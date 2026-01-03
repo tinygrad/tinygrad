@@ -16,7 +16,10 @@ from tinygrad.helpers import DEBUG
 
 from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, IMMEDIATE, PacketType
 
-dev = Device["AMD"]
+try:
+  dev = Device["AMD"]
+except Exception:
+  dev = None
 
 
 from extra.assembly.amd.emu import SQTTState, decode_program, exec_wave, WaveState, LDSMem
@@ -953,7 +956,7 @@ class TestEmulatorSQTT(SQTTCompareTestBase):
       v_mov_b32_e32(v[50], 1.0),
     ], "WMMA then VALU")
 
-@unittest.skipIf(not hasattr(dev, 'profile_events'), "AMD device required")
+@unittest.skipIf(dev is None or not hasattr(dev, 'profile_events'), "AMD device required")
 class TestSNop(SQTTCompareTestBase):
   """Dedicated tests for s_nop timing behavior."""
 
@@ -1374,7 +1377,7 @@ class TestSNop(SQTTCompareTestBase):
     self._run_and_compare([s_nop(63), s_nop(63)], "falsify_63_63")
 
 
-@unittest.skipIf(not hasattr(dev, 'profile_events'), "AMD device required")
+@unittest.skipIf(dev is None or not hasattr(dev, 'profile_events'), "AMD device required")
 class TestVALUMov(SQTTCompareTestBase):
   """Dedicated tests for v_mov_b32 VALU timing behavior."""
 
@@ -2050,6 +2053,130 @@ class TestVALUMov(SQTTCompareTestBase):
       s_nop(32),
       v_mov_b32_e32(v[1], 2.0),
     ], "vmov_snop32_vmov")
+
+  def test_vmov_snop63_vmov(self):
+    """v_mov, s_nop(63), v_mov."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(63),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_snop63_vmov")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Multiple independents then s_nop - testing s_nop pre-effect
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_ind2_snop0(self):
+    """Two independents then s_nop(0)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      s_nop(0),
+    ], "vmov_ind2_snop0")
+
+  def test_vmov_ind2_snop3(self):
+    """Two independents then s_nop(3)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      s_nop(3),
+    ], "vmov_ind2_snop3")
+
+  def test_vmov_ind3_snop0(self):
+    """Three independents then s_nop(0)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      s_nop(0),
+    ], "vmov_ind3_snop0")
+
+  def test_vmov_ind3_snop1(self):
+    """Three independents then s_nop(1)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      s_nop(1),
+    ], "vmov_ind3_snop1")
+
+  def test_vmov_ind3_snop2(self):
+    """Three independents then s_nop(2)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      s_nop(2),
+    ], "vmov_ind3_snop2")
+
+  def test_vmov_ind3_snop3(self):
+    """Three independents then s_nop(3)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      s_nop(3),
+    ], "vmov_ind3_snop3")
+
+  def test_vmov_ind3_snop4(self):
+    """Three independents then s_nop(4)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      s_nop(4),
+    ], "vmov_ind3_snop4")
+
+  def test_vmov_ind3_snop3_ind(self):
+    """Three independents, s_nop(3), then one more independent."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      s_nop(3),
+      v_mov_b32_e32(v[3], 4.0),
+    ], "vmov_ind3_snop3_ind")
+
+  def test_vmov_ind3_snop3_dep(self):
+    """Three independents, s_nop(3), then dependent on first."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      s_nop(3),
+      v_mov_b32_e32(v[10], v[0]),
+    ], "vmov_ind3_snop3_dep")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Chain then independent - testing emit time vs forwarding time
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_chain2_ind(self):
+    """Chain of 2 then independent."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[10], 2.0),
+    ], "vmov_chain2_ind")
+
+  def test_vmov_chain3_ind(self):
+    """Chain of 3 then independent."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[10], 2.0),
+    ], "vmov_chain3_ind")
+
+  def test_vmov_chain3_ind_dep(self):
+    """Chain of 3, independent, then dependent on independent."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], v[10]),
+    ], "vmov_chain3_ind_dep")
 
   # ─────────────────────────────────────────────────────────────────────────────
   # v_mov with s_nop and dependencies
