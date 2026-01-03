@@ -2,13 +2,11 @@
 # allow define from star imports
 
 import unittest
-import textwrap
+import textwrap, functools
 
 from tinygrad import Device, Tensor
-from tinygrad.uop.ops import UOp, Ops, track_rewrites
-from tinygrad.renderer import ProgramSpec
-from tinygrad.helpers import TracingKey, getenv
-from tinygrad.engine.realize import ExecItem, CompiledRunner
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.helpers import getenv
 
 from extra.assembly.amd.autogen.rdna3.ins import *
 
@@ -57,14 +55,16 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
 
-@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, ret=ret))
-def run_asm(name:str, insts:list) -> ProgramSpec:
+def asm_kernel(out:UOp, src:str, device:str, n_threads:int=1, n_workgroups:int=1) -> UOp:
+  lidx = UOp.special(n_threads, "lidx0")
+  gidx = UOp.special(n_workgroups, "gidx0")
+  sink = UOp.sink(out, lidx, gidx, arg=KernelInfo(name="test"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)), arg=())
+
+def run_asm(name:str, insts:list) -> None:
   src = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
-  prg = ProgramSpec(name, src:=template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK),
-                    lib=Device[Device.DEFAULT].compiler.compile(src), global_size=[1, 1, 1], local_size=[1, 1, 1], globals=[0])
-  ei = ExecItem(UOp(Ops.SINK), [Tensor.empty(1).uop.buffer.ensure_allocated()], prg=CompiledRunner(prg))
-  ei.run()
-  return prg
+  fxn = functools.partial(asm_kernel, src=template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(src)), device=Device.DEFAULT)
+  Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)
 
 @unittest.skipUnless(Device.DEFAULT == "AMD" and not getenv("AMD_LLVM"), "only on AMD with comgr")
 class TestCfg(unittest.TestCase):

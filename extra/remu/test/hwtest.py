@@ -10,13 +10,8 @@ from tinygrad.helpers import getenv
 
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.asm import waitcnt
-from test.testextra.test_cfg_viz import template
 
-def custom_src(out:UOp, src:str, device:str, n_threads:int=1, n_workgroups:int=1) -> UOp:
-  lidx = UOp.special(n_threads, "lidx0")
-  gidx = UOp.special(n_workgroups, "gidx0")
-  sink = UOp.sink(out, lidx, gidx, arg=KernelInfo(name="test"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
+from test.testextra.test_cfg_viz import asm_kernel
 
 def get_output(asm:list, n_threads:int=1, vdst:VGPR=v[1]):
   out = Tensor([0]*n_threads, dtype=dtypes.uint32).realize()
@@ -30,7 +25,7 @@ def get_output(asm:list, n_threads:int=1, vdst:VGPR=v[1]):
     s_endpgm()
   ])
   src = template.replace("fn_name", "test").replace("INSTRUCTION", textwrap.dedent(src))
-  out = Tensor.custom_kernel(out, fxn=functools.partial(custom_src, src=src, device=out.device, n_threads=n_threads))[0]
+  out = Tensor.custom_kernel(out, fxn=functools.partial(asm_kernel, src=src, device=out.device, n_threads=n_threads))[0]
   out.realize()
   return out.tolist()
 
