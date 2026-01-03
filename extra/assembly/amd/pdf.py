@@ -516,7 +516,7 @@ def _generate_gen_pcode_py(enums, pseudocode, arch) -> str:
   fn_lines.append('COMPILED_FUNCTIONS = {')
   for enum_cls in OP_ENUMS:
     if all_fn_entries.get(enum_cls): fn_lines.append(f'  {enum_cls.__name__}: {enum_cls.__name__}_FUNCTIONS,')
-  fn_lines.append('}\n\ndef get_compiled_functions(): return COMPILED_FUNCTIONS')
+  fn_lines.append('}')
 
   # Second pass: scan generated code for pcode imports
   fn_code_str = '\n'.join(fn_lines)

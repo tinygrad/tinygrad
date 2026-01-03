@@ -9450,5 +9450,3 @@ COMPILED_FUNCTIONS = {
   VOPCOp: VOPCOp_FUNCTIONS,
   DSOp: DSOp_FUNCTIONS,
 }
-
-def get_compiled_functions(): return COMPILED_FUNCTIONS

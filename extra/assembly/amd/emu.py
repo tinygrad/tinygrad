@@ -5,7 +5,7 @@ import ctypes
 from tinygrad.runtime.autogen import hsa
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.asm import detect_format
-from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
+from extra.assembly.amd.autogen.rdna3.gen_pcode import COMPILED_FUNCTIONS
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
   SrcEnum, SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
@@ -123,14 +123,9 @@ _VOPD_TO_VOP = {
   VOPDOp.V_DUAL_MAX_F32: VOP3Op.V_MAX_F32, VOPDOp.V_DUAL_MIN_F32: VOP3Op.V_MIN_F32,
   VOPDOp.V_DUAL_ADD_NC_U32: VOP3Op.V_ADD_NC_U32, VOPDOp.V_DUAL_LSHLREV_B32: VOP3Op.V_LSHLREV_B32, VOPDOp.V_DUAL_AND_B32: VOP3Op.V_AND_B32,
 }
-
-# Compiled pseudocode functions (lazy loaded)
-_COMPILED: dict | None = None
-
-def _get_compiled() -> dict:
-  global _COMPILED
-  if _COMPILED is None: _COMPILED = get_compiled_functions()
-  return _COMPILED
+def _exec_vopd(vopd_op, s0, s1, d0, st: 'WaveState', lane: int):
+  op = _VOPD_TO_VOP[vopd_op]
+  return COMPILED_FUNCTIONS[type(op)][op](s0, s1, 0, d0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)['D0']
 
 class WaveState:
   __slots__ = ('sgpr', 'vgpr', 'scc', 'pc', 'literal', '_pend_sgpr')
@@ -197,8 +192,6 @@ def decode_program(data: bytes) -> Program:
 
 def exec_scalar(st: WaveState, inst: Inst) -> int:
   """Execute scalar instruction. Returns PC delta."""
-  compiled = _get_compiled()
-
   # Get op enum and lookup compiled function
   if isinstance(inst, SMEM): ssrc0, sdst = None, None
   elif isinstance(inst, SOP1): ssrc0, sdst = inst.ssrc0, inst.sdst
@@ -208,7 +201,7 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   elif isinstance(inst, SOPP): ssrc0, sdst = None, None
   else: raise NotImplementedError(f"Unknown scalar type {type(inst)}")
 
-  fn = compiled.get(type(inst.op), {}).get(inst.op)
+  fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
   if fn is None:
     if isinstance(inst, SOPP): return 0  # SOPP without pseudocode (waits, hints, nops) are no-ops
     raise NotImplementedError(f"{inst.op.name} not in pseudocode")
@@ -247,7 +240,6 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
 
 def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None) -> None:
   """Execute vector instruction for one lane."""
-  compiled = _get_compiled()
   V = st.vgpr[lane]
 
   # VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)
@@ -255,15 +247,12 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
     vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
     inputs = [(inst.opx, st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
               (inst.opy, st.rsrc(inst.srcy0, lane), V[inst.vsrcy1], V[vdsty], vdsty)]
-    def exec_vopd(vopd_op, s0, s1, d0):
-      op = _VOPD_TO_VOP[vopd_op]
-      return compiled[type(op)][op](s0, s1, 0, d0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)['D0']
-    for vopd_op, s0, s1, d0, dst in inputs: V[dst] = exec_vopd(vopd_op, s0, s1, d0)
+    for vopd_op, s0, s1, d0, dst in inputs: V[dst] = _exec_vopd(vopd_op, s0, s1, d0, st, lane)
     return
 
   # Lookup compiled function for this op (V_NOP has no pcode)
   if isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: return
-  fn = compiled.get(type(inst.op), {}).get(inst.op)
+  fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
   if fn is None: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
 
   # Memory ops (FLAT/GLOBAL/SCRATCH and DS)
