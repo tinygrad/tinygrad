@@ -39,18 +39,18 @@ def _mod_src(val: int, idx: int, neg: int, abs_: int, is64: bool = False) -> int
 # Read source operand with VOP3 modifiers
 def _read_src(st, inst, src, idx: int, lane: int, neg: int, abs_: int, opsel: int) -> int:
   if src is None: return 0
-  regs, is_src_16 = inst.src_regs(idx), inst.is_src_16(idx)
-  if regs == 2: return _mod_src(st.rsrc64(src, lane), idx, neg, abs_, is64=True)
+  literal, regs, is_src_16 = inst._literal, inst.src_regs(idx), inst.is_src_16(idx)
+  if regs == 2: return _mod_src(st.rsrc64(src, lane, literal), idx, neg, abs_, is64=True)
   if is_src_16 and isinstance(inst, VOP3):
-    raw = st.rsrc_f16(src, lane) if 128 <= src < 255 else st.rsrc(src, lane)
+    raw = st.rsrc_f16(src, lane, literal) if 128 <= src < 255 else st.rsrc(src, lane, literal)
     val = _src16(raw, bool(opsel & (1 << idx)))
     if abs_ & (1 << idx): val &= 0x7fff
     if neg & (1 << idx): val ^= 0x8000
     return val
   if is_src_16 and isinstance(inst, (VOP1, VOP2, VOPC)):
-    if src >= 256: return _src16(_mod_src(st.rsrc(_vgpr_masked(src), lane), idx, neg, abs_), _vgpr_hi(src))
-    return _mod_src(st.rsrc_f16(src, lane), idx, neg, abs_) & 0xffff
-  return _mod_src(st.rsrc(src, lane), idx, neg, abs_)
+    if src >= 256: return _src16(_mod_src(st.rsrc(_vgpr_masked(src), lane, literal), idx, neg, abs_), _vgpr_hi(src))
+    return _mod_src(st.rsrc_f16(src, lane, literal), idx, neg, abs_) & 0xffff
+  return _mod_src(st.rsrc(src, lane, literal), idx, neg, abs_)
 
 # Helper: get number of dwords from memory op name
 def _op_ndwords(name: str) -> int:
@@ -126,10 +126,10 @@ _VOPD_TO_VOP = {
 
 
 class WaveState:
-  __slots__ = ('sgpr', 'vgpr', 'scc', 'pc', 'literal', '_pend_sgpr', 'lds', 'n_lanes')
+  __slots__ = ('sgpr', 'vgpr', 'scc', 'pc', '_pend_sgpr', 'lds', 'n_lanes')
   def __init__(self, lds: LDSMem | None = None, n_lanes: int = WAVE_SIZE):
     self.sgpr, self.vgpr = [0] * SGPR_COUNT, [[0] * VGPR_COUNT for _ in range(WAVE_SIZE)]
-    self.sgpr[EXEC_LO], self.scc, self.pc, self.literal, self._pend_sgpr, self.lds, self.n_lanes = 0xffffffff, 0, 0, 0, {}, lds, n_lanes
+    self.sgpr[EXEC_LO], self.scc, self.pc, self._pend_sgpr, self.lds, self.n_lanes = 0xffffffff, 0, 0, {}, lds, n_lanes
 
   @property
   def vcc(self) -> int: return self.sgpr[VCC_LO] | (self.sgpr[VCC_HI] << 32)
@@ -146,18 +146,18 @@ class WaveState:
   def rsgpr64(self, i: int) -> int: return self.rsgpr(i) | (self.rsgpr(i+1) << 32)
   def wsgpr64(self, i: int, v: int): self.wsgpr(i, v & MASK32); self.wsgpr(i+1, (v >> 32) & MASK32)
 
-  def _rsrc_base(self, v: int, lane: int, consts):
+  def _rsrc_base(self, v: int, lane: int, consts, literal: int):
     if v < SGPR_COUNT: return self.sgpr[v]
     if v == SCC: return self.scc
     if v < 255: return consts[v - 128]
-    if v == 255: return self.literal
+    if v == 255: return literal
     return self.vgpr[lane][v - 256] if v <= 511 else 0
-  def rsrc(self, v: int, lane: int) -> int: return self._rsrc_base(v, lane, _INLINE_CONSTS)
-  def rsrc_f16(self, v: int, lane: int) -> int: return self._rsrc_base(v, lane, _INLINE_CONSTS_F16)
-  def rsrc64(self, v: int, lane: int) -> int:
+  def rsrc(self, v: int, lane: int, literal: int = 0) -> int: return self._rsrc_base(v, lane, _INLINE_CONSTS, literal)
+  def rsrc_f16(self, v: int, lane: int, literal: int = 0) -> int: return self._rsrc_base(v, lane, _INLINE_CONSTS_F16, literal)
+  def rsrc64(self, v: int, lane: int, literal: int = 0) -> int:
     if 128 <= v < 255: return _INLINE_CONSTS_F64[v - 128]
-    if v == 255: return self.literal  # literal is already shifted in from_bytes for 64-bit ops
-    return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v < VCC_LO or 256 <= v <= 511 else 0) << 32)
+    if v == 255: return literal  # literal is already shifted in from_bytes for 64-bit ops
+    return self.rsrc(v, lane, literal) | ((self.rsrc(v+1, lane, literal) if v < VCC_LO or 256 <= v <= 511 else 0) << 32)
 
   def pend_sgpr_lane(self, reg: int, lane: int, val: int):
     if reg not in self._pend_sgpr: self._pend_sgpr[reg] = 0
@@ -185,7 +185,7 @@ def exec_scalar(st: WaveState, inst: Inst):
   # SMEM: memory loads
   if isinstance(inst, SMEM):
     addr = st.rsgpr64(inst.sbase * 2) + _sext(inst.offset, 21)
-    if inst.soffset not in (NULL, 0x7f): addr += st.rsrc(inst.soffset, 0)
+    if inst.soffset not in (NULL, 0x7f): addr += st.rsrc(inst.soffset, 0, inst._literal)
     result = inst._fn(GlobalMem, addr & MASK64)
     if 'SDATA' in result:
       sdata = result['SDATA']
@@ -194,10 +194,11 @@ def exec_scalar(st: WaveState, inst: Inst):
     return 0
 
   # Build context - use inst methods to determine operand sizes
-  s0 = st.rsrc64(ssrc0, 0) if inst.is_src_64(0) else (st.rsrc(ssrc0, 0) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))
-  s1 = st.rsrc64(inst.ssrc1, 0) if inst.is_src_64(1) else (st.rsrc(inst.ssrc1, 0) if isinstance(inst, (SOP2, SOPC)) else inst.simm16 if isinstance(inst, SOPK) else 0)
+  literal = inst._literal
+  s0 = st.rsrc64(ssrc0, 0, literal) if inst.is_src_64(0) else (st.rsrc(ssrc0, 0, literal) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))
+  s1 = st.rsrc64(inst.ssrc1, 0, literal) if inst.is_src_64(1) else (st.rsrc(inst.ssrc1, 0, literal) if isinstance(inst, (SOP2, SOPC)) else inst.simm16 if isinstance(inst, SOPK) else 0)
   d0 = st.rsgpr64(sdst) if inst.dst_regs() == 2 and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
-  literal = inst.simm16 if isinstance(inst, (SOPK, SOPP)) else st.literal
+  literal = inst.simm16 if isinstance(inst, (SOPK, SOPP)) else inst._literal
 
   # Call compiled function with int parameters
   result = inst._fn(s0, s1, 0, d0, st.scc, st.vcc & MASK32, 0, st.exec_mask & MASK32, literal, None, pc=st.pc * 4)
@@ -218,12 +219,13 @@ def exec_scalar(st: WaveState, inst: Inst):
 
 def exec_vopd(st: WaveState, inst, V: list, lane: int) -> None:
   """VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)."""
+  literal = inst._literal
   vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
-  inputs = [(inst.opx, st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
-            (inst.opy, st.rsrc(inst.srcy0, lane), V[inst.vsrcy1], V[vdsty], vdsty)]
+  inputs = [(inst.opx, st.rsrc(inst.srcx0, lane, literal), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
+            (inst.opy, st.rsrc(inst.srcy0, lane, literal), V[inst.vsrcy1], V[vdsty], vdsty)]
   for vopd_op, s0, s1, d0, dst in inputs:
     op = _VOPD_TO_VOP[vopd_op]
-    V[dst] = COMPILED_FUNCTIONS[type(op)][op](s0, s1, 0, d0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)['D0']
+    V[dst] = COMPILED_FUNCTIONS[type(op)][op](s0, s1, 0, d0, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
 
 def exec_flat(st: WaveState, inst, V: list, lane: int) -> None:
   """FLAT/GLOBAL/SCRATCH memory ops."""
@@ -245,31 +247,33 @@ def exec_ds(st: WaveState, inst, V: list, lane: int) -> None:
 
 def exec_vop3sd(st: WaveState, inst, V: list, lane: int) -> None:
   """VOP3SD: has extra scalar dest for carry output."""
-  def rsrc_n(src, regs): return st.rsrc64(src, lane) if regs == 2 else st.rsrc(src, lane)
+  literal = inst._literal
+  def rsrc_n(src, regs): return st.rsrc64(src, lane, literal) if regs == 2 else st.rsrc(src, lane, literal)
   s0, s1, s2 = rsrc_n(inst.src0, inst.src_regs(0)), rsrc_n(inst.src1, inst.src_regs(1)), rsrc_n(inst.src2, inst.src_regs(2))
   vcc = st.rsgpr64(inst.src2) if 'CO_CI' in inst.op_name else st.vcc  # Carry-in ops use src2 as carry bitmask
-  result = inst._fn(s0, s1, s2, V[inst.vdst], st.scc, vcc, lane, st.exec_mask, st.literal, None)
+  result = inst._fn(s0, s1, s2, V[inst.vdst], st.scc, vcc, lane, st.exec_mask, literal, None)
   V[inst.vdst] = result['D0'] & MASK32
   if inst.dst_regs() == 2: V[inst.vdst + 1] = (result['D0'] >> 32) & MASK32
   if 'VCC' in result: st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
 
 def exec_vop3p(st: WaveState, inst, V: list, lane: int) -> None:
   """VOP3P: packed 16-bit ops with opsel half-selection and neg modifiers."""
-  raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
+  literal = inst._literal
+  raws = [st.rsrc_f16(inst.src0, lane, literal), st.rsrc_f16(inst.src1, lane, literal), st.rsrc_f16(inst.src2, lane, literal) if inst.src2 is not None else 0]
   opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
   if 'FMA_MIX' in inst.op_name:
     # FMA_MIX: apply abs(neg_hi)/neg to sign bit based on f32 vs f16 mode
-    raws = [st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane) if inst.src2 is not None else 0]
+    raws = [st.rsrc(inst.src0, lane, literal), st.rsrc(inst.src1, lane, literal), st.rsrc(inst.src2, lane, literal) if inst.src2 is not None else 0]
     for i in range(3):
       sign_bit = (15 if not (inst.opsel & (1 << i)) else 31) if (opsel_hi >> i) & 1 else 31
       if inst.neg_hi & (1 << i): raws[i] &= ~(1 << sign_bit)
       if inst.neg & (1 << i): raws[i] ^= (1 << sign_bit)
-    result = inst._fn(raws[0], raws[1], raws[2], V[inst.vdst], st.scc, st.vcc, lane, st.exec_mask, st.literal, None, opsel=inst.opsel, opsel_hi=opsel_hi)
+    result = inst._fn(raws[0], raws[1], raws[2], V[inst.vdst], st.scc, st.vcc, lane, st.exec_mask, literal, None, opsel=inst.opsel, opsel_hi=opsel_hi)
   else:
     # Packed ops: pack lo/hi halves with neg applied
     srcs = [((_src16(raws[i], opsel_hi & (1 << i)) ^ (0x8000 if inst.neg_hi & (1 << i) else 0)) << 16) |
             (_src16(raws[i], inst.opsel & (1 << i)) ^ (0x8000 if inst.neg & (1 << i) else 0)) for i in range(3)]
-    result = inst._fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)
+    result = inst._fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, literal, None)
   V[inst.vdst] = result['D0'] & MASK32
 
 def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
@@ -301,7 +305,7 @@ def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
   vcc_for_fn = st.rsgpr64(src2) if inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and isinstance(inst, VOP3) and src2 is not None and src2 < 256 else st.vcc
   # Execute compiled function - pass src0_idx and vdst_idx for lane instructions
   src0_idx = (src0 - 256) if src0 is not None and src0 >= 256 else (src0 if src0 is not None else 0)
-  result = inst._fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, st.literal, st.vgpr, src0_idx, vdst)
+  result = inst._fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, inst._literal, st.vgpr, src0_idx, vdst)
 
   # Apply results
   if 'VCC' in result:
@@ -347,14 +351,14 @@ def dispatch_endpgm(st, inst): return -1
 def dispatch_barrier(st, inst): st.pc += inst._words; return -2
 def dispatch_nop(st, inst): st.pc += inst._words; return 0
 def dispatch_wmma(st, inst): exec_wmma(st, inst, inst.op); st.pc += inst._words; return 0
-def dispatch_writelane(st, inst): st.vgpr[st.rsrc(inst.src1, 0) & 0x1f][inst.vdst] = st.rsrc(inst.src0, 0) & MASK32; st.pc += inst._words; return 0
+def dispatch_writelane(st, inst): st.vgpr[st.rsrc(inst.src1, 0, inst._literal) & 0x1f][inst.vdst] = st.rsrc(inst.src0, 0, inst._literal) & MASK32; st.pc += inst._words; return 0
 def dispatch_readfirstlane(st, inst):
   first_lane = next((i for i in range(st.n_lanes) if st.exec_mask & (1 << i)), 0)
-  st.wsgpr(inst.vdst, st.vgpr[first_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, first_lane))
+  st.wsgpr(inst.vdst, st.vgpr[first_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, first_lane, inst._literal))
   st.pc += inst._words; return 0
 def dispatch_readlane(st, inst):
-  rd_lane = st.rsrc(inst.src1, 0) & 0x1f
-  st.wsgpr(inst.vdst, st.vgpr[rd_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, rd_lane))
+  rd_lane = st.rsrc(inst.src1, 0, inst._literal) & 0x1f
+  st.wsgpr(inst.vdst, st.vgpr[rd_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, rd_lane, inst._literal))
   st.pc += inst._words; return 0
 
 # Per-lane dispatch wrapper: wraps per-lane exec functions into wave-level dispatch
@@ -413,7 +417,6 @@ def decode_program(data: bytes) -> Program:
 def step_wave(program: Program, st: WaveState) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
-  st.literal = inst._literal
   return inst._dispatch(st, inst)
 
 def exec_wave(program: Program, st: WaveState) -> int:
