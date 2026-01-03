@@ -92,17 +92,15 @@ class PythonEmulator:
   def __init__(self):
     self.state: WaveState | None = None
     self.program: dict | None = None
-    self.n_lanes = 0
 
   def create(self, kernel: bytes, n_lanes: int):
     self.program = decode_program(kernel)
-    self.state = WaveState(LDSMem(bytearray(65536)))
+    self.state = WaveState(LDSMem(bytearray(65536)), n_lanes)
     self.state.exec_mask = (1 << n_lanes) - 1
-    self.n_lanes = n_lanes
 
   def step(self) -> int:
     assert self.program is not None and self.state is not None
-    return step_wave(self.program, self.state, self.n_lanes)
+    return step_wave(self.program, self.state)
   def set_sgpr(self, idx: int, val: int):
     assert self.state is not None
     self.state.sgpr[idx] = val & 0xffffffff

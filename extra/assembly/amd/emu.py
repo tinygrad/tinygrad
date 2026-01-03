@@ -1,7 +1,7 @@
 # RDNA3 emulator - executes compiled pseudocode from AMD ISA PDF
 # mypy: ignore-errors
 from __future__ import annotations
-import ctypes
+import ctypes, functools
 from tinygrad.runtime.autogen import hsa
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.asm import detect_format
@@ -126,10 +126,10 @@ _VOPD_TO_VOP = {
 
 
 class WaveState:
-  __slots__ = ('sgpr', 'vgpr', 'scc', 'pc', 'literal', '_pend_sgpr', 'lds')
-  def __init__(self, lds: LDSMem | None = None):
+  __slots__ = ('sgpr', 'vgpr', 'scc', 'pc', 'literal', '_pend_sgpr', 'lds', 'n_lanes')
+  def __init__(self, lds: LDSMem | None = None, n_lanes: int = WAVE_SIZE):
     self.sgpr, self.vgpr = [0] * SGPR_COUNT, [[0] * VGPR_COUNT for _ in range(WAVE_SIZE)]
-    self.sgpr[EXEC_LO], self.scc, self.pc, self.literal, self._pend_sgpr, self.lds = 0xffffffff, 0, 0, 0, {}, lds
+    self.sgpr[EXEC_LO], self.scc, self.pc, self.literal, self._pend_sgpr, self.lds, self.n_lanes = 0xffffffff, 0, 0, 0, {}, lds, n_lanes
 
   @property
   def vcc(self) -> int: return self.sgpr[VCC_LO] | (self.sgpr[VCC_HI] << 32)
@@ -171,8 +171,8 @@ class WaveState:
 # EXECUTION - All ops use pseudocode from PDF
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def exec_scalar(st: WaveState, inst: Inst) -> int:
-  """Execute scalar instruction. Returns PC delta."""
+def exec_scalar(st: WaveState, inst: Inst):
+  """Execute scalar instruction. Returns 0 to continue execution."""
   # Get op enum and lookup compiled function
   if isinstance(inst, SMEM): ssrc0, sdst = None, None
   elif isinstance(inst, SOP1): ssrc0, sdst = inst.ssrc0, inst.sdst
@@ -190,6 +190,7 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     if 'SDATA' in result:
       sdata = result['SDATA']
       for i in range(SMEM_DST_COUNT.get(inst.op, 1)): st.wsgpr(inst.sdata + i, (sdata >> (i * 32)) & MASK32)
+    st.pc += inst._words
     return 0
 
   # Build context - use inst methods to determine operand sizes
@@ -207,11 +208,12 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   if 'SCC' in result: st.scc = result['SCC'] & 1
   if 'EXEC' in result: st.exec_mask = result['EXEC']
   if 'PC' in result:
-    # Convert absolute byte address to word delta
+    # Convert absolute byte address to word offset
     pc_val = result['PC']
     new_pc = pc_val if pc_val < 0x8000000000000000 else pc_val - 0x10000000000000000
-    new_pc_words = new_pc // 4
-    return new_pc_words - st.pc - 1  # -1 because emulator adds inst_words (1 for scalar)
+    st.pc = new_pc // 4
+  else:
+    st.pc += inst._words
   return 0
 
 def exec_vopd(st: WaveState, inst, V: list, lane: int) -> None:
@@ -340,26 +342,31 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
 # PROGRAM DECODE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Wave-level dispatch functions: (st, inst, n_lanes) -> return_code or None (None = continue with pc increment)
-def dispatch_endpgm(st, inst, n_lanes): return -1
-def dispatch_barrier(st, inst, n_lanes): st.pc += inst._words; return -2
-def dispatch_scalar(st, inst, n_lanes): st.pc += inst._words + exec_scalar(st, inst); return 0
-def dispatch_nop(st, inst, n_lanes): pass
-def dispatch_wmma(st, inst, n_lanes): exec_wmma(st, inst, inst.op)
-def dispatch_writelane(st, inst, n_lanes): st.vgpr[st.rsrc(inst.src1, 0) & 0x1f][inst.vdst] = st.rsrc(inst.src0, 0) & MASK32
-def dispatch_readfirstlane(st, inst, n_lanes):
-  first_lane = next((i for i in range(n_lanes) if st.exec_mask & (1 << i)), 0)
+# Wave-level dispatch functions: (st, inst) -> return_code (0 = continue, -1 = end, -2 = barrier)
+def dispatch_endpgm(st, inst): return -1
+def dispatch_barrier(st, inst): st.pc += inst._words; return -2
+def dispatch_nop(st, inst): st.pc += inst._words; return 0
+def dispatch_wmma(st, inst): exec_wmma(st, inst, inst.op); st.pc += inst._words; return 0
+def dispatch_writelane(st, inst): st.vgpr[st.rsrc(inst.src1, 0) & 0x1f][inst.vdst] = st.rsrc(inst.src0, 0) & MASK32; st.pc += inst._words; return 0
+def dispatch_readfirstlane(st, inst):
+  first_lane = next((i for i in range(st.n_lanes) if st.exec_mask & (1 << i)), 0)
   st.wsgpr(inst.vdst, st.vgpr[first_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, first_lane))
-def dispatch_readlane(st, inst, n_lanes):
+  st.pc += inst._words; return 0
+def dispatch_readlane(st, inst):
   rd_lane = st.rsrc(inst.src1, 0) & 0x1f
   st.wsgpr(inst.vdst, st.vgpr[rd_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, rd_lane))
+  st.pc += inst._words; return 0
 
 # Per-lane dispatch wrapper: wraps per-lane exec functions into wave-level dispatch
+@functools.cache
 def dispatch_lane(exec_fn):
-  def dispatch(st, inst, n_lanes):
+  def dispatch(st, inst):
+    exec_mask, vgpr, n_lanes = st.exec_mask, st.vgpr, st.n_lanes
     for lane in range(n_lanes):
-      if st.exec_mask & (1 << lane): exec_fn(st, inst, st.vgpr[lane], lane)
+      if exec_mask >> lane & 1: exec_fn(st, inst, vgpr[lane], lane)
     st.commit_pends()
+    st.pc += inst._words
+    return 0
   return dispatch
 
 def decode_program(data: bytes) -> Program:
@@ -376,7 +383,7 @@ def decode_program(data: bytes) -> Program:
     fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: inst._dispatch = dispatch_endpgm
     elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER: inst._dispatch = dispatch_barrier
-    elif isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)): inst._dispatch = dispatch_scalar
+    elif isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)): inst._dispatch = exec_scalar
     elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: inst._dispatch = dispatch_nop
     elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name: inst._dispatch = dispatch_wmma
     elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32: inst._dispatch = dispatch_writelane
@@ -390,10 +397,11 @@ def decode_program(data: bytes) -> Program:
     else: inst._dispatch = dispatch_lane(exec_vop)
 
     # Validate pcode exists for instructions that need it (scalar/wave-level ops and VOPD don't need pcode)
-    needs_pcode = inst._dispatch not in (dispatch_endpgm, dispatch_barrier, dispatch_scalar, dispatch_nop, dispatch_wmma,
-                                         dispatch_writelane, dispatch_readfirstlane, dispatch_readlane) and not isinstance(inst, VOPD)
+    needs_pcode = inst._dispatch not in (dispatch_endpgm, dispatch_barrier, exec_scalar, dispatch_nop, dispatch_wmma,
+                                         dispatch_writelane, dispatch_readfirstlane, dispatch_readlane, dispatch_lane(exec_vopd))
     if fn is None and inst.op_name and needs_pcode: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
     inst._fn = fn if fn else lambda *args, **kwargs: {}
+    if inst._literal is None: inst._literal = 0
     result[i // 4] = inst
     i += inst._words * 4
   return result
@@ -402,17 +410,14 @@ def decode_program(data: bytes) -> Program:
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step_wave(program: Program, st: WaveState, n_lanes: int) -> int:
+def step_wave(program: Program, st: WaveState) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
-  st.literal = getattr(inst, '_literal', None) or 0
-  result = inst._dispatch(st, inst, n_lanes)
-  if result is not None: return result
-  st.pc += inst._words
-  return 0
+  st.literal = inst._literal
+  return inst._dispatch(st, inst)
 
-def exec_wave(program: Program, st: WaveState, n_lanes: int) -> int:
-  while st.pc in program and (result := step_wave(program, st, n_lanes)) == 0: pass
+def exec_wave(program: Program, st: WaveState) -> int:
+  while st.pc in program and (result := step_wave(program, st)) == 0: pass
   return result
 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int, rsrc2: int) -> None:
@@ -421,10 +426,10 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
   # GRANULATED_LDS_SIZE is in 512-byte units (see ops_amd.py: lds_size = ((group_segment_size + 511) // 512))
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   lds = LDSMem(bytearray(lds_size)) if lds_size else None
-  waves: list[tuple[WaveState, int]] = []
+  waves: list[WaveState] = []
   for wave_start in range(0, total_threads, WAVE_SIZE):
     n_lanes = min(WAVE_SIZE, total_threads - wave_start)
-    st = WaveState(lds)
+    st = WaveState(lds, n_lanes)
     st.exec_mask = (1 << n_lanes) - 1
     st.wsgpr64(0, args_ptr)  # s[0:1] = kernel arguments pointer
     # COMPUTE_PGM_RSRC2: USER_SGPR_COUNT is where workgroup IDs start, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z control which are passed
@@ -435,9 +440,9 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
     # VGPR0 = packed workitem IDs: (Z << 20) | (Y << 10) | X
     for tid in range(wave_start, wave_start + n_lanes):
       st.vgpr[tid - wave_start][0] = ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
-    waves.append((st, n_lanes))
+    waves.append(st)
   while waves:
-    waves = [(st, n_lanes) for st, n_lanes in waves if exec_wave(program, st, n_lanes) != -1]
+    waves = [st for st in waves if exec_wave(program, st) != -1]
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c) -> int:
   program = decode_program((ctypes.c_char * lib_sz).from_address(lib).raw)
