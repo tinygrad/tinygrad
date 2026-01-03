@@ -167,28 +167,8 @@ class WaveState:
     self._pend_sgpr.clear()
 
 
-def decode_program(data: bytes) -> Program:
-  result: Program = {}
-  i = 0
-  while i < len(data):
-    try: inst_class = detect_format(data[i:])
-    except ValueError: break  # stop at invalid instruction (padding/metadata after code)
-    if inst_class is None: i += 4; continue
-    base_size = inst_class._size()
-    # Pass enough data for potential 64-bit literal (base + 8 bytes max)
-    inst = inst_class.from_bytes(data[i:i+base_size+8])
-    inst._words = inst.size() // 4
-    fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
-    # Some instructions are handled specially without pcode: SOPP (control flow), VOPD (dual-issue), WMMA, lane ops
-    no_pcode_ok = inst_class.__name__ in ('SOPP', 'VOPD') or any(s in inst.op_name for s in ('WMMA', 'WRITELANE', 'READLANE', 'READFIRSTLANE', 'NOP'))
-    if fn is None and inst.op_name and not no_pcode_ok: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
-    inst._fn = fn if fn else lambda *args, **kwargs: {}
-    result[i // 4] = inst
-    i += inst._words * 4
-  return result
-
 # ═══════════════════════════════════════════════════════════════════════════════
-# EXECUTION - All ALU ops use pseudocode from PDF
+# EXECUTION - All ops use pseudocode from PDF
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def exec_scalar(st: WaveState, inst: Inst) -> int:
@@ -357,46 +337,78 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
     for i in range(256): st.vgpr[i % 32][vdst + i//32] = _i32(mat_d[i])
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PROGRAM DECODE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Wave-level dispatch functions: (st, inst, n_lanes) -> return_code or None (None = continue with pc increment)
+def dispatch_endpgm(st, inst, n_lanes): return -1
+def dispatch_barrier(st, inst, n_lanes): st.pc += inst._words; return -2
+def dispatch_scalar(st, inst, n_lanes): st.pc += inst._words + exec_scalar(st, inst); return 0
+def dispatch_nop(st, inst, n_lanes): pass
+def dispatch_wmma(st, inst, n_lanes): exec_wmma(st, inst, inst.op)
+def dispatch_writelane(st, inst, n_lanes): st.vgpr[st.rsrc(inst.src1, 0) & 0x1f][inst.vdst] = st.rsrc(inst.src0, 0) & MASK32
+def dispatch_readfirstlane(st, inst, n_lanes):
+  first_lane = next((i for i in range(n_lanes) if st.exec_mask & (1 << i)), 0)
+  st.wsgpr(inst.vdst, st.vgpr[first_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, first_lane))
+def dispatch_readlane(st, inst, n_lanes):
+  rd_lane = st.rsrc(inst.src1, 0) & 0x1f
+  st.wsgpr(inst.vdst, st.vgpr[rd_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, rd_lane))
+
+# Per-lane dispatch wrapper: wraps per-lane exec functions into wave-level dispatch
+def dispatch_lane(exec_fn):
+  def dispatch(st, inst, n_lanes):
+    for lane in range(n_lanes):
+      if st.exec_mask & (1 << lane): exec_fn(st, inst, st.vgpr[lane], lane)
+    st.commit_pends()
+  return dispatch
+
+def decode_program(data: bytes) -> Program:
+  result: Program = {}
+  i = 0
+  while i < len(data):
+    try: inst_class = detect_format(data[i:])
+    except ValueError: break  # stop at invalid instruction (padding/metadata after code)
+    if inst_class is None: i += 4; continue
+    inst = inst_class.from_bytes(data[i:i+inst_class._size()+8])  # +8 for potential 64-bit literal
+    inst._words = inst.size() // 4
+
+    # Determine dispatch function and pcode function
+    fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
+    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: inst._dispatch = dispatch_endpgm
+    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER: inst._dispatch = dispatch_barrier
+    elif isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)): inst._dispatch = dispatch_scalar
+    elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: inst._dispatch = dispatch_nop
+    elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name: inst._dispatch = dispatch_wmma
+    elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32: inst._dispatch = dispatch_writelane
+    elif isinstance(inst, (VOP1, VOP3)) and 'READFIRSTLANE' in inst.op_name: inst._dispatch = dispatch_readfirstlane
+    elif isinstance(inst, VOP3) and 'READLANE' in inst.op_name: inst._dispatch = dispatch_readlane
+    elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
+    elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
+    elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)
+    elif isinstance(inst, VOP3SD): inst._dispatch = dispatch_lane(exec_vop3sd)
+    elif isinstance(inst, VOP3P): inst._dispatch = dispatch_lane(exec_vop3p)
+    else: inst._dispatch = dispatch_lane(exec_vop)
+
+    # Validate pcode exists for instructions that need it (scalar/wave-level ops and VOPD don't need pcode)
+    needs_pcode = inst._dispatch not in (dispatch_endpgm, dispatch_barrier, dispatch_scalar, dispatch_nop, dispatch_wmma,
+                                         dispatch_writelane, dispatch_readfirstlane, dispatch_readlane) and not isinstance(inst, VOPD)
+    if fn is None and inst.op_name and needs_pcode: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
+    inst._fn = fn if fn else lambda *args, **kwargs: {}
+    result[i // 4] = inst
+    i += inst._words * 4
+  return result
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def step_wave(program: Program, st: WaveState, n_lanes: int) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
-  inst_words, st.literal = inst._words, getattr(inst, '_literal', None) or 0
-
-  # SOPP: special cases for control flow
-  if isinstance(inst, SOPP):
-    if inst.op == SOPPOp.S_ENDPGM: return -1
-    if inst.op == SOPPOp.S_BARRIER: st.pc += inst_words; return -2
-  if isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)):
-    st.pc += inst_words + exec_scalar(st, inst)
-    return 0
-  # Wave-level vector ops: execute once for entire wave (not per-lane)
-  if isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: pass
-  elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name:
-    exec_wmma(st, inst, inst.op)
-  elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32:
-    wr_lane = st.rsrc(inst.src1, 0) & 0x1f
-    st.vgpr[wr_lane][inst.vdst] = st.rsrc(inst.src0, 0) & MASK32
-  elif isinstance(inst, (VOP1, VOP3)) and 'READFIRSTLANE' in inst.op_name:
-    first_lane = next((i for i in range(n_lanes) if st.exec_mask & (1 << i)), 0)
-    st.wsgpr(inst.vdst, st.vgpr[first_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, first_lane))
-  elif isinstance(inst, VOP3) and 'READLANE' in inst.op_name:
-    rd_lane = st.rsrc(inst.src1, 0) & 0x1f
-    st.wsgpr(inst.vdst, st.vgpr[rd_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, rd_lane))
-  else:
-    # Per-lane vector ops - dispatch based on instruction type
-    if isinstance(inst, VOPD): fn = exec_vopd
-    elif isinstance(inst, FLAT): fn = exec_flat
-    elif isinstance(inst, DS): fn = exec_ds
-    elif isinstance(inst, VOP3SD): fn = exec_vop3sd
-    elif isinstance(inst, VOP3P): fn = exec_vop3p
-    else: fn = exec_vop
-    for lane in range(n_lanes):
-      if st.exec_mask & (1 << lane): fn(st, inst, st.vgpr[lane], lane)
-    st.commit_pends()
-  st.pc += inst_words
+  st.literal = getattr(inst, '_literal', None) or 0
+  result = inst._dispatch(st, inst, n_lanes)
+  if result is not None: return result
+  st.pc += inst._words
   return 0
 
 def exec_wave(program: Program, st: WaveState, n_lanes: int) -> int:
