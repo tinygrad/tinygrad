@@ -43,10 +43,9 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   src = (pathlib.Path(__file__).parent/"template.s").read_text().replace("INSTRUCTIONS", fp.read_text())
 
   sz = UOp.variable("SZ", 256, 8192)
-  wg = UOp.variable("WG", 1, 1024)
 
-  sink = UOp.sink(C.base, A.base, B.base, sz, wg, lidx, gidx, arg=KernelInfo(name="gemm"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
+  sink = UOp.sink(C.base, A.base, B.base, sz, lidx, gidx, arg=KernelInfo(name="gemm"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)), arg=())
 
 C_asm = Tensor.custom_kernel(C_asm, from_torch(A), from_torch(Bt), fxn=custom_asm_gemm)[0]
 
@@ -57,7 +56,7 @@ eis = [si.lower() for si in sched]
 
 with Context(DEBUG=2):
   for ei in eis:
-    et = ei.run({"SZ":N, "WG":NUM_WG}, wait=True)
+    et = ei.run({"SZ":N}, wait=True)
     print(f"{(N*N*N*2 / et)*1e-12:.2f} REAL TFLOPS")
 
 # ** correctness

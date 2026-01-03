@@ -4,7 +4,6 @@
 	s_load_dwordx2  s[32:33], s[0:1], 0x10   // B
 	// ** others kernel args
 	s_load_dword    s24, s[0:1], 0x18        // N
-	s_load_dword    s54, s[0:1], 0x1C        // num work groups
 	s_waitcnt lgkmcnt(0)
 	// "info"
 	s_mov_b32 s51, 1             // gemm_info = 1
