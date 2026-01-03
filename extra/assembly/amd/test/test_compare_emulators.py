@@ -9,7 +9,7 @@ os.environ["AMD"] = "1"
 os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
-from extra.assembly.amd.emu import WaveState, decode_program, step_wave, WAVE_SIZE, set_valid_mem_ranges, LDSMem
+from extra.assembly.amd.emu import WaveState, decode_program, WAVE_SIZE, set_valid_mem_ranges, LDSMem
 from extra.assembly.amd.test.helpers import KernelInfo
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
@@ -100,7 +100,7 @@ class PythonEmulator:
 
   def step(self) -> int:
     assert self.program is not None and self.state is not None
-    return step_wave(self.program, self.state)
+    return self.program[self.state.pc]._dispatch(self.state, self.program[self.state.pc])
   def set_sgpr(self, idx: int, val: int):
     assert self.state is not None
     self.state.sgpr[idx] = val & 0xffffffff

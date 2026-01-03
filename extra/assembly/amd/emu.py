@@ -9,7 +9,6 @@ from extra.assembly.amd.autogen.rdna3.gen_pcode import COMPILED_FUNCTIONS
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
   SrcEnum, SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
-Program = dict[int, Inst]
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
 VCC_LO, VCC_HI, NULL, EXEC_LO, EXEC_HI, SCC = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.SCC
 
@@ -217,6 +216,10 @@ def exec_scalar(st: WaveState, inst: Inst):
     st.pc += inst._words
   return 0
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# VECTOR INSTRUCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def exec_vopd(st: WaveState, inst, V: list, lane: int) -> None:
   """VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)."""
   literal = inst._literal
@@ -373,13 +376,12 @@ def dispatch_lane(exec_fn):
     return 0
   return dispatch
 
-def decode_program(data: bytes) -> Program:
-  result: Program = {}
+def decode_program(data: bytes) -> dict[int, Inst]:
+  result: dict[int, Inst] = {}
   i = 0
   while i < len(data):
     try: inst_class = detect_format(data[i:])
     except ValueError: break  # stop at invalid instruction (padding/metadata after code)
-    if inst_class is None: i += 4; continue
     inst = inst_class.from_bytes(data[i:i+inst_class._size()+8])  # +8 for potential 64-bit literal
     inst._words = inst.size() // 4
 
@@ -405,7 +407,6 @@ def decode_program(data: bytes) -> Program:
                                          dispatch_writelane, dispatch_readfirstlane, dispatch_readlane, dispatch_lane(exec_vopd))
     if fn is None and inst.op_name and needs_pcode: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
     inst._fn = fn if fn else lambda *args, **kwargs: {}
-    if inst._literal is None: inst._literal = 0
     result[i // 4] = inst
     i += inst._words * 4
   return result
@@ -414,16 +415,11 @@ def decode_program(data: bytes) -> Program:
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step_wave(program: Program, st: WaveState) -> int:
-  inst = program.get(st.pc)
-  if inst is None: return 1
-  return inst._dispatch(st, inst)
-
-def exec_wave(program: Program, st: WaveState) -> int:
-  while st.pc in program and (result := step_wave(program, st)) == 0: pass
+def exec_wave(program: dict[int, Inst], st: WaveState) -> int:
+  while (inst := program.get(st.pc)) and (result := inst._dispatch(st, inst)) == 0: pass
   return result
 
-def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int, rsrc2: int) -> None:
+def exec_workgroup(program: dict[int, Inst], workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int, rsrc2: int) -> None:
   lx, ly, lz = local_size
   total_threads = lx * ly * lz
   # GRANULATED_LDS_SIZE is in 512-byte units (see ops_amd.py: lds_size = ((group_segment_size + 511) // 512))
