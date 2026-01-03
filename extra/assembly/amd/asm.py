@@ -12,7 +12,7 @@ try:
   from extra.assembly.amd.autogen.cdna import ins as cdna_ins
   from extra.assembly.amd.autogen.cdna.ins import (VOP1 as CDNA_VOP1, VOP2 as CDNA_VOP2, VOPC as CDNA_VOPC, VOP3A as CDNA_VOP3A, VOP3B as CDNA_VOP3B,
     VOP3P as CDNA_VOP3P, SOP1 as CDNA_SOP1, SOP2 as CDNA_SOP2, SOPC as CDNA_SOPC, SOPK as CDNA_SOPK, SOPP as CDNA_SOPP,
-    SMEM as CDNA_SMEM, DS as CDNA_DS, FLAT as CDNA_FLAT, MUBUF as CDNA_MUBUF, MTBUF as CDNA_MTBUF)
+    SMEM as CDNA_SMEM, DS as CDNA_DS, FLAT as CDNA_FLAT, MUBUF as CDNA_MUBUF, MTBUF as CDNA_MTBUF, SDWA as CDNA_SDWA, DPP as CDNA_DPP)
   _HAS_CDNA = True
 except ImportError:
   _HAS_CDNA = False
@@ -117,7 +117,15 @@ def _disasm_vop1(inst: VOP1) -> str:
   parts = name.split('_')
   is_16d = any(p in ('f16','i16','u16','b16') for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in ('f16','i16','u16','b16') and 'cvt' not in name)
   dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else _fmt_v16(inst.vdst, 0, 128) if is_16d else f"v{inst.vdst}"
-  src = _fmt_src(inst.src0, inst.src_regs(0)) if inst.src_regs(0) > 1 else _src16(inst, inst.src0) if inst.is_src_16(0) and 'sat_pk' not in name else inst.lit(inst.src0)
+  # Handle literal for both 32-bit and 64-bit sources
+  if inst.src0 == 255:
+    src = inst.lit(inst.src0)
+  elif inst.src_regs(0) > 1:
+    src = _fmt_src(inst.src0, inst.src_regs(0))
+  elif inst.is_src_16(0) and 'sat_pk' not in name:
+    src = _src16(inst, inst.src0)
+  else:
+    src = inst.lit(inst.src0)
   return f"{name}_e32 {dst}, {src}"
 
 def _disasm_vop2(inst: VOP2) -> str:
@@ -125,8 +133,12 @@ def _disasm_vop2(inst: VOP2) -> str:
   is_cdna = type(inst).__module__.endswith('.cdna.ins')
   suf = "_e32" if is_cdna or inst.op != VOP2Op.V_DOT2ACC_F32_F16 else ""
   # fmaak: dst = src0 * vsrc1 + K, fmamk: dst = src0 * K + vsrc1
-  if not is_cdna and inst.op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
-  if not is_cdna and inst.op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
+  if not is_cdna and inst.op == VOP2Op.V_FMAAK_F16:
+    return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}, 0x{inst._literal:x}"
+  if not is_cdna and inst.op == VOP2Op.V_FMAMK_F16:
+    return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, 0x{inst._literal:x}, {_fmt_v16(inst.vsrc1, 0, 128)}"
+  if not is_cdna and inst.op == VOP2Op.V_FMAAK_F32: return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
+  if not is_cdna and inst.op == VOP2Op.V_FMAMK_F32: return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
   if hasattr(inst, '_literal') and inst._literal and name == 'v_fmaak_f32': return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
   if hasattr(inst, '_literal') and inst._literal and name == 'v_fmamk_f32': return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
   if not is_cdna and inst.is_16bit(): return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
@@ -136,7 +148,15 @@ def _disasm_vop2(inst: VOP2) -> str:
 def _disasm_vopc(inst: VOPC) -> str:
   name = inst.op_name.lower()
   is_cdna = type(inst).__module__.endswith('.cdna.ins')
-  s0 = _fmt_src(inst.src0, inst.src_regs(0)) if inst.src_regs(0) > 1 else (_src16(inst, inst.src0) if hasattr(inst, 'is_16bit') and inst.is_16bit() else inst.lit(inst.src0))
+  # Handle literal for both 32-bit and 64-bit sources
+  if inst.src0 == 255:
+    s0 = inst.lit(inst.src0)
+  elif inst.src_regs(0) > 1:
+    s0 = _fmt_src(inst.src0, inst.src_regs(0))
+  elif hasattr(inst, 'is_16bit') and inst.is_16bit():
+    s0 = _src16(inst, inst.src0)
+  else:
+    s0 = inst.lit(inst.src0)
   s1 = _vreg(inst.vsrc1, inst.src_regs(1)) if inst.src_regs(1) > 1 else (_fmt_v16(inst.vsrc1, 0, 128) if hasattr(inst, 'is_16bit') and inst.is_16bit() else f"v{inst.vsrc1}")
   vcc = "vcc" if is_cdna else "vcc_lo"
   return f"{name}_e32 {s0}, {s1}" if inst.op.value >= 128 else f"{name}_e32 {vcc}, {s0}, {s1}"
@@ -415,13 +435,16 @@ def _disasm_sop1(inst: SOP1) -> str:
   if op in (SOP1Op.S_SETPC_B64, SOP1Op.S_RFE_B64): return f"{name} {_fmt_src(inst.ssrc0, 2)}"
   if op == SOP1Op.S_SWAPPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {_fmt_src(inst.ssrc0, 2)}"
   if op in (SOP1Op.S_SENDMSG_RTN_B32, SOP1Op.S_SENDMSG_RTN_B64): return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
-  return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, {inst.lit(inst.ssrc0) if inst.src_regs(0) == 1 else _fmt_src(inst.ssrc0, inst.src_regs(0))}"
+  src = inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0))
+  return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, {src}"
 
 def _disasm_sop2(inst: SOP2) -> str:
   return f"{inst.op_name.lower()} {_fmt_sdst(inst.sdst, inst.dst_regs())}, {inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0))}, {inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, inst.src_regs(1))}"
 
 def _disasm_sopc(inst: SOPC) -> str:
-  return f"{inst.op_name.lower()} {_fmt_src(inst.ssrc0, inst.src_regs(0))}, {_fmt_src(inst.ssrc1, inst.src_regs(1))}"
+  s0 = inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0))
+  s1 = inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, inst.src_regs(1))
+  return f"{inst.op_name.lower()} {s0}, {s1}"
 
 def _disasm_sopk(inst: SOPK) -> str:
   op, name = inst.op, inst.op_name.lower()
@@ -436,6 +459,46 @@ def _disasm_vinterp(inst: VINTERP) -> str:
   mods = _mods((inst.waitexp, f"wait_exp:{inst.waitexp}"), (inst.clmp, "clamp"))
   return f"{inst.op_name.lower()} v{inst.vdst}, {inst.lit(inst.src0, inst.neg & 1)}, {inst.lit(inst.src1, inst.neg & 2)}, {inst.lit(inst.src2, inst.neg & 4)}" + (" " + mods if mods else "")
 
+DST_SEL = {0: 'BYTE_0', 1: 'BYTE_1', 2: 'BYTE_2', 3: 'BYTE_3', 4: 'WORD_0', 5: 'WORD_1', 6: 'DWORD'}
+DST_UNUSED = {0: 'UNUSED_PAD', 1: 'UNUSED_SEXT', 2: 'UNUSED_PRESERVE'}
+SRC_SEL = {0: 'BYTE_0', 1: 'BYTE_1', 2: 'BYTE_2', 3: 'BYTE_3', 4: 'WORD_0', 5: 'WORD_1', 6: 'DWORD'}
+
+def _disasm_sdwa(inst) -> str:
+  from extra.assembly.amd.autogen.cdna.ins import VOP1Op
+  try: name = VOP1Op(inst.vop_op).name.lower()
+  except ValueError: name = f"vop1_op_{inst.vop_op}"
+  src = f"v{inst.src0}" if isinstance(inst.src0, int) and inst.src0 < 256 else f"v{inst.src0 - 256}" if isinstance(inst.src0, int) else str(inst.src0)
+  mods = []
+  if inst.dst_sel != 6: mods.append(f"dst_sel:{DST_SEL.get(inst.dst_sel, inst.dst_sel)}")
+  if inst.dst_u != 0: mods.append(f"dst_unused:{DST_UNUSED.get(inst.dst_u, inst.dst_u)}")
+  if inst.src0_sel != 6: mods.append(f"src0_sel:{SRC_SEL.get(inst.src0_sel, inst.src0_sel)}")
+  return f"{name}_sdwa v{inst.vdst}, {src}" + (" " + " ".join(mods) if mods else "")
+
+def _disasm_dpp(inst) -> str:
+  from extra.assembly.amd.autogen.cdna.ins import VOP1Op
+  try: name = VOP1Op(inst.vop_op).name.lower()
+  except ValueError: name = f"vop1_op_{inst.vop_op}"
+  src = f"v{inst.src0}" if isinstance(inst.src0, int) and inst.src0 < 256 else f"v{inst.src0 - 256}" if isinstance(inst.src0, int) else str(inst.src0)
+  ctrl = inst.dpp_ctrl
+  if ctrl < 0x100: dpp = f"quad_perm:[{ctrl&3},{(ctrl>>2)&3},{(ctrl>>4)&3},{(ctrl>>6)&3}]"
+  elif ctrl < 0x110: dpp = f"row_shl:{ctrl & 0xf}"
+  elif ctrl < 0x120: dpp = f"row_shr:{ctrl & 0xf}"
+  elif ctrl < 0x130: dpp = f"row_ror:{ctrl & 0xf}"
+  elif ctrl == 0x130: dpp = "wave_shl:1"
+  elif ctrl == 0x134: dpp = "wave_rol:1"
+  elif ctrl == 0x138: dpp = "wave_shr:1"
+  elif ctrl == 0x13c: dpp = "wave_ror:1"
+  elif ctrl == 0x140: dpp = "row_mirror"
+  elif ctrl == 0x141: dpp = "row_half_mirror"
+  elif ctrl == 0x142: dpp = "row_bcast:15"
+  elif ctrl == 0x143: dpp = "row_bcast:31"
+  else: dpp = f"dpp_ctrl:0x{ctrl:x}"
+  mods = [dpp]
+  if inst.row_mask != 0xf: mods.append(f"row_mask:0x{inst.row_mask:x}")
+  if inst.bank_mask != 0xf: mods.append(f"bank_mask:0x{inst.bank_mask:x}")
+  if inst.bound_ctrl: mods.append("bound_ctrl:1")
+  return f"{name}_dpp v{inst.vdst}, {src} " + " ".join(mods)
+
 DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, VOP3: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOPD: _disasm_vopd, VOP3P: _disasm_vop3p,
                    VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
                    MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
@@ -443,7 +506,8 @@ DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, V
 if _HAS_CDNA:
   DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP2: _disasm_vop2, CDNA_VOPC: _disasm_vopc, CDNA_VOP3A: _disasm_vop3a, CDNA_VOP3B: _disasm_vop3b,
                           CDNA_VOP3P: _disasm_vop3p, CDNA_SOP1: _disasm_sop1, CDNA_SOP2: _disasm_sop2, CDNA_SOPC: _disasm_sopc, CDNA_SOPK: _disasm_sopk,
-                          CDNA_SOPP: _disasm_sopp, CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat, CDNA_MUBUF: _disasm_buf, CDNA_MTBUF: _disasm_buf})
+                          CDNA_SOPP: _disasm_sopp, CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat, CDNA_MUBUF: _disasm_buf, CDNA_MTBUF: _disasm_buf,
+                          CDNA_SDWA: _disasm_sdwa, CDNA_DPP: _disasm_dpp})
 
 def disasm(inst: Inst) -> str: return DISASM_HANDLERS[type(inst)](inst)
 

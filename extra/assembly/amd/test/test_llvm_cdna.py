@@ -4,6 +4,8 @@
 NOTE: CDNA (gfx908/gfx90a/gfx940/gfx942) instruction encodings differ from GFX9 (gfx900/Vega)
 in several ways, particularly for memory instructions. We use CDNA-specific test files (gfx90a/gfx942)
 for memory instructions to ensure correct bit-level compatibility.
+
+VOP1/VOP2/VOPC tests skip SDWA/DPP variants as they are different instruction formats.
 """
 import unittest, re, subprocess
 from tinygrad.helpers import fetch
@@ -59,24 +61,22 @@ def parse_llvm_tests(text: str, mnemonic_filter: str = None, size_filter: int = 
     if not asm_text: continue
     # Apply mnemonic filter if specified
     if mnemonic_filter and not asm_text.startswith(mnemonic_filter): continue
-    for j in range(i, min(i + 3, len(lines))):
-      # Match various CHECK formats
+    # Look for encoding in lines BEFORE the instruction first (CHECK comments come before)
+    hex_bytes = None
+    for j in range(max(0, i - 3), i):
+      # Match various CHECK formats (VI9, GFX9, CHECK, etc.)
+      if m := re.search(r'(?:VI9|GFX9|CHECK)[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
+        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
+        break
       if m := re.search(r'CHECK[^:]*:\s*\[(0x[0-9a-fA-F,x\s]+)\]', lines[j]):
         hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
-      elif m := re.search(r'GFX\d+[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
-        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
-      elif m := re.search(r'GFX\d+[^:]*:\s*\[(0x[0-9a-fA-F,x\s]+)\]', lines[j]):
-        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
-      else:
-        continue
-      if hex_bytes:
-        try:
-          data = bytes.fromhex(hex_bytes)
-          # Apply size filter if specified
-          if size_filter and len(data) != size_filter: continue
-          tests.append((asm_text, data))
-        except ValueError: pass
-      break
+        break
+    if hex_bytes:
+      try:
+        data = bytes.fromhex(hex_bytes)
+        if size_filter and len(data) != size_filter: continue
+        tests.append((asm_text, data))
+      except ValueError: pass
   return tests
 
 def compile_asm_batch(instrs: list[str], mcpu: str = 'gfx940') -> list[bytes]:
@@ -117,9 +117,21 @@ def _make_roundtrip_test(name):
     failures: list[str] = []
 
     for asm_text, data in self.tests.get(name, []):
-      if len(data) > fmt_cls._size():
-        skipped += 1
-        continue
+      has_lit = False
+      if fmt_cls._size() == 4 and len(data) == 8:
+        # Skip SDWA (src0=0xf9) and DPP (src0=0xfa) - not properly supported in autogen
+        if data[0] == 0xf9 or data[0] == 0xfa:
+          skipped += 1; continue
+        # Check for literal (src0=0xff or ssrc1=0xff for SOP2/SOPC)
+        has_lit = data[0] == 255 or (len(data) >= 2 and data[1] == 255 and fmt_cls.__name__ in ('SOP2', 'SOPC'))
+        if fmt_cls.__name__ == 'SOPK':
+          has_lit = has_lit or ((int.from_bytes(data[:4], 'little') >> 23) & 0x1f) == 20  # S_SETREG_IMM32_B32
+        if fmt_cls.__name__ == 'VOP2':
+          vop2_op = (int.from_bytes(data[:4], 'little') >> 25) & 0x3f
+          has_lit = has_lit or vop2_op in (23, 24, 36, 37)  # FMAMK/FMAAK/MADMK/MADAK always have literal
+        if not has_lit: skipped += 1; continue
+      expected_size = fmt_cls._size() + (4 if has_lit else 0)
+      if len(data) > expected_size: skipped += 1; continue
       try:
         decoded = fmt_cls.from_bytes(data)
         op_val = decoded._values.get('op', 0)
@@ -128,7 +140,7 @@ def _make_roundtrip_test(name):
           op_enum(op_val)
         except ValueError:
           enum_missing += 1
-          continue  # Skip opcodes not in our enum
+          continue
         reencoded = decoded.to_bytes()[:len(data)]
         if reencoded == data:
           passed += 1
@@ -151,9 +163,21 @@ def _make_disasm_test(name):
     failures: list[str] = []
 
     for asm_text, data in self.tests.get(name, []):
-      if len(data) > fmt_cls._size():
-        skipped += 1
-        continue
+      has_lit = False
+      if fmt_cls._size() == 4 and len(data) == 8:
+        # Skip SDWA (src0=0xf9) and DPP (src0=0xfa) - not properly supported in autogen
+        if data[0] == 0xf9 or data[0] == 0xfa:
+          skipped += 1; continue
+        # Check for literal (src0=0xff or ssrc1=0xff for SOP2/SOPC)
+        has_lit = data[0] == 255 or (len(data) >= 2 and data[1] == 255 and fmt_cls.__name__ in ('SOP2', 'SOPC'))
+        if fmt_cls.__name__ == 'SOPK':
+          has_lit = has_lit or ((int.from_bytes(data[:4], 'little') >> 23) & 0x1f) == 20  # S_SETREG_IMM32_B32
+        if fmt_cls.__name__ == 'VOP2':
+          vop2_op = (int.from_bytes(data[:4], 'little') >> 25) & 0x3f
+          has_lit = has_lit or vop2_op in (23, 24, 36, 37)  # FMAMK/FMAAK/MADMK/MADAK always have literal
+        if not has_lit: skipped += 1; continue
+      expected_size = fmt_cls._size() + (4 if has_lit else 0)
+      if len(data) > expected_size: skipped += 1; continue
       try:
         decoded = fmt_cls.from_bytes(data)
         op_val = decoded._values.get('op', 0)
@@ -162,7 +186,7 @@ def _make_disasm_test(name):
           op_enum(op_val)
         except ValueError:
           enum_missing += 1
-          continue  # Skip opcodes not in our enum
+          continue
         # Check roundtrip first
         reencoded = decoded.to_bytes()[:len(data)]
         if reencoded != data:
