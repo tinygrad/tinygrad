@@ -126,10 +126,10 @@ _VOPD_TO_VOP = {
 
 
 class WaveState:
-  __slots__ = ('sgpr', 'vgpr', 'scc', 'pc', 'literal', '_pend_sgpr')
-  def __init__(self):
+  __slots__ = ('sgpr', 'vgpr', 'scc', 'pc', 'literal', '_pend_sgpr', 'lds')
+  def __init__(self, lds: LDSMem | None = None):
     self.sgpr, self.vgpr = [0] * SGPR_COUNT, [[0] * VGPR_COUNT for _ in range(WAVE_SIZE)]
-    self.sgpr[EXEC_LO], self.scc, self.pc, self.literal, self._pend_sgpr = 0xffffffff, 0, 0, 0, {}
+    self.sgpr[EXEC_LO], self.scc, self.pc, self.literal, self._pend_sgpr, self.lds = 0xffffffff, 0, 0, 0, {}, lds
 
   @property
   def vcc(self) -> int: return self.sgpr[VCC_LO] | (self.sgpr[VCC_HI] << 32)
@@ -253,11 +253,11 @@ def exec_flat(st: WaveState, inst, V: list, lane: int) -> None:
   if 'VDATA' in result: _vgpr_write(V, inst.vdst, result['VDATA'], ndwords)
   if 'RETURN_DATA' in result: _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords)
 
-def exec_ds(st: WaveState, inst, V: list, lane: int, lds: LDSMem) -> None:
+def exec_ds(st: WaveState, inst, V: list, lane: int) -> None:
   """DS (LDS) memory ops."""
   ndwords = _op_ndwords(inst.op_name)
   data0, data1 = _vgpr_read(V, inst.data0, ndwords), _vgpr_read(V, inst.data1, ndwords) if inst.data1 is not None else 0
-  result = inst._fn(lds, V[inst.addr], data0, data1, inst.offset0, inst.offset1)
+  result = inst._fn(st.lds, V[inst.addr], data0, data1, inst.offset0, inst.offset1)
   if 'RETURN_DATA' in result and ('_RTN' in inst.op_name or '_LOAD' in inst.op_name):
     _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords * 2 if '_2ADDR_' in inst.op_name else ndwords)
 
@@ -360,7 +360,7 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
+def step_wave(program: Program, st: WaveState, n_lanes: int) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
   inst_words, st.literal = inst._words, getattr(inst, '_literal', None) or 0
@@ -389,7 +389,7 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
     # Per-lane vector ops - dispatch based on instruction type
     if isinstance(inst, VOPD): fn = exec_vopd
     elif isinstance(inst, FLAT): fn = exec_flat
-    elif isinstance(inst, DS): fn = lambda st, inst, V, lane: exec_ds(st, inst, V, lane, lds)
+    elif isinstance(inst, DS): fn = exec_ds
     elif isinstance(inst, VOP3SD): fn = exec_vop3sd
     elif isinstance(inst, VOP3P): fn = exec_vop3p
     else: fn = exec_vop
@@ -399,8 +399,8 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
   st.pc += inst_words
   return 0
 
-def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
-  while st.pc in program and (result := step_wave(program, st, lds, n_lanes)) == 0: pass
+def exec_wave(program: Program, st: WaveState, n_lanes: int) -> int:
+  while st.pc in program and (result := step_wave(program, st, n_lanes)) == 0: pass
   return result
 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int, rsrc2: int) -> None:
@@ -412,7 +412,7 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
   waves: list[tuple[WaveState, int]] = []
   for wave_start in range(0, total_threads, WAVE_SIZE):
     n_lanes = min(WAVE_SIZE, total_threads - wave_start)
-    st = WaveState()
+    st = WaveState(lds)
     st.exec_mask = (1 << n_lanes) - 1
     st.wsgpr64(0, args_ptr)  # s[0:1] = kernel arguments pointer
     # COMPUTE_PGM_RSRC2: USER_SGPR_COUNT is where workgroup IDs start, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z control which are passed
@@ -425,7 +425,7 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
       st.vgpr[tid - wave_start][0] = ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
     waves.append((st, n_lanes))
   while waves:
-    waves = [(st, n_lanes) for st, n_lanes in waves if exec_wave(program, st, lds, n_lanes) != -1]
+    waves = [(st, n_lanes) for st, n_lanes in waves if exec_wave(program, st, n_lanes) != -1]
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c) -> int:
   program = decode_program((ctypes.c_char * lib_sz).from_address(lib).raw)
