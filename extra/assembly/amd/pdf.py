@@ -513,17 +513,6 @@ def _generate_gen_pcode_py(enums, pseudocode, arch) -> str:
       for op, fn_name in fn_entries: fn_lines.append(f"  {cls_name}.{op.name}: {fn_name},")
       fn_lines.append('}\n')
 
-  # Add V_WRITELANE_B32 if VOP3Op exists
-  if 'VOP3Op' in enum_names:
-    fn_lines.append('''
-# V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
-  # --- compiled pseudocode ---
-  wr_lane = s1 & 0x1f
-  return {'D0': d0, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
-VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
-''')
-
   fn_lines.append('COMPILED_FUNCTIONS = {')
   for enum_cls in OP_ENUMS:
     if all_fn_entries.get(enum_cls): fn_lines.append(f'  {enum_cls.__name__}: {enum_cls.__name__}_FUNCTIONS,')

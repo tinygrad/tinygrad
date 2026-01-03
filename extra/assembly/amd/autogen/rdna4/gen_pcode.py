@@ -6670,6 +6670,45 @@ def _VOP3POp_V_PK_MAXIMUM_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, liter
   D0.b32 = tmp
   return {'D0': D0._val}
 
+def _VOP3POp_V_FMA_MIX_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[31 : 0].f32 = fma(ins[0], ins[1], ins[2])
+  return {'D0': D0._val}
+
+def _VOP3POp_V_FMA_MIXLO_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[15 : 0].f16 = f32_to_f16(fma(ins[0], ins[1], ins[2]))
+  return {'D0': D0._val}
+
+def _VOP3POp_V_FMA_MIXHI_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[31 : 16].f16 = f32_to_f16(fma(ins[0], ins[1], ins[2]))
+  return {'D0': D0._val}
+
 def _VOP3POp_V_DOT4_F32_FP8_BF8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
   S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
   # --- compiled pseudocode ---
@@ -6740,6 +6779,9 @@ VOP3POp_FUNCTIONS = {
   VOP3POp.V_PK_MAX_NUM_F16: _VOP3POp_V_PK_MAX_NUM_F16,
   VOP3POp.V_PK_MINIMUM_F16: _VOP3POp_V_PK_MINIMUM_F16,
   VOP3POp.V_PK_MAXIMUM_F16: _VOP3POp_V_PK_MAXIMUM_F16,
+  VOP3POp.V_FMA_MIX_F32: _VOP3POp_V_FMA_MIX_F32,
+  VOP3POp.V_FMA_MIXLO_F16: _VOP3POp_V_FMA_MIXLO_F16,
+  VOP3POp.V_FMA_MIXHI_F16: _VOP3POp_V_FMA_MIXHI_F16,
   VOP3POp.V_DOT4_F32_FP8_BF8: _VOP3POp_V_DOT4_F32_FP8_BF8,
   VOP3POp.V_DOT4_F32_BF8_FP8: _VOP3POp_V_DOT4_F32_BF8_FP8,
   VOP3POp.V_DOT4_F32_FP8_FP8: _VOP3POp_V_DOT4_F32_FP8_FP8,
@@ -9121,14 +9163,6 @@ DSOp_FUNCTIONS = {
   DSOp.DS_BVH_STACK_PUSH8_POP2_RTN_B64: _DSOp_DS_BVH_STACK_PUSH8_POP2_RTN_B64,
   DSOp.DS_LOAD_B96: _DSOp_DS_LOAD_B96,
 }
-
-
-# V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
-  # --- compiled pseudocode ---
-  wr_lane = s1 & 0x1f
-  return {'D0': d0, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
-VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
 
 COMPILED_FUNCTIONS = {
   SOP1Op: SOP1Op_FUNCTIONS,

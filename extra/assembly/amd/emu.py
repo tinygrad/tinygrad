@@ -317,12 +317,6 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
     # vsrc1 field is 8 bits: [6:0] = VGPR index, [7] = hi flag
     src0, src1, src2, vdst = inst.src0, inst.vsrc1 + 256, None, VCC_LO
   elif isinstance(inst, VOP3P):
-    # VOP3P: Packed 16-bit operations using compiled functions
-    # WMMA: wave-level matrix multiply-accumulate (special handling - needs cross-lane access)
-    if 'WMMA' in inst.op_name:
-      if lane == 0:  # Only execute once per wave, write results for all lanes
-        exec_wmma(st, inst, inst.op)
-      return
     # V_FMA_MIX: Mixed precision FMA - uses generated pcode with opsel parameters
     # Apply abs/neg modifiers to sources: for f32 mode modify bit 31, for f16 mode modify bit 15 or 31 based on opsel
     if 'FMA_MIX' in inst.op_name:
@@ -387,10 +381,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
     # VOPC comparison result stored in D0 bitmask, extract lane bit (non-CMPX only)
     st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)
   if op_cls is not VOPCOp and 'vgpr_write' not in result:
-    writes_to_sgpr = 'READFIRSTLANE' in inst.op_name or 'READLANE' in inst.op_name
     d0_val = result['D0']
-    if writes_to_sgpr: st.wsgpr(vdst, d0_val & MASK32)
-    elif inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
+    if inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
     elif inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
     else: V[vdst] = d0_val & MASK32
 
@@ -429,17 +421,27 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
   if isinstance(inst, SOPP):
     if inst.op == SOPPOp.S_ENDPGM: return -1
     if inst.op == SOPPOp.S_BARRIER: st.pc += inst_words; return -2
-
   if isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)):
     st.pc += inst_words + exec_scalar(st, inst)
+    return 0
+  # Wave-level vector ops: execute once for entire wave (not per-lane)
+  if isinstance(inst, VOP3P) and 'WMMA' in inst.op_name:
+    exec_wmma(st, inst, inst.op)
+  elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32:
+    wr_lane = st.rsrc(inst.src1, 0) & 0x1f
+    st.vgpr[wr_lane][inst.vdst] = st.rsrc(inst.src0, 0) & MASK32
+  elif isinstance(inst, (VOP1, VOP3)) and 'READFIRSTLANE' in inst.op_name:
+    first_lane = next((i for i in range(n_lanes) if st.exec_mask & (1 << i)), 0)
+    st.wsgpr(inst.vdst, st.vgpr[first_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, first_lane))
+  elif isinstance(inst, VOP3) and 'READLANE' in inst.op_name:
+    rd_lane = st.rsrc(inst.src1, 0) & 0x1f
+    st.wsgpr(inst.vdst, st.vgpr[rd_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, rd_lane))
   else:
-    # V_READFIRSTLANE/V_READLANE write to SGPR, execute once; others execute per-lane with exec_mask
-    is_readlane = isinstance(inst, (VOP1, VOP3)) and ('READFIRSTLANE' in inst.op_name or 'READLANE' in inst.op_name)
-    exec_mask = 1 if is_readlane else st.exec_mask
-    for lane in range(1 if is_readlane else n_lanes):
-      if exec_mask & (1 << lane): exec_vector(st, inst, lane, lds)
+    # Per-lane vector ops
+    for lane in range(n_lanes):
+      if st.exec_mask & (1 << lane): exec_vector(st, inst, lane, lds)
     st.commit_pends()
-    st.pc += inst_words
+  st.pc += inst_words
   return 0
 
 def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:

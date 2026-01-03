@@ -10246,14 +10246,6 @@ SCRATCHOp_FUNCTIONS = {
   SCRATCHOp.SCRATCH_STORE_D16_HI_B16: _SCRATCHOp_SCRATCH_STORE_D16_HI_B16,
 }
 
-
-# V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
-  # --- compiled pseudocode ---
-  wr_lane = s1 & 0x1f
-  return {'D0': d0, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
-VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
-
 COMPILED_FUNCTIONS = {
   SOP1Op: SOP1Op_FUNCTIONS,
   SOP2Op: SOP2Op_FUNCTIONS,
