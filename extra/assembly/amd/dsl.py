@@ -14,13 +14,17 @@ _struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
 _struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
 _struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")
 def _f32(i):
+  i = i & MASK32
   # RDNA3 default mode: flush f32 denormals to zero (FTZ)
   # Denormal: exponent=0 (bits 23-30) and mantissa!=0 (bits 0-22)
   if (i & 0x7f800000) == 0 and (i & 0x007fffff) != 0: return 0.0
-  return _struct_f.unpack(_struct_I.pack(i & MASK32))[0]
+  return _struct_f.unpack(_struct_I.pack(i))[0]
 def _i32(f):
+  if isinstance(f, int): f = float(f)
+  if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
+  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
   try:
-    bits = _struct_I.unpack(_struct_f.pack(float(f)))[0]
+    bits = _struct_I.unpack(_struct_f.pack(f))[0]
     # RDNA3 default mode: flush f32 denormals to zero (FTZ)
     if (bits & 0x7f800000) == 0 and (bits & 0x007fffff) != 0: return 0x80000000 if bits & 0x80000000 else 0
     return bits

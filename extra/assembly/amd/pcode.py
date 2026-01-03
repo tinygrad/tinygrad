@@ -381,10 +381,10 @@ class TypedView:
   def __index__(self): return int(self)
   def __trunc__(self): return int(float(self)) if self._float else int(self)
   def __float__(self):
-    if not self._float: return float(self._val)
-    if self._bf16: return _bf16(self._val)
-    if self._bits == 32: return _f32(self._val)
-    return _f16(self._val) if self._bits == 16 else _f64(self._val)
+    if self._float:
+      if self._bf16: return _bf16(self._val)  # bf16 uses different conversion
+      return _f16(self._val) if self._bits == 16 else _f32(self._val) if self._bits == 32 else _f64(self._val)
+    return float(int(self))
 
   # Arithmetic - floats use float(), ints use int()
   def __add__(s, o): return float(s) + float(o) if s._float else int(s) + int(o)
@@ -447,11 +447,11 @@ class Reg:
   u64 = property(lambda s: TypedView(s, 64), lambda s, v: setattr(s, '_val', int(v) & MASK64))
   i64 = property(lambda s: TypedView(s, 64, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK64))
   b64 = property(lambda s: TypedView(s, 64), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  f64 = property(lambda s: TypedView(s, 64, is_float=True), lambda s, v: setattr(s, '_val', v if isinstance(v, int) else _i64(v)))
+  f64 = property(lambda s: TypedView(s, 64, is_float=True), lambda s, v: setattr(s, '_val', v if isinstance(v, int) else _i64(float(v))))
   u32 = property(lambda s: TypedView(s, 32), lambda s, v: setattr(s, '_val', int(v) & MASK32))
   i32 = property(lambda s: TypedView(s, 32, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK32))
   b32 = property(lambda s: TypedView(s, 32), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  f32 = property(lambda s: TypedView(s, 32, is_float=True), lambda s, v: setattr(s, '_val', _i32(v)))
+  f32 = property(lambda s: TypedView(s, 32, is_float=True), lambda s, v: setattr(s, '_val', _i32(float(v))))
   u24 = property(lambda s: TypedView(s, 24))
   i24 = property(lambda s: TypedView(s, 24, signed=True))
   u16 = property(lambda s: TypedView(s, 16), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
