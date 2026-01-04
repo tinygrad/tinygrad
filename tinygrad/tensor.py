@@ -604,7 +604,7 @@ class Tensor(OpMixin):
     bits = bits.bitcast(uint_dtype)
     # only randomize the mantissa bits and set the exponent to 1
     one = Tensor.ones_like(bits, device=bits.device, dtype=dtype).bitcast(uint_dtype)
-    bits = bits.rshift((dtype.itemsize * 8) - nmant).bitwise_or(one)
+    bits = bits.rshift(dtype.bitsize - nmant).bitwise_or(one)
     # bitcast back to the original dtype and reshape
     out = bits.bitcast(dtype)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
     return out.contiguous() if contiguous else out
