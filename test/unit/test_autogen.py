@@ -1,6 +1,7 @@
 import ctypes, subprocess, tempfile, unittest
 from tinygrad.helpers import WIN
 from tinygrad.runtime.support.c import Struct
+from tinygrad.runtime.support.autogen import gen
 
 class TestAutogen(unittest.TestCase):
   def test_packed_struct_sizeof(self):
@@ -158,5 +159,69 @@ class TestAutogen(unittest.TestCase):
     assert ihdr.version == 0x0004
     assert ihdr.num_dies == 1
     assert ihdr.base_addr_64_bit == 1
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_gen_from_header(self):
+    # Create a temporary header file with various C constructs
+    header_content = """
+    typedef struct {
+      int x;
+      int y;
+    } Point;
+
+    typedef enum {
+      RED = 0,
+      GREEN = 1,
+      BLUE = 2
+    } Color;
+
+    typedef struct {
+      Point origin;
+      int width;
+      int height;
+      Color color;
+    } Rectangle;
+
+    int add_points(Point a, Point b);
+    """
+
+    # Write header to temporary file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
+      f.write(header_content)
+      f.flush()
+
+      generated_code = gen(name="test_header", dll=None, files=[f.name])
+
+      # Verify the generated code can be executed
+      namespace = {}
+      exec(generated_code, namespace)
+
+      # Check that the types were generated correctly
+      self.assertIn('Point', namespace)
+      self.assertIn('Color', namespace)
+      self.assertIn('Rectangle', namespace)
+      self.assertIn('RED', namespace)
+      self.assertIn('GREEN', namespace)
+      self.assertIn('BLUE', namespace)
+
+      # Verify enum values
+      self.assertEqual(namespace['RED'], 0)
+      self.assertEqual(namespace['GREEN'], 1)
+      self.assertEqual(namespace['BLUE'], 2)
+
+      # Verify we can instantiate the struct
+      Point = namespace['Point']
+      p = Point()
+      self.assertIsInstance(p, Struct)
+      self.assertTrue(hasattr(p, 'x'))
+      self.assertTrue(hasattr(p, 'y'))
+
+      # Verify nested struct
+      Rectangle = namespace['Rectangle']
+      rect = Rectangle()
+      self.assertTrue(hasattr(rect, 'origin'))
+      self.assertTrue(hasattr(rect, 'width'))
+      self.assertTrue(hasattr(rect, 'height'))
+      self.assertTrue(hasattr(rect, 'color'))
 
 if __name__ == "__main__": unittest.main()
