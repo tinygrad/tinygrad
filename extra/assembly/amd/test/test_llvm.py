@@ -56,7 +56,7 @@ LLVM_TEST_FILES = {
 }
 
 # Undocumented opcodes that we skip (reserved/internal to AMD)
-UNDOCUMENTED = {'smem': {34, 35}, 'sopk': {22, 23}, 'sopp': {8, 58, 59}}
+UNDOCUMENTED = {'smem': {34, 35}, 'sopk': {22, 23}, 'sopp': {58, 59}}
 
 def parse_llvm_tests(text: str) -> list[tuple[str, bytes]]:
   """Parse LLVM test format into (asm, expected_bytes) pairs."""
@@ -127,9 +127,18 @@ def _has_literal(data: bytes, fmt_cls) -> bool:
   if fn in ('SOP2', 'SOPC'): return data[0] == 0xff or data[1] == 0xff  # ssrc0 or ssrc1
   if fn == 'VOP2':
     op = (int.from_bytes(data[:4], 'little') >> 25) & 0x3f
-    return data[0] == 0xff or op in (23, 24, 36, 37)  # src0=literal or FMAMK/FMAAK/MADMK/MADAK
-  if fn == 'SOPK': return ((int.from_bytes(data[:4], 'little') >> 23) & 0x1f) == 20  # S_SETREG_IMM32_B32
-  if fn == 'VOPD': return data[0] == 0xff or data[4] == 0xff  # either src has literal
+    return data[0] == 0xff or op in (44, 45, 55, 56)  # src0=literal or FMAMK/FMAAK F32/F16 (RDNA3 opcodes)
+  if fn == 'SOPK': return ((int.from_bytes(data[:4], 'little') >> 23) & 0x1f) == 19  # S_SETREG_IMM32_B32 (RDNA3 opcode)
+  if fn == 'VOPD':
+    # Check srcx0/srcy0 for literal, or opx/opy for FMAAK/FMAMK (1, 2)
+    word0 = int.from_bytes(data[:4], 'little')
+    opx, opy = (word0 >> 22) & 0xf, (word0 >> 17) & 0x1f
+    return data[0] == 0xff or data[4] == 0xff or opx in (1, 2) or opy in (1, 2)
+  # VOP3/VOP3SD/VOP3P: check src0/src1/src2 fields for literal marker (0xff)
+  if fn in ('VOP3', 'VOP3SD', 'VOP3P'):
+    word1 = int.from_bytes(data[4:8], 'little')
+    src0, src1, src2 = word1 & 0x1ff, (word1 >> 9) & 0x1ff, (word1 >> 18) & 0x1ff
+    return src0 == 0xff or src1 == 0xff or src2 == 0xff
   return False
 
 def _make_roundtrip_test(name):
@@ -142,8 +151,8 @@ def _make_roundtrip_test(name):
     failures: list[str] = []
 
     for asm_text, data in self.tests.get(name, []):
-      # Handle literal constants: 32-bit formats can have trailing 32-bit literal
-      has_lit = _has_literal(data, fmt_cls) if fmt_cls._size() == 4 and len(data) == 8 else False
+      # Handle literal constants: formats can have trailing 32-bit literal
+      has_lit = _has_literal(data, fmt_cls)
       expected_size = fmt_cls._size() + (4 if has_lit else 0)
       if len(data) > expected_size: skipped += 1; continue
       try:
@@ -158,11 +167,6 @@ def _make_roundtrip_test(name):
           decoded = fmt_cls.from_bytes(data)
           op_val = _get_op(decoded)
           if op_val in UNDOCUMENTED.get(name, set()): skipped += 1; continue
-          # SOPP: skip instructions with simm16!=0 that shouldn't have immediates
-          if name == 'sopp':
-            simm16 = decoded._values.get('simm16', 0)
-            simm16 = simm16.val if hasattr(simm16, 'val') else simm16
-            if op_val in {48, 54, 53, 55, 60, 61, 62} and simm16 != 0: skipped += 1; continue
           try: op_enum(op_val)
           except ValueError: enum_missing += 1; continue
         # Check roundtrip
@@ -188,7 +192,7 @@ def _make_disasm_test(name):
 
     for asm_text, data in self.tests.get(name, []):
       # Handle literal constants
-      has_lit = _has_literal(data, fmt_cls) if fmt_cls._size() == 4 and len(data) == 8 else False
+      has_lit = _has_literal(data, fmt_cls)
       expected_size = fmt_cls._size() + (4 if has_lit else 0)
       if len(data) > expected_size: continue
       try:
@@ -203,10 +207,6 @@ def _make_disasm_test(name):
           decoded = fmt_cls.from_bytes(data)
           op_val = _get_op(decoded)
           if op_val in UNDOCUMENTED.get(name, set()): skipped += 1; continue
-          if name == 'sopp':
-            simm16 = decoded._values.get('simm16', 0)
-            simm16 = simm16.val if hasattr(simm16, 'val') else simm16
-            if op_val in {48, 54, 53, 55, 60, 61, 62} and simm16 != 0: skipped += 1; continue
           try: op_enum(op_val)
           except ValueError: skipped += 1; continue
         # Check roundtrip first

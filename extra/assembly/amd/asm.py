@@ -90,18 +90,35 @@ def _src16(inst, v: int) -> str: return _fmt_v16(v) if v >= 256 else inst.lit(v)
 def _mods(*pairs) -> str: return " ".join(m for c, m in pairs if c)
 def _fmt_bits(label: str, val: int, count: int) -> str: return f"{label}:[{','.join(str((val >> i) & 1) for i in range(count))}]"
 
-def _vop3_src(inst, v: int, neg: int, abs_: int, hi: int, n: int, f16: bool, any_hi: bool) -> str:
-  """Format VOP3 source operand with modifiers."""
-  if n > 1: s = _fmt_src(v, n)
-  elif f16 and v >= 256: s = f"v{v - 256}.h" if hi else (f"v{v - 256}.l" if any_hi else inst.lit(v))
+def _vop3_src(inst, v: int, neg: int, abs_: int, hi: int, n: int, f16: bool, any_hi: bool, opsel_support: bool = False) -> str:
+  """Format VOP3 source operand with modifiers.
+  f16: True if this source is known to be 16-bit from instruction semantics
+  opsel_support: True if this source supports opsel .h/.l selection even for non-f16 instructions
+  """
+  is_lit = v == 255
+  use_suffix = f16 or (opsel_support and v >= 256 and any_hi)  # Use .h/.l for f16 ops or opsel-supported VGPRs
+  if is_lit: s = inst.lit(v)  # Literal always uses inst.lit() to get actual value
+  elif n > 1: s = _fmt_src(v, n)
+  elif f16 and v >= 256: s = f"v{v - 256}.h" if hi else f"v{v - 256}.l"  # 16-bit always has suffix
+  elif use_suffix and v >= 256: s = f"v{v - 256}.h" if hi else (f"v{v - 256}.l" if any_hi else inst.lit(v))
   else: s = inst.lit(v)
   if abs_: s = f"|{s}|"
-  return f"-{s}" if neg else s
+  # For literals, use neg(...) syntax instead of -...
+  return f"neg({s})" if neg and is_lit else (f"-{s}" if neg else s)
 
-def _opsel_str(opsel: int, n: int, need: bool, is16_d: bool) -> str:
-  """Format op_sel modifier string."""
+def _opsel_str(opsel: int, n: int, need: bool, is16_d: bool, is16_src: bool = False) -> str:
+  """Format op_sel modifier string.
+  For 16-bit ops, the format is [src0, src1, ..., dst] including dst.
+  For 32-bit ops, the format is [src0, src1, src2] without dst (dst uses .h suffix).
+  """
   if not need: return ""
-  if is16_d and (opsel & 8): return f" op_sel:[1,1,1{',1' if n == 3 else ''}]"
+  # If only dst bit (bit 3) is set and dst is 16-bit, the .h suffix on dst conveys this - no op_sel needed
+  if is16_d and opsel == 8 and not is16_src: return ""
+  # 16-bit source operations use [src0, src1, dst] or [src0, src1, src2, dst] format
+  if is16_src:
+    if n == 3: return f" op_sel:[{opsel & 1},{(opsel >> 1) & 1},{(opsel >> 2) & 1},{(opsel >> 3) & 1}]"
+    return f" op_sel:[{opsel & 1},{(opsel >> 1) & 1},{(opsel >> 3) & 1}]"  # [src0, src1, dst] for 2-src
+  # 32-bit operations use [src0, src1, src2] format (dst uses .h suffix if needed)
   if n == 3: return f" op_sel:[{opsel & 1},{(opsel >> 1) & 1},{(opsel >> 2) & 1},{(opsel >> 3) & 1}]"
   return f" op_sel:[{opsel & 1},{(opsel >> 1) & 1},{(opsel >> 2) & 1}]"
 
@@ -161,12 +178,14 @@ def _disasm_vopc(inst: VOPC) -> str:
   vcc = "vcc" if is_cdna else "vcc_lo"
   return f"{name}_e32 {s0}, {s1}" if inst.op.value >= 128 else f"{name}_e32 {vcc}, {s0}, {s1}"
 
-NO_ARG_SOPP = {SOPPOp.S_ENDPGM, SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV,
+NO_ARG_SOPP = {SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV,
                SOPPOp.S_WAIT_IDLE, SOPPOp.S_ENDPGM_SAVED, SOPPOp.S_CODE_END, SOPPOp.S_ENDPGM_ORDERED_PS_DONE}
 
 def _disasm_sopp(inst: SOPP) -> str:
   name = inst.op_name.lower()
   if inst.op in NO_ARG_SOPP: return name
+  # s_endpgm has optional simm16 (default 0)
+  if inst.op == SOPPOp.S_ENDPGM: return name if inst.simm16 == 0 else f"{name} {inst.simm16}"
   if inst.op == SOPPOp.S_WAITCNT:
     vm, exp, lgkm = (inst.simm16 >> 10) & 0x3f, inst.simm16 & 0xf, (inst.simm16 >> 4) & 0x3f
     p = [f"vmcnt({vm})" if vm != 0x3f else "", f"expcnt({exp})" if exp != 7 else "", f"lgkmcnt({lgkm})" if lgkm != 0x3f else ""]
@@ -251,7 +270,7 @@ def _disasm_vop3(inst: VOP3) -> str:
   # VOP3SD (shared encoding)
   if isinstance(op, VOP3SDOp):
     sdst = (inst.clmp << 7) | (inst.opsel << 3) | inst.abs
-    def src(v, neg, n): s = _fmt_src(v, n) if n > 1 else inst.lit(v); return f"-{s}" if neg else s
+    def src(v, neg, n): s = inst.lit(v) if v == 255 else (_fmt_src(v, n) if n > 1 else inst.lit(v)); return f"neg({s})" if neg and v == 255 else (f"-{s}" if neg else s)
     s0, s1, s2 = src(inst.src0, inst.neg & 1, inst.src_regs(0)), src(inst.src1, inst.neg & 2, inst.src_regs(1)), src(inst.src2, inst.neg & 4, inst.src_regs(2))
     dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}"
     srcs = f"{s0}, {s1}, {s2}" if inst.num_srcs() == 3 else f"{s0}, {s1}"
@@ -260,45 +279,78 @@ def _disasm_vop3(inst: VOP3) -> str:
   # Detect 16-bit operand sizes (for .h/.l suffix handling)
   is16_d = is16_s = is16_s2 = False
   if 'cvt_pk' in name: is16_s = name.endswith('16')
+  elif 'sat_pk' in name: is16_d = True  # sat_pk uses 16-bit dst encoding with .h/.l suffix
   elif m := re.match(r'v_(?:cvt|frexp_exp)_([a-z0-9_]+)_([a-z0-9]+)', name):
-    is16_d, is16_s = _has(m.group(1), 'f16','i16','u16','b16'), _has(m.group(2), 'f16','i16','u16','b16')
+    is16_d, is16_s = _has(m.group(1), 'f16','i16','u16','b16','bf16'), _has(m.group(2), 'f16','i16','u16','b16','bf16')
     is16_s2 = is16_s
   elif re.match(r'v_mad_[iu]32_[iu]16', name): is16_s = True
   elif 'pack_b32' in name: is16_s = is16_s2 = True
-  else: is16_d = is16_s = is16_s2 = inst.is_16bit()
+  else:
+    # Use instruction metadata for 16-bit detection
+    is16_d = inst.is_dst_16() or inst.is_16bit()
+    is16_s = is16_s2 = inst.is_16bit()
+    # Special case: v_dot2_*16_*16 have packed f16x2 inputs for src0/src1, but 16-bit src2 and dst
+    if 'dot2' in name:
+      is16_d = True   # dst is 16-bit with .l/.h suffix
+      is16_s = False  # src0, src1 are packed f16x2, no .l/.h suffix
+      is16_s2 = True  # src2 is 16-bit with .l/.h suffix
+
+  # For 16-bit VOP3 instructions, ALL VGPRs use .h/.l suffixes
+  # Only _nc_ instructions support explicit op_sel modifier for non-VGPR high selection
+  supports_explicit_opsel = '_nc_' in name and ('16' in name or 'i16' in name or 'u16' in name)
+
+  # Some instructions use opsel for other purposes (lane selection), not source high/low
+  # These should NOT have .h/.l suffix on sources
+  no_src_suffix = 'permlane' in name or 'readlane' in name or 'writelane' in name
 
   any_hi = inst.opsel != 0
-  s0 = _vop3_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.opsel&1, inst.src_regs(0), is16_s, any_hi)
-  s1 = _vop3_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.opsel&2, inst.src_regs(1), is16_s, any_hi)
-  s2 = _vop3_src(inst, inst.src2, inst.neg&4, inst.abs&4, inst.opsel&4, inst.src_regs(2), is16_s2, any_hi)
+  # For 32-bit instructions that support opsel on sources, use .h/.l when bit is set
+  # Only apply opsel suffix to sources that are known 16-bit (is16_s/is16_s2)
+  # or for special instructions (alignbit/alignbyte on src2, dot2/div_fixup on src2)
+  is_alignbit = 'alignbit' in name or 'alignbyte' in name
+  # src2 suffix: for alignbit/alignbyte, or for is16_d instructions (not is16_s which is mixed like v_mad_*32_*16)
+  opsel_s2_special = (is_alignbit or is16_d) and inst.op >= 512
 
-  # Destination
+  s0 = _vop3_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.opsel&1, inst.src_regs(0), is16_s, any_hi, False)
+  s1 = _vop3_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.opsel&2, inst.src_regs(1), is16_s, any_hi, False)
+  s2 = _vop3_src(inst, inst.src2, inst.neg&4, inst.abs&4, inst.opsel&4, inst.src_regs(2), is16_s2, any_hi, opsel_s2_special and not no_src_suffix)
+
+  # Destination: use .h/.l suffix for 16-bit dst (always .l if no opsel bit 8)
   dn = inst.dst_regs()
   if op == VOP3Op.V_READLANE_B32: dst = _fmt_sdst(inst.vdst, 1)
   elif dn > 1: dst = _vreg(inst.vdst, dn)
-  elif is16_d: dst = f"v{inst.vdst}.h" if (inst.opsel & 8) else f"v{inst.vdst}.l" if any_hi else f"v{inst.vdst}"
+  elif is16_d: dst = f"v{inst.vdst}.h" if (inst.opsel & 8) else f"v{inst.vdst}.l"
   else: dst = f"v{inst.vdst}"
 
   cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
-  nonvgpr_opsel = (inst.src0 < 256 and (inst.opsel & 1)) or (inst.src1 < 256 and (inst.opsel & 2)) or (inst.src2 < 256 and (inst.opsel & 4))
-  need_opsel = nonvgpr_opsel or (inst.opsel and not is16_s)
+  # Need op_sel when non-VGPR sources have opsel bits set (they can't use .h suffix)
+  has_nonvgpr_opsel = (inst.src0 < 256 and (inst.opsel & 1)) or (inst.src1 < 256 and (inst.opsel & 2)) or (inst.src2 < 256 and (inst.opsel & 4))
+  # sat_pk instructions don't use op_sel modifier (only .h suffix on dst)
+  # cvt_pk_norm* DO use op_sel for non-VGPR sources
+  is_sat_pk = 'sat_pk' in name
+  # Output op_sel for non-VGPR sources with opsel bits set
+  need_opsel = has_nonvgpr_opsel and not is_sat_pk
 
   if inst.op < 256:  # VOPC
-    return f"{name}_e64 {s0}, {s1}" if name.startswith('v_cmpx') else f"{name}_e64 {_fmt_sdst(inst.vdst, 1)}, {s0}, {s1}"
+    return (f"{name}_e64 {s0}, {s1}{cl}" if name.startswith('v_cmpx') else f"{name}_e64 {_fmt_sdst(inst.vdst, 1)}, {s0}, {s1}{cl}")
   if inst.op < 384:  # VOP2
     n = inst.num_srcs()
-    os = _opsel_str(inst.opsel, n, need_opsel, is16_d)
+    os = _opsel_str(inst.opsel, n, need_opsel, is16_d, supports_explicit_opsel)
     return f"{name}_e64 {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if n == 3 else f"{name}_e64 {dst}, {s0}, {s1}{os}{cl}{om}"
   if inst.op < 512:  # VOP1
     return f"{name}_e64" if op in (VOP3Op.V_NOP, VOP3Op.V_PIPEFLUSH) else f"{name}_e64 {dst}, {s0}{_opsel_str(inst.opsel, 1, need_opsel, is16_d)}{cl}{om}"
   # Native VOP3
   n = inst.num_srcs()
-  os = _opsel_str(inst.opsel, n, need_opsel, is16_d)
+  # Special case: permlane uses op_sel:[src1, src2] (2 elements) for lane selection
+  if 'permlane' in name and inst.opsel:
+    perm_os = f" op_sel:[{(inst.opsel >> 0) & 1},{(inst.opsel >> 1) & 1}]"
+    return f"{name} {dst}, {s0}, {s1}, {s2}{perm_os}{cl}{om}"
+  os = _opsel_str(inst.opsel, n, need_opsel, is16_d, supports_explicit_opsel)
   return f"{name} {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if n == 3 else f"{name} {dst}, {s0}, {s1}{os}{cl}{om}"
 
 def _disasm_vop3sd(inst: VOP3SD) -> str:
   name = inst.op_name.lower()
-  def src(v, neg, n): s = _fmt_src(v, n) if n > 1 else inst.lit(v); return f"-{s}" if neg else s
+  def src(v, neg, n): s = inst.lit(v) if v == 255 else (_fmt_src(v, n) if n > 1 else inst.lit(v)); return f"neg({s})" if neg and v == 255 else (f"-{s}" if neg else s)
   s0, s1, s2 = src(inst.src0, inst.neg & 1, inst.src_regs(0)), src(inst.src1, inst.neg & 2, inst.src_regs(1)), src(inst.src2, inst.neg & 4, inst.src_regs(2))
   dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}"
   srcs = f"{s0}, {s1}, {s2}" if inst.num_srcs() == 3 else f"{s0}, {s1}"
@@ -328,7 +380,7 @@ def _disasm_vop3a(inst) -> str:
 def _disasm_vop3b(inst) -> str:
   """CDNA VOP3B disassembler (VOP3 with sdst)."""
   name = inst.op_name.lower()
-  def src(v, neg, n): s = _fmt_src(v, n) if n > 1 else inst.lit(v); return f"-{s}" if neg else s
+  def src(v, neg, n): s = inst.lit(v) if v == 255 else (_fmt_src(v, n) if n > 1 else inst.lit(v)); return f"neg({s})" if neg and v == 255 else (f"-{s}" if neg else s)
   s0, s1, s2 = src(inst.src0, inst.neg & 1, inst.src_regs(0)), src(inst.src1, inst.neg & 2, inst.src_regs(1)), src(inst.src2, inst.neg & 4, inst.src_regs(2))
   dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}"
   srcs = f"{s0}, {s1}, {s2}" if inst.num_srcs() == 3 else f"{s0}, {s1}"
@@ -338,7 +390,11 @@ def _disasm_vop3b(inst) -> str:
 def _disasm_vopd(inst: VOPD) -> str:
   lit = inst._literal or inst.literal
   vdst_y, nx, ny = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1), VOPDOp(inst.opx).name.lower(), VOPDOp(inst.opy).name.lower()
-  def half(n, vd, s0, vs1): return f"{n} v{vd}, {inst.lit(s0)}{f', 0x{lit:x}' if lit and _has(n, 'fmaak', 'fmamk') else ''}" if 'mov' in n else f"{n} v{vd}, {inst.lit(s0)}, v{vs1}{f', 0x{lit:x}' if lit and _has(n, 'fmaak', 'fmamk') else ''}"
+  def half(n, vd, s0, vs1):
+    if 'mov' in n: return f"{n} v{vd}, {inst.lit(s0)}"
+    if 'fmamk' in n: return f"{n} v{vd}, {inst.lit(s0)}, 0x{lit:x}, v{vs1}"  # fmamk: dst, src0, K, vsrc1
+    if 'fmaak' in n: return f"{n} v{vd}, {inst.lit(s0)}, v{vs1}, 0x{lit:x}"  # fmaak: dst, src0, vsrc1, K
+    return f"{n} v{vd}, {inst.lit(s0)}, v{vs1}"
   return f"{half(nx, inst.vdstx, inst.srcx0, inst.vsrcx1)} :: {half(ny, vdst_y, inst.srcy0, inst.vsrcy1)}"
 
 def _disasm_vop3p(inst: VOP3P) -> str:
@@ -346,14 +402,17 @@ def _disasm_vop3p(inst: VOP3P) -> str:
   is_cdna = type(inst).__module__.endswith('.cdna.ins')
   is_mfma = 'mfma' in name or 'smfmac' in name
   is_wmma, n, is_fma_mix = 'wmma' in name, inst.num_srcs(), 'fma_mix' in name
+  def get_src(v, sc):
+    if v == 255: return inst.lit(v)  # literal
+    return _fmt_src(v, sc)
   if is_mfma:
     # MFMA instructions have larger register counts
     sc = 2 if 'iu4' in name else 4 if 'iu8' in name or 'i4' in name else 8 if 'f16' in name or 'bf16' in name else 4
-    src0, src1, src2, dst = _fmt_src(inst.src0, sc), _fmt_src(inst.src1, sc), _fmt_src(inst.src2, 16), _vreg(inst.vdst, 16)
+    src0, src1, src2, dst = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, 16), _vreg(inst.vdst, 16)
   elif is_wmma:
     sc = 2 if 'iu4' in name else 4 if 'iu8' in name else 8
-    src0, src1, src2, dst = _fmt_src(inst.src0, sc), _fmt_src(inst.src1, sc), _fmt_src(inst.src2, 8), _vreg(inst.vdst, 8)
-  else: src0, src1, src2, dst = _fmt_src(inst.src0, 1), _fmt_src(inst.src1, 1), _fmt_src(inst.src2, 1), f"v{inst.vdst}"
+    src0, src1, src2, dst = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, 8), _vreg(inst.vdst, 8)
+  else: src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), f"v{inst.vdst}"
   opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
   if is_fma_mix:
     def m(s, neg, abs_): return f"-{f'|{s}|' if abs_ else s}" if neg else (f"|{s}|" if abs_ else s)
@@ -449,9 +508,10 @@ def _disasm_sopc(inst: SOPC) -> str:
 def _disasm_sopk(inst: SOPK) -> str:
   op, name = inst.op, inst.op_name.lower()
   if op == SOPKOp.S_VERSION: return f"{name} 0x{inst.simm16:x}"
-  if op in (SOPKOp.S_SETREG_B32, SOPKOp.S_GETREG_B32):
+  if op in (SOPKOp.S_SETREG_B32, SOPKOp.S_GETREG_B32, SOPKOp.S_SETREG_IMM32_B32):
     hid, hoff, hsz = inst.simm16 & 0x3f, (inst.simm16 >> 6) & 0x1f, ((inst.simm16 >> 11) & 0x1f) + 1
     hs = f"0x{inst.simm16:x}" if hid in (16, 17) else f"hwreg({HWREG.get(hid, str(hid))}, {hoff}, {hsz})"
+    if op == SOPKOp.S_SETREG_IMM32_B32: return f"{name} {hs}, 0x{inst._literal:x}"
     return f"{name} {hs}, {_fmt_sdst(inst.sdst, 1)}" if op == SOPKOp.S_SETREG_B32 else f"{name} {_fmt_sdst(inst.sdst, 1)}, {hs}"
   return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, 0x{inst.simm16:x}"
 
