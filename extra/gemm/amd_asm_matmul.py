@@ -164,10 +164,11 @@ V_LDS_A_DATA = list(range(167, 175))          # 8 data registers
 V_LDS_B_ADDR = list(range(141, 149))          # 8 address registers
 V_LDS_B_DATA = list(range(175, 183))          # 8 data registers
 
-# Derived: interleaved A/B store pairs for double-buffering
-LDS_STORE_PAIRS = [(a_addr, a_data, b_addr, b_data)
-                   for a_addr, a_data, b_addr, b_data
-                   in zip(V_LDS_A_ADDR, V_LDS_A_DATA, V_LDS_B_ADDR, V_LDS_B_DATA)]
+# Derived: interleaved A/B store pairs for double-buffering (order matters for performance!)
+# Interleaved: A0,B0,A1,B1,... maximizes memory-level parallelism
+LDS_STORE_PAIRS = [(addr, data) for a_addr, a_data, b_addr, b_data
+                   in zip(V_LDS_A_ADDR, V_LDS_A_DATA, V_LDS_B_ADDR, V_LDS_B_DATA)
+                   for addr, data in [(a_addr, a_data), (b_addr, b_data)]]
 
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
 PREFETCH_LOADS = [(171+2*i, 172+2*i, V_GLOBAL_B_ADDR if i < 2 else V_GLOBAL_A_ADDR, 32+4*i, 34+4*i) for i in range(6)]
@@ -175,8 +176,7 @@ PREFETCH_LOADS = [(171+2*i, 172+2*i, V_GLOBAL_B_ADDR if i < 2 else V_GLOBAL_A_AD
 # Initial tile prefetch: (vdst, saddr_lo)
 INIT_PREFETCH = [(167+i, 24+2*i) for i in range(4)]
 
-# Initial tile loads: (vdst, addr_lo) - loads initial A/B tiles from global memory
-# Order is optimized to overlap address computation with memory latency
+# Initial tile loads: (vdst, addr_lo) pairs
 INIT_TILE_LOADS = [(23,5),(24,9),(25,7),(26,2),(27,11),(28,13),(29,6),(30,8),(31,10),(12,12),(13,14),(3,2),(4,4),(5,8),(6,6),(7,10)]
 
 # Initial LDS stores: (addr, d0, d1, off0, off1) for stride64 or (addr, data) for single
@@ -194,49 +194,36 @@ ROW_SIGN_REGS = [149, 150, 151, 152, 153, 154, 156, 157]  # sign-extension (155 
 
 class Kernel:
   def __init__(self, arch='gfx1100'):
-    self.instructions = []
-    self.labels = {}
-    self.branch_targets = {}
-    self.arch = arch
+    self.instructions, self.labels, self.branch_targets, self.arch = [], {}, {}, arch
 
-  def emit(self, inst):
-    self.instructions.append(inst)
-    return inst
+  def emit(self, inst): self.instructions.append(inst); return inst
+  def label(self, name): self.labels[name] = len(self.instructions)
+  def branch_to(self, label): self.branch_targets[len(self.instructions) - 1] = label
 
-  def label(self, name):
-    self.labels[name] = len(self.instructions)
+  def add64(self, dst_lo, dst_hi, src_lo, src_hi, off):
+    """s[dst_lo:dst_hi] = s[src_lo:src_hi] + off"""
+    if off: self.emit(s_add_u32(s[dst_lo], s[src_lo], off)); self.emit(s_addc_u32(s[dst_hi], s[src_hi], 0))
+    elif dst_lo != src_lo: self.emit(s_mov_b64(s[dst_lo:dst_hi], s[src_lo:src_hi]))
 
-  def branch_to(self, label):
-    self.branch_targets[len(self.instructions) - 1] = label
-
-  def add64_imm(self, dst_lo, dst_hi, src_lo, src_hi, offset):
-    """64-bit add: s[dst_lo:dst_hi] = s[src_lo:src_hi] + offset"""
-    if offset == 0 and (dst_lo != src_lo or dst_hi != src_hi):
-      self.emit(s_mov_b64(s[dst_lo:dst_hi], s[src_lo:src_hi]))
-    elif offset != 0:
-      self.emit(s_add_u32(s[dst_lo], s[src_lo], offset))
-      self.emit(s_addc_u32(s[dst_hi], s[src_hi], 0))
-
-  def global_load(self, vdst, addr_lo, saddr_lo=None):
-    """Global load b32. If saddr_lo is None, uses null saddr (RawImm 124)."""
-    self.emit(global_load_b32(vdst=v[vdst], addr=v[addr_lo:addr_lo+1],
-                              saddr=s[saddr_lo:saddr_lo+2] if saddr_lo is not None else RawImm(124)))
+  def global_load(self, vdst, addr, saddr=None):
+    """Global load b32"""
+    self.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1],
+              saddr=s[saddr:saddr+2] if saddr else RawImm(124)))
 
   def to_asm(self):
     import re
-    lines = ['\t.text', f'\t.amdgcn_target "amdgcn-amd-amdhsa--{self.arch}"',
-             '\t.protected\tkernel', '\t.globl\tkernel', '\t.p2align\t8',
-             '\t.type\tkernel,@function', 'kernel:']
+    # Instruction stream with labels
     label_at = {pos: name for name, pos in self.labels.items()}
+    body = []
     for i, inst in enumerate(self.instructions):
-      if i in label_at:
-        lines.append(f'.{label_at[i]}:')
+      if i in label_at: body.append(f'.{label_at[i]}:')
       asm = inst.disasm()
       if i in self.branch_targets:
         asm = re.sub(r'(s_cbranch_\w+|s_branch)\s+\S+', rf'\1 .{self.branch_targets[i]}', asm)
-      lines.append('\t' + asm)
-    # AMDHSA kernel descriptor
-    hsa_attrs = [
+      body.append('\t' + asm)
+
+    # HSA kernel descriptor attributes (zeros included for compatibility)
+    hsa = [
       ('group_segment_fixed_size', LDS_SIZE), ('private_segment_fixed_size', 0), ('kernarg_size', 36),
       ('user_sgpr_count', 14), ('user_sgpr_dispatch_ptr', 0), ('user_sgpr_queue_ptr', 0),
       ('user_sgpr_kernarg_segment_ptr', 1), ('user_sgpr_dispatch_id', 0), ('user_sgpr_private_segment_size', 0),
@@ -247,18 +234,21 @@ class Kernel:
       ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3), ('dx10_clamp', 1), ('ieee_mode', 1),
       ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
       ('shared_vgpr_count', 0)]
-    lines.extend(['\t.section\t.rodata,"a",@progbits', '\t.p2align\t6, 0x0', '\t.amdhsa_kernel kernel'])
-    lines.extend([f'\t\t.amdhsa_{k} {v}' for k, v in hsa_attrs])
-    lines.extend(['\t.end_amdhsa_kernel', '\t.text', '.Lfunc_end0:', '\t.size\tkernel, .Lfunc_end0-kernel'])
-    lines.extend(['\t.amdgpu_metadata', '---', 'amdhsa.kernels:', '  - .args:'])
-    for i in range(3):
-      lines.extend([f'      - .address_space: global', f'        .offset: {i*8}', '        .size: 8', '        .value_kind: global_buffer'])
-    lines.extend([f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8',
-                  '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
-                  '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
-                  '    .vgpr_count: 216', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
-                  'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
-    return '\n'.join(lines)
+
+    return '\n'.join([
+      '\t.text', f'\t.amdgcn_target "amdgcn-amd-amdhsa--{self.arch}"',
+      '\t.protected\tkernel', '\t.globl\tkernel', '\t.p2align\t8', '\t.type\tkernel,@function', 'kernel:',
+      *body,
+      '\t.section\t.rodata,"a",@progbits', '\t.p2align\t6, 0x0', '\t.amdhsa_kernel kernel',
+      *[f'\t\t.amdhsa_{k} {v}' for k, v in hsa],
+      '\t.end_amdhsa_kernel', '\t.text', '.Lfunc_end0:', '\t.size\tkernel, .Lfunc_end0-kernel',
+      '\t.amdgpu_metadata', '---', 'amdhsa.kernels:', '  - .args:',
+      *[f'      - .address_space: global\n        .offset: {i*8}\n        .size: 8\n        .value_kind: global_buffer' for i in range(3)],
+      f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8',
+      '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
+      '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
+      '    .vgpr_count: 216', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
+      'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
 
 
 # =============================================================================
@@ -276,7 +266,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_waitcnt(simm16=WAIT_LGKM))
 
   # Compute 8 B matrix tile base pointers (s[24:39]) - each tile is 16KB apart (0x4000)
-  for i in range(8): k.add64_imm(24 + i*2, 25 + i*2, 22, 23, i * 0x4000)
+  for i in range(8): k.add64(24 + i*2, 25 + i*2, 22, 23, i * 0x4000)
 
   # B prefetch address: (workgroup_x * 128 + lane_id) * 4
   k.emit(s_lshl_b32(s[19], s[S_WORKGROUP_X], 7))
@@ -284,7 +274,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_B_ADDR], 2, v[V_GLOBAL_B_ADDR]))
 
   # Compute 8 A matrix tile base pointers (s[40:55]) - each tile is 256KB apart (0x40000)
-  for i in range(8): k.add64_imm(40 + i*2, 41 + i*2, 20, 21, i * 0x40000)
+  for i in range(8): k.add64(40 + i*2, 41 + i*2, 20, 21, i * 0x40000)
 
   # A prefetch address: workgroup_y * 512KB + (lane_id / 8) * 4KB + (lane_id % 8)
   k.emit(s_lshl_b32(s[19], s[S_WORKGROUP_Y], 19))  # workgroup_y * 512KB
@@ -509,10 +499,9 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_barrier())
   k.emit(s_cbranch_vccnz(simm16=0)); k.branch_to('LOOP_INC')
 
-  # Store prefetched data to LDS (interleaved A and B tiles)
-  for a_addr, a_data, b_addr, b_data in LDS_STORE_PAIRS:
-    k.emit(ds_store_b32(addr=v[a_addr], data0=v[a_data], offset0=0, offset1=0))
-    k.emit(ds_store_b32(addr=v[b_addr], data0=v[b_data], offset0=0, offset1=0))
+  # Store prefetched data to LDS
+  for addr, data in LDS_STORE_PAIRS:
+    k.emit(ds_store_b32(addr=v[addr], data0=v[data], offset0=0, offset1=0))
 
   k.emit(s_waitcnt(simm16=WAIT_LGKM))
   k.emit(s_barrier())
