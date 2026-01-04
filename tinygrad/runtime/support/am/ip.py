@@ -158,11 +158,11 @@ class AM_GMC(AM_IP):
     if self.adev.ip_ver[am.GC_HWIP] < (10,0,0): return (pte & am.AMDGPU_PDE_PTE) if pte_lv != am.AMDGPU_VM_PDB0 else not (pte & am.AMDGPU_PTE_TF)
     return pte & (am.AMDGPU_PDE_PTE_GFX12 if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else am.AMDGPU_PDE_PTE)
 
-  def on_interrupt(self):
-    for ip in ["MM", "GC"]:
-      va = (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
-      if self.adev.reg(self.pf_status_reg(ip)).read():
-        raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg(ip)).read_bitfields()} {va<<12:#x}")
+  def check_fault(self) -> str|None:
+    va = (self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_LO32').read()
+    if self.adev.reg(self.pf_status_reg("GC")).read():
+      return f"GCVM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg('GC')).read_bitfields()} {va<<12:#x}"
+    return None
 
 class AM_SMU(AM_IP):
   def init_sw(self):

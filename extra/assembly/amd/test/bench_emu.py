@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Benchmark comparing Python vs Rust RDNA3 emulators on synthetic and real tinygrad kernels."""
-import ctypes, time, os, struct, cProfile, pstats, io
+"""Benchmark comparing Python vs Rust RDNA3 emulators on real tinygrad kernels."""
+import ctypes, time, os
 from pathlib import Path
-from typing import Callable
 
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
 
-from extra.assembly.amd.emu import run_asm as python_run_asm, set_valid_mem_ranges, decode_program, step_wave, WaveState, WAVE_SIZE
+from extra.assembly.amd.emu import run_asm as python_run_asm, set_valid_mem_ranges, decode_program
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
 if not REMU_PATH.exists():
@@ -42,7 +41,7 @@ def setup_buffers(buf_sizes: list[int], init_data: dict[int, bytes] | None = Non
   ranges.add((args_ptr, ctypes.sizeof(args)))
   return buffers, args, args_ptr, ranges
 
-def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size, args_ptr, iterations: int = 5):
+def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
   """Benchmark an emulator and return average time."""
   gx, gy, gz = global_size
   lx, ly, lz = local_size
@@ -50,13 +49,13 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
   lib_ptr = ctypes.addressof(kernel_buf)
 
   # Warmup
-  run_fn(lib_ptr, len(kernel), gx, gy, gz, lx, ly, lz, args_ptr)
+  run_fn(lib_ptr, len(kernel), gx, gy, gz, lx, ly, lz, args_ptr, rsrc2)
 
   # Timed runs
   times = []
   for _ in range(iterations):
     start = time.perf_counter()
-    result = run_fn(lib_ptr, len(kernel), gx, gy, gz, lx, ly, lz, args_ptr)
+    result = run_fn(lib_ptr, len(kernel), gx, gy, gz, lx, ly, lz, args_ptr, rsrc2)
     end = time.perf_counter()
     if result != 0:
       print(f"  {name} returned error: {result}")
@@ -65,27 +64,12 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
 
   return sum(times) / len(times)
 
-def create_synthetic_kernel(n_ops: int) -> bytes:
-  """Create a synthetic kernel with n_ops vector operations."""
-  instructions = []
-  # VOP2 instructions: v_add_f32, v_mul_f32, v_max_f32, v_min_f32
-  ops = [
-    (0b0000011 << 25) | (1 << 17) | (0 << 9) | 256,  # v_add_f32 v0, v0, v1
-    (0b0001000 << 25) | (1 << 17) | (0 << 9) | 256,  # v_mul_f32 v0, v0, v1
-    (0b0010000 << 25) | (1 << 17) | (0 << 9) | 256,  # v_max_f32 v0, v0, v1
-    (0b0001111 << 25) | (1 << 17) | (0 << 9) | 256,  # v_min_f32 v0, v0, v1
-  ]
-  for i in range(n_ops):
-    instructions.append(ops[i % len(ops)])
-  # S_ENDPGM
-  instructions.append((0b101111111 << 23) | (48 << 16) | 0)
-  return b''.join(struct.pack('<I', inst) for inst in instructions)
-
-def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], dict[int, bytes]] | None:
-  """Get a real tinygrad kernel by operation name. Returns (code, global_size, local_size, buf_sizes, buf_data)."""
+def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], dict[int, bytes], int] | None:
+  """Get a real tinygrad kernel by operation name. Returns (code, global_size, local_size, buf_sizes, buf_data, rsrc2)."""
   try:
     from tinygrad import Tensor
     from tinygrad.runtime.support.elf import elf_loader
+    from tinygrad.runtime.autogen import hsa
     import numpy as np
     np.random.seed(42)
 
@@ -112,7 +96,9 @@ def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], d
       lowered = ei.lower()
       if ei.ast.op.name == 'SINK' and lowered.prg and lowered.prg.p.lib:
         lib = bytes(lowered.prg.p.lib)
+        image = memoryview(bytearray(lib))
         _, sections, _ = elf_loader(lib)
+        rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
         for sec in sections:
           if sec.name == '.text':
             buf_sizes = [b.nbytes for b in lowered.bufs]
@@ -122,67 +108,22 @@ def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], d
               if hasattr(buf, 'base') and buf.base is not None and hasattr(buf.base, '_buf'):
                 try: buf_data[i] = bytes(buf.base._buf)
                 except: pass
-            return (bytes(sec.content), tuple(lowered.prg.p.global_size), tuple(lowered.prg.p.local_size), buf_sizes, buf_data)
+            # Extract rsrc2 from ELF (same as ops_amd.py)
+            group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
+            lds_size = ((group_segment_size + 511) // 512) & 0x1FF
+            code = hsa.amd_kernel_code_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+256]) + b'\x00'*256)
+            rsrc2 = code.compute_pgm_rsrc2 | (lds_size << 15)
+            return (bytes(sec.content), tuple(lowered.prg.p.global_size), tuple(lowered.prg.p.local_size), buf_sizes, buf_data, rsrc2)
     return None
   except Exception as e:
     print(f"  Error getting kernel: {e}")
     return None
-
-def profile_python_emu(kernel: bytes, global_size, local_size, args_ptr, n_runs: int = 1):
-  """Profile the Python emulator to find bottlenecks."""
-  gx, gy, gz = global_size
-  lx, ly, lz = local_size
-  kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
-  lib_ptr = ctypes.addressof(kernel_buf)
-
-  pr = cProfile.Profile()
-  pr.enable()
-  for _ in range(n_runs):
-    python_run_asm(lib_ptr, len(kernel), gx, gy, gz, lx, ly, lz, args_ptr)
-  pr.disable()
-
-  s = io.StringIO()
-  ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
-  ps.print_stats(20)
-  return s.getvalue()
-
-def measure_step_rate(kernel: bytes, n_steps: int = 10000) -> float:
-  """Measure raw step_wave() performance (steps per second)."""
-  program = decode_program(kernel)
-  if not program: return 0.0
-
-  st = WaveState()
-  st.exec_mask = 0xffffffff
-  lds = bytearray(65536)
-  n_lanes = 32
-
-  # Reset PC for each measurement
-  start = time.perf_counter()
-  for _ in range(n_steps):
-    st.pc = 0
-    while st.pc in program:
-      result = step_wave(program, st, lds, n_lanes)
-      if result == -1: break
-  elapsed = time.perf_counter() - start
-  return n_steps / elapsed if elapsed > 0 else 0
-
-# Test configurations
-SYNTHETIC_TESTS = [
-  ("synthetic_10ops", 10, (1, 1, 1), (32, 1, 1)),
-  ("synthetic_100ops", 100, (1, 1, 1), (32, 1, 1)),
-  ("synthetic_500ops", 500, (1, 1, 1), (32, 1, 1)),
-  ("synthetic_100ops_4wg", 100, (4, 1, 1), (32, 1, 1)),
-  ("synthetic_100ops_16wg", 100, (16, 1, 1), (32, 1, 1)),
-]
 
 TINYGRAD_TESTS = ["add", "mul", "reduce_sum", "softmax", "exp", "gelu", "matmul_small"]
 
 def main():
   import argparse
   parser = argparse.ArgumentParser(description="Benchmark RDNA3 emulators")
-  parser.add_argument("--profile", action="store_true", help="Profile Python emulator")
-  parser.add_argument("--synthetic-only", action="store_true", help="Only run synthetic tests")
-  parser.add_argument("--tinygrad-only", action="store_true", help="Only run tinygrad tests")
   parser.add_argument("--iterations", type=int, default=3, help="Number of iterations per benchmark")
   args = parser.parse_args()
 
@@ -197,98 +138,55 @@ def main():
 
   results = []
 
-  # Synthetic workloads
-  if not args.tinygrad_only:
-    print("\n[SYNTHETIC WORKLOADS]")
-    print("-" * 90)
+  print("\n[TINYGRAD KERNELS]")
+  print("-" * 90)
 
-    for name, n_ops, global_size, local_size in SYNTHETIC_TESTS:
-      kernel = create_synthetic_kernel(n_ops)
-      n_insts = count_instructions(kernel)
-      n_workgroups = global_size[0] * global_size[1] * global_size[2]
-      n_threads = local_size[0] * local_size[1] * local_size[2]
-      total_work = n_insts * n_workgroups * n_threads
+  for op_name in TINYGRAD_TESTS:
+    print(f"\n{op_name}:", end=" ", flush=True)
+    kernel_info = get_tinygrad_kernel(op_name)
+    if kernel_info is None:
+      print("failed to compile")
+      continue
 
-      print(f"\n{name}: {n_insts} insts × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
+    kernel, global_size, local_size, buf_sizes, buf_data, rsrc2 = kernel_info
+    n_insts = count_instructions(kernel)
+    n_workgroups = global_size[0] * global_size[1] * global_size[2]
+    n_threads = local_size[0] * local_size[1] * local_size[2]
+    total_work = n_insts * n_workgroups * n_threads
 
-      buf_sizes = [4096]
-      buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes)
-      set_valid_mem_ranges(ranges)
+    print(f"{n_insts} insts × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
 
-      # Benchmark
-      py_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, args.iterations)
-      rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, args.iterations) if rust_remu else None
+    buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
+    set_valid_mem_ranges(ranges)
 
-      if py_time:
-        py_rate = total_work / py_time / 1e6
-        print(f"  Python: {py_time*1000:8.3f} ms  ({py_rate:7.2f} M ops/s)")
-      if rust_time:
-        rust_rate = total_work / rust_time / 1e6
-        speedup = py_time / rust_time if py_time else 0
-        print(f"  Rust:   {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
+    py_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
+    rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations) if rust_remu else None
 
-      results.append(("synthetic", name, n_insts, n_workgroups, py_time, rust_time))
+    if py_time:
+      py_rate = total_work / py_time / 1e6
+      print(f"  Python: {py_time*1000:8.3f} ms  ({py_rate:7.2f} M ops/s)")
+    if rust_time:
+      rust_rate = total_work / rust_time / 1e6
+      speedup = py_time / rust_time if py_time else 0
+      print(f"  Rust:   {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
 
-  # Tinygrad kernels
-  if not args.synthetic_only:
-    print("\n[TINYGRAD KERNELS]")
-    print("-" * 90)
-
-    for op_name in TINYGRAD_TESTS:
-      print(f"\n{op_name}:", end=" ", flush=True)
-      kernel_info = get_tinygrad_kernel(op_name)
-      if kernel_info is None:
-        print("failed to compile")
-        continue
-
-      kernel, global_size, local_size, buf_sizes, buf_data = kernel_info
-      n_insts = count_instructions(kernel)
-      n_workgroups = global_size[0] * global_size[1] * global_size[2]
-      n_threads = local_size[0] * local_size[1] * local_size[2]
-      total_work = n_insts * n_workgroups * n_threads
-
-      print(f"{n_insts} insts × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
-
-      buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
-      set_valid_mem_ranges(ranges)
-
-      py_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, args.iterations)
-      rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, args.iterations) if rust_remu else None
-
-      if py_time:
-        py_rate = total_work / py_time / 1e6
-        print(f"  Python: {py_time*1000:8.3f} ms  ({py_rate:7.2f} M ops/s)")
-      if rust_time:
-        rust_rate = total_work / rust_time / 1e6
-        speedup = py_time / rust_time if py_time else 0
-        print(f"  Rust:   {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
-
-      results.append(("tinygrad", op_name, n_insts, n_workgroups, py_time, rust_time))
-
-      # Optional profiling
-      if args.profile and py_time:
-        print("\n  [PROFILE - Top 10 functions]")
-        profile_output = profile_python_emu(kernel, global_size, local_size, args_ptr)
-        for line in profile_output.split('\n')[5:15]:
-          if line.strip(): print(f"    {line}")
+    results.append((op_name, n_insts, n_workgroups, py_time, rust_time))
 
   # Summary table
   print("\n" + "=" * 90)
   print("SUMMARY")
   print("=" * 90)
-  print(f"{'Type':<10} {'Name':<25} {'Insts':<8} {'WGs':<6} {'Python (ms)':<14} {'Rust (ms)':<14} {'Speedup':<10}")
+  print(f"{'Name':<25} {'Insts':<8} {'WGs':<6} {'Python (ms)':<14} {'Rust (ms)':<14} {'Speedup':<10}")
   print("-" * 90)
 
-  for test_type, name, n_insts, n_wgs, py_time, rust_time in results:
+  for name, n_insts, n_wgs, py_time, rust_time in results:
     py_ms = f"{py_time*1000:.3f}" if py_time else "error"
     if rust_time:
       rust_ms = f"{rust_time*1000:.3f}"
       speedup = f"{py_time/rust_time:.1f}x" if py_time else "N/A"
     else:
       rust_ms, speedup = "N/A", "N/A"
-    print(f"{test_type:<10} {name:<25} {n_insts:<8} {n_wgs:<6} {py_ms:<14} {rust_ms:<14} {speedup:<10}")
-
-
+    print(f"{name:<25} {n_insts:<8} {n_wgs:<6} {py_ms:<14} {rust_ms:<14} {speedup:<10}")
 
 if __name__ == "__main__":
   main()
