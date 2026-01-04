@@ -30,6 +30,9 @@ WAIT_LGKM = 64519    # wait for LDS/GDS/KMEM (lgkm_cnt=0)
 WAIT_ALL = 0         # wait for everything
 WAIT_VMEM = 1015     # wait for VMEM only (vm_cnt=0, lgkm_cnt=63)
 
+# Float constants as hex
+F32_ONE = 0x3F800000  # 1.0f
+
 # LDS tile register destinations
 V_A_TILE_REGS = [186, 190, 194, 198]  # A tile: 4 pairs of f32
 V_B_TILE_REGS = [184, 188, 192, 196, 200, 204, 208, 212]  # B tile: 8 pairs of f32
@@ -154,6 +157,11 @@ def derive_permute_swaps(acc_grid, reserved=ACC_RESERVED):
 # Derived: swap sequence to arrange accumulators for output
 PERMUTE_SWAPS = derive_permute_swaps(ACC_GRID)
 
+# Derived: output register order after PERMUTE_SWAPS (descending, 124 at front)
+OUT_REGS = [r for r in range(133, 1, -1) if r not in ACC_RESERVED]
+OUT_REGS.remove(124)
+OUT_REGS = [124] + OUT_REGS
+
 # =============================================================================
 # LDS tile staging registers
 # =============================================================================
@@ -210,6 +218,15 @@ class Kernel:
     self.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1],
               saddr=s[saddr:saddr+2] if saddr else RawImm(124)))
 
+  def waitcnt(self, lgkm=None, vm=None):
+    """Wait for memory operations. lgkm=0 waits for LDS, vm=0 waits for VMEM."""
+    if lgkm == 0 and vm is None: self.emit(s_waitcnt(simm16=WAIT_LGKM))
+    elif vm == 0 and lgkm is None: self.emit(s_waitcnt(simm16=WAIT_VMEM))
+    elif lgkm == 0 and vm == 0: self.emit(s_waitcnt(simm16=WAIT_ALL))
+    else: raise ValueError(f"unsupported waitcnt: lgkm={lgkm}, vm={vm}")
+
+  def barrier(self): self.emit(s_barrier())
+
   def to_asm(self):
     import re
     # Instruction stream with labels
@@ -263,7 +280,7 @@ def build_kernel(arch='gfx1100'):
   # ===========================================================================
   # Load A and B matrix pointers from kernarg (s[20:21] = A, s[22:23] = B)
   k.emit(s_load_b128(sdata=s[20:23], sbase=s[0:1], offset=0x0, soffset=RawImm(124)))
-  k.emit(s_waitcnt(simm16=WAIT_LGKM))
+  k.waitcnt(lgkm=0)
 
   # Compute 8 B matrix tile base pointers (s[24:39]) - each tile is 16KB apart (0x4000)
   for i in range(8): k.add64(24 + i*2, 25 + i*2, 22, 23, i * 0x4000)
@@ -287,7 +304,7 @@ def build_kernel(arch='gfx1100'):
 
   # Initialize constants
   k.emit(s_mov_b32(s[S_DIM_N], MATRIX_DIM))
-  k.emit(s_mov_b32(s[S_ALPHA], 0x3F800000))  # 1.0f
+  k.emit(s_mov_b32(s[S_ALPHA], F32_ONE))
   k.emit(s_mov_b32(s[6], 0))
 
   # Load C matrix pointer
@@ -310,7 +327,7 @@ def build_kernel(arch='gfx1100'):
   # Precompute lane-based offsets for epilogue
   k.emit(v_lshlrev_b32_e32(v[V_LANE_MOD8_X4], 2, v[V_LANE_ID_MOD8]))
   k.emit(v_lshlrev_b64(v[5:6], 2, v[1:2]))
-  k.emit(s_waitcnt(simm16=WAIT_LGKM))
+  k.waitcnt(lgkm=0)
 
   # ===========================================================================
   # Tile address computation for initial A/B matrix loads
@@ -409,14 +426,14 @@ def build_kernel(arch='gfx1100'):
   # Store initial tile data to LDS
   k.emit(s_mov_b32(s[S_LOOP_BOUND], 0))
   k.emit(s_cmp_gt_i32(s[S_DIM_N], 0))
-  k.emit(s_waitcnt(simm16=WAIT_ALL))
+  k.waitcnt(lgkm=0, vm=0)
   for st in INIT_LDS_STORES:
     if len(st) == 5:  # A-tile: stride64 store (2 values)
       k.emit(ds_store_2addr_stride64_b32(addr=v[st[0]], data0=v[st[1]], data1=v[st[2]], offset0=st[3], offset1=st[4]))
     else:  # B-tile: single store
       k.emit(ds_store_b32(addr=v[st[0]], data0=v[st[1]], offset0=0, offset1=0))
-  k.emit(s_waitcnt(simm16=WAIT_LGKM))
-  k.emit(s_barrier())
+  k.waitcnt(lgkm=0)
+  k.barrier()
 
   # ===========================================================================
   # INIT: Compute LDS base addresses, then zero accumulators
@@ -482,7 +499,7 @@ def build_kernel(arch='gfx1100'):
       k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_PTR], offset0=(i & 1) * 8 + (i & 2) * 64, offset1=i >> 2))
     k.emit(v_add_nc_u32_e32(v[V_LDS_A_PTR], LDS_A_STRIDE, v[V_LDS_A_PTR]))
     k.emit(v_add_nc_u32_e32(v[V_LDS_B_PTR], LDS_B_STRIDE, v[V_LDS_B_PTR]))
-    k.emit(s_waitcnt(simm16=WAIT_LGKM))
+    k.waitcnt(lgkm=0)
     # 64 dual FMACs
     for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
       k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
@@ -495,16 +512,16 @@ def build_kernel(arch='gfx1100'):
       k.global_load(vdst2, addr, slo2)
 
   k.emit(s_and_not1_b32(VCC_LO, EXEC_LO, s[S_PREFETCH_FLAG]))
-  k.emit(s_waitcnt(simm16=WAIT_VMEM))
-  k.emit(s_barrier())
+  k.waitcnt(vm=0)
+  k.barrier()
   k.emit(s_cbranch_vccnz(simm16=0)); k.branch_to('LOOP_INC')
 
   # Store prefetched data to LDS
   for addr, data in LDS_STORE_PAIRS:
     k.emit(ds_store_b32(addr=v[addr], data0=v[data], offset0=0, offset1=0))
 
-  k.emit(s_waitcnt(simm16=WAIT_LGKM))
-  k.emit(s_barrier())
+  k.waitcnt(lgkm=0)
+  k.barrier()
   k.emit(s_branch(simm16=0)); k.branch_to('LOOP_INC')
 
   # ===========================================================================
@@ -534,43 +551,36 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_lshl_b32(s[S_PREFETCH_FLAG], s[S_DIM_N], 2))  # row stride in bytes
 
   # Store 128 output values as 32 groups of 4 (128-bit stores)
-  # After PERMUTE_SWAPS, accumulators are in descending order: 133,132,131,...,2 (skipping reserved)
-  # with 124 moved to front due to swap sequence
-  out_regs = [r for r in range(133, 1, -1) if r not in ACC_RESERVED]
-  out_regs.remove(124)
-  out_regs = [124] + out_regs
-  reserved = {V_LANE_ID_MOD8, V_OUTPUT_ROW, V_LANE_MOD8_X4, V_LANE_DIV8_X4, V_ADDR_HI_ZERO}
+  # Layout: 2 row halves (0-3, 16-19) x 4 col groups x 4 rows = 32 stores of 4 floats
+  epilogue_reserved = {V_LANE_ID_MOD8, V_OUTPUT_ROW, V_LANE_MOD8_X4, V_LANE_DIV8_X4, V_ADDR_HI_ZERO}
 
-  reg_idx = 0
-  for row_half in range(2):  # rows 0-3, then rows 16-19
-    for col_off in [0, 32, 64, 96]:  # 4 column groups of 32 bytes (8 floats) each
-      for row_in_group in range(4):  # 4 rows per group
-        row = row_half * 16 + row_in_group
-        srcs = out_regs[reg_idx:reg_idx + 4]
-        reg_idx += 4
+  for i, (row_half, col_off, row_in_group) in enumerate([(rh, co, ri)
+      for rh in range(2) for co in [0, 32, 64, 96] for ri in range(4)]):
+    row = row_half * 16 + row_in_group
+    srcs = OUT_REGS[i*4:(i+1)*4]
 
-        # Find temp register for scaled values (must not conflict with reserved regs)
-        tmp = max(srcs) + 5
-        while any(r in reserved for r in range(tmp, tmp + 4)): tmp += 1
+    # Find temp register for scaled values (must not conflict with reserved regs)
+    tmp = max(srcs) + 5
+    while any(r in epilogue_reserved for r in range(tmp, tmp + 4)): tmp += 1
 
-        # Scale by alpha and store
-        for j, src in enumerate(srcs):
-          k.emit(v_mul_f32_e32(v[tmp + j], s[S_ALPHA], v[src]))
+    # Scale by alpha
+    for j, src in enumerate(srcs):
+      k.emit(v_mul_f32_e32(v[tmp + j], s[S_ALPHA], v[src]))
 
-        # Compute output address
-        if row_in_group == 0:  # first row: compute base address for this column group
-          if col_off == 0: k.emit(v_mov_b32_e32(v[0], v[V_LANE_ID_MOD8]))
-          else: k.emit(v_add_nc_u32_e32(v[0], col_off, v[V_LANE_ID_MOD8]))
-          row_base = 144 + row if row < 4 else 148 + row - 16
-          k.emit(v_add_nc_u32_e32(v[0], v[row_base], v[0]))
-          k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
-          k.emit(v_add_co_u32(v[0], VCC_LO, s[S_OUT_PTR[0]], v[0]))
-          k.emit(v_add_co_ci_u32_e32(v[1], s[S_OUT_PTR[1]], v[V_ADDR_HI_ZERO]))
-        else:  # subsequent rows: just add stride
-          k.emit(v_add_co_u32(v[0], VCC_LO, s[S_PREFETCH_FLAG], v[0]))
-          k.emit(v_add_co_ci_u32_e32(v[1], v[1], v[V_ADDR_HI_ZERO]))
+    # Compute output address
+    if row_in_group == 0:  # first row: compute base address for this column group
+      if col_off == 0: k.emit(v_mov_b32_e32(v[0], v[V_LANE_ID_MOD8]))
+      else: k.emit(v_add_nc_u32_e32(v[0], col_off, v[V_LANE_ID_MOD8]))
+      row_base = 144 + row if row < 4 else 148 + row - 16
+      k.emit(v_add_nc_u32_e32(v[0], v[row_base], v[0]))
+      k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
+      k.emit(v_add_co_u32(v[0], VCC_LO, s[S_OUT_PTR[0]], v[0]))
+      k.emit(v_add_co_ci_u32_e32(v[1], s[S_OUT_PTR[1]], v[V_ADDR_HI_ZERO]))
+    else:  # subsequent rows: just add stride
+      k.emit(v_add_co_u32(v[0], VCC_LO, s[S_PREFETCH_FLAG], v[0]))
+      k.emit(v_add_co_ci_u32_e32(v[1], v[1], v[V_ADDR_HI_ZERO]))
 
-        k.emit(global_store_b128(addr=v[0:1], data=v[tmp:tmp+3], saddr=RawImm(124)))
+    k.emit(global_store_b128(addr=v[0:1], data=v[tmp:tmp+3], saddr=RawImm(124)))
 
   k.emit(s_nop(0))
   k.emit(s_sendmsg(simm16=3))
