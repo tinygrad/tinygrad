@@ -5,7 +5,7 @@ NOTE: CDNA (gfx908/gfx90a/gfx940/gfx942) instruction encodings differ from GFX9 
 in several ways, particularly for memory instructions. We use CDNA-specific test files (gfx90a/gfx942)
 for memory instructions to ensure correct bit-level compatibility.
 
-VOP1/VOP2/VOPC tests skip SDWA/DPP variants as they are different instruction formats.
+VOP1/VOP2/VOPC base format tests exclude SDWA/DPP variants which are tested separately.
 """
 import unittest, re, subprocess
 from tinygrad.helpers import fetch
@@ -43,6 +43,9 @@ CDNA_TEST_FILES = {
   'scratch_gfx942': ('flat-scratch-gfx942.s', FLAT, FLATOp, 'gfx942', 'scratch_', None),
   # CDNA-specific: MFMA/MAI instructions
   'mai': ('mai-gfx942.s', VOP3P, VOP3POp, 'gfx942', None, None),
+  # SDWA and DPP format tests for VOP1 (VOP2 has different bit layout, tested separately)
+  'sdwa_vop1': ('gfx9_asm_vop1.s', SDWA, VOP1Op, 'gfx940', None, None),
+  'dpp_vop1': ('gfx9_asm_vop1.s', DPP, VOP1Op, 'gfx940', None, None),
 }
 
 def parse_llvm_tests(text: str, mnemonic_filter: str = None, size_filter: int = None) -> list[tuple[str, bytes]]:
@@ -61,9 +64,9 @@ def parse_llvm_tests(text: str, mnemonic_filter: str = None, size_filter: int = 
     if not asm_text: continue
     # Apply mnemonic filter if specified
     if mnemonic_filter and not asm_text.startswith(mnemonic_filter): continue
-    # Look for encoding in lines BEFORE the instruction first (CHECK comments come before)
+    # Look for encoding in lines BEFORE or AFTER the instruction (format varies between files)
     hex_bytes = None
-    for j in range(max(0, i - 3), i):
+    for j in list(range(max(0, i - 3), i)) + list(range(i + 1, min(i + 3, len(lines)))):
       # Match various CHECK formats (VI9, GFX9, CHECK, etc.)
       if m := re.search(r'(?:VI9|GFX9|CHECK)[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
         hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
@@ -115,13 +118,19 @@ def _make_roundtrip_test(name):
     _, fmt_cls, op_enum, mcpu, _, _ = CDNA_TEST_FILES[name]
     passed, failed, skipped, enum_missing = 0, 0, 0, 0
     failures: list[str] = []
+    is_sdwa = fmt_cls.__name__ == 'SDWA'
+    is_dpp = fmt_cls.__name__ == 'DPP'
 
     for asm_text, data in self.tests.get(name, []):
       has_lit = False
-      if fmt_cls._size() == 4 and len(data) == 8:
-        # Skip SDWA (src0=0xf9) and DPP (src0=0xfa) - not properly supported in autogen
-        if data[0] == 0xf9 or data[0] == 0xfa:
-          skipped += 1; continue
+      # SDWA/DPP format tests: only accept matching 8-byte instructions
+      if is_sdwa:
+        if len(data) != 8 or data[0] != 0xf9: skipped += 1; continue
+      elif is_dpp:
+        if len(data) != 8 or data[0] != 0xfa: skipped += 1; continue
+      elif fmt_cls._size() == 4 and len(data) == 8:
+        # For base formats, skip SDWA/DPP (tested separately)
+        if data[0] == 0xf9 or data[0] == 0xfa: skipped += 1; continue
         # Check for literal (src0=0xff or ssrc1=0xff for SOP2/SOPC)
         has_lit = data[0] == 255 or (len(data) >= 2 and data[1] == 255 and fmt_cls.__name__ in ('SOP2', 'SOPC'))
         if fmt_cls.__name__ == 'SOPK':
@@ -134,8 +143,20 @@ def _make_roundtrip_test(name):
       if len(data) > expected_size: skipped += 1; continue
       try:
         decoded = fmt_cls.from_bytes(data)
-        op_val = decoded._values.get('op', 0)
-        op_val = op_val.val if hasattr(op_val, 'val') else op_val
+        # For SDWA/DPP, opcode location depends on VOP1 vs VOP2
+        if is_sdwa or is_dpp:
+          # VOP1 uses vop_op (bits 16:9), VOP2 uses vop2_op (bits 31:25)
+          # VOP1 encoding has bits[31:25]=0x3f (63), VOP2 has opcode there
+          vop2_op = decoded._values.get('vop2_op', 0)
+          vop2_op = vop2_op.val if hasattr(vop2_op, 'val') else vop2_op
+          if vop2_op == 0x3f:  # VOP1 encoding
+            op_val = decoded._values.get('vop_op', 0)
+            op_val = op_val.val if hasattr(op_val, 'val') else op_val
+          else:  # VOP2 encoding
+            op_val = vop2_op
+        else:
+          op_val = decoded._values.get('op', 0)
+          op_val = op_val.val if hasattr(op_val, 'val') else op_val
         try:
           op_enum(op_val)
         except ValueError:
@@ -161,13 +182,19 @@ def _make_disasm_test(name):
     _, fmt_cls, op_enum, mcpu, _, _ = CDNA_TEST_FILES[name]
     passed, failed, skipped, enum_missing = 0, 0, 0, 0
     failures: list[str] = []
+    is_sdwa = fmt_cls.__name__ == 'SDWA'
+    is_dpp = fmt_cls.__name__ == 'DPP'
 
     for asm_text, data in self.tests.get(name, []):
       has_lit = False
-      if fmt_cls._size() == 4 and len(data) == 8:
-        # Skip SDWA (src0=0xf9) and DPP (src0=0xfa) - not properly supported in autogen
-        if data[0] == 0xf9 or data[0] == 0xfa:
-          skipped += 1; continue
+      # SDWA/DPP format tests: only accept matching 8-byte instructions
+      if is_sdwa:
+        if len(data) != 8 or data[0] != 0xf9: skipped += 1; continue
+      elif is_dpp:
+        if len(data) != 8 or data[0] != 0xfa: skipped += 1; continue
+      elif fmt_cls._size() == 4 and len(data) == 8:
+        # For base formats, skip SDWA/DPP (tested separately)
+        if data[0] == 0xf9 or data[0] == 0xfa: skipped += 1; continue
         # Check for literal (src0=0xff or ssrc1=0xff for SOP2/SOPC)
         has_lit = data[0] == 255 or (len(data) >= 2 and data[1] == 255 and fmt_cls.__name__ in ('SOP2', 'SOPC'))
         if fmt_cls.__name__ == 'SOPK':
@@ -180,8 +207,20 @@ def _make_disasm_test(name):
       if len(data) > expected_size: skipped += 1; continue
       try:
         decoded = fmt_cls.from_bytes(data)
-        op_val = decoded._values.get('op', 0)
-        op_val = op_val.val if hasattr(op_val, 'val') else op_val
+        # For SDWA/DPP, opcode location depends on VOP1 vs VOP2
+        if is_sdwa or is_dpp:
+          # VOP1 uses vop_op (bits 16:9), VOP2 uses vop2_op (bits 31:25)
+          # VOP1 encoding has bits[31:25]=0x3f (63), VOP2 has opcode there
+          vop2_op = decoded._values.get('vop2_op', 0)
+          vop2_op = vop2_op.val if hasattr(vop2_op, 'val') else vop2_op
+          if vop2_op == 0x3f:  # VOP1 encoding
+            op_val = decoded._values.get('vop_op', 0)
+            op_val = op_val.val if hasattr(op_val, 'val') else op_val
+          else:  # VOP2 encoding
+            op_val = vop2_op
+        else:
+          op_val = decoded._values.get('op', 0)
+          op_val = op_val.val if hasattr(op_val, 'val') else op_val
         try:
           op_enum(op_val)
         except ValueError:

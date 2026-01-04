@@ -542,6 +542,10 @@ class Inst:
           elif val in self._VOP3SD_OPS: self.op = VOP3SDOp(val)
           else: self.op = VOP3Op(val)
         except ValueError: self.op = val
+      # Prefer BitField marker (class-specific enum) over _enum_map (generic RDNA3 enums)
+      elif 'op' in self._fields and (marker := self._fields['op'].marker) and issubclass(marker, IntEnum):
+        try: self.op = marker(val)
+        except ValueError: self.op = val
       elif cls_name in self._enum_map:
         try: self.op = self._enum_map[cls_name](val)
         except ValueError: self.op = val

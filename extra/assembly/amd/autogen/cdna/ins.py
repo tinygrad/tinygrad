@@ -7,20 +7,18 @@ import functools
 
 # instruction formats
 class DPP(Inst64):
-  encoding = bits[31:26] == 0b110110
-  src1_sel = bits[58:56]
-  src1_sext = bits[59]
-  src1_neg = bits[60]
-  src1_abs = bits[61]
-  s1 = bits[63]
-  offset0 = bits[7:0]
-  offset1 = bits[15:8]
-  op = bits[24:17]
-  acc = bits[25]
-  addr:VGPRField = bits[39:32]
-  data0:VGPRField = bits[47:40]
-  data1:VGPRField = bits[55:48]
-  vdst:VGPRField = bits[63:56]
+  encoding = bits[8:0] == 0b11111010
+  vop_op = bits[16:9]
+  vdst:VGPRField = bits[24:17]
+  vop2_op = bits[31:25]
+  src0:Src = bits[39:32]
+  dpp_ctrl = bits[48:40]
+  bound_ctrl = bits[51]
+  src0_neg = bits[52]
+  src0_abs = bits[53]
+  src1_neg = bits[54]
+  src1_abs = bits[55]
+  bank_mask = bits[59:56]
   row_mask = bits[63:60]
 
 class DS(Inst64):
@@ -82,6 +80,10 @@ class MUBUF(Inst64):
   acc = bits[55]
 
 class SDWA(Inst64):
+  encoding = bits[8:0] == 0b11111001
+  vop_op = bits[16:9]
+  vdst:VGPRField = bits[24:17]
+  vop2_op = bits[31:25]
   src0:Src = bits[39:32]
   dst_sel = bits[42:40]
   dst_u = bits[44:43]
@@ -97,9 +99,6 @@ class SDWA(Inst64):
   src1_neg = bits[60]
   src1_abs = bits[61]
   s1 = bits[63]
-  sdst:SGPRField = bits[46:40]
-  sd = bits[47]
-  row_mask = bits[63:60]
 
 class SDWAB(Inst64):
   src0:Src = bits[39:32]
@@ -333,6 +332,22 @@ ds_read2_b64 = functools.partial(DS, DSOp.DS_READ2_B64)
 ds_read2st64_b64 = functools.partial(DS, DSOp.DS_READ2ST64_B64)
 ds_add_rtn_f64 = functools.partial(DS, DSOp.DS_ADD_RTN_F64)
 ds_condxchg32_rtn_b64 = functools.partial(DS, DSOp.DS_CONDXCHG32_RTN_B64)
+ds_add_src2_u32 = functools.partial(DS, DSOp.DS_ADD_SRC2_U32)
+ds_sub_src2_u32 = functools.partial(DS, DSOp.DS_SUB_SRC2_U32)
+ds_rsub_src2_u32 = functools.partial(DS, DSOp.DS_RSUB_SRC2_U32)
+ds_inc_src2_u32 = functools.partial(DS, DSOp.DS_INC_SRC2_U32)
+ds_dec_src2_u32 = functools.partial(DS, DSOp.DS_DEC_SRC2_U32)
+ds_min_src2_i32 = functools.partial(DS, DSOp.DS_MIN_SRC2_I32)
+ds_max_src2_i32 = functools.partial(DS, DSOp.DS_MAX_SRC2_I32)
+ds_min_src2_u32 = functools.partial(DS, DSOp.DS_MIN_SRC2_U32)
+ds_max_src2_u32 = functools.partial(DS, DSOp.DS_MAX_SRC2_U32)
+ds_and_src2_b32 = functools.partial(DS, DSOp.DS_AND_SRC2_B32)
+ds_or_src2_b32 = functools.partial(DS, DSOp.DS_OR_SRC2_B32)
+ds_xor_src2_b32 = functools.partial(DS, DSOp.DS_XOR_SRC2_B32)
+ds_write_src2_b32 = functools.partial(DS, DSOp.DS_WRITE_SRC2_B32)
+ds_min_src2_f32 = functools.partial(DS, DSOp.DS_MIN_SRC2_F32)
+ds_max_src2_f32 = functools.partial(DS, DSOp.DS_MAX_SRC2_F32)
+ds_add_src2_f32 = functools.partial(DS, DSOp.DS_ADD_SRC2_F32)
 ds_gws_sema_release_all = functools.partial(DS, DSOp.DS_GWS_SEMA_RELEASE_ALL)
 ds_gws_init = functools.partial(DS, DSOp.DS_GWS_INIT)
 ds_gws_sema_v = functools.partial(DS, DSOp.DS_GWS_SEMA_V)
@@ -344,6 +359,22 @@ ds_pk_add_rtn_f16 = functools.partial(DS, DSOp.DS_PK_ADD_RTN_F16)
 ds_pk_add_rtn_bf16 = functools.partial(DS, DSOp.DS_PK_ADD_RTN_BF16)
 ds_consume = functools.partial(DS, DSOp.DS_CONSUME)
 ds_append = functools.partial(DS, DSOp.DS_APPEND)
+ds_ordered_count = functools.partial(DS, DSOp.DS_ORDERED_COUNT)
+ds_add_src2_u64 = functools.partial(DS, DSOp.DS_ADD_SRC2_U64)
+ds_sub_src2_u64 = functools.partial(DS, DSOp.DS_SUB_SRC2_U64)
+ds_rsub_src2_u64 = functools.partial(DS, DSOp.DS_RSUB_SRC2_U64)
+ds_inc_src2_u64 = functools.partial(DS, DSOp.DS_INC_SRC2_U64)
+ds_dec_src2_u64 = functools.partial(DS, DSOp.DS_DEC_SRC2_U64)
+ds_min_src2_i64 = functools.partial(DS, DSOp.DS_MIN_SRC2_I64)
+ds_max_src2_i64 = functools.partial(DS, DSOp.DS_MAX_SRC2_I64)
+ds_min_src2_u64 = functools.partial(DS, DSOp.DS_MIN_SRC2_U64)
+ds_max_src2_u64 = functools.partial(DS, DSOp.DS_MAX_SRC2_U64)
+ds_and_src2_b64 = functools.partial(DS, DSOp.DS_AND_SRC2_B64)
+ds_or_src2_b64 = functools.partial(DS, DSOp.DS_OR_SRC2_B64)
+ds_xor_src2_b64 = functools.partial(DS, DSOp.DS_XOR_SRC2_B64)
+ds_write_src2_b64 = functools.partial(DS, DSOp.DS_WRITE_SRC2_B64)
+ds_min_src2_f64 = functools.partial(DS, DSOp.DS_MIN_SRC2_F64)
+ds_max_src2_f64 = functools.partial(DS, DSOp.DS_MAX_SRC2_F64)
 ds_write_b96 = functools.partial(DS, DSOp.DS_WRITE_B96)
 ds_write_b128 = functools.partial(DS, DSOp.DS_WRITE_B128)
 ds_read_b64_tr_b4 = functools.partial(DS, DSOp.DS_READ_B64_TR_B4)
@@ -769,6 +800,7 @@ s_bfe_u64 = functools.partial(SOP2, SOP2Op.S_BFE_U64)
 s_bfe_i64 = functools.partial(SOP2, SOP2Op.S_BFE_I64)
 s_cbranch_g_fork = functools.partial(SOP2, SOP2Op.S_CBRANCH_G_FORK)
 s_absdiff_i32 = functools.partial(SOP2, SOP2Op.S_ABSDIFF_I32)
+s_rfe_restore_b64 = functools.partial(SOP2, SOP2Op.S_RFE_RESTORE_B64)
 s_mul_hi_u32 = functools.partial(SOP2, SOP2Op.S_MUL_HI_U32)
 s_mul_hi_i32 = functools.partial(SOP2, SOP2Op.S_MUL_HI_I32)
 s_lshl1_add_u32 = functools.partial(SOP2, SOP2Op.S_LSHL1_ADD_U32)
@@ -905,6 +937,7 @@ v_fract_f64_e32 = functools.partial(VOP1, VOP1Op.V_FRACT_F64)
 v_frexp_exp_i32_f32_e32 = functools.partial(VOP1, VOP1Op.V_FREXP_EXP_I32_F32)
 v_frexp_mant_f32_e32 = functools.partial(VOP1, VOP1Op.V_FREXP_MANT_F32)
 v_clrexcp_e32 = functools.partial(VOP1, VOP1Op.V_CLREXCP)
+v_screen_partition_4se_b32_e32 = functools.partial(VOP1, VOP1Op.V_SCREEN_PARTITION_4SE_B32)
 v_mov_b64_e32 = functools.partial(VOP1, VOP1Op.V_MOV_B64)
 v_cvt_f16_u16_e32 = functools.partial(VOP1, VOP1Op.V_CVT_F16_U16)
 v_cvt_f16_i16_e32 = functools.partial(VOP1, VOP1Op.V_CVT_F16_I16)
@@ -924,6 +957,8 @@ v_rndne_f16_e32 = functools.partial(VOP1, VOP1Op.V_RNDNE_F16)
 v_fract_f16_e32 = functools.partial(VOP1, VOP1Op.V_FRACT_F16)
 v_sin_f16_e32 = functools.partial(VOP1, VOP1Op.V_SIN_F16)
 v_cos_f16_e32 = functools.partial(VOP1, VOP1Op.V_COS_F16)
+v_exp_legacy_f32_e32 = functools.partial(VOP1, VOP1Op.V_EXP_LEGACY_F32)
+v_log_legacy_f32_e32 = functools.partial(VOP1, VOP1Op.V_LOG_LEGACY_F32)
 v_cvt_norm_i16_f16_e32 = functools.partial(VOP1, VOP1Op.V_CVT_NORM_I16_F16)
 v_cvt_norm_u16_f16_e32 = functools.partial(VOP1, VOP1Op.V_CVT_NORM_U16_F16)
 v_sat_pk_u8_i16_e32 = functools.partial(VOP1, VOP1Op.V_SAT_PK_U8_I16)
@@ -1222,6 +1257,11 @@ v_and_b32 = functools.partial(VOP3A, VOP3AOp.V_AND_B32)
 v_or_b32 = functools.partial(VOP3A, VOP3AOp.V_OR_B32)
 v_xor_b32 = functools.partial(VOP3A, VOP3AOp.V_XOR_B32)
 v_dot2c_f32_bf16 = functools.partial(VOP3A, VOP3AOp.V_DOT2C_F32_BF16)
+v_sub_co_u32 = functools.partial(VOP3A, VOP3AOp.V_SUB_CO_U32)
+v_subrev_co_u32 = functools.partial(VOP3A, VOP3AOp.V_SUBREV_CO_U32)
+v_addc_co_u32 = functools.partial(VOP3A, VOP3AOp.V_ADDC_CO_U32)
+v_subb_co_u32 = functools.partial(VOP3A, VOP3AOp.V_SUBB_CO_U32)
+v_subbrev_co_u32 = functools.partial(VOP3A, VOP3AOp.V_SUBBREV_CO_U32)
 v_add_f16 = functools.partial(VOP3A, VOP3AOp.V_ADD_F16)
 v_sub_f16 = functools.partial(VOP3A, VOP3AOp.V_SUB_F16)
 v_subrev_f16 = functools.partial(VOP3A, VOP3AOp.V_SUBREV_F16)
@@ -1251,6 +1291,7 @@ v_dot8c_i32_i4 = functools.partial(VOP3A, VOP3AOp.V_DOT8C_I32_I4)
 v_fmac_f32 = functools.partial(VOP3A, VOP3AOp.V_FMAC_F32)
 v_pk_fmac_f16 = functools.partial(VOP3A, VOP3AOp.V_PK_FMAC_F16)
 v_xnor_b32 = functools.partial(VOP3A, VOP3AOp.V_XNOR_B32)
+v_screen_partition_4se_b32 = functools.partial(VOP3A, VOP3AOp.V_SCREEN_PARTITION_4SE_B32)
 v_nop = functools.partial(VOP3A, VOP3AOp.V_NOP)
 v_mov_b32 = functools.partial(VOP3A, VOP3AOp.V_MOV_B32)
 v_readfirstlane_b32 = functools.partial(VOP3A, VOP3AOp.V_READFIRSTLANE_B32)
@@ -1436,6 +1477,8 @@ v_cvt_pk_f16_f32 = functools.partial(VOP3A, VOP3AOp.V_CVT_PK_F16_F32)
 v_cvt_pk_bf16_f32 = functools.partial(VOP3A, VOP3AOp.V_CVT_PK_BF16_F32)
 v_cvt_scalef32_pk_bf16_fp8 = functools.partial(VOP3A, VOP3AOp.V_CVT_SCALEF32_PK_BF16_FP8)
 v_cvt_scalef32_pk_bf16_bf8 = functools.partial(VOP3A, VOP3AOp.V_CVT_SCALEF32_PK_BF16_BF8)
+v_interp_p2_f16 = functools.partial(VOP3A, VOP3AOp.V_INTERP_P2_F16)
+v_interp_p2_f16_opsel = functools.partial(VOP3A, VOP3AOp.V_INTERP_P2_F16_OPSEL)
 v_add_f64 = functools.partial(VOP3A, VOP3AOp.V_ADD_F64)
 v_mul_f64 = functools.partial(VOP3A, VOP3AOp.V_MUL_F64)
 v_min_f64 = functools.partial(VOP3A, VOP3AOp.V_MIN_F64)

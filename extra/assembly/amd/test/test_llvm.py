@@ -56,7 +56,7 @@ LLVM_TEST_FILES = {
 }
 
 # Undocumented opcodes that we skip (reserved/internal to AMD)
-UNDOCUMENTED = {'smem': {34, 35}, 'sopk': {22, 23}, 'sopp': {58, 59}}
+UNDOCUMENTED: dict = {}
 
 def parse_llvm_tests(text: str) -> list[tuple[str, bytes]]:
   """Parse LLVM test format into (asm, expected_bytes) pairs."""
