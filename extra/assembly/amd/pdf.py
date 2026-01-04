@@ -185,8 +185,8 @@ def _parse_single_pdf(url: str):
           break
     formats[fmt_name] = fields
 
-  # Fix known PDF errors
-  if 'SMEM' in formats:
+  # Fix known PDF errors (RDNA-specific SMEM bit positions)
+  if 'SMEM' in formats and not is_cdna:
     formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
                        for n, h, l, e, t in formats['SMEM']]
   # RDNA4: VFLAT/VGLOBAL/VSCRATCH OP field is [20:14] not [20:13] (PDF documentation error)
@@ -209,6 +209,11 @@ def _parse_single_pdf(url: str):
     if 'FLATOp' in enums:
       for k, v in {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}.items():
         assert k not in enums['FLATOp']; enums['FLATOp'][k] = v
+  # CDNA MTBUF: PDF is missing the FORMAT field (bits[25:19]) which is required for tbuffer_* instructions
+  if is_cdna and 'MTBUF' in formats:
+    field_names = {f[0] for f in formats['MTBUF']}
+    if 'FORMAT' not in field_names:
+      formats['MTBUF'].append(('FORMAT', 25, 19, None, None))
   # CDNA SDWA/DPP: PDF only has modifier fields, need VOP1/VOP2 overlay for correct encoding
   if is_cdna:
     if 'SDWA' in formats:

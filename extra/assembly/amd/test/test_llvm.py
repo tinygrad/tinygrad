@@ -15,17 +15,19 @@ RDNA_FILES = ['gfx11_asm_sop1.s', 'gfx11_asm_sop2.s', 'gfx11_asm_sopp.s', 'gfx11
   'gfx11_asm_vop3_alias.s', 'gfx11_asm_vop3p_alias.s', 'gfx11_asm_vopc_alias.s', 'gfx11_asm_vopcx_alias.s', 'gfx11_asm_vinterp_alias.s',
   'gfx11_asm_smem_alias.s', 'gfx11_asm_mubuf_alias.s', 'gfx11_asm_mtbuf_alias.s']
 CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'sopp-gfx9.s', 'gfx9_asm_sopk.s', 'gfx9_asm_sopc.s',
-  'gfx9_asm_vop1.s', 'vop1-gfx9.s', 'gfx9_asm_vop2.s', 'gfx9_asm_vopc.s', 'gfx9_asm_vop3p.s', 'vop3-gfx9.s',
-  'gfx9_asm_ds.s', 'ds-gfx9.s', 'gfx90a_ldst_acc.s', 'mubuf-gfx9.s', 'flat-scratch-gfx942.s', 'mai-gfx942.s']
+  'gfx9_asm_vop1.s', 'vop1-gfx9.s', 'gfx9_asm_vop2.s', 'gfx9_asm_vopc.s', 'gfx9_asm_vop3.s', 'gfx9_asm_vop3_e64.s', 'gfx9_asm_vop3p.s', 'vop3-gfx9.s',
+  'gfx9_asm_ds.s', 'ds-gfx9.s', 'gfx9_asm_flat.s', 'flat-gfx9.s', 'gfx9_asm_smem.s', 'gfx9_asm_mubuf.s', 'mubuf-gfx9.s', 'gfx9_asm_mtbuf.s',
+  'gfx9_asm_mimg.s', 'mimg-gfx90a.s', 'gfx9_asm_exp.s', 'gfx90a_ldst_acc.s', 'gfx90a_asm_features.s', 'flat-scratch-gfx942.s',
+  'gfx942_asm_features.s', 'mai-gfx90a.s', 'mai-gfx942.s']
 
-def parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
+def parse_llvm_tests(text: str, pattern: str, skip: tuple[str, ...] = ()) -> list[tuple[str, bytes]]:
   """Parse LLVM test format into (asm, expected_bytes) pairs."""
   tests, lines = [], text.split('\n')
   for i, line in enumerate(lines):
     line = line.strip()
     if not line or line.startswith(('//', '.', ';')): continue
     asm_text = line.split('//')[0].strip()
-    if not asm_text: continue
+    if not asm_text or any(asm_text.startswith(s) for s in skip): continue
     for j in range(i, min(i + 3, len(lines))):
       if m := re.search(pattern + r'[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
         hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
@@ -56,7 +58,7 @@ class TestLLVM(unittest.TestCase):
       try: cls.cdna.extend(parse_llvm_tests(fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore'), r'(?:VI9|GFX9|CHECK)'))
       except Exception as e: print(f"Warning: {f}: {e}")
 
-  def _test_asm(self, tests, name):
+  def _test_asm(self, tests, arch):
     passed, failed, skipped = 0, 0, 0
     for asm_text, expected in tests:
       try: result = asm(asm_text).to_bytes()
@@ -64,10 +66,10 @@ class TestLLVM(unittest.TestCase):
       if result is None: skipped += 1
       elif result == expected: passed += 1
       else: failed += 1
-    print(f"{name} asm: {passed} passed, {failed} failed, {skipped} skipped")
+    print(f"{arch} asm: {passed} passed, {failed} failed, {skipped} skipped")
     self.assertEqual(failed, 0)
 
-  def _test_roundtrip(self, tests, arch, name):
+  def _test_roundtrip(self, tests, arch):
     passed, failed, skipped = 0, 0, 0
     for _, data in tests:
       try:
@@ -75,10 +77,10 @@ class TestLLVM(unittest.TestCase):
         if decoded.to_bytes()[:len(data)] == data: passed += 1
         else: failed += 1
       except: skipped += 1
-    print(f"{name} roundtrip: {passed} passed, {failed} failed, {skipped} skipped")
+    print(f"{arch} roundtrip: {passed} passed, {failed} failed, {skipped} skipped")
     self.assertEqual(failed, 0)
 
-  def _test_disasm(self, tests, arch, name):
+  def _test_disasm(self, tests, arch):
     to_test = []
     for _, data in tests:
       try:
@@ -88,16 +90,16 @@ class TestLLVM(unittest.TestCase):
     if arch == "rdna3":
       llvm_results = compile_asm_batch([t[1] for t in to_test])
       passed = sum(1 for (data, _), llvm in zip(to_test, llvm_results) if llvm == data)
-      print(f"{name} disasm: {passed} passed, {len(to_test) - passed} failed")
+      print(f"{arch} disasm: {passed} passed, {len(to_test) - passed} failed")
       self.assertEqual(passed, len(to_test))
     else:
-      print(f"{name} disasm: {len(to_test)} passed")
+      print(f"{arch} disasm: {len(to_test)} passed")
 
-  def test_rdna_asm(self): self._test_asm(self.rdna, "RDNA")
-  def test_rdna_roundtrip(self): self._test_roundtrip(self.rdna, "rdna3", "RDNA")
-  def test_rdna_disasm(self): self._test_disasm(self.rdna, "rdna3", "RDNA")
-  def test_cdna_roundtrip(self): self._test_roundtrip(self.cdna, "cdna", "CDNA")
-  def test_cdna_disasm(self): self._test_disasm(self.cdna, "cdna", "CDNA")
+  def test_rdna3_asm(self): self._test_asm(self.rdna, "rdna3")
+  def test_rdna3_roundtrip(self): self._test_roundtrip(self.rdna, "rdna3")
+  def test_rdna3_disasm(self): self._test_disasm(self.rdna, "rdna3")
+  def test_cdna_roundtrip(self): self._test_roundtrip(self.cdna, "cdna")
+  def test_cdna_disasm(self): self._test_disasm(self.cdna, "cdna")
 
 if __name__ == "__main__":
   unittest.main()
