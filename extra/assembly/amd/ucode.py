@@ -2,7 +2,7 @@
 import functools, struct, math
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from extra.assembly.amd.qcode import parse, Const, Var, Typed, Slice, Index, Cast, Unary, Binary, Ternary, Call, Pack, Assign, Declare, If, For
+from extra.assembly.amd.qcode import parse, Const, Var, Typed, Slice, Index, Cast, Op, Call, Pack, Assign, Declare, If, For
 
 SIGNED = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
 FLOATS = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -111,6 +111,7 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
         return _cast(base, dt)
       inner = _expr(expr, ctx, dt)
       if dt == dtypes.float16: return UOp(Ops.BITCAST, dt, (_cast(inner, dtypes.uint16),))
+      if dt == dtypes.bfloat16: return UOp(Ops.BITCAST, dt, (_cast(inner, dtypes.uint16),))
       if dt in FLOATS: return UOp(Ops.BITCAST, dt, (inner,))
       return _cast(inner, dt)
 
@@ -152,44 +153,40 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
       if typ == 'I' and inner.dtype in SIGNED: return UOp(Ops.CAST, dt, (inner,))
       return _cast(inner, dt)
 
-    case Unary(op, expr):
-      val = _expr(expr, ctx, hint)
-      if op is Ops.NEG: return UOp(Ops.NEG, val.dtype, (val,))
-      if op is Ops.XOR: return UOp(Ops.XOR, val.dtype, (val, UOp.const(val.dtype, -1)))  # ~ is XOR with -1
-      if op is Ops.CMPEQ: return UOp(Ops.CMPEQ, dtypes.bool, (val, UOp.const(val.dtype, 0)))  # ! is == 0
-      raise ValueError(f"Unknown unary op: {op}")
-
-    case Binary(op, left, right):
-      l = _expr(left, ctx, hint)
-      r = _expr(right, ctx, l.dtype if l.dtype in FLOATS else hint)
-      # For 32/64-bit signed arithmetic, use unsigned to avoid overflow issues during constant folding
-      # Unwrap bitcasts to avoid double-cast chains that confuse the simplifier
-      if op in (Ops.ADD, Ops.SUB, Ops.MUL) and l.dtype in (dtypes.int32, dtypes.int64):
-        udt = {dtypes.int32: dtypes.uint32, dtypes.int64: dtypes.uint64}[l.dtype]
-        lu = l.src[0] if l.op == Ops.BITCAST and l.src[0].dtype == udt else _cast(l, udt)
-        ru = r.src[0] if r.op == Ops.BITCAST and r.src[0].dtype == udt else _cast(r, udt)
-        return UOp(op, udt, (lu, ru))
-      result_dt = l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype
-
-      # Comparison ops return bool
-      if op in (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE): return UOp(op, dtypes.bool, (l, r))
-      # Most binary ops use result_dt
-      if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR): return UOp(op, result_dt, (l, r))
-      # POW: 2**x -> EXP2(x), else EXP2(x * LOG2(base))
-      if op is Ops.POW:
-        exp = UOp(Ops.CAST, result_dt, (r,)) if r.dtype != result_dt else r
-        if l.op == Ops.CONST and l.arg == 2.0: return UOp(Ops.EXP2, result_dt, (exp,))
-        return UOp(Ops.EXP2, result_dt, (UOp(Ops.MUL, result_dt, (exp, UOp(Ops.LOG2, result_dt, (l,)))),))
-      # MOD: a % b = a - (a // b) * b
-      if op is Ops.MOD:
-        div = UOp(Ops.IDIV, result_dt, (l, r))
-        return UOp(Ops.SUB, result_dt, (l, UOp(Ops.MUL, result_dt, (div, r))))
-      raise ValueError(f"Unknown binary op: {op}")
-
-    case Ternary(cond, t, f):
-      c, tv = _expr(cond, ctx), _expr(t, ctx, hint)
-      fv = _expr(f, ctx, tv.dtype)
-      return UOp(Ops.WHERE, tv.dtype, (c, tv, fv))
+    case Op(op, src):
+      # Unary ops
+      if len(src) == 1:
+        val = _expr(src[0], ctx, hint)
+        if op is Ops.NEG: return UOp(Ops.NEG, val.dtype, (val,))
+        if op is Ops.XOR: return UOp(Ops.XOR, val.dtype, (val, UOp.const(val.dtype, -1)))  # ~ is XOR with -1
+        if op is Ops.CMPEQ: return UOp(Ops.CMPEQ, dtypes.bool, (val, UOp.const(val.dtype, 0)))  # ! is == 0
+        raise ValueError(f"Unknown unary op: {op}")
+      # Binary ops
+      if len(src) == 2:
+        l = _expr(src[0], ctx, hint)
+        r = _expr(src[1], ctx, l.dtype if l.dtype in FLOATS else hint)
+        # For 32/64-bit signed arithmetic, use unsigned to avoid overflow issues during constant folding
+        if op in (Ops.ADD, Ops.SUB, Ops.MUL) and l.dtype in (dtypes.int32, dtypes.int64):
+          udt = {dtypes.int32: dtypes.uint32, dtypes.int64: dtypes.uint64}[l.dtype]
+          lu = l.src[0] if l.op == Ops.BITCAST and l.src[0].dtype == udt else _cast(l, udt)
+          ru = r.src[0] if r.op == Ops.BITCAST and r.src[0].dtype == udt else _cast(r, udt)
+          return UOp(op, udt, (lu, ru))
+        result_dt = l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype
+        if op in (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE): return UOp(op, dtypes.bool, (l, r))
+        if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR): return UOp(op, result_dt, (l, r))
+        if op is Ops.POW:
+          exp = UOp(Ops.CAST, result_dt, (r,)) if r.dtype != result_dt else r
+          if l.op == Ops.CONST and l.arg == 2.0: return UOp(Ops.EXP2, result_dt, (exp,))
+          return UOp(Ops.EXP2, result_dt, (UOp(Ops.MUL, result_dt, (exp, UOp(Ops.LOG2, result_dt, (l,)))),))
+        if op is Ops.MOD:
+          div = UOp(Ops.IDIV, result_dt, (l, r))
+          return UOp(Ops.SUB, result_dt, (l, UOp(Ops.MUL, result_dt, (div, r))))
+        raise ValueError(f"Unknown binary op: {op}")
+      # Ternary ops (WHERE)
+      if len(src) == 3:
+        c, tv = _expr(src[0], ctx), _expr(src[1], ctx, hint)
+        fv = _expr(src[2], ctx, tv.dtype)
+        return UOp(Ops.WHERE, tv.dtype, (c, tv, fv))
 
     case Call(name, args): return _transform_call(name, [_expr(a, ctx, hint) for a in args], hint)
 
@@ -219,6 +216,11 @@ CVT_MAP = {'u32_to_f32': (dtypes.float32, False), 'i32_to_f32': (dtypes.float32,
 MATH_OPS = {'trunc': Ops.TRUNC, 'sqrt': Ops.SQRT, 'exp2': Ops.EXP2, 'log2': Ops.LOG2, 'sin': Ops.SIN, 'rcp': Ops.RECIPROCAL}
 
 def _call_MEM(v): return v
+def _call_bf16_to_f32(v):
+  # BF16 is the upper 16 bits of F32, so shift left by 16
+  bits = _cast(v, dtypes.uint32)
+  shifted = UOp(Ops.SHL, dtypes.uint32, (bits, UOp.const(dtypes.uint32, 16)))
+  return UOp(Ops.BITCAST, dtypes.float32, (shifted,))
 def _call_fma(a, b, c): return UOp(Ops.MULACC, c.dtype, (a, b, c))
 def _call_abs(v): return UOp(Ops.WHERE, v.dtype, (UOp(Ops.CMPLT, dtypes.bool, (v, UOp.const(v.dtype, 0))), UOp(Ops.NEG, v.dtype, (v,)), v))
 def _call_cos(v): return UOp(Ops.SIN, v.dtype, (UOp(Ops.ADD, v.dtype, (v, UOp.const(v.dtype, 1.5707963267948966))),))
@@ -301,7 +303,7 @@ CALL_DISPATCH = {
   'isSignalNAN': _call_isSignalNAN, 'cvtToQuietNAN': _call_cvtToQuietNAN, 'isINF': _call_isINF,
   'sign': _call_sign, 'exponent': _call_exponent, 'mantissa': _call_mantissa, 'isEven': _call_isEven,
   'signext': _call_signext, 'signext_from_bit': _call_signext_from_bit, 'ABSDIFF': _call_ABSDIFF, 'SAT8': _call_SAT8,
-  'BYTE_PERMUTE': _call_BYTE_PERMUTE,
+  'BYTE_PERMUTE': _call_BYTE_PERMUTE, 'bf16_to_f32': _call_bf16_to_f32,
 }
 
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
@@ -569,8 +571,8 @@ _SKIP_OPS = {
   'V_CMP_CLASS_F16', 'V_CMP_CLASS_F32', 'V_CMP_CLASS_F64', 'V_CMPX_CLASS_F16', 'V_CMPX_CLASS_F32', 'V_CMPX_CLASS_F64',
   'V_FREXP_MANT_F16', 'V_FREXP_MANT_F32', 'V_FREXP_MANT_F64',
   'V_DIV_FIXUP_F16', 'V_DIV_FIXUP_F32', 'V_DIV_SCALE_F32', 'V_DIV_SCALE_F64',  # complex NaN/inf/denorm handling
+
   'V_TRIG_PREOP_F64',  # lookup table for 2/PI mantissa bits
-  'V_MIN_F16', 'V_MIN_F32', 'V_MIN_F64', 'V_MAX_F16', 'V_MAX_F32', 'V_MAX_F64',  # neg zero handling: -0 < +0
   # Bit manipulation ops (find-first patterns now work via reversed loop unrolling, bit reversal via explicit OR chain)
   'S_FF0_I32_B32', 'S_FF0_I32_B64', 'S_FF1_I32_B32', 'S_FF1_I32_B64',
   'S_FLBIT_I32', 'S_FLBIT_I32_B32', 'S_FLBIT_I32_B64', 'S_FLBIT_I32_I32', 'S_FLBIT_I32_I64',
@@ -591,8 +593,8 @@ _SKIP_OPS = {
   'S_NOP', 'S_SETHALT', 'S_TRAP',
   # 65-bit intermediate results / multi-output with carry
   'V_MAD_U64_U32', 'V_MAD_I64_I32',  # { D1.u1, D0.u64 } = 65-bit result
-  # Dot product ops (need bf16/u4 conversion functions or array declarations)
-  'V_DOT2_F32_BF16',  # bf16_to_f32 not implemented
+  # Dot product ops (need bf16/u4 conversion functions or complex simplification)
+  'V_DOT2_F32_BF16',  # bf16_to_f32 + simplifier can't fold through BITCAST chains
   'V_DOT4_I32_IU8', 'V_DOT4_U32_U8',  # u8_to_u32 array access pattern
   'V_DOT8_I32_IU4', 'V_DOT8_U32_U4',  # u4_to_u32 array access pattern
   # VOP3P mixed precision (S[i] array access in loop)

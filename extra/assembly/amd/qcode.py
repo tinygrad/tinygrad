@@ -49,16 +49,12 @@ class Index: expr: Expr; idx: Expr
 @dataclass(frozen=True)
 class Cast: bits: int; typ: str; expr: Expr
 @dataclass(frozen=True)
-class Unary: op: Ops; expr: Expr
-@dataclass(frozen=True)
-class Binary: op: Ops; left: Expr; right: Expr
-@dataclass(frozen=True)
-class Ternary: cond: Expr; t: Expr; f: Expr
+class Op: op: Ops; src: tuple[Expr, ...]
 @dataclass(frozen=True)
 class Call: name: str; args: tuple[Expr, ...]
 @dataclass(frozen=True)
 class Pack: exprs: tuple[Expr, ...]
-Expr = Const|Var|Typed|Slice|Index|Cast|Unary|Binary|Ternary|Call|Pack
+Expr = Const|Var|Typed|Slice|Index|Cast|Op|Call|Pack
 
 @dataclass(frozen=True)
 class Assign: lhs: Expr; rhs: Expr
@@ -150,7 +146,7 @@ def expr(s: str) -> Expr:
       elif s[i] == ')': d -= 1
       elif s[i] == '[': b += 1
       elif s[i] == ']': b -= 1
-      elif s[i] == ':' and d == 0 and b == 0: return Ternary(expr(s[:q]), expr(s[q+1:i]), expr(s[i+1:]))
+      elif s[i] == ':' and d == 0 and b == 0: return Op(Ops.WHERE, (expr(s[:q]), expr(s[q+1:i]), expr(s[i+1:])))
   for ops in [('||',),('&&',),('|',),('^',),('&',),('==','!=','<>'),('<=','>=','<','>'),('<<','>>'),
               ('+','-'),('*','/','%'),('**',)]:
     if (p := _fop(s, ops)) > 0:
@@ -159,8 +155,8 @@ def expr(s: str) -> Expr:
       if l and r:
         lhs, rhs = expr(l), expr(r)
         if op in ('>', '>='): lhs, rhs = rhs, lhs  # swap args for > and >=
-        return Binary(_BINOPS[op], lhs, rhs)
-  if s[0] in '-~!' and len(s) > 1 and (s[0] != '!' or s[1] != '='): return Unary(_UNOPS[s[0]], expr(s[1:]))
+        return Op(_BINOPS[op], (lhs, rhs))
+  if s[0] in '-~!' and len(s) > 1 and (s[0] != '!' or s[1] != '='): return Op(_UNOPS[s[0]], (expr(s[1:]),))
   if '[' in s and s[-1] == ']':
     d = 0
     for i in range(len(s)-1, -1, -1):
@@ -170,7 +166,7 @@ def expr(s: str) -> Expr:
     b, n = s[:i], s[i+1:-1]
     if '+:' in n:  # Verilog [start +: width] -> [start+width-1 : start]
       st, w = expr(n.split('+:', 1)[0]), expr(n.split('+:', 1)[1])
-      return Slice(expr(b), Binary(Ops.SUB, Binary(Ops.ADD, st, w), Const(1)), st)
+      return Slice(expr(b), Op(Ops.SUB, (Op(Ops.ADD, (st, w)), Const(1))), st)
     if ':' in n and '?' not in n:
       d = 0
       for j, c in enumerate(n):
@@ -199,7 +195,7 @@ def stmt(line: str) -> Stmt|None:
     if op in line:
       l, r = line.split(op, 1)
       lhs = expr(l)
-      return Assign(lhs, Binary(uop, lhs, expr(r)))
+      return Assign(lhs, Op(uop, (lhs, expr(r))))
   if '=' in line and not any(line[:k] == p for k, p in [(3,'if '),(6,'elsif '),(4,'for ')]):
     eq = line.index('=')
     if eq > 0 and line[eq-1] not in '!<>=' and eq < len(line)-1 and line[eq+1] != '=':
@@ -252,9 +248,9 @@ if __name__ == "__main__":
               case Slice(e,h,l): return f"{pr(e)}[{pr(h)}:{pr(l)}]"
               case Index(e, i): return f"{pr(e)}[{pr(i)}]"
               case Cast(b, t, e): return f"{b}'{t}({pr(e)})"
-              case Unary(o, e): return f"{o.name}({pr(e)})"
-              case Binary(o, l, r): return f"({pr(l)} {o.name} {pr(r)})"
-              case Ternary(c, t, f): return f"({pr(c)} ? {pr(t)} : {pr(f)})"
+              case Op(o, src) if len(src) == 1: return f"{o.name}({pr(src[0])})"
+              case Op(o, src) if len(src) == 2: return f"({pr(src[0])} {o.name} {pr(src[1])})"
+              case Op(o, src) if len(src) == 3: return f"({pr(src[0])} ? {pr(src[1])} : {pr(src[2])})"
               case Call(n, a): return f"{n}({', '.join(pr(x) for x in a)})"
               case Pack(e): return f"{{{', '.join(pr(x) for x in e)}}}"
               case Assign(l, r): return f"{p}{pr(l)} = {pr(r)}"
