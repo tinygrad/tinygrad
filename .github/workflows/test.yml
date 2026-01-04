@@ -490,16 +490,19 @@ jobs:
     name: Models (llvm+cpu+gpu)
     runs-on: ubuntu-22.04
     timeout-minutes: 15
+    env:
+      CACHE_VERSION: '1917'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: models
+          key: models-uv
           deps: testing
           opencl: 'true'
           llvm: 'true'
+          uv: 'true'
       - name: Test models (llvm)
         run: CPU=1 CPU_LLVM=1 python -m pytest -n=auto test/models --durations=20
       - name: Test models (opencl)
@@ -588,16 +591,19 @@ jobs:
     name: Linux (WebGPU)
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    env:
+      CACHE_VERSION: '1917'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: webgpu-minimal
+        key: webgpu-minimal-uv
         deps: testing_minimal
         python-version: '3.11'
         webgpu: 'true'
+        uv: 'true'
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
         WEBGPU=1 python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
@@ -620,6 +626,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
+      CACHE_VERSION: '1917'
       AMD: 1
       MOCKGPU: 1
       FORWARD_ONLY: 1
@@ -630,10 +637,11 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: ${{ matrix.backend }}-minimal
+          key: ${{ matrix.backend }}-minimal-uv
           deps: testing_minimal
           amd: 'true'
           llvm: ${{ matrix.backend == 'amdllvm' && 'true' }}
+          uv: 'true'
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['AMD'], Device.DEFAULT"
@@ -715,6 +723,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
+      CACHE_VERSION: '1917'
       MOCKGPU: 1
       FORWARD_ONLY: 1
     steps:
@@ -723,10 +732,11 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: ${{ matrix.backend }}-minimal
+          key: ${{ matrix.backend }}-minimal-uv
           deps: testing_minimal
           cuda: 'true'
           ocelot: 'true'
+          uv: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'PTX' && 'CUDA=1\nCUDA_PTX=1' || matrix.backend == 'nv' && 'NV=1\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -748,17 +758,20 @@ jobs:
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    env:
+      CACHE_VERSION: '1917'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: ${{ matrix.backend }}-minimal
+          key: ${{ matrix.backend }}-minimal-uv
           deps: testing_minimal
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+          uv: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'CL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -778,19 +791,22 @@ jobs:
     name: MacOS (unit)
     runs-on: macos-14
     timeout-minutes: 20
+    env:
+      CACHE_VERSION: '1917'
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: metal
+        key: metal-uv
         deps: testing
         python-version: '3.11'
         amd: 'true'
         cuda: 'true'
         ocelot: 'true'
         llvm: 'true'
+        uv: 'true'
     - name: Run unit tests
       run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
     - name: Run ONNX
@@ -877,17 +893,20 @@ jobs:
     name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 20
+    env:
+      CACHE_VERSION: '1917'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: macos-${{ matrix.backend }}-minimal
+          key: macos-${{ matrix.backend }}-minimal-uv
           deps: testing_minimal
           pydeps: "capstone"
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+          uv: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -902,7 +921,7 @@ jobs:
         if: matrix.backend == 'cpu'
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
 
-# ****** Windows Tests ******
+# ****** Windows Testss ******
 
   wintests:
     strategy:
@@ -913,15 +932,18 @@ jobs:
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      CACHE_VERSION: '1917'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: windows-${{ matrix.backend }}-minimal
+          key: windows-${{ matrix.backend }}-minimal-uv
           deps: testing_unit
           pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
+          uv: 'true'
       - name: Set env
         shell: bash
         run:  printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'WEBGPU=1'}}" >> $GITHUB_ENV

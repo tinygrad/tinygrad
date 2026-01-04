@@ -6,7 +6,7 @@ authors = [{ name = "George Hotz" }]
 
 classifiers = ["Programming Language :: Python :: 3"]
 
-license = 'MIT'
+license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
