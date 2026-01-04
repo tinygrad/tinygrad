@@ -73,14 +73,23 @@ if __name__ == "__main__":
       # single iteration SMEM_A = (64 * 64) * (2 bytes / half) =  8192 bytes, SMEM_B = (128 * 64) * (2 bytes / half) = 16384 bytes
       # double-buffer smem = (8192 + 16384) * 2 = 49152 bytes
       # reduce for_loop size = [1, 1, (4096 // 16 // 4)==64]
-       # NOTE: T_K > 0 would be group_for_reduce
-      prog = CUDAProgram(device, "wmma_example", compiler.compile(open(os.path.join(script_dir, 'max_kernels/nv.fp16_fp32_fp32.max.cu')).read()))
+      # NOTE: T_K > 0 would be group_for_reduce
+      if getenv("UOPS"):
+        from extra.gemm.wmma_uop_helpers import build_wmma_uops, MAX_VARIANT
+        from tinygrad.renderer.cstyle import CUDARenderer
+        uops = build_wmma_uops(M, N, K, MAX_VARIANT)
+        renderer = CUDARenderer(device.arch)
+        src = renderer.render(uops)
+        if getenv("DEBUG") > 1: print(src)
+        prog = CUDAProgram(device, "nv_max_uop", compiler.compile(src))
+      else:
+        prog = CUDAProgram(device, "wmma_example", compiler.compile(open(os.path.join(script_dir, 'max_kernels/nv.fp16_fp32_fp32.max.cu')).read()))
       args = (c, a, b)
       kwargs = {
         'global_size': [M//64, N//128, 1],
         'local_size': [128, 1, 1], # 4 warpgroups == (T_M:=2) * (T_N:=2)
         'wait': True,
-        'vals': (N, K),
+        'vals': (N, K) if not getenv("UOPS") else (),
       }
     elif GEMM_VARIATION == "2_stage_swizzled_smem_input" and (M%64)==0 and (N%128)==0 and (K%64)==0 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.float and DTYPE_ACC == dtypes.float:
       print("Using CUDA, 2-stage reduce pipeline, swizzled SMEM inputs")
@@ -104,13 +113,22 @@ if __name__ == "__main__":
       }
     elif GEMM_VARIATION == "flat_smem_input" and (M%64)==0 and (N%128)==0 and (K%64)==0 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.float and DTYPE_ACC == dtypes.float:
       print("Using CUDA, flat SMEM inputs")
-      prog = CUDAProgram(device, "wmma_example", compiler.compile(open(os.path.join(script_dir, 'max_kernels/nv.fp16_fp32_fp32.flat_smem_input.cu')).read()))
+      if getenv("UOPS"):
+        from extra.gemm.wmma_uop_helpers import build_wmma_uops, FLAT_VARIANT
+        from tinygrad.renderer.cstyle import CUDARenderer
+        uops = build_wmma_uops(M, N, K, FLAT_VARIANT)
+        renderer = CUDARenderer(device.arch)
+        src = renderer.render(uops)
+        if getenv("DEBUG") > 1: print(src)
+        prog = CUDAProgram(device, "nv_flat_smem_input_uop", compiler.compile(src))
+      else:
+        prog = CUDAProgram(device, "wmma_example", compiler.compile(open(os.path.join(script_dir, 'max_kernels/nv.fp16_fp32_fp32.flat_smem_input.cu')).read()))
       args = (c, a, b)
       kwargs = {
         'global_size': [M//64, N//128, 1],
         'local_size': [128, 1, 1], # 4 warpgroups == (T_M:=2) * (T_N:=2)
         'wait': True,
-        'vals': (N, K),
+        'vals': (N, K) if not getenv("UOPS") else (),
       }
     elif GEMM_VARIATION == "hcopt" and M == N == K == 4096 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.half and DTYPE_ACC == dtypes.float:
       print("Using CUDA and generated hcopt")
@@ -121,6 +139,7 @@ if __name__ == "__main__":
         'global_size': [32, 64, 1],
         'local_size': [16, 2, 4], # 16,2 are warp, 4 workgroups upcasted to axis=1
         'wait': True,
+        'vals': (N, K),
       }
     elif GEMM_VARIATION == "2_stage" and (M%64)== 0 and (N%128)==0 and (K%64)==0 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.half and DTYPE_ACC == dtypes.half:
       print("Using CUDA and un-optimized 2-stage, swizzled SMEM inputs and direct acc to output kernel")
@@ -154,13 +173,22 @@ if __name__ == "__main__":
       }
     elif GEMM_VARIATION == "max" and (M%256)== 0 and (N%128)==0 and (K%32)==0 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.half and DTYPE_ACC == dtypes.half:
       print("Using CUDA and 3-stage (interleave global copies and ldmatrix), swizzled SMEM inputs and epilogue")
-      prog = CUDAProgram(device, "wmma_example", compiler.compile(open(os.path.join(script_dir, 'max_kernels/nv.fp16_fp16_fp16.max.cu')).read()), 73728)
+      if getenv("UOPS"):
+        from extra.gemm.wmma_uop_helpers import build_wmma_uops, MAX_FP16_VARIANT
+        from tinygrad.renderer.cstyle import CUDARenderer
+        uops = build_wmma_uops(M, N, K, MAX_FP16_VARIANT)
+        renderer = CUDARenderer(device.arch)
+        src = renderer.render(uops)
+        if getenv("DEBUG") > 1: print(src)
+        prog = CUDAProgram(device, "nv_max_fp16_uop", compiler.compile(src), 73728)
+      else:
+        prog = CUDAProgram(device, "wmma_example", compiler.compile(open(os.path.join(script_dir, 'max_kernels/nv.fp16_fp16_fp16.max.cu')).read()), 73728)
       args = (c, a, b)
       kwargs = {
         'global_size': [M//256, N//128, 1],
-        'local_size': [32, 4, 2], # 8 warpgroups, WG_M=4 and WG_N=2
+        'local_size': [256, 1, 1] if getenv("UOPS") else [32, 4, 2], # 8 warpgroups, WG_M=4 and WG_N=2
         'wait': True,
-        'vals': (N, K),
+        'vals': () if getenv("UOPS") else (N, K),
       }
     elif GEMM_VARIATION == "no_xor" and (M%256)== 0 and (N%128)==0 and (K%32)==0 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.half and DTYPE_ACC == dtypes.half:
       print("Using CUDA and 3-stage (interleave global copies and ldmatrix), swizzled SMEM inputs and epilogue")
@@ -177,6 +205,36 @@ if __name__ == "__main__":
 
     tms = []
     na, nb, nc = randoms()
+
+    sleep_secs = getenv("TORCH_COMP_SLEEP", 20)
+
+    import time
+
+    if getenv("TORCH_COMP"):
+      print(f"Sleeping for {sleep_secs}s")
+      time.sleep(sleep_secs)
+      import torch
+      torch_dtype = torch.bfloat16 if DTYPE_IN == dtypes.bfloat16 else (torch.float16 if DTYPE_IN == dtypes.half else torch.float32)
+      ta = torch.from_numpy(na.astype(np.float32)).to(torch_dtype).cuda()
+      tb = torch.from_numpy(nb.astype(np.float32)).to(torch_dtype).cuda()
+      torch.cuda.synchronize()
+      for _ in range(3): ta @ tb  # warmup
+      torch.cuda.synchronize()
+      torch_tms = []
+      for _ in range(CNT):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        ta @ tb
+        end.record()
+        torch.cuda.synchronize()
+        torch_tms.append(start.elapsed_time(end) / 1000)
+      print(f"TORCH MIN: {min(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/min(torch_tms):9.2f} GFLOPS")
+      print(f"TORCH AVG: {np.mean(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/np.mean(torch_tms):9.2f} GFLOPS")
+      print(f"TORCH MED: {np.median(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/np.median(torch_tms):9.2f} GFLOPS")
+
+    print(f"Sleeping for {sleep_secs}s")
+    time.sleep(sleep_secs)
     cudaalloc._copyin(a, memoryview(bytearray(na)))
     cudaalloc._copyin(b, memoryview(bytearray(nb)))
     for i in range(CNT):
@@ -185,7 +243,11 @@ if __name__ == "__main__":
     comp = na.astype(np.float32) @ nb.astype(np.float32)
     result = nc.reshape(M, N).astype(np.float32)
 
-    print(f"{N*N:10d} {min(tms)*1e6:9.2f} us, would be {FLOPS*1e-9/min(tms):9.2f} GFLOPS matmul, {BW*1e-9/min(tms):.2f} GB/s")
+    print(f"MIN: {N*N:10d} {min(tms)*1e6:9.2f} us, would be {FLOPS*1e-9/min(tms):9.2f} GFLOPS matmul, {BW*1e-9/min(tms):.2f} GB/s")
+    avg_tms = np.mean(tms)
+    med_tms = np.median(tms)
+    print(f"AVG: {N*N:10d} {(avg_tms)*1e6:9.2f} us, would be {FLOPS*1e-9/(avg_tms):9.2f} GFLOPS matmul, {BW*1e-9/(avg_tms):.2f} GB/s")
+    print(f"MED: {N*N:10d} {(med_tms)*1e6:9.2f} us, would be {FLOPS*1e-9/(med_tms):9.2f} GFLOPS matmul, {BW*1e-9/(med_tms):.2f} GB/s")
     try:
       np.testing.assert_allclose(result, comp, atol=ATOL, rtol=RTOL)
     except AssertionError as e:
@@ -207,6 +269,29 @@ if __name__ == "__main__":
       print(result)
       print("result sum  :", np.sum(result))
 
+    if getenv("TORCH_COMP"):
+      print(f"Sleeping for {sleep_secs}s")
+      time.sleep(sleep_secs)
+      import torch
+      torch_dtype = torch.bfloat16 if DTYPE_IN == dtypes.bfloat16 else (torch.float16 if DTYPE_IN == dtypes.half else torch.float32)
+      ta = torch.from_numpy(na.astype(np.float32)).to(torch_dtype).cuda()
+      tb = torch.from_numpy(nb.astype(np.float32)).to(torch_dtype).cuda()
+      torch.cuda.synchronize()
+      for _ in range(3): ta @ tb  # warmup
+      torch.cuda.synchronize()
+      torch_tms = []
+      for _ in range(CNT):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        ta @ tb
+        end.record()
+        torch.cuda.synchronize()
+        torch_tms.append(start.elapsed_time(end) / 1000)
+      print(f"TORCH MIN: {min(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/min(torch_tms):9.2f} GFLOPS")
+      print(f"TORCH AVG: {np.mean(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/np.mean(torch_tms):9.2f} GFLOPS")
+      print(f"TORCH MED: {np.median(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/np.median(torch_tms):9.2f} GFLOPS")
+
   elif getenv("AMD") == 1:
     # note: https://hipfft.readthedocs.io/en/rocm-6.1.2/how-to/fine-tuning-llms/optimizing-triton-kernel.html
 
@@ -216,4 +301,3 @@ if __name__ == "__main__":
 
   else:
     raise RuntimeError("invalid max_matmul device")
-
