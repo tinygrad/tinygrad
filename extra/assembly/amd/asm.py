@@ -145,6 +145,10 @@ def _disasm_sopp(inst: SOPP) -> str:
     dep = lambda v: deps[v-1] if 0 < v <= len(deps) else str(v)
     p = [f"instid0({dep(id0)})" if id0 else "", f"instskip({skips[skip]})" if skip else "", f"instid1({dep(id1)})" if id1 else ""]
     return f"s_delay_alu {' | '.join(x for x in p if x) or '0'}"
+  if inst.op == SOPPOp.S_SENDMSG:
+    msgs = {3: 'MSG_DEALLOC_VGPRS', 1: 'MSG_INTERRUPT', 2: 'MSG_GS', 4: 'MSG_SAVEWAVE', 9: 'MSG_GS_ALLOC_REQ', 10: 'MSG_GET_DOORBELL'}
+    msg_id = inst.simm16 & 0xf
+    if msg_id in msgs: return f"s_sendmsg sendmsg({msgs[msg_id]})"
   return f"{name} {inst.simm16}" if name.startswith(('s_cbranch', 's_branch')) else f"{name} 0x{inst.simm16:x}"
 
 def _disasm_smem(inst: SMEM) -> str:
@@ -465,6 +469,32 @@ def get_dsl(text: str) -> str:
       elif m := re.match(r'lgkmcnt\((\d+)\)', p): lgkm = int(m.group(1))
       elif re.match(r'^0x[0-9a-f]+$|^\d+$', p): return f"s_waitcnt(simm16={int(p, 0)})"
     return f"s_waitcnt(simm16={waitcnt(vm, exp, lgkm)})"
+
+  # s_clause - simm16 is the count
+  if mn == 's_clause':
+    return f"s_clause(simm16={int(op_str.strip(), 0)})"
+
+  # s_delay_alu - parse instid0, instskip, instid1
+  if mn == 's_delay_alu':
+    deps = {'VALU_DEP_1':1, 'VALU_DEP_2':2, 'VALU_DEP_3':3, 'VALU_DEP_4':4, 'TRANS32_DEP_1':5, 'TRANS32_DEP_2':6, 'TRANS32_DEP_3':7, 'FMA_ACCUM_CYCLE_1':8, 'SALU_CYCLE_1':9, 'SALU_CYCLE_2':10, 'SALU_CYCLE_3':11}
+    skips = {'SAME':0, 'NEXT':1, 'SKIP_1':2, 'SKIP_2':3, 'SKIP_3':4, 'SKIP_4':5}
+    id0, skip, id1 = 0, 0, 0
+    for part in op_str.replace('|', ' ').split():
+      if m := re.match(r'instid0\((\w+)\)', part): id0 = deps.get(m.group(1), int(m.group(1), 0) if m.group(1).isdigit() else 0)
+      elif m := re.match(r'instskip\((\w+)\)', part): skip = skips.get(m.group(1), int(m.group(1), 0) if m.group(1).isdigit() else 0)
+      elif m := re.match(r'instid1\((\w+)\)', part): id1 = deps.get(m.group(1), int(m.group(1), 0) if m.group(1).isdigit() else 0)
+    simm16 = id0 | (skip << 4) | (id1 << 7)
+    return f"s_delay_alu(simm16={simm16})"
+
+  # s_sendmsg - parse sendmsg(MSG_*)
+  if mn == 's_sendmsg':
+    msgs = {'MSG_DEALLOC_VGPRS': 3, 'MSG_INTERRUPT': 1, 'MSG_GS': 2, 'MSG_SAVEWAVE': 4, 'MSG_GS_ALLOC_REQ': 9, 'MSG_GET_DOORBELL': 10}
+    if m := re.match(r'sendmsg\((\w+)\)', op_str.strip()):
+      msg_name = m.group(1)
+      if msg_name in msgs: return f"s_sendmsg(simm16={msgs[msg_name]})"
+    # Fallback to numeric
+    if m := re.match(r'0x[0-9a-f]+|\d+', op_str.strip(), re.I):
+      return f"s_sendmsg(simm16={int(m.group(0), 0)})"
 
   # VOPD
   if '::' in text:
