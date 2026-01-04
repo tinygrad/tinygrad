@@ -248,17 +248,6 @@ def exec_ds(st: WaveState, inst, V: list, lane: int) -> None:
   if 'RETURN_DATA' in result and ('_RTN' in inst.op_name or '_LOAD' in inst.op_name):
     _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords * 2 if '_2ADDR_' in inst.op_name else ndwords)
 
-def exec_vop3sd(st: WaveState, inst, V: list, lane: int) -> None:
-  """VOP3SD: has extra scalar dest for carry output."""
-  literal = inst._literal
-  def rsrc_n(src, regs): return st.rsrc64(src, lane, literal) if regs == 2 else st.rsrc(src, lane, literal)
-  s0, s1, s2 = rsrc_n(inst.src0, inst.src_regs(0)), rsrc_n(inst.src1, inst.src_regs(1)), rsrc_n(inst.src2, inst.src_regs(2))
-  vcc = st.rsgpr64(inst.src2) if 'CO_CI' in inst.op_name else st.vcc  # Carry-in ops use src2 as carry bitmask
-  result = inst._fn(s0, s1, s2, V[inst.vdst], st.scc, vcc, lane, st.exec_mask, literal, None)
-  V[inst.vdst] = result['D0'] & MASK32
-  if inst.dst_regs() == 2: V[inst.vdst + 1] = (result['D0'] >> 32) & MASK32
-  if 'VCC' in result: st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
-
 def exec_vop3p(st: WaveState, inst, V: list, lane: int) -> None:
   """VOP3P: packed 16-bit ops with opsel half-selection and neg modifiers."""
   literal = inst._literal
@@ -280,15 +269,15 @@ def exec_vop3p(st: WaveState, inst, V: list, lane: int) -> None:
   V[inst.vdst] = result['D0'] & MASK32
 
 def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
-  """VOP1/VOP2/VOP3/VOPC: standard ALU ops (dst_hi: bit 7 of vdst indicates .h for 16-bit ops)."""
+  """VOP1/VOP2/VOP3/VOP3SD/VOPC: standard ALU ops."""
   if isinstance(inst, VOP1):
     src0, src1, src2, vdst = inst.src0, None, None, inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
     dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
   elif isinstance(inst, VOP2):
     src0, src1, src2, vdst = inst.src0, inst.vsrc1 + 256, None, inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
     dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
-  elif isinstance(inst, VOP3):
-    src0, src1, src2, vdst = inst.src0, inst.src1, (None if inst.op.value < 256 else inst.src2), inst.vdst
+  elif isinstance(inst, (VOP3, VOP3SD)):
+    src0, src1, src2, vdst = inst.src0, inst.src1, (None if isinstance(inst, VOP3) and inst.op.value < 256 else inst.src2), inst.vdst
     dst_hi = False
   elif isinstance(inst, VOPC):
     src0, src1, src2, vdst, dst_hi = inst.src0, inst.vsrc1 + 256, None, VCC_LO, False
@@ -304,19 +293,21 @@ def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
   elif inst.dst_regs() == 2: d0 = V[vdst] | (V[vdst + 1] << 32)
   else: d0 = V[vdst]
 
-  # V_CNDMASK: VOP3 uses src2 as mask, VOP2 uses VCC implicitly
-  vcc_for_fn = st.rsgpr64(src2) if inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and isinstance(inst, VOP3) and src2 is not None and src2 < 256 else st.vcc
-  # Execute compiled function - pass src0_idx and vdst_idx for lane instructions
+  # VOP3SD CO_CI uses src2 as carry bitmask; V_CNDMASK uses src2 as mask
+  if isinstance(inst, VOP3SD) and 'CO_CI' in inst.op_name: vcc_for_fn = st.rsgpr64(inst.src2)
+  elif inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and isinstance(inst, VOP3) and src2 is not None and src2 < 256: vcc_for_fn = st.rsgpr64(src2)
+  else: vcc_for_fn = st.vcc
   src0_idx = (src0 - 256) if src0 is not None and src0 >= 256 else (src0 if src0 is not None else 0)
   result = inst._fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, inst._literal, st.vgpr, src0_idx, vdst)
 
   # Apply results
   if 'VCC' in result:
-    st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['VCC'] >> lane) & 1)  # VOP2 carry ops write to VCC implicitly
+    if isinstance(inst, VOP3SD): st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
+    else: st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['VCC'] >> lane) & 1)
   if 'EXEC' in result:
-    st.pend_sgpr_lane(EXEC_LO, lane, (result['EXEC'] >> lane) & 1)  # V_CMPX instructions write to EXEC per-lane
+    st.pend_sgpr_lane(EXEC_LO, lane, (result['EXEC'] >> lane) & 1)
   elif isinstance(inst.op, VOPCOp):
-    st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)  # VOPC comparison result stored in D0 bitmask
+    st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)
   if not isinstance(inst.op, VOPCOp):
     d0_val = result['D0']
     if inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
@@ -395,7 +386,6 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
     elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)
-    elif isinstance(inst, VOP3SD): inst._dispatch = dispatch_lane(exec_vop3sd)
     elif isinstance(inst, VOP3P): inst._dispatch = dispatch_lane(exec_vop3p)
     else: inst._dispatch = dispatch_lane(exec_vop)
 
