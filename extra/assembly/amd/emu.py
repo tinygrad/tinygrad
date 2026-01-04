@@ -222,13 +222,11 @@ def exec_scalar(st: WaveState, inst: Inst):
 
 def exec_vopd(st: WaveState, inst, V: list, lane: int) -> None:
   """VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)."""
-  literal = inst._literal
-  vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
-  inputs = [(inst.opx, st.rsrc(inst.srcx0, lane, literal), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
-            (inst.opy, st.rsrc(inst.srcy0, lane, literal), V[inst.vsrcy1], V[vdsty], vdsty)]
-  for vopd_op, s0, s1, d0, dst in inputs:
-    op = _VOPD_TO_VOP[vopd_op]
-    V[dst] = COMPILED_FUNCTIONS[type(op)][op](s0, s1, 0, d0, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
+  literal, vdstx, vdsty = inst._literal, inst.vdstx, (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
+  sx0, sx1, dx, sy0, sy1, dy = st.rsrc(inst.srcx0, lane, literal), V[inst.vsrcx1], V[vdstx], st.rsrc(inst.srcy0, lane, literal), V[inst.vsrcy1], V[vdsty]
+  opx, opy = _VOPD_TO_VOP[inst.opx], _VOPD_TO_VOP[inst.opy]
+  V[vdstx] = COMPILED_FUNCTIONS[type(opx)][opx](sx0, sx1, 0, dx, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
+  V[vdsty] = COMPILED_FUNCTIONS[type(opy)][opy](sy0, sy1, 0, dy, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
 
 def exec_flat(st: WaveState, inst, V: list, lane: int) -> None:
   """FLAT/GLOBAL/SCRATCH memory ops."""
