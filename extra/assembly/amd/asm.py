@@ -7,6 +7,7 @@ from extra.assembly.amd.dsl import SPECIAL_GPRS, SPECIAL_PAIRS, SPECIAL_PAIRS_CD
 from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP,
   VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp, MTBUFOp)
+from extra.assembly.amd.autogen.rdna3.enum import BufFmt
 
 def _is_cdna(inst: Inst) -> bool: return 'cdna' in inst.__class__.__module__
 
@@ -60,46 +61,11 @@ HWREG = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_H
          19: 'HW_REG_PERF_SNAPSHOT_PC_HI', 20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI', 22: 'HW_REG_XNACK_MASK',
          23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER', 28: 'HW_REG_IB_STS2'}
 HWREG_IDS = {v.lower(): k for k, v in HWREG.items()}
-# Buffer format values for MTBUF instructions
-BUF_FMT = {"BUF_FMT_8_UNORM": 1, "BUF_FMT_8_SNORM": 2, "BUF_FMT_8_USCALED": 3, "BUF_FMT_8_SSCALED": 4,
-  "BUF_FMT_8_UINT": 5, "BUF_FMT_8_SINT": 6, "BUF_FMT_16_UNORM": 7, "BUF_FMT_16_SNORM": 8,
-  "BUF_FMT_16_USCALED": 9, "BUF_FMT_16_SSCALED": 10, "BUF_FMT_16_UINT": 11, "BUF_FMT_16_SINT": 12,
-  "BUF_FMT_16_FLOAT": 13, "BUF_FMT_8_8_UNORM": 14, "BUF_FMT_8_8_SNORM": 15, "BUF_FMT_8_8_USCALED": 16,
-  "BUF_FMT_8_8_SSCALED": 17, "BUF_FMT_8_8_UINT": 18, "BUF_FMT_8_8_SINT": 19, "BUF_FMT_32_UINT": 20,
-  "BUF_FMT_32_SINT": 21, "BUF_FMT_32_FLOAT": 22, "BUF_FMT_16_16_UNORM": 23, "BUF_FMT_16_16_SNORM": 24,
-  "BUF_FMT_16_16_USCALED": 25, "BUF_FMT_16_16_SSCALED": 26, "BUF_FMT_16_16_UINT": 27, "BUF_FMT_16_16_SINT": 28,
-  "BUF_FMT_16_16_FLOAT": 29, "BUF_FMT_10_11_11_FLOAT": 30, "BUF_FMT_11_11_10_FLOAT": 31,
-  "BUF_FMT_10_10_10_2_UNORM": 32, "BUF_FMT_10_10_10_2_SNORM": 33, "BUF_FMT_10_10_10_2_UINT": 34,
-  "BUF_FMT_10_10_10_2_SINT": 35, "BUF_FMT_2_10_10_10_UNORM": 36, "BUF_FMT_2_10_10_10_SNORM": 37,
-  "BUF_FMT_2_10_10_10_USCALED": 38, "BUF_FMT_2_10_10_10_SSCALED": 39, "BUF_FMT_2_10_10_10_UINT": 40,
-  "BUF_FMT_2_10_10_10_SINT": 41, "BUF_FMT_8_8_8_8_UNORM": 42, "BUF_FMT_8_8_8_8_SNORM": 43,
-  "BUF_FMT_8_8_8_8_USCALED": 44, "BUF_FMT_8_8_8_8_SSCALED": 45, "BUF_FMT_8_8_8_8_UINT": 46,
-  "BUF_FMT_8_8_8_8_SINT": 47, "BUF_FMT_32_32_UINT": 48, "BUF_FMT_32_32_SINT": 49, "BUF_FMT_32_32_FLOAT": 50,
-  "BUF_FMT_16_16_16_16_UNORM": 51, "BUF_FMT_16_16_16_16_SNORM": 52, "BUF_FMT_16_16_16_16_USCALED": 53,
-  "BUF_FMT_16_16_16_16_SSCALED": 54, "BUF_FMT_16_16_16_16_UINT": 55, "BUF_FMT_16_16_16_16_SINT": 56,
-  "BUF_FMT_16_16_16_16_FLOAT": 57, "BUF_FMT_32_32_32_UINT": 58, "BUF_FMT_32_32_32_SINT": 59,
-  "BUF_FMT_32_32_32_FLOAT": 60, "BUF_FMT_32_32_32_32_UINT": 61, "BUF_FMT_32_32_32_32_SINT": 62,
-  "BUF_FMT_32_32_32_32_FLOAT": 63}
-# DATA_FORMAT x NUM_FORMAT lookup for combined format:[BUF_DATA_FORMAT_X, BUF_NUM_FORMAT_Y] syntax
-_BUF_DATA_FMT = {"BUF_DATA_FORMAT_8": 0, "BUF_DATA_FORMAT_16": 1, "BUF_DATA_FORMAT_8_8": 2, "BUF_DATA_FORMAT_32": 3,
-  "BUF_DATA_FORMAT_16_16": 4, "BUF_DATA_FORMAT_10_11_11": 5, "BUF_DATA_FORMAT_11_11_10": 6, "BUF_DATA_FORMAT_10_10_10_2": 7,
-  "BUF_DATA_FORMAT_2_10_10_10": 8, "BUF_DATA_FORMAT_8_8_8_8": 9, "BUF_DATA_FORMAT_32_32": 10, "BUF_DATA_FORMAT_16_16_16_16": 11,
-  "BUF_DATA_FORMAT_32_32_32": 12, "BUF_DATA_FORMAT_32_32_32_32": 13}
-_BUF_NUM_FMT = {"BUF_NUM_FORMAT_UNORM": 0, "BUF_NUM_FORMAT_SNORM": 1, "BUF_NUM_FORMAT_USCALED": 2, "BUF_NUM_FORMAT_SSCALED": 3,
-  "BUF_NUM_FORMAT_UINT": 4, "BUF_NUM_FORMAT_SINT": 5, "BUF_NUM_FORMAT_FLOAT": 6}
-def _parse_buf_fmt_combo(s: str) -> int:
-  parts = [p.strip() for p in s.split(',')]
-  if len(parts) != 2: return None
-  df, nf = _BUF_DATA_FMT.get(parts[0]), _BUF_NUM_FMT.get(parts[1])
-  if df is None or nf is None: return None
-  # Map (df, nf) to combined format - this is architecture specific, we build from BUF_FMT
-  for name, val in BUF_FMT.items():
-    # Extract data format and num format from name like BUF_FMT_8_UNORM
-    name_parts = name.replace('BUF_FMT_', '').rsplit('_', 1)
-    if len(name_parts) == 2 and name_parts[1].upper() in ('UNORM','SNORM','USCALED','SSCALED','UINT','SINT','FLOAT'):
-      dfn, nfn = f"BUF_DATA_FORMAT_{name_parts[0]}", f"BUF_NUM_FORMAT_{name_parts[1]}"
-      if _BUF_DATA_FMT.get(dfn) == df and _BUF_NUM_FMT.get(nfn) == nf: return val
-  return None
+# RDNA unified buffer format - extracted from PDF, use enum for name->value lookup
+BUF_FMT = {e.name: e.value for e in BufFmt}
+def _parse_buf_fmt_combo(s: str) -> int:  # parse format:[BUF_DATA_FORMAT_X, BUF_NUM_FORMAT_Y]
+  parts = [p.strip().replace('BUF_DATA_FORMAT_', '').replace('BUF_NUM_FORMAT_', '') for p in s.split(',')]
+  return BUF_FMT.get(f'BUF_FMT_{parts[0]}_{parts[1]}') if len(parts) == 2 else None
 MSG = {128: 'MSG_RTN_GET_DOORBELL', 129: 'MSG_RTN_GET_DDID', 130: 'MSG_RTN_GET_TMA',
        131: 'MSG_RTN_GET_REALTIME', 132: 'MSG_RTN_SAVE_WAVE', 133: 'MSG_RTN_GET_TBA'}
 
