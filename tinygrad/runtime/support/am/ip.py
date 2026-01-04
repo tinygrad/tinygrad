@@ -57,8 +57,8 @@ class AM_GMC(AM_IP):
 
     self.trans_futher = self.adev.ip_ver[am.GC_HWIP] < (10, 0, 0)
 
-    # GFX11/GFX12 has 44-bit address space
-    self.address_space_mask = (1 << 44) - 1
+    # mi3xx has 48-bit, others have 44-bit address space
+    self.address_space_mask = (1 << (48 if self.adev.ip_ver[am.GC_HWIP][:2] == (9,4) else 44)) - 1
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
@@ -158,11 +158,11 @@ class AM_GMC(AM_IP):
     if self.adev.ip_ver[am.GC_HWIP] < (10,0,0): return (pte & am.AMDGPU_PDE_PTE) if pte_lv != am.AMDGPU_VM_PDB0 else not (pte & am.AMDGPU_PTE_TF)
     return pte & (am.AMDGPU_PDE_PTE_GFX12 if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else am.AMDGPU_PDE_PTE)
 
-  def on_interrupt(self):
-    for ip in ["MM", "GC"]:
-      va = (self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg(f'reg{ip}VM_L2_PROTECTION_FAULT_ADDR_LO32').read()
-      if self.adev.reg(self.pf_status_reg(ip)).read():
-        raise RuntimeError(f"{ip}VM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg(ip)).read_bitfields()} {va<<12:#x}")
+  def check_fault(self) -> str|None:
+    va = (self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_HI32').read()<<32) | self.adev.reg('regGCVM_L2_PROTECTION_FAULT_ADDR_LO32').read()
+    if self.adev.reg(self.pf_status_reg("GC")).read():
+      return f"GCVM_L2_PROTECTION_FAULT_STATUS: {self.adev.reg(self.pf_status_reg('GC')).read_bitfields()} {va<<12:#x}"
+    return None
 
 class AM_SMU(AM_IP):
   def init_sw(self):
@@ -183,7 +183,8 @@ class AM_SMU(AM_IP):
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
     elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
-    time.sleep(0.5) # 500ms
+
+    if not self.adev.is_hive(): time.sleep(0.5) # 500ms
 
   def read_table(self, table_t, arg):
     if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)

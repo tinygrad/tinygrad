@@ -92,7 +92,9 @@ def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
   lib_ptr = ctypes.addressof(kernel_buf)
 
   set_valid_mem_ranges({(out_addr, OUT_BYTES), (args_ptr, 8)})
-  result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr)
+  # rsrc2: USER_SGPR_COUNT=2, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z=1, LDS_SIZE=128 (64KB)
+  rsrc2 = 0x19c | (128 << 15)
+  result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr, rsrc2)
   assert result == 0, f"run_asm failed with {result}"
 
   return parse_output(bytes(out_buf), n_lanes)
