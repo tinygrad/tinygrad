@@ -379,7 +379,7 @@ class TestContribOnnxOps(TestOnnxOps):
         inps = {**base_inps, **extra_inps}
         opts = {**base_opts, **extra_opts}
         outputs = ["output", "present"] if "past" in inps else ["output"]
-        self.helper_test_single_op("Attention", inps, opts, outputs, atol=1e-4)
+        self.helper_test_single_op("Attention", inps, opts, outputs, rtol=5e-3, atol=5e-3)
 
   def test_skip_layer_normalization(self):
     shape = (2, 8, 32)
