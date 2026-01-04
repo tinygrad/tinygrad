@@ -11,8 +11,6 @@ def _div(a, b):
   except ZeroDivisionError:
     if a == 0.0 or math.isnan(a): return float("nan")
     return math.copysign(float("inf"), a * b) if b == 0.0 else float("inf") if a > 0 else float("-inf")
-
-
 def _check_nan_type(x, quiet_bit_expected, default):
   try:
     if not math.isnan(float(x)): return False
@@ -31,9 +29,7 @@ def _fpop(fn):
     x = float(x)
     if math.isnan(x) or math.isinf(x): return x
     result = float(fn(x))
-    # Preserve sign of zero (IEEE 754: ceil(-0.0) = -0.0, ceil(-0.1) = -0.0)
-    if result == 0.0: return math.copysign(0.0, x)
-    return result
+    return math.copysign(0.0, x) if result == 0.0 else result
   return wrapper
 def _f_to_int(f, lo, hi): f = float(f); return 0 if math.isnan(f) else (hi if f >= hi else lo if f <= lo else int(f))
 def _f16_to_f32_bits(bits): return struct.unpack("<e", struct.pack("<H", int(bits) & 0xffff))[0]
@@ -443,7 +439,6 @@ INF = _Inf()
 ROUND_MODE = _RoundMode()
 WAVE_MODE = _WaveMode()
 DENORM = _Denorm()
-DST = None
 
 # 2/PI with 1201 bits of precision for V_TRIG_PREOP_F64
 TWO_OVER_PI_1201 = Reg(0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6)
