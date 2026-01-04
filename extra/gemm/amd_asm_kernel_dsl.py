@@ -289,137 +289,65 @@ def build_kernel(arch='gfx1100'):
   # Row stride constant: s[7] = 16*N (for A matrix row stepping)
   k.emit(s_lshl_b32(s[7], s[4], 4))
 
-  # --- A matrix row offsets: v[119,125,130,134,137,138,139,140] = row*N + i*16N ---
-  k.emit(v_mul_lo_u32(v[119], v[22], s[4]))
-  k.emit(v_add_nc_u32_e32(v[125], s[7], v[119]))
-  k.emit(v_add_nc_u32_e32(v[130], s[7], v[125]))
-  k.emit(v_add_nc_u32_e32(v[134], s[7], v[130]))
-  k.emit(v_add_nc_u32_e32(v[137], s[7], v[134]))
-  k.emit(v_add_nc_u32_e32(v[138], s[7], v[137]))
-  k.emit(v_add_nc_u32_e32(v[139], s[7], v[138]))
-  k.emit(v_add_nc_u32_e32(v[140], s[7], v[139]))
+  # A matrix row offsets: v[row_regs[i]] = row*N + i*16N
+  row_regs = [119, 125, 130, 134, 137, 138, 139, 140]
+  k.emit(v_mul_lo_u32(v[row_regs[0]], v[22], s[4]))
+  for i in range(1, 8):
+    k.emit(v_add_nc_u32_e32(v[row_regs[i]], s[7], v[row_regs[i-1]]))
 
-  # --- B matrix: 6 addresses for batch 1 (cols 0-5) ---
-  # B addresses: v[5:6]=col0, v[9:10]=col1, v[7:8]=col2, v[2:3]=col3, v[11:12]=col4, v[13:14]=col5
+  # Helper: compute 64-bit address v[dst:dst+1] = base + offset*4
+  def addr64(dst, base_s):
+    k.emit(v_ashrrev_i32_e32(v[dst+1], 31, v[dst]))
+    k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[dst:dst+1]))
+    k.emit(v_add_co_u32(v[dst], VCC_LO, s[base_s], v[dst]))
+    k.emit(v_add_co_ci_u32_e32(v[dst+1], s[base_s+1], v[dst+1]))
 
-  # B addr 0: v[5:6] (already have col*4, just add base)
+  # Helper: compute B address for col + mult*N -> v[dst:dst+1]
+  def b_addr(dst, mult):
+    k.emit(v_mad_u32_u24(v[dst], s[4], mult, v[1]))
+    addr64(dst, 10)
+
+  # Helper: compute A address for row_reg + v[118] -> v[dst:dst+1], using v[tmp] as scratch
+  def a_addr(dst, row_reg, tmp):
+    k.emit(v_add_nc_u32_e32(v[tmp], v[row_reg], v[118]))
+    k.emit(v_ashrrev_i32_e32(v[tmp+1], 31, v[tmp]))
+    k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[tmp:tmp+1]))
+    k.emit(v_add_co_u32(v[dst], VCC_LO, s[8], v[dst]))
+    k.emit(v_add_co_ci_u32_e32(v[dst+1], s[9], v[dst+1]))
+
+  # --- B addresses for batch 1 (cols 0-5) -> v[5,9,7,2,11,13] ---
+  # col0: v[5:6] already has col*4, just add base
   k.emit(v_add_co_u32(v[5], VCC_LO, s[10], v[5]))
   k.emit(v_add_co_ci_u32_e32(v[6], s[11], v[6]))
+  # cols 1-5
+  for dst, mult in [(9,1), (7,2), (2,3), (11,4), (13,5)]:
+    b_addr(dst, mult)
 
-  # col1 = col + N, B addr 1 -> v[9:10]
-  k.emit(v_add_nc_u32_e32(v[9], s[4], v[1]))
-  k.emit(v_ashrrev_i32_e32(v[10], 31, v[9]))
-  k.emit(v_lshlrev_b64(v[9:10], 2, v[9:10]))
-  k.emit(v_add_co_u32(v[9], VCC_LO, s[10], v[9]))
-  k.emit(v_add_co_ci_u32_e32(v[10], s[11], v[10]))
-
-  # col2 = col + 2N, B addr 2 -> v[7:8]
-  k.emit(v_lshl_add_u32(v[7], s[4], 1, v[1]))  # v[7] = N*2 + col = col + 2N
-  k.emit(v_ashrrev_i32_e32(v[8], 31, v[7]))
-  k.emit(v_lshlrev_b64(v[7:8], 2, v[7:8]))
-  k.emit(v_add_co_u32(v[7], VCC_LO, s[10], v[7]))
-  k.emit(v_add_co_ci_u32_e32(v[8], s[11], v[8]))
-
-  # col3 = col + 3N, B addr 3 -> v[2:3]
-  k.emit(v_mad_u32_u24(v[2], s[4], 3, v[1]))   # v[2] = col + 3N
-  k.emit(v_ashrrev_i32_e32(v[3], 31, v[2]))
-  k.emit(v_lshlrev_b64(v[2:3], 2, v[2:3]))
-  k.emit(v_add_co_u32(v[2], VCC_LO, s[10], v[2]))
-  k.emit(v_add_co_ci_u32_e32(v[3], s[11], v[3]))
-
-  # col4, col5 for B addr 4,5 -> v[11:12], v[13:14]
-  # col4 = col + 4N, col5 = col + 5N
-  k.emit(v_lshl_add_u32(v[11], s[4], 2, v[1]))  # v[11] = col + 4N (using lshl_add: N*4 + col = col + 4N)
-  k.emit(v_ashrrev_i32_e32(v[12], 31, v[11]))
-  k.emit(v_lshlrev_b64(v[11:12], 2, v[11:12]))
-  k.emit(v_add_co_u32(v[11], VCC_LO, s[10], v[11]))
-  k.emit(v_add_co_ci_u32_e32(v[12], s[11], v[12]))
-
-  k.emit(v_mad_u32_u24(v[13], s[4], 5, v[1]))   # v[13] = col + 5N
-  k.emit(v_ashrrev_i32_e32(v[14], 31, v[13]))
-  k.emit(v_lshlrev_b64(v[13:14], 2, v[13:14]))
-  k.emit(v_add_co_u32(v[13], VCC_LO, s[10], v[13]))
-  k.emit(v_add_co_ci_u32_e32(v[14], s[11], v[14]))
-
-  # --- Batch 1: B matrix loads (6 addresses ready) ---
+  # Batch 1: B matrix loads
   for vdst, addr_lo in INIT_TILE_LOADS[:6]:
     k.emit(global_load_b32(vdst=v[vdst], addr=v[addr_lo:addr_lo+1], saddr=RawImm(124)))
 
-  # --- A matrix addresses for batch 2: rows 0-4 + col&7 ---
-  # Batch 2 addresses: v[6:7], v[8:9], v[10:11], v[12:13], v[14:15]
-  k.emit(v_add_nc_u32_e32(v[6], v[119], v[118]))
-  k.emit(v_ashrrev_i32_e32(v[7], 31, v[6]))
-  k.emit(v_lshlrev_b64(v[6:7], 2, v[6:7]))
-  k.emit(v_add_co_u32(v[6], VCC_LO, s[8], v[6]))
-  k.emit(v_add_co_ci_u32_e32(v[7], s[9], v[7]))
+  # --- A addresses for batch 2 (rows 0-4) -> v[6,8,10,12,14] ---
+  for dst, row_idx in [(6,0), (8,1), (10,2), (12,3), (14,4)]:
+    k.emit(v_add_nc_u32_e32(v[dst], v[row_regs[row_idx]], v[118]))
+    addr64(dst, 8)
 
-  k.emit(v_add_nc_u32_e32(v[8], v[125], v[118]))
-  k.emit(v_ashrrev_i32_e32(v[9], 31, v[8]))
-  k.emit(v_lshlrev_b64(v[8:9], 2, v[8:9]))
-  k.emit(v_add_co_u32(v[8], VCC_LO, s[8], v[8]))
-  k.emit(v_add_co_ci_u32_e32(v[9], s[9], v[9]))
-
-  k.emit(v_add_nc_u32_e32(v[10], v[130], v[118]))
-  k.emit(v_ashrrev_i32_e32(v[11], 31, v[10]))
-  k.emit(v_lshlrev_b64(v[10:11], 2, v[10:11]))
-  k.emit(v_add_co_u32(v[10], VCC_LO, s[8], v[10]))
-  k.emit(v_add_co_ci_u32_e32(v[11], s[9], v[11]))
-
-  k.emit(v_add_nc_u32_e32(v[12], v[134], v[118]))
-  k.emit(v_ashrrev_i32_e32(v[13], 31, v[12]))
-  k.emit(v_lshlrev_b64(v[12:13], 2, v[12:13]))
-  k.emit(v_add_co_u32(v[12], VCC_LO, s[8], v[12]))
-  k.emit(v_add_co_ci_u32_e32(v[13], s[9], v[13]))
-
-  k.emit(v_add_nc_u32_e32(v[14], v[137], v[118]))
-  k.emit(v_ashrrev_i32_e32(v[15], 31, v[14]))
-  k.emit(v_lshlrev_b64(v[14:15], 2, v[14:15]))
-  k.emit(v_add_co_u32(v[14], VCC_LO, s[8], v[14]))
-  k.emit(v_add_co_ci_u32_e32(v[15], s[9], v[15]))
-
-  # --- Batch 2: A matrix loads (5 addresses ready) ---
+  # Batch 2: A matrix loads
   for vdst, addr_lo in INIT_TILE_LOADS[6:11]:
     k.emit(global_load_b32(vdst=v[vdst], addr=v[addr_lo:addr_lo+1], saddr=RawImm(124)))
 
-  # --- Batch 3 addresses: 2 B (col6,col7) + 3 A (rows 5,6,7) ---
-  # B: v[2:3] <- col6, v[4:5] <- col7
-  # A: v[8:9] <- row5, v[6:7] <- row6, v[10:11] <- row7
+  # --- Batch 3: B cols 6-7 -> v[2,4], A rows 5-7 -> v[8,6,10] ---
+  for dst, mult, tmp in [(2,6,15), (4,7,4)]:
+    k.emit(v_mad_u32_u24(v[tmp], s[4], mult, v[1]))
+    k.emit(v_ashrrev_i32_e32(v[tmp+1], 31, v[tmp]))
+    k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[tmp:tmp+1]))
+    k.emit(v_add_co_u32(v[dst], VCC_LO, s[10], v[dst]))
+    k.emit(v_add_co_ci_u32_e32(v[dst+1], s[11], v[dst+1]))
 
-  # col6 = col + 6N, col7 = col + 7N
-  k.emit(v_mad_u32_u24(v[15], s[4], 6, v[1]))   # v[15] = col + 6N
-  k.emit(v_ashrrev_i32_e32(v[16], 31, v[15]))
-  k.emit(v_lshlrev_b64(v[2:3], 2, v[15:16]))
-  k.emit(v_add_co_u32(v[2], VCC_LO, s[10], v[2]))
-  k.emit(v_add_co_ci_u32_e32(v[3], s[11], v[3]))
+  for dst, row_idx, tmp in [(8,5,16), (6,6,18), (10,7,20)]:
+    a_addr(dst, row_regs[row_idx], tmp)
 
-  k.emit(v_mad_u32_u24(v[4], s[4], 7, v[1]))    # v[4] = col + 7N
-  k.emit(v_ashrrev_i32_e32(v[5], 31, v[4]))
-  k.emit(v_lshlrev_b64(v[4:5], 2, v[4:5]))
-  k.emit(v_add_co_u32(v[4], VCC_LO, s[10], v[4]))
-  k.emit(v_add_co_ci_u32_e32(v[5], s[11], v[5]))
-
-  # A row5 -> v[8:9]
-  k.emit(v_add_nc_u32_e32(v[16], v[138], v[118]))
-  k.emit(v_ashrrev_i32_e32(v[17], 31, v[16]))
-  k.emit(v_lshlrev_b64(v[8:9], 2, v[16:17]))
-  k.emit(v_add_co_u32(v[8], VCC_LO, s[8], v[8]))
-  k.emit(v_add_co_ci_u32_e32(v[9], s[9], v[9]))
-
-  # A row6 -> v[6:7]
-  k.emit(v_add_nc_u32_e32(v[18], v[139], v[118]))
-  k.emit(v_ashrrev_i32_e32(v[19], 31, v[18]))
-  k.emit(v_lshlrev_b64(v[6:7], 2, v[18:19]))
-  k.emit(v_add_co_u32(v[6], VCC_LO, s[8], v[6]))
-  k.emit(v_add_co_ci_u32_e32(v[7], s[9], v[7]))
-
-  # A row7 -> v[10:11]
-  k.emit(v_add_nc_u32_e32(v[20], v[140], v[118]))
-  k.emit(v_ashrrev_i32_e32(v[21], 31, v[20]))
-  k.emit(v_lshlrev_b64(v[10:11], 2, v[20:21]))
-  k.emit(v_add_co_u32(v[10], VCC_LO, s[8], v[10]))
-  k.emit(v_add_co_ci_u32_e32(v[11], s[9], v[11]))
-
-  # --- Batch 3: Mixed B+A loads ---
+  # Batch 3: Mixed B+A loads
   for vdst, addr_lo in INIT_TILE_LOADS[11:]:
     k.emit(global_load_b32(vdst=v[vdst], addr=v[addr_lo:addr_lo+1], saddr=RawImm(124)))
 
