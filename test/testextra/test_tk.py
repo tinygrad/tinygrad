@@ -840,7 +840,7 @@ class TestTK(unittest.TestCase):
     np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
     np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
 
-		@unittest.expectedFailure
+  @unittest.expectedFailure
   def test_fast_fa_bwd_causal_jitted(self):
     from extra.thunder.tiny.fa import flash_attention
 
