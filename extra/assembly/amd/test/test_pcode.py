@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Tests for the RDNA3 pseudocode DSL."""
 import unittest
-from extra.assembly.amd.pcode import (Reg, TypedView, SliceProxy, MASK32, MASK64,
-                                       _f32, _i32, _f16, _i16, f32_to_f16, _isnan, _bf16, _ibf16, bf16_to_f32, f32_to_bf16,
+from extra.assembly.amd.pcode import (Reg, TypedView, TypedView, MASK32, MASK64,
+                                       _f32, _i32, _f16, _i16, f32_to_f16, isNAN, _bf16, _ibf16, bf16_to_f32, f32_to_bf16,
                                        BYTE_PERMUTE, v_sad_u8, v_msad_u8)
 from extra.assembly.amd.pdf import compile_pseudocode, _expr
 from extra.assembly.amd.test.helpers import ExecContext
@@ -42,7 +42,7 @@ class TestReg(unittest.TestCase):
 class TestTypedView(unittest.TestCase):
   def test_bit_slice(self):
     r = Reg(0xDEADBEEF)
-    # Slices return SliceProxy which supports .u32, .u16 etc (matching pseudocode like S1.u32[1:0].u32)
+    # Slices return TypedView which supports .u32, .u16 etc (matching pseudocode like S1.u32[1:0].u32)
     self.assertEqual(r.u32[7:0].u32, 0xEF)
     self.assertEqual(r.u32[15:8].u32, 0xBE)
     self.assertEqual(r.u32[23:16].u32, 0xAD)
@@ -67,7 +67,7 @@ class TestTypedView(unittest.TestCase):
     # S0.u32[S1.u32[4:0]] - access bit at position from another register
     s0 = Reg(0b11010101)
     s1 = Reg(3)
-    bit_pos = s1.u32[4:0]  # SliceProxy, int value = 3
+    bit_pos = s1.u32[4:0]  # TypedView, int value = 3
     bit_val = s0.u32[int(bit_pos)]  # bit 3 of s0 = 0
     self.assertEqual(int(bit_pos), 3)
     self.assertEqual(bit_val, 0)
@@ -85,7 +85,7 @@ class TestTypedView(unittest.TestCase):
     self.assertFalse(r1.u32 < r2.u32)
     self.assertTrue(r1.u32 != r2.u32)
 
-class TestSliceProxy(unittest.TestCase):
+class TestTypedView(unittest.TestCase):
   def test_slice_read(self):
     r = Reg(0x56781234)
     self.assertEqual(r[15:0].u16, 0x1234)
@@ -261,15 +261,15 @@ class TestPseudocodeRegressions(unittest.TestCase):
     result = _VOPCOp_V_CMP_CLASS_F32(signal_nan, s1_quiet, 0, 0, 0, 0, 0, 0xffffffff, 0, None)
     self.assertEqual(result['D0'] & 1, 0, "Signaling NaN should not match quiet NaN mask")
 
-  def test_isnan_with_typed_view(self):
-    """_isnan must work with TypedView objects, not just Python floats.
-    Bug: _isnan checked isinstance(x, float) which returned False for TypedView."""
+  def testisNAN_with_typed_view(self):
+    """isNAN must work with TypedView objects, not just Python floats.
+    Bug: isNAN checked isinstance(x, float) which returned False for TypedView."""
     nan_reg = Reg(0x7fc00000)  # quiet NaN
     normal_reg = Reg(0x3f800000)  # 1.0
     inf_reg = Reg(0x7f800000)  # +inf
-    self.assertTrue(_isnan(nan_reg.f32), "_isnan should return True for NaN TypedView")
-    self.assertFalse(_isnan(normal_reg.f32), "_isnan should return False for normal TypedView")
-    self.assertFalse(_isnan(inf_reg.f32), "_isnan should return False for inf TypedView")
+    self.assertTrue(isNAN(nan_reg.f32), "isNAN should return True for NaN TypedView")
+    self.assertFalse(isNAN(normal_reg.f32), "isNAN should return False for normal TypedView")
+    self.assertFalse(isNAN(inf_reg.f32), "isNAN should return False for inf TypedView")
 
 class TestBF16(unittest.TestCase):
   """Tests for BF16 (bfloat16) support."""
@@ -308,7 +308,7 @@ class TestBF16(unittest.TestCase):
     self.assertAlmostEqual(float(r.bf16), 3.0, places=1)
 
   def test_bf16_slice_property(self):
-    """Test SliceProxy.bf16 property."""
+    """Test TypedView.bf16 property."""
     r = Reg(0x40404040)  # Two bf16 3.0 values
     self.assertAlmostEqual(r[15:0].bf16, 3.0, places=1)
     self.assertAlmostEqual(r[31:16].bf16, 3.0, places=1)

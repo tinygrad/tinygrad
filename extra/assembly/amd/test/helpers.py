@@ -30,8 +30,8 @@ def get_llvm_objdump():
 class ExecContext:
   """Context for running compiled pseudocode in tests."""
   def __init__(self, s0=0, s1=0, s2=0, d0=0, scc=0, vcc=0, lane=0, exec_mask=0xffffffff, literal=0, vgprs=None, src0_idx=0, vdst_idx=0):
-    from extra.assembly.amd.pcode import Reg, MASK32, MASK64, SliceProxy
-    self._Reg, self._MASK64, self._SliceProxy = Reg, MASK64, SliceProxy
+    from extra.assembly.amd.pcode import Reg, MASK32, MASK64, TypedView
+    self._Reg, self._MASK64, self._TypedView = Reg, MASK64, TypedView
     self.S0, self.S1, self.S2 = Reg(s0), Reg(s1), Reg(s2)
     self.D0, self.D1 = Reg(d0), Reg(0)
     self.SCC, self.VCC, self.EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
@@ -51,7 +51,7 @@ class ExecContext:
     ns.update({
       'S0': self.S0, 'S1': self.S1, 'S2': self.S2, 'D0': self.D0, 'D1': self.D1,
       'SCC': self.SCC, 'VCC': self.VCC, 'EXEC': self.EXEC,
-      'EXEC_LO': self._SliceProxy(self.EXEC, 31, 0), 'EXEC_HI': self._SliceProxy(self.EXEC, 63, 32),
+      'EXEC_LO': self._TypedView(self.EXEC, 31, 0), 'EXEC_HI': self._TypedView(self.EXEC, 63, 32),
       'tmp': self.tmp, 'saveexec': self.saveexec,
       'lane': self.lane, 'laneId': self.laneId, 'literal': self.literal,
       'SIMM16': self.SIMM16, 'SIMM32': self.SIMM32, 'VGPR': self.VGPR, 'SRC0': self.SRC0, 'VDST': self.VDST,
