@@ -312,24 +312,26 @@ class _Denorm:
   f64 = _DenormChecker(64)
 DENORM = _Denorm()
 
-class SliceProxy:
-  """Proxy for D0[31:16] that supports .f16/.u16 etc getters and setters."""
-  __slots__ = ('_reg', '_high', '_low', '_reversed')
-  def __init__(self, reg, high, low):
-    self._reg = reg
+class TypedView:
+  """View into a Reg with typed access. Used for both full-width (Reg.u32) and slices (Reg[31:16])."""
+  __slots__ = ('_reg', '_high', '_low', '_signed', '_float', '_bf16')
+  def __init__(self, reg, high, low, signed=False, is_float=False, is_bf16=False):
     # Handle reversed slices like [0:31] which means bit-reverse
-    if high < low: self._high, self._low, self._reversed = low, high, True
-    else: self._high, self._low, self._reversed = high, low, False
+    if high < low: high, low = low, high
+    self._reg, self._high, self._low = reg, high, low
+    self._signed, self._float, self._bf16 = signed, is_float, is_bf16
+
   def _nbits(self): return self._high - self._low + 1
   def _mask(self): return (1 << self._nbits()) - 1
-  def _get(self):
-    v = (self._reg._val >> self._low) & self._mask()
-    return _brev(v, self._nbits()) if self._reversed else v
-  def _set(self, v):
-    v = int(v)
-    if self._reversed: v = _brev(v, self._nbits())
-    self._reg._val = (self._reg._val & ~(self._mask() << self._low)) | ((v & self._mask()) << self._low)
+  def _get(self): return (self._reg._val >> self._low) & self._mask()
+  def _set(self, v): self._reg._val = (self._reg._val & ~(self._mask() << self._low)) | ((int(v) & self._mask()) << self._low)
 
+  @property
+  def _val(self): return self._get()
+  @property
+  def _bits(self): return self._nbits()
+
+  # Type accessors for slices (e.g., D0[31:16].f16)
   u8 = property(lambda s: s._get() & 0xff)
   u16 = property(lambda s: s._get() & 0xffff, lambda s, v: s._set(v))
   u32 = property(lambda s: s._get() & MASK32, lambda s, v: s._set(v))
@@ -340,33 +342,17 @@ class SliceProxy:
   bf16 = property(lambda s: _bf16(s._get()), lambda s, v: s._set(v if isinstance(v, int) else _ibf16(float(v))))
   b16, b32 = u16, u32
 
-  def __int__(self): return self._get()
-  def __index__(self): return self._get()
-
-  # Comparison operators (compare as integers)
-  def __eq__(s, o): return s._get() == int(o)
-  def __ne__(s, o): return s._get() != int(o)
-  def __lt__(s, o): return s._get() < int(o)
-  def __le__(s, o): return s._get() <= int(o)
-  def __gt__(s, o): return s._get() > int(o)
-  def __ge__(s, o): return s._get() >= int(o)
-
-class TypedView:
-  """View for S0.u32 that supports [4:0] slicing and [bit] access."""
-  __slots__ = ('_reg', '_bits', '_signed', '_float', '_bf16')
-  def __init__(self, reg, bits, signed=False, is_float=False, is_bf16=False):
-    self._reg, self._bits, self._signed, self._float, self._bf16 = reg, bits, signed, is_float, is_bf16
-
+  # Chained type access (e.g., jump_addr.i64 when jump_addr is already TypedView)
   @property
-  def _val(self):
-    mask = MASK64 if self._bits == 64 else MASK32 if self._bits == 32 else (1 << self._bits) - 1
-    return self._reg._val & mask
+  def i64(s): return s if s._nbits() == 64 and s._signed else int(s)
+  @property
+  def u64(s): return s if s._nbits() == 64 and not s._signed else int(s) & MASK64
 
   def __getitem__(self, key):
     if isinstance(key, slice):
       high, low = int(key.start), int(key.stop)
-      return SliceProxy(self._reg, high, low)
-    return (self._val >> int(key)) & 1
+      return TypedView(self._reg, high, low)
+    return (self._get() >> int(key)) & 1
 
   def __setitem__(self, key, value):
     if isinstance(key, slice):
@@ -377,14 +363,16 @@ class TypedView:
     elif value: self._reg._val |= (1 << int(key))
     else: self._reg._val &= ~(1 << int(key))
 
-  def __int__(self): return _sext(self._val, self._bits) if self._signed else self._val
+  def __int__(self): return _sext(self._get(), self._nbits()) if self._signed else self._get()
   def __index__(self): return int(self)
   def __trunc__(self): return int(float(self)) if self._float else int(self)
   def __float__(self):
     if self._float:
-      if self._bf16: return _bf16(self._val)  # bf16 uses different conversion
-      return _f16(self._val) if self._bits == 16 else _f32(self._val) if self._bits == 32 else _f64(self._val)
+      if self._bf16: return _bf16(self._get())
+      bits = self._nbits()
+      return _f16(self._get()) if bits == 16 else _f32(self._get()) if bits == 32 else _f64(self._get())
     return float(int(self))
+  def __bool__(s): return bool(int(s))
 
   # Arithmetic - floats use float(), ints use int()
   def __add__(s, o): return float(s) + float(o) if s._float else int(s) + int(o)
@@ -425,52 +413,42 @@ class TypedView:
   def __gt__(s, o): return float(s) > float(o) if s._float else int(s) > int(o)
   def __ge__(s, o): return float(s) >= float(o) if s._float else int(s) >= int(o)
 
-  def __bool__(s): return bool(int(s))
-
-  # Allow chained type access like jump_addr.i64 when jump_addr is already a TypedView
-  # These just return self or convert appropriately
-  @property
-  def i64(s): return s if s._bits == 64 and s._signed else int(s)
-  @property
-  def u64(s): return s if s._bits == 64 and not s._signed else int(s) & MASK64
-  @property
-  def i32(s): return s if s._bits == 32 and s._signed else _sext(int(s) & MASK32, 32)
-  @property
-  def u32(s): return s if s._bits == 32 and not s._signed else int(s) & MASK32
+SliceProxy = TypedView  # Alias for compatibility
 
 class Reg:
   """GPU register: D0.f32 = S0.f32 + S1.f32 just works. Supports up to 128 bits for DS_LOAD_B128."""
   __slots__ = ('_val',)
   def __init__(self, val=0): self._val = int(val) & MASK128
 
-  # Typed views
-  u64 = property(lambda s: TypedView(s, 64), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  i64 = property(lambda s: TypedView(s, 64, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  b64 = property(lambda s: TypedView(s, 64), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  f64 = property(lambda s: TypedView(s, 64, is_float=True), lambda s, v: setattr(s, '_val', v if isinstance(v, int) else _i64(float(v))))
-  u32 = property(lambda s: TypedView(s, 32), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  i32 = property(lambda s: TypedView(s, 32, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  b32 = property(lambda s: TypedView(s, 32), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  f32 = property(lambda s: TypedView(s, 32, is_float=True), lambda s, v: setattr(s, '_val', _i32(float(v))))
-  u24 = property(lambda s: TypedView(s, 24))
-  i24 = property(lambda s: TypedView(s, 24, signed=True))
-  u16 = property(lambda s: TypedView(s, 16), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  i16 = property(lambda s: TypedView(s, 16, signed=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  b16 = property(lambda s: TypedView(s, 16), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  f16 = property(lambda s: TypedView(s, 16, is_float=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _i16(float(v))) & 0xffff)))
-  bf16 = property(lambda s: TypedView(s, 16, is_float=True, is_bf16=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _ibf16(float(v))) & 0xffff)))
-  u8 = property(lambda s: TypedView(s, 8))
-  i8 = property(lambda s: TypedView(s, 8, signed=True))
-  u3 = property(lambda s: TypedView(s, 3))  # 3-bit for opsel fields
-  u1 = property(lambda s: TypedView(s, 1))  # single bit
+  # Typed views - TypedView(reg, high, low, signed, is_float, is_bf16)
+  u64 = property(lambda s: TypedView(s, 63, 0), lambda s, v: setattr(s, '_val', int(v) & MASK64))
+  i64 = property(lambda s: TypedView(s, 63, 0, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK64))
+  b64 = property(lambda s: TypedView(s, 63, 0), lambda s, v: setattr(s, '_val', int(v) & MASK64))
+  f64 = property(lambda s: TypedView(s, 63, 0, is_float=True), lambda s, v: setattr(s, '_val', v if isinstance(v, int) else _i64(float(v))))
+  u32 = property(lambda s: TypedView(s, 31, 0), lambda s, v: setattr(s, '_val', int(v) & MASK32))
+  i32 = property(lambda s: TypedView(s, 31, 0, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK32))
+  b32 = property(lambda s: TypedView(s, 31, 0), lambda s, v: setattr(s, '_val', int(v) & MASK32))
+  f32 = property(lambda s: TypedView(s, 31, 0, is_float=True), lambda s, v: setattr(s, '_val', _i32(float(v))))
+  u24 = property(lambda s: TypedView(s, 23, 0))
+  i24 = property(lambda s: TypedView(s, 23, 0, signed=True))
+  u16 = property(lambda s: TypedView(s, 15, 0), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  i16 = property(lambda s: TypedView(s, 15, 0, signed=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  b16 = property(lambda s: TypedView(s, 15, 0), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  f16 = property(lambda s: TypedView(s, 15, 0, is_float=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _i16(float(v))) & 0xffff)))
+  bf16 = property(lambda s: TypedView(s, 15, 0, is_float=True, is_bf16=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _ibf16(float(v))) & 0xffff)))
+  u8 = property(lambda s: TypedView(s, 7, 0))
+  i8 = property(lambda s: TypedView(s, 7, 0, signed=True))
+  u3 = property(lambda s: TypedView(s, 2, 0))  # 3-bit for opsel fields
+  u1 = property(lambda s: TypedView(s, 0, 0))  # single bit
 
   def __getitem__(s, key):
-    if isinstance(key, slice): return SliceProxy(s, int(key.start), int(key.stop))
+    if isinstance(key, slice): return TypedView(s, int(key.start), int(key.stop))
     return (s._val >> int(key)) & 1
 
   def __setitem__(s, key, value):
     if isinstance(key, slice):
       high, low = int(key.start), int(key.stop)
+      if high < low: high, low = low, high
       mask = (1 << (high - low + 1)) - 1
       s._val = (s._val & ~(mask << low)) | ((int(value) & mask) << low)
     elif value: s._val |= (1 << int(key))
