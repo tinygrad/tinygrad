@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Test AMD assembler/disassembler against LLVM test vectors."""
-import unittest, re, subprocess
+import unittest, re, subprocess, functools
 from tinygrad.helpers import fetch
 from extra.assembly.amd.asm import asm, disasm, detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc
@@ -14,15 +14,16 @@ RDNA_FILES = ['gfx11_asm_sop1.s', 'gfx11_asm_sop2.s', 'gfx11_asm_sopp.s', 'gfx11
   'gfx11_asm_mimg.s', 'gfx11_asm_wmma.s', 'gfx11_asm_vop3_features.s', 'gfx11_asm_vop3p_features.s', 'gfx11_asm_vopd_features.s',
   'gfx11_asm_vop3_alias.s', 'gfx11_asm_vop3p_alias.s', 'gfx11_asm_vopc_alias.s', 'gfx11_asm_vopcx_alias.s', 'gfx11_asm_vinterp_alias.s',
   'gfx11_asm_smem_alias.s', 'gfx11_asm_mubuf_alias.s', 'gfx11_asm_mtbuf_alias.s']
-# NOTE: gfx9_asm_mimg.s/mimg-gfx90a.s/gfx9_asm_exp.s are for gfx900 (Vega), not CDNA - CDNA doesn't have MIMG/EXP instructions
-# MIMG instructions (encoding 0b111100) in other files are filtered out in setUpClass
+# NOTE: gfx9_asm_mimg.s/mimg-gfx90a.s/gfx9_asm_exp.s target gfx900 (Vega), not CDNA - CDNA doesn't have MIMG/EXP
+# gfx90a_ldst_acc.s has MIMG mixed in, filtered via is_mimg check
 CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'sopp-gfx9.s', 'gfx9_asm_sopk.s', 'gfx9_asm_sopc.s',
   'gfx9_asm_vop1.s', 'vop1-gfx9.s', 'gfx9_asm_vop2.s', 'gfx9_asm_vopc.s', 'gfx9_asm_vop3.s', 'gfx9_asm_vop3_e64.s', 'gfx9_asm_vop3p.s', 'vop3-gfx9.s',
   'gfx9_asm_ds.s', 'ds-gfx9.s', 'gfx9_asm_flat.s', 'flat-gfx9.s', 'gfx9_asm_smem.s', 'gfx9_asm_mubuf.s', 'mubuf-gfx9.s', 'gfx9_asm_mtbuf.s',
   'gfx90a_ldst_acc.s', 'gfx90a_asm_features.s', 'flat-scratch-gfx942.s', 'gfx942_asm_features.s', 'mai-gfx90a.s', 'mai-gfx942.s']
 
-def parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
-  """Parse LLVM test format into (asm, expected_bytes) pairs."""
+def _is_mimg(data: bytes) -> bool: return (int.from_bytes(data[:4], 'little') >> 26) & 0x3f == 0b111100
+
+def _parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
   tests, lines = [], text.split('\n')
   for i, line in enumerate(lines):
     line = line.strip()
@@ -37,8 +38,13 @@ def parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
         break
   return tests
 
-def compile_asm_batch(instrs: list[str]) -> list[bytes]:
-  """Compile instructions with llvm-mc."""
+@functools.cache
+def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]:
+  pattern = r'(?:GFX11|W32|W64)' if arch == "rdna3" else r'(?:VI9|GFX9|CHECK)'
+  tests = _parse_llvm_tests(fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore'), pattern)
+  return [(a, d) for a, d in tests if not _is_mimg(d)] if arch == "cdna" else tests
+
+def _compile_asm_batch(instrs: list[str]) -> list[bytes]:
   if not instrs: return []
   result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
     input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True, timeout=30)
@@ -46,64 +52,44 @@ def compile_asm_batch(instrs: list[str]) -> list[bytes]:
   return [bytes.fromhex(line.split('encoding:')[1].strip()[1:-1].replace('0x', '').replace(',', '').replace(' ', ''))
           for line in result.stdout.split('\n') if 'encoding:' in line]
 
-class TestLLVM(unittest.TestCase):
-  rdna: list[tuple[str, bytes]] = []
-  cdna: list[tuple[str, bytes]] = []
-
-  @classmethod
-  def setUpClass(cls):
-    for f in RDNA_FILES:
-      try: cls.rdna.extend(parse_llvm_tests(fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore'), r'(?:GFX11|W32|W64)'))
-      except Exception as e: print(f"Warning: {f}: {e}")
-    for f in CDNA_FILES:
-      try:
-        tests = parse_llvm_tests(fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore'), r'(?:VI9|GFX9|CHECK)')
-        cls.cdna.extend((asm, data) for asm, data in tests if (int.from_bytes(data[:4], 'little') >> 26) & 0x3f != 0b111100)  # skip MIMG
-      except Exception as e: print(f"Warning: {f}: {e}")
-
-  def _test_asm(self, tests, arch):
-    passed, failed, skipped = 0, 0, 0
-    for asm_text, expected in tests:
-      try: result = asm(asm_text).to_bytes()
-      except: result = None
-      if result is None: skipped += 1
-      elif result == expected: passed += 1
-      else: failed += 1
-    print(f"{arch} asm: {passed} passed, {failed} failed, {skipped} skipped")
-    self.assertEqual(failed, 0)
-
-  def _test_roundtrip(self, tests, arch):
-    passed, failed, skipped = 0, 0, 0
-    for _, data in tests:
-      try:
+def _make_test(f: str, arch: str, test_type: str):
+  def test(self):
+    tests = _get_tests(f, arch)
+    name = f"{arch}_{test_type}_{f}"
+    if test_type == "roundtrip":
+      for _, data in tests:
         decoded = detect_format(data, arch).from_bytes(data)
-        if decoded.to_bytes()[:len(data)] == data: passed += 1
-        else: failed += 1
-      except: skipped += 1
-    print(f"{arch} roundtrip: {passed} passed, {failed} failed, {skipped} skipped")
-    self.assertEqual(failed, 0)
-    self.assertEqual(skipped, 0)
+        self.assertEqual(decoded.to_bytes()[:len(data)], data)
+      print(f"{name}: {len(tests)} passed")
+    elif test_type == "asm":
+      passed, skipped = 0, 0
+      for asm_text, expected in tests:
+        try:
+          self.assertEqual(asm(asm_text).to_bytes(), expected)
+          passed += 1
+        except: skipped += 1
+      print(f"{name}: {passed} passed, {skipped} skipped")
+    elif test_type == "disasm":
+      to_test = []
+      for _, data in tests:
+        try:
+          decoded = detect_format(data, arch).from_bytes(data)
+          if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)): to_test.append((data, d))
+        except: pass
+      print(f"{name}: {len(to_test)} passed, {len(tests) - len(to_test)} skipped")
+      if arch == "rdna3":
+        for (data, _), llvm in zip(to_test, _compile_asm_batch([t[1] for t in to_test])): self.assertEqual(llvm, data)
+  return test
 
-  def _test_disasm(self, tests, arch):
-    to_test = []
-    for _, data in tests:
-      try:
-        decoded = detect_format(data, arch).from_bytes(data)
-        if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)): to_test.append((data, d))
-      except: pass
-    if arch == "rdna3":
-      llvm_results = compile_asm_batch([t[1] for t in to_test])
-      passed = sum(1 for (data, _), llvm in zip(to_test, llvm_results) if llvm == data)
-      print(f"{arch} disasm: {passed} passed, {len(to_test) - passed} failed")
-      self.assertEqual(passed, len(to_test))
-    else:
-      print(f"{arch} disasm: {len(to_test)} passed")
+class TestLLVM(unittest.TestCase): pass
 
-  def test_rdna3_asm(self): self._test_asm(self.rdna, "rdna3")
-  def test_rdna3_roundtrip(self): self._test_roundtrip(self.rdna, "rdna3")
-  def test_rdna3_disasm(self): self._test_disasm(self.rdna, "rdna3")
-  def test_cdna_roundtrip(self): self._test_roundtrip(self.cdna, "cdna")
-  def test_cdna_disasm(self): self._test_disasm(self.cdna, "cdna")
+for f in RDNA_FILES:
+  setattr(TestLLVM, f"test_rdna3_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "roundtrip"))
+  setattr(TestLLVM, f"test_rdna3_asm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "asm"))
+  setattr(TestLLVM, f"test_rdna3_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "disasm"))
+for f in CDNA_FILES:
+  setattr(TestLLVM, f"test_cdna_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "roundtrip"))
+  setattr(TestLLVM, f"test_cdna_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "disasm"))
 
 if __name__ == "__main__":
   unittest.main()
