@@ -216,7 +216,7 @@ CVT_MAP = {'u32_to_f32': (dtypes.float32, False), 'i32_to_f32': (dtypes.float32,
            'u32_to_f64': (dtypes.float64, False), 'f64_to_f32': (dtypes.float32, False), 'f32_to_f64': (dtypes.float64, False),
            'u16_to_f16': (dtypes.float16, False), 'i16_to_f16': (dtypes.float16, False), 'f16_to_u16': (dtypes.uint16, False),
            'f16_to_i16': (dtypes.int16, False)}
-MATH_OPS = {'trunc': Ops.TRUNC, 'floor': Ops.TRUNC, 'sqrt': Ops.SQRT, 'exp2': Ops.EXP2, 'log2': Ops.LOG2, 'sin': Ops.SIN, 'rcp': Ops.RECIPROCAL}
+MATH_OPS = {'trunc': Ops.TRUNC, 'sqrt': Ops.SQRT, 'exp2': Ops.EXP2, 'log2': Ops.LOG2, 'sin': Ops.SIN, 'rcp': Ops.RECIPROCAL}
 
 def _call_MEM(v): return v
 def _call_fma(a, b, c): return UOp(Ops.MULACC, c.dtype, (a, b, c))
@@ -226,7 +226,14 @@ def _call_rsqrt(v): return UOp(Ops.RECIPROCAL, v.dtype, (UOp(Ops.SQRT, v.dtype, 
 def _call_clamp(x, lo, hi):
   clamped = UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, lo)), lo, x))
   return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (hi, clamped)), hi, clamped))
-def _call_fract(v): return UOp(Ops.SUB, v.dtype, (v, UOp(Ops.TRUNC, v.dtype, (v,))))
+def _call_floor(v):
+  # floor(x) = trunc(x) - (x < trunc(x) ? 1 : 0)
+  truncated = UOp(Ops.TRUNC, v.dtype, (v,))
+  needs_adjust = UOp(Ops.CMPLT, dtypes.bool, (v, truncated))
+  return UOp(Ops.WHERE, v.dtype, (needs_adjust, UOp(Ops.SUB, v.dtype, (truncated, UOp.const(v.dtype, 1))), truncated))
+def _call_fract(v):
+  # fract(x) = x - floor(x)
+  return UOp(Ops.SUB, v.dtype, (v, _call_floor(v)))
 def _call_isNAN(v): return UOp(Ops.CMPNE, dtypes.bool, (v, v))
 def _call_isSignalNAN(v): return UOp.const(dtypes.bool, 0)
 def _call_cvtToQuietNAN(v): return v
@@ -290,7 +297,7 @@ def _call_BYTE_PERMUTE(src, sel):
 
 CALL_DISPATCH = {
   'MEM': _call_MEM, 'fma': _call_fma, 'abs': _call_abs, 'cos': _call_cos, 'rsqrt': _call_rsqrt,
-  'clamp': _call_clamp, 'fract': _call_fract, 'isNAN': _call_isNAN, 'isQuietNAN': _call_isNAN,
+  'clamp': _call_clamp, 'floor': _call_floor, 'fract': _call_fract, 'isNAN': _call_isNAN, 'isQuietNAN': _call_isNAN,
   'isSignalNAN': _call_isSignalNAN, 'cvtToQuietNAN': _call_cvtToQuietNAN, 'isINF': _call_isINF,
   'sign': _call_sign, 'exponent': _call_exponent, 'mantissa': _call_mantissa, 'isEven': _call_isEven,
   'signext': _call_signext, 'signext_from_bit': _call_signext_from_bit, 'ABSDIFF': _call_ABSDIFF, 'SAT8': _call_SAT8,
@@ -557,15 +564,13 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
 
 # Ops with known issues (subtle float semantics, register array access, unimplemented features)
 _SKIP_OPS = {
-  # Float ops with subtle semantics (neg zero, NaN handling)
-  'V_CEIL_F16', 'V_CEIL_F32', 'V_CEIL_F64', 'V_FLOOR_F16', 'V_FLOOR_F32', 'V_FLOOR_F64',
-  'V_FRACT_F16', 'V_FRACT_F32', 'V_FRACT_F64', 'V_DIV_FMAS_F32', 'V_DIV_FMAS_F64',
+  # Float ops with subtle semantics (NaN handling, VCC-based scaling)
+  'V_DIV_FMAS_F32', 'V_DIV_FMAS_F64',
   'V_CMP_CLASS_F16', 'V_CMP_CLASS_F32', 'V_CMP_CLASS_F64', 'V_CMPX_CLASS_F16', 'V_CMPX_CLASS_F32', 'V_CMPX_CLASS_F64',
   'V_FREXP_MANT_F16', 'V_FREXP_MANT_F32', 'V_FREXP_MANT_F64',
   'V_DIV_FIXUP_F16', 'V_DIV_FIXUP_F32', 'V_DIV_SCALE_F32', 'V_DIV_SCALE_F64',  # complex NaN/inf/denorm handling
   'V_TRIG_PREOP_F64',  # lookup table for 2/PI mantissa bits
   'V_MIN_F16', 'V_MIN_F32', 'V_MIN_F64', 'V_MAX_F16', 'V_MAX_F32', 'V_MAX_F64',  # neg zero handling: -0 < +0
-  'V_SIN_F16', 'V_SIN_F32', 'V_COS_F16', 'V_COS_F32',  # transcendental with special range reduction
   # Bit manipulation ops (find-first patterns now work via reversed loop unrolling, bit reversal via explicit OR chain)
   'S_FF0_I32_B32', 'S_FF0_I32_B64', 'S_FF1_I32_B32', 'S_FF1_I32_B64',
   'S_FLBIT_I32', 'S_FLBIT_I32_B32', 'S_FLBIT_I32_B64', 'S_FLBIT_I32_I32', 'S_FLBIT_I32_I64',
