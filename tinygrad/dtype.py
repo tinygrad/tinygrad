@@ -38,16 +38,18 @@ class AddrSpace(Enum):
 @dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
-  itemsize: int
+  bitsize: int
   name: str
   fmt: FmtStr|None
   count: int
   _scalar: DType|None
+  @property
+  def itemsize(self) -> int: return (self.bitsize + 7) // 8
   @staticmethod
-  def new(priority:int, itemsize:int, name:str, fmt:FmtStr|None): return DType(priority, itemsize, name, fmt, 1, None)
+  def new(priority:int, bitsize:int, name:str, fmt:FmtStr|None): return DType(priority, bitsize, name, fmt, 1, None)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
   def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count != 1 else "")
-  def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
+  def __lt__(self, o:DType): return (self.priority, self.bitsize, self.name, self.fmt, self.count) < (o.priority, o.bitsize, o.name, o.fmt, o.count)
   @property
   def base(self): return self
   @property
@@ -56,9 +58,9 @@ class DType(metaclass=DTypeMetaClass):
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
-    return DType(self.priority, self.itemsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
+    return DType(self.priority, self.bitsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
-    return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
+    return PtrDType(self.priority, self.bitsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
   def nbytes(self) -> int: raise RuntimeError("only ptr types have nbytes")
   @property
@@ -79,8 +81,8 @@ class PtrDType(DType):
     assert self.v == 1, f"can't vectorize ptr {self} with size {sz}"
     if sz == 1: return self  # sz=1 is a scalar
     if isinstance(self, ImageDType):
-      return ImageDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
-    return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size)
+      return ImageDType(self.priority, self.bitsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
+    return type(self)(self.priority, self.bitsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size)
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType: raise RuntimeError("can't make a pointer from a pointer")
   def nbytes(self) -> int:
     if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
@@ -142,12 +144,12 @@ class dtypes:
   @staticmethod
   @functools.cache
   def min(dtype:DType):
-    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.scalar().itemsize*8-1)
+    if dtypes.is_int(dtype): return 0 if dtypes.is_unsigned(dtype) else -2**(dtype.scalar().bitsize-1)
     return -float("inf") if dtypes.is_float(dtype) else False
   @staticmethod
   @functools.cache
   def max(dtype:DType):
-    if dtypes.is_int(dtype): return 2**(dtype.scalar().itemsize*8)-1+dtypes.min(dtype)
+    if dtypes.is_int(dtype): return 2**(dtype.scalar().bitsize)-1+dtypes.min(dtype)
     return float("inf") if dtypes.is_float(dtype) else True
   @staticmethod
   def finfo(dtype:DType) -> tuple[int, int]:
@@ -158,25 +160,23 @@ class dtypes:
   @staticmethod
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
-  index: Final[DType] = DType.new(-1,100, "index", None)
+  index: Final[DType] = DType.new(-1, 800, "index", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
-  int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
-  uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
-  int16: Final[DType] = DType.new(3, 2, "short", 'h')
-  uint16: Final[DType] = DType.new(4, 2, "unsigned short", 'H')
-  int24: Final[DType] = DType.new(5, 3, "int24", None)
-  uint24: Final[DType] = DType.new(6, 3, "uint24", None)
-  int32: Final[DType] = DType.new(7, 4, "int", 'i')
-  uint32: Final[DType] = DType.new(8, 4, "unsigned int", 'I')
-  int64: Final[DType] = DType.new(9, 8, "long", 'q')
-  uint64: Final[DType] = DType.new(10, 8, "unsigned long", 'Q')
-  fp8e4m3: Final[DType] = DType.new(11, 1, "float8_e4m3", None)
-  fp8e5m2: Final[DType] = DType.new(12, 1, "float8_e5m2", None)
-  float16: Final[DType] = DType.new(13, 2, "half", 'e')
+  int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
+  uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
+  int16: Final[DType] = DType.new(3, 16, "short", 'h')
+  uint16: Final[DType] = DType.new(4, 16, "unsigned short", 'H')
+  int32: Final[DType] = DType.new(5, 32, "int", 'i')
+  uint32: Final[DType] = DType.new(6, 32, "unsigned int", 'I')
+  int64: Final[DType] = DType.new(7, 64, "long", 'q')
+  uint64: Final[DType] = DType.new(8, 64, "unsigned long", 'Q')
+  fp8e4m3: Final[DType] = DType.new(9, 8, "float8_e4m3", None)
+  fp8e5m2: Final[DType] = DType.new(10, 8, "float8_e5m2", None)
+  float16: Final[DType] = DType.new(11, 16, "half", 'e')
   # bfloat16 has higher priority than float16, so least_upper_dtype(dtypes.int64, dtypes.uint64) = dtypes.float16
-  bfloat16: Final[DType] = DType.new(14, 2, "__bf16", None)
-  float32: Final[DType] = DType.new(15, 4, "float", 'f')
-  float64: Final[DType] = DType.new(16, 8, "double", 'd')
+  bfloat16: Final[DType] = DType.new(12, 16, "__bf16", None)
+  float32: Final[DType] = DType.new(13, 32, "float", 'f')
+  float64: Final[DType] = DType.new(14, 64, "double", 'd')
 
   # dtype aliases
   half = float16; float = float32; double = float64 # noqa: E702
@@ -185,9 +185,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp, pitch=-1): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
+  def imageh(shp, pitch=-1): return ImageDType(100, 16, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
   @staticmethod
-  def imagef(shp, pitch=-1): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
+  def imagef(shp, pitch=-1): return ImageDType(100, 32, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32

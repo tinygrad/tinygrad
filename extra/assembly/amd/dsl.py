@@ -458,10 +458,16 @@ class Inst:
 
   @classmethod
   def from_bytes(cls, data: bytes):
+    import typing
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
     op_val = inst._values.get('op', 0)
-    has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
-    has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
+    # Check for instructions that always have a literal constant (FMAMK/FMAAK/MADMK/MADAK, SETREG_IMM32)
+    op_name = ''
+    if cls.__name__ in ('VOP2', 'SOP2', 'SOPK') and 'op' in (hints := typing.get_type_hints(cls, include_extras=True)):
+      if typing.get_origin(hints['op']) is typing.Annotated:
+        try: op_name = typing.get_args(hints['op'])[1](op_val).name
+        except (ValueError, TypeError): pass
+    has_literal = any(x in op_name for x in ('FMAMK', 'FMAAK', 'MADMK', 'MADAK', 'SETREG_IMM32'))
     # VOPD fmaak/fmamk always have a literal (opx/opy value 1 or 2)
     opx, opy = inst._values.get('opx', 0), inst._values.get('opy', 0)
     has_literal = has_literal or (cls.__name__ == 'VOPD' and (opx in (1, 2) or opy in (1, 2)))
@@ -475,7 +481,7 @@ class Inst:
         lit32 = int.from_bytes(data[cls._size():cls._size()+4], 'little')
         # Find which source has literal (255) and check its register count
         lit_src_is_64 = False
-        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2)]:
+        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
           if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255:
             lit_src_is_64 = inst.src_regs(idx) == 2
             break
@@ -495,7 +501,12 @@ class Inst:
     return unwrap(self._values.get(name, 0))
 
   def lit(self, v: int, neg: bool = False) -> str:
-    s = f"0x{self._literal:x}" if v == 255 and self._literal else decode_src(v)
+    if v == 255 and self._literal is not None:
+      # For 64-bit sources, literal is stored shifted - extract the 32-bit value
+      lit32 = (self._literal >> 32) if self._literal > 0xffffffff else self._literal
+      s = f"0x{lit32:x}"
+    else:
+      s = decode_src(v)
     return f"-{s}" if neg else s
 
   def __eq__(self, other):
@@ -527,6 +538,10 @@ class Inst:
           if val < 256: self.op = VOPCOp(val)
           elif val in self._VOP3SD_OPS: self.op = VOP3SDOp(val)
           else: self.op = VOP3Op(val)
+        except ValueError: self.op = val
+      # Prefer BitField marker (class-specific enum) over _enum_map (generic RDNA3 enums)
+      elif 'op' in self._fields and (marker := self._fields['op'].marker) and issubclass(marker, IntEnum):
+        try: self.op = marker(val)
         except ValueError: self.op = val
       elif cls_name in self._enum_map:
         try: self.op = self._enum_map[cls_name](val)

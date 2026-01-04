@@ -7,20 +7,18 @@ import functools
 
 # instruction formats
 class DPP(Inst64):
-  encoding = bits[31:26] == 0b110110
-  src1_sel = bits[58:56]
-  src1_sext = bits[59]
-  src1_neg = bits[60]
-  src1_abs = bits[61]
-  s1 = bits[63]
-  offset0 = bits[7:0]
-  offset1 = bits[15:8]
-  op = bits[24:17]
-  acc = bits[25]
-  addr:VGPRField = bits[39:32]
-  data0:VGPRField = bits[47:40]
-  data1:VGPRField = bits[55:48]
-  vdst:VGPRField = bits[63:56]
+  encoding = bits[8:0] == 0b11111010
+  vop_op = bits[16:9]
+  vdst:VGPRField = bits[24:17]
+  vop2_op = bits[31:25]
+  src0:Src = bits[39:32]
+  dpp_ctrl = bits[48:40]
+  bound_ctrl = bits[51]
+  src0_neg = bits[52]
+  src0_abs = bits[53]
+  src1_neg = bits[54]
+  src1_abs = bits[55]
+  bank_mask = bits[59:56]
   row_mask = bits[63:60]
 
 class DS(Inst64):
@@ -82,6 +80,10 @@ class MUBUF(Inst64):
   acc = bits[55]
 
 class SDWA(Inst64):
+  encoding = bits[8:0] == 0b11111001
+  vop_op = bits[16:9]
+  vdst:VGPRField = bits[24:17]
+  vop2_op = bits[31:25]
   src0:Src = bits[39:32]
   dst_sel = bits[42:40]
   dst_u = bits[44:43]
@@ -97,9 +99,6 @@ class SDWA(Inst64):
   src1_neg = bits[60]
   src1_abs = bits[61]
   s1 = bits[63]
-  sdst:SGPRField = bits[46:40]
-  sd = bits[47]
-  row_mask = bits[63:60]
 
 class SDWAB(Inst64):
   src0:Src = bits[39:32]

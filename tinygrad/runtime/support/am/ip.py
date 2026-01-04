@@ -57,8 +57,8 @@ class AM_GMC(AM_IP):
 
     self.trans_futher = self.adev.ip_ver[am.GC_HWIP] < (10, 0, 0)
 
-    # GFX11/GFX12 has 44-bit address space
-    self.address_space_mask = (1 << 44) - 1
+    # mi3xx has 48-bit, others have 44-bit address space
+    self.address_space_mask = (1 << (48 if self.adev.ip_ver[am.GC_HWIP][:2] == (9,4) else 44)) - 1
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
@@ -183,7 +183,8 @@ class AM_SMU(AM_IP):
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
     elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
-    time.sleep(0.5) # 500ms
+
+    if not self.adev.is_hive(): time.sleep(0.5) # 500ms
 
   def read_table(self, table_t, arg):
     if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
