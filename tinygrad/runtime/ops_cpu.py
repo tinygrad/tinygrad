@@ -123,10 +123,10 @@ class CPUAllocator(HCQAllocatorBase):
   def _as_dmaref(self, buf):
     self.dev.synchronize()
     return DMACPURef(buf.va_addr, buf.size)
-  def _copyin(self, dest, src:memoryview):
+  def _copyin(self, dest, src:memoryview, copy_kernel=None):
     self.dev.synchronize()
     with cpu_profile('TINY -> CPU', self.dev.device, is_copy=True): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
-  def _copyout(self, dest:memoryview, src):
+  def _copyout(self, dest:memoryview, src, copy_kernel=None):
     self.dev.synchronize()
     with cpu_profile('CPU -> TINY', self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
   def _map(self, buf:HCQBuffer):

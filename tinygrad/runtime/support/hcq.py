@@ -509,18 +509,19 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
 
 class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
-  def _copyin(self, dest:HCQBuffer, src:memoryview):
-    assert self.dev.hw_copy_queue_t is not None
-    with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"TINY -> {self.dev.device}", enabled=PROFILE):
+  def _copyin(self, dest:HCQBuffer, src:memoryview, copy_kernel=None):
+    assert copy_kernel is not None or self.dev.hw_copy_queue_t is not None
+    queue_t = self.dev.hw_compute_queue_t if copy_kernel else self.dev.hw_copy_queue_t
+    with hcq_profile(self.dev, queue_type=queue_t, desc=f"TINY ->{'k' if copy_kernel else ''} {self.dev.device}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
         self.dev.timeline_signal.wait(self.b_timeline[self.b_next])
-
         lsize = min(self.b[self.b_next].size, src.nbytes - i)
         self.b[self.b_next].cpu_view().view(size=lsize, fmt='B')[:] = src.cast('B')[i:i+lsize]
-        self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                  .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
-                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+        if copy_kernel: copy_kernel(self.dev.device)(dest.offset(i, lsize), self.b[self.b_next].offset(0, lsize), lsize)
+        else: self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
+                                        .copy(dest.va_addr+i, self.b[self.b_next].va_addr, lsize) \
+                                        .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
         self.b_timeline[self.b_next] = self.dev.timeline_value - 1
 
   def copy_from_disk(self, dest:HCQBuffer, src, size):
@@ -539,16 +540,18 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
                                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
         self.b_timeline[batch_info[1]] = self.dev.timeline_value - 1
 
-  def _copyout(self, dest:memoryview, src:HCQBuffer):
+  def _copyout(self, dest:memoryview, src:HCQBuffer, copy_kernel=None):
     self.dev.synchronize()
-
-    assert self.dev.hw_copy_queue_t is not None
-    with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"{self.dev.device} -> TINY", enabled=PROFILE):
+    assert copy_kernel is not None or self.dev.hw_copy_queue_t is not None
+    queue_t = self.dev.hw_compute_queue_t if copy_kernel else self.dev.hw_copy_queue_t
+    with hcq_profile(self.dev, queue_type=queue_t, desc=f"{self.dev.device} ->{'k' if copy_kernel else ''} TINY", enabled=PROFILE):
       for i in range(0, dest.nbytes, cp_size:=(self.max_copyout_size or self.b[0].size)):
-        self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                                  .copy(self.b[0].va_addr, src.va_addr+i, lsize:=min(cp_size, dest.nbytes-i)) \
-                                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
-        self.dev.timeline_signal.wait(self.dev.timeline_value - 1)
+        lsize = min(cp_size, dest.nbytes - i)
+        if copy_kernel: copy_kernel(self.dev.device)(self.b[0].offset(0, lsize), src.offset(i, lsize), lsize)
+        else: self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
+                                        .copy(self.b[0].va_addr, src.va_addr+i, lsize) \
+                                        .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+        self.dev.synchronize() if copy_kernel else self.dev.timeline_signal.wait(self.dev.timeline_value - 1)
         dest.cast('B')[i:i+lsize] = self.b[0].cpu_view().view(size=lsize, fmt='B')[:]
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQDeviceType, dest_dev:HCQDeviceType):

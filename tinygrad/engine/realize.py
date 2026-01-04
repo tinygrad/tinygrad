@@ -66,21 +66,27 @@ class ViewOp(Runner):
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
 
+def _make_copy_kernel(device:str):
+  def run(dest_buf, src_buf, sz:int):
+    runner = get_runner(device, copy_ast(sz))
+    global_size, local_size = runner.p.launch_dims({})
+    runner._prg(dest_buf, src_buf, global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None, vals=())
+  return run
+
 class BufferCopy(Runner):
-  def __init__(self, total_sz, dest_device, src_device):
+  def __init__(self, total_sz, dest_device, src_device, copy_kernel=None):
+    self.copy_kernel = copy_kernel
     sz = f"{total_sz/1e6:7.2f}M" if total_sz >= 1e6 else f"{total_sz:8d}"
-    name = f"{type(self).__name__[6:].lower()} {sz}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    name = f"{'copykernel' if copy_kernel else 'copy'} {sz}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     super().__init__(colored(name, "yellow"), dest_device, Estimates(lds=total_sz, mem=total_sz))
   def copy(self, dest, src):
     disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.dev, 'io_uring') and \
       getattr(src.allocator.dev, 'fd', None) is not None and dest.allocator.supports_copy_from_disk
     if disk_supports_fast_copyout and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096:
-      dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
+      dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes, self.copy_kernel)
     elif (src.device.startswith("DISK") or src.device.startswith("TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
-      # fast(ish) path, uses readinto in diskbuffers
-      src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
-    else:
-      dest.copyin(src.as_buffer(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
+      src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf, self.copy_kernel)
+    else: dest.allocator._copyin(dest._buf, src.as_buffer(allow_zero_copy=True), self.copy_kernel)
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     dest, src = rawbufs[0:2]
     assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
@@ -130,7 +136,7 @@ def copy_ast(sz:int) -> UOp:
   return dest[i].store(src[i]).end(i).sink(arg=KernelInfo(name=f"copy_{sz}"))
 
 def lower_copy(ctx, copy):
-  if getenv("USE_COPY_KERNEL"): return get_runner(ctx[0].device, copy_ast(ctx[0].nbytes))
+  if getenv("USE_COPY_KERNEL"): return BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device, copy_kernel=_make_copy_kernel)
   can_xfer = hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx])
   return BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) if can_xfer else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)
 
