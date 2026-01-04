@@ -194,7 +194,15 @@ def _parse_single_pdf(url: str):
     if fmt_name in formats:
       formats[fmt_name] = [(n, h, 14 if n == 'OP' else l, e, t) for n, h, l, e, t in formats[fmt_name]]
   if doc_name in ('RDNA3', 'RDNA3.5'):
-    if 'SOPPOp' in enums: assert 8 not in enums['SOPPOp']; enums['SOPPOp'][8] = 'S_WAITCNT_DEPCTR'
+    if 'SOPPOp' in enums:
+      for k, v in {8: 'S_WAITCNT_DEPCTR', 58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'}.items():
+        assert k not in enums['SOPPOp']; enums['SOPPOp'][k] = v
+    if 'SOPKOp' in enums:
+      for k, v in {22: 'S_SUBVECTOR_LOOP_BEGIN', 23: 'S_SUBVECTOR_LOOP_END'}.items():
+        assert k not in enums['SOPKOp']; enums['SOPKOp'][k] = v
+    if 'SMEMOp' in enums:
+      for k, v in {34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'}.items():
+        assert k not in enums['SMEMOp']; enums['SMEMOp'][k] = v
     if 'DSOp' in enums:
       for k, v in {24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V', 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'}.items():
         assert k not in enums['DSOp']; enums['DSOp'][k] = v
