@@ -45,6 +45,7 @@ LDS_BUF = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(addrspace=AddrSpace.LOCAL), arg
 class Ctx:
   def __init__(self, mem_buf: UOp = MEM_BUF):
     self.vars: dict[str, UOp] = dict(INPUT_VARS)
+    self.decls: dict[str, DType] = {}
     self.outputs: list[tuple[str, UOp, DType]] = []
     self.mem_stores: list[UOp] = []
     self.mem_buf = mem_buf
@@ -354,7 +355,7 @@ def _get_lhs_info(lhs: UOp, ctx: Ctx) -> tuple[str, DType, int|None, int|None, s
 
 def _stmt(stmt, ctx: Ctx):
   match stmt:
-    case Declare(_, _): pass
+    case Declare(name, dtype): ctx.decls[name] = dtype
     case Assign(lhs, rhs):
       # Handle MEM[addr].type = value -> memory store
       if lhs.op == Ops.BITCAST and lhs.src[0].op == Ops.CUSTOM and lhs.src[0].arg == 'MEM':
@@ -434,8 +435,9 @@ def _transform_if(branches: tuple, ctx: Ctx):
 def _transform_for(var: str, start: UOp, end: UOp, body: tuple, ctx: Ctx):
   start_val = start.arg if start.op == Ops.CONST else int(_expr(start, ctx).arg)
   end_val = end.arg if end.op == Ops.CONST else int(_expr(end, ctx).arg)
+  var_dtype = ctx.decls.get(var, dtypes.uint32)
   for i in range(int(end_val), int(start_val) - 1, -1):
-    ctx.vars[var] = UOp.const(dtypes.uint32, i)
+    ctx.vars[var] = UOp.const(var_dtype, i)
     for s in body:
       if isinstance(s, If): _transform_if(s.branches, ctx)
       elif isinstance(s, Assign): _stmt(s, ctx)
