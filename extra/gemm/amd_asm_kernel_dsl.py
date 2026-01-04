@@ -95,6 +95,18 @@ LDS_MASK_PAIRS = [(19, 19), (20, 20), (21, 21), (22, 32), (32, 33), (33, 34), (3
 # LDS row offset ORs: (dst, offset) for v[dst] = v[22] | offset
 LDS_ROW_OFFSETS = [(10, 16), (11, 32), (14, 48), (15, 64), (16, 0x50), (17, 0x60), (18, 0x70)]
 
+# Initial B-tile prefetch: (vdst, saddr_lo) pairs for global_load_b32 from v[203]
+INIT_PREFETCH = [(167, 24), (168, 26), (169, 28), (170, 30)]
+
+# LDS A-tile address offsets: (dst, shift_amt) for v[dst] = (shift_amt << 9) + v[155]
+LDS_A_OFFSETS = [(158, 1), (159, 2), (160, 3), (161, 4), (162, 5), (163, 6), (164, 7)]
+
+# Initial B-tile loads: (vdst, addr_lo) pairs for global_load_b32
+INIT_B_LOADS_1 = [(23, 5), (24, 9), (25, 7), (26, 2), (27, 11), (28, 13)]
+INIT_B_LOADS_2 = [(29, 6), (30, 8), (31, 10), (12, 12), (13, 14)]
+INIT_B_LOADS_3 = [(3, 2), (4, 4)]
+INIT_B_LOADS_4 = [(5, 8), (6, 6), (7, 10)]
+
 class Kernel:
   def __init__(self, arch: str = 'gfx1100'):
     self.instructions = []
@@ -303,12 +315,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[134], s[7], v[130]))
   k.emit(v_add_co_ci_u32_e32(v[14], s[11], v[14]))
   k.emit(s_clause(simm16=5))
-  k.emit(global_load_b32(vdst=v[23], addr=v[5:6], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[24], addr=v[9:10], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[25], addr=v[7:8], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[26], addr=v[2:3], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[27], addr=v[11:12], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[28], addr=v[13:14], saddr=RawImm(124)))
+  for vdst, alo in INIT_B_LOADS_1: k.emit(global_load_b32(vdst=v[vdst], addr=v[alo:alo+1], saddr=RawImm(124)))
   k.emit(v_add_nc_u32_e32(v[6], v[119], v[118]))
   k.emit(v_ashrrev_i32_e32(v[5], 31, v[4]))
   k.emit(v_add_nc_u32_e32(v[8], v[125], v[118]))
@@ -353,11 +360,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_ashrrev_i32_e32(v[21], 31, v[20]))
   k.emit(v_add_co_ci_u32_e32(v[15], s[9], v[15]))
   k.emit(s_clause(simm16=4))
-  k.emit(global_load_b32(vdst=v[29], addr=v[6:7], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[30], addr=v[8:9], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[31], addr=v[10:11], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[12], addr=v[12:13], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[13], addr=v[14:15], saddr=RawImm(124)))
+  for vdst, alo in INIT_B_LOADS_2: k.emit(global_load_b32(vdst=v[vdst], addr=v[alo:alo+1], saddr=RawImm(124)))
   k.emit(v_lshlrev_b64(v[6:7], 2, v[18:19]))
   k.emit(v_add_co_u32(v[8], VCC_LO, s[8], v[16]))
   k.emit(v_lshlrev_b64(v[10:11], 2, v[20:21]))
@@ -368,12 +371,9 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_co_u32(v[10], VCC_LO, s[8], v[10]))
   k.emit(v_add_co_ci_u32_e32(v[11], s[9], v[11]))
   k.emit(s_clause(simm16=1))
-  k.emit(global_load_b32(vdst=v[3], addr=v[2:3], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[4], addr=v[4:5], saddr=RawImm(124)))
+  for vdst, alo in INIT_B_LOADS_3: k.emit(global_load_b32(vdst=v[vdst], addr=v[alo:alo+1], saddr=RawImm(124)))
   k.emit(s_clause(simm16=2))
-  k.emit(global_load_b32(vdst=v[5], addr=v[8:9], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[6], addr=v[6:7], saddr=RawImm(124)))
-  k.emit(global_load_b32(vdst=v[7], addr=v[10:11], saddr=RawImm(124)))
+  for vdst, alo in INIT_B_LOADS_4: k.emit(global_load_b32(vdst=v[vdst], addr=v[alo:alo+1], saddr=RawImm(124)))
   k.emit(v_add_nc_u32_e32(v[9], s[12], v[22]))
   for dst, off in LDS_ROW_OFFSETS: k.emit(v_or_b32_e32(v[dst], off, v[22]))
   k.emit(s_bfe_i32(s[7], s[14], 0x10018))
@@ -457,13 +457,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_lshl_add_u32(v[155], v[3], 2, 0x1080))
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_LSHLREV_B32, vdstx=v[112], vdsty=v[3], srcx0=0, vsrcx1=v[0], srcy0=2, vsrcy1=v[0]))
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[113], vdsty=v[96], srcx0=0, vsrcx1=v[0], srcy0=0, vsrcy1=v[0]))
-  k.emit(v_lshl_add_u32(v[158], 1, 9, v[155]))
-  k.emit(v_lshl_add_u32(v[159], 2, 9, v[155]))
-  k.emit(v_lshl_add_u32(v[160], 3, 9, v[155]))
-  k.emit(v_lshl_add_u32(v[161], 4, 9, v[155]))
-  k.emit(v_lshl_add_u32(v[162], 5, 9, v[155]))
-  k.emit(v_lshl_add_u32(v[163], 6, 9, v[155]))
-  k.emit(v_lshl_add_u32(v[164], 7, 9, v[155]))
+  for dst, amt in LDS_A_OFFSETS: k.emit(v_lshl_add_u32(v[dst], amt, 9, v[155]))
   k.emit(v_and_or_b32(v[165], 0x180, v[3], v[2]))
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[111], vdsty=v[94], srcx0=0, vsrcx1=v[0], srcy0=0, vsrcy1=v[0]))
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[97], vdsty=v[80], srcx0=0, vsrcx1=v[0], srcy0=0, vsrcy1=v[0]))
@@ -548,10 +542,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[203], 0x20000, v[203]))
   k.emit(v_add_nc_u32_e32(v[215], 0x20, v[215]))
   k.emit(s_setprio(0))
-  k.emit(global_load_b32(vdst=v[167], addr=v[203], saddr=s[24:25]))
-  k.emit(global_load_b32(vdst=v[168], addr=v[203], saddr=s[26:27]))
-  k.emit(global_load_b32(vdst=v[169], addr=v[203], saddr=s[28:29]))
-  k.emit(global_load_b32(vdst=v[170], addr=v[203], saddr=s[30:31]))
+  for vdst, slo in INIT_PREFETCH: k.emit(global_load_b32(vdst=v[vdst], addr=v[203], saddr=s[slo:slo+2]))
   k.label('LBB0_8')
   k.emit(v_mov_b32_e32(v[183], v[165]))
   k.emit(s_mov_b32(s[14], 0))
