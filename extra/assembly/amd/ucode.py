@@ -2,7 +2,7 @@
 import functools, struct, math
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from extra.assembly.amd.qcode import parse, Const, Var, Bitcast, Slice, Cast, Op, Call, Pack, Assign, Declare, If, For
+from extra.assembly.amd.qcode import parse, Assign, Declare, If, For
 
 SIGNED = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
 FLOATS = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -27,13 +27,11 @@ INPUT_VARS = {
   'SIMM16': UOp(Ops.DEFINE_VAR, dtypes.int32, (), ('SIMM16', -32768, 32767)),
   'SIMM32': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('SIMM32', 0, 0xffffffff)),
   'PC': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('PC', 0, 0xffffffffffffffff)),
-  # Memory-related variables (for SMEM/FLAT/GLOBAL ops)
   'ADDR': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('ADDR', 0, 0xffffffffffffffff)),
   'SDATA': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('SDATA', 0, 0xffffffffffffffff)),
   'VDATA': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('VDATA', 0, 0xffffffffffffffff)),
   'VDST': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('VDST', 0, 0xffffffffffffffff)),
   'RETURN_DATA': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('RETURN_DATA', 0, 0xffffffffffffffff)),
-  # DS (LDS) op variables - DATA/DATA2 are the source data registers, OFFSET is address offset
   'DATA': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('DATA', 0, 0xffffffffffffffff)),
   'DATA2': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('DATA2', 0, 0xffffffffffffffff)),
   'OFFSET': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('OFFSET', 0, 0xffff)),
@@ -41,28 +39,25 @@ INPUT_VARS = {
   'OFFSET1': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('OFFSET1', 0, 0xff)),
 }
 
-# Global memory buffer for MEM[] accesses - DEFINE_GLOBAL with byte pointer
 MEM_BUF = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(addrspace=AddrSpace.GLOBAL), arg=0)
-# LDS (local) memory buffer for DS ops - DEFINE_LOCAL with byte pointer
 LDS_BUF = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(addrspace=AddrSpace.LOCAL), arg=0)
 
 class Ctx:
-  """Compilation context - tracks variables and outputs."""
   def __init__(self, mem_buf: UOp = MEM_BUF):
     self.vars: dict[str, UOp] = dict(INPUT_VARS)
     self.outputs: list[tuple[str, UOp, DType]] = []
-    self.mem_stores: list[UOp] = []  # STORE UOps for MEM/LDS
-    self.mem_buf = mem_buf  # MEM_BUF for global, LDS_BUF for local
+    self.mem_stores: list[UOp] = []
+    self.mem_buf = mem_buf
 
-def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
-  """Transform qcode AST expression to UOp."""
+def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
+  """Transform parsed UOp expression to resolved UOp."""
   match node:
-    case Const(val, dt):
+    case UOp(Ops.CONST, dt, _, val):
       dt = dt if dt != dtypes.int32 or hint is None else hint
       if isinstance(val, float) and dt not in FLOATS: dt = dtypes.float32
       return UOp.const(dt, val)
 
-    case Var(name):
+    case UOp(Ops.DEFINE_VAR, _, _, (name, None, None)):
       if name == 'PI': return UOp.const(hint or dtypes.float64, math.pi)
       if 'INF' in name and name.replace('+', '').replace('-', '').replace('.f16', '').replace('.f32', '').replace('.f64', '') == 'INF':
         dt = dtypes.float16 if '.f16' in name else dtypes.float32 if '.f32' in name else hint or dtypes.float64
@@ -83,124 +78,129 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
       if name not in ctx.vars: raise ValueError(f"Unknown variable: {name}")
       return _cast(ctx.vars[name], hint or ctx.vars[name].dtype)
 
-    case Bitcast(dt, expr):
-      # Handle MEM[addr].type -> memory load using INDEX + LOAD (buffer set by caller)
-      if isinstance(expr, Call) and expr.name == 'MEM':
-        addr_uop = _expr(expr.args[0], ctx, dtypes.uint64)
+    case UOp(Ops.BITCAST, dt, (inner,)):
+      # Handle MEM[addr].type -> memory load
+      if inner.op == Ops.CUSTOM and inner.arg == 'MEM':
+        addr_uop = _expr(inner.src[0], ctx, dtypes.uint64)
         buf = ctx.mem_buf
         idx = UOp(Ops.INDEX, dt.ptr(0, buf.dtype.addrspace), (buf, addr_uop))
         return UOp(Ops.LOAD, dt, (idx,))
-      if isinstance(expr, Var):
-        if expr.name in ('VCCZ', 'EXECZ'):
-          return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars.get('VCC' if expr.name == 'VCCZ' else 'EXEC'), UOp.const(dtypes.uint64, 0))), dtypes.uint32)
-        if expr.name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
-        vn = expr.name + '_64' if dt in (dtypes.float64, dtypes.uint64, dtypes.int64) and expr.name.isupper() else expr.name
-        base = ctx.vars.get(vn) if vn in ctx.vars else ctx.vars.get(expr.name)
-        if base is None: raise ValueError(f"Unknown variable: {expr.name}")
-        if dt.itemsize == 3 and 'int' in dt.name:  # 24-bit types
+      # Handle Var.type
+      if inner.op == Ops.DEFINE_VAR and inner.arg[1] is None:
+        name = inner.arg[0]
+        if name in ('VCCZ', 'EXECZ'):
+          return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars.get('VCC' if name == 'VCCZ' else 'EXEC'), UOp.const(dtypes.uint64, 0))), dtypes.uint32)
+        if name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
+        vn = name + '_64' if dt in (dtypes.float64, dtypes.uint64, dtypes.int64) and name.isupper() else name
+        base = ctx.vars.get(vn) if vn in ctx.vars else ctx.vars.get(name)
+        if base is None: raise ValueError(f"Unknown variable: {name}")
+        if dt.itemsize == 3 and 'int' in dt.name:
           masked = UOp(Ops.AND, dtypes.uint32, (base, UOp.const(dtypes.uint32, 0xffffff)))
-          if 'uint' not in dt.name:  # signed 24-bit
+          if 'uint' not in dt.name:
             return UOp(Ops.SUB, dtypes.int32, (UOp(Ops.XOR, dtypes.int32, (masked, UOp.const(dtypes.int32, 0x800000))), UOp.const(dtypes.int32, 0x800000)))
           return masked
         if dt == dtypes.float16:
           return UOp(Ops.BITCAST, dtypes.float16, (UOp(Ops.AND, dtypes.uint16, (_cast(base, dtypes.uint16), UOp.const(dtypes.uint16, 0xffff))),))
         if dt in FLOATS: return UOp(Ops.BITCAST, dt, (base,))
         if dt in SIGNED:
-          base64 = ctx.vars.get(expr.name + '_64') if (expr.name + '_64') in ctx.vars else base
+          base64 = ctx.vars.get(name + '_64') if (name + '_64') in ctx.vars else base
           return _cast(base64 if dt == dtypes.int64 else base, dt)
         return _cast(base, dt)
-      inner = _expr(expr, ctx, dt)
-      if dt == dtypes.float16: return UOp(Ops.BITCAST, dt, (_cast(inner, dtypes.uint16),))
-      if dt == dtypes.bfloat16: return UOp(Ops.BITCAST, dt, (_cast(inner, dtypes.uint16),))
-      if dt in FLOATS: return UOp(Ops.BITCAST, dt, (inner,))
-      return _cast(inner, dt)
+      inner_resolved = _expr(inner, ctx, dt)
+      if dt == dtypes.float16: return UOp(Ops.BITCAST, dt, (_cast(inner_resolved, dtypes.uint16),))
+      if dt == dtypes.bfloat16: return UOp(Ops.BITCAST, dt, (_cast(inner_resolved, dtypes.uint16),))
+      if dt in FLOATS: return UOp(Ops.BITCAST, dt, (inner_resolved,))
+      return _cast(inner_resolved, dt)
 
-    case Slice(expr, hi, lo):
-      base, hi_uop, lo_uop = _expr(expr, ctx), _expr(hi, ctx), _expr(lo, ctx)
-      # Single-bit slice with variable index: base[idx:idx] -> (base >> idx) & 1
-      if hi == lo:
+    case UOp(Ops.CUSTOMI, _, (base_expr, hi_expr, lo_expr)):  # Slice
+      base, hi_uop, lo_uop = _expr(base_expr, ctx), _expr(hi_expr, ctx), _expr(lo_expr, ctx)
+      # Single-bit slice: base[idx:idx] -> (base >> idx) & 1
+      if hi_expr is lo_expr:
         return UOp(Ops.AND, dtypes.uint32, (_cast(UOp(Ops.SHR, base.dtype, (base, _cast(lo_uop, base.dtype))), dtypes.uint32), UOp.const(dtypes.uint32, 1)))
       if hi_uop.op == Ops.CONST and lo_uop.op == Ops.CONST:
         hi_val, lo_val = int(hi_uop.arg), int(lo_uop.arg)
         if hi_val < lo_val:
-          # Reversed slice [lo:hi] means bit reversal - build explicit reversal using shifts and ORs
           width = lo_val - hi_val + 1
-          if width == 32:  # Full 32-bit reversal
+          if width == 32:
             result = UOp.const(dtypes.uint32, 0)
             for i in range(32):
               bit = UOp(Ops.AND, dtypes.uint32, (UOp(Ops.SHR, dtypes.uint32, (_cast(base, dtypes.uint32), UOp.const(dtypes.uint32, i))), UOp.const(dtypes.uint32, 1)))
               result = UOp(Ops.OR, dtypes.uint32, (result, UOp(Ops.SHL, dtypes.uint32, (bit, UOp.const(dtypes.uint32, 31 - i)))))
             return result
-          elif width == 64:  # Full 64-bit reversal
+          elif width == 64:
             result = UOp.const(dtypes.uint64, 0)
             for i in range(64):
               bit = UOp(Ops.AND, dtypes.uint64, (UOp(Ops.SHR, dtypes.uint64, (_cast(base, dtypes.uint64), UOp.const(dtypes.uint64, i))), UOp.const(dtypes.uint64, 1)))
               result = UOp(Ops.OR, dtypes.uint64, (result, UOp(Ops.SHL, dtypes.uint64, (bit, UOp.const(dtypes.uint64, 63 - i)))))
             return result
-          hi_val, lo_val = lo_val, hi_val  # Fall through to normal slice for partial reversal
+          hi_val, lo_val = lo_val, hi_val
         shifted = UOp(Ops.SHR, base.dtype, (base, UOp.const(base.dtype, lo_val))) if lo_val else base
         return UOp(Ops.AND, dtypes.uint32, (_cast(shifted, dtypes.uint32), UOp.const(dtypes.uint32, (1 << (hi_val - lo_val + 1)) - 1)))
       raise ValueError(f"Non-constant slice bounds: {node}")
 
-    case Cast(dt, expr):
-      inner = _expr(expr, ctx, dt)
-      if dt in FLOATS: return UOp(Ops.CAST, dt, (inner,))
-      if inner.dtype in (dtypes.uint32, dtypes.int32, dtypes.uint64, dtypes.int64) and inner.dtype.itemsize == dt.itemsize: return _cast(inner, dt)
-      if dt in SIGNED and inner.dtype in SIGNED: return UOp(Ops.CAST, dt, (inner,))
-      return _cast(inner, dt)
+    case UOp(Ops.CAST, dt, (inner,)):
+      inner_resolved = _expr(inner, ctx, dt)
+      if dt in FLOATS: return UOp(Ops.CAST, dt, (inner_resolved,))
+      if inner_resolved.dtype in (dtypes.uint32, dtypes.int32, dtypes.uint64, dtypes.int64) and inner_resolved.dtype.itemsize == dt.itemsize:
+        return _cast(inner_resolved, dt)
+      if dt in SIGNED and inner_resolved.dtype in SIGNED: return UOp(Ops.CAST, dt, (inner_resolved,))
+      return _cast(inner_resolved, dt)
 
-    case Op(op, src):
-      # Unary ops
-      if len(src) == 1:
-        val = _expr(src[0], ctx, hint)
-        if op is Ops.NEG: return UOp(Ops.NEG, val.dtype, (val,))
-        if op is Ops.XOR: return UOp(Ops.XOR, val.dtype, (val, UOp.const(val.dtype, -1)))  # ~ is XOR with -1
-        if op is Ops.CMPEQ: return UOp(Ops.CMPEQ, dtypes.bool, (val, UOp.const(val.dtype, 0)))  # ! is == 0
-        raise ValueError(f"Unknown unary op: {op}")
-      # Binary ops
-      if len(src) == 2:
-        l = _expr(src[0], ctx, hint)
-        r = _expr(src[1], ctx, l.dtype if l.dtype in FLOATS else hint)
-        # For 32/64-bit signed arithmetic, use unsigned to avoid overflow issues during constant folding
-        if op in (Ops.ADD, Ops.SUB, Ops.MUL) and l.dtype in (dtypes.int32, dtypes.int64):
-          udt = {dtypes.int32: dtypes.uint32, dtypes.int64: dtypes.uint64}[l.dtype]
-          lu = l.src[0] if l.op == Ops.BITCAST and l.src[0].dtype == udt else _cast(l, udt)
-          ru = r.src[0] if r.op == Ops.BITCAST and r.src[0].dtype == udt else _cast(r, udt)
-          return UOp(op, udt, (lu, ru))
-        result_dt = l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype
-        if op in (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE): return UOp(op, dtypes.bool, (l, r))
-        if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR): return UOp(op, result_dt, (l, r))
-        if op is Ops.POW:
-          exp = UOp(Ops.CAST, result_dt, (r,)) if r.dtype != result_dt else r
-          if l.op == Ops.CONST and l.arg == 2.0: return UOp(Ops.EXP2, result_dt, (exp,))
-          return UOp(Ops.EXP2, result_dt, (UOp(Ops.MUL, result_dt, (exp, UOp(Ops.LOG2, result_dt, (l,)))),))
-        if op is Ops.MOD:
-          div = UOp(Ops.IDIV, result_dt, (l, r))
-          return UOp(Ops.SUB, result_dt, (l, UOp(Ops.MUL, result_dt, (div, r))))
-        raise ValueError(f"Unknown binary op: {op}")
-      # Ternary ops (WHERE)
-      if len(src) == 3:
-        c, tv = _expr(src[0], ctx), _expr(src[1], ctx, hint)
-        fv = _expr(src[2], ctx, tv.dtype)
-        return UOp(Ops.WHERE, tv.dtype, (c, tv, fv))
+    case UOp(Ops.NEG, _, (src,)):
+      val = _expr(src, ctx, hint)
+      return UOp(Ops.NEG, val.dtype, (val,))
 
-    case Call(name, args): return _transform_call(name, [_expr(a, ctx, hint) for a in args], hint)
+    case UOp(Ops.XOR, _, (src,)) if len(node.src) == 1:  # Unary ~ (bitwise not)
+      val = _expr(src, ctx, hint)
+      return UOp(Ops.XOR, val.dtype, (val, UOp.const(val.dtype, -1)))
 
-    case Pack(exprs):
+    case UOp(Ops.CMPEQ, _, (src,)) if len(node.src) == 1:  # Unary ! (logical not)
+      val = _expr(src, ctx, hint)
+      return UOp(Ops.CMPEQ, dtypes.bool, (val, UOp.const(val.dtype, 0)))
+
+    case UOp(Ops.WHERE, _, (cond, tv, fv)):
+      c, t = _expr(cond, ctx), _expr(tv, ctx, hint)
+      f = _expr(fv, ctx, t.dtype)
+      return UOp(Ops.WHERE, t.dtype, (c, t, f))
+
+    case UOp(op, _, (l_expr, r_expr)) if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR,
+                                                 Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE, Ops.POW, Ops.MOD):
+      l = _expr(l_expr, ctx, hint)
+      r = _expr(r_expr, ctx, l.dtype if l.dtype in FLOATS else hint)
+      if op in (Ops.ADD, Ops.SUB, Ops.MUL) and l.dtype in (dtypes.int32, dtypes.int64):
+        udt = {dtypes.int32: dtypes.uint32, dtypes.int64: dtypes.uint64}[l.dtype]
+        lu = l.src[0] if l.op == Ops.BITCAST and l.src[0].dtype == udt else _cast(l, udt)
+        ru = r.src[0] if r.op == Ops.BITCAST and r.src[0].dtype == udt else _cast(r, udt)
+        return UOp(op, udt, (lu, ru))
+      result_dt = l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype
+      if op in (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE): return UOp(op, dtypes.bool, (l, r))
+      if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR): return UOp(op, result_dt, (l, r))
+      if op is Ops.POW:
+        exp = UOp(Ops.CAST, result_dt, (r,)) if r.dtype != result_dt else r
+        if l.op == Ops.CONST and l.arg == 2.0: return UOp(Ops.EXP2, result_dt, (exp,))
+        return UOp(Ops.EXP2, result_dt, (UOp(Ops.MUL, result_dt, (exp, UOp(Ops.LOG2, result_dt, (l,)))),))
+      if op is Ops.MOD:
+        div = UOp(Ops.IDIV, result_dt, (l, r))
+        return UOp(Ops.SUB, result_dt, (l, UOp(Ops.MUL, result_dt, (div, r))))
+
+    case UOp(Ops.CUSTOM, _, args, name):  # Call
+      resolved_args = [_expr(a, ctx, hint) for a in args]
+      return _transform_call(name, resolved_args, hint)
+
+    case UOp(Ops.CAT, _, exprs):  # Pack
       if len(exprs) == 2:
-        # AMD Pack {a, b} typically means {high, low} for concatenation (e.g., ALIGNBIT)
         hi, lo = _expr(exprs[0], ctx), _expr(exprs[1], ctx)
         if lo.dtype.itemsize >= 4:
           return UOp(Ops.OR, dtypes.uint64, (UOp(Ops.SHL, dtypes.uint64, (_cast(hi, dtypes.uint64), UOp.const(dtypes.uint64, 32))), _cast(lo, dtypes.uint64)))
         return UOp(Ops.OR, dtypes.uint32, (UOp(Ops.SHL, dtypes.uint32, (_cast(hi, dtypes.uint32), UOp.const(dtypes.uint32, 16))),
                                            UOp(Ops.AND, dtypes.uint32, (_cast(lo, dtypes.uint32), UOp.const(dtypes.uint32, 0xffff)))))
       raise ValueError(f"Pack with {len(exprs)} elements not supported")
+
   raise ValueError(f"Cannot transform expression: {node}")
 
 # Float bit layout: (uint_type, sign_shift, exp_shift, exp_mask, mantissa_mask)
 FP_INFO = {dtypes.float64: (dtypes.uint64, 63, 52, 0x7ff, 0xfffffffffffff),
            dtypes.float32: (dtypes.uint32, 31, 23, 0xff, 0x7fffff), dtypes.float16: (dtypes.uint16, 15, 10, 0x1f, 0x3ff)}
-# Type conversions: target_dtype, clamp_negative
 CVT_MAP = {'u32_to_f32': (dtypes.float32, False), 'i32_to_f32': (dtypes.float32, False), 'f32_to_u32': (dtypes.uint32, True),
            'f32_to_i32': (dtypes.int32, False), 'f16_to_f32': (dtypes.float32, False), 'f32_to_f16': (dtypes.float16, False),
            'f32_to_u8': (dtypes.uint8, False), 'f32_to_i8': (dtypes.int8, False), 'f32_to_u16': (dtypes.uint16, False),
@@ -213,7 +213,6 @@ MATH_OPS = {'trunc': Ops.TRUNC, 'sqrt': Ops.SQRT, 'exp2': Ops.EXP2, 'log2': Ops.
 
 def _call_MEM(v): return v
 def _call_bf16_to_f32(v):
-  # BF16 is the upper 16 bits of F32, so shift left by 16
   bits = _cast(v, dtypes.uint32)
   shifted = UOp(Ops.SHL, dtypes.uint32, (bits, UOp.const(dtypes.uint32, 16)))
   return UOp(Ops.BITCAST, dtypes.float32, (shifted,))
@@ -225,13 +224,10 @@ def _call_clamp(x, lo, hi):
   clamped = UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, lo)), lo, x))
   return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (hi, clamped)), hi, clamped))
 def _call_floor(v):
-  # floor(x) = trunc(x) - (x < trunc(x) ? 1 : 0)
   truncated = UOp(Ops.TRUNC, v.dtype, (v,))
   needs_adjust = UOp(Ops.CMPLT, dtypes.bool, (v, truncated))
   return UOp(Ops.WHERE, v.dtype, (needs_adjust, UOp(Ops.SUB, v.dtype, (truncated, UOp.const(v.dtype, 1))), truncated))
-def _call_fract(v):
-  # fract(x) = x - floor(x)
-  return UOp(Ops.SUB, v.dtype, (v, _call_floor(v)))
+def _call_fract(v): return UOp(Ops.SUB, v.dtype, (v, _call_floor(v)))
 def _call_isNAN(v): return UOp(Ops.CMPNE, dtypes.bool, (v, v))
 def _call_isSignalNAN(v): return UOp.const(dtypes.bool, 0)
 def _call_cvtToQuietNAN(v): return v
@@ -267,30 +263,23 @@ def _call_SAT8(v):
   clamped = UOp(Ops.WHERE, v.dtype, (UOp(Ops.CMPLT, dtypes.bool, (v, UOp.const(v.dtype, -128))), UOp.const(v.dtype, -128), v))
   return UOp(Ops.WHERE, v.dtype, (UOp(Ops.CMPLT, dtypes.bool, (UOp.const(v.dtype, 127), clamped)), UOp.const(v.dtype, 127), clamped))
 def _call_BYTE_PERMUTE(src, sel):
-  # BYTE_PERMUTE({S0, S1}, sel): select byte based on sel[3:0]
-  # sel[3:0]=0-7: select byte from {S0,S1}; 8-11: sign-extend byte N-8; 12: 0x00; 13-15: 0xFF; sel[7]=1: 0x00
-  # Pack gives (S0<<32)|S1 but BYTE_PERMUTE indexes bytes 0-3 from S0, so swap words
   src_fixed = UOp(Ops.OR, dtypes.uint64,
     (UOp(Ops.SHL, dtypes.uint64, (UOp(Ops.AND, dtypes.uint64, (_cast(src, dtypes.uint64), UOp.const(dtypes.uint64, 0xffffffff))), UOp.const(dtypes.uint64, 32))),
      UOp(Ops.SHR, dtypes.uint64, (_cast(src, dtypes.uint64), UOp.const(dtypes.uint64, 32)))))
   sel_val = UOp(Ops.AND, dtypes.uint32, (_cast(sel, dtypes.uint32), UOp.const(dtypes.uint32, 0xff)))
-  sel_idx = UOp(Ops.AND, dtypes.uint32, (sel_val, UOp.const(dtypes.uint32, 7)))  # sel[2:0]
-  sel_hi = UOp(Ops.AND, dtypes.uint32, (sel_val, UOp.const(dtypes.uint32, 0x80)))  # sel[7]
-  sel_nibble = UOp(Ops.AND, dtypes.uint32, (sel_val, UOp.const(dtypes.uint32, 0xf)))  # sel[3:0]
-  # Extract byte: (src_fixed >> (sel_idx * 8)) & 0xff
+  sel_idx = UOp(Ops.AND, dtypes.uint32, (sel_val, UOp.const(dtypes.uint32, 7)))
+  sel_hi = UOp(Ops.AND, dtypes.uint32, (sel_val, UOp.const(dtypes.uint32, 0x80)))
+  sel_nibble = UOp(Ops.AND, dtypes.uint32, (sel_val, UOp.const(dtypes.uint32, 0xf)))
   shift = UOp(Ops.SHL, dtypes.uint32, (sel_idx, UOp.const(dtypes.uint32, 3)))
   byte_val = _cast(UOp(Ops.AND, dtypes.uint64, (UOp(Ops.SHR, dtypes.uint64, (src_fixed, _cast(shift, dtypes.uint64))), UOp.const(dtypes.uint64, 0xff))), dtypes.uint32)
-  # Sign extend for sel[3:0]=8-11: output 0xFF if byte's MSB is 1, else 0x00
-  byte_msb = UOp(Ops.AND, dtypes.uint32, (byte_val, UOp.const(dtypes.uint32, 0x80)))  # bit 7 of byte
+  byte_msb = UOp(Ops.AND, dtypes.uint32, (byte_val, UOp.const(dtypes.uint32, 0x80)))
   sign_ext_val = UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPNE, dtypes.bool, (byte_msb, UOp.const(dtypes.uint32, 0))), UOp.const(dtypes.uint32, 0xff), UOp.const(dtypes.uint32, 0)))
-  is_sign_ext = UOp(Ops.AND, dtypes.bool, (UOp(Ops.CMPLT, dtypes.bool, (UOp.const(dtypes.uint32, 7), sel_nibble)), UOp(Ops.CMPLT, dtypes.bool, (sel_nibble, UOp.const(dtypes.uint32, 12)))))  # 8 <= sel_nibble <= 11
-  # sel[3:0]=12: return 0x00; sel[3:0]=13-15: return 0xFF
+  is_sign_ext = UOp(Ops.AND, dtypes.bool, (UOp(Ops.CMPLT, dtypes.bool, (UOp.const(dtypes.uint32, 7), sel_nibble)), UOp(Ops.CMPLT, dtypes.bool, (sel_nibble, UOp.const(dtypes.uint32, 12)))))
   is_const_zero = UOp(Ops.CMPEQ, dtypes.bool, (sel_nibble, UOp.const(dtypes.uint32, 12)))
-  is_const_ff = UOp(Ops.CMPLT, dtypes.bool, (UOp.const(dtypes.uint32, 12), sel_nibble))  # 13, 14, 15
+  is_const_ff = UOp(Ops.CMPLT, dtypes.bool, (UOp.const(dtypes.uint32, 12), sel_nibble))
   result = UOp(Ops.WHERE, dtypes.uint32, (is_const_ff, UOp.const(dtypes.uint32, 0xff), byte_val))
   result = UOp(Ops.WHERE, dtypes.uint32, (is_const_zero, UOp.const(dtypes.uint32, 0), result))
   result = UOp(Ops.WHERE, dtypes.uint32, (is_sign_ext, sign_ext_val, result))
-  # sel[7]=1: return 0x00 (overrides everything)
   return UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPNE, dtypes.bool, (sel_hi, UOp.const(dtypes.uint32, 0))), UOp.const(dtypes.uint32, 0), result))
 
 CALL_DISPATCH = {
@@ -303,9 +292,8 @@ CALL_DISPATCH = {
 }
 
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
-  """Transform function call to UOp."""
   if name in CALL_DISPATCH: return CALL_DISPATCH[name](*a)
-  if name == 'pow':  # pow(2.0, x) -> exp2(x)
+  if name == 'pow':
     assert a[0].op == Ops.CONST and a[0].arg == 2.0, f"pow only supports base=2, got {a[0]}"
     result_dt = a[0].dtype if a[0].dtype in FLOATS else hint or dtypes.float32
     return UOp(Ops.EXP2, result_dt, (a[1] if a[1].dtype == result_dt else UOp(Ops.CAST, result_dt, (a[1],)),))
@@ -323,7 +311,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     return UOp(Ops.CAST, out_dt, (UOp(Ops.MUL, a[0].dtype, (clamped, UOp.const(a[0].dtype, scale))),))
   if name == 'u32_to_u16': return UOp(Ops.AND, dtypes.uint32, (a[0], UOp.const(dtypes.uint32, 0xffff)))
   if name == 'i32_to_i16': return _cast(UOp(Ops.AND, dtypes.uint32, (_cast(a[0], dtypes.uint32), UOp.const(dtypes.uint32, 0xffff))), dtypes.int16)
-
   if name in ('LT_NEG_ZERO', 'GT_NEG_ZERO'):
     int_dt = {dtypes.float64: dtypes.int64, dtypes.float16: dtypes.int16}.get(a[0].dtype, dtypes.int32)
     a_bits, b_bits = UOp(Ops.BITCAST, int_dt, (a[0],)), UOp(Ops.BITCAST, int_dt, (a[1],))
@@ -334,7 +321,7 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     cmp = lambda x, y: UOp(Ops.CMPLT, dtypes.bool, ((x, y) if 'min' in name else (y, x)))
     m01 = UOp(Ops.WHERE, a[0].dtype, (cmp(a[0], a[1]), a[0], a[1]))
     return UOp(Ops.WHERE, a[0].dtype, (cmp(m01, a[2]), m01, a[2]))
-  if name in ('v_sad_u8', 'v_msad_u8'):  # sum of absolute differences
+  if name in ('v_sad_u8', 'v_msad_u8'):
     result = a[2] if len(a) > 2 else UOp.const(dtypes.uint32, 0)
     for i in range(4):
       byte_a = UOp(Ops.AND, dtypes.uint32, (UOp(Ops.SHR, dtypes.uint32, (a[0], UOp.const(dtypes.uint32, i*8))), UOp.const(dtypes.uint32, 0xff)))
@@ -346,28 +333,33 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     return result
   raise ValueError(f"Unknown function: {name}")
 
-def _get_lhs_info(lhs, ctx: Ctx) -> tuple[str, DType, int|None, int|None, str|None]:
+def _get_lhs_info(lhs: UOp, ctx: Ctx) -> tuple[str, DType, int|None, int|None, str|None]:
   """Extract assignment target: (var_name, dtype, hi_bit, lo_bit, idx_var)"""
   match lhs:
-    case Bitcast(dt, Var(name)): return name, dt, None, None, None
-    case Bitcast(dt, Slice(Var(name), Const(hi, _), Const(lo, _))): return name, dt, int(hi), int(lo), None
-    case Bitcast(_, Slice(Bitcast(_, Var(name)), Var(idx), Var(idx2))) if idx == idx2: return name, dtypes.uint64, None, None, idx
-    case Bitcast(dt, Slice(Var(name), Var(idx), Var(idx2))) if idx == idx2: return name, dt, None, None, idx
-    case Slice(Bitcast(_, Var(name)), Const(hi, _), Const(lo, _)): return name, dtypes.uint32, int(hi), int(lo), None
-    case Slice(Var(name), Const(hi, _), Const(lo, _)): return name, dtypes.uint32, int(hi), int(lo), None
-    case Slice(Bitcast(dt, Var(name)), Var(idx), Var(idx2)) if idx == idx2: return name, dt, None, None, idx
-    case Var(name): return name, dtypes.uint32, None, None, None
+    case UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)): return name, dt, None, None, None
+    case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))),)):
+      return name, dt, int(hi), int(lo), None
+    case UOp(Ops.BITCAST, _, (UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)),)) if lhs.src[0].src[1] is lhs.src[0].src[2]:
+      return name, dtypes.uint64, None, None, idx
+    case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)),)) if lhs.src[0].src[1] is lhs.src[0].src[2]:
+      return name, dt, None, None, idx
+    case UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))):
+      return name, dtypes.uint32, int(hi), int(lo), None
+    case UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))):
+      return name, dtypes.uint32, int(hi), int(lo), None
+    case UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)) if lhs.src[1] is lhs.src[2]:
+      return name, dt, None, None, idx
+    case UOp(Ops.DEFINE_VAR, _, _, (name, None, None)): return name, dtypes.uint32, None, None, None
   raise ValueError(f"Cannot parse LHS: {lhs}")
 
 def _stmt(stmt, ctx: Ctx):
-  """Transform statement and update context state."""
   match stmt:
     case Declare(_, _): pass
     case Assign(lhs, rhs):
-      # Handle MEM[addr].type = value -> memory store using INDEX + STORE (buffer set by caller)
-      if isinstance(lhs, Bitcast) and isinstance(lhs.expr, Call) and lhs.expr.name == 'MEM':
+      # Handle MEM[addr].type = value -> memory store
+      if lhs.op == Ops.BITCAST and lhs.src[0].op == Ops.CUSTOM and lhs.src[0].arg == 'MEM':
         dt = lhs.dtype
-        addr_uop = _expr(lhs.expr.args[0], ctx, dtypes.uint64)
+        addr_uop = _expr(lhs.src[0].src[0], ctx, dtypes.uint64)
         val_uop = _expr(rhs, ctx, dt)
         buf = ctx.mem_buf
         idx = UOp(Ops.INDEX, dt.ptr(0, buf.dtype.addrspace), (buf, addr_uop))
@@ -377,7 +369,6 @@ def _stmt(stmt, ctx: Ctx):
       var, dtype, hi, lo, idx_var = _get_lhs_info(lhs, ctx)
       out_vars = ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC', 'SDATA', 'VDATA', 'RETURN_DATA')
 
-      # Bit index: D0.u64[laneId] = expr
       if idx_var is not None:
         base, idx = ctx.vars.get(var), ctx.vars.get(idx_var)
         if base is None or idx is None: raise ValueError(f"Unknown variable: {var} or {idx_var}")
@@ -389,10 +380,8 @@ def _stmt(stmt, ctx: Ctx):
         if var in out_vars: ctx.outputs.append((var, result, dtype))
         return
 
-      # Bit range: D0[31:16].f16 = expr or SDATA[63:32] = expr
       if hi is not None and lo is not None:
         if hi < lo: hi, lo = lo, hi
-        # Use 64-bit operations if slice extends beyond 32 bits
         use64 = hi >= 32
         op_dt = dtypes.uint64 if use64 else dtypes.uint32
         base = ctx.vars.get(var, UOp.const(op_dt, 0))
@@ -410,7 +399,6 @@ def _stmt(stmt, ctx: Ctx):
           ctx.outputs.append((var, result, op_dt))
         return
 
-      # Simple assignment
       rhs_uop = _expr(rhs, ctx, dtype)
       ctx.vars[var] = rhs_uop
       if dtype.itemsize == 8 and var in ('D0', 'D1', 'S0', 'S1'): ctx.vars[var + '_64'] = rhs_uop
@@ -420,8 +408,7 @@ def _stmt(stmt, ctx: Ctx):
     case For(var, start, end, body): _transform_for(var, start, end, body, ctx)
 
 def _transform_if(branches: tuple, ctx: Ctx):
-  """Transform if/elsif/else to nested WHERE expressions."""
-  parsed = [(_expr(c, ctx) if c else None, body) for c, body in branches]
+  parsed = [(_expr(c, ctx) if c is not None else None, body) for c, body in branches]
   assigned = {_get_lhs_info(s.lhs, ctx)[0] for _, body in parsed for s in body if isinstance(s, Assign)}
 
   for var in assigned:
@@ -444,11 +431,9 @@ def _transform_if(branches: tuple, ctx: Ctx):
         ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
         ctx.outputs.append((var, result, dtype))
 
-def _transform_for(var: str, start, end, body: tuple, ctx: Ctx):
-  """Unroll for loop and transform body. Iterates in reverse for first-match semantics in find-first patterns."""
-  start_val = start.value if isinstance(start, Const) else int(_expr(start, ctx).arg)
-  end_val = end.value if isinstance(end, Const) else int(_expr(end, ctx).arg)
-  # Reverse iteration: builds WHERE chain so earlier loop iterations have priority (first-match semantics)
+def _transform_for(var: str, start: UOp, end: UOp, body: tuple, ctx: Ctx):
+  start_val = start.arg if start.op == Ops.CONST else int(_expr(start, ctx).arg)
+  end_val = end.arg if end.op == Ops.CONST else int(_expr(end, ctx).arg)
   for i in range(int(end_val), int(start_val) - 1, -1):
     ctx.vars[var] = UOp.const(dtypes.uint32, i)
     for s in body:
@@ -467,13 +452,11 @@ def _float_to_bits(val: float, dtype: DType) -> int:
   return int(val)
 
 def _compile_pseudocode(pseudocode: str, mem_buf: UOp = MEM_BUF) -> tuple[UOp, list[tuple[str, DType]], dict[str, UOp], list[UOp]]:
-  """Compile pseudocode to UOp graph. Returns (sink, outputs, input_vars, mem_stores)."""
   ctx = Ctx(mem_buf=mem_buf)
   for stmt in parse(pseudocode): _stmt(stmt, ctx)
   sink = UOp(Ops.SINK, dtypes.void, tuple(u for _, u, _ in ctx.outputs) or ())
   return sink, [(n, d) for n, _, d in ctx.outputs], INPUT_VARS, ctx.mem_stores
 
-# Map dtype to memory accessor name for emu.py
 _DTYPE_ACCESSOR = {
   dtypes.uint8: 'u8', dtypes.int8: 'i8', dtypes.uint16: 'u16', dtypes.int16: 'i16',
   dtypes.uint32: 'u32', dtypes.int32: 'i32', dtypes.uint64: 'u64', dtypes.int64: 'i64',
@@ -481,16 +464,12 @@ _DTYPE_ACCESSOR = {
 }
 
 def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[str, UOp], mem_stores: list[UOp]):
-  """Create runtime function using substitute+simplify, with memory ops on sink."""
-  # Add stores to sink first so they're included in detection
   if mem_stores: sink = UOp(Ops.SINK, dtypes.void, sink.src + tuple(mem_stores))
-  # Detect memory type from UOps: check if any INDEX uses DEFINE_LOCAL
   topo = sink.toposort()
   is_lds = any(u.op == Ops.DEFINE_LOCAL for u in topo)
   is_mem = bool(mem_stores) or any(u.op == Ops.LOAD for u in topo)
 
   def _extract_results(s, MEM=None):
-    # Execute stores and extract output values from simplified sink
     for u in s.src:
       if u.op == Ops.STORE:
         idx_uop, val_uop = u.src[0], u.src[1]
@@ -506,14 +485,12 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
     return result
 
   if is_lds:
-    # DS (LDS) ops: fn(MEM, addr, data0, data1, offset0, offset1)
     def fn(MEM, addr, data0=0, data1=0, offset0=0, offset1=0):
       dvars = {input_vars['ADDR']: UOp.const(dtypes.uint64, addr), input_vars['DATA']: UOp.const(dtypes.uint64, data0),
                input_vars['DATA2']: UOp.const(dtypes.uint64, data1), input_vars['OFFSET']: UOp.const(dtypes.uint32, offset0),
                input_vars['OFFSET0']: UOp.const(dtypes.uint32, offset0), input_vars['OFFSET1']: UOp.const(dtypes.uint32, offset1),
                input_vars['RETURN_DATA']: UOp.const(dtypes.uint64, 0)}
       s1 = sink.substitute(dvars).simplify()
-      # Replace LOADs with actual values from LDS, then simplify again
       loads = {}
       for u in s1.toposort():
         if u.op == Ops.LOAD:
@@ -525,14 +502,12 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
       return _extract_results(s2, MEM)
     return fn
   elif is_mem:
-    # SMEM/FLAT/GLOBAL ops: fn(MEM, addr, vdata, vdst)
     def fn(MEM, addr, vdata=0, vdst=0):
       dvars = {input_vars['ADDR']: UOp.const(dtypes.uint64, addr), input_vars['SDATA']: UOp.const(dtypes.uint64, 0),
                input_vars['VDATA']: UOp.const(dtypes.uint64, vdata), input_vars['VDST']: UOp.const(dtypes.uint64, vdst),
                input_vars['DATA']: UOp.const(dtypes.uint64, vdata), input_vars['DATA2']: UOp.const(dtypes.uint64, 0),
                input_vars['RETURN_DATA']: UOp.const(dtypes.uint64, 0)}
       s1 = sink.substitute(dvars).simplify()
-      # Replace LOADs with actual values from MEM, then simplify again
       loads = {}
       for u in s1.toposort():
         if u.op == Ops.LOAD:
@@ -544,7 +519,6 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
       return _extract_results(s2, MEM)
     return fn
   else:
-    # ALU ops: fn(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, ...)
     def fn(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
       simm16 = (literal if -32768 <= literal <= 32767 else (literal - 65536 if literal < 65536 else 0)) if literal is not None else 0
       dvars = {
@@ -560,22 +534,17 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
       return _extract_results(sink.substitute(dvars).simplify())
     return fn
 
-# Ops with known issues (subtle float semantics, register array access, unimplemented features)
 _SKIP_OPS = {
-  # Float ops with subtle semantics (NaN handling, VCC-based scaling)
   'V_DIV_FMAS_F32', 'V_DIV_FMAS_F64',
   'V_CMP_CLASS_F16', 'V_CMP_CLASS_F32', 'V_CMP_CLASS_F64', 'V_CMPX_CLASS_F16', 'V_CMPX_CLASS_F32', 'V_CMPX_CLASS_F64',
   'V_FREXP_MANT_F16', 'V_FREXP_MANT_F32', 'V_FREXP_MANT_F64',
-  'V_DIV_FIXUP_F16', 'V_DIV_FIXUP_F32', 'V_DIV_SCALE_F32', 'V_DIV_SCALE_F64',  # complex NaN/inf/denorm handling
-
-  'V_TRIG_PREOP_F64',  # lookup table for 2/PI mantissa bits
-  # Bit manipulation ops (find-first patterns now work via reversed loop unrolling, bit reversal via explicit OR chain)
+  'V_DIV_FIXUP_F16', 'V_DIV_FIXUP_F32', 'V_DIV_SCALE_F32', 'V_DIV_SCALE_F64',
+  'V_TRIG_PREOP_F64',
   'S_FF0_I32_B32', 'S_FF0_I32_B64', 'S_FF1_I32_B32', 'S_FF1_I32_B64',
   'S_FLBIT_I32', 'S_FLBIT_I32_B32', 'S_FLBIT_I32_B64', 'S_FLBIT_I32_I32', 'S_FLBIT_I32_I64',
-  'S_BITREPLICATE_B64_B32',  # bit replication loop
-  'S_BITSET0_B32', 'S_BITSET0_B64', 'S_BITSET1_B32', 'S_BITSET1_B64',  # D0[S0[n:0]] = val (dynamic index into output)
-  'S_QUADMASK_B32', 'S_QUADMASK_B64', 'S_WQM_B32', 'S_WQM_B64',  # quad/wave mask ops with +: slice syntax
-  # Register array access (SRC0, DST, VGPR[], SGPR[])
+  'S_BITREPLICATE_B64_B32',
+  'S_BITSET0_B32', 'S_BITSET0_B64', 'S_BITSET1_B32', 'S_BITSET1_B64',
+  'S_QUADMASK_B32', 'S_QUADMASK_B64', 'S_WQM_B32', 'S_WQM_B64',
   'S_GETREG_B32', 'S_SETREG_B32', 'S_SETREG_IMM32_B32',
   'S_MOVRELD_B32', 'S_MOVRELD_B64', 'S_MOVRELS_B32', 'S_MOVRELS_B64', 'S_MOVRELSD_2_B32',
   'V_MOVRELD_B32', 'V_MOVRELS_B32', 'V_MOVRELSD_B32', 'V_MOVRELSD_2_B32',
@@ -583,36 +552,26 @@ _SKIP_OPS = {
   'V_PERMLANE16_B32', 'V_PERMLANE64_B32', 'V_PERMLANEX16_B32',
   'V_MBCNT_HI_U32_B32', 'V_MBCNT_LO_U32_B32',
   'S_SENDMSG_RTN_B32', 'S_SENDMSG_RTN_B64',
-  'V_SWAPREL_B32',  # VGPR[laneId][addr] register array access
-  'V_PERM_B32',  # BYTE_PERMUTE with sign-extend selectors has complex semantics
-  # Control flow / special ops (no actual computation)
+  'V_SWAPREL_B32', 'V_PERM_B32',
   'S_NOP', 'S_SETHALT', 'S_TRAP',
-  # 65-bit intermediate results / multi-output with carry
-  'V_MAD_U64_U32', 'V_MAD_I64_I32',  # { D1.u1, D0.u64 } = 65-bit result
-  # Dot product ops (need bf16/u4 conversion functions or complex simplification)
-  'V_DOT2_F32_BF16',  # bf16_to_f32 + simplifier can't fold through BITCAST chains
-  'V_DOT4_I32_IU8', 'V_DOT4_U32_U8',  # u8_to_u32 array access pattern
-  'V_DOT8_I32_IU4', 'V_DOT8_U32_U4',  # u4_to_u32 array access pattern
-  # VOP3P mixed precision (S[i] array access in loop)
+  'V_MAD_U64_U32', 'V_MAD_I64_I32',
+  'V_DOT2_F32_BF16',
+  'V_DOT4_I32_IU8', 'V_DOT4_U32_U8',
+  'V_DOT8_I32_IU4', 'V_DOT8_U32_U4',
   'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16',
-  # Lookup table ops
-  'V_CVT_OFF_F32_I4',  # CVT_OFF_TABLE lookup
+  'V_CVT_OFF_F32_I4',
 }
 
-# Patterns that still need pcode (register arrays, special ops, complex atomics)
 _PCODE_PATTERNS = ('LDS[', 'LDS(', 'VGPR[', 'SGPR[', 'GPR[', 'GS_REGS', 'thread_in[', 'thread_out[', 'thread_valid[',
-                   'DATA2', 'OFFSET0', 'OFFSET1')  # DS ops with dual offsets or DATA2
-# Wide outputs (>64 bit) that need pcode's arbitrary-precision integers
-_WIDE_OUTPUT_PATTERNS = ('SDATA[95', 'SDATA[127', 'SDATA[159', 'SDATA[191', 'SDATA[223', 'SDATA[255',  # SMEM B128, B256, B512
-                         'VDATA[95', 'VDATA[127')  # FLAT B128
+                   'DATA2', 'OFFSET0', 'OFFSET1')
+_WIDE_OUTPUT_PATTERNS = ('SDATA[95', 'SDATA[127', 'SDATA[159', 'SDATA[191', 'SDATA[223', 'SDATA[255',
+                         'VDATA[95', 'VDATA[127')
 
 @functools.cache
 def compile_uop(op_name: str, pseudocode: str):
-  """Compile pseudocode to UOp-based function. Returns None if unsupported."""
   if op_name in _SKIP_OPS: return None
-  if any(p in pseudocode for p in _PCODE_PATTERNS): return None  # these patterns still need pcode
-  if any(p in pseudocode for p in _WIDE_OUTPUT_PATTERNS): return None  # >64-bit outputs need pcode
-  # DS ops use LDS (local memory), others use global MEM
+  if any(p in pseudocode for p in _PCODE_PATTERNS): return None
+  if any(p in pseudocode for p in _WIDE_OUTPUT_PATTERNS): return None
   is_ds = op_name.startswith('DS_')
   mem_buf = LDS_BUF if is_ds else MEM_BUF
   sink, output_info, input_vars, mem_stores = _compile_pseudocode(pseudocode, mem_buf)
