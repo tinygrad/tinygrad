@@ -541,30 +541,22 @@ class Inst:
     else:
       cls_name = self.__class__.__name__
       is_cdna = cls_name in ('VOP3A', 'VOP3B')
-      # For CDNA VOP3A/VOP3B, prefer VOP1/VOP2 promoted ops over VOP3AOp for opcodes 256-511
-      if is_cdna and isinstance(val, int) and 256 <= val < 512:
-        try: self.op = (CDNA_VOP1Op(val - 320) if val >= 320 else CDNA_VOP2Op(val - 256))
-        except ValueError:
-          # Fall back to VOP3AOp for true VOP3 instructions in the 256-511 range
-          marker = self._fields['op'].marker if 'op' in self._fields else None
-          if marker and issubclass(marker, IntEnum):
-            try: self.op = marker(val)
-            except ValueError: self.op = val
-          else: self.op = val
-      else:
-        # Use BitField marker enum if available, otherwise fall back to _enum_map
-        marker = self._fields['op'].marker if 'op' in self._fields else None
-        if marker and issubclass(marker, IntEnum):
-          try: self.op = marker(val)
-          except ValueError: self.op = val
-        elif cls_name in self._enum_map:
-          try: self.op = self._enum_map[cls_name](val)
-          except ValueError: self.op = val
-        else: self.op = val
-      # VOP3/VOP3A/VOP3B: fallback for VOPC (0-255) and VOP2/VOP1 promoted instructions (256-511)
+      # Try marker enum first (VOP3AOp, VOP3BOp, etc.)
+      marker = self._fields['op'].marker if 'op' in self._fields else None
+      if marker and issubclass(marker, IntEnum):
+        try: self.op = marker(val)
+        except ValueError: self.op = val
+      elif cls_name in self._enum_map:
+        try: self.op = self._enum_map[cls_name](val)
+        except ValueError: self.op = val
+      else: self.op = val
+      # Fallback for promoted instructions when marker lookup failed
       if not hasattr(self.op, 'name') and cls_name in ('VOP3', 'VOP3A', 'VOP3B') and isinstance(val, int):
         if val < 256:
           try: self.op = VOPCOp(val)
+          except ValueError: pass
+        elif is_cdna and 256 <= val < 512:
+          try: self.op = (CDNA_VOP1Op(val - 320) if val >= 320 else CDNA_VOP2Op(val - 256))
           except ValueError: pass
         elif val in self._VOP3SD_OPS and not is_cdna:
           try: self.op = VOP3SDOp(val)
