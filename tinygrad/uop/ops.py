@@ -104,15 +104,7 @@ class recursive_property(property):
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    # this is very similar to toposort/topovisit
-    stack: list[tuple[UOp, bool]] = [(x, False)]
-    while stack:
-      node, visited = stack.pop()
-      if self.nm in node.__dict__: continue
-      if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src): stack.append((s, False))
-      else: node.__dict__[self.nm] = self.fxn(node)
+    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
 # we import this late so we can use resolve/smax in mixins
