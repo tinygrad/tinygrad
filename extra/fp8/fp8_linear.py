@@ -1,19 +1,18 @@
 from typing import Callable, Any
-from tinygrad import Tensor, dtypes, nn, UOp, Device
+from tinygrad import Tensor, dtypes, nn, UOp
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
-from tinygrad.helpers import getenv
 
-GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))) if getenv("GPUS", 1) > 1 else Device.DEFAULT
-
-def quantize_to_fp8(x: Tensor, axis=None, dtype=dtypes.fp8e4m3):
-  x_abs_max = x.abs().max(axis=axis, keepdim=True).detach()
-  scale = 448. / (x_abs_max + 1e-8)
+def quantize_to_fp8(x: Tensor, dtype=dtypes.fp8e4m3):
+  fp8_min = -448.0 if dtype == dtypes.fp8e4m3 else -57344.0
+  fp8_max = 448.0 if dtype == dtypes.fp8e4m3 else 57344.0
+  x_abs_max = x.abs().max().detach()
+  scale = fp8_max / (x_abs_max + 1e-8)
   x_scaled = x * scale
   x_det = x_scaled.detach()
-  x_clamped = x_det.maximum(-448.0).minimum(448.0)
+  x_clamped = x_det.clamp(fp8_min, fp8_max)
   x_clamped_ste = x_scaled + (x_clamped - x_det)
-  res = x_clamped_ste.cast(dtype).contiguous()
-  return res, scale.float().reciprocal().contiguous()
+  res = x_clamped_ste.cast(dtype)
+  return res, scale.float().reciprocal()
 
 def custom_matmul(output: UOp, inp: UOp, weight: UOp) -> UOp:
   SEQ = inp.shape[1]
@@ -26,7 +25,7 @@ def custom_matmul(output: UOp, inp: UOp, weight: UOp) -> UOp:
   product = (inp.index((seq_idx*IN+reduce_idx+batch_idx*IN*SEQ)) * weight.index((out_idx*IN+reduce_idx))).cast(dtypes.float)
   reduced = product.reduce(reduce_idx, arg=Ops.ADD)
   store_op = output.index((seq_idx*OUT+out_idx+batch_idx*OUT*SEQ), ptr=True).store(reduced).end(batch_idx, seq_idx, out_idx)
-  return store_op.sink(arg=KernelInfo(name=f"custom_matmul_{inp.shape}x{weight.shape}"))
+  return store_op.sink(arg=KernelInfo(name=f"fp8_matmul_{inp.shape}x{weight.shape}"))
 
 def custom_matmul_backward(gradient: UOp, kernel: UOp) -> tuple[UOp, UOp]:
   _, input_uop, weight_uop = kernel.src
@@ -35,7 +34,7 @@ def custom_matmul_backward(gradient: UOp, kernel: UOp) -> tuple[UOp, UOp]:
   weight_tensor = Tensor(weight_uop, device=weight_uop.device)
   grad_quantized, scale = quantize_to_fp8(grad_tensor)
   scale_scalar = scale.reshape(())
-  grad_weight = Tensor.einsum('bso,bsi->oi', grad_quantized, input_tensor, dtype=dtypes.float)
+  grad_weight = Tensor.einsum("bso,bsi->oi", grad_quantized, input_tensor, dtype=dtypes.float)
   grad_weight = grad_weight * scale_scalar
   grad_2d = grad_quantized.reshape(grad_tensor.shape[0] * grad_tensor.shape[1], grad_tensor.shape[-1])
   grad_input = (grad_2d.dot(weight_tensor, dtype=dtypes.float)).contiguous().reshape(input_tensor.shape) * scale
@@ -52,6 +51,7 @@ class FP8Linear:
     batch, seq, _ = x.shape
     w_fp8, w_scale = quantize_to_fp8(self.weight)
     x_fp8, x_scale = quantize_to_fp8(x)
+    GPUS = self.weight.device
     if isinstance(GPUS, tuple) and len(GPUS) > 1:
       y = Tensor(Tensor.empty((batch//len(GPUS), seq, self.weight.shape[0]), dtype=dtypes.float, device=GPUS).uop.multi(0), device=GPUS)
     else:
