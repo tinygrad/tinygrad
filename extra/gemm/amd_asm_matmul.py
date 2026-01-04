@@ -64,8 +64,22 @@ S_WORKGROUP_Y = 15        # workgroup_id_y
 # Data tables
 # =============================================================================
 
-# 128 accumulator registers (FMAC destinations) to zero before loop
-ACC_REGS = list(range(2, 118)) + list(range(120, 125)) + list(range(126, 130)) + [131, 133, 214]
+# Accumulator grid: ACC_GRID[a_idx][b_idx] = vgpr for C[a,b]
+# a_idx: which A value (0-7), b_idx: which B value (0-15)
+# Scattered due to VOPD bank constraints (vdst_x % 4 != vdst_y % 4)
+ACC_GRID = [
+  [  5,  3,  9,  8,   37, 35, 41, 40,   69, 67, 73, 72,  101, 99,105,104],  # a0
+  [  4,  2,  7,  6,   36, 34, 39, 38,   68, 66, 71, 70,  100, 98,103,102],  # a1
+  [ 17, 16, 13, 11,   49, 48, 45, 43,   81, 80, 77, 75,  113,112,109,107],  # a2
+  [ 15, 14, 12, 10,   47, 46, 44, 42,   79, 78, 76, 74,  111,110,108,106],  # a3
+  [ 21, 19, 25, 24,   53, 51, 57, 56,   85, 83, 89, 88,  117,115,121,120],  # a4
+  [ 20, 18, 23, 22,   52, 50, 55, 54,   84, 82, 87, 86,  116,114,123,122],  # a5
+  [133,128, 29, 27,   33, 32, 61, 59,   65, 64, 93, 91,   97, 96,129,127],  # a6
+  [131,214, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7
+]
+
+# Derived: all 128 accumulator registers to zero before loop
+ACC_REGS = sorted(set(acc for row in ACC_GRID for acc in row))
 
 # 122 register swaps to permute accumulator layout before output
 PERMUTE_SWAPS = [
@@ -109,17 +123,6 @@ INIT_PREFETCH = [(167+i, 24+2*i) for i in range(4)]
 
 # Initial tile loads: (vdst, addr_lo) pairs
 INIT_TILE_LOADS = [(23,5),(24,9),(25,7),(26,2),(27,11),(28,13),(29,6),(30,8),(31,10),(12,12),(13,14),(3,2),(4,4),(5,8),(6,6),(7,10)]
-
-# Epilogue stores: (col_offset, row_index, data_base_reg, [src0, src1, src2, src3])
-EPILOGUE_STORES = [
-  (0,0,138,[124,133,132,131]), (0,1,134,[129,128,127,126]), (0,2,128,[123,122,121,120]), (0,3,124,[117,116,115,114]),
-  (32,0,120,[113,112,111,110]), (32,1,114,[109,108,107,106]), (32,2,110,[105,104,103,102]), (32,3,107,[101,100,99,98]),
-  (64,0,103,[97,96,95,94]), (64,1,98,[93,92,91,90]), (64,2,94,[89,88,87,86]), (64,3,90,[85,84,83,82]),
-  (96,0,86,[81,80,79,78]), (96,1,82,[77,76,75,74]), (96,2,78,[73,72,71,70]), (96,3,74,[69,68,67,66]),
-  (0,16,70,[65,64,63,62]), (0,17,66,[61,60,59,58]), (0,18,62,[57,56,55,54]), (0,19,58,[53,52,51,50]),
-  (32,16,54,[49,48,47,46]), (32,17,50,[45,44,43,42]), (32,18,46,[41,40,39,38]), (32,19,42,[37,36,35,34]),
-  (64,16,38,[33,32,31,30]), (64,17,34,[29,28,27,26]), (64,18,30,[25,24,23,22]), (64,19,26,[21,20,19,18]),
-  (96,16,22,[17,16,15,14]), (96,17,18,[13,12,11,10]), (96,18,14,[9,8,7,6]), (96,19,10,[5,4,3,2])]
 
 # Initial LDS stores: (addr, d0, d1, off0, off1) for stride64 or (addr, data) for single
 INIT_LDS_STORES = [
@@ -422,34 +425,67 @@ def build_kernel(arch='gfx1100'):
   # EPILOGUE: Permute and store results
   # ===========================================================================
   k.label('EPILOGUE')
-  for a, b in PERMUTE_SWAPS: k.emit(v_swap_b32_e32(v[a], v[b]))
-  k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[149], vdsty=v[150],
-              srcx0=v[V_LANE_MOD8_X4], vsrcx1=v[0], srcy0=v[V_LANE_DIV8_X4], vsrcy1=v[0]))
+
+  # Rearrange accumulators from FMAC layout to contiguous output order
+  for a, b in PERMUTE_SWAPS:
+    k.emit(v_swap_b32_e32(v[a], v[b]))
+
+  # Compute output coordinates: v[V_LANE_ID_MOD8] = col, v[V_OUTPUT_ROW] = row
+  k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32,
+              vdstx=v[149], vdsty=v[150], srcx0=v[V_LANE_MOD8_X4], vsrcx1=v[0], srcy0=v[V_LANE_DIV8_X4], vsrcy1=v[0]))
   k.emit(v_and_b32_e32(v[0], 0x60, v[0]))
   k.emit(v_or_b32_e32(v[V_LANE_ID_MOD8], s[S_TILE_X], v[149]))
   k.emit(v_add_nc_u32_e32(v[0], s[S_TILE_Y], v[0]))
   k.emit(v_or_b32_e32(v[V_OUTPUT_ROW], v[0], v[150]))
-  for base, off in [(144, 0), (148, 16)]:  # row multipliers for rows 0-3 and 16-19
-    if off: k.emit(v_or_b32_e32(v[1], off, v[V_OUTPUT_ROW]))
-    k.emit(v_mul_lo_u32(v[base], v[1] if off else v[V_OUTPUT_ROW], s[S_DIM_N]))
+
+  # Precompute row offsets: v[144-147] for rows 0-3, v[148-151] for rows 16-19
+  for base, row_off in [(144, 0), (148, 16)]:
+    if row_off: k.emit(v_or_b32_e32(v[1], row_off, v[V_OUTPUT_ROW]))
+    k.emit(v_mul_lo_u32(v[base], v[1] if row_off else v[V_OUTPUT_ROW], s[S_DIM_N]))
     for i in range(3): k.emit(v_add_nc_u32_e32(v[base + 1 + i], s[S_DIM_N], v[base + i]))
+
   k.emit(v_mov_b32_e32(v[V_ADDR_HI_ZERO], 0))
   k.emit(s_lshl_b32(s[S_PREFETCH_FLAG], s[S_DIM_N], 2))  # row stride in bytes
-  # Store 32 groups of 4x4 output values
-  for col_off, row_idx, data_base, srcs in EPILOGUE_STORES:
-    for j, src in enumerate(srcs): k.emit(v_mul_f32_e32(v[data_base + j], s[S_ALPHA], v[src]))
-    if row_idx in (0, 16):  # first row of each group: compute base address
-      if col_off == 0: k.emit(v_mov_b32_e32(v[0], v[V_LANE_ID_MOD8]))
-      else: k.emit(v_add_nc_u32_e32(v[0], col_off, v[V_LANE_ID_MOD8]))
-      row_reg = 144 + row_idx if row_idx < 4 else 148 + row_idx - 16
-      k.emit(v_add_nc_u32_e32(v[0], v[row_reg], v[0]))
-      k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
-      k.emit(v_add_co_u32(v[0], VCC_LO, s[S_OUT_PTR[0]], v[0]))
-      k.emit(v_add_co_ci_u32_e32(v[1], s[S_OUT_PTR[1]], v[V_ADDR_HI_ZERO]))
-    else:  # subsequent rows: add stride
-      k.emit(v_add_co_u32(v[0], VCC_LO, s[S_PREFETCH_FLAG], v[0]))
-      k.emit(v_add_co_ci_u32_e32(v[1], v[1], v[V_ADDR_HI_ZERO]))
-    k.emit(global_store_b128(addr=v[0:1], data=v[data_base:data_base+3], saddr=RawImm(124)))
+
+  # Store 128 output values as 32 groups of 4 (128-bit stores)
+  # After PERMUTE_SWAPS, accumulators are in descending order: 133,132,131,...,2 (skipping non-acc regs)
+  # with 124 moved to front due to swap sequence
+  out_regs = [r for r in range(133, 1, -1) if r not in {118, 119, 125, 130}]
+  out_regs.remove(124)
+  out_regs = [124] + out_regs
+  reserved = {V_LANE_ID_MOD8, V_OUTPUT_ROW, V_LANE_MOD8_X4, V_LANE_DIV8_X4, V_ADDR_HI_ZERO}
+
+  reg_idx = 0
+  for row_half in range(2):  # rows 0-3, then rows 16-19
+    for col_off in [0, 32, 64, 96]:  # 4 column groups of 32 bytes (8 floats) each
+      for row_in_group in range(4):  # 4 rows per group
+        row = row_half * 16 + row_in_group
+        srcs = out_regs[reg_idx:reg_idx + 4]
+        reg_idx += 4
+
+        # Find temp register for scaled values (must not conflict with reserved regs)
+        tmp = max(srcs) + 5
+        while any(r in reserved for r in range(tmp, tmp + 4)): tmp += 1
+
+        # Scale by alpha and store
+        for j, src in enumerate(srcs):
+          k.emit(v_mul_f32_e32(v[tmp + j], s[S_ALPHA], v[src]))
+
+        # Compute output address
+        if row_in_group == 0:  # first row: compute base address for this column group
+          if col_off == 0: k.emit(v_mov_b32_e32(v[0], v[V_LANE_ID_MOD8]))
+          else: k.emit(v_add_nc_u32_e32(v[0], col_off, v[V_LANE_ID_MOD8]))
+          row_base = 144 + row if row < 4 else 148 + row - 16
+          k.emit(v_add_nc_u32_e32(v[0], v[row_base], v[0]))
+          k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
+          k.emit(v_add_co_u32(v[0], VCC_LO, s[S_OUT_PTR[0]], v[0]))
+          k.emit(v_add_co_ci_u32_e32(v[1], s[S_OUT_PTR[1]], v[V_ADDR_HI_ZERO]))
+        else:  # subsequent rows: just add stride
+          k.emit(v_add_co_u32(v[0], VCC_LO, s[S_PREFETCH_FLAG], v[0]))
+          k.emit(v_add_co_ci_u32_e32(v[1], v[1], v[V_ADDR_HI_ZERO]))
+
+        k.emit(global_store_b128(addr=v[0:1], data=v[tmp:tmp+3], saddr=RawImm(124)))
+
   k.emit(s_nop(0))
   k.emit(s_sendmsg(simm16=3))
   k.emit(s_endpgm())
