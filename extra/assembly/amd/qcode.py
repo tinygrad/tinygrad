@@ -2,20 +2,32 @@
 from __future__ import annotations
 import re
 from dataclasses import dataclass
-from enum import Enum, auto
+from tinygrad.dtype import dtypes, DType
 
-class QDType(Enum):
-  F64=auto(); F32=auto(); F16=auto(); BF16=auto(); U64=auto(); U32=auto(); U24=auto(); U16=auto(); U8=auto()
-  I64=auto(); I32=auto(); I24=auto(); I16=auto(); I8=auto(); B128=auto(); B64=auto(); B32=auto(); B16=auto()
-  B8=auto(); U1=auto(); I1=auto(); U3=auto(); U4=auto(); I4=auto(); U=U32; I=I32; F=F32
-DTYPES = {d.name.lower(): d for d in QDType}
+# DType lookup table for AMD pseudocode type suffixes
+# Maps type suffix (e.g., 'u32', 'f16') to tinygrad DType
+# For types not in tinygrad (like i24, b128), create them with DType.new
+_QDTYPES: dict[str, DType] = {
+  'f64': dtypes.float64, 'f32': dtypes.float32, 'f16': dtypes.float16, 'bf16': dtypes.bfloat16,
+  'u64': dtypes.uint64, 'u32': dtypes.uint32, 'u16': dtypes.uint16, 'u8': dtypes.uint8,
+  'i64': dtypes.int64, 'i32': dtypes.int32, 'i16': dtypes.int16, 'i8': dtypes.int8,
+  # AMD-specific types not in tinygrad - create with appropriate bitsizes
+  'u24': DType.new(6, 24, "uint24", None), 'i24': DType.new(5, 24, "int24", None),
+  'u4': DType.new(6, 4, "uint4", None), 'i4': DType.new(5, 4, "int4", None),
+  'u3': DType.new(6, 3, "uint3", None), 'u1': DType.new(6, 1, "uint1", None), 'i1': DType.new(5, 1, "int1", None),
+  # Bit types (untyped bits) - use unsigned integer equivalents
+  'b128': DType.new(8, 128, "bits128", None), 'b64': dtypes.uint64, 'b32': dtypes.uint32,
+  'b16': dtypes.uint16, 'b8': dtypes.uint8,
+  # Aliases
+  'u': dtypes.uint32, 'i': dtypes.int32, 'f': dtypes.float32,
+}
 
 @dataclass(frozen=True)
-class Const: value: int|float; dtype: QDType = QDType.I32
+class Const: value: int|float; dtype: DType = dtypes.int32
 @dataclass(frozen=True)
 class Var: name: str
 @dataclass(frozen=True)
-class Typed: expr: Expr; dtype: QDType
+class Typed: expr: Expr; dtype: DType
 @dataclass(frozen=True)
 class Slice: expr: Expr; hi: Expr; lo: Expr
 @dataclass(frozen=True)
@@ -79,6 +91,20 @@ def _fop(s, ops):
           return i
   return -1
 
+def _get_dtype(name: str) -> DType | None:
+  """Get DType from type suffix name, or None if not found."""
+  return _QDTYPES.get(name.lower())
+
+def _make_dtype(bits: int, typ: str) -> DType:
+  """Create a DType for a given bitsize and type char (I/U/F/B)."""
+  key = f"{typ.lower()}{bits}"
+  if key in _QDTYPES: return _QDTYPES[key]
+  # Create a new dtype for unusual sizes
+  if typ == 'F': return DType.new(13, bits, f"float{bits}", None)
+  if typ == 'I': return DType.new(5, bits, f"int{bits}", None)
+  if typ == 'U' or typ == 'B': return DType.new(6, bits, f"uint{bits}", None)
+  return dtypes.uint32
+
 def expr(s: str) -> Expr:
   s = s.strip().rstrip(';')
   if s.endswith('.') and not (len(s) > 1 and s[-2].isdigit()): s = s[:-1]
@@ -89,16 +115,19 @@ def expr(s: str) -> Expr:
   if s[0] == '{' and s[-1] == '}': return Pack(tuple(expr(a) for a in _split(s[1:-1])))
   if m := re.match(r"^(\d+)'([IUFB])\(", s):
     if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1: return Cast(int(m[1]), m[2], expr(s[m.end():e]))
-  if m := re.match(r"^(\d+)'(-?\d+)([IUFB])?$", s): return Const(int(m[2]), DTYPES.get(f"{m[3]or'i'}{m[1]}".lower(), QDType.I32))
-  if m := re.match(r"^(\d+)'(-?[\d.]+)$", s): return Const(float(m[2]), DTYPES.get(f"f{m[1]}", QDType.F32))
-  if m := re.match(r"^(\d+)'(0x[0-9a-fA-F]+)$", s): return Const(int(m[2], 16), DTYPES.get(f"u{m[1]}", QDType.U32))
+  if m := re.match(r"^(\d+)'(-?\d+)([IUFB])?$", s):
+    return Const(int(m[2]), _make_dtype(int(m[1]), m[3] or 'I'))
+  if m := re.match(r"^(\d+)'(-?[\d.]+)$", s):
+    return Const(float(m[2]), _make_dtype(int(m[1]), 'F'))
+  if m := re.match(r"^(\d+)'(0x[0-9a-fA-F]+)$", s):
+    return Const(int(m[2], 16), _make_dtype(int(m[1]), 'U'))
   if m := re.match(r"^([A-Za-z_]\w*)\(", s):
     if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1:
       a = _split(s[m.end():e]); return Call(m[1], tuple(expr(x) for x in a) if a != [''] else ())
   if s[:4] == 'MEM[' and (e := _match(s, 3, '[', ']')) != -1:
     r, b = s[e+1:], Call('MEM', (expr(s[4:e]),))
     if not r: return b  # Just MEM[addr]
-    if r[:1] == '.' and r[1:] in DTYPES: return Typed(b, DTYPES[r[1:]])  # MEM[addr].type
+    if r[:1] == '.' and (dt := _get_dtype(r[1:])): return Typed(b, dt)  # MEM[addr].type
     # Otherwise fall through to let binary operators parse (e.g., MEM[ADDR].b32.u32 + X)
   if (q := _fop(s, ('?',))) > 0:
     d = b = 0
@@ -134,16 +163,16 @@ def expr(s: str) -> Expr:
     return Index(expr(b), expr(n))
   if '.' in s:
     for i in range(len(s)-1, 0, -1):
-      if s[i] == '.' and s[i+1:] in DTYPES: return Typed(expr(s[:i]), DTYPES[s[i+1:]])
+      if s[i] == '.' and (dt := _get_dtype(s[i+1:])): return Typed(expr(s[:i]), dt)
   if s[:5] == 'eval ': return Var(s)
   if ':' in s and '?' not in s and '[' not in s:
     p = s.split(':')
     if len(p) == 2 and all(re.match(r'^[A-Za-z_]\w*$', x.strip()) for x in p): return Binary(':', expr(p[0]), expr(p[1]))
   if re.match(r'^[A-Za-z_][\w.]*$', s): return Var(s)
   try:
-    if s[:2].lower() == '0x': return Const(int(re.sub(r'[UuLl]+$', '', s), 16), QDType.U32)
+    if s[:2].lower() == '0x': return Const(int(re.sub(r'[UuLl]+$', '', s), 16), dtypes.uint32)
     c = re.sub(r'[FfLlUu]+$', '', s)
-    return Const(float(c), QDType.F32) if '.' in c or 'e' in c.lower() else Const(int(re.sub(r'[UuLl]+$', '', s)), QDType.I32)
+    return Const(float(c), dtypes.float32) if '.' in c or 'e' in c.lower() else Const(int(re.sub(r'[UuLl]+$', '', s)), dtypes.int32)
   except ValueError: pass
   raise ValueError(f"Cannot parse expression: {s}")
 
@@ -203,7 +232,7 @@ if __name__ == "__main__":
           def pr(n, d=0):
             p = "  "*d
             match n:
-              case Const(v, t): return f"{v}" if t == QDType.I32 else f"{v}:{t.name}"
+              case Const(v, t): return f"{v}" if t == dtypes.int32 else f"{v}:{t.name}"
               case Var(x): return x
               case Typed(e, t): return f"{pr(e)}.{t.name}"
               case Slice(e,h,l): return f"{pr(e)}[{pr(h)}:{pr(l)}]"

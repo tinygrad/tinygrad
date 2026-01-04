@@ -2,19 +2,10 @@
 import functools, struct, math
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from extra.assembly.amd.qcode import parse, Const, Var, Typed, Slice, Index, Cast, Unary, Binary, Ternary, Call, Pack, Assign, Declare, If, For, QDType
+from extra.assembly.amd.qcode import parse, Const, Var, Typed, Slice, Index, Cast, Unary, Binary, Ternary, Call, Pack, Assign, Declare, If, For
 
-# Type mapping from qcode types to tinygrad dtypes
-QDTYPE_MAP = {
-  QDType.F64: dtypes.float64, QDType.F32: dtypes.float32, QDType.F16: dtypes.float16,
-  QDType.U64: dtypes.uint64, QDType.U32: dtypes.uint32, QDType.U24: dtypes.uint24, QDType.U16: dtypes.uint16, QDType.U8: dtypes.uint8,
-  QDType.I64: dtypes.int64, QDType.I32: dtypes.int32, QDType.I24: dtypes.int24, QDType.I16: dtypes.int16, QDType.I8: dtypes.int8,
-  QDType.B128: dtypes.uint64, QDType.B64: dtypes.uint64, QDType.B32: dtypes.uint32, QDType.B16: dtypes.uint16, QDType.B8: dtypes.uint8,
-  QDType.U1: dtypes.uint32, QDType.I1: dtypes.int32, QDType.U3: dtypes.uint32, QDType.U4: dtypes.uint32, QDType.I4: dtypes.int32,
-}
 SIGNED = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
 FLOATS = (dtypes.float16, dtypes.float32, dtypes.float64)
-def _qdt(qd: QDType) -> DType: return QDTYPE_MAP.get(qd, dtypes.uint32)
 
 def _cast(x: UOp, dtype: DType) -> UOp:
   return x if x.dtype == dtype else UOp(Ops.BITCAST if dtype.itemsize == x.dtype.itemsize else Ops.CAST, dtype, (x,))
@@ -66,8 +57,8 @@ class Ctx:
 def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
   """Transform qcode AST expression to UOp."""
   match node:
-    case Const(val, qdt):
-      dt = _qdt(qdt) if qdt != QDType.I32 or hint is None else hint
+    case Const(val, dt):
+      dt = dt if dt != dtypes.int32 or hint is None else hint
       if isinstance(val, float) and dt not in FLOATS: dt = dtypes.float32
       return UOp.const(dt, val)
 
@@ -92,8 +83,7 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
       if name not in ctx.vars: raise ValueError(f"Unknown variable: {name}")
       return _cast(ctx.vars[name], hint or ctx.vars[name].dtype)
 
-    case Typed(expr, qdt):
-      dt = _qdt(qdt)
+    case Typed(expr, dt):
       # Handle MEM[addr].type -> memory load using INDEX + LOAD (buffer set by caller)
       if isinstance(expr, Call) and expr.name == 'MEM':
         addr_uop = _expr(expr.args[0], ctx, dtypes.uint64)
@@ -104,13 +94,14 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
         if expr.name in ('VCCZ', 'EXECZ'):
           return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars.get('VCC' if expr.name == 'VCCZ' else 'EXEC'), UOp.const(dtypes.uint64, 0))), dtypes.uint32)
         if expr.name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
-        vn = expr.name + '_64' if qdt in (QDType.F64, QDType.U64, QDType.I64, QDType.B64) and expr.name.isupper() else expr.name
+        vn = expr.name + '_64' if dt in (dtypes.float64, dtypes.uint64, dtypes.int64) and expr.name.isupper() else expr.name
         base = ctx.vars.get(vn) if vn in ctx.vars else ctx.vars.get(expr.name)
         if base is None: raise ValueError(f"Unknown variable: {expr.name}")
-        if qdt == QDType.U24: return UOp(Ops.AND, dtypes.uint32, (base, UOp.const(dtypes.uint32, 0xffffff)))
-        if qdt == QDType.I24:
+        if dt.itemsize == 3 and 'int' in dt.name:  # 24-bit types
           masked = UOp(Ops.AND, dtypes.uint32, (base, UOp.const(dtypes.uint32, 0xffffff)))
-          return UOp(Ops.SUB, dtypes.int32, (UOp(Ops.XOR, dtypes.int32, (masked, UOp.const(dtypes.int32, 0x800000))), UOp.const(dtypes.int32, 0x800000)))
+          if 'uint' not in dt.name:  # signed 24-bit
+            return UOp(Ops.SUB, dtypes.int32, (UOp(Ops.XOR, dtypes.int32, (masked, UOp.const(dtypes.int32, 0x800000))), UOp.const(dtypes.int32, 0x800000)))
+          return masked
         if dt == dtypes.float16:
           return UOp(Ops.BITCAST, dtypes.float16, (UOp(Ops.AND, dtypes.uint16, (_cast(base, dtypes.uint16), UOp.const(dtypes.uint16, 0xffff))),))
         if dt in FLOATS: return UOp(Ops.BITCAST, dt, (base,))
@@ -361,13 +352,13 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
 def _get_lhs_info(lhs, ctx: Ctx) -> tuple[str, DType, int|None, int|None, str|None]:
   """Extract assignment target: (var_name, dtype, hi_bit, lo_bit, idx_var)"""
   match lhs:
-    case Typed(Var(name), qdt): return name, _qdt(qdt), None, None, None
-    case Typed(Slice(Var(name), Const(hi, _), Const(lo, _)), qdt): return name, _qdt(qdt), int(hi), int(lo), None
+    case Typed(Var(name), dt): return name, dt, None, None, None
+    case Typed(Slice(Var(name), Const(hi, _), Const(lo, _)), dt): return name, dt, int(hi), int(lo), None
     case Typed(Index(Typed(Var(name), _), Var(idx)), _): return name, dtypes.uint64, None, None, idx
-    case Typed(Index(Var(name), Var(idx)), qdt): return name, _qdt(qdt), None, None, idx
+    case Typed(Index(Var(name), Var(idx)), dt): return name, dt, None, None, idx
     case Slice(Typed(Var(name), _), Const(hi, _), Const(lo, _)): return name, dtypes.uint32, int(hi), int(lo), None
     case Slice(Var(name), Const(hi, _), Const(lo, _)): return name, dtypes.uint32, int(hi), int(lo), None
-    case Index(Typed(Var(name), qdt), Var(idx)): return name, _qdt(qdt), None, None, idx
+    case Index(Typed(Var(name), dt), Var(idx)): return name, dt, None, None, idx
     case Var(name): return name, dtypes.uint32, None, None, None
   raise ValueError(f"Cannot parse LHS: {lhs}")
 
@@ -378,7 +369,7 @@ def _stmt(stmt, ctx: Ctx):
     case Assign(lhs, rhs):
       # Handle MEM[addr].type = value -> memory store using INDEX + STORE (buffer set by caller)
       if isinstance(lhs, Typed) and isinstance(lhs.expr, Call) and lhs.expr.name == 'MEM':
-        dt = _qdt(lhs.dtype)
+        dt = lhs.dtype
         addr_uop = _expr(lhs.expr.args[0], ctx, dtypes.uint64)
         val_uop = _expr(rhs, ctx, dt)
         buf = ctx.mem_buf
