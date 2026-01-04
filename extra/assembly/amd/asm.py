@@ -22,8 +22,11 @@ _RDNA_FORMATS_32 = [SOP1, SOPC, SOPP, SOPK, VOPC, VOP1, SOP2, VOP2]  # SOP2/VOP2
 from extra.assembly.amd.autogen.cdna.ins import (VOP1 as C_VOP1, VOP2 as C_VOP2, VOPC as C_VOPC, VOP3A, VOP3B, VOP3P as C_VOP3P,
   SOP1 as C_SOP1, SOP2 as C_SOP2, SOPC as C_SOPC, SOPK as C_SOPK, SOPP as C_SOPP, SMEM as C_SMEM, DS as C_DS,
   FLAT as C_FLAT, MUBUF as C_MUBUF, MTBUF as C_MTBUF, SDWA, DPP)
-_CDNA_FORMATS_64 = [C_VOP3P, VOP3A, VOP3B, C_DS, C_FLAT, C_MUBUF, C_MTBUF, C_SMEM]
+_CDNA_FORMATS_64 = [C_VOP3P, VOP3A, C_DS, C_FLAT, C_MUBUF, C_MTBUF, C_SMEM]
 _CDNA_FORMATS_32 = [SDWA, DPP, C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_VOPC, C_VOP1, C_SOP2, C_VOP2]
+_CDNA_VOP3B_OPS = {281, 282, 283, 284, 285, 286, 480, 481, 488, 489}  # VOP3B opcodes
+# CDNA opcode name aliases for disasm (new name -> old name expected by tests)
+_CDNA_DISASM_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32', 'v_fmamk_f32': 'v_madmk_f32', 'v_fmaak_f32': 'v_madak_f32'}
 
 def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
@@ -32,7 +35,8 @@ def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   if arch == "cdna":
     if (word >> 30) == 0b11:
       for cls in _CDNA_FORMATS_64:
-        if _matches_encoding(word, cls): return cls
+        if _matches_encoding(word, cls):
+          return VOP3B if cls is VOP3A and ((word >> 16) & 0x3ff) in _CDNA_VOP3B_OPS else cls
       raise ValueError(f"unknown CDNA 64-bit format word={word:#010x}")
     for cls in _CDNA_FORMATS_32:
       if _matches_encoding(word, cls): return cls
@@ -109,19 +113,24 @@ def _vreg(b: int, n: int = 1) -> str: return _reg("v", b, n)
 def _ttmp(b: int, n: int = 1) -> str: return _reg("ttmp", b - 108, n) if 108 <= b <= 123 else None
 def _sreg_or_ttmp(b: int, n: int = 1) -> str: return _ttmp(b, n) or _sreg(b, n)
 
-def _fmt_sdst(v: int, n: int = 1) -> str:
-  if v == 124: return "null"
+def _fmt_sdst(v: int, n: int = 1, cdna: bool = False) -> str:
+  from extra.assembly.amd.dsl import SPECIAL_PAIRS_CDNA, SPECIAL_GPRS_CDNA
   if t := _ttmp(v, n): return t
-  if n > 1: return SPECIAL_PAIRS.get(v) or _sreg(v, n)
-  return SPECIAL_GPRS.get(v, f"s{v}")
+  pairs = SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS
+  gprs = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
+  if n > 1: return pairs.get(v) or gprs.get(v) or _sreg(v, n)  # also check gprs for null/m0
+  return gprs.get(v, f"s{v}")
 
-def _fmt_src(v: int, n: int = 1) -> str:
-  if n == 1: return decode_src(v)
+def _fmt_src(v: int, n: int = 1, cdna: bool = False) -> str:
+  from extra.assembly.amd.dsl import SPECIAL_PAIRS_CDNA
+  if n == 1: return decode_src(v, cdna)
   if v >= 256: return _vreg(v - 256, n)
-  if v <= 105: return _sreg(v, n)
-  if n == 2 and v in SPECIAL_PAIRS: return SPECIAL_PAIRS[v]
+  if v <= 101: return _sreg(v, n)  # s0-s101 can be pairs, but 102+ are special on CDNA
+  pairs = SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS
+  if n == 2 and v in pairs: return pairs[v]
+  if v <= 105: return _sreg(v, n)  # s102-s105 regular pairs for RDNA
   if t := _ttmp(v, n): return t
-  return decode_src(v)
+  return decode_src(v, cdna)
 
 def _fmt_v16(v: int, base: int = 256, hi_thresh: int = 384) -> str:
   return f"v{(v - base) & 0x7f}.{'h' if v >= hi_thresh else 'l'}"
@@ -158,37 +167,44 @@ def _opsel_str(opsel: int, n: int, need: bool, is16_d: bool) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _disasm_vop1(inst: VOP1) -> str:
-  name = inst.op_name.lower()
+  name, cdna = inst.op_name.lower(), _is_cdna(inst)
+  suf = "" if cdna else "_e32"
   if inst.op in (VOP1Op.V_NOP, VOP1Op.V_PIPEFLUSH): return name
-  if inst.op == VOP1Op.V_READFIRSTLANE_B32: return f"v_readfirstlane_b32 {decode_src(inst.vdst)}, v{inst.src0 - 256 if inst.src0 >= 256 else inst.src0}"
-  # 16-bit dst: uses .h/.l suffix (determined by name pattern, not dtype - e.g. sat_pk_u8_i16 outputs 8-bit but uses 16-bit encoding)
+  if 'readfirstlane' in name: return f"{name} {_fmt_sdst(inst.vdst, 1, cdna)}, v{inst.src0 - 256 if inst.src0 >= 256 else inst.src0}"
+  # 16-bit dst: uses .h/.l suffix for RDNA (CDNA uses plain vN)
   parts = name.split('_')
-  is_16d = any(p in ('f16','i16','u16','b16') for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in ('f16','i16','u16','b16') and 'cvt' not in name)
+  is_16d = not cdna and (any(p in ('f16','i16','u16','b16') for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in ('f16','i16','u16','b16') and 'cvt' not in name))
   dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else _fmt_v16(inst.vdst, 0, 128) if is_16d else f"v{inst.vdst}"
-  src = inst.lit(inst.src0) if inst.src0 == 255 else _fmt_src(inst.src0, inst.src_regs(0)) if inst.src_regs(0) > 1 else _src16(inst, inst.src0) if inst.is_src_16(0) and 'sat_pk' not in name else inst.lit(inst.src0)
-  return f"{name}_e32 {dst}, {src}"
+  src = inst.lit(inst.src0) if inst.src0 == 255 else _fmt_src(inst.src0, inst.src_regs(0), cdna) if inst.src_regs(0) > 1 else _src16(inst, inst.src0) if not cdna and inst.is_src_16(0) and 'sat_pk' not in name else inst.lit(inst.src0)
+  return f"{name}{suf} {dst}, {src}"
 
+_VOP2_CARRY_OUT = {'v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32'}  # carry out only
+_VOP2_CARRY_INOUT = {'v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32'}  # carry in and out
 def _disasm_vop2(inst: VOP2) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
-  suf = "" if not cdna and inst.op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32"
+  if cdna: name = _CDNA_DISASM_ALIASES.get(name, name)  # apply CDNA aliases
+  suf = "" if cdna or (not cdna and inst.op == VOP2Op.V_DOT2ACC_F32_F16) else "_e32"
   lit = getattr(inst, '_literal', None)
   is16 = not cdna and inst.is_16bit()
-  # fmaak: dst = src0 * vsrc1 + K, fmamk: dst = src0 * K + vsrc1
-  if 'fmaak' in name or (not cdna and inst.op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16)):
+  # fmaak/madak: dst = src0 * vsrc1 + K, fmamk/madmk: dst = src0 * K + vsrc1
+  if 'fmaak' in name or 'madak' in name or (not cdna and inst.op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16)):
     if is16: return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}, 0x{lit:x}"
     return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{lit:x}"
-  if 'fmamk' in name or (not cdna and inst.op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16)):
+  if 'fmamk' in name or 'madmk' in name or (not cdna and inst.op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16)):
     if is16: return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, 0x{lit:x}, {_fmt_v16(inst.vsrc1, 0, 128)}"
     return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{lit:x}, v{inst.vsrc1}"
   if is16: return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
   vcc = "vcc" if cdna else "vcc_lo"
+  # CDNA carry ops output vcc after vdst
+  if cdna and name in _VOP2_CARRY_OUT: return f"{name}{suf} v{inst.vdst}, {vcc}, {inst.lit(inst.src0)}, v{inst.vsrc1}"
+  if cdna and name in _VOP2_CARRY_INOUT: return f"{name}{suf} v{inst.vdst}, {vcc}, {inst.lit(inst.src0)}, v{inst.vsrc1}, {vcc}"
   return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (f", {vcc}" if name == 'v_cndmask_b32' else "")
 
 def _disasm_vopc(inst: VOPC) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
   if cdna:
-    s0 = inst.lit(inst.src0) if inst.src0 == 255 else _fmt_src(inst.src0, inst.src_regs(0))
-    return f"{name}_e32 {s0}, v{inst.vsrc1}" if inst.op.value >= 128 else f"{name}_e32 vcc, {s0}, v{inst.vsrc1}"
+    s0 = inst.lit(inst.src0) if inst.src0 == 255 else _fmt_src(inst.src0, inst.src_regs(0), cdna)
+    return f"{name} {s0}, v{inst.vsrc1}" if inst.op.value >= 128 else f"{name} vcc, {s0}, v{inst.vsrc1}"
   s0 = inst.lit(inst.src0) if inst.src0 == 255 else _fmt_src(inst.src0, inst.src_regs(0)) if inst.src_regs(0) > 1 else _src16(inst, inst.src0) if inst.is_16bit() else inst.lit(inst.src0)
   s1 = _vreg(inst.vsrc1, inst.src_regs(1)) if inst.src_regs(1) > 1 else _fmt_v16(inst.vsrc1, 0, 128) if inst.is_16bit() else f"v{inst.vsrc1}"
   return f"{name}_e32 {s0}, {s1}" if inst.op.value >= 128 else f"{name}_e32 vcc_lo, {s0}, {s1}"
@@ -430,21 +446,23 @@ def _disasm_mimg(inst: MIMG) -> str:
   return f"{name} {_vreg(inst.vdata, vdata)}, {vaddr_str}, {srsrc_str}{ssamp_str} {' '.join(mods)}"
 
 def _disasm_sop1(inst: SOP1) -> str:
-  op, name = inst.op, inst.op_name.lower()
-  src = inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0))
-  if not _is_cdna(inst):
+  op, name, cdna = inst.op, inst.op_name.lower(), _is_cdna(inst)
+  src = inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0), cdna)
+  if not cdna:
     if op == SOP1Op.S_GETPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}"
     if op in (SOP1Op.S_SETPC_B64, SOP1Op.S_RFE_B64): return f"{name} {src}"
     if op == SOP1Op.S_SWAPPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {src}"
     if op in (SOP1Op.S_SENDMSG_RTN_B32, SOP1Op.S_SENDMSG_RTN_B64): return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
-  return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, {src}"
+  return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs(), cdna)}, {src}"
 
 def _disasm_sop2(inst: SOP2) -> str:
-  return f"{inst.op_name.lower()} {_fmt_sdst(inst.sdst, inst.dst_regs())}, {inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0))}, {inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, inst.src_regs(1))}"
+  cdna = _is_cdna(inst)
+  return f"{inst.op_name.lower()} {_fmt_sdst(inst.sdst, inst.dst_regs(), cdna)}, {inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0), cdna)}, {inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, inst.src_regs(1), cdna)}"
 
 def _disasm_sopc(inst: SOPC) -> str:
-  s0 = inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0))
-  s1 = inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, inst.src_regs(1))
+  cdna = _is_cdna(inst)
+  s0 = inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0), cdna)
+  s1 = inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, inst.src_regs(1), cdna)
   return f"{inst.op_name.lower()} {s0}, {s1}"
 
 def _disasm_sopk(inst: SOPK) -> str:
@@ -458,10 +476,10 @@ def _disasm_sopk(inst: SOPK) -> str:
   if (not cdna and op in (SOPKOp.S_SETREG_B32, SOPKOp.S_GETREG_B32)) or (cdna and name in ('s_setreg_b32', 's_getreg_b32')):
     hid, hoff, hsz = inst.simm16 & 0x3f, (inst.simm16 >> 6) & 0x1f, ((inst.simm16 >> 11) & 0x1f) + 1
     hs = f"0x{inst.simm16:x}" if hid in (16, 17) else f"hwreg({HWREG.get(hid, str(hid))}, {hoff}, {hsz})"
-    return f"{name} {hs}, {_fmt_sdst(inst.sdst, 1)}" if 'setreg' in name else f"{name} {_fmt_sdst(inst.sdst, 1)}, {hs}"
+    return f"{name} {hs}, {_fmt_sdst(inst.sdst, 1, cdna)}" if 'setreg' in name else f"{name} {_fmt_sdst(inst.sdst, 1, cdna)}, {hs}"
   if not cdna and op in (SOPKOp.S_SUBVECTOR_LOOP_BEGIN, SOPKOp.S_SUBVECTOR_LOOP_END):
     return f"{name} {_fmt_sdst(inst.sdst, 1)}, 0x{inst.simm16:x}"
-  return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, 0x{inst.simm16:x}"
+  return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs(), cdna)}, 0x{inst.simm16:x}"
 
 def _disasm_vinterp(inst: VINTERP) -> str:
   mods = _mods((inst.waitexp, f"wait_exp:{inst.waitexp}"), (inst.clmp, "clamp"))

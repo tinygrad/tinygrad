@@ -243,7 +243,11 @@ def unwrap(val) -> int:
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 FLOAT_DEC = {v: str(k) for k, v in FLOAT_ENC.items()}
 SPECIAL_GPRS = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", 253: "scc"}
+SPECIAL_GPRS_CDNA = {102: "flat_scratch_lo", 103: "flat_scratch_hi", 104: "xnack_mask_lo", 105: "xnack_mask_hi",
+                    106: "vcc_lo", 107: "vcc_hi", 124: "m0", 126: "exec_lo", 127: "exec_hi",
+                    251: "src_vccz", 252: "src_execz", 253: "src_scc", 254: "src_lds_direct"}
 SPECIAL_PAIRS = {106: "vcc", 126: "exec"}
+SPECIAL_PAIRS_CDNA = {102: "flat_scratch", 104: "xnack_mask", 106: "vcc", 126: "exec"}
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
 RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata', 'vsrc1'}
 
@@ -260,9 +264,10 @@ def encode_src(val) -> int:
   if isinstance(val, int): return 128 + val if 0 <= val <= 64 else 192 - val if -16 <= val <= -1 else 255
   return 255
 
-def decode_src(val: int) -> str:
+def decode_src(val: int, cdna: bool = False) -> str:
+  special = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
+  if val in special: return special[val]
   if val <= 105: return f"s{val}"
-  if val in SPECIAL_GPRS: return SPECIAL_GPRS[val]
   if val in FLOAT_DEC: return FLOAT_DEC[val]
   if 108 <= val <= 123: return f"ttmp{val - 108}"
   if 128 <= val <= 192: return str(val - 128)
@@ -507,7 +512,7 @@ class Inst:
       lit32 = (self._literal >> 32) if self._literal > 0xffffffff else self._literal
       s = f"0x{lit32:x}"
     else:
-      s = decode_src(v)
+      s = decode_src(v, 'cdna' in self.__class__.__module__)
     return f"-{s}" if neg else s
 
   def __eq__(self, other):
