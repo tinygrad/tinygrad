@@ -3,7 +3,7 @@
 from __future__ import annotations
 import struct, math, re
 from enum import IntEnum
-from functools import cache, cached_property
+from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
@@ -346,6 +346,7 @@ class Inst:
     if 'abs_' in kwargs: kwargs['abs'] = kwargs.pop('abs_')
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
+    self._precompute()
     self._validate(orig_args)
     # Pre-shift literal for 64-bit sources (literal param is always raw 32-bit value from user)
     if literal is not None:
@@ -386,6 +387,7 @@ class Inst:
       elif name == 'sbase': self._values[name] = (val.idx if isinstance(val, Reg) else val.val if isinstance(val, SrcMod) else val * 2) // 2
       elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = val.idx // 4
       elif marker is _VDSTYEnc and isinstance(val, VGPR): self._values[name] = val.idx >> 1
+    self._precompute_fields()
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
@@ -450,6 +452,8 @@ class Inst:
     inst = object.__new__(cls)
     inst._values = {n: RawImm(v) if n in SRC_FIELDS else v for n, bf in cls._fields.items() if n != 'encoding' for v in [(word >> bf.lo) & bf.mask()]}
     inst._literal = None
+    inst._precompute()
+    inst._precompute_fields()
     return inst
 
   @classmethod
@@ -510,25 +514,32 @@ class Inst:
                'VOPD': VOPDOp, 'VINTERP': VINTERPOp}
   _VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
-  @property
-  def op(self):
-    """Return the op as an enum (e.g., VOP1Op.V_MOV_B32). VOP3 returns VOPCOp/VOP3SDOp for those op ranges."""
+  def _precompute(self):
+    """Precompute op, op_name, _spec_regs, _spec_dtype for fast access."""
     val = self._values.get('op')
-    if val is None: return None
-    if hasattr(val, 'name'): return val  # already an enum
-    cls_name = self.__class__.__name__
-    assert cls_name in self._enum_map, f"no enum map for {cls_name}"
-    return self._enum_map[cls_name](val)
+    if val is None: self.op = None
+    elif hasattr(val, 'name'): self.op = val
+    else:
+      cls_name = self.__class__.__name__
+      # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
+      if cls_name == 'VOP3':
+        try:
+          if val < 256: self.op = VOPCOp(val)
+          elif val in self._VOP3SD_OPS: self.op = VOP3SDOp(val)
+          else: self.op = VOP3Op(val)
+        except ValueError: self.op = val
+      elif cls_name in self._enum_map:
+        try: self.op = self._enum_map[cls_name](val)
+        except ValueError: self.op = val
+      else: self.op = val
+    self.op_name = self.op.name if hasattr(self.op, 'name') else ''
+    self._spec_regs = spec_regs(self.op_name)
+    self._spec_dtype = spec_dtype(self.op_name)
 
-  @cached_property
-  def op_name(self) -> str:
-    op = self.op
-    return op.name if hasattr(op, 'name') else ''
-
-  @cached_property
-  def _spec_regs(self) -> tuple[int, int, int, int]: return spec_regs(self.op_name)
-  @cached_property
-  def _spec_dtype(self) -> tuple[str | None, str | None, str | None, str | None]: return spec_dtype(self.op_name)
+  def _precompute_fields(self):
+    """Unwrap all field values as direct attributes for fast access."""
+    for name, val in self._values.items():
+      if name != 'op': setattr(self, name, unwrap(val))
   def dst_regs(self) -> int: return self._spec_regs[0]
   def src_regs(self, n: int) -> int: return self._spec_regs[n + 1]
   def num_srcs(self) -> int: return spec_num_srcs(self.op_name)

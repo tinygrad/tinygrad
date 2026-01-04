@@ -2,452 +2,602 @@
 # to regenerate: python -m extra.assembly.amd.pdf --arch rdna3
 # ruff: noqa: E501
 # mypy: ignore-errors
-from extra.assembly.amd.autogen.rdna3.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp
+from extra.assembly.amd.autogen.rdna3.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp
 from extra.assembly.amd.pcode import ABSDIFF, BYTE_PERMUTE, DENORM, F, GT_NEG_ZERO, INF, LT_NEG_ZERO, MAX_FLOAT_F32, OVERFLOW_F32, OVERFLOW_F64, PI, ROUND_MODE, Reg, SAT8, SliceProxy, TWO_OVER_PI_1201, UNDERFLOW_F32, UNDERFLOW_F64, WAVE32, WAVE64, WAVE_MODE, _pack, _pack32, bf16_to_f32, cos, cvtToQuietNAN, exponent, f16_to_f32, f16_to_i16, f16_to_snorm, f16_to_u16, f16_to_unorm, f32_to_f16, f32_to_f64, f32_to_i32, f32_to_snorm, f32_to_u32, f32_to_u8, f32_to_unorm, f64_to_f32, f64_to_i32, f64_to_u32, floor, fma, fract, i16_to_f16, i32_to_f32, i32_to_f64, i32_to_i16, isEven, isNAN, isQuietNAN, isSignalNAN, ldexp, log2, mantissa, pow, s_ff1_i32_b32, s_ff1_i32_b64, sign, signext, signext_from_bit, sin, sqrt, trunc, u16_to_f16, u32_to_f32, u32_to_f64, u32_to_u16, u4_to_u32, u8_to_u32, v_cvt_i16_f32, v_cvt_u16_f32, v_max3_f16, v_max3_f32, v_max3_i16, v_max3_i32, v_max3_u16, v_max3_u32, v_max_f16, v_max_f32, v_max_i16, v_max_i32, v_max_u16, v_max_u32, v_min3_f16, v_min3_f32, v_min_f16, v_min_f32, v_min_i16, v_min_i32, v_min_u16, v_min_u32, v_msad_u8, v_sad_u8
 
-def _SOP1Op_S_MOV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_MOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.b32 = S0.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_MOV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_MOV_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.b64 = S0.b64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CMOV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CMOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   if SCC:
     D0.b32 = S0.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CMOV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CMOV_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   if SCC:
     D0.b64 = S0.b64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_BREV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BREV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32[31 : 0] = S0.u32[0 : 31]
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_BREV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BREV_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u64[63 : 0] = S0.u64[0 : 63]
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CTZ_I32_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
       tmp = Reg(i); break
   D0.i32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CTZ_I32_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CTZ_I32_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
     if S0.u64[i] == 1:
       tmp = Reg(i); break
   D0.i32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CLZ_I32_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
       tmp = Reg(i); break
   D0.i32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CLZ_I32_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CLZ_I32_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
     if S0.u64[63 - i] == 1:
       tmp = Reg(i); break
   D0.i32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CLS_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CLS_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(1, int(31)+1):
     if S0.u32[31 - i] != S0.u32[31]:
       tmp = Reg(i); break
   D0.i32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CLS_I32_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CLS_I32_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(1, int(63)+1):
     if S0.u64[63 - i] != S0.u64[63]:
       tmp = Reg(i); break
   D0.i32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_SEXT_I32_I8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_SEXT_I32_I8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (signext(S0.i8))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_SEXT_I32_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_SEXT_I32_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (signext(S0.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_BITSET0_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BITSET0_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32[S0.u32[4 : 0]] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_BITSET0_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BITSET0_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u64[S0.u32[5 : 0]] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_BITSET1_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BITSET1_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32[S0.u32[4 : 0]] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_BITSET1_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BITSET1_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u64[S0.u32[5 : 0]] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_BITREPLICATE_B64_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BITREPLICATE_B64_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S0.u32)
   for i in range(0, int(31)+1):
     D0.u64[i * 2] = tmp[i]
     D0.u64[i * 2 + 1] = tmp[i]
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_ABS_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_ABS_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.i32 = ((-S0.i32) if (S0.i32 < 0) else (S0.i32))
   SCC = Reg(D0.i32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_BCNT0_I32_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BCNT0_I32_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(0)
   for i in range(0, int(31)+1):
     tmp += ((1) if (S0.u32[i] == 0) else (0))
   D0.i32 = tmp
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_BCNT0_I32_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BCNT0_I32_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(0)
   for i in range(0, int(63)+1):
     tmp += ((1) if (S0.u64[i] == 0) else (0))
   D0.i32 = tmp
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_BCNT1_I32_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BCNT1_I32_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(0)
   for i in range(0, int(31)+1):
     tmp += ((1) if (S0.u32[i] == 1) else (0))
   D0.i32 = tmp
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_BCNT1_I32_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_BCNT1_I32_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(0)
   for i in range(0, int(63)+1):
     tmp += ((1) if (S0.u64[i] == 1) else (0))
   D0.i32 = tmp
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_QUADMASK_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_QUADMASK_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(0)
   for i in range(0, int(7)+1):
     tmp[i] = S0.u32[(i * 4) + (4) - 1 : (i * 4)] != 0
   D0.u32 = tmp
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_QUADMASK_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_QUADMASK_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(0)
   for i in range(0, int(15)+1):
     tmp[i] = S0.u64[(i * 4) + (4) - 1 : (i * 4)] != 0
   D0.u64 = tmp
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_WQM_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_WQM_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(0)
   for i in range(0, int(31)+1):
     tmp[i] = S0.u32[(i & 60) + (4) - 1 : (i & 60)] != 0
   D0.u32 = tmp
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_WQM_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_WQM_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(0)
   for i in range(0, int(63)+1):
     tmp[i] = S0.u64[(i & 60) + (4) - 1 : (i & 60)] != 0
   D0.u64 = tmp
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_NOT_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_NOT_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = ~S0.u32
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_NOT_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_NOT_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = ~S0.u64
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP1Op_S_AND_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = (S0.u32 & EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = (S0.u64 & EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_OR_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_OR_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = (S0.u32 | EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_OR_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_OR_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = (S0.u64 | EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_XOR_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_XOR_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = (S0.u32 ^ EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_XOR_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_XOR_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = (S0.u64 ^ EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_NAND_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_NAND_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = ~(S0.u32 & EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_NAND_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_NAND_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = ~(S0.u64 & EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_NOR_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_NOR_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = ~(S0.u32 | EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_NOR_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_NOR_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = ~(S0.u64 | EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_XNOR_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_XNOR_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = ~(S0.u32 ^ EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_XNOR_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_XNOR_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = ~(S0.u64 ^ EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_NOT0_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_NOT0_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = (~S0.u32 & EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_NOT0_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_NOT0_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = (~S0.u64 & EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_OR_NOT0_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_OR_NOT0_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = (~S0.u32 | EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_OR_NOT0_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_OR_NOT0_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = (~S0.u64 | EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_NOT1_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_NOT1_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = (S0.u32 & ~EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_NOT1_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_NOT1_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = (S0.u64 & ~EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_OR_NOT1_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_OR_NOT1_SAVEEXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u32)
   EXEC.u32 = (S0.u32 | ~EXEC.u32)
   D0.u32 = saveexec.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_OR_NOT1_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_OR_NOT1_SAVEEXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   saveexec = Reg(EXEC.u64)
   EXEC.u64 = (S0.u64 | ~EXEC.u64)
   D0.u64 = saveexec.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_NOT0_WREXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_NOT0_WREXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u32 = (~S0.u32 & EXEC.u32)
   D0.u32 = EXEC.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_NOT0_WREXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_NOT0_WREXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64 = (~S0.u64 & EXEC.u64)
   D0.u64 = EXEC.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_NOT1_WREXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_NOT1_WREXEC_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u32 = (S0.u32 & ~EXEC.u32)
   D0.u32 = EXEC.u32
   SCC = Reg(EXEC.u32 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_AND_NOT1_WREXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_AND_NOT1_WREXEC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); SCC=Reg(scc); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64 = (S0.u64 & ~EXEC.u64)
   D0.u64 = EXEC.u64
   SCC = Reg(EXEC.u64 != 0)
-  return {'D0': D0, 'SCC': SCC, 'EXEC': EXEC}
+  return {'D0': D0._val, 'SCC': SCC._val, 'EXEC': EXEC._val}
 
-def _SOP1Op_S_GETPC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_GETPC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.i64 = PC + 4
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_SETPC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_SETPC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   PC = Reg(S0.i64)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOP1Op_S_SWAPPC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_SWAPPC_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   jump_addr = S0.i64
   D0.i64 = PC + 4
   PC = Reg(jump_addr.i64)
-  return {'D0': D0, 'PC': PC}
+  return {'D0': D0._val, 'PC': PC._val}
 
-def _SOP1Op_S_RFE_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_RFE_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   PC = Reg(S0.i64)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOP1Op_S_SENDMSG_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_SENDMSG_RTN_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   return {}
 
-def _SOP1Op_S_SENDMSG_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_SENDMSG_RTN_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   return {}
 
-def _SOP1Op_S_CEIL_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CEIL_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
   if ((S0.f32 > 0.0)  and  (S0.f32 != D0.f32)):
     D0.f32 += 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_FLOOR_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_FLOOR_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
   if ((S0.f32 < 0.0)  and  (S0.f32 != D0.f32)):
     D0.f32 += -1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_TRUNC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_TRUNC_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_RNDNE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_RNDNE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = floor(S0.f32 + 0.5)
   if (isEven(F(floor(S0.f32)))  and  (fract(S0.f32) == 0.5)):
     D0.f32 -= 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CVT_F32_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CVT_F32_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = i32_to_f32(S0.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CVT_F32_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CVT_F32_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CVT_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CVT_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f32_to_i32(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CVT_U32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CVT_U32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = f32_to_u32(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CVT_F16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CVT_F16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = f32_to_f16(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CVT_F32_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CVT_F32_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = f16_to_f32(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CVT_HI_F32_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CVT_HI_F32_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = f16_to_f32(S0[31 : 16].f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_CEIL_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_CEIL_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
   if ((S0.f16 > 0.0)  and  (S0.f16 != D0.f16)):
     D0.f16 += 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_FLOOR_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_FLOOR_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
   if ((S0.f16 < 0.0)  and  (S0.f16 != D0.f16)):
     D0.f16 += -1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_TRUNC_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_TRUNC_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP1Op_S_RNDNE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP1Op_S_RNDNE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = floor(S0.f16 + 0.5)
   if (isEven(F(floor(S0.f16)))  and  (fract(S0.f16) == 0.5)):
     D0.f16 -= 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
 SOP1Op_FUNCTIONS = {
   SOP1Op.S_MOV_B32: _SOP1Op_S_MOV_B32,
@@ -527,282 +677,388 @@ SOP1Op_FUNCTIONS = {
   SOP1Op.S_RNDNE_F16: _SOP1Op_S_RNDNE_F16,
 }
 
-def _SOP2Op_S_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_ADD_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg((S0.u32) + (S1.u32))
   SCC = Reg(((1) if (tmp >= 0x100000000) else (0)))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_SUB_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_SUB_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(S0.u32 - S1.u32)
   SCC = Reg(((1) if (S1.u32 > S0.u32) else (0)))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_ADD_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_ADD_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(S0.i32 + S1.i32)
   SCC = Reg(((S0.u32[31] == S1.u32[31])  and  (S0.u32[31] != tmp.u32[31])))
   D0.i32 = tmp.i32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_SUB_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_SUB_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(S0.i32 - S1.i32)
   SCC = Reg(((S0.u32[31] != S1.u32[31])  and  (S0.u32[31] != tmp.u32[31])))
   D0.i32 = tmp.i32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_ADDC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_ADDC_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg((S0.u32) + (S1.u32) + SCC.u64)
   SCC = Reg(((1) if (tmp >= 0x100000000) else (0)))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_SUBB_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_SUBB_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(S0.u32 - S1.u32 - SCC.u32)
   SCC = Reg(((1) if ((S1.u32) + SCC.u64 > (S0.u32)) else (0)))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_ABSDIFF_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_ABSDIFF_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.i32 = S0.i32 - S1.i32
   if D0.i32 < 0:
     D0.i32 = -D0.i32
   SCC = Reg(D0.i32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_LSHL_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_LSHL_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 << S1[4 : 0].u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_LSHL_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_LSHL_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = (S0.u64 << S1[5 : 0].u32)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_LSHR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_LSHR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 >> S1[4 : 0].u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_LSHR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_LSHR_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = (S0.u64 >> S1[5 : 0].u32)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_ASHR_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_ASHR_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.i32 = (signext(S0.i32) >> S1[4 : 0].u32)
   SCC = Reg(D0.i32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_ASHR_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_ASHR_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.i64 = (signext(S0.i64) >> S1[5 : 0].u32)
   SCC = Reg(D0.i64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_LSHL1_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_LSHL1_ADD_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(((S0.u32) << 1) + (S1.u32))
   SCC = Reg(((1) if (tmp >= 0x100000000) else (0)))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_LSHL2_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_LSHL2_ADD_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(((S0.u32) << 2) + (S1.u32))
   SCC = Reg(((1) if (tmp >= 0x100000000) else (0)))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_LSHL3_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_LSHL3_ADD_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(((S0.u32) << 3) + (S1.u32))
   SCC = Reg(((1) if (tmp >= 0x100000000) else (0)))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_LSHL4_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_LSHL4_ADD_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   tmp = Reg(((S0.u32) << 4) + (S1.u32))
   SCC = Reg(((1) if (tmp >= 0x100000000) else (0)))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_MIN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MIN_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.i32 < S1.i32)
   D0.i32 = ((S0.i32) if (SCC) else (S1.i32))
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_MIN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MIN_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32 < S1.u32)
   D0.u32 = ((S0.u32) if (SCC) else (S1.u32))
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_MAX_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MAX_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.i32 >= S1.i32)
   D0.i32 = ((S0.i32) if (SCC) else (S1.i32))
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_MAX_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MAX_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32 >= S1.u32)
   D0.u32 = ((S0.u32) if (SCC) else (S1.u32))
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_AND_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_AND_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 & S1.u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_AND_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_AND_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = (S0.u64 & S1.u64)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_OR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_OR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 | S1.u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_OR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_OR_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = (S0.u64 | S1.u64)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_XOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_XOR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 ^ S1.u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_XOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_XOR_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = (S0.u64 ^ S1.u64)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_NAND_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_NAND_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = ~(S0.u32 & S1.u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_NAND_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_NAND_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = ~(S0.u64 & S1.u64)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_NOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_NOR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = ~(S0.u32 | S1.u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_NOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_NOR_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = ~(S0.u64 | S1.u64)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_XNOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_XNOR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = ~(S0.u32 ^ S1.u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_XNOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_XNOR_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = ~(S0.u64 ^ S1.u64)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_AND_NOT1_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_AND_NOT1_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 & ~S1.u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_AND_NOT1_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_AND_NOT1_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = (S0.u64 & ~S1.u64)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_OR_NOT1_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_OR_NOT1_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 | ~S1.u32)
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_OR_NOT1_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_OR_NOT1_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = (S0.u64 | ~S1.u64)
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_BFE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_BFE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32 >> S1[4 : 0].u32) & ((1 << S1[22 : 16].u32) - 1))
   SCC = Reg(D0.u32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_BFE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _SOP2Op_S_BFE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp.i32 = ((S0.i32 >> S1[4 : 0].u32) & ((1 << S1[22 : 16].u32) - 1))
   D0.i32 = signext_from_bit(tmp.i32, S1[22 : 16].u32)
   SCC = Reg(D0.i32 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_BFE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_BFE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = ((S0.u64 >> S1[5 : 0].u32) & ((1 << S1[22 : 16].u32) - 1))
   SCC = Reg(D0.u64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_BFE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _SOP2Op_S_BFE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp.i64 = ((S0.i64 >> S1[5 : 0].u32) & ((1 << S1[22 : 16].u32) - 1))
   D0.i64 = signext_from_bit(tmp.i64, S1[22 : 16].u32)
   SCC = Reg(D0.i64 != 0)
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOP2Op_S_BFM_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_BFM_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (((1 << S0[4 : 0].u32) - 1) << S1[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_BFM_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_BFM_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u64 = (((1 << S0[5 : 0].u32) - 1) << S1[5 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MUL_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MUL_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = S0.i32 * S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MUL_HI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MUL_HI_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (((S0.u32) * (S1.u32)) >> 32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MUL_HI_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MUL_HI_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (((S0.i32) * (S1.i32)) >> 32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_CSELECT_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_CSELECT_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32) if (SCC) else (S1.u32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_CSELECT_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_CSELECT_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   D0.u64 = ((S0.u64) if (SCC) else (S1.u64))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_PACK_LL_B32_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_PACK_LL_B32_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0 = Reg(_pack(S1[15 : 0].u16, S0[15 : 0].u16))
   return {}
 
-def _SOP2Op_S_PACK_LH_B32_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_PACK_LH_B32_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0 = Reg(_pack(S1[31 : 16].u16, S0[15 : 0].u16))
   return {}
 
-def _SOP2Op_S_PACK_HH_B32_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_PACK_HH_B32_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0 = Reg(_pack(S1[31 : 16].u16, S0[31 : 16].u16))
   return {}
 
-def _SOP2Op_S_PACK_HL_B32_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_PACK_HL_B32_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0 = Reg(_pack(S1[15 : 0].u16, S0[31 : 16].u16))
   return {}
 
-def _SOP2Op_S_ADD_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_ADD_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 + S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_SUB_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_SUB_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 - S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MIN_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
@@ -825,9 +1081,11 @@ def _SOP2Op_S_MIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f32 = S0.f32
     else:
       D0.f32 = S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MAX_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
@@ -850,45 +1108,55 @@ def _SOP2Op_S_MAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f32 = S0.f32
     else:
       D0.f32 = S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MUL_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MUL_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 * S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_FMAAK_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM32 = Reg(literal)
+def _SOP2Op_S_FMAAK_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SIMM32=Reg(literal)
   # --- compiled pseudocode ---
   D0.f32 = fma(S0.f32, S1.f32, SIMM32.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_FMAMK_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM32 = Reg(literal)
+def _SOP2Op_S_FMAMK_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SIMM32=Reg(literal)
   # --- compiled pseudocode ---
   D0.f32 = fma(S0.f32, SIMM32.f32, S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_FMAC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_FMAC_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = fma(S0.f32, S1.f32, D0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_CVT_PK_RTZ_F16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _SOP2Op_S_CVT_PK_RTZ_F16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   prev_mode = ROUND_MODE
   tmp[15 : 0].f16 = f32_to_f16(S0.f32)
   tmp[31 : 16].f16 = f32_to_f16(S1.f32)
   return {}
 
-def _SOP2Op_S_ADD_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_ADD_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 + S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_SUB_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_SUB_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 - S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MIN_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
@@ -911,9 +1179,11 @@ def _SOP2Op_S_MIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f16 = S0.f16
     else:
       D0.f16 = S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MAX_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MAX_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
@@ -936,15 +1206,19 @@ def _SOP2Op_S_MAX_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f16 = S0.f16
     else:
       D0.f16 = S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_MUL_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_MUL_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 * S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOP2Op_S_FMAC_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOP2Op_S_FMAC_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = fma(S0.f16, S1.f16, D0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
 SOP2Op_FUNCTIONS = {
   SOP2Op.S_ADD_U32: _SOP2Op_S_ADD_U32,
@@ -1016,189 +1290,281 @@ SOP2Op_FUNCTIONS = {
   SOP2Op.S_FMAC_F16: _SOP2Op_S_FMAC_F16,
 }
 
-def _SOPCOp_S_CMP_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_EQ_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.i32 == S1.i32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LG_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LG_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.i32  !=  S1.i32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_GT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.i32 > S1.i32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_GE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.i32 >= S1.i32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.i32 < S1.i32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.i32 <= S1.i32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_EQ_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32 == S1.u32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LG_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LG_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32  !=  S1.u32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_GT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32 > S1.u32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_GE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32 >= S1.u32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32 < S1.u32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32 <= S1.u32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_BITCMP0_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_BITCMP0_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32[S1.u32[4 : 0]] == 0)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_BITCMP1_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_BITCMP1_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u32[S1.u32[4 : 0]] == 1)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_BITCMP0_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_BITCMP0_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u64[S1.u32[5 : 0]] == 0)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_BITCMP1_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_BITCMP1_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u64[S1.u32[5 : 0]] == 1)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_EQ_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u64 == S1.u64)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LG_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LG_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.u64  !=  S1.u64)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f32 < S1.f32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f16 < S1.f16)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_EQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f32 == S1.f32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_EQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f16 == S1.f16)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f32 <= S1.f32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f16 <= S1.f16)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_GT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f32 > S1.f32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_GT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f16 > S1.f16)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f32  !=  S1.f32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_LG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f16  !=  S1.f16)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_GE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f32 >= S1.f32)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_GE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(S0.f16 >= S1.f16)
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_O_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32))))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_O_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg(( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16))))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_U_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg((isNAN(F(S0.f32))  or  isNAN(F(S1.f32))))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_U_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg((isNAN(F(S0.f16))  or  isNAN(F(S1.f16))))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NGE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f32 >= S1.f32))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NGE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f16 >= S1.f16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NLG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f32  !=  S1.f32))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NLG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f16  !=  S1.f16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NGT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f32 > S1.f32))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NGT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f16 > S1.f16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NLE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f32 <= S1.f32))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NLE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f16 <= S1.f16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NEQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f32 == S1.f32))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NEQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f16 == S1.f16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NLT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f32 < S1.f32))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPCOp_S_CMP_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPCOp_S_CMP_NLT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); SCC=Reg(scc)
+  # --- compiled pseudocode ---
   SCC = Reg( not (S0.f16 < S1.f16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
 SOPCOp_FUNCTIONS = {
   SOPCOp.S_CMP_EQ_I32: _SOPCOp_S_CMP_EQ_I32,
@@ -1249,114 +1615,115 @@ SOPCOp_FUNCTIONS = {
   SOPCOp.S_CMP_NLT_F16: _SOPCOp_S_CMP_NLT_F16,
 }
 
-def _SOPKOp_S_MOVK_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_MOVK_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   D0.i32 = (signext(SIMM16.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOPKOp_S_VERSION(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPKOp_S_VERSION(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  # --- compiled pseudocode ---
   return {}
 
-def _SOPKOp_S_CMOVK_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMOVK_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   if SCC:
     D0.i32 = (signext(SIMM16.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOPKOp_S_CMPK_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_EQ_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg((S0.i32) == signext(SIMM16.i16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_LG_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_LG_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg((S0.i32) != signext(SIMM16.i16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_GT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg((S0.i32) > signext(SIMM16.i16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_GE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg((S0.i32) >= signext(SIMM16.i16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_LT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg((S0.i32) < signext(SIMM16.i16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_LE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg((S0.i32) <= signext(SIMM16.i16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_EQ_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg(S0.u32 == (SIMM16.u16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_LG_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_LG_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg(S0.u32 != (SIMM16.u16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_GT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg(S0.u32 > (SIMM16.u16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_GE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg(S0.u32 >= (SIMM16.u16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_LT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg(S0.u32 < (SIMM16.u16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_CMPK_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CMPK_LE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   SCC = Reg(S0.u32 <= (SIMM16.u16))
-  return {'SCC': SCC}
+  return {'SCC': SCC._val}
 
-def _SOPKOp_S_ADDK_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_ADDK_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); SCC=Reg(scc); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   tmp = Reg(D0.i32)
   D0.i32 = ((D0.i32) + signext(SIMM16.i16))
   SCC = Reg(((tmp[31] == SIMM16.i16[15])  and  (tmp[31] != D0.i32[31])))
-  return {'D0': D0, 'SCC': SCC}
+  return {'D0': D0._val, 'SCC': SCC._val}
 
-def _SOPKOp_S_MULK_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_MULK_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   D0.i32 = ((D0.i32) * signext(SIMM16.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _SOPKOp_S_CALL_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPKOp_S_CALL_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   D0.i64 = PC + 4
   PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
-  return {'D0': D0, 'PC': PC}
+  return {'D0': D0._val, 'PC': PC._val}
 
 SOPKOp_FUNCTIONS = {
   SOPKOp.S_MOVK_I32: _SOPKOp_S_MOVK_I32,
@@ -1379,118 +1746,118 @@ SOPKOp_FUNCTIONS = {
   SOPKOp.S_CALL_B64: _SOPKOp_S_CALL_B64,
 }
 
-def _SOPPOp_S_NOP(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPPOp_S_NOP(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   for i in range(0, int(SIMM16.u16[3 : 0].u32)+1):
     pass
   return {}
 
-def _SOPPOp_S_DELAY_ALU(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _SOPPOp_S_DELAY_ALU(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   return {}
 
-def _SOPPOp_S_TRAP(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  return {'PC': PC}
+def _SOPPOp_S_TRAP(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
+  return {'PC': PC._val}
 
-def _SOPPOp_S_BRANCH(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPPOp_S_BRANCH(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_SCC0(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPPOp_S_CBRANCH_SCC0(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  SCC=Reg(scc); PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   if SCC == 0:
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'SCC': SCC, 'PC': PC}
+  return {'SCC': SCC._val, 'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_SCC1(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPPOp_S_CBRANCH_SCC1(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  SCC=Reg(scc); PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   if SCC == 1:
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'SCC': SCC, 'PC': PC}
+  return {'SCC': SCC._val, 'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_VCCZ(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
-  VCCZ = Reg(1 if VCC._val == 0 else 0)
+def _SOPPOp_S_CBRANCH_VCCZ(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal); VCCZ=Reg(1 if VCC._val == 0 else 0)
   # --- compiled pseudocode ---
   if VCCZ.u1 == 1:
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_VCCNZ(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
-  VCCZ = Reg(1 if VCC._val == 0 else 0)
+def _SOPPOp_S_CBRANCH_VCCNZ(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal); VCCZ=Reg(1 if VCC._val == 0 else 0)
   # --- compiled pseudocode ---
   if VCCZ.u1 == 0:
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_EXECZ(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
-  EXECZ = Reg(1 if EXEC._val == 0 else 0)
+def _SOPPOp_S_CBRANCH_EXECZ(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask); PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal); EXECZ=Reg(1 if EXEC._val == 0 else 0)
   # --- compiled pseudocode ---
   if EXECZ.u1 == 1:
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_EXECNZ(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
-  EXECZ = Reg(1 if EXEC._val == 0 else 0)
+def _SOPPOp_S_CBRANCH_EXECNZ(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask); PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal); EXECZ=Reg(1 if EXEC._val == 0 else 0)
   # --- compiled pseudocode ---
   if EXECZ.u1 == 0:
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_CDBGSYS(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPPOp_S_CBRANCH_CDBGSYS(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   if WAVE_STATUS.COND_DBG_SYS.u32 != 0:
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_CDBGUSER(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPPOp_S_CBRANCH_CDBGUSER(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   if WAVE_STATUS.COND_DBG_USER.u32 != 0:
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_CDBGSYS_OR_USER(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPPOp_S_CBRANCH_CDBGSYS_OR_USER(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   if (WAVE_STATUS.COND_DBG_SYS  or  WAVE_STATUS.COND_DBG_USER):
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
-def _SOPPOp_S_CBRANCH_CDBGSYS_AND_USER(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM16 = Reg(literal)
+def _SOPPOp_S_CBRANCH_CDBGSYS_AND_USER(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  PC=Reg(pc) if pc is not None else None; SIMM16=Reg(literal)
   # --- compiled pseudocode ---
   if (WAVE_STATUS.COND_DBG_SYS  and  WAVE_STATUS.COND_DBG_USER):
     PC = Reg(PC + signext(SIMM16.i16 * 4) + 4)
   else:
     PC = Reg(PC + 4)
-  return {'PC': PC}
+  return {'PC': PC._val}
 
 SOPPOp_FUNCTIONS = {
   SOPPOp.S_NOP: _SOPPOp_S_NOP,
@@ -1509,13 +1876,139 @@ SOPPOp_FUNCTIONS = {
   SOPPOp.S_CBRANCH_CDBGSYS_AND_USER: _SOPPOp_S_CBRANCH_CDBGSYS_AND_USER,
 }
 
-def _VOP1Op_V_MOV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  D0.b32 = S0.b32
-  return {'D0': D0}
+def _SMEMOp_S_LOAD_B32(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  return {'SDATA': SDATA._val}
 
-def _VOP1Op_V_READFIRSTLANE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SRC0 = Reg(src0_idx)
-  EXEC_LO = SliceProxy(EXEC, 31, 0)
+def _SMEMOp_S_LOAD_B64(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  SDATA[63 : 32] = MEM[ADDR + 4].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_B128(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  SDATA[63 : 32] = MEM[ADDR + 4].b32
+  SDATA[95 : 64] = MEM[ADDR + 8].b32
+  SDATA[127 : 96] = MEM[ADDR + 12].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_B256(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  SDATA[63 : 32] = MEM[ADDR + 4].b32
+  SDATA[95 : 64] = MEM[ADDR + 8].b32
+  SDATA[127 : 96] = MEM[ADDR + 12].b32
+  SDATA[159 : 128] = MEM[ADDR + 16].b32
+  SDATA[191 : 160] = MEM[ADDR + 20].b32
+  SDATA[223 : 192] = MEM[ADDR + 24].b32
+  SDATA[255 : 224] = MEM[ADDR + 28].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_B512(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  SDATA[63 : 32] = MEM[ADDR + 4].b32
+  SDATA[95 : 64] = MEM[ADDR + 8].b32
+  SDATA[127 : 96] = MEM[ADDR + 12].b32
+  SDATA[159 : 128] = MEM[ADDR + 16].b32
+  SDATA[191 : 160] = MEM[ADDR + 20].b32
+  SDATA[223 : 192] = MEM[ADDR + 24].b32
+  SDATA[255 : 224] = MEM[ADDR + 28].b32
+  SDATA[287 : 256] = MEM[ADDR + 32].b32
+  SDATA[319 : 288] = MEM[ADDR + 36].b32
+  SDATA[351 : 320] = MEM[ADDR + 40].b32
+  SDATA[383 : 352] = MEM[ADDR + 44].b32
+  SDATA[415 : 384] = MEM[ADDR + 48].b32
+  SDATA[447 : 416] = MEM[ADDR + 52].b32
+  SDATA[479 : 448] = MEM[ADDR + 56].b32
+  SDATA[511 : 480] = MEM[ADDR + 60].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B32(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B64(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  SDATA[63 : 32] = MEM[ADDR + 4].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B128(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  SDATA[63 : 32] = MEM[ADDR + 4].b32
+  SDATA[95 : 64] = MEM[ADDR + 8].b32
+  SDATA[127 : 96] = MEM[ADDR + 12].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B256(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  SDATA[63 : 32] = MEM[ADDR + 4].b32
+  SDATA[95 : 64] = MEM[ADDR + 8].b32
+  SDATA[127 : 96] = MEM[ADDR + 12].b32
+  SDATA[159 : 128] = MEM[ADDR + 16].b32
+  SDATA[191 : 160] = MEM[ADDR + 20].b32
+  SDATA[223 : 192] = MEM[ADDR + 24].b32
+  SDATA[255 : 224] = MEM[ADDR + 28].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B512(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA[31 : 0] = MEM[ADDR].b32
+  SDATA[63 : 32] = MEM[ADDR + 4].b32
+  SDATA[95 : 64] = MEM[ADDR + 8].b32
+  SDATA[127 : 96] = MEM[ADDR + 12].b32
+  SDATA[159 : 128] = MEM[ADDR + 16].b32
+  SDATA[191 : 160] = MEM[ADDR + 20].b32
+  SDATA[223 : 192] = MEM[ADDR + 24].b32
+  SDATA[255 : 224] = MEM[ADDR + 28].b32
+  SDATA[287 : 256] = MEM[ADDR + 32].b32
+  SDATA[319 : 288] = MEM[ADDR + 36].b32
+  SDATA[351 : 320] = MEM[ADDR + 40].b32
+  SDATA[383 : 352] = MEM[ADDR + 44].b32
+  SDATA[415 : 384] = MEM[ADDR + 48].b32
+  SDATA[447 : 416] = MEM[ADDR + 52].b32
+  SDATA[479 : 448] = MEM[ADDR + 56].b32
+  SDATA[511 : 480] = MEM[ADDR + 60].b32
+  return {'SDATA': SDATA._val}
+
+SMEMOp_FUNCTIONS = {
+  SMEMOp.S_LOAD_B32: _SMEMOp_S_LOAD_B32,
+  SMEMOp.S_LOAD_B64: _SMEMOp_S_LOAD_B64,
+  SMEMOp.S_LOAD_B128: _SMEMOp_S_LOAD_B128,
+  SMEMOp.S_LOAD_B256: _SMEMOp_S_LOAD_B256,
+  SMEMOp.S_LOAD_B512: _SMEMOp_S_LOAD_B512,
+  SMEMOp.S_BUFFER_LOAD_B32: _SMEMOp_S_BUFFER_LOAD_B32,
+  SMEMOp.S_BUFFER_LOAD_B64: _SMEMOp_S_BUFFER_LOAD_B64,
+  SMEMOp.S_BUFFER_LOAD_B128: _SMEMOp_S_BUFFER_LOAD_B128,
+  SMEMOp.S_BUFFER_LOAD_B256: _SMEMOp_S_BUFFER_LOAD_B256,
+  SMEMOp.S_BUFFER_LOAD_B512: _SMEMOp_S_BUFFER_LOAD_B512,
+}
+
+def _VOP1Op_V_MOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
+  D0.b32 = S0.b32
+  return {'D0': D0._val}
+
+def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); EXEC=Reg(exec_mask); SRC0=Reg(src0_idx); EXEC_LO=SliceProxy(EXEC, 31, 0)
   # --- compiled pseudocode ---
   if WAVE64:
     if EXEC == 0x0:
@@ -1528,361 +2021,511 @@ def _VOP1Op_V_READFIRSTLANE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal,
     else:
       lane = (s_ff1_i32_b32(EXEC_LO))
   D0.b32 = VGPR[lane][SRC0.u32]
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_I32_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_I32_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f64_to_i32(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F64_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F64_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = i32_to_f64(S0.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F32_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F32_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = i32_to_f32(S0.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F32_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F32_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_U32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_U32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = f32_to_u32(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f32_to_i32(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = f32_to_f16(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F32_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F32_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = f16_to_f32(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_NEAREST_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_NEAREST_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f32_to_i32(floor(S0.f32 + 0.5))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_FLOOR_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_FLOOR_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f32_to_i32(floor(S0.f32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F32_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F32_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = f64_to_f32(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F64_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F64_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = f32_to_f64(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F32_UBYTE0(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F32_UBYTE0(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0[7 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F32_UBYTE1(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F32_UBYTE1(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0[15 : 8].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F32_UBYTE2(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F32_UBYTE2(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0[23 : 16].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F32_UBYTE3(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F32_UBYTE3(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0[31 : 24].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_U32_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_U32_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = f64_to_u32(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F64_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F64_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = u32_to_f64(S0.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_TRUNC_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_TRUNC_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = trunc(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CEIL_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CEIL_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = trunc(S0.f64)
   if ((S0.f64 > 0.0)  and  (S0.f64 != D0.f64)):
     D0.f64 += 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RNDNE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RNDNE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = floor(S0.f64 + 0.5)
   if (isEven(floor(S0.f64))  and  (fract(S0.f64) == 0.5)):
     D0.f64 -= 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FLOOR_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FLOOR_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = trunc(S0.f64)
   if ((S0.f64 < 0.0)  and  (S0.f64 != D0.f64)):
     D0.f64 += -1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_MOV_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_MOV_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.b16 = S0.b16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FRACT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FRACT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 + -floor(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_TRUNC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_TRUNC_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CEIL_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CEIL_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
   if ((S0.f32 > 0.0)  and  (S0.f32 != D0.f32)):
     D0.f32 += 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RNDNE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RNDNE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = floor(S0.f32 + 0.5)
   if (isEven(F(floor(S0.f32)))  and  (fract(S0.f32) == 0.5)):
     D0.f32 -= 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FLOOR_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FLOOR_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
   if ((S0.f32 < 0.0)  and  (S0.f32 != D0.f32)):
     D0.f32 += -1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_EXP_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_EXP_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = pow(2.0, S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_LOG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_LOG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = log2(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RCP_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RCP_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = 1.0 / S0.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RCP_IFLAG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RCP_IFLAG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = 1.0 / S0.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RSQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RSQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = 1.0 / sqrt(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RCP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RCP_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = 1.0 / S0.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RSQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RSQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = 1.0 / sqrt(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_SQRT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_SQRT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = sqrt(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_SQRT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_SQRT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = sqrt(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_SIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_SIN_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = sin(S0.f32 * F(PI * 2.0))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_COS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_COS_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = cos(S0.f32 * F(PI * 2.0))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_NOT_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_NOT_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ~S0.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_BFREV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_BFREV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32[31 : 0] = S0.u32[0 : 31]
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CLZ_I32_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
       D0.i32 = i; break
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CTZ_I32_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
       D0.i32 = i; break
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CLS_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CLS_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(1, int(31)+1):
     if S0.i32[31 - i] != S0.i32[31]:
       D0.i32 = i; break
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FREXP_EXP_I32_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FREXP_EXP_I32_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((S0.f64 == INF)  or  (S0.f64 == (-INF))  or  isNAN(S0.f64)):
     D0.i32 = 0
   else:
     D0.i32 = exponent(S0.f64) - 1023 + 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FREXP_MANT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FREXP_MANT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((S0.f64 == INF)  or  (S0.f64 == (-INF))  or  isNAN(S0.f64)):
     D0.f64 = S0.f64
   else:
     D0.f64 = mantissa(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FRACT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FRACT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = S0.f64 + -floor(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FREXP_EXP_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FREXP_EXP_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == INF)  or  (F(S0.f32) == (-INF))  or  isNAN(F(S0.f32))):
     D0.i32 = 0
   else:
     D0.i32 = exponent(S0.f32) - 127 + 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FREXP_MANT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FREXP_MANT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == INF)  or  (F(S0.f32) == (-INF))  or  isNAN(F(S0.f32))):
     D0.f32 = S0.f32
   else:
     D0.f32 = mantissa(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_MOVRELS_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SRC0 = Reg(src0_idx)
+def _VOP1Op_V_MOVRELS_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); SRC0=Reg(src0_idx)
   # --- compiled pseudocode ---
   addr = SRC0.u32
   D0.b32 = VGPR[laneId][addr].b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F16_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F16_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = u16_to_f16(S0.u16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_F16_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_F16_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = i16_to_f16(S0.i16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_U16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_U16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = f16_to_u16(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_I16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_I16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = f16_to_i16(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RCP_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RCP_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = 1.0 / S0.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_SQRT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_SQRT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = sqrt(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RSQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RSQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = 1.0 / sqrt(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_LOG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_LOG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = log2(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_EXP_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_EXP_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = pow(2.0, S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FREXP_MANT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FREXP_MANT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f16) == INF)  or  (F(S0.f16) == (-INF))  or  isNAN(F(S0.f16))):
     D0.f16 = S0.f16
   else:
     D0.f16 = mantissa(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FREXP_EXP_I16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FREXP_EXP_I16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f16) == INF)  or  (F(S0.f16) == (-INF))  or  isNAN(F(S0.f16))):
     D0.i16 = 0
   else:
     D0.i16 = (exponent(S0.f16) - 15 + 1)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FLOOR_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FLOOR_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
   if ((S0.f16 < 0.0)  and  (S0.f16 != D0.f16)):
     D0.f16 += -1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CEIL_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CEIL_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
   if ((S0.f16 > 0.0)  and  (S0.f16 != D0.f16)):
     D0.f16 += 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_TRUNC_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_TRUNC_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_RNDNE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_RNDNE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = floor(S0.f16 + 0.5)
   if (isEven(F(floor(S0.f16)))  and  (fract(S0.f16) == 0.5)):
     D0.f16 -= 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_FRACT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_FRACT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 + -floor(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_SIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_SIN_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = sin(S0.f16 * F(PI * 2.0))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_COS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_COS_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = cos(S0.f16 * F(PI * 2.0))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_SAT_PK_U8_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_SAT_PK_U8_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.b16 = _pack(SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_NORM_I16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_NORM_I16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = f16_to_snorm(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_NORM_U16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_NORM_U16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = f16_to_unorm(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_SWAP_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_SWAP_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(D0.b32)
   D0.b32 = S0.b32
   S0.b32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_SWAP_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_SWAP_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(D0.b16)
   D0.b16 = S0.b16
   S0.b16 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_NOT_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_NOT_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = ~S0.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_I32_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_I32_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (signext(S0.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP1Op_V_CVT_U32_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP1Op_V_CVT_U32_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0 = Reg(_pack(0, S0.u16))
   return {}
 
@@ -1967,64 +2610,90 @@ VOP1Op_FUNCTIONS = {
   VOP1Op.V_CVT_U32_U16: _VOP1Op_V_CVT_U32_U16,
 }
 
-def _VOP2Op_V_CNDMASK_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_CNDMASK_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   D0.u32 = ((S1.u32) if (VCC.u64[laneId]) else (S0.u32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_DOT2ACC_F32_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_DOT2ACC_F32_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(D0.f32)
   tmp += f16_to_f32(S0[15 : 0].f16) * f16_to_f32(S1[15 : 0].f16)
   tmp += f16_to_f32(S0[31 : 16].f16) * f16_to_f32(S1[31 : 16].f16)
   D0.f32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_ADD_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_ADD_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 + S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_SUB_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_SUB_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 - S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_SUBREV_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_SUBREV_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S1.f32 - S0.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_FMAC_DX9_ZERO_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_FMAC_DX9_ZERO_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
     D0.f32 = S2.f32
   else:
     D0.f32 = fma(S0.f32, S1.f32, D0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MUL_DX9_ZERO_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MUL_DX9_ZERO_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
     D0.f32 = 0.0
   else:
     D0.f32 = S0.f32 * S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MUL_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MUL_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 * S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MUL_I32_I24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MUL_I32_I24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (S0.i24) * (S1.i24)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MUL_HI_I32_I24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MUL_HI_I32_I24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (((S0.i24) * (S1.i24)) >> 32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MUL_U32_U24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MUL_U32_U24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u24) * (S1.u24)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MUL_HI_U32_U24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MUL_HI_U32_U24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (((S0.u24) * (S1.u24)) >> 32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MIN_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
@@ -2047,9 +2716,11 @@ def _VOP2Op_V_MIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f32 = S0.f32
     else:
       D0.f32 = S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MAX_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
@@ -2072,139 +2743,187 @@ def _VOP2Op_V_MAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f32 = S0.f32
     else:
       D0.f32 = S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MIN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MIN_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = ((S0.i32) if (S0.i32 < S1.i32) else (S1.i32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MAX_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MAX_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = ((S0.i32) if (S0.i32 >= S1.i32) else (S1.i32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MIN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MIN_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32) if (S0.u32 < S1.u32) else (S1.u32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MAX_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MAX_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32) if (S0.u32 >= S1.u32) else (S1.u32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_LSHLREV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_LSHLREV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S1.u32 << S0[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_LSHRREV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_LSHRREV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S1.u32 >> S0[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_ASHRREV_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_ASHRREV_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (S1.i32 >> S0[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_AND_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_AND_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 & S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_OR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_OR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 | S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_XOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_XOR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 ^ S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_XNOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_XNOR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ~(S0.u32 ^ S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_ADD_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_ADD_CO_CI_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg((S0.u32) + (S1.u32) + VCC.u64[laneId])
   VCC.u64[laneId] = ((1) if (tmp >= 0x100000000) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP2Op_V_SUB_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_SUB_CO_CI_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg(S0.u32 - S1.u32 - VCC.u64[laneId])
   VCC.u64[laneId] = ((1) if ((S1.u32) + VCC.u64[laneId] > (S0.u32)) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP2Op_V_SUBREV_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_SUBREV_CO_CI_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg(S1.u32 - S0.u32 - VCC.u64[laneId])
   VCC.u64[laneId] = ((1) if ((S0.u32) + VCC.u64[laneId] > (S1.u32)) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP2Op_V_ADD_NC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_ADD_NC_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = S0.u32 + S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_SUB_NC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_SUB_NC_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = S0.u32 - S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_SUBREV_NC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_SUBREV_NC_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = S1.u32 - S0.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_FMAC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_FMAC_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = fma(S0.f32, S1.f32, D0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_FMAMK_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM32 = Reg(literal)
+def _VOP2Op_V_FMAMK_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SIMM32=Reg(literal)
   # --- compiled pseudocode ---
   D0.f32 = fma(S0.f32, SIMM32.f32, S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_FMAAK_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM32 = Reg(literal)
+def _VOP2Op_V_FMAAK_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SIMM32=Reg(literal)
   # --- compiled pseudocode ---
   D0.f32 = fma(S0.f32, S1.f32, SIMM32.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_CVT_PK_RTZ_F16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP2Op_V_CVT_PK_RTZ_F16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   prev_mode = ROUND_MODE
   tmp[15 : 0].f16 = f32_to_f16(S0.f32)
   tmp[31 : 16].f16 = f32_to_f16(S1.f32)
   return {}
 
-def _VOP2Op_V_ADD_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_ADD_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 + S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_SUB_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_SUB_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 - S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_SUBREV_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_SUBREV_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S1.f16 - S0.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MUL_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MUL_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 * S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_FMAC_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_FMAC_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = fma(S0.f16, S1.f16, D0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_FMAMK_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM32 = Reg(literal)
+def _VOP2Op_V_FMAMK_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SIMM32=Reg(literal)
   # --- compiled pseudocode ---
   D0.f16 = fma(S0.f16, SIMM32.f16, S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_FMAAK_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SIMM32 = Reg(literal)
+def _VOP2Op_V_FMAAK_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); SIMM32=Reg(literal)
   # --- compiled pseudocode ---
   D0.f16 = fma(S0.f16, S1.f16, SIMM32.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MAX_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MAX_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
@@ -2227,9 +2946,11 @@ def _VOP2Op_V_MAX_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f16 = S0.f16
     else:
       D0.f16 = S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_MIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_MIN_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
@@ -2252,16 +2973,20 @@ def _VOP2Op_V_MIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f16 = S0.f16
     else:
       D0.f16 = S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_LDEXP_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_LDEXP_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 * F(2.0 ** (S1.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP2Op_V_PK_FMAC_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP2Op_V_PK_FMAC_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0[31 : 16].f16 = fma(S0[31 : 16].f16, S1[31 : 16].f16, D0[31 : 16].f16)
   D0[15 : 0].f16 = fma(S0[15 : 0].f16, S1[15 : 0].f16, D0[15 : 0].f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
 VOP2Op_FUNCTIONS = {
   VOP2Op.V_CNDMASK_B32: _VOP2Op_V_CNDMASK_B32,
@@ -2312,375 +3037,561 @@ VOP2Op_FUNCTIONS = {
   VOP2Op.V_PK_FMAC_F16: _VOP2Op_V_PK_FMAC_F16,
 }
 
-def _VOP3Op_V_CMP_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_F_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 < S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 == S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 <= S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 > S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16  !=  S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 >= S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_O_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_U_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NGE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 >= S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16  !=  S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NGT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 > S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 <= S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NEQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 == S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 < S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_T_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_F_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 < S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 == S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 <= S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 > S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32  !=  S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 >= S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_O_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_U_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NGE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 >= S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32  !=  S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NGT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 > S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 <= S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NEQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 == S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 < S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_T_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_F_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 < S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 == S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 <= S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 > S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LG_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64  !=  S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 >= S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_O_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_U_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NGE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 >= S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLG_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64  !=  S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NGT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 > S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 <= S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NEQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 == S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NLT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 < S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_T_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 < S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 == S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 <= S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 > S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16  !=  S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 >= S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 < S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 == S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 <= S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 > S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16  !=  S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 >= S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_F_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 < S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 == S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 <= S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 > S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32  !=  S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 >= S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_T_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_F_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 < S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 == S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 <= S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 > S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32  !=  S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 >= S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_T_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_F_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 < S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 == S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 <= S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 > S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64  !=  S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 >= S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_T_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_F_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LT_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 < S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_EQ_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 == S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_LE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 <= S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GT_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 > S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_NE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64  !=  S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_GE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 >= S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_T_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_CLASS_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   if isSignalNAN(F(S0.f16)):
     result = S1.u32[0]
   elif isQuietNAN(F(S0.f16)):
@@ -2694,9 +3605,11 @@ def _VOP3Op_V_CMP_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   else:
     result = S1.u32[((5) if (sign(S0.f16)) else (6))]
   D0.u64[laneId] = result
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_CLASS_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   if isSignalNAN(F(S0.f32)):
     result = S1.u32[0]
   elif isQuietNAN(F(S0.f32)):
@@ -2710,9 +3623,11 @@ def _VOP3Op_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   else:
     result = S1.u32[((5) if (sign(S0.f32)) else (6))]
   D0.u64[laneId] = result
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMP_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMP_CLASS_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   if isSignalNAN(S0.f64):
     result = S1.u32[0]
   elif isQuietNAN(S0.f64):
@@ -2726,377 +3641,563 @@ def _VOP3Op_V_CMP_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   else:
     result = S1.u32[((5) if (sign(S0.f64)) else (6))]
   D0.u64[laneId] = result
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CMPX_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_F_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 < S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 == S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 <= S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 > S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16  !=  S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 >= S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_O_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_U_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NGE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 >= S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16  !=  S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NGT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 > S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 <= S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NEQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 == S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 < S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_T_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_F_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 < S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 == S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 <= S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 > S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32  !=  S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 >= S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_O_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_U_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NGE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 >= S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32  !=  S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NGT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 > S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 <= S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NEQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 == S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 < S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_T_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_F_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 < S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 == S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 <= S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 > S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LG_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64  !=  S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 >= S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_O_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_U_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NGE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 >= S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLG_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64  !=  S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NGT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 > S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 <= S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NEQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 == S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NLT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 < S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_T_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 < S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 == S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 <= S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 > S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16  !=  S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 >= S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 < S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 == S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 <= S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 > S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16  !=  S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 >= S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_F_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 < S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 == S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 <= S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 > S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32  !=  S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 >= S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_T_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_F_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 < S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 == S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 <= S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 > S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32  !=  S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 >= S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_T_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_F_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 < S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 == S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 <= S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 > S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64  !=  S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 >= S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_T_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_F_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LT_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 < S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_EQ_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 == S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_LE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 <= S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GT_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 > S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_NE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64  !=  S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_GE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 >= S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_T_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_CLASS_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   if isSignalNAN(F(S0.f16)):
     result = S1.u32[0]
   elif isQuietNAN(F(S0.f16)):
@@ -3110,9 +4211,11 @@ def _VOP3Op_V_CMPX_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   else:
     result = S1.u32[((5) if (sign(S0.f16)) else (6))]
   EXEC.u64[laneId] = result
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_CLASS_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   if isSignalNAN(F(S0.f32)):
     result = S1.u32[0]
   elif isQuietNAN(F(S0.f32)):
@@ -3126,9 +4229,11 @@ def _VOP3Op_V_CMPX_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   else:
     result = S1.u32[((5) if (sign(S0.f32)) else (6))]
   EXEC.u64[laneId] = result
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_CMPX_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CMPX_CLASS_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   if isSignalNAN(S0.f64):
     result = S1.u32[0]
   elif isQuietNAN(S0.f64):
@@ -3142,15 +4247,16 @@ def _VOP3Op_V_CMPX_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   else:
     result = S1.u32[((5) if (sign(S0.f64)) else (6))]
   EXEC.u64[laneId] = result
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOP3Op_V_MOV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.b32 = S0.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_READFIRSTLANE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SRC0 = Reg(src0_idx)
-  EXEC_LO = SliceProxy(EXEC, 31, 0)
+def _VOP3Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); EXEC=Reg(exec_mask); SRC0=Reg(src0_idx); EXEC_LO=SliceProxy(EXEC, 31, 0)
   # --- compiled pseudocode ---
   if WAVE64:
     if EXEC == 0x0:
@@ -3163,403 +4269,573 @@ def _VOP3Op_V_READFIRSTLANE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal,
     else:
       lane = (s_ff1_i32_b32(EXEC_LO))
   D0.b32 = VGPR[lane][SRC0.u32]
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_I32_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_I32_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f64_to_i32(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F64_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F64_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = i32_to_f64(S0.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F32_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F32_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = i32_to_f32(S0.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F32_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F32_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_U32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_U32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = f32_to_u32(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f32_to_i32(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = f32_to_f16(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F32_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F32_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = f16_to_f32(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_NEAREST_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_NEAREST_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f32_to_i32(floor(S0.f32 + 0.5))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_FLOOR_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_FLOOR_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = f32_to_i32(floor(S0.f32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F32_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F32_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = f64_to_f32(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F64_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F64_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = f32_to_f64(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F32_UBYTE0(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F32_UBYTE0(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0[7 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F32_UBYTE1(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F32_UBYTE1(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0[15 : 8].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F32_UBYTE2(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F32_UBYTE2(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0[23 : 16].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F32_UBYTE3(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F32_UBYTE3(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = u32_to_f32(S0[31 : 24].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_U32_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_U32_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = f64_to_u32(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F64_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F64_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = u32_to_f64(S0.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_TRUNC_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_TRUNC_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = trunc(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CEIL_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CEIL_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = trunc(S0.f64)
   if ((S0.f64 > 0.0)  and  (S0.f64 != D0.f64)):
     D0.f64 += 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RNDNE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RNDNE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = floor(S0.f64 + 0.5)
   if (isEven(floor(S0.f64))  and  (fract(S0.f64) == 0.5)):
     D0.f64 -= 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FLOOR_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FLOOR_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = trunc(S0.f64)
   if ((S0.f64 < 0.0)  and  (S0.f64 != D0.f64)):
     D0.f64 += -1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MOV_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MOV_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.b16 = S0.b16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FRACT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FRACT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 + -floor(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_TRUNC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_TRUNC_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CEIL_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CEIL_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
   if ((S0.f32 > 0.0)  and  (S0.f32 != D0.f32)):
     D0.f32 += 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RNDNE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RNDNE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = floor(S0.f32 + 0.5)
   if (isEven(F(floor(S0.f32)))  and  (fract(S0.f32) == 0.5)):
     D0.f32 -= 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FLOOR_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FLOOR_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = trunc(S0.f32)
   if ((S0.f32 < 0.0)  and  (S0.f32 != D0.f32)):
     D0.f32 += -1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_EXP_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_EXP_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = pow(2.0, S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LOG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LOG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = log2(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RCP_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RCP_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = 1.0 / S0.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RCP_IFLAG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RCP_IFLAG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = 1.0 / S0.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RSQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RSQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = 1.0 / sqrt(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RCP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RCP_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = 1.0 / S0.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RSQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RSQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = 1.0 / sqrt(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SQRT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SQRT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = sqrt(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SQRT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SQRT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = sqrt(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SIN_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = sin(S0.f32 * F(PI * 2.0))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_COS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_COS_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = cos(S0.f32 * F(PI * 2.0))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_NOT_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_NOT_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ~S0.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_BFREV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_BFREV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32[31 : 0] = S0.u32[0 : 31]
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CLZ_I32_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
       D0.i32 = i; break
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CTZ_I32_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
       D0.i32 = i; break
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CLS_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CLS_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(1, int(31)+1):
     if S0.i32[31 - i] != S0.i32[31]:
       D0.i32 = i; break
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FREXP_EXP_I32_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FREXP_EXP_I32_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((S0.f64 == INF)  or  (S0.f64 == (-INF))  or  isNAN(S0.f64)):
     D0.i32 = 0
   else:
     D0.i32 = exponent(S0.f64) - 1023 + 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FREXP_MANT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FREXP_MANT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((S0.f64 == INF)  or  (S0.f64 == (-INF))  or  isNAN(S0.f64)):
     D0.f64 = S0.f64
   else:
     D0.f64 = mantissa(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FRACT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FRACT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = S0.f64 + -floor(S0.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FREXP_EXP_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FREXP_EXP_I32_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == INF)  or  (F(S0.f32) == (-INF))  or  isNAN(F(S0.f32))):
     D0.i32 = 0
   else:
     D0.i32 = exponent(S0.f32) - 127 + 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FREXP_MANT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FREXP_MANT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == INF)  or  (F(S0.f32) == (-INF))  or  isNAN(F(S0.f32))):
     D0.f32 = S0.f32
   else:
     D0.f32 = mantissa(S0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MOVRELS_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SRC0 = Reg(src0_idx)
+def _VOP3Op_V_MOVRELS_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); SRC0=Reg(src0_idx)
   # --- compiled pseudocode ---
   addr = SRC0.u32
   D0.b32 = VGPR[laneId][addr].b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F16_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F16_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = u16_to_f16(S0.u16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_F16_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_F16_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = i16_to_f16(S0.i16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_U16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_U16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = f16_to_u16(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_I16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_I16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = f16_to_i16(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RCP_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RCP_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = 1.0 / S0.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SQRT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SQRT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = sqrt(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RSQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RSQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = 1.0 / sqrt(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LOG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LOG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = log2(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_EXP_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_EXP_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = pow(2.0, S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FREXP_MANT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FREXP_MANT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f16) == INF)  or  (F(S0.f16) == (-INF))  or  isNAN(F(S0.f16))):
     D0.f16 = S0.f16
   else:
     D0.f16 = mantissa(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FREXP_EXP_I16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FREXP_EXP_I16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f16) == INF)  or  (F(S0.f16) == (-INF))  or  isNAN(F(S0.f16))):
     D0.i16 = 0
   else:
     D0.i16 = (exponent(S0.f16) - 15 + 1)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FLOOR_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FLOOR_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
   if ((S0.f16 < 0.0)  and  (S0.f16 != D0.f16)):
     D0.f16 += -1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CEIL_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CEIL_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
   if ((S0.f16 > 0.0)  and  (S0.f16 != D0.f16)):
     D0.f16 += 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_TRUNC_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_TRUNC_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = trunc(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_RNDNE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_RNDNE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = floor(S0.f16 + 0.5)
   if (isEven(F(floor(S0.f16)))  and  (fract(S0.f16) == 0.5)):
     D0.f16 -= 1.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FRACT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FRACT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 + -floor(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SIN_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = sin(S0.f16 * F(PI * 2.0))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_COS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_COS_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = cos(S0.f16 * F(PI * 2.0))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SAT_PK_U8_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SAT_PK_U8_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.b16 = _pack(SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_NORM_I16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_NORM_I16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = f16_to_snorm(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_NORM_U16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_NORM_U16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = f16_to_unorm(S0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_NOT_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_NOT_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = ~S0.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_I32_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_I32_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (signext(S0.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_U32_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_U32_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0 = Reg(_pack(0, S0.u16))
   return {}
 
-def _VOP3Op_V_CNDMASK_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CNDMASK_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   D0.u32 = ((S1.u32) if (VCC.u64[laneId]) else (S0.u32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ADD_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 + S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SUB_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUB_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 - S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SUBREV_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUBREV_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S1.f32 - S0.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FMAC_DX9_ZERO_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FMAC_DX9_ZERO_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
     D0.f32 = S2.f32
   else:
     D0.f32 = fma(S0.f32, S1.f32, D0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_DX9_ZERO_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_DX9_ZERO_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
     D0.f32 = 0.0
   else:
     D0.f32 = S0.f32 * S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 * S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_I32_I24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_I32_I24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (S0.i24) * (S1.i24)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_HI_I32_I24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_HI_I32_I24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (((S0.i24) * (S1.i24)) >> 32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_U32_U24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_U32_U24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u24) * (S1.u24)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_HI_U32_U24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_HI_U32_U24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (((S0.u24) * (S1.u24)) >> 32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
@@ -3582,9 +4858,11 @@ def _VOP3Op_V_MIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f32 = S0.f32
     else:
       D0.f32 = S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
@@ -3607,97 +4885,139 @@ def _VOP3Op_V_MAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f32 = S0.f32
     else:
       D0.f32 = S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = ((S0.i32) if (S0.i32 < S1.i32) else (S1.i32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = ((S0.i32) if (S0.i32 >= S1.i32) else (S1.i32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32) if (S0.u32 < S1.u32) else (S1.u32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32) if (S0.u32 >= S1.u32) else (S1.u32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LSHLREV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LSHLREV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S1.u32 << S0[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LSHRREV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LSHRREV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S1.u32 >> S0[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ASHRREV_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ASHRREV_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (S1.i32 >> S0[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_AND_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_AND_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 & S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_OR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_OR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 | S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_XOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_XOR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 ^ S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_XNOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_XNOR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ~(S0.u32 ^ S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ADD_NC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD_NC_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = S0.u32 + S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SUB_NC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUB_NC_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = S0.u32 - S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SUBREV_NC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUBREV_NC_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = S1.u32 - S0.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FMAC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FMAC_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = fma(S0.f32, S1.f32, D0.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_PK_RTZ_F16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_RTZ_F16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   prev_mode = ROUND_MODE
   tmp[15 : 0].f16 = f32_to_f16(S0.f32)
   tmp[31 : 16].f16 = f32_to_f16(S1.f32)
   return {}
 
-def _VOP3Op_V_ADD_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 + S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SUB_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUB_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 - S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SUBREV_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUBREV_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S1.f16 - S0.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 * S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FMAC_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FMAC_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = fma(S0.f16, S1.f16, D0.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
@@ -3720,9 +5040,11 @@ def _VOP3Op_V_MAX_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f16 = S0.f16
     else:
       D0.f16 = S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
@@ -3745,28 +5067,38 @@ def _VOP3Op_V_MIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f16 = S0.f16
     else:
       D0.f16 = S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LDEXP_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LDEXP_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = S0.f16 * F(2.0 ** (S1.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FMA_DX9_ZERO_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FMA_DX9_ZERO_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((F(S0.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
     D0.f32 = S2.f32
   else:
     D0.f32 = fma(S0.f32, S1.f32, S2.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAD_I32_I24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAD_I32_I24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (S0.i24) * (S1.i24) + S2.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAD_U32_U24(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAD_U32_U24(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u24) * (S1.u24) + S2.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CUBEID_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CUBEID_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((abs(S2.f32) >= abs(S0.f32))  and  (abs(S2.f32) >= abs(S1.f32))):
     if S2.f32 < 0.0:
       D0.f32 = 5.0
@@ -3782,9 +5114,11 @@ def _VOP3Op_V_CUBEID_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
       D0.f32 = 1.0
     else:
       D0.f32 = 0.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CUBESC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CUBESC_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((abs(S2.f32) >= abs(S0.f32))  and  (abs(S2.f32) >= abs(S1.f32))):
     if S2.f32 < 0.0:
       D0.f32 = -S0.f32
@@ -3797,9 +5131,11 @@ def _VOP3Op_V_CUBESC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
       D0.f32 = S2.f32
     else:
       D0.f32 = -S2.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CUBETC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CUBETC_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((abs(S2.f32) >= abs(S0.f32))  and  (abs(S2.f32) >= abs(S1.f32))):
     D0.f32 = -S1.f32
   elif abs(S1.f32) >= abs(S0.f32):
@@ -3809,88 +5145,120 @@ def _VOP3Op_V_CUBETC_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
       D0.f32 = S2.f32
   else:
     D0.f32 = -S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CUBEMA_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CUBEMA_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((abs(S2.f32) >= abs(S0.f32))  and  (abs(S2.f32) >= abs(S1.f32))):
     D0.f32 = S2.f32 * 2.0
   elif abs(S1.f32) >= abs(S0.f32):
     D0.f32 = S1.f32 * 2.0
   else:
     D0.f32 = S0.f32 * 2.0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_BFE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_BFE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32 >> S1[4 : 0].u32) & ((1 << S2[4 : 0].u32) - 1))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_BFE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_BFE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp.i32 = ((S0.i32 >> S1[4 : 0].u32) & ((1 << S2[4 : 0].u32) - 1))
   D0.i32 = signext_from_bit(tmp.i32, S2[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_BFI_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_BFI_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32 & S1.u32) | (~S0.u32 & S2.u32))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FMA_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FMA_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = fma(S0.f32, S1.f32, S2.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FMA_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FMA_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = fma(S0.f64, S1.f64, S2.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LERP_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LERP_U8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(((S0.u32[31 : 24] + S1.u32[31 : 24] + S2.u32[24].u8) >> 1 << 24))
   tmp += ((S0.u32[23 : 16] + S1.u32[23 : 16] + S2.u32[16].u8) >> 1 << 16)
   tmp += ((S0.u32[15 : 8] + S1.u32[15 : 8] + S2.u32[8].u8) >> 1 << 8)
   tmp += ((S0.u32[7 : 0] + S1.u32[7 : 0] + S2.u32[0].u8) >> 1)
   D0.u32 = tmp.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ALIGNBIT_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ALIGNBIT_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((_pack32(S0.u32, S1.u32) >> S2.u32[4 : 0].u32) & 0xffffffff)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ALIGNBYTE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ALIGNBYTE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((_pack32(S0.u32, S1.u32) >> (S2.u32[1 : 0].u32 * 8)) & 0xffffffff)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MULLIT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MULLIT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if ((S1.f32 == -MAX_FLOAT_F32)  or  (F(S1.f32) == (-INF))  or  isNAN(F(S1.f32))  or  (S2.f32 <= 0.0)  or  isNAN(F(S2.f32))):
     D0.f32 = -MAX_FLOAT_F32
   else:
     D0.f32 = S0.f32 * S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN3_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN3_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = v_min_f32(v_min_f32(S0.f32, S1.f32), S2.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN3_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN3_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = v_min_i32(v_min_i32(S0.i32, S1.i32), S2.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN3_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN3_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = v_min_u32(v_min_u32(S0.u32, S1.u32), S2.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX3_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX3_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = v_max_f32(v_max_f32(S0.f32, S1.f32), S2.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX3_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX3_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = v_max_i32(v_max_i32(S0.i32, S1.i32), S2.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX3_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX3_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = v_max_u32(v_max_u32(S0.u32, S1.u32), S2.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MED3_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MED3_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if (isNAN(F(S0.f32))  or  isNAN(F(S1.f32))  or  isNAN(F(S2.f32))):
     D0.f32 = v_min3_f32(S0.f32, S1.f32, S2.f32)
   elif v_max3_f32(S0.f32, S1.f32, S2.f32) == S0.f32:
@@ -3899,57 +5267,73 @@ def _VOP3Op_V_MED3_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
     D0.f32 = v_max_f32(S0.f32, S2.f32)
   else:
     D0.f32 = v_max_f32(S0.f32, S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MED3_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MED3_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if v_max3_i32(S0.i32, S1.i32, S2.i32) == S0.i32:
     D0.i32 = v_max_i32(S1.i32, S2.i32)
   elif v_max3_i32(S0.i32, S1.i32, S2.i32) == S1.i32:
     D0.i32 = v_max_i32(S0.i32, S2.i32)
   else:
     D0.i32 = v_max_i32(S0.i32, S1.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MED3_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MED3_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if v_max3_u32(S0.u32, S1.u32, S2.u32) == S0.u32:
     D0.u32 = v_max_u32(S1.u32, S2.u32)
   elif v_max3_u32(S0.u32, S1.u32, S2.u32) == S1.u32:
     D0.u32 = v_max_u32(S0.u32, S2.u32)
   else:
     D0.u32 = v_max_u32(S0.u32, S1.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SAD_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SAD_U8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.u32)
   tmp += (ABSDIFF(S0.u32[7 : 0], S1.u32[7 : 0]))
   tmp += (ABSDIFF(S0.u32[15 : 8], S1.u32[15 : 8]))
   tmp += (ABSDIFF(S0.u32[23 : 16], S1.u32[23 : 16]))
   tmp += (ABSDIFF(S0.u32[31 : 24], S1.u32[31 : 24]))
   D0.u32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SAD_HI_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SAD_HI_U8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((v_sad_u8(S0, S1, 0)) << 16) + S2.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SAD_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SAD_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.u32)
   tmp += ABSDIFF(S0[15 : 0].u16, S1[15 : 0].u16)
   tmp += ABSDIFF(S0[31 : 16].u16, S1[31 : 16].u16)
   D0.u32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SAD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SAD_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ABSDIFF(S0.u32, S1.u32) + S2.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_PK_U8_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CVT_PK_U8_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg((S2.u32 & (~(0xff << (S1.u32[1 : 0].u32 * 8)))))
   tmp = Reg((tmp | (((f32_to_u8(S0.f32)) & 255) << (S1.u32[1 : 0].u32 * 8))))
   D0.u32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_DIV_FIXUP_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_DIV_FIXUP_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   sign_out = (sign(S1.f32) ^ sign(S2.f32))
   if isNAN(F(S2.f32)):
     D0.f32 = F(cvtToQuietNAN(F(S2.f32)))
@@ -3969,9 +5353,11 @@ def _VOP3Op_V_DIV_FIXUP_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
     D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32))
   else:
     D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32)) if isNAN(S0.f32) else ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_DIV_FIXUP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_DIV_FIXUP_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   sign_out = (sign(S1.f64) ^ sign(S2.f64))
   if isNAN(S2.f64):
     D0.f64 = cvtToQuietNAN(S2.f64)
@@ -3991,117 +5377,151 @@ def _VOP3Op_V_DIV_FIXUP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
     D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64))
   else:
     D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_DIV_FMAS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_DIV_FMAS_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   if VCC.u64[laneId]:
     D0.f32 = (2.0 ** 64 if exponent(S2.f32) > 127 else 2.0 ** -64) * fma(S0.f32, S1.f32, S2.f32)
   else:
     D0.f32 = fma(S0.f32, S1.f32, S2.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_DIV_FMAS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_DIV_FMAS_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   if VCC.u64[laneId]:
     D0.f64 = (2.0 ** 128 if exponent(S2.f64) > 1023 else 2.0 ** -128) * fma(S0.f64, S1.f64, S2.f64)
   else:
     D0.f64 = fma(S0.f64, S1.f64, S2.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MSAD_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MSAD_U8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.u32)
   tmp += ((0) if (S1.u32[7 : 0] == 0) else ((ABSDIFF(S0.u32[7 : 0], S1.u32[7 : 0]))))
   tmp += ((0) if (S1.u32[15 : 8] == 0) else ((ABSDIFF(S0.u32[15 : 8], S1.u32[15 : 8]))))
   tmp += ((0) if (S1.u32[23 : 16] == 0) else ((ABSDIFF(S0.u32[23 : 16], S1.u32[23 : 16]))))
   tmp += ((0) if (S1.u32[31 : 24] == 0) else ((ABSDIFF(S0.u32[31 : 24], S1.u32[31 : 24]))))
   D0.u32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_QSAD_PK_U16_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_QSAD_PK_U16_U8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[63 : 48] = (v_sad_u8(S0[55 : 24], S1[31 : 0], S2[63 : 48].u32))
   tmp[47 : 32] = (v_sad_u8(S0[47 : 16], S1[31 : 0], S2[47 : 32].u32))
   tmp[31 : 16] = (v_sad_u8(S0[39 : 8], S1[31 : 0], S2[31 : 16].u32))
   tmp[15 : 0] = (v_sad_u8(S0[31 : 0], S1[31 : 0], S2[15 : 0].u32))
   D0.b64 = tmp.b64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MQSAD_PK_U16_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_MQSAD_PK_U16_U8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[63 : 48] = (v_msad_u8(S0[55 : 24], S1[31 : 0], S2[63 : 48].u32))
   tmp[47 : 32] = (v_msad_u8(S0[47 : 16], S1[31 : 0], S2[47 : 32].u32))
   tmp[31 : 16] = (v_msad_u8(S0[39 : 8], S1[31 : 0], S2[31 : 16].u32))
   tmp[15 : 0] = (v_msad_u8(S0[31 : 0], S1[31 : 0], S2[15 : 0].u32))
   D0.b64 = tmp.b64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MQSAD_U32_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_MQSAD_U32_U8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[127 : 96] = (v_msad_u8(S0[55 : 24], S1[31 : 0], S2[127 : 96].u32))
   tmp[95 : 64] = (v_msad_u8(S0[47 : 16], S1[31 : 0], S2[95 : 64].u32))
   tmp[63 : 32] = (v_msad_u8(S0[39 : 8], S1[31 : 0], S2[63 : 32].u32))
   tmp[31 : 0] = (v_msad_u8(S0[31 : 0], S1[31 : 0], S2[31 : 0].u32))
   D0.b128 = tmp.b128
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_XOR3_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_XOR3_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 ^ S1.u32 ^ S2.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAD_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAD_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = S0.u16 * S1.u16 + S2.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_PERM_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_PERM_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0[31 : 24] = BYTE_PERMUTE(_pack32(S0.u32, S1.u32), S2.u32[31 : 24])
   D0[23 : 16] = BYTE_PERMUTE(_pack32(S0.u32, S1.u32), S2.u32[23 : 16])
   D0[15 : 8] = BYTE_PERMUTE(_pack32(S0.u32, S1.u32), S2.u32[15 : 8])
   D0[7 : 0] = BYTE_PERMUTE(_pack32(S0.u32, S1.u32), S2.u32[7 : 0])
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_XAD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_XAD_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 ^ S1.u32) + S2.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LSHL_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LSHL_ADD_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 << S1.u32[4 : 0].u32) + S2.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ADD_LSHL_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD_LSHL_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32 + S1.u32) << S2.u32[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_FMA_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_FMA_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = fma(S0.f16, S1.f16, S2.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN3_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN3_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = v_min_f16(v_min_f16(S0.f16, S1.f16), S2.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN3_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN3_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = v_min_i16(v_min_i16(S0.i16, S1.i16), S2.i16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN3_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN3_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = v_min_u16(v_min_u16(S0.u16, S1.u16), S2.u16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX3_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX3_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = v_max_f16(v_max_f16(S0.f16, S1.f16), S2.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX3_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX3_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = v_max_i16(v_max_i16(S0.i16, S1.i16), S2.i16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX3_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX3_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = v_max_u16(v_max_u16(S0.u16, S1.u16), S2.u16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MED3_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MED3_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if (isNAN(F(S0.f16))  or  isNAN(F(S1.f16))  or  isNAN(F(S2.f16))):
     D0.f16 = v_min3_f16(S0.f16, S1.f16, S2.f16)
   elif v_max3_f16(S0.f16, S1.f16, S2.f16) == S0.f16:
@@ -4110,31 +5530,39 @@ def _VOP3Op_V_MED3_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
     D0.f16 = v_max_f16(S0.f16, S2.f16)
   else:
     D0.f16 = v_max_f16(S0.f16, S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MED3_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MED3_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if v_max3_i16(S0.i16, S1.i16, S2.i16) == S0.i16:
     D0.i16 = v_max_i16(S1.i16, S2.i16)
   elif v_max3_i16(S0.i16, S1.i16, S2.i16) == S1.i16:
     D0.i16 = v_max_i16(S0.i16, S2.i16)
   else:
     D0.i16 = v_max_i16(S0.i16, S1.i16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MED3_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MED3_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if v_max3_u16(S0.u16, S1.u16, S2.u16) == S0.u16:
     D0.u16 = v_max_u16(S1.u16, S2.u16)
   elif v_max3_u16(S0.u16, S1.u16, S2.u16) == S1.u16:
     D0.u16 = v_max_u16(S0.u16, S2.u16)
   else:
     D0.u16 = v_max_u16(S0.u16, S1.u16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAD_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAD_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = S0.i16 * S1.i16 + S2.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_DIV_FIXUP_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_DIV_FIXUP_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   sign_out = (sign(S1.f16) ^ sign(S2.f16))
   if isNAN(F(S2.f16)):
     D0.f16 = F(cvtToQuietNAN(F(S2.f16)))
@@ -4150,211 +5578,281 @@ def _VOP3Op_V_DIV_FIXUP_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
     D0.f16 = ((-0.0) if (sign_out) else (0.0))
   else:
     D0.f16 = ((-abs(S0.f16)) if (sign_out) else (abs(S0.f16)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ADD3_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD3_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = S0.u32 + S1.u32 + S2.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LSHL_OR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LSHL_OR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32 << S1.u32[4 : 0].u32) | S2.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_AND_OR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_AND_OR_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = ((S0.u32 & S1.u32) | S2.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_OR3_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_OR3_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u32 | S1.u32 | S2.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAD_U32_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAD_U32_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (S0.u16) * (S1.u16) + S2.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAD_I32_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAD_I32_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (S0.i16) * (S1.i16) + S2.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CNDMASK_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_CNDMASK_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   D0.u16 = ((S1.u16) if (VCC.u64[laneId]) else (S0.u16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAXMIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAXMIN_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = v_min_f32(v_max_f32(S0.f32, S1.f32), S2.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MINMAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MINMAX_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = v_max_f32(v_min_f32(S0.f32, S1.f32), S2.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAXMIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAXMIN_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = v_min_f16(v_max_f16(S0.f16, S1.f16), S2.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MINMAX_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MINMAX_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f16 = v_max_f16(v_min_f16(S0.f16, S1.f16), S2.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAXMIN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAXMIN_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = v_min_u32(v_max_u32(S0.u32, S1.u32), S2.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MINMAX_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MINMAX_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = v_max_u32(v_min_u32(S0.u32, S1.u32), S2.u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAXMIN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAXMIN_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = v_min_i32(v_max_i32(S0.i32, S1.i32), S2.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MINMAX_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MINMAX_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = v_max_i32(v_min_i32(S0.i32, S1.i32), S2.i32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_DOT2_F16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_DOT2_F16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.f16)
   tmp += S0[15 : 0].f16 * S1[15 : 0].f16
   tmp += S0[31 : 16].f16 * S1[31 : 16].f16
   D0.f16 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_DOT2_BF16_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_DOT2_BF16_BF16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.bf16)
   tmp += S0[15 : 0].bf16 * S1[15 : 0].bf16
   tmp += S0[31 : 16].bf16 * S1[31 : 16].bf16
   D0.bf16 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ADD_NC_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD_NC_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = S0.u16 + S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SUB_NC_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUB_NC_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = S0.u16 - S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_LO_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_LO_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = S0.u16 * S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_PK_I16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_I16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16] = (v_cvt_i16_f32(S1.f32))
   tmp[15 : 0] = (v_cvt_i16_f32(S0.f32))
   return {}
 
-def _VOP3Op_V_CVT_PK_U16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_U16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16] = (v_cvt_u16_f32(S1.f32))
   tmp[15 : 0] = (v_cvt_u16_f32(S0.f32))
   return {}
 
-def _VOP3Op_V_MAX_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = ((S0.u16) if (S0.u16 >= S1.u16) else (S1.u16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = ((S0.i16) if (S0.i16 >= S1.i16) else (S1.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = ((S0.u16) if (S0.u16 < S1.u16) else (S1.u16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = ((S0.i16) if (S0.i16 < S1.i16) else (S1.i16))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ADD_NC_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD_NC_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = S0.i16 + S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_SUB_NC_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUB_NC_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = S0.i16 - S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_PACK_B32_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_PACK_B32_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0[31 : 16].f16 = S1.f16
   D0[15 : 0].f16 = S0.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_PK_NORM_I16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_NORM_I16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[15 : 0].i16 = f16_to_snorm(S0.f16)
   tmp[31 : 16].i16 = f16_to_snorm(S1.f16)
   return {}
 
-def _VOP3Op_V_CVT_PK_NORM_U16_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_NORM_U16_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[15 : 0].u16 = f16_to_unorm(S0.f16)
   tmp[31 : 16].u16 = f16_to_unorm(S1.f16)
   return {}
 
-def _VOP3Op_V_LDEXP_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LDEXP_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f32 = S0.f32 * 2.0 ** S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_BFM_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_BFM_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (((1 << S0[4 : 0].u32) - 1) << S1[4 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_BCNT_U32_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_BCNT_U32_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S1.u32)
   for i in range(0, int(31)+1):
     tmp += S0[i].u32
   D0.u32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_CVT_PK_NORM_I16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_NORM_I16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[15 : 0].i16 = f32_to_snorm(S0.f32)
   tmp[31 : 16].i16 = f32_to_snorm(S1.f32)
   return {}
 
-def _VOP3Op_V_CVT_PK_NORM_U16_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_NORM_U16_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[15 : 0].u16 = f32_to_unorm(S0.f32)
   tmp[31 : 16].u16 = f32_to_unorm(S1.f32)
   return {}
 
-def _VOP3Op_V_CVT_PK_U16_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_U16_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[15 : 0].u16 = u32_to_u16(S0.u32)
   tmp[31 : 16].u16 = u32_to_u16(S1.u32)
   return {}
 
-def _VOP3Op_V_CVT_PK_I16_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3Op_V_CVT_PK_I16_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[15 : 0].i16 = i32_to_i16(S0.i32)
   tmp[31 : 16].i16 = i32_to_i16(S1.i32)
   return {}
 
-def _VOP3Op_V_SUB_NC_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_SUB_NC_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = S0.i32 - S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ADD_NC_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD_NC_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = S0.i32 + S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ADD_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ADD_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = S0.f64 + S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = S0.f64 * S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MIN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MIN_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(S0.f64):
       D0.f64 = cvtToQuietNAN(S0.f64)
@@ -4377,9 +5875,11 @@ def _VOP3Op_V_MIN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f64 = S0.f64
     else:
       D0.f64 = S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MAX_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MAX_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
     if isSignalNAN(S0.f64):
       D0.f64 = cvtToQuietNAN(S0.f64)
@@ -4402,25 +5902,35 @@ def _VOP3Op_V_MAX_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
       D0.f64 = S0.f64
     else:
       D0.f64 = S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LDEXP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LDEXP_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.f64 = S0.f64 * 2.0 ** S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_LO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_LO_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = S0.u32 * S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_HI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_HI_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u32 = (((S0.u32) * (S1.u32)) >> 32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_MUL_HI_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_MUL_HI_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i32 = (((S0.i32) * (S1.i32)) >> 32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_TRIG_PREOP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_TRIG_PREOP_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   shift = (S1[4 : 0].u32) * 53
   if exponent(S0.f64) > 1077:
     shift += exponent(S0.f64) - 1077
@@ -4429,53 +5939,71 @@ def _VOP3Op_V_TRIG_PREOP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   if exponent(S0.f64) >= 1968:
     scale += 128
   D0.f64 = ldexp(result, scale)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LSHLREV_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LSHLREV_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = (S1.u16 << S0[3 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LSHRREV_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LSHRREV_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = (S1.u16 >> S0[3 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ASHRREV_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ASHRREV_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i16 = (S1.i16 >> S0[3 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LSHLREV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LSHLREV_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u64 = (S1.u64 << S0[5 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_LSHRREV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_LSHRREV_B64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u64 = (S1.u64 >> S0[5 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_ASHRREV_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_ASHRREV_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.i64 = (S1.i64 >> S0[5 : 0].u32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_READLANE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SRC0 = Reg(src0_idx)
+def _VOP3Op_V_READLANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S1=Reg(s1); D0=Reg(d0); SRC0=Reg(src0_idx)
   # --- compiled pseudocode ---
   if WAVE32:
     lane = S1.u32[4 : 0].u32
   else:
     lane = S1.u32[5 : 0].u32
   D0.b32 = VGPR[lane][SRC0.u32]
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_AND_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_AND_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = (S0.u16 & S1.u16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_OR_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_OR_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = (S0.u16 | S1.u16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3Op_V_XOR_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_XOR_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0)
+  # --- compiled pseudocode ---
   D0.u16 = (S0.u16 ^ S1.u16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
 VOP3Op_FUNCTIONS = {
   VOP3Op.V_CMP_F_F16: _VOP3Op_V_CMP_F_F16,
@@ -4898,26 +6426,32 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_XOR_B16: _VOP3Op_V_XOR_B16,
 }
 
-def _VOP3SDOp_V_ADD_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3SDOp_V_ADD_CO_CI_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg((S0.u32) + (S1.u32) + VCC.u64[laneId])
   VCC.u64[laneId] = ((1) if (tmp >= 0x100000000) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP3SDOp_V_SUB_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3SDOp_V_SUB_CO_CI_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg(S0.u32 - S1.u32 - VCC.u64[laneId])
   VCC.u64[laneId] = ((1) if ((S1.u32) + VCC.u64[laneId] > (S0.u32)) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP3SDOp_V_SUBREV_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3SDOp_V_SUBREV_CO_CI_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg(S1.u32 - S0.u32 - VCC.u64[laneId])
   VCC.u64[laneId] = ((1) if ((S0.u32) + VCC.u64[laneId] > (S1.u32)) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP3SDOp_V_DIV_SCALE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  D0 = Reg(S0._val)
+def _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(s0); VCC=Reg(vcc)
   # --- compiled pseudocode ---
   VCC = Reg(0x0)
   if ((F(S2.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
@@ -4940,10 +6474,10 @@ def _VOP3SDOp_V_DIV_SCALE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, V
     VCC = Reg(0x1); D0.f32 = ldexp(S0.f32, 64)
   if S1.f32 == DENORM.f32:
     D0.f32 = float("nan")
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP3SDOp_V_DIV_SCALE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  D0 = Reg(S0._val)
+def _VOP3SDOp_V_DIV_SCALE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(s0); VCC=Reg(vcc)
   # --- compiled pseudocode ---
   VCC = Reg(0x0)
   if ((S2.f64 == 0.0)  or  (S1.f64 == 0.0)):
@@ -4966,41 +6500,47 @@ def _VOP3SDOp_V_DIV_SCALE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, V
     D0.f64 = ldexp(S0.f64, 128)
   if S1.f64 == DENORM.f64:
     D0.f64 = float("nan")
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP3SDOp_V_MAD_U64_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  D1 = Reg(0)
+def _VOP3SDOp_V_MAD_U64_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); D1=Reg(0)
   # --- compiled pseudocode ---
   _full = ((S0.u32) * (S1.u32) + (S2.u64))
   D0.u64 = int(_full) & 0xffffffffffffffff
   D1 = Reg((int(_full) >> 64) & 1)
-  return {'D0': D0, 'D1': D1}
+  return {'D0': D0._val, 'D1': D1._val}
 
-def _VOP3SDOp_V_MAD_I64_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  D1 = Reg(0)
+def _VOP3SDOp_V_MAD_I64_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); D1=Reg(0)
   # --- compiled pseudocode ---
   _full = ((S0.i32) * (S1.i32) + (S2.i64))
   D0.u64 = int(_full) & 0xffffffffffffffff
   D1 = Reg((int(_full) >> 64) & 1)
-  return {'D0': D0, 'D1': D1}
+  return {'D0': D0._val, 'D1': D1._val}
 
-def _VOP3SDOp_V_ADD_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3SDOp_V_ADD_CO_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg((S0.u32) + (S1.u32))
   VCC.u64[laneId] = ((1) if (tmp >= 0x100000000) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP3SDOp_V_SUB_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3SDOp_V_SUB_CO_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg(S0.u32 - S1.u32)
   VCC.u64[laneId] = ((1) if (S1.u32 > S0.u32) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
-def _VOP3SDOp_V_SUBREV_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3SDOp_V_SUBREV_CO_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc)
+  # --- compiled pseudocode ---
   tmp = Reg(S1.u32 - S0.u32)
   VCC.u64[laneId] = ((1) if (S0.u32 > S1.u32) else (0))
   D0.u32 = tmp.u32
-  return {'D0': D0, 'VCC': VCC}
+  return {'D0': D0._val, 'VCC': VCC._val}
 
 VOP3SDOp_FUNCTIONS = {
   VOP3SDOp.V_ADD_CO_CI_U32: _VOP3SDOp_V_ADD_CO_CI_U32,
@@ -5015,175 +6555,181 @@ VOP3SDOp_FUNCTIONS = {
   VOP3SDOp.V_SUBREV_CO_U32: _VOP3SDOp_V_SUBREV_CO_U32,
 }
 
-def _VOP3POp_V_PK_MAD_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MAD_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].i16 = S0[31 : 16].i16 * S1[31 : 16].i16 + S2[31 : 16].i16
   tmp[15 : 0].i16 = S0[15 : 0].i16 * S1[15 : 0].i16 + S2[15 : 0].i16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MUL_LO_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MUL_LO_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].u16 = S0[31 : 16].u16 * S1[31 : 16].u16
   tmp[15 : 0].u16 = S0[15 : 0].u16 * S1[15 : 0].u16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_ADD_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_ADD_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].i16 = S0[31 : 16].i16 + S1[31 : 16].i16
   tmp[15 : 0].i16 = S0[15 : 0].i16 + S1[15 : 0].i16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_SUB_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_SUB_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].i16 = S0[31 : 16].i16 - S1[31 : 16].i16
   tmp[15 : 0].i16 = S0[15 : 0].i16 - S1[15 : 0].i16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_LSHLREV_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_LSHLREV_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].u16 = (S1[31 : 16].u16 << S0.u32[19 : 16].u32)
   tmp[15 : 0].u16 = (S1[15 : 0].u16 << S0.u32[3 : 0].u32)
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_LSHRREV_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_LSHRREV_B16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].u16 = (S1[31 : 16].u16 >> S0.u32[19 : 16].u32)
   tmp[15 : 0].u16 = (S1[15 : 0].u16 >> S0.u32[3 : 0].u32)
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_ASHRREV_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_ASHRREV_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].i16 = (S1[31 : 16].i16 >> S0.u32[19 : 16].u32)
   tmp[15 : 0].i16 = (S1[15 : 0].i16 >> S0.u32[3 : 0].u32)
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MAX_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MAX_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].i16 = ((S0[31 : 16].i16) if (S0[31 : 16].i16 >= S1[31 : 16].i16) else (S1[31 : 16].i16))
   tmp[15 : 0].i16 = ((S0[15 : 0].i16) if (S0[15 : 0].i16 >= S1[15 : 0].i16) else (S1[15 : 0].i16))
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MIN_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MIN_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].i16 = ((S0[31 : 16].i16) if (S0[31 : 16].i16 < S1[31 : 16].i16) else (S1[31 : 16].i16))
   tmp[15 : 0].i16 = ((S0[15 : 0].i16) if (S0[15 : 0].i16 < S1[15 : 0].i16) else (S1[15 : 0].i16))
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MAD_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MAD_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].u16 = S0[31 : 16].u16 * S1[31 : 16].u16 + S2[31 : 16].u16
   tmp[15 : 0].u16 = S0[15 : 0].u16 * S1[15 : 0].u16 + S2[15 : 0].u16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_ADD_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_ADD_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].u16 = S0[31 : 16].u16 + S1[31 : 16].u16
   tmp[15 : 0].u16 = S0[15 : 0].u16 + S1[15 : 0].u16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_SUB_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_SUB_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].u16 = S0[31 : 16].u16 - S1[31 : 16].u16
   tmp[15 : 0].u16 = S0[15 : 0].u16 - S1[15 : 0].u16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MAX_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MAX_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].u16 = ((S0[31 : 16].u16) if (S0[31 : 16].u16 >= S1[31 : 16].u16) else (S1[31 : 16].u16))
   tmp[15 : 0].u16 = ((S0[15 : 0].u16) if (S0[15 : 0].u16 >= S1[15 : 0].u16) else (S1[15 : 0].u16))
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MIN_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MIN_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].u16 = ((S0[31 : 16].u16) if (S0[31 : 16].u16 < S1[31 : 16].u16) else (S1[31 : 16].u16))
   tmp[15 : 0].u16 = ((S0[15 : 0].u16) if (S0[15 : 0].u16 < S1[15 : 0].u16) else (S1[15 : 0].u16))
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_FMA_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_FMA_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].f16 = fma(S0[31 : 16].f16, S1[31 : 16].f16, S2[31 : 16].f16)
   tmp[15 : 0].f16 = fma(S0[15 : 0].f16, S1[15 : 0].f16, S2[15 : 0].f16)
   D0.b32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_ADD_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_ADD_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].f16 = S0[31 : 16].f16 + S1[31 : 16].f16
   tmp[15 : 0].f16 = S0[15 : 0].f16 + S1[15 : 0].f16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MUL_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MUL_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].f16 = S0[31 : 16].f16 * S1[31 : 16].f16
   tmp[15 : 0].f16 = S0[15 : 0].f16 * S1[15 : 0].f16
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MIN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MIN_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].f16 = v_min_f16(S0[31 : 16].f16, S1[31 : 16].f16)
   tmp[15 : 0].f16 = v_min_f16(S0[15 : 0].f16, S1[15 : 0].f16)
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_PK_MAX_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
+def _VOP3POp_V_PK_MAX_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); tmp=Reg(0)
   # --- compiled pseudocode ---
   tmp[31 : 16].f16 = v_max_f16(S0[31 : 16].f16, S1[31 : 16].f16)
   tmp[15 : 0].f16 = v_max_f16(S0[15 : 0].f16, S1[15 : 0].f16)
   D0.b32 = tmp.b32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_DOT2_F32_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3POp_V_DOT2_F32_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.f32)
   tmp += f16_to_f32(S0[15 : 0].f16) * f16_to_f32(S1[15 : 0].f16)
   tmp += f16_to_f32(S0[31 : 16].f16) * f16_to_f32(S1[31 : 16].f16)
   D0.f32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_DOT4_U32_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3POp_V_DOT4_U32_U8(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.u32)
   tmp += u8_to_u32(S0[7 : 0].u8) * u8_to_u32(S1[7 : 0].u8)
   tmp += u8_to_u32(S0[15 : 8].u8) * u8_to_u32(S1[15 : 8].u8)
   tmp += u8_to_u32(S0[23 : 16].u8) * u8_to_u32(S1[23 : 16].u8)
   tmp += u8_to_u32(S0[31 : 24].u8) * u8_to_u32(S1[31 : 24].u8)
   D0.u32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_DOT8_U32_U4(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3POp_V_DOT8_U32_U4(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.u32)
   tmp += u4_to_u32(S0[3 : 0].u4) * u4_to_u32(S1[3 : 0].u4)
   tmp += u4_to_u32(S0[7 : 4].u4) * u4_to_u32(S1[7 : 4].u4)
@@ -5194,14 +6740,55 @@ def _VOP3POp_V_DOT8_U32_U4(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   tmp += u4_to_u32(S0[27 : 24].u4) * u4_to_u32(S1[27 : 24].u4)
   tmp += u4_to_u32(S0[31 : 28].u4) * u4_to_u32(S1[31 : 28].u4)
   D0.u32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOP3POp_V_DOT2_F32_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3POp_V_DOT2_F32_BF16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); D0=Reg(d0)
+  # --- compiled pseudocode ---
   tmp = Reg(S2.f32)
   tmp += bf16_to_f32(S0[15 : 0].bf16) * bf16_to_f32(S1[15 : 0].bf16)
   tmp += bf16_to_f32(S0[31 : 16].bf16) * bf16_to_f32(S1[31 : 16].bf16)
   D0.f32 = tmp
-  return {'D0': D0}
+  return {'D0': D0._val}
+
+def _VOP3POp_V_FMA_MIX_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[31 : 0].f32 = fma(ins[0], ins[1], ins[2])
+  return {'D0': D0._val}
+
+def _VOP3POp_V_FMA_MIXLO_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[15 : 0].f16 = f32_to_f16(fma(ins[0], ins[1], ins[2]))
+  return {'D0': D0._val}
+
+def _VOP3POp_V_FMA_MIXHI_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[31 : 16].f16 = f32_to_f16(fma(ins[0], ins[1], ins[2]))
+  return {'D0': D0._val}
 
 VOP3POp_FUNCTIONS = {
   VOP3POp.V_PK_MAD_I16: _VOP3POp_V_PK_MAD_I16,
@@ -5227,377 +6814,566 @@ VOP3POp_FUNCTIONS = {
   VOP3POp.V_DOT4_U32_U8: _VOP3POp_V_DOT4_U32_U8,
   VOP3POp.V_DOT8_U32_U4: _VOP3POp_V_DOT8_U32_U4,
   VOP3POp.V_DOT2_F32_BF16: _VOP3POp_V_DOT2_F32_BF16,
+  VOP3POp.V_FMA_MIX_F32: _VOP3POp_V_FMA_MIX_F32,
+  VOP3POp.V_FMA_MIXLO_F16: _VOP3POp_V_FMA_MIXLO_F16,
+  VOP3POp.V_FMA_MIXHI_F16: _VOP3POp_V_FMA_MIXHI_F16,
 }
 
-def _VOPCOp_V_CMP_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_F_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 < S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 == S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 <= S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 > S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16  !=  S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 >= S1.f16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_O_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_U_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NGE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 >= S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16  !=  S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NGT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 > S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 <= S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NEQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 == S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 < S1.f16)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_T_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_F_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 < S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 == S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 <= S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 > S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32  !=  S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 >= S1.f32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_O_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_U_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NGE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 >= S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32  !=  S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NGT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 > S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 <= S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NEQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 == S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 < S1.f32)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_T_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_F_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 < S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 == S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 <= S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 > S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LG_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64  !=  S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 >= S1.f64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_O_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_U_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NGE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 >= S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLG_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64  !=  S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NGT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 > S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 <= S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NEQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 == S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NLT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 < S1.f64)
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_T_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 < S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 == S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 <= S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 > S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16  !=  S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 >= S1.i16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 < S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 == S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 <= S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 > S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16  !=  S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 >= S1.u16
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_F_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 < S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 == S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 <= S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 > S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32  !=  S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 >= S1.i32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_T_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_F_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 < S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 == S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 <= S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 > S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32  !=  S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 >= S1.u32
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_T_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_F_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 < S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 == S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 <= S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 > S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64  !=  S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 >= S1.i64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_T_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_F_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 0
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LT_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 < S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_EQ_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 == S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_LE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 <= S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GT_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 > S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_NE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64  !=  S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_GE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 >= S1.u64
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_T_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   D0.u64[laneId] = 1
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_CLASS_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   if isSignalNAN(F(S0.f16)):
     result = S1.u32[0]
   elif isQuietNAN(F(S0.f16)):
@@ -5611,9 +7387,11 @@ def _VOPCOp_V_CMP_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   else:
     result = S1.u32[((5) if (sign(S0.f16)) else (6))]
   D0.u64[laneId] = result
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_CLASS_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   if isSignalNAN(F(S0.f32)):
     result = S1.u32[0]
   elif isQuietNAN(F(S0.f32)):
@@ -5627,9 +7405,11 @@ def _VOPCOp_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   else:
     result = S1.u32[((5) if (sign(S0.f32)) else (6))]
   D0.u64[laneId] = result
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMP_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMP_CLASS_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); D0=Reg(d0); VCC=Reg(vcc); PC=Reg(pc) if pc is not None else None
+  # --- compiled pseudocode ---
   if isSignalNAN(S0.f64):
     result = S1.u32[0]
   elif isQuietNAN(S0.f64):
@@ -5643,377 +7423,563 @@ def _VOPCOp_V_CMP_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   else:
     result = S1.u32[((5) if (sign(S0.f64)) else (6))]
   D0.u64[laneId] = result
-  return {'D0': D0}
+  return {'D0': D0._val}
 
-def _VOPCOp_V_CMPX_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_F_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 < S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 == S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 <= S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 > S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16  !=  S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 >= S1.f16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_O_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_U_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NGE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 >= S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLG_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16  !=  S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NGT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 > S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLE_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 <= S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NEQ_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 == S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLT_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 < S1.f16)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_T_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_F_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 < S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 == S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 <= S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 > S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32  !=  S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 >= S1.f32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_O_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_U_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NGE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 >= S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLG_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32  !=  S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NGT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 > S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLE_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 <= S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NEQ_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 == S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLT_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 < S1.f32)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_T_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_F_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 < S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 == S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 <= S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 > S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LG_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64  !=  S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 >= S1.f64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_O_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_U_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NGE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 >= S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLG_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64  !=  S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NGT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 > S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLE_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 <= S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NEQ_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 == S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NLT_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 < S1.f64)
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_T_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 < S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 == S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 <= S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 > S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16  !=  S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_I16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 >= S1.i16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 < S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 == S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 <= S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 > S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16  !=  S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_U16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 >= S1.u16
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_F_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 < S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 == S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 <= S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 > S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32  !=  S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 >= S1.i32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_T_I32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_F_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 < S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 == S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 <= S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 > S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32  !=  S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 >= S1.u32
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_T_U32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_F_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 < S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 == S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 <= S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 > S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64  !=  S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 >= S1.i64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_T_I64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_F_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LT_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 < S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_EQ_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 == S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_LE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 <= S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GT_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 > S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_NE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64  !=  S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_GE_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 >= S1.u64
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_T_U64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_CLASS_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   if isSignalNAN(F(S0.f16)):
     result = S1.u32[0]
   elif isQuietNAN(F(S0.f16)):
@@ -6027,9 +7993,11 @@ def _VOPCOp_V_CMPX_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   else:
     result = S1.u32[((5) if (sign(S0.f16)) else (6))]
   EXEC.u64[laneId] = result
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_CLASS_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   if isSignalNAN(F(S0.f32)):
     result = S1.u32[0]
   elif isQuietNAN(F(S0.f32)):
@@ -6043,9 +8011,11 @@ def _VOPCOp_V_CMPX_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   else:
     result = S1.u32[((5) if (sign(S0.f32)) else (6))]
   EXEC.u64[laneId] = result
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
-def _VOPCOp_V_CMPX_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOPCOp_V_CMPX_CLASS_F64(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  S0=Reg(s0); S1=Reg(s1); EXEC=Reg(exec_mask)
+  # --- compiled pseudocode ---
   if isSignalNAN(S0.f64):
     result = S1.u32[0]
   elif isQuietNAN(S0.f64):
@@ -6059,7 +8029,7 @@ def _VOPCOp_V_CMPX_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   else:
     result = S1.u32[((5) if (sign(S0.f64)) else (6))]
   EXEC.u64[laneId] = result
-  return {'EXEC': EXEC}
+  return {'EXEC': EXEC._val}
 
 VOPCOp_FUNCTIONS = {
   VOPCOp.V_CMP_F_F16: _VOPCOp_V_CMP_F_F16,
@@ -6254,326 +8224,314 @@ VOPCOp_FUNCTIONS = {
   VOPCOp.V_CMPX_CLASS_F64: _VOPCOp_V_CMPX_CLASS_F64,
 }
 
-def _DSOp_DS_ADD_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_ADD_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 += DATA.u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_SUB_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_SUB_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 -= DATA.u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_RSUB_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_RSUB_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 = DATA.u32 - MEM[ADDR].u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_INC_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_INC_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((0) if (tmp >= src) else (tmp + 1))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_DEC_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_DEC_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_I32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_I32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i32)
   src = DATA.i32
   MEM[ADDR].i32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.i32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_I32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_I32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i32)
   src = DATA.i32
   MEM[ADDR].i32 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.i32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_AND_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_AND_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp & DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_OR_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_OR_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp | DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_XOR_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_XOR_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp ^ DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MSKOR_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_MSKOR_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = ((tmp & ~DATA.b32) | DATA2.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STORE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_STORE_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   MEM[ADDR + OFFSET.u32].b32 = DATA[31 : 0]
   return {}
 
-def _DSOp_DS_STORE_2ADDR_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
-  OFFSET = OFFSET0
+def _DSOp_DS_STORE_2ADDR_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   MEM[ADDR + OFFSET0.u32 * 4].b32 = DATA[31 : 0]
   MEM[ADDR + OFFSET1.u32 * 4].b32 = DATA2[31 : 0]
   return {}
 
-def _DSOp_DS_STORE_2ADDR_STRIDE64_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
-  OFFSET = OFFSET0
+def _DSOp_DS_STORE_2ADDR_STRIDE64_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   MEM[ADDR + OFFSET0.u32 * 256].b32 = DATA[31 : 0]
   MEM[ADDR + OFFSET1.u32 * 256].b32 = DATA2[31 : 0]
   return {}
 
-def _DSOp_DS_CMPSTORE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_CMPSTORE_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   src = DATA.b32
   cmp = DATA2.b32
   MEM[ADDR].b32 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_CMPSTORE_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_CMPSTORE_F32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   cmp = DATA2.f32
   MEM[ADDR].f32 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_F32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   MEM[ADDR].f32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_F32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   MEM[ADDR].f32 = ((src) if (src > tmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_ADD_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_ADD_F32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   MEM[ADDR].f32 += DATA.f32
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STORE_B8(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_STORE_B8(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = DATA[7 : 0]
   return {}
 
-def _DSOp_DS_STORE_B16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_STORE_B16(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = DATA[15 : 0]
   return {}
 
-def _DSOp_DS_ADD_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_ADD_RTN_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 += DATA.u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_SUB_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_SUB_RTN_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 -= DATA.u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_RSUB_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_RSUB_RTN_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 = DATA.u32 - MEM[ADDR].u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_INC_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_INC_RTN_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((0) if (tmp >= src) else (tmp + 1))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_DEC_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_DEC_RTN_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_RTN_I32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_RTN_I32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i32)
   src = DATA.i32
   MEM[ADDR].i32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.i32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_RTN_I32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_RTN_I32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i32)
   src = DATA.i32
   MEM[ADDR].i32 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.i32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_RTN_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_RTN_U32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_AND_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_AND_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp & DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_OR_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_OR_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp | DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_XOR_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_XOR_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp ^ DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MSKOR_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_MSKOR_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = ((tmp & ~DATA.b32) | DATA2.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STOREXCHG_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_STOREXCHG_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = DATA.b32
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STOREXCHG_2ADDR_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
-  OFFSET = OFFSET0
-  ADDR_BASE = ADDR
+def _DSOp_DS_STOREXCHG_2ADDR_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1; OFFSET=OFFSET0; ADDR_BASE=ADDR
   # --- compiled pseudocode ---
   addr1 = ADDR_BASE.u32 + OFFSET0.u32 * 4
   addr2 = ADDR_BASE.u32 + OFFSET1.u32 * 4
@@ -6583,13 +8541,10 @@ def _DSOp_DS_STOREXCHG_2ADDR_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, 
   MEM[addr2].b32 = DATA2.b32
   RETURN_DATA[31 : 0] = tmp1
   RETURN_DATA[63 : 32] = tmp2
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
-  OFFSET = OFFSET0
-  ADDR_BASE = ADDR
+def _DSOp_DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1; OFFSET=OFFSET0; ADDR_BASE=ADDR
   # --- compiled pseudocode ---
   addr1 = ADDR_BASE.u32 + OFFSET0.u32 * 256
   addr2 = ADDR_BASE.u32 + OFFSET1.u32 * 256
@@ -6599,227 +8554,217 @@ def _DSOp_DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, 
   MEM[addr2].b32 = DATA2.b32
   RETURN_DATA[31 : 0] = tmp1
   RETURN_DATA[63 : 32] = tmp2
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_CMPSTORE_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_CMPSTORE_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   src = DATA.b32
   cmp = DATA2.b32
   MEM[ADDR].b32 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_CMPSTORE_RTN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_CMPSTORE_RTN_F32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   cmp = DATA2.f32
   MEM[ADDR].f32 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_RTN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_RTN_F32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   MEM[ADDR].f32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_RTN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_RTN_F32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   MEM[ADDR].f32 = ((src) if (src > tmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_WRAP_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_WRAP_RTN_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 = ((tmp - DATA.u32) if (tmp >= DATA.u32) else (tmp + DATA2.u32))
   RETURN_DATA = tmp
   return {}
 
-def _DSOp_DS_LOAD_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_LOAD_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 0] = MEM[ADDR + OFFSET.u32].b32
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_2ADDR_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_LOAD_2ADDR_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 0] = MEM[ADDR + OFFSET0.u32 * 4].b32
   RETURN_DATA[63 : 32] = MEM[ADDR + OFFSET1.u32 * 4].b32
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_2ADDR_STRIDE64_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_LOAD_2ADDR_STRIDE64_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 0] = MEM[ADDR + OFFSET0.u32 * 256].b32
   RETURN_DATA[63 : 32] = MEM[ADDR + OFFSET1.u32 * 256].b32
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_I8(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_I8(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA.i32 = (signext(MEM[ADDR].i8))
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_U8(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_U8(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA.u32 = (_pack(0, MEM[ADDR].u8))
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_I16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_I16(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA.i32 = (signext(MEM[ADDR].i16))
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_U16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_U16(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA.u32 = (_pack(0, MEM[ADDR].u16))
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_ADD_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_ADD_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 += DATA.u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_SUB_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_SUB_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 -= DATA.u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_RSUB_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_RSUB_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 = DATA.u64 - MEM[ADDR].u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_INC_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_INC_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((0) if (tmp >= src) else (tmp + 1))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_DEC_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_DEC_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_I64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_I64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i64)
   src = DATA.i64
   MEM[ADDR].i64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.i64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_I64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_I64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i64)
   src = DATA.i64
   MEM[ADDR].i64 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.i64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_AND_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_AND_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp & DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_OR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_OR_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp | DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_XOR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_XOR_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp ^ DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MSKOR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_MSKOR_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = ((tmp & ~DATA.b64) | DATA2.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STORE_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_STORE_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   MEM[ADDR + OFFSET.u32].b32 = DATA[31 : 0]
   MEM[ADDR + OFFSET.u32 + 4].b32 = DATA[63 : 32]
   return {}
 
-def _DSOp_DS_STORE_2ADDR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
-  OFFSET = OFFSET0
+def _DSOp_DS_STORE_2ADDR_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   MEM[ADDR + OFFSET0.u32 * 8].b32 = DATA[31 : 0]
   MEM[ADDR + OFFSET0.u32 * 8 + 4].b32 = DATA[63 : 32]
@@ -6827,10 +8772,8 @@ def _DSOp_DS_STORE_2ADDR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_D
   MEM[ADDR + OFFSET1.u32 * 8 + 4].b32 = DATA2[63 : 32]
   return {}
 
-def _DSOp_DS_STORE_2ADDR_STRIDE64_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
-  OFFSET = OFFSET0
+def _DSOp_DS_STORE_2ADDR_STRIDE64_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   MEM[ADDR + OFFSET0.u32 * 512].b32 = DATA[31 : 0]
   MEM[ADDR + OFFSET0.u32 * 512 + 4].b32 = DATA[63 : 32]
@@ -6838,170 +8781,164 @@ def _DSOp_DS_STORE_2ADDR_STRIDE64_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1,
   MEM[ADDR + OFFSET1.u32 * 512 + 4].b32 = DATA2[63 : 32]
   return {}
 
-def _DSOp_DS_CMPSTORE_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_CMPSTORE_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   src = DATA.b64
   cmp = DATA2.b64
   MEM[ADDR].b64 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_CMPSTORE_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_CMPSTORE_F64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f64)
   src = DATA.f64
   cmp = DATA2.f64
   MEM[ADDR].f64 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.f64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_F64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f64)
   src = DATA.f64
   MEM[ADDR].f64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.f64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_F64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f64)
   src = DATA.f64
   MEM[ADDR].f64 = ((src) if (src > tmp) else (tmp))
   RETURN_DATA.f64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_ADD_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_ADD_RTN_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 += DATA.u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_SUB_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_SUB_RTN_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 -= DATA.u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_RSUB_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_RSUB_RTN_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 = DATA.u64 - MEM[ADDR].u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_INC_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_INC_RTN_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((0) if (tmp >= src) else (tmp + 1))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_DEC_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_DEC_RTN_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_RTN_I64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_RTN_I64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i64)
   src = DATA.i64
   MEM[ADDR].i64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.i64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_RTN_I64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_RTN_I64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i64)
   src = DATA.i64
   MEM[ADDR].i64 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.i64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_RTN_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_RTN_U64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_AND_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_AND_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp & DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_OR_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_OR_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp | DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_XOR_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_XOR_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp ^ DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MSKOR_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_MSKOR_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = ((tmp & ~DATA.b64) | DATA2.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STOREXCHG_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_STOREXCHG_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = DATA.b64
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STOREXCHG_2ADDR_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
-  OFFSET = OFFSET0
-  ADDR_BASE = ADDR
+def _DSOp_DS_STOREXCHG_2ADDR_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1; OFFSET=OFFSET0; ADDR_BASE=ADDR
   # --- compiled pseudocode ---
   addr1 = ADDR_BASE.u32 + OFFSET0.u32 * 8
   addr2 = ADDR_BASE.u32 + OFFSET1.u32 * 8
@@ -7011,13 +8948,10 @@ def _DSOp_DS_STOREXCHG_2ADDR_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, 
   MEM[addr2].b64 = DATA2.b64
   RETURN_DATA[63 : 0] = tmp1
   RETURN_DATA[127 : 64] = tmp2
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
-  OFFSET = OFFSET0
-  ADDR_BASE = ADDR
+def _DSOp_DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1; OFFSET=OFFSET0; ADDR_BASE=ADDR
   # --- compiled pseudocode ---
   addr1 = ADDR_BASE.u32 + OFFSET0.u32 * 512
   addr2 = ADDR_BASE.u32 + OFFSET1.u32 * 512
@@ -7027,87 +8961,81 @@ def _DSOp_DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, 
   MEM[addr2].b64 = DATA2.b64
   RETURN_DATA[63 : 0] = tmp1
   RETURN_DATA[127 : 64] = tmp2
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_CMPSTORE_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_CMPSTORE_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   src = DATA.b64
   cmp = DATA2.b64
   MEM[ADDR].b64 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_CMPSTORE_RTN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  DATA2 = DATA1
+def _DSOp_DS_CMPSTORE_RTN_F64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; DATA2=DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f64)
   src = DATA.f64
   cmp = DATA2.f64
   MEM[ADDR].f64 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.f64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MIN_RTN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MIN_RTN_F64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f64)
   src = DATA.f64
   MEM[ADDR].f64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.f64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_MAX_RTN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_MAX_RTN_F64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f64)
   src = DATA.f64
   MEM[ADDR].f64 = ((src) if (src > tmp) else (tmp))
   RETURN_DATA.f64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_LOAD_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 0] = MEM[ADDR + OFFSET.u32].b32
   RETURN_DATA[63 : 32] = MEM[ADDR + OFFSET.u32 + 4].b32
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_2ADDR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_LOAD_2ADDR_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 0] = MEM[ADDR + OFFSET0.u32 * 8].b32
   RETURN_DATA[63 : 32] = MEM[ADDR + OFFSET0.u32 * 8 + 4].b32
   RETURN_DATA[95 : 64] = MEM[ADDR + OFFSET1.u32 * 8].b32
   RETURN_DATA[127 : 96] = MEM[ADDR + OFFSET1.u32 * 8 + 4].b32
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_2ADDR_STRIDE64_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_LOAD_2ADDR_STRIDE64_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 0] = MEM[ADDR + OFFSET0.u32 * 512].b32
   RETURN_DATA[63 : 32] = MEM[ADDR + OFFSET0.u32 * 512 + 4].b32
   RETURN_DATA[95 : 64] = MEM[ADDR + OFFSET1.u32 * 512].b32
   RETURN_DATA[127 : 96] = MEM[ADDR + OFFSET1.u32 * 512 + 4].b32
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_ADD_RTN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_ADD_RTN_F32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   MEM[ADDR].f32 += DATA.f32
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_CONDXCHG32_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_CONDXCHG32_RTN_B64(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   ADDR = S0.u32
   DATA = S1.u64
@@ -7118,59 +9046,58 @@ def _DSOp_DS_CONDXCHG32_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETUR
   RETURN_DATA[1] = LDS[ADDR1].u32
   if DATA[63]:
     LDS[ADDR1] = _pack(0, DATA[62 : 32])
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_STORE_B8_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_STORE_B8_D16_HI(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = DATA[23 : 16]
   return {}
 
-def _DSOp_DS_STORE_B16_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_STORE_B16_D16_HI(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = DATA[31 : 16]
   return {}
 
-def _DSOp_DS_LOAD_U8_D16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_U8_D16(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[15 : 0].u16 = (_pack(0, MEM[ADDR].u8))
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_U8_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_U8_D16_HI(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 16].u16 = (_pack(0, MEM[ADDR].u8))
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_I8_D16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_I8_D16(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[15 : 0].i16 = (signext(MEM[ADDR].i8))
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_I8_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_I8_D16_HI(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 16].i16 = (signext(MEM[ADDR].i8))
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_U16_D16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_U16_D16(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[15 : 0].u16 = MEM[ADDR].u16
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_U16_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
+def _DSOp_DS_LOAD_U16_D16_HI(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 16].u16 = MEM[ADDR].u16
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_PERMUTE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_PERMUTE_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   for i in range(0, int(((63) if (WAVE64) else (31)))+1):
     tmp[i] = 0x0
@@ -7183,9 +9110,8 @@ def _DSOp_DS_PERMUTE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA)
       VGPR[i][VDST] = tmp[i]
   return {}
 
-def _DSOp_DS_BPERMUTE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_BPERMUTE_B32(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   for i in range(0, int(((63) if (WAVE64) else (31)))+1):
     tmp[i] = 0x0
@@ -7198,18 +9124,16 @@ def _DSOp_DS_BPERMUTE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA
       VGPR[i][VDST] = tmp[i]
   return {}
 
-def _DSOp_DS_STORE_B96(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_STORE_B96(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   MEM[ADDR + OFFSET.u32].b32 = DATA[31 : 0]
   MEM[ADDR + OFFSET.u32 + 4].b32 = DATA[63 : 32]
   MEM[ADDR + OFFSET.u32 + 8].b32 = DATA[95 : 64]
   return {}
 
-def _DSOp_DS_STORE_B128(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_STORE_B128(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   MEM[ADDR + OFFSET.u32].b32 = DATA[31 : 0]
   MEM[ADDR + OFFSET.u32 + 4].b32 = DATA[63 : 32]
@@ -7217,24 +9141,22 @@ def _DSOp_DS_STORE_B128(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
   MEM[ADDR + OFFSET.u32 + 12].b32 = DATA[127 : 96]
   return {}
 
-def _DSOp_DS_LOAD_B96(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_LOAD_B96(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 0] = MEM[ADDR + OFFSET.u32].b32
   RETURN_DATA[63 : 32] = MEM[ADDR + OFFSET.u32 + 4].b32
   RETURN_DATA[95 : 64] = MEM[ADDR + OFFSET.u32 + 8].b32
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _DSOp_DS_LOAD_B128(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
-  DATA = DATA0
-  OFFSET = OFFSET0
+def _DSOp_DS_LOAD_B128(MEM, addr, data0, data1, offset0, offset1):
+  ADDR=Reg(addr); DATA0=Reg(data0); DATA1=Reg(data1); OFFSET0=Reg(offset0); OFFSET1=Reg(offset1); RETURN_DATA=Reg(0); DATA=DATA0; OFFSET=OFFSET0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 0] = MEM[ADDR + OFFSET.u32].b32
   RETURN_DATA[63 : 32] = MEM[ADDR + OFFSET.u32 + 4].b32
   RETURN_DATA[95 : 64] = MEM[ADDR + OFFSET.u32 + 8].b32
   RETURN_DATA[127 : 96] = MEM[ADDR + OFFSET.u32 + 12].b32
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
 DSOp_FUNCTIONS = {
   DSOp.DS_ADD_U32: _DSOp_DS_ADD_U32,
@@ -7349,95 +9271,95 @@ DSOp_FUNCTIONS = {
   DSOp.DS_LOAD_B128: _DSOp_DS_LOAD_B128,
 }
 
-def _FLATOp_FLAT_LOAD_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.u32 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.i32 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_U16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_U16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.u32 = (_pack(0, MEM[ADDR].u16))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_I16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_I16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.i32 = (signext(MEM[ADDR].i16))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_B96(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_B96(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
   VDATA[95 : 64] = MEM[ADDR + 8].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_B128(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
   VDATA[95 : 64] = MEM[ADDR + 8].b32
   VDATA[127 : 96] = MEM[ADDR + 12].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_STORE_B8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_STORE_B8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = VDATA[7 : 0]
   return {}
 
-def _FLATOp_FLAT_STORE_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_STORE_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = VDATA[15 : 0]
   return {}
 
-def _FLATOp_FLAT_STORE_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_STORE_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   return {}
 
-def _FLATOp_FLAT_STORE_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_STORE_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
   return {}
 
-def _FLATOp_FLAT_STORE_B96(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_STORE_B96(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
   MEM[ADDR + 8].b32 = VDATA[95 : 64]
   return {}
 
-def _FLATOp_FLAT_STORE_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_STORE_B128(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
@@ -7445,313 +9367,313 @@ def _FLATOp_FLAT_STORE_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
   MEM[ADDR + 12].b32 = VDATA[127 : 96]
   return {}
 
-def _FLATOp_FLAT_LOAD_D16_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_D16_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].u16 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_D16_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_D16_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].i16 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_D16_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_D16_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].b16 = MEM[ADDR].b16
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_D16_HI_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_D16_HI_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].u16 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_D16_HI_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_D16_HI_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].i16 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_LOAD_D16_HI_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_LOAD_D16_HI_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].b16 = MEM[ADDR].b16
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _FLATOp_FLAT_STORE_D16_HI_B8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_STORE_D16_HI_B8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = VDATA[23 : 16]
   return {}
 
-def _FLATOp_FLAT_STORE_D16_HI_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_STORE_D16_HI_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = VDATA[31 : 16]
   return {}
 
-def _FLATOp_FLAT_ATOMIC_SWAP_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_SWAP_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = DATA.b32
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_CMPSWAP_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_CMPSWAP_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA[31 : 0].u32
   cmp = DATA[63 : 32].u32
   MEM[ADDR].u32 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_ADD_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_ADD_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 += DATA.u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_SUB_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_SUB_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 -= DATA.u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MIN_I32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MIN_I32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i32)
   src = DATA.i32
   MEM[ADDR].i32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.i32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MIN_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MIN_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MAX_I32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MAX_I32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i32)
   src = DATA.i32
   MEM[ADDR].i32 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.i32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MAX_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MAX_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_AND_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_AND_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp & DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_OR_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_OR_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp | DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_XOR_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_XOR_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp ^ DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_INC_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_INC_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((0) if (tmp >= src) else (tmp + 1))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_DEC_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_DEC_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_SWAP_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_SWAP_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = DATA.b64
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_CMPSWAP_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_CMPSWAP_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA[63 : 0].u64
   cmp = DATA[127 : 64].u64
   MEM[ADDR].u64 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_ADD_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_ADD_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 += DATA.u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_SUB_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_SUB_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 -= DATA.u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MIN_I64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MIN_I64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i64)
   src = DATA.i64
   MEM[ADDR].i64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.i64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MIN_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MIN_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MAX_I64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MAX_I64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i64)
   src = DATA.i64
   MEM[ADDR].i64 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.i64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MAX_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MAX_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_AND_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_AND_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp & DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_OR_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_OR_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp | DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_XOR_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_XOR_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp ^ DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_INC_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_INC_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((0) if (tmp >= src) else (tmp + 1))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_DEC_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_DEC_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_CMPSWAP_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_CMPSWAP_F32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA[31 : 0].f32
   cmp = DATA[63 : 32].f32
   MEM[ADDR].f32 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MIN_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MIN_F32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   MEM[ADDR].f32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_MAX_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_MAX_F32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   MEM[ADDR].f32 = ((src) if (src > tmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _FLATOp_FLAT_ATOMIC_ADD_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _FLATOp_FLAT_ATOMIC_ADD_F32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   MEM[ADDR].f32 += DATA.f32
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
 FLATOp_FUNCTIONS = {
   FLATOp.FLAT_LOAD_U8: _FLATOp_FLAT_LOAD_U8,
@@ -7808,95 +9730,95 @@ FLATOp_FUNCTIONS = {
   FLATOp.FLAT_ATOMIC_ADD_F32: _FLATOp_FLAT_ATOMIC_ADD_F32,
 }
 
-def _GLOBALOp_GLOBAL_LOAD_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.u32 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.i32 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_U16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_U16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.u32 = (_pack(0, MEM[ADDR].u16))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_I16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_I16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.i32 = (signext(MEM[ADDR].i16))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_B96(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_B96(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
   VDATA[95 : 64] = MEM[ADDR + 8].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_B128(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
   VDATA[95 : 64] = MEM[ADDR + 8].b32
   VDATA[127 : 96] = MEM[ADDR + 12].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_STORE_B8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_STORE_B8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = VDATA[7 : 0]
   return {}
 
-def _GLOBALOp_GLOBAL_STORE_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_STORE_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = VDATA[15 : 0]
   return {}
 
-def _GLOBALOp_GLOBAL_STORE_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_STORE_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   return {}
 
-def _GLOBALOp_GLOBAL_STORE_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_STORE_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
   return {}
 
-def _GLOBALOp_GLOBAL_STORE_B96(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_STORE_B96(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
   MEM[ADDR + 8].b32 = VDATA[95 : 64]
   return {}
 
-def _GLOBALOp_GLOBAL_STORE_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_STORE_B128(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
@@ -7904,90 +9826,90 @@ def _GLOBALOp_GLOBAL_STORE_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
   MEM[ADDR + 12].b32 = VDATA[127 : 96]
   return {}
 
-def _GLOBALOp_GLOBAL_LOAD_D16_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_D16_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].u16 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_D16_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_D16_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].i16 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_D16_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_D16_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].b16 = MEM[ADDR].b16
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_D16_HI_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_D16_HI_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].u16 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_D16_HI_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_D16_HI_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].i16 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_LOAD_D16_HI_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_LOAD_D16_HI_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].b16 = MEM[ADDR].b16
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _GLOBALOp_GLOBAL_STORE_D16_HI_B8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_STORE_D16_HI_B8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = VDATA[23 : 16]
   return {}
 
-def _GLOBALOp_GLOBAL_STORE_D16_HI_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_STORE_D16_HI_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = VDATA[31 : 16]
   return {}
 
-def _GLOBALOp_GLOBAL_ATOMIC_SWAP_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_SWAP_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = DATA.b32
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA[31 : 0].u32
   cmp = DATA[63 : 32].u32
   MEM[ADDR].u32 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_ADD_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_ADD_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 += DATA.u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_SUB_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_SUB_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 -= DATA.u32
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_CSUB_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_CSUB_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   old_value = MEM[ADDR].u32
   if old_value < DATA.u32:
@@ -7996,233 +9918,233 @@ def _GLOBALOp_GLOBAL_ATOMIC_CSUB_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
     new_value = old_value - DATA.u32
   MEM[ADDR].u32 = new_value
   RETURN_DATA.u32 = old_value
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MIN_I32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MIN_I32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i32)
   src = DATA.i32
   MEM[ADDR].i32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.i32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MIN_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MIN_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MAX_I32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MAX_I32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i32)
   src = DATA.i32
   MEM[ADDR].i32 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.i32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MAX_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MAX_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_AND_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_AND_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp & DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_OR_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_OR_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp | DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_XOR_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_XOR_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b32)
   MEM[ADDR].b32 = (tmp ^ DATA.b32)
   RETURN_DATA.b32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_INC_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_INC_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((0) if (tmp >= src) else (tmp + 1))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_DEC_U32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_DEC_U32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   src = DATA.u32
   MEM[ADDR].u32 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
   RETURN_DATA.u32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_SWAP_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_SWAP_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = DATA.b64
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA[63 : 0].u64
   cmp = DATA[127 : 64].u64
   MEM[ADDR].u64 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_ADD_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_ADD_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 += DATA.u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_SUB_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_SUB_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   MEM[ADDR].u64 -= DATA.u64
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MIN_I64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MIN_I64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i64)
   src = DATA.i64
   MEM[ADDR].i64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.i64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MIN_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MIN_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MAX_I64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MAX_I64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].i64)
   src = DATA.i64
   MEM[ADDR].i64 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.i64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MAX_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MAX_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (src >= tmp) else (tmp))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_AND_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_AND_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp & DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_OR_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_OR_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp | DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_XOR_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_XOR_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].b64)
   MEM[ADDR].b64 = (tmp ^ DATA.b64)
   RETURN_DATA.b64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_INC_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_INC_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((0) if (tmp >= src) else (tmp + 1))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_DEC_U64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_DEC_U64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u64)
   src = DATA.u64
   MEM[ADDR].u64 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
   RETURN_DATA.u64 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP_F32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA[31 : 0].f32
   cmp = DATA[63 : 32].f32
   MEM[ADDR].f32 = ((src) if (tmp == cmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MIN_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MIN_F32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   MEM[ADDR].f32 = ((src) if (src < tmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_MAX_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_MAX_F32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   src = DATA.f32
   MEM[ADDR].f32 = ((src) if (src > tmp) else (tmp))
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
-def _GLOBALOp_GLOBAL_ATOMIC_ADD_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _GLOBALOp_GLOBAL_ATOMIC_ADD_F32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f32)
   MEM[ADDR].f32 += DATA.f32
   RETURN_DATA.f32 = tmp
-  return {'RETURN_DATA': RETURN_DATA}
+  return {'RETURN_DATA': RETURN_DATA._val}
 
 GLOBALOp_FUNCTIONS = {
   GLOBALOp.GLOBAL_LOAD_U8: _GLOBALOp_GLOBAL_LOAD_U8,
@@ -8280,95 +10202,95 @@ GLOBALOp_FUNCTIONS = {
   GLOBALOp.GLOBAL_ATOMIC_ADD_F32: _GLOBALOp_GLOBAL_ATOMIC_ADD_F32,
 }
 
-def _SCRATCHOp_SCRATCH_LOAD_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.u32 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.i32 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_U16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_U16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.u32 = (_pack(0, MEM[ADDR].u16))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_I16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_I16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA.i32 = (signext(MEM[ADDR].i16))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_B96(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_B96(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
   VDATA[95 : 64] = MEM[ADDR + 8].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_B128(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 0] = MEM[ADDR].b32
   VDATA[63 : 32] = MEM[ADDR + 4].b32
   VDATA[95 : 64] = MEM[ADDR + 8].b32
   VDATA[127 : 96] = MEM[ADDR + 12].b32
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_STORE_B8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_STORE_B8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = VDATA[7 : 0]
   return {}
 
-def _SCRATCHOp_SCRATCH_STORE_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_STORE_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = VDATA[15 : 0]
   return {}
 
-def _SCRATCHOp_SCRATCH_STORE_B32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_STORE_B32(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   return {}
 
-def _SCRATCHOp_SCRATCH_STORE_B64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_STORE_B64(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
   return {}
 
-def _SCRATCHOp_SCRATCH_STORE_B96(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_STORE_B96(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
   MEM[ADDR + 8].b32 = VDATA[95 : 64]
   return {}
 
-def _SCRATCHOp_SCRATCH_STORE_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_STORE_B128(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b32 = VDATA[31 : 0]
   MEM[ADDR + 4].b32 = VDATA[63 : 32]
@@ -8376,50 +10298,50 @@ def _SCRATCHOp_SCRATCH_STORE_B128(MEM, ADDR, VDATA, VDST, RETURN_DATA):
   MEM[ADDR + 12].b32 = VDATA[127 : 96]
   return {}
 
-def _SCRATCHOp_SCRATCH_LOAD_D16_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_D16_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].u16 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_D16_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_D16_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].i16 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_D16_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_D16_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[15 : 0].b16 = MEM[ADDR].b16
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_D16_HI_U8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_D16_HI_U8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].u16 = (_pack(0, MEM[ADDR].u8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_D16_HI_I8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_D16_HI_I8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].i16 = (signext(MEM[ADDR].i8))
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_LOAD_D16_HI_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_LOAD_D16_HI_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   VDATA[31 : 16].b16 = MEM[ADDR].b16
-  return {'VDATA': VDATA}
+  return {'VDATA': VDATA._val}
 
-def _SCRATCHOp_SCRATCH_STORE_D16_HI_B8(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_STORE_D16_HI_B8(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = VDATA[23 : 16]
   return {}
 
-def _SCRATCHOp_SCRATCH_STORE_D16_HI_B16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
-  DATA = VDATA
+def _SCRATCHOp_SCRATCH_STORE_D16_HI_B16(MEM, addr, vdata, vdst):
+  ADDR=addr; VDATA=Reg(vdata); VDST=Reg(vdst); RETURN_DATA=Reg(0); DATA=VDATA
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = VDATA[31 : 16]
   return {}
@@ -8449,19 +10371,13 @@ SCRATCHOp_FUNCTIONS = {
   SCRATCHOp.SCRATCH_STORE_D16_HI_B16: _SCRATCHOp_SCRATCH_STORE_D16_HI_B16,
 }
 
-
-# V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  wr_lane = s1 & 0x1f
-  return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
-VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
-
 COMPILED_FUNCTIONS = {
   SOP1Op: SOP1Op_FUNCTIONS,
   SOP2Op: SOP2Op_FUNCTIONS,
   SOPCOp: SOPCOp_FUNCTIONS,
   SOPKOp: SOPKOp_FUNCTIONS,
   SOPPOp: SOPPOp_FUNCTIONS,
+  SMEMOp: SMEMOp_FUNCTIONS,
   VOP1Op: VOP1Op_FUNCTIONS,
   VOP2Op: VOP2Op_FUNCTIONS,
   VOP3Op: VOP3Op_FUNCTIONS,
@@ -8473,5 +10389,3 @@ COMPILED_FUNCTIONS = {
   GLOBALOp: GLOBALOp_FUNCTIONS,
   SCRATCHOp: SCRATCHOp_FUNCTIONS,
 }
-
-def get_compiled_functions(): return COMPILED_FUNCTIONS
