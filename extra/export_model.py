@@ -110,7 +110,7 @@ const {model_name}_name_to_id = Object.fromEntries(weightNames.map((name, index)
     return '\n'.join(headers + cprog), js_wrapper
 
 def dtype_to_js_type(dtype: DType) -> str:
-  return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{8*dtype.itemsize}Array"
+  return f"{'Uint' if dtype in dtypes.uints else 'Int' if (dtype in dtypes.sints or dtype == dtypes.bool) else 'Float'}{dtype.bitsize}Array"
 
 def export_model_webgpu(functions, statements, bufs, weight_names, input_names, output_names, model_name, symbolic_vars={}, stream_weights=False) -> Tuple[str,int,int]:
   kernel_code = '\n\n'.join([f"const {key} = `{code.replace(key, 'main')}`;" for key, code in functions.items()])
