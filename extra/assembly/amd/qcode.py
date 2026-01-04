@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, DType
+from tinygrad.uop import Ops
 
 # DType lookup table for AMD pseudocode type suffixes
 # Maps type suffix (e.g., 'u32', 'f16') to tinygrad DType
@@ -22,6 +23,19 @@ _QDTYPES: dict[str, DType] = {
   'u': dtypes.uint32, 'i': dtypes.int32, 'f': dtypes.float32,
 }
 
+# String to Ops mapping for binary operators
+_BINOPS: dict[str, Ops] = {
+  '+': Ops.ADD, '-': Ops.SUB, '*': Ops.MUL, '/': Ops.FDIV, '%': Ops.MOD, '**': Ops.POW,
+  '&': Ops.AND, '|': Ops.OR, '^': Ops.XOR, '<<': Ops.SHL, '>>': Ops.SHR,
+  '==': Ops.CMPEQ, '!=': Ops.CMPNE, '<>': Ops.CMPNE,
+  '<': Ops.CMPLT, '>': Ops.CMPLT,  # > uses swapped args
+  '<=': Ops.CMPLE, '>=': Ops.CMPLE,  # >= uses swapped args
+  '||': Ops.OR, '&&': Ops.AND,
+}
+
+# Unary ops mapping
+_UNOPS: dict[str, Ops] = {'-': Ops.NEG, '~': Ops.XOR, '!': Ops.CMPEQ}
+
 @dataclass(frozen=True)
 class Const: value: int|float; dtype: DType = dtypes.int32
 @dataclass(frozen=True)
@@ -35,9 +49,9 @@ class Index: expr: Expr; idx: Expr
 @dataclass(frozen=True)
 class Cast: bits: int; typ: str; expr: Expr
 @dataclass(frozen=True)
-class Unary: op: str; expr: Expr
+class Unary: op: Ops; expr: Expr
 @dataclass(frozen=True)
-class Binary: op: str; left: Expr; right: Expr
+class Binary: op: Ops; left: Expr; right: Expr
 @dataclass(frozen=True)
 class Ternary: cond: Expr; t: Expr; f: Expr
 @dataclass(frozen=True)
@@ -142,8 +156,11 @@ def expr(s: str) -> Expr:
     if (p := _fop(s, ops)) > 0:
       op = next(o for o in sorted(ops, key=len, reverse=True) if s[p:p+len(o)] == o)
       l, r = s[:p].strip(), s[p+len(op):].strip()
-      if l and r: return Binary(op, expr(l), expr(r))
-  if s[0] in '-~!' and len(s) > 1 and (s[0] != '!' or s[1] != '='): return Unary(s[0], expr(s[1:]))
+      if l and r:
+        lhs, rhs = expr(l), expr(r)
+        if op in ('>', '>='): lhs, rhs = rhs, lhs  # swap args for > and >=
+        return Binary(_BINOPS[op], lhs, rhs)
+  if s[0] in '-~!' and len(s) > 1 and (s[0] != '!' or s[1] != '='): return Unary(_UNOPS[s[0]], expr(s[1:]))
   if '[' in s and s[-1] == ']':
     d = 0
     for i in range(len(s)-1, -1, -1):
@@ -153,7 +170,7 @@ def expr(s: str) -> Expr:
     b, n = s[:i], s[i+1:-1]
     if '+:' in n:  # Verilog [start +: width] -> [start+width-1 : start]
       st, w = expr(n.split('+:', 1)[0]), expr(n.split('+:', 1)[1])
-      return Slice(expr(b), Binary('-', Binary('+', st, w), Const(1)), st)
+      return Slice(expr(b), Binary(Ops.SUB, Binary(Ops.ADD, st, w), Const(1)), st)
     if ':' in n and '?' not in n:
       d = 0
       for j, c in enumerate(n):
@@ -165,9 +182,6 @@ def expr(s: str) -> Expr:
     for i in range(len(s)-1, 0, -1):
       if s[i] == '.' and (dt := _get_dtype(s[i+1:])): return Typed(expr(s[:i]), dt)
   if s[:5] == 'eval ': return Var(s)
-  if ':' in s and '?' not in s and '[' not in s:
-    p = s.split(':')
-    if len(p) == 2 and all(re.match(r'^[A-Za-z_]\w*$', x.strip()) for x in p): return Binary(':', expr(p[0]), expr(p[1]))
   if re.match(r'^[A-Za-z_][\w.]*$', s): return Var(s)
   try:
     if s[:2].lower() == '0x': return Const(int(re.sub(r'[UuLl]+$', '', s), 16), dtypes.uint32)
@@ -181,11 +195,11 @@ def stmt(line: str) -> Stmt|None:
   if not line: return None
   if line[:5] == 'eval ': return Assign(Var('_eval'), Var(line))
   if line[:8] == 'declare ' and ':' in line: n, t = line[8:].split(':', 1); return Declare(n.strip(), t.strip())
-  for op in ('+=', '-=', '|=', '&=', '^=', '<<=', '>>='):
+  for op, uop in [('+=', Ops.ADD), ('-=', Ops.SUB), ('|=', Ops.OR), ('&=', Ops.AND), ('^=', Ops.XOR), ('<<=', Ops.SHL), ('>>=', Ops.SHR)]:
     if op in line:
       l, r = line.split(op, 1)
       lhs = expr(l)
-      return Assign(lhs, Binary(op[:-1], lhs, expr(r)))
+      return Assign(lhs, Binary(uop, lhs, expr(r)))
   if '=' in line and not any(line[:k] == p for k, p in [(3,'if '),(6,'elsif '),(4,'for ')]):
     eq = line.index('=')
     if eq > 0 and line[eq-1] not in '!<>=' and eq < len(line)-1 and line[eq+1] != '=':
@@ -238,8 +252,8 @@ if __name__ == "__main__":
               case Slice(e,h,l): return f"{pr(e)}[{pr(h)}:{pr(l)}]"
               case Index(e, i): return f"{pr(e)}[{pr(i)}]"
               case Cast(b, t, e): return f"{b}'{t}({pr(e)})"
-              case Unary(o, e): return f"{o}{pr(e)}"
-              case Binary(o, l, r): return f"({pr(l)} {o} {pr(r)})"
+              case Unary(o, e): return f"{o.name}({pr(e)})"
+              case Binary(o, l, r): return f"({pr(l)} {o.name} {pr(r)})"
               case Ternary(c, t, f): return f"({pr(c)} ? {pr(t)} : {pr(f)})"
               case Call(n, a): return f"{n}({', '.join(pr(x) for x in a)})"
               case Pack(e): return f"{{{', '.join(pr(x) for x in e)}}}"

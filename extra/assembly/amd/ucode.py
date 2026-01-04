@@ -154,9 +154,9 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
 
     case Unary(op, expr):
       val = _expr(expr, ctx, hint)
-      if op == '-': return UOp(Ops.NEG, val.dtype, (val,))
-      if op == '~': return UOp(Ops.XOR, val.dtype, (val, UOp.const(val.dtype, -1)))
-      if op == '!': return UOp(Ops.CMPEQ, dtypes.bool, (val, UOp.const(val.dtype, 0)))
+      if op is Ops.NEG: return UOp(Ops.NEG, val.dtype, (val,))
+      if op is Ops.XOR: return UOp(Ops.XOR, val.dtype, (val, UOp.const(val.dtype, -1)))  # ~ is XOR with -1
+      if op is Ops.CMPEQ: return UOp(Ops.CMPEQ, dtypes.bool, (val, UOp.const(val.dtype, 0)))  # ! is == 0
       raise ValueError(f"Unknown unary op: {op}")
 
     case Binary(op, left, right):
@@ -164,32 +164,24 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
       r = _expr(right, ctx, l.dtype if l.dtype in FLOATS else hint)
       # For 32/64-bit signed arithmetic, use unsigned to avoid overflow issues during constant folding
       # Unwrap bitcasts to avoid double-cast chains that confuse the simplifier
-      if op in ('+', '-', '*') and l.dtype in (dtypes.int32, dtypes.int64):
+      if op in (Ops.ADD, Ops.SUB, Ops.MUL) and l.dtype in (dtypes.int32, dtypes.int64):
         udt = {dtypes.int32: dtypes.uint32, dtypes.int64: dtypes.uint64}[l.dtype]
         lu = l.src[0] if l.op == Ops.BITCAST and l.src[0].dtype == udt else _cast(l, udt)
         ru = r.src[0] if r.op == Ops.BITCAST and r.src[0].dtype == udt else _cast(r, udt)
-        return UOp(Ops.ADD if op == '+' else Ops.SUB if op == '-' else Ops.MUL, udt, (lu, ru))
+        return UOp(op, udt, (lu, ru))
       result_dt = l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype
 
-      ops = {'+': Ops.ADD, '-': Ops.SUB, '*': Ops.MUL, '/': Ops.FDIV, '&': Ops.AND, '|': Ops.OR, '^': Ops.XOR, '<<': Ops.SHL,
-             '==': Ops.CMPEQ, '!=': Ops.CMPNE, '<>': Ops.CMPNE}
-      if op in ops:
-        uop_op = ops[op]
-        return UOp(uop_op, dtypes.bool if uop_op in (Ops.CMPEQ, Ops.CMPNE) else result_dt, (l, r))
-      if op == '>>': return UOp(Ops.SHR, result_dt, (l, r))
-      if op == '<': return UOp(Ops.CMPLT, dtypes.bool, (l, r))
-      if op == '>': return UOp(Ops.CMPLT, dtypes.bool, (r, l))
-      if op == '>=': return UOp(Ops.XOR, dtypes.bool, (UOp(Ops.CMPLT, dtypes.bool, (l, r)), UOp.const(dtypes.bool, True)))
-      if op == '<=': return UOp(Ops.XOR, dtypes.bool, (UOp(Ops.CMPLT, dtypes.bool, (r, l)), UOp.const(dtypes.bool, True)))
-      if op in ('||', '&&'):
-        one, zero = UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0)
-        inner = UOp(Ops.WHERE, dtypes.uint32, (r, one, zero))
-        return UOp(Ops.WHERE, dtypes.uint32, (l, one if op == '||' else inner, inner if op == '||' else zero))
-      if op == '**':
+      # Comparison ops return bool
+      if op in (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE): return UOp(op, dtypes.bool, (l, r))
+      # Most binary ops use result_dt
+      if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR): return UOp(op, result_dt, (l, r))
+      # POW: 2**x -> EXP2(x), else EXP2(x * LOG2(base))
+      if op is Ops.POW:
         exp = UOp(Ops.CAST, result_dt, (r,)) if r.dtype != result_dt else r
         if l.op == Ops.CONST and l.arg == 2.0: return UOp(Ops.EXP2, result_dt, (exp,))
         return UOp(Ops.EXP2, result_dt, (UOp(Ops.MUL, result_dt, (exp, UOp(Ops.LOG2, result_dt, (l,)))),))
-      if op == '%':
+      # MOD: a % b = a - (a // b) * b
+      if op is Ops.MOD:
         div = UOp(Ops.IDIV, result_dt, (l, r))
         return UOp(Ops.SUB, result_dt, (l, UOp(Ops.MUL, result_dt, (div, r))))
       raise ValueError(f"Unknown binary op: {op}")
