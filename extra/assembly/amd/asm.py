@@ -6,7 +6,7 @@ from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, 
 from extra.assembly.amd.dsl import SPECIAL_GPRS, SPECIAL_PAIRS, FLOAT_DEC, FLOAT_ENC, decode_src
 from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP,
-  VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp)
+  VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp, MTBUFOp)
 
 def _is_cdna(inst: Inst) -> bool: return 'cdna' in inst.__class__.__module__
 
@@ -59,6 +59,46 @@ HWREG = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_H
          19: 'HW_REG_PERF_SNAPSHOT_PC_HI', 20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI', 22: 'HW_REG_XNACK_MASK',
          23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER', 28: 'HW_REG_IB_STS2'}
 HWREG_IDS = {v.lower(): k for k, v in HWREG.items()}
+# Buffer format values for MTBUF instructions
+BUF_FMT = {"BUF_FMT_8_UNORM": 1, "BUF_FMT_8_SNORM": 2, "BUF_FMT_8_USCALED": 3, "BUF_FMT_8_SSCALED": 4,
+  "BUF_FMT_8_UINT": 5, "BUF_FMT_8_SINT": 6, "BUF_FMT_16_UNORM": 7, "BUF_FMT_16_SNORM": 8,
+  "BUF_FMT_16_USCALED": 9, "BUF_FMT_16_SSCALED": 10, "BUF_FMT_16_UINT": 11, "BUF_FMT_16_SINT": 12,
+  "BUF_FMT_16_FLOAT": 13, "BUF_FMT_8_8_UNORM": 14, "BUF_FMT_8_8_SNORM": 15, "BUF_FMT_8_8_USCALED": 16,
+  "BUF_FMT_8_8_SSCALED": 17, "BUF_FMT_8_8_UINT": 18, "BUF_FMT_8_8_SINT": 19, "BUF_FMT_32_UINT": 20,
+  "BUF_FMT_32_SINT": 21, "BUF_FMT_32_FLOAT": 22, "BUF_FMT_16_16_UNORM": 23, "BUF_FMT_16_16_SNORM": 24,
+  "BUF_FMT_16_16_USCALED": 25, "BUF_FMT_16_16_SSCALED": 26, "BUF_FMT_16_16_UINT": 27, "BUF_FMT_16_16_SINT": 28,
+  "BUF_FMT_16_16_FLOAT": 29, "BUF_FMT_10_11_11_FLOAT": 30, "BUF_FMT_11_11_10_FLOAT": 31,
+  "BUF_FMT_10_10_10_2_UNORM": 32, "BUF_FMT_10_10_10_2_SNORM": 33, "BUF_FMT_10_10_10_2_UINT": 34,
+  "BUF_FMT_10_10_10_2_SINT": 35, "BUF_FMT_2_10_10_10_UNORM": 36, "BUF_FMT_2_10_10_10_SNORM": 37,
+  "BUF_FMT_2_10_10_10_USCALED": 38, "BUF_FMT_2_10_10_10_SSCALED": 39, "BUF_FMT_2_10_10_10_UINT": 40,
+  "BUF_FMT_2_10_10_10_SINT": 41, "BUF_FMT_8_8_8_8_UNORM": 42, "BUF_FMT_8_8_8_8_SNORM": 43,
+  "BUF_FMT_8_8_8_8_USCALED": 44, "BUF_FMT_8_8_8_8_SSCALED": 45, "BUF_FMT_8_8_8_8_UINT": 46,
+  "BUF_FMT_8_8_8_8_SINT": 47, "BUF_FMT_32_32_UINT": 48, "BUF_FMT_32_32_SINT": 49, "BUF_FMT_32_32_FLOAT": 50,
+  "BUF_FMT_16_16_16_16_UNORM": 51, "BUF_FMT_16_16_16_16_SNORM": 52, "BUF_FMT_16_16_16_16_USCALED": 53,
+  "BUF_FMT_16_16_16_16_SSCALED": 54, "BUF_FMT_16_16_16_16_UINT": 55, "BUF_FMT_16_16_16_16_SINT": 56,
+  "BUF_FMT_16_16_16_16_FLOAT": 57, "BUF_FMT_32_32_32_UINT": 58, "BUF_FMT_32_32_32_SINT": 59,
+  "BUF_FMT_32_32_32_FLOAT": 60, "BUF_FMT_32_32_32_32_UINT": 61, "BUF_FMT_32_32_32_32_SINT": 62,
+  "BUF_FMT_32_32_32_32_FLOAT": 63}
+# DATA_FORMAT x NUM_FORMAT lookup for combined format:[BUF_DATA_FORMAT_X, BUF_NUM_FORMAT_Y] syntax
+_BUF_DATA_FMT = {"BUF_DATA_FORMAT_8": 0, "BUF_DATA_FORMAT_16": 1, "BUF_DATA_FORMAT_8_8": 2, "BUF_DATA_FORMAT_32": 3,
+  "BUF_DATA_FORMAT_16_16": 4, "BUF_DATA_FORMAT_10_11_11": 5, "BUF_DATA_FORMAT_11_11_10": 6, "BUF_DATA_FORMAT_10_10_10_2": 7,
+  "BUF_DATA_FORMAT_2_10_10_10": 8, "BUF_DATA_FORMAT_8_8_8_8": 9, "BUF_DATA_FORMAT_32_32": 10, "BUF_DATA_FORMAT_16_16_16_16": 11,
+  "BUF_DATA_FORMAT_32_32_32": 12, "BUF_DATA_FORMAT_32_32_32_32": 13}
+_BUF_NUM_FMT = {"BUF_NUM_FORMAT_UNORM": 0, "BUF_NUM_FORMAT_SNORM": 1, "BUF_NUM_FORMAT_USCALED": 2, "BUF_NUM_FORMAT_SSCALED": 3,
+  "BUF_NUM_FORMAT_UINT": 4, "BUF_NUM_FORMAT_SINT": 5, "BUF_NUM_FORMAT_FLOAT": 6}
+def _parse_buf_fmt_combo(s: str) -> int:
+  parts = [p.strip() for p in s.split(',')]
+  if len(parts) != 2: return None
+  df, nf = _BUF_DATA_FMT.get(parts[0]), _BUF_NUM_FMT.get(parts[1])
+  if df is None or nf is None: return None
+  # Map (df, nf) to combined format - this is architecture specific, we build from BUF_FMT
+  for name, val in BUF_FMT.items():
+    # Extract data format and num format from name like BUF_FMT_8_UNORM
+    name_parts = name.replace('BUF_FMT_', '').rsplit('_', 1)
+    if len(name_parts) == 2 and name_parts[1].upper() in ('UNORM','SNORM','USCALED','SSCALED','UINT','SINT','FLOAT'):
+      dfn, nfn = f"BUF_DATA_FORMAT_{name_parts[0]}", f"BUF_NUM_FORMAT_{name_parts[1]}"
+      if _BUF_DATA_FMT.get(dfn) == df and _BUF_NUM_FMT.get(nfn) == nf: return val
+  return None
 MSG = {128: 'MSG_RTN_GET_DOORBELL', 129: 'MSG_RTN_GET_DDID', 130: 'MSG_RTN_GET_TMA',
        131: 'MSG_RTN_GET_REALTIME', 132: 'MSG_RTN_SAVE_WAVE', 133: 'MSG_RTN_GET_TBA'}
 
@@ -479,11 +519,23 @@ def _parse_ops(s: str) -> list[str]:
   return ops
 
 def _extract(text: str, pat: str, flags=re.I):
-  if m := re.search(pat, text, flags): return m, text[:m.start()] + text[m.end():]
+  if m := re.search(pat, text, flags): return m, text[:m.start()] + ' ' + text[m.end():]
   return None, text
+
+# Instruction aliases: LLVM uses different names for some instructions
+_ALIASES = {
+  'v_cmp_tru_f16': 'v_cmp_t_f16', 'v_cmp_tru_f32': 'v_cmp_t_f32', 'v_cmp_tru_f64': 'v_cmp_t_f64',
+  'v_cmpx_tru_f16': 'v_cmpx_t_f16', 'v_cmpx_tru_f32': 'v_cmpx_t_f32', 'v_cmpx_tru_f64': 'v_cmpx_t_f64',
+  'v_cvt_flr_i32_f32': 'v_cvt_floor_i32_f32', 'v_cvt_rpi_i32_f32': 'v_cvt_nearest_i32_f32',
+  'v_ffbh_i32': 'v_cls_i32', 'v_ffbh_u32': 'v_clz_i32_u32', 'v_ffbl_b32': 'v_ctz_i32_b32',
+  'v_cvt_pkrtz_f16_f32': 'v_cvt_pk_rtz_f16_f32', 'v_fmac_legacy_f32': 'v_fmac_dx9_zero_f32', 'v_mul_legacy_f32': 'v_mul_dx9_zero_f32',
+}
 
 def get_dsl(text: str) -> str:
   text, kw = text.strip(), []
+  # Apply instruction aliases
+  for old, new in _ALIASES.items():
+    if text.lower().startswith(old): text = new + text[len(old):]
   # Extract modifiers
   for pat, val in [(r'\s+mul:2(?:\s|$)', 1), (r'\s+mul:4(?:\s|$)', 2), (r'\s+div:2(?:\s|$)', 3)]:
     if (m := _extract(text, pat))[0]: kw.append(f'omod={val}'); text = m[1]; break
@@ -499,6 +551,11 @@ def get_dsl(text: str) -> str:
   m, text = _extract(text, r'\s+dlc(?:\s|$)'); dlc = 1 if m else None
   m, text = _extract(text, r'\s+glc(?:\s|$)'); glc = 1 if m else None
   m, text = _extract(text, r'\s+slc(?:\s|$)'); slc = 1 if m else None
+  m, text = _extract(text, r'\s+tfe(?:\s|$)'); tfe = 1 if m else None
+  m, text = _extract(text, r'\s+offen(?:\s|$)'); offen = 1 if m else None
+  m, text = _extract(text, r'\s+idxen(?:\s|$)'); idxen = 1 if m else None
+  m, text = _extract(text, r'\s+format:\[([^\]]+)\]'); fmt_val = m.group(1) if m else None
+  m, text = _extract(text, r'\s+format:(\d+)'); fmt_val = m.group(1) if m and not fmt_val else fmt_val
   m, text = _extract(text, r'\s+neg_lo:\[([^\]]+)\]'); neg_lo = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
   m, text = _extract(text, r'\s+neg_hi:\[([^\]]+)\]'); neg_hi = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
   if waitexp: kw.append(f'waitexp={waitexp}')
@@ -545,9 +602,30 @@ def get_dsl(text: str) -> str:
     if off_val and len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}{gs}{ds})"
     if len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, soffset={args[2]}{gs}{ds})"
 
-  # Buffer
-  if mn.startswith('buffer_') and len(ops) >= 2 and ops[1].strip().lower() == 'off':
-    return f"{mn}(vdata={args[0]}, vaddr=0, srsrc={args[2]}, soffset={f'RawImm({args[3].strip()})' if len(args) > 3 else 'RawImm(0)'})"
+  # Buffer (MUBUF/MTBUF) instructions
+  if mn.startswith(('buffer_', 'tbuffer_')):
+    is_tbuf = mn.startswith('tbuffer_')
+    # Parse format value for tbuffer
+    fmt_num = None
+    if fmt_val is not None:
+      if fmt_val.isdigit(): fmt_num = int(fmt_val)
+      else: fmt_num = BUF_FMT.get(fmt_val.replace(' ', '')) or _parse_buf_fmt_combo(fmt_val)
+    # Handle special no-arg buffer ops
+    if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}()"
+    # Build modifiers string
+    buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
+                        ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
+    if is_tbuf and fmt_num is not None: buf_mods = f", format={fmt_num}" + buf_mods
+    # Determine vaddr value (v[0] for 'off', actual register otherwise)
+    vaddr_idx = 1
+    if len(ops) > vaddr_idx and ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
+    else: vaddr_val = args[vaddr_idx] if len(args) > vaddr_idx else "v[0]"
+    # srsrc and soffset indices depend on whether vaddr is 'off'
+    srsrc_idx, soff_idx = (2, 3) if len(ops) > 1 else (1, 2)
+    srsrc_val = args[srsrc_idx] if len(args) > srsrc_idx else "s[0:3]"
+    soff_val = args[soff_idx] if len(args) > soff_idx else "0"
+    # soffset: integers are inline constants, don't wrap in RawImm
+    return f"{mn}(vdata={args[0]}, vaddr={vaddr_val}, srsrc={srsrc_val}, soffset={soff_val}{buf_mods})"
 
   # FLAT/GLOBAL/SCRATCH load/store/atomic - saddr needs RawImm(124) for off/null
   def _saddr(a): return 'RawImm(124)' if a in ('OFF', 'NULL') else a
@@ -597,6 +675,15 @@ def get_dsl(text: str) -> str:
   if mn.replace('_e64', '') in vcc_ops and mn.endswith('_e64'): mn = mn.replace('_e64', '')
   if mn.startswith('v_cmp') and not mn.endswith('_e64') and len(args) >= 3 and ops[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'): args = args[1:]
   if 'cmpx' in mn and mn.endswith('_e64') and len(args) == 2: args = ['RawImm(126)'] + args
+  # v_cmp_*_e64 has SGPR destination in vdst field - encode as RawImm
+  _SGPR_NAMES = {'vcc_lo': 106, 'vcc_hi': 107, 'vcc': 106, 'null': 124, 'm0': 125, 'exec_lo': 126, 'exec_hi': 127}
+  if mn.startswith('v_cmp') and 'cmpx' not in mn and mn.endswith('_e64') and len(args) >= 1:
+    dst = ops[0].strip().lower()
+    if dst.startswith('s') and dst[1:].isdigit(): args[0] = f'RawImm({int(dst[1:])})'
+    elif dst.startswith('s[') and ':' in dst: args[0] = f'RawImm({int(dst[2:].split(":")[0])})'
+    elif dst.startswith('ttmp') and dst[4:].isdigit(): args[0] = f'RawImm({108 + int(dst[4:])})'
+    elif dst.startswith('ttmp[') and ':' in dst: args[0] = f'RawImm({108 + int(dst[5:].split(":")[0])})'
+    elif dst in _SGPR_NAMES: args[0] = f'RawImm({_SGPR_NAMES[dst]})'
 
   fn = mn.replace('.', '_')
   if opsel is not None: args = [re.sub(r'\.[hl]$', '', a) for a in args]
