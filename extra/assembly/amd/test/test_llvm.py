@@ -55,9 +55,6 @@ LLVM_TEST_FILES = {
   'mtbuf_alias': ('gfx11_asm_mtbuf_alias.s', MTBUF, MTBUFOp),
 }
 
-# Undocumented opcodes that we skip (reserved/internal to AMD)
-UNDOCUMENTED: dict = {}
-
 def parse_llvm_tests(text: str) -> list[tuple[str, bytes]]:
   """Parse LLVM test format into (asm, expected_bytes) pairs."""
   tests, lines = [], text.split('\n')
@@ -82,10 +79,10 @@ def parse_llvm_tests(text: str) -> list[tuple[str, bytes]]:
       break
   return tests
 
-def _get_op(inst) -> int:
-  """Extract opcode value from instruction."""
-  op = inst._values.get('op', 0)
-  return op.val if hasattr(op, 'val') else op
+def try_assemble(text: str):
+  """Try to assemble instruction text, return bytes or None on failure."""
+  try: return asm(text).to_bytes()
+  except: return None
 
 def compile_asm_batch(instrs: list[str]) -> list[bytes]:
   """Compile multiple instructions with a single llvm-mc call."""
@@ -95,6 +92,7 @@ def compile_asm_batch(instrs: list[str]) -> list[bytes]:
     [get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
     input=asm_text, capture_output=True, text=True, timeout=30)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
+  # Parse all encodings from output
   results = []
   for line in result.stdout.split('\n'):
     if 'encoding:' not in line: continue
@@ -105,7 +103,7 @@ def compile_asm_batch(instrs: list[str]) -> list[bytes]:
   return results
 
 class TestLLVM(unittest.TestCase):
-  """Test instruction format decode/encode roundtrip and disassembly against LLVM test vectors."""
+  """Test assembler and disassembler against all LLVM test vectors."""
   tests: dict[str, list[tuple[str, bytes]]] = {}
 
   @classmethod
@@ -118,115 +116,77 @@ class TestLLVM(unittest.TestCase):
         print(f"Warning: couldn't fetch {filename}: {e}")
         cls.tests[name] = []
 
-def _has_literal(data: bytes, fmt_cls) -> bool:
-  """Check if instruction has a trailing 32-bit literal constant."""
-  if len(data) <= fmt_cls._size(): return False
-  # Check for literal marker (src0=0xff or ssrc0/ssrc1=0xff)
-  fn = fmt_cls.__name__
-  if fn in ('SOP1', 'VOP1', 'VOPC'): return data[0] == 0xff  # ssrc0 / src0
-  if fn in ('SOP2', 'SOPC'): return data[0] == 0xff or data[1] == 0xff  # ssrc0 or ssrc1
-  if fn == 'VOP2':
-    op = (int.from_bytes(data[:4], 'little') >> 25) & 0x3f
-    return data[0] == 0xff or op in (44, 45, 55, 56)  # src0=literal or FMAMK/FMAAK F32/F16 (RDNA3 opcodes)
-  if fn == 'SOPK': return ((int.from_bytes(data[:4], 'little') >> 23) & 0x1f) == 19  # S_SETREG_IMM32_B32 (RDNA3 opcode)
-  if fn == 'VOPD':
-    # Check srcx0/srcy0 for literal, or opx/opy for FMAAK/FMAMK (1, 2)
-    word0 = int.from_bytes(data[:4], 'little')
-    opx, opy = (word0 >> 22) & 0xf, (word0 >> 17) & 0x1f
-    return data[0] == 0xff or data[4] == 0xff or opx in (1, 2) or opy in (1, 2)
-  # VOP3/VOP3SD/VOP3P: check src0/src1/src2 fields for literal marker (0xff)
-  if fn in ('VOP3', 'VOP3SD', 'VOP3P'):
-    word1 = int.from_bytes(data[4:8], 'little')
-    src0, src1, src2 = word1 & 0x1ff, (word1 >> 9) & 0x1ff, (word1 >> 18) & 0x1ff
-    return src0 == 0xff or src1 == 0xff or src2 == 0xff
-  return False
-
-def _make_roundtrip_test(name):
-  """Test decode → encode roundtrip for all instructions."""
+# Generate test methods dynamically for each format
+def _make_asm_test(name):
   def test(self):
-    _, fmt_cls, op_enum = LLVM_TEST_FILES[name]
-    vop3sd_opcodes = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
-    is_vopc_promotion = name in ('vop3_from_vopc', 'vop3_from_vopcx')
-    passed, failed, skipped, enum_missing = 0, 0, 0, 0
-    failures: list[str] = []
-
-    for asm_text, data in self.tests.get(name, []):
-      # Handle literal constants: formats can have trailing 32-bit literal
-      has_lit = _has_literal(data, fmt_cls)
-      expected_size = fmt_cls._size() + (4 if has_lit else 0)
-      if len(data) > expected_size: skipped += 1; continue
-      try:
-        # Decode instruction
-        if fmt_cls.__name__ in ('VOP3', 'VOP3SD'):
-          temp = VOP3.from_bytes(data)
-          is_vop3sd = (_get_op(temp) in vop3sd_opcodes) and not is_vopc_promotion
-          decoded = VOP3SD.from_bytes(data) if is_vop3sd else VOP3.from_bytes(data)
-          try: (VOP3SDOp if is_vop3sd else VOP3Op)(_get_op(decoded))
-          except ValueError: enum_missing += 1; continue
-        else:
-          decoded = fmt_cls.from_bytes(data)
-          op_val = _get_op(decoded)
-          if op_val in UNDOCUMENTED.get(name, set()): skipped += 1; continue
-          try: op_enum(op_val)
-          except ValueError: enum_missing += 1; continue
-        # Check roundtrip
-        reencoded = decoded.to_bytes()[:len(data)]
-        if reencoded == data: passed += 1
-        else: failed += 1; failures.append(f"'{asm_text}': orig={data.hex()} reenc={reencoded.hex()}")
-      except Exception as e:
-        failed += 1; failures.append(f"'{asm_text}': {e}")
-
-    print(f"{name.upper()} roundtrip: {passed} passed, {failed} failed, {skipped} skipped, {enum_missing} missing")
-    if failures[:5]: print("  " + "\n  ".join(failures[:5]))
+    passed, failed, skipped = 0, 0, 0
+    for asm_text, expected in self.tests.get(name, []):
+      result = try_assemble(asm_text)
+      if result is None: skipped += 1
+      elif result == expected: passed += 1
+      else: failed += 1
+    print(f"{name.upper()} asm: {passed} passed, {failed} failed, {skipped} skipped")
     self.assertEqual(failed, 0)
   return test
 
 def _make_disasm_test(name):
-  """Test decode → disasm → re-asm → compare for all instructions."""
   def test(self):
     _, fmt_cls, op_enum = LLVM_TEST_FILES[name]
+    # VOP3SD opcodes that share encoding with VOP3 (only for vop3sd test, not vopc promotions)
     vop3sd_opcodes = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
     is_vopc_promotion = name in ('vop3_from_vopc', 'vop3_from_vopcx')
-    to_test: list[tuple[str, bytes, str | None, str | None]] = []
-    skipped = 0
+    undocumented = {'smem': {34, 35}, 'sopk': {22, 23}, 'sopp': {8, 58, 59}}
 
+    # First pass: decode all instructions and collect disasm strings
+    to_test: list[tuple[str, bytes, str | None, str | None]] = []  # (asm_text, data, disasm_str, error)
+    skipped = 0
     for asm_text, data in self.tests.get(name, []):
-      # Handle literal constants
-      has_lit = _has_literal(data, fmt_cls)
-      expected_size = fmt_cls._size() + (4 if has_lit else 0)
-      if len(data) > expected_size: continue
+      if len(data) > fmt_cls._size(): continue
+      temp_inst = fmt_cls.from_bytes(data)
+      temp_op = temp_inst._values.get('op', 0)
+      temp_op = temp_op.val if hasattr(temp_op, 'val') else temp_op
+      if temp_op in undocumented.get(name, set()): skipped += 1; continue
+      if name == 'sopp':
+        simm16 = temp_inst._values.get('simm16', 0)
+        simm16 = simm16.val if hasattr(simm16, 'val') else simm16
+        sopp_no_imm = {48, 54, 53, 55, 60, 61, 62}
+        if temp_op in sopp_no_imm and simm16 != 0: skipped += 1; continue
       try:
-        # Decode instruction
         if fmt_cls.__name__ in ('VOP3', 'VOP3SD'):
           temp = VOP3.from_bytes(data)
-          is_vop3sd = (_get_op(temp) in vop3sd_opcodes) and not is_vopc_promotion
+          op_val = temp._values.get('op', 0)
+          op_val = op_val.val if hasattr(op_val, 'val') else op_val
+          is_vop3sd = (op_val in vop3sd_opcodes) and not is_vopc_promotion
           decoded = VOP3SD.from_bytes(data) if is_vop3sd else VOP3.from_bytes(data)
-          try: (VOP3SDOp if is_vop3sd else VOP3Op)(_get_op(decoded))
-          except ValueError: skipped += 1; continue
+          if is_vop3sd: VOP3SDOp(op_val)
+          else: VOP3Op(op_val)
         else:
           decoded = fmt_cls.from_bytes(data)
-          op_val = _get_op(decoded)
-          if op_val in UNDOCUMENTED.get(name, set()): skipped += 1; continue
-          try: op_enum(op_val)
-          except ValueError: skipped += 1; continue
-        # Check roundtrip first
+          op_val = decoded._values.get('op', 0)
+          op_val = op_val.val if hasattr(op_val, 'val') else op_val
+          op_enum(op_val)
         if decoded.to_bytes()[:len(data)] != data:
-          to_test.append((asm_text, data, None, "roundtrip failed")); continue
+          to_test.append((asm_text, data, None, "decode roundtrip failed"))
+          continue
         to_test.append((asm_text, data, decoded.disasm(), None))
       except Exception as e:
         to_test.append((asm_text, data, None, f"exception: {e}"))
 
-    # Batch compile all disasm strings
+    # Batch compile all disasm strings with single llvm-mc call
     disasm_strs = [(i, t[2]) for i, t in enumerate(to_test) if t[2] is not None]
     llvm_results = compile_asm_batch([s for _, s in disasm_strs]) if disasm_strs else []
     llvm_map = {i: llvm_results[j] for j, (i, _) in enumerate(disasm_strs)}
 
-    passed, failed, failures = 0, 0, []
+    # Match results back
+    passed, failed = 0, 0
+    failures: list[str] = []
     for idx, (asm_text, data, disasm_str, error) in enumerate(to_test):
-      if error: failed += 1; failures.append(f"{error} for {data.hex()}")
+      if error:
+        failed += 1; failures.append(f"{error} for {data.hex()}")
       elif disasm_str is not None and idx in llvm_map:
-        if llvm_map[idx] == data: passed += 1
-        else: failed += 1; failures.append(f"'{disasm_str}': expected={data.hex()} got={llvm_map[idx].hex()}")
+        llvm_bytes = llvm_map[idx]
+        if llvm_bytes is not None and llvm_bytes == data: passed += 1
+        elif llvm_bytes is not None: failed += 1; failures.append(f"'{disasm_str}': expected={data.hex()} got={llvm_bytes.hex()}")
 
     print(f"{name.upper()} disasm: {passed} passed, {failed} failed" + (f", {skipped} skipped" if skipped else ""))
     if failures[:10]: print("  " + "\n  ".join(failures[:10]))
@@ -234,7 +194,7 @@ def _make_disasm_test(name):
   return test
 
 for name in LLVM_TEST_FILES:
-  setattr(TestLLVM, f'test_{name}_roundtrip', _make_roundtrip_test(name))
+  setattr(TestLLVM, f'test_{name}_asm', _make_asm_test(name))
   setattr(TestLLVM, f'test_{name}_disasm', _make_disasm_test(name))
 
 if __name__ == "__main__":

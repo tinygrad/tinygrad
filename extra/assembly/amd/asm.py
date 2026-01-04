@@ -135,7 +135,7 @@ def _disasm_vopc(inst: VOPC) -> str:
   s1 = _vreg(inst.vsrc1, inst.src_regs(1)) if inst.src_regs(1) > 1 else (_fmt_v16(inst.vsrc1, 0, 128) if is16 else f"v{inst.vsrc1}")
   return f"{name}_e32 {s0}, {s1}" if inst.op.value >= 128 else f"{name}_e32 {'vcc' if is_cdna else 'vcc_lo'}, {s0}, {s1}"
 
-NO_ARG_SOPP = {SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV, SOPPOp.S_TTRACEDATA,
+NO_ARG_SOPP = {SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV,
                SOPPOp.S_WAIT_IDLE, SOPPOp.S_ENDPGM_SAVED, SOPPOp.S_CODE_END, SOPPOp.S_ENDPGM_ORDERED_PS_DONE}
 
 def _disasm_sopp(inst: SOPP) -> str:

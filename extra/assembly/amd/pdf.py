@@ -201,64 +201,15 @@ def _parse_single_pdf(url: str):
     if 'FLATOp' in enums:
       for k, v in {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}.items():
         assert k not in enums['FLATOp']; enums['FLATOp'][k] = v
-    # Add undocumented opcodes that exist in LLVM but not in PDF
-    if 'SMEMOp' in enums:
-      for k, v in {34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'}.items():
-        if k not in enums['SMEMOp']: enums['SMEMOp'][k] = v
-    if 'SOPKOp' in enums:
-      for k, v in {22: 'S_SUBVECTOR_LOOP_BEGIN', 23: 'S_SUBVECTOR_LOOP_END'}.items():
-        if k not in enums['SOPKOp']: enums['SOPKOp'][k] = v
-    if 'SOPPOp' in enums:
-      for k, v in {58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'}.items():
-        if k not in enums['SOPPOp']: enums['SOPPOp'][k] = v
-  # CDNA: Fix SDWA/DPP formats - they overlay VOP1/VOP2 but PDF only documents the modifier fields
-  # The first 32 bits are VOP1/VOP2 format, and the second 32 bits are SDWA/DPP-specific modifiers.
-  # We need to add the VOP1/VOP2 overlay fields (vop_op, vdst, vop2_op) so roundtrip encoding works.
-  # Bits[8:0] contain the marker (0xf9 for SDWA, 0xfa for DPP) instead of normal src0.
+  # CDNA SDWA/DPP: PDF only has modifier fields, need VOP1/VOP2 overlay for correct encoding
   if is_cdna:
-    # SDWA: Add VOP1/VOP2 overlay fields and remove incorrect fields parsed from PDF
     if 'SDWA' in formats:
-      # Filter out fields that don't belong (sdst, sd, row_mask are from wrong table or overlapping)
-      formats['SDWA'] = [f for f in formats['SDWA'] if f[0] not in ('ENCODING', 'SDST', 'SD', 'ROW_MASK')]
-      # Add VOP1/VOP2 overlay fields at the start (first 32 bits contain VOP1/VOP2 encoding)
-      # MARKER at bits[8:0] = 0xf9 indicates SDWA encoding
-      overlay_fields = [('ENCODING', 8, 0, 0xf9, None), ('VOP_OP', 16, 9, None, None),
-                        ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None)]
-      formats['SDWA'] = overlay_fields + formats['SDWA']
-    # DPP: Replace broken DS-like format with correct DPP fields
+      formats['SDWA'] = [('ENCODING', 8, 0, 0xf9, None), ('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None)] + \
+                        [f for f in formats['SDWA'] if f[0] not in ('ENCODING', 'SDST', 'SD', 'ROW_MASK')]
     if 'DPP' in formats:
-      # DPP format: first 32 bits are VOP1/VOP2, second 32 bits are DPP modifiers
-      # ENCODING at bits[8:0] = 0xfa indicates DPP encoding
-      formats['DPP'] = [
-        ('ENCODING', 8, 0, 0xfa, None), ('VOP_OP', 16, 9, None, None),
-        ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None),
-        ('SRC0', 39, 32, None, 'Src'), ('DPP_CTRL', 48, 40, None, None), ('BOUND_CTRL', 51, 51, None, None),
-        ('SRC0_NEG', 52, 52, None, None), ('SRC0_ABS', 53, 53, None, None),
-        ('SRC1_NEG', 54, 54, None, None), ('SRC1_ABS', 55, 55, None, None),
-        ('BANK_MASK', 59, 56, None, None), ('ROW_MASK', 63, 60, None, None)]
-
-  # CDNA: Add GFX9-only opcodes not in CDNA3/4 PDF (for LLVM test compatibility)
-  if is_cdna:
-    if 'DSOp' in enums:
-      ds_src2_ops = {128: 'DS_ADD_SRC2_U32', 129: 'DS_SUB_SRC2_U32', 130: 'DS_RSUB_SRC2_U32', 131: 'DS_INC_SRC2_U32',
-        132: 'DS_DEC_SRC2_U32', 133: 'DS_MIN_SRC2_I32', 134: 'DS_MAX_SRC2_I32', 135: 'DS_MIN_SRC2_U32', 136: 'DS_MAX_SRC2_U32',
-        137: 'DS_AND_SRC2_B32', 138: 'DS_OR_SRC2_B32', 139: 'DS_XOR_SRC2_B32', 141: 'DS_WRITE_SRC2_B32',
-        146: 'DS_MIN_SRC2_F32', 147: 'DS_MAX_SRC2_F32', 149: 'DS_ADD_SRC2_F32', 191: 'DS_ORDERED_COUNT',
-        192: 'DS_ADD_SRC2_U64', 193: 'DS_SUB_SRC2_U64', 194: 'DS_RSUB_SRC2_U64', 195: 'DS_INC_SRC2_U64',
-        196: 'DS_DEC_SRC2_U64', 197: 'DS_MIN_SRC2_I64', 198: 'DS_MAX_SRC2_I64', 199: 'DS_MIN_SRC2_U64', 200: 'DS_MAX_SRC2_U64',
-        201: 'DS_AND_SRC2_B64', 202: 'DS_OR_SRC2_B64', 203: 'DS_XOR_SRC2_B64', 205: 'DS_WRITE_SRC2_B64',
-        210: 'DS_MIN_SRC2_F64', 211: 'DS_MAX_SRC2_F64'}
-      for k, v in ds_src2_ops.items():
-        if k not in enums['DSOp']: enums['DSOp'][k] = v
-    if 'SOP2Op' in enums and 43 not in enums['SOP2Op']: enums['SOP2Op'][43] = 'S_RFE_RESTORE_B64'
-    if 'VOP1Op' in enums:
-      for k, v in {55: 'V_SCREEN_PARTITION_4SE_B32', 75: 'V_EXP_LEGACY_F32', 76: 'V_LOG_LEGACY_F32'}.items():
-        if k not in enums['VOP1Op']: enums['VOP1Op'][k] = v
-    if 'VOP3AOp' in enums:
-      vop3a_ops = {282: 'V_SUB_CO_U32', 283: 'V_SUBREV_CO_U32', 284: 'V_ADDC_CO_U32', 285: 'V_SUBB_CO_U32', 286: 'V_SUBBREV_CO_U32',
-        375: 'V_SCREEN_PARTITION_4SE_B32', 630: 'V_INTERP_P2_F16', 631: 'V_INTERP_P2_F16_OPSEL'}
-      for k, v in vop3a_ops.items():
-        if k not in enums['VOP3AOp']: enums['VOP3AOp'][k] = v
+      formats['DPP'] = [('ENCODING', 8, 0, 0xfa, None), ('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None),
+        ('SRC0', 39, 32, None, 'Src'), ('DPP_CTRL', 48, 40, None, None), ('BOUND_CTRL', 51, 51, None, None), ('SRC0_NEG', 52, 52, None, None), ('SRC0_ABS', 53, 53, None, None),
+        ('SRC1_NEG', 54, 54, None, None), ('SRC1_ABS', 55, 55, None, None), ('BANK_MASK', 59, 56, None, None), ('ROW_MASK', 63, 60, None, None)]
 
   # Extract pseudocode for instructions
   all_text = '\n'.join(pdf.text(i) for i in range(instr_start, instr_end))

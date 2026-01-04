@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Test CDNA assembler/disassembler against LLVM test vectors.
-
-NOTE: CDNA (gfx908/gfx90a/gfx940/gfx942) instruction encodings differ from GFX9 (gfx900/Vega)
-in several ways, particularly for memory instructions. We use CDNA-specific test files (gfx90a/gfx942)
-for memory instructions to ensure correct bit-level compatibility.
-
-VOP1/VOP2/VOPC base format tests exclude SDWA/DPP variants which are tested separately.
-"""
+"""Test CDNA assembler/disassembler against LLVM test vectors."""
 import unittest, re, subprocess
 from tinygrad.helpers import fetch
 from extra.assembly.amd.autogen.cdna.ins import *
@@ -14,6 +7,27 @@ from extra.assembly.amd.asm import disasm
 from extra.assembly.amd.test.helpers import get_llvm_mc
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
+
+def parse_llvm_tests(text: str, mnemonic_filter: str = None, size_filter: int = None) -> list[tuple[str, bytes]]:
+  """Parse LLVM test format into (asm, expected_bytes) pairs."""
+  tests, lines = [], text.split('\n')
+  for i, line in enumerate(lines):
+    line = line.strip()
+    if not line or line.startswith(('//', '.', ';')): continue
+    asm_text = line.split('//')[0].strip()
+    if not asm_text or (mnemonic_filter and not asm_text.startswith(mnemonic_filter)): continue
+    for j in list(range(max(0, i - 3), i)) + list(range(i, min(i + 3, len(lines)))):
+      if m := re.search(r'(?:VI9|GFX9|CHECK)[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
+        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
+      elif m := re.search(r'CHECK[^:]*:\s*\[(0x[0-9a-fA-F,x\s]+)\]', lines[j]):
+        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
+      else: continue
+      try:
+        data = bytes.fromhex(hex_bytes)
+        if size_filter is None or len(data) == size_filter: tests.append((asm_text, data))
+      except ValueError: pass
+      break
+  return tests
 
 # Use gfx9 tests for compatible scalar/vector formats and gfx90a/gfx942 tests for CDNA-specific instructions
 # Format: (filename, format_class, op_enum, mcpu, mnemonic_filter, size_filter)
@@ -48,57 +62,6 @@ CDNA_TEST_FILES = {
   'dpp_vop1': ('gfx9_asm_vop1.s', DPP, VOP1Op, 'gfx940', None, None),
 }
 
-def parse_llvm_tests(text: str, mnemonic_filter: str = None, size_filter: int = None) -> list[tuple[str, bytes]]:
-  """Parse LLVM test format into (asm, expected_bytes) pairs.
-  
-  Args:
-    text: LLVM test file content
-    mnemonic_filter: Optional prefix filter (e.g. 'flat_', 'buffer_', 'global_', 'scratch_')
-    size_filter: Optional instruction size filter (4 for 32-bit, 8 for 64-bit)
-  """
-  tests, lines = [], text.split('\n')
-  for i, line in enumerate(lines):
-    line = line.strip()
-    if not line or line.startswith(('//', '.', ';')): continue
-    asm_text = line.split('//')[0].strip()
-    if not asm_text: continue
-    # Apply mnemonic filter if specified
-    if mnemonic_filter and not asm_text.startswith(mnemonic_filter): continue
-    # Look for encoding in lines BEFORE or AFTER the instruction (format varies between files)
-    hex_bytes = None
-    for j in list(range(max(0, i - 3), i)) + list(range(i + 1, min(i + 3, len(lines)))):
-      # Match various CHECK formats (VI9, GFX9, CHECK, etc.)
-      if m := re.search(r'(?:VI9|GFX9|CHECK)[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
-        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
-        break
-      if m := re.search(r'CHECK[^:]*:\s*\[(0x[0-9a-fA-F,x\s]+)\]', lines[j]):
-        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
-        break
-    if hex_bytes:
-      try:
-        data = bytes.fromhex(hex_bytes)
-        if size_filter and len(data) != size_filter: continue
-        tests.append((asm_text, data))
-      except ValueError: pass
-  return tests
-
-def compile_asm_batch(instrs: list[str], mcpu: str = 'gfx940') -> list[bytes]:
-  """Compile multiple instructions with a single llvm-mc call."""
-  if not instrs: return []
-  asm_text = ".text\n" + "\n".join(instrs) + "\n"
-  result = subprocess.run(
-    [get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-show-encoding'],
-    input=asm_text, capture_output=True, text=True, timeout=30)
-  if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
-  results = []
-  for line in result.stdout.split('\n'):
-    if 'encoding:' not in line: continue
-    enc = line.split('encoding:')[1].strip()
-    if enc.startswith('[') and enc.endswith(']'):
-      results.append(bytes.fromhex(enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')))
-  if len(results) != len(instrs): raise RuntimeError(f"expected {len(instrs)} encodings, got {len(results)}")
-  return results
-
 class TestLLVMCDNA(unittest.TestCase):
   """Test CDNA instruction format decode/encode roundtrip and disassembly."""
   tests: dict[str, list[tuple[str, bytes]]] = {}
@@ -113,137 +76,62 @@ class TestLLVMCDNA(unittest.TestCase):
         print(f"Warning: couldn't fetch {filename}: {e}")
         cls.tests[name] = []
 
+def _get_val(v): return v.val if hasattr(v, 'val') else v
+
+def _filter_and_decode(tests, fmt_cls, op_enum):
+  """Filter tests and decode instructions, yielding (asm_text, data, decoded, error)."""
+  fn, is_sdwa, is_dpp = fmt_cls.__name__, fmt_cls.__name__ == 'SDWA', fmt_cls.__name__ == 'DPP'
+  for asm_text, data in tests:
+    has_lit = False
+    # SDWA/DPP format tests: only accept matching 8-byte instructions
+    if is_sdwa:
+      if len(data) != 8 or data[0] != 0xf9: continue
+    elif is_dpp:
+      if len(data) != 8 or data[0] != 0xfa: continue
+    elif fmt_cls._size() == 4 and len(data) == 8:
+      if data[0] in (0xf9, 0xfa): continue  # Skip SDWA/DPP (tested separately)
+      has_lit = data[0] == 255 or (len(data) >= 2 and data[1] == 255 and fn in ('SOP2', 'SOPC'))
+      if fn == 'SOPK': has_lit = has_lit or ((int.from_bytes(data[:4], 'little') >> 23) & 0x1f) == 20
+      if fn == 'VOP2': has_lit = has_lit or ((int.from_bytes(data[:4], 'little') >> 25) & 0x3f) in (23, 24, 36, 37)
+      if not has_lit: continue
+    if len(data) > fmt_cls._size() + (4 if has_lit else 0): continue
+    try:
+      decoded = fmt_cls.from_bytes(data)
+      # For SDWA/DPP, opcode location depends on VOP1 vs VOP2
+      if is_sdwa or is_dpp:
+        vop2_op = _get_val(decoded._values.get('vop2_op', 0))
+        op_val = _get_val(decoded._values.get('vop_op', 0)) if vop2_op == 0x3f else vop2_op
+      else:
+        op_val = _get_val(decoded._values.get('op', 0))
+      try: op_enum(op_val)
+      except ValueError: continue
+      yield asm_text, data, decoded, None
+    except Exception as e:
+      yield asm_text, data, None, str(e)
+
 def _make_roundtrip_test(name):
   def test(self):
-    _, fmt_cls, op_enum, mcpu, _, _ = CDNA_TEST_FILES[name]
-    passed, failed, skipped, enum_missing = 0, 0, 0, 0
-    failures: list[str] = []
-    is_sdwa = fmt_cls.__name__ == 'SDWA'
-    is_dpp = fmt_cls.__name__ == 'DPP'
-
-    for asm_text, data in self.tests.get(name, []):
-      has_lit = False
-      # SDWA/DPP format tests: only accept matching 8-byte instructions
-      if is_sdwa:
-        if len(data) != 8 or data[0] != 0xf9: skipped += 1; continue
-      elif is_dpp:
-        if len(data) != 8 or data[0] != 0xfa: skipped += 1; continue
-      elif fmt_cls._size() == 4 and len(data) == 8:
-        # For base formats, skip SDWA/DPP (tested separately)
-        if data[0] == 0xf9 or data[0] == 0xfa: skipped += 1; continue
-        # Check for literal (src0=0xff or ssrc1=0xff for SOP2/SOPC)
-        has_lit = data[0] == 255 or (len(data) >= 2 and data[1] == 255 and fmt_cls.__name__ in ('SOP2', 'SOPC'))
-        if fmt_cls.__name__ == 'SOPK':
-          has_lit = has_lit or ((int.from_bytes(data[:4], 'little') >> 23) & 0x1f) == 20  # S_SETREG_IMM32_B32
-        if fmt_cls.__name__ == 'VOP2':
-          vop2_op = (int.from_bytes(data[:4], 'little') >> 25) & 0x3f
-          has_lit = has_lit or vop2_op in (23, 24, 36, 37)  # FMAMK/FMAAK/MADMK/MADAK always have literal
-        if not has_lit: skipped += 1; continue
-      expected_size = fmt_cls._size() + (4 if has_lit else 0)
-      if len(data) > expected_size: skipped += 1; continue
-      try:
-        decoded = fmt_cls.from_bytes(data)
-        # For SDWA/DPP, opcode location depends on VOP1 vs VOP2
-        if is_sdwa or is_dpp:
-          # VOP1 uses vop_op (bits 16:9), VOP2 uses vop2_op (bits 31:25)
-          # VOP1 encoding has bits[31:25]=0x3f (63), VOP2 has opcode there
-          vop2_op = decoded._values.get('vop2_op', 0)
-          vop2_op = vop2_op.val if hasattr(vop2_op, 'val') else vop2_op
-          if vop2_op == 0x3f:  # VOP1 encoding
-            op_val = decoded._values.get('vop_op', 0)
-            op_val = op_val.val if hasattr(op_val, 'val') else op_val
-          else:  # VOP2 encoding
-            op_val = vop2_op
-        else:
-          op_val = decoded._values.get('op', 0)
-          op_val = op_val.val if hasattr(op_val, 'val') else op_val
-        try:
-          op_enum(op_val)
-        except ValueError:
-          enum_missing += 1
-          continue
-        reencoded = decoded.to_bytes()[:len(data)]
-        if reencoded == data:
-          passed += 1
-        else:
-          failed += 1
-          failures.append(f"'{asm_text}': orig={data.hex()} reenc={reencoded.hex()}")
-      except Exception as e:
-        failed += 1
-        failures.append(f"'{asm_text}': {e}")
-
-    print(f"CDNA {name.upper()} roundtrip: {passed} passed, {failed} failed, {skipped} skipped, {enum_missing} missing")
+    _, fmt_cls, op_enum, _, _, _ = CDNA_TEST_FILES[name]
+    passed, failed, failures = 0, 0, []
+    for asm_text, data, decoded, error in _filter_and_decode(self.tests.get(name, []), fmt_cls, op_enum):
+      if error: failed += 1; failures.append(f"'{asm_text}': {error}"); continue
+      if decoded.to_bytes()[:len(data)] == data: passed += 1
+      else: failed += 1; failures.append(f"'{asm_text}': orig={data.hex()} reenc={decoded.to_bytes()[:len(data)].hex()}")
+    print(f"CDNA {name.upper()} roundtrip: {passed} passed, {failed} failed")
     if failures[:5]: print("  " + "\n  ".join(failures[:5]))
     self.assertEqual(failed, 0)
   return test
 
 def _make_disasm_test(name):
   def test(self):
-    _, fmt_cls, op_enum, mcpu, _, _ = CDNA_TEST_FILES[name]
-    passed, failed, skipped, enum_missing = 0, 0, 0, 0
-    failures: list[str] = []
-    is_sdwa = fmt_cls.__name__ == 'SDWA'
-    is_dpp = fmt_cls.__name__ == 'DPP'
-
-    for asm_text, data in self.tests.get(name, []):
-      has_lit = False
-      # SDWA/DPP format tests: only accept matching 8-byte instructions
-      if is_sdwa:
-        if len(data) != 8 or data[0] != 0xf9: skipped += 1; continue
-      elif is_dpp:
-        if len(data) != 8 or data[0] != 0xfa: skipped += 1; continue
-      elif fmt_cls._size() == 4 and len(data) == 8:
-        # For base formats, skip SDWA/DPP (tested separately)
-        if data[0] == 0xf9 or data[0] == 0xfa: skipped += 1; continue
-        # Check for literal (src0=0xff or ssrc1=0xff for SOP2/SOPC)
-        has_lit = data[0] == 255 or (len(data) >= 2 and data[1] == 255 and fmt_cls.__name__ in ('SOP2', 'SOPC'))
-        if fmt_cls.__name__ == 'SOPK':
-          has_lit = has_lit or ((int.from_bytes(data[:4], 'little') >> 23) & 0x1f) == 20  # S_SETREG_IMM32_B32
-        if fmt_cls.__name__ == 'VOP2':
-          vop2_op = (int.from_bytes(data[:4], 'little') >> 25) & 0x3f
-          has_lit = has_lit or vop2_op in (23, 24, 36, 37)  # FMAMK/FMAAK/MADMK/MADAK always have literal
-        if not has_lit: skipped += 1; continue
-      expected_size = fmt_cls._size() + (4 if has_lit else 0)
-      if len(data) > expected_size: skipped += 1; continue
-      try:
-        decoded = fmt_cls.from_bytes(data)
-        # For SDWA/DPP, opcode location depends on VOP1 vs VOP2
-        if is_sdwa or is_dpp:
-          # VOP1 uses vop_op (bits 16:9), VOP2 uses vop2_op (bits 31:25)
-          # VOP1 encoding has bits[31:25]=0x3f (63), VOP2 has opcode there
-          vop2_op = decoded._values.get('vop2_op', 0)
-          vop2_op = vop2_op.val if hasattr(vop2_op, 'val') else vop2_op
-          if vop2_op == 0x3f:  # VOP1 encoding
-            op_val = decoded._values.get('vop_op', 0)
-            op_val = op_val.val if hasattr(op_val, 'val') else op_val
-          else:  # VOP2 encoding
-            op_val = vop2_op
-        else:
-          op_val = decoded._values.get('op', 0)
-          op_val = op_val.val if hasattr(op_val, 'val') else op_val
-        try:
-          op_enum(op_val)
-        except ValueError:
-          enum_missing += 1
-          continue
-        # Check roundtrip first
-        reencoded = decoded.to_bytes()[:len(data)]
-        if reencoded != data:
-          failed += 1
-          failures.append(f"'{asm_text}': roundtrip failed orig={data.hex()} reenc={reencoded.hex()}")
-          continue
-        # Try to disassemble - just check it doesn't crash and produces valid output
-        disasm_text = disasm(decoded)
-        if not disasm_text or not disasm_text.strip():
-          failed += 1
-          failures.append(f"'{asm_text}': empty disassembly")
-          continue
-        passed += 1
-      except Exception as e:
-        failed += 1
-        failures.append(f"'{asm_text}': {e}")
-
-    print(f"CDNA {name.upper()} disasm: {passed} passed, {failed} failed, {skipped} skipped, {enum_missing} missing")
+    _, fmt_cls, op_enum, _, _, _ = CDNA_TEST_FILES[name]
+    passed, failed, failures = 0, 0, []
+    for asm_text, data, decoded, error in _filter_and_decode(self.tests.get(name, []), fmt_cls, op_enum):
+      if error: failed += 1; failures.append(f"'{asm_text}': {error}"); continue
+      if decoded.to_bytes()[:len(data)] != data: failed += 1; failures.append(f"'{asm_text}': roundtrip failed"); continue
+      if not (disasm_text := disasm(decoded)) or not disasm_text.strip(): failed += 1; failures.append(f"'{asm_text}': empty disassembly"); continue
+      passed += 1
+    print(f"CDNA {name.upper()} disasm: {passed} passed, {failed} failed")
     if failures[:5]: print("  " + "\n  ".join(failures[:5]))
     self.assertEqual(failed, 0)
   return test
