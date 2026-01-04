@@ -1,5 +1,18 @@
 # RDNA3 128x128 tiled GEMM kernel - DSL version
 # Computes C = A @ B for 4096x4096 float32 matrices using 128x128 tiles
+#
+# Architecture: RDNA3 (gfx1100)
+# Tile size: 128x128 (each workgroup computes one tile of C)
+# Workgroup: 128 threads (arranged as 32x4 for coalesced memory access)
+# Inner loop: 8 iterations per K-block, processing 8 columns of A and 8 rows of B
+#
+# Register layout:
+#   v[2-129,131-133,214]: 128 accumulator registers for C tile
+#   v[184-199]: A tile data (8 elements loaded from LDS)
+#   v[200-215]: B tile data (8 elements loaded from LDS)
+#   s[8:9], s[10:11]: Base pointers for A and B matrices
+#   s[0:1]: Base pointer for C matrix
+
 from extra.assembly.amd.dsl import s, v, VCC_LO, RawImm, EXEC_LO
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.autogen.rdna3.enum import VOP1Op
@@ -57,14 +70,14 @@ FMAC_PATTERN = [
   (129,126,198,212,199,213),(127,124,198,213,199,212),(133,214,198,184,199,185),(131,128,199,184,198,185)]
 
 # Global memory prefetch: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
-PREFETCH_LOADS = [
-  (171,172,203,32,34), (173,174,203,36,38), (175,176,215,40,42),
-  (177,178,215,44,46), (179,180,215,48,50), (181,182,215,52,54)]
+# Pattern: vdst pairs start at 171, addr=203 for first 2, then 215, saddr starts at 32
+PREFETCH_LOADS = [(171+2*i, 172+2*i, 203 if i < 2 else 215, 32+4*i, 34+4*i) for i in range(6)]
 
 # LDS store pairs for prefetched data: (addr_vreg, data_vreg)
-LDS_STORE_PAIRS = [
-  (155,167),(141,175),(158,168),(142,176),(159,169),(143,177),(160,170),(144,178),
-  (161,171),(145,179),(162,172),(146,180),(163,173),(147,181),(164,174),(148,182)]
+# Interleaves two address sequences with two data sequences
+_lds_addr_a, _lds_addr_b = [155, 158, 159, 160, 161, 162, 163, 164], [141, 142, 143, 144, 145, 146, 147, 148]
+LDS_STORE_PAIRS = [(a, 167+i) for i, a in enumerate(_lds_addr_a)] + [(b, 175+i) for i, b in enumerate(_lds_addr_b)]
+LDS_STORE_PAIRS = [x for pair in zip(LDS_STORE_PAIRS[:8], LDS_STORE_PAIRS[8:]) for x in pair]  # interleave
 
 # Initial tile prefetch and loads: (vdst, addr_lo) pairs
 # [:6]=B cols 0-5, [6:11]=A rows 0-4, [11:]=2 B cols + 3 A rows
@@ -354,29 +367,39 @@ def build_kernel(arch='gfx1100'):
   # =========================================================================
   # LDS address computation
   # =========================================================================
+  # Computes LDS read/write addresses for 8 tile rows
+  # lds_rows = [10,11,14,15,16,17,18] hold row offsets (v[22] | 16*i for i=1..7)
+  # lds_temps = [19,20,21,32,33,34,35] hold masked intermediate values
 
+  lds_rows = [10, 11, 14, 15, 16, 17, 18]
+
+  # Initialize: v[9] = s[12] + v[22], v[lds_rows[i]] = v[22] | 16*(i+1)
   k.emit(v_add_nc_u32_e32(v[9], s[12], v[22]))
-  for i, dst in enumerate([10, 11, 14, 15, 16, 17, 18]):
+  for i, dst in enumerate(lds_rows):
     k.emit(v_or_b32_e32(v[dst], 16 * (i + 1), v[22]))
 
+  # Extract workgroup column offset
   k.emit(s_bfe_i32(s[7], s[14], 0x10018))
   k.emit(v_and_b32_e32(v[9], 0x3fffff80, v[9]))
   k.emit(s_lshr_b32(s[7], s[7], 25))
   k.emit(v_add_nc_u32_e32(v[19], s[12], v[10]))
   k.emit(v_add_nc_u32_e32(v[8], s[7], v[1]))
 
+  # Compute temps: v[dst] = s[12] + v[src] for remaining rows
   for dst, src in [(20,11), (21,14), (32,15), (33,16), (34,17), (35,18)]:
     k.emit(v_add_nc_u32_e32(v[dst], s[12], v[src]))
 
   k.emit(v_and_b32_e32(v[8], 0x3fffff80, v[8]))
   k.emit(v_sub_nc_u32_e32(v[9], v[22], v[9]))
 
+  # Mask and shuffle temps (shifts values from 32-35 into 22,32,33,34)
   for dst, src in [(19,19), (20,20), (21,21), (22,32), (32,33), (33,34), (34,35)]:
     k.emit(v_and_b32_e32(v[dst], 0x3fffff80, v[src]))
 
   k.emit(v_sub_nc_u32_e32(v[8], v[1], v[8]))
   k.emit(v_lshlrev_b32_e32(v[9], 2, v[9]))
 
+  # Compute final row offsets: lds_rows[i] -= temps[i]
   for a, b in [(10,19), (11,20), (14,21), (15,22), (16,32), (17,33), (18,34)]:
     k.emit(v_sub_nc_u32_e32(v[a], v[a], v[b]))
 
@@ -384,12 +407,14 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_lshlrev_b32_e32(v[8], 2, v[8]))
   k.emit(v_mad_u32_u24(v[141], 0x210, v[118], v[9]))
 
+  # Shift chain: v[dst] = v[src] << 2 (propagates through lds_rows)
   for dst, src in [(9,10), (10,11), (11,14), (14,15), (15,16), (16,17), (17,18)]:
     k.emit(v_lshlrev_b32_e32(v[dst], 2, v[src]))
 
   k.emit(v_lshlrev_b32_e32(v[136], 2, v[2]))
   k.emit(v_add_nc_u32_e32(v[8], 0x80, v[8]))
 
+  # Final LDS addresses: v[141..148] = 0x210 * v[118] + shifted_row_offset
   for dst, src in [(142,9), (143,10), (144,11), (145,14), (146,15), (147,16), (148,17)]:
     k.emit(v_mad_u32_u24(v[dst], 0x210, v[118], v[src]))
 
@@ -425,6 +450,7 @@ def build_kernel(arch='gfx1100'):
   # =========================================================================
   # ALTERNATE INIT PATH (LBB0_3/4)
   # =========================================================================
+  # Handles edge cases when K dimension requires special initialization
 
   k.label('LBB0_3')
   k.emit(s_mov_b32(s[7], -1))
@@ -437,7 +463,8 @@ def build_kernel(arch='gfx1100'):
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_ADD_NC_U32,
               vdstx=v[124], vdsty=v[3], srcx0=0, vsrcx1=v[0], srcy0=s[7], vsrcy1=v[1]))
 
-  for vreg, src in [(149,119), (150,125), (151,130), (152,134), (153,137), (154,138), (156,139), (157,140)]:
+  # Sign-extend row offsets for 64-bit addressing
+  for vreg, src in zip([149, 150, 151, 152, 153, 154, 156, 157], row_regs):
     k.emit(v_ashrrev_i32_e32(v[vreg], 31, v[src]))
 
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_AND_B32,
@@ -450,15 +477,15 @@ def build_kernel(arch='gfx1100'):
               vdstx=v[112], vdsty=v[3], srcx0=0, vsrcx1=v[0], srcy0=2, vsrcy1=v[0]))
   k.vopd_mov2(113, 96, 0, 0)
 
+  # LDS A-tile addresses: v[158..164] = (i+1)<<9 + v[155]
   for i, dst in enumerate([158, 159, 160, 161, 162, 163, 164]):
     k.emit(v_lshl_add_u32(v[dst], i + 1, 9, v[155]))
 
   k.emit(v_and_or_b32(v[165], 0x180, v[3], v[2]))
 
-  # Zero accumulators (alternate path)
+  # Zero accumulators (alternate path uses immediate 0)
   for vx, vy in ACC_ZERO_PAIRS_ALT:
     k.vopd_mov2(vx, vy, 0, 0)
-
   for vreg in [214, 5, 3]:
     k.emit(v_mov_b32_e32(v[vreg], 0))
 
@@ -534,16 +561,16 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[0], s[3], v[0]))
   k.emit(v_or_b32_e32(v[119], v[0], v[150]))
 
-  # Row multipliers for rows 0-3
-  k.emit(v_mul_lo_u32(v[144], v[119], s[4]))
-  for i in range(3):
-    k.emit(v_add_nc_u32_e32(v[145 + i], s[4], v[144 + i]))
-
-  # Row multipliers for rows 16-19
-  k.emit(v_or_b32_e32(v[1], 16, v[119]))
-  k.emit(v_mul_lo_u32(v[148], v[1], s[4]))
-  for i in range(3):
-    k.emit(v_add_nc_u32_e32(v[149 + i], s[4], v[148 + i]))
+  # Row multipliers: compute row*N for rows 0-3 and 16-19
+  # v[144..147] = (row+i)*N for i=0..3, v[148..151] = (row+16+i)*N for i=0..3
+  for base_reg, row_offset in [(144, 0), (148, 16)]:
+    if row_offset:
+      k.emit(v_or_b32_e32(v[1], row_offset, v[119]))
+      k.emit(v_mul_lo_u32(v[base_reg], v[1], s[4]))
+    else:
+      k.emit(v_mul_lo_u32(v[base_reg], v[119], s[4]))
+    for i in range(3):
+      k.emit(v_add_nc_u32_e32(v[base_reg + 1 + i], s[4], v[base_reg + i]))
 
   k.emit(v_mov_b32_e32(v[152], 0))
   k.emit(s_lshl_b32(s[13], s[4], 2))  # row stride
