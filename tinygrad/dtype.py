@@ -140,7 +140,11 @@ class dtypes:
     if isinstance(val, InvalidType): return val
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan
-    return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
+    if dtypes.is_int(dtype): return int(val)
+    if dtypes.is_float(dtype): return float(val)
+    if dtype == dtypes.bool: return bool(val)
+    # For unknown types (e.g. wide integers u65, b65), preserve as int
+    return int(val) if isinstance(val, (int, float)) else val
   @staticmethod
   @functools.cache
   def min(dtype:DType):

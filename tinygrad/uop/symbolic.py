@@ -17,11 +17,28 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   return None
 
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
-  if (from_fmt:=c.dtype.scalar().fmt) is None or (to_fmt:=root.dtype.scalar().fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
-  trunc = truncate.get(c.dtype.scalar(), lambda x: x)
-  def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, trunc(v)))[0]
-  return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
+  from_scalar, to_scalar = c.dtype.scalar(), root.dtype.scalar()
+  if from_scalar.fmt is None or to_scalar.fmt is None: return None
+  trunc = truncate.get(from_scalar, lambda x: x)
+  int_fmts = {1: 'B', 2: 'H', 4: 'I', 8: 'Q'}  # unsigned int formats by size
+  def convert(v:ConstType):
+    int_fmt = int_fmts.get(from_scalar.itemsize)
+    if int_fmt is None: return None
+    # Get the integer bit representation
+    if isinstance(v, float):
+      int_val = struct.unpack('<'+int_fmt, struct.pack('<'+from_scalar.fmt, v))[0]
+    else:
+      int_val = int(trunc(v)) & ((1 << (from_scalar.itemsize * 8)) - 1)
+    # Convert to output type
+    result = struct.unpack('<'+to_scalar.fmt, struct.pack('<'+int_fmt, int_val))[0]
+    # Don't fold if result is NaN with non-canonical bits (as_const normalizes all NaN to math.nan)
+    if isinstance(result, float) and math.isnan(result):
+      canonical_nan_bits = struct.unpack('<'+int_fmt, struct.pack('<'+to_scalar.fmt, math.nan))[0]
+      if int_val != canonical_nan_bits: return None  # would be corrupted by as_const
+    return result
+  result = convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg))
+  return None if result is None or (isinstance(result, tuple) and None in result) else root.const_like(result)
 
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
@@ -99,6 +116,9 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.arg)),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
   (UPat(Ops.BITCAST, name="root", src=(UPat.cvar("c"),)), fold_bitcast),
+  # BITCAST(BITCAST(x)) -> x when outer dtype matches x's dtype (preserves NaN bits)
+  (UPat(Ops.BITCAST, name="outer", src=(UPat(Ops.BITCAST, src=(UPat.var("x"),)),)),
+   lambda outer, x: x if outer.dtype == x.dtype and outer.dtype.itemsize == outer.src[0].dtype.itemsize else None),
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_lossless_cast(b.dtype, a.dtype) else None),
   # ** pow **
