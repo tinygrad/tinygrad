@@ -290,7 +290,7 @@ def _disasm_flat(inst: FLAT) -> str:
   seg = ['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'
   instr = f"{seg}_{name.split('_', 1)[1] if '_' in name else name}"
   off_val = inst.offset if seg == 'flat' else (inst.offset if inst.offset < 4096 else inst.offset - 8192)
-  w = inst.dst_regs() * (2 if 'cmpswap' in name else 1)
+  w = inst.dst_regs() * (2 if '_x2' in name else 1) * (2 if 'cmpswap' in name else 1)
   off_s = f" offset:{off_val}" if off_val else ""  # Omit offset:0
   if cdna: mods = f"{off_s}{' glc' if inst.sc0 else ''}{' slc' if inst.nt else ''}"  # GFX9: sc0->glc, nt->slc
   else: mods = f"{off_s}{' glc' if inst.glc else ''}{' slc' if inst.slc else ''}{' dlc' if inst.dlc else ''}"
@@ -323,7 +323,7 @@ def _disasm_ds(inst: DS) -> str:
   rp = 'a' if acc else 'v'  # register prefix for single regs
   gds = " gds" if inst.gds else ""
   off = f" offset:{inst.offset0 | (inst.offset1 << 8)}" if inst.offset0 or inst.offset1 else ""
-  off2 = f" offset0:{inst.offset0} offset1:{inst.offset1}" if inst.offset0 or inst.offset1 else ""
+  off2 = (" offset0:" + str(inst.offset0) if inst.offset0 else "") + (" offset1:" + str(inst.offset1) if inst.offset1 else "")
   w = inst.dst_regs()
   d0, d1, dst, addr = reg_fn(inst.data0, w), reg_fn(inst.data1, w), reg_fn(inst.vdst, w), f"v{inst.addr}"
 
@@ -337,6 +337,8 @@ def _disasm_ds(inst: DS) -> str:
     if 'load' in name: return f"{name} {reg_fn(inst.vdst, w*2)}, {addr}{off2}{gds}"
     if 'store' in name and 'xchg' not in name: return f"{name} {addr}, {d0}, {d1}{off2}{gds}"
     return f"{name} {reg_fn(inst.vdst, w*2)}, {addr}, {d0}, {d1}{off2}{gds}"
+  if 'write2' in name: return f"{name} {addr}, {d0}, {d1}{off2}{gds}"
+  if 'read2' in name: return f"{name} {reg_fn(inst.vdst, w*2)}, {addr}{off2}{gds}"
   if 'load' in name: return f"{name} {rp}{inst.vdst}{off}{gds}" if 'addtid' in name else f"{name} {dst}, {addr}{off}{gds}"
   if 'store' in name and not _has(name, 'cmp', 'xchg'):
     return f"{name} {rp}{inst.data0}{off}{gds}" if 'addtid' in name else f"{name} {addr}, {d0}{off}{gds}"
@@ -452,9 +454,20 @@ def _disasm_buf(inst: MUBUF | MTBUF) -> str:
   if hasattr(inst, 'tfe') and inst.tfe: w += 1
   vaddr = _vreg(inst.vaddr, 2) if inst.offen and inst.idxen else f"v{inst.vaddr}" if inst.offen or inst.idxen else "off"
   srsrc = _sreg_or_ttmp(inst.srsrc*4, 4)
-  if cdna: mods = ([f"format:{inst.format}"] if isinstance(inst, MTBUF) else []) + [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.offset,f"offset:{inst.offset}"),(inst.sc0,"sc0"),(inst.nt,"nt"),(inst.sc1,"sc1")] if c]
-  else: mods = ([f"format:{inst.format}"] if isinstance(inst, MTBUF) else []) + [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.offset,f"offset:{inst.offset}"),(inst.glc,"glc"),(inst.dlc,"dlc"),(inst.slc,"slc"),(inst.tfe,"tfe")] if c]
-  return f"{name} {reg_fn(inst.vdata, w)}, {vaddr}, {srsrc}, {decode_src(inst.soffset)}{' ' + ' '.join(mods) if mods else ''}"
+  is_mtbuf = isinstance(inst, MTBUF) or isinstance(inst, C_MTBUF)
+  if is_mtbuf:
+    if acc:  # GFX90a style: show dfmt/nfmt
+      dfmt, nfmt = inst.format & 0xf, (inst.format >> 4) & 0x7
+      fmt_s = f"  dfmt:{dfmt}, nfmt:{nfmt},"  # double space before dfmt per LLVM format
+    elif not cdna:  # RDNA style: show format
+      fmt_s = f" format:{inst.format}" if inst.format else ""
+    else:  # CDNA without acc: no format shown
+      fmt_s = ""
+  else:
+    fmt_s = ""
+  if cdna: mods = [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.offset,f"offset:{inst.offset}"),(inst.sc0,"glc"),(inst.nt,"slc"),(inst.sc1,"sc1")] if c]
+  else: mods = [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.offset,f"offset:{inst.offset}"),(inst.glc,"glc"),(inst.dlc,"dlc"),(inst.slc,"slc"),(inst.tfe,"tfe")] if c]
+  return f"{name} {reg_fn(inst.vdata, w)}, {vaddr}, {srsrc},{fmt_s} {decode_src(inst.soffset, cdna)}{' ' + ' '.join(mods) if mods else ''}"
 
 def _mimg_vaddr_width(name: str, dim: int, a16: bool) -> int:
   """Calculate vaddr register count for MIMG sample/gather operations."""
@@ -844,8 +857,27 @@ try:
 
   # CDNA VOP2 aliases: new opcode name -> old name expected by LLVM tests
   _CDNA_VOP3_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32'}
-  # GFX9-specific VOP3A opcodes not in CDNA3/4 enum (different instruction sets use same opcodes)
-  _GFX9_VOP3A_NAMES = {448: 'v_mad_legacy_f32', 449: 'v_mad_f32'}
+  # GFX9 (gfx900/Vega) VOP3A opcodes - these have different meanings than CDNA (gfx90a+)
+  # Used as fallback when inst.op_name is empty (opcode not in CDNA enum)
+  _GFX9_VOP3A_NAMES = {
+    448: 'v_mad_legacy_f32', 449: 'v_mad_f32', 450: 'v_mad_i32_i24', 451: 'v_mad_u32_u24',
+    452: 'v_cubeid_f32', 453: 'v_cubesc_f32', 454: 'v_cubetc_f32', 455: 'v_cubema_f32',
+    456: 'v_bfe_u32', 457: 'v_bfe_i32', 458: 'v_bfi_b32', 459: 'v_fma_f32', 460: 'v_fma_f64',
+    461: 'v_lerp_u8', 462: 'v_alignbit_b32', 463: 'v_alignbyte_b32',
+    464: 'v_min3_f32', 465: 'v_min3_i32', 466: 'v_min3_u32', 467: 'v_max3_f32', 468: 'v_max3_i32', 469: 'v_max3_u32',
+    470: 'v_med3_f32', 471: 'v_med3_i32', 472: 'v_med3_u32',
+    473: 'v_sad_u8', 474: 'v_sad_hi_u8', 475: 'v_sad_u16', 476: 'v_sad_u32', 477: 'v_cvt_pk_u8_f32',
+    478: 'v_div_fixup_f32', 479: 'v_div_fixup_f64', 482: 'v_div_fmas_f32', 483: 'v_div_fmas_f64',
+    484: 'v_msad_u8', 485: 'v_qsad_pk_u16_u8', 486: 'v_mqsad_pk_u16_u8', 487: 'v_mqsad_u32_u8',
+    490: 'v_mad_legacy_f16', 491: 'v_mad_legacy_u16', 492: 'v_mad_legacy_i16', 493: 'v_perm_b32',
+    494: 'v_fma_legacy_f16', 495: 'v_div_fixup_legacy_f16', 496: 'v_cvt_pkaccum_u8_f32',
+    497: 'v_mad_u32_u16', 498: 'v_mad_i32_i16', 499: 'v_xad_u32',
+    500: 'v_min3_f16', 501: 'v_min3_i16', 502: 'v_min3_u16', 503: 'v_max3_f16', 504: 'v_max3_i16', 505: 'v_max3_u16',
+    506: 'v_med3_f16', 507: 'v_med3_i16', 508: 'v_med3_u16',
+    509: 'v_lshl_add_u32', 510: 'v_add_lshl_u32', 511: 'v_add3_u32',
+    624: 'v_interp_p1_f32', 625: 'v_interp_p2_f32', 626: 'v_interp_mov_f32',
+    628: 'v_interp_p1ll_f16', 629: 'v_interp_p1lv_f16', 630: 'v_interp_p2_legacy_f16', 631: 'v_interp_p2_f16',
+  }
 
   def _disasm_vop3a(inst) -> str:
     op_val = inst._values.get('op', 0)  # get raw opcode value, not enum value
@@ -863,8 +895,10 @@ try:
       s2 = ""
       dst = f"v{inst.vdst}"
     else:
-      s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.src_regs(0)), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.src_regs(1)), _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, inst.src_regs(2))
-      dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}"
+      # Use spec_regs for register widths (handles GFX9 fallback names correctly)
+      dregs, r0, r1, r2 = spec_regs(name) if name else (inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2))
+      s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, r0), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, r1), _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, r2)
+      dst = _vreg(inst.vdst, dregs) if dregs > 1 else f"v{inst.vdst}"
     # Handle GFX9 fallback names (true VOP3 instructions not in CDNA enum)
     if op_val in _GFX9_VOP3A_NAMES:
       return f"{name} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name} {dst}, {s0}, {s1}{cl}{om}"
@@ -885,10 +919,18 @@ try:
     suf = "_e64" if op_val < 512 else ""
     return f"{name}{suf} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {s0}, {s1}{cl}{om}"
 
+  # GFX9-specific VOP3B opcodes not in CDNA enum
+  _GFX9_VOP3B_NAMES = {480: 'v_div_scale_f32', 481: 'v_div_scale_f64', 488: 'v_mad_u64_u32', 489: 'v_mad_i64_i32'}
+
   def _disasm_vop3b(inst) -> str:
-    name, n = inst.op_name.lower(), inst.num_srcs()
-    s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1), _cdna_src(inst, inst.src1, inst.neg&2), _cdna_src(inst, inst.src2, inst.neg&4)
-    dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}"
+    op_val = inst._values.get('op', 0)
+    if hasattr(op_val, 'value'): op_val = op_val.value
+    name = inst.op_name.lower() or _GFX9_VOP3B_NAMES.get(op_val, f'vop3b_op_{op_val}')
+    from extra.assembly.amd.dsl import spec_num_srcs, spec_regs
+    n = spec_num_srcs(name) if name else inst.num_srcs()
+    dregs, r0, r1, r2 = spec_regs(name) if name else (inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2))
+    s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, n=r0), _cdna_src(inst, inst.src1, inst.neg&2, n=r1), _cdna_src(inst, inst.src2, inst.neg&4, n=r2)
+    dst = _vreg(inst.vdst, dregs) if dregs > 1 else f"v{inst.vdst}"
     sdst = _fmt_sdst(inst.sdst, 2, cdna=True)  # VOP3B sdst is always 64-bit SGPR pair
     cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
     # Carry ops need special handling
@@ -896,7 +938,7 @@ try:
       s2 = _fmt_src(inst.src2, 2, cdna=True)  # src2 is carry-in (64-bit SGPR pair)
       return f"{name}_e64 {dst}, {sdst}, {s0}, {s1}, {s2}{cl}{om}"
     suf = "_e64" if 'co_' in name else ""
-    return f"{name}{suf} {dst}, {sdst}, {s0}, {s1}{cl}{om}"
+    return f"{name}{suf} {dst}, {sdst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {sdst}, {s0}, {s1}{cl}{om}"
 
   def _disasm_cdna_vop3p(inst) -> str:
     name, n, is_mfma = inst.op_name.lower(), inst.num_srcs(), 'mfma' in inst.op_name.lower() or 'smfmac' in inst.op_name.lower()
