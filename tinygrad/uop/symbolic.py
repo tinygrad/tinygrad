@@ -2,7 +2,7 @@
 import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
-from tinygrad.dtype import ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
+from tinygrad.dtype import ConstType, dtypes, PtrDType, can_lossless_cast, Invalid, truncate
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
 from tinygrad.uop.decompositions import xpow
 from tinygrad.uop.divandmod import div_and_mod_symbolic
@@ -19,7 +19,8 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if (from_fmt:=c.dtype.scalar().fmt) is None or (to_fmt:=root.dtype.scalar().fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
-  def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
+  trunc = truncate.get(c.dtype.scalar(), lambda x: x)
+  def convert(v:ConstType): return struct.unpack(to_fmt, struct.pack(from_fmt, trunc(v)))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")

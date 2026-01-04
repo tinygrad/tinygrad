@@ -4,18 +4,18 @@ import re
 from dataclasses import dataclass
 from enum import Enum, auto
 
-class DType(Enum):
+class QDType(Enum):
   F64=auto(); F32=auto(); F16=auto(); BF16=auto(); U64=auto(); U32=auto(); U24=auto(); U16=auto(); U8=auto()
   I64=auto(); I32=auto(); I24=auto(); I16=auto(); I8=auto(); B128=auto(); B64=auto(); B32=auto(); B16=auto()
   B8=auto(); U1=auto(); I1=auto(); U3=auto(); U4=auto(); I4=auto(); U=U32; I=I32; F=F32
-DTYPES = {d.name.lower(): d for d in DType}
+DTYPES = {d.name.lower(): d for d in QDType}
 
 @dataclass(frozen=True)
-class Const: value: int|float; dtype: DType = DType.I32
+class Const: value: int|float; dtype: QDType = QDType.I32
 @dataclass(frozen=True)
 class Var: name: str
 @dataclass(frozen=True)
-class Typed: expr: Expr; dtype: DType
+class Typed: expr: Expr; dtype: QDType
 @dataclass(frozen=True)
 class Slice: expr: Expr; hi: Expr; lo: Expr
 @dataclass(frozen=True)
@@ -89,9 +89,9 @@ def expr(s: str) -> Expr:
   if s[0] == '{' and s[-1] == '}': return Pack(tuple(expr(a) for a in _split(s[1:-1])))
   if m := re.match(r"^(\d+)'([IUFB])\(", s):
     if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1: return Cast(int(m[1]), m[2], expr(s[m.end():e]))
-  if m := re.match(r"^(\d+)'(-?\d+)([IUFB])?$", s): return Const(int(m[2]), DTYPES.get(f"{m[3]or'i'}{m[1]}".lower(), DType.I32))
-  if m := re.match(r"^(\d+)'(-?[\d.]+)$", s): return Const(float(m[2]), DTYPES.get(f"f{m[1]}", DType.F32))
-  if m := re.match(r"^(\d+)'(0x[0-9a-fA-F]+)$", s): return Const(int(m[2], 16), DTYPES.get(f"u{m[1]}", DType.U32))
+  if m := re.match(r"^(\d+)'(-?\d+)([IUFB])?$", s): return Const(int(m[2]), DTYPES.get(f"{m[3]or'i'}{m[1]}".lower(), QDType.I32))
+  if m := re.match(r"^(\d+)'(-?[\d.]+)$", s): return Const(float(m[2]), DTYPES.get(f"f{m[1]}", QDType.F32))
+  if m := re.match(r"^(\d+)'(0x[0-9a-fA-F]+)$", s): return Const(int(m[2], 16), DTYPES.get(f"u{m[1]}", QDType.U32))
   if m := re.match(r"^([A-Za-z_]\w*)\(", s):
     if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1:
       a = _split(s[m.end():e]); return Call(m[1], tuple(expr(x) for x in a) if a != [''] else ())
@@ -139,9 +139,9 @@ def expr(s: str) -> Expr:
     if len(p) == 2 and all(re.match(r'^[A-Za-z_]\w*$', x.strip()) for x in p): return Binary(':', expr(p[0]), expr(p[1]))
   if re.match(r'^[A-Za-z_][\w.]*$', s): return Var(s)
   try:
-    if s[:2].lower() == '0x': return Const(int(re.sub(r'[UuLl]+$', '', s), 16), DType.U32)
+    if s[:2].lower() == '0x': return Const(int(re.sub(r'[UuLl]+$', '', s), 16), QDType.U32)
     c = re.sub(r'[FfLlUu]+$', '', s)
-    return Const(float(c), DType.F32) if '.' in c or 'e' in c.lower() else Const(int(re.sub(r'[UuLl]+$', '', s)), DType.I32)
+    return Const(float(c), QDType.F32) if '.' in c or 'e' in c.lower() else Const(int(re.sub(r'[UuLl]+$', '', s)), QDType.I32)
   except ValueError: pass
   raise ValueError(f"Cannot parse expression: {s}")
 
@@ -201,7 +201,7 @@ if __name__ == "__main__":
           def pr(n, d=0):
             p = "  "*d
             match n:
-              case Const(v, t): return f"{v}" if t == DType.I32 else f"{v}:{t.name}"
+              case Const(v, t): return f"{v}" if t == QDType.I32 else f"{v}:{t.name}"
               case Var(x): return x
               case Typed(e, t): return f"{pr(e)}.{t.name}"
               case Slice(e,h,l): return f"{pr(e)}[{pr(h)}:{pr(l)}]"
