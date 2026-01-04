@@ -74,14 +74,14 @@ FMAC_PATTERN = [
 PREFETCH_LOADS = [(171+2*i, 172+2*i, 203 if i < 2 else 215, 32+4*i, 34+4*i) for i in range(6)]
 
 # LDS store pairs for prefetched data: (addr_vreg, data_vreg)
-# Interleaves two address sequences with two data sequences
-_lds_addr_a, _lds_addr_b = [155, 158, 159, 160, 161, 162, 163, 164], [141, 142, 143, 144, 145, 146, 147, 148]
-LDS_STORE_PAIRS = [(a, 167+i) for i, a in enumerate(_lds_addr_a)] + [(b, 175+i) for i, b in enumerate(_lds_addr_b)]
-LDS_STORE_PAIRS = [x for pair in zip(LDS_STORE_PAIRS[:8], LDS_STORE_PAIRS[8:]) for x in pair]  # interleave
+# Interleaves A stores (addr v[155,158-164], data v[167-174]) with B stores (addr v[141-148], data v[175-182])
+_lds_addr_a, _lds_addr_b = [155] + list(range(158, 165)), list(range(141, 149))
+LDS_STORE_PAIRS = [x for pair in zip([(a, 167+i) for i, a in enumerate(_lds_addr_a)],
+                                      [(b, 175+i) for i, b in enumerate(_lds_addr_b)]) for x in pair]
 
 # Initial tile prefetch and loads: (vdst, addr_lo) pairs
 # [:6]=B cols 0-5, [6:11]=A rows 0-4, [11:]=2 B cols + 3 A rows
-INIT_PREFETCH = [(167,24),(168,26),(169,28),(170,30)]
+INIT_PREFETCH = [(167+i, 24+2*i) for i in range(4)]
 INIT_TILE_LOADS = [(23,5),(24,9),(25,7),(26,2),(27,11),(28,13),(29,6),(30,8),(31,10),(12,12),(13,14),(3,2),(4,4),(5,8),(6,6),(7,10)]
 
 # Epilogue stores: (col_offset, row_index, data_base_reg, [src0, src1, src2, src3])
@@ -152,11 +152,12 @@ class Kernel:
 
   def lds_load_ab_tiles(self):
     """Load A and B tiles from LDS into registers."""
-    for vdst, offset in [(186,0), (190,8), (194,64), (198,72)]:
-      self.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[183], offset0=offset, offset1=0))
-    for vdst, offset, offset1 in [(184,0,0), (188,8,0), (192,128,0), (196,136,0),
-                                   (200,0,1), (204,8,1), (208,128,1), (212,136,1)]:
-      self.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[202], offset0=offset, offset1=offset1))
+    # A tile: 4 x 64-bit loads from v[183], storing to v[186,190,194,198]
+    for i, vdst in enumerate([186, 190, 194, 198]):
+      self.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[183], offset0=(i%2)*8 + (i//2)*64, offset1=0))
+    # B tile: 8 x 64-bit loads from v[202], storing to v[184,188,192,196,200,204,208,212]
+    for i, vdst in enumerate([184, 188, 192, 196, 200, 204, 208, 212]):
+      self.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[202], offset0=(i%2)*8 + (i//2 % 2)*128, offset1=i//4))
 
   def main_loop_iter(self, prefetch_idx):
     """One iteration of the main GEMM loop."""
@@ -192,41 +193,44 @@ class Kernel:
       self.emit(global_store_b128(addr=v[0:1], data=v[data_base:data_base+3], saddr=RawImm(124)))
 
   def to_asm(self):
+    import re
+    # Header
     lines = ['\t.text', f'\t.amdgcn_target "amdgcn-amd-amdhsa--{self.arch}"',
              '\t.protected\tkernel', '\t.globl\tkernel', '\t.p2align\t8',
              '\t.type\tkernel,@function', 'kernel:']
+    # Instructions with labels
     label_at = {pos: name for name, pos in self.labels.items()}
     for i, inst in enumerate(self.instructions):
       if i in label_at:
         lines.append(f'.{label_at[i]}:')
       asm = inst.disasm()
       if i in self.branch_targets:
-        import re
         asm = re.sub(r'(s_cbranch_\w+|s_branch)\s+\S+', rf'\1 .{self.branch_targets[i]}', asm)
       lines.append('\t' + asm)
-    lines.extend([
-      '\t.section\t.rodata,"a",@progbits', '\t.p2align\t6, 0x0', '\t.amdhsa_kernel kernel',
-      f'\t\t.amdhsa_group_segment_fixed_size {LDS_SIZE}', '\t\t.amdhsa_private_segment_fixed_size 0',
-      '\t\t.amdhsa_kernarg_size 36', '\t\t.amdhsa_user_sgpr_count 14', '\t\t.amdhsa_user_sgpr_dispatch_ptr 0',
-      '\t\t.amdhsa_user_sgpr_queue_ptr 0', '\t\t.amdhsa_user_sgpr_kernarg_segment_ptr 1',
-      '\t\t.amdhsa_user_sgpr_dispatch_id 0', '\t\t.amdhsa_user_sgpr_private_segment_size 0',
-      '\t\t.amdhsa_wavefront_size32 1', '\t\t.amdhsa_uses_dynamic_stack 0', '\t\t.amdhsa_enable_private_segment 0',
-      '\t\t.amdhsa_system_sgpr_workgroup_id_x 1', '\t\t.amdhsa_system_sgpr_workgroup_id_y 1',
-      '\t\t.amdhsa_system_sgpr_workgroup_id_z 0', '\t\t.amdhsa_system_sgpr_workgroup_info 0',
-      '\t\t.amdhsa_system_vgpr_workitem_id 0', '\t\t.amdhsa_next_free_vgpr 216', '\t\t.amdhsa_next_free_sgpr 16',
-      '\t\t.amdhsa_float_round_mode_32 0', '\t\t.amdhsa_float_round_mode_16_64 0',
-      '\t\t.amdhsa_float_denorm_mode_32 3', '\t\t.amdhsa_float_denorm_mode_16_64 3',
-      '\t\t.amdhsa_dx10_clamp 1', '\t\t.amdhsa_ieee_mode 1', '\t\t.amdhsa_fp16_overflow 0',
-      '\t\t.amdhsa_workgroup_processor_mode 0', '\t\t.amdhsa_memory_ordered 1', '\t\t.amdhsa_forward_progress 0',
-      '\t\t.amdhsa_shared_vgpr_count 0', '\t.end_amdhsa_kernel', '\t.text', '.Lfunc_end0:',
-      '\t.size\tkernel, .Lfunc_end0-kernel', '\t.amdgpu_metadata', '---', 'amdhsa.kernels:', '  - .args:',
-      '      - .address_space: global', '        .offset: 0', '        .size: 8', '        .value_kind: global_buffer',
-      '      - .address_space: global', '        .offset: 8', '        .size: 8', '        .value_kind: global_buffer',
-      '      - .address_space: global', '        .offset: 16', '        .size: 8', '        .value_kind: global_buffer',
-      f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8', '    .kernarg_segment_size: 24',
-      '    .max_flat_workgroup_size: 128', '    .name: kernel', '    .private_segment_fixed_size: 0',
-      '    .sgpr_count: 60', '    .symbol: kernel.kd', '    .vgpr_count: 216', '    .wavefront_size: 32',
-      f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}', 'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
+    # AMDHSA kernel descriptor
+    hsa_attrs = [
+      ('group_segment_fixed_size', LDS_SIZE), ('private_segment_fixed_size', 0), ('kernarg_size', 36),
+      ('user_sgpr_count', 14), ('user_sgpr_dispatch_ptr', 0), ('user_sgpr_queue_ptr', 0),
+      ('user_sgpr_kernarg_segment_ptr', 1), ('user_sgpr_dispatch_id', 0), ('user_sgpr_private_segment_size', 0),
+      ('wavefront_size32', 1), ('uses_dynamic_stack', 0), ('enable_private_segment', 0),
+      ('system_sgpr_workgroup_id_x', 1), ('system_sgpr_workgroup_id_y', 1), ('system_sgpr_workgroup_id_z', 0),
+      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 216),
+      ('next_free_sgpr', 16), ('float_round_mode_32', 0), ('float_round_mode_16_64', 0),
+      ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3), ('dx10_clamp', 1), ('ieee_mode', 1),
+      ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
+      ('shared_vgpr_count', 0)]
+    lines.extend(['\t.section\t.rodata,"a",@progbits', '\t.p2align\t6, 0x0', '\t.amdhsa_kernel kernel'])
+    lines.extend([f'\t\t.amdhsa_{k} {v}' for k, v in hsa_attrs])
+    lines.extend(['\t.end_amdhsa_kernel', '\t.text', '.Lfunc_end0:', '\t.size\tkernel, .Lfunc_end0-kernel'])
+    # AMDGPU metadata
+    lines.extend(['\t.amdgpu_metadata', '---', 'amdhsa.kernels:', '  - .args:'])
+    for i in range(3):  # 3 global buffer args
+      lines.extend([f'      - .address_space: global', f'        .offset: {i*8}', '        .size: 8', '        .value_kind: global_buffer'])
+    lines.extend([f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8',
+                  '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
+                  '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
+                  '    .vgpr_count: 216', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
+                  'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
     return '\n'.join(lines)
 
 
