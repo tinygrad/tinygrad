@@ -24,24 +24,30 @@ CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'sopp-gfx
 def _is_mimg(data: bytes) -> bool: return (int.from_bytes(data[:4], 'little') >> 26) & 0x3f == 0b111100
 
 def _parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
-  tests, lines = [], text.split('\n')
-  for i, line in enumerate(lines):
-    line = line.strip()
-    if not line or line.startswith(('//', '.', ';')): continue
-    asm_text = line.split('//')[0].strip()
-    if not asm_text: continue
-    for j in range(i, min(i + 3, len(lines))):
-      if m := re.search(pattern + r'[^:]*:.*?(?:encoding:\s*)?\[(0x[0-9a-f,x\s]+)\]', lines[j], re.I):
-        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
-        try: tests.append((asm_text, bytes.fromhex(hex_bytes)))
-        except ValueError: pass
-        break
+  tests = []
+  for block in text.split('\n\n'):
+    asm_text, encoding = None, None
+    for line in block.split('\n'):
+      line = line.strip()
+      if not line or line.startswith(('.', ';')): continue
+      if not line.startswith('//'):
+        asm_text = line.split('//')[0].strip() or asm_text
+      if m := re.search(pattern + r'[^:]*:.*?(?:encoding:\s*)?\[(0x[0-9a-f,x\s]+)\]', line, re.I):
+        encoding = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
+    if asm_text and encoding:
+      try: tests.append((asm_text, bytes.fromhex(encoding)))
+      except ValueError: pass
   return tests
 
 @functools.cache
 def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]:
-  pattern = r'(?:GFX11|W32|W64)' if arch == "rdna3" else r'(?:VI9|GFX9|CHECK)'
-  tests = _parse_llvm_tests(fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore'), pattern)
+  text = fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore')
+  if arch == "rdna3":
+    tests = _parse_llvm_tests(text, r'(?:GFX11|W32|W64)')
+  elif 'gfx90a' in f or 'gfx942' in f:
+    tests = _parse_llvm_tests(text, r'(?:GFX90A|GFX942)')
+  else:
+    tests = _parse_llvm_tests(text, r'(?:VI9|GFX9|CHECK)')
   return [(a, d) for a, d in tests if not _is_mimg(d)] if arch == "cdna" else tests
 
 def _compile_asm_batch(instrs: list[str]) -> list[bytes]:
