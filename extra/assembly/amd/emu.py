@@ -41,8 +41,14 @@ def _read_src(st, inst, src, idx: int, lane: int, neg: int, abs_: int, opsel: in
   literal, regs, is_src_16 = inst._literal, inst.src_regs(idx), inst.is_src_16(idx)
   if regs == 2: return _mod_src(st.rsrc64(src, lane, literal), idx, neg, abs_, is64=True)
   if isinstance(inst, VOP3P):
-    raw = st.rsrc_f16(src, lane, literal)
     opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
+    if 'FMA_MIX' in inst.op_name:
+      raw = st.rsrc(src, lane, literal)
+      sign_bit = (15 if not (opsel & (1 << idx)) else 31) if (opsel_hi >> idx) & 1 else 31
+      if inst.neg_hi & (1 << idx): raw &= ~(1 << sign_bit)
+      if neg & (1 << idx): raw ^= (1 << sign_bit)
+      return raw
+    raw = st.rsrc_f16(src, lane, literal)
     hi = _src16(raw, opsel_hi & (1 << idx)) ^ (0x8000 if inst.neg_hi & (1 << idx) else 0)
     lo = _src16(raw, opsel & (1 << idx)) ^ (0x8000 if neg & (1 << idx) else 0)
     return (hi << 16) | lo
@@ -252,16 +258,6 @@ def exec_ds(st: WaveState, inst, V: list, lane: int) -> None:
   if 'RETURN_DATA' in result and ('_RTN' in inst.op_name or '_LOAD' in inst.op_name):
     _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords * 2 if '_2ADDR_' in inst.op_name else ndwords)
 
-def exec_fma_mix(st: WaveState, inst, V: list, lane: int) -> None:
-  """VOP3P FMA_MIX: special sign bit handling for mixed f16/f32."""
-  literal, opsel, opsel_hi = inst._literal, inst.opsel, inst.opsel_hi | (inst.opsel_hi2 << 2)
-  raws = [st.rsrc(inst.src0, lane, literal), st.rsrc(inst.src1, lane, literal), st.rsrc(inst.src2, lane, literal) if inst.src2 is not None else 0]
-  for i in range(3):
-    sign_bit = (15 if not (opsel & (1 << i)) else 31) if (opsel_hi >> i) & 1 else 31
-    if inst.neg_hi & (1 << i): raws[i] &= ~(1 << sign_bit)
-    if inst.neg & (1 << i): raws[i] ^= (1 << sign_bit)
-  V[inst.vdst] = inst._fn(raws[0], raws[1], raws[2], V[inst.vdst], st.scc, st.vcc, lane, st.exec_mask, literal, None, opsel=opsel, opsel_hi=opsel_hi)['D0'] & MASK32
-
 def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
   """VOP1/VOP2/VOP3/VOP3SD/VOP3P/VOPC: standard ALU ops."""
   if isinstance(inst, VOP3P):
@@ -292,7 +288,8 @@ def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
   elif isinstance(inst, VOP3) and inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and src2 is not None and src2 < 256: vcc_for_fn = st.rsgpr64(src2)
   else: vcc_for_fn = st.vcc
   src0_idx = (src0 - 256) if src0 is not None and src0 >= 256 else (src0 if src0 is not None else 0)
-  result = inst._fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, inst._literal, st.vgpr, src0_idx, vdst)
+  extra_kwargs = {'opsel': opsel, 'opsel_hi': inst.opsel_hi | (inst.opsel_hi2 << 2)} if isinstance(inst, VOP3P) and 'FMA_MIX' in inst.op_name else {}
+  result = inst._fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, inst._literal, st.vgpr, src0_idx, vdst, **extra_kwargs)
 
   if 'VCC' in result:
     if isinstance(inst, VOP3SD): st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
@@ -379,7 +376,6 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
     elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)
-    elif isinstance(inst, VOP3P) and 'FMA_MIX' in inst.op_name: inst._dispatch = dispatch_lane(exec_fma_mix)
     else: inst._dispatch = dispatch_lane(exec_vop)
 
     # Validate pcode exists for instructions that need it (scalar/wave-level ops and VOPD don't need pcode)
