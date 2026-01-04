@@ -5,20 +5,17 @@ from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod, round_up, next_power2
 from enum import Enum, auto
 
-class InvalidTypeMetaClass(type):
-  instance:None|InvalidType = None
-  def __call__(cls):
-    if (ret:=InvalidTypeMetaClass.instance) is not None: return ret
-    InvalidTypeMetaClass.instance = ret = super().__call__()
-    return ret
-
-class InvalidType(metaclass=InvalidTypeMetaClass):
+class InvalidType:
+  _instance: ClassVar[InvalidType|None] = None
+  def __new__(cls):
+    if cls._instance is None: cls._instance = object.__new__(cls)
+    return cls._instance
   def __eq__(self, other): return self is other
   def __lt__(self, other): return self is not other
   def __gt__(self, other): return self is not other
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
-  def __reduce__(self): return (InvalidType, ())  # Return the global Invalid instance
+  def __reduce__(self): return (InvalidType, ())  # unpickle returns the singleton
 
 Invalid = InvalidType()
 
@@ -97,12 +94,14 @@ class PtrDType(DType):
 @dataclass(frozen=True, eq=False)
 class ImageDType(PtrDType):
   shape: tuple[int, ...] = ()   # shape of the Image
+  _pitch: int = -1
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
     assert addrspace == AddrSpace.GLOBAL, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
   @property
   def pitch(self):
+    if self._pitch != -1: return self._pitch
     imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
     pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
     align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
@@ -184,9 +183,9 @@ class dtypes:
 
   # NOTE: these are image dtypes
   @staticmethod
-  def imageh(shp): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
+  def imageh(shp, pitch=-1): return ImageDType(100, 2, "imageh", 'e', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
   @staticmethod
-  def imagef(shp): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp)
+  def imagef(shp, pitch=-1): return ImageDType(100, 4, "imagef", 'f', 1, None, dtypes.float32, AddrSpace.GLOBAL, 1, prod(shp), shp, pitch)
 
   default_float: ClassVar[DType] = float32
   default_int: ClassVar[DType] = int32

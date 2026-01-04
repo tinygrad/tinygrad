@@ -13,8 +13,9 @@ from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
 
 class CPUSignal(HCQSignal):
-  def _sleep(self, time_spent_waiting_ms:int):
+  def _sleep(self, time_spent_waiting_ms:int) -> bool:
     if self.is_timeline and self.owner is not None: self.owner.tasks.join()
+    return False
 
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, thread_id):
