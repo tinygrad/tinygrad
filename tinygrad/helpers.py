@@ -159,11 +159,11 @@ class Context(contextlib.ContextDecorator):
   def __exit__(self, *args):
     for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
-class ContextVar:
+class ContextVar(Generic[T]):
   _cache: ClassVar[dict[str, ContextVar]] = {}
-  value: int
+  value: T
   key: str
-  def __init__(self, key, default_value):
+  def __init__(self, key: str, default_value: T):
     if key in ContextVar._cache: raise RuntimeError(f"attempt to recreate ContextVar {key}")
     ContextVar._cache[key] = self
     self.value, self.key = getenv(key, default_value), key
