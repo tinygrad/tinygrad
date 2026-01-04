@@ -27,8 +27,6 @@ _CDNA_FORMATS_32 = [SDWA, DPP, C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_VOPC, C_VOP1, C
 _CDNA_VOP3B_OPS = {281, 282, 283, 284, 285, 286, 480, 481, 488, 489}  # VOP3B opcodes
 # CDNA opcode name aliases for disasm (new name -> old name expected by tests)
 _CDNA_DISASM_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32', 'v_fmamk_f32': 'v_madmk_f32', 'v_fmaak_f32': 'v_madak_f32'}
-# GFX9-specific VOP1 opcodes not in CDNA3/4 enum
-_GFX9_VOP1_NAMES = {55: 'v_screen_partition_4se_b32', 75: 'v_exp_legacy_f32', 76: 'v_log_legacy_f32'}
 
 def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
@@ -170,9 +168,7 @@ def _opsel_str(opsel: int, n: int, need: bool, is16_d: bool) -> str:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _disasm_vop1(inst: VOP1) -> str:
-  name, cdna = inst.op_name.lower(), _is_cdna(inst)
-  # GFX9 fallback for opcodes not in CDNA enum
-  if not name and cdna: name = _GFX9_VOP1_NAMES.get(inst.op, f'vop1_op_{inst.op}')
+  name, cdna = inst.op_name.lower() or f'vop1_op_{inst.op}', _is_cdna(inst)
   suf = "" if cdna else "_e32"
   if name in ('v_nop', 'v_pipeflush', 'v_clrexcp'): return name  # no operands
   if 'readfirstlane' in name:
@@ -857,35 +853,13 @@ try:
 
   # CDNA VOP2 aliases: new opcode name -> old name expected by LLVM tests
   _CDNA_VOP3_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32'}
-  # GFX9 (gfx900/Vega) VOP3A opcodes - these have different meanings than CDNA (gfx90a+)
-  # Used as fallback when inst.op_name is empty (opcode not in CDNA enum)
-  _GFX9_VOP3A_NAMES = {
-    448: 'v_mad_legacy_f32', 449: 'v_mad_f32', 450: 'v_mad_i32_i24', 451: 'v_mad_u32_u24',
-    452: 'v_cubeid_f32', 453: 'v_cubesc_f32', 454: 'v_cubetc_f32', 455: 'v_cubema_f32',
-    456: 'v_bfe_u32', 457: 'v_bfe_i32', 458: 'v_bfi_b32', 459: 'v_fma_f32', 460: 'v_fma_f64',
-    461: 'v_lerp_u8', 462: 'v_alignbit_b32', 463: 'v_alignbyte_b32',
-    464: 'v_min3_f32', 465: 'v_min3_i32', 466: 'v_min3_u32', 467: 'v_max3_f32', 468: 'v_max3_i32', 469: 'v_max3_u32',
-    470: 'v_med3_f32', 471: 'v_med3_i32', 472: 'v_med3_u32',
-    473: 'v_sad_u8', 474: 'v_sad_hi_u8', 475: 'v_sad_u16', 476: 'v_sad_u32', 477: 'v_cvt_pk_u8_f32',
-    478: 'v_div_fixup_f32', 479: 'v_div_fixup_f64', 482: 'v_div_fmas_f32', 483: 'v_div_fmas_f64',
-    484: 'v_msad_u8', 485: 'v_qsad_pk_u16_u8', 486: 'v_mqsad_pk_u16_u8', 487: 'v_mqsad_u32_u8',
-    490: 'v_mad_legacy_f16', 491: 'v_mad_legacy_u16', 492: 'v_mad_legacy_i16', 493: 'v_perm_b32',
-    494: 'v_fma_legacy_f16', 495: 'v_div_fixup_legacy_f16', 496: 'v_cvt_pkaccum_u8_f32',
-    497: 'v_mad_u32_u16', 498: 'v_mad_i32_i16', 499: 'v_xad_u32',
-    500: 'v_min3_f16', 501: 'v_min3_i16', 502: 'v_min3_u16', 503: 'v_max3_f16', 504: 'v_max3_i16', 505: 'v_max3_u16',
-    506: 'v_med3_f16', 507: 'v_med3_i16', 508: 'v_med3_u16',
-    509: 'v_lshl_add_u32', 510: 'v_add_lshl_u32', 511: 'v_add3_u32',
-    624: 'v_interp_p1_f32', 625: 'v_interp_p2_f32', 626: 'v_interp_mov_f32',
-    628: 'v_interp_p1ll_f16', 629: 'v_interp_p1lv_f16', 630: 'v_interp_p2_legacy_f16', 631: 'v_interp_p2_f16',
-  }
 
   def _disasm_vop3a(inst) -> str:
     op_val = inst._values.get('op', 0)  # get raw opcode value, not enum value
     if hasattr(op_val, 'value'): op_val = op_val.value  # in case it's stored as enum
-    # Use GFX9 name fallback if op_name is empty (opcode not in CDNA enum)
-    name = inst.op_name.lower() or _GFX9_VOP3A_NAMES.get(op_val, f'vop3a_op_{op_val}')
+    name = inst.op_name.lower() or f'vop3a_op_{op_val}'
     from extra.assembly.amd.dsl import spec_num_srcs, spec_regs
-    n = spec_num_srcs(name) if name else inst.num_srcs()  # recalculate for GFX9 fallback names
+    n = spec_num_srcs(name) if name else inst.num_srcs()
     cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
     orig_name = name
     name = _CDNA_VOP3_ALIASES.get(name, name)  # apply CDNA aliases
@@ -895,12 +869,11 @@ try:
       s2 = ""
       dst = f"v{inst.vdst}"
     else:
-      # Use spec_regs for register widths (handles GFX9 fallback names correctly)
       dregs, r0, r1, r2 = spec_regs(name) if name else (inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2))
       s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, r0), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, r1), _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, r2)
       dst = _vreg(inst.vdst, dregs) if dregs > 1 else f"v{inst.vdst}"
-    # Handle GFX9 fallback names (true VOP3 instructions not in CDNA enum)
-    if op_val in _GFX9_VOP3A_NAMES:
+    # True VOP3 instructions (512+) - 3-source ops
+    if op_val >= 512:
       return f"{name} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name} {dst}, {s0}, {s1}{cl}{om}"
     # VOPC (0-255): writes to SGPR pair, VOP2 (256-319): 2-3 src, VOP1 (320-511): 1 src
     if op_val < 256:
@@ -920,12 +893,10 @@ try:
     return f"{name}{suf} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {s0}, {s1}{cl}{om}"
 
   # GFX9-specific VOP3B opcodes not in CDNA enum
-  _GFX9_VOP3B_NAMES = {480: 'v_div_scale_f32', 481: 'v_div_scale_f64', 488: 'v_mad_u64_u32', 489: 'v_mad_i64_i32'}
-
   def _disasm_vop3b(inst) -> str:
     op_val = inst._values.get('op', 0)
     if hasattr(op_val, 'value'): op_val = op_val.value
-    name = inst.op_name.lower() or _GFX9_VOP3B_NAMES.get(op_val, f'vop3b_op_{op_val}')
+    name = inst.op_name.lower() or f'vop3b_op_{op_val}'
     from extra.assembly.amd.dsl import spec_num_srcs, spec_regs
     n = spec_num_srcs(name) if name else inst.num_srcs()
     dregs, r0, r1, r2 = spec_regs(name) if name else (inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2))
@@ -978,7 +949,7 @@ try:
     omod = _OMOD_SDWA.get(inst.omod, "")
     if vop2_op == 63:  # VOP1
       try: name = CDNA_VOP1Op(inst.vop_op).name.lower()
-      except ValueError: name = _GFX9_VOP1_NAMES.get(inst.vop_op, f"vop1_op_{inst.vop_op}")
+      except ValueError: name = f"vop1_op_{inst.vop_op}"
       dst = f"v{inst.vdst}"
       mods = [f"dst_sel:{_SEL[inst.dst_sel]}", f"dst_unused:{_UNUSED[inst.dst_u]}", f"src0_sel:{_SEL[inst.src0_sel]}"]
       return f"{name}_sdwa {dst}, {src0}{clamp}{omod} " + " ".join(mods)
@@ -1027,7 +998,7 @@ try:
     mods = [dpp, f"row_mask:0x{inst.row_mask:x}", f"bank_mask:0x{inst.bank_mask:x}"] + (["bound_ctrl:0"] if inst.bound_ctrl else [])
     if vop2_op == 63:  # VOP1
       try: name = CDNA_VOP1Op(inst.vop_op).name.lower()
-      except ValueError: name = _GFX9_VOP1_NAMES.get(inst.vop_op, f"vop1_op_{inst.vop_op}")
+      except ValueError: name = f"vop1_op_{inst.vop_op}"
       return f"{name}_dpp v{inst.vdst}, {src0} " + " ".join(mods)
     else:  # VOP2
       try: name = CDNA_VOP2Op(vop2_op).name.lower()

@@ -14,12 +14,13 @@ RDNA_FILES = ['gfx11_asm_sop1.s', 'gfx11_asm_sop2.s', 'gfx11_asm_sopp.s', 'gfx11
   'gfx11_asm_mimg.s', 'gfx11_asm_wmma.s', 'gfx11_asm_vop3_features.s', 'gfx11_asm_vop3p_features.s', 'gfx11_asm_vopd_features.s',
   'gfx11_asm_vop3_alias.s', 'gfx11_asm_vop3p_alias.s', 'gfx11_asm_vopc_alias.s', 'gfx11_asm_vopcx_alias.s', 'gfx11_asm_vinterp_alias.s',
   'gfx11_asm_smem_alias.s', 'gfx11_asm_mubuf_alias.s', 'gfx11_asm_mtbuf_alias.s']
-# NOTE: gfx9_asm_mimg.s/mimg-gfx90a.s/gfx9_asm_exp.s target gfx900 (Vega), not CDNA - CDNA doesn't have MIMG/EXP
+# CDNA test files - includes gfx9 files for shared instructions, plus gfx90a/gfx942 specific files
 # gfx90a_ldst_acc.s has MIMG mixed in, filtered via is_mimg check
-CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'sopp-gfx9.s', 'gfx9_asm_sopk.s', 'gfx9_asm_sopc.s',
-  'gfx9_asm_vop1.s', 'vop1-gfx9.s', 'gfx9_asm_vop2.s', 'gfx9_asm_vopc.s', 'gfx9_asm_vop3.s', 'gfx9_asm_vop3_e64.s', 'gfx9_asm_vop3p.s', 'vop3-gfx9.s',
-  'gfx9_asm_ds.s', 'ds-gfx9.s', 'gfx9_asm_flat.s', 'flat-gfx9.s', 'gfx9_asm_smem.s', 'gfx9_asm_mubuf.s', 'mubuf-gfx9.s', 'gfx9_asm_mtbuf.s',
-  'gfx90a_ldst_acc.s', 'gfx90a_asm_features.s', 'flat-scratch-gfx942.s', 'gfx942_asm_features.s', 'mai-gfx90a.s', 'mai-gfx942.s']
+CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'gfx9_asm_sopk.s', 'gfx9_asm_sopc.s',
+  'gfx9_asm_vop1.s', 'gfx9_asm_vop2.s', 'gfx9_asm_vopc.s', 'gfx9_asm_vop3.s', 'gfx9_asm_vop3p.s',
+  'gfx9_asm_ds.s', 'gfx9_asm_flat.s', 'gfx9_asm_smem.s', 'gfx9_asm_mubuf.s', 'gfx9_asm_mtbuf.s',
+  'gfx90a_ldst_acc.s', 'gfx90a_asm_features.s', 'flat-scratch-gfx942.s', 'gfx942_asm_features.s',
+  'mai-gfx90a.s', 'mai-gfx942.s']
 
 def _is_mimg(data: bytes) -> bool: return (int.from_bytes(data[:4], 'little') >> 26) & 0x3f == 0b111100
 

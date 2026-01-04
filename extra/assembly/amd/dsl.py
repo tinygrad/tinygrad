@@ -544,7 +544,13 @@ class Inst:
       # For CDNA VOP3A/VOP3B, prefer VOP1/VOP2 promoted ops over VOP3AOp for opcodes 256-511
       if is_cdna and isinstance(val, int) and 256 <= val < 512:
         try: self.op = (CDNA_VOP1Op(val - 320) if val >= 320 else CDNA_VOP2Op(val - 256))
-        except ValueError: self.op = val
+        except ValueError:
+          # Fall back to VOP3AOp for true VOP3 instructions in the 256-511 range
+          marker = self._fields['op'].marker if 'op' in self._fields else None
+          if marker and issubclass(marker, IntEnum):
+            try: self.op = marker(val)
+            except ValueError: self.op = val
+          else: self.op = val
       else:
         # Use BitField marker enum if available, otherwise fall back to _enum_map
         marker = self._fields['op'].marker if 'op' in self._fields else None
