@@ -409,28 +409,35 @@ def _stmt(stmt, ctx: Ctx):
     case For(var, start, end, body): _transform_for(var, start, end, body, ctx)
 
 def _transform_if(branches: tuple, ctx: Ctx):
-  parsed = [(_expr(c, ctx) if c is not None else None, body) for c, body in branches]
-  assigned = {_get_lhs_info(s.lhs, ctx)[0] for _, body in parsed for s in body if isinstance(s, Assign)}
+  # Process each branch by executing its body statements in a sub-context
+  parsed = []
+  for cond, body in branches:
+    cond_uop = _expr(cond, ctx) if cond is not None else None
+    # Create a sub-context that shares vars but has its own outputs
+    sub_ctx = Ctx(mem_buf=ctx.mem_buf)
+    sub_ctx.vars = dict(ctx.vars)
+    sub_ctx.decls = dict(ctx.decls)
+    for s in body: _stmt(s, sub_ctx)
+    parsed.append((cond_uop, sub_ctx))
+
+  # Collect all assigned variables across all branches
+  out_vars = ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC', 'SDATA', 'VDATA', 'RETURN_DATA')
+  assigned = set()
+  for _, sub_ctx in parsed:
+    for name, _, _ in sub_ctx.outputs:
+      if name in out_vars: assigned.add(name)
 
   for var in assigned:
-    dtype = next((_get_lhs_info(s.lhs, ctx)[1] for _, body in parsed for s in body if isinstance(s, Assign) and _get_lhs_info(s.lhs, ctx)[0] == var), dtypes.uint32)
+    dtype = next((d for _, sub_ctx in parsed for n, _, d in sub_ctx.outputs if n == var), dtypes.uint32)
     result = ctx.vars.get(var, UOp.const(dtype, 0))
-    for cond_uop, body in reversed(parsed):
-      branch_val = next((_expr(s.rhs, ctx, _get_lhs_info(s.lhs, ctx)[1]) for s in body if isinstance(s, Assign) and _get_lhs_info(s.lhs, ctx)[0] == var), None)
+    for cond_uop, sub_ctx in reversed(parsed):
+      branch_val = next((u for n, u, _ in sub_ctx.outputs if n == var), None)
       if branch_val is not None:
         result = branch_val if cond_uop is None else UOp(Ops.WHERE, branch_val.dtype, (cond_uop, branch_val, _cast(result, branch_val.dtype)))
 
-    if dtype in FLOATS:
-      result_bits = UOp(Ops.BITCAST, dtypes.uint32 if dtype == dtypes.float32 else dtypes.uint64, (result,))
-      ctx.vars[var] = result_bits
-      if var in ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC'):
-        ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
-        ctx.outputs.append((var, result_bits, dtypes.uint32 if dtype == dtypes.float32 else dtypes.uint64))
-    else:
-      ctx.vars[var] = result
-      if var in ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC'):
-        ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
-        ctx.outputs.append((var, result, dtype))
+    ctx.vars[var] = result
+    ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
+    ctx.outputs.append((var, result, dtype))
 
 def _transform_for(var: str, start: UOp, end: UOp, body: tuple, ctx: Ctx):
   start_val = start.arg if start.op == Ops.CONST else int(_expr(start, ctx).arg)

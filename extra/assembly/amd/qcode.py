@@ -187,8 +187,12 @@ def stmt(line: str) -> Stmt|None:
   if line[:5] == 'eval ': return Assign(UOp(Ops.DEFINE_VAR, dtypes.void, arg=('_eval', None, None)), UOp(Ops.DEFINE_VAR, dtypes.void, arg=(line, None, None)))
   if line[:8] == 'declare ' and ':' in line:
     n, t = line[8:].split(':', 1)
-    t = t.strip().split('[')[0]  # strip array suffix like [64]
-    if m := re.match(r"^(\d+)'([IUFB])$", t): return Declare(n.strip(), _QDTYPES[f"{m[2].lower()}{m[1]}"])
+    t = t.strip()
+    vec_count = int(m[1]) if (m := re.search(r'\[(\d+)\]$', t)) else 1
+    t = t.split('[')[0]  # strip array suffix like [64]
+    if m := re.match(r"^(\d+)'([IUFB])$", t):
+      dt = _QDTYPES[f"{m[2].lower()}{m[1]}"]
+      return Declare(n.strip(), dt.vec(vec_count) if vec_count > 1 else dt)
     return None  # unsupported declare type
   for op, uop in [('+=', Ops.ADD), ('-=', Ops.SUB), ('|=', Ops.OR), ('&=', Ops.AND), ('^=', Ops.XOR), ('<<=', Ops.SHL), ('>>=', Ops.SHR)]:
     if op in line:
@@ -215,23 +219,26 @@ def parse(code: str) -> tuple[Stmt, ...]:
         i += 1
       stmts.append(For(m[1], expr(m[2]), expr(m[3]), parse('\n'.join(body)))); continue
     if ln[:3] == 'if ' and ' then' in ln:
-      br, cond, body, i = [], ln[3:ln.index(' then')], [], i+1
-      while i < len(lines) and lines[i] != 'endif':
-        if lines[i][:6] == 'elsif ' and ' then' in lines[i]:
+      br, cond, body, i, depth = [], ln[3:ln.index(' then')], [], i+1, 1
+      while i < len(lines) and depth > 0:
+        if lines[i][:3] == 'if ' and ' then' in lines[i]: depth += 1; body.append(lines[i])
+        elif lines[i] == 'endif':
+          depth -= 1
+          if depth > 0: body.append(lines[i])
+        elif depth == 1 and lines[i][:6] == 'elsif ' and ' then' in lines[i]:
           br.append((expr(cond), parse('\n'.join(body)))); cond, body = lines[i][6:lines[i].index(' then')], []
-        elif lines[i] == 'else': br.append((expr(cond), parse('\n'.join(body)))); cond, body = None, []
+        elif depth == 1 and lines[i] == 'else':
+          br.append((expr(cond), parse('\n'.join(body)))); cond, body = None, []
         else: body.append(lines[i])
         i += 1
-      br.append((expr(cond) if cond else None, parse('\n'.join(body)))); stmts.append(If(tuple(br))); i += 1; continue
+      br.append((expr(cond) if cond else None, parse('\n'.join(body)))); stmts.append(If(tuple(br))); continue
+    if ln == 'else' or ln[:6] == 'elsif ': raise ValueError(f"Unexpected {ln.split()[0]} without matching if")
     if s := stmt(ln): stmts.append(s)
     i += 1
   return tuple(stmts)
 
-_OP_SYMS = {Ops.ADD: '+', Ops.SUB: '-', Ops.MUL: '*', Ops.FDIV: '/', Ops.MOD: '%', Ops.AND: '&', Ops.OR: '|',
-             Ops.XOR: '^', Ops.SHL: '<<', Ops.SHR: '>>', Ops.CMPEQ: '==', Ops.CMPNE: '!=', Ops.CMPLT: '<', Ops.CMPLE: '<='}
-_DT_STR = {dtypes.uint64: 'u64', dtypes.uint32: 'u32', dtypes.uint16: 'u16', dtypes.uint8: 'u8',
-           dtypes.int64: 'i64', dtypes.int32: 'i32', dtypes.int16: 'i16', dtypes.int8: 'i8',
-           dtypes.float64: 'f64', dtypes.float32: 'f32', dtypes.float16: 'f16'}
+_OP_SYMS = {v: k for k, v in _BINOPS.items() if k not in ('>', '>=', '<>', '||', '&&')}
+_DT_STR = {v: k for k, v in _QDTYPES.items() if k in ('u64', 'u32', 'u16', 'u8', 'i64', 'i32', 'i16', 'i8', 'f64', 'f32', 'f16', 'bf16')}
 
 def _dt_bits(dt: DType) -> int:
   if m := re.search(r'(\d+)', dt.name): return int(m[1])
@@ -273,22 +280,23 @@ def _pr(n, d=0):
       if n.tag == 'flipped' and n.op == Ops.CMPLE: sym, left, right = '>=', r, l
       # Use <> for unordered not-equal
       if n.tag == '<>' and n.op == Ops.CMPNE: sym = '<>'
-      # Use && / || for logical ops when operands are comparisons or bool-returning calls
-      bool_ops = (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE, Ops.CUSTOM, Ops.AND, Ops.OR)
-      if n.op == Ops.AND and l.op in bool_ops and r.op in bool_ops: sym = '&&'
-      if n.op == Ops.OR and l.op in bool_ops and r.op in bool_ops: sym = '||'
+
       return f"{_pr(left)} {sym} {_pr(right)}"
     case UOp(Ops.WHERE, _, (c, t, f)): return f"{_pr(c)} ? {_pr(t)} : {_pr(f)}"
     case UOp(Ops.CUSTOM, _, args, 'MEM'): return f"MEM[{_pr(args[0])}]"
     case UOp(Ops.CUSTOM, _, args, name): return f"{name}({', '.join(_pr(x) for x in args)})"
     case UOp(Ops.CAT, _, exprs): return f"{{{', '.join(_pr(x) for x in exprs)}}}"
     case Assign(l, r):
-      # Detect compound assignment: lhs = lhs op rhs -> lhs op= rhs
+      # Detect compound assignment: lhs = lhs op rhs -> lhs op= rhs (but not for PC)
       compound = {Ops.ADD: '+=', Ops.SUB: '-=', Ops.OR: '|=', Ops.AND: '&=', Ops.XOR: '^=', Ops.SHL: '<<=', Ops.SHR: '>>='}
-      if r.op in compound and len(r.src) == 2 and r.src[0] == l:
+      is_pc = l.op == Ops.DEFINE_VAR and l.arg[0] == 'PC'
+      if r.op in compound and len(r.src) == 2 and r.src[0] == l and not is_pc:
         return f"{p}{_pr(l)} {compound[r.op]} {_pr(r.src[1])}"
       return f"{p}{_pr(l)} = {_pr(r)}"
-    case Declare(name, dt): return f"{p}declare {name} : {_dt_bits(dt)}'{_DT_STR.get(dt, dt.name)[0].upper()}"
+    case Declare(name, dt):
+      base = dt.scalar() if dt.count > 1 else dt
+      suffix = f"[{dt.count}]" if dt.count > 1 else ""
+      return f"{p}declare {name} : {_dt_bits(base)}'{_DT_STR.get(base, base.name)[0].upper()}{suffix}"
     case If(br):
       parts = []
       for i, (c, b) in enumerate(br):
@@ -301,8 +309,32 @@ def _pr(n, d=0):
     case tuple(): return "\n".join(_pr(x, d) for x in n)
     case _: return f"{p}{n}"
 
+def _norm(s, keep_structure=False):
+  # Strip leading description lines (lines without = or ; that aren't declare/if/for)
+  while True:
+    m = re.match(r'^(?!declare|if |for )[^=;\n]+\n', s)
+    if not m: break
+    s = s[m.end():]
+  s = re.sub(r'//[^\n]*', '', s)  # strip comments
+  if keep_structure:
+    s = re.sub(r';', '', s)  # strip semicolons only
+    s = re.sub(r'\n\s*\n', '\n', s)  # collapse blank lines
+  else:
+    s = re.sub(r'[;()\s]', '', s)  # strip semicolons, parens, whitespace
+  s = re.sub(r'_eval=', '', s)  # strip _eval= prefix from eval statements
+  s = re.sub(r'0x[0-9a-fA-F]+', lambda m: str(int(m[0], 16)), s)  # hex to decimal
+  s = re.sub(r'\.b(\d+)', r'.u\1', s)  # .bXX -> .uXX
+  s = re.sub(r"'B", "'U", s)  # 'B -> 'U
+  s = re.sub(r'(\d+\.\d+)F', r'\1', s)  # strip F suffix from floats
+  s = re.sub(r'\+INF', 'INF', s)  # +INF -> INF
+  s = re.sub(r'&&', '&', s)  # && -> &
+  s = re.sub(r'\|\|', '|', s)  # || -> |
+  return s.strip()
+
 if __name__ == "__main__":
+  import os
   from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
+  DEBUG = int(os.getenv("DEBUG", "0"))
   ok, fail, match, errs = 0, 0, 0, {}
   for cls, ops in PSEUDOCODE_STRINGS.items():
     for op, pc in ops.items():
@@ -310,19 +342,22 @@ if __name__ == "__main__":
       except Exception as e: fail += 1; errs[str(e)[:60]] = errs.get(str(e)[:60], 0) + 1
       else:
         rendered = _pr(ast)
-        # Normalize for comparison
-        def norm(s):
-          s = re.sub(r'^[^=;]+(?=\n)', '', s)  # strip leading description lines (no = or ;)
-          s = re.sub(r'//[^\n]*', '', s)  # strip comments
-          s = re.sub(r'[;()\s]', '', s)  # strip semicolons, parens, whitespace
-          s = re.sub(r'0x[0-9a-fA-F]+', lambda m: str(int(m[0], 16)), s)  # hex to decimal
-          s = re.sub(r'\.b(\d+)', r'.u\1', s)  # .bXX -> .uXX
-          s = re.sub(r"'B", "'U", s)  # 'B -> 'U
-          s = re.sub(r'(\d+\.\d+)F', r'\1', s)  # strip F suffix from floats
-          return s
-        if norm(rendered) == norm(pc):
+        if _norm(pc) == _norm(rendered):
           match += 1
           if DEBUG >= 2: print(f"\033[32m{op.name}\033[0m")
-        elif DEBUG: print(f"\033[31m{'='*60}\n{op.name}\n{'='*60}\n{pc}\n{'-'*60}\n{rendered}\n\033[0m")
+        elif DEBUG:
+          # Show diff side by side - normalize AMD pcode (left), raw rendered (right)
+          orig_lines = [l for l in _norm(pc, keep_structure=True).split('\n') if l.strip()]
+          rend_lines = [l for l in rendered.split('\n') if l.strip()]
+          max_lines = max(len(orig_lines), len(rend_lines))
+          print(f"{'='*60}\n{op.name}\n{'='*60}")
+          w = 50  # column width
+          for i in range(max_lines):
+            oline = orig_lines[i] if i < len(orig_lines) else ''
+            rline = rend_lines[i] if i < len(rend_lines) else ''
+            line_match = _norm(oline) == _norm(rline)
+            color = '' if line_match else '\033[31m'
+            reset = '' if line_match else '\033[0m'
+            print(f"{color}{oline:<{w}} | {rline}{reset}")
   print(f"Parsed: {ok}/{ok+fail} ({100*ok/(ok+fail):.1f}%), Match: {match}/{ok} ({100*match/ok:.1f}%)")
   for e, c in sorted(errs.items(), key=lambda x: -x[1])[:10]: print(f"  {c}: {e}")
