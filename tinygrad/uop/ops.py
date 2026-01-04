@@ -190,18 +190,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # returns map of UOps to their consumers in the graph rooted by self
   def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]: return consumer_map_from_toposort(self.toposort())
 
-  def reverse_toposort(self, consumer_map) -> dict[UOp, None]:
-    ret: dict[UOp, None] = {}
-    stack: list[tuple[UOp, bool]] = [(x, False) for x in consumer_map if len(x.src) == 0]
-    while stack:
-      node, visited = stack.pop()
-      if node in ret: continue
-      if not visited:
-        stack.append((node, True))  # push node back on stack to process after its srcs
-        for s in consumer_map[node]: stack.append((s, False)) # push srcs on the stack
-      else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
-    return ret
-
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
     return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
