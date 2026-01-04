@@ -131,7 +131,7 @@ def _make_asm_test(name):
 
 def _make_disasm_test(name):
   def test(self):
-    _, fmt_cls, op_enum = LLVM_TEST_FILES[name]
+    _, base_fmt_cls, base_op_enum = LLVM_TEST_FILES[name]
     # VOP3SD opcodes that share encoding with VOP3 (only for vop3sd test, not vopc promotions)
     vop3sd_opcodes = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
     is_vopc_promotion = name in ('vop3_from_vopc', 'vop3_from_vopcx')
@@ -141,8 +141,9 @@ def _make_disasm_test(name):
     to_test: list[tuple[str, bytes, str | None, str | None]] = []  # (asm_text, data, disasm_str, error)
     skipped = 0
     for asm_text, data in self.tests.get(name, []):
-      # Skip VOP3 promotions in VOP1/VOP2/VOPC tests (8-byte instructions in 4-byte format test files)
-      if name in ('vop1', 'vop2', 'vopc', 'vopcx') and len(data) > fmt_cls._size(): skipped += 1; continue
+      # Detect VOP3 promotions in VOP1/VOP2/VOPC tests: VOP3 has bits [31:26]=0b110101 in first dword
+      is_vop3_enc = name in ('vop1', 'vop2', 'vopc', 'vopcx') and len(data) >= 4 and (data[3] >> 2) == 0x35
+      fmt_cls, op_enum = (VOP3, VOP3Op) if is_vop3_enc else (base_fmt_cls, base_op_enum)
       temp_inst = fmt_cls.from_bytes(data)
       temp_op = temp_inst._values.get('op', 0)
       temp_op = temp_op.val if hasattr(temp_op, 'val') else temp_op
@@ -153,7 +154,7 @@ def _make_disasm_test(name):
         sopp_no_imm = {48, 54, 53, 55, 60, 61, 62}
         if temp_op in sopp_no_imm and simm16 != 0: skipped += 1; continue
       try:
-        if fmt_cls.__name__ in ('VOP3', 'VOP3SD'):
+        if base_fmt_cls.__name__ in ('VOP3', 'VOP3SD'):
           temp = VOP3.from_bytes(data)
           op_val = temp._values.get('op', 0)
           op_val = op_val.val if hasattr(op_val, 'val') else op_val
