@@ -381,7 +381,7 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     # Compile pcode for instructions that use it (not VOPD which has _fnx/_fny, not special dispatches)
     # Try ucode first (UOp-based), fall back to pcode (Python exec-based)
     def _compile_op(cls_name, op_name, pcode):
-      return compile_uop(cls_name, op_name, pcode) or compile_pseudocode(cls_name, op_name, pcode)
+      return compile_uop(op_name, pcode) or compile_pseudocode(cls_name, op_name, pcode)
     # VOPD needs separate functions for X and Y ops
     if isinstance(inst, VOPD):
       def _compile_vopd_op(op): return _compile_op(type(op).__name__, op.name, PSEUDOCODE_STRINGS[type(op)][op])
