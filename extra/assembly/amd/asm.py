@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from extra.assembly.amd.dsl import Inst, RawImm, Reg, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory
 from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
-from extra.assembly.amd.dsl import SPECIAL_GPRS, SPECIAL_PAIRS, FLOAT_DEC, FLOAT_ENC, decode_src
+from extra.assembly.amd.dsl import SPECIAL_GPRS, SPECIAL_PAIRS, SPECIAL_PAIRS_CDNA, FLOAT_DEC, FLOAT_ENC, decode_src
 from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP,
   VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp, MTBUFOp)
@@ -452,18 +452,25 @@ def _disasm_buf(inst: MUBUF | MTBUF) -> str:
   srsrc = _sreg_or_ttmp(inst.srsrc*4, 4)
   is_mtbuf = isinstance(inst, MTBUF) or isinstance(inst, C_MTBUF)
   if is_mtbuf:
-    if acc:  # GFX90a style: show dfmt/nfmt
-      dfmt, nfmt = inst.format & 0xf, (inst.format >> 4) & 0x7
+    dfmt, nfmt = inst.format & 0xf, (inst.format >> 4) & 0x7
+    if acc:  # GFX90a accumulator style: show dfmt/nfmt as numbers
       fmt_s = f"  dfmt:{dfmt}, nfmt:{nfmt},"  # double space before dfmt per LLVM format
-    elif not cdna:  # RDNA style: show format
+    elif not cdna:  # RDNA style: show combined format number
       fmt_s = f" format:{inst.format}" if inst.format else ""
-    else:  # CDNA without acc: no format shown
-      fmt_s = ""
+    else:  # CDNA: show format:[BUF_DATA_FORMAT_X] or format:[BUF_NUM_FORMAT_X]
+      dfmt_names = ['INVALID', '8', '16', '8_8', '32', '16_16', '10_11_11', '11_11_10', '10_10_10_2', '2_10_10_10', '8_8_8_8', '32_32', '16_16_16_16', '32_32_32', '32_32_32_32', 'RESERVED_15']
+      nfmt_names = ['UNORM', 'SNORM', 'USCALED', 'SSCALED', 'UINT', 'SINT', 'RESERVED_6', 'FLOAT']
+      if dfmt == 1 and nfmt == 0: fmt_s = ""  # default, no format shown
+      elif nfmt == 0: fmt_s = f" format:[BUF_DATA_FORMAT_{dfmt_names[dfmt]}]"  # only dfmt differs
+      elif dfmt == 1: fmt_s = f" format:[BUF_NUM_FORMAT_{nfmt_names[nfmt]}]"  # only nfmt differs
+      else: fmt_s = f" format:[BUF_DATA_FORMAT_{dfmt_names[dfmt]},BUF_NUM_FORMAT_{nfmt_names[nfmt]}]"  # both differ
   else:
     fmt_s = ""
   if cdna: mods = [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.offset,f"offset:{inst.offset}"),(inst.sc0,"glc"),(inst.nt,"slc"),(inst.sc1,"sc1")] if c]
   else: mods = [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.offset,f"offset:{inst.offset}"),(inst.glc,"glc"),(inst.dlc,"dlc"),(inst.slc,"slc"),(inst.tfe,"tfe")] if c]
-  return f"{name} {reg_fn(inst.vdata, w)}, {vaddr}, {srsrc},{fmt_s} {decode_src(inst.soffset, cdna)}{' ' + ' '.join(mods) if mods else ''}"
+  soffset_s = decode_src(inst.soffset, cdna)
+  if cdna and not acc and is_mtbuf: return f"{name} {reg_fn(inst.vdata, w)}, {vaddr}, {srsrc}, {soffset_s}{fmt_s}{' ' + ' '.join(mods) if mods else ''}"
+  return f"{name} {reg_fn(inst.vdata, w)}, {vaddr}, {srsrc},{fmt_s} {soffset_s}{' ' + ' '.join(mods) if mods else ''}"
 
 def _mimg_vaddr_width(name: str, dim: int, a16: bool) -> int:
   """Calculate vaddr register count for MIMG sample/gather operations."""
