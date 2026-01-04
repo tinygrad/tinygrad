@@ -2,7 +2,7 @@
 import functools, struct, math
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from extra.assembly.amd.qcode import parse, Const, Var, Typed, Slice, Index, Cast, Op, Call, Pack, Assign, Declare, If, For
+from extra.assembly.amd.qcode import parse, Const, Var, Bitcast, Slice, Cast, Op, Call, Pack, Assign, Declare, If, For
 
 SIGNED = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64)
 FLOATS = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -83,7 +83,7 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
       if name not in ctx.vars: raise ValueError(f"Unknown variable: {name}")
       return _cast(ctx.vars[name], hint or ctx.vars[name].dtype)
 
-    case Typed(expr, dt):
+    case Bitcast(dt, expr):
       # Handle MEM[addr].type -> memory load using INDEX + LOAD (buffer set by caller)
       if isinstance(expr, Call) and expr.name == 'MEM':
         addr_uop = _expr(expr.args[0], ctx, dtypes.uint64)
@@ -117,6 +117,9 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
 
     case Slice(expr, hi, lo):
       base, hi_uop, lo_uop = _expr(expr, ctx), _expr(hi, ctx), _expr(lo, ctx)
+      # Single-bit slice with variable index: base[idx:idx] -> (base >> idx) & 1
+      if hi == lo:
+        return UOp(Ops.AND, dtypes.uint32, (_cast(UOp(Ops.SHR, base.dtype, (base, _cast(lo_uop, base.dtype))), dtypes.uint32), UOp.const(dtypes.uint32, 1)))
       if hi_uop.op == Ops.CONST and lo_uop.op == Ops.CONST:
         hi_val, lo_val = int(hi_uop.arg), int(lo_uop.arg)
         if hi_val < lo_val:
@@ -139,18 +142,11 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
         return UOp(Ops.AND, dtypes.uint32, (_cast(shifted, dtypes.uint32), UOp.const(dtypes.uint32, (1 << (hi_val - lo_val + 1)) - 1)))
       raise ValueError(f"Non-constant slice bounds: {node}")
 
-    case Index(expr, idx):
-      base, idx_uop = _expr(expr, ctx), _expr(idx, ctx)
-      return UOp(Ops.AND, dtypes.uint32, (_cast(UOp(Ops.SHR, base.dtype, (base, _cast(idx_uop, base.dtype))), dtypes.uint32), UOp.const(dtypes.uint32, 1)))
-
-    case Cast(bits, typ, expr):
-      dt = {(16,'I'): dtypes.int16, (16,'U'): dtypes.uint16, (16,'F'): dtypes.float16, (32,'I'): dtypes.int32, (32,'U'): dtypes.uint32,
-            (32,'F'): dtypes.float32, (32,'B'): dtypes.uint32, (64,'I'): dtypes.int64, (64,'U'): dtypes.uint64, (64,'F'): dtypes.float64,
-            (64,'B'): dtypes.uint64}.get((bits, typ), dtypes.uint32)
+    case Cast(dt, expr):
       inner = _expr(expr, ctx, dt)
-      if typ == 'F': return UOp(Ops.CAST, dt, (inner,))
-      if inner.dtype in (dtypes.uint32, dtypes.int32, dtypes.uint64, dtypes.int64) and inner.dtype.itemsize * 8 == bits: return _cast(inner, dt)
-      if typ == 'I' and inner.dtype in SIGNED: return UOp(Ops.CAST, dt, (inner,))
+      if dt in FLOATS: return UOp(Ops.CAST, dt, (inner,))
+      if inner.dtype in (dtypes.uint32, dtypes.int32, dtypes.uint64, dtypes.int64) and inner.dtype.itemsize == dt.itemsize: return _cast(inner, dt)
+      if dt in SIGNED and inner.dtype in SIGNED: return UOp(Ops.CAST, dt, (inner,))
       return _cast(inner, dt)
 
     case Op(op, src):
@@ -353,13 +349,13 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
 def _get_lhs_info(lhs, ctx: Ctx) -> tuple[str, DType, int|None, int|None, str|None]:
   """Extract assignment target: (var_name, dtype, hi_bit, lo_bit, idx_var)"""
   match lhs:
-    case Typed(Var(name), dt): return name, dt, None, None, None
-    case Typed(Slice(Var(name), Const(hi, _), Const(lo, _)), dt): return name, dt, int(hi), int(lo), None
-    case Typed(Index(Typed(Var(name), _), Var(idx)), _): return name, dtypes.uint64, None, None, idx
-    case Typed(Index(Var(name), Var(idx)), dt): return name, dt, None, None, idx
-    case Slice(Typed(Var(name), _), Const(hi, _), Const(lo, _)): return name, dtypes.uint32, int(hi), int(lo), None
+    case Bitcast(dt, Var(name)): return name, dt, None, None, None
+    case Bitcast(dt, Slice(Var(name), Const(hi, _), Const(lo, _))): return name, dt, int(hi), int(lo), None
+    case Bitcast(_, Slice(Bitcast(_, Var(name)), Var(idx), Var(idx2))) if idx == idx2: return name, dtypes.uint64, None, None, idx
+    case Bitcast(dt, Slice(Var(name), Var(idx), Var(idx2))) if idx == idx2: return name, dt, None, None, idx
+    case Slice(Bitcast(_, Var(name)), Const(hi, _), Const(lo, _)): return name, dtypes.uint32, int(hi), int(lo), None
     case Slice(Var(name), Const(hi, _), Const(lo, _)): return name, dtypes.uint32, int(hi), int(lo), None
-    case Index(Typed(Var(name), dt), Var(idx)): return name, dt, None, None, idx
+    case Slice(Bitcast(dt, Var(name)), Var(idx), Var(idx2)) if idx == idx2: return name, dt, None, None, idx
     case Var(name): return name, dtypes.uint32, None, None, None
   raise ValueError(f"Cannot parse LHS: {lhs}")
 
@@ -369,7 +365,7 @@ def _stmt(stmt, ctx: Ctx):
     case Declare(_, _): pass
     case Assign(lhs, rhs):
       # Handle MEM[addr].type = value -> memory store using INDEX + STORE (buffer set by caller)
-      if isinstance(lhs, Typed) and isinstance(lhs.expr, Call) and lhs.expr.name == 'MEM':
+      if isinstance(lhs, Bitcast) and isinstance(lhs.expr, Call) and lhs.expr.name == 'MEM':
         dt = lhs.dtype
         addr_uop = _expr(lhs.expr.args[0], ctx, dtypes.uint64)
         val_uop = _expr(rhs, ctx, dt)

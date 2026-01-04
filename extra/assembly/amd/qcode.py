@@ -41,20 +41,18 @@ class Const: value: int|float; dtype: DType = dtypes.int32
 @dataclass(frozen=True)
 class Var: name: str
 @dataclass(frozen=True)
-class Typed: expr: Expr; dtype: DType
+class Slice: expr: Expr; hi: Expr; lo: Expr  # bit range [hi:lo], single bit when hi == lo
 @dataclass(frozen=True)
-class Slice: expr: Expr; hi: Expr; lo: Expr
+class Cast: dtype: DType; expr: Expr
 @dataclass(frozen=True)
-class Index: expr: Expr; idx: Expr
-@dataclass(frozen=True)
-class Cast: bits: int; typ: str; expr: Expr
+class Bitcast: dtype: DType; expr: Expr
 @dataclass(frozen=True)
 class Op: op: Ops; src: tuple[Expr, ...]
 @dataclass(frozen=True)
 class Call: name: str; args: tuple[Expr, ...]
 @dataclass(frozen=True)
 class Pack: exprs: tuple[Expr, ...]
-Expr = Const|Var|Typed|Slice|Index|Cast|Op|Call|Pack
+Expr = Const|Var|Slice|Cast|Bitcast|Op|Call|Pack
 
 @dataclass(frozen=True)
 class Assign: lhs: Expr; rhs: Expr
@@ -124,7 +122,7 @@ def expr(s: str) -> Expr:
   if s[0] == '(' and (e := _match(s, 0, '(', ')')) == len(s)-1: return expr(s[1:e])
   if s[0] == '{' and s[-1] == '}': return Pack(tuple(expr(a) for a in _split(s[1:-1])))
   if m := re.match(r"^(\d+)'([IUFB])\(", s):
-    if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1: return Cast(int(m[1]), m[2], expr(s[m.end():e]))
+    if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1: return Cast(_make_dtype(int(m[1]), m[2]), expr(s[m.end():e]))
   if m := re.match(r"^(\d+)'(-?\d+)([IUFB])?$", s):
     return Const(int(m[2]), _make_dtype(int(m[1]), m[3] or 'I'))
   if m := re.match(r"^(\d+)'(-?[\d.]+)$", s):
@@ -137,7 +135,7 @@ def expr(s: str) -> Expr:
   if s[:4] == 'MEM[' and (e := _match(s, 3, '[', ']')) != -1:
     r, b = s[e+1:], Call('MEM', (expr(s[4:e]),))
     if not r: return b  # Just MEM[addr]
-    if r[:1] == '.' and (dt := _get_dtype(r[1:])): return Typed(b, dt)  # MEM[addr].type
+    if r[:1] == '.' and (dt := _get_dtype(r[1:])): return Bitcast(dt, b)  # MEM[addr].type
     # Otherwise fall through to let binary operators parse (e.g., MEM[ADDR].b32.u32 + X)
   if (q := _fop(s, ('?',))) > 0:
     d = b = 0
@@ -173,10 +171,11 @@ def expr(s: str) -> Expr:
         if c in '([{': d += 1
         elif c in ')]}': d -= 1
         elif c == ':' and d == 0: return Slice(expr(b), expr(n[:j]), expr(n[j+1:]))
-    return Index(expr(b), expr(n))
+    idx = expr(n)
+    return Slice(expr(b), idx, idx)
   if '.' in s:
     for i in range(len(s)-1, 0, -1):
-      if s[i] == '.' and (dt := _get_dtype(s[i+1:])): return Typed(expr(s[:i]), dt)
+      if s[i] == '.' and (dt := _get_dtype(s[i+1:])): return Bitcast(dt, expr(s[:i]))
   if s[:5] == 'eval ': return Var(s)
   if re.match(r'^[A-Za-z_][\w.]*$', s): return Var(s)
   try:
@@ -244,10 +243,9 @@ if __name__ == "__main__":
             match n:
               case Const(v, t): return f"{v}" if t == dtypes.int32 else f"{v}:{t.name}"
               case Var(x): return x
-              case Typed(e, t): return f"{pr(e)}.{t.name}"
-              case Slice(e,h,l): return f"{pr(e)}[{pr(h)}:{pr(l)}]"
-              case Index(e, i): return f"{pr(e)}[{pr(i)}]"
-              case Cast(b, t, e): return f"{b}'{t}({pr(e)})"
+              case Bitcast(dt, e): return f"{pr(e)}.{dt.name}"
+              case Slice(e,h,l): return f"{pr(e)}[{pr(h)}]" if h == l else f"{pr(e)}[{pr(h)}:{pr(l)}]"
+              case Cast(dt, e): return f"{dt.name}({pr(e)})"
               case Op(o, src) if len(src) == 1: return f"{o.name}({pr(src[0])})"
               case Op(o, src) if len(src) == 2: return f"({pr(src[0])} {o.name} {pr(src[1])})"
               case Op(o, src) if len(src) == 3: return f"({pr(src[0])} ? {pr(src[1])} : {pr(src[2])})"
