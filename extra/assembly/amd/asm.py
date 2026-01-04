@@ -8,6 +8,10 @@ from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP,
   VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp)
 
+from extra.assembly.amd.autogen.rdna4 import ins
+from extra.assembly.amd.autogen.rdna4.ins import (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM,
+  VBUFFER, VDS, VBUFFEROp, DSOp)
+
 def _matches_encoding(word: int, cls: type[Inst]) -> bool:
   """Check if word matches the encoding pattern of an instruction class."""
   if cls._encoding is None: return False
@@ -118,6 +122,12 @@ def _disasm_vop2(inst: VOP2) -> str:
   if inst.op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
   if inst.op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
   if inst.is_16bit(): return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
+  # Handle 64-bit ops (f64)
+  if 'f64' in name:
+    dst = _vreg(inst.vdst, 2)
+    src0 = _vreg(inst.src0 - 256, 2) if inst.src0 >= 256 else _fmt_src(inst.src0, 2)
+    src1 = _vreg(inst.vsrc1, 2)
+    return f"{name}{suf} {dst}, {src0}, {src1}"
   return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (", vcc_lo" if inst.op == VOP2Op.V_CNDMASK_B32 else "")
 
 def _disasm_vopc(inst: VOPC) -> str:
@@ -147,7 +157,8 @@ def _disasm_sopp(inst: SOPP) -> str:
 def _disasm_smem(inst: SMEM) -> str:
   name = inst.op_name.lower()
   if inst.op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV): return name
-  off_s = f"{decode_src(inst.soffset)} offset:0x{inst.offset:x}" if inst.offset and inst.soffset != 124 else f"0x{inst.offset:x}" if inst.offset else decode_src(inst.soffset)
+  off = getattr(inst, 'ioffset', None) or getattr(inst, 'offset', 0)  # RDNA4 uses ioffset, RDNA3 uses offset
+  off_s = f"{decode_src(inst.soffset)} offset:0x{off:x}" if off and inst.soffset != 124 else f"0x{off:x}" if off else decode_src(inst.soffset)
   sbase_idx, sbase_count = inst.sbase * 2, 4 if (8 <= inst.op.value <= 12 or name == 's_atc_probe_buffer') else 2
   sbase_str = _fmt_src(sbase_idx, sbase_count) if sbase_count == 2 else _sreg(sbase_idx, sbase_count) if sbase_idx <= 105 else _reg("ttmp", sbase_idx - 108, sbase_count)
   if name in ('s_atc_probe', 's_atc_probe_buffer'): return f"{name} {inst.sdata}, {sbase_str}, {off_s}"
@@ -275,7 +286,8 @@ def _disasm_vop3p(inst: VOP3P) -> str:
   name = inst.op_name.lower()
   is_wmma, n, is_fma_mix = 'wmma' in name, inst.num_srcs(), 'fma_mix' in name
   if is_wmma:
-    sc = 2 if 'iu4' in name else 4 if 'iu8' in name else 8
+    # src count: iu4=2, iu8=4, f16/bf16=4 (16 values per 4 VGPRs), f32=8
+    sc = 2 if 'iu4' in name else 4 if 'iu8' in name or 'f16' in name or 'bf16' in name else 8
     src0, src1, src2, dst = _fmt_src(inst.src0, sc), _fmt_src(inst.src1, sc), _fmt_src(inst.src2, 8), _vreg(inst.vdst, 8)
   else: src0, src1, src2, dst = _fmt_src(inst.src0, 1), _fmt_src(inst.src1, 1), _fmt_src(inst.src2, 1), f"v{inst.vdst}"
   opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
@@ -352,13 +364,17 @@ def _disasm_sop1(inst: SOP1) -> str:
   if op in (SOP1Op.S_SETPC_B64, SOP1Op.S_RFE_B64): return f"{name} {_fmt_src(inst.ssrc0, 2)}"
   if op == SOP1Op.S_SWAPPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {_fmt_src(inst.ssrc0, 2)}"
   if op in (SOP1Op.S_SENDMSG_RTN_B32, SOP1Op.S_SENDMSG_RTN_B64): return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
+  # barrier_signal only takes ssrc0 (barrier index), not sdst
+  if 'barrier_signal' in name: return f"{name} {inst.lit(inst.ssrc0)}"
   return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, {inst.lit(inst.ssrc0) if inst.src_regs(0) == 1 else _fmt_src(inst.ssrc0, inst.src_regs(0))}"
 
 def _disasm_sop2(inst: SOP2) -> str:
   return f"{inst.op_name.lower()} {_fmt_sdst(inst.sdst, inst.dst_regs())}, {inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0))}, {inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, inst.src_regs(1))}"
 
 def _disasm_sopc(inst: SOPC) -> str:
-  return f"{inst.op_name.lower()} {_fmt_src(inst.ssrc0, inst.src_regs(0))}, {_fmt_src(inst.ssrc1, inst.src_regs(1))}"
+  s0 = f"0x{inst._literal:x}" if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, inst.src_regs(0))
+  s1 = f"0x{inst._literal:x}" if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, inst.src_regs(1))
+  return f"{inst.op_name.lower()} {s0}, {s1}"
 
 def _disasm_sopk(inst: SOPK) -> str:
   op, name = inst.op, inst.op_name.lower()
@@ -373,9 +389,26 @@ def _disasm_vinterp(inst: VINTERP) -> str:
   mods = _mods((inst.waitexp, f"wait_exp:{inst.waitexp}"), (inst.clmp, "clamp"))
   return f"{inst.op_name.lower()} v{inst.vdst}, {inst.lit(inst.src0, inst.neg & 1)}, {inst.lit(inst.src1, inst.neg & 2)}, {inst.lit(inst.src2, inst.neg & 4)}" + (" " + mods if mods else "")
 
+def _disasm_vbuffer(inst: VBUFFER) -> str:
+  name = inst.op_name.lower()
+  w = {'b32':1,'b64':2,'b96':3,'b128':4}.get(name.split('_')[-1], 1)
+  vaddr = f"v{inst.vaddr}" if inst.offen or inst.idxen else "off"
+  srsrc = _sreg_or_ttmp(inst.rsrc, 4)  # rsrc is already register number, not divided by 4
+  mods = [m for c, m in [(inst.offen,"offen"),(inst.idxen,"idxen")] if c]
+  return f"{name} {_vreg(inst.vdata, w)}, {vaddr}, {srsrc}, {decode_src(inst.soffset)}{' ' + ' '.join(mods) if mods else ''}"
+
+def _disasm_vds(inst: VDS) -> str:
+  name = inst.op_name.lower()
+  w = {'b32':1,'b64':2,'b96':3,'b128':4}.get(name.split('_')[-1], 1)
+  off = f" offset:{inst.offset0 | (inst.offset1 << 8)}" if inst.offset0 or inst.offset1 else ""
+  if 'load' in name:
+    return f"{name} {_vreg(inst.vdst, w)}, v{inst.addr}{off}"
+  else:
+    return f"{name} v{inst.addr}, {_vreg(inst.data0, w)}{off}"
+
 DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, VOP3: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOPD: _disasm_vopd, VOP3P: _disasm_vop3p,
                    VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
-                   MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
+                   MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk, VBUFFER: _disasm_vbuffer, VDS: _disasm_vds}
 
 def disasm(inst: Inst) -> str: return DISASM_HANDLERS[type(inst)](inst)
 
