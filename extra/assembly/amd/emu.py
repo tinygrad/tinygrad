@@ -359,14 +359,12 @@ def decode_program(data: bytes) -> dict[int, Inst]:
   result: dict[int, Inst] = {}
   i = 0
   while i < len(data):
-    try: inst_class = detect_format(data[i:])
-    except ValueError: break  # stop at invalid instruction (padding/metadata after code)
-    inst = inst_class.from_bytes(data[i:i+inst_class._size()+8])  # +8 for potential 64-bit literal
+    inst = detect_format(data[i:]).from_bytes(data[i:])
     inst._words = inst.size() // 4
 
     # Determine dispatch function and pcode function
-    pcode_str = PSEUDOCODE_STRINGS.get(type(inst.op), {}).get(inst.op)
-    if isinstance(inst, SOPP) and inst.op in (SOPPOp.S_ENDPGM, SOPPOp.S_CODE_END): inst._dispatch = dispatch_endpgm
+    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
+    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: inst._dispatch = dispatch_endpgm
     elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER: inst._dispatch = dispatch_barrier
     elif isinstance(inst, SOPP) and inst.op in (SOPPOp.S_CLAUSE, SOPPOp.S_WAITCNT, SOPPOp.S_WAITCNT_DEPCTR, SOPPOp.S_SENDMSG): inst._dispatch = dispatch_nop
     elif isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)): inst._dispatch = exec_scalar
@@ -380,16 +378,13 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     else: inst._dispatch = dispatch_lane(exec_vop)
 
     # Compile pcode for instructions that use it (not VOPD which has _fnx/_fny, not special dispatches)
-    uses_pcode = inst._dispatch not in (dispatch_endpgm, dispatch_barrier, dispatch_nop, dispatch_wmma,
-                                        dispatch_writelane, dispatch_lane(exec_vopd))
-    if pcode_str is None and inst.op_name and uses_pcode: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
-    inst._fn = compile_pseudocode(type(inst.op).__name__, inst.op.name, pcode_str) if pcode_str and uses_pcode else lambda *args, **kwargs: {}
     # VOPD needs separate functions for X and Y ops
     if isinstance(inst, VOPD):
-      def _compile_vopd_op(op):
-        pcode = PSEUDOCODE_STRINGS.get(type(op), {}).get(op)
-        return compile_pseudocode(type(op).__name__, op.name, pcode) if pcode else lambda *args, **kwargs: {}
+      def _compile_vopd_op(op): return compile_pseudocode(type(op).__name__, op.name, PSEUDOCODE_STRINGS[type(op)][op])
       inst._fnx, inst._fny = _compile_vopd_op(_VOPD_TO_VOP[inst.opx]), _compile_vopd_op(_VOPD_TO_VOP[inst.opy])
+    elif inst._dispatch not in (dispatch_endpgm, dispatch_barrier, dispatch_nop, dispatch_wmma, dispatch_writelane):
+      assert type(inst.op) != int, f"inst op of {inst} is int"
+      inst._fn = compile_pseudocode(type(inst.op).__name__, inst.op.name, PSEUDOCODE_STRINGS[type(inst.op)][inst.op])
     result[i // 4] = inst
     i += inst._words * 4
   return result
