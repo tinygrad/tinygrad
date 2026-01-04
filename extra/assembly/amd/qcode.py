@@ -97,7 +97,9 @@ def expr(s: str) -> Expr:
       a = _split(s[m.end():e]); return Call(m[1], tuple(expr(x) for x in a) if a != [''] else ())
   if s[:4] == 'MEM[' and (e := _match(s, 3, '[', ']')) != -1:
     r, b = s[e+1:], Call('MEM', (expr(s[4:e]),))
-    return Typed(b, DTYPES[r[1:]]) if r[:1] == '.' and r[1:] in DTYPES else b
+    if not r: return b  # Just MEM[addr]
+    if r[:1] == '.' and r[1:] in DTYPES: return Typed(b, DTYPES[r[1:]])  # MEM[addr].type
+    # Otherwise fall through to let binary operators parse (e.g., MEM[ADDR].b32.u32 + X)
   if (q := _fop(s, ('?',))) > 0:
     d = b = 0
     for i in range(q+1, len(s)):
