@@ -81,35 +81,73 @@ ACC_GRID = [
 # Derived: all 128 accumulator registers to zero before loop
 ACC_REGS = sorted(set(acc for row in ACC_GRID for acc in row))
 
-# 122 register swaps to permute accumulator layout before output
-PERMUTE_SWAPS = [
-  (128,2),(56,2),(46,2),(100,2),(77,2),(87,2),(27,2),(54,2),(42,2),(98,2),(76,2),(83,2),(32,2),(40,2),(110,2),(68,2),
-  (93,2),(23,2),(59,2),(38,2),(106,2),(66,2),(92,2),(19,2),(64,2),(24,2),(62,2),(20,2),(61,2),(39,2),(107,2),(70,2),
-  (90,2),(18,2),(60,2),(35,2),(112,2),(72,2),(94,2),(4,2),(129,2),(7,2),(127,2),(6,2),(126,2),(133,3),(57,3),(47,3),
-  (101,3),(81,3),(89,3),(31,3),(37,3),(113,3),(73,3),(95,3),(5,3),(124,3),(131,8),(53,8),(49,8),(105,8),(79,8),(85,8),
-  (33,8),(41,8),(111,8),(69,8),(97,8),(9,8),(132,8),(114,10),(12,10),(115,10),(16,10),(122,10),(120,11),(14,11),(116,11),(13,11),
-  (121,11),(15,11),(117,11),(17,11),(123,11),(65,21),(25,21),(63,21),(58,22),(34,22),(108,22),(67,22),(96,22),(8,22),(50,26),(44,26),
-  (99,26),(80,26),(88,26),(30,26),(36,26),(109,26),(71,26),(91,26),(22,26),(51,28),(48,28),(104,28),(78,28),(84,28),(29,28),(55,28),
-  (43,28),(102,28),(74,28),(82,28),(103,45),(75,45),(86,45),(26,45),(45,52),(52,214)]
+# Reserved registers in the accumulator range (not used for accumulators)
+ACC_RESERVED = {118, 119, 125, 130}
 
-# 64 dual FMAC operations per inner loop iteration: (vdst_x, vdst_y, src_ax, src_bx, src_ay, src_by)
-FMAC_PATTERN = [
-  (5,2,186,184,187,185),(3,4,186,185,187,184),(9,6,186,188,187,189),(7,8,187,188,186,189),
-  (13,10,190,188,191,189),(11,12,190,189,191,188),(17,14,190,184,191,185),(15,16,191,184,190,185),
-  (21,18,194,184,195,185),(19,20,194,185,195,184),(25,22,194,188,195,189),(23,24,195,188,194,189),
-  (29,26,198,188,199,189),(27,28,198,189,199,188),(33,30,198,192,199,193),(31,32,199,192,198,193),
-  (37,34,186,192,187,193),(35,36,186,193,187,192),(41,38,186,196,187,197),(39,40,187,196,186,197),
-  (45,42,190,196,191,197),(43,44,190,197,191,196),(49,46,190,192,191,193),(47,48,191,192,190,193),
-  (53,50,194,192,195,193),(51,52,194,193,195,192),(57,54,194,196,195,197),(55,56,195,196,194,197),
-  (61,58,198,196,199,197),(59,60,198,197,199,196),(65,62,198,200,199,201),(63,64,199,200,198,201),
-  (69,66,186,200,187,201),(67,68,186,201,187,200),(73,70,186,204,187,205),(71,72,187,204,186,205),
-  (77,74,190,204,191,205),(75,76,190,205,191,204),(81,78,190,200,191,201),(79,80,191,200,190,201),
-  (85,82,194,200,195,201),(83,84,194,201,195,200),(89,86,194,204,195,205),(87,88,195,204,194,205),
-  (93,90,198,204,199,205),(91,92,198,205,199,204),(97,94,198,208,199,209),(95,96,199,208,198,209),
-  (101,98,186,208,187,209),(99,100,186,209,187,208),(105,102,186,212,187,213),(103,104,187,212,186,213),
-  (109,106,190,212,191,213),(107,108,190,213,191,212),(113,110,190,208,191,209),(111,112,191,208,190,209),
-  (117,114,194,208,195,209),(115,116,194,209,195,208),(121,122,194,212,195,213),(123,120,195,212,194,213),
-  (129,126,198,212,199,213),(127,124,198,213,199,212),(133,214,198,184,199,185),(131,128,199,184,198,185)]
+# Optimized (a_pair, b_pair) iteration order for better GPU scheduling
+# Interleaves A and B pairs to maximize instruction-level parallelism
+FMAC_PAIR_ORDER = [
+  (0,0),(0,1),(1,1),(1,0), (2,0),(2,1),(3,1),(3,2), (0,2),(0,3),(1,3),(1,2), (2,2),(2,3),(3,3),(3,4),
+  (0,4),(0,5),(1,5),(1,4), (2,4),(2,5),(3,5),(3,6), (0,6),(0,7),(1,7),(1,6), (2,6),(2,7),(3,7),(3,0),
+]
+
+def derive_fmac_pattern(acc_grid, a_tile_regs=None, b_tile_regs=None):
+  """Generate 64 dual FMAC ops from accumulator grid with optimized iteration order."""
+  if a_tile_regs is None: a_tile_regs = V_A_TILE_REGS
+  if b_tile_regs is None: b_tile_regs = V_B_TILE_REGS
+  pattern = []
+  for idx, (a_pair, b_pair) in enumerate(FMAC_PAIR_ORDER):
+    a_even, a_odd = a_pair * 2, a_pair * 2 + 1
+    b_even, b_odd = b_pair * 2, b_pair * 2 + 1
+    a_base, b_base = a_tile_regs[a_pair], b_tile_regs[b_pair]
+    # Op 1: normal order -> C[a_even, b_even] + C[a_odd, b_odd]
+    pattern.append((acc_grid[a_even][b_even], acc_grid[a_odd][b_odd],
+                   a_base, b_base, a_base+1, b_base+1))
+    # Op 2: alternate swapping A vs B to vary register banks
+    if idx % 2 == 0:  # swap B
+      pattern.append((acc_grid[a_even][b_odd], acc_grid[a_odd][b_even],
+                     a_base, b_base+1, a_base+1, b_base))
+    else:  # swap A
+      pattern.append((acc_grid[a_odd][b_even], acc_grid[a_even][b_odd],
+                     a_base+1, b_base, a_base, b_base+1))
+  return pattern
+
+# Derived: 64 dual FMAC operations
+FMAC_PATTERN = derive_fmac_pattern(ACC_GRID)
+
+def derive_permute_swaps(acc_grid, reserved=ACC_RESERVED):
+  """Derive swap sequence to permute accumulators from FMAC layout to output order.
+
+  After FMAC loop: acc_grid[a][b] holds C[a,b]
+  Output order: for row_half in 0,1; col_group in 0-3; row_in_group in 0-3; b_off in 0-3
+    -> need C[row_half*4 + row_in_group, col_group*4 + b_off] in descending reg order
+  """
+  out_regs = [r for r in range(133, 1, -1) if r not in reserved]
+  out_regs.remove(124)
+  out_regs = [124] + out_regs  # 124 at front due to epilogue temp reg usage
+
+  def target_ab(i):
+    row_half, col_group = i // 64, (i // 16) % 4
+    row_in_group, b_off = (i // 4) % 4, i % 4
+    return (row_half * 4 + row_in_group, col_group * 4 + b_off)
+
+  reg_contents = {acc_grid[a][b]: (a, b) for a in range(8) for b in range(16)}
+  ab_location = {ab: r for r, ab in reg_contents.items()}
+
+  swaps = []
+  for i in range(128):
+    target_reg, needed_ab = out_regs[i], target_ab(i)
+    current_reg = ab_location[needed_ab]
+    if current_reg != target_reg:
+      swaps.append((current_reg, target_reg))
+      ab_at_target = reg_contents.get(target_reg)
+      reg_contents[target_reg], ab_location[needed_ab] = needed_ab, target_reg
+      if ab_at_target is not None:
+        reg_contents[current_reg], ab_location[ab_at_target] = ab_at_target, current_reg
+  return swaps
+
+# Derived: swap sequence to arrange accumulators for output
+PERMUTE_SWAPS = derive_permute_swaps(ACC_GRID)
 
 # Global memory prefetch: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
 PREFETCH_LOADS = [(171+2*i, 172+2*i, V_GLOBAL_B_ADDR if i < 2 else V_GLOBAL_A_ADDR, 32+4*i, 34+4*i) for i in range(6)]
@@ -448,9 +486,9 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_lshl_b32(s[S_PREFETCH_FLAG], s[S_DIM_N], 2))  # row stride in bytes
 
   # Store 128 output values as 32 groups of 4 (128-bit stores)
-  # After PERMUTE_SWAPS, accumulators are in descending order: 133,132,131,...,2 (skipping non-acc regs)
+  # After PERMUTE_SWAPS, accumulators are in descending order: 133,132,131,...,2 (skipping reserved)
   # with 124 moved to front due to swap sequence
-  out_regs = [r for r in range(133, 1, -1) if r not in {118, 119, 125, 130}]
+  out_regs = [r for r in range(133, 1, -1) if r not in ACC_RESERVED]
   out_regs.remove(124)
   out_regs = [124] + out_regs
   reserved = {V_LANE_ID_MOD8, V_OUTPUT_ROW, V_LANE_MOD8_X4, V_LANE_DIV8_X4, V_ADDR_HI_ZERO}
