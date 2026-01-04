@@ -31,7 +31,7 @@ def _parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
     asm_text = line.split('//')[0].strip()
     if not asm_text: continue
     for j in range(i, min(i + 3, len(lines))):
-      if m := re.search(pattern + r'[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
+      if m := re.search(pattern + r'[^:]*:.*?(?:encoding:\s*)?\[(0x[0-9a-f,x\s]+)\]', lines[j], re.I):
         hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
         try: tests.append((asm_text, bytes.fromhex(hex_bytes)))
         except ValueError: pass
