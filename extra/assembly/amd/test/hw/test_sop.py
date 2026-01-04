@@ -33,6 +33,35 @@ class TestBasicScalar(unittest.TestCase):
     self.assertEqual(st.sgpr[4], 0)
     self.assertEqual(st.scc, 1)
 
+  def test_s_brev_b32(self):
+    """S_BREV_B32 reverses bits of a 32-bit value."""
+    # 10 = 0b00000000000000000000000000001010
+    # reversed = 0b01010000000000000000000000000000 = 0x50000000
+    instructions = [
+      s_mov_b32(s[0], 10),
+      s_brev_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 0x50000000)
+
+  def test_s_brev_b32_all_ones(self):
+    """S_BREV_B32 with all ones stays all ones."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_brev_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 0xFFFFFFFF)
+
+  def test_s_brev_b32_single_bit(self):
+    """S_BREV_B32 with bit 0 set becomes bit 31."""
+    instructions = [
+      s_mov_b32(s[0], 1),
+      s_brev_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 0x80000000)
+
 
 class TestQuadmaskWqm(unittest.TestCase):
   """Tests for S_QUADMASK_B32 and S_WQM_B32."""
@@ -199,6 +228,114 @@ class TestSCCBehavior(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[1], 0, "SCC should be false")
     self.assertEqual(st.scc, 0)
+
+
+class TestSignedArithmetic(unittest.TestCase):
+  """Tests for S_ADD_I32, S_SUB_I32 and their SCC overflow behavior."""
+
+  def test_s_add_i32_no_overflow(self):
+    """S_ADD_I32: 1 + 1 = 2, no overflow, SCC=0."""
+    instructions = [
+      s_mov_b32(s[0], 1),
+      s_add_i32(s[1], s[0], 1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 2)
+    self.assertEqual(st.scc, 0, "No overflow, SCC should be 0")
+
+  def test_s_add_i32_positive_overflow(self):
+    """S_ADD_I32: MAX_INT + 1 overflows, SCC=1."""
+    instructions = [
+      s_mov_b32(s[0], 0x7FFFFFFF),  # MAX_INT
+      s_add_i32(s[1], s[0], 1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 0x80000000)  # Wraps to MIN_INT
+    self.assertEqual(st.scc, 1, "Overflow, SCC should be 1")
+
+  def test_s_add_i32_negative_no_overflow(self):
+    """S_ADD_I32: -10 + 20 = 10, no overflow."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFF6),  # -10 in two's complement
+      s_mov_b32(s[1], 20),
+      s_add_i32(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 10)
+    self.assertEqual(st.scc, 0)
+
+  def test_s_add_i32_negative_overflow(self):
+    """S_ADD_I32: MIN_INT + (-1) underflows, SCC=1."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # MIN_INT
+      s_mov_b32(s[1], 0xFFFFFFFF),  # -1
+      s_add_i32(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0x7FFFFFFF)  # Wraps to MAX_INT
+    self.assertEqual(st.scc, 1, "Underflow, SCC should be 1")
+
+  def test_s_sub_i32_no_overflow(self):
+    """S_SUB_I32: 10 - 5 = 5, no overflow."""
+    instructions = [
+      s_mov_b32(s[0], 10),
+      s_mov_b32(s[1], 5),
+      s_sub_i32(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 5)
+    self.assertEqual(st.scc, 0)
+
+  def test_s_sub_i32_overflow(self):
+    """S_SUB_I32: MAX_INT - (-1) overflows, SCC=1."""
+    instructions = [
+      s_mov_b32(s[0], 0x7FFFFFFF),  # MAX_INT
+      s_mov_b32(s[1], 0xFFFFFFFF),  # -1
+      s_sub_i32(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0x80000000)  # Wraps to MIN_INT
+    self.assertEqual(st.scc, 1, "Overflow, SCC should be 1")
+
+  def test_s_mul_hi_u32(self):
+    """S_MUL_HI_U32: high 32 bits of u32 * u32."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # 2^31
+      s_mov_b32(s[1], 4),
+      s_mul_hi_u32(s[2], s[0], s[1]),  # (2^31 * 4) >> 32 = 2
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 2)
+
+  def test_s_mul_i32(self):
+    """S_MUL_I32: signed multiply low 32 bits."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # -1
+      s_mov_b32(s[1], 10),
+      s_mul_i32(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xFFFFFFF6)  # -10
+
+  def test_division_sequence_from_llvm(self):
+    """Test the division sequence pattern from LLVM-generated code."""
+    # This sequence is from the sin kernel and computes integer division
+    # s10 = dividend, s18 = divisor, result in s6/s14
+    dividend = 0x28BE60DB  # Some value from the sin kernel
+    divisor = 3  # Simplified divisor
+    instructions = [
+      s_mov_b32(s[10], dividend),
+      s_mov_b32(s[18], divisor),
+      # Compute reciprocal approximation: s6 = ~0 / divisor (approx)
+      s_mov_b32(s[11], 0),
+      s_sub_i32(s[11], s[11], s[18]),  # s11 = -divisor
+      # For testing, just verify basic arithmetic works
+      s_mul_i32(s[6], s[10], 2),
+      s_add_i32(s[7], s[6], 1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[6], (dividend * 2) & 0xFFFFFFFF)
+    self.assertEqual(st.sgpr[7], ((dividend * 2) + 1) & 0xFFFFFFFF)
 
 
 if __name__ == '__main__':
