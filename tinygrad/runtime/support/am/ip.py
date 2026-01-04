@@ -183,7 +183,8 @@ class AM_SMU(AM_IP):
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
     elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
-    time.sleep(0.5) # 500ms
+
+    if not self.adev.is_hive(): time.sleep(0.5) # 500ms
 
   def read_table(self, table_t, arg):
     if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
