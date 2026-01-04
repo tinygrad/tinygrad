@@ -57,7 +57,7 @@ S_WORKGROUP_X = 14        # workgroup_id_x
 S_WORKGROUP_Y = 15        # workgroup_id_y
 
 # =============================================================================
-# Register assignment tables
+# Data tables
 # =============================================================================
 
 # 128 accumulator registers (FMAC destinations) to zero before loop
@@ -96,11 +96,9 @@ FMAC_PATTERN = [
 # Global memory prefetch: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
 PREFETCH_LOADS = [(171+2*i, 172+2*i, V_GLOBAL_B_ADDR if i < 2 else V_GLOBAL_A_ADDR, 32+4*i, 34+4*i) for i in range(6)]
 
-# LDS store pairs for prefetched data: (addr_vreg, data_vreg)
-# Interleaves A stores (addr v[155,158-164], data v[167-174]) with B stores (addr v[141-148], data v[175-182])
-_lds_addr_a, _lds_addr_b = [155] + list(range(158, 165)), list(range(141, 149))
-LDS_STORE_PAIRS = [x for pair in zip([(a, 167+i) for i, a in enumerate(_lds_addr_a)],
-                                      [(b, 175+i) for i, b in enumerate(_lds_addr_b)]) for x in pair]
+# LDS store pairs: interleaved A (addr v[155,158-164], data v[167-174]) and B (addr v[141-148], data v[175-182])
+LDS_STORE_PAIRS = [(155,167),(141,175),(158,168),(142,176),(159,169),(143,177),(160,170),(144,178),
+                   (161,171),(145,179),(162,172),(146,180),(163,173),(147,181),(164,174),(148,182)]
 
 # Initial tile prefetch: (vdst, saddr_lo)
 INIT_PREFETCH = [(167+i, 24+2*i) for i in range(4)]
