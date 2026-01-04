@@ -87,13 +87,13 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing, ctx=ren.device, name="lower all index dtypes")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
+  # optional pre matcher
+  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
+
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
-
-  # optional pre matcher
-  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, ctx=ren, name="pre_matcher")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
@@ -128,7 +128,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 
 def do_linearize(prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
-  #if SPEC: type_verify(lst, program_spec)
+  if SPEC: type_verify(lst, program_spec)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:

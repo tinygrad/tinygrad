@@ -161,6 +161,7 @@ class X86Ops(FastEnum):
   # bitcasts
   VMOVD = auto(); VMOVQ = auto(); VMOVDm = auto(); VMOVQm = auto() # noqa: E702
   # comparisons
+  VUCOMISS = auto(); VUCOMISD = auto() # noqa: E702
   VCMPSS = auto(); VCMPSD = auto(); VCMPPS = auto(); VCMPPD = auto() # noqa: E702
   VPCMPGTB = auto(); VPCMPGTW = auto(); VPCMPGTD = auto(); VPCMPGTQ = auto() # noqa: E702
   VPCMPEQB = auto(); VPCMPEQW = auto(); VPCMPEQD = auto(); VPCMPEQQ = auto() # noqa: E702
@@ -231,7 +232,7 @@ class X86GroupOp:
                 X86Ops.VPMULLW, X86Ops.VPMULLD, X86Ops.VROUNDSS, X86Ops.VROUNDSD, X86Ops.VSQRTSS, X86Ops.VSQRTSD, X86Ops.VSHUFPS, X86Ops.VINSERTPS,
                 X86Ops.VPINSRB, X86Ops.VPINSRW, X86Ops.VPINSRD, X86Ops.VPINSRQ, X86Ops.VPAND, X86Ops.VPOR, X86Ops.VPXOR, X86Ops.VPSLLVD,
                 X86Ops.VPSLLVQ, X86Ops.VPSRLVD, X86Ops.VPSRLVQ, X86Ops.VPSRAVD, X86Ops.VCVTSI2SS, X86Ops.VCVTSI2SD, X86Ops.VCVTSS2SD, X86Ops.VCVTSD2SS,
-                X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB}
+                X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB, X86Ops.VUCOMISS, X86Ops.VUCOMISD}
 
   # X86Ops whose third src can read from memory NOTE: these are TwoAddress1st so the third src is actually the second
   ReadMem3rd = {X86Ops.VFMADD213SS, X86Ops.VFMADD213SD, X86Ops.VFMADD213PS, X86Ops.VFMADD213PD}
@@ -248,6 +249,6 @@ class X86GroupOp:
   # X86Ops that write flags or can modify flags to undefined values
   WriteFlags = {X86Ops.CMP, X86Ops.CMPi, X86Ops.ADD, X86Ops.ADDi, X86Ops.SUB, X86Ops.SUBi, X86Ops.IMUL, X86Ops.IMULi, X86Ops.IDIV, X86Ops.DIV,
                 X86Ops.SHL, X86Ops.SHLi, X86Ops.SHR, X86Ops.SHRi, X86Ops.SAR, X86Ops.SARi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi,
-                X86Ops.OR, X86Ops.ORi}
+                X86Ops.OR, X86Ops.ORi, X86Ops.VUCOMISS, X86Ops.VUCOMISD}
 
   All = set(X86Ops)

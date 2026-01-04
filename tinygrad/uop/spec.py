@@ -18,6 +18,9 @@ from tinygrad.uop.validate import validate_index
 shared_spec = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
 
+  # NOOP
+  (UPat(Ops.NOOP), lambda: True),
+
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
@@ -279,6 +282,8 @@ x86_spec = PatternMatcher([
   (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER)), lambda: True),
   (UPat(GroupOp.All), lambda: False),
   (UPat(X86GroupOp.All), lambda: True),
+  # vblends take mask which is float or int dtype
+  # cmove take flag producing instruction not just CMP
 ])
 
 # ***** uop helpers *****

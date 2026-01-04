@@ -124,8 +124,6 @@ class dtypes:
   @staticmethod
   def is_bool(x: DType) -> bool: return x.scalar() == dtypes.bool
   @staticmethod
-  def is_mask(x: DType) -> bool: return x.scalar() in dtypes.masks
-  @staticmethod
   def from_py(x) -> DType:
     if x.__class__ is float: return dtypes.default_float
     if x.__class__ is int: return dtypes.default_int
@@ -162,11 +160,6 @@ class dtypes:
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
   index: Final[DType] = DType.new(-1,100, "index", None)
-  # mask dtypes are used in x86/arm64 backends
-  mask8: Final[DType] = DType.new(-1, 1, "mask8", None)
-  mask16: Final[DType] = DType.new(-1, 2, "mask16", None)
-  mask32: Final[DType] = DType.new(-1, 4, "mask32", None)
-  mask64: Final[DType] = DType.new(-1, 8, "mask64", None)
   bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 1, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 1, "unsigned char", 'B')
@@ -200,7 +193,6 @@ class dtypes:
 
   fp8s = (fp8e4m3, fp8e5m2)
   floats = fp8s + (float16, bfloat16, float32, float64)
-  masks = (mask8, mask16, mask32, mask64)
   int8s = (uint8, int8)
   int16s = (uint16, int16)
   int32s = (uint32, int32)
@@ -235,10 +227,8 @@ def least_upper_dtype(*ds:DType) -> DType:
       if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index", "mask"))}
-INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()},
-                       **{v.name:k for k,v in dtypes.__dict__.items() if isinstance(v, DType) and k.startswith("mask")},
-                       "void": "void", "index":"index"}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index"))}
+INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "index":"index"}
 
 @functools.cache
 def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
