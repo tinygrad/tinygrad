@@ -1,7 +1,7 @@
 # UOp-based pseudocode compiler for AMD GPU instruction emulation
 import functools, struct, math
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes, DType, AddrSpace
 from extra.assembly.amd.qcode import parse, Const, Var, Typed, Slice, Index, Cast, Unary, Binary, Ternary, Call, Pack, Assign, Declare, If, For, QDType
 
 # Type mapping from qcode types to tinygrad dtypes
@@ -36,13 +36,23 @@ INPUT_VARS = {
   'SIMM16': UOp(Ops.DEFINE_VAR, dtypes.int32, (), ('SIMM16', -32768, 32767)),
   'SIMM32': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('SIMM32', 0, 0xffffffff)),
   'PC': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('PC', 0, 0xffffffffffffffff)),
+  # Memory-related variables (for SMEM/FLAT/GLOBAL ops)
+  'ADDR': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('ADDR', 0, 0xffffffffffffffff)),
+  'SDATA': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('SDATA', 0, 0xffffffffffffffff)),
+  'VDATA': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('VDATA', 0, 0xffffffffffffffff)),
+  'VDST': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('VDST', 0, 0xffffffffffffffff)),
+  'RETURN_DATA': UOp(Ops.DEFINE_VAR, dtypes.uint64, (), ('RETURN_DATA', 0, 0xffffffffffffffff)),
 }
+
+# Global memory buffer for MEM[] accesses - DEFINE_GLOBAL with byte pointer
+MEM_BUF = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(addrspace=AddrSpace.GLOBAL), arg=0)
 
 class Ctx:
   """Compilation context - tracks variables and outputs."""
   def __init__(self):
     self.vars: dict[str, UOp] = dict(INPUT_VARS)
     self.outputs: list[tuple[str, UOp, DType]] = []
+    self.mem_stores: list[UOp] = []  # STORE UOps for MEM
 
 def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
   """Transform qcode AST expression to UOp."""
@@ -75,6 +85,11 @@ def _expr(node, ctx: Ctx, hint: DType = None) -> UOp:
 
     case Typed(expr, qdt):
       dt = _qdt(qdt)
+      # Handle MEM[addr].type -> memory load using DEFINE_GLOBAL + INDEX + LOAD
+      if isinstance(expr, Call) and expr.name == 'MEM':
+        addr_uop = _expr(expr.args[0], ctx, dtypes.uint64)
+        idx = UOp(Ops.INDEX, dt.ptr(0, AddrSpace.GLOBAL), (MEM_BUF, addr_uop))
+        return UOp(Ops.LOAD, dt, (idx,))
       if isinstance(expr, Var):
         if expr.name in ('VCCZ', 'EXECZ'):
           return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars.get('VCC' if expr.name == 'VCCZ' else 'EXEC'), UOp.const(dtypes.uint64, 0))), dtypes.uint32)
@@ -308,8 +323,17 @@ def _stmt(stmt, ctx: Ctx):
   match stmt:
     case Declare(_, _): pass
     case Assign(lhs, rhs):
+      # Handle MEM[addr].type = value -> memory store using DEFINE_GLOBAL + INDEX + STORE
+      if isinstance(lhs, Typed) and isinstance(lhs.expr, Call) and lhs.expr.name == 'MEM':
+        dt = _qdt(lhs.dtype)
+        addr_uop = _expr(lhs.expr.args[0], ctx, dtypes.uint64)
+        val_uop = _expr(rhs, ctx, dt)
+        idx = UOp(Ops.INDEX, dt.ptr(0, AddrSpace.GLOBAL), (MEM_BUF, addr_uop))
+        ctx.mem_stores.append(UOp(Ops.STORE, dtypes.void, (idx, val_uop)))
+        return
+
       var, dtype, hi, lo, idx_var = _get_lhs_info(lhs, ctx)
-      out_vars = ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC')
+      out_vars = ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC', 'SDATA', 'VDATA', 'RETURN_DATA')
 
       # Bit index: D0.u64[laneId] = expr
       if idx_var is not None:
@@ -323,20 +347,25 @@ def _stmt(stmt, ctx: Ctx):
         if var in out_vars: ctx.outputs.append((var, result, dtype))
         return
 
-      # Bit range: D0[31:16].f16 = expr
+      # Bit range: D0[31:16].f16 = expr or SDATA[63:32] = expr
       if hi is not None and lo is not None:
         if hi < lo: hi, lo = lo, hi
-        base = ctx.vars.get(var, UOp.const(dtypes.uint32, 0))
+        # Use 64-bit operations if slice extends beyond 32 bits
+        use64 = hi >= 32
+        op_dt = dtypes.uint64 if use64 else dtypes.uint32
+        base = ctx.vars.get(var, UOp.const(op_dt, 0))
+        if base.dtype != op_dt: base = _cast(base, op_dt)
         rhs_uop = _expr(rhs, ctx, dtype)
-        rhs_bits = UOp(Ops.BITCAST, dtypes.uint16 if dtype == dtypes.float16 else (dtypes.uint32 if dtype == dtypes.float32 else dtypes.uint64), (rhs_uop,)) if dtype in FLOATS else _cast(rhs_uop, dtypes.uint32)
-        if dtype == dtypes.float16: rhs_bits = _cast(rhs_bits, dtypes.uint32)
+        rhs_bits = UOp(Ops.BITCAST, dtypes.uint16 if dtype == dtypes.float16 else (dtypes.uint32 if dtype == dtypes.float32 else dtypes.uint64), (rhs_uop,)) if dtype in FLOATS else _cast(rhs_uop, op_dt)
+        if dtype == dtypes.float16: rhs_bits = _cast(rhs_bits, op_dt)
         mask = (1 << (hi - lo + 1)) - 1
-        shifted = UOp(Ops.SHL, dtypes.uint32, (UOp(Ops.AND, dtypes.uint32, (rhs_bits, UOp.const(dtypes.uint32, mask))), UOp.const(dtypes.uint32, lo)))
-        result = UOp(Ops.OR, dtypes.uint32, (UOp(Ops.AND, dtypes.uint32, (_cast(base, dtypes.uint32), UOp.const(dtypes.uint32, ~(mask << lo) & 0xffffffff))), shifted))
+        shifted = UOp(Ops.SHL, op_dt, (UOp(Ops.AND, op_dt, (rhs_bits, UOp.const(op_dt, mask))), UOp.const(op_dt, lo)))
+        clear_mask = ~(mask << lo) & (0xffffffffffffffff if use64 else 0xffffffff)
+        result = UOp(Ops.OR, op_dt, (UOp(Ops.AND, op_dt, (base, UOp.const(op_dt, clear_mask))), shifted))
         ctx.vars[var] = result
         if var in out_vars:
           ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
-          ctx.outputs.append((var, result, dtypes.uint32))
+          ctx.outputs.append((var, result, op_dt))
         return
 
       # Simple assignment
@@ -394,35 +423,74 @@ def _float_to_bits(val: float, dtype: DType) -> int:
   if dtype == dtypes.float64: return struct.unpack('<Q', struct.pack('<d', val))[0]
   return int(val)
 
-def _compile_pseudocode(pseudocode: str) -> tuple[UOp, list[tuple[str, DType]], dict[str, UOp]]:
-  """Compile pseudocode to UOp graph."""
+def _compile_pseudocode(pseudocode: str) -> tuple[UOp, list[tuple[str, DType]], dict[str, UOp], list[UOp]]:
+  """Compile pseudocode to UOp graph. Returns (sink, outputs, input_vars, mem_stores)."""
   ctx = Ctx()
   for stmt in parse(pseudocode): _stmt(stmt, ctx)
-  return UOp(Ops.SINK, dtypes.void, tuple(u for _, u, _ in ctx.outputs) or ()), [(n, d) for n, _, d in ctx.outputs], INPUT_VARS
+  sink = UOp(Ops.SINK, dtypes.void, tuple(u for _, u, _ in ctx.outputs) or ())
+  return sink, [(n, d) for n, _, d in ctx.outputs], INPUT_VARS, ctx.mem_stores
 
-def _make_uop_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[str, UOp]):
-  """Create runtime function that evaluates UOp graph via simplify."""
-  def fn(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
-    simm16 = (literal if -32768 <= literal <= 32767 else (literal - 65536 if literal < 65536 else 0)) if literal is not None else 0
-    dvars = {
-      input_vars['S0']: UOp.const(dtypes.uint32, s0 & 0xffffffff), input_vars['S1']: UOp.const(dtypes.uint32, s1 & 0xffffffff),
-      input_vars['S2']: UOp.const(dtypes.uint32, s2 & 0xffffffff), input_vars['D0']: UOp.const(dtypes.uint32, d0 & 0xffffffff),
-      input_vars['S0_64']: UOp.const(dtypes.uint64, s0), input_vars['S1_64']: UOp.const(dtypes.uint64, s1),
-      input_vars['S2_64']: UOp.const(dtypes.uint64, s2), input_vars['D0_64']: UOp.const(dtypes.uint64, d0),
-      input_vars['SCC']: UOp.const(dtypes.uint32, scc), input_vars['VCC']: UOp.const(dtypes.uint64, vcc),
-      input_vars['EXEC']: UOp.const(dtypes.uint64, exec_mask), input_vars['laneId']: UOp.const(dtypes.uint32, laneId),
-      input_vars['SIMM16']: UOp.const(dtypes.int32, simm16), input_vars['SIMM32']: UOp.const(dtypes.uint32, literal or 0),
-      input_vars['PC']: UOp.const(dtypes.uint64, pc or 0),
-    }
-    simplified = sink.substitute(dvars).simplify()
-    assert simplified.op == Ops.SINK, f"expected SINK, got {simplified.op}"
+# Map dtype to memory accessor name for emu.py
+_DTYPE_ACCESSOR = {
+  dtypes.uint8: 'u8', dtypes.int8: 'i8', dtypes.uint16: 'u16', dtypes.int16: 'i16',
+  dtypes.uint32: 'u32', dtypes.int32: 'i32', dtypes.uint64: 'u64', dtypes.int64: 'i64',
+  dtypes.float32: 'u32', dtypes.float64: 'u64',
+}
+
+def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[str, UOp], mem_stores: list[UOp]):
+  """Create runtime function using substitute+simplify, with memory ops on sink."""
+  is_mem = bool(mem_stores) or any(u.op == Ops.LOAD for u in sink.toposort())
+  # Add stores to sink so they get substituted/simplified too
+  if mem_stores: sink = UOp(Ops.SINK, dtypes.void, sink.src + tuple(mem_stores))
+
+  def _extract_results(s, MEM=None):
+    # Execute stores and extract output values from simplified sink
+    for u in s.src:
+      if u.op == Ops.STORE:
+        idx_uop, val_uop = u.src[0], u.src[1]
+        addr, val, dt = int(idx_uop.src[1].arg), val_uop.arg, idx_uop.dtype.base
+        acc = _DTYPE_ACCESSOR.get(dt, 'u32')
+        if dt == dtypes.float32: val = struct.unpack('<I', struct.pack('<f', val))[0]
+        elif dt == dtypes.float64: val = struct.unpack('<Q', struct.pack('<d', val))[0]
+        setattr(MEM[addr], acc, int(val))
     result = {}
     for i, (name, dtype) in enumerate(output_info):
-      out = simplified.src[i]
-      assert out.op == Ops.CONST, f"simplify did not produce CONST for {name}, got {out.op}"
-      result[name] = _float_to_bits(out.arg, dtype) if dtype in FLOATS else int(out.arg) & (0xffffffff if dtype.itemsize <= 4 else 0xffffffffffffffff)
+      if i >= len(s.src) or s.src[i].op != Ops.CONST: continue
+      result[name] = _float_to_bits(s.src[i].arg, dtype) if dtype in FLOATS else int(s.src[i].arg) & (0xffffffff if dtype.itemsize <= 4 else 0xffffffffffffffff)
     return result
-  return fn
+
+  if is_mem:
+    def fn(MEM, addr, vdata=0, vdst=0):
+      dvars = {input_vars['ADDR']: UOp.const(dtypes.uint64, addr), input_vars['SDATA']: UOp.const(dtypes.uint64, 0),
+               input_vars['VDATA']: UOp.const(dtypes.uint64, vdata), input_vars['VDST']: UOp.const(dtypes.uint64, vdst),
+               input_vars['RETURN_DATA']: UOp.const(dtypes.uint64, 0)}
+      s1 = sink.substitute(dvars).simplify()
+      # Replace LOADs with actual values from MEM, then simplify again
+      loads = {}
+      for u in s1.toposort():
+        if u.op == Ops.LOAD:
+          idx_uop = u.src[0]
+          load_addr, dt = int(idx_uop.src[1].arg), idx_uop.dtype.base
+          acc = _DTYPE_ACCESSOR.get(dt, 'u32')
+          loads[u] = UOp.const(dt, getattr(MEM[load_addr], acc))
+      s2 = s1.substitute(loads).simplify() if loads else s1
+      return _extract_results(s2, MEM)
+    return fn
+  else:
+    def fn(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+      simm16 = (literal if -32768 <= literal <= 32767 else (literal - 65536 if literal < 65536 else 0)) if literal is not None else 0
+      dvars = {
+        input_vars['S0']: UOp.const(dtypes.uint32, s0 & 0xffffffff), input_vars['S1']: UOp.const(dtypes.uint32, s1 & 0xffffffff),
+        input_vars['S2']: UOp.const(dtypes.uint32, s2 & 0xffffffff), input_vars['D0']: UOp.const(dtypes.uint32, d0 & 0xffffffff),
+        input_vars['S0_64']: UOp.const(dtypes.uint64, s0), input_vars['S1_64']: UOp.const(dtypes.uint64, s1),
+        input_vars['S2_64']: UOp.const(dtypes.uint64, s2), input_vars['D0_64']: UOp.const(dtypes.uint64, d0),
+        input_vars['SCC']: UOp.const(dtypes.uint32, scc), input_vars['VCC']: UOp.const(dtypes.uint64, vcc),
+        input_vars['EXEC']: UOp.const(dtypes.uint64, exec_mask), input_vars['laneId']: UOp.const(dtypes.uint32, laneId),
+        input_vars['SIMM16']: UOp.const(dtypes.int32, simm16), input_vars['SIMM32']: UOp.const(dtypes.uint32, literal or 0),
+        input_vars['PC']: UOp.const(dtypes.uint64, pc or 0),
+      }
+      return _extract_results(sink.substitute(dvars).simplify())
+    return fn
 
 # Ops with known issues (subtle float semantics, register array access, unimplemented features)
 _SKIP_OPS = {
@@ -433,6 +501,8 @@ _SKIP_OPS = {
   'V_FREXP_MANT_F16', 'V_FREXP_MANT_F32', 'V_FREXP_MANT_F64',
   'V_DIV_FIXUP_F16', 'V_DIV_FIXUP_F32', 'V_DIV_SCALE_F32', 'V_DIV_SCALE_F64',  # complex NaN/inf/denorm handling
   'V_TRIG_PREOP_F64',  # lookup table for 2/PI mantissa bits
+  'V_MIN_F16', 'V_MIN_F32', 'V_MIN_F64', 'V_MAX_F16', 'V_MAX_F32', 'V_MAX_F64',  # neg zero handling: -0 < +0
+  'V_SIN_F16', 'V_SIN_F32', 'V_COS_F16', 'V_COS_F32',  # transcendental with special range reduction
   # Bit manipulation ops (need CLZ/CTZ/BREV intrinsics)
   'V_CLZ_I32_U32', 'V_CTZ_I32_B32', 'S_BREV_B32', 'S_BREV_B64',
   'S_FF0_I32_B32', 'S_FF0_I32_B64', 'S_FF1_I32_B32', 'S_FF1_I32_B64',
@@ -464,14 +534,19 @@ _SKIP_OPS = {
   'V_CVT_OFF_F32_I4',  # CVT_OFF_TABLE lookup
 }
 
-# Memory/runtime patterns that can't be compiled to pure UOps
-_MEM_PATTERNS = ('MEM[', 'LDS[', 'LDS(', 'SMEM[', 'FLAT[', 'GLOBAL[', 'DS[', 'SCRATCH[', 'VGPR[', 'SGPR[', 'GPR[', 'GS_REGS', 'ADDR',
-                 'thread_in[', 'thread_out[', 'thread_valid[')  # DS_SWIZZLE patterns
+# Patterns that still need pcode (LDS, register arrays, special ops, atomics/DS with DATA/OFFSET)
+# Note: 'DATA.' matches atomic ops (not SDATA/VDATA), 'OFFSET0' matches DS ops (not just OFFSET in addr calc)
+_PCODE_PATTERNS = ('LDS[', 'LDS(', 'VGPR[', 'SGPR[', 'GPR[', 'GS_REGS', 'thread_in[', 'thread_out[', 'thread_valid[',
+                   ' DATA.', '=DATA.', ' DATA[', '=DATA[', 'DATA2', 'OFFSET0', 'OFFSET1', 'OFFSET.')
+# Wide outputs (>64 bit) that need pcode's arbitrary-precision integers
+_WIDE_OUTPUT_PATTERNS = ('SDATA[95', 'SDATA[127', 'SDATA[159', 'SDATA[191', 'SDATA[223', 'SDATA[255',  # SMEM B128, B256, B512
+                         'VDATA[95', 'VDATA[127')  # FLAT B128
 
 @functools.cache
 def compile_uop(op_name: str, pseudocode: str):
   """Compile pseudocode to UOp-based function. Returns None if unsupported."""
   if op_name in _SKIP_OPS: return None
-  if any(p in pseudocode for p in _MEM_PATTERNS): return None  # memory ops need pcode
-  sink, output_info, input_vars = _compile_pseudocode(pseudocode)
-  return _make_uop_fn(sink, output_info, input_vars)
+  if any(p in pseudocode for p in _PCODE_PATTERNS): return None  # these patterns still need pcode
+  if any(p in pseudocode for p in _WIDE_OUTPUT_PATTERNS): return None  # >64-bit outputs need pcode
+  sink, output_info, input_vars, mem_stores = _compile_pseudocode(pseudocode)
+  return _make_fn(sink, output_info, input_vars, mem_stores)
