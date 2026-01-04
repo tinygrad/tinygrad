@@ -2078,14 +2078,24 @@ class Tensor(OpMixin):
     inputs = inputs_str.split(",")
     if len(xs)!=len(inputs): raise ValueError(f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}")
 
-    # map the value of each letter in the formula
-    letter_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(inputs, xs)]).items())
+    # handle trace (repeated letter in single input means take diagonal)
+    xs_:list[Tensor] = list(xs)
+    for i, (letters, x) in enumerate(zip(inputs, xs)):
+      for c in set(letters):
+        while (idxs := [j for j, ch in enumerate(letters) if ch == c]) and len(idxs) > 1:
+          d0, d1, n = idxs[0], idxs[1], cast(int, x.shape[idxs[0]])
+          perm = [j for j in range(x.ndim) if j not in (d0, d1)] + [d0, d1]
+          x = x.permute(perm).flatten(-2).pad(((0,0),)*(x.ndim-2)+((0,n),)).unflatten(-1, (n, n+1))[..., 0] if x.ndim > 2 else x.diagonal()
+          letters = letters[:d1] + letters[d1+1:]
+      inputs[i], xs_[i] = letters, x
 
-    xs_:list[Tensor] = []
+    # map the value of each letter in the formula
+    letter_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(inputs, xs_)]).items())
+
     lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in inputs]
-    for x,(order,letters) in zip(xs, [list(zip(*l)) for l in lhs]):
-      # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
-      xs_.append(x.permute(order).reshape([val if letter in letters else 1 for letter,val in letter_val]).expand([val for _,val in letter_val]))
+    # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
+    xs_ = [x.permute(o).reshape([v if l in letters else 1 for l,v in letter_val]).expand([v for _,v in letter_val])
+           for x,(o,letters) in zip(xs_, [list(zip(*l)) for l in lhs])]
 
     # ordinal encode the output alphabet
     rhs_order = argsort(argsort(list(output)))
