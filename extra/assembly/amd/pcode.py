@@ -33,7 +33,9 @@ def _isquietnan(x): return _check_nan_type(x, 1, True)  # quiet NaN has quiet bi
 def _issignalnan(x): return _check_nan_type(x, 0, False)  # signaling NaN has quiet bit = 0
 def _gt_neg_zero(a, b): return (a > b) or (a == 0 and b == 0 and not math.copysign(1, a) < 0 and math.copysign(1, b) < 0)
 def _lt_neg_zero(a, b): return (a < b) or (a == 0 and b == 0 and math.copysign(1, a) < 0 and not math.copysign(1, b) < 0)
-def _fma(a, b, c): return a * b + c
+def _fma(a, b, c):
+  try: return math.fma(float(a), float(b), float(c))
+  except ValueError: return float('nan')  # inf * 0 + c is NaN per IEEE 754
 def _signext(v): return v
 def _fpop(fn):
   def wrapper(x):
@@ -368,8 +370,8 @@ class TypedView:
   def __or__(s, o): return int(s) | int(o)
   def __xor__(s, o): return int(s) ^ int(o)
   def __invert__(s): return ~int(s)
-  def __lshift__(s, o): n = int(o); return int(s) << n if 0 <= n < 64 else 0
-  def __rshift__(s, o): n = int(o); return int(s) >> n if 0 <= n < 64 else 0
+  def __lshift__(s, o): n = int(o); return int(s) << n if 0 <= n < 64 or s._nbits() > 64 else 0
+  def __rshift__(s, o): n = int(o); return int(s) >> n if 0 <= n < 64 or s._nbits() > 64 else 0
   def __rand__(s, o): return int(o) & int(s)
   def __ror__(s, o): return int(o) | int(s)
   def __rxor__(s, o): return int(o) ^ int(s)

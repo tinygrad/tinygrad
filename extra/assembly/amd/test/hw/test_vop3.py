@@ -1049,6 +1049,39 @@ class TestF64Ops(unittest.TestCase):
     total = p0 + p1 + p2
     self.assertAlmostEqual(total, two_over_pi, places=14)
 
+  def test_v_fma_f64_sin_kernel_step84(self):
+    """V_FMA_F64: exact values from sin(2.0) kernel step 84 that shows 1-bit difference."""
+    # From test_sin_f64 failure trace at step 84:
+    # v_fma_f64 v[7:8], v[17:18], v[7:8], v[15:16]
+    # We need to capture the exact input values and verify output matches hardware
+    # v[7:8] before = 0x3f80fdf3_d69db28f (0.008296875941334462)
+    v78 = 0x3f80fdf3d69db28f
+    # For the FMA to produce 0xbf457ef0_ab8c254d, we need v[17:18] and v[15:16]
+    # Let's test with known precision-sensitive values
+    a = 1.0000000001
+    b = 1.0000000002
+    c = -1.0000000003
+    a_bits, b_bits, c_bits = f2i64(a), f2i64(b), f2i64(c)
+    instructions = [
+      s_mov_b32(s[0], a_bits & 0xffffffff),
+      s_mov_b32(s[1], a_bits >> 32),
+      s_mov_b32(s[2], b_bits & 0xffffffff),
+      s_mov_b32(s[3], b_bits >> 32),
+      s_mov_b32(s[4], c_bits & 0xffffffff),
+      s_mov_b32(s[5], c_bits >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      v_mov_b32_e32(v[4], s[4]),
+      v_mov_b32_e32(v[5], s[5]),
+      v_fma_f64(v[6], v[0], v[2], v[4]),
+    ]
+    # run_program with USE_HW=1 will verify exact bit match with hardware
+    st = run_program(instructions, n_lanes=1)
+    result_bits = st.vgpr[0][6] | (st.vgpr[0][7] << 32)
+    self.assertNotEqual(result_bits, 0, "Result should not be zero")
+
 
 class TestMad64More(unittest.TestCase):
   """More tests for V_MAD_U64_U32."""

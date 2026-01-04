@@ -393,6 +393,9 @@ class TestTinygradKernels(unittest.TestCase):
     x_np = np.random.randn(16, 10).astype(np.float32)
     self._test_kernel(lambda T: (T(x_np.tolist()).reshape(16,10) + 0).cross_entropy((T(classes).int().reshape(16) + 0)))
   def test_isinf(self): self._test_kernel(lambda T: T([float('-inf'), 0., float('inf'), 1.1]*8).isinf())
+  def test_sin_f64(self):
+    from tinygrad import dtypes
+    self._test_kernel(lambda T: T([2.0], dtype=dtypes.float64).sin())
 
 if __name__ == "__main__":
   unittest.main()
