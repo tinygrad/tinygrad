@@ -8,13 +8,15 @@
 
 from extra.assembly.amd.dsl import s, v, VCC_LO, RawImm, EXEC_LO
 from extra.assembly.amd.autogen.rdna3.ins import *
-from extra.assembly.amd.autogen.rdna3.enum import VOP1Op
 
 # =============================================================================
 # Kernel constants
 # =============================================================================
-LDS_SIZE = 8320   # Local data share size in bytes
-MATRIX_DIM = 4096 # Matrix dimension N (assumes square NxN matrices)
+LDS_SIZE = 8320       # Local data share size in bytes
+MATRIX_DIM = 4096     # Matrix dimension N (assumes square NxN matrices)
+LDS_A_STRIDE = 0x210  # LDS stride for A tile (528 bytes)
+LDS_B_STRIDE = 0x200  # LDS stride for B tile (512 bytes)
+LDS_BASE_OFFSET = 0x1080  # Base LDS offset for tiles
 
 # =============================================================================
 # Named register assignments (VGPRs)
@@ -176,8 +178,8 @@ class Kernel:
   def main_loop_iter(self, prefetch_idx):
     """One iteration of the main GEMM loop."""
     self.lds_load_ab_tiles()
-    self.emit(v_add_nc_u32_e32(v[V_LDS_A_PTR], 0x210, v[V_LDS_A_PTR]))
-    self.emit(v_add_nc_u32_e32(v[V_LDS_B_PTR], 0x200, v[V_LDS_B_PTR]))
+    self.emit(v_add_nc_u32_e32(v[V_LDS_A_PTR], LDS_A_STRIDE, v[V_LDS_A_PTR]))
+    self.emit(v_add_nc_u32_e32(v[V_LDS_B_PTR], LDS_B_STRIDE, v[V_LDS_B_PTR]))
     self.emit(s_waitcnt(simm16=64519))
     self.fmac_block()
     self.emit(s_setprio(0))
@@ -376,6 +378,7 @@ def build_kernel(arch='gfx1100'):
   # LDS address computation
   # ===========================================================================
   lds_rows = [10, 11, 14, 15, 16, 17, 18]
+  lds_temps = [19, 20, 21, 22, 32, 33, 34]
 
   k.emit(v_add_nc_u32_e32(v[9], s[S_LOOP_CTR], v[22]))
   for i, dst in enumerate(lds_rows):
@@ -387,33 +390,33 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[19], s[S_LOOP_CTR], v[10]))
   k.emit(v_add_nc_u32_e32(v[8], s[S_LOOP_BOUND], v[1]))
 
-  for dst, src in [(20,11), (21,14), (32,15), (33,16), (34,17), (35,18)]:
+  for dst, src in zip([20, 21, 32, 33, 34, 35], lds_rows[1:]):
     k.emit(v_add_nc_u32_e32(v[dst], s[S_LOOP_CTR], v[src]))
 
   k.emit(v_and_b32_e32(v[8], 0x3fffff80, v[8]))
   k.emit(v_sub_nc_u32_e32(v[9], v[22], v[9]))
 
-  for dst, src in [(19,19), (20,20), (21,21), (22,32), (32,33), (33,34), (34,35)]:
+  for dst, src in zip([19, 20, 21, 22, 32, 33, 34], [19, 20, 21, 32, 33, 34, 35]):
     k.emit(v_and_b32_e32(v[dst], 0x3fffff80, v[src]))
 
   k.emit(v_sub_nc_u32_e32(v[8], v[1], v[8]))
   k.emit(v_lshlrev_b32_e32(v[9], 2, v[9]))
 
-  for a, b in [(10,19), (11,20), (14,21), (15,22), (16,32), (17,33), (18,34)]:
+  for a, b in zip(lds_rows, lds_temps):
     k.emit(v_sub_nc_u32_e32(v[a], v[a], v[b]))
 
   k.emit(v_bfe_u32(v[2], v[0], 3, 2))
   k.emit(v_lshlrev_b32_e32(v[8], 2, v[8]))
-  k.emit(v_mad_u32_u24(v[141], 0x210, v[V_LANE_ID_MOD8], v[9]))
+  k.emit(v_mad_u32_u24(v[141], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[9]))
 
-  for dst, src in [(9,10), (10,11), (11,14), (14,15), (15,16), (16,17), (17,18)]:
+  for dst, src in zip([9] + lds_rows[:-1], lds_rows):
     k.emit(v_lshlrev_b32_e32(v[dst], 2, v[src]))
 
   k.emit(v_lshlrev_b32_e32(v[V_LANE_DIV8_X4], 2, v[2]))
   k.emit(v_add_nc_u32_e32(v[8], 0x80, v[8]))
 
-  for dst, src in [(142,9), (143,10), (144,11), (145,14), (146,15), (147,16), (148,17)]:
-    k.emit(v_mad_u32_u24(v[dst], 0x210, v[V_LANE_ID_MOD8], v[src]))
+  for dst, src in zip(range(142, 149), [9] + lds_rows[:-1]):
+    k.emit(v_mad_u32_u24(v[dst], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[src]))
 
   k.emit(s_mov_b32(s[S_LOOP_BOUND], 0))
   k.emit(s_cmp_gt_i32(s[S_DIM_N], 0))
@@ -450,15 +453,15 @@ def build_kernel(arch='gfx1100'):
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_AND_B32,
               vdstx=v[132], vdsty=v[3], srcx0=0, vsrcx1=v[0], srcy0=0x3fffff80, vsrcy1=v[3]))
   k.emit(v_sub_nc_u32_e32(v[3], v[1], v[3]))
-  k.emit(v_lshl_or_b32(v[V_LDS_B_BASE], v[V_LANE_ID_MOD8], 4, 0x1080))
+  k.emit(v_lshl_or_b32(v[V_LDS_B_BASE], v[V_LANE_ID_MOD8], 4, LDS_BASE_OFFSET))
   k.vopd_mov2(131, 110, 0, 0)
-  k.emit(v_lshl_add_u32(v[155], v[3], 2, 0x1080))
+  k.emit(v_lshl_add_u32(v[155], v[3], 2, LDS_BASE_OFFSET))
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_LSHLREV_B32,
               vdstx=v[112], vdsty=v[3], srcx0=0, vsrcx1=v[0], srcy0=2, vsrcy1=v[0]))
   k.vopd_mov2(113, 96, 0, 0)
 
   # LDS A-tile store addresses: v[158..164] = (i+1)<<9 + v[155]
-  for i, dst in enumerate([158, 159, 160, 161, 162, 163, 164]):
+  for i, dst in enumerate(range(158, 165)):
     k.emit(v_lshl_add_u32(v[dst], i + 1, 9, v[155]))
 
   k.emit(v_and_or_b32(v[V_LDS_A_BASE], 0x180, v[3], v[2]))
@@ -554,10 +557,8 @@ def build_kernel(arch='gfx1100'):
 
   # Store all results (8 groups of 4 consecutive rows)
   for group in range(8):
-    col_off = [0, 32, 64, 96][group % 4]
-    stores = [(EPILOGUE_STORES[group * 4 + i][1],
-               EPILOGUE_STORES[group * 4 + i][2],
-               EPILOGUE_STORES[group * 4 + i][3]) for i in range(4)]
+    col_off = (group % 4) * 32
+    stores = [(e[1], e[2], e[3]) for e in EPILOGUE_STORES[group*4 : group*4+4]]
     k.epilogue_store_group(col_off, stores)
 
   k.emit(s_nop(0))
