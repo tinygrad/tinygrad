@@ -141,7 +141,8 @@ def _make_disasm_test(name):
     to_test: list[tuple[str, bytes, str | None, str | None]] = []  # (asm_text, data, disasm_str, error)
     skipped = 0
     for asm_text, data in self.tests.get(name, []):
-      if len(data) > fmt_cls._size(): continue
+      # Skip VOP3 promotions in VOP1/VOP2/VOPC tests (8-byte instructions in 4-byte format test files)
+      if name in ('vop1', 'vop2', 'vopc', 'vopcx') and len(data) > fmt_cls._size(): skipped += 1; continue
       temp_inst = fmt_cls.from_bytes(data)
       temp_op = temp_inst._values.get('op', 0)
       temp_op = temp_op.val if hasattr(temp_op, 'val') else temp_op
