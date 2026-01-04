@@ -3,7 +3,7 @@
 # ruff: noqa: E501
 # mypy: ignore-errors
 from extra.assembly.amd.autogen.rdna4.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp
-from extra.assembly.amd.pcode import ABSDIFF, BYTE_PERMUTE, DENORM, F, INF, MAX_FLOAT_F32, OVERFLOW_F32, OVERFLOW_F64, PI, ROUND_MODE, Reg, SAT8, SliceProxy, TWO_OVER_PI_1201, UNDERFLOW_F32, UNDERFLOW_F64, WAVE32, WAVE64, _pack, _pack32, bf16_to_f32, cos, cvtToQuietNAN, exponent, f16_to_f32, f16_to_i16, f16_to_snorm, f16_to_u16, f16_to_unorm, f32_to_f16, f32_to_f64, f32_to_i32, f32_to_snorm, f32_to_u32, f32_to_u8, f32_to_unorm, f64_to_f32, f64_to_i32, f64_to_u32, floor, fma, fract, i16_to_f16, i32_to_f32, i32_to_f64, i32_to_i16, isEven, isNAN, isQuietNAN, isSignalNAN, ldexp, log2, mantissa, pow, s_ff1_i32_b32, s_ff1_i32_b64, sign, signext, signext_from_bit, sin, sqrt, trunc, u16_to_f16, u32_to_f32, u32_to_f64, u32_to_u16, u4_to_u32, u8_to_u32, v_cvt_i16_f32, v_cvt_u16_f32, v_max3_i16, v_max3_i32, v_max3_u16, v_max3_u32, v_max_i16, v_max_i32, v_max_u16, v_max_u32, v_min_i16, v_min_i32, v_min_u16, v_min_u32, v_msad_u8, v_sad_u8
+from extra.assembly.amd.pcode import ABSDIFF, BYTE_PERMUTE, DENORM, F, INF, MAX_FLOAT_F32, OVERFLOW_F32, OVERFLOW_F64, PI, ROUND_MODE, Reg, SAT8, TWO_OVER_PI_1201, TypedView, UNDERFLOW_F32, UNDERFLOW_F64, WAVE32, WAVE64, _pack, _pack32, bf16_to_f32, cos, cvtToQuietNAN, exponent, f16_to_f32, f16_to_i16, f16_to_snorm, f16_to_u16, f16_to_unorm, f32_to_f16, f32_to_f64, f32_to_i32, f32_to_snorm, f32_to_u32, f32_to_u8, f32_to_unorm, f64_to_f32, f64_to_i32, f64_to_u32, floor, fma, fract, i16_to_f16, i32_to_f32, i32_to_f64, i32_to_i16, isEven, isNAN, isQuietNAN, isSignalNAN, ldexp, log2, mantissa, pow, s_ff1_i32_b32, s_ff1_i32_b64, sign, signext, signext_from_bit, sin, sqrt, trunc, u16_to_f16, u32_to_f32, u32_to_f64, u32_to_u16, u4_to_u32, u8_to_u32, v_cvt_i16_f32, v_cvt_u16_f32, v_max3_i16, v_max3_i32, v_max3_u16, v_max3_u32, v_max_i16, v_max_i32, v_max_u16, v_max_u32, v_min_i16, v_min_i32, v_min_u16, v_min_u32, v_msad_u8, v_sad_u8
 
 def _SOP1Op_S_MOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
   S0=Reg(s0); D0=Reg(d0)
@@ -2102,7 +2102,7 @@ def _VOP1Op_V_MOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR
   return {'D0': D0._val}
 
 def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
-  D0=Reg(d0); EXEC=Reg(exec_mask); SRC0=Reg(src0_idx); EXEC_LO=SliceProxy(EXEC, 31, 0)
+  D0=Reg(d0); EXEC=Reg(exec_mask); SRC0=Reg(src0_idx); EXEC_LO=TypedView(EXEC, 31, 0)
   # --- compiled pseudocode ---
   if WAVE64:
     if EXEC == 0x0:
@@ -4228,7 +4228,7 @@ def _VOP3Op_V_MOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR
   return {'D0': D0._val}
 
 def _VOP3Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
-  D0=Reg(d0); EXEC=Reg(exec_mask); SRC0=Reg(src0_idx); EXEC_LO=SliceProxy(EXEC, 31, 0)
+  D0=Reg(d0); EXEC=Reg(exec_mask); SRC0=Reg(src0_idx); EXEC_LO=TypedView(EXEC, 31, 0)
   # --- compiled pseudocode ---
   if WAVE64:
     if EXEC == 0x0:
