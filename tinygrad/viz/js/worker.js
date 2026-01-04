@@ -13,18 +13,28 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = (g, { blocks, paths, pc_table, colors }) => {
+const layoutCfg = (g, { blocks, paths, pc_table, runtime_trace, colors }) => {
   g.setGraph({ rankdir:"TD", font:"monospace" });
   ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
-      const text = pc_table[m][0];
+      let text = pc_table[m][0];
+      if (runtime_trace != null) {
+        const t = runtime_trace[m];
+        if (t != null) {
+          // space for some kind of heatmap color scale here
+          label.push([{st:text + ` Hits: ${t.hit_count}`, color:t.hit_count > 1 ? "#f7768e" : "#9aa5ce"}]);
+          text += ` HITS: ${t.hit_count}`
+        } else label.push([{ st:text, color:"#676e8b" }]); // inactive / unreachable instruction
+      } else {
+        // static syntax coloring
+        const [inst, ...operands] = text.split(" ");
+        label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]);
+      }
       width = Math.max(width, ctx.measureText(text).width);
       height += LINE_HEIGHT;
-      const [inst, ...operands] = text.split(" ");
-      label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]);
     }
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
   }
