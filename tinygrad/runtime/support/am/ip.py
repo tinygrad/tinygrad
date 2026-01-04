@@ -57,8 +57,8 @@ class AM_GMC(AM_IP):
 
     self.trans_futher = self.adev.ip_ver[am.GC_HWIP] < (10, 0, 0)
 
-    # GFX11/GFX12 has 44-bit address space
-    self.address_space_mask = (1 << 44) - 1
+    # mi3xx has 48-bit, others have 44-bit address space
+    self.address_space_mask = (1 << (48 if self.adev.ip_ver[am.GC_HWIP][:2] == (9,4) else 44)) - 1
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
