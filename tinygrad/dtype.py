@@ -44,7 +44,7 @@ class DType(metaclass=DTypeMetaClass):
   count: int
   _scalar: DType|None
   @property
-  def itemsize(self) -> int: return self.bitsize // 8
+  def itemsize(self) -> int: return (self.bitsize + 7) // 8
   @staticmethod
   def new(priority:int, bitsize:int, name:str, fmt:FmtStr|None): return DType(priority, bitsize, name, fmt, 1, None)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
@@ -161,7 +161,7 @@ class dtypes:
   def fields() -> dict[str, DType]: return DTYPES_DICT
   void: Final[DType] = DType.new(-1, 0, "void", None)
   index: Final[DType] = DType.new(-1, 800, "index", None)
-  bool: Final[DType] = DType.new(0, 8, "bool", '?')
+  bool: Final[DType] = DType.new(0, 1, "bool", '?')
   int8: Final[DType] = DType.new(1, 8, "signed char", 'b')
   uint8: Final[DType] = DType.new(2, 8, "unsigned char", 'B')
   int16: Final[DType] = DType.new(3, 16, "short", 'h')
