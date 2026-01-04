@@ -17,21 +17,36 @@ def _matches_encoding(word: int, cls: type[Inst]) -> bool:
   return ((word >> bf.lo) & bf.mask()) == val
 
 # Order matters: more specific encodings first, VOP2 last (it's a catch-all for bit31=0)
-_FORMATS_64 = [VOPD, VOP3P, VINTERP, VOP3, DS, FLAT, MUBUF, MTBUF, MIMG, SMEM, EXP]
-_FORMATS_32 = [SOP1, SOPC, SOPP, SOPK, VOPC, VOP1, SOP2, VOP2]  # SOP2/VOP2 are catch-alls
+_RDNA_FORMATS_64 = [VOPD, VOP3P, VINTERP, VOP3, DS, FLAT, MUBUF, MTBUF, MIMG, SMEM, EXP]
+_RDNA_FORMATS_32 = [SOP1, SOPC, SOPP, SOPK, VOPC, VOP1, SOP2, VOP2]  # SOP2/VOP2 are catch-alls
+_CDNA_FORMATS_64: list[type[Inst]] = []  # populated lazily
+_CDNA_FORMATS_32: list[type[Inst]] = []
 
-def detect_format(data: bytes) -> type[Inst]:
+def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
   word = int.from_bytes(data[:4], 'little')
-  # Check 64-bit formats first (bits[31:30] == 0b11)
+  if arch == "cdna":
+    if not _CDNA_FORMATS_64:
+      from extra.assembly.amd.autogen.cdna.ins import (VOP1 as C_VOP1, VOP2 as C_VOP2, VOPC as C_VOPC, VOP3A, VOP3B, VOP3P as C_VOP3P,
+        SOP1 as C_SOP1, SOP2 as C_SOP2, SOPC as C_SOPC, SOPK as C_SOPK, SOPP as C_SOPP, SMEM as C_SMEM, DS as C_DS,
+        FLAT as C_FLAT, MUBUF as C_MUBUF, MTBUF as C_MTBUF, SDWA, DPP)
+      _CDNA_FORMATS_64.extend([C_VOP3P, VOP3A, VOP3B, C_DS, C_FLAT, C_MUBUF, C_MTBUF, C_SMEM])
+      _CDNA_FORMATS_32.extend([SDWA, DPP, C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_VOPC, C_VOP1, C_SOP2, C_VOP2])
+    if (word >> 30) == 0b11:
+      for cls in _CDNA_FORMATS_64:
+        if _matches_encoding(word, cls): return cls
+      raise ValueError(f"unknown CDNA 64-bit format word={word:#010x}")
+    for cls in _CDNA_FORMATS_32:
+      if _matches_encoding(word, cls): return cls
+    raise ValueError(f"unknown CDNA 32-bit format word={word:#010x}")
+  # RDNA (default)
   if (word >> 30) == 0b11:
-    for cls in _FORMATS_64:
+    for cls in _RDNA_FORMATS_64:
       if _matches_encoding(word, cls):
         return VOP3SD if cls is VOP3 and ((word >> 16) & 0x3ff) in Inst._VOP3SD_OPS else cls
     raise ValueError(f"unknown 64-bit format word={word:#010x}")
-  # 32-bit formats
-  for cls in _FORMATS_32:
+  for cls in _RDNA_FORMATS_32:
     if _matches_encoding(word, cls): return cls
   raise ValueError(f"unknown 32-bit format word={word:#010x}")
 
