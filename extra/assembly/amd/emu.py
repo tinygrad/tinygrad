@@ -5,7 +5,8 @@ import ctypes, functools
 from tinygrad.runtime.autogen import hsa
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.asm import detect_format
-from extra.assembly.amd.autogen.rdna3.gen_pcode import COMPILED_FUNCTIONS
+from extra.assembly.amd.pcode import compile_pseudocode
+from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
   SrcEnum, SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
@@ -236,9 +237,8 @@ def exec_vopd(st: WaveState, inst, V: list, lane: int) -> None:
   """VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)."""
   literal, vdstx, vdsty = inst._literal, inst.vdstx, (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
   sx0, sx1, dx, sy0, sy1, dy = st.rsrc(inst.srcx0, lane, literal), V[inst.vsrcx1], V[vdstx], st.rsrc(inst.srcy0, lane, literal), V[inst.vsrcy1], V[vdsty]
-  opx, opy = _VOPD_TO_VOP[inst.opx], _VOPD_TO_VOP[inst.opy]
-  V[vdstx] = COMPILED_FUNCTIONS[type(opx)][opx](sx0, sx1, 0, dx, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
-  V[vdsty] = COMPILED_FUNCTIONS[type(opy)][opy](sy0, sy1, 0, dy, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
+  V[vdstx] = inst._fnx(sx0, sx1, 0, dx, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
+  V[vdsty] = inst._fny(sy0, sy1, 0, dy, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
 
 def exec_flat(st: WaveState, inst, V: list, lane: int) -> None:
   """FLAT/GLOBAL/SCRATCH memory ops."""
@@ -359,15 +359,14 @@ def decode_program(data: bytes) -> dict[int, Inst]:
   result: dict[int, Inst] = {}
   i = 0
   while i < len(data):
-    try: inst_class = detect_format(data[i:])
-    except ValueError: break  # stop at invalid instruction (padding/metadata after code)
-    inst = inst_class.from_bytes(data[i:i+inst_class._size()+8])  # +8 for potential 64-bit literal
+    inst = detect_format(data[i:]).from_bytes(data[i:])
     inst._words = inst.size() // 4
 
     # Determine dispatch function and pcode function
-    fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
-    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: inst._dispatch = dispatch_endpgm
+    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
+    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: inst._dispatch = dispatch_endpgm
     elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER: inst._dispatch = dispatch_barrier
+    elif isinstance(inst, SOPP) and inst.op in (SOPPOp.S_CLAUSE, SOPPOp.S_WAITCNT, SOPPOp.S_WAITCNT_DEPCTR, SOPPOp.S_SENDMSG, SOPPOp.S_SET_INST_PREFETCH_DISTANCE): inst._dispatch = dispatch_nop
     elif isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)): inst._dispatch = exec_scalar
     elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: inst._dispatch = dispatch_nop
     elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name: inst._dispatch = dispatch_wmma
@@ -378,11 +377,14 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)
     else: inst._dispatch = dispatch_lane(exec_vop)
 
-    # Validate pcode exists for instructions that need it (scalar/wave-level ops and VOPD don't need pcode)
-    needs_pcode = inst._dispatch not in (dispatch_endpgm, dispatch_barrier, exec_scalar, dispatch_nop, dispatch_wmma,
-                                         dispatch_writelane, dispatch_readlane, dispatch_lane(exec_vopd))
-    if fn is None and inst.op_name and needs_pcode: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
-    inst._fn = fn if fn else lambda *args, **kwargs: {}
+    # Compile pcode for instructions that use it (not VOPD which has _fnx/_fny, not special dispatches)
+    # VOPD needs separate functions for X and Y ops
+    if isinstance(inst, VOPD):
+      def _compile_vopd_op(op): return compile_pseudocode(type(op).__name__, op.name, PSEUDOCODE_STRINGS[type(op)][op])
+      inst._fnx, inst._fny = _compile_vopd_op(_VOPD_TO_VOP[inst.opx]), _compile_vopd_op(_VOPD_TO_VOP[inst.opy])
+    elif inst._dispatch not in (dispatch_endpgm, dispatch_barrier, dispatch_nop, dispatch_wmma, dispatch_writelane):
+      assert type(inst.op) != int, f"inst op of {inst} is int"
+      inst._fn = compile_pseudocode(type(inst.op).__name__, inst.op.name, PSEUDOCODE_STRINGS[type(inst.op)][inst.op])
     result[i // 4] = inst
     i += inst._words * 4
   return result
