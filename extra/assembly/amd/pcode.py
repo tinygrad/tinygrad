@@ -315,7 +315,7 @@ DENORM = _Denorm()
 class TypedView:
   """View into a Reg with typed access. Used for both full-width (Reg.u32) and slices (Reg[31:16])."""
   __slots__ = ('_reg', '_high', '_low', '_signed', '_float', '_bf16')
-  def __init__(self, reg, high, low, signed=False, is_float=False, is_bf16=False):
+  def __init__(self, reg, high, low=0, signed=False, is_float=False, is_bf16=False):
     # Handle reversed slices like [0:31] which means bit-reverse
     if high < low: high, low = low, high
     self._reg, self._high, self._low = reg, high, low
@@ -420,26 +420,26 @@ class Reg:
   __slots__ = ('_val',)
   def __init__(self, val=0): self._val = int(val) & MASK128
 
-  # Typed views - TypedView(reg, high, low, signed, is_float, is_bf16)
-  u64 = property(lambda s: TypedView(s, 63, 0), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  i64 = property(lambda s: TypedView(s, 63, 0, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  b64 = property(lambda s: TypedView(s, 63, 0), lambda s, v: setattr(s, '_val', int(v) & MASK64))
-  f64 = property(lambda s: TypedView(s, 63, 0, is_float=True), lambda s, v: setattr(s, '_val', v if isinstance(v, int) else _i64(float(v))))
-  u32 = property(lambda s: TypedView(s, 31, 0), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  i32 = property(lambda s: TypedView(s, 31, 0, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  b32 = property(lambda s: TypedView(s, 31, 0), lambda s, v: setattr(s, '_val', int(v) & MASK32))
-  f32 = property(lambda s: TypedView(s, 31, 0, is_float=True), lambda s, v: setattr(s, '_val', _i32(float(v))))
-  u24 = property(lambda s: TypedView(s, 23, 0))
-  i24 = property(lambda s: TypedView(s, 23, 0, signed=True))
-  u16 = property(lambda s: TypedView(s, 15, 0), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  i16 = property(lambda s: TypedView(s, 15, 0, signed=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  b16 = property(lambda s: TypedView(s, 15, 0), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
-  f16 = property(lambda s: TypedView(s, 15, 0, is_float=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _i16(float(v))) & 0xffff)))
-  bf16 = property(lambda s: TypedView(s, 15, 0, is_float=True, is_bf16=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _ibf16(float(v))) & 0xffff)))
-  u8 = property(lambda s: TypedView(s, 7, 0))
-  i8 = property(lambda s: TypedView(s, 7, 0, signed=True))
-  u3 = property(lambda s: TypedView(s, 2, 0))  # 3-bit for opsel fields
-  u1 = property(lambda s: TypedView(s, 0, 0))  # single bit
+  # Typed views - TypedView(reg, high, signed, is_float, is_bf16)
+  u64 = property(lambda s: TypedView(s, 63), lambda s, v: setattr(s, '_val', int(v) & MASK64))
+  i64 = property(lambda s: TypedView(s, 63, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK64))
+  b64 = property(lambda s: TypedView(s, 63), lambda s, v: setattr(s, '_val', int(v) & MASK64))
+  f64 = property(lambda s: TypedView(s, 63, is_float=True), lambda s, v: setattr(s, '_val', v if isinstance(v, int) else _i64(float(v))))
+  u32 = property(lambda s: TypedView(s, 31), lambda s, v: setattr(s, '_val', int(v) & MASK32))
+  i32 = property(lambda s: TypedView(s, 31, signed=True), lambda s, v: setattr(s, '_val', int(v) & MASK32))
+  b32 = property(lambda s: TypedView(s, 31), lambda s, v: setattr(s, '_val', int(v) & MASK32))
+  f32 = property(lambda s: TypedView(s, 31, is_float=True), lambda s, v: setattr(s, '_val', _i32(float(v))))
+  u24 = property(lambda s: TypedView(s, 23))
+  i24 = property(lambda s: TypedView(s, 23, signed=True))
+  u16 = property(lambda s: TypedView(s, 15), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  i16 = property(lambda s: TypedView(s, 15, signed=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  b16 = property(lambda s: TypedView(s, 15), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  f16 = property(lambda s: TypedView(s, 15, is_float=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _i16(float(v))) & 0xffff)))
+  bf16 = property(lambda s: TypedView(s, 15, is_float=True, is_bf16=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _ibf16(float(v))) & 0xffff)))
+  u8 = property(lambda s: TypedView(s, 7))
+  i8 = property(lambda s: TypedView(s, 7, signed=True))
+  u3 = property(lambda s: TypedView(s, 2))  # 3-bit for opsel fields
+  u1 = property(lambda s: TypedView(s, 0))  # single bit
 
   def __getitem__(s, key):
     if isinstance(key, slice): return TypedView(s, int(key.start), int(key.stop))
