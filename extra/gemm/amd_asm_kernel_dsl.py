@@ -1,12 +1,9 @@
 # RDNA3 128x128 tiled GEMM kernel - DSL version of kernel8_batched_gmem.s
 from extra.assembly.amd.dsl import Inst, Inst32, Inst64, Inst96, s, v, NULL, VCC_LO, RawImm, EXEC_LO, SrcMod
 from extra.assembly.amd.autogen.rdna3.ins import *
+from extra.assembly.amd.autogen.rdna3.enum import VOP1Op
 
-# Kernel constants
-LDS_SIZE = 8320
-N = 4096
-BLOCK_M, BLOCK_N, BLOCK_K = 128, 128, 8
-STRIDE = N * 4  # N * sizeof(float)
+LDS_SIZE, N = 8320, 4096
 
 # Accumulator register pairs to zero (128 vgprs: 64 pairs)
 ACC_ZERO_PAIRS = [
@@ -191,11 +188,9 @@ class Kernel:
     for vdst, off in [(200,0), (204,8), (208,128), (212,136)]:
       self.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[202], offset0=off, offset1=1))
 
-  # Helper: swap two vgprs using v[200] as temp
+  # Helper: swap two vgprs using hardware swap instruction
   def vswap(self, a, b):
-    self.emit(v_mov_b32_e32(v[200], v[a]))
-    self.emit(v_mov_b32_e32(v[a], v[b]))
-    self.emit(v_mov_b32_e32(v[b], v[200]))
+    self.emit(v_swap_b32_e32(v[a], v[b]))
 
   # Helper: one iteration of the main GEMM loop with prefetch loads
   def main_loop_iter(self, prefetch_idx):
@@ -216,7 +211,8 @@ class Kernel:
       self.emit(ds_store_b32(addr=v[addr], data0=v[data], offset0=0, offset1=0))
 
   # Helper: multiply 4 accumulators by alpha and store for epilogue
-  # col_base in v[118], row_base in v[119], row multipliers in v[144-147] for rows 0-3
+  # col_base in v[118], row multipliers in v[144-147] for rows 0-3, v[148-151] for rows 16-19
+  # row_idx_map: 0->144, 1->145, 2->146, 3->147, 16->148, 17->149, 18->150, 19->151
   def epilogue_mul_store(self, col_off, row_idx, data_base, srcs):
     # Multiply 4 source accumulators by alpha (s[5]) into data_base:data_base+3
     for i, src in enumerate(srcs):
@@ -226,14 +222,9 @@ class Kernel:
       self.emit(v_mov_b32_e32(v[0], v[118]))
     else:
       self.emit(v_add_nc_u32_e32(v[0], col_off, v[118]))
-    # Compute row offset and add to get linear index
-    if row_idx < 4:
-      row_reg = 144 + row_idx  # Use precomputed row multiplier
-      self.emit(v_add_nc_u32_e32(v[0], v[row_reg], v[0]))
-    else:
-      self.emit(v_or_b32_e32(v[1], row_idx, v[119]))
-      self.emit(v_mul_lo_u32(v[1], v[1], s[4]))
-      self.emit(v_add_nc_u32_e32(v[0], v[1], v[0]))
+    # Use precomputed row multipliers for all row indices
+    row_reg = 144 + row_idx if row_idx < 4 else 148 + (row_idx - 16)
+    self.emit(v_add_nc_u32_e32(v[0], v[row_reg], v[0]))
     # Sign-extend to 64-bit, shift left by 2 (sizeof float)
     self.emit(v_ashrrev_i32_e32(v[1], 31, v[0]))
     self.emit(v_lshlrev_b64(v[0:1], 2, v[0:1]))
@@ -242,17 +233,6 @@ class Kernel:
     self.emit(v_add_co_ci_u32_e32(v[1], s[1], v[1]))
     # Store 4 floats
     self.emit(global_store_b128(addr=v[0:1], data=v[data_base:data_base+3], saddr=RawImm(124)))
-
-  def inst_size(self, inst):
-    if isinstance(inst, Inst96): return 12
-    if isinstance(inst, Inst64): return 8
-    return 4
-
-  def byte_offset(self, from_idx, to_idx):
-    if from_idx <= to_idx:
-      return sum(self.inst_size(self.instructions[i]) for i in range(from_idx, to_idx))
-    else:
-      return -sum(self.inst_size(self.instructions[i]) for i in range(to_idx, from_idx))
 
   def to_asm(self):
     lines = ['\t.text', f'\t.amdgcn_target "amdgcn-amd-amdhsa--{self.arch}"',
@@ -450,27 +430,20 @@ def build_kernel(arch='gfx1100'):
   for dst, src in LDS_ADDR_PAIRS: k.emit(v_mad_u32_u24(v[dst], 0x210, v[118], v[src]))
   k.emit(s_mov_b32(s[7], 0))
   k.emit(s_cmp_gt_i32(s[4], 0))
-  k.emit(s_waitcnt(simm16=15351))
+  # Wait for all global loads before storing to LDS
+  k.emit(s_waitcnt(simm16=0))
+  # Store all initial tile data to LDS
   k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[23], data1=v[24], offset0=16, offset1=18))
-  k.emit(s_waitcnt(simm16=10231))
   k.emit(ds_store_b32(addr=v[141], data0=v[29], offset0=0, offset1=0))
   k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[25], data1=v[26], offset0=20, offset1=22))
-  k.emit(s_waitcnt(simm16=9207))
   k.emit(ds_store_b32(addr=v[142], data0=v[30], offset0=0, offset1=0))
-  k.emit(s_waitcnt(simm16=8183))
   k.emit(ds_store_b32(addr=v[143], data0=v[31], offset0=0, offset1=0))
   k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[27], data1=v[28], offset0=24, offset1=26))
-  k.emit(s_waitcnt(simm16=7159))
   k.emit(ds_store_b32(addr=v[144], data0=v[12], offset0=0, offset1=0))
-  k.emit(s_waitcnt(simm16=6135))
   k.emit(ds_store_b32(addr=v[145], data0=v[13], offset0=0, offset1=0))
-  k.emit(s_waitcnt(simm16=4087))
   k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[3], data1=v[4], offset0=28, offset1=30))
-  k.emit(s_waitcnt(simm16=3063))
   k.emit(ds_store_b32(addr=v[146], data0=v[5], offset0=0, offset1=0))
-  k.emit(s_waitcnt(simm16=2039))
   k.emit(ds_store_b32(addr=v[147], data0=v[6], offset0=0, offset1=0))
-  k.emit(s_waitcnt(simm16=1015))
   k.emit(ds_store_b32(addr=v[148], data0=v[7], offset0=0, offset1=0))
   k.emit(s_waitcnt(simm16=64519))
   k.emit(s_barrier())
@@ -572,6 +545,12 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[145], s[4], v[144]))
   k.emit(v_add_nc_u32_e32(v[146], s[4], v[145]))
   k.emit(v_add_nc_u32_e32(v[147], s[4], v[146]))
+  # Compute row multipliers for rows 16-19: v[148+i] = (v[119] | (16+i)) * s[4]
+  k.emit(v_or_b32_e32(v[1], 16, v[119]))
+  k.emit(v_mul_lo_u32(v[148], v[1], s[4]))
+  k.emit(v_add_nc_u32_e32(v[149], s[4], v[148]))
+  k.emit(v_add_nc_u32_e32(v[150], s[4], v[149]))
+  k.emit(v_add_nc_u32_e32(v[151], s[4], v[150]))
   # Store all 32 groups of 4 floats
   for col_off, row_idx, data_base, srcs in EPILOGUE_STORES:
     k.epilogue_mul_store(col_off, row_idx, data_base, srcs)
