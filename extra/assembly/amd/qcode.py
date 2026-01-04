@@ -84,6 +84,7 @@ def expr(s: str) -> Expr:
   if s.endswith('.') and not (len(s) > 1 and s[-2].isdigit()): s = s[:-1]
   s = s.strip()
   if not s: raise ValueError("Empty expression")
+  if s == '+INF': s = 'INF'
   if s[0] == '(' and (e := _match(s, 0, '(', ')')) == len(s)-1: return expr(s[1:e])
   if s[0] == '{' and s[-1] == '}': return Pack(tuple(expr(a) for a in _split(s[1:-1])))
   if m := re.match(r"^(\d+)'([IUFB])\(", s):
@@ -132,9 +133,6 @@ def expr(s: str) -> Expr:
   if '.' in s:
     for i in range(len(s)-1, 0, -1):
       if s[i] == '.' and s[i+1:] in DTYPES: return Typed(expr(s[:i]), DTYPES[s[i+1:]])
-  if s in ('INF', '+INF'): return Const(float('inf'), DType.F64)
-  if s == '-INF': return Const(float('-inf'), DType.F64)
-  if s == 'PI': return Const(3.141592653589793, DType.F64)
   if s[:5] == 'eval ': return Var(s)
   if ':' in s and '?' not in s and '[' not in s:
     p = s.split(':')
