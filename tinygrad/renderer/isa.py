@@ -1,7 +1,7 @@
 from __future__ import annotations
 from tinygrad.renderer import Renderer
 from dataclasses import dataclass, field
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, print_uops, UOp, UPat, Ops
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, UPat, Ops
 from tinygrad.codegen import line_rewrite
 from tinygrad.codegen.late.linearizer import linearize
 from tinygrad.uop.spec import type_verify

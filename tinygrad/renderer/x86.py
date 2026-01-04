@@ -3,7 +3,6 @@ from typing import cast
 from tinygrad.dtype import dtypes, PtrDType, DType, truncate
 from tinygrad.uop import Ops, X86Ops, GroupOp, X86GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
-from tinygrad.uop.spec import x86_spec
 from tinygrad.renderer.isa import Register, ISARenderer, IselContext
 from tinygrad.codegen.late.regalloc import assign
 
@@ -72,7 +71,7 @@ extra_matcher = PatternMatcher([
    lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
 ])
 
-# ***** X86 instruction selection pre matcher *****
+# ***** X86 pre instruction selection *****
 
 # these must be done in a separate matcher because they violate the spec
 pre_isel_matcher = PatternMatcher([
@@ -421,6 +420,19 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(X86GroupOp.TwoAddress1st, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]), [assign(ctx, x.src[0], x.arg), nx] if x.arg != x.src[0].arg else [nx])),
 ])
 
+# ***** X86 spec *****
+# TODO: do we even want this?
+isa_spec = PatternMatcher([
+  # these are the only non X86Ops allowed
+  (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER)), lambda: True),
+  # vblends take a mask which is float or int dtype
+  (UPat((X86Ops.VPBLENDVB, X86Ops.VBLENDVPS, X86Ops.VBLENDVPD), src=(UPat.var("a"), UPat.var("b"), UPat.var("m")), name="x"),
+   lambda a,b,m,x: x.dtype == a.dtype == b.dtype and x.dtype.itemsize == m.dtype.itemsize),
+  # cmoves take a flag producing instruction
+  (UPat((X86Ops.CMOVB, X86Ops.CMOVL, X86Ops.CMOVE, X86Ops.CMOVNE), dtypes.bool, (UPat(), UPat(), UPat(X86GroupOp.WriteFlags))), lambda: True),
+  (UPat(X86GroupOp.All), lambda: True),
+])
+
 # ***** X86 instruction encoding *****
 
 def to_bytes(dt:DType, v:int|float):
@@ -637,7 +649,7 @@ class X86Renderer(ISARenderer):
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  isa_spec = x86_spec
+  isa_spec = isa_spec
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
 
   def two_address(self, x:UOp) -> int|None: return 0 if x.op in X86GroupOp.TwoAddress1st else None
