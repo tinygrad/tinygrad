@@ -58,7 +58,7 @@ class TextModelExportWebGPU(unittest.TestCase):
     expected_buffer_types = ["Uint"]*len(dtypes.uints[:-1]) + ["Int"]*len(dtypes.sints[:-1]) + ["Int", "Float"]
     for i, expected_buffer_type in enumerate(expected_buffer_types):
       dt = inputs[i].dtype
-      expected_arr_prefix = f"{expected_buffer_type}{8*dt.itemsize}"
+      expected_arr_prefix = f"{expected_buffer_type}{dt.itemsize*8}"
       # test input buffers
       self.assertIn(f"new {expected_arr_prefix}Array(gpuWriteBuffer{i}.getMappedRange()).set(_input{i});", prg)
       # test output buffers
