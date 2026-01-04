@@ -118,6 +118,9 @@ def _disasm_vop2(inst: VOP2) -> str:
   if inst.op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
   if inst.op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
   if inst.is_16bit(): return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
+  # v_add_co_ci_u32 etc need vcc_lo as both sdst (carry out) and carrier input
+  if inst.op in (VOP2Op.V_ADD_CO_CI_U32, VOP2Op.V_SUB_CO_CI_U32, VOP2Op.V_SUBREV_CO_CI_U32):
+    return f"{name}{suf} v{inst.vdst}, vcc_lo, {inst.lit(inst.src0)}, v{inst.vsrc1}, vcc_lo"
   return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (", vcc_lo" if inst.op == VOP2Op.V_CNDMASK_B32 else "")
 
 def _disasm_vopc(inst: VOPC) -> str:
@@ -147,7 +150,8 @@ def _disasm_sopp(inst: SOPP) -> str:
 def _disasm_smem(inst: SMEM) -> str:
   name = inst.op_name.lower()
   if inst.op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV): return name
-  off_s = f"{decode_src(inst.soffset)} offset:0x{inst.offset:x}" if inst.offset and inst.soffset != 124 else f"0x{inst.offset:x}" if inst.offset else decode_src(inst.soffset)
+  # When soffset is null (124) and offset is 0, output "0x0" not "null"
+  off_s = f"{decode_src(inst.soffset)} offset:0x{inst.offset:x}" if inst.offset and inst.soffset != 124 else f"0x{inst.offset:x}" if inst.offset or inst.soffset == 124 else decode_src(inst.soffset)
   sbase_idx, sbase_count = inst.sbase * 2, 4 if (8 <= inst.op.value <= 12 or name == 's_atc_probe_buffer') else 2
   sbase_str = _fmt_src(sbase_idx, sbase_count) if sbase_count == 2 else _sreg(sbase_idx, sbase_count) if sbase_idx <= 105 else _reg("ttmp", sbase_idx - 108, sbase_count)
   if name in ('s_atc_probe', 's_atc_probe_buffer'): return f"{name} {inst.sdata}, {sbase_str}, {off_s}"
@@ -262,8 +266,7 @@ def _disasm_vop3sd(inst: VOP3SD) -> str:
   s0, s1, s2 = src(inst.src0, inst.neg & 1, inst.src_regs(0)), src(inst.src1, inst.neg & 2, inst.src_regs(1)), src(inst.src2, inst.neg & 4, inst.src_regs(2))
   dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}"
   srcs = f"{s0}, {s1}, {s2}" if inst.num_srcs() == 3 else f"{s0}, {s1}"
-  suffix = "_e64" if name.startswith('v_') and 'co_' in name else ""
-  return f"{name}{suffix} {dst}, {_fmt_sdst(inst.sdst, 1)}, {srcs}{' clamp' if inst.clmp else ''}{_omod(inst.omod)}"
+  return f"{name} {dst}, {_fmt_sdst(inst.sdst, 1)}, {srcs}{' clamp' if inst.clmp else ''}{_omod(inst.omod)}"
 
 def _disasm_vopd(inst: VOPD) -> str:
   lit = inst._literal or inst.literal
@@ -438,7 +441,9 @@ def get_dsl(text: str) -> str:
     opsel = (bits[0] | (bits[1] << 1) | (bits[2] << 2)) if len(bits) == 3 and is3p else \
             (bits[0] | (bits[1] << 1) | (bits[2] << 3)) if len(bits) == 3 else sum(b << i for i, b in enumerate(bits))
   m, text = _extract(text, r'\s+wait_exp:(\d+)'); waitexp = m.group(1) if m else None
-  m, text = _extract(text, r'\s+offset:(0x[0-9a-fA-F]+|-?\d+)'); off_val = m.group(1) if m else None
+  m, text = _extract(text, r'\s+offset:\s*(0x[0-9a-fA-F]+|-?\d+)'); off_val = m.group(1) if m else None
+  m, text = _extract(text, r'\s+offset0:\s*(0x[0-9a-fA-F]+|-?\d+)'); off0_val = m.group(1) if m else None
+  m, text = _extract(text, r'\s+offset1:\s*(0x[0-9a-fA-F]+|-?\d+)'); off1_val = m.group(1) if m else None
   m, text = _extract(text, r'\s+dlc(?:\s|$)'); dlc = 1 if m else None
   m, text = _extract(text, r'\s+glc(?:\s|$)'); glc = 1 if m else None
   m, text = _extract(text, r'\s+slc(?:\s|$)'); slc = 1 if m else None
@@ -507,7 +512,13 @@ def get_dsl(text: str) -> str:
 
   # DS instructions
   if mn.startswith('ds_'):
-    off0, off1 = (str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)) if off_val else ("0", "0")
+    # Handle offset0/offset1 from separate fields or combined offset:
+    if off0_val is not None or off1_val is not None:
+      off0, off1 = off0_val or "0", off1_val or "0"
+    elif off_val:
+      off0, off1 = str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)
+    else:
+      off0, off1 = "0", "0"
     gds_s = ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
     off_kw = f", offset0={off0}, offset1={off1}{gds_s}"
     if mn == 'ds_nop' or mn in ('ds_gws_sema_v', 'ds_gws_sema_p', 'ds_gws_sema_release_all'): return f"{mn}({off_kw.lstrip(', ')})"
@@ -542,6 +553,8 @@ def get_dsl(text: str) -> str:
   if 'cmpx' in mn and mn.endswith('_e64') and len(args) == 2: args = ['RawImm(126)'] + args
 
   fn = mn.replace('.', '_')
+  # RDNA3 renamed some instructions - map old names to new names
+  fn = fn.replace('v_add_u32', 'v_add_nc_u32').replace('v_sub_u32', 'v_sub_nc_u32').replace('v_subrev_u32', 'v_subrev_nc_u32')
   if opsel is not None: args = [re.sub(r'\.[hl]$', '', a) for a in args]
 
   # v_fma_mix*: extract inline neg/abs modifiers
