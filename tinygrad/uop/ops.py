@@ -104,15 +104,7 @@ class recursive_property(property):
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    # this is very similar to toposort/topovisit
-    stack: list[tuple[UOp, bool]] = [(x, False)]
-    while stack:
-      node, visited = stack.pop()
-      if self.nm in node.__dict__: continue
-      if not visited:
-        stack.append((node, True))
-        for s in reversed(node.src): stack.append((s, False))
-      else: node.__dict__[self.nm] = self.fxn(node)
+    for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
 # we import this late so we can use resolve/smax in mixins
@@ -189,18 +181,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # returns map of UOps to their consumers in the graph rooted by self
   def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]: return consumer_map_from_toposort(self.toposort())
-
-  def reverse_toposort(self, consumer_map) -> dict[UOp, None]:
-    ret: dict[UOp, None] = {}
-    stack: list[tuple[UOp, bool]] = [(x, False) for x in consumer_map if len(x.src) == 0]
-    while stack:
-      node, visited = stack.pop()
-      if node in ret: continue
-      if not visited:
-        stack.append((node, True))  # push node back on stack to process after its srcs
-        for s in consumer_map[node]: stack.append((s, False)) # push srcs on the stack
-      else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
-    return ret
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 import struct, math, re
 from enum import IntEnum
-from functools import cache, cached_property
+from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
@@ -346,6 +346,7 @@ class Inst:
     if 'abs_' in kwargs: kwargs['abs'] = kwargs.pop('abs_')
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
+    self._precompute()
     self._validate(orig_args)
     # Pre-shift literal for 64-bit sources (literal param is always raw 32-bit value from user)
     if literal is not None:
@@ -386,6 +387,7 @@ class Inst:
       elif name == 'sbase': self._values[name] = (val.idx if isinstance(val, Reg) else val.val if isinstance(val, SrcMod) else val * 2) // 2
       elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = val.idx // 4
       elif marker is _VDSTYEnc and isinstance(val, VGPR): self._values[name] = val.idx >> 1
+    self._precompute_fields()
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
@@ -450,14 +452,22 @@ class Inst:
     inst = object.__new__(cls)
     inst._values = {n: RawImm(v) if n in SRC_FIELDS else v for n, bf in cls._fields.items() if n != 'encoding' for v in [(word >> bf.lo) & bf.mask()]}
     inst._literal = None
+    inst._precompute()
+    inst._precompute_fields()
     return inst
 
   @classmethod
   def from_bytes(cls, data: bytes):
+    import typing
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
     op_val = inst._values.get('op', 0)
-    has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
-    has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
+    # Check for instructions that always have a literal constant (FMAMK/FMAAK/MADMK/MADAK, SETREG_IMM32)
+    op_name = ''
+    if cls.__name__ in ('VOP2', 'SOP2', 'SOPK') and 'op' in (hints := typing.get_type_hints(cls, include_extras=True)):
+      if typing.get_origin(hints['op']) is typing.Annotated:
+        try: op_name = typing.get_args(hints['op'])[1](op_val).name
+        except (ValueError, TypeError): pass
+    has_literal = any(x in op_name for x in ('FMAMK', 'FMAAK', 'MADMK', 'MADAK', 'SETREG_IMM32'))
     # VOPD fmaak/fmamk always have a literal (opx/opy value 1 or 2)
     opx, opy = inst._values.get('opx', 0), inst._values.get('opy', 0)
     has_literal = has_literal or (cls.__name__ == 'VOPD' and (opx in (1, 2) or opy in (1, 2)))
@@ -471,7 +481,7 @@ class Inst:
         lit32 = int.from_bytes(data[cls._size():cls._size()+4], 'little')
         # Find which source has literal (255) and check its register count
         lit_src_is_64 = False
-        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2)]:
+        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
           if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255:
             lit_src_is_64 = inst.src_regs(idx) == 2
             break
@@ -491,7 +501,12 @@ class Inst:
     return unwrap(self._values.get(name, 0))
 
   def lit(self, v: int, neg: bool = False) -> str:
-    s = f"0x{self._literal:x}" if v == 255 and self._literal else decode_src(v)
+    if v == 255 and self._literal is not None:
+      # For 64-bit sources, literal is stored shifted - extract the 32-bit value
+      lit32 = (self._literal >> 32) if self._literal > 0xffffffff else self._literal
+      s = f"0x{lit32:x}"
+    else:
+      s = decode_src(v)
     return f"-{s}" if neg else s
 
   def __eq__(self, other):
@@ -510,25 +525,36 @@ class Inst:
                'VOPD': VOPDOp, 'VINTERP': VINTERPOp}
   _VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
-  @property
-  def op(self):
-    """Return the op as an enum (e.g., VOP1Op.V_MOV_B32). VOP3 returns VOPCOp/VOP3SDOp for those op ranges."""
+  def _precompute(self):
+    """Precompute op, op_name, _spec_regs, _spec_dtype for fast access."""
     val = self._values.get('op')
-    if val is None: return None
-    if hasattr(val, 'name'): return val  # already an enum
-    cls_name = self.__class__.__name__
-    assert cls_name in self._enum_map, f"no enum map for {cls_name}"
-    return self._enum_map[cls_name](val)
+    if val is None: self.op = None
+    elif hasattr(val, 'name'): self.op = val
+    else:
+      cls_name = self.__class__.__name__
+      # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
+      if cls_name == 'VOP3':
+        try:
+          if val < 256: self.op = VOPCOp(val)
+          elif val in self._VOP3SD_OPS: self.op = VOP3SDOp(val)
+          else: self.op = VOP3Op(val)
+        except ValueError: self.op = val
+      # Prefer BitField marker (class-specific enum) over _enum_map (generic RDNA3 enums)
+      elif 'op' in self._fields and (marker := self._fields['op'].marker) and issubclass(marker, IntEnum):
+        try: self.op = marker(val)
+        except ValueError: self.op = val
+      elif cls_name in self._enum_map:
+        try: self.op = self._enum_map[cls_name](val)
+        except ValueError: self.op = val
+      else: self.op = val
+    self.op_name = self.op.name if hasattr(self.op, 'name') else ''
+    self._spec_regs = spec_regs(self.op_name)
+    self._spec_dtype = spec_dtype(self.op_name)
 
-  @cached_property
-  def op_name(self) -> str:
-    op = self.op
-    return op.name if hasattr(op, 'name') else ''
-
-  @cached_property
-  def _spec_regs(self) -> tuple[int, int, int, int]: return spec_regs(self.op_name)
-  @cached_property
-  def _spec_dtype(self) -> tuple[str | None, str | None, str | None, str | None]: return spec_dtype(self.op_name)
+  def _precompute_fields(self):
+    """Unwrap all field values as direct attributes for fast access."""
+    for name, val in self._values.items():
+      if name != 'op': setattr(self, name, unwrap(val))
   def dst_regs(self) -> int: return self._spec_regs[0]
   def src_regs(self, n: int) -> int: return self._spec_regs[n + 1]
   def num_srcs(self) -> int: return spec_num_srcs(self.op_name)
