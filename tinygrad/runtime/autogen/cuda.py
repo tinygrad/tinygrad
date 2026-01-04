@@ -1,7 +1,8 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-dll = DLL('cuda', 'cuda')
+from tinygrad.helpers import WIN
+dll = DLL('cuda', 'nvcuda' if WIN else 'cuda')
 cuuint32_t = ctypes.c_uint32
 cuuint64_t = ctypes.c_uint64
 CUdeviceptr_v2 = ctypes.c_uint64
