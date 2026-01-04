@@ -92,7 +92,7 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
         if name in ('VCCZ', 'EXECZ'):
           return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars.get('VCC' if name == 'VCCZ' else 'EXEC'), UOp.const(dtypes.uint64, 0))), dtypes.uint32)
         if name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
-        vn = name + '_64' if dt in (dtypes.float64, dtypes.uint64, dtypes.int64) and name.isupper() else name
+        vn = name + '_64' if dt.itemsize == 8 and name.isupper() else name
         base = ctx.vars.get(vn) if vn in ctx.vars else ctx.vars.get(name)
         if base is None: raise ValueError(f"Unknown variable: {name}")
         if dt.itemsize == 3 and 'int' in dt.name:
@@ -142,7 +142,7 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
     case UOp(Ops.CAST, dt, (inner,)):
       inner_resolved = _expr(inner, ctx, dt)
       if dt in FLOATS: return UOp(Ops.CAST, dt, (inner_resolved,))
-      if inner_resolved.dtype in (dtypes.uint32, dtypes.int32, dtypes.uint64, dtypes.int64) and inner_resolved.dtype.itemsize == dt.itemsize:
+      if inner_resolved.dtype.itemsize == dt.itemsize:
         return _cast(inner_resolved, dt)
       if dt in SIGNED and inner_resolved.dtype in SIGNED: return UOp(Ops.CAST, dt, (inner_resolved,))
       return _cast(inner_resolved, dt)
