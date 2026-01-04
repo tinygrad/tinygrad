@@ -1,6 +1,8 @@
 from extra.assembly.amd.autogen.rdna4.ins import *
 from extra.assembly.amd.dsl import RawImm
 
+N = 4096
+
 def ds_load_b64(vdst, addr, offset1=0):
   return VDS(op=DSOp.DS_LOAD_B64, vdst=vdst, addr=addr, offset0=0, offset1=offset1)
 def ds_load_b128(vdst, addr, offset0=0, offset1=0):
@@ -16,28 +18,9 @@ def buffer_load_b32(vdata, vaddr, rsrc):
 def buffer_load_b128(vdata, vaddr, rsrc):
   return VBUFFER(op=VBUFFEROp.BUFFER_LOAD_B128, vdata=vdata, vaddr=vaddr, rsrc=RawImm(rsrc), soffset=NULL, offen=1, format=1)
 def buffer_store_b64(vdata, vaddr, rsrc):
-  return VBUFFER(op=VBUFFEROp.BUFFER_STORE_B64, vdata=vdata, vaddr=vaddr, rsrc=RawImm(rsrc), soffset=NULL, offen=1, format=1)
+  return VBUFFER(op=VBUFFEROp.BUFFER_STORE_B64, vdata=vdata, vaddr=vaddr, rsrc=rsrc, soffset=NULL, offen=1, format=1)
 def barrier_signal():
   return SOP1(op=SOP1Op.S_BARRIER_SIGNAL, sdst=RawImm(0), ssrc0=RawImm(193))
-
-def store_tile(r0, r1, r2, r3, tmp, update_ptr=True):
-  """Scale strided src regs by v[176:179], convert to f16, pack to v[tmp:tmp+1], store."""
-  insts = [
-    v_mul_f32_e32(v[r0], v[176], v[r0]),
-    v_mul_f32_e32(v[r1], v[177], v[r1]),
-    v_mul_f32_e32(v[r2], v[178], v[r2]),
-    v_mul_f32_e32(v[r3], v[179], v[r3]),
-    v_cvt_f16_f32_e64(v[r0], v[r0]),
-    v_cvt_f16_f32_e64(v[r1], v[r1]),
-    v_pack_b32_f16(v[tmp], v[r0], v[r1]),
-    v_cvt_f16_f32_e64(v[r2], v[r2]),
-    v_cvt_f16_f32_e64(v[r3], v[r3]),
-    v_pack_b32_f16(v[tmp+1], v[r2], v[r3]),
-  ]
-  if update_ptr:
-    insts += [s_lshl_b32(s[8], s[36], 1), s_add_co_u32(s[16], s[16], s[8]), s_add_co_ci_u32(s[17], s[17], 0)]
-  insts.append(buffer_store_b64(v[tmp:tmp+1], v[137], 16))
-  return insts
 
 insts = [
   "kernel_entry:",
@@ -57,7 +40,7 @@ insts = [
   s_mov_b32(s[25], 0x1000),
   s_mov_b32(s[26], 1),
   s_mov_b32(s[27], 0x1000),
-  s_mov_b32(s[36], 0x1000),
+  s_mov_b32(s[36], N),
   s_mov_b32(s[37], 0),
   s_mov_b32(s[38], 0x1000),
   s_mov_b32(s[39], 0),
@@ -885,6 +868,7 @@ insts = [
   v_wmma_f32_16x16x16_f16(v[120:127], v[217:220], v[152:155], v[120:127]),
   s_load_b256(sdata=s[48:55], sbase=s[0:1], ioffset=0x58, soffset=RawImm(124)),
   s_load_b32(sdata=s[56], sbase=s[0:1], ioffset=0x78, soffset=RawImm(124)),
+  # calculate address
   v_lshrrev_b32_e32(v[132], 5, v[254]),
   v_lshrrev_b32_e32(v[133], 1, v[132]),
   v_mul_lo_u32(v[133], 16, v[133]),
@@ -897,96 +881,40 @@ insts = [
   v_and_b32_e32(v[128], 1, v[132]),
   v_mul_lo_u32(v[128], 16, v[128]),
   v_and_b32_e32(v[133], 15, v[254]),
+  s_mul_i32(s[8], 0x80, s[2]),
   v_add_lshl_u32(v[128], v[133], v[128], 2),
-  s_mul_i32(s[8], 0x80, s[2]),
   v_add_nc_u32_e32(v[128], s[8], v[128]),
-  s_mul_i32(s[8], 0x80, s[3]),
-  v_add_nc_u32_e32(v[129], s[8], v[129]),
-  s_wait_kmcnt(0x0),
-  s_mov_b64(s[32:33], s[48:49]),
-  s_mov_b32(s[35], 0x30020000),
-  s_mov_b32(s[34], 0),
-  s_mul_i32(s[34], 4, s[34]),
-  s_add_co_u32(s[8], s[4], 1),
-  s_mul_i32(s[8], s[53], s[8]),
-  s_cmp_eq_u32(s[8], 0),
-  s_cselect_b32(s[8], s[24], s[8]),
-  s_mov_b64(s[40:41], s[50:51]),
-  s_mov_b32(s[43], 0x30020000),
-  s_mov_b32(s[42], 0),
-  s_mov_b32(s[8], 0),
-  s_cmp_lg_u32(s[52], s[8]),
-  s_cbranch_scc1("skip_bias_load"),
-  s_mul_i32(s[8], 0x80, s[2]),
-  v_add_nc_u32_e32(v[136], s[8], v[254]),
-  s_mul_i32(s[42], 4, s[42]),
-  s_mul_i32(s[8], s[53], s[4]),
-  v_add_nc_u32_e32(v[134], s[8], v[136]),
-  v_lshlrev_b32_e32(v[134], 2, v[134]),
-  v_lshlrev_b32_e32(v[135], 2, v[136]),
-  s_mul_i32(s[8], 0x80, s[3]),
-  v_add_nc_u32_e32(v[136], s[8], v[254]),
-  buffer_load_b32(v[132], v[134], 40),
-  buffer_load_b32(v[133], v[135], 32),
-  v_lshlrev_b32_e32(v[136], 2, v[254]),
-  barrier_signal(),
-  s_barrier_wait(0xffff),
-  s_wait_loadcnt(0x1),
-  ds_store_b32(v[136], v[132], offset1=0),
-  v_cmp_gt_u32_e64(RawImm(48), s[34], 0),
-  s_wait_loadcnt(0x0),
-  v_cndmask_b32_e64(v[133], 1.0, v[133], s[48]),
-  ds_store_b32(v[136], v[133], offset1=2),
-  "skip_bias_load:",
-  s_mul_i32(s[8], 0x80, s[2]),
-  v_sub_nc_u32_e64(v[139], v[128], s[8]),
-  v_lshlrev_b32_e32(v[139], 2, v[139]),
-  s_wait_dscnt(0x0),
-  barrier_signal(),
-  s_barrier_wait(0xffff),
-  ds_load_b128(v[176:179], v[139], offset1=2),
   v_add_lshl_u32(v[137], v[131], v[128], 1),
-  s_wait_dscnt(0x0),
-  *store_tile(0, 8, 16, 24, 140, update_ptr=False),
-  *store_tile(32, 40, 48, 56, 140),
-  *store_tile(64, 72, 80, 88, 140),
-  *store_tile(96, 104, 112, 120, 140),
-  *store_tile(1, 9, 17, 25, 140),
-  *store_tile(33, 41, 49, 57, 140),
-  *store_tile(65, 73, 81, 89, 140),
-  *store_tile(97, 105, 113, 121, 140),
-  s_nop(0),
-  ds_load_b128(v[176:179], v[139], offset1=2),
-  s_wait_dscnt(0x0),
-  *store_tile(2, 10, 18, 26, 140),
-  *store_tile(34, 42, 50, 58, 140),
-  *store_tile(66, 74, 82, 90, 140),
-  *store_tile(98, 106, 114, 122, 140),
-  *store_tile(3, 11, 19, 27, 140),
-  *store_tile(35, 43, 51, 59, 140),
-  *store_tile(67, 75, 83, 91, 140),
-  *store_tile(99, 107, 115, 123, 140),
-  s_nop(0),
-  ds_load_b128(v[176:179], v[139], offset1=2),
-  s_wait_dscnt(0x0),
-  *store_tile(4, 12, 20, 28, 140),
-  *store_tile(36, 44, 52, 60, 140),
-  *store_tile(68, 76, 84, 92, 140),
-  *store_tile(100, 108, 116, 124, 140),
-  *store_tile(5, 13, 21, 29, 140),
-  *store_tile(37, 45, 53, 61, 140),
-  *store_tile(69, 77, 85, 93, 140),
-  *store_tile(101, 109, 117, 125, 140),
-  s_nop(0),
-  ds_load_b128(v[176:179], v[139], offset1=2),
-  s_wait_dscnt(0x0),
-  *store_tile(6, 14, 22, 30, 140),
-  *store_tile(38, 46, 54, 62, 140),
-  *store_tile(70, 78, 86, 94, 140),
-  *store_tile(102, 110, 118, 126, 140),
-  *store_tile(7, 15, 23, 31, 140),
-  *store_tile(39, 47, 55, 63, 140),
-  *store_tile(71, 79, 87, 95, 140),
-  *store_tile(103, 111, 119, 127, 140),
-  s_endpgm(),
+  barrier_signal(),
+  s_barrier_wait(0xffff),
 ]
+
+# final stores
+
+ptr, tmpv = 16, 140
+vaddr = v[137]
+bases = (0, 32, 64, 96)
+row_pairs = ((0, 1), (2, 3), (4, 5), (6, 7))
+
+first = True
+for a, b in row_pairs:
+  insts += [s_nop(0), s_wait_dscnt(0x0)]
+  # even row then odd row, for each base
+  for r in (a, b):
+    for base in bases:
+      # advance the ptr SGPR
+      if not first: insts += [s_add_co_u32(s[ptr], s[ptr], N << 1), s_add_co_ci_u32(s[ptr+1], s[ptr+1], 0)]
+      first = False
+      # pack 4 fp16s
+      acc4 = [v[base+r], v[base+r+8], v[base+r+16], v[base+r+24]]
+      insts += [
+        v_cvt_f16_f32_e64(acc4[0], acc4[0]),
+        v_cvt_f16_f32_e64(acc4[1], acc4[1]),
+        v_pack_b32_f16(v[tmpv+0], acc4[0], acc4[1]),
+        v_cvt_f16_f32_e64(acc4[2], acc4[2]),
+        v_cvt_f16_f32_e64(acc4[3], acc4[3]),
+        v_pack_b32_f16(v[tmpv+1], acc4[2], acc4[3]),
+      ]
+      insts.append(buffer_store_b64(v[tmpv:tmpv+1], vaddr, ptr))
+
+insts.append(s_endpgm())
