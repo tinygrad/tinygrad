@@ -5,21 +5,25 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, DType
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
+from tinygrad.helpers import DEBUG
 
 # DType lookup table for AMD pseudocode type suffixes
+from tinygrad.dtype import INVERSE_DTYPES_DICT
 _QDTYPES: dict[str, DType] = {
   'f64': dtypes.float64, 'f32': dtypes.float32, 'f16': dtypes.float16, 'bf16': dtypes.bfloat16,
   'u64': dtypes.uint64, 'u32': dtypes.uint32, 'u16': dtypes.uint16, 'u8': dtypes.uint8,
   'i64': dtypes.int64, 'i32': dtypes.int32, 'i16': dtypes.int16, 'i8': dtypes.int8,
-  'b128': DType.new(8, 128, "bits128", None), 'b65': DType.new(8, 65, "bits65", None),
-  'b64': dtypes.uint64, 'b32': dtypes.uint32, 'b16': dtypes.uint16, 'b8': dtypes.uint8,
-  'b1201': DType.new(8, 1201, "bits1201", None),
-  'u65': DType.new(6, 65, "uint65", None), 'u24': DType.new(6, 24, "uint24", None),
-  'u6': DType.new(6, 6, "uint6", None), 'u4': DType.new(6, 4, "uint4", None),
-  'u3': DType.new(6, 3, "uint3", None), 'u1': DType.new(6, 1, "uint1", None),
-  'i65': DType.new(5, 65, "int65", None), 'i24': DType.new(5, 24, "int24", None), 'i1': DType.new(5, 1, "int1", None),
+  'b1201': DType.new(6, 1201, "b1201", None), 'b128': DType.new(6, 128, "b128", None),
+  'b65': DType.new(6, 65, "b65", None), 'b64': dtypes.uint64, 'b32': dtypes.uint32, 'b16': dtypes.uint16, 'b8': dtypes.uint8,
+  'u65': DType.new(6, 65, "u65", None), 'u24': DType.new(6, 24, "u24", None),
+  'u6': DType.new(6, 6, "u6", None), 'u4': DType.new(6, 4, "u4", None),
+  'u3': DType.new(6, 3, "u3", None), 'u1': DType.new(6, 1, "u1", None),
+  'i65': DType.new(5, 65, "i65", None), 'i24': DType.new(5, 24, "i24", None), 'i1': DType.new(5, 1, "i1", None),
   'u': dtypes.uint32, 'i': dtypes.int32, 'f': dtypes.float32,
 }
+# Register custom dtypes for repr
+for k, v in _QDTYPES.items():
+  if v.name not in INVERSE_DTYPES_DICT: INVERSE_DTYPES_DICT[v.name] = k
 
 # String to Ops mapping
 _BINOPS: dict[str, Ops] = {
@@ -125,8 +129,10 @@ def expr(s: str) -> UOp:
       l, r = s[:p].strip(), s[p+len(op):].strip()
       if l and r:
         lhs, rhs = expr(l), expr(r)
-        if op in ('>', '>='): lhs, rhs = rhs, lhs
-        return UOp(_BINOPS[op], dtypes.void, (lhs, rhs))
+        flipped = op in ('>', '>=')
+        if flipped: lhs, rhs = rhs, lhs
+        tag = 'flipped' if flipped else ('<>' if op == '<>' else None)
+        return UOp(_BINOPS[op], dtypes.void, (lhs, rhs), tag=tag)
   # Unary ops
   if s[0] in '-~!' and len(s) > 1 and (s[0] != '!' or s[1] != '='): return UOp(_UNOPS[s[0]], dtypes.void, (expr(s[1:]),))
   # Slice/Index -> CUSTOMI
@@ -158,10 +164,20 @@ def expr(s: str) -> UOp:
   if re.match(r'^[A-Za-z_][\w.]*$', s): return UOp(Ops.DEFINE_VAR, dtypes.void, arg=(s, None, None))
   # Numeric literal
   try:
-    if s[:2].lower() == '0x': return UOp(Ops.CONST, dtypes.uint32, arg=int(re.sub(r'[UuLl]+$', '', s), 16))
+    if s[:2].lower() == '0x':
+      m = re.match(r'0[xX]([0-9a-fA-F]+)([UuLl]*)$', s)
+      if m:
+        val, suf = int(m[1], 16), m[2].lower()
+        if 'll' in suf: return UOp(Ops.CONST, dtypes.uint64 if 'u' in suf else dtypes.int64, arg=val)
+        if 'u' in suf: return UOp(Ops.CONST, dtypes.uint32, arg=val)
+        return UOp(Ops.CONST, dtypes.uint32, arg=val)
+    suffix = re.search(r'([UuLlFf]+)$', s)
+    suf = suffix[1].lower() if suffix else ''
     c = re.sub(r'[FfLlUu]+$', '', s)
-    if '.' in c or 'e' in c.lower(): return UOp(Ops.CONST, dtypes.float32, arg=float(c))
-    return UOp(Ops.CONST, dtypes.int32, arg=int(re.sub(r'[UuLl]+$', '', s)))
+    if '.' in c or 'e' in c.lower() or 'f' in suf: return UOp(Ops.CONST, dtypes.float32, arg=float(c))
+    if 'u' in suf: return UOp(Ops.CONST, dtypes.uint64 if 'll' in suf else dtypes.uint32, arg=int(c))
+    if 'll' in suf: return UOp(Ops.CONST, dtypes.int64, arg=int(c))
+    return UOp(Ops.CONST, dtypes.int32, arg=int(c))
   except ValueError: pass
   raise ValueError(f"Cannot parse expression: {s}")
 
@@ -211,36 +227,102 @@ def parse(code: str) -> tuple[Stmt, ...]:
     i += 1
   return tuple(stmts)
 
+_OP_SYMS = {Ops.ADD: '+', Ops.SUB: '-', Ops.MUL: '*', Ops.FDIV: '/', Ops.MOD: '%', Ops.AND: '&', Ops.OR: '|',
+             Ops.XOR: '^', Ops.SHL: '<<', Ops.SHR: '>>', Ops.CMPEQ: '==', Ops.CMPNE: '!=', Ops.CMPLT: '<', Ops.CMPLE: '<='}
+_DT_STR = {dtypes.uint64: 'u64', dtypes.uint32: 'u32', dtypes.uint16: 'u16', dtypes.uint8: 'u8',
+           dtypes.int64: 'i64', dtypes.int32: 'i32', dtypes.int16: 'i16', dtypes.int8: 'i8',
+           dtypes.float64: 'f64', dtypes.float32: 'f32', dtypes.float16: 'f16'}
+
+def _dt_bits(dt: DType) -> int:
+  if m := re.search(r'(\d+)', dt.name): return int(m[1])
+  return dt.itemsize * 8
+
+def _pr(n, d=0):
+  p = "  "*d
+  match n:
+    case UOp(Ops.CONST, dt, _, v):
+      if dt == dtypes.int32: return str(int(v))
+      if dt == dtypes.int64: return f"{int(v)}LL"
+      if dt == dtypes.float32: return f"{v}F"
+      if dt == dtypes.float16: return f"16'{v}"
+      if dt == dtypes.uint32: return f"{int(v)}U"
+      if dt == dtypes.uint64: return f"{int(v)}ULL"
+      if dt == dtypes.int16: return f"16'{int(v)}"
+      bits = _dt_bits(dt)
+      if 'u' in dt.name or 'b' in dt.name: return f"{bits}'{int(v)}U"
+      if 'f' in dt.name or 'float' in dt.name: return f"{bits}'{v}"
+      if 'i' in dt.name or 'int' in dt.name: return f"{bits}'{int(v)}"
+      return f"{v}"
+    case UOp(Ops.DEFINE_VAR, _, _, (name, _, _)): return name
+    case UOp(Ops.BITCAST, dt, (e,)): return f"{_pr(e)}.{_DT_STR.get(dt, dt.name)}"
+    case UOp(Ops.CUSTOMI, _, (e, h, l)):
+      if h is l: return f"{_pr(e)}[{_pr(h)}]"
+      # Detect [start +: width] pattern: hi = (start + width) - 1, lo = start
+      if h.op == Ops.SUB and h.src[1].op == Ops.CONST and h.src[1].arg == 1 and h.src[0].op == Ops.ADD and h.src[0].src[0] == l:
+        return f"{_pr(e)}[{_pr(l)} +: {_pr(h.src[0].src[1])}]"
+      return f"{_pr(e)}[{_pr(h)} : {_pr(l)}]"
+    case UOp(Ops.CAST, dt, (e,)): return f"{_dt_bits(dt)}'{_DT_STR.get(dt, dt.name)[0].upper()}({_pr(e)})"
+    case UOp(Ops.NEG, _, (x,)): return f"-{_pr(x)}"
+    case UOp(Ops.XOR, _, (x,)) if len(n.src) == 1: return f"~{_pr(x)}"
+    case UOp(Ops.CMPEQ, _, (x,)) if len(n.src) == 1: return f"!{_pr(x)}"
+    case UOp(_, _, (l, r), _) if n.op in _OP_SYMS:
+      sym = _OP_SYMS[n.op]
+      left, right = l, r
+      # Restore > / >= if tag indicates flipped
+      if n.tag == 'flipped' and n.op == Ops.CMPLT: sym, left, right = '>', r, l
+      if n.tag == 'flipped' and n.op == Ops.CMPLE: sym, left, right = '>=', r, l
+      # Use <> for unordered not-equal
+      if n.tag == '<>' and n.op == Ops.CMPNE: sym = '<>'
+      # Use && / || for logical ops when operands are comparisons or bool-returning calls
+      bool_ops = (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE, Ops.CUSTOM, Ops.AND, Ops.OR)
+      if n.op == Ops.AND and l.op in bool_ops and r.op in bool_ops: sym = '&&'
+      if n.op == Ops.OR and l.op in bool_ops and r.op in bool_ops: sym = '||'
+      return f"{_pr(left)} {sym} {_pr(right)}"
+    case UOp(Ops.WHERE, _, (c, t, f)): return f"{_pr(c)} ? {_pr(t)} : {_pr(f)}"
+    case UOp(Ops.CUSTOM, _, args, 'MEM'): return f"MEM[{_pr(args[0])}]"
+    case UOp(Ops.CUSTOM, _, args, name): return f"{name}({', '.join(_pr(x) for x in args)})"
+    case UOp(Ops.CAT, _, exprs): return f"{{{', '.join(_pr(x) for x in exprs)}}}"
+    case Assign(l, r):
+      # Detect compound assignment: lhs = lhs op rhs -> lhs op= rhs
+      compound = {Ops.ADD: '+=', Ops.SUB: '-=', Ops.OR: '|=', Ops.AND: '&=', Ops.XOR: '^=', Ops.SHL: '<<=', Ops.SHR: '>>='}
+      if r.op in compound and len(r.src) == 2 and r.src[0] == l:
+        return f"{p}{_pr(l)} {compound[r.op]} {_pr(r.src[1])}"
+      return f"{p}{_pr(l)} = {_pr(r)}"
+    case Declare(name, dt): return f"{p}declare {name} : {_dt_bits(dt)}'{_DT_STR.get(dt, dt.name)[0].upper()}"
+    case If(br):
+      parts = []
+      for i, (c, b) in enumerate(br):
+        kw = "if" if i == 0 else "elsif" if c is not None else "else"
+        cond = f" {_pr(c)} then" if c is not None else ""
+        body = "\n".join(_pr(s, d) for s in b)
+        parts.append(f"{p}{kw}{cond}\n{body}")
+      return "\n".join(parts) + f"\n{p}endif"
+    case For(v, s, e, b): return f"{p}for {v} in {_pr(s)} : {_pr(e)} do\n" + "\n".join(_pr(x, d) for x in b) + f"\n{p}endfor"
+    case tuple(): return "\n".join(_pr(x, d) for x in n)
+    case _: return f"{p}{n}"
+
 if __name__ == "__main__":
-  import os
   from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
-  DEBUG = os.getenv("DEBUG", "0") == "1"
-  ok, fail, errs = 0, 0, {}
+  ok, fail, match, errs = 0, 0, 0, {}
   for cls, ops in PSEUDOCODE_STRINGS.items():
     for op, pc in ops.items():
       try: ast = parse(pc); ok += 1
       except Exception as e: fail += 1; errs[str(e)[:60]] = errs.get(str(e)[:60], 0) + 1
       else:
-        if DEBUG:
-          def pr(n, d=0):
-            p = "  "*d
-            match n:
-              case UOp(Ops.CONST, dt, _, v): return f"{v}" if dt == dtypes.int32 else f"{v}:{dt.name}"
-              case UOp(Ops.DEFINE_VAR, _, _, (name, _, _)): return name
-              case UOp(Ops.BITCAST, dt, (e,)): return f"{pr(e)}.{dt.name}"
-              case UOp(Ops.CUSTOMI, _, (e, h, l)): return f"{pr(e)}[{pr(h)}]" if h is l else f"{pr(e)}[{pr(h)}:{pr(l)}]"
-              case UOp(Ops.CAST, dt, (e,)): return f"{dt.name}({pr(e)})"
-              case UOp(Ops.NEG|Ops.XOR|Ops.CMPEQ, _, (x,)): return f"{n.op.name}({pr(x)})"
-              case UOp(_, _, (l, r), None) if n.op in _BINOPS.values(): return f"({pr(l)} {n.op.name} {pr(r)})"
-              case UOp(Ops.WHERE, _, (c, t, f)): return f"({pr(c)} ? {pr(t)} : {pr(f)})"
-              case UOp(Ops.CUSTOM, _, args, name): return f"{name}({', '.join(pr(x) for x in args)})"
-              case UOp(Ops.CAT, _, exprs): return f"{{{', '.join(pr(x) for x in exprs)}}}"
-              case Assign(l, r): return f"{p}{pr(l)} = {pr(r)}"
-              case Declare(n, t): return f"{p}declare {n}: {t.name}"
-              case If(br): return f"{p}if " + " elif ".join(f"({pr(c) if c is not None else 'else'}) {{\n" + "\n".join(pr(s,d+1) for s in b) + f"\n{p}}}" for c,b in br)
-              case For(v,s,e,b): return f"{p}for {v} in {pr(s)}:{pr(e)} {{\n" + "\n".join(pr(x,d+1) for x in b) + f"\n{p}}}"
-              case tuple(): return "\n".join(pr(x, d) for x in n)
-              case _: return f"{p}{n}"
-          print(f"{'='*60}\n{op.name}\n{'='*60}\n{pc}\n{'-'*60}\n{pr(ast)}\n")
-  print(f"Parsed: {ok}/{ok+fail} ({100*ok/(ok+fail):.1f}%)")
+        rendered = _pr(ast)
+        # Normalize for comparison
+        def norm(s):
+          s = re.sub(r'^[^=;]+(?=\n)', '', s)  # strip leading description lines (no = or ;)
+          s = re.sub(r'//[^\n]*', '', s)  # strip comments
+          s = re.sub(r'[;()\s]', '', s)  # strip semicolons, parens, whitespace
+          s = re.sub(r'0x[0-9a-fA-F]+', lambda m: str(int(m[0], 16)), s)  # hex to decimal
+          s = re.sub(r'\.b(\d+)', r'.u\1', s)  # .bXX -> .uXX
+          s = re.sub(r"'B", "'U", s)  # 'B -> 'U
+          s = re.sub(r'(\d+\.\d+)F', r'\1', s)  # strip F suffix from floats
+          return s
+        if norm(rendered) == norm(pc):
+          match += 1
+          if DEBUG >= 2: print(f"\033[32m{op.name}\033[0m")
+        elif DEBUG: print(f"\033[31m{'='*60}\n{op.name}\n{'='*60}\n{pc}\n{'-'*60}\n{rendered}\n\033[0m")
+  print(f"Parsed: {ok}/{ok+fail} ({100*ok/(ok+fail):.1f}%), Match: {match}/{ok} ({100*match/ok:.1f}%)")
   for e, c in sorted(errs.items(), key=lambda x: -x[1])[:10]: print(f"  {c}: {e}")
