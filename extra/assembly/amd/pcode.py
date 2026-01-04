@@ -1,6 +1,6 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
 import struct, math
-from extra.assembly.amd.dsl import MASK32, MASK64, MASK128, _f32, _i32, _sext, _f16, _i16, _f64, _i64
+from extra.assembly.amd.dsl import MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
@@ -269,31 +269,6 @@ ROUND_MODE = _RoundMode()
 def cvtToQuietNAN(x): return float('nan')
 DST = None  # Placeholder, will be set in context
 
-# 2/PI with 1201 bits of precision for V_TRIG_PREOP_F64
-# Computed as: int((2/pi) * 2^1201) - this is the fractional part of 2/pi scaled to integer
-# The MSB (bit 1200) corresponds to 2^0 position in the fraction 0.b1200 b1199 ... b1 b0
-_TWO_OVER_PI_1201_RAW = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6
-
-class _BigInt:
-  """Wrapper for large integers that supports bit slicing [high:low]."""
-  __slots__ = ('_val',)
-  def __init__(self, val): self._val = val
-  def __getitem__(self, key):
-    if isinstance(key, slice):
-      high, low = key.start, key.stop
-      if high < low: high, low = low, high  # Handle reversed slice
-      mask = (1 << (high - low + 1)) - 1
-      return (self._val >> low) & mask
-    return (self._val >> key) & 1
-  def __int__(self): return self._val
-  def __index__(self): return self._val
-  def __lshift__(self, n): return self._val << int(n)
-  def __rshift__(self, n): return self._val >> int(n)
-  def __and__(self, n): return self._val & int(n)
-  def __or__(self, n): return self._val | int(n)
-
-TWO_OVER_PI_1201 = _BigInt(_TWO_OVER_PI_1201_RAW)
-
 class _WaveMode:
   IEEE = False
 WAVE_MODE = _WaveMode()
@@ -418,7 +393,7 @@ SliceProxy = TypedView  # Alias for compatibility
 class Reg:
   """GPU register: D0.f32 = S0.f32 + S1.f32 just works. Supports up to 128 bits for DS_LOAD_B128."""
   __slots__ = ('_val',)
-  def __init__(self, val=0): self._val = int(val) & MASK128
+  def __init__(self, val=0): self._val = int(val)
 
   # Typed views - TypedView(reg, high, signed, is_float, is_bf16)
   u64 = property(lambda s: TypedView(s, 63), lambda s, v: setattr(s, '_val', int(v) & MASK64))
@@ -483,4 +458,5 @@ class Reg:
   def __eq__(s, o): return s._val == int(o)
   def __ne__(s, o): return s._val != int(o)
 
-
+# 2/PI with 1201 bits of precision for V_TRIG_PREOP_F64
+TWO_OVER_PI_1201 = Reg(0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6)
