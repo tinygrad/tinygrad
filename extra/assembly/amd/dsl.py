@@ -458,19 +458,16 @@ class Inst:
 
   @classmethod
   def from_bytes(cls, data: bytes):
+    import typing
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
     op_val = inst._values.get('op', 0)
     # Check for instructions that always have a literal constant (FMAMK/FMAAK/MADMK/MADAK, SETREG_IMM32)
     op_name = ''
-    if cls.__name__ in ('VOP2', 'SOP2', 'SOPK'):
-      try:
-        import typing
-        hints = typing.get_type_hints(cls, include_extras=True)
-        if 'op' in hints and typing.get_origin(hints['op']) is typing.Annotated:
-          op_enum_cls = typing.get_args(hints['op'])[1]
-          op_name = op_enum_cls(op_val).name if op_enum_cls else ''
-      except (ValueError, KeyError, AttributeError, TypeError): pass
-    has_literal = 'FMAMK' in op_name or 'FMAAK' in op_name or 'MADMK' in op_name or 'MADAK' in op_name or 'SETREG_IMM32' in op_name
+    if cls.__name__ in ('VOP2', 'SOP2', 'SOPK') and 'op' in (hints := typing.get_type_hints(cls, include_extras=True)):
+      if typing.get_origin(hints['op']) is typing.Annotated:
+        try: op_name = typing.get_args(hints['op'])[1](op_val).name
+        except (ValueError, TypeError): pass
+    has_literal = any(x in op_name for x in ('FMAMK', 'FMAAK', 'MADMK', 'MADAK', 'SETREG_IMM32'))
     # VOPD fmaak/fmamk always have a literal (opx/opy value 1 or 2)
     opx, opy = inst._values.get('opx', 0), inst._values.get('opy', 0)
     has_literal = has_literal or (cls.__name__ == 'VOPD' and (opx in (1, 2) or opy in (1, 2)))
