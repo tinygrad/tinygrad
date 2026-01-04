@@ -1,5 +1,5 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
-import struct, math
+import struct, math, re, functools
 from extra.assembly.amd.dsl import MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -442,3 +442,324 @@ DENORM = _Denorm()
 
 # 2/PI with 1201 bits of precision for V_TRIG_PREOP_F64
 TWO_OVER_PI_1201 = Reg(0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPILER: pseudocode -> Python (minimal transforms)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _compile_pseudocode(pseudocode: str) -> str:
+  """Compile pseudocode to Python. Transforms are minimal - most syntax just works."""
+  pseudocode = re.sub(r'\bpass\b', 'pass_', pseudocode)  # 'pass' is Python keyword
+  raw_lines = pseudocode.strip().split('\n')
+  joined_lines: list[str] = []
+  for line in raw_lines:
+    line = line.strip()
+    if joined_lines and (joined_lines[-1].rstrip().endswith(('||', '&&', '(', ',')) or
+                         (joined_lines[-1].count('(') > joined_lines[-1].count(')'))):
+      joined_lines[-1] = joined_lines[-1].rstrip() + ' ' + line
+    else:
+      joined_lines.append(line)
+
+  lines = []
+  indent, need_pass, in_first_match_loop = 0, False, False
+  for line in joined_lines:
+    line = line.split('//')[0].strip()  # Strip C-style comments
+    if not line: continue
+    if line.startswith('if '):
+      lines.append('  ' * indent + f"if {_expr(line[3:].rstrip(' then'))}:")
+      indent += 1
+      need_pass = True
+    elif line.startswith('elsif '):
+      if need_pass: lines.append('  ' * indent + "pass")
+      indent -= 1
+      lines.append('  ' * indent + f"elif {_expr(line[6:].rstrip(' then'))}:")
+      indent += 1
+      need_pass = True
+    elif line == 'else':
+      if need_pass: lines.append('  ' * indent + "pass")
+      indent -= 1
+      lines.append('  ' * indent + "else:")
+      indent += 1
+      need_pass = True
+    elif line.startswith('endif'):
+      if need_pass: lines.append('  ' * indent + "pass")
+      indent -= 1
+      need_pass = False
+    elif line.startswith('endfor'):
+      if need_pass: lines.append('  ' * indent + "pass")
+      indent -= 1
+      need_pass, in_first_match_loop = False, False
+    elif line.startswith('declare '):
+      pass
+    elif m := re.match(r'for (\w+) in (.+?)\s*:\s*(.+?) do', line):
+      start, end = _expr(m[2].strip()), _expr(m[3].strip())
+      lines.append('  ' * indent + f"for {m[1]} in range({start}, int({end})+1):")
+      indent += 1
+      need_pass, in_first_match_loop = True, True
+    elif '=' in line and not line.startswith('=='):
+      need_pass = False
+      line = line.rstrip(';')
+      if m := re.match(r'\{\s*D1\.[ui]1\s*,\s*D0\.[ui]64\s*\}\s*=\s*(.+)', line):
+        rhs = _expr(m[1])
+        lines.append('  ' * indent + f"_full = {rhs}")
+        lines.append('  ' * indent + f"D0.u64 = int(_full) & 0xffffffffffffffff")
+        lines.append('  ' * indent + f"D1 = Reg((int(_full) >> 64) & 1)")
+      elif any(op in line for op in ('+=', '-=', '*=', '/=', '|=', '&=', '^=')):
+        for op in ('+=', '-=', '*=', '/=', '|=', '&=', '^='):
+          if op in line:
+            lhs, rhs = line.split(op, 1)
+            lines.append('  ' * indent + f"{lhs.strip()} {op} {_expr(rhs.strip())}")
+            break
+      else:
+        lhs, rhs = line.split('=', 1)
+        lhs_s, rhs_s = _expr(lhs.strip()), rhs.strip()
+        stmt = _assign(lhs_s, _expr(rhs_s))
+        if in_first_match_loop and rhs_s == 'i' and (lhs_s == 'tmp' or lhs_s == 'D0.i32'):
+          stmt += "; break"
+        lines.append('  ' * indent + stmt)
+  if need_pass: lines.append('  ' * indent + "pass")
+  return '\n'.join(lines)
+
+def _assign(lhs: str, rhs: str) -> str:
+  if lhs in ('tmp', 'SCC', 'VCC', 'EXEC', 'D0', 'D1', 'saveexec', 'PC'):
+    return f"{lhs} = Reg({rhs})"
+  return f"{lhs} = {rhs}"
+
+def _expr(e: str) -> str:
+  e = e.strip()
+  e = e.replace('&&', ' and ').replace('||', ' or ').replace('<>', ' != ')
+  e = re.sub(r'!([^=])', r' not \1', e)
+  e = re.sub(r'\{\s*(\w+\.u32)\s*,\s*(\w+\.u32)\s*\}', r'_pack32(\1, \2)', e)
+  def pack(m):
+    hi, lo = _expr(m[1].strip()), _expr(m[2].strip())
+    return f'_pack({hi}, {lo})'
+  e = re.sub(r'\{\s*([^,{}]+)\s*,\s*([^,{}]+)\s*\}', pack, e)
+  e = re.sub(r"1201'B\(2\.0\s*/\s*PI\)", "TWO_OVER_PI_1201", e)
+  e = re.sub(r"\d+'([0-9a-fA-Fx]+)[UuFf]*", r'\1', e)
+  e = re.sub(r"\d+'[FIBU]\(", "(", e)
+  e = re.sub(r'\bB\(', '(', e)
+  e = re.sub(r'([0-9a-fA-Fx])ULL\b', r'\1', e)
+  e = re.sub(r'([0-9a-fA-Fx])LL\b', r'\1', e)
+  e = re.sub(r'([0-9a-fA-Fx])U\b', r'\1', e)
+  e = re.sub(r'(\d\.?\d*)F\b', r'\1', e)
+  e = re.sub(r'(\[laneId\])\.[uib]\d+', r'\1', e)
+  e = e.replace('+INF', 'INF').replace('-INF', '(-INF)')
+  e = re.sub(r'NAN\.f\d+', 'float("nan")', e)
+  def convert_verilog_slice(m):
+    start, width = m.group(1).strip(), m.group(2).strip()
+    return f'[({start}) + ({width}) - 1 : ({start})]'
+  e = re.sub(r'\[([^:\[\]]+)\s*\+:\s*([^:\[\]]+)\]', convert_verilog_slice, e)
+  def process_brackets(s):
+    result, i = [], 0
+    while i < len(s):
+      if s[i] == '[':
+        depth, start = 1, i + 1
+        j = start
+        while j < len(s) and depth > 0:
+          if s[j] == '[': depth += 1
+          elif s[j] == ']': depth -= 1
+          j += 1
+        inner = _expr(s[start:j-1])
+        result.append('[' + inner + ']')
+        i = j
+      else:
+        result.append(s[i])
+        i += 1
+    return ''.join(result)
+  e = process_brackets(e)
+  while '?' in e:
+    depth, bracket, q = 0, 0, -1
+    for i, c in enumerate(e):
+      if c == '(': depth += 1
+      elif c == ')': depth -= 1
+      elif c == '[': bracket += 1
+      elif c == ']': bracket -= 1
+      elif c == '?' and depth == 0 and bracket == 0: q = i; break
+    if q < 0: break
+    depth, bracket, col = 0, 0, -1
+    for i in range(q + 1, len(e)):
+      if e[i] == '(': depth += 1
+      elif e[i] == ')': depth -= 1
+      elif e[i] == '[': bracket += 1
+      elif e[i] == ']': bracket -= 1
+      elif e[i] == ':' and depth == 0 and bracket == 0: col = i; break
+    if col < 0: break
+    cond, t, f = e[:q].strip(), e[q+1:col].strip(), e[col+1:].strip()
+    e = f'(({t}) if ({cond}) else ({f}))'
+  return e
+
+def _apply_pseudocode_fixes(op_name: str, code: str) -> str:
+  """Apply known fixes for PDF pseudocode bugs."""
+  if op_name == 'V_DIV_FMAS_F32':
+    code = code.replace('D0.f32 = 2.0 ** 32 * fma(S0.f32, S1.f32, S2.f32)',
+                        'D0.f32 = (2.0 ** 64 if exponent(S2.f32) > 127 else 2.0 ** -64) * fma(S0.f32, S1.f32, S2.f32)')
+  if op_name == 'V_DIV_FMAS_F64':
+    code = code.replace('D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)',
+                        'D0.f64 = (2.0 ** 128 if exponent(S2.f64) > 1023 else 2.0 ** -128) * fma(S0.f64, S1.f64, S2.f64)')
+  if op_name == 'V_DIV_SCALE_F32':
+    code = code.replace('D0.f32 = float("nan")', 'VCC = Reg(0x1); D0.f32 = float("nan")')
+    code = code.replace('elif S1.f32 == DENORM.f32:\n  D0.f32 = ldexp(S0.f32, 64)', 'elif False:\n  pass')
+    code += '\nif S1.f32 == DENORM.f32:\n  D0.f32 = float("nan")'
+    code = code.replace('elif exponent(S2.f32) <= 23:\n  D0.f32 = ldexp(S0.f32, 64)', 'elif exponent(S2.f32) <= 23:\n  VCC = Reg(0x1); D0.f32 = ldexp(S0.f32, 64)')
+    code = code.replace('elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)\n  if S0.f32 == S2.f32:\n    D0.f32 = ldexp(S0.f32, 64)', 'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)')
+  if op_name == 'V_DIV_SCALE_F64':
+    code = code.replace('D0.f64 = float("nan")', 'VCC = Reg(0x1); D0.f64 = float("nan")')
+    code = code.replace('elif S1.f64 == DENORM.f64:\n  D0.f64 = ldexp(S0.f64, 128)', 'elif False:\n  pass')
+    code += '\nif S1.f64 == DENORM.f64:\n  D0.f64 = float("nan")'
+    code = code.replace('elif exponent(S2.f64) <= 52:\n  D0.f64 = ldexp(S0.f64, 128)', 'elif exponent(S2.f64) <= 52:\n  VCC = Reg(0x1); D0.f64 = ldexp(S0.f64, 128)')
+    code = code.replace('elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)', 'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)')
+  if op_name == 'V_DIV_FIXUP_F32':
+    code = code.replace('D0.f32 = ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))',
+                        'D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32)) if isNAN(S0.f32) else ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))')
+  if op_name == 'V_DIV_FIXUP_F64':
+    code = code.replace('D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))',
+                        'D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))')
+  if op_name == 'V_TRIG_PREOP_F64':
+    code = code.replace('result = F((TWO_OVER_PI_1201[1200 : 0] << shift.u32) & 0x1fffffffffffff)',
+                        'result = float(((TWO_OVER_PI_1201[1200 : 0] << int(shift)) >> (1201 - 53)) & 0x1fffffffffffff)')
+  return code
+
+def _generate_function(cls_name: str, op_name: str, pc: str, code: str) -> str:
+  """Generate a single compiled pseudocode function.
+  Functions take int parameters and return dict of int values.
+  Reg wrapping happens inside the function, only for registers actually used."""
+  has_d1 = '{ D1' in pc
+  is_cmpx = (cls_name in ('VOPCOp', 'VOP3Op')) and 'EXEC.u64[laneId]' in pc
+  is_div_scale = 'DIV_SCALE' in op_name
+  has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
+  is_ds = cls_name == 'DSOp'
+  is_flat = cls_name in ('FLATOp', 'GLOBALOp', 'SCRATCHOp')
+  is_smem = cls_name == 'SMEMOp'
+  has_s_array = 'S[i]' in pc  # FMA_MIX style: S[0], S[1], S[2] array access
+  combined = code + pc
+
+  fn_name = f"_{cls_name}_{op_name}"
+
+  # Detect which registers are used/modified
+  def needs_init(name): return name in combined and not re.search(rf'^\s*{name}\s*=\s*Reg\(', code, re.MULTILINE)
+  modifies_d0 = is_div_scale or bool(re.search(r'\bD0\b[.\[]', combined))
+  modifies_exec = is_cmpx or bool(re.search(r'EXEC\.(u32|u64|b32|b64)\s*=', combined))
+  modifies_vcc = has_sdst or bool(re.search(r'VCC\.(u32|u64|b32|b64)\s*=|VCC\.u64\[laneId\]\s*=', combined))
+  modifies_scc = bool(re.search(r'\bSCC\s*=', combined))
+  modifies_pc = bool(re.search(r'\bPC\s*=', combined))
+
+  # Build function signature and Reg init lines
+  if is_smem:
+    lines = [f"def {fn_name}(MEM, addr):"]
+    reg_inits = ["ADDR=Reg(addr)", "SDATA=Reg(0)"]
+    special_regs = []
+  elif is_ds:
+    lines = [f"def {fn_name}(MEM, addr, data0, data1, offset0, offset1):"]
+    reg_inits = ["ADDR=Reg(addr)", "DATA0=Reg(data0)", "DATA1=Reg(data1)", "OFFSET0=Reg(offset0)", "OFFSET1=Reg(offset1)", "RETURN_DATA=Reg(0)"]
+    special_regs = [('DATA', 'DATA0'), ('DATA2', 'DATA1'), ('OFFSET', 'OFFSET0'), ('ADDR_BASE', 'ADDR')]
+  elif is_flat:
+    lines = [f"def {fn_name}(MEM, addr, vdata, vdst):"]
+    reg_inits = ["ADDR=addr", "VDATA=Reg(vdata)", "VDST=Reg(vdst)", "RETURN_DATA=Reg(0)"]
+    special_regs = [('DATA', 'VDATA')]
+  elif has_s_array:
+    # FMA_MIX style: needs S[i] array, opsel, opsel_hi for source selection (neg/neg_hi applied in emu.py before call)
+    lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):"]
+    reg_inits = ["S0=Reg(s0)", "S1=Reg(s1)", "S2=Reg(s2)", "S=[S0,S1,S2]", "D0=Reg(d0)", "OPSEL=Reg(opsel)", "OPSEL_HI=Reg(opsel_hi)"]
+    special_regs = []
+    # Detect array declarations like "declare in : 32'F[3]" and create them (rename 'in' to 'ins' since 'in' is a keyword)
+    if "in[" in combined:
+      reg_inits.append("ins=[Reg(0),Reg(0),Reg(0)]")
+      code = code.replace("in[", "ins[")
+  else:
+    lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):"]
+    # Only create Regs for registers actually used in the pseudocode
+    reg_inits = []
+    if 'S0' in combined: reg_inits.append("S0=Reg(s0)")
+    if 'S1' in combined: reg_inits.append("S1=Reg(s1)")
+    if 'S2' in combined: reg_inits.append("S2=Reg(s2)")
+    if modifies_d0 or 'D0' in combined: reg_inits.append("D0=Reg(s0)" if is_div_scale else "D0=Reg(d0)")
+    if modifies_scc or 'SCC' in combined: reg_inits.append("SCC=Reg(scc)")
+    if modifies_vcc or 'VCC' in combined: reg_inits.append("VCC=Reg(vcc)")
+    if modifies_exec or 'EXEC' in combined: reg_inits.append("EXEC=Reg(exec_mask)")
+    if modifies_pc or 'PC' in combined: reg_inits.append("PC=Reg(pc) if pc is not None else None")
+    special_regs = [('D1', 'Reg(0)'), ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
+                    ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
+    if needs_init('tmp'): special_regs.insert(0, ('tmp', 'Reg(0)'))
+    if needs_init('saveexec'): special_regs.insert(0, ('saveexec', 'Reg(EXEC._val)'))
+
+  # Build init code
+  init_parts = reg_inits.copy()
+  for name, init in special_regs:
+    if name in combined: init_parts.append(f"{name}={init}")
+  if 'EXEC_LO' in code: init_parts.append("EXEC_LO=TypedView(EXEC, 31, 0)")
+  if 'EXEC_HI' in code: init_parts.append("EXEC_HI=TypedView(EXEC, 63, 32)")
+  if 'VCCZ' in code and not re.search(r'^\s*VCCZ\s*=', code, re.MULTILINE): init_parts.append("VCCZ=Reg(1 if VCC._val == 0 else 0)")
+  if 'EXECZ' in code and not re.search(r'^\s*EXECZ\s*=', code, re.MULTILINE): init_parts.append("EXECZ=Reg(1 if EXEC._val == 0 else 0)")
+
+  # Add init line and separator
+  if init_parts: lines.append(f"  {'; '.join(init_parts)}")
+
+  # Add compiled pseudocode
+  for line in code.split('\n'):
+    if line.strip(): lines.append(f"  {line}")
+
+  # Build result dict
+  result_items = []
+  if modifies_d0: result_items.append("'D0': D0._val")
+  if modifies_scc: result_items.append("'SCC': SCC._val")
+  if modifies_vcc: result_items.append("'VCC': VCC._val")
+  if modifies_exec: result_items.append("'EXEC': EXEC._val")
+  if has_d1: result_items.append("'D1': D1._val")
+  if modifies_pc: result_items.append("'PC': PC._val")
+  if is_smem and 'SDATA' in combined and re.search(r'^\s*SDATA[\.\[].*=', code, re.MULTILINE):
+    result_items.append("'SDATA': SDATA._val")
+  if is_ds and 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
+    result_items.append("'RETURN_DATA': RETURN_DATA._val")
+  if is_flat:
+    if 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
+      result_items.append("'RETURN_DATA': RETURN_DATA._val")
+    if re.search(r'^\s*VDATA[\.\[].*=', code, re.MULTILINE):
+      result_items.append("'VDATA': VDATA._val")
+  lines.append(f"  return {{{', '.join(result_items)}}}")
+  return '\n'.join(lines)
+
+# Build the globals dict for exec() - includes all pcode symbols
+_PCODE_GLOBALS = {
+  'Reg': Reg, 'TypedView': TypedView, '_pack': _pack, '_pack32': _pack32,
+  'ABSDIFF': ABSDIFF, 'BYTE_PERMUTE': BYTE_PERMUTE, 'DENORM': DENORM, 'F': F,
+  'GT_NEG_ZERO': GT_NEG_ZERO, 'LT_NEG_ZERO': LT_NEG_ZERO, 'INF': INF,
+  'MAX_FLOAT_F32': MAX_FLOAT_F32, 'OVERFLOW_F32': OVERFLOW_F32, 'OVERFLOW_F64': OVERFLOW_F64,
+  'UNDERFLOW_F32': UNDERFLOW_F32, 'UNDERFLOW_F64': UNDERFLOW_F64,
+  'PI': PI, 'ROUND_MODE': ROUND_MODE, 'WAVE_MODE': WAVE_MODE,
+  'WAVE32': WAVE32, 'WAVE64': WAVE64, 'TWO_OVER_PI_1201': TWO_OVER_PI_1201,
+  'SAT8': SAT8, 'trunc': trunc, 'floor': floor, 'ceil': ceil, 'sqrt': sqrt,
+  'log2': log2, 'fract': fract, 'sin': sin, 'cos': cos, 'pow': pow,
+  'isEven': isEven, 'mantissa': mantissa, 'signext_from_bit': signext_from_bit,
+  'i32_to_f32': i32_to_f32, 'u32_to_f32': u32_to_f32, 'i32_to_f64': i32_to_f64,
+  'u32_to_f64': u32_to_f64, 'f32_to_f64': f32_to_f64, 'f64_to_f32': f64_to_f32,
+  'f32_to_i32': f32_to_i32, 'f32_to_u32': f32_to_u32, 'f64_to_i32': f64_to_i32,
+  'f64_to_u32': f64_to_u32, 'f32_to_f16': f32_to_f16, 'f16_to_f32': f16_to_f32,
+  'i16_to_f16': i16_to_f16, 'u16_to_f16': u16_to_f16, 'f16_to_i16': f16_to_i16,
+  'f16_to_u16': f16_to_u16, 'bf16_to_f32': bf16_to_f32, 'f32_to_bf16': f32_to_bf16,
+  'u8_to_u32': u8_to_u32, 'u4_to_u32': u4_to_u32, 'u32_to_u16': u32_to_u16,
+  'i32_to_i16': i32_to_i16, 'f16_to_snorm': f16_to_snorm, 'f16_to_unorm': f16_to_unorm,
+  'f32_to_snorm': f32_to_snorm, 'f32_to_unorm': f32_to_unorm,
+  'v_cvt_i16_f32': v_cvt_i16_f32, 'v_cvt_u16_f32': v_cvt_u16_f32, 'f32_to_u8': f32_to_u8,
+  'v_min_f32': v_min_f32, 'v_max_f32': v_max_f32, 'v_min_f16': v_min_f16, 'v_max_f16': v_max_f16,
+  'v_min_i32': v_min_i32, 'v_max_i32': v_max_i32, 'v_min_i16': v_min_i16, 'v_max_i16': v_max_i16,
+  'v_min_u32': v_min_u32, 'v_max_u32': v_max_u32, 'v_min_u16': v_min_u16, 'v_max_u16': v_max_u16,
+  'v_min3_f32': v_min3_f32, 'v_max3_f32': v_max3_f32, 'v_min3_f16': v_min3_f16, 'v_max3_f16': v_max3_f16,
+  'v_min3_i32': v_min3_i32, 'v_max3_i32': v_max3_i32, 'v_min3_i16': v_min3_i16, 'v_max3_i16': v_max3_i16,
+  'v_min3_u32': v_min3_u32, 'v_max3_u32': v_max3_u32, 'v_min3_u16': v_min3_u16, 'v_max3_u16': v_max3_u16,
+  'v_sad_u8': v_sad_u8, 'v_msad_u8': v_msad_u8,
+  's_ff1_i32_b32': s_ff1_i32_b32, 's_ff1_i32_b64': s_ff1_i32_b64,
+  'isNAN': isNAN, 'isQuietNAN': isQuietNAN, 'isSignalNAN': isSignalNAN,
+  'fma': fma, 'ldexp': ldexp, 'sign': sign, 'exponent': exponent,
+  'signext': signext, 'cvtToQuietNAN': cvtToQuietNAN,
+}
+
+@functools.cache
+def compile_pseudocode(cls_name: str, op_name: str, pseudocode: str):
+  """Compile pseudocode string to executable function. Cached for performance."""
+  code = _compile_pseudocode(pseudocode)
+  code = _apply_pseudocode_fixes(op_name, code)
+  fn_code = _generate_function(cls_name, op_name, pseudocode, code)
+  fn_name = f"_{cls_name}_{op_name}"
+  local_ns = {}
+  exec(fn_code, _PCODE_GLOBALS, local_ns)
+  return local_ns[fn_name]

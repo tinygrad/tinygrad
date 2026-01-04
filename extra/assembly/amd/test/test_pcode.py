@@ -3,10 +3,14 @@
 import unittest
 from extra.assembly.amd.pcode import (Reg, TypedView, TypedView, MASK32, MASK64,
                                        _f32, _i32, _f16, _i16, f32_to_f16, isNAN, _bf16, _ibf16, bf16_to_f32, f32_to_bf16,
-                                       BYTE_PERMUTE, v_sad_u8, v_msad_u8)
-from extra.assembly.amd.pdf import compile_pseudocode, _expr
+                                       BYTE_PERMUTE, v_sad_u8, v_msad_u8, _compile_pseudocode, _expr, compile_pseudocode)
 from extra.assembly.amd.test.helpers import ExecContext
-from extra.assembly.amd.autogen.rdna3.gen_pcode import _VOP3SDOp_V_DIV_SCALE_F32, _VOPCOp_V_CMP_CLASS_F32
+from extra.assembly.amd.autogen.rdna3.str_pcode import VOP3SDOp_PCODE, VOPCOp_PCODE
+from extra.assembly.amd.autogen.rdna3.enum import VOP3SDOp, VOPCOp
+
+# Compile pseudocode functions on demand for regression tests
+_VOP3SDOp_V_DIV_SCALE_F32 = compile_pseudocode('VOP3SDOp', 'V_DIV_SCALE_F32', VOP3SDOp_PCODE[VOP3SDOp.V_DIV_SCALE_F32])
+_VOPCOp_V_CMP_CLASS_F32 = compile_pseudocode('VOPCOp', 'V_CMP_CLASS_F32', VOPCOp_PCODE[VOPCOp.V_CMP_CLASS_F32])
 
 class TestReg(unittest.TestCase):
   def test_u32_read(self):
@@ -154,19 +158,19 @@ class TestExecContext(unittest.TestCase):
     self.assertEqual(ctx.SCC._val, 0)
 
   def test_ternary(self):
-    code = compile_pseudocode("D0.u32 = S0.u32 > S1.u32 ? 1'1U : 1'0U")
+    code = _compile_pseudocode("D0.u32 = S0.u32 > S1.u32 ? 1'1U : 1'0U")
     ctx = ExecContext(s0=5, s1=3)
     ctx.run(code)
     self.assertEqual(ctx.D0._val, 1)
 
   def test_pack(self):
-    code = compile_pseudocode("D0 = { S1[15:0].u16, S0[15:0].u16 }")
+    code = _compile_pseudocode("D0 = { S1[15:0].u16, S0[15:0].u16 }")
     ctx = ExecContext(s0=0x1234, s1=0x5678)
     ctx.run(code)
     self.assertEqual(ctx.D0._val, 0x56781234)
 
   def test_tmp_with_typed_access(self):
-    code = compile_pseudocode("""tmp = S0.u32 + S1.u32
+    code = _compile_pseudocode("""tmp = S0.u32 + S1.u32
 D0.u32 = tmp.u32""")
     ctx = ExecContext(s0=100, s1=200)
     ctx.run(code)
@@ -174,7 +178,7 @@ D0.u32 = tmp.u32""")
 
   def test_s_add_u32_pattern(self):
     # Real pseudocode pattern from S_ADD_U32
-    code = compile_pseudocode("""tmp = 64'U(S0.u32) + 64'U(S1.u32)
+    code = _compile_pseudocode("""tmp = 64'U(S0.u32) + 64'U(S1.u32)
 SCC = tmp >= 0x100000000ULL ? 1'1U : 1'0U
 D0.u32 = tmp.u32""")
     # Test overflow case
@@ -184,7 +188,7 @@ D0.u32 = tmp.u32""")
     self.assertEqual(ctx.SCC._val, 1)  # Carry set
 
   def test_s_add_u32_no_overflow(self):
-    code = compile_pseudocode("""tmp = 64'U(S0.u32) + 64'U(S1.u32)
+    code = _compile_pseudocode("""tmp = 64'U(S0.u32) + 64'U(S1.u32)
 SCC = tmp >= 0x100000000ULL ? 1'1U : 1'0U
 D0.u32 = tmp.u32""")
     ctx = ExecContext(s0=100, s1=200)
@@ -206,7 +210,7 @@ D0.u32 = tmp.u32""")
 
   def test_for_loop(self):
     # CTZ pattern - find first set bit
-    code = compile_pseudocode("""tmp = -1
+    code = _compile_pseudocode("""tmp = -1
 for i in 0 : 31 do
   if S0.u32[i] == 1 then
     tmp = i
