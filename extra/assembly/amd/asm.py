@@ -19,20 +19,17 @@ def _matches_encoding(word: int, cls: type[Inst]) -> bool:
 # Order matters: more specific encodings first, VOP2 last (it's a catch-all for bit31=0)
 _RDNA_FORMATS_64 = [VOPD, VOP3P, VINTERP, VOP3, DS, FLAT, MUBUF, MTBUF, MIMG, SMEM, EXP]
 _RDNA_FORMATS_32 = [SOP1, SOPC, SOPP, SOPK, VOPC, VOP1, SOP2, VOP2]  # SOP2/VOP2 are catch-alls
-_CDNA_FORMATS_64: list[type[Inst]] = []  # populated lazily
-_CDNA_FORMATS_32: list[type[Inst]] = []
+from extra.assembly.amd.autogen.cdna.ins import (VOP1 as C_VOP1, VOP2 as C_VOP2, VOPC as C_VOPC, VOP3A, VOP3B, VOP3P as C_VOP3P,
+  SOP1 as C_SOP1, SOP2 as C_SOP2, SOPC as C_SOPC, SOPK as C_SOPK, SOPP as C_SOPP, SMEM as C_SMEM, DS as C_DS,
+  FLAT as C_FLAT, MUBUF as C_MUBUF, MTBUF as C_MTBUF, SDWA, DPP)
+_CDNA_FORMATS_64 = [C_VOP3P, VOP3A, VOP3B, C_DS, C_FLAT, C_MUBUF, C_MTBUF, C_SMEM]
+_CDNA_FORMATS_32 = [SDWA, DPP, C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_VOPC, C_VOP1, C_SOP2, C_VOP2]
 
 def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
   word = int.from_bytes(data[:4], 'little')
   if arch == "cdna":
-    if not _CDNA_FORMATS_64:
-      from extra.assembly.amd.autogen.cdna.ins import (VOP1 as C_VOP1, VOP2 as C_VOP2, VOPC as C_VOPC, VOP3A, VOP3B, VOP3P as C_VOP3P,
-        SOP1 as C_SOP1, SOP2 as C_SOP2, SOPC as C_SOPC, SOPK as C_SOPK, SOPP as C_SOPP, SMEM as C_SMEM, DS as C_DS,
-        FLAT as C_FLAT, MUBUF as C_MUBUF, MTBUF as C_MTBUF, SDWA, DPP)
-      _CDNA_FORMATS_64.extend([C_VOP3P, VOP3A, VOP3B, C_DS, C_FLAT, C_MUBUF, C_MTBUF, C_SMEM])
-      _CDNA_FORMATS_32.extend([SDWA, DPP, C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_VOPC, C_VOP1, C_SOP2, C_VOP2])
     if (word >> 30) == 0b11:
       for cls in _CDNA_FORMATS_64:
         if _matches_encoding(word, cls): return cls
@@ -219,7 +216,8 @@ def _disasm_smem(inst: SMEM) -> str:
   name = inst.op_name.lower()
   if inst.op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV): return name
   off_s = f"{decode_src(inst.soffset)} offset:0x{inst.offset:x}" if inst.offset and inst.soffset != 124 else f"0x{inst.offset:x}" if inst.offset else decode_src(inst.soffset)
-  sbase_idx, sbase_count = inst.sbase * 2, 4 if (8 <= inst.op.value <= 12 or name == 's_atc_probe_buffer') else 2
+  op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
+  sbase_idx, sbase_count = inst.sbase * 2, 4 if (8 <= op_val <= 12 or name == 's_atc_probe_buffer') else 2
   sbase_str = _fmt_src(sbase_idx, sbase_count) if sbase_count == 2 else _sreg(sbase_idx, sbase_count) if sbase_idx <= 105 else _reg("ttmp", sbase_idx - 108, sbase_count)
   if name in ('s_atc_probe', 's_atc_probe_buffer'): return f"{name} {inst.sdata}, {sbase_str}, {off_s}"
   return f"{name} {_fmt_sdst(inst.sdata, inst.dst_regs())}, {sbase_str}, {off_s}" + _mods((inst.glc, " glc"), (inst.dlc, " dlc"))
@@ -529,13 +527,44 @@ _ALIASES = {
   'v_cvt_flr_i32_f32': 'v_cvt_floor_i32_f32', 'v_cvt_rpi_i32_f32': 'v_cvt_nearest_i32_f32',
   'v_ffbh_i32': 'v_cls_i32', 'v_ffbh_u32': 'v_clz_i32_u32', 'v_ffbl_b32': 'v_ctz_i32_b32',
   'v_cvt_pkrtz_f16_f32': 'v_cvt_pk_rtz_f16_f32', 'v_fmac_legacy_f32': 'v_fmac_dx9_zero_f32', 'v_mul_legacy_f32': 'v_mul_dx9_zero_f32',
+  # SMEM aliases (dword -> b32, dwordx2 -> b64, etc.)
+  's_load_dword': 's_load_b32', 's_load_dwordx2': 's_load_b64', 's_load_dwordx4': 's_load_b128',
+  's_load_dwordx8': 's_load_b256', 's_load_dwordx16': 's_load_b512',
+  's_buffer_load_dword': 's_buffer_load_b32', 's_buffer_load_dwordx2': 's_buffer_load_b64',
+  's_buffer_load_dwordx4': 's_buffer_load_b128', 's_buffer_load_dwordx8': 's_buffer_load_b256',
+  's_buffer_load_dwordx16': 's_buffer_load_b512',
+  # VOP3 aliases
+  'v_cvt_pknorm_i16_f16': 'v_cvt_pk_norm_i16_f16', 'v_cvt_pknorm_u16_f16': 'v_cvt_pk_norm_u16_f16',
+  'v_add3_nc_u32': 'v_add3_u32', 'v_xor_add_u32': 'v_xad_u32',
+  # VINTERP aliases
+  'v_interp_p2_new_f32': 'v_interp_p2_f32',
+  # SOP1 aliases
+  's_ff1_i32_b32': 's_ctz_i32_b32', 's_ff1_i32_b64': 's_ctz_i32_b64',
+  's_flbit_i32_b32': 's_clz_i32_u32', 's_flbit_i32_b64': 's_clz_i32_u64', 's_flbit_i32': 's_cls_i32', 's_flbit_i32_i64': 's_cls_i32_i64',
+  's_andn1_saveexec_b32': 's_and_not0_saveexec_b32', 's_andn1_saveexec_b64': 's_and_not0_saveexec_b64',
+  's_andn1_wrexec_b32': 's_and_not0_wrexec_b32', 's_andn1_wrexec_b64': 's_and_not0_wrexec_b64',
+  's_andn2_saveexec_b32': 's_and_not1_saveexec_b32', 's_andn2_saveexec_b64': 's_and_not1_saveexec_b64',
+  's_andn2_wrexec_b32': 's_and_not1_wrexec_b32', 's_andn2_wrexec_b64': 's_and_not1_wrexec_b64',
+  's_orn1_saveexec_b32': 's_or_not0_saveexec_b32', 's_orn1_saveexec_b64': 's_or_not0_saveexec_b64',
+  's_orn2_saveexec_b32': 's_or_not1_saveexec_b32', 's_orn2_saveexec_b64': 's_or_not1_saveexec_b64',
+  # SOP2 aliases
+  's_andn2_b32': 's_and_not1_b32', 's_andn2_b64': 's_and_not1_b64',
+  's_orn2_b32': 's_or_not1_b32', 's_orn2_b64': 's_or_not1_b64',
+  # VOP2 aliases
+  'v_dot2c_f32_f16': 'v_dot2acc_f32_f16',
+  # More VOP3 aliases
+  'v_fma_legacy_f32': 'v_fma_dx9_zero_f32',
 }
 
+def _apply_alias(text: str) -> str:
+  mn = text.split()[0].lower() if ' ' in text else text.lower().rstrip('_')
+  # Try exact match first, then strip _e32/_e64 suffix
+  for m in (mn, mn.removesuffix('_e32'), mn.removesuffix('_e64')):
+    if m in _ALIASES: return _ALIASES[m] + text[len(m):]
+  return text
+
 def get_dsl(text: str) -> str:
-  text, kw = text.strip(), []
-  # Apply instruction aliases
-  for old, new in _ALIASES.items():
-    if text.lower().startswith(old): text = new + text[len(old):]
+  text, kw = _apply_alias(text.strip()), []
   # Extract modifiers
   for pat, val in [(r'\s+mul:2(?:\s|$)', 1), (r'\s+mul:4(?:\s|$)', 2), (r'\s+div:2(?:\s|$)', 3)]:
     if (m := _extract(text, pat))[0]: kw.append(f'omod={val}'); text = m[1]; break

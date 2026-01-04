@@ -7,6 +7,7 @@ from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
+from extra.assembly.amd.autogen.cdna.enum import VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op
 
 # Common masks and bit conversion functions
 MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
@@ -532,21 +533,27 @@ class Inst:
     elif hasattr(val, 'name'): self.op = val
     else:
       cls_name = self.__class__.__name__
-      # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
-      if cls_name == 'VOP3':
-        try:
-          if val < 256: self.op = VOPCOp(val)
-          elif val in self._VOP3SD_OPS: self.op = VOP3SDOp(val)
-          else: self.op = VOP3Op(val)
-        except ValueError: self.op = val
-      # Prefer BitField marker (class-specific enum) over _enum_map (generic RDNA3 enums)
-      elif 'op' in self._fields and (marker := self._fields['op'].marker) and issubclass(marker, IntEnum):
+      # Use BitField marker enum if available, otherwise fall back to _enum_map
+      marker = self._fields['op'].marker if 'op' in self._fields else None
+      if marker and issubclass(marker, IntEnum):
         try: self.op = marker(val)
         except ValueError: self.op = val
       elif cls_name in self._enum_map:
         try: self.op = self._enum_map[cls_name](val)
         except ValueError: self.op = val
       else: self.op = val
+      # VOP3/VOP3A/VOP3B: fallback for VOPC (0-255) and VOP2/VOP1 promoted instructions (256-511)
+      if not hasattr(self.op, 'name') and cls_name in ('VOP3', 'VOP3A', 'VOP3B') and isinstance(val, int):
+        is_cdna = cls_name in ('VOP3A', 'VOP3B')
+        if val < 256:
+          try: self.op = VOPCOp(val)
+          except ValueError: pass
+        elif val in self._VOP3SD_OPS and not is_cdna:
+          try: self.op = VOP3SDOp(val)
+          except ValueError: pass
+        elif 256 <= val < 512:
+          try: self.op = (CDNA_VOP1Op(val - 320) if val >= 320 else CDNA_VOP2Op(val - 256)) if is_cdna else (VOP1Op(val - 384) if val >= 384 else VOP2Op(val - 256))
+          except ValueError: pass
     self.op_name = self.op.name if hasattr(self.op, 'name') else ''
     self._spec_regs = spec_regs(self.op_name)
     self._spec_dtype = spec_dtype(self.op_name)
