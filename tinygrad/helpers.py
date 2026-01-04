@@ -188,11 +188,11 @@ CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasat
 # Compilers
 AMD_CC, CPU_CC, NV_CC, CUDA_CC = ContextVar("AMD_CC", ""), ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", "")
 QCOM_CC = ContextVar("QCOM_CC", "")
-AMD_LLVM = ContextVar("AMD_LLVM", AMD_CC.value=="LLVM")
-CPU_LLVM, CPU_LVP = ContextVar("CPU_LLVM", CPU_CC.value=="LLVM"), ContextVar("CPU_LVP", CPU_CC.value=="LVP")
-NV_PTX, NV_NAK = ContextVar("NV_PTX", NV_CC.value=="PTX"), ContextVar("NV_NAK", NV_CC.value=="NAK")
-CUDA_PTX = ContextVar("CUDA_PTX", CUDA_CC.value=="PTX")
-QCOM_IR3 = ContextVar("QCOM_IR3", QCOM_CC.value=="IR3")
+AMD_LLVM = ContextVar("AMD_LLVM", int(AMD_CC.value=="LLVM"))
+CPU_LLVM, CPU_LVP = ContextVar("CPU_LLVM", int(CPU_CC.value=="LLVM")), ContextVar("CPU_LVP", int(CPU_CC.value=="LVP"))
+NV_PTX, NV_NAK = ContextVar("NV_PTX", int(NV_CC.value=="PTX")), ContextVar("NV_NAK", int(NV_CC.value=="NAK"))
+CUDA_PTX = ContextVar("CUDA_PTX", int(CUDA_CC.value=="PTX"))
+QCOM_IR3 = ContextVar("QCOM_IR3", int(QCOM_CC.value=="IR3"))
 NULL_IR3, NULL_NAK = ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
