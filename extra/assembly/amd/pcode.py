@@ -34,7 +34,7 @@ def _issignalnan(x): return _check_nan_type(x, 0, False)  # signaling NaN has qu
 def _gt_neg_zero(a, b): return (a > b) or (a == 0 and b == 0 and not math.copysign(1, a) < 0 and math.copysign(1, b) < 0)
 def _lt_neg_zero(a, b): return (a < b) or (a == 0 and b == 0 and math.copysign(1, a) < 0 and not math.copysign(1, b) < 0)
 def _fma(a, b, c):
-  try: return math.fma(float(a), float(b), float(c))
+  try: return math.fma(a, b, c)
   except ValueError: return float('nan')  # inf * 0 + c is NaN per IEEE 754
 def _signext(v): return v
 def _fpop(fn):
@@ -291,17 +291,23 @@ DENORM = _Denorm()
 
 class TypedView:
   """View into a Reg with typed access. Used for both full-width (Reg.u32) and slices (Reg[31:16])."""
-  __slots__ = ('_reg', '_high', '_low', '_signed', '_float', '_bf16')
+  __slots__ = ('_reg', '_high', '_low', '_signed', '_float', '_bf16', '_reversed')
   def __init__(self, reg, high, low=0, signed=False, is_float=False, is_bf16=False):
     # Handle reversed slices like [0:31] which means bit-reverse
-    if high < low: high, low = low, high
-    self._reg, self._high, self._low = reg, high, low
+    if high < low: high, low, reversed = low, high, True
+    else: reversed = False
+    self._reg, self._high, self._low, self._reversed = reg, high, low, reversed
     self._signed, self._float, self._bf16 = signed, is_float, is_bf16
 
   def _nbits(self): return self._high - self._low + 1
   def _mask(self): return (1 << self._nbits()) - 1
-  def _get(self): return (self._reg._val >> self._low) & self._mask()
-  def _set(self, v): self._reg._val = (self._reg._val & ~(self._mask() << self._low)) | ((int(v) & self._mask()) << self._low)
+  def _get(self):
+    v = (self._reg._val >> self._low) & self._mask()
+    return _brev(v, self._nbits()) if self._reversed else v
+  def _set(self, v):
+    v = int(v)
+    if self._reversed: v = _brev(v, self._nbits())
+    self._reg._val = (self._reg._val & ~(self._mask() << self._low)) | ((v & self._mask()) << self._low)
 
   @property
   def _val(self): return self._get()

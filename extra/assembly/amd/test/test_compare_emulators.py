@@ -159,8 +159,9 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             # Instructions with known Rust emulator bugs - sync Python to Rust after execution
             # v_div_scale/v_div_fixup: Rust has different VCC handling
             # v_cvt_f16_f32: Rust clears high 16 bits, but hardware (and Python) preserves them
+            # s_add_i32/s_sub_i32: Rust has incorrect SCC overflow detection
             sync_after = any(x in inst_str for x in ('v_div_scale_f32', 'v_div_scale_f64', 'v_div_fixup_f32', 'v_div_fixup_f64',
-                                                      'v_cvt_f16_f32'))
+                                                      'v_cvt_f16_f32', 's_add_i32', 's_sub_i32'))
             diffs = rust_before.diff(python_before, n_lanes)
             if diffs:
               trace_lines = []
