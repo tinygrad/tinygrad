@@ -169,7 +169,7 @@ OUT_REGS = [124] + OUT_REGS
 # These are SEPARATE - DATA lives during prefetch/store, TILE lives during inner loop
 V_LDS_A_ADDR = [153]                          # single base register for A stores (use +512 offsets)
 V_LDS_A_DATA = list(range(155, 163))          # 8 data registers for A prefetch (v155-162)
-V_LDS_B_ADDR = list(range(145, 153))          # 8 address registers for B stores
+V_LDS_B_ADDR = 145                             # single base register for B stores (use 16-bit offsets)
 V_LDS_B_DATA = list(range(163, 171))          # 8 data registers for B prefetch (v163-170)
 
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
@@ -396,21 +396,21 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_bfe_u32(v[2], v[0], 3, 2))  # v[2] = (lane_id >> 3) & 3
   k.emit(v_lshlrev_b32_e32(v[8], 2, v[8]))
 
-  # Compute final B-tile addresses: V_LDS_B_ADDR[i] = LDS_A_STRIDE * lane_mod8 + row_base[i]
-  k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR[0]], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[9]))
+  # Compute single B-tile base address (use 16-bit offsets 0,64,128,192,256,320,384,448)
+  k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[9]))
   lds_bases = [9] + lds_r[:-1]  # base offsets for 8 rows
   for d, r in zip(lds_bases, lds_r): k.emit(v_lshlrev_b32_e32(v[d], 2, v[r]))
   k.emit(v_lshlrev_b32_e32(v[V_LANE_DIV8_X4], 2, v[2]))
   k.emit(v_add_nc_u32_e32(v[8], 0x80, v[8]))  # A-tile base + 128
-  for i, base in enumerate(lds_bases):
-    k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR[1 + i]], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[base]))
 
   # Store initial tile data to LDS
   k.waitcnt(vm=0)
   for i, (d0, d1) in enumerate([(0,1), (2,3), (4,5), (11,12)]):
     k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[INIT_TILE_LOADS[d0][0]], data1=v[INIT_TILE_LOADS[d1][0]], offset0=16+i*4, offset1=18+i*4))
+  # B stores: single base with offsets 0,64,128,192,256,320,384,448
   for i, idx in enumerate([6,7,8,9,10,13,14,15]):
-    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[i]], data0=v[INIT_TILE_LOADS[idx][0]], offset0=0, offset1=0))
+    offset = i * 64
+    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[INIT_TILE_LOADS[idx][0]], offset0=offset & 0xFF, offset1=offset >> 8))
   k.waitcnt(lgkm=0)
   k.barrier()
 
@@ -499,9 +499,10 @@ def build_kernel(arch='gfx1100'):
   # A tile (stride64 stores via V_LDS_A_ADDR[0]=v153): from V_LDS_B_DATA (v163-170)
   for i in range(4):
     k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR[0]], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
-  # B tile (single stores via V_LDS_B_ADDR): from V_LDS_A_DATA (v155-162)
+  # B tile (single base with 16-bit offsets): from V_LDS_B_DATA (v163-170)
   for i in range(8):
-    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[i]], data0=v[V_LDS_B_DATA[i]], offset0=0, offset1=0))
+    offset = i * 64
+    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
 
   k.waitcnt(lgkm=0)
   k.barrier()
