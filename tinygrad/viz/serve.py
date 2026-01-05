@@ -406,7 +406,10 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
   paths:dict[int, dict[int, int]] = {}
+  asm_width = max(max(len(asm) for asm, _ in pc_table.values()), 40)
+  lines:list[str] = []
   for pc, (asm, sz) in pc_table.items():
+    lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
       blocks[pc] = []
@@ -420,7 +423,7 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
       if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
-  return {"blocks":blocks, "paths":paths, "pc_table":pc_table, "colors":cfg_colors}
+  return {"data":{"blocks":blocks, "paths":paths, "pc_table":pc_table, "colors":cfg_colors}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -435,7 +438,7 @@ def get_render(query:str) -> dict:
     ret:dict = {"metadata":[]}
     if data.device.startswith("AMD") and data.lib is not None:
       with soft_err(lambda err: ret.update(err)):
-        ret["data"] = amdgpu_cfg(lib:=data.lib, device_props[data.device]["gfx_target_version"])
+        ret = {**ret, **amdgpu_cfg(lib:=data.lib, device_props[data.device]["gfx_target_version"])}
         with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
     return ret
@@ -472,7 +475,7 @@ def get_render(query:str) -> dict:
     # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
     prg = data["prg"]
-    cfg = amdgpu_cfg(prg.lib, device_props[prg.device]["gfx_target_version"])
+    cfg = amdgpu_cfg(prg.lib, device_props[prg.device]["gfx_target_version"])["data"]
     prev_instr = (w:=data["wave"]).begin_time
     pc_to_inst = data["disasm"]
     start_pc = None
@@ -490,8 +493,7 @@ def get_render(query:str) -> dict:
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
     cfg["runtime_trace"] = {pc-prg.base:v for pc,v in rows.items()}
-    return {"data":cfg, "metadata":[summary]}
-    #return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "data":cfg}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "data":cfg}
   return data
 
 # ** HTTP server

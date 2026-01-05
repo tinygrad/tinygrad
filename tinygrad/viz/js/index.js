@@ -1,6 +1,8 @@
 // ** graph helpers
 
+let currentSelection;
 const displaySelection = (sel) => {
+  currentSelection = sel;
   for (const e of document.getElementsByClassName("view")) e.style.display = e.matches(sel) ? "flex" : "none";
 }
 const metadata = document.querySelector(".metadata");
@@ -30,13 +32,13 @@ const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
   clearTimeout(timeout);
   const msgEl = d3.select("#progress-message").style("display", "none");
-  const customEl = d3.select("#custom").html("");
+  // const customEl = d3.select("#custom").html("");
   if (st === Status.STARTED) {
     msgEl.text(msg);
     timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
   } else if (st === Status.ERR) {
     displaySelection("#custom");
-    customEl.append("div").classed("raw-text", true).append(() => codeBlock(msg));
+    // customEl.append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -774,10 +776,6 @@ async function main() {
       })).node());
       metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
     });
-    // graph render
-    if (ret.data != null) return renderDag(ret, { recenter:true });
-    // table / plaintext render
-    displaySelection("#custom");
     const root = d3.create("div").classed("raw-text", true);
     function renderTable(root, ret) {
       const table = root.append("table");
@@ -806,9 +804,12 @@ async function main() {
       }
       return table;
     }
+    if (ret.data != null) renderDag(ret, { recenter:true });
     if (ret.cols != null) renderTable(root, ret);
-    else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
-    return document.querySelector("#custom").replaceChildren(root.node());
+    if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
+    document.querySelector("#custom").replaceChildren(root.node());
+    console.log(document.querySelector("#custom"));
+    return displaySelection(ret.data != null ? "#graph" : "#custom");
   }
   // ** Graph view
   // if we don't have a complete cache yet we start streaming graphs in this step
@@ -967,6 +968,11 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "r") {
     toggle.click();
   }
+  // g key toggles graph
+  if (event.key === "g") {
+    event.preventDefault();
+    displaySelection(currentSelection === "#graph" ? "#custom" : "#graph");
+  };
 });
 
 main()
