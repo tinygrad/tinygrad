@@ -30,13 +30,13 @@ const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
   clearTimeout(timeout);
   const msgEl = d3.select("#progress-message").style("display", "none");
-  const customEl = d3.select("#custom").html("");
+  const customEl = d3.select("#custom").style("display", "none");
   if (st === Status.STARTED) {
     msgEl.text(msg);
     timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
   } else if (st === Status.ERR) {
     displaySelection("#custom");
-    customEl.append("div").classed("raw-text", true).append(() => codeBlock(msg));
+    customEl.html("").append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -685,9 +685,15 @@ window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
 
-const toggleLabel = d3.create("label").text("Show indexing (r)").node();
-const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
-toggleLabel.prepend(toggle);
+const createToggle = (id, text) => {
+  const label = d3.create("label").text(text).node();
+  const toggle = d3.create("input").attr("type", "checkbox").attr("id", id).property("checked", true).node();
+  label.prepend(toggle);
+  return { toggle, label };
+}
+const { toggle, label:toggleLabel } = createToggle("show-indexing", "Show indexing (r)");
+const showGraph = createToggle("show-graph", "Show graph (g)");
+showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
 function appendSteps(root, idx, steps) {
   const stack = [];
@@ -772,9 +778,11 @@ async function main() {
       metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
     });
     // graph render
-    if (ret.data != null) return renderDag(ret, { recenter:true });
+    if (ret.data != null) {
+      metadata.prepend(showGraph.label);
+      renderDag(ret, { recenter:true });
+    } else displaySelection("#custom");
     // table / plaintext render
-    displaySelection("#custom");
     const root = d3.create("div").classed("raw-text", true);
     function renderTable(root, ret) {
       const table = root.append("table");
@@ -961,9 +969,9 @@ document.addEventListener("keydown", (event) => {
     document.getElementById("zoom-to-fit-btn").click();
   }
   // r key toggles indexing
-  if (event.key === "r") {
-    toggle.click();
-  }
+  if (event.key === "r") toggle.click();
+  // g key toggles graph
+  if (event.key === "g") showGraph.toggle.click();
 });
 
 main()
