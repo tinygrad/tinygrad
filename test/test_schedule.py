@@ -11,7 +11,7 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
-from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, CPU_X86
+from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.schedule.rangeify import Kernel
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 
@@ -1816,7 +1816,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(b.tolist(), [False, False])
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
-  @unittest.skipIf(Device.DEFAULT == "CPU" and CPU_X86, "seg fault")
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
     import torch

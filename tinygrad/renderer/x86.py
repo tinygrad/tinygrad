@@ -472,7 +472,8 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
   # index == 4 (rsp) indicates no index is present
   idx = cast(Register, idx_uop.arg).index if idx_uop is not None and idx_uop.arg is not None else 4
   reg_sz = (reg_uop.dtype.itemsize if not isinstance(reg_uop.dtype, PtrDType) else 8) if reg_uop is not None else 0
-  rm_sz = rm_uop.dtype.itemsize
+  # TODO: another reason to get rid of ptrs, if we access memory the size should be in scale uop otherwise size is in rm
+  rm_sz = 8 if isinstance(rm_uop.dtype, PtrDType) and disp_uop is None else rm_uop.dtype.itemsize
 
   # encode instruction
   inst = bytes([])
