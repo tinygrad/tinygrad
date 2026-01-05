@@ -273,33 +273,6 @@ def _extract_pseudocode(text: str) -> str | None:
     if is_code: result.append(s)
   return '\n'.join(result) if result else None
 
-def _merge_results(results: list[dict]) -> dict:
-  """Merge multiple PDF parse results into a superset."""
-  merged = {"formats": {}, "enums": {}, "src_enum": dict(SRC_EXTRAS), "doc_names": [], "pseudocode": {}, "is_cdna": False, "buf_fmt": {}}
-  for r in results:
-    merged["doc_names"].append(r["doc_name"])
-    merged["is_cdna"] = merged["is_cdna"] or r["is_cdna"]
-    for val, name in r["src_enum"].items():
-      if val in merged["src_enum"]: assert merged["src_enum"][val] == name
-      else: merged["src_enum"][val] = name
-    for enum_name, ops in r["enums"].items():
-      if enum_name not in merged["enums"]: merged["enums"][enum_name] = {}
-      for val, name in ops.items():
-        if val in merged["enums"][enum_name]: assert merged["enums"][enum_name][val] == name
-        else: merged["enums"][enum_name][val] = name
-    for fmt_name, fields in r["formats"].items():
-      if fmt_name not in merged["formats"]: merged["formats"][fmt_name] = list(fields)
-      else:
-        existing = {f[0]: (f[1], f[2]) for f in merged["formats"][fmt_name]}
-        for f in fields:
-          if f[0] in existing: assert existing[f[0]] == (f[1], f[2])
-          else: merged["formats"][fmt_name].append(f)
-    for key, pc in r["pseudocode"].items():
-      if key not in merged["pseudocode"]: merged["pseudocode"][key] = pc
-    for val, name in r.get("buf_fmt", {}).items():
-      if val not in merged["buf_fmt"]: merged["buf_fmt"][val] = name
-  return merged
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # CODE GENERATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -403,14 +376,8 @@ from extra.assembly.amd.autogen.{arch}.enum import {", ".join(enum_names)}
 
 def generate_arch(arch: str) -> dict:
   """Generate enum.py, ins.py and str_pcode.py for a single architecture."""
-  urls = PDF_URLS[arch]
-  if isinstance(urls, str): urls = [urls]
-
   print(f"\n{'='*60}\nGenerating {arch}...")
-  print(f"Parsing {len(urls)} PDF(s)...")
-  results = [_parse_single_pdf(url) for url in urls]
-  merged = _merge_results(results) if len(results) > 1 else results[0]
-  doc_name = "+".join(merged["doc_names"]) if len(results) > 1 else merged["doc_name"]
+  result = _parse_single_pdf(PDF_URLS[arch])
 
   base_path = Path(f"extra/assembly/amd/autogen/{arch}")
   base_path.mkdir(parents=True, exist_ok=True)
@@ -418,24 +385,24 @@ def generate_arch(arch: str) -> dict:
 
   # Write enum.py (enums only, no dsl.py dependency)
   enum_path = base_path / "enum.py"
-  enum_content = _generate_enum_py(merged["enums"], merged["src_enum"], doc_name, merged.get("buf_fmt"))
+  enum_content = _generate_enum_py(result["enums"], result["src_enum"], result["doc_name"], result.get("buf_fmt"))
   enum_path.write_text(enum_content)
-  buf_fmt_count = len([v for v in merged.get("buf_fmt", {}) if 1 <= v <= 63])
-  print(f"Generated {enum_path}: SrcEnum ({len(merged['src_enum'])}) + {len(merged['enums'])} enums" + (f" + BufFmt ({buf_fmt_count})" if buf_fmt_count else ""))
+  buf_fmt_count = len([v for v in result.get("buf_fmt", {}) if 1 <= v <= 63])
+  print(f"Generated {enum_path}: SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} enums" + (f" + BufFmt ({buf_fmt_count})" if buf_fmt_count else ""))
 
   # Write ins.py (instruction formats and helpers, imports dsl.py and enum.py)
   ins_path = base_path / "ins.py"
-  ins_content = _generate_ins_py(merged["formats"], merged["enums"], merged["src_enum"], doc_name).replace("{arch}", arch)
+  ins_content = _generate_ins_py(result["formats"], result["enums"], result["src_enum"], result["doc_name"]).replace("{arch}", arch)
   ins_path.write_text(ins_content)
-  print(f"Generated {ins_path}: {len(merged['formats'])} formats")
+  print(f"Generated {ins_path}: {len(result['formats'])} formats")
 
   # Write str_pcode.py (needs enum.py to exist first for imports)
   pcode_path = base_path / "str_pcode.py"
-  pcode_content = _generate_str_pcode_py(merged["enums"], merged["pseudocode"], arch)
+  pcode_content = _generate_str_pcode_py(result["enums"], result["pseudocode"], arch)
   pcode_path.write_text(pcode_content)
-  print(f"Generated {pcode_path}: {len(merged['pseudocode'])} instructions")
+  print(f"Generated {pcode_path}: {len(result['pseudocode'])} instructions")
 
-  return merged
+  return result
 
 def _generate_arch_wrapper(arch: str):
   """Wrapper for multiprocessing - returns arch name for ordering."""
