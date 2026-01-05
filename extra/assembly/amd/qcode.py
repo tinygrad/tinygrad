@@ -15,7 +15,7 @@ _QDTYPES: dict[str, DType] = {
   'i64': dtypes.int64, 'i32': dtypes.int32, 'i16': dtypes.int16, 'i8': dtypes.int8,
   'b1201': DType.new(6, 1201, "b1201", None), 'b128': DType.new(6, 128, "b128", None),
   'b65': DType.new(6, 65, "b65", None), 'b64': dtypes.uint64, 'b32': dtypes.uint32, 'b16': dtypes.uint16, 'b8': dtypes.uint8,
-  'u65': DType.new(6, 65, "u65", None), 'u24': DType.new(6, 24, "u24", None),
+  'u1201': DType.new(6, 1201, "u1201", None), 'u65': DType.new(6, 65, "u65", None), 'u24': DType.new(6, 24, "u24", None),
   'u6': DType.new(6, 6, "u6", None), 'u4': DType.new(6, 4, "u4", None),
   'u3': DType.new(6, 3, "u3", None), 'u1': DType.new(6, 1, "u1", None),
   'i65': DType.new(5, 65, "i65", None), 'i24': DType.new(5, 24, "i24", None), 'i1': DType.new(5, 1, "i1", None),

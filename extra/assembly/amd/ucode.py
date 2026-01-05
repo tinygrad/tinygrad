@@ -373,13 +373,17 @@ def _call_BYTE_PERMUTE(src, sel):
   sel_hi = UOp(Ops.AND, dtypes.uint32, (sel_val, UOp.const(dtypes.uint32, 0x80)))
   return UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPNE, dtypes.bool, (sel_hi, UOp.const(dtypes.uint32, 0))), UOp.const(dtypes.uint32, 0), result))
 
+def _call_trig_preop_result(shift):
+  # Returns CUSTOM op that gets evaluated at runtime with the 1201-bit constant
+  return UOp(Ops.CUSTOM, dtypes.float64, (shift,), arg='trig_preop_result')
+
 CALL_DISPATCH = {
   'MEM': _call_MEM, 'fma': _call_fma, 'abs': _call_abs, 'cos': _call_cos, 'rsqrt': _call_rsqrt,
   'clamp': _call_clamp, 'floor': _call_floor, 'fract': _call_fract, 'isNAN': _call_isNAN, 'isQuietNAN': _call_isQuietNAN,
   'isSignalNAN': _call_isSignalNAN, 'cvtToQuietNAN': _call_cvtToQuietNAN, 'isINF': _call_isINF, 'isDENORM': _call_isDENORM,
   'sign': _call_sign, 'exponent': _call_exponent, 'mantissa': _call_mantissa, 'isEven': _call_isEven,
   'signext': _call_signext, 'signext_from_bit': _call_signext_from_bit, 'ABSDIFF': _call_ABSDIFF, 'SAT8': _call_SAT8,
-  'BYTE_PERMUTE': _call_BYTE_PERMUTE, 'bf16_to_f32': _call_bf16_to_f32,
+  'BYTE_PERMUTE': _call_BYTE_PERMUTE, 'bf16_to_f32': _call_bf16_to_f32, 'trig_preop_result': _call_trig_preop_result,
 }
 
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
@@ -541,8 +545,11 @@ def _stmt(stmt, ctx: Ctx):
 
       if hi is not None and lo is not None:
         if hi < lo: hi, lo = lo, hi
-        use64 = hi >= 32
-        op_dt = dtypes.uint64 if use64 else dtypes.uint32
+        # Select dtype based on highest bit needed
+        if hi >= 128: op_dt = dtypes.uint256
+        elif hi >= 64: op_dt = dtypes.uint128
+        elif hi >= 32: op_dt = dtypes.uint64
+        else: op_dt = dtypes.uint32
         base = ctx.vars.get(var, UOp.const(op_dt, 0))
         if base.dtype != op_dt: base = _cast(base, op_dt)
         rhs_uop = _expr(rhs, ctx, dtype)
@@ -550,7 +557,8 @@ def _stmt(stmt, ctx: Ctx):
         if dtype == dtypes.float16: rhs_bits = _cast(rhs_bits, op_dt)
         mask = (1 << (hi - lo + 1)) - 1
         shifted = UOp(Ops.SHL, op_dt, (UOp(Ops.AND, op_dt, (rhs_bits, UOp.const(op_dt, mask))), UOp.const(op_dt, lo)))
-        clear_mask = ~(mask << lo) & (0xffffffffffffffff if use64 else 0xffffffff)
+        full_mask = (1 << (op_dt.itemsize * 8)) - 1  # itemsize is bytes, need bits
+        clear_mask = ~(mask << lo) & full_mask
         result = UOp(Ops.OR, op_dt, (UOp(Ops.AND, op_dt, (base, UOp.const(op_dt, clear_mask))), shifted))
         ctx.vars[var] = result
         if var in out_vars:
@@ -700,6 +708,15 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
       c, t, f = _eval_uop(u.src[0]), _eval_uop(u.src[1]), _eval_uop(u.src[2])
       if c is None or t is None or f is None: return None
       return t if c else f
+    if u.op == Ops.CUSTOM and u.arg == 'trig_preop_result':
+      # Compute result from 1201-bit 2/PI constant
+      shift = _eval_uop(u.src[0])
+      if shift is None: return None
+      TWO_OVER_PI_1201 = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6
+      # Extract 53 bits starting from position (1200 - shift) from the MSB
+      shifted = (TWO_OVER_PI_1201 << int(shift)) >> (1201 - 53)
+      mantissa = shifted & 0x1fffffffffffff
+      return float(mantissa)
     return None
 
   def _extract_results(s, MEM=None):
@@ -719,7 +736,11 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
       else:
         val = _eval_uop(s.src[i])
         if val is None: continue
-      result[name] = _float_to_bits(val, dtype) if dtype in FLOATS else int(val) & (0xffffffff if dtype.itemsize <= 4 else 0xffffffffffffffff)
+      if dtype in FLOATS:
+        result[name] = _float_to_bits(val, dtype)
+      else:
+        # Mask to appropriate size: 32-bit, 64-bit, or wider (128/256/512 bits)
+        result[name] = int(val) & ((1 << (dtype.itemsize * 8)) - 1)
     return result
 
   if is_lds:
@@ -774,11 +795,10 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
     return fn
 
 # Ops that need Python exec features (inline conditionals, complex PDF fixes) - fall back to pcode.py
-_SKIP_OPS: set[str] = {'V_TRIG_PREOP_F64'}
+_SKIP_OPS: set[str] = set()
 
-_PCODE_PATTERNS = ('LDS[', 'LDS(', 'VGPR[', 'SGPR[', 'GPR[', 'GS_REGS', 'thread_in[', 'thread_out[', 'thread_valid[')
-_WIDE_OUTPUT_PATTERNS = ('SDATA[95', 'SDATA[127', 'SDATA[159', 'SDATA[191', 'SDATA[223', 'SDATA[255',
-                         'VDATA[95', 'VDATA[127', 'RETURN_DATA[95', 'RETURN_DATA[127')
+_PCODE_PATTERNS: tuple[str, ...] = ()
+_WIDE_OUTPUT_PATTERNS: tuple[str, ...] = ()
 
 def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
   """Apply known fixes for PDF pseudocode bugs - same as pcode.py but for raw pseudocode."""
@@ -838,6 +858,10 @@ def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
         lines.insert(i, 'else\nD0.f64 = S0.f64')
         break
     pcode = '\n'.join(lines) + ';\nif isDENORM(S1.f64) then\nD0.f64 = NAN.f64\nendif'
+  if op_name == 'V_TRIG_PREOP_F64':
+    # Replace the complex 1201-bit computation with a function call
+    pcode = pcode.replace("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)",
+                          "result = trig_preop_result(shift)")
   return pcode
 
 @functools.cache
