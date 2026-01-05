@@ -185,8 +185,8 @@ def _parse_single_pdf(url: str):
           break
     formats[fmt_name] = fields
 
-  # Fix known PDF errors
-  if 'SMEM' in formats:
+  # Fix known PDF errors (RDNA-specific SMEM bit positions)
+  if 'SMEM' in formats and not is_cdna:
     formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
                        for n, h, l, e, t in formats['SMEM']]
   # RDNA4: VFLAT/VGLOBAL/VSCRATCH OP field is [20:14] not [20:13] (PDF documentation error)
@@ -194,13 +194,35 @@ def _parse_single_pdf(url: str):
     if fmt_name in formats:
       formats[fmt_name] = [(n, h, 14 if n == 'OP' else l, e, t) for n, h, l, e, t in formats[fmt_name]]
   if doc_name in ('RDNA3', 'RDNA3.5'):
-    if 'SOPPOp' in enums: assert 8 not in enums['SOPPOp']; enums['SOPPOp'][8] = 'S_WAITCNT_DEPCTR'
+    if 'SOPPOp' in enums:
+      for k, v in {8: 'S_WAITCNT_DEPCTR', 58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'}.items():
+        assert k not in enums['SOPPOp']; enums['SOPPOp'][k] = v
+    if 'SOPKOp' in enums:
+      for k, v in {22: 'S_SUBVECTOR_LOOP_BEGIN', 23: 'S_SUBVECTOR_LOOP_END'}.items():
+        assert k not in enums['SOPKOp']; enums['SOPKOp'][k] = v
+    if 'SMEMOp' in enums:
+      for k, v in {34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'}.items():
+        assert k not in enums['SMEMOp']; enums['SMEMOp'][k] = v
     if 'DSOp' in enums:
       for k, v in {24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V', 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'}.items():
         assert k not in enums['DSOp']; enums['DSOp'][k] = v
     if 'FLATOp' in enums:
       for k, v in {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}.items():
         assert k not in enums['FLATOp']; enums['FLATOp'][k] = v
+  # CDNA MTBUF: PDF is missing the FORMAT field (bits[25:19]) which is required for tbuffer_* instructions
+  if is_cdna and 'MTBUF' in formats:
+    field_names = {f[0] for f in formats['MTBUF']}
+    if 'FORMAT' not in field_names:
+      formats['MTBUF'].append(('FORMAT', 25, 19, None, None))
+  # CDNA SDWA/DPP: PDF only has modifier fields, need VOP1/VOP2 overlay for correct encoding
+  if is_cdna:
+    if 'SDWA' in formats:
+      formats['SDWA'] = [('ENCODING', 8, 0, 0xf9, None), ('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None)] + \
+                        [f for f in formats['SDWA'] if f[0] not in ('ENCODING', 'SDST', 'SD', 'ROW_MASK')]
+    if 'DPP' in formats:
+      formats['DPP'] = [('ENCODING', 8, 0, 0xfa, None), ('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None),
+        ('SRC0', 39, 32, None, 'Src'), ('DPP_CTRL', 48, 40, None, None), ('BOUND_CTRL', 51, 51, None, None), ('SRC0_NEG', 52, 52, None, None), ('SRC0_ABS', 53, 53, None, None),
+        ('SRC1_NEG', 54, 54, None, None), ('SRC1_ABS', 55, 55, None, None), ('BANK_MASK', 59, 56, None, None), ('ROW_MASK', 63, 60, None, None)]
 
   # Extract pseudocode for instructions
   all_text = '\n'.join(pdf.text(i) for i in range(instr_start, instr_end))
@@ -212,7 +234,20 @@ def _parse_single_pdf(url: str):
     snippet = all_text[start:end].strip()
     if pseudocode := _extract_pseudocode(snippet): raw_pseudocode[(name, opcode)] = pseudocode
 
-  return {"formats": formats, "enums": enums, "src_enum": src_enum, "doc_name": doc_name, "pseudocode": raw_pseudocode, "is_cdna": is_cdna}
+  # Extract unified buffer format table (RDNA only, for MTBUF format field)
+  buf_fmt = {}
+  if not is_cdna:
+    for i in range(total_pages):
+      for t in pdf.tables(i):
+        if t and len(t) > 2 and t[0] and '#' in str(t[0][0]) and 'Format' in str(t[0]):
+          for row in t[1:]:
+            for j in range(0, len(row) - 1, 3):  # table has 3-column groups: #, Format, (empty)
+              if row[j] and row[j].isdigit() and row[j+1] and re.match(r'^[\d_]+_(UNORM|SNORM|USCALED|SSCALED|UINT|SINT|FLOAT)$', row[j+1]):
+                buf_fmt[int(row[j])] = row[j+1]
+          if buf_fmt: break
+      if buf_fmt: break
+
+  return {"formats": formats, "enums": enums, "src_enum": src_enum, "doc_name": doc_name, "pseudocode": raw_pseudocode, "is_cdna": is_cdna, "buf_fmt": buf_fmt}
 
 def _extract_pseudocode(text: str) -> str | None:
   """Extract pseudocode from an instruction description snippet."""
@@ -241,7 +276,7 @@ def _extract_pseudocode(text: str) -> str | None:
 
 def _merge_results(results: list[dict]) -> dict:
   """Merge multiple PDF parse results into a superset."""
-  merged = {"formats": {}, "enums": {}, "src_enum": dict(SRC_EXTRAS), "doc_names": [], "pseudocode": {}, "is_cdna": False}
+  merged = {"formats": {}, "enums": {}, "src_enum": dict(SRC_EXTRAS), "doc_names": [], "pseudocode": {}, "is_cdna": False, "buf_fmt": {}}
   for r in results:
     merged["doc_names"].append(r["doc_name"])
     merged["is_cdna"] = merged["is_cdna"] or r["is_cdna"]
@@ -262,17 +297,20 @@ def _merge_results(results: list[dict]) -> dict:
           else: merged["formats"][fmt_name].append(f)
     for key, pc in r["pseudocode"].items():
       if key not in merged["pseudocode"]: merged["pseudocode"][key] = pc
+    for val, name in r.get("buf_fmt", {}).items():
+      if val not in merged["buf_fmt"]: merged["buf_fmt"][val] = name
   return merged
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CODE GENERATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _generate_enum_py(enums, src_enum, doc_name) -> str:
+def _generate_enum_py(enums, src_enum, doc_name, buf_fmt=None) -> str:
   """Generate enum.py content (just enums, no dsl.py dependency)."""
   def enum_lines(name, items): return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]
   lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf.py - do not edit", "from enum import IntEnum", ""]
   lines += enum_lines("SrcEnum", src_enum) + sum([enum_lines(n, ops) for n, ops in sorted(enums.items())], [])
+  if buf_fmt: lines += enum_lines("BufFmt", {v: f"BUF_FMT_{n}" for v, n in buf_fmt.items() if 1 <= v <= 63})
   return '\n'.join(lines)
 
 def _generate_ins_py(formats, enums, src_enum, doc_name) -> str:
@@ -381,9 +419,10 @@ def generate_arch(arch: str) -> dict:
 
   # Write enum.py (enums only, no dsl.py dependency)
   enum_path = base_path / "enum.py"
-  enum_content = _generate_enum_py(merged["enums"], merged["src_enum"], doc_name)
+  enum_content = _generate_enum_py(merged["enums"], merged["src_enum"], doc_name, merged.get("buf_fmt"))
   enum_path.write_text(enum_content)
-  print(f"Generated {enum_path}: SrcEnum ({len(merged['src_enum'])}) + {len(merged['enums'])} enums")
+  buf_fmt_count = len([v for v in merged.get("buf_fmt", {}) if 1 <= v <= 63])
+  print(f"Generated {enum_path}: SrcEnum ({len(merged['src_enum'])}) + {len(merged['enums'])} enums" + (f" + BufFmt ({buf_fmt_count})" if buf_fmt_count else ""))
 
   # Write ins.py (instruction formats and helpers, imports dsl.py and enum.py)
   ins_path = base_path / "ins.py"
