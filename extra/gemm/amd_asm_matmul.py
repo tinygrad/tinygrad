@@ -6,7 +6,7 @@
 # Workgroup: 128 threads (arranged as 32x4 for coalesced memory access)
 # Inner loop: 8 iterations per K-block, processing 8 columns of A and 8 rows of B
 #
-# Accumulators: 128 vgprs (v[2-117], v[120-124], v[126-129], v[131], v[133], v[214])
+# Accumulators: 128 vgprs (v[2-117], v[120-124], v[126-129], v[131-133])
 
 import numpy as np
 from tinygrad import Tensor, Device, Context, GlobalCounters
@@ -33,24 +33,25 @@ WAIT_VMEM = 1015     # wait for VMEM only (vm_cnt=0, lgkm_cnt=63)
 # Float constants as hex
 F32_ONE = 0x3F800000  # 1.0f
 
-# LDS tile register destinations
-V_A_TILE_REGS = [186, 190, 194, 198]  # A tile: 4 pairs of f32
-V_B_TILE_REGS = [184, 188, 192, 196, 200, 204, 208, 212]  # B tile: 8 pairs of f32
-
 # =============================================================================
-# Named register assignments (VGPRs)
+# Named register assignments (VGPRs) - COMPACT LAYOUT
 # =============================================================================
 V_LANE_ID_MOD8 = 118      # lane_id & 7 (column within 8-wide tile chunk)
 V_OUTPUT_ROW = 119        # output row coordinate
-V_LANE_MOD8_X4 = 135      # V_LANE_ID_MOD8 << 2 (byte offset)
-V_LANE_DIV8_X4 = 136      # (lane_id >> 3) << 2
-V_ADDR_HI_ZERO = 152      # always 0 (for 64-bit address high bits)
-V_LDS_A_BASE = 165        # LDS A-tile base address for inner loop
-V_LDS_B_BASE = 166        # LDS B-tile base address for inner loop
-V_LDS_A_PTR = 183         # current LDS A-tile read pointer
-V_LDS_B_PTR = 202         # current LDS B-tile read pointer
-V_GLOBAL_B_ADDR = 203     # global memory B prefetch address
-V_GLOBAL_A_ADDR = 215     # global memory A prefetch address
+V_LANE_MOD8_X4 = 134      # V_LANE_ID_MOD8 << 2 (byte offset)
+V_LANE_DIV8_X4 = 135      # (lane_id >> 3) << 2
+V_ADDR_HI_ZERO = 136      # always 0 (for 64-bit address high bits)
+V_LDS_A_BASE = 161        # LDS A-tile base address for inner loop
+V_LDS_B_BASE = 162        # LDS B-tile base address for inner loop
+V_LDS_A_PTR = 163         # current LDS A-tile read pointer
+V_LDS_B_PTR = 164         # current LDS B-tile read pointer
+V_GLOBAL_A_ADDR = 165     # global memory A prefetch address
+V_GLOBAL_B_ADDR = 166     # global memory B prefetch address
+
+# LDS tile register destinations - SEPARATE from DATA to avoid overlap
+# DATA regs (v167-182) receive global prefetch, TILE regs (v183-206) receive LDS loads
+V_A_TILE_REGS = [183, 185, 187, 189]  # A tile: 4 pairs (v183-190)
+V_B_TILE_REGS = [191, 193, 195, 197, 199, 201, 203, 205]  # B tile: 8 pairs (v191-206)
 
 # =============================================================================
 # Named register assignments (SGPRs)
@@ -83,7 +84,7 @@ ACC_GRID = [
   [ 21, 19, 25, 24,   53, 51, 57, 56,   85, 83, 89, 88,  117,115,121,120],  # a4
   [ 20, 18, 23, 22,   52, 50, 55, 54,   84, 82, 87, 86,  116,114,123,122],  # a5
   [133,128, 29, 27,   33, 32, 61, 59,   65, 64, 93, 91,   97, 96,129,127],  # a6
-  [131,214, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7
+  [131,132, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7 (was v214, moved to v132)
 ]
 
 # Derived: all 128 accumulator registers to zero before loop
@@ -163,38 +164,41 @@ OUT_REGS.remove(124)
 OUT_REGS = [124] + OUT_REGS
 
 # =============================================================================
-# LDS tile staging registers
+# LDS tile staging registers - COMPACT LAYOUT
 # =============================================================================
-# A tile: addr in v[155,158-164], data in v[167-174]
-# B tile: addr in v[141-148], data in v[175-182]
-V_LDS_A_ADDR = [155] + list(range(158, 165))  # 8 address registers
-V_LDS_A_DATA = list(range(167, 175))          # 8 data registers
-V_LDS_B_ADDR = list(range(141, 149))          # 8 address registers
-V_LDS_B_DATA = list(range(175, 183))          # 8 data registers
+# DATA regs receive contiguous global prefetch, then write to LDS
+# TILE regs receive scattered LDS loads (ds_load_b64 pairs), then feed FMACs
+# These are SEPARATE - DATA lives during prefetch/store, TILE lives during inner loop
+V_LDS_A_ADDR = list(range(153, 161))          # 8 address registers for A stores
+V_LDS_A_DATA = list(range(167, 175))          # 8 data registers for A prefetch (v167-174)
+V_LDS_B_ADDR = list(range(145, 153))          # 8 address registers for B stores
+V_LDS_B_DATA = list(range(175, 183))          # 8 data registers for B prefetch (v175-182)
 
-# Derived: interleaved A/B store pairs for double-buffering (order matters for performance!)
-# Interleaved: A0,B0,A1,B1,... maximizes memory-level parallelism
+# Derived: interleaved A/B store pairs for LDS writes
 LDS_STORE_PAIRS = [(addr, data) for a_addr, a_data, b_addr, b_data
                    in zip(V_LDS_A_ADDR, V_LDS_A_DATA, V_LDS_B_ADDR, V_LDS_B_DATA)
                    for addr, data in [(a_addr, a_data), (b_addr, b_data)]]
 
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
-PREFETCH_LOADS = [(171+2*i, 172+2*i, V_GLOBAL_B_ADDR if i < 2 else V_GLOBAL_A_ADDR, 32+4*i, 34+4*i) for i in range(6)]
+# Prefetch into DATA regs (v171-182, spanning A_DATA[4:8] and B_DATA[0:8])
+# First 2 pairs from B address, next 4 pairs from A address
+PREFETCH_LOADS = [(V_LDS_A_DATA[4+2*i], V_LDS_A_DATA[4+2*i+1], V_GLOBAL_B_ADDR, 32+4*i, 34+4*i) for i in range(2)] + \
+                 [(V_LDS_B_DATA[2*(i-2)], V_LDS_B_DATA[2*(i-2)+1], V_GLOBAL_A_ADDR, 32+4*i, 34+4*i) for i in range(2, 6)]
 
-# Initial tile prefetch: (vdst, saddr_lo)
-INIT_PREFETCH = [(167+i, 24+2*i) for i in range(4)]
+# Initial tile prefetch: (vdst, saddr_lo) - load into A data regs
+INIT_PREFETCH = [(V_LDS_A_DATA[i], 24+2*i) for i in range(4)]
 
-# Initial tile loads: (vdst, addr_lo) pairs
+# Initial tile loads: (vdst, addr_lo) pairs - use temp regs in accumulator gaps
 INIT_TILE_LOADS = [(23,5),(24,9),(25,7),(26,2),(27,11),(28,13),(29,6),(30,8),(31,10),(12,12),(13,14),(3,2),(4,4),(5,8),(6,6),(7,10)]
 
 # Initial LDS stores: (addr, d0, d1, off0, off1) for stride64 or (addr, data) for single
+# Updated to use new V_LDS_B_ADDR
 INIT_LDS_STORES = [
-  (8,23,24,16,18), (141,29), (8,25,26,20,22), (142,30), (143,31),
-  (8,27,28,24,26), (144,12), (145,13), (8,3,4,28,30), (146,5), (147,6), (148,7)]
+  (8,23,24,16,18), (145,29), (8,25,26,20,22), (146,30), (147,31),
+  (8,27,28,24,26), (148,12), (149,13), (8,3,4,28,30), (150,5), (151,6), (152,7)]
 
 # A matrix row offset registers (scattered to avoid accumulator conflicts)
-ROW_REGS = [119, 125, 130, 134, 137, 138, 139, 140]
-ROW_SIGN_REGS = [149, 150, 151, 152, 153, 154, 156, 157]  # sign-extension (155 used for LDS)
+ROW_REGS = list(range(137, 145))  # v137-v144 (8 regs)
 
 # =============================================================================
 # Kernel class
@@ -219,10 +223,15 @@ class Kernel:
               saddr=s[saddr:saddr+2] if saddr else RawImm(124)))
 
   def waitcnt(self, lgkm=None, vm=None):
-    """Wait for memory operations. lgkm=0 waits for LDS, vm=0 waits for VMEM."""
+    """Wait for memory operations. lgkm=0 waits for LDS, vm=0 waits for VMEM.
+    vm can be 0-63 to wait for specific number of outstanding VMEM ops."""
+    from extra.assembly.amd.asm import waitcnt as encode_waitcnt
     if lgkm == 0 and vm is None: self.emit(s_waitcnt(simm16=WAIT_LGKM))
     elif vm == 0 and lgkm is None: self.emit(s_waitcnt(simm16=WAIT_VMEM))
     elif lgkm == 0 and vm == 0: self.emit(s_waitcnt(simm16=WAIT_ALL))
+    elif vm is not None and lgkm is None:
+      # Wait for specific vmcnt, don't wait for lgkm/exp
+      self.emit(s_waitcnt(simm16=encode_waitcnt(vmcnt=vm, expcnt=7, lgkmcnt=63)))
     else: raise ValueError(f"unsupported waitcnt: lgkm={lgkm}, vm={vm}")
 
   def barrier(self): self.emit(s_barrier())
@@ -246,7 +255,7 @@ class Kernel:
       ('user_sgpr_kernarg_segment_ptr', 1), ('user_sgpr_dispatch_id', 0), ('user_sgpr_private_segment_size', 0),
       ('wavefront_size32', 1), ('uses_dynamic_stack', 0), ('enable_private_segment', 0),
       ('system_sgpr_workgroup_id_x', 1), ('system_sgpr_workgroup_id_y', 1), ('system_sgpr_workgroup_id_z', 0),
-      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 216),
+      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 207),
       ('next_free_sgpr', 16), ('float_round_mode_32', 0), ('float_round_mode_16_64', 0),
       ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3), ('dx10_clamp', 1), ('ieee_mode', 1),
       ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
@@ -264,7 +273,7 @@ class Kernel:
       f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8',
       '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
       '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
-      '    .vgpr_count: 216', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
+      '    .vgpr_count: 207', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
       'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
 
 
@@ -363,17 +372,20 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_co_u32(v[5], VCC_LO, s[S_B_PTR[0]], v[5]))
   k.emit(v_add_co_ci_u32_e32(v[6], s[S_B_PTR[1]], v[6]))
   for dst, mult in [(9,1), (7,2), (2,3), (11,4), (13,5)]: b_addr(dst, mult)
+  k.emit(s_clause(simm16=5))  # 6 consecutive global loads
   for vdst, addr in INIT_TILE_LOADS[:6]: k.global_load(vdst, addr)
 
   # Batch 2: A addresses (rows 0-4) and loads
   for dst, ri in [(6,0), (8,1), (10,2), (12,3), (14,4)]:
     k.emit(v_add_nc_u32_e32(v[dst], v[ROW_REGS[ri]], v[V_LANE_ID_MOD8]))
     addr64(dst, S_A_PTR[0])
+  k.emit(s_clause(simm16=4))  # 5 consecutive global loads
   for vdst, addr in INIT_TILE_LOADS[6:11]: k.global_load(vdst, addr)
 
   # Batch 3: B cols 6-7, A rows 5-7, and loads
   for dst, mult, tmp in [(2,6,15), (4,7,4)]: b_addr(dst, mult, tmp)
   for dst, ri, tmp in [(8,5,16), (6,6,18), (10,7,20)]: a_addr(dst, ROW_REGS[ri], tmp)
+  k.emit(s_clause(simm16=4))  # 5 consecutive global loads
   for vdst, addr in INIT_TILE_LOADS[11:]: k.global_load(vdst, addr)
 
   # ===========================================================================
@@ -414,24 +426,42 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_bfe_u32(v[2], v[0], 3, 2))  # v[2] = (lane_id >> 3) & 3
   k.emit(v_lshlrev_b32_e32(v[8], 2, v[8]))
 
-  # Compute final B-tile addresses: v[141+i] = LDS_A_STRIDE * lane_mod8 + row_base[i]
-  k.emit(v_mad_u32_u24(v[141], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[9]))
+  # Compute final B-tile addresses: V_LDS_B_ADDR[i] = LDS_A_STRIDE * lane_mod8 + row_base[i]
+  k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR[0]], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[9]))
   lds_bases = [9] + lds_r[:-1]  # base offsets for 8 rows
   for d, r in zip(lds_bases, lds_r): k.emit(v_lshlrev_b32_e32(v[d], 2, v[r]))
   k.emit(v_lshlrev_b32_e32(v[V_LANE_DIV8_X4], 2, v[2]))
   k.emit(v_add_nc_u32_e32(v[8], 0x80, v[8]))  # A-tile base + 128
   for i, base in enumerate(lds_bases):
-    k.emit(v_mad_u32_u24(v[142 + i], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[base]))
+    k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR[1 + i]], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[base]))
 
-  # Store initial tile data to LDS
+  # Store initial tile data to LDS with software pipelining
+  # We issued 16 global loads. Store as they complete rather than waiting for all.
+  # Load order: v23,v24,v25,v26,v27,v28,v29,v30,v31,v12,v13,v3,v4,v5,v6,v7
   k.emit(s_mov_b32(s[S_LOOP_BOUND], 0))
   k.emit(s_cmp_gt_i32(s[S_DIM_N], 0))
-  k.waitcnt(lgkm=0, vm=0)
-  for st in INIT_LDS_STORES:
-    if len(st) == 5:  # A-tile: stride64 store (2 values)
-      k.emit(ds_store_2addr_stride64_b32(addr=v[st[0]], data0=v[st[1]], data1=v[st[2]], offset0=st[3], offset1=st[4]))
-    else:  # B-tile: single store
-      k.emit(ds_store_b32(addr=v[st[0]], data0=v[st[1]], offset0=0, offset1=0))
+  k.waitcnt(vm=14)  # wait for loads 0,1 (v23,v24)
+  k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[23], data1=v[24], offset0=16, offset1=18))
+  k.waitcnt(vm=9)   # wait for load 6 (v29)
+  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[0]], data0=v[29], offset0=0, offset1=0))
+  k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[25], data1=v[26], offset0=20, offset1=22))
+  k.waitcnt(vm=8)   # wait for load 7 (v30)
+  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[1]], data0=v[30], offset0=0, offset1=0))
+  k.waitcnt(vm=7)   # wait for load 8 (v31)
+  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[2]], data0=v[31], offset0=0, offset1=0))
+  k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[27], data1=v[28], offset0=24, offset1=26))
+  k.waitcnt(vm=6)   # wait for load 9 (v12)
+  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[3]], data0=v[12], offset0=0, offset1=0))
+  k.waitcnt(vm=5)   # wait for load 10 (v13)
+  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[4]], data0=v[13], offset0=0, offset1=0))
+  k.waitcnt(vm=3)   # wait for loads 11,12 (v3,v4)
+  k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[3], data1=v[4], offset0=28, offset1=30))
+  k.waitcnt(vm=2)   # wait for load 13 (v5)
+  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[5]], data0=v[5], offset0=0, offset1=0))
+  k.waitcnt(vm=1)   # wait for load 14 (v6)
+  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[6]], data0=v[6], offset0=0, offset1=0))
+  k.waitcnt(vm=0)   # wait for load 15 (v7)
+  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[7]], data0=v[7], offset0=0, offset1=0))
   k.waitcnt(lgkm=0)
   k.barrier()
 
@@ -443,13 +473,13 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_lshlrev_b32_e32(v[2], 4, v[2]))
   k.emit(s_lshr_b32(s[S_LOOP_BOUND], s[S_LOOP_BOUND], 25))
   k.emit(v_add_nc_u32_e32(v[3], s[S_LOOP_BOUND], v[1]))
-  for d, s_ in zip(ROW_SIGN_REGS, ROW_REGS): k.emit(v_ashrrev_i32_e32(v[d], 31, v[s_]))  # sign-extend row offsets
+  # ROW_SIGN_REGS sign-extension removed - values were never used
   k.emit(v_and_b32_e32(v[3], ADDR_MASK, v[3]))
   k.emit(v_sub_nc_u32_e32(v[3], v[1], v[3]))
   k.emit(v_lshl_or_b32(v[V_LDS_B_BASE], v[V_LANE_ID_MOD8], 4, LDS_BASE_OFFSET))
-  k.emit(v_lshl_add_u32(v[155], v[3], 2, LDS_BASE_OFFSET))
+  k.emit(v_lshl_add_u32(v[V_LDS_A_ADDR[0]], v[3], 2, LDS_BASE_OFFSET))
   k.emit(v_lshlrev_b32_e32(v[3], 2, v[0]))
-  for i in range(7): k.emit(v_lshl_add_u32(v[158 + i], i + 1, 9, v[155]))  # LDS A-tile store addresses
+  for i in range(7): k.emit(v_lshl_add_u32(v[V_LDS_A_ADDR[1 + i]], i + 1, 9, v[V_LDS_A_ADDR[0]]))  # LDS A-tile store addresses
   k.emit(v_and_or_b32(v[V_LDS_A_BASE], 0x180, v[3], v[2]))
 
   for r in ACC_REGS: k.emit(v_mov_b32_e32(v[r], 0))  # zero all 128 accumulator registers
@@ -480,6 +510,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
   k.emit(s_setprio(0))
 
+  k.emit(s_clause(simm16=3))  # 4 consecutive global loads
   for vdst, saddr_lo in INIT_PREFETCH:
     k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
 
@@ -491,8 +522,18 @@ def build_kernel(arch='gfx1100'):
   k.label('INNER_LOOP')
 
   # 8 inner loop iterations (6 with prefetch, 2 without)
+  # Optimization: issue global prefetch BEFORE LDS loads so global memory
+  # operations can be in flight during LDS wait
   for iter in range(8):
+    # Issue global prefetch first (first 6 iterations only)
+    if iter < 6:
+      vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
+      k.emit(s_clause(simm16=1))  # 2 consecutive global loads
+      k.global_load(vdst1, addr, slo1)
+      k.global_load(vdst2, addr, slo2)
+
     # Load A tile (4 pairs) and B tile (8 pairs) from LDS
+    k.emit(s_clause(simm16=11))  # 12 consecutive memory ops
     for i, vdst in enumerate(V_A_TILE_REGS):  # 4 loads: offsets 0, 8, 64, 72
       k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_PTR], offset0=(i & 1) * 8 + (i >> 1) * 64, offset1=0))
     for i, vdst in enumerate(V_B_TILE_REGS):  # 8 loads: 2 banks x 4 offsets
@@ -506,10 +547,6 @@ def build_kernel(arch='gfx1100'):
                   vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
       if i == 0: k.emit(s_setprio(1))
     k.emit(s_setprio(0))
-    if iter < 6:  # prefetch
-      vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
-      k.global_load(vdst1, addr, slo1)
-      k.global_load(vdst2, addr, slo2)
 
   k.emit(s_and_not1_b32(VCC_LO, EXEC_LO, s[S_PREFETCH_FLAG]))
   k.waitcnt(vm=0)
