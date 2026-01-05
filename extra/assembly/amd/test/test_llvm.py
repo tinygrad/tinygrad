@@ -69,13 +69,17 @@ def _make_test(f: str, arch: str, test_type: str):
         self.assertEqual(decoded.to_bytes()[:len(data)], data)
       print(f"{name}: {len(tests)} passed")
     elif test_type == "asm":
-      passed, skipped = 0, 0
+      passed, failed, skipped = 0, 0, 0
       for asm_text, expected in tests:
         try:
-          self.assertEqual(asm(asm_text).to_bytes(), expected)
-          passed += 1
-        except: skipped += 1
-      print(f"{name}: {passed} passed, {skipped} skipped")
+          result = asm(asm_text, arch=arch)
+          if result.to_bytes() == expected:
+            passed += 1
+          else:
+            failed += 1
+        except:
+          skipped += 1
+      print(f"{name}: {passed} passed, {failed} failed, {skipped} skipped")
     elif test_type == "disasm":
       to_test = []
       for _, data in tests:

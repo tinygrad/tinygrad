@@ -305,7 +305,10 @@ class Inst:
     if isinstance(val, SrcMod):
       mod_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
       if val.neg and 'neg' in self._fields: self._or_field('neg', mod_bit)
-      if val.abs_ and 'abs' in self._fields: self._or_field('abs', mod_bit)
+      # abs can be in 'abs' field (VOP3A) or 'neg_hi' field (VOP3P uses neg_hi for abs)
+      if val.abs_:
+        if 'abs' in self._fields: self._or_field('abs', mod_bit)
+        elif 'neg_hi' in self._fields and 'abs' not in self._fields: self._or_field('neg_hi', mod_bit)  # VOP3P uses neg_hi for abs
     if isinstance(val, Reg) and val.hi and has_opsel:
       self._or_field('opsel', {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0))
     # Track literal value if needed
@@ -371,7 +374,9 @@ class Inst:
     # Format-specific setup
     if cls_name == 'FLAT' and 'sve' in self._fields:
       seg = self._values.get('seg', 0)
-      if (seg.val if isinstance(seg, RawImm) else seg) == 1 and isinstance(orig_args.get('addr'), VGPR): self._values['sve'] = 1
+      # Only auto-set sve=1 if not explicitly passed and conditions match (seg=1/scratch, addr is VGPR)
+      if 'sve' not in orig_args and (seg.val if isinstance(seg, RawImm) else seg) == 1 and isinstance(orig_args.get('addr'), VGPR):
+        self._values['sve'] = 1
     if cls_name == 'VOP3P':
       op = orig_args.get('op')
       if hasattr(op, 'value'): op = op.value
