@@ -440,32 +440,19 @@ def build_kernel(arch='gfx1100'):
   for i, base in enumerate(lds_bases):
     k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR[1 + i]], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[base]))
 
-  # Store initial tile data to LDS with software pipelining
-  # We issued 16 global loads. Store as they complete rather than waiting for all.
-  # Load order: v23,v24,v25,v26,v27,v28,v29,v30,v31,v12,v13,v3,v4,v5,v6,v7
-  k.emit(s_mov_b32(s[S_LOOP_BOUND], 0))
-  k.emit(s_cmp_gt_i32(s[S_DIM_N], 0))
-  k.waitcnt(vm=14)  # wait for loads 0,1 (v23,v24)
+  # Store initial tile data to LDS
+  k.waitcnt(vm=0)
   k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[23], data1=v[24], offset0=16, offset1=18))
-  k.waitcnt(vm=9)   # wait for load 6 (v29)
   k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[0]], data0=v[29], offset0=0, offset1=0))
   k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[25], data1=v[26], offset0=20, offset1=22))
-  k.waitcnt(vm=8)   # wait for load 7 (v30)
   k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[1]], data0=v[30], offset0=0, offset1=0))
-  k.waitcnt(vm=7)   # wait for load 8 (v31)
   k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[2]], data0=v[31], offset0=0, offset1=0))
   k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[27], data1=v[28], offset0=24, offset1=26))
-  k.waitcnt(vm=6)   # wait for load 9 (v12)
   k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[3]], data0=v[12], offset0=0, offset1=0))
-  k.waitcnt(vm=5)   # wait for load 10 (v13)
   k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[4]], data0=v[13], offset0=0, offset1=0))
-  k.waitcnt(vm=3)   # wait for loads 11,12 (v3,v4)
   k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[3], data1=v[4], offset0=28, offset1=30))
-  k.waitcnt(vm=2)   # wait for load 13 (v5)
   k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[5]], data0=v[5], offset0=0, offset1=0))
-  k.waitcnt(vm=1)   # wait for load 14 (v6)
   k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[6]], data0=v[6], offset0=0, offset1=0))
-  k.waitcnt(vm=0)   # wait for load 15 (v7)
   k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[7]], data0=v[7], offset0=0, offset1=0))
   k.waitcnt(lgkm=0)
   k.barrier()
@@ -531,8 +518,7 @@ def build_kernel(arch='gfx1100'):
     if not NO_DS:
       k.emit(s_clause(simm16=11))  # 12 loads total: 4 A + 8 B
       # A tile: 4 ds_load_b64
-      for i in range(4):
-        vdst = V_A_TILE_REGS[i]
+      for i, vdst in enumerate(V_A_TILE_REGS):
         a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
         k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
       # B tile: 8 ds_load_b64
@@ -542,6 +528,7 @@ def build_kernel(arch='gfx1100'):
       k.waitcnt(lgkm=0)
 
     # 64 dual FMACs
+    k.emit(s_clause(simm16=63))
     for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
       k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
                   vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
