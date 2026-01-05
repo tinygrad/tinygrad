@@ -528,28 +528,37 @@ def build_kernel(arch='gfx1100'):
   NO_DS, NO_GLOBAL = getenv("NO_DS", 0), getenv("NO_GLOBAL", 0)
   for iter in range(8):
     # Load A tile (4 pairs) and B tile (8 pairs) from LDS
+    # Reordered: A[2,3] (banks 16,18) first, then B (banks 0,2), then A[0,1] (banks 0,2)
+    # This minimizes bank conflicts by loading non-conflicting banks first
     if not NO_DS:
       k.emit(s_clause(simm16=11))
-      for i, vdst in enumerate(V_A_TILE_REGS):
+      # A[2,3] first - banks 16, 18 (no conflict with B)
+      for i in [2, 3]:
+        vdst = V_A_TILE_REGS[i]
         a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
         k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
+      # B[0-7] - banks 0, 2 (no conflict with A[2,3])
       for i, vdst in enumerate(V_B_TILE_REGS):
         b_off = (i & 1) * 8 + (i & 2) * 64 + (i >> 2) * 256 + iter * LDS_B_STRIDE
         k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_BASE], offset0=b_off & 0xFF, offset1=b_off >> 8))
-
-    # Issue global prefetch (first 6 iterations only)
-    if iter < 6 and not NO_GLOBAL:
-      vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
-      k.emit(s_clause(simm16=1))
-      k.global_load(vdst1, addr, slo1)
-      k.global_load(vdst2, addr, slo2)
-
-    if not NO_DS: k.waitcnt(lgkm=0)
+      # A[0,1] last - banks 0, 2 (may conflict with B, but B should be mostly done)
+      for i in [0, 1]:
+        vdst = V_A_TILE_REGS[i]
+        a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
+        k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
+      k.waitcnt(lgkm=0)
 
     # 64 dual FMACs
     for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
       k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
                   vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
+
+    # Issue global prefetch AFTER FMACs (first 6 iterations only)
+    if iter < 6 and not NO_GLOBAL:
+      vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
+      k.emit(s_clause(simm16=1))
+      k.global_load(vdst1, addr, slo1)
+      k.global_load(vdst2, addr, slo2)
 
   k.emit(s_and_not1_b32(VCC_LO, EXEC_LO, s[S_PREFETCH_FLAG]))
   k.waitcnt(vm=0)
