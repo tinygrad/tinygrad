@@ -678,6 +678,41 @@ def test_matmul():
     print(f"mean squared error {err}")
     if err > 1e-06: raise RuntimeError("matmul is wrong!")
 
+def run_sqtt():
+  """Run with SQTT profiling and write trace files."""
+  import subprocess, os
+
+  # Run test_matmul in a subprocess with SQTT enabled from the start
+  env = {**os.environ, "AMD": "1", "SQTT": "1", "CNT": "1", "PROFILE": "1", "PYTHONPATH": "."}
+  result = subprocess.run(
+    ["python", "-c", "from extra.gemm.amd_asm_matmul import test_matmul; test_matmul()"],
+    capture_output=True, text=True, env=env, timeout=120
+  )
+  print(result.stdout)
+  if result.returncode != 0:
+    print(result.stderr)
+    raise RuntimeError("test_matmul failed")
+
+  # Run roc.py to extract trace data
+  result = subprocess.run(
+    ["python", "extra/sqtt/roc.py", "--profile", "/tmp/profile.pkl.tiny", "--kernel", "kernel"],
+    capture_output=True, text=True, env={**os.environ, "DEBUG": "5"}, timeout=60
+  )
+  output = result.stdout + result.stderr
+
+  # Parse and write instruction trace
+  trace_lines = [line for line in output.split('\n') if line.startswith('|')]
+  with open("/tmp/sqtt_trace.txt", "w") as f:
+    f.write('\n'.join(trace_lines))
+  print(f"Wrote {len(trace_lines)} lines to /tmp/sqtt_trace.txt")
+
+  # Parse and write occupancy events
+  occ_lines = [line for line in output.split('\n') if line.startswith('OCC ')]
+  with open("/tmp/occ_events.txt", "w") as f:
+    f.write('\n'.join(occ_lines))
+  print(f"Wrote {len(occ_lines)} lines to /tmp/occ_events.txt")
+
 if __name__ == "__main__":
   if getenv("ASM", 0): print(build_kernel(Device[Device.DEFAULT].arch))
+  elif getenv("SQTT", 0): run_sqtt()
   else: test_matmul()
