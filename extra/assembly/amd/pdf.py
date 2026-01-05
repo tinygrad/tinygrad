@@ -163,15 +163,20 @@ def _parse_single_pdf(url: str):
     page_idx = microcode_start + rel_idx
     text = pdf.text(page_idx)
     field_pos = text.find('Field Name', header_pos)
-    fields = None
+    fields, found_table_on_first_page = None, False
     for offset in range(3):
       if page_idx + offset >= total_pages: break
-      if offset > 0 and has_header_before_fields(pdf.text(page_idx + offset)): break
+      offset_text = pdf.text(page_idx + offset)
+      if offset > 0 and has_header_before_fields(offset_text): break
       for t in pdf.tables(page_idx + offset) if offset > 0 or field_pos > header_pos else []:
-        if is_fields_table(t) and (f := _parse_fields_table(t, fmt_name, enum_names)) and has_encoding(f): fields = f; break
+        if is_fields_table(t) and (f := _parse_fields_table(t, fmt_name, enum_names)):
+          if offset == 0: found_table_on_first_page = True
+          if has_encoding(f): fields = f; break
       if fields: break
+      if offset == 0 and found_table_on_first_page: break  # found table without encoding on first page, use fallback
     if not fields and field_pos > header_pos:
-      for t in pdf.tables(page_idx):
+      # For formats without ENCODING (like DPP/SDWA), find table closest to header
+      for t in reversed(pdf.tables(page_idx)):  # search bottom-up since format sections go top-to-bottom
         if is_fields_table(t) and (f := _parse_fields_table(t, fmt_name, enum_names)): fields = f; break
     if not fields: continue
     field_names = {f[0] for f in fields}
@@ -209,19 +214,14 @@ def _parse_single_pdf(url: str):
       for k, v in {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}.items():
         assert k not in enums['FLATOp']; enums['FLATOp'][k] = v
   # CDNA MTBUF: PDF is missing the FORMAT field (bits[25:19]) which is required for tbuffer_* instructions
-  if is_cdna and 'MTBUF' in formats:
-    field_names = {f[0] for f in formats['MTBUF']}
-    if 'FORMAT' not in field_names:
-      formats['MTBUF'].append(('FORMAT', 25, 19, None, None))
-  # CDNA SDWA/DPP: PDF only has modifier fields, need VOP1/VOP2 overlay for correct encoding
-  if is_cdna:
-    if 'SDWA' in formats:
-      formats['SDWA'] = [('ENCODING', 8, 0, 0xf9, None), ('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None)] + \
-                        [f for f in formats['SDWA'] if f[0] not in ('ENCODING', 'SDST', 'SD', 'ROW_MASK')]
-    if 'DPP' in formats:
-      formats['DPP'] = [('ENCODING', 8, 0, 0xfa, None), ('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None),
-        ('SRC0', 39, 32, None, 'Src'), ('DPP_CTRL', 48, 40, None, None), ('BOUND_CTRL', 51, 51, None, None), ('SRC0_NEG', 52, 52, None, None), ('SRC0_ABS', 53, 53, None, None),
-        ('SRC1_NEG', 54, 54, None, None), ('SRC1_ABS', 55, 55, None, None), ('BANK_MASK', 59, 56, None, None), ('ROW_MASK', 63, 60, None, None)]
+  if is_cdna and 'MTBUF' in formats and 'FORMAT' not in {f[0] for f in formats['MTBUF']}:
+    formats['MTBUF'].append(('FORMAT', 25, 19, None, None))
+  # CDNA DPP/SDWA: Add VOP overlay fields (bits[31:0]) - PDF only documents modifier fields (bits[63:32])
+  vop_overlay = [('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None)]
+  if is_cdna and 'DPP' in formats and 'ENCODING' not in {f[0] for f in formats['DPP']}:
+    formats['DPP'] = [('ENCODING', 8, 0, 0xfa, None)] + vop_overlay + [('BOUND_CTRL' if f[0] == 'BC' else f[0], *f[1:]) for f in formats['DPP']]
+  if is_cdna and 'SDWA' in formats and 'ENCODING' not in {f[0] for f in formats['SDWA']}:
+    formats['SDWA'] = [('ENCODING', 8, 0, 0xf9, None)] + vop_overlay + [f for f in formats['SDWA'] if f[0] not in ('SDST', 'SD', 'ROW_MASK')]
 
   # Extract pseudocode for instructions
   all_text = '\n'.join(pdf.text(i) for i in range(instr_start, instr_end))
