@@ -60,7 +60,7 @@ class TestFP8Linear(unittest.TestCase):
     y_before = model(x).numpy()
     convert_to_float8_training(model, module_filter_fn=lambda _, fqn: "fc1" in fqn)
     self.assertIsInstance(model.fc1, FP8Linear)
-    self.assertIsInstance(model.fc2, Linear)
+    self.assertNotIsInstance(model.fc2, FP8Linear)
     y_after = model(x).numpy()
     np.testing.assert_allclose(y_after, y_before, rtol=0.1, atol=0.1)
 
