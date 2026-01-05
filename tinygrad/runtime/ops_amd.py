@@ -553,9 +553,10 @@ class AMDProgram(HCQProgram):
       if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
       else: raise RuntimeError(f"unknown AMD reloc {typ}")
 
-    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True))
-    self.dev.allocator._copyin(self.lib_gpu, image)
-    self.dev.synchronize()
+    self.lib_gpu = self.dev.allocator.alloc(round_up(image.nbytes, 0x1000), buf_spec:=BufferSpec(nolru=True, cpu_access=True))
+    self.lib_gpu.cpu_view()[:image.nbytes] = image
+    # self.dev.allocator._copyin(self.lib_gpu, image)
+    # self.dev.synchronize()
 
     self.group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
     self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
@@ -947,7 +948,7 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
-                     functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size),
+                     functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size) if self.sdma_queue(0) else None,
                      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
 
     # Scratch setup
@@ -1003,7 +1004,9 @@ class AMDDevice(HCQCompiled):
             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
   @functools.lru_cache(None)
-  def sdma_queue(self, idx:int=0): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+  def sdma_queue(self, idx:int):
+    with contextlib.suppress(OSError): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+    return None
 
   def _ensure_has_local_memory(self, private_segment_size):
     if self.max_private_segment_size >= private_segment_size: return
