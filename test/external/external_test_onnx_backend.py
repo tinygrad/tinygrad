@@ -194,16 +194,6 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad d
 backend_test.exclude('test_if_opt_cpu') # ValueError: 13 is not a valid AttributeType
 backend_test.exclude('test_if_seq_cpu') # NotImplementedError: op='SequenceConstruct' is not supported
 
-# regression from removing StrEnum in Domain
-backend_test.exclude('test_adam_cpu')
-backend_test.exclude('test_gradient_of_add_and_mul_cpu')
-backend_test.exclude('test_gradient_of_add_cpu')
-
-if Device.DEFAULT in ['CL', 'METAL']:
-  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
-  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
-  backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
-
 if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "CL"):
   # numerical inaccuracy
   backend_test.exclude('test_mish_cpu')
