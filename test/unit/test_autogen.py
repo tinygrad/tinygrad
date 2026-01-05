@@ -224,4 +224,43 @@ class TestAutogen(unittest.TestCase):
       self.assertTrue(hasattr(rect, 'height'))
       self.assertTrue(hasattr(rect, 'color'))
 
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_struct_ordering(self):
+    # Test that structs are ordered correctly even when defined in "reverse" dependency order
+    # B contains pointer to A, but B is defined first - valid C with forward declaration
+    header_content = """
+    struct A;  // forward declaration
+    struct C;
+    typedef struct A A;
+
+    struct B {
+      struct C *c_ptr;
+    };
+
+    struct C {
+      struct A *a_ptr;
+    };
+
+    struct A {
+      int x;
+      struct B *b_ptr;  // circular reference
+    };
+    """
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
+      f.write(header_content)
+      f.flush()
+      generated_code = gen(name="test_ordering", dll=None, files=[f.name])
+      namespace = {}
+      exec(generated_code, namespace)
+      # Verify both structs exist and can reference each other
+      self.assertIn('struct_A', namespace)
+      self.assertIn('struct_B', namespace)
+      self.assertIn('struct_C', namespace)
+      A, B, C = namespace['struct_A'], namespace['struct_B'], namespace['struct_C']
+      a, b, c = A(), B(), C()
+      self.assertTrue(hasattr(a, 'x'))
+      self.assertTrue(hasattr(a, 'b_ptr'))
+      self.assertTrue(hasattr(b, 'c_ptr'))
+      self.assertTrue(hasattr(c, 'a_ptr'))
+
 if __name__ == "__main__": unittest.main()
