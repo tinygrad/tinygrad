@@ -65,6 +65,13 @@ S_LOOP_CTR = 12           # loop counter (increments by 8)
 S_PREFETCH_FLAG = 13      # prefetch condition flag / row stride in epilogue
 S_WORKGROUP_X = 14        # workgroup_id_x
 S_WORKGROUP_Y = 15        # workgroup_id_y
+# Kernarg load destinations (before copy to working regs)
+S_KERNARG_OUT = (16, 17)  # output pointer from kernarg
+S_KERNARG_A = (20, 21)    # A pointer from kernarg
+S_KERNARG_B = (22, 23)    # B pointer from kernarg
+# Prefetch base pointers (8 pairs each, 16KB/256KB apart)
+S_PREFETCH_B = 24         # s[24:39] - 8 B tile pointers
+S_PREFETCH_A = 40         # s[40:55] - 8 A tile pointers
 
 # =============================================================================
 # Data tables
@@ -161,11 +168,13 @@ V_LDS_B_DATA = list(range(163, 171))          # 8 data registers for B prefetch 
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
 # Prefetch into DATA regs (v171-182, spanning A_DATA[4:8] and B_DATA[0:8])
 # First 2 pairs from B address, next 4 pairs from A address
-PREFETCH_LOADS = [(V_LDS_A_DATA[4+2*i], V_LDS_A_DATA[4+2*i+1], V_GLOBAL_B_ADDR, 32+4*i, 34+4*i) for i in range(2)] + \
-                 [(V_LDS_B_DATA[2*(i-2)], V_LDS_B_DATA[2*(i-2)+1], V_GLOBAL_A_ADDR, 32+4*i, 34+4*i) for i in range(2, 6)]
+# Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
+# First 2 pairs from B prefetch pointers (s[32:39]), next 4 pairs from A prefetch pointers (s[40:55])
+PREFETCH_LOADS = [(V_LDS_A_DATA[4+2*i], V_LDS_A_DATA[4+2*i+1], V_GLOBAL_B_ADDR, S_PREFETCH_B+8+4*i, S_PREFETCH_B+10+4*i) for i in range(2)] + \
+                 [(V_LDS_B_DATA[2*(i-2)], V_LDS_B_DATA[2*(i-2)+1], V_GLOBAL_A_ADDR, S_PREFETCH_A+4*(i-2), S_PREFETCH_A+2+4*(i-2)) for i in range(2, 6)]
 
-# Initial tile prefetch: (vdst, saddr_lo) - load into A data regs
-INIT_PREFETCH = [(V_LDS_A_DATA[i], 24+2*i) for i in range(4)]
+# Initial tile prefetch: (vdst, saddr_lo) - load into A data regs using B prefetch pointers (s[24:31])
+INIT_PREFETCH = [(V_LDS_A_DATA[i], S_PREFETCH_B+2*i) for i in range(4)]
 
 # Initial tile loads: (vdst, addr_lo) pairs - use temp regs in accumulator gaps
 INIT_TILE_LOADS = [(23,5),(24,9),(25,7),(26,2),(27,11),(28,13),(29,6),(30,8),(31,10),(12,12),(13,14),(3,2),(4,4),(5,8),(6,6),(7,10)]
@@ -260,8 +269,8 @@ def build_kernel(arch='gfx1100'):
   # ===========================================================================
   # PROLOGUE: Load kernel arguments, compute tile coordinates and addresses
   # ===========================================================================
-  k.emit(s_load_b128(sdata=s[20:23], sbase=s[0:1], offset=0x0, soffset=RawImm(124)))
-  k.emit(s_load_b64(sdata=s[16:17], sbase=s[0:1], offset=0x10, soffset=RawImm(124)))
+  k.emit(s_load_b128(sdata=s[S_KERNARG_A[0]:S_KERNARG_B[1]], sbase=s[0:1], offset=0x0, soffset=RawImm(124)))
+  k.emit(s_load_b64(sdata=s[S_KERNARG_OUT[0]:S_KERNARG_OUT[1]], sbase=s[0:1], offset=0x10, soffset=RawImm(124)))
   k.emit(s_mov_b32(s[S_DIM_N], MATRIX_DIM))
   k.emit(s_mov_b32(s[S_LOOP_CTR], 0))  # used by LDS swizzle, always 0 for valid workgroups
   k.emit(s_lshl_b32(s[S_TILE_X], s[S_WORKGROUP_X], 7))
@@ -278,13 +287,13 @@ def build_kernel(arch='gfx1100'):
   k.waitcnt(lgkm=0)
 
   # Copy pointers to working registers
-  k.emit(s_mov_b64(s[S_OUT_PTR[0]:S_OUT_PTR[1]], s[16:17]))
-  k.emit(s_mov_b64(s[S_A_PTR[0]:S_A_PTR[1]], s[20:21]))
-  k.emit(s_mov_b64(s[S_B_PTR[0]:S_B_PTR[1]], s[22:23]))
+  k.emit(s_mov_b64(s[S_OUT_PTR[0]:S_OUT_PTR[1]], s[S_KERNARG_OUT[0]:S_KERNARG_OUT[1]]))
+  k.emit(s_mov_b64(s[S_A_PTR[0]:S_A_PTR[1]], s[S_KERNARG_A[0]:S_KERNARG_A[1]]))
+  k.emit(s_mov_b64(s[S_B_PTR[0]:S_B_PTR[1]], s[S_KERNARG_B[0]:S_KERNARG_B[1]]))
 
   # Compute 8 A and B matrix tile base pointers for prefetch
-  for i in range(8): k.add64(24 + i*2, 25 + i*2, 22, 23, i * 0x4000)   # B: 16KB apart
-  for i in range(8): k.add64(40 + i*2, 41 + i*2, 20, 21, i * 0x40000)  # A: 256KB apart
+  for i in range(8): k.add64(S_PREFETCH_B + i*2, S_PREFETCH_B + i*2 + 1, S_KERNARG_B[0], S_KERNARG_B[1], i * 0x4000)   # B: 16KB apart
+  for i in range(8): k.add64(S_PREFETCH_A + i*2, S_PREFETCH_A + i*2 + 1, S_KERNARG_A[0], S_KERNARG_A[1], i * 0x40000)  # A: 256KB apart
 
   # Global prefetch addresses: B = (tile_x + lane_id) * 4, A = ((tile_y << 12) + (lane_id/8)*4K + lane_id%8) * 4
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], s[S_TILE_X], v[0]))
