@@ -48,9 +48,9 @@ V_GLOBAL_B_ADDR = 154     # global memory B prefetch address
 
 # LDS tile register destinations - SEPARATE from DATA to avoid overlap
 # DATA regs (v155-170) receive global prefetch
-# A TILE on banks 2-3, B TILE on banks 0-1 to avoid VGPR bank conflicts in dual FMAC
-V_A_TILE_REGS = [186, 190, 194, 198]  # A tile: 4 pairs on banks 2-3 (v186-187, v190-191, v194-195, v198-199)
-V_B_TILE_REGS = [184, 188, 192, 196, 200, 204, 208, 212]  # B tile: 8 pairs on banks 0-1
+# A TILE at v186-199 (scattered), B TILE at v184-212 (scattered)
+V_A_TILE_REGS = [186, 190, 194, 198]  # A tile: 4 pairs scattered
+V_B_TILE_REGS = [184, 188, 192, 196, 200, 204, 208, 212]  # B tile: 8 pairs scattered
 
 # =============================================================================
 # Named register assignments (SGPRs)
@@ -514,7 +514,6 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
   k.emit(s_setprio(0))
 
-  k.emit(s_clause(simm16=3))  # 4 consecutive global loads
   for vdst, saddr_lo in INIT_PREFETCH:
     k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
 
@@ -528,24 +527,17 @@ def build_kernel(arch='gfx1100'):
   NO_DS, NO_GLOBAL = getenv("NO_DS", 0), getenv("NO_GLOBAL", 0)
   for iter in range(8):
     # Load A tile (4 pairs) and B tile (8 pairs) from LDS
-    # Reordered: A[2,3] (banks 16,18) first, then B (banks 0,2), then A[0,1] (banks 0,2)
-    # This minimizes bank conflicts by loading non-conflicting banks first
     if not NO_DS:
-      k.emit(s_clause(simm16=11))
-      # A[2,3] first - banks 16, 18 (no conflict with B)
-      for i in [2, 3]:
+      k.emit(s_clause(simm16=11))  # 12 loads total: 4 A + 8 B
+      # A tile: 4 ds_load_b64
+      for i in range(4):
         vdst = V_A_TILE_REGS[i]
         a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
         k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
-      # B[0-7] - banks 0, 2 (no conflict with A[2,3])
+      # B tile: 8 ds_load_b64
       for i, vdst in enumerate(V_B_TILE_REGS):
         b_off = (i & 1) * 8 + (i & 2) * 64 + (i >> 2) * 256 + iter * LDS_B_STRIDE
         k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_BASE], offset0=b_off & 0xFF, offset1=b_off >> 8))
-      # A[0,1] last - banks 0, 2 (may conflict with B, but B should be mostly done)
-      for i in [0, 1]:
-        vdst = V_A_TILE_REGS[i]
-        a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
-        k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
       k.waitcnt(lgkm=0)
 
     # 64 dual FMACs
@@ -556,7 +548,6 @@ def build_kernel(arch='gfx1100'):
     # Issue global prefetch AFTER FMACs (first 6 iterations only)
     if iter < 6 and not NO_GLOBAL:
       vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
-      k.emit(s_clause(simm16=1))
       k.global_load(vdst1, addr, slo1)
       k.global_load(vdst2, addr, slo2)
 
@@ -705,17 +696,10 @@ def run_sqtt():
   )
   output = result.stdout + result.stderr
 
-  # Parse and write instruction trace
-  trace_lines = [line for line in output.split('\n') if line.startswith('|')]
+  # Write full output to trace file
   with open("/tmp/sqtt_trace.txt", "w") as f:
-    f.write('\n'.join(trace_lines))
-  print(f"Wrote {len(trace_lines)} lines to /tmp/sqtt_trace.txt")
-
-  # Parse and write occupancy events
-  occ_lines = [line for line in output.split('\n') if line.startswith('OCC ')]
-  with open("/tmp/occ_events.txt", "w") as f:
-    f.write('\n'.join(occ_lines))
-  print(f"Wrote {len(occ_lines)} lines to /tmp/occ_events.txt")
+    f.write(output)
+  print(f"Wrote {len(output)} bytes to /tmp/sqtt_trace.txt")
 
 if __name__ == "__main__":
   if getenv("ASM", 0): print(build_kernel(Device[Device.DEFAULT].arch))
