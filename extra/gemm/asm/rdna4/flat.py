@@ -3,7 +3,7 @@ import numpy as np
 from tinygrad import Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
-from extra.assembly.amd.dsl import RawImm
+from extra.assembly.amd.dsl import RawImm, NULL
 #from extra.assembly.amd.autogen.rdna4.ins import *
 from extra.gemm.asm.rdna4.ins import *
 
@@ -31,9 +31,9 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_mov_b32(s[2], ttmp[9]),
   s_and_b32(s[3], 0xffff, ttmp[7]),
   s_lshr_b32(s[4], ttmp[7], 16),
-  s_load_b64(sdata=s[28:29], sbase=s[0:1], ioffset=0x0, soffset=RawImm(124)),
-  s_load_b64(sdata=s[32:33], sbase=s[0:1], ioffset=0x10, soffset=RawImm(124)),
-  s_load_b64(sdata=s[34:35], sbase=s[0:1], ioffset=0x8, soffset=RawImm(124)),
+  s_load_b64(sdata=s[28:29], sbase=s[0:1], ioffset=0x0, soffset=NULL),
+  s_load_b64(sdata=s[32:33], sbase=s[0:1], ioffset=0x10, soffset=NULL),
+  s_load_b64(sdata=s[34:35], sbase=s[0:1], ioffset=0x8, soffset=NULL),
   s_waitcnt(simm16=64519),
   s_mov_b32(s[20], 1),
   s_mov_b32(s[21], 0),
@@ -422,6 +422,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_add_co_u32(s[47], s[47], 2),
   s_cmp_eq_u32(s[12], 0),
   s_cbranch_scc1("skip_first_prefetch"),
+  # **** GLOBAL -> VGPR
   # Prefetch A matrix tiles (4 loads from rsrc=48)
   *[buffer_load_b128(v[222+i*4:226+i*4], v[128+i], 48) for i in range(4)],
   # Prefetch B matrix tiles (4 loads from rsrc=52)
@@ -476,6 +477,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_add_co_ci_u32(s[17], s[17], s[69]),
   s_and_b32(s[68], s[46], 0x3fff),
   s_cmp_eq_u32(s[68], 1),
+  # **** VGPR -> LDS
   # Zero initialize accumulators v[0:127]
   *[v_mov_b32_e32(v[i], 0) for i in range(128)],
   s_wait_loadcnt(0x0),
@@ -497,6 +499,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_wait_dscnt(0x0),
   barrier_signal(),
   s_barrier_wait(0xffff),
+  # **** LDS -> VGPR
   # Load A tile from LDS: 8x b64 loads
   *[ds_load_b64(v[156+i*2:158+i*2], v[138], offset1=i) for i in range(8)],
   # Load B tile from LDS: 4x b128 loads
@@ -508,6 +511,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_nop(0),
   "main_loop:",
   s_wait_dscnt(0x3),
+  # **** VPGR -> WMMA layout
   v_perm_b32(v[140], v[158], v[156], s[66]),
   v_perm_b32(v[141], v[162], v[160], s[66]),
   v_perm_b32(v[142], v[166], v[164], s[66]),
@@ -872,7 +876,6 @@ def custom_gemm(N:int, dev:str) -> UOp:
   v_wmma_f32_16x16x16_f16(v[120:127], v[217:220], v[152:155], v[120:127]),
   s_load_b256(sdata=s[48:55], sbase=s[0:1], ioffset=0x58, soffset=RawImm(124)),
   s_load_b32(sdata=s[56], sbase=s[0:1], ioffset=0x78, soffset=RawImm(124)),
-  # calculate address
   v_lshrrev_b32_e32(v[132], 5, v[254]),
   v_lshrrev_b32_e32(v[133], 1, v[132]),
   v_mul_lo_u32(v[133], 16, v[133]),
@@ -889,34 +892,20 @@ def custom_gemm(N:int, dev:str) -> UOp:
   v_add_lshl_u32(v[128], v[133], v[128], 2),
   v_add_nc_u32_e32(v[128], s[8], v[128]),
   v_add_lshl_u32(v[137], v[131], v[128], 1),
-  barrier_signal(),
-  s_barrier_wait(0xffff),
   ]
-  # final stores
-  ptr, tmpv = 16, 140
-  vaddr = v[137]
+  # VGPR -> GLOBAL store
+  insts += [s_wait_dscnt(0x0)]
+  saddr, tmpv, vaddr = 16, 140, v[137]
   bases = (0, 32, 64, 96)
   row_pairs = ((0, 1), (2, 3), (4, 5), (6, 7))
-  first = True
-  for a, b in row_pairs:
-    insts += [s_nop(0), s_wait_dscnt(0x0)]
-    # even row then odd row, for each base
-    for r in (a, b):
-      for base in bases:
-        # advance the ptr SGPR
-        if not first: insts += [s_add_co_u32(s[ptr], s[ptr], N << 1), s_add_co_ci_u32(s[ptr+1], s[ptr+1], 0)]
-        first = False
-        # pack 4 fp16s
-        acc4 = [v[base+r], v[base+r+8], v[base+r+16], v[base+r+24]]
-        insts += [
-        v_cvt_f16_f32_e64(acc4[0], acc4[0]),
-        v_cvt_f16_f32_e64(acc4[1], acc4[1]),
-        v_pack_b32_f16(v[tmpv+0], acc4[0], acc4[1]),
-        v_cvt_f16_f32_e64(acc4[2], acc4[2]),
-        v_cvt_f16_f32_e64(acc4[3], acc4[3]),
-        v_pack_b32_f16(v[tmpv+1], acc4[2], acc4[3]),]
-        insts.append(buffer_store_b64(v[tmpv:tmpv+1], vaddr, ptr))
-  insts.append(s_endpgm())
+  store_seq = [base+r for a, b in row_pairs for r in (a, b) for base in bases]
+  def pack_f16(vdst, a, b): return [v_cvt_f16_f32_e64(a, a), v_cvt_f16_f32_e64(b, b), v_pack_b32_f16(vdst, a, b)]
+  for i,base in enumerate(store_seq):
+    if i > 0: insts += [s_add_co_u32(s[saddr], s[saddr], N << 1), s_add_co_ci_u32(s[saddr+1], s[saddr+1], 0)]
+    insts += pack_f16(v[tmpv], v[base], v[base+8])
+    insts += pack_f16(v[tmpv+1], v[base+16], v[base+24])
+    insts += [buffer_store_b64(v[tmpv:tmpv+1], vaddr, saddr)]
+  insts += [s_endpgm()]
   sink = UOp.sink(A, B, C, lidx, gidx, arg=KernelInfo(name="gemm"))
   src = (pathlib.Path(__file__).parent/"template.s").read_text()
   src = src.replace("INSTRUCTIONS", "\n".join([i if isinstance(i, str) else f"\t{i.disasm()}" for i in insts]))
