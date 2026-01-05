@@ -34,12 +34,12 @@ WAIT_VMEM = 1015     # wait for VMEM only (vm_cnt=0, lgkm_cnt=63)
 # =============================================================================
 # Named register assignments (VGPRs) - COMPACT LAYOUT
 # =============================================================================
-V_LANE_ID_MOD8 = 118      # lane_id & 7 (column within 8-wide tile chunk)
+V_LANE_ID_MOD8 = 214      # lane_id & 7 (column within 8-wide tile chunk)
 V_OUTPUT_ROW = 119        # output row coordinate
 V_LANE_MOD8_X4 = 134      # V_LANE_ID_MOD8 << 2 (byte offset)
 V_LANE_DIV8_X4 = 135      # (lane_id >> 3) << 2
 V_ADDR_HI_ZERO = 136      # always 0 (for 64-bit address high bits)
-V_LDS_A_BASE = 125        # LDS A-tile base address for inner loop (in ACC_RESERVED gap)
+V_LDS_A_BASE = 133        # LDS A-tile base address for inner loop (in ACC_RESERVED gap)
 V_LDS_B_BASE = 130        # LDS B-tile base address for inner loop (in ACC_RESERVED gap)
 V_GLOBAL_A_ADDR = 119     # global memory A prefetch address (reuses V_OUTPUT_ROW slot during main loop)
 V_GLOBAL_B_ADDR = 154     # global memory B prefetch address
@@ -81,15 +81,15 @@ ACC_GRID = [
   [ 15, 14, 12, 10,   47, 46, 44, 42,   79, 78, 76, 74,  111,110,108,106],  # a3
   [ 21, 19, 25, 24,   53, 51, 57, 56,   85, 83, 89, 88,  117,115,121,120],  # a4
   [ 20, 18, 23, 22,   52, 50, 55, 54,   84, 82, 87, 86,  116,114,123,122],  # a5
-  [133,128, 29, 27,   33, 32, 61, 59,   65, 64, 93, 91,   97, 96,129,127],  # a6
-  [131,214, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7
+  [125,128, 29, 27,   33, 32, 61, 59,   65, 64, 93, 91,   97, 96,129,127],  # a6
+  [131,118, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7
 ]
 
 # Derived: all 128 accumulator registers to zero before loop
 ACC_REGS = sorted(set(acc for row in ACC_GRID for acc in row))
 
 # Reserved registers in the accumulator range (not used for accumulators)
-ACC_RESERVED = {118, 119, 125, 130}
+ACC_RESERVED = {119, 130}
 
 # Optimized (a_pair, b_pair) iteration order for better GPU scheduling
 # Interleaves A and B pairs to maximize instruction-level parallelism
@@ -167,9 +167,9 @@ OUT_REGS = [124] + OUT_REGS
 # DATA regs receive contiguous global prefetch, then write to LDS
 # TILE regs receive scattered LDS loads (ds_load_b64 pairs), then feed FMACs
 # These are SEPARATE - DATA lives during prefetch/store, TILE lives during inner loop
-V_LDS_A_ADDR = [153]                          # single base register for A stores (use +512 offsets)
+V_LDS_A_ADDR = 153                            # single base register for A stores (use +512 offsets)
 V_LDS_A_DATA = list(range(155, 163))          # 8 data registers for A prefetch (v155-162)
-V_LDS_B_ADDR = 145                             # single base register for B stores (use 16-bit offsets)
+V_LDS_B_ADDR = 145                            # single base register for B stores (use 16-bit offsets)
 V_LDS_B_DATA = list(range(163, 171))          # 8 data registers for B prefetch (v163-170)
 
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
@@ -423,9 +423,8 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_and_b32_e32(v[3], ADDR_MASK, v[3]))
   k.emit(v_sub_nc_u32_e32(v[3], v[1], v[3]))
   k.emit(v_lshl_or_b32(v[V_LDS_B_BASE], v[V_LANE_ID_MOD8], 4, LDS_BASE_OFFSET))
-  k.emit(v_lshl_add_u32(v[V_LDS_A_ADDR[0]], v[3], 2, LDS_BASE_OFFSET))
+  k.emit(v_lshl_add_u32(v[V_LDS_A_ADDR], v[3], 2, LDS_BASE_OFFSET))
   k.emit(v_lshlrev_b32_e32(v[3], 2, v[0]))
-  # V_LDS_A_ADDR[1-7] eliminated - use offset-based addressing from V_LDS_A_ADDR[0]
   k.emit(v_and_or_b32(v[V_LDS_A_BASE], 0x180, v[3], v[2]))
 
   for r in ACC_REGS: k.emit(v_mov_b32_e32(v[r], 0))  # zero all 128 accumulator registers
@@ -496,9 +495,9 @@ def build_kernel(arch='gfx1100'):
 
   # Store prefetched data to LDS
   # NOTE: Naming is confusing - V_LDS_B_DATA holds A matrix data, V_LDS_A_DATA holds B matrix data
-  # A tile (stride64 stores via V_LDS_A_ADDR[0]=v153): from V_LDS_B_DATA (v163-170)
+  # A tile (stride64 stores via V_LDS_A_ADDR=v153): from V_LDS_B_DATA (v163-170)
   for i in range(4):
-    k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR[0]], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
+    k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
   # B tile (single base with 16-bit offsets): from V_LDS_B_DATA (v163-170)
   for i in range(8):
     offset = i * 64
