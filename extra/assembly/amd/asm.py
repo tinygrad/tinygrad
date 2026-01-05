@@ -543,8 +543,14 @@ SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b128', 's_load_b256', 's_load_b5
             's_atc_probe', 's_atc_probe_buffer'}
 SPEC_DSL = {'vcc_lo': 'VCC_LO', 'vcc_hi': 'VCC_HI', 'vcc': 'VCC_LO', 'null': 'NULL', 'off': 'OFF', 'm0': 'M0',
             'exec_lo': 'EXEC_LO', 'exec_hi': 'EXEC_HI', 'exec': 'EXEC_LO', 'scc': 'SCC', 'src_scc': 'SCC'}
+SPEC_DSL_CDNA = {'vcc_lo': 'VCC_LO', 'vcc_hi': 'VCC_HI', 'vcc': 'VCC_LO', 'null': 'NULL', 'off': 'OFF', 'm0': 'M0',
+                 'exec_lo': 'EXEC_LO', 'exec_hi': 'EXEC_HI', 'exec': 'EXEC_LO', 'scc': 'SCC', 'src_scc': 'SRC_SCC',
+                 'flat_scratch_lo': 'FLAT_SCRATCH_LO', 'flat_scratch_hi': 'FLAT_SCRATCH_HI', 'flat_scratch': 'FLAT_SCRATCH',
+                 'xnack_mask_lo': 'XNACK_MASK_LO', 'xnack_mask_hi': 'XNACK_MASK_HI', 'xnack_mask': 'XNACK_MASK',
+                 'src_vccz': 'SRC_VCCZ', 'src_execz': 'SRC_EXECZ', 'vccz': 'SRC_VCCZ', 'execz': 'SRC_EXECZ',
+                 'src_lds_direct': 'SRC_LDS_DIRECT', 'lds_direct': 'SRC_LDS_DIRECT'}
 
-def _op2dsl(op: str) -> str:
+def _op2dsl(op: str, arch: str = "rdna3") -> str:
   op = op.strip()
   neg = op.startswith('-') and not (op[1:2].isdigit() or (len(op) > 2 and op[1] == '0' and op[2] in 'xX'))
   if neg: op = op[1:]
@@ -553,8 +559,9 @@ def _op2dsl(op: str) -> str:
   hi = ".h" if op.endswith('.h') else ".l" if op.endswith('.l') else ""
   if hi: op = op[:-2]
   lo = op.lower()
+  spec_dsl = SPEC_DSL_CDNA if arch == "cdna" else SPEC_DSL
   def wrap(b): return f"{'-' if neg else ''}abs({b}){hi}" if abs_ else f"-{b}{hi}" if neg else f"{b}{hi}"
-  if lo in SPEC_DSL: return wrap(SPEC_DSL[lo])
+  if lo in spec_dsl: return wrap(spec_dsl[lo])
   if op in FLOATS: return wrap(op)
   rp = {'s': 's', 'v': 'v', 't': 'ttmp', 'ttmp': 'ttmp'}
   if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return wrap(f"{rp[m.group(1)]}[{m.group(2)}:{m.group(3)}]")
@@ -612,16 +619,31 @@ _ALIASES = {
   # More VOP3 aliases
   'v_fma_legacy_f32': 'v_fma_dx9_zero_f32',
 }
+# RDNA3-only aliases (should NOT be applied to CDNA)
+_RDNA3_ONLY_ALIASES = {'v_mul_legacy_f32', 'v_fmac_legacy_f32', 'v_fma_legacy_f32',
+  # SMEM: RDNA3 uses b32/b64, CDNA uses dword/dwordx2
+  's_load_dword', 's_load_dwordx2', 's_load_dwordx4', 's_load_dwordx8', 's_load_dwordx16',
+  's_buffer_load_dword', 's_buffer_load_dwordx2', 's_buffer_load_dwordx4', 's_buffer_load_dwordx8', 's_buffer_load_dwordx16'}
+# CDNA-specific aliases (GFX9 uses different names for some instructions)
+# CDNA-specific aliases - CDNA uses dword naming, not b32
+_CDNA_ALIASES = {
+  # VOP aliases (inverse of _CDNA_DISASM_ALIASES)
+  'v_cvt_pkrtz_f16_f32': 'v_cvt_pk_rtz_f16_f32',
+  'v_mul_legacy_f32': 'v_fmac_f64', 'v_mac_f32': 'v_dot2c_f32_bf16', 'v_madmk_f32': 'v_fmamk_f32', 'v_madak_f32': 'v_fmaak_f32',
+}
 
-def _apply_alias(text: str) -> str:
+def _apply_alias(text: str, arch: str = "rdna3") -> str:
   mn = text.split()[0].lower() if ' ' in text else text.lower().rstrip('_')
+  aliases = _CDNA_ALIASES if arch == "cdna" else _ALIASES
   # Try exact match first, then strip _e32/_e64 suffix
   for m in (mn, mn.removesuffix('_e32'), mn.removesuffix('_e64')):
-    if m in _ALIASES: return _ALIASES[m] + text[len(m):]
+    if m in aliases: return aliases[m] + text[len(m):]
+    # Also check common aliases, but skip RDNA3-only ones for CDNA
+    if m in _ALIASES and not (arch == "cdna" and m in _RDNA3_ONLY_ALIASES): return _ALIASES[m] + text[len(m):]
   return text
 
-def get_dsl(text: str) -> str:
-  text, kw = _apply_alias(text.strip()), []
+def get_dsl(text: str, arch: str = "rdna3") -> str:
+  text, kw = _apply_alias(text.strip(), arch), []
   # Extract modifiers
   for pat, val in [(r'\s+mul:2(?:\s|$)', 1), (r'\s+mul:4(?:\s|$)', 2), (r'\s+div:2(?:\s|$)', 3)]:
     if (m := _extract(text, pat))[0]: kw.append(f'omod={val}'); text = m[1]; break
@@ -644,12 +666,17 @@ def get_dsl(text: str) -> str:
   m, text = _extract(text, r'\s+format:(\d+)'); fmt_val = m.group(1) if m and not fmt_val else fmt_val
   m, text = _extract(text, r'\s+neg_lo:\[([^\]]+)\]'); neg_lo = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
   m, text = _extract(text, r'\s+neg_hi:\[([^\]]+)\]'); neg_hi = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+  m, text = _extract(text, r'\s+op_sel_hi:\[([^\]]+)\]'); opsel_hi = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+  m, text = _extract(text, r'\s+gds(?:\s|$)'); gds = 1 if m else None
+  m, text = _extract(text, r'\s+offset0:(\d+)'); offset0 = m.group(1) if m else None
+  m, text = _extract(text, r'\s+offset1:(\d+)'); offset1 = m.group(1) if m else None
+  m, text = _extract(text, r'\s+lds(?:\s|$)'); lds = 1 if m else None
   if waitexp: kw.append(f'waitexp={waitexp}')
 
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
   mn, op_str = parts[0].lower(), text[len(parts[0]):].strip()
-  ops, args = _parse_ops(op_str), [_op2dsl(o) for o in _parse_ops(op_str)]
+  ops, args = _parse_ops(op_str), [_op2dsl(o, arch) for o in _parse_ops(op_str)]
 
   # s_waitcnt
   if mn == 's_waitcnt':
@@ -661,11 +688,11 @@ def get_dsl(text: str) -> str:
       elif re.match(r'^0x[0-9a-f]+$|^\d+$', p): return f"s_waitcnt(simm16={int(p, 0)})"
     return f"s_waitcnt(simm16={waitcnt(vm, exp, lgkm)})"
 
-  # VOPD
+  # VOPD (RDNA3 only)
   if '::' in text:
     xp, yp = text.split('::')
     xps, yps = xp.strip().replace(',', ' ').split(), yp.strip().replace(',', ' ').split()
-    xo, yo = [_op2dsl(p) for p in xps[1:]], [_op2dsl(p) for p in yps[1:]]
+    xo, yo = [_op2dsl(p, arch) for p in xps[1:]], [_op2dsl(p, arch) for p in yps[1:]]
     vdx, sx0, vsx1 = xo[0], xo[1] if len(xo) > 1 else '0', xo[2] if len(xo) > 2 else 'v[0]'
     vdy, sy0, vsy1 = yo[0], yo[1] if len(yo) > 1 else '0', yo[2] if len(yo) > 2 else 'v[0]'
     lit = xo[3] if 'fmaak' in xps[0].lower() and len(xo) > 3 else yo[3] if 'fmaak' in yps[0].lower() and len(yo) > 3 else None
@@ -675,18 +702,41 @@ def get_dsl(text: str) -> str:
 
   # Special instructions
   if mn == 's_setreg_imm32_b32': raise ValueError(f"unsupported: {mn}")
+  # v_readfirstlane_b32 has SGPR dest but encoded in vdst field - use RawImm
+  if mn == 'v_readfirstlane_b32' and len(args) >= 2:
+    dst = ops[0].strip().lower()
+    if dst.startswith('s') and dst[1:].isdigit(): dst_val = int(dst[1:])
+    elif dst.startswith('ttmp') and dst[4:].isdigit(): dst_val = 108 + int(dst[4:])
+    else:
+      sgpr_map = {'vcc_lo': 106, 'vcc_hi': 107, 'm0': 124, 'exec_lo': 126, 'exec_hi': 127,
+                  'flat_scratch_lo': 102, 'flat_scratch_hi': 103, 'xnack_mask_lo': 104, 'xnack_mask_hi': 105}
+      dst_val = sgpr_map.get(dst, int(dst) if dst.isdigit() else 0)
+    return f"v_readfirstlane_b32_e32(vdst=RawImm({dst_val}), src0={args[1]})"
   if mn in ('s_setpc_b64', 's_rfe_b64'): return f"{mn}(ssrc0={args[0]})"
   if mn in ('s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'): return f"{mn}(sdst={args[0]}, ssrc0=RawImm({args[1].strip()}))"
   if mn == 's_version': return f"{mn}(simm16={args[0]})"
   if mn == 's_setreg_b32': return f"{mn}(simm16={args[0]}, sdst={args[1]})"
 
   # SMEM
-  if mn in SMEM_OPS:
+  if mn in SMEM_OPS or (arch == "cdna" and mn.startswith(('s_load_dword', 's_buffer_load_dword'))):
     gs, ds = ", glc=1" if glc else "", ", dlc=1" if dlc else ""
-    if len(ops) >= 3 and re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
-      return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(124){gs}{ds})"
-    if off_val and len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}{gs}{ds})"
-    if len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, soffset={args[2]}{gs}{ds})"
+    if arch == "cdna":
+      # CDNA SMEM encoding: imm=1 for immediate, soe=1 for sgpr+offset combo
+      if len(ops) >= 3 and re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
+        # Immediate offset only
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(0), imm=1{gs}{ds})"
+      if off_val and len(ops) >= 3:
+        # SGPR + immediate offset: soe=1, soffset=SGPR, offset=imm
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}, soe=1, imm=1{gs}{ds})"
+      if len(ops) >= 3:
+        # SGPR offset only: offset=SGPR index, soffset=0
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(0){gs}{ds})"
+    else:
+      # RDNA3 encoding
+      if len(ops) >= 3 and re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(124){gs}{ds})"
+      if off_val and len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}{gs}{ds})"
+      if len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, soffset={args[2]}{gs}{ds})"
 
   # Buffer (MUBUF/MTBUF) instructions
   if mn.startswith(('buffer_', 'tbuffer_')):
@@ -698,10 +748,20 @@ def get_dsl(text: str) -> str:
       else: fmt_num = BUF_FMT.get(fmt_val.replace(' ', '')) or _parse_buf_fmt_combo(fmt_val)
     # Handle special no-arg buffer ops
     if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}()"
-    # Build modifiers string
-    buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
-                        ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
+    # Build modifiers string - CDNA uses sc0/nt for glc/slc
+    if arch == "cdna":
+      buf_mods = "".join([f", offset={off_val}" if off_val else "", ", sc0=1" if glc else "", ", nt=1" if slc else "",
+                          ", offen=1" if offen else "", ", idxen=1" if idxen else "", ", lds=1" if lds else ""])
+    else:
+      buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
+                          ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
     if is_tbuf and fmt_num is not None: buf_mods = f", format={fmt_num}" + buf_mods
+    # Handle LDS mode: first operand is 'off' meaning no vdata, it goes to LDS
+    if len(ops) >= 1 and ops[0].strip().lower() == 'off':
+      # LDS mode: buffer_load_format_x off, srsrc, soffset -> no vdata, just vaddr=off
+      srsrc_val = args[1] if len(args) > 1 else "s[0:3]"
+      soff_val = args[2] if len(args) > 2 else "0"
+      return f"{mn}(vdata=v[0], vaddr=v[0], srsrc={srsrc_val}, soffset={soff_val}{buf_mods})"
     # Determine vaddr value (v[0] for 'off', actual register otherwise)
     vaddr_idx = 1
     if len(ops) > vaddr_idx and ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
@@ -713,14 +773,20 @@ def get_dsl(text: str) -> str:
     # soffset: integers are inline constants, don't wrap in RawImm
     return f"{mn}(vdata={args[0]}, vaddr={vaddr_val}, srsrc={srsrc_val}, soffset={soff_val}{buf_mods})"
 
-  # FLAT/GLOBAL/SCRATCH load/store/atomic - saddr needs RawImm(124) for off/null
-  def _saddr(a): return 'RawImm(124)' if a in ('OFF', 'NULL') else a
-  flat_mods = f"{f', offset={off_val}' if off_val else ''}{', glc=1' if glc else ''}{', slc=1' if slc else ''}{', dlc=1' if dlc else ''}"
+  # FLAT/GLOBAL/SCRATCH load/store/atomic - saddr needs RawImm for off/null
+  # CDNA: flat uses saddr=0 for off, RDNA: uses saddr=124 (NULL)
+  # CDNA: uses sc0/sc1 for glc/slc
+  saddr_off = 'RawImm(0)' if arch == "cdna" else 'RawImm(124)'
+  def _saddr(a): return saddr_off if a in ('OFF', 'NULL') else a
+  if arch == "cdna":
+    flat_mods = f"{f', offset={off_val}' if off_val else ''}{', sc0=1' if glc else ''}{', nt=1' if slc else ''}"
+  else:
+    flat_mods = f"{f', offset={off_val}' if off_val else ''}{', glc=1' if glc else ''}{', slc=1' if slc else ''}{', dlc=1' if dlc else ''}"
   for pre, flds in [('flat_load','vdst,addr,saddr'), ('global_load','vdst,addr,saddr'), ('scratch_load','vdst,addr,saddr'),
                     ('flat_store','addr,data,saddr'), ('global_store','addr,data,saddr'), ('scratch_store','addr,data,saddr')]:
     if mn.startswith(pre) and len(args) >= 2:
       f0, f1, f2 = flds.split(',')
-      return f"{mn}({f0}={args[0]}, {f1}={args[1]}{f', {f2}={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
+      return f"{mn}({f0}={args[0]}, {f1}={args[1]}{f', {f2}={_saddr(args[2])}' if len(args) >= 3 else f', saddr={saddr_off}'}{flat_mods})"
   for pre in ('flat_atomic', 'global_atomic', 'scratch_atomic'):
     if mn.startswith(pre):
       if glc and len(args) >= 3: return f"{mn}(vdst={args[0]}, addr={args[1]}, data={args[2]}{f', saddr={_saddr(args[3])}' if len(args) >= 4 else ', saddr=RawImm(124)'}{flat_mods})"
@@ -728,8 +794,14 @@ def get_dsl(text: str) -> str:
 
   # DS instructions
   if mn.startswith('ds_'):
-    off0, off1 = (str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)) if off_val else ("0", "0")
-    gds_s = ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
+    # Handle offset formats: offset:N (combined), offset0:N offset1:N (separate), or none
+    if offset0 is not None or offset1 is not None:
+      off0, off1 = offset0 or "0", offset1 or "0"
+    elif off_val:
+      off0, off1 = str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)
+    else:
+      off0, off1 = "0", "0"
+    gds_s = ", gds=1" if gds else ""
     off_kw = f", offset0={off0}, offset1={off1}{gds_s}"
     if mn == 'ds_nop' or mn in ('ds_gws_sema_v', 'ds_gws_sema_p', 'ds_gws_sema_release_all'): return f"{mn}({off_kw.lstrip(', ')})"
     if 'gws_' in mn: return f"{mn}(addr={args[0]}{off_kw})"
@@ -740,6 +812,7 @@ def get_dsl(text: str) -> str:
       if 'store' in mn and 'xchg' not in mn: return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
       return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
     if 'load' in mn: return f"{mn}(vdst={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'write2' in mn: return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
     if 'store' in mn and not _has(mn, 'cmp', 'xchg'):
       return f"{mn}(data0={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
     if 'swizzle' in mn or 'ordered_count' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
@@ -785,7 +858,7 @@ def get_dsl(text: str) -> str:
       if abs_: op = op[1:-1]
       if neg: inline_neg |= (1 << i)
       if abs_: inline_abs |= (1 << i)
-      clean_args.append(_op2dsl(op))
+      clean_args.append(_op2dsl(op, arch))
     args = clean_args + args[4:]
     if inline_neg: neg_lo = inline_neg
     if inline_abs: neg_hi = inline_abs
@@ -793,21 +866,67 @@ def get_dsl(text: str) -> str:
   all_kw = list(kw)
   if lit_s: all_kw.append(lit_s.lstrip(', '))
   if opsel is not None: all_kw.append(f'opsel={opsel}')
+  if opsel_hi is not None: all_kw.append(f'opsel_hi={opsel_hi & 3}'); all_kw.append(f'opsel_hi2={(opsel_hi >> 2) & 1}')
   if neg_lo is not None: all_kw.append(f'neg={neg_lo}')
   if neg_hi is not None: all_kw.append(f'neg_hi={neg_hi}')
   if 'bvh' in mn and 'intersect_ray' in mn: all_kw.extend(['dmask=15', 'unrm=1', 'r128=1'])
 
+  # For CDNA _e64 VOP instructions: use keyword args (VOP3 layout)
+  # Pattern: v_xxx_e64 dst, src0[, src1[, src2]] -> v_xxx(vdst=dst, src0=src0[, src1=src1[, src2=src2]])
+  # For v_nop_e64 (no operands), add _vop3=True marker to force VOP3 encoding
+  if fn.endswith('_e64') and fn.startswith('v_') and arch == "cdna":
+    fn_base = fn[:-4]  # strip _e64
+    vop3_args = ['_vop3=True']  # marker for asm() to force VOP3
+    if len(args) >= 1: vop3_args.append(f'vdst={args[0]}')
+    if len(args) >= 2: vop3_args.append(f'src0={args[1]}')
+    if len(args) >= 3: vop3_args.append(f'src1={args[2]}')
+    if len(args) >= 4: vop3_args.append(f'src2={args[3]}')
+    a_str = ', '.join(vop3_args + all_kw)
+    return f"{fn_base}({a_str})"
+
   a_str, kw_str = ', '.join(args), ', '.join(all_kw)
   return f"{fn}({a_str}, {kw_str})" if kw_str and a_str else f"{fn}({kw_str})" if kw_str else f"{fn}({a_str})"
 
-def asm(text: str) -> Inst:
-  dsl = get_dsl(text)
-  ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
-  ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
-             'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF})
-  try: return eval(dsl, ns)
+def asm(text: str, arch: str = "rdna3") -> Inst:
+  dsl = get_dsl(text, arch)
+  if arch == "cdna":
+    from extra.assembly.amd.autogen.cdna import ins as cdna_ins
+    ns = {n: getattr(cdna_ins, n) for n in dir(cdna_ins) if not n.startswith('_')}
+    # CDNA special registers: m0=124, flat_scratch=102-103, xnack_mask=104-105, no NULL (use m0 for off)
+    ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
+               'VCC_LO': RawImm(106), 'VCC_HI': RawImm(107), 'VCC': RawImm(106), 'EXEC_LO': RawImm(126), 'EXEC_HI': RawImm(127), 'EXEC': RawImm(126),
+               'SCC': RawImm(253), 'M0': RawImm(124), 'NULL': RawImm(124), 'OFF': RawImm(124),
+               'FLAT_SCRATCH_LO': RawImm(102), 'FLAT_SCRATCH_HI': RawImm(103), 'FLAT_SCRATCH': RawImm(102),
+               'XNACK_MASK_LO': RawImm(104), 'XNACK_MASK_HI': RawImm(105), 'XNACK_MASK': RawImm(104),
+               'SRC_VCCZ': RawImm(251), 'SRC_EXECZ': RawImm(252), 'SRC_SCC': RawImm(253), 'SRC_LDS_DIRECT': RawImm(254)})
+  else:
+    ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
+    ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
+               'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF})
+  try:
+    # For CDNA, prefer _e32 variants for VOP1/VOP2 when available (bare names map to VOP3)
+    # But skip if:
+    #   - already has _e64 suffix (explicit VOP3 request)
+    #   - uses keyword args like vdst=/src0= (VOP3 layout from _e64 instructions)
+    #   - has _vop3=True marker (from _e64 instructions without operands)
+    uses_vop3_kwargs = 'vdst=' in dsl or 'src0=' in dsl or '_vop3=True' in dsl
+    if arch == "cdna" and (m := re.match(r'^(v_\w+)(\(.*\))$', dsl)) and not m.group(1).endswith('_e64') and not uses_vop3_kwargs:
+      e32_name = f"{m.group(1)}_e32"
+      if e32_name in ns: return eval(f"{e32_name}{m.group(2)}", ns)
+    # For CDNA, _e64 suffix maps to base name (VOP3)
+    if arch == "cdna" and (m := re.match(r'^(v_\w+)_e64(\(.*\))$', dsl)):
+      base_name = m.group(1)
+      if base_name in ns: return eval(f"{base_name}{m.group(2)}", ns)
+    # Strip _vop3=True marker before eval
+    eval_dsl = dsl.replace('_vop3=True, ', '').replace('_vop3=True', '')
+    return eval(eval_dsl, ns)
   except NameError:
-    if m := re.match(r'^(v_\w+)(\(.*\))$', dsl): return eval(f"{m.group(1)}_e32{m.group(2)}", ns)
+    # For CDNA, try stripping _e64 to get VOP3 base name
+    if arch == "cdna" and (m := re.match(r'^(v_\w+)_e64(\(.*\))$', dsl)):
+      return eval(f"{m.group(1)}{m.group(2)}", ns)
+    # Don't try _e32 if already _e64
+    if (m := re.match(r'^(v_\w+)(\(.*\))$', dsl)) and not m.group(1).endswith('_e64'):
+      return eval(f"{m.group(1)}_e32{m.group(2)}", ns)
     raise
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -175,28 +175,28 @@ class VOP2(Inst32):
 
 class VOP3A(Inst64):
   encoding = bits[31:26] == 0b110100
-  vdst:VGPRField = bits[7:0]
-  abs = bits[10:8]
-  opsel = bits[14:11]
-  clmp = bits[15]
   op:Annotated[BitField, VOP3AOp] = bits[25:16]
+  vdst:VGPRField = bits[7:0]
   src0:Src = bits[40:32]
   src1:Src = bits[49:41]
   src2:Src = bits[58:50]
   omod = bits[60:59]
   neg = bits[63:61]
+  abs = bits[10:8]
+  clmp = bits[15]
+  opsel = bits[14:11]
 
 class VOP3B(Inst64):
   encoding = bits[31:26] == 0b110100
+  op:Annotated[BitField, VOP3BOp] = bits[25:16]
   vdst:VGPRField = bits[7:0]
   sdst:SGPRField = bits[14:8]
-  clmp = bits[15]
-  op:Annotated[BitField, VOP3BOp] = bits[25:16]
   src0:Src = bits[40:32]
   src1:Src = bits[49:41]
   src2:Src = bits[58:50]
   omod = bits[60:59]
   neg = bits[63:61]
+  clmp = bits[15]
 
 class VOP3P(Inst64):
   encoding = bits[31:23] == 0b110100111

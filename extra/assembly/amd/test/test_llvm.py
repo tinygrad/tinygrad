@@ -96,6 +96,7 @@ for f in RDNA_FILES:
   setattr(TestLLVM, f"test_rdna3_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "disasm"))
 for f in CDNA_FILES:
   setattr(TestLLVM, f"test_cdna_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "roundtrip"))
+  setattr(TestLLVM, f"test_cdna_asm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "asm"))
   setattr(TestLLVM, f"test_cdna_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "disasm"))
 
 if __name__ == "__main__":
