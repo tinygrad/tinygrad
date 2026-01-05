@@ -167,7 +167,6 @@ backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*') # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/aionnxml/op_tree_ensemble.py#L121
 
 # TODO: not yet implemented
-backend_test.exclude('test_tensorscatter_*')
 backend_test.exclude('test_l1normalization_*')
 backend_test.exclude('test_l2normalization_*')
 backend_test.exclude('test_lpnormalization_*')
