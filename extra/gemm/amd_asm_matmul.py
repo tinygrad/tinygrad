@@ -174,9 +174,13 @@ V_LDS_B_ADDR = list(range(145, 153))          # 8 address registers for B stores
 V_LDS_B_DATA = list(range(173, 181))          # 8 data registers for B prefetch (v173-180)
 
 # Derived: interleaved A/B store pairs for LDS writes
-LDS_STORE_PAIRS = [(addr, data) for a_addr, a_data, b_addr, b_data
-                   in zip(V_LDS_A_ADDR, V_LDS_A_DATA, V_LDS_B_ADDR, V_LDS_B_DATA)
-                   for addr, data in [(a_addr, a_data), (b_addr, b_data)]]
+# A stores use V_LDS_A_ADDR[0] + i*512 offset, B stores use precomputed addresses
+# Format: (addr_vreg, data_vreg, offset0, offset1)
+LDS_STORE_PAIRS = []
+for i, (a_data, b_addr, b_data) in enumerate(zip(V_LDS_A_DATA, V_LDS_B_ADDR, V_LDS_B_DATA)):
+  a_off = i * 512  # A stores are strided by 512
+  LDS_STORE_PAIRS.append((V_LDS_A_ADDR[0], a_data, a_off & 0xFF, a_off >> 8))  # A store with offset
+  LDS_STORE_PAIRS.append((b_addr, b_data, 0, 0))  # B store with no offset
 
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
 # Prefetch into DATA regs (v171-182, spanning A_DATA[4:8] and B_DATA[0:8])
@@ -554,8 +558,8 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_cbranch_vccnz(simm16=0)); k.branch_to('LOOP_INC')
 
   # Store prefetched data to LDS
-  for addr, data in LDS_STORE_PAIRS:
-    k.emit(ds_store_b32(addr=v[addr], data0=v[data], offset0=0, offset1=0))
+  for addr, data, off0, off1 in LDS_STORE_PAIRS:
+    k.emit(ds_store_b32(addr=v[addr], data0=v[data], offset0=off0, offset1=off1))
 
   k.waitcnt(lgkm=0)
   k.barrier()
