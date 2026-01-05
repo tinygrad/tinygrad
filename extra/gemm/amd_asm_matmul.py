@@ -41,15 +41,17 @@ V_OUTPUT_ROW = 119        # output row coordinate
 V_LANE_MOD8_X4 = 134      # V_LANE_ID_MOD8 << 2 (byte offset)
 V_LANE_DIV8_X4 = 135      # (lane_id >> 3) << 2
 V_ADDR_HI_ZERO = 136      # always 0 (for 64-bit address high bits)
-V_LDS_A_BASE = 154        # LDS A-tile base address for inner loop
-V_LDS_B_BASE = 155        # LDS B-tile base address for inner loop
-V_GLOBAL_A_ADDR = 156     # global memory A prefetch address
-V_GLOBAL_B_ADDR = 157     # global memory B prefetch address
+V_LDS_A_BASE = 125        # LDS A-tile base address for inner loop (in ACC_RESERVED gap)
+V_LDS_B_BASE = 130        # LDS B-tile base address for inner loop (in ACC_RESERVED gap)
+V_GLOBAL_A_ADDR = 119     # global memory A prefetch address (reuses V_OUTPUT_ROW slot during main loop)
+V_GLOBAL_B_ADDR = 154     # global memory B prefetch address
 
 # LDS tile register destinations - SEPARATE from DATA to avoid overlap
-# DATA regs (v158-173) receive global prefetch, TILE regs (v174-197) receive LDS loads
-V_A_TILE_REGS = [174, 176, 178, 180]  # A tile: 4 pairs (v174-181)
-V_B_TILE_REGS = [182, 184, 186, 188, 190, 192, 194, 196]  # B tile: 8 pairs (v182-197)
+# DATA regs (v155-170) receive global prefetch
+# A TILE reuses ROW_REGS (v137-144) which are free after prologue
+# B TILE at v171-186
+V_A_TILE_REGS = [137, 139, 141, 143]  # A tile: 4 pairs (v137-144, reusing ROW_REGS)
+V_B_TILE_REGS = [171, 173, 175, 177, 179, 181, 183, 185]  # B tile: 8 pairs (v171-186)
 
 # =============================================================================
 # Named register assignments (SGPRs)
@@ -168,9 +170,9 @@ OUT_REGS = [124] + OUT_REGS
 # TILE regs receive scattered LDS loads (ds_load_b64 pairs), then feed FMACs
 # These are SEPARATE - DATA lives during prefetch/store, TILE lives during inner loop
 V_LDS_A_ADDR = [153]                          # single base register for A stores (use +512 offsets)
-V_LDS_A_DATA = list(range(158, 166))          # 8 data registers for A prefetch (v158-165)
+V_LDS_A_DATA = list(range(155, 163))          # 8 data registers for A prefetch (v155-162)
 V_LDS_B_ADDR = list(range(145, 153))          # 8 address registers for B stores
-V_LDS_B_DATA = list(range(166, 174))          # 8 data registers for B prefetch (v166-173)
+V_LDS_B_DATA = list(range(163, 171))          # 8 data registers for B prefetch (v163-170)
 
 # Derived: interleaved A/B store pairs for LDS writes
 # A stores use V_LDS_A_ADDR[0] + i*512 offset, B stores use precomputed addresses
@@ -257,7 +259,7 @@ class Kernel:
       ('user_sgpr_kernarg_segment_ptr', 1), ('user_sgpr_dispatch_id', 0), ('user_sgpr_private_segment_size', 0),
       ('wavefront_size32', 1), ('uses_dynamic_stack', 0), ('enable_private_segment', 0),
       ('system_sgpr_workgroup_id_x', 1), ('system_sgpr_workgroup_id_y', 1), ('system_sgpr_workgroup_id_z', 0),
-      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 198),
+      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 187),
       ('next_free_sgpr', 16), ('float_round_mode_32', 0), ('float_round_mode_16_64', 0),
       ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3), ('dx10_clamp', 1), ('ieee_mode', 1),
       ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
@@ -275,7 +277,7 @@ class Kernel:
       f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8',
       '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
       '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
-      '    .vgpr_count: 198', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
+      '    .vgpr_count: 187', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
       'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
 
 
