@@ -748,7 +748,6 @@ async function main() {
   if (ckey in cache) {
     ret = cache[ckey];
   }
-  // ** Text view
   if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     if (ret.steps?.length > 0) {
@@ -760,15 +759,23 @@ async function main() {
       appendSteps(el.ctx, state.currentCtx, ctx.steps);
       return setState({ currentStep:state.currentStep+1, expandSteps:true });
     }
-    // cycles on the x axis
+    // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
       return renderProfiler(ckey, "clk", opts);
     }
-    displaySelection("#custom");
     metadata.innerHTML = "";
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
+        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
+      })).node());
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
+    });
+    // graph render
+    if (ret.data != null) return renderDag(ret, { recenter:true });
+    // table / plaintext render
+    displaySelection("#custom");
     const root = d3.create("div").classed("raw-text", true);
-    // detailed assembly view
     function renderTable(root, ret) {
       const table = root.append("table");
       const thead = table.append("thead");
@@ -797,14 +804,7 @@ async function main() {
       return table;
     }
     if (ret.cols != null) renderTable(root, ret);
-    else if (ret.data != null) renderDag(ret, { recenter:true });
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
-    ret.metadata?.forEach(m => {
-      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
-        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
-      })).node());
-      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
-    });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** Graph view
