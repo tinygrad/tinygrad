@@ -1171,6 +1171,8 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_einsum(self):
+    # scalar
+    helper_test_op([()], lambda a: torch.einsum('->', a), lambda a: Tensor.einsum('->', a))
     # matrix transpose
     helper_test_op([(10,10)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
     helper_test_op([(10,10)], lambda a: torch.einsum('ij -> ji', a), lambda a: Tensor.einsum('ij -> ji', a))
@@ -1238,6 +1240,18 @@ class TestOps(unittest.TestCase):
     # multiple ellipsis must broadcast together
     self.helper_test_exception([(2, 3, 4), (2, 3, 4)], lambda a, b: torch.einsum('i...j,ji...->...', [a, b]),
                 lambda a, b: Tensor.einsum('i...j,ji...->...', [a, b]), expected=RuntimeError)
+
+  def test_einsum_trace(self):
+    # inner product
+    helper_test_op([(5,), (5,)], lambda a, b: torch.einsum('i,i', a, b), lambda a, b: Tensor.einsum('i,i', a, b))
+    # simple diagonal
+    helper_test_op([(4, 4)], lambda a: torch.einsum('ii->i', a), lambda a: Tensor.einsum('ii->i', a))
+    # trace (sum of diagonal)
+    helper_test_op([(4, 4)], lambda a: torch.einsum('ii->', a), lambda a: Tensor.einsum('ii->', a))
+    # batch diagonal
+    helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...i', a), lambda a: Tensor.einsum('...ii->...i', a))
+    # batch trace
+    helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...', a), lambda a: Tensor.einsum('...ii->...', a))
 
   def test_einsum_shape_check(self):
     self.helper_test_exception([(3,8,10,5), (11,5,13,16,8)], lambda a, b: torch.einsum('pqrs,tuqvr->pstuv', [a, b]),

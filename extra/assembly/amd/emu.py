@@ -291,14 +291,16 @@ def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
   extra_kwargs = {'opsel': opsel, 'opsel_hi': inst.opsel_hi | (inst.opsel_hi2 << 2)} if isinstance(inst, VOP3P) and 'FMA_MIX' in inst.op_name else {}
   result = inst._fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, inst._literal, st.vgpr, src0_idx, vdst, **extra_kwargs)
 
+  # Check if this is a VOPC instruction (either standalone VOPC or VOP3 with VOPC opcode)
+  is_vopc = isinstance(inst.op, VOPCOp) or (isinstance(inst, VOP3) and inst.op.value < 256)
   if 'VCC' in result:
     if isinstance(inst, VOP3SD): st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
     else: st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['VCC'] >> lane) & 1)
   if 'EXEC' in result:
     st.pend_sgpr_lane(EXEC_LO, lane, (result['EXEC'] >> lane) & 1)
-  elif isinstance(inst.op, VOPCOp):
+  elif is_vopc:
     st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)
-  if not isinstance(inst.op, VOPCOp):
+  if not is_vopc:
     d0_val = result['D0']
     if inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
     elif not isinstance(inst, VOP3P) and inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
