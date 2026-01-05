@@ -31,9 +31,6 @@ WAIT_LGKM = 64519    # wait for LDS/GDS/KMEM (lgkm_cnt=0)
 WAIT_ALL = 0         # wait for everything
 WAIT_VMEM = 1015     # wait for VMEM only (vm_cnt=0, lgkm_cnt=63)
 
-# Float constants as hex
-F32_ONE = 0x3F800000  # 1.0f
-
 # =============================================================================
 # Named register assignments (VGPRs) - COMPACT LAYOUT
 # =============================================================================
@@ -61,7 +58,6 @@ S_OUT_PTR = (0, 1)        # output C matrix base pointer
 S_TILE_X = 2              # workgroup_x << 7
 S_TILE_Y = 3              # workgroup_y << 7
 S_DIM_N = 4               # matrix dimension N
-S_ALPHA = 5               # alpha scalar (1.0f = 0x3F800000)
 S_LOOP_BOUND = 7          # K-8 (loop termination bound)
 S_A_PTR = (8, 9)          # A matrix base pointer
 S_B_PTR = (10, 11)        # B matrix base pointer
@@ -281,7 +277,6 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_load_b128(sdata=s[20:23], sbase=s[0:1], offset=0x0, soffset=RawImm(124)))
   k.emit(s_load_b64(sdata=s[16:17], sbase=s[0:1], offset=0x10, soffset=RawImm(124)))
   k.emit(s_mov_b32(s[S_DIM_N], MATRIX_DIM))
-  k.emit(s_mov_b32(s[S_ALPHA], F32_ONE))
   k.emit(s_mov_b32(s[S_LOOP_CTR], 0))  # used by LDS swizzle, always 0 for valid workgroups
   k.emit(s_lshl_b32(s[S_TILE_X], s[S_WORKGROUP_X], 7))
   k.emit(s_lshl_b32(s[S_TILE_Y], s[S_WORKGROUP_Y], 7))
@@ -551,9 +546,9 @@ def build_kernel(arch='gfx1100'):
     tmp = max(srcs) + 5
     while any(r in epilogue_reserved for r in range(tmp, tmp + 4)): tmp += 1
 
-    # Scale by alpha
+    # Copy values to temp regs for output (alpha=1.0 hardcoded, so just move)
     for j, src in enumerate(srcs):
-      k.emit(v_mul_f32_e32(v[tmp + j], s[S_ALPHA], v[src]))
+      k.emit(v_mov_b32_e32(v[tmp + j], v[src]))
 
     # Compute output address
     if row_in_group == 0:  # first row: compute base address for this column group
@@ -570,7 +565,6 @@ def build_kernel(arch='gfx1100'):
 
     k.emit(global_store_b128(addr=v[0:1], data=v[tmp:tmp+3], saddr=RawImm(124)))
 
-  k.emit(s_nop(0))
   k.emit(s_sendmsg(simm16=3))
   k.emit(s_endpgm())
 
