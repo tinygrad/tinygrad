@@ -2,8 +2,8 @@ import unittest
 from extra.assembly.amd.pdf2 import extract, extract_tables, generate_enums, PDF_URLS
 
 EXPECTED = {
-  "rdna3": {"pages": 655, "tables": 115, "header_page": 2, "header_text": "RDNA3.5", "sop2_table": 65, "sop2_page": 156, "enums": 20, "sop2_ops": 66, "sop2_first": "S_ADD_U32"},
-  "rdna4": {"pages": 711, "tables": 125, "header_page": 2, "header_text": "RDNA4", "sop2_table": 74, "sop2_page": 175, "enums": 21, "sop2_ops": 74, "sop2_first": "S_ADD_CO_U32"},
+  "rdna3": {"pages": 655, "tables": 115, "header_page": 2, "header_text": "RDNA3.5", "sop2_table": 65, "sop2_page": 156, "enums": 21, "sop2_ops": 67, "sop2_first": "S_ADD_U32"},
+  "rdna4": {"pages": 711, "tables": 125, "header_page": 2, "header_text": "RDNA4", "sop2_table": 74, "sop2_page": 175, "enums": 22, "sop2_ops": 74, "sop2_first": "S_ADD_CO_U32"},
   "cdna":  {"pages": 610, "tables": 104, "header_page": 2, "header_text": "CDNA4", "sop2_table": 65, "sop2_page": 568, "enums": 18, "sop2_ops": 52, "sop2_first": "S_ADD_U32"},
 }
 
