@@ -171,9 +171,10 @@ backend_test.exclude('test_tensorscatter_*')
 backend_test.exclude('test_l1normalization_*')
 backend_test.exclude('test_l2normalization_*')
 backend_test.exclude('test_lpnormalization_*')
-backend_test.exclude('test_mod_mixed_sign_float16_cpu')
-backend_test.exclude('test_attention_3d_*')
-backend_test.exclude('test_attention_4d_*')
+backend_test.exclude('test_attention_4d_diff_heads_mask4d_padded_kv_cpu')  # needs nonpad_kv_seqlen handling
+backend_test.exclude('test_attention_4d_fp16_expanded_cpu')  # fp16 numerical issues
+backend_test.exclude('test_attention_4d_gqa_with_past_and_present_fp16_cpu')  # fp16 numerical issues
+backend_test.exclude('test_attention_4d_gqa_with_past_and_present_fp16_expanded_cpu')  # fp16 numerical issues
 
 
 # rest of the failing tests
