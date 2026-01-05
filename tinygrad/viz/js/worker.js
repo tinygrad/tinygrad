@@ -13,7 +13,7 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = (g, { blocks, paths, pc_table, runtime_trace, colors }) => {
+const layoutCfg = (g, { blocks, paths, pc_table, hit_count, colors }) => {
   g.setGraph({ rankdir:"TD", font:"monospace" });
   ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
@@ -21,19 +21,13 @@ const layoutCfg = (g, { blocks, paths, pc_table, runtime_trace, colors }) => {
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
-      let text = pc_table[m][0];
-      if (runtime_trace != null) {
-        const cnt = runtime_trace[m]?.hit_count ?? 0;
-        if (minColor == null || cnt < minColor) minColor = cnt;
-        if (maxColor == null || cnt > maxColor) maxColor = cnt;
-        // space for some kind of heatmap color scale here
-        label.push([{st:text + ` Hits: ${cnt}`, color:cnt }]);
-        text += ` HITS: ${cnt}`
-      } else {
-        // static syntax coloring
-        const [inst, ...operands] = text.split(" ");
-        label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]);
-      }
+      const text = pc_table[m][0];
+      if (hit_count != null) {
+        const num = hit_count[m] || 0;
+        if (minColor == null || num < minColor) minColor = num;
+        if (maxColor == null || num > maxColor) maxColor = num;
+        label.push([{st:text, color:num}]);
+      } else { const [inst, ...operands] = text.split(" "); label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]); }
       width = Math.max(width, ctx.measureText(text).width);
       height += LINE_HEIGHT;
     }

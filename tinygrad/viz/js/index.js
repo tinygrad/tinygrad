@@ -820,7 +820,6 @@ async function main() {
     if (ret.cols != null) renderTable(root, ret);
     if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     document.querySelector("#custom").replaceChildren(root.node());
-    console.log(document.querySelector("#custom"));
     return displaySelection(ret.data != null ? "#graph" : "#custom");
   }
   // ** Graph view

@@ -492,7 +492,7 @@ def get_render(query:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    cfg["runtime_trace"] = {pc-prg.base:v for pc,v in rows.items()}
+    cfg["hit_count"] = {pc-prg.base:v["hit_count"] for pc,v in rows.items()}
     return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "data":cfg}
   return data
 
