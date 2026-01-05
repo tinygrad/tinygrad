@@ -141,7 +141,7 @@ def hand_spec_kernel3():
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
 def test_matmul(sink:UOp, dtype=dtypes.float32, N=N):
-  rng = np.random.default_rng(1337)
+  rng = np.random.default_rng()
   a = Tensor(rng.random((N, N), dtype=np.float32)-0.5, dtype=dtype)
   b = Tensor(rng.random((N, N), dtype=np.float32)-0.5, dtype=dtype)
   hc = Tensor.empty(N, N, dtype=dtype)
