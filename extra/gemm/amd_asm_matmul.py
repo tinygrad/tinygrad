@@ -227,15 +227,15 @@ class Kernel:
               saddr=s[saddr:saddr+2] if saddr else RawImm(124)))
 
   def waitcnt(self, lgkm=None, vm=None):
-    """Wait for memory operations. lgkm=0 waits for LDS, vm=0 waits for VMEM.
-    vm can be 0-63 to wait for specific number of outstanding VMEM ops."""
+    """Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain."""
     from extra.assembly.amd.asm import waitcnt as encode_waitcnt
     if lgkm == 0 and vm is None: self.emit(s_waitcnt(simm16=WAIT_LGKM))
     elif vm == 0 and lgkm is None: self.emit(s_waitcnt(simm16=WAIT_VMEM))
     elif lgkm == 0 and vm == 0: self.emit(s_waitcnt(simm16=WAIT_ALL))
     elif vm is not None and lgkm is None:
-      # Wait for specific vmcnt, don't wait for lgkm/exp
       self.emit(s_waitcnt(simm16=encode_waitcnt(vmcnt=vm, expcnt=7, lgkmcnt=63)))
+    elif lgkm is not None and vm is None:
+      self.emit(s_waitcnt(simm16=encode_waitcnt(vmcnt=63, expcnt=7, lgkmcnt=lgkm)))
     else: raise ValueError(f"unsupported waitcnt: lgkm={lgkm}, vm={vm}")
 
   def barrier(self): self.emit(s_barrier())
@@ -525,32 +525,31 @@ def build_kernel(arch='gfx1100'):
   k.label('INNER_LOOP')
 
   # 8 inner loop iterations (6 with prefetch, 2 without)
-  # Optimization: issue global prefetch BEFORE LDS loads so global memory
-  # operations can be in flight during LDS wait
-  # Uses offset-based addressing: offset = base_offset + iter * stride
   for iter in range(8):
-    # Issue global prefetch first (first 6 iterations only)
+    # Load A tile (4 pairs) and B tile (8 pairs) from LDS
+    k.emit(s_clause(simm16=11))
+    for i, vdst in enumerate(V_A_TILE_REGS):
+      a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
+      k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
+    for i, vdst in enumerate(V_B_TILE_REGS):
+      b_off = (i & 1) * 8 + (i & 2) * 64 + (i >> 2) * 256 + iter * LDS_B_STRIDE
+      k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_BASE], offset0=b_off & 0xFF, offset1=b_off >> 8))
+
+    # Issue global prefetch AFTER LDS loads (first 6 iterations only)
+    # This provides some latency hiding while LDS loads complete
     if iter < 6:
       vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
-      k.emit(s_clause(simm16=1))  # 2 consecutive global loads
+      k.emit(s_clause(simm16=1))
       k.global_load(vdst1, addr, slo1)
       k.global_load(vdst2, addr, slo2)
 
-    # Load A tile (4 pairs) and B tile (8 pairs) from LDS using offset-based addressing
-    k.emit(s_clause(simm16=11))  # 12 consecutive memory ops
-    for i, vdst in enumerate(V_A_TILE_REGS):  # 4 loads: offsets 0, 8, 64, 72 + iter*128
-      a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
-      k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
-    for i, vdst in enumerate(V_B_TILE_REGS):  # 8 loads: 2 banks x 4 offsets + iter*16
-      b_off = (i & 1) * 8 + (i & 2) * 64 + (i >> 2) * 256 + iter * LDS_B_STRIDE
-      k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_BASE], offset0=b_off & 0xFF, offset1=b_off >> 8))
-    # No PTR increment needed - offsets are baked into instructions
     k.waitcnt(lgkm=0)
+
     # 64 dual FMACs
     for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
       k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
                   vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
-      if i == 0: k.emit(s_setprio(1))
+      if i == 4: k.emit(s_setprio(1))
     k.emit(s_setprio(0))
 
   k.emit(s_and_not1_b32(VCC_LO, EXEC_LO, s[S_PREFETCH_FLAG]))
