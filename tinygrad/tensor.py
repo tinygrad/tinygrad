@@ -162,10 +162,10 @@ class Tensor(OpMixin):
 
     # data might be on a different device
     if isinstance(_device, str): self.uop:UOp = data if data.device == _device else data.copy_to_device(_device)
-    # if device is a tuple, we should have/construct a MultiLazyBuffer
+    # if device is a tuple, we should have/construct a multi-device UOp
     elif isinstance(data.device, str): self.uop = Tensor(data).shard(_device).uop
     else:
-      assert data.device == _device, f"MultiLazyBuffer device mismatch, {data.device} != {_device}"
+      assert data.device == _device, f"multi-device UOp device mismatch, {data.device} != {_device}"
       self.uop = data
 
     # add to all_tensors after construction succeeds
@@ -397,7 +397,7 @@ class Tensor(OpMixin):
     print(t.shard((t.device, t.device), axis=1).uop)
     ```
     """
-    if not isinstance(self.device, str): raise RuntimeError("can't shard a MultiLazyBuffer")
+    if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
     devices = tuple(canonicalize_device(x) for x in devices)
     mlb = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
