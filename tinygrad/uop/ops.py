@@ -878,7 +878,8 @@ python_alu: dict[Ops, Callable]  = {
   Ops.TRUNC: lambda x: x if math.isinf(x) or math.isnan(x) else math.copysign(math.trunc(x), x),
   Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt, Ops.CMPLE: operator.le,
   Ops.XOR: operator.xor, Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift, Ops.MAX: max,
-  Ops.MOD: cmod, Ops.IDIV: cdiv, Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq,
+  Ops.MOD: cmod, Ops.IDIV: cdiv, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq,
+  Ops.MULACC: lambda x,y,z: math.fma(x,y,z) if not (math.isinf(x) or math.isinf(y) or math.isnan(x) or math.isnan(y)) else (x*y)+z,
   Ops.FDIV: lambda x,y: x/y if y != 0 else (math.nan if x == 0 else math.copysign(math.inf, x*y))}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
