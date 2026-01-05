@@ -1,8 +1,6 @@
 // ** graph helpers
 
-let currentSelection;
 const displaySelection = (sel) => {
-  currentSelection = sel;
   for (const e of document.getElementsByClassName("view")) e.style.display = e.matches(sel) ? "flex" : "none";
 }
 const metadata = document.querySelector(".metadata");
@@ -822,9 +820,8 @@ async function main() {
     }
     if (ret.data != null) renderDag(ret, { recenter:true });
     if (ret.cols != null) renderTable(root, ret);
-    if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
-    document.querySelector("#custom").replaceChildren(root.node());
-    return displaySelection(ret.data != null ? "#graph" : "#custom");
+    else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
+    return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** Graph view
   // if we don't have a complete cache yet we start streaming graphs in this step
