@@ -178,5 +178,42 @@ class TestCfg(unittest.TestCase):
         s_endpgm(),
     ])
 
+  def test_colored_blocks(self):
+    run_asm("colored_blocks", [
+      "entry:",
+        s_mov_b32(s[0], 1),
+        s_branch("bb0"),
+      "bb0:",
+        s_nop(0),
+        s_cmp_eq_i32(s[0], 1),
+        s_cbranch_scc1("bb1"),
+        s_branch("end"),
+      "bb1:",
+        s_mov_b32(s[1], 2),
+      "bb1_loop:",
+        s_nop(0),
+        s_add_u32(s[1], s[1], -1),
+        s_cmp_eq_i32(s[1], 0),
+        s_cbranch_scc0("bb1_loop"),
+        s_branch("bb2"),
+      "bb2:",
+        s_mov_b32(s[2], 3),
+      "bb2_loop:",
+        s_nop(0),
+        s_add_u32(s[2], s[2], -1),
+        s_cmp_eq_i32(s[2], 0),
+        s_cbranch_scc0("bb2_loop"),
+        s_branch("bb3"),
+      "bb3:",
+        s_mov_b32(s[3], 4),
+      "bb3_loop:",
+        s_nop(0),
+        s_add_u32(s[3], s[3], -1),
+        s_cmp_eq_i32(s[3], 0),
+        s_cbranch_scc0("bb3_loop"),
+      "end:",
+        s_endpgm(),
+    ])
+
 if __name__ == "__main__":
   unittest.main()

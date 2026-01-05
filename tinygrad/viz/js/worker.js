@@ -17,17 +17,18 @@ const layoutCfg = (g, { blocks, paths, pc_table, runtime_trace, colors }) => {
   g.setGraph({ rankdir:"TD", font:"monospace" });
   ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
+  let minColor, maxColor;
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
       let text = pc_table[m][0];
       if (runtime_trace != null) {
-        const t = runtime_trace[m];
-        if (t != null) {
-          // space for some kind of heatmap color scale here
-          label.push([{st:text + ` Hits: ${t.hit_count}`, color:t.hit_count > 1 ? "#f7768e" : "#9aa5ce"}]);
-          text += ` HITS: ${t.hit_count}`
-        } else label.push([{ st:text, color:"#676e8b" }]); // inactive / unreachable instruction
+        const cnt = runtime_trace[m]?.hit_count ?? 0;
+        if (minColor == null || cnt < minColor) minColor = cnt;
+        if (maxColor == null || cnt > maxColor) maxColor = cnt;
+        // space for some kind of heatmap color scale here
+        label.push([{st:text + ` Hits: ${cnt}`, color:cnt }]);
+        text += ` HITS: ${cnt}`
       } else {
         // static syntax coloring
         const [inst, ...operands] = text.split(" ");
@@ -38,6 +39,7 @@ const layoutCfg = (g, { blocks, paths, pc_table, runtime_trace, colors }) => {
     }
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
   }
+  g.graph().colorDomain = [minColor, maxColor];
   // paths become edges between basic blocks
   for (const [lead, value] of Object.entries(paths)) {
     for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, {label:{type:"port", text:""}, color:colors[color]});

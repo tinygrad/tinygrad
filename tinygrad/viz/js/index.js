@@ -55,8 +55,11 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
+const colorScale = d3.scaleSequential(t => d3.interpolateTurbo(0.12 + 0.88 * t));
+
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
+  if (data.value.colorDomain != null) colorScale.domain(data.value.colorDomain);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
@@ -88,7 +91,7 @@ const drawGraph = (data) => {
     }
     return [ret];
   }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
-    .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve").style("font-family", g.graph().font);
+    .attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color)).text(d => d.st).attr("xml:space", "preserve").style("font-family", g.graph().font);
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
