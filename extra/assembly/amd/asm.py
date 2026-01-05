@@ -1224,17 +1224,13 @@ def get_dsl(text: str, arch: str = "rdna3", gfx942: bool = False) -> str:
       return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
     return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
 
-  # v_fmaak/v_fmamk literal handling
-  # RDNA3: use literal= keyword arg; CDNA: keep literal in positional args for _e32 variant
-  # v_fmamk_e32(vdst, src0, K, vsrc1); v_fmaak_e32(vdst, src0, vsrc1, K)
+  # v_fmaak/v_fmamk/v_madak/v_madmk literal handling - need literal= keyword for VOP2
+  # fmamk/madmk: dst = src0 * K + vsrc1, fmaak/madak: dst = src0 * vsrc1 + K
   lit_s = ""
-  if arch == "cdna":
-    # For CDNA, reorder args to match _e32 signature: fmamk(vdst, src0, K, vsrc1), fmaak(vdst, src0, vsrc1, K)
-    if mn in ('v_fmamk_f32', 'v_fmamk_f16') and len(args) == 4: args = [args[0], args[1], args[2], args[3]]  # already correct order
-    elif mn in ('v_fmaak_f32', 'v_fmaak_f16') and len(args) == 4: args = [args[0], args[1], args[2], args[3]]  # already correct order
-  else:
-    if mn in ('v_fmaak_f32', 'v_fmaak_f16') and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
-    elif mn in ('v_fmamk_f32', 'v_fmamk_f16') and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
+  _ak_ops = ('v_fmaak_f32', 'v_fmaak_f16', 'v_madak_f32', 'v_madak_f16')
+  _mk_ops = ('v_fmamk_f32', 'v_fmamk_f16', 'v_madmk_f32', 'v_madmk_f16')
+  if mn in _ak_ops and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
+  elif mn in _mk_ops and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
 
   # VCC ops cleanup
   vcc_ops = {'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'}
