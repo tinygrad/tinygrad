@@ -43,6 +43,14 @@ def _i64(f):
   try: return _struct_Q.unpack(_struct_d.pack(f))[0]
   except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
 
+# Float conversion helpers (used by tests)
+def f32_to_f16(f):
+  f = float(f)
+  if math.isnan(f): return 0x7e00  # f16 NaN
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00  # f16 ±infinity
+  try: return _struct_H.unpack(_struct_e.pack(f))[0]
+  except OverflowError: return 0x7c00 if f > 0 else 0xfc00  # overflow -> ±infinity
+
 # Instruction spec - register counts and dtypes derived from instruction names
 _REGS = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16,
          'F32': 1, 'I32': 1, 'U32': 1, 'F64': 2, 'I64': 2, 'U64': 2,

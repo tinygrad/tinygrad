@@ -47,10 +47,14 @@ INPUT_VARS = {
   'OFFSET1': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('OFFSET1', 0, 0xff)),
   'OPSEL': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('OPSEL', 0, 7)),
   'OPSEL_HI': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('OPSEL_HI', 0, 7)),
+  'SRC0': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('SRC0', 0, 0xffffffff)),  # Source register index
+  'VDST': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('VDST', 0, 0xffffffff)),  # Dest register index (for writelane)
+  'M0': UOp(Ops.DEFINE_VAR, dtypes.uint32, (), ('M0', 0, 0xffffffff)),  # M0 register
 }
 
 MEM_BUF = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(addrspace=AddrSpace.GLOBAL), arg=0)
 LDS_BUF = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(addrspace=AddrSpace.LOCAL), arg=0)
+VGPR_BUF = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(addrspace=AddrSpace.GLOBAL), arg=1)  # VGPR[lane][reg] as flat array
 
 class Ctx:
   def __init__(self, mem_buf: UOp = MEM_BUF):
@@ -85,6 +89,25 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       if name == 'NAN.f32': return UOp.const(dtypes.float32, float('nan'))
       if name in ('VCCZ', 'EXECZ'):
         return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars.get('VCC' if name == 'VCCZ' else 'EXEC'), UOp.const(dtypes.uint64, 0))), dtypes.uint32)
+      if name == 'EXEC_LO':
+        return _cast(UOp(Ops.AND, dtypes.uint64, (ctx.vars.get('EXEC'), UOp.const(dtypes.uint64, 0xffffffff))), hint or dtypes.uint32)
+      if name == 'EXEC_HI':
+        return _cast(UOp(Ops.SHR, dtypes.uint64, (ctx.vars.get('EXEC'), UOp.const(dtypes.uint64, 32))), hint or dtypes.uint32)
+      if name == 'VCC_LO':
+        return _cast(UOp(Ops.AND, dtypes.uint64, (ctx.vars.get('VCC'), UOp.const(dtypes.uint64, 0xffffffff))), hint or dtypes.uint32)
+      if name == 'VCC_HI':
+        return _cast(UOp(Ops.SHR, dtypes.uint64, (ctx.vars.get('VCC'), UOp.const(dtypes.uint64, 32))), hint or dtypes.uint32)
+      if name == 'laneID' or name == 'laneId':
+        return ctx.vars.get('laneId', UOp.const(dtypes.uint32, 0))
+      if name == 'ThreadMask':
+        # ThreadMask is the same as EXEC for wave32
+        return _cast(ctx.vars.get('EXEC'), hint or dtypes.uint32)
+      if name == 'DST':
+        # DST is the raw destination register index from the instruction
+        return ctx.vars.get('VDST', UOp.const(dtypes.uint32, 0))
+      if name == 'LDS':
+        # LDS is the local data share memory - treat as memory buffer
+        return UOp.const(dtypes.uint64, 0)  # Base address placeholder
       if name.startswith('eval '): return ctx.vars.get('_eval', UOp.const(dtypes.uint32, 0))
       if name not in ctx.vars: raise ValueError(f"Unknown variable: {name}")
       return _cast(ctx.vars[name], hint or ctx.vars[name].dtype)
@@ -109,6 +132,18 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
           return UOp.const(dt, denorm)
         if name in ('VCCZ', 'EXECZ'):
           return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars.get('VCC' if name == 'VCCZ' else 'EXEC'), UOp.const(dtypes.uint64, 0))), dtypes.uint32)
+        if name == 'EXEC_LO':
+          return _cast(UOp(Ops.AND, dtypes.uint64, (ctx.vars.get('EXEC'), UOp.const(dtypes.uint64, 0xffffffff))), dt)
+        if name == 'EXEC_HI':
+          return _cast(UOp(Ops.SHR, dtypes.uint64, (ctx.vars.get('EXEC'), UOp.const(dtypes.uint64, 32))), dt)
+        if name == 'VCC_LO':
+          return _cast(UOp(Ops.AND, dtypes.uint64, (ctx.vars.get('VCC'), UOp.const(dtypes.uint64, 0xffffffff))), dt)
+        if name == 'VCC_HI':
+          return _cast(UOp(Ops.SHR, dtypes.uint64, (ctx.vars.get('VCC'), UOp.const(dtypes.uint64, 32))), dt)
+        if name == 'DST':
+          return _cast(ctx.vars.get('VDST', UOp.const(dtypes.uint32, 0)), dt)
+        if name == 'laneID' or name == 'laneId':
+          return _cast(ctx.vars.get('laneId', UOp.const(dtypes.uint32, 0)), dt)
         if name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
         vn = name + '_64' if dt.itemsize == 8 and name.isupper() else name
         base = ctx.vars.get(vn) if vn in ctx.vars else ctx.vars.get(name)
@@ -132,6 +167,20 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       return _cast(inner_resolved, dt)
 
     case UOp(Ops.CUSTOMI, _, (base_expr, hi_expr, lo_expr)):  # Slice or array access
+      # Check for VGPR[lane][reg] access pattern (nested CUSTOMI where inner base is VGPR)
+      if base_expr.op == Ops.CUSTOMI and hi_expr is lo_expr:
+        inner_base, inner_idx, _ = base_expr.src
+        if inner_base.op == Ops.DEFINE_VAR and inner_base.arg[0] == 'VGPR':
+          # VGPR[lane][reg] -> load from VGPR buffer at index (lane * 256 + reg)
+          lane_uop = _expr(inner_idx, ctx, dtypes.uint32)
+          reg_uop = _expr(hi_expr, ctx, dtypes.uint32)
+          # Compute flat index: lane * 256 + reg (256 VGPRs per lane)
+          idx = UOp(Ops.ADD, dtypes.uint32, (UOp(Ops.MUL, dtypes.uint32, (lane_uop, UOp.const(dtypes.uint32, 256))), reg_uop))
+          return UOp(Ops.CUSTOM, dtypes.uint32, (idx,), arg='vgpr_read')
+      # Check for SGPR[idx] access pattern (scalar register file access)
+      if base_expr.op == Ops.DEFINE_VAR and base_expr.arg[0] == 'SGPR' and hi_expr is lo_expr:
+        idx_uop = _expr(hi_expr, ctx, dtypes.uint32)
+        return UOp(Ops.CUSTOM, dtypes.uint32, (idx_uop,), arg='sgpr_read')
       # Check for array element access first: arr[idx] where arr is a vector type
       if base_expr.op == Ops.DEFINE_VAR and base_expr.arg[1] is None and hi_expr is lo_expr:
         name = base_expr.arg[0]
@@ -377,6 +426,14 @@ def _call_trig_preop_result(shift):
   # Returns CUSTOM op that gets evaluated at runtime with the 1201-bit constant
   return UOp(Ops.CUSTOM, dtypes.float64, (shift,), arg='trig_preop_result')
 
+def _call_s_ff1_i32_b32(v):
+  # Find first 1 bit (count trailing zeros) - returns CUSTOM op evaluated at runtime
+  return UOp(Ops.CUSTOM, dtypes.int32, (_cast(v, dtypes.uint32),), arg='s_ff1_i32_b32')
+
+def _call_s_ff1_i32_b64(v):
+  # Find first 1 bit in 64-bit value (count trailing zeros) - returns CUSTOM op evaluated at runtime
+  return UOp(Ops.CUSTOM, dtypes.int32, (_cast(v, dtypes.uint64),), arg='s_ff1_i32_b64')
+
 CALL_DISPATCH = {
   'MEM': _call_MEM, 'fma': _call_fma, 'abs': _call_abs, 'cos': _call_cos, 'rsqrt': _call_rsqrt,
   'clamp': _call_clamp, 'floor': _call_floor, 'fract': _call_fract, 'isNAN': _call_isNAN, 'isQuietNAN': _call_isQuietNAN,
@@ -384,6 +441,9 @@ CALL_DISPATCH = {
   'sign': _call_sign, 'exponent': _call_exponent, 'mantissa': _call_mantissa, 'isEven': _call_isEven,
   'signext': _call_signext, 'signext_from_bit': _call_signext_from_bit, 'ABSDIFF': _call_ABSDIFF, 'SAT8': _call_SAT8,
   'BYTE_PERMUTE': _call_BYTE_PERMUTE, 'bf16_to_f32': _call_bf16_to_f32, 'trig_preop_result': _call_trig_preop_result,
+  's_ff1_i32_b32': _call_s_ff1_i32_b32, 's_ff1_i32_b64': _call_s_ff1_i32_b64,
+  'u8_to_u32': lambda v: _cast(UOp(Ops.AND, dtypes.uint32, (_cast(v, dtypes.uint32), UOp.const(dtypes.uint32, 0xff))), dtypes.uint32),
+  'u4_to_u32': lambda v: _cast(UOp(Ops.AND, dtypes.uint32, (_cast(v, dtypes.uint32), UOp.const(dtypes.uint32, 0xf))), dtypes.uint32),
 }
 
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
@@ -432,40 +492,53 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     return result
   raise ValueError(f"Unknown function: {name}")
 
-def _get_lhs_info(lhs: UOp, ctx: Ctx) -> tuple[str, DType, int|None, int|None, str|None, int|None]:
-  """Extract assignment target: (var_name, dtype, hi_bit, lo_bit, idx_var, array_idx)"""
+def _get_lhs_info(lhs: UOp, ctx: Ctx) -> tuple[str, DType, int|None, int|None, UOp|str|None, int|None, UOp|None]:
+  """Extract assignment target: (var_name, dtype, hi_bit, lo_bit, idx_var, array_idx, dynamic_idx_uop)
+  dynamic_idx_uop is set when the bit index is a runtime expression (not constant or simple variable)"""
   match lhs:
-    case UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)): return name, dt, None, None, None, None
+    case UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)): return name, dt, None, None, None, None, None
     case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))),)):
-      return name, dt, int(hi), int(lo), None, None
+      return name, dt, int(hi), int(lo), None, None, None
     case UOp(Ops.BITCAST, _, (UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)),)) if lhs.src[0].src[1] is lhs.src[0].src[2]:
-      return name, dtypes.uint64, None, None, idx, None
+      return name, dtypes.uint64, None, None, idx, None, None
     case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)),)) if lhs.src[0].src[1] is lhs.src[0].src[2]:
-      return name, dt, None, None, idx, None
+      return name, dt, None, None, idx, None, None
     case UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))):
-      return name, dtypes.uint32, int(hi), int(lo), None, None
+      return name, dtypes.uint32, int(hi), int(lo), None, None, None
     case UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.CONST, _, _, idx), _)) if lhs.src[1] is lhs.src[2]:
       # Check if this is array element access (variable is a vector type)
       var_dtype = ctx.decls.get(name)
       if var_dtype is not None and var_dtype.count > 1:
-        return name, var_dtype.scalar(), None, None, None, int(idx)
-      return name, dtypes.uint32, int(idx), int(idx), None, None
+        return name, var_dtype.scalar(), None, None, None, int(idx), None
+      return name, dtypes.uint32, int(idx), int(idx), None, None, None
     case UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))):
-      return name, dtypes.uint32, int(hi), int(lo), None, None
+      return name, dtypes.uint32, int(hi), int(lo), None, None, None
     case UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)) if lhs.src[1] is lhs.src[2]:
-      return name, dt, None, None, idx, None
+      return name, dt, None, None, idx, None, None
     # Handle arr[i] where i is a variable - check if it's array element or bit index
     case UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)) if lhs.src[1] is lhs.src[2]:
       var_dtype = ctx.decls.get(name)
       if var_dtype is not None and var_dtype.count > 1:
         # Array element access with variable index
-        return name, var_dtype.scalar(), None, None, None, idx  # Return idx as variable name for array_idx
-      return name, dtypes.uint32, None, None, idx, None
+        return name, var_dtype.scalar(), None, None, None, idx, None  # Return idx as variable name for array_idx
+      return name, dtypes.uint32, None, None, idx, None, None
+    # Handle D0.u32[expr] where expr is a complex expression (dynamic bit index)
+    case UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), idx_expr, idx_expr2)) if lhs.src[1] is lhs.src[2]:
+      return name, dt, None, None, None, None, idx_expr  # Return expression as dynamic_idx_uop
+    # Handle VGPR[lane][reg] = value (nested CUSTOMI for VGPR write)
+    case UOp(Ops.CUSTOMI, _, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, ('VGPR', None, None)), lane_expr, _)), reg_expr, _)):
+      return 'VGPR', dtypes.uint32, None, None, None, None, (lane_expr, reg_expr)  # Return tuple for VGPR write
+    # Handle VGPR[laneId][addr].type = value (with BITCAST wrapper)
+    case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, ('VGPR', None, None)), lane_expr, _)), reg_expr, _)),)):
+      return 'VGPR', dt, None, None, None, None, (lane_expr, reg_expr)  # Return tuple for VGPR write
+    # Handle SGPR[addr].type = value (scalar register write with BITCAST)
+    case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, ('SGPR', None, None)), reg_expr, _)),)):
+      return 'SGPR', dt, None, None, None, None, reg_expr  # Return expr for SGPR write
     case UOp(Ops.DEFINE_VAR, _, _, (name, None, None)):
       # If the variable already exists, use its dtype; otherwise default to uint32
       existing = ctx.vars.get(name)
       dtype = existing.dtype if existing is not None else dtypes.uint32
-      return name, dtype, None, None, None, None
+      return name, dtype, None, None, None, None, None
   raise ValueError(f"Cannot parse LHS: {lhs}")
 
 def _stmt(stmt, ctx: Ctx):
@@ -511,8 +584,46 @@ def _stmt(stmt, ctx: Ctx):
             offset += bits
         return
 
-      var, dtype, hi, lo, idx_var, array_idx = _get_lhs_info(lhs, ctx)
+      var, dtype, hi, lo, idx_var, array_idx, dynamic_idx = _get_lhs_info(lhs, ctx)
       out_vars = ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC', 'SDATA', 'VDATA', 'RETURN_DATA')
+
+      # Handle VGPR write: VGPR[lane][reg] = value
+      if var == 'VGPR' and isinstance(dynamic_idx, tuple):
+        lane_expr, reg_expr = dynamic_idx
+        lane_uop = _expr(lane_expr, ctx, dtypes.uint32)
+        reg_uop = _expr(reg_expr, ctx, dtypes.uint32)
+        val_uop = _expr(rhs, ctx, dtype)
+        # Compute flat index: lane * 256 + reg
+        idx = UOp(Ops.ADD, dtypes.uint32, (UOp(Ops.MUL, dtypes.uint32, (lane_uop, UOp.const(dtypes.uint32, 256))), reg_uop))
+        ctx.outputs.append(('VGPR_WRITE', UOp(Ops.CUSTOM, dtypes.uint32, (idx, _cast(val_uop, dtypes.uint32)), arg='vgpr_write'), dtypes.uint32))
+        return
+
+      # Handle SGPR write: SGPR[reg] = value
+      if var == 'SGPR' and dynamic_idx is not None and not isinstance(dynamic_idx, tuple):
+        reg_uop = _expr(dynamic_idx, ctx, dtypes.uint32)
+        val_uop = _expr(rhs, ctx, dtype)
+        ctx.outputs.append(('SGPR_WRITE', UOp(Ops.CUSTOM, dtypes.uint32, (reg_uop, _cast(val_uop, dtypes.uint32)), arg='sgpr_write'), dtypes.uint32))
+        return
+
+      # Handle dynamic bit index: D0.u32[expr] = value (where expr is runtime expression)
+      if dynamic_idx is not None and not isinstance(dynamic_idx, tuple):
+        idx_uop = _expr(dynamic_idx, ctx, dtypes.uint32)
+        rhs_uop = _expr(rhs, ctx, dtypes.uint32)
+        op_dt = dtype if dtype.itemsize >= 4 else dtypes.uint32
+        if dtype.itemsize == 8: op_dt = dtypes.uint64
+        base = ctx.vars.get(var, UOp.const(op_dt, 0))
+        if base.dtype != op_dt: base = _cast(base, op_dt)
+        # Set single bit at dynamic index: base = (base & ~(1 << idx)) | ((val & 1) << idx)
+        one = UOp.const(op_dt, 1)
+        bit_mask = UOp(Ops.SHL, op_dt, (one, _cast(idx_uop, op_dt)))
+        inv_mask = UOp(Ops.XOR, op_dt, (bit_mask, UOp.const(op_dt, -1)))
+        val_bit = UOp(Ops.SHL, op_dt, (UOp(Ops.AND, op_dt, (_cast(rhs_uop, op_dt), one)), _cast(idx_uop, op_dt)))
+        result = UOp(Ops.OR, op_dt, (UOp(Ops.AND, op_dt, (base, inv_mask)), val_bit))
+        ctx.vars[var] = result
+        if var in out_vars:
+          ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
+          ctx.outputs.append((var, result, op_dt))
+        return
 
       # Handle array element assignment: arr[idx] = value
       if array_idx is not None:
@@ -717,6 +828,28 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
       shifted = (TWO_OVER_PI_1201 << int(shift)) >> (1201 - 53)
       mantissa = shifted & 0x1fffffffffffff
       return float(mantissa)
+    if u.op == Ops.CUSTOM and u.arg == 's_ff1_i32_b32':
+      # Find first 1 bit (count trailing zeros) in 32-bit value
+      v = _eval_uop(u.src[0])
+      if v is None: return None
+      v = int(v) & 0xffffffff
+      if v == 0: return 32
+      n = 0
+      while (v & 1) == 0: v >>= 1; n += 1
+      return n
+    if u.op == Ops.CUSTOM and u.arg == 's_ff1_i32_b64':
+      # Find first 1 bit (count trailing zeros) in 64-bit value
+      v = _eval_uop(u.src[0])
+      if v is None: return None
+      v = int(v) & 0xffffffffffffffff
+      if v == 0: return 64
+      n = 0
+      while (v & 1) == 0: v >>= 1; n += 1
+      return n
+    if u.op == Ops.CUSTOM and u.arg == 'vgpr_read':
+      # VGPR read - returns CUSTOM that will be resolved with VGPR data at runtime
+      # This can't be evaluated statically - needs VGPR substitution
+      return None
     return None
 
   def _extract_results(s, MEM=None):
@@ -790,8 +923,20 @@ def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[s
         input_vars['SIMM16']: UOp.const(dtypes.int32, simm16), input_vars['SIMM32']: UOp.const(dtypes.uint32, literal or 0),
         input_vars['PC']: UOp.const(dtypes.uint64, pc or 0),
         input_vars['OPSEL']: UOp.const(dtypes.uint32, opsel), input_vars['OPSEL_HI']: UOp.const(dtypes.uint32, opsel_hi),
+        input_vars['SRC0']: UOp.const(dtypes.uint32, src0_idx),
       }
-      return _extract_results(sink.substitute(dvars).simplify())
+      s1_sub = sink.substitute(dvars).simplify()
+      # Handle VGPR reads - substitute vgpr_read CUSTOM ops with actual values
+      if VGPR is not None:
+        vgpr_subs = {}
+        for u in s1_sub.toposort():
+          if u.op == Ops.CUSTOM and u.arg == 'vgpr_read':
+            idx = _eval_uop(u.src[0])
+            if idx is not None:
+              lane, reg = int(idx) // 256, int(idx) % 256
+              vgpr_subs[u] = UOp.const(dtypes.uint32, VGPR[lane][reg] if lane < len(VGPR) and reg < len(VGPR[lane]) else 0)
+        if vgpr_subs: s1_sub = s1_sub.substitute(vgpr_subs).simplify()
+      return _extract_results(s1_sub)
     return fn
 
 # Ops that need Python exec features (inline conditionals, complex PDF fixes) - fall back to pcode.py

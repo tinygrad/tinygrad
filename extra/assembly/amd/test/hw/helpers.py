@@ -5,9 +5,8 @@ Set USE_HW=1 to run on both emulator and real hardware, comparing results.
 """
 import ctypes, os, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
-from extra.assembly.amd.dsl import RawImm
+from extra.assembly.amd.dsl import RawImm, _i32, _f32
 from extra.assembly.amd.emu import WaveState, run_asm, set_valid_mem_ranges
-from extra.assembly.amd.pcode import _i32, _f32
 
 VCC = SrcEnum.VCC_LO  # For VOP3SD sdst field
 USE_HW = os.environ.get("USE_HW", "0") == "1"
