@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import ctypes, pathlib, argparse, pickle, dataclasses, threading
 from typing import Generator
-from tinygrad.helpers import temp, unwrap, DEBUG
+from tinygrad.helpers import temp, unwrap, DEBUG, ProfileRangeEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.runtime.autogen import rocprof
 
@@ -157,6 +157,10 @@ def main() -> None:
   n = 0
   for s in trace["steps"]:
     print(s["name"])
+    # tabulate wave start and end events
+    if s["query"].startswith("/cu-sqtt"):
+      data = {"cols": ["SIMD", "Event", "Start", "End"],
+              "rows": [(e.device, e.name, int(e.st), int(e.en), []) for e in s["data"] if isinstance(e, ProfileRangeEvent)]}
     data = viz.get_render(s["query"])
     print_data(data)
     n += 1
