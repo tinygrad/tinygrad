@@ -57,7 +57,18 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const colorScale = d3.scaleSequential(t => d3.interpolateTurbo(0.12 + 0.88 * t));
+const interp = t => {
+  // always gray for zero hits
+  if (t === 0) return "#565f89";
+  // always white or above for > 0
+  const activeLo = "#c8d3f5";
+  const mid = "#e0af68";
+  const hotspot = "#f7768e";
+  if (t <= 0.55) return d3.interpolateLab(activeLo, mid)(t / 0.55);
+  return d3.interpolateLab(mid, hotspot)((t - 0.55) / 0.45);
+}
+
+const colorScale = d3.scaleSequential(interp).clamp(true);
 
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
