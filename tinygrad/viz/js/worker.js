@@ -13,7 +13,7 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = (g, { blocks, paths, pc_table, hit_count, colors }) => {
+const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
   g.setGraph({ rankdir:"TD", font:"monospace" });
   ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
@@ -22,8 +22,8 @@ const layoutCfg = (g, { blocks, paths, pc_table, hit_count, colors }) => {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
       const text = pc_table[m][0];
-      if (hit_count != null) {
-        const num = hit_count[m] || 0;
+      if (counters != null) {
+        const num = counters[m]?.hit_count || 0;
         if (minColor == null || num < minColor) minColor = num;
         if (maxColor == null || num > maxColor) maxColor = num;
         label.push([{st:text, color:num}]);

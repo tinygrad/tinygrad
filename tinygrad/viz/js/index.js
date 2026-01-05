@@ -57,18 +57,12 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const interp = t => {
-  // always gray for zero hits
-  if (t === 0) return "#565f89";
-  // always white or above for > 0
-  const activeLo = "#c8d3f5";
-  const mid = "#e0af68";
-  const hotspot = "#f7768e";
-  if (t <= 0.55) return d3.interpolateLab(activeLo, mid)(t / 0.55);
-  return d3.interpolateLab(mid, hotspot)((t - 0.55) / 0.45);
-}
-
-const colorScale = d3.scaleSequential(interp).clamp(true);
+const colorScale = d3.scaleSequential(t => {
+  if (t === 0) return colorScheme.ACTIVE[0];
+  t = Math.pow(t, 0.8)
+  if (t <= 0.65) return d3.interpolateLab(colorScheme.ACTIVE[1], colorScheme.ACTIVE[2])(t / 0.65)
+  return d3.interpolateLab(colorScheme.ACTIVE[2], colorScheme.ACTIVE[3])((t - 0.65) / 0.35)
+}).clamp(true);
 
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
@@ -170,7 +164,8 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),}
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
+  ACTIVE:["#565f89", "#c8d3f5", "#7aa2f7", "#6a7fd8"]}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
