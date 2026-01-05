@@ -665,17 +665,22 @@ _ALIASES = {
   # More VOP3 aliases
   'v_fma_legacy_f32': 'v_fma_dx9_zero_f32',
 }
-# RDNA3-only aliases (should NOT be applied to CDNA)
+# RDNA3-only aliases (should NOT be applied to CDNA) - CDNA uses OLD names, RDNA3 uses NEW names
 _RDNA3_ONLY_ALIASES = {'v_mul_legacy_f32', 'v_fmac_legacy_f32', 'v_fma_legacy_f32',
-  # SMEM: RDNA3 uses b32/b64, CDNA uses dword/dwordx2
   's_load_dword', 's_load_dwordx2', 's_load_dwordx4', 's_load_dwordx8', 's_load_dwordx16',
-  's_buffer_load_dword', 's_buffer_load_dwordx2', 's_buffer_load_dwordx4', 's_buffer_load_dwordx8', 's_buffer_load_dwordx16'}
+  's_buffer_load_dword', 's_buffer_load_dwordx2', 's_buffer_load_dwordx4', 's_buffer_load_dwordx8', 's_buffer_load_dwordx16',
+  # SOP: CDNA uses s_andn2/s_orn2, RDNA3 uses s_and_not1/s_or_not1
+  's_andn2_b32', 's_andn2_b64', 's_orn2_b32', 's_orn2_b64',
+  's_andn1_saveexec_b32', 's_andn1_saveexec_b64', 's_andn1_wrexec_b32', 's_andn1_wrexec_b64',
+  's_andn2_saveexec_b32', 's_andn2_saveexec_b64', 's_andn2_wrexec_b32', 's_andn2_wrexec_b64',
+  's_orn1_saveexec_b32', 's_orn1_saveexec_b64', 's_orn2_saveexec_b32', 's_orn2_saveexec_b64',
+  # VOP1: CDNA uses old names
+  'v_cvt_flr_i32_f32', 'v_cvt_rpi_i32_f32', 'v_ffbh_i32', 'v_ffbh_u32', 'v_ffbl_b32'}
 # CDNA-specific aliases (GFX9 uses different names for some instructions)
 # CDNA-specific aliases - CDNA uses dword naming, not b32
 _CDNA_ALIASES = {
-  # VOP aliases (inverse of _CDNA_DISASM_ALIASES)
-  'v_cvt_pkrtz_f16_f32': 'v_cvt_pk_rtz_f16_f32',
-  'v_mul_legacy_f32': 'v_fmac_f64', 'v_mac_f32': 'v_dot2c_f32_bf16', 'v_madmk_f32': 'v_fmamk_f32', 'v_madak_f32': 'v_fmaak_f32',
+  # VOP aliases: madmk/madak -> fmamk/fmaak (same encoding, different name in CDNA enum)
+  'v_cvt_pkrtz_f16_f32': 'v_cvt_pk_rtz_f16_f32', 'v_madmk_f32': 'v_fmamk_f32', 'v_madak_f32': 'v_fmaak_f32',
   # VOPC: v_cmp_t_fXX -> v_cmp_tru_fXX for CDNA
   'v_cmp_t_f16': 'v_cmp_tru_f16', 'v_cmp_t_f32': 'v_cmp_tru_f32', 'v_cmp_t_f64': 'v_cmp_tru_f64',
   'v_cmpx_t_f16': 'v_cmpx_tru_f16', 'v_cmpx_t_f32': 'v_cmpx_tru_f32', 'v_cmpx_t_f64': 'v_cmpx_tru_f64',
@@ -1375,10 +1380,11 @@ def get_dsl(text: str, arch: str = "rdna3", gfx942: bool = False) -> str:
           dpp_kw.append(f'vdst={args[0]}' if args else 'vdst=v[0]')
           dpp_kw.append(f'src0={args[1]}' if len(args) > 1 else 'src0=v[0]')
         else:
-          dpp_kw.append(f'vop_op={args[1] if len(args) > 1 else "v[0]"}')
+          # VOP2 DPP: vop_op is vsrc1 (second source), src0 is DPP source (first source)
+          dpp_kw.append(f'vop_op={args[2] if len(args) > 2 else "v[0]"}')
           dpp_kw.append(f'vop2_op={vop2_op.value}')
           dpp_kw.append(f'vdst={args[0]}' if args else 'vdst=v[0]')
-          dpp_kw.append(f'src0={args[2] if len(args) > 2 else "v[0]"}')
+          dpp_kw.append(f'src0={args[1] if len(args) > 1 else "v[0]"}')
         dpp_kw.append(f'dpp_ctrl={dpp_ctrl}')
         dpp_kw.append(f'row_mask={dpp_row_mask if dpp_row_mask is not None else 15}')
         dpp_kw.append(f'bank_mask={dpp_bank_mask if dpp_bank_mask is not None else 15}')
@@ -1414,10 +1420,24 @@ def get_dsl(text: str, arch: str = "rdna3", gfx942: bool = False) -> str:
   a_str, kw_str = ', '.join(args), ', '.join(all_kw)
   return f"{fn}({a_str}, {kw_str})" if kw_str and a_str else f"{fn}({kw_str})" if kw_str else f"{fn}({a_str})"
 
+# CDNA VOP3A opcodes that need +64 offset (autogen has wrong values for GFX90a)
+_CDNA_VOP3A_OPCODE_FIX = {'v_mul_legacy_f32': 64}  # actual opcode should be 0x2a1, autogen has 0x261
+
+def _fix_cdna_opcode(inst, mnemonic: str):
+  """Fix opcode for CDNA instructions where autogen has wrong values."""
+  base = mnemonic.removesuffix('_e64').removesuffix('_e32')
+  if base in _CDNA_VOP3A_OPCODE_FIX and hasattr(inst, '_values') and 'op' in inst._values:
+    op = inst._values['op']
+    offset = _CDNA_VOP3A_OPCODE_FIX[base]
+    inst._values['op'] = (op.value + offset) if hasattr(op, 'value') else (op + offset)
+  return inst
+
 def asm(text: str, arch: str = "rdna3") -> Inst:
-  # Normalize arch: gfx942 is a CDNA variant
+  # Normalize arch: gfx90a and gfx942 are CDNA variants
   is_gfx942 = arch == "gfx942"
-  if is_gfx942: arch = "cdna"
+  is_gfx90a = arch == "gfx90a"
+  if is_gfx942 or is_gfx90a: arch = "cdna"
+  mnemonic = text.split()[0].lower()
   dsl = get_dsl(text, arch, gfx942=is_gfx942)
   if arch == "cdna":
     from extra.assembly.amd.autogen.cdna import ins as cdna_ins
@@ -1439,6 +1459,7 @@ def asm(text: str, arch: str = "rdna3") -> Inst:
     ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
     ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
                'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF})
+  fix = (lambda inst: _fix_cdna_opcode(inst, mnemonic)) if arch == "cdna" else (lambda inst: inst)
   try:
     # For CDNA, prefer _e32 variants for VOP1/VOP2 when available (bare names map to VOP3)
     # But skip if:
@@ -1454,21 +1475,21 @@ def asm(text: str, arch: str = "rdna3") -> Inst:
       if e32_name in ns and fn_name in _VOP2_CARRY_OUT | _VOP2_CARRY_INOUT:
         args_match = re.match(r'\(([^,]+),\s*[^,]+,\s*(.+)\)$', args_str)
         if args_match: args_str = f"({args_match.group(1)}, {args_match.group(2)})"
-      if e32_name in ns: return eval(f"{e32_name}{args_str}", ns)
+      if e32_name in ns: return fix(eval(f"{e32_name}{args_str}", ns))
     # For CDNA, _e64 suffix maps to base name (VOP3)
     if arch == "cdna" and (m := re.match(r'^(v_\w+)_e64(\(.*\))$', dsl)):
       base_name = m.group(1)
-      if base_name in ns: return eval(f"{base_name}{m.group(2)}", ns)
+      if base_name in ns: return fix(eval(f"{base_name}{m.group(2)}", ns))
     # Strip _vop3=True marker before eval
     eval_dsl = dsl.replace('_vop3=True, ', '').replace('_vop3=True', '')
-    return eval(eval_dsl, ns)
+    return fix(eval(eval_dsl, ns))
   except NameError:
     # For CDNA, try stripping _e64 to get VOP3 base name
     if arch == "cdna" and (m := re.match(r'^(v_\w+)_e64(\(.*\))$', dsl)):
-      return eval(f"{m.group(1)}{m.group(2)}", ns)
+      return fix(eval(f"{m.group(1)}{m.group(2)}", ns))
     # Don't try _e32 if already _e64
     if (m := re.match(r'^(v_\w+)(\(.*\))$', dsl)) and not m.group(1).endswith('_e64'):
-      return eval(f"{m.group(1)}_e32{m.group(2)}", ns)
+      return fix(eval(f"{m.group(1)}_e32{m.group(2)}", ns))
     raise
 
 # ═══════════════════════════════════════════════════════════════════════════════

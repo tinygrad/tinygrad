@@ -80,6 +80,7 @@ def _make_test(f: str, arch: str, test_type: str):
         except:
           skipped += 1
       print(f"{name}: {passed} passed, {failed} failed, {skipped} skipped")
+      self.assertEqual(failed, 0, f"{name}: {failed} tests produced wrong encoding")
     elif test_type == "disasm":
       to_test = []
       for _, data in tests:
