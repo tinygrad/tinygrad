@@ -32,6 +32,9 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
       int_val = int(trunc(v)) & ((1 << (from_scalar.itemsize * 8)) - 1)
     # Convert to output type
     result = struct.unpack('<'+to_scalar.fmt, struct.pack('<'+int_fmt, int_val))[0]
+    # FTZ: flush f32 denormals to zero (for AMD GPU emulation - RDNA3 default mode)
+    if to_scalar.fmt == 'f' and (int_val & 0x7f800000) == 0 and (int_val & 0x007fffff) != 0:
+      result = 0.0
     # Don't fold if result is NaN with non-canonical bits (as_const normalizes all NaN to math.nan)
     if isinstance(result, float) and math.isnan(result):
       canonical_nan_bits = struct.unpack('<'+int_fmt, struct.pack('<'+to_scalar.fmt, math.nan))[0]
@@ -109,9 +112,9 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   ((UPat.var("x") * UPat.var("x2")) / UPat.var("x2"), lambda x,x2: x), # (x*x2)/x2 -> x
   # x*0 -> 0 or 0*x -> 0
   # if x is nan or inf it should render the nan value.
-  # NOTE: this can be wrong for loaded NaN
-  (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if x.op is Ops.CONST
-                                             and isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
+  # NOTE: this can be wrong for loaded NaN - disabled for AMD emulator correctness
+  # (UPat.var("x") * 0, lambda x: x.const_like(float("nan") if x.op is Ops.CONST
+  #                                            and isinstance(x.arg, float) and (math.isnan(x.arg) or math.isinf(x.arg)) else 0)),
   # *** cast/bitcast ***
   (UPat(Ops.CAST, name="root", src=(UPat.cvar("c"),)), lambda root, c: root.const_like(c.arg)),
   (UPat((Ops.CAST, Ops.BITCAST), name="root"), lambda root: root.src[0] if root.dtype == root.src[0].dtype else None),
