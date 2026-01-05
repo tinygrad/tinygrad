@@ -64,8 +64,6 @@ backend_test.exclude('test_qlinearmatmul_2D_int8_float32_cpu')
 backend_test.exclude('test_qlinearmatmul_3D_int8_float32_cpu')
 # tested in external_test_onnx_ops.py::TestMainOnnxOps.test_maxunpool_export_with_output_shape
 backend_test.exclude('test_maxunpool_export_with_output_shape_cpu')
-# tested in external_test_onnx_ops.py::TestMainOnnxOps.test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True
-backend_test.exclude('test_averagepool_3d_dilations_large_count_include_pad_is_1_ceil_mode_is_True_cpu')
 # tested in external_test_onnx_ops.py::TestMainOnnxOps.test_resize_downsample_scales_linear_align_corners
 backend_test.exclude('test_resize_downsample_scales_linear_align_corners_cpu')
 # tested in external_test_onnx_ops.py::TestMainOnnxOps.test_resize_downsample_scales_cubic_align_corners
@@ -174,8 +172,6 @@ backend_test.exclude('test_l1normalization_*')
 backend_test.exclude('test_l2normalization_*')
 backend_test.exclude('test_lpnormalization_*')
 backend_test.exclude('test_mod_mixed_sign_float16_cpu')
-backend_test.exclude('test_qlinearmatmul_2D_uint8_float16_cpu')
-backend_test.exclude('test_qlinearmatmul_3D_uint8_float16_cpu')
 backend_test.exclude('test_attention_3d_*')
 backend_test.exclude('test_attention_4d_*')
 
