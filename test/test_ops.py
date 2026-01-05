@@ -1171,6 +1171,8 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_einsum(self):
+    # scalar
+    helper_test_op([()], lambda a: torch.einsum('->', a), lambda a: Tensor.einsum('->', a))
     # matrix transpose
     helper_test_op([(10,10)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
     helper_test_op([(10,10)], lambda a: torch.einsum('ij -> ji', a), lambda a: Tensor.einsum('ij -> ji', a))

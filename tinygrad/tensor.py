@@ -2095,7 +2095,7 @@ class Tensor(OpMixin):
     lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in inputs]
     # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
     xs_ = [x.permute(o).reshape([v if l in letters else 1 for l,v in letter_val]).expand([v for _,v in letter_val])
-           for x,(o,letters) in zip(xs_, [list(zip(*l)) for l in lhs])]
+           for x,(o,letters) in zip(xs_, [list(zip(*l)) if l else ((), ()) for l in lhs])]
 
     # ordinal encode the output alphabet
     rhs_order = argsort(argsort(list(output)))
