@@ -12,8 +12,8 @@ PDF_URLS = {
 # Generic PDF extraction tools
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def extract(url: str) -> list[list[tuple[float, float, str]]]:
-  """Extract positioned text from PDF. Returns list of text elements (x, y, text) per page."""
+def extract(url: str) -> list[list[tuple[float, float, str, str]]]:
+  """Extract positioned text from PDF. Returns list of text elements (x, y, text, font) per page."""
   data = fetch(url).read_bytes()
 
   # Parse xref table to locate objects
@@ -39,22 +39,23 @@ def extract(url: str) -> list[list[tuple[float, float, str]]]:
     if b'/Type /Page' not in data[xref[n]:xref[n]+500]: continue
     if not (m := re.search(rb'/Contents (\d+) 0 R', data[xref[n]:xref[n]+500])): continue
     stream = get_stream(int(m.group(1))).decode('latin-1')
-    elements = []
+    elements, font = [], ''
     for bt in re.finditer(r'BT(.*?)ET', stream, re.S):
       x, y = 0.0, 0.0
-      for m in re.finditer(r'([\d.+-]+) ([\d.+-]+) Td|[\d.+-]+ [\d.+-]+ [\d.+-]+ [\d.+-]+ ([\d.+-]+) ([\d.+-]+) Tm|<([0-9A-Fa-f]+)>.*?Tj|\[([^\]]+)\] TJ', bt.group(1)):
-        if m.group(1): x, y = x + float(m.group(1)), y + float(m.group(2))
-        elif m.group(3): x, y = float(m.group(3)), float(m.group(4))
-        elif m.group(5) and (t := bytes.fromhex(m.group(5)).decode('latin-1')).strip(): elements.append((x, y, t))
-        elif m.group(6) and (t := ''.join(bytes.fromhex(h).decode('latin-1') for h in re.findall(r'<([0-9A-Fa-f]+)>', m.group(6)))).strip(): elements.append((x, y, t))
+      for m in re.finditer(r'(/F[\d.]+) [\d.]+ Tf|([\d.+-]+) ([\d.+-]+) Td|[\d.+-]+ [\d.+-]+ [\d.+-]+ [\d.+-]+ ([\d.+-]+) ([\d.+-]+) Tm|<([0-9A-Fa-f]+)>.*?Tj|\[([^\]]+)\] TJ', bt.group(1)):
+        if m.group(1): font = m.group(1)
+        elif m.group(2): x, y = x + float(m.group(2)), y + float(m.group(3))
+        elif m.group(4): x, y = float(m.group(4)), float(m.group(5))
+        elif m.group(6) and (t := bytes.fromhex(m.group(6)).decode('latin-1')).strip(): elements.append((x, y, t, font))
+        elif m.group(7) and (t := ''.join(bytes.fromhex(h).decode('latin-1') for h in re.findall(r'<([0-9A-Fa-f]+)>', m.group(7)))).strip(): elements.append((x, y, t, font))
     pages.append(sorted(elements, key=lambda e: (-e[1], e[0])))
   return pages
 
-def extract_tables(pages: list[list[tuple[float, float, str]]]) -> dict[int, tuple[str, list[list[str]]]]:
+def extract_tables(pages: list[list[tuple[float, float, str, str]]]) -> dict[int, tuple[str, list[list[str]]]]:
   """Extract numbered tables from PDF pages. Returns {table_num: (title, rows)} where rows is list of cells per row."""
   def group_by_y(texts, key=lambda y: round(y)):
     by_y: dict[int, list[tuple[float, float, str]]] = {}
-    for x, y, t in texts:
+    for x, y, t, _ in texts:
       by_y.setdefault(key(y), []).append((x, y, t))
     return by_y
 
@@ -72,8 +73,8 @@ def extract_tables(pages: list[list[tuple[float, float, str]]]) -> dict[int, tup
   for num, title, start_page, header_y in table_positions:
     rows, col_xs = [], None
     for page_idx in range(start_page, len(pages)):
-      page_texts = [(x, y, t) for x, y, t in pages[page_idx] if 30 < y < 760 and (page_idx > start_page or y < header_y)]
-      for items in sorted(group_by_y(page_texts, key=lambda y: round(y / 5)).values(), key=lambda items: -items[0][1]):
+      page_texts = [(x, y, t) for x, y, t, _ in pages[page_idx] if 30 < y < 760 and (page_idx > start_page or y < header_y)]
+      for items in sorted(group_by_y([(x, y, t, '') for x, y, t in page_texts], key=lambda y: round(y / 5)).values(), key=lambda items: -items[0][1]):
         xs = tuple(sorted(round(x) for x, _, _ in items))
         if col_xs is None:
           if len(xs) < 2: continue  # Skip single-column rows before table starts
@@ -123,6 +124,40 @@ def extract_ins(tables: dict[int, tuple[str, list[list[str]]]]) -> tuple[dict[st
         fields.append((field_name, hi, lo))
     if fields: formats[fmt_name] = fields
   return formats, encodings
+
+def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[str, dict[int, str]]) -> dict[tuple[str, int], str]:
+  """Extract pseudocode for instructions. Returns {(name, opcode): pseudocode}."""
+  # Build lookup from instruction name to opcode
+  name_to_op = {name: op for ops in enums.values() for op, name in ops.items()}
+
+  # First pass: find all instruction headers across all pages
+  all_instructions: list[tuple[int, float, str, int]] = []  # (page_idx, y, name, opcode)
+  for page_idx, page in enumerate(pages):
+    by_y: dict[int, list[tuple[float, str]]] = {}
+    for x, y, t, _ in page:
+      by_y.setdefault(round(y), []).append((x, t))
+    for y, items in sorted(by_y.items(), reverse=True):
+      left = [(x, t) for x, t in items if 55 < x < 65]
+      right = [(x, t) for x, t in items if 535 < x < 550]
+      if left and right and left[0][1] in name_to_op and right[0][1].isdigit():
+        all_instructions.append((page_idx, y, left[0][1], int(right[0][1])))
+
+  # Second pass: extract pseudocode between consecutive instructions
+  pcode: dict[tuple[str, int], str] = {}
+  for i, (page_idx, y, name, opcode) in enumerate(all_instructions):
+    # Get end boundary from next instruction
+    if i + 1 < len(all_instructions):
+      next_page, next_y = all_instructions[i + 1][0], all_instructions[i + 1][1]
+    else:
+      next_page, next_y = page_idx, 0
+    # Collect F6 text from current position to next instruction
+    lines = []
+    for p in range(page_idx, next_page + 1):
+      start_y = y if p == page_idx else 800
+      end_y = next_y if p == next_page else 0
+      lines.extend((y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y)
+    if lines: pcode[(name, opcode)] = '\n'.join(t for _, t in sorted(lines, reverse=True))
+  return pcode
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Write autogen files
@@ -192,14 +227,47 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
   with open(path, "w") as f:
     f.write("\n".join(lines))
 
+def write_pcode(pcode: dict[tuple[str, int], str], enums: dict[str, dict[int, str]], arch: str, path: str):
+  """Write str_pcode.py file from extracted pseudocode."""
+  # Build mapping from (name, opcode) to enum class name
+  op_to_enum: dict[tuple[str, int], str] = {}
+  for fmt_name, ops in enums.items():
+    for opcode, name in ops.items():
+      op_to_enum[(name, opcode)] = f"{fmt_name}Op"
+
+  # Group pseudocode by enum class
+  by_enum: dict[str, list[tuple[str, int, str]]] = {}
+  for (name, opcode), code in pcode.items():
+    if enum_name := op_to_enum.get((name, opcode)):
+      by_enum.setdefault(enum_name, []).append((name, opcode, code))
+
+  # Generate file
+  enum_names = sorted(by_enum.keys())
+  lines = [f"# autogenerated by pdf2.py - do not edit", f"# to regenerate: python -m extra.assembly.amd.pdf2",
+           "# ruff: noqa: E501", f"from extra.assembly.amd.autogen.{arch}.enum import {', '.join(enum_names)}", ""]
+  for enum_name in enum_names:
+    lines.append(f"{enum_name}_PCODE = {{")
+    for name, opcode, code in sorted(by_enum[enum_name], key=lambda x: x[1]):
+      lines.append(f"  {enum_name}.{name}: {code!r},")
+    lines.append("}\n")
+  lines.append("PSEUDOCODE_STRINGS = {")
+  for enum_name in enum_names:
+    lines.append(f"  {enum_name}: {enum_name}_PCODE,")
+  lines.append("}")
+  with open(path, "w") as f:
+    f.write("\n".join(lines))
+
 if __name__ == "__main__":
   import pathlib
   for arch, url in PDF_URLS.items():
     print(f"Processing {arch}...")
-    tables = extract_tables(extract(url))
+    pages = extract(url)
+    tables = extract_tables(pages)
     enums = extract_enums(tables)
     formats, encodings = extract_ins(tables)
+    pcode = extract_pcode(pages, enums)
     base = pathlib.Path(__file__).parent / "autogen" / arch
     write_enums(enums, arch, base / "enum.py")
     write_ins(formats, encodings, enums, arch, base / "ins.py")
-    print(f"  {len(tables)} tables -> {base}")
+    write_pcode(pcode, enums, arch, base / "str_pcode.py")
+    print(f"  {len(tables)} tables, {len(pcode)} pcode -> {base}")
