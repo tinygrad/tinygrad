@@ -9,16 +9,16 @@ PDF_URLS = {
 }
 
 def extract(url: str) -> list[list[tuple[float, float, str]]]:
-  """Extract text elements from PDF grouped by page. Returns list of pages, each page is list of (x, y, text)."""
+  """Extract positioned text from PDF. Returns list of text elements (x, y, text) per page."""
   data = fetch(url).read_bytes()
 
-  # Parse xref table
+  # Parse xref table to locate objects
   xref: dict[int, int] = {}
   pos = int(re.search(rb'startxref\s+(\d+)', data).group(1)) + 4
   while data[pos:pos+7] != b'trailer':
     while data[pos:pos+1] in b' \r\n': pos += 1
     line_end = data.find(b'\n', pos)
-    start_obj, count = int(data[pos:line_end].split()[0]), int(data[pos:line_end].split()[1])
+    start_obj, count = map(int, data[pos:line_end].split()[:2])
     pos = line_end + 1
     for i in range(count):
       if data[pos+17:pos+18] == b'n' and (off := int(data[pos:pos+10])) > 0: xref[start_obj + i] = off
@@ -26,81 +26,90 @@ def extract(url: str) -> list[list[tuple[float, float, str]]]:
 
   def get_stream(n: int) -> bytes:
     obj = data[xref[n]:data.find(b'endobj', xref[n])]
-    start = obj.find(b'stream\n') + 7
-    raw = obj[start:obj.find(b'\nendstream')]
+    raw = obj[obj.find(b'stream\n') + 7:obj.find(b'\nendstream')]
     return zlib.decompress(raw) if b'/FlateDecode' in obj else raw
 
-  # Find page content streams
-  pages = [int(m.group(1)) for n in sorted(xref) if b'/Type /Page' in data[xref[n]:xref[n]+500] and (m := re.search(rb'/Contents (\d+) 0 R', data[xref[n]:xref[n]+500]))]
-
-  # Extract text from each page
-  result = []
-  for page_obj in pages:
+  # Find page content streams and extract text
+  pages = []
+  for n in sorted(xref):
+    if b'/Type /Page' not in data[xref[n]:xref[n]+500]: continue
+    if not (m := re.search(rb'/Contents (\d+) 0 R', data[xref[n]:xref[n]+500])): continue
+    stream = get_stream(int(m.group(1))).decode('latin-1')
     elements = []
-    for bt in re.finditer(r'BT(.*?)ET', get_stream(page_obj).decode('latin-1'), re.S):
+    for bt in re.finditer(r'BT(.*?)ET', stream, re.S):
       x, y = 0.0, 0.0
       for m in re.finditer(r'([\d.+-]+) ([\d.+-]+) Td|[\d.+-]+ [\d.+-]+ [\d.+-]+ [\d.+-]+ ([\d.+-]+) ([\d.+-]+) Tm|<([0-9A-Fa-f]+)>.*?Tj|\[([^\]]+)\] TJ', bt.group(1)):
         if m.group(1): x, y = x + float(m.group(1)), y + float(m.group(2))
         elif m.group(3): x, y = float(m.group(3)), float(m.group(4))
         elif m.group(5) and (t := bytes.fromhex(m.group(5)).decode('latin-1')).strip(): elements.append((x, y, t))
         elif m.group(6) and (t := ''.join(bytes.fromhex(h).decode('latin-1') for h in re.findall(r'<([0-9A-Fa-f]+)>', m.group(6)))).strip(): elements.append((x, y, t))
-    result.append(sorted(elements, key=lambda e: (-e[1], e[0])))
-  return result
+    pages.append(sorted(elements, key=lambda e: (-e[1], e[0])))
+  return pages
 
 def extract_tables(pages: list[list[tuple[float, float, str]]]) -> dict[int, tuple[str, list[list[str]]]]:
   """Extract numbered tables from PDF pages. Returns {table_num: (title, rows)} where rows is list of cells per row."""
-  # Find all table headers with their positions
-  table_positions: list[tuple[int, str, int, float]] = []  # (num, title, page, y)
-  for page_idx, page in enumerate(pages):
-    for x, y, t in page:
-      if m := re.match(r'Table (\d+)\. (.+)', t):
-        table_positions.append((int(m.group(1)), m.group(2), page_idx, y))
+  # Merge text elements on same line for finding headers
+  def merge_lines(texts):
+    by_y: dict[int, list[tuple[float, str]]] = {}
+    for x, y, t in texts:
+      by_y.setdefault(round(y), []).append((x, t))
+    return [(float(y), ''.join(t for _, t in sorted(items))) for y, items in by_y.items()]
 
-  table_positions.sort(key=lambda t: (t[2], -t[3]))  # sort by page, then by y descending
+  # Group elements into rows by Y position, return list of (y, x_positions, row_texts) sorted by y descending
+  def group_rows(texts):
+    by_y: dict[int, list[tuple[float, float, str]]] = {}
+    for x, y, t in texts:
+      by_y.setdefault(round(y / 5), []).append((x, y, t))
+    rows = []
+    for items in by_y.values():
+      avg_y = sum(y for _, y, _ in items) / len(items)
+      xs = tuple(sorted(round(x) for x, _, _ in items))
+      row = [t for _, t in sorted((x, t) for x, _, t in items)]
+      rows.append((avg_y, xs, row))
+    return sorted(rows, key=lambda r: -r[0])  # Sort by Y descending (top to bottom)
 
+  # Find all table headers
+  table_positions = []
+  for page_idx, texts in enumerate(pages):
+    for y, line in merge_lines(texts):
+      if m := re.search(r'Table (\d+)\. (.+)', line):
+        table_positions.append((int(m.group(1)), m.group(2).strip(), page_idx, y))
+  table_positions.sort(key=lambda t: (t[2], -t[3]))
+
+  # For each table, find rows with matching X positions
   result: dict[int, tuple[str, list[list[str]]]] = {}
-  for i, (num, title, start_page, start_y) in enumerate(table_positions):
-    # Find end boundary
-    if i + 1 < len(table_positions):
-      _, _, end_page, end_y = table_positions[i + 1]
-    else:
-      end_page, end_y = len(pages) - 1, 0
-
-    # Collect elements for this table (below header, above next table)
-    elements: list[tuple[float, float, str]] = []
-    for page_idx in range(start_page, min(end_page + 1, len(pages))):
-      for x, y, t in pages[page_idx]:
-        # Skip headers/footers
-        if y < 30 or y > 760: continue
-        if re.match(r'^\d+ of \d+$', t): continue
-        if t.startswith('"RDNA') or t.startswith('CDNA') or 'Instruction Set Architecture' in t: continue
-
-        # On start page: only elements below the table header
-        if page_idx == start_page and y >= start_y: continue
-        # On end page: only elements above the next table header
-        if page_idx == end_page and y <= end_y: continue
-
-        elements.append((x, y, t))
-
-    if not elements: continue
-
-    # Group into rows by Y position
-    elements.sort(key=lambda e: (-e[1], e[0]))
-    rows: list[list[tuple[float, str]]] = []
-    current_row: list[tuple[float, str]] = []
-    current_y: float | None = None
-    for x, y, t in elements:
-      if current_y is None or abs(y - current_y) < 5:
-        current_row.append((x, t))
-        current_y = y if current_y is None else current_y
+  for num, title, start_page, header_y in table_positions:
+    rows, col_xs = [], None
+    for page_idx in range(start_page, len(pages)):
+      texts = pages[page_idx]
+      # Filter to elements below header on start page, exclude page header/footer
+      page_texts = [(x, y, t) for x, y, t in texts if 30 < y < 760 and (page_idx > start_page or y < header_y)]
+      for y, xs, row in group_rows(page_texts):
+        if col_xs is None:
+          if len(xs) < 2: continue  # Skip single-column rows before table starts
+          col_xs = xs  # First multi-column row defines column positions
+        elif not any(c in xs for c in col_xs[:2]): break  # Row missing first columns = end of table
+        rows.append(row)
       else:
-        if current_row: rows.append(sorted(current_row, key=lambda e: e[0]))
-        current_row, current_y = [(x, t)], y
-    if current_row: rows.append(sorted(current_row, key=lambda e: e[0]))
-
-    result[num] = (title, [[t for _, t in row] for row in rows])
-
+        continue  # No break = continue to next page
+      break  # Break from inner loop = break from outer loop
+    if rows: result[num] = (title, rows)
   return result
+
+def generate_enums(tables: dict[int, tuple[str, list[list[str]]]]) -> dict[str, dict[int, str]]:
+  """Parse AMD ISA opcode tables into {enum_name: {opcode: name}} dicts."""
+  enums: dict[str, dict[int, str]] = {}
+  for num, (title, rows) in tables.items():
+    if not (m := re.match(r'(\w+) (?:Y-)?Opcodes', title)): continue
+    fmt_name = 'VOPD' if 'Y-Opcodes' in title else m.group(1)
+    ops: dict[int, str] = {}
+    for row in rows:
+      # Opcode rows have pairs: (number, NAME, number, NAME, ...) - filter to valid pairs only
+      for i in range(0, len(row) - 1, 2):
+        if row[i].isdigit() and re.match(r'^[A-Z][A-Z0-9_]+$', row[i + 1]):
+          ops[int(row[i])] = row[i + 1]
+    if ops: enums[fmt_name + 'Op'] = ops
+  return enums
 
 if __name__ == "__main__":
   import sys, json
@@ -113,4 +122,4 @@ if __name__ == "__main__":
       for row in rows[:5]: print(f"  {row}")
       if len(rows) > 5: print(f"  ... ({len(rows) - 5} more)")
   else:
-    print(json.dumps([{"page": i, "elements": [{"x": x, "y": y, "text": t} for x, y, t in p]} for i, p in enumerate(pages)]))
+    print(json.dumps([{"page": i, "texts": len(texts)} for i, texts in enumerate(pages)]))
