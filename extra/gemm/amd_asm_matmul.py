@@ -166,9 +166,6 @@ V_LDS_B_ADDR = 145                            # single base register for B store
 V_LDS_B_DATA = list(range(163, 171))          # 8 data registers for B prefetch (v163-170)
 
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
-# Prefetch into DATA regs (v171-182, spanning A_DATA[4:8] and B_DATA[0:8])
-# First 2 pairs from B address, next 4 pairs from A address
-# Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
 # First 2 pairs from B prefetch pointers (s[32:39]), next 4 pairs from A prefetch pointers (s[40:55])
 PREFETCH_LOADS = [(V_LDS_A_DATA[4+2*i], V_LDS_A_DATA[4+2*i+1], V_GLOBAL_B_ADDR, S_PREFETCH_B+8+4*i, S_PREFETCH_B+10+4*i) for i in range(2)] + \
                  [(V_LDS_B_DATA[2*(i-2)], V_LDS_B_DATA[2*(i-2)+1], V_GLOBAL_A_ADDR, S_PREFETCH_A+4*(i-2), S_PREFETCH_A+2+4*(i-2)) for i in range(2, 6)]
@@ -356,47 +353,52 @@ def build_kernel(arch='gfx1100'):
   # ===========================================================================
   # LDS store address computation (bank-conflict-avoiding swizzle)
   # ===========================================================================
-  # Computes v[141-148]: 8 B-tile row store addresses with swizzling
-  # Formula: v[141+i] = LDS_A_STRIDE * (lane_id % 8) + row_base[i]
-  # The row_base values are swizzled based on (lane_id >> 3) to avoid bank conflicts
+  # This section computes LDS store addresses with a swizzle pattern to avoid bank conflicts.
+  # Key outputs:
+  #   v[8]: A-tile initial store base (used only for initial stores with stride64)
+  #   V_LDS_B_ADDR (v145): B-tile store base (used for both initial and main loop)
+  #   V_LANE_DIV8_X4 (v135): (lane_id >> 3) << 2 for epilogue
   #
-  # Also computes v[8]: A-tile store base address (used with stride64 stores)
-  # And v[V_LANE_DIV8_X4]: (lane_id >> 3) << 2 for later use
+  # The swizzle ensures that threads in the same wavefront write to different LDS banks.
+  # Formula: swizzled_addr = base + (lane_id & 7) * LDS_A_STRIDE + swizzle_offset
+  # where swizzle_offset depends on (lane_id >> 3) to distribute across banks.
 
-  # Temporary registers for row offset computation
-  lds_r = [10, 11, 14, 15, 16, 17, 18]  # row offsets before swizzle
-  lds_t = [19, 20, 21, 22, 32, 33, 34]  # masked values for swizzle
+  # v[22] = tile_y | (lane_id >> 3) from prologue, used as base for row offsets
+  # Compute 7 row offsets for B-tile rows 1-7 (row 0 computed separately in v[9])
+  k.emit(v_add_nc_u32_e32(v[9], s[S_LOOP_CTR], v[22]))  # row 0 base (S_LOOP_CTR=0)
+  for i in range(7): k.emit(v_or_b32_e32(v[10 + i if i < 2 else 12 + i], 16 * (i + 1), v[22]))  # rows 1-7
 
-  # Compute raw row offsets: v[lds_r[i]] = 16*(i+1) | v[22]
-  k.emit(v_add_nc_u32_e32(v[9], s[S_LOOP_CTR], v[22]))
-  for i, r in enumerate(lds_r): k.emit(v_or_b32_e32(v[r], 16 * (i + 1), v[22]))
-
-  # Extract sign bit of workgroup_x for swizzle (always 0 for valid workgroups)
+  # Extract sign bit of workgroup_x (always 0 for valid workgroups, used for masking)
   k.emit(s_bfe_i32(s[S_LOOP_BOUND], s[S_WORKGROUP_X], 0x10018))
   k.emit(v_and_b32_e32(v[9], ADDR_MASK, v[9]))
   k.emit(s_lshr_b32(s[S_LOOP_BOUND], s[S_LOOP_BOUND], 25))
 
-  # Compute masked versions for bank conflict avoidance
+  # Compute masked row offsets for bank conflict avoidance pattern
+  # Pattern: v[row] = row_val - (row_val & ADDR_MASK) extracts lower bits
   k.emit(v_add_nc_u32_e32(v[19], s[S_LOOP_CTR], v[10]))
-  k.emit(v_add_nc_u32_e32(v[8], s[S_LOOP_BOUND], v[1]))
-  for d, r in zip([20, 21, 32, 33, 34, 35], lds_r[1:]): k.emit(v_add_nc_u32_e32(v[d], s[S_LOOP_CTR], v[r]))
+  k.emit(v_add_nc_u32_e32(v[8], s[S_LOOP_BOUND], v[1]))  # A-tile base computation
+  for d, r in zip([20, 21, 32, 33, 34, 35], [11, 14, 15, 16, 17, 18]):
+    k.emit(v_add_nc_u32_e32(v[d], s[S_LOOP_CTR], v[r]))
   k.emit(v_and_b32_e32(v[8], ADDR_MASK, v[8]))
-  k.emit(v_sub_nc_u32_e32(v[9], v[22], v[9]))
-  for d, s_ in zip(lds_t, lds_t[1:] + [35]): k.emit(v_and_b32_e32(v[d], ADDR_MASK, v[s_]))
-  k.emit(v_sub_nc_u32_e32(v[8], v[1], v[8]))
+  k.emit(v_sub_nc_u32_e32(v[9], v[22], v[9]))  # row 0 swizzle offset
+  for d, s_ in zip([19, 20, 21, 22, 32, 33, 34], [20, 21, 22, 32, 33, 34, 35]):
+    k.emit(v_and_b32_e32(v[d], ADDR_MASK, v[s_]))
+  k.emit(v_sub_nc_u32_e32(v[8], v[1], v[8]))  # A-tile swizzle
 
-  # Apply swizzle and scale to byte offsets
-  k.emit(v_lshlrev_b32_e32(v[9], 2, v[9]))
-  for r, t in zip(lds_r, lds_t): k.emit(v_sub_nc_u32_e32(v[r], v[r], v[t]))
+  # Apply swizzle offsets and scale to byte offsets
+  k.emit(v_lshlrev_b32_e32(v[9], 2, v[9]))  # row 0 offset * 4
+  for r, t in zip([10, 11, 14, 15, 16, 17, 18], [19, 20, 21, 22, 32, 33, 34]):
+    k.emit(v_sub_nc_u32_e32(v[r], v[r], v[t]))  # rows 1-7 swizzle
   k.emit(v_bfe_u32(v[2], v[0], 3, 2))  # v[2] = (lane_id >> 3) & 3
-  k.emit(v_lshlrev_b32_e32(v[8], 2, v[8]))
+  k.emit(v_lshlrev_b32_e32(v[8], 2, v[8]))  # A-tile base * 4
 
-  # Compute single B-tile base address (use 16-bit offsets 0,64,128,192,256,320,384,448)
+  # Compute B-tile base address: LDS_A_STRIDE * (lane_id % 8) + row0_offset
   k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[9]))
-  lds_bases = [9] + lds_r[:-1]  # base offsets for 8 rows
-  for d, r in zip(lds_bases, lds_r): k.emit(v_lshlrev_b32_e32(v[d], 2, v[r]))
+  # Scale row offsets 1-7 to byte offsets (row 0 already in v[9])
+  for d, r in zip([9, 10, 11, 14, 15, 16, 17], [10, 11, 14, 15, 16, 17, 18]):
+    k.emit(v_lshlrev_b32_e32(v[d], 2, v[r]))
   k.emit(v_lshlrev_b32_e32(v[V_LANE_DIV8_X4], 2, v[2]))
-  k.emit(v_add_nc_u32_e32(v[8], 0x80, v[8]))  # A-tile base + 128
+  k.emit(v_add_nc_u32_e32(v[8], 0x80, v[8]))  # A-tile initial store base + 128
 
   # Store initial tile data to LDS
   k.waitcnt(vm=0)
@@ -489,12 +491,13 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_cbranch_vccnz(simm16=0)); k.branch_to('LOOP_INC')
 
   # Store prefetched data to LDS
-  # NOTE: Naming is confusing - V_LDS_B_DATA holds A matrix data, V_LDS_A_DATA holds B matrix data
-  # A tile (stride64 stores via V_LDS_A_ADDR=v153): from V_LDS_B_DATA (v163-170)
-  for i in range(4):
+  # NOTE: Register naming reflects LDS tile organization, not source matrix:
+  #   V_LDS_A_DATA (v155-162) holds data that goes to LDS A-tile region
+  #   V_LDS_B_DATA (v163-170) holds data that goes to LDS B-tile region
+  # The data sources are swapped: A-tile receives B matrix rows, B-tile receives A matrix columns
+  for i in range(4):  # A tile: 8 values via 4 stride64 stores
     k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
-  # B tile (single base with 16-bit offsets): from V_LDS_B_DATA (v163-170)
-  for i in range(8):
+  for i in range(8):  # B tile: 8 values via 8 scalar stores with 64-byte spacing
     offset = i * 64
     k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
 
