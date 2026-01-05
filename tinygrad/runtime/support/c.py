@@ -1,6 +1,5 @@
-import ctypes, functools, os, pathlib, re, struct, sys, sysconfig
-from tinygrad.helpers import cached_classproperty, ceildiv, getenv, mv_address, to_mv, DEBUG, OSX, WIN
-from _ctypes import _SimpleCData
+import ctypes, functools, os, pathlib, re, sys, sysconfig, typing
+from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -36,131 +35,27 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
   return _CEnum
 
-class _CData:
-  __slots__, SIZE = ('_mem_',), 0
-
-  def __init__(self, src=None):
-    if src is None: self._mem_ = memoryview(bytearray(self.SIZE))
-    else: self._mem_ = src if isinstance(src, memoryview) else (to_mv(src, self.SIZE) if isinstance(src, int) else memoryview(src).cast('B'))
-
-  def __buffer__(self, flags): return self._mem_
-
-  @property
-  def addr(self): return mv_address(self._mem_)
-
-  @cached_classproperty
-  def _shadow(self): return type(f'{self.__class__.__name__}_shadow', (ctypes.Structure,), {'_fields_': [('a', ctypes.c_char * self.SIZE)]})
-
-  @classmethod
-  def from_param(cls, obj):
-    if obj is None: return None
-    assert isinstance(obj, cls)
-    # TODO: remove this
-    return cls._shadow.from_buffer(obj._mem_)
-
-  @classmethod
-  def from_buffer(cls, src):
-    _CData.__init__(ret:=cls.__new__(cls), src)
-    return ret
-
-  @classmethod
-  def from_buffer_copy(cls, src): return cls.from_buffer(bytearray(src))
-
-class Union(_CData): pass
-class Struct(_CData):
-  __slots__ = ('_fields_',)
+def record(cls):
   def __init__(self, *args, **kwargs):
-    super().__init__()
-    for f,v in [*zip(self._fields_, args), *kwargs.items()]: setattr(self, f, v)
+    ctypes.Structure.__init__(self)
+    for f,v in [*zip(self._real_fields_, args), *kwargs.items()]: setattr(self, f, v)
 
-@functools.cache
-def Array(typ, cnt):
-  stride = ctypes.sizeof(typ) if (prim:=issubclass(typ, _SimpleCData)) else typ.SIZE
+  struct = type(cls.__name__, (ctypes.Structure,), {'_fields_': [('_mem_', ctypes.c_char * cls.SIZE)], '__init__':__init__})
+  hints = typing.get_type_hints(cls, include_extras=True, localns={cls.__name__:struct})
+  for nm, typ in hints.items(): setattr(struct, nm, field(typ.__origin__, *typ.__metadata__))
+  setattr(struct, '_real_fields_', tuple(hints.keys()))
+  return struct
 
-  def chkidx(idx):
-    if idx >= cnt or idx <= -cnt: raise IndexError(f"{idx} out of range")
-    return cnt + idx if idx < 0 else idx
-
-  class _Array(_CData):
-    SIZE = stride * cnt
-
-    def __init__(self, src=None):
-      if isinstance(src, (list, tuple)):
-        super().__init__()
-        self[:] = src
-      else: super().__init__(src)
-
-    def __len__(self): return cnt
-
-    def __getitem__(self, idx):
-      offset = chkidx(idx) * stride
-      return typ.from_buffer(self._mem_[offset:offset+stride]).value if prim else typ(src=self._mem_[offset:offset+stride])
-
-    def __setitem__(self, idx, v):
-      if isinstance(idx, slice):
-        for i, v in zip(range(*idx.indices(cnt)), v): self[i] = v
-        return
-      offset = chkidx(idx) * stride
-      if prim: v = typ(v)
-      self._mem_[offset:offset+stride] = bytes(v)
-
-    def __iter__(self):
-      for i in range(cnt): yield self[i]
-
-    @classmethod
-    def from_param(cls, obj):
-      if obj is None: return None
-      assert isinstance(obj, cls)
-      return ctypes.c_void_p(mv_address(obj._mem_))
-
-  _Array.__name__ = f"Array_{typ.__name__}_{cnt}"
-  return _Array
-
-class _Pointer(_CData):
-  SIZE, _shadow = struct.calcsize("P"), ctypes.c_void_p
-
-  def __init__(self, src=0):
-    super().__init__(bytearray((src if isinstance(src, int) else ctypes.addressof(src) if isinstance(src, _SimpleCData)
-                                else src.addr).to_bytes(self.SIZE, sys.byteorder)))
-    if isinstance(src, _CData): self.__dict__["contents"] = src
-
-  @property
-  def value(self): return struct.unpack("P", self._mem_)[0]
-
-  @classmethod
-  def from_param(cls, obj): return obj if isinstance(obj, bytes) else ctypes.c_void_p(obj.value)
-
-  @classmethod
-  def from_buffer(cls, src): return cls(src)
-
-@functools.cache
-def Pointer(typ):
-  if typ is None: return ctypes.c_void_p
-
-  sz = ctypes.sizeof(typ) if (prim:=issubclass(typ, _SimpleCData)) else typ.SIZE
-  class PTR(_Pointer):
-    @property
-    def contents(self):
-      assert self.value, "null pointer dereference"
-      return typ.from_buffer(to_mv(self.value, sz)) if prim else typ.from_buffer(self.value)
-
-  PTR.__name__ = f"Pointer_{typ.__name__}"
-  return PTR
-
-# replace this with a method once ctypes is removed completely
-def pointer(val): return Pointer(val.__class__)(val)
-
-def field(off:int, typ:type[_CData, _SimpleCData], bit_width=None, bit_off=0):
+def field(typ, off:int, bit_width=None, bit_off=0):
   if bit_width is not None:
     sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
     # FIXME: signedness
-    return property(lambda self: (int.from_bytes(self._mem_[sl], sys.byteorder) >> bit_off) & mask,
-                    lambda self,v: self._mem_.__setitem__(sl, ((int.from_bytes(self._mem_[sl])&set_mask)|(v << bit_off)).to_bytes(sz, sys.byteorder)))
+    return property(lambda self: (int.from_bytes(memoryview(self).cast('B')[sl], sys.byteorder) >> bit_off) & mask,
+                    lambda self,v: memoryview(self).cast('B').__setitem__(sl, ((int.from_bytes(self._mem_[sl])&set_mask)|(v << bit_off)).to_bytes(sz, sys.byteorder)))
 
-  sl = slice(off, off + (typ.SIZE if issubclass(typ, _CData) else ctypes.sizeof(typ)))
-  if issubclass(typ, _CData): return property(lambda self: typ.from_buffer(self._mem_[sl]),
-                                                lambda self, v: self._mem_.__setitem__(sl, bytes(v if isinstance(v, _CData) else typ(v))))
-  return property(lambda self: typ.from_buffer(self._mem_[sl]).value, lambda self, v: self._mem_.__setitem__(sl, bytes(typ(v))))
+  sl = slice(off, off + ctypes.sizeof(typ))
+  return property(lambda self: typ.from_buffer(memoryview(self).cast('B')[sl]),
+                  lambda self, v: memoryview(self).cast('B').__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v))))
 
 class DLL(ctypes.CDLL):
   @staticmethod
@@ -198,20 +93,14 @@ class DLL(ctypes.CDLL):
     elif DEBUG >= 3: print(f"loading {nm} failed: not found on system")
 
   @functools.cache
-  def _get_func(self, name:str, args:tuple[_SimpleCData|_CData], res:_SimpleCData|_CData):
-    (fn:=getattr(self, name)).argtypes, fn.restype = args, (res if res is None or issubclass(res, _SimpleCData) else res._shadow)
+  def _get_func(self, name:str, args:tuple, res):
+    (fn:=getattr(self, name)).argtypes, fn.restype = args, res
     return fn
 
-  def bind(self, argtypes:tuple[_SimpleCData|_CData], restype:_SimpleCData|_CData):
-    def wrap(fn):
-      def wrapper(*args):
-        def process(a, t):
-          if isinstance(a, bytes): return a
-          return pointer(a) if issubclass(t, _Pointer) and not isinstance(a, _Pointer) else a
-        out = self._get_func(fn.__name__, argtypes, restype)(*(process(a, t) for a,t in zip(args, argtypes)))
-        return out if restype is None or issubclass(restype, _SimpleCData) else restype.from_buffer(out)
-      return wrapper
-    return wrap
+  def bind(self, fn):
+    restype = (hints:=typing.get_type_hints(fn)).pop('return', None)
+    argtypes = tuple(hints.values())
+    return lambda *args: self._get_func(fn.__name__, argtypes, restype)(*args)
 
   def __getattr__(self, nm):
     if not self.loaded: raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))

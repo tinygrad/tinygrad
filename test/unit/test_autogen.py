@@ -1,6 +1,7 @@
 import ctypes, struct, subprocess, tempfile, unittest
+from typing import Annotated
 from tinygrad.helpers import WIN
-from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, field, pointer
+from tinygrad.runtime.support.c import DLL, record
 from tinygrad.runtime.support.autogen import gen
 
 class TestAutogen(unittest.TestCase):
@@ -23,9 +24,14 @@ class TestAutogen(unittest.TestCase):
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_struct_interop(self):
-    class Baz(Struct): SIZE = 8
-    Baz._fields_ = ['a', 'b', 'c', 'd']
-    Baz.a, Baz.b, Baz.c, Baz.d = field(0, ctypes.c_int, 30), field(3, ctypes.c_int, 30, 6), field(7, ctypes.c_int, 2, 4), field(7, ctypes.c_int, 2, 6)
+    @record
+    class Baz:
+      SIZE = 8
+      a: Annotated[ctypes.c_int, 0, 30]
+      b: Annotated[ctypes.c_int, 3, 30, 6]
+      c: Annotated[ctypes.c_int, 7, 2, 4]
+      d: Annotated[ctypes.c_int, 7, 2, 6]
+
     src = '''
       struct __attribute__((packed)) baz {
         int a:30;
@@ -40,16 +46,24 @@ class TestAutogen(unittest.TestCase):
     '''
     dll = self.compile(src)
     b = Baz(0xAA000, 0x00BB0, 0, 1)
-    @dll.bind((Baz,), ctypes.c_int)
-    def test(_): ...
+    @dll.bind
+    def test(x:Baz) -> ctypes.c_int: ...
     self.assertEqual(test(b), b.a + b.b + b.c + b.d)
 
   # https://github.com/python/cpython/issues/90914
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_bitfield_interop(self):
-    class Baz(Struct): SIZE = 1
-    Baz._fields_ = [chr(ord('a') + i) for i in range(8)]
-    for i in range(8): setattr(Baz, chr(ord('a') + i), field(0, ctypes.c_bool, 1, i))
+    @record
+    class Baz:
+      SIZE = 1
+      a: Annotated[ctypes.c_bool, 0, 1, 0]
+      b: Annotated[ctypes.c_bool, 0, 1, 1]
+      c: Annotated[ctypes.c_bool, 0, 1, 2]
+      d: Annotated[ctypes.c_bool, 0, 1, 3]
+      e: Annotated[ctypes.c_bool, 0, 1, 4]
+      f: Annotated[ctypes.c_bool, 0, 1, 5]
+      g: Annotated[ctypes.c_bool, 0, 1, 6]
+      h: Annotated[ctypes.c_bool, 0, 1, 7]
     src = '''#include <stdbool.h>
       struct baz {
         bool a:1, b:1, c:1, d:1, e:1, f:1, g:1, h:1;
@@ -60,15 +74,23 @@ class TestAutogen(unittest.TestCase):
       }
     '''
     dll = self.compile(src)
-    @dll.bind((Baz,), ctypes.c_int)
-    def test(_): ...
+    @dll.bind
+    def test(x:Baz) -> ctypes.c_int: ...
     for i in range(8): self.assertEqual(test(Baz(*(j==i for j in range(8)))), i==2)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_struct_interop(self):
-    class Baz(Struct): SIZE = 32
-    Baz._fields_ = [chr(ord('a') + i) for i in range(8)]
-    for i in range(8): setattr(Baz, chr(ord('a') + i), field(i*4, ctypes.c_int))
+    @record
+    class Baz:
+      SIZE = 32
+      a: Annotated[ctypes.c_int, 0]
+      b: Annotated[ctypes.c_int, 4]
+      c: Annotated[ctypes.c_int, 8]
+      d: Annotated[ctypes.c_int, 12]
+      e: Annotated[ctypes.c_int, 16]
+      f: Annotated[ctypes.c_int, 20]
+      g: Annotated[ctypes.c_int, 24]
+      h: Annotated[ctypes.c_int, 28]
     src = '''#include <stdio.h>
       struct baz {
         int a, b, c, d, e, f, g, h;
@@ -79,33 +101,16 @@ class TestAutogen(unittest.TestCase):
       }
     '''
     dll = self.compile(src)
-    @dll.bind((Baz,), Baz)
-    def test(_): ...
+    @dll.bind
+    def test(x:Baz) -> Baz: ...
     self.assertEqual(bytes(test(Baz(*range(8)))), struct.pack("8i", *range(7, -1, -1)))
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
-  def test_array_interop(self):
-    Int4 = Array(ctypes.c_int, 4)
-    src = """
-      void test(int arr[4]) {
-        arr[0] += 10;
-        arr[3] *= 10;
-      }
-    """
-    dll = self.compile(src)
-    @dll.bind((Int4,), None)
-    def test(_): ...
-    test(arr:=Int4([1,2,3,4]))
-    self.assertEqual(arr[0], 11)
-    self.assertEqual(arr[1], 2)
-    self.assertEqual(arr[2], 3)
-    self.assertEqual(arr[3], 40)
-
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_aos_interop(self):
-    class Item(Struct): SIZE = 4
-    Item._fields_ = ['val']
-    Item.val = field(0, ctypes.c_int)
+    @record
+    class Item:
+      SIZE = 4
+      val: Annotated[ctypes.c_int, 0]
     src = """
     struct item { int val; };
       int test(struct item arr[3]) {
@@ -115,25 +120,26 @@ class TestAutogen(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind((Array(Item, 3),), ctypes.c_int)
-    def test(_): ...
-    self.assertEqual(test(Array(Item, 3)([Item(10), Item(20), Item(30)])), 60)
+    @dll.bind
+    def test(arr:(Item * 3)) -> ctypes.c_int: ...
+    self.assertEqual(test((Item * 3)(Item(10), Item(20), Item(30))), 60)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_soa_interop(self):
-    class Row(Struct): SIZE = 16
-    Row._fields_ = ['data']
-    Row.data = field(0, Array(ctypes.c_int, 3))
+    @record
+    class Row:
+      SIZE = 16
+      data: Annotated[ctypes.c_int * 3, 0]
     src = """
-    struct row { int data[3]; };
+      struct row { int data[3]; };
       struct row test(struct row x) {
         return (struct row){{ x.data[2], x.data[1], x.data[0] }};
       }
     """
     dll = self.compile(src)
-    @dll.bind((Row,), Row)
-    def test(_): ...
-    r = test(Row([10, 20, 30]))
+    @dll.bind
+    def test(x:Row) -> Row: ...
+    r = test(Row((ctypes.c_int * 3)(10, 20, 30)))
     self.assertIsInstance(r, Row)
     self.assertEqual(r.data[0], 30)
     self.assertEqual(r.data[1], 20)
@@ -141,13 +147,15 @@ class TestAutogen(unittest.TestCase):
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_nested_struct_interop(self):
-    class Inner(Struct): SIZE = 4
-    Inner._fields_ = ['a']
-    Inner.a = field(0, ctypes.c_int)
-    class Outer(Struct): SIZE = 8
-    Outer._fields_ = ['inner', 'b']
-    Outer.inner = field(0, Inner)
-    Outer.b = field(4, ctypes.c_int)
+    @record
+    class Inner:
+      SIZE = 4
+      a: Annotated[ctypes.c_int, 0]
+    @record
+    class Outer:
+      SIZE = 8
+      inner: Annotated[Inner, 0]
+      b: Annotated[ctypes.c_int, 4]
     src = """
       struct i { int a; };
       struct o { struct i i; int b; };
@@ -156,29 +164,18 @@ class TestAutogen(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind((Outer,), Outer)
-    def test(_): ...
+    @dll.bind
+    def test(x:Outer) -> Outer: ...
     o = test(Outer(Inner(10), 20))
-    self.assertEqual(o.inner.a, 20)
-    self.assertEqual(o.b, 10)
-
-  def test_pointer_interop(self):
-    src = """
-      int test(int *p) {
-        return (*p)++;
-      }
-    """
-    dll = self.compile(src)
-    @dll.bind((Pointer(ctypes.c_int),), ctypes.c_int)
-    def test(_): ...
-    self.assertEqual(test(pointer(i:=ctypes.c_int(10))), 10)
-    self.assertEqual(i.value, 11)
+    self.assertEqual(o.inner.a.value, 20)
+    self.assertEqual(o.b.value, 10)
 
   def test_struct_pointer_interop(self):
-    class Foo(Struct): SIZE = 8
-    Foo._fields_ = ['a', 'b']
-    Foo.a = field(0, ctypes.c_int)
-    Foo.b = field(4, ctypes.c_int)
+    @record
+    class Foo:
+      SIZE = 8
+      a: Annotated[ctypes.c_int, 0]
+      b: Annotated[ctypes.c_int, 4]
     src = """
       struct foo { int a, b; };
       struct foo *test(struct foo *f) {
@@ -189,36 +186,12 @@ class TestAutogen(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind((Pointer(Foo),), Pointer(Foo))
-    def test(_): ...
-    inp = pointer(Foo(10, 20))
+    @dll.bind
+    def test(f:ctypes.POINTER(Foo)) -> ctypes.POINTER(Foo): ...
+    inp = ctypes.pointer(Foo(10, 20))
     out = test(inp)
-    self.assertEqual(inp.value, out.value)
-    self.assertEqual(out.contents.a, 20)
-    self.assertEqual(out.contents.b, 10)
-
-  def test_none_is_null(self):
-    src = """
-      #include <assert.h>
-      #include <stddef.h>
-      void test(void *p) { assert(p == NULL); }
-    """
-
-    dll = self.compile(src)
-    @dll.bind((Pointer(None),), None)
-    def test(_): ...
-    test(None)
-
-  def test_bytes_to_charp(self):
-    src = """
-      #include <string.h>
-      int test(char *s) { return strlen(s); }
-    """
-
-    dll = self.compile(src)
-    @dll.bind((Pointer(ctypes.c_char),), ctypes.c_int)
-    def test(_): ...
-    self.assertEqual(test(b"test"), 4)
+    self.assertEqual(out.contents.a.value, 20)
+    self.assertEqual(out.contents.b.value, 10)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):
