@@ -15,10 +15,10 @@ export BEAM=3 BEAM_UOPS_MAX=6000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MI
 export IGNORE_JIT_FIRST_BEAM=1 FREE_INTERMEDIATE=0
 export BASEDIR="/raid/datasets/wiki"
 export BEAM_TIMEOUT_SEC=15
+export FP8_TRAIN=1
 # search
 IGNORE_BEAM_CACHE=1 BENCHMARK=10 BERT_LAYERS=2 RUNMLPERF=0 python3 examples/mlperf/model_train.py
 
 export WANDB=1 PARALLEL=0
 
-export FP8_TRAIN=1
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
