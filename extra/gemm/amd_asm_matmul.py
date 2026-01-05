@@ -35,13 +35,13 @@ WAIT_VMEM = 1015     # wait for VMEM only (vm_cnt=0, lgkm_cnt=63)
 # Named register assignments (VGPRs) - COMPACT LAYOUT
 # =============================================================================
 V_LANE_ID_MOD8 = 214      # lane_id & 7 (column within 8-wide tile chunk)
-V_OUTPUT_ROW = 119        # output row coordinate
+V_OUTPUT_ROW = 131        # output row coordinate
 V_LANE_MOD8_X4 = 134      # V_LANE_ID_MOD8 << 2 (byte offset)
 V_LANE_DIV8_X4 = 135      # (lane_id >> 3) << 2
 V_ADDR_HI_ZERO = 136      # always 0 (for 64-bit address high bits)
 V_LDS_A_BASE = 133        # LDS A-tile base address for inner loop (in ACC_RESERVED gap)
 V_LDS_B_BASE = 130        # LDS B-tile base address for inner loop (in ACC_RESERVED gap)
-V_GLOBAL_A_ADDR = 119     # global memory A prefetch address (reuses V_OUTPUT_ROW slot during main loop)
+V_GLOBAL_A_ADDR = 131     # global memory A prefetch address (reuses V_OUTPUT_ROW slot during main loop)
 V_GLOBAL_B_ADDR = 154     # global memory B prefetch address
 
 # LDS tile register destinations - SEPARATE from DATA to avoid overlap
@@ -82,14 +82,14 @@ ACC_GRID = [
   [ 21, 19, 25, 24,   53, 51, 57, 56,   85, 83, 89, 88,  117,115,121,120],  # a4
   [ 20, 18, 23, 22,   52, 50, 55, 54,   84, 82, 87, 86,  116,114,123,122],  # a5
   [125,128, 29, 27,   33, 32, 61, 59,   65, 64, 93, 91,   97, 96,129,127],  # a6
-  [131,118, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7
+  [119,118, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7
 ]
 
 # Derived: all 128 accumulator registers to zero before loop
 ACC_REGS = sorted(set(acc for row in ACC_GRID for acc in row))
 
 # Reserved registers in the accumulator range (not used for accumulators)
-ACC_RESERVED = {119, 130}
+ACC_RESERVED = {131, 130}
 
 # Optimized (a_pair, b_pair) iteration order for better GPU scheduling
 # Interleaves A and B pairs to maximize instruction-level parallelism
