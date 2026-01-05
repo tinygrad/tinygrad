@@ -352,9 +352,9 @@ def _generate_ins_py(formats, enums, src_enum, doc_name) -> str:
       tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt, f"{fmt}, {cls_name}")
       if fmt in formats or fmt in ("GLOBAL", "SCRATCH"):
         suffix = "_e32" if fmt in ("VOP1", "VOP2", "VOPC") else "_e64" if fmt == "VOP3" and op_val < 512 else ""
-        if name in ('V_FMAMK_F32', 'V_FMAMK_F16'):
+        if name in ('V_FMAMK_F32', 'V_FMAMK_F16', 'V_MADMK_F32', 'V_MADMK_F16'):
           lines.append(f"def {name.lower()}{suffix}(vdst, src0, K, vsrc1): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
-        elif name in ('V_FMAAK_F32', 'V_FMAAK_F16'):
+        elif name in ('V_FMAAK_F32', 'V_FMAAK_F16', 'V_MADAK_F32', 'V_MADAK_F16'):
           lines.append(f"def {name.lower()}{suffix}(vdst, src0, vsrc1, K): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
         else: lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
   src_names = {name for _, name in src_enum.items()}
