@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from extra.assembly.amd.dsl import Inst, RawImm, Reg, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory
 from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
-from extra.assembly.amd.dsl import SPECIAL_GPRS, SPECIAL_PAIRS, SPECIAL_PAIRS_CDNA, FLOAT_DEC, FLOAT_ENC, decode_src
+from extra.assembly.amd.dsl import SPECIAL_GPRS, SPECIAL_GPRS_CDNA, SPECIAL_PAIRS, SPECIAL_PAIRS_CDNA, FLOAT_DEC, FLOAT_ENC, decode_src
 from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP,
   VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp, MTBUFOp)
@@ -33,7 +33,7 @@ def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
   word = int.from_bytes(data[:4], 'little')
-  if arch == "cdna":
+  if arch in ("cdna", "gfx90a", "gfx942"):
     if (word >> 30) == 0b11:
       for cls in _CDNA_FORMATS_64:
         if _matches_encoding(word, cls):
@@ -60,7 +60,17 @@ HWREG = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_H
          6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS', 15: 'HW_REG_SH_MEM_BASES', 18: 'HW_REG_PERF_SNAPSHOT_PC_LO',
          19: 'HW_REG_PERF_SNAPSHOT_PC_HI', 20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI', 22: 'HW_REG_XNACK_MASK',
          23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER', 28: 'HW_REG_IB_STS2'}
+# GFX942-specific HWREG values
+_HWREG_GFX942 = {'HW_REG_XCC_ID': 20, 'HW_REG_SQ_PERF_SNAPSHOT_DATA': 21, 'HW_REG_SQ_PERF_SNAPSHOT_DATA1': 22,
+                 'HW_REG_SQ_PERF_SNAPSHOT_PC_LO': 23, 'HW_REG_SQ_PERF_SNAPSHOT_PC_HI': 24}
 HWREG_IDS = {v.lower(): k for k, v in HWREG.items()}
+HWREG_IDS.update({k.lower(): v for k, v in _HWREG_GFX942.items()})
+def hwreg(name, offset=0, size=32):
+  """Encode hwreg(name[, offset[, size]]) -> simm16 value. id[5:0], offset[10:6], size-1[15:11]"""
+  if isinstance(name, int): hid = name
+  else: hid = HWREG_IDS.get(name.lower(), HWREG_IDS.get(name.lower().replace('hw_reg_', ''), None))
+  if hid is None: raise ValueError(f"unknown hwreg: {name}")
+  return hid | (offset << 6) | ((size - 1) << 11)
 # RDNA unified buffer format - extracted from PDF, use enum for name->value lookup
 BUF_FMT = {e.name: e.value for e in BufFmt}
 def _parse_buf_fmt_combo(s: str) -> int:  # parse format:[BUF_DATA_FORMAT_X, BUF_NUM_FORMAT_Y]
@@ -540,11 +550,19 @@ FLOATS = {str(k): k for k in FLOAT_ENC}  # Valid float literal strings: '0.5', '
 REG_MAP: dict[str, _RegFactory] = {'s': s, 'v': v, 't': ttmp, 'ttmp': ttmp}
 SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b128', 's_load_b256', 's_load_b512',
             's_buffer_load_b32', 's_buffer_load_b64', 's_buffer_load_b128', 's_buffer_load_b256', 's_buffer_load_b512',
+            's_scratch_load_dword', 's_scratch_load_dwordx2', 's_scratch_load_dwordx4',
+            's_scratch_store_dword', 's_scratch_store_dwordx2', 's_scratch_store_dwordx4',
+            's_store_dword', 's_store_dwordx2', 's_store_dwordx4',
+            's_buffer_store_dword', 's_buffer_store_dwordx2', 's_buffer_store_dwordx4',
             's_atc_probe', 's_atc_probe_buffer'}
 SPEC_DSL = {'vcc_lo': 'VCC_LO', 'vcc_hi': 'VCC_HI', 'vcc': 'VCC_LO', 'null': 'NULL', 'off': 'OFF', 'm0': 'M0',
             'exec_lo': 'EXEC_LO', 'exec_hi': 'EXEC_HI', 'exec': 'EXEC_LO', 'scc': 'SCC', 'src_scc': 'SCC'}
+SPEC_DSL_CDNA = {**SPEC_DSL, 'src_scc': 'SRC_SCC', 'flat_scratch_lo': 'FLAT_SCRATCH_LO', 'flat_scratch_hi': 'FLAT_SCRATCH_HI',
+                 'flat_scratch': 'FLAT_SCRATCH', 'xnack_mask_lo': 'XNACK_MASK_LO', 'xnack_mask_hi': 'XNACK_MASK_HI', 'xnack_mask': 'XNACK_MASK',
+                 'src_vccz': 'SRC_VCCZ', 'src_execz': 'SRC_EXECZ', 'vccz': 'SRC_VCCZ', 'execz': 'SRC_EXECZ',
+                 'src_lds_direct': 'SRC_LDS_DIRECT', 'lds_direct': 'SRC_LDS_DIRECT'}
 
-def _op2dsl(op: str) -> str:
+def _op2dsl(op: str, arch: str = "rdna3") -> str:
   op = op.strip()
   neg = op.startswith('-') and not (op[1:2].isdigit() or (len(op) > 2 and op[1] == '0' and op[2] in 'xX'))
   if neg: op = op[1:]
@@ -553,13 +571,21 @@ def _op2dsl(op: str) -> str:
   hi = ".h" if op.endswith('.h') else ".l" if op.endswith('.l') else ""
   if hi: op = op[:-2]
   lo = op.lower()
+  spec_dsl = SPEC_DSL_CDNA if arch == "cdna" else SPEC_DSL
   def wrap(b): return f"{'-' if neg else ''}abs({b}){hi}" if abs_ else f"-{b}{hi}" if neg else f"{b}{hi}"
-  if lo in SPEC_DSL: return wrap(SPEC_DSL[lo])
+  if lo in spec_dsl: return wrap(spec_dsl[lo])
   if op in FLOATS: return wrap(op)
   rp = {'s': 's', 'v': 'v', 't': 'ttmp', 'ttmp': 'ttmp'}
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return wrap(f"{rp[m.group(1)]}[{m.group(2)}:{m.group(3)}]")
-  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', lo): return wrap(f"{rp[m.group(1)]}[{m.group(2)}]")
+  if m := re.match(r'^([asvt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return wrap(f"{rp.get(m.group(1), m.group(1))}[{m.group(2)}:{m.group(3)}]")
+  if m := re.match(r'^([asvt](?:tmp)?)(\d+)$', lo): return wrap(f"{rp.get(m.group(1), m.group(1))}[{m.group(2)}]")
   if re.match(r'^-?\d+$|^-?0x[0-9a-fA-F]+$', op): return f"SrcMod({op}, neg={neg}, abs_={abs_})" if neg or abs_ else op
+  # Floating-point literal: convert to IEEE 754 32-bit integer representation
+  import struct
+  try:
+    f = float(op)
+    as_int = struct.unpack('<I', struct.pack('<f', f))[0]
+    return f"SrcMod({as_int}, neg={neg}, abs_={abs_})" if neg or abs_ else str(as_int)
+  except ValueError: pass
   return wrap(op)
 
 def _parse_ops(s: str) -> list[str]:
@@ -576,6 +602,33 @@ def _parse_ops(s: str) -> list[str]:
 def _extract(text: str, pat: str, flags=re.I):
   if m := re.search(pat, text, flags): return m, text[:m.start()] + ' ' + text[m.end():]
   return None, text
+
+def _parse_src_mods(raw: str) -> tuple[str, bool, bool, bool]:
+  """Parse neg/abs/sext modifiers from operand string. Returns (stripped_op, neg, abs_, sext)."""
+  neg = raw.startswith('-') and not raw[1:2].isdigit() and raw[1:3] != '0.'
+  if neg: raw = raw[1:]
+  abs_ = raw.startswith('|') and raw.endswith('|')
+  if abs_: raw = raw[1:-1]
+  sext = raw.startswith('sext(') and raw.endswith(')')
+  if sext: raw = raw[5:-1]
+  return raw, neg, abs_, sext
+
+_SGPR_BY_NAME = {v: k for k, v in SPECIAL_GPRS_CDNA.items()}
+_SGPR_BY_NAME.update({'src_vccz': 251, 'src_execz': 252, 'src_scc': 253, 'vcc': 106})
+
+def _parse_sdwa_src(raw: str) -> tuple[int, int]:
+  """Parse SDWA source operand. Returns (value, s_flag) where s_flag=1 for SGPR/literal."""
+  if raw.startswith('v') and (raw[1:].isdigit() or raw[1] == '['): return int(raw.split('[')[1].split(']')[0]) if '[' in raw else int(raw[1:]), 0
+  if raw.startswith('s') and (raw[1:].isdigit() or raw[1] == '['): return int(raw.split('[')[1].split(':')[0]) if '[' in raw else int(raw[1:]), 1
+  if raw.startswith('ttmp') and raw[4:].isdigit(): return 108 + int(raw[4:]), 1
+  if raw in _SGPR_BY_NAME: return _SGPR_BY_NAME[raw], 1
+  # Inline constants: integers 0-64 -> 128+N, -1 to -16 -> 192+abs(N), floats use FLOAT_ENC
+  if raw.lstrip('-').replace('.', '', 1).isdigit():
+    if '.' in raw: return FLOAT_ENC.get(float(raw), 128), 1
+    ival = int(raw)
+    if 0 <= ival <= 64: return 128 + ival, 1
+    if -16 <= ival < 0: return 192 + (-ival), 1
+  return 0, 0
 
 # Instruction aliases: LLVM uses different names for some instructions
 _ALIASES = {
@@ -612,16 +665,41 @@ _ALIASES = {
   # More VOP3 aliases
   'v_fma_legacy_f32': 'v_fma_dx9_zero_f32',
 }
+# RDNA3-only aliases (should NOT be applied to CDNA) - CDNA uses OLD names, RDNA3 uses NEW names
+_RDNA3_ONLY_ALIASES = {'v_mul_legacy_f32', 'v_fmac_legacy_f32', 'v_fma_legacy_f32',
+  's_load_dword', 's_load_dwordx2', 's_load_dwordx4', 's_load_dwordx8', 's_load_dwordx16',
+  's_buffer_load_dword', 's_buffer_load_dwordx2', 's_buffer_load_dwordx4', 's_buffer_load_dwordx8', 's_buffer_load_dwordx16',
+  # SOP: CDNA uses s_andn2/s_orn2, RDNA3 uses s_and_not1/s_or_not1
+  's_andn2_b32', 's_andn2_b64', 's_orn2_b32', 's_orn2_b64',
+  's_andn1_saveexec_b32', 's_andn1_saveexec_b64', 's_andn1_wrexec_b32', 's_andn1_wrexec_b64',
+  's_andn2_saveexec_b32', 's_andn2_saveexec_b64', 's_andn2_wrexec_b32', 's_andn2_wrexec_b64',
+  's_orn1_saveexec_b32', 's_orn1_saveexec_b64', 's_orn2_saveexec_b32', 's_orn2_saveexec_b64',
+  # VOP1: CDNA uses old names
+  'v_cvt_flr_i32_f32', 'v_cvt_rpi_i32_f32', 'v_ffbh_i32', 'v_ffbh_u32', 'v_ffbl_b32',
+  # VOPC: CDNA uses tru suffix for float comparisons
+  'v_cmp_tru_f16', 'v_cmp_tru_f32', 'v_cmp_tru_f64', 'v_cmpx_tru_f16', 'v_cmpx_tru_f32', 'v_cmpx_tru_f64'}
+# CDNA-specific aliases (GFX9 uses different names for some instructions)
+# CDNA-specific aliases - CDNA uses dword naming, not b32
+_CDNA_ALIASES = {
+  # VOP aliases: madmk/madak -> fmamk/fmaak (same encoding, different name in CDNA enum)
+  'v_cvt_pkrtz_f16_f32': 'v_cvt_pk_rtz_f16_f32', 'v_madmk_f32': 'v_fmamk_f32', 'v_madak_f32': 'v_fmaak_f32',
+  # VOPC: v_cmp_t_fXX -> v_cmp_tru_fXX for CDNA float comparisons
+  'v_cmp_t_f16': 'v_cmp_tru_f16', 'v_cmp_t_f32': 'v_cmp_tru_f32', 'v_cmp_t_f64': 'v_cmp_tru_f64',
+  'v_cmpx_t_f16': 'v_cmpx_tru_f16', 'v_cmpx_t_f32': 'v_cmpx_tru_f32', 'v_cmpx_t_f64': 'v_cmpx_tru_f64',
+}
 
-def _apply_alias(text: str) -> str:
+def _apply_alias(text: str, arch: str = "rdna3") -> str:
   mn = text.split()[0].lower() if ' ' in text else text.lower().rstrip('_')
+  aliases = _CDNA_ALIASES if arch == "cdna" else _ALIASES
   # Try exact match first, then strip _e32/_e64 suffix
   for m in (mn, mn.removesuffix('_e32'), mn.removesuffix('_e64')):
-    if m in _ALIASES: return _ALIASES[m] + text[len(m):]
+    if m in aliases: return aliases[m] + text[len(m):]
+    # Also check common aliases, but skip RDNA3-only ones for CDNA
+    if m in _ALIASES and not (arch == "cdna" and m in _RDNA3_ONLY_ALIASES): return _ALIASES[m] + text[len(m):]
   return text
 
-def get_dsl(text: str) -> str:
-  text, kw = _apply_alias(text.strip()), []
+def get_dsl(text: str, arch: str = "rdna3", gfx942: bool = False) -> str:
+  text, kw = _apply_alias(text.strip(), arch), []
   # Extract modifiers
   for pat, val in [(r'\s+mul:2(?:\s|$)', 1), (r'\s+mul:4(?:\s|$)', 2), (r'\s+div:2(?:\s|$)', 3)]:
     if (m := _extract(text, pat))[0]: kw.append(f'omod={val}'); text = m[1]; break
@@ -629,27 +707,65 @@ def get_dsl(text: str) -> str:
   opsel, m, text = None, *_extract(text, r'\s+op_sel:\[([^\]]+)\]')
   if m:
     bits, mn = [int(x.strip()) for x in m.group(1).split(',')], text.split()[0].lower()
-    is3p = mn.startswith(('v_pk_', 'v_wmma_', 'v_dot'))
+    is3p = mn.startswith(('v_pk_', 'v_wmma_', 'v_dot', 'v_mad_mix', 'v_fma_mix'))
     opsel = (bits[0] | (bits[1] << 1) | (bits[2] << 2)) if len(bits) == 3 and is3p else \
             (bits[0] | (bits[1] << 1) | (bits[2] << 3)) if len(bits) == 3 else sum(b << i for i, b in enumerate(bits))
   m, text = _extract(text, r'\s+wait_exp:(\d+)'); waitexp = m.group(1) if m else None
   m, text = _extract(text, r'\s+offset:(0x[0-9a-fA-F]+|-?\d+)'); off_val = m.group(1) if m else None
-  m, text = _extract(text, r'\s+dlc(?:\s|$)'); dlc = 1 if m else None
-  m, text = _extract(text, r'\s+glc(?:\s|$)'); glc = 1 if m else None
-  m, text = _extract(text, r'\s+slc(?:\s|$)'); slc = 1 if m else None
-  m, text = _extract(text, r'\s+tfe(?:\s|$)'); tfe = 1 if m else None
-  m, text = _extract(text, r'\s+offen(?:\s|$)'); offen = 1 if m else None
-  m, text = _extract(text, r'\s+idxen(?:\s|$)'); idxen = 1 if m else None
+  # Flag modifiers: extract presence/absence
+  flags = {}
+  for f in ('dlc', 'glc', 'slc', 'tfe', 'offen', 'idxen', 'gds', 'lds'):
+    m, text = _extract(text, rf'\s+{f}(?:\s|$)'); flags[f] = 1 if m else None
+  dlc, glc, slc, tfe, offen, idxen, gds, lds = [flags[f] for f in ('dlc', 'glc', 'slc', 'tfe', 'offen', 'idxen', 'gds', 'lds')]
+  # GFX942: sc0, sc1, nt with negation variants
+  for f in ('sc0', 'sc1', 'nt'):
+    m, text = _extract(text, rf'\s+{f}(?:\s|$)'); flags[f] = 1 if m else None
+    m, text = _extract(text, rf'\s+no{f}(?:\s|$)'); flags[f] = 0 if m else flags[f]
+  sc0, sc1, nt = flags['sc0'], flags['sc1'], flags['nt']
   m, text = _extract(text, r'\s+format:\[([^\]]+)\]'); fmt_val = m.group(1) if m else None
   m, text = _extract(text, r'\s+format:(\d+)'); fmt_val = m.group(1) if m and not fmt_val else fmt_val
+  # dfmt:N, nfmt:N can appear as comma-separated items (CDNA ACC style) or as space-separated modifiers
+  m, text = _extract(text, r',\s*dfmt:(\d+)'); dfmt_val = int(m.group(1)) if m else None
+  if not m: m, text = _extract(text, r'\s+dfmt:(\d+)'); dfmt_val = int(m.group(1)) if m else dfmt_val
+  m, text = _extract(text, r',\s*nfmt:(\d+)'); nfmt_val = int(m.group(1)) if m else None
+  if not m: m, text = _extract(text, r'\s+nfmt:(\d+)'); nfmt_val = int(m.group(1)) if m else nfmt_val
   m, text = _extract(text, r'\s+neg_lo:\[([^\]]+)\]'); neg_lo = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
   m, text = _extract(text, r'\s+neg_hi:\[([^\]]+)\]'); neg_hi = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+  m, text = _extract(text, r'\s+op_sel_hi:\[([^\]]+)\]')
+  opsel_hi, opsel_hi_count = (sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))), len(m.group(1).split(','))) if m else (None, 0)
+  m, text = _extract(text, r'\s+offset0:(\d+)'); offset0 = m.group(1) if m else None
+  m, text = _extract(text, r'\s+offset1:(\d+)'); offset1 = m.group(1) if m else None
+  # MAI instruction modifiers (MFMA cbsz/abid/blgp)
+  m, text = _extract(text, r'\s+cbsz:(\d+)'); cbsz = int(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+abid:(\d+)'); abid = int(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+blgp:(\d+)'); blgp = int(m.group(1)) if m else None
+  # MFMA neg:[x,y,z] modifier -> sets neg field (same as blgp for MFMA)
+  m, text = _extract(text, r'\s+neg:\[([^\]]+)\]'); mfma_neg = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+  # SDWA modifiers: sel values are BYTE_0-3=0-3, WORD_0-1=4-5, DWORD=6; dst_unused PAD=0, SEXT=1, PRESERVE=2
+  def _sel(s): return {'BYTE_0': 0, 'BYTE_1': 1, 'BYTE_2': 2, 'BYTE_3': 3, 'WORD_0': 4, 'WORD_1': 5, 'DWORD': 6}.get(s, 6)
+  m, text = _extract(text, r'\s+dst_sel:(\w+)'); sdwa_dst_sel = _sel(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+dst_unused:(\w+)'); sdwa_dst_unused = {'UNUSED_PAD': 0, 'UNUSED_SEXT': 1, 'UNUSED_PRESERVE': 2}.get(m.group(1), 0) if m else None
+  m, text = _extract(text, r'\s+src0_sel:(\w+)'); sdwa_src0_sel = _sel(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+src1_sel:(\w+)'); sdwa_src1_sel = _sel(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+sext\(src0\)'); sdwa_src0_sext = 1 if m else None
+  m, text = _extract(text, r'\s+sext\(src1\)'); sdwa_src1_sext = 1 if m else None
+  # DPP modifiers: quad_perm, row_shl/shr/ror, wave_shl/rol/shr/ror, row_mirror, row_bcast, etc.
+  m, text = _extract(text, r'\s+quad_perm:\[(\d+),(\d+),(\d+),(\d+)\]')
+  dpp_ctrl = int(m.group(1)) | (int(m.group(2)) << 2) | (int(m.group(3)) << 4) | (int(m.group(4)) << 6) if m else None
+  for pat, base in [('row_shl', 0x100), ('row_shr', 0x110), ('row_ror', 0x120), ('row_newbcast', 0x150)]:
+    m, text = _extract(text, rf'\s+{pat}:(\d+)'); dpp_ctrl = base + int(m.group(1)) if m else dpp_ctrl
+  for pat, val in [('wave_shl:1', 0x130), ('wave_rol:1', 0x134), ('wave_shr:1', 0x138), ('wave_ror:1', 0x13c),
+                   ('row_mirror', 0x140), ('row_half_mirror', 0x141), ('row_bcast:15', 0x142), ('row_bcast:31', 0x143)]:
+    m, text = _extract(text, rf'\s+{pat}(?:\s|$)'); dpp_ctrl = val if m else dpp_ctrl
+  m, text = _extract(text, r'\s+row_mask:(0x[0-9a-fA-F]+|\d+)'); dpp_row_mask = int(m.group(1), 0) if m else None; dpp_row_mask_specified = m is not None
+  m, text = _extract(text, r'\s+bank_mask:(0x[0-9a-fA-F]+|\d+)'); dpp_bank_mask = int(m.group(1), 0) if m else None; dpp_bank_mask_specified = m is not None
+  m, text = _extract(text, r'\s+bound_ctrl:([01])'); dpp_bound_ctrl = 1 if m else None
   if waitexp: kw.append(f'waitexp={waitexp}')
 
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
   mn, op_str = parts[0].lower(), text[len(parts[0]):].strip()
-  ops, args = _parse_ops(op_str), [_op2dsl(o) for o in _parse_ops(op_str)]
+  ops, args = _parse_ops(op_str), [_op2dsl(o, arch) for o in _parse_ops(op_str)]
 
   # s_waitcnt
   if mn == 's_waitcnt':
@@ -661,11 +777,209 @@ def get_dsl(text: str) -> str:
       elif re.match(r'^0x[0-9a-f]+$|^\d+$', p): return f"s_waitcnt(simm16={int(p, 0)})"
     return f"s_waitcnt(simm16={waitcnt(vm, exp, lgkm)})"
 
-  # VOPD
+  # MAI instructions (CDNA): v_mfma_*, v_accvgpr_*, v_smfmac_*
+  if arch == "cdna" and mn.startswith(('v_mfma_', 'v_accvgpr_', 'v_smfmac_')):
+    from extra.assembly.amd.autogen.cdna.ins import VOP3POp, VOP1Op
+    # Handle aliases: v_accvgpr_read_b32 -> v_accvgpr_read, v_accvgpr_write_b32 -> v_accvgpr_write
+    fn = mn.replace('_b32', '').upper()
+    # MFMA/SMFMAC name mapping: LLVM v_mfma_f32_32x32x1f32 -> enum V_MFMA_F32_32X32X1_2B_F32
+    def _mfma_alias(n):
+      n = n.replace('_1K', '')  # Strip _1K suffix first (same opcodes)
+      # FP8/BF8 pairs: insert underscore between AND before: 64BF8BF8 -> 64_BF8_BF8
+      for t in ('BF8BF8', 'BF8FP8', 'FP8BF8', 'FP8FP8'):
+        if t in n: n = n.replace(t, '_' + t[:3] + '_' + t[3:])
+      # Insert underscore before dtype suffix
+      for t in ('F32', 'F16', 'BF16', 'I8', 'F64', 'XF32'):
+        n = re.sub(rf'(X\d+)({t})$', rf'\1_{t}', n)
+      # Block sizes for specific shapes
+      for pat, blk in [('32X32X1_', '32X32X1_2B_'), ('16X16X1_', '16X16X1_4B_'), ('4X4X1_', '4X4X1_16B_'),
+                       ('32X32X4_F16', '32X32X4_2B_F16'), ('16X16X4_F16', '16X16X4_4B_F16'), ('4X4X4_F16', '4X4X4_16B_F16'),
+                       ('32X32X4_I8', '32X32X4_2B_I8'), ('16X16X4_I8', '16X16X4_4B_I8'), ('4X4X4_I8', '4X4X4_16B_I8'),
+                       ('32X32X4_BF16', '32X32X4_2B_BF16'), ('16X16X4_BF16', '16X16X4_4B_BF16'), ('4X4X4_BF16', '4X4X4_16B_BF16'),
+                       ('4X4X4_F64', '4X4X4_4B_F64')]:
+        n = n.replace(pat, blk)
+      return n
+    _MFMA_ALIASES = {n: _mfma_alias(n) for n in [
+      'V_MFMA_F32_32X32X1F32', 'V_MFMA_F32_16X16X1F32', 'V_MFMA_F32_4X4X1F32', 'V_MFMA_F32_32X32X2F32', 'V_MFMA_F32_16X16X4F32',
+      'V_MFMA_F32_32X32X4F16', 'V_MFMA_F32_16X16X4F16', 'V_MFMA_F32_4X4X4F16', 'V_MFMA_F32_32X32X8F16', 'V_MFMA_F32_16X16X16F16',
+      'V_MFMA_F32_32X32X16F16', 'V_MFMA_F32_16X16X32F16',
+      'V_MFMA_I32_32X32X4I8', 'V_MFMA_I32_16X16X4I8', 'V_MFMA_I32_4X4X4I8', 'V_MFMA_I32_32X32X16I8', 'V_MFMA_I32_16X16X32I8',
+      'V_MFMA_F64_16X16X4F64', 'V_MFMA_F64_4X4X4F64',
+      'V_MFMA_F32_32X32X4BF16', 'V_MFMA_F32_16X16X4BF16', 'V_MFMA_F32_4X4X4BF16', 'V_MFMA_F32_32X32X8BF16', 'V_MFMA_F32_16X16X16BF16',
+      'V_MFMA_F32_32X32X16BF16', 'V_MFMA_F32_16X16X32BF16',
+      'V_MFMA_F32_32X32X4BF16_1K', 'V_MFMA_F32_16X16X4BF16_1K', 'V_MFMA_F32_4X4X4BF16_1K', 'V_MFMA_F32_32X32X8BF16_1K', 'V_MFMA_F32_16X16X16BF16_1K',
+      'V_MFMA_F32_16X16X8XF32', 'V_MFMA_F32_32X32X4XF32',
+      'V_SMFMAC_F32_16X16X32F16', 'V_SMFMAC_F32_32X32X16F16', 'V_SMFMAC_F32_16X16X32BF16', 'V_SMFMAC_F32_32X32X16BF16',
+      'V_SMFMAC_I32_16X16X64I8', 'V_SMFMAC_I32_32X32X32I8',
+      'V_SMFMAC_F32_16X16X64BF8BF8', 'V_SMFMAC_F32_16X16X64BF8FP8', 'V_SMFMAC_F32_16X16X64FP8BF8', 'V_SMFMAC_F32_16X16X64FP8FP8',
+      'V_SMFMAC_F32_32X32X32BF8BF8', 'V_SMFMAC_F32_32X32X32BF8FP8', 'V_SMFMAC_F32_32X32X32FP8BF8', 'V_SMFMAC_F32_32X32X32FP8FP8']}
+    # GFX90a-specific opcodes (different from gfx942 enum): map to raw opcode values
+    # These instructions use opcodes that don't match our gfx942-based enum
+    _MFMA_GFX90A_OPS = {
+      'V_MFMA_I32_32X32X8I8': 84, 'V_MFMA_I32_16X16X16I8': 85,
+      'V_MFMA_F32_32X32X2BF16': 104, 'V_MFMA_F32_16X16X2BF16': 105, 'V_MFMA_F32_4X4X2BF16': 107,
+      'V_MFMA_F32_32X32X4BF16': 108, 'V_MFMA_F32_16X16X8BF16': 109,
+      'V_MFMA_F32_32X32X4BF16_1K': 99, 'V_MFMA_F32_16X16X4BF16_1K': 100, 'V_MFMA_F32_4X4X4BF16_1K': 101,
+      'V_MFMA_F32_32X32X8BF16_1K': 102, 'V_MFMA_F32_16X16X16BF16_1K': 103,
+    }
+    # Check for gfx90a-specific opcodes BEFORE applying aliases (gfx90a uses different opcodes than gfx942)
+    gfx90a_op = _MFMA_GFX90A_OPS.get(fn.upper()) if not gfx942 else None
+    # Apply aliases for gfx942 (or when no gfx90a-specific opcode exists)
+    if gfx90a_op is None:
+      fn = _MFMA_ALIASES.get(fn, fn)
+    # v_accvgpr_mov_b32 is VOP1, not VOP3P
+    if mn.startswith('v_accvgpr_mov'):
+      vop1_op = getattr(VOP1Op, fn, None)
+      if vop1_op is None: raise ValueError(f"unknown MAI instruction: {mn}")
+      # v_accvgpr_mov_b32 a1, a2 -> VOP1 with dst=a1, src=a2
+      # dst is ACC (a[N]), src is ACC (a[N])
+      # In VOP1 encoding: vdst uses VGPR number, src0 uses 256+N for ACC registers
+      dst_m = re.match(r'a\[?(\d+)', ops[0]) if ops else None
+      src_m = re.match(r'a\[?(\d+)', ops[1]) if len(ops) > 1 else None
+      if not dst_m or not src_m: raise ValueError(f"v_accvgpr_mov requires ACC registers: {mn} {ops}")
+      return f"v_accvgpr_mov_b32_e32(vdst=v[{dst_m.group(1)}], src0=RawImm({256 + int(src_m.group(1))}))"
+    # VOP3P MAI instructions
+    vop3p_op = getattr(VOP3POp, fn, None)
+    if vop3p_op is None and gfx90a_op is None: raise ValueError(f"unknown MAI instruction: {mn}")
+    # Parse operands: vdst, src0, src1[, src2] - can be VGPRs (v[N]) or ACCs (a[N])
+    # ACC encoding: VGPRs and ACCs both use 256+N in src fields, ACC flags in opsel_hi/clmp
+    # NOTE: we detect ACC from the ORIGINAL operand string, not the converted DSL
+    def parse_mai_reg(orig_op, dsl_arg):
+      """Parse MAI register from original operand, return (reg_num, is_acc)"""
+      orig = orig_op.strip().lower()
+      # Check original operand for ACC (a[N] or aN)
+      if m := re.match(r'a\[?(\d+)', orig): return int(m.group(1)), True
+      if m := re.match(r'v\[?(\d+)', orig): return int(m.group(1)), False
+      # For literals, use DSL conversion
+      if m := re.match(r'v\[(\d+)(?::\d+)?\]', dsl_arg): return int(m.group(1)), False
+      # Handle literals and other sources
+      return dsl_arg, False
+    vdst_num, vdst_acc = parse_mai_reg(ops[0], args[0]) if ops else (0, False)
+    src0_num, src0_acc = parse_mai_reg(ops[1], args[1]) if len(ops) > 1 else (0, False)
+    src1_num, src1_acc = parse_mai_reg(ops[2], args[2]) if len(ops) > 2 else (0, False)
+    src2_num, src2_acc = parse_mai_reg(ops[3], args[3]) if len(ops) > 3 else (0, False)
+    # Build src values: VGPRs/ACCs use 256+N encoding
+    def mai_src(num, is_acc):
+      if isinstance(num, str): return num  # literal or special
+      return f"RawImm({256 + num})"
+    # Build VOP3P call with proper ACC flags
+    # opsel_hi[0] (bit 59) = src0 is ACC, opsel_hi[1] (bit 60) = src1 is ACC
+    # clmp (bit 15) = vdst is ACC (only for MFMA/SMFMAC, not for v_accvgpr_*)
+    # For MFMA/SMFMAC, src2 ACC is encoded in the src2 value (256+N if ACC)
+    opsel_hi_val = (1 if src0_acc else 0) | ((1 if src1_acc else 0) << 1)
+    is_mfma = 'mfma' in mn or 'smfmac' in mn
+    clmp_val = 1 if vdst_acc and is_mfma else 0  # Only set clmp for MFMA with ACC vdst
+    # cbsz -> neg_hi, abid -> opsel, blgp -> neg
+    mai_mods = []
+    # MFMA/SMFMAC need explicit opsel_hi based on ACC flags, v_accvgpr_* use VOP3P defaults
+    if is_mfma:
+      mai_mods = [f'opsel_hi={opsel_hi_val}', 'opsel_hi2=0']
+    if clmp_val: mai_mods.append(f'clmp={clmp_val}')
+    if cbsz is not None: mai_mods.append(f'neg_hi={cbsz}')
+    if abid is not None: mai_mods.append(f'opsel={abid}')
+    # blgp and neg:[x,y,z] both set the neg field
+    neg_val = mfma_neg if mfma_neg is not None else blgp
+    if neg_val is not None: mai_mods.append(f'neg={neg_val}')
+    # v_accvgpr_read/write have 2 operands, MFMA/SMFMAC have 4
+    if mn.startswith('v_accvgpr_read'):
+      # v_accvgpr_read vdst, src0 (src0 is ACC register)
+      return f"{fn.lower()}(vdst=v[{vdst_num}], src0={mai_src(src0_num, src0_acc)}, src1=RawImm(0), src2=RawImm(0){', ' + ', '.join(mai_mods) if mai_mods else ''})"
+    if mn.startswith('v_accvgpr_write'):
+      # v_accvgpr_write vdst, src0 (vdst is ACC register)
+      return f"{fn.lower()}(vdst=v[{vdst_num}], src0={mai_src(src0_num, src0_acc)}, src1=RawImm(0), src2=RawImm(0){', ' + ', '.join(mai_mods) if mai_mods else ''})"
+    # MFMA/SMFMAC: 4 operands
+    src2_val = mai_src(src2_num, src2_acc)
+    # Use raw VOP3P with explicit op for gfx90a-specific opcodes
+    if gfx90a_op is not None:
+      return f"VOP3P(op={gfx90a_op}, vdst=v[{vdst_num}], src0={mai_src(src0_num, src0_acc)}, src1={mai_src(src1_num, src1_acc)}, src2={src2_val}{', ' + ', '.join(mai_mods) if mai_mods else ''})"
+    return f"{fn.lower()}(vdst=v[{vdst_num}], src0={mai_src(src0_num, src0_acc)}, src1={mai_src(src1_num, src1_acc)}, src2={src2_val}{', ' + ', '.join(mai_mods) if mai_mods else ''})"
+
+  # SDWA instructions (CDNA)
+  if mn.endswith('_sdwa') and arch == "cdna":
+    base_mn = mn[:-5]  # strip _sdwa
+    from extra.assembly.amd.autogen.cdna.ins import VOP1Op, VOP2Op, VOPCOp, SDWA
+    vop1_op, vop2_op, vopc_op = getattr(VOP1Op, base_mn.upper(), None), getattr(VOP2Op, base_mn.upper(), None), getattr(VOPCOp, base_mn.upper(), None)
+    if vop1_op is None and vop2_op is None and vopc_op is None: raise ValueError(f"unknown SDWA instruction: {mn}")
+    # Operand layout: vdst, [vcc,] src0[, vsrc1] - carry-out ops have vcc at index 1
+    carry_out = {'v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32', 'v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32'}
+    src0_idx, src1_idx = (2, 3) if base_mn in carry_out else (1, 2)
+    # VOPC SDWA: sdst at [0], src0 at [1], src1 at [2]
+    if vopc_op is not None:
+      _SDWA_SDST = {'vcc': 0, 'vcc_lo': 0, 'flat_scratch': 230, 'flat_scratch_lo': 230}
+      sdst_raw = ops[0].strip().lower()
+      sdst_enc = _SDWA_SDST.get(sdst_raw, 128 + int(sdst_raw[2:].split(':')[0]) if sdst_raw.startswith('s[') else
+                  128 + int(sdst_raw[1:]) if sdst_raw.startswith('s') and sdst_raw[1:].isdigit() else
+                  128 + 108 + int(sdst_raw[5:].split(':')[0]) if sdst_raw.startswith('ttmp[') else 0)
+      src0_raw, src0_neg, src0_abs, src0_sext = _parse_src_mods(ops[1].strip().lower() if len(ops) > 1 else 'v0')
+      src1_raw, src1_neg, src1_abs, src1_sext = _parse_src_mods(ops[2].strip().lower() if len(ops) > 2 else 'v0')
+      src0_val, s0 = _parse_sdwa_src(src0_raw)
+      vsrc1_val, s1 = _parse_sdwa_src(src1_raw)
+      sdwa_kw = [f'vop_op={vsrc1_val}', 'vop2_op=62', f'vdst=RawImm({vopc_op.value})', f'src0=RawImm({src0_val})',
+                 f'dst_sel={sdst_enc & 7}', f'dst_u={(sdst_enc >> 3) & 3}', f'clmp={(sdst_enc >> 5) & 1}', f'omod={(sdst_enc >> 6) & 3}',
+                 f'src0_sel={sdwa_src0_sel if sdwa_src0_sel is not None else 6}', f'src1_sel={sdwa_src1_sel if sdwa_src1_sel is not None else 6}']
+      if src0_sext or sdwa_src0_sext: sdwa_kw.append('src0_sext=1')
+      if src0_neg: sdwa_kw.append('src0_neg=1')
+      if src0_abs: sdwa_kw.append('src0_abs=1')
+      if s0: sdwa_kw.append('s0=1')
+      if src1_sext or sdwa_src1_sext: sdwa_kw.append('src1_sext=1')
+      if src1_neg: sdwa_kw.append('src1_neg=1')
+      if src1_abs: sdwa_kw.append('src1_abs=1')
+      if s1: sdwa_kw.append('s1=1')
+      return f"SDWA({', '.join(sdwa_kw)})"
+    # VOP1/VOP2 SDWA
+    src0_raw, src0_neg, src0_abs, src0_sext = _parse_src_mods(ops[src0_idx].strip().lower() if len(ops) > src0_idx else 'v0')
+    src0_val, s0 = _parse_sdwa_src(src0_raw)
+    vsrc1_val, src1_neg, src1_abs, src1_sext, s1 = 0, False, False, False, 0
+    if vop2_op is not None and len(ops) > src1_idx:
+      src1_raw, src1_neg, src1_abs, src1_sext = _parse_src_mods(ops[src1_idx].strip().lower())
+      vsrc1_val, s1 = _parse_sdwa_src(src1_raw)
+    sdwa_kw = [f'vop_op={vop1_op.value if vop1_op else vsrc1_val}', f'vop2_op={63 if vop1_op else vop2_op.value}',
+               f'vdst={args[0]}', f'src0=RawImm({src0_val})', f'dst_sel={sdwa_dst_sel if sdwa_dst_sel is not None else 6}',
+               f'dst_u={sdwa_dst_unused if sdwa_dst_unused is not None else 2}', f'src0_sel={sdwa_src0_sel if sdwa_src0_sel is not None else 6}']
+    if src0_sext or sdwa_src0_sext: sdwa_kw.append('src0_sext=1')
+    if src0_neg: sdwa_kw.append('src0_neg=1')
+    if src0_abs: sdwa_kw.append('src0_abs=1')
+    if s0: sdwa_kw.append('s0=1')
+    if vop2_op is not None:
+      sdwa_kw.append(f'src1_sel={sdwa_src1_sel if sdwa_src1_sel is not None else 6}')
+      if src1_sext or sdwa_src1_sext: sdwa_kw.append('src1_sext=1')
+      if src1_neg: sdwa_kw.append('src1_neg=1')
+      if src1_abs: sdwa_kw.append('src1_abs=1')
+      if s1: sdwa_kw.append('s1=1')
+    for k in kw:
+      if k.startswith('clmp=') or k.startswith('omod='): sdwa_kw.append(k)
+    return f"SDWA({', '.join(sdwa_kw)})"
+
+  # DPP instructions (CDNA)
+  if mn.endswith('_dpp') and arch == "cdna" and dpp_ctrl is not None:
+    base_mn = mn[:-4]  # strip _dpp
+    from extra.assembly.amd.autogen.cdna.ins import VOP1Op, VOP2Op, DPP
+    vop1_op, vop2_op = getattr(VOP1Op, base_mn.upper(), None), getattr(VOP2Op, base_mn.upper(), None)
+    if vop1_op is None and vop2_op is None: raise ValueError(f"unknown DPP instruction: {mn}")
+    carry_out = {'v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32', 'v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32'}
+    src0_idx, src1_idx = (2, 3) if base_mn in carry_out else (1, 2)
+    src0_raw, src0_neg, src0_abs, _ = _parse_src_mods(ops[src0_idx].strip().lower() if len(ops) > src0_idx else 'v0')
+    src0_val = int(src0_raw[1:]) if src0_raw.startswith('v') and src0_raw[1:].isdigit() else int(src0_raw.split('[')[1].split(']')[0]) if 'v[' in src0_raw else 0
+    vsrc1_val, src1_neg, src1_abs = 0, False, False
+    if vop2_op is not None and len(ops) > src1_idx:
+      src1_raw, src1_neg, src1_abs, _ = _parse_src_mods(ops[src1_idx].strip().lower())
+      vsrc1_val = int(src1_raw[1:]) if src1_raw.startswith('v') and src1_raw[1:].isdigit() else int(src1_raw.split('[')[1].split(']')[0]) if 'v[' in src1_raw else 0
+    dpp_kw = [f'vop_op={vop1_op.value if vop1_op else vsrc1_val}', f'vop2_op={63 if vop1_op else vop2_op.value}',
+              f'vdst={args[0]}', f'src0=RawImm({src0_val})', f'dpp_ctrl={dpp_ctrl}']
+    if dpp_bound_ctrl: dpp_kw.append('bound_ctrl=1')
+    if src0_neg: dpp_kw.append('src0_neg=1')
+    if src0_abs: dpp_kw.append('src0_abs=1')
+    if src1_neg: dpp_kw.append('src1_neg=1')
+    if src1_abs: dpp_kw.append('src1_abs=1')
+    if dpp_bank_mask_specified or dpp_row_mask_specified:
+      dpp_kw.extend([f'bank_mask={dpp_bank_mask if dpp_bank_mask is not None else 0xf}', f'row_mask={dpp_row_mask if dpp_row_mask is not None else 0xf}'])
+    return f"DPP({', '.join(dpp_kw)})"
+
+  # VOPD (RDNA3 only)
   if '::' in text:
     xp, yp = text.split('::')
     xps, yps = xp.strip().replace(',', ' ').split(), yp.strip().replace(',', ' ').split()
-    xo, yo = [_op2dsl(p) for p in xps[1:]], [_op2dsl(p) for p in yps[1:]]
+    xo, yo = [_op2dsl(p, arch) for p in xps[1:]], [_op2dsl(p, arch) for p in yps[1:]]
     vdx, sx0, vsx1 = xo[0], xo[1] if len(xo) > 1 else '0', xo[2] if len(xo) > 2 else 'v[0]'
     vdy, sy0, vsy1 = yo[0], yo[1] if len(yo) > 1 else '0', yo[2] if len(yo) > 2 else 'v[0]'
     lit = xo[3] if 'fmaak' in xps[0].lower() and len(xo) > 3 else yo[3] if 'fmaak' in yps[0].lower() and len(yo) > 3 else None
@@ -675,33 +989,133 @@ def get_dsl(text: str) -> str:
 
   # Special instructions
   if mn == 's_setreg_imm32_b32': raise ValueError(f"unsupported: {mn}")
+  # v_readfirstlane_b32 has SGPR dest but encoded in vdst field - use RawImm
+  if mn == 'v_readfirstlane_b32' and len(args) >= 2:
+    dst = ops[0].strip().lower()
+    if dst.startswith('s') and dst[1:].isdigit(): dst_val = int(dst[1:])
+    elif dst.startswith('ttmp') and dst[4:].isdigit(): dst_val = 108 + int(dst[4:])
+    else:
+      sgpr_map = {'vcc_lo': 106, 'vcc_hi': 107, 'm0': 124, 'exec_lo': 126, 'exec_hi': 127,
+                  'flat_scratch_lo': 102, 'flat_scratch_hi': 103, 'xnack_mask_lo': 104, 'xnack_mask_hi': 105,
+                  'null': 124}  # null register for RDNA3
+      dst_val = sgpr_map.get(dst, int(dst) if dst.isdigit() else 0)
+    return f"v_readfirstlane_b32_e32(vdst=RawImm({dst_val}), src0={args[1]})"
   if mn in ('s_setpc_b64', 's_rfe_b64'): return f"{mn}(ssrc0={args[0]})"
+  if mn in ('s_cbranch_join', 's_set_gpr_idx_idx'): return f"{mn}(ssrc0={args[0]}, sdst=RawImm(0))"  # No destination, only source
+  if mn == 's_cbranch_g_fork': return f"{mn}(ssrc0={args[0]}, ssrc1={args[1]}, sdst=RawImm(0))"  # Two sources, no dest
+  if mn == 's_set_gpr_idx_on': return f"{mn}(ssrc0={args[0]}, ssrc1=RawImm({int(args[1], 0)}))"  # Mode bits as raw value
   if mn in ('s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'): return f"{mn}(sdst={args[0]}, ssrc0=RawImm({args[1].strip()}))"
   if mn == 's_version': return f"{mn}(simm16={args[0]})"
   if mn == 's_setreg_b32': return f"{mn}(simm16={args[0]}, sdst={args[1]})"
 
+  # SMEM: s_dcache_discard has swapped operand layout (saddr→sbase, soffset→sdata)
+  if arch == "cdna" and mn.startswith('s_dcache_discard'):
+    gs = ", glc=1" if glc else ""
+    # Syntax: s_dcache_discard saddr, soffset [offset:imm]
+    if off_val and len(ops) >= 2:
+      # SGPR + immediate offset: soe=1, imm=1, soffset=SGPR, offset=imm
+      return f"{mn}(sbase={args[0]}, sdata=RawImm(0), offset={off_val}, soffset={args[1]}, soe=1, imm=1{gs})"
+    if len(ops) >= 2 and re.match(r'^-?[0-9]|^-?0x', ops[1].strip().lower()):
+      # Immediate offset only: imm=1
+      return f"{mn}(sbase={args[0]}, sdata=RawImm(0), offset={args[1]}, soffset=RawImm(0), imm=1{gs})"
+    # SGPR offset only: imm=0, offset=SGPR
+    return f"{mn}(sbase={args[0]}, sdata=RawImm(0), offset={args[1]}, soffset=RawImm(0){gs})"
+
+  # SMEM: s_atomic_*/s_buffer_atomic_* uses offset field for SGPR (imm=0), not soffset
+  if arch == "cdna" and (mn.startswith('s_buffer_atomic') or (mn.startswith('s_atomic') and not mn.startswith('s_atc'))):
+    gs = ", glc=1" if glc else ""
+    if len(ops) >= 3:
+      # Syntax: s_atomic_* sdata, sbase, soffset [offset:imm]
+      if off_val:
+        # SGPR + immediate offset: soe=1, imm=1
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}, soe=1, imm=1{gs})"
+      if re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
+        # Immediate offset only: imm=1
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(0), imm=1{gs})"
+      # SGPR offset only: imm=0, offset=SGPR
+      return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(0){gs})"
+
   # SMEM
-  if mn in SMEM_OPS:
+  if mn in SMEM_OPS or (arch == "cdna" and mn.startswith(('s_load_dword', 's_buffer_load_dword'))):
     gs, ds = ", glc=1" if glc else "", ", dlc=1" if dlc else ""
-    if len(ops) >= 3 and re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
-      return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(124){gs}{ds})"
-    if off_val and len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}{gs}{ds})"
-    if len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, soffset={args[2]}{gs}{ds})"
+    if arch == "cdna":
+      # CDNA SMEM encoding: imm=1 for immediate, soe=1 for sgpr+offset combo
+      if len(ops) >= 3 and re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
+        # Immediate offset only
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(0), imm=1{gs}{ds})"
+      if off_val and len(ops) >= 3:
+        # SGPR + immediate offset: soe=1, soffset=SGPR, offset=imm
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}, soe=1, imm=1{gs}{ds})"
+      if len(ops) >= 3:
+        # SGPR offset only: offset=SGPR index, soffset=0
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(0){gs}{ds})"
+      if len(ops) == 2:
+        # No offset specified: imm=1, offset=0
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset=0, soffset=RawImm(0), imm=1{gs}{ds})"
+    else:
+      # RDNA3 encoding
+      if len(ops) >= 3 and re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
+        return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(124){gs}{ds})"
+      if off_val and len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}{gs}{ds})"
+      if len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, soffset={args[2]}{gs}{ds})"
+
+  # ACC register handling for CDNA: detect a[N] and set acc=1, convert to v[N]
+  def _has_acc(args): return any(a.startswith('a[') for a in args if isinstance(a, str))
+  def _acc_to_vgpr(a): return 'v' + a[1:] if isinstance(a, str) and a.startswith('a[') else a
 
   # Buffer (MUBUF/MTBUF) instructions
   if mn.startswith(('buffer_', 'tbuffer_')):
     is_tbuf = mn.startswith('tbuffer_')
     # Parse format value for tbuffer
     fmt_num = None
-    if fmt_val is not None:
+    # Handle dfmt:N nfmt:N style (CDNA ACC style)
+    if dfmt_val is not None or nfmt_val is not None:
+      fmt_num = (dfmt_val if dfmt_val is not None else 1) | ((nfmt_val if nfmt_val is not None else 0) << 4)
+    elif fmt_val is not None:
       if fmt_val.isdigit(): fmt_num = int(fmt_val)
-      else: fmt_num = BUF_FMT.get(fmt_val.replace(' ', '')) or _parse_buf_fmt_combo(fmt_val)
-    # Handle special no-arg buffer ops
-    if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}()"
-    # Build modifiers string
-    buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
-                        ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
-    if is_tbuf and fmt_num is not None: buf_mods = f", format={fmt_num}" + buf_mods
+      else:
+        fmt_num = BUF_FMT.get(fmt_val.replace(' ', '')) or _parse_buf_fmt_combo(fmt_val)
+        # CDNA-style: BUF_DATA_FORMAT_X or BUF_NUM_FORMAT_X (or comma-separated pair)
+        if fmt_num is None and arch == "cdna":
+          _dfmt = {'INVALID': 0, '8': 1, '16': 2, '8_8': 3, '32': 4, '16_16': 5, '10_11_11': 6, '11_11_10': 7,
+                   '10_10_10_2': 8, '2_10_10_10': 9, '8_8_8_8': 10, '32_32': 11, '16_16_16_16': 12,
+                   '32_32_32': 13, '32_32_32_32': 14, 'RESERVED_15': 15}
+          _nfmt = {'UNORM': 0, 'SNORM': 1, 'USCALED': 2, 'SSCALED': 3, 'UINT': 4, 'SINT': 5, 'RESERVED_6': 6, 'FLOAT': 7}
+          parts = [p.strip() for p in fmt_val.split(',')]
+          dfmt, nfmt = 1, 0  # defaults
+          for p in parts:
+            if p.startswith('BUF_DATA_FORMAT_'): dfmt = _dfmt.get(p[16:], 1)
+            elif p.startswith('BUF_NUM_FORMAT_'): nfmt = _nfmt.get(p[15:], 0)
+          fmt_num = dfmt | (nfmt << 4)
+    # Handle special no-arg buffer ops (with optional sc0/sc1 for CDNA)
+    if mn in ('buffer_gl0_inv', 'buffer_gl1_inv'): return f"{mn}()"
+    if mn in ('buffer_inv', 'buffer_wbl2'):
+      _buf_sc0 = 1 if sc0 else None
+      _buf_sc1 = 1 if sc1 else None
+      mods = [x for x in ['sc0=1' if _buf_sc0 else '', 'sc1=1' if _buf_sc1 else ''] if x]
+      return f"{mn}({', '.join(mods)})"
+    # ACC register support for CDNA: detect a[N] registers and set acc=1
+    acc_mod = ', acc=1' if arch == 'cdna' and _has_acc(args) else ''
+    args = [_acc_to_vgpr(a) for a in args]  # convert a[N] to v[N] for encoding
+    # Build modifiers string - CDNA uses sc0/nt for glc/slc; GFX942 uses sc0/sc1/nt directly
+    if arch == "cdna":
+      _buf_sc0 = 1 if (sc0 or glc) else None
+      _buf_sc1 = 1 if sc1 else None
+      _buf_nt = 1 if (nt or slc) else None
+      buf_mods = "".join([f", offset={off_val}" if off_val else "", ", sc0=1" if _buf_sc0 else "", ", sc1=1" if _buf_sc1 else "",
+                          ", nt=1" if _buf_nt else "", ", offen=1" if offen else "", ", idxen=1" if idxen else "", ", lds=1" if lds else "", acc_mod])
+    else:
+      buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
+                          ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
+    # Default format for tbuffer is dfmt=1, nfmt=0 (format=8 after encoding as (nfmt<<4)|dfmt becomes just dfmt=1)
+    # Actually format is (dfmt | (nfmt << 4)), so dfmt=1, nfmt=0 -> format=1
+    if is_tbuf: buf_mods = f", format={fmt_num if fmt_num is not None else 1}" + buf_mods
+    # Handle LDS mode: first operand is 'off' meaning no vdata, it goes to LDS
+    if len(ops) >= 1 and ops[0].strip().lower() == 'off':
+      # LDS mode: buffer_load_format_x off, srsrc, soffset -> no vdata, just vaddr=off
+      srsrc_val = args[1] if len(args) > 1 else "s[0:3]"
+      soff_val = args[2] if len(args) > 2 else "0"
+      return f"{mn}(vdata=v[0], vaddr=v[0], srsrc={srsrc_val}, soffset={soff_val}{buf_mods})"
     # Determine vaddr value (v[0] for 'off', actual register otherwise)
     vaddr_idx = 1
     if len(ops) > vaddr_idx and ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
@@ -713,24 +1127,81 @@ def get_dsl(text: str) -> str:
     # soffset: integers are inline constants, don't wrap in RawImm
     return f"{mn}(vdata={args[0]}, vaddr={vaddr_val}, srsrc={srsrc_val}, soffset={soff_val}{buf_mods})"
 
-  # FLAT/GLOBAL/SCRATCH load/store/atomic - saddr needs RawImm(124) for off/null
-  def _saddr(a): return 'RawImm(124)' if a in ('OFF', 'NULL') else a
-  flat_mods = f"{f', offset={off_val}' if off_val else ''}{', glc=1' if glc else ''}{', slc=1' if slc else ''}{', dlc=1' if dlc else ''}"
+  # FLAT/GLOBAL/SCRATCH load/store/atomic - saddr needs RawImm for off/null
+  # CDNA: flat uses saddr=0 for off, global/scratch use saddr=0x7F (127) for off
+  # RDNA: uses saddr=124 (NULL)
+  # CDNA: uses sc0/sc1 for glc/slc
+  def _saddr_off(seg): return 'RawImm(0)' if arch == 'cdna' and seg == 'flat' else ('RawImm(127)' if arch == 'cdna' else 'RawImm(124)')
+  def _saddr(a, seg='global'): return _saddr_off(seg) if a in ('OFF', 'NULL') else a
+  if arch == "cdna":
+    # GFX942 uses sc0/sc1/nt directly; older CDNA uses glc->sc0, slc->nt
+    _sc0 = 1 if (sc0 or glc) else None
+    _sc1 = 1 if sc1 else None
+    _nt = 1 if (nt or slc) else None
+    flat_mods = f"{f', offset={off_val}' if off_val else ''}{', sc0=1' if _sc0 else ''}{', sc1=1' if _sc1 else ''}{', nt=1' if _nt else ''}{', lds=1' if lds else ''}"
+  else:
+    flat_mods = f"{f', offset={off_val}' if off_val else ''}{', glc=1' if glc else ''}{', slc=1' if slc else ''}{', dlc=1' if dlc else ''}{', lds=1' if lds else ''}"
   for pre, flds in [('flat_load','vdst,addr,saddr'), ('global_load','vdst,addr,saddr'), ('scratch_load','vdst,addr,saddr'),
                     ('flat_store','addr,data,saddr'), ('global_store','addr,data,saddr'), ('scratch_store','addr,data,saddr')]:
     if mn.startswith(pre) and len(args) >= 2:
       f0, f1, f2 = flds.split(',')
-      return f"{mn}({f0}={args[0]}, {f1}={args[1]}{f', {f2}={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
+      seg = pre.split('_')[0]  # 'flat', 'global', or 'scratch'
+      # ACC register support for CDNA: detect a[N] registers and set acc=1
+      acc_mod = ', acc=1' if arch == 'cdna' and _has_acc(args) else ''
+      args = [_acc_to_vgpr(a) for a in args]  # convert a[N] to v[N] for encoding
+      # LDS mode: args=[addr, saddr], vdst=0, data goes to LDS
+      # Triggered by 'lds' modifier OR '_lds_' in mnemonic (e.g. global_load_lds_dword)
+      is_lds_instr = '_lds_' in mn
+      if (lds or is_lds_instr) and 'load' in pre:
+        addr_off = args[0] == 'OFF'
+        addr_val = 'v[0]' if seg == 'scratch' and addr_off else args[0]
+        saddr_val = _saddr(args[1], seg) if len(args) >= 2 else _saddr_off(seg)
+        # For scratch_load_lds_* with vaddr (not off), lds=1 is needed in encoding
+        # For global_load_lds_*, lds is implicit in opcode (no lds bit needed)
+        need_lds_bit = is_lds_instr and seg == 'scratch' and not addr_off
+        lds_flat_mods = flat_mods + ', lds=1' if need_lds_bit else flat_mods
+        return f"{mn}(vdst=v[0], addr={addr_val}, saddr={saddr_val}{lds_flat_mods}{acc_mod})"
+      # For scratch, 'off' as vaddr means vaddr=0 (no offset), not null register
+      # For load: args=[vdst, addr, saddr], for store: args=[addr, data, saddr]
+      # For RDNA3 scratch with 'off' as vaddr, set sve=0 (no VGPR address)
+      # For GFX942 scratch: lds=1 when vaddr is used (not 'off')
+      if 'store' in pre:
+        addr_off = seg == 'scratch' and args[0] == 'OFF'
+        addr_val = 'v[0]' if addr_off else args[0]
+        sve_mod = ', sve=0' if addr_off and arch == 'rdna3' else ''
+        gfx942_lds = ', lds=1' if gfx942 and seg == 'scratch' and not addr_off else ''
+        return f"{mn}({f0}={addr_val}, {f1}={args[1]}{f', {f2}={_saddr(args[2], seg)}' if len(args) >= 3 else f', saddr={_saddr_off(seg)}'}{sve_mod}{flat_mods}{gfx942_lds}{acc_mod})"
+      else:
+        addr_off = seg == 'scratch' and args[1] == 'OFF'
+        addr_val = 'v[0]' if addr_off else args[1]
+        sve_mod = ', sve=0' if addr_off and arch == 'rdna3' else ''
+        gfx942_lds = ', lds=1' if gfx942 and seg == 'scratch' and not addr_off else ''
+        return f"{mn}({f0}={args[0]}, {f1}={addr_val}{f', {f2}={_saddr(args[2], seg)}' if len(args) >= 3 else f', saddr={_saddr_off(seg)}'}{sve_mod}{flat_mods}{gfx942_lds}{acc_mod})"
   for pre in ('flat_atomic', 'global_atomic', 'scratch_atomic'):
     if mn.startswith(pre):
-      if glc and len(args) >= 3: return f"{mn}(vdst={args[0]}, addr={args[1]}, data={args[2]}{f', saddr={_saddr(args[3])}' if len(args) >= 4 else ', saddr=RawImm(124)'}{flat_mods})"
-      if len(args) >= 2: return f"{mn}(addr={args[0]}, data={args[1]}{f', saddr={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
+      seg = pre.split('_')[0]  # 'flat', 'global', or 'scratch'
+      # ACC register support for CDNA: detect a[N] registers and set acc=1
+      acc_mod = ', acc=1' if arch == 'cdna' and _has_acc(args) else ''
+      args = [_acc_to_vgpr(a) for a in args]  # convert a[N] to v[N] for encoding
+      # For atomics with return value: vdst, addr, data, [saddr] - triggered by glc (or sc0 for GFX942)
+      has_return = glc or sc0
+      if has_return and len(args) >= 3: return f"{mn}(vdst={args[0]}, addr={args[1]}, data={args[2]}{f', saddr={_saddr(args[3], seg)}' if len(args) >= 4 else f', saddr={_saddr_off(seg)}'}{flat_mods}{acc_mod})"
+      if len(args) >= 2: return f"{mn}(addr={args[0]}, data={args[1]}{f', saddr={_saddr(args[2], seg)}' if len(args) >= 3 else f', saddr={_saddr_off(seg)}'}{flat_mods}{acc_mod})"
 
   # DS instructions
   if mn.startswith('ds_'):
-    off0, off1 = (str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)) if off_val else ("0", "0")
-    gds_s = ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
-    off_kw = f", offset0={off0}, offset1={off1}{gds_s}"
+    # Handle offset formats: offset:N (combined), offset0:N offset1:N (separate), or none
+    if offset0 is not None or offset1 is not None:
+      off0, off1 = offset0 or "0", offset1 or "0"
+    elif off_val:
+      off0, off1 = str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)
+    else:
+      off0, off1 = "0", "0"
+    # ACC register support for CDNA DS instructions
+    acc_mod = ', acc=1' if arch == 'cdna' and _has_acc(args) else ''
+    args = [_acc_to_vgpr(a) for a in args]  # convert a[N] to v[N] for encoding
+    gds_s = ", gds=1" if gds else ""
+    off_kw = f", offset0={off0}, offset1={off1}{gds_s}{acc_mod}"
     if mn == 'ds_nop' or mn in ('ds_gws_sema_v', 'ds_gws_sema_p', 'ds_gws_sema_release_all'): return f"{mn}({off_kw.lstrip(', ')})"
     if 'gws_' in mn: return f"{mn}(addr={args[0]}{off_kw})"
     if 'consume' in mn or 'append' in mn: return f"{mn}(vdst={args[0]}{off_kw})"
@@ -739,37 +1210,43 @@ def get_dsl(text: str) -> str:
       if 'load' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
       if 'store' in mn and 'xchg' not in mn: return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
       return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
-    if 'load' in mn: return f"{mn}(vdst={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'load' in mn or ('read' in mn and 'read2' not in mn): return f"{mn}(vdst={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'read2' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'write2' in mn: return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
+    if 'xchg2' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
     if 'store' in mn and not _has(mn, 'cmp', 'xchg'):
       return f"{mn}(data0={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
     if 'swizzle' in mn or 'ordered_count' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
     if 'permute' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
     if 'bvh' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
     if 'condxchg' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
-    if _has(mn, 'cmpstore', 'mskor', 'wrap'):
+    if _has(mn, 'cmpst', 'mskor', 'wrap'):
       return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
     return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
 
-  # v_fmaak/v_fmamk literal extraction
-  lit_s = ""
-  if mn in ('v_fmaak_f32', 'v_fmaak_f16') and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
-  elif mn in ('v_fmamk_f32', 'v_fmamk_f16') and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
+  # v_fmaak/v_fmamk/v_madak/v_madmk - autogen functions take K positionally, syntax matches signature
 
   # VCC ops cleanup
   vcc_ops = {'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'}
   if mn.replace('_e32', '') in vcc_ops and len(args) >= 5: mn, args = mn.replace('_e32', '') + '_e32', [args[0], args[2], args[3]]
   if mn.replace('_e64', '') in vcc_ops and mn.endswith('_e64'): mn = mn.replace('_e64', '')
   if mn.startswith('v_cmp') and not mn.endswith('_e64') and len(args) >= 3 and ops[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'): args = args[1:]
-  if 'cmpx' in mn and mn.endswith('_e64') and len(args) == 2: args = ['RawImm(126)'] + args
-  # v_cmp_*_e64 has SGPR destination in vdst field - encode as RawImm
+  # For RDNA3 v_cmpx, destination is implicitly exec (126)
+  if 'cmpx' in mn and mn.endswith('_e64') and len(args) == 2 and arch == 'rdna3': args = ['RawImm(126)'] + args
+  # v_cmp_*_e64 and v_cmpx_*_e64 have SGPR destination in vdst field - encode as RawImm
+  # For CDNA, v_cmpx also writes to SGPR pair (first operand)
   _SGPR_NAMES = {'vcc_lo': 106, 'vcc_hi': 107, 'vcc': 106, 'null': 124, 'm0': 125, 'exec_lo': 126, 'exec_hi': 127}
-  if mn.startswith('v_cmp') and 'cmpx' not in mn and mn.endswith('_e64') and len(args) >= 1:
-    dst = ops[0].strip().lower()
-    if dst.startswith('s') and dst[1:].isdigit(): args[0] = f'RawImm({int(dst[1:])})'
-    elif dst.startswith('s[') and ':' in dst: args[0] = f'RawImm({int(dst[2:].split(":")[0])})'
-    elif dst.startswith('ttmp') and dst[4:].isdigit(): args[0] = f'RawImm({108 + int(dst[4:])})'
-    elif dst.startswith('ttmp[') and ':' in dst: args[0] = f'RawImm({108 + int(dst[5:].split(":")[0])})'
-    elif dst in _SGPR_NAMES: args[0] = f'RawImm({_SGPR_NAMES[dst]})'
+  if mn.startswith('v_cmp') and mn.endswith('_e64') and len(args) >= 1:
+    # For CDNA v_cmpx with 3 operands (sdst, src0, src1), convert sdst to RawImm
+    # For RDNA3, v_cmpx only has 2 operands (src0, src1) - already handled above
+    is_cmpx = 'cmpx' in mn
+    if not is_cmpx or arch == 'cdna':
+      dst = ops[0].strip().lower()
+      if dst.startswith('s') and dst[1:].isdigit(): args[0] = f'RawImm({int(dst[1:])})'
+      elif dst.startswith('s[') and ':' in dst: args[0] = f'RawImm({int(dst[2:].split(":")[0])})'
+      elif dst.startswith('ttmp') and dst[4:].isdigit(): args[0] = f'RawImm({108 + int(dst[4:])})'
+      elif dst.startswith('ttmp[') and ':' in dst: args[0] = f'RawImm({108 + int(dst[5:].split(":")[0])})'
+      elif dst in _SGPR_NAMES: args[0] = f'RawImm({_SGPR_NAMES[dst]})'
 
   fn = mn.replace('.', '_')
   if opsel is not None: args = [re.sub(r'\.[hl]$', '', a) for a in args]
@@ -785,29 +1262,233 @@ def get_dsl(text: str) -> str:
       if abs_: op = op[1:-1]
       if neg: inline_neg |= (1 << i)
       if abs_: inline_abs |= (1 << i)
-      clean_args.append(_op2dsl(op))
+      clean_args.append(_op2dsl(op, arch))
     args = clean_args + args[4:]
     if inline_neg: neg_lo = inline_neg
     if inline_abs: neg_hi = inline_abs
 
   all_kw = list(kw)
-  if lit_s: all_kw.append(lit_s.lstrip(', '))
   if opsel is not None: all_kw.append(f'opsel={opsel}')
+  if opsel_hi is not None:
+    all_kw.append(f'opsel_hi={opsel_hi & 3}')
+    if opsel_hi_count >= 3: all_kw.append(f'opsel_hi2={(opsel_hi >> 2) & 1}')  # only set opsel_hi2 if 3 elements specified
   if neg_lo is not None: all_kw.append(f'neg={neg_lo}')
   if neg_hi is not None: all_kw.append(f'neg_hi={neg_hi}')
   if 'bvh' in mn and 'intersect_ray' in mn: all_kw.extend(['dmask=15', 'unrm=1', 'r128=1'])
 
+  # For CDNA _e64 VOP instructions: use keyword args (VOP3 layout)
+  # Pattern: v_xxx_e64 dst, src0[, src1[, src2]] -> VOP3A with promoted opcode
+  # VOP1 to VOP3 promotion: VOP3 op = 384 + (VOP1_op - 64) for VOP1_op >= 64, else 256 + VOP1_op
+  if fn.endswith('_e64') and fn.startswith('v_') and arch == "cdna":
+    fn_base = fn[:-4].upper()  # strip _e64 and uppercase for enum lookup
+    from extra.assembly.amd.autogen.cdna.ins import VOP1Op, VOP2Op, VOP3AOp, VOP3BOp
+    # Check if this is a VOP3B instruction (has sdst for carry-out)
+    vop3b_op = getattr(VOP3BOp, fn_base, None)
+    if vop3b_op is not None:
+      # VOP3B: v_xxx_e64 vdst, sdst, src0, src1[, src2]
+      vop3_args = []
+      if len(args) >= 1: vop3_args.append(f'vdst={args[0]}')
+      if len(args) >= 2: vop3_args.append(f'sdst={args[1]}')
+      if len(args) >= 3: vop3_args.append(f'src0={args[2]}')
+      if len(args) >= 4: vop3_args.append(f'src1={args[3]}')
+      if len(args) >= 5: vop3_args.append(f'src2={args[4]}')
+      a_str = ', '.join(vop3_args + all_kw)
+      return f"{fn[:-4]}({a_str})"
+    # Check if this is a VOP1 instruction that needs promotion
+    vop1_op = getattr(VOP1Op, fn_base, None)
+    vop2_op = getattr(VOP2Op, fn_base, None)
+    vop3a_op = getattr(VOP3AOp, fn_base, None)
+    if vop1_op is not None and vop3a_op is None:
+      # VOP1 -> VOP3 promotion: calculate promoted opcode
+      promoted_op = 384 + (vop1_op.value - 64) if vop1_op.value >= 64 else 256 + vop1_op.value
+      vop3_args = [f'op={promoted_op}']
+      if len(args) >= 1: vop3_args.append(f'vdst={args[0]}')
+      if len(args) >= 2: vop3_args.append(f'src0={args[1]}')
+      if len(args) >= 3: vop3_args.append(f'src1={args[2]}')
+      if len(args) >= 4: vop3_args.append(f'src2={args[3]}')
+      return f"VOP3A({', '.join(vop3_args + all_kw)})"
+    # Otherwise try normal VOP3 lookup
+    vop3_args = ['_vop3=True']  # marker for asm() to force VOP3
+    if len(args) >= 1: vop3_args.append(f'vdst={args[0]}')
+    if len(args) >= 2: vop3_args.append(f'src0={args[1]}')
+    if len(args) >= 3: vop3_args.append(f'src1={args[2]}')
+    if len(args) >= 4: vop3_args.append(f'src2={args[3]}')
+    a_str = ', '.join(vop3_args + all_kw)
+    return f"{fn[:-4]}({a_str})"
+
+  # CDNA VOP1 with modifiers: auto-promote to VOP3A/SDWA/DPP
+  # Check if this is a VOP1 instruction needing extended encoding (not already _e64/_sdwa/_dpp)
+  has_vop3_mods = any(k.startswith(('omod=', 'clmp=')) for k in all_kw)
+  has_sdwa_mods = sdwa_src0_sel is not None or sdwa_src1_sel is not None or sdwa_dst_sel is not None
+  has_dpp_mods = dpp_ctrl is not None
+  if arch == "cdna" and fn.startswith('v_') and not fn.endswith(('_e64', '_sdwa', '_dpp')) and (has_vop3_mods or has_sdwa_mods or has_dpp_mods):
+    from extra.assembly.amd.autogen.cdna.ins import VOP1Op, VOP2Op, SDWA, DPP
+    fn_upper = fn.upper()
+    vop1_op = getattr(VOP1Op, fn_upper, None)
+    vop2_op = getattr(VOP2Op, fn_upper, None)
+    if vop1_op is not None or vop2_op is not None:
+      if has_sdwa_mods:
+        # SDWA encoding for VOP1/VOP2 with src0_sel/src1_sel/dst_sel
+        sdwa_kw = []
+        src0_orig = ops[1].strip().lower() if len(ops) > 1 else ''
+        src0_is_sgpr = src0_orig.startswith('s') and not src0_orig.startswith('src')
+        src0_is_literal = src0_orig.isdigit() or (len(src0_orig) > 2 and src0_orig[:2] == '0x')
+        if vop1_op is not None:
+          sdwa_kw.append(f'vop_op={vop1_op.value}')
+          sdwa_kw.append('vop2_op=63')  # 0x3f indicates VOP1 mode
+          sdwa_kw.append(f'vdst={args[0]}' if args else 'vdst=v[0]')
+          sdwa_kw.append(f'src0={args[1]}' if len(args) > 1 else 'src0=v[0]')
+        else:
+          sdwa_kw.append(f'vop_op={args[1] if len(args) > 1 else "v[0]"}')
+          sdwa_kw.append(f'vop2_op={vop2_op.value}')
+          sdwa_kw.append(f'vdst={args[0]}' if args else 'vdst=v[0]')
+          sdwa_kw.append(f'src0={args[2] if len(args) > 2 else "v[0]"}')
+        sdwa_kw.append(f'dst_sel={sdwa_dst_sel if sdwa_dst_sel is not None else 6}')
+        sdwa_kw.append('dst_u=0')
+        sdwa_kw.append(f'src0_sel={sdwa_src0_sel if sdwa_src0_sel is not None else 6}')
+        sdwa_kw.append('src0_sext=0')
+        sdwa_kw.append('src0_neg=0')
+        sdwa_kw.append('src0_abs=0')
+        sdwa_kw.append(f's0={1 if src0_is_sgpr or src0_is_literal else 0}')  # s0=1 for SGPR/literal
+        sdwa_kw.append(f'src1_sel={sdwa_src1_sel if sdwa_src1_sel is not None else 0}')  # 0 for VOP1
+        sdwa_kw.append('src1_sext=0')
+        sdwa_kw.append('src1_neg=0')
+        sdwa_kw.append('src1_abs=0')
+        sdwa_kw.append('s1=0')
+        # Add clamp and omod if present
+        if any(k == 'clmp=1' for k in all_kw): sdwa_kw.append('clmp=1')
+        for k in all_kw:
+          if k.startswith('omod='): sdwa_kw.append(k); break
+        return f"SDWA({', '.join(sdwa_kw)})"
+      elif has_dpp_mods:
+        # DPP encoding for VOP1/VOP2 with quad_perm/row_shl/etc.
+        dpp_kw = []
+        if vop1_op is not None:
+          dpp_kw.append(f'vop_op={vop1_op.value}')
+          dpp_kw.append('vop2_op=63')  # 0x3f indicates VOP1 mode
+          dpp_kw.append(f'vdst={args[0]}' if args else 'vdst=v[0]')
+          dpp_kw.append(f'src0={args[1]}' if len(args) > 1 else 'src0=v[0]')
+        else:
+          # VOP2 DPP: vop_op is vsrc1 (second source), src0 is DPP source (first source)
+          dpp_kw.append(f'vop_op={args[2] if len(args) > 2 else "v[0]"}')
+          dpp_kw.append(f'vop2_op={vop2_op.value}')
+          dpp_kw.append(f'vdst={args[0]}' if args else 'vdst=v[0]')
+          dpp_kw.append(f'src0={args[1] if len(args) > 1 else "v[0]"}')
+        dpp_kw.append(f'dpp_ctrl={dpp_ctrl}')
+        dpp_kw.append(f'row_mask={dpp_row_mask if dpp_row_mask is not None else 15}')
+        dpp_kw.append(f'bank_mask={dpp_bank_mask if dpp_bank_mask is not None else 15}')
+        dpp_kw.append(f'bound_ctrl={dpp_bound_ctrl if dpp_bound_ctrl is not None else 0}')
+        return f"DPP({', '.join(dpp_kw)})"
+      elif has_vop3_mods and vop1_op is not None:
+        # VOP3A encoding for VOP1 with clamp/omod
+        from extra.assembly.amd.autogen.cdna.ins import VOP3AOp
+        # Calculate promoted opcode: VOP3 op = 320 + VOP1_op
+        promoted_op = 320 + vop1_op.value
+        vop3_kw = [f'op={promoted_op}']
+        vop3_kw.append(f'vdst={args[0]}' if args else 'vdst=v[0]')
+        vop3_kw.append(f'src0={args[1]}' if len(args) > 1 else 'src0=v[0]')
+        vop3_kw.append('src1=RawImm(0)')
+        vop3_kw.append('src2=RawImm(0)')
+        vop3_kw.extend(all_kw)
+        return f"VOP3A({', '.join(vop3_kw)})"
+
+  # GFX942-specific VOP3A opcode adjustments: some instructions need +64 offset
+  _GFX942_VOP3A_OFFSET64 = {'V_CVT_PK_BF8_F32', 'V_CVT_PK_FP8_F32', 'V_CVT_SR_BF8_F32', 'V_CVT_SR_FP8_F32', 'V_LSHL_ADD_U64'}
+  if gfx942 and fn.upper() in _GFX942_VOP3A_OFFSET64:
+    from extra.assembly.amd.autogen.cdna.ins import VOP3AOp
+    base_op = getattr(VOP3AOp, fn.upper(), None)
+    if base_op is not None:
+      vop3_kw = [f'op={base_op + 64}']
+      vop3_kw.append(f'vdst={args[0]}' if args else 'vdst=v[0]')
+      vop3_kw.append(f'src0={args[1]}' if len(args) > 1 else 'src0=v[0]')
+      vop3_kw.append(f'src1={args[2]}' if len(args) > 2 else 'src1=RawImm(0)')
+      vop3_kw.append(f'src2={args[3]}' if len(args) > 3 else 'src2=RawImm(0)')
+      vop3_kw.extend(all_kw)
+      return f"VOP3A({', '.join(vop3_kw)})"
+
   a_str, kw_str = ', '.join(args), ', '.join(all_kw)
   return f"{fn}({a_str}, {kw_str})" if kw_str and a_str else f"{fn}({kw_str})" if kw_str else f"{fn}({a_str})"
 
-def asm(text: str) -> Inst:
-  dsl = get_dsl(text)
-  ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
-  ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
-             'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF})
-  try: return eval(dsl, ns)
+# CDNA VOP3A opcodes that need +64 offset on gfx90a/gfx942 (autogen has wrong values)
+_CDNA_VOP3A_OPCODE_FIX = {'v_mul_legacy_f32': 64}  # gfx90a opcode is 0x2a1, autogen has 0x261
+
+def _fix_cdna_opcode(inst, mnemonic: str, is_gfx90a_or_942: bool):
+  """Fix opcode for CDNA instructions where autogen has wrong values (gfx90a/gfx942 only)."""
+  if not is_gfx90a_or_942: return inst
+  base = mnemonic.removesuffix('_e64').removesuffix('_e32')
+  if base in _CDNA_VOP3A_OPCODE_FIX and hasattr(inst, '_values') and 'op' in inst._values:
+    op = inst._values['op']
+    offset = _CDNA_VOP3A_OPCODE_FIX[base]
+    inst._values['op'] = (op.value + offset) if hasattr(op, 'value') else (op + offset)
+  return inst
+
+def asm(text: str, arch: str = "rdna3") -> Inst:
+  # Normalize arch: gfx90a and gfx942 are CDNA variants
+  is_gfx942 = arch == "gfx942"
+  is_gfx90a = arch == "gfx90a"
+  is_gfx90a_or_942 = is_gfx942 or is_gfx90a
+  if is_gfx90a_or_942: arch = "cdna"
+  mnemonic = text.split()[0].lower()
+  dsl = get_dsl(text, arch, gfx942=is_gfx942)
+  if arch == "cdna":
+    from extra.assembly.amd.autogen.cdna import ins as cdna_ins
+    ns = {n: getattr(cdna_ins, n) for n in dir(cdna_ins) if not n.startswith('_')}
+    # CDNA special registers: m0=124, flat_scratch=102-103, xnack_mask=104-105, no NULL (use m0 for off)
+    # HWREG symbolic names for s_getreg_b32/s_setreg_b32
+    _hwreg_names = {k: v for k, v in _HWREG_GFX942.items()}
+    _hwreg_names.update({v: k for k, v in HWREG.items()})  # standard names: id -> name
+    _hwreg_ids = {v: k for k, v in _hwreg_names.items()}  # reverse: name -> id
+    ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
+               'VCC_LO': RawImm(106), 'VCC_HI': RawImm(107), 'VCC': RawImm(106), 'EXEC_LO': RawImm(126), 'EXEC_HI': RawImm(127), 'EXEC': RawImm(126),
+               'SCC': RawImm(253), 'M0': RawImm(124), 'NULL': RawImm(124), 'OFF': RawImm(124), 'hwreg': hwreg,
+               'HW_REG_XCC_ID': 20, 'HW_REG_SQ_PERF_SNAPSHOT_DATA': 21, 'HW_REG_SQ_PERF_SNAPSHOT_DATA1': 22,
+               'HW_REG_SQ_PERF_SNAPSHOT_PC_LO': 23, 'HW_REG_SQ_PERF_SNAPSHOT_PC_HI': 24,
+               'FLAT_SCRATCH_LO': RawImm(102), 'FLAT_SCRATCH_HI': RawImm(103), 'FLAT_SCRATCH': RawImm(102),
+               'XNACK_MASK_LO': RawImm(104), 'XNACK_MASK_HI': RawImm(105), 'XNACK_MASK': RawImm(104),
+               'SRC_VCCZ': RawImm(251), 'SRC_EXECZ': RawImm(252), 'SRC_SCC': RawImm(253), 'SRC_LDS_DIRECT': RawImm(254)})
+  else:
+    ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
+    ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
+               'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF})
+  fix = (lambda inst: _fix_cdna_opcode(inst, mnemonic, is_gfx90a_or_942)) if arch == "cdna" else (lambda inst: inst)
+  try:
+    # Generic CDNA (not gfx90a/gfx942): v_mul_legacy_f32 uses VOP2 opcode 4, _e64 uses VOP3A opcode 0x104
+    if arch == "cdna" and not is_gfx90a_or_942 and mnemonic.startswith('v_mul_legacy_f32'):
+      from extra.assembly.amd.autogen.cdna.ins import VOP2, VOP3A
+      args = _parse_ops(text[len(mnemonic):])
+      dsl_args = [_op2dsl(a, arch) for a in args]
+      if mnemonic == 'v_mul_legacy_f32_e64':
+        return eval(f"VOP3A(op=0x104, vdst={dsl_args[0]}, src0={dsl_args[1]}, src1={dsl_args[2]}, src2=RawImm(0))", ns)
+      return eval(f"VOP2(op=4, vdst={dsl_args[0]}, src0={dsl_args[1]}, vsrc1={dsl_args[2]})", ns)
+    # For CDNA, prefer _e32 variants for VOP1/VOP2 when available (bare names map to VOP3)
+    # But skip if:
+    #   - already has _e64 suffix (explicit VOP3 request)
+    #   - uses keyword args like vdst=/src0= (VOP3 layout from _e64 instructions)
+    #   - has _vop3=True marker (from _e64 instructions without operands)
+    uses_vop3_kwargs = 'vdst=' in dsl or 'src0=' in dsl or '_vop3=True' in dsl
+    if arch == "cdna" and (m := re.match(r'^(v_\w+)(\(.*\))$', dsl)) and not m.group(1).endswith('_e64') and not uses_vop3_kwargs:
+      fn_name, args_str = m.group(1), m.group(2)
+      e32_name = f"{fn_name}_e32"
+      # VOP2 carry ops: v_add_co_u32(vdst, vcc, src0, vsrc1) -> v_add_co_u32_e32(vdst, src0, vsrc1)
+      # Strip VCC argument (2nd arg) for VOP2 carry operations when using _e32
+      if e32_name in ns and fn_name in _VOP2_CARRY_OUT | _VOP2_CARRY_INOUT:
+        args_match = re.match(r'\(([^,]+),\s*[^,]+,\s*(.+)\)$', args_str)
+        if args_match: args_str = f"({args_match.group(1)}, {args_match.group(2)})"
+      if e32_name in ns: return fix(eval(f"{e32_name}{args_str}", ns))
+    # For CDNA, _e64 suffix maps to base name (VOP3)
+    if arch == "cdna" and (m := re.match(r'^(v_\w+)_e64(\(.*\))$', dsl)):
+      base_name = m.group(1)
+      if base_name in ns: return fix(eval(f"{base_name}{m.group(2)}", ns))
+    # Strip _vop3=True marker before eval
+    eval_dsl = dsl.replace('_vop3=True, ', '').replace('_vop3=True', '')
+    return fix(eval(eval_dsl, ns))
   except NameError:
-    if m := re.match(r'^(v_\w+)(\(.*\))$', dsl): return eval(f"{m.group(1)}_e32{m.group(2)}", ns)
+    # For CDNA, try stripping _e64 to get VOP3 base name
+    if arch == "cdna" and (m := re.match(r'^(v_\w+)_e64(\(.*\))$', dsl)):
+      return fix(eval(f"{m.group(1)}{m.group(2)}", ns))
+    # Don't try _e32 if already _e64
+    if (m := re.match(r'^(v_\w+)(\(.*\))$', dsl)) and not m.group(1).endswith('_e64'):
+      return fix(eval(f"{m.group(1)}_e32{m.group(2)}", ns))
     raise
 
 # ═══════════════════════════════════════════════════════════════════════════════

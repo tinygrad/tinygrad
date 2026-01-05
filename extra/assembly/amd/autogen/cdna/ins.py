@@ -175,28 +175,28 @@ class VOP2(Inst32):
 
 class VOP3A(Inst64):
   encoding = bits[31:26] == 0b110100
-  vdst:VGPRField = bits[7:0]
-  abs = bits[10:8]
-  opsel = bits[14:11]
-  clmp = bits[15]
   op:Annotated[BitField, VOP3AOp] = bits[25:16]
+  vdst:VGPRField = bits[7:0]
   src0:Src = bits[40:32]
   src1:Src = bits[49:41]
   src2:Src = bits[58:50]
   omod = bits[60:59]
   neg = bits[63:61]
+  abs = bits[10:8]
+  clmp = bits[15]
+  opsel = bits[14:11]
 
 class VOP3B(Inst64):
   encoding = bits[31:26] == 0b110100
+  op:Annotated[BitField, VOP3BOp] = bits[25:16]
   vdst:VGPRField = bits[7:0]
   sdst:SGPRField = bits[14:8]
-  clmp = bits[15]
-  op:Annotated[BitField, VOP3BOp] = bits[25:16]
   src0:Src = bits[40:32]
   src1:Src = bits[49:41]
   src2:Src = bits[58:50]
   omod = bits[60:59]
   neg = bits[63:61]
+  clmp = bits[15]
 
 class VOP3P(Inst64):
   encoding = bits[31:23] == 0b110100111
@@ -974,8 +974,8 @@ v_sub_f16_e32 = functools.partial(VOP2, VOP2Op.V_SUB_F16)
 v_subrev_f16_e32 = functools.partial(VOP2, VOP2Op.V_SUBREV_F16)
 v_mul_f16_e32 = functools.partial(VOP2, VOP2Op.V_MUL_F16)
 v_mac_f16_e32 = functools.partial(VOP2, VOP2Op.V_MAC_F16)
-v_madmk_f16_e32 = functools.partial(VOP2, VOP2Op.V_MADMK_F16)
-v_madak_f16_e32 = functools.partial(VOP2, VOP2Op.V_MADAK_F16)
+def v_madmk_f16_e32(vdst, src0, K, vsrc1): return VOP2(VOP2Op.V_MADMK_F16, vdst, src0, vsrc1, literal=K)
+def v_madak_f16_e32(vdst, src0, vsrc1, K): return VOP2(VOP2Op.V_MADAK_F16, vdst, src0, vsrc1, literal=K)
 v_add_u16_e32 = functools.partial(VOP2, VOP2Op.V_ADD_U16)
 v_sub_u16_e32 = functools.partial(VOP2, VOP2Op.V_SUB_U16)
 v_subrev_u16_e32 = functools.partial(VOP2, VOP2Op.V_SUBREV_U16)
