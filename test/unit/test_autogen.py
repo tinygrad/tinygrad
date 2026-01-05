@@ -9,6 +9,18 @@ class TestAutogen(unittest.TestCase):
       subprocess.check_output(('clang', '-x', 'c', '-fPIC', '-shared', '-', '-o', f.name), input=src.encode())
       return DLL("test", f.name)
 
+  def run_gen(self, contents):
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
+      f.write(contents)
+      f.flush()
+
+      generated_code = gen(name="test_header", dll=None, files=[f.name])
+      print(generated_code)
+
+      namespace = {}
+      exec(generated_code, namespace)
+      return namespace
+
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_struct_interop(self):
     class Baz(Struct): SIZE = 8
@@ -187,34 +199,46 @@ class TestAutogen(unittest.TestCase):
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):
-    NvU32 = ctypes.c_uint32
-    NvU64 = ctypes.c_uint64
-    class FWSECLIC_READ_VBIOS_DESC(Struct): pass
-    FWSECLIC_READ_VBIOS_DESC._packed_ = True
-    FWSECLIC_READ_VBIOS_DESC._fields_ = [
-      ('version', NvU32),
-      ('size', NvU32),
-      ('gfwImageOffset', NvU64),
-      ('gfwImageSize', NvU32),
-      ('flags', NvU32),
-    ]
-    class FWSECLIC_FRTS_REGION_DESC(Struct): pass
-    FWSECLIC_FRTS_REGION_DESC._packed_ = True
-    FWSECLIC_FRTS_REGION_DESC._fields_ = [
-      ('version', NvU32),
-      ('size', NvU32),
-      ('frtsRegionOffset4K', NvU32),
-      ('frtsRegionSize', NvU32),
-      ('frtsRegionMediaType', NvU32),
-    ]
-    class FWSECLIC_FRTS_CMD(Struct): pass
-    FWSECLIC_FRTS_CMD._packed_ = True
-    FWSECLIC_FRTS_CMD._fields_ = [
-      ('readVbiosDesc', FWSECLIC_READ_VBIOS_DESC),
-      ('frtsRegionDesc', FWSECLIC_FRTS_REGION_DESC),
-    ]
-    read_vbios_desc = FWSECLIC_READ_VBIOS_DESC(version=0x1, size=ctypes.sizeof(FWSECLIC_READ_VBIOS_DESC), flags=2)
-    frst_reg_desc = FWSECLIC_FRTS_REGION_DESC(version=0x1, size=ctypes.sizeof(FWSECLIC_FRTS_REGION_DESC),
+    ns = self.run_gen("""
+typedef unsigned NvU32;
+typedef unsigned long NvU64;
+
+typedef struct
+{
+    NvU32 version;
+    NvU32 size;
+    NvU64 gfwImageOffset;
+    NvU32 gfwImageSize;
+    NvU32 flags;
+} __attribute__((packed)) FWSECLIC_READ_VBIOS_DESC;
+
+#define FWSECLIC_READ_VBIOS_STRUCT_FLAGS (2)
+
+typedef struct
+{
+    NvU32 version;
+    NvU32 size;
+    NvU32 frtsRegionOffset4K;
+    NvU32 frtsRegionSize;
+    NvU32 frtsRegionMediaType;
+} __attribute__((packed)) FWSECLIC_FRTS_REGION_DESC;
+
+#define FWSECLIC_FRTS_REGION_MEDIA_FB (2)
+#define FWSECLIC_FRTS_REGION_SIZE_1MB_IN_4K (0x100)
+
+typedef struct
+{
+    FWSECLIC_READ_VBIOS_DESC readVbiosDesc;
+    FWSECLIC_FRTS_REGION_DESC frtsRegionDesc;
+} __attribute__((packed)) FWSECLIC_FRTS_CMD;
+""")
+
+    FWSECLIC_READ_VBIOS_DESC = ns['FWSECLIC_READ_VBIOS_DESC']
+    FWSECLIC_FRTS_REGION_DESC = ns['FWSECLIC_FRTS_REGION_DESC']
+    FWSECLIC_FRTS_CMD = ns['FWSECLIC_FRTS_CMD']
+
+    read_vbios_desc = FWSECLIC_READ_VBIOS_DESC(version=0x1, size=FWSECLIC_READ_VBIOS_DESC.SIZE, flags=2)
+    frst_reg_desc = FWSECLIC_FRTS_REGION_DESC(version=0x1, size=FWSECLIC_FRTS_REGION_DESC.SIZE,
       frtsRegionOffset4K=0xdead, frtsRegionSize=0x100, frtsRegionMediaType=2)
     frts_cmd = FWSECLIC_FRTS_CMD(readVbiosDesc=read_vbios_desc, frtsRegionDesc=frst_reg_desc)
     assert int.from_bytes(frts_cmd, 'little') == 0x2000001000000dead0000001400000001000000020000000000000000000000000000001800000001
@@ -224,49 +248,38 @@ class TestAutogen(unittest.TestCase):
     assert frts_cmd.frtsRegionDesc.__class__ is FWSECLIC_FRTS_REGION_DESC
 
   def test_packed_fields(self):
-    uint8_t = ctypes.c_ubyte
-    uint16_t = ctypes.c_ushort
-    uint32_t = ctypes.c_uint32
+    ns = self.run_gen("""#include <stdint.h>
+typedef struct die_info
+ {
+	 uint16_t die_id;
+	 uint16_t die_offset; /* Points to the corresponding die_header structure */
+ } die_info;
 
-    class struct_die_info(Struct): pass
-    struct_die_info._packed_ = True
-    struct_die_info._fields_ = [
-      ('die_id', uint16_t),
-      ('die_offset', uint16_t),
-    ]
-    die_info = struct_die_info
-    class struct_ip_discovery_header(Struct): pass
-    class struct_ip_discovery_header_0(ctypes.Union): pass
-    class struct_ip_discovery_header_0_0(Struct): pass
-    uint8_t = ctypes.c_ubyte
-    struct_ip_discovery_header_0_0._fields_ = [
-      ('base_addr_64_bit', uint8_t,1),
-      ('reserved', uint8_t,7),
-      ('reserved2', uint8_t),
-    ]
-    struct_ip_discovery_header_0._anonymous_ = ['_0']
-    struct_ip_discovery_header_0._packed_ = True
-    struct_ip_discovery_header_0._fields_ = [
-      ('padding', (uint16_t * 1)),
-      ('_0', struct_ip_discovery_header_0_0),
-    ]
-    struct_ip_discovery_header._anonymous_ = ['_0']
-    struct_ip_discovery_header._packed_ = True
-    struct_ip_discovery_header._fields_ = [
-      ('signature', uint32_t),
-      ('version', uint16_t),
-      ('size', uint16_t),
-      ('id', uint32_t),
-      ('num_dies', uint16_t),
-      ('die_info', (die_info * 16)),
-      ('_0', struct_ip_discovery_header_0),
-    ]
-    ip_discovery_header = struct_ip_discovery_header
+typedef struct ip_discovery_header
+ {
+	 uint32_t signature;    /* Table Signature */
+	 uint16_t version;      /* Table Version */
+	 uint16_t size;         /* Table Size */
+	 uint32_t id;           /* Table ID */
+	 uint16_t num_dies;     /* Number of Dies */
+	 die_info die_info[16]; /* list die information for up to 16 dies */
+	 union {
+		 uint16_t padding[1];	/* version <= 3 */
+		 struct {		/* version == 4 */
+			 uint8_t base_addr_64_bit : 1; /* ip structures are using 64 bit base address */
+			 uint8_t reserved : 7;
+			 uint8_t reserved2;
+		 };
+	 };
+ } ip_discovery_header;
+""")
+
+    ip_discovery_header = ns['ip_discovery_header']
 
     hdr = b'IPDS\x04\x00|\x1d\x80\x1a\xffd\x01\x00\x00\x00\x8c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00' # noqa: E501
     ihdr = ip_discovery_header.from_buffer_copy(hdr)
 
-    assert ctypes.sizeof(ihdr) == 80
+    assert ihdr.SIZE == 80
     assert ihdr.signature == 0x53445049
     assert ihdr.version == 0x0004
     assert ihdr.num_dies == 1
@@ -274,7 +287,7 @@ class TestAutogen(unittest.TestCase):
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_gen_from_header(self):
-    header_content = """
+    namespace = self.run_gen("""
     typedef struct {
       int x;
       int y;
@@ -293,45 +306,35 @@ class TestAutogen(unittest.TestCase):
       Color color;
     } Rectangle;
 
-    int add_points(Point a, Point b);
-    """
+    int add_points(Point a, Point b);""")
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
-      f.write(header_content)
-      f.flush()
+    self.assertIn('Point', namespace)
+    self.assertIn('Color', namespace)
+    self.assertIn('Rectangle', namespace)
+    self.assertIn('RED', namespace)
+    self.assertIn('GREEN', namespace)
+    self.assertIn('BLUE', namespace)
 
-      generated_code = gen(name="test_header", dll=None, files=[f.name])
+    self.assertEqual(namespace['RED'], 0)
+    self.assertEqual(namespace['GREEN'], 1)
+    self.assertEqual(namespace['BLUE'], 2)
 
-      namespace = {}
-      exec(generated_code, namespace)
+    Point = namespace['Point']
+    p = Point()
+    self.assertIsInstance(p, Struct)
+    self.assertTrue(hasattr(p, 'x'))
+    self.assertTrue(hasattr(p, 'y'))
 
-      self.assertIn('Point', namespace)
-      self.assertIn('Color', namespace)
-      self.assertIn('Rectangle', namespace)
-      self.assertIn('RED', namespace)
-      self.assertIn('GREEN', namespace)
-      self.assertIn('BLUE', namespace)
-
-      self.assertEqual(namespace['RED'], 0)
-      self.assertEqual(namespace['GREEN'], 1)
-      self.assertEqual(namespace['BLUE'], 2)
-
-      Point = namespace['Point']
-      p = Point()
-      self.assertIsInstance(p, Struct)
-      self.assertTrue(hasattr(p, 'x'))
-      self.assertTrue(hasattr(p, 'y'))
-
-      Rectangle = namespace['Rectangle']
-      rect = Rectangle()
-      self.assertTrue(hasattr(rect, 'origin'))
-      self.assertTrue(hasattr(rect, 'width'))
-      self.assertTrue(hasattr(rect, 'height'))
-      self.assertTrue(hasattr(rect, 'color'))
+    Rectangle = namespace['Rectangle']
+    rect = Rectangle()
+    self.assertTrue(hasattr(rect, 'origin'))
+    self.assertTrue(hasattr(rect, 'width'))
+    self.assertTrue(hasattr(rect, 'height'))
+    self.assertTrue(hasattr(rect, 'color'))
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_struct_ordering(self):
-    header_content = """
+    namespace = self.run_gen("""
     struct A;
     struct C;
     typedef struct A A;
@@ -347,22 +350,16 @@ class TestAutogen(unittest.TestCase):
     struct A {
       int x;
       struct B *b_ptr;
-    };
-    """
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
-      f.write(header_content)
-      f.flush()
-      generated_code = gen(name="test_ordering", dll=None, files=[f.name])
-      namespace = {}
-      exec(generated_code, namespace)
-      self.assertIn('struct_A', namespace)
-      self.assertIn('struct_B', namespace)
-      self.assertIn('struct_C', namespace)
-      A, B, C = namespace['struct_A'], namespace['struct_B'], namespace['struct_C']
-      a, b, c = A(), B(), C()
-      self.assertTrue(hasattr(a, 'x'))
-      self.assertTrue(hasattr(a, 'b_ptr'))
-      self.assertTrue(hasattr(b, 'c_ptr'))
-      self.assertTrue(hasattr(c, 'a_ptr'))
+    };""")
+
+    self.assertIn('struct_A', namespace)
+    self.assertIn('struct_B', namespace)
+    self.assertIn('struct_C', namespace)
+    A, B, C = namespace['A'], namespace['struct_B'], namespace['struct_C']
+    a, b, c = A(), B(), C()
+    self.assertTrue(hasattr(a, 'x'))
+    self.assertTrue(hasattr(a, 'b_ptr'))
+    self.assertTrue(hasattr(b, 'c_ptr'))
+    self.assertTrue(hasattr(c, 'a_ptr'))
 
 if __name__ == "__main__": unittest.main()
