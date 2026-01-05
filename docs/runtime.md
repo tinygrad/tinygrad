@@ -70,7 +70,7 @@ AMD backend supports several interfaces for communicating with devices:
 
 * `KFD`: uses the amdgpu driver
 * `PCI`: uses the [AM driver](developer/am.md)
-* `USB`: USB3 interafce for asm24xx chips.
+* `USB`: USB3 interface for asm24xx chips.
 
 You can force an interface by setting `AMD_IFACE` to one of these values. In the case of `AMD_IFACE=PCI`, this may unbind your GPU from the amdgpu driver.
 

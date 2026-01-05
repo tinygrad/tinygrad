@@ -3,22 +3,32 @@
 from __future__ import annotations
 import struct, math, re
 from enum import IntEnum
-from functools import cache, cached_property
+from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
+from extra.assembly.amd.autogen.cdna.enum import VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op
 
 # Common masks and bit conversion functions
 MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
 _struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
 _struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
 _struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")
-def _f32(i): return _struct_f.unpack(_struct_I.pack(i & MASK32))[0]
+def _f32(i):
+  i = i & MASK32
+  # RDNA3 default mode: flush f32 denormals to zero (FTZ)
+  # Denormal: exponent=0 (bits 23-30) and mantissa!=0 (bits 0-22)
+  if (i & 0x7f800000) == 0 and (i & 0x007fffff) != 0: return 0.0
+  return _struct_f.unpack(_struct_I.pack(i))[0]
 def _i32(f):
   if isinstance(f, int): f = float(f)
   if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
   if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
-  try: return _struct_I.unpack(_struct_f.pack(f))[0]
+  try:
+    bits = _struct_I.unpack(_struct_f.pack(f))[0]
+    # RDNA3 default mode: flush f32 denormals to zero (FTZ)
+    if (bits & 0x7f800000) == 0 and (bits & 0x007fffff) != 0: return 0x80000000 if bits & 0x80000000 else 0
+    return bits
   except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
 def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
 def _f16(i): return _struct_e.unpack(_struct_H.pack(i & 0xffff))[0]
@@ -37,12 +47,14 @@ def _i64(f):
 # Instruction spec - register counts and dtypes derived from instruction names
 _REGS = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16,
          'F32': 1, 'I32': 1, 'U32': 1, 'F64': 2, 'I64': 2, 'U64': 2,
-         'F16': 1, 'I16': 1, 'U16': 1, 'B16': 1, 'I8': 1, 'U8': 1, 'B8': 1}
+         'F16': 1, 'I16': 1, 'U16': 1, 'B16': 1, 'I8': 1, 'U8': 1, 'B8': 1,
+         'DWORD': 1, 'DWORDX2': 2, 'DWORDX3': 3, 'DWORDX4': 4, 'DWORDX8': 8, 'DWORDX16': 16,
+         'BYTE': 1, 'SHORT': 1, 'UBYTE': 1, 'SBYTE': 1, 'USHORT': 1, 'SSHORT': 1}
 _CVT_RE = re.compile(r'CVT_([FIUB]\d+)_([FIUB]\d+)$')
 _MAD_MUL_RE = re.compile(r'(?:MAD|MUL)_([IU]\d+)_([IU]\d+)$')
 _PACK_RE = re.compile(r'PACK_([FIUB]\d+)_([FIUB]\d+)$')
 _DST_SRC_RE = re.compile(r'_([FIUB]\d+)_([FIUB]\d+)$')
-_SINGLE_RE = re.compile(r'_([FIUB](?:32|64|16|8|96|128|256|512))$')
+_SINGLE_RE = re.compile(r'_([FIUB](?:32|64|16|8|96|128|256|512)|DWORD(?:X(?:2|3|4|8|16))?|[US]?BYTE|[US]?SHORT)$')
 @cache
 def _suffix(name: str) -> tuple[str | None, str | None]:
   name = name.upper()
@@ -233,7 +245,11 @@ def unwrap(val) -> int:
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 FLOAT_DEC = {v: str(k) for k, v in FLOAT_ENC.items()}
 SPECIAL_GPRS = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", 253: "scc"}
+SPECIAL_GPRS_CDNA = {102: "flat_scratch_lo", 103: "flat_scratch_hi", 104: "xnack_mask_lo", 105: "xnack_mask_hi",
+                    106: "vcc_lo", 107: "vcc_hi", 124: "m0", 126: "exec_lo", 127: "exec_hi",
+                    251: "src_vccz", 252: "src_execz", 253: "src_scc", 254: "src_lds_direct"}
 SPECIAL_PAIRS = {106: "vcc", 126: "exec"}
+SPECIAL_PAIRS_CDNA = {102: "flat_scratch", 104: "xnack_mask", 106: "vcc", 126: "exec"}
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
 RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata', 'vsrc1'}
 
@@ -250,9 +266,10 @@ def encode_src(val) -> int:
   if isinstance(val, int): return 128 + val if 0 <= val <= 64 else 192 - val if -16 <= val <= -1 else 255
   return 255
 
-def decode_src(val: int) -> str:
+def decode_src(val: int, cdna: bool = False) -> str:
+  special = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
+  if val in special: return special[val]
   if val <= 105: return f"s{val}"
-  if val in SPECIAL_GPRS: return SPECIAL_GPRS[val]
   if val in FLOAT_DEC: return FLOAT_DEC[val]
   if 108 <= val <= 123: return f"ttmp{val - 108}"
   if 128 <= val <= 192: return str(val - 128)
@@ -333,8 +350,11 @@ class Inst:
   def __init__(self, *args, literal: int | None = None, **kwargs):
     self._values, self._literal = dict(self._defaults), None
     field_names = [n for n in self._fields if n != 'encoding']
+    # Map Python-friendly names to actual field names (abs_ -> abs for Python reserved word)
+    if 'abs_' in kwargs: kwargs['abs'] = kwargs.pop('abs_')
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
+    self._precompute()
     self._validate(orig_args)
     # Pre-shift literal for 64-bit sources (literal param is always raw 32-bit value from user)
     if literal is not None:
@@ -373,13 +393,14 @@ class Inst:
       if name in SRC_FIELDS: self._encode_src(name, val)
       elif name in RAW_FIELDS: self._encode_raw(name, val)
       elif name == 'sbase': self._values[name] = (val.idx if isinstance(val, Reg) else val.val if isinstance(val, SrcMod) else val * 2) // 2
-      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = val.idx // 4
+      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = _encode_reg(val) // 4
       elif marker is _VDSTYEnc and isinstance(val, VGPR): self._values[name] = val.idx >> 1
+    self._precompute_fields()
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
     if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val  # Special regs like VCC_LO
-    if name in {'srsrc', 'ssamp'}: return val.idx // 4 if isinstance(val, Reg) else val
+    if name in {'srsrc', 'ssamp'}: return _encode_reg(val) // 4 if isinstance(val, Reg) else val
     if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val.val // 2 if isinstance(val, SrcMod) else val
     if name in RAW_FIELDS: return _encode_reg(val) if isinstance(val, Reg) else val
     if isinstance(val, Reg) or name in SRC_FIELDS: return encode_src(val)
@@ -439,14 +460,22 @@ class Inst:
     inst = object.__new__(cls)
     inst._values = {n: RawImm(v) if n in SRC_FIELDS else v for n, bf in cls._fields.items() if n != 'encoding' for v in [(word >> bf.lo) & bf.mask()]}
     inst._literal = None
+    inst._precompute()
+    inst._precompute_fields()
     return inst
 
   @classmethod
   def from_bytes(cls, data: bytes):
+    import typing
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
     op_val = inst._values.get('op', 0)
-    has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
-    has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
+    # Check for instructions that always have a literal constant (FMAMK/FMAAK/MADMK/MADAK, SETREG_IMM32)
+    op_name = ''
+    if cls.__name__ in ('VOP2', 'SOP2', 'SOPK') and 'op' in (hints := typing.get_type_hints(cls, include_extras=True)):
+      if typing.get_origin(hints['op']) is typing.Annotated:
+        try: op_name = typing.get_args(hints['op'])[1](op_val).name
+        except (ValueError, TypeError): pass
+    has_literal = any(x in op_name for x in ('FMAMK', 'FMAAK', 'MADMK', 'MADAK', 'SETREG_IMM32'))
     # VOPD fmaak/fmamk always have a literal (opx/opy value 1 or 2)
     opx, opy = inst._values.get('opx', 0), inst._values.get('opy', 0)
     has_literal = has_literal or (cls.__name__ == 'VOPD' and (opx in (1, 2) or opy in (1, 2)))
@@ -460,7 +489,7 @@ class Inst:
         lit32 = int.from_bytes(data[cls._size():cls._size()+4], 'little')
         # Find which source has literal (255) and check its register count
         lit_src_is_64 = False
-        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2)]:
+        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
           if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255:
             lit_src_is_64 = inst.src_regs(idx) == 2
             break
@@ -480,7 +509,12 @@ class Inst:
     return unwrap(self._values.get(name, 0))
 
   def lit(self, v: int, neg: bool = False) -> str:
-    s = f"0x{self._literal:x}" if v == 255 and self._literal else decode_src(v)
+    if v == 255 and self._literal is not None:
+      # For 64-bit sources, literal is stored shifted - extract the 32-bit value
+      lit32 = (self._literal >> 32) if self._literal > 0xffffffff else self._literal
+      s = f"0x{lit32:x}"
+    else:
+      s = decode_src(v, 'cdna' in self.__class__.__module__)
     return f"-{s}" if neg else s
 
   def __eq__(self, other):
@@ -499,25 +533,45 @@ class Inst:
                'VOPD': VOPDOp, 'VINTERP': VINTERPOp}
   _VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
-  @property
-  def op(self):
-    """Return the op as an enum (e.g., VOP1Op.V_MOV_B32). VOP3 returns VOPCOp/VOP3SDOp for those op ranges."""
+  def _precompute(self):
+    """Precompute op, op_name, _spec_regs, _spec_dtype for fast access."""
     val = self._values.get('op')
-    if val is None: return None
-    if hasattr(val, 'name'): return val  # already an enum
-    cls_name = self.__class__.__name__
-    assert cls_name in self._enum_map, f"no enum map for {cls_name}"
-    return self._enum_map[cls_name](val)
+    if val is None: self.op = None
+    elif hasattr(val, 'name'): self.op = val
+    else:
+      cls_name = self.__class__.__name__
+      is_cdna = cls_name in ('VOP3A', 'VOP3B')
+      # Try marker enum first (VOP3AOp, VOP3BOp, etc.)
+      marker = self._fields['op'].marker if 'op' in self._fields else None
+      if marker and issubclass(marker, IntEnum):
+        try: self.op = marker(val)
+        except ValueError: self.op = val
+      elif cls_name in self._enum_map:
+        try: self.op = self._enum_map[cls_name](val)
+        except ValueError: self.op = val
+      else: self.op = val
+      # Fallback for promoted instructions when marker lookup failed
+      if not hasattr(self.op, 'name') and cls_name in ('VOP3', 'VOP3A', 'VOP3B') and isinstance(val, int):
+        if val < 256:
+          try: self.op = VOPCOp(val)
+          except ValueError: pass
+        elif is_cdna and 256 <= val < 512:
+          try: self.op = (CDNA_VOP1Op(val - 320) if val >= 320 else CDNA_VOP2Op(val - 256))
+          except ValueError: pass
+        elif val in self._VOP3SD_OPS and not is_cdna:
+          try: self.op = VOP3SDOp(val)
+          except ValueError: pass
+        elif 256 <= val < 512 and not is_cdna:
+          try: self.op = VOP1Op(val - 384) if val >= 384 else VOP2Op(val - 256)
+          except ValueError: pass
+    self.op_name = self.op.name if hasattr(self.op, 'name') else ''
+    self._spec_regs = spec_regs(self.op_name)
+    self._spec_dtype = spec_dtype(self.op_name)
 
-  @cached_property
-  def op_name(self) -> str:
-    op = self.op
-    return op.name if hasattr(op, 'name') else ''
-
-  @cached_property
-  def _spec_regs(self) -> tuple[int, int, int, int]: return spec_regs(self.op_name)
-  @cached_property
-  def _spec_dtype(self) -> tuple[str | None, str | None, str | None, str | None]: return spec_dtype(self.op_name)
+  def _precompute_fields(self):
+    """Unwrap all field values as direct attributes for fast access."""
+    for name, val in self._values.items():
+      if name != 'op': setattr(self, name, unwrap(val))
   def dst_regs(self) -> int: return self._spec_regs[0]
   def src_regs(self, n: int) -> int: return self._spec_regs[n + 1]
   def num_srcs(self) -> int: return spec_num_srcs(self.op_name)

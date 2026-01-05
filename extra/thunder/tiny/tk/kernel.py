@@ -55,6 +55,11 @@ class Kernel(AbstractContextManager):
     if track: self.range_stack.append(rng)
     return rng
 
+  def raw_range(self, end:int=0, axis_type:AxisType=AxisType.LOOP):
+    rng = UOp.range(end, self.range_id, axis_type=axis_type)
+    self.range_id += 1
+    return rng
+
   def alloc(self, shape, dtype, addrspace:AddrSpace, name:str|None=None):
     match addrspace:
       case AddrSpace.GLOBAL:
