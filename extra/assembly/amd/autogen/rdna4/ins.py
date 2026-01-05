@@ -214,14 +214,9 @@ class VOPD(Inst64):
   vsrcy1 = bits[48:41]
 
 class VSAMPLE(Inst96):
-  encoding = bits[31:24] == 0b111001
   encoding = bits[31:26] == 0b111001
-  op:Annotated[BitField, VSAMPLEOp] = bits[20:13]
   op:Annotated[BitField, VSAMPLEOp] = bits[21:14]
-  vdst:VGPRField = bits[39:32]
   vdata:VGPRField = bits[39:32]
-  vaddr:VGPRField = bits[71:64]
-  saddr:SSrc = bits[6:0]
   dmask = bits[25:22]
   dim = bits[2:0]
   tfe = bits[3]
@@ -231,16 +226,11 @@ class VSAMPLE(Inst96):
   a16 = bits[6]
   lwe = bits[40]
   rsrc = bits[49:41]
-  sve = bits[49]
   scope = bits[51:50]
-  scope = bits[51:50]
-  th = bits[54:52]
   th = bits[54:52]
   samp = bits[63:55]
-  vsrc = bits[62:55]
   vaddr0 = bits[71:64]
   vaddr1 = bits[79:72]
-  ioffset = bits[95:72]
   vaddr2 = bits[87:80]
   vaddr3 = bits[95:88]
 
