@@ -99,9 +99,11 @@ for f in RDNA_FILES:
   setattr(TestLLVM, f"test_rdna3_asm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "asm"))
   setattr(TestLLVM, f"test_rdna3_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "disasm"))
 for f in CDNA_FILES:
-  setattr(TestLLVM, f"test_cdna_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "roundtrip"))
-  setattr(TestLLVM, f"test_cdna_asm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "asm"))
-  setattr(TestLLVM, f"test_cdna_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "disasm"))
+  # Use gfx942 arch for gfx942-specific files, cdna for others
+  arch = "gfx942" if "gfx942" in f else "cdna"
+  setattr(TestLLVM, f"test_cdna_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, arch, "roundtrip"))
+  setattr(TestLLVM, f"test_cdna_asm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, arch, "asm"))
+  setattr(TestLLVM, f"test_cdna_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, arch, "disasm"))
 
 if __name__ == "__main__":
   unittest.main()
