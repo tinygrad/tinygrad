@@ -275,58 +275,42 @@ def build_kernel(arch='gfx1100'):
   k = Kernel(arch)
 
   # ===========================================================================
-  # PROLOGUE: Load kernel arguments and compute tile base addresses
+  # PROLOGUE: Load kernel arguments, compute tile coordinates and addresses
   # ===========================================================================
-  # Load A and B matrix pointers from kernarg (s[20:21] = A, s[22:23] = B)
   k.emit(s_load_b128(sdata=s[20:23], sbase=s[0:1], offset=0x0, soffset=RawImm(124)))
-  k.waitcnt(lgkm=0)
-
-  # Compute 8 B matrix tile base pointers (s[24:39]) - each tile is 16KB apart (0x4000)
-  for i in range(8): k.add64(24 + i*2, 25 + i*2, 22, 23, i * 0x4000)
-
-  # B prefetch address: (workgroup_x * 128 + lane_id) * 4
-  k.emit(s_lshl_b32(s[19], s[S_WORKGROUP_X], 7))
-  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], s[19], v[0]))
-  k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_B_ADDR], 2, v[V_GLOBAL_B_ADDR]))
-
-  # Compute 8 A matrix tile base pointers (s[40:55]) - each tile is 256KB apart (0x40000)
-  for i in range(8): k.add64(40 + i*2, 41 + i*2, 20, 21, i * 0x40000)
-
-  # A prefetch address: workgroup_y * 512KB + (lane_id / 8) * 4KB + (lane_id % 8)
-  k.emit(s_lshl_b32(s[19], s[S_WORKGROUP_Y], 19))  # workgroup_y * 512KB
-  k.emit(v_lshrrev_b32_e32(v[1], 3, v[0]))         # lane_id / 8
-  k.emit(v_lshlrev_b32_e32(v[1], 12, v[1]))        # * 4KB
-  k.emit(v_and_b32_e32(v[V_GLOBAL_A_ADDR], 7, v[0]))  # lane_id % 8
-  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], v[1], v[V_GLOBAL_A_ADDR]))
-  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], s[19], v[V_GLOBAL_A_ADDR]))
-  k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_A_ADDR], 2, v[V_GLOBAL_A_ADDR]))
-
-  # Initialize constants
+  k.emit(s_load_b64(sdata=s[16:17], sbase=s[0:1], offset=0x10, soffset=RawImm(124)))
   k.emit(s_mov_b32(s[S_DIM_N], MATRIX_DIM))
   k.emit(s_mov_b32(s[S_ALPHA], F32_ONE))
-  k.emit(s_mov_b32(s[6], 0))
-
-  # Load C matrix pointer
-  k.emit(s_load_b128(sdata=s[8:11], sbase=s[0:1], offset=0x0, soffset=RawImm(124)))
-
-  # Compute tile coordinates: tile_x = workgroup_x * 128, tile_y = workgroup_y * 128
+  k.emit(s_mov_b32(s[S_LOOP_CTR], 0))  # used by LDS swizzle, always 0 for valid workgroups
   k.emit(s_lshl_b32(s[S_TILE_X], s[S_WORKGROUP_X], 7))
+  k.emit(s_lshl_b32(s[S_TILE_Y], s[S_WORKGROUP_Y], 7))
+
+  # Lane-derived values
+  k.emit(v_and_b32_e32(v[V_LANE_ID_MOD8], 7, v[0]))
   k.emit(v_lshrrev_b32_e32(v[4], 3, v[0]))
   k.emit(v_or_b32_e32(v[1], s[S_TILE_X], v[0]))
-  k.emit(s_lshl_b32(s[S_TILE_Y], s[S_WORKGROUP_Y], 7))
-  k.emit(v_and_b32_e32(v[V_LANE_ID_MOD8], 7, v[0]))
-  k.emit(s_bfe_i32(s[S_LOOP_CTR], s[S_WORKGROUP_Y], 0x10018))
   k.emit(v_or_b32_e32(v[22], s[S_TILE_Y], v[4]))
-  k.emit(v_ashrrev_i32_e32(v[2], 31, v[1]))
-  k.emit(s_lshr_b32(s[S_LOOP_CTR], s[S_LOOP_CTR], 25))
-
-  # Load output pointer
-  k.emit(s_load_b64(sdata=s[S_OUT_PTR[0]:S_OUT_PTR[1]], sbase=s[0:1], offset=0x10, soffset=RawImm(124)))
-
-  # Precompute lane-based offsets for epilogue
   k.emit(v_lshlrev_b32_e32(v[V_LANE_MOD8_X4], 2, v[V_LANE_ID_MOD8]))
+  k.emit(v_ashrrev_i32_e32(v[2], 31, v[1]))
   k.emit(v_lshlrev_b64(v[5:6], 2, v[1:2]))
   k.waitcnt(lgkm=0)
+
+  # Copy pointers to working registers
+  k.emit(s_mov_b64(s[S_OUT_PTR[0]:S_OUT_PTR[1]], s[16:17]))
+  k.emit(s_mov_b64(s[S_A_PTR[0]:S_A_PTR[1]], s[20:21]))
+  k.emit(s_mov_b64(s[S_B_PTR[0]:S_B_PTR[1]], s[22:23]))
+
+  # Compute 8 A and B matrix tile base pointers for prefetch
+  for i in range(8): k.add64(24 + i*2, 25 + i*2, 22, 23, i * 0x4000)   # B: 16KB apart
+  for i in range(8): k.add64(40 + i*2, 41 + i*2, 20, 21, i * 0x40000)  # A: 256KB apart
+
+  # Global prefetch addresses: B = (tile_x + lane_id) * 4, A = ((tile_y << 12) + (lane_id/8)*4K + lane_id%8) * 4
+  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], s[S_TILE_X], v[0]))
+  k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_B_ADDR], 2, v[V_GLOBAL_B_ADDR]))
+  k.emit(s_lshl_b32(s[19], s[S_TILE_Y], 12))
+  k.emit(v_lshl_add_u32(v[V_GLOBAL_A_ADDR], v[4], 12, v[V_LANE_ID_MOD8]))  # (lane_id/8)*4K + lane_id%8
+  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], s[19], v[V_GLOBAL_A_ADDR]))
+  k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_A_ADDR], 2, v[V_GLOBAL_A_ADDR]))
 
   # ===========================================================================
   # Tile address computation for initial A/B matrix loads
@@ -438,11 +422,9 @@ def build_kernel(arch='gfx1100'):
   # INIT: Compute LDS base addresses, then zero accumulators
   # ===========================================================================
   # Compute LDS base addresses (v[2], v[3] used here, then zeroed later)
-  k.emit(s_ashr_i32(s[S_LOOP_BOUND], s[S_TILE_X], 31))
+  # v[3] = v[1] & ~0x7F = clear lower 7 bits (S_LOOP_BOUND is 0 from LDS swizzle for valid workgroups)
   k.emit(v_lshlrev_b32_e32(v[2], 4, v[2]))
-  k.emit(s_lshr_b32(s[S_LOOP_BOUND], s[S_LOOP_BOUND], 25))
   k.emit(v_add_nc_u32_e32(v[3], s[S_LOOP_BOUND], v[1]))
-  # ROW_SIGN_REGS sign-extension removed - values were never used
   k.emit(v_and_b32_e32(v[3], ADDR_MASK, v[3]))
   k.emit(v_sub_nc_u32_e32(v[3], v[1], v[3]))
   k.emit(v_lshl_or_b32(v[V_LDS_B_BASE], v[V_LANE_ID_MOD8], 4, LDS_BASE_OFFSET))
@@ -470,9 +452,8 @@ def build_kernel(arch='gfx1100'):
 
   k.label('LOOP_ENTRY')
   k.emit(s_cmp_lt_i32(s[S_LOOP_CTR], s[S_LOOP_BOUND]))
-  k.emit(s_cselect_b32(s[S_PREFETCH_FLAG], -1, 0))
-  k.emit(s_cmp_ge_i32(s[S_LOOP_CTR], s[S_LOOP_BOUND]))
-  k.emit(s_cbranch_scc1(simm16=0)); k.branch_to('SKIP_PREFETCH')
+  k.emit(s_cselect_b32(s[S_PREFETCH_FLAG], -1, 0))  # s_cselect doesn't modify SCC
+  k.emit(s_cbranch_scc0(simm16=0)); k.branch_to('SKIP_PREFETCH')  # branch if loop_ctr >= loop_bound
 
   # Advance prefetch pointers
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
@@ -483,10 +464,6 @@ def build_kernel(arch='gfx1100'):
     k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
 
   k.label('SKIP_PREFETCH')
-  # PTR registers eliminated - use offset-based addressing from BASE
-  k.emit(s_mov_b32(s[S_WORKGROUP_X], 0))
-
-  k.label('INNER_LOOP')
 
   # 8 inner loop iterations
   NO_DS, NO_GLOBAL = getenv("NO_DS", 0), getenv("NO_GLOBAL", 0)
