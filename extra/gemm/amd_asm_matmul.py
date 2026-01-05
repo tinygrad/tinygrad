@@ -48,10 +48,9 @@ V_GLOBAL_B_ADDR = 154     # global memory B prefetch address
 
 # LDS tile register destinations - SEPARATE from DATA to avoid overlap
 # DATA regs (v155-170) receive global prefetch
-# A TILE reuses ROW_REGS (v137-144) which are free after prologue
-# B TILE at v171-186
-V_A_TILE_REGS = [137, 139, 141, 143]  # A tile: 4 pairs (v137-144, reusing ROW_REGS)
-V_B_TILE_REGS = [171, 173, 175, 177, 179, 181, 183, 185]  # B tile: 8 pairs (v171-186)
+# A TILE on banks 2-3, B TILE on banks 0-1 to avoid VGPR bank conflicts in dual FMAC
+V_A_TILE_REGS = [186, 190, 194, 198]  # A tile: 4 pairs on banks 2-3 (v186-187, v190-191, v194-195, v198-199)
+V_B_TILE_REGS = [184, 188, 192, 196, 200, 204, 208, 212]  # B tile: 8 pairs on banks 0-1
 
 # =============================================================================
 # Named register assignments (SGPRs)
@@ -76,6 +75,7 @@ S_WORKGROUP_Y = 15        # workgroup_id_y
 # Accumulator grid: ACC_GRID[a_idx][b_idx] = vgpr for C[a,b]
 # a_idx: which A value (0-7), b_idx: which B value (0-15)
 # Scattered due to VOPD bank constraints (vdst_x % 4 != vdst_y % 4)
+# Layout matches kernel8 for optimal VGPR bank usage
 ACC_GRID = [
   [  5,  3,  9,  8,   37, 35, 41, 40,   69, 67, 73, 72,  101, 99,105,104],  # a0
   [  4,  2,  7,  6,   36, 34, 39, 38,   68, 66, 71, 70,  100, 98,103,102],  # a1
@@ -84,7 +84,7 @@ ACC_GRID = [
   [ 21, 19, 25, 24,   53, 51, 57, 56,   85, 83, 89, 88,  117,115,121,120],  # a4
   [ 20, 18, 23, 22,   52, 50, 55, 54,   84, 82, 87, 86,  116,114,123,122],  # a5
   [133,128, 29, 27,   33, 32, 61, 59,   65, 64, 93, 91,   97, 96,129,127],  # a6
-  [131,132, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7 (was v214, moved to v132)
+  [131,214, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7
 ]
 
 # Derived: all 128 accumulator registers to zero before loop
@@ -259,7 +259,7 @@ class Kernel:
       ('user_sgpr_kernarg_segment_ptr', 1), ('user_sgpr_dispatch_id', 0), ('user_sgpr_private_segment_size', 0),
       ('wavefront_size32', 1), ('uses_dynamic_stack', 0), ('enable_private_segment', 0),
       ('system_sgpr_workgroup_id_x', 1), ('system_sgpr_workgroup_id_y', 1), ('system_sgpr_workgroup_id_z', 0),
-      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 187),
+      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 214),
       ('next_free_sgpr', 16), ('float_round_mode_32', 0), ('float_round_mode_16_64', 0),
       ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3), ('dx10_clamp', 1), ('ieee_mode', 1),
       ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
@@ -277,7 +277,7 @@ class Kernel:
       f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8',
       '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
       '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
-      '    .vgpr_count: 187', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
+      '    .vgpr_count: 214', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
       'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
 
 
@@ -524,33 +524,32 @@ def build_kernel(arch='gfx1100'):
 
   k.label('INNER_LOOP')
 
-  # 8 inner loop iterations (6 with prefetch, 2 without)
+  # 8 inner loop iterations
+  NO_DS, NO_GLOBAL = getenv("NO_DS", 0), getenv("NO_GLOBAL", 0)
   for iter in range(8):
     # Load A tile (4 pairs) and B tile (8 pairs) from LDS
-    k.emit(s_clause(simm16=11))
-    for i, vdst in enumerate(V_A_TILE_REGS):
-      a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
-      k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
-    for i, vdst in enumerate(V_B_TILE_REGS):
-      b_off = (i & 1) * 8 + (i & 2) * 64 + (i >> 2) * 256 + iter * LDS_B_STRIDE
-      k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_BASE], offset0=b_off & 0xFF, offset1=b_off >> 8))
+    if not NO_DS:
+      k.emit(s_clause(simm16=11))
+      for i, vdst in enumerate(V_A_TILE_REGS):
+        a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
+        k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_A_BASE], offset0=a_off & 0xFF, offset1=a_off >> 8))
+      for i, vdst in enumerate(V_B_TILE_REGS):
+        b_off = (i & 1) * 8 + (i & 2) * 64 + (i >> 2) * 256 + iter * LDS_B_STRIDE
+        k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_BASE], offset0=b_off & 0xFF, offset1=b_off >> 8))
 
-    # Issue global prefetch AFTER LDS loads (first 6 iterations only)
-    # This provides some latency hiding while LDS loads complete
-    if iter < 6:
+    # Issue global prefetch (first 6 iterations only)
+    if iter < 6 and not NO_GLOBAL:
       vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
       k.emit(s_clause(simm16=1))
       k.global_load(vdst1, addr, slo1)
       k.global_load(vdst2, addr, slo2)
 
-    k.waitcnt(lgkm=0)
+    if not NO_DS: k.waitcnt(lgkm=0)
 
     # 64 dual FMACs
     for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
       k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
                   vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
-      if i == 4: k.emit(s_setprio(1))
-    k.emit(s_setprio(0))
 
   k.emit(s_and_not1_b32(VCC_LO, EXEC_LO, s[S_PREFETCH_FLAG]))
   k.waitcnt(vm=0)
@@ -682,16 +681,13 @@ def run_sqtt():
   """Run with SQTT profiling and write trace files."""
   import subprocess, os
 
-  # Run test_matmul in a subprocess with SQTT enabled from the start
-  env = {**os.environ, "AMD": "1", "SQTT": "1", "CNT": "1", "PROFILE": "1", "PYTHONPATH": "."}
+  # Run test_matmul in a subprocess with SQTT enabled from the start (no verify)
+  env = {**os.environ, "AMD": "1", "SQTT": "1", "CNT": "1", "PROFILE": "1", "PYTHONPATH": ".", "VERIFY": "0"}
   result = subprocess.run(
     ["python", "-c", "from extra.gemm.amd_asm_matmul import test_matmul; test_matmul()"],
     capture_output=True, text=True, env=env, timeout=120
   )
   print(result.stdout)
-  if result.returncode != 0:
-    print(result.stderr)
-    raise RuntimeError("test_matmul failed")
 
   # Run roc.py to extract trace data
   result = subprocess.run(
