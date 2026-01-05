@@ -406,8 +406,8 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
   paths:dict[int, dict[int, int]] = {}
-  asm_width = max(max(len(asm) for asm, _ in pc_table.values()), 40)
   lines:list[str] = []
+  asm_width = max(len(asm) for asm, _ in pc_table.values())
   for pc, (asm, sz) in pc_table.items():
     lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
@@ -438,7 +438,7 @@ def get_render(query:str) -> dict:
     ret:dict = {"metadata":[]}
     if data.device.startswith("AMD") and data.lib is not None:
       with soft_err(lambda err: ret.update(err)):
-        ret = {**ret, **amdgpu_cfg(lib:=data.lib, device_props[data.device]["gfx_target_version"])}
+        ret.update(amdgpu_cfg(lib:=data.lib, device_props[data.device]["gfx_target_version"]))
         with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
     return ret
