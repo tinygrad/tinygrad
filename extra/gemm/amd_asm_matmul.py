@@ -48,9 +48,10 @@ V_GLOBAL_B_ADDR = 154     # global memory B prefetch address
 
 # LDS tile register destinations - SEPARATE from DATA to avoid overlap
 # DATA regs (v155-170) receive global prefetch
-# A TILE at v186-199 (scattered), B TILE at v184-212 (scattered)
-V_A_TILE_REGS = [186, 190, 194, 198]  # A tile: 4 pairs scattered
-V_B_TILE_REGS = [184, 188, 192, 196, 200, 204, 208, 212]  # B tile: 8 pairs scattered
+# A on banks 2-3, B on banks 0-1 to avoid bank conflicts in VOPD
+# This layout matches kernel8's optimization for VGPR cache utilization
+V_A_TILE_REGS = [186, 190, 194, 198]  # A tile: banks 2,2,2,2 (186%4=2, 190%4=2, etc.)
+V_B_TILE_REGS = [184, 188, 192, 196, 200, 204, 208, 212]  # B tile: banks 0,0,0,0,0,0,0,0
 
 # =============================================================================
 # Named register assignments (SGPRs)
