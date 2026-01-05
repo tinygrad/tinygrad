@@ -175,8 +175,6 @@ V_LDS_A_DATA = list(range(155, 163))          # 8 data registers for A prefetch 
 V_LDS_B_ADDR = list(range(145, 153))          # 8 address registers for B stores
 V_LDS_B_DATA = list(range(163, 171))          # 8 data registers for B prefetch (v163-170)
 
-
-
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
 # Prefetch into DATA regs (v171-182, spanning A_DATA[4:8] and B_DATA[0:8])
 # First 2 pairs from B address, next 4 pairs from A address
@@ -188,8 +186,6 @@ INIT_PREFETCH = [(V_LDS_A_DATA[i], 24+2*i) for i in range(4)]
 
 # Initial tile loads: (vdst, addr_lo) pairs - use temp regs in accumulator gaps
 INIT_TILE_LOADS = [(23,5),(24,9),(25,7),(26,2),(27,11),(28,13),(29,6),(30,8),(31,10),(12,12),(13,14),(3,2),(4,4),(5,8),(6,6),(7,10)]
-
-
 
 # A matrix row offset registers (scattered to avoid accumulator conflicts)
 ROW_REGS = list(range(137, 145))  # v137-v144 (8 regs)
@@ -431,18 +427,10 @@ def build_kernel(arch='gfx1100'):
 
   # Store initial tile data to LDS
   k.waitcnt(vm=0)
-  k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[23], data1=v[24], offset0=16, offset1=18))
-  k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[25], data1=v[26], offset0=20, offset1=22))
-  k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[27], data1=v[28], offset0=24, offset1=26))
-  k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[3], data1=v[4], offset0=28, offset1=30))
-  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[0]], data0=v[29], offset0=0, offset1=0))
-  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[1]], data0=v[30], offset0=0, offset1=0))
-  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[2]], data0=v[31], offset0=0, offset1=0))
-  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[3]], data0=v[12], offset0=0, offset1=0))
-  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[4]], data0=v[13], offset0=0, offset1=0))
-  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[5]], data0=v[5], offset0=0, offset1=0))
-  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[6]], data0=v[6], offset0=0, offset1=0))
-  k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[7]], data0=v[7], offset0=0, offset1=0))
+  for i, (d0, d1) in enumerate([(0,1), (2,3), (4,5), (11,12)]):
+    k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[INIT_TILE_LOADS[d0][0]], data1=v[INIT_TILE_LOADS[d1][0]], offset0=16+i*4, offset1=18+i*4))
+  for i, idx in enumerate([6,7,8,9,10,13,14,15]):
+    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[i]], data0=v[INIT_TILE_LOADS[idx][0]], offset0=0, offset1=0))
   k.waitcnt(lgkm=0)
   k.barrier()
 
@@ -536,10 +524,8 @@ def build_kernel(arch='gfx1100'):
   # Store prefetched data to LDS
   # NOTE: Naming is confusing - V_LDS_B_DATA holds A matrix data, V_LDS_A_DATA holds B matrix data
   # A tile (stride64 stores via V_LDS_A_ADDR[0]=v153): from V_LDS_B_DATA (v163-170)
-  k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR[0]], data0=v[V_LDS_A_DATA[0]], data1=v[V_LDS_A_DATA[1]], offset0=0, offset1=2))
-  k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR[0]], data0=v[V_LDS_A_DATA[2]], data1=v[V_LDS_A_DATA[3]], offset0=4, offset1=6))
-  k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR[0]], data0=v[V_LDS_A_DATA[4]], data1=v[V_LDS_A_DATA[5]], offset0=8, offset1=10))
-  k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR[0]], data0=v[V_LDS_A_DATA[6]], data1=v[V_LDS_A_DATA[7]], offset0=12, offset1=14))
+  for i in range(4):
+    k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR[0]], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
   # B tile (single stores via V_LDS_B_ADDR): from V_LDS_A_DATA (v155-162)
   for i in range(8):
     k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR[i]], data0=v[V_LDS_B_DATA[i]], offset0=0, offset1=0))
