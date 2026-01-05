@@ -73,7 +73,7 @@ S_WORKGROUP_Y = 15        # workgroup_id_y
 # Accumulator grid: ACC_GRID[a_idx][b_idx] = vgpr for C[a,b]
 # a_idx: which A value (0-7), b_idx: which B value (0-15)
 # Scattered due to VOPD bank constraints (vdst_x % 4 != vdst_y % 4)
-# Layout matches kernel8 for optimal VGPR bank usage
+# Range is from v2 - v129
 ACC_GRID = [
   [  5,  3,  9,  8,   37, 35, 41, 40,   69, 67, 73, 72,  101, 99,105,104],  # a0
   [  4,  2,  7,  6,   36, 34, 39, 38,   68, 66, 71, 70,  100, 98,103,102],  # a1
@@ -84,12 +84,6 @@ ACC_GRID = [
   [125,128, 29, 27,   33, 32, 61, 59,   65, 64, 93, 91,   97, 96,129,127],  # a6
   [119,118, 28, 26,   31, 30, 60, 58,   63, 62, 92, 90,   95, 94,124,126],  # a7
 ]
-
-# Derived: all 128 accumulator registers to zero before loop
-ACC_REGS = sorted(set(acc for row in ACC_GRID for acc in row))
-
-# Reserved registers in the accumulator range (not used for accumulators)
-ACC_RESERVED = {131, 130}
 
 # Optimized (a_pair, b_pair) iteration order for better GPU scheduling
 # Interleaves A and B pairs to maximize instruction-level parallelism
@@ -122,17 +116,13 @@ def derive_fmac_pattern(acc_grid, a_tile_regs=None, b_tile_regs=None):
 # Derived: 64 dual FMAC operations
 FMAC_PATTERN = derive_fmac_pattern(ACC_GRID)
 
-def derive_permute_swaps(acc_grid, reserved=ACC_RESERVED):
+def derive_permute_swaps(acc_grid, out_regs):
   """Derive swap sequence to permute accumulators from FMAC layout to output order.
 
   After FMAC loop: acc_grid[a][b] holds C[a,b]
   Output order: for row_half in 0,1; col_group in 0-3; row_in_group in 0-3; b_off in 0-3
     -> need C[row_half*4 + row_in_group, col_group*4 + b_off] in descending reg order
   """
-  out_regs = [r for r in range(133, 1, -1) if r not in reserved]
-  out_regs.remove(124)
-  out_regs = [124] + out_regs  # 124 at front due to epilogue temp reg usage
-
   def target_ab(i):
     row_half, col_group = i // 64, (i // 16) % 4
     row_in_group, b_off = (i // 4) % 4, i % 4
@@ -154,12 +144,8 @@ def derive_permute_swaps(acc_grid, reserved=ACC_RESERVED):
   return swaps
 
 # Derived: swap sequence to arrange accumulators for output
-PERMUTE_SWAPS = derive_permute_swaps(ACC_GRID)
-
-# Derived: output register order after PERMUTE_SWAPS (descending, 124 at front)
-OUT_REGS = [r for r in range(133, 1, -1) if r not in ACC_RESERVED]
-OUT_REGS.remove(124)
-OUT_REGS = [124] + OUT_REGS
+OUT_REGS = list(range(129, 1, -1))
+PERMUTE_SWAPS = derive_permute_swaps(ACC_GRID, OUT_REGS)
 
 # =============================================================================
 # LDS tile staging registers - COMPACT LAYOUT
@@ -427,7 +413,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_lshlrev_b32_e32(v[3], 2, v[0]))
   k.emit(v_and_or_b32(v[V_LDS_A_BASE], 0x180, v[3], v[2]))
 
-  for r in ACC_REGS: k.emit(v_mov_b32_e32(v[r], 0))  # zero all 128 accumulator registers
+  for r in OUT_REGS: k.emit(v_mov_b32_e32(v[r], 0))  # zero all 128 accumulator registers
 
   k.emit(s_add_i32(s[S_LOOP_BOUND], s[S_DIM_N], -8))
   k.emit(s_add_u32(s[S_A_PTR[0]], s[S_A_PTR[0]], 32))
