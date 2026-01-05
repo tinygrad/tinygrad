@@ -794,6 +794,8 @@ jobs:
         ocelot: 'true'
         llvm: 'true'
     - name: Run unit tests
+      env:
+        LIBCLANG_PATH: '/opt/homebrew/opt/llvm@20/lib/libclang.dylib'
       run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
