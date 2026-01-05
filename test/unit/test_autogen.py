@@ -162,7 +162,6 @@ class TestAutogen(unittest.TestCase):
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_gen_from_header(self):
-    # Create a temporary header file with various C constructs
     header_content = """
     typedef struct {
       int x;
@@ -185,18 +184,15 @@ class TestAutogen(unittest.TestCase):
     int add_points(Point a, Point b);
     """
 
-    # Write header to temporary file
     with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
       f.write(header_content)
       f.flush()
 
       generated_code = gen(name="test_header", dll=None, files=[f.name])
 
-      # Verify the generated code can be executed
       namespace = {}
       exec(generated_code, namespace)
 
-      # Check that the types were generated correctly
       self.assertIn('Point', namespace)
       self.assertIn('Color', namespace)
       self.assertIn('Rectangle', namespace)
@@ -204,19 +200,16 @@ class TestAutogen(unittest.TestCase):
       self.assertIn('GREEN', namespace)
       self.assertIn('BLUE', namespace)
 
-      # Verify enum values
       self.assertEqual(namespace['RED'], 0)
       self.assertEqual(namespace['GREEN'], 1)
       self.assertEqual(namespace['BLUE'], 2)
 
-      # Verify we can instantiate the struct
       Point = namespace['Point']
       p = Point()
       self.assertIsInstance(p, Struct)
       self.assertTrue(hasattr(p, 'x'))
       self.assertTrue(hasattr(p, 'y'))
 
-      # Verify nested struct
       Rectangle = namespace['Rectangle']
       rect = Rectangle()
       self.assertTrue(hasattr(rect, 'origin'))
@@ -226,10 +219,8 @@ class TestAutogen(unittest.TestCase):
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_struct_ordering(self):
-    # Test that structs are ordered correctly even when defined in "reverse" dependency order
-    # B contains pointer to A, but B is defined first - valid C with forward declaration
     header_content = """
-    struct A;  // forward declaration
+    struct A;
     struct C;
     typedef struct A A;
 
@@ -243,7 +234,7 @@ class TestAutogen(unittest.TestCase):
 
     struct A {
       int x;
-      struct B *b_ptr;  // circular reference
+      struct B *b_ptr;
     };
     """
     with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
@@ -252,7 +243,6 @@ class TestAutogen(unittest.TestCase):
       generated_code = gen(name="test_ordering", dll=None, files=[f.name])
       namespace = {}
       exec(generated_code, namespace)
-      # Verify both structs exist and can reference each other
       self.assertIn('struct_A', namespace)
       self.assertIn('struct_B', namespace)
       self.assertIn('struct_C', namespace)
