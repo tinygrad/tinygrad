@@ -30,13 +30,13 @@ const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
   clearTimeout(timeout);
   const msgEl = d3.select("#progress-message").style("display", "none");
-  const customEl = d3.select("#custom").html("");
+  const customEl = d3.select("#custom").style("display", "none");
   if (st === Status.STARTED) {
     msgEl.text(msg);
     timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
   } else if (st === Status.ERR) {
     displaySelection("#custom");
-    customEl.append("div").classed("raw-text", true).append(() => codeBlock(msg));
+    customEl.html("").append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -685,9 +685,15 @@ window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
 
-const toggleLabel = d3.create("label").text("Show indexing (r)").node();
-const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
-toggleLabel.prepend(toggle);
+const createToggle = (id, text) => {
+  const label = d3.create("label").text(text).node();
+  const toggle = d3.create("input").attr("type", "checkbox").attr("id", id).property("checked", true).node();
+  label.prepend(toggle);
+  return { toggle, label };
+}
+const { toggle, label:toggleLabel } = createToggle("show-indexing", "Show indexing (r)");
+const showGraph = createToggle("show-graph", "Show graph (g)");
+showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
 function appendSteps(root, idx, steps) {
   const stack = [];
@@ -748,7 +754,6 @@ async function main() {
   if (ckey in cache) {
     ret = cache[ckey];
   }
-  // ** Text view
   if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     if (ret.steps?.length > 0) {
@@ -760,15 +765,25 @@ async function main() {
       appendSteps(el.ctx, state.currentCtx, ctx.steps);
       return setState({ currentStep:state.currentStep+1, expandSteps:true });
     }
-    // cycles on the x axis
+    // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
       return renderProfiler(ckey, "clk", opts);
     }
-    displaySelection("#custom");
     metadata.innerHTML = "";
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
+        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
+      })).node());
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
+    });
+    // graph render
+    if (ret.data != null) {
+      metadata.prepend(showGraph.label);
+      renderDag(ret, { recenter:true });
+    } else displaySelection("#custom");
+    // table / plaintext render
     const root = d3.create("div").classed("raw-text", true);
-    // detailed assembly view
     function renderTable(root, ret) {
       const table = root.append("table");
       const thead = table.append("thead");
@@ -797,14 +812,7 @@ async function main() {
       return table;
     }
     if (ret.cols != null) renderTable(root, ret);
-    else if (ret.data != null) renderDag(ret, { recenter:true });
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
-    ret.metadata?.forEach(m => {
-      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
-        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
-      })).node());
-      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
-    });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** Graph view
@@ -961,9 +969,9 @@ document.addEventListener("keydown", (event) => {
     document.getElementById("zoom-to-fit-btn").click();
   }
   // r key toggles indexing
-  if (event.key === "r") {
-    toggle.click();
-  }
+  if (event.key === "r") toggle.click();
+  // g key toggles graph
+  if (event.key === "g") showGraph.toggle.click();
 });
 
 main()

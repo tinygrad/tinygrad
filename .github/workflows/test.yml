@@ -257,6 +257,7 @@ jobs:
         key: unittest-12
         pydeps: "pillow numpy ftfy regex"
         deps: testing_unit
+        llvm: 'true'
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
@@ -309,7 +310,7 @@ jobs:
         deps: testing_unit
         python-version: '3.14'
     - name: Test SPEC=2
-      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --ignore test/unit/test_autogen.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -793,6 +794,8 @@ jobs:
         ocelot: 'true'
         llvm: 'true'
     - name: Run unit tests
+      env:
+        LIBCLANG_PATH: '/opt/homebrew/opt/llvm@20/lib/libclang.dylib'
       run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20

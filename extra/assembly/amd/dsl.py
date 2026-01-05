@@ -7,6 +7,7 @@ from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
+from extra.assembly.amd.autogen.cdna.enum import VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op
 
 # Common masks and bit conversion functions
 MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
@@ -46,12 +47,14 @@ def _i64(f):
 # Instruction spec - register counts and dtypes derived from instruction names
 _REGS = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16,
          'F32': 1, 'I32': 1, 'U32': 1, 'F64': 2, 'I64': 2, 'U64': 2,
-         'F16': 1, 'I16': 1, 'U16': 1, 'B16': 1, 'I8': 1, 'U8': 1, 'B8': 1}
+         'F16': 1, 'I16': 1, 'U16': 1, 'B16': 1, 'I8': 1, 'U8': 1, 'B8': 1,
+         'DWORD': 1, 'DWORDX2': 2, 'DWORDX3': 3, 'DWORDX4': 4, 'DWORDX8': 8, 'DWORDX16': 16,
+         'BYTE': 1, 'SHORT': 1, 'UBYTE': 1, 'SBYTE': 1, 'USHORT': 1, 'SSHORT': 1}
 _CVT_RE = re.compile(r'CVT_([FIUB]\d+)_([FIUB]\d+)$')
 _MAD_MUL_RE = re.compile(r'(?:MAD|MUL)_([IU]\d+)_([IU]\d+)$')
 _PACK_RE = re.compile(r'PACK_([FIUB]\d+)_([FIUB]\d+)$')
 _DST_SRC_RE = re.compile(r'_([FIUB]\d+)_([FIUB]\d+)$')
-_SINGLE_RE = re.compile(r'_([FIUB](?:32|64|16|8|96|128|256|512))$')
+_SINGLE_RE = re.compile(r'_([FIUB](?:32|64|16|8|96|128|256|512)|DWORD(?:X(?:2|3|4|8|16))?|[US]?BYTE|[US]?SHORT)$')
 @cache
 def _suffix(name: str) -> tuple[str | None, str | None]:
   name = name.upper()
@@ -242,7 +245,11 @@ def unwrap(val) -> int:
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 FLOAT_DEC = {v: str(k) for k, v in FLOAT_ENC.items()}
 SPECIAL_GPRS = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", 253: "scc"}
+SPECIAL_GPRS_CDNA = {102: "flat_scratch_lo", 103: "flat_scratch_hi", 104: "xnack_mask_lo", 105: "xnack_mask_hi",
+                    106: "vcc_lo", 107: "vcc_hi", 124: "m0", 126: "exec_lo", 127: "exec_hi",
+                    251: "src_vccz", 252: "src_execz", 253: "src_scc", 254: "src_lds_direct"}
 SPECIAL_PAIRS = {106: "vcc", 126: "exec"}
+SPECIAL_PAIRS_CDNA = {102: "flat_scratch", 104: "xnack_mask", 106: "vcc", 126: "exec"}
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
 RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata', 'vsrc1'}
 
@@ -259,9 +266,10 @@ def encode_src(val) -> int:
   if isinstance(val, int): return 128 + val if 0 <= val <= 64 else 192 - val if -16 <= val <= -1 else 255
   return 255
 
-def decode_src(val: int) -> str:
+def decode_src(val: int, cdna: bool = False) -> str:
+  special = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
+  if val in special: return special[val]
   if val <= 105: return f"s{val}"
-  if val in SPECIAL_GPRS: return SPECIAL_GPRS[val]
   if val in FLOAT_DEC: return FLOAT_DEC[val]
   if 108 <= val <= 123: return f"ttmp{val - 108}"
   if 128 <= val <= 192: return str(val - 128)
@@ -385,14 +393,14 @@ class Inst:
       if name in SRC_FIELDS: self._encode_src(name, val)
       elif name in RAW_FIELDS: self._encode_raw(name, val)
       elif name == 'sbase': self._values[name] = (val.idx if isinstance(val, Reg) else val.val if isinstance(val, SrcMod) else val * 2) // 2
-      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = val.idx // 4
+      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = _encode_reg(val) // 4
       elif marker is _VDSTYEnc and isinstance(val, VGPR): self._values[name] = val.idx >> 1
     self._precompute_fields()
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
     if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val  # Special regs like VCC_LO
-    if name in {'srsrc', 'ssamp'}: return val.idx // 4 if isinstance(val, Reg) else val
+    if name in {'srsrc', 'ssamp'}: return _encode_reg(val) // 4 if isinstance(val, Reg) else val
     if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val.val // 2 if isinstance(val, SrcMod) else val
     if name in RAW_FIELDS: return _encode_reg(val) if isinstance(val, Reg) else val
     if isinstance(val, Reg) or name in SRC_FIELDS: return encode_src(val)
@@ -506,7 +514,7 @@ class Inst:
       lit32 = (self._literal >> 32) if self._literal > 0xffffffff else self._literal
       s = f"0x{lit32:x}"
     else:
-      s = decode_src(v)
+      s = decode_src(v, 'cdna' in self.__class__.__module__)
     return f"-{s}" if neg else s
 
   def __eq__(self, other):
@@ -532,21 +540,30 @@ class Inst:
     elif hasattr(val, 'name'): self.op = val
     else:
       cls_name = self.__class__.__name__
-      # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
-      if cls_name == 'VOP3':
-        try:
-          if val < 256: self.op = VOPCOp(val)
-          elif val in self._VOP3SD_OPS: self.op = VOP3SDOp(val)
-          else: self.op = VOP3Op(val)
-        except ValueError: self.op = val
-      # Prefer BitField marker (class-specific enum) over _enum_map (generic RDNA3 enums)
-      elif 'op' in self._fields and (marker := self._fields['op'].marker) and issubclass(marker, IntEnum):
+      is_cdna = cls_name in ('VOP3A', 'VOP3B')
+      # Try marker enum first (VOP3AOp, VOP3BOp, etc.)
+      marker = self._fields['op'].marker if 'op' in self._fields else None
+      if marker and issubclass(marker, IntEnum):
         try: self.op = marker(val)
         except ValueError: self.op = val
       elif cls_name in self._enum_map:
         try: self.op = self._enum_map[cls_name](val)
         except ValueError: self.op = val
       else: self.op = val
+      # Fallback for promoted instructions when marker lookup failed
+      if not hasattr(self.op, 'name') and cls_name in ('VOP3', 'VOP3A', 'VOP3B') and isinstance(val, int):
+        if val < 256:
+          try: self.op = VOPCOp(val)
+          except ValueError: pass
+        elif is_cdna and 256 <= val < 512:
+          try: self.op = (CDNA_VOP1Op(val - 320) if val >= 320 else CDNA_VOP2Op(val - 256))
+          except ValueError: pass
+        elif val in self._VOP3SD_OPS and not is_cdna:
+          try: self.op = VOP3SDOp(val)
+          except ValueError: pass
+        elif 256 <= val < 512 and not is_cdna:
+          try: self.op = VOP1Op(val - 384) if val >= 384 else VOP2Op(val - 256)
+          except ValueError: pass
     self.op_name = self.op.name if hasattr(self.op, 'name') else ''
     self._spec_regs = spec_regs(self.op_name)
     self._spec_dtype = spec_dtype(self.op_name)
