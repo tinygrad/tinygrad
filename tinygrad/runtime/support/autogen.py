@@ -122,17 +122,19 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         # libclang does not use CXType_Elaborated for function parameters with type qualifiers (eg. void (*)(const struct foo))
         if (_nm:=re.sub(r"^const ", "", nm(t))) in types and types[_nm][1]: return types[_nm][0]
         # check for forward declaration
-        if _nm in types: types[_nm] = (tnm:=types[_nm][0]), len(fields(t)) != 0
+        if _nm in types: types[_nm] = (tnm:=types[_nm][0]), len(fields(t)) != 0, (ln:=types[_nm][2])
         else:
-          if clang.clang_Cursor_isAnonymous(decl):
-            types[_nm] = (tnm:=(suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}")), True)
-          else: types[_nm] = (tnm:=_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0
+          if clang.clang_Cursor_isAnonymous(decl): types[_nm] = (tnm:=(suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl
+                                                                                                  else 'union'}{anoncnt()}")), True, len(lines))
+          else: types[_nm] = (tnm:=_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, len(lines)
           lines.append(f"class {tnm}({'Struct' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
           if typedef: lines.append(f"{typedef} = {tnm}")
         ff=[(nm(f), offset, tname(clang.clang_getCursorType(f))) + ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
                                                                     *clang.clang_Cursor_isBitField(f)) for f,offset in all_fields(t)]
-        if ff: lines.extend([f"{tnm}.SIZE = {clang.clang_Type_getSizeOf(t)}", f"{tnm}._fields_ = [{', '.join(repr(f) for f,*_ in ff)}]",
-                             *[f"setattr({tnm}, '{f}', field({', '.join(str(a) for a in args)}))" for f,*args in ff]])
+        if ff:
+          lines.extend([f"{tnm}.SIZE = {clang.clang_Type_getSizeOf(t)}", f"{tnm}._fields_ = [{', '.join(repr(f) for f,*_ in ff)}]",
+                        *[f"setattr({tnm}, '{f}', field({', '.join(str(a) for a in args)}))" for f,*args in ff]])
+          lines[ln].replace("pass", "\n"+"\n".join([f"  {f}: {typ}" for f,_,typ,*_ in ff]))
         return tnm
       case clang.CXType_Enum:
         # TODO: C++ and GNU C have forward declared enums
