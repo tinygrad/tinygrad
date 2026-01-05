@@ -197,6 +197,18 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(out.contents.a, 20)
     self.assertEqual(out.contents.b, 10)
 
+  def test_none_is_null(self):
+    src = """
+      #include <assert.h>
+      #include <stddef.h>
+      void test(void *p) { assert(p == NULL); }
+    """
+
+    dll = self.compile(src)
+    @dll.bind((Pointer(None),), None)
+    def test(_): ...
+    test(None)
+
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):
     ns = self.run_gen("""
