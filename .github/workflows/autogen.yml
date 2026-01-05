@@ -156,6 +156,8 @@ jobs:
         name: autogen-ubuntu-patch
         path: autogen-ubuntu.patch
         if-no-files-found: ignore
+    - name: Fail if differences found
+      run: git diff --quiet
   autogen-mac:
     name: In-tree Autogen (macos)
     runs-on: macos-14
@@ -184,6 +186,8 @@ jobs:
         name: autogen-macos-patch
         path: autogen-macos.patch
         if-no-files-found: ignore
+    - name: Fail if differences found
+      run: git diff --quiet
   autogen-comgr-3:
     name: In-tree Autogen (comgr 3)
     runs-on: ubuntu-24.04
@@ -219,3 +223,5 @@ jobs:
         name: autogen-comgr3-patch
         path: autogen-comgr3.patch
         if-no-files-found: ignore
+    - name: Fail if differences found
+      run: git diff --quiet
