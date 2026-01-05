@@ -209,6 +209,17 @@ class TestAutogen(unittest.TestCase):
     def test(_): ...
     test(None)
 
+  def test_bytes_to_charp(self):
+    src = """
+      #include <string.h>
+      int test(char *s) { return strlen(s); }
+    """
+
+    dll = self.compile(src)
+    @dll.bind((Pointer(ctypes.c_char),), ctypes.c_int)
+    def test(_): ...
+    self.assertEqual(test(b"test"), 4)
+
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):
     ns = self.run_gen("""

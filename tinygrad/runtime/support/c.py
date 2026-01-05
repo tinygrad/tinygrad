@@ -128,7 +128,7 @@ class _Pointer(_CData):
   def value(self): return struct.unpack("P", self._mem_)[0]
 
   @classmethod
-  def from_param(cls, obj): return ctypes.c_void_p(obj.value)
+  def from_param(cls, obj): return obj if isinstance(obj, bytes) else ctypes.c_void_p(obj.value)
 
   @classmethod
   def from_buffer(cls, src): return cls(src)
@@ -205,8 +205,10 @@ class DLL(ctypes.CDLL):
   def bind(self, argtypes:tuple[_SimpleCData|_CData], restype:_SimpleCData|_CData):
     def wrap(fn):
       def wrapper(*args):
-        out = self._get_func(fn.__name__, argtypes, restype)(*(pointer(a) if issubclass(t, _Pointer) and not isinstance(a, _Pointer) else a
-                                                               for a,t in zip(args, argtypes)))
+        def process(a, t):
+          if isinstance(a, bytes): return a
+          return pointer(a) if issubclass(t, _Pointer) and not isinstance(a, _Pointer) else a
+        out = self._get_func(fn.__name__, argtypes, restype)(*(process(a, t) for a,t in zip(args, argtypes)))
         return out if restype is None or issubclass(restype, _SimpleCData) else restype.from_buffer(out)
       return wrapper
     return wrap
