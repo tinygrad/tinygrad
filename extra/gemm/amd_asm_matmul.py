@@ -291,7 +291,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_or_b32_e32(v[1], s[S_TILE_X], v[0]))
   k.emit(v_or_b32_e32(v[22], s[S_TILE_Y], v[4]))
   k.emit(v_lshlrev_b32_e32(v[V_LANE_MOD8_X4], 2, v[V_LANE_ID_MOD8]))
-  k.emit(v_ashrrev_i32_e32(v[2], 31, v[1]))
+  k.emit(v_mov_b32_e32(v[2], 0))  # v[1] always positive, sign extension is 0
   k.emit(v_lshlrev_b64(v[5:6], 2, v[1:2]))
   k.waitcnt(lgkm=0)
 
@@ -320,7 +320,7 @@ def build_kernel(arch='gfx1100'):
   for i in range(1, 8): k.emit(v_add_nc_u32_e32(v[ROW_REGS[i]], s[S_LOOP_BOUND], v[ROW_REGS[i-1]]))
 
   def addr64(dst, base_s):  # 64-bit address: v[dst:dst+1] = s[base_s:base_s+1] + v[dst]*4
-    k.emit(v_ashrrev_i32_e32(v[dst+1], 31, v[dst]))
+    k.emit(v_mov_b32_e32(v[dst+1], 0))  # offset always positive, sign ext = 0
     k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[dst:dst+1]))
     k.emit(v_add_co_u32(v[dst], VCC_LO, s[base_s], v[dst]))
     k.emit(v_add_co_ci_u32_e32(v[dst+1], s[base_s+1], v[dst+1]))
@@ -329,7 +329,7 @@ def build_kernel(arch='gfx1100'):
     tmp = tmp if tmp is not None else dst
     k.emit(v_mad_u32_u24(v[tmp], s[S_DIM_N], mult, v[1]))
     if tmp != dst:
-      k.emit(v_ashrrev_i32_e32(v[tmp+1], 31, v[tmp]))
+      k.emit(v_mov_b32_e32(v[tmp+1], 0))  # offset always positive
       k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[tmp:tmp+1]))
       k.emit(v_add_co_u32(v[dst], VCC_LO, s[S_B_PTR[0]], v[dst]))
       k.emit(v_add_co_ci_u32_e32(v[dst+1], s[S_B_PTR[1]], v[dst+1]))
@@ -337,7 +337,7 @@ def build_kernel(arch='gfx1100'):
 
   def a_addr(dst, row_reg, tmp):  # A address for row_reg + lane_id_mod8
     k.emit(v_add_nc_u32_e32(v[tmp], v[row_reg], v[V_LANE_ID_MOD8]))
-    k.emit(v_ashrrev_i32_e32(v[tmp+1], 31, v[tmp]))
+    k.emit(v_mov_b32_e32(v[tmp+1], 0))  # offset always positive
     k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[tmp:tmp+1]))
     k.emit(v_add_co_u32(v[dst], VCC_LO, s[S_A_PTR[0]], v[dst]))
     k.emit(v_add_co_ci_u32_e32(v[dst+1], s[S_A_PTR[1]], v[dst+1]))
@@ -380,7 +380,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[9], s[S_LOOP_CTR], v[22]))
   for i, r in enumerate(lds_r): k.emit(v_or_b32_e32(v[r], 16 * (i + 1), v[22]))
 
-  # Extract sign bit of workgroup_x for swizzle
+  # Extract sign bit of workgroup_x for swizzle (always 0 for valid workgroups)
   k.emit(s_bfe_i32(s[S_LOOP_BOUND], s[S_WORKGROUP_X], 0x10018))
   k.emit(v_and_b32_e32(v[9], ADDR_MASK, v[9]))
   k.emit(s_lshr_b32(s[S_LOOP_BOUND], s[S_LOOP_BOUND], 25))
@@ -421,8 +421,7 @@ def build_kernel(arch='gfx1100'):
   # ===========================================================================
   # INIT: Compute LDS base addresses, then zero accumulators
   # ===========================================================================
-  # Compute LDS base addresses (v[2], v[3] used here, then zeroed later)
-  # v[3] = v[1] & ~0x7F = clear lower 7 bits (S_LOOP_BOUND is 0 from LDS swizzle for valid workgroups)
+  # v[3] = v[1] & 0x7F (lower 7 bits) since S_LOOP_BOUND=0 for valid workgroups
   k.emit(v_lshlrev_b32_e32(v[2], 4, v[2]))
   k.emit(v_add_nc_u32_e32(v[3], s[S_LOOP_BOUND], v[1]))
   k.emit(v_and_b32_e32(v[3], ADDR_MASK, v[3]))
@@ -438,7 +437,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_add_i32(s[S_LOOP_BOUND], s[S_DIM_N], -8))
   k.emit(s_add_u32(s[S_A_PTR[0]], s[S_A_PTR[0]], 32))
   k.emit(s_addc_u32(s[S_A_PTR[1]], s[S_A_PTR[1]], 0))
-  k.emit(s_mov_b32(s[S_LOOP_CTR], 0))
+  # S_LOOP_CTR is already 0 from prologue initialization
   k.emit(s_branch(simm16=0)); k.branch_to('LOOP_ENTRY')
 
   # ===========================================================================
