@@ -167,9 +167,6 @@ def _disasm_vop2(inst: VOP2) -> str:
   # CDNA carry ops output vcc after vdst
   if cdna and name in _VOP2_CARRY_OUT: return f"{name}{suf} v{inst.vdst}, {vcc}, {inst.lit(inst.src0)}, v{inst.vsrc1}"
   if cdna and name in _VOP2_CARRY_INOUT: return f"{name}{suf} v{inst.vdst}, {vcc}, {inst.lit(inst.src0)}, v{inst.vsrc1}, {vcc}"
-  # v_add_co_ci_u32 etc need vcc as both sdst (carry out) and carrier input
-  if not cdna and inst.op in (VOP2Op.V_ADD_CO_CI_U32, VOP2Op.V_SUB_CO_CI_U32, VOP2Op.V_SUBREV_CO_CI_U32):
-    return f"{name}{suf} v{inst.vdst}, {vcc}, {inst.lit(inst.src0)}, v{inst.vsrc1}, {vcc}"
   return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (f", {vcc}" if name == 'v_cndmask_b32' else "")
 
 def _disasm_vopc(inst: VOPC) -> str:
@@ -215,10 +212,6 @@ def _disasm_sopp(inst: SOPP) -> str:
     dep = lambda v: deps[v-1] if 0 < v <= len(deps) else str(v)
     p = [f"instid0({dep(id0)})" if id0 else "", f"instskip({skips[skip]})" if skip else "", f"instid1({dep(id1)})" if id1 else ""]
     return f"s_delay_alu {' | '.join(x for x in p if x) or '0'}"
-  if inst.op == SOPPOp.S_SENDMSG:
-    msgs = {3: 'MSG_DEALLOC_VGPRS', 1: 'MSG_INTERRUPT', 2: 'MSG_GS', 4: 'MSG_SAVEWAVE', 9: 'MSG_GS_ALLOC_REQ', 10: 'MSG_GET_DOORBELL'}
-    msg_id = inst.simm16 & 0xf
-    if msg_id in msgs: return f"s_sendmsg sendmsg({msgs[msg_id]})"
   return f"{name} {inst.simm16}" if name.startswith(('s_cbranch', 's_branch')) else f"{name} 0x{inst.simm16:x}"
 
 def _disasm_smem(inst: SMEM) -> str:
@@ -240,8 +233,8 @@ def _disasm_smem(inst: SMEM) -> str:
       off_s = decode_src(inst.soffset, cdna)
   elif inst.offset and inst.soffset != 124:
     off_s = f"{decode_src(inst.soffset, cdna)} offset:0x{inst.offset:x}"
-  elif inst.offset or inst.soffset == 124:
-    off_s = f"0x{inst.offset:x}"  # When soffset is null (124) and offset is 0, output "0x0" not "null"
+  elif inst.offset:
+    off_s = f"0x{inst.offset:x}"
   else:
     off_s = decode_src(inst.soffset, cdna)
   op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
@@ -379,7 +372,8 @@ def _disasm_vop3sd(inst: VOP3SD) -> str:
   s0, s1, s2 = src(inst.src0, inst.neg & 1, inst.src_regs(0)), src(inst.src1, inst.neg & 2, inst.src_regs(1)), src(inst.src2, inst.neg & 4, inst.src_regs(2))
   dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}"
   srcs = f"{s0}, {s1}, {s2}" if inst.num_srcs() == 3 else f"{s0}, {s1}"
-  return f"{name} {dst}, {_fmt_sdst(inst.sdst, 1)}, {srcs}{' clamp' if inst.clmp else ''}{_omod(inst.omod)}"
+  suffix = "_e64" if name.startswith('v_') and 'co_' in name else ""
+  return f"{name}{suffix} {dst}, {_fmt_sdst(inst.sdst, 1)}, {srcs}{' clamp' if inst.clmp else ''}{_omod(inst.omod)}"
 
 def _disasm_vopd(inst: VOPD) -> str:
   lit = inst._literal or inst.literal
@@ -639,9 +633,7 @@ def get_dsl(text: str) -> str:
     opsel = (bits[0] | (bits[1] << 1) | (bits[2] << 2)) if len(bits) == 3 and is3p else \
             (bits[0] | (bits[1] << 1) | (bits[2] << 3)) if len(bits) == 3 else sum(b << i for i, b in enumerate(bits))
   m, text = _extract(text, r'\s+wait_exp:(\d+)'); waitexp = m.group(1) if m else None
-  m, text = _extract(text, r'\s+offset:\s*(0x[0-9a-fA-F]+|-?\d+)'); off_val = m.group(1) if m else None
-  m, text = _extract(text, r'\s+offset0:\s*(0x[0-9a-fA-F]+|-?\d+)'); off0_val = m.group(1) if m else None
-  m, text = _extract(text, r'\s+offset1:\s*(0x[0-9a-fA-F]+|-?\d+)'); off1_val = m.group(1) if m else None
+  m, text = _extract(text, r'\s+offset:(0x[0-9a-fA-F]+|-?\d+)'); off_val = m.group(1) if m else None
   m, text = _extract(text, r'\s+dlc(?:\s|$)'); dlc = 1 if m else None
   m, text = _extract(text, r'\s+glc(?:\s|$)'); glc = 1 if m else None
   m, text = _extract(text, r'\s+slc(?:\s|$)'); slc = 1 if m else None
@@ -668,32 +660,6 @@ def get_dsl(text: str) -> str:
       elif m := re.match(r'lgkmcnt\((\d+)\)', p): lgkm = int(m.group(1))
       elif re.match(r'^0x[0-9a-f]+$|^\d+$', p): return f"s_waitcnt(simm16={int(p, 0)})"
     return f"s_waitcnt(simm16={waitcnt(vm, exp, lgkm)})"
-
-  # s_clause - simm16 is the count
-  if mn == 's_clause':
-    return f"s_clause(simm16={int(op_str.strip(), 0)})"
-
-  # s_delay_alu - parse instid0, instskip, instid1
-  if mn == 's_delay_alu':
-    deps = {'VALU_DEP_1':1, 'VALU_DEP_2':2, 'VALU_DEP_3':3, 'VALU_DEP_4':4, 'TRANS32_DEP_1':5, 'TRANS32_DEP_2':6, 'TRANS32_DEP_3':7, 'FMA_ACCUM_CYCLE_1':8, 'SALU_CYCLE_1':9, 'SALU_CYCLE_2':10, 'SALU_CYCLE_3':11}
-    skips = {'SAME':0, 'NEXT':1, 'SKIP_1':2, 'SKIP_2':3, 'SKIP_3':4, 'SKIP_4':5}
-    id0, skip, id1 = 0, 0, 0
-    for part in op_str.replace('|', ' ').split():
-      if m := re.match(r'instid0\((\w+)\)', part): id0 = deps.get(m.group(1), int(m.group(1), 0) if m.group(1).isdigit() else 0)
-      elif m := re.match(r'instskip\((\w+)\)', part): skip = skips.get(m.group(1), int(m.group(1), 0) if m.group(1).isdigit() else 0)
-      elif m := re.match(r'instid1\((\w+)\)', part): id1 = deps.get(m.group(1), int(m.group(1), 0) if m.group(1).isdigit() else 0)
-    simm16 = id0 | (skip << 4) | (id1 << 7)
-    return f"s_delay_alu(simm16={simm16})"
-
-  # s_sendmsg - parse sendmsg(MSG_*)
-  if mn == 's_sendmsg':
-    msgs = {'MSG_DEALLOC_VGPRS': 3, 'MSG_INTERRUPT': 1, 'MSG_GS': 2, 'MSG_SAVEWAVE': 4, 'MSG_GS_ALLOC_REQ': 9, 'MSG_GET_DOORBELL': 10}
-    if m := re.match(r'sendmsg\((\w+)\)', op_str.strip()):
-      msg_name = m.group(1)
-      if msg_name in msgs: return f"s_sendmsg(simm16={msgs[msg_name]})"
-    # Fallback to numeric
-    if m := re.match(r'0x[0-9a-f]+|\d+', op_str.strip(), re.I):
-      return f"s_sendmsg(simm16={int(m.group(0), 0)})"
 
   # VOPD
   if '::' in text:
@@ -762,13 +728,7 @@ def get_dsl(text: str) -> str:
 
   # DS instructions
   if mn.startswith('ds_'):
-    # Handle offset0/offset1 from separate fields or combined offset:
-    if off0_val is not None or off1_val is not None:
-      off0, off1 = off0_val or "0", off1_val or "0"
-    elif off_val:
-      off0, off1 = str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)
-    else:
-      off0, off1 = "0", "0"
+    off0, off1 = (str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)) if off_val else ("0", "0")
     gds_s = ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
     off_kw = f", offset0={off0}, offset1={off1}{gds_s}"
     if mn == 'ds_nop' or mn in ('ds_gws_sema_v', 'ds_gws_sema_p', 'ds_gws_sema_release_all'): return f"{mn}({off_kw.lstrip(', ')})"
@@ -812,8 +772,6 @@ def get_dsl(text: str) -> str:
     elif dst in _SGPR_NAMES: args[0] = f'RawImm({_SGPR_NAMES[dst]})'
 
   fn = mn.replace('.', '_')
-  # RDNA3 renamed some instructions - map old names to new names
-  fn = fn.replace('v_add_u32', 'v_add_nc_u32').replace('v_sub_u32', 'v_sub_nc_u32').replace('v_subrev_u32', 'v_subrev_nc_u32')
   if opsel is not None: args = [re.sub(r'\.[hl]$', '', a) for a in args]
 
   # v_fma_mix*: extract inline neg/abs modifiers
