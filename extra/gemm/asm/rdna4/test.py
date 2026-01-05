@@ -3,25 +3,22 @@ import pathlib
 from tinygrad import Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
-from extra.gemm.amd_uop_matmul import test_matmul
-from extra.gemm.asm.rdna4.gemm import insts
+from extra.gemm.amd_uop_matmul import N, test_matmul
+from extra.gemm.asm.rdna4.gemm import gemm
 
-N = 4096
-TN = 96
 THREADS_PER_WG = 128
-NUM_WG = 1024
+
+# “2×2 wave-level tiling of a 128×128 workgroup C tile, where each wave computes a 64×64 sub-tile using WMMA.”
+WAVE_BLOCK = 2
+C_TILE = 64 * WAVE_BLOCK
+
+TN = (N + C_TILE - 1) // C_TILE
+NUM_WG =  TN * TN
+
+assert N % THREADS_PER_WG == 0, "N must be divisible by THREADS_PER_WG"
 
 dname:str = Device.DEFAULT
 template:str = (pathlib.Path(__file__).parent/"template.s").read_text()
-
-def insts_to_asm() -> str:
-  lines = []
-  for inst in insts:
-    if isinstance(inst, str):
-      lines.append(inst)
-    else:
-      lines.append(f"\t{inst.disasm()}")
-  return "\n".join(lines)
 
 def asm_kernel() -> UOp:
   lidx = UOp.special(THREADS_PER_WG, "lidx0")
@@ -31,7 +28,7 @@ def asm_kernel() -> UOp:
   b = UOp.placeholder((N*N,), dtypes.half, slot=2)
   c = UOp.placeholder((N*N,), dtypes.half, slot=0)
 
-  src = template.replace("INSTRUCTIONS", insts_to_asm())
+  src = template.replace("INSTRUCTIONS", "\n".join([i if isinstance(i, str) else f"\t{i.disasm()}" for i in gemm(N)]))
 
   sink = UOp.sink(a, b, c, lidx, gidx, arg=KernelInfo(name="gemm"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)), arg=())
