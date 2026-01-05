@@ -9,6 +9,7 @@
 # Accumulators: 128 vgprs (v[2-117], v[120-124], v[126-129], v[131-133])
 
 import numpy as np
+from pathlib import Path
 from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.helpers import getenv, colored
 from tinygrad.engine.realize import Runner, Estimates, ExecItem
@@ -587,7 +588,13 @@ def test_matmul():
   dev = Device[Device.DEFAULT]
   print(f"Device arch: {dev.arch}")
 
-  asm = build_kernel(dev.arch)
+  if getenv("STOCK", 0):
+    # Load the stock kernel from amd_seb/kernel8_batched_gmem.s
+    stock_path = Path(__file__).parent / "amd_seb" / "kernel8_batched_gmem.s"
+    asm = stock_path.read_text()
+    print(f"Loaded stock kernel from {stock_path}")
+  else:
+    asm = build_kernel(dev.arch)
   if getenv("PRINT_ASM", 0): print(asm)
 
   binary = dev.compiler.compile(asm)
