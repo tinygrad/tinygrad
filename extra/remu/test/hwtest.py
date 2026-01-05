@@ -3,21 +3,18 @@
 
 import numpy as np
 import unittest
-import subprocess, struct, math, textwrap
-from tinygrad import Tensor, dtypes, Device, UOp
-from tinygrad.uop.ops import Ops
+import subprocess, struct, math, functools
+from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import getenv
-from tinygrad.runtime.support.compiler_amd import amdgpu_disassemble
-from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.realize import CompiledRunner
 
-from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.asm import waitcnt
-from test.testextra.test_cfg_viz import template
+from extra.assembly.amd.autogen.rdna3.ins import *
+from extra.assembly.amd.asm import waitcnt
+
+from test.testextra.test_cfg_viz import asm_kernel
 
 def get_output(asm:list, n_threads:int=1, vdst:VGPR=v[1]):
   out = Tensor([0]*n_threads, dtype=dtypes.uint32).realize()
-  src = "\n".join(inst.disasm() for inst in [
+  insts = [
     s_load_b64(s[0:1], s[0:1], NULL),
     *asm,
     v_lshlrev_b32_e32(v[0], 2, v[0]),
@@ -25,12 +22,9 @@ def get_output(asm:list, n_threads:int=1, vdst:VGPR=v[1]):
     #global_store_b32(v[0], v[1], s[0:1]),
     global_store_b32(addr=v[0], data=vdst, saddr=s[0:1]),
     s_endpgm()
-  ])
-  prg = ProgramSpec("test", template.replace("fn_name", "test").replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK),
-                    global_size=[1, 1, 1], local_size=[n_threads, 1, 1], globals=[0])
-  car = CompiledRunner(prg)
-  if getenv("PRINT_ASM"): amdgpu_disassemble(car.lib)
-  car([out.uop.buffer], {}, wait=True)
+  ]
+  out = Tensor.custom_kernel(out, fxn=functools.partial(asm_kernel, name="test", insts=insts, device=out.device, n_threads=n_threads))[0]
+  out.realize()
   return out.tolist()
 
 def f16_to_bits(x:float) -> int: return struct.unpack('<H', struct.pack('<e', x))[0]

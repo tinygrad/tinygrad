@@ -15,7 +15,7 @@ from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads
-from tinygrad.codegen.opt.postrange import apply_opts
+from tinygrad.codegen.opt.postrange import apply_opts, make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
@@ -52,6 +52,9 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
     # split store range (only on CPU for now)
     sink = graph_rewrite(sink, pm_split_store, ctx=ren.device, name="cut store ranges")
+
+    # create image buffers
+    sink = make_images(sink, ren)
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren)
@@ -133,7 +136,7 @@ def do_linearize(prg:UOp, sink:UOp) -> UOp:
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
-  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
+  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=ctx.aux(list(lin.src)) if ctx.has_aux else prg.arg)
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   if ctx.compiler is None: return None
@@ -166,8 +169,10 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
   # rewrite to prg
-  full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
-  prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
+  if ast.op is Ops.PROGRAM: prg = ast
+  else:
+    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
+    prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
 
   # create the ProgramSpec

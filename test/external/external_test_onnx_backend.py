@@ -151,8 +151,6 @@ backend_test.exclude('test_hannwindow_*')
 backend_test.exclude('test_hardmax_*')
 backend_test.exclude('test_gridsample_*')
 backend_test.exclude('test_dft_*')
-backend_test.exclude('test_einsum_batch_diagonal_cpu*') # TODO: equation = '...ii ->...i'
-backend_test.exclude('test_einsum_inner_prod_cpu*') # TODO: equation = 'i,i'
 backend_test.exclude('test_unique_*')
 backend_test.exclude('test_sequence_*')
 backend_test.exclude('test_nonmaxsuppression_*')
@@ -175,7 +173,6 @@ backend_test.exclude('test_tensorscatter_*')
 backend_test.exclude('test_l1normalization_*')
 backend_test.exclude('test_l2normalization_*')
 backend_test.exclude('test_lpnormalization_*')
-backend_test.exclude('test_einsum_scalar_cpu')
 backend_test.exclude('test_mod_mixed_sign_float16_cpu')
 backend_test.exclude('test_qlinearmatmul_2D_uint8_float16_cpu')
 backend_test.exclude('test_qlinearmatmul_3D_uint8_float16_cpu')
@@ -196,16 +193,6 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cp
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 backend_test.exclude('test_if_opt_cpu') # ValueError: 13 is not a valid AttributeType
 backend_test.exclude('test_if_seq_cpu') # NotImplementedError: op='SequenceConstruct' is not supported
-
-# regression from removing StrEnum in Domain
-backend_test.exclude('test_adam_cpu')
-backend_test.exclude('test_gradient_of_add_and_mul_cpu')
-backend_test.exclude('test_gradient_of_add_cpu')
-
-if Device.DEFAULT in ['CL', 'METAL']:
-  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_2_3_cpu')
-  backend_test.exclude('test_resize_upsample_sizes_nearest_axes_3_2_cpu')
-  backend_test.exclude('test_resize_upsample_sizes_nearest_cpu')
 
 if Device.DEFAULT == "METAL" or (OSX and Device.DEFAULT == "CL"):
   # numerical inaccuracy

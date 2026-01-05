@@ -1,10 +1,10 @@
 import base64, ctypes, pathlib, tempfile, hashlib, sys
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, system, data64
-from tinygrad.runtime.autogen import mesa
+from tinygrad.runtime.autogen import mesa, llvm
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
-try: from tinygrad.runtime.autogen import llvm
-except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
+
+# NB: compilers assume mesa's glsl type cache is managed externally with mesa.glsl_type_singleton_init_or_ref() and mesa.glsl_type_singleton_decref()
 
 def rzalloc(typ, ctx=None, **kwargs):
   s = ctypes.cast(mesa.rzalloc_size(ctypes.cast(ctx, ctypes.c_void_p), ctypes.sizeof(typ)), ctypes.POINTER(typ))
@@ -16,20 +16,8 @@ def deserialize(enc_src, opts):
   mesa.blob_reader_init(blobreader, src:=base64.b64decode(enc_src), len(src))
   return mesa.nir_deserialize(None, ctypes.cast(opts, ctypes.POINTER(mesa.nir_shader_compiler_options)), blobreader)
 
-class NIRCompiler(Compiler):
-  def __init__(self, cache_key):
-    mesa.glsl_type_singleton_init_or_ref()
-    super().__init__(cache_key)
-  def __del__(self): mesa.glsl_type_singleton_decref()
-
-class LVPCompiler(CPULLVMCompiler, NIRCompiler):
-  def __init__(self, cache_key="lvp"):
-    CPULLVMCompiler.__init__(self)
-    NIRCompiler.__init__(self, f"compile_{cache_key}")
-
-  def __del__(self):
-    NIRCompiler.__del__(self)
-    CPULLVMCompiler.__del__(self)
+class LVPCompiler(CPULLVMCompiler):
+  def __init__(self, cache_key="lvp"): CPULLVMCompiler.__init__(self, cache_key=f"compile_{cache_key}")
 
   def compile(self, src) -> bytes:
     shader, ctx = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext()
@@ -62,16 +50,14 @@ class LVPCompiler(CPULLVMCompiler, NIRCompiler):
 
   def disassemble(self, lib: bytes): cpu_objdump(lib)
 
-class NAKCompiler(NIRCompiler):
+class NAKCompiler(Compiler):
   def __init__(self, arch, warps_per_sm, cache_key="nak"):
     self.arch, self.warps_per_sm = arch, warps_per_sm
     self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(arch[3:]), max_warps_per_mp=warps_per_sm))
     self.nir_options = bytes(mesa.nak_nir_options(self.cc).contents)
     super().__init__(f"compile_{cache_key}_{arch}")
 
-  def __del__(self):
-    mesa.nak_compiler_destroy(self.cc)
-    super().__del__()
+  def __del__(self): mesa.nak_compiler_destroy(self.cc)
 
   def __reduce__(self): return NAKCompiler, (self.arch, self.warps_per_sm)
 
@@ -102,7 +88,7 @@ def disas_adreno(lib:bytes, gpu_id=630):
     tf.seek(0)
     print(tf.read())
 
-class IR3Compiler(NIRCompiler):
+class IR3Compiler(Compiler):
   def __init__(self, chip_id, cache_key="ir3"):
     assert sys.version_info >= (3,14), "IR3 requires python 3.14's bitfield fixes"
     self.dev_id = mesa.struct_fd_dev_id(((chip_id >> 24) & 0xFF) * 100 + ((chip_id >> 16) & 0xFF) * 10 + ((chip_id >>  8) & 0xFF), chip_id)
@@ -112,9 +98,7 @@ class IR3Compiler(NIRCompiler):
     self.nir_options = bytes(mesa.ir3_get_compiler_options(self.cc).contents)
     super().__init__(f"compile_{cache_key}")
 
-  def __del__(self):
-    mesa.ir3_compiler_destroy(self.cc)
-    super().__del__()
+  def __del__(self): mesa.ir3_compiler_destroy(self.cc)
 
   def __reduce__(self): return IR3Compiler, (self.dev_id.chip_id,)
 

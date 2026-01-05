@@ -131,7 +131,7 @@ class TestDType(unittest.TestCase):
   def test_finfo(self):
     if self.DTYPE not in [dtypes.float16, dtypes.float32, dtypes.float64]: return
     info = np.finfo(_to_np_dtype(self.DTYPE))
-    self.assertEqual(info.bits, self.DTYPE.itemsize*8)
+    self.assertEqual(info.bits, self.DTYPE.bitsize)
     self.assertEqual((info.nexp, info.nmant), dtypes.finfo(self.DTYPE))
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
