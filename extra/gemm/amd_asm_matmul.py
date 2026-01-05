@@ -444,6 +444,8 @@ def build_kernel(arch='gfx1100'):
   # MAIN GEMM LOOP
   # ===========================================================================
 
+  NO_DS, NO_GLOBAL = getenv("NO_DS", 0), getenv("NO_GLOBAL", 0)
+
   k.label('LOOP_INC')
   k.emit(s_add_i32(s[S_LOOP_CTR], s[S_LOOP_CTR], 8))
   k.emit(s_cmp_ge_i32(s[S_LOOP_CTR], s[S_DIM_N]))
@@ -457,15 +459,14 @@ def build_kernel(arch='gfx1100'):
   # Advance prefetch pointers
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
-  k.emit(s_setprio(0))
 
-  for vdst, saddr_lo in INIT_PREFETCH:
-    k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
+  if not NO_GLOBAL:
+    for vdst, saddr_lo in INIT_PREFETCH:
+      k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
 
   k.label('SKIP_PREFETCH')
 
   # 8 inner loop iterations
-  NO_DS, NO_GLOBAL = getenv("NO_DS", 0), getenv("NO_GLOBAL", 0)
   for iter in range(8):
     # Load A tile (4 pairs) and B tile (8 pairs) from LDS
     if not NO_DS:
