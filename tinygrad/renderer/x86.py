@@ -227,14 +227,10 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.IF, src=(UPat(Ops.CMPLT, name="y"),)), lambda y: UOp(X86Ops.JL, src=(cmp(y),))),
   (UPat(Ops.IF, src=(UPat(Ops.CMPEQ, name="y"),)), lambda y: UOp(X86Ops.JE, src=(cmp(y),))),
   (UPat(Ops.IF, src=(UPat(Ops.CMPNE, name="y"),)), lambda y: UOp(X86Ops.JNE, src=(cmp(y),))),
-  # TODO: now how do you handle int cmp to float where?
-  # TODO: how do I deal with bitwise?
-  # answer: deal with them the same way, if int cmp or bitwise (bool) cast to int of float size, mul -1 and bitcast
-  # if float cmp and int where use ucomiss all otehr cases just use the vcmpss, convert to bool with bitcast -> and 1 -> noop bool
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
-  (UPat(name="m").where(UPat.var("a", dtypes.ints), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if x.dtype.count > 1 else None),
-  (UPat(name="m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VBLENDVPS, src=(b, a, m.replace(dtype=m.src[0].dtype)))),
-  (UPat(name="m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VBLENDVPD, src=(b, a, m.replace(dtype=m.src[0].dtype)))),
+  (UPat(name="m").where(UPat.var("a", dtypes.ints), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if x.dtype.count > 1 else None), # noqa: E501
+  (UPat(name="m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VBLENDVPS, src=(b, a, m.replace(dtype=m.src[0].dtype)))), # noqa: E501
+  (UPat(name="m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VBLENDVPD, src=(b, a, m.replace(dtype=m.src[0].dtype)))), # noqa: E501
   # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
   (UPat(GroupOp.Comparison, dtypes.bool, (UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.replace(dtype=x.src[0].dtype).bitcast(dtypes.int32).bitwise_and(1).f(Ops.NOOP, dtype=dtypes.bool)), # noqa: E501
   (UPat(GroupOp.Comparison, dtypes.bool, (UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.replace(dtype=x.src[0].dtype).bitcast(dtypes.int64).bitwise_and(1).f(Ops.NOOP, dtype=dtypes.bool)), # noqa: E501
@@ -383,7 +379,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dt_64bit)), name="x"), lambda ctx,x: x.replace(op=X86Ops.VMOVSDm, src=fuse_index(ctx, x) + (x.src[-1],))), # noqa: E501
   (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dt_32bit)), name="x"), lambda ctx,x: x.replace(op=X86Ops.VMOVSSm, src=fuse_index(ctx, x) + (x.src[-1],))), # noqa: E501
   (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dt_16bit)), name="x"), lambda ctx,x: x.replace(op=X86Ops.VPEXTRW, src=fuse_index(ctx, x) + (x.src[-1], imm(dtypes.uint8, 0)))), # noqa: E501
-  (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dtypes.ints+(dtypes.bool,),)), name="x"), lambda ctx,x: x.replace(op=X86Ops.MOVm, src=fuse_index(ctx, x) + (x.src[-1],))), # noqa: E501
+  (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dtypes.ints+(dtypes.bool,))), name="x"),
+   lambda ctx,x: x.replace(op=X86Ops.MOVm, src=fuse_index(ctx, x) + (x.src[-1],)) if (i:=to_imm(x.src[-1])) is None else x.replace(op=X86Ops.MOVi, src=fuse_index(ctx, x) + (i,))), # noqa: E501
   # **** X86Op rewrites ****
   # fuse loads into X86Ops that allow it, if beneficial
   (UPat(X86GroupOp.ReadMem1st, src=(UPat(Ops.LOAD),), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 0)),
