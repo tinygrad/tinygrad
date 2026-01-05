@@ -49,7 +49,7 @@ def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]:
     tests = _parse_llvm_tests(text, r'(?:GFX90A|GFX942)')
   else:
     tests = _parse_llvm_tests(text, r'(?:VI9|GFX9|CHECK)')
-  return [(a, d) for a, d in tests if not _is_mimg(d)] if arch == "cdna" else tests
+  return [(a, d) for a, d in tests if not _is_mimg(d)] if arch in ("cdna", "gfx90a", "gfx942") else tests
 
 def _compile_asm_batch(instrs: list[str]) -> list[bytes]:
   if not instrs: return []
@@ -100,8 +100,8 @@ for f in RDNA_FILES:
   setattr(TestLLVM, f"test_rdna3_asm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "asm"))
   setattr(TestLLVM, f"test_rdna3_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "disasm"))
 for f in CDNA_FILES:
-  # Use gfx942 arch for gfx942-specific files, cdna for others
-  arch = "gfx942" if "gfx942" in f else "cdna"
+  # Use specific arch for gfx90a/gfx942 files, generic cdna for others
+  arch = "gfx942" if "gfx942" in f else "gfx90a" if "gfx90a" in f else "cdna"
   setattr(TestLLVM, f"test_cdna_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, arch, "roundtrip"))
   setattr(TestLLVM, f"test_cdna_asm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, arch, "asm"))
   setattr(TestLLVM, f"test_cdna_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, arch, "disasm"))
