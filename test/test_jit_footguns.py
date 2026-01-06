@@ -21,6 +21,7 @@ ERRORS RAISED (lower priority - at least users know):
 import unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit
+from tinygrad.engine.jit import JitError
 
 class TestJitFootguns(unittest.TestCase):
 
@@ -70,7 +71,7 @@ class TestJitFootguns(unittest.TestCase):
     def f(a, b): return (a + b).realize()
 
     x = Tensor([1, 2, 3])
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       f(x, x)
 
   def test_tensors_in_containers_ignored(self):
@@ -116,7 +117,7 @@ class TestJitFootguns(unittest.TestCase):
     def f(a): return (a + 1).realize()
 
     base = Tensor.randn(10, 10).realize()
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       for i in range(1, 5):
         f(base[:, i:i+2])  # different offset each time
 
@@ -128,7 +129,7 @@ class TestJitFootguns(unittest.TestCase):
     f(Tensor.randn(10, 10), Tensor.randn(10, 10))  # warmup
     f(Tensor.randn(10, 10), Tensor.randn(10, 10))  # capture
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       f(Tensor.randn(20, 20), Tensor.randn(20, 20))
 
   def test_python_constants_frozen(self):
@@ -170,7 +171,7 @@ class TestJitFootguns(unittest.TestCase):
     f(Tensor([1]), Tensor([2]))  # warmup with positional
     f(Tensor([1]), Tensor([2]))  # capture with positional
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       f(a=Tensor([3]), b=Tensor([4]))  # kwargs fail
 
   def test_class_method_shared_across_instances(self):
@@ -213,7 +214,7 @@ class TestJitFootguns(unittest.TestCase):
     @TinyJit
     def f(a, b): return None
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       for _ in range(3):
         f(Tensor([1]), Tensor([2]))
 

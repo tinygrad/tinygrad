@@ -13,6 +13,7 @@ from dataclasses import dataclass, replace
 from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
+class JitError(Exception): pass
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
@@ -225,7 +226,7 @@ def _prepare_jit_inputs(args, kwargs):
   lbs: list[UOp] = flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
   input_buffers: list[Buffer] = flatten([rb.bufs if isinstance(rb:=lb.base.realized, MultiBuffer) else [rb]
                                          for lb in lbs if lb.base.realized is not None])
-  assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
+  if len(set(input_buffers)) != len(input_buffers): raise JitError("duplicate inputs to JIT")
   st_varval_dtype_device = [(*(lb.substitute({lb.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), lb.dtype, lb.device) for lb in lbs]
   _var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
@@ -294,7 +295,7 @@ class TinyJit(Generic[ReturnType]):
         finally: capturing.clear()
       jit_cache = self._jit_cache
       del self._buffer_replace, self._jit_cache
-      assert len(jit_cache), "didn't JIT anything!"
+      if not len(jit_cache): raise JitError("didn't JIT anything!")
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_buffers)} inputs")
 
       # track inputs that are views of buffers
@@ -333,9 +334,9 @@ class TinyJit(Generic[ReturnType]):
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
-      assert self.captured.expected_names == names, f"args mismatch in JIT: {self.captured.expected_names=} != {names}"
-      assert self.captured.expected_st_vars_dtype_device == st_vars_dtype_device, \
-        f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
+      if self.captured.expected_names != names: raise JitError(f"args mismatch in JIT: {self.captured.expected_names=} != {names}")
+      if self.captured.expected_st_vars_dtype_device != st_vars_dtype_device:
+        raise JitError(f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}")
       ret = self.captured(input_buffers, var_vals)
 
     self.cnt += 1
