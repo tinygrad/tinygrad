@@ -57,7 +57,8 @@ def field(typ, off:int, bit_width=None, bit_off=0):
     sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
     # FIXME: signedness
     return property(lambda self: (int.from_bytes(memoryview(self).cast('B')[sl], sys.byteorder) >> bit_off) & mask,
-                    lambda self,v: memoryview(self).cast('B').__setitem__(sl, ((int.from_bytes(self._mem_[sl])&set_mask)|(v << bit_off)).to_bytes(sz, sys.byteorder)))
+                    lambda self,v: memoryview(self).cast('B').__setitem__(sl, ((int.from_bytes(self._mem_[sl]) & set_mask) |
+                                                                               (v << bit_off)).to_bytes(sz, sys.byteorder)))
 
   sl = slice(off, off + ctypes.sizeof(typ))
   return property(lambda self: v.value if isinstance(v:=typ.from_buffer(memoryview(self).cast('B')[sl]), _SimpleCData) else v,
