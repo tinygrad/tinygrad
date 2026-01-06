@@ -240,7 +240,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.RESHAPE:
         if self.src[0]._shape is None: return self.marg
 
-    # movement ops change the shape. this is the logic from the old ShapeTracker
+    # movement ops change the shape
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE_AXIS, Ops.WMMA}):
       ps = self.src[0]._shape
@@ -475,14 +475,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
-  # *** ShapeTracker helpers ***
-
   def split_uop(self:UOp, sep:Ops):
     if self.op is sep:
       for s in self.src: yield from s.split_uop(sep)
     else: yield self
 
-  # *** from MultiLazyBuffer ***
+  # *** multi-device helpers ***
 
   def multi(self, axis:int|None):
     assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
@@ -523,8 +521,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     sz = self.shape[axis] // dcount
     return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
   def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis).multi(axis)
-
-  # *** from LazyBuffer ***
 
   def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
     assert arg is None or isinstance(self.device, tuple)

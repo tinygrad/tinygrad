@@ -7,6 +7,19 @@ from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
+from extra.assembly.amd.autogen.cdna.enum import VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op
+
+# Source operand encoding - constant across all AMD ISAs
+class SrcEnum(IntEnum):
+  VCC_LO=106; VCC_HI=107; NULL=124; M0=125; EXEC_LO=126; EXEC_HI=127; ZERO=128
+  DPP8=233; DPP8FI=234; SHARED_BASE=235; SHARED_LIMIT=236; PRIVATE_BASE=237; PRIVATE_LIMIT=238
+  POS_HALF=240; NEG_HALF=241; POS_ONE=242; NEG_ONE=243; POS_TWO=244; NEG_TWO=245
+  POS_FOUR=246; NEG_FOUR=247; INV_2PI=248; DPP16=250; VCCZ=251; EXECZ=252; SCC=253; LDS_DIRECT=254
+VCC_LO, VCC_HI, NULL, M0, EXEC_LO, EXEC_HI, ZERO = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.M0, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.ZERO
+DPP8FI, SHARED_BASE, SHARED_LIMIT, PRIVATE_BASE, PRIVATE_LIMIT = SrcEnum.DPP8FI, SrcEnum.SHARED_BASE, SrcEnum.SHARED_LIMIT, SrcEnum.PRIVATE_BASE, SrcEnum.PRIVATE_LIMIT
+POS_HALF, NEG_HALF, POS_ONE, NEG_ONE, POS_TWO, NEG_TWO = SrcEnum.POS_HALF, SrcEnum.NEG_HALF, SrcEnum.POS_ONE, SrcEnum.NEG_ONE, SrcEnum.POS_TWO, SrcEnum.NEG_TWO
+POS_FOUR, NEG_FOUR, INV_2PI, VCCZ, EXECZ, SCC, LDS_DIRECT = SrcEnum.POS_FOUR, SrcEnum.NEG_FOUR, SrcEnum.INV_2PI, SrcEnum.VCCZ, SrcEnum.EXECZ, SrcEnum.SCC, SrcEnum.LDS_DIRECT
+OFF = NULL
 
 # Common masks and bit conversion functions
 MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
@@ -54,12 +67,14 @@ def f32_to_f16(f):
 # Instruction spec - register counts and dtypes derived from instruction names
 _REGS = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16,
          'F32': 1, 'I32': 1, 'U32': 1, 'F64': 2, 'I64': 2, 'U64': 2,
-         'F16': 1, 'I16': 1, 'U16': 1, 'B16': 1, 'I8': 1, 'U8': 1, 'B8': 1}
+         'F16': 1, 'I16': 1, 'U16': 1, 'B16': 1, 'I8': 1, 'U8': 1, 'B8': 1,
+         'DWORD': 1, 'DWORDX2': 2, 'DWORDX3': 3, 'DWORDX4': 4, 'DWORDX8': 8, 'DWORDX16': 16,
+         'BYTE': 1, 'SHORT': 1, 'UBYTE': 1, 'SBYTE': 1, 'USHORT': 1, 'SSHORT': 1}
 _CVT_RE = re.compile(r'CVT_([FIUB]\d+)_([FIUB]\d+)$')
 _MAD_MUL_RE = re.compile(r'(?:MAD|MUL)_([IU]\d+)_([IU]\d+)$')
 _PACK_RE = re.compile(r'PACK_([FIUB]\d+)_([FIUB]\d+)$')
 _DST_SRC_RE = re.compile(r'_([FIUB]\d+)_([FIUB]\d+)$')
-_SINGLE_RE = re.compile(r'_([FIUB](?:32|64|16|8|96|128|256|512))$')
+_SINGLE_RE = re.compile(r'_([FIUB](?:32|64|16|8|96|128|256|512)|DWORD(?:X(?:2|3|4|8|16))?|[US]?BYTE|[US]?SHORT)$')
 @cache
 def _suffix(name: str) -> tuple[str | None, str | None]:
   name = name.upper()
@@ -250,7 +265,11 @@ def unwrap(val) -> int:
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 FLOAT_DEC = {v: str(k) for k, v in FLOAT_ENC.items()}
 SPECIAL_GPRS = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", 253: "scc"}
+SPECIAL_GPRS_CDNA = {102: "flat_scratch_lo", 103: "flat_scratch_hi", 104: "xnack_mask_lo", 105: "xnack_mask_hi",
+                    106: "vcc_lo", 107: "vcc_hi", 124: "m0", 126: "exec_lo", 127: "exec_hi",
+                    251: "src_vccz", 252: "src_execz", 253: "src_scc", 254: "src_lds_direct"}
 SPECIAL_PAIRS = {106: "vcc", 126: "exec"}
+SPECIAL_PAIRS_CDNA = {102: "flat_scratch", 104: "xnack_mask", 106: "vcc", 126: "exec"}
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
 RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata', 'vsrc1'}
 
@@ -267,9 +286,10 @@ def encode_src(val) -> int:
   if isinstance(val, int): return 128 + val if 0 <= val <= 64 else 192 - val if -16 <= val <= -1 else 255
   return 255
 
-def decode_src(val: int) -> str:
+def decode_src(val: int, cdna: bool = False) -> str:
+  special = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
+  if val in special: return special[val]
   if val <= 105: return f"s{val}"
-  if val in SPECIAL_GPRS: return SPECIAL_GPRS[val]
   if val in FLOAT_DEC: return FLOAT_DEC[val]
   if 108 <= val <= 123: return f"ttmp{val - 108}"
   if 128 <= val <= 192: return str(val - 128)
@@ -288,7 +308,16 @@ class Inst:
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
-    cls._fields = {n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))}
+    # Merge fields from parent classes
+    cls._fields = {}
+    for base in reversed(cls.__mro__):
+      if base is Inst or not hasattr(base, '_fields'): continue
+      cls._fields.update(base._fields)
+    # Add this class's own fields (overrides parents)
+    cls._fields.update({n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))})
+    # Compute size from max bit (exclude optional fields starting at bit 64+, e.g. MIMG NSA)
+    max_bit = max((bf.hi for bf in cls._fields.values() if bf.lo < 64), default=0) if cls._fields else 0
+    cls._sz = 12 if max_bit > 63 else 8 if max_bit > 31 else 4
     if 'encoding' in cls._fields and isinstance(cls.__dict__.get('encoding'), tuple): cls._encoding = cls.__dict__['encoding']
 
   def _or_field(self, name: str, bit: int):
@@ -352,6 +381,16 @@ class Inst:
     field_names = [n for n in self._fields if n != 'encoding']
     # Map Python-friendly names to actual field names (abs_ -> abs for Python reserved word)
     if 'abs_' in kwargs: kwargs['abs'] = kwargs.pop('abs_')
+    # If more args than fields, treat extra arg as literal (for FMAAK/FMAMK style instructions)
+    # FMAMK has K in middle (vdst, src0, K, vsrc1), FMAAK has K at end (vdst, src0, vsrc1, K)
+    args = list(args)
+    if len(args) > len(field_names) and literal is None:
+      for i, a in enumerate(args):
+        if isinstance(a, int) and not isinstance(a, SrcEnum) and i < len(field_names) and field_names[i] in ('vsrc1',):
+          literal = args.pop(i)
+          break
+      else:
+        literal = args.pop()  # fallback: last arg is literal
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
     self._precompute()
@@ -393,14 +432,14 @@ class Inst:
       if name in SRC_FIELDS: self._encode_src(name, val)
       elif name in RAW_FIELDS: self._encode_raw(name, val)
       elif name == 'sbase': self._values[name] = (val.idx if isinstance(val, Reg) else val.val if isinstance(val, SrcMod) else val * 2) // 2
-      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = val.idx // 4
+      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = _encode_reg(val) // 4
       elif marker is _VDSTYEnc and isinstance(val, VGPR): self._values[name] = val.idx >> 1
     self._precompute_fields()
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
     if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val  # Special regs like VCC_LO
-    if name in {'srsrc', 'ssamp'}: return val.idx // 4 if isinstance(val, Reg) else val
+    if name in {'srsrc', 'ssamp'}: return _encode_reg(val) // 4 if isinstance(val, Reg) else val
     if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val.val // 2 if isinstance(val, SrcMod) else val
     if name in RAW_FIELDS: return _encode_reg(val) if isinstance(val, Reg) else val
     if isinstance(val, Reg) or name in SRC_FIELDS: return encode_src(val)
@@ -450,7 +489,7 @@ class Inst:
     return result + (lit32 & MASK32).to_bytes(4, 'little')
 
   @classmethod
-  def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 12 if issubclass(cls, Inst96) else 8
+  def _size(cls) -> int: return cls._sz
   def size(self) -> int:
     # Literal is always 4 bytes in the binary (for 64-bit ops, it's in high 32 bits)
     return self._size() + (4 if self._literal is not None else 0)
@@ -514,7 +553,7 @@ class Inst:
       lit32 = (self._literal >> 32) if self._literal > 0xffffffff else self._literal
       s = f"0x{lit32:x}"
     else:
-      s = decode_src(v)
+      s = decode_src(v, 'cdna' in self.__class__.__module__)
     return f"-{s}" if neg else s
 
   def __eq__(self, other):
@@ -540,21 +579,30 @@ class Inst:
     elif hasattr(val, 'name'): self.op = val
     else:
       cls_name = self.__class__.__name__
-      # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
-      if cls_name == 'VOP3':
-        try:
-          if val < 256: self.op = VOPCOp(val)
-          elif val in self._VOP3SD_OPS: self.op = VOP3SDOp(val)
-          else: self.op = VOP3Op(val)
-        except ValueError: self.op = val
-      # Prefer BitField marker (class-specific enum) over _enum_map (generic RDNA3 enums)
-      elif 'op' in self._fields and (marker := self._fields['op'].marker) and issubclass(marker, IntEnum):
+      is_cdna = cls_name in ('VOP3A', 'VOP3B')
+      # Try marker enum first (VOP3AOp, VOP3BOp, etc.)
+      marker = self._fields['op'].marker if 'op' in self._fields else None
+      if marker and issubclass(marker, IntEnum):
         try: self.op = marker(val)
         except ValueError: self.op = val
       elif cls_name in self._enum_map:
         try: self.op = self._enum_map[cls_name](val)
         except ValueError: self.op = val
       else: self.op = val
+      # Fallback for promoted instructions when marker lookup failed
+      if not hasattr(self.op, 'name') and cls_name in ('VOP3', 'VOP3A', 'VOP3B') and isinstance(val, int):
+        if val < 256:
+          try: self.op = VOPCOp(val)
+          except ValueError: pass
+        elif is_cdna and 256 <= val < 512:
+          try: self.op = (CDNA_VOP1Op(val - 320) if val >= 320 else CDNA_VOP2Op(val - 256))
+          except ValueError: pass
+        elif val in self._VOP3SD_OPS and not is_cdna:
+          try: self.op = VOP3SDOp(val)
+          except ValueError: pass
+        elif 256 <= val < 512 and not is_cdna:
+          try: self.op = VOP1Op(val - 384) if val >= 384 else VOP2Op(val - 256)
+          except ValueError: pass
     self.op_name = self.op.name if hasattr(self.op, 'name') else ''
     self._spec_regs = spec_regs(self.op_name)
     self._spec_dtype = spec_dtype(self.op_name)
@@ -574,6 +622,4 @@ class Inst:
   def is_64bit(self) -> bool: return spec_is_64bit(self.op_name)
   def is_dst_16(self) -> bool: return self._spec_regs[0] == 1 and is_dtype_16(self._spec_dtype[0])
 
-class Inst32(Inst): pass
-class Inst64(Inst): pass
-class Inst96(Inst): pass
+
