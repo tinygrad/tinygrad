@@ -1,5 +1,6 @@
 import ctypes, functools, os, pathlib, re, sys, sysconfig, typing
 from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
+from _ctypes import _SimpleCData
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -59,7 +60,7 @@ def field(typ, off:int, bit_width=None, bit_off=0):
                     lambda self,v: memoryview(self).cast('B').__setitem__(sl, ((int.from_bytes(self._mem_[sl])&set_mask)|(v << bit_off)).to_bytes(sz, sys.byteorder)))
 
   sl = slice(off, off + ctypes.sizeof(typ))
-  return property(lambda self: typ.from_buffer(memoryview(self).cast('B')[sl]),
+  return property(lambda self: v.value if isinstance(v:=typ.from_buffer(memoryview(self).cast('B')[sl]), _SimpleCData) else v,
                   lambda self, v: memoryview(self).cast('B').__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v))))
 
 class DLL(ctypes.CDLL):

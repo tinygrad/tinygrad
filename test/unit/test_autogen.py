@@ -16,7 +16,6 @@ class TestAutogen(unittest.TestCase):
       f.flush()
 
       generated_code = gen(name="test_header", dll=None, files=[f.name])
-      print(generated_code)
 
       namespace = {}
       exec(generated_code, namespace)
@@ -173,8 +172,8 @@ class TestAutogen(unittest.TestCase):
     @dll.bind
     def test(x:Outer) -> Outer: ...
     o = test(Outer(Inner(10), 20))
-    self.assertEqual(o.inner.a.value, 20)
-    self.assertEqual(o.b.value, 10)
+    self.assertEqual(o.inner.a, 20)
+    self.assertEqual(o.b, 10)
 
   def test_struct_pointer_interop(self):
     @record
@@ -197,8 +196,8 @@ class TestAutogen(unittest.TestCase):
     def test(f:ctypes.POINTER(Foo)) -> ctypes.POINTER(Foo): ...
     inp = ctypes.pointer(Foo(10, 20))
     out = test(inp)
-    self.assertEqual(out.contents.a.value, 20)
-    self.assertEqual(out.contents.b.value, 10)
+    self.assertEqual(out.contents.a, 20)
+    self.assertEqual(out.contents.b, 10)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):
