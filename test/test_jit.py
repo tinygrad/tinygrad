@@ -525,9 +525,9 @@ class TestJit(unittest.TestCase):
     # masked_select uses .item() internally, so output size gets baked in
     @TinyJit
     def f(x:Tensor, mask:Tensor) -> Tensor: return x.masked_select(mask)
-    mask_2 = Tensor([True, False, True, False], dtype=dtypes.bool)
+    mask_2 = Tensor([True, False, True, False])
     for _ in range(3): f(Tensor([1, 2, 3, 4]), mask_2)
-    mask_3 = Tensor([True, True, True, False], dtype=dtypes.bool)
+    mask_3 = Tensor([True, True, True, False])
     result = f(Tensor([1, 2, 3, 4]), mask_3)
     self.assertEqual(result.shape, (2,))  # wrong, should be (3,)
 
