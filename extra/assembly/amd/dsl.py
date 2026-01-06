@@ -295,7 +295,16 @@ class Inst:
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
-    cls._fields = {n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))}
+    # Merge fields from parent classes
+    cls._fields = {}
+    for base in reversed(cls.__mro__):
+      if base is Inst or not hasattr(base, '_fields'): continue
+      cls._fields.update(base._fields)
+    # Add this class's own fields (overrides parents)
+    cls._fields.update({n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))})
+    # Compute size from max bit (exclude optional fields starting at bit 64+, e.g. MIMG NSA)
+    max_bit = max((bf.hi for bf in cls._fields.values() if bf.lo < 64), default=0) if cls._fields else 0
+    cls._sz = 12 if max_bit > 63 else 8 if max_bit > 31 else 4
     if 'encoding' in cls._fields and isinstance(cls.__dict__.get('encoding'), tuple): cls._encoding = cls.__dict__['encoding']
 
   def _or_field(self, name: str, bit: int):
@@ -457,7 +466,7 @@ class Inst:
     return result + (lit32 & MASK32).to_bytes(4, 'little')
 
   @classmethod
-  def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 12 if issubclass(cls, Inst96) else 8
+  def _size(cls) -> int: return cls._sz
   def size(self) -> int:
     # Literal is always 4 bytes in the binary (for 64-bit ops, it's in high 32 bits)
     return self._size() + (4 if self._literal is not None else 0)
@@ -590,6 +599,4 @@ class Inst:
   def is_64bit(self) -> bool: return spec_is_64bit(self.op_name)
   def is_dst_16(self) -> bool: return self._spec_regs[0] == 1 and is_dtype_16(self._spec_dtype[0])
 
-class Inst32(Inst): pass
-class Inst64(Inst): pass
-class Inst96(Inst): pass
+
