@@ -301,7 +301,7 @@ class MockDSPProgram:
         input=b''.join([bytes(to_mv(x.va_addr, x.size)) for x in bufs] + [struct.pack("I", x) for x in vals]), stdout=subprocess.PIPE, check=True)
     offset = 4
     for x in bufs:
-      x.cpu_view()[:] = proc.stdout[offset:offset+x.size]
+      to_mv(x.va_addr, x.size)[:] = proc.stdout[offset:offset+x.size]
       offset += x.size
     assert offset == len(proc.stdout)
     return struct.unpack("I", proc.stdout[0:4])[0] / 1e9  # pretend it's 1 Ghz, but this is an inscount, not a time
