@@ -44,7 +44,11 @@ class Declare: name: str; dtype: DType
 class If: branches: tuple[tuple[UOp|None, tuple[Stmt, ...]], ...]
 @dataclass(frozen=True)
 class For: var: str; start: UOp; end: UOp; body: tuple[Stmt, ...]
-Stmt = Assign|Declare|If|For
+@dataclass(frozen=True)
+class Lambda: name: str; params: tuple[str, ...]; body: tuple[Stmt, ...]|UOp
+@dataclass(frozen=True)
+class Break: pass
+Stmt = Assign|Declare|If|For|Lambda|Break
 
 def _match(s, i, o, c):
   d = 1
@@ -184,6 +188,7 @@ def expr(s: str) -> UOp:
 def stmt(line: str) -> Stmt|None:
   line = line.split('//')[0].strip().rstrip(';')
   if not line: return None
+  if line == 'break': return Break()
   if line[:5] == 'eval ': return Assign(UOp(Ops.DEFINE_VAR, dtypes.void, arg=('_eval', None, None)), UOp(Ops.DEFINE_VAR, dtypes.void, arg=(line, None, None)))
   if line[:8] == 'declare ' and ':' in line:
     n, t = line[8:].split(':', 1)
@@ -206,28 +211,47 @@ def stmt(line: str) -> Stmt|None:
   return None
 
 def parse(code: str) -> tuple[Stmt, ...]:
-  lines = [l.split('//')[0].strip().rstrip(';') for l in code.strip().split('\n') if l.split('//')[0].strip()]
+  lines = [l.split('//')[0].strip() for l in code.strip().split('\n') if l.split('//')[0].strip()]
   stmts, i = [], 0
   while i < len(lines):
-    ln = lines[i]
+    ln = lines[i].rstrip(';')
+    # Lambda: NAME = lambda(params) ( body );
+    if '= lambda(' in ln and (m := re.match(r'(\w+)\s*=\s*lambda\(([^)]*)\)\s*\(', ln)):
+      name, params = m[1], tuple(p.strip() for p in m[2].split(',')) if m[2].strip() else ()
+      # Collect lambda body until closing );
+      body_lines = [ln[m.end():]]
+      i += 1
+      while i < len(lines) and not lines[i-1].rstrip().endswith(');'):
+        body_lines.append(lines[i])
+        i += 1
+      body_text = ' '.join(body_lines).strip()
+      if body_text.endswith(');'): body_text = body_text[:-2]
+      # Try to parse as expression first, then as statements
+      try:
+        body = expr(body_text)
+      except ValueError:
+        body = parse(body_text)
+      stmts.append(Lambda(name, params, body)); continue
     if ln[:4] == 'for ' and ' do' in ln and (m := re.match(r'for\s+(\w+)\s+in\s+(.+?)\s*:\s*(.+?)\s+do', ln)):
       i, body, d = i+1, [], 1
       while i < len(lines) and d > 0:
-        if lines[i][:4] == 'for ' and ' do' in lines[i]: d += 1
-        elif lines[i] == 'endfor': d -= 1
+        line_i = lines[i].rstrip(';').rstrip('.')
+        if line_i[:4] == 'for ' and ' do' in line_i: d += 1
+        elif line_i == 'endfor': d -= 1
         if d > 0: body.append(lines[i])
         i += 1
       stmts.append(For(m[1], expr(m[2]), expr(m[3]), parse('\n'.join(body)))); continue
     if ln[:3] == 'if ' and ' then' in ln:
       br, cond, body, i, depth = [], ln[3:ln.index(' then')], [], i+1, 1
       while i < len(lines) and depth > 0:
-        if lines[i][:3] == 'if ' and ' then' in lines[i]: depth += 1; body.append(lines[i])
-        elif lines[i] == 'endif':
+        line_i = lines[i].rstrip(';').rstrip('.')
+        if line_i[:3] == 'if ' and ' then' in line_i: depth += 1; body.append(lines[i])
+        elif line_i == 'endif':
           depth -= 1
           if depth > 0: body.append(lines[i])
-        elif depth == 1 and lines[i][:6] == 'elsif ' and ' then' in lines[i]:
-          br.append((expr(cond), parse('\n'.join(body)))); cond, body = lines[i][6:lines[i].index(' then')], []
-        elif depth == 1 and lines[i] == 'else':
+        elif depth == 1 and line_i[:6] == 'elsif ' and ' then' in line_i:
+          br.append((expr(cond), parse('\n'.join(body)))); cond, body = line_i[6:line_i.index(' then')], []
+        elif depth == 1 and line_i == 'else':
           br.append((expr(cond), parse('\n'.join(body)))); cond, body = None, []
         else: body.append(lines[i])
         i += 1

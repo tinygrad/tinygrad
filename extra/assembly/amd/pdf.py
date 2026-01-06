@@ -171,7 +171,16 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[
       lines.extend((p, y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y and 60 < x < 80)
     if lines:
       # Sort by page first, then by y descending within each page (higher y = earlier text in PDF)
-      pcode_lines = [t.replace('Ê', '').strip() for _, _, t in sorted(lines, key=lambda x: (x[0], -x[1]))]
+      sorted_lines = sorted(lines, key=lambda x: (x[0], -x[1]))
+      # Stop at large Y gaps (>30) - indicates section break (Notes, examples, etc)
+      filtered = [sorted_lines[0]]
+      for j in range(1, len(sorted_lines)):
+        prev_page, prev_y, _ = sorted_lines[j-1]
+        curr_page, curr_y, _ = sorted_lines[j]
+        if curr_page == prev_page and prev_y - curr_y > 30: break
+        if curr_page != prev_page and prev_y > 60 and curr_y < 730: break  # examples spilled to next page (not at very top)
+        filtered.append(sorted_lines[j])
+      pcode_lines = [t.replace('Ê', '').strip() for _, _, t in filtered]
       if pcode_lines: pcode[(name, opcode)] = '\n'.join(pcode_lines)
   return pcode
 
