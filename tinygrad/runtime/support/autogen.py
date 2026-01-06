@@ -93,7 +93,7 @@ arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
 
 def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
-  macros, lines, anoncnt, types, objc = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False
+  macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
     nonlocal lines, types, anoncnt, objc
@@ -217,8 +217,9 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
       rollback = lines, types
       try:
         match c.kind:
-          case clang.CXCursor_FunctionDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
+          case clang.CXCursor_FunctionDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll and nm(c) not in fns:
             # TODO: we could support name-mangling
+            fns.add(nm(c))
             argus = [f"{normalize(arg) or '_' + str(i)}:{tname(clang.clang_getCursorType(arg))}" for i, arg in enumerate(arguments(c))]
             lines.extend(["@dll.bind", f"def {nm(c)}({', '.join(argus)}) -> {tname(clang.clang_getCursorResultType(c))}: ..."])
             if clang.CXCursor_NSReturnsRetained in attrs(c): lines.append(f"{nm(c)} = objc.returns_retained({nm(c)})")
