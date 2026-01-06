@@ -15,6 +15,13 @@ from weakref import WeakKeyDictionary
 class GraphException(Exception): pass
 class JitError(Exception): pass
 
+def _check_no_non_tensor_return(ret):
+  if ret is None or isinstance(ret, Tensor): return
+  if isinstance(ret, (tuple, list, dict)):
+    for item in (ret.values() if isinstance(ret, dict) else ret): _check_no_non_tensor_return(item)
+    return
+  raise JitError(f"JIT return contains non-Tensor value of type {type(ret).__name__}")
+
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
 def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int], max_batch_size=0) -> list[ExecItem]:
@@ -296,6 +303,7 @@ class TinyJit(Generic[ReturnType]):
       jit_cache = self._jit_cache
       del self._buffer_replace, self._jit_cache
       if not len(jit_cache): raise JitError("didn't JIT anything!")
+      _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_buffers)} inputs")
 
       # track inputs that are views of buffers
