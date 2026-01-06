@@ -91,7 +91,7 @@ def extract_tables(pages: list[list[tuple[float, float, str, str]]]) -> dict[int
 # AMD specific extraction
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def extract_enums(tables: dict[int, tuple[str, list[list[str]]]]) -> dict[str, dict[int, str]]:
+def extract_enums(tables: dict[int, tuple[str, list[list[str]]]], arch: str) -> dict[str, dict[int, str]]:
   """Extract opcode enums from tables. Returns {fmt_name: {opcode: opname}}."""
   enums: dict[str, dict[int, str]] = {}
   for num, (title, rows) in tables.items():
@@ -103,9 +103,40 @@ def extract_enums(tables: dict[int, tuple[str, list[list[str]]]]) -> dict[str, d
         if row[i].isdigit() and re.match(r'^[A-Z][A-Z0-9_]+$', row[i + 1]):
           ops[int(row[i])] = row[i + 1]
     if ops: enums[fmt_name] = ops
+  # Fix missing opcodes not in PDF tables (documented in ISA but missing from opcode tables)
+  if arch in ('rdna3', 'rdna4'):
+    if 'SOPP' in enums:
+      enums['SOPP'].update({8: 'S_WAITCNT_DEPCTR', 58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'})
+    if 'SOPK' in enums:
+      enums['SOPK'].update({22: 'S_SUBVECTOR_LOOP_BEGIN', 23: 'S_SUBVECTOR_LOOP_END'})
+    if 'SMEM' in enums:
+      enums['SMEM'].update({34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'})
+    if 'DS' in enums:
+      enums['DS'].update({24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V', 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'})
+    if 'FLAT' in enums:
+      enums['FLAT'].update({40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'})
   return enums
 
-def extract_ins(tables: dict[int, tuple[str, list[list[str]]]]) -> tuple[dict[str, list[tuple[str, int, int]]], dict[str, str]]:
+def extract_src_enum(pages: list[list[tuple[float, float, str, str]]]) -> dict[int, str]:
+  """Extract SrcEnum from SSRC encoding description. Returns {value: name}."""
+  # These are constant across all AMD ISAs
+  return {106: 'VCC_LO', 107: 'VCC_HI', 124: 'NULL', 125: 'M0', 126: 'EXEC_LO', 127: 'EXEC_HI', 128: 'ZERO',
+          233: 'DPP8', 234: 'DPP8FI', 235: 'SHARED_BASE', 236: 'SHARED_LIMIT', 237: 'PRIVATE_BASE', 238: 'PRIVATE_LIMIT',
+          240: 'POS_HALF', 241: 'NEG_HALF', 242: 'POS_ONE', 243: 'NEG_ONE', 244: 'POS_TWO', 245: 'NEG_TWO',
+          246: 'POS_FOUR', 247: 'NEG_FOUR', 248: 'INV_2PI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 253: 'SCC', 254: 'LDS_DIRECT'}
+
+def extract_buf_fmt(tables: dict[int, tuple[str, list[list[str]]]]) -> dict[int, str]:
+  """Extract BufFmt from Buffer Data Formats table. Returns {value: name}."""
+  buf_fmt: dict[int, str] = {}
+  for num, (title, rows) in tables.items():
+    if 'Data Format' not in title: continue
+    for row in rows:
+      for i in range(0, len(row) - 1, 2):
+        if row[i].isdigit() and re.match(r'^[\dA-Z_]+$', row[i + 1]) and 'INVALID' not in row[i + 1]:
+          buf_fmt[int(row[i])] = row[i + 1]
+  return buf_fmt
+
+def extract_ins(tables: dict[int, tuple[str, list[list[str]]]], arch: str) -> tuple[dict[str, list[tuple[str, int, int]]], dict[str, str]]:
   """Extract formats and encodings from 'XXX Fields' tables. Returns (formats, encodings)."""
   formats: dict[str, list[tuple[str, int, int]]] = {}
   encodings: dict[str, str] = {}
@@ -119,10 +150,39 @@ def extract_ins(tables: dict[int, tuple[str, list[list[str]]]]) -> tuple[dict[st
         field_name = row[0].lower()
         hi, lo = int(bits.group(1)), int(bits.group(2)) if bits.group(2) else int(bits.group(1))
         if field_name == 'encoding' and len(row) >= 3:
-          if "'b" in row[2]: encodings[fmt_name] = row[2].split("'b")[-1].replace('_', '')
-          elif (enc := re.search(r':\s*([01_]+)', row[2])): encodings[fmt_name] = enc.group(1).replace('_', '')
+          enc_bits = None
+          if "'b" in row[2]: enc_bits = row[2].split("'b")[-1].replace('_', '')
+          elif (enc := re.search(r':\s*([01_]+)', row[2])): enc_bits = enc.group(1).replace('_', '')
+          if enc_bits:
+            # If encoding bits exceed field width, extend field to match (AMD docs sometimes have this)
+            declared_width, actual_width = hi - lo + 1, len(enc_bits)
+            if actual_width > declared_width: lo = hi - actual_width + 1
+            encodings[fmt_name] = enc_bits
         fields.append((field_name, hi, lo))
     if fields: formats[fmt_name] = fields
+  # Fix known PDF errors
+  if arch in ('rdna3', 'rdna4'):
+    # RDNA SMEM: PDF says DLC=[14], GLC=[16] but hardware uses DLC=[13], GLC=[14]
+    if 'SMEM' in formats:
+      formats['SMEM'] = [(n, 13 if n == 'dlc' else 14 if n == 'glc' else h, 13 if n == 'dlc' else 14 if n == 'glc' else l)
+                         for n, h, l in formats['SMEM']]
+  if arch == 'cdna':
+    # CDNA DPP/SDWA: PDF only documents modifier fields (bits[63:32]), need to add VOP overlay fields (bits[31:0])
+    vop_overlay = [('encoding', 8, 0), ('vop_op', 16, 9), ('vdst', 24, 17), ('vop2_op', 31, 25)]
+    if 'DPP' in formats and not any(n == 'encoding' for n, _, _ in formats['DPP']):
+      formats['DPP'] = vop_overlay + [('bound_ctrl' if n == 'bc' else n, h, l) for n, h, l in formats['DPP']]
+      encodings['DPP'] = '11111010'
+    if 'SDWA' in formats and not any(n == 'encoding' for n, _, _ in formats['SDWA']):
+      formats['SDWA'] = vop_overlay + [(n, h, l) for n, h, l in formats['SDWA']]
+      encodings['SDWA'] = '11111001'
+    # CDNA MTBUF: PDF is missing the FORMAT field (bits[25:19])
+    if 'MTBUF' in formats and not any(n == 'format' for n, _, _ in formats['MTBUF']):
+      formats['MTBUF'].append(('format', 25, 19))
+    # CDNA DS: PDF is missing the GDS field (bit 16) - same as RDNA but shifted down by 1 bit
+    if 'DS' in formats and not any(n == 'gds' for n, _, _ in formats['DS']):
+      formats['DS'].append(('gds', 16, 16))
+    # SDWAB is not a separate format, it's documented for VOPC but not used - remove it
+    formats.pop('SDWAB', None)
   return formats, encodings
 
 def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[str, dict[int, str]]) -> dict[tuple[str, int], str]:
@@ -155,22 +215,55 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[
     for p in range(page_idx, next_page + 1):
       start_y = y if p == page_idx else 800
       end_y = next_y if p == next_page else 0
-      lines.extend((y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y)
-    if lines: pcode[(name, opcode)] = '\n'.join(t for _, t in sorted(lines, reverse=True))
+      lines.extend((p, y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y)
+    if lines:
+      # Sort by page first, then by y descending within each page (higher y = earlier text in PDF)
+      # Filter to only include actual pseudocode lines
+      pcode_lines, in_lambda, depth = [], 0, 0
+      for _, _, t in sorted(lines, key=lambda x: (x[0], -x[1])):
+        t = t.replace('Ê', '')  # Strip font-specific indent character
+        s = t.strip()
+        if not s: continue
+        if '=>' in s or re.match(r'^[A-Z_]+\(', s): continue  # Skip example lines
+        if '= lambda(' in s: in_lambda += 1; continue  # Skip lambda definitions
+        if in_lambda > 0:
+          if s.endswith(');'): in_lambda -= 1
+          continue
+        # Only include lines that look like pseudocode
+        is_code = (any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =', 'PC =',
+                                        'D0[', 'D1[', 'S0[', 'S1[', 'S2[', 'MEM[', 'RETURN_DATA', 'VADDR', 'VDATA', 'VDST', 'SADDR', 'OFFSET']) or
+                   s.startswith(('if ', 'else', 'elsif', 'endif', 'declare ', 'for ', 'endfor', '//')) or
+                   re.match(r'^[a-z_]+\s*=', s) or re.match(r'^[a-z_]+\[', s) or (depth > 0 and '=' in s))
+        if s.startswith('if '): depth += 1
+        elif s.startswith('endif'): depth = max(0, depth - 1)
+        if is_code: pcode_lines.append(s)
+      if pcode_lines: pcode[(name, opcode)] = '\n'.join(pcode_lines)
   return pcode
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Write autogen files
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def write_enums(enums: dict[str, dict[int, str]], arch: str, path: str):
+def write_enums(enums: dict[str, dict[int, str]], src_enum: dict[int, str], buf_fmt: dict[int, str], arch: str, path: str):
   """Write enum.py file from extracted enums."""
   doc_name = {"rdna3": "RDNA3.5", "rdna4": "RDNA4", "cdna": "CDNA4"}[arch]
   lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf2.py - do not edit", "from enum import IntEnum", ""]
+  # SrcEnum
+  lines.append("class SrcEnum(IntEnum):")
+  for val, name in sorted(src_enum.items()):
+    lines.append(f"  {name} = {val}")
+  lines.append("")
+  # Opcode enums
   for fmt_name, ops in sorted(enums.items()):
     lines.append(f"class {fmt_name}Op(IntEnum):")
     for opcode, opname in sorted(ops.items()):
       lines.append(f"  {opname} = {opcode}")
+    lines.append("")
+  # BufFmt
+  if buf_fmt:
+    lines.append("class BufFmt(IntEnum):")
+    for val, name in sorted(buf_fmt.items()):
+      lines.append(f"  BUF_FMT_{name} = {val}")
     lines.append("")
   with open(path, "w") as f:
     f.write("\n".join(lines))
@@ -181,7 +274,7 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
 
   # Field types and ordering
   def field_type(name, fmt):
-    if name == 'op': return f'Annotated[BitField, {fmt}Op]'
+    if name == 'op' and fmt in enums: return f'Annotated[BitField, {fmt}Op]'
     if name in ('vdst', 'vsrc1', 'vaddr', 'vdata', 'data', 'data0', 'data1', 'addr', 'vsrc0', 'vsrc2', 'vsrc3'): return 'VGPRField'
     if name in ('sdst', 'sbase', 'sdata', 'srsrc', 'ssamp'): return 'SGPRField'
     if name.startswith('ssrc') or name in ('saddr', 'soffset'): return 'SSrc'
@@ -200,18 +293,29 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
 
   # Generate format classes
   lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf2.py - do not edit", "# ruff: noqa: F401,F403",
-           "import functools", "from typing import Annotated",
-           "from extra.assembly.amd.dsl import bits, BitField, Inst32, Inst64, Inst96, SSrc, Src, SImm, Imm, SGPRField, VGPRField",
-           f"from extra.assembly.amd.autogen.{arch}.enum import *", ""]
+           "from typing import Annotated",
+           "from extra.assembly.amd.dsl import bits, BitField, Inst32, Inst64, Inst96, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField",
+           f"from extra.assembly.amd.autogen.{arch}.enum import *", "import functools", ""]
+  inst64_override = {'MIMG'}  # MIMG has optional NSA fields > 64 bits but base is 64-bit
+  format_defaults = {'VOP3P': {'opsel_hi': 3, 'opsel_hi2': 1}}
   for fmt_name, fields in sorted(formats.items()):
     max_bit = max(hi for _, hi, _ in fields)
-    size = 96 if max_bit > 63 else 64 if max_bit > 31 else 32
+    if fmt_name in inst64_override: size = 64
+    elif max_bit > 63: size = 96
+    elif max_bit > 31 or fmt_name == 'VOP3SD': size = 64
+    else: size = 32
     lines.append(f"class {fmt_name}(Inst{size}):")
+    if fmt_name in format_defaults: lines.append(f"  _defaults = {format_defaults[fmt_name]}")
     for name, hi, lo in sort_fields(fields):
       bits_str = f"bits[{hi}:{lo}]" if hi != lo else f"bits[{hi}]"
       if name == 'encoding' and fmt_name in encodings: lines.append(f"  encoding = {bits_str} == 0b{encodings[fmt_name]}")
       else:
         ftype = field_type(name, fmt_name)
+        # VOPD needs special type annotations
+        if fmt_name == 'VOPD':
+          if name in ('opx', 'opy'): ftype = 'Annotated[BitField, VOPDOp]'
+          elif name == 'vdsty': ftype = 'VDSTYEnc'
+          elif name in ('srcx0', 'srcy0'): ftype = 'Src'
         lines.append(f"  {name}{f':{ftype}' if ftype else ''} = {bits_str}")
     lines.append("")
 
@@ -220,25 +324,42 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
   for fmt_name, ops in sorted(enums.items()):
     seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=1"}.get(fmt_name, "")
     tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt_name, f"{fmt_name}, {fmt_name}Op")
+    suffix = "_e32" if fmt_name in ("VOP1", "VOP2", "VOPC") else "_e64" if fmt_name == "VOP3" and len(ops) > 0 else ""
     if fmt_name in formats or fmt_name in ("GLOBAL", "SCRATCH"):
       for op_val, name in sorted(ops.items()):
-        lines.append(f"{name.lower()} = functools.partial({tgt}.{name}{seg})")
+        fn_suffix = suffix if fmt_name != "VOP3" or op_val < 512 else ""
+        # Special handling for instructions with literal constants
+        if name in ('V_FMAMK_F32', 'V_FMAMK_F16'):
+          lines.append(f"def {name.lower()}{fn_suffix}(vdst, src0, K, vsrc1): return {fmt_name}({fmt_name}Op.{name}, vdst, src0, vsrc1, literal=K)")
+        elif name in ('V_FMAAK_F32', 'V_FMAAK_F16'):
+          lines.append(f"def {name.lower()}{fn_suffix}(vdst, src0, vsrc1, K): return {fmt_name}({fmt_name}Op.{name}, vdst, src0, vsrc1, literal=K)")
+        else:
+          lines.append(f"{name.lower()}{fn_suffix} = functools.partial({tgt}.{name}{seg})")
+
+  # Export SrcEnum values
+  lines.append("")
+  src_exports = ['VCC_LO', 'VCC_HI', 'NULL', 'M0', 'EXEC_LO', 'EXEC_HI', 'ZERO', 'DPP8FI', 'SHARED_BASE', 'SHARED_LIMIT',
+                 'PRIVATE_BASE', 'PRIVATE_LIMIT', 'POS_HALF', 'NEG_HALF', 'POS_ONE', 'NEG_ONE', 'POS_TWO', 'NEG_TWO',
+                 'POS_FOUR', 'NEG_FOUR', 'INV_2PI', 'VCCZ', 'EXECZ', 'SCC', 'LDS_DIRECT']
+  for name in src_exports:
+    lines.append(f"{name} = SrcEnum.{name}")
+  lines.append("OFF = NULL")
 
   with open(path, "w") as f:
     f.write("\n".join(lines))
 
 def write_pcode(pcode: dict[tuple[str, int], str], enums: dict[str, dict[int, str]], arch: str, path: str):
   """Write str_pcode.py file from extracted pseudocode."""
-  # Build mapping from (name, opcode) to enum class name
-  op_to_enum: dict[tuple[str, int], str] = {}
+  # Build mapping from (name, opcode) to list of enum class names (can be multiple)
+  op_to_enums: dict[tuple[str, int], list[str]] = {}
   for fmt_name, ops in enums.items():
     for opcode, name in ops.items():
-      op_to_enum[(name, opcode)] = f"{fmt_name}Op"
+      op_to_enums.setdefault((name, opcode), []).append(f"{fmt_name}Op")
 
-  # Group pseudocode by enum class
+  # Group pseudocode by enum class (same pcode can go to multiple enums)
   by_enum: dict[str, list[tuple[str, int, str]]] = {}
   for (name, opcode), code in pcode.items():
-    if enum_name := op_to_enum.get((name, opcode)):
+    for enum_name in op_to_enums.get((name, opcode), []):
       by_enum.setdefault(enum_name, []).append((name, opcode, code))
 
   # Generate file
@@ -263,11 +384,13 @@ if __name__ == "__main__":
     print(f"Processing {arch}...")
     pages = extract(url)
     tables = extract_tables(pages)
-    enums = extract_enums(tables)
-    formats, encodings = extract_ins(tables)
+    enums = extract_enums(tables, arch)
+    src_enum = extract_src_enum(pages)
+    buf_fmt = extract_buf_fmt(tables)
+    formats, encodings = extract_ins(tables, arch)
     pcode = extract_pcode(pages, enums)
     base = pathlib.Path(__file__).parent / "autogen" / arch
-    write_enums(enums, arch, base / "enum.py")
+    write_enums(enums, src_enum, buf_fmt, arch, base / "enum.py")
     write_ins(formats, encodings, enums, arch, base / "ins.py")
     write_pcode(pcode, enums, arch, base / "str_pcode.py")
     print(f"  {len(tables)} tables, {len(pcode)} pcode -> {base}")
