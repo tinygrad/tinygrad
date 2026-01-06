@@ -163,12 +163,12 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[
       next_page, next_y = all_instructions[i + 1][0], all_instructions[i + 1][1]
     else:
       next_page, next_y = page_idx, 0
-    # Collect F6 text from current position to next instruction
+    # Collect F6 text from current position to next instruction (pseudocode is at x ≈ 69)
     lines = []
     for p in range(page_idx, next_page + 1):
       start_y = y if p == page_idx else 800
       end_y = next_y if p == next_page else 0
-      lines.extend((p, y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y)
+      lines.extend((p, y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y and 60 < x < 80)
     if lines:
       # Sort by page first, then by y descending within each page (higher y = earlier text in PDF)
       pcode_lines = [t.replace('Ê', '').strip() for _, _, t in sorted(lines, key=lambda x: (x[0], -x[1]))]
