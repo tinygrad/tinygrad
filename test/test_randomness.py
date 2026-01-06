@@ -110,6 +110,8 @@ class TestRandomness(unittest.TestCase):
         for u in si.prg.p.uops:
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {si.prg.p.name}")
 
+  # NOTE: I have changed the spec, so it no longer matches JAX reference implementation (distribution still holds)
+  @unittest.expectedFailure
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
 
