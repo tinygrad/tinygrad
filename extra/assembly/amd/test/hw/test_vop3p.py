@@ -271,7 +271,7 @@ class TestVOP3P(unittest.TestCase):
       s_mov_b32(s[1], 0x44004200),  # hi=4.0, lo=3.0
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_pk_add_f16(v[2], v[0], v[1]),
+      v_pk_add_f16(v[2], v[0], v[1], opsel_hi=3, opsel_hi2=1),
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
@@ -288,7 +288,7 @@ class TestVOP3P(unittest.TestCase):
       s_mov_b32(s[1], 0x45004400),  # hi=5.0, lo=4.0
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_pk_mul_f16(v[2], v[0], v[1]),
+      v_pk_mul_f16(v[2], v[0], v[1], opsel_hi=3, opsel_hi2=1),
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
@@ -307,7 +307,7 @@ class TestVOP3P(unittest.TestCase):
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
       v_mov_b32_e32(v[2], s[2]),
-      v_pk_fma_f16(v[3], v[0], v[1], v[2]),
+      v_pk_fma_f16(v[3], v[0], v[1], v[2], opsel_hi=3, opsel_hi2=1),
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][3]
@@ -325,7 +325,7 @@ class TestVOP3P(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x3c003c00),  # packed f16: hi=1.0, lo=1.0
       v_mov_b32_e32(v[0], s[0]),
-      v_pk_add_f16(v[1], v[0], SrcEnum.POS_ONE),  # Add inline constant 1.0
+      v_pk_add_f16(v[1], v[0], SrcEnum.POS_ONE, opsel_hi=3, opsel_hi2=1),  # Add inline constant 1.0
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][1]
@@ -345,7 +345,7 @@ class TestVOP3P(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x44004200),  # packed f16: hi=4.0, lo=3.0
       v_mov_b32_e32(v[0], s[0]),
-      v_pk_mul_f16(v[1], v[0], SrcEnum.POS_TWO),
+      v_pk_mul_f16(v[1], v[0], SrcEnum.POS_TWO, opsel_hi=3, opsel_hi2=1),
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][1]
@@ -486,12 +486,12 @@ class TestSpecialOps(unittest.TestCase):
     """V_DOT2_F32_BF16 computes dot product of bf16 pairs."""
     # bf16 1.0 = 0x3f80, bf16 2.0 = 0x4000
     instructions = [
-      s_mov_b32(s[0], 0x3f803f80),  # packed bf16: 1.0, 1.0
-      s_mov_b32(s[1], 0x40003f80),  # packed bf16: 2.0, 1.0
+      s_mov_b32(s[0], 0x3f803f80),  # packed bf16: lo=1.0, hi=1.0
+      s_mov_b32(s[1], 0x40003f80),  # packed bf16: lo=1.0, hi=2.0
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
       v_mov_b32_e32(v[2], 0),
-      v_dot2_f32_bf16(v[3], v[0], v[1], v[2]),
+      v_dot2_f32_bf16(v[3], v[0], v[1], v[2], opsel_hi=3, opsel_hi2=1),
     ]
     st = run_program(instructions, n_lanes=1)
     # 1.0*1.0 + 1.0*2.0 + 0 = 3.0
@@ -510,7 +510,7 @@ class TestPackedMixedSigns(unittest.TestCase):
       s_mov_b32(s[1], 0x3c003c00),  # packed: hi=1.0, lo=1.0
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_pk_add_f16(v[2], v[0], v[1]),
+      v_pk_add_f16(v[2], v[0], v[1], opsel_hi=3, opsel_hi2=1),
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
