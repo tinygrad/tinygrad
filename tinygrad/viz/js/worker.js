@@ -17,15 +17,14 @@ const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
   g.setGraph({ rankdir:"TD", font:"monospace" });
   ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
-  let minColor, maxColor;
+  let minColor = 0, maxColor = 0;
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
       const text = pc_table[m][0];
       if (counters != null) {
         const num = counters[m]?.hit_count || 0;
-        if (minColor == null || num < minColor) minColor = num;
-        if (maxColor == null || num > maxColor) maxColor = num;
+        if (num > maxColor) maxColor = num;
         label.push([{st:text, color:num}]);
       } else { const [inst, ...operands] = text.split(" "); label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]); }
       width = Math.max(width, ctx.measureText(text).width);
