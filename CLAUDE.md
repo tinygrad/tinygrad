@@ -209,6 +209,8 @@ Key patterns to watch (from ResNet50 benchmark):
 
 Patterns with 0% match rate are workload-specific overhead. They may be useful in other workloads, so don't remove them without understanding their purpose.
 
+Set VIZ to `-1` to save all matches. Use `./extra/viz/cli.py` to explore the trace.
+
 ## AMD Performance Counter Profiling
 
 Set VIZ to `-2` to save performance counters traces for the AMD backend.
