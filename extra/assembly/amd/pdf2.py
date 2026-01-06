@@ -202,25 +202,7 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[
       lines.extend((p, y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y)
     if lines:
       # Sort by page first, then by y descending within each page (higher y = earlier text in PDF)
-      # Filter to only include actual pseudocode lines
-      pcode_lines, in_lambda, depth = [], 0, 0
-      for _, _, t in sorted(lines, key=lambda x: (x[0], -x[1])):
-        t = t.replace('Ê', '')  # Strip font-specific indent character
-        s = t.strip()
-        if not s: continue
-        if '=>' in s or re.match(r'^[A-Z_]+\(', s): continue  # Skip example lines
-        if '= lambda(' in s: in_lambda += 1; continue  # Skip lambda definitions
-        if in_lambda > 0:
-          if s.endswith(');'): in_lambda -= 1
-          continue
-        # Only include lines that look like pseudocode
-        is_code = (any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =', 'PC =',
-                                        'D0[', 'D1[', 'S0[', 'S1[', 'S2[', 'MEM[', 'RETURN_DATA', 'VADDR', 'VDATA', 'VDST', 'SADDR', 'OFFSET']) or
-                   s.startswith(('if ', 'else', 'elsif', 'endif', 'declare ', 'for ', 'endfor', '//')) or
-                   re.match(r'^[a-z_]+\s*=', s) or re.match(r'^[a-z_]+\[', s) or (depth > 0 and '=' in s))
-        if s.startswith('if '): depth += 1
-        elif s.startswith('endif'): depth = max(0, depth - 1)
-        if is_code: pcode_lines.append(s)
+      pcode_lines = [t.replace('Ê', '').strip() for _, _, t in sorted(lines, key=lambda x: (x[0], -x[1]))]
       if pcode_lines: pcode[(name, opcode)] = '\n'.join(pcode_lines)
   return pcode
 
