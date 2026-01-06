@@ -447,6 +447,27 @@ TWO_OVER_PI_1201 = Reg(0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c
 # COMPILER: pseudocode -> Python (minimal transforms)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _filter_pseudocode(pseudocode: str) -> str:
+  """Filter raw PDF pseudocode to only include actual code lines."""
+  pcode_lines, in_lambda, depth = [], 0, 0
+  for line in pseudocode.split('\n'):
+    s = line.strip()
+    if not s: continue
+    if '=>' in s or re.match(r'^[A-Z_]+\(', s): continue  # Skip example lines
+    if '= lambda(' in s: in_lambda += 1; continue  # Skip lambda definitions
+    if in_lambda > 0:
+      if s.endswith(');'): in_lambda -= 1
+      continue
+    # Only include lines that look like pseudocode
+    is_code = (any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =', 'PC =',
+                                    'D0[', 'D1[', 'S0[', 'S1[', 'S2[', 'MEM[', 'RETURN_DATA', 'VADDR', 'VDATA', 'VDST', 'SADDR', 'OFFSET']) or
+               s.startswith(('if ', 'else', 'elsif', 'endif', 'declare ', 'for ', 'endfor', '//')) or
+               re.match(r'^[a-z_]+\s*=', s) or re.match(r'^[a-z_]+\[', s) or (depth > 0 and '=' in s))
+    if s.startswith('if '): depth += 1
+    elif s.startswith('endif'): depth = max(0, depth - 1)
+    if is_code: pcode_lines.append(s)
+  return '\n'.join(pcode_lines)
+
 def _compile_pseudocode(pseudocode: str) -> str:
   """Compile pseudocode to Python. Transforms are minimal - most syntax just works."""
   pseudocode = re.sub(r'\bpass\b', 'pass_', pseudocode)  # 'pass' is Python keyword
@@ -756,9 +777,10 @@ _PCODE_GLOBALS = {
 @functools.cache
 def compile_pseudocode(cls_name: str, op_name: str, pseudocode: str):
   """Compile pseudocode string to executable function. Cached for performance."""
-  code = _compile_pseudocode(pseudocode)
+  filtered = _filter_pseudocode(pseudocode)
+  code = _compile_pseudocode(filtered)
   code = _apply_pseudocode_fixes(op_name, code)
-  fn_code = _generate_function(cls_name, op_name, pseudocode, code)
+  fn_code = _generate_function(cls_name, op_name, filtered, code)
   fn_name = f"_{cls_name}_{op_name}"
   local_ns = {}
   exec(fn_code, _PCODE_GLOBALS, local_ns)
