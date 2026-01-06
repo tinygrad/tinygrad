@@ -13,21 +13,26 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = (g, { blocks, paths, pc_table, colors }) => {
+const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
   g.setGraph({ rankdir:"TD", font:"monospace" });
   ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
+  let maxColor = 0;
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
       const text = pc_table[m][0];
+      if (counters != null) {
+        const num = counters[m]?.hit_count || 0;
+        if (num > maxColor) maxColor = num;
+        label.push([{st:text, color:num}]);
+      } else { const [inst, ...operands] = text.split(" "); label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]); }
       width = Math.max(width, ctx.measureText(text).width);
       height += LINE_HEIGHT;
-      const [inst, ...operands] = text.split(" ");
-      label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]);
     }
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
   }
+  g.graph().colorDomain = [0, maxColor];
   // paths become edges between basic blocks
   for (const [lead, value] of Object.entries(paths)) {
     for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, {label:{type:"port", text:""}, color:colors[color]});
