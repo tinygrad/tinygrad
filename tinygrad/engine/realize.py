@@ -2,8 +2,7 @@ from typing import cast, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
-from tinygrad.helpers import unwrap
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -128,7 +127,7 @@ si_lowerer = PatternMatcher([
   (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
   (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
   (UPat(Ops.COPY, name="copy"), lambda ctx,copy: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
-      if hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx]) \
+      if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
       else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device))),
   (UPat(Ops.ENCDEC, name="encdec"), lambda ctx,encdec: EncDec(encdec, ctx[0].nbytes, ctx[1].device)),
 ])
