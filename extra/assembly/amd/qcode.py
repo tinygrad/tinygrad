@@ -11,11 +11,14 @@ from tinygrad.helpers import DEBUG
 from tinygrad.dtype import INVERSE_DTYPES_DICT
 _QDTYPES: dict[str, DType] = {
   'f64': dtypes.float64, 'f32': dtypes.float32, 'f16': dtypes.float16, 'bf16': dtypes.bfloat16,
+  'fp8': DType.new(4, 8, "fp8", None), 'bf8': DType.new(4, 8, "bf8", None), 'fp6': DType.new(4, 6, "fp6", None), 'bf6': DType.new(4, 6, "bf6", None),
+  'fp4': DType.new(4, 4, "fp4", None), 'i4': DType.new(5, 4, "i4", None),
   'u64': dtypes.uint64, 'u32': dtypes.uint32, 'u16': dtypes.uint16, 'u8': dtypes.uint8,
   'i64': dtypes.int64, 'i32': dtypes.int32, 'i16': dtypes.int16, 'i8': dtypes.int8,
-  'b1201': DType.new(6, 1201, "b1201", None), 'b128': DType.new(6, 128, "b128", None),
-  'b65': DType.new(6, 65, "b65", None), 'b64': dtypes.uint64, 'b32': dtypes.uint32, 'b16': dtypes.uint16, 'b8': dtypes.uint8,
-  'u1201': DType.new(6, 1201, "u1201", None), 'u65': DType.new(6, 65, "u65", None), 'u24': DType.new(6, 24, "u24", None),
+  'b1201': DType.new(6, 1201, "b1201", None), 'b1024': DType.new(6, 1024, "b1024", None), 'b512': DType.new(6, 512, "b512", None),
+  'b192': DType.new(6, 192, "b192", None), 'b128': DType.new(6, 128, "b128", None),
+  'b65': DType.new(6, 65, "b65", None), 'b64': dtypes.uint64, 'b32': dtypes.uint32, 'b23': DType.new(6, 23, "b23", None), 'b16': dtypes.uint16, 'b8': dtypes.uint8, 'b4': DType.new(6, 4, "b4", None),
+  'u1201': DType.new(6, 1201, "u1201", None), 'u65': DType.new(6, 65, "u65", None), 'u24': DType.new(6, 24, "u24", None), 'u23': DType.new(6, 23, "u23", None),
   'u6': DType.new(6, 6, "u6", None), 'u4': DType.new(6, 4, "u4", None),
   'u3': DType.new(6, 3, "u3", None), 'u1': DType.new(6, 1, "u1", None),
   'i65': DType.new(5, 65, "i65", None), 'i24': DType.new(5, 24, "i24", None), 'i1': DType.new(5, 1, "i1", None),
@@ -208,9 +211,25 @@ def stmt(line: str) -> Stmt|None:
       lhs = expr(l)
       return Assign(lhs, UOp(uop, dtypes.void, (lhs, expr(r))))
   if '=' in line and not any(line[:k] == p for k, p in [(3,'if '),(6,'elsif '),(4,'for ')]):
-    eq = line.index('=')
-    if eq > 0 and line[eq-1] not in '!<>=' and eq < len(line)-1 and line[eq+1] != '=':
-      return Assign(expr(line[:eq]), expr(line[eq+1:]))
+    # Find leftmost assignment = (not ==, <=, >=, !=) for chained assignment support
+    eq = -1
+    for i in range(1, len(line) - 1):
+      if line[i] == '=' and line[i-1] not in '!<>=' and line[i+1] != '=':
+        eq = i
+        break
+    if eq > 0:
+      rhs = line[eq+1:].strip()
+      # Check if RHS contains another assignment = (not ==, <=, >=, !=)
+      has_assign = False
+      for i in range(1, len(rhs) - 1):
+        if rhs[i] == '=' and rhs[i-1] not in '!<>=' and rhs[i+1] != '=':
+          has_assign = True
+          break
+      if has_assign:
+        rhs_parsed = stmt(rhs)
+        if isinstance(rhs_parsed, Assign):
+          return Assign(expr(line[:eq]), rhs_parsed)
+      return Assign(expr(line[:eq]), expr(rhs))
   # Bare function call (e.g., nop())
   if re.match(r'\w+\([^)]*\)$', line):
     return expr(line)
