@@ -88,15 +88,15 @@ class TestRandomness(unittest.TestCase):
     """
     key0 = 1337
     key1 = 0
-    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
+    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.tile(np.arange(10, dtype=np.uint32), 2))
     print(f"[{', '.join(f'{v}' for v in values)}]")
     """
-    jr = np.array([2221762175, 1752107825, 653745012, 1967534793, 1395205442, 3840423848, 2159346757,
-                   603508235, 3319473678, 3363866483, 3544324138, 1436466838, 2169858556, 2570072943,
-                   2387150698, 3678370550, 2911697663, 403244401, 2560861638, 1692360114])
-
-    counts = Tensor.arange(20, dtype=dtypes.uint32)
-    counts0, counts1 = counts.chunk(2)
+    # JAX reference implementation
+    jr = np.array([96694167, 3899677701, 3777760592, 361541278, 4247778752, 3205134549, 1911899812,
+                    3457752739, 1813072390, 3423281881, 2019547449, 3238527978, 4081885405, 2759498550, 
+                    585929100, 37685650, 1493162330, 3176705340, 139929675, 3743710624])
+    
+    counts0 = counts1 = Tensor.arange(10, dtype=dtypes.uint32)
     r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
