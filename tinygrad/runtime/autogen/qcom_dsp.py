@@ -292,11 +292,7 @@ FASTRPC_ASYNC_CALLBACK = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_CA
 FASTRPC_ASYNC_POLL = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_POLL', 2)
 FASTRPC_ASYNC_TYPE_MAX = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_TYPE_MAX', 3)
 
-@record
-class struct_fastrpc_async_callback:
-  SIZE = 16
-  fn: Annotated[ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.POINTER(None), ctypes.c_int32), 0]
-  context: Annotated[ctypes.POINTER(None), 8]
+class struct_fastrpc_async_callback(ctypes.Structure): pass
 fastrpc_async_callback_t = struct_fastrpc_async_callback
 @record
 class struct_fastrpc_async_descriptor:
@@ -411,13 +407,7 @@ FASTRPC_USER_PD_EXCEPTION = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD
 FASTRPC_DSP_SSR = enum_remote_rpc_status_flags.define('FASTRPC_DSP_SSR', 4)
 
 remote_rpc_status_flags_t = enum_remote_rpc_status_flags
-fastrpc_notif_fn_t = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.c_int32, ctypes.c_int32, enum_remote_rpc_status_flags)
-@record
-class struct_remote_rpc_notif_register:
-  SIZE = 24
-  context: Annotated[ctypes.POINTER(None), 0]
-  domain: Annotated[ctypes.c_int32, 8]
-  notifier_fn: Annotated[fastrpc_notif_fn_t, 16]
+class struct_remote_rpc_notif_register(ctypes.Structure): pass
 remote_rpc_notif_register_t = struct_remote_rpc_notif_register
 enum_remote_mem_map_flags = CEnum(ctypes.c_uint32)
 REMOTE_MAP_MEM_STATIC = enum_remote_mem_map_flags.define('REMOTE_MAP_MEM_STATIC', 0)

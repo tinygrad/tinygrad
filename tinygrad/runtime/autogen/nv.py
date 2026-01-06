@@ -535,40 +535,7 @@ class msgqTxHeader:
 class msgqRxHeader:
   SIZE = 4
   readPtr: Annotated[NvU32, 0]
-@record
-class msgqMetadata:
-  SIZE = 232
-  pOurTxHdr: Annotated[ctypes.POINTER(msgqTxHeader), 0]
-  pTheirTxHdr: Annotated[ctypes.POINTER(msgqTxHeader), 8]
-  pOurRxHdr: Annotated[ctypes.POINTER(msgqRxHeader), 16]
-  pTheirRxHdr: Annotated[ctypes.POINTER(msgqRxHeader), 24]
-  pOurEntries: Annotated[ctypes.POINTER(NvU8), 32]
-  pTheirEntries: Annotated[ctypes.POINTER(NvU8), 40]
-  pReadIncoming: Annotated[ctypes.POINTER(NvU32), 48]
-  pWriteIncoming: Annotated[ctypes.POINTER(NvU32), 56]
-  pReadOutgoing: Annotated[ctypes.POINTER(NvU32), 64]
-  pWriteOutgoing: Annotated[ctypes.POINTER(NvU32), 72]
-  tx: Annotated[msgqTxHeader, 80]
-  txReadPtr: Annotated[NvU32, 112]
-  txFree: Annotated[NvU32, 116]
-  txLinked: Annotated[NvBool, 120]
-  rx: Annotated[msgqTxHeader, 124]
-  rxReadPtr: Annotated[NvU32, 156]
-  rxAvail: Annotated[NvU32, 160]
-  rxLinked: Annotated[NvBool, 164]
-  rxSwapped: Annotated[NvBool, 165]
-  fcnNotify: Annotated[msgqFcnNotifyRemote, 168]
-  fcnNotifyArg: Annotated[ctypes.POINTER(None), 176]
-  fcnBackendRw: Annotated[msgqFcnBackendRw, 184]
-  fcnBackendRwArg: Annotated[ctypes.POINTER(None), 192]
-  fcnInvalidate: Annotated[msgqFcnCacheOp, 200]
-  fcnFlush: Annotated[msgqFcnCacheOp, 208]
-  fcnZero: Annotated[msgqFcnCacheOp, 216]
-  fcnBarrier: Annotated[msgqFcnBarrier, 224]
-msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(None))
-msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.POINTER(None), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(None))
-msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.c_uint32)
-msgqFcnBarrier = ctypes.CFUNCTYPE(None, )
+class msgqMetadata(ctypes.Structure): pass
 @record
 class struct_rpc_set_guest_system_info_v03_00:
   SIZE = 792

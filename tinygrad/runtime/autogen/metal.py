@@ -250,7 +250,6 @@ MTLTextureSwizzleAlpha = enum_MTLTextureSwizzle.define('MTLTextureSwizzleAlpha',
 
 MTLTextureSwizzle = enum_MTLTextureSwizzle
 class NSObject(objc.Spec): pass
-IMP = ctypes.CFUNCTYPE(None, )
 class NSInvocation(objc.Spec): pass
 class NSMethodSignature(objc.Spec): pass
 NSMethodSignature._bases_ = [NSObject]
@@ -274,7 +273,6 @@ NSInvocation._methods_ = [
   ('setArgument:atIndex:', None, [ctypes.POINTER(None), NSInteger]),
   ('invoke', None, []),
   ('invokeWithTarget:', None, [objc.id_]),
-  ('invokeUsingIMP:', None, [IMP]),
   ('methodSignature', NSMethodSignature, []),
   ('argumentsRetained', BOOL, []),
   ('target', objc.id_, []),
@@ -317,7 +315,6 @@ NSObject._methods_ = [
   ('finalize', None, []),
   ('copy', objc.id_, [], True),
   ('mutableCopy', objc.id_, [], True),
-  ('methodForSelector:', IMP, [objc.id_]),
   ('doesNotRecognizeSelector:', None, [objc.id_]),
   ('forwardingTargetForSelector:', objc.id_, [objc.id_]),
   ('forwardInvocation:', None, [NSInvocation]),
@@ -335,7 +332,6 @@ NSObject._classmethods_ = [
   ('mutableCopyWithZone:', objc.id_, [ctypes.POINTER(struct__NSZone)], True),
   ('instancesRespondToSelector:', BOOL, [objc.id_]),
   ('conformsToProtocol:', BOOL, [Protocol]),
-  ('instanceMethodForSelector:', IMP, [objc.id_]),
   ('instanceMethodSignatureForSelector:', NSMethodSignature, [objc.id_]),
   ('resolveClassMethod:', BOOL, [objc.id_]),
   ('resolveInstanceMethod:', BOOL, [objc.id_]),

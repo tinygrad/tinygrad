@@ -871,12 +871,7 @@ hipGraphNodeTypeMemcpyFromSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemc
 hipGraphNodeTypeMemcpyToSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyToSymbol', 13)
 hipGraphNodeTypeCount = hipGraphNodeType.define('hipGraphNodeTypeCount', 14)
 
-hipHostFn_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(None))
-@record
-class hipHostNodeParams:
-  SIZE = 16
-  fn: Annotated[hipHostFn_t, 0]
-  userData: Annotated[ctypes.POINTER(None), 8]
+class hipHostNodeParams(ctypes.Structure): pass
 @record
 class hipKernelNodeParams:
   SIZE = 64
@@ -1328,9 +1323,6 @@ def hipStreamGetDevice(stream:hipStream_t, device:ctypes.POINTER(hipDevice_t)) -
 def hipExtStreamCreateWithCUMask(stream:ctypes.POINTER(hipStream_t), cuMaskSize:uint32_t, cuMask:ctypes.POINTER(uint32_t)) -> hipError_t: ...
 @dll.bind
 def hipExtStreamGetCUMask(stream:hipStream_t, cuMaskSize:uint32_t, cuMask:ctypes.POINTER(uint32_t)) -> hipError_t: ...
-hipStreamCallback_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(ihipStream_t), hipError_t, ctypes.POINTER(None))
-@dll.bind
-def hipStreamAddCallback(stream:hipStream_t, callback:hipStreamCallback_t, userData:ctypes.POINTER(None), flags:ctypes.c_uint32) -> hipError_t: ...
 @dll.bind
 def hipStreamWaitValue32(stream:hipStream_t, ptr:ctypes.POINTER(None), value:uint32_t, flags:ctypes.c_uint32, mask:uint32_t) -> hipError_t: ...
 uint64_t = ctypes.c_uint64
@@ -1817,11 +1809,7 @@ def __hipPopCallConfiguration(gridDim:ctypes.POINTER(dim3), blockDim:ctypes.POIN
 @dll.bind
 def hipLaunchKernel(function_address:ctypes.POINTER(None), numBlocks:dim3, dimBlocks:dim3, args:ctypes.POINTER(ctypes.POINTER(None)), sharedMemBytes:size_t, stream:hipStream_t) -> hipError_t: ...
 @dll.bind
-def hipLaunchHostFunc(stream:hipStream_t, fn:hipHostFn_t, userData:ctypes.POINTER(None)) -> hipError_t: ...
-@dll.bind
 def hipDrvMemcpy2DUnaligned(pCopy:ctypes.POINTER(hip_Memcpy2D)) -> hipError_t: ...
-@dll.bind
-def hipExtLaunchKernel(function_address:ctypes.POINTER(None), numBlocks:dim3, dimBlocks:dim3, args:ctypes.POINTER(ctypes.POINTER(None)), sharedMemBytes:size_t, stream:hipStream_t, startEvent:hipEvent_t, stopEvent:hipEvent_t, flags:ctypes.c_int32) -> hipError_t: ...
 @record
 class hipResourceDesc:
   SIZE = 64
@@ -2304,8 +2292,6 @@ def hipDeviceGetGraphMemAttribute(device:ctypes.c_int32, attr:hipGraphMemAttribu
 def hipDeviceSetGraphMemAttribute(device:ctypes.c_int32, attr:hipGraphMemAttributeType, value:ctypes.POINTER(None)) -> hipError_t: ...
 @dll.bind
 def hipDeviceGraphMemTrim(device:ctypes.c_int32) -> hipError_t: ...
-@dll.bind
-def hipUserObjectCreate(object_out:ctypes.POINTER(hipUserObject_t), ptr:ctypes.POINTER(None), destroy:hipHostFn_t, initialRefcount:ctypes.c_uint32, flags:ctypes.c_uint32) -> hipError_t: ...
 @dll.bind
 def hipUserObjectRelease(object:hipUserObject_t, count:ctypes.c_uint32) -> hipError_t: ...
 @dll.bind

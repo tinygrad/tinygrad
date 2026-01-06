@@ -1064,9 +1064,6 @@ CXChildVisit_Break = enum_CXChildVisitResult.define('CXChildVisit_Break', 0)
 CXChildVisit_Continue = enum_CXChildVisitResult.define('CXChildVisit_Continue', 1)
 CXChildVisit_Recurse = enum_CXChildVisitResult.define('CXChildVisit_Recurse', 2)
 
-CXCursorVisitor = ctypes.CFUNCTYPE(enum_CXChildVisitResult, CXCursor, CXCursor, ctypes.POINTER(None))
-@dll.bind
-def clang_visitChildren(parent:CXCursor, visitor:CXCursorVisitor, client_data:CXClientData) -> ctypes.c_uint32: ...
 class struct__CXChildVisitResult(ctypes.Structure): pass
 CXCursorVisitorBlock = ctypes.POINTER(struct__CXChildVisitResult)
 @dll.bind
@@ -1300,8 +1297,6 @@ def clang_getCursorKindSpelling(Kind:enum_CXCursorKind) -> CXString: ...
 def clang_getDefinitionSpellingAndExtent(_0:CXCursor, startBuf:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), endBuf:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), startLine:ctypes.POINTER(ctypes.c_uint32), startColumn:ctypes.POINTER(ctypes.c_uint32), endLine:ctypes.POINTER(ctypes.c_uint32), endColumn:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
 def clang_enableStackTraces() -> None: ...
-@dll.bind
-def clang_executeOnThread(fn:ctypes.CFUNCTYPE(None, ctypes.POINTER(None)), user_data:ctypes.POINTER(None), stack_size:ctypes.c_uint32) -> None: ...
 CXCompletionString = ctypes.POINTER(None)
 @record
 class CXCompletionResult:
@@ -1420,9 +1415,6 @@ def clang_codeCompleteGetObjCSelector(Results:ctypes.POINTER(CXCodeCompleteResul
 def clang_getClangVersion() -> CXString: ...
 @dll.bind
 def clang_toggleCrashRecovery(isEnabled:ctypes.c_uint32) -> None: ...
-CXInclusionVisitor = ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.POINTER(CXSourceLocation), ctypes.c_uint32, ctypes.POINTER(None))
-@dll.bind
-def clang_getInclusions(tu:CXTranslationUnit, visitor:CXInclusionVisitor, client_data:CXClientData) -> None: ...
 CXEvalResultKind = CEnum(ctypes.c_uint32)
 CXEval_Int = CXEvalResultKind.define('CXEval_Int', 1)
 CXEval_Float = CXEvalResultKind.define('CXEval_Float', 2)
@@ -1466,11 +1458,7 @@ enum_CXVisitorResult = CEnum(ctypes.c_uint32)
 CXVisit_Break = enum_CXVisitorResult.define('CXVisit_Break', 0)
 CXVisit_Continue = enum_CXVisitorResult.define('CXVisit_Continue', 1)
 
-@record
-class struct_CXCursorAndRangeVisitor:
-  SIZE = 16
-  context: Annotated[ctypes.POINTER(None), 0]
-  visit: Annotated[ctypes.CFUNCTYPE(enum_CXVisitorResult, ctypes.POINTER(None), CXCursor, CXSourceRange), 8]
+class struct_CXCursorAndRangeVisitor(ctypes.Structure): pass
 CXCursorAndRangeVisitor = struct_CXCursorAndRangeVisitor
 CXResult = CEnum(ctypes.c_uint32)
 CXResult_Success = CXResult.define('CXResult_Success', 0)
@@ -1687,17 +1675,7 @@ class CXIdxEntityRefInfo:
   parentEntity: Annotated[ctypes.POINTER(CXIdxEntityInfo), 72]
   container: Annotated[ctypes.POINTER(CXIdxContainerInfo), 80]
   role: Annotated[CXSymbolRole, 88]
-@record
-class IndexerCallbacks:
-  SIZE = 64
-  abortQuery: Annotated[ctypes.CFUNCTYPE(ctypes.c_int32, CXClientData, ctypes.POINTER(None)), 0]
-  diagnostic: Annotated[ctypes.CFUNCTYPE(None, CXClientData, CXDiagnosticSet, ctypes.POINTER(None)), 8]
-  enteredMainFile: Annotated[ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, CXFile, ctypes.POINTER(None)), 16]
-  ppIncludedFile: Annotated[ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, ctypes.POINTER(CXIdxIncludedFileInfo)), 24]
-  importedASTFile: Annotated[ctypes.CFUNCTYPE(CXIdxClientASTFile, CXClientData, ctypes.POINTER(CXIdxImportedASTFileInfo)), 32]
-  startedTranslationUnit: Annotated[ctypes.CFUNCTYPE(CXIdxClientContainer, CXClientData, ctypes.POINTER(None)), 40]
-  indexDeclaration: Annotated[ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxDeclInfo)), 48]
-  indexEntityReference: Annotated[ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxEntityRefInfo)), 56]
+class IndexerCallbacks(ctypes.Structure): pass
 @dll.bind
 def clang_index_isEntityObjCContainerKind(_0:CXIdxEntityKind) -> ctypes.c_int32: ...
 @dll.bind
@@ -1745,11 +1723,6 @@ def clang_indexTranslationUnit(_0:CXIndexAction, client_data:CXClientData, index
 def clang_indexLoc_getFileLocation(loc:CXIdxLoc, indexFile:ctypes.POINTER(CXIdxClientFile), file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
 def clang_indexLoc_getCXSourceLocation(loc:CXIdxLoc) -> CXSourceLocation: ...
-CXFieldVisitor = ctypes.CFUNCTYPE(enum_CXVisitorResult, CXCursor, ctypes.POINTER(None))
-@dll.bind
-def clang_Type_visitFields(T:CXType, visitor:CXFieldVisitor, client_data:CXClientData) -> ctypes.c_uint32: ...
-@dll.bind
-def clang_visitCXXBaseClasses(T:CXType, visitor:CXFieldVisitor, client_data:CXClientData) -> ctypes.c_uint32: ...
 enum_CXBinaryOperatorKind = CEnum(ctypes.c_uint32)
 CXBinaryOperator_Invalid = enum_CXBinaryOperatorKind.define('CXBinaryOperator_Invalid', 0)
 CXBinaryOperator_PtrMemD = enum_CXBinaryOperatorKind.define('CXBinaryOperator_PtrMemD', 1)
