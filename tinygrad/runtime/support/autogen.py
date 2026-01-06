@@ -74,7 +74,7 @@ def readext(f, fst, snd=None):
   with open(f, "r") as f: # reopening this every time is dumb...
     f.seek(start:=loc_off(clang.clang_getRangeStart(fst) if isinstance(fst, clang.CXSourceRange) else fst))
     return f.read(loc_off(clang.clang_getRangeEnd(fst) if isinstance(fst, clang.CXSourceRange) else snd)-start)
-def attrs(c): return list(filter(lambda k: (v:=k.value) >= 400 and v < 500, map(lambda c: c.kind, children(c))))
+def attrs(c): return list(filter(lambda k: k >= 400 and k < 500, map(lambda c: c.kind, children(c))))
 
 def protocols(t): yield from (clang.clang_Type_getObjCProtocolDecl(t, i) for i in range(clang.clang_Type_getNumObjCProtocolRefs(t)))
 def basetype(t): return clang.clang_Type_getObjCObjectBaseType(t)
