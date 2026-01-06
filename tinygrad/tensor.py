@@ -557,8 +557,8 @@ class Tensor(OpMixin):
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
-  def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor) -> Tensor:
-    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
+  def _threefry_random_bits(key:Tensor, counts0:Tensor) -> Tensor:
+    x = counts0.cast(dtypes.uint64)
     x = x._apply_uop(UOp.threefry, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
     counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
     return counts0.cat(counts1)
@@ -597,9 +597,8 @@ class Tensor(OpMixin):
 
     # threefry random bits
     bits_count = Tensor._device_rng_counters[device] - num
-    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+bits_count)
-    counts1 = counts0 + ceildiv(num, 2)
-    bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
+    counts = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+bits_count)
+    bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts)[:num]
 
     # bitcast to uint with same number of bits
     _, nmant = dtypes.finfo(dtype)
