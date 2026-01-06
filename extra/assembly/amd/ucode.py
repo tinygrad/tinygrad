@@ -2,7 +2,7 @@
 import functools, struct, math
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from extra.assembly.amd.qcode import parse, Assign, Declare, If, For
+from extra.assembly.amd.pcode_parse import parse, Assign, Declare, If, For
 
 SIGNED, FLOATS = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64), (dtypes.float16, dtypes.float32, dtypes.float64)
 MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
