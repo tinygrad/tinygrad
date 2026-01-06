@@ -192,9 +192,12 @@ When optimizing tinygrad internals:
 
 9. **Avoid creating intermediate objects in hot paths** - For example, `any(x.op in ops for x in self.backward_slice)` is faster than `any(x.op in ops for x in {self:None, **self.backward_slice})` because it avoids dict creation.
 
-## Pattern Matching Profiling
+## Pattern Matching Analysis
 
-Use `TRACK_MATCH_STATS=2` to identify expensive patterns:
+**Use the right tool:**
+
+- `TRACK_MATCH_STATS=2` - **Profiling**: identify expensive patterns
+- `VIZ=-1` - **Inspection**: see all transformations, what every match pattern does, the before/after diffs
 
 ```bash
 TRACK_MATCH_STATS=2 PYTHONPATH="." python3 test/external/external_benchmark_schedule.py
@@ -208,6 +211,14 @@ Key patterns to watch (from ResNet50 benchmark):
 - `vmin==vmax folding`: ~55ms, 0.33% match rate - checks 52K ops but rarely matches
 
 Patterns with 0% match rate are workload-specific overhead. They may be useful in other workloads, so don't remove them without understanding their purpose.
+
+```bash
+# Save the trace
+VIZ=-1 python test/test_tiny.py TestTiny.test_gemm
+
+# Explore it
+./extra/viz/cli.py --help
+```
 
 ## AMD Performance Counter Profiling
 
