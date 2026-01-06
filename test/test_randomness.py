@@ -110,38 +110,34 @@ class TestRandomness(unittest.TestCase):
         for u in si.prg.p.uops:
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {si.prg.p.name}")
 
-  # NOTE: I have changed the spec, so it no longer matches JAX reference implementation (distribution still holds)
-  @unittest.expectedFailure
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
-
     # reference generated using
     """
     key0 = 1337
     key1 = int.from_bytes(hashlib.sha256(int(0).to_bytes(4)).digest(), "big") & 0xffffffff
-    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.arange(20, dtype=np.uint32))
+    values = jax.extend.random.threefry_2x32((np.uint32(key1), np.uint32(key0)), np.tile(np.arange(10, dtype=np.uint32), 2))
     values = (values >> (32 - 23)) | np.array(1, dtype=np.float32).view(np.uint32)
     values =  values.view(np.float32) - 1
     print(f"[{', '.join(f'{v}' for v in values)}]")
     """
-    jr = np.array([0.9073467254638672, 0.8235964775085449, 0.6872662305831909, 0.9920015335083008, 0.4941047430038452,
-                   0.3108327388763428, 0.09639489650726318, 0.004686474800109863, 0.8435229063034058, 0.824237585067749,
-                   0.5873836278915405, 0.4232727289199829, 0.2530076503753662, 0.40300023555755615, 0.03966474533081055,
-                   0.27904558181762695, 0.9150195121765137, 0.48057758808135986, 0.23821306228637695, 0.7676635980606079], dtype=np.float32)
+    jr = np.array([0.64602804, 0.92046547, 0.7401037, 0.3942032, 0.40671802, 0.6436621, 0.5206623, 0.22375143,
+                   0.70807624, 0.38364744, 0.41685486, 0.47665608, 0.009511948, 0.65394187, 0.99575675, 0.9577522,
+                   0.09252262, 0.71196556, 0.6976292, 0.27724016], dtype=np.float32)
     r = Tensor.rand(20).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
-    # next 20, np.arange(20, 40, dtype=np.uint32)
-    jr = np.array([0.7444133758544922, 0.7713677883148193, 0.8233780860900879, 0.43871235847473145, 0.517757773399353,
-                   0.6437174081802368, 0.967403769493103, 0.26167726516723633, 0.6825339794158936, 0.14966607093811035,
-                   0.28920769691467285, 0.017063498497009277, 0.2627382278442383, 0.9525482654571533, 0.9351049661636353,
-                   0.43904995918273926, 0.043945908546447754, 0.6616791486740112, 0.6667773723602295, 0.5228077173233032], dtype=np.float32)
+    # next 20, np.tile(np.arange(20, 30, dtype=np.uint32), 2)
+    jr = np.array([0.021026373, 0.1256187, 0.7586163, 0.28140187, 0.706741, 0.7084174, 0.8895695, 0.8290298,
+                   0.6767577, 0.67285323, 0.3406446, 0.61420345, 0.17236173, 0.46465623, 0.5711199, 0.6435076,
+                   0.124486566, 0.23862779, 0.20885861, 0.16646779], dtype=np.float32)
     r = Tensor.rand(20).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
-    # next 10, np.arange(40, 50, dtype=np.uint32)
-    jr = np.array([0.9614430665969849, 0.059279561042785645, 0.01909029483795166, 0.47882091999053955, 0.9677121639251709,
-                   0.36863112449645996, 0.3102607727050781, 0.06608951091766357, 0.35329878330230713, 0.26518797874450684], dtype=np.float32)
+    # next 10, np.tile(np.arange(40, 45, dtype=np.uint32), 2)
+    jr = np.array([0.96615326, 0.3364507, 0.39027202, 0.24160278, 0.10455513, 0.75493455, 0.72733414, 0.97796345,
+                   0.8045577, 0.21859896], dtype=np.float32)
+
     r = Tensor.rand(10).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
