@@ -37,14 +37,13 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
 def record(cls):
   def __init__(self, *args, **kwargs):
+    if hasattr(c:=self.__class__, '_ns_'):
+      for nm, t in typing.get_type_hints(cls, globalns=c._ns_, include_extras=True).items(): setattr(c, nm, field(t.__origin__, *t.__metadata__))
+      del c._ns_
     ctypes.Structure.__init__(self)
     for f,v in [*zip(self._real_fields_, args), *kwargs.items()]: setattr(self, f, v)
-
-  struct = type(cls.__name__, (ctypes.Structure,), {'_fields_': [('_mem_', ctypes.c_char * cls.SIZE)], '__init__':__init__})
-  hints = typing.get_type_hints(cls, include_extras=True, localns={cls.__name__:struct})
-  for nm, typ in hints.items(): setattr(struct, nm, field(typ.__origin__, *typ.__metadata__))
-  setattr(struct, '_real_fields_', tuple(hints.keys()))
-  return struct
+  return type(cls.__name__, (ctypes.Structure,), {'__init__':__init__, '_fields_': [('_mem_', ctypes.c_char * cls.SIZE)],
+                                                  '_real_fields_':tuple(cls.__annotations__.keys()), '_ns_': sys._getframe().f_back.f_globals})
 
 def field(typ, off:int, bit_width=None, bit_off=0):
   if bit_width is not None:
