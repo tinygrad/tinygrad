@@ -217,7 +217,7 @@ class TestSymbolicJit(unittest.TestCase):
   def test_ones_sum(self):
     def f(a): return a.sum().realize()
     jf = TinyJit(f)
-    t = Tensor.ones(10)
+    t = Tensor.ones(10).contiguous()
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       symbolic = jf(t[:vi]).item()

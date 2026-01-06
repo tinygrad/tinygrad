@@ -11,9 +11,9 @@ SILENT MISMATCHES (highest priority - wrong results, no error):
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
   python_constants_frozen            HARD   inherent to tracing JITs
   conditional_branches_frozen        HARD   inherent to tracing JITs
-  unrealized_const_input_frozen      HARD   unrealized const has no buffer to replace, values baked in
 
 ERRORS RAISED (lower priority - at least users know):
+  unrealized_const_input_error       EASY   raises JitError for unrealized const inputs
   non_tensor_outputs_error           EASY   raises JitError if return contains non-Tensor values
   positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
   duplicate_inputs_fail              MED    would need to handle aliasing in input_replace
@@ -140,16 +140,20 @@ class TestJitFootguns(unittest.TestCase):
     self.assertEqual(results[2], 20)   # should be 30!
     self.assertEqual(results[3], 20)   # should be 40!
 
-  def test_unrealized_const_input_frozen(self):
-    """Unrealized const tensors have no buffer to replace, so values are baked in at capture time."""
+  def test_unrealized_const_input_error(self):
+    """Const tensors have no buffer to replace, so JIT raises an error. Even explicit .realize() doesn't help."""
     @TinyJit
     def f(a, b): return (a * b).realize()
 
-    for i in range(1, 5):
-      result = f(Tensor([1, 2, 3]).realize(), Tensor(i))  # Tensor(i) is unrealized const
-      # value is frozen at capture (i=2), so i=3,4 give wrong results
-      expected = [2, 4, 6] if i >= 2 else [i, 2*i, 3*i]
-      np.testing.assert_equal(result.numpy(), expected)  # i=3,4 should be [3,6,9], [4,8,12]!
+    # unrealized const fails
+    with self.assertRaises(JitError):
+      f(Tensor([1, 2, 3]).realize(), Tensor(2))
+
+    # explicit .realize() on const still fails - const cannot be realized to have a buffer
+    @TinyJit
+    def g(a, b): return (a * b).realize()
+    with self.assertRaises(JitError):
+      g(Tensor([1, 2, 3]).realize(), Tensor(2).realize())
 
   def test_conditional_branches_frozen(self):
     """Only the branch taken during capture runs thereafter."""
