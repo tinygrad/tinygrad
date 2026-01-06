@@ -130,9 +130,9 @@ def extract_ins(tables: dict[int, tuple[str, list[list[str]]]], arch: str) -> tu
     fields = []
     for row in rows:
       if len(row) < 2: continue
-      if (bits := re.match(r'\[(\d+):?(\d+)?\]', row[1])):
+      if (bits := re.match(r'\[?(\d+):(\d+)\]?$', row[1])) or (bits := re.match(r'\[(\d+)\]$', row[1])):
         field_name = row[0].lower()
-        hi, lo = int(bits.group(1)), int(bits.group(2)) if bits.group(2) else int(bits.group(1))
+        hi, lo = int(bits.group(1)), int(bits.group(2)) if bits.lastindex >= 2 else int(bits.group(1))
         if field_name == 'encoding' and len(row) >= 3:
           enc_bits = None
           if "'b" in row[2]: enc_bits = row[2].split("'b")[-1].replace('_', '')
@@ -159,14 +159,9 @@ def extract_ins(tables: dict[int, tuple[str, list[list[str]]]], arch: str) -> tu
     if 'SDWA' in formats and not any(n == 'encoding' for n, _, _ in formats['SDWA']):
       formats['SDWA'] = vop_overlay + [(n, h, l) for n, h, l in formats['SDWA']]
       encodings['SDWA'] = '11111001'
-    # CDNA MTBUF: PDF is missing the FORMAT field (bits[25:19])
-    if 'MTBUF' in formats and not any(n == 'format' for n, _, _ in formats['MTBUF']):
-      formats['MTBUF'].append(('format', 25, 19))
-    # CDNA DS: PDF is missing the GDS field (bit 16) - same as RDNA but shifted down by 1 bit
+    # CDNA DS: PDF is missing the GDS field (bit 16)
     if 'DS' in formats and not any(n == 'gds' for n, _, _ in formats['DS']):
       formats['DS'].append(('gds', 16, 16))
-    # SDWAB is not a separate format, it's documented for VOPC but not used - remove it
-    formats.pop('SDWAB', None)
   return formats, encodings
 
 def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[str, dict[int, str]]) -> dict[tuple[str, int], str]:
