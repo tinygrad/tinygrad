@@ -424,7 +424,9 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_lshlrev_b32_e32(v[3], 2, v[0]))
   k.emit(v_and_or_b32(v[V_LDS_A_BASE], 0x180, v[3], v[2]))
 
-  for r in OUT_REGS: k.emit(v_mov_b32_e32(v[r], 0))  # zero all 128 accumulator registers
+  # Zero all 128 accumulators using VOPD dual moves (64 instructions instead of 128)
+  for i in range(0, len(OUT_REGS), 2):
+    k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[OUT_REGS[i]], vdsty=v[OUT_REGS[i+1]], srcx0=0, srcy0=0))
 
   k.emit(s_add_i32(s[S_LOOP_BOUND], s[S_DIM_N], -8))
   k.emit(s_add_u32(s[S_A_PTR[0]], s[S_A_PTR[0]], 32))
