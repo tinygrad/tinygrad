@@ -226,10 +226,12 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
   # Field types and ordering
   def field_type(name, fmt):
     if name == 'op' and fmt in enums: return f'Annotated[BitField, {fmt}Op]'
+    if name in ('opx', 'opy'): return 'Annotated[BitField, VOPDOp]'
+    if name == 'vdsty': return 'VDSTYEnc'
     if name in ('vdst', 'vsrc1', 'vaddr', 'vdata', 'data', 'data0', 'data1', 'addr', 'vsrc0', 'vsrc2', 'vsrc3'): return 'VGPRField'
     if name in ('sdst', 'sbase', 'sdata', 'srsrc', 'ssamp'): return 'SGPRField'
     if name.startswith('ssrc') or name in ('saddr', 'soffset'): return 'SSrc'
-    if name == 'src0' or name.startswith('src') and name[3:].isdigit(): return 'Src'
+    if name in ('src0', 'srcx0', 'srcy0') or name.startswith('src') and name[3:].isdigit(): return 'Src'
     if name.startswith('simm'): return 'SImm'
     if name == 'offset' or name.startswith('imm'): return 'Imm'
     return None
@@ -256,11 +258,6 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
       if name == 'encoding' and fmt_name in encodings: lines.append(f"  encoding = {bits_str} == 0b{encodings[fmt_name]}")
       else:
         ftype = field_type(name, fmt_name)
-        # VOPD needs special type annotations
-        if fmt_name == 'VOPD':
-          if name in ('opx', 'opy'): ftype = 'Annotated[BitField, VOPDOp]'
-          elif name == 'vdsty': ftype = 'VDSTYEnc'
-          elif name in ('srcx0', 'srcy0'): ftype = 'Src'
         lines.append(f"  {name}{f':{ftype}' if ftype else ''} = {bits_str}")
     lines.append("")
 
