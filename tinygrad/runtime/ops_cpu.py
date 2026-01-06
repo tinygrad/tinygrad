@@ -112,9 +112,7 @@ class CPUProgram(HCQProgram):
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.mem), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
 class CPUAllocator(HCQAllocator):
-  def __init__(self, dev:CPUDevice):
-    super().__init__(dev)
-    self.supports_copy_from_disk, self.supports_transfer = not dev.is_usb() and dev.has_sdma_queue, not dev.has_sdma_queue
+  def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     if options.external_ptr: addr, buf = options.external_ptr, None
     elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))

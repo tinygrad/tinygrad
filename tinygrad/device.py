@@ -218,10 +218,10 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator(Generic[DeviceType]):
-  def __init__(self, dev:DeviceType):
+  def __init__(self, dev:DeviceType, supports_copy_from_disk:bool=True, supports_transfer:bool=True):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
-    self.supports_copy_from_disk, self.supports_transfer = True, True
+    self.supports_copy_from_disk, self.supports_transfer = supports_copy_from_disk, supports_transfer
   # overridden in LRUAllocator
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -244,9 +244,9 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self, dev:DeviceType):
+  def __init__(self, dev:DeviceType, **kwargs):
     self.cache: dict[tuple[int, BufferSpec|None], Any] = defaultdict(list)
-    super().__init__(dev)
+    super().__init__(dev, **kwargs)
   def alloc(self, size:int, options:BufferSpec|None=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
