@@ -249,10 +249,8 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
            "from typing import Annotated",
            "from extra.assembly.amd.dsl import bits, BitField, Inst, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField, SrcEnum",
            f"from extra.assembly.amd.autogen.{arch}.enum import *", "import functools", ""]
-  format_defaults = {'VOP3P': {'opsel_hi': 3, 'opsel_hi2': 1}}
   for fmt_name, fields in sorted(formats.items()):
     lines.append(f"class {fmt_name}(Inst):")
-    if fmt_name in format_defaults: lines.append(f"  _defaults = {format_defaults[fmt_name]}")
     for name, hi, lo in sort_fields(fields):
       bits_str = f"bits[{hi}:{lo}]" if hi != lo else f"bits[{hi}]"
       if name == 'encoding' and fmt_name in encodings: lines.append(f"  encoding = {bits_str} == 0b{encodings[fmt_name]}")

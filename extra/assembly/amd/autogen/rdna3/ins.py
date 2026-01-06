@@ -205,7 +205,6 @@ class VOP3(Inst):
   opsel = bits[14:11]
 
 class VOP3P(Inst):
-  _defaults = {'opsel_hi': 3, 'opsel_hi2': 1}
   encoding = bits[31:24] == 0b11001100
   op:Annotated[BitField, VOP3POp] = bits[22:16]
   vdst:VGPRField = bits[7:0]
