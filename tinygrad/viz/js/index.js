@@ -55,10 +55,7 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const colorScale = d3.scaleSequential(t => {
-  if (t === 0) return colorScheme.ACTIVE[0];
-  return d3.interpolateLab(colorScheme.ACTIVE[1], colorScheme.ACTIVE[2])(t);
-}).clamp(true);
+const colorScale = d3.scaleSequential(t => t > 0 ? d3.interpolateLab(colorScheme.ACTIVE[1], colorScheme.ACTIVE[2])(t) : colorScheme.ACTIVE[0]).clamp(true);
 
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
