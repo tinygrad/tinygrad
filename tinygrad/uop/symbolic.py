@@ -184,7 +184,6 @@ commutative = PatternMatcher([
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
   # ** boolean algebra **
-  (UPat.var("x") | (UPat.var("x") & UPat.var()), lambda x: x), # x|(x&y) -> x
   # TODO: make a more general or folder like simplify_valid
   (UPat.var("x", dtype=dtypes.bool) | UPat.var("x").logical_not(), lambda x: x.const_like(True)),  # x|!x -> True
   # ** combine terms **

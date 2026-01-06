@@ -18,21 +18,21 @@ class DiskDevice(Compiled):
     super().__init__(device, DiskAllocator(self), None, None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    if self.size is not None and hasattr(self.device, "mem"):
+    if self.size is not None and hasattr(self, "mem"):
       self.count += 1
       return
     filename = self.device[len("disk:"):]
-    self.size = size
 
     if sys.platform != "win32" and filename.startswith("shm:"):
       fd = _posixshmem.shm_open("/"+filename[4:].lstrip("/"), os.O_RDWR, 0o600)
-      self.mem = mmap.mmap(fd, self.size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
+      self.mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
     else:
       try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0))
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
-      if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
-      self.mem = mmap.mmap(self.fd, self.size)
+      if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < size: os.ftruncate(self.fd, size)
+      self.mem = mmap.mmap(self.fd, size)
+    self.size = size
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
       with contextlib.suppress(OSError): self.mem.madvise(hp) # some systems have transparent_hugepage disabled
     self.count += 1

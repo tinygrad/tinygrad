@@ -43,7 +43,10 @@ def fully_flatten(l):
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def _is_balanced(s:str) -> bool: return (d := 0, all((d := d + (c == '(') - (c == ')')) >= 0 for c in s))[1] and d == 0
 def strip_parens(fst:str) -> str: return fst[1:-1] if fst[:1]=='(' and fst[-1:]==')' and _is_balanced(fst[1:-1]) else fst
-def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
+def ceildiv(num, amt):
+  # use (num + amt - 1) // amt when num is a UOp and non-negative to avoid C/Python division mismatch
+  if hasattr(num, 'vmin') and num.vmin >= 0 and (amt > 0 if isinstance(amt, int) else amt.vmin > 0): return (num + amt - 1) // amt
+  return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def round_down(num:int, amt:int) -> int: return -round_up(-num, amt)
 def next_power2(x): return 1 if x == 0 else 1 << (x - 1).bit_length()
@@ -125,10 +128,6 @@ def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.p
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
-class LazySeq(Generic[T]): # NOTE: Mapping requires __iter__ and __len__, Sequence requires supporting __len__ and slicing in __getitem__
-  def __init__(self, gen:Callable[[int], T]): self.gen = gen
-  def __getitem__(self, idx:int) -> T: return self.gen(idx)
-
 # for length N coefficients `p`, returns p[0] * x**(N-1) + p[1] * x**(N-2) + ... + p[-2] * x + p[-1]
 def polyN(x:T, p:list[float]) -> T: return functools.reduce(lambda acc,c: acc*x+c, p, 0.0)  # type: ignore
 
@@ -165,6 +164,7 @@ class ContextVar:
     ContextVar._cache[key] = self
     self.value, self.key = getenv(key, default_value), key
   def __bool__(self): return bool(self.value)
+  def __eq__(self, x): return self.value == x
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
@@ -505,7 +505,9 @@ class tqdm(Generic[T]):
     if elapsed and self.i/elapsed > self.rate and self.i: self.skip = max(int(self.i/elapsed)//self.rate,1)
     def HMS(t): return ':'.join(f'{x:02d}' if i else str(x) for i,x in enumerate([int(t)//3600,int(t)%3600//60,int(t)%60]) if i or x)
     def SI(x):
-      return (f"{x/1000**int(g:=round(math.log(x,1000),6)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)].strip()) if x else '0.00'
+      if not x: return '0.00'
+      v = f"{x/1000**int(g:=round(math.log(x,1000),6)):.{int(3-3*math.fmod(g,1))}f}"[:4].rstrip('.')
+      return (f"{x/1000**(int(g)+1):.3f}"[:4].rstrip('.')+' kMGTPEZY'[int(g)+1]) if v == "1000" else v+' kMGTPEZY'[int(g)].strip()
     prog_text = f'{SI(self.n)}{f"/{SI(self.t)}" if self.t else self.unit}' if self.unit_scale else f'{self.n}{f"/{self.t}" if self.t else self.unit}'
     est_text = f'<{HMS(elapsed/prog-elapsed) if self.n else "?"}' if self.t else ''
     it_text = (SI(self.n/elapsed) if self.unit_scale else f"{self.n/elapsed:5.2f}") if self.n else "?"

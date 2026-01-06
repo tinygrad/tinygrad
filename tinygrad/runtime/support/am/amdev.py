@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
-from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
+from tinygrad.helpers import mv_address, getenv, DEBUG, fetch, lo32, hi32
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
@@ -55,7 +55,8 @@ class AMFirmware:
     # SDMA firmware
     blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", versioned_header="struct_sdma_firmware_header")
     if hdr.header.header_version_major == 1:
-      self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SDMA0)]
+      self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SDMA0,
+                               am.GFX_FW_TYPE_SDMA1, am.GFX_FW_TYPE_SDMA2, am.GFX_FW_TYPE_SDMA3)]
     elif hdr.header.header_version_major == 2:
       self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
       self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
@@ -172,7 +173,7 @@ class AMDev(PCIDevImplBase):
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive():
-        if self.gmc.xgmi_seg_sz > 0:
+        if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
         self.smu.mode1_reset()
@@ -220,6 +221,8 @@ class AMDev(PCIDevImplBase):
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
 
+  def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
+
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
   def paddr2xgmi(self, paddr:int) -> int: return self.gmc.paddr_base + paddr
   def xgmi2paddr(self, xgmi_paddr:int) -> int: return xgmi_paddr - self.gmc.paddr_base
@@ -250,10 +253,11 @@ class AMDev(PCIDevImplBase):
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
 
   def indirect_wreg_pcie(self, reg:int, val:int, aid:int=0):
-    self.reg("regBIF_BX0_PCIE_INDEX2").write(reg * 4 + ((((aid & 0b11) << 32) | (1 << 34)) if aid > 0 else 0))
-    self.reg("regBIF_BX0_PCIE_INDEX2").read()
+    reg_addr = reg * 4 + ((((aid & 0b11) << 32) | (1 << 34)) if aid > 0 else 0)
+    self.reg("regBIF_BX0_PCIE_INDEX2").write(lo32(reg_addr))
+    if reg_addr >> 32: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(hi32(reg_addr) & 0xff)
     self.reg("regBIF_BX0_PCIE_DATA2").write(val)
-    self.reg("regBIF_BX0_PCIE_DATA2").read()
+    if reg_addr >> 32: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(0)
 
   def _read_vram(self, addr, size) -> bytes:
     assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"

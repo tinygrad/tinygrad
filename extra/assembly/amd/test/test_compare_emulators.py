@@ -9,7 +9,7 @@ os.environ["AMD"] = "1"
 os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
-from extra.assembly.amd.emu import WaveState, decode_program, step_wave, WAVE_SIZE, set_valid_mem_ranges
+from extra.assembly.amd.emu import WaveState, decode_program, WAVE_SIZE, set_valid_mem_ranges, LDSMem
 from extra.assembly.amd.test.helpers import KernelInfo
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
@@ -92,19 +92,15 @@ class PythonEmulator:
   def __init__(self):
     self.state: WaveState | None = None
     self.program: dict | None = None
-    self.lds: bytearray | None = None
-    self.n_lanes = 0
 
   def create(self, kernel: bytes, n_lanes: int):
     self.program = decode_program(kernel)
-    self.state = WaveState()
+    self.state = WaveState(LDSMem(bytearray(65536)), n_lanes)
     self.state.exec_mask = (1 << n_lanes) - 1
-    self.lds = bytearray(65536)
-    self.n_lanes = n_lanes
 
   def step(self) -> int:
-    assert self.program is not None and self.state is not None and self.lds is not None
-    return step_wave(self.program, self.state, self.lds, self.n_lanes)
+    assert self.program is not None and self.state is not None
+    return self.program[self.state.pc]._dispatch(self.state, self.program[self.state.pc])
   def set_sgpr(self, idx: int, val: int):
     assert self.state is not None
     self.state.sgpr[idx] = val & 0xffffffff
@@ -163,8 +159,9 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             # Instructions with known Rust emulator bugs - sync Python to Rust after execution
             # v_div_scale/v_div_fixup: Rust has different VCC handling
             # v_cvt_f16_f32: Rust clears high 16 bits, but hardware (and Python) preserves them
+            # s_add_i32/s_sub_i32: Rust has incorrect SCC overflow detection
             sync_after = any(x in inst_str for x in ('v_div_scale_f32', 'v_div_scale_f64', 'v_div_fixup_f32', 'v_div_fixup_f64',
-                                                      'v_cvt_f16_f32'))
+                                                      'v_cvt_f16_f32', 's_add_i32', 's_sub_i32'))
             diffs = rust_before.diff(python_before, n_lanes)
             if diffs:
               trace_lines = []
@@ -397,6 +394,9 @@ class TestTinygradKernels(unittest.TestCase):
     x_np = np.random.randn(16, 10).astype(np.float32)
     self._test_kernel(lambda T: (T(x_np.tolist()).reshape(16,10) + 0).cross_entropy((T(classes).int().reshape(16) + 0)))
   def test_isinf(self): self._test_kernel(lambda T: T([float('-inf'), 0., float('inf'), 1.1]*8).isinf())
+  def test_sin_f64(self):
+    from tinygrad import dtypes
+    self._test_kernel(lambda T: T([2.0], dtype=dtypes.float64).sin())
 
 if __name__ == "__main__":
   unittest.main()

@@ -132,7 +132,7 @@ def __getattr__(nm):
   tarball="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
   prolog=["import gzip, base64"], epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
-      return load("libclang", "'clang-20'",
+      return load("libclang", "['clang-20', 'clang']",
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
                   args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":

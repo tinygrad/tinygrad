@@ -40,11 +40,13 @@ jobs:
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev
     - name: Verify OpenCL autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/opencl.py /tmp/opencl.py.bak
         python3 -c "from tinygrad.runtime.autogen import opencl"
         diff /tmp/opencl.py.bak tinygrad/runtime/autogen/opencl.py
     - name: Verify CUDA autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/cuda.py /tmp/cuda.py.bak
         mv tinygrad/runtime/autogen/nvrtc.py /tmp/nvrtc.py.bak
@@ -58,6 +60,7 @@ jobs:
         diff /tmp/nv_570.py.bak tinygrad/runtime/autogen/nv_570.py
         diff /tmp/nv.py.bak tinygrad/runtime/autogen/nv.py
     - name: Verify AMD autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/comgr.py /tmp/comgr.py.bak
         mv tinygrad/runtime/autogen/hsa.py /tmp/hsa.py.bak
@@ -89,6 +92,7 @@ jobs:
         diff /tmp/am_smu_v13_0_0.py.bak tinygrad/runtime/autogen/am/smu_v13_0_0.py
         diff /tmp/am_smu_v14_0_2.py.bak tinygrad/runtime/autogen/am/smu_v14_0_2.py
     - name: Verify Linux autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
         mv tinygrad/runtime/autogen/kfd.py /tmp/kfd.py.bak
@@ -104,16 +108,19 @@ jobs:
         diff /tmp/pci.py.bak tinygrad/runtime/autogen/pci.py
         diff /tmp/vfio.py.bak tinygrad/runtime/autogen/vfio.py
     - name: Verify LLVM autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/llvm.py /tmp/llvm.py.bak
         python3 -c "from tinygrad.runtime.autogen import llvm"
         diff /tmp/llvm.py.bak tinygrad/runtime/autogen/llvm.py
     - name: Verify WebGPU autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/webgpu.py /tmp/webgpu.py.bak
         python3 -c "from tinygrad.runtime.autogen import webgpu"
         diff /tmp/webgpu.py.bak tinygrad/runtime/autogen/webgpu.py
     - name: Verify Qualcomm autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/kgsl.py /tmp/kgsl.py.bak
         mv tinygrad/runtime/autogen/qcom_dsp.py /tmp/qcom_dsp.py.bak
@@ -121,20 +128,36 @@ jobs:
         diff /tmp/kgsl.py.bak tinygrad/runtime/autogen/kgsl.py
         diff /tmp/qcom_dsp.py.bak tinygrad/runtime/autogen/qcom_dsp.py
     - name: Verify libusb autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/libusb.py /tmp/libusb.py.bak
         python3 -c "from tinygrad.runtime.autogen import libusb"
         diff /tmp/libusb.py.bak tinygrad/runtime/autogen/libusb.py
     - name: Verify mesa autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
         python3 -c "from tinygrad.runtime.autogen import mesa"
         diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
     - name: Verify libclang autogen
+      continue-on-error: true
       run: |
         cp tinygrad/runtime/autogen/libclang.py /tmp/libclang.py.bak
         REGEN=1 python3 -c "from tinygrad.runtime.autogen import libclang"
         diff /tmp/libclang.py.bak tinygrad/runtime/autogen/libclang.py
+    - name: Generate patch for differences
+      run: |
+        if ! git diff --quiet; then
+          git diff > autogen-ubuntu.patch
+        fi
+    - name: Upload patch artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: autogen-ubuntu-patch
+        path: autogen-ubuntu.patch
+        if-no-files-found: ignore
+    - name: Fail if differences found
+      run: git diff --quiet
   autogen-mac:
     name: In-tree Autogen (macos)
     runs-on: macos-14
@@ -147,10 +170,24 @@ jobs:
       with:
         llvm: 'true'
     - name: Verify macos autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/metal.py /tmp/metal.py.bak
         LIBCLANG_PATH=/opt/homebrew/opt/llvm@20/lib/libclang.dylib python3 -c "from tinygrad.runtime.autogen import metal"
         diff /tmp/metal.py.bak tinygrad/runtime/autogen/metal.py
+    - name: Generate patch for differences
+      run: |
+        if ! git diff --quiet; then
+          git diff > autogen-macos.patch
+        fi
+    - name: Upload patch artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: autogen-macos-patch
+        path: autogen-macos.patch
+        if-no-files-found: ignore
+    - name: Fail if differences found
+      run: git diff --quiet
   autogen-comgr-3:
     name: In-tree Autogen (comgr 3)
     runs-on: ubuntu-24.04
@@ -170,7 +207,21 @@ jobs:
         sudo apt -qq update || true
         sudo apt-get install -y --no-install-recommends libclang-20-dev comgr
     - name: Verify comgr (3) autogen
+      continue-on-error: true
       run: |
         mv tinygrad/runtime/autogen/comgr_3.py /tmp/comgr_3.py.bak
         python3 -c "from tinygrad.runtime.autogen import comgr_3"
         diff /tmp/comgr_3.py.bak tinygrad/runtime/autogen/comgr_3.py
+    - name: Generate patch for differences
+      run: |
+        if ! git diff --quiet; then
+          git diff > autogen-comgr3.patch
+        fi
+    - name: Upload patch artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: autogen-comgr3-patch
+        path: autogen-comgr3.patch
+        if-no-files-found: ignore
+    - name: Fail if differences found
+      run: git diff --quiet
