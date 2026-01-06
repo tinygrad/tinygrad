@@ -574,7 +574,14 @@ _DTYPE_ACCESSOR = {dtypes.uint8: 'u8', dtypes.int8: 'i8', dtypes.uint16: 'u16', 
 
 def _compile_pseudocode(pseudocode: str, mem_buf: UOp = MEM_BUF) -> tuple[UOp, list[tuple[str, DType]], dict[str, UOp], list[UOp]]:
   ctx = Ctx(mem_buf=mem_buf)
-  for stmt in parse(pseudocode): _stmt(stmt, ctx)
+  try:
+    stmts = parse(pseudocode)
+  except AssertionError as e:
+    print("issue parsing")
+    print(pseudocode)
+    print(e)
+    raise
+  for stmt in stmts: _stmt(stmt, ctx)
   return UOp(Ops.SINK, dtypes.void, tuple(u for _, u, _ in ctx.outputs) or ()), [(n, d) for n, _, d in ctx.outputs], INPUT_VARS, ctx.mem_stores
 
 def _make_fn(sink: UOp, output_info: list[tuple[str, DType]], input_vars: dict[str, UOp], mem_stores: list[UOp]):
