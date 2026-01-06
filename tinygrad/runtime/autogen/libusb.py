@@ -325,7 +325,23 @@ class struct_libusb_iso_packet_descriptor:
   length: Annotated[ctypes.c_uint32, 0]
   actual_length: Annotated[ctypes.c_uint32, 4]
   status: Annotated[enum_libusb_transfer_status, 8]
-class struct_libusb_transfer(ctypes.Structure): pass
+@record
+class struct_libusb_transfer:
+  SIZE = 64
+  dev_handle: Annotated[ctypes.POINTER(libusb_device_handle), 0]
+  flags: Annotated[uint8_t, 8]
+  endpoint: Annotated[ctypes.c_ubyte, 9]
+  type: Annotated[ctypes.c_ubyte, 10]
+  timeout: Annotated[ctypes.c_uint32, 12]
+  status: Annotated[enum_libusb_transfer_status, 16]
+  length: Annotated[ctypes.c_int32, 20]
+  actual_length: Annotated[ctypes.c_int32, 24]
+  callback: Annotated[libusb_transfer_cb_fn, 32]
+  user_data: Annotated[ctypes.POINTER(None), 40]
+  buffer: Annotated[ctypes.POINTER(ctypes.c_ubyte), 48]
+  num_iso_packets: Annotated[ctypes.c_int32, 56]
+  iso_packet_desc: Annotated[(struct_libusb_iso_packet_descriptor * 0), 60]
+libusb_transfer_cb_fn = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_transfer))
 enum_libusb_capability = CEnum(ctypes.c_uint32)
 LIBUSB_CAP_HAS_CAPABILITY = enum_libusb_capability.define('LIBUSB_CAP_HAS_CAPABILITY', 0)
 LIBUSB_CAP_HAS_HOTPLUG = enum_libusb_capability.define('LIBUSB_CAP_HAS_HOTPLUG', 1)
@@ -350,8 +366,17 @@ LIBUSB_OPTION_NO_DEVICE_DISCOVERY = enum_libusb_option.define('LIBUSB_OPTION_NO_
 LIBUSB_OPTION_LOG_CB = enum_libusb_option.define('LIBUSB_OPTION_LOG_CB', 3)
 LIBUSB_OPTION_MAX = enum_libusb_option.define('LIBUSB_OPTION_MAX', 4)
 
-class struct_libusb_init_option(ctypes.Structure): pass
-class _anonunion0(ctypes.Union): pass
+libusb_log_cb = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_context), enum_libusb_log_level, ctypes.POINTER(ctypes.c_char))
+@record
+class struct_libusb_init_option:
+  SIZE = 16
+  option: Annotated[enum_libusb_option, 0]
+  value: Annotated[_anonunion0, 8]
+@record
+class _anonunion0:
+  SIZE = 8
+  ival: Annotated[ctypes.c_int32, 0]
+  log_cbval: Annotated[libusb_log_cb, 0]
 @dll.bind
 def libusb_init(ctx:ctypes.POINTER(ctypes.POINTER(libusb_context))) -> ctypes.c_int32: ...
 @dll.bind
@@ -360,6 +385,8 @@ def libusb_init_context(ctx:ctypes.POINTER(ctypes.POINTER(libusb_context)), opti
 def libusb_exit(ctx:ctypes.POINTER(libusb_context)) -> None: ...
 @dll.bind
 def libusb_set_debug(ctx:ctypes.POINTER(libusb_context), level:ctypes.c_int32) -> None: ...
+@dll.bind
+def libusb_set_log_cb(ctx:ctypes.POINTER(libusb_context), cb:libusb_log_cb, mode:ctypes.c_int32) -> None: ...
 @dll.bind
 def libusb_get_version() -> ctypes.POINTER(struct_libusb_version): ...
 @dll.bind
@@ -545,10 +572,14 @@ class struct_libusb_pollfd:
   SIZE = 8
   fd: Annotated[ctypes.c_int32, 0]
   events: Annotated[ctypes.c_int16, 4]
+libusb_pollfd_added_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int16, ctypes.POINTER(None))
+libusb_pollfd_removed_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.POINTER(None))
 @dll.bind
 def libusb_get_pollfds(ctx:ctypes.POINTER(libusb_context)) -> ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd)): ...
 @dll.bind
 def libusb_free_pollfds(pollfds:ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd))) -> None: ...
+@dll.bind
+def libusb_set_pollfd_notifiers(ctx:ctypes.POINTER(libusb_context), added_cb:libusb_pollfd_added_cb, removed_cb:libusb_pollfd_removed_cb, user_data:ctypes.POINTER(None)) -> None: ...
 libusb_hotplug_callback_handle = ctypes.c_int32
 libusb_hotplug_event = CEnum(ctypes.c_uint32)
 LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED = libusb_hotplug_event.define('LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED', 1)
@@ -557,6 +588,9 @@ LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT = libusb_hotplug_event.define('LIBUSB_HOTPLUG_E
 libusb_hotplug_flag = CEnum(ctypes.c_uint32)
 LIBUSB_HOTPLUG_ENUMERATE = libusb_hotplug_flag.define('LIBUSB_HOTPLUG_ENUMERATE', 1)
 
+libusb_hotplug_callback_fn = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_device), libusb_hotplug_event, ctypes.POINTER(None))
+@dll.bind
+def libusb_hotplug_register_callback(ctx:ctypes.POINTER(libusb_context), events:ctypes.c_int32, flags:ctypes.c_int32, vendor_id:ctypes.c_int32, product_id:ctypes.c_int32, dev_class:ctypes.c_int32, cb_fn:libusb_hotplug_callback_fn, user_data:ctypes.POINTER(None), callback_handle:ctypes.POINTER(libusb_hotplug_callback_handle)) -> ctypes.c_int32: ...
 @dll.bind
 def libusb_hotplug_deregister_callback(ctx:ctypes.POINTER(libusb_context), callback_handle:libusb_hotplug_callback_handle) -> None: ...
 @dll.bind

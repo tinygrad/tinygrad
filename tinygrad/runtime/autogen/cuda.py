@@ -633,6 +633,7 @@ CU_RESOURCE_TYPE_LINEAR = enum_CUresourcetype_enum.define('CU_RESOURCE_TYPE_LINE
 CU_RESOURCE_TYPE_PITCH2D = enum_CUresourcetype_enum.define('CU_RESOURCE_TYPE_PITCH2D', 3)
 
 CUresourcetype = enum_CUresourcetype_enum
+CUhostFn = ctypes.CFUNCTYPE(None, ctypes.POINTER(None))
 enum_CUaccessProperty_enum = CEnum(ctypes.c_uint32)
 CU_ACCESS_PROPERTY_NORMAL = enum_CUaccessProperty_enum.define('CU_ACCESS_PROPERTY_NORMAL', 0)
 CU_ACCESS_PROPERTY_STREAMING = enum_CUaccessProperty_enum.define('CU_ACCESS_PROPERTY_STREAMING', 1)
@@ -692,7 +693,11 @@ class struct_CUDA_MEMSET_NODE_PARAMS_st:
   height: Annotated[size_t, 32]
 CUDA_MEMSET_NODE_PARAMS_v1 = struct_CUDA_MEMSET_NODE_PARAMS_st
 CUDA_MEMSET_NODE_PARAMS = struct_CUDA_MEMSET_NODE_PARAMS_st
-class struct_CUDA_HOST_NODE_PARAMS_st(ctypes.Structure): pass
+@record
+class struct_CUDA_HOST_NODE_PARAMS_st:
+  SIZE = 16
+  fn: Annotated[CUhostFn, 0]
+  userData: Annotated[ctypes.POINTER(None), 8]
 CUDA_HOST_NODE_PARAMS_v1 = struct_CUDA_HOST_NODE_PARAMS_st
 CUDA_HOST_NODE_PARAMS = struct_CUDA_HOST_NODE_PARAMS_st
 enum_CUgraphNodeType_enum = CEnum(ctypes.c_uint32)
@@ -982,6 +987,8 @@ CU_DEVICE_P2P_ATTRIBUTE_ACCESS_ACCESS_SUPPORTED = enum_CUdevice_P2PAttribute_enu
 CU_DEVICE_P2P_ATTRIBUTE_CUDA_ARRAY_ACCESS_SUPPORTED = enum_CUdevice_P2PAttribute_enum.define('CU_DEVICE_P2P_ATTRIBUTE_CUDA_ARRAY_ACCESS_SUPPORTED', 4)
 
 CUdevice_P2PAttribute = enum_CUdevice_P2PAttribute_enum
+CUstreamCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_CUstream_st), enum_cudaError_enum, ctypes.POINTER(None))
+CUoccupancyB2DSize = ctypes.CFUNCTYPE(ctypes.c_uint64, ctypes.c_int32)
 @record
 class struct_CUDA_MEMCPY2D_st:
   SIZE = 128
@@ -2082,6 +2089,8 @@ def cuStreamGetCtx_ptsz(hStream:CUstream, pctx:ctypes.POINTER(CUcontext)) -> CUr
 @dll.bind
 def cuStreamWaitEvent_ptsz(hStream:CUstream, hEvent:CUevent, Flags:ctypes.c_uint32) -> CUresult: ...
 @dll.bind
+def cuStreamAddCallback_ptsz(hStream:CUstream, callback:CUstreamCallback, userData:ctypes.POINTER(None), flags:ctypes.c_uint32) -> CUresult: ...
+@dll.bind
 def cuStreamBeginCapture_v2_ptsz(hStream:CUstream, mode:CUstreamCaptureMode) -> CUresult: ...
 @dll.bind
 def cuThreadExchangeStreamCaptureMode(mode:ctypes.POINTER(CUstreamCaptureMode)) -> CUresult: ...
@@ -2165,6 +2174,8 @@ def cuLaunchKernelEx_ptsz(config:ctypes.POINTER(CUlaunchConfig), f:CUfunction, k
 def cuLaunchCooperativeKernel_ptsz(f:CUfunction, gridDimX:ctypes.c_uint32, gridDimY:ctypes.c_uint32, gridDimZ:ctypes.c_uint32, blockDimX:ctypes.c_uint32, blockDimY:ctypes.c_uint32, blockDimZ:ctypes.c_uint32, sharedMemBytes:ctypes.c_uint32, hStream:CUstream, kernelParams:ctypes.POINTER(ctypes.POINTER(None))) -> CUresult: ...
 @dll.bind
 def cuLaunchCooperativeKernelMultiDevice(launchParamsList:ctypes.POINTER(CUDA_LAUNCH_PARAMS), numDevices:ctypes.c_uint32, flags:ctypes.c_uint32) -> CUresult: ...
+@dll.bind
+def cuLaunchHostFunc_ptsz(hStream:CUstream, fn:CUhostFn, userData:ctypes.POINTER(None)) -> CUresult: ...
 @dll.bind
 def cuFuncSetBlockShape(hfunc:CUfunction, x:ctypes.c_int32, y:ctypes.c_int32, z:ctypes.c_int32) -> CUresult: ...
 @dll.bind
@@ -2332,6 +2343,8 @@ def cuGraphKernelNodeSetAttribute(hNode:CUgraphNode, attr:CUkernelNodeAttrID, va
 @dll.bind
 def cuGraphDebugDotPrint(hGraph:CUgraph, path:ctypes.POINTER(ctypes.c_char), flags:ctypes.c_uint32) -> CUresult: ...
 @dll.bind
+def cuUserObjectCreate(object_out:ctypes.POINTER(CUuserObject), ptr:ctypes.POINTER(None), destroy:CUhostFn, initialRefcount:ctypes.c_uint32, flags:ctypes.c_uint32) -> CUresult: ...
+@dll.bind
 def cuUserObjectRetain(object:CUuserObject, count:ctypes.c_uint32) -> CUresult: ...
 @dll.bind
 def cuUserObjectRelease(object:CUuserObject, count:ctypes.c_uint32) -> CUresult: ...
@@ -2343,6 +2356,10 @@ def cuGraphReleaseUserObject(graph:CUgraph, object:CUuserObject, count:ctypes.c_
 def cuOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks:ctypes.POINTER(ctypes.c_int32), func:CUfunction, blockSize:ctypes.c_int32, dynamicSMemSize:size_t) -> CUresult: ...
 @dll.bind
 def cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks:ctypes.POINTER(ctypes.c_int32), func:CUfunction, blockSize:ctypes.c_int32, dynamicSMemSize:size_t, flags:ctypes.c_uint32) -> CUresult: ...
+@dll.bind
+def cuOccupancyMaxPotentialBlockSize(minGridSize:ctypes.POINTER(ctypes.c_int32), blockSize:ctypes.POINTER(ctypes.c_int32), func:CUfunction, blockSizeToDynamicSMemSize:CUoccupancyB2DSize, dynamicSMemSize:size_t, blockSizeLimit:ctypes.c_int32) -> CUresult: ...
+@dll.bind
+def cuOccupancyMaxPotentialBlockSizeWithFlags(minGridSize:ctypes.POINTER(ctypes.c_int32), blockSize:ctypes.POINTER(ctypes.c_int32), func:CUfunction, blockSizeToDynamicSMemSize:CUoccupancyB2DSize, dynamicSMemSize:size_t, blockSizeLimit:ctypes.c_int32, flags:ctypes.c_uint32) -> CUresult: ...
 @dll.bind
 def cuOccupancyAvailableDynamicSMemPerBlock(dynamicSmemSize:ctypes.POINTER(size_t), func:CUfunction, numBlocks:ctypes.c_int32, blockSize:ctypes.c_int32) -> CUresult: ...
 @dll.bind
@@ -2718,6 +2735,8 @@ def cuStreamGetCtx(hStream:CUstream, pctx:ctypes.POINTER(CUcontext)) -> CUresult
 @dll.bind
 def cuStreamWaitEvent(hStream:CUstream, hEvent:CUevent, Flags:ctypes.c_uint32) -> CUresult: ...
 @dll.bind
+def cuStreamAddCallback(hStream:CUstream, callback:CUstreamCallback, userData:ctypes.POINTER(None), flags:ctypes.c_uint32) -> CUresult: ...
+@dll.bind
 def cuStreamAttachMemAsync(hStream:CUstream, dptr:CUdeviceptr, length:size_t, flags:ctypes.c_uint32) -> CUresult: ...
 @dll.bind
 def cuStreamQuery(hStream:CUstream) -> CUresult: ...
@@ -2731,6 +2750,8 @@ def cuEventRecordWithFlags(hEvent:CUevent, hStream:CUstream, flags:ctypes.c_uint
 def cuLaunchKernel(f:CUfunction, gridDimX:ctypes.c_uint32, gridDimY:ctypes.c_uint32, gridDimZ:ctypes.c_uint32, blockDimX:ctypes.c_uint32, blockDimY:ctypes.c_uint32, blockDimZ:ctypes.c_uint32, sharedMemBytes:ctypes.c_uint32, hStream:CUstream, kernelParams:ctypes.POINTER(ctypes.POINTER(None)), extra:ctypes.POINTER(ctypes.POINTER(None))) -> CUresult: ...
 @dll.bind
 def cuLaunchKernelEx(config:ctypes.POINTER(CUlaunchConfig), f:CUfunction, kernelParams:ctypes.POINTER(ctypes.POINTER(None)), extra:ctypes.POINTER(ctypes.POINTER(None))) -> CUresult: ...
+@dll.bind
+def cuLaunchHostFunc(hStream:CUstream, fn:CUhostFn, userData:ctypes.POINTER(None)) -> CUresult: ...
 @dll.bind
 def cuGraphicsMapResources(count:ctypes.c_uint32, resources:ctypes.POINTER(CUgraphicsResource), hStream:CUstream) -> CUresult: ...
 @dll.bind
