@@ -1,16 +1,18 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import Annotated
+from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 import os
 dll = DLL('hip', os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so')
-class ihipModuleSymbol_t(Struct): pass
-hipFunction_t = Pointer(ihipModuleSymbol_t)
+class ihipModuleSymbol_t(ctypes.Structure): pass
+hipFunction_t = ctypes.POINTER(ihipModuleSymbol_t)
 uint32_t = ctypes.c_uint32
 size_t = ctypes.c_uint64
-class ihipStream_t(Struct): pass
-hipStream_t = Pointer(ihipStream_t)
-class ihipEvent_t(Struct): pass
-hipEvent_t = Pointer(ihipEvent_t)
+class ihipStream_t(ctypes.Structure): pass
+hipStream_t = ctypes.POINTER(ihipStream_t)
+class ihipEvent_t(ctypes.Structure): pass
+hipEvent_t = ctypes.POINTER(ihipEvent_t)
 hipError_t = CEnum(ctypes.c_uint32)
 hipSuccess = hipError_t.define('hipSuccess', 0)
 hipErrorInvalidValue = hipError_t.define('hipErrorInvalidValue', 1)
@@ -91,18 +93,18 @@ hipErrorRuntimeMemory = hipError_t.define('hipErrorRuntimeMemory', 1052)
 hipErrorRuntimeOther = hipError_t.define('hipErrorRuntimeOther', 1053)
 hipErrorTbd = hipError_t.define('hipErrorTbd', 1054)
 
-@dll.bind((hipFunction_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, size_t, hipStream_t, Pointer(ctypes.c_void_p), Pointer(ctypes.c_void_p), hipEvent_t, hipEvent_t, uint32_t), hipError_t)
-def hipExtModuleLaunchKernel(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent, flags): ...
-@dll.bind((hipFunction_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, size_t, hipStream_t, Pointer(ctypes.c_void_p), Pointer(ctypes.c_void_p), hipEvent_t, hipEvent_t), hipError_t)
-def hipHccModuleLaunchKernel(f, globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes, hStream, kernelParams, extra, startEvent, stopEvent): ...
-class dim3(Struct): pass
-dim3.SIZE = 12
-dim3._fields_ = ['x', 'y', 'z']
-setattr(dim3, 'x', field(0, uint32_t))
-setattr(dim3, 'y', field(4, uint32_t))
-setattr(dim3, 'z', field(8, uint32_t))
-@dll.bind((ctypes.c_void_p, dim3, dim3, Pointer(ctypes.c_void_p), size_t, hipStream_t, hipEvent_t, hipEvent_t, ctypes.c_int32), hipError_t)
-def hipExtLaunchKernel(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags): ...
+@dll.bind
+def hipExtModuleLaunchKernel(f:hipFunction_t, globalWorkSizeX:uint32_t, globalWorkSizeY:uint32_t, globalWorkSizeZ:uint32_t, localWorkSizeX:uint32_t, localWorkSizeY:uint32_t, localWorkSizeZ:uint32_t, sharedMemBytes:size_t, hStream:hipStream_t, kernelParams:ctypes.POINTER(ctypes.POINTER(None)), extra:ctypes.POINTER(ctypes.POINTER(None)), startEvent:hipEvent_t, stopEvent:hipEvent_t, flags:uint32_t) -> hipError_t: ...
+@dll.bind
+def hipHccModuleLaunchKernel(f:hipFunction_t, globalWorkSizeX:uint32_t, globalWorkSizeY:uint32_t, globalWorkSizeZ:uint32_t, localWorkSizeX:uint32_t, localWorkSizeY:uint32_t, localWorkSizeZ:uint32_t, sharedMemBytes:size_t, hStream:hipStream_t, kernelParams:ctypes.POINTER(ctypes.POINTER(None)), extra:ctypes.POINTER(ctypes.POINTER(None)), startEvent:hipEvent_t, stopEvent:hipEvent_t) -> hipError_t: ...
+@record
+class dim3:
+  SIZE = 12
+  x: Annotated[uint32_t, 0]
+  y: Annotated[uint32_t, 4]
+  z: Annotated[uint32_t, 8]
+@dll.bind
+def hipExtLaunchKernel(function_address:ctypes.POINTER(None), numBlocks:dim3, dimBlocks:dim3, args:ctypes.POINTER(ctypes.POINTER(None)), sharedMemBytes:size_t, stream:hipStream_t, startEvent:hipEvent_t, stopEvent:hipEvent_t, flags:ctypes.c_int32) -> hipError_t: ...
 hiprtcResult = CEnum(ctypes.c_uint32)
 HIPRTC_SUCCESS = hiprtcResult.define('HIPRTC_SUCCESS', 0)
 HIPRTC_ERROR_OUT_OF_MEMORY = hiprtcResult.define('HIPRTC_ERROR_OUT_OF_MEMORY', 1)
@@ -161,187 +163,187 @@ HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_IN
 HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE', 102)
 HIPRTC_JIT_NUM_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_INPUT_TYPES', 9)
 
-class ihiprtcLinkState(Struct): pass
-hiprtcLinkState = Pointer(ihiprtcLinkState)
-@dll.bind((hiprtcResult), Pointer(ctypes.c_char))
-def hiprtcGetErrorString(result): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(ctypes.c_int32)), hiprtcResult)
-def hiprtcVersion(major, minor): ...
-class _hiprtcProgram(Struct): pass
-hiprtcProgram = Pointer(_hiprtcProgram)
-@dll.bind((hiprtcProgram, Pointer(ctypes.c_char)), hiprtcResult)
-def hiprtcAddNameExpression(prog, name_expression): ...
-@dll.bind((hiprtcProgram, ctypes.c_int32, Pointer(Pointer(ctypes.c_char))), hiprtcResult)
-def hiprtcCompileProgram(prog, numOptions, options): ...
-@dll.bind((Pointer(hiprtcProgram), Pointer(ctypes.c_char), Pointer(ctypes.c_char), ctypes.c_int32, Pointer(Pointer(ctypes.c_char)), Pointer(Pointer(ctypes.c_char))), hiprtcResult)
-def hiprtcCreateProgram(prog, src, name, numHeaders, headers, includeNames): ...
-@dll.bind((Pointer(hiprtcProgram)), hiprtcResult)
-def hiprtcDestroyProgram(prog): ...
-@dll.bind((hiprtcProgram, Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char))), hiprtcResult)
-def hiprtcGetLoweredName(prog, name_expression, lowered_name): ...
-@dll.bind((hiprtcProgram, Pointer(ctypes.c_char)), hiprtcResult)
-def hiprtcGetProgramLog(prog, log): ...
-@dll.bind((hiprtcProgram, Pointer(size_t)), hiprtcResult)
-def hiprtcGetProgramLogSize(prog, logSizeRet): ...
-@dll.bind((hiprtcProgram, Pointer(ctypes.c_char)), hiprtcResult)
-def hiprtcGetCode(prog, code): ...
-@dll.bind((hiprtcProgram, Pointer(size_t)), hiprtcResult)
-def hiprtcGetCodeSize(prog, codeSizeRet): ...
-@dll.bind((hiprtcProgram, Pointer(ctypes.c_char)), hiprtcResult)
-def hiprtcGetBitcode(prog, bitcode): ...
-@dll.bind((hiprtcProgram, Pointer(size_t)), hiprtcResult)
-def hiprtcGetBitcodeSize(prog, bitcode_size): ...
-@dll.bind((ctypes.c_uint32, Pointer(hiprtcJIT_option), Pointer(ctypes.c_void_p), Pointer(hiprtcLinkState)), hiprtcResult)
-def hiprtcLinkCreate(num_options, option_ptr, option_vals_pptr, hip_link_state_ptr): ...
-@dll.bind((hiprtcLinkState, hiprtcJITInputType, Pointer(ctypes.c_char), ctypes.c_uint32, Pointer(hiprtcJIT_option), Pointer(ctypes.c_void_p)), hiprtcResult)
-def hiprtcLinkAddFile(hip_link_state, input_type, file_path, num_options, options_ptr, option_values): ...
-@dll.bind((hiprtcLinkState, hiprtcJITInputType, ctypes.c_void_p, size_t, Pointer(ctypes.c_char), ctypes.c_uint32, Pointer(hiprtcJIT_option), Pointer(ctypes.c_void_p)), hiprtcResult)
-def hiprtcLinkAddData(hip_link_state, input_type, image, image_size, name, num_options, options_ptr, option_values): ...
-@dll.bind((hiprtcLinkState, Pointer(ctypes.c_void_p), Pointer(size_t)), hiprtcResult)
-def hiprtcLinkComplete(hip_link_state, bin_out, size_out): ...
-@dll.bind((hiprtcLinkState), hiprtcResult)
-def hiprtcLinkDestroy(hip_link_state): ...
+class ihiprtcLinkState(ctypes.Structure): pass
+hiprtcLinkState = ctypes.POINTER(ihiprtcLinkState)
+@dll.bind
+def hiprtcGetErrorString(result:hiprtcResult) -> ctypes.POINTER(ctypes.c_char): ...
+@dll.bind
+def hiprtcVersion(major:ctypes.POINTER(ctypes.c_int32), minor:ctypes.POINTER(ctypes.c_int32)) -> hiprtcResult: ...
+class _hiprtcProgram(ctypes.Structure): pass
+hiprtcProgram = ctypes.POINTER(_hiprtcProgram)
+@dll.bind
+def hiprtcAddNameExpression(prog:hiprtcProgram, name_expression:ctypes.POINTER(ctypes.c_char)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcCompileProgram(prog:hiprtcProgram, numOptions:ctypes.c_int32, options:ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) -> hiprtcResult: ...
+@dll.bind
+def hiprtcCreateProgram(prog:ctypes.POINTER(hiprtcProgram), src:ctypes.POINTER(ctypes.c_char), name:ctypes.POINTER(ctypes.c_char), numHeaders:ctypes.c_int32, headers:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), includeNames:ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) -> hiprtcResult: ...
+@dll.bind
+def hiprtcDestroyProgram(prog:ctypes.POINTER(hiprtcProgram)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcGetLoweredName(prog:hiprtcProgram, name_expression:ctypes.POINTER(ctypes.c_char), lowered_name:ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) -> hiprtcResult: ...
+@dll.bind
+def hiprtcGetProgramLog(prog:hiprtcProgram, log:ctypes.POINTER(ctypes.c_char)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcGetProgramLogSize(prog:hiprtcProgram, logSizeRet:ctypes.POINTER(size_t)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcGetCode(prog:hiprtcProgram, code:ctypes.POINTER(ctypes.c_char)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcGetCodeSize(prog:hiprtcProgram, codeSizeRet:ctypes.POINTER(size_t)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcGetBitcode(prog:hiprtcProgram, bitcode:ctypes.POINTER(ctypes.c_char)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcGetBitcodeSize(prog:hiprtcProgram, bitcode_size:ctypes.POINTER(size_t)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcLinkCreate(num_options:ctypes.c_uint32, option_ptr:ctypes.POINTER(hiprtcJIT_option), option_vals_pptr:ctypes.POINTER(ctypes.POINTER(None)), hip_link_state_ptr:ctypes.POINTER(hiprtcLinkState)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcLinkAddFile(hip_link_state:hiprtcLinkState, input_type:hiprtcJITInputType, file_path:ctypes.POINTER(ctypes.c_char), num_options:ctypes.c_uint32, options_ptr:ctypes.POINTER(hiprtcJIT_option), option_values:ctypes.POINTER(ctypes.POINTER(None))) -> hiprtcResult: ...
+@dll.bind
+def hiprtcLinkAddData(hip_link_state:hiprtcLinkState, input_type:hiprtcJITInputType, image:ctypes.POINTER(None), image_size:size_t, name:ctypes.POINTER(ctypes.c_char), num_options:ctypes.c_uint32, options_ptr:ctypes.POINTER(hiprtcJIT_option), option_values:ctypes.POINTER(ctypes.POINTER(None))) -> hiprtcResult: ...
+@dll.bind
+def hiprtcLinkComplete(hip_link_state:hiprtcLinkState, bin_out:ctypes.POINTER(ctypes.POINTER(None)), size_out:ctypes.POINTER(size_t)) -> hiprtcResult: ...
+@dll.bind
+def hiprtcLinkDestroy(hip_link_state:hiprtcLinkState) -> hiprtcResult: ...
 _anonenum0 = CEnum(ctypes.c_uint32)
 HIP_SUCCESS = _anonenum0.define('HIP_SUCCESS', 0)
 HIP_ERROR_INVALID_VALUE = _anonenum0.define('HIP_ERROR_INVALID_VALUE', 1)
 HIP_ERROR_NOT_INITIALIZED = _anonenum0.define('HIP_ERROR_NOT_INITIALIZED', 2)
 HIP_ERROR_LAUNCH_OUT_OF_RESOURCES = _anonenum0.define('HIP_ERROR_LAUNCH_OUT_OF_RESOURCES', 3)
 
-class hipDeviceArch_t(Struct): pass
-hipDeviceArch_t.SIZE = 4
-hipDeviceArch_t._fields_ = ['hasGlobalInt32Atomics', 'hasGlobalFloatAtomicExch', 'hasSharedInt32Atomics', 'hasSharedFloatAtomicExch', 'hasFloatAtomicAdd', 'hasGlobalInt64Atomics', 'hasSharedInt64Atomics', 'hasDoubles', 'hasWarpVote', 'hasWarpBallot', 'hasWarpShuffle', 'hasFunnelShift', 'hasThreadFenceSystem', 'hasSyncThreadsExt', 'hasSurfaceFuncs', 'has3dGrid', 'hasDynamicParallelism']
-setattr(hipDeviceArch_t, 'hasGlobalInt32Atomics', field(0, ctypes.c_uint32, 1, 0))
-setattr(hipDeviceArch_t, 'hasGlobalFloatAtomicExch', field(0, ctypes.c_uint32, 1, 1))
-setattr(hipDeviceArch_t, 'hasSharedInt32Atomics', field(0, ctypes.c_uint32, 1, 2))
-setattr(hipDeviceArch_t, 'hasSharedFloatAtomicExch', field(0, ctypes.c_uint32, 1, 3))
-setattr(hipDeviceArch_t, 'hasFloatAtomicAdd', field(0, ctypes.c_uint32, 1, 4))
-setattr(hipDeviceArch_t, 'hasGlobalInt64Atomics', field(0, ctypes.c_uint32, 1, 5))
-setattr(hipDeviceArch_t, 'hasSharedInt64Atomics', field(0, ctypes.c_uint32, 1, 6))
-setattr(hipDeviceArch_t, 'hasDoubles', field(0, ctypes.c_uint32, 1, 7))
-setattr(hipDeviceArch_t, 'hasWarpVote', field(1, ctypes.c_uint32, 1, 0))
-setattr(hipDeviceArch_t, 'hasWarpBallot', field(1, ctypes.c_uint32, 1, 1))
-setattr(hipDeviceArch_t, 'hasWarpShuffle', field(1, ctypes.c_uint32, 1, 2))
-setattr(hipDeviceArch_t, 'hasFunnelShift', field(1, ctypes.c_uint32, 1, 3))
-setattr(hipDeviceArch_t, 'hasThreadFenceSystem', field(1, ctypes.c_uint32, 1, 4))
-setattr(hipDeviceArch_t, 'hasSyncThreadsExt', field(1, ctypes.c_uint32, 1, 5))
-setattr(hipDeviceArch_t, 'hasSurfaceFuncs', field(1, ctypes.c_uint32, 1, 6))
-setattr(hipDeviceArch_t, 'has3dGrid', field(1, ctypes.c_uint32, 1, 7))
-setattr(hipDeviceArch_t, 'hasDynamicParallelism', field(2, ctypes.c_uint32, 1, 0))
-class hipUUID_t(Struct): pass
-hipUUID_t.SIZE = 16
-hipUUID_t._fields_ = ['bytes']
-setattr(hipUUID_t, 'bytes', field(0, Array(ctypes.c_char, 16)))
+@record
+class hipDeviceArch_t:
+  SIZE = 4
+  hasGlobalInt32Atomics: Annotated[ctypes.c_uint32, 0, 1, 0]
+  hasGlobalFloatAtomicExch: Annotated[ctypes.c_uint32, 0, 1, 1]
+  hasSharedInt32Atomics: Annotated[ctypes.c_uint32, 0, 1, 2]
+  hasSharedFloatAtomicExch: Annotated[ctypes.c_uint32, 0, 1, 3]
+  hasFloatAtomicAdd: Annotated[ctypes.c_uint32, 0, 1, 4]
+  hasGlobalInt64Atomics: Annotated[ctypes.c_uint32, 0, 1, 5]
+  hasSharedInt64Atomics: Annotated[ctypes.c_uint32, 0, 1, 6]
+  hasDoubles: Annotated[ctypes.c_uint32, 0, 1, 7]
+  hasWarpVote: Annotated[ctypes.c_uint32, 1, 1, 0]
+  hasWarpBallot: Annotated[ctypes.c_uint32, 1, 1, 1]
+  hasWarpShuffle: Annotated[ctypes.c_uint32, 1, 1, 2]
+  hasFunnelShift: Annotated[ctypes.c_uint32, 1, 1, 3]
+  hasThreadFenceSystem: Annotated[ctypes.c_uint32, 1, 1, 4]
+  hasSyncThreadsExt: Annotated[ctypes.c_uint32, 1, 1, 5]
+  hasSurfaceFuncs: Annotated[ctypes.c_uint32, 1, 1, 6]
+  has3dGrid: Annotated[ctypes.c_uint32, 1, 1, 7]
+  hasDynamicParallelism: Annotated[ctypes.c_uint32, 2, 1, 0]
+@record
+class hipUUID_t:
+  SIZE = 16
+  bytes: Annotated[(ctypes.c_char* 16), 0]
 hipUUID = hipUUID_t
-class hipDeviceProp_tR0600(Struct): pass
-hipDeviceProp_tR0600.SIZE = 1472
-hipDeviceProp_tR0600._fields_ = ['name', 'uuid', 'luid', 'luidDeviceNodeMask', 'totalGlobalMem', 'sharedMemPerBlock', 'regsPerBlock', 'warpSize', 'memPitch', 'maxThreadsPerBlock', 'maxThreadsDim', 'maxGridSize', 'clockRate', 'totalConstMem', 'major', 'minor', 'textureAlignment', 'texturePitchAlignment', 'deviceOverlap', 'multiProcessorCount', 'kernelExecTimeoutEnabled', 'integrated', 'canMapHostMemory', 'computeMode', 'maxTexture1D', 'maxTexture1DMipmap', 'maxTexture1DLinear', 'maxTexture2D', 'maxTexture2DMipmap', 'maxTexture2DLinear', 'maxTexture2DGather', 'maxTexture3D', 'maxTexture3DAlt', 'maxTextureCubemap', 'maxTexture1DLayered', 'maxTexture2DLayered', 'maxTextureCubemapLayered', 'maxSurface1D', 'maxSurface2D', 'maxSurface3D', 'maxSurface1DLayered', 'maxSurface2DLayered', 'maxSurfaceCubemap', 'maxSurfaceCubemapLayered', 'surfaceAlignment', 'concurrentKernels', 'ECCEnabled', 'pciBusID', 'pciDeviceID', 'pciDomainID', 'tccDriver', 'asyncEngineCount', 'unifiedAddressing', 'memoryClockRate', 'memoryBusWidth', 'l2CacheSize', 'persistingL2CacheMaxSize', 'maxThreadsPerMultiProcessor', 'streamPrioritiesSupported', 'globalL1CacheSupported', 'localL1CacheSupported', 'sharedMemPerMultiprocessor', 'regsPerMultiprocessor', 'managedMemory', 'isMultiGpuBoard', 'multiGpuBoardGroupID', 'hostNativeAtomicSupported', 'singleToDoublePrecisionPerfRatio', 'pageableMemoryAccess', 'concurrentManagedAccess', 'computePreemptionSupported', 'canUseHostPointerForRegisteredMem', 'cooperativeLaunch', 'cooperativeMultiDeviceLaunch', 'sharedMemPerBlockOptin', 'pageableMemoryAccessUsesHostPageTables', 'directManagedMemAccessFromHost', 'maxBlocksPerMultiProcessor', 'accessPolicyMaxWindowSize', 'reservedSharedMemPerBlock', 'hostRegisterSupported', 'sparseHipArraySupported', 'hostRegisterReadOnlySupported', 'timelineSemaphoreInteropSupported', 'memoryPoolsSupported', 'gpuDirectRDMASupported', 'gpuDirectRDMAFlushWritesOptions', 'gpuDirectRDMAWritesOrdering', 'memoryPoolSupportedHandleTypes', 'deferredMappingHipArraySupported', 'ipcEventSupported', 'clusterLaunch', 'unifiedFunctionPointers', 'reserved', 'hipReserved', 'gcnArchName', 'maxSharedMemoryPerMultiProcessor', 'clockInstructionRate', 'arch', 'hdpMemFlushCntl', 'hdpRegFlushCntl', 'cooperativeMultiDeviceUnmatchedFunc', 'cooperativeMultiDeviceUnmatchedGridDim', 'cooperativeMultiDeviceUnmatchedBlockDim', 'cooperativeMultiDeviceUnmatchedSharedMem', 'isLargeBar', 'asicRevision']
-setattr(hipDeviceProp_tR0600, 'name', field(0, Array(ctypes.c_char, 256)))
-setattr(hipDeviceProp_tR0600, 'uuid', field(256, hipUUID))
-setattr(hipDeviceProp_tR0600, 'luid', field(272, Array(ctypes.c_char, 8)))
-setattr(hipDeviceProp_tR0600, 'luidDeviceNodeMask', field(280, ctypes.c_uint32))
-setattr(hipDeviceProp_tR0600, 'totalGlobalMem', field(288, size_t))
-setattr(hipDeviceProp_tR0600, 'sharedMemPerBlock', field(296, size_t))
-setattr(hipDeviceProp_tR0600, 'regsPerBlock', field(304, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'warpSize', field(308, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'memPitch', field(312, size_t))
-setattr(hipDeviceProp_tR0600, 'maxThreadsPerBlock', field(320, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxThreadsDim', field(324, Array(ctypes.c_int32, 3)))
-setattr(hipDeviceProp_tR0600, 'maxGridSize', field(336, Array(ctypes.c_int32, 3)))
-setattr(hipDeviceProp_tR0600, 'clockRate', field(348, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'totalConstMem', field(352, size_t))
-setattr(hipDeviceProp_tR0600, 'major', field(360, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'minor', field(364, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'textureAlignment', field(368, size_t))
-setattr(hipDeviceProp_tR0600, 'texturePitchAlignment', field(376, size_t))
-setattr(hipDeviceProp_tR0600, 'deviceOverlap', field(384, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'multiProcessorCount', field(388, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'kernelExecTimeoutEnabled', field(392, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'integrated', field(396, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'canMapHostMemory', field(400, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'computeMode', field(404, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxTexture1D', field(408, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxTexture1DMipmap', field(412, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxTexture1DLinear', field(416, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxTexture2D', field(420, Array(ctypes.c_int32, 2)))
-setattr(hipDeviceProp_tR0600, 'maxTexture2DMipmap', field(428, Array(ctypes.c_int32, 2)))
-setattr(hipDeviceProp_tR0600, 'maxTexture2DLinear', field(436, Array(ctypes.c_int32, 3)))
-setattr(hipDeviceProp_tR0600, 'maxTexture2DGather', field(448, Array(ctypes.c_int32, 2)))
-setattr(hipDeviceProp_tR0600, 'maxTexture3D', field(456, Array(ctypes.c_int32, 3)))
-setattr(hipDeviceProp_tR0600, 'maxTexture3DAlt', field(468, Array(ctypes.c_int32, 3)))
-setattr(hipDeviceProp_tR0600, 'maxTextureCubemap', field(480, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxTexture1DLayered', field(484, Array(ctypes.c_int32, 2)))
-setattr(hipDeviceProp_tR0600, 'maxTexture2DLayered', field(492, Array(ctypes.c_int32, 3)))
-setattr(hipDeviceProp_tR0600, 'maxTextureCubemapLayered', field(504, Array(ctypes.c_int32, 2)))
-setattr(hipDeviceProp_tR0600, 'maxSurface1D', field(512, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxSurface2D', field(516, Array(ctypes.c_int32, 2)))
-setattr(hipDeviceProp_tR0600, 'maxSurface3D', field(524, Array(ctypes.c_int32, 3)))
-setattr(hipDeviceProp_tR0600, 'maxSurface1DLayered', field(536, Array(ctypes.c_int32, 2)))
-setattr(hipDeviceProp_tR0600, 'maxSurface2DLayered', field(544, Array(ctypes.c_int32, 3)))
-setattr(hipDeviceProp_tR0600, 'maxSurfaceCubemap', field(556, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxSurfaceCubemapLayered', field(560, Array(ctypes.c_int32, 2)))
-setattr(hipDeviceProp_tR0600, 'surfaceAlignment', field(568, size_t))
-setattr(hipDeviceProp_tR0600, 'concurrentKernels', field(576, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'ECCEnabled', field(580, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'pciBusID', field(584, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'pciDeviceID', field(588, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'pciDomainID', field(592, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'tccDriver', field(596, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'asyncEngineCount', field(600, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'unifiedAddressing', field(604, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'memoryClockRate', field(608, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'memoryBusWidth', field(612, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'l2CacheSize', field(616, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'persistingL2CacheMaxSize', field(620, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxThreadsPerMultiProcessor', field(624, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'streamPrioritiesSupported', field(628, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'globalL1CacheSupported', field(632, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'localL1CacheSupported', field(636, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'sharedMemPerMultiprocessor', field(640, size_t))
-setattr(hipDeviceProp_tR0600, 'regsPerMultiprocessor', field(648, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'managedMemory', field(652, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'isMultiGpuBoard', field(656, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'multiGpuBoardGroupID', field(660, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'hostNativeAtomicSupported', field(664, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'singleToDoublePrecisionPerfRatio', field(668, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'pageableMemoryAccess', field(672, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'concurrentManagedAccess', field(676, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'computePreemptionSupported', field(680, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'canUseHostPointerForRegisteredMem', field(684, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'cooperativeLaunch', field(688, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'cooperativeMultiDeviceLaunch', field(692, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'sharedMemPerBlockOptin', field(696, size_t))
-setattr(hipDeviceProp_tR0600, 'pageableMemoryAccessUsesHostPageTables', field(704, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'directManagedMemAccessFromHost', field(708, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'maxBlocksPerMultiProcessor', field(712, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'accessPolicyMaxWindowSize', field(716, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'reservedSharedMemPerBlock', field(720, size_t))
-setattr(hipDeviceProp_tR0600, 'hostRegisterSupported', field(728, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'sparseHipArraySupported', field(732, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'hostRegisterReadOnlySupported', field(736, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'timelineSemaphoreInteropSupported', field(740, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'memoryPoolsSupported', field(744, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'gpuDirectRDMASupported', field(748, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'gpuDirectRDMAFlushWritesOptions', field(752, ctypes.c_uint32))
-setattr(hipDeviceProp_tR0600, 'gpuDirectRDMAWritesOrdering', field(756, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'memoryPoolSupportedHandleTypes', field(760, ctypes.c_uint32))
-setattr(hipDeviceProp_tR0600, 'deferredMappingHipArraySupported', field(764, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'ipcEventSupported', field(768, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'clusterLaunch', field(772, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'unifiedFunctionPointers', field(776, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'reserved', field(780, Array(ctypes.c_int32, 63)))
-setattr(hipDeviceProp_tR0600, 'hipReserved', field(1032, Array(ctypes.c_int32, 32)))
-setattr(hipDeviceProp_tR0600, 'gcnArchName', field(1160, Array(ctypes.c_char, 256)))
-setattr(hipDeviceProp_tR0600, 'maxSharedMemoryPerMultiProcessor', field(1416, size_t))
-setattr(hipDeviceProp_tR0600, 'clockInstructionRate', field(1424, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'arch', field(1428, hipDeviceArch_t))
-setattr(hipDeviceProp_tR0600, 'hdpMemFlushCntl', field(1432, Pointer(ctypes.c_uint32)))
-setattr(hipDeviceProp_tR0600, 'hdpRegFlushCntl', field(1440, Pointer(ctypes.c_uint32)))
-setattr(hipDeviceProp_tR0600, 'cooperativeMultiDeviceUnmatchedFunc', field(1448, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'cooperativeMultiDeviceUnmatchedGridDim', field(1452, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'cooperativeMultiDeviceUnmatchedBlockDim', field(1456, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'cooperativeMultiDeviceUnmatchedSharedMem', field(1460, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'isLargeBar', field(1464, ctypes.c_int32))
-setattr(hipDeviceProp_tR0600, 'asicRevision', field(1468, ctypes.c_int32))
+@record
+class hipDeviceProp_tR0600:
+  SIZE = 1472
+  name: Annotated[(ctypes.c_char* 256), 0]
+  uuid: Annotated[hipUUID, 256]
+  luid: Annotated[(ctypes.c_char* 8), 272]
+  luidDeviceNodeMask: Annotated[ctypes.c_uint32, 280]
+  totalGlobalMem: Annotated[size_t, 288]
+  sharedMemPerBlock: Annotated[size_t, 296]
+  regsPerBlock: Annotated[ctypes.c_int32, 304]
+  warpSize: Annotated[ctypes.c_int32, 308]
+  memPitch: Annotated[size_t, 312]
+  maxThreadsPerBlock: Annotated[ctypes.c_int32, 320]
+  maxThreadsDim: Annotated[(ctypes.c_int32* 3), 324]
+  maxGridSize: Annotated[(ctypes.c_int32* 3), 336]
+  clockRate: Annotated[ctypes.c_int32, 348]
+  totalConstMem: Annotated[size_t, 352]
+  major: Annotated[ctypes.c_int32, 360]
+  minor: Annotated[ctypes.c_int32, 364]
+  textureAlignment: Annotated[size_t, 368]
+  texturePitchAlignment: Annotated[size_t, 376]
+  deviceOverlap: Annotated[ctypes.c_int32, 384]
+  multiProcessorCount: Annotated[ctypes.c_int32, 388]
+  kernelExecTimeoutEnabled: Annotated[ctypes.c_int32, 392]
+  integrated: Annotated[ctypes.c_int32, 396]
+  canMapHostMemory: Annotated[ctypes.c_int32, 400]
+  computeMode: Annotated[ctypes.c_int32, 404]
+  maxTexture1D: Annotated[ctypes.c_int32, 408]
+  maxTexture1DMipmap: Annotated[ctypes.c_int32, 412]
+  maxTexture1DLinear: Annotated[ctypes.c_int32, 416]
+  maxTexture2D: Annotated[(ctypes.c_int32* 2), 420]
+  maxTexture2DMipmap: Annotated[(ctypes.c_int32* 2), 428]
+  maxTexture2DLinear: Annotated[(ctypes.c_int32* 3), 436]
+  maxTexture2DGather: Annotated[(ctypes.c_int32* 2), 448]
+  maxTexture3D: Annotated[(ctypes.c_int32* 3), 456]
+  maxTexture3DAlt: Annotated[(ctypes.c_int32* 3), 468]
+  maxTextureCubemap: Annotated[ctypes.c_int32, 480]
+  maxTexture1DLayered: Annotated[(ctypes.c_int32* 2), 484]
+  maxTexture2DLayered: Annotated[(ctypes.c_int32* 3), 492]
+  maxTextureCubemapLayered: Annotated[(ctypes.c_int32* 2), 504]
+  maxSurface1D: Annotated[ctypes.c_int32, 512]
+  maxSurface2D: Annotated[(ctypes.c_int32* 2), 516]
+  maxSurface3D: Annotated[(ctypes.c_int32* 3), 524]
+  maxSurface1DLayered: Annotated[(ctypes.c_int32* 2), 536]
+  maxSurface2DLayered: Annotated[(ctypes.c_int32* 3), 544]
+  maxSurfaceCubemap: Annotated[ctypes.c_int32, 556]
+  maxSurfaceCubemapLayered: Annotated[(ctypes.c_int32* 2), 560]
+  surfaceAlignment: Annotated[size_t, 568]
+  concurrentKernels: Annotated[ctypes.c_int32, 576]
+  ECCEnabled: Annotated[ctypes.c_int32, 580]
+  pciBusID: Annotated[ctypes.c_int32, 584]
+  pciDeviceID: Annotated[ctypes.c_int32, 588]
+  pciDomainID: Annotated[ctypes.c_int32, 592]
+  tccDriver: Annotated[ctypes.c_int32, 596]
+  asyncEngineCount: Annotated[ctypes.c_int32, 600]
+  unifiedAddressing: Annotated[ctypes.c_int32, 604]
+  memoryClockRate: Annotated[ctypes.c_int32, 608]
+  memoryBusWidth: Annotated[ctypes.c_int32, 612]
+  l2CacheSize: Annotated[ctypes.c_int32, 616]
+  persistingL2CacheMaxSize: Annotated[ctypes.c_int32, 620]
+  maxThreadsPerMultiProcessor: Annotated[ctypes.c_int32, 624]
+  streamPrioritiesSupported: Annotated[ctypes.c_int32, 628]
+  globalL1CacheSupported: Annotated[ctypes.c_int32, 632]
+  localL1CacheSupported: Annotated[ctypes.c_int32, 636]
+  sharedMemPerMultiprocessor: Annotated[size_t, 640]
+  regsPerMultiprocessor: Annotated[ctypes.c_int32, 648]
+  managedMemory: Annotated[ctypes.c_int32, 652]
+  isMultiGpuBoard: Annotated[ctypes.c_int32, 656]
+  multiGpuBoardGroupID: Annotated[ctypes.c_int32, 660]
+  hostNativeAtomicSupported: Annotated[ctypes.c_int32, 664]
+  singleToDoublePrecisionPerfRatio: Annotated[ctypes.c_int32, 668]
+  pageableMemoryAccess: Annotated[ctypes.c_int32, 672]
+  concurrentManagedAccess: Annotated[ctypes.c_int32, 676]
+  computePreemptionSupported: Annotated[ctypes.c_int32, 680]
+  canUseHostPointerForRegisteredMem: Annotated[ctypes.c_int32, 684]
+  cooperativeLaunch: Annotated[ctypes.c_int32, 688]
+  cooperativeMultiDeviceLaunch: Annotated[ctypes.c_int32, 692]
+  sharedMemPerBlockOptin: Annotated[size_t, 696]
+  pageableMemoryAccessUsesHostPageTables: Annotated[ctypes.c_int32, 704]
+  directManagedMemAccessFromHost: Annotated[ctypes.c_int32, 708]
+  maxBlocksPerMultiProcessor: Annotated[ctypes.c_int32, 712]
+  accessPolicyMaxWindowSize: Annotated[ctypes.c_int32, 716]
+  reservedSharedMemPerBlock: Annotated[size_t, 720]
+  hostRegisterSupported: Annotated[ctypes.c_int32, 728]
+  sparseHipArraySupported: Annotated[ctypes.c_int32, 732]
+  hostRegisterReadOnlySupported: Annotated[ctypes.c_int32, 736]
+  timelineSemaphoreInteropSupported: Annotated[ctypes.c_int32, 740]
+  memoryPoolsSupported: Annotated[ctypes.c_int32, 744]
+  gpuDirectRDMASupported: Annotated[ctypes.c_int32, 748]
+  gpuDirectRDMAFlushWritesOptions: Annotated[ctypes.c_uint32, 752]
+  gpuDirectRDMAWritesOrdering: Annotated[ctypes.c_int32, 756]
+  memoryPoolSupportedHandleTypes: Annotated[ctypes.c_uint32, 760]
+  deferredMappingHipArraySupported: Annotated[ctypes.c_int32, 764]
+  ipcEventSupported: Annotated[ctypes.c_int32, 768]
+  clusterLaunch: Annotated[ctypes.c_int32, 772]
+  unifiedFunctionPointers: Annotated[ctypes.c_int32, 776]
+  reserved: Annotated[(ctypes.c_int32* 63), 780]
+  hipReserved: Annotated[(ctypes.c_int32* 32), 1032]
+  gcnArchName: Annotated[(ctypes.c_char* 256), 1160]
+  maxSharedMemoryPerMultiProcessor: Annotated[size_t, 1416]
+  clockInstructionRate: Annotated[ctypes.c_int32, 1424]
+  arch: Annotated[hipDeviceArch_t, 1428]
+  hdpMemFlushCntl: Annotated[ctypes.POINTER(ctypes.c_uint32), 1432]
+  hdpRegFlushCntl: Annotated[ctypes.POINTER(ctypes.c_uint32), 1440]
+  cooperativeMultiDeviceUnmatchedFunc: Annotated[ctypes.c_int32, 1448]
+  cooperativeMultiDeviceUnmatchedGridDim: Annotated[ctypes.c_int32, 1452]
+  cooperativeMultiDeviceUnmatchedBlockDim: Annotated[ctypes.c_int32, 1456]
+  cooperativeMultiDeviceUnmatchedSharedMem: Annotated[ctypes.c_int32, 1460]
+  isLargeBar: Annotated[ctypes.c_int32, 1464]
+  asicRevision: Annotated[ctypes.c_int32, 1468]
 hipMemoryType = CEnum(ctypes.c_uint32)
 hipMemoryTypeUnregistered = hipMemoryType.define('hipMemoryTypeUnregistered', 0)
 hipMemoryTypeHost = hipMemoryType.define('hipMemoryTypeHost', 1)
@@ -350,15 +352,15 @@ hipMemoryTypeManaged = hipMemoryType.define('hipMemoryTypeManaged', 3)
 hipMemoryTypeArray = hipMemoryType.define('hipMemoryTypeArray', 10)
 hipMemoryTypeUnified = hipMemoryType.define('hipMemoryTypeUnified', 11)
 
-class hipPointerAttribute_t(Struct): pass
-hipPointerAttribute_t.SIZE = 32
-hipPointerAttribute_t._fields_ = ['type', 'device', 'devicePointer', 'hostPointer', 'isManaged', 'allocationFlags']
-setattr(hipPointerAttribute_t, 'type', field(0, hipMemoryType))
-setattr(hipPointerAttribute_t, 'device', field(4, ctypes.c_int32))
-setattr(hipPointerAttribute_t, 'devicePointer', field(8, ctypes.c_void_p))
-setattr(hipPointerAttribute_t, 'hostPointer', field(16, ctypes.c_void_p))
-setattr(hipPointerAttribute_t, 'isManaged', field(24, ctypes.c_int32))
-setattr(hipPointerAttribute_t, 'allocationFlags', field(28, ctypes.c_uint32))
+@record
+class hipPointerAttribute_t:
+  SIZE = 32
+  type: Annotated[hipMemoryType, 0]
+  device: Annotated[ctypes.c_int32, 4]
+  devicePointer: Annotated[ctypes.POINTER(None), 8]
+  hostPointer: Annotated[ctypes.POINTER(None), 16]
+  isManaged: Annotated[ctypes.c_int32, 24]
+  allocationFlags: Annotated[ctypes.c_uint32, 28]
 hipDeviceAttribute_t = CEnum(ctypes.c_uint32)
 hipDeviceAttributeCudaCompatibleBegin = hipDeviceAttribute_t.define('hipDeviceAttributeCudaCompatibleBegin', 0)
 hipDeviceAttributeEccEnabled = hipDeviceAttribute_t.define('hipDeviceAttributeEccEnabled', 0)
@@ -496,10 +498,10 @@ hipGPUDirectRDMAWritesOrderingNone = hipGPUDirectRDMAWritesOrdering.define('hipG
 hipGPUDirectRDMAWritesOrderingOwner = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingOwner', 100)
 hipGPUDirectRDMAWritesOrderingAllDevices = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingAllDevices', 200)
 
-@dll.bind((), hipError_t)
-def hip_init(): ...
-class ihipCtx_t(Struct): pass
-hipCtx_t = Pointer(ihipCtx_t)
+@dll.bind
+def hip_init() -> hipError_t: ...
+class ihipCtx_t(ctypes.Structure): pass
+hipCtx_t = ctypes.POINTER(ihipCtx_t)
 hipDevice_t = ctypes.c_int32
 hipDeviceP2PAttr = CEnum(ctypes.c_uint32)
 hipDevP2PAttrPerformanceRank = hipDeviceP2PAttr.define('hipDevP2PAttrPerformanceRank', 0)
@@ -507,33 +509,33 @@ hipDevP2PAttrAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrAccessSuppo
 hipDevP2PAttrNativeAtomicSupported = hipDeviceP2PAttr.define('hipDevP2PAttrNativeAtomicSupported', 2)
 hipDevP2PAttrHipArrayAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrHipArrayAccessSupported', 3)
 
-class hipIpcMemHandle_st(Struct): pass
-hipIpcMemHandle_st.SIZE = 64
-hipIpcMemHandle_st._fields_ = ['reserved']
-setattr(hipIpcMemHandle_st, 'reserved', field(0, Array(ctypes.c_char, 64)))
+@record
+class hipIpcMemHandle_st:
+  SIZE = 64
+  reserved: Annotated[(ctypes.c_char* 64), 0]
 hipIpcMemHandle_t = hipIpcMemHandle_st
-class hipIpcEventHandle_st(Struct): pass
-hipIpcEventHandle_st.SIZE = 64
-hipIpcEventHandle_st._fields_ = ['reserved']
-setattr(hipIpcEventHandle_st, 'reserved', field(0, Array(ctypes.c_char, 64)))
+@record
+class hipIpcEventHandle_st:
+  SIZE = 64
+  reserved: Annotated[(ctypes.c_char* 64), 0]
 hipIpcEventHandle_t = hipIpcEventHandle_st
-class ihipModule_t(Struct): pass
-hipModule_t = Pointer(ihipModule_t)
-class ihipMemPoolHandle_t(Struct): pass
-hipMemPool_t = Pointer(ihipMemPoolHandle_t)
-class hipFuncAttributes(Struct): pass
-hipFuncAttributes.SIZE = 56
-hipFuncAttributes._fields_ = ['binaryVersion', 'cacheModeCA', 'constSizeBytes', 'localSizeBytes', 'maxDynamicSharedSizeBytes', 'maxThreadsPerBlock', 'numRegs', 'preferredShmemCarveout', 'ptxVersion', 'sharedSizeBytes']
-setattr(hipFuncAttributes, 'binaryVersion', field(0, ctypes.c_int32))
-setattr(hipFuncAttributes, 'cacheModeCA', field(4, ctypes.c_int32))
-setattr(hipFuncAttributes, 'constSizeBytes', field(8, size_t))
-setattr(hipFuncAttributes, 'localSizeBytes', field(16, size_t))
-setattr(hipFuncAttributes, 'maxDynamicSharedSizeBytes', field(24, ctypes.c_int32))
-setattr(hipFuncAttributes, 'maxThreadsPerBlock', field(28, ctypes.c_int32))
-setattr(hipFuncAttributes, 'numRegs', field(32, ctypes.c_int32))
-setattr(hipFuncAttributes, 'preferredShmemCarveout', field(36, ctypes.c_int32))
-setattr(hipFuncAttributes, 'ptxVersion', field(40, ctypes.c_int32))
-setattr(hipFuncAttributes, 'sharedSizeBytes', field(48, size_t))
+class ihipModule_t(ctypes.Structure): pass
+hipModule_t = ctypes.POINTER(ihipModule_t)
+class ihipMemPoolHandle_t(ctypes.Structure): pass
+hipMemPool_t = ctypes.POINTER(ihipMemPoolHandle_t)
+@record
+class hipFuncAttributes:
+  SIZE = 56
+  binaryVersion: Annotated[ctypes.c_int32, 0]
+  cacheModeCA: Annotated[ctypes.c_int32, 4]
+  constSizeBytes: Annotated[size_t, 8]
+  localSizeBytes: Annotated[size_t, 16]
+  maxDynamicSharedSizeBytes: Annotated[ctypes.c_int32, 24]
+  maxThreadsPerBlock: Annotated[ctypes.c_int32, 28]
+  numRegs: Annotated[ctypes.c_int32, 32]
+  preferredShmemCarveout: Annotated[ctypes.c_int32, 36]
+  ptxVersion: Annotated[ctypes.c_int32, 40]
+  sharedSizeBytes: Annotated[size_t, 48]
 hipLimit_t = CEnum(ctypes.c_uint32)
 hipLimitStackSize = hipLimit_t.define('hipLimitStackSize', 0)
 hipLimitPrintfFifoSize = hipLimit_t.define('hipLimitPrintfFifoSize', 1)
@@ -576,21 +578,21 @@ hipMemLocationType = CEnum(ctypes.c_uint32)
 hipMemLocationTypeInvalid = hipMemLocationType.define('hipMemLocationTypeInvalid', 0)
 hipMemLocationTypeDevice = hipMemLocationType.define('hipMemLocationTypeDevice', 1)
 
-class hipMemLocation(Struct): pass
-hipMemLocation.SIZE = 8
-hipMemLocation._fields_ = ['type', 'id']
-setattr(hipMemLocation, 'type', field(0, hipMemLocationType))
-setattr(hipMemLocation, 'id', field(4, ctypes.c_int32))
+@record
+class hipMemLocation:
+  SIZE = 8
+  type: Annotated[hipMemLocationType, 0]
+  id: Annotated[ctypes.c_int32, 4]
 hipMemAccessFlags = CEnum(ctypes.c_uint32)
 hipMemAccessFlagsProtNone = hipMemAccessFlags.define('hipMemAccessFlagsProtNone', 0)
 hipMemAccessFlagsProtRead = hipMemAccessFlags.define('hipMemAccessFlagsProtRead', 1)
 hipMemAccessFlagsProtReadWrite = hipMemAccessFlags.define('hipMemAccessFlagsProtReadWrite', 3)
 
-class hipMemAccessDesc(Struct): pass
-hipMemAccessDesc.SIZE = 12
-hipMemAccessDesc._fields_ = ['location', 'flags']
-setattr(hipMemAccessDesc, 'location', field(0, hipMemLocation))
-setattr(hipMemAccessDesc, 'flags', field(8, hipMemAccessFlags))
+@record
+class hipMemAccessDesc:
+  SIZE = 12
+  location: Annotated[hipMemLocation, 0]
+  flags: Annotated[hipMemAccessFlags, 8]
 hipMemAllocationType = CEnum(ctypes.c_uint32)
 hipMemAllocationTypeInvalid = hipMemAllocationType.define('hipMemAllocationTypeInvalid', 0)
 hipMemAllocationTypePinned = hipMemAllocationType.define('hipMemAllocationTypePinned', 1)
@@ -602,19 +604,19 @@ hipMemHandleTypePosixFileDescriptor = hipMemAllocationHandleType.define('hipMemH
 hipMemHandleTypeWin32 = hipMemAllocationHandleType.define('hipMemHandleTypeWin32', 2)
 hipMemHandleTypeWin32Kmt = hipMemAllocationHandleType.define('hipMemHandleTypeWin32Kmt', 4)
 
-class hipMemPoolProps(Struct): pass
-hipMemPoolProps.SIZE = 88
-hipMemPoolProps._fields_ = ['allocType', 'handleTypes', 'location', 'win32SecurityAttributes', 'maxSize', 'reserved']
-setattr(hipMemPoolProps, 'allocType', field(0, hipMemAllocationType))
-setattr(hipMemPoolProps, 'handleTypes', field(4, hipMemAllocationHandleType))
-setattr(hipMemPoolProps, 'location', field(8, hipMemLocation))
-setattr(hipMemPoolProps, 'win32SecurityAttributes', field(16, ctypes.c_void_p))
-setattr(hipMemPoolProps, 'maxSize', field(24, size_t))
-setattr(hipMemPoolProps, 'reserved', field(32, Array(ctypes.c_ubyte, 56)))
-class hipMemPoolPtrExportData(Struct): pass
-hipMemPoolPtrExportData.SIZE = 64
-hipMemPoolPtrExportData._fields_ = ['reserved']
-setattr(hipMemPoolPtrExportData, 'reserved', field(0, Array(ctypes.c_ubyte, 64)))
+@record
+class hipMemPoolProps:
+  SIZE = 88
+  allocType: Annotated[hipMemAllocationType, 0]
+  handleTypes: Annotated[hipMemAllocationHandleType, 4]
+  location: Annotated[hipMemLocation, 8]
+  win32SecurityAttributes: Annotated[ctypes.POINTER(None), 16]
+  maxSize: Annotated[size_t, 24]
+  reserved: Annotated[(ctypes.c_ubyte* 56), 32]
+@record
+class hipMemPoolPtrExportData:
+  SIZE = 64
+  reserved: Annotated[(ctypes.c_ubyte* 64), 0]
 hipJitOption = CEnum(ctypes.c_uint32)
 hipJitOptionMaxRegisters = hipJitOption.define('hipJitOptionMaxRegisters', 0)
 hipJitOptionThreadsPerBlock = hipJitOption.define('hipJitOptionThreadsPerBlock', 1)
@@ -651,29 +653,29 @@ hipSharedMemBankSizeDefault = hipSharedMemConfig.define('hipSharedMemBankSizeDef
 hipSharedMemBankSizeFourByte = hipSharedMemConfig.define('hipSharedMemBankSizeFourByte', 1)
 hipSharedMemBankSizeEightByte = hipSharedMemConfig.define('hipSharedMemBankSizeEightByte', 2)
 
-class hipLaunchParams_t(Struct): pass
-hipLaunchParams_t.SIZE = 56
-hipLaunchParams_t._fields_ = ['func', 'gridDim', 'blockDim', 'args', 'sharedMem', 'stream']
-setattr(hipLaunchParams_t, 'func', field(0, ctypes.c_void_p))
-setattr(hipLaunchParams_t, 'gridDim', field(8, dim3))
-setattr(hipLaunchParams_t, 'blockDim', field(20, dim3))
-setattr(hipLaunchParams_t, 'args', field(32, Pointer(ctypes.c_void_p)))
-setattr(hipLaunchParams_t, 'sharedMem', field(40, size_t))
-setattr(hipLaunchParams_t, 'stream', field(48, hipStream_t))
+@record
+class hipLaunchParams_t:
+  SIZE = 56
+  func: Annotated[ctypes.POINTER(None), 0]
+  gridDim: Annotated[dim3, 8]
+  blockDim: Annotated[dim3, 20]
+  args: Annotated[ctypes.POINTER(ctypes.POINTER(None)), 32]
+  sharedMem: Annotated[size_t, 40]
+  stream: Annotated[hipStream_t, 48]
 hipLaunchParams = hipLaunchParams_t
-class hipFunctionLaunchParams_t(Struct): pass
-hipFunctionLaunchParams_t.SIZE = 56
-hipFunctionLaunchParams_t._fields_ = ['function', 'gridDimX', 'gridDimY', 'gridDimZ', 'blockDimX', 'blockDimY', 'blockDimZ', 'sharedMemBytes', 'hStream', 'kernelParams']
-setattr(hipFunctionLaunchParams_t, 'function', field(0, hipFunction_t))
-setattr(hipFunctionLaunchParams_t, 'gridDimX', field(8, ctypes.c_uint32))
-setattr(hipFunctionLaunchParams_t, 'gridDimY', field(12, ctypes.c_uint32))
-setattr(hipFunctionLaunchParams_t, 'gridDimZ', field(16, ctypes.c_uint32))
-setattr(hipFunctionLaunchParams_t, 'blockDimX', field(20, ctypes.c_uint32))
-setattr(hipFunctionLaunchParams_t, 'blockDimY', field(24, ctypes.c_uint32))
-setattr(hipFunctionLaunchParams_t, 'blockDimZ', field(28, ctypes.c_uint32))
-setattr(hipFunctionLaunchParams_t, 'sharedMemBytes', field(32, ctypes.c_uint32))
-setattr(hipFunctionLaunchParams_t, 'hStream', field(40, hipStream_t))
-setattr(hipFunctionLaunchParams_t, 'kernelParams', field(48, Pointer(ctypes.c_void_p)))
+@record
+class hipFunctionLaunchParams_t:
+  SIZE = 56
+  function: Annotated[hipFunction_t, 0]
+  gridDimX: Annotated[ctypes.c_uint32, 8]
+  gridDimY: Annotated[ctypes.c_uint32, 12]
+  gridDimZ: Annotated[ctypes.c_uint32, 16]
+  blockDimX: Annotated[ctypes.c_uint32, 20]
+  blockDimY: Annotated[ctypes.c_uint32, 24]
+  blockDimZ: Annotated[ctypes.c_uint32, 28]
+  sharedMemBytes: Annotated[ctypes.c_uint32, 32]
+  hStream: Annotated[hipStream_t, 40]
+  kernelParams: Annotated[ctypes.POINTER(ctypes.POINTER(None)), 48]
 hipFunctionLaunchParams = hipFunctionLaunchParams_t
 hipExternalMemoryHandleType_enum = CEnum(ctypes.c_uint32)
 hipExternalMemoryHandleTypeOpaqueFd = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueFd', 1)
@@ -686,64 +688,64 @@ hipExternalMemoryHandleTypeD3D11ResourceKmt = hipExternalMemoryHandleType_enum.d
 hipExternalMemoryHandleTypeNvSciBuf = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeNvSciBuf', 8)
 
 hipExternalMemoryHandleType = hipExternalMemoryHandleType_enum
-class hipExternalMemoryHandleDesc_st(Struct): pass
-class _anonunion1(Union): pass
-class _anonstruct2(Struct): pass
-_anonstruct2.SIZE = 16
-_anonstruct2._fields_ = ['handle', 'name']
-setattr(_anonstruct2, 'handle', field(0, ctypes.c_void_p))
-setattr(_anonstruct2, 'name', field(8, ctypes.c_void_p))
-_anonunion1.SIZE = 16
-_anonunion1._fields_ = ['fd', 'win32', 'nvSciBufObject']
-setattr(_anonunion1, 'fd', field(0, ctypes.c_int32))
-setattr(_anonunion1, 'win32', field(0, _anonstruct2))
-setattr(_anonunion1, 'nvSciBufObject', field(0, ctypes.c_void_p))
-hipExternalMemoryHandleDesc_st.SIZE = 104
-hipExternalMemoryHandleDesc_st._fields_ = ['type', 'handle', 'size', 'flags', 'reserved']
-setattr(hipExternalMemoryHandleDesc_st, 'type', field(0, hipExternalMemoryHandleType))
-setattr(hipExternalMemoryHandleDesc_st, 'handle', field(8, _anonunion1))
-setattr(hipExternalMemoryHandleDesc_st, 'size', field(24, ctypes.c_uint64))
-setattr(hipExternalMemoryHandleDesc_st, 'flags', field(32, ctypes.c_uint32))
-setattr(hipExternalMemoryHandleDesc_st, 'reserved', field(36, Array(ctypes.c_uint32, 16)))
+@record
+class hipExternalMemoryHandleDesc_st:
+  SIZE = 104
+  type: Annotated[hipExternalMemoryHandleType, 0]
+  handle: Annotated[_anonunion1, 8]
+  size: Annotated[ctypes.c_uint64, 24]
+  flags: Annotated[ctypes.c_uint32, 32]
+  reserved: Annotated[(ctypes.c_uint32* 16), 36]
+@record
+class _anonunion1:
+  SIZE = 16
+  fd: Annotated[ctypes.c_int32, 0]
+  win32: Annotated[_anonstruct2, 0]
+  nvSciBufObject: Annotated[ctypes.POINTER(None), 0]
+@record
+class _anonstruct2:
+  SIZE = 16
+  handle: Annotated[ctypes.POINTER(None), 0]
+  name: Annotated[ctypes.POINTER(None), 8]
 hipExternalMemoryHandleDesc = hipExternalMemoryHandleDesc_st
-class hipExternalMemoryBufferDesc_st(Struct): pass
-hipExternalMemoryBufferDesc_st.SIZE = 88
-hipExternalMemoryBufferDesc_st._fields_ = ['offset', 'size', 'flags', 'reserved']
-setattr(hipExternalMemoryBufferDesc_st, 'offset', field(0, ctypes.c_uint64))
-setattr(hipExternalMemoryBufferDesc_st, 'size', field(8, ctypes.c_uint64))
-setattr(hipExternalMemoryBufferDesc_st, 'flags', field(16, ctypes.c_uint32))
-setattr(hipExternalMemoryBufferDesc_st, 'reserved', field(20, Array(ctypes.c_uint32, 16)))
+@record
+class hipExternalMemoryBufferDesc_st:
+  SIZE = 88
+  offset: Annotated[ctypes.c_uint64, 0]
+  size: Annotated[ctypes.c_uint64, 8]
+  flags: Annotated[ctypes.c_uint32, 16]
+  reserved: Annotated[(ctypes.c_uint32* 16), 20]
 hipExternalMemoryBufferDesc = hipExternalMemoryBufferDesc_st
-class hipExternalMemoryMipmappedArrayDesc_st(Struct): pass
-class hipChannelFormatDesc(Struct): pass
+@record
+class hipExternalMemoryMipmappedArrayDesc_st:
+  SIZE = 64
+  offset: Annotated[ctypes.c_uint64, 0]
+  formatDesc: Annotated[hipChannelFormatDesc, 8]
+  extent: Annotated[hipExtent, 32]
+  flags: Annotated[ctypes.c_uint32, 56]
+  numLevels: Annotated[ctypes.c_uint32, 60]
+@record
+class hipChannelFormatDesc:
+  SIZE = 20
+  x: Annotated[ctypes.c_int32, 0]
+  y: Annotated[ctypes.c_int32, 4]
+  z: Annotated[ctypes.c_int32, 8]
+  w: Annotated[ctypes.c_int32, 12]
+  f: Annotated[hipChannelFormatKind, 16]
 hipChannelFormatKind = CEnum(ctypes.c_uint32)
 hipChannelFormatKindSigned = hipChannelFormatKind.define('hipChannelFormatKindSigned', 0)
 hipChannelFormatKindUnsigned = hipChannelFormatKind.define('hipChannelFormatKindUnsigned', 1)
 hipChannelFormatKindFloat = hipChannelFormatKind.define('hipChannelFormatKindFloat', 2)
 hipChannelFormatKindNone = hipChannelFormatKind.define('hipChannelFormatKindNone', 3)
 
-hipChannelFormatDesc.SIZE = 20
-hipChannelFormatDesc._fields_ = ['x', 'y', 'z', 'w', 'f']
-setattr(hipChannelFormatDesc, 'x', field(0, ctypes.c_int32))
-setattr(hipChannelFormatDesc, 'y', field(4, ctypes.c_int32))
-setattr(hipChannelFormatDesc, 'z', field(8, ctypes.c_int32))
-setattr(hipChannelFormatDesc, 'w', field(12, ctypes.c_int32))
-setattr(hipChannelFormatDesc, 'f', field(16, hipChannelFormatKind))
-class hipExtent(Struct): pass
-hipExtent.SIZE = 24
-hipExtent._fields_ = ['width', 'height', 'depth']
-setattr(hipExtent, 'width', field(0, size_t))
-setattr(hipExtent, 'height', field(8, size_t))
-setattr(hipExtent, 'depth', field(16, size_t))
-hipExternalMemoryMipmappedArrayDesc_st.SIZE = 64
-hipExternalMemoryMipmappedArrayDesc_st._fields_ = ['offset', 'formatDesc', 'extent', 'flags', 'numLevels']
-setattr(hipExternalMemoryMipmappedArrayDesc_st, 'offset', field(0, ctypes.c_uint64))
-setattr(hipExternalMemoryMipmappedArrayDesc_st, 'formatDesc', field(8, hipChannelFormatDesc))
-setattr(hipExternalMemoryMipmappedArrayDesc_st, 'extent', field(32, hipExtent))
-setattr(hipExternalMemoryMipmappedArrayDesc_st, 'flags', field(56, ctypes.c_uint32))
-setattr(hipExternalMemoryMipmappedArrayDesc_st, 'numLevels', field(60, ctypes.c_uint32))
+@record
+class hipExtent:
+  SIZE = 24
+  width: Annotated[size_t, 0]
+  height: Annotated[size_t, 8]
+  depth: Annotated[size_t, 16]
 hipExternalMemoryMipmappedArrayDesc = hipExternalMemoryMipmappedArrayDesc_st
-hipExternalMemory_t = ctypes.c_void_p
+hipExternalMemory_t = ctypes.POINTER(None)
 hipExternalSemaphoreHandleType_enum = CEnum(ctypes.c_uint32)
 hipExternalSemaphoreHandleTypeOpaqueFd = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueFd', 1)
 hipExternalSemaphoreHandleTypeOpaqueWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueWin32', 2)
@@ -757,83 +759,83 @@ hipExternalSemaphoreHandleTypeTimelineSemaphoreFd = hipExternalSemaphoreHandleTy
 hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32', 10)
 
 hipExternalSemaphoreHandleType = hipExternalSemaphoreHandleType_enum
-class hipExternalSemaphoreHandleDesc_st(Struct): pass
-class _anonunion3(Union): pass
-class _anonstruct4(Struct): pass
-_anonstruct4.SIZE = 16
-_anonstruct4._fields_ = ['handle', 'name']
-setattr(_anonstruct4, 'handle', field(0, ctypes.c_void_p))
-setattr(_anonstruct4, 'name', field(8, ctypes.c_void_p))
-_anonunion3.SIZE = 16
-_anonunion3._fields_ = ['fd', 'win32', 'NvSciSyncObj']
-setattr(_anonunion3, 'fd', field(0, ctypes.c_int32))
-setattr(_anonunion3, 'win32', field(0, _anonstruct4))
-setattr(_anonunion3, 'NvSciSyncObj', field(0, ctypes.c_void_p))
-hipExternalSemaphoreHandleDesc_st.SIZE = 96
-hipExternalSemaphoreHandleDesc_st._fields_ = ['type', 'handle', 'flags', 'reserved']
-setattr(hipExternalSemaphoreHandleDesc_st, 'type', field(0, hipExternalSemaphoreHandleType))
-setattr(hipExternalSemaphoreHandleDesc_st, 'handle', field(8, _anonunion3))
-setattr(hipExternalSemaphoreHandleDesc_st, 'flags', field(24, ctypes.c_uint32))
-setattr(hipExternalSemaphoreHandleDesc_st, 'reserved', field(28, Array(ctypes.c_uint32, 16)))
+@record
+class hipExternalSemaphoreHandleDesc_st:
+  SIZE = 96
+  type: Annotated[hipExternalSemaphoreHandleType, 0]
+  handle: Annotated[_anonunion3, 8]
+  flags: Annotated[ctypes.c_uint32, 24]
+  reserved: Annotated[(ctypes.c_uint32* 16), 28]
+@record
+class _anonunion3:
+  SIZE = 16
+  fd: Annotated[ctypes.c_int32, 0]
+  win32: Annotated[_anonstruct4, 0]
+  NvSciSyncObj: Annotated[ctypes.POINTER(None), 0]
+@record
+class _anonstruct4:
+  SIZE = 16
+  handle: Annotated[ctypes.POINTER(None), 0]
+  name: Annotated[ctypes.POINTER(None), 8]
 hipExternalSemaphoreHandleDesc = hipExternalSemaphoreHandleDesc_st
-hipExternalSemaphore_t = ctypes.c_void_p
-class hipExternalSemaphoreSignalParams_st(Struct): pass
-class _anonstruct5(Struct): pass
-class _anonstruct6(Struct): pass
-_anonstruct6.SIZE = 8
-_anonstruct6._fields_ = ['value']
-setattr(_anonstruct6, 'value', field(0, ctypes.c_uint64))
-class _anonunion7(Union): pass
-_anonunion7.SIZE = 8
-_anonunion7._fields_ = ['fence', 'reserved']
-setattr(_anonunion7, 'fence', field(0, ctypes.c_void_p))
-setattr(_anonunion7, 'reserved', field(0, ctypes.c_uint64))
-class _anonstruct8(Struct): pass
-_anonstruct8.SIZE = 8
-_anonstruct8._fields_ = ['key']
-setattr(_anonstruct8, 'key', field(0, ctypes.c_uint64))
-_anonstruct5.SIZE = 72
-_anonstruct5._fields_ = ['fence', 'nvSciSync', 'keyedMutex', 'reserved']
-setattr(_anonstruct5, 'fence', field(0, _anonstruct6))
-setattr(_anonstruct5, 'nvSciSync', field(8, _anonunion7))
-setattr(_anonstruct5, 'keyedMutex', field(16, _anonstruct8))
-setattr(_anonstruct5, 'reserved', field(24, Array(ctypes.c_uint32, 12)))
-hipExternalSemaphoreSignalParams_st.SIZE = 144
-hipExternalSemaphoreSignalParams_st._fields_ = ['params', 'flags', 'reserved']
-setattr(hipExternalSemaphoreSignalParams_st, 'params', field(0, _anonstruct5))
-setattr(hipExternalSemaphoreSignalParams_st, 'flags', field(72, ctypes.c_uint32))
-setattr(hipExternalSemaphoreSignalParams_st, 'reserved', field(76, Array(ctypes.c_uint32, 16)))
+hipExternalSemaphore_t = ctypes.POINTER(None)
+@record
+class hipExternalSemaphoreSignalParams_st:
+  SIZE = 144
+  params: Annotated[_anonstruct5, 0]
+  flags: Annotated[ctypes.c_uint32, 72]
+  reserved: Annotated[(ctypes.c_uint32* 16), 76]
+@record
+class _anonstruct5:
+  SIZE = 72
+  fence: Annotated[_anonstruct6, 0]
+  nvSciSync: Annotated[_anonunion7, 8]
+  keyedMutex: Annotated[_anonstruct8, 16]
+  reserved: Annotated[(ctypes.c_uint32* 12), 24]
+@record
+class _anonstruct6:
+  SIZE = 8
+  value: Annotated[ctypes.c_uint64, 0]
+@record
+class _anonunion7:
+  SIZE = 8
+  fence: Annotated[ctypes.POINTER(None), 0]
+  reserved: Annotated[ctypes.c_uint64, 0]
+@record
+class _anonstruct8:
+  SIZE = 8
+  key: Annotated[ctypes.c_uint64, 0]
 hipExternalSemaphoreSignalParams = hipExternalSemaphoreSignalParams_st
-class hipExternalSemaphoreWaitParams_st(Struct): pass
-class _anonstruct9(Struct): pass
-class _anonstruct10(Struct): pass
-_anonstruct10.SIZE = 8
-_anonstruct10._fields_ = ['value']
-setattr(_anonstruct10, 'value', field(0, ctypes.c_uint64))
-class _anonunion11(Union): pass
-_anonunion11.SIZE = 8
-_anonunion11._fields_ = ['fence', 'reserved']
-setattr(_anonunion11, 'fence', field(0, ctypes.c_void_p))
-setattr(_anonunion11, 'reserved', field(0, ctypes.c_uint64))
-class _anonstruct12(Struct): pass
-_anonstruct12.SIZE = 16
-_anonstruct12._fields_ = ['key', 'timeoutMs']
-setattr(_anonstruct12, 'key', field(0, ctypes.c_uint64))
-setattr(_anonstruct12, 'timeoutMs', field(8, ctypes.c_uint32))
-_anonstruct9.SIZE = 72
-_anonstruct9._fields_ = ['fence', 'nvSciSync', 'keyedMutex', 'reserved']
-setattr(_anonstruct9, 'fence', field(0, _anonstruct10))
-setattr(_anonstruct9, 'nvSciSync', field(8, _anonunion11))
-setattr(_anonstruct9, 'keyedMutex', field(16, _anonstruct12))
-setattr(_anonstruct9, 'reserved', field(32, Array(ctypes.c_uint32, 10)))
-hipExternalSemaphoreWaitParams_st.SIZE = 144
-hipExternalSemaphoreWaitParams_st._fields_ = ['params', 'flags', 'reserved']
-setattr(hipExternalSemaphoreWaitParams_st, 'params', field(0, _anonstruct9))
-setattr(hipExternalSemaphoreWaitParams_st, 'flags', field(72, ctypes.c_uint32))
-setattr(hipExternalSemaphoreWaitParams_st, 'reserved', field(76, Array(ctypes.c_uint32, 16)))
+@record
+class hipExternalSemaphoreWaitParams_st:
+  SIZE = 144
+  params: Annotated[_anonstruct9, 0]
+  flags: Annotated[ctypes.c_uint32, 72]
+  reserved: Annotated[(ctypes.c_uint32* 16), 76]
+@record
+class _anonstruct9:
+  SIZE = 72
+  fence: Annotated[_anonstruct10, 0]
+  nvSciSync: Annotated[_anonunion11, 8]
+  keyedMutex: Annotated[_anonstruct12, 16]
+  reserved: Annotated[(ctypes.c_uint32* 10), 32]
+@record
+class _anonstruct10:
+  SIZE = 8
+  value: Annotated[ctypes.c_uint64, 0]
+@record
+class _anonunion11:
+  SIZE = 8
+  fence: Annotated[ctypes.POINTER(None), 0]
+  reserved: Annotated[ctypes.c_uint64, 0]
+@record
+class _anonstruct12:
+  SIZE = 16
+  key: Annotated[ctypes.c_uint64, 0]
+  timeoutMs: Annotated[ctypes.c_uint32, 8]
 hipExternalSemaphoreWaitParams = hipExternalSemaphoreWaitParams_st
-@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_uint32)), None)
-def __hipGetPCH(pch, size): ...
+@dll.bind
+def __hipGetPCH(pch:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), size:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 hipGraphicsRegisterFlags = CEnum(ctypes.c_uint32)
 hipGraphicsRegisterFlagsNone = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsNone', 0)
 hipGraphicsRegisterFlagsReadOnly = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsReadOnly', 1)
@@ -841,17 +843,17 @@ hipGraphicsRegisterFlagsWriteDiscard = hipGraphicsRegisterFlags.define('hipGraph
 hipGraphicsRegisterFlagsSurfaceLoadStore = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsSurfaceLoadStore', 4)
 hipGraphicsRegisterFlagsTextureGather = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsTextureGather', 8)
 
-class _hipGraphicsResource(Struct): pass
+class _hipGraphicsResource(ctypes.Structure): pass
 hipGraphicsResource = _hipGraphicsResource
-hipGraphicsResource_t = Pointer(_hipGraphicsResource)
-class ihipGraph(Struct): pass
-hipGraph_t = Pointer(ihipGraph)
-class hipGraphNode(Struct): pass
-hipGraphNode_t = Pointer(hipGraphNode)
-class hipGraphExec(Struct): pass
-hipGraphExec_t = Pointer(hipGraphExec)
-class hipUserObject(Struct): pass
-hipUserObject_t = Pointer(hipUserObject)
+hipGraphicsResource_t = ctypes.POINTER(_hipGraphicsResource)
+class ihipGraph(ctypes.Structure): pass
+hipGraph_t = ctypes.POINTER(ihipGraph)
+class hipGraphNode(ctypes.Structure): pass
+hipGraphNode_t = ctypes.POINTER(hipGraphNode)
+class hipGraphExec(ctypes.Structure): pass
+hipGraphExec_t = ctypes.POINTER(hipGraphExec)
+class hipUserObject(ctypes.Structure): pass
+hipUserObject_t = ctypes.POINTER(hipUserObject)
 hipGraphNodeType = CEnum(ctypes.c_uint32)
 hipGraphNodeTypeKernel = hipGraphNodeType.define('hipGraphNodeTypeKernel', 0)
 hipGraphNodeTypeMemcpy = hipGraphNodeType.define('hipGraphNodeTypeMemcpy', 1)
@@ -869,72 +871,72 @@ hipGraphNodeTypeMemcpyFromSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemc
 hipGraphNodeTypeMemcpyToSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyToSymbol', 13)
 hipGraphNodeTypeCount = hipGraphNodeType.define('hipGraphNodeTypeCount', 14)
 
-hipHostFn_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
-class hipHostNodeParams(Struct): pass
-hipHostNodeParams.SIZE = 16
-hipHostNodeParams._fields_ = ['fn', 'userData']
-setattr(hipHostNodeParams, 'fn', field(0, hipHostFn_t))
-setattr(hipHostNodeParams, 'userData', field(8, ctypes.c_void_p))
-class hipKernelNodeParams(Struct): pass
-hipKernelNodeParams.SIZE = 64
-hipKernelNodeParams._fields_ = ['blockDim', 'extra', 'func', 'gridDim', 'kernelParams', 'sharedMemBytes']
-setattr(hipKernelNodeParams, 'blockDim', field(0, dim3))
-setattr(hipKernelNodeParams, 'extra', field(16, Pointer(ctypes.c_void_p)))
-setattr(hipKernelNodeParams, 'func', field(24, ctypes.c_void_p))
-setattr(hipKernelNodeParams, 'gridDim', field(32, dim3))
-setattr(hipKernelNodeParams, 'kernelParams', field(48, Pointer(ctypes.c_void_p)))
-setattr(hipKernelNodeParams, 'sharedMemBytes', field(56, ctypes.c_uint32))
-class hipMemsetParams(Struct): pass
-hipMemsetParams.SIZE = 48
-hipMemsetParams._fields_ = ['dst', 'elementSize', 'height', 'pitch', 'value', 'width']
-setattr(hipMemsetParams, 'dst', field(0, ctypes.c_void_p))
-setattr(hipMemsetParams, 'elementSize', field(8, ctypes.c_uint32))
-setattr(hipMemsetParams, 'height', field(16, size_t))
-setattr(hipMemsetParams, 'pitch', field(24, size_t))
-setattr(hipMemsetParams, 'value', field(32, ctypes.c_uint32))
-setattr(hipMemsetParams, 'width', field(40, size_t))
-class hipMemAllocNodeParams(Struct): pass
-hipMemAllocNodeParams.SIZE = 120
-hipMemAllocNodeParams._fields_ = ['poolProps', 'accessDescs', 'accessDescCount', 'bytesize', 'dptr']
-setattr(hipMemAllocNodeParams, 'poolProps', field(0, hipMemPoolProps))
-setattr(hipMemAllocNodeParams, 'accessDescs', field(88, Pointer(hipMemAccessDesc)))
-setattr(hipMemAllocNodeParams, 'accessDescCount', field(96, size_t))
-setattr(hipMemAllocNodeParams, 'bytesize', field(104, size_t))
-setattr(hipMemAllocNodeParams, 'dptr', field(112, ctypes.c_void_p))
+hipHostFn_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(None))
+@record
+class hipHostNodeParams:
+  SIZE = 16
+  fn: Annotated[hipHostFn_t, 0]
+  userData: Annotated[ctypes.POINTER(None), 8]
+@record
+class hipKernelNodeParams:
+  SIZE = 64
+  blockDim: Annotated[dim3, 0]
+  extra: Annotated[ctypes.POINTER(ctypes.POINTER(None)), 16]
+  func: Annotated[ctypes.POINTER(None), 24]
+  gridDim: Annotated[dim3, 32]
+  kernelParams: Annotated[ctypes.POINTER(ctypes.POINTER(None)), 48]
+  sharedMemBytes: Annotated[ctypes.c_uint32, 56]
+@record
+class hipMemsetParams:
+  SIZE = 48
+  dst: Annotated[ctypes.POINTER(None), 0]
+  elementSize: Annotated[ctypes.c_uint32, 8]
+  height: Annotated[size_t, 16]
+  pitch: Annotated[size_t, 24]
+  value: Annotated[ctypes.c_uint32, 32]
+  width: Annotated[size_t, 40]
+@record
+class hipMemAllocNodeParams:
+  SIZE = 120
+  poolProps: Annotated[hipMemPoolProps, 0]
+  accessDescs: Annotated[ctypes.POINTER(hipMemAccessDesc), 88]
+  accessDescCount: Annotated[size_t, 96]
+  bytesize: Annotated[size_t, 104]
+  dptr: Annotated[ctypes.POINTER(None), 112]
 hipAccessProperty = CEnum(ctypes.c_uint32)
 hipAccessPropertyNormal = hipAccessProperty.define('hipAccessPropertyNormal', 0)
 hipAccessPropertyStreaming = hipAccessProperty.define('hipAccessPropertyStreaming', 1)
 hipAccessPropertyPersisting = hipAccessProperty.define('hipAccessPropertyPersisting', 2)
 
-class hipAccessPolicyWindow(Struct): pass
-hipAccessPolicyWindow.SIZE = 32
-hipAccessPolicyWindow._fields_ = ['base_ptr', 'hitProp', 'hitRatio', 'missProp', 'num_bytes']
-setattr(hipAccessPolicyWindow, 'base_ptr', field(0, ctypes.c_void_p))
-setattr(hipAccessPolicyWindow, 'hitProp', field(8, hipAccessProperty))
-setattr(hipAccessPolicyWindow, 'hitRatio', field(12, ctypes.c_float))
-setattr(hipAccessPolicyWindow, 'missProp', field(16, hipAccessProperty))
-setattr(hipAccessPolicyWindow, 'num_bytes', field(24, size_t))
+@record
+class hipAccessPolicyWindow:
+  SIZE = 32
+  base_ptr: Annotated[ctypes.POINTER(None), 0]
+  hitProp: Annotated[hipAccessProperty, 8]
+  hitRatio: Annotated[ctypes.c_float, 12]
+  missProp: Annotated[hipAccessProperty, 16]
+  num_bytes: Annotated[size_t, 24]
 hipLaunchAttributeID = CEnum(ctypes.c_uint32)
 hipLaunchAttributeAccessPolicyWindow = hipLaunchAttributeID.define('hipLaunchAttributeAccessPolicyWindow', 1)
 hipLaunchAttributeCooperative = hipLaunchAttributeID.define('hipLaunchAttributeCooperative', 2)
 hipLaunchAttributePriority = hipLaunchAttributeID.define('hipLaunchAttributePriority', 8)
 
-class hipLaunchAttributeValue(Union): pass
-hipLaunchAttributeValue.SIZE = 32
-hipLaunchAttributeValue._fields_ = ['accessPolicyWindow', 'cooperative', 'priority']
-setattr(hipLaunchAttributeValue, 'accessPolicyWindow', field(0, hipAccessPolicyWindow))
-setattr(hipLaunchAttributeValue, 'cooperative', field(0, ctypes.c_int32))
-setattr(hipLaunchAttributeValue, 'priority', field(0, ctypes.c_int32))
-class HIP_MEMSET_NODE_PARAMS(Struct): pass
-hipDeviceptr_t = ctypes.c_void_p
-HIP_MEMSET_NODE_PARAMS.SIZE = 40
-HIP_MEMSET_NODE_PARAMS._fields_ = ['dst', 'pitch', 'value', 'elementSize', 'width', 'height']
-setattr(HIP_MEMSET_NODE_PARAMS, 'dst', field(0, hipDeviceptr_t))
-setattr(HIP_MEMSET_NODE_PARAMS, 'pitch', field(8, size_t))
-setattr(HIP_MEMSET_NODE_PARAMS, 'value', field(16, ctypes.c_uint32))
-setattr(HIP_MEMSET_NODE_PARAMS, 'elementSize', field(20, ctypes.c_uint32))
-setattr(HIP_MEMSET_NODE_PARAMS, 'width', field(24, size_t))
-setattr(HIP_MEMSET_NODE_PARAMS, 'height', field(32, size_t))
+@record
+class hipLaunchAttributeValue:
+  SIZE = 32
+  accessPolicyWindow: Annotated[hipAccessPolicyWindow, 0]
+  cooperative: Annotated[ctypes.c_int32, 0]
+  priority: Annotated[ctypes.c_int32, 0]
+@record
+class HIP_MEMSET_NODE_PARAMS:
+  SIZE = 40
+  dst: Annotated[hipDeviceptr_t, 0]
+  pitch: Annotated[size_t, 8]
+  value: Annotated[ctypes.c_uint32, 16]
+  elementSize: Annotated[ctypes.c_uint32, 20]
+  width: Annotated[size_t, 24]
+  height: Annotated[size_t, 32]
+hipDeviceptr_t = ctypes.POINTER(None)
 hipGraphExecUpdateResult = CEnum(ctypes.c_uint32)
 hipGraphExecUpdateSuccess = hipGraphExecUpdateResult.define('hipGraphExecUpdateSuccess', 0)
 hipGraphExecUpdateError = hipGraphExecUpdateResult.define('hipGraphExecUpdateError', 1)
@@ -996,41 +998,41 @@ hipGraphInstantiateInvalidStructure = hipGraphInstantiateResult.define('hipGraph
 hipGraphInstantiateNodeOperationNotSupported = hipGraphInstantiateResult.define('hipGraphInstantiateNodeOperationNotSupported', 3)
 hipGraphInstantiateMultipleDevicesNotSupported = hipGraphInstantiateResult.define('hipGraphInstantiateMultipleDevicesNotSupported', 4)
 
-class hipGraphInstantiateParams(Struct): pass
-hipGraphInstantiateParams.SIZE = 32
-hipGraphInstantiateParams._fields_ = ['errNode_out', 'flags', 'result_out', 'uploadStream']
-setattr(hipGraphInstantiateParams, 'errNode_out', field(0, hipGraphNode_t))
-setattr(hipGraphInstantiateParams, 'flags', field(8, ctypes.c_uint64))
-setattr(hipGraphInstantiateParams, 'result_out', field(16, hipGraphInstantiateResult))
-setattr(hipGraphInstantiateParams, 'uploadStream', field(24, hipStream_t))
-class hipMemAllocationProp(Struct): pass
-class _anonstruct13(Struct): pass
-_anonstruct13.SIZE = 4
-_anonstruct13._fields_ = ['compressionType', 'gpuDirectRDMACapable', 'usage']
-setattr(_anonstruct13, 'compressionType', field(0, ctypes.c_ubyte))
-setattr(_anonstruct13, 'gpuDirectRDMACapable', field(1, ctypes.c_ubyte))
-setattr(_anonstruct13, 'usage', field(2, ctypes.c_uint16))
-hipMemAllocationProp.SIZE = 32
-hipMemAllocationProp._fields_ = ['type', 'requestedHandleType', 'location', 'win32HandleMetaData', 'allocFlags']
-setattr(hipMemAllocationProp, 'type', field(0, hipMemAllocationType))
-setattr(hipMemAllocationProp, 'requestedHandleType', field(4, hipMemAllocationHandleType))
-setattr(hipMemAllocationProp, 'location', field(8, hipMemLocation))
-setattr(hipMemAllocationProp, 'win32HandleMetaData', field(16, ctypes.c_void_p))
-setattr(hipMemAllocationProp, 'allocFlags', field(24, _anonstruct13))
-class hipExternalSemaphoreSignalNodeParams(Struct): pass
-hipExternalSemaphoreSignalNodeParams.SIZE = 24
-hipExternalSemaphoreSignalNodeParams._fields_ = ['extSemArray', 'paramsArray', 'numExtSems']
-setattr(hipExternalSemaphoreSignalNodeParams, 'extSemArray', field(0, Pointer(hipExternalSemaphore_t)))
-setattr(hipExternalSemaphoreSignalNodeParams, 'paramsArray', field(8, Pointer(hipExternalSemaphoreSignalParams)))
-setattr(hipExternalSemaphoreSignalNodeParams, 'numExtSems', field(16, ctypes.c_uint32))
-class hipExternalSemaphoreWaitNodeParams(Struct): pass
-hipExternalSemaphoreWaitNodeParams.SIZE = 24
-hipExternalSemaphoreWaitNodeParams._fields_ = ['extSemArray', 'paramsArray', 'numExtSems']
-setattr(hipExternalSemaphoreWaitNodeParams, 'extSemArray', field(0, Pointer(hipExternalSemaphore_t)))
-setattr(hipExternalSemaphoreWaitNodeParams, 'paramsArray', field(8, Pointer(hipExternalSemaphoreWaitParams)))
-setattr(hipExternalSemaphoreWaitNodeParams, 'numExtSems', field(16, ctypes.c_uint32))
-class ihipMemGenericAllocationHandle(Struct): pass
-hipMemGenericAllocationHandle_t = Pointer(ihipMemGenericAllocationHandle)
+@record
+class hipGraphInstantiateParams:
+  SIZE = 32
+  errNode_out: Annotated[hipGraphNode_t, 0]
+  flags: Annotated[ctypes.c_uint64, 8]
+  result_out: Annotated[hipGraphInstantiateResult, 16]
+  uploadStream: Annotated[hipStream_t, 24]
+@record
+class hipMemAllocationProp:
+  SIZE = 32
+  type: Annotated[hipMemAllocationType, 0]
+  requestedHandleType: Annotated[hipMemAllocationHandleType, 4]
+  location: Annotated[hipMemLocation, 8]
+  win32HandleMetaData: Annotated[ctypes.POINTER(None), 16]
+  allocFlags: Annotated[_anonstruct13, 24]
+@record
+class _anonstruct13:
+  SIZE = 4
+  compressionType: Annotated[ctypes.c_ubyte, 0]
+  gpuDirectRDMACapable: Annotated[ctypes.c_ubyte, 1]
+  usage: Annotated[ctypes.c_uint16, 2]
+@record
+class hipExternalSemaphoreSignalNodeParams:
+  SIZE = 24
+  extSemArray: Annotated[ctypes.POINTER(hipExternalSemaphore_t), 0]
+  paramsArray: Annotated[ctypes.POINTER(hipExternalSemaphoreSignalParams), 8]
+  numExtSems: Annotated[ctypes.c_uint32, 16]
+@record
+class hipExternalSemaphoreWaitNodeParams:
+  SIZE = 24
+  extSemArray: Annotated[ctypes.POINTER(hipExternalSemaphore_t), 0]
+  paramsArray: Annotated[ctypes.POINTER(hipExternalSemaphoreWaitParams), 8]
+  numExtSems: Annotated[ctypes.c_uint32, 16]
+class ihipMemGenericAllocationHandle(ctypes.Structure): pass
+hipMemGenericAllocationHandle_t = ctypes.POINTER(ihipMemGenericAllocationHandle)
 hipMemAllocationGranularity_flags = CEnum(ctypes.c_uint32)
 hipMemAllocationGranularityMinimum = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityMinimum', 0)
 hipMemAllocationGranularityRecommended = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityRecommended', 1)
@@ -1046,15 +1048,45 @@ hipArraySparseSubresourceType = CEnum(ctypes.c_uint32)
 hipArraySparseSubresourceTypeSparseLevel = hipArraySparseSubresourceType.define('hipArraySparseSubresourceTypeSparseLevel', 0)
 hipArraySparseSubresourceTypeMiptail = hipArraySparseSubresourceType.define('hipArraySparseSubresourceTypeMiptail', 1)
 
-class hipArrayMapInfo(Struct): pass
+@record
+class hipArrayMapInfo:
+  SIZE = 152
+  resourceType: Annotated[hipResourceType, 0]
+  resource: Annotated[_anonunion14, 8]
+  subresourceType: Annotated[hipArraySparseSubresourceType, 72]
+  subresource: Annotated[_anonunion15, 80]
+  memOperationType: Annotated[hipMemOperationType, 112]
+  memHandleType: Annotated[hipMemHandleType, 116]
+  memHandle: Annotated[_anonunion18, 120]
+  offset: Annotated[ctypes.c_uint64, 128]
+  deviceBitMask: Annotated[ctypes.c_uint32, 136]
+  flags: Annotated[ctypes.c_uint32, 140]
+  reserved: Annotated[(ctypes.c_uint32* 2), 144]
 hipResourceType = CEnum(ctypes.c_uint32)
 hipResourceTypeArray = hipResourceType.define('hipResourceTypeArray', 0)
 hipResourceTypeMipmappedArray = hipResourceType.define('hipResourceTypeMipmappedArray', 1)
 hipResourceTypeLinear = hipResourceType.define('hipResourceTypeLinear', 2)
 hipResourceTypePitch2D = hipResourceType.define('hipResourceTypePitch2D', 3)
 
-class _anonunion14(Union): pass
-class hipMipmappedArray(Struct): pass
+@record
+class _anonunion14:
+  SIZE = 64
+  mipmap: Annotated[hipMipmappedArray, 0]
+  array: Annotated[hipArray_t, 0]
+@record
+class hipMipmappedArray:
+  SIZE = 64
+  data: Annotated[ctypes.POINTER(None), 0]
+  desc: Annotated[hipChannelFormatDesc, 8]
+  type: Annotated[ctypes.c_uint32, 28]
+  width: Annotated[ctypes.c_uint32, 32]
+  height: Annotated[ctypes.c_uint32, 36]
+  depth: Annotated[ctypes.c_uint32, 40]
+  min_mipmap_level: Annotated[ctypes.c_uint32, 44]
+  max_mipmap_level: Annotated[ctypes.c_uint32, 48]
+  flags: Annotated[ctypes.c_uint32, 52]
+  format: Annotated[hipArray_Format, 56]
+  num_channels: Annotated[ctypes.c_uint32, 60]
 hipArray_Format = CEnum(ctypes.c_uint32)
 HIP_AD_FORMAT_UNSIGNED_INT8 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT8', 1)
 HIP_AD_FORMAT_UNSIGNED_INT16 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT16', 2)
@@ -1065,79 +1097,64 @@ HIP_AD_FORMAT_SIGNED_INT32 = hipArray_Format.define('HIP_AD_FORMAT_SIGNED_INT32'
 HIP_AD_FORMAT_HALF = hipArray_Format.define('HIP_AD_FORMAT_HALF', 16)
 HIP_AD_FORMAT_FLOAT = hipArray_Format.define('HIP_AD_FORMAT_FLOAT', 32)
 
-hipMipmappedArray.SIZE = 64
-hipMipmappedArray._fields_ = ['data', 'desc', 'type', 'width', 'height', 'depth', 'min_mipmap_level', 'max_mipmap_level', 'flags', 'format', 'num_channels']
-setattr(hipMipmappedArray, 'data', field(0, ctypes.c_void_p))
-setattr(hipMipmappedArray, 'desc', field(8, hipChannelFormatDesc))
-setattr(hipMipmappedArray, 'type', field(28, ctypes.c_uint32))
-setattr(hipMipmappedArray, 'width', field(32, ctypes.c_uint32))
-setattr(hipMipmappedArray, 'height', field(36, ctypes.c_uint32))
-setattr(hipMipmappedArray, 'depth', field(40, ctypes.c_uint32))
-setattr(hipMipmappedArray, 'min_mipmap_level', field(44, ctypes.c_uint32))
-setattr(hipMipmappedArray, 'max_mipmap_level', field(48, ctypes.c_uint32))
-setattr(hipMipmappedArray, 'flags', field(52, ctypes.c_uint32))
-setattr(hipMipmappedArray, 'format', field(56, hipArray_Format))
-setattr(hipMipmappedArray, 'num_channels', field(60, ctypes.c_uint32))
-class hipArray(Struct): pass
-hipArray_t = Pointer(hipArray)
-_anonunion14.SIZE = 64
-_anonunion14._fields_ = ['mipmap', 'array']
-setattr(_anonunion14, 'mipmap', field(0, hipMipmappedArray))
-setattr(_anonunion14, 'array', field(0, hipArray_t))
-class _anonunion15(Union): pass
-class _anonstruct16(Struct): pass
-_anonstruct16.SIZE = 32
-_anonstruct16._fields_ = ['level', 'layer', 'offsetX', 'offsetY', 'offsetZ', 'extentWidth', 'extentHeight', 'extentDepth']
-setattr(_anonstruct16, 'level', field(0, ctypes.c_uint32))
-setattr(_anonstruct16, 'layer', field(4, ctypes.c_uint32))
-setattr(_anonstruct16, 'offsetX', field(8, ctypes.c_uint32))
-setattr(_anonstruct16, 'offsetY', field(12, ctypes.c_uint32))
-setattr(_anonstruct16, 'offsetZ', field(16, ctypes.c_uint32))
-setattr(_anonstruct16, 'extentWidth', field(20, ctypes.c_uint32))
-setattr(_anonstruct16, 'extentHeight', field(24, ctypes.c_uint32))
-setattr(_anonstruct16, 'extentDepth', field(28, ctypes.c_uint32))
-class _anonstruct17(Struct): pass
-_anonstruct17.SIZE = 24
-_anonstruct17._fields_ = ['layer', 'offset', 'size']
-setattr(_anonstruct17, 'layer', field(0, ctypes.c_uint32))
-setattr(_anonstruct17, 'offset', field(8, ctypes.c_uint64))
-setattr(_anonstruct17, 'size', field(16, ctypes.c_uint64))
-_anonunion15.SIZE = 32
-_anonunion15._fields_ = ['sparseLevel', 'miptail']
-setattr(_anonunion15, 'sparseLevel', field(0, _anonstruct16))
-setattr(_anonunion15, 'miptail', field(0, _anonstruct17))
-class _anonunion18(Union): pass
-_anonunion18.SIZE = 8
-_anonunion18._fields_ = ['memHandle']
-setattr(_anonunion18, 'memHandle', field(0, hipMemGenericAllocationHandle_t))
-hipArrayMapInfo.SIZE = 152
-hipArrayMapInfo._fields_ = ['resourceType', 'resource', 'subresourceType', 'subresource', 'memOperationType', 'memHandleType', 'memHandle', 'offset', 'deviceBitMask', 'flags', 'reserved']
-setattr(hipArrayMapInfo, 'resourceType', field(0, hipResourceType))
-setattr(hipArrayMapInfo, 'resource', field(8, _anonunion14))
-setattr(hipArrayMapInfo, 'subresourceType', field(72, hipArraySparseSubresourceType))
-setattr(hipArrayMapInfo, 'subresource', field(80, _anonunion15))
-setattr(hipArrayMapInfo, 'memOperationType', field(112, hipMemOperationType))
-setattr(hipArrayMapInfo, 'memHandleType', field(116, hipMemHandleType))
-setattr(hipArrayMapInfo, 'memHandle', field(120, _anonunion18))
-setattr(hipArrayMapInfo, 'offset', field(128, ctypes.c_uint64))
-setattr(hipArrayMapInfo, 'deviceBitMask', field(136, ctypes.c_uint32))
-setattr(hipArrayMapInfo, 'flags', field(140, ctypes.c_uint32))
-setattr(hipArrayMapInfo, 'reserved', field(144, Array(ctypes.c_uint32, 2)))
-class hipMemcpyNodeParams(Struct): pass
-class hipMemcpy3DParms(Struct): pass
-class hipPos(Struct): pass
-hipPos.SIZE = 24
-hipPos._fields_ = ['x', 'y', 'z']
-setattr(hipPos, 'x', field(0, size_t))
-setattr(hipPos, 'y', field(8, size_t))
-setattr(hipPos, 'z', field(16, size_t))
-class hipPitchedPtr(Struct): pass
-hipPitchedPtr.SIZE = 32
-hipPitchedPtr._fields_ = ['ptr', 'pitch', 'xsize', 'ysize']
-setattr(hipPitchedPtr, 'ptr', field(0, ctypes.c_void_p))
-setattr(hipPitchedPtr, 'pitch', field(8, size_t))
-setattr(hipPitchedPtr, 'xsize', field(16, size_t))
-setattr(hipPitchedPtr, 'ysize', field(24, size_t))
+class hipArray(ctypes.Structure): pass
+hipArray_t = ctypes.POINTER(hipArray)
+@record
+class _anonunion15:
+  SIZE = 32
+  sparseLevel: Annotated[_anonstruct16, 0]
+  miptail: Annotated[_anonstruct17, 0]
+@record
+class _anonstruct16:
+  SIZE = 32
+  level: Annotated[ctypes.c_uint32, 0]
+  layer: Annotated[ctypes.c_uint32, 4]
+  offsetX: Annotated[ctypes.c_uint32, 8]
+  offsetY: Annotated[ctypes.c_uint32, 12]
+  offsetZ: Annotated[ctypes.c_uint32, 16]
+  extentWidth: Annotated[ctypes.c_uint32, 20]
+  extentHeight: Annotated[ctypes.c_uint32, 24]
+  extentDepth: Annotated[ctypes.c_uint32, 28]
+@record
+class _anonstruct17:
+  SIZE = 24
+  layer: Annotated[ctypes.c_uint32, 0]
+  offset: Annotated[ctypes.c_uint64, 8]
+  size: Annotated[ctypes.c_uint64, 16]
+@record
+class _anonunion18:
+  SIZE = 8
+  memHandle: Annotated[hipMemGenericAllocationHandle_t, 0]
+@record
+class hipMemcpyNodeParams:
+  SIZE = 176
+  flags: Annotated[ctypes.c_int32, 0]
+  reserved: Annotated[(ctypes.c_int32* 3), 4]
+  copyParams: Annotated[hipMemcpy3DParms, 16]
+@record
+class hipMemcpy3DParms:
+  SIZE = 160
+  srcArray: Annotated[hipArray_t, 0]
+  srcPos: Annotated[hipPos, 8]
+  srcPtr: Annotated[hipPitchedPtr, 32]
+  dstArray: Annotated[hipArray_t, 64]
+  dstPos: Annotated[hipPos, 72]
+  dstPtr: Annotated[hipPitchedPtr, 96]
+  extent: Annotated[hipExtent, 128]
+  kind: Annotated[hipMemcpyKind, 152]
+@record
+class hipPos:
+  SIZE = 24
+  x: Annotated[size_t, 0]
+  y: Annotated[size_t, 8]
+  z: Annotated[size_t, 16]
+@record
+class hipPitchedPtr:
+  SIZE = 32
+  ptr: Annotated[ctypes.POINTER(None), 0]
+  pitch: Annotated[size_t, 8]
+  xsize: Annotated[size_t, 16]
+  ysize: Annotated[size_t, 24]
 hipMemcpyKind = CEnum(ctypes.c_uint32)
 hipMemcpyHostToHost = hipMemcpyKind.define('hipMemcpyHostToHost', 0)
 hipMemcpyHostToDevice = hipMemcpyKind.define('hipMemcpyHostToDevice', 1)
@@ -1146,212 +1163,197 @@ hipMemcpyDeviceToDevice = hipMemcpyKind.define('hipMemcpyDeviceToDevice', 3)
 hipMemcpyDefault = hipMemcpyKind.define('hipMemcpyDefault', 4)
 hipMemcpyDeviceToDeviceNoCU = hipMemcpyKind.define('hipMemcpyDeviceToDeviceNoCU', 1024)
 
-hipMemcpy3DParms.SIZE = 160
-hipMemcpy3DParms._fields_ = ['srcArray', 'srcPos', 'srcPtr', 'dstArray', 'dstPos', 'dstPtr', 'extent', 'kind']
-setattr(hipMemcpy3DParms, 'srcArray', field(0, hipArray_t))
-setattr(hipMemcpy3DParms, 'srcPos', field(8, hipPos))
-setattr(hipMemcpy3DParms, 'srcPtr', field(32, hipPitchedPtr))
-setattr(hipMemcpy3DParms, 'dstArray', field(64, hipArray_t))
-setattr(hipMemcpy3DParms, 'dstPos', field(72, hipPos))
-setattr(hipMemcpy3DParms, 'dstPtr', field(96, hipPitchedPtr))
-setattr(hipMemcpy3DParms, 'extent', field(128, hipExtent))
-setattr(hipMemcpy3DParms, 'kind', field(152, hipMemcpyKind))
-hipMemcpyNodeParams.SIZE = 176
-hipMemcpyNodeParams._fields_ = ['flags', 'reserved', 'copyParams']
-setattr(hipMemcpyNodeParams, 'flags', field(0, ctypes.c_int32))
-setattr(hipMemcpyNodeParams, 'reserved', field(4, Array(ctypes.c_int32, 3)))
-setattr(hipMemcpyNodeParams, 'copyParams', field(16, hipMemcpy3DParms))
-class hipChildGraphNodeParams(Struct): pass
-hipChildGraphNodeParams.SIZE = 8
-hipChildGraphNodeParams._fields_ = ['graph']
-setattr(hipChildGraphNodeParams, 'graph', field(0, hipGraph_t))
-class hipEventWaitNodeParams(Struct): pass
-hipEventWaitNodeParams.SIZE = 8
-hipEventWaitNodeParams._fields_ = ['event']
-setattr(hipEventWaitNodeParams, 'event', field(0, hipEvent_t))
-class hipEventRecordNodeParams(Struct): pass
-hipEventRecordNodeParams.SIZE = 8
-hipEventRecordNodeParams._fields_ = ['event']
-setattr(hipEventRecordNodeParams, 'event', field(0, hipEvent_t))
-class hipMemFreeNodeParams(Struct): pass
-hipMemFreeNodeParams.SIZE = 8
-hipMemFreeNodeParams._fields_ = ['dptr']
-setattr(hipMemFreeNodeParams, 'dptr', field(0, ctypes.c_void_p))
-class hipGraphNodeParams(Struct): pass
-hipGraphNodeParams.SIZE = 256
-hipGraphNodeParams._fields_ = ['type', 'reserved0', 'reserved1', 'kernel', 'memcpy', 'memset', 'host', 'graph', 'eventWait', 'eventRecord', 'extSemSignal', 'extSemWait', 'alloc', 'free', 'reserved2']
-setattr(hipGraphNodeParams, 'type', field(0, hipGraphNodeType))
-setattr(hipGraphNodeParams, 'reserved0', field(4, Array(ctypes.c_int32, 3)))
-setattr(hipGraphNodeParams, 'reserved1', field(16, Array(ctypes.c_int64, 29)))
-setattr(hipGraphNodeParams, 'kernel', field(16, hipKernelNodeParams))
-setattr(hipGraphNodeParams, 'memcpy', field(16, hipMemcpyNodeParams))
-setattr(hipGraphNodeParams, 'memset', field(16, hipMemsetParams))
-setattr(hipGraphNodeParams, 'host', field(16, hipHostNodeParams))
-setattr(hipGraphNodeParams, 'graph', field(16, hipChildGraphNodeParams))
-setattr(hipGraphNodeParams, 'eventWait', field(16, hipEventWaitNodeParams))
-setattr(hipGraphNodeParams, 'eventRecord', field(16, hipEventRecordNodeParams))
-setattr(hipGraphNodeParams, 'extSemSignal', field(16, hipExternalSemaphoreSignalNodeParams))
-setattr(hipGraphNodeParams, 'extSemWait', field(16, hipExternalSemaphoreWaitNodeParams))
-setattr(hipGraphNodeParams, 'alloc', field(16, hipMemAllocNodeParams))
-setattr(hipGraphNodeParams, 'free', field(16, hipMemFreeNodeParams))
-setattr(hipGraphNodeParams, 'reserved2', field(248, ctypes.c_int64))
+@record
+class hipChildGraphNodeParams:
+  SIZE = 8
+  graph: Annotated[hipGraph_t, 0]
+@record
+class hipEventWaitNodeParams:
+  SIZE = 8
+  event: Annotated[hipEvent_t, 0]
+@record
+class hipEventRecordNodeParams:
+  SIZE = 8
+  event: Annotated[hipEvent_t, 0]
+@record
+class hipMemFreeNodeParams:
+  SIZE = 8
+  dptr: Annotated[ctypes.POINTER(None), 0]
+@record
+class hipGraphNodeParams:
+  SIZE = 256
+  type: Annotated[hipGraphNodeType, 0]
+  reserved0: Annotated[(ctypes.c_int32* 3), 4]
+  reserved1: Annotated[(ctypes.c_int64* 29), 16]
+  kernel: Annotated[hipKernelNodeParams, 16]
+  memcpy: Annotated[hipMemcpyNodeParams, 16]
+  memset: Annotated[hipMemsetParams, 16]
+  host: Annotated[hipHostNodeParams, 16]
+  graph: Annotated[hipChildGraphNodeParams, 16]
+  eventWait: Annotated[hipEventWaitNodeParams, 16]
+  eventRecord: Annotated[hipEventRecordNodeParams, 16]
+  extSemSignal: Annotated[hipExternalSemaphoreSignalNodeParams, 16]
+  extSemWait: Annotated[hipExternalSemaphoreWaitNodeParams, 16]
+  alloc: Annotated[hipMemAllocNodeParams, 16]
+  free: Annotated[hipMemFreeNodeParams, 16]
+  reserved2: Annotated[ctypes.c_int64, 248]
 hipGraphDependencyType = CEnum(ctypes.c_uint32)
 hipGraphDependencyTypeDefault = hipGraphDependencyType.define('hipGraphDependencyTypeDefault', 0)
 hipGraphDependencyTypeProgrammatic = hipGraphDependencyType.define('hipGraphDependencyTypeProgrammatic', 1)
 
-class hipGraphEdgeData(Struct): pass
-hipGraphEdgeData.SIZE = 8
-hipGraphEdgeData._fields_ = ['from_port', 'reserved', 'to_port', 'type']
-setattr(hipGraphEdgeData, 'from_port', field(0, ctypes.c_ubyte))
-setattr(hipGraphEdgeData, 'reserved', field(1, Array(ctypes.c_ubyte, 5)))
-setattr(hipGraphEdgeData, 'to_port', field(6, ctypes.c_ubyte))
-setattr(hipGraphEdgeData, 'type', field(7, ctypes.c_ubyte))
-@dll.bind((ctypes.c_uint32), hipError_t)
-def hipInit(flags): ...
-@dll.bind((Pointer(ctypes.c_int32)), hipError_t)
-def hipDriverGetVersion(driverVersion): ...
-@dll.bind((Pointer(ctypes.c_int32)), hipError_t)
-def hipRuntimeGetVersion(runtimeVersion): ...
-@dll.bind((Pointer(hipDevice_t), ctypes.c_int32), hipError_t)
-def hipDeviceGet(device, ordinal): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(ctypes.c_int32), hipDevice_t), hipError_t)
-def hipDeviceComputeCapability(major, minor, device): ...
-@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32, hipDevice_t), hipError_t)
-def hipDeviceGetName(name, len, device): ...
-@dll.bind((Pointer(hipUUID), hipDevice_t), hipError_t)
-def hipDeviceGetUuid(uuid, device): ...
-@dll.bind((Pointer(ctypes.c_int32), hipDeviceP2PAttr, ctypes.c_int32, ctypes.c_int32), hipError_t)
-def hipDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice): ...
-@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32, ctypes.c_int32), hipError_t)
-def hipDeviceGetPCIBusId(pciBusId, len, device): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(ctypes.c_char)), hipError_t)
-def hipDeviceGetByPCIBusId(device, pciBusId): ...
-@dll.bind((Pointer(size_t), hipDevice_t), hipError_t)
-def hipDeviceTotalMem(bytes, device): ...
-@dll.bind((), hipError_t)
-def hipDeviceSynchronize(): ...
-@dll.bind((), hipError_t)
-def hipDeviceReset(): ...
-@dll.bind((ctypes.c_int32), hipError_t)
-def hipSetDevice(deviceId): ...
-@dll.bind((Pointer(ctypes.c_int32), ctypes.c_int32), hipError_t)
-def hipSetValidDevices(device_arr, len): ...
-@dll.bind((Pointer(ctypes.c_int32)), hipError_t)
-def hipGetDevice(deviceId): ...
-@dll.bind((Pointer(ctypes.c_int32)), hipError_t)
-def hipGetDeviceCount(count): ...
-@dll.bind((Pointer(ctypes.c_int32), hipDeviceAttribute_t, ctypes.c_int32), hipError_t)
-def hipDeviceGetAttribute(pi, attr, deviceId): ...
-@dll.bind((Pointer(hipMemPool_t), ctypes.c_int32), hipError_t)
-def hipDeviceGetDefaultMemPool(mem_pool, device): ...
-@dll.bind((ctypes.c_int32, hipMemPool_t), hipError_t)
-def hipDeviceSetMemPool(device, mem_pool): ...
-@dll.bind((Pointer(hipMemPool_t), ctypes.c_int32), hipError_t)
-def hipDeviceGetMemPool(mem_pool, device): ...
-@dll.bind((Pointer(hipDeviceProp_tR0600), ctypes.c_int32), hipError_t)
-def hipGetDevicePropertiesR0600(prop, deviceId): ...
-@dll.bind((hipFuncCache_t), hipError_t)
-def hipDeviceSetCacheConfig(cacheConfig): ...
-@dll.bind((Pointer(hipFuncCache_t)), hipError_t)
-def hipDeviceGetCacheConfig(cacheConfig): ...
-@dll.bind((Pointer(size_t), hipLimit_t), hipError_t)
-def hipDeviceGetLimit(pValue, limit): ...
-@dll.bind((hipLimit_t, size_t), hipError_t)
-def hipDeviceSetLimit(limit, value): ...
-@dll.bind((Pointer(hipSharedMemConfig)), hipError_t)
-def hipDeviceGetSharedMemConfig(pConfig): ...
-@dll.bind((Pointer(ctypes.c_uint32)), hipError_t)
-def hipGetDeviceFlags(flags): ...
-@dll.bind((hipSharedMemConfig), hipError_t)
-def hipDeviceSetSharedMemConfig(config): ...
-@dll.bind((ctypes.c_uint32), hipError_t)
-def hipSetDeviceFlags(flags): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(hipDeviceProp_tR0600)), hipError_t)
-def hipChooseDeviceR0600(device, prop): ...
-@dll.bind((ctypes.c_int32, ctypes.c_int32, Pointer(uint32_t), Pointer(uint32_t)), hipError_t)
-def hipExtGetLinkTypeAndHopCount(device1, device2, linktype, hopcount): ...
-@dll.bind((Pointer(hipIpcMemHandle_t), ctypes.c_void_p), hipError_t)
-def hipIpcGetMemHandle(handle, devPtr): ...
-@dll.bind((Pointer(ctypes.c_void_p), hipIpcMemHandle_t, ctypes.c_uint32), hipError_t)
-def hipIpcOpenMemHandle(devPtr, handle, flags): ...
-@dll.bind((ctypes.c_void_p), hipError_t)
-def hipIpcCloseMemHandle(devPtr): ...
-@dll.bind((Pointer(hipIpcEventHandle_t), hipEvent_t), hipError_t)
-def hipIpcGetEventHandle(handle, event): ...
-@dll.bind((Pointer(hipEvent_t), hipIpcEventHandle_t), hipError_t)
-def hipIpcOpenEventHandle(event, handle): ...
-@dll.bind((ctypes.c_void_p, hipFuncAttribute, ctypes.c_int32), hipError_t)
-def hipFuncSetAttribute(func, attr, value): ...
-@dll.bind((ctypes.c_void_p, hipFuncCache_t), hipError_t)
-def hipFuncSetCacheConfig(func, config): ...
-@dll.bind((ctypes.c_void_p, hipSharedMemConfig), hipError_t)
-def hipFuncSetSharedMemConfig(func, config): ...
-@dll.bind((), hipError_t)
-def hipGetLastError(): ...
-@dll.bind((), hipError_t)
-def hipExtGetLastError(): ...
-@dll.bind((), hipError_t)
-def hipPeekAtLastError(): ...
-@dll.bind((hipError_t), Pointer(ctypes.c_char))
-def hipGetErrorName(hip_error): ...
-@dll.bind((hipError_t), Pointer(ctypes.c_char))
-def hipGetErrorString(hipError): ...
-@dll.bind((hipError_t, Pointer(Pointer(ctypes.c_char))), hipError_t)
-def hipDrvGetErrorName(hipError, errorString): ...
-@dll.bind((hipError_t, Pointer(Pointer(ctypes.c_char))), hipError_t)
-def hipDrvGetErrorString(hipError, errorString): ...
-@dll.bind((Pointer(hipStream_t)), hipError_t)
-def hipStreamCreate(stream): ...
-@dll.bind((Pointer(hipStream_t), ctypes.c_uint32), hipError_t)
-def hipStreamCreateWithFlags(stream, flags): ...
-@dll.bind((Pointer(hipStream_t), ctypes.c_uint32, ctypes.c_int32), hipError_t)
-def hipStreamCreateWithPriority(stream, flags, priority): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(ctypes.c_int32)), hipError_t)
-def hipDeviceGetStreamPriorityRange(leastPriority, greatestPriority): ...
-@dll.bind((hipStream_t), hipError_t)
-def hipStreamDestroy(stream): ...
-@dll.bind((hipStream_t), hipError_t)
-def hipStreamQuery(stream): ...
-@dll.bind((hipStream_t), hipError_t)
-def hipStreamSynchronize(stream): ...
-@dll.bind((hipStream_t, hipEvent_t, ctypes.c_uint32), hipError_t)
-def hipStreamWaitEvent(stream, event, flags): ...
-@dll.bind((hipStream_t, Pointer(ctypes.c_uint32)), hipError_t)
-def hipStreamGetFlags(stream, flags): ...
-@dll.bind((hipStream_t, Pointer(ctypes.c_int32)), hipError_t)
-def hipStreamGetPriority(stream, priority): ...
-@dll.bind((hipStream_t, Pointer(hipDevice_t)), hipError_t)
-def hipStreamGetDevice(stream, device): ...
-@dll.bind((Pointer(hipStream_t), uint32_t, Pointer(uint32_t)), hipError_t)
-def hipExtStreamCreateWithCUMask(stream, cuMaskSize, cuMask): ...
-@dll.bind((hipStream_t, uint32_t, Pointer(uint32_t)), hipError_t)
-def hipExtStreamGetCUMask(stream, cuMaskSize, cuMask): ...
-hipStreamCallback_t = ctypes.CFUNCTYPE(None, Pointer(ihipStream_t), hipError_t, ctypes.c_void_p)
-@dll.bind((hipStream_t, hipStreamCallback_t, ctypes.c_void_p, ctypes.c_uint32), hipError_t)
-def hipStreamAddCallback(stream, callback, userData, flags): ...
-@dll.bind((hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint32, uint32_t), hipError_t)
-def hipStreamWaitValue32(stream, ptr, value, flags, mask): ...
+@record
+class hipGraphEdgeData:
+  SIZE = 8
+  from_port: Annotated[ctypes.c_ubyte, 0]
+  reserved: Annotated[(ctypes.c_ubyte* 5), 1]
+  to_port: Annotated[ctypes.c_ubyte, 6]
+  type: Annotated[ctypes.c_ubyte, 7]
+@dll.bind
+def hipInit(flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipDriverGetVersion(driverVersion:ctypes.POINTER(ctypes.c_int32)) -> hipError_t: ...
+@dll.bind
+def hipRuntimeGetVersion(runtimeVersion:ctypes.POINTER(ctypes.c_int32)) -> hipError_t: ...
+@dll.bind
+def hipDeviceGet(device:ctypes.POINTER(hipDevice_t), ordinal:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipDeviceComputeCapability(major:ctypes.POINTER(ctypes.c_int32), minor:ctypes.POINTER(ctypes.c_int32), device:hipDevice_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetName(name:ctypes.POINTER(ctypes.c_char), len:ctypes.c_int32, device:hipDevice_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetUuid(uuid:ctypes.POINTER(hipUUID), device:hipDevice_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetP2PAttribute(value:ctypes.POINTER(ctypes.c_int32), attr:hipDeviceP2PAttr, srcDevice:ctypes.c_int32, dstDevice:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetPCIBusId(pciBusId:ctypes.POINTER(ctypes.c_char), len:ctypes.c_int32, device:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetByPCIBusId(device:ctypes.POINTER(ctypes.c_int32), pciBusId:ctypes.POINTER(ctypes.c_char)) -> hipError_t: ...
+@dll.bind
+def hipDeviceTotalMem(bytes:ctypes.POINTER(size_t), device:hipDevice_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceSynchronize() -> hipError_t: ...
+@dll.bind
+def hipDeviceReset() -> hipError_t: ...
+@dll.bind
+def hipSetDevice(deviceId:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipSetValidDevices(device_arr:ctypes.POINTER(ctypes.c_int32), len:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipGetDevice(deviceId:ctypes.POINTER(ctypes.c_int32)) -> hipError_t: ...
+@dll.bind
+def hipGetDeviceCount(count:ctypes.POINTER(ctypes.c_int32)) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetAttribute(pi:ctypes.POINTER(ctypes.c_int32), attr:hipDeviceAttribute_t, deviceId:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetDefaultMemPool(mem_pool:ctypes.POINTER(hipMemPool_t), device:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipDeviceSetMemPool(device:ctypes.c_int32, mem_pool:hipMemPool_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetMemPool(mem_pool:ctypes.POINTER(hipMemPool_t), device:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipGetDevicePropertiesR0600(prop:ctypes.POINTER(hipDeviceProp_tR0600), deviceId:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipDeviceSetCacheConfig(cacheConfig:hipFuncCache_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetCacheConfig(cacheConfig:ctypes.POINTER(hipFuncCache_t)) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetLimit(pValue:ctypes.POINTER(size_t), limit:hipLimit_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceSetLimit(limit:hipLimit_t, value:size_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetSharedMemConfig(pConfig:ctypes.POINTER(hipSharedMemConfig)) -> hipError_t: ...
+@dll.bind
+def hipGetDeviceFlags(flags:ctypes.POINTER(ctypes.c_uint32)) -> hipError_t: ...
+@dll.bind
+def hipDeviceSetSharedMemConfig(config:hipSharedMemConfig) -> hipError_t: ...
+@dll.bind
+def hipSetDeviceFlags(flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipChooseDeviceR0600(device:ctypes.POINTER(ctypes.c_int32), prop:ctypes.POINTER(hipDeviceProp_tR0600)) -> hipError_t: ...
+@dll.bind
+def hipExtGetLinkTypeAndHopCount(device1:ctypes.c_int32, device2:ctypes.c_int32, linktype:ctypes.POINTER(uint32_t), hopcount:ctypes.POINTER(uint32_t)) -> hipError_t: ...
+@dll.bind
+def hipIpcGetMemHandle(handle:ctypes.POINTER(hipIpcMemHandle_t), devPtr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipIpcOpenMemHandle(devPtr:ctypes.POINTER(ctypes.POINTER(None)), handle:hipIpcMemHandle_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipIpcCloseMemHandle(devPtr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipIpcGetEventHandle(handle:ctypes.POINTER(hipIpcEventHandle_t), event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipIpcOpenEventHandle(event:ctypes.POINTER(hipEvent_t), handle:hipIpcEventHandle_t) -> hipError_t: ...
+@dll.bind
+def hipFuncSetAttribute(func:ctypes.POINTER(None), attr:hipFuncAttribute, value:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipFuncSetCacheConfig(func:ctypes.POINTER(None), config:hipFuncCache_t) -> hipError_t: ...
+@dll.bind
+def hipFuncSetSharedMemConfig(func:ctypes.POINTER(None), config:hipSharedMemConfig) -> hipError_t: ...
+@dll.bind
+def hipGetLastError() -> hipError_t: ...
+@dll.bind
+def hipExtGetLastError() -> hipError_t: ...
+@dll.bind
+def hipPeekAtLastError() -> hipError_t: ...
+@dll.bind
+def hipGetErrorName(hip_error:hipError_t) -> ctypes.POINTER(ctypes.c_char): ...
+@dll.bind
+def hipGetErrorString(hipError:hipError_t) -> ctypes.POINTER(ctypes.c_char): ...
+@dll.bind
+def hipDrvGetErrorName(hipError:hipError_t, errorString:ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) -> hipError_t: ...
+@dll.bind
+def hipDrvGetErrorString(hipError:hipError_t, errorString:ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) -> hipError_t: ...
+@dll.bind
+def hipStreamCreate(stream:ctypes.POINTER(hipStream_t)) -> hipError_t: ...
+@dll.bind
+def hipStreamCreateWithFlags(stream:ctypes.POINTER(hipStream_t), flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipStreamCreateWithPriority(stream:ctypes.POINTER(hipStream_t), flags:ctypes.c_uint32, priority:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetStreamPriorityRange(leastPriority:ctypes.POINTER(ctypes.c_int32), greatestPriority:ctypes.POINTER(ctypes.c_int32)) -> hipError_t: ...
+@dll.bind
+def hipStreamDestroy(stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipStreamQuery(stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipStreamSynchronize(stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipStreamWaitEvent(stream:hipStream_t, event:hipEvent_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipStreamGetFlags(stream:hipStream_t, flags:ctypes.POINTER(ctypes.c_uint32)) -> hipError_t: ...
+@dll.bind
+def hipStreamGetPriority(stream:hipStream_t, priority:ctypes.POINTER(ctypes.c_int32)) -> hipError_t: ...
+@dll.bind
+def hipStreamGetDevice(stream:hipStream_t, device:ctypes.POINTER(hipDevice_t)) -> hipError_t: ...
+@dll.bind
+def hipExtStreamCreateWithCUMask(stream:ctypes.POINTER(hipStream_t), cuMaskSize:uint32_t, cuMask:ctypes.POINTER(uint32_t)) -> hipError_t: ...
+@dll.bind
+def hipExtStreamGetCUMask(stream:hipStream_t, cuMaskSize:uint32_t, cuMask:ctypes.POINTER(uint32_t)) -> hipError_t: ...
+hipStreamCallback_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(ihipStream_t), hipError_t, ctypes.POINTER(None))
+@dll.bind
+def hipStreamAddCallback(stream:hipStream_t, callback:hipStreamCallback_t, userData:ctypes.POINTER(None), flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipStreamWaitValue32(stream:hipStream_t, ptr:ctypes.POINTER(None), value:uint32_t, flags:ctypes.c_uint32, mask:uint32_t) -> hipError_t: ...
 uint64_t = ctypes.c_uint64
-@dll.bind((hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint32, uint64_t), hipError_t)
-def hipStreamWaitValue64(stream, ptr, value, flags, mask): ...
-@dll.bind((hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint32), hipError_t)
-def hipStreamWriteValue32(stream, ptr, value, flags): ...
-@dll.bind((hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint32), hipError_t)
-def hipStreamWriteValue64(stream, ptr, value, flags): ...
-@dll.bind((Pointer(hipEvent_t), ctypes.c_uint32), hipError_t)
-def hipEventCreateWithFlags(event, flags): ...
-@dll.bind((Pointer(hipEvent_t)), hipError_t)
-def hipEventCreate(event): ...
-@dll.bind((hipEvent_t, hipStream_t), hipError_t)
-def hipEventRecord(event, stream): ...
-@dll.bind((hipEvent_t), hipError_t)
-def hipEventDestroy(event): ...
-@dll.bind((hipEvent_t), hipError_t)
-def hipEventSynchronize(event): ...
-@dll.bind((Pointer(ctypes.c_float), hipEvent_t, hipEvent_t), hipError_t)
-def hipEventElapsedTime(ms, start, stop): ...
-@dll.bind((hipEvent_t), hipError_t)
-def hipEventQuery(event): ...
+@dll.bind
+def hipStreamWaitValue64(stream:hipStream_t, ptr:ctypes.POINTER(None), value:uint64_t, flags:ctypes.c_uint32, mask:uint64_t) -> hipError_t: ...
+@dll.bind
+def hipStreamWriteValue32(stream:hipStream_t, ptr:ctypes.POINTER(None), value:uint32_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipStreamWriteValue64(stream:hipStream_t, ptr:ctypes.POINTER(None), value:uint64_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipEventCreateWithFlags(event:ctypes.POINTER(hipEvent_t), flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipEventCreate(event:ctypes.POINTER(hipEvent_t)) -> hipError_t: ...
+@dll.bind
+def hipEventRecord(event:hipEvent_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipEventDestroy(event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipEventSynchronize(event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipEventElapsedTime(ms:ctypes.POINTER(ctypes.c_float), start:hipEvent_t, stop:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipEventQuery(event:hipEvent_t) -> hipError_t: ...
 hipPointer_attribute = CEnum(ctypes.c_uint32)
 HIP_POINTER_ATTRIBUTE_CONTEXT = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_CONTEXT', 1)
 HIP_POINTER_ATTRIBUTE_MEMORY_TYPE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MEMORY_TYPE', 2)
@@ -1371,351 +1373,351 @@ HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE = hipPointer_attribute.define('
 HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS', 16)
 HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE', 17)
 
-@dll.bind((ctypes.c_void_p, hipPointer_attribute, hipDeviceptr_t), hipError_t)
-def hipPointerSetAttribute(value, attribute, ptr): ...
-@dll.bind((Pointer(hipPointerAttribute_t), ctypes.c_void_p), hipError_t)
-def hipPointerGetAttributes(attributes, ptr): ...
-@dll.bind((ctypes.c_void_p, hipPointer_attribute, hipDeviceptr_t), hipError_t)
-def hipPointerGetAttribute(data, attribute, ptr): ...
-@dll.bind((ctypes.c_uint32, Pointer(hipPointer_attribute), Pointer(ctypes.c_void_p), hipDeviceptr_t), hipError_t)
-def hipDrvPointerGetAttributes(numAttributes, attributes, data, ptr): ...
-@dll.bind((Pointer(hipExternalSemaphore_t), Pointer(hipExternalSemaphoreHandleDesc)), hipError_t)
-def hipImportExternalSemaphore(extSem_out, semHandleDesc): ...
-@dll.bind((Pointer(hipExternalSemaphore_t), Pointer(hipExternalSemaphoreSignalParams), ctypes.c_uint32, hipStream_t), hipError_t)
-def hipSignalExternalSemaphoresAsync(extSemArray, paramsArray, numExtSems, stream): ...
-@dll.bind((Pointer(hipExternalSemaphore_t), Pointer(hipExternalSemaphoreWaitParams), ctypes.c_uint32, hipStream_t), hipError_t)
-def hipWaitExternalSemaphoresAsync(extSemArray, paramsArray, numExtSems, stream): ...
-@dll.bind((hipExternalSemaphore_t), hipError_t)
-def hipDestroyExternalSemaphore(extSem): ...
-@dll.bind((Pointer(hipExternalMemory_t), Pointer(hipExternalMemoryHandleDesc)), hipError_t)
-def hipImportExternalMemory(extMem_out, memHandleDesc): ...
-@dll.bind((Pointer(ctypes.c_void_p), hipExternalMemory_t, Pointer(hipExternalMemoryBufferDesc)), hipError_t)
-def hipExternalMemoryGetMappedBuffer(devPtr, extMem, bufferDesc): ...
-@dll.bind((hipExternalMemory_t), hipError_t)
-def hipDestroyExternalMemory(extMem): ...
-hipMipmappedArray_t = Pointer(hipMipmappedArray)
-@dll.bind((Pointer(hipMipmappedArray_t), hipExternalMemory_t, Pointer(hipExternalMemoryMipmappedArrayDesc)), hipError_t)
-def hipExternalMemoryGetMappedMipmappedArray(mipmap, extMem, mipmapDesc): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t), hipError_t)
-def hipMalloc(ptr, size): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t, ctypes.c_uint32), hipError_t)
-def hipExtMallocWithFlags(ptr, sizeBytes, flags): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t), hipError_t)
-def hipMallocHost(ptr, size): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t), hipError_t)
-def hipMemAllocHost(ptr, size): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t, ctypes.c_uint32), hipError_t)
-def hipHostMalloc(ptr, size, flags): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t, ctypes.c_uint32), hipError_t)
-def hipMallocManaged(dev_ptr, size, flags): ...
-@dll.bind((ctypes.c_void_p, size_t, ctypes.c_int32, hipStream_t), hipError_t)
-def hipMemPrefetchAsync(dev_ptr, count, device, stream): ...
-@dll.bind((ctypes.c_void_p, size_t, hipMemoryAdvise, ctypes.c_int32), hipError_t)
-def hipMemAdvise(dev_ptr, count, advice, device): ...
-@dll.bind((ctypes.c_void_p, size_t, hipMemRangeAttribute, ctypes.c_void_p, size_t), hipError_t)
-def hipMemRangeGetAttribute(data, data_size, attribute, dev_ptr, count): ...
-@dll.bind((Pointer(ctypes.c_void_p), Pointer(size_t), Pointer(hipMemRangeAttribute), size_t, ctypes.c_void_p, size_t), hipError_t)
-def hipMemRangeGetAttributes(data, data_sizes, attributes, num_attributes, dev_ptr, count): ...
-@dll.bind((hipStream_t, ctypes.c_void_p, size_t, ctypes.c_uint32), hipError_t)
-def hipStreamAttachMemAsync(stream, dev_ptr, length, flags): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t, hipStream_t), hipError_t)
-def hipMallocAsync(dev_ptr, size, stream): ...
-@dll.bind((ctypes.c_void_p, hipStream_t), hipError_t)
-def hipFreeAsync(dev_ptr, stream): ...
-@dll.bind((hipMemPool_t, size_t), hipError_t)
-def hipMemPoolTrimTo(mem_pool, min_bytes_to_hold): ...
-@dll.bind((hipMemPool_t, hipMemPoolAttr, ctypes.c_void_p), hipError_t)
-def hipMemPoolSetAttribute(mem_pool, attr, value): ...
-@dll.bind((hipMemPool_t, hipMemPoolAttr, ctypes.c_void_p), hipError_t)
-def hipMemPoolGetAttribute(mem_pool, attr, value): ...
-@dll.bind((hipMemPool_t, Pointer(hipMemAccessDesc), size_t), hipError_t)
-def hipMemPoolSetAccess(mem_pool, desc_list, count): ...
-@dll.bind((Pointer(hipMemAccessFlags), hipMemPool_t, Pointer(hipMemLocation)), hipError_t)
-def hipMemPoolGetAccess(flags, mem_pool, location): ...
-@dll.bind((Pointer(hipMemPool_t), Pointer(hipMemPoolProps)), hipError_t)
-def hipMemPoolCreate(mem_pool, pool_props): ...
-@dll.bind((hipMemPool_t), hipError_t)
-def hipMemPoolDestroy(mem_pool): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t, hipMemPool_t, hipStream_t), hipError_t)
-def hipMallocFromPoolAsync(dev_ptr, size, mem_pool, stream): ...
-@dll.bind((ctypes.c_void_p, hipMemPool_t, hipMemAllocationHandleType, ctypes.c_uint32), hipError_t)
-def hipMemPoolExportToShareableHandle(shared_handle, mem_pool, handle_type, flags): ...
-@dll.bind((Pointer(hipMemPool_t), ctypes.c_void_p, hipMemAllocationHandleType, ctypes.c_uint32), hipError_t)
-def hipMemPoolImportFromShareableHandle(mem_pool, shared_handle, handle_type, flags): ...
-@dll.bind((Pointer(hipMemPoolPtrExportData), ctypes.c_void_p), hipError_t)
-def hipMemPoolExportPointer(export_data, dev_ptr): ...
-@dll.bind((Pointer(ctypes.c_void_p), hipMemPool_t, Pointer(hipMemPoolPtrExportData)), hipError_t)
-def hipMemPoolImportPointer(dev_ptr, mem_pool, export_data): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t, ctypes.c_uint32), hipError_t)
-def hipHostAlloc(ptr, size, flags): ...
-@dll.bind((Pointer(ctypes.c_void_p), ctypes.c_void_p, ctypes.c_uint32), hipError_t)
-def hipHostGetDevicePointer(devPtr, hstPtr, flags): ...
-@dll.bind((Pointer(ctypes.c_uint32), ctypes.c_void_p), hipError_t)
-def hipHostGetFlags(flagsPtr, hostPtr): ...
-@dll.bind((ctypes.c_void_p, size_t, ctypes.c_uint32), hipError_t)
-def hipHostRegister(hostPtr, sizeBytes, flags): ...
-@dll.bind((ctypes.c_void_p), hipError_t)
-def hipHostUnregister(hostPtr): ...
-@dll.bind((Pointer(ctypes.c_void_p), Pointer(size_t), size_t, size_t), hipError_t)
-def hipMallocPitch(ptr, pitch, width, height): ...
-@dll.bind((Pointer(hipDeviceptr_t), Pointer(size_t), size_t, size_t, ctypes.c_uint32), hipError_t)
-def hipMemAllocPitch(dptr, pitch, widthInBytes, height, elementSizeBytes): ...
-@dll.bind((ctypes.c_void_p), hipError_t)
-def hipFree(ptr): ...
-@dll.bind((ctypes.c_void_p), hipError_t)
-def hipFreeHost(ptr): ...
-@dll.bind((ctypes.c_void_p), hipError_t)
-def hipHostFree(ptr): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpy(dst, src, sizeBytes, kind): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind, hipStream_t), hipError_t)
-def hipMemcpyWithStream(dst, src, sizeBytes, kind, stream): ...
-@dll.bind((hipDeviceptr_t, ctypes.c_void_p, size_t), hipError_t)
-def hipMemcpyHtoD(dst, src, sizeBytes): ...
-@dll.bind((ctypes.c_void_p, hipDeviceptr_t, size_t), hipError_t)
-def hipMemcpyDtoH(dst, src, sizeBytes): ...
-@dll.bind((hipDeviceptr_t, hipDeviceptr_t, size_t), hipError_t)
-def hipMemcpyDtoD(dst, src, sizeBytes): ...
-@dll.bind((hipDeviceptr_t, hipArray_t, size_t, size_t), hipError_t)
-def hipMemcpyAtoD(dstDevice, srcArray, srcOffset, ByteCount): ...
-@dll.bind((hipArray_t, size_t, hipDeviceptr_t, size_t), hipError_t)
-def hipMemcpyDtoA(dstArray, dstOffset, srcDevice, ByteCount): ...
-@dll.bind((hipArray_t, size_t, hipArray_t, size_t, size_t), hipError_t)
-def hipMemcpyAtoA(dstArray, dstOffset, srcArray, srcOffset, ByteCount): ...
-@dll.bind((hipDeviceptr_t, ctypes.c_void_p, size_t, hipStream_t), hipError_t)
-def hipMemcpyHtoDAsync(dst, src, sizeBytes, stream): ...
-@dll.bind((ctypes.c_void_p, hipDeviceptr_t, size_t, hipStream_t), hipError_t)
-def hipMemcpyDtoHAsync(dst, src, sizeBytes, stream): ...
-@dll.bind((hipDeviceptr_t, hipDeviceptr_t, size_t, hipStream_t), hipError_t)
-def hipMemcpyDtoDAsync(dst, src, sizeBytes, stream): ...
-@dll.bind((ctypes.c_void_p, hipArray_t, size_t, size_t, hipStream_t), hipError_t)
-def hipMemcpyAtoHAsync(dstHost, srcArray, srcOffset, ByteCount, stream): ...
-@dll.bind((hipArray_t, size_t, ctypes.c_void_p, size_t, hipStream_t), hipError_t)
-def hipMemcpyHtoAAsync(dstArray, dstOffset, srcHost, ByteCount, stream): ...
-@dll.bind((Pointer(hipDeviceptr_t), Pointer(size_t), hipModule_t, Pointer(ctypes.c_char)), hipError_t)
-def hipModuleGetGlobal(dptr, bytes, hmod, name): ...
-@dll.bind((Pointer(ctypes.c_void_p), ctypes.c_void_p), hipError_t)
-def hipGetSymbolAddress(devPtr, symbol): ...
-@dll.bind((Pointer(size_t), ctypes.c_void_p), hipError_t)
-def hipGetSymbolSize(size, symbol): ...
-@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_void_p), ctypes.c_int32, uint64_t, Pointer(hipDriverProcAddressQueryResult)), hipError_t)
-def hipGetProcAddress(symbol, pfn, hipVersion, flags, symbolStatus): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpyToSymbol(symbol, src, sizeBytes, offset, kind): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind, hipStream_t), hipError_t)
-def hipMemcpyToSymbolAsync(symbol, src, sizeBytes, offset, kind, stream): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpyFromSymbol(dst, symbol, sizeBytes, offset, kind): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind, hipStream_t), hipError_t)
-def hipMemcpyFromSymbolAsync(dst, symbol, sizeBytes, offset, kind, stream): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind, hipStream_t), hipError_t)
-def hipMemcpyAsync(dst, src, sizeBytes, kind, stream): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_int32, size_t), hipError_t)
-def hipMemset(dst, value, sizeBytes): ...
-@dll.bind((hipDeviceptr_t, ctypes.c_ubyte, size_t), hipError_t)
-def hipMemsetD8(dest, value, count): ...
-@dll.bind((hipDeviceptr_t, ctypes.c_ubyte, size_t, hipStream_t), hipError_t)
-def hipMemsetD8Async(dest, value, count, stream): ...
-@dll.bind((hipDeviceptr_t, ctypes.c_uint16, size_t), hipError_t)
-def hipMemsetD16(dest, value, count): ...
-@dll.bind((hipDeviceptr_t, ctypes.c_uint16, size_t, hipStream_t), hipError_t)
-def hipMemsetD16Async(dest, value, count, stream): ...
-@dll.bind((hipDeviceptr_t, ctypes.c_int32, size_t), hipError_t)
-def hipMemsetD32(dest, value, count): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_int32, size_t, hipStream_t), hipError_t)
-def hipMemsetAsync(dst, value, sizeBytes, stream): ...
-@dll.bind((hipDeviceptr_t, ctypes.c_int32, size_t, hipStream_t), hipError_t)
-def hipMemsetD32Async(dst, value, count, stream): ...
-@dll.bind((ctypes.c_void_p, size_t, ctypes.c_int32, size_t, size_t), hipError_t)
-def hipMemset2D(dst, pitch, value, width, height): ...
-@dll.bind((ctypes.c_void_p, size_t, ctypes.c_int32, size_t, size_t, hipStream_t), hipError_t)
-def hipMemset2DAsync(dst, pitch, value, width, height, stream): ...
-@dll.bind((hipPitchedPtr, ctypes.c_int32, hipExtent), hipError_t)
-def hipMemset3D(pitchedDevPtr, value, extent): ...
-@dll.bind((hipPitchedPtr, ctypes.c_int32, hipExtent, hipStream_t), hipError_t)
-def hipMemset3DAsync(pitchedDevPtr, value, extent, stream): ...
-@dll.bind((Pointer(size_t), Pointer(size_t)), hipError_t)
-def hipMemGetInfo(free, total): ...
-@dll.bind((ctypes.c_void_p, Pointer(size_t)), hipError_t)
-def hipMemPtrGetInfo(ptr, size): ...
-@dll.bind((Pointer(hipArray_t), Pointer(hipChannelFormatDesc), size_t, size_t, ctypes.c_uint32), hipError_t)
-def hipMallocArray(array, desc, width, height, flags): ...
-class HIP_ARRAY_DESCRIPTOR(Struct): pass
-HIP_ARRAY_DESCRIPTOR.SIZE = 24
-HIP_ARRAY_DESCRIPTOR._fields_ = ['Width', 'Height', 'Format', 'NumChannels']
-setattr(HIP_ARRAY_DESCRIPTOR, 'Width', field(0, size_t))
-setattr(HIP_ARRAY_DESCRIPTOR, 'Height', field(8, size_t))
-setattr(HIP_ARRAY_DESCRIPTOR, 'Format', field(16, hipArray_Format))
-setattr(HIP_ARRAY_DESCRIPTOR, 'NumChannels', field(20, ctypes.c_uint32))
-@dll.bind((Pointer(hipArray_t), Pointer(HIP_ARRAY_DESCRIPTOR)), hipError_t)
-def hipArrayCreate(pHandle, pAllocateArray): ...
-@dll.bind((hipArray_t), hipError_t)
-def hipArrayDestroy(array): ...
-class HIP_ARRAY3D_DESCRIPTOR(Struct): pass
-HIP_ARRAY3D_DESCRIPTOR.SIZE = 40
-HIP_ARRAY3D_DESCRIPTOR._fields_ = ['Width', 'Height', 'Depth', 'Format', 'NumChannels', 'Flags']
-setattr(HIP_ARRAY3D_DESCRIPTOR, 'Width', field(0, size_t))
-setattr(HIP_ARRAY3D_DESCRIPTOR, 'Height', field(8, size_t))
-setattr(HIP_ARRAY3D_DESCRIPTOR, 'Depth', field(16, size_t))
-setattr(HIP_ARRAY3D_DESCRIPTOR, 'Format', field(24, hipArray_Format))
-setattr(HIP_ARRAY3D_DESCRIPTOR, 'NumChannels', field(28, ctypes.c_uint32))
-setattr(HIP_ARRAY3D_DESCRIPTOR, 'Flags', field(32, ctypes.c_uint32))
-@dll.bind((Pointer(hipArray_t), Pointer(HIP_ARRAY3D_DESCRIPTOR)), hipError_t)
-def hipArray3DCreate(array, pAllocateArray): ...
-@dll.bind((Pointer(hipPitchedPtr), hipExtent), hipError_t)
-def hipMalloc3D(pitchedDevPtr, extent): ...
-@dll.bind((hipArray_t), hipError_t)
-def hipFreeArray(array): ...
-@dll.bind((Pointer(hipArray_t), Pointer(hipChannelFormatDesc), hipExtent, ctypes.c_uint32), hipError_t)
-def hipMalloc3DArray(array, desc, extent, flags): ...
-@dll.bind((Pointer(hipChannelFormatDesc), Pointer(hipExtent), Pointer(ctypes.c_uint32), hipArray_t), hipError_t)
-def hipArrayGetInfo(desc, extent, flags, array): ...
-@dll.bind((Pointer(HIP_ARRAY_DESCRIPTOR), hipArray_t), hipError_t)
-def hipArrayGetDescriptor(pArrayDescriptor, array): ...
-@dll.bind((Pointer(HIP_ARRAY3D_DESCRIPTOR), hipArray_t), hipError_t)
-def hipArray3DGetDescriptor(pArrayDescriptor, array): ...
-@dll.bind((ctypes.c_void_p, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpy2D(dst, dpitch, src, spitch, width, height, kind): ...
-class hip_Memcpy2D(Struct): pass
-hip_Memcpy2D.SIZE = 128
-hip_Memcpy2D._fields_ = ['srcXInBytes', 'srcY', 'srcMemoryType', 'srcHost', 'srcDevice', 'srcArray', 'srcPitch', 'dstXInBytes', 'dstY', 'dstMemoryType', 'dstHost', 'dstDevice', 'dstArray', 'dstPitch', 'WidthInBytes', 'Height']
-setattr(hip_Memcpy2D, 'srcXInBytes', field(0, size_t))
-setattr(hip_Memcpy2D, 'srcY', field(8, size_t))
-setattr(hip_Memcpy2D, 'srcMemoryType', field(16, hipMemoryType))
-setattr(hip_Memcpy2D, 'srcHost', field(24, ctypes.c_void_p))
-setattr(hip_Memcpy2D, 'srcDevice', field(32, hipDeviceptr_t))
-setattr(hip_Memcpy2D, 'srcArray', field(40, hipArray_t))
-setattr(hip_Memcpy2D, 'srcPitch', field(48, size_t))
-setattr(hip_Memcpy2D, 'dstXInBytes', field(56, size_t))
-setattr(hip_Memcpy2D, 'dstY', field(64, size_t))
-setattr(hip_Memcpy2D, 'dstMemoryType', field(72, hipMemoryType))
-setattr(hip_Memcpy2D, 'dstHost', field(80, ctypes.c_void_p))
-setattr(hip_Memcpy2D, 'dstDevice', field(88, hipDeviceptr_t))
-setattr(hip_Memcpy2D, 'dstArray', field(96, hipArray_t))
-setattr(hip_Memcpy2D, 'dstPitch', field(104, size_t))
-setattr(hip_Memcpy2D, 'WidthInBytes', field(112, size_t))
-setattr(hip_Memcpy2D, 'Height', field(120, size_t))
-@dll.bind((Pointer(hip_Memcpy2D)), hipError_t)
-def hipMemcpyParam2D(pCopy): ...
-@dll.bind((Pointer(hip_Memcpy2D), hipStream_t), hipError_t)
-def hipMemcpyParam2DAsync(pCopy, stream): ...
-@dll.bind((ctypes.c_void_p, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind, hipStream_t), hipError_t)
-def hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream): ...
-@dll.bind((hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpy2DToArray(dst, wOffset, hOffset, src, spitch, width, height, kind): ...
-@dll.bind((hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind, hipStream_t), hipError_t)
-def hipMemcpy2DToArrayAsync(dst, wOffset, hOffset, src, spitch, width, height, kind, stream): ...
-hipArray_const_t = Pointer(hipArray)
-@dll.bind((hipArray_t, size_t, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpy2DArrayToArray(dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc, width, height, kind): ...
-@dll.bind((hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpyToArray(dst, wOffset, hOffset, src, count, kind): ...
-@dll.bind((ctypes.c_void_p, hipArray_const_t, size_t, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpyFromArray(dst, srcArray, wOffset, hOffset, count, kind): ...
-@dll.bind((ctypes.c_void_p, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipMemcpy2DFromArray(dst, dpitch, src, wOffset, hOffset, width, height, kind): ...
-@dll.bind((ctypes.c_void_p, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind, hipStream_t), hipError_t)
-def hipMemcpy2DFromArrayAsync(dst, dpitch, src, wOffset, hOffset, width, height, kind, stream): ...
-@dll.bind((ctypes.c_void_p, hipArray_t, size_t, size_t), hipError_t)
-def hipMemcpyAtoH(dst, srcArray, srcOffset, count): ...
-@dll.bind((hipArray_t, size_t, ctypes.c_void_p, size_t), hipError_t)
-def hipMemcpyHtoA(dstArray, dstOffset, srcHost, count): ...
-@dll.bind((Pointer(hipMemcpy3DParms)), hipError_t)
-def hipMemcpy3D(p): ...
-@dll.bind((Pointer(hipMemcpy3DParms), hipStream_t), hipError_t)
-def hipMemcpy3DAsync(p, stream): ...
-class HIP_MEMCPY3D(Struct): pass
-HIP_MEMCPY3D.SIZE = 184
-HIP_MEMCPY3D._fields_ = ['srcXInBytes', 'srcY', 'srcZ', 'srcLOD', 'srcMemoryType', 'srcHost', 'srcDevice', 'srcArray', 'srcPitch', 'srcHeight', 'dstXInBytes', 'dstY', 'dstZ', 'dstLOD', 'dstMemoryType', 'dstHost', 'dstDevice', 'dstArray', 'dstPitch', 'dstHeight', 'WidthInBytes', 'Height', 'Depth']
-setattr(HIP_MEMCPY3D, 'srcXInBytes', field(0, size_t))
-setattr(HIP_MEMCPY3D, 'srcY', field(8, size_t))
-setattr(HIP_MEMCPY3D, 'srcZ', field(16, size_t))
-setattr(HIP_MEMCPY3D, 'srcLOD', field(24, size_t))
-setattr(HIP_MEMCPY3D, 'srcMemoryType', field(32, hipMemoryType))
-setattr(HIP_MEMCPY3D, 'srcHost', field(40, ctypes.c_void_p))
-setattr(HIP_MEMCPY3D, 'srcDevice', field(48, hipDeviceptr_t))
-setattr(HIP_MEMCPY3D, 'srcArray', field(56, hipArray_t))
-setattr(HIP_MEMCPY3D, 'srcPitch', field(64, size_t))
-setattr(HIP_MEMCPY3D, 'srcHeight', field(72, size_t))
-setattr(HIP_MEMCPY3D, 'dstXInBytes', field(80, size_t))
-setattr(HIP_MEMCPY3D, 'dstY', field(88, size_t))
-setattr(HIP_MEMCPY3D, 'dstZ', field(96, size_t))
-setattr(HIP_MEMCPY3D, 'dstLOD', field(104, size_t))
-setattr(HIP_MEMCPY3D, 'dstMemoryType', field(112, hipMemoryType))
-setattr(HIP_MEMCPY3D, 'dstHost', field(120, ctypes.c_void_p))
-setattr(HIP_MEMCPY3D, 'dstDevice', field(128, hipDeviceptr_t))
-setattr(HIP_MEMCPY3D, 'dstArray', field(136, hipArray_t))
-setattr(HIP_MEMCPY3D, 'dstPitch', field(144, size_t))
-setattr(HIP_MEMCPY3D, 'dstHeight', field(152, size_t))
-setattr(HIP_MEMCPY3D, 'WidthInBytes', field(160, size_t))
-setattr(HIP_MEMCPY3D, 'Height', field(168, size_t))
-setattr(HIP_MEMCPY3D, 'Depth', field(176, size_t))
-@dll.bind((Pointer(HIP_MEMCPY3D)), hipError_t)
-def hipDrvMemcpy3D(pCopy): ...
-@dll.bind((Pointer(HIP_MEMCPY3D), hipStream_t), hipError_t)
-def hipDrvMemcpy3DAsync(pCopy, stream): ...
-@dll.bind((Pointer(ctypes.c_int32), ctypes.c_int32, ctypes.c_int32), hipError_t)
-def hipDeviceCanAccessPeer(canAccessPeer, deviceId, peerDeviceId): ...
-@dll.bind((ctypes.c_int32, ctypes.c_uint32), hipError_t)
-def hipDeviceEnablePeerAccess(peerDeviceId, flags): ...
-@dll.bind((ctypes.c_int32), hipError_t)
-def hipDeviceDisablePeerAccess(peerDeviceId): ...
-@dll.bind((Pointer(hipDeviceptr_t), Pointer(size_t), hipDeviceptr_t), hipError_t)
-def hipMemGetAddressRange(pbase, psize, dptr): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, size_t), hipError_t)
-def hipMemcpyPeer(dst, dstDeviceId, src, srcDeviceId, sizeBytes): ...
-@dll.bind((ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, size_t, hipStream_t), hipError_t)
-def hipMemcpyPeerAsync(dst, dstDeviceId, src, srcDevice, sizeBytes, stream): ...
-@dll.bind((Pointer(hipCtx_t), ctypes.c_uint32, hipDevice_t), hipError_t)
-def hipCtxCreate(ctx, flags, device): ...
-@dll.bind((hipCtx_t), hipError_t)
-def hipCtxDestroy(ctx): ...
-@dll.bind((Pointer(hipCtx_t)), hipError_t)
-def hipCtxPopCurrent(ctx): ...
-@dll.bind((hipCtx_t), hipError_t)
-def hipCtxPushCurrent(ctx): ...
-@dll.bind((hipCtx_t), hipError_t)
-def hipCtxSetCurrent(ctx): ...
-@dll.bind((Pointer(hipCtx_t)), hipError_t)
-def hipCtxGetCurrent(ctx): ...
-@dll.bind((Pointer(hipDevice_t)), hipError_t)
-def hipCtxGetDevice(device): ...
-@dll.bind((hipCtx_t, Pointer(ctypes.c_int32)), hipError_t)
-def hipCtxGetApiVersion(ctx, apiVersion): ...
-@dll.bind((Pointer(hipFuncCache_t)), hipError_t)
-def hipCtxGetCacheConfig(cacheConfig): ...
-@dll.bind((hipFuncCache_t), hipError_t)
-def hipCtxSetCacheConfig(cacheConfig): ...
-@dll.bind((hipSharedMemConfig), hipError_t)
-def hipCtxSetSharedMemConfig(config): ...
-@dll.bind((Pointer(hipSharedMemConfig)), hipError_t)
-def hipCtxGetSharedMemConfig(pConfig): ...
-@dll.bind((), hipError_t)
-def hipCtxSynchronize(): ...
-@dll.bind((Pointer(ctypes.c_uint32)), hipError_t)
-def hipCtxGetFlags(flags): ...
-@dll.bind((hipCtx_t, ctypes.c_uint32), hipError_t)
-def hipCtxEnablePeerAccess(peerCtx, flags): ...
-@dll.bind((hipCtx_t), hipError_t)
-def hipCtxDisablePeerAccess(peerCtx): ...
-@dll.bind((hipDevice_t, Pointer(ctypes.c_uint32), Pointer(ctypes.c_int32)), hipError_t)
-def hipDevicePrimaryCtxGetState(dev, flags, active): ...
-@dll.bind((hipDevice_t), hipError_t)
-def hipDevicePrimaryCtxRelease(dev): ...
-@dll.bind((Pointer(hipCtx_t), hipDevice_t), hipError_t)
-def hipDevicePrimaryCtxRetain(pctx, dev): ...
-@dll.bind((hipDevice_t), hipError_t)
-def hipDevicePrimaryCtxReset(dev): ...
-@dll.bind((hipDevice_t, ctypes.c_uint32), hipError_t)
-def hipDevicePrimaryCtxSetFlags(dev, flags): ...
-@dll.bind((Pointer(hipModule_t), Pointer(ctypes.c_char)), hipError_t)
-def hipModuleLoad(module, fname): ...
-@dll.bind((hipModule_t), hipError_t)
-def hipModuleUnload(module): ...
-@dll.bind((Pointer(hipFunction_t), hipModule_t, Pointer(ctypes.c_char)), hipError_t)
-def hipModuleGetFunction(function, module, kname): ...
-@dll.bind((Pointer(hipFuncAttributes), ctypes.c_void_p), hipError_t)
-def hipFuncGetAttributes(attr, func): ...
+@dll.bind
+def hipPointerSetAttribute(value:ctypes.POINTER(None), attribute:hipPointer_attribute, ptr:hipDeviceptr_t) -> hipError_t: ...
+@dll.bind
+def hipPointerGetAttributes(attributes:ctypes.POINTER(hipPointerAttribute_t), ptr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipPointerGetAttribute(data:ctypes.POINTER(None), attribute:hipPointer_attribute, ptr:hipDeviceptr_t) -> hipError_t: ...
+@dll.bind
+def hipDrvPointerGetAttributes(numAttributes:ctypes.c_uint32, attributes:ctypes.POINTER(hipPointer_attribute), data:ctypes.POINTER(ctypes.POINTER(None)), ptr:hipDeviceptr_t) -> hipError_t: ...
+@dll.bind
+def hipImportExternalSemaphore(extSem_out:ctypes.POINTER(hipExternalSemaphore_t), semHandleDesc:ctypes.POINTER(hipExternalSemaphoreHandleDesc)) -> hipError_t: ...
+@dll.bind
+def hipSignalExternalSemaphoresAsync(extSemArray:ctypes.POINTER(hipExternalSemaphore_t), paramsArray:ctypes.POINTER(hipExternalSemaphoreSignalParams), numExtSems:ctypes.c_uint32, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipWaitExternalSemaphoresAsync(extSemArray:ctypes.POINTER(hipExternalSemaphore_t), paramsArray:ctypes.POINTER(hipExternalSemaphoreWaitParams), numExtSems:ctypes.c_uint32, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipDestroyExternalSemaphore(extSem:hipExternalSemaphore_t) -> hipError_t: ...
+@dll.bind
+def hipImportExternalMemory(extMem_out:ctypes.POINTER(hipExternalMemory_t), memHandleDesc:ctypes.POINTER(hipExternalMemoryHandleDesc)) -> hipError_t: ...
+@dll.bind
+def hipExternalMemoryGetMappedBuffer(devPtr:ctypes.POINTER(ctypes.POINTER(None)), extMem:hipExternalMemory_t, bufferDesc:ctypes.POINTER(hipExternalMemoryBufferDesc)) -> hipError_t: ...
+@dll.bind
+def hipDestroyExternalMemory(extMem:hipExternalMemory_t) -> hipError_t: ...
+hipMipmappedArray_t = ctypes.POINTER(hipMipmappedArray)
+@dll.bind
+def hipExternalMemoryGetMappedMipmappedArray(mipmap:ctypes.POINTER(hipMipmappedArray_t), extMem:hipExternalMemory_t, mipmapDesc:ctypes.POINTER(hipExternalMemoryMipmappedArrayDesc)) -> hipError_t: ...
+@dll.bind
+def hipMalloc(ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t) -> hipError_t: ...
+@dll.bind
+def hipExtMallocWithFlags(ptr:ctypes.POINTER(ctypes.POINTER(None)), sizeBytes:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipMallocHost(ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemAllocHost(ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t) -> hipError_t: ...
+@dll.bind
+def hipHostMalloc(ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipMallocManaged(dev_ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipMemPrefetchAsync(dev_ptr:ctypes.POINTER(None), count:size_t, device:ctypes.c_int32, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemAdvise(dev_ptr:ctypes.POINTER(None), count:size_t, advice:hipMemoryAdvise, device:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipMemRangeGetAttribute(data:ctypes.POINTER(None), data_size:size_t, attribute:hipMemRangeAttribute, dev_ptr:ctypes.POINTER(None), count:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemRangeGetAttributes(data:ctypes.POINTER(ctypes.POINTER(None)), data_sizes:ctypes.POINTER(size_t), attributes:ctypes.POINTER(hipMemRangeAttribute), num_attributes:size_t, dev_ptr:ctypes.POINTER(None), count:size_t) -> hipError_t: ...
+@dll.bind
+def hipStreamAttachMemAsync(stream:hipStream_t, dev_ptr:ctypes.POINTER(None), length:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipMallocAsync(dev_ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipFreeAsync(dev_ptr:ctypes.POINTER(None), stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemPoolTrimTo(mem_pool:hipMemPool_t, min_bytes_to_hold:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemPoolSetAttribute(mem_pool:hipMemPool_t, attr:hipMemPoolAttr, value:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipMemPoolGetAttribute(mem_pool:hipMemPool_t, attr:hipMemPoolAttr, value:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipMemPoolSetAccess(mem_pool:hipMemPool_t, desc_list:ctypes.POINTER(hipMemAccessDesc), count:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemPoolGetAccess(flags:ctypes.POINTER(hipMemAccessFlags), mem_pool:hipMemPool_t, location:ctypes.POINTER(hipMemLocation)) -> hipError_t: ...
+@dll.bind
+def hipMemPoolCreate(mem_pool:ctypes.POINTER(hipMemPool_t), pool_props:ctypes.POINTER(hipMemPoolProps)) -> hipError_t: ...
+@dll.bind
+def hipMemPoolDestroy(mem_pool:hipMemPool_t) -> hipError_t: ...
+@dll.bind
+def hipMallocFromPoolAsync(dev_ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t, mem_pool:hipMemPool_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemPoolExportToShareableHandle(shared_handle:ctypes.POINTER(None), mem_pool:hipMemPool_t, handle_type:hipMemAllocationHandleType, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipMemPoolImportFromShareableHandle(mem_pool:ctypes.POINTER(hipMemPool_t), shared_handle:ctypes.POINTER(None), handle_type:hipMemAllocationHandleType, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipMemPoolExportPointer(export_data:ctypes.POINTER(hipMemPoolPtrExportData), dev_ptr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipMemPoolImportPointer(dev_ptr:ctypes.POINTER(ctypes.POINTER(None)), mem_pool:hipMemPool_t, export_data:ctypes.POINTER(hipMemPoolPtrExportData)) -> hipError_t: ...
+@dll.bind
+def hipHostAlloc(ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipHostGetDevicePointer(devPtr:ctypes.POINTER(ctypes.POINTER(None)), hstPtr:ctypes.POINTER(None), flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipHostGetFlags(flagsPtr:ctypes.POINTER(ctypes.c_uint32), hostPtr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipHostRegister(hostPtr:ctypes.POINTER(None), sizeBytes:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipHostUnregister(hostPtr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipMallocPitch(ptr:ctypes.POINTER(ctypes.POINTER(None)), pitch:ctypes.POINTER(size_t), width:size_t, height:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemAllocPitch(dptr:ctypes.POINTER(hipDeviceptr_t), pitch:ctypes.POINTER(size_t), widthInBytes:size_t, height:size_t, elementSizeBytes:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipFree(ptr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipFreeHost(ptr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipHostFree(ptr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipMemcpy(dst:ctypes.POINTER(None), src:ctypes.POINTER(None), sizeBytes:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipMemcpyWithStream(dst:ctypes.POINTER(None), src:ctypes.POINTER(None), sizeBytes:size_t, kind:hipMemcpyKind, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyHtoD(dst:hipDeviceptr_t, src:ctypes.POINTER(None), sizeBytes:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyDtoH(dst:ctypes.POINTER(None), src:hipDeviceptr_t, sizeBytes:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyDtoD(dst:hipDeviceptr_t, src:hipDeviceptr_t, sizeBytes:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyAtoD(dstDevice:hipDeviceptr_t, srcArray:hipArray_t, srcOffset:size_t, ByteCount:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyDtoA(dstArray:hipArray_t, dstOffset:size_t, srcDevice:hipDeviceptr_t, ByteCount:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyAtoA(dstArray:hipArray_t, dstOffset:size_t, srcArray:hipArray_t, srcOffset:size_t, ByteCount:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyHtoDAsync(dst:hipDeviceptr_t, src:ctypes.POINTER(None), sizeBytes:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyDtoHAsync(dst:ctypes.POINTER(None), src:hipDeviceptr_t, sizeBytes:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyDtoDAsync(dst:hipDeviceptr_t, src:hipDeviceptr_t, sizeBytes:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyAtoHAsync(dstHost:ctypes.POINTER(None), srcArray:hipArray_t, srcOffset:size_t, ByteCount:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyHtoAAsync(dstArray:hipArray_t, dstOffset:size_t, srcHost:ctypes.POINTER(None), ByteCount:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipModuleGetGlobal(dptr:ctypes.POINTER(hipDeviceptr_t), bytes:ctypes.POINTER(size_t), hmod:hipModule_t, name:ctypes.POINTER(ctypes.c_char)) -> hipError_t: ...
+@dll.bind
+def hipGetSymbolAddress(devPtr:ctypes.POINTER(ctypes.POINTER(None)), symbol:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipGetSymbolSize(size:ctypes.POINTER(size_t), symbol:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipGetProcAddress(symbol:ctypes.POINTER(ctypes.c_char), pfn:ctypes.POINTER(ctypes.POINTER(None)), hipVersion:ctypes.c_int32, flags:uint64_t, symbolStatus:ctypes.POINTER(hipDriverProcAddressQueryResult)) -> hipError_t: ...
+@dll.bind
+def hipMemcpyToSymbol(symbol:ctypes.POINTER(None), src:ctypes.POINTER(None), sizeBytes:size_t, offset:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipMemcpyToSymbolAsync(symbol:ctypes.POINTER(None), src:ctypes.POINTER(None), sizeBytes:size_t, offset:size_t, kind:hipMemcpyKind, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyFromSymbol(dst:ctypes.POINTER(None), symbol:ctypes.POINTER(None), sizeBytes:size_t, offset:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipMemcpyFromSymbolAsync(dst:ctypes.POINTER(None), symbol:ctypes.POINTER(None), sizeBytes:size_t, offset:size_t, kind:hipMemcpyKind, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyAsync(dst:ctypes.POINTER(None), src:ctypes.POINTER(None), sizeBytes:size_t, kind:hipMemcpyKind, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemset(dst:ctypes.POINTER(None), value:ctypes.c_int32, sizeBytes:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemsetD8(dest:hipDeviceptr_t, value:ctypes.c_ubyte, count:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemsetD8Async(dest:hipDeviceptr_t, value:ctypes.c_ubyte, count:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemsetD16(dest:hipDeviceptr_t, value:ctypes.c_uint16, count:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemsetD16Async(dest:hipDeviceptr_t, value:ctypes.c_uint16, count:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemsetD32(dest:hipDeviceptr_t, value:ctypes.c_int32, count:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemsetAsync(dst:ctypes.POINTER(None), value:ctypes.c_int32, sizeBytes:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemsetD32Async(dst:hipDeviceptr_t, value:ctypes.c_int32, count:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemset2D(dst:ctypes.POINTER(None), pitch:size_t, value:ctypes.c_int32, width:size_t, height:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemset2DAsync(dst:ctypes.POINTER(None), pitch:size_t, value:ctypes.c_int32, width:size_t, height:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemset3D(pitchedDevPtr:hipPitchedPtr, value:ctypes.c_int32, extent:hipExtent) -> hipError_t: ...
+@dll.bind
+def hipMemset3DAsync(pitchedDevPtr:hipPitchedPtr, value:ctypes.c_int32, extent:hipExtent, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemGetInfo(free:ctypes.POINTER(size_t), total:ctypes.POINTER(size_t)) -> hipError_t: ...
+@dll.bind
+def hipMemPtrGetInfo(ptr:ctypes.POINTER(None), size:ctypes.POINTER(size_t)) -> hipError_t: ...
+@dll.bind
+def hipMallocArray(array:ctypes.POINTER(hipArray_t), desc:ctypes.POINTER(hipChannelFormatDesc), width:size_t, height:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@record
+class HIP_ARRAY_DESCRIPTOR:
+  SIZE = 24
+  Width: Annotated[size_t, 0]
+  Height: Annotated[size_t, 8]
+  Format: Annotated[hipArray_Format, 16]
+  NumChannels: Annotated[ctypes.c_uint32, 20]
+@dll.bind
+def hipArrayCreate(pHandle:ctypes.POINTER(hipArray_t), pAllocateArray:ctypes.POINTER(HIP_ARRAY_DESCRIPTOR)) -> hipError_t: ...
+@dll.bind
+def hipArrayDestroy(array:hipArray_t) -> hipError_t: ...
+@record
+class HIP_ARRAY3D_DESCRIPTOR:
+  SIZE = 40
+  Width: Annotated[size_t, 0]
+  Height: Annotated[size_t, 8]
+  Depth: Annotated[size_t, 16]
+  Format: Annotated[hipArray_Format, 24]
+  NumChannels: Annotated[ctypes.c_uint32, 28]
+  Flags: Annotated[ctypes.c_uint32, 32]
+@dll.bind
+def hipArray3DCreate(array:ctypes.POINTER(hipArray_t), pAllocateArray:ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR)) -> hipError_t: ...
+@dll.bind
+def hipMalloc3D(pitchedDevPtr:ctypes.POINTER(hipPitchedPtr), extent:hipExtent) -> hipError_t: ...
+@dll.bind
+def hipFreeArray(array:hipArray_t) -> hipError_t: ...
+@dll.bind
+def hipMalloc3DArray(array:ctypes.POINTER(hipArray_t), desc:ctypes.POINTER(hipChannelFormatDesc), extent:hipExtent, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipArrayGetInfo(desc:ctypes.POINTER(hipChannelFormatDesc), extent:ctypes.POINTER(hipExtent), flags:ctypes.POINTER(ctypes.c_uint32), array:hipArray_t) -> hipError_t: ...
+@dll.bind
+def hipArrayGetDescriptor(pArrayDescriptor:ctypes.POINTER(HIP_ARRAY_DESCRIPTOR), array:hipArray_t) -> hipError_t: ...
+@dll.bind
+def hipArray3DGetDescriptor(pArrayDescriptor:ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR), array:hipArray_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpy2D(dst:ctypes.POINTER(None), dpitch:size_t, src:ctypes.POINTER(None), spitch:size_t, width:size_t, height:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@record
+class hip_Memcpy2D:
+  SIZE = 128
+  srcXInBytes: Annotated[size_t, 0]
+  srcY: Annotated[size_t, 8]
+  srcMemoryType: Annotated[hipMemoryType, 16]
+  srcHost: Annotated[ctypes.POINTER(None), 24]
+  srcDevice: Annotated[hipDeviceptr_t, 32]
+  srcArray: Annotated[hipArray_t, 40]
+  srcPitch: Annotated[size_t, 48]
+  dstXInBytes: Annotated[size_t, 56]
+  dstY: Annotated[size_t, 64]
+  dstMemoryType: Annotated[hipMemoryType, 72]
+  dstHost: Annotated[ctypes.POINTER(None), 80]
+  dstDevice: Annotated[hipDeviceptr_t, 88]
+  dstArray: Annotated[hipArray_t, 96]
+  dstPitch: Annotated[size_t, 104]
+  WidthInBytes: Annotated[size_t, 112]
+  Height: Annotated[size_t, 120]
+@dll.bind
+def hipMemcpyParam2D(pCopy:ctypes.POINTER(hip_Memcpy2D)) -> hipError_t: ...
+@dll.bind
+def hipMemcpyParam2DAsync(pCopy:ctypes.POINTER(hip_Memcpy2D), stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpy2DAsync(dst:ctypes.POINTER(None), dpitch:size_t, src:ctypes.POINTER(None), spitch:size_t, width:size_t, height:size_t, kind:hipMemcpyKind, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpy2DToArray(dst:hipArray_t, wOffset:size_t, hOffset:size_t, src:ctypes.POINTER(None), spitch:size_t, width:size_t, height:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipMemcpy2DToArrayAsync(dst:hipArray_t, wOffset:size_t, hOffset:size_t, src:ctypes.POINTER(None), spitch:size_t, width:size_t, height:size_t, kind:hipMemcpyKind, stream:hipStream_t) -> hipError_t: ...
+hipArray_const_t = ctypes.POINTER(hipArray)
+@dll.bind
+def hipMemcpy2DArrayToArray(dst:hipArray_t, wOffsetDst:size_t, hOffsetDst:size_t, src:hipArray_const_t, wOffsetSrc:size_t, hOffsetSrc:size_t, width:size_t, height:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipMemcpyToArray(dst:hipArray_t, wOffset:size_t, hOffset:size_t, src:ctypes.POINTER(None), count:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipMemcpyFromArray(dst:ctypes.POINTER(None), srcArray:hipArray_const_t, wOffset:size_t, hOffset:size_t, count:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipMemcpy2DFromArray(dst:ctypes.POINTER(None), dpitch:size_t, src:hipArray_const_t, wOffset:size_t, hOffset:size_t, width:size_t, height:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipMemcpy2DFromArrayAsync(dst:ctypes.POINTER(None), dpitch:size_t, src:hipArray_const_t, wOffset:size_t, hOffset:size_t, width:size_t, height:size_t, kind:hipMemcpyKind, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyAtoH(dst:ctypes.POINTER(None), srcArray:hipArray_t, srcOffset:size_t, count:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyHtoA(dstArray:hipArray_t, dstOffset:size_t, srcHost:ctypes.POINTER(None), count:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpy3D(p:ctypes.POINTER(hipMemcpy3DParms)) -> hipError_t: ...
+@dll.bind
+def hipMemcpy3DAsync(p:ctypes.POINTER(hipMemcpy3DParms), stream:hipStream_t) -> hipError_t: ...
+@record
+class HIP_MEMCPY3D:
+  SIZE = 184
+  srcXInBytes: Annotated[size_t, 0]
+  srcY: Annotated[size_t, 8]
+  srcZ: Annotated[size_t, 16]
+  srcLOD: Annotated[size_t, 24]
+  srcMemoryType: Annotated[hipMemoryType, 32]
+  srcHost: Annotated[ctypes.POINTER(None), 40]
+  srcDevice: Annotated[hipDeviceptr_t, 48]
+  srcArray: Annotated[hipArray_t, 56]
+  srcPitch: Annotated[size_t, 64]
+  srcHeight: Annotated[size_t, 72]
+  dstXInBytes: Annotated[size_t, 80]
+  dstY: Annotated[size_t, 88]
+  dstZ: Annotated[size_t, 96]
+  dstLOD: Annotated[size_t, 104]
+  dstMemoryType: Annotated[hipMemoryType, 112]
+  dstHost: Annotated[ctypes.POINTER(None), 120]
+  dstDevice: Annotated[hipDeviceptr_t, 128]
+  dstArray: Annotated[hipArray_t, 136]
+  dstPitch: Annotated[size_t, 144]
+  dstHeight: Annotated[size_t, 152]
+  WidthInBytes: Annotated[size_t, 160]
+  Height: Annotated[size_t, 168]
+  Depth: Annotated[size_t, 176]
+@dll.bind
+def hipDrvMemcpy3D(pCopy:ctypes.POINTER(HIP_MEMCPY3D)) -> hipError_t: ...
+@dll.bind
+def hipDrvMemcpy3DAsync(pCopy:ctypes.POINTER(HIP_MEMCPY3D), stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipDeviceCanAccessPeer(canAccessPeer:ctypes.POINTER(ctypes.c_int32), deviceId:ctypes.c_int32, peerDeviceId:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipDeviceEnablePeerAccess(peerDeviceId:ctypes.c_int32, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipDeviceDisablePeerAccess(peerDeviceId:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipMemGetAddressRange(pbase:ctypes.POINTER(hipDeviceptr_t), psize:ctypes.POINTER(size_t), dptr:hipDeviceptr_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyPeer(dst:ctypes.POINTER(None), dstDeviceId:ctypes.c_int32, src:ctypes.POINTER(None), srcDeviceId:ctypes.c_int32, sizeBytes:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemcpyPeerAsync(dst:ctypes.POINTER(None), dstDeviceId:ctypes.c_int32, src:ctypes.POINTER(None), srcDevice:ctypes.c_int32, sizeBytes:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipCtxCreate(ctx:ctypes.POINTER(hipCtx_t), flags:ctypes.c_uint32, device:hipDevice_t) -> hipError_t: ...
+@dll.bind
+def hipCtxDestroy(ctx:hipCtx_t) -> hipError_t: ...
+@dll.bind
+def hipCtxPopCurrent(ctx:ctypes.POINTER(hipCtx_t)) -> hipError_t: ...
+@dll.bind
+def hipCtxPushCurrent(ctx:hipCtx_t) -> hipError_t: ...
+@dll.bind
+def hipCtxSetCurrent(ctx:hipCtx_t) -> hipError_t: ...
+@dll.bind
+def hipCtxGetCurrent(ctx:ctypes.POINTER(hipCtx_t)) -> hipError_t: ...
+@dll.bind
+def hipCtxGetDevice(device:ctypes.POINTER(hipDevice_t)) -> hipError_t: ...
+@dll.bind
+def hipCtxGetApiVersion(ctx:hipCtx_t, apiVersion:ctypes.POINTER(ctypes.c_int32)) -> hipError_t: ...
+@dll.bind
+def hipCtxGetCacheConfig(cacheConfig:ctypes.POINTER(hipFuncCache_t)) -> hipError_t: ...
+@dll.bind
+def hipCtxSetCacheConfig(cacheConfig:hipFuncCache_t) -> hipError_t: ...
+@dll.bind
+def hipCtxSetSharedMemConfig(config:hipSharedMemConfig) -> hipError_t: ...
+@dll.bind
+def hipCtxGetSharedMemConfig(pConfig:ctypes.POINTER(hipSharedMemConfig)) -> hipError_t: ...
+@dll.bind
+def hipCtxSynchronize() -> hipError_t: ...
+@dll.bind
+def hipCtxGetFlags(flags:ctypes.POINTER(ctypes.c_uint32)) -> hipError_t: ...
+@dll.bind
+def hipCtxEnablePeerAccess(peerCtx:hipCtx_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipCtxDisablePeerAccess(peerCtx:hipCtx_t) -> hipError_t: ...
+@dll.bind
+def hipDevicePrimaryCtxGetState(dev:hipDevice_t, flags:ctypes.POINTER(ctypes.c_uint32), active:ctypes.POINTER(ctypes.c_int32)) -> hipError_t: ...
+@dll.bind
+def hipDevicePrimaryCtxRelease(dev:hipDevice_t) -> hipError_t: ...
+@dll.bind
+def hipDevicePrimaryCtxRetain(pctx:ctypes.POINTER(hipCtx_t), dev:hipDevice_t) -> hipError_t: ...
+@dll.bind
+def hipDevicePrimaryCtxReset(dev:hipDevice_t) -> hipError_t: ...
+@dll.bind
+def hipDevicePrimaryCtxSetFlags(dev:hipDevice_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipModuleLoad(module:ctypes.POINTER(hipModule_t), fname:ctypes.POINTER(ctypes.c_char)) -> hipError_t: ...
+@dll.bind
+def hipModuleUnload(module:hipModule_t) -> hipError_t: ...
+@dll.bind
+def hipModuleGetFunction(function:ctypes.POINTER(hipFunction_t), module:hipModule_t, kname:ctypes.POINTER(ctypes.c_char)) -> hipError_t: ...
+@dll.bind
+def hipFuncGetAttributes(attr:ctypes.POINTER(hipFuncAttributes), func:ctypes.POINTER(None)) -> hipError_t: ...
 hipFunction_attribute = CEnum(ctypes.c_uint32)
 HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK', 0)
 HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES', 1)
@@ -1729,11 +1731,27 @@ HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES = hipFunction_attribute.define(
 HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT', 9)
 HIP_FUNC_ATTRIBUTE_MAX = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX', 10)
 
-@dll.bind((Pointer(ctypes.c_int32), hipFunction_attribute, hipFunction_t), hipError_t)
-def hipFuncGetAttribute(value, attrib, hfunc): ...
-@dll.bind((Pointer(hipFunction_t), ctypes.c_void_p), hipError_t)
-def hipGetFuncBySymbol(functionPtr, symbolPtr): ...
-class textureReference(Struct): pass
+@dll.bind
+def hipFuncGetAttribute(value:ctypes.POINTER(ctypes.c_int32), attrib:hipFunction_attribute, hfunc:hipFunction_t) -> hipError_t: ...
+@dll.bind
+def hipGetFuncBySymbol(functionPtr:ctypes.POINTER(hipFunction_t), symbolPtr:ctypes.POINTER(None)) -> hipError_t: ...
+@record
+class textureReference:
+  SIZE = 88
+  normalized: Annotated[ctypes.c_int32, 0]
+  readMode: Annotated[hipTextureReadMode, 4]
+  filterMode: Annotated[hipTextureFilterMode, 8]
+  addressMode: Annotated[(hipTextureAddressMode* 3), 12]
+  channelDesc: Annotated[hipChannelFormatDesc, 24]
+  sRGB: Annotated[ctypes.c_int32, 44]
+  maxAnisotropy: Annotated[ctypes.c_uint32, 48]
+  mipmapFilterMode: Annotated[hipTextureFilterMode, 52]
+  mipmapLevelBias: Annotated[ctypes.c_float, 56]
+  minMipmapLevelClamp: Annotated[ctypes.c_float, 60]
+  maxMipmapLevelClamp: Annotated[ctypes.c_float, 64]
+  textureObject: Annotated[hipTextureObject_t, 72]
+  numChannels: Annotated[ctypes.c_int32, 80]
+  format: Annotated[hipArray_Format, 84]
 hipTextureReadMode = CEnum(ctypes.c_uint32)
 hipReadModeElementType = hipTextureReadMode.define('hipReadModeElementType', 0)
 hipReadModeNormalizedFloat = hipTextureReadMode.define('hipReadModeNormalizedFloat', 1)
@@ -1748,127 +1766,121 @@ hipAddressModeClamp = hipTextureAddressMode.define('hipAddressModeClamp', 1)
 hipAddressModeMirror = hipTextureAddressMode.define('hipAddressModeMirror', 2)
 hipAddressModeBorder = hipTextureAddressMode.define('hipAddressModeBorder', 3)
 
-class __hip_texture(Struct): pass
-hipTextureObject_t = Pointer(__hip_texture)
-textureReference.SIZE = 88
-textureReference._fields_ = ['normalized', 'readMode', 'filterMode', 'addressMode', 'channelDesc', 'sRGB', 'maxAnisotropy', 'mipmapFilterMode', 'mipmapLevelBias', 'minMipmapLevelClamp', 'maxMipmapLevelClamp', 'textureObject', 'numChannels', 'format']
-setattr(textureReference, 'normalized', field(0, ctypes.c_int32))
-setattr(textureReference, 'readMode', field(4, hipTextureReadMode))
-setattr(textureReference, 'filterMode', field(8, hipTextureFilterMode))
-setattr(textureReference, 'addressMode', field(12, Array(hipTextureAddressMode, 3)))
-setattr(textureReference, 'channelDesc', field(24, hipChannelFormatDesc))
-setattr(textureReference, 'sRGB', field(44, ctypes.c_int32))
-setattr(textureReference, 'maxAnisotropy', field(48, ctypes.c_uint32))
-setattr(textureReference, 'mipmapFilterMode', field(52, hipTextureFilterMode))
-setattr(textureReference, 'mipmapLevelBias', field(56, ctypes.c_float))
-setattr(textureReference, 'minMipmapLevelClamp', field(60, ctypes.c_float))
-setattr(textureReference, 'maxMipmapLevelClamp', field(64, ctypes.c_float))
-setattr(textureReference, 'textureObject', field(72, hipTextureObject_t))
-setattr(textureReference, 'numChannels', field(80, ctypes.c_int32))
-setattr(textureReference, 'format', field(84, hipArray_Format))
-@dll.bind((Pointer(Pointer(textureReference)), hipModule_t, Pointer(ctypes.c_char)), hipError_t)
-def hipModuleGetTexRef(texRef, hmod, name): ...
-@dll.bind((Pointer(hipModule_t), ctypes.c_void_p), hipError_t)
-def hipModuleLoadData(module, image): ...
-@dll.bind((Pointer(hipModule_t), ctypes.c_void_p, ctypes.c_uint32, Pointer(hipJitOption), Pointer(ctypes.c_void_p)), hipError_t)
-def hipModuleLoadDataEx(module, image, numOptions, options, optionValues): ...
-@dll.bind((hipFunction_t, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, hipStream_t, Pointer(ctypes.c_void_p), Pointer(ctypes.c_void_p)), hipError_t)
-def hipModuleLaunchKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams, extra): ...
-@dll.bind((hipFunction_t, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, hipStream_t, Pointer(ctypes.c_void_p)), hipError_t)
-def hipModuleLaunchCooperativeKernel(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, sharedMemBytes, stream, kernelParams): ...
-@dll.bind((Pointer(hipFunctionLaunchParams), ctypes.c_uint32, ctypes.c_uint32), hipError_t)
-def hipModuleLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags): ...
-@dll.bind((ctypes.c_void_p, dim3, dim3, Pointer(ctypes.c_void_p), ctypes.c_uint32, hipStream_t), hipError_t)
-def hipLaunchCooperativeKernel(f, gridDim, blockDimX, kernelParams, sharedMemBytes, stream): ...
-@dll.bind((Pointer(hipLaunchParams), ctypes.c_int32, ctypes.c_uint32), hipError_t)
-def hipLaunchCooperativeKernelMultiDevice(launchParamsList, numDevices, flags): ...
-@dll.bind((Pointer(hipLaunchParams), ctypes.c_int32, ctypes.c_uint32), hipError_t)
-def hipExtLaunchMultiKernelMultiDevice(launchParamsList, numDevices, flags): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(ctypes.c_int32), hipFunction_t, size_t, ctypes.c_int32), hipError_t)
-def hipModuleOccupancyMaxPotentialBlockSize(gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(ctypes.c_int32), hipFunction_t, size_t, ctypes.c_int32, ctypes.c_uint32), hipError_t)
-def hipModuleOccupancyMaxPotentialBlockSizeWithFlags(gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit, flags): ...
-@dll.bind((Pointer(ctypes.c_int32), hipFunction_t, ctypes.c_int32, size_t), hipError_t)
-def hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, f, blockSize, dynSharedMemPerBlk): ...
-@dll.bind((Pointer(ctypes.c_int32), hipFunction_t, ctypes.c_int32, size_t, ctypes.c_uint32), hipError_t)
-def hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, f, blockSize, dynSharedMemPerBlk, flags): ...
-@dll.bind((Pointer(ctypes.c_int32), ctypes.c_void_p, ctypes.c_int32, size_t), hipError_t)
-def hipOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, f, blockSize, dynSharedMemPerBlk): ...
-@dll.bind((Pointer(ctypes.c_int32), ctypes.c_void_p, ctypes.c_int32, size_t, ctypes.c_uint32), hipError_t)
-def hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, f, blockSize, dynSharedMemPerBlk, flags): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(ctypes.c_int32), ctypes.c_void_p, size_t, ctypes.c_int32), hipError_t)
-def hipOccupancyMaxPotentialBlockSize(gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit): ...
-@dll.bind((), hipError_t)
-def hipProfilerStart(): ...
-@dll.bind((), hipError_t)
-def hipProfilerStop(): ...
-@dll.bind((dim3, dim3, size_t, hipStream_t), hipError_t)
-def hipConfigureCall(gridDim, blockDim, sharedMem, stream): ...
-@dll.bind((ctypes.c_void_p, size_t, size_t), hipError_t)
-def hipSetupArgument(arg, size, offset): ...
-@dll.bind((ctypes.c_void_p), hipError_t)
-def hipLaunchByPtr(func): ...
-@dll.bind((dim3, dim3, size_t, hipStream_t), hipError_t)
-def __hipPushCallConfiguration(gridDim, blockDim, sharedMem, stream): ...
-@dll.bind((Pointer(dim3), Pointer(dim3), Pointer(size_t), Pointer(hipStream_t)), hipError_t)
-def __hipPopCallConfiguration(gridDim, blockDim, sharedMem, stream): ...
-@dll.bind((ctypes.c_void_p, dim3, dim3, Pointer(ctypes.c_void_p), size_t, hipStream_t), hipError_t)
-def hipLaunchKernel(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream): ...
-@dll.bind((hipStream_t, hipHostFn_t, ctypes.c_void_p), hipError_t)
-def hipLaunchHostFunc(stream, fn, userData): ...
-@dll.bind((Pointer(hip_Memcpy2D)), hipError_t)
-def hipDrvMemcpy2DUnaligned(pCopy): ...
-@dll.bind((ctypes.c_void_p, dim3, dim3, Pointer(ctypes.c_void_p), size_t, hipStream_t, hipEvent_t, hipEvent_t, ctypes.c_int32), hipError_t)
-def hipExtLaunchKernel(function_address, numBlocks, dimBlocks, args, sharedMemBytes, stream, startEvent, stopEvent, flags): ...
-class hipResourceDesc(Struct): pass
-class _anonunion19(Union): pass
-class _anonstruct20(Struct): pass
-_anonstruct20.SIZE = 8
-_anonstruct20._fields_ = ['array']
-setattr(_anonstruct20, 'array', field(0, hipArray_t))
-class _anonstruct21(Struct): pass
-_anonstruct21.SIZE = 8
-_anonstruct21._fields_ = ['mipmap']
-setattr(_anonstruct21, 'mipmap', field(0, hipMipmappedArray_t))
-class _anonstruct22(Struct): pass
-_anonstruct22.SIZE = 40
-_anonstruct22._fields_ = ['devPtr', 'desc', 'sizeInBytes']
-setattr(_anonstruct22, 'devPtr', field(0, ctypes.c_void_p))
-setattr(_anonstruct22, 'desc', field(8, hipChannelFormatDesc))
-setattr(_anonstruct22, 'sizeInBytes', field(32, size_t))
-class _anonstruct23(Struct): pass
-_anonstruct23.SIZE = 56
-_anonstruct23._fields_ = ['devPtr', 'desc', 'width', 'height', 'pitchInBytes']
-setattr(_anonstruct23, 'devPtr', field(0, ctypes.c_void_p))
-setattr(_anonstruct23, 'desc', field(8, hipChannelFormatDesc))
-setattr(_anonstruct23, 'width', field(32, size_t))
-setattr(_anonstruct23, 'height', field(40, size_t))
-setattr(_anonstruct23, 'pitchInBytes', field(48, size_t))
-_anonunion19.SIZE = 56
-_anonunion19._fields_ = ['array', 'mipmap', 'linear', 'pitch2D']
-setattr(_anonunion19, 'array', field(0, _anonstruct20))
-setattr(_anonunion19, 'mipmap', field(0, _anonstruct21))
-setattr(_anonunion19, 'linear', field(0, _anonstruct22))
-setattr(_anonunion19, 'pitch2D', field(0, _anonstruct23))
-hipResourceDesc.SIZE = 64
-hipResourceDesc._fields_ = ['resType', 'res']
-setattr(hipResourceDesc, 'resType', field(0, hipResourceType))
-setattr(hipResourceDesc, 'res', field(8, _anonunion19))
-class hipTextureDesc(Struct): pass
-hipTextureDesc.SIZE = 64
-hipTextureDesc._fields_ = ['addressMode', 'filterMode', 'readMode', 'sRGB', 'borderColor', 'normalizedCoords', 'maxAnisotropy', 'mipmapFilterMode', 'mipmapLevelBias', 'minMipmapLevelClamp', 'maxMipmapLevelClamp']
-setattr(hipTextureDesc, 'addressMode', field(0, Array(hipTextureAddressMode, 3)))
-setattr(hipTextureDesc, 'filterMode', field(12, hipTextureFilterMode))
-setattr(hipTextureDesc, 'readMode', field(16, hipTextureReadMode))
-setattr(hipTextureDesc, 'sRGB', field(20, ctypes.c_int32))
-setattr(hipTextureDesc, 'borderColor', field(24, Array(ctypes.c_float, 4)))
-setattr(hipTextureDesc, 'normalizedCoords', field(40, ctypes.c_int32))
-setattr(hipTextureDesc, 'maxAnisotropy', field(44, ctypes.c_uint32))
-setattr(hipTextureDesc, 'mipmapFilterMode', field(48, hipTextureFilterMode))
-setattr(hipTextureDesc, 'mipmapLevelBias', field(52, ctypes.c_float))
-setattr(hipTextureDesc, 'minMipmapLevelClamp', field(56, ctypes.c_float))
-setattr(hipTextureDesc, 'maxMipmapLevelClamp', field(60, ctypes.c_float))
-class hipResourceViewDesc(Struct): pass
+class __hip_texture(ctypes.Structure): pass
+hipTextureObject_t = ctypes.POINTER(__hip_texture)
+@dll.bind
+def hipModuleGetTexRef(texRef:ctypes.POINTER(ctypes.POINTER(textureReference)), hmod:hipModule_t, name:ctypes.POINTER(ctypes.c_char)) -> hipError_t: ...
+@dll.bind
+def hipModuleLoadData(module:ctypes.POINTER(hipModule_t), image:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipModuleLoadDataEx(module:ctypes.POINTER(hipModule_t), image:ctypes.POINTER(None), numOptions:ctypes.c_uint32, options:ctypes.POINTER(hipJitOption), optionValues:ctypes.POINTER(ctypes.POINTER(None))) -> hipError_t: ...
+@dll.bind
+def hipModuleLaunchKernel(f:hipFunction_t, gridDimX:ctypes.c_uint32, gridDimY:ctypes.c_uint32, gridDimZ:ctypes.c_uint32, blockDimX:ctypes.c_uint32, blockDimY:ctypes.c_uint32, blockDimZ:ctypes.c_uint32, sharedMemBytes:ctypes.c_uint32, stream:hipStream_t, kernelParams:ctypes.POINTER(ctypes.POINTER(None)), extra:ctypes.POINTER(ctypes.POINTER(None))) -> hipError_t: ...
+@dll.bind
+def hipModuleLaunchCooperativeKernel(f:hipFunction_t, gridDimX:ctypes.c_uint32, gridDimY:ctypes.c_uint32, gridDimZ:ctypes.c_uint32, blockDimX:ctypes.c_uint32, blockDimY:ctypes.c_uint32, blockDimZ:ctypes.c_uint32, sharedMemBytes:ctypes.c_uint32, stream:hipStream_t, kernelParams:ctypes.POINTER(ctypes.POINTER(None))) -> hipError_t: ...
+@dll.bind
+def hipModuleLaunchCooperativeKernelMultiDevice(launchParamsList:ctypes.POINTER(hipFunctionLaunchParams), numDevices:ctypes.c_uint32, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipLaunchCooperativeKernel(f:ctypes.POINTER(None), gridDim:dim3, blockDimX:dim3, kernelParams:ctypes.POINTER(ctypes.POINTER(None)), sharedMemBytes:ctypes.c_uint32, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipLaunchCooperativeKernelMultiDevice(launchParamsList:ctypes.POINTER(hipLaunchParams), numDevices:ctypes.c_int32, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipExtLaunchMultiKernelMultiDevice(launchParamsList:ctypes.POINTER(hipLaunchParams), numDevices:ctypes.c_int32, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipModuleOccupancyMaxPotentialBlockSize(gridSize:ctypes.POINTER(ctypes.c_int32), blockSize:ctypes.POINTER(ctypes.c_int32), f:hipFunction_t, dynSharedMemPerBlk:size_t, blockSizeLimit:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipModuleOccupancyMaxPotentialBlockSizeWithFlags(gridSize:ctypes.POINTER(ctypes.c_int32), blockSize:ctypes.POINTER(ctypes.c_int32), f:hipFunction_t, dynSharedMemPerBlk:size_t, blockSizeLimit:ctypes.c_int32, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks:ctypes.POINTER(ctypes.c_int32), f:hipFunction_t, blockSize:ctypes.c_int32, dynSharedMemPerBlk:size_t) -> hipError_t: ...
+@dll.bind
+def hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks:ctypes.POINTER(ctypes.c_int32), f:hipFunction_t, blockSize:ctypes.c_int32, dynSharedMemPerBlk:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks:ctypes.POINTER(ctypes.c_int32), f:ctypes.POINTER(None), blockSize:ctypes.c_int32, dynSharedMemPerBlk:size_t) -> hipError_t: ...
+@dll.bind
+def hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks:ctypes.POINTER(ctypes.c_int32), f:ctypes.POINTER(None), blockSize:ctypes.c_int32, dynSharedMemPerBlk:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipOccupancyMaxPotentialBlockSize(gridSize:ctypes.POINTER(ctypes.c_int32), blockSize:ctypes.POINTER(ctypes.c_int32), f:ctypes.POINTER(None), dynSharedMemPerBlk:size_t, blockSizeLimit:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipProfilerStart() -> hipError_t: ...
+@dll.bind
+def hipProfilerStop() -> hipError_t: ...
+@dll.bind
+def hipConfigureCall(gridDim:dim3, blockDim:dim3, sharedMem:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipSetupArgument(arg:ctypes.POINTER(None), size:size_t, offset:size_t) -> hipError_t: ...
+@dll.bind
+def hipLaunchByPtr(func:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def __hipPushCallConfiguration(gridDim:dim3, blockDim:dim3, sharedMem:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def __hipPopCallConfiguration(gridDim:ctypes.POINTER(dim3), blockDim:ctypes.POINTER(dim3), sharedMem:ctypes.POINTER(size_t), stream:ctypes.POINTER(hipStream_t)) -> hipError_t: ...
+@dll.bind
+def hipLaunchKernel(function_address:ctypes.POINTER(None), numBlocks:dim3, dimBlocks:dim3, args:ctypes.POINTER(ctypes.POINTER(None)), sharedMemBytes:size_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipLaunchHostFunc(stream:hipStream_t, fn:hipHostFn_t, userData:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipDrvMemcpy2DUnaligned(pCopy:ctypes.POINTER(hip_Memcpy2D)) -> hipError_t: ...
+@dll.bind
+def hipExtLaunchKernel(function_address:ctypes.POINTER(None), numBlocks:dim3, dimBlocks:dim3, args:ctypes.POINTER(ctypes.POINTER(None)), sharedMemBytes:size_t, stream:hipStream_t, startEvent:hipEvent_t, stopEvent:hipEvent_t, flags:ctypes.c_int32) -> hipError_t: ...
+@record
+class hipResourceDesc:
+  SIZE = 64
+  resType: Annotated[hipResourceType, 0]
+  res: Annotated[_anonunion19, 8]
+@record
+class _anonunion19:
+  SIZE = 56
+  array: Annotated[_anonstruct20, 0]
+  mipmap: Annotated[_anonstruct21, 0]
+  linear: Annotated[_anonstruct22, 0]
+  pitch2D: Annotated[_anonstruct23, 0]
+@record
+class _anonstruct20:
+  SIZE = 8
+  array: Annotated[hipArray_t, 0]
+@record
+class _anonstruct21:
+  SIZE = 8
+  mipmap: Annotated[hipMipmappedArray_t, 0]
+@record
+class _anonstruct22:
+  SIZE = 40
+  devPtr: Annotated[ctypes.POINTER(None), 0]
+  desc: Annotated[hipChannelFormatDesc, 8]
+  sizeInBytes: Annotated[size_t, 32]
+@record
+class _anonstruct23:
+  SIZE = 56
+  devPtr: Annotated[ctypes.POINTER(None), 0]
+  desc: Annotated[hipChannelFormatDesc, 8]
+  width: Annotated[size_t, 32]
+  height: Annotated[size_t, 40]
+  pitchInBytes: Annotated[size_t, 48]
+@record
+class hipTextureDesc:
+  SIZE = 64
+  addressMode: Annotated[(hipTextureAddressMode* 3), 0]
+  filterMode: Annotated[hipTextureFilterMode, 12]
+  readMode: Annotated[hipTextureReadMode, 16]
+  sRGB: Annotated[ctypes.c_int32, 20]
+  borderColor: Annotated[(ctypes.c_float* 4), 24]
+  normalizedCoords: Annotated[ctypes.c_int32, 40]
+  maxAnisotropy: Annotated[ctypes.c_uint32, 44]
+  mipmapFilterMode: Annotated[hipTextureFilterMode, 48]
+  mipmapLevelBias: Annotated[ctypes.c_float, 52]
+  minMipmapLevelClamp: Annotated[ctypes.c_float, 56]
+  maxMipmapLevelClamp: Annotated[ctypes.c_float, 60]
+@record
+class hipResourceViewDesc:
+  SIZE = 48
+  format: Annotated[hipResourceViewFormat, 0]
+  width: Annotated[size_t, 8]
+  height: Annotated[size_t, 16]
+  depth: Annotated[size_t, 24]
+  firstMipmapLevel: Annotated[ctypes.c_uint32, 32]
+  lastMipmapLevel: Annotated[ctypes.c_uint32, 36]
+  firstLayer: Annotated[ctypes.c_uint32, 40]
+  lastLayer: Annotated[ctypes.c_uint32, 44]
 hipResourceViewFormat = CEnum(ctypes.c_uint32)
 hipResViewFormatNone = hipResourceViewFormat.define('hipResViewFormatNone', 0)
 hipResViewFormatUnsignedChar1 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar1', 1)
@@ -1906,29 +1918,24 @@ hipResViewFormatUnsignedBlockCompressed6H = hipResourceViewFormat.define('hipRes
 hipResViewFormatSignedBlockCompressed6H = hipResourceViewFormat.define('hipResViewFormatSignedBlockCompressed6H', 33)
 hipResViewFormatUnsignedBlockCompressed7 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed7', 34)
 
-hipResourceViewDesc.SIZE = 48
-hipResourceViewDesc._fields_ = ['format', 'width', 'height', 'depth', 'firstMipmapLevel', 'lastMipmapLevel', 'firstLayer', 'lastLayer']
-setattr(hipResourceViewDesc, 'format', field(0, hipResourceViewFormat))
-setattr(hipResourceViewDesc, 'width', field(8, size_t))
-setattr(hipResourceViewDesc, 'height', field(16, size_t))
-setattr(hipResourceViewDesc, 'depth', field(24, size_t))
-setattr(hipResourceViewDesc, 'firstMipmapLevel', field(32, ctypes.c_uint32))
-setattr(hipResourceViewDesc, 'lastMipmapLevel', field(36, ctypes.c_uint32))
-setattr(hipResourceViewDesc, 'firstLayer', field(40, ctypes.c_uint32))
-setattr(hipResourceViewDesc, 'lastLayer', field(44, ctypes.c_uint32))
-@dll.bind((Pointer(hipTextureObject_t), Pointer(hipResourceDesc), Pointer(hipTextureDesc), Pointer(hipResourceViewDesc)), hipError_t)
-def hipCreateTextureObject(pTexObject, pResDesc, pTexDesc, pResViewDesc): ...
-@dll.bind((hipTextureObject_t), hipError_t)
-def hipDestroyTextureObject(textureObject): ...
-@dll.bind((Pointer(hipChannelFormatDesc), hipArray_const_t), hipError_t)
-def hipGetChannelDesc(desc, array): ...
-@dll.bind((Pointer(hipResourceDesc), hipTextureObject_t), hipError_t)
-def hipGetTextureObjectResourceDesc(pResDesc, textureObject): ...
-@dll.bind((Pointer(hipResourceViewDesc), hipTextureObject_t), hipError_t)
-def hipGetTextureObjectResourceViewDesc(pResViewDesc, textureObject): ...
-@dll.bind((Pointer(hipTextureDesc), hipTextureObject_t), hipError_t)
-def hipGetTextureObjectTextureDesc(pTexDesc, textureObject): ...
-class HIP_RESOURCE_DESC_st(Struct): pass
+@dll.bind
+def hipCreateTextureObject(pTexObject:ctypes.POINTER(hipTextureObject_t), pResDesc:ctypes.POINTER(hipResourceDesc), pTexDesc:ctypes.POINTER(hipTextureDesc), pResViewDesc:ctypes.POINTER(hipResourceViewDesc)) -> hipError_t: ...
+@dll.bind
+def hipDestroyTextureObject(textureObject:hipTextureObject_t) -> hipError_t: ...
+@dll.bind
+def hipGetChannelDesc(desc:ctypes.POINTER(hipChannelFormatDesc), array:hipArray_const_t) -> hipError_t: ...
+@dll.bind
+def hipGetTextureObjectResourceDesc(pResDesc:ctypes.POINTER(hipResourceDesc), textureObject:hipTextureObject_t) -> hipError_t: ...
+@dll.bind
+def hipGetTextureObjectResourceViewDesc(pResViewDesc:ctypes.POINTER(hipResourceViewDesc), textureObject:hipTextureObject_t) -> hipError_t: ...
+@dll.bind
+def hipGetTextureObjectTextureDesc(pTexDesc:ctypes.POINTER(hipTextureDesc), textureObject:hipTextureObject_t) -> hipError_t: ...
+@record
+class HIP_RESOURCE_DESC_st:
+  SIZE = 144
+  resType: Annotated[HIPresourcetype, 0]
+  res: Annotated[_anonunion24, 8]
+  flags: Annotated[ctypes.c_uint32, 136]
 HIP_RESOURCE_DESC = HIP_RESOURCE_DESC_st
 HIPresourcetype_enum = CEnum(ctypes.c_uint32)
 HIP_RESOURCE_TYPE_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_ARRAY', 0)
@@ -1937,48 +1944,55 @@ HIP_RESOURCE_TYPE_LINEAR = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_LINEAR
 HIP_RESOURCE_TYPE_PITCH2D = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_PITCH2D', 3)
 
 HIPresourcetype = HIPresourcetype_enum
-class _anonunion24(Union): pass
-class _anonstruct25(Struct): pass
-_anonstruct25.SIZE = 8
-_anonstruct25._fields_ = ['hArray']
-setattr(_anonstruct25, 'hArray', field(0, hipArray_t))
-class _anonstruct26(Struct): pass
-_anonstruct26.SIZE = 8
-_anonstruct26._fields_ = ['hMipmappedArray']
-setattr(_anonstruct26, 'hMipmappedArray', field(0, hipMipmappedArray_t))
-class _anonstruct27(Struct): pass
-_anonstruct27.SIZE = 24
-_anonstruct27._fields_ = ['devPtr', 'format', 'numChannels', 'sizeInBytes']
-setattr(_anonstruct27, 'devPtr', field(0, hipDeviceptr_t))
-setattr(_anonstruct27, 'format', field(8, hipArray_Format))
-setattr(_anonstruct27, 'numChannels', field(12, ctypes.c_uint32))
-setattr(_anonstruct27, 'sizeInBytes', field(16, size_t))
-class _anonstruct28(Struct): pass
-_anonstruct28.SIZE = 40
-_anonstruct28._fields_ = ['devPtr', 'format', 'numChannels', 'width', 'height', 'pitchInBytes']
-setattr(_anonstruct28, 'devPtr', field(0, hipDeviceptr_t))
-setattr(_anonstruct28, 'format', field(8, hipArray_Format))
-setattr(_anonstruct28, 'numChannels', field(12, ctypes.c_uint32))
-setattr(_anonstruct28, 'width', field(16, size_t))
-setattr(_anonstruct28, 'height', field(24, size_t))
-setattr(_anonstruct28, 'pitchInBytes', field(32, size_t))
-class _anonstruct29(Struct): pass
-_anonstruct29.SIZE = 128
-_anonstruct29._fields_ = ['reserved']
-setattr(_anonstruct29, 'reserved', field(0, Array(ctypes.c_int32, 32)))
-_anonunion24.SIZE = 128
-_anonunion24._fields_ = ['array', 'mipmap', 'linear', 'pitch2D', 'reserved']
-setattr(_anonunion24, 'array', field(0, _anonstruct25))
-setattr(_anonunion24, 'mipmap', field(0, _anonstruct26))
-setattr(_anonunion24, 'linear', field(0, _anonstruct27))
-setattr(_anonunion24, 'pitch2D', field(0, _anonstruct28))
-setattr(_anonunion24, 'reserved', field(0, _anonstruct29))
-HIP_RESOURCE_DESC_st.SIZE = 144
-HIP_RESOURCE_DESC_st._fields_ = ['resType', 'res', 'flags']
-setattr(HIP_RESOURCE_DESC_st, 'resType', field(0, HIPresourcetype))
-setattr(HIP_RESOURCE_DESC_st, 'res', field(8, _anonunion24))
-setattr(HIP_RESOURCE_DESC_st, 'flags', field(136, ctypes.c_uint32))
-class HIP_TEXTURE_DESC_st(Struct): pass
+@record
+class _anonunion24:
+  SIZE = 128
+  array: Annotated[_anonstruct25, 0]
+  mipmap: Annotated[_anonstruct26, 0]
+  linear: Annotated[_anonstruct27, 0]
+  pitch2D: Annotated[_anonstruct28, 0]
+  reserved: Annotated[_anonstruct29, 0]
+@record
+class _anonstruct25:
+  SIZE = 8
+  hArray: Annotated[hipArray_t, 0]
+@record
+class _anonstruct26:
+  SIZE = 8
+  hMipmappedArray: Annotated[hipMipmappedArray_t, 0]
+@record
+class _anonstruct27:
+  SIZE = 24
+  devPtr: Annotated[hipDeviceptr_t, 0]
+  format: Annotated[hipArray_Format, 8]
+  numChannels: Annotated[ctypes.c_uint32, 12]
+  sizeInBytes: Annotated[size_t, 16]
+@record
+class _anonstruct28:
+  SIZE = 40
+  devPtr: Annotated[hipDeviceptr_t, 0]
+  format: Annotated[hipArray_Format, 8]
+  numChannels: Annotated[ctypes.c_uint32, 12]
+  width: Annotated[size_t, 16]
+  height: Annotated[size_t, 24]
+  pitchInBytes: Annotated[size_t, 32]
+@record
+class _anonstruct29:
+  SIZE = 128
+  reserved: Annotated[(ctypes.c_int32* 32), 0]
+@record
+class HIP_TEXTURE_DESC_st:
+  SIZE = 104
+  addressMode: Annotated[(HIPaddress_mode* 3), 0]
+  filterMode: Annotated[HIPfilter_mode, 12]
+  flags: Annotated[ctypes.c_uint32, 16]
+  maxAnisotropy: Annotated[ctypes.c_uint32, 20]
+  mipmapFilterMode: Annotated[HIPfilter_mode, 24]
+  mipmapLevelBias: Annotated[ctypes.c_float, 28]
+  minMipmapLevelClamp: Annotated[ctypes.c_float, 32]
+  maxMipmapLevelClamp: Annotated[ctypes.c_float, 36]
+  borderColor: Annotated[(ctypes.c_float* 4), 40]
+  reserved: Annotated[(ctypes.c_int32* 12), 56]
 HIP_TEXTURE_DESC = HIP_TEXTURE_DESC_st
 HIPaddress_mode_enum = CEnum(ctypes.c_uint32)
 HIP_TR_ADDRESS_MODE_WRAP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_WRAP', 0)
@@ -1992,19 +2006,18 @@ HIP_TR_FILTER_MODE_POINT = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_POINT'
 HIP_TR_FILTER_MODE_LINEAR = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_LINEAR', 1)
 
 HIPfilter_mode = HIPfilter_mode_enum
-HIP_TEXTURE_DESC_st.SIZE = 104
-HIP_TEXTURE_DESC_st._fields_ = ['addressMode', 'filterMode', 'flags', 'maxAnisotropy', 'mipmapFilterMode', 'mipmapLevelBias', 'minMipmapLevelClamp', 'maxMipmapLevelClamp', 'borderColor', 'reserved']
-setattr(HIP_TEXTURE_DESC_st, 'addressMode', field(0, Array(HIPaddress_mode, 3)))
-setattr(HIP_TEXTURE_DESC_st, 'filterMode', field(12, HIPfilter_mode))
-setattr(HIP_TEXTURE_DESC_st, 'flags', field(16, ctypes.c_uint32))
-setattr(HIP_TEXTURE_DESC_st, 'maxAnisotropy', field(20, ctypes.c_uint32))
-setattr(HIP_TEXTURE_DESC_st, 'mipmapFilterMode', field(24, HIPfilter_mode))
-setattr(HIP_TEXTURE_DESC_st, 'mipmapLevelBias', field(28, ctypes.c_float))
-setattr(HIP_TEXTURE_DESC_st, 'minMipmapLevelClamp', field(32, ctypes.c_float))
-setattr(HIP_TEXTURE_DESC_st, 'maxMipmapLevelClamp', field(36, ctypes.c_float))
-setattr(HIP_TEXTURE_DESC_st, 'borderColor', field(40, Array(ctypes.c_float, 4)))
-setattr(HIP_TEXTURE_DESC_st, 'reserved', field(56, Array(ctypes.c_int32, 12)))
-class HIP_RESOURCE_VIEW_DESC_st(Struct): pass
+@record
+class HIP_RESOURCE_VIEW_DESC_st:
+  SIZE = 112
+  format: Annotated[HIPresourceViewFormat, 0]
+  width: Annotated[size_t, 8]
+  height: Annotated[size_t, 16]
+  depth: Annotated[size_t, 24]
+  firstMipmapLevel: Annotated[ctypes.c_uint32, 32]
+  lastMipmapLevel: Annotated[ctypes.c_uint32, 36]
+  firstLayer: Annotated[ctypes.c_uint32, 40]
+  lastLayer: Annotated[ctypes.c_uint32, 44]
+  reserved: Annotated[(ctypes.c_uint32* 16), 48]
 HIP_RESOURCE_VIEW_DESC = HIP_RESOURCE_VIEW_DESC_st
 HIPresourceViewFormat_enum = CEnum(ctypes.c_uint32)
 HIP_RES_VIEW_FORMAT_NONE = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_NONE', 0)
@@ -2044,346 +2057,336 @@ HIP_RES_VIEW_FORMAT_SIGNED_BC6H = HIPresourceViewFormat_enum.define('HIP_RES_VIE
 HIP_RES_VIEW_FORMAT_UNSIGNED_BC7 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC7', 34)
 
 HIPresourceViewFormat = HIPresourceViewFormat_enum
-HIP_RESOURCE_VIEW_DESC_st.SIZE = 112
-HIP_RESOURCE_VIEW_DESC_st._fields_ = ['format', 'width', 'height', 'depth', 'firstMipmapLevel', 'lastMipmapLevel', 'firstLayer', 'lastLayer', 'reserved']
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'format', field(0, HIPresourceViewFormat))
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'width', field(8, size_t))
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'height', field(16, size_t))
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'depth', field(24, size_t))
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'firstMipmapLevel', field(32, ctypes.c_uint32))
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'lastMipmapLevel', field(36, ctypes.c_uint32))
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'firstLayer', field(40, ctypes.c_uint32))
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'lastLayer', field(44, ctypes.c_uint32))
-setattr(HIP_RESOURCE_VIEW_DESC_st, 'reserved', field(48, Array(ctypes.c_uint32, 16)))
-@dll.bind((Pointer(hipTextureObject_t), Pointer(HIP_RESOURCE_DESC), Pointer(HIP_TEXTURE_DESC), Pointer(HIP_RESOURCE_VIEW_DESC)), hipError_t)
-def hipTexObjectCreate(pTexObject, pResDesc, pTexDesc, pResViewDesc): ...
-@dll.bind((hipTextureObject_t), hipError_t)
-def hipTexObjectDestroy(texObject): ...
-@dll.bind((Pointer(HIP_RESOURCE_DESC), hipTextureObject_t), hipError_t)
-def hipTexObjectGetResourceDesc(pResDesc, texObject): ...
-@dll.bind((Pointer(HIP_RESOURCE_VIEW_DESC), hipTextureObject_t), hipError_t)
-def hipTexObjectGetResourceViewDesc(pResViewDesc, texObject): ...
-@dll.bind((Pointer(HIP_TEXTURE_DESC), hipTextureObject_t), hipError_t)
-def hipTexObjectGetTextureDesc(pTexDesc, texObject): ...
-@dll.bind((Pointer(hipMipmappedArray_t), Pointer(hipChannelFormatDesc), hipExtent, ctypes.c_uint32, ctypes.c_uint32), hipError_t)
-def hipMallocMipmappedArray(mipmappedArray, desc, extent, numLevels, flags): ...
-@dll.bind((hipMipmappedArray_t), hipError_t)
-def hipFreeMipmappedArray(mipmappedArray): ...
-hipMipmappedArray_const_t = Pointer(hipMipmappedArray)
-@dll.bind((Pointer(hipArray_t), hipMipmappedArray_const_t, ctypes.c_uint32), hipError_t)
-def hipGetMipmappedArrayLevel(levelArray, mipmappedArray, level): ...
-@dll.bind((Pointer(hipMipmappedArray_t), Pointer(HIP_ARRAY3D_DESCRIPTOR), ctypes.c_uint32), hipError_t)
-def hipMipmappedArrayCreate(pHandle, pMipmappedArrayDesc, numMipmapLevels): ...
-@dll.bind((hipMipmappedArray_t), hipError_t)
-def hipMipmappedArrayDestroy(hMipmappedArray): ...
-@dll.bind((Pointer(hipArray_t), hipMipmappedArray_t, ctypes.c_uint32), hipError_t)
-def hipMipmappedArrayGetLevel(pLevelArray, hMipMappedArray, level): ...
-@dll.bind((Pointer(textureReference), hipMipmappedArray_const_t, Pointer(hipChannelFormatDesc)), hipError_t)
-def hipBindTextureToMipmappedArray(tex, mipmappedArray, desc): ...
-@dll.bind((Pointer(Pointer(textureReference)), ctypes.c_void_p), hipError_t)
-def hipGetTextureReference(texref, symbol): ...
-@dll.bind((Pointer(ctypes.c_float), Pointer(textureReference)), hipError_t)
-def hipTexRefGetBorderColor(pBorderColor, texRef): ...
-@dll.bind((Pointer(hipArray_t), Pointer(textureReference)), hipError_t)
-def hipTexRefGetArray(pArray, texRef): ...
-@dll.bind((Pointer(textureReference), ctypes.c_int32, hipTextureAddressMode), hipError_t)
-def hipTexRefSetAddressMode(texRef, dim, am): ...
-@dll.bind((Pointer(textureReference), hipArray_const_t, ctypes.c_uint32), hipError_t)
-def hipTexRefSetArray(tex, array, flags): ...
-@dll.bind((Pointer(textureReference), hipTextureFilterMode), hipError_t)
-def hipTexRefSetFilterMode(texRef, fm): ...
-@dll.bind((Pointer(textureReference), ctypes.c_uint32), hipError_t)
-def hipTexRefSetFlags(texRef, Flags): ...
-@dll.bind((Pointer(textureReference), hipArray_Format, ctypes.c_int32), hipError_t)
-def hipTexRefSetFormat(texRef, fmt, NumPackedComponents): ...
-@dll.bind((Pointer(size_t), Pointer(textureReference), ctypes.c_void_p, Pointer(hipChannelFormatDesc), size_t), hipError_t)
-def hipBindTexture(offset, tex, devPtr, desc, size): ...
-@dll.bind((Pointer(size_t), Pointer(textureReference), ctypes.c_void_p, Pointer(hipChannelFormatDesc), size_t, size_t, size_t), hipError_t)
-def hipBindTexture2D(offset, tex, devPtr, desc, width, height, pitch): ...
-@dll.bind((Pointer(textureReference), hipArray_const_t, Pointer(hipChannelFormatDesc)), hipError_t)
-def hipBindTextureToArray(tex, array, desc): ...
-@dll.bind((Pointer(size_t), Pointer(textureReference)), hipError_t)
-def hipGetTextureAlignmentOffset(offset, texref): ...
-@dll.bind((Pointer(textureReference)), hipError_t)
-def hipUnbindTexture(tex): ...
-@dll.bind((Pointer(hipDeviceptr_t), Pointer(textureReference)), hipError_t)
-def hipTexRefGetAddress(dev_ptr, texRef): ...
-@dll.bind((Pointer(hipTextureAddressMode), Pointer(textureReference), ctypes.c_int32), hipError_t)
-def hipTexRefGetAddressMode(pam, texRef, dim): ...
-@dll.bind((Pointer(hipTextureFilterMode), Pointer(textureReference)), hipError_t)
-def hipTexRefGetFilterMode(pfm, texRef): ...
-@dll.bind((Pointer(ctypes.c_uint32), Pointer(textureReference)), hipError_t)
-def hipTexRefGetFlags(pFlags, texRef): ...
-@dll.bind((Pointer(hipArray_Format), Pointer(ctypes.c_int32), Pointer(textureReference)), hipError_t)
-def hipTexRefGetFormat(pFormat, pNumChannels, texRef): ...
-@dll.bind((Pointer(ctypes.c_int32), Pointer(textureReference)), hipError_t)
-def hipTexRefGetMaxAnisotropy(pmaxAnsio, texRef): ...
-@dll.bind((Pointer(hipTextureFilterMode), Pointer(textureReference)), hipError_t)
-def hipTexRefGetMipmapFilterMode(pfm, texRef): ...
-@dll.bind((Pointer(ctypes.c_float), Pointer(textureReference)), hipError_t)
-def hipTexRefGetMipmapLevelBias(pbias, texRef): ...
-@dll.bind((Pointer(ctypes.c_float), Pointer(ctypes.c_float), Pointer(textureReference)), hipError_t)
-def hipTexRefGetMipmapLevelClamp(pminMipmapLevelClamp, pmaxMipmapLevelClamp, texRef): ...
-@dll.bind((Pointer(hipMipmappedArray_t), Pointer(textureReference)), hipError_t)
-def hipTexRefGetMipMappedArray(pArray, texRef): ...
-@dll.bind((Pointer(size_t), Pointer(textureReference), hipDeviceptr_t, size_t), hipError_t)
-def hipTexRefSetAddress(ByteOffset, texRef, dptr, bytes): ...
-@dll.bind((Pointer(textureReference), Pointer(HIP_ARRAY_DESCRIPTOR), hipDeviceptr_t, size_t), hipError_t)
-def hipTexRefSetAddress2D(texRef, desc, dptr, Pitch): ...
-@dll.bind((Pointer(textureReference), ctypes.c_uint32), hipError_t)
-def hipTexRefSetMaxAnisotropy(texRef, maxAniso): ...
-@dll.bind((Pointer(textureReference), Pointer(ctypes.c_float)), hipError_t)
-def hipTexRefSetBorderColor(texRef, pBorderColor): ...
-@dll.bind((Pointer(textureReference), hipTextureFilterMode), hipError_t)
-def hipTexRefSetMipmapFilterMode(texRef, fm): ...
-@dll.bind((Pointer(textureReference), ctypes.c_float), hipError_t)
-def hipTexRefSetMipmapLevelBias(texRef, bias): ...
-@dll.bind((Pointer(textureReference), ctypes.c_float, ctypes.c_float), hipError_t)
-def hipTexRefSetMipmapLevelClamp(texRef, minMipMapLevelClamp, maxMipMapLevelClamp): ...
-@dll.bind((Pointer(textureReference), Pointer(hipMipmappedArray), ctypes.c_uint32), hipError_t)
-def hipTexRefSetMipmappedArray(texRef, mipmappedArray, Flags): ...
-@dll.bind((uint32_t), Pointer(ctypes.c_char))
-def hipApiName(id): ...
-@dll.bind((hipFunction_t), Pointer(ctypes.c_char))
-def hipKernelNameRef(f): ...
-@dll.bind((ctypes.c_void_p, hipStream_t), Pointer(ctypes.c_char))
-def hipKernelNameRefByPtr(hostFunction, stream): ...
-@dll.bind((hipStream_t), ctypes.c_int32)
-def hipGetStreamDeviceId(stream): ...
-@dll.bind((hipStream_t, hipStreamCaptureMode), hipError_t)
-def hipStreamBeginCapture(stream, mode): ...
-@dll.bind((hipStream_t, hipGraph_t, Pointer(hipGraphNode_t), Pointer(hipGraphEdgeData), size_t, hipStreamCaptureMode), hipError_t)
-def hipStreamBeginCaptureToGraph(stream, graph, dependencies, dependencyData, numDependencies, mode): ...
-@dll.bind((hipStream_t, Pointer(hipGraph_t)), hipError_t)
-def hipStreamEndCapture(stream, pGraph): ...
-@dll.bind((hipStream_t, Pointer(hipStreamCaptureStatus), Pointer(ctypes.c_uint64)), hipError_t)
-def hipStreamGetCaptureInfo(stream, pCaptureStatus, pId): ...
-@dll.bind((hipStream_t, Pointer(hipStreamCaptureStatus), Pointer(ctypes.c_uint64), Pointer(hipGraph_t), Pointer(Pointer(hipGraphNode_t)), Pointer(size_t)), hipError_t)
-def hipStreamGetCaptureInfo_v2(stream, captureStatus_out, id_out, graph_out, dependencies_out, numDependencies_out): ...
-@dll.bind((hipStream_t, Pointer(hipStreamCaptureStatus)), hipError_t)
-def hipStreamIsCapturing(stream, pCaptureStatus): ...
-@dll.bind((hipStream_t, Pointer(hipGraphNode_t), size_t, ctypes.c_uint32), hipError_t)
-def hipStreamUpdateCaptureDependencies(stream, dependencies, numDependencies, flags): ...
-@dll.bind((Pointer(hipStreamCaptureMode)), hipError_t)
-def hipThreadExchangeStreamCaptureMode(mode): ...
-@dll.bind((Pointer(hipGraph_t), ctypes.c_uint32), hipError_t)
-def hipGraphCreate(pGraph, flags): ...
-@dll.bind((hipGraph_t), hipError_t)
-def hipGraphDestroy(graph): ...
-@dll.bind((hipGraph_t, Pointer(hipGraphNode_t), Pointer(hipGraphNode_t), size_t), hipError_t)
-def hipGraphAddDependencies(graph, _nfrom, to, numDependencies): ...
-@dll.bind((hipGraph_t, Pointer(hipGraphNode_t), Pointer(hipGraphNode_t), size_t), hipError_t)
-def hipGraphRemoveDependencies(graph, _nfrom, to, numDependencies): ...
-@dll.bind((hipGraph_t, Pointer(hipGraphNode_t), Pointer(hipGraphNode_t), Pointer(size_t)), hipError_t)
-def hipGraphGetEdges(graph, _nfrom, to, numEdges): ...
-@dll.bind((hipGraph_t, Pointer(hipGraphNode_t), Pointer(size_t)), hipError_t)
-def hipGraphGetNodes(graph, nodes, numNodes): ...
-@dll.bind((hipGraph_t, Pointer(hipGraphNode_t), Pointer(size_t)), hipError_t)
-def hipGraphGetRootNodes(graph, pRootNodes, pNumRootNodes): ...
-@dll.bind((hipGraphNode_t, Pointer(hipGraphNode_t), Pointer(size_t)), hipError_t)
-def hipGraphNodeGetDependencies(node, pDependencies, pNumDependencies): ...
-@dll.bind((hipGraphNode_t, Pointer(hipGraphNode_t), Pointer(size_t)), hipError_t)
-def hipGraphNodeGetDependentNodes(node, pDependentNodes, pNumDependentNodes): ...
-@dll.bind((hipGraphNode_t, Pointer(hipGraphNodeType)), hipError_t)
-def hipGraphNodeGetType(node, pType): ...
-@dll.bind((hipGraphNode_t), hipError_t)
-def hipGraphDestroyNode(node): ...
-@dll.bind((Pointer(hipGraph_t), hipGraph_t), hipError_t)
-def hipGraphClone(pGraphClone, originalGraph): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraphNode_t, hipGraph_t), hipError_t)
-def hipGraphNodeFindInClone(pNode, originalNode, clonedGraph): ...
-@dll.bind((Pointer(hipGraphExec_t), hipGraph_t, Pointer(hipGraphNode_t), Pointer(ctypes.c_char), size_t), hipError_t)
-def hipGraphInstantiate(pGraphExec, graph, pErrorNode, pLogBuffer, bufferSize): ...
-@dll.bind((Pointer(hipGraphExec_t), hipGraph_t, ctypes.c_uint64), hipError_t)
-def hipGraphInstantiateWithFlags(pGraphExec, graph, flags): ...
-@dll.bind((Pointer(hipGraphExec_t), hipGraph_t, Pointer(hipGraphInstantiateParams)), hipError_t)
-def hipGraphInstantiateWithParams(pGraphExec, graph, instantiateParams): ...
-@dll.bind((hipGraphExec_t, hipStream_t), hipError_t)
-def hipGraphLaunch(graphExec, stream): ...
-@dll.bind((hipGraphExec_t, hipStream_t), hipError_t)
-def hipGraphUpload(graphExec, stream): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(hipGraphNodeParams)), hipError_t)
-def hipGraphAddNode(pGraphNode, graph, pDependencies, numDependencies, nodeParams): ...
-@dll.bind((hipGraphExec_t), hipError_t)
-def hipGraphExecDestroy(graphExec): ...
-@dll.bind((hipGraphExec_t, hipGraph_t, Pointer(hipGraphNode_t), Pointer(hipGraphExecUpdateResult)), hipError_t)
-def hipGraphExecUpdate(hGraphExec, hGraph, hErrorNode_out, updateResult_out): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(hipKernelNodeParams)), hipError_t)
-def hipGraphAddKernelNode(pGraphNode, graph, pDependencies, numDependencies, pNodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipKernelNodeParams)), hipError_t)
-def hipGraphKernelNodeGetParams(node, pNodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipKernelNodeParams)), hipError_t)
-def hipGraphKernelNodeSetParams(node, pNodeParams): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, Pointer(hipKernelNodeParams)), hipError_t)
-def hipGraphExecKernelNodeSetParams(hGraphExec, node, pNodeParams): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(HIP_MEMCPY3D), hipCtx_t), hipError_t)
-def hipDrvGraphAddMemcpyNode(phGraphNode, hGraph, dependencies, numDependencies, copyParams, ctx): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(hipMemcpy3DParms)), hipError_t)
-def hipGraphAddMemcpyNode(pGraphNode, graph, pDependencies, numDependencies, pCopyParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipMemcpy3DParms)), hipError_t)
-def hipGraphMemcpyNodeGetParams(node, pNodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipMemcpy3DParms)), hipError_t)
-def hipGraphMemcpyNodeSetParams(node, pNodeParams): ...
-@dll.bind((hipGraphNode_t, hipLaunchAttributeID, Pointer(hipLaunchAttributeValue)), hipError_t)
-def hipGraphKernelNodeSetAttribute(hNode, attr, value): ...
-@dll.bind((hipGraphNode_t, hipLaunchAttributeID, Pointer(hipLaunchAttributeValue)), hipError_t)
-def hipGraphKernelNodeGetAttribute(hNode, attr, value): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, Pointer(hipMemcpy3DParms)), hipError_t)
-def hipGraphExecMemcpyNodeSetParams(hGraphExec, node, pNodeParams): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind), hipError_t)
-def hipGraphAddMemcpyNode1D(pGraphNode, graph, pDependencies, numDependencies, dst, src, count, kind): ...
-@dll.bind((hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind), hipError_t)
-def hipGraphMemcpyNodeSetParams1D(node, dst, src, count, kind): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, hipMemcpyKind), hipError_t)
-def hipGraphExecMemcpyNodeSetParams1D(hGraphExec, node, dst, src, count, kind): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipGraphAddMemcpyNodeFromSymbol(pGraphNode, graph, pDependencies, numDependencies, dst, symbol, count, offset, kind): ...
-@dll.bind((hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipGraphMemcpyNodeSetParamsFromSymbol(node, dst, symbol, count, offset, kind): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipGraphExecMemcpyNodeSetParamsFromSymbol(hGraphExec, node, dst, symbol, count, offset, kind): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipGraphAddMemcpyNodeToSymbol(pGraphNode, graph, pDependencies, numDependencies, symbol, src, count, offset, kind): ...
-@dll.bind((hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipGraphMemcpyNodeSetParamsToSymbol(node, symbol, src, count, offset, kind): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, hipMemcpyKind), hipError_t)
-def hipGraphExecMemcpyNodeSetParamsToSymbol(hGraphExec, node, symbol, src, count, offset, kind): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(hipMemsetParams)), hipError_t)
-def hipGraphAddMemsetNode(pGraphNode, graph, pDependencies, numDependencies, pMemsetParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipMemsetParams)), hipError_t)
-def hipGraphMemsetNodeGetParams(node, pNodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipMemsetParams)), hipError_t)
-def hipGraphMemsetNodeSetParams(node, pNodeParams): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, Pointer(hipMemsetParams)), hipError_t)
-def hipGraphExecMemsetNodeSetParams(hGraphExec, node, pNodeParams): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(hipHostNodeParams)), hipError_t)
-def hipGraphAddHostNode(pGraphNode, graph, pDependencies, numDependencies, pNodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipHostNodeParams)), hipError_t)
-def hipGraphHostNodeGetParams(node, pNodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipHostNodeParams)), hipError_t)
-def hipGraphHostNodeSetParams(node, pNodeParams): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, Pointer(hipHostNodeParams)), hipError_t)
-def hipGraphExecHostNodeSetParams(hGraphExec, node, pNodeParams): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, hipGraph_t), hipError_t)
-def hipGraphAddChildGraphNode(pGraphNode, graph, pDependencies, numDependencies, childGraph): ...
-@dll.bind((hipGraphNode_t, Pointer(hipGraph_t)), hipError_t)
-def hipGraphChildGraphNodeGetGraph(node, pGraph): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, hipGraph_t), hipError_t)
-def hipGraphExecChildGraphNodeSetParams(hGraphExec, node, childGraph): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t), hipError_t)
-def hipGraphAddEmptyNode(pGraphNode, graph, pDependencies, numDependencies): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, hipEvent_t), hipError_t)
-def hipGraphAddEventRecordNode(pGraphNode, graph, pDependencies, numDependencies, event): ...
-@dll.bind((hipGraphNode_t, Pointer(hipEvent_t)), hipError_t)
-def hipGraphEventRecordNodeGetEvent(node, event_out): ...
-@dll.bind((hipGraphNode_t, hipEvent_t), hipError_t)
-def hipGraphEventRecordNodeSetEvent(node, event): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, hipEvent_t), hipError_t)
-def hipGraphExecEventRecordNodeSetEvent(hGraphExec, hNode, event): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, hipEvent_t), hipError_t)
-def hipGraphAddEventWaitNode(pGraphNode, graph, pDependencies, numDependencies, event): ...
-@dll.bind((hipGraphNode_t, Pointer(hipEvent_t)), hipError_t)
-def hipGraphEventWaitNodeGetEvent(node, event_out): ...
-@dll.bind((hipGraphNode_t, hipEvent_t), hipError_t)
-def hipGraphEventWaitNodeSetEvent(node, event): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, hipEvent_t), hipError_t)
-def hipGraphExecEventWaitNodeSetEvent(hGraphExec, hNode, event): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(hipMemAllocNodeParams)), hipError_t)
-def hipGraphAddMemAllocNode(pGraphNode, graph, pDependencies, numDependencies, pNodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipMemAllocNodeParams)), hipError_t)
-def hipGraphMemAllocNodeGetParams(node, pNodeParams): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, ctypes.c_void_p), hipError_t)
-def hipGraphAddMemFreeNode(pGraphNode, graph, pDependencies, numDependencies, dev_ptr): ...
-@dll.bind((hipGraphNode_t, ctypes.c_void_p), hipError_t)
-def hipGraphMemFreeNodeGetParams(node, dev_ptr): ...
-@dll.bind((ctypes.c_int32, hipGraphMemAttributeType, ctypes.c_void_p), hipError_t)
-def hipDeviceGetGraphMemAttribute(device, attr, value): ...
-@dll.bind((ctypes.c_int32, hipGraphMemAttributeType, ctypes.c_void_p), hipError_t)
-def hipDeviceSetGraphMemAttribute(device, attr, value): ...
-@dll.bind((ctypes.c_int32), hipError_t)
-def hipDeviceGraphMemTrim(device): ...
-@dll.bind((Pointer(hipUserObject_t), ctypes.c_void_p, hipHostFn_t, ctypes.c_uint32, ctypes.c_uint32), hipError_t)
-def hipUserObjectCreate(object_out, ptr, destroy, initialRefcount, flags): ...
-@dll.bind((hipUserObject_t, ctypes.c_uint32), hipError_t)
-def hipUserObjectRelease(object, count): ...
-@dll.bind((hipUserObject_t, ctypes.c_uint32), hipError_t)
-def hipUserObjectRetain(object, count): ...
-@dll.bind((hipGraph_t, hipUserObject_t, ctypes.c_uint32, ctypes.c_uint32), hipError_t)
-def hipGraphRetainUserObject(graph, object, count, flags): ...
-@dll.bind((hipGraph_t, hipUserObject_t, ctypes.c_uint32), hipError_t)
-def hipGraphReleaseUserObject(graph, object, count): ...
-@dll.bind((hipGraph_t, Pointer(ctypes.c_char), ctypes.c_uint32), hipError_t)
-def hipGraphDebugDotPrint(graph, path, flags): ...
-@dll.bind((hipGraphNode_t, hipGraphNode_t), hipError_t)
-def hipGraphKernelNodeCopyAttributes(hSrc, hDst): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, ctypes.c_uint32), hipError_t)
-def hipGraphNodeSetEnabled(hGraphExec, hNode, isEnabled): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, Pointer(ctypes.c_uint32)), hipError_t)
-def hipGraphNodeGetEnabled(hGraphExec, hNode, isEnabled): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(hipExternalSemaphoreWaitNodeParams)), hipError_t)
-def hipGraphAddExternalSemaphoresWaitNode(pGraphNode, graph, pDependencies, numDependencies, nodeParams): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(hipExternalSemaphoreSignalNodeParams)), hipError_t)
-def hipGraphAddExternalSemaphoresSignalNode(pGraphNode, graph, pDependencies, numDependencies, nodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipExternalSemaphoreSignalNodeParams)), hipError_t)
-def hipGraphExternalSemaphoresSignalNodeSetParams(hNode, nodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipExternalSemaphoreWaitNodeParams)), hipError_t)
-def hipGraphExternalSemaphoresWaitNodeSetParams(hNode, nodeParams): ...
-@dll.bind((hipGraphNode_t, Pointer(hipExternalSemaphoreSignalNodeParams)), hipError_t)
-def hipGraphExternalSemaphoresSignalNodeGetParams(hNode, params_out): ...
-@dll.bind((hipGraphNode_t, Pointer(hipExternalSemaphoreWaitNodeParams)), hipError_t)
-def hipGraphExternalSemaphoresWaitNodeGetParams(hNode, params_out): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, Pointer(hipExternalSemaphoreSignalNodeParams)), hipError_t)
-def hipGraphExecExternalSemaphoresSignalNodeSetParams(hGraphExec, hNode, nodeParams): ...
-@dll.bind((hipGraphExec_t, hipGraphNode_t, Pointer(hipExternalSemaphoreWaitNodeParams)), hipError_t)
-def hipGraphExecExternalSemaphoresWaitNodeSetParams(hGraphExec, hNode, nodeParams): ...
-@dll.bind((Pointer(hipGraphNode_t), hipGraph_t, Pointer(hipGraphNode_t), size_t, Pointer(HIP_MEMSET_NODE_PARAMS), hipCtx_t), hipError_t)
-def hipDrvGraphAddMemsetNode(phGraphNode, hGraph, dependencies, numDependencies, memsetParams, ctx): ...
-@dll.bind((ctypes.c_void_p, size_t), hipError_t)
-def hipMemAddressFree(devPtr, size): ...
-@dll.bind((Pointer(ctypes.c_void_p), size_t, size_t, ctypes.c_void_p, ctypes.c_uint64), hipError_t)
-def hipMemAddressReserve(ptr, size, alignment, addr, flags): ...
-@dll.bind((Pointer(hipMemGenericAllocationHandle_t), size_t, Pointer(hipMemAllocationProp), ctypes.c_uint64), hipError_t)
-def hipMemCreate(handle, size, prop, flags): ...
-@dll.bind((ctypes.c_void_p, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, ctypes.c_uint64), hipError_t)
-def hipMemExportToShareableHandle(shareableHandle, handle, handleType, flags): ...
-@dll.bind((Pointer(ctypes.c_uint64), Pointer(hipMemLocation), ctypes.c_void_p), hipError_t)
-def hipMemGetAccess(flags, location, ptr): ...
-@dll.bind((Pointer(size_t), Pointer(hipMemAllocationProp), hipMemAllocationGranularity_flags), hipError_t)
-def hipMemGetAllocationGranularity(granularity, prop, option): ...
-@dll.bind((Pointer(hipMemAllocationProp), hipMemGenericAllocationHandle_t), hipError_t)
-def hipMemGetAllocationPropertiesFromHandle(prop, handle): ...
-@dll.bind((Pointer(hipMemGenericAllocationHandle_t), ctypes.c_void_p, hipMemAllocationHandleType), hipError_t)
-def hipMemImportFromShareableHandle(handle, osHandle, shHandleType): ...
-@dll.bind((ctypes.c_void_p, size_t, size_t, hipMemGenericAllocationHandle_t, ctypes.c_uint64), hipError_t)
-def hipMemMap(ptr, size, offset, handle, flags): ...
-@dll.bind((Pointer(hipArrayMapInfo), ctypes.c_uint32, hipStream_t), hipError_t)
-def hipMemMapArrayAsync(mapInfoList, count, stream): ...
-@dll.bind((hipMemGenericAllocationHandle_t), hipError_t)
-def hipMemRelease(handle): ...
-@dll.bind((Pointer(hipMemGenericAllocationHandle_t), ctypes.c_void_p), hipError_t)
-def hipMemRetainAllocationHandle(handle, addr): ...
-@dll.bind((ctypes.c_void_p, size_t, Pointer(hipMemAccessDesc), size_t), hipError_t)
-def hipMemSetAccess(ptr, size, desc, count): ...
-@dll.bind((ctypes.c_void_p, size_t), hipError_t)
-def hipMemUnmap(ptr, size): ...
-@dll.bind((ctypes.c_int32, Pointer(hipGraphicsResource_t), hipStream_t), hipError_t)
-def hipGraphicsMapResources(count, resources, stream): ...
-@dll.bind((Pointer(hipArray_t), hipGraphicsResource_t, ctypes.c_uint32, ctypes.c_uint32), hipError_t)
-def hipGraphicsSubResourceGetMappedArray(array, resource, arrayIndex, mipLevel): ...
-@dll.bind((Pointer(ctypes.c_void_p), Pointer(size_t), hipGraphicsResource_t), hipError_t)
-def hipGraphicsResourceGetMappedPointer(devPtr, size, resource): ...
-@dll.bind((ctypes.c_int32, Pointer(hipGraphicsResource_t), hipStream_t), hipError_t)
-def hipGraphicsUnmapResources(count, resources, stream): ...
-@dll.bind((hipGraphicsResource_t), hipError_t)
-def hipGraphicsUnregisterResource(resource): ...
-class __hip_surface(Struct): pass
-hipSurfaceObject_t = Pointer(__hip_surface)
-@dll.bind((Pointer(hipSurfaceObject_t), Pointer(hipResourceDesc)), hipError_t)
-def hipCreateSurfaceObject(pSurfObject, pResDesc): ...
-@dll.bind((hipSurfaceObject_t), hipError_t)
-def hipDestroySurfaceObject(surfaceObject): ...
-hipmipmappedArray = Pointer(hipMipmappedArray)
+@dll.bind
+def hipTexObjectCreate(pTexObject:ctypes.POINTER(hipTextureObject_t), pResDesc:ctypes.POINTER(HIP_RESOURCE_DESC), pTexDesc:ctypes.POINTER(HIP_TEXTURE_DESC), pResViewDesc:ctypes.POINTER(HIP_RESOURCE_VIEW_DESC)) -> hipError_t: ...
+@dll.bind
+def hipTexObjectDestroy(texObject:hipTextureObject_t) -> hipError_t: ...
+@dll.bind
+def hipTexObjectGetResourceDesc(pResDesc:ctypes.POINTER(HIP_RESOURCE_DESC), texObject:hipTextureObject_t) -> hipError_t: ...
+@dll.bind
+def hipTexObjectGetResourceViewDesc(pResViewDesc:ctypes.POINTER(HIP_RESOURCE_VIEW_DESC), texObject:hipTextureObject_t) -> hipError_t: ...
+@dll.bind
+def hipTexObjectGetTextureDesc(pTexDesc:ctypes.POINTER(HIP_TEXTURE_DESC), texObject:hipTextureObject_t) -> hipError_t: ...
+@dll.bind
+def hipMallocMipmappedArray(mipmappedArray:ctypes.POINTER(hipMipmappedArray_t), desc:ctypes.POINTER(hipChannelFormatDesc), extent:hipExtent, numLevels:ctypes.c_uint32, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipFreeMipmappedArray(mipmappedArray:hipMipmappedArray_t) -> hipError_t: ...
+hipMipmappedArray_const_t = ctypes.POINTER(hipMipmappedArray)
+@dll.bind
+def hipGetMipmappedArrayLevel(levelArray:ctypes.POINTER(hipArray_t), mipmappedArray:hipMipmappedArray_const_t, level:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipMipmappedArrayCreate(pHandle:ctypes.POINTER(hipMipmappedArray_t), pMipmappedArrayDesc:ctypes.POINTER(HIP_ARRAY3D_DESCRIPTOR), numMipmapLevels:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipMipmappedArrayDestroy(hMipmappedArray:hipMipmappedArray_t) -> hipError_t: ...
+@dll.bind
+def hipMipmappedArrayGetLevel(pLevelArray:ctypes.POINTER(hipArray_t), hMipMappedArray:hipMipmappedArray_t, level:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipBindTextureToMipmappedArray(tex:ctypes.POINTER(textureReference), mipmappedArray:hipMipmappedArray_const_t, desc:ctypes.POINTER(hipChannelFormatDesc)) -> hipError_t: ...
+@dll.bind
+def hipGetTextureReference(texref:ctypes.POINTER(ctypes.POINTER(textureReference)), symbol:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetBorderColor(pBorderColor:ctypes.POINTER(ctypes.c_float), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetArray(pArray:ctypes.POINTER(hipArray_t), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetAddressMode(texRef:ctypes.POINTER(textureReference), dim:ctypes.c_int32, am:hipTextureAddressMode) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetArray(tex:ctypes.POINTER(textureReference), array:hipArray_const_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetFilterMode(texRef:ctypes.POINTER(textureReference), fm:hipTextureFilterMode) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetFlags(texRef:ctypes.POINTER(textureReference), Flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetFormat(texRef:ctypes.POINTER(textureReference), fmt:hipArray_Format, NumPackedComponents:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipBindTexture(offset:ctypes.POINTER(size_t), tex:ctypes.POINTER(textureReference), devPtr:ctypes.POINTER(None), desc:ctypes.POINTER(hipChannelFormatDesc), size:size_t) -> hipError_t: ...
+@dll.bind
+def hipBindTexture2D(offset:ctypes.POINTER(size_t), tex:ctypes.POINTER(textureReference), devPtr:ctypes.POINTER(None), desc:ctypes.POINTER(hipChannelFormatDesc), width:size_t, height:size_t, pitch:size_t) -> hipError_t: ...
+@dll.bind
+def hipBindTextureToArray(tex:ctypes.POINTER(textureReference), array:hipArray_const_t, desc:ctypes.POINTER(hipChannelFormatDesc)) -> hipError_t: ...
+@dll.bind
+def hipGetTextureAlignmentOffset(offset:ctypes.POINTER(size_t), texref:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipUnbindTexture(tex:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetAddress(dev_ptr:ctypes.POINTER(hipDeviceptr_t), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetAddressMode(pam:ctypes.POINTER(hipTextureAddressMode), texRef:ctypes.POINTER(textureReference), dim:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetFilterMode(pfm:ctypes.POINTER(hipTextureFilterMode), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetFlags(pFlags:ctypes.POINTER(ctypes.c_uint32), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetFormat(pFormat:ctypes.POINTER(hipArray_Format), pNumChannels:ctypes.POINTER(ctypes.c_int32), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetMaxAnisotropy(pmaxAnsio:ctypes.POINTER(ctypes.c_int32), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetMipmapFilterMode(pfm:ctypes.POINTER(hipTextureFilterMode), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetMipmapLevelBias(pbias:ctypes.POINTER(ctypes.c_float), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetMipmapLevelClamp(pminMipmapLevelClamp:ctypes.POINTER(ctypes.c_float), pmaxMipmapLevelClamp:ctypes.POINTER(ctypes.c_float), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefGetMipMappedArray(pArray:ctypes.POINTER(hipMipmappedArray_t), texRef:ctypes.POINTER(textureReference)) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetAddress(ByteOffset:ctypes.POINTER(size_t), texRef:ctypes.POINTER(textureReference), dptr:hipDeviceptr_t, bytes:size_t) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetAddress2D(texRef:ctypes.POINTER(textureReference), desc:ctypes.POINTER(HIP_ARRAY_DESCRIPTOR), dptr:hipDeviceptr_t, Pitch:size_t) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetMaxAnisotropy(texRef:ctypes.POINTER(textureReference), maxAniso:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetBorderColor(texRef:ctypes.POINTER(textureReference), pBorderColor:ctypes.POINTER(ctypes.c_float)) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetMipmapFilterMode(texRef:ctypes.POINTER(textureReference), fm:hipTextureFilterMode) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetMipmapLevelBias(texRef:ctypes.POINTER(textureReference), bias:ctypes.c_float) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetMipmapLevelClamp(texRef:ctypes.POINTER(textureReference), minMipMapLevelClamp:ctypes.c_float, maxMipMapLevelClamp:ctypes.c_float) -> hipError_t: ...
+@dll.bind
+def hipTexRefSetMipmappedArray(texRef:ctypes.POINTER(textureReference), mipmappedArray:ctypes.POINTER(hipMipmappedArray), Flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipApiName(id:uint32_t) -> ctypes.POINTER(ctypes.c_char): ...
+@dll.bind
+def hipKernelNameRef(f:hipFunction_t) -> ctypes.POINTER(ctypes.c_char): ...
+@dll.bind
+def hipKernelNameRefByPtr(hostFunction:ctypes.POINTER(None), stream:hipStream_t) -> ctypes.POINTER(ctypes.c_char): ...
+@dll.bind
+def hipGetStreamDeviceId(stream:hipStream_t) -> ctypes.c_int32: ...
+@dll.bind
+def hipStreamBeginCapture(stream:hipStream_t, mode:hipStreamCaptureMode) -> hipError_t: ...
+@dll.bind
+def hipStreamBeginCaptureToGraph(stream:hipStream_t, graph:hipGraph_t, dependencies:ctypes.POINTER(hipGraphNode_t), dependencyData:ctypes.POINTER(hipGraphEdgeData), numDependencies:size_t, mode:hipStreamCaptureMode) -> hipError_t: ...
+@dll.bind
+def hipStreamEndCapture(stream:hipStream_t, pGraph:ctypes.POINTER(hipGraph_t)) -> hipError_t: ...
+@dll.bind
+def hipStreamGetCaptureInfo(stream:hipStream_t, pCaptureStatus:ctypes.POINTER(hipStreamCaptureStatus), pId:ctypes.POINTER(ctypes.c_uint64)) -> hipError_t: ...
+@dll.bind
+def hipStreamGetCaptureInfo_v2(stream:hipStream_t, captureStatus_out:ctypes.POINTER(hipStreamCaptureStatus), id_out:ctypes.POINTER(ctypes.c_uint64), graph_out:ctypes.POINTER(hipGraph_t), dependencies_out:ctypes.POINTER(ctypes.POINTER(hipGraphNode_t)), numDependencies_out:ctypes.POINTER(size_t)) -> hipError_t: ...
+@dll.bind
+def hipStreamIsCapturing(stream:hipStream_t, pCaptureStatus:ctypes.POINTER(hipStreamCaptureStatus)) -> hipError_t: ...
+@dll.bind
+def hipStreamUpdateCaptureDependencies(stream:hipStream_t, dependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipThreadExchangeStreamCaptureMode(mode:ctypes.POINTER(hipStreamCaptureMode)) -> hipError_t: ...
+@dll.bind
+def hipGraphCreate(pGraph:ctypes.POINTER(hipGraph_t), flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipGraphDestroy(graph:hipGraph_t) -> hipError_t: ...
+@dll.bind
+def hipGraphAddDependencies(graph:hipGraph_t, _from:ctypes.POINTER(hipGraphNode_t), to:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t) -> hipError_t: ...
+@dll.bind
+def hipGraphRemoveDependencies(graph:hipGraph_t, _from:ctypes.POINTER(hipGraphNode_t), to:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t) -> hipError_t: ...
+@dll.bind
+def hipGraphGetEdges(graph:hipGraph_t, _from:ctypes.POINTER(hipGraphNode_t), to:ctypes.POINTER(hipGraphNode_t), numEdges:ctypes.POINTER(size_t)) -> hipError_t: ...
+@dll.bind
+def hipGraphGetNodes(graph:hipGraph_t, nodes:ctypes.POINTER(hipGraphNode_t), numNodes:ctypes.POINTER(size_t)) -> hipError_t: ...
+@dll.bind
+def hipGraphGetRootNodes(graph:hipGraph_t, pRootNodes:ctypes.POINTER(hipGraphNode_t), pNumRootNodes:ctypes.POINTER(size_t)) -> hipError_t: ...
+@dll.bind
+def hipGraphNodeGetDependencies(node:hipGraphNode_t, pDependencies:ctypes.POINTER(hipGraphNode_t), pNumDependencies:ctypes.POINTER(size_t)) -> hipError_t: ...
+@dll.bind
+def hipGraphNodeGetDependentNodes(node:hipGraphNode_t, pDependentNodes:ctypes.POINTER(hipGraphNode_t), pNumDependentNodes:ctypes.POINTER(size_t)) -> hipError_t: ...
+@dll.bind
+def hipGraphNodeGetType(node:hipGraphNode_t, pType:ctypes.POINTER(hipGraphNodeType)) -> hipError_t: ...
+@dll.bind
+def hipGraphDestroyNode(node:hipGraphNode_t) -> hipError_t: ...
+@dll.bind
+def hipGraphClone(pGraphClone:ctypes.POINTER(hipGraph_t), originalGraph:hipGraph_t) -> hipError_t: ...
+@dll.bind
+def hipGraphNodeFindInClone(pNode:ctypes.POINTER(hipGraphNode_t), originalNode:hipGraphNode_t, clonedGraph:hipGraph_t) -> hipError_t: ...
+@dll.bind
+def hipGraphInstantiate(pGraphExec:ctypes.POINTER(hipGraphExec_t), graph:hipGraph_t, pErrorNode:ctypes.POINTER(hipGraphNode_t), pLogBuffer:ctypes.POINTER(ctypes.c_char), bufferSize:size_t) -> hipError_t: ...
+@dll.bind
+def hipGraphInstantiateWithFlags(pGraphExec:ctypes.POINTER(hipGraphExec_t), graph:hipGraph_t, flags:ctypes.c_uint64) -> hipError_t: ...
+@dll.bind
+def hipGraphInstantiateWithParams(pGraphExec:ctypes.POINTER(hipGraphExec_t), graph:hipGraph_t, instantiateParams:ctypes.POINTER(hipGraphInstantiateParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphLaunch(graphExec:hipGraphExec_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipGraphUpload(graphExec:hipGraphExec_t, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipGraphAddNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, nodeParams:ctypes.POINTER(hipGraphNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExecDestroy(graphExec:hipGraphExec_t) -> hipError_t: ...
+@dll.bind
+def hipGraphExecUpdate(hGraphExec:hipGraphExec_t, hGraph:hipGraph_t, hErrorNode_out:ctypes.POINTER(hipGraphNode_t), updateResult_out:ctypes.POINTER(hipGraphExecUpdateResult)) -> hipError_t: ...
+@dll.bind
+def hipGraphAddKernelNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, pNodeParams:ctypes.POINTER(hipKernelNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphKernelNodeGetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipKernelNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphKernelNodeSetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipKernelNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExecKernelNodeSetParams(hGraphExec:hipGraphExec_t, node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipKernelNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipDrvGraphAddMemcpyNode(phGraphNode:ctypes.POINTER(hipGraphNode_t), hGraph:hipGraph_t, dependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, copyParams:ctypes.POINTER(HIP_MEMCPY3D), ctx:hipCtx_t) -> hipError_t: ...
+@dll.bind
+def hipGraphAddMemcpyNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, pCopyParams:ctypes.POINTER(hipMemcpy3DParms)) -> hipError_t: ...
+@dll.bind
+def hipGraphMemcpyNodeGetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipMemcpy3DParms)) -> hipError_t: ...
+@dll.bind
+def hipGraphMemcpyNodeSetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipMemcpy3DParms)) -> hipError_t: ...
+@dll.bind
+def hipGraphKernelNodeSetAttribute(hNode:hipGraphNode_t, attr:hipLaunchAttributeID, value:ctypes.POINTER(hipLaunchAttributeValue)) -> hipError_t: ...
+@dll.bind
+def hipGraphKernelNodeGetAttribute(hNode:hipGraphNode_t, attr:hipLaunchAttributeID, value:ctypes.POINTER(hipLaunchAttributeValue)) -> hipError_t: ...
+@dll.bind
+def hipGraphExecMemcpyNodeSetParams(hGraphExec:hipGraphExec_t, node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipMemcpy3DParms)) -> hipError_t: ...
+@dll.bind
+def hipGraphAddMemcpyNode1D(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, dst:ctypes.POINTER(None), src:ctypes.POINTER(None), count:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphMemcpyNodeSetParams1D(node:hipGraphNode_t, dst:ctypes.POINTER(None), src:ctypes.POINTER(None), count:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphExecMemcpyNodeSetParams1D(hGraphExec:hipGraphExec_t, node:hipGraphNode_t, dst:ctypes.POINTER(None), src:ctypes.POINTER(None), count:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphAddMemcpyNodeFromSymbol(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, dst:ctypes.POINTER(None), symbol:ctypes.POINTER(None), count:size_t, offset:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphMemcpyNodeSetParamsFromSymbol(node:hipGraphNode_t, dst:ctypes.POINTER(None), symbol:ctypes.POINTER(None), count:size_t, offset:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphExecMemcpyNodeSetParamsFromSymbol(hGraphExec:hipGraphExec_t, node:hipGraphNode_t, dst:ctypes.POINTER(None), symbol:ctypes.POINTER(None), count:size_t, offset:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphAddMemcpyNodeToSymbol(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, symbol:ctypes.POINTER(None), src:ctypes.POINTER(None), count:size_t, offset:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphMemcpyNodeSetParamsToSymbol(node:hipGraphNode_t, symbol:ctypes.POINTER(None), src:ctypes.POINTER(None), count:size_t, offset:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphExecMemcpyNodeSetParamsToSymbol(hGraphExec:hipGraphExec_t, node:hipGraphNode_t, symbol:ctypes.POINTER(None), src:ctypes.POINTER(None), count:size_t, offset:size_t, kind:hipMemcpyKind) -> hipError_t: ...
+@dll.bind
+def hipGraphAddMemsetNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, pMemsetParams:ctypes.POINTER(hipMemsetParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphMemsetNodeGetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipMemsetParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphMemsetNodeSetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipMemsetParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExecMemsetNodeSetParams(hGraphExec:hipGraphExec_t, node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipMemsetParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphAddHostNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, pNodeParams:ctypes.POINTER(hipHostNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphHostNodeGetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipHostNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphHostNodeSetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipHostNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExecHostNodeSetParams(hGraphExec:hipGraphExec_t, node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipHostNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphAddChildGraphNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, childGraph:hipGraph_t) -> hipError_t: ...
+@dll.bind
+def hipGraphChildGraphNodeGetGraph(node:hipGraphNode_t, pGraph:ctypes.POINTER(hipGraph_t)) -> hipError_t: ...
+@dll.bind
+def hipGraphExecChildGraphNodeSetParams(hGraphExec:hipGraphExec_t, node:hipGraphNode_t, childGraph:hipGraph_t) -> hipError_t: ...
+@dll.bind
+def hipGraphAddEmptyNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t) -> hipError_t: ...
+@dll.bind
+def hipGraphAddEventRecordNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipGraphEventRecordNodeGetEvent(node:hipGraphNode_t, event_out:ctypes.POINTER(hipEvent_t)) -> hipError_t: ...
+@dll.bind
+def hipGraphEventRecordNodeSetEvent(node:hipGraphNode_t, event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipGraphExecEventRecordNodeSetEvent(hGraphExec:hipGraphExec_t, hNode:hipGraphNode_t, event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipGraphAddEventWaitNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipGraphEventWaitNodeGetEvent(node:hipGraphNode_t, event_out:ctypes.POINTER(hipEvent_t)) -> hipError_t: ...
+@dll.bind
+def hipGraphEventWaitNodeSetEvent(node:hipGraphNode_t, event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipGraphExecEventWaitNodeSetEvent(hGraphExec:hipGraphExec_t, hNode:hipGraphNode_t, event:hipEvent_t) -> hipError_t: ...
+@dll.bind
+def hipGraphAddMemAllocNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, pNodeParams:ctypes.POINTER(hipMemAllocNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphMemAllocNodeGetParams(node:hipGraphNode_t, pNodeParams:ctypes.POINTER(hipMemAllocNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphAddMemFreeNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, dev_ptr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipGraphMemFreeNodeGetParams(node:hipGraphNode_t, dev_ptr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipDeviceGetGraphMemAttribute(device:ctypes.c_int32, attr:hipGraphMemAttributeType, value:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipDeviceSetGraphMemAttribute(device:ctypes.c_int32, attr:hipGraphMemAttributeType, value:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipDeviceGraphMemTrim(device:ctypes.c_int32) -> hipError_t: ...
+@dll.bind
+def hipUserObjectCreate(object_out:ctypes.POINTER(hipUserObject_t), ptr:ctypes.POINTER(None), destroy:hipHostFn_t, initialRefcount:ctypes.c_uint32, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipUserObjectRelease(object:hipUserObject_t, count:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipUserObjectRetain(object:hipUserObject_t, count:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipGraphRetainUserObject(graph:hipGraph_t, object:hipUserObject_t, count:ctypes.c_uint32, flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipGraphReleaseUserObject(graph:hipGraph_t, object:hipUserObject_t, count:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipGraphDebugDotPrint(graph:hipGraph_t, path:ctypes.POINTER(ctypes.c_char), flags:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipGraphKernelNodeCopyAttributes(hSrc:hipGraphNode_t, hDst:hipGraphNode_t) -> hipError_t: ...
+@dll.bind
+def hipGraphNodeSetEnabled(hGraphExec:hipGraphExec_t, hNode:hipGraphNode_t, isEnabled:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipGraphNodeGetEnabled(hGraphExec:hipGraphExec_t, hNode:hipGraphNode_t, isEnabled:ctypes.POINTER(ctypes.c_uint32)) -> hipError_t: ...
+@dll.bind
+def hipGraphAddExternalSemaphoresWaitNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, nodeParams:ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphAddExternalSemaphoresSignalNode(pGraphNode:ctypes.POINTER(hipGraphNode_t), graph:hipGraph_t, pDependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, nodeParams:ctypes.POINTER(hipExternalSemaphoreSignalNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExternalSemaphoresSignalNodeSetParams(hNode:hipGraphNode_t, nodeParams:ctypes.POINTER(hipExternalSemaphoreSignalNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExternalSemaphoresWaitNodeSetParams(hNode:hipGraphNode_t, nodeParams:ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExternalSemaphoresSignalNodeGetParams(hNode:hipGraphNode_t, params_out:ctypes.POINTER(hipExternalSemaphoreSignalNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExternalSemaphoresWaitNodeGetParams(hNode:hipGraphNode_t, params_out:ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExecExternalSemaphoresSignalNodeSetParams(hGraphExec:hipGraphExec_t, hNode:hipGraphNode_t, nodeParams:ctypes.POINTER(hipExternalSemaphoreSignalNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipGraphExecExternalSemaphoresWaitNodeSetParams(hGraphExec:hipGraphExec_t, hNode:hipGraphNode_t, nodeParams:ctypes.POINTER(hipExternalSemaphoreWaitNodeParams)) -> hipError_t: ...
+@dll.bind
+def hipDrvGraphAddMemsetNode(phGraphNode:ctypes.POINTER(hipGraphNode_t), hGraph:hipGraph_t, dependencies:ctypes.POINTER(hipGraphNode_t), numDependencies:size_t, memsetParams:ctypes.POINTER(HIP_MEMSET_NODE_PARAMS), ctx:hipCtx_t) -> hipError_t: ...
+@dll.bind
+def hipMemAddressFree(devPtr:ctypes.POINTER(None), size:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemAddressReserve(ptr:ctypes.POINTER(ctypes.POINTER(None)), size:size_t, alignment:size_t, addr:ctypes.POINTER(None), flags:ctypes.c_uint64) -> hipError_t: ...
+@dll.bind
+def hipMemCreate(handle:ctypes.POINTER(hipMemGenericAllocationHandle_t), size:size_t, prop:ctypes.POINTER(hipMemAllocationProp), flags:ctypes.c_uint64) -> hipError_t: ...
+@dll.bind
+def hipMemExportToShareableHandle(shareableHandle:ctypes.POINTER(None), handle:hipMemGenericAllocationHandle_t, handleType:hipMemAllocationHandleType, flags:ctypes.c_uint64) -> hipError_t: ...
+@dll.bind
+def hipMemGetAccess(flags:ctypes.POINTER(ctypes.c_uint64), location:ctypes.POINTER(hipMemLocation), ptr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipMemGetAllocationGranularity(granularity:ctypes.POINTER(size_t), prop:ctypes.POINTER(hipMemAllocationProp), option:hipMemAllocationGranularity_flags) -> hipError_t: ...
+@dll.bind
+def hipMemGetAllocationPropertiesFromHandle(prop:ctypes.POINTER(hipMemAllocationProp), handle:hipMemGenericAllocationHandle_t) -> hipError_t: ...
+@dll.bind
+def hipMemImportFromShareableHandle(handle:ctypes.POINTER(hipMemGenericAllocationHandle_t), osHandle:ctypes.POINTER(None), shHandleType:hipMemAllocationHandleType) -> hipError_t: ...
+@dll.bind
+def hipMemMap(ptr:ctypes.POINTER(None), size:size_t, offset:size_t, handle:hipMemGenericAllocationHandle_t, flags:ctypes.c_uint64) -> hipError_t: ...
+@dll.bind
+def hipMemMapArrayAsync(mapInfoList:ctypes.POINTER(hipArrayMapInfo), count:ctypes.c_uint32, stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipMemRelease(handle:hipMemGenericAllocationHandle_t) -> hipError_t: ...
+@dll.bind
+def hipMemRetainAllocationHandle(handle:ctypes.POINTER(hipMemGenericAllocationHandle_t), addr:ctypes.POINTER(None)) -> hipError_t: ...
+@dll.bind
+def hipMemSetAccess(ptr:ctypes.POINTER(None), size:size_t, desc:ctypes.POINTER(hipMemAccessDesc), count:size_t) -> hipError_t: ...
+@dll.bind
+def hipMemUnmap(ptr:ctypes.POINTER(None), size:size_t) -> hipError_t: ...
+@dll.bind
+def hipGraphicsMapResources(count:ctypes.c_int32, resources:ctypes.POINTER(hipGraphicsResource_t), stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipGraphicsSubResourceGetMappedArray(array:ctypes.POINTER(hipArray_t), resource:hipGraphicsResource_t, arrayIndex:ctypes.c_uint32, mipLevel:ctypes.c_uint32) -> hipError_t: ...
+@dll.bind
+def hipGraphicsResourceGetMappedPointer(devPtr:ctypes.POINTER(ctypes.POINTER(None)), size:ctypes.POINTER(size_t), resource:hipGraphicsResource_t) -> hipError_t: ...
+@dll.bind
+def hipGraphicsUnmapResources(count:ctypes.c_int32, resources:ctypes.POINTER(hipGraphicsResource_t), stream:hipStream_t) -> hipError_t: ...
+@dll.bind
+def hipGraphicsUnregisterResource(resource:hipGraphicsResource_t) -> hipError_t: ...
+class __hip_surface(ctypes.Structure): pass
+hipSurfaceObject_t = ctypes.POINTER(__hip_surface)
+@dll.bind
+def hipCreateSurfaceObject(pSurfObject:ctypes.POINTER(hipSurfaceObject_t), pResDesc:ctypes.POINTER(hipResourceDesc)) -> hipError_t: ...
+@dll.bind
+def hipDestroySurfaceObject(surfaceObject:hipSurfaceObject_t) -> hipError_t: ...
+hipmipmappedArray = ctypes.POINTER(hipMipmappedArray)
 hipResourcetype = HIPresourcetype_enum
+init_records()
 hipGetDeviceProperties = hipGetDevicePropertiesR0600
 hipDeviceProp_t = hipDeviceProp_tR0600
 hipChooseDevice = hipChooseDeviceR0600

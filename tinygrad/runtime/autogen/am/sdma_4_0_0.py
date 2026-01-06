@@ -1,719 +1,452 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('extra_info', ctypes.c_uint32,16),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION_0._fields_ = [
-  ('count', ctypes.c_uint32,22),
-  ('reserved_0', ctypes.c_uint32,10),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION_0._fields_ = [
-  ('reserved_0', ctypes.c_uint32,16),
-  ('dst_swap', ctypes.c_uint32,2),
-  ('reserved_1', ctypes.c_uint32,6),
-  ('src_swap', ctypes.c_uint32,2),
-  ('reserved_2', ctypes.c_uint32,6),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION_0),
-  ('DW_2_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION_0._fields_ = [
-  ('src_addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION_0),
-  ('DW_3_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION_0._fields_ = [
-  ('src_addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION_0),
-  ('DW_4_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION_0._fields_ = [
-  ('dst_addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION_0),
-  ('DW_5_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION_0._fields_ = [
-  ('dst_addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION_0),
-  ('DW_6_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION),
-  ('COUNT_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION),
-  ('PARAMETER_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION),
-  ('SRC_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION),
-  ('SRC_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION),
-  ('DST_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION),
-  ('DST_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION),
-]
+from typing import Annotated
+from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+@record
+class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG:
+  SIZE = 28
+  HEADER_UNION: Annotated[_anonunion0, 0]
+  COUNT_UNION: Annotated[_anonunion1, 4]
+  PARAMETER_UNION: Annotated[_anonunion2, 8]
+  SRC_ADDR_LO_UNION: Annotated[_anonunion3, 12]
+  SRC_ADDR_HI_UNION: Annotated[_anonunion4, 16]
+  DST_ADDR_LO_UNION: Annotated[_anonunion5, 20]
+  DST_ADDR_HI_UNION: Annotated[_anonunion6, 24]
+@record
+class _anonunion0:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  extra_info: Annotated[ctypes.c_uint32, 2, 16, 0]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion1:
+  SIZE = 4
+  count: Annotated[ctypes.c_uint32, 0, 22, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 2, 10, 6]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion2:
+  SIZE = 4
+  reserved_0: Annotated[ctypes.c_uint32, 0, 16, 0]
+  dst_swap: Annotated[ctypes.c_uint32, 2, 2, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 2, 6, 2]
+  src_swap: Annotated[ctypes.c_uint32, 3, 2, 0]
+  reserved_2: Annotated[ctypes.c_uint32, 3, 6, 2]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion3:
+  SIZE = 4
+  src_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion4:
+  SIZE = 4
+  src_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion5:
+  SIZE = 4
+  dst_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_5_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion6:
+  SIZE = 4
+  dst_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_6_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_COPY_LINEAR = rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('reserved', ctypes.c_uint32,13),
-  ('element', ctypes.c_uint32,3),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION_0._fields_ = [
-  ('src_addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION_0._fields_ = [
-  ('src_addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION_0),
-  ('DW_2_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION_0._fields_ = [
-  ('src_offset_x', ctypes.c_uint32,14),
-  ('reserved_1', ctypes.c_uint32,2),
-  ('src_offset_y', ctypes.c_uint32,14),
-  ('reserved_2', ctypes.c_uint32,2),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION_0),
-  ('DW_3_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION_0._fields_ = [
-  ('src_offset_z', ctypes.c_uint32,11),
-  ('reserved_1', ctypes.c_uint32,2),
-  ('src_pitch', ctypes.c_uint32,19),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION_0),
-  ('DW_4_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION_0._fields_ = [
-  ('src_slice_pitch', ctypes.c_uint32,28),
-  ('reserved_1', ctypes.c_uint32,4),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION_0),
-  ('DW_5_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION_0._fields_ = [
-  ('dst_addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION_0),
-  ('DW_6_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION_0._fields_ = [
-  ('dst_addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION_0),
-  ('DW_7_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION_0._fields_ = [
-  ('dst_offset_x', ctypes.c_uint32,14),
-  ('reserved_1', ctypes.c_uint32,2),
-  ('dst_offset_y', ctypes.c_uint32,14),
-  ('reserved_2', ctypes.c_uint32,2),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION_0),
-  ('DW_8_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION_0._fields_ = [
-  ('dst_offset_z', ctypes.c_uint32,11),
-  ('reserved_1', ctypes.c_uint32,2),
-  ('dst_pitch', ctypes.c_uint32,19),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION_0),
-  ('DW_9_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION_0._fields_ = [
-  ('dst_slice_pitch', ctypes.c_uint32,28),
-  ('reserved_1', ctypes.c_uint32,4),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION_0),
-  ('DW_10_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION_0._fields_ = [
-  ('rect_x', ctypes.c_uint32,14),
-  ('reserved_1', ctypes.c_uint32,2),
-  ('rect_y', ctypes.c_uint32,14),
-  ('reserved_2', ctypes.c_uint32,2),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION_0),
-  ('DW_11_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION_0._fields_ = [
-  ('rect_z', ctypes.c_uint32,11),
-  ('reserved_1', ctypes.c_uint32,5),
-  ('dst_swap', ctypes.c_uint32,2),
-  ('reserved_2', ctypes.c_uint32,6),
-  ('src_swap', ctypes.c_uint32,2),
-  ('reserved_3', ctypes.c_uint32,6),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION_0),
-  ('DW_12_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION),
-  ('SRC_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION),
-  ('SRC_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION),
-  ('SRC_PARAMETER_1_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION),
-  ('SRC_PARAMETER_2_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION),
-  ('SRC_PARAMETER_3_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION),
-  ('DST_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION),
-  ('DST_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION),
-  ('DST_PARAMETER_1_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION),
-  ('DST_PARAMETER_2_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION),
-  ('DST_PARAMETER_3_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION),
-  ('RECT_PARAMETER_1_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION),
-  ('RECT_PARAMETER_2_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION),
-]
+@record
+class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG:
+  SIZE = 52
+  HEADER_UNION: Annotated[_anonunion7, 0]
+  SRC_ADDR_LO_UNION: Annotated[_anonunion8, 4]
+  SRC_ADDR_HI_UNION: Annotated[_anonunion9, 8]
+  SRC_PARAMETER_1_UNION: Annotated[_anonunion10, 12]
+  SRC_PARAMETER_2_UNION: Annotated[_anonunion11, 16]
+  SRC_PARAMETER_3_UNION: Annotated[_anonunion12, 20]
+  DST_ADDR_LO_UNION: Annotated[_anonunion13, 24]
+  DST_ADDR_HI_UNION: Annotated[_anonunion14, 28]
+  DST_PARAMETER_1_UNION: Annotated[_anonunion15, 32]
+  DST_PARAMETER_2_UNION: Annotated[_anonunion16, 36]
+  DST_PARAMETER_3_UNION: Annotated[_anonunion17, 40]
+  RECT_PARAMETER_1_UNION: Annotated[_anonunion18, 44]
+  RECT_PARAMETER_2_UNION: Annotated[_anonunion19, 48]
+@record
+class _anonunion7:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  reserved: Annotated[ctypes.c_uint32, 2, 13, 0]
+  element: Annotated[ctypes.c_uint32, 3, 3, 5]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion8:
+  SIZE = 4
+  src_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion9:
+  SIZE = 4
+  src_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion10:
+  SIZE = 4
+  src_offset_x: Annotated[ctypes.c_uint32, 0, 14, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 6]
+  src_offset_y: Annotated[ctypes.c_uint32, 2, 14, 0]
+  reserved_2: Annotated[ctypes.c_uint32, 3, 2, 6]
+  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion11:
+  SIZE = 4
+  src_offset_z: Annotated[ctypes.c_uint32, 0, 11, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 3]
+  src_pitch: Annotated[ctypes.c_uint32, 1, 19, 5]
+  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion12:
+  SIZE = 4
+  src_slice_pitch: Annotated[ctypes.c_uint32, 0, 28, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 3, 4, 4]
+  DW_5_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion13:
+  SIZE = 4
+  dst_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_6_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion14:
+  SIZE = 4
+  dst_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_7_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion15:
+  SIZE = 4
+  dst_offset_x: Annotated[ctypes.c_uint32, 0, 14, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 6]
+  dst_offset_y: Annotated[ctypes.c_uint32, 2, 14, 0]
+  reserved_2: Annotated[ctypes.c_uint32, 3, 2, 6]
+  DW_8_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion16:
+  SIZE = 4
+  dst_offset_z: Annotated[ctypes.c_uint32, 0, 11, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 3]
+  dst_pitch: Annotated[ctypes.c_uint32, 1, 19, 5]
+  DW_9_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion17:
+  SIZE = 4
+  dst_slice_pitch: Annotated[ctypes.c_uint32, 0, 28, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 3, 4, 4]
+  DW_10_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion18:
+  SIZE = 4
+  rect_x: Annotated[ctypes.c_uint32, 0, 14, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 6]
+  rect_y: Annotated[ctypes.c_uint32, 2, 14, 0]
+  reserved_2: Annotated[ctypes.c_uint32, 3, 2, 6]
+  DW_11_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion19:
+  SIZE = 4
+  rect_z: Annotated[ctypes.c_uint32, 0, 11, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 1, 5, 3]
+  dst_swap: Annotated[ctypes.c_uint32, 2, 2, 0]
+  reserved_2: Annotated[ctypes.c_uint32, 2, 6, 2]
+  src_swap: Annotated[ctypes.c_uint32, 3, 2, 0]
+  reserved_3: Annotated[ctypes.c_uint32, 3, 6, 2]
+  DW_12_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT = rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('sw', ctypes.c_uint32,2),
-  ('reserved_0', ctypes.c_uint32,12),
-  ('fillsize', ctypes.c_uint32,2),
-]
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION_0._fields_ = [
-  ('dst_addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION_0._fields_ = [
-  ('dst_addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION_0),
-  ('DW_2_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION_0._fields_ = [
-  ('src_data_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION_0),
-  ('DW_3_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION_0._fields_ = [
-  ('count', ctypes.c_uint32,22),
-  ('reserved_0', ctypes.c_uint32,10),
-]
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION_0),
-  ('DW_4_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION),
-  ('DST_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION),
-  ('DST_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION),
-  ('DATA_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION),
-  ('COUNT_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION),
-]
+@record
+class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG:
+  SIZE = 20
+  HEADER_UNION: Annotated[_anonunion20, 0]
+  DST_ADDR_LO_UNION: Annotated[_anonunion21, 4]
+  DST_ADDR_HI_UNION: Annotated[_anonunion22, 8]
+  DATA_UNION: Annotated[_anonunion23, 12]
+  COUNT_UNION: Annotated[_anonunion24, 16]
+@record
+class _anonunion20:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  sw: Annotated[ctypes.c_uint32, 2, 2, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 2, 12, 2]
+  fillsize: Annotated[ctypes.c_uint32, 3, 2, 6]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion21:
+  SIZE = 4
+  dst_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion22:
+  SIZE = 4
+  dst_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion23:
+  SIZE = 4
+  src_data_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion24:
+  SIZE = 4
+  count: Annotated[ctypes.c_uint32, 0, 22, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 2, 10, 6]
+  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_CONSTANT_FILL = rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG
-class rocr_AMD_SDMA_PKT_FENCE_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('mtype', ctypes.c_uint32,3),
-  ('gcc', ctypes.c_uint32,1),
-  ('sys', ctypes.c_uint32,1),
-  ('pad1', ctypes.c_uint32,1),
-  ('snp', ctypes.c_uint32,1),
-  ('gpa', ctypes.c_uint32,1),
-  ('l2_policy', ctypes.c_uint32,2),
-  ('reserved_0', ctypes.c_uint32,6),
-]
-rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION_0._fields_ = [
-  ('addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION_0._fields_ = [
-  ('addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION_0),
-  ('DW_2_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION_0._fields_ = [
-  ('data', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION_0),
-  ('DW_3_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_FENCE_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION),
-  ('ADDR_LO_UNION', rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION),
-  ('ADDR_HI_UNION', rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION),
-  ('DATA_UNION', rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION),
-]
+@record
+class rocr_AMD_SDMA_PKT_FENCE_TAG:
+  SIZE = 16
+  HEADER_UNION: Annotated[_anonunion25, 0]
+  ADDR_LO_UNION: Annotated[_anonunion26, 4]
+  ADDR_HI_UNION: Annotated[_anonunion27, 8]
+  DATA_UNION: Annotated[_anonunion28, 12]
+@record
+class _anonunion25:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  mtype: Annotated[ctypes.c_uint32, 2, 3, 0]
+  gcc: Annotated[ctypes.c_uint32, 2, 1, 3]
+  sys: Annotated[ctypes.c_uint32, 2, 1, 4]
+  pad1: Annotated[ctypes.c_uint32, 2, 1, 5]
+  snp: Annotated[ctypes.c_uint32, 2, 1, 6]
+  gpa: Annotated[ctypes.c_uint32, 2, 1, 7]
+  l2_policy: Annotated[ctypes.c_uint32, 3, 2, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 3, 6, 2]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion26:
+  SIZE = 4
+  addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion27:
+  SIZE = 4
+  addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion28:
+  SIZE = 4
+  data: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_FENCE = rocr_AMD_SDMA_PKT_FENCE_TAG
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('reserved_0', ctypes.c_uint32,10),
-  ('hdp_flush', ctypes.c_uint32,1),
-  ('reserved_1', ctypes.c_uint32,1),
-  ('func', ctypes.c_uint32,3),
-  ('mem_poll', ctypes.c_uint32,1),
-]
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION_0._fields_ = [
-  ('addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION_0._fields_ = [
-  ('addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION_0),
-  ('DW_2_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION_0._fields_ = [
-  ('value', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION_0),
-  ('DW_3_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION_0._fields_ = [
-  ('mask', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION_0),
-  ('DW_4_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION_0._fields_ = [
-  ('interval', ctypes.c_uint32,16),
-  ('retry_count', ctypes.c_uint32,12),
-  ('reserved_0', ctypes.c_uint32,4),
-]
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION_0),
-  ('DW_5_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION),
-  ('ADDR_LO_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION),
-  ('ADDR_HI_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION),
-  ('VALUE_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION),
-  ('MASK_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION),
-  ('DW5_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION),
-]
+@record
+class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG:
+  SIZE = 24
+  HEADER_UNION: Annotated[_anonunion29, 0]
+  ADDR_LO_UNION: Annotated[_anonunion30, 4]
+  ADDR_HI_UNION: Annotated[_anonunion31, 8]
+  VALUE_UNION: Annotated[_anonunion32, 12]
+  MASK_UNION: Annotated[_anonunion33, 16]
+  DW5_UNION: Annotated[_anonunion34, 20]
+@record
+class _anonunion29:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 2, 10, 0]
+  hdp_flush: Annotated[ctypes.c_uint32, 3, 1, 2]
+  reserved_1: Annotated[ctypes.c_uint32, 3, 1, 3]
+  func: Annotated[ctypes.c_uint32, 3, 3, 4]
+  mem_poll: Annotated[ctypes.c_uint32, 3, 1, 7]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion30:
+  SIZE = 4
+  addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion31:
+  SIZE = 4
+  addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion32:
+  SIZE = 4
+  value: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion33:
+  SIZE = 4
+  mask: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion34:
+  SIZE = 4
+  interval: Annotated[ctypes.c_uint32, 0, 16, 0]
+  retry_count: Annotated[ctypes.c_uint32, 2, 12, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 3, 4, 4]
+  DW_5_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_POLL_REGMEM = rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('l', ctypes.c_uint32,1),
-  ('reserved_0', ctypes.c_uint32,8),
-  ('operation', ctypes.c_uint32,7),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION_0._fields_ = [
-  ('addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION_0._fields_ = [
-  ('addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION_0),
-  ('DW_2_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION_0._fields_ = [
-  ('src_data_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION_0),
-  ('DW_3_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION_0._fields_ = [
-  ('src_data_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION_0),
-  ('DW_4_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION_0._fields_ = [
-  ('cmp_data_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION_0),
-  ('DW_5_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION_0._fields_ = [
-  ('cmp_data_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION_0),
-  ('DW_6_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION_0._fields_ = [
-  ('loop_interval', ctypes.c_uint32,13),
-  ('reserved_0', ctypes.c_uint32,19),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION_0),
-  ('DW_7_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_ATOMIC_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION),
-  ('ADDR_LO_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION),
-  ('ADDR_HI_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION),
-  ('SRC_DATA_LO_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION),
-  ('SRC_DATA_HI_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION),
-  ('CMP_DATA_LO_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION),
-  ('CMP_DATA_HI_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION),
-  ('LOOP_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION),
-]
+@record
+class rocr_AMD_SDMA_PKT_ATOMIC_TAG:
+  SIZE = 32
+  HEADER_UNION: Annotated[_anonunion35, 0]
+  ADDR_LO_UNION: Annotated[_anonunion36, 4]
+  ADDR_HI_UNION: Annotated[_anonunion37, 8]
+  SRC_DATA_LO_UNION: Annotated[_anonunion38, 12]
+  SRC_DATA_HI_UNION: Annotated[_anonunion39, 16]
+  CMP_DATA_LO_UNION: Annotated[_anonunion40, 20]
+  CMP_DATA_HI_UNION: Annotated[_anonunion41, 24]
+  LOOP_UNION: Annotated[_anonunion42, 28]
+@record
+class _anonunion35:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  l: Annotated[ctypes.c_uint32, 2, 1, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 2, 8, 1]
+  operation: Annotated[ctypes.c_uint32, 3, 7, 1]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion36:
+  SIZE = 4
+  addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion37:
+  SIZE = 4
+  addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion38:
+  SIZE = 4
+  src_data_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion39:
+  SIZE = 4
+  src_data_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion40:
+  SIZE = 4
+  cmp_data_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_5_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion41:
+  SIZE = 4
+  cmp_data_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_6_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion42:
+  SIZE = 4
+  loop_interval: Annotated[ctypes.c_uint32, 0, 13, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 1, 19, 5]
+  DW_7_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_ATOMIC = rocr_AMD_SDMA_PKT_ATOMIC_TAG
-class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('reserved_0', ctypes.c_uint32,16),
-]
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION_0._fields_ = [
-  ('addr_31_0', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION_0._fields_ = [
-  ('addr_63_32', ctypes.c_uint32,32),
-]
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION_0),
-  ('DW_2_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_TIMESTAMP_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION),
-  ('ADDR_LO_UNION', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION),
-  ('ADDR_HI_UNION', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION),
-]
+@record
+class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG:
+  SIZE = 12
+  HEADER_UNION: Annotated[_anonunion43, 0]
+  ADDR_LO_UNION: Annotated[_anonunion44, 4]
+  ADDR_HI_UNION: Annotated[_anonunion45, 8]
+@record
+class _anonunion43:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 2, 16, 0]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion44:
+  SIZE = 4
+  addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion45:
+  SIZE = 4
+  addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_TIMESTAMP = rocr_AMD_SDMA_PKT_TIMESTAMP_TAG
-class rocr_AMD_SDMA_PKT_TRAP_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('reserved_0', ctypes.c_uint32,16),
-]
-rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION_0._fields_ = [
-  ('int_ctx', ctypes.c_uint32,28),
-  ('reserved_1', ctypes.c_uint32,4),
-]
-rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_TRAP_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION),
-  ('INT_CONTEXT_UNION', rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION),
-]
+@record
+class rocr_AMD_SDMA_PKT_TRAP_TAG:
+  SIZE = 8
+  HEADER_UNION: Annotated[_anonunion46, 0]
+  INT_CONTEXT_UNION: Annotated[_anonunion47, 4]
+@record
+class _anonunion46:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  reserved_0: Annotated[ctypes.c_uint32, 2, 16, 0]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion47:
+  SIZE = 4
+  int_ctx: Annotated[ctypes.c_uint32, 0, 28, 0]
+  reserved_1: Annotated[ctypes.c_uint32, 3, 4, 4]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_TRAP = rocr_AMD_SDMA_PKT_TRAP_TAG
-class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG(Struct): pass
-rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG._fields_ = [
-  ('DW_0_DATA', ctypes.c_uint32),
-  ('DW_1_DATA', ctypes.c_uint32),
-  ('DW_2_DATA', ctypes.c_uint32),
-  ('DW_3_DATA', ctypes.c_uint32),
-  ('DW_4_DATA', ctypes.c_uint32),
-  ('DW_5_DATA', ctypes.c_uint32),
-]
+@record
+class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG:
+  SIZE = 24
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 4]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 8]
+  DW_3_DATA: Annotated[ctypes.c_uint32, 12]
+  DW_4_DATA: Annotated[ctypes.c_uint32, 16]
+  DW_5_DATA: Annotated[ctypes.c_uint32, 20]
 rocr_AMD_SDMA_PKT_HDP_FLUSH = rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG
-class rocr_AMD_SDMA_PKT_GCR_TAG(Struct): pass
-class rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION_0._fields_ = [
-  ('op', ctypes.c_uint32,8),
-  ('sub_op', ctypes.c_uint32,8),
-  ('', ctypes.c_uint32,16),
-]
-rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION_0),
-  ('DW_0_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION_0._fields_ = [
-  ('', ctypes.c_uint32,7),
-  ('BaseVA_LO', ctypes.c_uint32,25),
-]
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION_0),
-  ('DW_1_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION_0._fields_ = [
-  ('BaseVA_HI', ctypes.c_uint32,16),
-  ('GCR_CONTROL_GLI_INV', ctypes.c_uint32,2),
-  ('GCR_CONTROL_GL1_RANGE', ctypes.c_uint32,2),
-  ('GCR_CONTROL_GLM_WB', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GLM_INV', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GLK_WB', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GLK_INV', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GLV_INV', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GL1_INV', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GL2_US', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GL2_RANGE', ctypes.c_uint32,2),
-  ('GCR_CONTROL_GL2_DISCARD', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GL2_INV', ctypes.c_uint32,1),
-  ('GCR_CONTROL_GL2_WB', ctypes.c_uint32,1),
-]
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION_0),
-  ('DW_2_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION_0._fields_ = [
-  ('GCR_CONTROL_RANGE_IS_PA', ctypes.c_uint32,1),
-  ('GCR_CONTROL_SEQ', ctypes.c_uint32,2),
-  ('', ctypes.c_uint32,4),
-  ('LimitVA_LO', ctypes.c_uint32,25),
-]
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION_0),
-  ('DW_3_DATA', ctypes.c_uint32),
-]
-class rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION(ctypes.Union): pass
-class rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION_0(Struct): pass
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION_0._fields_ = [
-  ('LimitVA_HI', ctypes.c_uint32,16),
-  ('', ctypes.c_uint32,8),
-  ('VMID', ctypes.c_uint32,4),
-  ('', ctypes.c_uint32,4),
-]
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION._anonymous_ = ['_0']
-rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION._fields_ = [
-  ('_0', rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION_0),
-  ('DW_4_DATA', ctypes.c_uint32),
-]
-rocr_AMD_SDMA_PKT_GCR_TAG._fields_ = [
-  ('HEADER_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION),
-  ('WORD1_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION),
-  ('WORD2_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION),
-  ('WORD3_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION),
-  ('WORD4_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION),
-]
+@record
+class rocr_AMD_SDMA_PKT_GCR_TAG:
+  SIZE = 20
+  HEADER_UNION: Annotated[_anonunion48, 0]
+  WORD1_UNION: Annotated[_anonunion49, 4]
+  WORD2_UNION: Annotated[_anonunion50, 8]
+  WORD3_UNION: Annotated[_anonunion51, 12]
+  WORD4_UNION: Annotated[_anonunion52, 16]
+@record
+class _anonunion48:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0, 8, 0]
+  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
+  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion49:
+  SIZE = 4
+  BaseVA_LO: Annotated[ctypes.c_uint32, 0, 25, 7]
+  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion50:
+  SIZE = 4
+  BaseVA_HI: Annotated[ctypes.c_uint32, 0, 16, 0]
+  GCR_CONTROL_GLI_INV: Annotated[ctypes.c_uint32, 2, 2, 0]
+  GCR_CONTROL_GL1_RANGE: Annotated[ctypes.c_uint32, 2, 2, 2]
+  GCR_CONTROL_GLM_WB: Annotated[ctypes.c_uint32, 2, 1, 4]
+  GCR_CONTROL_GLM_INV: Annotated[ctypes.c_uint32, 2, 1, 5]
+  GCR_CONTROL_GLK_WB: Annotated[ctypes.c_uint32, 2, 1, 6]
+  GCR_CONTROL_GLK_INV: Annotated[ctypes.c_uint32, 2, 1, 7]
+  GCR_CONTROL_GLV_INV: Annotated[ctypes.c_uint32, 3, 1, 0]
+  GCR_CONTROL_GL1_INV: Annotated[ctypes.c_uint32, 3, 1, 1]
+  GCR_CONTROL_GL2_US: Annotated[ctypes.c_uint32, 3, 1, 2]
+  GCR_CONTROL_GL2_RANGE: Annotated[ctypes.c_uint32, 3, 2, 3]
+  GCR_CONTROL_GL2_DISCARD: Annotated[ctypes.c_uint32, 3, 1, 5]
+  GCR_CONTROL_GL2_INV: Annotated[ctypes.c_uint32, 3, 1, 6]
+  GCR_CONTROL_GL2_WB: Annotated[ctypes.c_uint32, 3, 1, 7]
+  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion51:
+  SIZE = 4
+  GCR_CONTROL_RANGE_IS_PA: Annotated[ctypes.c_uint32, 0, 1, 0]
+  GCR_CONTROL_SEQ: Annotated[ctypes.c_uint32, 0, 2, 1]
+  LimitVA_LO: Annotated[ctypes.c_uint32, 0, 25, 7]
+  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+@record
+class _anonunion52:
+  SIZE = 4
+  LimitVA_HI: Annotated[ctypes.c_uint32, 0, 16, 0]
+  VMID: Annotated[ctypes.c_uint32, 3, 4, 0]
+  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
 rocr_AMD_SDMA_PKT_GCR = rocr_AMD_SDMA_PKT_GCR_TAG
+init_records()
 SDMA_OP_COPY = 1
 SDMA_OP_FENCE = 5
 SDMA_OP_TRAP = 6

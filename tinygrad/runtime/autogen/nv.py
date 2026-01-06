@@ -1,195 +1,197 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
-class MCTP_HEADER(Struct): pass
+from typing import Annotated
+from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+@record
+class MCTP_HEADER:
+  SIZE = 7
+  constBlob: Annotated[NvU32, 0]
+  msgType: Annotated[NvU8, 4]
+  vendorId: Annotated[NvU16, 5]
 NvU32 = ctypes.c_uint32
 NvU8 = ctypes.c_ubyte
 NvU16 = ctypes.c_uint16
-MCTP_HEADER.SIZE = 7
-MCTP_HEADER._fields_ = ['constBlob', 'msgType', 'vendorId']
-setattr(MCTP_HEADER, 'constBlob', field(0, NvU32))
-setattr(MCTP_HEADER, 'msgType', field(4, NvU8))
-setattr(MCTP_HEADER, 'vendorId', field(5, NvU16))
-class NVDM_PAYLOAD_COT(Struct): pass
+@record
+class NVDM_PAYLOAD_COT:
+  SIZE = 860
+  version: Annotated[NvU16, 0]
+  size: Annotated[NvU16, 2]
+  gspFmcSysmemOffset: Annotated[NvU64, 4]
+  frtsSysmemOffset: Annotated[NvU64, 12]
+  frtsSysmemSize: Annotated[NvU32, 20]
+  frtsVidmemOffset: Annotated[NvU64, 24]
+  frtsVidmemSize: Annotated[NvU32, 32]
+  hash384: Annotated[(NvU32* 12), 36]
+  publicKey: Annotated[(NvU32* 96), 84]
+  signature: Annotated[(NvU32* 96), 468]
+  gspBootArgsSysmemOffset: Annotated[NvU64, 852]
 NvU64 = ctypes.c_uint64
-NVDM_PAYLOAD_COT.SIZE = 860
-NVDM_PAYLOAD_COT._fields_ = ['version', 'size', 'gspFmcSysmemOffset', 'frtsSysmemOffset', 'frtsSysmemSize', 'frtsVidmemOffset', 'frtsVidmemSize', 'hash384', 'publicKey', 'signature', 'gspBootArgsSysmemOffset']
-setattr(NVDM_PAYLOAD_COT, 'version', field(0, NvU16))
-setattr(NVDM_PAYLOAD_COT, 'size', field(2, NvU16))
-setattr(NVDM_PAYLOAD_COT, 'gspFmcSysmemOffset', field(4, NvU64))
-setattr(NVDM_PAYLOAD_COT, 'frtsSysmemOffset', field(12, NvU64))
-setattr(NVDM_PAYLOAD_COT, 'frtsSysmemSize', field(20, NvU32))
-setattr(NVDM_PAYLOAD_COT, 'frtsVidmemOffset', field(24, NvU64))
-setattr(NVDM_PAYLOAD_COT, 'frtsVidmemSize', field(32, NvU32))
-setattr(NVDM_PAYLOAD_COT, 'hash384', field(36, Array(NvU32, 12)))
-setattr(NVDM_PAYLOAD_COT, 'publicKey', field(84, Array(NvU32, 96)))
-setattr(NVDM_PAYLOAD_COT, 'signature', field(468, Array(NvU32, 96)))
-setattr(NVDM_PAYLOAD_COT, 'gspBootArgsSysmemOffset', field(852, NvU64))
-class MESSAGE_QUEUE_INIT_ARGUMENTS(Struct): pass
+@record
+class MESSAGE_QUEUE_INIT_ARGUMENTS:
+  SIZE = 32
+  sharedMemPhysAddr: Annotated[NvU64, 0]
+  pageTableEntryCount: Annotated[NvU32, 8]
+  cmdQueueOffset: Annotated[NvLength, 16]
+  statQueueOffset: Annotated[NvLength, 24]
 NvLength = ctypes.c_uint64
-MESSAGE_QUEUE_INIT_ARGUMENTS.SIZE = 32
-MESSAGE_QUEUE_INIT_ARGUMENTS._fields_ = ['sharedMemPhysAddr', 'pageTableEntryCount', 'cmdQueueOffset', 'statQueueOffset']
-setattr(MESSAGE_QUEUE_INIT_ARGUMENTS, 'sharedMemPhysAddr', field(0, NvU64))
-setattr(MESSAGE_QUEUE_INIT_ARGUMENTS, 'pageTableEntryCount', field(8, NvU32))
-setattr(MESSAGE_QUEUE_INIT_ARGUMENTS, 'cmdQueueOffset', field(16, NvLength))
-setattr(MESSAGE_QUEUE_INIT_ARGUMENTS, 'statQueueOffset', field(24, NvLength))
-class GSP_SR_INIT_ARGUMENTS(Struct): pass
+@record
+class GSP_SR_INIT_ARGUMENTS:
+  SIZE = 12
+  oldLevel: Annotated[NvU32, 0]
+  flags: Annotated[NvU32, 4]
+  bInPMTransition: Annotated[NvBool, 8]
 NvBool = ctypes.c_ubyte
-GSP_SR_INIT_ARGUMENTS.SIZE = 12
-GSP_SR_INIT_ARGUMENTS._fields_ = ['oldLevel', 'flags', 'bInPMTransition']
-setattr(GSP_SR_INIT_ARGUMENTS, 'oldLevel', field(0, NvU32))
-setattr(GSP_SR_INIT_ARGUMENTS, 'flags', field(4, NvU32))
-setattr(GSP_SR_INIT_ARGUMENTS, 'bInPMTransition', field(8, NvBool))
-class GSP_ARGUMENTS_CACHED(Struct): pass
-class _anonstruct0(Struct): pass
-_anonstruct0.SIZE = 16
-_anonstruct0._fields_ = ['pa', 'size']
-setattr(_anonstruct0, 'pa', field(0, NvU64))
-setattr(_anonstruct0, 'size', field(8, NvU64))
-GSP_ARGUMENTS_CACHED.SIZE = 72
-GSP_ARGUMENTS_CACHED._fields_ = ['messageQueueInitArguments', 'srInitArguments', 'gpuInstance', 'bDmemStack', 'profilerArgs']
-setattr(GSP_ARGUMENTS_CACHED, 'messageQueueInitArguments', field(0, MESSAGE_QUEUE_INIT_ARGUMENTS))
-setattr(GSP_ARGUMENTS_CACHED, 'srInitArguments', field(32, GSP_SR_INIT_ARGUMENTS))
-setattr(GSP_ARGUMENTS_CACHED, 'gpuInstance', field(44, NvU32))
-setattr(GSP_ARGUMENTS_CACHED, 'bDmemStack', field(48, NvBool))
-setattr(GSP_ARGUMENTS_CACHED, 'profilerArgs', field(56, _anonstruct0))
+@record
+class GSP_ARGUMENTS_CACHED:
+  SIZE = 72
+  messageQueueInitArguments: Annotated[MESSAGE_QUEUE_INIT_ARGUMENTS, 0]
+  srInitArguments: Annotated[GSP_SR_INIT_ARGUMENTS, 32]
+  gpuInstance: Annotated[NvU32, 44]
+  bDmemStack: Annotated[NvBool, 48]
+  profilerArgs: Annotated[_anonstruct0, 56]
+@record
+class _anonstruct0:
+  SIZE = 16
+  pa: Annotated[NvU64, 0]
+  size: Annotated[NvU64, 8]
 GSP_DMA_TARGET = CEnum(ctypes.c_uint32)
 GSP_DMA_TARGET_LOCAL_FB = GSP_DMA_TARGET.define('GSP_DMA_TARGET_LOCAL_FB', 0)
 GSP_DMA_TARGET_COHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COHERENT_SYSTEM', 1)
 GSP_DMA_TARGET_NONCOHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_NONCOHERENT_SYSTEM', 2)
 GSP_DMA_TARGET_COUNT = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COUNT', 3)
 
-class struct_GSP_FMC_INIT_PARAMS(Struct): pass
-struct_GSP_FMC_INIT_PARAMS.SIZE = 4
-struct_GSP_FMC_INIT_PARAMS._fields_ = ['regkeys']
-setattr(struct_GSP_FMC_INIT_PARAMS, 'regkeys', field(0, NvU32))
+@record
+class struct_GSP_FMC_INIT_PARAMS:
+  SIZE = 4
+  regkeys: Annotated[NvU32, 0]
 GSP_FMC_INIT_PARAMS = struct_GSP_FMC_INIT_PARAMS
-class struct_GSP_ACR_BOOT_GSP_RM_PARAMS(Struct): pass
-struct_GSP_ACR_BOOT_GSP_RM_PARAMS.SIZE = 32
-struct_GSP_ACR_BOOT_GSP_RM_PARAMS._fields_ = ['target', 'gspRmDescSize', 'gspRmDescOffset', 'wprCarveoutOffset', 'wprCarveoutSize', 'bIsGspRmBoot']
-setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'target', field(0, GSP_DMA_TARGET))
-setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'gspRmDescSize', field(4, NvU32))
-setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'gspRmDescOffset', field(8, NvU64))
-setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'wprCarveoutOffset', field(16, NvU64))
-setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'wprCarveoutSize', field(24, NvU32))
-setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'bIsGspRmBoot', field(28, NvBool))
+@record
+class struct_GSP_ACR_BOOT_GSP_RM_PARAMS:
+  SIZE = 32
+  target: Annotated[GSP_DMA_TARGET, 0]
+  gspRmDescSize: Annotated[NvU32, 4]
+  gspRmDescOffset: Annotated[NvU64, 8]
+  wprCarveoutOffset: Annotated[NvU64, 16]
+  wprCarveoutSize: Annotated[NvU32, 24]
+  bIsGspRmBoot: Annotated[NvBool, 28]
 GSP_ACR_BOOT_GSP_RM_PARAMS = struct_GSP_ACR_BOOT_GSP_RM_PARAMS
-class struct_GSP_RM_PARAMS(Struct): pass
-struct_GSP_RM_PARAMS.SIZE = 16
-struct_GSP_RM_PARAMS._fields_ = ['target', 'bootArgsOffset']
-setattr(struct_GSP_RM_PARAMS, 'target', field(0, GSP_DMA_TARGET))
-setattr(struct_GSP_RM_PARAMS, 'bootArgsOffset', field(8, NvU64))
+@record
+class struct_GSP_RM_PARAMS:
+  SIZE = 16
+  target: Annotated[GSP_DMA_TARGET, 0]
+  bootArgsOffset: Annotated[NvU64, 8]
 GSP_RM_PARAMS = struct_GSP_RM_PARAMS
-class struct_GSP_SPDM_PARAMS(Struct): pass
-struct_GSP_SPDM_PARAMS.SIZE = 24
-struct_GSP_SPDM_PARAMS._fields_ = ['target', 'payloadBufferOffset', 'payloadBufferSize']
-setattr(struct_GSP_SPDM_PARAMS, 'target', field(0, GSP_DMA_TARGET))
-setattr(struct_GSP_SPDM_PARAMS, 'payloadBufferOffset', field(8, NvU64))
-setattr(struct_GSP_SPDM_PARAMS, 'payloadBufferSize', field(16, NvU32))
+@record
+class struct_GSP_SPDM_PARAMS:
+  SIZE = 24
+  target: Annotated[GSP_DMA_TARGET, 0]
+  payloadBufferOffset: Annotated[NvU64, 8]
+  payloadBufferSize: Annotated[NvU32, 16]
 GSP_SPDM_PARAMS = struct_GSP_SPDM_PARAMS
-class struct_GSP_FMC_BOOT_PARAMS(Struct): pass
-struct_GSP_FMC_BOOT_PARAMS.SIZE = 80
-struct_GSP_FMC_BOOT_PARAMS._fields_ = ['initParams', 'bootGspRmParams', 'gspRmParams', 'gspSpdmParams']
-setattr(struct_GSP_FMC_BOOT_PARAMS, 'initParams', field(0, GSP_FMC_INIT_PARAMS))
-setattr(struct_GSP_FMC_BOOT_PARAMS, 'bootGspRmParams', field(8, GSP_ACR_BOOT_GSP_RM_PARAMS))
-setattr(struct_GSP_FMC_BOOT_PARAMS, 'gspRmParams', field(40, GSP_RM_PARAMS))
-setattr(struct_GSP_FMC_BOOT_PARAMS, 'gspSpdmParams', field(56, GSP_SPDM_PARAMS))
+@record
+class struct_GSP_FMC_BOOT_PARAMS:
+  SIZE = 80
+  initParams: Annotated[GSP_FMC_INIT_PARAMS, 0]
+  bootGspRmParams: Annotated[GSP_ACR_BOOT_GSP_RM_PARAMS, 8]
+  gspRmParams: Annotated[GSP_RM_PARAMS, 40]
+  gspSpdmParams: Annotated[GSP_SPDM_PARAMS, 56]
 GSP_FMC_BOOT_PARAMS = struct_GSP_FMC_BOOT_PARAMS
-class GspFwWprMeta(Struct): pass
-GspFwWprMeta.SIZE = 256
-GspFwWprMeta._fields_ = ['magic', 'revision', 'sysmemAddrOfRadix3Elf', 'sizeOfRadix3Elf', 'sysmemAddrOfBootloader', 'sizeOfBootloader', 'bootloaderCodeOffset', 'bootloaderDataOffset', 'bootloaderManifestOffset', 'sysmemAddrOfSignature', 'sizeOfSignature', 'gspFwHeapFreeListWprOffset', 'unused0', 'unused1', 'gspFwRsvdStart', 'nonWprHeapOffset', 'nonWprHeapSize', 'gspFwWprStart', 'gspFwHeapOffset', 'gspFwHeapSize', 'gspFwOffset', 'bootBinOffset', 'frtsOffset', 'frtsSize', 'gspFwWprEnd', 'fbSize', 'vgaWorkspaceOffset', 'vgaWorkspaceSize', 'bootCount', 'partitionRpcAddr', 'partitionRpcRequestOffset', 'partitionRpcReplyOffset', 'elfCodeOffset', 'elfDataOffset', 'elfCodeSize', 'elfDataSize', 'lsUcodeVersion', 'partitionRpcPadding', 'sysmemAddrOfCrashReportQueue', 'sizeOfCrashReportQueue', 'lsUcodeVersionPadding', 'gspFwHeapVfPartitionCount', 'flags', 'padding', 'pmuReservedSize', 'verified']
-setattr(GspFwWprMeta, 'magic', field(0, NvU64))
-setattr(GspFwWprMeta, 'revision', field(8, NvU64))
-setattr(GspFwWprMeta, 'sysmemAddrOfRadix3Elf', field(16, NvU64))
-setattr(GspFwWprMeta, 'sizeOfRadix3Elf', field(24, NvU64))
-setattr(GspFwWprMeta, 'sysmemAddrOfBootloader', field(32, NvU64))
-setattr(GspFwWprMeta, 'sizeOfBootloader', field(40, NvU64))
-setattr(GspFwWprMeta, 'bootloaderCodeOffset', field(48, NvU64))
-setattr(GspFwWprMeta, 'bootloaderDataOffset', field(56, NvU64))
-setattr(GspFwWprMeta, 'bootloaderManifestOffset', field(64, NvU64))
-setattr(GspFwWprMeta, 'sysmemAddrOfSignature', field(0, NvU64))
-setattr(GspFwWprMeta, 'sizeOfSignature', field(8, NvU64))
-setattr(GspFwWprMeta, 'gspFwHeapFreeListWprOffset', field(0, NvU32))
-setattr(GspFwWprMeta, 'unused0', field(4, NvU32))
-setattr(GspFwWprMeta, 'unused1', field(8, NvU64))
-setattr(GspFwWprMeta, 'gspFwRsvdStart', field(88, NvU64))
-setattr(GspFwWprMeta, 'nonWprHeapOffset', field(96, NvU64))
-setattr(GspFwWprMeta, 'nonWprHeapSize', field(104, NvU64))
-setattr(GspFwWprMeta, 'gspFwWprStart', field(112, NvU64))
-setattr(GspFwWprMeta, 'gspFwHeapOffset', field(120, NvU64))
-setattr(GspFwWprMeta, 'gspFwHeapSize', field(128, NvU64))
-setattr(GspFwWprMeta, 'gspFwOffset', field(136, NvU64))
-setattr(GspFwWprMeta, 'bootBinOffset', field(144, NvU64))
-setattr(GspFwWprMeta, 'frtsOffset', field(152, NvU64))
-setattr(GspFwWprMeta, 'frtsSize', field(160, NvU64))
-setattr(GspFwWprMeta, 'gspFwWprEnd', field(168, NvU64))
-setattr(GspFwWprMeta, 'fbSize', field(176, NvU64))
-setattr(GspFwWprMeta, 'vgaWorkspaceOffset', field(184, NvU64))
-setattr(GspFwWprMeta, 'vgaWorkspaceSize', field(192, NvU64))
-setattr(GspFwWprMeta, 'bootCount', field(200, NvU64))
-setattr(GspFwWprMeta, 'partitionRpcAddr', field(0, NvU64))
-setattr(GspFwWprMeta, 'partitionRpcRequestOffset', field(8, NvU16))
-setattr(GspFwWprMeta, 'partitionRpcReplyOffset', field(10, NvU16))
-setattr(GspFwWprMeta, 'elfCodeOffset', field(12, NvU32))
-setattr(GspFwWprMeta, 'elfDataOffset', field(16, NvU32))
-setattr(GspFwWprMeta, 'elfCodeSize', field(20, NvU32))
-setattr(GspFwWprMeta, 'elfDataSize', field(24, NvU32))
-setattr(GspFwWprMeta, 'lsUcodeVersion', field(28, NvU32))
-setattr(GspFwWprMeta, 'partitionRpcPadding', field(0, Array(NvU32, 4)))
-setattr(GspFwWprMeta, 'sysmemAddrOfCrashReportQueue', field(16, NvU64))
-setattr(GspFwWprMeta, 'sizeOfCrashReportQueue', field(24, NvU32))
-setattr(GspFwWprMeta, 'lsUcodeVersionPadding', field(28, Array(NvU32, 1)))
-setattr(GspFwWprMeta, 'gspFwHeapVfPartitionCount', field(240, NvU8))
-setattr(GspFwWprMeta, 'flags', field(241, NvU8))
-setattr(GspFwWprMeta, 'padding', field(242, Array(NvU8, 2)))
-setattr(GspFwWprMeta, 'pmuReservedSize', field(244, NvU32))
-setattr(GspFwWprMeta, 'verified', field(248, NvU64))
-class GspFwHeapFreeRegion(Struct): pass
-GspFwHeapFreeRegion.SIZE = 8
-GspFwHeapFreeRegion._fields_ = ['offs', 'length']
-setattr(GspFwHeapFreeRegion, 'offs', field(0, NvU32))
-setattr(GspFwHeapFreeRegion, 'length', field(4, NvU32))
-class GspFwHeapFreeList(Struct): pass
-GspFwHeapFreeList.SIZE = 1040
-GspFwHeapFreeList._fields_ = ['magic', 'nregions', 'regions']
-setattr(GspFwHeapFreeList, 'magic', field(0, NvU64))
-setattr(GspFwHeapFreeList, 'nregions', field(8, NvU32))
-setattr(GspFwHeapFreeList, 'regions', field(12, Array(GspFwHeapFreeRegion, 128)))
-class GspFwSRMeta(Struct): pass
-GspFwSRMeta.SIZE = 256
-GspFwSRMeta._fields_ = ['magic', 'revision', 'sysmemAddrOfSuspendResumeData', 'sizeOfSuspendResumeData', 'internal', 'flags', 'subrevision', 'padding']
-setattr(GspFwSRMeta, 'magic', field(0, NvU64))
-setattr(GspFwSRMeta, 'revision', field(8, NvU64))
-setattr(GspFwSRMeta, 'sysmemAddrOfSuspendResumeData', field(16, NvU64))
-setattr(GspFwSRMeta, 'sizeOfSuspendResumeData', field(24, NvU64))
-setattr(GspFwSRMeta, 'internal', field(32, Array(NvU32, 32)))
-setattr(GspFwSRMeta, 'flags', field(160, NvU32))
-setattr(GspFwSRMeta, 'subrevision', field(164, NvU32))
-setattr(GspFwSRMeta, 'padding', field(168, Array(NvU32, 22)))
-class RM_RISCV_UCODE_DESC(Struct): pass
-RM_RISCV_UCODE_DESC.SIZE = 84
-RM_RISCV_UCODE_DESC._fields_ = ['version', 'bootloaderOffset', 'bootloaderSize', 'bootloaderParamOffset', 'bootloaderParamSize', 'riscvElfOffset', 'riscvElfSize', 'appVersion', 'manifestOffset', 'manifestSize', 'monitorDataOffset', 'monitorDataSize', 'monitorCodeOffset', 'monitorCodeSize', 'bIsMonitorEnabled', 'swbromCodeOffset', 'swbromCodeSize', 'swbromDataOffset', 'swbromDataSize', 'fbReservedSize', 'bSignedAsCode']
-setattr(RM_RISCV_UCODE_DESC, 'version', field(0, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'bootloaderOffset', field(4, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'bootloaderSize', field(8, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'bootloaderParamOffset', field(12, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'bootloaderParamSize', field(16, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'riscvElfOffset', field(20, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'riscvElfSize', field(24, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'appVersion', field(28, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'manifestOffset', field(32, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'manifestSize', field(36, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'monitorDataOffset', field(40, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'monitorDataSize', field(44, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'monitorCodeOffset', field(48, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'monitorCodeSize', field(52, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'bIsMonitorEnabled', field(56, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'swbromCodeOffset', field(60, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'swbromCodeSize', field(64, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'swbromDataOffset', field(68, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'swbromDataSize', field(72, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'fbReservedSize', field(76, NvU32))
-setattr(RM_RISCV_UCODE_DESC, 'bSignedAsCode', field(80, NvU32))
+@record
+class GspFwWprMeta:
+  SIZE = 256
+  magic: Annotated[NvU64, 0]
+  revision: Annotated[NvU64, 8]
+  sysmemAddrOfRadix3Elf: Annotated[NvU64, 16]
+  sizeOfRadix3Elf: Annotated[NvU64, 24]
+  sysmemAddrOfBootloader: Annotated[NvU64, 32]
+  sizeOfBootloader: Annotated[NvU64, 40]
+  bootloaderCodeOffset: Annotated[NvU64, 48]
+  bootloaderDataOffset: Annotated[NvU64, 56]
+  bootloaderManifestOffset: Annotated[NvU64, 64]
+  sysmemAddrOfSignature: Annotated[NvU64, 0]
+  sizeOfSignature: Annotated[NvU64, 8]
+  gspFwHeapFreeListWprOffset: Annotated[NvU32, 0]
+  unused0: Annotated[NvU32, 4]
+  unused1: Annotated[NvU64, 8]
+  gspFwRsvdStart: Annotated[NvU64, 88]
+  nonWprHeapOffset: Annotated[NvU64, 96]
+  nonWprHeapSize: Annotated[NvU64, 104]
+  gspFwWprStart: Annotated[NvU64, 112]
+  gspFwHeapOffset: Annotated[NvU64, 120]
+  gspFwHeapSize: Annotated[NvU64, 128]
+  gspFwOffset: Annotated[NvU64, 136]
+  bootBinOffset: Annotated[NvU64, 144]
+  frtsOffset: Annotated[NvU64, 152]
+  frtsSize: Annotated[NvU64, 160]
+  gspFwWprEnd: Annotated[NvU64, 168]
+  fbSize: Annotated[NvU64, 176]
+  vgaWorkspaceOffset: Annotated[NvU64, 184]
+  vgaWorkspaceSize: Annotated[NvU64, 192]
+  bootCount: Annotated[NvU64, 200]
+  partitionRpcAddr: Annotated[NvU64, 0]
+  partitionRpcRequestOffset: Annotated[NvU16, 8]
+  partitionRpcReplyOffset: Annotated[NvU16, 10]
+  elfCodeOffset: Annotated[NvU32, 12]
+  elfDataOffset: Annotated[NvU32, 16]
+  elfCodeSize: Annotated[NvU32, 20]
+  elfDataSize: Annotated[NvU32, 24]
+  lsUcodeVersion: Annotated[NvU32, 28]
+  partitionRpcPadding: Annotated[(NvU32* 4), 0]
+  sysmemAddrOfCrashReportQueue: Annotated[NvU64, 16]
+  sizeOfCrashReportQueue: Annotated[NvU32, 24]
+  lsUcodeVersionPadding: Annotated[(NvU32* 1), 28]
+  gspFwHeapVfPartitionCount: Annotated[NvU8, 240]
+  flags: Annotated[NvU8, 241]
+  padding: Annotated[(NvU8* 2), 242]
+  pmuReservedSize: Annotated[NvU32, 244]
+  verified: Annotated[NvU64, 248]
+@record
+class GspFwHeapFreeRegion:
+  SIZE = 8
+  offs: Annotated[NvU32, 0]
+  length: Annotated[NvU32, 4]
+@record
+class GspFwHeapFreeList:
+  SIZE = 1040
+  magic: Annotated[NvU64, 0]
+  nregions: Annotated[NvU32, 8]
+  regions: Annotated[(GspFwHeapFreeRegion* 128), 12]
+@record
+class GspFwSRMeta:
+  SIZE = 256
+  magic: Annotated[NvU64, 0]
+  revision: Annotated[NvU64, 8]
+  sysmemAddrOfSuspendResumeData: Annotated[NvU64, 16]
+  sizeOfSuspendResumeData: Annotated[NvU64, 24]
+  internal: Annotated[(NvU32* 32), 32]
+  flags: Annotated[NvU32, 160]
+  subrevision: Annotated[NvU32, 164]
+  padding: Annotated[(NvU32* 22), 168]
+@record
+class RM_RISCV_UCODE_DESC:
+  SIZE = 84
+  version: Annotated[NvU32, 0]
+  bootloaderOffset: Annotated[NvU32, 4]
+  bootloaderSize: Annotated[NvU32, 8]
+  bootloaderParamOffset: Annotated[NvU32, 12]
+  bootloaderParamSize: Annotated[NvU32, 16]
+  riscvElfOffset: Annotated[NvU32, 20]
+  riscvElfSize: Annotated[NvU32, 24]
+  appVersion: Annotated[NvU32, 28]
+  manifestOffset: Annotated[NvU32, 32]
+  manifestSize: Annotated[NvU32, 36]
+  monitorDataOffset: Annotated[NvU32, 40]
+  monitorDataSize: Annotated[NvU32, 44]
+  monitorCodeOffset: Annotated[NvU32, 48]
+  monitorCodeSize: Annotated[NvU32, 52]
+  bIsMonitorEnabled: Annotated[NvU32, 56]
+  swbromCodeOffset: Annotated[NvU32, 60]
+  swbromCodeSize: Annotated[NvU32, 64]
+  swbromDataOffset: Annotated[NvU32, 68]
+  swbromDataSize: Annotated[NvU32, 72]
+  fbReservedSize: Annotated[NvU32, 76]
+  bSignedAsCode: Annotated[NvU32, 80]
 RPC_GR_BUFFER_TYPE = CEnum(ctypes.c_uint32)
 RPC_GR_BUFFER_TYPE_GRAPHICS = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS', 0)
 RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL', 1)
@@ -217,18 +219,18 @@ NV_RPC_UPDATE_PDE_BAR_1 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_B
 NV_RPC_UPDATE_PDE_BAR_2 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_2', 1)
 NV_RPC_UPDATE_PDE_BAR_INVALID = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_INVALID', 2)
 
-class struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS(Struct): pass
-struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS.SIZE = 12
-struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS._fields_ = ['headIndex', 'maxHResolution', 'maxVResolution']
-setattr(struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS, 'headIndex', field(0, NvU32))
-setattr(struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS, 'maxHResolution', field(4, NvU32))
-setattr(struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS, 'maxVResolution', field(8, NvU32))
+@record
+class struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS:
+  SIZE = 12
+  headIndex: Annotated[NvU32, 0]
+  maxHResolution: Annotated[NvU32, 4]
+  maxVResolution: Annotated[NvU32, 8]
 VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS = struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS
-class struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS(Struct): pass
-struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS.SIZE = 8
-struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS._fields_ = ['numHeads', 'maxNumHeads']
-setattr(struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS, 'numHeads', field(0, NvU32))
-setattr(struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS, 'maxNumHeads', field(4, NvU32))
+@record
+class struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS:
+  SIZE = 8
+  numHeads: Annotated[NvU32, 0]
+  maxNumHeads: Annotated[NvU32, 4]
 VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS = struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS
 GPU_RECOVERY_EVENT_TYPE = CEnum(ctypes.c_uint32)
 GPU_RECOVERY_EVENT_TYPE_REFRESH = GPU_RECOVERY_EVENT_TYPE.define('GPU_RECOVERY_EVENT_TYPE_REFRESH', 0)
@@ -510,772 +512,792 @@ LIBOS_MEMORY_REGION_LOC_NONE = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_
 LIBOS_MEMORY_REGION_LOC_SYSMEM = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_SYSMEM', 1)
 LIBOS_MEMORY_REGION_LOC_FB = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_FB', 2)
 
-class LibosMemoryRegionInitArgument(Struct): pass
-LibosMemoryRegionInitArgument.SIZE = 32
-LibosMemoryRegionInitArgument._fields_ = ['id8', 'pa', 'size', 'kind', 'loc']
-setattr(LibosMemoryRegionInitArgument, 'id8', field(0, LibosAddress))
-setattr(LibosMemoryRegionInitArgument, 'pa', field(8, LibosAddress))
-setattr(LibosMemoryRegionInitArgument, 'size', field(16, LibosAddress))
-setattr(LibosMemoryRegionInitArgument, 'kind', field(24, NvU8))
-setattr(LibosMemoryRegionInitArgument, 'loc', field(25, NvU8))
-class msgqTxHeader(Struct): pass
-msgqTxHeader.SIZE = 32
-msgqTxHeader._fields_ = ['version', 'size', 'msgSize', 'msgCount', 'writePtr', 'flags', 'rxHdrOff', 'entryOff']
-setattr(msgqTxHeader, 'version', field(0, NvU32))
-setattr(msgqTxHeader, 'size', field(4, NvU32))
-setattr(msgqTxHeader, 'msgSize', field(8, NvU32))
-setattr(msgqTxHeader, 'msgCount', field(12, NvU32))
-setattr(msgqTxHeader, 'writePtr', field(16, NvU32))
-setattr(msgqTxHeader, 'flags', field(20, NvU32))
-setattr(msgqTxHeader, 'rxHdrOff', field(24, NvU32))
-setattr(msgqTxHeader, 'entryOff', field(28, NvU32))
-class msgqRxHeader(Struct): pass
-msgqRxHeader.SIZE = 4
-msgqRxHeader._fields_ = ['readPtr']
-setattr(msgqRxHeader, 'readPtr', field(0, NvU32))
-class msgqMetadata(Struct): pass
-msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_void_p)
-msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p)
-msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32)
+@record
+class LibosMemoryRegionInitArgument:
+  SIZE = 32
+  id8: Annotated[LibosAddress, 0]
+  pa: Annotated[LibosAddress, 8]
+  size: Annotated[LibosAddress, 16]
+  kind: Annotated[NvU8, 24]
+  loc: Annotated[NvU8, 25]
+@record
+class msgqTxHeader:
+  SIZE = 32
+  version: Annotated[NvU32, 0]
+  size: Annotated[NvU32, 4]
+  msgSize: Annotated[NvU32, 8]
+  msgCount: Annotated[NvU32, 12]
+  writePtr: Annotated[NvU32, 16]
+  flags: Annotated[NvU32, 20]
+  rxHdrOff: Annotated[NvU32, 24]
+  entryOff: Annotated[NvU32, 28]
+@record
+class msgqRxHeader:
+  SIZE = 4
+  readPtr: Annotated[NvU32, 0]
+@record
+class msgqMetadata:
+  SIZE = 232
+  pOurTxHdr: Annotated[ctypes.POINTER(msgqTxHeader), 0]
+  pTheirTxHdr: Annotated[ctypes.POINTER(msgqTxHeader), 8]
+  pOurRxHdr: Annotated[ctypes.POINTER(msgqRxHeader), 16]
+  pTheirRxHdr: Annotated[ctypes.POINTER(msgqRxHeader), 24]
+  pOurEntries: Annotated[ctypes.POINTER(NvU8), 32]
+  pTheirEntries: Annotated[ctypes.POINTER(NvU8), 40]
+  pReadIncoming: Annotated[ctypes.POINTER(NvU32), 48]
+  pWriteIncoming: Annotated[ctypes.POINTER(NvU32), 56]
+  pReadOutgoing: Annotated[ctypes.POINTER(NvU32), 64]
+  pWriteOutgoing: Annotated[ctypes.POINTER(NvU32), 72]
+  tx: Annotated[msgqTxHeader, 80]
+  txReadPtr: Annotated[NvU32, 112]
+  txFree: Annotated[NvU32, 116]
+  txLinked: Annotated[NvBool, 120]
+  rx: Annotated[msgqTxHeader, 124]
+  rxReadPtr: Annotated[NvU32, 156]
+  rxAvail: Annotated[NvU32, 160]
+  rxLinked: Annotated[NvBool, 164]
+  rxSwapped: Annotated[NvBool, 165]
+  fcnNotify: Annotated[msgqFcnNotifyRemote, 168]
+  fcnNotifyArg: Annotated[ctypes.POINTER(None), 176]
+  fcnBackendRw: Annotated[msgqFcnBackendRw, 184]
+  fcnBackendRwArg: Annotated[ctypes.POINTER(None), 192]
+  fcnInvalidate: Annotated[msgqFcnCacheOp, 200]
+  fcnFlush: Annotated[msgqFcnCacheOp, 208]
+  fcnZero: Annotated[msgqFcnCacheOp, 216]
+  fcnBarrier: Annotated[msgqFcnBarrier, 224]
+msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(None))
+msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.POINTER(None), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(None))
+msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.c_uint32)
 msgqFcnBarrier = ctypes.CFUNCTYPE(None, )
-msgqMetadata.SIZE = 232
-msgqMetadata._fields_ = ['pOurTxHdr', 'pTheirTxHdr', 'pOurRxHdr', 'pTheirRxHdr', 'pOurEntries', 'pTheirEntries', 'pReadIncoming', 'pWriteIncoming', 'pReadOutgoing', 'pWriteOutgoing', 'tx', 'txReadPtr', 'txFree', 'txLinked', 'rx', 'rxReadPtr', 'rxAvail', 'rxLinked', 'rxSwapped', 'fcnNotify', 'fcnNotifyArg', 'fcnBackendRw', 'fcnBackendRwArg', 'fcnInvalidate', 'fcnFlush', 'fcnZero', 'fcnBarrier']
-setattr(msgqMetadata, 'pOurTxHdr', field(0, Pointer(msgqTxHeader)))
-setattr(msgqMetadata, 'pTheirTxHdr', field(8, Pointer(msgqTxHeader)))
-setattr(msgqMetadata, 'pOurRxHdr', field(16, Pointer(msgqRxHeader)))
-setattr(msgqMetadata, 'pTheirRxHdr', field(24, Pointer(msgqRxHeader)))
-setattr(msgqMetadata, 'pOurEntries', field(32, Pointer(NvU8)))
-setattr(msgqMetadata, 'pTheirEntries', field(40, Pointer(NvU8)))
-setattr(msgqMetadata, 'pReadIncoming', field(48, Pointer(NvU32)))
-setattr(msgqMetadata, 'pWriteIncoming', field(56, Pointer(NvU32)))
-setattr(msgqMetadata, 'pReadOutgoing', field(64, Pointer(NvU32)))
-setattr(msgqMetadata, 'pWriteOutgoing', field(72, Pointer(NvU32)))
-setattr(msgqMetadata, 'tx', field(80, msgqTxHeader))
-setattr(msgqMetadata, 'txReadPtr', field(112, NvU32))
-setattr(msgqMetadata, 'txFree', field(116, NvU32))
-setattr(msgqMetadata, 'txLinked', field(120, NvBool))
-setattr(msgqMetadata, 'rx', field(124, msgqTxHeader))
-setattr(msgqMetadata, 'rxReadPtr', field(156, NvU32))
-setattr(msgqMetadata, 'rxAvail', field(160, NvU32))
-setattr(msgqMetadata, 'rxLinked', field(164, NvBool))
-setattr(msgqMetadata, 'rxSwapped', field(165, NvBool))
-setattr(msgqMetadata, 'fcnNotify', field(168, msgqFcnNotifyRemote))
-setattr(msgqMetadata, 'fcnNotifyArg', field(176, ctypes.c_void_p))
-setattr(msgqMetadata, 'fcnBackendRw', field(184, msgqFcnBackendRw))
-setattr(msgqMetadata, 'fcnBackendRwArg', field(192, ctypes.c_void_p))
-setattr(msgqMetadata, 'fcnInvalidate', field(200, msgqFcnCacheOp))
-setattr(msgqMetadata, 'fcnFlush', field(208, msgqFcnCacheOp))
-setattr(msgqMetadata, 'fcnZero', field(216, msgqFcnCacheOp))
-setattr(msgqMetadata, 'fcnBarrier', field(224, msgqFcnBarrier))
-class struct_rpc_set_guest_system_info_v03_00(Struct): pass
-struct_rpc_set_guest_system_info_v03_00.SIZE = 792
-struct_rpc_set_guest_system_info_v03_00._fields_ = ['vgxVersionMajorNum', 'vgxVersionMinorNum', 'guestDriverVersionBufferLength', 'guestVersionBufferLength', 'guestTitleBufferLength', 'guestClNum', 'guestDriverVersion', 'guestVersion', 'guestTitle']
-setattr(struct_rpc_set_guest_system_info_v03_00, 'vgxVersionMajorNum', field(0, NvU32))
-setattr(struct_rpc_set_guest_system_info_v03_00, 'vgxVersionMinorNum', field(4, NvU32))
-setattr(struct_rpc_set_guest_system_info_v03_00, 'guestDriverVersionBufferLength', field(8, NvU32))
-setattr(struct_rpc_set_guest_system_info_v03_00, 'guestVersionBufferLength', field(12, NvU32))
-setattr(struct_rpc_set_guest_system_info_v03_00, 'guestTitleBufferLength', field(16, NvU32))
-setattr(struct_rpc_set_guest_system_info_v03_00, 'guestClNum', field(20, NvU32))
-setattr(struct_rpc_set_guest_system_info_v03_00, 'guestDriverVersion', field(24, Array(ctypes.c_char, 256)))
-setattr(struct_rpc_set_guest_system_info_v03_00, 'guestVersion', field(280, Array(ctypes.c_char, 256)))
-setattr(struct_rpc_set_guest_system_info_v03_00, 'guestTitle', field(536, Array(ctypes.c_char, 256)))
+@record
+class struct_rpc_set_guest_system_info_v03_00:
+  SIZE = 792
+  vgxVersionMajorNum: Annotated[NvU32, 0]
+  vgxVersionMinorNum: Annotated[NvU32, 4]
+  guestDriverVersionBufferLength: Annotated[NvU32, 8]
+  guestVersionBufferLength: Annotated[NvU32, 12]
+  guestTitleBufferLength: Annotated[NvU32, 16]
+  guestClNum: Annotated[NvU32, 20]
+  guestDriverVersion: Annotated[(ctypes.c_char* 256), 24]
+  guestVersion: Annotated[(ctypes.c_char* 256), 280]
+  guestTitle: Annotated[(ctypes.c_char* 256), 536]
 rpc_set_guest_system_info_v03_00 = struct_rpc_set_guest_system_info_v03_00
 rpc_set_guest_system_info_v = struct_rpc_set_guest_system_info_v03_00
-class struct_rpc_set_guest_system_info_ext_v15_02(Struct): pass
-struct_rpc_set_guest_system_info_ext_v15_02.SIZE = 264
-struct_rpc_set_guest_system_info_ext_v15_02._fields_ = ['guestDriverBranch', 'domain', 'bus', 'device']
-setattr(struct_rpc_set_guest_system_info_ext_v15_02, 'guestDriverBranch', field(0, Array(ctypes.c_char, 256)))
-setattr(struct_rpc_set_guest_system_info_ext_v15_02, 'domain', field(256, NvU32))
-setattr(struct_rpc_set_guest_system_info_ext_v15_02, 'bus', field(260, NvU16))
-setattr(struct_rpc_set_guest_system_info_ext_v15_02, 'device', field(262, NvU16))
+@record
+class struct_rpc_set_guest_system_info_ext_v15_02:
+  SIZE = 264
+  guestDriverBranch: Annotated[(ctypes.c_char* 256), 0]
+  domain: Annotated[NvU32, 256]
+  bus: Annotated[NvU16, 260]
+  device: Annotated[NvU16, 262]
 rpc_set_guest_system_info_ext_v15_02 = struct_rpc_set_guest_system_info_ext_v15_02
-class struct_rpc_set_guest_system_info_ext_v25_1B(Struct): pass
-struct_rpc_set_guest_system_info_ext_v25_1B.SIZE = 268
-struct_rpc_set_guest_system_info_ext_v25_1B._fields_ = ['guestDriverBranch', 'domain', 'bus', 'device', 'gridBuildCsp']
-setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'guestDriverBranch', field(0, Array(ctypes.c_char, 256)))
-setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'domain', field(256, NvU32))
-setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'bus', field(260, NvU16))
-setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'device', field(262, NvU16))
-setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'gridBuildCsp', field(264, NvU32))
+@record
+class struct_rpc_set_guest_system_info_ext_v25_1B:
+  SIZE = 268
+  guestDriverBranch: Annotated[(ctypes.c_char* 256), 0]
+  domain: Annotated[NvU32, 256]
+  bus: Annotated[NvU16, 260]
+  device: Annotated[NvU16, 262]
+  gridBuildCsp: Annotated[NvU32, 264]
 rpc_set_guest_system_info_ext_v25_1B = struct_rpc_set_guest_system_info_ext_v25_1B
 rpc_set_guest_system_info_ext_v = struct_rpc_set_guest_system_info_ext_v25_1B
-class struct_rpc_alloc_root_v07_00(Struct): pass
+@record
+class struct_rpc_alloc_root_v07_00:
+  SIZE = 108
+  hClient: Annotated[NvHandle, 0]
+  processID: Annotated[NvU32, 4]
+  processName: Annotated[(ctypes.c_char* 100), 8]
 NvHandle = ctypes.c_uint32
-struct_rpc_alloc_root_v07_00.SIZE = 108
-struct_rpc_alloc_root_v07_00._fields_ = ['hClient', 'processID', 'processName']
-setattr(struct_rpc_alloc_root_v07_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_root_v07_00, 'processID', field(4, NvU32))
-setattr(struct_rpc_alloc_root_v07_00, 'processName', field(8, Array(ctypes.c_char, 100)))
 rpc_alloc_root_v07_00 = struct_rpc_alloc_root_v07_00
 rpc_alloc_root_v = struct_rpc_alloc_root_v07_00
-class struct_rpc_alloc_memory_v13_01(Struct): pass
-class struct_pte_desc(Struct): pass
-class _anonunion1(Union): pass
-_anonunion1.SIZE = 8
-_anonunion1._fields_ = ['pte', 'pde']
-setattr(_anonunion1, 'pte', field(0, NvU64))
-setattr(_anonunion1, 'pde', field(0, NvU64))
-struct_pte_desc.SIZE = 8
-struct_pte_desc._fields_ = ['idr', 'reserved1', 'length', 'pte_pde']
-setattr(struct_pte_desc, 'idr', field(0, NvU32, 2, 0))
-setattr(struct_pte_desc, 'reserved1', field(0, NvU32, 14, 2))
-setattr(struct_pte_desc, 'length', field(2, NvU32, 16, 0))
-setattr(struct_pte_desc, 'pte_pde', field(8, Array(_anonunion1, 0)))
-struct_rpc_alloc_memory_v13_01.SIZE = 56
-struct_rpc_alloc_memory_v13_01._fields_ = ['hClient', 'hDevice', 'hMemory', 'hClass', 'flags', 'pteAdjust', 'format', 'length', 'pageCount', 'pteDesc']
-setattr(struct_rpc_alloc_memory_v13_01, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_memory_v13_01, 'hDevice', field(4, NvHandle))
-setattr(struct_rpc_alloc_memory_v13_01, 'hMemory', field(8, NvHandle))
-setattr(struct_rpc_alloc_memory_v13_01, 'hClass', field(12, NvU32))
-setattr(struct_rpc_alloc_memory_v13_01, 'flags', field(16, NvU32))
-setattr(struct_rpc_alloc_memory_v13_01, 'pteAdjust', field(20, NvU32))
-setattr(struct_rpc_alloc_memory_v13_01, 'format', field(24, NvU32))
-setattr(struct_rpc_alloc_memory_v13_01, 'length', field(32, NvU64))
-setattr(struct_rpc_alloc_memory_v13_01, 'pageCount', field(40, NvU32))
-setattr(struct_rpc_alloc_memory_v13_01, 'pteDesc', field(48, struct_pte_desc))
+@record
+class struct_rpc_alloc_memory_v13_01:
+  SIZE = 56
+  hClient: Annotated[NvHandle, 0]
+  hDevice: Annotated[NvHandle, 4]
+  hMemory: Annotated[NvHandle, 8]
+  hClass: Annotated[NvU32, 12]
+  flags: Annotated[NvU32, 16]
+  pteAdjust: Annotated[NvU32, 20]
+  format: Annotated[NvU32, 24]
+  length: Annotated[NvU64, 32]
+  pageCount: Annotated[NvU32, 40]
+  pteDesc: Annotated[struct_pte_desc, 48]
+@record
+class struct_pte_desc:
+  SIZE = 8
+  idr: Annotated[NvU32, 0, 2, 0]
+  reserved1: Annotated[NvU32, 0, 14, 2]
+  length: Annotated[NvU32, 2, 16, 0]
+  pte_pde: Annotated[(_anonunion1 * 0), 8]
+@record
+class _anonunion1:
+  SIZE = 8
+  pte: Annotated[NvU64, 0]
+  pde: Annotated[NvU64, 0]
 rpc_alloc_memory_v13_01 = struct_rpc_alloc_memory_v13_01
 rpc_alloc_memory_v = struct_rpc_alloc_memory_v13_01
-class struct_rpc_alloc_channel_dma_v1F_04(Struct): pass
-class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04(Struct): pass
+@record
+class struct_rpc_alloc_channel_dma_v1F_04:
+  SIZE = 248
+  hClient: Annotated[NvHandle, 0]
+  hDevice: Annotated[NvHandle, 4]
+  hChannel: Annotated[NvHandle, 8]
+  hClass: Annotated[NvU32, 12]
+  flags: Annotated[NvU32, 16]
+  params: Annotated[NV_CHANNEL_ALLOC_PARAMS_v1F_04, 24]
+  chid: Annotated[NvU32, 240]
+@record
+class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04:
+  SIZE = 216
+  hObjectError: Annotated[NvHandle, 0]
+  hObjectBuffer: Annotated[NvHandle, 4]
+  gpFifoOffset: Annotated[NvU64, 8]
+  gpFifoEntries: Annotated[NvU32, 16]
+  flags: Annotated[NvU32, 20]
+  hContextShare: Annotated[NvHandle, 24]
+  hVASpace: Annotated[NvHandle, 28]
+  hUserdMemory: Annotated[(NvHandle* 1), 32]
+  userdOffset: Annotated[(NvU64* 1), 40]
+  engineType: Annotated[NvU32, 48]
+  hObjectEccError: Annotated[NvHandle, 52]
+  instanceMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 56]
+  ramfcMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 80]
+  userdMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 104]
+  mthdbufMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 128]
+  hPhysChannelGroup: Annotated[NvHandle, 152]
+  subDeviceId: Annotated[NvHandle, 156]
+  internalFlags: Annotated[NvU32, 160]
+  errorNotifierMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 168]
+  eccErrorNotifierMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 192]
 NV_CHANNEL_ALLOC_PARAMS_v1F_04 = struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04
-class struct_NV_MEMORY_DESC_PARAMS_v18_01(Struct): pass
+@record
+class struct_NV_MEMORY_DESC_PARAMS_v18_01:
+  SIZE = 24
+  base: Annotated[NvU64, 0]
+  size: Annotated[NvU64, 8]
+  addressSpace: Annotated[NvU32, 16]
+  cacheAttrib: Annotated[NvU32, 20]
 NV_MEMORY_DESC_PARAMS_v18_01 = struct_NV_MEMORY_DESC_PARAMS_v18_01
-struct_NV_MEMORY_DESC_PARAMS_v18_01.SIZE = 24
-struct_NV_MEMORY_DESC_PARAMS_v18_01._fields_ = ['base', 'size', 'addressSpace', 'cacheAttrib']
-setattr(struct_NV_MEMORY_DESC_PARAMS_v18_01, 'base', field(0, NvU64))
-setattr(struct_NV_MEMORY_DESC_PARAMS_v18_01, 'size', field(8, NvU64))
-setattr(struct_NV_MEMORY_DESC_PARAMS_v18_01, 'addressSpace', field(16, NvU32))
-setattr(struct_NV_MEMORY_DESC_PARAMS_v18_01, 'cacheAttrib', field(20, NvU32))
-struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04.SIZE = 216
-struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04._fields_ = ['hObjectError', 'hObjectBuffer', 'gpFifoOffset', 'gpFifoEntries', 'flags', 'hContextShare', 'hVASpace', 'hUserdMemory', 'userdOffset', 'engineType', 'hObjectEccError', 'instanceMem', 'ramfcMem', 'userdMem', 'mthdbufMem', 'hPhysChannelGroup', 'subDeviceId', 'internalFlags', 'errorNotifierMem', 'eccErrorNotifierMem']
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hObjectError', field(0, NvHandle))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hObjectBuffer', field(4, NvHandle))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'gpFifoOffset', field(8, NvU64))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'gpFifoEntries', field(16, NvU32))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'flags', field(20, NvU32))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hContextShare', field(24, NvHandle))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hVASpace', field(28, NvHandle))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hUserdMemory', field(32, Array(NvHandle, 1)))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'userdOffset', field(40, Array(NvU64, 1)))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'engineType', field(48, NvU32))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hObjectEccError', field(52, NvHandle))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'instanceMem', field(56, NV_MEMORY_DESC_PARAMS_v18_01))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'ramfcMem', field(80, NV_MEMORY_DESC_PARAMS_v18_01))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'userdMem', field(104, NV_MEMORY_DESC_PARAMS_v18_01))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'mthdbufMem', field(128, NV_MEMORY_DESC_PARAMS_v18_01))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hPhysChannelGroup', field(152, NvHandle))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'subDeviceId', field(156, NvHandle))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'internalFlags', field(160, NvU32))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'errorNotifierMem', field(168, NV_MEMORY_DESC_PARAMS_v18_01))
-setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'eccErrorNotifierMem', field(192, NV_MEMORY_DESC_PARAMS_v18_01))
-struct_rpc_alloc_channel_dma_v1F_04.SIZE = 248
-struct_rpc_alloc_channel_dma_v1F_04._fields_ = ['hClient', 'hDevice', 'hChannel', 'hClass', 'flags', 'params', 'chid']
-setattr(struct_rpc_alloc_channel_dma_v1F_04, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_channel_dma_v1F_04, 'hDevice', field(4, NvHandle))
-setattr(struct_rpc_alloc_channel_dma_v1F_04, 'hChannel', field(8, NvHandle))
-setattr(struct_rpc_alloc_channel_dma_v1F_04, 'hClass', field(12, NvU32))
-setattr(struct_rpc_alloc_channel_dma_v1F_04, 'flags', field(16, NvU32))
-setattr(struct_rpc_alloc_channel_dma_v1F_04, 'params', field(24, NV_CHANNEL_ALLOC_PARAMS_v1F_04))
-setattr(struct_rpc_alloc_channel_dma_v1F_04, 'chid', field(240, NvU32))
 rpc_alloc_channel_dma_v1F_04 = struct_rpc_alloc_channel_dma_v1F_04
 rpc_alloc_channel_dma_v = struct_rpc_alloc_channel_dma_v1F_04
-class struct_rpc_alloc_object_v25_08(Struct): pass
-class union_alloc_object_params_v25_08(Union): pass
+@record
+class struct_rpc_alloc_object_v25_08:
+  SIZE = 64
+  hClient: Annotated[NvHandle, 0]
+  hParent: Annotated[NvHandle, 4]
+  hObject: Annotated[NvHandle, 8]
+  hClass: Annotated[NvU32, 12]
+  param_len: Annotated[NvU32, 16]
+  params: Annotated[alloc_object_params_v25_08, 24]
+@record
+class union_alloc_object_params_v25_08:
+  SIZE = 40
+  param_NV50_TESLA: Annotated[alloc_object_NV50_TESLA_v03_00, 0]
+  param_GT212_DMA_COPY: Annotated[alloc_object_GT212_DMA_COPY_v03_00, 0]
+  param_GF100_DISP_SW: Annotated[alloc_object_GF100_DISP_SW_v03_00, 0]
+  param_KEPLER_CHANNEL_GROUP_A: Annotated[alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 0]
+  param_FERMI_CONTEXT_SHARE_A: Annotated[alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 0]
+  param_NVD0B7_VIDEO_ENCODER: Annotated[alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 0]
+  param_FERMI_VASPACE_A: Annotated[alloc_object_FERMI_VASPACE_A_v03_00, 0]
+  param_NVB0B0_VIDEO_DECODER: Annotated[alloc_object_NVB0B0_VIDEO_DECODER_v03_00, 0]
+  param_NV83DE_ALLOC_PARAMETERS: Annotated[alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 0]
+  param_NVENC_SW_SESSION: Annotated[alloc_object_NVENC_SW_SESSION_v06_01, 0]
+  param_NVC4B0_VIDEO_DECODER: Annotated[alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 0]
+  param_NVFBC_SW_SESSION: Annotated[alloc_object_NVFBC_SW_SESSION_v12_04, 0]
+  param_NV_NVJPG_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 0]
+  param_NV503B_ALLOC_PARAMETERS: Annotated[alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 0]
+  param_NVC637_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00, 0]
+  param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS: Annotated[alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 0]
+  param_NVC638_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06, 0]
+  param_NV503C_ALLOC_PARAMETERS: Annotated[alloc_object_NV503C_ALLOC_PARAMETERS_v18_15, 0]
+  param_NVC670_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 0]
+  param_NVB1CC_ALLOC_PARAMETERS: Annotated[alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03, 0]
+  param_NVB2CC_ALLOC_PARAMETERS: Annotated[alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03, 0]
+  param_NV_GR_ALLOCATION_PARAMETERS: Annotated[NV_GR_ALLOCATION_PARAMETERS_v1A_17, 0]
+  param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS: Annotated[alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B, 0]
+  param_NV00F8_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 0]
+  param_NVC9FA_VIDEO_OFA: Annotated[alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 0]
+  param_NV2081_ALLOC_PARAMETERS: Annotated[alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 0]
 alloc_object_params_v25_08 = union_alloc_object_params_v25_08
-class struct_alloc_object_NV50_TESLA_v03_00(Struct): pass
+@record
+class struct_alloc_object_NV50_TESLA_v03_00:
+  SIZE = 16
+  version: Annotated[NvU32, 0]
+  flags: Annotated[NvU32, 4]
+  size: Annotated[NvU32, 8]
+  caps: Annotated[NvU32, 12]
 alloc_object_NV50_TESLA_v03_00 = struct_alloc_object_NV50_TESLA_v03_00
-struct_alloc_object_NV50_TESLA_v03_00.SIZE = 16
-struct_alloc_object_NV50_TESLA_v03_00._fields_ = ['version', 'flags', 'size', 'caps']
-setattr(struct_alloc_object_NV50_TESLA_v03_00, 'version', field(0, NvU32))
-setattr(struct_alloc_object_NV50_TESLA_v03_00, 'flags', field(4, NvU32))
-setattr(struct_alloc_object_NV50_TESLA_v03_00, 'size', field(8, NvU32))
-setattr(struct_alloc_object_NV50_TESLA_v03_00, 'caps', field(12, NvU32))
-class struct_alloc_object_GT212_DMA_COPY_v03_00(Struct): pass
+@record
+class struct_alloc_object_GT212_DMA_COPY_v03_00:
+  SIZE = 8
+  version: Annotated[NvU32, 0]
+  engineInstance: Annotated[NvU32, 4]
 alloc_object_GT212_DMA_COPY_v03_00 = struct_alloc_object_GT212_DMA_COPY_v03_00
-struct_alloc_object_GT212_DMA_COPY_v03_00.SIZE = 8
-struct_alloc_object_GT212_DMA_COPY_v03_00._fields_ = ['version', 'engineInstance']
-setattr(struct_alloc_object_GT212_DMA_COPY_v03_00, 'version', field(0, NvU32))
-setattr(struct_alloc_object_GT212_DMA_COPY_v03_00, 'engineInstance', field(4, NvU32))
-class struct_alloc_object_GF100_DISP_SW_v03_00(Struct): pass
+@record
+class struct_alloc_object_GF100_DISP_SW_v03_00:
+  SIZE = 32
+  _reserved1: Annotated[NvU32, 0]
+  _reserved2: Annotated[NvU64, 8]
+  logicalHeadId: Annotated[NvU32, 16]
+  displayMask: Annotated[NvU32, 20]
+  caps: Annotated[NvU32, 24]
 alloc_object_GF100_DISP_SW_v03_00 = struct_alloc_object_GF100_DISP_SW_v03_00
-struct_alloc_object_GF100_DISP_SW_v03_00.SIZE = 32
-struct_alloc_object_GF100_DISP_SW_v03_00._fields_ = ['_reserved1', '_reserved2', 'logicalHeadId', 'displayMask', 'caps']
-setattr(struct_alloc_object_GF100_DISP_SW_v03_00, '_reserved1', field(0, NvU32))
-setattr(struct_alloc_object_GF100_DISP_SW_v03_00, '_reserved2', field(8, NvU64))
-setattr(struct_alloc_object_GF100_DISP_SW_v03_00, 'logicalHeadId', field(16, NvU32))
-setattr(struct_alloc_object_GF100_DISP_SW_v03_00, 'displayMask', field(20, NvU32))
-setattr(struct_alloc_object_GF100_DISP_SW_v03_00, 'caps', field(24, NvU32))
-class struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08(Struct): pass
+@record
+class struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08:
+  SIZE = 12
+  hObjectError: Annotated[NvU32, 0]
+  hVASpace: Annotated[NvU32, 4]
+  engineType: Annotated[NvU32, 8]
 alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08 = struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08
-struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08.SIZE = 12
-struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08._fields_ = ['hObjectError', 'hVASpace', 'engineType']
-setattr(struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 'hObjectError', field(0, NvU32))
-setattr(struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 'hVASpace', field(4, NvU32))
-setattr(struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 'engineType', field(8, NvU32))
-class struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00(Struct): pass
+@record
+class struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00:
+  SIZE = 12
+  hVASpace: Annotated[NvU32, 0]
+  flags: Annotated[NvU32, 4]
+  subctxId: Annotated[NvU32, 8]
 alloc_object_FERMI_CONTEXT_SHARE_A_v04_00 = struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00
-struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00.SIZE = 12
-struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00._fields_ = ['hVASpace', 'flags', 'subctxId']
-setattr(struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 'hVASpace', field(0, NvU32))
-setattr(struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 'flags', field(4, NvU32))
-setattr(struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 'subctxId', field(8, NvU32))
-class struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00(Struct): pass
+@record
+class struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00:
+  SIZE = 12
+  size: Annotated[NvU32, 0]
+  prohibitMultipleInstances: Annotated[NvU32, 4]
+  engineInstance: Annotated[NvU32, 8]
 alloc_object_NVD0B7_VIDEO_ENCODER_v03_00 = struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00
-struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00.SIZE = 12
-struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00._fields_ = ['size', 'prohibitMultipleInstances', 'engineInstance']
-setattr(struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 'size', field(0, NvU32))
-setattr(struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 'prohibitMultipleInstances', field(4, NvU32))
-setattr(struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 'engineInstance', field(8, NvU32))
-class struct_alloc_object_FERMI_VASPACE_A_v03_00(Struct): pass
+@record
+class struct_alloc_object_FERMI_VASPACE_A_v03_00:
+  SIZE = 32
+  index: Annotated[NvU32, 0]
+  flags: Annotated[NvU32, 4]
+  vaSize: Annotated[NvU64, 8]
+  bigPageSize: Annotated[NvU32, 16]
+  vaBase: Annotated[NvU64, 24]
 alloc_object_FERMI_VASPACE_A_v03_00 = struct_alloc_object_FERMI_VASPACE_A_v03_00
-struct_alloc_object_FERMI_VASPACE_A_v03_00.SIZE = 32
-struct_alloc_object_FERMI_VASPACE_A_v03_00._fields_ = ['index', 'flags', 'vaSize', 'bigPageSize', 'vaBase']
-setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'index', field(0, NvU32))
-setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'flags', field(4, NvU32))
-setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'vaSize', field(8, NvU64))
-setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'bigPageSize', field(16, NvU32))
-setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'vaBase', field(24, NvU64))
-class struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00(Struct): pass
+@record
+class struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00:
+  SIZE = 8
+  size: Annotated[NvU32, 0]
+  prohibitMultipleInstances: Annotated[NvU32, 4]
 alloc_object_NVB0B0_VIDEO_DECODER_v03_00 = struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00
-struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00.SIZE = 8
-struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00._fields_ = ['size', 'prohibitMultipleInstances']
-setattr(struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00, 'size', field(0, NvU32))
-setattr(struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00, 'prohibitMultipleInstances', field(4, NvU32))
-class struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00(Struct): pass
+@record
+class struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00:
+  SIZE = 12
+  hDebuggerClient: Annotated[NvHandle, 0]
+  hAppClient: Annotated[NvHandle, 4]
+  hClass3dObject: Annotated[NvHandle, 8]
 alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00 = struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00
-struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00.SIZE = 12
-struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00._fields_ = ['hDebuggerClient', 'hAppClient', 'hClass3dObject']
-setattr(struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 'hDebuggerClient', field(0, NvHandle))
-setattr(struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 'hAppClient', field(4, NvHandle))
-setattr(struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 'hClass3dObject', field(8, NvHandle))
-class struct_alloc_object_NVENC_SW_SESSION_v06_01(Struct): pass
+@record
+class struct_alloc_object_NVENC_SW_SESSION_v06_01:
+  SIZE = 12
+  codecType: Annotated[NvU32, 0]
+  hResolution: Annotated[NvU32, 4]
+  vResolution: Annotated[NvU32, 8]
 alloc_object_NVENC_SW_SESSION_v06_01 = struct_alloc_object_NVENC_SW_SESSION_v06_01
-struct_alloc_object_NVENC_SW_SESSION_v06_01.SIZE = 12
-struct_alloc_object_NVENC_SW_SESSION_v06_01._fields_ = ['codecType', 'hResolution', 'vResolution']
-setattr(struct_alloc_object_NVENC_SW_SESSION_v06_01, 'codecType', field(0, NvU32))
-setattr(struct_alloc_object_NVENC_SW_SESSION_v06_01, 'hResolution', field(4, NvU32))
-setattr(struct_alloc_object_NVENC_SW_SESSION_v06_01, 'vResolution', field(8, NvU32))
-class struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02(Struct): pass
+@record
+class struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02:
+  SIZE = 12
+  size: Annotated[NvU32, 0]
+  prohibitMultipleInstances: Annotated[NvU32, 4]
+  engineInstance: Annotated[NvU32, 8]
 alloc_object_NVC4B0_VIDEO_DECODER_v12_02 = struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02
-struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02.SIZE = 12
-struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02._fields_ = ['size', 'prohibitMultipleInstances', 'engineInstance']
-setattr(struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 'size', field(0, NvU32))
-setattr(struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 'prohibitMultipleInstances', field(4, NvU32))
-setattr(struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 'engineInstance', field(8, NvU32))
-class struct_alloc_object_NVFBC_SW_SESSION_v12_04(Struct): pass
+@record
+class struct_alloc_object_NVFBC_SW_SESSION_v12_04:
+  SIZE = 20
+  displayOrdinal: Annotated[NvU32, 0]
+  sessionType: Annotated[NvU32, 4]
+  sessionFlags: Annotated[NvU32, 8]
+  hMaxResolution: Annotated[NvU32, 12]
+  vMaxResolution: Annotated[NvU32, 16]
 alloc_object_NVFBC_SW_SESSION_v12_04 = struct_alloc_object_NVFBC_SW_SESSION_v12_04
-struct_alloc_object_NVFBC_SW_SESSION_v12_04.SIZE = 20
-struct_alloc_object_NVFBC_SW_SESSION_v12_04._fields_ = ['displayOrdinal', 'sessionType', 'sessionFlags', 'hMaxResolution', 'vMaxResolution']
-setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'displayOrdinal', field(0, NvU32))
-setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'sessionType', field(4, NvU32))
-setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'sessionFlags', field(8, NvU32))
-setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'hMaxResolution', field(12, NvU32))
-setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'vMaxResolution', field(16, NvU32))
-class struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02(Struct): pass
+@record
+class struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02:
+  SIZE = 12
+  size: Annotated[NvU32, 0]
+  prohibitMultipleInstances: Annotated[NvU32, 4]
+  engineInstance: Annotated[NvU32, 8]
 alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02 = struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02
-struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02.SIZE = 12
-struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02._fields_ = ['size', 'prohibitMultipleInstances', 'engineInstance']
-setattr(struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 'size', field(0, NvU32))
-setattr(struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 'prohibitMultipleInstances', field(4, NvU32))
-setattr(struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 'engineInstance', field(8, NvU32))
-class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02(Struct): pass
+@record
+class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02:
+  SIZE = 32
+  hSubDevice: Annotated[NvHandle, 0]
+  hPeerSubDevice: Annotated[NvHandle, 4]
+  subDevicePeerIdMask: Annotated[NvU32, 8]
+  peerSubDevicePeerIdMask: Annotated[NvU32, 12]
+  mailboxBar1Addr: Annotated[NvU64, 16]
+  mailboxTotalSize: Annotated[NvU32, 24]
+  flags: Annotated[NvU32, 28]
 alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02 = struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02
-struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02.SIZE = 32
-struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02._fields_ = ['hSubDevice', 'hPeerSubDevice', 'subDevicePeerIdMask', 'peerSubDevicePeerIdMask', 'mailboxBar1Addr', 'mailboxTotalSize', 'flags']
-setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'hSubDevice', field(0, NvHandle))
-setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'hPeerSubDevice', field(4, NvHandle))
-setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'subDevicePeerIdMask', field(8, NvU32))
-setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'peerSubDevicePeerIdMask', field(12, NvU32))
-setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'mailboxBar1Addr', field(16, NvU64))
-setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'mailboxTotalSize', field(24, NvU32))
-setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'flags', field(28, NvU32))
-class struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00(Struct): pass
+@record
+class struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00:
+  SIZE = 4
+  swizzId: Annotated[NvU32, 0]
 alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00 = struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00
-struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00.SIZE = 4
-struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00._fields_ = ['swizzId']
-setattr(struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00, 'swizzId', field(0, NvU32))
-class struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03(Struct): pass
+@record
+class struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03:
+  SIZE = 24
+  offset: Annotated[NvU64, 0]
+  limit: Annotated[NvU64, 8]
+  hVASpace: Annotated[NvHandle, 16]
 alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03 = struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03
-struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03.SIZE = 24
-struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03._fields_ = ['offset', 'limit', 'hVASpace']
-setattr(struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 'offset', field(0, NvU64))
-setattr(struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 'limit', field(8, NvU64))
-setattr(struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 'hVASpace', field(16, NvHandle))
-class struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06(Struct): pass
+@record
+class struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06:
+  SIZE = 4
+  execPartitionId: Annotated[NvU32, 0]
 alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06 = struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06
-struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06.SIZE = 4
-struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06._fields_ = ['execPartitionId']
-setattr(struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06, 'execPartitionId', field(0, NvU32))
-class struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15(Struct): pass
+@record
+class struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15:
+  SIZE = 16
+  flags: Annotated[NvU32, 0]
+  p2pToken: Annotated[NvU64, 8]
 alloc_object_NV503C_ALLOC_PARAMETERS_v18_15 = struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15
-struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15.SIZE = 16
-struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15._fields_ = ['flags', 'p2pToken']
-setattr(struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15, 'flags', field(0, NvU32))
-setattr(struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15, 'p2pToken', field(8, NvU64))
-class struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01(Struct): pass
+@record
+class struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01:
+  SIZE = 12
+  numHeads: Annotated[NvU32, 0]
+  numSors: Annotated[NvU32, 4]
+  numDsis: Annotated[NvU32, 8]
 alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01 = struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01
-struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01.SIZE = 12
-struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01._fields_ = ['numHeads', 'numSors', 'numDsis']
-setattr(struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 'numHeads', field(0, NvU32))
-setattr(struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 'numSors', field(4, NvU32))
-setattr(struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 'numDsis', field(8, NvU32))
-class struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03(Struct): pass
+@record
+class struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03:
+  SIZE = 4
+  hSubDevice: Annotated[NvHandle, 0]
 alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03 = struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03
-struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03.SIZE = 4
-struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03._fields_ = ['hSubDevice']
-setattr(struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03, 'hSubDevice', field(0, NvHandle))
-class struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03(Struct): pass
+@record
+class struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03:
+  SIZE = 8
+  hClientTarget: Annotated[NvHandle, 0]
+  hContextTarget: Annotated[NvHandle, 4]
 alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03 = struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03
-struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03.SIZE = 8
-struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03._fields_ = ['hClientTarget', 'hContextTarget']
-setattr(struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03, 'hClientTarget', field(0, NvHandle))
-setattr(struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03, 'hContextTarget', field(4, NvHandle))
-class struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17(Struct): pass
+@record
+class struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17:
+  SIZE = 16
+  version: Annotated[NvU32, 0]
+  flags: Annotated[NvU32, 4]
+  size: Annotated[NvU32, 8]
+  caps: Annotated[NvU32, 12]
 NV_GR_ALLOCATION_PARAMETERS_v1A_17 = struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17
-struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17.SIZE = 16
-struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17._fields_ = ['version', 'flags', 'size', 'caps']
-setattr(struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17, 'version', field(0, NvU32))
-setattr(struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17, 'flags', field(4, NvU32))
-setattr(struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17, 'size', field(8, NvU32))
-setattr(struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17, 'caps', field(12, NvU32))
-class struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B(Struct): pass
+@record
+class struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B:
+  SIZE = 8
+  hClient: Annotated[NvHandle, 0]
+  hChannel: Annotated[NvHandle, 4]
 alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B = struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B
-struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B.SIZE = 8
-struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B._fields_ = ['hClient', 'hChannel']
-setattr(struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B, 'hClient', field(0, NvHandle))
-setattr(struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B, 'hChannel', field(4, NvHandle))
-class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C(Struct): pass
+@record
+class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C:
+  SIZE = 40
+  alignment: Annotated[NvU64, 0]
+  allocSize: Annotated[NvU64, 8]
+  pageSize: Annotated[NvU32, 16]
+  allocFlags: Annotated[NvU32, 20]
+  map: Annotated[NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C, 24]
 alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C = struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C
-class struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C(Struct): pass
+@record
+class struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C:
+  SIZE = 16
+  offset: Annotated[NvU64, 0]
+  hVidMem: Annotated[NvHandle, 8]
+  flags: Annotated[NvU32, 12]
 NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C = struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C
-struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C.SIZE = 16
-struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C._fields_ = ['offset', 'hVidMem', 'flags']
-setattr(struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C, 'offset', field(0, NvU64))
-setattr(struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C, 'hVidMem', field(8, NvHandle))
-setattr(struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C, 'flags', field(12, NvU32))
-struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C.SIZE = 40
-struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C._fields_ = ['alignment', 'allocSize', 'pageSize', 'allocFlags', 'map']
-setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'alignment', field(0, NvU64))
-setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'allocSize', field(8, NvU64))
-setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'pageSize', field(16, NvU32))
-setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'allocFlags', field(20, NvU32))
-setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'map', field(24, NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C))
-class struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00(Struct): pass
+@record
+class struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00:
+  SIZE = 8
+  size: Annotated[NvU32, 0]
+  prohibitMultipleInstances: Annotated[NvU32, 4]
 alloc_object_NVC9FA_VIDEO_OFA_v1F_00 = struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00
-struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00.SIZE = 8
-struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00._fields_ = ['size', 'prohibitMultipleInstances']
-setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 'size', field(0, NvU32))
-setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 'prohibitMultipleInstances', field(4, NvU32))
-class struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08(Struct): pass
+@record
+class struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08:
+  SIZE = 4
+  reserved: Annotated[NvU32, 0]
 alloc_object_NV2081_ALLOC_PARAMETERS_v25_08 = struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08
-struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08.SIZE = 4
-struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08._fields_ = ['reserved']
-setattr(struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 'reserved', field(0, NvU32))
-union_alloc_object_params_v25_08.SIZE = 40
-union_alloc_object_params_v25_08._fields_ = ['param_NV50_TESLA', 'param_GT212_DMA_COPY', 'param_GF100_DISP_SW', 'param_KEPLER_CHANNEL_GROUP_A', 'param_FERMI_CONTEXT_SHARE_A', 'param_NVD0B7_VIDEO_ENCODER', 'param_FERMI_VASPACE_A', 'param_NVB0B0_VIDEO_DECODER', 'param_NV83DE_ALLOC_PARAMETERS', 'param_NVENC_SW_SESSION', 'param_NVC4B0_VIDEO_DECODER', 'param_NVFBC_SW_SESSION', 'param_NV_NVJPG_ALLOCATION_PARAMETERS', 'param_NV503B_ALLOC_PARAMETERS', 'param_NVC637_ALLOCATION_PARAMETERS', 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', 'param_NVC638_ALLOCATION_PARAMETERS', 'param_NV503C_ALLOC_PARAMETERS', 'param_NVC670_ALLOCATION_PARAMETERS', 'param_NVB1CC_ALLOC_PARAMETERS', 'param_NVB2CC_ALLOC_PARAMETERS', 'param_NV_GR_ALLOCATION_PARAMETERS', 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', 'param_NV00F8_ALLOCATION_PARAMETERS', 'param_NVC9FA_VIDEO_OFA', 'param_NV2081_ALLOC_PARAMETERS']
-setattr(union_alloc_object_params_v25_08, 'param_NV50_TESLA', field(0, alloc_object_NV50_TESLA_v03_00))
-setattr(union_alloc_object_params_v25_08, 'param_GT212_DMA_COPY', field(0, alloc_object_GT212_DMA_COPY_v03_00))
-setattr(union_alloc_object_params_v25_08, 'param_GF100_DISP_SW', field(0, alloc_object_GF100_DISP_SW_v03_00))
-setattr(union_alloc_object_params_v25_08, 'param_KEPLER_CHANNEL_GROUP_A', field(0, alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08))
-setattr(union_alloc_object_params_v25_08, 'param_FERMI_CONTEXT_SHARE_A', field(0, alloc_object_FERMI_CONTEXT_SHARE_A_v04_00))
-setattr(union_alloc_object_params_v25_08, 'param_NVD0B7_VIDEO_ENCODER', field(0, alloc_object_NVD0B7_VIDEO_ENCODER_v03_00))
-setattr(union_alloc_object_params_v25_08, 'param_FERMI_VASPACE_A', field(0, alloc_object_FERMI_VASPACE_A_v03_00))
-setattr(union_alloc_object_params_v25_08, 'param_NVB0B0_VIDEO_DECODER', field(0, alloc_object_NVB0B0_VIDEO_DECODER_v03_00))
-setattr(union_alloc_object_params_v25_08, 'param_NV83DE_ALLOC_PARAMETERS', field(0, alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00))
-setattr(union_alloc_object_params_v25_08, 'param_NVENC_SW_SESSION', field(0, alloc_object_NVENC_SW_SESSION_v06_01))
-setattr(union_alloc_object_params_v25_08, 'param_NVC4B0_VIDEO_DECODER', field(0, alloc_object_NVC4B0_VIDEO_DECODER_v12_02))
-setattr(union_alloc_object_params_v25_08, 'param_NVFBC_SW_SESSION', field(0, alloc_object_NVFBC_SW_SESSION_v12_04))
-setattr(union_alloc_object_params_v25_08, 'param_NV_NVJPG_ALLOCATION_PARAMETERS', field(0, alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02))
-setattr(union_alloc_object_params_v25_08, 'param_NV503B_ALLOC_PARAMETERS', field(0, alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02))
-setattr(union_alloc_object_params_v25_08, 'param_NVC637_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00))
-setattr(union_alloc_object_params_v25_08, 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', field(0, alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03))
-setattr(union_alloc_object_params_v25_08, 'param_NVC638_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06))
-setattr(union_alloc_object_params_v25_08, 'param_NV503C_ALLOC_PARAMETERS', field(0, alloc_object_NV503C_ALLOC_PARAMETERS_v18_15))
-setattr(union_alloc_object_params_v25_08, 'param_NVC670_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01))
-setattr(union_alloc_object_params_v25_08, 'param_NVB1CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03))
-setattr(union_alloc_object_params_v25_08, 'param_NVB2CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03))
-setattr(union_alloc_object_params_v25_08, 'param_NV_GR_ALLOCATION_PARAMETERS', field(0, NV_GR_ALLOCATION_PARAMETERS_v1A_17))
-setattr(union_alloc_object_params_v25_08, 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', field(0, alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B))
-setattr(union_alloc_object_params_v25_08, 'param_NV00F8_ALLOCATION_PARAMETERS', field(0, alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C))
-setattr(union_alloc_object_params_v25_08, 'param_NVC9FA_VIDEO_OFA', field(0, alloc_object_NVC9FA_VIDEO_OFA_v1F_00))
-setattr(union_alloc_object_params_v25_08, 'param_NV2081_ALLOC_PARAMETERS', field(0, alloc_object_NV2081_ALLOC_PARAMETERS_v25_08))
-struct_rpc_alloc_object_v25_08.SIZE = 64
-struct_rpc_alloc_object_v25_08._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'param_len', 'params']
-setattr(struct_rpc_alloc_object_v25_08, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_object_v25_08, 'hParent', field(4, NvHandle))
-setattr(struct_rpc_alloc_object_v25_08, 'hObject', field(8, NvHandle))
-setattr(struct_rpc_alloc_object_v25_08, 'hClass', field(12, NvU32))
-setattr(struct_rpc_alloc_object_v25_08, 'param_len', field(16, NvU32))
-setattr(struct_rpc_alloc_object_v25_08, 'params', field(24, alloc_object_params_v25_08))
 rpc_alloc_object_v25_08 = struct_rpc_alloc_object_v25_08
-class struct_rpc_alloc_object_v26_00(Struct): pass
-class union_alloc_object_params_v26_00(Union): pass
+@record
+class struct_rpc_alloc_object_v26_00:
+  SIZE = 80
+  hClient: Annotated[NvHandle, 0]
+  hParent: Annotated[NvHandle, 4]
+  hObject: Annotated[NvHandle, 8]
+  hClass: Annotated[NvU32, 12]
+  param_len: Annotated[NvU32, 16]
+  params: Annotated[alloc_object_params_v26_00, 24]
+@record
+class union_alloc_object_params_v26_00:
+  SIZE = 56
+  param_NV50_TESLA: Annotated[alloc_object_NV50_TESLA_v03_00, 0]
+  param_GT212_DMA_COPY: Annotated[alloc_object_GT212_DMA_COPY_v03_00, 0]
+  param_GF100_DISP_SW: Annotated[alloc_object_GF100_DISP_SW_v03_00, 0]
+  param_KEPLER_CHANNEL_GROUP_A: Annotated[alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 0]
+  param_FERMI_CONTEXT_SHARE_A: Annotated[alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 0]
+  param_NVD0B7_VIDEO_ENCODER: Annotated[alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 0]
+  param_FERMI_VASPACE_A: Annotated[alloc_object_FERMI_VASPACE_A_v03_00, 0]
+  param_NVB0B0_VIDEO_DECODER: Annotated[alloc_object_NVB0B0_VIDEO_DECODER_v03_00, 0]
+  param_NV83DE_ALLOC_PARAMETERS: Annotated[alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 0]
+  param_NVENC_SW_SESSION: Annotated[alloc_object_NVENC_SW_SESSION_v06_01, 0]
+  param_NVC4B0_VIDEO_DECODER: Annotated[alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 0]
+  param_NVFBC_SW_SESSION: Annotated[alloc_object_NVFBC_SW_SESSION_v12_04, 0]
+  param_NV_NVJPG_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 0]
+  param_NV503B_ALLOC_PARAMETERS: Annotated[alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 0]
+  param_NVC637_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00, 0]
+  param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS: Annotated[alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 0]
+  param_NVC638_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06, 0]
+  param_NV503C_ALLOC_PARAMETERS: Annotated[alloc_object_NV503C_ALLOC_PARAMETERS_v18_15, 0]
+  param_NVC670_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 0]
+  param_NVB1CC_ALLOC_PARAMETERS: Annotated[alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03, 0]
+  param_NVB2CC_ALLOC_PARAMETERS: Annotated[alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03, 0]
+  param_NV_GR_ALLOCATION_PARAMETERS: Annotated[NV_GR_ALLOCATION_PARAMETERS_v1A_17, 0]
+  param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS: Annotated[alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B, 0]
+  param_NV00F8_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 0]
+  param_NVC9FA_VIDEO_OFA: Annotated[alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 0]
+  param_NV2081_ALLOC_PARAMETERS: Annotated[alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 0]
+  param_padding: Annotated[(NvU8* 56), 0]
 alloc_object_params_v26_00 = union_alloc_object_params_v26_00
-union_alloc_object_params_v26_00.SIZE = 56
-union_alloc_object_params_v26_00._fields_ = ['param_NV50_TESLA', 'param_GT212_DMA_COPY', 'param_GF100_DISP_SW', 'param_KEPLER_CHANNEL_GROUP_A', 'param_FERMI_CONTEXT_SHARE_A', 'param_NVD0B7_VIDEO_ENCODER', 'param_FERMI_VASPACE_A', 'param_NVB0B0_VIDEO_DECODER', 'param_NV83DE_ALLOC_PARAMETERS', 'param_NVENC_SW_SESSION', 'param_NVC4B0_VIDEO_DECODER', 'param_NVFBC_SW_SESSION', 'param_NV_NVJPG_ALLOCATION_PARAMETERS', 'param_NV503B_ALLOC_PARAMETERS', 'param_NVC637_ALLOCATION_PARAMETERS', 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', 'param_NVC638_ALLOCATION_PARAMETERS', 'param_NV503C_ALLOC_PARAMETERS', 'param_NVC670_ALLOCATION_PARAMETERS', 'param_NVB1CC_ALLOC_PARAMETERS', 'param_NVB2CC_ALLOC_PARAMETERS', 'param_NV_GR_ALLOCATION_PARAMETERS', 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', 'param_NV00F8_ALLOCATION_PARAMETERS', 'param_NVC9FA_VIDEO_OFA', 'param_NV2081_ALLOC_PARAMETERS', 'param_padding']
-setattr(union_alloc_object_params_v26_00, 'param_NV50_TESLA', field(0, alloc_object_NV50_TESLA_v03_00))
-setattr(union_alloc_object_params_v26_00, 'param_GT212_DMA_COPY', field(0, alloc_object_GT212_DMA_COPY_v03_00))
-setattr(union_alloc_object_params_v26_00, 'param_GF100_DISP_SW', field(0, alloc_object_GF100_DISP_SW_v03_00))
-setattr(union_alloc_object_params_v26_00, 'param_KEPLER_CHANNEL_GROUP_A', field(0, alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08))
-setattr(union_alloc_object_params_v26_00, 'param_FERMI_CONTEXT_SHARE_A', field(0, alloc_object_FERMI_CONTEXT_SHARE_A_v04_00))
-setattr(union_alloc_object_params_v26_00, 'param_NVD0B7_VIDEO_ENCODER', field(0, alloc_object_NVD0B7_VIDEO_ENCODER_v03_00))
-setattr(union_alloc_object_params_v26_00, 'param_FERMI_VASPACE_A', field(0, alloc_object_FERMI_VASPACE_A_v03_00))
-setattr(union_alloc_object_params_v26_00, 'param_NVB0B0_VIDEO_DECODER', field(0, alloc_object_NVB0B0_VIDEO_DECODER_v03_00))
-setattr(union_alloc_object_params_v26_00, 'param_NV83DE_ALLOC_PARAMETERS', field(0, alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00))
-setattr(union_alloc_object_params_v26_00, 'param_NVENC_SW_SESSION', field(0, alloc_object_NVENC_SW_SESSION_v06_01))
-setattr(union_alloc_object_params_v26_00, 'param_NVC4B0_VIDEO_DECODER', field(0, alloc_object_NVC4B0_VIDEO_DECODER_v12_02))
-setattr(union_alloc_object_params_v26_00, 'param_NVFBC_SW_SESSION', field(0, alloc_object_NVFBC_SW_SESSION_v12_04))
-setattr(union_alloc_object_params_v26_00, 'param_NV_NVJPG_ALLOCATION_PARAMETERS', field(0, alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02))
-setattr(union_alloc_object_params_v26_00, 'param_NV503B_ALLOC_PARAMETERS', field(0, alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02))
-setattr(union_alloc_object_params_v26_00, 'param_NVC637_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00))
-setattr(union_alloc_object_params_v26_00, 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', field(0, alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03))
-setattr(union_alloc_object_params_v26_00, 'param_NVC638_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06))
-setattr(union_alloc_object_params_v26_00, 'param_NV503C_ALLOC_PARAMETERS', field(0, alloc_object_NV503C_ALLOC_PARAMETERS_v18_15))
-setattr(union_alloc_object_params_v26_00, 'param_NVC670_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01))
-setattr(union_alloc_object_params_v26_00, 'param_NVB1CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03))
-setattr(union_alloc_object_params_v26_00, 'param_NVB2CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03))
-setattr(union_alloc_object_params_v26_00, 'param_NV_GR_ALLOCATION_PARAMETERS', field(0, NV_GR_ALLOCATION_PARAMETERS_v1A_17))
-setattr(union_alloc_object_params_v26_00, 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', field(0, alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B))
-setattr(union_alloc_object_params_v26_00, 'param_NV00F8_ALLOCATION_PARAMETERS', field(0, alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C))
-setattr(union_alloc_object_params_v26_00, 'param_NVC9FA_VIDEO_OFA', field(0, alloc_object_NVC9FA_VIDEO_OFA_v1F_00))
-setattr(union_alloc_object_params_v26_00, 'param_NV2081_ALLOC_PARAMETERS', field(0, alloc_object_NV2081_ALLOC_PARAMETERS_v25_08))
-setattr(union_alloc_object_params_v26_00, 'param_padding', field(0, Array(NvU8, 56)))
-struct_rpc_alloc_object_v26_00.SIZE = 80
-struct_rpc_alloc_object_v26_00._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'param_len', 'params']
-setattr(struct_rpc_alloc_object_v26_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_object_v26_00, 'hParent', field(4, NvHandle))
-setattr(struct_rpc_alloc_object_v26_00, 'hObject', field(8, NvHandle))
-setattr(struct_rpc_alloc_object_v26_00, 'hClass', field(12, NvU32))
-setattr(struct_rpc_alloc_object_v26_00, 'param_len', field(16, NvU32))
-setattr(struct_rpc_alloc_object_v26_00, 'params', field(24, alloc_object_params_v26_00))
 rpc_alloc_object_v26_00 = struct_rpc_alloc_object_v26_00
-class struct_rpc_alloc_object_v27_00(Struct): pass
-class union_alloc_object_params_v27_00(Union): pass
+@record
+class struct_rpc_alloc_object_v27_00:
+  SIZE = 80
+  hClient: Annotated[NvHandle, 0]
+  hParent: Annotated[NvHandle, 4]
+  hObject: Annotated[NvHandle, 8]
+  hClass: Annotated[NvU32, 12]
+  param_len: Annotated[NvU32, 16]
+  params: Annotated[alloc_object_params_v27_00, 24]
+@record
+class union_alloc_object_params_v27_00:
+  SIZE = 56
+  param_NV50_TESLA: Annotated[alloc_object_NV50_TESLA_v03_00, 0]
+  param_GT212_DMA_COPY: Annotated[alloc_object_GT212_DMA_COPY_v03_00, 0]
+  param_GF100_DISP_SW: Annotated[alloc_object_GF100_DISP_SW_v03_00, 0]
+  param_KEPLER_CHANNEL_GROUP_A: Annotated[alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 0]
+  param_FERMI_CONTEXT_SHARE_A: Annotated[alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 0]
+  param_NVD0B7_VIDEO_ENCODER: Annotated[alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 0]
+  param_FERMI_VASPACE_A: Annotated[alloc_object_FERMI_VASPACE_A_v03_00, 0]
+  param_NVB0B0_VIDEO_DECODER: Annotated[alloc_object_NVB0B0_VIDEO_DECODER_v03_00, 0]
+  param_NV83DE_ALLOC_PARAMETERS: Annotated[alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 0]
+  param_NVENC_SW_SESSION: Annotated[alloc_object_NVENC_SW_SESSION_v06_01, 0]
+  param_NVC4B0_VIDEO_DECODER: Annotated[alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 0]
+  param_NVFBC_SW_SESSION: Annotated[alloc_object_NVFBC_SW_SESSION_v12_04, 0]
+  param_NV_NVJPG_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 0]
+  param_NV503B_ALLOC_PARAMETERS: Annotated[alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 0]
+  param_NVC637_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00, 0]
+  param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS: Annotated[alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 0]
+  param_NVC638_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06, 0]
+  param_NV503C_ALLOC_PARAMETERS: Annotated[alloc_object_NV503C_ALLOC_PARAMETERS_v18_15, 0]
+  param_NVC670_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 0]
+  param_NVB1CC_ALLOC_PARAMETERS: Annotated[alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03, 0]
+  param_NVB2CC_ALLOC_PARAMETERS: Annotated[alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03, 0]
+  param_NV_GR_ALLOCATION_PARAMETERS: Annotated[NV_GR_ALLOCATION_PARAMETERS_v1A_17, 0]
+  param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS: Annotated[alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B, 0]
+  param_NV00F8_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 0]
+  param_NVC9FA_VIDEO_OFA: Annotated[alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 0]
+  param_NV2081_ALLOC_PARAMETERS: Annotated[alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 0]
+  param_padding: Annotated[(NvU8* 56), 0]
 alloc_object_params_v27_00 = union_alloc_object_params_v27_00
-union_alloc_object_params_v27_00.SIZE = 56
-union_alloc_object_params_v27_00._fields_ = ['param_NV50_TESLA', 'param_GT212_DMA_COPY', 'param_GF100_DISP_SW', 'param_KEPLER_CHANNEL_GROUP_A', 'param_FERMI_CONTEXT_SHARE_A', 'param_NVD0B7_VIDEO_ENCODER', 'param_FERMI_VASPACE_A', 'param_NVB0B0_VIDEO_DECODER', 'param_NV83DE_ALLOC_PARAMETERS', 'param_NVENC_SW_SESSION', 'param_NVC4B0_VIDEO_DECODER', 'param_NVFBC_SW_SESSION', 'param_NV_NVJPG_ALLOCATION_PARAMETERS', 'param_NV503B_ALLOC_PARAMETERS', 'param_NVC637_ALLOCATION_PARAMETERS', 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', 'param_NVC638_ALLOCATION_PARAMETERS', 'param_NV503C_ALLOC_PARAMETERS', 'param_NVC670_ALLOCATION_PARAMETERS', 'param_NVB1CC_ALLOC_PARAMETERS', 'param_NVB2CC_ALLOC_PARAMETERS', 'param_NV_GR_ALLOCATION_PARAMETERS', 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', 'param_NV00F8_ALLOCATION_PARAMETERS', 'param_NVC9FA_VIDEO_OFA', 'param_NV2081_ALLOC_PARAMETERS', 'param_padding']
-setattr(union_alloc_object_params_v27_00, 'param_NV50_TESLA', field(0, alloc_object_NV50_TESLA_v03_00))
-setattr(union_alloc_object_params_v27_00, 'param_GT212_DMA_COPY', field(0, alloc_object_GT212_DMA_COPY_v03_00))
-setattr(union_alloc_object_params_v27_00, 'param_GF100_DISP_SW', field(0, alloc_object_GF100_DISP_SW_v03_00))
-setattr(union_alloc_object_params_v27_00, 'param_KEPLER_CHANNEL_GROUP_A', field(0, alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08))
-setattr(union_alloc_object_params_v27_00, 'param_FERMI_CONTEXT_SHARE_A', field(0, alloc_object_FERMI_CONTEXT_SHARE_A_v04_00))
-setattr(union_alloc_object_params_v27_00, 'param_NVD0B7_VIDEO_ENCODER', field(0, alloc_object_NVD0B7_VIDEO_ENCODER_v03_00))
-setattr(union_alloc_object_params_v27_00, 'param_FERMI_VASPACE_A', field(0, alloc_object_FERMI_VASPACE_A_v03_00))
-setattr(union_alloc_object_params_v27_00, 'param_NVB0B0_VIDEO_DECODER', field(0, alloc_object_NVB0B0_VIDEO_DECODER_v03_00))
-setattr(union_alloc_object_params_v27_00, 'param_NV83DE_ALLOC_PARAMETERS', field(0, alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00))
-setattr(union_alloc_object_params_v27_00, 'param_NVENC_SW_SESSION', field(0, alloc_object_NVENC_SW_SESSION_v06_01))
-setattr(union_alloc_object_params_v27_00, 'param_NVC4B0_VIDEO_DECODER', field(0, alloc_object_NVC4B0_VIDEO_DECODER_v12_02))
-setattr(union_alloc_object_params_v27_00, 'param_NVFBC_SW_SESSION', field(0, alloc_object_NVFBC_SW_SESSION_v12_04))
-setattr(union_alloc_object_params_v27_00, 'param_NV_NVJPG_ALLOCATION_PARAMETERS', field(0, alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02))
-setattr(union_alloc_object_params_v27_00, 'param_NV503B_ALLOC_PARAMETERS', field(0, alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02))
-setattr(union_alloc_object_params_v27_00, 'param_NVC637_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00))
-setattr(union_alloc_object_params_v27_00, 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', field(0, alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03))
-setattr(union_alloc_object_params_v27_00, 'param_NVC638_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06))
-setattr(union_alloc_object_params_v27_00, 'param_NV503C_ALLOC_PARAMETERS', field(0, alloc_object_NV503C_ALLOC_PARAMETERS_v18_15))
-setattr(union_alloc_object_params_v27_00, 'param_NVC670_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01))
-setattr(union_alloc_object_params_v27_00, 'param_NVB1CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03))
-setattr(union_alloc_object_params_v27_00, 'param_NVB2CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03))
-setattr(union_alloc_object_params_v27_00, 'param_NV_GR_ALLOCATION_PARAMETERS', field(0, NV_GR_ALLOCATION_PARAMETERS_v1A_17))
-setattr(union_alloc_object_params_v27_00, 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', field(0, alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B))
-setattr(union_alloc_object_params_v27_00, 'param_NV00F8_ALLOCATION_PARAMETERS', field(0, alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C))
-setattr(union_alloc_object_params_v27_00, 'param_NVC9FA_VIDEO_OFA', field(0, alloc_object_NVC9FA_VIDEO_OFA_v1F_00))
-setattr(union_alloc_object_params_v27_00, 'param_NV2081_ALLOC_PARAMETERS', field(0, alloc_object_NV2081_ALLOC_PARAMETERS_v25_08))
-setattr(union_alloc_object_params_v27_00, 'param_padding', field(0, Array(NvU8, 56)))
-struct_rpc_alloc_object_v27_00.SIZE = 80
-struct_rpc_alloc_object_v27_00._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'param_len', 'params']
-setattr(struct_rpc_alloc_object_v27_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_object_v27_00, 'hParent', field(4, NvHandle))
-setattr(struct_rpc_alloc_object_v27_00, 'hObject', field(8, NvHandle))
-setattr(struct_rpc_alloc_object_v27_00, 'hClass', field(12, NvU32))
-setattr(struct_rpc_alloc_object_v27_00, 'param_len', field(16, NvU32))
-setattr(struct_rpc_alloc_object_v27_00, 'params', field(24, alloc_object_params_v27_00))
 rpc_alloc_object_v27_00 = struct_rpc_alloc_object_v27_00
-class struct_rpc_alloc_object_v29_06(Struct): pass
-class union_alloc_object_params_v29_06(Union): pass
+@record
+class struct_rpc_alloc_object_v29_06:
+  SIZE = 80
+  hClient: Annotated[NvHandle, 0]
+  hParent: Annotated[NvHandle, 4]
+  hObject: Annotated[NvHandle, 8]
+  hClass: Annotated[NvU32, 12]
+  param_len: Annotated[NvU32, 16]
+  params: Annotated[alloc_object_params_v29_06, 24]
+@record
+class union_alloc_object_params_v29_06:
+  SIZE = 56
+  param_NV50_TESLA: Annotated[alloc_object_NV50_TESLA_v03_00, 0]
+  param_GT212_DMA_COPY: Annotated[alloc_object_GT212_DMA_COPY_v03_00, 0]
+  param_GF100_DISP_SW: Annotated[alloc_object_GF100_DISP_SW_v03_00, 0]
+  param_KEPLER_CHANNEL_GROUP_A: Annotated[alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 0]
+  param_FERMI_CONTEXT_SHARE_A: Annotated[alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 0]
+  param_NVD0B7_VIDEO_ENCODER: Annotated[alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 0]
+  param_FERMI_VASPACE_A: Annotated[alloc_object_FERMI_VASPACE_A_v03_00, 0]
+  param_NVB0B0_VIDEO_DECODER: Annotated[alloc_object_NVB0B0_VIDEO_DECODER_v03_00, 0]
+  param_NV83DE_ALLOC_PARAMETERS: Annotated[alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 0]
+  param_NVENC_SW_SESSION: Annotated[alloc_object_NVENC_SW_SESSION_v06_01, 0]
+  param_NVC4B0_VIDEO_DECODER: Annotated[alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 0]
+  param_NVFBC_SW_SESSION: Annotated[alloc_object_NVFBC_SW_SESSION_v12_04, 0]
+  param_NV_NVJPG_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 0]
+  param_NV503B_ALLOC_PARAMETERS: Annotated[alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 0]
+  param_NVC637_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00, 0]
+  param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS: Annotated[alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 0]
+  param_NVC638_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06, 0]
+  param_NV503C_ALLOC_PARAMETERS: Annotated[alloc_object_NV503C_ALLOC_PARAMETERS_v18_15, 0]
+  param_NVC670_ALLOCATION_PARAMETERS: Annotated[alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 0]
+  param_NVB1CC_ALLOC_PARAMETERS: Annotated[alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03, 0]
+  param_NVB2CC_ALLOC_PARAMETERS: Annotated[alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03, 0]
+  param_NV_GR_ALLOCATION_PARAMETERS: Annotated[NV_GR_ALLOCATION_PARAMETERS_v1A_17, 0]
+  param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS: Annotated[alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B, 0]
+  param_NV00F8_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 0]
+  param_NVC9FA_VIDEO_OFA: Annotated[alloc_object_NVC9FA_VIDEO_OFA_v29_06, 0]
+  param_NV2081_ALLOC_PARAMETERS: Annotated[alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 0]
+  param_padding: Annotated[(NvU8* 56), 0]
 alloc_object_params_v29_06 = union_alloc_object_params_v29_06
-class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06(Struct): pass
+@record
+class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06:
+  SIZE = 12
+  size: Annotated[NvU32, 0]
+  prohibitMultipleInstances: Annotated[NvU32, 4]
+  engineInstance: Annotated[NvU32, 8]
 alloc_object_NVC9FA_VIDEO_OFA_v29_06 = struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06
-struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06.SIZE = 12
-struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06._fields_ = ['size', 'prohibitMultipleInstances', 'engineInstance']
-setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06, 'size', field(0, NvU32))
-setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06, 'prohibitMultipleInstances', field(4, NvU32))
-setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06, 'engineInstance', field(8, NvU32))
-union_alloc_object_params_v29_06.SIZE = 56
-union_alloc_object_params_v29_06._fields_ = ['param_NV50_TESLA', 'param_GT212_DMA_COPY', 'param_GF100_DISP_SW', 'param_KEPLER_CHANNEL_GROUP_A', 'param_FERMI_CONTEXT_SHARE_A', 'param_NVD0B7_VIDEO_ENCODER', 'param_FERMI_VASPACE_A', 'param_NVB0B0_VIDEO_DECODER', 'param_NV83DE_ALLOC_PARAMETERS', 'param_NVENC_SW_SESSION', 'param_NVC4B0_VIDEO_DECODER', 'param_NVFBC_SW_SESSION', 'param_NV_NVJPG_ALLOCATION_PARAMETERS', 'param_NV503B_ALLOC_PARAMETERS', 'param_NVC637_ALLOCATION_PARAMETERS', 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', 'param_NVC638_ALLOCATION_PARAMETERS', 'param_NV503C_ALLOC_PARAMETERS', 'param_NVC670_ALLOCATION_PARAMETERS', 'param_NVB1CC_ALLOC_PARAMETERS', 'param_NVB2CC_ALLOC_PARAMETERS', 'param_NV_GR_ALLOCATION_PARAMETERS', 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', 'param_NV00F8_ALLOCATION_PARAMETERS', 'param_NVC9FA_VIDEO_OFA', 'param_NV2081_ALLOC_PARAMETERS', 'param_padding']
-setattr(union_alloc_object_params_v29_06, 'param_NV50_TESLA', field(0, alloc_object_NV50_TESLA_v03_00))
-setattr(union_alloc_object_params_v29_06, 'param_GT212_DMA_COPY', field(0, alloc_object_GT212_DMA_COPY_v03_00))
-setattr(union_alloc_object_params_v29_06, 'param_GF100_DISP_SW', field(0, alloc_object_GF100_DISP_SW_v03_00))
-setattr(union_alloc_object_params_v29_06, 'param_KEPLER_CHANNEL_GROUP_A', field(0, alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08))
-setattr(union_alloc_object_params_v29_06, 'param_FERMI_CONTEXT_SHARE_A', field(0, alloc_object_FERMI_CONTEXT_SHARE_A_v04_00))
-setattr(union_alloc_object_params_v29_06, 'param_NVD0B7_VIDEO_ENCODER', field(0, alloc_object_NVD0B7_VIDEO_ENCODER_v03_00))
-setattr(union_alloc_object_params_v29_06, 'param_FERMI_VASPACE_A', field(0, alloc_object_FERMI_VASPACE_A_v03_00))
-setattr(union_alloc_object_params_v29_06, 'param_NVB0B0_VIDEO_DECODER', field(0, alloc_object_NVB0B0_VIDEO_DECODER_v03_00))
-setattr(union_alloc_object_params_v29_06, 'param_NV83DE_ALLOC_PARAMETERS', field(0, alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00))
-setattr(union_alloc_object_params_v29_06, 'param_NVENC_SW_SESSION', field(0, alloc_object_NVENC_SW_SESSION_v06_01))
-setattr(union_alloc_object_params_v29_06, 'param_NVC4B0_VIDEO_DECODER', field(0, alloc_object_NVC4B0_VIDEO_DECODER_v12_02))
-setattr(union_alloc_object_params_v29_06, 'param_NVFBC_SW_SESSION', field(0, alloc_object_NVFBC_SW_SESSION_v12_04))
-setattr(union_alloc_object_params_v29_06, 'param_NV_NVJPG_ALLOCATION_PARAMETERS', field(0, alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02))
-setattr(union_alloc_object_params_v29_06, 'param_NV503B_ALLOC_PARAMETERS', field(0, alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02))
-setattr(union_alloc_object_params_v29_06, 'param_NVC637_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00))
-setattr(union_alloc_object_params_v29_06, 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', field(0, alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03))
-setattr(union_alloc_object_params_v29_06, 'param_NVC638_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06))
-setattr(union_alloc_object_params_v29_06, 'param_NV503C_ALLOC_PARAMETERS', field(0, alloc_object_NV503C_ALLOC_PARAMETERS_v18_15))
-setattr(union_alloc_object_params_v29_06, 'param_NVC670_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01))
-setattr(union_alloc_object_params_v29_06, 'param_NVB1CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03))
-setattr(union_alloc_object_params_v29_06, 'param_NVB2CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03))
-setattr(union_alloc_object_params_v29_06, 'param_NV_GR_ALLOCATION_PARAMETERS', field(0, NV_GR_ALLOCATION_PARAMETERS_v1A_17))
-setattr(union_alloc_object_params_v29_06, 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', field(0, alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B))
-setattr(union_alloc_object_params_v29_06, 'param_NV00F8_ALLOCATION_PARAMETERS', field(0, alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C))
-setattr(union_alloc_object_params_v29_06, 'param_NVC9FA_VIDEO_OFA', field(0, alloc_object_NVC9FA_VIDEO_OFA_v29_06))
-setattr(union_alloc_object_params_v29_06, 'param_NV2081_ALLOC_PARAMETERS', field(0, alloc_object_NV2081_ALLOC_PARAMETERS_v25_08))
-setattr(union_alloc_object_params_v29_06, 'param_padding', field(0, Array(NvU8, 56)))
-struct_rpc_alloc_object_v29_06.SIZE = 80
-struct_rpc_alloc_object_v29_06._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'param_len', 'params']
-setattr(struct_rpc_alloc_object_v29_06, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_object_v29_06, 'hParent', field(4, NvHandle))
-setattr(struct_rpc_alloc_object_v29_06, 'hObject', field(8, NvHandle))
-setattr(struct_rpc_alloc_object_v29_06, 'hClass', field(12, NvU32))
-setattr(struct_rpc_alloc_object_v29_06, 'param_len', field(16, NvU32))
-setattr(struct_rpc_alloc_object_v29_06, 'params', field(24, alloc_object_params_v29_06))
 rpc_alloc_object_v29_06 = struct_rpc_alloc_object_v29_06
 rpc_alloc_object_v = struct_rpc_alloc_object_v29_06
-class struct_rpc_free_v03_00(Struct): pass
-class struct_NVOS00_PARAMETERS_v03_00(Struct): pass
+@record
+class struct_rpc_free_v03_00:
+  SIZE = 16
+  params: Annotated[NVOS00_PARAMETERS_v03_00, 0]
+@record
+class struct_NVOS00_PARAMETERS_v03_00:
+  SIZE = 16
+  hRoot: Annotated[NvHandle, 0]
+  hObjectParent: Annotated[NvHandle, 4]
+  hObjectOld: Annotated[NvHandle, 8]
+  status: Annotated[NvV32, 12]
 NVOS00_PARAMETERS_v03_00 = struct_NVOS00_PARAMETERS_v03_00
 NvV32 = ctypes.c_uint32
-struct_NVOS00_PARAMETERS_v03_00.SIZE = 16
-struct_NVOS00_PARAMETERS_v03_00._fields_ = ['hRoot', 'hObjectParent', 'hObjectOld', 'status']
-setattr(struct_NVOS00_PARAMETERS_v03_00, 'hRoot', field(0, NvHandle))
-setattr(struct_NVOS00_PARAMETERS_v03_00, 'hObjectParent', field(4, NvHandle))
-setattr(struct_NVOS00_PARAMETERS_v03_00, 'hObjectOld', field(8, NvHandle))
-setattr(struct_NVOS00_PARAMETERS_v03_00, 'status', field(12, NvV32))
-struct_rpc_free_v03_00.SIZE = 16
-struct_rpc_free_v03_00._fields_ = ['params']
-setattr(struct_rpc_free_v03_00, 'params', field(0, NVOS00_PARAMETERS_v03_00))
 rpc_free_v03_00 = struct_rpc_free_v03_00
 rpc_free_v = struct_rpc_free_v03_00
-class struct_rpc_log_v03_00(Struct): pass
-struct_rpc_log_v03_00.SIZE = 8
-struct_rpc_log_v03_00._fields_ = ['level', 'log_len', 'log_msg']
-setattr(struct_rpc_log_v03_00, 'level', field(0, NvU32))
-setattr(struct_rpc_log_v03_00, 'log_len', field(4, NvU32))
-setattr(struct_rpc_log_v03_00, 'log_msg', field(8, Array(ctypes.c_char, 0)))
+@record
+class struct_rpc_log_v03_00:
+  SIZE = 8
+  level: Annotated[NvU32, 0]
+  log_len: Annotated[NvU32, 4]
+  log_msg: Annotated[(ctypes.c_char * 0), 8]
 rpc_log_v03_00 = struct_rpc_log_v03_00
 rpc_log_v = struct_rpc_log_v03_00
-class struct_rpc_map_memory_dma_v03_00(Struct): pass
-class struct_NVOS46_PARAMETERS_v03_00(Struct): pass
+@record
+class struct_rpc_map_memory_dma_v03_00:
+  SIZE = 56
+  params: Annotated[NVOS46_PARAMETERS_v03_00, 0]
+@record
+class struct_NVOS46_PARAMETERS_v03_00:
+  SIZE = 56
+  hClient: Annotated[NvHandle, 0]
+  hDevice: Annotated[NvHandle, 4]
+  hDma: Annotated[NvHandle, 8]
+  hMemory: Annotated[NvHandle, 12]
+  offset: Annotated[NvU64, 16]
+  length: Annotated[NvU64, 24]
+  flags: Annotated[NvV32, 32]
+  dmaOffset: Annotated[NvU64, 40]
+  status: Annotated[NvV32, 48]
 NVOS46_PARAMETERS_v03_00 = struct_NVOS46_PARAMETERS_v03_00
-struct_NVOS46_PARAMETERS_v03_00.SIZE = 56
-struct_NVOS46_PARAMETERS_v03_00._fields_ = ['hClient', 'hDevice', 'hDma', 'hMemory', 'offset', 'length', 'flags', 'dmaOffset', 'status']
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'hDevice', field(4, NvHandle))
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'hDma', field(8, NvHandle))
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'hMemory', field(12, NvHandle))
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'offset', field(16, NvU64))
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'length', field(24, NvU64))
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'flags', field(32, NvV32))
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'dmaOffset', field(40, NvU64))
-setattr(struct_NVOS46_PARAMETERS_v03_00, 'status', field(48, NvV32))
-struct_rpc_map_memory_dma_v03_00.SIZE = 56
-struct_rpc_map_memory_dma_v03_00._fields_ = ['params']
-setattr(struct_rpc_map_memory_dma_v03_00, 'params', field(0, NVOS46_PARAMETERS_v03_00))
 rpc_map_memory_dma_v03_00 = struct_rpc_map_memory_dma_v03_00
 rpc_map_memory_dma_v = struct_rpc_map_memory_dma_v03_00
-class struct_rpc_unmap_memory_dma_v03_00(Struct): pass
-class struct_NVOS47_PARAMETERS_v03_00(Struct): pass
+@record
+class struct_rpc_unmap_memory_dma_v03_00:
+  SIZE = 40
+  params: Annotated[NVOS47_PARAMETERS_v03_00, 0]
+@record
+class struct_NVOS47_PARAMETERS_v03_00:
+  SIZE = 40
+  hClient: Annotated[NvHandle, 0]
+  hDevice: Annotated[NvHandle, 4]
+  hDma: Annotated[NvHandle, 8]
+  hMemory: Annotated[NvHandle, 12]
+  flags: Annotated[NvV32, 16]
+  dmaOffset: Annotated[NvU64, 24]
+  status: Annotated[NvV32, 32]
 NVOS47_PARAMETERS_v03_00 = struct_NVOS47_PARAMETERS_v03_00
-struct_NVOS47_PARAMETERS_v03_00.SIZE = 40
-struct_NVOS47_PARAMETERS_v03_00._fields_ = ['hClient', 'hDevice', 'hDma', 'hMemory', 'flags', 'dmaOffset', 'status']
-setattr(struct_NVOS47_PARAMETERS_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_NVOS47_PARAMETERS_v03_00, 'hDevice', field(4, NvHandle))
-setattr(struct_NVOS47_PARAMETERS_v03_00, 'hDma', field(8, NvHandle))
-setattr(struct_NVOS47_PARAMETERS_v03_00, 'hMemory', field(12, NvHandle))
-setattr(struct_NVOS47_PARAMETERS_v03_00, 'flags', field(16, NvV32))
-setattr(struct_NVOS47_PARAMETERS_v03_00, 'dmaOffset', field(24, NvU64))
-setattr(struct_NVOS47_PARAMETERS_v03_00, 'status', field(32, NvV32))
-struct_rpc_unmap_memory_dma_v03_00.SIZE = 40
-struct_rpc_unmap_memory_dma_v03_00._fields_ = ['params']
-setattr(struct_rpc_unmap_memory_dma_v03_00, 'params', field(0, NVOS47_PARAMETERS_v03_00))
 rpc_unmap_memory_dma_v03_00 = struct_rpc_unmap_memory_dma_v03_00
 rpc_unmap_memory_dma_v = struct_rpc_unmap_memory_dma_v03_00
-class struct_rpc_alloc_subdevice_v08_01(Struct): pass
-class struct_NVOS21_PARAMETERS_v03_00(Struct): pass
+@record
+class struct_rpc_alloc_subdevice_v08_01:
+  SIZE = 40
+  subDeviceInst: Annotated[NvU32, 0]
+  params: Annotated[NVOS21_PARAMETERS_v03_00, 8]
+@record
+class struct_NVOS21_PARAMETERS_v03_00:
+  SIZE = 32
+  hRoot: Annotated[NvHandle, 0]
+  hObjectParent: Annotated[NvHandle, 4]
+  hObjectNew: Annotated[NvHandle, 8]
+  hClass: Annotated[NvV32, 12]
+  pAllocParms: Annotated[NvP64, 16]
+  status: Annotated[NvV32, 24]
 NVOS21_PARAMETERS_v03_00 = struct_NVOS21_PARAMETERS_v03_00
-NvP64 = ctypes.c_void_p
-struct_NVOS21_PARAMETERS_v03_00.SIZE = 32
-struct_NVOS21_PARAMETERS_v03_00._fields_ = ['hRoot', 'hObjectParent', 'hObjectNew', 'hClass', 'pAllocParms', 'status']
-setattr(struct_NVOS21_PARAMETERS_v03_00, 'hRoot', field(0, NvHandle))
-setattr(struct_NVOS21_PARAMETERS_v03_00, 'hObjectParent', field(4, NvHandle))
-setattr(struct_NVOS21_PARAMETERS_v03_00, 'hObjectNew', field(8, NvHandle))
-setattr(struct_NVOS21_PARAMETERS_v03_00, 'hClass', field(12, NvV32))
-setattr(struct_NVOS21_PARAMETERS_v03_00, 'pAllocParms', field(16, NvP64))
-setattr(struct_NVOS21_PARAMETERS_v03_00, 'status', field(24, NvV32))
-struct_rpc_alloc_subdevice_v08_01.SIZE = 40
-struct_rpc_alloc_subdevice_v08_01._fields_ = ['subDeviceInst', 'params']
-setattr(struct_rpc_alloc_subdevice_v08_01, 'subDeviceInst', field(0, NvU32))
-setattr(struct_rpc_alloc_subdevice_v08_01, 'params', field(8, NVOS21_PARAMETERS_v03_00))
+NvP64 = ctypes.POINTER(None)
 rpc_alloc_subdevice_v08_01 = struct_rpc_alloc_subdevice_v08_01
 rpc_alloc_subdevice_v = struct_rpc_alloc_subdevice_v08_01
-class struct_rpc_dup_object_v03_00(Struct): pass
-class struct_NVOS55_PARAMETERS_v03_00(Struct): pass
+@record
+class struct_rpc_dup_object_v03_00:
+  SIZE = 28
+  params: Annotated[NVOS55_PARAMETERS_v03_00, 0]
+@record
+class struct_NVOS55_PARAMETERS_v03_00:
+  SIZE = 28
+  hClient: Annotated[NvHandle, 0]
+  hParent: Annotated[NvHandle, 4]
+  hObject: Annotated[NvHandle, 8]
+  hClientSrc: Annotated[NvHandle, 12]
+  hObjectSrc: Annotated[NvHandle, 16]
+  flags: Annotated[NvU32, 20]
+  status: Annotated[NvU32, 24]
 NVOS55_PARAMETERS_v03_00 = struct_NVOS55_PARAMETERS_v03_00
-struct_NVOS55_PARAMETERS_v03_00.SIZE = 28
-struct_NVOS55_PARAMETERS_v03_00._fields_ = ['hClient', 'hParent', 'hObject', 'hClientSrc', 'hObjectSrc', 'flags', 'status']
-setattr(struct_NVOS55_PARAMETERS_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_NVOS55_PARAMETERS_v03_00, 'hParent', field(4, NvHandle))
-setattr(struct_NVOS55_PARAMETERS_v03_00, 'hObject', field(8, NvHandle))
-setattr(struct_NVOS55_PARAMETERS_v03_00, 'hClientSrc', field(12, NvHandle))
-setattr(struct_NVOS55_PARAMETERS_v03_00, 'hObjectSrc', field(16, NvHandle))
-setattr(struct_NVOS55_PARAMETERS_v03_00, 'flags', field(20, NvU32))
-setattr(struct_NVOS55_PARAMETERS_v03_00, 'status', field(24, NvU32))
-struct_rpc_dup_object_v03_00.SIZE = 28
-struct_rpc_dup_object_v03_00._fields_ = ['params']
-setattr(struct_rpc_dup_object_v03_00, 'params', field(0, NVOS55_PARAMETERS_v03_00))
 rpc_dup_object_v03_00 = struct_rpc_dup_object_v03_00
 rpc_dup_object_v = struct_rpc_dup_object_v03_00
-class struct_rpc_idle_channels_v03_00(Struct): pass
-class struct_idle_channel_list_v03_00(Struct): pass
+@record
+class struct_rpc_idle_channels_v03_00:
+  SIZE = 12
+  flags: Annotated[NvU32, 0]
+  timeout: Annotated[NvU32, 4]
+  nchannels: Annotated[NvU32, 8]
+  channel_list: Annotated[(idle_channel_list_v03_00 * 0), 12]
+@record
+class struct_idle_channel_list_v03_00:
+  SIZE = 12
+  phClient: Annotated[NvU32, 0]
+  phDevice: Annotated[NvU32, 4]
+  phChannel: Annotated[NvU32, 8]
 idle_channel_list_v03_00 = struct_idle_channel_list_v03_00
-struct_idle_channel_list_v03_00.SIZE = 12
-struct_idle_channel_list_v03_00._fields_ = ['phClient', 'phDevice', 'phChannel']
-setattr(struct_idle_channel_list_v03_00, 'phClient', field(0, NvU32))
-setattr(struct_idle_channel_list_v03_00, 'phDevice', field(4, NvU32))
-setattr(struct_idle_channel_list_v03_00, 'phChannel', field(8, NvU32))
-struct_rpc_idle_channels_v03_00.SIZE = 12
-struct_rpc_idle_channels_v03_00._fields_ = ['flags', 'timeout', 'nchannels', 'channel_list']
-setattr(struct_rpc_idle_channels_v03_00, 'flags', field(0, NvU32))
-setattr(struct_rpc_idle_channels_v03_00, 'timeout', field(4, NvU32))
-setattr(struct_rpc_idle_channels_v03_00, 'nchannels', field(8, NvU32))
-setattr(struct_rpc_idle_channels_v03_00, 'channel_list', field(12, Array(idle_channel_list_v03_00, 0)))
 rpc_idle_channels_v03_00 = struct_rpc_idle_channels_v03_00
 rpc_idle_channels_v = struct_rpc_idle_channels_v03_00
-class struct_rpc_alloc_event_v03_00(Struct): pass
-struct_rpc_alloc_event_v03_00.SIZE = 28
-struct_rpc_alloc_event_v03_00._fields_ = ['hClient', 'hParentClient', 'hChannel', 'hObject', 'hEvent', 'hClass', 'notifyIndex']
-setattr(struct_rpc_alloc_event_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_event_v03_00, 'hParentClient', field(4, NvHandle))
-setattr(struct_rpc_alloc_event_v03_00, 'hChannel', field(8, NvHandle))
-setattr(struct_rpc_alloc_event_v03_00, 'hObject', field(12, NvHandle))
-setattr(struct_rpc_alloc_event_v03_00, 'hEvent', field(16, NvHandle))
-setattr(struct_rpc_alloc_event_v03_00, 'hClass', field(20, NvU32))
-setattr(struct_rpc_alloc_event_v03_00, 'notifyIndex', field(24, NvU32))
+@record
+class struct_rpc_alloc_event_v03_00:
+  SIZE = 28
+  hClient: Annotated[NvHandle, 0]
+  hParentClient: Annotated[NvHandle, 4]
+  hChannel: Annotated[NvHandle, 8]
+  hObject: Annotated[NvHandle, 12]
+  hEvent: Annotated[NvHandle, 16]
+  hClass: Annotated[NvU32, 20]
+  notifyIndex: Annotated[NvU32, 24]
 rpc_alloc_event_v03_00 = struct_rpc_alloc_event_v03_00
 rpc_alloc_event_v = struct_rpc_alloc_event_v03_00
-class struct_rpc_rm_api_control_v25_0D(Struct): pass
-class struct_NVOS54_PARAMETERS_v03_00(Struct): pass
+@record
+class struct_rpc_rm_api_control_v25_0D:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
+@record
+class struct_NVOS54_PARAMETERS_v03_00:
+  SIZE = 32
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  cmd: Annotated[NvRmctrlCmd, 8]
+  params: Annotated[NvP64, 16]
+  paramsSize: Annotated[NvU32, 24]
+  status: Annotated[NvV32, 28]
 NVOS54_PARAMETERS_v03_00 = struct_NVOS54_PARAMETERS_v03_00
 NvRmctrlCmd = ctypes.c_uint32
-struct_NVOS54_PARAMETERS_v03_00.SIZE = 32
-struct_NVOS54_PARAMETERS_v03_00._fields_ = ['hClient', 'hObject', 'cmd', 'params', 'paramsSize', 'status']
-setattr(struct_NVOS54_PARAMETERS_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_NVOS54_PARAMETERS_v03_00, 'hObject', field(4, NvHandle))
-setattr(struct_NVOS54_PARAMETERS_v03_00, 'cmd', field(8, NvRmctrlCmd))
-setattr(struct_NVOS54_PARAMETERS_v03_00, 'params', field(16, NvP64))
-setattr(struct_NVOS54_PARAMETERS_v03_00, 'paramsSize', field(24, NvU32))
-setattr(struct_NVOS54_PARAMETERS_v03_00, 'status', field(28, NvV32))
-struct_rpc_rm_api_control_v25_0D.SIZE = 40
-struct_rpc_rm_api_control_v25_0D._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_0D, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_0D, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_0D = struct_rpc_rm_api_control_v25_0D
-class struct_rpc_rm_api_control_v25_0F(Struct): pass
-struct_rpc_rm_api_control_v25_0F.SIZE = 40
-struct_rpc_rm_api_control_v25_0F._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_0F, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_0F, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_0F:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_0F = struct_rpc_rm_api_control_v25_0F
-class struct_rpc_rm_api_control_v25_10(Struct): pass
-struct_rpc_rm_api_control_v25_10.SIZE = 40
-struct_rpc_rm_api_control_v25_10._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_10, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_10, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_10:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_10 = struct_rpc_rm_api_control_v25_10
-class struct_rpc_rm_api_control_v25_14(Struct): pass
-struct_rpc_rm_api_control_v25_14.SIZE = 40
-struct_rpc_rm_api_control_v25_14._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_14, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_14, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_14:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_14 = struct_rpc_rm_api_control_v25_14
-class struct_rpc_rm_api_control_v25_15(Struct): pass
-struct_rpc_rm_api_control_v25_15.SIZE = 40
-struct_rpc_rm_api_control_v25_15._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_15, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_15, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_15:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_15 = struct_rpc_rm_api_control_v25_15
-class struct_rpc_rm_api_control_v25_16(Struct): pass
-struct_rpc_rm_api_control_v25_16.SIZE = 40
-struct_rpc_rm_api_control_v25_16._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_16, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_16, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_16:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_16 = struct_rpc_rm_api_control_v25_16
-class struct_rpc_rm_api_control_v25_17(Struct): pass
-struct_rpc_rm_api_control_v25_17.SIZE = 40
-struct_rpc_rm_api_control_v25_17._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_17, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_17, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_17:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_17 = struct_rpc_rm_api_control_v25_17
-class struct_rpc_rm_api_control_v25_18(Struct): pass
-struct_rpc_rm_api_control_v25_18.SIZE = 40
-struct_rpc_rm_api_control_v25_18._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_18, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_18, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_18:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_18 = struct_rpc_rm_api_control_v25_18
-class struct_rpc_rm_api_control_v25_19(Struct): pass
-struct_rpc_rm_api_control_v25_19.SIZE = 40
-struct_rpc_rm_api_control_v25_19._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_19, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_19, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_19:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_19 = struct_rpc_rm_api_control_v25_19
-class struct_rpc_rm_api_control_v25_1A(Struct): pass
-struct_rpc_rm_api_control_v25_1A.SIZE = 40
-struct_rpc_rm_api_control_v25_1A._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v25_1A, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v25_1A, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v25_1A:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_1A = struct_rpc_rm_api_control_v25_1A
-class struct_rpc_rm_api_control_v27_03(Struct): pass
-struct_rpc_rm_api_control_v27_03.SIZE = 40
-struct_rpc_rm_api_control_v27_03._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v27_03, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v27_03, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v27_03:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v27_03 = struct_rpc_rm_api_control_v27_03
-class struct_rpc_rm_api_control_v29_04(Struct): pass
-struct_rpc_rm_api_control_v29_04.SIZE = 40
-struct_rpc_rm_api_control_v29_04._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v29_04, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v29_04, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v29_04:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v29_04 = struct_rpc_rm_api_control_v29_04
-class struct_rpc_rm_api_control_v29_09(Struct): pass
-struct_rpc_rm_api_control_v29_09.SIZE = 40
-struct_rpc_rm_api_control_v29_09._fields_ = ['params', 'rm_api_params']
-setattr(struct_rpc_rm_api_control_v29_09, 'params', field(0, NVOS54_PARAMETERS_v03_00))
-setattr(struct_rpc_rm_api_control_v29_09, 'rm_api_params', field(32, NvP64))
+@record
+class struct_rpc_rm_api_control_v29_09:
+  SIZE = 40
+  params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
+  rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v29_09 = struct_rpc_rm_api_control_v29_09
 rpc_rm_api_control_v = struct_rpc_rm_api_control_v29_09
-class struct_rpc_alloc_share_device_v03_00(Struct): pass
-class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00(Struct): pass
+@record
+class struct_rpc_alloc_share_device_v03_00:
+  SIZE = 64
+  hClient: Annotated[NvHandle, 0]
+  hDevice: Annotated[NvHandle, 4]
+  hClass: Annotated[NvU32, 8]
+  params: Annotated[NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 16]
+@record
+class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00:
+  SIZE = 48
+  szName: Annotated[NvP64, 0]
+  hClientShare: Annotated[NvHandle, 8]
+  hTargetClient: Annotated[NvHandle, 12]
+  hTargetDevice: Annotated[NvHandle, 16]
+  flags: Annotated[NvV32, 20]
+  vaSpaceSize: Annotated[NvU64, 24]
+  vaMode: Annotated[NvV32, 32]
+  vaBase: Annotated[NvU64, 40]
 NV_DEVICE_ALLOCATION_PARAMETERS_v03_00 = struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00
-struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00.SIZE = 48
-struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00._fields_ = ['szName', 'hClientShare', 'hTargetClient', 'hTargetDevice', 'flags', 'vaSpaceSize', 'vaMode', 'vaBase']
-setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'szName', field(0, NvP64))
-setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'hClientShare', field(8, NvHandle))
-setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'hTargetClient', field(12, NvHandle))
-setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'hTargetDevice', field(16, NvHandle))
-setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'flags', field(20, NvV32))
-setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'vaSpaceSize', field(24, NvU64))
-setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'vaMode', field(32, NvV32))
-setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'vaBase', field(40, NvU64))
-struct_rpc_alloc_share_device_v03_00.SIZE = 64
-struct_rpc_alloc_share_device_v03_00._fields_ = ['hClient', 'hDevice', 'hClass', 'params']
-setattr(struct_rpc_alloc_share_device_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_alloc_share_device_v03_00, 'hDevice', field(4, NvHandle))
-setattr(struct_rpc_alloc_share_device_v03_00, 'hClass', field(8, NvU32))
-setattr(struct_rpc_alloc_share_device_v03_00, 'params', field(16, NV_DEVICE_ALLOCATION_PARAMETERS_v03_00))
 rpc_alloc_share_device_v03_00 = struct_rpc_alloc_share_device_v03_00
 rpc_alloc_share_device_v = struct_rpc_alloc_share_device_v03_00
-class struct_rpc_get_engine_utilization_v1F_0E(Struct): pass
-class union_vgpuGetEngineUtilization_data_v1F_0E(Union): pass
+@record
+class struct_rpc_get_engine_utilization_v1F_0E:
+  SIZE = 4048
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  cmd: Annotated[NvU32, 8]
+  params: Annotated[vgpuGetEngineUtilization_data_v1F_0E, 16]
+@record
+class union_vgpuGetEngineUtilization_data_v1F_0E:
+  SIZE = 4032
+  vidPerfmonSample: Annotated[NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00, 0]
+  getAccountingState: Annotated[NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C, 0]
+  setAccountingState: Annotated[NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C, 0]
+  getAccountingPidList: Annotated[NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 0]
+  procAccountingInfo: Annotated[NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 0]
+  clearAccountingInfo: Annotated[NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C, 0]
+  gpumonPerfmonsampleV2: Annotated[(NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E* 72), 0]
 vgpuGetEngineUtilization_data_v1F_0E = union_vgpuGetEngineUtilization_data_v1F_0E
-class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00(Struct): pass
+@record
+class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00:
+  SIZE = 12
+  engineType: Annotated[NV2080_CTRL_CMD_PERF_VID_ENG, 0]
+  clkPercentBusy: Annotated[NvU32, 4]
+  samplingPeriodUs: Annotated[NvU32, 8]
 NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00 = struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00
 enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint32)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVENC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVENC', 1)
@@ -1284,981 +1306,973 @@ NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('N
 NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA', 4)
 
 NV2080_CTRL_CMD_PERF_VID_ENG = enum_NV2080_CTRL_CMD_PERF_VID_ENG
-struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00.SIZE = 12
-struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00._fields_ = ['engineType', 'clkPercentBusy', 'samplingPeriodUs']
-setattr(struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00, 'engineType', field(0, NV2080_CTRL_CMD_PERF_VID_ENG))
-setattr(struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00, 'clkPercentBusy', field(4, NvU32))
-setattr(struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00, 'samplingPeriodUs', field(8, NvU32))
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C(Struct): pass
+@record
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C:
+  SIZE = 12
+  gpuId: Annotated[NvU32, 0]
+  vmPid: Annotated[NvU32, 4]
+  state: Annotated[NvU32, 8]
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C.SIZE = 12
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = ['gpuId', 'vmPid', 'state']
-setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C, 'vmPid', field(4, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C, 'state', field(8, NvU32))
-class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C(Struct): pass
+@record
+class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C:
+  SIZE = 12
+  gpuId: Annotated[NvU32, 0]
+  vmPid: Annotated[NvU32, 4]
+  newState: Annotated[NvU32, 8]
 NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C.SIZE = 12
-struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = ['gpuId', 'vmPid', 'newState']
-setattr(struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C, 'vmPid', field(4, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C, 'newState', field(8, NvU32))
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C(Struct): pass
+@record
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C:
+  SIZE = 4016
+  gpuId: Annotated[NvU32, 0]
+  vmPid: Annotated[NvU32, 4]
+  passIndex: Annotated[NvU32, 8]
+  pidCount: Annotated[NvU32, 12]
+  pidTable: Annotated[(NvU32* 1000), 16]
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C.SIZE = 4016
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C._fields_ = ['gpuId', 'vmPid', 'passIndex', 'pidCount', 'pidTable']
-setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'vmPid', field(4, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'passIndex', field(8, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'pidCount', field(12, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'pidTable', field(16, Array(NvU32, 1000)))
-class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C(Struct): pass
+@record
+class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C:
+  SIZE = 48
+  gpuId: Annotated[NvU32, 0]
+  pid: Annotated[NvU32, 4]
+  subPid: Annotated[NvU32, 8]
+  gpuUtil: Annotated[NvU32, 12]
+  fbUtil: Annotated[NvU32, 16]
+  maxFbUsage: Annotated[NvU64, 24]
+  startTime: Annotated[NvU64, 32]
+  endTime: Annotated[NvU64, 40]
 NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C.SIZE = 48
-struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C._fields_ = ['gpuId', 'pid', 'subPid', 'gpuUtil', 'fbUtil', 'maxFbUsage', 'startTime', 'endTime']
-setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'pid', field(4, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'subPid', field(8, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'gpuUtil', field(12, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'fbUtil', field(16, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'maxFbUsage', field(24, NvU64))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'startTime', field(32, NvU64))
-setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'endTime', field(40, NvU64))
-class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C(Struct): pass
+@record
+class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C:
+  SIZE = 8
+  gpuId: Annotated[NvU32, 0]
+  vmPid: Annotated[NvU32, 4]
 NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C.SIZE = 8
-struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C._fields_ = ['gpuId', 'vmPid']
-setattr(struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
-setattr(struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C, 'vmPid', field(4, NvU32))
-class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E(Struct): pass
+@record
+class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E:
+  SIZE = 56
+  timeStamp: Annotated[NvU64, 0]
+  fb: Annotated[NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 8]
+  gr: Annotated[NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 20]
+  nvenc: Annotated[NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 32]
+  nvdec: Annotated[NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 44]
 NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E = struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E
-class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00(Struct): pass
+@record
+class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00:
+  SIZE = 12
+  util: Annotated[NvU32, 0]
+  procId: Annotated[NvU32, 4]
+  subProcessID: Annotated[NvU32, 8]
 NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00 = struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00
-struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00.SIZE = 12
-struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00._fields_ = ['util', 'procId', 'subProcessID']
-setattr(struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 'util', field(0, NvU32))
-setattr(struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 'procId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 'subProcessID', field(8, NvU32))
-struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E.SIZE = 56
-struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E._fields_ = ['timeStamp', 'fb', 'gr', 'nvenc', 'nvdec']
-setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'timeStamp', field(0, NvU64))
-setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'fb', field(8, NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00))
-setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'gr', field(20, NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00))
-setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'nvenc', field(32, NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00))
-setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'nvdec', field(44, NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00))
-union_vgpuGetEngineUtilization_data_v1F_0E.SIZE = 4032
-union_vgpuGetEngineUtilization_data_v1F_0E._fields_ = ['vidPerfmonSample', 'getAccountingState', 'setAccountingState', 'getAccountingPidList', 'procAccountingInfo', 'clearAccountingInfo', 'gpumonPerfmonsampleV2']
-setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'vidPerfmonSample', field(0, NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00))
-setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'getAccountingState', field(0, NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C))
-setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'setAccountingState', field(0, NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C))
-setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'getAccountingPidList', field(0, NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C))
-setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'procAccountingInfo', field(0, NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C))
-setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'clearAccountingInfo', field(0, NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C))
-setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'gpumonPerfmonsampleV2', field(0, Array(NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 72)))
-struct_rpc_get_engine_utilization_v1F_0E.SIZE = 4048
-struct_rpc_get_engine_utilization_v1F_0E._fields_ = ['hClient', 'hObject', 'cmd', 'params']
-setattr(struct_rpc_get_engine_utilization_v1F_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_get_engine_utilization_v1F_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_get_engine_utilization_v1F_0E, 'cmd', field(8, NvU32))
-setattr(struct_rpc_get_engine_utilization_v1F_0E, 'params', field(16, vgpuGetEngineUtilization_data_v1F_0E))
 rpc_get_engine_utilization_v1F_0E = struct_rpc_get_engine_utilization_v1F_0E
 rpc_get_engine_utilization_v = struct_rpc_get_engine_utilization_v1F_0E
-class struct_rpc_perf_get_level_info_v03_00(Struct): pass
-struct_rpc_perf_get_level_info_v03_00.SIZE = 24
-struct_rpc_perf_get_level_info_v03_00._fields_ = ['hClient', 'hObject', 'level', 'flags', 'perfGetClkInfoListSize', 'param_size', 'params']
-setattr(struct_rpc_perf_get_level_info_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_perf_get_level_info_v03_00, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_perf_get_level_info_v03_00, 'level', field(8, NvU32))
-setattr(struct_rpc_perf_get_level_info_v03_00, 'flags', field(12, NvU32))
-setattr(struct_rpc_perf_get_level_info_v03_00, 'perfGetClkInfoListSize', field(16, NvU32))
-setattr(struct_rpc_perf_get_level_info_v03_00, 'param_size', field(20, NvU32))
-setattr(struct_rpc_perf_get_level_info_v03_00, 'params', field(24, Array(NvU32, 0)))
+@record
+class struct_rpc_perf_get_level_info_v03_00:
+  SIZE = 24
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  level: Annotated[NvU32, 8]
+  flags: Annotated[NvU32, 12]
+  perfGetClkInfoListSize: Annotated[NvU32, 16]
+  param_size: Annotated[NvU32, 20]
+  params: Annotated[(NvU32 * 0), 24]
 rpc_perf_get_level_info_v03_00 = struct_rpc_perf_get_level_info_v03_00
 rpc_perf_get_level_info_v = struct_rpc_perf_get_level_info_v03_00
-class struct_rpc_set_surface_properties_v07_07(Struct): pass
-class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07(Struct): pass
+@record
+class struct_rpc_set_surface_properties_v07_07:
+  SIZE = 76
+  hClient: Annotated[NvHandle, 0]
+  params: Annotated[NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 4]
+@record
+class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07:
+  SIZE = 72
+  headIndex: Annotated[NvU32, 0]
+  isPrimary: Annotated[NvU32, 4]
+  offset: Annotated[NvU32, 8]
+  surfaceType: Annotated[NvU32, 12]
+  surfaceBlockHeight: Annotated[NvU32, 16]
+  surfacePitch: Annotated[NvU32, 20]
+  surfaceFormat: Annotated[NvU32, 24]
+  surfaceWidth: Annotated[NvU32, 28]
+  surfaceHeight: Annotated[NvU32, 32]
+  rectX: Annotated[NvU32, 36]
+  rectY: Annotated[NvU32, 40]
+  rectWidth: Annotated[NvU32, 44]
+  rectHeight: Annotated[NvU32, 48]
+  surfaceSize: Annotated[NvU32, 52]
+  surfaceKind: Annotated[NvU32, 56]
+  hHwResDevice: Annotated[NvU32, 60]
+  hHwResHandle: Annotated[NvU32, 64]
+  effectiveFbPageSize: Annotated[NvU32, 68]
 NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07 = struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07
-struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07.SIZE = 72
-struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07._fields_ = ['headIndex', 'isPrimary', 'offset', 'surfaceType', 'surfaceBlockHeight', 'surfacePitch', 'surfaceFormat', 'surfaceWidth', 'surfaceHeight', 'rectX', 'rectY', 'rectWidth', 'rectHeight', 'surfaceSize', 'surfaceKind', 'hHwResDevice', 'hHwResHandle', 'effectiveFbPageSize']
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'headIndex', field(0, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'isPrimary', field(4, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'offset', field(8, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceType', field(12, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceBlockHeight', field(16, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfacePitch', field(20, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceFormat', field(24, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceWidth', field(28, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceHeight', field(32, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'rectX', field(36, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'rectY', field(40, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'rectWidth', field(44, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'rectHeight', field(48, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceSize', field(52, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceKind', field(56, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'hHwResDevice', field(60, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'hHwResHandle', field(64, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'effectiveFbPageSize', field(68, NvU32))
-struct_rpc_set_surface_properties_v07_07.SIZE = 76
-struct_rpc_set_surface_properties_v07_07._fields_ = ['hClient', 'params']
-setattr(struct_rpc_set_surface_properties_v07_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_set_surface_properties_v07_07, 'params', field(4, NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07))
 rpc_set_surface_properties_v07_07 = struct_rpc_set_surface_properties_v07_07
 rpc_set_surface_properties_v = struct_rpc_set_surface_properties_v07_07
-class struct_rpc_cleanup_surface_v03_00(Struct): pass
-class struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_cleanup_surface_v03_00:
+  SIZE = 8
+  params: Annotated[NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00, 0]
+@record
+class struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00:
+  SIZE = 8
+  headIndex: Annotated[NvU32, 0]
+  blankingEnabled: Annotated[NvU32, 4]
 NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00 = struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00
-struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00.SIZE = 8
-struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00._fields_ = ['headIndex', 'blankingEnabled']
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00, 'headIndex', field(0, NvU32))
-setattr(struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00, 'blankingEnabled', field(4, NvU32))
-struct_rpc_cleanup_surface_v03_00.SIZE = 8
-struct_rpc_cleanup_surface_v03_00._fields_ = ['params']
-setattr(struct_rpc_cleanup_surface_v03_00, 'params', field(0, NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00))
 rpc_cleanup_surface_v03_00 = struct_rpc_cleanup_surface_v03_00
 rpc_cleanup_surface_v = struct_rpc_cleanup_surface_v03_00
-class struct_rpc_unloading_guest_driver_v1F_07(Struct): pass
-struct_rpc_unloading_guest_driver_v1F_07.SIZE = 8
-struct_rpc_unloading_guest_driver_v1F_07._fields_ = ['bInPMTransition', 'bGc6Entering', 'newLevel']
-setattr(struct_rpc_unloading_guest_driver_v1F_07, 'bInPMTransition', field(0, NvBool))
-setattr(struct_rpc_unloading_guest_driver_v1F_07, 'bGc6Entering', field(1, NvBool))
-setattr(struct_rpc_unloading_guest_driver_v1F_07, 'newLevel', field(4, NvU32))
+@record
+class struct_rpc_unloading_guest_driver_v1F_07:
+  SIZE = 8
+  bInPMTransition: Annotated[NvBool, 0]
+  bGc6Entering: Annotated[NvBool, 1]
+  newLevel: Annotated[NvU32, 4]
 rpc_unloading_guest_driver_v1F_07 = struct_rpc_unloading_guest_driver_v1F_07
 rpc_unloading_guest_driver_v = struct_rpc_unloading_guest_driver_v1F_07
-class struct_rpc_gpu_exec_reg_ops_v12_01(Struct): pass
-class struct_gpu_exec_reg_ops_v12_01(Struct): pass
+@record
+class struct_rpc_gpu_exec_reg_ops_v12_01:
+  SIZE = 56
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[gpu_exec_reg_ops_v12_01, 8]
+@record
+class struct_gpu_exec_reg_ops_v12_01:
+  SIZE = 48
+  reg_op_params: Annotated[NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 0]
+  operations: Annotated[(NV2080_CTRL_GPU_REG_OP_v03_00 * 0), 48]
 gpu_exec_reg_ops_v12_01 = struct_gpu_exec_reg_ops_v12_01
-class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01(Struct): pass
+@record
+class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01:
+  SIZE = 48
+  hClientTarget: Annotated[NvHandle, 0]
+  hChannelTarget: Annotated[NvHandle, 4]
+  reserved00: Annotated[(NvU32* 3), 8]
+  regOpCount: Annotated[NvU32, 20]
+  grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 24]
+  regOps: Annotated[NvP64, 40]
 NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01 = struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01
-class struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01(Struct): pass
+@record
+class struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01:
+  SIZE = 16
+  flags: Annotated[NvU32, 0]
+  route: Annotated[NvU64, 8]
 NV2080_CTRL_GR_ROUTE_INFO_v12_01 = struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01
-struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01.SIZE = 16
-struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01._fields_ = ['flags', 'route']
-setattr(struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01, 'flags', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01, 'route', field(8, NvU64))
-struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01.SIZE = 48
-struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01._fields_ = ['hClientTarget', 'hChannelTarget', 'reserved00', 'regOpCount', 'grRouteInfo', 'regOps']
-setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'hClientTarget', field(0, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'hChannelTarget', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'reserved00', field(8, Array(NvU32, 3)))
-setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'regOpCount', field(20, NvU32))
-setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'grRouteInfo', field(24, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
-setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'regOps', field(40, NvP64))
-class struct_NV2080_CTRL_GPU_REG_OP_v03_00(Struct): pass
+@record
+class struct_NV2080_CTRL_GPU_REG_OP_v03_00:
+  SIZE = 32
+  regOp: Annotated[NvU8, 0]
+  regType: Annotated[NvU8, 1]
+  regStatus: Annotated[NvU8, 2]
+  regQuad: Annotated[NvU8, 3]
+  regGroupMask: Annotated[NvU32, 4]
+  regSubGroupMask: Annotated[NvU32, 8]
+  regOffset: Annotated[NvU32, 12]
+  regValueHi: Annotated[NvU32, 16]
+  regValueLo: Annotated[NvU32, 20]
+  regAndNMaskHi: Annotated[NvU32, 24]
+  regAndNMaskLo: Annotated[NvU32, 28]
 NV2080_CTRL_GPU_REG_OP_v03_00 = struct_NV2080_CTRL_GPU_REG_OP_v03_00
-struct_NV2080_CTRL_GPU_REG_OP_v03_00.SIZE = 32
-struct_NV2080_CTRL_GPU_REG_OP_v03_00._fields_ = ['regOp', 'regType', 'regStatus', 'regQuad', 'regGroupMask', 'regSubGroupMask', 'regOffset', 'regValueHi', 'regValueLo', 'regAndNMaskHi', 'regAndNMaskLo']
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regOp', field(0, NvU8))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regType', field(1, NvU8))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regStatus', field(2, NvU8))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regQuad', field(3, NvU8))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regGroupMask', field(4, NvU32))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regSubGroupMask', field(8, NvU32))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regOffset', field(12, NvU32))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regValueHi', field(16, NvU32))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regValueLo', field(20, NvU32))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regAndNMaskHi', field(24, NvU32))
-setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regAndNMaskLo', field(28, NvU32))
-struct_gpu_exec_reg_ops_v12_01.SIZE = 48
-struct_gpu_exec_reg_ops_v12_01._fields_ = ['reg_op_params', 'operations']
-setattr(struct_gpu_exec_reg_ops_v12_01, 'reg_op_params', field(0, NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01))
-setattr(struct_gpu_exec_reg_ops_v12_01, 'operations', field(48, Array(NV2080_CTRL_GPU_REG_OP_v03_00, 0)))
-struct_rpc_gpu_exec_reg_ops_v12_01.SIZE = 56
-struct_rpc_gpu_exec_reg_ops_v12_01._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_gpu_exec_reg_ops_v12_01, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_gpu_exec_reg_ops_v12_01, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_gpu_exec_reg_ops_v12_01, 'params', field(8, gpu_exec_reg_ops_v12_01))
 rpc_gpu_exec_reg_ops_v12_01 = struct_rpc_gpu_exec_reg_ops_v12_01
 rpc_gpu_exec_reg_ops_v = struct_rpc_gpu_exec_reg_ops_v12_01
-class struct_rpc_get_static_data_v25_0E(Struct): pass
-struct_rpc_get_static_data_v25_0E.SIZE = 8
-struct_rpc_get_static_data_v25_0E._fields_ = ['offset', 'size', 'payload']
-setattr(struct_rpc_get_static_data_v25_0E, 'offset', field(0, NvU32))
-setattr(struct_rpc_get_static_data_v25_0E, 'size', field(4, NvU32))
-setattr(struct_rpc_get_static_data_v25_0E, 'payload', field(8, Array(NvU8, 0)))
+@record
+class struct_rpc_get_static_data_v25_0E:
+  SIZE = 8
+  offset: Annotated[NvU32, 0]
+  size: Annotated[NvU32, 4]
+  payload: Annotated[(NvU8 * 0), 8]
 rpc_get_static_data_v25_0E = struct_rpc_get_static_data_v25_0E
-class struct_rpc_get_static_data_v27_01(Struct): pass
-struct_rpc_get_static_data_v27_01.SIZE = 8
-struct_rpc_get_static_data_v27_01._fields_ = ['offset', 'size', 'payload']
-setattr(struct_rpc_get_static_data_v27_01, 'offset', field(0, NvU32))
-setattr(struct_rpc_get_static_data_v27_01, 'size', field(4, NvU32))
-setattr(struct_rpc_get_static_data_v27_01, 'payload', field(8, Array(NvU8, 0)))
+@record
+class struct_rpc_get_static_data_v27_01:
+  SIZE = 8
+  offset: Annotated[NvU32, 0]
+  size: Annotated[NvU32, 4]
+  payload: Annotated[(NvU8 * 0), 8]
 rpc_get_static_data_v27_01 = struct_rpc_get_static_data_v27_01
 rpc_get_static_data_v = struct_rpc_get_static_data_v27_01
-class struct_rpc_get_consolidated_gr_static_info_v1B_04(Struct): pass
-struct_rpc_get_consolidated_gr_static_info_v1B_04.SIZE = 8
-struct_rpc_get_consolidated_gr_static_info_v1B_04._fields_ = ['offset', 'size', 'payload']
-setattr(struct_rpc_get_consolidated_gr_static_info_v1B_04, 'offset', field(0, NvU32))
-setattr(struct_rpc_get_consolidated_gr_static_info_v1B_04, 'size', field(4, NvU32))
-setattr(struct_rpc_get_consolidated_gr_static_info_v1B_04, 'payload', field(8, Array(NvU8, 0)))
+@record
+class struct_rpc_get_consolidated_gr_static_info_v1B_04:
+  SIZE = 8
+  offset: Annotated[NvU32, 0]
+  size: Annotated[NvU32, 4]
+  payload: Annotated[(NvU8 * 0), 8]
 rpc_get_consolidated_gr_static_info_v1B_04 = struct_rpc_get_consolidated_gr_static_info_v1B_04
 rpc_get_consolidated_gr_static_info_v = struct_rpc_get_consolidated_gr_static_info_v1B_04
-class struct_rpc_set_page_directory_v1E_05(Struct): pass
-class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(Struct): pass
+@record
+class struct_rpc_set_page_directory_v1E_05:
+  SIZE = 48
+  hClient: Annotated[NvHandle, 0]
+  hDevice: Annotated[NvHandle, 4]
+  pasid: Annotated[NvU32, 8]
+  params: Annotated[NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 16]
+@record
+class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05:
+  SIZE = 32
+  physAddress: Annotated[NvU64, 0]
+  numEntries: Annotated[NvU32, 8]
+  flags: Annotated[NvU32, 12]
+  hVASpace: Annotated[NvHandle, 16]
+  chId: Annotated[NvU32, 20]
+  subDeviceId: Annotated[NvU32, 24]
+  pasid: Annotated[NvU32, 28]
 NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05 = struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05
-struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05.SIZE = 32
-struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = ['physAddress', 'numEntries', 'flags', 'hVASpace', 'chId', 'subDeviceId', 'pasid']
-setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'physAddress', field(0, NvU64))
-setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'numEntries', field(8, NvU32))
-setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'flags', field(12, NvU32))
-setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'hVASpace', field(16, NvHandle))
-setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'chId', field(20, NvU32))
-setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'subDeviceId', field(24, NvU32))
-setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'pasid', field(28, NvU32))
-struct_rpc_set_page_directory_v1E_05.SIZE = 48
-struct_rpc_set_page_directory_v1E_05._fields_ = ['hClient', 'hDevice', 'pasid', 'params']
-setattr(struct_rpc_set_page_directory_v1E_05, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_set_page_directory_v1E_05, 'hDevice', field(4, NvHandle))
-setattr(struct_rpc_set_page_directory_v1E_05, 'pasid', field(8, NvU32))
-setattr(struct_rpc_set_page_directory_v1E_05, 'params', field(16, NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05))
 rpc_set_page_directory_v1E_05 = struct_rpc_set_page_directory_v1E_05
 rpc_set_page_directory_v = struct_rpc_set_page_directory_v1E_05
-class struct_rpc_unset_page_directory_v1E_05(Struct): pass
-class struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05(Struct): pass
+@record
+class struct_rpc_unset_page_directory_v1E_05:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hDevice: Annotated[NvHandle, 4]
+  params: Annotated[NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05, 8]
+@record
+class struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05:
+  SIZE = 8
+  hVASpace: Annotated[NvHandle, 0]
+  subDeviceId: Annotated[NvU32, 4]
 NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05 = struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05
-struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05.SIZE = 8
-struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = ['hVASpace', 'subDeviceId']
-setattr(struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05, 'hVASpace', field(0, NvHandle))
-setattr(struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05, 'subDeviceId', field(4, NvU32))
-struct_rpc_unset_page_directory_v1E_05.SIZE = 16
-struct_rpc_unset_page_directory_v1E_05._fields_ = ['hClient', 'hDevice', 'params']
-setattr(struct_rpc_unset_page_directory_v1E_05, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_unset_page_directory_v1E_05, 'hDevice', field(4, NvHandle))
-setattr(struct_rpc_unset_page_directory_v1E_05, 'params', field(8, NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05))
 rpc_unset_page_directory_v1E_05 = struct_rpc_unset_page_directory_v1E_05
 rpc_unset_page_directory_v = struct_rpc_unset_page_directory_v1E_05
-class struct_rpc_get_gsp_static_info_v14_00(Struct): pass
-struct_rpc_get_gsp_static_info_v14_00.SIZE = 4
-struct_rpc_get_gsp_static_info_v14_00._fields_ = ['data']
-setattr(struct_rpc_get_gsp_static_info_v14_00, 'data', field(0, NvU32))
+@record
+class struct_rpc_get_gsp_static_info_v14_00:
+  SIZE = 4
+  data: Annotated[NvU32, 0]
 rpc_get_gsp_static_info_v14_00 = struct_rpc_get_gsp_static_info_v14_00
 rpc_get_gsp_static_info_v = struct_rpc_get_gsp_static_info_v14_00
-class struct_rpc_update_bar_pde_v15_00(Struct): pass
-class struct_UpdateBarPde_v15_00(Struct): pass
+@record
+class struct_rpc_update_bar_pde_v15_00:
+  SIZE = 24
+  info: Annotated[UpdateBarPde_v15_00, 0]
+@record
+class struct_UpdateBarPde_v15_00:
+  SIZE = 24
+  barType: Annotated[NV_RPC_UPDATE_PDE_BAR_TYPE, 0]
+  entryValue: Annotated[NvU64, 8]
+  entryLevelShift: Annotated[NvU64, 16]
 UpdateBarPde_v15_00 = struct_UpdateBarPde_v15_00
-struct_UpdateBarPde_v15_00.SIZE = 24
-struct_UpdateBarPde_v15_00._fields_ = ['barType', 'entryValue', 'entryLevelShift']
-setattr(struct_UpdateBarPde_v15_00, 'barType', field(0, NV_RPC_UPDATE_PDE_BAR_TYPE))
-setattr(struct_UpdateBarPde_v15_00, 'entryValue', field(8, NvU64))
-setattr(struct_UpdateBarPde_v15_00, 'entryLevelShift', field(16, NvU64))
-struct_rpc_update_bar_pde_v15_00.SIZE = 24
-struct_rpc_update_bar_pde_v15_00._fields_ = ['info']
-setattr(struct_rpc_update_bar_pde_v15_00, 'info', field(0, UpdateBarPde_v15_00))
 rpc_update_bar_pde_v15_00 = struct_rpc_update_bar_pde_v15_00
 rpc_update_bar_pde_v = struct_rpc_update_bar_pde_v15_00
-class struct_rpc_get_encoder_capacity_v07_00(Struct): pass
-struct_rpc_get_encoder_capacity_v07_00.SIZE = 12
-struct_rpc_get_encoder_capacity_v07_00._fields_ = ['hClient', 'hObject', 'encoderCapacity']
-setattr(struct_rpc_get_encoder_capacity_v07_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_get_encoder_capacity_v07_00, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_get_encoder_capacity_v07_00, 'encoderCapacity', field(8, NvU32))
+@record
+class struct_rpc_get_encoder_capacity_v07_00:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  encoderCapacity: Annotated[NvU32, 8]
 rpc_get_encoder_capacity_v07_00 = struct_rpc_get_encoder_capacity_v07_00
 rpc_get_encoder_capacity_v = struct_rpc_get_encoder_capacity_v07_00
-class struct_rpc_vgpu_pf_reg_read32_v15_00(Struct): pass
-struct_rpc_vgpu_pf_reg_read32_v15_00.SIZE = 16
-struct_rpc_vgpu_pf_reg_read32_v15_00._fields_ = ['address', 'value', 'grEngId']
-setattr(struct_rpc_vgpu_pf_reg_read32_v15_00, 'address', field(0, NvU64))
-setattr(struct_rpc_vgpu_pf_reg_read32_v15_00, 'value', field(8, NvU32))
-setattr(struct_rpc_vgpu_pf_reg_read32_v15_00, 'grEngId', field(12, NvU32))
+@record
+class struct_rpc_vgpu_pf_reg_read32_v15_00:
+  SIZE = 16
+  address: Annotated[NvU64, 0]
+  value: Annotated[NvU32, 8]
+  grEngId: Annotated[NvU32, 12]
 rpc_vgpu_pf_reg_read32_v15_00 = struct_rpc_vgpu_pf_reg_read32_v15_00
 rpc_vgpu_pf_reg_read32_v = struct_rpc_vgpu_pf_reg_read32_v15_00
-class struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08(Struct): pass
-class struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02(Struct): pass
+@record
+class struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08:
+  SIZE = 8
+  setFbUsage: Annotated[NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02, 0]
+@record
+class struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02:
+  SIZE = 8
+  fbUsed: Annotated[NvU64, 0]
 NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02 = struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02
-struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02.SIZE = 8
-struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02._fields_ = ['fbUsed']
-setattr(struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02, 'fbUsed', field(0, NvU64))
-struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08.SIZE = 8
-struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08._fields_ = ['setFbUsage']
-setattr(struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08, 'setFbUsage', field(0, NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02))
 rpc_ctrl_set_vgpu_fb_usage_v1A_08 = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
 rpc_ctrl_set_vgpu_fb_usage_v = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
-class struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09(Struct): pass
-class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01(Struct): pass
+@record
+class struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09:
+  SIZE = 40
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  nvencSessionUpdate: Annotated[NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 8]
+@record
+class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01:
+  SIZE = 32
+  hResolution: Annotated[NvU32, 0]
+  vResolution: Annotated[NvU32, 4]
+  averageEncodeLatency: Annotated[NvU32, 8]
+  averageEncodeFps: Annotated[NvU32, 12]
+  timestampBufferSize: Annotated[NvU32, 16]
+  timestampBuffer: Annotated[NvP64, 24]
 NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01 = struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01
-struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01.SIZE = 32
-struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01._fields_ = ['hResolution', 'vResolution', 'averageEncodeLatency', 'averageEncodeFps', 'timestampBufferSize', 'timestampBuffer']
-setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'hResolution', field(0, NvU32))
-setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'vResolution', field(4, NvU32))
-setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'averageEncodeLatency', field(8, NvU32))
-setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'averageEncodeFps', field(12, NvU32))
-setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'timestampBufferSize', field(16, NvU32))
-setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'timestampBuffer', field(24, NvP64))
-struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09.SIZE = 40
-struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09._fields_ = ['hClient', 'hObject', 'nvencSessionUpdate']
-setattr(struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09, 'nvencSessionUpdate', field(8, NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01))
 rpc_ctrl_nvenc_sw_session_update_info_v1A_09 = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
 rpc_ctrl_nvenc_sw_session_update_info_v = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
-class struct_rpc_ctrl_reset_channel_v1A_09(Struct): pass
-class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01(Struct): pass
+@record
+class struct_rpc_ctrl_reset_channel_v1A_09:
+  SIZE = 20
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  resetChannel: Annotated[NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01, 8]
+@record
+class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01:
+  SIZE = 12
+  engineID: Annotated[NvU32, 0]
+  subdeviceInstance: Annotated[NvU32, 4]
+  resetReason: Annotated[NvU32, 8]
 NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01 = struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01
-struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01.SIZE = 12
-struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01._fields_ = ['engineID', 'subdeviceInstance', 'resetReason']
-setattr(struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01, 'engineID', field(0, NvU32))
-setattr(struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01, 'subdeviceInstance', field(4, NvU32))
-setattr(struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01, 'resetReason', field(8, NvU32))
-struct_rpc_ctrl_reset_channel_v1A_09.SIZE = 20
-struct_rpc_ctrl_reset_channel_v1A_09._fields_ = ['hClient', 'hObject', 'resetChannel']
-setattr(struct_rpc_ctrl_reset_channel_v1A_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_reset_channel_v1A_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_reset_channel_v1A_09, 'resetChannel', field(8, NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01))
 rpc_ctrl_reset_channel_v1A_09 = struct_rpc_ctrl_reset_channel_v1A_09
 rpc_ctrl_reset_channel_v = struct_rpc_ctrl_reset_channel_v1A_09
-class struct_rpc_ctrl_reset_isolated_channel_v1A_09(Struct): pass
-class struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_reset_isolated_channel_v1A_09:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  resetIsolatedChannel: Annotated[NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00, 8]
+@record
+class struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00:
+  SIZE = 8
+  exceptType: Annotated[NvU32, 0]
+  engineID: Annotated[NvU32, 4]
 NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00 = struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00
-struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00.SIZE = 8
-struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00._fields_ = ['exceptType', 'engineID']
-setattr(struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00, 'exceptType', field(0, NvU32))
-setattr(struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00, 'engineID', field(4, NvU32))
-struct_rpc_ctrl_reset_isolated_channel_v1A_09.SIZE = 16
-struct_rpc_ctrl_reset_isolated_channel_v1A_09._fields_ = ['hClient', 'hObject', 'resetIsolatedChannel']
-setattr(struct_rpc_ctrl_reset_isolated_channel_v1A_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_reset_isolated_channel_v1A_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_reset_isolated_channel_v1A_09, 'resetIsolatedChannel', field(8, NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00))
 rpc_ctrl_reset_isolated_channel_v1A_09 = struct_rpc_ctrl_reset_isolated_channel_v1A_09
 rpc_ctrl_reset_isolated_channel_v = struct_rpc_ctrl_reset_isolated_channel_v1A_09
-class struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09(Struct): pass
-class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09(Struct): pass
+@record
+class struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  handleVfPriFault: Annotated[NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09, 8]
+@record
+class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09:
+  SIZE = 4
+  faultType: Annotated[NvU32, 0]
 NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09 = struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09
-struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09.SIZE = 4
-struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09._fields_ = ['faultType']
-setattr(struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09, 'faultType', field(0, NvU32))
-struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09.SIZE = 12
-struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09._fields_ = ['hClient', 'hObject', 'handleVfPriFault']
-setattr(struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09, 'handleVfPriFault', field(8, NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09))
 rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09 = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
 rpc_ctrl_gpu_handle_vf_pri_fault_v = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
-class struct_rpc_ctrl_perf_boost_v1A_09(Struct): pass
-class struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_perf_boost_v1A_09:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  perfBoost: Annotated[NV2080_CTRL_PERF_BOOST_PARAMS_v03_00, 8]
+@record
+class struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00:
+  SIZE = 8
+  flags: Annotated[NvU32, 0]
+  duration: Annotated[NvU32, 4]
 NV2080_CTRL_PERF_BOOST_PARAMS_v03_00 = struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00
-struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00.SIZE = 8
-struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00._fields_ = ['flags', 'duration']
-setattr(struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00, 'flags', field(0, NvU32))
-setattr(struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00, 'duration', field(4, NvU32))
-struct_rpc_ctrl_perf_boost_v1A_09.SIZE = 16
-struct_rpc_ctrl_perf_boost_v1A_09._fields_ = ['hClient', 'hObject', 'perfBoost']
-setattr(struct_rpc_ctrl_perf_boost_v1A_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_perf_boost_v1A_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_perf_boost_v1A_09, 'perfBoost', field(8, NV2080_CTRL_PERF_BOOST_PARAMS_v03_00))
 rpc_ctrl_perf_boost_v1A_09 = struct_rpc_ctrl_perf_boost_v1A_09
 rpc_ctrl_perf_boost_v = struct_rpc_ctrl_perf_boost_v1A_09
-class struct_rpc_ctrl_get_zbc_clear_table_v1A_09(Struct): pass
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00(Struct): pass
+@record
+class struct_rpc_ctrl_get_zbc_clear_table_v1A_09:
+  SIZE = 64
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  getZbcClearTable: Annotated[NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 8]
+@record
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00:
+  SIZE = 56
+  value: Annotated[NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 0]
+  indexSize: Annotated[NvU32, 40]
+  indexUsed: Annotated[NvU32, 44]
+  format: Annotated[NvU32, 48]
+  valType: Annotated[NvU32, 52]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00(Struct): pass
+@record
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00:
+  SIZE = 40
+  colorFB: Annotated[(NvU32* 4), 0]
+  colorDS: Annotated[(NvU32* 4), 16]
+  depth: Annotated[NvU32, 32]
+  stencil: Annotated[NvU32, 36]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00.SIZE = 40
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00._fields_ = ['colorFB', 'colorDS', 'depth', 'stencil']
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 'colorFB', field(0, Array(NvU32, 4)))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 'colorDS', field(16, Array(NvU32, 4)))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 'depth', field(32, NvU32))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 'stencil', field(36, NvU32))
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00.SIZE = 56
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00._fields_ = ['value', 'indexSize', 'indexUsed', 'format', 'valType']
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'value', field(0, NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'indexSize', field(40, NvU32))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'indexUsed', field(44, NvU32))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'format', field(48, NvU32))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'valType', field(52, NvU32))
-struct_rpc_ctrl_get_zbc_clear_table_v1A_09.SIZE = 64
-struct_rpc_ctrl_get_zbc_clear_table_v1A_09._fields_ = ['hClient', 'hObject', 'getZbcClearTable']
-setattr(struct_rpc_ctrl_get_zbc_clear_table_v1A_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_zbc_clear_table_v1A_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_zbc_clear_table_v1A_09, 'getZbcClearTable', field(8, NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00))
 rpc_ctrl_get_zbc_clear_table_v1A_09 = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
 rpc_ctrl_get_zbc_clear_table_v = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
-class struct_rpc_ctrl_set_zbc_color_clear_v1A_09(Struct): pass
-class struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_set_zbc_color_clear_v1A_09:
+  SIZE = 44
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  setZbcColorClr: Annotated[NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00, 8]
+@record
+class struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00:
+  SIZE = 36
+  colorFB: Annotated[(NvU32* 4), 0]
+  colorDS: Annotated[(NvU32* 4), 16]
+  format: Annotated[NvU32, 32]
 NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00 = struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00
-struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00.SIZE = 36
-struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00._fields_ = ['colorFB', 'colorDS', 'format']
-setattr(struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00, 'colorFB', field(0, Array(NvU32, 4)))
-setattr(struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00, 'colorDS', field(16, Array(NvU32, 4)))
-setattr(struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00, 'format', field(32, NvU32))
-struct_rpc_ctrl_set_zbc_color_clear_v1A_09.SIZE = 44
-struct_rpc_ctrl_set_zbc_color_clear_v1A_09._fields_ = ['hClient', 'hObject', 'setZbcColorClr']
-setattr(struct_rpc_ctrl_set_zbc_color_clear_v1A_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_set_zbc_color_clear_v1A_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_set_zbc_color_clear_v1A_09, 'setZbcColorClr', field(8, NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00))
 rpc_ctrl_set_zbc_color_clear_v1A_09 = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
 rpc_ctrl_set_zbc_color_clear_v = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
-class struct_rpc_ctrl_set_zbc_depth_clear_v1A_09(Struct): pass
-class struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_set_zbc_depth_clear_v1A_09:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  setZbcDepthClr: Annotated[NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00, 8]
+@record
+class struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00:
+  SIZE = 8
+  depth: Annotated[NvU32, 0]
+  format: Annotated[NvU32, 4]
 NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00 = struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00
-struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00.SIZE = 8
-struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00._fields_ = ['depth', 'format']
-setattr(struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00, 'depth', field(0, NvU32))
-setattr(struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00, 'format', field(4, NvU32))
-struct_rpc_ctrl_set_zbc_depth_clear_v1A_09.SIZE = 16
-struct_rpc_ctrl_set_zbc_depth_clear_v1A_09._fields_ = ['hClient', 'hObject', 'setZbcDepthClr']
-setattr(struct_rpc_ctrl_set_zbc_depth_clear_v1A_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_set_zbc_depth_clear_v1A_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_set_zbc_depth_clear_v1A_09, 'setZbcDepthClr', field(8, NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00))
 rpc_ctrl_set_zbc_depth_clear_v1A_09 = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
 rpc_ctrl_set_zbc_depth_clear_v = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
-class struct_rpc_ctrl_set_zbc_stencil_clear_v27_06(Struct): pass
-class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06(Struct): pass
+@record
+class struct_rpc_ctrl_set_zbc_stencil_clear_v27_06:
+  SIZE = 20
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  setZbcStencilClr: Annotated[NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06, 8]
+@record
+class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06:
+  SIZE = 12
+  stencil: Annotated[NvU32, 0]
+  format: Annotated[NvU32, 4]
+  bSkipL2Table: Annotated[NvBool, 8]
 NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06 = struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06
-struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06.SIZE = 12
-struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06._fields_ = ['stencil', 'format', 'bSkipL2Table']
-setattr(struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06, 'stencil', field(0, NvU32))
-setattr(struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06, 'format', field(4, NvU32))
-setattr(struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06, 'bSkipL2Table', field(8, NvBool))
-struct_rpc_ctrl_set_zbc_stencil_clear_v27_06.SIZE = 20
-struct_rpc_ctrl_set_zbc_stencil_clear_v27_06._fields_ = ['hClient', 'hObject', 'setZbcStencilClr']
-setattr(struct_rpc_ctrl_set_zbc_stencil_clear_v27_06, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_set_zbc_stencil_clear_v27_06, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_set_zbc_stencil_clear_v27_06, 'setZbcStencilClr', field(8, NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06))
 rpc_ctrl_set_zbc_stencil_clear_v27_06 = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
 rpc_ctrl_set_zbc_stencil_clear_v = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
-class struct_rpc_ctrl_gpfifo_schedule_v1A_0A(Struct): pass
-class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_gpfifo_schedule_v1A_0A:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  cmd: Annotated[NvU32, 8]
+  gpfifoSchedule: Annotated[NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00, 12]
+@record
+class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00:
+  SIZE = 1
+  bEnable: Annotated[NvBool, 0]
 NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00 = struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00
-struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00.SIZE = 1
-struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00._fields_ = ['bEnable']
-setattr(struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00, 'bEnable', field(0, NvBool))
-struct_rpc_ctrl_gpfifo_schedule_v1A_0A.SIZE = 16
-struct_rpc_ctrl_gpfifo_schedule_v1A_0A._fields_ = ['hClient', 'hObject', 'cmd', 'gpfifoSchedule']
-setattr(struct_rpc_ctrl_gpfifo_schedule_v1A_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpfifo_schedule_v1A_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpfifo_schedule_v1A_0A, 'cmd', field(8, NvU32))
-setattr(struct_rpc_ctrl_gpfifo_schedule_v1A_0A, 'gpfifoSchedule', field(12, NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00))
 rpc_ctrl_gpfifo_schedule_v1A_0A = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
 rpc_ctrl_gpfifo_schedule_v = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
-class struct_rpc_ctrl_set_timeslice_v1A_0A(Struct): pass
-class struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00(Struct): pass
+@record
+class struct_rpc_ctrl_set_timeslice_v1A_0A:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  setTimeSlice: Annotated[NVA06C_CTRL_TIMESLICE_PARAMS_v06_00, 8]
+@record
+class struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00:
+  SIZE = 8
+  timesliceUs: Annotated[NvU64, 0]
 NVA06C_CTRL_TIMESLICE_PARAMS_v06_00 = struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00
-struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00.SIZE = 8
-struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00._fields_ = ['timesliceUs']
-setattr(struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00, 'timesliceUs', field(0, NvU64))
-struct_rpc_ctrl_set_timeslice_v1A_0A.SIZE = 16
-struct_rpc_ctrl_set_timeslice_v1A_0A._fields_ = ['hClient', 'hObject', 'setTimeSlice']
-setattr(struct_rpc_ctrl_set_timeslice_v1A_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_set_timeslice_v1A_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_set_timeslice_v1A_0A, 'setTimeSlice', field(8, NVA06C_CTRL_TIMESLICE_PARAMS_v06_00))
 rpc_ctrl_set_timeslice_v1A_0A = struct_rpc_ctrl_set_timeslice_v1A_0A
 rpc_ctrl_set_timeslice_v = struct_rpc_ctrl_set_timeslice_v1A_0A
-class struct_rpc_ctrl_fifo_disable_channels_v1A_0A(Struct): pass
-class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00(Struct): pass
+@record
+class struct_rpc_ctrl_fifo_disable_channels_v1A_0A:
+  SIZE = 544
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  fifoDisableChannels: Annotated[NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 8]
+@record
+class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00:
+  SIZE = 536
+  bDisable: Annotated[NvBool, 0]
+  numChannels: Annotated[NvU32, 4]
+  bOnlyDisableScheduling: Annotated[NvBool, 8]
+  bRewindGpPut: Annotated[NvBool, 9]
+  pRunlistPreemptEvent: Annotated[NvP64, 16]
+  hClientList: Annotated[(NvHandle* 64), 24]
+  hChannelList: Annotated[(NvHandle* 64), 280]
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00 = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00
-struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00.SIZE = 536
-struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00._fields_ = ['bDisable', 'numChannels', 'bOnlyDisableScheduling', 'bRewindGpPut', 'pRunlistPreemptEvent', 'hClientList', 'hChannelList']
-setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'bDisable', field(0, NvBool))
-setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'numChannels', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'bOnlyDisableScheduling', field(8, NvBool))
-setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'bRewindGpPut', field(9, NvBool))
-setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'pRunlistPreemptEvent', field(16, NvP64))
-setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'hClientList', field(24, Array(NvHandle, 64)))
-setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'hChannelList', field(280, Array(NvHandle, 64)))
-struct_rpc_ctrl_fifo_disable_channels_v1A_0A.SIZE = 544
-struct_rpc_ctrl_fifo_disable_channels_v1A_0A._fields_ = ['hClient', 'hObject', 'fifoDisableChannels']
-setattr(struct_rpc_ctrl_fifo_disable_channels_v1A_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fifo_disable_channels_v1A_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fifo_disable_channels_v1A_0A, 'fifoDisableChannels', field(8, NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00))
 rpc_ctrl_fifo_disable_channels_v1A_0A = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
 rpc_ctrl_fifo_disable_channels_v = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
-class struct_rpc_ctrl_preempt_v1A_0A(Struct): pass
-class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A(Struct): pass
+@record
+class struct_rpc_ctrl_preempt_v1A_0A:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  cmdPreempt: Annotated[NVA06C_CTRL_PREEMPT_PARAMS_v09_0A, 8]
+@record
+class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A:
+  SIZE = 8
+  bWait: Annotated[NvBool, 0]
+  bManualTimeout: Annotated[NvBool, 1]
+  timeoutUs: Annotated[NvU32, 4]
 NVA06C_CTRL_PREEMPT_PARAMS_v09_0A = struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A
-struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A.SIZE = 8
-struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A._fields_ = ['bWait', 'bManualTimeout', 'timeoutUs']
-setattr(struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A, 'bWait', field(0, NvBool))
-setattr(struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A, 'bManualTimeout', field(1, NvBool))
-setattr(struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A, 'timeoutUs', field(4, NvU32))
-struct_rpc_ctrl_preempt_v1A_0A.SIZE = 16
-struct_rpc_ctrl_preempt_v1A_0A._fields_ = ['hClient', 'hObject', 'cmdPreempt']
-setattr(struct_rpc_ctrl_preempt_v1A_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_preempt_v1A_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_preempt_v1A_0A, 'cmdPreempt', field(8, NVA06C_CTRL_PREEMPT_PARAMS_v09_0A))
 rpc_ctrl_preempt_v1A_0A = struct_rpc_ctrl_preempt_v1A_0A
 rpc_ctrl_preempt_v = struct_rpc_ctrl_preempt_v1A_0A
-class struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A(Struct): pass
-class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(Struct): pass
+@record
+class struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  interleaveLevelTSG: Annotated[NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02, 8]
+@record
+class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02:
+  SIZE = 4
+  tsgInterleaveLevel: Annotated[NvU32, 0]
 NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02 = struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02
-struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02.SIZE = 4
-struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = ['tsgInterleaveLevel']
-setattr(struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02, 'tsgInterleaveLevel', field(0, NvU32))
-struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A.SIZE = 12
-struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A._fields_ = ['hClient', 'hObject', 'interleaveLevelTSG']
-setattr(struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A, 'interleaveLevelTSG', field(8, NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02))
 rpc_ctrl_set_tsg_interleave_level_v1A_0A = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
 rpc_ctrl_set_tsg_interleave_level_v = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
-class struct_rpc_ctrl_set_channel_interleave_level_v1A_0A(Struct): pass
-class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(Struct): pass
+@record
+class struct_rpc_ctrl_set_channel_interleave_level_v1A_0A:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  interleaveLevelChannel: Annotated[NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02, 8]
+@record
+class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02:
+  SIZE = 4
+  channelInterleaveLevel: Annotated[NvU32, 0]
 NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02 = struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02
-struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02.SIZE = 4
-struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = ['channelInterleaveLevel']
-setattr(struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02, 'channelInterleaveLevel', field(0, NvU32))
-struct_rpc_ctrl_set_channel_interleave_level_v1A_0A.SIZE = 12
-struct_rpc_ctrl_set_channel_interleave_level_v1A_0A._fields_ = ['hClient', 'hObject', 'interleaveLevelChannel']
-setattr(struct_rpc_ctrl_set_channel_interleave_level_v1A_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_set_channel_interleave_level_v1A_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_set_channel_interleave_level_v1A_0A, 'interleaveLevelChannel', field(8, NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02))
 rpc_ctrl_set_channel_interleave_level_v1A_0A = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
 rpc_ctrl_set_channel_interleave_level_v = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
-class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E(Struct): pass
-class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01(Struct): pass
+@record
+class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E:
+  SIZE = 112
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 8]
+@record
+class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01:
+  SIZE = 104
+  flags: Annotated[NvU32, 0]
+  hClient: Annotated[NvHandle, 4]
+  hChannel: Annotated[NvHandle, 8]
+  vMemPtrs: Annotated[(NvU64* 8), 16]
+  gfxpPreemptMode: Annotated[NvU32, 80]
+  cilpPreemptMode: Annotated[NvU32, 84]
+  grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 88]
 NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01 = struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01
-struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01.SIZE = 104
-struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01._fields_ = ['flags', 'hClient', 'hChannel', 'vMemPtrs', 'gfxpPreemptMode', 'cilpPreemptMode', 'grRouteInfo']
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'flags', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'hClient', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'hChannel', field(8, NvHandle))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'vMemPtrs', field(16, Array(NvU64, 8)))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'gfxpPreemptMode', field(80, NvU32))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'cilpPreemptMode', field(84, NvU32))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'grRouteInfo', field(88, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
-struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E.SIZE = 112
-struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01))
 rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E
-class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07(Struct): pass
-class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07(Struct): pass
+@record
+class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07:
+  SIZE = 120
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 8]
+@record
+class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07:
+  SIZE = 112
+  flags: Annotated[NvU32, 0]
+  hClient: Annotated[NvHandle, 4]
+  hChannel: Annotated[NvHandle, 8]
+  vMemPtrs: Annotated[(NvU64* 9), 16]
+  gfxpPreemptMode: Annotated[NvU32, 88]
+  cilpPreemptMode: Annotated[NvU32, 92]
+  grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 96]
 NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07 = struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07
-struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07.SIZE = 112
-struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07._fields_ = ['flags', 'hClient', 'hChannel', 'vMemPtrs', 'gfxpPreemptMode', 'cilpPreemptMode', 'grRouteInfo']
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'flags', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'hClient', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'hChannel', field(8, NvHandle))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'vMemPtrs', field(16, Array(NvU64, 9)))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'gfxpPreemptMode', field(88, NvU32))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'cilpPreemptMode', field(92, NvU32))
-setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'grRouteInfo', field(96, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
-struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07.SIZE = 120
-struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07, 'ctrlParams', field(8, NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07))
 rpc_ctrl_gr_ctxsw_preemption_bind_v28_07 = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
 rpc_ctrl_gr_ctxsw_preemption_bind_v = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
-class struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E(Struct): pass
-class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01(Struct): pass
+@record
+class struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E:
+  SIZE = 40
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 8]
+@record
+class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01:
+  SIZE = 32
+  flags: Annotated[NvU32, 0]
+  hChannel: Annotated[NvHandle, 4]
+  gfxpPreemptMode: Annotated[NvU32, 8]
+  cilpPreemptMode: Annotated[NvU32, 12]
+  grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 16]
 NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01 = struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01
-struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01.SIZE = 32
-struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01._fields_ = ['flags', 'hChannel', 'gfxpPreemptMode', 'cilpPreemptMode', 'grRouteInfo']
-setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'flags', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'hChannel', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'gfxpPreemptMode', field(8, NvU32))
-setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'cilpPreemptMode', field(12, NvU32))
-setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'grRouteInfo', field(16, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
-struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E.SIZE = 40
-struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01))
 rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
 rpc_ctrl_gr_set_ctxsw_preemption_mode_v = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
-class struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E(Struct): pass
-class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E:
+  SIZE = 32
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 8]
+@record
+class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00:
+  SIZE = 24
+  hClient: Annotated[NvHandle, 0]
+  hChannel: Annotated[NvHandle, 4]
+  vMemPtr: Annotated[NvU64, 8]
+  zcullMode: Annotated[NvU32, 16]
 NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00 = struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00
-struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00.SIZE = 24
-struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00._fields_ = ['hClient', 'hChannel', 'vMemPtr', 'zcullMode']
-setattr(struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 'hChannel', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 'vMemPtr', field(8, NvU64))
-setattr(struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 'zcullMode', field(16, NvU32))
-struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E.SIZE = 32
-struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00))
 rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
 rpc_ctrl_gr_ctxsw_zcull_bind_v = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
-class struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E(Struct): pass
-class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E:
+  SIZE = 64
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 8]
+@record
+class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00:
+  SIZE = 56
+  engineType: Annotated[NvU32, 0]
+  hClient: Annotated[NvHandle, 4]
+  ChID: Annotated[NvU32, 8]
+  hChanClient: Annotated[NvHandle, 12]
+  hObject: Annotated[NvHandle, 16]
+  hVirtMemory: Annotated[NvHandle, 20]
+  physAddress: Annotated[NvU64, 24]
+  physAttr: Annotated[NvU32, 32]
+  hDmaHandle: Annotated[NvHandle, 36]
+  index: Annotated[NvU32, 40]
+  size: Annotated[NvU64, 48]
 NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00 = struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00
-struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00.SIZE = 56
-struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00._fields_ = ['engineType', 'hClient', 'ChID', 'hChanClient', 'hObject', 'hVirtMemory', 'physAddress', 'physAttr', 'hDmaHandle', 'index', 'size']
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'engineType', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hClient', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'ChID', field(8, NvU32))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hChanClient', field(12, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hObject', field(16, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hVirtMemory', field(20, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'physAddress', field(24, NvU64))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'physAttr', field(32, NvU32))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hDmaHandle', field(36, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'index', field(40, NvU32))
-setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'size', field(48, NvU64))
-struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E.SIZE = 64
-struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00))
 rpc_ctrl_gpu_initialize_ctx_v1A_0E = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
 rpc_ctrl_gpu_initialize_ctx_v = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
-class struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04(Struct): pass
-class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04(Struct): pass
+@record
+class struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04:
+  SIZE = 192
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 8]
+@record
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04:
+  SIZE = 184
+  hSubDevice: Annotated[NvHandle, 0]
+  subDeviceId: Annotated[NvU32, 4]
+  pageSize: Annotated[NvU64, 8]
+  virtAddrLo: Annotated[NvU64, 16]
+  virtAddrHi: Annotated[NvU64, 24]
+  numLevelsToCopy: Annotated[NvU32, 32]
+  levels: Annotated[(NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04* 6), 40]
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04 = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04
-class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04(Struct): pass
+@record
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04:
+  SIZE = 24
+  physAddress: Annotated[NvU64, 0]
+  size: Annotated[NvU64, 8]
+  aperture: Annotated[NvU32, 16]
+  pageShift: Annotated[NvU8, 20]
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04 = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04
-struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04.SIZE = 24
-struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04._fields_ = ['physAddress', 'size', 'aperture', 'pageShift']
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 'physAddress', field(0, NvU64))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 'size', field(8, NvU64))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 'aperture', field(16, NvU32))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 'pageShift', field(20, NvU8))
-struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04.SIZE = 184
-struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04._fields_ = ['hSubDevice', 'subDeviceId', 'pageSize', 'virtAddrLo', 'virtAddrHi', 'numLevelsToCopy', 'levels']
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'hSubDevice', field(0, NvHandle))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'subDeviceId', field(4, NvU32))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'pageSize', field(8, NvU64))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'virtAddrLo', field(16, NvU64))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'virtAddrHi', field(24, NvU64))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'numLevelsToCopy', field(32, NvU32))
-setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'levels', field(40, Array(NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 6)))
-struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04.SIZE = 192
-struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04, 'ctrlParams', field(8, NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04))
 rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04 = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
 rpc_ctrl_vaspace_copy_server_reserved_pdes_v = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
-class struct_rpc_ctrl_mc_service_interrupts_v1A_0E(Struct): pass
-class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01(Struct): pass
+@record
+class struct_rpc_ctrl_mc_service_interrupts_v1A_0E:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01, 8]
+@record
+class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01:
+  SIZE = 4
+  engines: Annotated[NvU32, 0]
 NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01 = struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01
-struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01.SIZE = 4
-struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01._fields_ = ['engines']
-setattr(struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01, 'engines', field(0, NvU32))
-struct_rpc_ctrl_mc_service_interrupts_v1A_0E.SIZE = 12
-struct_rpc_ctrl_mc_service_interrupts_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_mc_service_interrupts_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_mc_service_interrupts_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_mc_service_interrupts_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01))
 rpc_ctrl_mc_service_interrupts_v1A_0E = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
 rpc_ctrl_mc_service_interrupts_v = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
-class struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D(Struct): pass
-struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D.SIZE = 2208
-struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D._fields_ = ['iter', 'gpuIds', 'gpuCount', 'p2pCaps', 'p2pOptimalReadCEs', 'p2pOptimalWriteCEs', 'p2pCapsStatus', 'busPeerIds']
-setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'iter', field(0, NvU8))
-setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'gpuIds', field(4, Array(NvU32, 32)))
-setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'gpuCount', field(132, NvU32))
-setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'p2pCaps', field(136, NvU32))
-setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'p2pOptimalReadCEs', field(140, NvU32))
-setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'p2pOptimalWriteCEs', field(144, NvU32))
-setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'p2pCapsStatus', field(148, Array(NvU8, 9)))
-setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'busPeerIds', field(160, Array(NvU32, 512)))
+@record
+class struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D:
+  SIZE = 2208
+  iter: Annotated[NvU8, 0]
+  gpuIds: Annotated[(NvU32* 32), 4]
+  gpuCount: Annotated[NvU32, 132]
+  p2pCaps: Annotated[NvU32, 136]
+  p2pOptimalReadCEs: Annotated[NvU32, 140]
+  p2pOptimalWriteCEs: Annotated[NvU32, 144]
+  p2pCapsStatus: Annotated[(NvU8* 9), 148]
+  busPeerIds: Annotated[(NvU32* 512), 160]
 rpc_ctrl_get_p2p_caps_v2_v1F_0D = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
 rpc_ctrl_get_p2p_caps_v2_v = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
-class struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02(Struct): pass
-class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02(Struct): pass
+@record
+class struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02:
+  SIZE = 1544
+  ctrlParams: Annotated[NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 0]
+@record
+class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02:
+  SIZE = 1544
+  bAllCaps: Annotated[NvBool, 0]
+  bUseUuid: Annotated[NvBool, 1]
+  peerGpuCount: Annotated[NvU32, 4]
+  peerGpuCaps: Annotated[(NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02* 32), 8]
 NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02 = struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02
-class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02(Struct): pass
+@record
+class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02:
+  SIZE = 48
+  gpuId: Annotated[NvU32, 0]
+  gpuUuid: Annotated[(NvU8* 16), 4]
+  p2pCaps: Annotated[NvU32, 20]
+  p2pOptimalReadCEs: Annotated[NvU32, 24]
+  p2pOptimalWriteCEs: Annotated[NvU32, 28]
+  p2pCapsStatus: Annotated[(NvU8* 9), 32]
+  busPeerId: Annotated[NvU32, 44]
 NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02 = struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02
-struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02.SIZE = 48
-struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02._fields_ = ['gpuId', 'gpuUuid', 'p2pCaps', 'p2pOptimalReadCEs', 'p2pOptimalWriteCEs', 'p2pCapsStatus', 'busPeerId']
-setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'gpuId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'gpuUuid', field(4, Array(NvU8, 16)))
-setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'p2pCaps', field(20, NvU32))
-setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'p2pOptimalReadCEs', field(24, NvU32))
-setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'p2pOptimalWriteCEs', field(28, NvU32))
-setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'p2pCapsStatus', field(32, Array(NvU8, 9)))
-setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'busPeerId', field(44, NvU32))
-struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02.SIZE = 1544
-struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02._fields_ = ['bAllCaps', 'bUseUuid', 'peerGpuCount', 'peerGpuCaps']
-setattr(struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 'bAllCaps', field(0, NvBool))
-setattr(struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 'bUseUuid', field(1, NvBool))
-setattr(struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 'peerGpuCount', field(4, NvU32))
-setattr(struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 'peerGpuCaps', field(8, Array(NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 32)))
-struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02.SIZE = 1544
-struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02._fields_ = ['ctrlParams']
-setattr(struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02, 'ctrlParams', field(0, NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02))
 rpc_ctrl_subdevice_get_p2p_caps_v21_02 = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
 rpc_ctrl_subdevice_get_p2p_caps_v = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
-class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03(Struct): pass
-class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03(Struct): pass
+@record
+class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03:
+  SIZE = 40
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 8]
+@record
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03:
+  SIZE = 32
+  allocatedSize: Annotated[NvU64, 0]
+  peakAllocatedSize: Annotated[NvU64, 8]
+  managedSize: Annotated[NvU64, 16]
+  allocationCount: Annotated[NvU32, 24]
+  peakAllocationCount: Annotated[NvU32, 28]
 NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03 = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03
-struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03.SIZE = 32
-struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03._fields_ = ['allocatedSize', 'peakAllocatedSize', 'managedSize', 'allocationCount', 'peakAllocationCount']
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'allocatedSize', field(0, NvU64))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'peakAllocatedSize', field(8, NvU64))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'managedSize', field(16, NvU64))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'allocationCount', field(24, NvU32))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'peakAllocationCount', field(28, NvU32))
-struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03.SIZE = 40
-struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03, 'ctrlParams', field(8, NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03))
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03 = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03
-class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06(Struct): pass
-class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06(Struct): pass
+@record
+class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06:
+  SIZE = 48
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 8]
+@record
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06:
+  SIZE = 40
+  allocatedSize: Annotated[NvU64, 0]
+  peakAllocatedSize: Annotated[NvU64, 8]
+  managedSize: Annotated[NvU64, 16]
+  allocationCount: Annotated[NvU32, 24]
+  peakAllocationCount: Annotated[NvU32, 28]
+  largestFreeChunkSize: Annotated[NvU64, 32]
 NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06 = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06
-struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06.SIZE = 40
-struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06._fields_ = ['allocatedSize', 'peakAllocatedSize', 'managedSize', 'allocationCount', 'peakAllocationCount', 'largestFreeChunkSize']
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'allocatedSize', field(0, NvU64))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'peakAllocatedSize', field(8, NvU64))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'managedSize', field(16, NvU64))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'allocationCount', field(24, NvU32))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'peakAllocationCount', field(28, NvU32))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'largestFreeChunkSize', field(32, NvU64))
-struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06.SIZE = 48
-struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06, 'ctrlParams', field(8, NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06))
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06 = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
-class struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00:
+  SIZE = 8
+  hTargetChannel: Annotated[NvHandle, 0]
+  numSMsToClear: Annotated[NvU32, 4]
 NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00 = struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00
-struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00.SIZE = 8
-struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00._fields_ = ['hTargetChannel', 'numSMsToClear']
-setattr(struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00, 'hTargetChannel', field(0, NvHandle))
-setattr(struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00, 'numSMsToClear', field(4, NvU32))
-struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C.SIZE = 16
-struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00))
 rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
 rpc_ctrl_dbg_clear_all_sm_error_states_v = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
-class struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06:
+  SIZE = 3872
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06:
+  SIZE = 3864
+  hTargetChannel: Annotated[NvHandle, 0]
+  numSMsToRead: Annotated[NvU32, 4]
+  smErrorStateArray: Annotated[(NV83DE_SM_ERROR_STATE_REGISTERS_v21_06* 80), 8]
+  mmuFaultInfo: Annotated[NvU32, 3848]
+  mmuFault: Annotated[NV83DE_MMU_FAULT_INFO_v16_03, 3852]
+  startingSM: Annotated[NvU32, 3860]
 NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06 = struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06
-class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06(Struct): pass
+@record
+class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06:
+  SIZE = 48
+  hwwGlobalEsr: Annotated[NvU32, 0]
+  hwwWarpEsr: Annotated[NvU32, 4]
+  hwwWarpEsrPc: Annotated[NvU32, 8]
+  hwwGlobalEsrReportMask: Annotated[NvU32, 12]
+  hwwWarpEsrReportMask: Annotated[NvU32, 16]
+  hwwEsrAddr: Annotated[NvU64, 24]
+  hwwWarpEsrPc64: Annotated[NvU64, 32]
+  hwwCgaEsr: Annotated[NvU32, 40]
+  hwwCgaEsrReportMask: Annotated[NvU32, 44]
 NV83DE_SM_ERROR_STATE_REGISTERS_v21_06 = struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06
-struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06.SIZE = 48
-struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06._fields_ = ['hwwGlobalEsr', 'hwwWarpEsr', 'hwwWarpEsrPc', 'hwwGlobalEsrReportMask', 'hwwWarpEsrReportMask', 'hwwEsrAddr', 'hwwWarpEsrPc64', 'hwwCgaEsr', 'hwwCgaEsrReportMask']
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwGlobalEsr', field(0, NvU32))
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwWarpEsr', field(4, NvU32))
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwWarpEsrPc', field(8, NvU32))
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwGlobalEsrReportMask', field(12, NvU32))
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwWarpEsrReportMask', field(16, NvU32))
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwEsrAddr', field(24, NvU64))
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwWarpEsrPc64', field(32, NvU64))
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwCgaEsr', field(40, NvU32))
-setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwCgaEsrReportMask', field(44, NvU32))
-class struct_NV83DE_MMU_FAULT_INFO_v16_03(Struct): pass
+@record
+class struct_NV83DE_MMU_FAULT_INFO_v16_03:
+  SIZE = 8
+  valid: Annotated[NvBool, 0]
+  faultInfo: Annotated[NvU32, 4]
 NV83DE_MMU_FAULT_INFO_v16_03 = struct_NV83DE_MMU_FAULT_INFO_v16_03
-struct_NV83DE_MMU_FAULT_INFO_v16_03.SIZE = 8
-struct_NV83DE_MMU_FAULT_INFO_v16_03._fields_ = ['valid', 'faultInfo']
-setattr(struct_NV83DE_MMU_FAULT_INFO_v16_03, 'valid', field(0, NvBool))
-setattr(struct_NV83DE_MMU_FAULT_INFO_v16_03, 'faultInfo', field(4, NvU32))
-struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06.SIZE = 3864
-struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06._fields_ = ['hTargetChannel', 'numSMsToRead', 'smErrorStateArray', 'mmuFaultInfo', 'mmuFault', 'startingSM']
-setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'hTargetChannel', field(0, NvHandle))
-setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'numSMsToRead', field(4, NvU32))
-setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'smErrorStateArray', field(8, Array(NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 80)))
-setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'mmuFaultInfo', field(3848, NvU32))
-setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'mmuFault', field(3852, NV83DE_MMU_FAULT_INFO_v16_03))
-setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'startingSM', field(3860, NvU32))
-struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06.SIZE = 3872
-struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06))
 rpc_ctrl_dbg_read_all_sm_error_states_v21_06 = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
 rpc_ctrl_dbg_read_all_sm_error_states_v = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
-class struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00:
+  SIZE = 4
+  exceptionMask: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00 = struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00
-struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00.SIZE = 4
-struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00._fields_ = ['exceptionMask']
-setattr(struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00, 'exceptionMask', field(0, NvU32))
-struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C.SIZE = 12
-struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00))
 rpc_ctrl_dbg_set_exception_mask_v1A_0C = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
 rpc_ctrl_dbg_set_exception_mask_v = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
-class struct_rpc_ctrl_gpu_promote_ctx_v1A_20(Struct): pass
-class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20(Struct): pass
+@record
+class struct_rpc_ctrl_gpu_promote_ctx_v1A_20:
+  SIZE = 568
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  promoteCtx: Annotated[NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 8]
+@record
+class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20:
+  SIZE = 560
+  engineType: Annotated[NvU32, 0]
+  hClient: Annotated[NvHandle, 4]
+  ChID: Annotated[NvU32, 8]
+  hChanClient: Annotated[NvHandle, 12]
+  hObject: Annotated[NvHandle, 16]
+  hVirtMemory: Annotated[NvHandle, 20]
+  virtAddress: Annotated[NvU64, 24]
+  size: Annotated[NvU64, 32]
+  entryCount: Annotated[NvU32, 40]
+  promoteEntry: Annotated[(NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20* 16), 48]
 NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20 = struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20
-class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20(Struct): pass
+@record
+class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20:
+  SIZE = 32
+  gpuPhysAddr: Annotated[NvU64, 0]
+  gpuVirtAddr: Annotated[NvU64, 8]
+  size: Annotated[NvU64, 16]
+  physAttr: Annotated[NvU32, 24]
+  bufferId: Annotated[NvU16, 28]
+  bInitialize: Annotated[NvU8, 30]
+  bNonmapped: Annotated[NvU8, 31]
 NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20 = struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20
-struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20.SIZE = 32
-struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20._fields_ = ['gpuPhysAddr', 'gpuVirtAddr', 'size', 'physAttr', 'bufferId', 'bInitialize', 'bNonmapped']
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'gpuPhysAddr', field(0, NvU64))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'gpuVirtAddr', field(8, NvU64))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'size', field(16, NvU64))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'physAttr', field(24, NvU32))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'bufferId', field(28, NvU16))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'bInitialize', field(30, NvU8))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'bNonmapped', field(31, NvU8))
-struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20.SIZE = 560
-struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20._fields_ = ['engineType', 'hClient', 'ChID', 'hChanClient', 'hObject', 'hVirtMemory', 'virtAddress', 'size', 'entryCount', 'promoteEntry']
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'engineType', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'hClient', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'ChID', field(8, NvU32))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'hChanClient', field(12, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'hObject', field(16, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'hVirtMemory', field(20, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'virtAddress', field(24, NvU64))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'size', field(32, NvU64))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'entryCount', field(40, NvU32))
-setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'promoteEntry', field(48, Array(NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 16)))
-struct_rpc_ctrl_gpu_promote_ctx_v1A_20.SIZE = 568
-struct_rpc_ctrl_gpu_promote_ctx_v1A_20._fields_ = ['hClient', 'hObject', 'promoteCtx']
-setattr(struct_rpc_ctrl_gpu_promote_ctx_v1A_20, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpu_promote_ctx_v1A_20, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpu_promote_ctx_v1A_20, 'promoteCtx', field(8, NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20))
 rpc_ctrl_gpu_promote_ctx_v1A_20 = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
 rpc_ctrl_gpu_promote_ctx_v = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
-class struct_rpc_ctrl_dbg_suspend_context_v1A_10(Struct): pass
-class struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_suspend_context_v1A_10:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06, 8]
+@record
+class struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06:
+  SIZE = 8
+  waitForEvent: Annotated[NvU32, 0]
+  hResidentChannel: Annotated[NvHandle, 4]
 NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06 = struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06
-struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06.SIZE = 8
-struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06._fields_ = ['waitForEvent', 'hResidentChannel']
-setattr(struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06, 'waitForEvent', field(0, NvU32))
-setattr(struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06, 'hResidentChannel', field(4, NvHandle))
-struct_rpc_ctrl_dbg_suspend_context_v1A_10.SIZE = 16
-struct_rpc_ctrl_dbg_suspend_context_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_suspend_context_v1A_10, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_suspend_context_v1A_10, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_suspend_context_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06))
 rpc_ctrl_dbg_suspend_context_v1A_10 = struct_rpc_ctrl_dbg_suspend_context_v1A_10
 rpc_ctrl_dbg_suspend_context_v = struct_rpc_ctrl_dbg_suspend_context_v1A_10
-class struct_rpc_ctrl_dbg_resume_context_v1A_10(Struct): pass
-struct_rpc_ctrl_dbg_resume_context_v1A_10.SIZE = 8
-struct_rpc_ctrl_dbg_resume_context_v1A_10._fields_ = ['hClient', 'hObject']
-setattr(struct_rpc_ctrl_dbg_resume_context_v1A_10, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_resume_context_v1A_10, 'hObject', field(4, NvHandle))
+@record
+class struct_rpc_ctrl_dbg_resume_context_v1A_10:
+  SIZE = 8
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
 rpc_ctrl_dbg_resume_context_v1A_10 = struct_rpc_ctrl_dbg_resume_context_v1A_10
 rpc_ctrl_dbg_resume_context_v = struct_rpc_ctrl_dbg_resume_context_v1A_10
-class struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10:
+  SIZE = 3216
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06:
+  SIZE = 3208
+  bNonTransactional: Annotated[NvBool, 0]
+  regOpCount: Annotated[NvU32, 4]
+  regOps: Annotated[(NV2080_CTRL_GPU_REG_OP_v03_00* 100), 8]
 NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06.SIZE = 3208
-struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06._fields_ = ['bNonTransactional', 'regOpCount', 'regOps']
-setattr(struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06, 'bNonTransactional', field(0, NvBool))
-setattr(struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06, 'regOpCount', field(4, NvU32))
-setattr(struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06, 'regOps', field(8, Array(NV2080_CTRL_GPU_REG_OP_v03_00, 100)))
-struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10.SIZE = 3216
-struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06))
 rpc_ctrl_dbg_exec_reg_ops_v1A_10 = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
 rpc_ctrl_dbg_exec_reg_ops_v = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
-class struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06:
+  SIZE = 4
+  action: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06.SIZE = 4
-struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06._fields_ = ['action']
-setattr(struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06, 'action', field(0, NvU32))
-struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10.SIZE = 12
-struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06))
 rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10 = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
 rpc_ctrl_dbg_set_mode_mmu_debug_v = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
-class struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07:
+  SIZE = 4
+  action: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07 = struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07
-struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07.SIZE = 4
-struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = ['action']
-setattr(struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07, 'action', field(0, NvU32))
-struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07.SIZE = 12
-struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07))
 rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07 = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
 rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
-class struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06:
+  SIZE = 64
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06:
+  SIZE = 56
+  hTargetChannel: Annotated[NvHandle, 0]
+  smID: Annotated[NvU32, 4]
+  smErrorState: Annotated[NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 8]
 NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06 = struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06
-struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06.SIZE = 56
-struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06._fields_ = ['hTargetChannel', 'smID', 'smErrorState']
-setattr(struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06, 'hTargetChannel', field(0, NvHandle))
-setattr(struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06, 'smID', field(4, NvU32))
-setattr(struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06, 'smErrorState', field(8, NV83DE_SM_ERROR_STATE_REGISTERS_v21_06))
-struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06.SIZE = 64
-struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06))
 rpc_ctrl_dbg_read_single_sm_error_state_v21_06 = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
 rpc_ctrl_dbg_read_single_sm_error_state_v = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
-class struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06:
+  SIZE = 8
+  hTargetChannel: Annotated[NvHandle, 0]
+  smID: Annotated[NvU32, 4]
 NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06.SIZE = 8
-struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06._fields_ = ['hTargetChannel', 'smID']
-setattr(struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06, 'hTargetChannel', field(0, NvHandle))
-setattr(struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06, 'smID', field(4, NvU32))
-struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10.SIZE = 16
-struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06))
 rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10 = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
 rpc_ctrl_dbg_clear_single_sm_error_state_v = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
-class struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06:
+  SIZE = 4
+  action: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06.SIZE = 4
-struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06._fields_ = ['action']
-setattr(struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06, 'action', field(0, NvU32))
-struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10.SIZE = 12
-struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06))
 rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10 = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
 rpc_ctrl_dbg_set_mode_errbar_debug_v = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
-class struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06:
+  SIZE = 4
+  stopTriggerType: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06.SIZE = 4
-struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06._fields_ = ['stopTriggerType']
-setattr(struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06, 'stopTriggerType', field(0, NvU32))
-struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10.SIZE = 12
-struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06))
 rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10 = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
 rpc_ctrl_dbg_set_next_stop_trigger_type_v = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
-class struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E(Struct): pass
-class struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00, 8]
+@record
+class struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00:
+  SIZE = 4
+  hVASpace: Annotated[NvHandle, 0]
 NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00 = struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00
-struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00.SIZE = 4
-struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00._fields_ = ['hVASpace']
-setattr(struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00, 'hVASpace', field(0, NvHandle))
-struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E.SIZE = 12
-struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E, 'ctrlParams', field(8, NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00))
 rpc_ctrl_dma_set_default_vaspace_v1A_0E = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
 rpc_ctrl_dma_set_default_vaspace_v = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
-class struct_rpc_ctrl_get_ce_pce_mask_v1A_0E(Struct): pass
-class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07(Struct): pass
+@record
+class struct_rpc_ctrl_get_ce_pce_mask_v1A_0E:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07, 8]
+@record
+class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07:
+  SIZE = 8
+  ceEngineType: Annotated[NvU32, 0]
+  pceMask: Annotated[NvU32, 4]
 NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07 = struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07
-struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07.SIZE = 8
-struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07._fields_ = ['ceEngineType', 'pceMask']
-setattr(struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07, 'ceEngineType', field(0, NvU32))
-setattr(struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07, 'pceMask', field(4, NvU32))
-struct_rpc_ctrl_get_ce_pce_mask_v1A_0E.SIZE = 16
-struct_rpc_ctrl_get_ce_pce_mask_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_get_ce_pce_mask_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_ce_pce_mask_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_ce_pce_mask_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07))
 rpc_ctrl_get_ce_pce_mask_v1A_0E = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
 rpc_ctrl_get_ce_pce_mask_v = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
-class struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E(Struct): pass
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07(Struct): pass
+@record
+class struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E:
+  SIZE = 64
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 8]
+@record
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07:
+  SIZE = 56
+  value: Annotated[NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 0]
+  format: Annotated[NvU32, 40]
+  index: Annotated[NvU32, 44]
+  bIndexValid: Annotated[NvBool, 48]
+  tableType: Annotated[NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE, 52]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07(Struct): pass
+@record
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07:
+  SIZE = 40
+  colorFB: Annotated[(NvU32* 4), 0]
+  colorDS: Annotated[(NvU32* 4), 16]
+  depth: Annotated[NvU32, 32]
+  stencil: Annotated[NvU32, 36]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07.SIZE = 40
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07._fields_ = ['colorFB', 'colorDS', 'depth', 'stencil']
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 'colorFB', field(0, Array(NvU32, 4)))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 'colorDS', field(16, Array(NvU32, 4)))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 'depth', field(32, NvU32))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 'stencil', field(36, NvU32))
 enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = CEnum(ctypes.c_uint32)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID', 0)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR', 1)
@@ -2267,639 +2281,637 @@ NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_STENCIL = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COUNT = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COUNT', 4)
 
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07.SIZE = 56
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07._fields_ = ['value', 'format', 'index', 'bIndexValid', 'tableType']
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'value', field(0, NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'format', field(40, NvU32))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'index', field(44, NvU32))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'bIndexValid', field(48, NvBool))
-setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'tableType', field(52, NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE))
-struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E.SIZE = 64
-struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E, 'ctrlParams', field(8, NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07))
 rpc_ctrl_get_zbc_clear_table_entry_v1A_0E = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
 rpc_ctrl_get_zbc_clear_table_entry_v = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
-class struct_rpc_ctrl_get_nvlink_status_v23_04(Struct): pass
-class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04(Struct): pass
+@record
+class struct_rpc_ctrl_get_nvlink_status_v23_04:
+  SIZE = 3088
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04, 8]
+@record
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04:
+  SIZE = 3080
+  enabledLinkMask: Annotated[NvU32, 0]
+  linkInfo: Annotated[(NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D* 24), 8]
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04 = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04
-class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D(Struct): pass
+@record
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D:
+  SIZE = 128
+  capsTbl: Annotated[NvU32, 0]
+  phyType: Annotated[NvU8, 4]
+  subLinkWidth: Annotated[NvU8, 5]
+  linkState: Annotated[NvU32, 8]
+  rxSublinkStatus: Annotated[NvU8, 12]
+  txSublinkStatus: Annotated[NvU8, 13]
+  nvlinkVersion: Annotated[NvU8, 14]
+  nciVersion: Annotated[NvU8, 15]
+  phyVersion: Annotated[NvU8, 16]
+  nvlinkLinkClockKHz: Annotated[NvU32, 20]
+  nvlinkLineRateMbps: Annotated[NvU32, 24]
+  connected: Annotated[NvBool, 28]
+  remoteDeviceLinkNumber: Annotated[NvU8, 29]
+  localDeviceLinkNumber: Annotated[NvU8, 30]
+  remoteDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 32]
+  localDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 80]
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D
-class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02(Struct): pass
+@record
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02:
+  SIZE = 48
+  deviceIdFlags: Annotated[NvU32, 0]
+  domain: Annotated[NvU32, 4]
+  bus: Annotated[NvU16, 8]
+  device: Annotated[NvU16, 10]
+  function: Annotated[NvU16, 12]
+  pciDeviceId: Annotated[NvU32, 16]
+  deviceType: Annotated[NvU64, 24]
+  deviceUUID: Annotated[(NvU8* 16), 32]
 NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02 = struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02
-struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02.SIZE = 48
-struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02._fields_ = ['deviceIdFlags', 'domain', 'bus', 'device', 'function', 'pciDeviceId', 'deviceType', 'deviceUUID']
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'deviceIdFlags', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'domain', field(4, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'bus', field(8, NvU16))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'device', field(10, NvU16))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'function', field(12, NvU16))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'pciDeviceId', field(16, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'deviceType', field(24, NvU64))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'deviceUUID', field(32, Array(NvU8, 16)))
-struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D.SIZE = 128
-struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D._fields_ = ['capsTbl', 'phyType', 'subLinkWidth', 'linkState', 'rxSublinkStatus', 'txSublinkStatus', 'nvlinkVersion', 'nciVersion', 'phyVersion', 'nvlinkLinkClockKHz', 'nvlinkLineRateMbps', 'connected', 'remoteDeviceLinkNumber', 'localDeviceLinkNumber', 'remoteDeviceInfo', 'localDeviceInfo']
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'capsTbl', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'phyType', field(4, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'subLinkWidth', field(5, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'linkState', field(8, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'rxSublinkStatus', field(12, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'txSublinkStatus', field(13, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'nvlinkVersion', field(14, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'nciVersion', field(15, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'phyVersion', field(16, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'nvlinkLinkClockKHz', field(20, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'nvlinkLineRateMbps', field(24, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'connected', field(28, NvBool))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'remoteDeviceLinkNumber', field(29, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'localDeviceLinkNumber', field(30, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'remoteDeviceInfo', field(32, NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'localDeviceInfo', field(80, NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02))
-struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04.SIZE = 3080
-struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04._fields_ = ['enabledLinkMask', 'linkInfo']
-setattr(struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04, 'enabledLinkMask', field(0, NvU32))
-setattr(struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04, 'linkInfo', field(8, Array(NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 24)))
-struct_rpc_ctrl_get_nvlink_status_v23_04.SIZE = 3088
-struct_rpc_ctrl_get_nvlink_status_v23_04._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_get_nvlink_status_v23_04, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_nvlink_status_v23_04, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_nvlink_status_v23_04, 'ctrlParams', field(8, NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04))
 rpc_ctrl_get_nvlink_status_v23_04 = struct_rpc_ctrl_get_nvlink_status_v23_04
-class struct_rpc_ctrl_get_nvlink_status_v28_09(Struct): pass
-class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09(Struct): pass
+@record
+class struct_rpc_ctrl_get_nvlink_status_v28_09:
+  SIZE = 3472
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09, 8]
+@record
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09:
+  SIZE = 3464
+  enabledLinkMask: Annotated[NvU32, 0]
+  linkInfo: Annotated[(NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09* 24), 8]
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09 = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09
-class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09(Struct): pass
+@record
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09:
+  SIZE = 144
+  capsTbl: Annotated[NvU32, 0]
+  phyType: Annotated[NvU8, 4]
+  subLinkWidth: Annotated[NvU8, 5]
+  linkState: Annotated[NvU32, 8]
+  rxSublinkStatus: Annotated[NvU8, 12]
+  txSublinkStatus: Annotated[NvU8, 13]
+  nvlinkVersion: Annotated[NvU8, 14]
+  nciVersion: Annotated[NvU8, 15]
+  phyVersion: Annotated[NvU8, 16]
+  nvlinkLinkClockKHz: Annotated[NvU32, 20]
+  nvlinkLineRateMbps: Annotated[NvU32, 24]
+  connected: Annotated[NvBool, 28]
+  remoteDeviceLinkNumber: Annotated[NvU8, 29]
+  localDeviceLinkNumber: Annotated[NvU8, 30]
+  remoteDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 32]
+  localDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 88]
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09 = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09
-class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09(Struct): pass
+@record
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09:
+  SIZE = 56
+  deviceIdFlags: Annotated[NvU32, 0]
+  domain: Annotated[NvU32, 4]
+  bus: Annotated[NvU16, 8]
+  device: Annotated[NvU16, 10]
+  function: Annotated[NvU16, 12]
+  pciDeviceId: Annotated[NvU32, 16]
+  deviceType: Annotated[NvU64, 24]
+  deviceUUID: Annotated[(NvU8* 16), 32]
+  fabricRecoveryStatusMask: Annotated[NvU32, 48]
 NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09 = struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09
-struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09.SIZE = 56
-struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09._fields_ = ['deviceIdFlags', 'domain', 'bus', 'device', 'function', 'pciDeviceId', 'deviceType', 'deviceUUID', 'fabricRecoveryStatusMask']
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'deviceIdFlags', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'domain', field(4, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'bus', field(8, NvU16))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'device', field(10, NvU16))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'function', field(12, NvU16))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'pciDeviceId', field(16, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'deviceType', field(24, NvU64))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'deviceUUID', field(32, Array(NvU8, 16)))
-setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'fabricRecoveryStatusMask', field(48, NvU32))
-struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09.SIZE = 144
-struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09._fields_ = ['capsTbl', 'phyType', 'subLinkWidth', 'linkState', 'rxSublinkStatus', 'txSublinkStatus', 'nvlinkVersion', 'nciVersion', 'phyVersion', 'nvlinkLinkClockKHz', 'nvlinkLineRateMbps', 'connected', 'remoteDeviceLinkNumber', 'localDeviceLinkNumber', 'remoteDeviceInfo', 'localDeviceInfo']
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'capsTbl', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'phyType', field(4, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'subLinkWidth', field(5, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'linkState', field(8, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'rxSublinkStatus', field(12, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'txSublinkStatus', field(13, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'nvlinkVersion', field(14, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'nciVersion', field(15, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'phyVersion', field(16, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'nvlinkLinkClockKHz', field(20, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'nvlinkLineRateMbps', field(24, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'connected', field(28, NvBool))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'remoteDeviceLinkNumber', field(29, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'localDeviceLinkNumber', field(30, NvU8))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'remoteDeviceInfo', field(32, NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09))
-setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'localDeviceInfo', field(88, NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09))
-struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09.SIZE = 3464
-struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09._fields_ = ['enabledLinkMask', 'linkInfo']
-setattr(struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09, 'enabledLinkMask', field(0, NvU32))
-setattr(struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09, 'linkInfo', field(8, Array(NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 24)))
-struct_rpc_ctrl_get_nvlink_status_v28_09.SIZE = 3472
-struct_rpc_ctrl_get_nvlink_status_v28_09._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_get_nvlink_status_v28_09, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_nvlink_status_v28_09, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_nvlink_status_v28_09, 'ctrlParams', field(8, NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09))
 rpc_ctrl_get_nvlink_status_v28_09 = struct_rpc_ctrl_get_nvlink_status_v28_09
 rpc_ctrl_get_nvlink_status_v = struct_rpc_ctrl_get_nvlink_status_v28_09
-class struct_rpc_ctrl_get_p2p_caps_v1F_0D(Struct): pass
-class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D(Struct): pass
+@record
+class struct_rpc_ctrl_get_p2p_caps_v1F_0D:
+  SIZE = 164
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 8]
+@record
+class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D:
+  SIZE = 156
+  gpuIds: Annotated[(NvU32* 32), 0]
+  gpuCount: Annotated[NvU32, 128]
+  p2pCaps: Annotated[NvU32, 132]
+  p2pOptimalReadCEs: Annotated[NvU32, 136]
+  p2pOptimalWriteCEs: Annotated[NvU32, 140]
+  p2pCapsStatus: Annotated[(NvU8* 9), 144]
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D
-struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D.SIZE = 156
-struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D._fields_ = ['gpuIds', 'gpuCount', 'p2pCaps', 'p2pOptimalReadCEs', 'p2pOptimalWriteCEs', 'p2pCapsStatus']
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'gpuIds', field(0, Array(NvU32, 32)))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'gpuCount', field(128, NvU32))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'p2pCaps', field(132, NvU32))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'p2pOptimalReadCEs', field(136, NvU32))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'p2pOptimalWriteCEs', field(140, NvU32))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'p2pCapsStatus', field(144, Array(NvU8, 9)))
-struct_rpc_ctrl_get_p2p_caps_v1F_0D.SIZE = 164
-struct_rpc_ctrl_get_p2p_caps_v1F_0D._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_get_p2p_caps_v1F_0D, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_p2p_caps_v1F_0D, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_p2p_caps_v1F_0D, 'ctrlParams', field(8, NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D))
 rpc_ctrl_get_p2p_caps_v1F_0D = struct_rpc_ctrl_get_p2p_caps_v1F_0D
 rpc_ctrl_get_p2p_caps_v = struct_rpc_ctrl_get_p2p_caps_v1F_0D
-class struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E(Struct): pass
-class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A(Struct): pass
+@record
+class struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E:
+  SIZE = 1360
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 8]
+@record
+class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A:
+  SIZE = 1352
+  grpACount: Annotated[NvU32, 0]
+  grpBCount: Annotated[NvU32, 4]
+  gpuIdGrpA: Annotated[(NvU32* 8), 8]
+  gpuIdGrpB: Annotated[(NvU32* 8), 40]
+  p2pCaps: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A* 8), 72]
+  a2bOptimalReadCes: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A* 8), 328]
+  a2bOptimalWriteCes: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A* 8), 584]
+  b2aOptimalReadCes: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A* 8), 840]
+  b2aOptimalWriteCes: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A* 8), 1096]
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A
-class struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A(Struct): pass
+@record
+class struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A:
+  SIZE = 32
+  array: Annotated[(NvU32* 8), 0]
 NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A = struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A
-struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A.SIZE = 32
-struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A._fields_ = ['array']
-setattr(struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 'array', field(0, Array(NvU32, 8)))
-struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A.SIZE = 1352
-struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A._fields_ = ['grpACount', 'grpBCount', 'gpuIdGrpA', 'gpuIdGrpB', 'p2pCaps', 'a2bOptimalReadCes', 'a2bOptimalWriteCes', 'b2aOptimalReadCes', 'b2aOptimalWriteCes']
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'grpACount', field(0, NvU32))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'grpBCount', field(4, NvU32))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'gpuIdGrpA', field(8, Array(NvU32, 8)))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'gpuIdGrpB', field(40, Array(NvU32, 8)))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'p2pCaps', field(72, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'a2bOptimalReadCes', field(328, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'a2bOptimalWriteCes', field(584, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'b2aOptimalReadCes', field(840, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
-setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'b2aOptimalWriteCes', field(1096, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
-struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E.SIZE = 1360
-struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E, 'ctrlParams', field(8, NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A))
 rpc_ctrl_get_p2p_caps_matrix_v1A_0E = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
 rpc_ctrl_get_p2p_caps_matrix_v = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
-class struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F(Struct): pass
-class struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F(Struct): pass
+@record
+class struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F, 8]
+@record
+class struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F:
+  SIZE = 1
+  ctxsw: Annotated[NvBool, 0]
 NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F = struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F
-struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F.SIZE = 1
-struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F._fields_ = ['ctxsw']
-setattr(struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F, 'ctxsw', field(0, NvBool))
-struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F.SIZE = 12
-struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F, 'params', field(8, NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F))
 rpc_ctrl_reserve_pm_area_smpc_v1A_0F = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
 rpc_ctrl_reserve_pm_area_smpc_v = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
-class struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F(Struct): pass
-class struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F(Struct): pass
+@record
+class struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F, 8]
+@record
+class struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F:
+  SIZE = 1
+  ctxsw: Annotated[NvBool, 0]
 NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F = struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F
-struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F.SIZE = 1
-struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F._fields_ = ['ctxsw']
-setattr(struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F, 'ctxsw', field(0, NvBool))
-struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F.SIZE = 12
-struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F, 'params', field(8, NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F))
 rpc_ctrl_reserve_hwpm_legacy_v1A_0F = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
 rpc_ctrl_reserve_hwpm_legacy_v = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
-class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F(Struct): pass
-class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F(Struct): pass
+@record
+class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F:
+  SIZE = 3988
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 8]
+@record
+class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F:
+  SIZE = 3980
+  regOpCount: Annotated[NvU32, 0]
+  mode: Annotated[NVB0CC_REGOPS_MODE, 4]
+  bPassed: Annotated[NvBool, 8]
+  bDirect: Annotated[NvBool, 9]
+  regOps: Annotated[(NV2080_CTRL_GPU_REG_OP_v03_00* 124), 12]
 NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F = struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F
 enum_NVB0CC_REGOPS_MODE = CEnum(ctypes.c_uint32)
 NVB0CC_REGOPS_MODE_ALL_OR_NONE = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_ALL_OR_NONE', 0)
 NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR', 1)
 
 NVB0CC_REGOPS_MODE = enum_NVB0CC_REGOPS_MODE
-struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F.SIZE = 3980
-struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F._fields_ = ['regOpCount', 'mode', 'bPassed', 'bDirect', 'regOps']
-setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'regOpCount', field(0, NvU32))
-setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'mode', field(4, NVB0CC_REGOPS_MODE))
-setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'bPassed', field(8, NvBool))
-setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'bDirect', field(9, NvBool))
-setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'regOps', field(12, Array(NV2080_CTRL_GPU_REG_OP_v03_00, 124)))
-struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F.SIZE = 3988
-struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F, 'params', field(8, NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F))
 rpc_ctrl_b0cc_exec_reg_ops_v1A_0F = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
 rpc_ctrl_b0cc_exec_reg_ops_v = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
-class struct_rpc_ctrl_bind_pm_resources_v1A_0F(Struct): pass
-struct_rpc_ctrl_bind_pm_resources_v1A_0F.SIZE = 8
-struct_rpc_ctrl_bind_pm_resources_v1A_0F._fields_ = ['hClient', 'hObject']
-setattr(struct_rpc_ctrl_bind_pm_resources_v1A_0F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_bind_pm_resources_v1A_0F, 'hObject', field(4, NvHandle))
+@record
+class struct_rpc_ctrl_bind_pm_resources_v1A_0F:
+  SIZE = 8
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
 rpc_ctrl_bind_pm_resources_v1A_0F = struct_rpc_ctrl_bind_pm_resources_v1A_0F
 rpc_ctrl_bind_pm_resources_v = struct_rpc_ctrl_bind_pm_resources_v1A_0F
-class struct_rpc_ctrl_alloc_pma_stream_v1A_14(Struct): pass
-class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14(Struct): pass
+@record
+class struct_rpc_ctrl_alloc_pma_stream_v1A_14:
+  SIZE = 64
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 8]
+@record
+class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14:
+  SIZE = 56
+  hMemPmaBuffer: Annotated[NvHandle, 0]
+  pmaBufferOffset: Annotated[NvU64, 8]
+  pmaBufferSize: Annotated[NvU64, 16]
+  hMemPmaBytesAvailable: Annotated[NvHandle, 24]
+  pmaBytesAvailableOffset: Annotated[NvU64, 32]
+  ctxsw: Annotated[NvBool, 40]
+  pmaChannelIdx: Annotated[NvU32, 44]
+  pmaBufferVA: Annotated[NvU64, 48]
 NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14 = struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14
-struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14.SIZE = 56
-struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14._fields_ = ['hMemPmaBuffer', 'pmaBufferOffset', 'pmaBufferSize', 'hMemPmaBytesAvailable', 'pmaBytesAvailableOffset', 'ctxsw', 'pmaChannelIdx', 'pmaBufferVA']
-setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'hMemPmaBuffer', field(0, NvHandle))
-setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaBufferOffset', field(8, NvU64))
-setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaBufferSize', field(16, NvU64))
-setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'hMemPmaBytesAvailable', field(24, NvHandle))
-setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaBytesAvailableOffset', field(32, NvU64))
-setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'ctxsw', field(40, NvBool))
-setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaChannelIdx', field(44, NvU32))
-setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaBufferVA', field(48, NvU64))
-struct_rpc_ctrl_alloc_pma_stream_v1A_14.SIZE = 64
-struct_rpc_ctrl_alloc_pma_stream_v1A_14._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_alloc_pma_stream_v1A_14, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_alloc_pma_stream_v1A_14, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_alloc_pma_stream_v1A_14, 'params', field(8, NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14))
 rpc_ctrl_alloc_pma_stream_v1A_14 = struct_rpc_ctrl_alloc_pma_stream_v1A_14
 rpc_ctrl_alloc_pma_stream_v = struct_rpc_ctrl_alloc_pma_stream_v1A_14
-class struct_rpc_ctrl_pma_stream_update_get_put_v1A_14(Struct): pass
-class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14(Struct): pass
+@record
+class struct_rpc_ctrl_pma_stream_update_get_put_v1A_14:
+  SIZE = 56
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 8]
+@record
+class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14:
+  SIZE = 48
+  bytesConsumed: Annotated[NvU64, 0]
+  bUpdateAvailableBytes: Annotated[NvBool, 8]
+  bWait: Annotated[NvBool, 9]
+  bytesAvailable: Annotated[NvU64, 16]
+  bReturnPut: Annotated[NvBool, 24]
+  putPtr: Annotated[NvU64, 32]
+  pmaChannelIdx: Annotated[NvU32, 40]
 NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14 = struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14
-struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14.SIZE = 48
-struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14._fields_ = ['bytesConsumed', 'bUpdateAvailableBytes', 'bWait', 'bytesAvailable', 'bReturnPut', 'putPtr', 'pmaChannelIdx']
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bytesConsumed', field(0, NvU64))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bUpdateAvailableBytes', field(8, NvBool))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bWait', field(9, NvBool))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bytesAvailable', field(16, NvU64))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bReturnPut', field(24, NvBool))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'putPtr', field(32, NvU64))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'pmaChannelIdx', field(40, NvU32))
-struct_rpc_ctrl_pma_stream_update_get_put_v1A_14.SIZE = 56
-struct_rpc_ctrl_pma_stream_update_get_put_v1A_14._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_pma_stream_update_get_put_v1A_14, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_pma_stream_update_get_put_v1A_14, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_pma_stream_update_get_put_v1A_14, 'params', field(8, NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14))
 rpc_ctrl_pma_stream_update_get_put_v1A_14 = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
 rpc_ctrl_pma_stream_update_get_put_v = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
-class struct_rpc_ctrl_fb_get_info_v2_v25_0A(Struct): pass
-class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A(Struct): pass
+@record
+class struct_rpc_ctrl_fb_get_info_v2_v25_0A:
+  SIZE = 452
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A, 8]
+@record
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A:
+  SIZE = 444
+  fbInfoListSize: Annotated[NvU32, 0]
+  fbInfoList: Annotated[(NV2080_CTRL_FB_INFO_v1A_15* 55), 4]
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A
-class struct_NV2080_CTRL_FB_INFO_v1A_15(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_INFO_v1A_15:
+  SIZE = 8
+  index: Annotated[NvU32, 0]
+  data: Annotated[NvU32, 4]
 NV2080_CTRL_FB_INFO_v1A_15 = struct_NV2080_CTRL_FB_INFO_v1A_15
-struct_NV2080_CTRL_FB_INFO_v1A_15.SIZE = 8
-struct_NV2080_CTRL_FB_INFO_v1A_15._fields_ = ['index', 'data']
-setattr(struct_NV2080_CTRL_FB_INFO_v1A_15, 'index', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_INFO_v1A_15, 'data', field(4, NvU32))
-struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A.SIZE = 444
-struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A._fields_ = ['fbInfoListSize', 'fbInfoList']
-setattr(struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A, 'fbInfoListSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A, 'fbInfoList', field(4, Array(NV2080_CTRL_FB_INFO_v1A_15, 55)))
-struct_rpc_ctrl_fb_get_info_v2_v25_0A.SIZE = 452
-struct_rpc_ctrl_fb_get_info_v2_v25_0A._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_fb_get_info_v2_v25_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fb_get_info_v2_v25_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fb_get_info_v2_v25_0A, 'ctrlParams', field(8, NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A))
 rpc_ctrl_fb_get_info_v2_v25_0A = struct_rpc_ctrl_fb_get_info_v2_v25_0A
-class struct_rpc_ctrl_fb_get_info_v2_v27_00(Struct): pass
-class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00(Struct): pass
+@record
+class struct_rpc_ctrl_fb_get_info_v2_v27_00:
+  SIZE = 468
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00, 8]
+@record
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00:
+  SIZE = 460
+  fbInfoListSize: Annotated[NvU32, 0]
+  fbInfoList: Annotated[(NV2080_CTRL_FB_INFO_v1A_15* 57), 4]
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00 = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00
-struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00.SIZE = 460
-struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00._fields_ = ['fbInfoListSize', 'fbInfoList']
-setattr(struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00, 'fbInfoListSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00, 'fbInfoList', field(4, Array(NV2080_CTRL_FB_INFO_v1A_15, 57)))
-struct_rpc_ctrl_fb_get_info_v2_v27_00.SIZE = 468
-struct_rpc_ctrl_fb_get_info_v2_v27_00._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_fb_get_info_v2_v27_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fb_get_info_v2_v27_00, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fb_get_info_v2_v27_00, 'ctrlParams', field(8, NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00))
 rpc_ctrl_fb_get_info_v2_v27_00 = struct_rpc_ctrl_fb_get_info_v2_v27_00
 rpc_ctrl_fb_get_info_v2_v = struct_rpc_ctrl_fb_get_info_v2_v27_00
-class struct_rpc_ctrl_fifo_set_channel_properties_v1A_16(Struct): pass
-class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_fifo_set_channel_properties_v1A_16:
+  SIZE = 24
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00, 8]
+@record
+class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00:
+  SIZE = 16
+  hChannel: Annotated[NvHandle, 0]
+  property: Annotated[NvU32, 4]
+  value: Annotated[NvU64, 8]
 NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00 = struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00
-struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00.SIZE = 16
-struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00._fields_ = ['hChannel', 'property', 'value']
-setattr(struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00, 'hChannel', field(0, NvHandle))
-setattr(struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00, 'property', field(4, NvU32))
-setattr(struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00, 'value', field(8, NvU64))
-struct_rpc_ctrl_fifo_set_channel_properties_v1A_16.SIZE = 24
-struct_rpc_ctrl_fifo_set_channel_properties_v1A_16._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_fifo_set_channel_properties_v1A_16, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fifo_set_channel_properties_v1A_16, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fifo_set_channel_properties_v1A_16, 'ctrlParams', field(8, NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00))
 rpc_ctrl_fifo_set_channel_properties_v1A_16 = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
 rpc_ctrl_fifo_set_channel_properties_v = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
-class struct_rpc_ctrl_gpu_evict_ctx_v1A_1C(Struct): pass
-class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00(Struct): pass
+@record
+class struct_rpc_ctrl_gpu_evict_ctx_v1A_1C:
+  SIZE = 28
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 8]
+@record
+class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00:
+  SIZE = 20
+  engineType: Annotated[NvU32, 0]
+  hClient: Annotated[NvHandle, 4]
+  ChID: Annotated[NvU32, 8]
+  hChanClient: Annotated[NvHandle, 12]
+  hObject: Annotated[NvHandle, 16]
 NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00 = struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00
-struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00.SIZE = 20
-struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00._fields_ = ['engineType', 'hClient', 'ChID', 'hChanClient', 'hObject']
-setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'engineType', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'hClient', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'ChID', field(8, NvU32))
-setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'hChanClient', field(12, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'hObject', field(16, NvHandle))
-struct_rpc_ctrl_gpu_evict_ctx_v1A_1C.SIZE = 28
-struct_rpc_ctrl_gpu_evict_ctx_v1A_1C._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_gpu_evict_ctx_v1A_1C, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpu_evict_ctx_v1A_1C, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpu_evict_ctx_v1A_1C, 'params', field(8, NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00))
 rpc_ctrl_gpu_evict_ctx_v1A_1C = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
 rpc_ctrl_gpu_evict_ctx_v = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
-class struct_rpc_ctrl_fb_get_fs_info_v24_00(Struct): pass
-class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00(Struct): pass
+@record
+class struct_rpc_ctrl_fb_get_fs_info_v24_00:
+  SIZE = 3856
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00, 8]
+@record
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00:
+  SIZE = 3848
+  numQueries: Annotated[NvU16, 0]
+  reserved: Annotated[(NvU8* 6), 2]
+  queries: Annotated[(NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D* 120), 8]
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00 = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D:
+  SIZE = 32
+  queryType: Annotated[NvU16, 0]
+  reserved: Annotated[(NvU8* 2), 2]
+  status: Annotated[NvU32, 4]
+  queryParams: Annotated[NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 8]
 NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D
-class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D(Union): pass
+@record
+class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D:
+  SIZE = 24
+  inv: Annotated[NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D, 0]
+  fbp: Annotated[NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D, 0]
+  ltc: Annotated[NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D, 0]
+  lts: Annotated[NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D, 0]
+  fbpa: Annotated[NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D, 0]
+  rop: Annotated[NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 0]
+  dmLtc: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D, 0]
+  dmLts: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D, 0]
+  dmFbpa: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D, 0]
+  dmRop: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D, 0]
+  dmFbpaSubp: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D, 0]
+  fbpaSubp: Annotated[NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D, 0]
+  fbpLogicalMap: Annotated[NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D, 0]
 NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D = union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D
-class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D:
+  SIZE = 24
+  data: Annotated[(NvU8* 24), 0]
 NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D.SIZE = 24
-struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D._fields_ = ['data']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D, 'data', field(0, Array(NvU8, 24)))
-class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D:
+  SIZE = 16
+  swizzId: Annotated[NvU32, 0]
+  fbpEnMask: Annotated[NvU64, 8]
 NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D.SIZE = 16
-struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D._fields_ = ['swizzId', 'fbpEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D, 'swizzId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D, 'fbpEnMask', field(8, NvU64))
-class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D:
+  SIZE = 8
+  fbpIndex: Annotated[NvU32, 0]
+  ltcEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'ltcEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D, 'ltcEnMask', field(4, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D:
+  SIZE = 8
+  fbpIndex: Annotated[NvU32, 0]
+  ltsEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'ltsEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D, 'ltsEnMask', field(4, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D:
+  SIZE = 8
+  fbpIndex: Annotated[NvU32, 0]
+  fbpaEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'fbpaEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D, 'fbpaEnMask', field(4, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D:
+  SIZE = 8
+  fbpIndex: Annotated[NvU32, 0]
+  ropEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'ropEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 'ropEnMask', field(4, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D:
+  SIZE = 12
+  fbpIndex: Annotated[NvU32, 0]
+  swizzId: Annotated[NvU32, 4]
+  ltcEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D.SIZE = 12
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'ltcEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D, 'ltcEnMask', field(8, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D:
+  SIZE = 12
+  fbpIndex: Annotated[NvU32, 0]
+  swizzId: Annotated[NvU32, 4]
+  ltsEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D.SIZE = 12
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'ltsEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D, 'ltsEnMask', field(8, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D:
+  SIZE = 12
+  fbpIndex: Annotated[NvU32, 0]
+  swizzId: Annotated[NvU32, 4]
+  fbpaEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D.SIZE = 12
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'fbpaEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D, 'fbpaEnMask', field(8, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D:
+  SIZE = 12
+  fbpIndex: Annotated[NvU32, 0]
+  swizzId: Annotated[NvU32, 4]
+  ropEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D.SIZE = 12
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'ropEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D, 'ropEnMask', field(8, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D:
+  SIZE = 16
+  fbpIndex: Annotated[NvU32, 0]
+  swizzId: Annotated[NvU32, 4]
+  fbpaSubpEnMask: Annotated[NvU64, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D.SIZE = 16
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'fbpaSubpEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'fbpaSubpEnMask', field(8, NvU64))
-class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D:
+  SIZE = 8
+  fbpIndex: Annotated[NvU32, 0]
+  fbpaSubpEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'fbpaSubpEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'fbpaSubpEnMask', field(4, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D:
+  SIZE = 8
+  fbpIndex: Annotated[NvU32, 0]
+  fbpLogicalIndex: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'fbpLogicalIndex']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D, 'fbpLogicalIndex', field(4, NvU32))
-union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D.SIZE = 24
-union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D._fields_ = ['inv', 'fbp', 'ltc', 'lts', 'fbpa', 'rop', 'dmLtc', 'dmLts', 'dmFbpa', 'dmRop', 'dmFbpaSubp', 'fbpaSubp', 'fbpLogicalMap']
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'inv', field(0, NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'fbp', field(0, NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'ltc', field(0, NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'lts', field(0, NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'fbpa', field(0, NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'rop', field(0, NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmLtc', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmLts', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmFbpa', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmRop', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmFbpaSubp', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'fbpaSubp', field(0, NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'fbpLogicalMap', field(0, NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D))
-struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D.SIZE = 32
-struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D._fields_ = ['queryType', 'reserved', 'status', 'queryParams']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 'queryType', field(0, NvU16))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 'reserved', field(2, Array(NvU8, 2)))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 'status', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 'queryParams', field(8, NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D))
-struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00.SIZE = 3848
-struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00._fields_ = ['numQueries', 'reserved', 'queries']
-setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00, 'numQueries', field(0, NvU16))
-setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00, 'reserved', field(2, Array(NvU8, 6)))
-setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00, 'queries', field(8, Array(NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 120)))
-struct_rpc_ctrl_fb_get_fs_info_v24_00.SIZE = 3856
-struct_rpc_ctrl_fb_get_fs_info_v24_00._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_fb_get_fs_info_v24_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fb_get_fs_info_v24_00, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fb_get_fs_info_v24_00, 'params', field(8, NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00))
 rpc_ctrl_fb_get_fs_info_v24_00 = struct_rpc_ctrl_fb_get_fs_info_v24_00
-class struct_rpc_ctrl_fb_get_fs_info_v26_04(Struct): pass
-class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04(Struct): pass
+@record
+class struct_rpc_ctrl_fb_get_fs_info_v26_04:
+  SIZE = 3856
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04, 8]
+@record
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04:
+  SIZE = 3848
+  numQueries: Annotated[NvU16, 0]
+  reserved: Annotated[(NvU8* 6), 2]
+  queries: Annotated[(NV2080_CTRL_FB_FS_INFO_QUERY_v26_04* 120), 8]
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04 = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04:
+  SIZE = 32
+  queryType: Annotated[NvU16, 0]
+  reserved: Annotated[(NvU8* 2), 2]
+  status: Annotated[NvU32, 4]
+  queryParams: Annotated[NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 8]
 NV2080_CTRL_FB_FS_INFO_QUERY_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04
-class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04(Union): pass
+@record
+class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04:
+  SIZE = 24
+  inv: Annotated[NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D, 0]
+  fbp: Annotated[NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D, 0]
+  ltc: Annotated[NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D, 0]
+  lts: Annotated[NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D, 0]
+  fbpa: Annotated[NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D, 0]
+  rop: Annotated[NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 0]
+  dmLtc: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D, 0]
+  dmLts: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D, 0]
+  dmFbpa: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D, 0]
+  dmRop: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D, 0]
+  dmFbpaSubp: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D, 0]
+  fbpaSubp: Annotated[NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D, 0]
+  fbpLogicalMap: Annotated[NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D, 0]
+  sysl2Ltc: Annotated[NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04, 0]
+  pac: Annotated[NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04, 0]
+  logicalLtc: Annotated[NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04, 0]
+  dmLogicalLtc: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04, 0]
 NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04 = union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04
-class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04(Struct): pass
+@record
+class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04:
+  SIZE = 8
+  sysIdx: Annotated[NvU32, 0]
+  sysl2LtcEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04
-struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04.SIZE = 8
-struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04._fields_ = ['sysIdx', 'sysl2LtcEnMask']
-setattr(struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04, 'sysIdx', field(0, NvU32))
-setattr(struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04, 'sysl2LtcEnMask', field(4, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04:
+  SIZE = 8
+  fbpIndex: Annotated[NvU32, 0]
+  pacEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04
-struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04.SIZE = 8
-struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04._fields_ = ['fbpIndex', 'pacEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04, 'pacEnMask', field(4, NvU32))
-class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04:
+  SIZE = 16
+  fbpIndex: Annotated[NvU32, 0]
+  logicalLtcEnMask: Annotated[NvU64, 8]
 NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04
-struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04.SIZE = 16
-struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = ['fbpIndex', 'logicalLtcEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04, 'logicalLtcEnMask', field(8, NvU64))
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04(Struct): pass
+@record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04:
+  SIZE = 16
+  fbpIndex: Annotated[NvU32, 0]
+  swizzId: Annotated[NvU32, 4]
+  logicalLtcEnMask: Annotated[NvU64, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04.SIZE = 16
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = ['fbpIndex', 'swizzId', 'logicalLtcEnMask']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04, 'fbpIndex', field(0, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04, 'swizzId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04, 'logicalLtcEnMask', field(8, NvU64))
-union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04.SIZE = 24
-union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04._fields_ = ['inv', 'fbp', 'ltc', 'lts', 'fbpa', 'rop', 'dmLtc', 'dmLts', 'dmFbpa', 'dmRop', 'dmFbpaSubp', 'fbpaSubp', 'fbpLogicalMap', 'sysl2Ltc', 'pac', 'logicalLtc', 'dmLogicalLtc']
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'inv', field(0, NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'fbp', field(0, NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'ltc', field(0, NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'lts', field(0, NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'fbpa', field(0, NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'rop', field(0, NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmLtc', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmLts', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmFbpa', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmRop', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmFbpaSubp', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'fbpaSubp', field(0, NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'fbpLogicalMap', field(0, NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'sysl2Ltc', field(0, NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'pac', field(0, NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'logicalLtc', field(0, NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04))
-setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmLogicalLtc', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04))
-struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04.SIZE = 32
-struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04._fields_ = ['queryType', 'reserved', 'status', 'queryParams']
-setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 'queryType', field(0, NvU16))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 'reserved', field(2, Array(NvU8, 2)))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 'status', field(4, NvU32))
-setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 'queryParams', field(8, NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04))
-struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04.SIZE = 3848
-struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04._fields_ = ['numQueries', 'reserved', 'queries']
-setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04, 'numQueries', field(0, NvU16))
-setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04, 'reserved', field(2, Array(NvU8, 6)))
-setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04, 'queries', field(8, Array(NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 120)))
-struct_rpc_ctrl_fb_get_fs_info_v26_04.SIZE = 3856
-struct_rpc_ctrl_fb_get_fs_info_v26_04._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_fb_get_fs_info_v26_04, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fb_get_fs_info_v26_04, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fb_get_fs_info_v26_04, 'params', field(8, NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04))
 rpc_ctrl_fb_get_fs_info_v26_04 = struct_rpc_ctrl_fb_get_fs_info_v26_04
 rpc_ctrl_fb_get_fs_info_v = struct_rpc_ctrl_fb_get_fs_info_v26_04
-class struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D(Struct): pass
-class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D:
+  SIZE = 1936
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D, 8]
+@record
+class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D:
+  SIZE = 1928
+  numQueries: Annotated[NvU16, 0]
+  reserved: Annotated[(NvU8* 6), 2]
+  queries: Annotated[(NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D* 96), 8]
 NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D:
+  SIZE = 20
+  queryType: Annotated[NvU16, 0]
+  reserved: Annotated[(NvU8* 2), 2]
+  status: Annotated[NvU32, 4]
+  queryData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 8]
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D
-class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D(Union): pass
+@record
+class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D:
+  SIZE = 12
+  gpcCountData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D, 0]
+  chipletGpcMapData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 0]
+  tpcMaskData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D, 0]
+  ppcMaskData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D, 0]
+  partitionGpcMapData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 0]
+  syspipeMaskData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D, 0]
+  partitionChipletSyspipeData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D, 0]
+  dmGpcMaskData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D, 0]
+  partitionSyspipeIdData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D, 0]
+  ropMaskData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 0]
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D = union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D:
+  SIZE = 4
+  gpcCount: Annotated[NvU32, 0]
 NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D.SIZE = 4
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D._fields_ = ['gpcCount']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D, 'gpcCount', field(0, NvU32))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D:
+  SIZE = 8
+  gpcId: Annotated[NvU32, 0]
+  chipletGpcMap: Annotated[NvU32, 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = ['gpcId', 'chipletGpcMap']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'gpcId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'chipletGpcMap', field(4, NvU32))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D:
+  SIZE = 8
+  gpcId: Annotated[NvU32, 0]
+  tpcMask: Annotated[NvU32, 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D._fields_ = ['gpcId', 'tpcMask']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D, 'gpcId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D, 'tpcMask', field(4, NvU32))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D:
+  SIZE = 8
+  gpcId: Annotated[NvU32, 0]
+  ppcMask: Annotated[NvU32, 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D._fields_ = ['gpcId', 'ppcMask']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D, 'gpcId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D, 'ppcMask', field(4, NvU32))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D:
+  SIZE = 12
+  swizzId: Annotated[NvU32, 0]
+  gpcId: Annotated[NvU32, 4]
+  chipletGpcMap: Annotated[NvU32, 8]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D.SIZE = 12
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = ['swizzId', 'gpcId', 'chipletGpcMap']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'swizzId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'gpcId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'chipletGpcMap', field(8, NvU32))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D:
+  SIZE = 4
+  chipletSyspipeMask: Annotated[NvU32, 0]
 NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D.SIZE = 4
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D._fields_ = ['chipletSyspipeMask']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D, 'chipletSyspipeMask', field(0, NvU32))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D:
+  SIZE = 12
+  swizzId: Annotated[NvU16, 0]
+  physSyspipeIdCount: Annotated[NvU16, 2]
+  physSyspipeId: Annotated[(NvU8* 8), 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D.SIZE = 12
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D._fields_ = ['swizzId', 'physSyspipeIdCount', 'physSyspipeId']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D, 'swizzId', field(0, NvU16))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D, 'physSyspipeIdCount', field(2, NvU16))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D, 'physSyspipeId', field(4, Array(NvU8, 8)))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D:
+  SIZE = 12
+  swizzId: Annotated[NvU32, 0]
+  grIdx: Annotated[NvU32, 4]
+  gpcEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D.SIZE = 12
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D._fields_ = ['swizzId', 'grIdx', 'gpcEnMask']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D, 'swizzId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D, 'grIdx', field(4, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D, 'gpcEnMask', field(8, NvU32))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D:
+  SIZE = 4
+  syspipeId: Annotated[NvU32, 0]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D.SIZE = 4
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D._fields_ = ['syspipeId']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D, 'syspipeId', field(0, NvU32))
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D(Struct): pass
+@record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D:
+  SIZE = 8
+  gpcId: Annotated[NvU32, 0]
+  ropMask: Annotated[NvU32, 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D.SIZE = 8
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = ['gpcId', 'ropMask']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 'gpcId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 'ropMask', field(4, NvU32))
-union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D.SIZE = 12
-union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D._fields_ = ['gpcCountData', 'chipletGpcMapData', 'tpcMaskData', 'ppcMaskData', 'partitionGpcMapData', 'syspipeMaskData', 'partitionChipletSyspipeData', 'dmGpcMaskData', 'partitionSyspipeIdData', 'ropMaskData']
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'gpcCountData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'chipletGpcMapData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'tpcMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'ppcMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'partitionGpcMapData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'syspipeMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'partitionChipletSyspipeData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'dmGpcMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'partitionSyspipeIdData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D))
-setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'ropMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D))
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D.SIZE = 20
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D._fields_ = ['queryType', 'reserved', 'status', 'queryData']
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 'queryType', field(0, NvU16))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 'reserved', field(2, Array(NvU8, 2)))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 'status', field(4, NvU32))
-setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 'queryData', field(8, NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D))
-struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D.SIZE = 1928
-struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D._fields_ = ['numQueries', 'reserved', 'queries']
-setattr(struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D, 'numQueries', field(0, NvU16))
-setattr(struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D, 'reserved', field(2, Array(NvU8, 6)))
-setattr(struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D, 'queries', field(8, Array(NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 96)))
-struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D.SIZE = 1936
-struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D, 'params', field(8, NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D))
 rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
 rpc_ctrl_grmgr_get_gr_fs_info_v = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
-class struct_rpc_ctrl_stop_channel_v1A_1E(Struct): pass
-class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E(Struct): pass
+@record
+class struct_rpc_ctrl_stop_channel_v1A_1E:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E, 8]
+@record
+class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E:
+  SIZE = 1
+  bImmediate: Annotated[NvBool, 0]
 NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E = struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E
-struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E.SIZE = 1
-struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E._fields_ = ['bImmediate']
-setattr(struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E, 'bImmediate', field(0, NvBool))
-struct_rpc_ctrl_stop_channel_v1A_1E.SIZE = 12
-struct_rpc_ctrl_stop_channel_v1A_1E._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_stop_channel_v1A_1E, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_stop_channel_v1A_1E, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_stop_channel_v1A_1E, 'params', field(8, NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E))
 rpc_ctrl_stop_channel_v1A_1E = struct_rpc_ctrl_stop_channel_v1A_1E
 rpc_ctrl_stop_channel_v = struct_rpc_ctrl_stop_channel_v1A_1E
-class struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F(Struct): pass
-class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F(Struct): pass
+@record
+class struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F:
+  SIZE = 32
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F, 8]
+@record
+class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F:
+  SIZE = 24
+  hChannel: Annotated[NvHandle, 0]
+  samplingMode: Annotated[NvU32, 4]
+  grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 8]
 NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F = struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F
-struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F.SIZE = 24
-struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F._fields_ = ['hChannel', 'samplingMode', 'grRouteInfo']
-setattr(struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F, 'hChannel', field(0, NvHandle))
-setattr(struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F, 'samplingMode', field(4, NvU32))
-setattr(struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F, 'grRouteInfo', field(8, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
-struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F.SIZE = 32
-struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F, 'params', field(8, NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F))
 rpc_ctrl_gr_pc_sampling_mode_v1A_1F = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
 rpc_ctrl_gr_pc_sampling_mode_v = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
-class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F(Struct): pass
-class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F(Struct): pass
+@record
+class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F:
+  SIZE = 40
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F, 8]
+@record
+class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F:
+  SIZE = 32
+  rm: Annotated[PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F, 0]
+  output: Annotated[NV2080_CTRL_PERF_RATED_TDP_ACTION, 8]
+  inputs: Annotated[(NV2080_CTRL_PERF_RATED_TDP_ACTION* 5), 12]
 NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F = struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F
-class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F(Struct): pass
+@record
+class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F:
+  SIZE = 8
+  clientActiveMask: Annotated[NvU32, 0]
+  bRegkeyLimitRatedTdp: Annotated[NvU8, 4]
 PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F = struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F
-struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F.SIZE = 8
-struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F._fields_ = ['clientActiveMask', 'bRegkeyLimitRatedTdp']
-setattr(struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F, 'clientActiveMask', field(0, NvU32))
-setattr(struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F, 'bRegkeyLimitRatedTdp', field(4, NvU8))
 enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(ctypes.c_uint32)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT', 0)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED', 1)
@@ -2908,20 +2920,19 @@ NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK = enum_NV2080_CTRL_PERF_RATED_TDP_A
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR', 4)
 
 NV2080_CTRL_PERF_RATED_TDP_ACTION = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION
-struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F.SIZE = 32
-struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F._fields_ = ['rm', 'output', 'inputs']
-setattr(struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F, 'rm', field(0, PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F))
-setattr(struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F, 'output', field(8, NV2080_CTRL_PERF_RATED_TDP_ACTION))
-setattr(struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F, 'inputs', field(12, Array(NV2080_CTRL_PERF_RATED_TDP_ACTION, 5)))
-struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F.SIZE = 40
-struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F, 'params', field(8, NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F))
 rpc_ctrl_perf_rated_tdp_get_status_v1A_1F = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
 rpc_ctrl_perf_rated_tdp_get_status_v = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
-class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F(Struct): pass
-class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F(Struct): pass
+@record
+class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F, 8]
+@record
+class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F:
+  SIZE = 8
+  client: Annotated[NV2080_CTRL_PERF_RATED_TDP_CLIENT, 0]
+  input: Annotated[NV2080_CTRL_PERF_RATED_TDP_ACTION, 4]
 NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F
 enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(ctypes.c_uint32)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM', 0)
@@ -2932,75 +2943,77 @@ NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE = enum_NV2080_CTRL_PERF_RATED_TDP_CLIE
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS', 5)
 
 NV2080_CTRL_PERF_RATED_TDP_CLIENT = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT
-struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F.SIZE = 8
-struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F._fields_ = ['client', 'input']
-setattr(struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F, 'client', field(0, NV2080_CTRL_PERF_RATED_TDP_CLIENT))
-setattr(struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F, 'input', field(4, NV2080_CTRL_PERF_RATED_TDP_ACTION))
-struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F.SIZE = 16
-struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F, 'params', field(8, NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F))
 rpc_ctrl_perf_rated_tdp_set_control_v1A_1F = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
 rpc_ctrl_perf_rated_tdp_set_control_v = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
-class struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F(Struct): pass
-class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F(Struct): pass
+@record
+class struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F, 8]
+@record
+class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F:
+  SIZE = 1
+  bSetMaxFreq: Annotated[NvBool, 0]
 NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F = struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F
-struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F.SIZE = 1
-struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F._fields_ = ['bSetMaxFreq']
-setattr(struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F, 'bSetMaxFreq', field(0, NvBool))
-struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F.SIZE = 12
-struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F, 'params', field(8, NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F))
 rpc_ctrl_timer_set_gr_tick_freq_v1A_1F = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
 rpc_ctrl_timer_set_gr_tick_freq_v = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
-class struct_rpc_ctrl_free_pma_stream_v1A_1F(Struct): pass
-class struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F(Struct): pass
+@record
+class struct_rpc_ctrl_free_pma_stream_v1A_1F:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F, 8]
+@record
+class struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F:
+  SIZE = 4
+  pmaChannelIdx: Annotated[NvU32, 0]
 NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F = struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F
-struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F.SIZE = 4
-struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F._fields_ = ['pmaChannelIdx']
-setattr(struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F, 'pmaChannelIdx', field(0, NvU32))
-struct_rpc_ctrl_free_pma_stream_v1A_1F.SIZE = 12
-struct_rpc_ctrl_free_pma_stream_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_free_pma_stream_v1A_1F, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_free_pma_stream_v1A_1F, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_free_pma_stream_v1A_1F, 'params', field(8, NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F))
 rpc_ctrl_free_pma_stream_v1A_1F = struct_rpc_ctrl_free_pma_stream_v1A_1F
 rpc_ctrl_free_pma_stream_v = struct_rpc_ctrl_free_pma_stream_v1A_1F
-class struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23(Struct): pass
-class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23(Struct): pass
+@record
+class struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23:
+  SIZE = 32
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 8]
+@record
+class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23:
+  SIZE = 24
+  base: Annotated[NvU64, 0]
+  size: Annotated[NvU64, 8]
+  addressSpace: Annotated[NvU32, 16]
+  cacheAttrib: Annotated[NvU32, 20]
 NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23 = struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23
-struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23.SIZE = 24
-struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23._fields_ = ['base', 'size', 'addressSpace', 'cacheAttrib']
-setattr(struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 'base', field(0, NvU64))
-setattr(struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 'size', field(8, NvU64))
-setattr(struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 'addressSpace', field(16, NvU32))
-setattr(struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 'cacheAttrib', field(20, NvU32))
-struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23.SIZE = 32
-struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23, 'params', field(8, NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23))
 rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23 = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
 rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
-class struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02:
+  SIZE = 8
+  smID: Annotated[NvU32, 0]
+  bSingleStep: Annotated[NvBool, 4]
 NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02 = struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02
-struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02.SIZE = 8
-struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02._fields_ = ['smID', 'bSingleStep']
-setattr(struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02, 'smID', field(0, NvU32))
-setattr(struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02, 'bSingleStep', field(4, NvBool))
-struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02.SIZE = 16
-struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02, 'params', field(8, NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02))
 rpc_ctrl_dbg_set_single_sm_single_step_v1C_02 = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
 rpc_ctrl_dbg_set_single_sm_single_step_v = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
-class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04(Struct): pass
-class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04(Struct): pass
+@record
+class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04:
+  SIZE = 40
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 8]
+@record
+class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04:
+  SIZE = 32
+  hChannelGroup: Annotated[NvHandle, 0]
+  mode: Annotated[NV0080_CTRL_GR_TPC_PARTITION_MODE, 4]
+  bEnableAllTpcs: Annotated[NvBool, 8]
+  grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 16]
 NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04 = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04
 enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(ctypes.c_uint32)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE', 0)
@@ -3008,1076 +3021,1077 @@ NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MOD
 NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC', 2)
 
 NV0080_CTRL_GR_TPC_PARTITION_MODE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE
-struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04.SIZE = 32
-struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04._fields_ = ['hChannelGroup', 'mode', 'bEnableAllTpcs', 'grRouteInfo']
-setattr(struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 'hChannelGroup', field(0, NvHandle))
-setattr(struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 'mode', field(4, NV0080_CTRL_GR_TPC_PARTITION_MODE))
-setattr(struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 'bEnableAllTpcs', field(8, NvBool))
-setattr(struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 'grRouteInfo', field(16, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
-struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04.SIZE = 40
-struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04, 'params', field(8, NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04))
 rpc_ctrl_gr_get_tpc_partition_mode_v1C_04 = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
 rpc_ctrl_gr_get_tpc_partition_mode_v = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
-class struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04(Struct): pass
-struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04.SIZE = 40
-struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04, 'params', field(8, NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04))
+@record
+class struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04:
+  SIZE = 40
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 8]
 rpc_ctrl_gr_set_tpc_partition_mode_v1C_04 = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
 rpc_ctrl_gr_set_tpc_partition_mode_v = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
-class struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07(Struct): pass
-class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07(Struct): pass
+@record
+class struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07:
+  SIZE = 96
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07, 8]
+@record
+class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07:
+  SIZE = 88
+  methodBufferMemdesc: Annotated[(NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07* 2), 0]
+  bar2Addr: Annotated[(NvU64* 2), 64]
+  numValidEntries: Annotated[NvU32, 80]
 NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07 = struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07
-class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07(Struct): pass
+@record
+class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07:
+  SIZE = 32
+  base: Annotated[NvU64, 0]
+  size: Annotated[NvU64, 8]
+  alignment: Annotated[NvU64, 16]
+  addressSpace: Annotated[NvU32, 24]
+  cpuCacheAttrib: Annotated[NvU32, 28]
 NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07 = struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07
-struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07.SIZE = 32
-struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07._fields_ = ['base', 'size', 'alignment', 'addressSpace', 'cpuCacheAttrib']
-setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'base', field(0, NvU64))
-setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'size', field(8, NvU64))
-setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'alignment', field(16, NvU64))
-setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'addressSpace', field(24, NvU32))
-setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'cpuCacheAttrib', field(28, NvU32))
-struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07.SIZE = 88
-struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07._fields_ = ['methodBufferMemdesc', 'bar2Addr', 'numValidEntries']
-setattr(struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07, 'methodBufferMemdesc', field(0, Array(NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 2)))
-setattr(struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07, 'bar2Addr', field(64, Array(NvU64, 2)))
-setattr(struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07, 'numValidEntries', field(80, NvU32))
-struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07.SIZE = 96
-struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07, 'params', field(8, NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07))
 rpc_ctrl_internal_promote_fault_method_buffers_v1E_07 = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
 rpc_ctrl_internal_promote_fault_method_buffers_v = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
-class struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05(Struct): pass
-class struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05(Struct): pass
+@record
+class struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05, 8]
+@record
+class struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05:
+  SIZE = 1
+  bZbcSurfacesExist: Annotated[NvBool, 0]
 NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05 = struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05
-struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05.SIZE = 1
-struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05._fields_ = ['bZbcSurfacesExist']
-setattr(struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05, 'bZbcSurfacesExist', field(0, NvBool))
-struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05.SIZE = 12
-struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05, 'params', field(8, NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05))
 rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05 = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
 rpc_ctrl_internal_memsys_set_zbc_referenced_v = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
-class struct_rpc_ctrl_fabric_memory_describe_v1E_0C(Struct): pass
-class struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C(Struct): pass
+@record
+class struct_rpc_ctrl_fabric_memory_describe_v1E_0C:
+  SIZE = 2080
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 8]
+@record
+class struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C:
+  SIZE = 2072
+  offset: Annotated[NvU64, 0]
+  totalPfns: Annotated[NvU64, 8]
+  pfnArray: Annotated[(NvU32* 512), 16]
+  numPfns: Annotated[NvU32, 2064]
 NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C = struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C
-struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C.SIZE = 2072
-struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C._fields_ = ['offset', 'totalPfns', 'pfnArray', 'numPfns']
-setattr(struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 'offset', field(0, NvU64))
-setattr(struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 'totalPfns', field(8, NvU64))
-setattr(struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 'pfnArray', field(16, Array(NvU32, 512)))
-setattr(struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 'numPfns', field(2064, NvU32))
-struct_rpc_ctrl_fabric_memory_describe_v1E_0C.SIZE = 2080
-struct_rpc_ctrl_fabric_memory_describe_v1E_0C._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_fabric_memory_describe_v1E_0C, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fabric_memory_describe_v1E_0C, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fabric_memory_describe_v1E_0C, 'params', field(8, NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C))
 rpc_ctrl_fabric_memory_describe_v1E_0C = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
 rpc_ctrl_fabric_memory_describe_v = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
-class struct_rpc_ctrl_fabric_mem_stats_v1E_0C(Struct): pass
-class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C(Struct): pass
+@record
+class struct_rpc_ctrl_fabric_mem_stats_v1E_0C:
+  SIZE = 24
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C, 8]
+@record
+class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C:
+  SIZE = 16
+  totalSize: Annotated[NvU64, 0]
+  freeSize: Annotated[NvU64, 8]
 NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C = struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C
-struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C.SIZE = 16
-struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C._fields_ = ['totalSize', 'freeSize']
-setattr(struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C, 'totalSize', field(0, NvU64))
-setattr(struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C, 'freeSize', field(8, NvU64))
-struct_rpc_ctrl_fabric_mem_stats_v1E_0C.SIZE = 24
-struct_rpc_ctrl_fabric_mem_stats_v1E_0C._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_fabric_mem_stats_v1E_0C, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fabric_mem_stats_v1E_0C, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fabric_mem_stats_v1E_0C, 'params', field(8, NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C))
 rpc_ctrl_fabric_mem_stats_v1E_0C = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
 rpc_ctrl_fabric_mem_stats_v = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
-class struct_rpc_ctrl_bus_set_p2p_mapping_v21_03(Struct): pass
-class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03(Struct): pass
+@record
+class struct_rpc_ctrl_bus_set_p2p_mapping_v21_03:
+  SIZE = 44
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 8]
+@record
+class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03:
+  SIZE = 36
+  connectionType: Annotated[NvU32, 0]
+  peerId: Annotated[NvU32, 4]
+  bSpaAccessOnly: Annotated[NvU32, 8]
+  bUseUuid: Annotated[NvBool, 12]
+  remoteGpuId: Annotated[NvU32, 16]
+  remoteGpuUuid: Annotated[(NvU8* 16), 20]
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03 = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03
-struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03.SIZE = 36
-struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03._fields_ = ['connectionType', 'peerId', 'bSpaAccessOnly', 'bUseUuid', 'remoteGpuId', 'remoteGpuUuid']
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'connectionType', field(0, NvU32))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'peerId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'bSpaAccessOnly', field(8, NvU32))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'bUseUuid', field(12, NvBool))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'remoteGpuId', field(16, NvU32))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'remoteGpuUuid', field(20, Array(NvU8, 16)))
-struct_rpc_ctrl_bus_set_p2p_mapping_v21_03.SIZE = 44
-struct_rpc_ctrl_bus_set_p2p_mapping_v21_03._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v21_03, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v21_03, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v21_03, 'params', field(8, NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03))
 rpc_ctrl_bus_set_p2p_mapping_v21_03 = struct_rpc_ctrl_bus_set_p2p_mapping_v21_03
-class struct_rpc_ctrl_bus_set_p2p_mapping_v29_08(Struct): pass
-class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08(Struct): pass
+@record
+class struct_rpc_ctrl_bus_set_p2p_mapping_v29_08:
+  SIZE = 48
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 8]
+@record
+class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08:
+  SIZE = 40
+  connectionType: Annotated[NvU32, 0]
+  peerId: Annotated[NvU32, 4]
+  bEgmPeer: Annotated[NvBool, 8]
+  bSpaAccessOnly: Annotated[NvU32, 12]
+  bUseUuid: Annotated[NvBool, 16]
+  remoteGpuId: Annotated[NvU32, 20]
+  remoteGpuUuid: Annotated[(NvU8* 16), 24]
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08 = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08
-struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08.SIZE = 40
-struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08._fields_ = ['connectionType', 'peerId', 'bEgmPeer', 'bSpaAccessOnly', 'bUseUuid', 'remoteGpuId', 'remoteGpuUuid']
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'connectionType', field(0, NvU32))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'peerId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'bEgmPeer', field(8, NvBool))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'bSpaAccessOnly', field(12, NvU32))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'bUseUuid', field(16, NvBool))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'remoteGpuId', field(20, NvU32))
-setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'remoteGpuUuid', field(24, Array(NvU8, 16)))
-struct_rpc_ctrl_bus_set_p2p_mapping_v29_08.SIZE = 48
-struct_rpc_ctrl_bus_set_p2p_mapping_v29_08._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v29_08, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v29_08, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v29_08, 'params', field(8, NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08))
 rpc_ctrl_bus_set_p2p_mapping_v29_08 = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
 rpc_ctrl_bus_set_p2p_mapping_v = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
-class struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03(Struct): pass
-class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03(Struct): pass
+@record
+class struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03:
+  SIZE = 40
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 8]
+@record
+class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03:
+  SIZE = 32
+  connectionType: Annotated[NvU32, 0]
+  peerId: Annotated[NvU32, 4]
+  bUseUuid: Annotated[NvBool, 8]
+  remoteGpuId: Annotated[NvU32, 12]
+  remoteGpuUuid: Annotated[(NvU8* 16), 16]
 NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03 = struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03
-struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03.SIZE = 32
-struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03._fields_ = ['connectionType', 'peerId', 'bUseUuid', 'remoteGpuId', 'remoteGpuUuid']
-setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'connectionType', field(0, NvU32))
-setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'peerId', field(4, NvU32))
-setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'bUseUuid', field(8, NvBool))
-setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'remoteGpuId', field(12, NvU32))
-setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'remoteGpuUuid', field(16, Array(NvU8, 16)))
-struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03.SIZE = 40
-struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03, 'params', field(8, NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03))
 rpc_ctrl_bus_unset_p2p_mapping_v21_03 = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
 rpc_ctrl_bus_unset_p2p_mapping_v = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
-class struct_rpc_ctrl_gpu_get_info_v2_v25_11(Struct): pass
-class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11(Struct): pass
+@record
+class struct_rpc_ctrl_gpu_get_info_v2_v25_11:
+  SIZE = 532
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11, 8]
+@record
+class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11:
+  SIZE = 524
+  gpuInfoListSize: Annotated[NvU32, 0]
+  gpuInfoList: Annotated[(NV2080_CTRL_GPU_INFO_v25_11* 65), 4]
 NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11 = struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11
-class struct_NV2080_CTRL_GPU_INFO_v25_11(Struct): pass
+@record
+class struct_NV2080_CTRL_GPU_INFO_v25_11:
+  SIZE = 8
+  index: Annotated[NvU32, 0]
+  data: Annotated[NvU32, 4]
 NV2080_CTRL_GPU_INFO_v25_11 = struct_NV2080_CTRL_GPU_INFO_v25_11
-struct_NV2080_CTRL_GPU_INFO_v25_11.SIZE = 8
-struct_NV2080_CTRL_GPU_INFO_v25_11._fields_ = ['index', 'data']
-setattr(struct_NV2080_CTRL_GPU_INFO_v25_11, 'index', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GPU_INFO_v25_11, 'data', field(4, NvU32))
-struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11.SIZE = 524
-struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11._fields_ = ['gpuInfoListSize', 'gpuInfoList']
-setattr(struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11, 'gpuInfoListSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11, 'gpuInfoList', field(4, Array(NV2080_CTRL_GPU_INFO_v25_11, 65)))
-struct_rpc_ctrl_gpu_get_info_v2_v25_11.SIZE = 532
-struct_rpc_ctrl_gpu_get_info_v2_v25_11._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_gpu_get_info_v2_v25_11, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpu_get_info_v2_v25_11, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpu_get_info_v2_v25_11, 'params', field(8, NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11))
 rpc_ctrl_gpu_get_info_v2_v25_11 = struct_rpc_ctrl_gpu_get_info_v2_v25_11
 rpc_ctrl_gpu_get_info_v2_v = struct_rpc_ctrl_gpu_get_info_v2_v25_11
-class struct_rpc_update_gpm_guest_buffer_info_v27_01(Struct): pass
-struct_rpc_update_gpm_guest_buffer_info_v27_01.SIZE = 24
-struct_rpc_update_gpm_guest_buffer_info_v27_01._fields_ = ['gpfn', 'swizzId', 'computeId', 'bufSize', 'bMap']
-setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'gpfn', field(0, NvU64))
-setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'swizzId', field(8, NvU32))
-setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'computeId', field(12, NvU32))
-setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'bufSize', field(16, NvU32))
-setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'bMap', field(20, NvBool))
+@record
+class struct_rpc_update_gpm_guest_buffer_info_v27_01:
+  SIZE = 24
+  gpfn: Annotated[NvU64, 0]
+  swizzId: Annotated[NvU32, 8]
+  computeId: Annotated[NvU32, 12]
+  bufSize: Annotated[NvU32, 16]
+  bMap: Annotated[NvBool, 20]
 rpc_update_gpm_guest_buffer_info_v27_01 = struct_rpc_update_gpm_guest_buffer_info_v27_01
 rpc_update_gpm_guest_buffer_info_v = struct_rpc_update_gpm_guest_buffer_info_v27_01
-class struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08(Struct): pass
-class struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08(Struct): pass
+@record
+class struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08, 8]
+@record
+class struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08:
+  SIZE = 8
+  pmaChannelIdx: Annotated[NvU32, 0]
+  bMembytesPollingRequired: Annotated[NvBool, 4]
 NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08 = struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08
-struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08.SIZE = 8
-struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08._fields_ = ['pmaChannelIdx', 'bMembytesPollingRequired']
-setattr(struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08, 'pmaChannelIdx', field(0, NvU32))
-setattr(struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08, 'bMembytesPollingRequired', field(4, NvBool))
-struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08.SIZE = 16
-struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08, 'params', field(8, NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08))
 rpc_ctrl_internal_quiesce_pma_channel_v1C_08 = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
 rpc_ctrl_internal_quiesce_pma_channel_v = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
-class struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C(Struct): pass
-class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C(Struct): pass
+@record
+class struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C:
+  SIZE = 56
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 8]
+@record
+class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C:
+  SIZE = 48
+  pmaChannelIdx: Annotated[NvU32, 0]
+  pmaBufferVA: Annotated[NvU64, 8]
+  pmaBufferSize: Annotated[NvU64, 16]
+  membytesVA: Annotated[NvU64, 24]
+  hwpmIBPA: Annotated[NvU64, 32]
+  hwpmIBAperture: Annotated[NvU8, 40]
 NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C = struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C
-struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C.SIZE = 48
-struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C._fields_ = ['pmaChannelIdx', 'pmaBufferVA', 'pmaBufferSize', 'membytesVA', 'hwpmIBPA', 'hwpmIBAperture']
-setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'pmaChannelIdx', field(0, NvU32))
-setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'pmaBufferVA', field(8, NvU64))
-setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'pmaBufferSize', field(16, NvU64))
-setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'membytesVA', field(24, NvU64))
-setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'hwpmIBPA', field(32, NvU64))
-setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'hwpmIBAperture', field(40, NvU8))
-struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C.SIZE = 56
-struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C, 'params', field(8, NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C))
 rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
 rpc_ctrl_internal_sriov_promote_pma_stream_v = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
-class struct_rpc_ctrl_exec_partitions_create_v24_05(Struct): pass
-class struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05(Struct): pass
+@record
+class struct_rpc_ctrl_exec_partitions_create_v24_05:
+  SIZE = 436
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  status: Annotated[NvU32, 8]
+  execPartitionsCreate: Annotated[NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 12]
+@record
+class struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05:
+  SIZE = 424
+  bQuery: Annotated[NvBool, 0]
+  execPartCount: Annotated[NvU32, 4]
+  execPartInfo: Annotated[(NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05* 8), 8]
+  execPartId: Annotated[(NvU32* 8), 392]
 NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05
-class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05(Struct): pass
+@record
+class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05:
+  SIZE = 48
+  gpcCount: Annotated[NvU32, 0]
+  gfxGpcCount: Annotated[NvU32, 4]
+  veidCount: Annotated[NvU32, 8]
+  ceCount: Annotated[NvU32, 12]
+  nvEncCount: Annotated[NvU32, 16]
+  nvDecCount: Annotated[NvU32, 20]
+  nvJpgCount: Annotated[NvU32, 24]
+  ofaCount: Annotated[NvU32, 28]
+  sharedEngFlag: Annotated[NvU32, 32]
+  smCount: Annotated[NvU32, 36]
+  spanStart: Annotated[NvU32, 40]
+  computeSize: Annotated[NvU32, 44]
 NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05
-struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05.SIZE = 48
-struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05._fields_ = ['gpcCount', 'gfxGpcCount', 'veidCount', 'ceCount', 'nvEncCount', 'nvDecCount', 'nvJpgCount', 'ofaCount', 'sharedEngFlag', 'smCount', 'spanStart', 'computeSize']
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'gpcCount', field(0, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'gfxGpcCount', field(4, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'veidCount', field(8, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'ceCount', field(12, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'nvEncCount', field(16, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'nvDecCount', field(20, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'nvJpgCount', field(24, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'ofaCount', field(28, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'sharedEngFlag', field(32, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'smCount', field(36, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'spanStart', field(40, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'computeSize', field(44, NvU32))
-struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05.SIZE = 424
-struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05._fields_ = ['bQuery', 'execPartCount', 'execPartInfo', 'execPartId']
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 'bQuery', field(0, NvBool))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 'execPartCount', field(4, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 'execPartInfo', field(8, Array(NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 8)))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 'execPartId', field(392, Array(NvU32, 8)))
-struct_rpc_ctrl_exec_partitions_create_v24_05.SIZE = 436
-struct_rpc_ctrl_exec_partitions_create_v24_05._fields_ = ['hClient', 'hObject', 'status', 'execPartitionsCreate']
-setattr(struct_rpc_ctrl_exec_partitions_create_v24_05, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_exec_partitions_create_v24_05, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_exec_partitions_create_v24_05, 'status', field(8, NvU32))
-setattr(struct_rpc_ctrl_exec_partitions_create_v24_05, 'execPartitionsCreate', field(12, NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05))
 rpc_ctrl_exec_partitions_create_v24_05 = struct_rpc_ctrl_exec_partitions_create_v24_05
 rpc_ctrl_exec_partitions_create_v = struct_rpc_ctrl_exec_partitions_create_v24_05
-class struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05(Struct): pass
-class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04(Struct): pass
+@record
+class struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05:
+  SIZE = 24
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04, 8]
+@record
+class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04:
+  SIZE = 16
+  imbPhysAddr: Annotated[NvU64, 0]
+  addrSpace: Annotated[NvU32, 8]
+  flaAction: Annotated[NvU32, 12]
 NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04 = struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04
-struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04.SIZE = 16
-struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04._fields_ = ['imbPhysAddr', 'addrSpace', 'flaAction']
-setattr(struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04, 'imbPhysAddr', field(0, NvU64))
-setattr(struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04, 'addrSpace', field(8, NvU32))
-setattr(struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04, 'flaAction', field(12, NvU32))
-struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05.SIZE = 24
-struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05, 'params', field(8, NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04))
 rpc_ctrl_fla_setup_instance_mem_block_v21_05 = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
 rpc_ctrl_fla_setup_instance_mem_block_v = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
-class struct_rpc_ctrl_get_total_hs_credits_v21_08(Struct): pass
-class struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08(Struct): pass
+@record
+class struct_rpc_ctrl_get_total_hs_credits_v21_08:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08, 8]
+@record
+class struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08:
+  SIZE = 4
+  numCredits: Annotated[NvU32, 0]
 NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08
-struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08.SIZE = 4
-struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08._fields_ = ['numCredits']
-setattr(struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08, 'numCredits', field(0, NvU32))
-struct_rpc_ctrl_get_total_hs_credits_v21_08.SIZE = 12
-struct_rpc_ctrl_get_total_hs_credits_v21_08._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_get_total_hs_credits_v21_08, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_total_hs_credits_v21_08, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_total_hs_credits_v21_08, 'params', field(8, NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08))
 rpc_ctrl_get_total_hs_credits_v21_08 = struct_rpc_ctrl_get_total_hs_credits_v21_08
 rpc_ctrl_get_total_hs_credits_v = struct_rpc_ctrl_get_total_hs_credits_v21_08
-class struct_rpc_ctrl_get_hs_credits_v21_08(Struct): pass
-class struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08(Struct): pass
+@record
+class struct_rpc_ctrl_get_hs_credits_v21_08:
+  SIZE = 264
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 8]
+@record
+class struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08:
+  SIZE = 256
+  pmaChannelIdx: Annotated[NvU8, 0]
+  numEntries: Annotated[NvU8, 1]
+  statusInfo: Annotated[NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08, 2]
+  creditInfo: Annotated[(NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08* 63), 4]
 NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08
-class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08(Struct): pass
+@record
+class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08:
+  SIZE = 2
+  status: Annotated[NvU8, 0]
+  entryIndex: Annotated[NvU8, 1]
 NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08 = struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08
-struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08.SIZE = 2
-struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08._fields_ = ['status', 'entryIndex']
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08, 'status', field(0, NvU8))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08, 'entryIndex', field(1, NvU8))
-class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08(Struct): pass
+@record
+class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08:
+  SIZE = 4
+  chipletType: Annotated[NvU8, 0]
+  chipletIndex: Annotated[NvU8, 1]
+  numCredits: Annotated[NvU16, 2]
 NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08 = struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08
-struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08.SIZE = 4
-struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08._fields_ = ['chipletType', 'chipletIndex', 'numCredits']
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 'chipletType', field(0, NvU8))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 'chipletIndex', field(1, NvU8))
-setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 'numCredits', field(2, NvU16))
-struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08.SIZE = 256
-struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08._fields_ = ['pmaChannelIdx', 'numEntries', 'statusInfo', 'creditInfo']
-setattr(struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 'pmaChannelIdx', field(0, NvU8))
-setattr(struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 'numEntries', field(1, NvU8))
-setattr(struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 'statusInfo', field(2, NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08))
-setattr(struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 'creditInfo', field(4, Array(NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 63)))
-struct_rpc_ctrl_get_hs_credits_v21_08.SIZE = 264
-struct_rpc_ctrl_get_hs_credits_v21_08._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_get_hs_credits_v21_08, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_hs_credits_v21_08, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_hs_credits_v21_08, 'params', field(8, NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08))
 rpc_ctrl_get_hs_credits_v21_08 = struct_rpc_ctrl_get_hs_credits_v21_08
 rpc_ctrl_get_hs_credits_v = struct_rpc_ctrl_get_hs_credits_v21_08
-class struct_rpc_ctrl_reserve_hes_v29_07(Struct): pass
-class struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07(Struct): pass
+@record
+class struct_rpc_ctrl_reserve_hes_v29_07:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07, 8]
+@record
+class struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07:
+  SIZE = 8
+  type: Annotated[NvU32, 0]
+  reserveParams: Annotated[NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07, 4]
 NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07 = struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07
-class struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07(Struct): pass
+@record
+class struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07:
+  SIZE = 1
+  cwd: Annotated[NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07, 0]
 NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07 = struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07
-class struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07(Struct): pass
+@record
+class struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07:
+  SIZE = 1
+  ctxsw: Annotated[NvBool, 0]
 NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07 = struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07
-struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07.SIZE = 1
-struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07._fields_ = ['ctxsw']
-setattr(struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07, 'ctxsw', field(0, NvBool))
-struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07.SIZE = 1
-struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07._fields_ = ['cwd']
-setattr(struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07, 'cwd', field(0, NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07))
-struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07.SIZE = 8
-struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07._fields_ = ['type', 'reserveParams']
-setattr(struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07, 'type', field(0, NvU32))
-setattr(struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07, 'reserveParams', field(4, NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07))
-struct_rpc_ctrl_reserve_hes_v29_07.SIZE = 16
-struct_rpc_ctrl_reserve_hes_v29_07._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_reserve_hes_v29_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_reserve_hes_v29_07, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_reserve_hes_v29_07, 'params', field(8, NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07))
 rpc_ctrl_reserve_hes_v29_07 = struct_rpc_ctrl_reserve_hes_v29_07
 rpc_ctrl_reserve_hes_v = struct_rpc_ctrl_reserve_hes_v29_07
-class struct_rpc_ctrl_release_hes_v29_07(Struct): pass
-class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07(Struct): pass
+@record
+class struct_rpc_ctrl_release_hes_v29_07:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07, 8]
+@record
+class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07:
+  SIZE = 4
+  type: Annotated[NvU32, 0]
 NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07 = struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07
-struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07.SIZE = 4
-struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07._fields_ = ['type']
-setattr(struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07, 'type', field(0, NvU32))
-struct_rpc_ctrl_release_hes_v29_07.SIZE = 12
-struct_rpc_ctrl_release_hes_v29_07._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_release_hes_v29_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_release_hes_v29_07, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_release_hes_v29_07, 'params', field(8, NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07))
 rpc_ctrl_release_hes_v29_07 = struct_rpc_ctrl_release_hes_v29_07
 rpc_ctrl_release_hes_v = struct_rpc_ctrl_release_hes_v29_07
-class struct_rpc_ctrl_reserve_ccu_prof_v29_07(Struct): pass
-class struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07(Struct): pass
+@record
+class struct_rpc_ctrl_reserve_ccu_prof_v29_07:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07, 8]
+@record
+class struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07:
+  SIZE = 1
+  ctxsw: Annotated[NvBool, 0]
 NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07 = struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07
-struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07.SIZE = 1
-struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07._fields_ = ['ctxsw']
-setattr(struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07, 'ctxsw', field(0, NvBool))
-struct_rpc_ctrl_reserve_ccu_prof_v29_07.SIZE = 12
-struct_rpc_ctrl_reserve_ccu_prof_v29_07._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_reserve_ccu_prof_v29_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_reserve_ccu_prof_v29_07, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_reserve_ccu_prof_v29_07, 'params', field(8, NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07))
 rpc_ctrl_reserve_ccu_prof_v29_07 = struct_rpc_ctrl_reserve_ccu_prof_v29_07
 rpc_ctrl_reserve_ccu_prof_v = struct_rpc_ctrl_reserve_ccu_prof_v29_07
-class struct_rpc_ctrl_release_ccu_prof_v29_07(Struct): pass
-struct_rpc_ctrl_release_ccu_prof_v29_07.SIZE = 8
-struct_rpc_ctrl_release_ccu_prof_v29_07._fields_ = ['hClient', 'hObject']
-setattr(struct_rpc_ctrl_release_ccu_prof_v29_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_release_ccu_prof_v29_07, 'hObject', field(4, NvHandle))
+@record
+class struct_rpc_ctrl_release_ccu_prof_v29_07:
+  SIZE = 8
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
 rpc_ctrl_release_ccu_prof_v29_07 = struct_rpc_ctrl_release_ccu_prof_v29_07
 rpc_ctrl_release_ccu_prof_v = struct_rpc_ctrl_release_ccu_prof_v29_07
-class struct_rpc_ctrl_set_hs_credits_v21_08(Struct): pass
-class struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08(Struct): pass
+@record
+class struct_rpc_ctrl_set_hs_credits_v21_08:
+  SIZE = 264
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 8]
+@record
+class struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08:
+  SIZE = 256
+  pmaChannelIdx: Annotated[NvU8, 0]
+  numEntries: Annotated[NvU8, 1]
+  statusInfo: Annotated[NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08, 2]
+  creditInfo: Annotated[(NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08* 63), 4]
 NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08
-struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08.SIZE = 256
-struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08._fields_ = ['pmaChannelIdx', 'numEntries', 'statusInfo', 'creditInfo']
-setattr(struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 'pmaChannelIdx', field(0, NvU8))
-setattr(struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 'numEntries', field(1, NvU8))
-setattr(struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 'statusInfo', field(2, NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08))
-setattr(struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 'creditInfo', field(4, Array(NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 63)))
-struct_rpc_ctrl_set_hs_credits_v21_08.SIZE = 264
-struct_rpc_ctrl_set_hs_credits_v21_08._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_set_hs_credits_v21_08, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_set_hs_credits_v21_08, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_set_hs_credits_v21_08, 'params', field(8, NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08))
 rpc_ctrl_set_hs_credits_v21_08 = struct_rpc_ctrl_set_hs_credits_v21_08
 rpc_ctrl_set_hs_credits_v = struct_rpc_ctrl_set_hs_credits_v21_08
-class struct_rpc_ctrl_pm_area_pc_sampler_v21_0B(Struct): pass
-struct_rpc_ctrl_pm_area_pc_sampler_v21_0B.SIZE = 12
-struct_rpc_ctrl_pm_area_pc_sampler_v21_0B._fields_ = ['hClient', 'hObject', 'cmd']
-setattr(struct_rpc_ctrl_pm_area_pc_sampler_v21_0B, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_pm_area_pc_sampler_v21_0B, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_pm_area_pc_sampler_v21_0B, 'cmd', field(8, NvU32))
+@record
+class struct_rpc_ctrl_pm_area_pc_sampler_v21_0B:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  cmd: Annotated[NvU32, 8]
 rpc_ctrl_pm_area_pc_sampler_v21_0B = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
 rpc_ctrl_pm_area_pc_sampler_v = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
-class struct_rpc_ctrl_exec_partitions_delete_v1F_0A(Struct): pass
-class struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05(Struct): pass
+@record
+class struct_rpc_ctrl_exec_partitions_delete_v1F_0A:
+  SIZE = 44
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  execPartitionsDelete: Annotated[NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05, 8]
+@record
+class struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05:
+  SIZE = 36
+  execPartCount: Annotated[NvU32, 0]
+  execPartId: Annotated[(NvU32* 8), 4]
 NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05
-struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05.SIZE = 36
-struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05._fields_ = ['execPartCount', 'execPartId']
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05, 'execPartCount', field(0, NvU32))
-setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05, 'execPartId', field(4, Array(NvU32, 8)))
-struct_rpc_ctrl_exec_partitions_delete_v1F_0A.SIZE = 44
-struct_rpc_ctrl_exec_partitions_delete_v1F_0A._fields_ = ['hClient', 'hObject', 'execPartitionsDelete']
-setattr(struct_rpc_ctrl_exec_partitions_delete_v1F_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_exec_partitions_delete_v1F_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_exec_partitions_delete_v1F_0A, 'execPartitionsDelete', field(8, NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05))
 rpc_ctrl_exec_partitions_delete_v1F_0A = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
 rpc_ctrl_exec_partitions_delete_v = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
-class struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A(Struct): pass
-class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00(Struct): pass
+@record
+class struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  workSubmitToken: Annotated[NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00, 8]
+@record
+class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00:
+  SIZE = 4
+  workSubmitToken: Annotated[NvU32, 0]
 NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00 = struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00
-struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00.SIZE = 4
-struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00._fields_ = ['workSubmitToken']
-setattr(struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00, 'workSubmitToken', field(0, NvU32))
-struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A.SIZE = 12
-struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A._fields_ = ['hClient', 'hObject', 'workSubmitToken']
-setattr(struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A, 'workSubmitToken', field(8, NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00))
 rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
 rpc_ctrl_gpfifo_get_work_submit_token_v = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
-class struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A(Struct): pass
-class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04(Struct): pass
+@record
+class struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  setWorkSubmitTokenIndex: Annotated[NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04, 8]
+@record
+class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04:
+  SIZE = 4
+  index: Annotated[NvU32, 0]
 NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04 = struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04
-struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04.SIZE = 4
-struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04._fields_ = ['index']
-setattr(struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04, 'index', field(0, NvU32))
-struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A.SIZE = 12
-struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A._fields_ = ['hClient', 'hObject', 'setWorkSubmitTokenIndex']
-setattr(struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A, 'setWorkSubmitTokenIndex', field(8, NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04))
 rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
 rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
-class struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D(Struct): pass
-class struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B(Struct): pass
+@record
+class struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D:
+  SIZE = 16
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  vfErrContIntrMask: Annotated[NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B, 8]
+@record
+class struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B:
+  SIZE = 8
+  eccMask: Annotated[NvU32, 0]
+  nvlinkMask: Annotated[NvU32, 4]
 NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B = struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B
-struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B.SIZE = 8
-struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B._fields_ = ['eccMask', 'nvlinkMask']
-setattr(struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B, 'eccMask', field(0, NvU32))
-setattr(struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B, 'nvlinkMask', field(4, NvU32))
-struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D.SIZE = 16
-struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D._fields_ = ['hClient', 'hObject', 'vfErrContIntrMask']
-setattr(struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D, 'vfErrContIntrMask', field(8, NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B))
 rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
 rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
-class struct_rpc_save_hibernation_data_v1E_0E(Struct): pass
-struct_rpc_save_hibernation_data_v1E_0E.SIZE = 4
-struct_rpc_save_hibernation_data_v1E_0E._fields_ = ['remainedBytes', 'payload']
-setattr(struct_rpc_save_hibernation_data_v1E_0E, 'remainedBytes', field(0, NvU32))
-setattr(struct_rpc_save_hibernation_data_v1E_0E, 'payload', field(4, Array(NvU8, 0)))
+@record
+class struct_rpc_save_hibernation_data_v1E_0E:
+  SIZE = 4
+  remainedBytes: Annotated[NvU32, 0]
+  payload: Annotated[(NvU8 * 0), 4]
 rpc_save_hibernation_data_v1E_0E = struct_rpc_save_hibernation_data_v1E_0E
 rpc_save_hibernation_data_v = struct_rpc_save_hibernation_data_v1E_0E
-class struct_rpc_restore_hibernation_data_v1E_0E(Struct): pass
-struct_rpc_restore_hibernation_data_v1E_0E.SIZE = 4
-struct_rpc_restore_hibernation_data_v1E_0E._fields_ = ['remainedBytes', 'payload']
-setattr(struct_rpc_restore_hibernation_data_v1E_0E, 'remainedBytes', field(0, NvU32))
-setattr(struct_rpc_restore_hibernation_data_v1E_0E, 'payload', field(4, Array(NvU8, 0)))
+@record
+class struct_rpc_restore_hibernation_data_v1E_0E:
+  SIZE = 4
+  remainedBytes: Annotated[NvU32, 0]
+  payload: Annotated[(NvU8 * 0), 4]
 rpc_restore_hibernation_data_v1E_0E = struct_rpc_restore_hibernation_data_v1E_0E
 rpc_restore_hibernation_data_v = struct_rpc_restore_hibernation_data_v1E_0E
-class struct_rpc_ctrl_get_mmu_debug_mode_v1E_06(Struct): pass
-class struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06(Struct): pass
+@record
+class struct_rpc_ctrl_get_mmu_debug_mode_v1E_06:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06, 8]
+@record
+class struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06:
+  SIZE = 1
+  bMode: Annotated[NvBool, 0]
 NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06 = struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06
-struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06.SIZE = 1
-struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06._fields_ = ['bMode']
-setattr(struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06, 'bMode', field(0, NvBool))
-struct_rpc_ctrl_get_mmu_debug_mode_v1E_06.SIZE = 12
-struct_rpc_ctrl_get_mmu_debug_mode_v1E_06._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_get_mmu_debug_mode_v1E_06, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_get_mmu_debug_mode_v1E_06, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_get_mmu_debug_mode_v1E_06, 'params', field(8, NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06))
 rpc_ctrl_get_mmu_debug_mode_v1E_06 = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
 rpc_ctrl_get_mmu_debug_mode_v = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
-class struct_rpc_disable_channels_v1E_0B(Struct): pass
-struct_rpc_disable_channels_v1E_0B.SIZE = 4
-struct_rpc_disable_channels_v1E_0B._fields_ = ['bDisable']
-setattr(struct_rpc_disable_channels_v1E_0B, 'bDisable', field(0, NvU32))
+@record
+class struct_rpc_disable_channels_v1E_0B:
+  SIZE = 4
+  bDisable: Annotated[NvU32, 0]
 rpc_disable_channels_v1E_0B = struct_rpc_disable_channels_v1E_0B
 rpc_disable_channels_v = struct_rpc_disable_channels_v1E_0B
-class struct_rpc_ctrl_gpu_migratable_ops_v21_07(Struct): pass
-class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07(Struct): pass
+@record
+class struct_rpc_ctrl_gpu_migratable_ops_v21_07:
+  SIZE = 1840
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 8]
+@record
+class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07:
+  SIZE = 1832
+  hClientTarget: Annotated[NvHandle, 0]
+  hChannelTarget: Annotated[NvHandle, 4]
+  bNonTransactional: Annotated[NvU32, 8]
+  regOpCount: Annotated[NvU32, 12]
+  smIds: Annotated[(NvU32* 50), 16]
+  regOps: Annotated[(NV2080_CTRL_GPU_REG_OP_v03_00* 50), 216]
+  grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 1816]
 NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07 = struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07
-struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07.SIZE = 1832
-struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07._fields_ = ['hClientTarget', 'hChannelTarget', 'bNonTransactional', 'regOpCount', 'smIds', 'regOps', 'grRouteInfo']
-setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'hClientTarget', field(0, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'hChannelTarget', field(4, NvHandle))
-setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'bNonTransactional', field(8, NvU32))
-setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'regOpCount', field(12, NvU32))
-setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'smIds', field(16, Array(NvU32, 50)))
-setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'regOps', field(216, Array(NV2080_CTRL_GPU_REG_OP_v03_00, 50)))
-setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'grRouteInfo', field(1816, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
-struct_rpc_ctrl_gpu_migratable_ops_v21_07.SIZE = 1840
-struct_rpc_ctrl_gpu_migratable_ops_v21_07._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_gpu_migratable_ops_v21_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpu_migratable_ops_v21_07, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpu_migratable_ops_v21_07, 'ctrlParams', field(8, NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07))
 rpc_ctrl_gpu_migratable_ops_v21_07 = struct_rpc_ctrl_gpu_migratable_ops_v21_07
 rpc_ctrl_gpu_migratable_ops_v = struct_rpc_ctrl_gpu_migratable_ops_v21_07
-class struct_rpc_invalidate_tlb_v23_03(Struct): pass
-struct_rpc_invalidate_tlb_v23_03.SIZE = 16
-struct_rpc_invalidate_tlb_v23_03._fields_ = ['pdbAddress', 'regVal']
-setattr(struct_rpc_invalidate_tlb_v23_03, 'pdbAddress', field(0, NvU64))
-setattr(struct_rpc_invalidate_tlb_v23_03, 'regVal', field(8, NvU32))
+@record
+class struct_rpc_invalidate_tlb_v23_03:
+  SIZE = 16
+  pdbAddress: Annotated[NvU64, 0]
+  regVal: Annotated[NvU32, 8]
 rpc_invalidate_tlb_v23_03 = struct_rpc_invalidate_tlb_v23_03
 rpc_invalidate_tlb_v = struct_rpc_invalidate_tlb_v23_03
-class struct_rpc_get_brand_caps_v25_12(Struct): pass
-struct_rpc_get_brand_caps_v25_12.SIZE = 4
-struct_rpc_get_brand_caps_v25_12._fields_ = ['brands']
-setattr(struct_rpc_get_brand_caps_v25_12, 'brands', field(0, NvU32))
+@record
+class struct_rpc_get_brand_caps_v25_12:
+  SIZE = 4
+  brands: Annotated[NvU32, 0]
 rpc_get_brand_caps_v25_12 = struct_rpc_get_brand_caps_v25_12
 rpc_get_brand_caps_v = struct_rpc_get_brand_caps_v25_12
-class struct_rpc_gsp_set_system_info_v17_00(Struct): pass
-struct_rpc_gsp_set_system_info_v17_00.SIZE = 4
-struct_rpc_gsp_set_system_info_v17_00._fields_ = ['data']
-setattr(struct_rpc_gsp_set_system_info_v17_00, 'data', field(0, NvU32))
+@record
+class struct_rpc_gsp_set_system_info_v17_00:
+  SIZE = 4
+  data: Annotated[NvU32, 0]
 rpc_gsp_set_system_info_v17_00 = struct_rpc_gsp_set_system_info_v17_00
 rpc_gsp_set_system_info_v = struct_rpc_gsp_set_system_info_v17_00
-class struct_rpc_gsp_rm_alloc_v03_00(Struct): pass
-struct_rpc_gsp_rm_alloc_v03_00.SIZE = 32
-struct_rpc_gsp_rm_alloc_v03_00._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'status', 'paramsSize', 'flags', 'reserved', 'params']
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'hParent', field(4, NvHandle))
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'hObject', field(8, NvHandle))
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'hClass', field(12, NvU32))
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'status', field(16, NvU32))
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'paramsSize', field(20, NvU32))
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'flags', field(24, NvU32))
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'reserved', field(28, Array(NvU8, 4)))
-setattr(struct_rpc_gsp_rm_alloc_v03_00, 'params', field(32, Array(NvU8, 0)))
+@record
+class struct_rpc_gsp_rm_alloc_v03_00:
+  SIZE = 32
+  hClient: Annotated[NvHandle, 0]
+  hParent: Annotated[NvHandle, 4]
+  hObject: Annotated[NvHandle, 8]
+  hClass: Annotated[NvU32, 12]
+  status: Annotated[NvU32, 16]
+  paramsSize: Annotated[NvU32, 20]
+  flags: Annotated[NvU32, 24]
+  reserved: Annotated[(NvU8* 4), 28]
+  params: Annotated[(NvU8 * 0), 32]
 rpc_gsp_rm_alloc_v03_00 = struct_rpc_gsp_rm_alloc_v03_00
 rpc_gsp_rm_alloc_v = struct_rpc_gsp_rm_alloc_v03_00
-class struct_rpc_gsp_rm_control_v03_00(Struct): pass
-struct_rpc_gsp_rm_control_v03_00.SIZE = 24
-struct_rpc_gsp_rm_control_v03_00._fields_ = ['hClient', 'hObject', 'cmd', 'status', 'paramsSize', 'flags', 'params']
-setattr(struct_rpc_gsp_rm_control_v03_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_gsp_rm_control_v03_00, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_gsp_rm_control_v03_00, 'cmd', field(8, NvU32))
-setattr(struct_rpc_gsp_rm_control_v03_00, 'status', field(12, NvU32))
-setattr(struct_rpc_gsp_rm_control_v03_00, 'paramsSize', field(16, NvU32))
-setattr(struct_rpc_gsp_rm_control_v03_00, 'flags', field(20, NvU32))
-setattr(struct_rpc_gsp_rm_control_v03_00, 'params', field(24, Array(NvU8, 0)))
+@record
+class struct_rpc_gsp_rm_control_v03_00:
+  SIZE = 24
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  cmd: Annotated[NvU32, 8]
+  status: Annotated[NvU32, 12]
+  paramsSize: Annotated[NvU32, 16]
+  flags: Annotated[NvU32, 20]
+  params: Annotated[(NvU8 * 0), 24]
 rpc_gsp_rm_control_v03_00 = struct_rpc_gsp_rm_control_v03_00
 rpc_gsp_rm_control_v = struct_rpc_gsp_rm_control_v03_00
-class struct_rpc_dump_protobuf_component_v18_12(Struct): pass
-struct_rpc_dump_protobuf_component_v18_12.SIZE = 16
-struct_rpc_dump_protobuf_component_v18_12._fields_ = ['component', 'nvDumpType', 'countOnly', 'bugCheckCode', 'internalCode', 'bufferSize', 'blob']
-setattr(struct_rpc_dump_protobuf_component_v18_12, 'component', field(0, NvU16))
-setattr(struct_rpc_dump_protobuf_component_v18_12, 'nvDumpType', field(2, NvU8))
-setattr(struct_rpc_dump_protobuf_component_v18_12, 'countOnly', field(3, NvBool))
-setattr(struct_rpc_dump_protobuf_component_v18_12, 'bugCheckCode', field(4, NvU32))
-setattr(struct_rpc_dump_protobuf_component_v18_12, 'internalCode', field(8, NvU32))
-setattr(struct_rpc_dump_protobuf_component_v18_12, 'bufferSize', field(12, NvU32))
-setattr(struct_rpc_dump_protobuf_component_v18_12, 'blob', field(16, Array(NvU8, 0)))
+@record
+class struct_rpc_dump_protobuf_component_v18_12:
+  SIZE = 16
+  component: Annotated[NvU16, 0]
+  nvDumpType: Annotated[NvU8, 2]
+  countOnly: Annotated[NvBool, 3]
+  bugCheckCode: Annotated[NvU32, 4]
+  internalCode: Annotated[NvU32, 8]
+  bufferSize: Annotated[NvU32, 12]
+  blob: Annotated[(NvU8 * 0), 16]
 rpc_dump_protobuf_component_v18_12 = struct_rpc_dump_protobuf_component_v18_12
 rpc_dump_protobuf_component_v = struct_rpc_dump_protobuf_component_v18_12
-class struct_rpc_run_cpu_sequencer_v17_00(Struct): pass
-struct_rpc_run_cpu_sequencer_v17_00.SIZE = 40
-struct_rpc_run_cpu_sequencer_v17_00._fields_ = ['bufferSizeDWord', 'cmdIndex', 'regSaveArea', 'commandBuffer']
-setattr(struct_rpc_run_cpu_sequencer_v17_00, 'bufferSizeDWord', field(0, NvU32))
-setattr(struct_rpc_run_cpu_sequencer_v17_00, 'cmdIndex', field(4, NvU32))
-setattr(struct_rpc_run_cpu_sequencer_v17_00, 'regSaveArea', field(8, Array(NvU32, 8)))
-setattr(struct_rpc_run_cpu_sequencer_v17_00, 'commandBuffer', field(40, Array(NvU32, 0)))
+@record
+class struct_rpc_run_cpu_sequencer_v17_00:
+  SIZE = 40
+  bufferSizeDWord: Annotated[NvU32, 0]
+  cmdIndex: Annotated[NvU32, 4]
+  regSaveArea: Annotated[(NvU32* 8), 8]
+  commandBuffer: Annotated[(NvU32 * 0), 40]
 rpc_run_cpu_sequencer_v17_00 = struct_rpc_run_cpu_sequencer_v17_00
 rpc_run_cpu_sequencer_v = struct_rpc_run_cpu_sequencer_v17_00
-class struct_rpc_post_event_v17_00(Struct): pass
-struct_rpc_post_event_v17_00.SIZE = 32
-struct_rpc_post_event_v17_00._fields_ = ['hClient', 'hEvent', 'notifyIndex', 'data', 'info16', 'status', 'eventDataSize', 'bNotifyList', 'eventData']
-setattr(struct_rpc_post_event_v17_00, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_post_event_v17_00, 'hEvent', field(4, NvHandle))
-setattr(struct_rpc_post_event_v17_00, 'notifyIndex', field(8, NvU32))
-setattr(struct_rpc_post_event_v17_00, 'data', field(12, NvU32))
-setattr(struct_rpc_post_event_v17_00, 'info16', field(16, NvU16))
-setattr(struct_rpc_post_event_v17_00, 'status', field(20, NvU32))
-setattr(struct_rpc_post_event_v17_00, 'eventDataSize', field(24, NvU32))
-setattr(struct_rpc_post_event_v17_00, 'bNotifyList', field(28, NvBool))
-setattr(struct_rpc_post_event_v17_00, 'eventData', field(29, Array(NvU8, 0)))
+@record
+class struct_rpc_post_event_v17_00:
+  SIZE = 32
+  hClient: Annotated[NvHandle, 0]
+  hEvent: Annotated[NvHandle, 4]
+  notifyIndex: Annotated[NvU32, 8]
+  data: Annotated[NvU32, 12]
+  info16: Annotated[NvU16, 16]
+  status: Annotated[NvU32, 20]
+  eventDataSize: Annotated[NvU32, 24]
+  bNotifyList: Annotated[NvBool, 28]
+  eventData: Annotated[(NvU8 * 0), 29]
 rpc_post_event_v17_00 = struct_rpc_post_event_v17_00
 rpc_post_event_v = struct_rpc_post_event_v17_00
-class struct_rpc_rc_triggered_v17_02(Struct): pass
-struct_rpc_rc_triggered_v17_02.SIZE = 48
-struct_rpc_rc_triggered_v17_02._fields_ = ['nv2080EngineType', 'chid', 'gfid', 'exceptLevel', 'exceptType', 'scope', 'partitionAttributionId', 'mmuFaultAddrLo', 'mmuFaultAddrHi', 'mmuFaultType', 'bCallbackNeeded', 'rcJournalBufferSize', 'rcJournalBuffer']
-setattr(struct_rpc_rc_triggered_v17_02, 'nv2080EngineType', field(0, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'chid', field(4, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'gfid', field(8, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'exceptLevel', field(12, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'exceptType', field(16, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'scope', field(20, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'partitionAttributionId', field(24, NvU16))
-setattr(struct_rpc_rc_triggered_v17_02, 'mmuFaultAddrLo', field(28, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'mmuFaultAddrHi', field(32, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'mmuFaultType', field(36, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'bCallbackNeeded', field(40, NvBool))
-setattr(struct_rpc_rc_triggered_v17_02, 'rcJournalBufferSize', field(44, NvU32))
-setattr(struct_rpc_rc_triggered_v17_02, 'rcJournalBuffer', field(48, Array(NvU8, 0)))
+@record
+class struct_rpc_rc_triggered_v17_02:
+  SIZE = 48
+  nv2080EngineType: Annotated[NvU32, 0]
+  chid: Annotated[NvU32, 4]
+  gfid: Annotated[NvU32, 8]
+  exceptLevel: Annotated[NvU32, 12]
+  exceptType: Annotated[NvU32, 16]
+  scope: Annotated[NvU32, 20]
+  partitionAttributionId: Annotated[NvU16, 24]
+  mmuFaultAddrLo: Annotated[NvU32, 28]
+  mmuFaultAddrHi: Annotated[NvU32, 32]
+  mmuFaultType: Annotated[NvU32, 36]
+  bCallbackNeeded: Annotated[NvBool, 40]
+  rcJournalBufferSize: Annotated[NvU32, 44]
+  rcJournalBuffer: Annotated[(NvU8 * 0), 48]
 rpc_rc_triggered_v17_02 = struct_rpc_rc_triggered_v17_02
 rpc_rc_triggered_v = struct_rpc_rc_triggered_v17_02
-class struct_rpc_os_error_log_v17_00(Struct): pass
-struct_rpc_os_error_log_v17_00.SIZE = 268
-struct_rpc_os_error_log_v17_00._fields_ = ['exceptType', 'runlistId', 'chid', 'errString']
-setattr(struct_rpc_os_error_log_v17_00, 'exceptType', field(0, NvU32))
-setattr(struct_rpc_os_error_log_v17_00, 'runlistId', field(4, NvU32))
-setattr(struct_rpc_os_error_log_v17_00, 'chid', field(8, NvU32))
-setattr(struct_rpc_os_error_log_v17_00, 'errString', field(12, Array(ctypes.c_char, 256)))
+@record
+class struct_rpc_os_error_log_v17_00:
+  SIZE = 268
+  exceptType: Annotated[NvU32, 0]
+  runlistId: Annotated[NvU32, 4]
+  chid: Annotated[NvU32, 8]
+  errString: Annotated[(ctypes.c_char* 256), 12]
 rpc_os_error_log_v17_00 = struct_rpc_os_error_log_v17_00
 rpc_os_error_log_v = struct_rpc_os_error_log_v17_00
-class struct_rpc_rg_line_intr_v17_00(Struct): pass
-struct_rpc_rg_line_intr_v17_00.SIZE = 8
-struct_rpc_rg_line_intr_v17_00._fields_ = ['head', 'rgIntr']
-setattr(struct_rpc_rg_line_intr_v17_00, 'head', field(0, NvU32))
-setattr(struct_rpc_rg_line_intr_v17_00, 'rgIntr', field(4, NvU32))
+@record
+class struct_rpc_rg_line_intr_v17_00:
+  SIZE = 8
+  head: Annotated[NvU32, 0]
+  rgIntr: Annotated[NvU32, 4]
 rpc_rg_line_intr_v17_00 = struct_rpc_rg_line_intr_v17_00
 rpc_rg_line_intr_v = struct_rpc_rg_line_intr_v17_00
-class struct_rpc_display_modeset_v01_00(Struct): pass
-struct_rpc_display_modeset_v01_00.SIZE = 12
-struct_rpc_display_modeset_v01_00._fields_ = ['bModesetStart', 'minRequiredIsoBandwidthKBPS', 'minRequiredFloorBandwidthKBPS']
-setattr(struct_rpc_display_modeset_v01_00, 'bModesetStart', field(0, NvBool))
-setattr(struct_rpc_display_modeset_v01_00, 'minRequiredIsoBandwidthKBPS', field(4, NvU32))
-setattr(struct_rpc_display_modeset_v01_00, 'minRequiredFloorBandwidthKBPS', field(8, NvU32))
+@record
+class struct_rpc_display_modeset_v01_00:
+  SIZE = 12
+  bModesetStart: Annotated[NvBool, 0]
+  minRequiredIsoBandwidthKBPS: Annotated[NvU32, 4]
+  minRequiredFloorBandwidthKBPS: Annotated[NvU32, 8]
 rpc_display_modeset_v01_00 = struct_rpc_display_modeset_v01_00
 rpc_display_modeset_v = struct_rpc_display_modeset_v01_00
-class struct_rpc_gpuacct_perfmon_util_samples_v1F_0E(Struct): pass
-class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E(Struct): pass
+@record
+class struct_rpc_gpuacct_perfmon_util_samples_v1F_0E:
+  SIZE = 4048
+  params: Annotated[NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 0]
+@record
+class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E:
+  SIZE = 4048
+  type: Annotated[NvU8, 0]
+  bufSize: Annotated[NvU32, 4]
+  count: Annotated[NvU32, 8]
+  tracker: Annotated[NvU32, 12]
+  samples: Annotated[(NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E* 72), 16]
 NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E = struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E
-struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E.SIZE = 4048
-struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E._fields_ = ['type', 'bufSize', 'count', 'tracker', 'samples']
-setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'type', field(0, NvU8))
-setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'bufSize', field(4, NvU32))
-setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'count', field(8, NvU32))
-setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'tracker', field(12, NvU32))
-setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'samples', field(16, Array(NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 72)))
-struct_rpc_gpuacct_perfmon_util_samples_v1F_0E.SIZE = 4048
-struct_rpc_gpuacct_perfmon_util_samples_v1F_0E._fields_ = ['params']
-setattr(struct_rpc_gpuacct_perfmon_util_samples_v1F_0E, 'params', field(0, NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E))
 rpc_gpuacct_perfmon_util_samples_v1F_0E = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
 rpc_gpuacct_perfmon_util_samples_v = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
-class struct_rpc_vgpu_gsp_plugin_triggered_v17_00(Struct): pass
-struct_rpc_vgpu_gsp_plugin_triggered_v17_00.SIZE = 8
-struct_rpc_vgpu_gsp_plugin_triggered_v17_00._fields_ = ['gfid', 'notifyIndex']
-setattr(struct_rpc_vgpu_gsp_plugin_triggered_v17_00, 'gfid', field(0, NvU32))
-setattr(struct_rpc_vgpu_gsp_plugin_triggered_v17_00, 'notifyIndex', field(4, NvU32))
+@record
+class struct_rpc_vgpu_gsp_plugin_triggered_v17_00:
+  SIZE = 8
+  gfid: Annotated[NvU32, 0]
+  notifyIndex: Annotated[NvU32, 4]
 rpc_vgpu_gsp_plugin_triggered_v17_00 = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
 rpc_vgpu_gsp_plugin_triggered_v = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
-class struct_rpc_vgpu_config_event_v17_00(Struct): pass
-struct_rpc_vgpu_config_event_v17_00.SIZE = 4
-struct_rpc_vgpu_config_event_v17_00._fields_ = ['notifyIndex']
-setattr(struct_rpc_vgpu_config_event_v17_00, 'notifyIndex', field(0, NvU32))
+@record
+class struct_rpc_vgpu_config_event_v17_00:
+  SIZE = 4
+  notifyIndex: Annotated[NvU32, 0]
 rpc_vgpu_config_event_v17_00 = struct_rpc_vgpu_config_event_v17_00
 rpc_vgpu_config_event_v = struct_rpc_vgpu_config_event_v17_00
-class struct_rpc_dce_rm_init_v01_00(Struct): pass
-struct_rpc_dce_rm_init_v01_00.SIZE = 8
-struct_rpc_dce_rm_init_v01_00._fields_ = ['bInit', 'hInternalClient']
-setattr(struct_rpc_dce_rm_init_v01_00, 'bInit', field(0, NvBool))
-setattr(struct_rpc_dce_rm_init_v01_00, 'hInternalClient', field(4, NvU32))
+@record
+class struct_rpc_dce_rm_init_v01_00:
+  SIZE = 8
+  bInit: Annotated[NvBool, 0]
+  hInternalClient: Annotated[NvU32, 4]
 rpc_dce_rm_init_v01_00 = struct_rpc_dce_rm_init_v01_00
 rpc_dce_rm_init_v = struct_rpc_dce_rm_init_v01_00
-class struct_rpc_sim_read_v1E_01(Struct): pass
-struct_rpc_sim_read_v1E_01.SIZE = 264
-struct_rpc_sim_read_v1E_01._fields_ = ['path', 'index', 'count']
-setattr(struct_rpc_sim_read_v1E_01, 'path', field(0, Array(ctypes.c_char, 256)))
-setattr(struct_rpc_sim_read_v1E_01, 'index', field(256, NvU32))
-setattr(struct_rpc_sim_read_v1E_01, 'count', field(260, NvU32))
+@record
+class struct_rpc_sim_read_v1E_01:
+  SIZE = 264
+  path: Annotated[(ctypes.c_char* 256), 0]
+  index: Annotated[NvU32, 256]
+  count: Annotated[NvU32, 260]
 rpc_sim_read_v1E_01 = struct_rpc_sim_read_v1E_01
 rpc_sim_read_v = struct_rpc_sim_read_v1E_01
-class struct_rpc_sim_write_v1E_01(Struct): pass
-struct_rpc_sim_write_v1E_01.SIZE = 268
-struct_rpc_sim_write_v1E_01._fields_ = ['path', 'index', 'count', 'data']
-setattr(struct_rpc_sim_write_v1E_01, 'path', field(0, Array(ctypes.c_char, 256)))
-setattr(struct_rpc_sim_write_v1E_01, 'index', field(256, NvU32))
-setattr(struct_rpc_sim_write_v1E_01, 'count', field(260, NvU32))
-setattr(struct_rpc_sim_write_v1E_01, 'data', field(264, NvU32))
+@record
+class struct_rpc_sim_write_v1E_01:
+  SIZE = 268
+  path: Annotated[(ctypes.c_char* 256), 0]
+  index: Annotated[NvU32, 256]
+  count: Annotated[NvU32, 260]
+  data: Annotated[NvU32, 264]
 rpc_sim_write_v1E_01 = struct_rpc_sim_write_v1E_01
 rpc_sim_write_v = struct_rpc_sim_write_v1E_01
-class struct_rpc_ucode_libos_print_v1E_08(Struct): pass
-struct_rpc_ucode_libos_print_v1E_08.SIZE = 8
-struct_rpc_ucode_libos_print_v1E_08._fields_ = ['ucodeEngDesc', 'libosPrintBufSize', 'libosPrintBuf']
-setattr(struct_rpc_ucode_libos_print_v1E_08, 'ucodeEngDesc', field(0, NvU32))
-setattr(struct_rpc_ucode_libos_print_v1E_08, 'libosPrintBufSize', field(4, NvU32))
-setattr(struct_rpc_ucode_libos_print_v1E_08, 'libosPrintBuf', field(8, Array(NvU8, 0)))
+@record
+class struct_rpc_ucode_libos_print_v1E_08:
+  SIZE = 8
+  ucodeEngDesc: Annotated[NvU32, 0]
+  libosPrintBufSize: Annotated[NvU32, 4]
+  libosPrintBuf: Annotated[(NvU8 * 0), 8]
 rpc_ucode_libos_print_v1E_08 = struct_rpc_ucode_libos_print_v1E_08
 rpc_ucode_libos_print_v = struct_rpc_ucode_libos_print_v1E_08
-class struct_rpc_init_done_v17_00(Struct): pass
-struct_rpc_init_done_v17_00.SIZE = 4
-struct_rpc_init_done_v17_00._fields_ = ['not_used']
-setattr(struct_rpc_init_done_v17_00, 'not_used', field(0, NvU32))
+@record
+class struct_rpc_init_done_v17_00:
+  SIZE = 4
+  not_used: Annotated[NvU32, 0]
 rpc_init_done_v17_00 = struct_rpc_init_done_v17_00
 rpc_init_done_v = struct_rpc_init_done_v17_00
-class struct_rpc_semaphore_schedule_callback_v17_00(Struct): pass
-struct_rpc_semaphore_schedule_callback_v17_00.SIZE = 32
-struct_rpc_semaphore_schedule_callback_v17_00._fields_ = ['GPUVA', 'hVASpace', 'ReleaseValue', 'Flags', 'completionStatus', 'hClient', 'hEvent']
-setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'GPUVA', field(0, NvU64))
-setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'hVASpace', field(8, NvU32))
-setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'ReleaseValue', field(12, NvU32))
-setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'Flags', field(16, NvU32))
-setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'completionStatus', field(20, NvU32))
-setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'hClient', field(24, NvHandle))
-setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'hEvent', field(28, NvHandle))
+@record
+class struct_rpc_semaphore_schedule_callback_v17_00:
+  SIZE = 32
+  GPUVA: Annotated[NvU64, 0]
+  hVASpace: Annotated[NvU32, 8]
+  ReleaseValue: Annotated[NvU32, 12]
+  Flags: Annotated[NvU32, 16]
+  completionStatus: Annotated[NvU32, 20]
+  hClient: Annotated[NvHandle, 24]
+  hEvent: Annotated[NvHandle, 28]
 rpc_semaphore_schedule_callback_v17_00 = struct_rpc_semaphore_schedule_callback_v17_00
 rpc_semaphore_schedule_callback_v = struct_rpc_semaphore_schedule_callback_v17_00
-class struct_rpc_timed_semaphore_release_v01_00(Struct): pass
-struct_rpc_timed_semaphore_release_v01_00.SIZE = 40
-struct_rpc_timed_semaphore_release_v01_00._fields_ = ['semaphoreVA', 'notifierVA', 'hVASpace', 'releaseValue', 'completionStatus', 'hClient', 'hDevice']
-setattr(struct_rpc_timed_semaphore_release_v01_00, 'semaphoreVA', field(0, NvU64))
-setattr(struct_rpc_timed_semaphore_release_v01_00, 'notifierVA', field(8, NvU64))
-setattr(struct_rpc_timed_semaphore_release_v01_00, 'hVASpace', field(16, NvU32))
-setattr(struct_rpc_timed_semaphore_release_v01_00, 'releaseValue', field(20, NvU32))
-setattr(struct_rpc_timed_semaphore_release_v01_00, 'completionStatus', field(24, NvU32))
-setattr(struct_rpc_timed_semaphore_release_v01_00, 'hClient', field(28, NvHandle))
-setattr(struct_rpc_timed_semaphore_release_v01_00, 'hDevice', field(32, NvHandle))
+@record
+class struct_rpc_timed_semaphore_release_v01_00:
+  SIZE = 40
+  semaphoreVA: Annotated[NvU64, 0]
+  notifierVA: Annotated[NvU64, 8]
+  hVASpace: Annotated[NvU32, 16]
+  releaseValue: Annotated[NvU32, 20]
+  completionStatus: Annotated[NvU32, 24]
+  hClient: Annotated[NvHandle, 28]
+  hDevice: Annotated[NvHandle, 32]
 rpc_timed_semaphore_release_v01_00 = struct_rpc_timed_semaphore_release_v01_00
 rpc_timed_semaphore_release_v = struct_rpc_timed_semaphore_release_v01_00
-class struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00(Struct): pass
-class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00(Struct): pass
+@record
+class struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00:
+  SIZE = 16
+  params: Annotated[NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00, 0]
+@record
+class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00:
+  SIZE = 16
+  flags: Annotated[NvU32, 0]
+  bBridgeless: Annotated[NvBool, 4]
+  currLimits: Annotated[(NvU32* 2), 8]
 NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00 = struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00
-struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00.SIZE = 16
-struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00._fields_ = ['flags', 'bBridgeless', 'currLimits']
-setattr(struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00, 'flags', field(0, NvU32))
-setattr(struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00, 'bBridgeless', field(4, NvBool))
-setattr(struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00, 'currLimits', field(8, Array(NvU32, 2)))
-struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00.SIZE = 16
-struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00._fields_ = ['params']
-setattr(struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00, 'params', field(0, NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00))
 rpc_perf_gpu_boost_sync_limits_callback_v17_00 = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
 rpc_perf_gpu_boost_sync_limits_callback_v = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
-class struct_rpc_perf_bridgeless_info_update_v17_00(Struct): pass
-struct_rpc_perf_bridgeless_info_update_v17_00.SIZE = 8
-struct_rpc_perf_bridgeless_info_update_v17_00._fields_ = ['bBridgeless']
-setattr(struct_rpc_perf_bridgeless_info_update_v17_00, 'bBridgeless', field(0, NvU64))
+@record
+class struct_rpc_perf_bridgeless_info_update_v17_00:
+  SIZE = 8
+  bBridgeless: Annotated[NvU64, 0]
 rpc_perf_bridgeless_info_update_v17_00 = struct_rpc_perf_bridgeless_info_update_v17_00
 rpc_perf_bridgeless_info_update_v = struct_rpc_perf_bridgeless_info_update_v17_00
-class struct_rpc_nvlink_fault_up_v17_00(Struct): pass
-struct_rpc_nvlink_fault_up_v17_00.SIZE = 4
-struct_rpc_nvlink_fault_up_v17_00._fields_ = ['linkId']
-setattr(struct_rpc_nvlink_fault_up_v17_00, 'linkId', field(0, NvU32))
+@record
+class struct_rpc_nvlink_fault_up_v17_00:
+  SIZE = 4
+  linkId: Annotated[NvU32, 0]
 rpc_nvlink_fault_up_v17_00 = struct_rpc_nvlink_fault_up_v17_00
 rpc_nvlink_fault_up_v = struct_rpc_nvlink_fault_up_v17_00
-class struct_rpc_nvlink_inband_received_data_256_v17_00(Struct): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00(Struct): pass
+@record
+class struct_rpc_nvlink_inband_received_data_256_v17_00:
+  SIZE = 260
+  params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00, 0]
+@record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00:
+  SIZE = 260
+  dataSize: Annotated[NvU32, 0]
+  data: Annotated[(NvU8* 256), 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00.SIZE = 260
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00._fields_ = ['dataSize', 'data']
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00, 'dataSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00, 'data', field(4, Array(NvU8, 256)))
-struct_rpc_nvlink_inband_received_data_256_v17_00.SIZE = 260
-struct_rpc_nvlink_inband_received_data_256_v17_00._fields_ = ['params']
-setattr(struct_rpc_nvlink_inband_received_data_256_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_256_v17_00 = struct_rpc_nvlink_inband_received_data_256_v17_00
 rpc_nvlink_inband_received_data_256_v = struct_rpc_nvlink_inband_received_data_256_v17_00
-class struct_rpc_nvlink_inband_received_data_512_v17_00(Struct): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00(Struct): pass
+@record
+class struct_rpc_nvlink_inband_received_data_512_v17_00:
+  SIZE = 516
+  params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00, 0]
+@record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00:
+  SIZE = 516
+  dataSize: Annotated[NvU32, 0]
+  data: Annotated[(NvU8* 512), 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00.SIZE = 516
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00._fields_ = ['dataSize', 'data']
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00, 'dataSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00, 'data', field(4, Array(NvU8, 512)))
-struct_rpc_nvlink_inband_received_data_512_v17_00.SIZE = 516
-struct_rpc_nvlink_inband_received_data_512_v17_00._fields_ = ['params']
-setattr(struct_rpc_nvlink_inband_received_data_512_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_512_v17_00 = struct_rpc_nvlink_inband_received_data_512_v17_00
 rpc_nvlink_inband_received_data_512_v = struct_rpc_nvlink_inband_received_data_512_v17_00
-class struct_rpc_nvlink_inband_received_data_1024_v17_00(Struct): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00(Struct): pass
+@record
+class struct_rpc_nvlink_inband_received_data_1024_v17_00:
+  SIZE = 1028
+  params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00, 0]
+@record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00:
+  SIZE = 1028
+  dataSize: Annotated[NvU32, 0]
+  data: Annotated[(NvU8* 1024), 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00.SIZE = 1028
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00._fields_ = ['dataSize', 'data']
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00, 'dataSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00, 'data', field(4, Array(NvU8, 1024)))
-struct_rpc_nvlink_inband_received_data_1024_v17_00.SIZE = 1028
-struct_rpc_nvlink_inband_received_data_1024_v17_00._fields_ = ['params']
-setattr(struct_rpc_nvlink_inband_received_data_1024_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_1024_v17_00 = struct_rpc_nvlink_inband_received_data_1024_v17_00
 rpc_nvlink_inband_received_data_1024_v = struct_rpc_nvlink_inband_received_data_1024_v17_00
-class struct_rpc_nvlink_inband_received_data_2048_v17_00(Struct): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00(Struct): pass
+@record
+class struct_rpc_nvlink_inband_received_data_2048_v17_00:
+  SIZE = 2052
+  params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00, 0]
+@record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00:
+  SIZE = 2052
+  dataSize: Annotated[NvU32, 0]
+  data: Annotated[(NvU8* 2048), 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00.SIZE = 2052
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00._fields_ = ['dataSize', 'data']
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00, 'dataSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00, 'data', field(4, Array(NvU8, 2048)))
-struct_rpc_nvlink_inband_received_data_2048_v17_00.SIZE = 2052
-struct_rpc_nvlink_inband_received_data_2048_v17_00._fields_ = ['params']
-setattr(struct_rpc_nvlink_inband_received_data_2048_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_2048_v17_00 = struct_rpc_nvlink_inband_received_data_2048_v17_00
 rpc_nvlink_inband_received_data_2048_v = struct_rpc_nvlink_inband_received_data_2048_v17_00
-class struct_rpc_nvlink_inband_received_data_4096_v17_00(Struct): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00(Struct): pass
+@record
+class struct_rpc_nvlink_inband_received_data_4096_v17_00:
+  SIZE = 4100
+  params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00, 0]
+@record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00:
+  SIZE = 4100
+  dataSize: Annotated[NvU32, 0]
+  data: Annotated[(NvU8* 4096), 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00.SIZE = 4100
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00._fields_ = ['dataSize', 'data']
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00, 'dataSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00, 'data', field(4, Array(NvU8, 4096)))
-struct_rpc_nvlink_inband_received_data_4096_v17_00.SIZE = 4100
-struct_rpc_nvlink_inband_received_data_4096_v17_00._fields_ = ['params']
-setattr(struct_rpc_nvlink_inband_received_data_4096_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_4096_v17_00 = struct_rpc_nvlink_inband_received_data_4096_v17_00
 rpc_nvlink_inband_received_data_4096_v = struct_rpc_nvlink_inband_received_data_4096_v17_00
-class struct_rpc_nvlink_is_gpu_degraded_v17_00(Struct): pass
-class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00(Struct): pass
+@record
+class struct_rpc_nvlink_is_gpu_degraded_v17_00:
+  SIZE = 8
+  params: Annotated[NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00, 0]
+@record
+class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00:
+  SIZE = 8
+  linkId: Annotated[NvU32, 0]
+  bIsGpuDegraded: Annotated[NvBool, 4]
 NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00.SIZE = 8
-struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00._fields_ = ['linkId', 'bIsGpuDegraded']
-setattr(struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00, 'linkId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00, 'bIsGpuDegraded', field(4, NvBool))
-struct_rpc_nvlink_is_gpu_degraded_v17_00.SIZE = 8
-struct_rpc_nvlink_is_gpu_degraded_v17_00._fields_ = ['params']
-setattr(struct_rpc_nvlink_is_gpu_degraded_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00))
 rpc_nvlink_is_gpu_degraded_v17_00 = struct_rpc_nvlink_is_gpu_degraded_v17_00
 rpc_nvlink_is_gpu_degraded_v = struct_rpc_nvlink_is_gpu_degraded_v17_00
-class struct_rpc_nvlink_fatal_error_recovery_v17_00(Struct): pass
-class struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00(Struct): pass
+@record
+class struct_rpc_nvlink_fatal_error_recovery_v17_00:
+  SIZE = 2
+  params: Annotated[NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00, 0]
+@record
+class struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00:
+  SIZE = 2
+  bRecoverable: Annotated[NvBool, 0]
+  bLazy: Annotated[NvBool, 1]
 NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00.SIZE = 2
-struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00._fields_ = ['bRecoverable', 'bLazy']
-setattr(struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00, 'bRecoverable', field(0, NvBool))
-setattr(struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00, 'bLazy', field(1, NvBool))
-struct_rpc_nvlink_fatal_error_recovery_v17_00.SIZE = 2
-struct_rpc_nvlink_fatal_error_recovery_v17_00._fields_ = ['params']
-setattr(struct_rpc_nvlink_fatal_error_recovery_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00))
 rpc_nvlink_fatal_error_recovery_v17_00 = struct_rpc_nvlink_fatal_error_recovery_v17_00
 rpc_nvlink_fatal_error_recovery_v = struct_rpc_nvlink_fatal_error_recovery_v17_00
-class struct_rpc_update_gsp_trace_v01_00(Struct): pass
-struct_rpc_update_gsp_trace_v01_00.SIZE = 8
-struct_rpc_update_gsp_trace_v01_00._fields_ = ['records', 'data']
-setattr(struct_rpc_update_gsp_trace_v01_00, 'records', field(0, NvU32))
-setattr(struct_rpc_update_gsp_trace_v01_00, 'data', field(4, NvU32))
+@record
+class struct_rpc_update_gsp_trace_v01_00:
+  SIZE = 8
+  records: Annotated[NvU32, 0]
+  data: Annotated[NvU32, 4]
 rpc_update_gsp_trace_v01_00 = struct_rpc_update_gsp_trace_v01_00
 rpc_update_gsp_trace_v = struct_rpc_update_gsp_trace_v01_00
-class struct_rpc_gsp_post_nocat_record_v01_00(Struct): pass
-struct_rpc_gsp_post_nocat_record_v01_00.SIZE = 4
-struct_rpc_gsp_post_nocat_record_v01_00._fields_ = ['data']
-setattr(struct_rpc_gsp_post_nocat_record_v01_00, 'data', field(0, NvU32))
+@record
+class struct_rpc_gsp_post_nocat_record_v01_00:
+  SIZE = 4
+  data: Annotated[NvU32, 0]
 rpc_gsp_post_nocat_record_v01_00 = struct_rpc_gsp_post_nocat_record_v01_00
 rpc_gsp_post_nocat_record_v = struct_rpc_gsp_post_nocat_record_v01_00
-class struct_rpc_extdev_intr_service_v17_00(Struct): pass
-struct_rpc_extdev_intr_service_v17_00.SIZE = 4
-struct_rpc_extdev_intr_service_v17_00._fields_ = ['lossRegStatus', 'gainRegStatus', 'miscRegStatus', 'rmStatus']
-setattr(struct_rpc_extdev_intr_service_v17_00, 'lossRegStatus', field(0, NvU8))
-setattr(struct_rpc_extdev_intr_service_v17_00, 'gainRegStatus', field(1, NvU8))
-setattr(struct_rpc_extdev_intr_service_v17_00, 'miscRegStatus', field(2, NvU8))
-setattr(struct_rpc_extdev_intr_service_v17_00, 'rmStatus', field(3, NvBool))
+@record
+class struct_rpc_extdev_intr_service_v17_00:
+  SIZE = 4
+  lossRegStatus: Annotated[NvU8, 0]
+  gainRegStatus: Annotated[NvU8, 1]
+  miscRegStatus: Annotated[NvU8, 2]
+  rmStatus: Annotated[NvBool, 3]
 rpc_extdev_intr_service_v17_00 = struct_rpc_extdev_intr_service_v17_00
 rpc_extdev_intr_service_v = struct_rpc_extdev_intr_service_v17_00
-class struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04(Struct): pass
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04(Struct): pass
+@record
+class struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04:
+  SIZE = 16
+  params: Annotated[NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04, 0]
+@record
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04:
+  SIZE = 16
+  flags: Annotated[NvU8, 0]
+  syncData: Annotated[NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04, 4]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04(Struct): pass
+@record
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04:
+  SIZE = 12
+  type: Annotated[NvU8, 0]
+  data: Annotated[NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04, 4]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04
-class union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04(Union): pass
+@record
+class union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04:
+  SIZE = 8
+  smbpbi: Annotated[NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04, 0]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04 = union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04(Struct): pass
+@record
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04:
+  SIZE = 8
+  sensorId: Annotated[NvU32, 0]
+  limit: Annotated[NvU32, 4]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04.SIZE = 8
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04._fields_ = ['sensorId', 'limit']
-setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04, 'sensorId', field(0, NvU32))
-setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04, 'limit', field(4, NvU32))
-union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04.SIZE = 8
-union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04._fields_ = ['smbpbi']
-setattr(union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04, 'smbpbi', field(0, NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04))
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04.SIZE = 12
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04._fields_ = ['type', 'data']
-setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04, 'type', field(0, NvU8))
-setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04, 'data', field(4, NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04))
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04.SIZE = 16
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04._fields_ = ['flags', 'syncData']
-setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04, 'flags', field(0, NvU8))
-setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04, 'syncData', field(4, NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04))
-struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04.SIZE = 16
-struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04._fields_ = ['params']
-setattr(struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04, 'params', field(0, NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04))
 rpc_pfm_req_hndlr_state_sync_callback_v21_04 = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
 rpc_pfm_req_hndlr_state_sync_callback_v = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
-class struct_rpc_vgpu_gsp_mig_ci_config_v21_03(Struct): pass
-struct_rpc_vgpu_gsp_mig_ci_config_v21_03.SIZE = 44
-struct_rpc_vgpu_gsp_mig_ci_config_v21_03._fields_ = ['execPartCount', 'execPartId', 'gfid', 'bDelete']
-setattr(struct_rpc_vgpu_gsp_mig_ci_config_v21_03, 'execPartCount', field(0, NvU32))
-setattr(struct_rpc_vgpu_gsp_mig_ci_config_v21_03, 'execPartId', field(4, Array(NvU32, 8)))
-setattr(struct_rpc_vgpu_gsp_mig_ci_config_v21_03, 'gfid', field(36, NvU32))
-setattr(struct_rpc_vgpu_gsp_mig_ci_config_v21_03, 'bDelete', field(40, NvBool))
+@record
+class struct_rpc_vgpu_gsp_mig_ci_config_v21_03:
+  SIZE = 44
+  execPartCount: Annotated[NvU32, 0]
+  execPartId: Annotated[(NvU32* 8), 4]
+  gfid: Annotated[NvU32, 36]
+  bDelete: Annotated[NvBool, 40]
 rpc_vgpu_gsp_mig_ci_config_v21_03 = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
 rpc_vgpu_gsp_mig_ci_config_v = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
-class struct_rpc_gsp_lockdown_notice_v17_00(Struct): pass
-struct_rpc_gsp_lockdown_notice_v17_00.SIZE = 1
-struct_rpc_gsp_lockdown_notice_v17_00._fields_ = ['bLockdownEngaging']
-setattr(struct_rpc_gsp_lockdown_notice_v17_00, 'bLockdownEngaging', field(0, NvBool))
+@record
+class struct_rpc_gsp_lockdown_notice_v17_00:
+  SIZE = 1
+  bLockdownEngaging: Annotated[NvBool, 0]
 rpc_gsp_lockdown_notice_v17_00 = struct_rpc_gsp_lockdown_notice_v17_00
 rpc_gsp_lockdown_notice_v = struct_rpc_gsp_lockdown_notice_v17_00
-class struct_rpc_ctrl_gpu_query_ecc_status_v24_06(Struct): pass
-class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06(Struct): pass
+@record
+class struct_rpc_ctrl_gpu_query_ecc_status_v24_06:
+  SIZE = 1016
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06, 8]
+@record
+class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06:
+  SIZE = 1008
+  units: Annotated[(NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01* 25), 0]
+  bFatalPoisonError: Annotated[NvBool, 1000]
+  flags: Annotated[NvU32, 1004]
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06 = struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06
-class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01(Struct): pass
+@record
+class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01:
+  SIZE = 40
+  enabled: Annotated[NvBool, 0]
+  scrubComplete: Annotated[NvBool, 1]
+  supported: Annotated[NvBool, 2]
+  dbe: Annotated[NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01, 8]
+  dbeNonResettable: Annotated[NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01, 16]
+  sbe: Annotated[NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01, 24]
+  sbeNonResettable: Annotated[NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01, 32]
 NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01 = struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01
-class struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01(Struct): pass
+@record
+class struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01:
+  SIZE = 8
+  count: Annotated[NvU64, 0]
 NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01 = struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01
-struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01.SIZE = 8
-struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01._fields_ = ['count']
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01, 'count', field(0, NvU64))
-struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01.SIZE = 40
-struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01._fields_ = ['enabled', 'scrubComplete', 'supported', 'dbe', 'dbeNonResettable', 'sbe', 'sbeNonResettable']
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'enabled', field(0, NvBool))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'scrubComplete', field(1, NvBool))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'supported', field(2, NvBool))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'dbe', field(8, NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'dbeNonResettable', field(16, NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'sbe', field(24, NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'sbeNonResettable', field(32, NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01))
-struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06.SIZE = 1008
-struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06._fields_ = ['units', 'bFatalPoisonError', 'flags']
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06, 'units', field(0, Array(NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 25)))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06, 'bFatalPoisonError', field(1000, NvBool))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06, 'flags', field(1004, NvU32))
-struct_rpc_ctrl_gpu_query_ecc_status_v24_06.SIZE = 1016
-struct_rpc_ctrl_gpu_query_ecc_status_v24_06._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_gpu_query_ecc_status_v24_06, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpu_query_ecc_status_v24_06, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpu_query_ecc_status_v24_06, 'params', field(8, NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06))
 rpc_ctrl_gpu_query_ecc_status_v24_06 = struct_rpc_ctrl_gpu_query_ecc_status_v24_06
-class struct_rpc_ctrl_gpu_query_ecc_status_v26_02(Struct): pass
-class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02(Struct): pass
+@record
+class struct_rpc_ctrl_gpu_query_ecc_status_v26_02:
+  SIZE = 1216
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  params: Annotated[NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02, 8]
+@record
+class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02:
+  SIZE = 1208
+  units: Annotated[(NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01* 30), 0]
+  bFatalPoisonError: Annotated[NvBool, 1200]
+  flags: Annotated[NvU32, 1204]
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02 = struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02
-struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02.SIZE = 1208
-struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02._fields_ = ['units', 'bFatalPoisonError', 'flags']
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02, 'units', field(0, Array(NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 30)))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02, 'bFatalPoisonError', field(1200, NvBool))
-setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02, 'flags', field(1204, NvU32))
-struct_rpc_ctrl_gpu_query_ecc_status_v26_02.SIZE = 1216
-struct_rpc_ctrl_gpu_query_ecc_status_v26_02._fields_ = ['hClient', 'hObject', 'params']
-setattr(struct_rpc_ctrl_gpu_query_ecc_status_v26_02, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_gpu_query_ecc_status_v26_02, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_gpu_query_ecc_status_v26_02, 'params', field(8, NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02))
 rpc_ctrl_gpu_query_ecc_status_v26_02 = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
 rpc_ctrl_gpu_query_ecc_status_v = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
-class struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04:
+  SIZE = 4
+  value: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04 = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04
-struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04.SIZE = 4
-struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04._fields_ = ['value']
-setattr(struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04, 'value', field(0, NvU32))
-struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04.SIZE = 12
-struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04))
 rpc_ctrl_dbg_get_mode_mmu_debug_v25_04 = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
 rpc_ctrl_dbg_get_mode_mmu_debug_v = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
-class struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07(Struct): pass
-class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(Struct): pass
+@record
+class struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07:
+  SIZE = 12
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07, 8]
+@record
+class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07:
+  SIZE = 4
+  value: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07 = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07
-struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07.SIZE = 4
-struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = ['value']
-setattr(struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07, 'value', field(0, NvU32))
-struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07.SIZE = 12
-struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07))
 rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07 = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
 rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
-class struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09(Struct): pass
-struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09.SIZE = 1
-struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09._fields_ = ['bwMode']
-setattr(struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09, 'bwMode', field(0, NvU8))
+@record
+class struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09:
+  SIZE = 1
+  bwMode: Annotated[NvU8, 0]
 rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09 = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
 rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
-class struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C(Struct): pass
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C(Struct): pass
+@record
+class struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C:
+  SIZE = 520
+  message_type: Annotated[NvU16, 0]
+  more: Annotated[NvBool, 2]
+  payload: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C, 4]
+@record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C:
+  SIZE = 516
+  dataSize: Annotated[NvU32, 0]
+  data: Annotated[(NvU8* 512), 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C.SIZE = 516
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C._fields_ = ['dataSize', 'data']
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C, 'dataSize', field(0, NvU32))
-setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C, 'data', field(4, Array(NvU8, 512)))
-struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C.SIZE = 520
-struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C._fields_ = ['message_type', 'more', 'payload']
-setattr(struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C, 'message_type', field(0, NvU16))
-setattr(struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C, 'more', field(2, NvBool))
-setattr(struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C, 'payload', field(4, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C))
 rpc_ctrl_nvlink_get_inband_received_data_v25_0C = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
 rpc_ctrl_nvlink_get_inband_received_data_v = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
-class struct_rpc_fecs_error_v26_02(Struct): pass
-struct_rpc_fecs_error_v26_02.SIZE = 8
-struct_rpc_fecs_error_v26_02._fields_ = ['grIdx', 'error_type']
-setattr(struct_rpc_fecs_error_v26_02, 'grIdx', field(0, NvU32))
-setattr(struct_rpc_fecs_error_v26_02, 'error_type', field(4, NvU8))
+@record
+class struct_rpc_fecs_error_v26_02:
+  SIZE = 8
+  grIdx: Annotated[NvU32, 0]
+  error_type: Annotated[NvU8, 4]
 rpc_fecs_error_v26_02 = struct_rpc_fecs_error_v26_02
 rpc_fecs_error_v = struct_rpc_fecs_error_v26_02
-class struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05(Struct): pass
-struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05.SIZE = 1028
-struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05._fields_ = ['buffer', 'dataSize']
-setattr(struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05, 'buffer', field(0, Array(NvU8, 1024)))
-setattr(struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05, 'dataSize', field(1024, NvU32))
+@record
+class struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05:
+  SIZE = 1028
+  buffer: Annotated[(NvU8* 1024), 0]
+  dataSize: Annotated[NvU32, 1024]
 rpc_ctrl_cmd_nvlink_inband_send_data_v26_05 = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
 rpc_ctrl_cmd_nvlink_inband_send_data_v = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
-class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00(Struct): pass
-struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00.SIZE = 32
-struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00._fields_ = ['bufferSize', 'tracepointMask', 'bufferWatermark', 'bufferAddr', 'flag']
-setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'bufferSize', field(0, NvU32))
-setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'tracepointMask', field(4, NvU32))
-setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'bufferWatermark', field(8, NvU32))
-setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'bufferAddr', field(16, NvU64))
-setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'flag', field(24, NvU8))
+@record
+class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00:
+  SIZE = 32
+  bufferSize: Annotated[NvU32, 0]
+  tracepointMask: Annotated[NvU32, 4]
+  bufferWatermark: Annotated[NvU32, 8]
+  bufferAddr: Annotated[NvU64, 16]
+  flag: Annotated[NvU8, 24]
 rpc_ctrl_cmd_internal_control_gsp_trace_v28_00 = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
 rpc_ctrl_cmd_internal_control_gsp_trace_v = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
-class struct_rpc_recovery_action_v28_01(Struct): pass
-struct_rpc_recovery_action_v28_01.SIZE = 8
-struct_rpc_recovery_action_v28_01._fields_ = ['type', 'value']
-setattr(struct_rpc_recovery_action_v28_01, 'type', field(0, NvU32))
-setattr(struct_rpc_recovery_action_v28_01, 'value', field(4, NvBool))
+@record
+class struct_rpc_recovery_action_v28_01:
+  SIZE = 8
+  type: Annotated[NvU32, 0]
+  value: Annotated[NvBool, 4]
 rpc_recovery_action_v28_01 = struct_rpc_recovery_action_v28_01
 rpc_recovery_action_v = struct_rpc_recovery_action_v28_01
-class struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02(Struct): pass
-class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02(Struct): pass
+@record
+class struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02:
+  SIZE = 1048
+  hClient: Annotated[NvHandle, 0]
+  hObject: Annotated[NvHandle, 4]
+  ctrlParams: Annotated[NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02, 8]
+@record
+class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02:
+  SIZE = 1040
+  poolStats: Annotated[(NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02* 64), 0]
+  totalHeapSize: Annotated[NvU64, 1024]
+  poolCount: Annotated[NvU8, 1032]
 NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02 = struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02
-class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02(Struct): pass
+@record
+class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02:
+  SIZE = 16
+  allocations: Annotated[NvU32, 0]
+  peakAllocations: Annotated[NvU32, 4]
+  objectSize: Annotated[NvU64, 8]
 NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02 = struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02
-struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02.SIZE = 16
-struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02._fields_ = ['allocations', 'peakAllocations', 'objectSize']
-setattr(struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, 'allocations', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, 'peakAllocations', field(4, NvU32))
-setattr(struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, 'objectSize', field(8, NvU64))
-struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02.SIZE = 1040
-struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02._fields_ = ['poolStats', 'totalHeapSize', 'poolCount']
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02, 'poolStats', field(0, Array(NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, 64)))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02, 'totalHeapSize', field(1024, NvU64))
-setattr(struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02, 'poolCount', field(1032, NvU8))
-struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02.SIZE = 1048
-struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02._fields_ = ['hClient', 'hObject', 'ctrlParams']
-setattr(struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02, 'hClient', field(0, NvHandle))
-setattr(struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02, 'hObject', field(4, NvHandle))
-setattr(struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02, 'ctrlParams', field(8, NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02))
 rpc_ctrl_subdevice_get_libos_heap_stats_v29_02 = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
 rpc_ctrl_subdevice_get_libos_heap_stats_v = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
-class struct_GSP_MSG_QUEUE_ELEMENT(Struct): pass
-struct_GSP_MSG_QUEUE_ELEMENT.SIZE = 48
-struct_GSP_MSG_QUEUE_ELEMENT._fields_ = ['authTagBuffer', 'aadBuffer', 'checkSum', 'seqNum', 'elemCount', 'padding']
-setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'authTagBuffer', field(0, Array(NvU8, 16)))
-setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'aadBuffer', field(16, Array(NvU8, 16)))
-setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'checkSum', field(32, NvU32))
-setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'seqNum', field(36, NvU32))
-setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'elemCount', field(40, NvU32))
-setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'padding', field(44, NvU32))
+@record
+class struct_GSP_MSG_QUEUE_ELEMENT:
+  SIZE = 48
+  authTagBuffer: Annotated[(NvU8* 16), 0]
+  aadBuffer: Annotated[(NvU8* 16), 16]
+  checkSum: Annotated[NvU32, 32]
+  seqNum: Annotated[NvU32, 36]
+  elemCount: Annotated[NvU32, 40]
+  padding: Annotated[NvU32, 44]
 GSP_MSG_QUEUE_ELEMENT = struct_GSP_MSG_QUEUE_ELEMENT
-class union_rpc_message_rpc_union_field_v03_00(Union): pass
-union_rpc_message_rpc_union_field_v03_00.SIZE = 4
-union_rpc_message_rpc_union_field_v03_00._fields_ = ['spare', 'cpuRmGfid']
-setattr(union_rpc_message_rpc_union_field_v03_00, 'spare', field(0, NvU32))
-setattr(union_rpc_message_rpc_union_field_v03_00, 'cpuRmGfid', field(0, NvU32))
+@record
+class union_rpc_message_rpc_union_field_v03_00:
+  SIZE = 4
+  spare: Annotated[NvU32, 0]
+  cpuRmGfid: Annotated[NvU32, 0]
 rpc_message_rpc_union_field_v03_00 = union_rpc_message_rpc_union_field_v03_00
 rpc_message_rpc_union_field_v = union_rpc_message_rpc_union_field_v03_00
-class struct_rpc_message_header_v03_00(Struct): pass
-struct_rpc_message_header_v03_00.SIZE = 32
-struct_rpc_message_header_v03_00._fields_ = ['header_version', 'signature', 'length', 'function', 'rpc_result', 'rpc_result_private', 'sequence', 'u']
-setattr(struct_rpc_message_header_v03_00, 'header_version', field(0, NvU32))
-setattr(struct_rpc_message_header_v03_00, 'signature', field(4, NvU32))
-setattr(struct_rpc_message_header_v03_00, 'length', field(8, NvU32))
-setattr(struct_rpc_message_header_v03_00, 'function', field(12, NvU32))
-setattr(struct_rpc_message_header_v03_00, 'rpc_result', field(16, NvU32))
-setattr(struct_rpc_message_header_v03_00, 'rpc_result_private', field(20, NvU32))
-setattr(struct_rpc_message_header_v03_00, 'sequence', field(24, NvU32))
-setattr(struct_rpc_message_header_v03_00, 'u', field(28, rpc_message_rpc_union_field_v))
+@record
+class struct_rpc_message_header_v03_00:
+  SIZE = 32
+  header_version: Annotated[NvU32, 0]
+  signature: Annotated[NvU32, 4]
+  length: Annotated[NvU32, 8]
+  function: Annotated[NvU32, 12]
+  rpc_result: Annotated[NvU32, 16]
+  rpc_result_private: Annotated[NvU32, 20]
+  sequence: Annotated[NvU32, 24]
+  u: Annotated[rpc_message_rpc_union_field_v, 28]
 rpc_message_header_v03_00 = struct_rpc_message_header_v03_00
 rpc_message_header_v = struct_rpc_message_header_v03_00
-class struct_PACKED_REGISTRY_ENTRY(Struct): pass
-struct_PACKED_REGISTRY_ENTRY.SIZE = 16
-struct_PACKED_REGISTRY_ENTRY._fields_ = ['nameOffset', 'type', 'data', 'length']
-setattr(struct_PACKED_REGISTRY_ENTRY, 'nameOffset', field(0, NvU32))
-setattr(struct_PACKED_REGISTRY_ENTRY, 'type', field(4, NvU8))
-setattr(struct_PACKED_REGISTRY_ENTRY, 'data', field(8, NvU32))
-setattr(struct_PACKED_REGISTRY_ENTRY, 'length', field(12, NvU32))
+@record
+class struct_PACKED_REGISTRY_ENTRY:
+  SIZE = 16
+  nameOffset: Annotated[NvU32, 0]
+  type: Annotated[NvU8, 4]
+  data: Annotated[NvU32, 8]
+  length: Annotated[NvU32, 12]
 PACKED_REGISTRY_ENTRY = struct_PACKED_REGISTRY_ENTRY
-class struct_PACKED_REGISTRY_TABLE(Struct): pass
-struct_PACKED_REGISTRY_TABLE.SIZE = 8
-struct_PACKED_REGISTRY_TABLE._fields_ = ['size', 'numEntries']
-setattr(struct_PACKED_REGISTRY_TABLE, 'size', field(0, NvU32))
-setattr(struct_PACKED_REGISTRY_TABLE, 'numEntries', field(4, NvU32))
+@record
+class struct_PACKED_REGISTRY_TABLE:
+  SIZE = 8
+  size: Annotated[NvU32, 0]
+  numEntries: Annotated[NvU32, 4]
 PACKED_REGISTRY_TABLE = struct_PACKED_REGISTRY_TABLE
 DISPMUXSTATE = CEnum(ctypes.c_uint32)
 dispMuxState_None = DISPMUXSTATE.define('dispMuxState_None', 0)
 dispMuxState_IntegratedGPU = DISPMUXSTATE.define('dispMuxState_IntegratedGPU', 1)
 dispMuxState_DiscreteGPU = DISPMUXSTATE.define('dispMuxState_DiscreteGPU', 2)
 
-class ACPI_DSM_CACHE(Struct): pass
-ACPI_DSM_CACHE.SIZE = 28
-ACPI_DSM_CACHE._fields_ = ['suppFuncStatus', 'suppFuncs', 'suppFuncsLen', 'bArg3isInteger', 'callbackStatus', 'callback']
-setattr(ACPI_DSM_CACHE, 'suppFuncStatus', field(0, NvU32))
-setattr(ACPI_DSM_CACHE, 'suppFuncs', field(4, Array(NvU8, 8)))
-setattr(ACPI_DSM_CACHE, 'suppFuncsLen', field(12, NvU32))
-setattr(ACPI_DSM_CACHE, 'bArg3isInteger', field(16, NvBool))
-setattr(ACPI_DSM_CACHE, 'callbackStatus', field(20, NvU32))
-setattr(ACPI_DSM_CACHE, 'callback', field(24, NvU32))
-class ACPI_DATA(Struct): pass
+@record
+class ACPI_DSM_CACHE:
+  SIZE = 28
+  suppFuncStatus: Annotated[NvU32, 0]
+  suppFuncs: Annotated[(NvU8* 8), 4]
+  suppFuncsLen: Annotated[NvU32, 12]
+  bArg3isInteger: Annotated[NvBool, 16]
+  callbackStatus: Annotated[NvU32, 20]
+  callback: Annotated[NvU32, 24]
+@record
+class ACPI_DATA:
+  SIZE = 472
+  dsm: Annotated[(ACPI_DSM_CACHE* 12), 0]
+  dispStatusHotplugFunc: Annotated[ACPI_DSM_FUNCTION, 336]
+  dispStatusConfigFunc: Annotated[ACPI_DSM_FUNCTION, 340]
+  perfPostPowerStateFunc: Annotated[ACPI_DSM_FUNCTION, 344]
+  stereo3dStateActiveFunc: Annotated[ACPI_DSM_FUNCTION, 348]
+  dsmPlatCapsCache: Annotated[(NvU32* 12), 352]
+  MDTLFeatureSupport: Annotated[NvU32, 400]
+  dsmCurrentFunc: Annotated[(ACPI_DSM_FUNCTION* 8), 404]
+  dsmCurrentSubFunc: Annotated[(NvU32* 8), 436]
+  dsmCurrentFuncSupport: Annotated[NvU32, 468]
 enum__ACPI_DSM_FUNCTION = CEnum(ctypes.c_uint32)
 ACPI_DSM_FUNCTION_NBSI = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NBSI', 0)
 ACPI_DSM_FUNCTION_NVHG = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NVHG', 1)
@@ -4096,63 +4110,51 @@ ACPI_DSM_FUNCTION_CURRENT = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_CU
 ACPI_DSM_FUNCTION_INVALID = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_INVALID', 255)
 
 ACPI_DSM_FUNCTION = enum__ACPI_DSM_FUNCTION
-ACPI_DATA.SIZE = 472
-ACPI_DATA._fields_ = ['dsm', 'dispStatusHotplugFunc', 'dispStatusConfigFunc', 'perfPostPowerStateFunc', 'stereo3dStateActiveFunc', 'dsmPlatCapsCache', 'MDTLFeatureSupport', 'dsmCurrentFunc', 'dsmCurrentSubFunc', 'dsmCurrentFuncSupport']
-setattr(ACPI_DATA, 'dsm', field(0, Array(ACPI_DSM_CACHE, 12)))
-setattr(ACPI_DATA, 'dispStatusHotplugFunc', field(336, ACPI_DSM_FUNCTION))
-setattr(ACPI_DATA, 'dispStatusConfigFunc', field(340, ACPI_DSM_FUNCTION))
-setattr(ACPI_DATA, 'perfPostPowerStateFunc', field(344, ACPI_DSM_FUNCTION))
-setattr(ACPI_DATA, 'stereo3dStateActiveFunc', field(348, ACPI_DSM_FUNCTION))
-setattr(ACPI_DATA, 'dsmPlatCapsCache', field(352, Array(NvU32, 12)))
-setattr(ACPI_DATA, 'MDTLFeatureSupport', field(400, NvU32))
-setattr(ACPI_DATA, 'dsmCurrentFunc', field(404, Array(ACPI_DSM_FUNCTION, 8)))
-setattr(ACPI_DATA, 'dsmCurrentSubFunc', field(436, Array(NvU32, 8)))
-setattr(ACPI_DATA, 'dsmCurrentFuncSupport', field(468, NvU32))
-class struct_DOD_METHOD_DATA(Struct): pass
+@record
+class struct_DOD_METHOD_DATA:
+  SIZE = 72
+  status: Annotated[NV_STATUS, 0]
+  acpiIdListLen: Annotated[NvU32, 4]
+  acpiIdList: Annotated[(NvU32* 16), 8]
 NV_STATUS = ctypes.c_uint32
-struct_DOD_METHOD_DATA.SIZE = 72
-struct_DOD_METHOD_DATA._fields_ = ['status', 'acpiIdListLen', 'acpiIdList']
-setattr(struct_DOD_METHOD_DATA, 'status', field(0, NV_STATUS))
-setattr(struct_DOD_METHOD_DATA, 'acpiIdListLen', field(4, NvU32))
-setattr(struct_DOD_METHOD_DATA, 'acpiIdList', field(8, Array(NvU32, 16)))
 DOD_METHOD_DATA = struct_DOD_METHOD_DATA
-class struct_JT_METHOD_DATA(Struct): pass
-struct_JT_METHOD_DATA.SIZE = 12
-struct_JT_METHOD_DATA._fields_ = ['status', 'jtCaps', 'jtRevId', 'bSBIOSCaps']
-setattr(struct_JT_METHOD_DATA, 'status', field(0, NV_STATUS))
-setattr(struct_JT_METHOD_DATA, 'jtCaps', field(4, NvU32))
-setattr(struct_JT_METHOD_DATA, 'jtRevId', field(8, NvU16))
-setattr(struct_JT_METHOD_DATA, 'bSBIOSCaps', field(10, NvBool))
+@record
+class struct_JT_METHOD_DATA:
+  SIZE = 12
+  status: Annotated[NV_STATUS, 0]
+  jtCaps: Annotated[NvU32, 4]
+  jtRevId: Annotated[NvU16, 8]
+  bSBIOSCaps: Annotated[NvBool, 10]
 JT_METHOD_DATA = struct_JT_METHOD_DATA
-class struct_MUX_METHOD_DATA_ELEMENT(Struct): pass
-struct_MUX_METHOD_DATA_ELEMENT.SIZE = 12
-struct_MUX_METHOD_DATA_ELEMENT._fields_ = ['acpiId', 'mode', 'status']
-setattr(struct_MUX_METHOD_DATA_ELEMENT, 'acpiId', field(0, NvU32))
-setattr(struct_MUX_METHOD_DATA_ELEMENT, 'mode', field(4, NvU32))
-setattr(struct_MUX_METHOD_DATA_ELEMENT, 'status', field(8, NV_STATUS))
+@record
+class struct_MUX_METHOD_DATA_ELEMENT:
+  SIZE = 12
+  acpiId: Annotated[NvU32, 0]
+  mode: Annotated[NvU32, 4]
+  status: Annotated[NV_STATUS, 8]
 MUX_METHOD_DATA_ELEMENT = struct_MUX_METHOD_DATA_ELEMENT
-class struct_MUX_METHOD_DATA(Struct): pass
-struct_MUX_METHOD_DATA.SIZE = 580
-struct_MUX_METHOD_DATA._fields_ = ['tableLen', 'acpiIdMuxModeTable', 'acpiIdMuxPartTable', 'acpiIdMuxStateTable']
-setattr(struct_MUX_METHOD_DATA, 'tableLen', field(0, NvU32))
-setattr(struct_MUX_METHOD_DATA, 'acpiIdMuxModeTable', field(4, Array(MUX_METHOD_DATA_ELEMENT, 16)))
-setattr(struct_MUX_METHOD_DATA, 'acpiIdMuxPartTable', field(196, Array(MUX_METHOD_DATA_ELEMENT, 16)))
-setattr(struct_MUX_METHOD_DATA, 'acpiIdMuxStateTable', field(388, Array(MUX_METHOD_DATA_ELEMENT, 16)))
+@record
+class struct_MUX_METHOD_DATA:
+  SIZE = 580
+  tableLen: Annotated[NvU32, 0]
+  acpiIdMuxModeTable: Annotated[(MUX_METHOD_DATA_ELEMENT* 16), 4]
+  acpiIdMuxPartTable: Annotated[(MUX_METHOD_DATA_ELEMENT* 16), 196]
+  acpiIdMuxStateTable: Annotated[(MUX_METHOD_DATA_ELEMENT* 16), 388]
 MUX_METHOD_DATA = struct_MUX_METHOD_DATA
-class struct_CAPS_METHOD_DATA(Struct): pass
-struct_CAPS_METHOD_DATA.SIZE = 8
-struct_CAPS_METHOD_DATA._fields_ = ['status', 'optimusCaps']
-setattr(struct_CAPS_METHOD_DATA, 'status', field(0, NV_STATUS))
-setattr(struct_CAPS_METHOD_DATA, 'optimusCaps', field(4, NvU32))
+@record
+class struct_CAPS_METHOD_DATA:
+  SIZE = 8
+  status: Annotated[NV_STATUS, 0]
+  optimusCaps: Annotated[NvU32, 4]
 CAPS_METHOD_DATA = struct_CAPS_METHOD_DATA
-class struct_ACPI_METHOD_DATA(Struct): pass
-struct_ACPI_METHOD_DATA.SIZE = 676
-struct_ACPI_METHOD_DATA._fields_ = ['bValid', 'dodMethodData', 'jtMethodData', 'muxMethodData', 'capsMethodData']
-setattr(struct_ACPI_METHOD_DATA, 'bValid', field(0, NvBool))
-setattr(struct_ACPI_METHOD_DATA, 'dodMethodData', field(4, DOD_METHOD_DATA))
-setattr(struct_ACPI_METHOD_DATA, 'jtMethodData', field(76, JT_METHOD_DATA))
-setattr(struct_ACPI_METHOD_DATA, 'muxMethodData', field(88, MUX_METHOD_DATA))
-setattr(struct_ACPI_METHOD_DATA, 'capsMethodData', field(668, CAPS_METHOD_DATA))
+@record
+class struct_ACPI_METHOD_DATA:
+  SIZE = 676
+  bValid: Annotated[NvBool, 0]
+  dodMethodData: Annotated[DOD_METHOD_DATA, 4]
+  jtMethodData: Annotated[JT_METHOD_DATA, 76]
+  muxMethodData: Annotated[MUX_METHOD_DATA, 88]
+  capsMethodData: Annotated[CAPS_METHOD_DATA, 668]
 ACPI_METHOD_DATA = struct_ACPI_METHOD_DATA
 RM_ENGINE_TYPE = CEnum(ctypes.c_uint32)
 RM_ENGINE_TYPE_NULL = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_NULL', 0)
@@ -4241,383 +4243,384 @@ RM_ENGINE_TYPE_RESERVED52 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_RESERVED52', 8
 RM_ENGINE_TYPE_RESERVED53 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_RESERVED53', 83)
 RM_ENGINE_TYPE_LAST = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_LAST', 84)
 
-class BUSINFO(Struct): pass
-BUSINFO.SIZE = 10
-BUSINFO._fields_ = ['deviceID', 'vendorID', 'subdeviceID', 'subvendorID', 'revisionID']
-setattr(BUSINFO, 'deviceID', field(0, NvU16))
-setattr(BUSINFO, 'vendorID', field(2, NvU16))
-setattr(BUSINFO, 'subdeviceID', field(4, NvU16))
-setattr(BUSINFO, 'subvendorID', field(6, NvU16))
-setattr(BUSINFO, 'revisionID', field(8, NvU8))
-class struct_GSP_VF_INFO(Struct): pass
-struct_GSP_VF_INFO.SIZE = 40
-struct_GSP_VF_INFO._fields_ = ['totalVFs', 'firstVFOffset', 'FirstVFBar0Address', 'FirstVFBar1Address', 'FirstVFBar2Address', 'b64bitBar0', 'b64bitBar1', 'b64bitBar2']
-setattr(struct_GSP_VF_INFO, 'totalVFs', field(0, NvU32))
-setattr(struct_GSP_VF_INFO, 'firstVFOffset', field(4, NvU32))
-setattr(struct_GSP_VF_INFO, 'FirstVFBar0Address', field(8, NvU64))
-setattr(struct_GSP_VF_INFO, 'FirstVFBar1Address', field(16, NvU64))
-setattr(struct_GSP_VF_INFO, 'FirstVFBar2Address', field(24, NvU64))
-setattr(struct_GSP_VF_INFO, 'b64bitBar0', field(32, NvBool))
-setattr(struct_GSP_VF_INFO, 'b64bitBar1', field(33, NvBool))
-setattr(struct_GSP_VF_INFO, 'b64bitBar2', field(34, NvBool))
+@record
+class BUSINFO:
+  SIZE = 10
+  deviceID: Annotated[NvU16, 0]
+  vendorID: Annotated[NvU16, 2]
+  subdeviceID: Annotated[NvU16, 4]
+  subvendorID: Annotated[NvU16, 6]
+  revisionID: Annotated[NvU8, 8]
+@record
+class struct_GSP_VF_INFO:
+  SIZE = 40
+  totalVFs: Annotated[NvU32, 0]
+  firstVFOffset: Annotated[NvU32, 4]
+  FirstVFBar0Address: Annotated[NvU64, 8]
+  FirstVFBar1Address: Annotated[NvU64, 16]
+  FirstVFBar2Address: Annotated[NvU64, 24]
+  b64bitBar0: Annotated[NvBool, 32]
+  b64bitBar1: Annotated[NvBool, 33]
+  b64bitBar2: Annotated[NvBool, 34]
 GSP_VF_INFO = struct_GSP_VF_INFO
-class GSP_PCIE_CONFIG_REG(Struct): pass
-GSP_PCIE_CONFIG_REG.SIZE = 4
-GSP_PCIE_CONFIG_REG._fields_ = ['linkCap']
-setattr(GSP_PCIE_CONFIG_REG, 'linkCap', field(0, NvU32))
-class EcidManufacturingInfo(Struct): pass
-EcidManufacturingInfo.SIZE = 12
-EcidManufacturingInfo._fields_ = ['ecidLow', 'ecidHigh', 'ecidExtended']
-setattr(EcidManufacturingInfo, 'ecidLow', field(0, NvU32))
-setattr(EcidManufacturingInfo, 'ecidHigh', field(4, NvU32))
-setattr(EcidManufacturingInfo, 'ecidExtended', field(8, NvU32))
-class FW_WPR_LAYOUT_OFFSET(Struct): pass
-FW_WPR_LAYOUT_OFFSET.SIZE = 16
-FW_WPR_LAYOUT_OFFSET._fields_ = ['nonWprHeapOffset', 'frtsOffset']
-setattr(FW_WPR_LAYOUT_OFFSET, 'nonWprHeapOffset', field(0, NvU64))
-setattr(FW_WPR_LAYOUT_OFFSET, 'frtsOffset', field(8, NvU64))
-class struct_GspStaticConfigInfo_t(Struct): pass
-class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS(Struct): pass
+@record
+class GSP_PCIE_CONFIG_REG:
+  SIZE = 4
+  linkCap: Annotated[NvU32, 0]
+@record
+class EcidManufacturingInfo:
+  SIZE = 12
+  ecidLow: Annotated[NvU32, 0]
+  ecidHigh: Annotated[NvU32, 4]
+  ecidExtended: Annotated[NvU32, 8]
+@record
+class FW_WPR_LAYOUT_OFFSET:
+  SIZE = 16
+  nonWprHeapOffset: Annotated[NvU64, 0]
+  frtsOffset: Annotated[NvU64, 8]
+@record
+class struct_GspStaticConfigInfo_t:
+  SIZE = 1656
+  grCapsBits: Annotated[(NvU8* 23), 0]
+  gidInfo: Annotated[NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 24]
+  SKUInfo: Annotated[NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 292]
+  fbRegionInfoParams: Annotated[NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS, 344]
+  sriovCaps: Annotated[NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 1120]
+  sriovMaxGfid: Annotated[NvU32, 1200]
+  engineCaps: Annotated[(NvU32* 3), 1204]
+  poisonFuseEnabled: Annotated[NvBool, 1216]
+  fb_length: Annotated[NvU64, 1224]
+  fbio_mask: Annotated[NvU64, 1232]
+  fb_bus_width: Annotated[NvU32, 1240]
+  fb_ram_type: Annotated[NvU32, 1244]
+  fbp_mask: Annotated[NvU64, 1248]
+  l2_cache_size: Annotated[NvU32, 1256]
+  gpuNameString: Annotated[(NvU8* 64), 1260]
+  gpuShortNameString: Annotated[(NvU8* 64), 1324]
+  gpuNameString_Unicode: Annotated[(NvU16* 64), 1388]
+  bGpuInternalSku: Annotated[NvBool, 1516]
+  bIsQuadroGeneric: Annotated[NvBool, 1517]
+  bIsQuadroAd: Annotated[NvBool, 1518]
+  bIsNvidiaNvs: Annotated[NvBool, 1519]
+  bIsVgx: Annotated[NvBool, 1520]
+  bGeforceSmb: Annotated[NvBool, 1521]
+  bIsTitan: Annotated[NvBool, 1522]
+  bIsTesla: Annotated[NvBool, 1523]
+  bIsMobile: Annotated[NvBool, 1524]
+  bIsGc6Rtd3Allowed: Annotated[NvBool, 1525]
+  bIsGc8Rtd3Allowed: Annotated[NvBool, 1526]
+  bIsGcOffRtd3Allowed: Annotated[NvBool, 1527]
+  bIsGcoffLegacyAllowed: Annotated[NvBool, 1528]
+  bIsMigSupported: Annotated[NvBool, 1529]
+  RTD3GC6TotalBoardPower: Annotated[NvU16, 1530]
+  RTD3GC6PerstDelay: Annotated[NvU16, 1532]
+  bar1PdeBase: Annotated[NvU64, 1536]
+  bar2PdeBase: Annotated[NvU64, 1544]
+  bVbiosValid: Annotated[NvBool, 1552]
+  vbiosSubVendor: Annotated[NvU32, 1556]
+  vbiosSubDevice: Annotated[NvU32, 1560]
+  bPageRetirementSupported: Annotated[NvBool, 1564]
+  bSplitVasBetweenServerClientRm: Annotated[NvBool, 1565]
+  bClRootportNeedsNosnoopWAR: Annotated[NvBool, 1566]
+  displaylessMaxHeads: Annotated[VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS, 1568]
+  displaylessMaxResolution: Annotated[VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS, 1576]
+  displaylessMaxPixels: Annotated[NvU64, 1592]
+  hInternalClient: Annotated[NvHandle, 1600]
+  hInternalDevice: Annotated[NvHandle, 1604]
+  hInternalSubdevice: Annotated[NvHandle, 1608]
+  bSelfHostedMode: Annotated[NvBool, 1612]
+  bAtsSupported: Annotated[NvBool, 1613]
+  bIsGpuUefi: Annotated[NvBool, 1614]
+  bIsEfiInit: Annotated[NvBool, 1615]
+  ecidInfo: Annotated[(EcidManufacturingInfo* 2), 1616]
+  fwWprLayoutOffset: Annotated[FW_WPR_LAYOUT_OFFSET, 1640]
+@record
+class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS:
+  SIZE = 268
+  index: Annotated[NvU32, 0]
+  flags: Annotated[NvU32, 4]
+  length: Annotated[NvU32, 8]
+  data: Annotated[(NvU8* 256), 12]
 NV2080_CTRL_GPU_GET_GID_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS
-struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS.SIZE = 268
-struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS._fields_ = ['index', 'flags', 'length', 'data']
-setattr(struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 'index', field(0, NvU32))
-setattr(struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 'flags', field(4, NvU32))
-setattr(struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 'length', field(8, NvU32))
-setattr(struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 'data', field(12, Array(NvU8, 256)))
-class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS(Struct): pass
+@record
+class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS:
+  SIZE = 48
+  BoardID: Annotated[NvU32, 0]
+  chipSKU: Annotated[(ctypes.c_char* 9), 4]
+  chipSKUMod: Annotated[(ctypes.c_char* 5), 13]
+  skuConfigVersion: Annotated[NvU32, 20]
+  project: Annotated[(ctypes.c_char* 5), 24]
+  projectSKU: Annotated[(ctypes.c_char* 5), 29]
+  CDP: Annotated[(ctypes.c_char* 6), 34]
+  projectSKUMod: Annotated[(ctypes.c_char* 2), 40]
+  businessCycle: Annotated[NvU32, 44]
 NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
-struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS.SIZE = 48
-struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS._fields_ = ['BoardID', 'chipSKU', 'chipSKUMod', 'skuConfigVersion', 'project', 'projectSKU', 'CDP', 'projectSKUMod', 'businessCycle']
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'BoardID', field(0, NvU32))
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'chipSKU', field(4, Array(ctypes.c_char, 9)))
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'chipSKUMod', field(13, Array(ctypes.c_char, 5)))
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'skuConfigVersion', field(20, NvU32))
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'project', field(24, Array(ctypes.c_char, 5)))
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'projectSKU', field(29, Array(ctypes.c_char, 5)))
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'CDP', field(34, Array(ctypes.c_char, 6)))
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'projectSKUMod', field(40, Array(ctypes.c_char, 2)))
-setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'businessCycle', field(44, NvU32))
-class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS(Struct): pass
+@record
+class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS:
+  SIZE = 776
+  numFBRegions: Annotated[NvU32, 0]
+  fbRegion: Annotated[(NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO* 16), 8]
 NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS
-class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO(Struct): pass
+@record
+class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO:
+  SIZE = 48
+  base: Annotated[NvU64, 0]
+  limit: Annotated[NvU64, 8]
+  reserved: Annotated[NvU64, 16]
+  performance: Annotated[NvU32, 24]
+  supportCompressed: Annotated[NvBool, 28]
+  supportISO: Annotated[NvBool, 29]
+  bProtected: Annotated[NvBool, 30]
+  blackList: Annotated[NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG, 31]
 NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO
-NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = Array(ctypes.c_ubyte, 17)
-struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO.SIZE = 48
-struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO._fields_ = ['base', 'limit', 'reserved', 'performance', 'supportCompressed', 'supportISO', 'bProtected', 'blackList']
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'base', field(0, NvU64))
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'limit', field(8, NvU64))
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'reserved', field(16, NvU64))
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'performance', field(24, NvU32))
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'supportCompressed', field(28, NvBool))
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'supportISO', field(29, NvBool))
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'bProtected', field(30, NvBool))
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'blackList', field(31, NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG))
-struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS.SIZE = 776
-struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS._fields_ = ['numFBRegions', 'fbRegion']
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS, 'numFBRegions', field(0, NvU32))
-setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS, 'fbRegion', field(8, Array(NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 16)))
-class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS(Struct): pass
+NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = (ctypes.c_ubyte* 17)
+@record
+class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS:
+  SIZE = 80
+  totalVFs: Annotated[NvU32, 0]
+  firstVfOffset: Annotated[NvU32, 4]
+  vfFeatureMask: Annotated[NvU32, 8]
+  FirstVFBar0Address: Annotated[NvU64, 16]
+  FirstVFBar1Address: Annotated[NvU64, 24]
+  FirstVFBar2Address: Annotated[NvU64, 32]
+  bar0Size: Annotated[NvU64, 40]
+  bar1Size: Annotated[NvU64, 48]
+  bar2Size: Annotated[NvU64, 56]
+  b64bitBar0: Annotated[NvBool, 64]
+  b64bitBar1: Annotated[NvBool, 65]
+  b64bitBar2: Annotated[NvBool, 66]
+  bSriovEnabled: Annotated[NvBool, 67]
+  bSriovHeavyEnabled: Annotated[NvBool, 68]
+  bEmulateVFBar0TlbInvalidationRegister: Annotated[NvBool, 69]
+  bClientRmAllocatedCtxBuffer: Annotated[NvBool, 70]
+  bNonPowerOf2ChannelCountSupported: Annotated[NvBool, 71]
+  bVfResizableBAR1Supported: Annotated[NvBool, 72]
 NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS = struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS
-struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS.SIZE = 80
-struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS._fields_ = ['totalVFs', 'firstVfOffset', 'vfFeatureMask', 'FirstVFBar0Address', 'FirstVFBar1Address', 'FirstVFBar2Address', 'bar0Size', 'bar1Size', 'bar2Size', 'b64bitBar0', 'b64bitBar1', 'b64bitBar2', 'bSriovEnabled', 'bSriovHeavyEnabled', 'bEmulateVFBar0TlbInvalidationRegister', 'bClientRmAllocatedCtxBuffer', 'bNonPowerOf2ChannelCountSupported', 'bVfResizableBAR1Supported']
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'totalVFs', field(0, NvU32))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'firstVfOffset', field(4, NvU32))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'vfFeatureMask', field(8, NvU32))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'FirstVFBar0Address', field(16, NvU64))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'FirstVFBar1Address', field(24, NvU64))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'FirstVFBar2Address', field(32, NvU64))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bar0Size', field(40, NvU64))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bar1Size', field(48, NvU64))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bar2Size', field(56, NvU64))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'b64bitBar0', field(64, NvBool))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'b64bitBar1', field(65, NvBool))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'b64bitBar2', field(66, NvBool))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bSriovEnabled', field(67, NvBool))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bSriovHeavyEnabled', field(68, NvBool))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bEmulateVFBar0TlbInvalidationRegister', field(69, NvBool))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bClientRmAllocatedCtxBuffer', field(70, NvBool))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bNonPowerOf2ChannelCountSupported', field(71, NvBool))
-setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bVfResizableBAR1Supported', field(72, NvBool))
-struct_GspStaticConfigInfo_t.SIZE = 1656
-struct_GspStaticConfigInfo_t._fields_ = ['grCapsBits', 'gidInfo', 'SKUInfo', 'fbRegionInfoParams', 'sriovCaps', 'sriovMaxGfid', 'engineCaps', 'poisonFuseEnabled', 'fb_length', 'fbio_mask', 'fb_bus_width', 'fb_ram_type', 'fbp_mask', 'l2_cache_size', 'gpuNameString', 'gpuShortNameString', 'gpuNameString_Unicode', 'bGpuInternalSku', 'bIsQuadroGeneric', 'bIsQuadroAd', 'bIsNvidiaNvs', 'bIsVgx', 'bGeforceSmb', 'bIsTitan', 'bIsTesla', 'bIsMobile', 'bIsGc6Rtd3Allowed', 'bIsGc8Rtd3Allowed', 'bIsGcOffRtd3Allowed', 'bIsGcoffLegacyAllowed', 'bIsMigSupported', 'RTD3GC6TotalBoardPower', 'RTD3GC6PerstDelay', 'bar1PdeBase', 'bar2PdeBase', 'bVbiosValid', 'vbiosSubVendor', 'vbiosSubDevice', 'bPageRetirementSupported', 'bSplitVasBetweenServerClientRm', 'bClRootportNeedsNosnoopWAR', 'displaylessMaxHeads', 'displaylessMaxResolution', 'displaylessMaxPixels', 'hInternalClient', 'hInternalDevice', 'hInternalSubdevice', 'bSelfHostedMode', 'bAtsSupported', 'bIsGpuUefi', 'bIsEfiInit', 'ecidInfo', 'fwWprLayoutOffset']
-setattr(struct_GspStaticConfigInfo_t, 'grCapsBits', field(0, Array(NvU8, 23)))
-setattr(struct_GspStaticConfigInfo_t, 'gidInfo', field(24, NV2080_CTRL_GPU_GET_GID_INFO_PARAMS))
-setattr(struct_GspStaticConfigInfo_t, 'SKUInfo', field(292, NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS))
-setattr(struct_GspStaticConfigInfo_t, 'fbRegionInfoParams', field(344, NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS))
-setattr(struct_GspStaticConfigInfo_t, 'sriovCaps', field(1120, NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS))
-setattr(struct_GspStaticConfigInfo_t, 'sriovMaxGfid', field(1200, NvU32))
-setattr(struct_GspStaticConfigInfo_t, 'engineCaps', field(1204, Array(NvU32, 3)))
-setattr(struct_GspStaticConfigInfo_t, 'poisonFuseEnabled', field(1216, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'fb_length', field(1224, NvU64))
-setattr(struct_GspStaticConfigInfo_t, 'fbio_mask', field(1232, NvU64))
-setattr(struct_GspStaticConfigInfo_t, 'fb_bus_width', field(1240, NvU32))
-setattr(struct_GspStaticConfigInfo_t, 'fb_ram_type', field(1244, NvU32))
-setattr(struct_GspStaticConfigInfo_t, 'fbp_mask', field(1248, NvU64))
-setattr(struct_GspStaticConfigInfo_t, 'l2_cache_size', field(1256, NvU32))
-setattr(struct_GspStaticConfigInfo_t, 'gpuNameString', field(1260, Array(NvU8, 64)))
-setattr(struct_GspStaticConfigInfo_t, 'gpuShortNameString', field(1324, Array(NvU8, 64)))
-setattr(struct_GspStaticConfigInfo_t, 'gpuNameString_Unicode', field(1388, Array(NvU16, 64)))
-setattr(struct_GspStaticConfigInfo_t, 'bGpuInternalSku', field(1516, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsQuadroGeneric', field(1517, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsQuadroAd', field(1518, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsNvidiaNvs', field(1519, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsVgx', field(1520, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bGeforceSmb', field(1521, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsTitan', field(1522, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsTesla', field(1523, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsMobile', field(1524, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsGc6Rtd3Allowed', field(1525, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsGc8Rtd3Allowed', field(1526, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsGcOffRtd3Allowed', field(1527, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsGcoffLegacyAllowed', field(1528, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsMigSupported', field(1529, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'RTD3GC6TotalBoardPower', field(1530, NvU16))
-setattr(struct_GspStaticConfigInfo_t, 'RTD3GC6PerstDelay', field(1532, NvU16))
-setattr(struct_GspStaticConfigInfo_t, 'bar1PdeBase', field(1536, NvU64))
-setattr(struct_GspStaticConfigInfo_t, 'bar2PdeBase', field(1544, NvU64))
-setattr(struct_GspStaticConfigInfo_t, 'bVbiosValid', field(1552, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'vbiosSubVendor', field(1556, NvU32))
-setattr(struct_GspStaticConfigInfo_t, 'vbiosSubDevice', field(1560, NvU32))
-setattr(struct_GspStaticConfigInfo_t, 'bPageRetirementSupported', field(1564, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bSplitVasBetweenServerClientRm', field(1565, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bClRootportNeedsNosnoopWAR', field(1566, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'displaylessMaxHeads', field(1568, VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS))
-setattr(struct_GspStaticConfigInfo_t, 'displaylessMaxResolution', field(1576, VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS))
-setattr(struct_GspStaticConfigInfo_t, 'displaylessMaxPixels', field(1592, NvU64))
-setattr(struct_GspStaticConfigInfo_t, 'hInternalClient', field(1600, NvHandle))
-setattr(struct_GspStaticConfigInfo_t, 'hInternalDevice', field(1604, NvHandle))
-setattr(struct_GspStaticConfigInfo_t, 'hInternalSubdevice', field(1608, NvHandle))
-setattr(struct_GspStaticConfigInfo_t, 'bSelfHostedMode', field(1612, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bAtsSupported', field(1613, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsGpuUefi', field(1614, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'bIsEfiInit', field(1615, NvBool))
-setattr(struct_GspStaticConfigInfo_t, 'ecidInfo', field(1616, Array(EcidManufacturingInfo, 2)))
-setattr(struct_GspStaticConfigInfo_t, 'fwWprLayoutOffset', field(1640, FW_WPR_LAYOUT_OFFSET))
 GspStaticConfigInfo = struct_GspStaticConfigInfo_t
-class struct_GspSystemInfo(Struct): pass
-struct_GspSystemInfo.SIZE = 928
-struct_GspSystemInfo._fields_ = ['gpuPhysAddr', 'gpuPhysFbAddr', 'gpuPhysInstAddr', 'gpuPhysIoAddr', 'nvDomainBusDeviceFunc', 'simAccessBufPhysAddr', 'notifyOpSharedSurfacePhysAddr', 'pcieAtomicsOpMask', 'consoleMemSize', 'maxUserVa', 'pciConfigMirrorBase', 'pciConfigMirrorSize', 'PCIDeviceID', 'PCISubDeviceID', 'PCIRevisionID', 'pcieAtomicsCplDeviceCapMask', 'oorArch', 'clPdbProperties', 'Chipset', 'bGpuBehindBridge', 'bFlrSupported', 'b64bBar0Supported', 'bMnocAvailable', 'chipsetL1ssEnable', 'bUpstreamL0sUnsupported', 'bUpstreamL1Unsupported', 'bUpstreamL1PorSupported', 'bUpstreamL1PorMobileOnly', 'bSystemHasMux', 'upstreamAddressValid', 'FHBBusInfo', 'chipsetIDInfo', 'acpiMethodData', 'hypervisorType', 'bIsPassthru', 'sysTimerOffsetNs', 'gspVFInfo', 'bIsPrimary', 'isGridBuild', 'pcieConfigReg', 'gridBuildCsp', 'bPreserveVideoMemoryAllocations', 'bTdrEventSupported', 'bFeatureStretchVblankCapable', 'bEnableDynamicGranularityPageArrays', 'bClockBoostSupported', 'bRouteDispIntrsToCPU', 'hostPageSize']
-setattr(struct_GspSystemInfo, 'gpuPhysAddr', field(0, NvU64))
-setattr(struct_GspSystemInfo, 'gpuPhysFbAddr', field(8, NvU64))
-setattr(struct_GspSystemInfo, 'gpuPhysInstAddr', field(16, NvU64))
-setattr(struct_GspSystemInfo, 'gpuPhysIoAddr', field(24, NvU64))
-setattr(struct_GspSystemInfo, 'nvDomainBusDeviceFunc', field(32, NvU64))
-setattr(struct_GspSystemInfo, 'simAccessBufPhysAddr', field(40, NvU64))
-setattr(struct_GspSystemInfo, 'notifyOpSharedSurfacePhysAddr', field(48, NvU64))
-setattr(struct_GspSystemInfo, 'pcieAtomicsOpMask', field(56, NvU64))
-setattr(struct_GspSystemInfo, 'consoleMemSize', field(64, NvU64))
-setattr(struct_GspSystemInfo, 'maxUserVa', field(72, NvU64))
-setattr(struct_GspSystemInfo, 'pciConfigMirrorBase', field(80, NvU32))
-setattr(struct_GspSystemInfo, 'pciConfigMirrorSize', field(84, NvU32))
-setattr(struct_GspSystemInfo, 'PCIDeviceID', field(88, NvU32))
-setattr(struct_GspSystemInfo, 'PCISubDeviceID', field(92, NvU32))
-setattr(struct_GspSystemInfo, 'PCIRevisionID', field(96, NvU32))
-setattr(struct_GspSystemInfo, 'pcieAtomicsCplDeviceCapMask', field(100, NvU32))
-setattr(struct_GspSystemInfo, 'oorArch', field(104, NvU8))
-setattr(struct_GspSystemInfo, 'clPdbProperties', field(112, NvU64))
-setattr(struct_GspSystemInfo, 'Chipset', field(120, NvU32))
-setattr(struct_GspSystemInfo, 'bGpuBehindBridge', field(124, NvBool))
-setattr(struct_GspSystemInfo, 'bFlrSupported', field(125, NvBool))
-setattr(struct_GspSystemInfo, 'b64bBar0Supported', field(126, NvBool))
-setattr(struct_GspSystemInfo, 'bMnocAvailable', field(127, NvBool))
-setattr(struct_GspSystemInfo, 'chipsetL1ssEnable', field(128, NvU32))
-setattr(struct_GspSystemInfo, 'bUpstreamL0sUnsupported', field(132, NvBool))
-setattr(struct_GspSystemInfo, 'bUpstreamL1Unsupported', field(133, NvBool))
-setattr(struct_GspSystemInfo, 'bUpstreamL1PorSupported', field(134, NvBool))
-setattr(struct_GspSystemInfo, 'bUpstreamL1PorMobileOnly', field(135, NvBool))
-setattr(struct_GspSystemInfo, 'bSystemHasMux', field(136, NvBool))
-setattr(struct_GspSystemInfo, 'upstreamAddressValid', field(137, NvU8))
-setattr(struct_GspSystemInfo, 'FHBBusInfo', field(138, BUSINFO))
-setattr(struct_GspSystemInfo, 'chipsetIDInfo', field(148, BUSINFO))
-setattr(struct_GspSystemInfo, 'acpiMethodData', field(160, ACPI_METHOD_DATA))
-setattr(struct_GspSystemInfo, 'hypervisorType', field(836, NvU32))
-setattr(struct_GspSystemInfo, 'bIsPassthru', field(840, NvBool))
-setattr(struct_GspSystemInfo, 'sysTimerOffsetNs', field(848, NvU64))
-setattr(struct_GspSystemInfo, 'gspVFInfo', field(856, GSP_VF_INFO))
-setattr(struct_GspSystemInfo, 'bIsPrimary', field(896, NvBool))
-setattr(struct_GspSystemInfo, 'isGridBuild', field(897, NvBool))
-setattr(struct_GspSystemInfo, 'pcieConfigReg', field(900, GSP_PCIE_CONFIG_REG))
-setattr(struct_GspSystemInfo, 'gridBuildCsp', field(904, NvU32))
-setattr(struct_GspSystemInfo, 'bPreserveVideoMemoryAllocations', field(908, NvBool))
-setattr(struct_GspSystemInfo, 'bTdrEventSupported', field(909, NvBool))
-setattr(struct_GspSystemInfo, 'bFeatureStretchVblankCapable', field(910, NvBool))
-setattr(struct_GspSystemInfo, 'bEnableDynamicGranularityPageArrays', field(911, NvBool))
-setattr(struct_GspSystemInfo, 'bClockBoostSupported', field(912, NvBool))
-setattr(struct_GspSystemInfo, 'bRouteDispIntrsToCPU', field(913, NvBool))
-setattr(struct_GspSystemInfo, 'hostPageSize', field(920, NvU64))
+@record
+class struct_GspSystemInfo:
+  SIZE = 928
+  gpuPhysAddr: Annotated[NvU64, 0]
+  gpuPhysFbAddr: Annotated[NvU64, 8]
+  gpuPhysInstAddr: Annotated[NvU64, 16]
+  gpuPhysIoAddr: Annotated[NvU64, 24]
+  nvDomainBusDeviceFunc: Annotated[NvU64, 32]
+  simAccessBufPhysAddr: Annotated[NvU64, 40]
+  notifyOpSharedSurfacePhysAddr: Annotated[NvU64, 48]
+  pcieAtomicsOpMask: Annotated[NvU64, 56]
+  consoleMemSize: Annotated[NvU64, 64]
+  maxUserVa: Annotated[NvU64, 72]
+  pciConfigMirrorBase: Annotated[NvU32, 80]
+  pciConfigMirrorSize: Annotated[NvU32, 84]
+  PCIDeviceID: Annotated[NvU32, 88]
+  PCISubDeviceID: Annotated[NvU32, 92]
+  PCIRevisionID: Annotated[NvU32, 96]
+  pcieAtomicsCplDeviceCapMask: Annotated[NvU32, 100]
+  oorArch: Annotated[NvU8, 104]
+  clPdbProperties: Annotated[NvU64, 112]
+  Chipset: Annotated[NvU32, 120]
+  bGpuBehindBridge: Annotated[NvBool, 124]
+  bFlrSupported: Annotated[NvBool, 125]
+  b64bBar0Supported: Annotated[NvBool, 126]
+  bMnocAvailable: Annotated[NvBool, 127]
+  chipsetL1ssEnable: Annotated[NvU32, 128]
+  bUpstreamL0sUnsupported: Annotated[NvBool, 132]
+  bUpstreamL1Unsupported: Annotated[NvBool, 133]
+  bUpstreamL1PorSupported: Annotated[NvBool, 134]
+  bUpstreamL1PorMobileOnly: Annotated[NvBool, 135]
+  bSystemHasMux: Annotated[NvBool, 136]
+  upstreamAddressValid: Annotated[NvU8, 137]
+  FHBBusInfo: Annotated[BUSINFO, 138]
+  chipsetIDInfo: Annotated[BUSINFO, 148]
+  acpiMethodData: Annotated[ACPI_METHOD_DATA, 160]
+  hypervisorType: Annotated[NvU32, 836]
+  bIsPassthru: Annotated[NvBool, 840]
+  sysTimerOffsetNs: Annotated[NvU64, 848]
+  gspVFInfo: Annotated[GSP_VF_INFO, 856]
+  bIsPrimary: Annotated[NvBool, 896]
+  isGridBuild: Annotated[NvBool, 897]
+  pcieConfigReg: Annotated[GSP_PCIE_CONFIG_REG, 900]
+  gridBuildCsp: Annotated[NvU32, 904]
+  bPreserveVideoMemoryAllocations: Annotated[NvBool, 908]
+  bTdrEventSupported: Annotated[NvBool, 909]
+  bFeatureStretchVblankCapable: Annotated[NvBool, 910]
+  bEnableDynamicGranularityPageArrays: Annotated[NvBool, 911]
+  bClockBoostSupported: Annotated[NvBool, 912]
+  bRouteDispIntrsToCPU: Annotated[NvBool, 913]
+  hostPageSize: Annotated[NvU64, 920]
 GspSystemInfo = struct_GspSystemInfo
-class FALCON_APPLICATION_INTERFACE_HEADER_V1(Struct): pass
-FALCON_APPLICATION_INTERFACE_HEADER_V1.SIZE = 4
-FALCON_APPLICATION_INTERFACE_HEADER_V1._fields_ = ['version', 'headerSize', 'entrySize', 'entryCount']
-setattr(FALCON_APPLICATION_INTERFACE_HEADER_V1, 'version', field(0, NvU8))
-setattr(FALCON_APPLICATION_INTERFACE_HEADER_V1, 'headerSize', field(1, NvU8))
-setattr(FALCON_APPLICATION_INTERFACE_HEADER_V1, 'entrySize', field(2, NvU8))
-setattr(FALCON_APPLICATION_INTERFACE_HEADER_V1, 'entryCount', field(3, NvU8))
-class FALCON_APPLICATION_INTERFACE_ENTRY_V1(Struct): pass
-FALCON_APPLICATION_INTERFACE_ENTRY_V1.SIZE = 8
-FALCON_APPLICATION_INTERFACE_ENTRY_V1._fields_ = ['id', 'dmemOffset']
-setattr(FALCON_APPLICATION_INTERFACE_ENTRY_V1, 'id', field(0, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_ENTRY_V1, 'dmemOffset', field(4, NvU32))
-class FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3(Struct): pass
-FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3.SIZE = 64
-FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._fields_ = ['signature', 'version', 'size', 'cmd_in_buffer_offset', 'cmd_in_buffer_size', 'cmd_out_buffer_offset', 'cmd_out_buffer_size', 'nvf_img_data_buffer_offset', 'nvf_img_data_buffer_size', 'printfBufferHdr', 'ucode_build_time_stamp', 'ucode_signature', 'init_cmd', 'ucode_feature', 'ucode_cmd_mask0', 'ucode_cmd_mask1', 'multiTgtTbl']
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'signature', field(0, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'version', field(4, NvU16))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'size', field(6, NvU16))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'cmd_in_buffer_offset', field(8, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'cmd_in_buffer_size', field(12, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'cmd_out_buffer_offset', field(16, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'cmd_out_buffer_size', field(20, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'nvf_img_data_buffer_offset', field(24, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'nvf_img_data_buffer_size', field(28, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'printfBufferHdr', field(32, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_build_time_stamp', field(36, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_signature', field(40, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'init_cmd', field(44, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_feature', field(48, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_cmd_mask0', field(52, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_cmd_mask1', field(56, NvU32))
-setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'multiTgtTbl', field(60, NvU32))
-class struct_BIT_HEADER_V1_00(Struct): pass
-struct_BIT_HEADER_V1_00.SIZE = 12
-struct_BIT_HEADER_V1_00._fields_ = ['Id', 'Signature', 'BCD_Version', 'HeaderSize', 'TokenSize', 'TokenEntries', 'HeaderChksum']
-setattr(struct_BIT_HEADER_V1_00, 'Id', field(0, ctypes.c_uint16))
-setattr(struct_BIT_HEADER_V1_00, 'Signature', field(2, ctypes.c_uint32))
-setattr(struct_BIT_HEADER_V1_00, 'BCD_Version', field(6, ctypes.c_uint16))
-setattr(struct_BIT_HEADER_V1_00, 'HeaderSize', field(8, ctypes.c_ubyte))
-setattr(struct_BIT_HEADER_V1_00, 'TokenSize', field(9, ctypes.c_ubyte))
-setattr(struct_BIT_HEADER_V1_00, 'TokenEntries', field(10, ctypes.c_ubyte))
-setattr(struct_BIT_HEADER_V1_00, 'HeaderChksum', field(11, ctypes.c_ubyte))
+@record
+class FALCON_APPLICATION_INTERFACE_HEADER_V1:
+  SIZE = 4
+  version: Annotated[NvU8, 0]
+  headerSize: Annotated[NvU8, 1]
+  entrySize: Annotated[NvU8, 2]
+  entryCount: Annotated[NvU8, 3]
+@record
+class FALCON_APPLICATION_INTERFACE_ENTRY_V1:
+  SIZE = 8
+  id: Annotated[NvU32, 0]
+  dmemOffset: Annotated[NvU32, 4]
+@record
+class FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3:
+  SIZE = 64
+  signature: Annotated[NvU32, 0]
+  version: Annotated[NvU16, 4]
+  size: Annotated[NvU16, 6]
+  cmd_in_buffer_offset: Annotated[NvU32, 8]
+  cmd_in_buffer_size: Annotated[NvU32, 12]
+  cmd_out_buffer_offset: Annotated[NvU32, 16]
+  cmd_out_buffer_size: Annotated[NvU32, 20]
+  nvf_img_data_buffer_offset: Annotated[NvU32, 24]
+  nvf_img_data_buffer_size: Annotated[NvU32, 28]
+  printfBufferHdr: Annotated[NvU32, 32]
+  ucode_build_time_stamp: Annotated[NvU32, 36]
+  ucode_signature: Annotated[NvU32, 40]
+  init_cmd: Annotated[NvU32, 44]
+  ucode_feature: Annotated[NvU32, 48]
+  ucode_cmd_mask0: Annotated[NvU32, 52]
+  ucode_cmd_mask1: Annotated[NvU32, 56]
+  multiTgtTbl: Annotated[NvU32, 60]
+@record
+class struct_BIT_HEADER_V1_00:
+  SIZE = 12
+  Id: Annotated[ctypes.c_uint16, 0]
+  Signature: Annotated[ctypes.c_uint32, 2]
+  BCD_Version: Annotated[ctypes.c_uint16, 6]
+  HeaderSize: Annotated[ctypes.c_ubyte, 8]
+  TokenSize: Annotated[ctypes.c_ubyte, 9]
+  TokenEntries: Annotated[ctypes.c_ubyte, 10]
+  HeaderChksum: Annotated[ctypes.c_ubyte, 11]
 BIT_HEADER_V1_00 = struct_BIT_HEADER_V1_00
-class struct_BIT_TOKEN_V1_00(Struct): pass
-struct_BIT_TOKEN_V1_00.SIZE = 8
-struct_BIT_TOKEN_V1_00._fields_ = ['TokenId', 'DataVersion', 'DataSize', 'DataPtr']
-setattr(struct_BIT_TOKEN_V1_00, 'TokenId', field(0, ctypes.c_ubyte))
-setattr(struct_BIT_TOKEN_V1_00, 'DataVersion', field(1, ctypes.c_ubyte))
-setattr(struct_BIT_TOKEN_V1_00, 'DataSize', field(2, ctypes.c_uint16))
-setattr(struct_BIT_TOKEN_V1_00, 'DataPtr', field(4, ctypes.c_uint32))
+@record
+class struct_BIT_TOKEN_V1_00:
+  SIZE = 8
+  TokenId: Annotated[ctypes.c_ubyte, 0]
+  DataVersion: Annotated[ctypes.c_ubyte, 1]
+  DataSize: Annotated[ctypes.c_uint16, 2]
+  DataPtr: Annotated[ctypes.c_uint32, 4]
 BIT_TOKEN_V1_00 = struct_BIT_TOKEN_V1_00
-class BIT_DATA_BIOSDATA_BINVER(Struct): pass
-BIT_DATA_BIOSDATA_BINVER.SIZE = 5
-BIT_DATA_BIOSDATA_BINVER._fields_ = ['Version', 'OemVersion']
-setattr(BIT_DATA_BIOSDATA_BINVER, 'Version', field(0, ctypes.c_uint32))
-setattr(BIT_DATA_BIOSDATA_BINVER, 'OemVersion', field(4, ctypes.c_ubyte))
-class BIT_DATA_FALCON_DATA_V2(Struct): pass
-BIT_DATA_FALCON_DATA_V2.SIZE = 4
-BIT_DATA_FALCON_DATA_V2._fields_ = ['FalconUcodeTablePtr']
-setattr(BIT_DATA_FALCON_DATA_V2, 'FalconUcodeTablePtr', field(0, ctypes.c_uint32))
-class FALCON_UCODE_TABLE_HDR_V1(Struct): pass
-FALCON_UCODE_TABLE_HDR_V1.SIZE = 6
-FALCON_UCODE_TABLE_HDR_V1._fields_ = ['Version', 'HeaderSize', 'EntrySize', 'EntryCount', 'DescVersion', 'DescSize']
-setattr(FALCON_UCODE_TABLE_HDR_V1, 'Version', field(0, ctypes.c_ubyte))
-setattr(FALCON_UCODE_TABLE_HDR_V1, 'HeaderSize', field(1, ctypes.c_ubyte))
-setattr(FALCON_UCODE_TABLE_HDR_V1, 'EntrySize', field(2, ctypes.c_ubyte))
-setattr(FALCON_UCODE_TABLE_HDR_V1, 'EntryCount', field(3, ctypes.c_ubyte))
-setattr(FALCON_UCODE_TABLE_HDR_V1, 'DescVersion', field(4, ctypes.c_ubyte))
-setattr(FALCON_UCODE_TABLE_HDR_V1, 'DescSize', field(5, ctypes.c_ubyte))
-class FALCON_UCODE_TABLE_ENTRY_V1(Struct): pass
-FALCON_UCODE_TABLE_ENTRY_V1.SIZE = 6
-FALCON_UCODE_TABLE_ENTRY_V1._fields_ = ['ApplicationID', 'TargetID', 'DescPtr']
-setattr(FALCON_UCODE_TABLE_ENTRY_V1, 'ApplicationID', field(0, ctypes.c_ubyte))
-setattr(FALCON_UCODE_TABLE_ENTRY_V1, 'TargetID', field(1, ctypes.c_ubyte))
-setattr(FALCON_UCODE_TABLE_ENTRY_V1, 'DescPtr', field(2, ctypes.c_uint32))
-class FALCON_UCODE_DESC_HEADER(Struct): pass
-FALCON_UCODE_DESC_HEADER.SIZE = 4
-FALCON_UCODE_DESC_HEADER._fields_ = ['vDesc']
-setattr(FALCON_UCODE_DESC_HEADER, 'vDesc', field(0, ctypes.c_uint32))
-class FALCON_UCODE_DESC_V3(Struct): pass
-FALCON_UCODE_DESC_V3.SIZE = 44
-FALCON_UCODE_DESC_V3._fields_ = ['Hdr', 'StoredSize', 'PKCDataOffset', 'InterfaceOffset', 'IMEMPhysBase', 'IMEMLoadSize', 'IMEMVirtBase', 'DMEMPhysBase', 'DMEMLoadSize', 'EngineIdMask', 'UcodeId', 'SignatureCount', 'SignatureVersions', 'Reserved']
-setattr(FALCON_UCODE_DESC_V3, 'Hdr', field(0, FALCON_UCODE_DESC_HEADER))
-setattr(FALCON_UCODE_DESC_V3, 'StoredSize', field(4, ctypes.c_uint32))
-setattr(FALCON_UCODE_DESC_V3, 'PKCDataOffset', field(8, ctypes.c_uint32))
-setattr(FALCON_UCODE_DESC_V3, 'InterfaceOffset', field(12, ctypes.c_uint32))
-setattr(FALCON_UCODE_DESC_V3, 'IMEMPhysBase', field(16, ctypes.c_uint32))
-setattr(FALCON_UCODE_DESC_V3, 'IMEMLoadSize', field(20, ctypes.c_uint32))
-setattr(FALCON_UCODE_DESC_V3, 'IMEMVirtBase', field(24, ctypes.c_uint32))
-setattr(FALCON_UCODE_DESC_V3, 'DMEMPhysBase', field(28, ctypes.c_uint32))
-setattr(FALCON_UCODE_DESC_V3, 'DMEMLoadSize', field(32, ctypes.c_uint32))
-setattr(FALCON_UCODE_DESC_V3, 'EngineIdMask', field(36, ctypes.c_uint16))
-setattr(FALCON_UCODE_DESC_V3, 'UcodeId', field(38, ctypes.c_ubyte))
-setattr(FALCON_UCODE_DESC_V3, 'SignatureCount', field(39, ctypes.c_ubyte))
-setattr(FALCON_UCODE_DESC_V3, 'SignatureVersions', field(40, ctypes.c_uint16))
-setattr(FALCON_UCODE_DESC_V3, 'Reserved', field(42, ctypes.c_uint16))
-class FWSECLIC_READ_VBIOS_DESC(Struct): pass
-FWSECLIC_READ_VBIOS_DESC.SIZE = 24
-FWSECLIC_READ_VBIOS_DESC._fields_ = ['version', 'size', 'gfwImageOffset', 'gfwImageSize', 'flags']
-setattr(FWSECLIC_READ_VBIOS_DESC, 'version', field(0, NvU32))
-setattr(FWSECLIC_READ_VBIOS_DESC, 'size', field(4, NvU32))
-setattr(FWSECLIC_READ_VBIOS_DESC, 'gfwImageOffset', field(8, NvU64))
-setattr(FWSECLIC_READ_VBIOS_DESC, 'gfwImageSize', field(16, NvU32))
-setattr(FWSECLIC_READ_VBIOS_DESC, 'flags', field(20, NvU32))
-class FWSECLIC_FRTS_REGION_DESC(Struct): pass
-FWSECLIC_FRTS_REGION_DESC.SIZE = 20
-FWSECLIC_FRTS_REGION_DESC._fields_ = ['version', 'size', 'frtsRegionOffset4K', 'frtsRegionSize', 'frtsRegionMediaType']
-setattr(FWSECLIC_FRTS_REGION_DESC, 'version', field(0, NvU32))
-setattr(FWSECLIC_FRTS_REGION_DESC, 'size', field(4, NvU32))
-setattr(FWSECLIC_FRTS_REGION_DESC, 'frtsRegionOffset4K', field(8, NvU32))
-setattr(FWSECLIC_FRTS_REGION_DESC, 'frtsRegionSize', field(12, NvU32))
-setattr(FWSECLIC_FRTS_REGION_DESC, 'frtsRegionMediaType', field(16, NvU32))
-class FWSECLIC_FRTS_CMD(Struct): pass
-FWSECLIC_FRTS_CMD.SIZE = 44
-FWSECLIC_FRTS_CMD._fields_ = ['readVbiosDesc', 'frtsRegionDesc']
-setattr(FWSECLIC_FRTS_CMD, 'readVbiosDesc', field(0, FWSECLIC_READ_VBIOS_DESC))
-setattr(FWSECLIC_FRTS_CMD, 'frtsRegionDesc', field(24, FWSECLIC_FRTS_REGION_DESC))
-class struct__PCI_EXP_ROM_STANDARD(Struct): pass
-struct__PCI_EXP_ROM_STANDARD.SIZE = 30
-struct__PCI_EXP_ROM_STANDARD._fields_ = ['sig', 'reserved', 'pciDataStrucPtr', 'sizeOfBlock']
-setattr(struct__PCI_EXP_ROM_STANDARD, 'sig', field(0, NvU16))
-setattr(struct__PCI_EXP_ROM_STANDARD, 'reserved', field(2, Array(NvU8, 22)))
-setattr(struct__PCI_EXP_ROM_STANDARD, 'pciDataStrucPtr', field(24, NvU16))
-setattr(struct__PCI_EXP_ROM_STANDARD, 'sizeOfBlock', field(26, NvU32))
+@record
+class BIT_DATA_BIOSDATA_BINVER:
+  SIZE = 5
+  Version: Annotated[ctypes.c_uint32, 0]
+  OemVersion: Annotated[ctypes.c_ubyte, 4]
+@record
+class BIT_DATA_FALCON_DATA_V2:
+  SIZE = 4
+  FalconUcodeTablePtr: Annotated[ctypes.c_uint32, 0]
+@record
+class FALCON_UCODE_TABLE_HDR_V1:
+  SIZE = 6
+  Version: Annotated[ctypes.c_ubyte, 0]
+  HeaderSize: Annotated[ctypes.c_ubyte, 1]
+  EntrySize: Annotated[ctypes.c_ubyte, 2]
+  EntryCount: Annotated[ctypes.c_ubyte, 3]
+  DescVersion: Annotated[ctypes.c_ubyte, 4]
+  DescSize: Annotated[ctypes.c_ubyte, 5]
+@record
+class FALCON_UCODE_TABLE_ENTRY_V1:
+  SIZE = 6
+  ApplicationID: Annotated[ctypes.c_ubyte, 0]
+  TargetID: Annotated[ctypes.c_ubyte, 1]
+  DescPtr: Annotated[ctypes.c_uint32, 2]
+@record
+class FALCON_UCODE_DESC_HEADER:
+  SIZE = 4
+  vDesc: Annotated[ctypes.c_uint32, 0]
+@record
+class FALCON_UCODE_DESC_V3:
+  SIZE = 44
+  Hdr: Annotated[FALCON_UCODE_DESC_HEADER, 0]
+  StoredSize: Annotated[ctypes.c_uint32, 4]
+  PKCDataOffset: Annotated[ctypes.c_uint32, 8]
+  InterfaceOffset: Annotated[ctypes.c_uint32, 12]
+  IMEMPhysBase: Annotated[ctypes.c_uint32, 16]
+  IMEMLoadSize: Annotated[ctypes.c_uint32, 20]
+  IMEMVirtBase: Annotated[ctypes.c_uint32, 24]
+  DMEMPhysBase: Annotated[ctypes.c_uint32, 28]
+  DMEMLoadSize: Annotated[ctypes.c_uint32, 32]
+  EngineIdMask: Annotated[ctypes.c_uint16, 36]
+  UcodeId: Annotated[ctypes.c_ubyte, 38]
+  SignatureCount: Annotated[ctypes.c_ubyte, 39]
+  SignatureVersions: Annotated[ctypes.c_uint16, 40]
+  Reserved: Annotated[ctypes.c_uint16, 42]
+@record
+class FWSECLIC_READ_VBIOS_DESC:
+  SIZE = 24
+  version: Annotated[NvU32, 0]
+  size: Annotated[NvU32, 4]
+  gfwImageOffset: Annotated[NvU64, 8]
+  gfwImageSize: Annotated[NvU32, 16]
+  flags: Annotated[NvU32, 20]
+@record
+class FWSECLIC_FRTS_REGION_DESC:
+  SIZE = 20
+  version: Annotated[NvU32, 0]
+  size: Annotated[NvU32, 4]
+  frtsRegionOffset4K: Annotated[NvU32, 8]
+  frtsRegionSize: Annotated[NvU32, 12]
+  frtsRegionMediaType: Annotated[NvU32, 16]
+@record
+class FWSECLIC_FRTS_CMD:
+  SIZE = 44
+  readVbiosDesc: Annotated[FWSECLIC_READ_VBIOS_DESC, 0]
+  frtsRegionDesc: Annotated[FWSECLIC_FRTS_REGION_DESC, 24]
+@record
+class struct__PCI_EXP_ROM_STANDARD:
+  SIZE = 30
+  sig: Annotated[NvU16, 0]
+  reserved: Annotated[(NvU8* 22), 2]
+  pciDataStrucPtr: Annotated[NvU16, 24]
+  sizeOfBlock: Annotated[NvU32, 26]
 PCI_EXP_ROM_STANDARD = struct__PCI_EXP_ROM_STANDARD
-PPCI_EXP_ROM_STANDARD = Pointer(struct__PCI_EXP_ROM_STANDARD)
-class struct__PCI_EXP_ROM_NBSI(Struct): pass
-struct__PCI_EXP_ROM_NBSI.SIZE = 30
-struct__PCI_EXP_ROM_NBSI._fields_ = ['sig', 'reserved', 'nbsiDataOffset', 'pciDataStrucPtr', 'sizeOfBlock']
-setattr(struct__PCI_EXP_ROM_NBSI, 'sig', field(0, NvU16))
-setattr(struct__PCI_EXP_ROM_NBSI, 'reserved', field(2, Array(NvU8, 20)))
-setattr(struct__PCI_EXP_ROM_NBSI, 'nbsiDataOffset', field(22, NvU16))
-setattr(struct__PCI_EXP_ROM_NBSI, 'pciDataStrucPtr', field(24, NvU16))
-setattr(struct__PCI_EXP_ROM_NBSI, 'sizeOfBlock', field(26, NvU32))
+PPCI_EXP_ROM_STANDARD = ctypes.POINTER(struct__PCI_EXP_ROM_STANDARD)
+@record
+class struct__PCI_EXP_ROM_NBSI:
+  SIZE = 30
+  sig: Annotated[NvU16, 0]
+  reserved: Annotated[(NvU8* 20), 2]
+  nbsiDataOffset: Annotated[NvU16, 22]
+  pciDataStrucPtr: Annotated[NvU16, 24]
+  sizeOfBlock: Annotated[NvU32, 26]
 PCI_EXP_ROM_NBSI = struct__PCI_EXP_ROM_NBSI
-PPCI_EXP_ROM_NBSI = Pointer(struct__PCI_EXP_ROM_NBSI)
-class union__PCI_EXP_ROM(Union): pass
-union__PCI_EXP_ROM.SIZE = 30
-union__PCI_EXP_ROM._fields_ = ['standard', 'nbsi']
-setattr(union__PCI_EXP_ROM, 'standard', field(0, PCI_EXP_ROM_STANDARD))
-setattr(union__PCI_EXP_ROM, 'nbsi', field(0, PCI_EXP_ROM_NBSI))
+PPCI_EXP_ROM_NBSI = ctypes.POINTER(struct__PCI_EXP_ROM_NBSI)
+@record
+class union__PCI_EXP_ROM:
+  SIZE = 30
+  standard: Annotated[PCI_EXP_ROM_STANDARD, 0]
+  nbsi: Annotated[PCI_EXP_ROM_NBSI, 0]
 PCI_EXP_ROM = union__PCI_EXP_ROM
-PPCI_EXP_ROM = Pointer(union__PCI_EXP_ROM)
-class struct__PCI_DATA_STRUCT(Struct): pass
-struct__PCI_DATA_STRUCT.SIZE = 24
-struct__PCI_DATA_STRUCT._fields_ = ['sig', 'vendorID', 'deviceID', 'deviceListPtr', 'pciDataStructLen', 'pciDataStructRev', 'classCode', 'imageLen', 'vendorRomRev', 'codeType', 'lastImage', 'maxRunTimeImageLen']
-setattr(struct__PCI_DATA_STRUCT, 'sig', field(0, NvU32))
-setattr(struct__PCI_DATA_STRUCT, 'vendorID', field(4, NvU16))
-setattr(struct__PCI_DATA_STRUCT, 'deviceID', field(6, NvU16))
-setattr(struct__PCI_DATA_STRUCT, 'deviceListPtr', field(8, NvU16))
-setattr(struct__PCI_DATA_STRUCT, 'pciDataStructLen', field(10, NvU16))
-setattr(struct__PCI_DATA_STRUCT, 'pciDataStructRev', field(12, NvU8))
-setattr(struct__PCI_DATA_STRUCT, 'classCode', field(13, Array(NvU8, 3)))
-setattr(struct__PCI_DATA_STRUCT, 'imageLen', field(16, NvU16))
-setattr(struct__PCI_DATA_STRUCT, 'vendorRomRev', field(18, NvU16))
-setattr(struct__PCI_DATA_STRUCT, 'codeType', field(20, NvU8))
-setattr(struct__PCI_DATA_STRUCT, 'lastImage', field(21, NvU8))
-setattr(struct__PCI_DATA_STRUCT, 'maxRunTimeImageLen', field(22, NvU16))
+PPCI_EXP_ROM = ctypes.POINTER(union__PCI_EXP_ROM)
+@record
+class struct__PCI_DATA_STRUCT:
+  SIZE = 24
+  sig: Annotated[NvU32, 0]
+  vendorID: Annotated[NvU16, 4]
+  deviceID: Annotated[NvU16, 6]
+  deviceListPtr: Annotated[NvU16, 8]
+  pciDataStructLen: Annotated[NvU16, 10]
+  pciDataStructRev: Annotated[NvU8, 12]
+  classCode: Annotated[(NvU8* 3), 13]
+  imageLen: Annotated[NvU16, 16]
+  vendorRomRev: Annotated[NvU16, 18]
+  codeType: Annotated[NvU8, 20]
+  lastImage: Annotated[NvU8, 21]
+  maxRunTimeImageLen: Annotated[NvU16, 22]
 PCI_DATA_STRUCT = struct__PCI_DATA_STRUCT
-PPCI_DATA_STRUCT = Pointer(struct__PCI_DATA_STRUCT)
-class struct__NV_PCI_DATA_EXT_STRUCT(Struct): pass
-struct__NV_PCI_DATA_EXT_STRUCT.SIZE = 12
-struct__NV_PCI_DATA_EXT_STRUCT._fields_ = ['signature', 'nvPciDataExtRev', 'nvPciDataExtLen', 'subimageLen', 'privLastImage', 'flags']
-setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'signature', field(0, NvU32))
-setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'nvPciDataExtRev', field(4, NvU16))
-setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'nvPciDataExtLen', field(6, NvU16))
-setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'subimageLen', field(8, NvU16))
-setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'privLastImage', field(10, NvU8))
-setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'flags', field(11, NvU8))
+PPCI_DATA_STRUCT = ctypes.POINTER(struct__PCI_DATA_STRUCT)
+@record
+class struct__NV_PCI_DATA_EXT_STRUCT:
+  SIZE = 12
+  signature: Annotated[NvU32, 0]
+  nvPciDataExtRev: Annotated[NvU16, 4]
+  nvPciDataExtLen: Annotated[NvU16, 6]
+  subimageLen: Annotated[NvU16, 8]
+  privLastImage: Annotated[NvU8, 10]
+  flags: Annotated[NvU8, 11]
 NV_PCI_DATA_EXT_STRUCT = struct__NV_PCI_DATA_EXT_STRUCT
-PNV_PCI_DATA_EXT_STRUCT = Pointer(struct__NV_PCI_DATA_EXT_STRUCT)
+PNV_PCI_DATA_EXT_STRUCT = ctypes.POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
+init_records()
 GSP_FW_WPR_META_VERIFIED = 0xa0a0a0a0a0a0a0a0
 GSP_FW_WPR_META_REVISION = 1
 GSP_FW_WPR_META_MAGIC = 0xdc3aae21371a60b3

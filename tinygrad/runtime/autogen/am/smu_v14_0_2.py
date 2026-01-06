@@ -1,85 +1,83 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-class struct_SMU14_Firmware_Footer(Struct): pass
+from typing import Annotated
+from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+@record
+class struct_SMU14_Firmware_Footer:
+  SIZE = 4
+  Signature: Annotated[uint32_t, 0]
 uint32_t = ctypes.c_uint32
-struct_SMU14_Firmware_Footer._packed_ = True
-struct_SMU14_Firmware_Footer._fields_ = [
-  ('Signature', uint32_t),
-]
 SMU14_Firmware_Footer = struct_SMU14_Firmware_Footer
-class SMU_Firmware_Header(Struct): pass
-SMU_Firmware_Header._packed_ = True
-SMU_Firmware_Header._fields_ = [
-  ('ImageVersion', uint32_t),
-  ('ImageVersion2', uint32_t),
-  ('Padding0', (uint32_t * 3)),
-  ('SizeFWSigned', uint32_t),
-  ('Padding1', (uint32_t * 25)),
-  ('FirmwareType', uint32_t),
-  ('Filler', (uint32_t * 32)),
-]
-class FwStatus_t(Struct): pass
-FwStatus_t._packed_ = True
-FwStatus_t._fields_ = [
-  ('DpmHandlerID', uint32_t,8),
-  ('ActivityMonitorID', uint32_t,8),
-  ('DpmTimerID', uint32_t,8),
-  ('DpmHubID', uint32_t,4),
-  ('DpmHubTask', uint32_t,4),
-  ('CclkSyncStatus', uint32_t,8),
-  ('Ccx0CpuOff', uint32_t,2),
-  ('Ccx1CpuOff', uint32_t,2),
-  ('GfxOffStatus', uint32_t,2),
-  ('VddOff', uint32_t,1),
-  ('InWhisperMode', uint32_t,1),
-  ('ZstateStatus', uint32_t,4),
-  ('spare0', uint32_t,4),
-  ('DstateFun', uint32_t,4),
-  ('DstateDev', uint32_t,4),
-  ('P2JobHandler', uint32_t,24),
-  ('RsmuPmiP2PendingCnt', uint32_t,8),
-  ('PostCode', uint32_t,32),
-  ('MsgPortBusy', uint32_t,24),
-  ('RsmuPmiP1Pending', uint32_t,1),
-  ('DfCstateExitPending', uint32_t,1),
-  ('Ccx0Pc6ExitPending', uint32_t,1),
-  ('Ccx1Pc6ExitPending', uint32_t,1),
-  ('WarmResetPending', uint32_t,1),
-  ('spare1', uint32_t,3),
-  ('IdleMask', uint32_t,32),
-]
-class FwStatus_t_v14_0_1(Struct): pass
-FwStatus_t_v14_0_1._packed_ = True
-FwStatus_t_v14_0_1._fields_ = [
-  ('DpmHandlerID', uint32_t,8),
-  ('ActivityMonitorID', uint32_t,8),
-  ('DpmTimerID', uint32_t,8),
-  ('DpmHubID', uint32_t,4),
-  ('DpmHubTask', uint32_t,4),
-  ('CclkSyncStatus', uint32_t,8),
-  ('ZstateStatus', uint32_t,4),
-  ('Cpu1VddOff', uint32_t,4),
-  ('DstateFun', uint32_t,4),
-  ('DstateDev', uint32_t,4),
-  ('GfxOffStatus', uint32_t,2),
-  ('Cpu0Off', uint32_t,2),
-  ('Cpu1Off', uint32_t,2),
-  ('Cpu0VddOff', uint32_t,2),
-  ('P2JobHandler', uint32_t,32),
-  ('PostCode', uint32_t,32),
-  ('MsgPortBusy', uint32_t,15),
-  ('RsmuPmiP1Pending', uint32_t,1),
-  ('RsmuPmiP2PendingCnt', uint32_t,8),
-  ('DfCstateExitPending', uint32_t,1),
-  ('Pc6EntryPending', uint32_t,1),
-  ('Pc6ExitPending', uint32_t,1),
-  ('WarmResetPending', uint32_t,1),
-  ('Mp0ClkPending', uint32_t,1),
-  ('InWhisperMode', uint32_t,1),
-  ('spare2', uint32_t,2),
-  ('IdleMask', uint32_t,32),
-]
+@record
+class SMU_Firmware_Header:
+  SIZE = 256
+  ImageVersion: Annotated[uint32_t, 0]
+  ImageVersion2: Annotated[uint32_t, 4]
+  Padding0: Annotated[(uint32_t* 3), 8]
+  SizeFWSigned: Annotated[uint32_t, 20]
+  Padding1: Annotated[(uint32_t* 25), 24]
+  FirmwareType: Annotated[uint32_t, 124]
+  Filler: Annotated[(uint32_t* 32), 128]
+@record
+class FwStatus_t:
+  SIZE = 24
+  DpmHandlerID: Annotated[uint32_t, 0, 8, 0]
+  ActivityMonitorID: Annotated[uint32_t, 1, 8, 0]
+  DpmTimerID: Annotated[uint32_t, 2, 8, 0]
+  DpmHubID: Annotated[uint32_t, 3, 4, 0]
+  DpmHubTask: Annotated[uint32_t, 3, 4, 4]
+  CclkSyncStatus: Annotated[uint32_t, 4, 8, 0]
+  Ccx0CpuOff: Annotated[uint32_t, 5, 2, 0]
+  Ccx1CpuOff: Annotated[uint32_t, 5, 2, 2]
+  GfxOffStatus: Annotated[uint32_t, 5, 2, 4]
+  VddOff: Annotated[uint32_t, 5, 1, 6]
+  InWhisperMode: Annotated[uint32_t, 5, 1, 7]
+  ZstateStatus: Annotated[uint32_t, 6, 4, 0]
+  spare0: Annotated[uint32_t, 6, 4, 4]
+  DstateFun: Annotated[uint32_t, 7, 4, 0]
+  DstateDev: Annotated[uint32_t, 7, 4, 4]
+  P2JobHandler: Annotated[uint32_t, 8, 24, 0]
+  RsmuPmiP2PendingCnt: Annotated[uint32_t, 11, 8, 0]
+  PostCode: Annotated[uint32_t, 12, 32, 0]
+  MsgPortBusy: Annotated[uint32_t, 16, 24, 0]
+  RsmuPmiP1Pending: Annotated[uint32_t, 19, 1, 0]
+  DfCstateExitPending: Annotated[uint32_t, 19, 1, 1]
+  Ccx0Pc6ExitPending: Annotated[uint32_t, 19, 1, 2]
+  Ccx1Pc6ExitPending: Annotated[uint32_t, 19, 1, 3]
+  WarmResetPending: Annotated[uint32_t, 19, 1, 4]
+  spare1: Annotated[uint32_t, 19, 3, 5]
+  IdleMask: Annotated[uint32_t, 20, 32, 0]
+@record
+class FwStatus_t_v14_0_1:
+  SIZE = 24
+  DpmHandlerID: Annotated[uint32_t, 0, 8, 0]
+  ActivityMonitorID: Annotated[uint32_t, 1, 8, 0]
+  DpmTimerID: Annotated[uint32_t, 2, 8, 0]
+  DpmHubID: Annotated[uint32_t, 3, 4, 0]
+  DpmHubTask: Annotated[uint32_t, 3, 4, 4]
+  CclkSyncStatus: Annotated[uint32_t, 4, 8, 0]
+  ZstateStatus: Annotated[uint32_t, 5, 4, 0]
+  Cpu1VddOff: Annotated[uint32_t, 5, 4, 4]
+  DstateFun: Annotated[uint32_t, 6, 4, 0]
+  DstateDev: Annotated[uint32_t, 6, 4, 4]
+  GfxOffStatus: Annotated[uint32_t, 7, 2, 0]
+  Cpu0Off: Annotated[uint32_t, 7, 2, 2]
+  Cpu1Off: Annotated[uint32_t, 7, 2, 4]
+  Cpu0VddOff: Annotated[uint32_t, 7, 2, 6]
+  P2JobHandler: Annotated[uint32_t, 8, 32, 0]
+  PostCode: Annotated[uint32_t, 12, 32, 0]
+  MsgPortBusy: Annotated[uint32_t, 16, 15, 0]
+  RsmuPmiP1Pending: Annotated[uint32_t, 17, 1, 7]
+  RsmuPmiP2PendingCnt: Annotated[uint32_t, 18, 8, 0]
+  DfCstateExitPending: Annotated[uint32_t, 19, 1, 0]
+  Pc6EntryPending: Annotated[uint32_t, 19, 1, 1]
+  Pc6ExitPending: Annotated[uint32_t, 19, 1, 2]
+  WarmResetPending: Annotated[uint32_t, 19, 1, 3]
+  Mp0ClkPending: Annotated[uint32_t, 19, 1, 4]
+  InWhisperMode: Annotated[uint32_t, 19, 1, 5]
+  spare2: Annotated[uint32_t, 19, 2, 6]
+  IdleMask: Annotated[uint32_t, 20, 32, 0]
 FEATURE_PWR_DOMAIN_e = CEnum(ctypes.c_uint32)
 FEATURE_PWR_ALL = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_ALL', 0)
 FEATURE_PWR_S5 = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_S5', 1)
@@ -161,18 +159,18 @@ I2C_CONTROLLER_PROTOCOL_INA3221 = I2cControllerProtocol_e.define('I2C_CONTROLLER
 I2C_CONTROLLER_PROTOCOL_TMP_MAX6604 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_TMP_MAX6604', 4)
 I2C_CONTROLLER_PROTOCOL_COUNT = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_COUNT', 5)
 
-class I2cControllerConfig_t(Struct): pass
+@record
+class I2cControllerConfig_t:
+  SIZE = 8
+  Enabled: Annotated[uint8_t, 0]
+  Speed: Annotated[uint8_t, 1]
+  SlaveAddress: Annotated[uint8_t, 2]
+  ControllerPort: Annotated[uint8_t, 3]
+  ControllerName: Annotated[uint8_t, 4]
+  ThermalThrotter: Annotated[uint8_t, 5]
+  I2cProtocol: Annotated[uint8_t, 6]
+  PaddingConfig: Annotated[uint8_t, 7]
 uint8_t = ctypes.c_ubyte
-I2cControllerConfig_t._fields_ = [
-  ('Enabled', uint8_t),
-  ('Speed', uint8_t),
-  ('SlaveAddress', uint8_t),
-  ('ControllerPort', uint8_t),
-  ('ControllerName', uint8_t),
-  ('ThermalThrotter', uint8_t),
-  ('I2cProtocol', uint8_t),
-  ('PaddingConfig', uint8_t),
-]
 I2cPort_e = CEnum(ctypes.c_uint32)
 I2C_PORT_SVD_SCL = I2cPort_e.define('I2C_PORT_SVD_SCL', 0)
 I2C_PORT_GPIO = I2cPort_e.define('I2C_PORT_GPIO', 1)
@@ -191,39 +189,39 @@ I2C_CMD_READ = I2cCmdType_e.define('I2C_CMD_READ', 0)
 I2C_CMD_WRITE = I2cCmdType_e.define('I2C_CMD_WRITE', 1)
 I2C_CMD_COUNT = I2cCmdType_e.define('I2C_CMD_COUNT', 2)
 
-class SwI2cCmd_t(Struct): pass
-SwI2cCmd_t._fields_ = [
-  ('ReadWriteData', uint8_t),
-  ('CmdConfig', uint8_t),
-]
-class SwI2cRequest_t(Struct): pass
-SwI2cRequest_t._fields_ = [
-  ('I2CcontrollerPort', uint8_t),
-  ('I2CSpeed', uint8_t),
-  ('SlaveAddress', uint8_t),
-  ('NumCmds', uint8_t),
-  ('SwI2cCmds', (SwI2cCmd_t * 24)),
-]
-class SwI2cRequestExternal_t(Struct): pass
-SwI2cRequestExternal_t._fields_ = [
-  ('SwI2cRequest', SwI2cRequest_t),
-  ('Spare', (uint32_t * 8)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class EccInfo_t(Struct): pass
+@record
+class SwI2cCmd_t:
+  SIZE = 2
+  ReadWriteData: Annotated[uint8_t, 0]
+  CmdConfig: Annotated[uint8_t, 1]
+@record
+class SwI2cRequest_t:
+  SIZE = 52
+  I2CcontrollerPort: Annotated[uint8_t, 0]
+  I2CSpeed: Annotated[uint8_t, 1]
+  SlaveAddress: Annotated[uint8_t, 2]
+  NumCmds: Annotated[uint8_t, 3]
+  SwI2cCmds: Annotated[(SwI2cCmd_t* 24), 4]
+@record
+class SwI2cRequestExternal_t:
+  SIZE = 116
+  SwI2cRequest: Annotated[SwI2cRequest_t, 0]
+  Spare: Annotated[(uint32_t* 8), 52]
+  MmHubPadding: Annotated[(uint32_t* 8), 84]
+@record
+class EccInfo_t:
+  SIZE = 24
+  mca_umc_status: Annotated[uint64_t, 0]
+  mca_umc_addr: Annotated[uint64_t, 8]
+  ce_count_lo_chip: Annotated[uint16_t, 16]
+  ce_count_hi_chip: Annotated[uint16_t, 18]
+  eccPadding: Annotated[uint32_t, 20]
 uint64_t = ctypes.c_uint64
 uint16_t = ctypes.c_uint16
-EccInfo_t._fields_ = [
-  ('mca_umc_status', uint64_t),
-  ('mca_umc_addr', uint64_t),
-  ('ce_count_lo_chip', uint16_t),
-  ('ce_count_hi_chip', uint16_t),
-  ('eccPadding', uint32_t),
-]
-class EccInfoTable_t(Struct): pass
-EccInfoTable_t._fields_ = [
-  ('EccInfo', (EccInfo_t * 24)),
-]
+@record
+class EccInfoTable_t:
+  SIZE = 576
+  EccInfo: Annotated[(EccInfo_t* 24), 0]
 EPCS_STATUS_e = CEnum(ctypes.c_uint32)
 EPCS_SHORTED_LIMIT = EPCS_STATUS_e.define('EPCS_SHORTED_LIMIT', 0)
 EPCS_LOW_POWER_LIMIT = EPCS_STATUS_e.define('EPCS_LOW_POWER_LIMIT', 1)
@@ -247,23 +245,23 @@ PowerGatingSettings_e = CEnum(ctypes.c_uint32)
 PG_POWER_DOWN = PowerGatingSettings_e.define('PG_POWER_DOWN', 0)
 PG_POWER_UP = PowerGatingSettings_e.define('PG_POWER_UP', 1)
 
-class QuadraticInt_t(Struct): pass
-QuadraticInt_t._fields_ = [
-  ('a', uint32_t),
-  ('b', uint32_t),
-  ('c', uint32_t),
-]
-class LinearInt_t(Struct): pass
-LinearInt_t._fields_ = [
-  ('m', uint32_t),
-  ('b', uint32_t),
-]
-class DroopInt_t(Struct): pass
-DroopInt_t._fields_ = [
-  ('a', uint32_t),
-  ('b', uint32_t),
-  ('c', uint32_t),
-]
+@record
+class QuadraticInt_t:
+  SIZE = 12
+  a: Annotated[uint32_t, 0]
+  b: Annotated[uint32_t, 4]
+  c: Annotated[uint32_t, 8]
+@record
+class LinearInt_t:
+  SIZE = 8
+  m: Annotated[uint32_t, 0]
+  b: Annotated[uint32_t, 4]
+@record
+class DroopInt_t:
+  SIZE = 12
+  a: Annotated[uint32_t, 0]
+  b: Annotated[uint32_t, 4]
+  c: Annotated[uint32_t, 8]
 DCS_ARCH_e = CEnum(ctypes.c_uint32)
 DCS_ARCH_DISABLED = DCS_ARCH_e.define('DCS_ARCH_DISABLED', 0)
 DCS_ARCH_FADCS = DCS_ARCH_e.define('DCS_ARCH_FADCS', 1)
@@ -320,19 +318,19 @@ PWR_CONFIG_TCP_MEASURED = PwrConfig_e.define('PWR_CONFIG_TCP_MEASURED', 3)
 PWR_CONFIG_TBP_DESKTOP = PwrConfig_e.define('PWR_CONFIG_TBP_DESKTOP', 4)
 PWR_CONFIG_TBP_MOBILE = PwrConfig_e.define('PWR_CONFIG_TBP_MOBILE', 5)
 
-class DpmDescriptor_t(Struct): pass
-DpmDescriptor_t._fields_ = [
-  ('Padding', uint8_t),
-  ('SnapToDiscrete', uint8_t),
-  ('NumDiscreteLevels', uint8_t),
-  ('CalculateFopt', uint8_t),
-  ('ConversionToAvfsClk', LinearInt_t),
-  ('Padding3', (uint32_t * 3)),
-  ('Padding4', uint16_t),
-  ('FoptimalDc', uint16_t),
-  ('FoptimalAc', uint16_t),
-  ('Padding2', uint16_t),
-]
+@record
+class DpmDescriptor_t:
+  SIZE = 32
+  Padding: Annotated[uint8_t, 0]
+  SnapToDiscrete: Annotated[uint8_t, 1]
+  NumDiscreteLevels: Annotated[uint8_t, 2]
+  CalculateFopt: Annotated[uint8_t, 3]
+  ConversionToAvfsClk: Annotated[LinearInt_t, 4]
+  Padding3: Annotated[(uint32_t* 3), 12]
+  Padding4: Annotated[uint16_t, 24]
+  FoptimalDc: Annotated[uint16_t, 26]
+  FoptimalAc: Annotated[uint16_t, 28]
+  Padding2: Annotated[uint16_t, 30]
 PPT_THROTTLER_e = CEnum(ctypes.c_uint32)
 PPT_THROTTLER_PPT0 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT0', 0)
 PPT_THROTTLER_PPT1 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT1', 1)
@@ -474,13 +472,13 @@ PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_3 = PP_GRTAVFS_FW_SEP_FUSE_e.de
 PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4', 18)
 PP_GRTAVFS_FW_SEP_FUSE_COUNT = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_COUNT', 19)
 
-class SviTelemetryScale_t(Struct): pass
+@record
+class SviTelemetryScale_t:
+  SIZE = 4
+  Offset: Annotated[int8_t, 0]
+  Padding: Annotated[uint8_t, 1]
+  MaxCurrent: Annotated[uint16_t, 2]
 int8_t = ctypes.c_byte
-SviTelemetryScale_t._fields_ = [
-  ('Offset', int8_t),
-  ('Padding', uint8_t),
-  ('MaxCurrent', uint16_t),
-]
 PP_OD_POWER_FEATURE_e = CEnum(ctypes.c_uint32)
 PP_OD_POWER_FEATURE_ALWAYS_ENABLED = PP_OD_POWER_FEATURE_e.define('PP_OD_POWER_FEATURE_ALWAYS_ENABLED', 0)
 PP_OD_POWER_FEATURE_DISABLED_WHILE_GAMING = PP_OD_POWER_FEATURE_e.define('PP_OD_POWER_FEATURE_DISABLED_WHILE_GAMING', 1)
@@ -520,87 +518,87 @@ OD_OP_GFX_EDC_ERROR = OD_FAIL_e.define('OD_OP_GFX_EDC_ERROR', 25)
 OD_OP_GFX_PCC_ERROR = OD_FAIL_e.define('OD_OP_GFX_PCC_ERROR', 26)
 OD_POWER_FEATURE_CTRL_ERROR = OD_FAIL_e.define('OD_POWER_FEATURE_CTRL_ERROR', 27)
 
-class OverDriveTable_t(Struct): pass
+@record
+class OverDriveTable_t:
+  SIZE = 156
+  FeatureCtrlMask: Annotated[uint32_t, 0]
+  VoltageOffsetPerZoneBoundary: Annotated[(int16_t* 6), 4]
+  VddGfxVmax: Annotated[uint16_t, 16]
+  VddSocVmax: Annotated[uint16_t, 18]
+  IdlePwrSavingFeaturesCtrl: Annotated[uint8_t, 20]
+  RuntimePwrSavingFeaturesCtrl: Annotated[uint8_t, 21]
+  Padding: Annotated[uint16_t, 22]
+  GfxclkFoffset: Annotated[int16_t, 24]
+  Padding1: Annotated[uint16_t, 26]
+  UclkFmin: Annotated[uint16_t, 28]
+  UclkFmax: Annotated[uint16_t, 30]
+  FclkFmin: Annotated[uint16_t, 32]
+  FclkFmax: Annotated[uint16_t, 34]
+  Ppt: Annotated[int16_t, 36]
+  Tdc: Annotated[int16_t, 38]
+  FanLinearPwmPoints: Annotated[(uint8_t* 6), 40]
+  FanLinearTempPoints: Annotated[(uint8_t* 6), 46]
+  FanMinimumPwm: Annotated[uint16_t, 52]
+  AcousticTargetRpmThreshold: Annotated[uint16_t, 54]
+  AcousticLimitRpmThreshold: Annotated[uint16_t, 56]
+  FanTargetTemperature: Annotated[uint16_t, 58]
+  FanZeroRpmEnable: Annotated[uint8_t, 60]
+  FanZeroRpmStopTemp: Annotated[uint8_t, 61]
+  FanMode: Annotated[uint8_t, 62]
+  MaxOpTemp: Annotated[uint8_t, 63]
+  AdvancedOdModeEnabled: Annotated[uint8_t, 64]
+  Padding2: Annotated[(uint8_t* 3), 65]
+  GfxVoltageFullCtrlMode: Annotated[uint16_t, 68]
+  SocVoltageFullCtrlMode: Annotated[uint16_t, 70]
+  GfxclkFullCtrlMode: Annotated[uint16_t, 72]
+  UclkFullCtrlMode: Annotated[uint16_t, 74]
+  FclkFullCtrlMode: Annotated[uint16_t, 76]
+  Padding3: Annotated[uint16_t, 78]
+  GfxEdc: Annotated[int16_t, 80]
+  GfxPccLimitControl: Annotated[int16_t, 82]
+  GfxclkFmaxVmax: Annotated[uint16_t, 84]
+  GfxclkFmaxVmaxTemperature: Annotated[uint8_t, 86]
+  Padding4: Annotated[(uint8_t* 1), 87]
+  Spare: Annotated[(uint32_t* 9), 88]
+  MmHubPadding: Annotated[(uint32_t* 8), 124]
 int16_t = ctypes.c_int16
-OverDriveTable_t._fields_ = [
-  ('FeatureCtrlMask', uint32_t),
-  ('VoltageOffsetPerZoneBoundary', (int16_t * 6)),
-  ('VddGfxVmax', uint16_t),
-  ('VddSocVmax', uint16_t),
-  ('IdlePwrSavingFeaturesCtrl', uint8_t),
-  ('RuntimePwrSavingFeaturesCtrl', uint8_t),
-  ('Padding', uint16_t),
-  ('GfxclkFoffset', int16_t),
-  ('Padding1', uint16_t),
-  ('UclkFmin', uint16_t),
-  ('UclkFmax', uint16_t),
-  ('FclkFmin', uint16_t),
-  ('FclkFmax', uint16_t),
-  ('Ppt', int16_t),
-  ('Tdc', int16_t),
-  ('FanLinearPwmPoints', (uint8_t * 6)),
-  ('FanLinearTempPoints', (uint8_t * 6)),
-  ('FanMinimumPwm', uint16_t),
-  ('AcousticTargetRpmThreshold', uint16_t),
-  ('AcousticLimitRpmThreshold', uint16_t),
-  ('FanTargetTemperature', uint16_t),
-  ('FanZeroRpmEnable', uint8_t),
-  ('FanZeroRpmStopTemp', uint8_t),
-  ('FanMode', uint8_t),
-  ('MaxOpTemp', uint8_t),
-  ('AdvancedOdModeEnabled', uint8_t),
-  ('Padding2', (uint8_t * 3)),
-  ('GfxVoltageFullCtrlMode', uint16_t),
-  ('SocVoltageFullCtrlMode', uint16_t),
-  ('GfxclkFullCtrlMode', uint16_t),
-  ('UclkFullCtrlMode', uint16_t),
-  ('FclkFullCtrlMode', uint16_t),
-  ('Padding3', uint16_t),
-  ('GfxEdc', int16_t),
-  ('GfxPccLimitControl', int16_t),
-  ('GfxclkFmaxVmax', uint16_t),
-  ('GfxclkFmaxVmaxTemperature', uint8_t),
-  ('Padding4', (uint8_t * 1)),
-  ('Spare', (uint32_t * 9)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class OverDriveTableExternal_t(Struct): pass
-OverDriveTableExternal_t._fields_ = [
-  ('OverDriveTable', OverDriveTable_t),
-]
-class OverDriveLimits_t(Struct): pass
-OverDriveLimits_t._fields_ = [
-  ('FeatureCtrlMask', uint32_t),
-  ('VoltageOffsetPerZoneBoundary', (int16_t * 6)),
-  ('VddGfxVmax', uint16_t),
-  ('VddSocVmax', uint16_t),
-  ('GfxclkFoffset', int16_t),
-  ('Padding', uint16_t),
-  ('UclkFmin', uint16_t),
-  ('UclkFmax', uint16_t),
-  ('FclkFmin', uint16_t),
-  ('FclkFmax', uint16_t),
-  ('Ppt', int16_t),
-  ('Tdc', int16_t),
-  ('FanLinearPwmPoints', (uint8_t * 6)),
-  ('FanLinearTempPoints', (uint8_t * 6)),
-  ('FanMinimumPwm', uint16_t),
-  ('AcousticTargetRpmThreshold', uint16_t),
-  ('AcousticLimitRpmThreshold', uint16_t),
-  ('FanTargetTemperature', uint16_t),
-  ('FanZeroRpmEnable', uint8_t),
-  ('MaxOpTemp', uint8_t),
-  ('Padding1', (uint8_t * 2)),
-  ('GfxVoltageFullCtrlMode', uint16_t),
-  ('SocVoltageFullCtrlMode', uint16_t),
-  ('GfxclkFullCtrlMode', uint16_t),
-  ('UclkFullCtrlMode', uint16_t),
-  ('FclkFullCtrlMode', uint16_t),
-  ('GfxEdc', int16_t),
-  ('GfxPccLimitControl', int16_t),
-  ('Padding2', int16_t),
-  ('Spare', (uint32_t * 5)),
-]
+@record
+class OverDriveTableExternal_t:
+  SIZE = 156
+  OverDriveTable: Annotated[OverDriveTable_t, 0]
+@record
+class OverDriveLimits_t:
+  SIZE = 96
+  FeatureCtrlMask: Annotated[uint32_t, 0]
+  VoltageOffsetPerZoneBoundary: Annotated[(int16_t* 6), 4]
+  VddGfxVmax: Annotated[uint16_t, 16]
+  VddSocVmax: Annotated[uint16_t, 18]
+  GfxclkFoffset: Annotated[int16_t, 20]
+  Padding: Annotated[uint16_t, 22]
+  UclkFmin: Annotated[uint16_t, 24]
+  UclkFmax: Annotated[uint16_t, 26]
+  FclkFmin: Annotated[uint16_t, 28]
+  FclkFmax: Annotated[uint16_t, 30]
+  Ppt: Annotated[int16_t, 32]
+  Tdc: Annotated[int16_t, 34]
+  FanLinearPwmPoints: Annotated[(uint8_t* 6), 36]
+  FanLinearTempPoints: Annotated[(uint8_t* 6), 42]
+  FanMinimumPwm: Annotated[uint16_t, 48]
+  AcousticTargetRpmThreshold: Annotated[uint16_t, 50]
+  AcousticLimitRpmThreshold: Annotated[uint16_t, 52]
+  FanTargetTemperature: Annotated[uint16_t, 54]
+  FanZeroRpmEnable: Annotated[uint8_t, 56]
+  MaxOpTemp: Annotated[uint8_t, 57]
+  Padding1: Annotated[(uint8_t* 2), 58]
+  GfxVoltageFullCtrlMode: Annotated[uint16_t, 60]
+  SocVoltageFullCtrlMode: Annotated[uint16_t, 62]
+  GfxclkFullCtrlMode: Annotated[uint16_t, 64]
+  UclkFullCtrlMode: Annotated[uint16_t, 66]
+  FclkFullCtrlMode: Annotated[uint16_t, 68]
+  GfxEdc: Annotated[int16_t, 70]
+  GfxPccLimitControl: Annotated[int16_t, 72]
+  Padding2: Annotated[int16_t, 74]
+  Spare: Annotated[(uint32_t* 5), 76]
 BOARD_GPIO_TYPE_e = CEnum(ctypes.c_uint32)
 BOARD_GPIO_SMUIO_0 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_0', 0)
 BOARD_GPIO_SMUIO_1 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_1', 1)
@@ -649,667 +647,667 @@ BOARD_GPIO_DC_SWAPLOCK_B = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_SWAPLOCK_B', 
 MAX_BOARD_DC_GPIO_NUM = BOARD_GPIO_TYPE_e.define('MAX_BOARD_DC_GPIO_NUM', 44)
 BOARD_GPIO_LV_EN = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_LV_EN', 45)
 
-class BootValues_t(Struct): pass
-BootValues_t._fields_ = [
-  ('InitImuClk', uint16_t),
-  ('InitSocclk', uint16_t),
-  ('InitMpioclk', uint16_t),
-  ('InitSmnclk', uint16_t),
-  ('InitDispClk', uint16_t),
-  ('InitDppClk', uint16_t),
-  ('InitDprefclk', uint16_t),
-  ('InitDcfclk', uint16_t),
-  ('InitDtbclk', uint16_t),
-  ('InitDbguSocClk', uint16_t),
-  ('InitGfxclk_bypass', uint16_t),
-  ('InitMp1clk', uint16_t),
-  ('InitLclk', uint16_t),
-  ('InitDbguBacoClk', uint16_t),
-  ('InitBaco400clk', uint16_t),
-  ('InitBaco1200clk_bypass', uint16_t),
-  ('InitBaco700clk_bypass', uint16_t),
-  ('InitBaco500clk', uint16_t),
-  ('InitDclk0', uint16_t),
-  ('InitVclk0', uint16_t),
-  ('InitFclk', uint16_t),
-  ('Padding1', uint16_t),
-  ('InitUclkLevel', uint8_t),
-  ('Padding', (uint8_t * 3)),
-  ('InitVcoFreqPll0', uint32_t),
-  ('InitVcoFreqPll1', uint32_t),
-  ('InitVcoFreqPll2', uint32_t),
-  ('InitVcoFreqPll3', uint32_t),
-  ('InitVcoFreqPll4', uint32_t),
-  ('InitVcoFreqPll5', uint32_t),
-  ('InitVcoFreqPll6', uint32_t),
-  ('InitVcoFreqPll7', uint32_t),
-  ('InitVcoFreqPll8', uint32_t),
-  ('InitGfx', uint16_t),
-  ('InitSoc', uint16_t),
-  ('InitVddIoMem', uint16_t),
-  ('InitVddCiMem', uint16_t),
-  ('Spare', (uint32_t * 8)),
-]
-class MsgLimits_t(Struct): pass
-MsgLimits_t._fields_ = [
-  ('Power', ((uint16_t * 2) * 4)),
-  ('Tdc', (uint16_t * 2)),
-  ('Temperature', (uint16_t * 12)),
-  ('PwmLimitMin', uint8_t),
-  ('PwmLimitMax', uint8_t),
-  ('FanTargetTemperature', uint8_t),
-  ('Spare1', (uint8_t * 1)),
-  ('AcousticTargetRpmThresholdMin', uint16_t),
-  ('AcousticTargetRpmThresholdMax', uint16_t),
-  ('AcousticLimitRpmThresholdMin', uint16_t),
-  ('AcousticLimitRpmThresholdMax', uint16_t),
-  ('PccLimitMin', uint16_t),
-  ('PccLimitMax', uint16_t),
-  ('FanStopTempMin', uint16_t),
-  ('FanStopTempMax', uint16_t),
-  ('FanStartTempMin', uint16_t),
-  ('FanStartTempMax', uint16_t),
-  ('PowerMinPpt0', (uint16_t * 2)),
-  ('Spare', (uint32_t * 11)),
-]
-class DriverReportedClocks_t(Struct): pass
-DriverReportedClocks_t._fields_ = [
-  ('BaseClockAc', uint16_t),
-  ('GameClockAc', uint16_t),
-  ('BoostClockAc', uint16_t),
-  ('BaseClockDc', uint16_t),
-  ('GameClockDc', uint16_t),
-  ('BoostClockDc', uint16_t),
-  ('MaxReportedClock', uint16_t),
-  ('Padding', uint16_t),
-  ('Reserved', (uint32_t * 3)),
-]
-class AvfsDcBtcParams_t(Struct): pass
-AvfsDcBtcParams_t._fields_ = [
-  ('DcBtcEnabled', uint8_t),
-  ('Padding', (uint8_t * 3)),
-  ('DcTol', uint16_t),
-  ('DcBtcGb', uint16_t),
-  ('DcBtcMin', uint16_t),
-  ('DcBtcMax', uint16_t),
-  ('DcBtcGbScalar', LinearInt_t),
-]
-class AvfsFuseOverride_t(Struct): pass
-AvfsFuseOverride_t._fields_ = [
-  ('AvfsTemp', (uint16_t * 2)),
-  ('VftFMin', uint16_t),
-  ('VInversion', uint16_t),
-  ('qVft', (QuadraticInt_t * 2)),
-  ('qAvfsGb', QuadraticInt_t),
-  ('qAvfsGb2', QuadraticInt_t),
-]
-class PFE_Settings_t(Struct): pass
-PFE_Settings_t._fields_ = [
-  ('Version', uint8_t),
-  ('Spare8', (uint8_t * 3)),
-  ('FeaturesToRun', (uint32_t * 2)),
-  ('FwDStateMask', uint32_t),
-  ('DebugOverrides', uint32_t),
-  ('Spare', (uint32_t * 2)),
-]
-class SkuTable_t(Struct): pass
+@record
+class BootValues_t:
+  SIZE = 124
+  InitImuClk: Annotated[uint16_t, 0]
+  InitSocclk: Annotated[uint16_t, 2]
+  InitMpioclk: Annotated[uint16_t, 4]
+  InitSmnclk: Annotated[uint16_t, 6]
+  InitDispClk: Annotated[uint16_t, 8]
+  InitDppClk: Annotated[uint16_t, 10]
+  InitDprefclk: Annotated[uint16_t, 12]
+  InitDcfclk: Annotated[uint16_t, 14]
+  InitDtbclk: Annotated[uint16_t, 16]
+  InitDbguSocClk: Annotated[uint16_t, 18]
+  InitGfxclk_bypass: Annotated[uint16_t, 20]
+  InitMp1clk: Annotated[uint16_t, 22]
+  InitLclk: Annotated[uint16_t, 24]
+  InitDbguBacoClk: Annotated[uint16_t, 26]
+  InitBaco400clk: Annotated[uint16_t, 28]
+  InitBaco1200clk_bypass: Annotated[uint16_t, 30]
+  InitBaco700clk_bypass: Annotated[uint16_t, 32]
+  InitBaco500clk: Annotated[uint16_t, 34]
+  InitDclk0: Annotated[uint16_t, 36]
+  InitVclk0: Annotated[uint16_t, 38]
+  InitFclk: Annotated[uint16_t, 40]
+  Padding1: Annotated[uint16_t, 42]
+  InitUclkLevel: Annotated[uint8_t, 44]
+  Padding: Annotated[(uint8_t* 3), 45]
+  InitVcoFreqPll0: Annotated[uint32_t, 48]
+  InitVcoFreqPll1: Annotated[uint32_t, 52]
+  InitVcoFreqPll2: Annotated[uint32_t, 56]
+  InitVcoFreqPll3: Annotated[uint32_t, 60]
+  InitVcoFreqPll4: Annotated[uint32_t, 64]
+  InitVcoFreqPll5: Annotated[uint32_t, 68]
+  InitVcoFreqPll6: Annotated[uint32_t, 72]
+  InitVcoFreqPll7: Annotated[uint32_t, 76]
+  InitVcoFreqPll8: Annotated[uint32_t, 80]
+  InitGfx: Annotated[uint16_t, 84]
+  InitSoc: Annotated[uint16_t, 86]
+  InitVddIoMem: Annotated[uint16_t, 88]
+  InitVddCiMem: Annotated[uint16_t, 90]
+  Spare: Annotated[(uint32_t* 8), 92]
+@record
+class MsgLimits_t:
+  SIZE = 116
+  Power: Annotated[((uint16_t* 2)* 4), 0]
+  Tdc: Annotated[(uint16_t* 2), 16]
+  Temperature: Annotated[(uint16_t* 12), 20]
+  PwmLimitMin: Annotated[uint8_t, 44]
+  PwmLimitMax: Annotated[uint8_t, 45]
+  FanTargetTemperature: Annotated[uint8_t, 46]
+  Spare1: Annotated[(uint8_t* 1), 47]
+  AcousticTargetRpmThresholdMin: Annotated[uint16_t, 48]
+  AcousticTargetRpmThresholdMax: Annotated[uint16_t, 50]
+  AcousticLimitRpmThresholdMin: Annotated[uint16_t, 52]
+  AcousticLimitRpmThresholdMax: Annotated[uint16_t, 54]
+  PccLimitMin: Annotated[uint16_t, 56]
+  PccLimitMax: Annotated[uint16_t, 58]
+  FanStopTempMin: Annotated[uint16_t, 60]
+  FanStopTempMax: Annotated[uint16_t, 62]
+  FanStartTempMin: Annotated[uint16_t, 64]
+  FanStartTempMax: Annotated[uint16_t, 66]
+  PowerMinPpt0: Annotated[(uint16_t* 2), 68]
+  Spare: Annotated[(uint32_t* 11), 72]
+@record
+class DriverReportedClocks_t:
+  SIZE = 28
+  BaseClockAc: Annotated[uint16_t, 0]
+  GameClockAc: Annotated[uint16_t, 2]
+  BoostClockAc: Annotated[uint16_t, 4]
+  BaseClockDc: Annotated[uint16_t, 6]
+  GameClockDc: Annotated[uint16_t, 8]
+  BoostClockDc: Annotated[uint16_t, 10]
+  MaxReportedClock: Annotated[uint16_t, 12]
+  Padding: Annotated[uint16_t, 14]
+  Reserved: Annotated[(uint32_t* 3), 16]
+@record
+class AvfsDcBtcParams_t:
+  SIZE = 20
+  DcBtcEnabled: Annotated[uint8_t, 0]
+  Padding: Annotated[(uint8_t* 3), 1]
+  DcTol: Annotated[uint16_t, 4]
+  DcBtcGb: Annotated[uint16_t, 6]
+  DcBtcMin: Annotated[uint16_t, 8]
+  DcBtcMax: Annotated[uint16_t, 10]
+  DcBtcGbScalar: Annotated[LinearInt_t, 12]
+@record
+class AvfsFuseOverride_t:
+  SIZE = 56
+  AvfsTemp: Annotated[(uint16_t* 2), 0]
+  VftFMin: Annotated[uint16_t, 4]
+  VInversion: Annotated[uint16_t, 6]
+  qVft: Annotated[(QuadraticInt_t* 2), 8]
+  qAvfsGb: Annotated[QuadraticInt_t, 32]
+  qAvfsGb2: Annotated[QuadraticInt_t, 44]
+@record
+class PFE_Settings_t:
+  SIZE = 28
+  Version: Annotated[uint8_t, 0]
+  Spare8: Annotated[(uint8_t* 3), 1]
+  FeaturesToRun: Annotated[(uint32_t* 2), 4]
+  FwDStateMask: Annotated[uint32_t, 12]
+  DebugOverrides: Annotated[uint32_t, 16]
+  Spare: Annotated[(uint32_t* 2), 20]
+@record
+class SkuTable_t:
+  SIZE = 3552
+  Version: Annotated[uint32_t, 0]
+  TotalPowerConfig: Annotated[uint8_t, 4]
+  CustomerVariant: Annotated[uint8_t, 5]
+  MemoryTemperatureTypeMask: Annotated[uint8_t, 6]
+  SmartShiftVersion: Annotated[uint8_t, 7]
+  SocketPowerLimitSpare: Annotated[(uint8_t* 10), 8]
+  EnableLegacyPptLimit: Annotated[uint8_t, 18]
+  UseInputTelemetry: Annotated[uint8_t, 19]
+  SmartShiftMinReportedPptinDcs: Annotated[uint8_t, 20]
+  PaddingPpt: Annotated[(uint8_t* 7), 21]
+  HwCtfTempLimit: Annotated[uint16_t, 28]
+  PaddingInfra: Annotated[uint16_t, 30]
+  FitControllerFailureRateLimit: Annotated[uint32_t, 32]
+  FitControllerGfxDutyCycle: Annotated[uint32_t, 36]
+  FitControllerSocDutyCycle: Annotated[uint32_t, 40]
+  FitControllerSocOffset: Annotated[uint32_t, 44]
+  GfxApccPlusResidencyLimit: Annotated[uint32_t, 48]
+  ThrottlerControlMask: Annotated[uint32_t, 52]
+  UlvVoltageOffset: Annotated[(uint16_t* 2), 56]
+  Padding: Annotated[(uint8_t* 2), 60]
+  DeepUlvVoltageOffsetSoc: Annotated[uint16_t, 62]
+  DefaultMaxVoltage: Annotated[(uint16_t* 2), 64]
+  BoostMaxVoltage: Annotated[(uint16_t* 2), 68]
+  VminTempHystersis: Annotated[(int16_t* 2), 72]
+  VminTempThreshold: Annotated[(int16_t* 2), 76]
+  Vmin_Hot_T0: Annotated[(uint16_t* 2), 80]
+  Vmin_Cold_T0: Annotated[(uint16_t* 2), 84]
+  Vmin_Hot_Eol: Annotated[(uint16_t* 2), 88]
+  Vmin_Cold_Eol: Annotated[(uint16_t* 2), 92]
+  Vmin_Aging_Offset: Annotated[(uint16_t* 2), 96]
+  Spare_Vmin_Plat_Offset_Hot: Annotated[(uint16_t* 2), 100]
+  Spare_Vmin_Plat_Offset_Cold: Annotated[(uint16_t* 2), 104]
+  VcBtcFixedVminAgingOffset: Annotated[(uint16_t* 2), 108]
+  VcBtcVmin2PsmDegrationGb: Annotated[(uint16_t* 2), 112]
+  VcBtcPsmA: Annotated[(uint32_t* 2), 116]
+  VcBtcPsmB: Annotated[(uint32_t* 2), 124]
+  VcBtcVminA: Annotated[(uint32_t* 2), 132]
+  VcBtcVminB: Annotated[(uint32_t* 2), 140]
+  PerPartVminEnabled: Annotated[(uint8_t* 2), 148]
+  VcBtcEnabled: Annotated[(uint8_t* 2), 150]
+  SocketPowerLimitAcTau: Annotated[(uint16_t* 4), 152]
+  SocketPowerLimitDcTau: Annotated[(uint16_t* 4), 160]
+  Gfx_Vmin_droop: Annotated[QuadraticInt_t, 168]
+  Soc_Vmin_droop: Annotated[QuadraticInt_t, 180]
+  SpareVmin: Annotated[(uint32_t* 6), 192]
+  DpmDescriptor: Annotated[(DpmDescriptor_t* 11), 216]
+  FreqTableGfx: Annotated[(uint16_t* 16), 568]
+  FreqTableVclk: Annotated[(uint16_t* 8), 600]
+  FreqTableDclk: Annotated[(uint16_t* 8), 616]
+  FreqTableSocclk: Annotated[(uint16_t* 8), 632]
+  FreqTableUclk: Annotated[(uint16_t* 6), 648]
+  FreqTableShadowUclk: Annotated[(uint16_t* 6), 660]
+  FreqTableDispclk: Annotated[(uint16_t* 8), 672]
+  FreqTableDppClk: Annotated[(uint16_t* 8), 688]
+  FreqTableDprefclk: Annotated[(uint16_t* 8), 704]
+  FreqTableDcfclk: Annotated[(uint16_t* 8), 720]
+  FreqTableDtbclk: Annotated[(uint16_t* 8), 736]
+  FreqTableFclk: Annotated[(uint16_t* 8), 752]
+  DcModeMaxFreq: Annotated[(uint32_t* 11), 768]
+  GfxclkAibFmax: Annotated[uint16_t, 812]
+  GfxDpmPadding: Annotated[uint16_t, 814]
+  GfxclkFgfxoffEntry: Annotated[uint16_t, 816]
+  GfxclkFgfxoffExitImu: Annotated[uint16_t, 818]
+  GfxclkFgfxoffExitRlc: Annotated[uint16_t, 820]
+  GfxclkThrottleClock: Annotated[uint16_t, 822]
+  EnableGfxPowerStagesGpio: Annotated[uint8_t, 824]
+  GfxIdlePadding: Annotated[uint8_t, 825]
+  SmsRepairWRCKClkDivEn: Annotated[uint8_t, 826]
+  SmsRepairWRCKClkDivVal: Annotated[uint8_t, 827]
+  GfxOffEntryEarlyMGCGEn: Annotated[uint8_t, 828]
+  GfxOffEntryForceCGCGEn: Annotated[uint8_t, 829]
+  GfxOffEntryForceCGCGDelayEn: Annotated[uint8_t, 830]
+  GfxOffEntryForceCGCGDelayVal: Annotated[uint8_t, 831]
+  GfxclkFreqGfxUlv: Annotated[uint16_t, 832]
+  GfxIdlePadding2: Annotated[(uint8_t* 2), 834]
+  GfxOffEntryHysteresis: Annotated[uint32_t, 836]
+  GfxoffSpare: Annotated[(uint32_t* 15), 840]
+  DfllMstrOscConfigA: Annotated[uint16_t, 900]
+  DfllSlvOscConfigA: Annotated[uint16_t, 902]
+  DfllBtcMasterScalerM: Annotated[uint32_t, 904]
+  DfllBtcMasterScalerB: Annotated[int32_t, 908]
+  DfllBtcSlaveScalerM: Annotated[uint32_t, 912]
+  DfllBtcSlaveScalerB: Annotated[int32_t, 916]
+  DfllPccAsWaitCtrl: Annotated[uint32_t, 920]
+  DfllPccAsStepCtrl: Annotated[uint32_t, 924]
+  GfxDfllSpare: Annotated[(uint32_t* 9), 928]
+  DvoPsmDownThresholdVoltage: Annotated[uint32_t, 964]
+  DvoPsmUpThresholdVoltage: Annotated[uint32_t, 968]
+  DvoFmaxLowScaler: Annotated[uint32_t, 972]
+  PaddingDcs: Annotated[uint32_t, 976]
+  DcsMinGfxOffTime: Annotated[uint16_t, 980]
+  DcsMaxGfxOffTime: Annotated[uint16_t, 982]
+  DcsMinCreditAccum: Annotated[uint32_t, 984]
+  DcsExitHysteresis: Annotated[uint16_t, 988]
+  DcsTimeout: Annotated[uint16_t, 990]
+  DcsPfGfxFopt: Annotated[uint32_t, 992]
+  DcsPfUclkFopt: Annotated[uint32_t, 996]
+  FoptEnabled: Annotated[uint8_t, 1000]
+  DcsSpare2: Annotated[(uint8_t* 3), 1001]
+  DcsFoptM: Annotated[uint32_t, 1004]
+  DcsFoptB: Annotated[uint32_t, 1008]
+  DcsSpare: Annotated[(uint32_t* 9), 1012]
+  UseStrobeModeOptimizations: Annotated[uint8_t, 1048]
+  PaddingMem: Annotated[(uint8_t* 3), 1049]
+  UclkDpmPstates: Annotated[(uint8_t* 6), 1052]
+  UclkDpmShadowPstates: Annotated[(uint8_t* 6), 1058]
+  FreqTableUclkDiv: Annotated[(uint8_t* 6), 1064]
+  FreqTableShadowUclkDiv: Annotated[(uint8_t* 6), 1070]
+  MemVmempVoltage: Annotated[(uint16_t* 6), 1076]
+  MemVddioVoltage: Annotated[(uint16_t* 6), 1088]
+  DalDcModeMaxUclkFreq: Annotated[uint16_t, 1100]
+  PaddingsMem: Annotated[(uint8_t* 2), 1102]
+  PaddingFclk: Annotated[uint32_t, 1104]
+  PcieGenSpeed: Annotated[(uint8_t* 3), 1108]
+  PcieLaneCount: Annotated[(uint8_t* 3), 1111]
+  LclkFreq: Annotated[(uint16_t* 3), 1114]
+  OverrideGfxAvfsFuses: Annotated[uint8_t, 1120]
+  GfxAvfsPadding: Annotated[(uint8_t* 1), 1121]
+  DroopGBStDev: Annotated[uint16_t, 1122]
+  SocHwRtAvfsFuses: Annotated[(uint32_t* 32), 1124]
+  GfxL2HwRtAvfsFuses: Annotated[(uint32_t* 32), 1252]
+  PsmDidt_Vcross: Annotated[(uint16_t* 2), 1380]
+  PsmDidt_StaticDroop_A: Annotated[(uint32_t* 3), 1384]
+  PsmDidt_StaticDroop_B: Annotated[(uint32_t* 3), 1396]
+  PsmDidt_DynDroop_A: Annotated[(uint32_t* 3), 1408]
+  PsmDidt_DynDroop_B: Annotated[(uint32_t* 3), 1420]
+  spare_HwRtAvfsFuses: Annotated[(uint32_t* 19), 1432]
+  SocCommonRtAvfs: Annotated[(uint32_t* 13), 1508]
+  GfxCommonRtAvfs: Annotated[(uint32_t* 13), 1560]
+  SocFwRtAvfsFuses: Annotated[(uint32_t* 19), 1612]
+  GfxL2FwRtAvfsFuses: Annotated[(uint32_t* 19), 1688]
+  spare_FwRtAvfsFuses: Annotated[(uint32_t* 19), 1764]
+  Soc_Droop_PWL_F: Annotated[(uint32_t* 5), 1840]
+  Soc_Droop_PWL_a: Annotated[(uint32_t* 5), 1860]
+  Soc_Droop_PWL_b: Annotated[(uint32_t* 5), 1880]
+  Soc_Droop_PWL_c: Annotated[(uint32_t* 5), 1900]
+  Gfx_Droop_PWL_F: Annotated[(uint32_t* 5), 1920]
+  Gfx_Droop_PWL_a: Annotated[(uint32_t* 5), 1940]
+  Gfx_Droop_PWL_b: Annotated[(uint32_t* 5), 1960]
+  Gfx_Droop_PWL_c: Annotated[(uint32_t* 5), 1980]
+  Gfx_Static_PWL_Offset: Annotated[(uint32_t* 5), 2000]
+  Soc_Static_PWL_Offset: Annotated[(uint32_t* 5), 2020]
+  dGbV_dT_vmin: Annotated[uint32_t, 2040]
+  dGbV_dT_vmax: Annotated[uint32_t, 2044]
+  PaddingV2F: Annotated[(uint32_t* 4), 2048]
+  DcBtcGfxParams: Annotated[AvfsDcBtcParams_t, 2064]
+  SSCurve_GFX: Annotated[QuadraticInt_t, 2084]
+  GfxAvfsSpare: Annotated[(uint32_t* 29), 2096]
+  OverrideSocAvfsFuses: Annotated[uint8_t, 2212]
+  MinSocAvfsRevision: Annotated[uint8_t, 2213]
+  SocAvfsPadding: Annotated[(uint8_t* 2), 2214]
+  SocAvfsFuseOverride: Annotated[(AvfsFuseOverride_t* 1), 2216]
+  dBtcGbSoc: Annotated[(DroopInt_t* 1), 2272]
+  qAgingGb: Annotated[(LinearInt_t* 1), 2284]
+  qStaticVoltageOffset: Annotated[(QuadraticInt_t* 1), 2292]
+  DcBtcSocParams: Annotated[(AvfsDcBtcParams_t* 1), 2304]
+  SSCurve_SOC: Annotated[QuadraticInt_t, 2324]
+  SocAvfsSpare: Annotated[(uint32_t* 29), 2336]
+  BootValues: Annotated[BootValues_t, 2452]
+  DriverReportedClocks: Annotated[DriverReportedClocks_t, 2576]
+  MsgLimits: Annotated[MsgLimits_t, 2604]
+  OverDriveLimitsBasicMin: Annotated[OverDriveLimits_t, 2720]
+  OverDriveLimitsBasicMax: Annotated[OverDriveLimits_t, 2816]
+  OverDriveLimitsAdvancedMin: Annotated[OverDriveLimits_t, 2912]
+  OverDriveLimitsAdvancedMax: Annotated[OverDriveLimits_t, 3008]
+  TotalBoardPowerSupport: Annotated[uint8_t, 3104]
+  TotalBoardPowerPadding: Annotated[(uint8_t* 1), 3105]
+  TotalBoardPowerRoc: Annotated[uint16_t, 3106]
+  qFeffCoeffGameClock: Annotated[(QuadraticInt_t* 2), 3108]
+  qFeffCoeffBaseClock: Annotated[(QuadraticInt_t* 2), 3132]
+  qFeffCoeffBoostClock: Annotated[(QuadraticInt_t* 2), 3156]
+  AptUclkGfxclkLookup: Annotated[((int32_t* 6)* 2), 3180]
+  AptUclkGfxclkLookupHyst: Annotated[((uint32_t* 6)* 2), 3228]
+  AptPadding: Annotated[uint32_t, 3276]
+  GfxXvminDidtDroopThresh: Annotated[QuadraticInt_t, 3280]
+  GfxXvminDidtResetDDWait: Annotated[uint32_t, 3292]
+  GfxXvminDidtClkStopWait: Annotated[uint32_t, 3296]
+  GfxXvminDidtFcsStepCtrl: Annotated[uint32_t, 3300]
+  GfxXvminDidtFcsWaitCtrl: Annotated[uint32_t, 3304]
+  PsmModeEnabled: Annotated[uint32_t, 3308]
+  P2v_a: Annotated[uint32_t, 3312]
+  P2v_b: Annotated[uint32_t, 3316]
+  P2v_c: Annotated[uint32_t, 3320]
+  T2p_a: Annotated[uint32_t, 3324]
+  T2p_b: Annotated[uint32_t, 3328]
+  T2p_c: Annotated[uint32_t, 3332]
+  P2vTemp: Annotated[uint32_t, 3336]
+  PsmDidtStaticSettings: Annotated[QuadraticInt_t, 3340]
+  PsmDidtDynamicSettings: Annotated[QuadraticInt_t, 3352]
+  PsmDidtAvgDiv: Annotated[uint8_t, 3364]
+  PsmDidtForceStall: Annotated[uint8_t, 3365]
+  PsmDidtReleaseTimer: Annotated[uint16_t, 3366]
+  PsmDidtStallPattern: Annotated[uint32_t, 3368]
+  CacEdcCacLeakageC0: Annotated[uint32_t, 3372]
+  CacEdcCacLeakageC1: Annotated[uint32_t, 3376]
+  CacEdcCacLeakageC2: Annotated[uint32_t, 3380]
+  CacEdcCacLeakageC3: Annotated[uint32_t, 3384]
+  CacEdcCacLeakageC4: Annotated[uint32_t, 3388]
+  CacEdcCacLeakageC5: Annotated[uint32_t, 3392]
+  CacEdcGfxClkScalar: Annotated[uint32_t, 3396]
+  CacEdcGfxClkIntercept: Annotated[uint32_t, 3400]
+  CacEdcCac_m: Annotated[uint32_t, 3404]
+  CacEdcCac_b: Annotated[uint32_t, 3408]
+  CacEdcCurrLimitGuardband: Annotated[uint32_t, 3412]
+  CacEdcDynToTotalCacRatio: Annotated[uint32_t, 3416]
+  XVmin_Gfx_EdcThreshScalar: Annotated[uint32_t, 3420]
+  XVmin_Gfx_EdcEnableFreq: Annotated[uint32_t, 3424]
+  XVmin_Gfx_EdcPccAsStepCtrl: Annotated[uint32_t, 3428]
+  XVmin_Gfx_EdcPccAsWaitCtrl: Annotated[uint32_t, 3432]
+  XVmin_Gfx_EdcThreshold: Annotated[uint16_t, 3436]
+  XVmin_Gfx_EdcFiltHysWaitCtrl: Annotated[uint16_t, 3438]
+  XVmin_Soc_EdcThreshScalar: Annotated[uint32_t, 3440]
+  XVmin_Soc_EdcEnableFreq: Annotated[uint32_t, 3444]
+  XVmin_Soc_EdcThreshold: Annotated[uint32_t, 3448]
+  XVmin_Soc_EdcStepUpTime: Annotated[uint16_t, 3452]
+  XVmin_Soc_EdcStepDownTime: Annotated[uint16_t, 3454]
+  XVmin_Soc_EdcInitPccStep: Annotated[uint8_t, 3456]
+  PaddingSocEdc: Annotated[(uint8_t* 3), 3457]
+  GfxXvminFuseOverride: Annotated[uint8_t, 3460]
+  SocXvminFuseOverride: Annotated[uint8_t, 3461]
+  PaddingXvminFuseOverride: Annotated[(uint8_t* 2), 3462]
+  GfxXvminFddTempLow: Annotated[uint8_t, 3464]
+  GfxXvminFddTempHigh: Annotated[uint8_t, 3465]
+  SocXvminFddTempLow: Annotated[uint8_t, 3466]
+  SocXvminFddTempHigh: Annotated[uint8_t, 3467]
+  GfxXvminFddVolt0: Annotated[uint16_t, 3468]
+  GfxXvminFddVolt1: Annotated[uint16_t, 3470]
+  GfxXvminFddVolt2: Annotated[uint16_t, 3472]
+  SocXvminFddVolt0: Annotated[uint16_t, 3474]
+  SocXvminFddVolt1: Annotated[uint16_t, 3476]
+  SocXvminFddVolt2: Annotated[uint16_t, 3478]
+  GfxXvminDsFddDsm: Annotated[(uint16_t* 6), 3480]
+  GfxXvminEdcFddDsm: Annotated[(uint16_t* 6), 3492]
+  SocXvminEdcFddDsm: Annotated[(uint16_t* 6), 3504]
+  Spare: Annotated[uint32_t, 3516]
+  MmHubPadding: Annotated[(uint32_t* 8), 3520]
 int32_t = ctypes.c_int32
-SkuTable_t._fields_ = [
-  ('Version', uint32_t),
-  ('TotalPowerConfig', uint8_t),
-  ('CustomerVariant', uint8_t),
-  ('MemoryTemperatureTypeMask', uint8_t),
-  ('SmartShiftVersion', uint8_t),
-  ('SocketPowerLimitSpare', (uint8_t * 10)),
-  ('EnableLegacyPptLimit', uint8_t),
-  ('UseInputTelemetry', uint8_t),
-  ('SmartShiftMinReportedPptinDcs', uint8_t),
-  ('PaddingPpt', (uint8_t * 7)),
-  ('HwCtfTempLimit', uint16_t),
-  ('PaddingInfra', uint16_t),
-  ('FitControllerFailureRateLimit', uint32_t),
-  ('FitControllerGfxDutyCycle', uint32_t),
-  ('FitControllerSocDutyCycle', uint32_t),
-  ('FitControllerSocOffset', uint32_t),
-  ('GfxApccPlusResidencyLimit', uint32_t),
-  ('ThrottlerControlMask', uint32_t),
-  ('UlvVoltageOffset', (uint16_t * 2)),
-  ('Padding', (uint8_t * 2)),
-  ('DeepUlvVoltageOffsetSoc', uint16_t),
-  ('DefaultMaxVoltage', (uint16_t * 2)),
-  ('BoostMaxVoltage', (uint16_t * 2)),
-  ('VminTempHystersis', (int16_t * 2)),
-  ('VminTempThreshold', (int16_t * 2)),
-  ('Vmin_Hot_T0', (uint16_t * 2)),
-  ('Vmin_Cold_T0', (uint16_t * 2)),
-  ('Vmin_Hot_Eol', (uint16_t * 2)),
-  ('Vmin_Cold_Eol', (uint16_t * 2)),
-  ('Vmin_Aging_Offset', (uint16_t * 2)),
-  ('Spare_Vmin_Plat_Offset_Hot', (uint16_t * 2)),
-  ('Spare_Vmin_Plat_Offset_Cold', (uint16_t * 2)),
-  ('VcBtcFixedVminAgingOffset', (uint16_t * 2)),
-  ('VcBtcVmin2PsmDegrationGb', (uint16_t * 2)),
-  ('VcBtcPsmA', (uint32_t * 2)),
-  ('VcBtcPsmB', (uint32_t * 2)),
-  ('VcBtcVminA', (uint32_t * 2)),
-  ('VcBtcVminB', (uint32_t * 2)),
-  ('PerPartVminEnabled', (uint8_t * 2)),
-  ('VcBtcEnabled', (uint8_t * 2)),
-  ('SocketPowerLimitAcTau', (uint16_t * 4)),
-  ('SocketPowerLimitDcTau', (uint16_t * 4)),
-  ('Gfx_Vmin_droop', QuadraticInt_t),
-  ('Soc_Vmin_droop', QuadraticInt_t),
-  ('SpareVmin', (uint32_t * 6)),
-  ('DpmDescriptor', (DpmDescriptor_t * 11)),
-  ('FreqTableGfx', (uint16_t * 16)),
-  ('FreqTableVclk', (uint16_t * 8)),
-  ('FreqTableDclk', (uint16_t * 8)),
-  ('FreqTableSocclk', (uint16_t * 8)),
-  ('FreqTableUclk', (uint16_t * 6)),
-  ('FreqTableShadowUclk', (uint16_t * 6)),
-  ('FreqTableDispclk', (uint16_t * 8)),
-  ('FreqTableDppClk', (uint16_t * 8)),
-  ('FreqTableDprefclk', (uint16_t * 8)),
-  ('FreqTableDcfclk', (uint16_t * 8)),
-  ('FreqTableDtbclk', (uint16_t * 8)),
-  ('FreqTableFclk', (uint16_t * 8)),
-  ('DcModeMaxFreq', (uint32_t * 11)),
-  ('GfxclkAibFmax', uint16_t),
-  ('GfxDpmPadding', uint16_t),
-  ('GfxclkFgfxoffEntry', uint16_t),
-  ('GfxclkFgfxoffExitImu', uint16_t),
-  ('GfxclkFgfxoffExitRlc', uint16_t),
-  ('GfxclkThrottleClock', uint16_t),
-  ('EnableGfxPowerStagesGpio', uint8_t),
-  ('GfxIdlePadding', uint8_t),
-  ('SmsRepairWRCKClkDivEn', uint8_t),
-  ('SmsRepairWRCKClkDivVal', uint8_t),
-  ('GfxOffEntryEarlyMGCGEn', uint8_t),
-  ('GfxOffEntryForceCGCGEn', uint8_t),
-  ('GfxOffEntryForceCGCGDelayEn', uint8_t),
-  ('GfxOffEntryForceCGCGDelayVal', uint8_t),
-  ('GfxclkFreqGfxUlv', uint16_t),
-  ('GfxIdlePadding2', (uint8_t * 2)),
-  ('GfxOffEntryHysteresis', uint32_t),
-  ('GfxoffSpare', (uint32_t * 15)),
-  ('DfllMstrOscConfigA', uint16_t),
-  ('DfllSlvOscConfigA', uint16_t),
-  ('DfllBtcMasterScalerM', uint32_t),
-  ('DfllBtcMasterScalerB', int32_t),
-  ('DfllBtcSlaveScalerM', uint32_t),
-  ('DfllBtcSlaveScalerB', int32_t),
-  ('DfllPccAsWaitCtrl', uint32_t),
-  ('DfllPccAsStepCtrl', uint32_t),
-  ('GfxDfllSpare', (uint32_t * 9)),
-  ('DvoPsmDownThresholdVoltage', uint32_t),
-  ('DvoPsmUpThresholdVoltage', uint32_t),
-  ('DvoFmaxLowScaler', uint32_t),
-  ('PaddingDcs', uint32_t),
-  ('DcsMinGfxOffTime', uint16_t),
-  ('DcsMaxGfxOffTime', uint16_t),
-  ('DcsMinCreditAccum', uint32_t),
-  ('DcsExitHysteresis', uint16_t),
-  ('DcsTimeout', uint16_t),
-  ('DcsPfGfxFopt', uint32_t),
-  ('DcsPfUclkFopt', uint32_t),
-  ('FoptEnabled', uint8_t),
-  ('DcsSpare2', (uint8_t * 3)),
-  ('DcsFoptM', uint32_t),
-  ('DcsFoptB', uint32_t),
-  ('DcsSpare', (uint32_t * 9)),
-  ('UseStrobeModeOptimizations', uint8_t),
-  ('PaddingMem', (uint8_t * 3)),
-  ('UclkDpmPstates', (uint8_t * 6)),
-  ('UclkDpmShadowPstates', (uint8_t * 6)),
-  ('FreqTableUclkDiv', (uint8_t * 6)),
-  ('FreqTableShadowUclkDiv', (uint8_t * 6)),
-  ('MemVmempVoltage', (uint16_t * 6)),
-  ('MemVddioVoltage', (uint16_t * 6)),
-  ('DalDcModeMaxUclkFreq', uint16_t),
-  ('PaddingsMem', (uint8_t * 2)),
-  ('PaddingFclk', uint32_t),
-  ('PcieGenSpeed', (uint8_t * 3)),
-  ('PcieLaneCount', (uint8_t * 3)),
-  ('LclkFreq', (uint16_t * 3)),
-  ('OverrideGfxAvfsFuses', uint8_t),
-  ('GfxAvfsPadding', (uint8_t * 1)),
-  ('DroopGBStDev', uint16_t),
-  ('SocHwRtAvfsFuses', (uint32_t * 32)),
-  ('GfxL2HwRtAvfsFuses', (uint32_t * 32)),
-  ('PsmDidt_Vcross', (uint16_t * 2)),
-  ('PsmDidt_StaticDroop_A', (uint32_t * 3)),
-  ('PsmDidt_StaticDroop_B', (uint32_t * 3)),
-  ('PsmDidt_DynDroop_A', (uint32_t * 3)),
-  ('PsmDidt_DynDroop_B', (uint32_t * 3)),
-  ('spare_HwRtAvfsFuses', (uint32_t * 19)),
-  ('SocCommonRtAvfs', (uint32_t * 13)),
-  ('GfxCommonRtAvfs', (uint32_t * 13)),
-  ('SocFwRtAvfsFuses', (uint32_t * 19)),
-  ('GfxL2FwRtAvfsFuses', (uint32_t * 19)),
-  ('spare_FwRtAvfsFuses', (uint32_t * 19)),
-  ('Soc_Droop_PWL_F', (uint32_t * 5)),
-  ('Soc_Droop_PWL_a', (uint32_t * 5)),
-  ('Soc_Droop_PWL_b', (uint32_t * 5)),
-  ('Soc_Droop_PWL_c', (uint32_t * 5)),
-  ('Gfx_Droop_PWL_F', (uint32_t * 5)),
-  ('Gfx_Droop_PWL_a', (uint32_t * 5)),
-  ('Gfx_Droop_PWL_b', (uint32_t * 5)),
-  ('Gfx_Droop_PWL_c', (uint32_t * 5)),
-  ('Gfx_Static_PWL_Offset', (uint32_t * 5)),
-  ('Soc_Static_PWL_Offset', (uint32_t * 5)),
-  ('dGbV_dT_vmin', uint32_t),
-  ('dGbV_dT_vmax', uint32_t),
-  ('PaddingV2F', (uint32_t * 4)),
-  ('DcBtcGfxParams', AvfsDcBtcParams_t),
-  ('SSCurve_GFX', QuadraticInt_t),
-  ('GfxAvfsSpare', (uint32_t * 29)),
-  ('OverrideSocAvfsFuses', uint8_t),
-  ('MinSocAvfsRevision', uint8_t),
-  ('SocAvfsPadding', (uint8_t * 2)),
-  ('SocAvfsFuseOverride', (AvfsFuseOverride_t * 1)),
-  ('dBtcGbSoc', (DroopInt_t * 1)),
-  ('qAgingGb', (LinearInt_t * 1)),
-  ('qStaticVoltageOffset', (QuadraticInt_t * 1)),
-  ('DcBtcSocParams', (AvfsDcBtcParams_t * 1)),
-  ('SSCurve_SOC', QuadraticInt_t),
-  ('SocAvfsSpare', (uint32_t * 29)),
-  ('BootValues', BootValues_t),
-  ('DriverReportedClocks', DriverReportedClocks_t),
-  ('MsgLimits', MsgLimits_t),
-  ('OverDriveLimitsBasicMin', OverDriveLimits_t),
-  ('OverDriveLimitsBasicMax', OverDriveLimits_t),
-  ('OverDriveLimitsAdvancedMin', OverDriveLimits_t),
-  ('OverDriveLimitsAdvancedMax', OverDriveLimits_t),
-  ('TotalBoardPowerSupport', uint8_t),
-  ('TotalBoardPowerPadding', (uint8_t * 1)),
-  ('TotalBoardPowerRoc', uint16_t),
-  ('qFeffCoeffGameClock', (QuadraticInt_t * 2)),
-  ('qFeffCoeffBaseClock', (QuadraticInt_t * 2)),
-  ('qFeffCoeffBoostClock', (QuadraticInt_t * 2)),
-  ('AptUclkGfxclkLookup', ((int32_t * 6) * 2)),
-  ('AptUclkGfxclkLookupHyst', ((uint32_t * 6) * 2)),
-  ('AptPadding', uint32_t),
-  ('GfxXvminDidtDroopThresh', QuadraticInt_t),
-  ('GfxXvminDidtResetDDWait', uint32_t),
-  ('GfxXvminDidtClkStopWait', uint32_t),
-  ('GfxXvminDidtFcsStepCtrl', uint32_t),
-  ('GfxXvminDidtFcsWaitCtrl', uint32_t),
-  ('PsmModeEnabled', uint32_t),
-  ('P2v_a', uint32_t),
-  ('P2v_b', uint32_t),
-  ('P2v_c', uint32_t),
-  ('T2p_a', uint32_t),
-  ('T2p_b', uint32_t),
-  ('T2p_c', uint32_t),
-  ('P2vTemp', uint32_t),
-  ('PsmDidtStaticSettings', QuadraticInt_t),
-  ('PsmDidtDynamicSettings', QuadraticInt_t),
-  ('PsmDidtAvgDiv', uint8_t),
-  ('PsmDidtForceStall', uint8_t),
-  ('PsmDidtReleaseTimer', uint16_t),
-  ('PsmDidtStallPattern', uint32_t),
-  ('CacEdcCacLeakageC0', uint32_t),
-  ('CacEdcCacLeakageC1', uint32_t),
-  ('CacEdcCacLeakageC2', uint32_t),
-  ('CacEdcCacLeakageC3', uint32_t),
-  ('CacEdcCacLeakageC4', uint32_t),
-  ('CacEdcCacLeakageC5', uint32_t),
-  ('CacEdcGfxClkScalar', uint32_t),
-  ('CacEdcGfxClkIntercept', uint32_t),
-  ('CacEdcCac_m', uint32_t),
-  ('CacEdcCac_b', uint32_t),
-  ('CacEdcCurrLimitGuardband', uint32_t),
-  ('CacEdcDynToTotalCacRatio', uint32_t),
-  ('XVmin_Gfx_EdcThreshScalar', uint32_t),
-  ('XVmin_Gfx_EdcEnableFreq', uint32_t),
-  ('XVmin_Gfx_EdcPccAsStepCtrl', uint32_t),
-  ('XVmin_Gfx_EdcPccAsWaitCtrl', uint32_t),
-  ('XVmin_Gfx_EdcThreshold', uint16_t),
-  ('XVmin_Gfx_EdcFiltHysWaitCtrl', uint16_t),
-  ('XVmin_Soc_EdcThreshScalar', uint32_t),
-  ('XVmin_Soc_EdcEnableFreq', uint32_t),
-  ('XVmin_Soc_EdcThreshold', uint32_t),
-  ('XVmin_Soc_EdcStepUpTime', uint16_t),
-  ('XVmin_Soc_EdcStepDownTime', uint16_t),
-  ('XVmin_Soc_EdcInitPccStep', uint8_t),
-  ('PaddingSocEdc', (uint8_t * 3)),
-  ('GfxXvminFuseOverride', uint8_t),
-  ('SocXvminFuseOverride', uint8_t),
-  ('PaddingXvminFuseOverride', (uint8_t * 2)),
-  ('GfxXvminFddTempLow', uint8_t),
-  ('GfxXvminFddTempHigh', uint8_t),
-  ('SocXvminFddTempLow', uint8_t),
-  ('SocXvminFddTempHigh', uint8_t),
-  ('GfxXvminFddVolt0', uint16_t),
-  ('GfxXvminFddVolt1', uint16_t),
-  ('GfxXvminFddVolt2', uint16_t),
-  ('SocXvminFddVolt0', uint16_t),
-  ('SocXvminFddVolt1', uint16_t),
-  ('SocXvminFddVolt2', uint16_t),
-  ('GfxXvminDsFddDsm', (uint16_t * 6)),
-  ('GfxXvminEdcFddDsm', (uint16_t * 6)),
-  ('SocXvminEdcFddDsm', (uint16_t * 6)),
-  ('Spare', uint32_t),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class Svi3RegulatorSettings_t(Struct): pass
-Svi3RegulatorSettings_t._fields_ = [
-  ('SlewRateConditions', uint8_t),
-  ('LoadLineAdjust', uint8_t),
-  ('VoutOffset', uint8_t),
-  ('VidMax', uint8_t),
-  ('VidMin', uint8_t),
-  ('TenBitTelEn', uint8_t),
-  ('SixteenBitTelEn', uint8_t),
-  ('OcpThresh', uint8_t),
-  ('OcpWarnThresh', uint8_t),
-  ('OcpSettings', uint8_t),
-  ('VrhotThresh', uint8_t),
-  ('OtpThresh', uint8_t),
-  ('UvpOvpDeltaRef', uint8_t),
-  ('PhaseShed', uint8_t),
-  ('Padding', (uint8_t * 10)),
-  ('SettingOverrideMask', uint32_t),
-]
-class BoardTable_t(Struct): pass
-BoardTable_t._fields_ = [
-  ('Version', uint32_t),
-  ('I2cControllers', (I2cControllerConfig_t * 8)),
-  ('SlaveAddrMapping', (uint8_t * 4)),
-  ('VrPsiSupport', (uint8_t * 4)),
-  ('Svi3SvcSpeed', uint32_t),
-  ('EnablePsi6', (uint8_t * 4)),
-  ('Svi3RegSettings', (Svi3RegulatorSettings_t * 4)),
-  ('LedOffGpio', uint8_t),
-  ('FanOffGpio', uint8_t),
-  ('GfxVrPowerStageOffGpio', uint8_t),
-  ('AcDcGpio', uint8_t),
-  ('AcDcPolarity', uint8_t),
-  ('VR0HotGpio', uint8_t),
-  ('VR0HotPolarity', uint8_t),
-  ('GthrGpio', uint8_t),
-  ('GthrPolarity', uint8_t),
-  ('LedPin0', uint8_t),
-  ('LedPin1', uint8_t),
-  ('LedPin2', uint8_t),
-  ('LedEnableMask', uint8_t),
-  ('LedPcie', uint8_t),
-  ('LedError', uint8_t),
-  ('PaddingLed', uint8_t),
-  ('UclkTrainingModeSpreadPercent', uint8_t),
-  ('UclkSpreadPadding', uint8_t),
-  ('UclkSpreadFreq', uint16_t),
-  ('UclkSpreadPercent', (uint8_t * 16)),
-  ('GfxclkSpreadEnable', uint8_t),
-  ('FclkSpreadPercent', uint8_t),
-  ('FclkSpreadFreq', uint16_t),
-  ('DramWidth', uint8_t),
-  ('PaddingMem1', (uint8_t * 7)),
-  ('HsrEnabled', uint8_t),
-  ('VddqOffEnabled', uint8_t),
-  ('PaddingUmcFlags', (uint8_t * 2)),
-  ('Paddign1', uint32_t),
-  ('BacoEntryDelay', uint32_t),
-  ('FuseWritePowerMuxPresent', uint8_t),
-  ('FuseWritePadding', (uint8_t * 3)),
-  ('LoadlineGfx', uint32_t),
-  ('LoadlineSoc', uint32_t),
-  ('GfxEdcLimit', uint32_t),
-  ('SocEdcLimit', uint32_t),
-  ('RestBoardPower', uint32_t),
-  ('ConnectorsImpedance', uint32_t),
-  ('EpcsSens0', uint8_t),
-  ('EpcsSens1', uint8_t),
-  ('PaddingEpcs', (uint8_t * 2)),
-  ('BoardSpare', (uint32_t * 52)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class CustomSkuTable_t(Struct): pass
-CustomSkuTable_t._fields_ = [
-  ('SocketPowerLimitAc', (uint16_t * 4)),
-  ('VrTdcLimit', (uint16_t * 2)),
-  ('TotalIdleBoardPowerM', int16_t),
-  ('TotalIdleBoardPowerB', int16_t),
-  ('TotalBoardPowerM', int16_t),
-  ('TotalBoardPowerB', int16_t),
-  ('TemperatureLimit', (uint16_t * 12)),
-  ('FanStopTemp', (uint16_t * 12)),
-  ('FanStartTemp', (uint16_t * 12)),
-  ('FanGain', (uint16_t * 12)),
-  ('FanPwmMin', uint16_t),
-  ('AcousticTargetRpmThreshold', uint16_t),
-  ('AcousticLimitRpmThreshold', uint16_t),
-  ('FanMaximumRpm', uint16_t),
-  ('MGpuAcousticLimitRpmThreshold', uint16_t),
-  ('FanTargetGfxclk', uint16_t),
-  ('TempInputSelectMask', uint32_t),
-  ('FanZeroRpmEnable', uint8_t),
-  ('FanTachEdgePerRev', uint8_t),
-  ('FanPadding', uint16_t),
-  ('FanTargetTemperature', (uint16_t * 12)),
-  ('FuzzyFan_ErrorSetDelta', int16_t),
-  ('FuzzyFan_ErrorRateSetDelta', int16_t),
-  ('FuzzyFan_PwmSetDelta', int16_t),
-  ('FanPadding2', uint16_t),
-  ('FwCtfLimit', (uint16_t * 12)),
-  ('IntakeTempEnableRPM', uint16_t),
-  ('IntakeTempOffsetTemp', int16_t),
-  ('IntakeTempReleaseTemp', uint16_t),
-  ('IntakeTempHighIntakeAcousticLimit', uint16_t),
-  ('IntakeTempAcouticLimitReleaseRate', uint16_t),
-  ('FanAbnormalTempLimitOffset', int16_t),
-  ('FanStalledTriggerRpm', uint16_t),
-  ('FanAbnormalTriggerRpmCoeff', uint16_t),
-  ('FanSpare', (uint16_t * 1)),
-  ('FanIntakeSensorSupport', uint8_t),
-  ('FanIntakePadding', uint8_t),
-  ('FanSpare2', (uint32_t * 12)),
-  ('ODFeatureCtrlMask', uint32_t),
-  ('TemperatureLimit_Hynix', uint16_t),
-  ('TemperatureLimit_Micron', uint16_t),
-  ('TemperatureFwCtfLimit_Hynix', uint16_t),
-  ('TemperatureFwCtfLimit_Micron', uint16_t),
-  ('PlatformTdcLimit', (uint16_t * 2)),
-  ('SocketPowerLimitDc', (uint16_t * 4)),
-  ('SocketPowerLimitSmartShift2', uint16_t),
-  ('CustomSkuSpare16b', uint16_t),
-  ('CustomSkuSpare32b', (uint32_t * 10)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class PPTable_t(Struct): pass
-PPTable_t._fields_ = [
-  ('PFE_Settings', PFE_Settings_t),
-  ('SkuTable', SkuTable_t),
-  ('CustomSkuTable', CustomSkuTable_t),
-  ('BoardTable', BoardTable_t),
-]
-class DriverSmuConfig_t(Struct): pass
-DriverSmuConfig_t._fields_ = [
-  ('GfxclkAverageLpfTau', uint16_t),
-  ('FclkAverageLpfTau', uint16_t),
-  ('UclkAverageLpfTau', uint16_t),
-  ('GfxActivityLpfTau', uint16_t),
-  ('UclkActivityLpfTau', uint16_t),
-  ('UclkMaxActivityLpfTau', uint16_t),
-  ('SocketPowerLpfTau', uint16_t),
-  ('VcnClkAverageLpfTau', uint16_t),
-  ('VcnUsageAverageLpfTau', uint16_t),
-  ('PcieActivityLpTau', uint16_t),
-]
-class DriverSmuConfigExternal_t(Struct): pass
-DriverSmuConfigExternal_t._fields_ = [
-  ('DriverSmuConfig', DriverSmuConfig_t),
-  ('Spare', (uint32_t * 8)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class DriverInfoTable_t(Struct): pass
-DriverInfoTable_t._fields_ = [
-  ('FreqTableGfx', (uint16_t * 16)),
-  ('FreqTableVclk', (uint16_t * 8)),
-  ('FreqTableDclk', (uint16_t * 8)),
-  ('FreqTableSocclk', (uint16_t * 8)),
-  ('FreqTableUclk', (uint16_t * 6)),
-  ('FreqTableDispclk', (uint16_t * 8)),
-  ('FreqTableDppClk', (uint16_t * 8)),
-  ('FreqTableDprefclk', (uint16_t * 8)),
-  ('FreqTableDcfclk', (uint16_t * 8)),
-  ('FreqTableDtbclk', (uint16_t * 8)),
-  ('FreqTableFclk', (uint16_t * 8)),
-  ('DcModeMaxFreq', (uint16_t * 11)),
-  ('Padding', uint16_t),
-  ('Spare', (uint32_t * 32)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class SmuMetrics_t(Struct): pass
-SmuMetrics_t._fields_ = [
-  ('CurrClock', (uint32_t * 11)),
-  ('AverageGfxclkFrequencyTarget', uint16_t),
-  ('AverageGfxclkFrequencyPreDs', uint16_t),
-  ('AverageGfxclkFrequencyPostDs', uint16_t),
-  ('AverageFclkFrequencyPreDs', uint16_t),
-  ('AverageFclkFrequencyPostDs', uint16_t),
-  ('AverageMemclkFrequencyPreDs', uint16_t),
-  ('AverageMemclkFrequencyPostDs', uint16_t),
-  ('AverageVclk0Frequency', uint16_t),
-  ('AverageDclk0Frequency', uint16_t),
-  ('AverageVclk1Frequency', uint16_t),
-  ('AverageDclk1Frequency', uint16_t),
-  ('AveragePCIeBusy', uint16_t),
-  ('dGPU_W_MAX', uint16_t),
-  ('padding', uint16_t),
-  ('MovingAverageGfxclkFrequencyTarget', uint16_t),
-  ('MovingAverageGfxclkFrequencyPreDs', uint16_t),
-  ('MovingAverageGfxclkFrequencyPostDs', uint16_t),
-  ('MovingAverageFclkFrequencyPreDs', uint16_t),
-  ('MovingAverageFclkFrequencyPostDs', uint16_t),
-  ('MovingAverageMemclkFrequencyPreDs', uint16_t),
-  ('MovingAverageMemclkFrequencyPostDs', uint16_t),
-  ('MovingAverageVclk0Frequency', uint16_t),
-  ('MovingAverageDclk0Frequency', uint16_t),
-  ('MovingAverageGfxActivity', uint16_t),
-  ('MovingAverageUclkActivity', uint16_t),
-  ('MovingAverageVcn0ActivityPercentage', uint16_t),
-  ('MovingAveragePCIeBusy', uint16_t),
-  ('MovingAverageUclkActivity_MAX', uint16_t),
-  ('MovingAverageSocketPower', uint16_t),
-  ('MovingAveragePadding', uint16_t),
-  ('MetricsCounter', uint32_t),
-  ('AvgVoltage', (uint16_t * 4)),
-  ('AvgCurrent', (uint16_t * 4)),
-  ('AverageGfxActivity', uint16_t),
-  ('AverageUclkActivity', uint16_t),
-  ('AverageVcn0ActivityPercentage', uint16_t),
-  ('Vcn1ActivityPercentage', uint16_t),
-  ('EnergyAccumulator', uint32_t),
-  ('AverageSocketPower', uint16_t),
-  ('AverageTotalBoardPower', uint16_t),
-  ('AvgTemperature', (uint16_t * 12)),
-  ('AvgTemperatureFanIntake', uint16_t),
-  ('PcieRate', uint8_t),
-  ('PcieWidth', uint8_t),
-  ('AvgFanPwm', uint8_t),
-  ('Padding', (uint8_t * 1)),
-  ('AvgFanRpm', uint16_t),
-  ('ThrottlingPercentage', (uint8_t * 21)),
-  ('VmaxThrottlingPercentage', uint8_t),
-  ('padding1', (uint8_t * 2)),
-  ('D3HotEntryCountPerMode', (uint32_t * 4)),
-  ('D3HotExitCountPerMode', (uint32_t * 4)),
-  ('ArmMsgReceivedCountPerMode', (uint32_t * 4)),
-  ('ApuSTAPMSmartShiftLimit', uint16_t),
-  ('ApuSTAPMLimit', uint16_t),
-  ('AvgApuSocketPower', uint16_t),
-  ('AverageUclkActivity_MAX', uint16_t),
-  ('PublicSerialNumberLower', uint32_t),
-  ('PublicSerialNumberUpper', uint32_t),
-]
-class SmuMetricsExternal_t(Struct): pass
-SmuMetricsExternal_t._fields_ = [
-  ('SmuMetrics', SmuMetrics_t),
-  ('Spare', (uint32_t * 30)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class WatermarkRowGeneric_t(Struct): pass
-WatermarkRowGeneric_t._fields_ = [
-  ('WmSetting', uint8_t),
-  ('Flags', uint8_t),
-  ('Padding', (uint8_t * 2)),
-]
+@record
+class Svi3RegulatorSettings_t:
+  SIZE = 28
+  SlewRateConditions: Annotated[uint8_t, 0]
+  LoadLineAdjust: Annotated[uint8_t, 1]
+  VoutOffset: Annotated[uint8_t, 2]
+  VidMax: Annotated[uint8_t, 3]
+  VidMin: Annotated[uint8_t, 4]
+  TenBitTelEn: Annotated[uint8_t, 5]
+  SixteenBitTelEn: Annotated[uint8_t, 6]
+  OcpThresh: Annotated[uint8_t, 7]
+  OcpWarnThresh: Annotated[uint8_t, 8]
+  OcpSettings: Annotated[uint8_t, 9]
+  VrhotThresh: Annotated[uint8_t, 10]
+  OtpThresh: Annotated[uint8_t, 11]
+  UvpOvpDeltaRef: Annotated[uint8_t, 12]
+  PhaseShed: Annotated[uint8_t, 13]
+  Padding: Annotated[(uint8_t* 10), 14]
+  SettingOverrideMask: Annotated[uint32_t, 24]
+@record
+class BoardTable_t:
+  SIZE = 528
+  Version: Annotated[uint32_t, 0]
+  I2cControllers: Annotated[(I2cControllerConfig_t* 8), 4]
+  SlaveAddrMapping: Annotated[(uint8_t* 4), 68]
+  VrPsiSupport: Annotated[(uint8_t* 4), 72]
+  Svi3SvcSpeed: Annotated[uint32_t, 76]
+  EnablePsi6: Annotated[(uint8_t* 4), 80]
+  Svi3RegSettings: Annotated[(Svi3RegulatorSettings_t* 4), 84]
+  LedOffGpio: Annotated[uint8_t, 196]
+  FanOffGpio: Annotated[uint8_t, 197]
+  GfxVrPowerStageOffGpio: Annotated[uint8_t, 198]
+  AcDcGpio: Annotated[uint8_t, 199]
+  AcDcPolarity: Annotated[uint8_t, 200]
+  VR0HotGpio: Annotated[uint8_t, 201]
+  VR0HotPolarity: Annotated[uint8_t, 202]
+  GthrGpio: Annotated[uint8_t, 203]
+  GthrPolarity: Annotated[uint8_t, 204]
+  LedPin0: Annotated[uint8_t, 205]
+  LedPin1: Annotated[uint8_t, 206]
+  LedPin2: Annotated[uint8_t, 207]
+  LedEnableMask: Annotated[uint8_t, 208]
+  LedPcie: Annotated[uint8_t, 209]
+  LedError: Annotated[uint8_t, 210]
+  PaddingLed: Annotated[uint8_t, 211]
+  UclkTrainingModeSpreadPercent: Annotated[uint8_t, 212]
+  UclkSpreadPadding: Annotated[uint8_t, 213]
+  UclkSpreadFreq: Annotated[uint16_t, 214]
+  UclkSpreadPercent: Annotated[(uint8_t* 16), 216]
+  GfxclkSpreadEnable: Annotated[uint8_t, 232]
+  FclkSpreadPercent: Annotated[uint8_t, 233]
+  FclkSpreadFreq: Annotated[uint16_t, 234]
+  DramWidth: Annotated[uint8_t, 236]
+  PaddingMem1: Annotated[(uint8_t* 7), 237]
+  HsrEnabled: Annotated[uint8_t, 244]
+  VddqOffEnabled: Annotated[uint8_t, 245]
+  PaddingUmcFlags: Annotated[(uint8_t* 2), 246]
+  Paddign1: Annotated[uint32_t, 248]
+  BacoEntryDelay: Annotated[uint32_t, 252]
+  FuseWritePowerMuxPresent: Annotated[uint8_t, 256]
+  FuseWritePadding: Annotated[(uint8_t* 3), 257]
+  LoadlineGfx: Annotated[uint32_t, 260]
+  LoadlineSoc: Annotated[uint32_t, 264]
+  GfxEdcLimit: Annotated[uint32_t, 268]
+  SocEdcLimit: Annotated[uint32_t, 272]
+  RestBoardPower: Annotated[uint32_t, 276]
+  ConnectorsImpedance: Annotated[uint32_t, 280]
+  EpcsSens0: Annotated[uint8_t, 284]
+  EpcsSens1: Annotated[uint8_t, 285]
+  PaddingEpcs: Annotated[(uint8_t* 2), 286]
+  BoardSpare: Annotated[(uint32_t* 52), 288]
+  MmHubPadding: Annotated[(uint32_t* 8), 496]
+@record
+class CustomSkuTable_t:
+  SIZE = 360
+  SocketPowerLimitAc: Annotated[(uint16_t* 4), 0]
+  VrTdcLimit: Annotated[(uint16_t* 2), 8]
+  TotalIdleBoardPowerM: Annotated[int16_t, 12]
+  TotalIdleBoardPowerB: Annotated[int16_t, 14]
+  TotalBoardPowerM: Annotated[int16_t, 16]
+  TotalBoardPowerB: Annotated[int16_t, 18]
+  TemperatureLimit: Annotated[(uint16_t* 12), 20]
+  FanStopTemp: Annotated[(uint16_t* 12), 44]
+  FanStartTemp: Annotated[(uint16_t* 12), 68]
+  FanGain: Annotated[(uint16_t* 12), 92]
+  FanPwmMin: Annotated[uint16_t, 116]
+  AcousticTargetRpmThreshold: Annotated[uint16_t, 118]
+  AcousticLimitRpmThreshold: Annotated[uint16_t, 120]
+  FanMaximumRpm: Annotated[uint16_t, 122]
+  MGpuAcousticLimitRpmThreshold: Annotated[uint16_t, 124]
+  FanTargetGfxclk: Annotated[uint16_t, 126]
+  TempInputSelectMask: Annotated[uint32_t, 128]
+  FanZeroRpmEnable: Annotated[uint8_t, 132]
+  FanTachEdgePerRev: Annotated[uint8_t, 133]
+  FanPadding: Annotated[uint16_t, 134]
+  FanTargetTemperature: Annotated[(uint16_t* 12), 136]
+  FuzzyFan_ErrorSetDelta: Annotated[int16_t, 160]
+  FuzzyFan_ErrorRateSetDelta: Annotated[int16_t, 162]
+  FuzzyFan_PwmSetDelta: Annotated[int16_t, 164]
+  FanPadding2: Annotated[uint16_t, 166]
+  FwCtfLimit: Annotated[(uint16_t* 12), 168]
+  IntakeTempEnableRPM: Annotated[uint16_t, 192]
+  IntakeTempOffsetTemp: Annotated[int16_t, 194]
+  IntakeTempReleaseTemp: Annotated[uint16_t, 196]
+  IntakeTempHighIntakeAcousticLimit: Annotated[uint16_t, 198]
+  IntakeTempAcouticLimitReleaseRate: Annotated[uint16_t, 200]
+  FanAbnormalTempLimitOffset: Annotated[int16_t, 202]
+  FanStalledTriggerRpm: Annotated[uint16_t, 204]
+  FanAbnormalTriggerRpmCoeff: Annotated[uint16_t, 206]
+  FanSpare: Annotated[(uint16_t* 1), 208]
+  FanIntakeSensorSupport: Annotated[uint8_t, 210]
+  FanIntakePadding: Annotated[uint8_t, 211]
+  FanSpare2: Annotated[(uint32_t* 12), 212]
+  ODFeatureCtrlMask: Annotated[uint32_t, 260]
+  TemperatureLimit_Hynix: Annotated[uint16_t, 264]
+  TemperatureLimit_Micron: Annotated[uint16_t, 266]
+  TemperatureFwCtfLimit_Hynix: Annotated[uint16_t, 268]
+  TemperatureFwCtfLimit_Micron: Annotated[uint16_t, 270]
+  PlatformTdcLimit: Annotated[(uint16_t* 2), 272]
+  SocketPowerLimitDc: Annotated[(uint16_t* 4), 276]
+  SocketPowerLimitSmartShift2: Annotated[uint16_t, 284]
+  CustomSkuSpare16b: Annotated[uint16_t, 286]
+  CustomSkuSpare32b: Annotated[(uint32_t* 10), 288]
+  MmHubPadding: Annotated[(uint32_t* 8), 328]
+@record
+class PPTable_t:
+  SIZE = 4468
+  PFE_Settings: Annotated[PFE_Settings_t, 0]
+  SkuTable: Annotated[SkuTable_t, 28]
+  CustomSkuTable: Annotated[CustomSkuTable_t, 3580]
+  BoardTable: Annotated[BoardTable_t, 3940]
+@record
+class DriverSmuConfig_t:
+  SIZE = 20
+  GfxclkAverageLpfTau: Annotated[uint16_t, 0]
+  FclkAverageLpfTau: Annotated[uint16_t, 2]
+  UclkAverageLpfTau: Annotated[uint16_t, 4]
+  GfxActivityLpfTau: Annotated[uint16_t, 6]
+  UclkActivityLpfTau: Annotated[uint16_t, 8]
+  UclkMaxActivityLpfTau: Annotated[uint16_t, 10]
+  SocketPowerLpfTau: Annotated[uint16_t, 12]
+  VcnClkAverageLpfTau: Annotated[uint16_t, 14]
+  VcnUsageAverageLpfTau: Annotated[uint16_t, 16]
+  PcieActivityLpTau: Annotated[uint16_t, 18]
+@record
+class DriverSmuConfigExternal_t:
+  SIZE = 84
+  DriverSmuConfig: Annotated[DriverSmuConfig_t, 0]
+  Spare: Annotated[(uint32_t* 8), 20]
+  MmHubPadding: Annotated[(uint32_t* 8), 52]
+@record
+class DriverInfoTable_t:
+  SIZE = 372
+  FreqTableGfx: Annotated[(uint16_t* 16), 0]
+  FreqTableVclk: Annotated[(uint16_t* 8), 32]
+  FreqTableDclk: Annotated[(uint16_t* 8), 48]
+  FreqTableSocclk: Annotated[(uint16_t* 8), 64]
+  FreqTableUclk: Annotated[(uint16_t* 6), 80]
+  FreqTableDispclk: Annotated[(uint16_t* 8), 92]
+  FreqTableDppClk: Annotated[(uint16_t* 8), 108]
+  FreqTableDprefclk: Annotated[(uint16_t* 8), 124]
+  FreqTableDcfclk: Annotated[(uint16_t* 8), 140]
+  FreqTableDtbclk: Annotated[(uint16_t* 8), 156]
+  FreqTableFclk: Annotated[(uint16_t* 8), 172]
+  DcModeMaxFreq: Annotated[(uint16_t* 11), 188]
+  Padding: Annotated[uint16_t, 210]
+  Spare: Annotated[(uint32_t* 32), 212]
+  MmHubPadding: Annotated[(uint32_t* 8), 340]
+@record
+class SmuMetrics_t:
+  SIZE = 260
+  CurrClock: Annotated[(uint32_t* 11), 0]
+  AverageGfxclkFrequencyTarget: Annotated[uint16_t, 44]
+  AverageGfxclkFrequencyPreDs: Annotated[uint16_t, 46]
+  AverageGfxclkFrequencyPostDs: Annotated[uint16_t, 48]
+  AverageFclkFrequencyPreDs: Annotated[uint16_t, 50]
+  AverageFclkFrequencyPostDs: Annotated[uint16_t, 52]
+  AverageMemclkFrequencyPreDs: Annotated[uint16_t, 54]
+  AverageMemclkFrequencyPostDs: Annotated[uint16_t, 56]
+  AverageVclk0Frequency: Annotated[uint16_t, 58]
+  AverageDclk0Frequency: Annotated[uint16_t, 60]
+  AverageVclk1Frequency: Annotated[uint16_t, 62]
+  AverageDclk1Frequency: Annotated[uint16_t, 64]
+  AveragePCIeBusy: Annotated[uint16_t, 66]
+  dGPU_W_MAX: Annotated[uint16_t, 68]
+  padding: Annotated[uint16_t, 70]
+  MovingAverageGfxclkFrequencyTarget: Annotated[uint16_t, 72]
+  MovingAverageGfxclkFrequencyPreDs: Annotated[uint16_t, 74]
+  MovingAverageGfxclkFrequencyPostDs: Annotated[uint16_t, 76]
+  MovingAverageFclkFrequencyPreDs: Annotated[uint16_t, 78]
+  MovingAverageFclkFrequencyPostDs: Annotated[uint16_t, 80]
+  MovingAverageMemclkFrequencyPreDs: Annotated[uint16_t, 82]
+  MovingAverageMemclkFrequencyPostDs: Annotated[uint16_t, 84]
+  MovingAverageVclk0Frequency: Annotated[uint16_t, 86]
+  MovingAverageDclk0Frequency: Annotated[uint16_t, 88]
+  MovingAverageGfxActivity: Annotated[uint16_t, 90]
+  MovingAverageUclkActivity: Annotated[uint16_t, 92]
+  MovingAverageVcn0ActivityPercentage: Annotated[uint16_t, 94]
+  MovingAveragePCIeBusy: Annotated[uint16_t, 96]
+  MovingAverageUclkActivity_MAX: Annotated[uint16_t, 98]
+  MovingAverageSocketPower: Annotated[uint16_t, 100]
+  MovingAveragePadding: Annotated[uint16_t, 102]
+  MetricsCounter: Annotated[uint32_t, 104]
+  AvgVoltage: Annotated[(uint16_t* 4), 108]
+  AvgCurrent: Annotated[(uint16_t* 4), 116]
+  AverageGfxActivity: Annotated[uint16_t, 124]
+  AverageUclkActivity: Annotated[uint16_t, 126]
+  AverageVcn0ActivityPercentage: Annotated[uint16_t, 128]
+  Vcn1ActivityPercentage: Annotated[uint16_t, 130]
+  EnergyAccumulator: Annotated[uint32_t, 132]
+  AverageSocketPower: Annotated[uint16_t, 136]
+  AverageTotalBoardPower: Annotated[uint16_t, 138]
+  AvgTemperature: Annotated[(uint16_t* 12), 140]
+  AvgTemperatureFanIntake: Annotated[uint16_t, 164]
+  PcieRate: Annotated[uint8_t, 166]
+  PcieWidth: Annotated[uint8_t, 167]
+  AvgFanPwm: Annotated[uint8_t, 168]
+  Padding: Annotated[(uint8_t* 1), 169]
+  AvgFanRpm: Annotated[uint16_t, 170]
+  ThrottlingPercentage: Annotated[(uint8_t* 21), 172]
+  VmaxThrottlingPercentage: Annotated[uint8_t, 193]
+  padding1: Annotated[(uint8_t* 2), 194]
+  D3HotEntryCountPerMode: Annotated[(uint32_t* 4), 196]
+  D3HotExitCountPerMode: Annotated[(uint32_t* 4), 212]
+  ArmMsgReceivedCountPerMode: Annotated[(uint32_t* 4), 228]
+  ApuSTAPMSmartShiftLimit: Annotated[uint16_t, 244]
+  ApuSTAPMLimit: Annotated[uint16_t, 246]
+  AvgApuSocketPower: Annotated[uint16_t, 248]
+  AverageUclkActivity_MAX: Annotated[uint16_t, 250]
+  PublicSerialNumberLower: Annotated[uint32_t, 252]
+  PublicSerialNumberUpper: Annotated[uint32_t, 256]
+@record
+class SmuMetricsExternal_t:
+  SIZE = 412
+  SmuMetrics: Annotated[SmuMetrics_t, 0]
+  Spare: Annotated[(uint32_t* 30), 260]
+  MmHubPadding: Annotated[(uint32_t* 8), 380]
+@record
+class WatermarkRowGeneric_t:
+  SIZE = 4
+  WmSetting: Annotated[uint8_t, 0]
+  Flags: Annotated[uint8_t, 1]
+  Padding: Annotated[(uint8_t* 2), 2]
 WATERMARKS_FLAGS_e = CEnum(ctypes.c_uint32)
 WATERMARKS_CLOCK_RANGE = WATERMARKS_FLAGS_e.define('WATERMARKS_CLOCK_RANGE', 0)
 WATERMARKS_DUMMY_PSTATE = WATERMARKS_FLAGS_e.define('WATERMARKS_DUMMY_PSTATE', 1)
 WATERMARKS_MALL = WATERMARKS_FLAGS_e.define('WATERMARKS_MALL', 2)
 WATERMARKS_COUNT = WATERMARKS_FLAGS_e.define('WATERMARKS_COUNT', 3)
 
-class Watermarks_t(Struct): pass
-Watermarks_t._fields_ = [
-  ('WatermarkRow', (WatermarkRowGeneric_t * 4)),
-]
-class WatermarksExternal_t(Struct): pass
-WatermarksExternal_t._fields_ = [
-  ('Watermarks', Watermarks_t),
-  ('Spare', (uint32_t * 16)),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class AvfsDebugTable_t(Struct): pass
-AvfsDebugTable_t._fields_ = [
-  ('avgPsmCount', (uint16_t * 76)),
-  ('minPsmCount', (uint16_t * 76)),
-  ('maxPsmCount', (uint16_t * 76)),
-  ('avgPsmVoltage', (ctypes.c_float * 76)),
-  ('minPsmVoltage', (ctypes.c_float * 76)),
-  ('maxPsmVoltage', (ctypes.c_float * 76)),
-]
-class AvfsDebugTableExternal_t(Struct): pass
-AvfsDebugTableExternal_t._fields_ = [
-  ('AvfsDebugTable', AvfsDebugTable_t),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class DpmActivityMonitorCoeffInt_t(Struct): pass
-DpmActivityMonitorCoeffInt_t._fields_ = [
-  ('Gfx_ActiveHystLimit', uint8_t),
-  ('Gfx_IdleHystLimit', uint8_t),
-  ('Gfx_FPS', uint8_t),
-  ('Gfx_MinActiveFreqType', uint8_t),
-  ('Gfx_BoosterFreqType', uint8_t),
-  ('PaddingGfx', uint8_t),
-  ('Gfx_MinActiveFreq', uint16_t),
-  ('Gfx_BoosterFreq', uint16_t),
-  ('Gfx_PD_Data_time_constant', uint16_t),
-  ('Gfx_PD_Data_limit_a', uint32_t),
-  ('Gfx_PD_Data_limit_b', uint32_t),
-  ('Gfx_PD_Data_limit_c', uint32_t),
-  ('Gfx_PD_Data_error_coeff', uint32_t),
-  ('Gfx_PD_Data_error_rate_coeff', uint32_t),
-  ('Fclk_ActiveHystLimit', uint8_t),
-  ('Fclk_IdleHystLimit', uint8_t),
-  ('Fclk_FPS', uint8_t),
-  ('Fclk_MinActiveFreqType', uint8_t),
-  ('Fclk_BoosterFreqType', uint8_t),
-  ('PaddingFclk', uint8_t),
-  ('Fclk_MinActiveFreq', uint16_t),
-  ('Fclk_BoosterFreq', uint16_t),
-  ('Fclk_PD_Data_time_constant', uint16_t),
-  ('Fclk_PD_Data_limit_a', uint32_t),
-  ('Fclk_PD_Data_limit_b', uint32_t),
-  ('Fclk_PD_Data_limit_c', uint32_t),
-  ('Fclk_PD_Data_error_coeff', uint32_t),
-  ('Fclk_PD_Data_error_rate_coeff', uint32_t),
-  ('Mem_UpThreshold_Limit', (uint32_t * 6)),
-  ('Mem_UpHystLimit', (uint8_t * 6)),
-  ('Mem_DownHystLimit', (uint16_t * 6)),
-  ('Mem_Fps', uint16_t),
-]
-class DpmActivityMonitorCoeffIntExternal_t(Struct): pass
-DpmActivityMonitorCoeffIntExternal_t._fields_ = [
-  ('DpmActivityMonitorCoeffInt', DpmActivityMonitorCoeffInt_t),
-  ('MmHubPadding', (uint32_t * 8)),
-]
-class struct_smu_hw_power_state(Struct): pass
-struct_smu_hw_power_state._fields_ = [
-  ('magic', ctypes.c_uint32),
-]
-class struct_smu_power_state(Struct): pass
+@record
+class Watermarks_t:
+  SIZE = 16
+  WatermarkRow: Annotated[(WatermarkRowGeneric_t* 4), 0]
+@record
+class WatermarksExternal_t:
+  SIZE = 112
+  Watermarks: Annotated[Watermarks_t, 0]
+  Spare: Annotated[(uint32_t* 16), 16]
+  MmHubPadding: Annotated[(uint32_t* 8), 80]
+@record
+class AvfsDebugTable_t:
+  SIZE = 1368
+  avgPsmCount: Annotated[(uint16_t* 76), 0]
+  minPsmCount: Annotated[(uint16_t* 76), 152]
+  maxPsmCount: Annotated[(uint16_t* 76), 304]
+  avgPsmVoltage: Annotated[(ctypes.c_float* 76), 456]
+  minPsmVoltage: Annotated[(ctypes.c_float* 76), 760]
+  maxPsmVoltage: Annotated[(ctypes.c_float* 76), 1064]
+@record
+class AvfsDebugTableExternal_t:
+  SIZE = 1400
+  AvfsDebugTable: Annotated[AvfsDebugTable_t, 0]
+  MmHubPadding: Annotated[(uint32_t* 8), 1368]
+@record
+class DpmActivityMonitorCoeffInt_t:
+  SIZE = 108
+  Gfx_ActiveHystLimit: Annotated[uint8_t, 0]
+  Gfx_IdleHystLimit: Annotated[uint8_t, 1]
+  Gfx_FPS: Annotated[uint8_t, 2]
+  Gfx_MinActiveFreqType: Annotated[uint8_t, 3]
+  Gfx_BoosterFreqType: Annotated[uint8_t, 4]
+  PaddingGfx: Annotated[uint8_t, 5]
+  Gfx_MinActiveFreq: Annotated[uint16_t, 6]
+  Gfx_BoosterFreq: Annotated[uint16_t, 8]
+  Gfx_PD_Data_time_constant: Annotated[uint16_t, 10]
+  Gfx_PD_Data_limit_a: Annotated[uint32_t, 12]
+  Gfx_PD_Data_limit_b: Annotated[uint32_t, 16]
+  Gfx_PD_Data_limit_c: Annotated[uint32_t, 20]
+  Gfx_PD_Data_error_coeff: Annotated[uint32_t, 24]
+  Gfx_PD_Data_error_rate_coeff: Annotated[uint32_t, 28]
+  Fclk_ActiveHystLimit: Annotated[uint8_t, 32]
+  Fclk_IdleHystLimit: Annotated[uint8_t, 33]
+  Fclk_FPS: Annotated[uint8_t, 34]
+  Fclk_MinActiveFreqType: Annotated[uint8_t, 35]
+  Fclk_BoosterFreqType: Annotated[uint8_t, 36]
+  PaddingFclk: Annotated[uint8_t, 37]
+  Fclk_MinActiveFreq: Annotated[uint16_t, 38]
+  Fclk_BoosterFreq: Annotated[uint16_t, 40]
+  Fclk_PD_Data_time_constant: Annotated[uint16_t, 42]
+  Fclk_PD_Data_limit_a: Annotated[uint32_t, 44]
+  Fclk_PD_Data_limit_b: Annotated[uint32_t, 48]
+  Fclk_PD_Data_limit_c: Annotated[uint32_t, 52]
+  Fclk_PD_Data_error_coeff: Annotated[uint32_t, 56]
+  Fclk_PD_Data_error_rate_coeff: Annotated[uint32_t, 60]
+  Mem_UpThreshold_Limit: Annotated[(uint32_t* 6), 64]
+  Mem_UpHystLimit: Annotated[(uint8_t* 6), 88]
+  Mem_DownHystLimit: Annotated[(uint16_t* 6), 94]
+  Mem_Fps: Annotated[uint16_t, 106]
+@record
+class DpmActivityMonitorCoeffIntExternal_t:
+  SIZE = 140
+  DpmActivityMonitorCoeffInt: Annotated[DpmActivityMonitorCoeffInt_t, 0]
+  MmHubPadding: Annotated[(uint32_t* 8), 108]
+@record
+class struct_smu_hw_power_state:
+  SIZE = 4
+  magic: Annotated[ctypes.c_uint32, 0]
+class struct_smu_power_state(ctypes.Structure): pass
 enum_smu_state_ui_label = CEnum(ctypes.c_uint32)
 SMU_STATE_UI_LABEL_NONE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_NONE', 0)
 SMU_STATE_UI_LABEL_BATTERY = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BATTERY', 1)
@@ -1342,67 +1340,67 @@ SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE2 = enum_smu_state_classificati
 SMU_STATE_CLASSIFICATION_FLAG_ULV = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_ULV', 524288)
 SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC', 1048576)
 
-class struct_smu_state_classification_block(Struct): pass
-struct_smu_state_classification_block._fields_ = [
-  ('ui_label', enum_smu_state_ui_label),
-  ('flags', enum_smu_state_classification_flag),
-  ('bios_index', ctypes.c_int32),
-  ('temporary_state', ctypes.c_bool),
-  ('to_be_deleted', ctypes.c_bool),
-]
-class struct_smu_state_pcie_block(Struct): pass
-struct_smu_state_pcie_block._fields_ = [
-  ('lanes', ctypes.c_uint32),
-]
+@record
+class struct_smu_state_classification_block:
+  SIZE = 16
+  ui_label: Annotated[enum_smu_state_ui_label, 0]
+  flags: Annotated[enum_smu_state_classification_flag, 4]
+  bios_index: Annotated[ctypes.c_int32, 8]
+  temporary_state: Annotated[ctypes.c_bool, 12]
+  to_be_deleted: Annotated[ctypes.c_bool, 13]
+@record
+class struct_smu_state_pcie_block:
+  SIZE = 4
+  lanes: Annotated[ctypes.c_uint32, 0]
 enum_smu_refreshrate_source = CEnum(ctypes.c_uint32)
 SMU_REFRESHRATE_SOURCE_EDID = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EDID', 0)
 SMU_REFRESHRATE_SOURCE_EXPLICIT = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EXPLICIT', 1)
 
-class struct_smu_state_display_block(Struct): pass
-struct_smu_state_display_block._fields_ = [
-  ('disable_frame_modulation', ctypes.c_bool),
-  ('limit_refreshrate', ctypes.c_bool),
-  ('refreshrate_source', enum_smu_refreshrate_source),
-  ('explicit_refreshrate', ctypes.c_int32),
-  ('edid_refreshrate_index', ctypes.c_int32),
-  ('enable_vari_bright', ctypes.c_bool),
-]
-class struct_smu_state_memory_block(Struct): pass
-struct_smu_state_memory_block._fields_ = [
-  ('dll_off', ctypes.c_bool),
-  ('m3arb', ctypes.c_ubyte),
-  ('unused', (ctypes.c_ubyte * 3)),
-]
-class struct_smu_state_software_algorithm_block(Struct): pass
-struct_smu_state_software_algorithm_block._fields_ = [
-  ('disable_load_balancing', ctypes.c_bool),
-  ('enable_sleep_for_timestamps', ctypes.c_bool),
-]
-class struct_smu_temperature_range(Struct): pass
-struct_smu_temperature_range._fields_ = [
-  ('min', ctypes.c_int32),
-  ('max', ctypes.c_int32),
-  ('edge_emergency_max', ctypes.c_int32),
-  ('hotspot_min', ctypes.c_int32),
-  ('hotspot_crit_max', ctypes.c_int32),
-  ('hotspot_emergency_max', ctypes.c_int32),
-  ('mem_min', ctypes.c_int32),
-  ('mem_crit_max', ctypes.c_int32),
-  ('mem_emergency_max', ctypes.c_int32),
-  ('software_shutdown_temp', ctypes.c_int32),
-  ('software_shutdown_temp_offset', ctypes.c_int32),
-]
-class struct_smu_state_validation_block(Struct): pass
-struct_smu_state_validation_block._fields_ = [
-  ('single_display_only', ctypes.c_bool),
-  ('disallow_on_dc', ctypes.c_bool),
-  ('supported_power_levels', ctypes.c_ubyte),
-]
-class struct_smu_uvd_clocks(Struct): pass
-struct_smu_uvd_clocks._fields_ = [
-  ('vclk', ctypes.c_uint32),
-  ('dclk', ctypes.c_uint32),
-]
+@record
+class struct_smu_state_display_block:
+  SIZE = 20
+  disable_frame_modulation: Annotated[ctypes.c_bool, 0]
+  limit_refreshrate: Annotated[ctypes.c_bool, 1]
+  refreshrate_source: Annotated[enum_smu_refreshrate_source, 4]
+  explicit_refreshrate: Annotated[ctypes.c_int32, 8]
+  edid_refreshrate_index: Annotated[ctypes.c_int32, 12]
+  enable_vari_bright: Annotated[ctypes.c_bool, 16]
+@record
+class struct_smu_state_memory_block:
+  SIZE = 5
+  dll_off: Annotated[ctypes.c_bool, 0]
+  m3arb: Annotated[ctypes.c_ubyte, 1]
+  unused: Annotated[(ctypes.c_ubyte* 3), 2]
+@record
+class struct_smu_state_software_algorithm_block:
+  SIZE = 2
+  disable_load_balancing: Annotated[ctypes.c_bool, 0]
+  enable_sleep_for_timestamps: Annotated[ctypes.c_bool, 1]
+@record
+class struct_smu_temperature_range:
+  SIZE = 44
+  min: Annotated[ctypes.c_int32, 0]
+  max: Annotated[ctypes.c_int32, 4]
+  edge_emergency_max: Annotated[ctypes.c_int32, 8]
+  hotspot_min: Annotated[ctypes.c_int32, 12]
+  hotspot_crit_max: Annotated[ctypes.c_int32, 16]
+  hotspot_emergency_max: Annotated[ctypes.c_int32, 20]
+  mem_min: Annotated[ctypes.c_int32, 24]
+  mem_crit_max: Annotated[ctypes.c_int32, 28]
+  mem_emergency_max: Annotated[ctypes.c_int32, 32]
+  software_shutdown_temp: Annotated[ctypes.c_int32, 36]
+  software_shutdown_temp_offset: Annotated[ctypes.c_int32, 40]
+@record
+class struct_smu_state_validation_block:
+  SIZE = 3
+  single_display_only: Annotated[ctypes.c_bool, 0]
+  disallow_on_dc: Annotated[ctypes.c_bool, 1]
+  supported_power_levels: Annotated[ctypes.c_ubyte, 2]
+@record
+class struct_smu_uvd_clocks:
+  SIZE = 8
+  vclk: Annotated[ctypes.c_uint32, 0]
+  dclk: Annotated[ctypes.c_uint32, 4]
 enum_smu_power_src_type = CEnum(ctypes.c_uint32)
 SMU_POWER_SOURCE_AC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_AC', 0)
 SMU_POWER_SOURCE_DC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_DC', 1)
@@ -1456,72 +1454,72 @@ SMU_OD_FAN_TARGET_TEMPERATURE = enum_smu_clk_type.define('SMU_OD_FAN_TARGET_TEMP
 SMU_OD_FAN_MINIMUM_PWM = enum_smu_clk_type.define('SMU_OD_FAN_MINIMUM_PWM', 27)
 SMU_CLK_COUNT = enum_smu_clk_type.define('SMU_CLK_COUNT', 28)
 
-class struct_smu_user_dpm_profile(Struct): pass
-struct_smu_user_dpm_profile._fields_ = [
-  ('fan_mode', ctypes.c_uint32),
-  ('power_limit', ctypes.c_uint32),
-  ('fan_speed_pwm', ctypes.c_uint32),
-  ('fan_speed_rpm', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-  ('user_od', ctypes.c_uint32),
-  ('clk_mask', (ctypes.c_uint32 * 28)),
-  ('clk_dependency', ctypes.c_uint32),
-]
-class struct_smu_table(Struct): pass
-class struct_amdgpu_bo(Struct): pass
-struct_smu_table._fields_ = [
-  ('size', ctypes.c_uint64),
-  ('align', ctypes.c_uint32),
-  ('domain', ctypes.c_ubyte),
-  ('mc_address', ctypes.c_uint64),
-  ('cpu_addr', ctypes.c_void_p),
-  ('bo', ctypes.POINTER(struct_amdgpu_bo)),
-  ('version', ctypes.c_uint32),
-]
+@record
+class struct_smu_user_dpm_profile:
+  SIZE = 140
+  fan_mode: Annotated[ctypes.c_uint32, 0]
+  power_limit: Annotated[ctypes.c_uint32, 4]
+  fan_speed_pwm: Annotated[ctypes.c_uint32, 8]
+  fan_speed_rpm: Annotated[ctypes.c_uint32, 12]
+  flags: Annotated[ctypes.c_uint32, 16]
+  user_od: Annotated[ctypes.c_uint32, 20]
+  clk_mask: Annotated[(ctypes.c_uint32* 28), 24]
+  clk_dependency: Annotated[ctypes.c_uint32, 136]
+@record
+class struct_smu_table:
+  SIZE = 48
+  size: Annotated[ctypes.c_uint64, 0]
+  align: Annotated[ctypes.c_uint32, 8]
+  domain: Annotated[ctypes.c_ubyte, 12]
+  mc_address: Annotated[ctypes.c_uint64, 16]
+  cpu_addr: Annotated[ctypes.POINTER(None), 24]
+  bo: Annotated[ctypes.POINTER(struct_amdgpu_bo), 32]
+  version: Annotated[ctypes.c_uint32, 40]
+class struct_amdgpu_bo(ctypes.Structure): pass
 enum_smu_perf_level_designation = CEnum(ctypes.c_uint32)
 PERF_LEVEL_ACTIVITY = enum_smu_perf_level_designation.define('PERF_LEVEL_ACTIVITY', 0)
 PERF_LEVEL_POWER_CONTAINMENT = enum_smu_perf_level_designation.define('PERF_LEVEL_POWER_CONTAINMENT', 1)
 
-class struct_smu_performance_level(Struct): pass
-struct_smu_performance_level._fields_ = [
-  ('core_clock', ctypes.c_uint32),
-  ('memory_clock', ctypes.c_uint32),
-  ('vddc', ctypes.c_uint32),
-  ('vddci', ctypes.c_uint32),
-  ('non_local_mem_freq', ctypes.c_uint32),
-  ('non_local_mem_width', ctypes.c_uint32),
-]
-class struct_smu_clock_info(Struct): pass
-struct_smu_clock_info._fields_ = [
-  ('min_mem_clk', ctypes.c_uint32),
-  ('max_mem_clk', ctypes.c_uint32),
-  ('min_eng_clk', ctypes.c_uint32),
-  ('max_eng_clk', ctypes.c_uint32),
-  ('min_bus_bandwidth', ctypes.c_uint32),
-  ('max_bus_bandwidth', ctypes.c_uint32),
-]
-class struct_smu_bios_boot_up_values(Struct): pass
-struct_smu_bios_boot_up_values._fields_ = [
-  ('revision', ctypes.c_uint32),
-  ('gfxclk', ctypes.c_uint32),
-  ('uclk', ctypes.c_uint32),
-  ('socclk', ctypes.c_uint32),
-  ('dcefclk', ctypes.c_uint32),
-  ('eclk', ctypes.c_uint32),
-  ('vclk', ctypes.c_uint32),
-  ('dclk', ctypes.c_uint32),
-  ('vddc', ctypes.c_uint16),
-  ('vddci', ctypes.c_uint16),
-  ('mvddc', ctypes.c_uint16),
-  ('vdd_gfx', ctypes.c_uint16),
-  ('cooling_id', ctypes.c_ubyte),
-  ('pp_table_id', ctypes.c_uint32),
-  ('format_revision', ctypes.c_uint32),
-  ('content_revision', ctypes.c_uint32),
-  ('fclk', ctypes.c_uint32),
-  ('lclk', ctypes.c_uint32),
-  ('firmware_caps', ctypes.c_uint32),
-]
+@record
+class struct_smu_performance_level:
+  SIZE = 24
+  core_clock: Annotated[ctypes.c_uint32, 0]
+  memory_clock: Annotated[ctypes.c_uint32, 4]
+  vddc: Annotated[ctypes.c_uint32, 8]
+  vddci: Annotated[ctypes.c_uint32, 12]
+  non_local_mem_freq: Annotated[ctypes.c_uint32, 16]
+  non_local_mem_width: Annotated[ctypes.c_uint32, 20]
+@record
+class struct_smu_clock_info:
+  SIZE = 24
+  min_mem_clk: Annotated[ctypes.c_uint32, 0]
+  max_mem_clk: Annotated[ctypes.c_uint32, 4]
+  min_eng_clk: Annotated[ctypes.c_uint32, 8]
+  max_eng_clk: Annotated[ctypes.c_uint32, 12]
+  min_bus_bandwidth: Annotated[ctypes.c_uint32, 16]
+  max_bus_bandwidth: Annotated[ctypes.c_uint32, 20]
+@record
+class struct_smu_bios_boot_up_values:
+  SIZE = 68
+  revision: Annotated[ctypes.c_uint32, 0]
+  gfxclk: Annotated[ctypes.c_uint32, 4]
+  uclk: Annotated[ctypes.c_uint32, 8]
+  socclk: Annotated[ctypes.c_uint32, 12]
+  dcefclk: Annotated[ctypes.c_uint32, 16]
+  eclk: Annotated[ctypes.c_uint32, 20]
+  vclk: Annotated[ctypes.c_uint32, 24]
+  dclk: Annotated[ctypes.c_uint32, 28]
+  vddc: Annotated[ctypes.c_uint16, 32]
+  vddci: Annotated[ctypes.c_uint16, 34]
+  mvddc: Annotated[ctypes.c_uint16, 36]
+  vdd_gfx: Annotated[ctypes.c_uint16, 38]
+  cooling_id: Annotated[ctypes.c_ubyte, 40]
+  pp_table_id: Annotated[ctypes.c_uint32, 44]
+  format_revision: Annotated[ctypes.c_uint32, 48]
+  content_revision: Annotated[ctypes.c_uint32, 52]
+  fclk: Annotated[ctypes.c_uint32, 56]
+  lclk: Annotated[ctypes.c_uint32, 60]
+  firmware_caps: Annotated[ctypes.c_uint32, 64]
 enum_smu_table_id = CEnum(ctypes.c_uint32)
 SMU_TABLE_PPTABLE = enum_smu_table_id.define('SMU_TABLE_PPTABLE', 0)
 SMU_TABLE_WATERMARKS = enum_smu_table_id.define('SMU_TABLE_WATERMARKS', 1)
@@ -1542,6 +1540,7 @@ SMU_TABLE_COMBO_PPTABLE = enum_smu_table_id.define('SMU_TABLE_COMBO_PPTABLE', 15
 SMU_TABLE_WIFIBAND = enum_smu_table_id.define('SMU_TABLE_WIFIBAND', 16)
 SMU_TABLE_COUNT = enum_smu_table_id.define('SMU_TABLE_COUNT', 17)
 
+init_records()
 FEATURE_CCLK_DPM_BIT = 0
 FEATURE_FAN_CONTROLLER_BIT = 1
 FEATURE_DATA_CALCULATION_BIT = 2

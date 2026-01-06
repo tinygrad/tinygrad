@@ -1,107 +1,109 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
-class struct_vfio_info_cap_header(Struct): pass
+from typing import Annotated
+from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+@record
+class struct_vfio_info_cap_header:
+  SIZE = 8
+  id: Annotated[ctypes.c_uint16, 0]
+  version: Annotated[ctypes.c_uint16, 2]
+  next: Annotated[ctypes.c_uint32, 4]
 __u16 = ctypes.c_uint16
 __u32 = ctypes.c_uint32
-struct_vfio_info_cap_header.SIZE = 8
-struct_vfio_info_cap_header._fields_ = ['id', 'version', 'next']
-setattr(struct_vfio_info_cap_header, 'id', field(0, ctypes.c_uint16))
-setattr(struct_vfio_info_cap_header, 'version', field(2, ctypes.c_uint16))
-setattr(struct_vfio_info_cap_header, 'next', field(4, ctypes.c_uint32))
-class struct_vfio_group_status(Struct): pass
-struct_vfio_group_status.SIZE = 8
-struct_vfio_group_status._fields_ = ['argsz', 'flags']
-setattr(struct_vfio_group_status, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_group_status, 'flags', field(4, ctypes.c_uint32))
-class struct_vfio_device_info(Struct): pass
-struct_vfio_device_info.SIZE = 24
-struct_vfio_device_info._fields_ = ['argsz', 'flags', 'num_regions', 'num_irqs', 'cap_offset', 'pad']
-setattr(struct_vfio_device_info, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_info, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_device_info, 'num_regions', field(8, ctypes.c_uint32))
-setattr(struct_vfio_device_info, 'num_irqs', field(12, ctypes.c_uint32))
-setattr(struct_vfio_device_info, 'cap_offset', field(16, ctypes.c_uint32))
-setattr(struct_vfio_device_info, 'pad', field(20, ctypes.c_uint32))
-class struct_vfio_device_info_cap_pci_atomic_comp(Struct): pass
-struct_vfio_device_info_cap_pci_atomic_comp.SIZE = 16
-struct_vfio_device_info_cap_pci_atomic_comp._fields_ = ['header', 'flags', 'reserved']
-setattr(struct_vfio_device_info_cap_pci_atomic_comp, 'header', field(0, struct_vfio_info_cap_header))
-setattr(struct_vfio_device_info_cap_pci_atomic_comp, 'flags', field(8, ctypes.c_uint32))
-setattr(struct_vfio_device_info_cap_pci_atomic_comp, 'reserved', field(12, ctypes.c_uint32))
-class struct_vfio_region_info(Struct): pass
+@record
+class struct_vfio_group_status:
+  SIZE = 8
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+@record
+class struct_vfio_device_info:
+  SIZE = 24
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  num_regions: Annotated[ctypes.c_uint32, 8]
+  num_irqs: Annotated[ctypes.c_uint32, 12]
+  cap_offset: Annotated[ctypes.c_uint32, 16]
+  pad: Annotated[ctypes.c_uint32, 20]
+@record
+class struct_vfio_device_info_cap_pci_atomic_comp:
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  flags: Annotated[ctypes.c_uint32, 8]
+  reserved: Annotated[ctypes.c_uint32, 12]
+@record
+class struct_vfio_region_info:
+  SIZE = 32
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  index: Annotated[ctypes.c_uint32, 8]
+  cap_offset: Annotated[ctypes.c_uint32, 12]
+  size: Annotated[ctypes.c_uint64, 16]
+  offset: Annotated[ctypes.c_uint64, 24]
 __u64 = ctypes.c_uint64
-struct_vfio_region_info.SIZE = 32
-struct_vfio_region_info._fields_ = ['argsz', 'flags', 'index', 'cap_offset', 'size', 'offset']
-setattr(struct_vfio_region_info, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_region_info, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_region_info, 'index', field(8, ctypes.c_uint32))
-setattr(struct_vfio_region_info, 'cap_offset', field(12, ctypes.c_uint32))
-setattr(struct_vfio_region_info, 'size', field(16, ctypes.c_uint64))
-setattr(struct_vfio_region_info, 'offset', field(24, ctypes.c_uint64))
-class struct_vfio_region_sparse_mmap_area(Struct): pass
-struct_vfio_region_sparse_mmap_area.SIZE = 16
-struct_vfio_region_sparse_mmap_area._fields_ = ['offset', 'size']
-setattr(struct_vfio_region_sparse_mmap_area, 'offset', field(0, ctypes.c_uint64))
-setattr(struct_vfio_region_sparse_mmap_area, 'size', field(8, ctypes.c_uint64))
-class struct_vfio_region_info_cap_sparse_mmap(Struct): pass
-struct_vfio_region_info_cap_sparse_mmap.SIZE = 16
-struct_vfio_region_info_cap_sparse_mmap._fields_ = ['header', 'nr_areas', 'reserved', 'areas']
-setattr(struct_vfio_region_info_cap_sparse_mmap, 'header', field(0, struct_vfio_info_cap_header))
-setattr(struct_vfio_region_info_cap_sparse_mmap, 'nr_areas', field(8, ctypes.c_uint32))
-setattr(struct_vfio_region_info_cap_sparse_mmap, 'reserved', field(12, ctypes.c_uint32))
-setattr(struct_vfio_region_info_cap_sparse_mmap, 'areas', field(16, Array(struct_vfio_region_sparse_mmap_area, 0)))
-class struct_vfio_region_info_cap_type(Struct): pass
-struct_vfio_region_info_cap_type.SIZE = 16
-struct_vfio_region_info_cap_type._fields_ = ['header', 'type', 'subtype']
-setattr(struct_vfio_region_info_cap_type, 'header', field(0, struct_vfio_info_cap_header))
-setattr(struct_vfio_region_info_cap_type, 'type', field(8, ctypes.c_uint32))
-setattr(struct_vfio_region_info_cap_type, 'subtype', field(12, ctypes.c_uint32))
-class struct_vfio_region_gfx_edid(Struct): pass
-struct_vfio_region_gfx_edid.SIZE = 24
-struct_vfio_region_gfx_edid._fields_ = ['edid_offset', 'edid_max_size', 'edid_size', 'max_xres', 'max_yres', 'link_state']
-setattr(struct_vfio_region_gfx_edid, 'edid_offset', field(0, ctypes.c_uint32))
-setattr(struct_vfio_region_gfx_edid, 'edid_max_size', field(4, ctypes.c_uint32))
-setattr(struct_vfio_region_gfx_edid, 'edid_size', field(8, ctypes.c_uint32))
-setattr(struct_vfio_region_gfx_edid, 'max_xres', field(12, ctypes.c_uint32))
-setattr(struct_vfio_region_gfx_edid, 'max_yres', field(16, ctypes.c_uint32))
-setattr(struct_vfio_region_gfx_edid, 'link_state', field(20, ctypes.c_uint32))
-class struct_vfio_device_migration_info(Struct): pass
-struct_vfio_device_migration_info.SIZE = 32
-struct_vfio_device_migration_info._fields_ = ['device_state', 'reserved', 'pending_bytes', 'data_offset', 'data_size']
-setattr(struct_vfio_device_migration_info, 'device_state', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_migration_info, 'reserved', field(4, ctypes.c_uint32))
-setattr(struct_vfio_device_migration_info, 'pending_bytes', field(8, ctypes.c_uint64))
-setattr(struct_vfio_device_migration_info, 'data_offset', field(16, ctypes.c_uint64))
-setattr(struct_vfio_device_migration_info, 'data_size', field(24, ctypes.c_uint64))
-class struct_vfio_region_info_cap_nvlink2_ssatgt(Struct): pass
-struct_vfio_region_info_cap_nvlink2_ssatgt.SIZE = 16
-struct_vfio_region_info_cap_nvlink2_ssatgt._fields_ = ['header', 'tgt']
-setattr(struct_vfio_region_info_cap_nvlink2_ssatgt, 'header', field(0, struct_vfio_info_cap_header))
-setattr(struct_vfio_region_info_cap_nvlink2_ssatgt, 'tgt', field(8, ctypes.c_uint64))
-class struct_vfio_region_info_cap_nvlink2_lnkspd(Struct): pass
-struct_vfio_region_info_cap_nvlink2_lnkspd.SIZE = 16
-struct_vfio_region_info_cap_nvlink2_lnkspd._fields_ = ['header', 'link_speed', '__pad']
-setattr(struct_vfio_region_info_cap_nvlink2_lnkspd, 'header', field(0, struct_vfio_info_cap_header))
-setattr(struct_vfio_region_info_cap_nvlink2_lnkspd, 'link_speed', field(8, ctypes.c_uint32))
-setattr(struct_vfio_region_info_cap_nvlink2_lnkspd, '__pad', field(12, ctypes.c_uint32))
-class struct_vfio_irq_info(Struct): pass
-struct_vfio_irq_info.SIZE = 16
-struct_vfio_irq_info._fields_ = ['argsz', 'flags', 'index', 'count']
-setattr(struct_vfio_irq_info, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_irq_info, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_irq_info, 'index', field(8, ctypes.c_uint32))
-setattr(struct_vfio_irq_info, 'count', field(12, ctypes.c_uint32))
-class struct_vfio_irq_set(Struct): pass
+@record
+class struct_vfio_region_sparse_mmap_area:
+  SIZE = 16
+  offset: Annotated[ctypes.c_uint64, 0]
+  size: Annotated[ctypes.c_uint64, 8]
+@record
+class struct_vfio_region_info_cap_sparse_mmap:
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  nr_areas: Annotated[ctypes.c_uint32, 8]
+  reserved: Annotated[ctypes.c_uint32, 12]
+  areas: Annotated[(struct_vfio_region_sparse_mmap_area * 0), 16]
+@record
+class struct_vfio_region_info_cap_type:
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  type: Annotated[ctypes.c_uint32, 8]
+  subtype: Annotated[ctypes.c_uint32, 12]
+@record
+class struct_vfio_region_gfx_edid:
+  SIZE = 24
+  edid_offset: Annotated[ctypes.c_uint32, 0]
+  edid_max_size: Annotated[ctypes.c_uint32, 4]
+  edid_size: Annotated[ctypes.c_uint32, 8]
+  max_xres: Annotated[ctypes.c_uint32, 12]
+  max_yres: Annotated[ctypes.c_uint32, 16]
+  link_state: Annotated[ctypes.c_uint32, 20]
+@record
+class struct_vfio_device_migration_info:
+  SIZE = 32
+  device_state: Annotated[ctypes.c_uint32, 0]
+  reserved: Annotated[ctypes.c_uint32, 4]
+  pending_bytes: Annotated[ctypes.c_uint64, 8]
+  data_offset: Annotated[ctypes.c_uint64, 16]
+  data_size: Annotated[ctypes.c_uint64, 24]
+@record
+class struct_vfio_region_info_cap_nvlink2_ssatgt:
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  tgt: Annotated[ctypes.c_uint64, 8]
+@record
+class struct_vfio_region_info_cap_nvlink2_lnkspd:
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  link_speed: Annotated[ctypes.c_uint32, 8]
+  __pad: Annotated[ctypes.c_uint32, 12]
+@record
+class struct_vfio_irq_info:
+  SIZE = 16
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  index: Annotated[ctypes.c_uint32, 8]
+  count: Annotated[ctypes.c_uint32, 12]
+@record
+class struct_vfio_irq_set:
+  SIZE = 20
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  index: Annotated[ctypes.c_uint32, 8]
+  start: Annotated[ctypes.c_uint32, 12]
+  count: Annotated[ctypes.c_uint32, 16]
+  data: Annotated[(ctypes.c_ubyte * 0), 20]
 __u8 = ctypes.c_ubyte
-struct_vfio_irq_set.SIZE = 20
-struct_vfio_irq_set._fields_ = ['argsz', 'flags', 'index', 'start', 'count', 'data']
-setattr(struct_vfio_irq_set, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_irq_set, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_irq_set, 'index', field(8, ctypes.c_uint32))
-setattr(struct_vfio_irq_set, 'start', field(12, ctypes.c_uint32))
-setattr(struct_vfio_irq_set, 'count', field(16, ctypes.c_uint32))
-setattr(struct_vfio_irq_set, 'data', field(20, Array(ctypes.c_ubyte, 0)))
 _anonenum0 = CEnum(ctypes.c_uint32)
 VFIO_PCI_BAR0_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR0_REGION_INDEX', 0)
 VFIO_PCI_BAR1_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR1_REGION_INDEX', 1)
@@ -136,90 +138,90 @@ _anonenum4 = CEnum(ctypes.c_uint32)
 VFIO_AP_REQ_IRQ_INDEX = _anonenum4.define('VFIO_AP_REQ_IRQ_INDEX', 0)
 VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 1)
 
-class struct_vfio_pci_dependent_device(Struct): pass
-struct_vfio_pci_dependent_device.SIZE = 8
-struct_vfio_pci_dependent_device._fields_ = ['group_id', 'devid', 'segment', 'bus', 'devfn']
-setattr(struct_vfio_pci_dependent_device, 'group_id', field(0, ctypes.c_uint32))
-setattr(struct_vfio_pci_dependent_device, 'devid', field(0, ctypes.c_uint32))
-setattr(struct_vfio_pci_dependent_device, 'segment', field(4, ctypes.c_uint16))
-setattr(struct_vfio_pci_dependent_device, 'bus', field(6, ctypes.c_ubyte))
-setattr(struct_vfio_pci_dependent_device, 'devfn', field(7, ctypes.c_ubyte))
-class struct_vfio_pci_hot_reset_info(Struct): pass
-struct_vfio_pci_hot_reset_info.SIZE = 12
-struct_vfio_pci_hot_reset_info._fields_ = ['argsz', 'flags', 'count', 'devices']
-setattr(struct_vfio_pci_hot_reset_info, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_pci_hot_reset_info, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_pci_hot_reset_info, 'count', field(8, ctypes.c_uint32))
-setattr(struct_vfio_pci_hot_reset_info, 'devices', field(12, Array(struct_vfio_pci_dependent_device, 0)))
-class struct_vfio_pci_hot_reset(Struct): pass
+@record
+class struct_vfio_pci_dependent_device:
+  SIZE = 8
+  group_id: Annotated[ctypes.c_uint32, 0]
+  devid: Annotated[ctypes.c_uint32, 0]
+  segment: Annotated[ctypes.c_uint16, 4]
+  bus: Annotated[ctypes.c_ubyte, 6]
+  devfn: Annotated[ctypes.c_ubyte, 7]
+@record
+class struct_vfio_pci_hot_reset_info:
+  SIZE = 12
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  count: Annotated[ctypes.c_uint32, 8]
+  devices: Annotated[(struct_vfio_pci_dependent_device * 0), 12]
+@record
+class struct_vfio_pci_hot_reset:
+  SIZE = 12
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  count: Annotated[ctypes.c_uint32, 8]
+  group_fds: Annotated[(ctypes.c_int32 * 0), 12]
 __s32 = ctypes.c_int32
-struct_vfio_pci_hot_reset.SIZE = 12
-struct_vfio_pci_hot_reset._fields_ = ['argsz', 'flags', 'count', 'group_fds']
-setattr(struct_vfio_pci_hot_reset, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_pci_hot_reset, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_pci_hot_reset, 'count', field(8, ctypes.c_uint32))
-setattr(struct_vfio_pci_hot_reset, 'group_fds', field(12, Array(ctypes.c_int32, 0)))
-class struct_vfio_device_gfx_plane_info(Struct): pass
-struct_vfio_device_gfx_plane_info.SIZE = 64
-struct_vfio_device_gfx_plane_info._fields_ = ['argsz', 'flags', 'drm_plane_type', 'drm_format', 'drm_format_mod', 'width', 'height', 'stride', 'size', 'x_pos', 'y_pos', 'x_hot', 'y_hot', 'region_index', 'dmabuf_id', 'reserved']
-setattr(struct_vfio_device_gfx_plane_info, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'drm_plane_type', field(8, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'drm_format', field(12, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'drm_format_mod', field(16, ctypes.c_uint64))
-setattr(struct_vfio_device_gfx_plane_info, 'width', field(24, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'height', field(28, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'stride', field(32, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'size', field(36, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'x_pos', field(40, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'y_pos', field(44, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'x_hot', field(48, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'y_hot', field(52, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'region_index', field(56, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'dmabuf_id', field(56, ctypes.c_uint32))
-setattr(struct_vfio_device_gfx_plane_info, 'reserved', field(60, ctypes.c_uint32))
-class struct_vfio_device_ioeventfd(Struct): pass
-struct_vfio_device_ioeventfd.SIZE = 32
-struct_vfio_device_ioeventfd._fields_ = ['argsz', 'flags', 'offset', 'data', 'fd', 'reserved']
-setattr(struct_vfio_device_ioeventfd, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_ioeventfd, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_device_ioeventfd, 'offset', field(8, ctypes.c_uint64))
-setattr(struct_vfio_device_ioeventfd, 'data', field(16, ctypes.c_uint64))
-setattr(struct_vfio_device_ioeventfd, 'fd', field(24, ctypes.c_int32))
-setattr(struct_vfio_device_ioeventfd, 'reserved', field(28, ctypes.c_uint32))
-class struct_vfio_device_feature(Struct): pass
-struct_vfio_device_feature.SIZE = 8
-struct_vfio_device_feature._fields_ = ['argsz', 'flags', 'data']
-setattr(struct_vfio_device_feature, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_feature, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_device_feature, 'data', field(8, Array(ctypes.c_ubyte, 0)))
-class struct_vfio_device_bind_iommufd(Struct): pass
-struct_vfio_device_bind_iommufd.SIZE = 16
-struct_vfio_device_bind_iommufd._fields_ = ['argsz', 'flags', 'iommufd', 'out_devid']
-setattr(struct_vfio_device_bind_iommufd, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_bind_iommufd, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_device_bind_iommufd, 'iommufd', field(8, ctypes.c_int32))
-setattr(struct_vfio_device_bind_iommufd, 'out_devid', field(12, ctypes.c_uint32))
-class struct_vfio_device_attach_iommufd_pt(Struct): pass
-struct_vfio_device_attach_iommufd_pt.SIZE = 12
-struct_vfio_device_attach_iommufd_pt._fields_ = ['argsz', 'flags', 'pt_id']
-setattr(struct_vfio_device_attach_iommufd_pt, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_attach_iommufd_pt, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_device_attach_iommufd_pt, 'pt_id', field(8, ctypes.c_uint32))
-class struct_vfio_device_detach_iommufd_pt(Struct): pass
-struct_vfio_device_detach_iommufd_pt.SIZE = 8
-struct_vfio_device_detach_iommufd_pt._fields_ = ['argsz', 'flags']
-setattr(struct_vfio_device_detach_iommufd_pt, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_detach_iommufd_pt, 'flags', field(4, ctypes.c_uint32))
-class struct_vfio_device_feature_migration(Struct): pass
-struct_vfio_device_feature_migration.SIZE = 8
-struct_vfio_device_feature_migration._fields_ = ['flags']
-setattr(struct_vfio_device_feature_migration, 'flags', field(0, ctypes.c_uint64))
-class struct_vfio_device_feature_mig_state(Struct): pass
-struct_vfio_device_feature_mig_state.SIZE = 8
-struct_vfio_device_feature_mig_state._fields_ = ['device_state', 'data_fd']
-setattr(struct_vfio_device_feature_mig_state, 'device_state', field(0, ctypes.c_uint32))
-setattr(struct_vfio_device_feature_mig_state, 'data_fd', field(4, ctypes.c_int32))
+@record
+class struct_vfio_device_gfx_plane_info:
+  SIZE = 64
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  drm_plane_type: Annotated[ctypes.c_uint32, 8]
+  drm_format: Annotated[ctypes.c_uint32, 12]
+  drm_format_mod: Annotated[ctypes.c_uint64, 16]
+  width: Annotated[ctypes.c_uint32, 24]
+  height: Annotated[ctypes.c_uint32, 28]
+  stride: Annotated[ctypes.c_uint32, 32]
+  size: Annotated[ctypes.c_uint32, 36]
+  x_pos: Annotated[ctypes.c_uint32, 40]
+  y_pos: Annotated[ctypes.c_uint32, 44]
+  x_hot: Annotated[ctypes.c_uint32, 48]
+  y_hot: Annotated[ctypes.c_uint32, 52]
+  region_index: Annotated[ctypes.c_uint32, 56]
+  dmabuf_id: Annotated[ctypes.c_uint32, 56]
+  reserved: Annotated[ctypes.c_uint32, 60]
+@record
+class struct_vfio_device_ioeventfd:
+  SIZE = 32
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  offset: Annotated[ctypes.c_uint64, 8]
+  data: Annotated[ctypes.c_uint64, 16]
+  fd: Annotated[ctypes.c_int32, 24]
+  reserved: Annotated[ctypes.c_uint32, 28]
+@record
+class struct_vfio_device_feature:
+  SIZE = 8
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  data: Annotated[(ctypes.c_ubyte * 0), 8]
+@record
+class struct_vfio_device_bind_iommufd:
+  SIZE = 16
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  iommufd: Annotated[ctypes.c_int32, 8]
+  out_devid: Annotated[ctypes.c_uint32, 12]
+@record
+class struct_vfio_device_attach_iommufd_pt:
+  SIZE = 12
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  pt_id: Annotated[ctypes.c_uint32, 8]
+@record
+class struct_vfio_device_detach_iommufd_pt:
+  SIZE = 8
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+@record
+class struct_vfio_device_feature_migration:
+  SIZE = 8
+  flags: Annotated[ctypes.c_uint64, 0]
+@record
+class struct_vfio_device_feature_mig_state:
+  SIZE = 8
+  device_state: Annotated[ctypes.c_uint32, 0]
+  data_fd: Annotated[ctypes.c_int32, 4]
 enum_vfio_device_mig_state = CEnum(ctypes.c_uint32)
 VFIO_DEVICE_STATE_ERROR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_ERROR', 0)
 VFIO_DEVICE_STATE_STOP = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP', 1)
@@ -231,163 +233,164 @@ VFIO_DEVICE_STATE_PRE_COPY = enum_vfio_device_mig_state.define('VFIO_DEVICE_STAT
 VFIO_DEVICE_STATE_PRE_COPY_P2P = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_PRE_COPY_P2P', 7)
 VFIO_DEVICE_STATE_NR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_NR', 8)
 
-class struct_vfio_precopy_info(Struct): pass
-struct_vfio_precopy_info.SIZE = 24
-struct_vfio_precopy_info._fields_ = ['argsz', 'flags', 'initial_bytes', 'dirty_bytes']
-setattr(struct_vfio_precopy_info, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_precopy_info, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_precopy_info, 'initial_bytes', field(8, ctypes.c_uint64))
-setattr(struct_vfio_precopy_info, 'dirty_bytes', field(16, ctypes.c_uint64))
-class struct_vfio_device_low_power_entry_with_wakeup(Struct): pass
-struct_vfio_device_low_power_entry_with_wakeup.SIZE = 8
-struct_vfio_device_low_power_entry_with_wakeup._fields_ = ['wakeup_eventfd', 'reserved']
-setattr(struct_vfio_device_low_power_entry_with_wakeup, 'wakeup_eventfd', field(0, ctypes.c_int32))
-setattr(struct_vfio_device_low_power_entry_with_wakeup, 'reserved', field(4, ctypes.c_uint32))
-class struct_vfio_device_feature_dma_logging_control(Struct): pass
-struct_vfio_device_feature_dma_logging_control.SIZE = 24
-struct_vfio_device_feature_dma_logging_control._fields_ = ['page_size', 'num_ranges', '__reserved', 'ranges']
-setattr(struct_vfio_device_feature_dma_logging_control, 'page_size', field(0, ctypes.c_uint64))
-setattr(struct_vfio_device_feature_dma_logging_control, 'num_ranges', field(8, ctypes.c_uint32))
-setattr(struct_vfio_device_feature_dma_logging_control, '__reserved', field(12, ctypes.c_uint32))
-setattr(struct_vfio_device_feature_dma_logging_control, 'ranges', field(16, ctypes.c_uint64))
-class struct_vfio_device_feature_dma_logging_range(Struct): pass
-struct_vfio_device_feature_dma_logging_range.SIZE = 16
-struct_vfio_device_feature_dma_logging_range._fields_ = ['iova', 'length']
-setattr(struct_vfio_device_feature_dma_logging_range, 'iova', field(0, ctypes.c_uint64))
-setattr(struct_vfio_device_feature_dma_logging_range, 'length', field(8, ctypes.c_uint64))
-class struct_vfio_device_feature_dma_logging_report(Struct): pass
-struct_vfio_device_feature_dma_logging_report.SIZE = 32
-struct_vfio_device_feature_dma_logging_report._fields_ = ['iova', 'length', 'page_size', 'bitmap']
-setattr(struct_vfio_device_feature_dma_logging_report, 'iova', field(0, ctypes.c_uint64))
-setattr(struct_vfio_device_feature_dma_logging_report, 'length', field(8, ctypes.c_uint64))
-setattr(struct_vfio_device_feature_dma_logging_report, 'page_size', field(16, ctypes.c_uint64))
-setattr(struct_vfio_device_feature_dma_logging_report, 'bitmap', field(24, ctypes.c_uint64))
-class struct_vfio_device_feature_mig_data_size(Struct): pass
-struct_vfio_device_feature_mig_data_size.SIZE = 8
-struct_vfio_device_feature_mig_data_size._fields_ = ['stop_copy_length']
-setattr(struct_vfio_device_feature_mig_data_size, 'stop_copy_length', field(0, ctypes.c_uint64))
-class struct_vfio_device_feature_bus_master(Struct): pass
-struct_vfio_device_feature_bus_master.SIZE = 4
-struct_vfio_device_feature_bus_master._fields_ = ['op']
-setattr(struct_vfio_device_feature_bus_master, 'op', field(0, ctypes.c_uint32))
-class struct_vfio_iommu_type1_info(Struct): pass
-struct_vfio_iommu_type1_info.SIZE = 24
-struct_vfio_iommu_type1_info._fields_ = ['argsz', 'flags', 'iova_pgsizes', 'cap_offset', 'pad']
-setattr(struct_vfio_iommu_type1_info, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_info, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_info, 'iova_pgsizes', field(8, ctypes.c_uint64))
-setattr(struct_vfio_iommu_type1_info, 'cap_offset', field(16, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_info, 'pad', field(20, ctypes.c_uint32))
-class struct_vfio_iova_range(Struct): pass
-struct_vfio_iova_range.SIZE = 16
-struct_vfio_iova_range._fields_ = ['start', 'end']
-setattr(struct_vfio_iova_range, 'start', field(0, ctypes.c_uint64))
-setattr(struct_vfio_iova_range, 'end', field(8, ctypes.c_uint64))
-class struct_vfio_iommu_type1_info_cap_iova_range(Struct): pass
-struct_vfio_iommu_type1_info_cap_iova_range.SIZE = 16
-struct_vfio_iommu_type1_info_cap_iova_range._fields_ = ['header', 'nr_iovas', 'reserved', 'iova_ranges']
-setattr(struct_vfio_iommu_type1_info_cap_iova_range, 'header', field(0, struct_vfio_info_cap_header))
-setattr(struct_vfio_iommu_type1_info_cap_iova_range, 'nr_iovas', field(8, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_info_cap_iova_range, 'reserved', field(12, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_info_cap_iova_range, 'iova_ranges', field(16, Array(struct_vfio_iova_range, 0)))
-class struct_vfio_iommu_type1_info_cap_migration(Struct): pass
-struct_vfio_iommu_type1_info_cap_migration.SIZE = 32
-struct_vfio_iommu_type1_info_cap_migration._fields_ = ['header', 'flags', 'pgsize_bitmap', 'max_dirty_bitmap_size']
-setattr(struct_vfio_iommu_type1_info_cap_migration, 'header', field(0, struct_vfio_info_cap_header))
-setattr(struct_vfio_iommu_type1_info_cap_migration, 'flags', field(8, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_info_cap_migration, 'pgsize_bitmap', field(16, ctypes.c_uint64))
-setattr(struct_vfio_iommu_type1_info_cap_migration, 'max_dirty_bitmap_size', field(24, ctypes.c_uint64))
-class struct_vfio_iommu_type1_info_dma_avail(Struct): pass
-struct_vfio_iommu_type1_info_dma_avail.SIZE = 12
-struct_vfio_iommu_type1_info_dma_avail._fields_ = ['header', 'avail']
-setattr(struct_vfio_iommu_type1_info_dma_avail, 'header', field(0, struct_vfio_info_cap_header))
-setattr(struct_vfio_iommu_type1_info_dma_avail, 'avail', field(8, ctypes.c_uint32))
-class struct_vfio_iommu_type1_dma_map(Struct): pass
-struct_vfio_iommu_type1_dma_map.SIZE = 32
-struct_vfio_iommu_type1_dma_map._fields_ = ['argsz', 'flags', 'vaddr', 'iova', 'size']
-setattr(struct_vfio_iommu_type1_dma_map, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_dma_map, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_dma_map, 'vaddr', field(8, ctypes.c_uint64))
-setattr(struct_vfio_iommu_type1_dma_map, 'iova', field(16, ctypes.c_uint64))
-setattr(struct_vfio_iommu_type1_dma_map, 'size', field(24, ctypes.c_uint64))
-class struct_vfio_bitmap(Struct): pass
-struct_vfio_bitmap.SIZE = 24
-struct_vfio_bitmap._fields_ = ['pgsize', 'size', 'data']
-setattr(struct_vfio_bitmap, 'pgsize', field(0, ctypes.c_uint64))
-setattr(struct_vfio_bitmap, 'size', field(8, ctypes.c_uint64))
-setattr(struct_vfio_bitmap, 'data', field(16, Pointer(ctypes.c_uint64)))
-class struct_vfio_iommu_type1_dma_unmap(Struct): pass
-struct_vfio_iommu_type1_dma_unmap.SIZE = 24
-struct_vfio_iommu_type1_dma_unmap._fields_ = ['argsz', 'flags', 'iova', 'size', 'data']
-setattr(struct_vfio_iommu_type1_dma_unmap, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_dma_unmap, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_dma_unmap, 'iova', field(8, ctypes.c_uint64))
-setattr(struct_vfio_iommu_type1_dma_unmap, 'size', field(16, ctypes.c_uint64))
-setattr(struct_vfio_iommu_type1_dma_unmap, 'data', field(24, Array(ctypes.c_ubyte, 0)))
-class struct_vfio_iommu_type1_dirty_bitmap(Struct): pass
-struct_vfio_iommu_type1_dirty_bitmap.SIZE = 8
-struct_vfio_iommu_type1_dirty_bitmap._fields_ = ['argsz', 'flags', 'data']
-setattr(struct_vfio_iommu_type1_dirty_bitmap, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_dirty_bitmap, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_iommu_type1_dirty_bitmap, 'data', field(8, Array(ctypes.c_ubyte, 0)))
-class struct_vfio_iommu_type1_dirty_bitmap_get(Struct): pass
-struct_vfio_iommu_type1_dirty_bitmap_get.SIZE = 40
-struct_vfio_iommu_type1_dirty_bitmap_get._fields_ = ['iova', 'size', 'bitmap']
-setattr(struct_vfio_iommu_type1_dirty_bitmap_get, 'iova', field(0, ctypes.c_uint64))
-setattr(struct_vfio_iommu_type1_dirty_bitmap_get, 'size', field(8, ctypes.c_uint64))
-setattr(struct_vfio_iommu_type1_dirty_bitmap_get, 'bitmap', field(16, struct_vfio_bitmap))
-class struct_vfio_iommu_spapr_tce_ddw_info(Struct): pass
-struct_vfio_iommu_spapr_tce_ddw_info.SIZE = 16
-struct_vfio_iommu_spapr_tce_ddw_info._fields_ = ['pgsizes', 'max_dynamic_windows_supported', 'levels']
-setattr(struct_vfio_iommu_spapr_tce_ddw_info, 'pgsizes', field(0, ctypes.c_uint64))
-setattr(struct_vfio_iommu_spapr_tce_ddw_info, 'max_dynamic_windows_supported', field(8, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_ddw_info, 'levels', field(12, ctypes.c_uint32))
-class struct_vfio_iommu_spapr_tce_info(Struct): pass
-struct_vfio_iommu_spapr_tce_info.SIZE = 32
-struct_vfio_iommu_spapr_tce_info._fields_ = ['argsz', 'flags', 'dma32_window_start', 'dma32_window_size', 'ddw']
-setattr(struct_vfio_iommu_spapr_tce_info, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_info, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_info, 'dma32_window_start', field(8, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_info, 'dma32_window_size', field(12, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_info, 'ddw', field(16, struct_vfio_iommu_spapr_tce_ddw_info))
-class struct_vfio_eeh_pe_err(Struct): pass
-struct_vfio_eeh_pe_err.SIZE = 24
-struct_vfio_eeh_pe_err._fields_ = ['type', 'func', 'addr', 'mask']
-setattr(struct_vfio_eeh_pe_err, 'type', field(0, ctypes.c_uint32))
-setattr(struct_vfio_eeh_pe_err, 'func', field(4, ctypes.c_uint32))
-setattr(struct_vfio_eeh_pe_err, 'addr', field(8, ctypes.c_uint64))
-setattr(struct_vfio_eeh_pe_err, 'mask', field(16, ctypes.c_uint64))
-class struct_vfio_eeh_pe_op(Struct): pass
-struct_vfio_eeh_pe_op.SIZE = 40
-struct_vfio_eeh_pe_op._fields_ = ['argsz', 'flags', 'op', 'err']
-setattr(struct_vfio_eeh_pe_op, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_eeh_pe_op, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_eeh_pe_op, 'op', field(8, ctypes.c_uint32))
-setattr(struct_vfio_eeh_pe_op, 'err', field(16, struct_vfio_eeh_pe_err))
-class struct_vfio_iommu_spapr_register_memory(Struct): pass
-struct_vfio_iommu_spapr_register_memory.SIZE = 24
-struct_vfio_iommu_spapr_register_memory._fields_ = ['argsz', 'flags', 'vaddr', 'size']
-setattr(struct_vfio_iommu_spapr_register_memory, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_register_memory, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_register_memory, 'vaddr', field(8, ctypes.c_uint64))
-setattr(struct_vfio_iommu_spapr_register_memory, 'size', field(16, ctypes.c_uint64))
-class struct_vfio_iommu_spapr_tce_create(Struct): pass
-struct_vfio_iommu_spapr_tce_create.SIZE = 40
-struct_vfio_iommu_spapr_tce_create._fields_ = ['argsz', 'flags', 'page_shift', '__resv1', 'window_size', 'levels', '__resv2', 'start_addr']
-setattr(struct_vfio_iommu_spapr_tce_create, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_create, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_create, 'page_shift', field(8, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_create, '__resv1', field(12, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_create, 'window_size', field(16, ctypes.c_uint64))
-setattr(struct_vfio_iommu_spapr_tce_create, 'levels', field(24, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_create, '__resv2', field(28, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_create, 'start_addr', field(32, ctypes.c_uint64))
-class struct_vfio_iommu_spapr_tce_remove(Struct): pass
-struct_vfio_iommu_spapr_tce_remove.SIZE = 16
-struct_vfio_iommu_spapr_tce_remove._fields_ = ['argsz', 'flags', 'start_addr']
-setattr(struct_vfio_iommu_spapr_tce_remove, 'argsz', field(0, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_remove, 'flags', field(4, ctypes.c_uint32))
-setattr(struct_vfio_iommu_spapr_tce_remove, 'start_addr', field(8, ctypes.c_uint64))
+@record
+class struct_vfio_precopy_info:
+  SIZE = 24
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  initial_bytes: Annotated[ctypes.c_uint64, 8]
+  dirty_bytes: Annotated[ctypes.c_uint64, 16]
+@record
+class struct_vfio_device_low_power_entry_with_wakeup:
+  SIZE = 8
+  wakeup_eventfd: Annotated[ctypes.c_int32, 0]
+  reserved: Annotated[ctypes.c_uint32, 4]
+@record
+class struct_vfio_device_feature_dma_logging_control:
+  SIZE = 24
+  page_size: Annotated[ctypes.c_uint64, 0]
+  num_ranges: Annotated[ctypes.c_uint32, 8]
+  __reserved: Annotated[ctypes.c_uint32, 12]
+  ranges: Annotated[ctypes.c_uint64, 16]
+@record
+class struct_vfio_device_feature_dma_logging_range:
+  SIZE = 16
+  iova: Annotated[ctypes.c_uint64, 0]
+  length: Annotated[ctypes.c_uint64, 8]
+@record
+class struct_vfio_device_feature_dma_logging_report:
+  SIZE = 32
+  iova: Annotated[ctypes.c_uint64, 0]
+  length: Annotated[ctypes.c_uint64, 8]
+  page_size: Annotated[ctypes.c_uint64, 16]
+  bitmap: Annotated[ctypes.c_uint64, 24]
+@record
+class struct_vfio_device_feature_mig_data_size:
+  SIZE = 8
+  stop_copy_length: Annotated[ctypes.c_uint64, 0]
+@record
+class struct_vfio_device_feature_bus_master:
+  SIZE = 4
+  op: Annotated[ctypes.c_uint32, 0]
+@record
+class struct_vfio_iommu_type1_info:
+  SIZE = 24
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  iova_pgsizes: Annotated[ctypes.c_uint64, 8]
+  cap_offset: Annotated[ctypes.c_uint32, 16]
+  pad: Annotated[ctypes.c_uint32, 20]
+@record
+class struct_vfio_iova_range:
+  SIZE = 16
+  start: Annotated[ctypes.c_uint64, 0]
+  end: Annotated[ctypes.c_uint64, 8]
+@record
+class struct_vfio_iommu_type1_info_cap_iova_range:
+  SIZE = 16
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  nr_iovas: Annotated[ctypes.c_uint32, 8]
+  reserved: Annotated[ctypes.c_uint32, 12]
+  iova_ranges: Annotated[(struct_vfio_iova_range * 0), 16]
+@record
+class struct_vfio_iommu_type1_info_cap_migration:
+  SIZE = 32
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  flags: Annotated[ctypes.c_uint32, 8]
+  pgsize_bitmap: Annotated[ctypes.c_uint64, 16]
+  max_dirty_bitmap_size: Annotated[ctypes.c_uint64, 24]
+@record
+class struct_vfio_iommu_type1_info_dma_avail:
+  SIZE = 12
+  header: Annotated[struct_vfio_info_cap_header, 0]
+  avail: Annotated[ctypes.c_uint32, 8]
+@record
+class struct_vfio_iommu_type1_dma_map:
+  SIZE = 32
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  vaddr: Annotated[ctypes.c_uint64, 8]
+  iova: Annotated[ctypes.c_uint64, 16]
+  size: Annotated[ctypes.c_uint64, 24]
+@record
+class struct_vfio_bitmap:
+  SIZE = 24
+  pgsize: Annotated[ctypes.c_uint64, 0]
+  size: Annotated[ctypes.c_uint64, 8]
+  data: Annotated[ctypes.POINTER(ctypes.c_uint64), 16]
+@record
+class struct_vfio_iommu_type1_dma_unmap:
+  SIZE = 24
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  iova: Annotated[ctypes.c_uint64, 8]
+  size: Annotated[ctypes.c_uint64, 16]
+  data: Annotated[(ctypes.c_ubyte * 0), 24]
+@record
+class struct_vfio_iommu_type1_dirty_bitmap:
+  SIZE = 8
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  data: Annotated[(ctypes.c_ubyte * 0), 8]
+@record
+class struct_vfio_iommu_type1_dirty_bitmap_get:
+  SIZE = 40
+  iova: Annotated[ctypes.c_uint64, 0]
+  size: Annotated[ctypes.c_uint64, 8]
+  bitmap: Annotated[struct_vfio_bitmap, 16]
+@record
+class struct_vfio_iommu_spapr_tce_ddw_info:
+  SIZE = 16
+  pgsizes: Annotated[ctypes.c_uint64, 0]
+  max_dynamic_windows_supported: Annotated[ctypes.c_uint32, 8]
+  levels: Annotated[ctypes.c_uint32, 12]
+@record
+class struct_vfio_iommu_spapr_tce_info:
+  SIZE = 32
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  dma32_window_start: Annotated[ctypes.c_uint32, 8]
+  dma32_window_size: Annotated[ctypes.c_uint32, 12]
+  ddw: Annotated[struct_vfio_iommu_spapr_tce_ddw_info, 16]
+@record
+class struct_vfio_eeh_pe_err:
+  SIZE = 24
+  type: Annotated[ctypes.c_uint32, 0]
+  func: Annotated[ctypes.c_uint32, 4]
+  addr: Annotated[ctypes.c_uint64, 8]
+  mask: Annotated[ctypes.c_uint64, 16]
+@record
+class struct_vfio_eeh_pe_op:
+  SIZE = 40
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  op: Annotated[ctypes.c_uint32, 8]
+  err: Annotated[struct_vfio_eeh_pe_err, 16]
+@record
+class struct_vfio_iommu_spapr_register_memory:
+  SIZE = 24
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  vaddr: Annotated[ctypes.c_uint64, 8]
+  size: Annotated[ctypes.c_uint64, 16]
+@record
+class struct_vfio_iommu_spapr_tce_create:
+  SIZE = 40
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  page_shift: Annotated[ctypes.c_uint32, 8]
+  __resv1: Annotated[ctypes.c_uint32, 12]
+  window_size: Annotated[ctypes.c_uint64, 16]
+  levels: Annotated[ctypes.c_uint32, 24]
+  __resv2: Annotated[ctypes.c_uint32, 28]
+  start_addr: Annotated[ctypes.c_uint64, 32]
+@record
+class struct_vfio_iommu_spapr_tce_remove:
+  SIZE = 16
+  argsz: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  start_addr: Annotated[ctypes.c_uint64, 8]
+init_records()
 VFIO_API_VERSION = 0
 VFIO_TYPE1_IOMMU = 1
 VFIO_SPAPR_TCE_IOMMU = 2

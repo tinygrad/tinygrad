@@ -1,16 +1,18 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import Annotated
+from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 class union_PM4_MES_TYPE_3_HEADER(ctypes.Union): pass
 enum_mes_set_resources_queue_type_enum = CEnum(ctypes.c_uint32)
 queue_type__mes_set_resources__kernel_interface_queue_kiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__kernel_interface_queue_kiq', 0)
 queue_type__mes_set_resources__hsa_interface_queue_hiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__hsa_interface_queue_hiq', 1)
 queue_type__mes_set_resources__hsa_debug_interface_queue = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__hsa_debug_interface_queue', 4)
 
-class struct_pm4_mes_set_resources(Struct): pass
-class struct_pm4_mes_runlist(Struct): pass
-class struct_pm4_mes_map_process(Struct): pass
-class struct_PM4_MES_MAP_PROCESS_VM(Struct): pass
+class struct_pm4_mes_set_resources(ctypes.Structure): pass
+class struct_pm4_mes_runlist(ctypes.Structure): pass
+class struct_pm4_mes_map_process(ctypes.Structure): pass
+class struct_PM4_MES_MAP_PROCESS_VM(ctypes.Structure): pass
 enum_mes_map_queues_queue_sel_enum = CEnum(ctypes.c_uint32)
 queue_sel__mes_map_queues__map_to_specified_queue_slots_vi = enum_mes_map_queues_queue_sel_enum.define('queue_sel__mes_map_queues__map_to_specified_queue_slots_vi', 0)
 queue_sel__mes_map_queues__map_to_hws_determined_queue_slots_vi = enum_mes_map_queues_queue_sel_enum.define('queue_sel__mes_map_queues__map_to_hws_determined_queue_slots_vi', 1)
@@ -31,7 +33,7 @@ extended_engine_sel__mes_map_queues__legacy_engine_sel = enum_mes_map_queues_ext
 extended_engine_sel__mes_map_queues__sdma0_to_7_sel = enum_mes_map_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_map_queues__sdma0_to_7_sel', 1)
 extended_engine_sel__mes_map_queues__sdma8_to_15_sel = enum_mes_map_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_map_queues__sdma8_to_15_sel', 2)
 
-class struct_pm4_mes_map_queues(Struct): pass
+class struct_pm4_mes_map_queues(ctypes.Structure): pass
 enum_mes_query_status_interrupt_sel_enum = CEnum(ctypes.c_uint32)
 interrupt_sel__mes_query_status__completion_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__completion_status', 0)
 interrupt_sel__mes_query_status__process_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__process_status', 1)
@@ -48,7 +50,7 @@ engine_sel__mes_query_status__compute = enum_mes_query_status_engine_sel_enum.de
 engine_sel__mes_query_status__sdma0_queue = enum_mes_query_status_engine_sel_enum.define('engine_sel__mes_query_status__sdma0_queue', 2)
 engine_sel__mes_query_status__sdma1_queue = enum_mes_query_status_engine_sel_enum.define('engine_sel__mes_query_status__sdma1_queue', 3)
 
-class struct_pm4_mes_query_status(Struct): pass
+class struct_pm4_mes_query_status(ctypes.Structure): pass
 enum_mes_unmap_queues_action_enum = CEnum(ctypes.c_uint32)
 action__mes_unmap_queues__preempt_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__preempt_queues', 0)
 action__mes_unmap_queues__reset_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__reset_queues', 1)
@@ -70,7 +72,7 @@ enum_mes_unmap_queues_extended_engine_sel_enum = CEnum(ctypes.c_uint32)
 extended_engine_sel__mes_unmap_queues__legacy_engine_sel = enum_mes_unmap_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_unmap_queues__legacy_engine_sel', 0)
 extended_engine_sel__mes_unmap_queues__sdma0_to_7_sel = enum_mes_unmap_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_unmap_queues__sdma0_to_7_sel', 1)
 
-class struct_pm4_mes_unmap_queues(Struct): pass
+class struct_pm4_mes_unmap_queues(ctypes.Structure): pass
 enum_mec_release_mem_event_index_enum = CEnum(ctypes.c_uint32)
 event_index__mec_release_mem__end_of_pipe = enum_mec_release_mem_event_index_enum.define('event_index__mec_release_mem__end_of_pipe', 5)
 event_index__mec_release_mem__shader_done = enum_mec_release_mem_event_index_enum.define('event_index__mec_release_mem__shader_done', 6)
@@ -106,7 +108,7 @@ data_sel__mec_release_mem__send_gpu_clock_counter = enum_mec_release_mem_data_se
 data_sel__mec_release_mem__send_cp_perfcounter_hi_lo = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__send_cp_perfcounter_hi_lo', 4)
 data_sel__mec_release_mem__store_gds_data_to_memory = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__store_gds_data_to_memory', 5)
 
-class struct_pm4_mec_release_mem(Struct): pass
+class struct_pm4_mec_release_mem(ctypes.Structure): pass
 enum_WRITE_DATA_dst_sel_enum = CEnum(ctypes.c_uint32)
 dst_sel___write_data__mem_mapped_register = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__mem_mapped_register', 0)
 dst_sel___write_data__tc_l2 = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__tc_l2', 2)
@@ -126,10 +128,11 @@ enum_WRITE_DATA_cache_policy_enum = CEnum(ctypes.c_uint32)
 cache_policy___write_data__lru = enum_WRITE_DATA_cache_policy_enum.define('cache_policy___write_data__lru', 0)
 cache_policy___write_data__stream = enum_WRITE_DATA_cache_policy_enum.define('cache_policy___write_data__stream', 1)
 
-class struct_pm4_mec_write_data_mmio(Struct): pass
+class struct_pm4_mec_write_data_mmio(ctypes.Structure): pass
 _anonenum0 = CEnum(ctypes.c_uint32)
 CACHE_FLUSH_AND_INV_TS_EVENT = _anonenum0.define('CACHE_FLUSH_AND_INV_TS_EVENT', 20)
 
+init_records()
 PACKET_TYPE0 = 0
 PACKET_TYPE1 = 1
 PACKET_TYPE2 = 2

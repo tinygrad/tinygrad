@@ -1,6 +1,8 @@
 # mypy: ignore-errors
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import Annotated
+from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 ion_user_handle_t = ctypes.c_int32
 enum_ion_heap_type = CEnum(ctypes.c_uint32)
 ION_HEAP_TYPE_SYSTEM = enum_ion_heap_type.define('ION_HEAP_TYPE_SYSTEM', 0)
@@ -11,29 +13,29 @@ ION_HEAP_TYPE_DMA = enum_ion_heap_type.define('ION_HEAP_TYPE_DMA', 4)
 ION_HEAP_TYPE_CUSTOM = enum_ion_heap_type.define('ION_HEAP_TYPE_CUSTOM', 5)
 ION_NUM_HEAPS = enum_ion_heap_type.define('ION_NUM_HEAPS', 16)
 
-class struct_ion_allocation_data(Struct): pass
+@record
+class struct_ion_allocation_data:
+  SIZE = 32
+  len: Annotated[size_t, 0]
+  align: Annotated[size_t, 8]
+  heap_id_mask: Annotated[ctypes.c_uint32, 16]
+  flags: Annotated[ctypes.c_uint32, 20]
+  handle: Annotated[ion_user_handle_t, 24]
 size_t = ctypes.c_uint64
-struct_ion_allocation_data.SIZE = 32
-struct_ion_allocation_data._fields_ = ['len', 'align', 'heap_id_mask', 'flags', 'handle']
-setattr(struct_ion_allocation_data, 'len', field(0, size_t))
-setattr(struct_ion_allocation_data, 'align', field(8, size_t))
-setattr(struct_ion_allocation_data, 'heap_id_mask', field(16, ctypes.c_uint32))
-setattr(struct_ion_allocation_data, 'flags', field(20, ctypes.c_uint32))
-setattr(struct_ion_allocation_data, 'handle', field(24, ion_user_handle_t))
-class struct_ion_fd_data(Struct): pass
-struct_ion_fd_data.SIZE = 8
-struct_ion_fd_data._fields_ = ['handle', 'fd']
-setattr(struct_ion_fd_data, 'handle', field(0, ion_user_handle_t))
-setattr(struct_ion_fd_data, 'fd', field(4, ctypes.c_int32))
-class struct_ion_handle_data(Struct): pass
-struct_ion_handle_data.SIZE = 4
-struct_ion_handle_data._fields_ = ['handle']
-setattr(struct_ion_handle_data, 'handle', field(0, ion_user_handle_t))
-class struct_ion_custom_data(Struct): pass
-struct_ion_custom_data.SIZE = 16
-struct_ion_custom_data._fields_ = ['cmd', 'arg']
-setattr(struct_ion_custom_data, 'cmd', field(0, ctypes.c_uint32))
-setattr(struct_ion_custom_data, 'arg', field(8, ctypes.c_uint64))
+@record
+class struct_ion_fd_data:
+  SIZE = 8
+  handle: Annotated[ion_user_handle_t, 0]
+  fd: Annotated[ctypes.c_int32, 4]
+@record
+class struct_ion_handle_data:
+  SIZE = 4
+  handle: Annotated[ion_user_handle_t, 0]
+@record
+class struct_ion_custom_data:
+  SIZE = 16
+  cmd: Annotated[ctypes.c_uint32, 0]
+  arg: Annotated[ctypes.c_uint64, 8]
 enum_msm_ion_heap_types = CEnum(ctypes.c_uint32)
 ION_HEAP_TYPE_MSM_START = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_MSM_START', 6)
 ION_HEAP_TYPE_SECURE_DMA = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_SECURE_DMA', 6)
@@ -74,234 +76,234 @@ CAMERA_SECURE_CP_USAGE = enum_cp_mem_usage.define('CAMERA_SECURE_CP_USAGE', 5)
 MAX_USAGE = enum_cp_mem_usage.define('MAX_USAGE', 6)
 UNKNOWN = enum_cp_mem_usage.define('UNKNOWN', 2147483647)
 
-class struct_ion_flush_data(Struct): pass
-struct_ion_flush_data.SIZE = 24
-struct_ion_flush_data._fields_ = ['handle', 'fd', 'vaddr', 'offset', 'length']
-setattr(struct_ion_flush_data, 'handle', field(0, ion_user_handle_t))
-setattr(struct_ion_flush_data, 'fd', field(4, ctypes.c_int32))
-setattr(struct_ion_flush_data, 'vaddr', field(8, ctypes.c_void_p))
-setattr(struct_ion_flush_data, 'offset', field(16, ctypes.c_uint32))
-setattr(struct_ion_flush_data, 'length', field(20, ctypes.c_uint32))
-class struct_ion_prefetch_regions(Struct): pass
-struct_ion_prefetch_regions.SIZE = 24
-struct_ion_prefetch_regions._fields_ = ['vmid', 'sizes', 'nr_sizes']
-setattr(struct_ion_prefetch_regions, 'vmid', field(0, ctypes.c_uint32))
-setattr(struct_ion_prefetch_regions, 'sizes', field(8, Pointer(size_t)))
-setattr(struct_ion_prefetch_regions, 'nr_sizes', field(16, ctypes.c_uint32))
-class struct_ion_prefetch_data(Struct): pass
-struct_ion_prefetch_data.SIZE = 32
-struct_ion_prefetch_data._fields_ = ['heap_id', 'len', 'regions', 'nr_regions']
-setattr(struct_ion_prefetch_data, 'heap_id', field(0, ctypes.c_int32))
-setattr(struct_ion_prefetch_data, 'len', field(8, ctypes.c_uint64))
-setattr(struct_ion_prefetch_data, 'regions', field(16, Pointer(struct_ion_prefetch_regions)))
-setattr(struct_ion_prefetch_data, 'nr_regions', field(24, ctypes.c_uint32))
-class struct_remote_buf64(Struct): pass
+@record
+class struct_ion_flush_data:
+  SIZE = 24
+  handle: Annotated[ion_user_handle_t, 0]
+  fd: Annotated[ctypes.c_int32, 4]
+  vaddr: Annotated[ctypes.POINTER(None), 8]
+  offset: Annotated[ctypes.c_uint32, 16]
+  length: Annotated[ctypes.c_uint32, 20]
+@record
+class struct_ion_prefetch_regions:
+  SIZE = 24
+  vmid: Annotated[ctypes.c_uint32, 0]
+  sizes: Annotated[ctypes.POINTER(size_t), 8]
+  nr_sizes: Annotated[ctypes.c_uint32, 16]
+@record
+class struct_ion_prefetch_data:
+  SIZE = 32
+  heap_id: Annotated[ctypes.c_int32, 0]
+  len: Annotated[ctypes.c_uint64, 8]
+  regions: Annotated[ctypes.POINTER(struct_ion_prefetch_regions), 16]
+  nr_regions: Annotated[ctypes.c_uint32, 24]
+@record
+class struct_remote_buf64:
+  SIZE = 16
+  pv: Annotated[uint64_t, 0]
+  len: Annotated[uint64_t, 8]
 uint64_t = ctypes.c_uint64
-struct_remote_buf64.SIZE = 16
-struct_remote_buf64._fields_ = ['pv', 'len']
-setattr(struct_remote_buf64, 'pv', field(0, uint64_t))
-setattr(struct_remote_buf64, 'len', field(8, uint64_t))
-class struct_remote_dma_handle64(Struct): pass
+@record
+class struct_remote_dma_handle64:
+  SIZE = 12
+  fd: Annotated[ctypes.c_int32, 0]
+  offset: Annotated[uint32_t, 4]
+  len: Annotated[uint32_t, 8]
 uint32_t = ctypes.c_uint32
-struct_remote_dma_handle64.SIZE = 12
-struct_remote_dma_handle64._fields_ = ['fd', 'offset', 'len']
-setattr(struct_remote_dma_handle64, 'fd', field(0, ctypes.c_int32))
-setattr(struct_remote_dma_handle64, 'offset', field(4, uint32_t))
-setattr(struct_remote_dma_handle64, 'len', field(8, uint32_t))
-class union_remote_arg64(Union): pass
-union_remote_arg64.SIZE = 16
-union_remote_arg64._fields_ = ['buf', 'dma', 'h']
-setattr(union_remote_arg64, 'buf', field(0, struct_remote_buf64))
-setattr(union_remote_arg64, 'dma', field(0, struct_remote_dma_handle64))
-setattr(union_remote_arg64, 'h', field(0, uint32_t))
-class struct_remote_buf(Struct): pass
-struct_remote_buf.SIZE = 16
-struct_remote_buf._fields_ = ['pv', 'len']
-setattr(struct_remote_buf, 'pv', field(0, ctypes.c_void_p))
-setattr(struct_remote_buf, 'len', field(8, size_t))
-class struct_remote_dma_handle(Struct): pass
-struct_remote_dma_handle.SIZE = 8
-struct_remote_dma_handle._fields_ = ['fd', 'offset']
-setattr(struct_remote_dma_handle, 'fd', field(0, ctypes.c_int32))
-setattr(struct_remote_dma_handle, 'offset', field(4, uint32_t))
-class union_remote_arg(Union): pass
-union_remote_arg.SIZE = 16
-union_remote_arg._fields_ = ['buf', 'dma', 'h']
-setattr(union_remote_arg, 'buf', field(0, struct_remote_buf))
-setattr(union_remote_arg, 'dma', field(0, struct_remote_dma_handle))
-setattr(union_remote_arg, 'h', field(0, uint32_t))
-class struct_fastrpc_ioctl_invoke(Struct): pass
-struct_fastrpc_ioctl_invoke.SIZE = 16
-struct_fastrpc_ioctl_invoke._fields_ = ['handle', 'sc', 'pra']
-setattr(struct_fastrpc_ioctl_invoke, 'handle', field(0, uint32_t))
-setattr(struct_fastrpc_ioctl_invoke, 'sc', field(4, uint32_t))
-setattr(struct_fastrpc_ioctl_invoke, 'pra', field(8, Pointer(union_remote_arg)))
-class struct_fastrpc_ioctl_invoke_fd(Struct): pass
-struct_fastrpc_ioctl_invoke_fd.SIZE = 24
-struct_fastrpc_ioctl_invoke_fd._fields_ = ['inv', 'fds']
-setattr(struct_fastrpc_ioctl_invoke_fd, 'inv', field(0, struct_fastrpc_ioctl_invoke))
-setattr(struct_fastrpc_ioctl_invoke_fd, 'fds', field(16, Pointer(ctypes.c_int32)))
-class struct_fastrpc_ioctl_invoke_attrs(Struct): pass
-struct_fastrpc_ioctl_invoke_attrs.SIZE = 32
-struct_fastrpc_ioctl_invoke_attrs._fields_ = ['inv', 'fds', 'attrs']
-setattr(struct_fastrpc_ioctl_invoke_attrs, 'inv', field(0, struct_fastrpc_ioctl_invoke))
-setattr(struct_fastrpc_ioctl_invoke_attrs, 'fds', field(16, Pointer(ctypes.c_int32)))
-setattr(struct_fastrpc_ioctl_invoke_attrs, 'attrs', field(24, Pointer(ctypes.c_uint32)))
-class struct_fastrpc_ioctl_invoke_crc(Struct): pass
-struct_fastrpc_ioctl_invoke_crc.SIZE = 40
-struct_fastrpc_ioctl_invoke_crc._fields_ = ['inv', 'fds', 'attrs', 'crc']
-setattr(struct_fastrpc_ioctl_invoke_crc, 'inv', field(0, struct_fastrpc_ioctl_invoke))
-setattr(struct_fastrpc_ioctl_invoke_crc, 'fds', field(16, Pointer(ctypes.c_int32)))
-setattr(struct_fastrpc_ioctl_invoke_crc, 'attrs', field(24, Pointer(ctypes.c_uint32)))
-setattr(struct_fastrpc_ioctl_invoke_crc, 'crc', field(32, Pointer(ctypes.c_uint32)))
-class struct_fastrpc_ioctl_init(Struct): pass
+@record
+class union_remote_arg64:
+  SIZE = 16
+  buf: Annotated[struct_remote_buf64, 0]
+  dma: Annotated[struct_remote_dma_handle64, 0]
+  h: Annotated[uint32_t, 0]
+@record
+class struct_remote_buf:
+  SIZE = 16
+  pv: Annotated[ctypes.POINTER(None), 0]
+  len: Annotated[size_t, 8]
+@record
+class struct_remote_dma_handle:
+  SIZE = 8
+  fd: Annotated[ctypes.c_int32, 0]
+  offset: Annotated[uint32_t, 4]
+@record
+class union_remote_arg:
+  SIZE = 16
+  buf: Annotated[struct_remote_buf, 0]
+  dma: Annotated[struct_remote_dma_handle, 0]
+  h: Annotated[uint32_t, 0]
+@record
+class struct_fastrpc_ioctl_invoke:
+  SIZE = 16
+  handle: Annotated[uint32_t, 0]
+  sc: Annotated[uint32_t, 4]
+  pra: Annotated[ctypes.POINTER(union_remote_arg), 8]
+@record
+class struct_fastrpc_ioctl_invoke_fd:
+  SIZE = 24
+  inv: Annotated[struct_fastrpc_ioctl_invoke, 0]
+  fds: Annotated[ctypes.POINTER(ctypes.c_int32), 16]
+@record
+class struct_fastrpc_ioctl_invoke_attrs:
+  SIZE = 32
+  inv: Annotated[struct_fastrpc_ioctl_invoke, 0]
+  fds: Annotated[ctypes.POINTER(ctypes.c_int32), 16]
+  attrs: Annotated[ctypes.POINTER(ctypes.c_uint32), 24]
+@record
+class struct_fastrpc_ioctl_invoke_crc:
+  SIZE = 40
+  inv: Annotated[struct_fastrpc_ioctl_invoke, 0]
+  fds: Annotated[ctypes.POINTER(ctypes.c_int32), 16]
+  attrs: Annotated[ctypes.POINTER(ctypes.c_uint32), 24]
+  crc: Annotated[ctypes.POINTER(ctypes.c_uint32), 32]
+@record
+class struct_fastrpc_ioctl_init:
+  SIZE = 40
+  flags: Annotated[uint32_t, 0]
+  file: Annotated[uintptr_t, 8]
+  filelen: Annotated[uint32_t, 16]
+  filefd: Annotated[int32_t, 20]
+  mem: Annotated[uintptr_t, 24]
+  memlen: Annotated[uint32_t, 32]
+  memfd: Annotated[int32_t, 36]
 uintptr_t = ctypes.c_uint64
 int32_t = ctypes.c_int32
-struct_fastrpc_ioctl_init.SIZE = 40
-struct_fastrpc_ioctl_init._fields_ = ['flags', 'file', 'filelen', 'filefd', 'mem', 'memlen', 'memfd']
-setattr(struct_fastrpc_ioctl_init, 'flags', field(0, uint32_t))
-setattr(struct_fastrpc_ioctl_init, 'file', field(8, uintptr_t))
-setattr(struct_fastrpc_ioctl_init, 'filelen', field(16, uint32_t))
-setattr(struct_fastrpc_ioctl_init, 'filefd', field(20, int32_t))
-setattr(struct_fastrpc_ioctl_init, 'mem', field(24, uintptr_t))
-setattr(struct_fastrpc_ioctl_init, 'memlen', field(32, uint32_t))
-setattr(struct_fastrpc_ioctl_init, 'memfd', field(36, int32_t))
-class struct_fastrpc_ioctl_init_attrs(Struct): pass
-struct_fastrpc_ioctl_init_attrs.SIZE = 48
-struct_fastrpc_ioctl_init_attrs._fields_ = ['init', 'attrs', 'siglen']
-setattr(struct_fastrpc_ioctl_init_attrs, 'init', field(0, struct_fastrpc_ioctl_init))
-setattr(struct_fastrpc_ioctl_init_attrs, 'attrs', field(40, ctypes.c_int32))
-setattr(struct_fastrpc_ioctl_init_attrs, 'siglen', field(44, ctypes.c_uint32))
-class struct_fastrpc_ioctl_munmap(Struct): pass
-struct_fastrpc_ioctl_munmap.SIZE = 16
-struct_fastrpc_ioctl_munmap._fields_ = ['vaddrout', 'size']
-setattr(struct_fastrpc_ioctl_munmap, 'vaddrout', field(0, uintptr_t))
-setattr(struct_fastrpc_ioctl_munmap, 'size', field(8, size_t))
-class struct_fastrpc_ioctl_munmap_64(Struct): pass
-struct_fastrpc_ioctl_munmap_64.SIZE = 16
-struct_fastrpc_ioctl_munmap_64._fields_ = ['vaddrout', 'size']
-setattr(struct_fastrpc_ioctl_munmap_64, 'vaddrout', field(0, uint64_t))
-setattr(struct_fastrpc_ioctl_munmap_64, 'size', field(8, size_t))
-class struct_fastrpc_ioctl_mmap(Struct): pass
-struct_fastrpc_ioctl_mmap.SIZE = 32
-struct_fastrpc_ioctl_mmap._fields_ = ['fd', 'flags', 'vaddrin', 'size', 'vaddrout']
-setattr(struct_fastrpc_ioctl_mmap, 'fd', field(0, ctypes.c_int32))
-setattr(struct_fastrpc_ioctl_mmap, 'flags', field(4, uint32_t))
-setattr(struct_fastrpc_ioctl_mmap, 'vaddrin', field(8, uintptr_t))
-setattr(struct_fastrpc_ioctl_mmap, 'size', field(16, size_t))
-setattr(struct_fastrpc_ioctl_mmap, 'vaddrout', field(24, uintptr_t))
-class struct_fastrpc_ioctl_mmap_64(Struct): pass
-struct_fastrpc_ioctl_mmap_64.SIZE = 32
-struct_fastrpc_ioctl_mmap_64._fields_ = ['fd', 'flags', 'vaddrin', 'size', 'vaddrout']
-setattr(struct_fastrpc_ioctl_mmap_64, 'fd', field(0, ctypes.c_int32))
-setattr(struct_fastrpc_ioctl_mmap_64, 'flags', field(4, uint32_t))
-setattr(struct_fastrpc_ioctl_mmap_64, 'vaddrin', field(8, uint64_t))
-setattr(struct_fastrpc_ioctl_mmap_64, 'size', field(16, size_t))
-setattr(struct_fastrpc_ioctl_mmap_64, 'vaddrout', field(24, uint64_t))
-class struct_fastrpc_ioctl_munmap_fd(Struct): pass
+@record
+class struct_fastrpc_ioctl_init_attrs:
+  SIZE = 48
+  init: Annotated[struct_fastrpc_ioctl_init, 0]
+  attrs: Annotated[ctypes.c_int32, 40]
+  siglen: Annotated[ctypes.c_uint32, 44]
+@record
+class struct_fastrpc_ioctl_munmap:
+  SIZE = 16
+  vaddrout: Annotated[uintptr_t, 0]
+  size: Annotated[size_t, 8]
+@record
+class struct_fastrpc_ioctl_munmap_64:
+  SIZE = 16
+  vaddrout: Annotated[uint64_t, 0]
+  size: Annotated[size_t, 8]
+@record
+class struct_fastrpc_ioctl_mmap:
+  SIZE = 32
+  fd: Annotated[ctypes.c_int32, 0]
+  flags: Annotated[uint32_t, 4]
+  vaddrin: Annotated[uintptr_t, 8]
+  size: Annotated[size_t, 16]
+  vaddrout: Annotated[uintptr_t, 24]
+@record
+class struct_fastrpc_ioctl_mmap_64:
+  SIZE = 32
+  fd: Annotated[ctypes.c_int32, 0]
+  flags: Annotated[uint32_t, 4]
+  vaddrin: Annotated[uint64_t, 8]
+  size: Annotated[size_t, 16]
+  vaddrout: Annotated[uint64_t, 24]
+@record
+class struct_fastrpc_ioctl_munmap_fd:
+  SIZE = 24
+  fd: Annotated[ctypes.c_int32, 0]
+  flags: Annotated[uint32_t, 4]
+  va: Annotated[uintptr_t, 8]
+  len: Annotated[ssize_t, 16]
 ssize_t = ctypes.c_int64
-struct_fastrpc_ioctl_munmap_fd.SIZE = 24
-struct_fastrpc_ioctl_munmap_fd._fields_ = ['fd', 'flags', 'va', 'len']
-setattr(struct_fastrpc_ioctl_munmap_fd, 'fd', field(0, ctypes.c_int32))
-setattr(struct_fastrpc_ioctl_munmap_fd, 'flags', field(4, uint32_t))
-setattr(struct_fastrpc_ioctl_munmap_fd, 'va', field(8, uintptr_t))
-setattr(struct_fastrpc_ioctl_munmap_fd, 'len', field(16, ssize_t))
-class struct_fastrpc_ioctl_perf(Struct): pass
-struct_fastrpc_ioctl_perf.SIZE = 24
-struct_fastrpc_ioctl_perf._fields_ = ['data', 'numkeys', 'keys']
-setattr(struct_fastrpc_ioctl_perf, 'data', field(0, uintptr_t))
-setattr(struct_fastrpc_ioctl_perf, 'numkeys', field(8, uint32_t))
-setattr(struct_fastrpc_ioctl_perf, 'keys', field(16, uintptr_t))
-class struct_fastrpc_ctrl_latency(Struct): pass
-struct_fastrpc_ctrl_latency.SIZE = 8
-struct_fastrpc_ctrl_latency._fields_ = ['enable', 'level']
-setattr(struct_fastrpc_ctrl_latency, 'enable', field(0, uint32_t))
-setattr(struct_fastrpc_ctrl_latency, 'level', field(4, uint32_t))
-class struct_fastrpc_ctrl_smmu(Struct): pass
-struct_fastrpc_ctrl_smmu.SIZE = 4
-struct_fastrpc_ctrl_smmu._fields_ = ['sharedcb']
-setattr(struct_fastrpc_ctrl_smmu, 'sharedcb', field(0, uint32_t))
-class struct_fastrpc_ctrl_kalloc(Struct): pass
-struct_fastrpc_ctrl_kalloc.SIZE = 4
-struct_fastrpc_ctrl_kalloc._fields_ = ['kalloc_support']
-setattr(struct_fastrpc_ctrl_kalloc, 'kalloc_support', field(0, uint32_t))
-class struct_fastrpc_ioctl_control(Struct): pass
-struct_fastrpc_ioctl_control.SIZE = 12
-struct_fastrpc_ioctl_control._fields_ = ['req', 'lp', 'smmu', 'kalloc']
-setattr(struct_fastrpc_ioctl_control, 'req', field(0, uint32_t))
-setattr(struct_fastrpc_ioctl_control, 'lp', field(4, struct_fastrpc_ctrl_latency))
-setattr(struct_fastrpc_ioctl_control, 'smmu', field(4, struct_fastrpc_ctrl_smmu))
-setattr(struct_fastrpc_ioctl_control, 'kalloc', field(4, struct_fastrpc_ctrl_kalloc))
-class struct_smq_null_invoke(Struct): pass
-struct_smq_null_invoke.SIZE = 16
-struct_smq_null_invoke._fields_ = ['ctx', 'handle', 'sc']
-setattr(struct_smq_null_invoke, 'ctx', field(0, uint64_t))
-setattr(struct_smq_null_invoke, 'handle', field(8, uint32_t))
-setattr(struct_smq_null_invoke, 'sc', field(12, uint32_t))
-class struct_smq_phy_page(Struct): pass
-struct_smq_phy_page.SIZE = 16
-struct_smq_phy_page._fields_ = ['addr', 'size']
-setattr(struct_smq_phy_page, 'addr', field(0, uint64_t))
-setattr(struct_smq_phy_page, 'size', field(8, uint64_t))
-class struct_smq_invoke_buf(Struct): pass
-struct_smq_invoke_buf.SIZE = 8
-struct_smq_invoke_buf._fields_ = ['num', 'pgidx']
-setattr(struct_smq_invoke_buf, 'num', field(0, ctypes.c_int32))
-setattr(struct_smq_invoke_buf, 'pgidx', field(4, ctypes.c_int32))
-class struct_smq_invoke(Struct): pass
-struct_smq_invoke.SIZE = 32
-struct_smq_invoke._fields_ = ['header', 'page']
-setattr(struct_smq_invoke, 'header', field(0, struct_smq_null_invoke))
-setattr(struct_smq_invoke, 'page', field(16, struct_smq_phy_page))
-class struct_smq_msg(Struct): pass
-struct_smq_msg.SIZE = 40
-struct_smq_msg._fields_ = ['pid', 'tid', 'invoke']
-setattr(struct_smq_msg, 'pid', field(0, uint32_t))
-setattr(struct_smq_msg, 'tid', field(4, uint32_t))
-setattr(struct_smq_msg, 'invoke', field(8, struct_smq_invoke))
-class struct_smq_invoke_rsp(Struct): pass
-struct_smq_invoke_rsp.SIZE = 16
-struct_smq_invoke_rsp._fields_ = ['ctx', 'retval']
-setattr(struct_smq_invoke_rsp, 'ctx', field(0, uint64_t))
-setattr(struct_smq_invoke_rsp, 'retval', field(8, ctypes.c_int32))
+@record
+class struct_fastrpc_ioctl_perf:
+  SIZE = 24
+  data: Annotated[uintptr_t, 0]
+  numkeys: Annotated[uint32_t, 8]
+  keys: Annotated[uintptr_t, 16]
+@record
+class struct_fastrpc_ctrl_latency:
+  SIZE = 8
+  enable: Annotated[uint32_t, 0]
+  level: Annotated[uint32_t, 4]
+@record
+class struct_fastrpc_ctrl_smmu:
+  SIZE = 4
+  sharedcb: Annotated[uint32_t, 0]
+@record
+class struct_fastrpc_ctrl_kalloc:
+  SIZE = 4
+  kalloc_support: Annotated[uint32_t, 0]
+@record
+class struct_fastrpc_ioctl_control:
+  SIZE = 12
+  req: Annotated[uint32_t, 0]
+  lp: Annotated[struct_fastrpc_ctrl_latency, 4]
+  smmu: Annotated[struct_fastrpc_ctrl_smmu, 4]
+  kalloc: Annotated[struct_fastrpc_ctrl_kalloc, 4]
+@record
+class struct_smq_null_invoke:
+  SIZE = 16
+  ctx: Annotated[uint64_t, 0]
+  handle: Annotated[uint32_t, 8]
+  sc: Annotated[uint32_t, 12]
+@record
+class struct_smq_phy_page:
+  SIZE = 16
+  addr: Annotated[uint64_t, 0]
+  size: Annotated[uint64_t, 8]
+@record
+class struct_smq_invoke_buf:
+  SIZE = 8
+  num: Annotated[ctypes.c_int32, 0]
+  pgidx: Annotated[ctypes.c_int32, 4]
+@record
+class struct_smq_invoke:
+  SIZE = 32
+  header: Annotated[struct_smq_null_invoke, 0]
+  page: Annotated[struct_smq_phy_page, 16]
+@record
+class struct_smq_msg:
+  SIZE = 40
+  pid: Annotated[uint32_t, 0]
+  tid: Annotated[uint32_t, 4]
+  invoke: Annotated[struct_smq_invoke, 8]
+@record
+class struct_smq_invoke_rsp:
+  SIZE = 16
+  ctx: Annotated[uint64_t, 0]
+  retval: Annotated[ctypes.c_int32, 8]
 remote_handle = ctypes.c_uint32
 remote_handle64 = ctypes.c_uint64
 fastrpc_async_jobid = ctypes.c_uint64
-class remote_buf(Struct): pass
-remote_buf.SIZE = 16
-remote_buf._fields_ = ['pv', 'nLen']
-setattr(remote_buf, 'pv', field(0, ctypes.c_void_p))
-setattr(remote_buf, 'nLen', field(8, size_t))
-class remote_dma_handle(Struct): pass
-remote_dma_handle.SIZE = 8
-remote_dma_handle._fields_ = ['fd', 'offset']
-setattr(remote_dma_handle, 'fd', field(0, int32_t))
-setattr(remote_dma_handle, 'offset', field(4, uint32_t))
-class remote_arg(Union): pass
-remote_arg.SIZE = 16
-remote_arg._fields_ = ['buf', 'h', 'h64', 'dma']
-setattr(remote_arg, 'buf', field(0, remote_buf))
-setattr(remote_arg, 'h', field(0, remote_handle))
-setattr(remote_arg, 'h64', field(0, remote_handle64))
-setattr(remote_arg, 'dma', field(0, remote_dma_handle))
+@record
+class remote_buf:
+  SIZE = 16
+  pv: Annotated[ctypes.POINTER(None), 0]
+  nLen: Annotated[size_t, 8]
+@record
+class remote_dma_handle:
+  SIZE = 8
+  fd: Annotated[int32_t, 0]
+  offset: Annotated[uint32_t, 4]
+@record
+class remote_arg:
+  SIZE = 16
+  buf: Annotated[remote_buf, 0]
+  h: Annotated[remote_handle, 0]
+  h64: Annotated[remote_handle64, 0]
+  dma: Annotated[remote_dma_handle, 0]
 enum_fastrpc_async_notify_type = CEnum(ctypes.c_uint32)
 FASTRPC_ASYNC_NO_SYNC = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_NO_SYNC', 0)
 FASTRPC_ASYNC_CALLBACK = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_CALLBACK', 1)
 FASTRPC_ASYNC_POLL = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_POLL', 2)
 FASTRPC_ASYNC_TYPE_MAX = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_TYPE_MAX', 3)
 
-class struct_fastrpc_async_callback(Struct): pass
-struct_fastrpc_async_callback.SIZE = 16
-struct_fastrpc_async_callback._fields_ = ['fn', 'context']
-setattr(struct_fastrpc_async_callback, 'fn', field(0, ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int32)))
-setattr(struct_fastrpc_async_callback, 'context', field(8, ctypes.c_void_p))
+@record
+class struct_fastrpc_async_callback:
+  SIZE = 16
+  fn: Annotated[ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.POINTER(None), ctypes.c_int32), 0]
+  context: Annotated[ctypes.POINTER(None), 8]
 fastrpc_async_callback_t = struct_fastrpc_async_callback
-class struct_fastrpc_async_descriptor(Struct): pass
-struct_fastrpc_async_descriptor.SIZE = 32
-struct_fastrpc_async_descriptor._fields_ = ['type', 'jobid', 'cb']
-setattr(struct_fastrpc_async_descriptor, 'type', field(0, enum_fastrpc_async_notify_type))
-setattr(struct_fastrpc_async_descriptor, 'jobid', field(8, fastrpc_async_jobid))
-setattr(struct_fastrpc_async_descriptor, 'cb', field(16, fastrpc_async_callback_t))
+@record
+class struct_fastrpc_async_descriptor:
+  SIZE = 32
+  type: Annotated[enum_fastrpc_async_notify_type, 0]
+  jobid: Annotated[fastrpc_async_jobid, 8]
+  cb: Annotated[fastrpc_async_callback_t, 16]
 fastrpc_async_descriptor_t = struct_fastrpc_async_descriptor
 enum_fastrpc_process_type = CEnum(ctypes.c_uint32)
 PROCESS_TYPE_SIGNED = enum_fastrpc_process_type.define('PROCESS_TYPE_SIGNED', 0)
@@ -320,11 +322,11 @@ RPC_ADAPTIVE_QOS = enum_remote_rpc_latency_flags.define('RPC_ADAPTIVE_QOS', 2)
 RPC_POLL_QOS = enum_remote_rpc_latency_flags.define('RPC_POLL_QOS', 3)
 
 remote_rpc_control_latency_t = enum_remote_rpc_latency_flags
-class struct_remote_rpc_control_latency(Struct): pass
-struct_remote_rpc_control_latency.SIZE = 8
-struct_remote_rpc_control_latency._fields_ = ['enable', 'latency']
-setattr(struct_remote_rpc_control_latency, 'enable', field(0, remote_rpc_control_latency_t))
-setattr(struct_remote_rpc_control_latency, 'latency', field(4, uint32_t))
+@record
+class struct_remote_rpc_control_latency:
+  SIZE = 8
+  enable: Annotated[remote_rpc_control_latency_t, 0]
+  latency: Annotated[uint32_t, 4]
 enum_remote_dsp_attributes = CEnum(ctypes.c_uint32)
 DOMAIN_SUPPORT = enum_remote_dsp_attributes.define('DOMAIN_SUPPORT', 0)
 UNSIGNED_PD_SUPPORT = enum_remote_dsp_attributes.define('UNSIGNED_PD_SUPPORT', 1)
@@ -339,21 +341,21 @@ ASYNC_FASTRPC_SUPPORT = enum_remote_dsp_attributes.define('ASYNC_FASTRPC_SUPPORT
 STATUS_NOTIFICATION_SUPPORT = enum_remote_dsp_attributes.define('STATUS_NOTIFICATION_SUPPORT', 10)
 FASTRPC_MAX_DSP_ATTRIBUTES = enum_remote_dsp_attributes.define('FASTRPC_MAX_DSP_ATTRIBUTES', 11)
 
-class struct_remote_dsp_capability(Struct): pass
-struct_remote_dsp_capability.SIZE = 12
-struct_remote_dsp_capability._fields_ = ['domain', 'attribute_ID', 'capability']
-setattr(struct_remote_dsp_capability, 'domain', field(0, uint32_t))
-setattr(struct_remote_dsp_capability, 'attribute_ID', field(4, uint32_t))
-setattr(struct_remote_dsp_capability, 'capability', field(8, uint32_t))
+@record
+class struct_remote_dsp_capability:
+  SIZE = 12
+  domain: Annotated[uint32_t, 0]
+  attribute_ID: Annotated[uint32_t, 4]
+  capability: Annotated[uint32_t, 8]
 fastrpc_capability = struct_remote_dsp_capability
-class struct_remote_rpc_control_wakelock(Struct): pass
-struct_remote_rpc_control_wakelock.SIZE = 4
-struct_remote_rpc_control_wakelock._fields_ = ['enable']
-setattr(struct_remote_rpc_control_wakelock, 'enable', field(0, uint32_t))
-class struct_remote_rpc_get_domain(Struct): pass
-struct_remote_rpc_get_domain.SIZE = 4
-struct_remote_rpc_get_domain._fields_ = ['domain']
-setattr(struct_remote_rpc_get_domain, 'domain', field(0, ctypes.c_int32))
+@record
+class struct_remote_rpc_control_wakelock:
+  SIZE = 4
+  enable: Annotated[uint32_t, 0]
+@record
+class struct_remote_rpc_get_domain:
+  SIZE = 4
+  domain: Annotated[ctypes.c_int32, 0]
 remote_rpc_get_domain_t = struct_remote_rpc_get_domain
 enum_session_control_req_id = CEnum(ctypes.c_uint32)
 FASTRPC_THREAD_PARAMS = enum_session_control_req_id.define('FASTRPC_THREAD_PARAMS', 1)
@@ -366,40 +368,40 @@ FASTRPC_REMOTE_PROCESS_EXCEPTION = enum_session_control_req_id.define('FASTRPC_R
 FASTRPC_REMOTE_PROCESS_TYPE = enum_session_control_req_id.define('FASTRPC_REMOTE_PROCESS_TYPE', 10)
 FASTRPC_REGISTER_STATUS_NOTIFICATIONS = enum_session_control_req_id.define('FASTRPC_REGISTER_STATUS_NOTIFICATIONS', 11)
 
-class struct_remote_rpc_thread_params(Struct): pass
-struct_remote_rpc_thread_params.SIZE = 12
-struct_remote_rpc_thread_params._fields_ = ['domain', 'prio', 'stack_size']
-setattr(struct_remote_rpc_thread_params, 'domain', field(0, ctypes.c_int32))
-setattr(struct_remote_rpc_thread_params, 'prio', field(4, ctypes.c_int32))
-setattr(struct_remote_rpc_thread_params, 'stack_size', field(8, ctypes.c_int32))
-class struct_remote_rpc_control_unsigned_module(Struct): pass
-struct_remote_rpc_control_unsigned_module.SIZE = 8
-struct_remote_rpc_control_unsigned_module._fields_ = ['domain', 'enable']
-setattr(struct_remote_rpc_control_unsigned_module, 'domain', field(0, ctypes.c_int32))
-setattr(struct_remote_rpc_control_unsigned_module, 'enable', field(4, ctypes.c_int32))
-class struct_remote_rpc_relative_thread_priority(Struct): pass
-struct_remote_rpc_relative_thread_priority.SIZE = 8
-struct_remote_rpc_relative_thread_priority._fields_ = ['domain', 'relative_thread_priority']
-setattr(struct_remote_rpc_relative_thread_priority, 'domain', field(0, ctypes.c_int32))
-setattr(struct_remote_rpc_relative_thread_priority, 'relative_thread_priority', field(4, ctypes.c_int32))
-class struct_remote_rpc_process_clean_params(Struct): pass
-struct_remote_rpc_process_clean_params.SIZE = 4
-struct_remote_rpc_process_clean_params._fields_ = ['domain']
-setattr(struct_remote_rpc_process_clean_params, 'domain', field(0, ctypes.c_int32))
-class struct_remote_rpc_session_close(Struct): pass
-struct_remote_rpc_session_close.SIZE = 4
-struct_remote_rpc_session_close._fields_ = ['domain']
-setattr(struct_remote_rpc_session_close, 'domain', field(0, ctypes.c_int32))
-class struct_remote_rpc_control_pd_dump(Struct): pass
-struct_remote_rpc_control_pd_dump.SIZE = 8
-struct_remote_rpc_control_pd_dump._fields_ = ['domain', 'enable']
-setattr(struct_remote_rpc_control_pd_dump, 'domain', field(0, ctypes.c_int32))
-setattr(struct_remote_rpc_control_pd_dump, 'enable', field(4, ctypes.c_int32))
-class struct_remote_process_type(Struct): pass
-struct_remote_process_type.SIZE = 8
-struct_remote_process_type._fields_ = ['domain', 'process_type']
-setattr(struct_remote_process_type, 'domain', field(0, ctypes.c_int32))
-setattr(struct_remote_process_type, 'process_type', field(4, ctypes.c_int32))
+@record
+class struct_remote_rpc_thread_params:
+  SIZE = 12
+  domain: Annotated[ctypes.c_int32, 0]
+  prio: Annotated[ctypes.c_int32, 4]
+  stack_size: Annotated[ctypes.c_int32, 8]
+@record
+class struct_remote_rpc_control_unsigned_module:
+  SIZE = 8
+  domain: Annotated[ctypes.c_int32, 0]
+  enable: Annotated[ctypes.c_int32, 4]
+@record
+class struct_remote_rpc_relative_thread_priority:
+  SIZE = 8
+  domain: Annotated[ctypes.c_int32, 0]
+  relative_thread_priority: Annotated[ctypes.c_int32, 4]
+@record
+class struct_remote_rpc_process_clean_params:
+  SIZE = 4
+  domain: Annotated[ctypes.c_int32, 0]
+@record
+class struct_remote_rpc_session_close:
+  SIZE = 4
+  domain: Annotated[ctypes.c_int32, 0]
+@record
+class struct_remote_rpc_control_pd_dump:
+  SIZE = 8
+  domain: Annotated[ctypes.c_int32, 0]
+  enable: Annotated[ctypes.c_int32, 4]
+@record
+class struct_remote_process_type:
+  SIZE = 8
+  domain: Annotated[ctypes.c_int32, 0]
+  process_type: Annotated[ctypes.c_int32, 4]
 remote_rpc_process_exception = struct_remote_rpc_process_clean_params
 enum_remote_rpc_status_flags = CEnum(ctypes.c_uint32)
 FASTRPC_USER_PD_UP = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_UP', 0)
@@ -409,13 +411,13 @@ FASTRPC_USER_PD_EXCEPTION = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD
 FASTRPC_DSP_SSR = enum_remote_rpc_status_flags.define('FASTRPC_DSP_SSR', 4)
 
 remote_rpc_status_flags_t = enum_remote_rpc_status_flags
-fastrpc_notif_fn_t = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, enum_remote_rpc_status_flags)
-class struct_remote_rpc_notif_register(Struct): pass
-struct_remote_rpc_notif_register.SIZE = 24
-struct_remote_rpc_notif_register._fields_ = ['context', 'domain', 'notifier_fn']
-setattr(struct_remote_rpc_notif_register, 'context', field(0, ctypes.c_void_p))
-setattr(struct_remote_rpc_notif_register, 'domain', field(8, ctypes.c_int32))
-setattr(struct_remote_rpc_notif_register, 'notifier_fn', field(16, fastrpc_notif_fn_t))
+fastrpc_notif_fn_t = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.c_int32, ctypes.c_int32, enum_remote_rpc_status_flags)
+@record
+class struct_remote_rpc_notif_register:
+  SIZE = 24
+  context: Annotated[ctypes.POINTER(None), 0]
+  domain: Annotated[ctypes.c_int32, 8]
+  notifier_fn: Annotated[fastrpc_notif_fn_t, 16]
 remote_rpc_notif_register_t = struct_remote_rpc_notif_register
 enum_remote_mem_map_flags = CEnum(ctypes.c_uint32)
 REMOTE_MAP_MEM_STATIC = enum_remote_mem_map_flags.define('REMOTE_MAP_MEM_STATIC', 0)
@@ -437,11 +439,11 @@ FASTRPC_MAP_FD = enum_fastrpc_map_flags.define('FASTRPC_MAP_FD', 2)
 FASTRPC_MAP_FD_DELAYED = enum_fastrpc_map_flags.define('FASTRPC_MAP_FD_DELAYED', 3)
 FASTRPC_MAP_MAX = enum_fastrpc_map_flags.define('FASTRPC_MAP_MAX', 4)
 
-class struct__cstring1_s(Struct): pass
-struct__cstring1_s.SIZE = 16
-struct__cstring1_s._fields_ = ['data', 'dataLen']
-setattr(struct__cstring1_s, 'data', field(0, Pointer(ctypes.c_char)))
-setattr(struct__cstring1_s, 'dataLen', field(8, ctypes.c_int32))
+@record
+class struct__cstring1_s:
+  SIZE = 16
+  data: Annotated[ctypes.POINTER(ctypes.c_char), 0]
+  dataLen: Annotated[ctypes.c_int32, 8]
 _cstring1_t = struct__cstring1_s
 apps_std_FILE = ctypes.c_int32
 enum_apps_std_SEEK = CEnum(ctypes.c_uint32)
@@ -451,37 +453,38 @@ APPS_STD_SEEK_END = enum_apps_std_SEEK.define('APPS_STD_SEEK_END', 2)
 _32BIT_PLACEHOLDER_apps_std_SEEK = enum_apps_std_SEEK.define('_32BIT_PLACEHOLDER_apps_std_SEEK', 2147483647)
 
 apps_std_SEEK = enum_apps_std_SEEK
-class struct_apps_std_DIR(Struct): pass
+@record
+class struct_apps_std_DIR:
+  SIZE = 8
+  handle: Annotated[uint64, 0]
 uint64 = ctypes.c_uint64
-struct_apps_std_DIR.SIZE = 8
-struct_apps_std_DIR._fields_ = ['handle']
-setattr(struct_apps_std_DIR, 'handle', field(0, uint64))
 apps_std_DIR = struct_apps_std_DIR
-class struct_apps_std_DIRENT(Struct): pass
-struct_apps_std_DIRENT.SIZE = 260
-struct_apps_std_DIRENT._fields_ = ['ino', 'name']
-setattr(struct_apps_std_DIRENT, 'ino', field(0, ctypes.c_int32))
-setattr(struct_apps_std_DIRENT, 'name', field(4, Array(ctypes.c_char, 255)))
+@record
+class struct_apps_std_DIRENT:
+  SIZE = 260
+  ino: Annotated[ctypes.c_int32, 0]
+  name: Annotated[(ctypes.c_char* 255), 4]
 apps_std_DIRENT = struct_apps_std_DIRENT
-class struct_apps_std_STAT(Struct): pass
+@record
+class struct_apps_std_STAT:
+  SIZE = 96
+  tsz: Annotated[uint64, 0]
+  dev: Annotated[uint64, 8]
+  ino: Annotated[uint64, 16]
+  mode: Annotated[uint32, 24]
+  nlink: Annotated[uint32, 28]
+  rdev: Annotated[uint64, 32]
+  size: Annotated[uint64, 40]
+  atime: Annotated[int64, 48]
+  atimensec: Annotated[int64, 56]
+  mtime: Annotated[int64, 64]
+  mtimensec: Annotated[int64, 72]
+  ctime: Annotated[int64, 80]
+  ctimensec: Annotated[int64, 88]
 uint32 = ctypes.c_uint32
 int64 = ctypes.c_int64
-struct_apps_std_STAT.SIZE = 96
-struct_apps_std_STAT._fields_ = ['tsz', 'dev', 'ino', 'mode', 'nlink', 'rdev', 'size', 'atime', 'atimensec', 'mtime', 'mtimensec', 'ctime', 'ctimensec']
-setattr(struct_apps_std_STAT, 'tsz', field(0, uint64))
-setattr(struct_apps_std_STAT, 'dev', field(8, uint64))
-setattr(struct_apps_std_STAT, 'ino', field(16, uint64))
-setattr(struct_apps_std_STAT, 'mode', field(24, uint32))
-setattr(struct_apps_std_STAT, 'nlink', field(28, uint32))
-setattr(struct_apps_std_STAT, 'rdev', field(32, uint64))
-setattr(struct_apps_std_STAT, 'size', field(40, uint64))
-setattr(struct_apps_std_STAT, 'atime', field(48, int64))
-setattr(struct_apps_std_STAT, 'atimensec', field(56, int64))
-setattr(struct_apps_std_STAT, 'mtime', field(64, int64))
-setattr(struct_apps_std_STAT, 'mtimensec', field(72, int64))
-setattr(struct_apps_std_STAT, 'ctime', field(80, int64))
-setattr(struct_apps_std_STAT, 'ctimensec', field(88, int64))
 apps_std_STAT = struct_apps_std_STAT
+init_records()
 ION_HEAP_SYSTEM_MASK = ((1 << ION_HEAP_TYPE_SYSTEM))
 ION_HEAP_SYSTEM_CONTIG_MASK = ((1 << ION_HEAP_TYPE_SYSTEM_CONTIG))
 ION_HEAP_CARVEOUT_MASK = ((1 << ION_HEAP_TYPE_CARVEOUT))
