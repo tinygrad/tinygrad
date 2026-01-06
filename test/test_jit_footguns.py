@@ -6,7 +6,6 @@ Each test shows behavior that works without JIT but changes with JIT.
 Comments marked "should be X!" indicate the intuitively expected value.
 
 SILENT MISMATCHES (highest priority - wrong results, no error):
-  tensors_in_containers_ignored      EASY   only checks t.__class__ is Tensor, could scan lists/dicts
   class_method_shared_across_instances EASY could check if first arg is self and warn
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
   python_constants_frozen            HARD   inherent to tracing JITs
@@ -65,20 +64,12 @@ class TestJitFootguns(unittest.TestCase):
     with self.assertRaises(JitError):
       f(x, x)
 
-  def test_tensors_in_containers_ignored(self):
-    """Tensors inside lists/dicts are not tracked as inputs."""
+  def test_tensors_in_containers(self):
     @TinyJit
     def f(a, arr): return (a + arr[0]).realize()
-
-    results = []
     for i in range(4):
       a, b = Tensor([1, 1, 1]).realize(), Tensor([i, i, i]).realize()
-      results.append(f(a, [b]).numpy().copy())
-
-    np.testing.assert_array_equal(results[0], [1, 1, 1])  # warmup
-    np.testing.assert_array_equal(results[1], [2, 2, 2])  # capture
-    np.testing.assert_array_equal(results[2], [2, 2, 2])  # should be [3,3,3]!
-    np.testing.assert_array_equal(results[3], [2, 2, 2])  # should be [4,4,4]!
+      np.testing.assert_array_equal(f(a, [b]).numpy(), [1+i, 1+i, 1+i])
 
   def test_nested_jit_fails_on_second_call(self):
     """Nested JIT works on first call but fails on second."""

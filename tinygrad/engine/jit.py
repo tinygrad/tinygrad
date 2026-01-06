@@ -228,6 +228,10 @@ class CapturedJit(Generic[ReturnType]):
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
+  # extract tensors from containers (shallow, not recursive to avoid grabbing model weights)
+  for x in args + tuple(kwargs.values()):
+    if isinstance(x, (tuple,list)): tensors += [t for t in x if t.__class__ is Tensor and not any(t is y for y in tensors)]
+    elif isinstance(x, dict): tensors += [t for t in x.values() if t.__class__ is Tensor and not any(t is y for y in tensors)]
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
   # TODO: this multi unpack stuff is not well tested.
   lbs: list[UOp] = flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
