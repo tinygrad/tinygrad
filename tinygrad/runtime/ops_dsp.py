@@ -98,13 +98,11 @@ class DSPBuffer:
 
 class DSPAllocator(Allocator['DSPDevice']):
   def _alloc(self, size:int, options:BufferSpec):
-    if getenv("MOCKDSP"): fd, share_info = -1, None
+    if getenv("MOCKDSP"): fd, share_info, flags = -1, None, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS
     else:
       b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
-      fd = (share_info:=qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)).fd
-
-    va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
-    return DSPBuffer(va_addr, size, share_info, offset=0)
+      fd, flags = (share_info:=qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)).fd, mmap.MAP_SHARED
+    return DSPBuffer(libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, flags, fd, 0), size, share_info, offset=0)
 
   @suppress_finalizing
   def _free(self, opaque:DSPBuffer, options:BufferSpec):
