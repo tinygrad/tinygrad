@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Test pdf2.py PDF parser and enum generation."""
+"""Test pdf.py PDF parser and enum generation."""
 import unittest, tempfile, importlib.util
-from extra.assembly.amd.pdf2 import extract, extract_tables, extract_enums, write_enums, PDF_URLS
+from extra.assembly.amd.pdf import extract, extract_tables, extract_enums, write_enums, PDF_URLS
 
 EXPECTED = {
   "rdna3": {"pages": 655, "tables": 115, "sop2_ops": 67, "sop2_first": "S_ADD_U32"},
