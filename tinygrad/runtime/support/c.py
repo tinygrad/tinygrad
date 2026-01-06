@@ -1,4 +1,4 @@
-import ctypes, functools, inspect, os, pathlib, re, sys, sysconfig
+import ctypes, functools, os, pathlib, re, sys, sysconfig, typing
 from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
@@ -41,7 +41,7 @@ def record(cls):
     for f,v in [*zip(self._real_fields_, args), *kwargs.items()]: setattr(self, f, v)
 
   struct = type(cls.__name__, (ctypes.Structure,), {'_fields_': [('_mem_', ctypes.c_char * cls.SIZE)], '__init__':__init__})
-  hints = inspect.get_annotations(cls, locals={cls.__name__:struct})
+  hints = typing.get_type_hints(cls, include_extras=True, localns={cls.__name__:struct})
   for nm, typ in hints.items(): setattr(struct, nm, field(typ.__origin__, *typ.__metadata__))
   setattr(struct, '_real_fields_', tuple(hints.keys()))
   return struct
@@ -98,7 +98,7 @@ class DLL(ctypes.CDLL):
     return fn
 
   def bind(self, fn):
-    restype = (hints:=inspect.get_annotations(fn)).pop('return', None)
+    restype = (hints:=typing.get_type_hints(fn)).pop('return', None)
     argtypes = tuple(hints.values())
     return lambda *args: self._get_func(fn.__name__, argtypes, restype)(*args)
 
