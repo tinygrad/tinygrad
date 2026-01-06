@@ -5,7 +5,7 @@ import numpy as np
 from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV, needs_second_gpu
 from tinygrad.tensor import Tensor
-from tinygrad.engine.jit import TinyJit, GraphRunner, MultiGraphRunner, graph_class
+from tinygrad.engine.jit import TinyJit, JitError, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
 from tinygrad.device import Device
 from tinygrad.helpers import Context, JIT, GlobalCounters, getenv
@@ -76,7 +76,7 @@ class TestJit(unittest.TestCase):
   def test_nothing_jitted(self):
     @TinyJit
     def add(a, b): return None
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       for _ in range(5):
         a = Tensor.randn(10, 10)
         b = Tensor.randn(10, 10)
@@ -125,13 +125,13 @@ class TestJit(unittest.TestCase):
       b = Tensor.randn(10, 10)
       add(a, b)
     bad = Tensor.randn(20, 20)
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       add(a, bad)
 
   def test_jit_shape_views_mismatch(self):
     @TinyJit
     def add(a): return (a+1).realize()
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       for i in range(1,5):
         # a has an offset that the kernel doesn't know about
         a = Tensor.randn(10, 10).realize()[:, i:i+2]
@@ -142,7 +142,7 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     a = Tensor.randn(10, 10)
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       add(a, a)
 
   def test_jit_assign(self, dtype=dtypes.float32):
@@ -510,7 +510,7 @@ class TestJit(unittest.TestCase):
     # TODO: this should fail since input has a different size
     f(Tensor(2.0)).item()
     # TODO: this should not fail, and should return 3
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       f(Tensor([2.0])).item()
 
 @unittest.skip("Pending multioutput implementation #3607")
