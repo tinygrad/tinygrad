@@ -225,7 +225,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
             if clang.CXCursor_NSReturnsRetained in attrs(c): lines.append(f"{nm(c)} = objc.returns_retained({nm(c)})")
           case (clang.CXCursor_StructDecl | clang.CXCursor_UnionDecl | clang.CXCursor_TypedefDecl | clang.CXCursor_EnumDecl
                 | clang.CXCursor_ObjCInterfaceDecl): tname(clang.clang_getCursorType(c))
-          case clang.CXCursor_MacroDefinition if parse_macros and len(toks:=Tokens(c)) > 1:
+          case clang.CXCursor_MacroDefinition if parse_macros and nm(c) not in fns and len(toks:=Tokens(c)) > 1:
             if nm(toks[1])=='(' and clang.clang_equalLocations(clang.clang_getRangeEnd(extent(toks[0])), clang.clang_getRangeStart(extent(toks[1]))):
               it = iter(toks[1:])
               _args = [nm(t) for t in itertools.takewhile(lambda t:nm(t)!=')', it) if clang.clang_getTokenKind(t) == clang.CXToken_Identifier]
