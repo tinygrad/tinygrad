@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test pdf.py PDF parser and enum generation."""
 import unittest, tempfile, importlib.util
-from extra.assembly.amd.pdf import extract, extract_tables, extract_enums, write_enums, PDF_URLS
+from extra.assembly.amd.pdf import extract, extract_tables, extract_enums, extract_pcode, write_enums, PDF_URLS
 
 EXPECTED = {
   "rdna3": {"pages": 655, "tables": 115, "sop2_ops": 67, "sop2_first": "S_ADD_U32"},
@@ -15,6 +15,7 @@ class TestPDF2(unittest.TestCase):
     cls.data = {name: extract(url) for name, url in PDF_URLS.items()}
     cls.tables = {name: extract_tables(pages) for name, pages in cls.data.items()}
     cls.enums = {name: extract_enums(cls.tables[name]) for name in PDF_URLS}
+    cls.pcode = {name: extract_pcode(cls.data[name], cls.enums[name]) for name in PDF_URLS}
 
   def test_page_counts(self):
     for name, exp in EXPECTED.items():
@@ -45,6 +46,26 @@ class TestPDF2(unittest.TestCase):
         for attr in dir(mod):
           if attr.endswith('Op'):
             self.assertGreaterEqual(len(getattr(mod, attr)), 2, f"{name} {attr} has too few ops")
+
+  def test_pcode_rdna3_tricky(self):
+    """Test specific pseudocode patterns that are tricky to extract correctly."""
+    pcode = self.pcode['rdna3']
+    # BUFFER_ATOMIC_MAX_U64: should have 4 statements (not truncated)
+    self.assertEqual(pcode[('BUFFER_ATOMIC_MAX_U64', 72)],
+      'tmp = MEM[ADDR].u64;\nsrc = DATA.u64;\nMEM[ADDR].u64 = src >= tmp ? src : tmp;\nRETURN_DATA.u64 = tmp')
+    # GLOBAL_STORE_B128: should have 4 MEM stores (not truncated)
+    self.assertEqual(pcode[('GLOBAL_STORE_B128', 29)],
+      'MEM[ADDR].b32 = VDATA[31 : 0];\nMEM[ADDR + 4U].b32 = VDATA[63 : 32];\nMEM[ADDR + 8U].b32 = VDATA[95 : 64];\nMEM[ADDR + 12U].b32 = VDATA[127 : 96]')
+    # S_CMOVK_I32: should have full if/endif block
+    self.assertEqual(pcode[('S_CMOVK_I32', 2)],
+      "if SCC then\nD0.i32 = 32'I(signext(SIMM16.i16))\nendif")
+
+  def test_pcode_no_examples(self):
+    """Pseudocode should not contain example lines with '=>'."""
+    for name in PDF_URLS:
+      for (op_name, opcode), code in self.pcode[name].items():
+        # No example lines (test vectors like "S_CTZ_I32_B32(0xaaaaaaaa) => 1")
+        self.assertNotIn('=>', code, f"{name} {op_name} contains example line with '=>'")
 
 if __name__ == "__main__":
   unittest.main()
