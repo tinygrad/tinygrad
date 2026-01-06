@@ -2,6 +2,7 @@
 """Benchmark comparing Python vs Rust RDNA3 emulators on real tinygrad kernels."""
 import ctypes, time, os
 from pathlib import Path
+from tinygrad.helpers import getenv, Profiling
 
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
@@ -125,6 +126,7 @@ def main():
   import argparse
   parser = argparse.ArgumentParser(description="Benchmark RDNA3 emulators")
   parser.add_argument("--iterations", type=int, default=3, help="Number of iterations per benchmark")
+  parser.add_argument("--profile", action='store_true', help="Enable profiler")
   args = parser.parse_args()
 
   rust_remu = get_rust_remu()
@@ -159,7 +161,8 @@ def main():
     buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
     set_valid_mem_ranges(ranges)
 
-    py_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
+    with Profiling(enabled=args.profile):
+      py_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
     rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations) if rust_remu else None
 
     if py_time:
