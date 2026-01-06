@@ -1,6 +1,6 @@
 # Generic PDF text extractor - no external dependencies
 import re, zlib
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, merge_dicts
 
 PDF_URLS = {
   "rdna3": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content",
@@ -91,50 +91,39 @@ def extract_tables(pages: list[list[tuple[float, float, str, str]]]) -> dict[int
 # AMD specific extraction
 # ═══════════════════════════════════════════════════════════════════════════════
 
+SRC_ENUM = {106: 'VCC_LO', 107: 'VCC_HI', 124: 'NULL', 125: 'M0', 126: 'EXEC_LO', 127: 'EXEC_HI', 128: 'ZERO',
+            233: 'DPP8', 234: 'DPP8FI', 235: 'SHARED_BASE', 236: 'SHARED_LIMIT', 237: 'PRIVATE_BASE', 238: 'PRIVATE_LIMIT',
+            240: 'POS_HALF', 241: 'NEG_HALF', 242: 'POS_ONE', 243: 'NEG_ONE', 244: 'POS_TWO', 245: 'NEG_TWO',
+            246: 'POS_FOUR', 247: 'NEG_FOUR', 248: 'INV_2PI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 253: 'SCC', 254: 'LDS_DIRECT'}
+
 def extract_enums(tables: dict[int, tuple[str, list[list[str]]]], arch: str) -> dict[str, dict[int, str]]:
-  """Extract opcode enums from tables. Returns {fmt_name: {opcode: opname}}."""
-  enums: dict[str, dict[int, str]] = {}
+  """Extract all enums from tables. Returns {enum_name: {value: name}}."""
+  enums: dict[str, dict[int, str]] = {'Src': SRC_ENUM}
   for num, (title, rows) in tables.items():
-    if not (m := re.match(r'(\w+) (?:Y-)?Opcodes', title)): continue
-    fmt_name = 'VOPD' if 'Y-Opcodes' in title else m.group(1)
-    ops: dict[int, str] = {}
-    for row in rows:
-      for i in range(0, len(row) - 1, 2):
-        if row[i].isdigit() and re.match(r'^[A-Z][A-Z0-9_]+$', row[i + 1]):
-          ops[int(row[i])] = row[i + 1]
-    if ops: enums[fmt_name] = ops
+    # Opcode enums from "XXX Opcodes" tables
+    if m := re.match(r'(\w+) (?:Y-)?Opcodes', title):
+      fmt_name = 'VOPD' if 'Y-Opcodes' in title else m.group(1)
+      ops: dict[int, str] = {}
+      for row in rows:
+        for i in range(0, len(row) - 1, 2):
+          if row[i].isdigit() and re.match(r'^[A-Z][A-Z0-9_]+$', row[i + 1]):
+            ops[int(row[i])] = row[i + 1]
+      if ops: enums[fmt_name] = ops
+    # BufFmt from "Data Format" tables
+    if 'Data Format' in title:
+      for row in rows:
+        for i in range(0, len(row) - 1, 2):
+          if row[i].isdigit() and re.match(r'^[\dA-Z_]+$', row[i + 1]) and 'INVALID' not in row[i + 1]:
+            enums.setdefault('BufFmt', {})[int(row[i])] = row[i + 1]
   # Fix missing opcodes not in PDF tables (documented in ISA but missing from opcode tables)
-  if arch in ('rdna3', 'rdna4'):
-    if 'SOPP' in enums:
-      enums['SOPP'].update({8: 'S_WAITCNT_DEPCTR', 58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'})
-    if 'SOPK' in enums:
-      enums['SOPK'].update({22: 'S_SUBVECTOR_LOOP_BEGIN', 23: 'S_SUBVECTOR_LOOP_END'})
-    if 'SMEM' in enums:
-      enums['SMEM'].update({34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'})
-    if 'DS' in enums:
-      enums['DS'].update({24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V', 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'})
-    if 'FLAT' in enums:
-      enums['FLAT'].update({40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'})
+  if arch == 'rdna3':
+    fixes = {'SOPP': {8: 'S_WAITCNT_DEPCTR', 58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'},
+             'SOPK': {22: 'S_SUBVECTOR_LOOP_BEGIN', 23: 'S_SUBVECTOR_LOOP_END'},
+             'SMEM': {34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'},
+             'DS': {24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V', 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'},
+             'FLAT': {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}}
+    for fmt, ops in fixes.items(): enums[fmt] = merge_dicts([enums[fmt], ops])
   return enums
-
-def extract_src_enum(pages: list[list[tuple[float, float, str, str]]]) -> dict[int, str]:
-  """Extract SrcEnum from SSRC encoding description. Returns {value: name}."""
-  # These are constant across all AMD ISAs
-  return {106: 'VCC_LO', 107: 'VCC_HI', 124: 'NULL', 125: 'M0', 126: 'EXEC_LO', 127: 'EXEC_HI', 128: 'ZERO',
-          233: 'DPP8', 234: 'DPP8FI', 235: 'SHARED_BASE', 236: 'SHARED_LIMIT', 237: 'PRIVATE_BASE', 238: 'PRIVATE_LIMIT',
-          240: 'POS_HALF', 241: 'NEG_HALF', 242: 'POS_ONE', 243: 'NEG_ONE', 244: 'POS_TWO', 245: 'NEG_TWO',
-          246: 'POS_FOUR', 247: 'NEG_FOUR', 248: 'INV_2PI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 253: 'SCC', 254: 'LDS_DIRECT'}
-
-def extract_buf_fmt(tables: dict[int, tuple[str, list[list[str]]]]) -> dict[int, str]:
-  """Extract BufFmt from Buffer Data Formats table. Returns {value: name}."""
-  buf_fmt: dict[int, str] = {}
-  for num, (title, rows) in tables.items():
-    if 'Data Format' not in title: continue
-    for row in rows:
-      for i in range(0, len(row) - 1, 2):
-        if row[i].isdigit() and re.match(r'^[\dA-Z_]+$', row[i + 1]) and 'INVALID' not in row[i + 1]:
-          buf_fmt[int(row[i])] = row[i + 1]
-  return buf_fmt
 
 def extract_ins(tables: dict[int, tuple[str, list[list[str]]]], arch: str) -> tuple[dict[str, list[tuple[str, int, int]]], dict[str, str]]:
   """Extract formats and encodings from 'XXX Fields' tables. Returns (formats, encodings)."""
@@ -244,26 +233,16 @@ def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[
 # Write autogen files
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def write_enums(enums: dict[str, dict[int, str]], src_enum: dict[int, str], buf_fmt: dict[int, str], arch: str, path: str):
+def write_enums(enums: dict[str, dict[int, str]], arch: str, path: str):
   """Write enum.py file from extracted enums."""
   doc_name = {"rdna3": "RDNA3.5", "rdna4": "RDNA4", "cdna": "CDNA4"}[arch]
   lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf2.py - do not edit", "from enum import IntEnum", ""]
-  # SrcEnum
-  lines.append("class SrcEnum(IntEnum):")
-  for val, name in sorted(src_enum.items()):
-    lines.append(f"  {name} = {val}")
-  lines.append("")
-  # Opcode enums
-  for fmt_name, ops in sorted(enums.items()):
-    lines.append(f"class {fmt_name}Op(IntEnum):")
-    for opcode, opname in sorted(ops.items()):
-      lines.append(f"  {opname} = {opcode}")
-    lines.append("")
-  # BufFmt
-  if buf_fmt:
-    lines.append("class BufFmt(IntEnum):")
-    for val, name in sorted(buf_fmt.items()):
-      lines.append(f"  BUF_FMT_{name} = {val}")
+  for name, values in sorted(enums.items()):
+    suffix = "Op" if name not in ('Src', 'BufFmt') else ("Enum" if name == 'Src' else "")
+    prefix = "BUF_FMT_" if name == 'BufFmt' else ""
+    lines.append(f"class {name}{suffix}(IntEnum):")
+    for val, member in sorted(values.items()):
+      lines.append(f"  {prefix}{member} = {val}")
     lines.append("")
   with open(path, "w") as f:
     f.write("\n".join(lines))
@@ -385,12 +364,10 @@ if __name__ == "__main__":
     pages = extract(url)
     tables = extract_tables(pages)
     enums = extract_enums(tables, arch)
-    src_enum = extract_src_enum(pages)
-    buf_fmt = extract_buf_fmt(tables)
     formats, encodings = extract_ins(tables, arch)
     pcode = extract_pcode(pages, enums)
     base = pathlib.Path(__file__).parent / "autogen" / arch
-    write_enums(enums, src_enum, buf_fmt, arch, base / "enum.py")
+    write_enums(enums, arch, base / "enum.py")
     write_ins(formats, encodings, enums, arch, base / "ins.py")
     write_pcode(pcode, enums, arch, base / "str_pcode.py")
     print(f"  {len(tables)} tables, {len(pcode)} pcode -> {base}")
