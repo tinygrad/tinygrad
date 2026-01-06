@@ -3,7 +3,7 @@ import platform, sys, ctypes, functools, time, mmap, threading, queue
 from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap, data64_le
 from tinygrad.helpers import CPU_CC, CPU_LVP, CPU_LLVM
 from tinygrad.device import BufferSpec, DMACPURef, CompilerSet, CompilerPair
-from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
+from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangJITRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer
@@ -111,7 +111,10 @@ class CPUProgram(HCQProgram):
   def __del__(self):
     if sys.platform == 'win32': ctypes.windll.kernel32.VirtualFree(ctypes.c_void_p(self.mem), ctypes.c_size_t(0), 0x8000) #0x8000 - MEM_RELEASE
 
-class CPUAllocator(HCQAllocatorBase):
+class CPUAllocator(HCQAllocator):
+  def __init__(self, dev:CPUDevice):
+    super().__init__(dev)
+    self.supports_copy_from_disk, self.supports_transfer = not dev.is_usb() and dev.has_sdma_queue, not dev.has_sdma_queue
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     if options.external_ptr: addr, buf = options.external_ptr, None
     elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
@@ -123,12 +126,6 @@ class CPUAllocator(HCQAllocatorBase):
   def _as_dmaref(self, buf):
     self.dev.synchronize()
     return DMACPURef(buf.va_addr, buf.size)
-  def _copyin(self, dest, src:memoryview):
-    self.dev.synchronize()
-    with cpu_profile('TINY -> CPU', self.dev.device, is_copy=True): ctypes.memmove(dest.va_addr, from_mv(src), len(src))
-  def _copyout(self, dest:memoryview, src):
-    self.dev.synchronize()
-    with cpu_profile('CPU -> TINY', self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), src.va_addr, len(dest))
   def _map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
 
