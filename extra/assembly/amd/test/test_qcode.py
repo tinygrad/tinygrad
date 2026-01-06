@@ -57,9 +57,11 @@ def _pr(n, d=0):
     case Assign(l, r):
       compound = {Ops.ADD: '+=', Ops.SUB: '-=', Ops.OR: '|=', Ops.AND: '&=', Ops.XOR: '^=', Ops.SHL: '<<=', Ops.SHR: '>>='}
       is_pc = l.op == Ops.DEFINE_VAR and l.arg[0] == 'PC'
-      if r.op in compound and len(r.src) == 2 and r.src[0] == l and not is_pc:
+      if isinstance(r, UOp) and r.op in compound and len(r.src) == 2 and r.src[0] == l and not is_pc:
         return f"{p}{_pr(l)} {compound[r.op]} {_pr(r.src[1])}"
-      return f"{p}{_pr(l)} = {_pr(r)}"
+      # Chained assignment: render without prefix for RHS
+      rhs = _pr(r) if isinstance(r, Assign) else _pr(r)
+      return f"{p}{_pr(l)} = {rhs}"
     case Declare(name, dt):
       base = dt.scalar() if dt.count > 1 else dt
       suffix = f"[{dt.count}]" if dt.count > 1 else ""
@@ -104,7 +106,8 @@ def _norm(s, keep_structure=False):
   return s.strip()
 
 def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
-  ok, fail, match, errs = 0, 0, 0, {}
+  ok, fail, match = 0, 0, 0
+  errs: dict[str, list[str]] = {}
   for cls, ops in pcode_strings.items():
     for op, pc in ops.items():
       try:
@@ -112,7 +115,9 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
         ok += 1
       except Exception as e:
         fail += 1
-        errs[str(e)[:60]] = errs.get(str(e)[:60], 0) + 1
+        key = str(e)[:60]
+        if key not in errs: errs[key] = []
+        errs[key].append(f"{cls.__name__}.{op.name}")
         continue
       rendered = _pr(ast)
       if _norm(pc) == _norm(rendered):
@@ -136,14 +141,15 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
   roundtrip_rate = 100 * match / ok if ok > 0 else 0
   if DEBUG:
     print(f"Parsed: {ok}/{total} ({parse_rate:.1f}%), Match: {match}/{ok} ({roundtrip_rate:.1f}%)")
-    for e, c in sorted(errs.items(), key=lambda x: -x[1])[:10]: print(f"  {c}: {e}")
+    for e, ops in sorted(errs.items(), key=lambda x: -len(x[1])):
+      print(f"  {len(ops)}: {e} ({ops[0]})")
   test.assertGreater(parse_rate, min_parse, f"Parse rate {parse_rate:.1f}% should be >{min_parse}%")
   test.assertGreater(roundtrip_rate, min_roundtrip, f"Roundtrip rate {roundtrip_rate:.1f}% should be >{min_roundtrip}%")
 
 class TestQcodeParseAndRoundtrip(unittest.TestCase):
   def test_rdna3(self): _test_arch(self, RDNA3_PCODE)
   def test_rdna4(self): _test_arch(self, RDNA4_PCODE, min_parse=96)
-  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=78)
+  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=95)
 
 if __name__ == "__main__":
   unittest.main()
