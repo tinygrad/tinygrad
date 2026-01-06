@@ -35,15 +35,21 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
   return _CEnum
 
+_pending_records = []
+
 def record(cls):
   def __init__(self, *args, **kwargs):
-    if hasattr(c:=self.__class__, '_ns_'):
-      for nm, t in typing.get_type_hints(cls, globalns=c._ns_, include_extras=True).items(): setattr(c, nm, field(t.__origin__, *t.__metadata__))
-      del c._ns_
     ctypes.Structure.__init__(self)
     for f,v in [*zip(self._real_fields_, args), *kwargs.items()]: setattr(self, f, v)
-  return type(cls.__name__, (ctypes.Structure,), {'__init__':__init__, '_fields_': [('_mem_', ctypes.c_char * cls.SIZE)],
-                                                  '_real_fields_':tuple(cls.__annotations__.keys()), '_ns_': sys._getframe().f_back.f_globals})
+  struct = type(cls.__name__, (ctypes.Structure,), {'__init__':__init__, '_fields_': [('_mem_', ctypes.c_char * cls.SIZE)],
+                                                    '_real_fields_':tuple(cls.__annotations__.keys())})
+  _pending_records.append((cls, struct, sys._getframe().f_back.f_globals))
+  return struct
+
+def init_records():
+  for cls, struct, ns in _pending_records:
+    for nm, t in typing.get_type_hints(cls, globalns=ns, include_extras=True).items(): setattr(struct, nm, field(t.__origin__, *t.__metadata__))
+  _pending_records.clear()
 
 def field(typ, off:int, bit_width=None, bit_off=0):
   if bit_width is not None:
@@ -97,8 +103,7 @@ class DLL(ctypes.CDLL):
     return fn
 
   def bind(self, fn):
-    restype = (hints:=typing.get_type_hints(fn)).pop('return', None)
-    argtypes = tuple(hints.values())
+    restype, argtypes = None if (rt:=(hints:=typing.get_type_hints(fn)).pop('return', None)) is type(None) else rt, tuple(hints.values())
     return lambda *args: self._get_func(fn.__name__, argtypes, restype)(*args)
 
   def __getattr__(self, nm):
