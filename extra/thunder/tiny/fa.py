@@ -11,6 +11,12 @@ NUM_WORKERS = 1
 Q_BLOCK_SIZE = 16
 KV_BLOCK_SIZE = 16
 
+def _sharded_empty(shape:tuple[int,...], ref:Tensor, axis:int, **kwargs) -> Tensor:
+  """Create an empty tensor, sharded like ref if ref is sharded."""
+  if not isinstance(ref.device, tuple): return Tensor.empty(*shape, device=ref.device, **kwargs)
+  shard_shape = tuple(s // len(ref.device) if i == axis else s for i, s in enumerate(shape))
+  return Tensor(Tensor.empty(*shard_shape, device=ref.device, **kwargs).uop.multi(axis), device=ref.device)
+
 def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False):
   if len(xq.shape) == 3: xq, xk, xv = xq.unsqueeze(0), xk.unsqueeze(0), xv.unsqueeze(0)
 
@@ -29,7 +35,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   B, N, H, D = xq.shape
   H_KV = xk.shape[2]
   GROUP_SIZE = H // H_KV
-  print(f"Flash Attention {B=} {N=} {H=} {D=} {H_KV=} {GROUP_SIZE=}")
 
   def custom_forward(ou:UOp, l_vecu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp) -> UOp:
     with Kernel("fa_custom_forward", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
@@ -395,29 +400,42 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
       return ker.finish()
 
+  # for multi-device, create mask on single device first then shard
+  single_device = xq.device[0] if isinstance(xq.device, tuple) else xq.device
+
   if is_causal:
     if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-    attn_mask = Tensor.ones((B, 1, N, N), requires_grad=False, device=xq.device, dtype=dtypes.bool).tril()
+    attn_mask = Tensor.ones((B, 1, N, N), requires_grad=False, device=single_device, dtype=dtypes.bool).tril()
   if attn_mask is not None:
     if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
   else:
-    attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=xq.device, dtype=dtypes.float32)
+    attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=single_device, dtype=dtypes.float32)
+  # shard attn_mask if inputs are sharded (axis=0 is batch dimension)
+  if isinstance(xq.device, tuple) and isinstance(attn_mask.device, str):
+    attn_mask = attn_mask.shard(xq.device, axis=0)
 
-  attn = Tensor.empty_like(xq)
-  l_vec = Tensor.empty(B, H, 1, N, requires_grad=False, device=xq.device, dtype=dtypes.float32).detach()
+  attn = _sharded_empty(xq.shape, xq, 0, dtype=xq.dtype)
+  l_vec = _sharded_empty((B, H, 1, N), xq, 0, requires_grad=False, dtype=dtypes.float32).detach()
 
   def grad(gradu:UOp, kernel:UOp) -> tuple[None, None, UOp, UOp, UOp, None]:
-    grad = Tensor(gradu)
-    grad_q = Tensor.empty_like(q := Tensor(kernel.src[2]))
-    grad_k = Tensor.empty_like(k := Tensor(kernel.src[3]))
-    grad_v = Tensor.empty_like(v := Tensor(kernel.src[4]))
-    mask = Tensor(kernel.src[5])
+    # Create Tensors from UOps, preserving device for multi-device tensors
+    grad = Tensor(gradu, device=gradu.device)
+    # kernel.src[0] is the padded attn output, kernel.src[1] is l_vec from the forward pass
+    attn_padded = Tensor(kernel.src[0], device=kernel.src[0].device)
+    l_vec_out = Tensor(kernel.src[1], device=kernel.src[1].device)
+    q = Tensor(kernel.src[2], device=kernel.src[2].device)
+    k = Tensor(kernel.src[3], device=kernel.src[3].device)
+    v = Tensor(kernel.src[4], device=kernel.src[4].device)
+    mask = Tensor(kernel.src[5], device=kernel.src[5].device)
+    grad_q = _sharded_empty(q.shape, q, 0, dtype=q.dtype)
+    grad_k = _sharded_empty(k.shape, k, 0, dtype=k.dtype)
+    grad_v = _sharded_empty(v.shape, v, 0, dtype=v.dtype)
 
-    delta_vec = (grad * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
+    delta_vec = (grad * attn_padded).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
 
-    grad_q = Tensor.custom_kernel(grad_q, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
-    grad_k = Tensor.custom_kernel(grad_k, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_k)[0]
-    grad_v = Tensor.custom_kernel(grad_v, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_v)[0]
+    grad_q = Tensor.custom_kernel(grad_q, grad, q, k, v, mask, l_vec_out, delta_vec, fxn=custom_backward_q)[0]
+    grad_k = Tensor.custom_kernel(grad_k, grad, q, k, v, mask, l_vec_out, delta_vec, fxn=custom_backward_k)[0]
+    grad_v = Tensor.custom_kernel(grad_v, grad, q, k, v, mask, l_vec_out, delta_vec, fxn=custom_backward_v)[0]
     return (None, None, grad_q.uop, grad_k.uop, grad_v.uop, None)
 
   attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, attn_mask, fxn=custom_forward, grad_fxn=grad)[:2]

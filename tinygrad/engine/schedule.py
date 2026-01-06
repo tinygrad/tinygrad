@@ -9,6 +9,11 @@ from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
 
+def unwrap_src(s:UOp) -> UOp:
+  """Unwrap wrapper ops (INDEX, CAST, etc.) to get the underlying AFTER/BUFFER."""
+  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.BIND, Ops.MSELECT, Ops.MSTACK, Ops.CONST}: s = s.src[0]
+  return s
+
 def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
@@ -18,10 +23,15 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       if u.op is Ops.RANGE:
         in_degree.setdefault(u, 0)
         continue
-      if u.op is not Ops.AFTER or u.src[1].op is Ops.RANGE: continue
+      # only process AFTERs for KERNEL (or END wrapping KERNEL)
+      if u.op is not Ops.AFTER: continue
+      if u.src[1].op is Ops.END:
+        if u.src[1].src[0].op is not Ops.KERNEL: continue
+      elif u.src[1].op is not Ops.KERNEL: continue
       k = u.src[1]
       in_degree.setdefault(k, 0)
       for s in k.src[0].src if k.op is Ops.END else k.src:
+        s = unwrap_src(s)
         if s.op is Ops.AFTER:
           children.setdefault(s.src[1], []).append(k)
           in_degree[k] += 1
@@ -32,8 +42,8 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
               assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
               children.setdefault(ss.src[1], []).append(k)
               in_degree[k] += 1
-        elif s.op in {Ops.BUFFER, Ops.BIND}:
-          pass  # a BUFFER is already realized, BINDs are handled in complete_create_schedule_with_vars
+        elif s.op in {Ops.BUFFER, Ops.BIND, Ops.CONST}:
+          pass  # a BUFFER is already realized, BINDs are handled in complete_create_schedule_with_vars, CONST is literal
         else:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
@@ -49,7 +59,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       if k.op is Ops.RANGE: schedule.append(k)
       elif k.op is Ops.KERNEL:
         ast = k.arg.ast
-        buf_uops = tuple(s.buf_uop for s in k.src if s.op is not Ops.BIND)
+        buf_uops = tuple(unwrap_src(s).buf_uop for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
         schedule.append((ast, buf_uops, k.arg.metadata, {}, bound_ranges))
         if rk.op is Ops.END: schedule.append(rk)
