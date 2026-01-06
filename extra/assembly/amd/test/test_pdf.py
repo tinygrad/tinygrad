@@ -14,7 +14,7 @@ class TestPDF2(unittest.TestCase):
   def setUpClass(cls):
     cls.data = {name: extract(url) for name, url in PDF_URLS.items()}
     cls.tables = {name: extract_tables(pages) for name, pages in cls.data.items()}
-    cls.enums = {name: extract_enums(cls.tables[name], name) for name in PDF_URLS}
+    cls.enums = {name: extract_enums(cls.tables[name]) for name in PDF_URLS}
 
   def test_page_counts(self):
     for name, exp in EXPECTED.items():
