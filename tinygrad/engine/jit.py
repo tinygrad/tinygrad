@@ -231,8 +231,9 @@ def _prepare_jit_inputs(args, kwargs):
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
   # TODO: this multi unpack stuff is not well tested.
   lbs: list[UOp] = flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
-  input_buffers: list[Buffer] = flatten([rb.bufs if isinstance(rb:=lb.base.realized, MultiBuffer) else [rb]
-                                         for lb in lbs if lb.base.realized is not None])
+  if any(lb.base.op is not Ops.BUFFER for lb in lbs):
+    raise JitError("JIT inputs must be Tensors with buffers, const Tensors are not allowed")
+  input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b:=lb.base.buffer, MultiBuffer) else [b] for lb in lbs])
   if len(set(input_buffers)) != len(input_buffers): raise JitError("duplicate inputs to JIT")
   st_varval_dtype_device = [(*(lb.substitute({lb.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), lb.dtype, lb.device) for lb in lbs]
   _var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
