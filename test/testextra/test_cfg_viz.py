@@ -178,5 +178,21 @@ class TestCfg(unittest.TestCase):
         s_endpgm(),
     ])
 
+  def test_colored_blocks(self):
+    N = 10
+    asm = ["entry:", s_branch("init0"),]
+    for i in range(N):
+      asm += [f"init{i}:", s_mov_b32(s[1], i + 1), s_branch(loop:=f"loop{i}")]
+      asm += [
+        f"{loop}:",
+          s_nop(i & 7),
+          s_add_u32(s[1], s[1], -1),
+          s_cmp_eq_i32(s[1], 0),
+          s_cbranch_scc0(loop),
+          s_branch(f"init{i+1}" if i + 1 < N else "end"),
+      ]
+    asm += ["end:", s_endpgm()]
+    run_asm("test_colored_blocks", asm)
+
 if __name__ == "__main__":
   unittest.main()
