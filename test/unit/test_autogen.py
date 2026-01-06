@@ -233,8 +233,8 @@ typedef struct
     FWSECLIC_FRTS_REGION_DESC = ns['FWSECLIC_FRTS_REGION_DESC']
     FWSECLIC_FRTS_CMD = ns['FWSECLIC_FRTS_CMD']
 
-    read_vbios_desc = FWSECLIC_READ_VBIOS_DESC(version=0x1, size=FWSECLIC_READ_VBIOS_DESC.SIZE, flags=2)
-    frst_reg_desc = FWSECLIC_FRTS_REGION_DESC(version=0x1, size=FWSECLIC_FRTS_REGION_DESC.SIZE,
+    read_vbios_desc = FWSECLIC_READ_VBIOS_DESC(version=0x1, size=ctypes.sizeof(FWSECLIC_READ_VBIOS_DESC), flags=2)
+    frst_reg_desc = FWSECLIC_FRTS_REGION_DESC(version=0x1, size=ctypes.sizeof(FWSECLIC_FRTS_REGION_DESC),
       frtsRegionOffset4K=0xdead, frtsRegionSize=0x100, frtsRegionMediaType=2)
     frts_cmd = FWSECLIC_FRTS_CMD(readVbiosDesc=read_vbios_desc, frtsRegionDesc=frst_reg_desc)
     assert int.from_bytes(frts_cmd, 'little') == 0x2000001000000dead0000001400000001000000020000000000000000000000000000001800000001
@@ -275,7 +275,7 @@ typedef struct ip_discovery_header
     hdr = b'IPDS\x04\x00|\x1d\x80\x1a\xffd\x01\x00\x00\x00\x8c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00' # noqa: E501
     ihdr = ip_discovery_header.from_buffer_copy(hdr)
 
-    assert ihdr.SIZE == 80
+    assert ctypes.sizeof(ihdr) == 80
     assert ihdr.signature == 0x53445049
     assert ihdr.version == 0x0004
     assert ihdr.num_dies == 1
@@ -317,7 +317,6 @@ typedef struct ip_discovery_header
 
     Point = namespace['Point']
     p = Point()
-    self.assertIsInstance(p, Struct)
     self.assertTrue(hasattr(p, 'x'))
     self.assertTrue(hasattr(p, 'y'))
 
