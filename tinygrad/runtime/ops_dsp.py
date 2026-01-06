@@ -2,10 +2,9 @@ from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
 from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, CompilerSet, CompilerPair
-from tinygrad.runtime.ops_cpu import CPUAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG
+from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -99,14 +98,18 @@ class DSPBuffer:
 
 class DSPAllocator(Allocator['DSPDevice']):
   def _alloc(self, size:int, options:BufferSpec):
-    b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
-    share_info = qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)
+    if getenv("MOCKDSP"): fd, share_info = -1, None
+    else:
+      b = qcom_dsp.ION_IOC_ALLOC(self.dev.ion_fd, len=size, align=0x200, heap_id_mask=1<<qcom_dsp.ION_SYSTEM_HEAP_ID, flags=qcom_dsp.ION_FLAG_CACHED)
+      fd = (share_info:=qcom_dsp.ION_IOC_SHARE(self.dev.ion_fd, handle=b.handle)).fd
+
     va_addr = libc.mmap(0, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED, share_info.fd, 0)
     return DSPBuffer(va_addr, size, share_info, offset=0)
 
+  @suppress_finalizing
   def _free(self, opaque:DSPBuffer, options:BufferSpec):
-    if libc is not None and qcom_dsp is not None:
-      libc.munmap(opaque.va_addr, opaque.size)
+    libc.munmap(opaque.va_addr, opaque.size)
+    if opaque.share_info is not None:
       os.close(opaque.share_info.fd)
       qcom_dsp.ION_IOC_FREE(self.dev.ion_fd, handle=opaque.share_info.handle)
 
@@ -134,7 +137,7 @@ class DSPDevice(Compiled):
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
     if getenv("MOCKDSP"):
       mock_compilers = CompilerSet([CompilerPair(MockDSPRenderer, functools.partial(ClangCompiler, None, ["-static"]+compiler_args, 'llvm-objdump'))])
-      super().__init__(device, CPUAllocator(self), mock_compilers, MockDSPProgram)
+      super().__init__(device, DSPAllocator(self), mock_compilers, MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
