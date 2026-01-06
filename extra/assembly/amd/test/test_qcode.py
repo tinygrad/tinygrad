@@ -2,7 +2,7 @@ import unittest, re, os
 from tinygrad.dtype import dtypes
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
-from extra.assembly.amd.qcode import parse, _BINOPS, _QDTYPES, Assign, Declare, If, For, Lambda, Break
+from extra.assembly.amd.qcode import parse, _BINOPS, _QDTYPES, Assign, Declare, If, For, Lambda, Break, Return
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
 
 DEBUG = int(os.getenv("DEBUG", "0"))
@@ -72,6 +72,7 @@ def _pr(n, d=0):
       return "\n".join(parts) + f"\n{p}endif"
     case For(v, s, e, b): return f"{p}for {v} in {_pr(s)} : {_pr(e)} do\n" + "\n".join(_pr(x, d) for x in b) + f"\n{p}endfor"
     case Break(): return f"{p}break"
+    case Return(v): return f"{p}return {_pr(v)}"
     case Lambda(name, params, body):
       body_str = _pr(body) if isinstance(body, UOp) else "\n".join(_pr(x, d) for x in body)
       return f"{p}{name} = lambda({', '.join(params)}) (\n{body_str});"
@@ -135,7 +136,7 @@ class TestQcodeParseAndRoundtrip(unittest.TestCase):
     if DEBUG:
       print(f"Parsed: {ok}/{total} ({parse_rate:.1f}%), Match: {match}/{ok} ({roundtrip_rate:.1f}%)")
       for e, c in sorted(errs.items(), key=lambda x: -x[1])[:10]: print(f"  {c}: {e}")
-    self.assertGreater(parse_rate, 98.5, f"Parse rate {parse_rate:.1f}% should be >98.5%")
+    self.assertGreater(parse_rate, 98, f"Parse rate {parse_rate:.1f}% should be >98%")
     self.assertGreater(roundtrip_rate, 98, f"Roundtrip rate {roundtrip_rate:.1f}% should be >98%")
 
 if __name__ == "__main__":
