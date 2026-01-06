@@ -239,13 +239,7 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
     if fmt_name in formats or fmt_name in ("GLOBAL", "SCRATCH"):
       for op_val, name in sorted(ops.items()):
         fn_suffix = suffix if fmt_name != "VOP3" or op_val < 512 else ""
-        # Special handling for instructions with literal constants
-        if name in ('V_FMAMK_F32', 'V_FMAMK_F16'):
-          lines.append(f"def {name.lower()}{fn_suffix}(vdst, src0, K, vsrc1): return {fmt_name}({fmt_name}Op.{name}, vdst, src0, vsrc1, literal=K)")
-        elif name in ('V_FMAAK_F32', 'V_FMAAK_F16'):
-          lines.append(f"def {name.lower()}{fn_suffix}(vdst, src0, vsrc1, K): return {fmt_name}({fmt_name}Op.{name}, vdst, src0, vsrc1, literal=K)")
-        else:
-          lines.append(f"{name.lower()}{fn_suffix} = functools.partial({tgt}.{name}{seg})")
+        lines.append(f"{name.lower()}{fn_suffix} = functools.partial({tgt}.{name}{seg})")
 
   with open(path, "w") as f:
     f.write("\n".join(lines))

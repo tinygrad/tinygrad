@@ -373,6 +373,16 @@ class Inst:
     field_names = [n for n in self._fields if n != 'encoding']
     # Map Python-friendly names to actual field names (abs_ -> abs for Python reserved word)
     if 'abs_' in kwargs: kwargs['abs'] = kwargs.pop('abs_')
+    # If more args than fields, treat extra arg as literal (for FMAAK/FMAMK style instructions)
+    # FMAMK has K in middle (vdst, src0, K, vsrc1), FMAAK has K at end (vdst, src0, vsrc1, K)
+    args = list(args)
+    if len(args) > len(field_names) and literal is None:
+      for i, a in enumerate(args):
+        if isinstance(a, int) and not isinstance(a, SrcEnum) and i < len(field_names) and field_names[i] in ('vsrc1',):
+          literal = args.pop(i)
+          break
+      else:
+        literal = args.pop()  # fallback: last arg is literal
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
     self._precompute()
