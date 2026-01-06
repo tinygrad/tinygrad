@@ -1,7 +1,7 @@
 import ctypes, struct, subprocess, tempfile, unittest
 from typing import Annotated
 from tinygrad.helpers import WIN
-from tinygrad.runtime.support.c import DLL, record
+from tinygrad.runtime.support.c import DLL, record, init_records
 from tinygrad.runtime.support.autogen import gen
 
 class TestAutogen(unittest.TestCase):
@@ -31,6 +31,7 @@ class TestAutogen(unittest.TestCase):
       b: Annotated[ctypes.c_int, 3, 30, 6]
       c: Annotated[ctypes.c_int, 7, 2, 4]
       d: Annotated[ctypes.c_int, 7, 2, 6]
+    init_records()
 
     src = '''
       struct __attribute__((packed)) baz {
@@ -64,6 +65,7 @@ class TestAutogen(unittest.TestCase):
       f: Annotated[ctypes.c_bool, 0, 1, 5]
       g: Annotated[ctypes.c_bool, 0, 1, 6]
       h: Annotated[ctypes.c_bool, 0, 1, 7]
+    init_records()
     src = '''#include <stdbool.h>
       struct baz {
         bool a:1, b:1, c:1, d:1, e:1, f:1, g:1, h:1;
@@ -91,6 +93,7 @@ class TestAutogen(unittest.TestCase):
       f: Annotated[ctypes.c_int, 20]
       g: Annotated[ctypes.c_int, 24]
       h: Annotated[ctypes.c_int, 28]
+    init_records()
     src = '''#include <stdio.h>
       struct baz {
         int a, b, c, d, e, f, g, h;
@@ -111,6 +114,7 @@ class TestAutogen(unittest.TestCase):
     class Item:
       SIZE = 4
       val: Annotated[ctypes.c_int, 0]
+    init_records()
     src = """
     struct item { int val; };
       int test(struct item arr[3]) {
@@ -130,6 +134,7 @@ class TestAutogen(unittest.TestCase):
     class Row:
       SIZE = 16
       data: Annotated[ctypes.c_int * 3, 0]
+    init_records()
     src = """
       struct row { int data[3]; };
       struct row test(struct row x) {
@@ -156,6 +161,7 @@ class TestAutogen(unittest.TestCase):
       SIZE = 8
       inner: Annotated[Inner, 0]
       b: Annotated[ctypes.c_int, 4]
+    init_records()
     src = """
       struct i { int a; };
       struct o { struct i i; int b; };
@@ -176,6 +182,7 @@ class TestAutogen(unittest.TestCase):
       SIZE = 8
       a: Annotated[ctypes.c_int, 0]
       b: Annotated[ctypes.c_int, 4]
+    init_records()
     src = """
       struct foo { int a, b; };
       struct foo *test(struct foo *f) {
