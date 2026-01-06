@@ -1,457 +1,305 @@
-# Generate AMD ISA autogen files from PDF documentation
-# Combines format/enum generation (previously in dsl.py) and pseudocode compilation (previously in pcode.py)
-# Usage: python -m extra.assembly.amd.pdf [--arch rdna3|rdna4|cdna|all]
-import re, functools
-from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor
+# Generic PDF text extractor - no external dependencies
+import re, zlib
+from tinygrad.helpers import fetch, merge_dicts
 
 PDF_URLS = {
   "rdna3": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content",
   "rdna4": "https://docs.amd.com/api/khub/documents/uQpkEvk3pv~kfAb2x~j4uw/content",
-  "cdna": ["https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf",
-           "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"],
+  "cdna": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf",
 }
 
-# Field type mappings and ordering
-FIELD_TYPES = {'SSRC0': 'SSrc', 'SSRC1': 'SSrc', 'SOFFSET': 'SSrc', 'SADDR': 'SSrc', 'SRC0': 'Src', 'SRC1': 'Src', 'SRC2': 'Src',
-  'SDST': 'SGPRField', 'SBASE': 'SGPRField', 'SDATA': 'SGPRField', 'SRSRC': 'SGPRField', 'VDST': 'VGPRField', 'VSRC1': 'VGPRField',
-  'VDATA': 'VGPRField', 'VADDR': 'VGPRField', 'ADDR': 'VGPRField', 'DATA': 'VGPRField', 'DATA0': 'VGPRField', 'DATA1': 'VGPRField',
-  'SIMM16': 'SImm', 'OFFSET': 'Imm', 'OPX': 'VOPDOp', 'OPY': 'VOPDOp', 'SRCX0': 'Src', 'SRCY0': 'Src',
-  'VSRCX1': 'VGPRField', 'VSRCY1': 'VGPRField', 'VDSTX': 'VGPRField', 'VDSTY': 'VDSTYEnc'}
-FIELD_ORDER = {
-  'SOP2': ['op', 'sdst', 'ssrc0', 'ssrc1'], 'SOP1': ['op', 'sdst', 'ssrc0'], 'SOPC': ['op', 'ssrc0', 'ssrc1'],
-  'SOPK': ['op', 'sdst', 'simm16'], 'SOPP': ['op', 'simm16'], 'VOP1': ['op', 'vdst', 'src0'], 'VOPC': ['op', 'src0', 'vsrc1'],
-  'VOP2': ['op', 'vdst', 'src0', 'vsrc1'], 'VOP3SD': ['op', 'vdst', 'sdst', 'src0', 'src1', 'src2', 'clmp'],
-  'SMEM': ['op', 'sdata', 'sbase', 'soffset', 'offset', 'glc', 'dlc'], 'DS': ['op', 'vdst', 'addr', 'data0', 'data1'],
-  'VOP3': ['op', 'vdst', 'src0', 'src1', 'src2', 'omod', 'neg', 'abs', 'clmp', 'opsel'],
-  'VOP3P': ['op', 'vdst', 'src0', 'src1', 'src2', 'neg', 'neg_hi', 'opsel', 'opsel_hi', 'clmp'],
-  'FLAT': ['op', 'vdst', 'addr', 'data', 'saddr', 'offset', 'seg', 'dlc', 'glc', 'slc'],
-  'MUBUF': ['op', 'vdata', 'vaddr', 'srsrc', 'soffset', 'offset', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe'],
-  'MTBUF': ['op', 'vdata', 'vaddr', 'srsrc', 'soffset', 'offset', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe'],
-  'MIMG': ['op', 'vdata', 'vaddr', 'srsrc', 'ssamp', 'dmask', 'dim', 'unrm', 'dlc', 'glc', 'slc'],
-  'EXP': ['en', 'target', 'vsrc0', 'vsrc1', 'vsrc2', 'vsrc3', 'done', 'row'],
-  'VINTERP': ['op', 'vdst', 'src0', 'src1', 'src2', 'waitexp', 'clmp', 'opsel', 'neg'],
-  'VOPD': ['opx', 'opy', 'vdstx', 'vdsty', 'srcx0', 'vsrcx1', 'srcy0', 'vsrcy1'],
-  'LDSDIR': ['op', 'vdst', 'attr', 'attr_chan', 'wait_va']}
-SRC_EXTRAS = {233: 'DPP8', 234: 'DPP8FI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 254: 'LDS_DIRECT'}
-FLOAT_MAP = {'0.5': 'POS_HALF', '-0.5': 'NEG_HALF', '1.0': 'POS_ONE', '-1.0': 'NEG_ONE', '2.0': 'POS_TWO', '-2.0': 'NEG_TWO',
-  '4.0': 'POS_FOUR', '-4.0': 'NEG_FOUR', '1/(2*PI)': 'INV_2PI', '0': 'ZERO'}
-INST_PATTERN = re.compile(r'^([SVD]S?_[A-Z0-9_]+|(?:FLAT|GLOBAL|SCRATCH)_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
-
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
-# PDF PARSING WITH PAGE CACHING
+# Generic PDF extraction tools
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class CachedPDF:
-  """PDF wrapper with page text/table caching for faster repeated access."""
-  def __init__(self, pdf):
-    self._pdf, self._text_cache, self._table_cache = pdf, {}, {}
-  def __len__(self): return len(self._pdf.pages)
-  def text(self, i):
-    if i not in self._text_cache: self._text_cache[i] = self._pdf.pages[i].extract_text() or ''
-    return self._text_cache[i]
-  def tables(self, i):
-    if i not in self._table_cache: self._table_cache[i] = [t.extract() for t in self._pdf.pages[i].find_tables()]
-    return self._table_cache[i]
+def extract(url: str) -> list[list[tuple[float, float, str, str]]]:
+  """Extract positioned text from PDF. Returns list of text elements (x, y, text, font) per page."""
+  data = fetch(url).read_bytes()
 
-def _parse_bits(s: str) -> tuple[int, int] | None:
-  return (int(m.group(1)), int(m.group(2) or m.group(1))) if (m := re.match(r'\[(\d+)(?::(\d+))?\]', s)) else None
+  # Parse xref table to locate objects
+  xref: dict[int, int] = {}
+  pos = int(re.search(rb'startxref\s+(\d+)', data).group(1)) + 4
+  while data[pos:pos+7] != b'trailer':
+    while data[pos:pos+1] in b' \r\n': pos += 1
+    line_end = data.find(b'\n', pos)
+    start_obj, count = map(int, data[pos:line_end].split()[:2])
+    pos = line_end + 1
+    for i in range(count):
+      if data[pos+17:pos+18] == b'n' and (off := int(data[pos:pos+10])) > 0: xref[start_obj + i] = off
+      pos += 20
 
-def _parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
-  fields = []
-  for row in table[1:]:
-    if not row or not row[0]: continue
-    name, bits_str = row[0].split('\n')[0].strip(), (row[1] or '').split('\n')[0].strip()
-    if not (bits := _parse_bits(bits_str)): continue
-    enc_val, hi, lo = None, bits[0], bits[1]
-    if name == 'ENCODING' and row[2]:
-      desc = row[2]
-      # Handle shared FLAT/GLOBAL/SCRATCH table: look for format-specific encoding
-      fmt_key = fmt.lstrip('V').lower().capitalize()  # VFLAT -> Flat, VGLOBAL -> Global
-      if m := re.search(rf"{fmt_key}='b([01_]+)", desc):
-        enc_bits = m.group(1).replace('_', '')
-      elif m := re.search(r"(?:'b|Must be:\s*)([01_]+)", desc):
-        enc_bits = m.group(1).replace('_', '')
-      else:
-        enc_bits = None
-      if enc_bits:
-        enc_val, declared_width, actual_width = int(enc_bits, 2), hi - lo + 1, len(enc_bits)
-        if actual_width > declared_width: lo = hi - actual_width + 1
-    ftype = f"{fmt}Op" if name == 'OP' and f"{fmt}Op" in enums else FIELD_TYPES.get(name.upper())
-    fields.append((name, hi, lo, enc_val, ftype))
-  return fields
+  def get_stream(n: int) -> bytes:
+    obj = data[xref[n]:data.find(b'endobj', xref[n])]
+    raw = obj[obj.find(b'stream\n') + 7:obj.find(b'\nendstream')]
+    return zlib.decompress(raw) if b'/FlateDecode' in obj else raw
 
-def _parse_single_pdf(url: str):
-  """Parse a single PDF and return (formats, enums, src_enum, doc_name, instructions)."""
-  import pdfplumber
-  from tinygrad.helpers import fetch
+  # Find page content streams and extract text
+  pages = []
+  for n in sorted(xref):
+    if b'/Type /Page' not in data[xref[n]:xref[n]+500]: continue
+    if not (m := re.search(rb'/Contents (\d+) 0 R', data[xref[n]:xref[n]+500])): continue
+    stream = get_stream(int(m.group(1))).decode('latin-1')
+    elements, font = [], ''
+    for bt in re.finditer(r'BT(.*?)ET', stream, re.S):
+      x, y = 0.0, 0.0
+      for m in re.finditer(r'(/F[\d.]+) [\d.]+ Tf|([\d.+-]+) ([\d.+-]+) Td|[\d.+-]+ [\d.+-]+ [\d.+-]+ [\d.+-]+ ([\d.+-]+) ([\d.+-]+) Tm|<([0-9A-Fa-f]+)>.*?Tj|\[([^\]]+)\] TJ', bt.group(1)):
+        if m.group(1): font = m.group(1)
+        elif m.group(2): x, y = x + float(m.group(2)), y + float(m.group(3))
+        elif m.group(4): x, y = float(m.group(4)), float(m.group(5))
+        elif m.group(6) and (t := bytes.fromhex(m.group(6)).decode('latin-1')).strip(): elements.append((x, y, t, font))
+        elif m.group(7) and (t := ''.join(bytes.fromhex(h).decode('latin-1') for h in re.findall(r'<([0-9A-Fa-f]+)>', m.group(7)))).strip(): elements.append((x, y, t, font))
+    pages.append(sorted(elements, key=lambda e: (-e[1], e[0])))
+  return pages
 
-  pdf = CachedPDF(pdfplumber.open(fetch(url)))
-  total_pages = len(pdf)
+def extract_tables(pages: list[list[tuple[float, float, str, str]]]) -> dict[int, tuple[str, list[list[str]]]]:
+  """Extract numbered tables from PDF pages. Returns {table_num: (title, rows)} where rows is list of cells per row."""
+  def group_by_y(texts, key=lambda y: round(y)):
+    by_y: dict[int, list[tuple[float, float, str]]] = {}
+    for x, y, t, _ in texts:
+      by_y.setdefault(key(y), []).append((x, y, t))
+    return by_y
 
-  # Auto-detect document type
-  first_page = pdf.text(0)
-  is_cdna4, is_cdna3 = 'CDNA4' in first_page or 'CDNA 4' in first_page, 'CDNA3' in first_page or 'MI300' in first_page
-  is_cdna, is_rdna4 = is_cdna3 or is_cdna4, 'RDNA4' in first_page or 'RDNA 4' in first_page
-  is_rdna35, is_rdna3 = 'RDNA3.5' in first_page or 'RDNA 3.5' in first_page, 'RDNA3' in first_page and 'RDNA3.5' not in first_page
-  doc_name = "CDNA4" if is_cdna4 else "CDNA3" if is_cdna3 else "RDNA4" if is_rdna4 else "RDNA3.5" if is_rdna35 else "RDNA3" if is_rdna3 else "Unknown"
+  # Find all table headers by merging text on same line
+  table_positions = []
+  for page_idx, texts in enumerate(pages):
+    for items in group_by_y(texts).values():
+      line = ''.join(t for _, t in sorted((x, t) for x, _, t in items))
+      if m := re.search(r'Table (\d+)\. (.+)', line):
+        table_positions.append((int(m.group(1)), m.group(2).strip(), page_idx, items[0][1]))
+  table_positions.sort(key=lambda t: (t[2], -t[3]))
 
-  # Find Microcode Formats section (for formats/enums)
-  microcode_start = next((i for i in range(int(total_pages * 0.2), total_pages)
-                          if re.search(r'\d+\.\d+\.\d+\.\s+SOP2\b|Chapter \d+\.\s+Microcode Formats', pdf.text(i))), int(total_pages * 0.9))
-  # Find Instructions section (for pseudocode)
-  instr_start = next((i for i in range(int(total_pages * 0.1), int(total_pages * 0.5))
-                      if re.search(r'Chapter \d+\.\s+Instructions\b', pdf.text(i))), total_pages // 3)
-  instr_end = next((i for start in [int(total_pages * 0.6), int(total_pages * 0.5), instr_start]
-                    for i in range(start, min(start + 100, total_pages))
-                    if re.search(r'Chapter \d+\.\s+Microcode Formats', pdf.text(i))), total_pages)
-
-  # Parse src enum from SSRC encoding table
-  src_enum = dict(SRC_EXTRAS)
-  for i in range(microcode_start, min(microcode_start + 10, total_pages)):
-    text = pdf.text(i)
-    if 'SSRC0' in text and 'VCC_LO' in text:
-      for m in re.finditer(r'^(\d+)\s+(\S+)', text, re.M):
-        val, name = int(m.group(1)), m.group(2).rstrip('.:')
-        if name in FLOAT_MAP: src_enum[val] = FLOAT_MAP[name]
-        elif re.match(r'^[A-Z][A-Z0-9_]*$', name): src_enum[val] = name
+  # For each table, find rows with matching X positions
+  result: dict[int, tuple[str, list[list[str]]]] = {}
+  for num, title, start_page, header_y in table_positions:
+    rows, col_xs = [], None
+    for page_idx in range(start_page, len(pages)):
+      page_texts = [(x, y, t) for x, y, t, _ in pages[page_idx] if 30 < y < 760 and (page_idx > start_page or y < header_y)]
+      for items in sorted(group_by_y([(x, y, t, '') for x, y, t in page_texts], key=lambda y: round(y / 5)).values(), key=lambda items: -items[0][1]):
+        xs = tuple(sorted(round(x) for x, _, _ in items))
+        if col_xs is None:
+          if len(xs) < 2: continue  # Skip single-column rows before table starts
+          col_xs = xs
+        elif len(xs) == 1 and xs[0] in col_xs: continue  # Skip continuation rows at known column positions
+        elif not any(c in xs for c in col_xs[:2]): break  # Row missing first columns = end of table
+        rows.append([t for _, t in sorted((x, t) for x, _, t in items)])
+      else: continue
       break
+    if rows: result[num] = (title, rows)
+  return result
 
-  # Parse opcode tables
-  full_text = '\n'.join(pdf.text(i) for i in range(microcode_start, min(microcode_start + 50, total_pages)))
+# ═══════════════════════════════════════════════════════════════════════════════
+# AMD specific extraction
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def extract_enums(tables: dict[int, tuple[str, list[list[str]]]]) -> dict[str, dict[int, str]]:
+  """Extract all enums from tables. Returns {enum_name: {value: name}}."""
   enums: dict[str, dict[int, str]] = {}
-  for m in re.finditer(r'Table \d+\. (\w+) Opcodes(.*?)(?=Table \d+\.|\n\d+\.\d+\.\d+\.\s+\w+\s*\nDescription|$)', full_text, re.S):
-    if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+([A-Z][A-Z0-9_]+)', m.group(2))}:
-      enums[m.group(1) + "Op"] = ops
-  if vopd_m := re.search(r'Table \d+\. VOPD Y-Opcodes\n(.*?)(?=Table \d+\.|15\.\d)', full_text, re.S):
-    if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+(V_DUAL_\w+)', vopd_m.group(1))}:
-      enums["VOPDOp"] = ops
-  enum_names = set(enums.keys())
+  for num, (title, rows) in tables.items():
+    # Opcode enums from "XXX Opcodes" tables
+    if m := re.match(r'(\w+) (?:Y-)?Opcodes', title):
+      fmt_name = 'VOPD' if 'Y-Opcodes' in title else m.group(1)
+      ops: dict[int, str] = {}
+      for row in rows:
+        for i in range(0, len(row) - 1, 2):
+          if row[i].isdigit() and re.match(r'^[A-Z][A-Z0-9_]+$', row[i + 1]):
+            ops[int(row[i])] = row[i + 1]
+      if ops: enums[fmt_name] = ops
+    # BufFmt from "Data Format" tables
+    if 'Data Format' in title:
+      for row in rows:
+        for i in range(0, len(row) - 1, 2):
+          if row[i].isdigit() and re.match(r'^[\dA-Z_]+$', row[i + 1]) and 'INVALID' not in row[i + 1]:
+            enums.setdefault('BufFmt', {})[int(row[i])] = row[i + 1]
+  return enums
 
-  # Parse instruction formats
-  def is_fields_table(t): return t and len(t) > 1 and t[0] and 'Field' in str(t[0][0] or '')
-  def has_encoding(fields): return any(f[0] == 'ENCODING' for f in fields)
-  def has_header_before_fields(text): return (pos := text.find('Field Name')) != -1 and bool(re.search(r'\d+\.\d+\.\d+\.\s+\w+\s*\n', text[:pos]))
+def extract_ins(tables: dict[int, tuple[str, list[list[str]]]]) -> tuple[dict[str, list[tuple[str, int, int]]], dict[str, str]]:
+  """Extract formats and encodings from 'XXX Fields' tables. Returns (formats, encodings)."""
+  formats: dict[str, list[tuple[str, int, int]]] = {}
+  encodings: dict[str, str] = {}
+  for num, (title, rows) in tables.items():
+    if not (m := re.match(r'(\w+) Fields$', title)): continue
+    fmt_name = m.group(1)
+    fields = []
+    for row in rows:
+      if len(row) < 2: continue
+      if (bits := re.match(r'\[?(\d+):(\d+)\]?$', row[1])) or (bits := re.match(r'\[(\d+)\]$', row[1])):
+        field_name = row[0].lower()
+        hi, lo = int(bits.group(1)), int(bits.group(2)) if bits.lastindex >= 2 else int(bits.group(1))
+        if field_name == 'encoding' and len(row) >= 3:
+          enc_bits = None
+          if "'b" in row[2]: enc_bits = row[2].split("'b")[-1].replace('_', '')
+          elif (enc := re.search(r':\s*([01_]+)', row[2])): enc_bits = enc.group(1).replace('_', '')
+          if enc_bits:
+            # If encoding bits exceed field width, extend field to match (AMD docs sometimes have this)
+            declared_width, actual_width = hi - lo + 1, len(enc_bits)
+            if actual_width > declared_width: lo = hi - actual_width + 1
+            encodings[fmt_name] = enc_bits
+        fields.append((field_name, hi, lo))
+    if fields: formats[fmt_name] = fields
+  return formats, encodings
 
-  format_headers = []
-  for i in range(50):
-    if microcode_start + i >= total_pages: break
-    text = pdf.text(microcode_start + i)
-    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text): format_headers.append((m.group(1), i, m.start()))
-    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n', text):
-      fmt_name = m.group(1)
-      if is_cdna and fmt_name.isupper() and len(fmt_name) >= 2: format_headers.append((fmt_name, i, m.start()))
-      elif m.start() > len(text) - 200 and 'Description' not in text[m.end():] and i + 1 < 50:
-        next_text = pdf.text(microcode_start + i + 1).lstrip()
-        if next_text.startswith('Description') or (next_text.startswith('"RDNA') and 'Description' in next_text[:200]):
-          format_headers.append((fmt_name, i, m.start()))
-    # RDNA4: Look for "Table X. Y Fields" patterns (e.g., VIMAGE, VSAMPLE, or shared FLAT/GLOBAL/SCRATCH)
-    for m in re.finditer(r'Table \d+\.\s+([\w,\s]+?)\s+Fields', text):
-      table_name = m.group(1).strip()
-      # Handle shared table like "FLAT, GLOBAL and SCRATCH"
-      if ',' in table_name or ' and ' in table_name:
-        for part in re.split(r',\s*|\s+and\s+', table_name):
-          fmt_name = 'V' + part.strip()
-          if fmt_name not in [h[0] for h in format_headers]: format_headers.append((fmt_name, i, m.start()))
-      elif table_name.startswith('V'):
-        if table_name not in [h[0] for h in format_headers]: format_headers.append((table_name, i, m.start()))
+def extract_pcode(pages: list[list[tuple[float, float, str, str]]], enums: dict[str, dict[int, str]]) -> dict[tuple[str, int], str]:
+  """Extract pseudocode for instructions. Returns {(name, opcode): pseudocode}."""
+  # Build lookup from instruction name to opcode
+  name_to_op = {name: op for ops in enums.values() for op, name in ops.items()}
 
-  formats: dict[str, list] = {}
-  for fmt_name, rel_idx, header_pos in format_headers:
-    if fmt_name in formats: continue
-    page_idx = microcode_start + rel_idx
-    text = pdf.text(page_idx)
-    field_pos = text.find('Field Name', header_pos)
-    fields = None
-    for offset in range(3):
-      if page_idx + offset >= total_pages: break
-      if offset > 0 and has_header_before_fields(pdf.text(page_idx + offset)): break
-      for t in pdf.tables(page_idx + offset) if offset > 0 or field_pos > header_pos else []:
-        if is_fields_table(t) and (f := _parse_fields_table(t, fmt_name, enum_names)) and has_encoding(f): fields = f; break
-      if fields: break
-    if not fields and field_pos > header_pos:
-      for t in pdf.tables(page_idx):
-        if is_fields_table(t) and (f := _parse_fields_table(t, fmt_name, enum_names)): fields = f; break
-    if not fields: continue
-    field_names = {f[0] for f in fields}
-    for pg_offset in range(1, 3):
-      if page_idx + pg_offset >= total_pages or has_header_before_fields(pdf.text(page_idx + pg_offset)): break
-      for t in pdf.tables(page_idx + pg_offset):
-        if is_fields_table(t) and (extra := _parse_fields_table(t, fmt_name, enum_names)) and not has_encoding(extra):
-          for ef in extra:
-            if ef[0] not in field_names: fields.append(ef); field_names.add(ef[0])
-          break
-    formats[fmt_name] = fields
+  # First pass: find all instruction headers across all pages
+  all_instructions: list[tuple[int, float, str, int]] = []  # (page_idx, y, name, opcode)
+  for page_idx, page in enumerate(pages):
+    by_y: dict[int, list[tuple[float, str]]] = {}
+    for x, y, t, _ in page:
+      by_y.setdefault(round(y), []).append((x, t))
+    for y, items in sorted(by_y.items(), reverse=True):
+      left = [(x, t) for x, t in items if 55 < x < 65]
+      right = [(x, t) for x, t in items if 535 < x < 550]
+      if left and right and left[0][1] in name_to_op and right[0][1].isdigit():
+        all_instructions.append((page_idx, y, left[0][1], int(right[0][1])))
 
-  # Fix known PDF errors (RDNA-specific SMEM bit positions)
-  if 'SMEM' in formats and not is_cdna:
-    formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
-                       for n, h, l, e, t in formats['SMEM']]
-  # RDNA4: VFLAT/VGLOBAL/VSCRATCH OP field is [20:14] not [20:13] (PDF documentation error)
-  for fmt_name in ['VFLAT', 'VGLOBAL', 'VSCRATCH']:
-    if fmt_name in formats:
-      formats[fmt_name] = [(n, h, 14 if n == 'OP' else l, e, t) for n, h, l, e, t in formats[fmt_name]]
-  if doc_name in ('RDNA3', 'RDNA3.5'):
-    if 'SOPPOp' in enums:
-      for k, v in {8: 'S_WAITCNT_DEPCTR', 58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'}.items():
-        assert k not in enums['SOPPOp']; enums['SOPPOp'][k] = v
-    if 'SOPKOp' in enums:
-      for k, v in {22: 'S_SUBVECTOR_LOOP_BEGIN', 23: 'S_SUBVECTOR_LOOP_END'}.items():
-        assert k not in enums['SOPKOp']; enums['SOPKOp'][k] = v
-    if 'SMEMOp' in enums:
-      for k, v in {34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'}.items():
-        assert k not in enums['SMEMOp']; enums['SMEMOp'][k] = v
-    if 'DSOp' in enums:
-      for k, v in {24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V', 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'}.items():
-        assert k not in enums['DSOp']; enums['DSOp'][k] = v
-    if 'FLATOp' in enums:
-      for k, v in {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}.items():
-        assert k not in enums['FLATOp']; enums['FLATOp'][k] = v
-  # CDNA MTBUF: PDF is missing the FORMAT field (bits[25:19]) which is required for tbuffer_* instructions
-  if is_cdna and 'MTBUF' in formats:
-    field_names = {f[0] for f in formats['MTBUF']}
-    if 'FORMAT' not in field_names:
-      formats['MTBUF'].append(('FORMAT', 25, 19, None, None))
-  # CDNA SDWA/DPP: PDF only has modifier fields, need VOP1/VOP2 overlay for correct encoding
-  if is_cdna:
-    if 'SDWA' in formats:
-      formats['SDWA'] = [('ENCODING', 8, 0, 0xf9, None), ('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None)] + \
-                        [f for f in formats['SDWA'] if f[0] not in ('ENCODING', 'SDST', 'SD', 'ROW_MASK')]
-    if 'DPP' in formats:
-      formats['DPP'] = [('ENCODING', 8, 0, 0xfa, None), ('VOP_OP', 16, 9, None, None), ('VDST', 24, 17, None, 'VGPRField'), ('VOP2_OP', 31, 25, None, None),
-        ('SRC0', 39, 32, None, 'Src'), ('DPP_CTRL', 48, 40, None, None), ('BOUND_CTRL', 51, 51, None, None), ('SRC0_NEG', 52, 52, None, None), ('SRC0_ABS', 53, 53, None, None),
-        ('SRC1_NEG', 54, 54, None, None), ('SRC1_ABS', 55, 55, None, None), ('BANK_MASK', 59, 56, None, None), ('ROW_MASK', 63, 60, None, None)]
-
-  # Extract pseudocode for instructions
-  all_text = '\n'.join(pdf.text(i) for i in range(instr_start, instr_end))
-  matches = list(INST_PATTERN.finditer(all_text))
-  raw_pseudocode: dict[tuple[str, int], str] = {}
-  for i, match in enumerate(matches):
-    name, opcode = match.group(1), int(match.group(2))
-    start, end = match.end(), matches[i + 1].start() if i + 1 < len(matches) else match.end() + 2000
-    snippet = all_text[start:end].strip()
-    if pseudocode := _extract_pseudocode(snippet): raw_pseudocode[(name, opcode)] = pseudocode
-
-  # Extract unified buffer format table (RDNA only, for MTBUF format field)
-  buf_fmt = {}
-  if not is_cdna:
-    for i in range(total_pages):
-      for t in pdf.tables(i):
-        if t and len(t) > 2 and t[0] and '#' in str(t[0][0]) and 'Format' in str(t[0]):
-          for row in t[1:]:
-            for j in range(0, len(row) - 1, 3):  # table has 3-column groups: #, Format, (empty)
-              if row[j] and row[j].isdigit() and row[j+1] and re.match(r'^[\d_]+_(UNORM|SNORM|USCALED|SSCALED|UINT|SINT|FLOAT)$', row[j+1]):
-                buf_fmt[int(row[j])] = row[j+1]
-          if buf_fmt: break
-      if buf_fmt: break
-
-  return {"formats": formats, "enums": enums, "src_enum": src_enum, "doc_name": doc_name, "pseudocode": raw_pseudocode, "is_cdna": is_cdna, "buf_fmt": buf_fmt}
-
-def _extract_pseudocode(text: str) -> str | None:
-  """Extract pseudocode from an instruction description snippet."""
-  lines, result, depth, in_lambda = text.split('\n'), [], 0, 0
-  for line in lines:
-    s = line.strip()
-    if not s or re.match(r'^\d+ of \d+$', s) or re.match(r'^\d+\.\d+\..*Instructions', s): continue
-    if s.startswith(('Notes', 'Functional examples', '•', '-')): break  # Stop at notes/bullets
-    if s.startswith(('"RDNA', 'AMD ', 'CDNA')): continue
-    if '•' in s or '–' in s: continue  # Skip lines with bullets/dashes
-    if '= lambda(' in s: in_lambda += 1; continue
-    if in_lambda > 0:
-      if s.endswith(');'): in_lambda -= 1
-      continue
-    if s.startswith('if '): depth += 1
-    elif s.startswith('endif'): depth = max(0, depth - 1)
-    if s.endswith('.') and not any(p in s for p in ['D0', 'D1', 'S0', 'S1', 'S2', 'SCC', 'VCC', 'tmp', '=']): continue
-    if re.match(r'^[a-z].*\.$', s) and '=' not in s: continue
-    is_code = (any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =', 'PC =',
-                                    'D0[', 'D1[', 'S0[', 'S1[', 'S2[', 'MEM[', 'RETURN_DATA',
-                                    'VADDR', 'VDATA', 'VDST', 'SADDR', 'OFFSET']) or
-               s.startswith(('if ', 'else', 'elsif', 'endif', 'declare ', 'for ', 'endfor', '//')) or
-               re.match(r'^[a-z_]+\s*=', s) or re.match(r'^[a-z_]+\[', s) or (depth > 0 and '=' in s))
-    if is_code: result.append(s)
-  return '\n'.join(result) if result else None
-
-def _merge_results(results: list[dict]) -> dict:
-  """Merge multiple PDF parse results into a superset."""
-  merged = {"formats": {}, "enums": {}, "src_enum": dict(SRC_EXTRAS), "doc_names": [], "pseudocode": {}, "is_cdna": False, "buf_fmt": {}}
-  for r in results:
-    merged["doc_names"].append(r["doc_name"])
-    merged["is_cdna"] = merged["is_cdna"] or r["is_cdna"]
-    for val, name in r["src_enum"].items():
-      if val in merged["src_enum"]: assert merged["src_enum"][val] == name
-      else: merged["src_enum"][val] = name
-    for enum_name, ops in r["enums"].items():
-      if enum_name not in merged["enums"]: merged["enums"][enum_name] = {}
-      for val, name in ops.items():
-        if val in merged["enums"][enum_name]: assert merged["enums"][enum_name][val] == name
-        else: merged["enums"][enum_name][val] = name
-    for fmt_name, fields in r["formats"].items():
-      if fmt_name not in merged["formats"]: merged["formats"][fmt_name] = list(fields)
-      else:
-        existing = {f[0]: (f[1], f[2]) for f in merged["formats"][fmt_name]}
-        for f in fields:
-          if f[0] in existing: assert existing[f[0]] == (f[1], f[2])
-          else: merged["formats"][fmt_name].append(f)
-    for key, pc in r["pseudocode"].items():
-      if key not in merged["pseudocode"]: merged["pseudocode"][key] = pc
-    for val, name in r.get("buf_fmt", {}).items():
-      if val not in merged["buf_fmt"]: merged["buf_fmt"][val] = name
-  return merged
+  # Second pass: extract pseudocode between consecutive instructions
+  pcode: dict[tuple[str, int], str] = {}
+  for i, (page_idx, y, name, opcode) in enumerate(all_instructions):
+    # Get end boundary from next instruction
+    if i + 1 < len(all_instructions):
+      next_page, next_y = all_instructions[i + 1][0], all_instructions[i + 1][1]
+    else:
+      next_page, next_y = page_idx, 0
+    # Collect F6 text from current position to next instruction
+    lines = []
+    for p in range(page_idx, next_page + 1):
+      start_y = y if p == page_idx else 800
+      end_y = next_y if p == next_page else 0
+      lines.extend((p, y2, t) for x, y2, t, f in pages[p] if f in ('/F6.0', '/F7.0') and end_y < y2 < start_y)
+    if lines:
+      # Sort by page first, then by y descending within each page (higher y = earlier text in PDF)
+      pcode_lines = [t.replace('Ê', '').strip() for _, _, t in sorted(lines, key=lambda x: (x[0], -x[1]))]
+      if pcode_lines: pcode[(name, opcode)] = '\n'.join(pcode_lines)
+  return pcode
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CODE GENERATION
+# Write autogen files
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _generate_enum_py(enums, src_enum, doc_name, buf_fmt=None) -> str:
-  """Generate enum.py content (just enums, no dsl.py dependency)."""
-  def enum_lines(name, items): return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]
-  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf.py - do not edit", "from enum import IntEnum", ""]
-  lines += enum_lines("SrcEnum", src_enum) + sum([enum_lines(n, ops) for n, ops in sorted(enums.items())], [])
-  if buf_fmt: lines += enum_lines("BufFmt", {v: f"BUF_FMT_{n}" for v, n in buf_fmt.items() if 1 <= v <= 63})
-  return '\n'.join(lines)
-
-def _generate_ins_py(formats, enums, src_enum, doc_name) -> str:
-  """Generate ins.py content (instruction formats and helpers, imports dsl.py and enum.py)."""
-  def field_key(f, order): return order.index(f[0].lower()) if f[0].lower() in order else 1000
-  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf.py - do not edit",
-           "# ruff: noqa: F401,F403", "from typing import Annotated",
-           "from extra.assembly.amd.dsl import bits, BitField, Inst32, Inst64, Inst96, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField",
-           "from extra.assembly.amd.autogen.{arch}.enum import *",
-           "import functools", ""]
-  format_defaults = {'VOP3P': {'opsel_hi': 3, 'opsel_hi2': 1}}
-  lines.append("# instruction formats")
-  # MIMG has optional NSA (Non-Sequential Address) fields that extend beyond 64 bits, but base encoding is 64-bit
-  inst64_override = {'MIMG'}
-  for fmt_name, fields in sorted(formats.items()):
-    max_bit = max(f[1] for f in fields)
-    if fmt_name in inst64_override: base = "Inst64"
-    else: base = "Inst96" if max_bit > 63 else "Inst64" if max_bit > 31 or fmt_name == 'VOP3SD' else "Inst32"
-    order = FIELD_ORDER.get(fmt_name, [])
-    lines.append(f"class {fmt_name}({base}):")
-    if enc := next((f for f in fields if f[0] == 'ENCODING'), None):
-      lines.append(f"  encoding = bits[{enc[1]}:{enc[2]}] == 0b{enc[3]:b}" if enc[1] != enc[2] else f"  encoding = bits[{enc[1]}] == {enc[3]}")
-    if defaults := format_defaults.get(fmt_name): lines.append(f"  _defaults = {defaults}")
-    for name, hi, lo, _, ftype in sorted([f for f in fields if f[0] != 'ENCODING'], key=lambda f: field_key(f, order)):
-      ann = f":Annotated[BitField, {ftype}]" if ftype and ftype.endswith('Op') else f":{ftype}" if ftype else ""
-      lines.append(f"  {name.lower()}{ann} = bits[{hi}]" if hi == lo else f"  {name.lower()}{ann} = bits[{hi}:{lo}]")
+def write_enums(enums: dict[str, dict[int, str]], arch: str, path: str):
+  """Write enum.py file from extracted enums."""
+  lines = ["# autogenerated from AMD ISA PDF by pdf.py - do not edit", "from enum import IntEnum", ""]
+  for name, values in sorted(enums.items()):
+    suffix = "Op" if name not in ('Src', 'BufFmt') else ("Enum" if name == 'Src' else "")
+    prefix = "BUF_FMT_" if name == 'BufFmt' else ""
+    lines.append(f"class {name}{suffix}(IntEnum):")
+    for val, member in sorted(values.items()):
+      lines.append(f"  {prefix}{member} = {val}")
     lines.append("")
+  with open(path, "w") as f:
+    f.write("\n".join(lines))
+
+def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[str, str], enums: dict[str, dict[int, str]], arch: str, path: str):
+  """Write ins.py file from extracted formats and enums."""
+  # Field types and ordering
+  def field_type(name, fmt):
+    if name == 'op' and fmt in enums: return f'Annotated[BitField, {fmt}Op]'
+    if name in ('opx', 'opy'): return 'Annotated[BitField, VOPDOp]'
+    if name == 'vdsty': return 'VDSTYEnc'
+    if name in ('vdst', 'vsrc1', 'vaddr', 'vdata', 'data', 'data0', 'data1', 'addr', 'vsrc0', 'vsrc2', 'vsrc3'): return 'VGPRField'
+    if name in ('sdst', 'sbase', 'sdata', 'srsrc', 'ssamp'): return 'SGPRField'
+    if name.startswith('ssrc') or name in ('saddr', 'soffset'): return 'SSrc'
+    if name in ('src0', 'srcx0', 'srcy0') or name.startswith('src') and name[3:].isdigit(): return 'Src'
+    if name.startswith('simm'): return 'SImm'
+    if name == 'offset' or name.startswith('imm'): return 'Imm'
+    return None
+  field_priority = ['encoding', 'op', 'opx', 'opy', 'vdst', 'vdstx', 'vdsty', 'sdst', 'vdata', 'sdata', 'addr', 'vaddr', 'data', 'data0', 'data1',
+                    'src0', 'srcx0', 'srcy0', 'vsrc0', 'ssrc0', 'src1', 'vsrc1', 'vsrcx1', 'vsrcy1', 'ssrc1', 'src2', 'vsrc2', 'src3', 'vsrc3',
+                    'saddr', 'sbase', 'srsrc', 'ssamp', 'soffset', 'offset', 'simm16', 'en', 'target', 'attr', 'attr_chan',
+                    'omod', 'neg', 'neg_hi', 'abs', 'clmp', 'opsel', 'opsel_hi', 'waitexp', 'wait_va',
+                    'dmask', 'dim', 'seg', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe', 'unrm', 'done', 'row']
+  def sort_fields(fields):
+    order = {name: i for i, name in enumerate(field_priority)}
+    return sorted(fields, key=lambda f: (order.get(f[0], 1000), f[2]))
+
+  # Generate format classes
+  lines = ["# autogenerated from AMD ISA PDF by pdf.py - do not edit", "# ruff: noqa: F401,F403",
+           "from typing import Annotated",
+           "from extra.assembly.amd.dsl import *",
+           f"from extra.assembly.amd.autogen.{arch}.enum import *", "import functools", ""]
+  for fmt_name, fields in sorted(formats.items()):
+    lines.append(f"class {fmt_name}(Inst):")
+    for name, hi, lo in sort_fields(fields):
+      bits_str = f"bits[{hi}:{lo}]" if hi != lo else f"bits[{hi}]"
+      if name == 'encoding' and fmt_name in encodings: lines.append(f"  encoding = {bits_str} == 0b{encodings[fmt_name]}")
+      else:
+        ftype = field_type(name, fmt_name)
+        lines.append(f"  {name}{f':{ftype}' if ftype else ''} = {bits_str}")
+    lines.append("")
+
+  # Generate instruction helpers
   lines.append("# instruction helpers")
-  for cls_name, ops in sorted(enums.items()):
-    fmt = cls_name[:-2]
-    for op_val, name in sorted(ops.items()):
-      seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=1"}.get(fmt, "")
-      tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt, f"{fmt}, {cls_name}")
-      if fmt in formats or fmt in ("GLOBAL", "SCRATCH"):
-        suffix = "_e32" if fmt in ("VOP1", "VOP2", "VOPC") else "_e64" if fmt == "VOP3" and op_val < 512 else ""
-        if name in ('V_FMAMK_F32', 'V_FMAMK_F16'):
-          lines.append(f"def {name.lower()}{suffix}(vdst, src0, K, vsrc1): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
-        elif name in ('V_FMAAK_F32', 'V_FMAAK_F16'):
-          lines.append(f"def {name.lower()}{suffix}(vdst, src0, vsrc1, K): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
-        else: lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
-  src_names = {name for _, name in src_enum.items()}
-  lines += [""] + [f"{name} = SrcEnum.{name}" for _, name in sorted(src_enum.items()) if name not in {'DPP8', 'DPP16'}]
-  if "NULL" in src_names: lines.append("OFF = NULL\n")
-  return '\n'.join(lines)
+  for fmt_name, ops in sorted(enums.items()):
+    seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=1"}.get(fmt_name, "")
+    tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt_name, f"{fmt_name}, {fmt_name}Op")
+    suffix = "_e32" if fmt_name in ("VOP1", "VOP2", "VOPC") else "_e64" if fmt_name == "VOP3" and len(ops) > 0 else ""
+    if fmt_name in formats or fmt_name in ("GLOBAL", "SCRATCH"):
+      for op_val, name in sorted(ops.items()):
+        fn_suffix = suffix if fmt_name != "VOP3" or op_val < 512 else ""
+        lines.append(f"{name.lower()}{fn_suffix} = functools.partial({tgt}.{name}{seg})")
 
-def _generate_str_pcode_py(enums, pseudocode, arch) -> str:
-  """Generate str_pcode.py content (raw pseudocode strings)."""
-  # Get op enums for this arch (import from .ins which re-exports from .enum)
-  import importlib
-  autogen = importlib.import_module(f"extra.assembly.amd.autogen.{arch}.ins")
-  OP_ENUMS = [getattr(autogen, name) for name in ['SOP1Op', 'SOP2Op', 'SOPCOp', 'SOPKOp', 'SOPPOp', 'SMEMOp', 'VOP1Op', 'VOP2Op', 'VOP3Op', 'VOP3SDOp', 'VOP3POp', 'VOPCOp', 'VOP3AOp', 'VOP3BOp', 'DSOp', 'FLATOp', 'GLOBALOp', 'SCRATCHOp'] if hasattr(autogen, name)]
+  with open(path, "w") as f:
+    f.write("\n".join(lines))
 
-  # Build defined ops mapping
-  defined_ops: dict[tuple, list] = {}
-  for enum_cls in OP_ENUMS:
-    for op in enum_cls:
-      if op.name.startswith(('S_', 'V_', 'DS_', 'FLAT_', 'GLOBAL_', 'SCRATCH_')): defined_ops.setdefault((op.name, op.value), []).append((enum_cls, op))
-
-  enum_names = [e.__name__ for e in OP_ENUMS]
-  instructions: dict = {cls: {} for cls in OP_ENUMS}
-  for key, pc in pseudocode.items():
-    if key in defined_ops:
-      for enum_cls, enum_val in defined_ops[key]: instructions[enum_cls][enum_val] = pc
-
-  # Build string dictionaries for each enum
-  lines = [f'''# autogenerated by pdf.py - do not edit
-# to regenerate: python -m extra.assembly.amd.pdf --arch {arch}
-# ruff: noqa: E501
-from extra.assembly.amd.autogen.{arch}.enum import {", ".join(enum_names)}
-''']
-  all_dict_entries: dict = {}
-  for enum_cls in OP_ENUMS:
-    cls_name = enum_cls.__name__
-    if not instructions.get(enum_cls): continue
-    dict_entries = [(op, repr(pc)) for op, pc in instructions[enum_cls].items()]
-    if dict_entries:
-      all_dict_entries[enum_cls] = dict_entries
-      lines.append(f'{cls_name}_PCODE = {{')
-      for op, escaped in dict_entries: lines.append(f"  {cls_name}.{op.name}: {escaped},")
-      lines.append('}\n')
-
-  lines.append('PSEUDOCODE_STRINGS = {')
-  for enum_cls in OP_ENUMS:
-    if all_dict_entries.get(enum_cls): lines.append(f'  {enum_cls.__name__}: {enum_cls.__name__}_PCODE,')
-  lines.append('}')
-  return '\n'.join(lines)
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MAIN GENERATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def generate_arch(arch: str) -> dict:
-  """Generate enum.py, ins.py and str_pcode.py for a single architecture."""
-  urls = PDF_URLS[arch]
-  if isinstance(urls, str): urls = [urls]
-
-  print(f"\n{'='*60}\nGenerating {arch}...")
-  print(f"Parsing {len(urls)} PDF(s)...")
-  results = [_parse_single_pdf(url) for url in urls]
-  merged = _merge_results(results) if len(results) > 1 else results[0]
-  doc_name = "+".join(merged["doc_names"]) if len(results) > 1 else merged["doc_name"]
-
-  base_path = Path(f"extra/assembly/amd/autogen/{arch}")
-  base_path.mkdir(parents=True, exist_ok=True)
-  (base_path / "__init__.py").touch()
-
-  # Write enum.py (enums only, no dsl.py dependency)
-  enum_path = base_path / "enum.py"
-  enum_content = _generate_enum_py(merged["enums"], merged["src_enum"], doc_name, merged.get("buf_fmt"))
-  enum_path.write_text(enum_content)
-  buf_fmt_count = len([v for v in merged.get("buf_fmt", {}) if 1 <= v <= 63])
-  print(f"Generated {enum_path}: SrcEnum ({len(merged['src_enum'])}) + {len(merged['enums'])} enums" + (f" + BufFmt ({buf_fmt_count})" if buf_fmt_count else ""))
-
-  # Write ins.py (instruction formats and helpers, imports dsl.py and enum.py)
-  ins_path = base_path / "ins.py"
-  ins_content = _generate_ins_py(merged["formats"], merged["enums"], merged["src_enum"], doc_name).replace("{arch}", arch)
-  ins_path.write_text(ins_content)
-  print(f"Generated {ins_path}: {len(merged['formats'])} formats")
-
-  # Write str_pcode.py (needs enum.py to exist first for imports)
-  pcode_path = base_path / "str_pcode.py"
-  pcode_content = _generate_str_pcode_py(merged["enums"], merged["pseudocode"], arch)
-  pcode_path.write_text(pcode_content)
-  print(f"Generated {pcode_path}: {len(merged['pseudocode'])} instructions")
-
-  return merged
-
-def _generate_arch_wrapper(arch: str):
-  """Wrapper for multiprocessing - returns arch name for ordering."""
-  generate_arch(arch)
-  return arch
-
-def generate_all():
-  """Generate all architectures in parallel."""
-  with ProcessPoolExecutor() as executor:
-    list(executor.map(_generate_arch_wrapper, PDF_URLS.keys()))
+def write_pcode(pcode: dict[tuple[str, int], str], enums: dict[str, dict[int, str]], arch: str, path: str):
+  """Write str_pcode.py file from extracted pseudocode."""
+  # Group pseudocode by enum class
+  by_enum: dict[str, list[tuple[str, int, str]]] = {}
+  for fmt_name, ops in enums.items():
+    for opcode, name in ops.items():
+      if (name, opcode) in pcode: by_enum.setdefault(f"{fmt_name}Op", []).append((name, opcode, pcode[(name, opcode)]))
+  # Generate file
+  enum_names = sorted(by_enum.keys())
+  lines = [f"# autogenerated by pdf.py - do not edit", f"# to regenerate: python -m extra.assembly.amd.pdf",
+           "# ruff: noqa: E501", f"from extra.assembly.amd.autogen.{arch}.enum import {', '.join(enum_names)}", ""]
+  for enum_name in enum_names:
+    lines.append(f"{enum_name}_PCODE = {{")
+    for name, opcode, code in sorted(by_enum[enum_name], key=lambda x: x[1]):
+      lines.append(f"  {enum_name}.{name}: {code!r},")
+    lines.append("}\n")
+  lines.append(f"PSEUDOCODE_STRINGS = {{{', '.join(f'{e}: {e}_PCODE' for e in enum_names)}}}")
+  with open(path, "w") as f:
+    f.write("\n".join(lines))
 
 if __name__ == "__main__":
-  import argparse
-  parser = argparse.ArgumentParser(description="Generate AMD ISA autogen files from PDF documentation")
-  parser.add_argument("--arch", choices=list(PDF_URLS.keys()) + ["all"], default="rdna3")
-  args = parser.parse_args()
-  if args.arch == "all": generate_all()
-  else: generate_arch(args.arch)
+  import pathlib
+  for arch, url in PDF_URLS.items():
+    print(f"Processing {arch}...")
+    pages = extract(url)
+    tables = extract_tables(pages)
+    enums = extract_enums(tables)
+    formats, encodings = extract_ins(tables)
+    pcode = extract_pcode(pages, enums)
+    # Fix known PDF errors
+    if arch == 'rdna3':
+      fixes = {'SOPP': {8: 'S_WAITCNT_DEPCTR', 58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'},
+               'SOPK': {22: 'S_SUBVECTOR_LOOP_BEGIN', 23: 'S_SUBVECTOR_LOOP_END'},
+               'SMEM': {34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'},
+               'DS': {24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V', 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'},
+               'FLAT': {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}}
+      for fmt, ops in fixes.items(): enums[fmt] = merge_dicts([enums[fmt], ops])
+    if arch in ('rdna3', 'rdna4'):
+      # RDNA SMEM: PDF says DLC=[14], GLC=[16] but hardware uses DLC=[13], GLC=[14]
+      if 'SMEM' in formats:
+        formats['SMEM'] = [(n, 13 if n == 'dlc' else 14 if n == 'glc' else h, 13 if n == 'dlc' else 14 if n == 'glc' else l)
+                           for n, h, l in formats['SMEM']]
+    if arch == 'cdna':
+      # CDNA DS: PDF is missing the GDS field (bit 16)
+      if 'DS' in formats and not any(n == 'gds' for n, _, _ in formats['DS']):
+        formats['DS'].append(('gds', 16, 16))
+      # CDNA DPP/SDWA: PDF only documents modifier fields (bits[63:32]), need to add VOP overlay fields (bits[31:0])
+      vop_overlay = [('encoding', 8, 0), ('vop_op', 16, 9), ('vdst', 24, 17), ('vop2_op', 31, 25)]
+      if 'DPP' in formats and not any(n == 'encoding' for n, _, _ in formats['DPP']):
+        formats['DPP'] = vop_overlay + [('bc' if n == 'bound_ctrl' else n, h, l) for n, h, l in formats['DPP']]
+        encodings['DPP'] = '11111010'
+      if 'SDWA' in formats and not any(n == 'encoding' for n, _, _ in formats['SDWA']):
+        formats['SDWA'] = vop_overlay + [(n, h, l) for n, h, l in formats['SDWA']]
+        encodings['SDWA'] = '11111001'
+    base = pathlib.Path(__file__).parent / "autogen" / arch
+    write_enums(enums, arch, base / "enum.py")
+    write_ins(formats, encodings, enums, arch, base / "ins.py")
+    write_pcode(pcode, enums, arch, base / "str_pcode.py")
+    print(f"  {len(tables)} tables, {len(pcode)} pcode -> {base}")

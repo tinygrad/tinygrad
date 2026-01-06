@@ -670,6 +670,10 @@ jobs:
           deps: testing_minimal
           amd: 'true'
           python-version: '3.13'
+      - name: Verify AMD autogen is up to date
+        run: |
+          python -m extra.assembly.amd.pdf
+          git diff --exit-code extra/assembly/amd/autogen/
       - name: Install LLVM 21
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -689,23 +693,6 @@ jobs:
       # TODO: run all once emulator is faster
       - name: Run RDNA3 ops tests
         run: SKIP_SLOW_TEST=1 AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril"
-
-  testamdautogen:
-    name: AMD autogen
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: rdna3-autogen
-          pydeps: "pdfplumber"
-      - name: Verify AMD autogen is up to date
-        run: |
-          python -m extra.assembly.amd.pdf --arch all
-          git diff --exit-code extra/assembly/amd/autogen/
 
   testnvidia:
     strategy:
