@@ -7,13 +7,13 @@ Comments marked "should be X!" indicate the intuitively expected value.
 
 SILENT MISMATCHES (highest priority - wrong results, no error):
   tensors_in_containers_ignored      EASY   only checks t.__class__ is Tensor, could scan lists/dicts
-  non_tensor_outputs_frozen          EASY   could warn/error if return contains non-Tensor values
   class_method_shared_across_instances EASY could check if first arg is self and warn
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
   python_constants_frozen            HARD   inherent to tracing JITs
   conditional_branches_frozen        HARD   inherent to tracing JITs
 
 ERRORS RAISED (lower priority - at least users know):
+  non_tensor_outputs_error           EASY   raises JitError if return contains non-Tensor values
   positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
   duplicate_inputs_fail              MED    would need to handle aliasing in input_replace
   nested_jit_fails_on_second_call    MED    could fail on first call instead of second
@@ -49,21 +49,11 @@ class TestJitFootguns(unittest.TestCase):
 
     self.assertEqual([r1.item(), r2.item(), r3.item()], [2, 4, 6])
 
-  def test_non_tensor_outputs_frozen(self):
-    """Non-tensor return values are frozen at capture time."""
+  def test_non_tensor_outputs_error(self):
     @TinyJit
     def f(x, mult): return (x * 2).realize(), mult * 10
-
-    # collect results, copying tensor values immediately (buffer reuse!)
-    results = []
-    for i in range(5):
-      t, s = f(Tensor([i]), i)
-      results.append((t.item(), s))
-
-    # tensor outputs work correctly
-    self.assertEqual([r[0] for r in results[2:]], [4, 6, 8])
-    # scalar outputs frozen at capture (i=1) - should be 20, 30, 40!
-    self.assertEqual([r[1] for r in results[2:]], [10, 10, 10])
+    with self.assertRaises(JitError):
+      for i in range(3): f(Tensor([i]), i)
 
   def test_duplicate_inputs_fail(self):
     """JIT cannot handle the same tensor passed as multiple arguments."""
