@@ -131,7 +131,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           else: types[_nm] = (tnm:=_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
           lines.append(f"class {tnm}(ctypes.{'Structure' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
           if typedef: lines.append(f"{typedef} = {tnm}")
-        ff=[(nm(f), tname(clang.clang_getCursorType(f)), offset) + ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
+        ff=[(f, tname(clang.clang_getCursorType(f)), offset) + ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
                                                                     *clang.clang_Cursor_isBitField(f)) for f,offset in all_fields(t)]
         if ff: lines[ln] = '\n'.join(["@record", f"class {tnm}:", f"  SIZE = {clang.clang_Type_getSizeOf(t)}",
                                       *[f"  {normalize(f)}: Annotated[{', '.join(str(a) for a in args)}]" for f,*args in ff]])
