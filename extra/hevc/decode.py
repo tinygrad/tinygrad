@@ -43,7 +43,7 @@ if __name__ == "__main__":
     return hevc_tensor[offset:offset+sz].decode_hevc_frame(pos, out_image_size, opaque_nv[i], hist).realize()
 
   # warm up
-  history = [Tensor.empty(*out_image_size, dtype=dtypes.uint8, device="NV").realize() for _ in range(max_hist)]
+  history = [Tensor.empty(*out_image_size, dtype=dtypes.uint8, device="NV") for _ in range(max_hist)]
   for i in range(3):
     decode_jit(v_pos.bind(0), hevc_tensor, v_offset.bind(frame_info[0][0]), v_sz.bind(frame_info[0][1]), opaque_nv, v_i.bind(0), *history)
 
