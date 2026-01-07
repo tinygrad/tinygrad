@@ -39,12 +39,12 @@ def assign(ctx:RegallocContext, x:UOp, reg:Register):
   return ret.replace(dtype=x.dtype)
 def load(ctx:RegallocContext, dt:DType, disp:UOp, reg:Register):
   ndt = dtypes.uint64 if isinstance(dt, PtrDType) else dt
-  ret = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().load(disp, dtype=ndt, arg=reg))
+  ret = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(disp).load(dtype=ndt, arg=reg))
   assert ret is not None
   return ret.replace(dtype=dt)
 def store(ctx:RegallocContext, disp:UOp, x:UOp):
   nx = x.replace(dtype=dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype)
-  ret = ctx.ren.isel_matcher.rewrite(UOp(Ops.STORE, src=(ctx.ren.stack_pointer(), disp, nx)))
+  ret = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(disp).store(nx))#  ,  UOp(Ops.STORE, src=(ctx.ren.stack_pointer(), disp, nx)))
   assert ret is not None
   return ret.replace(src=(s if s is not nx else x for s in ret.src))
 

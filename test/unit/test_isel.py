@@ -18,8 +18,21 @@ class TestIselX86(unittest.TestCase):
     f = c + d
     n = self.isel_rewrite(f)
     self.assertTrue(n.src[0].op is X86Ops.CMOVL and n.src[1].op is X86Ops.CMOVNE)
-    # both comparisons become the same X86Ops.CMP
+    # both comparisons become the same instruction
     self.assertTrue(n.src[0].src[2] == n.src[1].src[2] and n.src[0].src[2].op is X86Ops.CMP)
+
+  def test_cmove_and_blend_with_float_cmp(self):
+    a = UOp.variable("a", 0, 0, dtypes.float32)
+    b = UOp.variable("b", 0, 0, dtypes.float32)
+    c = a < b
+    d = c.where(a.cast(dtypes.int32), b.cast(dtypes.int32))
+    e = c.where(a, b)
+    f = d + e
+    n = self.isel_rewrite(f)
+    # the comparison instruction depends on the user, int cmove uses flag while float cmove uses mask
+    # so both flag producing and mask producing comparisons must be present 
+    self.assertTrue(n.src[0].op is X86Ops.CMOVB and n.src[0].src[2].op is X86Ops.VUCOMISS)
+    self.assertTrue(n.src[1].op is X86Ops.VBLENDVPS and n.src[1].src[2].op is X86Ops.VCMPSS and n.src[1].src[2].src[2].arg == 1)
 
   # the geps become part of the immediate in the instruction
   def test_vshufps_same_src(self):
@@ -65,15 +78,6 @@ class TestIselX86(unittest.TestCase):
     load = index.load()
     n = self.isel_rewrite(load)
     self.assertTrue(n.src[1] is var)
-
-  # don't fuse when used multiple times
-  def test_dont_fuse_index(self):
-    offset = UOp.variable("a", 0, 0, dtypes.int32) + UOp.const(dtypes.int32, 1)
-    index = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), arg=0).index(offset, ptr=True)
-    load = index.load()
-    store = index.store(load)
-    n = self.isel_rewrite(store)
-    self.assertTrue(n.src[1].op is Ops.NOOP)
 
   def test_fuse_load(self):
     offset = UOp.variable("a", 0, 0, dtypes.int32) + UOp.const(dtypes.int32, 1)

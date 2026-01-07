@@ -80,18 +80,6 @@ pre_isel_matcher = PatternMatcher([
   # gated index becomes a conditional move on the index, the load/store are unconditional
   (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt"), name="x"), lambda base,idx,gate,alt,x: gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count), arg=0)).after(l.store(alt)).index(UOp.const(dtypes.int32, 0), ptr=True)).load(dtype=x.dtype)),
   (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).store(UPat.var("val")), lambda base,idx,gate,val: gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True)).store(val)),
-  # fold the displacement into the load/store to expose the base index for memory address fusion in isel
-  # after this all load/stores have an extra const in the src
-  (UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.cvar("disp")),), name="x"),
-   lambda buf,disp,x: x.replace(src=(buf, disp.const_like(disp.arg * buf.dtype.base.scalar().itemsize)))),
-  (UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.var("idx") + UPat.cvar("disp")),), name="x"),
-    lambda buf,idx,disp,x: x.replace(src=(buf.index(idx, ptr=True), disp.const_like(disp.arg * buf.dtype.base.scalar().itemsize)))),
-  (UPat(Ops.LOAD, src=(UPat.var("buf"),), name="x"), lambda buf,x: x.replace(src=(buf, UOp.const(dtypes.int32, 0)))),
-  (UPat(Ops.STORE, src=(UPat.var("buf").index(UPat.cvar("disp")), UPat.var("a")), name="x"),
-   lambda buf,disp,a,x: x.replace(src=(buf, disp.const_like(disp.arg * buf.dtype.base.scalar().itemsize), a))),
-  (UPat(Ops.STORE, src=(UPat.var("buf").index(UPat.var("idx") + UPat.cvar("disp")), UPat.var("a")), name="x"),
-   lambda buf,idx,disp,a,x: x.replace(src=(buf.index(idx, ptr=True), disp.const_like(disp.arg * buf.dtype.base.scalar().itemsize), a))),
-  (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("a")), name="x"), lambda buf,a,x: x.replace(src=(buf, UOp.const(dtypes.int32, 0), a))),
   # after extracting displacement cast idx to 64bit if it can be negative
   #(UPat.var("base").index(UPat.var("idx", dtypes.int32)), lambda base,idx: base.index(idx.cast(dtypes.int64), ptr=True) if idx.vmin < 0 else None),
   # TODO: remove this once we allow all flag producing ops in cmove
@@ -128,7 +116,6 @@ def cmp(x:UOp):
   if x.src[0].dtype is dtypes.float32: return UOp(X86Ops.VUCOMISS, src=x.src)
   if x.src[0].dtype is dtypes.float64: return UOp(X86Ops.VUCOMISD, src=x.src)
   return UOp(X86Ops.CMP, src=x.src) if (i:=to_imm(x.src[1])) is None else UOp(X86Ops.CMPi, src=(x.src[0], i))
-def disp(c:UOp) -> UOp: return imm(dtypes.int32 if c.overflows(dtypes.int8) else dtypes.int8, c.arg)
 def def_reg(dt:DType, reg:Register|None=None): return UOp(X86Ops.DEFINE_REG, dt, arg=reg)
 
 # vshufps takes 2 registers, it gets its lower 64 bits from the first register and its upper 64 bits from the second
@@ -174,15 +161,19 @@ def idiv(ctx:IselContext, x:UOp):
   # this move "cleanses" the register constraint (rax) of idiv, this is because the constraint only applies on definition and not on the uses of idiv
   return UOp(X86Ops.MOV, x.dtype, (idiv,))
 
-def fuse_index(ctx:IselContext, x:UOp) -> tuple[UOp, ...]:
-  # fuse INDEX into the address if only used once, if there was a displacement it was already moved into the load/store to expose the base index
-  base, idx = x.src[0].src if x.src[0].op is Ops.INDEX and len(ctx.uses[x.src[0]]) == 1 else (x.src[0], UOp(Ops.NOOP))
-  # if the idx can be less than 0 need to sign extend
-  return (base, idx.cast(dtypes.int64) if idx.op is not Ops.NOOP and idx.vmin < 0 else idx, disp(x.src[1]))
+def fuse_address(x:UOp) -> tuple[UOp, ...]:
+  def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.max(dtypes.int8) else dtypes.int8, v)
+  def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v
+  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), imm(dtypes.int8, 0))
+  base, idx = x.src
+  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, _cast(idx.src[0]), _disp(idx.src[1].arg * disp_scale))
+  if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * disp_scale))
+  return (base, _cast(idx), _disp(0))
 
 def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
   # if the load is used multiple times we don't fuse
-  return x.replace(src=x.src[:i] + fuse_index(ctx, x.src[i]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == x.src.count(x.src[i]) == 1 else None
+  return x.replace(src=x.src[:i] + fuse_address(x.src[i].src[0]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == x.src.count(x.src[i]) == 1 else None
 
 def abi(ctx:IselContext, x:UOp):
   def _stack_arg(disp:int): return UOp(X86Ops.MOV, x.dtype, (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(X86Ops.FRAME_INDEX, dtypes.int32, arg=disp)))
@@ -219,11 +210,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CONST, dtypes.float64, name="x"), lambda x: UOp(X86Ops.VMOVQ, x.dtype, (UOp(X86Ops.MOVABS, dtypes.int64, (imm(x.dtype, x.arg),)),))),
   (UPat(Ops.CONST, dtypes.int64s, name="x"), lambda x: UOp(X86Ops.MOVABS, x.dtype, (imm(x.dtype, x.arg),)) if x.tag is None else None),
   (UPat(Ops.CONST, dtypes.ints+(dtypes.bool,), name="x"), lambda x: UOp(X86Ops.MOVi, x.dtype, (imm(x.dtype, x.arg),)) if x.tag is None else None),
-  # LEA, first 2 cases only happen if INDEX is followed by a WHERE preventing the displacement being moved to the LOAD/STORE
-  # if the idx can be less than 0 need to sign extend
-  (UPat(Ops.INDEX, src=(UPat.var("base"), UPat.var("idx") + UPat.cvar("dis")), name="x"), lambda base,idx,dis,x: x.replace(op=X86Ops.LEA, src=(base, idx.cast(dtypes.int64) if idx.vmin < 0 else idx, disp(dis.const_like(dis.arg * base.dtype.itemsize))))),
-  (UPat(Ops.INDEX, src=(UPat.var("base"), UPat.cvar("dis")), name="x"), lambda base,dis,x: x.replace(op=X86Ops.LEA, src=(base, UOp(Ops.NOOP), disp(dis.const_like(dis.arg * base.dtype.itemsize))))),
-  (UPat(Ops.INDEX, src=(UPat.var("base"), UPat.var("idx")), name="x"), lambda base,idx,x: x.replace(op=X86Ops.LEA, src=(base, idx.cast(dtypes.int64) if idx.vmin < 0 else idx, imm(dtypes.int8, 0)))),
+  # LEA
+  (UPat(Ops.INDEX, name="x"), lambda x: x.replace(op=X86Ops.LEA, src=fuse_address(x))),
   # jumps, use flags
   (UPat(Ops.IF, src=(UPat(Ops.CMPLT, dtypes.bool, (UPat(dtype=dtypes.uints), UPat()), name="y"),), name="x"), lambda y,x: UOp(X86Ops.JB, x.dtype, (cmp(y),))), # noqa: E501
   (UPat(Ops.IF, src=(UPat(Ops.CMPLT, name="y"),)), lambda y: UOp(X86Ops.JL, src=(cmp(y),))),
@@ -374,17 +362,17 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.ASSIGN, dt_64bit, name="x"), lambda x: x.replace(op=X86Ops.VMOVSD)),
   (UPat(Ops.ASSIGN, dt_32bit+dt_16bit, name="x"), lambda x: x.replace(op=X86Ops.VMOVSS)),
   (UPat(Ops.ASSIGN, dtypes.ints+(dtypes.bool,), name="x"), lambda x: x.replace(op=X86Ops.MOV)),
-  (UPat(Ops.LOAD, dt_128bit, name="x"), lambda ctx,x: x.replace(op=X86Ops.VMOVUPS, src=fuse_index(ctx, x))),
-  (UPat(Ops.LOAD, dt_64bit, name="x"), lambda ctx,x: x.replace(op=X86Ops.VMOVSD, src=fuse_index(ctx, x))),
-  (UPat(Ops.LOAD, dt_32bit, name="x"), lambda ctx,x: x.replace(op=X86Ops.VMOVSS, src=fuse_index(ctx, x))),
-  (UPat(Ops.LOAD, dt_16bit, name="x"), lambda ctx,x: x.replace(op=X86Ops.VPINSRW, src=(def_reg(x.dtype, x.arg),) + fuse_index(ctx, x) + (imm(dtypes.uint8, 0),))),
-  (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), name="x"), lambda ctx,x: x.replace(op=X86Ops.MOV, src=fuse_index(ctx, x))),
-  (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dt_128bit)), name="x"), lambda ctx,x: x.replace(op=X86Ops.VMOVUPSm, src=fuse_index(ctx, x) + (x.src[-1],))), # noqa: E501
-  (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dt_64bit)), name="x"), lambda ctx,x: x.replace(op=X86Ops.VMOVSDm, src=fuse_index(ctx, x) + (x.src[-1],))), # noqa: E501
-  (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dt_32bit)), name="x"), lambda ctx,x: x.replace(op=X86Ops.VMOVSSm, src=fuse_index(ctx, x) + (x.src[-1],))), # noqa: E501
-  (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dt_16bit)), name="x"), lambda ctx,x: x.replace(op=X86Ops.VPEXTRW, src=fuse_index(ctx, x) + (x.src[-1], imm(dtypes.uint8, 0)))), # noqa: E501
-  (UPat(Ops.STORE, src=(UPat(), UPat(), UPat(dtype=dtypes.ints+(dtypes.bool,))), name="x"),
-   lambda ctx,x: x.replace(op=X86Ops.MOVm, src=fuse_index(ctx, x) + (x.src[-1],)) if (i:=to_imm(x.src[-1])) is None else x.replace(op=X86Ops.MOVi, src=fuse_index(ctx, x) + (i,))), # noqa: E501
+  (UPat(Ops.LOAD, dt_128bit, name="x"), lambda x: x.replace(op=X86Ops.VMOVUPS, src=fuse_address(x.src[0]))),
+  (UPat(Ops.LOAD, dt_64bit, name="x"), lambda x: x.replace(op=X86Ops.VMOVSD, src=fuse_address(x.src[0]))),
+  (UPat(Ops.LOAD, dt_32bit, name="x"), lambda x: x.replace(op=X86Ops.VMOVSS, src=fuse_address(x.src[0]))),
+  (UPat(Ops.LOAD, dt_16bit, name="x"), lambda x: x.replace(op=X86Ops.VPINSRW, src=(def_reg(x.dtype, x.arg),) + fuse_address(x.src[0]) + (imm(dtypes.uint8, 0),))),
+  (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), name="x"), lambda x: x.replace(op=X86Ops.MOV, src=fuse_address(x.src[0]))),
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dt_128bit)), name="x"), lambda x: x.replace(op=X86Ops.VMOVUPSm, src=fuse_address(x.src[0]) + (x.src[1],))), # noqa: E501
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dt_64bit)), name="x"), lambda x: x.replace(op=X86Ops.VMOVSDm, src=fuse_address(x.src[0]) + (x.src[1],))), # noqa: E501
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dt_32bit)), name="x"), lambda x: x.replace(op=X86Ops.VMOVSSm, src=fuse_address(x.src[0]) + (x.src[1],))), # noqa: E501
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dt_16bit)), name="x"), lambda x: x.replace(op=X86Ops.VPEXTRW, src=fuse_address(x.src[0]) + (x.src[1], imm(dtypes.uint8, 0)))), # noqa: E501
+  (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.ints+(dtypes.bool,))), name="x"),
+   lambda x: x.replace(op=X86Ops.MOVm, src=fuse_address(x.src[0]) + (x.src[1],)) if (i:=to_imm(x.src[1])) is None else x.replace(op=X86Ops.MOVi, src=fuse_address(x.src[0]) + (i,))), # noqa: E501
   # **** X86Op rewrites ****
   # fuse loads into X86Ops that allow it, if beneficial
   (UPat(X86GroupOp.ReadMem1st, src=(UPat(Ops.LOAD),), allow_any_len=True, name="x"), lambda ctx,x: fuse_load(ctx, x, 0)),
