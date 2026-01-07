@@ -43,9 +43,6 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
     # converting negative float to unsigned integer is undefined
     a = a.abs()
-  if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
-    # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
-    a = (a > 65504).where(65504, a)
 
   expected = list(a.numpy().astype(_to_np_dtype(target_dtype)))
   if target_dtype in dtypes.fp8s: expected = [truncate[target_dtype](x) for x in expected]
