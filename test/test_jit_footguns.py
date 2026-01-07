@@ -16,7 +16,6 @@ ERRORS RAISED (lower priority - at least users know):
   non_tensor_outputs_error           EASY   raises JitError if return contains non-Tensor values
   positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
   duplicate_inputs_fail              MED    would need to handle aliasing in input_replace
-  nested_jit_fails_on_second_call    MED    could fail on first call instead of second
 """
 import unittest
 import numpy as np
@@ -70,17 +69,6 @@ class TestJitFootguns(unittest.TestCase):
     for i in range(4):
       a, b = Tensor([1, 1, 1]).realize(), Tensor([i, i, i]).realize()
       np.testing.assert_array_equal(f(a, [b]).numpy(), [1+i, 1+i, 1+i])
-
-  def test_nested_jit_fails_on_second_call(self):
-    """Nested JIT works on first call but fails on second."""
-    @TinyJit
-    def inner(t): return t + 1
-    @TinyJit
-    def outer(t): return inner(t) * 3
-
-    self.assertEqual(outer(Tensor([1])).realize().item(), 6)  # works!
-    with self.assertRaises(RuntimeError):
-      outer(Tensor([2])).realize()  # fails
 
   def test_implicit_inputs_need_realize(self):
     """Closure tensors must be realized before JIT call."""

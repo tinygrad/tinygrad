@@ -526,9 +526,8 @@ class TestJitInsideJit(unittest.TestCase):
     @TinyJit
     def g(t): return f(t) * 3
 
-    # NOTE: first does not raise
-    g(Tensor([1])).realize()
-    with self.assertRaisesRegex(RuntimeError, "having TinyJit inside another TinyJit is not supported"):
+    # nested JIT raises on first call
+    with self.assertRaises(JitError):
       g(Tensor([1])).realize()
 
 class TestCopyInsideJit(unittest.TestCase):
