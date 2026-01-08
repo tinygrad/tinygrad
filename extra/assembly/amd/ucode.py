@@ -203,13 +203,8 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
 # FUNCTION CALLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-CVT_MAP = {'u32_to_f32': (dtypes.float32, False), 'i32_to_f32': (dtypes.float32, False), 'f32_to_u32': (dtypes.uint32, True),
-           'f32_to_i32': (dtypes.int32, False), 'f16_to_f32': (dtypes.float32, False), 'f32_to_f16': (dtypes.float16, False),
-           'f32_to_u8': (dtypes.uint8, False), 'f32_to_i8': (dtypes.int8, False), 'f32_to_u16': (dtypes.uint16, False),
-           'f32_to_i16': (dtypes.int16, False), 'v_cvt_u16_f32': (dtypes.uint16, False), 'v_cvt_i16_f32': (dtypes.int16, False),
-           'f64_to_i32': (dtypes.int32, False), 'f64_to_u32': (dtypes.uint32, True), 'i32_to_f64': (dtypes.float64, False),
-           'u32_to_f64': (dtypes.float64, False), 'f64_to_f32': (dtypes.float32, False), 'f32_to_f64': (dtypes.float64, False),
-           'u16_to_f16': (dtypes.float16, False), 'i16_to_f16': (dtypes.float16, False), 'f16_to_u16': (dtypes.uint16, False), 'f16_to_i16': (dtypes.int16, False)}
+# Conversions that need special handling (clamping negative to 0 before cast)
+CVT_MAP = {'f32_to_u32': (dtypes.uint32, True), 'f64_to_u32': (dtypes.uint32, True)}
 
 def _fp_bits(v: UOp) -> tuple[UOp, int, int, int]:
   """Get float as bits with its layout info. Unwraps CAST to check original float type."""
