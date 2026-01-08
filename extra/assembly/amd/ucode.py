@@ -227,8 +227,6 @@ def _minmax(args: list[UOp], is_min: bool) -> UOp:
 
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'MEM': return a[0]
-  if name == 'isINF': return UOp(Ops.OR, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, float('inf')))),
-                                                        UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, float('-inf'))))))
   if name in ('isQuietNAN', 'isSignalNAN'):
     bits, exp_shift, exp_mask, mant_mask = _fp_bits(a[0])
     # Use the dtype from bits (uint32/uint64/uint16) to determine which quiet bit to use
@@ -295,7 +293,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     assert a[0].op == Ops.CONST and a[0].arg == 2.0
     return UOp(Ops.EXP2, a[0].dtype, (a[1] if a[1].dtype == a[0].dtype else UOp(Ops.CAST, a[0].dtype, (a[1],)),))
   if name == 'ldexp': return UOp(Ops.MUL, a[0].dtype, (a[0], UOp(Ops.EXP2, a[0].dtype, (UOp(Ops.CAST, a[0].dtype, (a[1],)),))))
-  if name in ('min', 'max'): return _minmax(a, is_min=(name == 'min'))
   if name in CVT_MAP:
     dt, clamp = CVT_MAP[name]
     v = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0.0))), UOp.const(a[0].dtype, 0.0), a[0])) if clamp else a[0]

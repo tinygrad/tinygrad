@@ -195,6 +195,14 @@ def expr(s: str) -> UOp:
         x, trunc = srcs[0], UOp(Ops.TRUNC, srcs[0].dtype, (srcs[0],))
         floor = UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, x.dtype, (trunc, _typed_const(x, 1))), trunc))
         return UOp(Ops.SUB, x.dtype, (x, floor))
+      if name == 'isINF':
+        x = srcs[0]
+        return UOp(Ops.OR, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('inf')))),
+                                         UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('-inf'))))))
+      if name in ('min', 'max'):
+        a, b = srcs[0], srcs[1]
+        cmp = UOp(Ops.CMPLT, dtypes.bool, (a, b) if name == 'min' else (b, a))
+        return UOp(Ops.WHERE, a.dtype, (cmp, a, b))
       output_dtype = _infer_fn_dtype(name, srcs)
       return UOp(Ops.CUSTOM, output_dtype, srcs, arg=name)
   # MEM[addr] -> CUSTOM('MEM', addr), MEM[addr].type -> BITCAST
