@@ -783,7 +783,7 @@ def _apply_alias(text: str) -> str:
     if m in _ALIASES: return _ALIASES[m] + text[len(m):]
   return text
 
-def get_dsl(text: str) -> str:
+def get_dsl(text: str, arch: str = "rdna3") -> str:
   text, kw = _apply_alias(text.strip()), []
   # Extract modifiers
   for pat, val in [(r'\s+mul:2(?:\s|$)', 1), (r'\s+mul:4(?:\s|$)', 2), (r'\s+div:2(?:\s|$)', 3)]:
@@ -851,7 +851,7 @@ def get_dsl(text: str) -> str:
     if off_val and len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}{gs}{ds})"
     if len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, soffset={args[2]}{gs}{ds})"
 
-  # Buffer (MUBUF/MTBUF) instructions
+  # Buffer (MUBUF/MTBUF/VBUFFER) instructions
   if mn.startswith(('buffer_', 'tbuffer_')):
     is_tbuf = mn.startswith('tbuffer_')
     # Parse format value for tbuffer
@@ -861,7 +861,42 @@ def get_dsl(text: str) -> str:
       else: fmt_num = BUF_FMT.get(fmt_val.replace(' ', '')) or _parse_buf_fmt_combo(fmt_val)
     # Handle special no-arg buffer ops
     if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}()"
-    # Build modifiers string
+    # RDNA4 uses VBUFFER with different field names and th/scope instead of glc/dlc/slc
+    if arch == "rdna4":
+      # Extract th and scope modifiers
+      m, text = _extract(text, r'\s+th:TH_(\w+)')
+      th_val = {'LOAD_RT': 0, 'LOAD_NT': 1, 'LOAD_HT': 2, 'LOAD_BYPASS': 3, 'LOAD_LU': 4, 'LOAD_RT_NT': 5, 'LOAD_NT_HT': 6, 'LOAD_RT_WB': 7,
+                'STORE_RT': 0, 'STORE_NT': 1, 'STORE_HT': 2, 'STORE_BYPASS': 3, 'STORE_LU': 4, 'STORE_RT_NT': 5, 'STORE_NT_HT': 6,
+                'ATOMIC_RT': 0, 'ATOMIC_NT': 1, 'ATOMIC_RETURN': 4, 'ATOMIC_RETURN_NT': 5, 'ATOMIC_CASCADE_RT': 6, 'ATOMIC_CASCADE_NT': 7}.get(m.group(1), 0) if m else 0
+      m, text = _extract(text, r'\s+scope:SCOPE_(\w+)')
+      scope_val = {'CU': 0, 'SE': 1, 'DEV': 2, 'SYS': 3}.get(m.group(1), 0) if m else 0
+      # Build VBUFFER modifier string
+      vbuf_mods = "".join([f", ioffset={off_val}" if off_val else "", ", offen=1" if offen else "", ", idxen=1" if idxen else "",
+                          f", th={th_val}" if th_val else "", f", scope={scope_val}" if scope_val else "",
+                          ", tfe=1" if tfe else ""])
+      if is_tbuf and fmt_num is not None: vbuf_mods = f", format={fmt_num}" + vbuf_mods
+      elif is_tbuf: vbuf_mods = ", format=1" + vbuf_mods  # default format for tbuffer
+      else: vbuf_mods = ", format=1" + vbuf_mods  # VBUFFER needs format=1 by default
+      # Determine vaddr value (v[0] for 'off', actual register otherwise)
+      vaddr_idx = 1
+      if len(ops) > vaddr_idx and ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
+      else: vaddr_val = args[vaddr_idx] if len(args) > vaddr_idx else "v[0]"
+      # rsrc and soffset indices
+      rsrc_idx, soff_idx = (2, 3) if len(ops) > 1 else (1, 2)
+      # RDNA4 VBUFFER rsrc is raw SGPR index (not divided by 4), extract base index from s[N:N+3]
+      rsrc_raw = ops[rsrc_idx].strip() if len(ops) > rsrc_idx else "s[0:3]"
+      if m := re.match(r's\[(\d+):\d+\]', rsrc_raw.lower()): rsrc_val = m.group(1)
+      elif m := re.match(r's(\d+)', rsrc_raw.lower()): rsrc_val = m.group(1)
+      else: rsrc_val = "0"
+      # soffset: special regs use raw encoding, regular sgprs use index
+      soff_raw = ops[soff_idx].strip() if len(ops) > soff_idx else "0"
+      soff_lower = soff_raw.lower()
+      if soff_lower == 'm0': soff_val = "125"
+      elif soff_lower in ('null', 'off'): soff_val = "124"
+      elif m := re.match(r's(\d+)', soff_lower): soff_val = m.group(1)
+      else: soff_val = soff_raw
+      return f"{mn}(vdata={args[0]}, vaddr={vaddr_val}, rsrc={rsrc_val}, soffset={soff_val}{vbuf_mods})"
+    # RDNA3 MUBUF/MTBUF handling
     buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
                         ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
     if is_tbuf and fmt_num is not None: buf_mods = f", format={fmt_num}" + buf_mods
@@ -963,9 +998,12 @@ def get_dsl(text: str) -> str:
   a_str, kw_str = ', '.join(args), ', '.join(all_kw)
   return f"{fn}({a_str}, {kw_str})" if kw_str and a_str else f"{fn}({kw_str})" if kw_str else f"{fn}({a_str})"
 
-def asm(text: str) -> Inst:
-  dsl = get_dsl(text)
-  ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
+def asm(text: str, arch: str = "rdna3") -> Inst:
+  dsl = get_dsl(text, arch)
+  if arch == "rdna4":
+    ns = {n: getattr(rdna4_ins, n) for n in dir(rdna4_ins) if not n.startswith('_')}
+  else:
+    ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
   ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
              'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF})
   try: return eval(dsl, ns)

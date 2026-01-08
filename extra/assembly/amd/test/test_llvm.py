@@ -82,7 +82,7 @@ def _make_test(f: str, arch: str, test_type: str):
       passed, skipped = 0, 0
       for asm_text, expected in tests:
         try:
-          self.assertEqual(asm(asm_text).to_bytes(), expected)
+          self.assertEqual(asm(asm_text, arch).to_bytes(), expected)
           passed += 1
         except: skipped += 1
       print(f"{name}: {passed} passed, {skipped} skipped")
