@@ -12,7 +12,7 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
+const layoutCfg = (g, { blocks, paths, pc_tokens, counters, colors }) => {
   const lineHeight = 18;
   g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight, textSpace:"1ch" });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
@@ -21,8 +21,7 @@ const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
-      // token kind, (0 = opcode, 1 = operand)
-      const tokens = pc_table[m][0].split(" ").map((t, i) => ({ st:t, keys:[t.replace(",", "")], kind:Number(i>0)}));
+      const tokens = pc_tokens[m];
       const num = counters?.[m]?.hit_count ?? 0;
       if (num > maxColor) maxColor = num;
       label.push(tokens.map((t, i) => ({st:t.st, keys:t.keys, color:counters != null ? num : tokenColors[t.kind]})));
