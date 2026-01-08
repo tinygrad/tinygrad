@@ -191,20 +191,17 @@ class AM_SMU(AM_IP):
     else: self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, arg)
     return table_t.from_buffer(bytearray(self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
 
-  def set_clocks(self, level):
-    if not hasattr(self, 'clcks'):
-      clks = [self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK]
-      if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12)}: clks.append(self.smu_mod.PPCLK_GFXCLK)
+  @functools.cache  # pylint: disable=method-cache-max-size-none
+  def read_clocks(self, clk_list:tuple[int]) -> dict[int, list[int]]:
+    return {clck: [self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
+      for clck in clk_list if (cnt:=self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff)}
 
-      self.clcks = {}
-      for clck in clks:
-        cnt = self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff
-        self.clcks[clck] = [self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
+  def set_clocks(self, level:int):
+    clks = tuple([self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK])
+    if self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,12)}: clks += (self.smu_mod.PPCLK_GFXCLK,)
 
-    for clck, vals in self.clcks.items():
-      if not vals: continue
+    for clck, vals in self.read_clocks(clks).items():
       with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), timeout=20)
-      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
 
   def _smu_cmn_send_msg(self, msg:int, param=0, debug=False):
     (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).write(0) # resp reg
