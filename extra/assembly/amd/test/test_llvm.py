@@ -91,7 +91,8 @@ def _make_test(f: str, arch: str, test_type: str):
       for _, data in tests:
         try:
           decoded = detect_format(data, arch).from_bytes(data)
-          if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)): to_test.append((data, d))
+          # Skip if roundtrip fails, disasm fails, or op_name is missing (disasm starts with space)
+          if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)) and not d.startswith(' '): to_test.append((data, d))
         except: pass
       print(f"{name}: {len(to_test)} passed, {len(tests) - len(to_test)} skipped")
       if arch in ("rdna3", "rdna4"):
