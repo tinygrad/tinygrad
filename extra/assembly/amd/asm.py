@@ -146,7 +146,7 @@ def _vop3_src(inst, v: int, neg: int, abs_: int, hi: int, n: int, f16: bool) -> 
   """Format VOP3 source operand with modifiers."""
   if v == 255: s = inst.lit(v)  # literal constant takes priority
   elif n > 1: s = _fmt_src(v, n)
-  elif f16 and v >= 256: s = f"v{v - 256}.h" if hi else f"v{v - 256}.l"
+  elif f16 and v >= 256: s = f"v{v - 256}.h" if hi else f"v{v - 256}"
   elif v == 253: s = "src_scc"  # VOP3 sources use src_scc not scc
   else: s = inst.lit(v)
   if abs_: s = f"|{s}|"
@@ -422,7 +422,7 @@ def _disasm_vop3(inst: VOP3) -> str:
   dn = inst.dst_regs()
   if op == VOP3Op.V_READLANE_B32: dst = _fmt_sdst(inst.vdst, 1)
   elif dn > 1: dst = _vreg(inst.vdst, dn)
-  elif is16_d: dst = f"v{inst.vdst}.h" if (inst.opsel & 8) else f"v{inst.vdst}.l"
+  elif is16_d: dst = f"v{inst.vdst}.h" if (inst.opsel & 8) else f"v{inst.vdst}"
   else: dst = f"v{inst.vdst}"
 
   clamp = inst.cm if 'cm' in inst._fields else getattr(inst, 'clmp', 0)  # RDNA4 uses 'cm', RDNA3 uses 'clmp'
