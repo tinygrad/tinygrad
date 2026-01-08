@@ -40,27 +40,42 @@ const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
   dagre.layout(g);
 }
 
-const layoutUOp = (g, { graph, change }, opts) => {
+const layoutUOp = (g, { graph, change, is_deps_graph, device_count, devices }, opts) => {
   const lineHeight = 14;
-  g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
+  // use top-to-bottom layout with tighter spacing for dependency graphs
+  if (is_deps_graph) {
+    g.setGraph({ rankdir: "TB", font:"sans-serif", lh:lineHeight, ranksep: 25, nodesep: 20, ranker: "tight-tree" });
+  } else {
+    g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
+  }
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
-  for (const [k, {label, src, ref, color, tag }] of Object.entries(graph)) {
+
+  // create device cluster nodes for dependency graphs
+  if (is_deps_graph && device_count) {
+    for (let i = 0; i < device_count; i++) {
+      const label = devices?.[i] || `Device ${i}`;
+      g.setNode(`device_${i}`, {label, labelWidth:0, labelHeight:0, className:"device-cluster", clusterLabelPos: "top", color:"rgba(42, 45, 58, 0.3)"});
+    }
+  }
+
+  for (const [k, {label, src, ref, color, tag, device_col }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
       width = Math.max(width, ctx.measureText(line).width);
       height += lineHeight;
     }
-    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag});
+    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag, device_col});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
     for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
     if (change?.includes(parseInt(k))) g.setParent(k, "overlay");
+    else if (is_deps_graph && device_col != null) g.setParent(k, `device_${device_col}`);
   }
   // optionally hide nodes from the layuot
-  if (!opts.showIndexing) {
+  if (opts && !opts.showIndexing) {
     for (const n of g.nodes()) {
       const node = g.node(n);
       if (node.label.includes("dtypes.index")) g.removeNode(n);
