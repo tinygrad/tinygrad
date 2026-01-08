@@ -1012,3 +1012,36 @@ try:
     VOP3A: _disasm_vop3a, VOP3B: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p, SDWA: _disasm_sdwa, DPP: _disasm_dpp})
 except ImportError:
   pass
+
+# Register RDNA4 handlers - shared formats use merged disassemblers, RDNA4-only formats use dedicated ones
+def _disasm_vbuffer(inst: R4_VBUFFER) -> str:
+  name = inst.op_name.lower()
+  # Calculate vdata width from op name
+  w = (2 if _has(name, 'xyz', 'xyzw') else 1) if 'd16' in name else \
+      ((2 if _has(name, 'b64', 'u64', 'i64') else 1) * (2 if 'cmpswap' in name else 1)) if 'atomic' in name else \
+      {'b32':1,'b64':2,'b96':3,'b128':4,'u8':1,'i8':1,'u16':1,'i16':1,'x':1,'xy':2,'xyz':3,'xyzw':4}.get(name.split('_')[-1], 1)
+  if inst.tfe: w += 1
+  vaddr = _vreg(inst.vaddr, 2) if inst.offen and inst.idxen else f"v{inst.vaddr}" if inst.offen or inst.idxen else "off"
+  srsrc = _sreg_or_ttmp(inst.rsrc, 4)
+  fmt_s = f" format:{inst.format}" if inst.format else ""
+  mods = [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.ioffset,f"offset:{inst.ioffset}"),(inst.tfe,"tfe")] if c]
+  soffset_s = decode_src(inst.soffset, False)
+  return f"{name} {_vreg(inst.vdata, w)}, {vaddr}, {srsrc},{fmt_s} {soffset_s}{' ' + ' '.join(mods) if mods else ''}"
+
+def _disasm_vexport(inst: R4_VEXPORT) -> str:
+  # Target names for export
+  target_names = {i: f"mrt{i}" for i in range(8)}
+  target_names.update({8: "mrtz", 9: "null", 12: "pos0", 13: "pos1", 14: "pos2", 15: "pos3",
+                       16: "pos4", 32: "param0", 33: "param1", 34: "param2", 35: "param3", 36: "param4"})
+  target = target_names.get(inst.target, f"target{inst.target}")
+  # Build vsrc list based on enable mask
+  vsrcs = []
+  for i, vsrc in enumerate([inst.vsrc0, inst.vsrc1, inst.vsrc2, inst.vsrc3]):
+    vsrcs.append(f"v{vsrc}" if (inst.en >> i) & 1 else "off")
+  mods = [m for c, m in [(inst.done, "done"), (inst.row, "row_en")] if c]
+  return f"export {target}, {', '.join(vsrcs)}{' ' + ' '.join(mods) if mods else ''}"
+
+DISASM_HANDLERS.update({R4_VOP1: _disasm_vop1, R4_VOP2: _disasm_vop2, R4_VOPC: _disasm_vopc, R4_VOP3: _disasm_vop3, R4_VOP3SD: _disasm_vop3sd,
+  R4_VOPD: _disasm_vopd, R4_VOP3P: _disasm_vop3p, R4_VINTERP: _disasm_vinterp,
+  R4_SOP1: _disasm_sop1, R4_SOP2: _disasm_sop2, R4_SOPC: _disasm_sopc, R4_SOPK: _disasm_sopk, R4_SOPP: _disasm_sopp,
+  R4_SMEM: _disasm_smem, R4_DS: _disasm_ds, R4_VBUFFER: _disasm_vbuffer, R4_VEXPORT: _disasm_vexport})
