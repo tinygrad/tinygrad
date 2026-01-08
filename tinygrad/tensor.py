@@ -137,9 +137,9 @@ class Tensor(OpMixin):
         const = UOp.const(var.dtype, val, _device, ())
         data = data.replace(src=(var.replace(src=const.src), const))  # type: ignore
     elif data is None:
-      data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or dtypes.default_float, 0, _device)
+      data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.default_float, 0, _device)
     elif isinstance(data, get_args(ConstType)):
-      data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
+      data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if _dtype is None else _dtype)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -151,7 +151,7 @@ class Tensor(OpMixin):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
       if data.shape == ():
-        data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or _from_np_dtype(data.dtype), data.item(), _device)
+        data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or _from_np_dtype(data.dtype), data.item(), _device)
       else:
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
@@ -197,6 +197,8 @@ class Tensor(OpMixin):
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
+    # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
+    if requires_grad and self.uop.op is Ops.CONST: self.replace(Tensor(self.uop.arg, device=self.device, dtype=self.dtype, requires_grad=True))
     self.requires_grad = requires_grad
     return self
 
