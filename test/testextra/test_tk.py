@@ -241,18 +241,18 @@ class TestTK(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), ref.numpy())
     np.testing.assert_allclose(c.numpy(), ref.numpy())
 
-  @unittest.skip("TODO")
   def test_load_store_group(self):
-    N = 256
+    N = 1024
     BLOCK_SIZE = 64
-    with Kernel("load_store_group", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS * 2) as ker:
+    NUM_WORKERS = 4
+    with Kernel("load_store_group", (N // (BLOCK_SIZE * NUM_WORKERS), N // BLOCK_SIZE, 1), WARP_THREADS * NUM_WORKERS) as ker:
       warp = ker.warp
-      group = ker.group(2)
+      group = ker.group(NUM_WORKERS)
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
       a = ker.gl((1, 1, N, N), dtypes.float32)
 
-      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE * NUM_WORKERS), dtypes.float32)
 
       a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
       b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
@@ -260,9 +260,9 @@ class TestTK(unittest.TestCase):
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
       a_smem = group.load(a_smem, a, (), (0, 0, row, col), axis=2)
-      a_reg = warp.load(a_reg, a_smem)
+      a_reg = warp.load(a_reg, a_smem, (), (0, ker.warpid,))
       b_reg = warp.copy(b_reg, a_reg)
-      b = warp.store(b, b_reg, (0, 0, row, col), (), axis=2)
+      b = warp.store(b, b_reg, (0, 0, row, col * NUM_WORKERS + ker.warpid), (), axis=2)
 
       sink = ker.finish()
 
