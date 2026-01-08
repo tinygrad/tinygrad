@@ -48,6 +48,15 @@ def _floor(x):
   trunc = UOp(Ops.TRUNC, x.dtype, (x,))
   return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, x.dtype, (trunc, _typed_const(x, 1))), trunc))
 
+def _cvt(src_dt: DType, dst_dt: DType):
+  """Create a conversion function that asserts input type and casts to output type."""
+  def convert(x: UOp) -> UOp:
+    # Allow: exact match, void (unresolved), or uint32 (unresolved array access/slice)
+    # TODO: should only allow exact match
+    assert x.dtype == src_dt or x.dtype == dtypes.void or x.dtype == dtypes.uint32, f"Expected {src_dt}, got {x.dtype}"
+    return UOp(Ops.CAST, dst_dt, (x,))
+  return convert
+
 # Function expansions: name -> lambda(*srcs) -> UOp
 _FN_EXPAND: dict[str, callable] = {
   'trunc': lambda x: UOp(Ops.TRUNC, x.dtype, (x,)),
@@ -69,6 +78,17 @@ _FN_EXPAND: dict[str, callable] = {
   'max': lambda a, b: UOp(Ops.WHERE, a.dtype, (UOp(Ops.CMPLT, dtypes.bool, (b, a)), a, b)),
   'clamp': lambda x, lo, hi: (c := UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, lo)), lo, x)),
                               UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (hi, c)), hi, c)))[1],
+  # Conversions (type-checked casts)
+  'f32_to_i32': _cvt(dtypes.float32, dtypes.int32), 'f32_to_f16': _cvt(dtypes.float32, dtypes.float16),
+  'f32_to_f64': _cvt(dtypes.float32, dtypes.float64), 'f32_to_i8': _cvt(dtypes.float32, dtypes.int8),
+  'f32_to_u8': _cvt(dtypes.float32, dtypes.uint8), 'f32_to_i16': _cvt(dtypes.float32, dtypes.int16),
+  'f32_to_u16': _cvt(dtypes.float32, dtypes.uint16), 'f64_to_i32': _cvt(dtypes.float64, dtypes.int32),
+  'f64_to_f32': _cvt(dtypes.float64, dtypes.float32), 'f16_to_f32': _cvt(dtypes.float16, dtypes.float32),
+  'f16_to_i16': _cvt(dtypes.float16, dtypes.int16), 'f16_to_u16': _cvt(dtypes.float16, dtypes.uint16),
+  'i32_to_f32': _cvt(dtypes.int32, dtypes.float32), 'i32_to_f64': _cvt(dtypes.int32, dtypes.float64),
+  'u32_to_f32': _cvt(dtypes.uint32, dtypes.float32), 'u32_to_f64': _cvt(dtypes.uint32, dtypes.float64),
+  'i16_to_f16': _cvt(dtypes.int16, dtypes.float16), 'u16_to_f16': _cvt(dtypes.uint16, dtypes.float16),
+  'v_cvt_u16_f32': _cvt(dtypes.float32, dtypes.uint16), 'v_cvt_i16_f32': _cvt(dtypes.float32, dtypes.int16),
 }
 
 # Function return type inference for CUSTOM ops
@@ -80,18 +100,12 @@ _U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones',
             'u8_to_u32', 'u4_to_u32', 'u32_to_u16', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8',
             'v_min_u16', 'v_min_u32', 'v_max_u16', 'v_max_u32', 'v_min3_u16', 'v_min3_u32', 'v_max3_u16', 'v_max3_u32'}
 _I32_FNS = {'v_min_i16', 'v_min_i32', 'v_max_i16', 'v_max_i32', 'v_min3_i16', 'v_min3_i32', 'v_max3_i16', 'v_max3_i32'}
-_CVT_FNS = {  # conversion functions: name -> output dtype
-  'f32_to_i32': dtypes.int32, 'f32_to_u32': dtypes.uint32, 'f32_to_f16': dtypes.float16, 'f32_to_f64': dtypes.float64,
-  'f32_to_i8': dtypes.int8, 'f32_to_u8': dtypes.uint8, 'f32_to_i16': dtypes.int16, 'f32_to_u16': dtypes.uint16,
-  'f64_to_i32': dtypes.int32, 'f64_to_u32': dtypes.uint32, 'f64_to_f32': dtypes.float32,
-  'f16_to_f32': dtypes.float32, 'f16_to_i16': dtypes.int16, 'f16_to_u16': dtypes.uint16,
-  'i32_to_f32': dtypes.float32, 'i32_to_f64': dtypes.float64, 'i32_to_i16': dtypes.int16,
-  'u32_to_f32': dtypes.float32, 'u32_to_f64': dtypes.float64,
-  'i16_to_f16': dtypes.float16, 'u16_to_f16': dtypes.float16,
-  'bf16_to_f32': dtypes.float32, 'f32_to_bf16': dtypes.bfloat16,
-  'v_cvt_u16_f32': dtypes.uint16, 'v_cvt_i16_f32': dtypes.int16,
-  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
-  'signext': dtypes.int64, 'signext_from_bit': dtypes.int64,
+_CVT_FNS = {  # conversion functions: name -> output dtype (only those not in _FN_EXPAND)
+  'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32,  # need clamping
+  'i32_to_i16': dtypes.int16, 'u32_to_u16': dtypes.uint32,  # need masking
+  'bf16_to_f32': dtypes.float32, 'f32_to_bf16': dtypes.bfloat16,  # bit manipulation
+  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,  # scaling
+  'signext': dtypes.int64, 'signext_from_bit': dtypes.int64,  # special handling
 }
 
 def _infer_fn_dtype(name: str, srcs: tuple[UOp, ...]) -> DType:

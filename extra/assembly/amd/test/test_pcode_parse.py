@@ -158,6 +158,14 @@ def _norm(s, keep_structure=False):
   s = re.sub(r'//[^\n]*', '', s)
   s = re.sub(r'0x[0-9a-fA-F]+', lambda m: str(int(m[0], 16)), s)  # convert hex before stripping whitespace
   s = re.sub(r"(\d+)U(?!LL)", r"\1", s)  # strip U suffix early before whitespace removal
+  # Normalize conversion functions to typed cast syntax (f32_to_f64 -> 64'F, etc.)
+  cvt_map = {'f32_to_i32': "32'I", 'f32_to_f16': "16'F", 'f32_to_f64': "64'F", 'f32_to_i8': "8'I",
+             'f32_to_u8': "8'U", 'f32_to_i16': "16'I", 'f32_to_u16': "16'U", 'f64_to_i32': "32'I",
+             'f64_to_f32': "32'F", 'f16_to_f32': "32'F", 'f16_to_i16': "16'I", 'f16_to_u16': "16'U",
+             'i32_to_f32': "32'F", 'i32_to_f64': "64'F", 'u32_to_f32': "32'F", 'u32_to_f64': "64'F",
+             'i16_to_f16': "16'F", 'u16_to_f16': "16'F"}
+  for fn, cast in cvt_map.items():
+    s = re.sub(rf'\b{fn}\b', cast, s)
   if keep_structure:
     s = re.sub(r';', '', s)
     s = re.sub(r'\n\s*\n', '\n', s)
