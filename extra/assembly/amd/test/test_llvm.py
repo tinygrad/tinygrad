@@ -5,7 +5,7 @@ from tinygrad.helpers import fetch
 from extra.assembly.amd.asm import asm, disasm, detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc
 
-LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
+LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/test/MC/AMDGPU"
 
 RDNA_FILES = ['gfx11_asm_sop1.s', 'gfx11_asm_sop2.s', 'gfx11_asm_sopp.s', 'gfx11_asm_sopk.s', 'gfx11_asm_sopc.s',
   'gfx11_asm_vop1.s', 'gfx11_asm_vop2.s', 'gfx11_asm_vopc.s', 'gfx11_asm_vop3.s', 'gfx11_asm_vop3p.s', 'gfx11_asm_vinterp.s',
@@ -22,10 +22,12 @@ CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'gfx9_asm
   'gfx90a_ldst_acc.s', 'gfx90a_asm_features.s', 'flat-scratch-gfx942.s', 'gfx942_asm_features.s',
   'mai-gfx90a.s', 'mai-gfx942.s']
 # RDNA4 (gfx12) test files - excludes alias/err/fake16/dpp files, and vimage/vsample (not supported)
-# NOTE: vflat excluded - PDF has wrong OP field bits [20:13] vs hardware [21:14], and missing seg field
+# NOTE: vflat/vdsdir excluded - not implemented; features.s has mixed formats
 RDNA4_FILES = ['gfx12_asm_sop1.s', 'gfx12_asm_sop2.s', 'gfx12_asm_sopp.s', 'gfx12_asm_sopk.s', 'gfx12_asm_sopc.s',
-  'gfx12_asm_vop1.s', 'gfx12_asm_vop2.s', 'gfx12_asm_vopc.s', 'gfx12_asm_vop3.s', 'gfx12_asm_vop3p.s',
-  'gfx12_asm_vopd.s', 'gfx12_asm_ds.s', 'gfx12_asm_smem.s',
+  'gfx12_asm_vop1.s', 'gfx12_asm_vop2.s', 'gfx12_asm_vopc.s', 'gfx12_asm_vopcx.s', 'gfx12_asm_vop3.s', 'gfx12_asm_vop3c.s',
+  'gfx12_asm_vop3cx.s', 'gfx12_asm_vop3p.s', 'gfx12_asm_vop3_from_vop1.s', 'gfx12_asm_vop3_from_vop2.s',
+  'gfx12_asm_vop3p_features.s', 'gfx12_asm_vopd.s', 'gfx12_asm_vopd_features.s',
+  'gfx12_asm_ds.s', 'gfx12_asm_smem.s',
   'gfx12_asm_vbuffer_mubuf.s', 'gfx12_asm_vbuffer_mtbuf.s', 'gfx12_asm_wmma_w32.s', 'gfx12_asm_exp.s']
 
 def _is_mimg(data: bytes) -> bool: return (int.from_bytes(data[:4], 'little') >> 26) & 0x3f == 0b111100
@@ -82,7 +84,7 @@ def _make_test(f: str, arch: str, test_type: str):
       passed, skipped = 0, 0
       for asm_text, expected in tests:
         try:
-          self.assertEqual(asm(asm_text).to_bytes(), expected)
+          self.assertEqual(asm(asm_text, arch).to_bytes(), expected)
           passed += 1
         except: skipped += 1
       print(f"{name}: {passed} passed, {skipped} skipped")
@@ -91,10 +93,13 @@ def _make_test(f: str, arch: str, test_type: str):
       for _, data in tests:
         try:
           decoded = detect_format(data, arch).from_bytes(data)
-          if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)): to_test.append((data, d))
+          # Skip if roundtrip fails, disasm fails, or op_name is missing (disasm starts with space)
+          if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)) and not d.startswith(' '): to_test.append((data, d))
         except: pass
-      print(f"{name}: {len(to_test)} passed, {len(tests) - len(to_test)} skipped")
+      skipped = len(tests) - len(to_test)
+      print(f"{name}: {len(to_test)} passed, {skipped} skipped")
       if arch in ("rdna3", "rdna4"):
+        self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
         for (data, _), llvm in zip(to_test, _compile_asm_batch([t[1] for t in to_test], arch)): self.assertEqual(llvm, data)
   return test
 
