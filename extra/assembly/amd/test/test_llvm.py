@@ -5,7 +5,7 @@ from tinygrad.helpers import fetch
 from extra.assembly.amd.asm import asm, disasm, detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc
 
-LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
+LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/test/MC/AMDGPU"
 
 RDNA_FILES = ['gfx11_asm_sop1.s', 'gfx11_asm_sop2.s', 'gfx11_asm_sopp.s', 'gfx11_asm_sopk.s', 'gfx11_asm_sopc.s',
   'gfx11_asm_vop1.s', 'gfx11_asm_vop2.s', 'gfx11_asm_vopc.s', 'gfx11_asm_vop3.s', 'gfx11_asm_vop3p.s', 'gfx11_asm_vinterp.s',
@@ -94,8 +94,10 @@ def _make_test(f: str, arch: str, test_type: str):
           # Skip if roundtrip fails, disasm fails, or op_name is missing (disasm starts with space)
           if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)) and not d.startswith(' '): to_test.append((data, d))
         except: pass
-      print(f"{name}: {len(to_test)} passed, {len(tests) - len(to_test)} skipped")
+      skipped = len(tests) - len(to_test)
+      print(f"{name}: {len(to_test)} passed, {skipped} skipped")
       if arch in ("rdna3", "rdna4"):
+        self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
         for (data, _), llvm in zip(to_test, _compile_asm_batch([t[1] for t in to_test], arch)): self.assertEqual(llvm, data)
   return test
 

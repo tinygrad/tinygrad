@@ -607,8 +607,9 @@ def _disasm_sop1(inst: SOP1) -> str:
     if op in (SOP1Op.S_SETPC_B64, SOP1Op.S_RFE_B64): return f"{name} {src}"
     if op == SOP1Op.S_SWAPPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {src}"
     if op in (SOP1Op.S_SENDMSG_RTN_B32, SOP1Op.S_SENDMSG_RTN_B64): return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
-  # RDNA4 source-only ops
-  if inst.op_name in ('S_ALLOC_VGPR', 'S_SLEEP_VAR', 'S_BARRIER_SIGNAL', 'S_BARRIER_SIGNAL_ISFIRST', 'S_BARRIER_WAIT', 'S_BARRIER_LEAVE'): return f"{name} {src}"
+  # RDNA4 source-only ops (sdst=NULL)
+  sop1_src_only = ('S_ALLOC_VGPR', 'S_SLEEP_VAR', 'S_BARRIER_SIGNAL', 'S_BARRIER_SIGNAL_ISFIRST', 'S_BARRIER_INIT', 'S_BARRIER_JOIN')
+  if inst.op_name in sop1_src_only: return f"{name} {src}"
   return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs(), cdna)}, {src}"
 
 def _disasm_sop2(inst: SOP2) -> str:
@@ -853,7 +854,7 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
     opsel |= (byte_sel << 2)  # byte_sel goes to opsel[3:2]
   if ds_off0 is not None: kw.append(f'offset0={ds_off0}')
   if ds_off1 is not None: kw.append(f'offset1={ds_off1}')
-  if index_key is not None: kw.append(f'index_key={index_key}')
+  if index_key is not None: kw.append(f'opsel={index_key}')  # SWMMAC index_key is encoded in opsel field
 
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
