@@ -9,6 +9,47 @@ from extra.assembly.amd.autogen.cdna.str_pcode import PSEUDOCODE_STRINGS as CDNA
 
 DEBUG = int(os.getenv("DEBUG", "0"))
 
+# Ops allowed to have void dtype (unresolved at parse time, resolved in ucode.py)
+_VOID_OK_OPS = {Ops.DEFINE_VAR, Ops.CUSTOM}  # DEFINE_VAR for variables/params, CUSTOM('MEM') for untyped memory
+
+def _void_is_ok(uop) -> bool:
+  """Check if void dtype is acceptable for this uop (can't be inferred from sources)."""
+  if uop.op in _VOID_OK_OPS: return True
+  if not uop.src: return False  # no sources but not DEFINE_VAR/CUSTOM - should have a type
+  # void is OK if we can't infer a type from sources
+  if uop.op == Ops.WHERE:  # WHERE(gate, lhs, rhs) - infer from lhs/rhs, not gate
+    return uop.src[1].dtype == dtypes.void and uop.src[2].dtype == dtypes.void
+  # For other ops, void is OK if all sources are void
+  return all(s.dtype == dtypes.void for s in uop.src)
+
+def _count_void_dtypes(uop, counts=None):
+  """Count void dtypes, return (allowed_void, disallowed_void) counts."""
+  if counts is None: counts = [0, 0]
+  if uop.dtype == dtypes.void:
+    if _void_is_ok(uop): counts[0] += 1
+    else: counts[1] += 1
+  for s in uop.src: _count_void_dtypes(s, counts)
+  return counts
+
+def _check_stmt_voids(stmt, counts):
+  match stmt:
+    case Assign(lhs, rhs):
+      _count_void_dtypes(lhs, counts)
+      if isinstance(rhs, UOp): _count_void_dtypes(rhs, counts)
+      elif isinstance(rhs, Assign): _check_stmt_voids(rhs, counts)
+    case If(branches):
+      for cond, body in branches:
+        if cond is not None: _count_void_dtypes(cond, counts)
+        for s in body: _check_stmt_voids(s, counts)
+    case For(_, start, end, body):
+      _count_void_dtypes(start, counts); _count_void_dtypes(end, counts)
+      for s in body: _check_stmt_voids(s, counts)
+    case Lambda(_, _, body):
+      if isinstance(body, UOp): _count_void_dtypes(body, counts)
+      else:
+        for s in body: _check_stmt_voids(s, counts)
+    case Return(v): _count_void_dtypes(v, counts)
+
 _OP_SYMS = {v: k for k, v in _BINOPS.items() if k not in ('>', '>=', '<>', '||', '&&')}
 _DT_STR = {v: k for k, v in _QDTYPES.items() if k in ('u64', 'u32', 'u16', 'u8', 'i64', 'i32', 'i16', 'i8', 'f64', 'f32', 'f16', 'bf16')}
 
@@ -106,7 +147,7 @@ def _norm(s, keep_structure=False):
   return s.strip()
 
 def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
-  ok, fail, match = 0, 0, 0
+  ok, fail, match, void_ok, void_bad = 0, 0, 0, 0, 0
   errs: dict[str, list[str]] = {}
   for cls, ops in pcode_strings.items():
     for op, pc in ops.items():
@@ -119,6 +160,10 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
         if key not in errs: errs[key] = []
         errs[key].append(f"{cls.__name__}.{op.name}")
         continue
+      # Check void dtypes
+      counts = [0, 0]
+      for stmt in ast: _check_stmt_voids(stmt, counts)
+      void_ok += counts[0]; void_bad += counts[1]
       rendered = _pr(ast)
       if _norm(pc) == _norm(rendered):
         match += 1
@@ -139,12 +184,13 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
   total = ok + fail
   parse_rate = 100 * ok / total
   roundtrip_rate = 100 * match / ok if ok > 0 else 0
+  print(f"Parsed: {ok}/{total} ({parse_rate:.1f}%), Match: {match}/{ok} ({roundtrip_rate:.1f}%), Void: {void_ok} ok, {void_bad} bad")
   if DEBUG:
-    print(f"Parsed: {ok}/{total} ({parse_rate:.1f}%), Match: {match}/{ok} ({roundtrip_rate:.1f}%)")
     for e, ops in sorted(errs.items(), key=lambda x: -len(x[1])):
       print(f"  {len(ops)}: {e} ({ops[0]})")
   test.assertGreater(parse_rate, min_parse, f"Parse rate {parse_rate:.1f}% should be >{min_parse}%")
   test.assertGreater(roundtrip_rate, min_roundtrip, f"Roundtrip rate {roundtrip_rate:.1f}% should be >{min_roundtrip}%")
+  test.assertEqual(void_bad, 0, f"Found {void_bad} ops with unexpected void dtype")
 
 class TestQcodeParseAndRoundtrip(unittest.TestCase):
   def test_rdna3(self): _test_arch(self, RDNA3_PCODE)
