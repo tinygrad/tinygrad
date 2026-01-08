@@ -213,13 +213,6 @@ def _fp_bits(v: UOp) -> tuple[UOp, int, int, int]:
   while v.op == Ops.CAST and v.src[0].dtype in FLOATS: v = v.src[0]
   uint_dt, _, exp_shift, exp_mask, mant_mask, _ = FP_INFO.get(v.dtype, FP_INFO[dtypes.float32])
   return UOp(Ops.BITCAST, uint_dt, (v,)), exp_shift, exp_mask, mant_mask
-
-def _minmax(args: list[UOp], is_min: bool) -> UOp:
-  """Build min/max expression for 2 or 3 arguments."""
-  cmp = lambda x, y: UOp(Ops.CMPLT, dtypes.bool, (x, y) if is_min else (y, x))
-  result = UOp(Ops.WHERE, args[0].dtype, (cmp(args[0], args[1]), args[0], args[1]))
-  return UOp(Ops.WHERE, args[0].dtype, (cmp(result, args[2]), result, args[2])) if len(args) > 2 else result
-
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'MEM': return a[0]
   if name in ('isQuietNAN', 'isSignalNAN'):
@@ -302,7 +295,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name in ('LT_NEG_ZERO', 'GT_NEG_ZERO'):
     int_dt = {dtypes.float64: dtypes.int64, dtypes.float16: dtypes.int16}.get(a[0].dtype, dtypes.int32)
     return UOp(Ops.CMPLT, dtypes.bool, ((UOp(Ops.BITCAST, int_dt, (a[0],)), UOp(Ops.BITCAST, int_dt, (a[1],))) if 'LT' in name else (UOp(Ops.BITCAST, int_dt, (a[1],)), UOp(Ops.BITCAST, int_dt, (a[0],)))))
-  if name.startswith('v_min') or name.startswith('v_max'): return _minmax(a, is_min=('min' in name))
   if name in ('v_sad_u8', 'v_msad_u8'):
     result = a[2] if len(a) > 2 else UOp.const(dtypes.uint32, 0)
     for i in range(4):

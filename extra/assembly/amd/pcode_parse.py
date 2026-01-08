@@ -55,6 +55,16 @@ def _cvt(src_dt: DType, dst_dt: DType):
     return UOp(Ops.CAST, dst_dt, (x,))
   return convert
 
+def _minmax(dt: DType, is_min: bool):
+  """Create a min/max function that asserts input types."""
+  def fn(*args: UOp) -> UOp:
+    for i, a in enumerate(args):
+      assert a.dtype == dt, f"Expected {dt} for arg {i}, got {a.dtype}"
+    cmp = lambda x, y: UOp(Ops.CMPLT, dtypes.bool, (x, y) if is_min else (y, x))
+    result = UOp(Ops.WHERE, dt, (cmp(args[0], args[1]), args[0], args[1]))
+    return UOp(Ops.WHERE, dt, (cmp(result, args[2]), result, args[2])) if len(args) > 2 else result
+  return fn
+
 # Function expansions: name -> lambda(*srcs) -> UOp
 _FN_EXPAND: dict[str, callable] = {
   'trunc': lambda x: UOp(Ops.TRUNC, x.dtype, (x,)),
@@ -87,17 +97,28 @@ _FN_EXPAND: dict[str, callable] = {
   'u32_to_f32': _cvt(dtypes.uint32, dtypes.float32), 'u32_to_f64': _cvt(dtypes.uint32, dtypes.float64),
   'i16_to_f16': _cvt(dtypes.int16, dtypes.float16), 'u16_to_f16': _cvt(dtypes.uint16, dtypes.float16),
   'v_cvt_u16_f32': _cvt(dtypes.float32, dtypes.uint16), 'v_cvt_i16_f32': _cvt(dtypes.float32, dtypes.int16),
+  # v_min/v_max (2 args, type-checked)
+  'v_min_f16': _minmax(dtypes.float16, True), 'v_min_f32': _minmax(dtypes.float32, True),
+  'v_min_i16': _minmax(dtypes.int16, True), 'v_min_i32': _minmax(dtypes.int32, True),
+  'v_min_u16': _minmax(dtypes.uint16, True), 'v_min_u32': _minmax(dtypes.uint32, True),
+  'v_max_f16': _minmax(dtypes.float16, False), 'v_max_f32': _minmax(dtypes.float32, False),
+  'v_max_i16': _minmax(dtypes.int16, False), 'v_max_i32': _minmax(dtypes.int32, False),
+  'v_max_u16': _minmax(dtypes.uint16, False), 'v_max_u32': _minmax(dtypes.uint32, False),
+  # v_min3/v_max3 (3 args, type-checked)
+  'v_min3_f16': _minmax(dtypes.float16, True), 'v_min3_f32': _minmax(dtypes.float32, True),
+  'v_min3_i16': _minmax(dtypes.int16, True), 'v_min3_i32': _minmax(dtypes.int32, True),
+  'v_min3_u16': _minmax(dtypes.uint16, True), 'v_min3_u32': _minmax(dtypes.uint32, True),
+  'v_max3_f16': _minmax(dtypes.float16, False), 'v_max3_f32': _minmax(dtypes.float32, False),
+  'v_max3_i16': _minmax(dtypes.int16, False), 'v_max3_i32': _minmax(dtypes.int32, False),
+  'v_max3_u16': _minmax(dtypes.uint16, False), 'v_max3_u32': _minmax(dtypes.uint32, False),
 }
 
 # Function return type inference for CUSTOM ops
 _BOOL_FNS = {'isNAN', 'isINF', 'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', 'GT_NEG_ZERO'}
 _PASSTHRU_FNS = {'abs', 'floor', 'fract', 'sqrt', 'sin', 'cos', 'trunc', 'fma', 'clamp', 'min', 'max', 'ldexp',
-                 'cvtToQuietNAN', 'pow', 'rcp', 'rsqrt', 'exp2', 'log2', 'mantissa', 'v_min_f16', 'v_min_f32',
-                 'v_max_f16', 'v_max_f32', 'v_min3_f16', 'v_min3_f32', 'v_max3_f16', 'v_max3_f32'}
+                 'cvtToQuietNAN', 'pow', 'rcp', 'rsqrt', 'exp2', 'log2', 'mantissa'}
 _U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones', 'countbits', 'reverse_bits',
-            'u8_to_u32', 'u4_to_u32', 'u32_to_u16', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8',
-            'v_min_u16', 'v_min_u32', 'v_max_u16', 'v_max_u32', 'v_min3_u16', 'v_min3_u32', 'v_max3_u16', 'v_max3_u32'}
-_I32_FNS = {'v_min_i16', 'v_min_i32', 'v_max_i16', 'v_max_i32', 'v_min3_i16', 'v_min3_i32', 'v_max3_i16', 'v_max3_i32'}
+            'u8_to_u32', 'u4_to_u32', 'u32_to_u16', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8'}
 _CVT_FNS = {  # conversion functions: name -> output dtype (only those not in _FN_EXPAND)
   'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32,  # need clamping
   'i32_to_i16': dtypes.int16, 'u32_to_u16': dtypes.uint32,  # need masking
@@ -111,7 +132,6 @@ def _infer_fn_dtype(name: str, srcs: tuple[UOp, ...]) -> DType:
   if name in _BOOL_FNS: return dtypes.bool
   if name in _PASSTHRU_FNS: return srcs[0].dtype if srcs and srcs[0].dtype != dtypes.void else dtypes.void
   if name in _U32_FNS: return dtypes.uint32
-  if name in _I32_FNS: return dtypes.int32
   if name in _CVT_FNS: return _CVT_FNS[name]
   if name == 'trig_preop_result': return dtypes.float64
   # Default: inherit from first non-void source, or void
