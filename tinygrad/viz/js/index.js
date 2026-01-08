@@ -90,8 +90,9 @@ const drawGraph = (data) => {
       for (let i=1; i<lines.length; i++) ret.push([{ st:lines[i], color }]);
     }
     return [ret];
-  }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
-    .attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color)).text(d => d.st).attr("xml:space", "preserve").style("font-family", g.graph().font);
+  }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
+    .selectAll("tspan").data(d => d).join("tspan").attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color))
+    .text(d => d.st).attr("xml:space", "preserve");
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges

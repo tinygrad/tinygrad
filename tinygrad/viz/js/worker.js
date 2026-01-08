@@ -1,7 +1,6 @@
 const NODE_PADDING = 10;
 const rectDims = (lw, lh) => ({ width:lw+NODE_PADDING*2, height:lh+NODE_PADDING*2, labelWidth:lw, labelHeight:lh });
 
-const LINE_HEIGHT = 14;
 const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 
@@ -14,8 +13,9 @@ onmessage = (e) => {
 }
 
 const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
-  g.setGraph({ rankdir:"TD", font:"monospace" });
-  ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
+  const lineHeight = 16;
+  g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight });
+  ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
   let maxColor = 0;
   for (const [lead, members] of Object.entries(blocks)) {
@@ -28,7 +28,7 @@ const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
         label.push([{st:text, color:num}]);
       } else { const [inst, ...operands] = text.split(" "); label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]); }
       width = Math.max(width, ctx.measureText(text).width);
-      height += LINE_HEIGHT;
+      height += lineHeight;
     }
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
   }
@@ -41,15 +41,16 @@ const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
 }
 
 const layoutUOp = (g, { graph, change }, opts) => {
-  g.setGraph({ rankdir: "LR", font:"sans-serif" });
-  ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
+  const lineHeight = 14;
+  g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
+  ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
   for (const [k, {label, src, ref, color, tag }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
       width = Math.max(width, ctx.measureText(line).width);
-      height += LINE_HEIGHT;
+      height += lineHeight;
     }
     g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag});
     // add edges
