@@ -51,7 +51,7 @@ def _floor(x):
 def _cvt(src_dt: DType, dst_dt: DType):
   """Create a conversion function that asserts input type and casts to output type."""
   def convert(x: UOp) -> UOp:
-    assert x.dtype == src_dt or x.dtype == dtypes.void, f"Expected {src_dt}, got {x.dtype}"
+    assert x.dtype == src_dt, f"Expected {src_dt}, got {x.dtype}"
     return UOp(Ops.CAST, dst_dt, (x,))
   return convert
 
