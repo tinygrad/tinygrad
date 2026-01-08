@@ -1,6 +1,7 @@
 import pathlib
 import numpy as np
 from tinygrad import Device, dtypes
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 from extra.assembly.amd.dsl import NULL
@@ -711,7 +712,8 @@ def custom_gemm(N:int, dev:str) -> UOp:
   sink = UOp.sink(A, B, C, lidx, gidx, arg=KernelInfo(name="gemm"))
   src = (pathlib.Path(__file__).parent/"template.s").read_text()
   src = src.replace("INSTRUCTIONS", "\n".join([i if isinstance(i, str) else f"\t{i.disasm()}" for i in insts]))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dev), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)), arg=())
+  lib = HIPCompiler("gfx1200").compile(src)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dev), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=())
 
 if __name__ == "__main__":
   test_matmul(custom_gemm(N, Device.DEFAULT), dtype=dtypes.half, N=N)
