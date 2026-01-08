@@ -1,4 +1,4 @@
-# RDNA3/CDNA assembler and disassembler
+# RDNA3/RDNA4/CDNA assembler and disassembler
 from __future__ import annotations
 import re
 from extra.assembly.amd.dsl import Inst, RawImm, Reg, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory
@@ -8,6 +8,10 @@ from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP,
   VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp, MTBUFOp)
 from extra.assembly.amd.autogen.rdna3.enum import BufFmt
+from extra.assembly.amd.autogen.rdna4 import ins as rdna4_ins
+from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
+  VOPC as R4_VOPC, VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
+  SMEM as R4_SMEM, DS as R4_DS, VBUFFER as R4_VBUFFER, VEXPORT as R4_VEXPORT)
 
 def _is_cdna(inst: Inst) -> bool: return 'cdna' in inst.__class__.__module__
 
@@ -28,6 +32,12 @@ _CDNA_FORMATS_32 = [SDWA, DPP, C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_VOPC, C_VOP1, C
 _CDNA_VOP3B_OPS = {281, 282, 283, 284, 285, 286, 480, 481, 488, 489}  # VOP3B opcodes
 # CDNA opcode name aliases for disasm (new name -> old name expected by tests)
 _CDNA_DISASM_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32', 'v_fmamk_f32': 'v_madmk_f32', 'v_fmaak_f32': 'v_madak_f32'}
+# RDNA4 (gfx12) format lists - note: no FLAT/MUBUF/MTBUF/MIMG, uses VBUFFER instead
+# NOTE: VFLAT not included - PDF has errors (wrong OP field bits, missing seg field)
+_RDNA4_FORMATS_64 = [R4_VOPD, R4_VOP3P, R4_VINTERP, R4_VOP3, R4_DS, R4_VBUFFER, R4_SMEM, R4_VEXPORT]
+_RDNA4_FORMATS_32 = [R4_SOP1, R4_SOPC, R4_SOPP, R4_SOPK, R4_VOPC, R4_VOP1, R4_SOP2, R4_VOP2]
+# RDNA4 VOP3SD opcodes (carry-out ops that use sdst field)
+_RDNA4_VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
 def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
@@ -42,7 +52,16 @@ def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
     for cls in _CDNA_FORMATS_32:
       if _matches_encoding(word, cls): return cls
     raise ValueError(f"unknown CDNA 32-bit format word={word:#010x}")
-  # RDNA (default)
+  if arch == "rdna4":
+    if (word >> 30) == 0b11:
+      for cls in _RDNA4_FORMATS_64:
+        if _matches_encoding(word, cls):
+          return R4_VOP3SD if cls is R4_VOP3 and ((word >> 16) & 0x3ff) in _RDNA4_VOP3SD_OPS else cls
+      raise ValueError(f"unknown RDNA4 64-bit format word={word:#010x}")
+    for cls in _RDNA4_FORMATS_32:
+      if _matches_encoding(word, cls): return cls
+    raise ValueError(f"unknown RDNA4 32-bit format word={word:#010x}")
+  # RDNA3 (default)
   if (word >> 30) == 0b11:
     for cls in _RDNA_FORMATS_64:
       if _matches_encoding(word, cls):
