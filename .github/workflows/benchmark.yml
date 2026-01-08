@@ -291,7 +291,7 @@ jobs:
     # - name: Fuzz Padded Tensor Core GEMM (PTX)
     #   run: NV=1 NV_PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: HEVC Decode Benchmark
-      run: VALIDATE=1 MAX_FRAMES=100 NV=1 PYTHONPATH=. python3 extra/hevc/decode.py
+      run: VALIDATE=1 MAX_FRAMES=100 JITBEAM=1 NV=1 PYTHONPATH=. python3 extra/hevc/decode.py
     - name: Train MNIST
       run: time PYTHONPATH=. NV=1 TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
