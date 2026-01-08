@@ -14,7 +14,7 @@ onmessage = (e) => {
 
 const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
   const lineHeight = 18;
-  g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight });
+  g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight, textSpace:"1ch" });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
   let maxColor = 0, getColor = counters != null ? () => counters[m]?.hit_count : (t) => ({0:"#7aa2f7", 1:"#9aa5ce"}[t.kind]);

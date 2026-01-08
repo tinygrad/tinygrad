@@ -70,7 +70,7 @@ const drawGraph = (data) => {
       if (parents == null && children == null) return;
       const src = [...parents, ...children, d.id];
       nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
-      labels.selectAll("rect.bg").classed("highlight", false);
+      if (!e.target.classList.contains("token")) labels.selectAll("rect.bg").classed("highlight", false);
       const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
       d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
       d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
@@ -78,7 +78,7 @@ const drawGraph = (data) => {
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
-  const STROKE_WIDTH = 1.4;
+  const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   const rectGroup = labels.selectAll("g.rect-layer").data(d => [d]).join("g").attr("class", "rect-group");
@@ -94,15 +94,14 @@ const drawGraph = (data) => {
     }
     return [ret];
   }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
-    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 ? "1ch" : 0).attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color))
+    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 ? textSpace: 0).attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color))
     .text(d => d.st).attr("xml:space", "preserve").classed("token", true);
-  const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").nodes())
+  const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").nodes().filter(n => n.__data__.keys))
     .join("rect").attr("class", "bg").each(n => n.bbox = n.getBBox()).attr("x", n => n.bbox.x).attr("y", n => n.bbox.y).attr("width", n => n.bbox.width).attr("height", n => n.bbox.height);
   tokens.on("click", (e, { keys }) => {
-    e.stopPropagation();
     const match = (d) => d.__data__.keys.some(k => keys.includes(k));
-    const on = !tokensBg.filter(match).classed("highlight");
-    tokensBg.classed("highlight", match);
+    const on = tokensBg.filter(match).classed("highlight");
+    tokensBg.classed("highlight", (d) => !on && match(d));
   })
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
