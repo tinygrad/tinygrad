@@ -8,6 +8,10 @@ from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
 from extra.assembly.amd.autogen.cdna.enum import VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op
+from extra.assembly.amd.autogen.rdna4.enum import (VOP1Op as RDNA4_VOP1Op, VOP2Op as RDNA4_VOP2Op, VOP3Op as RDNA4_VOP3Op,
+  VOP3SDOp as RDNA4_VOP3SDOp, VOP3POp as RDNA4_VOP3POp, VOPCOp as RDNA4_VOPCOp, VOPDOp as RDNA4_VOPDOp,
+  SOP1Op as RDNA4_SOP1Op, SOP2Op as RDNA4_SOP2Op, SOPCOp as RDNA4_SOPCOp, SOPKOp as RDNA4_SOPKOp, SOPPOp as RDNA4_SOPPOp,
+  SMEMOp as RDNA4_SMEMOp, DSOp as RDNA4_DSOp, VBUFFEROp as RDNA4_VBUFFEROp, VINTERPOp as RDNA4_VINTERPOp)
 
 # Source operand encoding - constant across all AMD ISAs
 class SrcEnum(IntEnum):
@@ -96,6 +100,7 @@ _SPECIAL_REGS = {
   'V_CMP_CLASS_F16': (1, 1, 1, 1), 'V_CMPX_CLASS_F16': (1, 1, 1, 1),
   'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2),
   'V_QSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_U32_U8': (4, 2, 1, 4),
+  'V_CVT_PK_F32_BF8': (2, 1, 1, 1), 'V_CVT_PK_F32_FP8': (2, 1, 1, 1),
 }
 _SPECIAL_DTYPE = {
   'V_LSHLREV_B64': ('B64', 'U32', 'B64', None), 'V_LSHRREV_B64': ('B64', 'U32', 'B64', None), 'V_ASHRREV_I64': ('I64', 'U32', 'I64', None),
@@ -140,8 +145,8 @@ def spec_is_16bit(name: str) -> bool:
 def spec_is_64bit(name: str) -> bool: return bool(_F64_RE.search(name.upper()))
 _3SRC = {'FMA', 'MAD', 'MIN3', 'MAX3', 'MED3', 'DIV_FIX', 'DIV_FMAS', 'DIV_SCALE', 'SAD', 'LERP', 'ALIGN', 'CUBE', 'BFE', 'BFI',
          'PERM_B32', 'PERMLANE', 'CNDMASK', 'XOR3', 'OR3', 'ADD3', 'LSHL_OR', 'AND_OR', 'LSHL_ADD', 'ADD_LSHL', 'XAD', 'MAXMIN',
-         'MINMAX', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
-_2SRC = {'FMAC'}  # FMAC uses dst as implicit accumulator, so only 2 explicit sources
+         'MINMAX', 'MINIMUMMAXIMUM', 'MAXIMUMMINIMUM', 'MINIMUM3', 'MAXIMUM3', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
+_2SRC = {'FMAC', 'PERMLANE16_VAR', 'PERMLANEX16_VAR'}  # FMAC uses dst as implicit accumulator, _VAR permlane only 2 sources
 def spec_num_srcs(name: str) -> int:
   name = name.upper()
   if any(k in name for k in _2SRC): return 2
@@ -275,12 +280,17 @@ RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst'
 
 def _encode_reg(val: Reg) -> int: return (108 if isinstance(val, TTMP) else 0) + val.idx
 
-def _is_inline_const(v: int) -> bool: return 0 <= v <= 127 or 128 <= v <= 208 or 240 <= v <= 255
+def _is_encoded_src(v: int) -> bool: return 106 <= v <= 127 or 128 <= v <= 208 or 240 <= v <= 255  # Special regs (106-127) or inline const
 
 def encode_src(val) -> int:
   if isinstance(val, VGPR): return 256 + _encode_reg(val)
   if isinstance(val, Reg): return _encode_reg(val)
-  if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val if _is_inline_const(val.val) else 255
+  if isinstance(val, SrcMod) and not isinstance(val, Reg):
+    v = val.val
+    if _is_encoded_src(v): return v  # Already encoded (special reg 106-127 or inline const 128-208 or float 240-255)
+    if isinstance(v, int) and 0 <= v <= 64: return 128 + v  # Encode as inline constant
+    if isinstance(v, int) and -16 <= v <= -1: return 192 - v
+    return 255  # Literal
   if hasattr(val, 'value'): return val.value  # IntEnum
   if isinstance(val, float): return 128 if val == 0.0 else FLOAT_ENC.get(val, 255)
   if isinstance(val, int): return 128 + val if 0 <= val <= 64 else 192 - val if -16 <= val <= -1 else 255
@@ -315,8 +325,9 @@ class Inst:
       cls._fields.update(base._fields)
     # Add this class's own fields (overrides parents)
     cls._fields.update({n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))})
-    # Compute size from max bit (exclude optional fields starting at bit 64+, e.g. MIMG NSA)
-    max_bit = max((bf.hi for bf in cls._fields.values() if bf.lo < 64), default=0) if cls._fields else 0
+    # Compute size from max bit (exclude optional MIMG NSA fields: addr1/addr2 at bits 64+)
+    optional_nsa = {'addr1', 'addr2'}
+    max_bit = max((bf.hi for n, bf in cls._fields.items() if n not in optional_nsa), default=0) if cls._fields else 0
     cls._sz = 12 if max_bit > 63 else 8 if max_bit > 31 else 4
     if 'encoding' in cls._fields and isinstance(cls.__dict__.get('encoding'), tuple): cls._encoding = cls.__dict__['encoding']
 
@@ -362,19 +373,30 @@ class Inst:
   def _validate(self, orig_args: dict):
     """Format-specific validation. Override in subclass or check by class name."""
     cls_name, op = self.__class__.__name__, orig_args.get('op')
-    if hasattr(op, 'value'): op = op.value
-    # SMEM: register count must match opcode
-    if cls_name == 'SMEM' and op is not None:
-      expected = {0:1, 1:2, 2:4, 3:8, 4:16, 8:1, 9:2, 10:4, 11:8, 12:16}.get(op)
+    op_val = op.value if hasattr(op, 'value') else op
+    op_name = op.name if hasattr(op, 'name') else None
+    # SMEM: register count must match opcode (derive from name: b32=1, b64=2, b96=3, b128=4, b256=8, b512=16, i8/u8/i16/u16=1)
+    if cls_name == 'SMEM' and op_name:
+      expected = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16, 'I8': 1, 'U8': 1, 'I16': 1, 'U16': 1}.get(op_name.split('_')[-1])
       sdata = orig_args.get('sdata')
       if expected and isinstance(sdata, Reg) and sdata.count != expected:
-        raise ValueError(f"SMEM op {op} expects {expected} registers, got {sdata.count}")
-    # SOP1: b32=1 reg, b64=2 regs
+        raise ValueError(f"SMEM op {op_name} expects {expected} registers, got {sdata.count}")
+    # SOP1: derive expected register sizes from op name (e.g., S_MOV_B64 -> dst=2, src=2; S_CTZ_I32_B64 -> dst=1, src=2)
     if cls_name == 'SOP1' and hasattr(orig_args.get('op'), 'name'):
-      expected = 2 if orig_args['op'].name.endswith('_B64') else 1
-      for fld in ('sdst', 'ssrc0'):
+      op_name = orig_args['op'].name
+      # Special cases: BITSET takes bit index (1 reg) regardless of dst size
+      if 'BITSET' in op_name:
+        dst_size = 2 if op_name.endswith('_B64') else 1
+        src_size = 1  # bit index is always 1 reg
+      else:
+        # Extract sizes from name: last suffix is src type, second-to-last (if exists) is dst type
+        sizes = {'B32': 1, 'I32': 1, 'U32': 1, 'B64': 2, 'I64': 2, 'U64': 2, 'B128': 4, 'B256': 8, 'B512': 16}
+        parts = op_name.split('_')
+        src_size = sizes.get(parts[-1], 1) if parts[-1] in sizes else 1
+        dst_size = sizes.get(parts[-2], src_size) if len(parts) >= 2 and parts[-2] in sizes else src_size
+      for fld, expected in [('sdst', dst_size), ('ssrc0', src_size)]:
         if isinstance(orig_args.get(fld), Reg) and orig_args[fld].count != expected:
-          raise ValueError(f"SOP1 {orig_args['op'].name} expects {expected} register(s) for {fld}, got {orig_args[fld].count}")
+          raise ValueError(f"SOP1 {op_name} expects {expected} register(s) for {fld}, got {orig_args[fld].count}")
 
   def __init__(self, *args, literal: int | None = None, **kwargs):
     self._values, self._literal = dict(self._defaults), None
@@ -414,7 +436,9 @@ class Inst:
     if cls_name == 'VOP3P':
       op = orig_args.get('op')
       if hasattr(op, 'value'): op = op.value
+      # fma_mix ops (32-34) default to opsel_hi=0, WMMA ops (64-69) default to opsel_hi=7 to match LLVM
       if op in (32, 33, 34) and 'opsel_hi' not in orig_args: self._values['opsel_hi'] = self._values['opsel_hi2'] = 0
+      if op in range(64, 70) and 'opsel_hi' not in orig_args: self._values['opsel_hi'], self._values['opsel_hi2'] = 3, 1
 
     # Encode all fields
     for name, val in list(self._values.items()):

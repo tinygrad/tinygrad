@@ -199,7 +199,7 @@ class TestSymbolicOps(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
 
   def test_ones_sum(self):
-    t = Tensor.ones(10)
+    t = Tensor.ones(10).contiguous()
     for i in range(1, 5):
       vi = Variable("i", 1, 10).bind(i)
       symbolic = t[:vi].sum().item()
