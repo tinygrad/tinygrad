@@ -14,8 +14,9 @@ class TestIntegration(unittest.TestCase):
     b = self.inst.to_bytes()
     st = self.inst.disasm()
     reasm = asm(st)
+    arch = 'rdna4' if 'rdna4' in type(self.inst).__module__ else ('cdna' if 'cdna' in type(self.inst).__module__ else 'rdna3')
     desc = f"{st:25s} {self.inst} {b!r} {reasm}"
-    self.assertEqual(b, compile_asm(st), desc)
+    self.assertEqual(b, compile_asm(st, arch), desc)
     # TODO: this compare should work for valid things
     #self.assertEqual(self.inst, reasm)
     self.assertEqual(repr(self.inst), repr(reasm))
@@ -53,6 +54,10 @@ class TestIntegration(unittest.TestCase):
       self.inst = s_mov_b64(s[80], s[0:1])
     with self.assertRaises(Exception):
       self.inst = s_mov_b64(s[80:81], s[0])
+
+  def test_global_store_b32(self):
+    from extra.assembly.amd.autogen.rdna4.ins import global_store_b32
+    self.inst = global_store_b32(vaddr=v[0], vsrc=v[1], saddr=s[4:5])
 
   def test_load_b128_no_0(self):
     self.inst = s_load_b128(s[4:7], s[0:1], NULL)

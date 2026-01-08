@@ -117,7 +117,7 @@ def extract_ins(tables: dict[int, tuple[str, list[list[str]]]]) -> tuple[dict[st
   formats: dict[str, list[tuple[str, int, int]]] = {}
   encodings: dict[str, str] = {}
   for num, (title, rows) in tables.items():
-    if not (m := re.match(r'(\w+) Fields$', title)): continue
+    if not (m := re.match(r'^\s*(\w+)(?:\s+Fields|,\s*.*\s+Fields)\s*$', title)): continue
     fmt_name = m.group(1)
     fields = []
     for row in rows:
@@ -243,9 +243,9 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
   lines.append("# instruction helpers")
   for fmt_name, ops in sorted(enums.items()):
     seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=1"}.get(fmt_name, "")
-    tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt_name, f"{fmt_name}, {fmt_name}Op")
+    tgt = {"GLOBAL": "FLAT, GLOBALOp", "VGLOBAL": "FLAT, VGLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt_name, f"{fmt_name}, {fmt_name}Op")
     suffix = "_e32" if fmt_name in ("VOP1", "VOP2", "VOPC") else "_e64" if fmt_name == "VOP3" and len(ops) > 0 else ""
-    if fmt_name in formats or fmt_name in ("GLOBAL", "SCRATCH"):
+    if fmt_name in formats or fmt_name in ("GLOBAL", "VGLOBAL", "SCRATCH"):
       for op_val, name in sorted(ops.items()):
         fn_suffix = suffix if fmt_name != "VOP3" or op_val < 512 else ""
         lines.append(f"{name.lower()}{fn_suffix} = functools.partial({tgt}.{name}{seg})")
