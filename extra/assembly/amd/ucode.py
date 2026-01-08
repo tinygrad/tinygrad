@@ -76,6 +76,9 @@ def _resolve_special_var(name: str, ctx: Ctx, hint: DType = None) -> UOp | None:
 def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
   """Transform parsed UOp expression to resolved UOp."""
   match node:
+    case UOp(Ops.CONST, dtypes.void, (type_src,), val):  # Deferred const: infer type from type_src
+      resolved_src = _expr(type_src, ctx, hint)
+      return UOp.const(resolved_src.dtype, val)
     case UOp(Ops.CONST, dt, _, val):
       dt = dt if dt != dtypes.int32 or hint is None else hint
       return UOp.const(dtypes.float32 if isinstance(val, float) and dt not in FLOATS else dt, val)
@@ -224,16 +227,6 @@ def _minmax(args: list[UOp], is_min: bool) -> UOp:
 
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'MEM': return a[0]
-  if name == 'abs': return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0))), UOp(Ops.NEG, a[0].dtype, (a[0],)), a[0]))
-  if name == 'cos': return UOp(Ops.SIN, a[0].dtype, (UOp(Ops.ADD, a[0].dtype, (a[0], UOp.const(a[0].dtype, 1.5707963267948966))),))
-  if name == 'rsqrt': return UOp(Ops.RECIPROCAL, a[0].dtype, (UOp(Ops.SQRT, a[0].dtype, (a[0],)),))
-  if name == 'floor':
-    trunc = UOp(Ops.TRUNC, a[0].dtype, (a[0],))
-    return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], trunc)), UOp(Ops.SUB, a[0].dtype, (trunc, UOp.const(a[0].dtype, 1))), trunc))
-  if name == 'fract': return UOp(Ops.SUB, a[0].dtype, (a[0], _transform_call('floor', a, hint)))
-  if name == 'clamp':
-    c = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], a[1])), a[1], a[0]))
-    return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[2], c)), a[2], c))
   if name == 'isINF': return UOp(Ops.OR, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, float('inf')))),
                                                         UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, float('-inf'))))))
   if name in ('isQuietNAN', 'isSignalNAN'):

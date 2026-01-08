@@ -85,6 +85,9 @@ def _pr(n, d=0):
     case UOp(Ops.XOR, _, (x,)) if len(n.src) == 1: return f"~{_pr(x)}"
     case UOp(Ops.CMPEQ, _, (x,)) if len(n.src) == 1: return f"!{_pr(x)}"
     case UOp(Ops.CMPNE, dtypes.bool, (a, b)) if a == b: return f"isNAN({_pr(a)})"
+    # fract(x) -> SUB(x, floor(x)) where floor(x) = WHERE(CMPLT(x, TRUNC(x)), SUB(TRUNC(x), 1), TRUNC(x))
+    case UOp(Ops.SUB, _, (x1, UOp(Ops.WHERE, _, (UOp(Ops.CMPLT, _, (x2, UOp(Ops.TRUNC, _, (x3,)))), UOp(Ops.SUB, _, (UOp(Ops.TRUNC, _, (x4,)), UOp(Ops.CONST, _, _, c))), UOp(Ops.TRUNC, _, (x5,)))))) if c in (1, 1.0) and x1 == x2 == x3 == x4 == x5:
+      return f"fract({_pr(x1)})"
     case UOp(_, _, (l, r), _) if n.op in _OP_SYMS:
       sym = _OP_SYMS[n.op]
       left, right = l, r
@@ -92,12 +95,24 @@ def _pr(n, d=0):
       if n.tag == 'flipped' and n.op == Ops.CMPLE: sym, left, right = '>=', r, l
       if n.tag == '<>' and n.op == Ops.CMPNE: sym = '<>'
       return f"{_pr(left)} {sym} {_pr(right)}"
+    # clamp(x, lo, hi) -> WHERE(CMPLT(hi, WHERE(CMPLT(x, lo), lo, x)), hi, WHERE(CMPLT(x, lo), lo, x))
+    case UOp(Ops.WHERE, _, (UOp(Ops.CMPLT, _, (hi, UOp(Ops.WHERE, _, (UOp(Ops.CMPLT, _, (x1, lo1)), lo2, x2)))), hi2, UOp(Ops.WHERE, _, (UOp(Ops.CMPLT, _, (x3, lo3)), lo4, x4)))) if hi == hi2 and x1 == x2 == x3 == x4 and lo1 == lo2 == lo3 == lo4:
+      return f"clamp({_pr(x1)}, {_pr(lo1)}, {_pr(hi)})"
+    # abs(x) -> WHERE(CMPLT(x, 0), NEG(x), x)
+    case UOp(Ops.WHERE, _, (UOp(Ops.CMPLT, _, (x1, UOp(Ops.CONST, _, _, c))), UOp(Ops.NEG, _, (x2,)), x3)) if c in (0, 0.0) and x1 == x2 == x3:
+      return f"abs({_pr(x1)})"
+    # floor(x) -> WHERE(CMPLT(x, TRUNC(x)), SUB(TRUNC(x), 1), TRUNC(x))
+    case UOp(Ops.WHERE, _, (UOp(Ops.CMPLT, _, (x1, UOp(Ops.TRUNC, _, (x2,)))), UOp(Ops.SUB, _, (UOp(Ops.TRUNC, _, (x3,)), UOp(Ops.CONST, _, _, c))), UOp(Ops.TRUNC, _, (x4,)))) if c in (1, 1.0) and x1 == x2 == x3 == x4:
+      return f"floor({_pr(x1)})"
     case UOp(Ops.WHERE, _, (c, t, f)): return f"{_pr(c)} ? {_pr(t)} : {_pr(f)}"
     case UOp(Ops.TRUNC, _, (x,)): return f"trunc({_pr(x)})"
     case UOp(Ops.SQRT, _, (x,)): return f"sqrt({_pr(x)})"
     case UOp(Ops.EXP2, _, (x,)): return f"exp2({_pr(x)})"
     case UOp(Ops.LOG2, _, (x,)): return f"log2({_pr(x)})"
+    # cos(x) -> SIN(ADD(x, π/2))
+    case UOp(Ops.SIN, _, (UOp(Ops.ADD, _, (x, UOp(Ops.CONST, _, _, c))),)) if abs(c - 1.5707963267948966) < 1e-10: return f"cos({_pr(x)})"
     case UOp(Ops.SIN, _, (x,)): return f"sin({_pr(x)})"
+    case UOp(Ops.RECIPROCAL, _, (UOp(Ops.SQRT, _, (x,)),)): return f"rsqrt({_pr(x)})"
     case UOp(Ops.RECIPROCAL, _, (x,)): return f"rcp({_pr(x)})"
     case UOp(Ops.MULACC, _, (a, b, c)): return f"fma({_pr(a)}, {_pr(b)}, {_pr(c)})"
     case UOp(Ops.CUSTOM, _, args, 'MEM'): return f"MEM[{_pr(args[0])}]"
