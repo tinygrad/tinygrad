@@ -161,6 +161,13 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
     case UOp(Ops.XOR, _, (src,)) if len(node.src) == 1: val = _expr(src, ctx, hint); return UOp(Ops.XOR, val.dtype, (val, UOp.const(val.dtype, -1)))
     case UOp(Ops.CMPEQ, _, (src,)) if len(node.src) == 1: val = _expr(src, ctx, hint); return UOp(Ops.CMPEQ, dtypes.bool, (val, UOp.const(val.dtype, 0)))
 
+    # Unary math ops
+    case UOp(op, _, (src,)) if op in (Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL):
+      val = _expr(src, ctx, hint); return UOp(op, val.dtype, (val,))
+
+    # MULACC (fma)
+    case UOp(Ops.MULACC, _, (a, b, c)): return UOp(Ops.MULACC, _expr(c, ctx, hint).dtype, (_expr(a, ctx, hint), _expr(b, ctx, hint), _expr(c, ctx, hint)))
+
     case UOp(Ops.WHERE, _, (cond, tv, fv)):
       c, t = _expr(cond, ctx), _expr(tv, ctx, hint)
       return UOp(Ops.WHERE, t.dtype, (c, t, _expr(fv, ctx, t.dtype)))
@@ -200,7 +207,6 @@ CVT_MAP = {'u32_to_f32': (dtypes.float32, False), 'i32_to_f32': (dtypes.float32,
            'f64_to_i32': (dtypes.int32, False), 'f64_to_u32': (dtypes.uint32, True), 'i32_to_f64': (dtypes.float64, False),
            'u32_to_f64': (dtypes.float64, False), 'f64_to_f32': (dtypes.float32, False), 'f32_to_f64': (dtypes.float64, False),
            'u16_to_f16': (dtypes.float16, False), 'i16_to_f16': (dtypes.float16, False), 'f16_to_u16': (dtypes.uint16, False), 'f16_to_i16': (dtypes.int16, False)}
-MATH_OPS = {'trunc': Ops.TRUNC, 'sqrt': Ops.SQRT, 'exp2': Ops.EXP2, 'log2': Ops.LOG2, 'sin': Ops.SIN, 'rcp': Ops.RECIPROCAL}
 
 def _fp_bits(v: UOp) -> tuple[UOp, int, int, int]:
   """Get float as bits with its layout info. Unwraps CAST to check original float type."""
@@ -218,7 +224,6 @@ def _minmax(args: list[UOp], is_min: bool) -> UOp:
 
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'MEM': return a[0]
-  if name == 'fma': return UOp(Ops.MULACC, a[2].dtype, (a[0], a[1], a[2]))
   if name == 'abs': return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0))), UOp(Ops.NEG, a[0].dtype, (a[0],)), a[0]))
   if name == 'cos': return UOp(Ops.SIN, a[0].dtype, (UOp(Ops.ADD, a[0].dtype, (a[0], UOp.const(a[0].dtype, 1.5707963267948966))),))
   if name == 'rsqrt': return UOp(Ops.RECIPROCAL, a[0].dtype, (UOp(Ops.SQRT, a[0].dtype, (a[0],)),))
@@ -297,7 +302,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'pow':
     assert a[0].op == Ops.CONST and a[0].arg == 2.0
     return UOp(Ops.EXP2, a[0].dtype, (a[1] if a[1].dtype == a[0].dtype else UOp(Ops.CAST, a[0].dtype, (a[1],)),))
-  if name in MATH_OPS: return UOp(MATH_OPS[name], a[0].dtype, (a[0],))
   if name == 'ldexp': return UOp(Ops.MUL, a[0].dtype, (a[0], UOp(Ops.EXP2, a[0].dtype, (UOp(Ops.CAST, a[0].dtype, (a[1],)),))))
   if name in ('min', 'max'): return _minmax(a, is_min=(name == 'min'))
   if name in CVT_MAP:

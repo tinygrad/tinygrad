@@ -92,6 +92,13 @@ def _pr(n, d=0):
       if n.tag == '<>' and n.op == Ops.CMPNE: sym = '<>'
       return f"{_pr(left)} {sym} {_pr(right)}"
     case UOp(Ops.WHERE, _, (c, t, f)): return f"{_pr(c)} ? {_pr(t)} : {_pr(f)}"
+    case UOp(Ops.TRUNC, _, (x,)): return f"trunc({_pr(x)})"
+    case UOp(Ops.SQRT, _, (x,)): return f"sqrt({_pr(x)})"
+    case UOp(Ops.EXP2, _, (x,)): return f"exp2({_pr(x)})"
+    case UOp(Ops.LOG2, _, (x,)): return f"log2({_pr(x)})"
+    case UOp(Ops.SIN, _, (x,)): return f"sin({_pr(x)})"
+    case UOp(Ops.RECIPROCAL, _, (x,)): return f"rcp({_pr(x)})"
+    case UOp(Ops.MULACC, _, (a, b, c)): return f"fma({_pr(a)}, {_pr(b)}, {_pr(c)})"
     case UOp(Ops.CUSTOM, _, args, 'MEM'): return f"MEM[{_pr(args[0])}]"
     case UOp(Ops.CUSTOM, _, args, name): return f"{name}({', '.join(_pr(x) for x in args)})"
     case UOp(Ops.CAT, _, exprs): return f"{{{', '.join(_pr(x) for x in exprs)}}}"

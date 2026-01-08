@@ -40,6 +40,9 @@ _BINOPS: dict[str, Ops] = {
 # NOTE: ~ is bitwise NOT (XOR with -1), ! is logical NOT (compare == 0). NEG is arithmetic negation, not suitable here.
 _UNOPS: dict[str, Ops] = {'-': Ops.NEG, '~': Ops.XOR, '!': Ops.CMPEQ}
 
+# Direct function -> UOp mappings (parsed directly, not as CUSTOM)
+_DIRECT_OPS: dict[str, Ops] = {'trunc': Ops.TRUNC, 'sqrt': Ops.SQRT, 'exp2': Ops.EXP2, 'log2': Ops.LOG2, 'sin': Ops.SIN, 'rcp': Ops.RECIPROCAL}
+
 # Function return type inference for CUSTOM ops
 _BOOL_FNS = {'isNAN', 'isINF', 'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', 'GT_NEG_ZERO'}
 _PASSTHRU_FNS = {'abs', 'floor', 'fract', 'sqrt', 'sin', 'cos', 'trunc', 'fma', 'clamp', 'min', 'max', 'ldexp',
@@ -160,13 +163,17 @@ def expr(s: str) -> UOp:
     return UOp(Ops.CONST, _QDTYPES[f"f{m[1]}"], arg=float(m[2]))
   if m := re.match(r"^(\d+)'(0x[0-9a-fA-F]+)$", s):
     return UOp(Ops.CONST, _QDTYPES[f"u{m[1]}"], arg=int(m[2], 16))
-  # Function call -> CUSTOM
+  # Function call -> direct UOp or CUSTOM
   if m := re.match(r"^([A-Za-z_]\w*)\(", s):
     if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1:
       a = _split(s[m.end():e])
       srcs = tuple(expr(x) for x in a) if a != [''] else ()
-      output_dtype = _infer_fn_dtype(m[1], srcs)
-      return UOp(Ops.CUSTOM, output_dtype, srcs, arg=m[1])
+      name = m[1]
+      # Direct UOp mappings for functions
+      if name in _DIRECT_OPS: return UOp(_DIRECT_OPS[name], srcs[0].dtype, srcs)
+      if name == 'fma': return UOp(Ops.MULACC, srcs[2].dtype, (srcs[0], srcs[1], srcs[2]))
+      output_dtype = _infer_fn_dtype(name, srcs)
+      return UOp(Ops.CUSTOM, output_dtype, srcs, arg=name)
   # MEM[addr] -> CUSTOM('MEM', addr), MEM[addr].type -> BITCAST
   if s[:4] == 'MEM[' and (e := _match(s, 3, '[', ']')) != -1:
     r, b = s[e+1:], UOp(Ops.CUSTOM, dtypes.void, (expr(s[4:e]),), arg='MEM')
