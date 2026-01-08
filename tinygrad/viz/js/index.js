@@ -76,11 +76,13 @@ const drawGraph = (data) => {
       e.stopPropagation();
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-    .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
+    .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
   const STROKE_WIDTH = 1.4;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
-  labels.selectAll("text").data(d => {
+  const rectGroup = labels.selectAll("g.rect-layer").data(d => [d]).join("g").attr("class", "rect-group");
+  const textGroup = labels.selectAll("g.text-layer").data(d => [d]).join("g").attr("class", "text-group");
+  const tokens = textGroup.selectAll("text").data(d => {
     if (Array.isArray(d.label)) return [d.label];
     const ret = [[]];
     for (const s of parseColors(d.label, defaultColor="initial")) {
@@ -92,7 +94,15 @@ const drawGraph = (data) => {
     return [ret];
   }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
     .selectAll("tspan").data(d => d).join("tspan").attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color))
-    .text(d => d.st).attr("xml:space", "preserve");
+    .text(d => d.st).attr("xml:space", "preserve").classed("token", true);
+  const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").nodes())
+    .join("rect").attr("class", "bg").each(n => n.bbox = n.getBBox()).attr("x", n => n.bbox.x).attr("y", n => n.bbox.y).attr("width", n => n.bbox.width).attr("height", n => n.bbox.height);
+  tokens.on("click", (e, { keys }) => {
+    e.stopPropagation();
+    const match = (d) => d.__data__.keys.some(k => keys.includes(k));
+    const on = !tokensBg.filter(match).classed("highlight");
+    tokensBg.classed("highlight", match);
+  })
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges

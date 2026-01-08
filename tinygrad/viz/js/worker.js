@@ -17,17 +17,15 @@ const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
   g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
-  let maxColor = 0;
+  let maxColor = 0, getColor = counters != null ? () => counters[m]?.hit_count : (t) => ({0:"#7aa2f7", 1:"#9aa5ce"}[t.kind]);
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
-      const text = pc_table[m][0];
-      if (counters != null) {
-        const num = counters[m]?.hit_count || 0;
-        if (num > maxColor) maxColor = num;
-        label.push([{st:text, color:num}]);
-      } else { const [inst, ...operands] = text.split(" "); label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]); }
-      width = Math.max(width, ctx.measureText(text).width);
+      // token kind, (0 = opcode, 1 = operand)
+      const tokens = pc_table[m][0].split(" ").map((t, i) => ({ st:t, keys:[t], kind:Number(i>0)}));
+      if (counters != null && counters[m]?.hit_count > maxColor) maxColor = num
+      label.push(tokens.map((t, i) => ({st:t.st+" ", keys:t.keys, color:getColor(t)})));
+      width = Math.max(width, ctx.measureText(tokens.join(" ")).width);
       height += lineHeight;
     }
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
