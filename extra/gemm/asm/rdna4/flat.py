@@ -4,8 +4,7 @@ from tinygrad import Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 from extra.assembly.amd.dsl import NULL
-#from extra.assembly.amd.autogen.rdna4.ins import *
-from extra.gemm.asm.rdna4.ins import *
+from extra.assembly.amd.autogen.rdna4.ins import *
 
 from extra.gemm.amd_uop_matmul import N, test_matmul
 
@@ -302,7 +301,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   *[buffer_load_b128(v[238+i*4:242+i*4], v[132+i], 52) for i in range(4)],
   "skip_prefetch_2:",
   s_wait_dscnt(0x0),
-  barrier_signal(),
+  s_barrier_signal(),
   s_barrier_wait(0xffff),
   # **** LDS -> VGPR
   # Load A tile from LDS: 8x b64 loads
@@ -379,7 +378,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   v_wmma_f32_16x16x16_f16(v[88:95], v[197:200], v[152:155], v[88:95]),
   v_wmma_f32_16x16x16_f16(v[96:103], v[201:204], v[140:143], v[96:103]),
   s_wait_dscnt(0x0),
-  barrier_signal(),
+  s_barrier_signal(),
   s_barrier_wait(0xffff),
   v_wmma_f32_16x16x16_f16(v[104:111], v[201:204], v[144:147], v[104:111]),
   s_wait_loadcnt(0x7),
@@ -432,7 +431,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   v_wmma_f32_16x16x16_f16(v[24:31], v[205:208], v[152:155], v[24:31]),
   v_wmma_f32_16x16x16_f16(v[32:39], v[209:212], v[140:143], v[32:39]),
   s_wait_dscnt(0x0),
-  barrier_signal(),
+  s_barrier_signal(),
   s_barrier_wait(0xffff),
   v_wmma_f32_16x16x16_f16(v[40:47], v[209:212], v[144:147], v[40:47]),
   ds_load_b64(v[156:157], v[138], offset1=0),
@@ -524,7 +523,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   v_wmma_f32_16x16x16_f16(v[88:95], v[197:200], v[152:155], v[88:95]),
   v_wmma_f32_16x16x16_f16(v[96:103], v[201:204], v[140:143], v[96:103]),
   s_wait_dscnt(0x0),
-  barrier_signal(),
+  s_barrier_signal(),
   s_barrier_wait(0xffff),
   v_wmma_f32_16x16x16_f16(v[104:111], v[201:204], v[144:147], v[104:111]),
   s_wait_loadcnt(0x7),
@@ -569,7 +568,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   v_wmma_f32_16x16x16_f16(v[24:31], v[205:208], v[152:155], v[24:31]),
   v_wmma_f32_16x16x16_f16(v[32:39], v[209:212], v[140:143], v[32:39]),
   s_wait_dscnt(0x0),
-  barrier_signal(),
+  s_barrier_signal(),
   s_barrier_wait(0xffff),
   v_wmma_f32_16x16x16_f16(v[40:47], v[209:212], v[144:147], v[40:47]),
   ds_load_b64(v[156:157], v[138], offset1=0),
@@ -641,7 +640,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   v_wmma_f32_16x16x16_f16(v[96:103], v[201:204], v[140:143], v[96:103]),
   v_wmma_f32_16x16x16_f16(v[104:111], v[201:204], v[144:147], v[104:111]),
   s_wait_dscnt(0x0),
-  barrier_signal(),
+  s_barrier_signal(),
   s_barrier_wait(0xffff),
   v_wmma_f32_16x16x16_f16(v[112:119], v[201:204], v[148:151], v[112:119]),
   v_wmma_f32_16x16x16_f16(v[120:127], v[201:204], v[152:155], v[120:127]),
