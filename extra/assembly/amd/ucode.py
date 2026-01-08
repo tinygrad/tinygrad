@@ -234,7 +234,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'clamp':
     c = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], a[1])), a[1], a[0]))
     return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[2], c)), a[2], c))
-  if name == 'isNAN': return UOp(Ops.CMPNE, dtypes.bool, (a[0], a[0]))
   if name == 'isINF': return UOp(Ops.OR, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, float('inf')))),
                                                         UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, float('-inf'))))))
   if name in ('isQuietNAN', 'isSignalNAN'):
