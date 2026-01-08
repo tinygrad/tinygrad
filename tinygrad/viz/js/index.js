@@ -93,7 +93,7 @@ const drawGraph = (data) => {
     }
     return [ret];
   }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
-    .selectAll("tspan").data(d => d).join("tspan").attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color))
+    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 ? "1ch" : 0).attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color))
     .text(d => d.st).attr("xml:space", "preserve").classed("token", true);
   const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").nodes())
     .join("rect").attr("class", "bg").each(n => n.bbox = n.getBBox()).attr("x", n => n.bbox.x).attr("y", n => n.bbox.y).attr("width", n => n.bbox.width).attr("height", n => n.bbox.height);

@@ -13,7 +13,7 @@ onmessage = (e) => {
 }
 
 const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
-  const lineHeight = 16;
+  const lineHeight = 18;
   g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
@@ -22,9 +22,9 @@ const layoutCfg = (g, { blocks, paths, pc_table, counters, colors }) => {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
       // token kind, (0 = opcode, 1 = operand)
-      const tokens = pc_table[m][0].split(" ").map((t, i) => ({ st:t, keys:[t], kind:Number(i>0)}));
+      const tokens = pc_table[m][0].split(" ").map((t, i) => ({ st:t, keys:[t.replace(",", "")], kind:Number(i>0)}));
       if (counters != null && counters[m]?.hit_count > maxColor) maxColor = num
-      label.push(tokens.map((t, i) => ({st:t.st+" ", keys:t.keys, color:getColor(t)})));
+      label.push(tokens.map((t, i) => ({st:t.st, keys:t.keys, color:getColor(t)})));
       width = Math.max(width, ctx.measureText(tokens.join(" ")).width);
       height += lineHeight;
     }
