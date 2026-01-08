@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, DType
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
-from tinygrad.helpers import DEBUG
-
 # DType lookup table for AMD pseudocode type suffixes
 from tinygrad.dtype import INVERSE_DTYPES_DICT
 _QDTYPES: dict[str, DType] = {
