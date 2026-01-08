@@ -1,5 +1,5 @@
 import os, unittest, ctypes
-from tinygrad import dtypes, Tensor, fetch, Device
+from tinygrad import dtypes, Tensor, fetch
 import numpy as np
 from tinygrad.nn.state import ggml_data_to_tensor, gguf_load
 from tinygrad.device import is_dtype_supported
@@ -109,7 +109,7 @@ class TestGGUF(unittest.TestCase):
   def _test_gguf_load(self, url: str):
     fp = fetch(url)
     model_size = os.stat(fp).st_size
-    gguf_tensor = Tensor.empty(model_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT)
+    gguf_tensor = Tensor.empty(model_size, dtype=dtypes.uint8, device=f"disk:{fp}")
     kv_data, tensors = gguf_load(gguf_tensor)
 
     gguf_params = ggml.gguf_init_params(ctx=self.ctx, no_alloc=False)

@@ -333,10 +333,34 @@ def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
   glbls = sorted([x for x in ast.backward_slice if x.op is Ops.DEFINE_GLOBAL], key=lambda x: x.arg)
   return [Buffer(dname, x.ptrdtype.size, x.dtype.base if not isinstance(x.dtype, ImageDType) else x.dtype) for x in glbls]
 
+def _mark_gemm_reduces(k:Scheduler) -> None:
+  # Semantic marker for GEMM-like reductions (matmul/dot): REDUCE(ADD, MUL(loadA, loadB))
+  replaces: dict[UOp, UOp] = {}
+  for red in [x for x in k.ast.backward_slice if x.op is Ops.REDUCE and x.arg is Ops.ADD and x.tag is None]:
+    mul = red.src[0] if red.src[0].op is not Ops.CAST else red.src[0].src[0]
+    if mul.op is not Ops.MUL: continue
+    if all(s.op is Ops.INDEX or (s.op is Ops.CAST and len(s.src) and s.src[0].op is Ops.INDEX) for s in mul.src):
+      replaces[red] = red.replace(tag="GEMM")
+  if replaces: k.ast = k.ast.substitute(replaces)
+
+def _fp8_mul_promote_to_acc(k:Scheduler) -> None:
+  # If TC didn't apply, fp8 matmul should still multiply in the accumulation dtype when one is requested.
+  if not any(u.op is Ops.REDUCE and u.arg is Ops.ADD and u.tag == "GEMM" for u in k.ast.backward_slice): return
+  if any(u.op is Ops.WMMA for u in k.ast.backward_slice): return
+  replaces: dict[UOp, UOp] = {}
+  for red in [x for x in k.ast.backward_slice if x.op is Ops.REDUCE and x.arg is Ops.ADD and x.tag == "GEMM"]:
+    acc_dtype = red.dtype.scalar()
+    if acc_dtype in dtypes.fp8s: continue
+    mul = red.src[0] if red.src[0].op is not Ops.CAST else red.src[0].src[0]
+    if mul.op is Ops.MUL and (mul.src[0].dtype.scalar() in dtypes.fp8s or mul.src[1].dtype.scalar() in dtypes.fp8s):
+      replaces[mul] = UOp(Ops.MUL, acc_dtype, (mul.src[0].cast(acc_dtype), mul.src[1].cast(acc_dtype)))
+  if replaces: k.ast = k.ast.substitute(replaces)
+
 def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   if ast.tag is not None: return ast
   k = Scheduler(ast, ren)
   k.convert_loop_to_global()
+  _mark_gemm_reduces(k)
   if ast.arg is not None and ast.arg.opts_to_apply is not None:
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
   elif BEAM >= 1:
@@ -348,6 +372,7 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
     if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
+  _fp8_mul_promote_to_acc(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
 
 # create image buffers
