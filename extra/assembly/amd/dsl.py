@@ -412,7 +412,6 @@ class Inst:
       op = orig_args.get('op')
       if hasattr(op, 'value'): op = op.value
       if op in (32, 33, 34) and 'opsel_hi' not in orig_args: self._values['opsel_hi'] = self._values['opsel_hi2'] = 0
-      if op in range(64, 75) and 'opsel_hi' not in orig_args: self._values['opsel_hi'], self._values['opsel_hi2'] = 3, 1
 
     # Encode all fields
     for name, val in list(self._values.items()):
