@@ -3,7 +3,7 @@ from tinygrad.helpers import getenv, DEBUG, round_up, Timing, tqdm, fetch, ceild
 from extra.hevc.hevc import parse_hevc_file_headers, untile_nv12, to_bgr, nv_gpu
 from tinygrad import Tensor, dtypes, Device, Variable, TinyJit
 
-# will rounup hevc input data to 32 bytes, so more optimal kernels can be generated.
+# rounds up hevc input data to 32 bytes, so more optimal kernels can be generated
 HEVC_ROUNDUP = getenv("DATA_ROUNDUP", 32)
 
 if __name__ == "__main__":
