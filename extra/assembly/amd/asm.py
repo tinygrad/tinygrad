@@ -131,10 +131,9 @@ def _mods(*pairs) -> str: return " ".join(m for c, m in pairs if c)
 def _fmt_bits(label: str, val: int, count: int) -> str: return f"{label}:[{','.join(str((val >> i) & 1) for i in range(count))}]"
 
 def _vop3_src(inst, v: int, neg: int, abs_: int, hi: int, n: int, f16: bool) -> str:
-  """Format VOP3 source operand with modifiers."""
+  """Format VOP3 source operand with modifiers. VOP3 uses op_sel for hi/lo, not .h/.l suffix."""
   if v == 255: s = inst.lit(v)  # literal constant takes priority
   elif n > 1: s = _fmt_src(v, n)
-  elif f16 and v >= 256: s = f"v{v - 256}.h" if hi else f"v{v - 256}.l"
   else: s = inst.lit(v)
   if abs_: s = f"|{s}|"
   return f"-{s}" if neg else s
@@ -241,19 +240,21 @@ def _disasm_smem(inst: SMEM) -> str:
   # soe=0, imm=1: offset is immediate
   # soe=0, imm=0: offset field is SGPR encoding (0-255)
   soe, imm = getattr(inst, 'soe', 0), getattr(inst, 'imm', 1)
+  # RDNA4 uses ioffset, others use offset
+  offset = getattr(inst, 'offset', None) or getattr(inst, 'ioffset', 0)
   if cdna:
     if soe and imm:
-      off_s = f"{decode_src(inst.soffset, cdna)} offset:0x{inst.offset:x}"  # SGPR + immediate
+      off_s = f"{decode_src(inst.soffset, cdna)} offset:0x{offset:x}"  # SGPR + immediate
     elif imm:
-      off_s = f"0x{inst.offset:x}"  # Immediate offset only
-    elif inst.offset < 256:
-      off_s = decode_src(inst.offset, cdna)  # SGPR encoding in offset field
+      off_s = f"0x{offset:x}"  # Immediate offset only
+    elif offset < 256:
+      off_s = decode_src(offset, cdna)  # SGPR encoding in offset field
     else:
       off_s = decode_src(inst.soffset, cdna)
-  elif inst.offset and inst.soffset != 124:
-    off_s = f"{decode_src(inst.soffset, cdna)} offset:0x{inst.offset:x}"
-  elif inst.offset:
-    off_s = f"0x{inst.offset:x}"
+  elif offset and inst.soffset != 124:
+    off_s = f"{decode_src(inst.soffset, cdna)} offset:0x{offset:x}"
+  elif offset:
+    off_s = f"0x{offset:x}"
   else:
     off_s = decode_src(inst.soffset, cdna)
   op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
@@ -359,11 +360,10 @@ def _disasm_vop3(inst: VOP3) -> str:
   s1 = _vop3_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.opsel&2, inst.src_regs(1), is16_s)
   s2 = _vop3_src(inst, inst.src2, inst.neg&4, inst.abs&4, inst.opsel&4, inst.src_regs(2), is16_s2)
 
-  # Destination
+  # Destination - VOP3 uses op_sel for hi/lo, not .h/.l suffix
   dn = inst.dst_regs()
   if op == VOP3Op.V_READLANE_B32: dst = _fmt_sdst(inst.vdst, 1)
   elif dn > 1: dst = _vreg(inst.vdst, dn)
-  elif is16_d: dst = f"v{inst.vdst}.h" if (inst.opsel & 8) else f"v{inst.vdst}.l"
   else: dst = f"v{inst.vdst}"
 
   cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
@@ -410,7 +410,8 @@ def _disasm_vop3p(inst: VOP3P) -> str:
   is_wmma, n, is_fma_mix = 'wmma' in name, inst.num_srcs(), 'fma_mix' in name
   def get_src(v, sc): return inst.lit(v) if v == 255 else _fmt_src(v, sc)
   if is_wmma:
-    sc = 2 if 'iu4' in name else 4 if 'iu8' in name else 8
+    # src count: iu4=2, iu8=4, f16/bf16=4 (16 values per 4 VGPRs), f32=8
+    sc = 2 if 'iu4' in name else 4 if 'iu8' in name or 'f16' in name or 'bf16' in name else 8
     src0, src1, src2, dst = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, 8), _vreg(inst.vdst, 8)
   else: src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), f"v{inst.vdst}"
   opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
@@ -511,6 +512,8 @@ def _disasm_sop1(inst: SOP1) -> str:
     if op in (SOP1Op.S_SETPC_B64, SOP1Op.S_RFE_B64): return f"{name} {src}"
     if op == SOP1Op.S_SWAPPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {src}"
     if op in (SOP1Op.S_SENDMSG_RTN_B32, SOP1Op.S_SENDMSG_RTN_B64): return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs())}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
+    # barrier_signal only takes ssrc0 (barrier index), not sdst
+    if 'barrier_signal' in name: return f"{name} {inst.lit(inst.ssrc0)}"
   return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs(), cdna)}, {src}"
 
 def _disasm_sop2(inst: SOP2) -> str:
@@ -1016,17 +1019,11 @@ except ImportError:
 # Register RDNA4 handlers - shared formats use merged disassemblers, RDNA4-only formats use dedicated ones
 def _disasm_vbuffer(inst: R4_VBUFFER) -> str:
   name = inst.op_name.lower()
-  # Calculate vdata width from op name
-  w = (2 if _has(name, 'xyz', 'xyzw') else 1) if 'd16' in name else \
-      ((2 if _has(name, 'b64', 'u64', 'i64') else 1) * (2 if 'cmpswap' in name else 1)) if 'atomic' in name else \
-      {'b32':1,'b64':2,'b96':3,'b128':4,'u8':1,'i8':1,'u16':1,'i16':1,'x':1,'xy':2,'xyz':3,'xyzw':4}.get(name.split('_')[-1], 1)
-  if inst.tfe: w += 1
-  vaddr = _vreg(inst.vaddr, 2) if inst.offen and inst.idxen else f"v{inst.vaddr}" if inst.offen or inst.idxen else "off"
-  srsrc = _sreg_or_ttmp(inst.rsrc, 4)
-  fmt_s = f" format:{inst.format}" if inst.format else ""
-  mods = [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.ioffset,f"offset:{inst.ioffset}"),(inst.tfe,"tfe")] if c]
-  soffset_s = decode_src(inst.soffset, False)
-  return f"{name} {_vreg(inst.vdata, w)}, {vaddr}, {srsrc},{fmt_s} {soffset_s}{' ' + ' '.join(mods) if mods else ''}"
+  w = {'b32':1,'b64':2,'b96':3,'b128':4}.get(name.split('_')[-1], 1)
+  vaddr = f"v{inst.vaddr}" if inst.offen or inst.idxen else "off"
+  srsrc = _sreg_or_ttmp(inst.rsrc, 4)  # rsrc is already register number, not divided by 4
+  mods = [m for c, m in [(inst.offen,"offen"),(inst.idxen,"idxen")] if c]
+  return f"{name} {_vreg(inst.vdata, w)}, {vaddr}, {srsrc}, {decode_src(inst.soffset)}{' ' + ' '.join(mods) if mods else ''}"
 
 def _disasm_vexport(inst: R4_VEXPORT) -> str:
   # Target names for export

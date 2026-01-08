@@ -4,8 +4,7 @@ from tinygrad import Device, dtypes
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
-from extra.assembly.amd.dsl import NULL
-from extra.assembly.amd.autogen.rdna4.ins import *
+from extra.gemm.asm.rdna4.ins import *
 
 from extra.gemm.amd_uop_matmul import N, test_matmul
 
