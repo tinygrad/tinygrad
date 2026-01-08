@@ -85,6 +85,9 @@ def _pr(n, d=0):
     case UOp(Ops.XOR, _, (x,)) if len(n.src) == 1: return f"~{_pr(x)}"
     case UOp(Ops.CMPEQ, _, (x,)) if len(n.src) == 1: return f"!{_pr(x)}"
     case UOp(Ops.CMPNE, dtypes.bool, (a, b)) if a == b: return f"isNAN({_pr(a)})"
+    # isINF(x) -> OR(CMPEQ(x, +inf), CMPEQ(x, -inf))
+    case UOp(Ops.OR, dtypes.bool, (UOp(Ops.CMPEQ, _, (x1, UOp(Ops.CONST, _, _, c1))), UOp(Ops.CMPEQ, _, (x2, UOp(Ops.CONST, _, _, c2))))) if x1 == x2 and c1 == float('inf') and c2 == float('-inf'):
+      return f"isINF({_pr(x1)})"
     # fract(x) -> SUB(x, floor(x)) where floor(x) = WHERE(CMPLT(x, TRUNC(x)), SUB(TRUNC(x), 1), TRUNC(x))
     case UOp(Ops.SUB, _, (x1, UOp(Ops.WHERE, _, (UOp(Ops.CMPLT, _, (x2, UOp(Ops.TRUNC, _, (x3,)))), UOp(Ops.SUB, _, (UOp(Ops.TRUNC, _, (x4,)), UOp(Ops.CONST, _, _, c))), UOp(Ops.TRUNC, _, (x5,)))))) if c in (1, 1.0) and x1 == x2 == x3 == x4 == x5:
       return f"fract({_pr(x1)})"
