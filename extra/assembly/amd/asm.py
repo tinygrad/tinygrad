@@ -90,6 +90,9 @@ HWREG_RDNA4 = {1: 'HW_REG_WAVE_MODE', 2: 'HW_REG_WAVE_STATUS', 4: 'HW_REG_WAVE_S
                30: 'HW_REG_SHADER_CYCLES_HI', 31: 'HW_REG_WAVE_DVGPR_ALLOC_LO', 32: 'HW_REG_WAVE_DVGPR_ALLOC_HI'}
 # RDNA unified buffer format - extracted from PDF, use enum for name->value lookup
 BUF_FMT = {e.name: e.value for e in BufFmt}
+# Extended format map for formats missing from enum (computed from observed patterns)
+_BUF_FMT_EXT = {'BUF_FMT_32_32_32_32_SINT': 62, 'BUF_FMT_32_32_32_32_FLOAT': 63, 'BUF_FMT_8_FLOAT': 108}
+BUF_FMT.update(_BUF_FMT_EXT)
 def _parse_buf_fmt_combo(s: str) -> int:  # parse format:[BUF_DATA_FORMAT_X, BUF_NUM_FORMAT_Y]
   parts = [p.strip().replace('BUF_DATA_FORMAT_', '').replace('BUF_NUM_FORMAT_', '') for p in s.split(',')]
   return BUF_FMT.get(f'BUF_FMT_{parts[0]}_{parts[1]}') if len(parts) == 2 else None
@@ -863,13 +866,19 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
     if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}()"
     # RDNA4 uses VBUFFER with different field names and th/scope instead of glc/dlc/slc
     if arch == "rdna4":
-      # Extract th and scope modifiers
-      m, text = _extract(text, r'\s+th:TH_(\w+)')
+      # Extract th and scope modifiers - RDNA4 temporal hints (from ISA docs)
+      # Load: RT=0, NT=1, HT=2, BYPASS=3, LU=4, RT_NT=5, NT_HT=6, RT_WB=7
+      # Store: RT=0, NT=1, HT=2, BYPASS=3, LU=4, RT_NT=5, NT_HT=6
+      # Atomic: RT=0, NT=1, RETURN=1, NT_RETURN=3, RT_RETURN=1, CASCADE_RT=6, CASCADE_NT=6
+      m, buf_text = _extract(op_str, r'\s+th:TH_(\w+)')
       th_val = {'LOAD_RT': 0, 'LOAD_NT': 1, 'LOAD_HT': 2, 'LOAD_BYPASS': 3, 'LOAD_LU': 4, 'LOAD_RT_NT': 5, 'LOAD_NT_HT': 6, 'LOAD_RT_WB': 7,
                 'STORE_RT': 0, 'STORE_NT': 1, 'STORE_HT': 2, 'STORE_BYPASS': 3, 'STORE_LU': 4, 'STORE_RT_NT': 5, 'STORE_NT_HT': 6,
-                'ATOMIC_RT': 0, 'ATOMIC_NT': 1, 'ATOMIC_RETURN': 4, 'ATOMIC_RETURN_NT': 5, 'ATOMIC_CASCADE_RT': 6, 'ATOMIC_CASCADE_NT': 7}.get(m.group(1), 0) if m else 0
-      m, text = _extract(text, r'\s+scope:SCOPE_(\w+)')
+                'ATOMIC_RT': 0, 'ATOMIC_NT': 1, 'ATOMIC_RETURN': 1, 'ATOMIC_RT_RETURN': 1, 'ATOMIC_NT_RETURN': 3, 'ATOMIC_CASCADE_RT': 6, 'ATOMIC_CASCADE_NT': 6}.get(m.group(1), 0) if m else 0
+      m, buf_text = _extract(buf_text, r'\s+scope:SCOPE_(\w+)')
       scope_val = {'CU': 0, 'SE': 1, 'DEV': 2, 'SYS': 3}.get(m.group(1), 0) if m else 0
+      # Re-parse operands from cleaned text
+      buf_ops = _parse_ops(buf_text)
+      buf_args = [_op2dsl(o) for o in buf_ops]
       # Build VBUFFER modifier string
       vbuf_mods = "".join([f", ioffset={off_val}" if off_val else "", ", offen=1" if offen else "", ", idxen=1" if idxen else "",
                           f", th={th_val}" if th_val else "", f", scope={scope_val}" if scope_val else "",
@@ -879,23 +888,25 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
       else: vbuf_mods = ", format=1" + vbuf_mods  # VBUFFER needs format=1 by default
       # Determine vaddr value (v[0] for 'off', actual register otherwise)
       vaddr_idx = 1
-      if len(ops) > vaddr_idx and ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
-      else: vaddr_val = args[vaddr_idx] if len(args) > vaddr_idx else "v[0]"
+      if len(buf_ops) > vaddr_idx and buf_ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
+      else: vaddr_val = buf_args[vaddr_idx] if len(buf_args) > vaddr_idx else "v[0]"
       # rsrc and soffset indices
-      rsrc_idx, soff_idx = (2, 3) if len(ops) > 1 else (1, 2)
-      # RDNA4 VBUFFER rsrc is raw SGPR index (not divided by 4), extract base index from s[N:N+3]
-      rsrc_raw = ops[rsrc_idx].strip() if len(ops) > rsrc_idx else "s[0:3]"
+      rsrc_idx, soff_idx = (2, 3) if len(buf_ops) > 1 else (1, 2)
+      # RDNA4 VBUFFER rsrc is raw SGPR index (not divided by 4), extract base index from s[N:N+3] or ttmp[N:N+3]
+      rsrc_raw = buf_ops[rsrc_idx].strip() if len(buf_ops) > rsrc_idx else "s[0:3]"
       if m := re.match(r's\[(\d+):\d+\]', rsrc_raw.lower()): rsrc_val = m.group(1)
       elif m := re.match(r's(\d+)', rsrc_raw.lower()): rsrc_val = m.group(1)
+      elif m := re.match(r'ttmp\[(\d+):\d+\]', rsrc_raw.lower()): rsrc_val = str(108 + int(m.group(1)))
+      elif m := re.match(r'ttmp(\d+)', rsrc_raw.lower()): rsrc_val = str(108 + int(m.group(1)))
       else: rsrc_val = "0"
-      # soffset: special regs use raw encoding, regular sgprs use index
-      soff_raw = ops[soff_idx].strip() if len(ops) > soff_idx else "0"
+      # soffset: RDNA4 VBUFFER uses raw SGPR index (0-127), wrap in RawImm to bypass encode_src
+      soff_raw = buf_ops[soff_idx].strip() if len(buf_ops) > soff_idx else "0"
       soff_lower = soff_raw.lower()
-      if soff_lower == 'm0': soff_val = "125"
-      elif soff_lower in ('null', 'off'): soff_val = "124"
-      elif m := re.match(r's(\d+)', soff_lower): soff_val = m.group(1)
-      else: soff_val = soff_raw
-      return f"{mn}(vdata={args[0]}, vaddr={vaddr_val}, rsrc={rsrc_val}, soffset={soff_val}{vbuf_mods})"
+      if soff_lower == 'm0': soff_val = "RawImm(125)"
+      elif soff_lower in ('null', 'off'): soff_val = "RawImm(124)"
+      elif m := re.match(r's(\d+)', soff_lower): soff_val = f"RawImm({m.group(1)})"
+      else: soff_val = f"RawImm({soff_raw})"
+      return f"{mn}(vdata={buf_args[0]}, vaddr={vaddr_val}, rsrc={rsrc_val}, soffset={soff_val}{vbuf_mods})"
     # RDNA3 MUBUF/MTBUF handling
     buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
                         ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
@@ -953,14 +964,27 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
   if mn in ('v_fmaak_f32', 'v_fmaak_f16') and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
   elif mn in ('v_fmamk_f32', 'v_fmamk_f16') and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
 
-  # VCC ops cleanup
+  # Special register name to encoding map (used for carry ops and v_cmp)
+  _SGPR_NAMES = {'vcc_lo': 106, 'vcc_hi': 107, 'vcc': 106, 'null': 124, 'm0': 125, 'exec_lo': 126, 'exec_hi': 127}
+  # VCC ops cleanup - v_add_co_ci_u32 etc. with carry-in/out
   vcc_ops = {'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'}
-  if mn.replace('_e32', '') in vcc_ops and len(args) >= 5: mn, args = mn.replace('_e32', '') + '_e32', [args[0], args[2], args[3]]
+  if mn.replace('_e32', '') in vcc_ops and len(args) >= 5:
+    # Check if carry-in is vcc_lo - if so, use VOP2, otherwise use VOP3SD
+    carry_in = ops[4].strip().lower() if len(ops) > 4 else 'vcc_lo'
+    carry_out = ops[1].strip().lower() if len(ops) > 1 else 'vcc_lo'
+    if carry_in in ('vcc_lo', 'vcc') and carry_out in ('vcc_lo', 'vcc'):
+      mn, args = mn.replace('_e32', '') + '_e32', [args[0], args[2], args[3]]
+    else:
+      # Need VOP3SD format for non-vcc carry operands
+      mn_base = mn.replace('_e32', '').replace('_e64', '')
+      # sdst = carry-out, src2 = carry-in
+      sdst = _SGPR_NAMES.get(carry_out, 124) if carry_out in _SGPR_NAMES else (int(carry_out[1:]) if carry_out.startswith('s') and carry_out[1:].isdigit() else 124)
+      src2 = _SGPR_NAMES.get(carry_in, 0) if carry_in in _SGPR_NAMES else (int(carry_in[1:]) if carry_in.startswith('s') and carry_in[1:].isdigit() else 0)
+      return f"{mn_base}(vdst={args[0]}, sdst=RawImm({sdst}), src0={args[2]}, src1={args[3]}, src2=RawImm({src2}))"
   if mn.replace('_e64', '') in vcc_ops and mn.endswith('_e64'): mn = mn.replace('_e64', '')
   if mn.startswith('v_cmp') and not mn.endswith('_e64') and len(args) >= 3 and ops[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'): args = args[1:]
   if 'cmpx' in mn and mn.endswith('_e64') and len(args) == 2: args = ['RawImm(126)'] + args
   # v_cmp_*_e64 has SGPR destination in vdst field - encode as RawImm
-  _SGPR_NAMES = {'vcc_lo': 106, 'vcc_hi': 107, 'vcc': 106, 'null': 124, 'm0': 125, 'exec_lo': 126, 'exec_hi': 127}
   if mn.startswith('v_cmp') and 'cmpx' not in mn and mn.endswith('_e64') and len(args) >= 1:
     dst = ops[0].strip().lower()
     if dst.startswith('s') and dst[1:].isdigit(): args[0] = f'RawImm({int(dst[1:])})'
