@@ -40,12 +40,36 @@ _BINOPS: dict[str, Ops] = {
 # NOTE: ~ is bitwise NOT (XOR with -1), ! is logical NOT (compare == 0). NEG is arithmetic negation, not suitable here.
 _UNOPS: dict[str, Ops] = {'-': Ops.NEG, '~': Ops.XOR, '!': Ops.CMPEQ}
 
-# Direct function -> UOp mappings (parsed directly, not as CUSTOM)
-_DIRECT_OPS: dict[str, Ops] = {'trunc': Ops.TRUNC, 'sqrt': Ops.SQRT, 'exp2': Ops.EXP2, 'log2': Ops.LOG2, 'sin': Ops.SIN, 'rcp': Ops.RECIPROCAL}
-
 def _typed_const(src: UOp, val) -> UOp:
   """Create a const with same dtype as src, or a deferred const if src.dtype is void."""
   return UOp.const(src.dtype, val) if src.dtype != dtypes.void else UOp(Ops.CONST, dtypes.void, (src,), val)
+
+def _floor(x):
+  trunc = UOp(Ops.TRUNC, x.dtype, (x,))
+  return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, x.dtype, (trunc, _typed_const(x, 1))), trunc))
+
+# Function expansions: name -> lambda(*srcs) -> UOp
+_FN_EXPAND: dict[str, callable] = {
+  'trunc': lambda x: UOp(Ops.TRUNC, x.dtype, (x,)),
+  'sqrt': lambda x: UOp(Ops.SQRT, x.dtype, (x,)),
+  'exp2': lambda x: UOp(Ops.EXP2, x.dtype, (x,)),
+  'log2': lambda x: UOp(Ops.LOG2, x.dtype, (x,)),
+  'sin': lambda x: UOp(Ops.SIN, x.dtype, (x,)),
+  'rcp': lambda x: UOp(Ops.RECIPROCAL, x.dtype, (x,)),
+  'fma': lambda a, b, c: UOp(Ops.MULACC, c.dtype, (a, b, c)),
+  'isNAN': lambda x: UOp(Ops.CMPNE, dtypes.bool, (x, x)),
+  'rsqrt': lambda x: UOp(Ops.RECIPROCAL, x.dtype, (UOp(Ops.SQRT, x.dtype, (x,)),)),
+  'abs': lambda x: UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, _typed_const(x, 0))), UOp(Ops.NEG, x.dtype, (x,)), x)),
+  'cos': lambda x: UOp(Ops.SIN, x.dtype, (UOp(Ops.ADD, x.dtype, (x, _typed_const(x, 1.5707963267948966))),)),
+  'floor': _floor,
+  'fract': lambda x: UOp(Ops.SUB, x.dtype, (x, _floor(x))),
+  'isINF': lambda x: UOp(Ops.OR, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('inf')))),
+                                               UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('-inf')))))),
+  'min': lambda a, b: UOp(Ops.WHERE, a.dtype, (UOp(Ops.CMPLT, dtypes.bool, (a, b)), a, b)),
+  'max': lambda a, b: UOp(Ops.WHERE, a.dtype, (UOp(Ops.CMPLT, dtypes.bool, (b, a)), a, b)),
+  'clamp': lambda x, lo, hi: (c := UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, lo)), lo, x)),
+                              UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (hi, c)), hi, c)))[1],
+}
 
 # Function return type inference for CUSTOM ops
 _BOOL_FNS = {'isNAN', 'isINF', 'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', 'GT_NEG_ZERO'}
@@ -173,36 +197,7 @@ def expr(s: str) -> UOp:
       a = _split(s[m.end():e])
       srcs = tuple(expr(x) for x in a) if a != [''] else ()
       name = m[1]
-      # Direct UOp mappings for functions
-      if name in _DIRECT_OPS: return UOp(_DIRECT_OPS[name], srcs[0].dtype, srcs)
-      if name == 'fma': return UOp(Ops.MULACC, srcs[2].dtype, (srcs[0], srcs[1], srcs[2]))
-      if name == 'isNAN': return UOp(Ops.CMPNE, dtypes.bool, (srcs[0], srcs[0]))
-      if name == 'rsqrt': return UOp(Ops.RECIPROCAL, srcs[0].dtype, (UOp(Ops.SQRT, srcs[0].dtype, (srcs[0],)),))
-      if name == 'clamp':
-        x, lo, hi = srcs[0], srcs[1], srcs[2]
-        c = UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, lo)), lo, x))
-        return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (hi, c)), hi, c))
-      if name == 'abs':
-        x = srcs[0]
-        return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, _typed_const(x, 0))), UOp(Ops.NEG, x.dtype, (x,)), x))
-      if name == 'cos':
-        x = srcs[0]
-        return UOp(Ops.SIN, x.dtype, (UOp(Ops.ADD, x.dtype, (x, _typed_const(x, 1.5707963267948966))),))
-      if name == 'floor':
-        x, trunc = srcs[0], UOp(Ops.TRUNC, srcs[0].dtype, (srcs[0],))
-        return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, x.dtype, (trunc, _typed_const(x, 1))), trunc))
-      if name == 'fract':
-        x, trunc = srcs[0], UOp(Ops.TRUNC, srcs[0].dtype, (srcs[0],))
-        floor = UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, x.dtype, (trunc, _typed_const(x, 1))), trunc))
-        return UOp(Ops.SUB, x.dtype, (x, floor))
-      if name == 'isINF':
-        x = srcs[0]
-        return UOp(Ops.OR, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('inf')))),
-                                         UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('-inf'))))))
-      if name in ('min', 'max'):
-        a, b = srcs[0], srcs[1]
-        cmp = UOp(Ops.CMPLT, dtypes.bool, (a, b) if name == 'min' else (b, a))
-        return UOp(Ops.WHERE, a.dtype, (cmp, a, b))
+      if name in _FN_EXPAND: return _FN_EXPAND[name](*srcs)
       output_dtype = _infer_fn_dtype(name, srcs)
       return UOp(Ops.CUSTOM, output_dtype, srcs, arg=name)
   # MEM[addr] -> CUSTOM('MEM', addr), MEM[addr].type -> BITCAST
