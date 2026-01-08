@@ -172,6 +172,7 @@ def expr(s: str) -> UOp:
       # Direct UOp mappings for functions
       if name in _DIRECT_OPS: return UOp(_DIRECT_OPS[name], srcs[0].dtype, srcs)
       if name == 'fma': return UOp(Ops.MULACC, srcs[2].dtype, (srcs[0], srcs[1], srcs[2]))
+      if name == 'isNAN': return UOp(Ops.CMPNE, dtypes.bool, (srcs[0], srcs[0]))
       output_dtype = _infer_fn_dtype(name, srcs)
       return UOp(Ops.CUSTOM, output_dtype, srcs, arg=name)
   # MEM[addr] -> CUSTOM('MEM', addr), MEM[addr].type -> BITCAST

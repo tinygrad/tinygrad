@@ -84,6 +84,7 @@ def _pr(n, d=0):
     case UOp(Ops.NEG, _, (x,)): return f"-{_pr(x)}"
     case UOp(Ops.XOR, _, (x,)) if len(n.src) == 1: return f"~{_pr(x)}"
     case UOp(Ops.CMPEQ, _, (x,)) if len(n.src) == 1: return f"!{_pr(x)}"
+    case UOp(Ops.CMPNE, dtypes.bool, (a, b)) if a == b: return f"isNAN({_pr(a)})"
     case UOp(_, _, (l, r), _) if n.op in _OP_SYMS:
       sym = _OP_SYMS[n.op]
       left, right = l, r
