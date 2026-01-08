@@ -8,6 +8,22 @@ from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
 from extra.assembly.amd.autogen.cdna.enum import VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op
+from extra.assembly.amd.autogen.rdna4.enum import (VOP1Op as RDNA4_VOP1Op, VOP2Op as RDNA4_VOP2Op, VOP3Op as RDNA4_VOP3Op,
+  VOP3SDOp as RDNA4_VOP3SDOp, VOP3POp as RDNA4_VOP3POp, VOPCOp as RDNA4_VOPCOp, VOPDOp as RDNA4_VOPDOp,
+  SOP1Op as RDNA4_SOP1Op, SOP2Op as RDNA4_SOP2Op, SOPCOp as RDNA4_SOPCOp, SOPKOp as RDNA4_SOPKOp, SOPPOp as RDNA4_SOPPOp,
+  SMEMOp as RDNA4_SMEMOp, DSOp as RDNA4_DSOp, VBUFFEROp as RDNA4_VBUFFEROp, VINTERPOp as RDNA4_VINTERPOp)
+
+# Source operand encoding - constant across all AMD ISAs
+class SrcEnum(IntEnum):
+  VCC_LO=106; VCC_HI=107; NULL=124; M0=125; EXEC_LO=126; EXEC_HI=127; ZERO=128
+  DPP8=233; DPP8FI=234; SHARED_BASE=235; SHARED_LIMIT=236; PRIVATE_BASE=237; PRIVATE_LIMIT=238
+  POS_HALF=240; NEG_HALF=241; POS_ONE=242; NEG_ONE=243; POS_TWO=244; NEG_TWO=245
+  POS_FOUR=246; NEG_FOUR=247; INV_2PI=248; DPP16=250; VCCZ=251; EXECZ=252; SCC=253; LDS_DIRECT=254
+VCC_LO, VCC_HI, NULL, M0, EXEC_LO, EXEC_HI, ZERO = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.M0, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.ZERO
+DPP8FI, SHARED_BASE, SHARED_LIMIT, PRIVATE_BASE, PRIVATE_LIMIT = SrcEnum.DPP8FI, SrcEnum.SHARED_BASE, SrcEnum.SHARED_LIMIT, SrcEnum.PRIVATE_BASE, SrcEnum.PRIVATE_LIMIT
+POS_HALF, NEG_HALF, POS_ONE, NEG_ONE, POS_TWO, NEG_TWO = SrcEnum.POS_HALF, SrcEnum.NEG_HALF, SrcEnum.POS_ONE, SrcEnum.NEG_ONE, SrcEnum.POS_TWO, SrcEnum.NEG_TWO
+POS_FOUR, NEG_FOUR, INV_2PI, VCCZ, EXECZ, SCC, LDS_DIRECT = SrcEnum.POS_FOUR, SrcEnum.NEG_FOUR, SrcEnum.INV_2PI, SrcEnum.VCCZ, SrcEnum.EXECZ, SrcEnum.SCC, SrcEnum.LDS_DIRECT
+OFF = NULL
 
 # Common masks and bit conversion functions
 MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
@@ -288,7 +304,17 @@ class Inst:
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
-    cls._fields = {n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))}
+    # Merge fields from parent classes
+    cls._fields = {}
+    for base in reversed(cls.__mro__):
+      if base is Inst or not hasattr(base, '_fields'): continue
+      cls._fields.update(base._fields)
+    # Add this class's own fields (overrides parents)
+    cls._fields.update({n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))})
+    # Compute size from max bit (exclude optional MIMG NSA fields: addr1/addr2 at bits 64+)
+    optional_nsa = {'addr1', 'addr2'}
+    max_bit = max((bf.hi for n, bf in cls._fields.items() if n not in optional_nsa), default=0) if cls._fields else 0
+    cls._sz = 12 if max_bit > 63 else 8 if max_bit > 31 else 4
     if 'encoding' in cls._fields and isinstance(cls.__dict__.get('encoding'), tuple): cls._encoding = cls.__dict__['encoding']
 
   def _or_field(self, name: str, bit: int):
@@ -352,6 +378,16 @@ class Inst:
     field_names = [n for n in self._fields if n != 'encoding']
     # Map Python-friendly names to actual field names (abs_ -> abs for Python reserved word)
     if 'abs_' in kwargs: kwargs['abs'] = kwargs.pop('abs_')
+    # If more args than fields, treat extra arg as literal (for FMAAK/FMAMK style instructions)
+    # FMAMK has K in middle (vdst, src0, K, vsrc1), FMAAK has K at end (vdst, src0, vsrc1, K)
+    args = list(args)
+    if len(args) > len(field_names) and literal is None:
+      for i, a in enumerate(args):
+        if isinstance(a, int) and not isinstance(a, SrcEnum) and i < len(field_names) and field_names[i] in ('vsrc1',):
+          literal = args.pop(i)
+          break
+      else:
+        literal = args.pop()  # fallback: last arg is literal
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
     self._precompute()
@@ -450,7 +486,7 @@ class Inst:
     return result + (lit32 & MASK32).to_bytes(4, 'little')
 
   @classmethod
-  def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 12 if issubclass(cls, Inst96) else 8
+  def _size(cls) -> int: return cls._sz
   def size(self) -> int:
     # Literal is always 4 bytes in the binary (for 64-bit ops, it's in high 32 bits)
     return self._size() + (4 if self._literal is not None else 0)
@@ -583,6 +619,4 @@ class Inst:
   def is_64bit(self) -> bool: return spec_is_64bit(self.op_name)
   def is_dst_16(self) -> bool: return self._spec_regs[0] == 1 and is_dtype_16(self._spec_dtype[0])
 
-class Inst32(Inst): pass
-class Inst64(Inst): pass
-class Inst96(Inst): pass
+

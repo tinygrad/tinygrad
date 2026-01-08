@@ -3,7 +3,7 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
+from tinygrad.helpers import PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerSet
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
@@ -486,8 +486,8 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   This class implements basic copy operations following the HCQ API, utilizing both types of `HWQueue`.
   """
 
-  def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, max_copyout_size:int|None=None):
-    super().__init__(dev)
+  def __init__(self, dev:HCQDeviceType, batch_size:int=(2 << 20), batch_cnt:int=32, copy_bufs=None, max_copyout_size:int|None=None, **kwargs):
+    super().__init__(dev, **kwargs)
     self.b = copy_bufs or [self._alloc(batch_size, BufferSpec(host=True)) for _ in range(batch_cnt)]
     self.b_timeline, self.b_next, self.max_copyout_size = [0] * len(self.b), 0, max_copyout_size
 
@@ -510,7 +510,11 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
 class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
   def _copyin(self, dest:HCQBuffer, src:memoryview):
-    assert self.dev.hw_copy_queue_t is not None
+    if self.dev.hw_copy_queue_t is None:
+      self.dev.synchronize()
+      with cpu_profile(f'TINY -> {self.dev.device}', self.dev.device, is_copy=True): ctypes.memmove(cast(int, dest.va_addr), from_mv(src), len(src))
+      return
+
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"TINY -> {self.dev.device}", enabled=PROFILE):
       for i in range(0, src.nbytes, self.b[0].size):
         self.b_next = (self.b_next + 1) % len(self.b)
@@ -541,8 +545,10 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
+    if self.dev.hw_copy_queue_t is None:
+      with cpu_profile(f'{self.dev.device} -> TINY', self.dev.device, is_copy=True): ctypes.memmove(from_mv(dest), cast(int, src.va_addr), len(dest))
+      return
 
-    assert self.dev.hw_copy_queue_t is not None
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=f"{self.dev.device} -> TINY", enabled=PROFILE):
       for i in range(0, dest.nbytes, cp_size:=(self.max_copyout_size or self.b[0].size)):
         self.dev.hw_copy_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \

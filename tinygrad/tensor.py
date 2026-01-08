@@ -18,7 +18,8 @@ from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 
 # TODO: this should be the only usage of Device
-def canonicalize_device(device:str|None) -> str: return Device.canonicalize(device)
+def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
+  return tuple(Device.canonicalize(d) for d in device) if isinstance(device, (tuple, list)) else Device.canonicalize(device)
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -115,7 +116,7 @@ class Tensor(OpMixin):
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
-    _device:str|tuple[str, ...] = tuple(canonicalize_device(x) for x in device) if isinstance(device, (tuple, list)) else canonicalize_device(device)
+    _device:str|tuple[str, ...] = canonicalize_device(device)
     del device, dtype
 
     # tensors can have gradients if you have called .backward
@@ -162,10 +163,10 @@ class Tensor(OpMixin):
 
     # data might be on a different device
     if isinstance(_device, str): self.uop:UOp = data if data.device == _device else data.copy_to_device(_device)
-    # if device is a tuple, we should have/construct a MultiLazyBuffer
+    # if device is a tuple, we should have/construct a multi-device UOp
     elif isinstance(data.device, str): self.uop = Tensor(data).shard(_device).uop
     else:
-      assert data.device == _device, f"MultiLazyBuffer device mismatch, {data.device} != {_device}"
+      assert data.device == _device, f"multi-device UOp device mismatch, {data.device} != {_device}"
       self.uop = data
 
     # add to all_tensors after construction succeeds
@@ -373,7 +374,7 @@ class Tensor(OpMixin):
     """
     Moves the tensor to the given device.
     """
-    device = tuple(canonicalize_device(x) for x in device) if isinstance(device, (tuple, list)) else canonicalize_device(device)
+    device = canonicalize_device(device)
     if device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
     ret = Tensor(self.uop, device, requires_grad=self.requires_grad)
@@ -397,9 +398,9 @@ class Tensor(OpMixin):
     print(t.shard((t.device, t.device), axis=1).uop)
     ```
     """
-    if not isinstance(self.device, str): raise RuntimeError("can't shard a MultiLazyBuffer")
+    if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
-    devices = tuple(canonicalize_device(x) for x in devices)
+    devices = cast(tuple[str, ...], canonicalize_device(devices))
     mlb = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
@@ -495,7 +496,7 @@ class Tensor(OpMixin):
     dtype, shape = to_dtype(dtype) if dtype is not None else dtypes.default_float, argfix(*shape)
     if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
     # TODO: add test for multidevice tensor
-    device = tuple(canonicalize_device(d) for d in device) if isinstance(device, tuple) else canonicalize_device(device)
+    device = canonicalize_device(device)
     return Tensor(UOp.new_buffer(device, size, dtype), device, dtype, **kwargs).shrink(((0,prod(shape)),)).reshape(shape)
 
   def empty_like(self, **kwargs) -> Tensor:
@@ -577,7 +578,7 @@ class Tensor(OpMixin):
     if not dtypes.is_float(dtype := to_dtype(dtype or dtypes.default_float)): raise ValueError(f"rand only supports float dtypes, got {dtype}")
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
-    device = canonicalize_device(device)
+    device = cast(str, canonicalize_device(device))
 
     # if shape has 0, return zero tensor
     if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dtype, **kwargs)
@@ -2062,37 +2063,33 @@ class Tensor(OpMixin):
     print(Tensor.einsum("ij,ij->", x, y).numpy())
     ```
     """
-    def parse_formula(formula:str, *operands:Tensor):
-      if "..." in (formula := formula.replace(" ", "")):
-        ell_chars, ell_longest = "".join(c for c in string.ascii_letters if c not in formula), 0
-        for i, inp in enumerate(filter(lambda x: "..." in x, inputs := formula.split("->")[0].split(","))):
-          if (ell_count := max(operands[i].ndim, 1) - (len(inp) - len("..."))) > ell_longest: ell_longest = ell_count
-          inputs[i] = inp.replace("...", ell_chars[-ell_count:])
-        inputs_str, out_ellipse = ",".join(inputs), ell_chars[-ell_longest:]
-        return (inputs_str, formula.split("->")[1].replace("...", out_ellipse)) if "->" in formula else \
-          (inputs_str, out_ellipse + ''.join(sorted(c for c in inputs_str if inputs_str.count(c) == 1 and c.isalpha() and c not in out_ellipse)))
-      return formula.split("->") if "->" in formula else (formula, ''.join(c for c in sorted(formula) if formula.count(c) == 1 and c.isalpha()))
-
-    xs:tuple[Tensor, ...] = argfix(*operands)
-    inputs_str, output = parse_formula(formula, *xs)
-    inputs = inputs_str.split(",")
-    if len(xs)!=len(inputs): raise ValueError(f"number of inputs doesn't match number of operands in formula, expected {len(inputs)}, got {len(xs)}")
-
-    # map the value of each letter in the formula
-    letter_val = sorted(merge_dicts([dict(zip(letters, tensor.shape)) for letters, tensor in zip(inputs, xs)]).items())
-
-    xs_:list[Tensor] = []
-    lhs = [sorted(enumerate(s), key=lambda e:e[1]) for s in inputs]
-    for x,(order,letters) in zip(xs, [list(zip(*l)) for l in lhs]):
-      # permute to the sorted letter order, then reshape/expand to create dimensions for the missing letters
-      xs_.append(x.permute(order).reshape([val if letter in letters else 1 for letter,val in letter_val]).expand([val for _,val in letter_val]))
-
-    # ordinal encode the output alphabet
-    rhs_order = argsort(argsort(list(output)))
-
-    # sum over all axes that's not in the output, then permute to the output order
-    return functools.reduce(lambda a,b:a*b, xs_) \
-      .sum(axis=[axis for axis,(letter,_) in enumerate(letter_val) if letter not in output], dtype=dtype).permute(rhs_order)
+    xs, formula = list(argfix(*operands)), formula.replace(" ", "")
+    # expand ellipsis to letters, determine output
+    if "..." in formula:
+      ell, lhs = "".join(c for c in string.ascii_letters if c not in formula), (formula.split("->") + [""])[0]
+      ell_n = [max(0, x.ndim - len(s) + 3) if "..." in s else 0 for s, x in zip(lhs.split(","), xs)]
+      for i, (s, x) in enumerate(zip(inputs := lhs.split(","), xs)): inputs[i] = s.replace("...", ell[max(ell_n)-ell_n[i]:max(ell_n)])
+      lhs, auto = ",".join(inputs), "".join(sorted(c for c in lhs if lhs.count(c) == 1 and c.isalpha() and c not in ell))
+      formula = f"{lhs}->{formula.split('->')[1].replace('...', ell[:max(ell_n)]) if '->' in formula else ell[:max(ell_n)] + auto}"
+    lhs, rhs = formula.split("->") if "->" in formula else (formula, "".join(sorted(c for c in formula if formula.count(c)==1 and c.isalpha())))
+    inputs = lhs.split(",")
+    if len(xs) != len(inputs): raise ValueError(f"number of operands doesn't match, expected {len(inputs)}, got {len(xs)}")
+    # trace: take diagonal when letter repeats in single input
+    for i, (s, x) in enumerate(zip(inputs, xs)):
+      for c in set(s):
+        while s.count(c) > 1:
+          j, k, n = s.index(c), s.index(c, s.index(c)+1), cast(int, x.shape[s.index(c)])
+          perm = [d for d in range(x.ndim) if d not in (j,k)]+[j,k]
+          x = x.permute(perm).flatten(-2).pad(((0,0),)*(x.ndim-2)+((0,n),)).unflatten(-1,(n,n+1))[...,0] if x.ndim > 2 else x.diagonal()
+          s = s[:k] + s[k+1:]
+      inputs[i], xs[i] = s, x
+    # check sizes and build sorted alphabet
+    sz = merge_dicts([dict(zip(s, x.shape)) for s, x in zip(inputs, xs)])
+    alpha = sorted(sz)
+    # align all tensors to alphabet, multiply, sum non-output, permute to output order
+    xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]).expand([sz[c] for c in alpha]) if s else x
+          for s, x in zip(inputs, xs)]
+    return functools.reduce(lambda a,b:a*b, xs).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
 
   # ***** processing ops *****
 

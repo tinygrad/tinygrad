@@ -25,7 +25,6 @@ if __name__ == "__main__":
   frame_info = frame_info[:getenv("MAX_FRAMES", len(frame_info))]
 
   # move all needed data to gpu
-  #all_slices = []
   with Timing("copy to gpu: "):
     opaque_nv = opaque.to("NV").contiguous().realize()
     hevc_tensor = hevc_tensor.to("NV")
@@ -36,27 +35,23 @@ if __name__ == "__main__":
   # define variables
   v_pos = Variable("pos", 0, max_hist + 1)
   v_offset = Variable("offset", 0, hevc_tensor.numel()-1)
-  v_sz = Variable("sz", 0, hevc_tensor.numel())
+  v_sz = Variable("sz", 1, hevc_tensor.numel())
   v_i = Variable("i", 0, len(frame_info)-1)
 
   @TinyJit
-  def decode_jit(pos:Variable, src:Tensor, data:Tensor, *hist:Tensor):
-    return src.decode_hevc_frame(pos, out_image_size, data, hist).realize()
+  def decode_jit(pos:Variable, hevc_tensor:Tensor, offset:Variable, sz:Variable, opaque_nv:Tensor, i:Variable, *hist:Tensor):
+    return hevc_tensor[offset:offset+sz].decode_hevc_frame(pos, out_image_size, opaque_nv[i], hist).realize()
 
   # warm up
   history = [Tensor.empty(*out_image_size, dtype=dtypes.uint8, device="NV") for _ in range(max_hist)]
   for i in range(3):
-    hevc_frame = hevc_tensor.shrink((((bound_offset:=v_offset.bind(frame_info[0][0])), bound_offset+v_sz.bind(frame_info[0][1])),))
-    decode_jit(v_pos.bind(0), hevc_frame, opaque_nv[v_i.bind(0)], *history)
+    decode_jit(v_pos.bind(0), hevc_tensor, v_offset.bind(frame_info[0][0]), v_sz.bind(frame_info[0][1]), opaque_nv, v_i.bind(0), *history)
 
   out_images = []
   with Timing("decoding whole file: ", on_exit=(lambda et: f", {len(frame_info)} frames, {len(frame_info)/(et/1e9):.2f} fps")):
     for i, (offset, sz, frame_pos, history_sz, is_hist) in enumerate(frame_info):
       history = history[-max_hist:] if max_hist > 0 else []
-      # TODO: this shrink should work as a slice
-      hevc_frame = hevc_tensor.shrink((((bound_offset:=v_offset.bind(offset)), bound_offset+v_sz.bind(sz)),))
-
-      outimg = decode_jit(v_pos.bind(frame_pos), hevc_frame, opaque_nv[v_i.bind(i)], *history).clone()
+      outimg = decode_jit(v_pos.bind(frame_pos), hevc_tensor, v_offset.bind(offset), v_sz.bind(sz), opaque_nv, v_i.bind(i), *history).clone().realize()
       out_images.append(outimg)
       if is_hist: history.append(outimg)
 

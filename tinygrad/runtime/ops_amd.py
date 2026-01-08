@@ -620,12 +620,12 @@ class AMDProgram(HCQProgram):
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
-    super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
+    super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None,
+                     supports_copy_from_disk=not dev.is_usb() and dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue)
     if hasattr(dev.iface, "as_dmaref"): self._as_dmaref = dev.iface.as_dmaref
-    self.supports_copy_from_disk = not dev.is_usb()
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
+    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_sdma_queue)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
@@ -940,6 +940,7 @@ class AMDDevice(HCQCompiled):
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
+    self.has_sdma_queue = self.sdma_queue(0) is not None
 
     compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
                              CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), None, AMD_LLVM),
@@ -947,7 +948,7 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
-                     functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size),
+                     functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size) if self.has_sdma_queue else None,
                      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
 
     # Scratch setup
@@ -1003,7 +1004,9 @@ class AMDDevice(HCQCompiled):
             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
   @functools.lru_cache(None)
-  def sdma_queue(self, idx:int=0): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+  def sdma_queue(self, idx:int):
+    with contextlib.suppress(OSError): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+    return None
 
   def _ensure_has_local_memory(self, private_segment_size):
     if self.max_private_segment_size >= private_segment_size: return
