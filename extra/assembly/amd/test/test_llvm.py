@@ -21,6 +21,12 @@ CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'gfx9_asm
   'gfx9_asm_ds.s', 'gfx9_asm_flat.s', 'gfx9_asm_smem.s', 'gfx9_asm_mubuf.s', 'gfx9_asm_mtbuf.s',
   'gfx90a_ldst_acc.s', 'gfx90a_asm_features.s', 'flat-scratch-gfx942.s', 'gfx942_asm_features.s',
   'mai-gfx90a.s', 'mai-gfx942.s']
+# RDNA4 (gfx12) test files - excludes alias/err/fake16/dpp files, and vimage/vsample (not supported)
+# NOTE: vflat excluded - PDF has wrong OP field bits [20:13] vs hardware [21:14], and missing seg field
+RDNA4_FILES = ['gfx12_asm_sop1.s', 'gfx12_asm_sop2.s', 'gfx12_asm_sopp.s', 'gfx12_asm_sopk.s', 'gfx12_asm_sopc.s',
+  'gfx12_asm_vop1.s', 'gfx12_asm_vop2.s', 'gfx12_asm_vopc.s', 'gfx12_asm_vop3.s', 'gfx12_asm_vop3p.s',
+  'gfx12_asm_vopd.s', 'gfx12_asm_ds.s', 'gfx12_asm_smem.s',
+  'gfx12_asm_vbuffer_mubuf.s', 'gfx12_asm_vbuffer_mtbuf.s', 'gfx12_asm_wmma_w32.s', 'gfx12_asm_exp.s']
 
 def _is_mimg(data: bytes) -> bool: return (int.from_bytes(data[:4], 'little') >> 26) & 0x3f == 0b111100
 
@@ -45,15 +51,19 @@ def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]:
   text = fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore')
   if arch == "rdna3":
     tests = _parse_llvm_tests(text, r'(?:GFX11|W32|W64)')
+  elif arch == "rdna4":
+    # Match GFX12 but not GFX1250 (which has different lit64 encoding)
+    tests = _parse_llvm_tests(text, r'(?:GFX12(?!50)|W32|W64)')
   elif 'gfx90a' in f or 'gfx942' in f:
     tests = _parse_llvm_tests(text, r'(?:GFX90A|GFX942)')
   else:
     tests = _parse_llvm_tests(text, r'(?:VI9|GFX9|CHECK)')
   return [(a, d) for a, d in tests if not _is_mimg(d)] if arch == "cdna" else tests
 
-def _compile_asm_batch(instrs: list[str]) -> list[bytes]:
+def _compile_asm_batch(instrs: list[str], arch: str = "rdna3") -> list[bytes]:
   if not instrs: return []
-  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+  mcpu = {'rdna3': 'gfx1100', 'rdna4': 'gfx1200'}.get(arch, 'gfx1100')
+  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
     input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True, timeout=30)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc failed: {result.stderr.strip()}")
   return [bytes.fromhex(line.split('encoding:')[1].strip()[1:-1].replace('0x', '').replace(',', '').replace(' ', ''))
@@ -84,8 +94,8 @@ def _make_test(f: str, arch: str, test_type: str):
           if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)): to_test.append((data, d))
         except: pass
       print(f"{name}: {len(to_test)} passed, {len(tests) - len(to_test)} skipped")
-      if arch == "rdna3":
-        for (data, _), llvm in zip(to_test, _compile_asm_batch([t[1] for t in to_test])): self.assertEqual(llvm, data)
+      if arch in ("rdna3", "rdna4"):
+        for (data, _), llvm in zip(to_test, _compile_asm_batch([t[1] for t in to_test], arch)): self.assertEqual(llvm, data)
   return test
 
 class TestLLVM(unittest.TestCase): pass
@@ -97,6 +107,9 @@ for f in RDNA_FILES:
 for f in CDNA_FILES:
   setattr(TestLLVM, f"test_cdna_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "roundtrip"))
   setattr(TestLLVM, f"test_cdna_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "disasm"))
+for f in RDNA4_FILES:
+  setattr(TestLLVM, f"test_rdna4_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna4", "roundtrip"))
+  setattr(TestLLVM, f"test_rdna4_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna4", "disasm"))
 
 if __name__ == "__main__":
   unittest.main()

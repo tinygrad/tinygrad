@@ -8,6 +8,10 @@ from typing import overload, Annotated, TypeVar, Generic
 from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
 from extra.assembly.amd.autogen.cdna.enum import VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op
+from extra.assembly.amd.autogen.rdna4.enum import (VOP1Op as RDNA4_VOP1Op, VOP2Op as RDNA4_VOP2Op, VOP3Op as RDNA4_VOP3Op,
+  VOP3SDOp as RDNA4_VOP3SDOp, VOP3POp as RDNA4_VOP3POp, VOPCOp as RDNA4_VOPCOp, VOPDOp as RDNA4_VOPDOp,
+  SOP1Op as RDNA4_SOP1Op, SOP2Op as RDNA4_SOP2Op, SOPCOp as RDNA4_SOPCOp, SOPKOp as RDNA4_SOPKOp, SOPPOp as RDNA4_SOPPOp,
+  SMEMOp as RDNA4_SMEMOp, DSOp as RDNA4_DSOp, VBUFFEROp as RDNA4_VBUFFEROp, VINTERPOp as RDNA4_VINTERPOp)
 
 # Source operand encoding - constant across all AMD ISAs
 class SrcEnum(IntEnum):
@@ -307,8 +311,9 @@ class Inst:
       cls._fields.update(base._fields)
     # Add this class's own fields (overrides parents)
     cls._fields.update({n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))})
-    # Compute size from max bit (exclude optional fields starting at bit 64+, e.g. MIMG NSA)
-    max_bit = max((bf.hi for bf in cls._fields.values() if bf.lo < 64), default=0) if cls._fields else 0
+    # Compute size from max bit (exclude optional MIMG NSA fields: addr1/addr2 at bits 64+)
+    optional_nsa = {'addr1', 'addr2'}
+    max_bit = max((bf.hi for n, bf in cls._fields.items() if n not in optional_nsa), default=0) if cls._fields else 0
     cls._sz = 12 if max_bit > 63 else 8 if max_bit > 31 else 4
     if 'encoding' in cls._fields and isinstance(cls.__dict__.get('encoding'), tuple): cls._encoding = cls.__dict__['encoding']
 
