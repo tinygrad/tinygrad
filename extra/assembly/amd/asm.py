@@ -437,7 +437,12 @@ def _disasm_vop3(inst: VOP3) -> str:
     os = _opsel_str(inst.opsel, n, need_opsel, is16_d)
     return f"{name}_e64 {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if n == 3 else f"{name}_e64 {dst}, {s0}, {s1}{os}{cl}{om}"
   if inst.op < 512:  # VOP1
-    return f"{name}_e64" if op in (VOP3Op.V_NOP, VOP3Op.V_PIPEFLUSH) else f"{name}_e64 {dst}, {s0}{_opsel_str(inst.opsel, 1, need_opsel, is16_d)}{cl}{om}"
+    # v_cvt_f32_bf8/fp8 use byte_sel instead of op_sel (opsel bits [1:0] map to byte_sel [0],[1] swapped)
+    if re.match(r'v_cvt_f32_(bf|fp)8', name) and inst.opsel:
+      os = f" byte_sel:{((inst.opsel & 1) << 1) | ((inst.opsel >> 1) & 1)}"
+    else:
+      os = _opsel_str(inst.opsel, 1, need_opsel, is16_d)
+    return f"{name}_e64" if op in (VOP3Op.V_NOP, VOP3Op.V_PIPEFLUSH) else f"{name}_e64 {dst}, {s0}{os}{cl}{om}"
   # Native VOP3
   n = inst.num_srcs()
   # v_cvt_sr_*_f32 uses byte_sel instead of op_sel
