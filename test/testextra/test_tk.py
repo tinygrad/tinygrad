@@ -242,9 +242,9 @@ class TestTK(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), ref.numpy())
 
   def test_load_store_group(self):
-    N = 256
+    N = 1024
     BLOCK_SIZE = 64
-    NUM_WORKERS = 2
+    NUM_WORKERS = 4
     with Kernel("load_store_group", (N // (BLOCK_SIZE * NUM_WORKERS), N // BLOCK_SIZE, 1), WARP_THREADS * NUM_WORKERS) as ker:
       warp = ker.warp
       group = ker.group(NUM_WORKERS)
