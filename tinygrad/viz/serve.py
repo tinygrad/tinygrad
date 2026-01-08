@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
-import ctypes, pathlib, traceback, itertools
+import pathlib, traceback, itertools
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
@@ -274,7 +274,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  disasm = {addr+base:inst_disasm for addr,inst_disasm in llvm_disasm(device_props[p.device]["gfx_target_version"], unwrap(p.lib)).items()}
+  disasm = {addr+base:inst_disasm for addr,inst_disasm in amd_disasm(device_props[p.device]["gfx_target_version"], unwrap(p.lib)).items()}
   rctx = decode(data, {p.name:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
@@ -360,29 +360,21 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
-def llvm_disasm(target:int, lib:bytes) -> dict[int, tuple[str, int]]:
-  from tinygrad.runtime.autogen import llvm
+def amd_disasm(target:int, lib:bytes) -> dict[int, tuple[str, int]]:
   from tinygrad.runtime.support.elf import elf_loader
-  llvm.LLVMInitializeAMDGPUTargetInfo()
-  llvm.LLVMInitializeAMDGPUTargetMC()
-  llvm.LLVMInitializeAMDGPUAsmParser()
-  llvm.LLVMInitializeAMDGPUDisassembler()
-  # pass NULL to callbacks
-  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
-  arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
-  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
+  from extra.assembly.amd.asm import detect_format
   image, sections, _ = elf_loader(lib)
-  text = next((sh.header for sh in sections if sh.name == ".text"), None)
+  text = next((sh for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"
-  off, sz = text.sh_addr, text.sh_size
+  off, buf = text.header.sh_addr, text.content
   addr_table:dict[int, tuple[str, int]] = {}
-  out = ctypes.create_string_buffer(128)
-  cur_off = off
-  while cur_off < sz + off:
-    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
-    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
-    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
-    cur_off += instr_sz
+  offset = 0
+  while offset < len(buf):
+    remaining = buf[offset:]
+    fmt = detect_format(remaining)
+    decoded = fmt.from_bytes(remaining)
+    addr_table[off+offset] = (decoded.disasm(), decoded.size())
+    offset += decoded.size()
   return addr_table
 
 SOPP_INSTS = {"s_branch", "s_cbranch_scc0", "s_cbranch_scc1", "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz"}
@@ -397,7 +389,7 @@ COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
   # disassemble
-  pc_table = llvm_disasm(target, lib)
+  pc_table = amd_disasm(target, lib)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
   for pc, (asm, sz) in pc_table.items():
