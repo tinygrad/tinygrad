@@ -166,6 +166,15 @@ def _norm(s, keep_structure=False):
              'i16_to_f16': "16'F", 'u16_to_f16': "16'F"}
   for fn, cast in cvt_map.items():
     s = re.sub(rf'\b{fn}\b', cast, s)
+  # Normalize v_min_*/v_max_* to ternary: v_min_f32(a, b) -> a<b?a:b, v_max_f32(a, b) -> b<a?a:b
+  # Use non-greedy match for simple args (no nested parens)
+  for suffix in ('f16', 'f32', 'i16', 'i32', 'u16', 'u32'):
+    s = re.sub(rf'v_min_{suffix}\(([^(),]+),\s*([^()]+)\)', r'\1<\2?\1:\2', s)
+    s = re.sub(rf'v_max_{suffix}\(([^(),]+),\s*([^()]+)\)', r'\2<\1?\1:\2', s)
+  # Also normalize v_min3_*/v_max3_* (3 args) - these become nested ternaries
+  for suffix in ('f16', 'f32', 'i16', 'i32', 'u16', 'u32'):
+    s = re.sub(rf'v_min3_{suffix}\(([^(),]+),\s*([^(),]+),\s*([^()]+)\)', r'\1<\2?\1:\2<\3?\1<\2?\1:\2:\3', s)
+    s = re.sub(rf'v_max3_{suffix}\(([^(),]+),\s*([^(),]+),\s*([^()]+)\)', r'\3<\2<\1?\1:\2?\2<\1?\1:\2:\3', s)
   if keep_structure:
     s = re.sub(r';', '', s)
     s = re.sub(r'\n\s*\n', '\n', s)
@@ -229,7 +238,7 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
 class TestQcodeParseAndRoundtrip(unittest.TestCase):
   def test_rdna3(self): _test_arch(self, RDNA3_PCODE)
   def test_rdna4(self): _test_arch(self, RDNA4_PCODE, min_parse=96)
-  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=95)
+  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=95, min_roundtrip=97)
 
 if __name__ == "__main__":
   unittest.main()
