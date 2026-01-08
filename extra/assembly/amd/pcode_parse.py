@@ -21,7 +21,7 @@ _QDTYPES: dict[str, DType] = {
   'b65': DType.new(6, 65, "b65", None), 'b64': dtypes.uint64, 'b32': dtypes.uint32, 'b23': DType.new(6, 23, "b23", None), 'b16': dtypes.uint16, 'b8': dtypes.uint8, 'b4': DType.new(6, 4, "b4", None),
   'u1201': DType.new(6, 1201, "u1201", None), 'u65': DType.new(6, 65, "u65", None), 'u24': DType.new(6, 24, "u24", None), 'u23': DType.new(6, 23, "u23", None),
   'u6': DType.new(6, 6, "u6", None), 'u4': DType.new(6, 4, "u4", None),
-  # TODO: why is there i1 and u1?
+  # i1/u1 are used for carry/overflow bits in 64-bit multiply-add ops (e.g., { D1.u1, D0.u64 } = 65-bit result)
   'u3': DType.new(6, 3, "u3", None), 'u1': DType.new(6, 1, "u1", None),
   'i65': DType.new(5, 65, "i65", None), 'i24': DType.new(5, 24, "i24", None),
   'i1': DType.new(5, 1, "i1", None),
@@ -39,8 +39,44 @@ _BINOPS: dict[str, Ops] = {
   '<': Ops.CMPLT, '>': Ops.CMPLT, '<=': Ops.CMPLE, '>=': Ops.CMPLE,
   '||': Ops.OR, '&&': Ops.AND,
 }
-# TODO: XOR and CMPEQ are binops. see if you can distinguish this based on types and use NEG for all
+# NOTE: ~ is bitwise NOT (XOR with -1), ! is logical NOT (compare == 0). NEG is arithmetic negation, not suitable here.
 _UNOPS: dict[str, Ops] = {'-': Ops.NEG, '~': Ops.XOR, '!': Ops.CMPEQ}
+
+# Function return type inference for CUSTOM ops
+_BOOL_FNS = {'isNAN', 'isINF', 'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', 'GT_NEG_ZERO'}
+_PASSTHRU_FNS = {'abs', 'floor', 'fract', 'sqrt', 'sin', 'cos', 'trunc', 'fma', 'clamp', 'min', 'max', 'ldexp',
+                 'cvtToQuietNAN', 'pow', 'rcp', 'rsqrt', 'exp2', 'log2', 'mantissa', 'v_min_f16', 'v_min_f32',
+                 'v_max_f16', 'v_max_f32', 'v_min3_f16', 'v_min3_f32', 'v_max3_f16', 'v_max3_f32'}
+_U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones', 'countbits', 'reverse_bits',
+            'u8_to_u32', 'u4_to_u32', 'u32_to_u16', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8',
+            'v_min_u16', 'v_min_u32', 'v_max_u16', 'v_max_u32', 'v_min3_u16', 'v_min3_u32', 'v_max3_u16', 'v_max3_u32'}
+_I32_FNS = {'v_min_i16', 'v_min_i32', 'v_max_i16', 'v_max_i32', 'v_min3_i16', 'v_min3_i32', 'v_max3_i16', 'v_max3_i32'}
+_CVT_FNS = {  # conversion functions: name -> output dtype
+  'f32_to_i32': dtypes.int32, 'f32_to_u32': dtypes.uint32, 'f32_to_f16': dtypes.float16, 'f32_to_f64': dtypes.float64,
+  'f32_to_i8': dtypes.int8, 'f32_to_u8': dtypes.uint8, 'f32_to_i16': dtypes.int16, 'f32_to_u16': dtypes.uint16,
+  'f64_to_i32': dtypes.int32, 'f64_to_u32': dtypes.uint32, 'f64_to_f32': dtypes.float32,
+  'f16_to_f32': dtypes.float32, 'f16_to_i16': dtypes.int16, 'f16_to_u16': dtypes.uint16,
+  'i32_to_f32': dtypes.float32, 'i32_to_f64': dtypes.float64, 'i32_to_i16': dtypes.int16,
+  'u32_to_f32': dtypes.float32, 'u32_to_f64': dtypes.float64,
+  'i16_to_f16': dtypes.float16, 'u16_to_f16': dtypes.float16,
+  'bf16_to_f32': dtypes.float32, 'f32_to_bf16': dtypes.bfloat16,
+  'v_cvt_u16_f32': dtypes.uint16, 'v_cvt_i16_f32': dtypes.int16,
+  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
+  'signext': dtypes.int64, 'signext_from_bit': dtypes.int64,
+}
+
+def _infer_fn_dtype(name: str, srcs: tuple[UOp, ...]) -> DType:
+  """Infer output dtype for a function call based on function name and input types."""
+  if name in _BOOL_FNS: return dtypes.bool
+  if name in _PASSTHRU_FNS: return srcs[0].dtype if srcs and srcs[0].dtype != dtypes.void else dtypes.void
+  if name in _U32_FNS: return dtypes.uint32
+  if name in _I32_FNS: return dtypes.int32
+  if name in _CVT_FNS: return _CVT_FNS[name]
+  if name == 'trig_preop_result': return dtypes.float64
+  # Default: inherit from first non-void source, or void
+  for s in srcs:
+    if s.dtype != dtypes.void: return s.dtype
+  return dtypes.void
 
 # Statement types (control flow, not expressions)
 @dataclass(frozen=True)
@@ -58,6 +94,9 @@ class Break: pass
 @dataclass(frozen=True)
 class Return: value: UOp
 Stmt = Assign|Declare|If|For|Lambda|Break|Return
+
+# Parse context for tracking variable dtypes (module-level, set during parse())
+_var_dtypes: dict[str, DType] = {}
 
 def _match(s, i, o, c):
   d = 1
@@ -103,12 +142,19 @@ def expr(s: str) -> UOp:
   if s == '+INF': s = 'INF'
   # Parentheses
   if s[0] == '(' and (e := _match(s, 0, '(', ')')) == len(s)-1: return expr(s[1:e])
-  # Pack -> CAT
-  if s[0] == '{' and s[-1] == '}': return UOp(Ops.CAT, dtypes.void, tuple(expr(a) for a in _split(s[1:-1])))
-  # Typed cast: 32'U(expr)
+  # Pack -> CAT: { hi, lo } concatenates to larger type
+  if s[0] == '{' and s[-1] == '}':
+    parts = tuple(expr(a) for a in _split(s[1:-1]))
+    # Infer combined bitwidth from parts (e.g., {u32, u32} -> u64)
+    total_bits = sum(p.dtype.bitsize for p in parts if p.dtype != dtypes.void)
+    cat_dtype = dtypes.uint64 if total_bits > 32 else dtypes.uint32 if total_bits > 0 else dtypes.void
+    return UOp(Ops.CAT, cat_dtype, parts)
+  # Typed cast: 32'U(expr) - value conversion (vs .type which is bit reinterpretation)
   if m := re.match(r"^(\d+)'([IUFB])\(", s):
-    # TODO: is this cast or bitcast? I think it's also BITCAST, but understand better
-    if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1: return UOp(Ops.CAST, _QDTYPES[f"{m[2].lower()}{m[1]}"], (expr(s[m.end():e]),))
+    if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1:
+      cast_dtype = _QDTYPES[f"{m[2].lower()}{m[1]}"]
+      assert cast_dtype != dtypes.void, f"CAST target type should not be void"
+      return UOp(Ops.CAST, cast_dtype, (expr(s[m.end():e]),))
   # Typed constant: 32'-5I
   if m := re.match(r"^(\d+)'(-?\d+)([IUFB])?$", s):
     return UOp(Ops.CONST, _QDTYPES[f"{(m[3] or 'I').lower()}{m[1]}"], arg=int(m[2]))
@@ -121,14 +167,15 @@ def expr(s: str) -> UOp:
     if (e := _match(s, m.end()-1, '(', ')')) == len(s)-1:
       a = _split(s[m.end():e])
       srcs = tuple(expr(x) for x in a) if a != [''] else ()
-      output_dtype = dtypes.void
-      # TODO: set the output dtypes to reasonable things based on the input dtypes
+      output_dtype = _infer_fn_dtype(m[1], srcs)
       return UOp(Ops.CUSTOM, output_dtype, srcs, arg=m[1])
   # MEM[addr] -> CUSTOM('MEM', addr), MEM[addr].type -> BITCAST
   if s[:4] == 'MEM[' and (e := _match(s, 3, '[', ']')) != -1:
     r, b = s[e+1:], UOp(Ops.CUSTOM, dtypes.void, (expr(s[4:e]),), arg='MEM')
     if not r: return b
-    if r[:1] == '.' and (dt := _get_dtype(r[1:])): return UOp(Ops.BITCAST, dt, (b,))
+    if r[:1] == '.' and (dt := _get_dtype(r[1:])):
+      assert dt != dtypes.void, f"BITCAST target type should not be void"
+      return UOp(Ops.BITCAST, dt, (b,))
   # Ternary: cond ? t : f -> WHERE
   if (q := _fop(s, ('?',))) > 0:
     d = b = 0
@@ -139,10 +186,12 @@ def expr(s: str) -> UOp:
       elif s[i] == ']': b -= 1
       elif s[i] == ':' and d == 0 and b == 0:
         gate, lhs, rhs = expr(s[:q]), expr(s[q+1:i]), expr(s[i+1:])
-        # TODO: enable this. dtypes.u1 and dtypes.i1 is probably fine too on gate
-        #assert gate.dtype == dtypes.bool, f"gate on where must be bool, got {gate.dtype}"
-        #assert lhs.dtype != dtypes.void or rhs.dtype != dtypes.void, "lhs/rhs can't both be void in WHERE"
-        return UOp(Ops.WHERE, dtypes.void, (gate, lhs, rhs))
+        # Infer output dtype from lhs/rhs (prefer non-void)
+        out_dtype = lhs.dtype if lhs.dtype != dtypes.void else rhs.dtype
+        # Gate can be bool, void (unresolved), or integer (C-style truthiness: 0=false, non-zero=true)
+        assert gate.dtype == dtypes.void or gate.dtype == dtypes.bool or dtypes.is_int(gate.dtype), \
+          f"gate on WHERE must be bool or int, got {gate.dtype}"
+        return UOp(Ops.WHERE, out_dtype, (gate, lhs, rhs))
   # Binary ops
   for ops in [('||',),('&&',),('|',),('^',),('&',),('==','!=','<>'),('<=','>=','<','>'),('<<','>>'),
               ('+','-'),('*','/','%'),('**',)]:
@@ -155,16 +204,15 @@ def expr(s: str) -> UOp:
         if flipped: lhs, rhs = rhs, lhs
         tag = 'flipped' if flipped else ('<>' if op == '<>' else None)
         uop_op = _BINOPS[op]
-        # TODO: enable this
-        #assert lhs.dtype != dtypes.void or rhs.dtype != dtypes.void, f"lhs/rhs can't both be void in {uop_op}"
-        # TODO: check that dtypes match
         output_dtype = lhs.dtype if lhs.dtype != dtypes.void else rhs.dtype
         if uop_op in {Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE, Ops.CMPLT}: output_dtype = dtypes.bool
         return UOp(uop_op, output_dtype, (lhs, rhs), tag=tag)
-  # Unary ops
+  # Unary ops: - (negate), ~ (bitwise NOT), ! (logical NOT)
   if s[0] in '-~!' and len(s) > 1 and (s[0] != '!' or s[1] != '='):
     src = expr(s[1:])
-    return UOp(_UNOPS[s[0]], src.dtype, (src,))
+    # ! is logical NOT (compare to 0), returns bool; - and ~ preserve dtype
+    out_dtype = dtypes.bool if s[0] == '!' else src.dtype
+    return UOp(_UNOPS[s[0]], out_dtype, (src,))
   # Slice/Index -> CUSTOMI
   if '[' in s and s[-1] == ']':
     d = 0
@@ -175,27 +223,43 @@ def expr(s: str) -> UOp:
     b, n = s[:i], s[i+1:-1]
     if '+:' in n:  # Verilog [start +: width]
       st, w = expr(n.split('+:', 1)[0]), expr(n.split('+:', 1)[1])
-      # TODO: correct dtypes here
-      hi = UOp(Ops.SUB, dtypes.void, (UOp(Ops.ADD, dtypes.void, (st, w)), UOp(Ops.CONST, dtypes.int32, arg=1)))
-      # TODO: use SHRINK instead of CUSTOMI, it's more sensible even if it doesn't perfectly match spec
-      return UOp(Ops.CUSTOMI, dtypes.void, (expr(b), hi, st))
+      # hi = start + width - 1; use int32 for index computations
+      idx_dt = st.dtype if st.dtype != dtypes.void else dtypes.int32
+      hi = UOp(Ops.SUB, idx_dt, (UOp(Ops.ADD, idx_dt, (st, w)), UOp(Ops.CONST, dtypes.int32, arg=1)))
+      # Infer slice dtype from width (if constant)
+      slice_dtype = dtypes.uint64 if (w.op == Ops.CONST and w.arg > 32) else dtypes.uint32
+      # NOTE: CUSTOMI is used for bit slicing; SHRINK would be for tensor operations
+      return UOp(Ops.CUSTOMI, slice_dtype, (expr(b), hi, st))
     if ':' in n and '?' not in n:
       d = 0
       for j, c in enumerate(n):
         if c in '([{': d += 1
         elif c in ')]}': d -= 1
-        elif c == ':' and d == 0: return UOp(Ops.CUSTOMI, dtypes.void, (expr(b), expr(n[:j]), expr(n[j+1:])))
+        elif c == ':' and d == 0:
+          hi_expr, lo_expr = expr(n[:j]), expr(n[j+1:])
+          # Infer slice dtype from constant bounds (hi - lo + 1 bits)
+          if hi_expr.op == Ops.CONST and lo_expr.op == Ops.CONST:
+            width = abs(int(hi_expr.arg) - int(lo_expr.arg)) + 1
+            slice_dtype = dtypes.uint64 if width > 32 else dtypes.uint32
+          else:
+            slice_dtype = dtypes.uint32  # default for dynamic slices
+          return UOp(Ops.CUSTOMI, slice_dtype, (expr(b), hi_expr, lo_expr))
     idx = expr(n)
-    return UOp(Ops.CUSTOMI, dtypes.void, (expr(b), idx, idx))
+    # Single bit index returns uint32 (1 bit result fits in u32)
+    return UOp(Ops.CUSTOMI, dtypes.uint32, (expr(b), idx, idx))
   # Bitcast: expr.type
   if '.' in s:
     for i in range(len(s)-1, 0, -1):
-      if s[i] == '.' and (dt := _get_dtype(s[i+1:])): return UOp(Ops.BITCAST, dt, (expr(s[:i]),))
+      if s[i] == '.' and (dt := _get_dtype(s[i+1:])):
+        assert dt != dtypes.void, f"BITCAST target type should not be void: {s}"
+        return UOp(Ops.BITCAST, dt, (expr(s[:i]),))
   # Variable
   if s[:5] == 'eval ': return UOp(Ops.DEFINE_VAR, dtypes.void, arg=(s, None, None))
-  if re.match(r'^[A-Za-z_][\w.]*$', s): return UOp(Ops.DEFINE_VAR, dtypes.void, arg=(s, None, None))
+  if re.match(r'^[A-Za-z_][\w.]*$', s):
+    var_dtype = _var_dtypes.get(s, dtypes.void)
+    return UOp(Ops.DEFINE_VAR, var_dtype, arg=(s, None, None))
   # Numeric literal
-  # TODO: hex constants are unsigned even without U
+  # NOTE: hex constants are unsigned (uint32) even without U suffix
   try:
     if s[:2].lower() == '0x':
       m = re.match(r'0[xX]([0-9a-fA-F]+)([UuLl]*)$', s)
@@ -215,7 +279,7 @@ def expr(s: str) -> UOp:
   raise ValueError(f"Cannot parse expression: {s}")
 
 def stmt(line: str) -> Stmt|None:
-  # TODO: track dtypes of variables here on inputs. SCC is dtypes.bool by default. ADDR is dtypes.uint64
+  # NOTE: variable dtypes are resolved in ucode.py via INPUT_VARS (SCC=uint32, ADDR=uint64, etc.)
   line = line.split('//')[0].strip().rstrip(';').rstrip('.')
   if not line: return None
   if line == 'break': return Break()
@@ -228,15 +292,17 @@ def stmt(line: str) -> Stmt|None:
     t = t.split('[')[0]  # strip array suffix like [64]
     if m := re.match(r"^(\d+)'([IUFB])$", t):
       dt = _QDTYPES[f"{m[2].lower()}{m[1]}"]
-      # TODO: track the dtypes of the created variables here
-      return Declare(n.strip(), dt.vec(vec_count) if vec_count > 1 else dt)
+      final_dt = dt.vec(vec_count) if vec_count > 1 else dt
+      _var_dtypes[n.strip()] = final_dt  # track dtype for subsequent expr() calls
+      return Declare(n.strip(), final_dt)
     return None  # unsupported declare type
   for op, uop in [('+=', Ops.ADD), ('-=', Ops.SUB), ('|=', Ops.OR), ('&=', Ops.AND), ('^=', Ops.XOR), ('<<=', Ops.SHL), ('>>=', Ops.SHR)]:
     if op in line:
       l, r = line.split(op, 1)
       lhs, rhs = expr(l), expr(r)
-      # TODO: track the dtypes of the created variables here
-      return Assign(lhs, UOp(uop, dtypes.void, (lhs, rhs)))
+      # Infer result dtype from operands (dtype resolution happens in ucode._stmt)
+      result_dtype = lhs.dtype if lhs.dtype != dtypes.void else rhs.dtype
+      return Assign(lhs, UOp(uop, result_dtype, (lhs, rhs)))
   if '=' in line and not any(line[:k] == p for k, p in [(3,'if '),(6,'elsif '),(4,'for ')]):
     # Find leftmost assignment = (not ==, <=, >=, !=) for chained assignment support
     eq = -1
@@ -255,14 +321,22 @@ def stmt(line: str) -> Stmt|None:
       if has_assign:
         rhs_parsed = stmt(rhs)
         if isinstance(rhs_parsed, Assign):
-          return Assign(expr(line[:eq]), rhs_parsed)
-      return Assign(expr(line[:eq]), expr(rhs))
+          lhs = expr(line[:eq])
+          return Assign(lhs, rhs_parsed)
+      lhs, rhs_expr = expr(line[:eq]), expr(rhs)
+      # Track dtype for bare variable assignments (e.g., tmp = S0.u32)
+      if lhs.op == Ops.DEFINE_VAR and lhs.dtype == dtypes.void and rhs_expr.dtype != dtypes.void:
+        _var_dtypes[lhs.arg[0]] = rhs_expr.dtype
+        lhs = UOp(Ops.DEFINE_VAR, rhs_expr.dtype, arg=lhs.arg)
+      return Assign(lhs, rhs_expr)
   # Bare function call (e.g., nop())
   if re.match(r'\w+\([^)]*\)$', line):
     return expr(line)
   raise ValueError(f"Cannot parse statement: {line}")
 
 def parse(code: str) -> tuple[Stmt, ...]:
+  global _var_dtypes
+  _var_dtypes = {}  # reset for each parse
   lines = [l.split('//')[0].strip() for l in code.strip().split('\n') if l.split('//')[0].strip()]
   # Join continuation lines (unbalanced parens) - but not for control flow or lambdas
   joined, j = [], 0
