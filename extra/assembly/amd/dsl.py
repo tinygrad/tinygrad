@@ -271,12 +271,17 @@ RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst'
 
 def _encode_reg(val: Reg) -> int: return (108 if isinstance(val, TTMP) else 0) + val.idx
 
-def _is_inline_const(v: int) -> bool: return 0 <= v <= 127 or 128 <= v <= 208 or 240 <= v <= 255
+def _is_encoded_src(v: int) -> bool: return 106 <= v <= 127 or 128 <= v <= 208 or 240 <= v <= 255  # Special regs (106-127) or inline const
 
 def encode_src(val) -> int:
   if isinstance(val, VGPR): return 256 + _encode_reg(val)
   if isinstance(val, Reg): return _encode_reg(val)
-  if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val if _is_inline_const(val.val) else 255
+  if isinstance(val, SrcMod) and not isinstance(val, Reg):
+    v = val.val
+    if _is_encoded_src(v): return v  # Already encoded (special reg 106-127 or inline const 128-208 or float 240-255)
+    if isinstance(v, int) and 0 <= v <= 64: return 128 + v  # Encode as inline constant
+    if isinstance(v, int) and -16 <= v <= -1: return 192 - v
+    return 255  # Literal
   if hasattr(val, 'value'): return val.value  # IntEnum
   if isinstance(val, float): return 128 if val == 0.0 else FLOAT_ENC.get(val, 255)
   if isinstance(val, int): return 128 + val if 0 <= val <= 64 else 192 - val if -16 <= val <= -1 else 255
@@ -359,19 +364,30 @@ class Inst:
   def _validate(self, orig_args: dict):
     """Format-specific validation. Override in subclass or check by class name."""
     cls_name, op = self.__class__.__name__, orig_args.get('op')
-    if hasattr(op, 'value'): op = op.value
-    # SMEM: register count must match opcode
-    if cls_name == 'SMEM' and op is not None:
-      expected = {0:1, 1:2, 2:4, 3:8, 4:16, 8:1, 9:2, 10:4, 11:8, 12:16}.get(op)
+    op_val = op.value if hasattr(op, 'value') else op
+    op_name = op.name if hasattr(op, 'name') else None
+    # SMEM: register count must match opcode (derive from name: b32=1, b64=2, b96=3, b128=4, b256=8, b512=16, i8/u8/i16/u16=1)
+    if cls_name == 'SMEM' and op_name:
+      expected = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16, 'I8': 1, 'U8': 1, 'I16': 1, 'U16': 1}.get(op_name.split('_')[-1])
       sdata = orig_args.get('sdata')
       if expected and isinstance(sdata, Reg) and sdata.count != expected:
-        raise ValueError(f"SMEM op {op} expects {expected} registers, got {sdata.count}")
-    # SOP1: b32=1 reg, b64=2 regs
+        raise ValueError(f"SMEM op {op_name} expects {expected} registers, got {sdata.count}")
+    # SOP1: derive expected register sizes from op name (e.g., S_MOV_B64 -> dst=2, src=2; S_CTZ_I32_B64 -> dst=1, src=2)
     if cls_name == 'SOP1' and hasattr(orig_args.get('op'), 'name'):
-      expected = 2 if orig_args['op'].name.endswith('_B64') else 1
-      for fld in ('sdst', 'ssrc0'):
+      op_name = orig_args['op'].name
+      # Special cases: BITSET takes bit index (1 reg) regardless of dst size
+      if 'BITSET' in op_name:
+        dst_size = 2 if op_name.endswith('_B64') else 1
+        src_size = 1  # bit index is always 1 reg
+      else:
+        # Extract sizes from name: last suffix is src type, second-to-last (if exists) is dst type
+        sizes = {'B32': 1, 'I32': 1, 'U32': 1, 'B64': 2, 'I64': 2, 'U64': 2, 'B128': 4, 'B256': 8, 'B512': 16}
+        parts = op_name.split('_')
+        src_size = sizes.get(parts[-1], 1) if parts[-1] in sizes else 1
+        dst_size = sizes.get(parts[-2], src_size) if len(parts) >= 2 and parts[-2] in sizes else src_size
+      for fld, expected in [('sdst', dst_size), ('ssrc0', src_size)]:
         if isinstance(orig_args.get(fld), Reg) and orig_args[fld].count != expected:
-          raise ValueError(f"SOP1 {orig_args['op'].name} expects {expected} register(s) for {fld}, got {orig_args[fld].count}")
+          raise ValueError(f"SOP1 {op_name} expects {expected} register(s) for {fld}, got {orig_args[fld].count}")
 
   def __init__(self, *args, literal: int | None = None, **kwargs):
     self._values, self._literal = dict(self._defaults), None
