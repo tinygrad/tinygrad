@@ -43,9 +43,6 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
     # converting negative float to unsigned integer is undefined
     a = a.abs()
-  if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
-    # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
-    a = (a > 65504).where(65504, a)
 
   expected = list(a.numpy().astype(_to_np_dtype(target_dtype)))
   if target_dtype in dtypes.fp8s: expected = [truncate[target_dtype](x) for x in expected]
@@ -216,7 +213,7 @@ class TestBFloat16DType(unittest.TestCase):
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
+@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16) and is_dtype_supported(dtypes.float16), "bfloat16 or float16 not supported")
 class TestBFloat16DTypeCast(unittest.TestCase):
   def test_f16_to_bf16_conversion(self):
     original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
@@ -426,7 +423,6 @@ class TestDtypeUsage(unittest.TestCase):
 class TestOpsBFloat16(unittest.TestCase):
   def test_cast(self):
     # TODO: helper_test_op breaks in unrelated part
-    # TODO: wrong output with CL=1 on mac
     data = [60000.0, 70000.0, 80000.0]
     np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 
