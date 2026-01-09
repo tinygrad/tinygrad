@@ -2,7 +2,8 @@
 import functools, struct, math
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType, AddrSpace
-from extra.assembly.amd.pcode_parse import parse, Assign, Declare, If, For
+from extra.assembly.amd.pcode_parse import Assign, Declare, If, For
+from extra.assembly.amd.pcode_transform import parse_transform
 
 SIGNED, FLOATS = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64), (dtypes.float16, dtypes.float32, dtypes.float64)
 MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
@@ -562,7 +563,7 @@ _DTYPE_ACCESSOR = {dtypes.uint8: 'u8', dtypes.int8: 'i8', dtypes.uint16: 'u16', 
 def _compile_pseudocode(pseudocode: str, mem_buf: UOp = MEM_BUF) -> tuple[UOp, list[tuple[str, DType]], dict[str, UOp], list[UOp]]:
   ctx = Ctx(mem_buf=mem_buf)
   try:
-    stmts = parse(pseudocode)
+    stmts = parse_transform(pseudocode)
   except AssertionError as e:
     print("issue parsing")
     print(pseudocode)
