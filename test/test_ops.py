@@ -1465,6 +1465,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.all(axis=(1,2)), forward_only=True)
   def test_all_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.all(axis=(1,3)), forward_only=True)
+  def test_all_large(self):
+    for exp in [15, 16, 20]:
+      t = Tensor.ones(2**exp).bool()
+      self.assertTrue(t.all().item(), f"all() failed for size 2^{exp}")
 
   def test_isclose(self):
     helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x), forward_only=True)
