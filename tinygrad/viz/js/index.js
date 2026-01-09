@@ -487,13 +487,13 @@ async function renderProfiler(path, unit, opts) {
     for (const tick of xscale.ticks()) {
       const x = xscale(tick);
       drawLine(ctx, [x, x], [0, tickSize]);
-      const label = formatTime(tick, et-st);
       const labelX = x+ctx.lineWidth+2;
-      if (labelX > lastLabelEnd) {
-        ctx.textBaseline = "top";
-        ctx.fillText(label, labelX, tickSize);
-        lastLabelEnd = labelX + ctx.measureText(label).width + 4;
-      }
+      if (labelX <= lastLabelEnd) continue;
+
+      const label = formatTime(tick, et-st);
+      ctx.textBaseline = "top";
+      ctx.fillText(label, labelX, tickSize);
+      lastLabelEnd = labelX + ctx.measureText(label).width + 4;
     }
     if (data.axes.y != null) {
       drawLine(ctx, [0, 0], data.axes.y.range);
