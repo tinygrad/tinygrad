@@ -25,7 +25,7 @@ const layoutCfg = (g, { blocks, paths, pc_tokens, counters, colors }) => {
       const num = counters?.[m]?.hit_count ?? 0;
       if (num > maxColor) maxColor = num;
       label.push(tokens.map((t, i) => ({st:t.st, keys:t.keys, color:counters != null ? num : tokenColors[t.kind]})));
-      width = Math.max(width, ctx.measureText(tokens.join(" ")).width);
+      width = Math.max(width, ctx.measureText(tokens.map((t) => t.st).join("")).width);
       height += lineHeight;
     }
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
