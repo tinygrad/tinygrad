@@ -40,32 +40,7 @@ _BINOPS: dict[str, Ops] = {
 # NOTE: ~ is bitwise NOT (XOR with -1), ! is logical NOT (compare == 0). NEG is arithmetic negation, not suitable here.
 _UNOPS: dict[str, Ops] = {'-': Ops.NEG, '~': Ops.XOR, '!': Ops.CMPEQ}
 
-def _typed_const(src: UOp, val) -> UOp:
-  """Create a const with same dtype as src, or a deferred const if src.dtype is void."""
-  return UOp.const(src.dtype, val) if src.dtype != dtypes.void else UOp(Ops.CONST, dtypes.void, (src,), val)
-
-def _floor(x):
-  trunc = UOp(Ops.TRUNC, x.dtype, (x,))
-  return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, x.dtype, (trunc, _typed_const(x, 1))), trunc))
-
-def _cvt(src_dt: DType, dst_dt: DType):
-  """Create a conversion function that asserts input type and casts to output type."""
-  def convert(x: UOp) -> UOp:
-    assert x.dtype == src_dt, f"Expected {src_dt}, got {x.dtype}"
-    return UOp(Ops.CAST, dst_dt, (x,))
-  return convert
-
-def _minmax(dt: DType, is_min: bool):
-  """Create a min/max function that asserts input types."""
-  def fn(*args: UOp) -> UOp:
-    for i, a in enumerate(args):
-      assert a.dtype == dt, f"Expected {dt} for arg {i}, got {a.dtype}"
-    cmp = lambda x, y: UOp(Ops.CMPLT, dtypes.bool, (x, y) if is_min else (y, x))
-    result = UOp(Ops.WHERE, dt, (cmp(args[0], args[1]), args[0], args[1]))
-    return UOp(Ops.WHERE, dt, (cmp(result, args[2]), result, args[2])) if len(args) > 2 else result
-  return fn
-
-# Function expansions: name -> lambda(*srcs) -> UOp
+# Function expansions that map directly to UOps (not CUSTOM)
 _FN_EXPAND: dict[str, callable] = {
   'trunc': lambda x: UOp(Ops.TRUNC, x.dtype, (x,)),
   'sqrt': lambda x: UOp(Ops.SQRT, x.dtype, (x,)),
@@ -74,61 +49,36 @@ _FN_EXPAND: dict[str, callable] = {
   'sin': lambda x: UOp(Ops.SIN, x.dtype, (x,)),
   'rcp': lambda x: UOp(Ops.RECIPROCAL, x.dtype, (x,)),
   'fma': lambda a, b, c: UOp(Ops.MULACC, c.dtype, (a, b, c)),
-  'isNAN': lambda x: UOp(Ops.CMPNE, dtypes.bool, (x, x)),
-  'rsqrt': lambda x: UOp(Ops.RECIPROCAL, x.dtype, (UOp(Ops.SQRT, x.dtype, (x,)),)),
-  'abs': lambda x: UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, _typed_const(x, 0))), UOp(Ops.NEG, x.dtype, (x,)), x)),
-  'cos': lambda x: UOp(Ops.SIN, x.dtype, (UOp(Ops.ADD, x.dtype, (x, _typed_const(x, 1.5707963267948966))),)),
-  'floor': _floor,
-  'fract': lambda x: UOp(Ops.SUB, x.dtype, (x, _floor(x))),
-  'isINF': lambda x: UOp(Ops.OR, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('inf')))),
-                                               UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('-inf')))))),
-  'min': lambda a, b: UOp(Ops.WHERE, a.dtype, (UOp(Ops.CMPLT, dtypes.bool, (a, b)), a, b)),
-  'max': lambda a, b: UOp(Ops.WHERE, a.dtype, (UOp(Ops.CMPLT, dtypes.bool, (b, a)), a, b)),
-  'clamp': lambda x, lo, hi: (c := UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, lo)), lo, x)),
-                              UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (hi, c)), hi, c)))[1],
-  # Conversions (type-checked casts)
-  'f32_to_i32': _cvt(dtypes.float32, dtypes.int32), 'f32_to_f16': _cvt(dtypes.float32, dtypes.float16),
-  'f32_to_f64': _cvt(dtypes.float32, dtypes.float64), 'f32_to_i8': _cvt(dtypes.float32, dtypes.int8),
-  'f32_to_u8': _cvt(dtypes.float32, dtypes.uint8), 'f32_to_i16': _cvt(dtypes.float32, dtypes.int16),
-  'f32_to_u16': _cvt(dtypes.float32, dtypes.uint16), 'f64_to_i32': _cvt(dtypes.float64, dtypes.int32),
-  'f64_to_f32': _cvt(dtypes.float64, dtypes.float32), 'f16_to_f32': _cvt(dtypes.float16, dtypes.float32),
-  'f16_to_i16': _cvt(dtypes.float16, dtypes.int16), 'f16_to_u16': _cvt(dtypes.float16, dtypes.uint16),
-  'i32_to_f32': _cvt(dtypes.int32, dtypes.float32), 'i32_to_f64': _cvt(dtypes.int32, dtypes.float64),
-  'u32_to_f32': _cvt(dtypes.uint32, dtypes.float32), 'u32_to_f64': _cvt(dtypes.uint32, dtypes.float64),
-  'i16_to_f16': _cvt(dtypes.int16, dtypes.float16), 'u16_to_f16': _cvt(dtypes.uint16, dtypes.float16),
-  'v_cvt_u16_f32': _cvt(dtypes.float32, dtypes.uint16), 'v_cvt_i16_f32': _cvt(dtypes.float32, dtypes.int16),
-  # v_min/v_max (2 args, type-checked)
-  'v_min_f16': _minmax(dtypes.float16, True), 'v_min_f32': _minmax(dtypes.float32, True),
-  'v_min_i16': _minmax(dtypes.int16, True), 'v_min_i32': _minmax(dtypes.int32, True),
-  'v_min_u16': _minmax(dtypes.uint16, True), 'v_min_u32': _minmax(dtypes.uint32, True),
-  'v_max_f16': _minmax(dtypes.float16, False), 'v_max_f32': _minmax(dtypes.float32, False),
-  'v_max_i16': _minmax(dtypes.int16, False), 'v_max_i32': _minmax(dtypes.int32, False),
-  'v_max_u16': _minmax(dtypes.uint16, False), 'v_max_u32': _minmax(dtypes.uint32, False),
-  # v_min3/v_max3 (3 args, type-checked)
-  'v_min3_f16': _minmax(dtypes.float16, True), 'v_min3_f32': _minmax(dtypes.float32, True),
-  'v_min3_i16': _minmax(dtypes.int16, True), 'v_min3_i32': _minmax(dtypes.int32, True),
-  'v_min3_u16': _minmax(dtypes.uint16, True), 'v_min3_u32': _minmax(dtypes.uint32, True),
-  'v_max3_f16': _minmax(dtypes.float16, False), 'v_max3_f32': _minmax(dtypes.float32, False),
-  'v_max3_i16': _minmax(dtypes.int16, False), 'v_max3_i32': _minmax(dtypes.int32, False),
-  'v_max3_u16': _minmax(dtypes.uint16, False), 'v_max3_u32': _minmax(dtypes.uint32, False),
-  # Bit manipulation conversions
-  'signext': lambda x: UOp(Ops.CAST, dtypes.int64, (x,)),
-  'bf16_to_f32': lambda x: UOp(Ops.BITCAST, dtypes.float32, (UOp(Ops.SHL, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 16))),)),
-  'u32_to_u16': lambda x: UOp(Ops.AND, dtypes.uint32, (x, UOp.const(dtypes.uint32, 0xffff))),
-  'i32_to_i16': lambda x: UOp(Ops.CAST, dtypes.int16, (UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xffff))),)),
 }
 
 # Function return type inference for CUSTOM ops
 _BOOL_FNS = {'isNAN', 'isINF', 'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', 'GT_NEG_ZERO'}
 _PASSTHRU_FNS = {'abs', 'floor', 'fract', 'sqrt', 'sin', 'cos', 'trunc', 'fma', 'clamp', 'min', 'max', 'ldexp',
-                 'cvtToQuietNAN', 'pow', 'rcp', 'rsqrt', 'exp2', 'log2', 'mantissa'}
+                 'cvtToQuietNAN', 'pow', 'rcp', 'rsqrt', 'exp2', 'log2', 'mantissa',
+                 'v_min_f16', 'v_min_f32', 'v_max_f16', 'v_max_f32',
+                 'v_min3_f16', 'v_min3_f32', 'v_max3_f16', 'v_max3_f32'}
 _U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones', 'countbits', 'reverse_bits',
-            'u8_to_u32', 'u4_to_u32', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8'}
-_CVT_FNS = {  # conversion functions: name -> output dtype (only those not in _FN_EXPAND)
-  'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32,  # need clamping
-  'f32_to_bf16': dtypes.bfloat16,  # bit manipulation (truncation)
-  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,  # scaling
-  'signext_from_bit': dtypes.int64,  # special handling with 2 args
+            'u8_to_u32', 'u4_to_u32', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8', 'u32_to_u16'}
+_CVT_FNS = {  # conversion functions: name -> output dtype
+  # Float to int conversions
+  'f32_to_i32': dtypes.int32, 'f32_to_u32': dtypes.uint32, 'f64_to_i32': dtypes.int32, 'f64_to_u32': dtypes.uint32,
+  'f32_to_i8': dtypes.int8, 'f32_to_u8': dtypes.uint8, 'f32_to_i16': dtypes.int16, 'f32_to_u16': dtypes.uint16,
+  'f16_to_i16': dtypes.int16, 'f16_to_u16': dtypes.uint16, 'v_cvt_u16_f32': dtypes.uint16, 'v_cvt_i16_f32': dtypes.int16,
+  # Float to float conversions
+  'f32_to_f16': dtypes.float16, 'f32_to_f64': dtypes.float64, 'f64_to_f32': dtypes.float32,
+  'f16_to_f32': dtypes.float32, 'bf16_to_f32': dtypes.float32, 'f32_to_bf16': dtypes.bfloat16,
+  # Int to float conversions
+  'i32_to_f32': dtypes.float32, 'u32_to_f32': dtypes.float32, 'i32_to_f64': dtypes.float64, 'u32_to_f64': dtypes.float64,
+  'i16_to_f16': dtypes.float16, 'u16_to_f16': dtypes.float16,
+  # Int to int conversions
+  'i32_to_i16': dtypes.int16, 'signext': dtypes.int64, 'signext_from_bit': dtypes.int64,
+  # Norm conversions
+  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
+  # v_min/v_max int versions
+  'v_min_i16': dtypes.int16, 'v_min_i32': dtypes.int32, 'v_min_u16': dtypes.uint16, 'v_min_u32': dtypes.uint32,
+  'v_max_i16': dtypes.int16, 'v_max_i32': dtypes.int32, 'v_max_u16': dtypes.uint16, 'v_max_u32': dtypes.uint32,
+  'v_min3_i16': dtypes.int16, 'v_min3_i32': dtypes.int32, 'v_min3_u16': dtypes.uint16, 'v_min3_u32': dtypes.uint32,
+  'v_max3_i16': dtypes.int16, 'v_max3_i32': dtypes.int32, 'v_max3_u16': dtypes.uint16, 'v_max3_u32': dtypes.uint32,
 }
 
 def _infer_fn_dtype(name: str, srcs: tuple[UOp, ...]) -> DType:
