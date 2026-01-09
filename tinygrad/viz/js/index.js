@@ -64,31 +64,12 @@ const drawGraph = (data) => {
   updateProgress(Status.COMPLETE);
   const g = dagre.graphlib.json.read(data);
   if (data.value.colorDomain != null) colorScale.domain(data.value.colorDomain);
-  // clear previous graph elements
-  d3.select("#nodes").selectAll("*").remove();
-  d3.select("#edges").selectAll("*").remove();
-  d3.select("#edge-labels").selectAll("*").remove();
-  // clear metadata and show close button
   metadata.innerHTML = "";
-  // draw nodes (clusters first, then regular nodes)
+  // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
-  const allNodes = g.nodes().map(id => g.node(id));
-  const clusters = allNodes.filter(d => d.className === "device-cluster");
-  const regularNodes = allNodes.filter(d => d.className !== "device-cluster");
-
-  // draw clusters first (background)
-  const clusterNodes = d3.select("#nodes").selectAll("g.device-cluster").data(clusters, d => d).join("g").attr("class", "device-cluster")
-    .attr("transform", d => `translate(${d.x},${d.y})`);
-  clusterNodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-    .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
-  clusterNodes.selectAll("text").data(d => [d]).join("text")
-    .attr("x", d => -d.width/2 + 10).attr("y", d => -d.height/2 - 20)
-    .style("font-size", "40px").style("font-weight", "600").style("fill", "#f0f0f5")
-    .text(d => d.label);
-
-  // draw regular nodes
-  const nodes = d3.select("#nodes").selectAll("g.node").data(regularNodes, d => d).join("g").attr("class", "node")
-    .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
+  const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d.id).join("g").attr("class", d => d.className ?? "node")
+    .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null && d.className !== "device-cluster").on("click", (e,d) => {
+      if (d.className === "device-cluster") return;
       if (d.ref != null) return switchCtx(d.ref);
       const parents = g.predecessors(d.id);
       const children = g.successors(d.id);
@@ -103,7 +84,13 @@ const drawGraph = (data) => {
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
-  const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
+  // cluster labels (simple text)
+  nodes.filter(d => d.className === "device-cluster").selectAll("text.cluster-label").data(d => [d]).join("text").attr("class", "cluster-label")
+    .attr("x", d => -d.width/2 + 10).attr("y", d => -d.height/2 - 20)
+    .style("font-size", "40px").style("font-weight", "600").style("fill", "#f0f0f5")
+    .text(d => d.label);
+  // regular node labels
+  const labels = nodes.filter(d => d.className !== "device-cluster").selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   labels.selectAll("text").data(d => {
     if (Array.isArray(d.label)) return [d.label];
