@@ -40,7 +40,7 @@ def __getattr__(nm):
     case "cuda": return load("cuda", "'cuda'", ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"], parse_macros=False)
     case "nvrtc": return load("nvrtc", "'nvrtc'", ["/usr/include/nvrtc.h"], paths=nv_lib_path, prolog=["import sysconfig"])
     case "nvjitlink": load("nvjitlink", "'nvJitLink'", [root/"extra/nvJitLink.h"], paths=nv_lib_path, prolog=["import sysconfig"])
-    case "kfd": return load("kfd", None, ["/usr/include/linux/kfd_ioctl.h"])
+    case "kfd": return load("kfd", None, [root/"extra/hip_gpu_driver/kfd_ioctl.h"])
     case "nv_570" | "nv_580":
       return load(nm, None, [
         *[root/"extra/nv_gpu_driver"/s for s in ["clc9b0.h", "clc6c0qmd.h","clcec0qmd.h", "nvdec_drv.h"]], "{}/kernel-open/common/inc/nvmisc.h",
