@@ -29,12 +29,15 @@ let timeout = null;
 const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
   clearTimeout(timeout);
-  const msgEl = d3.select("#progress-message").style("display", "none");
-  const customEl = d3.select("#custom").style("display", "none");
+  const msgEl = d3.select("#progress-message");
+  const customEl = d3.select("#custom");
   if (st === Status.STARTED) {
-    msgEl.text(msg);
-    timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
+    msgEl.text(msg).style("display", "block");
+  } else if (st === Status.COMPLETE) {
+    msgEl.style("display", "none");
   } else if (st === Status.ERR) {
+    msgEl.style("display", "none");
+    customEl.style("display", "none");
     displaySelection("#custom");
     customEl.html("").append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
@@ -58,11 +61,33 @@ function addTags(root) {
 const colorScale = d3.scaleSequential(t => t > 0 ? d3.interpolateLab(colorScheme.ACTIVE[1], colorScheme.ACTIVE[2])(t) : colorScheme.ACTIVE[0]).clamp(true);
 
 const drawGraph = (data) => {
+  updateProgress(Status.COMPLETE);
   const g = dagre.graphlib.json.read(data);
   if (data.value.colorDomain != null) colorScale.domain(data.value.colorDomain);
-  // draw nodes
+  // clear previous graph elements
+  d3.select("#nodes").selectAll("*").remove();
+  d3.select("#edges").selectAll("*").remove();
+  d3.select("#edge-labels").selectAll("*").remove();
+  // clear metadata and show close button
+  metadata.innerHTML = "";
+  // draw nodes (clusters first, then regular nodes)
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
-  const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
+  const allNodes = g.nodes().map(id => g.node(id));
+  const clusters = allNodes.filter(d => d.className === "device-cluster");
+  const regularNodes = allNodes.filter(d => d.className !== "device-cluster");
+
+  // draw clusters first (background)
+  const clusterNodes = d3.select("#nodes").selectAll("g.device-cluster").data(clusters, d => d).join("g").attr("class", "device-cluster")
+    .attr("transform", d => `translate(${d.x},${d.y})`);
+  clusterNodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
+    .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
+  clusterNodes.selectAll("text").data(d => [d]).join("text")
+    .attr("x", d => -d.width/2 + 10).attr("y", d => -d.height/2 - 20)
+    .style("font-size", "40px").style("font-weight", "600").style("fill", "#f0f0f5")
+    .text(d => d.label);
+
+  // draw regular nodes
+  const nodes = d3.select("#nodes").selectAll("g.node").data(regularNodes, d => d).join("g").attr("class", "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).classed("clickable", d => d.ref != null).on("click", (e,d) => {
       if (d.ref != null) return switchCtx(d.ref);
       const parents = g.predecessors(d.id);
@@ -221,6 +246,12 @@ function getMetadata(key) {
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+    // check if this is a batched event with graph index
+    const graphIdxMatch = n.match(/gidx:(\d+)/);
+    if (graphIdxMatch) {
+      const graphIdx = parseInt(graphIdxMatch[1]);
+      html.append("a").text("View dependency graph").on("click", () => renderGraphDeps(graphIdx));
+    }
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
@@ -261,6 +292,14 @@ function focusShape(shape) {
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
+
+async function renderGraphDeps(graphIdx) {
+  if (workerUrl == null) await initWorker();
+  updateProgress(Status.STARTED, "Loading dependency graph...");
+  const data = await fetchValue(`/graph-deps?gidx=${graphIdx}`);
+  if (!data.data) return updateProgress(Status.COMPLETE);
+  renderDag({ data:data.data, opts:{} }, { recenter:true });
+}
 
 async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");

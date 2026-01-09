@@ -142,6 +142,9 @@ def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(dev
 
 device_props:dict[str, dict] = {}
 
+# store ProfileGraphEvent for dependency graph visualization
+graph_events:list[ProfileGraphEvent] = []
+
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
@@ -150,7 +153,9 @@ def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decim
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
       for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device, ent.is_copy)), e.sigs[ent.en_id]+diff]
-      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
+      graph_idx = len(graph_events)
+      graph_events.append(e)
+      yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)} gidx:{graph_idx}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # normalize event timestamps and attach kernel metadata
@@ -437,6 +442,28 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
     pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s) if i>0 else [s], "kind":int(i>0)} for i,s in enumerate(text.replace(",", " , ").split(" "))]
   return {"data":{"blocks":blocks, "paths":paths, "colors":cfg_colors, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
+# ** Dependency graph for ProfileGraphEvent
+
+def graph_event_to_dag(ge:ProfileGraphEvent) -> dict:
+  """Convert ProfileGraphEvent to a dagre-compatible graph format for visualization"""
+  graph:dict[int, dict] = {}
+
+  def get_color(device:str, is_copy:bool) -> str:
+    return uops_colors[Ops.COPY] if is_copy else uops_colors[Ops.KERNEL]
+
+  devices = list(dict.fromkeys(ent.device for ent in ge.ents))
+  for i,ent in enumerate(ge.ents):
+    label = f"Node {i}\n{ent.name}"
+    graph[i] = {
+      "label": label,
+      "src": [(port, dep_idx) for port, dep_idx in enumerate(ge.deps[i])],
+      "color": get_color(ent.device, ent.is_copy),
+      "ref": None,
+      "tag": None,
+      "device_col": devices.index(ent.device)
+    }
+  return {"data": {"graph": graph, "is_deps_graph": True, "device_count": len(devices), "devices": devices}}
+
 # ** Main render function to get the complete details about a trace event
 
 def get_render(query:str) -> dict:
@@ -505,6 +532,10 @@ def get_render(query:str) -> dict:
     cfg = amdgpu_cfg((p:=data["prg"]).lib, device_props[p.device]["gfx_target_version"])["data"]
     cfg["counters"] = {pc-p.base:v for pc,v in rows.items()}
     return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "data":cfg}
+  if fmt == "graph-deps":
+    graph_idx = get_int(qs, "gidx")
+    if graph_idx >= len(graph_events): return {}
+    return graph_event_to_dag(graph_events[graph_idx])
   return data
 
 # ** HTTP server
