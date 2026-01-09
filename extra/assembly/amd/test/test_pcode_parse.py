@@ -2,7 +2,6 @@ import unittest, re, os
 from tinygrad.dtype import dtypes
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
-from tinygrad.renderer.cstyle import ClangRenderer
 from extra.assembly.amd.pcode_parse import parse, _BINOPS, _QDTYPES, Assign, Declare, If, For, Lambda, Break, Return
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS as RDNA3_PCODE
 from extra.assembly.amd.autogen.rdna4.str_pcode import PSEUDOCODE_STRINGS as RDNA4_PCODE
@@ -196,6 +195,38 @@ def _norm(s, keep_structure=False):
   s = re.sub(r'\|\|', '|', s)
   return s.strip()
 
+def _pp(stmt, indent=0) -> str:
+  """Pretty print a parsed statement with proper indentation."""
+  pad = "  " * indent
+  match stmt:
+    case Assign(lhs, rhs) if isinstance(rhs, Assign): return f"{pad}Assign({lhs},\n{pad}       Assign({rhs.lhs},\n{pad}              {rhs.rhs}))"
+    case Assign(lhs, rhs): return f"{pad}Assign({lhs},\n{pad}       {rhs})"
+    case Declare(name, dt): return f"{pad}Declare({name!r}, {dt})"
+    case If(branches):
+      lines = [f"{pad}If("]
+      for cond, body in branches:
+        lines.append(f"{pad}  ({cond},")
+        lines.append(f"{pad}   [")
+        for s in body: lines.append(_pp(s, indent + 2) + ",")
+        lines.append(f"{pad}   ]),")
+      lines.append(f"{pad})")
+      return "\n".join(lines)
+    case For(var, start, end, body):
+      lines = [f"{pad}For({var!r}, {start}, {end},"]
+      lines.append(f"{pad}  [")
+      for s in body: lines.append(_pp(s, indent + 1) + ",")
+      lines.append(f"{pad}  ])")
+      return "\n".join(lines)
+    case Break(): return f"{pad}Break()"
+    case Return(v): return f"{pad}Return({v})"
+    case Lambda(name, params, body):
+      if isinstance(body, UOp): return f"{pad}Lambda({name!r}, {params}, {body})"
+      lines = [f"{pad}Lambda({name!r}, {params}, ["]
+      for s in body: lines.append(_pp(s, indent + 1) + ",")
+      lines.append(f"{pad}])")
+      return "\n".join(lines)
+    case _: return f"{pad}{stmt}"
+
 def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
   ok, fail, match, void_ok, void_bad = 0, 0, 0, 0, 0
   errs: dict[str, list[str]] = {}
@@ -218,11 +249,9 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
       if _norm(pc) == _norm(rendered):
         match += 1
         if DEBUG >= 2:
-          print(f"\033[32m{op.name}\033[0m")
-          #for ln in ast:
-          #  if isinstance(ln, Assign):
-          #src = ClangRenderer.render(ast.toposort())
-          #print(src)
+          print(f"{'='*60}\n\033[32m{op.name}\033[0m\n{'='*60}")
+          print(pc)
+          for stmt in ast: print(_pp(stmt))
       elif DEBUG:
         orig_lines = [l for l in _norm(pc, keep_structure=True).split('\n') if l.strip()]
         rend_lines = [l for l in rendered.split('\n') if l.strip()]
