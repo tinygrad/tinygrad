@@ -150,7 +150,6 @@ function renderDag(layoutSpec, { recenter }) {
 // ** profiler graph
 
 function formatMicroseconds(ts, dur=ts) {
-  if (ts === 0) return "0";
   const s = Math.floor(ts / 1e6), ms = Math.floor((ts % 1e6) / 1e3), us = Math.round(ts % 1e3), showUs = dur <= 1e3;
   const parts = [];
   if (s) parts.push(`${s}s`);
