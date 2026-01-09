@@ -319,6 +319,24 @@ class TestDiskTensor(unittest.TestCase):
 
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
 
+  def test_assign_with_bitcast(self):
+    # bitcast assign is used in safe_save for writing header length
+    # this tests the synchronous disk assign hack handles bitcast correctly
+    pathlib.Path(temp(fn:="dt_assign_bitcast")).unlink(missing_ok=True)
+    t = Tensor.empty(16, device=f"disk:{temp(fn)}", dtype=dtypes.uint8)
+    t[0:8].bitcast(dtypes.int64).assign([12345])
+    # verify the data was written correctly
+    val = int.from_bytes(t[0:8].data(), 'little')
+    self.assertEqual(val, 12345)
+
+  def test_assign_cross_device(self):
+    # disk assign allows cross-device (source on GPU/CPU, target on disk)
+    pathlib.Path(temp(fn:="dt_assign_cross")).unlink(missing_ok=True)
+    t = Tensor.empty(4, device=f"disk:{temp(fn)}", dtype=dtypes.float32)
+    src = Tensor([1.0, 2.0, 3.0, 4.0])  # on default device
+    t.assign(src)
+    np.testing.assert_array_equal(t.numpy(), [1.0, 2.0, 3.0, 4.0])
+
   def test_bitcast(self):
     with open(temp('dt_bitcast'), "wb") as f: f.write(bytes(range(10,20)))
     t = Tensor.empty(5, dtype=dtypes.int16, device=f"disk:{temp('dt_bitcast')}")
