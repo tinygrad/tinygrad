@@ -157,7 +157,10 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       inner_resolved = _expr(inner, ctx, dt)
       if dt in FLOATS and inner_resolved.op == Ops.CONST and inner_resolved.dtype not in FLOATS:
         return UOp(Ops.BITCAST, dt, (inner_resolved,))
-      if inner_resolved.dtype.itemsize == dt.itemsize: return _cast(inner_resolved, dt)
+      # Same-size casts between same kind (int<->int or float<->float) can use bitcast
+      # But float<->int needs actual CAST even if same size
+      if inner_resolved.dtype.itemsize == dt.itemsize and (inner_resolved.dtype in FLOATS) == (dt in FLOATS):
+        return _cast(inner_resolved, dt)
       return UOp(Ops.CAST, dt, (inner_resolved,))
 
     case UOp(Ops.NEG, _, (src,)): val = _expr(src, ctx, hint); return UOp(Ops.NEG, val.dtype, (val,))
@@ -247,7 +250,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'cvtToQuietNAN': return a[0]
   if name == 'isEven':
     return UOp(Ops.CMPEQ, dtypes.bool, (UOp(Ops.AND, dtypes.int64, (UOp(Ops.CAST, dtypes.int64, (a[0],)), UOp.const(dtypes.int64, 1))), UOp.const(dtypes.int64, 0)))
-  if name == 'signext': return _cast(a[0], dtypes.int64)
   if name == 'signext_from_bit':
     sign = UOp(Ops.SHL, a[0].dtype, (UOp.const(a[0].dtype, 1), UOp(Ops.SUB, a[0].dtype, (_cast(a[1], a[0].dtype), UOp.const(a[0].dtype, 1)))))
     result = UOp(Ops.SUB, a[0].dtype, (UOp(Ops.XOR, a[0].dtype, (a[0], sign)), sign))
@@ -259,7 +261,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'SAT8':
     c = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], UOp.const(a[0].dtype, -128))), UOp.const(a[0].dtype, -128), a[0]))
     return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (UOp.const(a[0].dtype, 127), c)), UOp.const(a[0].dtype, 127), c))
-  if name == 'bf16_to_f32': return UOp(Ops.BITCAST, dtypes.float32, (UOp(Ops.SHL, dtypes.uint32, (_cast(a[0], dtypes.uint32), UOp.const(dtypes.uint32, 16))),))
   if name == 'BYTE_PERMUTE':
     src64, sel = _cast(a[0], dtypes.uint64), UOp(Ops.AND, dtypes.uint32, (_cast(a[1], dtypes.uint32), UOp.const(dtypes.uint32, 0xff)))
     sel_idx, sel_nib = UOp(Ops.AND, dtypes.uint32, (sel, UOp.const(dtypes.uint32, 7))), UOp(Ops.AND, dtypes.uint32, (sel, UOp.const(dtypes.uint32, 0xf)))
@@ -290,8 +291,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     c = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], UOp.const(a[0].dtype, lo))), UOp.const(a[0].dtype, lo), a[0]))
     c = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (UOp.const(a[0].dtype, 1.0), c)), UOp.const(a[0].dtype, 1.0), c))
     return UOp(Ops.CAST, out, (UOp(Ops.MUL, a[0].dtype, (c, UOp.const(a[0].dtype, scale))),))
-  if name == 'u32_to_u16': return UOp(Ops.AND, dtypes.uint32, (a[0], UOp.const(dtypes.uint32, 0xffff)))
-  if name == 'i32_to_i16': return _cast(UOp(Ops.AND, dtypes.uint32, (_cast(a[0], dtypes.uint32), UOp.const(dtypes.uint32, 0xffff))), dtypes.int16)
   if name in ('LT_NEG_ZERO', 'GT_NEG_ZERO'):
     int_dt = {dtypes.float64: dtypes.int64, dtypes.float16: dtypes.int16}.get(a[0].dtype, dtypes.int32)
     return UOp(Ops.CMPLT, dtypes.bool, ((UOp(Ops.BITCAST, int_dt, (a[0],)), UOp(Ops.BITCAST, int_dt, (a[1],))) if 'LT' in name else (UOp(Ops.BITCAST, int_dt, (a[1],)), UOp(Ops.BITCAST, int_dt, (a[0],)))))
@@ -505,7 +504,15 @@ TWO_OVER_PI_1201 = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757b
 def _eval_uop(u: UOp) -> int|float|None:
   """Recursively evaluate a UOp tree to a constant value."""
   if u.op == Ops.CONST: return u.arg
-  if u.op == Ops.CAST: return _eval_uop(u.src[0])
+  if u.op == Ops.CAST:
+    v = _eval_uop(u.src[0])
+    if v is None: return None
+    # Float to int: truncate toward zero
+    if u.dtype in (dtypes.int32, dtypes.uint32, dtypes.int64, dtypes.uint64, dtypes.int16, dtypes.uint16, dtypes.int8, dtypes.uint8):
+      if u.src[0].dtype in FLOATS: return int(v)
+    # Int to float
+    if u.dtype in FLOATS and u.src[0].dtype not in FLOATS: return float(v)
+    return v
   if u.op == Ops.BITCAST:
     v = _eval_uop(u.src[0])
     if v is None: return None

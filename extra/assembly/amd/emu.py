@@ -6,7 +6,6 @@ from tinygrad.runtime.autogen import hsa
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.ucode import compile_uop
-from extra.assembly.amd.pcode_exec import compile_exec
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
 from extra.assembly.amd.dsl import SrcEnum
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
@@ -382,16 +381,14 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     else: inst._dispatch = dispatch_lane(exec_vop)
 
     # Compile pcode for instructions that use it (not VOPD which has _fnx/_fny, not special dispatches)
-    # Try pcode_exec first (simple UOp->Python), fall back to ucode (UOp graph evaluation)
-    def _compile_op(cls_name, op_name, pcode):
-      return compile_exec(op_name, pcode) or compile_uop(op_name, pcode)
+    def _compile_op(op_name, pcode): return compile_uop(op_name, pcode)
     # VOPD needs separate functions for X and Y ops
     if isinstance(inst, VOPD):
-      def _compile_vopd_op(op): return _compile_op(type(op).__name__, op.name, PSEUDOCODE_STRINGS[type(op)][op])
+      def _compile_vopd_op(op): return _compile_op(op.name, PSEUDOCODE_STRINGS[type(op)][op])
       inst._fnx, inst._fny = _compile_vopd_op(_VOPD_TO_VOP[inst.opx]), _compile_vopd_op(_VOPD_TO_VOP[inst.opy])
     elif inst._dispatch not in (dispatch_endpgm, dispatch_barrier, dispatch_nop, dispatch_wmma, dispatch_writelane):
       assert type(inst.op) != int, f"inst op of {inst} is int"
-      inst._fn = _compile_op(type(inst.op).__name__, inst.op.name, PSEUDOCODE_STRINGS[type(inst.op)][inst.op])
+      inst._fn = _compile_op(inst.op.name, PSEUDOCODE_STRINGS[type(inst.op)][inst.op])
     result[i // 4] = inst
     i += inst._words * 4
   return result

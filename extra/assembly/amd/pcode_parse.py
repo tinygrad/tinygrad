@@ -111,6 +111,11 @@ _FN_EXPAND: dict[str, callable] = {
   'v_max3_f16': _minmax(dtypes.float16, False), 'v_max3_f32': _minmax(dtypes.float32, False),
   'v_max3_i16': _minmax(dtypes.int16, False), 'v_max3_i32': _minmax(dtypes.int32, False),
   'v_max3_u16': _minmax(dtypes.uint16, False), 'v_max3_u32': _minmax(dtypes.uint32, False),
+  # Bit manipulation conversions
+  'signext': lambda x: UOp(Ops.CAST, dtypes.int64, (x,)),
+  'bf16_to_f32': lambda x: UOp(Ops.BITCAST, dtypes.float32, (UOp(Ops.SHL, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 16))),)),
+  'u32_to_u16': lambda x: UOp(Ops.AND, dtypes.uint32, (x, UOp.const(dtypes.uint32, 0xffff))),
+  'i32_to_i16': lambda x: UOp(Ops.CAST, dtypes.int16, (UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xffff))),)),
 }
 
 # Function return type inference for CUSTOM ops
@@ -118,13 +123,12 @@ _BOOL_FNS = {'isNAN', 'isINF', 'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven'
 _PASSTHRU_FNS = {'abs', 'floor', 'fract', 'sqrt', 'sin', 'cos', 'trunc', 'fma', 'clamp', 'min', 'max', 'ldexp',
                  'cvtToQuietNAN', 'pow', 'rcp', 'rsqrt', 'exp2', 'log2', 'mantissa'}
 _U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones', 'countbits', 'reverse_bits',
-            'u8_to_u32', 'u4_to_u32', 'u32_to_u16', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8'}
+            'u8_to_u32', 'u4_to_u32', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8'}
 _CVT_FNS = {  # conversion functions: name -> output dtype (only those not in _FN_EXPAND)
   'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32,  # need clamping
-  'i32_to_i16': dtypes.int16, 'u32_to_u16': dtypes.uint32,  # need masking
-  'bf16_to_f32': dtypes.float32, 'f32_to_bf16': dtypes.bfloat16,  # bit manipulation
+  'f32_to_bf16': dtypes.bfloat16,  # bit manipulation (truncation)
   'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,  # scaling
-  'signext': dtypes.int64, 'signext_from_bit': dtypes.int64,  # special handling
+  'signext_from_bit': dtypes.int64,  # special handling with 2 args
 }
 
 def _infer_fn_dtype(name: str, srcs: tuple[UOp, ...]) -> DType:
