@@ -113,12 +113,17 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[st
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
+  exc:Exception|None = None
   def worker():
+    nonlocal exc
     try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
     except AttributeError as e:
-      raise RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install") from e
+      exc = RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install")
+      exc.__cause__ = e
   (t:=threading.Thread(target=worker, daemon=True)).start()
   t.join()
+  if exc is not None:
+    raise exc
   return ROCParseCtx
 
 def print_data(data:dict) -> None:
