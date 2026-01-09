@@ -1,6 +1,6 @@
 import heapq
 from typing import Any
-from collections import defaultdict
+from collections import defaultdict, deque
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
@@ -68,23 +68,25 @@ def linearize(sink:UOp, schedule_mode:bool=False) -> list[UOp]:
         case _: priority = 0            # everything else has priority 0
       priorities[u] = (run_count, priority, extra)
 
-  # number the uops in "ideal" order (schedule_mode skips tuplize to avoid comparing Kernel objects)
-  use_tuplize = TUPLE_ORDER and not schedule_mode
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if use_tuplize else ())))}
-
   # then force them to be toposorted in as close to the ideal order as possible
-  # schedule_mode: forward (in_degree, consumers), normal: backward then reverse (out_degree, u.src)
-  degree = in_degree if schedule_mode else out_degree
-  # schedule_mode uses positive nkey (no reversal), normal uses negative nkey (will reverse at end)
-  heap = [(nkey[u], u) if schedule_mode else (-nkey[u], u) for u in lst if degree.get(u, 0) == 0]
-  heapq.heapify(heap)
   newlst: list[UOp] = []
-  while heap:
-    newlst.append(u:=heapq.heappop(heap)[1])
-    for v in (consumers[u] if schedule_mode else u.src):
-      degree[v] -= 1
-      if degree[v] == 0: heapq.heappush(heap, (nkey[v], v) if schedule_mode else (-nkey[v], v))
-  if not schedule_mode: newlst = newlst[::-1]
+  if schedule_mode:
+    queue: deque[UOp] = deque([u for u in lst if in_degree.get(u, 0) == 0])
+    while queue:
+      newlst.append(u := queue.popleft())
+      for v in consumers[u]:
+        in_degree[v] -= 1
+        if in_degree[v] == 0: queue.append(v)
+  else:
+    nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
+    heap = [(-nkey[u], u) for u in lst if out_degree.get(u, 0) == 0]
+    heapq.heapify(heap)
+    while heap:
+      newlst.append(u := heapq.heappop(heap)[1])
+      for v in u.src:
+        out_degree[v] -= 1
+        if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v], v))
+    newlst = newlst[::-1]
 
   if getenv("DEBUG_LINEARIZE"):
     for i,u in enumerate(newlst):
