@@ -276,6 +276,29 @@ class TestDiskTensor(unittest.TestCase):
     dt[1] = [3]
     self.assertEqual(dt.tolist(), [[1], [3]])
 
+  def test_assign_const_to_disk(self):
+    # assign from CONST (Tensor.full) to disk - source has no buffer, needs contiguous first
+    pathlib.Path(temp(fn:="dt_assign_const")).unlink(missing_ok=True)
+    dt = Tensor.empty(4, device=f"disk:{temp(fn)}", dtype=dtypes.int32)
+    dt.assign(Tensor.full((4,), 42, dtype=dtypes.int32)).realize()
+    np.testing.assert_array_equal(dt.numpy(), [42, 42, 42, 42])
+
+  def test_assign_slice_from_const(self):
+    # slice assign from CONST to disk - tests size calculation when no RANGE ops
+    pathlib.Path(temp(fn:="dt_slice_const")).unlink(missing_ok=True)
+    dt = Tensor([0, 1, 2, 3], dtype=dtypes.int32).to(f"disk:{temp(fn)}")
+    dt[1:3].assign(Tensor.full((2,), 99, dtype=dtypes.int32)).realize()
+    np.testing.assert_array_equal(dt.numpy(), [0, 99, 99, 3])
+
+  def test_disk_to_disk_copy(self):
+    # disk-to-disk copy needs to go through CPU
+    pathlib.Path(temp(fn1:="dt_d2d_src")).unlink(missing_ok=True)
+    pathlib.Path(temp(fn2:="dt_d2d_dst")).unlink(missing_ok=True)
+    src = Tensor([1, 2, 3, 4], dtype=dtypes.int32).to(f"disk:{temp(fn1)}")
+    dst = Tensor.empty(4, device=f"disk:{temp(fn2)}", dtype=dtypes.int32)
+    dst.assign(src.to("CPU")).realize()
+    np.testing.assert_array_equal(dst.numpy(), [1, 2, 3, 4])
+
   def test_assign_slice(self):
     def assign(x,s,y): x[s] = y
     helper_test_disk_tensor("dt_assign_slice_1", [0,1,2,3], lambda x: assign(x, slice(0,2), [13, 12]))
