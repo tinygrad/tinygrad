@@ -290,6 +290,11 @@ if __name__ == "__main__":
                'DS': {24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V', 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'},
                'FLAT': {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}}
       for fmt, ops in fixes.items(): enums[fmt] = merge_dicts([enums[fmt], ops])
+    if arch == 'rdna4':
+      fixes = {'SMEM': {34: 'S_ATC_PROBE', 35: 'S_ATC_PROBE_BUFFER'},
+               'SOP1': {81: 'S_BARRIER_INIT', 82: 'S_BARRIER_JOIN'},
+               'SOPP': {21: 'S_BARRIER_LEAVE', 58: 'S_TTRACEDATA', 59: 'S_TTRACEDATA_IMM'}}
+      for fmt, ops in fixes.items(): enums[fmt] = merge_dicts([enums[fmt], ops])
     if arch in ('rdna3', 'rdna4'):
       # RDNA SMEM: PDF says DLC=[14], GLC=[16] but hardware uses DLC=[13], GLC=[14]
       if 'SMEM' in formats:
