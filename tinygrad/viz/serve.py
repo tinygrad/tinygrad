@@ -393,6 +393,14 @@ def parse_branch(asm:str) -> int|None:
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
 
+def amdgpu_tokenize(st:str) -> list[str]:
+  try:
+    from extra.assembly.amd.dsl import Reg, s, v
+    from extra.assembly.amd.asm import _op2dsl
+    dsl = eval(_op2dsl(st), {'s':s, 'v':v})
+    return [f"{type(dsl).__name__[0].lower()}{dsl.idx + i}" for i in range(dsl.count)] if isinstance(dsl, Reg) else [st]
+  except (ImportError, NameError, SyntaxError, TypeError): return []
+
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
@@ -425,8 +433,8 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
   for pc, (text, _) in pc_table.items():
-    pc_tokens[pc] = [{"st":s, "keys":[s.replace(",", "")], "kind":int(i>0)} for i,s in enumerate(text.split(" "))]
-  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens, "colors":cfg_colors}, "src":"\n".join(lines)}
+    pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s.replace(",", "")), "kind":int(i>0)} for i,s in enumerate(text.split(" "))]
+  return {"data":{"blocks":blocks, "paths":paths, "colors":cfg_colors, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
 
