@@ -93,7 +93,7 @@ const drawGraph = (data) => {
     }
     return [ret];
   }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
-    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 ? textSpace: 0).text(d => d.st).attr("xml:space", "preserve")
+    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 && d.st !== "," ? textSpace: 0).text(d => d.st).attr("xml:space", "preserve")
     .classed("token", true).attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color));
   const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => {
     const ret = [];

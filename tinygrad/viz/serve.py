@@ -434,7 +434,8 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
   for pc, (text, _) in pc_table.items():
-    pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s.replace(",", "")) if i>0 else [s], "kind":int(i>0)} for i,s in enumerate(text.split(" "))]
+    pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s.replace(",", "")) if i>0 else [s], "kind":int(i>0)}
+                     for i,s in enumerate(text.replace(",", " , ").split(" "))]
   return {"data":{"blocks":blocks, "paths":paths, "colors":cfg_colors, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
