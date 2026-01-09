@@ -2,6 +2,7 @@ import unittest, re, os
 from tinygrad.dtype import dtypes
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
+from tinygrad.renderer.cstyle import ClangRenderer
 from extra.assembly.amd.pcode_parse import parse, _BINOPS, _QDTYPES, Assign, Declare, If, For, Lambda, Break, Return
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS as RDNA3_PCODE
 from extra.assembly.amd.autogen.rdna4.str_pcode import PSEUDOCODE_STRINGS as RDNA4_PCODE
@@ -163,9 +164,15 @@ def _norm(s, keep_structure=False):
              'f32_to_u8': "8'U", 'f32_to_i16': "16'I", 'f32_to_u16': "16'U", 'f64_to_i32': "32'I",
              'f64_to_f32': "32'F", 'f16_to_f32': "32'F", 'f16_to_i16': "16'I", 'f16_to_u16': "16'U",
              'i32_to_f32': "32'F", 'i32_to_f64': "64'F", 'u32_to_f32': "32'F", 'u32_to_f64': "64'F",
-             'i16_to_f16': "16'F", 'u16_to_f16': "16'F"}
+             'i16_to_f16': "16'F", 'u16_to_f16': "16'F", 'signext': "64'I",
+             'v_cvt_i16_f32': "16'I", 'v_cvt_u16_f32': "16'U"}
   for fn, cast in cvt_map.items():
     s = re.sub(rf'\b{fn}\b', cast, s)
+  # Normalize u32_to_u16(x) -> x&65535 and i32_to_i16(x) -> 16'I(32'U(x)&65535)
+  s = re.sub(r"u32_to_u16\(([^()]+)\)", r"\1&65535", s)
+  s = re.sub(r"i32_to_i16\(([^()]+)\)", r"16'I(32'U(\1)&65535)", s)
+  # Normalize bf16_to_f32(x) -> 32'U(x)<<16.f32
+  s = re.sub(r"bf16_to_f32\(([^()]+)\)", r"32'U(\1)<<16.f32", s)
   # Normalize v_min_*/v_max_* to ternary: v_min_f32(a, b) -> a<b?a:b, v_max_f32(a, b) -> b<a?a:b
   # Use non-greedy match for simple args (no nested parens)
   for suffix in ('f16', 'f32', 'i16', 'i32', 'u16', 'u32'):
@@ -210,7 +217,12 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
       rendered = _pr(ast)
       if _norm(pc) == _norm(rendered):
         match += 1
-        if DEBUG >= 2: print(f"\033[32m{op.name}\033[0m")
+        if DEBUG >= 2:
+          print(f"\033[32m{op.name}\033[0m")
+          #for ln in ast:
+          #  if isinstance(ln, Assign):
+          #src = ClangRenderer.render(ast.toposort())
+          #print(src)
       elif DEBUG:
         orig_lines = [l for l in _norm(pc, keep_structure=True).split('\n') if l.strip()]
         rend_lines = [l for l in rendered.split('\n') if l.strip()]
