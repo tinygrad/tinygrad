@@ -8,7 +8,7 @@ CUDA_PATH = getenv("CUDA_PATH", "")
 
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   sz = init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x))))
-  return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value).rstrip(b'\00')
+  return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value)
 
 def nvrtc_check(status, ctx=None):
   if status != 0:
@@ -35,7 +35,7 @@ def pretty_ptx(s):
 def cuda_disassemble(lib:bytes, arch:str):
   try:
     fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
-    with open(fn, "wb") as f: f.write(lib)
+    with open(fn, "wb") as f: f.write(lib.rstrip(b'\x00'))
     subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn], check=False, stderr=subprocess.DEVNULL) # optional ptx -> sass step for CUDA=1
     print(system(f'nvdisasm {fn}'))
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
