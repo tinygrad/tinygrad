@@ -1,11 +1,20 @@
 import pathlib
 import numpy as np
 from tinygrad import Device, dtypes
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 from extra.assembly.amd.autogen.rdna4.ins import *
 from extra.gemm.amd_uop_matmul import N, test_matmul
+
+# tiny hsaco packer
+import tempfile, subprocess, os
+def pack_hsaco(src:str, arch:str) -> bytes:
+  with tempfile.TemporaryDirectory() as d:
+    s,o,h = [os.path.join(d,x) for x in ("k.s","k.o","k.hsaco")]
+    open(s,"w").write(src)
+    subprocess.check_call(["llvm-mc","-triple=amdgcn-amd-amdhsa",f"-mcpu={arch}","-mattr=+real-true16","-filetype=obj",s,"-o",o])
+    subprocess.check_call(["ld.lld","-shared","-m","elf64_amdgpu",o,"-o",h])
+    return open(h,"rb").read()
 
 # 2×2 wave-level tiling of a 128×128 workgroup C tile, where each wave computes a 64×64 sub-tile using WMMA
 N = 4096
@@ -710,7 +719,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   sink = UOp.sink(A, B, C, lidx, gidx, arg=KernelInfo(name="gemm"))
   src = (pathlib.Path(__file__).parent/"template.s").read_text()
   src = src.replace("INSTRUCTIONS", "\n".join([i if isinstance(i, str) else f"\t{i.disasm()}" for i in insts]))
-  lib = HIPCompiler("gfx1200").compile(src)
+  lib = pack_hsaco(src, "gfx1200")
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dev), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=())
 
 if __name__ == "__main__":
