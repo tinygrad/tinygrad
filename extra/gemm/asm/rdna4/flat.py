@@ -128,8 +128,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_and_b32(s[3], s[20], 7),
   s_mul_i32(s[17], s[17], s[16]),
   s_add_co_u32(s[3], s[3], s[17]),
-  v_mov_b32_e32(v[6], v[0]),
-  v_mov_b32_e32(v[7], v[2]),
+  v_dual_mov_b32(VOPDOp.V_DUAL_MOV_B32, v[6], v[7], v[0], v[2]),
   v_add_co_u32(v[8], VCC_LO, 32, v[7]),
   v_add_co_u32(v[9], VCC_LO, 32, v[8]),
   v_add_co_u32(v[10], VCC_LO, 32, v[9]),
@@ -291,7 +290,7 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_add_co_ci_u32(s[17], s[29], s[69]),
   # **** VGPR -> LDS
   # Zero initialize accumulators v[0:127]
-  *[v_mov_b32_e32(v[i], 0) for i in range(128)],
+  *[v_dual_mov_b32(VOPDOp.V_DUAL_MOV_B32, v[i], v[i+1], 0, 0) for i in range(0, 128, 2)],
   s_wait_loadcnt(0x0),
   ds_store_b128(addr=v[136], data0=v[222:225], offset1=0),
   ds_store_b128(addr=v[136], data0=v[226:229], offset1=8),
