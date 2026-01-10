@@ -163,9 +163,12 @@ function renderDag(layoutSpec, { recenter }) {
 // ** profiler graph
 
 function formatMicroseconds(ts, dur=ts) {
-  if (dur<=1e3) return `${ts.toFixed(2)}us`;
-  if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
-  return `${(ts*1e-6).toFixed(2)}s`;
+  const s = Math.floor(ts / 1e6), ms = Math.floor((ts % 1e6) / 1e3), us = Math.round(ts % 1e3), showUs = dur <= 1e3;
+  const parts = [];
+  if (s) parts.push(`${s}s`);
+  if (ms || (!showUs && !s)) parts.push(`${ms}ms`);
+  if (showUs && (us || (!ms && !s))) parts.push(`${us}us`);
+  return parts.join(' ');
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
@@ -493,13 +496,17 @@ async function renderProfiler(path, unit, opts) {
     // draw axes
     ctx.translate(0, baseOffset);
     drawLine(ctx, xscale.range(), [0, 0]);
+    let lastLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
-      // tick line
       const x = xscale(tick);
-      drawLine(ctx, [x, x], [0, tickSize])
-      // tick label
+      drawLine(ctx, [x, x], [0, tickSize]);
+      const labelX = x+ctx.lineWidth+2;
+      if (labelX <= lastLabelEnd) continue;
+
+      const label = formatTime(tick, et-st);
       ctx.textBaseline = "top";
-      ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
+      ctx.fillText(label, labelX, tickSize);
+      lastLabelEnd = labelX + ctx.measureText(label).width + 4;
     }
     if (data.axes.y != null) {
       drawLine(ctx, [0, 0], data.axes.y.range);

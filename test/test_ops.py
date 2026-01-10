@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM, EMULATE
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LLVM, EMULATE
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -235,8 +235,7 @@ class TestOps(unittest.TestCase):
   def test_unfold(self):
     helper_test_op([(8,)], lambda x: x.unfold(0, 2, 1))
     helper_test_op([(8,)], lambda x: x.unfold(0, 2, 2))
-    # TODO: something is wrong with unfold
-    if not getenv("TINY_BACKEND"): helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
+    helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
     helper_test_op([(3,3,3)], lambda x: x.unfold(2, 2, 8))
     helper_test_op([(3,3,3)], lambda x: x.unfold(1, 0, 8))
     helper_test_op([(3,3,3,3,3)], lambda x: x.unfold(-1, 2, 2))
@@ -701,10 +700,14 @@ class TestOps(unittest.TestCase):
 
   def test_pow_zero_tensor(self):
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
-    # TODO: fix WEBGPU and LVP
-    if Device.DEFAULT != "WEBGPU" and not CPU_LVP:
+    # TODO: fix WEBGPU
+    if Device.DEFAULT != "WEBGPU":
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU issue")
+  def test_exp2_log2_zero_times_negative(self):
+    # gallivm's exp2/log2 have "undefined behavior with infs, 0s and nans", so exp2(log2(0)*y) returns 0 instead of inf
+    helper_test_op(None, lambda x,y: (x.log2()*y).exp2(), lambda x,y: (x.log2()*y).exp2(), vals=[[0.0], [-0.7]], forward_only=True)
   def test_pow_zero_const(self):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
@@ -1462,6 +1465,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.all(axis=(1,2)), forward_only=True)
   def test_all_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.all(axis=(1,3)), forward_only=True)
+  def test_all_large(self):
+    for exp in [15, 16, 20]:
+      helper_test_op(None, lambda: torch.ones(2**exp).bool().all(), lambda: Tensor.ones(2**exp).bool().all(), vals=[], forward_only=True)
 
   def test_isclose(self):
     helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x), forward_only=True)
