@@ -162,8 +162,8 @@ function renderDag(layoutSpec, { recenter }) {
 
 // ** profiler graph
 
-function formatMicroseconds(ts, dur=ts) {
-  const s = Math.floor(ts / 1e6), ms = Math.floor((ts % 1e6) / 1e3), us = Math.round(ts % 1e3), showUs = dur <= 1e3;
+function formatMicroseconds(ts, showUs=true) {
+  const s = Math.floor(ts / 1e6), ms = Math.floor((ts % 1e6) / 1e3), us = Math.round(ts % 1e3);
   const parts = [];
   if (s) parts.push(`${s}s`);
   if (ms || (!showUs && !s)) parts.push(`${ms}ms`);
@@ -503,7 +503,7 @@ async function renderProfiler(path, unit, opts) {
       const labelX = x+ctx.lineWidth+2;
       if (labelX <= lastLabelEnd) continue;
 
-      const label = formatTime(tick, et-st);
+      const label = formatTime(tick, et-st <= 1e3 ? true : false);
       ctx.textBaseline = "top";
       ctx.fillText(label, labelX, tickSize);
       lastLabelEnd = labelX + ctx.measureText(label).width + 4;
