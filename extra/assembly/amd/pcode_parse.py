@@ -38,12 +38,9 @@ _BINOPS: dict[str, Ops] = {
 # NOTE: ~ is bitwise NOT (XOR with -1), ! is logical NOT (compare == 0). NEG is arithmetic negation, not suitable here.
 _UNOPS: dict[str, Ops] = {'-': Ops.NEG, '~': Ops.XOR, '!': Ops.CMPEQ}
 
-# Statement types (control flow, not expressions)
-# Assign is UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs))
-# Declare is UOp(Ops.DEFINE_VAR, dtype, arg=name)
-
-def Assign(lhs: UOp, rhs: UOp) -> UOp: return UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs))
-def Declare(name: str, dtype: DType) -> UOp: return UOp(Ops.DEFINE_VAR, dtype, arg=name)
+# Statement types:
+# - Assign: UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs))
+# - Declare: UOp(Ops.DEFINE_VAR, dtype, arg=name)
 
 # Control flow statements (can be late substituted)
 @dataclass(frozen=True)
@@ -224,7 +221,7 @@ def stmt(line: str) -> Stmt|None:
   if not line: return None
   if line == 'break': return Break()
   if line[:7] == 'return ': return Return(expr(line[7:]))
-  if line[:5] == 'eval ': return Assign(UOp(Ops.DEFINE_VAR, dtypes.void, arg=('_eval', None, None)), UOp(Ops.DEFINE_VAR, dtypes.void, arg=(line, None, None)))
+  if line[:5] == 'eval ': return UOp(Ops.ASSIGN, dtypes.void, (UOp(Ops.DEFINE_VAR, dtypes.void, arg=('_eval', None, None)), UOp(Ops.DEFINE_VAR, dtypes.void, arg=(line, None, None))))
   if line[:8] == 'declare ' and ':' in line:
     n, t = line[8:].split(':', 1)
     t = t.strip()
@@ -233,13 +230,13 @@ def stmt(line: str) -> Stmt|None:
     if m := re.match(r"^(\d+)'([IUFB])$", t):
       dt = _QDTYPES[f"{m[2].lower()}{m[1]}"]
       final_dt = dt.vec(vec_count) if vec_count > 1 else dt
-      return Declare(n.strip(), final_dt)
+      return UOp(Ops.DEFINE_VAR, final_dt, arg=n.strip())
     return None  # unsupported declare type
   for op, uop in [('+=', Ops.ADD), ('-=', Ops.SUB), ('|=', Ops.OR), ('&=', Ops.AND), ('^=', Ops.XOR), ('<<=', Ops.SHL), ('>>=', Ops.SHR)]:
     if op in line:
       l, r = line.split(op, 1)
       lhs, rhs = expr(l), expr(r)
-      return Assign(lhs, UOp(uop, dtypes.void, (lhs, rhs)))
+      return UOp(Ops.ASSIGN, dtypes.void, (lhs, UOp(uop, dtypes.void, (lhs, rhs))))
   if '=' in line and not any(line[:k] == p for k, p in [(3,'if '),(6,'elsif '),(4,'for ')]):
     # Find leftmost assignment = (not ==, <=, >=, !=) for chained assignment support
     eq = -1
@@ -259,9 +256,9 @@ def stmt(line: str) -> Stmt|None:
         rhs_parsed = stmt(rhs)
         if isinstance(rhs_parsed, UOp) and rhs_parsed.op == Ops.ASSIGN:
           lhs = expr(line[:eq])
-          return Assign(lhs, rhs_parsed)
+          return UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs_parsed))
       lhs, rhs_expr = expr(line[:eq]), expr(rhs)
-      return Assign(lhs, rhs_expr)
+      return UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs_expr))
   # Bare function call (e.g., nop())
   if re.match(r'\w+\([^)]*\)$', line):
     return expr(line)
