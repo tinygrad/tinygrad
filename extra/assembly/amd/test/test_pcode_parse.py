@@ -85,15 +85,15 @@ def _pr(n, d=0):
     case UOp(Ops.CUSTOM, _, args, 'MEM'): return f"MEM[{_pr(args[0])}]"
     case UOp(Ops.CUSTOM, _, args, name): return f"{name}({', '.join(_pr(x) for x in args)})"
     case UOp(Ops.CAT, _, exprs): return f"{{{', '.join(_pr(x) for x in exprs)}}}"
-    case Assign(l, r):
+    case UOp(Ops.ASSIGN, _, (l, r)):
       compound = {Ops.ADD: '+=', Ops.SUB: '-=', Ops.OR: '|=', Ops.AND: '&=', Ops.XOR: '^=', Ops.SHL: '<<=', Ops.SHR: '>>='}
       is_pc = l.op == Ops.DEFINE_VAR and l.arg[0] == 'PC'
       if isinstance(r, UOp) and r.op in compound and len(r.src) == 2 and r.src[0] == l and not is_pc:
         return f"{p}{_pr(l)} {compound[r.op]} {_pr(r.src[1])}"
       # Chained assignment: render without prefix for RHS
-      rhs = _pr(r) if isinstance(r, Assign) else _pr(r)
+      rhs = _pr(r) if (isinstance(r, UOp) and r.op == Ops.ASSIGN) else _pr(r)
       return f"{p}{_pr(l)} = {rhs}"
-    case Declare(name, dt):
+    case UOp(Ops.DEFINE_VAR, dt, _, name) if isinstance(name, str):
       base = dt.scalar() if dt.count > 1 else dt
       suffix = f"[{dt.count}]" if dt.count > 1 else ""
       return f"{p}declare {name} : {_dt_bits(base)}'{_DT_STR.get(base, base.name)[0].upper()}{suffix}"
@@ -163,9 +163,10 @@ def _pp(stmt, indent=0) -> str:
   """Pretty print a parsed statement with proper indentation."""
   pad = "  " * indent
   match stmt:
-    case Assign(lhs, rhs) if isinstance(rhs, Assign): return f"{pad}Assign({lhs},\n{pad}       Assign({rhs.lhs},\n{pad}              {rhs.rhs}))"
-    case Assign(lhs, rhs): return f"{pad}Assign({lhs},\n{pad}       {rhs})"
-    case Declare(name, dt): return f"{pad}Declare({name!r}, {dt})"
+    case UOp(Ops.ASSIGN, _, (lhs, rhs)) if isinstance(rhs, UOp) and rhs.op == Ops.ASSIGN:
+      return f"{pad}Assign({lhs},\n{pad}       Assign({rhs.src[0]},\n{pad}              {rhs.src[1]}))"
+    case UOp(Ops.ASSIGN, _, (lhs, rhs)): return f"{pad}Assign({lhs},\n{pad}       {rhs})"
+    case UOp(Ops.DEFINE_VAR, dt, _, name) if isinstance(name, str): return f"{pad}Declare({name!r}, {dt})"
     case If(branches):
       lines = [f"{pad}If("]
       for cond, body in branches:

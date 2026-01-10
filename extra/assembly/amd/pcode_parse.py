@@ -2,11 +2,9 @@
 from __future__ import annotations
 import re
 from dataclasses import dataclass
-from tinygrad.dtype import dtypes, DType
+from tinygrad.dtype import dtypes, DType, INVERSE_DTYPES_DICT
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
-# DType lookup table for AMD pseudocode type suffixes
-from tinygrad.dtype import INVERSE_DTYPES_DICT
 _QDTYPES: dict[str, DType] = {
   'f64': dtypes.float64, 'f32': dtypes.float32, 'f16': dtypes.float16, 'bf16': dtypes.bfloat16,
   'fp8': DType.new(4, 8, "fp8", None), 'bf8': DType.new(4, 8, "bf8", None),
@@ -41,31 +39,24 @@ _BINOPS: dict[str, Ops] = {
 _UNOPS: dict[str, Ops] = {'-': Ops.NEG, '~': Ops.XOR, '!': Ops.CMPEQ}
 
 # Statement types (control flow, not expressions)
+# Assign is UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs))
+# Declare is UOp(Ops.DEFINE_VAR, dtype, arg=name)
 
-# these are UStatement (just one UOp)
+def Assign(lhs: UOp, rhs: UOp) -> UOp: return UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs))
+def Declare(name: str, dtype: DType) -> UOp: return UOp(Ops.DEFINE_VAR, dtype, arg=name)
 
-# TODO: this should be Ops.ASSIGN
-@dataclass(frozen=True)
-class Assign: lhs: UOp; rhs: UOp
-
-# TODO: this should be Ops.DEFINE_VAR
-@dataclass(frozen=True)
-class Declare: name: str; dtype: DType
-
-# this can all be late substitutes
+# Control flow statements (can be late substituted)
 @dataclass(frozen=True)
 class If: branches: tuple[tuple[UOp|None, tuple[Stmt, ...]], ...]
 @dataclass(frozen=True)
 class For: var: str; start: UOp; end: UOp; body: tuple[Stmt, ...]
 @dataclass(frozen=True)
 class Lambda: name: str; params: tuple[str, ...]; body: tuple[Stmt, ...]|UOp
-
-# when are these two used?
 @dataclass(frozen=True)
 class Break: pass
 @dataclass(frozen=True)
 class Return: value: UOp
-Stmt = Assign|Declare|If|For|Lambda|Break|Return
+Stmt = UOp|If|For|Lambda|Break|Return
 
 def _match(s, i, o, c):
   d = 1
@@ -266,7 +257,7 @@ def stmt(line: str) -> Stmt|None:
           break
       if has_assign:
         rhs_parsed = stmt(rhs)
-        if isinstance(rhs_parsed, Assign):
+        if isinstance(rhs_parsed, UOp) and rhs_parsed.op == Ops.ASSIGN:
           lhs = expr(line[:eq])
           return Assign(lhs, rhs_parsed)
       lhs, rhs_expr = expr(line[:eq]), expr(rhs)
