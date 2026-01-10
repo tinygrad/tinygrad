@@ -1,5 +1,6 @@
 # Transform parsed pcode CUSTOM ops to UOps using PatternMatcher
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
+from tinygrad.uop.spec import shared_spec, type_verify
 from tinygrad.dtype import dtypes, DType
 from extra.assembly.amd.pcode_parse import parse, If, For, Lambda, Break, Return
 
@@ -104,10 +105,10 @@ def _prop_where(cond, t, f, **kw):
   dt = _first_nonvoid(t, f)
   return UOp(Ops.WHERE, dt, (cond, t, f), kw.get('arg')) if dt != dtypes.void else None
 
-def _prop_cat(src, **kw):
-  total_bits = sum(p.dtype.itemsize * 8 for p in src if p.dtype != dtypes.void)
+def _prop_cat(x):
+  total_bits = sum(p.dtype.itemsize * 8 for p in x.src if p.dtype != dtypes.void)
   dt = dtypes.uint64 if total_bits > 32 else dtypes.uint32 if total_bits > 0 else dtypes.void
-  return UOp(Ops.CAT, dt, src, kw.get('arg')) if dt != dtypes.void else None
+  return UOp(Ops.CAT, dt, x.src, x.arg) if dt != dtypes.void else None
 
 def _prop_customi(base, hi, lo, **kw):
   if hi is lo:  # array element access
@@ -117,13 +118,13 @@ def _prop_customi(base, hi, lo, **kw):
     dt = dtypes.uint64 if hi.op == Ops.CONST and lo.op == Ops.CONST and abs(int(hi.arg) - int(lo.arg)) + 1 > 32 else dtypes.uint32
   return UOp(Ops.CUSTOMI, dt, (base, hi, lo), kw.get('arg'))
 
-def _prop_custom(src, arg, **kw):
-  if arg in _BOOL_FNS: dt = dtypes.bool
-  elif arg in _U32_FNS: dt = dtypes.uint32
-  elif arg in _CVT_FNS: dt = _CVT_FNS[arg]
-  elif arg == 'trig_preop_result': dt = dtypes.float64
-  else: dt = _first_nonvoid(*src) if src else dtypes.void
-  return UOp(Ops.CUSTOM, dt, src, arg) if dt != dtypes.void else None
+def _prop_custom(x):
+  if x.arg in _BOOL_FNS: dt = dtypes.bool
+  elif x.arg in _U32_FNS: dt = dtypes.uint32
+  elif x.arg in _CVT_FNS: dt = _CVT_FNS[x.arg]
+  elif x.arg == 'trig_preop_result': dt = dtypes.float64
+  else: dt = _first_nonvoid(*x.src) if x.src else dtypes.void
+  return UOp(Ops.CUSTOM, dt, x.src, x.arg) if dt != dtypes.void else None
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATTERN MATCHER
@@ -175,16 +176,42 @@ pcode_pm = PatternMatcher([
         dtype=dtypes.void, src=(UPat.var('x'),), name='__OP__'), _prop_unop),
   (UPat(Ops.MULACC, dtype=dtypes.void, src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), _prop_mulacc),
   (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var('cond'), UPat.var('t'), UPat.var('f'))), _prop_where),
-  (UPat(Ops.CAT, dtype=dtypes.void, src=UPat.var('src')), _prop_cat),
+  (UPat(Ops.CAT, dtype=dtypes.void, name='x'), _prop_cat),
   (UPat(Ops.CUSTOMI, dtype=dtypes.void, src=(UPat.var('base'), UPat.var('hi'), UPat.var('lo'))), _prop_customi),
-  (UPat(Ops.CUSTOM, dtype=dtypes.void, src=UPat.var('src'), arg=UPat.var('arg')), _prop_custom),
+  (UPat(Ops.CUSTOM, dtype=dtypes.void, name='x'), _prop_custom),
 ])
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PCODE SPEC (extends shared_spec with pcode-specific patterns)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+pcode_spec = PatternMatcher([
+  # DEFINE_VAR for register/variable references
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg, (str, tuple))),
+  # ASSIGN with void dtype
+  (UPat(Ops.ASSIGN, dtypes.void, src=(UPat(), UPat())), lambda: True),
+  # BITCAST for type views on registers
+  (UPat(Ops.BITCAST, src=(UPat(),)), lambda: True),
+  # CUSTOMI for slices and array access
+  (UPat(Ops.CUSTOMI, src=(UPat(), UPat(), UPat())), lambda: True),
+  # CUSTOM ops that haven't been transformed yet
+  (UPat(Ops.CUSTOM), lambda: True),
+  # CAT for bit concatenation
+  (UPat(Ops.CAT), lambda: True),
+  # MULACC (fused multiply-add)
+  (UPat(Ops.MULACC, src=(UPat(), UPat(), UPat())), lambda: True),
+  # ALU ops - pcode is loose with types, allow any combination
+  (UPat(GroupOp.ALU), lambda: True),
+]) + shared_spec
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TRANSFORM
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _transform_uop(u: UOp, ctx: dict) -> UOp: return graph_rewrite(u, pcode_pm, ctx=ctx)
+def _transform_uop(u: UOp, ctx: dict) -> UOp:
+  result = graph_rewrite(u, pcode_pm, ctx=ctx)
+  type_verify(result, pcode_spec)
+  return result
 
 def _transform_stmt(stmt, ctx: dict):
   match stmt:
@@ -196,5 +223,5 @@ def _transform_stmt(stmt, ctx: dict):
     case _: return stmt
 
 def parse_transform(pcode: str) -> tuple:
-  ctx: dict[str, DType] = {}
+  ctx: dict[str, DType] = {'SCC': dtypes.bool, 'VCC': dtypes.uint64, 'EXEC': dtypes.uint64}
   return tuple(_transform_stmt(s, ctx) for s in parse(pcode))
