@@ -110,9 +110,9 @@ const drawGraph = (data) => {
     const matches = [...new Set(tokens.filter(match).nodes().map(n => n.parentElement))].map(n => {
       const data = {st:"", color:instColors.CONSUMER, curr:false};
       for (const [i, c] of [...n.children].entries()) {
-        if (i === 1 && c === n) data.color = instColors.PRODUCER;
-        if (c === e.target) data.curr = true;
         const { st } = c.__data__;
+        if (i === 1 && st === e.target.__data__.st) data.color = instColors.PRODUCER;
+        if (c === e.target) { data.curr = true; data.st = "**"+data.st; }
         data.st += (st+(st === ',' ? '' : ' '));
       }
       return data;
