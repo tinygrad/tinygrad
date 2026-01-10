@@ -21,7 +21,7 @@ class SQTTMultiwave(unittest.TestCase):
     #prg = get_runner("AMD", UOp.sink())._prg
     prg = compile_asm_sqtt(ins, alu_only=True)
     print(prg)
-    blobs = run_prg_sqtt_batch(prg, n_runs=1, n_lanes=32*4)
+    blobs = run_prg_sqtt_batch(prg, n_runs=2, n_lanes=32*4)
     for blob in blobs:
       packets = decode(blob)
       for p in filter_noise_packets(packets):
