@@ -115,48 +115,20 @@ def _pr(n, d=0):
     case _: return f"{p}{n}"
 
 def _norm(s, keep_structure=False):
-  while True:
-    m = re.match(r'^(?!declare|if |for )[^=;\n]+\n', s)
-    if not m: break
-    s = s[m.end():]
-  s = re.sub(r'//[^\n]*', '', s)
-  s = re.sub(r'0x[0-9a-fA-F]+', lambda m: str(int(m[0], 16)), s)  # convert hex before stripping whitespace
-  s = re.sub(r"(\d+)U(?!LL)", r"\1", s)  # strip U suffix early before whitespace removal
-  # Normalize conversion functions to typed cast syntax (f32_to_f64 -> 64'F, etc.)
-  cvt_map = {'f32_to_i32': "32'I", 'f32_to_f16': "16'F", 'f32_to_f64': "64'F", 'f32_to_i8': "8'I",
-             'f32_to_u8': "8'U", 'f32_to_i16': "16'I", 'f32_to_u16': "16'U", 'f64_to_i32': "32'I",
-             'f64_to_f32': "32'F", 'f16_to_f32': "32'F", 'f16_to_i16': "16'I", 'f16_to_u16': "16'U",
-             'i32_to_f32': "32'F", 'i32_to_f64': "64'F", 'u32_to_f32': "32'F", 'u32_to_f64': "64'F",
-             'i16_to_f16': "16'F", 'u16_to_f16': "16'F", 'signext': "64'I",
-             'v_cvt_i16_f32': "16'I", 'v_cvt_u16_f32': "16'U"}
-  for fn, cast in cvt_map.items():
-    s = re.sub(rf'\b{fn}\b', cast, s)
-  # Normalize u32_to_u16(x) -> x&65535 and i32_to_i16(x) -> 16'I(32'U(x)&65535)
-  s = re.sub(r"u32_to_u16\(([^()]+)\)", r"\1&65535", s)
-  s = re.sub(r"i32_to_i16\(([^()]+)\)", r"16'I(32'U(\1)&65535)", s)
-  # Normalize bf16_to_f32(x) -> 32'U(x)<<16.f32
-  s = re.sub(r"bf16_to_f32\(([^()]+)\)", r"32'U(\1)<<16.f32", s)
-  # Normalize v_min_*/v_max_* to ternary: v_min_f32(a, b) -> a<b?a:b, v_max_f32(a, b) -> b<a?a:b
-  # Use non-greedy match for simple args (no nested parens)
-  for suffix in ('f16', 'f32', 'i16', 'i32', 'u16', 'u32'):
-    s = re.sub(rf'v_min_{suffix}\(([^(),]+),\s*([^()]+)\)', r'\1<\2?\1:\2', s)
-    s = re.sub(rf'v_max_{suffix}\(([^(),]+),\s*([^()]+)\)', r'\2<\1?\1:\2', s)
-  # Also normalize v_min3_*/v_max3_* (3 args) - these become nested ternaries
-  for suffix in ('f16', 'f32', 'i16', 'i32', 'u16', 'u32'):
-    s = re.sub(rf'v_min3_{suffix}\(([^(),]+),\s*([^(),]+),\s*([^()]+)\)', r'\1<\2?\1:\2<\3?\1<\2?\1:\2:\3', s)
-    s = re.sub(rf'v_max3_{suffix}\(([^(),]+),\s*([^(),]+),\s*([^()]+)\)', r'\3<\2<\1?\1:\2?\2<\1?\1:\2:\3', s)
+  s = re.sub(r'//[^\n]*', '', s)  # comments
+  s = re.sub(r'0x[0-9a-fA-F]+', lambda m: str(int(m[0], 16)), s)  # hex literals
+  s = re.sub(r"(\d+)U(?!LL)", r"\1", s)  # strip U suffix (but not ULL)
+  s = re.sub(r'\.b(\d+)', r'.u\1', s)  # .b32 -> .u32
+  s = re.sub(r"'B", "'U", s)  # 'B -> 'U
+  s = re.sub(r'(\d+\.\d+)F', r'\1', s)  # 0.5F -> 0.5
+  s = re.sub(r'\+INF', 'INF', s)  # +INF -> INF
+  s = re.sub(r'&&', '&', s)  # && -> &
+  s = re.sub(r'\|\|', '|', s)  # || -> |
   if keep_structure:
     s = re.sub(r';', '', s)
     s = re.sub(r'\n\s*\n', '\n', s)
   else:
     s = re.sub(r'[;()\s]', '', s)
-  s = re.sub(r'_eval=', '', s)
-  s = re.sub(r'\.b(\d+)', r'.u\1', s)
-  s = re.sub(r"'B", "'U", s)
-  s = re.sub(r'(\d+\.\d+)F', r'\1', s)
-  s = re.sub(r'\+INF', 'INF', s)
-  s = re.sub(r'&&', '&', s)
-  s = re.sub(r'\|\|', '|', s)
   return s.strip()
 
 def _pp(stmt, indent=0) -> str:
