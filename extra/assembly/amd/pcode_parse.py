@@ -94,16 +94,26 @@ def _infer_fn_dtype(name: str, srcs: tuple[UOp, ...]) -> DType:
   return dtypes.void
 
 # Statement types (control flow, not expressions)
+
+# these are UStatement (just one UOp)
+
+# TODO: this should be Ops.ASSIGN
 @dataclass(frozen=True)
 class Assign: lhs: UOp; rhs: UOp
+
+# TODO: this should be Ops.DEFINE_VAR
 @dataclass(frozen=True)
 class Declare: name: str; dtype: DType
+
+# this can all be late substitutes
 @dataclass(frozen=True)
 class If: branches: tuple[tuple[UOp|None, tuple[Stmt, ...]], ...]
 @dataclass(frozen=True)
 class For: var: str; start: UOp; end: UOp; body: tuple[Stmt, ...]
 @dataclass(frozen=True)
 class Lambda: name: str; params: tuple[str, ...]; body: tuple[Stmt, ...]|UOp
+
+# when are these two used?
 @dataclass(frozen=True)
 class Break: pass
 @dataclass(frozen=True)
