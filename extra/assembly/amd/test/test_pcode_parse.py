@@ -1,8 +1,9 @@
-import unittest, re, os
+import unittest, re, os, random
 from tinygrad.dtype import dtypes
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
 from extra.assembly.amd.pcode_parse import parse, _BINOPS, _QDTYPES, Assign, Declare, If, For, Lambda, Break, Return
+from extra.assembly.amd.pcode_transform import parse_transform
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS as RDNA3_PCODE
 from extra.assembly.amd.autogen.rdna4.str_pcode import PSEUDOCODE_STRINGS as RDNA4_PCODE
 from extra.assembly.amd.autogen.cdna.str_pcode import PSEUDOCODE_STRINGS as CDNA_PCODE
@@ -230,8 +231,15 @@ def _pp(stmt, indent=0) -> str:
 def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
   ok, fail, match, void_ok, void_bad = 0, 0, 0, 0, 0
   errs: dict[str, list[str]] = {}
+
+  # test in random order
+  triples = []
   for cls, ops in pcode_strings.items():
-    for op, pc in ops.items():
+    for op, pc in ops.items(): triples.append((cls, op, pc))
+  random.shuffle(triples)
+
+  if True:
+    for cls, op, pc in triples:
       try:
         ast = parse(pc)
         ok += 1
@@ -251,13 +259,15 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
         if DEBUG >= 2:
           print(f"{'='*60}\n\033[32m{op.name}\033[0m\n{'='*60}")
           print(pc)
-          for stmt in ast: print(_pp(stmt))
+          if DEBUG >= 3:
+            ast_pt = parse_transform(pc)
+            for stmt in ast_pt: print(_pp(stmt))
       elif DEBUG:
         orig_lines = [l for l in _norm(pc, keep_structure=True).split('\n') if l.strip()]
         rend_lines = [l for l in rendered.split('\n') if l.strip()]
         max_lines = max(len(orig_lines), len(rend_lines))
-        print(f"{'='*60}\n{op.name}\n{'='*60}")
-        w = 50
+        print(f"{'='*60}\n\033[31m{op.name}\033[0m\n{'='*60}")
+        w = 60
         for i in range(max_lines):
           oline = orig_lines[i] if i < len(orig_lines) else ''
           rline = rend_lines[i] if i < len(rend_lines) else ''
