@@ -103,18 +103,25 @@ const drawGraph = (data) => {
     });
     return ret;
   }).join("rect").attr("class", "bg").attr("x", d => d.x).attr("y", d => d.y).attr("width", d => d.width).attr("height", d => d.height);
-  const instColors = {PRODUCER:"#8fbfb0", CONSUMER:"#b6a6e3"};
+  const instColors = {PRODUCER:"#8fbfb0", CONSUMER:"#b6a6e3", BOTH:"#c9b27c"};
   tokens.on("click", (e, { keys }) => {
     const match = (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k));
     tokensBg.classed("highlight", match);
     const matches = [...new Set(tokens.filter(match).nodes().map(n => n.parentElement))].map(n => {
       const data = {st:"", color:instColors.CONSUMER, curr:false};
+      let hasProducer = false;
+      let hasConsumer = false;
       for (const [i, c] of [...n.children].entries()) {
-        if (i === 1 && c.__data__.keys.some(k => keys.includes(k))) data.color = instColors.PRODUCER;
+        const isHit = c.__data__.keys.some(k => keys.includes(k));
+        if (isHit) {
+          if (i === 1) hasProducer = true;
+          else hasConsumer = true;
+        }
         if (c === e.target) { data.curr = true; data.st = "**"+data.st; }
         const { st } = c.__data__;
         data.st += (st+(st === ',' ? '' : ' '));
       }
+      data.color = hasProducer && hasConsumer ? instColors.BOTH : hasProducer ? instColors.PRODUCER : instColors.CONSUMER;
       return data;
     });
     d3.select(metadata).selectAll("p").data(matches).join("p").text(d => d.st).style("font-family", "monospace").style("color", d => d.color).style("text-decoration", d => d.curr ? "underline" : null);
