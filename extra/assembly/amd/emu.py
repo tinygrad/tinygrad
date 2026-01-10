@@ -2,6 +2,7 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes
+from tinygrad.helpers import DEBUG
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.pcode import Reg
 from extra.assembly.amd.asm import detect_format
@@ -449,34 +450,87 @@ from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE, VALUINST, ALU
 #  InstSkip = SIMM16[6:4]
 #  InstID1  = SIMM16[10:7]
 
+class VQueueItem:
+  def __init__(self, inst, deps):
+    self.inst = inst
+    self.deps = deps
+    # TODO: this should track through the phases of VQueue
+    self.cycles = 7
+  def tick(self):
+    if any(not d.finished() for d in self.deps): return
+    self.cycles -= 1
+  def finished(self):
+    return self.cycles <= 0
+
+def _get_src_vgprs(inst: Inst) -> list[int]:
+  if isinstance(inst, VOP1): return [inst.src0 - 256] if inst.src0 >= 256 else []
+  if isinstance(inst, VOP2): return ([inst.src0 - 256] if inst.src0 >= 256 else []) + [inst.vsrc1]
+  if isinstance(inst, VOP3): return [s - 256 for s in [inst.src0, inst.src1, getattr(inst, 'src2', None)] if s is not None and s >= 256]
+  return []
+
 class SQTTState:
   def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
     self.cycle = 0
     self.packets = []
-    self.inst_count = 0
+    self.last_inst = None
+    self.vqueue:list[VQueueItem] = []
+    self.vgpr_pends = {}
+    self.delay_alu = 0
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
 
   def tick(self):
+    for q in self.vqueue: q.tick()
+    # if this instruction is finished, mark it as finished
+    if len(self.vqueue) and self.vqueue[0].finished():
+      self.emit(ALUEXEC, src=AluSrc.VALU)
+      self.vqueue.pop(0)
     self.cycle += 1
 
   def process_instruction(self, inst: Inst):
-    if inst.op == SOPPOp.S_NOP:
+    if DEBUG >= 2: print(inst)
+    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_DELAY_ALU:
+      # delay alu isn't a dispatch
+      self.delay_alu = inst.simm16
+      return
+    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_NOP:
       # this repros with s_nop(0), s_nop(7)
-      in_range = (SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0)
-      for _ in range(inst.simm16 + (SNOP_EXTRA_DELAY_CYCLES if in_range else 0)): self.tick()
+      # why does this happen?
+      # TODO: i think the 4 cycles is a generic stall, it's also seen in non indep valu chains
+      in_range = (SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX and self.last_inst is not None)
+      cycles = inst.simm16
+      # 2 extra cycles
+      if isinstance(self.last_inst, (VOP1, VOP2, VOP3)): cycles += 2
+      if in_range: cycles += SNOP_EXTRA_DELAY_CYCLES
+      for _ in range(cycles): self.tick()
       self.emit(IMMEDIATE, wave=self.wave_id)
-      self.tick()
-    self.inst_count += 1
+    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM:
+      while len(self.vqueue): self.tick()
+      self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+    elif isinstance(inst, (VOP1, VOP2, VOP3)):
+      # delay_alu delays the dispatch
+      if self.delay_alu and len(self.vqueue):
+        # TODO: support other delay_alus
+        while self.vqueue[-1].cycles > 2: self.tick()
+      # TODO: if vqueue is full, there's a delay on enqueuing
+      deps = []
+      for src in _get_src_vgprs(inst):
+        if src in self.vgpr_pends:
+          deps.append(self.vgpr_pends[src])
+      self.vqueue.append(VQueueItem(inst, deps))
+      self.vgpr_pends[inst.vdst] = self.vqueue[-1]
+      self.emit(VALUINST, wave=self.wave_id)
+
+    # we can only issue one instruction per cycle
+    self.tick()
+    self.last_inst = inst
+    self.delay_alu = 0
 
   def emit_wavestart(self):
     self.emit(WAVESTART, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
     for _ in range(WAVESTART_TO_INST_CYCLES): self.tick()
-
-  def finalize(self):
-    self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
 """
 
 class SQTTState:
@@ -617,8 +671,7 @@ def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int, trace:
     result = step_wave(program, st, lds, n_lanes, trace)
     if result == -1: break
     if result == -2: return -2
-  if trace is not None:
-    trace.finalize()
+  #if trace is not None: trace.finalize()
   return 0
 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int,

@@ -2876,6 +2876,18 @@ class TestCustom(SQTTCompareTestBase):
       s_nop(0),
     ], nops=0)
 
+  def test_nop_after_v(self, delay=0):
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(delay),
+      v_mov_b32_e32(v[1], 1.0),
+      s_nop(0),
+    ], nops=0)
+
+  def test_nop_after_v_2(self): self.test_nop_after_v(2)
+  def test_nop_after_v_4(self): self.test_nop_after_v(4)
+  def test_nop_after_v_8(self): self.test_nop_after_v(8)
+
   def test_long_nop_after_v(self):
     self._run_and_compare([
       v_mov_b32_e32(v[0], 1.0),
@@ -2883,11 +2895,11 @@ class TestCustom(SQTTCompareTestBase):
     ], nops=0)
 
   def test_long_nop(self):
-    self._run_and_compare([
+    self._run_and_compare(ins:=[
       s_nop(0),
-      s_nop(0),
-      s_nop(7),
+      s_nop(18), # 18 actually delays longer that 19
     ], nops=0)
+    print(ins)
 
   def test_one_nop(self):
     self._run_and_compare([
@@ -2977,11 +2989,22 @@ class TestCustom(SQTTCompareTestBase):
       s_nop(0),
     ], nops=0, emu=False)
 
-  def test_long_chain(self):
+  def test_long_chain(self, chain_length=30, nops=0):
+    # this isn't modelled correctly
+    # the VGPRs are in a quque that eventually stalls
+    ins = [v_mov_b32_e32(v[0], 1.0)]
+    for i in range(chain_length):
+      ins.append(v_mov_b32_e32(v[i+1], v[i]))
+    self._run_and_compare(ins, nops=nops)
+
+  def test_short_chain(self): self.test_long_chain(1, nops=16)
+  def test_med_chain(self): self.test_long_chain(2, nops=16)
+
+  def test_long_chain_indep(self):
     # this isn't modelled correctly
     ins = [v_mov_b32_e32(v[0], 1.0)]
     for i in range(30):
-      ins.append(v_mov_b32_e32(v[i+1], v[i]))
+      ins.append(v_mov_b32_e32(v[i+1], 1.0))
     self._run_and_compare(ins, nops=0)
 
 if __name__ == "__main__":
