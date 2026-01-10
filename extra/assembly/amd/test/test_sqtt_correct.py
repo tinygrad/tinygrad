@@ -94,8 +94,8 @@ def run_hardware(instructions: list) -> list:
         return t
   return []
 
-def run_sqtt(instructions: list) -> list:
-  instructions = wrap_with_nops(instructions)
+def run_sqtt(instructions: list, nops: int = 16) -> list:
+  instructions = wrap_with_nops(instructions, nops=nops)
   return run_hardware(instructions) if USE_HW else run_emulator(instructions)
 
 def get_deltas(instructions: list) -> tuple[list[int], list[int]]:
@@ -291,32 +291,38 @@ class TestSNopDelay(unittest.TestCase):
   def test_snop_63(self): self._test(63)
 
 
-# Single VALU exec latency: 6 cycles normally, 10 cycles if s_nop >= 4
-VALU_EXEC_LATENCY = {0: 6, 1: 6, 2: 6, 3: 6, 4: 10, 5: 10, 6: 10, 7: 10, 8: 10, 9: 10, 10: 10}
+def get_valu_to_exec(instrs, nops: int = 16):
+  """Returns VALUINST to ALUEXEC delay for first VALU in instrs."""
+  packets = run_sqtt(instrs, nops=nops)
+  deltas = get_timing_deltas(packets)
+  time, valu_time, exec_time = 0, None, None
+  for ptype, delta in deltas:
+    time += delta
+    if ptype == 'VALUINST' and valu_time is None: valu_time = time
+    if ptype == 'ALUEXEC' and exec_time is None: exec_time = time
+  return exec_time - valu_time
 
-class TestVALUExecLatency(unittest.TestCase):
+
+class TestVALUExecWithNop(unittest.TestCase):
   """Single VALU followed by s_nop - measures VALUINST to ALUEXEC delay."""
-  def _get_delay(self, n):
-    packets = run_sqtt([v_mov_b32_e32(v[0], 1.0), s_nop(n)])
-    deltas = get_timing_deltas(packets)
-    time, valu_time, exec_time = 0, None, None
-    for ptype, delta in deltas:
-      time += delta
-      if ptype == 'VALUINST' and valu_time is None: valu_time = time
-      if ptype == 'ALUEXEC' and exec_time is None: exec_time = time
-    return exec_time - valu_time
+  def _test(self, n, expected): self.assertEqual(get_valu_to_exec([v_mov_b32_e32(v[0], 1.0), s_nop(n)]), expected)
+  def test_nop0(self): self._test(0, 6)
+  def test_nop1(self): self._test(1, 6)
+  def test_nop2(self): self._test(2, 6)
+  def test_nop3(self): self._test(3, 6)
+  def test_nop4(self): self._test(4, 10)
+  def test_nop5(self): self._test(5, 10)
+  def test_nop6(self): self._test(6, 10)
+  def test_nop7(self): self._test(7, 10)
+  def test_nop8(self): self._test(8, 10)
+  def test_nop9(self): self._test(9, 10)
+  def test_nop10(self): self._test(10, 10)
 
-  def test_nop0(self): self.assertEqual(self._get_delay(0), VALU_EXEC_LATENCY[0])
-  def test_nop1(self): self.assertEqual(self._get_delay(1), VALU_EXEC_LATENCY[1])
-  def test_nop2(self): self.assertEqual(self._get_delay(2), VALU_EXEC_LATENCY[2])
-  def test_nop3(self): self.assertEqual(self._get_delay(3), VALU_EXEC_LATENCY[3])
-  def test_nop4(self): self.assertEqual(self._get_delay(4), VALU_EXEC_LATENCY[4])
-  def test_nop5(self): self.assertEqual(self._get_delay(5), VALU_EXEC_LATENCY[5])
-  def test_nop6(self): self.assertEqual(self._get_delay(6), VALU_EXEC_LATENCY[6])
-  def test_nop7(self): self.assertEqual(self._get_delay(7), VALU_EXEC_LATENCY[7])
-  def test_nop8(self): self.assertEqual(self._get_delay(8), VALU_EXEC_LATENCY[8])
-  def test_nop9(self): self.assertEqual(self._get_delay(9), VALU_EXEC_LATENCY[9])
-  def test_nop10(self): self.assertEqual(self._get_delay(10), VALU_EXEC_LATENCY[10])
+
+class TestVALUExecBare(unittest.TestCase):
+  """Single VALU with no trailing s_nop - baseline exec latency."""
+  def test_bare(self): self.assertEqual(get_valu_to_exec([v_mov_b32_e32(v[0], 1.0)]), 6)
+  def test_bare_no_padding(self): self.assertEqual(get_valu_to_exec([v_mov_b32_e32(v[0], 1.0)], nops=0), 10)
 
 
 if __name__ == "__main__":
