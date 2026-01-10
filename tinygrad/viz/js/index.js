@@ -103,16 +103,16 @@ const drawGraph = (data) => {
     });
     return ret;
   }).join("rect").attr("class", "bg").attr("x", d => d.x).attr("y", d => d.y).attr("width", d => d.width).attr("height", d => d.height);
-  const instColors = {PRODUCER:"#8fbfb0", CONSUMER:"#d49a9a"};
+  const instColors = {PRODUCER:"#8fbfb0", CONSUMER:"#b6a6e3"};
   tokens.on("click", (e, { keys }) => {
     const match = (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k));
     tokensBg.classed("highlight", match);
     const matches = [...new Set(tokens.filter(match).nodes().map(n => n.parentElement))].map(n => {
       const data = {st:"", color:instColors.CONSUMER, curr:false};
       for (const [i, c] of [...n.children].entries()) {
-        const { st } = c.__data__;
-        if (i === 1 && st === e.target.__data__.st) data.color = instColors.PRODUCER;
+        if (i === 1 && c.__data__.keys.some(k => keys.includes(k))) data.color = instColors.PRODUCER;
         if (c === e.target) { data.curr = true; data.st = "**"+data.st; }
+        const { st } = c.__data__;
         data.st += (st+(st === ',' ? '' : ' '));
       }
       return data;
