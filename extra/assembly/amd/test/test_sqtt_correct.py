@@ -291,38 +291,30 @@ class TestSNopDelay(unittest.TestCase):
   def test_snop_63(self): self._test(63)
 
 
-def get_valu_to_exec(instrs, nops: int = 16):
-  """Returns VALUINST to ALUEXEC delay for first VALU in instrs."""
-  packets = run_sqtt(instrs, nops=nops)
-  deltas = get_timing_deltas(packets)
-  time, valu_time, exec_time = 0, None, None
-  for ptype, delta in deltas:
-    time += delta
-    if ptype == 'VALUINST' and valu_time is None: valu_time = time
-    if ptype == 'ALUEXEC' and exec_time is None: exec_time = time
-  return exec_time - valu_time
-
-
 class TestVALUExecWithNop(unittest.TestCase):
   """Single VALU followed by s_nop - measures VALUINST to ALUEXEC delay."""
-  def _test(self, n, expected): self.assertEqual(get_valu_to_exec([v_mov_b32_e32(v[0], 1.0), s_nop(n)]), expected)
-  def test_nop0(self): self._test(0, 6)
-  def test_nop1(self): self._test(1, 6)
-  def test_nop2(self): self._test(2, 6)
-  def test_nop3(self): self._test(3, 6)
-  def test_nop4(self): self._test(4, 10)
-  def test_nop5(self): self._test(5, 10)
-  def test_nop6(self): self._test(6, 10)
-  def test_nop7(self): self._test(7, 10)
-  def test_nop8(self): self._test(8, 10)
-  def test_nop9(self): self._test(9, 10)
-  def test_nop10(self): self._test(10, 10)
+  def _get_delay(self, instrs, nops=16):
+    deltas = get_timing_deltas(run_sqtt(instrs, nops=nops))
+    time, valu_time, exec_time = 0, None, None
+    for ptype, delta in deltas:
+      time += delta
+      if ptype == 'VALUINST' and valu_time is None: valu_time = time
+      if ptype == 'ALUEXEC' and exec_time is None: exec_time = time
+    return exec_time - valu_time
 
-
-class TestVALUExecBare(unittest.TestCase):
-  """Single VALU with no trailing s_nop - baseline exec latency."""
-  def test_bare(self): self.assertEqual(get_valu_to_exec([v_mov_b32_e32(v[0], 1.0)]), 6)
-  def test_bare_no_padding(self): self.assertEqual(get_valu_to_exec([v_mov_b32_e32(v[0], 1.0)], nops=0), 10)
+  def test_nop0(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(0)]), 6)
+  def test_nop1(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(1)]), 6)
+  def test_nop2(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(2)]), 6)
+  def test_nop3(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(3)]), 6)
+  def test_nop4(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(4)]), 10)
+  def test_nop5(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(5)]), 10)
+  def test_nop6(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(6)]), 10)
+  def test_nop7(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(7)]), 10)
+  def test_nop8(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(8)]), 10)
+  def test_nop9(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(9)]), 10)
+  def test_nop10(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(10)]), 10)
+  def test_bare(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0)]), 6)
+  def test_bare_no_padding(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0)], nops=0), 10)
 
 
 if __name__ == "__main__":
