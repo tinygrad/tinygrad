@@ -1,6 +1,5 @@
 import heapq
 from collections import defaultdict
-from typing import Any
 from tinygrad.helpers import TUPLE_ORDER, getenv, prod
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, multirange_str
 
@@ -8,40 +7,29 @@ from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, multirange_str
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
-  consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
-  in_degree:dict[UOp, int] = {}
-  out_degree:dict[UOp, int] = {}
-  priorities:dict[UOp, tuple[int, int, Any]] = {}
+  out_degree: defaultdict[UOp, int] = defaultdict(int)
 
   # for schedule-level linearization, compute depth in KERNEL dependency graph
   # this ensures kernels are ordered like BFS: all depth-0 before depth-1, etc.
   kernel_depth: dict[UOp, int] = {}
-  op_depth: dict[UOp, int] = {}
   kernel_first_after_pos: dict[UOp, int] = {}  # position of first AFTER pointing to each kernel
+  toposort_pos: dict[UOp, int] = {}
+  priorities: dict[UOp, tuple] = {}
+  op_depth: dict[UOp, int] = {}
+
   for i, u in enumerate(lst):
+    toposort_pos[u] = i
     # compute depth based on all dependencies
     max_d = 0
     for s in u.src:
       max_d = max(max_d, op_depth.get(s, 0))
-    if u.op is Ops.KERNEL:
-      kernel_depth[u] = max_d
-      op_depth[u] = max_d + 1
-    else:
-      op_depth[u] = max_d
+      out_degree[s] += 1
+    op_depth[u] = max_d + (1 if u.op is Ops.KERNEL else 0)
+    if u.op is Ops.KERNEL: kernel_depth[u] = max_d
 
     # track the first AFTER op that points to each kernel (for BFS-like ordering)
     if u.op is Ops.AFTER and len(u.src) > 1 and u.src[1].op is Ops.KERNEL:
       kernel_first_after_pos.setdefault(u.src[1], i)
-
-  # toposort position for stable ordering within same depth
-  toposort_pos = {u:i for i,u in enumerate(lst)}
-
-  # get consumers and assign priorities
-  # NOTE: this requires the lst be locally toposorted
-  for u in reversed(lst):
-    for s in u.src: consumers[s].append(u)
-    in_degree[u] = len(u.src)
-    out_degree[u] = len(consumers[u])
 
     # we place UOps with higher run_counts later
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
@@ -58,13 +46,13 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
       case Ops.RANGE: priority = 5    # placing RANGE is good
-      case Ops.KERNEL: priority, extra = 6, (kernel_depth[u], kernel_first_after_pos.get(u, toposort_pos[u]))
+      case Ops.KERNEL: priority, extra = 6, (kernel_depth[u], kernel_first_after_pos.get(u, i))
       case Ops.END: priority = -5     # placing END is bad
       case _: priority = 0            # everything else has priority 0
-    priorities[u] = (run_count, priority, extra)
+    priorities[u] = (run_count, priority, extra) + (u.tuplize if TUPLE_ORDER else ())
 
   # number the uops in "ideal" order
-  nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
+  nkey = {u:i for i,u in enumerate(sorted(lst, key=priorities.__getitem__))}
 
   # then force them to be toposorted in as close to the ideal order as possible
   heap = [(-nkey[sink], sink)]
