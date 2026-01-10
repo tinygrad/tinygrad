@@ -1,7 +1,6 @@
 import heapq
 from collections import defaultdict
 from typing import Any
-
 from tinygrad.helpers import TUPLE_ORDER, getenv, prod
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, multirange_str
 
@@ -14,17 +13,22 @@ def linearize(sink:UOp) -> list[UOp]:
   out_degree:dict[UOp, int] = {}
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
-  # for schedule-level linearization, compute depth in KERNEL dependency graph (via AFTER ops)
+  # for schedule-level linearization, compute depth in KERNEL dependency graph
   # this ensures kernels are ordered like BFS: all depth-0 before depth-1, etc.
   kernel_depth: dict[UOp, int] = {}
+  op_depth: dict[UOp, int] = {}
   kernel_first_after_pos: dict[UOp, int] = {}  # position of first AFTER pointing to each kernel
   for i, u in enumerate(lst):
+    # compute depth based on all dependencies
+    max_d = 0
+    for s in u.src:
+      max_d = max(max_d, op_depth.get(s, 0))
     if u.op is Ops.KERNEL:
-      max_dep_depth = -1
-      for s in u.src:
-        if s.op is Ops.AFTER and len(s.src) > 1 and s.src[1].op is Ops.KERNEL:
-          max_dep_depth = max(max_dep_depth, kernel_depth.get(s.src[1], 0))
-      kernel_depth[u] = max_dep_depth + 1
+      kernel_depth[u] = max_d
+      op_depth[u] = max_d + 1
+    else:
+      op_depth[u] = max_d
+
     # track the first AFTER op that points to each kernel (for BFS-like ordering)
     if u.op is Ops.AFTER and len(u.src) > 1 and u.src[1].op is Ops.KERNEL:
       kernel_first_after_pos.setdefault(u.src[1], i)
