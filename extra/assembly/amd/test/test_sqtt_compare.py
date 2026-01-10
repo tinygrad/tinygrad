@@ -29,12 +29,14 @@ from extra.assembly.amd.autogen.rdna3.ins import (v_mov_b32_e32, v_add_f32_e32, 
   v_add_f64, v_mul_f64, v_fma_f64,  # Double precision
   v_wmma_f32_16x16x16_f16, v_wmma_f32_16x16x16_bf16,  # WMMA
   VOPD, VOPDOp)  # Dual issue
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import v, s
+from extra.assembly.amd.asm import asm
 from extra.assembly.amd.test.test_sqtt_hw import compile_asm_sqtt, run_prg_sqtt, run_prg_sqtt_batch, get_wave_packets, format_packet, assemble, wrap_with_nops
 
 def run_emulator_sqtt(instructions: list) -> list[PacketType]:
   """Run instructions through emulator and return SQTT packets."""
-  code = assemble(wrap_with_nops(instructions))
+  code = assemble(instructions)
   program = decode_program(code)
 
   st = WaveState()
@@ -68,11 +70,12 @@ def get_timing_deltas(packets: list) -> list[tuple[str, int]]:
 class SQTTCompareTestBase(unittest.TestCase):
   """Base class with shared _run_and_compare method for SQTT tests."""
 
-  def _run_and_compare(self, instructions: list, name: str = "", n_runs: int = 200, min_identical: int = 20, max_attempts: int = 10):
+  def _run_and_compare(self, instructions: list, name: str = "", n_runs: int = 200, min_identical: int = 20, max_attempts: int = 10, nops=16, emu=True):
     """Run instructions on both hardware and emulator, compare SQTT structure."""
     from collections import Counter
 
     # Compile once
+    instructions = wrap_with_nops(instructions, nops)
     prg = compile_asm_sqtt(instructions, alu_only=True)
 
     # Retry up to max_attempts times until we get min_identical matching patterns
@@ -125,8 +128,9 @@ class SQTTCompareTestBase(unittest.TestCase):
         self.skipTest(f"Could not capture any hardware traces on SIMD 0 after {max_attempts} attempts")
 
     # Run on emulator
-    emu_packets = run_emulator_sqtt(instructions)
-    emu_deltas = get_timing_deltas(emu_packets)
+    if emu:
+      emu_packets = run_emulator_sqtt(instructions)
+      emu_deltas = get_timing_deltas(emu_packets)
 
     # Find most common pattern and a representative trace for it
     most_common_pattern = list(pattern_counts.most_common(1)[0][0]) if pattern_counts else []
@@ -139,10 +143,10 @@ class SQTTCompareTestBase(unittest.TestCase):
 
       print(f"Timing patterns:")
       for pattern, count in pattern_counts.most_common():
-        match = " <- MATCH" if list(pattern) == emu_deltas else ""
-        print(f"  {count:2d}x: {list(pattern)}{match}")
+        print(f"  {count:2d}x: {list(pattern)}")
 
-      print(f"\nEmulator: {emu_deltas}")
+      if emu:
+        print(f"\nEmulator: {emu_deltas}")
 
       # Print HW trace (filter noise, normalize to WAVESTART time)
       hw_filtered = filter_noise_packets(most_common_trace)
@@ -153,18 +157,20 @@ class SQTTCompareTestBase(unittest.TestCase):
         print(f"  {t:8d}: {format_packet(p)}")
 
       # Print emulator trace
-      emu_t0 = emu_packets[0]._time if emu_packets else 0
-      print(f"\nEmulator:")
-      for p in emu_packets:
-        t = p._time - emu_t0 if hasattr(p, '_time') else 0
-        print(f"  {t:8d}: {format_packet(p)}")
+      if emu:
+        emu_t0 = emu_packets[0]._time if emu_packets else 0
+        print(f"\nEmulator:")
+        for p in emu_packets:
+          t = p._time - emu_t0 if hasattr(p, '_time') else 0
+          print(f"  {t:8d}: {format_packet(p)}")
 
     # Assert emulator pattern matches most common HW pattern exactly
-    emu_pattern = tuple(emu_deltas)
-    self.assertIn(emu_pattern, pattern_counts,
-      f"{name}: emulator pattern not found in HW traces.\n"
-      f"Emulator: {emu_deltas}\n"
-      f"HW patterns: {[list(p) for p in pattern_counts.most_common(3)]}")
+    if emu:
+      emu_pattern = tuple(emu_deltas)
+      self.assertIn(emu_pattern, pattern_counts,
+        f"{name}: emulator pattern not found in HW traces.\n"
+        f"Emulator: {emu_deltas}\n"
+        f"HW patterns: {[list(p) for p in pattern_counts.most_common(3)]}")
 
 
 @unittest.skip("TestEmulatorSQTT needs more work - causes GPU faults")
@@ -2837,6 +2843,146 @@ class TestVALUMov(SQTTCompareTestBase):
       v_mov_b32_e32(v[4], v[3]),
       v_mov_b32_e32(v[5], v[4]),
     ], "vmov_fuzz_chain_break_restart")
+
+class TestCustom(SQTTCompareTestBase):
+  def test_vgpr_no_nops(self):
+    # cycle 42. this is after endpgm is running
+    # endpgm does something weird, and this is wrong
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+    ], nops=0)
+
+  def test_alu_delay(self):
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_delay_alu(1), # InstID0 = 1
+      v_mov_b32_e32(v[1], 1.0),
+      s_nop(0),
+    ], nops=0)
+
+  def test_alu_delay_real(self):
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_delay_alu(1), # InstID0 = 1
+      v_mov_b32_e32(v[1], v[0]),
+    ])
+
+  @unittest.skip("no cache model")
+  def test_cache_inv(self):
+    self._run_and_compare([
+      s_icache_inv(),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], nops=0)
+
+  def test_long_nop_after_v(self):
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(8),
+    ], nops=0)
+
+  def test_long_nop(self):
+    self._run_and_compare([
+      s_nop(0),
+      s_nop(0),
+      s_nop(7),
+    ], nops=0)
+
+  def test_one_nop(self):
+    self._run_and_compare([
+      s_nop(0), # scheduled 32
+    ], nops=0)
+
+  def test_one_nop_3(self):
+    self._run_and_compare([
+      s_nop(3), # scheduled 35 = 32+3
+    ], nops=0)
+
+  def test_one_nop_4(self):
+    # this 4 doesn't behave weird
+    self._run_and_compare([
+      s_nop(4), # scheduled 36 = 32+4
+    ], nops=0)
+
+  def test_one_nop_100(self):
+    # 100 isn't weird either, this is 132
+    self._run_and_compare([
+      s_nop(100),
+    ], nops=0)
+
+  def test_vgpr_one_nop(self):
+    # cycle 38, same as with many nops
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),  # scheduled 32
+      s_nop(0), # this nop forces a flush of the pipeline, scheduled 35
+    ], nops=0)
+
+  def test_vgpr_one_long_nop_3(self):
+    # cycle 38, same as with short nop
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),  # scheduled 32
+      s_nop(3),
+    ], nops=0)
+
+  def test_vgpr_one_long_nop_4(self):
+    # cycle 42, same as with no nops
+    # this also delays the IMMEDIATE until cycle 43
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),  # scheduled 32
+      s_nop(4),
+    ], nops=0)
+
+  def test_vgpr_no_nops_rep(self):
+    # cycle 38, same as with nops
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+    ]*16, nops=0)
+
+  def test_vgpr_16_nops(self):
+    # cycle 38
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+    ], nops=16)
+
+  def test_vgpr_unused(self):
+    # this is currently wrong
+    # though it looks like you can use any VGPR for the same result
+    self._run_and_compare([
+      v_mov_b32_e32(v[1], v[0]),
+    ])
+
+  def test_vopd(self):
+    # Legal combinations for the dual-op: at most 2 SGPRs, or 1 SGPR + 1 literal, or share a literal.
+    # There are 4 VGPR banks (indexed by SRC[1:0]), and each bank has a cache
+    # Each cache has 3 read ports: one dedicated to SRC0, one dedicated to SRC1 and one for SRC2
+    # A cache can read all 3 of them at once, but it can’t read two SRC0’s at once (or SRC1/2).
+    # SRCX0 and SRCY0 must use different VGPR banks;
+    # VSRCX1 and VSRCY1 must use different banks.
+    ins = VOPD(opx=VOPDOp.V_DUAL_ADD_F32, opy=VOPDOp.V_DUAL_ADD_F32,
+               vdstx=v[0], srcx0=v[2], vsrcx1=v[3],
+               vdsty=v[1], srcy0=v[4], vsrcy1=v[5])
+    print(ins.disasm())
+    off = 10
+    self._run_and_compare([
+      v_mov_b32_e32(v[off+2], 1.0),
+      v_mov_b32_e32(v[off+3], 1.0),
+      v_mov_b32_e32(v[off+4], 1.0),
+      v_mov_b32_e32(v[off+5], 1.0),
+      s_nop(100-39),
+      ins,
+      # this needs three nops to get 8 cycle timing
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], nops=0, emu=False)
+
+  def test_long_chain(self):
+    # this isn't modelled correctly
+    ins = [v_mov_b32_e32(v[0], 1.0)]
+    for i in range(30):
+      ins.append(v_mov_b32_e32(v[i+1], v[i]))
+    self._run_and_compare(ins, nops=0)
 
 if __name__ == "__main__":
   unittest.main()

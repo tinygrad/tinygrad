@@ -436,9 +436,50 @@ REGCACHE_BYPASS_PENALTY = 4
 
 from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE, VALUINST, ALUEXEC, AluSrc
 
-class SQTTState:
-  """SQTT tracing state - cycle-accurate VALU pipeline simulation."""
+# hand coded simple
 
+# S_WAITCNT -- SIMM16 = { VMcnt[5:0], LGKMcnt[5:0], 1’b0, EXPcnt[2:0] }
+#  VMcnt
+#  VScnt
+#  LGKMcnt
+#  EXPcnt
+
+# S_DELAY_ALU
+#  InstID0  = SIMM16[3:0]
+#  InstSkip = SIMM16[6:4]
+#  InstID1  = SIMM16[10:7]
+
+class SQTTState:
+  def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
+    self.wave_id, self.simd, self.cu = wave_id, simd, cu
+    self.cycle = 0
+    self.packets = []
+    self.inst_count = 0
+
+  def emit(self, pkt_class, **kwargs):
+    self.packets.append(pkt_class(_time=self.cycle, **kwargs))
+
+  def tick(self):
+    self.cycle += 1
+
+  def process_instruction(self, inst: Inst):
+    if inst.op == SOPPOp.S_NOP:
+      # this repros with s_nop(0), s_nop(7)
+      in_range = (SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0)
+      for _ in range(inst.simm16 + (SNOP_EXTRA_DELAY_CYCLES if in_range else 0)): self.tick()
+      self.emit(IMMEDIATE, wave=self.wave_id)
+      self.tick()
+    self.inst_count += 1
+
+  def emit_wavestart(self):
+    self.emit(WAVESTART, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+    for _ in range(WAVESTART_TO_INST_CYCLES): self.tick()
+
+  def finalize(self):
+    self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+"""
+
+class SQTTState:
   def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
     self.packets, self.cycle, self.inst_count = [], 0, 0
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
@@ -537,6 +578,7 @@ class SQTTState:
   def finalize(self):
     while self.pending or self.deferred: self.tick()
     self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+"""
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION LOOP

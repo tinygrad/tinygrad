@@ -132,13 +132,13 @@ def print_all_packets(packets: list) -> None:
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
 
-def wrap_with_nops(instructions: list) -> list:
+def wrap_with_nops(instructions: list, nops=16) -> list:
   """Add epilogue for clean SQTT timing.
 
   Need enough NOPs to cover long-latency ops (DP: 42 cycles, WMMA: 47 cycles).
   With 64 NOPs, the IMMEDIATE phase extends to cover these completions.
   """
-  return instructions + [s_nop(0)]*16 + [s_endpgm()]
+  return instructions + [s_nop(0)]*nops + [s_endpgm()]
 
 def compile_asm_sqtt(instructions: list, alu_only: bool = False) -> AMDProgram:
   """Compile instructions to an AMDProgram for SQTT tracing.
@@ -151,7 +151,7 @@ def compile_asm_sqtt(instructions: list, alu_only: bool = False) -> AMDProgram:
   """
   compiler = HIPCompiler(dev.arch)
   # Add NOPs before s_endpgm to flush pipeline and get clean timing
-  code = assemble(wrap_with_nops(instructions))
+  code = assemble(instructions)
   byte_str = ', '.join(f'0x{b:02x}' for b in code)
 
   if alu_only:
