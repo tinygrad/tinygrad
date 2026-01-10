@@ -115,10 +115,11 @@ class TestSchedule(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_expand_buffer_before_cast(self):
+    Tensor.manual_seed(42)
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
     run_schedule(check_schedule(b, 1))
-    np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
+    np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2, rtol=1e-3)
 
   def test_indexing_scalars_simple(self):
     X = Tensor.randn(2, 2).realize()

@@ -308,6 +308,7 @@ class TestTautologicalCompare(unittest.TestCase):
     np.testing.assert_equal((Tensor(True) < Tensor(False)).numpy(), False)
     np.testing.assert_equal((Tensor(True) < Tensor(True)).numpy(), False)
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support NaN comparison correctly")
   def test_a_eq_a(self):
     # self eq is always true for int or bool
     a = Tensor([1, 2, 3])

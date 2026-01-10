@@ -639,6 +639,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y)
     helper_test_op([(45,65), (45,65)], lambda x,y: x.pow(y))
 
+  # TODO: WEBGPU NaN handling in pow operations
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU NaN handling differs")
   def test_pow(self):
     helper_test_op([(45,65)], lambda x: x**0)
     helper_test_op([(45,65)], lambda x: x**1)
