@@ -1,58 +1,13 @@
 from __future__ import annotations
-
-import collections
-import functools
-import hashlib
-import inspect
-import itertools
-import math
-import operator
-import os
-import pathlib
-import pickle
-import sys
-import time
-import types
-import weakref
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final
+import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, Callable, Final, Iterable, Sequence, Type, cast
-
-from tinygrad.dtype import AddrSpace, ConstType, DType, ImageDType, Invalid, InvalidType, PtrDType, dtypes, least_upper_dtype, truncate
-from tinygrad.helpers import (
-  CI,
-  PROFILE,
-  SPEC,
-  TRACEMETA,
-  VIZ,
-  Context,
-  ContextVar,
-  Metadata,
-  T,
-  TracingKey,
-  all_int,
-  all_same,
-  ansilen,
-  argfix,
-  cdiv,
-  cmod,
-  colored,
-  cpu_profile,
-  dedup,
-  diskcache_put,
-  flatten,
-  getenv,
-  panic,
-  partition,
-  printable,
-  prod,
-  strip_parens,
-  temp,
-  to_function_name,
-  unwrap,
-)
-from tinygrad.uop import GroupOp, Ops
-
+from tinygrad.uop import Ops, GroupOp
+from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
+from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
+from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
+from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
