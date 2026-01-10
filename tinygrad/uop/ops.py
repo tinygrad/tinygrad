@@ -110,6 +110,7 @@ class recursive_property(property):
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin import OpMixin
 
+
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
 class UOp(OpMixin, metaclass=UOpMetaClass):
@@ -184,7 +185,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
-    return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
+    if isinstance(self.arg, Kernel): arg_key = ("Kernel", self.arg.ast.tuplize, tuple(str(m) for m in self.arg.metadata))
+    elif isinstance(self.arg, KernelInfo): arg_key = ("KernelInfo", self.arg.name, self.arg.applied_opts)
+    else: arg_key = (type(self.arg).__name__, self.arg)
+    return (self.op.value, arg_key, self.dtype,)+tuple([x.tuplize for x in self.src])
 
   @property
   def ptrdtype(self) -> PtrDType:
