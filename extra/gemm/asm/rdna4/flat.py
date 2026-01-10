@@ -275,8 +275,6 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_mov_b32(s[18], 0x80000000),
   s_mov_b32(s[19], 0x30020000),
   s_mov_b64(s[20:21], s[30:31]),
-  s_mov_b32(s[22], 0x80000000),
-  s_mov_b32(s[23], 0x30020000),
   s_mul_i32(s[70], C_TILE, s[3]),
   s_mul_hi_u32(s[69], s[70], s[27]),
   s_mul_i32(s[68], s[70], s[27]),
