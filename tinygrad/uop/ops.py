@@ -1064,8 +1064,7 @@ _name_cnt:dict[str, itertools.count] = {}
 
 if getenv("CAPTURE_PROCESS_REPLAY"):
   replay_capture: list[bytes] = []
-  import atexit
-  import uuid
+  import atexit, uuid
   @atexit.register
   def save_to_diskcache():
     uid = uuid.uuid4() # one id per process
