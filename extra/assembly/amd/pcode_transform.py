@@ -1,7 +1,7 @@
 # Transform parsed pcode CUSTOM ops to UOps using PatternMatcher
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.dtype import dtypes, DType
-from extra.assembly.amd.pcode_parse import parse, Assign, Declare, If, For, Lambda, Break, Return
+from extra.assembly.amd.pcode_parse import parse, If, For, Lambda, Break, Return
 
 def _typed_const(src: UOp, val) -> UOp:
   """Create a const with same dtype as src, or a deferred const if src.dtype is void."""
@@ -225,13 +225,13 @@ def _transform_stmt(stmt):
   match stmt:
     # Chained assignment: ASSIGN(lhs, ASSIGN(rhs_lhs, rhs_rhs))
     case UOp(Ops.ASSIGN, _, (lhs, UOp(Ops.ASSIGN, _, (rhs_lhs, rhs_rhs)))):
-      return Assign(_transform_uop(lhs), Assign(_transform_uop(rhs_lhs), _transform_uop(rhs_rhs)))
+      return UOp(Ops.ASSIGN, dtypes.void, (_transform_uop(lhs), UOp(Ops.ASSIGN, dtypes.void, (_transform_uop(rhs_lhs), _transform_uop(rhs_rhs)))))
     # Simple assignment: ASSIGN(lhs, rhs)
     case UOp(Ops.ASSIGN, _, (lhs, rhs)):
-      return Assign(_transform_uop(lhs), _transform_uop(rhs))
+      return UOp(Ops.ASSIGN, dtypes.void, (_transform_uop(lhs), _transform_uop(rhs)))
     # Declaration: DEFINE_VAR with dtype and name arg
     case UOp(Ops.DEFINE_VAR, dtype, arg=name) if name is not None and dtype != dtypes.void:
-      return Declare(name, dtype)
+      return UOp(Ops.DEFINE_VAR, dtype, arg=name)
     case If(branches):
       new_branches = tuple((_transform_uop(cond) if cond is not None else None, tuple(_transform_stmt(s) for s in body)) for cond, body in branches)
       return If(new_branches)
