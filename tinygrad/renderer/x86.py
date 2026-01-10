@@ -46,6 +46,8 @@ extra_matcher = PatternMatcher([
   (UPat.var('a', dtypes.floats)*UPat.var('b')+UPat.var('c'), lambda a,b,c: a.alu(Ops.MULACC, b, c)),
   # no max for scalar ints
   (UPat(Ops.MAX, dtypes.ints, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0]) if m.dtype.count == 1 else None),
+  # even with Ops.MAX in decompositions this pattern still hits
+  ((UPat.var("a") < UPat.var("b")).where(UPat.var("b", dtypes.floats), UPat.var("a")), lambda a,b: UOp(Ops.MAX, b.dtype, (a, b))),
   # no int8 mul or cmove, cast to int16
   (UPat.var("a", dtypes.int8s) * UPat.var("b"), lambda a,b: (a.cast(dtypes.int16) * b.cast(dtypes.int16)).cast(a.dtype)),
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
@@ -80,8 +82,6 @@ pre_isel_matcher = PatternMatcher([
   # gated index becomes a conditional move on the index, the load/store are unconditional
   (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt"), name="x"), lambda base,idx,gate,alt,x: gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count), arg=0)).after(l.store(alt)).index(UOp.const(dtypes.int32, 0), ptr=True)).load(dtype=x.dtype)),
   (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).store(UPat.var("val")), lambda base,idx,gate,val: gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True)).store(val)),
-  # after extracting displacement cast idx to 64bit if it can be negative
-  #(UPat.var("base").index(UPat.var("idx", dtypes.int32)), lambda base,idx: base.index(idx.cast(dtypes.int64), ptr=True) if idx.vmin < 0 else None),
   # TODO: remove this once we allow all flag producing ops in cmove
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
@@ -164,7 +164,7 @@ def idiv(ctx:IselContext, x:UOp):
 def fuse_address(x:UOp) -> tuple[UOp, ...]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.max(dtypes.int8) else dtypes.int8, v)
   def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v
-  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), imm(dtypes.int8, 0))
+  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), _disp(0))
   base, idx = x.src
   disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, _cast(idx.src[0]), _disp(idx.src[1].arg * disp_scale))
@@ -210,13 +210,6 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CONST, dtypes.float64, name="x"), lambda x: UOp(X86Ops.VMOVQ, x.dtype, (UOp(X86Ops.MOVABS, dtypes.int64, (imm(x.dtype, x.arg),)),))),
   (UPat(Ops.CONST, dtypes.int64s, name="x"), lambda x: UOp(X86Ops.MOVABS, x.dtype, (imm(x.dtype, x.arg),)) if x.tag is None else None),
   (UPat(Ops.CONST, dtypes.ints+(dtypes.bool,), name="x"), lambda x: UOp(X86Ops.MOVi, x.dtype, (imm(x.dtype, x.arg),)) if x.tag is None else None),
-  # LEA
-  (UPat(Ops.INDEX, name="x"), lambda x: x.replace(op=X86Ops.LEA, src=fuse_address(x))),
-  # jumps, use flags
-  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, dtypes.bool, (UPat(dtype=dtypes.uints), UPat()), name="y"),), name="x"), lambda y,x: UOp(X86Ops.JB, x.dtype, (cmp(y),))), # noqa: E501
-  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, name="y"),)), lambda y: UOp(X86Ops.JL, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPEQ, name="y"),)), lambda y: UOp(X86Ops.JE, src=(cmp(y),))),
-  (UPat(Ops.IF, src=(UPat(Ops.CMPNE, name="y"),)), lambda y: UOp(X86Ops.JNE, src=(cmp(y),))),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
   (UPat(name="m").where(UPat.var("a", dtypes.ints), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if x.dtype.count > 1 else None), # noqa: E501
   (UPat(name="m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VBLENDVPS, src=(b, a, m.replace(dtype=m.src[0].dtype)))), # noqa: E501
@@ -229,6 +222,11 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CMPLT, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVB, a.dtype, src=(b, a, cmp(m)))), # noqa: E501
   (UPat(Ops.CMPEQ, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVE, a.dtype, src=(b, a, cmp(m)))), # noqa: E501
   (UPat(Ops.CMPNE, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVNE, a.dtype, src=(b, a, cmp(m)))), # noqa: E501
+  # jumps, use flags
+  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, dtypes.bool, (UPat(dtype=dtypes.uints), UPat()), name="y"),), name="x"), lambda y,x: UOp(X86Ops.JB, x.dtype, (cmp(y),))), # noqa: E501
+  (UPat(Ops.IF, src=(UPat(Ops.CMPLT, name="y"),)), lambda y: UOp(X86Ops.JL, src=(cmp(y),))),
+  (UPat(Ops.IF, src=(UPat(Ops.CMPEQ, name="y"),)), lambda y: UOp(X86Ops.JE, src=(cmp(y),))),
+  (UPat(Ops.IF, src=(UPat(Ops.CMPNE, name="y"),)), lambda y: UOp(X86Ops.JNE, src=(cmp(y),))),
   # comparisons whose user doesn't use the flag, move flag result to register
   (UPat(Ops.CMPLT, dtypes.bool, (UPat(dtype=dtypes.uints), UPat()), name="x"), lambda x: UOp(X86Ops.SETB, x.dtype, (cmp(x),))),
   (UPat(Ops.CMPLT, dtypes.bool, name="x"), lambda x: UOp(X86Ops.SETL, x.dtype, (cmp(x),))),
@@ -355,6 +353,8 @@ isel_matcher = PatternMatcher([
   (UPat(dtype=dtypes.int64s).bitcast(dtypes.float64).named("x"), lambda x: x.replace(op=X86Ops.VMOVQ)),
   (UPat(dtype=dtypes.float32).bitcast(dtypes.int32s).named("x"), lambda x: x.replace(op=X86Ops.VMOVDm)),
   (UPat(dtype=dtypes.float64).bitcast(dtypes.int64s).named("x"), lambda x: x.replace(op=X86Ops.VMOVQm)),
+  # index
+  (UPat(Ops.INDEX, name="x"), lambda x: x.replace(op=X86Ops.LEA, src=fuse_address(x))),
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # assign, load, store
   # NOTE: assign here violates the spec, it only happens in register allocation when a reg to reg move needs to be inserted
@@ -633,10 +633,13 @@ encodings = PatternMatcher([
   (UPat(X86Ops.RET), lambda: bytes([0xC3])),
 ])
 
+from tinygrad.helpers import getenv, CPU_COUNT
 class X86Renderer(ISARenderer):
   device = "CPU"
   max_vec_sz = 16
   has_local = False
+  has_threads = bool(getenv("THREADS", 1))
+  #global_max = (CPU_COUNT.value, 0, 0)
   global_max = None
   extra_matcher = extra_matcher
   pre_isel_matcher = pre_isel_matcher
