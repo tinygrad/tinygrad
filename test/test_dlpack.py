@@ -172,5 +172,79 @@ class TestDLPackMemoryManagement(unittest.TestCase):
     self.assertIsNotNone(capsule1)
     self.assertIsNotNone(capsule2)
 
+class TestDLPackImport(unittest.TestCase):
+  """Test importing tensors via Tensor.from_dlpack()."""
+  @classmethod
+  def setUpClass(cls):
+    try:
+      import numpy as np
+      cls.np = np
+    except ImportError:
+      raise unittest.SkipTest("NumPy not installed")
+
+  def test_import_1d(self):
+    arr = self.np.array([1.0, 2.0, 3.0, 4.0], dtype=self.np.float32)
+    t = Tensor.from_dlpack(arr)
+    self.assertEqual(t.tolist(), [1.0, 2.0, 3.0, 4.0])
+
+  def test_import_2d(self):
+    arr = self.np.array([[1.0, 2.0], [3.0, 4.0]], dtype=self.np.float32)
+    t = Tensor.from_dlpack(arr)
+    self.assertEqual(t.tolist(), [[1.0, 2.0], [3.0, 4.0]])
+
+  def test_import_3d(self):
+    arr = self.np.array([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]], dtype=self.np.float32)
+    t = Tensor.from_dlpack(arr)
+    self.assertEqual(t.tolist(), [[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]])
+
+  def test_import_dtypes(self):
+    for np_dt, tg_dt in [(self.np.int32, dtypes.int32), (self.np.int64, dtypes.int64),
+                         (self.np.float32, dtypes.float32), (self.np.float64, dtypes.float64)]:
+      with self.subTest(dtype=np_dt):
+        arr = self.np.array([1, 2, 3], dtype=np_dt)
+        t = Tensor.from_dlpack(arr)
+        self.assertEqual(t.dtype, tg_dt)
+
+  def test_import_preserves_device(self):
+    arr = self.np.array([1.0, 2.0, 3.0], dtype=self.np.float32)
+    t = Tensor.from_dlpack(arr)
+    self.assertEqual(t.device, "CPU")
+
+class TestDLPackRoundTrip(unittest.TestCase):
+  """Test round-trip: tinygrad -> numpy -> tinygrad."""
+  @classmethod
+  def setUpClass(cls):
+    try:
+      import numpy as np
+      cls.np = np
+    except ImportError:
+      raise unittest.SkipTest("NumPy not installed")
+
+  def test_roundtrip_1d(self):
+    t1 = Tensor([1.0, 2.0, 3.0, 4.0], dtype=dtypes.float32, device="CPU")
+    arr = self.np.from_dlpack(t1)
+    t2 = Tensor.from_dlpack(arr)
+    self.assertEqual(t1.tolist(), t2.tolist())
+
+  def test_roundtrip_2d(self):
+    t1 = Tensor([[1.0, 2.0], [3.0, 4.0]], dtype=dtypes.float32, device="CPU")
+    arr = self.np.from_dlpack(t1)
+    t2 = Tensor.from_dlpack(arr)
+    self.assertEqual(t1.tolist(), t2.tolist())
+
+  def test_roundtrip_multiple_dtypes(self):
+    for dt, np_dt in [(dtypes.float32, self.np.float32), (dtypes.int32, self.np.int32)]:
+      with self.subTest(dtype=dt):
+        t1 = Tensor([1, 2, 3, 4], dtype=dt, device="CPU")
+        arr = self.np.from_dlpack(t1)
+        t2 = Tensor.from_dlpack(arr)
+        self.assertEqual(t1.tolist(), t2.tolist())
+        self.assertEqual(t2.dtype, dt)
+
+  def test_tinygrad_to_tinygrad(self):
+    t1 = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float32, device="CPU")
+    t2 = Tensor.from_dlpack(t1)
+    self.assertEqual(t1.tolist(), t2.tolist())
+
 if __name__ == "__main__":
   unittest.main()

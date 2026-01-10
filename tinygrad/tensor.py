@@ -639,6 +639,81 @@ class Tensor(OpMixin):
     return r
 
   @staticmethod
+  def from_dlpack(x, /, *, copy: bool | None = None) -> Tensor:
+    """
+    Import a tensor from DLPack format.
+
+    Args:
+      x: Object with __dlpack__ method or a DLPack PyCapsule.
+      copy: If True, always copy. If False, never copy (raise if needed). If None, copy if needed.
+
+    Returns:
+      Tensor containing the imported data.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    import numpy as np
+    arr = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    t = Tensor.from_dlpack(arr)
+    print(t.numpy())
+    ```
+    """
+    # Get capsule from object with __dlpack__ protocol or use directly if capsule
+    if not hasattr(x, '__dlpack__'):
+      raise ValueError("Object does not support DLPack")
+    capsule = x.__dlpack__() if copy is None else x.__dlpack__(copy=copy)
+
+    # Try versioned format first, then legacy
+    if dlpack.pycapsule_isvalid(capsule, dlpack.DLPACK_CAPSULE_NAME):
+      managed_void_ptr = dlpack.pycapsule_getpointer(capsule, dlpack.DLPACK_CAPSULE_NAME)
+      managed_ptr = ctypes.cast(managed_void_ptr, ctypes.POINTER(c_dlpack.DLManagedTensorVersioned))
+      dl_tensor = managed_ptr.contents.dl_tensor
+      used_name = dlpack.DLPACK_CAPSULE_USED_NAME
+    elif dlpack.pycapsule_isvalid(capsule, dlpack.DLPACK_CAPSULE_NAME_LEGACY):
+      managed_void_ptr = dlpack.pycapsule_getpointer(capsule, dlpack.DLPACK_CAPSULE_NAME_LEGACY)
+      managed_ptr = ctypes.cast(managed_void_ptr, ctypes.POINTER(c_dlpack.DLManagedTensor))  # type: ignore[arg-type]
+      dl_tensor = managed_ptr.contents.dl_tensor
+      used_name = dlpack.DLPACK_CAPSULE_USED_NAME_LEGACY
+    else:
+      raise RuntimeError("Invalid DLPack capsule")
+
+    # Extract tensor info
+    data_ptr = dl_tensor.data + dl_tensor.byte_offset
+    ndim = dl_tensor.ndim
+    shape = tuple(dl_tensor.shape[i] for i in range(ndim))
+    dtype = dlpack.dl_datatype_to_dtype(dl_tensor.dtype)
+    device = dlpack.get_tinygrad_device(dl_tensor.device)
+
+    # Check strides for contiguity (strides is NULL for contiguous C-order tensors)
+    if dl_tensor.strides and ndim > 0:
+      strides = tuple(dl_tensor.strides[i] for i in range(ndim))
+      expected = []
+      stride = 1
+      for s in reversed(shape):
+        expected.append(stride)
+        stride *= s
+      if strides != tuple(reversed(expected)):
+        if copy is False:
+          raise BufferError("Non-contiguous DLPack tensor requires copy but copy=False")
+        raise NotImplementedError("Import of non-contiguous DLPack tensors not yet supported")
+
+    # Mark capsule as consumed
+    dlpack.pycapsule_setname(capsule, used_name)
+
+    # Create context to manage memory lifetime
+    import_ctx = dlpack.DLPackImportContext(capsule, managed_ptr)
+
+    # Create tensor from the data pointer
+    tensor = Tensor.from_blob(data_ptr, shape, dtype=dtype, device=device)
+
+    # Store context keyed by buffer to keep it alive until buffer is GC'd
+    buffer = cast(Buffer, tensor.uop.buffer)
+    if buffer not in dlpack._import_ctx_store:
+      dlpack._import_ctx_store[buffer] = []
+    dlpack._import_ctx_store[buffer].append(import_ctx)
+
+    return tensor
+
+  @staticmethod
   def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:
     """
     Creates a Tensor from a URL.
