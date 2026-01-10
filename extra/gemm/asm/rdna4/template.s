@@ -19,8 +19,8 @@ INSTRUCTIONS
   .amdhsa_next_free_sgpr 16
   # workgroup / workitem IDs (RSRC2)
   .amdhsa_system_sgpr_workgroup_id_x 1
-  .amdhsa_system_sgpr_workgroup_id_y 1
-  .amdhsa_system_sgpr_workgroup_id_z 1
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
   # user SGPRs: kernarg ptr in s[0:1]
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_user_sgpr_count 2

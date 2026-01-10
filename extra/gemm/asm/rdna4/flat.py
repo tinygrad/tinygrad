@@ -38,14 +38,15 @@ def custom_gemm(N:int, dev:str) -> UOp:
 
   insts = [
   "kernel_entry:",
-  s_mov_b32(s[2], ttmp[9]),
-  s_and_b32(s[3], 0xffff, ttmp[7]),
-  s_lshr_b32(s[4], ttmp[7], 16),
+  # load kernel args
   s_load_b64(sdata=s[28:29], sbase=s[0:1], ioffset=0x0, soffset=NULL),
   s_load_b64(sdata=s[32:33], sbase=s[0:1], ioffset=0x10, soffset=NULL),
   s_load_b64(sdata=s[34:35], sbase=s[0:1], ioffset=0x8, soffset=NULL),
   s_waitcnt(simm16=64519),
+  # gidx / lidx calculation
+  s_mov_b32(s[2], ttmp[9]),
   s_mov_b32(s[27], N),
+  # 0x4400 configures LDS addressing mode for ds_load/store operations.
   s_mov_b32(M0, 0x4400),
   v_mov_b32_e32(v[254], v[0]),
   s_mov_b32(VCC_HI, 0),
