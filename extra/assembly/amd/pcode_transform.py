@@ -18,9 +18,99 @@ def _minmax(a: UOp, b: UOp, is_min: bool) -> UOp:
 def _minmax3(a: UOp, b: UOp, c: UOp, is_min: bool) -> UOp:
   return _minmax(_minmax(a, b, is_min), c, is_min)
 
-# PatternMatcher for transforming CUSTOM ops to UOps
+# ═══════════════════════════════════════════════════════════════════════════════
+# DTYPE PROPAGATION HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _first_nonvoid(*srcs: UOp) -> DType:
+  """Get first non-void dtype from sources."""
+  for s in srcs:
+    if s.dtype != dtypes.void: return s.dtype
+  return dtypes.void
+
+def _infer_binop_dtype(l: UOp, r: UOp) -> DType:
+  """Infer dtype for binary ops from operands."""
+  return l.dtype if l.dtype != dtypes.void else r.dtype
+
+def _infer_slice_dtype(hi: UOp, lo: UOp) -> DType:
+  """Infer dtype for CUSTOMI slices from bounds."""
+  if hi.op == Ops.CONST and lo.op == Ops.CONST:
+    width = abs(int(hi.arg) - int(lo.arg)) + 1
+    return dtypes.uint64 if width > 32 else dtypes.uint32
+  return dtypes.uint32
+
+def _infer_cat_dtype(*parts: UOp) -> DType:
+  """Infer dtype for CAT from parts' bitsizes."""
+  total_bits = sum(p.dtype.itemsize * 8 for p in parts if p.dtype != dtypes.void)
+  return dtypes.uint64 if total_bits > 32 else dtypes.uint32 if total_bits > 0 else dtypes.void
+
+# Function return type inference for remaining CUSTOM ops (ones not transformed by pcode_pm)
+_BOOL_FNS = {'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', 'GT_NEG_ZERO'}
+_U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones', 'countbits', 'reverse_bits',
+            'u8_to_u32', 'u4_to_u32', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8'}
+_CVT_FNS = {
+  'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32,
+  'f32_to_bf16': dtypes.bfloat16,
+  'signext_from_bit': dtypes.int64,
+  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
+}
+
+def _infer_custom_dtype(name: str, srcs: tuple[UOp, ...]) -> DType:
+  """Infer output dtype for CUSTOM function calls."""
+  if name in _BOOL_FNS: return dtypes.bool
+  if name in _U32_FNS: return dtypes.uint32
+  if name in _CVT_FNS: return _CVT_FNS[name]
+  if name == 'trig_preop_result': return dtypes.float64
+  # Passthrough functions inherit from first source
+  return _first_nonvoid(*srcs) if srcs else dtypes.void
+
+# Dtype propagation patterns - match void dtype and replace with inferred
+def _prop_binop(l: UOp, r: UOp, **kw) -> UOp|None:
+  dt = _infer_binop_dtype(l, r)
+  if dt == dtypes.void: return None
+  return UOp(kw['__OP__'].op, dt, (l, r), kw.get('arg'), kw.get('tag'))
+
+def _prop_unop(x: UOp, **kw) -> UOp|None:
+  if x.dtype == dtypes.void: return None
+  return UOp(kw['__OP__'].op, x.dtype, (x,), kw.get('arg'), kw.get('tag'))
+
+def _prop_mulacc(a: UOp, b: UOp, c: UOp, **kw) -> UOp|None:
+  if c.dtype == dtypes.void: return None
+  return UOp(Ops.MULACC, c.dtype, (a, b, c), kw.get('arg'), kw.get('tag'))
+
+def _prop_where(cond: UOp, t: UOp, f: UOp, **kw) -> UOp|None:
+  dt = _first_nonvoid(t, f)  # infer from true/false branches, not gate
+  if dt == dtypes.void: return None
+  return UOp(Ops.WHERE, dt, (cond, t, f), kw.get('arg'), kw.get('tag'))
+
+def _prop_cat(src: tuple[UOp, ...], **kw) -> UOp|None:
+  dt = _infer_cat_dtype(*src)
+  if dt == dtypes.void: return None
+  return UOp(Ops.CAT, dt, src, kw.get('arg'), kw.get('tag'))
+
+def _prop_customi(base: UOp, hi: UOp, lo: UOp, **kw) -> UOp|None:
+  # CUSTOMI(base, hi, lo) - for slices, infer from bounds; for array access, use uint32
+  if hi is lo:  # single index (hi == lo)
+    # Array element access - check if base has vector dtype
+    if base.dtype != dtypes.void and base.dtype.count > 1:
+      return UOp(Ops.CUSTOMI, base.dtype.scalar(), (base, hi, lo), kw.get('arg'), kw.get('tag'))
+    return UOp(Ops.CUSTOMI, dtypes.uint32, (base, hi, lo), kw.get('arg'), kw.get('tag'))
+  # Slice - infer from bounds
+  dt = _infer_slice_dtype(hi, lo)
+  return UOp(Ops.CUSTOMI, dt, (base, hi, lo), kw.get('arg'), kw.get('tag'))
+
+def _prop_custom(src: tuple[UOp, ...], arg, **kw) -> UOp|None:
+  dt = _infer_custom_dtype(arg, src)
+  if dt == dtypes.void: return None
+  return UOp(Ops.CUSTOM, dt, src, arg, kw.get('tag'))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMBINED PATTERN MATCHER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Transform CUSTOM ops to real UOps
 pcode_pm = PatternMatcher([
-  # Direct UOp mappings (formerly _FN_EXPAND in pcode_parse.py)
+  # Direct UOp mappings
   (UPat(Ops.CUSTOM, arg='trunc', src=(UPat.var('x'),)), lambda x: UOp(Ops.TRUNC, dtypes.void, (x,))),
   (UPat(Ops.CUSTOM, arg='sqrt', src=(UPat.var('x'),)), lambda x: UOp(Ops.SQRT, dtypes.void, (x,))),
   (UPat(Ops.CUSTOM, arg='exp2', src=(UPat.var('x'),)), lambda x: UOp(Ops.EXP2, dtypes.void, (x,))),
@@ -106,105 +196,8 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='u32_to_u16', src=(UPat.var('x'),)), lambda x: UOp(Ops.AND, dtypes.uint32, (x, UOp.const(dtypes.uint32, 0xffff)))),
   (UPat(Ops.CUSTOM, arg='i32_to_i16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int16, (
     UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xffff))),))),
-])
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DTYPE PROPAGATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _first_nonvoid(*srcs: UOp) -> DType:
-  """Get first non-void dtype from sources."""
-  for s in srcs:
-    if s.dtype != dtypes.void: return s.dtype
-  return dtypes.void
-
-def _infer_binop_dtype(l: UOp, r: UOp) -> DType:
-  """Infer dtype for binary ops from operands."""
-  return l.dtype if l.dtype != dtypes.void else r.dtype
-
-def _infer_slice_dtype(hi: UOp, lo: UOp) -> DType:
-  """Infer dtype for CUSTOMI slices from bounds."""
-  if hi.op == Ops.CONST and lo.op == Ops.CONST:
-    width = abs(int(hi.arg) - int(lo.arg)) + 1
-    return dtypes.uint64 if width > 32 else dtypes.uint32
-  return dtypes.uint32
-
-def _infer_cat_dtype(*parts: UOp) -> DType:
-  """Infer dtype for CAT from parts' bitsizes."""
-  total_bits = sum(p.dtype.itemsize * 8 for p in parts if p.dtype != dtypes.void)
-  return dtypes.uint64 if total_bits > 32 else dtypes.uint32 if total_bits > 0 else dtypes.void
-
-# Function return type inference for CUSTOM ops
-_BOOL_FNS = {'isNAN', 'isINF', 'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', 'GT_NEG_ZERO'}
-_U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones', 'countbits', 'reverse_bits',
-            'u8_to_u32', 'u4_to_u32', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8'}
-_CVT_FNS = {
-  'f32_to_i32': dtypes.int32, 'f32_to_u32': dtypes.uint32, 'f64_to_i32': dtypes.int32, 'f64_to_u32': dtypes.uint32,
-  'f32_to_i8': dtypes.int8, 'f32_to_u8': dtypes.uint8, 'f32_to_i16': dtypes.int16, 'f32_to_u16': dtypes.uint16,
-  'f16_to_i16': dtypes.int16, 'f16_to_u16': dtypes.uint16, 'v_cvt_u16_f32': dtypes.uint16, 'v_cvt_i16_f32': dtypes.int16,
-  'f32_to_f16': dtypes.float16, 'f32_to_f64': dtypes.float64, 'f64_to_f32': dtypes.float32,
-  'f16_to_f32': dtypes.float32, 'bf16_to_f32': dtypes.float32, 'f32_to_bf16': dtypes.bfloat16,
-  'i32_to_f32': dtypes.float32, 'u32_to_f32': dtypes.float32, 'i32_to_f64': dtypes.float64, 'u32_to_f64': dtypes.float64,
-  'i16_to_f16': dtypes.float16, 'u16_to_f16': dtypes.float16,
-  'i32_to_i16': dtypes.int16, 'signext': dtypes.int64, 'signext_from_bit': dtypes.int64,
-  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
-  'v_min_i16': dtypes.int16, 'v_min_i32': dtypes.int32, 'v_min_u16': dtypes.uint16, 'v_min_u32': dtypes.uint32,
-  'v_max_i16': dtypes.int16, 'v_max_i32': dtypes.int32, 'v_max_u16': dtypes.uint16, 'v_max_u32': dtypes.uint32,
-  'v_min3_i16': dtypes.int16, 'v_min3_i32': dtypes.int32, 'v_min3_u16': dtypes.uint16, 'v_min3_u32': dtypes.uint32,
-  'v_max3_i16': dtypes.int16, 'v_max3_i32': dtypes.int32, 'v_max3_u16': dtypes.uint16, 'v_max3_u32': dtypes.uint32,
-  'u32_to_u16': dtypes.uint32,  # returns u32 masked
-}
-
-def _infer_custom_dtype(name: str, srcs: tuple[UOp, ...]) -> DType:
-  """Infer output dtype for CUSTOM function calls."""
-  if name in _BOOL_FNS: return dtypes.bool
-  if name in _U32_FNS: return dtypes.uint32
-  if name in _CVT_FNS: return _CVT_FNS[name]
-  if name == 'trig_preop_result': return dtypes.float64
-  # Passthrough functions inherit from first source
-  return _first_nonvoid(*srcs) if srcs else dtypes.void
-
-# Dtype propagation patterns - match void dtype and replace with inferred
-def _prop_binop(l: UOp, r: UOp, **kw) -> UOp|None:
-  dt = _infer_binop_dtype(l, r)
-  if dt == dtypes.void: return None
-  return UOp(kw['__OP__'].op, dt, (l, r), kw.get('arg'), kw.get('tag'))
-
-def _prop_unop(x: UOp, **kw) -> UOp|None:
-  if x.dtype == dtypes.void: return None
-  return UOp(kw['__OP__'].op, x.dtype, (x,), kw.get('arg'), kw.get('tag'))
-
-def _prop_mulacc(a: UOp, b: UOp, c: UOp, **kw) -> UOp|None:
-  if c.dtype == dtypes.void: return None
-  return UOp(Ops.MULACC, c.dtype, (a, b, c), kw.get('arg'), kw.get('tag'))
-
-def _prop_where(cond: UOp, t: UOp, f: UOp, **kw) -> UOp|None:
-  dt = _first_nonvoid(t, f)  # infer from true/false branches, not gate
-  if dt == dtypes.void: return None
-  return UOp(Ops.WHERE, dt, (cond, t, f), kw.get('arg'), kw.get('tag'))
-
-def _prop_cat(src: tuple[UOp, ...], **kw) -> UOp|None:
-  dt = _infer_cat_dtype(*src)
-  if dt == dtypes.void: return None
-  return UOp(Ops.CAT, dt, src, kw.get('arg'), kw.get('tag'))
-
-def _prop_customi(base: UOp, hi: UOp, lo: UOp, **kw) -> UOp|None:
-  # CUSTOMI(base, hi, lo) - for slices, infer from bounds; for array access, use uint32
-  if hi is lo:  # single index (hi == lo)
-    # Array element access - check if base has vector dtype
-    if base.dtype != dtypes.void and base.dtype.count > 1:
-      return UOp(Ops.CUSTOMI, base.dtype.scalar(), (base, hi, lo), kw.get('arg'), kw.get('tag'))
-    return UOp(Ops.CUSTOMI, dtypes.uint32, (base, hi, lo), kw.get('arg'), kw.get('tag'))
-  # Slice - infer from bounds
-  dt = _infer_slice_dtype(hi, lo)
-  return UOp(Ops.CUSTOMI, dt, (base, hi, lo), kw.get('arg'), kw.get('tag'))
-
-def _prop_custom(src: tuple[UOp, ...], arg, **kw) -> UOp|None:
-  dt = _infer_custom_dtype(arg, src)
-  if dt == dtypes.void: return None
-  return UOp(Ops.CUSTOM, dt, src, arg, kw.get('tag'))
-
-dtype_pm = PatternMatcher([
+]) + PatternMatcher([
+  # Dtype propagation patterns - match void dtype and replace with inferred
   # Binary ops with void dtype
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.MOD, Ops.POW), dtype=dtypes.void,
         src=(UPat.var('l'), UPat.var('r')), name='__OP__'), _prop_binop),
@@ -225,8 +218,7 @@ dtype_pm = PatternMatcher([
 
 def _transform_uop(u: UOp) -> UOp:
   """Transform a UOp tree, rewriting CUSTOM ops and propagating dtypes."""
-  u = graph_rewrite(u, pcode_pm)
-  return graph_rewrite(u, dtype_pm)
+  return graph_rewrite(u, pcode_pm)
 
 def _transform_stmt(stmt):
   """Transform a statement, rewriting all UOps within it."""

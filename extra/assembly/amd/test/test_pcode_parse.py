@@ -11,7 +11,7 @@ from extra.assembly.amd.autogen.cdna.str_pcode import PSEUDOCODE_STRINGS as CDNA
 DEBUG = int(os.getenv("DEBUG", "0"))
 
 # NOTE: After refactor, parse() outputs void dtypes for most ops.
-# Dtype inference happens in parse_transform() via dtype_pm PatternMatcher.
+# Dtype inference happens in parse_transform() via pcode_pm PatternMatcher.
 # Void checking is no longer done at parse time - it's expected to have voids.
 
 _OP_SYMS = {v: k for k, v in _BINOPS.items() if k not in ('>', '>=', '<>', '||', '&&')}
