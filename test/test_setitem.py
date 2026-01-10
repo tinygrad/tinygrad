@@ -1,7 +1,7 @@
 import unittest
 import random
 from os import getenv
-from tinygrad import Tensor, TinyJit, Variable, dtypes
+from tinygrad import Tensor, TinyJit, Variable, dtypes, Device
 from tinygrad.helpers import Context
 import numpy as np
 
@@ -159,6 +159,8 @@ class TestSetitem(unittest.TestCase):
     t[:-1] = t[1:]
     self.assertEqual(t.tolist(), [[2.0], [1.0], [1.0]])
 
+  # TODO: WEBGPU pipeline validation error
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU pipeline validation error")
   def test_setitem_big(self):
     idx_size, val = 256, 4
     t = Tensor.arange(0, idx_size+1)

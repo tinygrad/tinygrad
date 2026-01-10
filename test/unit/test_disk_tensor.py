@@ -167,6 +167,7 @@ class TestSafetensors(unittest.TestCase):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
       if dtype in [dtypes.double, *dtypes.fp8s] and Device.DEFAULT == "METAL": continue # not supported on METAL
+      if not is_dtype_supported(dtype): continue
       path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
