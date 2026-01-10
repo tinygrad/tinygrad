@@ -165,11 +165,20 @@ test:
 .rodata
 .p2align 6
 .amdhsa_kernel test
-  .amdhsa_next_free_vgpr 64
-  .amdhsa_next_free_sgpr 8
-  .amdhsa_wavefront_size32 1
+  # basic memory
   .amdhsa_group_segment_fixed_size 0
   .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 32
+  .amdhsa_enable_private_segment 0
+  # register usage
+  .amdhsa_next_free_vgpr 64
+  .amdhsa_next_free_sgpr 8
+  # RSRC1
+  .amdhsa_wavefront_size32 1
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  # this is key
+  .amdhsa_workgroup_processor_mode 0
 .end_amdhsa_kernel
 
 .amdgpu_metadata
