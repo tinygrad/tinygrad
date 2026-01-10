@@ -7,15 +7,17 @@ def _typed_const(src: UOp, val) -> UOp:
   """Create a const with same dtype as src, or a deferred const if src.dtype is void."""
   return UOp.const(src.dtype, val) if src.dtype != dtypes.void else UOp(Ops.CONST, dtypes.void, (src,), val)
 
-def _floor(x: UOp) -> UOp:
-  trunc = UOp(Ops.TRUNC, dtypes.void, (x,))
-  return UOp(Ops.WHERE, dtypes.void, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, dtypes.void, (trunc, _typed_const(x, 1))), trunc))
+def _floor(x: UOp, dt: DType) -> UOp:
+  trunc = UOp(Ops.TRUNC, dt, (x,))
+  return UOp(Ops.WHERE, dt, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, dt, (trunc, _typed_const(x, 1))), trunc))
 
-def _minmax(a: UOp, b: UOp, is_min: bool, dt: DType = dtypes.void) -> UOp:
+def _minmax(a: UOp, b: UOp, is_min: bool, dt: DType|None = None) -> UOp:
+  if dt is None: dt = a.dtype if a.dtype != dtypes.void else b.dtype
   cmp = UOp(Ops.CMPLT, dtypes.bool, (a, b) if is_min else (b, a))
   return UOp(Ops.WHERE, dt, (cmp, a, b))
 
-def _minmax3(a: UOp, b: UOp, c: UOp, is_min: bool, dt: DType = dtypes.void) -> UOp:
+def _minmax3(a: UOp, b: UOp, c: UOp, is_min: bool, dt: DType|None = None) -> UOp:
+  if dt is None: dt = a.dtype if a.dtype != dtypes.void else b.dtype if b.dtype != dtypes.void else c.dtype
   return _minmax(_minmax(a, b, is_min, dt), c, is_min, dt)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -109,20 +111,49 @@ def _prop_var(ctx, u) -> UOp|None:
   if name not in ctx: return None
   return UOp(Ops.DEFINE_VAR, ctx[name], arg=u.arg)
 
+def _track_var(ctx, u) -> UOp|None:
+  """Track typed DEFINE_VAR in ctx, assert on conflict."""
+  if ctx is None: return None
+  name = u.arg[0] if isinstance(u.arg, tuple) else u.arg
+  if name in ctx:
+    assert ctx[name] == u.dtype, f"variable '{name}' declared with conflicting types: {ctx[name]} vs {u.dtype}"
+    return None  # already tracked, no change needed
+  ctx[name] = u.dtype
+  return None  # no rewrite, just tracking
+
+def _get_var_name(u: UOp) -> str|None:
+  """Extract variable name from a UOp (DEFINE_VAR or CUSTOMI array access)."""
+  if u.op == Ops.DEFINE_VAR: return u.arg[0] if isinstance(u.arg, tuple) else u.arg
+  if u.op == Ops.CUSTOMI and u.src[0].op == Ops.DEFINE_VAR: return _get_var_name(u.src[0])
+  return None
+
+def _prop_assign(ctx, lhs, rhs) -> UOp|None:
+  """Infer LHS variable type from RHS in ASSIGN."""
+  if ctx is None or rhs.dtype == dtypes.void: return None
+  # Only infer for bare DEFINE_VAR (not BITCAST wrapped)
+  if lhs.op != Ops.DEFINE_VAR: return None
+  name = _get_var_name(lhs)
+  if name is None or name in ctx: return None
+  ctx[name] = rhs.dtype
+  return UOp(Ops.ASSIGN, dtypes.void, (UOp(Ops.DEFINE_VAR, rhs.dtype, arg=lhs.arg), rhs))
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMBINED PATTERN MATCHER
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Float dtype pattern for matching float inputs
+_fpat = UPat.var('x', dtype=dtypes.floats)
+
 # Transform CUSTOM ops to real UOps
 pcode_pm = PatternMatcher([
-  # Direct UOp mappings
-  (UPat(Ops.CUSTOM, arg='trunc', src=(UPat.var('x'),)), lambda x: UOp(Ops.TRUNC, dtypes.void, (x,))),
-  (UPat(Ops.CUSTOM, arg='sqrt', src=(UPat.var('x'),)), lambda x: UOp(Ops.SQRT, dtypes.void, (x,))),
-  (UPat(Ops.CUSTOM, arg='exp2', src=(UPat.var('x'),)), lambda x: UOp(Ops.EXP2, dtypes.void, (x,))),
-  (UPat(Ops.CUSTOM, arg='log2', src=(UPat.var('x'),)), lambda x: UOp(Ops.LOG2, dtypes.void, (x,))),
-  (UPat(Ops.CUSTOM, arg='sin', src=(UPat.var('x'),)), lambda x: UOp(Ops.SIN, dtypes.void, (x,))),
-  (UPat(Ops.CUSTOM, arg='rcp', src=(UPat.var('x'),)), lambda x: UOp(Ops.RECIPROCAL, dtypes.void, (x,))),
-  (UPat(Ops.CUSTOM, arg='fma', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: UOp(Ops.MULACC, dtypes.void, (a, b, c))),
+  # Direct UOp mappings (float ops preserve input type)
+  (UPat(Ops.CUSTOM, arg='trunc', src=(_fpat,)), lambda x: UOp(Ops.TRUNC, x.dtype, (x,))),
+  (UPat(Ops.CUSTOM, arg='sqrt', src=(_fpat,)), lambda x: UOp(Ops.SQRT, x.dtype, (x,))),
+  (UPat(Ops.CUSTOM, arg='exp2', src=(_fpat,)), lambda x: UOp(Ops.EXP2, x.dtype, (x,))),
+  (UPat(Ops.CUSTOM, arg='log2', src=(_fpat,)), lambda x: UOp(Ops.LOG2, x.dtype, (x,))),
+  (UPat(Ops.CUSTOM, arg='sin', src=(_fpat,)), lambda x: UOp(Ops.SIN, x.dtype, (x,))),
+  (UPat(Ops.CUSTOM, arg='rcp', src=(_fpat,)), lambda x: UOp(Ops.RECIPROCAL, x.dtype, (x,))),
+  (UPat(Ops.CUSTOM, arg='fma', src=(_fpat, UPat.var('b'), UPat.var('c'))), lambda x, b, c: UOp(Ops.MULACC, x.dtype, (x, b, c))),
 
   # Boolean functions
   (UPat(Ops.CUSTOM, arg='isNAN', src=(UPat.var('x'),)), lambda x: UOp(Ops.CMPNE, dtypes.bool, (x, x))),
@@ -130,14 +161,14 @@ pcode_pm = PatternMatcher([
     UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('inf')))),
     UOp(Ops.CMPEQ, dtypes.bool, (x, _typed_const(x, float('-inf'))))))),
 
-  # Math functions
-  (UPat(Ops.CUSTOM, arg='abs', src=(UPat.var('x'),)), lambda x: UOp(Ops.WHERE, dtypes.void, (
-    UOp(Ops.CMPLT, dtypes.bool, (x, _typed_const(x, 0))), UOp(Ops.NEG, dtypes.void, (x,)), x))),
-  (UPat(Ops.CUSTOM, arg='cos', src=(UPat.var('x'),)), lambda x: UOp(Ops.SIN, dtypes.void, (
-    UOp(Ops.ADD, dtypes.void, (x, _typed_const(x, 1.5707963267948966))),))),
-  (UPat(Ops.CUSTOM, arg='floor', src=(UPat.var('x'),)), lambda x: _floor(x)),
-  (UPat(Ops.CUSTOM, arg='fract', src=(UPat.var('x'),)), lambda x: UOp(Ops.SUB, dtypes.void, (x, _floor(x)))),
-  (UPat(Ops.CUSTOM, arg='rsqrt', src=(UPat.var('x'),)), lambda x: UOp(Ops.RECIPROCAL, dtypes.void, (UOp(Ops.SQRT, dtypes.void, (x,)),))),
+  # Math functions (float ops preserve input type)
+  (UPat(Ops.CUSTOM, arg='abs', src=(_fpat,)), lambda x: UOp(Ops.WHERE, x.dtype, (
+    UOp(Ops.CMPLT, dtypes.bool, (x, _typed_const(x, 0))), UOp(Ops.NEG, x.dtype, (x,)), x))),
+  (UPat(Ops.CUSTOM, arg='cos', src=(_fpat,)), lambda x: UOp(Ops.SIN, x.dtype, (
+    UOp(Ops.ADD, x.dtype, (x, _typed_const(x, 1.5707963267948966))),))),
+  (UPat(Ops.CUSTOM, arg='floor', src=(_fpat,)), lambda x: _floor(x, x.dtype)),
+  (UPat(Ops.CUSTOM, arg='fract', src=(_fpat,)), lambda x: UOp(Ops.SUB, x.dtype, (x, _floor(x, x.dtype)))),
+  (UPat(Ops.CUSTOM, arg='rsqrt', src=(_fpat,)), lambda x: UOp(Ops.RECIPROCAL, x.dtype, (UOp(Ops.SQRT, x.dtype, (x,)),))),
 
   # min/max (2 args) - generic (inherits type from propagation)
   (UPat(Ops.CUSTOM, arg='min', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
@@ -207,8 +238,12 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='i32_to_i16', src=(UPat.var('x', dtype=dtypes.int32),)), lambda x: UOp(Ops.CAST, dtypes.int16, (
     UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xffff))),))),
 ]) + PatternMatcher([
-  # Variable type propagation from ctx
+  # Track typed DEFINE_VAR in ctx (must come before propagation)
+  (UPat(Ops.DEFINE_VAR, name='u'), lambda ctx, u: _track_var(ctx, u) if u.dtype != dtypes.void else None),
+  # Propagate variable type from ctx to void DEFINE_VAR
   (UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='u'), _prop_var),
+  # Infer LHS type from RHS in ASSIGN
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='lhs'), UPat.var('rhs'))), _prop_assign),
   # Dtype propagation patterns - match void dtype and replace with inferred
   # Binary ops with void dtype
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.MOD, Ops.POW), dtype=dtypes.void,
@@ -230,28 +265,9 @@ pcode_pm = PatternMatcher([
 
 def _transform_uop(u: UOp, ctx: dict) -> UOp: return graph_rewrite(u, pcode_pm, ctx=ctx)
 
-def _get_var_name(u: UOp) -> str|None:
-  """Extract variable name from a UOp (DEFINE_VAR or CUSTOMI array access)."""
-  if u.op == Ops.DEFINE_VAR: return u.arg[0] if isinstance(u.arg, tuple) else u.arg
-  if u.op == Ops.CUSTOMI and u.src[0].op == Ops.DEFINE_VAR: return _get_var_name(u.src[0])
-  return None
-
 def _transform_stmt(stmt, ctx: dict):
-  """Transform a statement, updating ctx with inferred types."""
+  """Transform a statement, rewriting UOps and updating ctx."""
   match stmt:
-    case UOp(op=Ops.DEFINE_VAR, dtype=dt, arg=arg) if dt != dtypes.void:
-      name = arg[0] if isinstance(arg, tuple) else arg
-      ctx[name] = dt
-      return stmt
-    case UOp(op=Ops.ASSIGN):
-      lhs, rhs = stmt.src
-      rhs = _transform_uop(rhs, ctx)
-      lhs = _transform_uop(lhs, ctx)
-      # Infer LHS variable type from RHS if RHS has resolved type
-      if rhs.dtype != dtypes.void and (name := _get_var_name(lhs)) and name not in ctx:
-        ctx[name] = rhs.dtype
-        lhs = _transform_uop(lhs, ctx)  # re-transform to propagate type
-      return UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs))
     case If(branches):
       return If(tuple((_transform_uop(cond, ctx) if cond is not None else None, tuple(_transform_stmt(s, ctx) for s in body)) for cond, body in branches))
     case For(var, start, end, body):
