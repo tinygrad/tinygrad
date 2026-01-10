@@ -1615,7 +1615,7 @@ class TestCarryBorrow(unittest.TestCase):
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
       v_add_co_u32(v[4], VCC, v[0], v[2]),
-      v_add_co_ci_u32_e32(v[5], VCC, v[1], v[3]),
+      v_add_co_ci_u32_e32(v[5], v[1], v[3]),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][4], 0x00000000, "lo result")

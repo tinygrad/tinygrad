@@ -52,6 +52,8 @@ def wer_helper(result: str, reference: str)->float:
 
 @unittest.skipIf(Device.DEFAULT in ["CPU"], "slow")
 @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+# TODO: WEBGPU GPU dispatch dimensions limit
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU GPU dispatch dimensions limit")
 class TestWhisper(unittest.TestCase):
   @classmethod
   def setUpClass(cls):

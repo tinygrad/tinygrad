@@ -11,8 +11,7 @@ os.environ["PYTHON_REMU"] = "1"
 
 from extra.assembly.amd.emu import WaveState, decode_program, WAVE_SIZE, set_valid_mem_ranges, LDSMem
 from extra.assembly.amd.test.helpers import KernelInfo
-
-REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
+from extra.assembly.amd.test.bench_emu import REMU_PATH
 
 def _is_f32_nan(bits: int) -> bool:
   """Check if 32-bit value is a NaN (exponent all 1s, mantissa non-zero)."""
