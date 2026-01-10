@@ -349,14 +349,16 @@ def _get_lhs_info(lhs: UOp, ctx: Ctx) -> tuple[str, DType, int|None, int|None, s
 
 def _stmt(stmt, ctx: Ctx):
   match stmt:
-    case Declare(name, dtype):
+    # Declaration: DEFINE_VAR with dtype and name arg
+    case UOp(Ops.DEFINE_VAR, dtype, arg=name) if name is not None and dtype != dtypes.void:
       ctx.decls[name] = dtype
       if name == 'S' and dtype.count == 3:
         ctx.vars['S_0'], ctx.vars['S_1'], ctx.vars['S_2'] = ctx.vars['S0'], ctx.vars['S1'], ctx.vars['S2']
       else:
         ctx.vars[name] = UOp.const(dtype, 0)
 
-    case Assign(lhs, rhs):
+    # Assignment: ASSIGN(lhs, rhs)
+    case UOp(Ops.ASSIGN, _, (lhs, rhs)):
       # Memory store
       if lhs.op == Ops.BITCAST and lhs.src[0].op == Ops.CUSTOM and lhs.src[0].arg == 'MEM':
         addr, val = _expr(lhs.src[0].src[0], ctx, dtypes.uint64), _expr(rhs, ctx, lhs.dtype)
@@ -483,7 +485,7 @@ def _transform_for(var: str, start: UOp, end: UOp, body: tuple, ctx: Ctx):
     ctx.vars[var] = UOp.const(ctx.decls.get(var, dtypes.uint32), i)
     for s in body:
       if isinstance(s, If): _transform_if(s.branches, ctx)
-      elif isinstance(s, Assign): _stmt(s, ctx)
+      elif isinstance(s, UOp) and s.op == Ops.ASSIGN: _stmt(s, ctx)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CODE GENERATION

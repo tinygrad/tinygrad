@@ -231,10 +231,15 @@ def _transform_uop(u: UOp) -> UOp:
 def _transform_stmt(stmt):
   """Transform a statement, rewriting all UOps within it."""
   match stmt:
-    case Assign(lhs, rhs) if isinstance(rhs, Assign):
-      return Assign(_transform_uop(lhs), Assign(_transform_uop(rhs.lhs), _transform_uop(rhs.rhs)))
-    case Assign(lhs, rhs):
+    # Chained assignment: ASSIGN(lhs, ASSIGN(rhs_lhs, rhs_rhs))
+    case UOp(Ops.ASSIGN, _, (lhs, UOp(Ops.ASSIGN, _, (rhs_lhs, rhs_rhs)))):
+      return Assign(_transform_uop(lhs), Assign(_transform_uop(rhs_lhs), _transform_uop(rhs_rhs)))
+    # Simple assignment: ASSIGN(lhs, rhs)
+    case UOp(Ops.ASSIGN, _, (lhs, rhs)):
       return Assign(_transform_uop(lhs), _transform_uop(rhs))
+    # Declaration: DEFINE_VAR with dtype and name arg
+    case UOp(Ops.DEFINE_VAR, dtype, arg=name) if name is not None and dtype != dtypes.void:
+      return Declare(name, dtype)
     case If(branches):
       new_branches = tuple((_transform_uop(cond) if cond is not None else None, tuple(_transform_stmt(s) for s in body)) for cond, body in branches)
       return If(new_branches)
@@ -245,6 +250,8 @@ def _transform_stmt(stmt):
       return Lambda(name, params, tuple(_transform_stmt(s) for s in body))
     case Return(v):
       return Return(_transform_uop(v))
+    case UOp():  # Other UOps (like bare function calls)
+      return _transform_uop(stmt)
     case _:
       return stmt
 
