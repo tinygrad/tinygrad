@@ -216,36 +216,20 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, dtype=dtypes.void, src=UPat.var('src'), arg=UPat.var('arg')), _prop_custom),
 ])
 
-def _transform_uop(u: UOp) -> UOp:
-  """Transform a UOp tree, rewriting CUSTOM ops and propagating dtypes."""
-  return graph_rewrite(u, pcode_pm)
+def _transform_uop(u: UOp) -> UOp: return graph_rewrite(u, pcode_pm)
 
 def _transform_stmt(stmt):
   """Transform a statement, rewriting all UOps within it."""
   match stmt:
-    # Chained assignment: ASSIGN(lhs, ASSIGN(rhs_lhs, rhs_rhs))
-    case UOp(Ops.ASSIGN, _, (lhs, UOp(Ops.ASSIGN, _, (rhs_lhs, rhs_rhs)))):
-      return UOp(Ops.ASSIGN, dtypes.void, (_transform_uop(lhs), UOp(Ops.ASSIGN, dtypes.void, (_transform_uop(rhs_lhs), _transform_uop(rhs_rhs)))))
-    # Simple assignment: ASSIGN(lhs, rhs)
-    case UOp(Ops.ASSIGN, _, (lhs, rhs)):
-      return UOp(Ops.ASSIGN, dtypes.void, (_transform_uop(lhs), _transform_uop(rhs)))
-    # Declaration: DEFINE_VAR with dtype and name arg
-    case UOp(Ops.DEFINE_VAR, dtype, arg=name) if name is not None and dtype != dtypes.void:
-      return UOp(Ops.DEFINE_VAR, dtype, arg=name)
     case If(branches):
-      new_branches = tuple((_transform_uop(cond) if cond is not None else None, tuple(_transform_stmt(s) for s in body)) for cond, body in branches)
-      return If(new_branches)
+      return If(tuple((_transform_uop(cond) if cond is not None else None, tuple(_transform_stmt(s) for s in body)) for cond, body in branches))
     case For(var, start, end, body):
       return For(var, _transform_uop(start), _transform_uop(end), tuple(_transform_stmt(s) for s in body))
     case Lambda(name, params, body):
-      if isinstance(body, UOp): return Lambda(name, params, _transform_uop(body))
-      return Lambda(name, params, tuple(_transform_stmt(s) for s in body))
-    case Return(v):
-      return Return(_transform_uop(v))
-    case UOp():  # Other UOps (like bare function calls)
-      return _transform_uop(stmt)
-    case _:
-      return stmt
+      return Lambda(name, params, _transform_uop(body) if isinstance(body, UOp) else tuple(_transform_stmt(s) for s in body))
+    case Return(v): return Return(_transform_uop(v))
+    case UOp(): return _transform_uop(stmt)
+    case _: return stmt
 
 def parse_transform(pcode: str) -> tuple:
   """Parse pseudocode and transform CUSTOM ops to UOps."""
