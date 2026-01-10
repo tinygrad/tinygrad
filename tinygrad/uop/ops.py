@@ -1,13 +1,58 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final
-import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
+
+import collections
+import functools
+import hashlib
+import inspect
+import itertools
+import math
+import operator
+import os
+import pathlib
+import pickle
+import sys
+import time
+import types
+import weakref
 from dataclasses import dataclass
 from enum import Enum, auto
-from tinygrad.uop import Ops, GroupOp
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
-from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
-from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
-from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
+from typing import TYPE_CHECKING, Any, Callable, Final, Iterable, Sequence, Type, cast
+
+from tinygrad.dtype import AddrSpace, ConstType, DType, ImageDType, Invalid, InvalidType, PtrDType, dtypes, least_upper_dtype, truncate
+from tinygrad.helpers import (
+  CI,
+  PROFILE,
+  SPEC,
+  TRACEMETA,
+  VIZ,
+  Context,
+  ContextVar,
+  Metadata,
+  T,
+  TracingKey,
+  all_int,
+  all_same,
+  ansilen,
+  argfix,
+  cdiv,
+  cmod,
+  colored,
+  cpu_profile,
+  dedup,
+  diskcache_put,
+  flatten,
+  getenv,
+  panic,
+  partition,
+  printable,
+  prod,
+  strip_parens,
+  temp,
+  to_function_name,
+  unwrap,
+)
+from tinygrad.uop import GroupOp, Ops
+
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
@@ -185,6 +230,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
+    arg_key: tuple
     if isinstance(self.arg, Kernel): arg_key = ("Kernel", self.arg.ast.tuplize, tuple(str(m) for m in self.arg.metadata))
     elif isinstance(self.arg, KernelInfo): arg_key = ("KernelInfo", self.arg.name, self.arg.applied_opts)
     else: arg_key = (type(self.arg).__name__, self.arg)
@@ -1063,7 +1109,8 @@ _name_cnt:dict[str, itertools.count] = {}
 
 if getenv("CAPTURE_PROCESS_REPLAY"):
   replay_capture: list[bytes] = []
-  import atexit, uuid
+  import atexit
+  import uuid
   @atexit.register
   def save_to_diskcache():
     uid = uuid.uuid4() # one id per process
