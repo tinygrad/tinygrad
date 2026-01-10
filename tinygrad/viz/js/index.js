@@ -104,7 +104,9 @@ const drawGraph = (data) => {
     return ret;
   }).join("rect").attr("class", "bg").attr("x", d => d.x).attr("y", d => d.y).attr("width", d => d.width).attr("height", d => d.height);
   tokens.on("click", (e, { keys }) => {
-    tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
+    const match = (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k));
+    tokensBg.classed("highlight", match);
+    d3.select(metadata).selectAll("p").data(tokens.filter(match)).join("p").text(d => d.parentNode.textContent).style("font-family", "monospace");
   });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
@@ -759,7 +761,7 @@ async function main() {
       }
       appendSteps(ul, i, steps);
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx: 2, currentStep: 3, currentRewrite: 0, expandSteps: true});
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
