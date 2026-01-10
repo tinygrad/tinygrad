@@ -11,12 +11,12 @@ def _floor(x: UOp) -> UOp:
   trunc = UOp(Ops.TRUNC, dtypes.void, (x,))
   return UOp(Ops.WHERE, dtypes.void, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, dtypes.void, (trunc, _typed_const(x, 1))), trunc))
 
-def _minmax(a: UOp, b: UOp, is_min: bool) -> UOp:
+def _minmax(a: UOp, b: UOp, is_min: bool, dt: DType = dtypes.void) -> UOp:
   cmp = UOp(Ops.CMPLT, dtypes.bool, (a, b) if is_min else (b, a))
-  return UOp(Ops.WHERE, dtypes.void, (cmp, a, b))
+  return UOp(Ops.WHERE, dt, (cmp, a, b))
 
-def _minmax3(a: UOp, b: UOp, c: UOp, is_min: bool) -> UOp:
-  return _minmax(_minmax(a, b, is_min), c, is_min)
+def _minmax3(a: UOp, b: UOp, c: UOp, is_min: bool, dt: DType = dtypes.void) -> UOp:
+  return _minmax(_minmax(a, b, is_min, dt), c, is_min, dt)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DTYPE PROPAGATION HELPERS
@@ -49,8 +49,7 @@ _BOOL_FNS = {'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', '
 _U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones', 'countbits', 'reverse_bits',
             'u8_to_u32', 'u4_to_u32', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8'}
 _CVT_FNS = {
-  'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32,
-  'f32_to_bf16': dtypes.bfloat16,
+  'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32,  # special clamping conversions, not simple casts
   'signext_from_bit': dtypes.int64,
   'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
 }
@@ -89,12 +88,11 @@ def _prop_cat(src: tuple[UOp, ...], **kw) -> UOp|None:
   return UOp(Ops.CAT, dt, src, kw.get('arg'), kw.get('tag'))
 
 def _prop_customi(base: UOp, hi: UOp, lo: UOp, **kw) -> UOp|None:
-  # CUSTOMI(base, hi, lo) - for slices, infer from bounds; for array access, use uint32
-  if hi is lo:  # single index (hi == lo)
-    # Array element access - check if base has vector dtype
-    if base.dtype != dtypes.void and base.dtype.count > 1:
-      return UOp(Ops.CUSTOMI, base.dtype.scalar(), (base, hi, lo), kw.get('arg'), kw.get('tag'))
-    return UOp(Ops.CUSTOMI, dtypes.uint32, (base, hi, lo), kw.get('arg'), kw.get('tag'))
+  # CUSTOMI(base, hi, lo) - for slices, infer from bounds; for array access, infer from base
+  if hi is lo:  # single index (hi == lo) - array element access
+    if base.dtype == dtypes.void: return None  # can't infer yet
+    if base.dtype.count > 1: return UOp(Ops.CUSTOMI, base.dtype.scalar(), (base, hi, lo), kw.get('arg'), kw.get('tag'))
+    return UOp(Ops.CUSTOMI, base.dtype, (base, hi, lo), kw.get('arg'), kw.get('tag'))
   # Slice - infer from bounds
   dt = _infer_slice_dtype(hi, lo)
   return UOp(Ops.CUSTOMI, dt, (base, hi, lo), kw.get('arg'), kw.get('tag'))
@@ -103,6 +101,13 @@ def _prop_custom(src: tuple[UOp, ...], arg, **kw) -> UOp|None:
   dt = _infer_custom_dtype(arg, src)
   if dt == dtypes.void: return None
   return UOp(Ops.CUSTOM, dt, src, arg, kw.get('tag'))
+
+def _prop_var(ctx, u) -> UOp|None:
+  """Propagate variable type from ctx declarations."""
+  if ctx is None: return None
+  name = u.arg[0] if isinstance(u.arg, tuple) else u.arg
+  if name not in ctx: return None
+  return UOp(Ops.DEFINE_VAR, ctx[name], arg=u.arg)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMBINED PATTERN MATCHER
@@ -134,69 +139,76 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='fract', src=(UPat.var('x'),)), lambda x: UOp(Ops.SUB, dtypes.void, (x, _floor(x)))),
   (UPat(Ops.CUSTOM, arg='rsqrt', src=(UPat.var('x'),)), lambda x: UOp(Ops.RECIPROCAL, dtypes.void, (UOp(Ops.SQRT, dtypes.void, (x,)),))),
 
-  # min/max (2 args)
+  # min/max (2 args) - generic (inherits type from propagation)
   (UPat(Ops.CUSTOM, arg='min', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
   (UPat(Ops.CUSTOM, arg='max', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, False)),
-  (UPat(Ops.CUSTOM, arg='v_min_f16', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
-  (UPat(Ops.CUSTOM, arg='v_min_f32', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
-  (UPat(Ops.CUSTOM, arg='v_min_i16', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
-  (UPat(Ops.CUSTOM, arg='v_min_i32', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
-  (UPat(Ops.CUSTOM, arg='v_min_u16', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
-  (UPat(Ops.CUSTOM, arg='v_min_u32', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
-  (UPat(Ops.CUSTOM, arg='v_max_f16', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, False)),
-  (UPat(Ops.CUSTOM, arg='v_max_f32', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, False)),
-  (UPat(Ops.CUSTOM, arg='v_max_i16', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, False)),
-  (UPat(Ops.CUSTOM, arg='v_max_i32', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, False)),
-  (UPat(Ops.CUSTOM, arg='v_max_u16', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, False)),
-  (UPat(Ops.CUSTOM, arg='v_max_u32', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, False)),
+  # min/max (2 args) - typed versions
+  (UPat(Ops.CUSTOM, arg='v_min_f16', src=(UPat.var('a', dtype=dtypes.float16), UPat.var('b', dtype=dtypes.float16))), lambda a, b: _minmax(a, b, True, dtypes.float16)),
+  (UPat(Ops.CUSTOM, arg='v_min_f32', src=(UPat.var('a', dtype=dtypes.float32), UPat.var('b', dtype=dtypes.float32))), lambda a, b: _minmax(a, b, True, dtypes.float32)),
+  (UPat(Ops.CUSTOM, arg='v_min_i16', src=(UPat.var('a', dtype=dtypes.int16), UPat.var('b', dtype=dtypes.int16))), lambda a, b: _minmax(a, b, True, dtypes.int16)),
+  (UPat(Ops.CUSTOM, arg='v_min_i32', src=(UPat.var('a', dtype=dtypes.int32), UPat.var('b', dtype=dtypes.int32))), lambda a, b: _minmax(a, b, True, dtypes.int32)),
+  (UPat(Ops.CUSTOM, arg='v_min_u16', src=(UPat.var('a', dtype=dtypes.uint16), UPat.var('b', dtype=dtypes.uint16))), lambda a, b: _minmax(a, b, True, dtypes.uint16)),
+  (UPat(Ops.CUSTOM, arg='v_min_u32', src=(UPat.var('a', dtype=dtypes.uint32), UPat.var('b', dtype=dtypes.uint32))), lambda a, b: _minmax(a, b, True, dtypes.uint32)),
+  (UPat(Ops.CUSTOM, arg='v_max_f16', src=(UPat.var('a', dtype=dtypes.float16), UPat.var('b', dtype=dtypes.float16))), lambda a, b: _minmax(a, b, False, dtypes.float16)),
+  (UPat(Ops.CUSTOM, arg='v_max_f32', src=(UPat.var('a', dtype=dtypes.float32), UPat.var('b', dtype=dtypes.float32))), lambda a, b: _minmax(a, b, False, dtypes.float32)),
+  (UPat(Ops.CUSTOM, arg='v_max_i16', src=(UPat.var('a', dtype=dtypes.int16), UPat.var('b', dtype=dtypes.int16))), lambda a, b: _minmax(a, b, False, dtypes.int16)),
+  (UPat(Ops.CUSTOM, arg='v_max_i32', src=(UPat.var('a', dtype=dtypes.int32), UPat.var('b', dtype=dtypes.int32))), lambda a, b: _minmax(a, b, False, dtypes.int32)),
+  (UPat(Ops.CUSTOM, arg='v_max_u16', src=(UPat.var('a', dtype=dtypes.uint16), UPat.var('b', dtype=dtypes.uint16))), lambda a, b: _minmax(a, b, False, dtypes.uint16)),
+  (UPat(Ops.CUSTOM, arg='v_max_u32', src=(UPat.var('a', dtype=dtypes.uint32), UPat.var('b', dtype=dtypes.uint32))), lambda a, b: _minmax(a, b, False, dtypes.uint32)),
 
-  # min3/max3 (3 args)
-  (UPat(Ops.CUSTOM, arg='v_min3_f16', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, True)),
-  (UPat(Ops.CUSTOM, arg='v_min3_f32', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, True)),
-  (UPat(Ops.CUSTOM, arg='v_min3_i16', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, True)),
-  (UPat(Ops.CUSTOM, arg='v_min3_i32', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, True)),
-  (UPat(Ops.CUSTOM, arg='v_min3_u16', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, True)),
-  (UPat(Ops.CUSTOM, arg='v_min3_u32', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, True)),
-  (UPat(Ops.CUSTOM, arg='v_max3_f16', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, False)),
-  (UPat(Ops.CUSTOM, arg='v_max3_f32', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, False)),
-  (UPat(Ops.CUSTOM, arg='v_max3_i16', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, False)),
-  (UPat(Ops.CUSTOM, arg='v_max3_i32', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, False)),
-  (UPat(Ops.CUSTOM, arg='v_max3_u16', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, False)),
-  (UPat(Ops.CUSTOM, arg='v_max3_u32', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), lambda a, b, c: _minmax3(a, b, c, False)),
+  # min3/max3 (3 args) - typed versions
+  (UPat(Ops.CUSTOM, arg='v_min3_f16', src=(UPat.var('a', dtype=dtypes.float16), UPat.var('b', dtype=dtypes.float16), UPat.var('c', dtype=dtypes.float16))), lambda a, b, c: _minmax3(a, b, c, True, dtypes.float16)),
+  (UPat(Ops.CUSTOM, arg='v_min3_f32', src=(UPat.var('a', dtype=dtypes.float32), UPat.var('b', dtype=dtypes.float32), UPat.var('c', dtype=dtypes.float32))), lambda a, b, c: _minmax3(a, b, c, True, dtypes.float32)),
+  (UPat(Ops.CUSTOM, arg='v_min3_i16', src=(UPat.var('a', dtype=dtypes.int16), UPat.var('b', dtype=dtypes.int16), UPat.var('c', dtype=dtypes.int16))), lambda a, b, c: _minmax3(a, b, c, True, dtypes.int16)),
+  (UPat(Ops.CUSTOM, arg='v_min3_i32', src=(UPat.var('a', dtype=dtypes.int32), UPat.var('b', dtype=dtypes.int32), UPat.var('c', dtype=dtypes.int32))), lambda a, b, c: _minmax3(a, b, c, True, dtypes.int32)),
+  (UPat(Ops.CUSTOM, arg='v_min3_u16', src=(UPat.var('a', dtype=dtypes.uint16), UPat.var('b', dtype=dtypes.uint16), UPat.var('c', dtype=dtypes.uint16))), lambda a, b, c: _minmax3(a, b, c, True, dtypes.uint16)),
+  (UPat(Ops.CUSTOM, arg='v_min3_u32', src=(UPat.var('a', dtype=dtypes.uint32), UPat.var('b', dtype=dtypes.uint32), UPat.var('c', dtype=dtypes.uint32))), lambda a, b, c: _minmax3(a, b, c, True, dtypes.uint32)),
+  (UPat(Ops.CUSTOM, arg='v_max3_f16', src=(UPat.var('a', dtype=dtypes.float16), UPat.var('b', dtype=dtypes.float16), UPat.var('c', dtype=dtypes.float16))), lambda a, b, c: _minmax3(a, b, c, False, dtypes.float16)),
+  (UPat(Ops.CUSTOM, arg='v_max3_f32', src=(UPat.var('a', dtype=dtypes.float32), UPat.var('b', dtype=dtypes.float32), UPat.var('c', dtype=dtypes.float32))), lambda a, b, c: _minmax3(a, b, c, False, dtypes.float32)),
+  (UPat(Ops.CUSTOM, arg='v_max3_i16', src=(UPat.var('a', dtype=dtypes.int16), UPat.var('b', dtype=dtypes.int16), UPat.var('c', dtype=dtypes.int16))), lambda a, b, c: _minmax3(a, b, c, False, dtypes.int16)),
+  (UPat(Ops.CUSTOM, arg='v_max3_i32', src=(UPat.var('a', dtype=dtypes.int32), UPat.var('b', dtype=dtypes.int32), UPat.var('c', dtype=dtypes.int32))), lambda a, b, c: _minmax3(a, b, c, False, dtypes.int32)),
+  (UPat(Ops.CUSTOM, arg='v_max3_u16', src=(UPat.var('a', dtype=dtypes.uint16), UPat.var('b', dtype=dtypes.uint16), UPat.var('c', dtype=dtypes.uint16))), lambda a, b, c: _minmax3(a, b, c, False, dtypes.uint16)),
+  (UPat(Ops.CUSTOM, arg='v_max3_u32', src=(UPat.var('a', dtype=dtypes.uint32), UPat.var('b', dtype=dtypes.uint32), UPat.var('c', dtype=dtypes.uint32))), lambda a, b, c: _minmax3(a, b, c, False, dtypes.uint32)),
 
   # clamp(x, lo, hi) = min(max(x, lo), hi)
   (UPat(Ops.CUSTOM, arg='clamp', src=(UPat.var('x'), UPat.var('lo'), UPat.var('hi'))), lambda x, lo, hi: _minmax(_minmax(x, lo, False), hi, True)),
 
   # Float/int conversions (type-checked casts)
-  (UPat(Ops.CUSTOM, arg='f32_to_i32', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int32, (x,))),
-  (UPat(Ops.CUSTOM, arg='f32_to_f16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float16, (x,))),
-  (UPat(Ops.CUSTOM, arg='f32_to_f64', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float64, (x,))),
-  (UPat(Ops.CUSTOM, arg='f32_to_i8', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int8, (x,))),
-  (UPat(Ops.CUSTOM, arg='f32_to_u8', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.uint8, (x,))),
-  (UPat(Ops.CUSTOM, arg='f32_to_i16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int16, (x,))),
-  (UPat(Ops.CUSTOM, arg='f32_to_u16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.uint16, (x,))),
-  (UPat(Ops.CUSTOM, arg='f64_to_i32', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int32, (x,))),
-  (UPat(Ops.CUSTOM, arg='f64_to_f32', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float32, (x,))),
-  (UPat(Ops.CUSTOM, arg='f16_to_f32', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float32, (x,))),
-  (UPat(Ops.CUSTOM, arg='f16_to_i16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int16, (x,))),
-  (UPat(Ops.CUSTOM, arg='f16_to_u16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.uint16, (x,))),
-  (UPat(Ops.CUSTOM, arg='i32_to_f32', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float32, (x,))),
-  (UPat(Ops.CUSTOM, arg='i32_to_f64', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float64, (x,))),
-  (UPat(Ops.CUSTOM, arg='u32_to_f32', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float32, (x,))),
-  (UPat(Ops.CUSTOM, arg='u32_to_f64', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float64, (x,))),
-  (UPat(Ops.CUSTOM, arg='i16_to_f16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float16, (x,))),
-  (UPat(Ops.CUSTOM, arg='u16_to_f16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.float16, (x,))),
-  (UPat(Ops.CUSTOM, arg='v_cvt_u16_f32', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.uint16, (x,))),
-  (UPat(Ops.CUSTOM, arg='v_cvt_i16_f32', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int16, (x,))),
+  (UPat(Ops.CUSTOM, arg='f32_to_i32', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.int32, (x,))),
+  (UPat(Ops.CUSTOM, arg='f32_to_f16', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.float16, (x,))),
+  (UPat(Ops.CUSTOM, arg='f32_to_f64', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.float64, (x,))),
+  (UPat(Ops.CUSTOM, arg='f32_to_i8', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.int8, (x,))),
+  (UPat(Ops.CUSTOM, arg='f32_to_u8', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.uint8, (x,))),
+  (UPat(Ops.CUSTOM, arg='f32_to_i16', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.int16, (x,))),
+  (UPat(Ops.CUSTOM, arg='f32_to_u16', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.uint16, (x,))),
+  (UPat(Ops.CUSTOM, arg='f64_to_i32', src=(UPat.var('x', dtype=dtypes.float64),)), lambda x: UOp(Ops.CAST, dtypes.int32, (x,))),
+  (UPat(Ops.CUSTOM, arg='f64_to_f32', src=(UPat.var('x', dtype=dtypes.float64),)), lambda x: UOp(Ops.CAST, dtypes.float32, (x,))),
+  (UPat(Ops.CUSTOM, arg='f16_to_f32', src=(UPat.var('x', dtype=dtypes.float16),)), lambda x: UOp(Ops.CAST, dtypes.float32, (x,))),
+  (UPat(Ops.CUSTOM, arg='f16_to_i16', src=(UPat.var('x', dtype=dtypes.float16),)), lambda x: UOp(Ops.CAST, dtypes.int16, (x,))),
+  (UPat(Ops.CUSTOM, arg='f16_to_u16', src=(UPat.var('x', dtype=dtypes.float16),)), lambda x: UOp(Ops.CAST, dtypes.uint16, (x,))),
+  (UPat(Ops.CUSTOM, arg='i32_to_f32', src=(UPat.var('x', dtype=dtypes.int32),)), lambda x: UOp(Ops.CAST, dtypes.float32, (x,))),
+  (UPat(Ops.CUSTOM, arg='i32_to_f64', src=(UPat.var('x', dtype=dtypes.int32),)), lambda x: UOp(Ops.CAST, dtypes.float64, (x,))),
+  (UPat(Ops.CUSTOM, arg='u32_to_f32', src=(UPat.var('x', dtype=dtypes.uint32),)), lambda x: UOp(Ops.CAST, dtypes.float32, (x,))),
+  (UPat(Ops.CUSTOM, arg='u32_to_f64', src=(UPat.var('x', dtype=dtypes.uint32),)), lambda x: UOp(Ops.CAST, dtypes.float64, (x,))),
+  (UPat(Ops.CUSTOM, arg='i16_to_f16', src=(UPat.var('x', dtype=dtypes.int16),)), lambda x: UOp(Ops.CAST, dtypes.float16, (x,))),
+  (UPat(Ops.CUSTOM, arg='u16_to_f16', src=(UPat.var('x', dtype=dtypes.uint16),)), lambda x: UOp(Ops.CAST, dtypes.float16, (x,))),
+  (UPat(Ops.CUSTOM, arg='v_cvt_u16_f32', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.uint16, (x,))),
+  (UPat(Ops.CUSTOM, arg='v_cvt_i16_f32', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.int16, (x,))),
+  (UPat(Ops.CUSTOM, arg='f32_to_bf16', src=(UPat.var('x', dtype=dtypes.float32),)), lambda x: UOp(Ops.CAST, dtypes.bfloat16, (x,))),
 
   # Bit manipulation conversions
-  (UPat(Ops.CUSTOM, arg='signext', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int64, (x,))),
-  (UPat(Ops.CUSTOM, arg='bf16_to_f32', src=(UPat.var('x'),)), lambda x: UOp(Ops.BITCAST, dtypes.float32, (
+  (UPat(Ops.CUSTOM, arg='signext', src=(UPat.var('x', dtype=dtypes.int8),)), lambda x: UOp(Ops.CAST, dtypes.int64, (x,))),
+  (UPat(Ops.CUSTOM, arg='signext', src=(UPat.var('x', dtype=dtypes.int16),)), lambda x: UOp(Ops.CAST, dtypes.int64, (x,))),
+  (UPat(Ops.CUSTOM, arg='signext', src=(UPat.var('x', dtype=dtypes.int32),)), lambda x: UOp(Ops.CAST, dtypes.int64, (x,))),
+  (UPat(Ops.CUSTOM, arg='signext', src=(UPat.var('x', dtype=dtypes.int64),)), lambda x: UOp(Ops.CAST, dtypes.int64, (x,))),
+  (UPat(Ops.CUSTOM, arg='bf16_to_f32', src=(UPat.var('x', dtype=dtypes.bfloat16),)), lambda x: UOp(Ops.BITCAST, dtypes.float32, (
     UOp(Ops.SHL, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 16))),))),
-  (UPat(Ops.CUSTOM, arg='u32_to_u16', src=(UPat.var('x'),)), lambda x: UOp(Ops.AND, dtypes.uint32, (x, UOp.const(dtypes.uint32, 0xffff)))),
-  (UPat(Ops.CUSTOM, arg='i32_to_i16', src=(UPat.var('x'),)), lambda x: UOp(Ops.CAST, dtypes.int16, (
+  (UPat(Ops.CUSTOM, arg='u32_to_u16', src=(UPat.var('x', dtype=dtypes.uint32),)), lambda x: UOp(Ops.AND, dtypes.uint32, (x, UOp.const(dtypes.uint32, 0xffff)))),
+  (UPat(Ops.CUSTOM, arg='i32_to_i16', src=(UPat.var('x', dtype=dtypes.int32),)), lambda x: UOp(Ops.CAST, dtypes.int16, (
     UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xffff))),))),
 ]) + PatternMatcher([
+  # Variable type propagation from ctx
+  (UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='u'), _prop_var),
   # Dtype propagation patterns - match void dtype and replace with inferred
   # Binary ops with void dtype
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.MOD, Ops.POW), dtype=dtypes.void,
@@ -216,22 +228,41 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, dtype=dtypes.void, src=UPat.var('src'), arg=UPat.var('arg')), _prop_custom),
 ])
 
-def _transform_uop(u: UOp) -> UOp: return graph_rewrite(u, pcode_pm)
+def _transform_uop(u: UOp, ctx: dict) -> UOp: return graph_rewrite(u, pcode_pm, ctx=ctx)
 
-def _transform_stmt(stmt):
-  """Transform a statement, rewriting all UOps within it."""
+def _get_var_name(u: UOp) -> str|None:
+  """Extract variable name from a UOp (DEFINE_VAR or CUSTOMI array access)."""
+  if u.op == Ops.DEFINE_VAR: return u.arg[0] if isinstance(u.arg, tuple) else u.arg
+  if u.op == Ops.CUSTOMI and u.src[0].op == Ops.DEFINE_VAR: return _get_var_name(u.src[0])
+  return None
+
+def _transform_stmt(stmt, ctx: dict):
+  """Transform a statement, updating ctx with inferred types."""
   match stmt:
+    case UOp(op=Ops.DEFINE_VAR, dtype=dt, arg=arg) if dt != dtypes.void:
+      name = arg[0] if isinstance(arg, tuple) else arg
+      ctx[name] = dt
+      return stmt
+    case UOp(op=Ops.ASSIGN):
+      lhs, rhs = stmt.src
+      rhs = _transform_uop(rhs, ctx)
+      lhs = _transform_uop(lhs, ctx)
+      # Infer LHS variable type from RHS if RHS has resolved type
+      if rhs.dtype != dtypes.void and (name := _get_var_name(lhs)) and name not in ctx:
+        ctx[name] = rhs.dtype
+        lhs = _transform_uop(lhs, ctx)  # re-transform to propagate type
+      return UOp(Ops.ASSIGN, dtypes.void, (lhs, rhs))
     case If(branches):
-      return If(tuple((_transform_uop(cond) if cond is not None else None, tuple(_transform_stmt(s) for s in body)) for cond, body in branches))
+      return If(tuple((_transform_uop(cond, ctx) if cond is not None else None, tuple(_transform_stmt(s, ctx) for s in body)) for cond, body in branches))
     case For(var, start, end, body):
-      return For(var, _transform_uop(start), _transform_uop(end), tuple(_transform_stmt(s) for s in body))
+      return For(var, _transform_uop(start, ctx), _transform_uop(end, ctx), tuple(_transform_stmt(s, ctx) for s in body))
     case Lambda(name, params, body):
-      return Lambda(name, params, _transform_uop(body) if isinstance(body, UOp) else tuple(_transform_stmt(s) for s in body))
-    case Return(v): return Return(_transform_uop(v))
-    case UOp(): return _transform_uop(stmt)
+      return Lambda(name, params, _transform_uop(body, ctx) if isinstance(body, UOp) else tuple(_transform_stmt(s, ctx) for s in body))
+    case Return(v): return Return(_transform_uop(v, ctx))
+    case UOp(): return _transform_uop(stmt, ctx)
     case _: return stmt
 
 def parse_transform(pcode: str) -> tuple:
   """Parse pseudocode and transform CUSTOM ops to UOps."""
-  stmts = parse(pcode)
-  return tuple(_transform_stmt(s) for s in stmts)
+  ctx: dict[str, DType] = {}
+  return tuple(_transform_stmt(s, ctx) for s in parse(pcode))
