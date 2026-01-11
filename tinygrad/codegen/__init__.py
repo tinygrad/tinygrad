@@ -26,8 +26,16 @@ pm_syntactic_sugar = PatternMatcher([
    lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
 ])
 
+# cache for full_rewrite_to_sink results
+_rewrite_cache: dict[tuple[bytes, str, bool], UOp] = {}
+
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
+
+  # check cache
+  cache_key = (sink.key, ren.device, optimize)
+  if cache_key in _rewrite_cache:
+    return _rewrite_cache[cache_key]
 
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(sink))
@@ -59,11 +67,8 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren)
 
-  # ** expander (expand_rewrite) **
-  sink = graph_rewrite(sink, sym+pm_move_where_on_load, name="postopt symbolic")
-
-  # expand
-  sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  # ** expander (expand_rewrite) - merged postopt symbolic + expander
+  sink = graph_rewrite(sink, sym+pm_move_where_on_load+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
@@ -93,20 +98,18 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
 
-  # decompositions
+  # decompositions + final rules for the renderer (merged for efficiency)
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)
-  sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
-
-  # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher+pm_split_ends
-  sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren.device, name="final rewrite")
+  sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren.device, name="decompositions+final rewrite")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
-  # return the rewritten sink
+  # cache and return the rewritten sink
+  _rewrite_cache[cache_key] = sink
   return sink
 
 # inject IF/ENDIF. only needed if device doesn't support gated stores
@@ -143,20 +146,38 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   lib = ctx.compiler.compile_cached(source.arg)
   return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
 
+# Full pipeline: linearize -> render -> compile
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])
 
+# Render only: linearize -> render (stops before compile)
+pm_to_program_render_only = PatternMatcher([
+  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
+])
+
+# Compile only: attach pre-compiled binary
+def do_attach_binary(ctx:bytes, prg:UOp, source:UOp) -> UOp|None:
+  """Attach a pre-compiled binary to the program."""
+  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=ctx),))
+
+pm_attach_binary = PatternMatcher([
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_attach_binary),
+])
+
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None, skip_compile:bool=False) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
   Args:
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
+    opts: Optional list of optimizations to apply
+    skip_compile: If True, only render source code without compiling
 
   Returns:
     The ProgramSpec of the program.
@@ -171,9 +192,17 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   # rewrite to prg
   if ast.op is Ops.PROGRAM: prg = ast
   else:
-    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
+    should_optimize = ast.tag is None
+    full_sink = full_rewrite_to_sink(ast, renderer, optimize=should_optimize)
     prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
-  prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
+
+  # Choose pipeline based on skip_compile
+  pm = pm_to_program_render_only if skip_compile else pm_to_program
+  prg = graph_rewrite(prg, pm, ctx=renderer, name="linearize/render" if skip_compile else "linearize/render/compile")
 
   # create the ProgramSpec
   return ProgramSpec.from_uop(prg)
+
+def attach_compiled_binary(prg_uop:UOp, binary:bytes) -> UOp:
+  """Attach a pre-compiled binary to a rendered program UOp."""
+  return graph_rewrite(prg_uop, pm_attach_binary, ctx=binary, name="attach binary")
