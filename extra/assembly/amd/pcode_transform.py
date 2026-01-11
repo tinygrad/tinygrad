@@ -30,17 +30,13 @@ _CUSTOM_TYPES = {
   'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
   'trig_preop_result': dtypes.float64,
 }
-# Constants that get replaced with CONST
+# Constants: name -> (dtype, value) - replaced with CONST during transformation
 _CONSTS = {
   'PI': (dtypes.float64, math.pi), 'INF': (dtypes.float64, math.inf),
   'MAX_FLOAT_F32': (dtypes.float32, 3.4028235e+38), 'MAX_FLOAT_F64': (dtypes.float64, 1.7976931348623157e+308),
   'OVERFLOW_F32': (dtypes.float32, math.inf), 'OVERFLOW_F64': (dtypes.float64, math.inf),
   'UNDERFLOW_F32': (dtypes.float32, 0.0), 'UNDERFLOW_F64': (dtypes.float64, 0.0),
 }
-# Well-known register types
-_REGS = {'SCC': dtypes.bool, 'VCC': dtypes.uint64, 'EXEC': dtypes.uint64, 'VDATA': dtypes.uint64, 'SDATA': dtypes.uint64,
-         'ADDR': dtypes.uint64, 'VDST': dtypes.uint32, 'ROUND_MODE': dtypes.uint32, 'ROUND_TOWARD_ZERO': dtypes.uint32,
-         'HW_REGISTERS': dtypes.uint32, 'SGPR': dtypes.uint32, 'VGPR': dtypes.uint32}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPERS
@@ -60,10 +56,6 @@ def _minmax(a: UOp, b: UOp, is_min: bool, dt: DType|None = None) -> UOp:
 def _vn(u: UOp) -> str|None:  # var name
   if u.op == Ops.DEFINE_VAR: return u.arg[0] if isinstance(u.arg, tuple) else u.arg
   return _vn(u.src[0]) if u.op == Ops.CUSTOMI and u.src[0].op == Ops.DEFINE_VAR else None
-
-
-
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATTERN HANDLERS
@@ -219,16 +211,8 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='i32_to_i16', src=(UPat.var('x', dtype=dtypes.int32),)),
    lambda x: UOp(Ops.CAST, dtypes.int16, (UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xffff))),))),
 ]) + PatternMatcher([
-  # Math constants
-  (UPat(Ops.DEFINE_VAR, arg=('PI', None, None)), lambda: UOp.const(dtypes.float64, 3.141592653589793)),
-  (UPat(Ops.DEFINE_VAR, arg=('INF', None, None)), lambda: UOp.const(dtypes.float64, float('inf'))),
-  # Float special values
-  (UPat(Ops.DEFINE_VAR, arg=('MAX_FLOAT_F32', None, None)), lambda: UOp.const(dtypes.float32, 3.4028235e+38)),
-  (UPat(Ops.DEFINE_VAR, arg=('MAX_FLOAT_F64', None, None)), lambda: UOp.const(dtypes.float64, 1.7976931348623157e+308)),
-  (UPat(Ops.DEFINE_VAR, arg=('OVERFLOW_F32', None, None)), lambda: UOp.const(dtypes.float32, float('inf'))),
-  (UPat(Ops.DEFINE_VAR, arg=('OVERFLOW_F64', None, None)), lambda: UOp.const(dtypes.float64, float('inf'))),
-  (UPat(Ops.DEFINE_VAR, arg=('UNDERFLOW_F32', None, None)), lambda: UOp.const(dtypes.float32, 0.0)),
-  (UPat(Ops.DEFINE_VAR, arg=('UNDERFLOW_F64', None, None)), lambda: UOp.const(dtypes.float64, 0.0)),
+  # Named constants from _CONSTS dict
+  (UPat(Ops.DEFINE_VAR, name='u'), lambda u: UOp.const(*_CONSTS[u.arg[0]]) if isinstance(u.arg, tuple) and u.arg[0] in _CONSTS else None),
   # Variable type tracking and propagation
   (UPat(Ops.DEFINE_VAR, name='u'), _track_var),
   (UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='u'), _prop_var),
