@@ -265,6 +265,10 @@ class TestVALULatency(unittest.TestCase):
   def test_vgpr_after_2_const(self): self.assertEqual(self._vgpr_after_n_const(2), 10)
   def test_vgpr_after_3_const(self): self.assertEqual(self._vgpr_after_n_const(3), 9)
   def test_vgpr_after_4_const(self): self.assertEqual(self._vgpr_after_n_const(4), 8)
+  def test_vgpr_after_5_const(self): self.assertEqual(self._vgpr_after_n_const(5), 8)
+  def test_vgpr_after_6_const(self): self.assertEqual(self._vgpr_after_n_const(6), 9)  # anomaly
+  def test_vgpr_after_7_const(self): self.assertEqual(self._vgpr_after_n_const(7), 8)
+  def test_vgpr_after_8_const(self): self.assertEqual(self._vgpr_after_n_const(8), 8)
 
   # s_nop(0) immediately drops VGPR read latency to 8
   def test_vgpr_nop_warmup(self): self.assertEqual(self._get_latency([v_mov_b32_e32(v[0], 1.0), s_nop(0), v_mov_b32_e32(v[1], v[99])]), 8)
