@@ -893,7 +893,7 @@ def get_location() -> tuple[str, int]:
 
 class UPat(OpMixin):
   __slots__ = ("op", "dtype", "arg", "name", "src", "is_any")
-  def __init__(self, op:AllOps|tuple[AllOps, ...]|set[AllOps]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
+  def __init__(self, op:AllOps|tuple[AllOps, ...]|set[Ops]|set[X86Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
                name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False):
     assert op is None or isinstance(op, (AllOps, tuple, set)), "op must be Ops or tuple of Ops"
@@ -1015,7 +1015,7 @@ class PatternMatcher:
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
+    self.pdict: dict[AllOps, list[tuple[UPat, Callable, set]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
