@@ -7,6 +7,7 @@ from torch._dynamo.backends.registry import register_backend
 from torch._functorch.aot_autograd import aot_module_simplified
 
 from tinygrad import Tensor, TinyJit
+from tinygrad.uop.ops import Ops
 
 @register_backend
 def tiny(gm:torch.fx.GraphModule, sample_inputs):
@@ -15,10 +16,33 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
     @TinyJit
     def tiny_function(*args:Tensor):
       outs = gm(*[wrap(x) for x in args])
-      for x in outs: unwrap(x).realize()
-      return outs
+      # Filter out None outputs (e.g., for inputs without gradients in backward pass)
+      tiny_outs = tuple(unwrap(x) if x is not None else None for x in outs)
+      for x in tiny_outs:
+        if x is not None: x.realize()
+      return tiny_outs
     # TODO: this should be able to pass in .tiny() Tensors, not need to convert them. it tries to access Storage if you pass in.
-    def torch_function(*args:torch.Tensor): return tiny_function(*[unwrap(x.tiny()) for x in args])
+    def torch_function(*args:torch.Tensor):
+      # Check if inputs are on CPU (need to convert outputs back to CPU)
+      inputs_on_cpu = any(x.device.type == 'cpu' for x in args if isinstance(x, torch.Tensor))
+      # Convert to tinygrad tensors, ensuring constants are made contiguous
+      tiny_args = []
+      for x in args:
+        t = unwrap(x.tiny())
+        # Constants need to be made contiguous to have a buffer for JIT
+        if t.uop.base.op is Ops.CONST: t = t.contiguous()
+        tiny_args.append(t)
+      tiny_outs = tiny_function(*tiny_args)
+      # Wrap outputs and convert to CPU if inputs were on CPU
+      result = []
+      for x in tiny_outs:
+        if x is None:
+          result.append(None)
+        else:
+          out = wrap(x)
+          if inputs_on_cpu: out = out.cpu()
+          result.append(out)
+      return tuple(result)
     return torch_function
   return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
 

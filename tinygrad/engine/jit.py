@@ -160,6 +160,57 @@ def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
   for ei in jit_cache:
     if any(b in depends for b in ei.bufs): depends.update(get_out_buffers_for_ei(ei))
 
+def _get_ret_input_map(ret, input_buffers: list[Buffer]) -> dict[tuple[int, ...], int]:
+  """Build mapping from ret positions to input buffer indices for passthrough values."""
+  input_buf_ids = {id(b): i for i, b in enumerate(input_buffers)}
+  ret_input_map: dict[tuple[int, ...], int] = {}
+  def traverse(obj, path: tuple[int, ...] = ()):
+    if obj is None: return
+    if isinstance(obj, Tensor):
+      if obj.uop.base.realized is not None:
+        buf_id = id(obj.uop.base.realized)
+        if buf_id in input_buf_ids:
+          ret_input_map[path] = input_buf_ids[buf_id]
+    elif isinstance(obj, (tuple, list)):
+      for i, item in enumerate(obj): traverse(item, path + (i,))
+    elif isinstance(obj, dict):
+      for i, (k, v) in enumerate(sorted(obj.items())): traverse(v, path + (i,))
+  traverse(ret)
+  return ret_input_map
+
+def _update_ret_with_input_buffers(ret, ret_input_map: dict[tuple[int, ...], int], input_buffers: list[Buffer]):
+  """Update ret to use new input buffers for passthrough values."""
+  if not ret_input_map: return ret
+  from tinygrad.uop.ops import buffers  # global dict mapping UOp -> Buffer
+
+  def update_tensor(t: Tensor, new_buf: Buffer) -> Tensor:
+    # For passthrough values, create a new tensor that uses the new buffer
+    old_base = t.uop.base
+    # Create a new BUFFER UOp with a new UNIQUE identifier so it gets its own buffer entry
+    new_unique = UOp(Ops.UNIQUE, src=())  # creates a new unique identifier
+    new_device = UOp(Ops.DEVICE, arg=new_buf.device, src=())
+    new_base = UOp(Ops.BUFFER, old_base.dtype, (new_unique, new_device), old_base.arg)
+    # Register the new buffer in the global buffers dict
+    buffers[new_base] = new_buf
+    # Substitute the old base with the new one throughout the UOp tree
+    new_uop = t.uop.substitute({old_base: new_base})
+    return Tensor(new_uop, t.device, requires_grad=t.requires_grad)
+
+  def traverse(obj, path: tuple[int, ...] = ()):
+    if path in ret_input_map:
+      return update_tensor(obj, input_buffers[ret_input_map[path]])
+    if obj is None: return None
+    if isinstance(obj, Tensor): return obj
+    if isinstance(obj, tuple):
+      return tuple(traverse(item, path + (i,)) for i, item in enumerate(obj))
+    if isinstance(obj, list):
+      return [traverse(item, path + (i,)) for i, item in enumerate(obj)]
+    if isinstance(obj, dict):
+      return {k: traverse(v, path + (i,)) for i, (k, v) in enumerate(sorted(obj.items()))}
+    return obj
+
+  return traverse(ret)
+
 ReturnType = TypeVar('ReturnType')
 @dataclass
 class CapturedJit(Generic[ReturnType]):
@@ -169,10 +220,12 @@ class CapturedJit(Generic[ReturnType]):
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
   expected_names: list[int|str]
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
+  ret_input_map: dict[tuple[int, ...], int]|None = None  # mapping from ret position to input buffer index for passthrough values
 
   def __reduce__(self):
     # TODO: free_intermediates here? replan_buffers_memory_layout here?
-    return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs, self.expected_names, self.expected_input_info)
+    return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
+                            self.expected_names, self.expected_input_info, self.ret_input_map)
 
   def __post_init__(self):
     self._jit_cache: list[ExecItem] = self.jit_cache
@@ -221,8 +274,11 @@ class CapturedJit(Generic[ReturnType]):
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
+    # Update ret to use new input buffers for passthrough values BEFORE clearing inputs
+    # (because _clear_inputs may set positions in input_buffers to None when graph batching stores bufs = input_buffers)
+    ret = _update_ret_with_input_buffers(self.ret, self.ret_input_map, input_buffers) if self.ret_input_map else self.ret
     self._clear_inputs()
-    return self.ret
+    return ret
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
@@ -336,12 +392,18 @@ class TinyJit(Generic[ReturnType]):
       noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec)) for b in ji.bufs}
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
       jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
+      # Update input_buffers to reflect memory planning reassignments
+      input_buffers = [assigned.get(b, b) for b in input_buffers]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
+      # Build mapping from ret positions to input buffer indices for passthrough values
+      ret_input_map = _get_ret_input_map(ret, input_buffers)
+      if DEBUG >= 1 and ret_input_map: print(f"JIT: {len(ret_input_map)} ret values are passthrough inputs")
+
       # set this for next run
-      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, expected_input_info)
+      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, expected_input_info, ret_input_map)
       if self.optimize: self.captured.replan_buffers_memory_layout()
     elif self.cnt >= 2:
       # jit exec

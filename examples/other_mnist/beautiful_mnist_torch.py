@@ -3,6 +3,8 @@ from tinygrad.helpers import trange, colored, DEBUG, temp
 from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
+# Import torch.compile tiny backend
+from extra.torch_backend.test_compile import tiny  # noqa: F401 - registers the "tiny" backend
 
 class Model(nn.Module):
   def __init__(self):
@@ -29,6 +31,9 @@ if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
     device = torch.device("tiny")
+  elif getenv("TORCH_COMPILE"):
+    # Use CPU when torch.compile with tiny backend - computation routes through tinygrad
+    device = torch.device("cpu")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1: print(f"using torch backend {device}")
@@ -43,11 +48,21 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
+  # Use torch.compile with tiny backend for forward pass and loss
+  # (optimizer operations are not compiled as they're stateful)
+  if getenv("TORCH_COMPILE"):
+    @torch.compile(backend="tiny")
+    def forward_and_loss(X, Y):
+      out = model(X)
+      return loss_fn(out, Y)
+  else:
+    def forward_and_loss(X, Y):
+      out = model(X)
+      return loss_fn(out, Y)
+
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
-    out = model(X)
-    loss = loss_fn(out, Y)
+    loss = forward_and_loss(X, Y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()

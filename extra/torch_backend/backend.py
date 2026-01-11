@@ -405,6 +405,8 @@ decomps = [
   aten.native_layer_norm_backward,
   aten.linalg_cross,
   aten.addmm,
+  aten.mse_loss, aten.mse_loss_backward,
+  aten._native_batch_norm_legit_functional,
   aten.addcmul,
   aten.addcdiv,
   aten._log_softmax_backward_data,
