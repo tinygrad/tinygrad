@@ -543,19 +543,11 @@ class SQTTState:
     if self.cycle > 10000: raise RuntimeError("cycle limit exceeded")
     events = []
 
-    # 1. ALU[3] exits - instruction completes, result goes to completed
+    # 1. ALU[3] exits - capture but don't add to completed yet
     exiting = self.alu[3]
     if exiting is not None:
       self.emit(ALUEXEC, src=AluSrc.VALU)
       events.append(colored(f"EXEC v{exiting}", 'red'))
-      self.completed.add(exiting)
-      # Remove from in_flight and check if it had a forwarding slot
-      for idx, (d, _, has_fwd_slot) in enumerate(self.in_flight):
-        if d == exiting:
-          if has_fwd_slot:
-            self.forward_warm = True
-          self.in_flight.pop(idx)
-          break
 
     # 2. Slide ALU pipeline
     self.alu[3] = self.alu[2]
@@ -563,7 +555,7 @@ class SQTTState:
     self.alu[1] = self.alu[0]
     self.alu[0] = None
 
-    # 3. Try to promote from issue_queue to ALU[0]
+    # 3. Try to promote from issue_queue to ALU[0] (before adding exiting to completed)
     if self.alu[0] is None and self.issue_queue:
       for i, (dest, srcs, ready_at, has_fwd_slot, was_warm) in enumerate(self.issue_queue):
         # Check if instruction has a minimum ready cycle
@@ -580,10 +572,10 @@ class SQTTState:
           self.cold_used = True
           self.issue_queue[i] = (dest, srcs, self.cycle + 1, has_fwd_slot, was_warm)
           continue
-        # Forwarding: consumer can forward if it has a slot
-        can_forward = has_fwd_slot and has_deps
-        # Regfile path: has dependencies but no slot
-        must_use_regfile = has_deps and not has_fwd_slot
+        # Forwarding: consumer can forward if producer has a slot (source is in fwd_slots)
+        can_forward = has_deps and any(src in self.fwd_slots for src in srcs)
+        # Regfile path: has dependencies but producer has no slot
+        must_use_regfile = has_deps and not can_forward
         # Regfile penalty: add +4 cycles latency (only apply once)
         if must_use_regfile and ready_at == 0:
           self.issue_queue[i] = (dest, srcs, self.cycle + 4, has_fwd_slot, was_warm)
@@ -599,6 +591,17 @@ class SQTTState:
               break
         events.append(colored(f"v{dest}->ALU" + ("(fwd)" if can_forward else "(rf)" if must_use_regfile else ""), 'green'))
         break
+
+    # 4. Now add exiting instruction to completed (after promotion decision)
+    if exiting is not None:
+      self.completed.add(exiting)
+      # Remove from in_flight and check if it had a forwarding slot
+      for idx, (d, _, has_fwd_slot) in enumerate(self.in_flight):
+        if d == exiting:
+          if has_fwd_slot:
+            self.forward_warm = True
+          self.in_flight.pop(idx)
+          break
 
     self._debug_line(events)
 
@@ -656,7 +659,8 @@ class SQTTState:
 
       if DEBUG >= 3:
         cycle = colored(f'C{self.cycle:>3}:', 'cyan')
-        issue = colored(f'ISSUE v{dest}', 'magenta')
+        slot_info = "" if has_fwd_slot else colored(" NO_SLOT", 'red')
+        issue = colored(f'ISSUE v{dest}', 'magenta') + slot_info
         padding = 95 - ansilen(issue)
         print(f"{cycle} {issue}{' ' * padding} {disasm(inst)}")
 
