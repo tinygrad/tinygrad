@@ -264,9 +264,13 @@ pcode_spec = PatternMatcher([
   # ASSIGN: dtype matches rhs (unless both void)
   (UPat(Ops.ASSIGN, src=(UPat.var("lhs"), UPat.var("rhs")), name="a"),
    lambda a, lhs, rhs: a.dtype == rhs.dtype and (rhs.dtype != dtypes.void or lhs.dtype == dtypes.void)),
-  # Pcode-specific ops (void sources allowed - type comes from context)
+  # BITCAST: void source allowed (type view on untyped register)
   (UPat(Ops.BITCAST, src=(UPat(),)), lambda: True),
-  (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.CAT)), lambda: True),
+  # CUSTOMI/CAT: must be typed (slice bounds or bit concat determine type)
+  (UPat(Ops.CUSTOMI, name="x"), lambda x: x.dtype != dtypes.void),
+  (UPat(Ops.CAT, name="x"), lambda x: x.dtype != dtypes.void),
+  # CUSTOM: MEM and passthrough ops (abs, cvtToQuietNAN) can be void (wrapped by BITCAST/CAST)
+  (UPat(Ops.CUSTOM, name="x"), lambda x: x.dtype != dtypes.void or x.arg in {'MEM', 'abs', 'cvtToQuietNAN'}),
   # POW allows int exponent with float base
   (UPat(Ops.POW, dtype=dtypes.floats, src=(UPat(dtype=dtypes.floats), UPat(dtype=dtypes.ints))), lambda: True),
 ]) + shared_spec
