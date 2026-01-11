@@ -233,27 +233,41 @@ class TestForwardingGap(unittest.TestCase):
 
 
 class TestVALULatency(unittest.TestCase):
-  """VALU latency depends on uncached VGPR source reads.
-  6 cycles: no VGPR source (constant only)
-  9 cycles: uncached VGPR source read
+  """VALU latency depends on VGPR source reads.
+  6 cycles: no VGPR source (constant only), stays 6 regardless of warmup
+  8-11 cycles: VGPR source read, decreases with warmup (11->10->9->8)
+  s_nop(0) after VALU immediately drops VGPR read latency to 8
   """
-  def _get_latency(self, instr):
-    packets = run_sqtt([instr])
+  def _get_latency(self, instrs):
+    if not isinstance(instrs, list): instrs = [instrs]
+    packets = run_sqtt(instrs)
     deltas = get_timing_deltas(packets)
-    time, valu_time, exec_time = 0, None, None
+    time, valu_times, exec_times = 0, [], []
     for ptype, delta in deltas:
       time += delta
-      if ptype == 'VALUINST' and valu_time is None: valu_time = time
-      if ptype == 'ALUEXEC' and exec_time is None: exec_time = time
-    return exec_time - valu_time
+      if ptype == 'VALUINST': valu_times.append(time)
+      if ptype == 'ALUEXEC': exec_times.append(time)
+    return exec_times[-1] - valu_times[-1] if valu_times and exec_times else None
 
-  # 6-cycle latency: no VGPR source (constant)
-  def test_mov_const(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], 1.0)), 6)
-  def test_mov_literal(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], 565.0)), 6)
+  # 6-cycle latency: no VGPR source (constant), always 6
+  def test_const_single(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], 1.0)), 6)
+  def test_const_literal(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], 565.0)), 6)
+  def test_const_after_const(self): self.assertEqual(self._get_latency([v_mov_b32_e32(v[0], 1.0), v_mov_b32_e32(v[1], 2.0)]), 6)
+  def test_const_after_nop(self): self.assertEqual(self._get_latency([v_mov_b32_e32(v[0], 1.0), s_nop(0), v_mov_b32_e32(v[1], 2.0)]), 6)
 
-  # 9-cycle latency: uncached VGPR source read
-  def test_mov_vgpr(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], v[1])), 9)
-  def test_add_vgpr(self): self.assertEqual(self._get_latency(v_add_f32_e32(v[0], v[1], v[2])), 9)
+  # VGPR read latency: cold start = 9
+  def test_vgpr_cold(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], v[1])), 9)
+
+  # VGPR read latency: warmup decreases 11->10->9->8
+  def _vgpr_after_n_const(self, n):
+    return self._get_latency([v_mov_b32_e32(v[i], float(i)) for i in range(n)] + [v_mov_b32_e32(v[10], v[99])])
+  def test_vgpr_after_1_const(self): self.assertEqual(self._vgpr_after_n_const(1), 11)
+  def test_vgpr_after_2_const(self): self.assertEqual(self._vgpr_after_n_const(2), 10)
+  def test_vgpr_after_3_const(self): self.assertEqual(self._vgpr_after_n_const(3), 9)
+  def test_vgpr_after_4_const(self): self.assertEqual(self._vgpr_after_n_const(4), 8)
+
+  # s_nop(0) immediately drops VGPR read latency to 8
+  def test_vgpr_nop_warmup(self): self.assertEqual(self._get_latency([v_mov_b32_e32(v[0], 1.0), s_nop(0), v_mov_b32_e32(v[1], v[99])]), 8)
 
 
 class TestChainWithNop(unittest.TestCase):
