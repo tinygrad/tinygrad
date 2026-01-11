@@ -30,6 +30,9 @@ _CUSTOM_TYPES = {
   's_ff1_i32_b32': dtypes.uint32, 's_ff1_i32_b64': dtypes.uint32,
   'ConvertFromFormat': dtypes.uint32, 'nop': dtypes.uint32,
   'trig_preop_result': dtypes.float64,
+  # Buffer channel offsets (zero-arg ops)
+  'ChannelOffsetX': dtypes.uint32, 'ChannelOffsetY': dtypes.uint32,
+  'ChannelOffsetZ': dtypes.uint32, 'ChannelOffsetW': dtypes.uint32,
 }
 # Constants: name -> (dtype, value) - replaced with CONST during transformation
 _CONSTS = {
@@ -171,12 +174,21 @@ def _prop_custom(x):
   if dt == dtypes.void: return None  # wait for sources to be typed first
   return UOp(Ops.CUSTOM, dt, x.src, x.arg)
 
-def _prop_customi(base, hi, lo):
-  if base.dtype == dtypes.void: return None  # wait for base to be typed
+def _prop_customi(ctx, base, hi, lo):
   if hi is lo:
-    # Array element access: use scalar element type
-    dt = base.dtype.scalar() if base.dtype.count > 1 else base.dtype
-    return UOp(Ops.CUSTOMI, dt, (base, hi, lo))
+    # Array element access or single-bit slice
+    if base.dtype != dtypes.void:
+      dt = base.dtype.scalar() if base.dtype.count > 1 else base.dtype
+      return UOp(Ops.CUSTOMI, dt, (base, hi, lo))
+    # Base is void: check if it's a declared variable that will get typed later
+    if ctx is not None and base.op == Ops.DEFINE_VAR:
+      name = base.arg[0] if isinstance(base.arg, tuple) else base.arg
+      if name in ctx:
+        # Variable is declared, wait for it to be typed
+        return None
+    # Unknown variable or not in context: default to uint32 (bit index)
+    return UOp(Ops.CUSTOMI, dtypes.uint32, (base, hi, lo))
+  # Bit slice: infer type from slice width (don't need base type)
   if hi.op == Ops.CONST and lo.op == Ops.CONST:
     return UOp(Ops.CUSTOMI, dtypes.uint64 if abs(int(hi.arg) - int(lo.arg)) + 1 > 32 else dtypes.uint32, (base, hi, lo))
   return UOp(Ops.CUSTOMI, dtypes.uint32, (base, hi, lo))
@@ -391,9 +403,11 @@ pcode_pm = PatternMatcher([
         dtype=dtypes.void, src=(UPat.var('l'), UPat.var('r')), name='__OP__'), _prop_binop),
   (UPat((Ops.NEG, Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL),
         dtype=dtypes.void, src=(UPat.var('x'),), name='__OP__'), _prop_unop),
-  # Unary XOR (NOT) -> binary XOR with all ones
-  (UPat(Ops.XOR, src=(UPat.var('x'),)),
-   lambda x: UOp(Ops.XOR, x.dtype, (x, UOp.const(x.dtype, -1))) if x.dtype != dtypes.void else None),
+  # Unary XOR (NOT): propagate type from source, then expand to binary XOR with all ones
+  (UPat(Ops.XOR, dtype=dtypes.void, src=(UPat.var('x'),)),
+   lambda x: UOp(Ops.XOR, x.dtype, (x,)) if x.dtype != dtypes.void else None),
+  (UPat(Ops.XOR, src=(UPat.var('x'),), name='op'),
+   lambda op, x: UOp(Ops.XOR, op.dtype, (x, UOp.const(op.dtype, -1))) if op.dtype != dtypes.void else None),
   # Unary CMPEQ (logical NOT) -> CMPEQ(x, 0) with matching type (default to uint32 for void)
   (UPat(Ops.CMPEQ, dtype=dtypes.bool, src=(UPat.var('x'),)),
    lambda x: UOp(Ops.CMPEQ, dtypes.bool, (x, UOp.const(x.dtype if x.dtype != dtypes.void else dtypes.uint32, 0)))),
@@ -431,6 +445,13 @@ pcode_pm = PatternMatcher([
         src=(UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='v'), UPat.var('t')), name='op'),
    lambda ctx, op, v, t: _backprop(ctx, op, v, t)),
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR),
+        src=(UPat.var('t'), UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='v')), name='op'),
+   lambda ctx, op, t, v: _backprop(ctx, op, v, t)),
+  # Back-propagate types through comparisons
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE),
+        src=(UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='v'), UPat.var('t')), name='op'),
+   lambda ctx, op, v, t: _backprop(ctx, op, v, t)),
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE),
         src=(UPat.var('t'), UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='v')), name='op'),
    lambda ctx, op, t, v: _backprop(ctx, op, v, t)),
 ])
