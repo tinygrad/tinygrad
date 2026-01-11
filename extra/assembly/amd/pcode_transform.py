@@ -179,11 +179,41 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CAT, dtype=dtypes.void, name='x'), _prop_cat),
   (UPat(Ops.CUSTOMI, dtype=dtypes.void, src=(UPat.var('base'), UPat.var('hi'), UPat.var('lo'))), _prop_customi),
   (UPat(Ops.CUSTOM, dtype=dtypes.void, name='x'), _prop_custom),
+  # Fix comparison type mismatches: cast to larger type
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE), src=(UPat.var('x'), UPat.var('y')), name='cmp'),
+   lambda cmp, x, y: UOp(cmp.op, dtypes.bool, (x, UOp(Ops.CAST, x.dtype, (y,)))) if x.dtype != dtypes.void and y.dtype != dtypes.void and x.dtype != y.dtype and x.dtype.itemsize >= y.dtype.itemsize else None),
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE), src=(UPat.var('x'), UPat.var('y')), name='cmp'),
+   lambda cmp, x, y: UOp(cmp.op, dtypes.bool, (UOp(Ops.CAST, y.dtype, (x,)), y)) if x.dtype != dtypes.void and y.dtype != dtypes.void and x.dtype != y.dtype and y.dtype.itemsize > x.dtype.itemsize else None),
+  # Fix WHERE with non-bool condition: cast int condition to bool (test != 0)
+  (UPat(Ops.WHERE, src=(UPat.var('c', dtype=dtypes.ints), UPat.var('t'), UPat.var('f'))),
+   lambda c, t, f: UOp(Ops.WHERE, t.dtype if t.dtype != dtypes.void else f.dtype, (UOp(Ops.CMPNE, dtypes.bool, (c, UOp.const(c.dtype, 0))), t, f))),
+  # Fix binary op type mismatches: cast smaller to larger (excluding POW which allows int exponent)
+  (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV), src=(UPat.var('x'), UPat.var('y')), name='op'),
+   lambda op, x, y: UOp(op.op, op.dtype, (x, UOp(Ops.CAST, x.dtype, (y,)))) if x.dtype != dtypes.void and y.dtype != dtypes.void and x.dtype != y.dtype and x.dtype.itemsize >= y.dtype.itemsize else None),
+  (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV), src=(UPat.var('x'), UPat.var('y')), name='op'),
+   lambda op, x, y: UOp(op.op, op.dtype, (UOp(Ops.CAST, y.dtype, (x,)), y)) if x.dtype != dtypes.void and y.dtype != dtypes.void and x.dtype != y.dtype and y.dtype.itemsize > x.dtype.itemsize else None),
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PCODE SPEC (extends shared_spec with pcode-specific patterns)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def _is_numeric(dt: DType) -> bool:
+  """Check if dtype is numeric (bool, int, float, or custom bit-width type like u1, i65)"""
+  if dt == dtypes.bool or dtypes.is_int(dt) or dtypes.is_float(dt): return True
+  return dt.name[0] in ('u', 'i') and dt.name[1:].isdigit()  # custom bit-width types
+
+def _check_binop(x):
+  """Binary ALU: result and sources should be compatible"""
+  for s in x.src:
+    if s.dtype == dtypes.void: continue
+    if x.dtype.base == s.dtype.base: continue
+    # Both numeric types (int/float/custom bit-width) are compatible
+    if _is_numeric(x.dtype) and _is_numeric(s.dtype): continue
+    # POW allows int exponent with float base
+    if x.op == Ops.POW and dtypes.is_float(x.dtype) and dtypes.is_int(s.dtype): continue
+    return False
+  return True
 
 pcode_spec = PatternMatcher([
   # DEFINE_VAR for register/variable references
@@ -200,8 +230,25 @@ pcode_spec = PatternMatcher([
   (UPat(Ops.CAT), lambda: True),
   # MULACC (fused multiply-add)
   (UPat(Ops.MULACC, src=(UPat(), UPat(), UPat())), lambda: True),
-  # ALU ops - pcode is loose with types, allow any combination
-  (UPat(GroupOp.ALU), lambda: True),
+  # Unary ops: result matches source (or void source)
+  (UPat((Ops.NEG, Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL), src=(UPat.var("x"),), name="u"),
+   lambda u, x: u.dtype == x.dtype or x.dtype == dtypes.void),
+  # Unary XOR (parity) can have void result
+  (UPat(Ops.XOR, src=(UPat(),)), lambda: True),
+  # SHL/SHR: shift amount is uint
+  (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"),
+   lambda a, x, y: (a.dtype == x.dtype or x.dtype == dtypes.void) and y.dtype == dtypes.uint),
+  # Comparisons: result is bool, sources match (or void)
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))),
+   lambda x, y: x.dtype == dtypes.void or y.dtype == dtypes.void or x.dtype == y.dtype),
+  # Unary comparison (sign check)
+  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE), dtype=dtypes.bool, src=(UPat(),)), lambda: True),
+  # WHERE: condition is bool, t/f match result (or void)
+  (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("t"), UPat.var("f"))),
+   lambda w, t, f: (w.dtype == t.dtype or t.dtype == dtypes.void) and (w.dtype == f.dtype or f.dtype == dtypes.void)),
+  # Binary ALU ops
+  (UPat(GroupOp.ALU-{Ops.SHL, Ops.SHR, Ops.WHERE, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE, Ops.NEG, Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL},
+        src=(UPat(), UPat()), name="x"), _check_binop),
 ]) + shared_spec
 
 # ═══════════════════════════════════════════════════════════════════════════════
