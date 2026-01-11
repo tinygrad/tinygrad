@@ -88,7 +88,7 @@ def _prop_assign(ctx, lhs, rhs):
   if ctx is None or rhs.dtype == dtypes.void or lhs.op != Ops.DEFINE_VAR: return None
   if (name := _var_name(lhs)) is None or name in ctx: return None
   ctx[name] = rhs.dtype
-  return UOp(Ops.ASSIGN, dtypes.void, (UOp(Ops.DEFINE_VAR, rhs.dtype, arg=lhs.arg), rhs))
+  return UOp(Ops.ASSIGN, rhs.dtype, (UOp(Ops.DEFINE_VAR, rhs.dtype, arg=lhs.arg), rhs))
 
 # Dtype propagation for void-typed ops
 def _prop_binop(l, r, __OP__, **kw):
@@ -169,11 +169,18 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.DEFINE_VAR, name='u'), _track_var),
   (UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='u'), _prop_var),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='lhs'), UPat.var('rhs'))), _prop_assign),
+  # Propagate dtype for ASSIGN from rhs, or infer rhs dtype from lhs if rhs is void
+  (UPat(Ops.ASSIGN, dtype=dtypes.void, src=(UPat.var('lhs'), UPat.var('rhs'))),
+   lambda lhs, rhs: UOp(Ops.ASSIGN, rhs.dtype, (lhs, rhs)) if rhs.dtype != dtypes.void else
+                    UOp(Ops.ASSIGN, lhs.dtype, (lhs, rhs.replace(dtype=lhs.dtype))) if lhs.dtype != dtypes.void else None),
   # Dtype propagation for void-typed ops
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.MOD, Ops.POW),
         dtype=dtypes.void, src=(UPat.var('l'), UPat.var('r')), name='__OP__'), _prop_binop),
   (UPat((Ops.NEG, Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL),
         dtype=dtypes.void, src=(UPat.var('x'),), name='__OP__'), _prop_unop),
+  # Unary XOR (NOT) -> binary XOR with all ones
+  (UPat(Ops.XOR, src=(UPat.var('x'),)),
+   lambda x: UOp(Ops.XOR, x.dtype, (x, UOp.const(x.dtype, -1))) if x.dtype != dtypes.void else None),
   (UPat(Ops.MULACC, dtype=dtypes.void, src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), _prop_mulacc),
   (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var('cond'), UPat.var('t'), UPat.var('f'))), _prop_where),
   (UPat(Ops.CAT, dtype=dtypes.void, name='x'), _prop_cat),
@@ -218,8 +225,9 @@ def _check_binop(x):
 pcode_spec = PatternMatcher([
   # DEFINE_VAR for register/variable references
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg, (str, tuple))),
-  # ASSIGN with void dtype
-  (UPat(Ops.ASSIGN, dtypes.void, src=(UPat(), UPat())), lambda: True),
+  # ASSIGN: dtype matches rhs, rhs must be typed (unless both sides are void)
+  (UPat(Ops.ASSIGN, src=(UPat.var("lhs"), UPat.var("rhs")), name="a"),
+   lambda a, lhs, rhs: a.dtype == rhs.dtype and (rhs.dtype != dtypes.void or lhs.dtype == dtypes.void)),
   # BITCAST for type views on registers
   (UPat(Ops.BITCAST, src=(UPat(),)), lambda: True),
   # CUSTOMI for slices and array access
@@ -228,13 +236,13 @@ pcode_spec = PatternMatcher([
   (UPat(Ops.CUSTOM), lambda: True),
   # CAT for bit concatenation
   (UPat(Ops.CAT), lambda: True),
-  # MULACC (fused multiply-add)
-  (UPat(Ops.MULACC, src=(UPat(), UPat(), UPat())), lambda: True),
+  # MULACC: all types match (or void)
+  (UPat(Ops.MULACC, src=(UPat(), UPat(), UPat()), name="x"),
+   lambda x: all(s.dtype == x.dtype or s.dtype == dtypes.void for s in x.src)),
   # Unary ops: result matches source (or void source)
   (UPat((Ops.NEG, Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL), src=(UPat.var("x"),), name="u"),
    lambda u, x: u.dtype == x.dtype or x.dtype == dtypes.void),
-  # Unary XOR (parity) can have void result
-  (UPat(Ops.XOR, src=(UPat(),)), lambda: True),
+
   # SHL/SHR: shift amount is uint
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"),
    lambda a, x, y: (a.dtype == x.dtype or x.dtype == dtypes.void) and y.dtype == dtypes.uint),
