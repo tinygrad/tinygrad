@@ -4,7 +4,8 @@ import pickle, unittest, ctypes
 from pathlib import Path
 from tinygrad.helpers import DEBUG, colored
 from tinygrad.runtime.autogen import rocprof
-from tinygrad.viz.serve import llvm_disasm
+from tinygrad.runtime.support.elf import elf_loader
+from extra.assembly.amd.asm import detect_format, disasm
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
                                      ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, AluSrc, MemSrc)
 
@@ -43,8 +44,13 @@ def print_packets(packets: list) -> None:
 # ROCPROF DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def run_rocprof_decoder(blobs: list[bytes], disasm: dict):
+def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
   """Run rocprof decoder on SQTT blobs, returning raw occupancy and instruction records."""
+  image, sections, _ = elf_loader(lib)
+  text = next((sh for sh in sections if sh.name == ".text"), None)
+  assert text is not None, "no .text section found"
+  text_off, text_size = text.header.sh_addr, text.header.sh_size
+
   blob_iter, current_blob = iter(blobs), [None]
   occupancy_records: list[tuple[int, int, int, int, bool]] = []  # (wave_id, simd, cu, time, is_start)
   wave_insts: list[list[tuple[int, int]]] = []  # per-wave list of (time, stall)
@@ -75,13 +81,20 @@ def run_rocprof_decoder(blobs: list[bytes], disasm: dict):
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, _):
-    if pc.address not in disasm:
+    offset = pc.address - base
+    if offset < text_off or offset >= text_off + text_size:
       mem_size_ptr[0] = 0
       return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    instr, mem_size_ptr[0] = disasm[pc.address]
-    if instr == "s_endpgm": mem_size_ptr[0] = 0
+    try:
+      fmt = detect_format(bytes(image[offset:]))
+      inst = fmt.from_bytes(bytes(image[offset:]))
+      instr_text, mem_size_ptr[0] = disasm(inst), inst._size()
+    except (ValueError, AssertionError):
+      mem_size_ptr[0] = 0
+      return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    if instr_text == "s_endpgm": mem_size_ptr[0] = 0
     if (max_sz := size_ptr[0]) == 0: return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES
-    instr_bytes = instr.encode()
+    instr_bytes = instr_text.encode()
     ctypes.memmove(instr_ptr, instr_bytes, min(len(instr_bytes), max_sz - 1))
     size_ptr[0] = min(len(instr_bytes), max_sz - 1)
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
@@ -98,16 +111,14 @@ class TestSQTTExamples(unittest.TestCase):
         data = pickle.load(f)
       sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
       prg = next((e for e in data if type(e).__name__ == "ProfileProgramEvent"), None)
-      dev = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.props is not None), None)
-      if sqtt_events and prg and dev:
-        disasm = {prg.base + addr: v for addr, v in llvm_disasm(dev.props["gfx_target_version"], prg.lib).items()}
-        cls.examples[pkl_path.stem] = (sqtt_events, disasm)
+      if sqtt_events and prg:
+        cls.examples[pkl_path.stem] = (sqtt_events, prg.lib, prg.base)
 
   def test_examples_loaded(self):
     self.assertGreater(len(self.examples), 0, "no example files found")
 
   def test_decode_all_examples(self):
-    for name, (events, _) in self.examples.items():
+    for name, (events, *_) in self.examples.items():
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
           packets = decode(event.blob)
@@ -116,14 +127,14 @@ class TestSQTTExamples(unittest.TestCase):
           self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
 
   def test_packet_types_valid(self):
-    for name, (events, _) in self.examples.items():
+    for name, (events, *_) in self.examples.items():
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
           for pkt in decode(event.blob):
             self.assertIn(type(pkt), PACKET_TYPES, f"unknown packet type {type(pkt)} in {name}")
 
   def test_wave_lifecycle(self):
-    for name, (events, _) in self.examples.items():
+    for name, (events, *_) in self.examples.items():
       if "empty" in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
@@ -131,14 +142,14 @@ class TestSQTTExamples(unittest.TestCase):
         self.assertGreater(len([p for p in all_packets if isinstance(p, WAVEEND)]), 0, f"no WAVEEND in {name}")
 
   def test_time_monotonic(self):
-    for name, (events, _) in self.examples.items():
+    for name, (events, *_) in self.examples.items():
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
           times = [p._time for p in decode(event.blob)]
           self.assertEqual(times, sorted(times), f"timestamps not monotonic in {name}")
 
   def test_gemm_has_instructions(self):
-    for name, (events, _) in self.examples.items():
+    for name, (events, *_) in self.examples.items():
       if "gemm" not in name: continue
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
@@ -146,9 +157,9 @@ class TestSQTTExamples(unittest.TestCase):
 
   def test_rocprof_wave_times_match(self):
     """Wave start/end times must match rocprof exactly."""
-    for name, (events, disasm) in self.examples.items():
+    for name, (events, lib, base) in self.examples.items():
       with self.subTest(example=name):
-        occupancy, _ = run_rocprof_decoder([e.blob for e in events], disasm)
+        occupancy, _ = run_rocprof_decoder([e.blob for e in events], lib, base)
         # extract from rocprof occupancy records
         roc_starts: dict[tuple[int, int, int], int] = {}
         roc_waves: list[tuple[int, int]] = []
@@ -169,9 +180,9 @@ class TestSQTTExamples(unittest.TestCase):
 
   def test_rocprof_inst_times_match(self):
     """Instruction times must match rocprof exactly (excluding s_endpgm)."""
-    for name, (events, disasm) in self.examples.items():
+    for name, (events, lib, base) in self.examples.items():
       with self.subTest(example=name):
-        _, wave_insts = run_rocprof_decoder([e.blob for e in events], disasm)
+        _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base)
         # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
         roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
         # extract from our decoder
