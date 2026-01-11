@@ -214,11 +214,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     mant = UOp(Ops.AND, bits.dtype, (bits, UOp.const(bits.dtype, mant_mask)))
     return UOp(Ops.AND, dtypes.bool, (UOp(Ops.AND, dtypes.bool, (is_exp_all, UOp(Ops.CMPNE, dtypes.bool, (mant, UOp.const(bits.dtype, 0))))),
                                       UOp(Ops.CMPEQ, dtypes.bool, (quiet_check, UOp.const(bits.dtype, 0)))))
-  if name == 'isDENORM':
-    bits, exp_shift, exp_mask, mant_mask = _fp_bits(a[0])
-    exp = UOp(Ops.AND, bits.dtype, (UOp(Ops.SHR, bits.dtype, (bits, UOp.const(bits.dtype, exp_shift))), UOp.const(bits.dtype, exp_mask)))
-    mant = UOp(Ops.AND, bits.dtype, (bits, UOp.const(bits.dtype, mant_mask)))
-    return UOp(Ops.AND, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (exp, UOp.const(bits.dtype, 0))), UOp(Ops.CMPNE, dtypes.bool, (mant, UOp.const(bits.dtype, 0)))))
   if name == 'sign':
     uint_dt, sign_shift, _, _, _, _ = FP_INFO.get(a[0].dtype, FP_INFO[dtypes.float32])
     return UOp(Ops.AND, dtypes.uint32, (_cast(UOp(Ops.SHR, uint_dt, (UOp(Ops.BITCAST, uint_dt, (a[0],)), UOp.const(uint_dt, sign_shift))), dtypes.uint32), UOp.const(dtypes.uint32, 1)))
