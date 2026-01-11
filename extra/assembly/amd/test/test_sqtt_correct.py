@@ -125,32 +125,20 @@ class TestVALUChains(unittest.TestCase):
     self.assertEqual(issue[:n-1], expected_issue)
     self.assertEqual(execd, expected_exec)
 
-  def test_chain_2(self):
-    self._chain(2, [1], [6])
-  def test_chain_3(self):
-    self._chain(3, [1, 1], [6, 5])
-  def test_chain_4(self):
-    self._chain(4, [1, 1, 1], [6, 5, 5])
-  def test_chain_5(self):
-    self._chain(5, [1, 1, 1, 1], [6, 5, 5, 9])
-  def test_chain_6(self):
-    self._chain(6, [1, 1, 1, 1, 1], [6, 5, 5, 9, 9])
-  def test_chain_7(self):
-    self._chain(7, [1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 9, 9])
-  def test_chain_8(self):
-    self._chain(8, [1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 9, 9, 9])
-  def test_chain_12(self):
-    self._chain(12, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9])
-  def test_chain_14(self):
-    self._chain(14, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
-  def test_chain_15(self):  # issue stalls start here
-    self._chain(15, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3], [6, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
-  def test_chain_16(self):
-    self._chain(16, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5], [6, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
-  def test_chain_18(self):
-    self._chain(18, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5], [6, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
-  def test_chain_20(self):
-    self._chain(20, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 5], [6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  def test_chain_2(self): self._chain(2, [1], [6])
+  def test_chain_3(self): self._chain(3, [1, 1], [6, 5])
+  def test_chain_4(self): self._chain(4, [1, 1, 1], [6, 5, 5])
+  def test_chain_5(self): self._chain(5, [1, 1, 1, 1], [6, 5, 5, 9])
+  def test_chain_6(self): self._chain(6, [1, 1, 1, 1, 1], [6, 5, 5, 9, 9])
+  def test_chain_7(self): self._chain(7, [1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 9, 9])
+  def test_chain_8(self): self._chain(8, [1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 9, 9, 9])
+  def test_chain_12(self): self._chain(12, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9])
+  def test_chain_14(self): self._chain(14, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  # issue stalls start here
+  def test_chain_15(self): self._chain(15, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3], [6, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  def test_chain_16(self): self._chain(16, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5], [6, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  def test_chain_18(self): self._chain(18, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5], [6, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  def test_chain_20(self): self._chain(20, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 5], [6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
 
 
 class TestVALUChainsWithNops(unittest.TestCase):
