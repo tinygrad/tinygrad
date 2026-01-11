@@ -17,8 +17,7 @@ def _cast(x: UOp, dtype: DType) -> UOp:
   return x if x.dtype == dtype else UOp(Ops.BITCAST if dtype.itemsize == x.dtype.itemsize else Ops.CAST, dtype, (x,))
 
 # Input variables
-def _var(name, dt, lo=0, hi=None): return UOp(Ops.DEFINE_VAR, dt, (), (name, lo, hi if hi else (1 << dt.itemsize*8) - 1))
-INPUT_VARS = {n: _var(n, dt) for n, dt in [
+INPUT_VARS = {n: UOp(Ops.DEFINE_VAR, dt, (), (n, 0, (1 << dt.itemsize*8) - 1)) for n, dt in [
   ('S0', dtypes.uint32), ('S1', dtypes.uint32), ('S2', dtypes.uint32), ('D0', dtypes.uint32),
   ('S0_64', dtypes.uint64), ('S1_64', dtypes.uint64), ('S2_64', dtypes.uint64), ('D0_64', dtypes.uint64),
   ('SCC', dtypes.uint32), ('VCC', dtypes.uint64), ('EXEC', dtypes.uint64), ('laneId', dtypes.uint32),
@@ -33,13 +32,6 @@ INPUT_VARS['ADDR_BASE'] = INPUT_VARS['ADDR']
 MEM_BUF = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(addrspace=AddrSpace.GLOBAL), arg=0)
 LDS_BUF = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(addrspace=AddrSpace.LOCAL), arg=0)
 
-# Float bit layout: (uint_type, sign_shift, exp_shift, exp_mask, mantissa_mask, bias)
-FP_INFO = {
-  dtypes.float64: (dtypes.uint64, 63, 52, 0x7ff, 0xfffffffffffff, 1023),
-  dtypes.float32: (dtypes.uint32, 31, 23, 0xff, 0x7fffff, 127),
-  dtypes.float16: (dtypes.uint16, 15, 10, 0x1f, 0x3ff, 15),
-}
-
 class Ctx:
   def __init__(self, mem_buf: UOp = MEM_BUF):
     self.vars, self.decls, self.outputs, self.mem_stores, self.mem_buf = dict(INPUT_VARS), {}, [], [], mem_buf
@@ -50,7 +42,6 @@ class Ctx:
 
 def _resolve_special_var(name: str, ctx: Ctx, hint: DType = None) -> UOp | None:
   """Resolve context-dependent special variables (constants handled by pcode_transform)."""
-  if name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
   # Register aliases
   if name in ('VCCZ', 'EXECZ'):
     return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars['VCC' if 'VCC' in name else 'EXEC'], UOp.const(dtypes.uint64, 0))), dtypes.uint32)
@@ -165,38 +156,15 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       if op in (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE): return UOp(op, dtypes.bool, (l, r))
       return UOp(op, l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype, (l, r))
 
-    case UOp(Ops.CUSTOM, _, args, name): return _transform_call(name, [_expr(a, ctx, hint) for a in args], hint)
+    case UOp(Ops.CUSTOM, dt, args, name):
+      return UOp(Ops.CUSTOM, dt, tuple(_expr(a, ctx, hint) for a in args), name)
 
     # Memory operations: INDEX from pcode_transform -> LOAD with actual buffer
-    # dt is element type (e.g. uint32), not ptr type
     case UOp(Ops.INDEX, dt, (buf, addr)):
       actual_buf = ctx.mem_buf if buf is PCODE_MEM_BUF else buf
       idx = UOp(Ops.INDEX, dt.ptr(0, ctx.mem_buf.dtype.addrspace), (actual_buf, _expr(addr, ctx, dtypes.uint64)))
       return UOp(Ops.LOAD, dt, (idx,))
   raise ValueError(f"Cannot transform expression: {node}")
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# FUNCTION CALLS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
-  if name == 'MEM': return a[0]
-  if name == 'sign':
-    uint_dt, sign_shift, _, _, _, _ = FP_INFO.get(a[0].dtype, FP_INFO[dtypes.float32])
-    return UOp(Ops.AND, dtypes.uint32, (_cast(UOp(Ops.SHR, uint_dt, (UOp(Ops.BITCAST, uint_dt, (a[0],)), UOp.const(uint_dt, sign_shift))), dtypes.uint32), UOp.const(dtypes.uint32, 1)))
-  if name == 'exponent':
-    bits, exp_shift, exp_mask, _ = _fp_bits(a[0])
-    return UOp(Ops.AND, dtypes.uint32, (_cast(UOp(Ops.SHR, bits.dtype, (bits, UOp.const(bits.dtype, exp_shift))), dtypes.uint32), UOp.const(dtypes.uint32, exp_mask)))
-  if name == 'mantissa':
-    uint_dt, sign_shift, exp_shift, _, mant_mask, bias = FP_INFO.get(a[0].dtype, FP_INFO[dtypes.float32])
-    bits = UOp(Ops.BITCAST, uint_dt, (a[0],))
-    result = UOp(Ops.BITCAST, a[0].dtype, (UOp(Ops.OR, uint_dt, (UOp(Ops.AND, uint_dt, (bits, UOp.const(uint_dt, (1 << sign_shift) | mant_mask))),
-                                                                  UOp.const(uint_dt, (bias - 1) << exp_shift))),))
-    return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0.0))), a[0], result))
-  if name == 'trig_preop_result': return UOp(Ops.CUSTOM, dtypes.float64, (a[0],), arg='trig_preop_result')
-  if name == 's_ff1_i32_b32': return UOp(Ops.CUSTOM, dtypes.int32, (_cast(a[0], dtypes.uint32),), arg='s_ff1_i32_b32')
-  if name == 's_ff1_i32_b64': return UOp(Ops.CUSTOM, dtypes.int32, (_cast(a[0], dtypes.uint64),), arg='s_ff1_i32_b64')
-  raise ValueError(f"Unknown function: {name}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # STATEMENT PROCESSING
