@@ -49,11 +49,8 @@ class Ctx:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _resolve_special_var(name: str, ctx: Ctx, hint: DType = None) -> UOp | None:
-  """Resolve special variables and constants (most constants now handled by pcode_transform)."""
-  if name == 'NAN.f32': return UOp.const(dtypes.float32, float('nan'))
-  if name.startswith('DENORM.'): return UOp.const(dtypes.float64 if '64' in name else dtypes.float32, 2.2250738585072014e-308 if '64' in name else 1.17549435e-38)
-  if name in ('WAVE_MODE.IEEE', 'WAVE32'): return UOp.const(dtypes.uint32, 1)
-  if name in ('WAVE64', 'ROUND_MODE') or name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
+  """Resolve context-dependent special variables (constants handled by pcode_transform)."""
+  if name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
   # Register aliases
   if name in ('VCCZ', 'EXECZ'):
     return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars['VCC' if 'VCC' in name else 'EXEC'], UOp.const(dtypes.uint64, 0))), dtypes.uint32)
@@ -64,7 +61,6 @@ def _resolve_special_var(name: str, ctx: Ctx, hint: DType = None) -> UOp | None:
   if name in ('laneID', 'laneId'): return ctx.vars.get('laneId', UOp.const(dtypes.uint32, 0))
   if name == 'ThreadMask': return _cast(ctx.vars.get('EXEC'), hint or dtypes.uint32)
   if name == 'DST': return ctx.vars.get('VDST', UOp.const(dtypes.uint32, 0))
-  if name == 'LDS': return UOp.const(dtypes.uint64, 0)
   return None
 
 def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
@@ -84,12 +80,9 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       return _cast(ctx.vars[name], hint or ctx.vars[name].dtype)
 
     case UOp(Ops.BITCAST, dt, (inner,)):
-      # Typed variable access: Var.type
+      # Typed variable access: Var.type (INF, NAN, DENORM handled by pcode_transform)
       if inner.op == Ops.DEFINE_VAR and inner.arg[1] is None:
         name = inner.arg[0]
-        if name in ('INF', '+INF', '-INF'): return UOp.const(dt, float('-inf') if '-' in name else float('inf'))
-        if name == 'NAN': return UOp.const(dt, float('nan'))
-        if name == 'DENORM': return UOp.const(dt, FP_INFO.get(dt, FP_INFO[dtypes.float32])[4] * 2**(-FP_INFO.get(dt, FP_INFO[dtypes.float32])[5]))
         if (resolved := _resolve_special_var(name, ctx, dt)) is not None: return _cast(resolved, dt)
         vn = name + '_64' if dt.itemsize == 8 and name.isupper() else name
         base = ctx.vars.get(vn) if vn in ctx.vars else ctx.vars.get(name)

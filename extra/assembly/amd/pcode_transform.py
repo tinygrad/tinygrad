@@ -37,6 +37,10 @@ _CONSTS = {
   'OVERFLOW_F32': (dtypes.float32, math.inf), 'OVERFLOW_F64': (dtypes.float64, math.inf),
   'UNDERFLOW_F32': (dtypes.float32, 0.0), 'UNDERFLOW_F64': (dtypes.float64, 0.0),
   'WAVE32': (dtypes.uint32, 1), 'WAVE64': (dtypes.uint32, 0),  # RDNA3 is wave32 mode
+  'WAVE_MODE.IEEE': (dtypes.uint32, 1), 'ROUND_MODE': (dtypes.uint32, 0),
+  'NAN.f32': (dtypes.float32, float('nan')), 'NAN.f64': (dtypes.float64, float('nan')),
+  'DENORM.f32': (dtypes.float32, 1.17549435e-38), 'DENORM.f64': (dtypes.float64, 2.2250738585072014e-308),
+  'LDS': (dtypes.uint64, 0),
 }
 
 # Float bit layout: (uint_type, sign_shift, exp_shift, exp_mask, mantissa_mask, bias, quiet_bit)
@@ -295,6 +299,11 @@ pcode_pm = PatternMatcher([
 ]) + PatternMatcher([
   # Named constants from _CONSTS dict
   (UPat(Ops.DEFINE_VAR, name='u'), lambda u: UOp.const(*_CONSTS[u.arg[0]]) if isinstance(u.arg, tuple) and u.arg[0] in _CONSTS else None),
+  # Typed constants: INF.f32, NAN.f64, DENORM.f32, etc. (BITCAST of untyped var to target type)
+  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('INF', None, None)),), name='x'), lambda x: UOp.const(x.dtype, float('inf'))),
+  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('NAN', None, None)),), name='x'), lambda x: UOp.const(x.dtype, float('nan'))),
+  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('DENORM', None, None)),), name='x'),
+   lambda x: UOp.const(x.dtype, FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])[4] * 2**(-FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])[5]))),
   # Variable type tracking and propagation
   (UPat(Ops.DEFINE_VAR, name='u'), _track_var),
   (UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='u'), _prop_var),
