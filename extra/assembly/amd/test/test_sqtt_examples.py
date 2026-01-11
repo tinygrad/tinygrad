@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""Tests for SQTT packet decoding using real captured examples."""
+import pickle, unittest, ctypes
+from pathlib import Path
+from tinygrad.helpers import DEBUG, colored
+from tinygrad.runtime.autogen import rocprof
+from tinygrad.runtime.support.elf import elf_loader
+from extra.assembly.amd.asm import detect_format, disasm
+from extra.assembly.amd.autogen.rdna3.ins import SOPP
+from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
+from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
+                                     ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, AluSrc, MemSrc)
+
+EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
+OTHER_OP_RANGE = range(0x50, 0x60)  # INST ops for non-traced SIMDs
+
+PACKET_COLORS = {
+  "INST": "WHITE", "VALUINST": "BLACK", "VMEMEXEC": "yellow", "ALUEXEC": "yellow",
+  "IMMEDIATE": "YELLOW", "IMMEDIATE_MASK": "YELLOW", "WAVERDY": "cyan", "WAVEALLOC": "cyan",
+  "WAVEEND": "blue", "WAVESTART": "blue", "PERF": "magenta", "EVENT": "red", "EVENT_BIG": "red",
+  "REG": "green", "LAYOUT_HEADER": "white", "SNAPSHOT": "white", "UTILCTR": "green",
+}
+
+def format_packet(p, time_offset: int = 0) -> str:
+  name, cycle = type(p).__name__, p._time - time_offset
+  if isinstance(p, INST):
+    op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+  elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
+  elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
+  elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
+  elif isinstance(p, (WAVESTART, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
+  elif hasattr(p, '_values'):
+    fields = " ".join(f"{k}=0x{v:x}" if k in {'snap', 'val32'} else f"{k}={v}"
+                      for k, v in p._values.items() if not k.startswith('_') and k != 'delta')
+  else: fields = ""
+  return f"{cycle:8}: {colored(f'{name:18}', PACKET_COLORS.get(name, 'white'))} {fields}"
+
+def print_packets(packets: list) -> None:
+  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"}
+  time_offset = packets[0]._time if packets else 0
+  for p in packets:
+    if type(p).__name__ not in skip: print(format_packet(p, time_offset))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ROCPROF DECODER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
+  """Run rocprof decoder on SQTT blobs, returning raw occupancy and instruction records."""
+  image, sections, _ = elf_loader(lib)
+  text = next((sh for sh in sections if sh.name == ".text"), None)
+  assert text is not None, "no .text section found"
+  text_off, text_size = text.header.sh_addr, text.header.sh_size
+
+  blob_iter, current_blob = iter(blobs), [None]
+  occupancy_records: list[tuple[int, int, int, int, bool]] = []  # (wave_id, simd, cu, time, is_start)
+  wave_insts: list[list[tuple[int, int]]] = []  # per-wave list of (time, stall)
+
+  @rocprof.rocprof_trace_decoder_se_data_callback_t
+  def copy_cb(buf, buf_size, _):
+    blob = next(blob_iter, None)
+    if blob is None: return 0
+    current_blob[0] = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
+    buf[0] = ctypes.cast(current_blob[0], ctypes.POINTER(ctypes.c_ubyte))
+    buf_size[0] = len(current_blob[0])
+    return len(current_blob[0])
+
+  @rocprof.rocprof_trace_decoder_trace_callback_t
+  def trace_cb(record_type, events_ptr, n, _):
+    if record_type == rocprof.ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY:
+      for ev in (rocprof.rocprofiler_thread_trace_decoder_occupancy_t * n).from_address(events_ptr):
+        occupancy_records.append((ev.wave_id, ev.simd, ev.cu, ev.time, ev.start))
+    elif record_type == rocprof.ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE:
+      for ev in (rocprof.rocprofiler_thread_trace_decoder_wave_t * n).from_address(events_ptr):
+        if ev.instructions_size > 0:
+          sz = ev.instructions_size * ctypes.sizeof(rocprof.rocprofiler_thread_trace_decoder_inst_t)
+          insts_blob = bytearray(sz)
+          ctypes.memmove((ctypes.c_char * sz).from_buffer(insts_blob), ev.instructions_array, sz)
+          insts = list((rocprof.rocprofiler_thread_trace_decoder_inst_t * ev.instructions_size).from_buffer(insts_blob))
+          wave_insts.append([(inst.time, inst.stall) for inst in insts])
+    return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+
+  @rocprof.rocprof_trace_decoder_isa_callback_t
+  def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, _):
+    offset = pc.address - base
+    if offset < text_off or offset >= text_off + text_size:
+      mem_size_ptr[0] = 0
+      return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    try:
+      fmt = detect_format(bytes(image[offset:]))
+      inst = fmt.from_bytes(bytes(image[offset:]))
+      instr_text, mem_size_ptr[0] = disasm(inst), inst._size()
+    except (ValueError, AssertionError):
+      mem_size_ptr[0] = 0
+      return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: mem_size_ptr[0] = 0
+    if (max_sz := size_ptr[0]) == 0: return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES
+    instr_bytes = instr_text.encode()
+    ctypes.memmove(instr_ptr, instr_bytes, min(len(instr_bytes), max_sz - 1))
+    size_ptr[0] = min(len(instr_bytes), max_sz - 1)
+    return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+
+  rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
+  return occupancy_records, wave_insts
+
+class TestSQTTExamples(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls.examples = {}
+    for pkl_path in sorted(EXAMPLES_DIR.glob("*.pkl")):
+      with open(pkl_path, "rb") as f:
+        data = pickle.load(f)
+      sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+      prg = next((e for e in data if type(e).__name__ == "ProfileProgramEvent"), None)
+      if sqtt_events and prg:
+        cls.examples[pkl_path.stem] = (sqtt_events, prg.lib, prg.base)
+
+  def test_examples_loaded(self):
+    self.assertGreater(len(self.examples), 0, "no example files found")
+
+  def test_decode_all_examples(self):
+    for name, (events, *_) in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          packets = decode(event.blob)
+          if DEBUG >= 2: print(f"\n=== {name} event {i} ==="); print_packets(packets)
+          self.assertGreater(len(packets), 0, f"no packets decoded from {name} event {i}")
+          self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
+
+  def test_packet_types_valid(self):
+    for name, (events, *_) in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          for pkt in decode(event.blob):
+            self.assertIn(type(pkt), PACKET_TYPES, f"unknown packet type {type(pkt)} in {name}")
+
+  def test_wave_lifecycle(self):
+    for name, (events, *_) in self.examples.items():
+      if "empty" in name: continue
+      with self.subTest(example=name):
+        all_packets = [p for e in events for p in decode(e.blob)]
+        self.assertGreater(len([p for p in all_packets if isinstance(p, WAVESTART)]), 0, f"no WAVESTART in {name}")
+        self.assertGreater(len([p for p in all_packets if isinstance(p, WAVEEND)]), 0, f"no WAVEEND in {name}")
+
+  def test_time_monotonic(self):
+    for name, (events, *_) in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          times = [p._time for p in decode(event.blob)]
+          self.assertEqual(times, sorted(times), f"timestamps not monotonic in {name}")
+
+  def test_gemm_has_instructions(self):
+    for name, (events, *_) in self.examples.items():
+      if "gemm" not in name: continue
+      with self.subTest(example=name):
+        all_packets = [p for e in events for p in decode(e.blob)]
+        self.assertGreater(len([p for p in all_packets if isinstance(p, INST)]), 0, f"no INST packets in {name}")
+
+  def test_rocprof_wave_times_match(self):
+    """Wave start/end times must match rocprof exactly."""
+    for name, (events, lib, base) in self.examples.items():
+      with self.subTest(example=name):
+        occupancy, _ = run_rocprof_decoder([e.blob for e in events], lib, base)
+        # extract from rocprof occupancy records
+        roc_starts: dict[tuple[int, int, int], int] = {}
+        roc_waves: list[tuple[int, int]] = []
+        for wave_id, simd, cu, time, is_start in occupancy:
+          key = (wave_id, simd, cu)
+          if is_start: roc_starts[key] = time
+          elif key in roc_starts: roc_waves.append((roc_starts.pop(key), time))
+        # extract from our decoder
+        our_waves: list[tuple[int, int]] = []
+        for event in events:
+          packets = decode(event.blob)
+          wave_starts: dict[tuple[int, int, int], int] = {}
+          for p in packets:
+            if isinstance(p, WAVESTART): wave_starts[(p.wave, p.simd, p.cu)] = p._time
+            elif isinstance(p, WAVEEND) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
+              our_waves.append((wave_starts[key], p._time))
+        self.assertEqual(sorted(our_waves), sorted(roc_waves), f"wave times mismatch in {name}")
+
+  def test_rocprof_inst_times_match(self):
+    """Instruction times must match rocprof exactly (excluding s_endpgm)."""
+    for name, (events, lib, base) in self.examples.items():
+      with self.subTest(example=name):
+        _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base)
+        # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
+        roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
+        # extract from our decoder
+        our_insts: list[int] = []
+        for event in events:
+          for p in decode(event.blob):
+            if isinstance(p, INST):
+              op_val = p.op if isinstance(p.op, int) else p.op.value
+              if op_val not in OTHER_OP_RANGE: our_insts.append(p._time)
+            elif isinstance(p, VALUINST): our_insts.append(p._time)
+            elif isinstance(p, IMMEDIATE): our_insts.append(p._time)
+            elif isinstance(p, IMMEDIATE_MASK):
+              for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
+        self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
+
+if __name__ == "__main__":
+  unittest.main()
