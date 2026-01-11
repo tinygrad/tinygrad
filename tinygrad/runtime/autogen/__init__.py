@@ -100,6 +100,8 @@ def __getattr__(nm):
                                                                               "amd_hsa_kernel_code", "hsa_ext_finalize",
                                                                               "hsa_ext_image", "hsa_ven_amd_aqlprofile"]]],
       tarball=rocr_src, args=["-DLITTLEENDIAN_CPU"], prolog=["import os"])
+    case "amdgpu_kd": return load("amdgpu_kd", None, lambda: [f"{system('llvm-config-20 --includedir')}/llvm/Support/AMDHSAKernelDescriptor.h"],
+                                  args=lambda: system("llvm-config-20 --cflags").split() + ["-x", "c++"], recsym=True, parse_macros=False)
     case "amd_gpu": return load("amd_gpu", None, [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers", "nvd", "gc_11_0_0_offset",
                                                                                                "sienna_cichlid_ip_offset"]],
                                 args=["-I/opt/rocm/include", "-x", "c++"])
