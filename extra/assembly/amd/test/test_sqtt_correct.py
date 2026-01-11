@@ -115,80 +115,42 @@ def get_deltas(instructions: list) -> tuple[list[int], list[int]]:
   execd = [exec_times[i] - exec_times[i-1] for i in range(1, len(exec_times))]
   return issue, execd
 
-# Hardware ALUEXEC delta patterns:
-#   chain: forwarding (6,5,5...) then stalls when exhausted (9,9,9...)
-#   ind: no dependencies, exec follows issue by 1 cycle
-#   snop: n+4 baseline, but +4 extra for 11 <= n <= 22
-CHAIN_ISSUE = {
-  2:  [1],
-  3:  [1, 1],
-  4:  [1, 1, 1],
-  5:  [1, 1, 1, 1],
-  6:  [1, 1, 1, 1, 1],
-  7:  [1, 1, 1, 1, 1, 1],
-  8:  [1, 1, 1, 1, 1, 1, 1],
-  12: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  14: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-  15: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3],              # issue stalls start here
-  16: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5],
-  18: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5],
-  20: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 5],
-}
-CHAIN_EXEC = {
-  2:  [6],
-  3:  [6, 5],
-  4:  [6, 5, 5],
-  5:  [6, 5, 5, 9],
-  6:  [6, 5, 5, 9, 9],
-  7:  [6, 5, 5, 5, 9, 9],
-  8:  [6, 5, 5, 5, 9, 9, 9],
-  12: [6, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9],
-  14: [6, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9],
-  15: [6, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9],
-  16: [6, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9],
-  18: [6, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9],
-  20: [6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9],
-}
-IND_EXEC = {
-  2: [1],
-  3: [1, 1],
-  4: [1, 1, 1],
-  5: [1, 1, 1, 1],
-  6: [1, 1, 1, 1, 1],
-  7: [1, 1, 1, 1, 1, 1],
-  8: [1, 1, 1, 1, 1, 1, 1],
-}
-SNOP_EXEC = {
-  0: 4,   1: 5,   2: 6,   3: 7,   4: 8,   5: 9,   6: 10,  7: 11,  8: 12,  9: 13,  10: 14,
-  11: 19, 12: 20, 13: 21, 14: 22, 15: 23, 16: 24, 17: 25, 18: 26, 19: 27, 20: 28, 21: 29, 22: 30,  # +4 extra
-  23: 27, 24: 28, 25: 29, 26: 30, 27: 31, 28: 32, 29: 33, 30: 34, 31: 35,
-  32: 36, 33: 37, 34: 38, 35: 39, 36: 40, 37: 41, 38: 42, 39: 43,
-  40: 44, 41: 45, 42: 46, 43: 47, 44: 48, 45: 49, 46: 50, 47: 51,
-  48: 52, 49: 53, 50: 54, 51: 55, 52: 56, 53: 57, 54: 58, 55: 59,
-  56: 60, 57: 61, 58: 62, 59: 63, 60: 64, 61: 65, 62: 66, 63: 67,
-}
+# ************************************ tests ************************************
 
 class TestVALUChains(unittest.TestCase):
   """VALU dependency chains."""
-  def _chain(self, n):
+  def _chain(self, n, expected_issue, expected_exec):
     instrs = [v_mov_b32_e32(v[0], 1.0)] + [v_add_f32_e32(v[i], v[i-1], v[i-1]) for i in range(1, n)]
     issue, execd = get_deltas(instrs)
-    self.assertEqual(issue[:n-1], CHAIN_ISSUE[n])
-    self.assertEqual(execd, CHAIN_EXEC[n])
+    self.assertEqual(issue[:n-1], expected_issue)
+    self.assertEqual(execd, expected_exec)
 
-  def test_chain_2(self): self._chain(2)
-  def test_chain_3(self): self._chain(3)
-  def test_chain_4(self): self._chain(4)
-  def test_chain_5(self): self._chain(5)
-  def test_chain_6(self): self._chain(6)
-  def test_chain_7(self): self._chain(7)
-  def test_chain_8(self): self._chain(8)
-  def test_chain_12(self): self._chain(12)
-  def test_chain_14(self): self._chain(14)
-  def test_chain_15(self): self._chain(15)  # issue stalls start here
-  def test_chain_16(self): self._chain(16)
-  def test_chain_18(self): self._chain(18)
-  def test_chain_20(self): self._chain(20)
+  def test_chain_2(self):
+    self._chain(2, [1], [6])
+  def test_chain_3(self):
+    self._chain(3, [1, 1], [6, 5])
+  def test_chain_4(self):
+    self._chain(4, [1, 1, 1], [6, 5, 5])
+  def test_chain_5(self):
+    self._chain(5, [1, 1, 1, 1], [6, 5, 5, 9])
+  def test_chain_6(self):
+    self._chain(6, [1, 1, 1, 1, 1], [6, 5, 5, 9, 9])
+  def test_chain_7(self):
+    self._chain(7, [1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 9, 9])
+  def test_chain_8(self):
+    self._chain(8, [1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 9, 9, 9])
+  def test_chain_12(self):
+    self._chain(12, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9])
+  def test_chain_14(self):
+    self._chain(14, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], [6, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  def test_chain_15(self):  # issue stalls start here
+    self._chain(15, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3], [6, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  def test_chain_16(self):
+    self._chain(16, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5], [6, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  def test_chain_18(self):
+    self._chain(18, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5], [6, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
+  def test_chain_20(self):
+    self._chain(20, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 5], [6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
 
 
 class TestVALUChainsWithNops(unittest.TestCase):
@@ -210,43 +172,40 @@ class TestVALUChainsWithNops(unittest.TestCase):
 
 class TestVALUIndependent(unittest.TestCase):
   """Independent VALU instructions."""
-  def _ind(self, n):
+  def _ind(self, n, expected_exec):
     instrs = [v_mov_b32_e32(v[i], float(i)) for i in range(n)]
     issue, execd = get_deltas(instrs)
     self.assertEqual(issue[:n-1], [1]*(n-1))
-    self.assertEqual(execd, IND_EXEC[n])
+    self.assertEqual(execd, expected_exec)
 
-  def test_ind_2(self): self._ind(2)
-  def test_ind_3(self): self._ind(3)
-  def test_ind_4(self): self._ind(4)
-  def test_ind_5(self): self._ind(5)
-  def test_ind_6(self): self._ind(6)
-  def test_ind_7(self): self._ind(7)
-  def test_ind_8(self): self._ind(8)
+  def test_ind_2(self): self._ind(2, [1])
+  def test_ind_3(self): self._ind(3, [1, 1])
+  def test_ind_4(self): self._ind(4, [1, 1, 1])
+  def test_ind_5(self): self._ind(5, [1, 1, 1, 1])
+  def test_ind_6(self): self._ind(6, [1, 1, 1, 1, 1])
+  def test_ind_7(self): self._ind(7, [1, 1, 1, 1, 1, 1])
+  def test_ind_8(self): self._ind(8, [1, 1, 1, 1, 1, 1, 1])
 
 
 class TestForwardingGap(unittest.TestCase):
   """Producer + N independent instructions + consumer - tests forwarding window."""
-  def _last_exec_delta(self, n_gap):
+  def _exec_deltas(self, n_gap):
     instrs = [v_mov_b32_e32(v[0], 1.0)]
     instrs += [v_mov_b32_e32(v[10+i], float(i)) for i in range(n_gap)]
     instrs += [v_add_f32_e32(v[1], v[0], v[0])]
     _, execd = get_deltas(instrs)
-    return execd[-1]
+    return execd
 
-  def test_gap0(self): self.assertEqual(self._last_exec_delta(0), 6)
-  def test_gap1(self): self.assertEqual(self._last_exec_delta(1), 5)
-  def test_gap2(self): self.assertEqual(self._last_exec_delta(2), 4)
-  def test_gap3(self): self.assertEqual(self._last_exec_delta(3), 3)
-  def test_gap4(self): self.assertEqual(self._last_exec_delta(4), 3)
-  def test_gap5(self): self.assertEqual(self._last_exec_delta(5), 4)  # anomaly
-  def test_gap6(self): self.assertEqual(self._last_exec_delta(6), 3)
-  def test_gap7(self): self.assertEqual(self._last_exec_delta(7), 3)
-  def test_gap8(self): self.assertEqual(self._last_exec_delta(8), 3)
-  def test_gap9(self): self.assertEqual(self._last_exec_delta(9), 3)
-  def test_gap10(self): self.assertEqual(self._last_exec_delta(10), 3)
-  def test_gap11(self): self.assertEqual(self._last_exec_delta(11), 3)
-  def test_gap12(self): self.assertEqual(self._last_exec_delta(12), 3)
+  def test_gap0(self): self.assertEqual(self._exec_deltas(0), [6])
+  def test_gap1(self): self.assertEqual(self._exec_deltas(1), [1, 5])
+  def test_gap2(self): self.assertEqual(self._exec_deltas(2), [1, 1, 4])
+  def test_gap3(self): self.assertEqual(self._exec_deltas(3), [1, 1, 1, 3])
+  def test_gap4(self): self.assertEqual(self._exec_deltas(4), [1, 1, 1, 1, 3])
+  def test_gap5(self): self.assertEqual(self._exec_deltas(5), [1, 1, 1, 1, 1, 4])  # anomaly
+  def test_gap6(self): self.assertEqual(self._exec_deltas(6), [1, 1, 1, 1, 1, 1, 3])
+  def test_gap7(self): self.assertEqual(self._exec_deltas(7), [1, 1, 1, 1, 1, 1, 1, 3])
+  def test_gap8(self): self.assertEqual(self._exec_deltas(8), [1, 1, 1, 1, 1, 1, 1, 1, 3])
+  def test_gap9(self): self.assertEqual(self._exec_deltas(9), [1, 1, 1, 1, 1, 1, 1, 1, 1, 3])
 
 
 class TestVALULatency(unittest.TestCase):
@@ -370,27 +329,29 @@ class TestInd3NopMid(unittest.TestCase):
 
 
 class TestSNopDelay(unittest.TestCase):
-  """Single s_nop delay between two independent v_movs."""
-  def _test(self, n):
+  """Single s_nop delay between two independent v_movs.
+  s_nop(n) delays n+1 cycles, plus +4 extra for n in [11, 22].
+  Exec delta = n + 4 (baseline) + 4 (if 11 <= n <= 22)."""
+  def _test(self, n, expected):
     _, execd = get_deltas([v_mov_b32_e32(v[0], 1.0), s_nop(n), v_mov_b32_e32(v[1], 2.0)])
-    self.assertEqual(execd, [SNOP_EXEC[n]])
+    self.assertEqual(execd, [expected])
 
-  def test_snop_0(self): self._test(0)
-  def test_snop_1(self): self._test(1)
-  def test_snop_2(self): self._test(2)
-  def test_snop_3(self): self._test(3)
-  def test_snop_4(self): self._test(4)
-  def test_snop_5(self): self._test(5)
-  def test_snop_6(self): self._test(6)
-  def test_snop_7(self): self._test(7)
-  def test_snop_10(self): self._test(10)
-  def test_snop_11(self): self._test(11)  # +4 extra starts here
-  def test_snop_15(self): self._test(15)
-  def test_snop_22(self): self._test(22)  # +4 extra ends here
-  def test_snop_23(self): self._test(23)
-  def test_snop_31(self): self._test(31)
-  def test_snop_32(self): self._test(32)
-  def test_snop_63(self): self._test(63)
+  def test_snop_0(self):  self._test(0, 4)
+  def test_snop_1(self):  self._test(1, 5)
+  def test_snop_2(self):  self._test(2, 6)
+  def test_snop_3(self):  self._test(3, 7)
+  def test_snop_4(self):  self._test(4, 8)
+  def test_snop_5(self):  self._test(5, 9)
+  def test_snop_6(self):  self._test(6, 10)
+  def test_snop_7(self):  self._test(7, 11)
+  def test_snop_10(self): self._test(10, 14)
+  def test_snop_11(self): self._test(11, 19)  # +4 extra starts here
+  def test_snop_15(self): self._test(15, 23)
+  def test_snop_22(self): self._test(22, 30)  # +4 extra ends here
+  def test_snop_23(self): self._test(23, 27)
+  def test_snop_31(self): self._test(31, 35)
+  def test_snop_32(self): self._test(32, 36)
+  def test_snop_63(self): self._test(63, 67)
 
 
 class TestVALUExecWithNop(unittest.TestCase):
