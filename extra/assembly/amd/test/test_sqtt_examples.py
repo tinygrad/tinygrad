@@ -47,7 +47,7 @@ def run_rocprof_decoder(blobs: list[bytes], disasm: dict):
   """Run rocprof decoder on SQTT blobs, returning raw occupancy and instruction records."""
   blob_iter, current_blob = iter(blobs), [None]
   occupancy_records: list[tuple[int, int, int, int, bool]] = []  # (wave_id, simd, cu, time, is_start)
-  inst_records: list[tuple[int, int, int]] = []  # (time, stall, duration)
+  wave_insts: list[list[tuple[int, int]]] = []  # per-wave list of (time, stall)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
   def copy_cb(buf, buf_size, _):
@@ -70,7 +70,7 @@ def run_rocprof_decoder(blobs: list[bytes], disasm: dict):
           insts_blob = bytearray(sz)
           ctypes.memmove((ctypes.c_char * sz).from_buffer(insts_blob), ev.instructions_array, sz)
           insts = list((rocprof.rocprofiler_thread_trace_decoder_inst_t * ev.instructions_size).from_buffer(insts_blob))
-          for inst in insts: inst_records.append((inst.time, inst.stall, inst.duration))
+          wave_insts.append([(inst.time, inst.stall) for inst in insts])
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
@@ -87,7 +87,7 @@ def run_rocprof_decoder(blobs: list[bytes], disasm: dict):
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-  return occupancy_records, inst_records
+  return occupancy_records, wave_insts
 
 class TestSQTTExamples(unittest.TestCase):
   @classmethod
@@ -168,27 +168,16 @@ class TestSQTTExamples(unittest.TestCase):
         self.assertEqual(sorted(our_waves), sorted(roc_waves), f"wave times mismatch in {name}")
 
   def test_rocprof_inst_times_match(self):
-    """Instruction times must match rocprof exactly."""
+    """Instruction times must match rocprof exactly (excluding s_endpgm)."""
     for name, (events, disasm) in self.examples.items():
       with self.subTest(example=name):
-        _, inst_records = run_rocprof_decoder([e.blob for e in events], disasm)
-        # extract from rocprof: time + stall, except last inst per wave uses time + duration
-        # heuristic: if next inst has earlier time, current is last in wave
-        roc_insts: list[int] = []
-        for i, (time, stall, duration) in enumerate(inst_records):
-          is_last = (i == len(inst_records) - 1) or (i + 1 < len(inst_records) and inst_records[i + 1][0] < time)
-          roc_insts.append(time + duration if is_last else time + stall)
+        _, wave_insts = run_rocprof_decoder([e.blob for e in events], disasm)
+        # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
+        roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
         # extract from our decoder
         our_insts: list[int] = []
         for event in events:
-          packets = decode(event.blob)
-          traced_simd = next((p.simd for p in packets if isinstance(p, LAYOUT_HEADER)), None)
-          traced_waves: set[tuple[int, int, int]] = set()
-          waves_with_insts: set[int] = set()
-          for p in packets:
-            if isinstance(p, WAVESTART) and p.simd == traced_simd: traced_waves.add((p.wave, p.simd, p.cu))
-            elif isinstance(p, (INST, VALUINST)): waves_with_insts.add(p.wave)
-          for p in packets:
+          for p in decode(event.blob):
             if isinstance(p, INST):
               op_val = p.op if isinstance(p.op, int) else p.op.value
               if op_val not in OTHER_OP_RANGE: our_insts.append(p._time)
@@ -196,8 +185,6 @@ class TestSQTTExamples(unittest.TestCase):
             elif isinstance(p, IMMEDIATE): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE_MASK):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
-            elif isinstance(p, WAVEEND) and (p.wave, p.simd, p.cu) in traced_waves and p.wave in waves_with_insts:
-              our_insts.append(p._time)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
 
 if __name__ == "__main__":

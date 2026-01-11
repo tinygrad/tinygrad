@@ -681,7 +681,7 @@ jobs:
       - name: RDNA3 Line Count
         run: cloc --by-file extra/assembly/amd/*.py
       - name: Install rocprof-trace-decoder
-        run: sudo ./extra/sqtt/install_sqtt_decoder.py
+        run: sudo -E ./extra/sqtt/install_sqtt_decoder.py
       - name: Run RDNA3 emulator tests
         run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Run RDNA3 emulator tests (AMD_LLVM=1)
