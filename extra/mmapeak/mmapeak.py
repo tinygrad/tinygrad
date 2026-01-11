@@ -7,7 +7,7 @@ from tinygrad.device import Device
 from tinygrad.runtime.ops_amd import AMDProgram
 
 from extra.assembly.amd.dsl import s, v, Inst
-from extra.amd_elf import pack_hsaco
+from extra.amdgpu_elf import pack_hsaco
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -16,7 +16,7 @@ FLOPS_PER_MATMUL = 16*16*16*2
 INTERNAL_LOOP = 1_000_00
 INSTRUCTIONS_PER_LOOP = 200
 
-# arch specific instruction for S_LOOP_N = S_LOOP_N - 1
+# arch specific instruction for S_LOOP_N -= 1
 S_LOOP_N = s[1]
 INST_LOOP_STEP:Inst|None = None
 
@@ -62,7 +62,7 @@ if __name__=="__main__":
     launchBenchmark(v_wmma_f32_16x16x16_f16, (7,8,15))
     launchBenchmark(v_wmma_i32_16x16x16_iu4, (7,8,9))
     launchBenchmark(v_wmma_i32_16x16x16_iu8, (7,8,11))
-  elif DEV.arch == 'gfx1201':
+  elif DEV.arch == 'gfx1200':
     from extra.assembly.amd.autogen.rdna4.ins import *
     INST_LOOP_STEP = s_addk_co_i32(S_LOOP_N, 0xffff)
     KD = {"next_free_vgpr":32, "next_free_sgpr":1, "wavefront_size32":1}

@@ -1,3 +1,4 @@
+# minimal amdgpu elf packer
 import ctypes
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
 
