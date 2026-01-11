@@ -5,7 +5,7 @@ from pathlib import Path
 from tinygrad.helpers import DEBUG, colored
 from tinygrad.runtime.autogen import rocprof
 from tinygrad.runtime.support.elf import elf_loader
-from extra.assembly.amd.asm import detect_format, disasm
+from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
@@ -90,15 +90,15 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
     try:
       fmt = detect_format(bytes(image[offset:]))
       inst = fmt.from_bytes(bytes(image[offset:]))
-      instr_text, mem_size_ptr[0] = disasm(inst), inst._size()
+      mem_size_ptr[0] = inst._size()
     except (ValueError, AssertionError):
       mem_size_ptr[0] = 0
       return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: mem_size_ptr[0] = 0
+    # rocprof parses instruction string to determine type; v_nop works for all
     if (max_sz := size_ptr[0]) == 0: return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES
-    instr_bytes = instr_text.encode()
-    ctypes.memmove(instr_ptr, instr_bytes, min(len(instr_bytes), max_sz - 1))
-    size_ptr[0] = min(len(instr_bytes), max_sz - 1)
+    ctypes.memmove(instr_ptr, b"v_nop", min(5, max_sz - 1))
+    size_ptr[0] = min(5, max_sz - 1)
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
