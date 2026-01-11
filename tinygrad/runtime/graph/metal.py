@@ -10,8 +10,8 @@ from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support import objc
 
 class MetalGraph(GraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
+    super().__init__(jit_cache, input_buffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
     # create metal batch exec
@@ -39,7 +39,7 @@ class MetalGraph(GraphRunner):
       all_pipelines.append(prg._prg.pipeline_state)
       icb_command.setComputePipelineState(prg._prg.pipeline_state)
       for i,b in enumerate(ji.bufs):
-        if b is not None and b not in input_rawbuffers:
+        if b is not None and b not in input_buffers:
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist.index(v.expr)*4, len(ji.bufs)+i)
@@ -55,15 +55,15 @@ class MetalGraph(GraphRunner):
     for var in self.fixedvars: self.int_buf_view[self.varlist.index(var)] = self.fixedvars[var]
     self.range = metal.NSRange(0, len(jit_cache))
 
-  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
+  def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
     # NOTE: old command buffer may not be inflight anymore
     if self.command_buffer is not None and PROFILE: self.collect_timestamps()
 
-    all_resources = dedup(self.all_resources + [input_rawbuffers[input_idx]._buf.buf for input_idx in self.input_replace.values()])
+    all_resources = dedup(self.all_resources + [input_buffers[input_idx]._buf.buf for input_idx in self.input_replace.values()])
     for (j,i),input_idx in self.input_replace.items():
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
-      computeCommand.setKernelBuffer_offset_atIndex(input_rawbuffers[input_idx]._buf.buf, input_rawbuffers[input_idx]._buf.offset, i)
+      computeCommand.setKernelBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, i)
 
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)

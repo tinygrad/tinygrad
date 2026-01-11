@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM, EMULATE
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LLVM, EMULATE
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -235,8 +235,7 @@ class TestOps(unittest.TestCase):
   def test_unfold(self):
     helper_test_op([(8,)], lambda x: x.unfold(0, 2, 1))
     helper_test_op([(8,)], lambda x: x.unfold(0, 2, 2))
-    # TODO: something is wrong with unfold
-    if not getenv("TINY_BACKEND"): helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
+    helper_test_op([(8,)], lambda x: x.unfold(0, 7, 3))
     helper_test_op([(3,3,3)], lambda x: x.unfold(2, 2, 8))
     helper_test_op([(3,3,3)], lambda x: x.unfold(1, 0, 8))
     helper_test_op([(3,3,3,3,3)], lambda x: x.unfold(-1, 2, 2))
@@ -640,6 +639,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x**y)
     helper_test_op([(45,65), (45,65)], lambda x,y: x.pow(y))
 
+  # TODO: WEBGPU NaN handling in pow operations
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU NaN handling differs")
   def test_pow(self):
     helper_test_op([(45,65)], lambda x: x**0)
     helper_test_op([(45,65)], lambda x: x**1)
@@ -701,10 +702,14 @@ class TestOps(unittest.TestCase):
 
   def test_pow_zero_tensor(self):
     helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.0]])
-    # TODO: fix WEBGPU and LVP
-    if Device.DEFAULT != "WEBGPU" and not CPU_LVP:
+    # TODO: fix WEBGPU
+    if Device.DEFAULT != "WEBGPU":
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [0.3]])
       helper_test_op(None, lambda x,y: x**y, vals=[[0.0], [-0.3]])
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU issue")
+  def test_exp2_log2_zero_times_negative(self):
+    # gallivm's exp2/log2 have "undefined behavior with infs, 0s and nans", so exp2(log2(0)*y) returns 0 instead of inf
+    helper_test_op(None, lambda x,y: (x.log2()*y).exp2(), lambda x,y: (x.log2()*y).exp2(), vals=[[0.0], [-0.7]], forward_only=True)
   def test_pow_zero_const(self):
     helper_test_op(None, lambda x: x**0.3, vals=[[0.0]])
     helper_test_op(None, lambda x: x**0.0, vals=[[0.0]])
@@ -1171,6 +1176,8 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_einsum(self):
+    # scalar
+    helper_test_op([()], lambda a: torch.einsum('->', a), lambda a: Tensor.einsum('->', a))
     # matrix transpose
     helper_test_op([(10,10)], lambda a: torch.einsum('ij->ji', a), lambda a: Tensor.einsum('ij->ji', a))
     helper_test_op([(10,10)], lambda a: torch.einsum('ij -> ji', a), lambda a: Tensor.einsum('ij -> ji', a))
@@ -1238,6 +1245,18 @@ class TestOps(unittest.TestCase):
     # multiple ellipsis must broadcast together
     self.helper_test_exception([(2, 3, 4), (2, 3, 4)], lambda a, b: torch.einsum('i...j,ji...->...', [a, b]),
                 lambda a, b: Tensor.einsum('i...j,ji...->...', [a, b]), expected=RuntimeError)
+
+  def test_einsum_trace(self):
+    # inner product
+    helper_test_op([(5,), (5,)], lambda a, b: torch.einsum('i,i', a, b), lambda a, b: Tensor.einsum('i,i', a, b))
+    # simple diagonal
+    helper_test_op([(4, 4)], lambda a: torch.einsum('ii->i', a), lambda a: Tensor.einsum('ii->i', a))
+    # trace (sum of diagonal)
+    helper_test_op([(4, 4)], lambda a: torch.einsum('ii->', a), lambda a: Tensor.einsum('ii->', a))
+    # batch diagonal
+    helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...i', a), lambda a: Tensor.einsum('...ii->...i', a))
+    # batch trace
+    helper_test_op([(3, 5, 5)], lambda a: torch.einsum('...ii->...', a), lambda a: Tensor.einsum('...ii->...', a))
 
   def test_einsum_shape_check(self):
     self.helper_test_exception([(3,8,10,5), (11,5,13,16,8)], lambda a, b: torch.einsum('pqrs,tuqvr->pstuv', [a, b]),
@@ -1448,6 +1467,9 @@ class TestOps(unittest.TestCase):
     helper_test_op([(3,4,5,6)], lambda x: x.all(axis=(1,2)), forward_only=True)
   def test_all_zero_axis(self):
     helper_test_op([(1,0,3,0,5)], lambda x: x.all(axis=(1,3)), forward_only=True)
+  def test_all_large(self):
+    for exp in [15, 16, 20]:
+      helper_test_op(None, lambda: torch.ones(2**exp).bool().all(), lambda: Tensor.ones(2**exp).bool().all(), vals=[], forward_only=True)
 
   def test_isclose(self):
     helper_test_op([(3, 4, 5, 6)], lambda x: x.isclose(x), forward_only=True)

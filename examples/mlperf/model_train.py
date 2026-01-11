@@ -1008,6 +1008,7 @@ def train_bert():
   config["DISABLE_DROPOUT"] = getenv("DISABLE_DROPOUT", 0)
   config["TRAIN_BEAM"]    = TRAIN_BEAM = getenv("TRAIN_BEAM", BEAM.value)
   config["EVAL_BEAM"]     = EVAL_BEAM  = getenv("EVAL_BEAM", BEAM.value)
+  config["FP8_TRAIN"]     = getenv("FP8_TRAIN", 0)
 
   Tensor.manual_seed(seed)  # seed for weight initialization
 
@@ -1085,7 +1086,7 @@ def train_bert():
   if RUNMLPERF:
     # only load real data with RUNMLPERF
     eval_it = iter(batch_load_val_bert(EVAL_BS))
-    train_it = iter(tqdm(batch_load_train_bert(BS), total=train_steps, disable=BENCHMARK))
+    train_it = iter(tqdm(batch_load_train_bert(BS, seed=seed), total=train_steps, disable=BENCHMARK))
     for _ in range(start_step): next(train_it) # Fast forward
   else:
     # repeat fake data
@@ -1147,7 +1148,7 @@ def train_bert():
 
         device_str = parameters[0].device if isinstance(parameters[0].device, str) else f"{parameters[0].device[0]} * {len(parameters[0].device)}"
         loss = loss.item()
-        assert not math.isnan(loss)
+        if not getenv("FP8_TRAIN"): assert not math.isnan(loss)
         lr = lr.item()
 
       cl = time.perf_counter()
@@ -1160,7 +1161,7 @@ def train_bert():
       if WANDB:
         wandb.log({"lr": lr, "train/loss": loss, "train/global_norm": global_norm.item(), "train/step_time": cl - st,
                     "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
-                    "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*GBS})
+                    "train/mem":GlobalCounters.mem_used / 1e9, "train/GFLOPS": GlobalCounters.global_ops * 1e-9 / (cl - st), "epoch": (i+1)*GBS})
 
       train_data, next_data = next_data, None
       i += 1

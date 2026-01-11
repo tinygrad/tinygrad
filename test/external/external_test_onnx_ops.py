@@ -477,18 +477,21 @@ class TestContribOnnxOps(TestOnnxOps):
 
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
-      with self.subTest(dtype=dtype, zero_point=zero_point):
-        dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
-        inputs = {
-          "X": np.random.randint(dtype_min, dtype_max + 1, [1, 3, 32, 32], dtype=dtype),
-          "x_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
-          "x_zero_point": np.array(zero_point, dtype=dtype),
-          "y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
-          "y_zero_point": np.array(zero_point, dtype=dtype)
-        }
-        attributes = {"channels_last": 0}
-        outputs = ["C"]
-        self.helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs)
+      for channels_last in [0, 1]:
+        with self.subTest(dtype=dtype, zero_point=zero_point, channels_last=channels_last):
+          dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
+          # NCHW for channels_last=0, NHWC for channels_last=1
+          shape = [1, 3, 32, 32] if channels_last == 0 else [1, 32, 32, 3]
+          inputs = {
+            "X": np.random.randint(dtype_min, dtype_max + 1, shape, dtype=dtype),
+            "x_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+            "x_zero_point": np.array(zero_point, dtype=dtype),
+            "y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+            "y_zero_point": np.array(zero_point, dtype=dtype)
+          }
+          attributes = {"channels_last": channels_last}
+          outputs = ["C"]
+          self.helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs)
 
 if __name__ == "__main__":
   unittest.main()

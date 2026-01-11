@@ -153,8 +153,7 @@ class SMICtx:
     tables = {}
     for dev in self.devs:
       match dev.ip_ver[am.MP1_HWIP]:
-        case (13,0,6): table_t = dev.smu.smu_mod.MetricsTableX_t
-        case (13,0,12): table_t = dev.smu.smu_mod.MetricsTableV2_t
+        case (13,0,6)|(13,0,12): table_t = dev.smu.smu_mod.MetricsTableX_t
         case _: table_t = dev.smu.smu_mod.SmuMetricsExternal_t
       tables[dev] = dev.smu.read_table(table_t, dev.smu.smu_mod.SMU_TABLE_SMU_METRICS) if dev.pci_state == "D0" else None
     return tables
@@ -165,17 +164,17 @@ class SMICtx:
 
   def get_gfx_activity(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6): return max(0, min(100, self._smuq10_round(metrics.SocketGfxBusy)))
+      case (13,0,6)|(13,0,12): return max(0, min(100, self._smuq10_round(metrics.SocketGfxBusy)))
       case _: return metrics.SmuMetrics.AverageGfxActivity
 
   def get_mem_activity(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6): return max(0, min(100, self._smuq10_round(metrics.DramBandwidthUtilization)))
+      case (13,0,6)|(13,0,12): return max(0, min(100, self._smuq10_round(metrics.DramBandwidthUtilization)))
       case _: return metrics.SmuMetrics.AverageUclkActivity
 
   def get_temps(self, dev, metrics, compact=False):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6):
+      case (13,0,6)|(13,0,12):
         temps = {
           "Hotspot": self._smuq10_round(metrics.MaxSocketTemperature),
           "HBM": self._smuq10_round(metrics.MaxHbmTemperature),
@@ -191,7 +190,7 @@ class SMICtx:
 
   def get_voltage(self, dev, metrics, compact=False):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6): return {}
+      case (13,0,6)|(13,0,12): return {}
       case _:
         voltage_keys = [(k, name) for k, name in dev.smu.smu_mod.SVI_PLANE_e.items()
                         if k < dev.smu.smu_mod.SVI_PLANE_COUNT and metrics.SmuMetrics.AvgVoltage[k] != 0]
@@ -205,33 +204,33 @@ class SMICtx:
   def get_gfx_freq(self, dev, metrics):
     if metrics is None: return 0
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6): return self._smuq10_round(metrics.GfxclkFrequency[0])
+      case (13,0,6)|(13,0,12): return self._smuq10_round(metrics.GfxclkFrequency[0])
       case _:
         return metrics.SmuMetrics.AverageGfxclkFrequencyPostDs if self.get_gfx_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
                metrics.SmuMetrics.AverageGfxclkFrequencyPreDs
 
   def get_mem_freq(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6): return self._smuq10_round(metrics.UclkFrequency)
+      case (13,0,6)|(13,0,12): return self._smuq10_round(metrics.UclkFrequency)
       case _:
         return metrics.SmuMetrics.AverageMemclkFrequencyPostDs if self.get_mem_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
                metrics.SmuMetrics.AverageMemclkFrequencyPreDs
 
   def get_fckl_freq(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6): return self._smuq10_round(metrics.FclkFrequency)
+      case (13,0,6)|(13,0,12): return self._smuq10_round(metrics.FclkFrequency)
       case _:
         return metrics.SmuMetrics.AverageFclkFrequencyPostDs if self.get_mem_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
                metrics.SmuMetrics.AverageFclkFrequencyPreDs
 
   def get_fan_rpm_pwm(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6): return None, None
+      case (13,0,6)|(13,0,12): return None, None
       case _: return metrics.SmuMetrics.AvgFanRpm, metrics.SmuMetrics.AvgFanPwm
 
   def get_power(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
-      case (13,0,6): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.MaxSocketPowerLimit)
+      case (13,0,6)|(13,0,12): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.MaxSocketPowerLimit)
       case _: return metrics.SmuMetrics.AverageSocketPower, metrics.SmuMetrics.dGPU_W_MAX
 
   def get_mem_usage(self, dev):

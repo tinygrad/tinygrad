@@ -66,10 +66,10 @@ testing_minimal = [
   "pytest-xdist",
   "pytest-timeout",
   "pytest-split",
-  "hypothesis",
+  "hypothesis>=6.148.9",
   "z3-solver",
 ]
-testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai"]
+testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai", "ggml-python"]
 testing = [
   "tinygrad[testing_unit]",
   "pillow",
@@ -87,7 +87,6 @@ testing = [
   "networkx",
   "nibabel",
   "bottle",
-  "ggml-python",
   "capstone",
   "pycocotools",
   "boto3",

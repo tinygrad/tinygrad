@@ -6,7 +6,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.system import PCIDevice, PCIDevImplBase
-from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.am.ip import AM_IP, AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -162,36 +162,34 @@ class AMDev(PCIDevImplBase):
     # To enable this, AM uses a separate boot memory that is guaranteed not to be overwritten. This physical memory is utilized for
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
+    # To determine if the previous AM session finalized correctly, AM uses regSCRATCH_REG6 as a flag.
     self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
     self.init_sw(smi_dev=False)
 
     self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
-    if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
+    if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive():
-        if self.gmc.xgmi_seg_sz > 0:
+        if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
         self.smu.mode1_reset()
-      for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
-        ip.init_hw()
-        if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+      self.init_hw(self.soc, self.gmc, self.ih, self.psp, self.smu)
 
     # Booting done
     self.is_booting = False
 
     # Re-initialize main blocks
-    for ip in [self.gfx, self.sdma]:
-      ip.init_hw()
-      if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+    self.init_hw(self.gfx, self.sdma)
 
     self.smu.set_clocks(level=-1) # last level, max perf.
     for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(AMDev.Version)
+    self.reg("regSCRATCH_REG6").write(1) # set initialized state.
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
@@ -215,11 +213,19 @@ class AMDev(PCIDevImplBase):
     # Init sw for all IP blocks
     for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
 
+  def init_hw(self, *blocks:AM_IP):
+    for ip in blocks:
+      ip.init_hw()
+      if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
+    self.reg("regSCRATCH_REG6").write(0) # set finalized state.
+
+  def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
   def paddr2xgmi(self, paddr:int) -> int: return self.gmc.paddr_base + paddr

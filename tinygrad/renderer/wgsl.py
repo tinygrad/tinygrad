@@ -12,8 +12,11 @@ def packed_store(bidx:UOp, var:UOp):
   shift_am = (bidx.src[1].cast(dtypes.uint32)%UOp.const(dtypes.uint32, 4//var.dtype.itemsize))*UOp.const(dtypes.uint32, 8*var.dtype.itemsize)
   new_v = (var & (0xFF if var.dtype.itemsize == 1 else 0xFFFF)).cast(dtypes.uint32) << shift_am
   mask = (((0xFF if var.dtype.itemsize == 1 else 0xFFFF) << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
-  buf = UOp.load(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), dtype=dtypes.uint32)
-  return UOp.store(UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], bidx.src[1]//(4//var.dtype.itemsize))), ((buf & mask) | new_v.cast(dtypes.uint32)))
+  div_idx = bidx.src[1]//(4//var.dtype.itemsize)
+  # preserve valid condition (bidx.src[2]) if it exists for gated stores
+  idx_src = (bidx.src[0], div_idx) if len(bidx.src) == 2 else (bidx.src[0], div_idx, bidx.src[2])
+  buf = UOp.load(UOp(Ops.INDEX, bidx.dtype, idx_src), dtype=dtypes.uint32)
+  return UOp.store(UOp(Ops.INDEX, bidx.dtype, idx_src), ((buf & mask) | new_v.cast(dtypes.uint32)))
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
 def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None):

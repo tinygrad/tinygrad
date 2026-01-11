@@ -112,18 +112,15 @@ class PacketType:
     if 'encoding' in cls.__dict__ and isinstance(cls.__dict__['encoding'], tuple):
       cls._encoding = cls.__dict__['encoding']
     # Cache field type annotations for enum conversion
-    try:
-      cls._field_types = {k: v for k, v in get_type_hints(cls).items()
-                          if isinstance(v, type) and issubclass(v, IntEnum)}
-    except Exception:
-      cls._field_types = {}
+    try: cls._field_types = {k: v for k, v in get_type_hints(cls).items() if isinstance(v, type) and issubclass(v, IntEnum)}
+    except Exception: cls._field_types = {}
     # Cache fields and precompute extraction info: (name, lo, mask, enum_type)
     cls._fields = {k: v for k, v in cls.__dict__.items() if isinstance(v, BitField) and k != 'encoding'}
     cls._extract_info = [(name, bf.lo, bf.mask(), cls._field_types.get(name)) for name, bf in cls._fields.items()]
+    cls._size_nibbles = ((max((f.hi for f in cls._fields.values()), default=0) + 4) // 4)
 
   def __init__(self, _time: int = 0, **kwargs):
     """Construct packet from named fields (like assembly instructions)."""
-    # Build raw value from encoding + fields
     raw = 0
     if self._encoding:
       bf, pattern = self._encoding
@@ -132,10 +129,7 @@ class PacketType:
       val = kwargs.get(name, 0)
       if isinstance(val, IntEnum): val = val.value
       raw |= (val & bf.mask()) << bf.lo
-    self._raw = raw
-    self._time = _time
-    # Extract values back (handles enum conversion)
-    self._values = {}
+    self._raw, self._time, self._values = raw, _time, {}
     for name, lo, mask, enum_type in self._extract_info:
       val = (raw >> lo) & mask
       if enum_type is not None:
@@ -144,31 +138,15 @@ class PacketType:
       self._values[name] = val
 
   @classmethod
-  def fields(cls) -> dict[str, BitField]:
-    return cls._fields
-
-  @classmethod
-  def size_bits(cls) -> int:
-    max_bit = max((f.hi for f in cls.fields().values()), default=0)
-    return ((max_bit + 4) // 4) * 4
-
-  @classmethod
-  def size_nibbles(cls) -> int:
-    return cls.size_bits() // 4
-
-  @classmethod
   def from_raw(cls, raw: int, time: int = 0):
     inst = object.__new__(cls)
-    inst._raw = raw
-    inst._time = time
-    values = {}
+    inst._raw, inst._time, inst._values = raw, time, {}
     for name, lo, mask, enum_type in cls._extract_info:
       val = (raw >> lo) & mask
       if enum_type is not None:
         try: val = enum_type(val)
         except ValueError: pass
-      values[name] = val
-    inst._values = values
+      inst._values[name] = val
     return inst
 
   def __getattr__(self, name: str):
@@ -368,8 +346,6 @@ for _byte_val, _opcode in enumerate(STATE_TO_OPCODE):
   if _opcode not in OPCODE_TO_BYTES: OPCODE_TO_BYTES[_opcode] = []
   OPCODE_TO_BYTES[_opcode].append(_byte_val)
 
-BUDGET = {opcode: pkt_cls.size_nibbles() for opcode, pkt_cls in OPCODE_TO_CLASS.items()}
-
 # Precompute special case opcodes
 _TS_DELTA_OR_MARK_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_OR_MARK)
 _TS_DELTA_SHORT_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_SHORT)
@@ -384,7 +360,7 @@ for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
   _delta_lo = _delta_field.lo if _delta_field else 0
   _delta_mask = _delta_field.mask() if _delta_field else 0
   _special = 1 if _opcode == _TS_DELTA_OR_MARK_OPCODE else (2 if _opcode == _TS_DELTA_SHORT_OPCODE else 0)
-  _DECODE_INFO[_opcode] = (_pkt_cls, BUDGET[_opcode], _delta_lo, _delta_mask, _special)
+  _DECODE_INFO[_opcode] = (_pkt_cls, _pkt_cls._size_nibbles, _delta_lo, _delta_mask, _special)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
@@ -439,7 +415,7 @@ def encode(packets: list[PacketType]) -> bytes:
 
   read_lengths = [16]
   for p in packets[:-1]:
-    read_lengths.append(p.size_nibbles())
+    read_lengths.append(type(p)._size_nibbles)
 
   total_nibbles = sum(read_lengths)
   bits_arr = [0] * (total_nibbles * 4)

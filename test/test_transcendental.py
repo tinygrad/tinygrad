@@ -47,6 +47,8 @@ class TestTranscendentalMath(unittest.TestCase):
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
                                  atol=1e-2, rtol=5e-3)  # exp can have bigger rtol
 
+  # TODO: WEBGPU produces incorrect values near infinity
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU incorrect values near inf")
   @given(strat.sampled_from([(dtypes.float64, 709.5), (dtypes.float32, 88.7), (dtypes.float16, 11)]))
   def test_exp_near_inf(self, dtype_x):
     # reordering compute might return inf

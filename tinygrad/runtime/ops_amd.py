@@ -11,7 +11,7 @@ from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, Profil
 from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
-from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
+from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
@@ -43,9 +43,10 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
 
-  def _sleep(self, time_spent_waiting_ms:int):
+  def _sleep(self, time_spent_waiting_ms:int) -> bool:
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
-    if time_spent_waiting_ms > 2000 and self.is_timeline and self.owner is not None: self.owner.iface.sleep(200)
+    if time_spent_waiting_ms > 2000 and self.is_timeline and self.owner is not None: return self.owner.iface.sleep(200)
+    return False
 
 class AMDComputeQueue(HWQueue):
   def __init__(self, dev:AMDDevice):
@@ -558,29 +559,29 @@ class AMDProgram(HCQProgram):
     self.dev.allocator._copyin(self.lib_gpu, image)
     self.dev.synchronize()
 
-    self.group_segment_size = image[rodata_entry:rodata_entry+4].cast("I")[0]
-    self.private_segment_size = image[rodata_entry+4:rodata_entry+8].cast("I")[0]
-    self.kernargs_segment_size = image[rodata_entry+8:rodata_entry+12].cast("I")[0]
+    desc_sz = ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)
+    desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+desc_sz]))
+    self.group_segment_size = desc.group_segment_fixed_size
+    self.private_segment_size = desc.private_segment_fixed_size
+    self.kernargs_segment_size = desc.kernarg_size
     lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
     if lds_size > (self.dev.iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
 
     # Ensure scratch size
     self.dev._ensure_has_local_memory(self.private_segment_size)
 
-    # NOTE: this is wrong, it's not this object. pad it, since it might be smaller than the struct
-    code = hsa.amd_kernel_code_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+256]) + b'\x00'*256)
-    self.wave32: bool = code.kernel_code_properties & 0x400 == 0x400
+    self.wave32: bool = desc.kernel_code_properties & 0x400 == 0x400
 
     # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
-    self.rsrc1: int = code.compute_pgm_rsrc1 | ((1 << 20) if (11,0,0) <= self.dev.target < (12,0,0) else 0)
-    self.rsrc2: int = code.compute_pgm_rsrc2 | (lds_size << 15)
-    self.rsrc3: int = image[rodata_entry+44:rodata_entry+48].cast("I")[0] # NOTE: kernel descriptor, not in amd_kernel_code_t struct
+    self.rsrc1: int = desc.compute_pgm_rsrc1 | ((1 << 20) if (11,0,0) <= self.dev.target < (12,0,0) else 0)
+    self.rsrc2: int = desc.compute_pgm_rsrc2 | (lds_size << 15)
+    self.rsrc3: int = desc.compute_pgm_rsrc3
     self.aql_prog_addr: int = self.lib_gpu.va_addr + rodata_entry
-    self.prog_addr: int = self.lib_gpu.va_addr + rodata_entry + code.kernel_code_entry_byte_offset
+    self.prog_addr: int = self.lib_gpu.va_addr + rodata_entry + desc.kernel_code_entry_byte_offset
     # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
     # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
-    self.enable_dispatch_ptr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
-    self.enable_private_segment_sgpr: int = code.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
+    self.enable_dispatch_ptr: int = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    self.enable_private_segment_sgpr: int = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
     additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
 
     if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
@@ -621,12 +622,12 @@ class AMDProgram(HCQProgram):
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
-    super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None)
+    super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None,
+                     supports_copy_from_disk=not dev.is_usb() and dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue)
     if hasattr(dev.iface, "as_dmaref"): self._as_dmaref = dev.iface.as_dmaref
-    self.supports_copy_from_disk = not dev.is_usb()
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
+    return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_sdma_queue)
 
   def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
@@ -775,7 +776,9 @@ class KFDIface:
                         write_ptrs=[MMIOInterface(queue.write_pointer_address, 8, fmt='Q')],
                         doorbells=[MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt='Q')])
 
-  def sleep(self, tm:int): kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
+  def sleep(self, tm:int) -> bool:
+    kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
+    return False
 
   def on_device_hang(self):
     def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._fields_)
@@ -845,15 +848,16 @@ class PCIIface(PCIIfaceBase):
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
       read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')], put_value=pv)
 
-  def sleep(self, timeout):
+  def sleep(self, timeout) -> bool:
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
       self.dev_impl.ih.interrupt_handler()
+    return self.dev_impl.gmc.check_fault() is not None
 
   def on_device_hang(self):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
-    for d in devs: d.iface.dev_impl.gmc.on_interrupt()
-    raise RuntimeError("Device hang detected")
+    faults = [f for d in devs if (f:=d.iface.dev_impl.gmc.check_fault())]
+    raise RuntimeError(f"Device hang detected: {'; '.join(faults)}" if faults else "Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
 
@@ -885,7 +889,7 @@ class USBIface(PCIIface):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
     return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
 
-  def sleep(self, timeout): pass
+  def sleep(self, timeout) -> bool: return False
 
 class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))
@@ -938,6 +942,7 @@ class AMDDevice(HCQCompiled):
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
+    self.has_sdma_queue = self.sdma_queue(0) is not None
 
     compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
                              CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), None, AMD_LLVM),
@@ -945,7 +950,7 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
-                     functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size),
+                     functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size) if self.has_sdma_queue else None,
                      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
 
     # Scratch setup
@@ -1001,7 +1006,9 @@ class AMDDevice(HCQCompiled):
             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
   @functools.lru_cache(None)
-  def sdma_queue(self, idx:int=0): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+  def sdma_queue(self, idx:int):
+    with contextlib.suppress(OSError): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+    return None
 
   def _ensure_has_local_memory(self, private_segment_size):
     if self.max_private_segment_size >= private_segment_size: return

@@ -218,10 +218,10 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator(Generic[DeviceType]):
-  def __init__(self, dev:DeviceType):
+  def __init__(self, dev:DeviceType, supports_copy_from_disk:bool=True, supports_transfer:bool=True):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
-    self.supports_copy_from_disk: bool = True
+    self.supports_copy_from_disk, self.supports_transfer = supports_copy_from_disk, supports_transfer
   # overridden in LRUAllocator
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -244,9 +244,9 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self, dev:DeviceType):
+  def __init__(self, dev:DeviceType, **kwargs):
     self.cache: dict[tuple[int, BufferSpec|None], Any] = defaultdict(list)
-    super().__init__(dev)
+    super().__init__(dev, **kwargs)
   def alloc(self, size:int, options:BufferSpec|None=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -351,7 +351,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     if device == "CUDA": return not CI and not CUDA_PTX
     if device == "NV": return not CI and not NV_PTX and not NV_NAK
     if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not CPU_LVP
-    return device in {"AMD", "PYTHON", "NULL"}
+    return device in {"AMD", "CL", "PYTHON", "NULL"}
   if dtype in dtypes.fp8s:
     if device == "CUDA": return not CI and not CUDA_PTX
     if device == "NV": return not CI and not NV_PTX and not NV_NAK
