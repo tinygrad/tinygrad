@@ -62,7 +62,7 @@ if __name__=="__main__":
     launchBenchmark(v_wmma_f32_16x16x16_f16, (7,8,15))
     launchBenchmark(v_wmma_i32_16x16x16_iu4, (7,8,9))
     launchBenchmark(v_wmma_i32_16x16x16_iu8, (7,8,11))
-  elif DEV.arch == 'gfx1200':
+  elif DEV.arch == 'gfx1201':
     from extra.assembly.amd.autogen.rdna4.ins import *
     INST_LOOP_STEP = s_addk_co_i32(S_LOOP_N, 0xffff)
     KD = {"next_free_vgpr":32, "next_free_sgpr":1, "wavefront_size32":1}
