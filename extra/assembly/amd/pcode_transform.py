@@ -1,8 +1,9 @@
 # Transform parsed pcode CUSTOM ops to UOps using PatternMatcher
-from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite, GroupOp
+from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite
 from tinygrad.uop.spec import shared_spec, type_verify
 from tinygrad.dtype import dtypes, DType
 from extra.assembly.amd.pcode_parse import parse, If, For, Lambda, Break, Return
+import math
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TYPE MAPPINGS
@@ -13,71 +14,76 @@ _DT_SUFFIX = {
   'i8': dtypes.int8, 'i16': dtypes.int16, 'i32': dtypes.int32, 'i64': dtypes.int64,
   'u8': dtypes.uint8, 'u16': dtypes.uint16, 'u32': dtypes.uint32, 'u64': dtypes.uint64,
 }
-# Special conversions needing custom handling - excluded from auto-generated casts
-_SPECIAL_CASTS = {'f32_to_u32', 'f64_to_u32', 'f16_to_u32', 'f32_to_u64', 'f64_to_u64', 'f16_to_u64',  # clamping
-                  'bf16_to_f32', 'u32_to_u16', 'i32_to_i16'}  # bit manipulation
-# Auto-generate all {src}_to_{dst} and v_cvt_{dst}_{src} cast mappings
+_SPECIAL_CASTS = {'f32_to_u32', 'f64_to_u32', 'f16_to_u32', 'f32_to_u64', 'f64_to_u64', 'f16_to_u64',
+                  'bf16_to_f32', 'u32_to_u16', 'i32_to_i16'}
 _CAST_MAP = {f'{s}_to_{d}': _DT_SUFFIX[d] for s in _DT_SUFFIX for d in _DT_SUFFIX if s != d and f'{s}_to_{d}' not in _SPECIAL_CASTS}
 _CAST_MAP.update({f'v_cvt_{d}_{s}': _DT_SUFFIX[d] for s in _DT_SUFFIX for d in _DT_SUFFIX if s != d and f'{s}_to_{d}' not in _SPECIAL_CASTS})
 
-# Remaining CUSTOM ops that need dtype inference (not transformed to real UOps)
-_BOOL_FNS = {'isDENORM', 'isQuietNAN', 'isSignalNAN', 'isEven', 'LT_NEG_ZERO', 'GT_NEG_ZERO'}
-_U32_FNS = {'sign', 'exponent', 'ABSDIFF', 'SAT8', 'BYTE_PERMUTE', 'count_ones', 'countbits', 'reverse_bits',
-            'u8_to_u32', 'u4_to_u32', 's_ff1_i32_b32', 's_ff1_i32_b64', 'v_sad_u8', 'v_msad_u8'}
-_CVT_FNS = {'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32, 'signext_from_bit': dtypes.int64,
-            'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16}
+# CUSTOM op return types
+_CUSTOM_TYPES = {
+  'isDENORM': dtypes.bool, 'isQuietNAN': dtypes.bool, 'isSignalNAN': dtypes.bool, 'isEven': dtypes.bool,
+  'LT_NEG_ZERO': dtypes.bool, 'GT_NEG_ZERO': dtypes.bool,
+  'sign': dtypes.uint32, 'exponent': dtypes.uint32, 'ABSDIFF': dtypes.uint32, 'SAT8': dtypes.uint32,
+  'BYTE_PERMUTE': dtypes.uint32, 'count_ones': dtypes.uint32, 'countbits': dtypes.uint32, 'reverse_bits': dtypes.uint32,
+  'u8_to_u32': dtypes.uint32, 'u4_to_u32': dtypes.uint32, 's_ff1_i32_b32': dtypes.uint32, 's_ff1_i32_b64': dtypes.uint32,
+  'v_sad_u8': dtypes.uint32, 'v_msad_u8': dtypes.uint32, 'ConvertFromFormat': dtypes.uint32, 'nop': dtypes.uint32,
+  'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32, 'signext_from_bit': dtypes.int64,
+  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
+  'trig_preop_result': dtypes.float64,
+}
+# Constants that get replaced with CONST
+_CONSTS = {
+  'PI': (dtypes.float64, math.pi), 'INF': (dtypes.float64, math.inf),
+  'MAX_FLOAT_F32': (dtypes.float32, 3.4028235e+38), 'MAX_FLOAT_F64': (dtypes.float64, 1.7976931348623157e+308),
+  'OVERFLOW_F32': (dtypes.float32, math.inf), 'OVERFLOW_F64': (dtypes.float64, math.inf),
+  'UNDERFLOW_F32': (dtypes.float32, 0.0), 'UNDERFLOW_F64': (dtypes.float64, 0.0),
+}
+# Well-known register types
+_REGS = {'SCC': dtypes.bool, 'VCC': dtypes.uint64, 'EXEC': dtypes.uint64, 'VDATA': dtypes.uint64, 'SDATA': dtypes.uint64,
+         'ADDR': dtypes.uint64, 'VDST': dtypes.uint32, 'ROUND_MODE': dtypes.uint32, 'ROUND_TOWARD_ZERO': dtypes.uint32,
+         'HW_REGISTERS': dtypes.uint32, 'SGPR': dtypes.uint32, 'VGPR': dtypes.uint32}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _typed_const(src: UOp, val) -> UOp:
+def _tc(src: UOp, val) -> UOp:  # typed const
   return UOp.const(src.dtype, val) if src.dtype != dtypes.void else UOp(Ops.CONST, dtypes.void, (src,), val)
 
-def _floor(x: UOp, dt: DType) -> UOp:
-  trunc = UOp(Ops.TRUNC, dt, (x,))
-  return UOp(Ops.WHERE, dt, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, dt, (trunc, _typed_const(x, 1))), trunc))
+def _floor(x: UOp) -> UOp:
+  trunc = UOp(Ops.TRUNC, x.dtype, (x,))
+  return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, trunc)), UOp(Ops.SUB, x.dtype, (trunc, _tc(x, 1))), trunc))
 
 def _minmax(a: UOp, b: UOp, is_min: bool, dt: DType|None = None) -> UOp:
   dt = dt or (a.dtype if a.dtype != dtypes.void else b.dtype)
   return UOp(Ops.WHERE, dt, (UOp(Ops.CMPLT, dtypes.bool, (a, b) if is_min else (b, a)), a, b))
 
-def _minmax3(a: UOp, b: UOp, c: UOp, is_min: bool, dt: DType|None = None) -> UOp:
-  dt = dt or (a.dtype if a.dtype != dtypes.void else b.dtype if b.dtype != dtypes.void else c.dtype)
-  return _minmax(_minmax(a, b, is_min, dt), c, is_min, dt)
-
-def _first_nonvoid(*srcs: UOp) -> DType:
-  return next((s.dtype for s in srcs if s.dtype != dtypes.void), dtypes.void)
-
-def _var_name(u: UOp) -> str|None:
+def _vn(u: UOp) -> str|None:  # var name
   if u.op == Ops.DEFINE_VAR: return u.arg[0] if isinstance(u.arg, tuple) else u.arg
-  if u.op == Ops.CUSTOMI and u.src[0].op == Ops.DEFINE_VAR: return _var_name(u.src[0])
-  return None
+  return _vn(u.src[0]) if u.op == Ops.CUSTOMI and u.src[0].op == Ops.DEFINE_VAR else None
+
+def _typed_const(src: UOp, val) -> UOp:  # const matching src type
+  return UOp.const(src.dtype, val) if src.dtype != dtypes.void else UOp(Ops.CONST, dtypes.void, (src,), val)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATTERN HANDLERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _typed_minmax2(a, b, op):
-  if not isinstance(op.arg, str) or not (op.arg.startswith('v_min_') or op.arg.startswith('v_max_')): return None
-  if (suffix := op.arg.split('_')[-1]) not in _DT_SUFFIX: return None
-  return _minmax(a, b, op.arg.startswith('v_min_'), _DT_SUFFIX[suffix])
+def _typed_minmax(op, *args):
+  if not isinstance(op.arg, str): return None
+  n, suffix = len(args), op.arg.split('_')[-1]
+  if suffix not in _DT_SUFFIX: return None
+  if n == 2 and (op.arg.startswith('v_min_') or op.arg.startswith('v_max_')):
+    return _minmax(args[0], args[1], op.arg.startswith('v_min_'), _DT_SUFFIX[suffix])
+  if n == 3 and (op.arg.startswith('v_min3_') or op.arg.startswith('v_max3_')):
+    return _minmax(_minmax(args[0], args[1], op.arg.startswith('v_min3_'), _DT_SUFFIX[suffix]), args[2], op.arg.startswith('v_min3_'), _DT_SUFFIX[suffix])
+  return None
 
-def _typed_minmax3(a, b, c, op):
-  if not isinstance(op.arg, str) or not (op.arg.startswith('v_min3_') or op.arg.startswith('v_max3_')): return None
-  if (suffix := op.arg.split('_')[-1]) not in _DT_SUFFIX: return None
-  return _minmax3(a, b, c, op.arg.startswith('v_min3_'), _DT_SUFFIX[suffix])
-
-def _typed_cast(x, op):
-  return UOp(Ops.CAST, _CAST_MAP[op.arg], (x,)) if op.arg in _CAST_MAP else None
-
-# Variable type tracking/propagation
 def _track_var(ctx, u):
   if ctx is None or u.dtype == dtypes.void: return None
   name = u.arg[0] if isinstance(u.arg, tuple) else u.arg
-  if name in ctx: assert ctx[name] == u.dtype, f"variable '{name}' declared with conflicting types: {ctx[name]} vs {u.dtype}"
+  if name in ctx: assert ctx[name] == u.dtype, f"variable '{name}' type conflict: {ctx[name]} vs {u.dtype}"
   else: ctx[name] = u.dtype
-  return None
 
 def _prop_var(ctx, u):
   if ctx is None: return None
@@ -86,73 +92,58 @@ def _prop_var(ctx, u):
 
 def _prop_assign(ctx, lhs, rhs):
   if ctx is None or rhs.dtype == dtypes.void or lhs.op != Ops.DEFINE_VAR: return None
-  if (name := _var_name(lhs)) is None or name in ctx: return None
+  if (name := _vn(lhs)) is None or name in ctx: return None
   ctx[name] = rhs.dtype
   return UOp(Ops.ASSIGN, rhs.dtype, (UOp(Ops.DEFINE_VAR, rhs.dtype, arg=lhs.arg), rhs))
 
-# Dtype propagation for void-typed ops (forward propagation)
-def _prop_binop(l, r, __OP__, **kw):
-  # For SHL/SHR, result type comes from left operand
-  if __OP__.op in {Ops.SHL, Ops.SHR}:
-    dt = l.dtype if l.dtype != dtypes.void else r.dtype
-  # Use larger dtype if both are typed, otherwise first non-void
-  elif l.dtype != dtypes.void and r.dtype != dtypes.void:
-    dt = l.dtype if l.dtype.itemsize >= r.dtype.itemsize else r.dtype
-  else:
-    dt = l.dtype if l.dtype != dtypes.void else r.dtype
-  return UOp(__OP__.op, dt, (l, r), kw.get('arg')) if dt != dtypes.void else None
-
-# Back-propagate type to void DEFINE_VAR source
-def _backprop_binop(ctx, op, void_var, typed_src):
-  # void_var is void DEFINE_VAR, typed_src is typed - propagate type to void_var
-  dt = typed_src.dtype
-  name = void_var.arg[0] if isinstance(void_var.arg, tuple) else void_var.arg
-  if ctx is not None:
-    if name in ctx: assert ctx[name] == dt, f"variable '{name}' has conflicting types: {ctx[name]} vs {dt}"
-    else: ctx[name] = dt
-  new_var = UOp(Ops.DEFINE_VAR, dt, arg=void_var.arg)
-  # maintain original order
-  new_srcs = (new_var, typed_src) if op.src[0] is void_var else (typed_src, new_var)
-  return UOp(op.op, op.dtype, new_srcs, op.arg)
-
-def _prop_unop(x, __OP__, **kw):
-  return UOp(__OP__.op, x.dtype, (x,), kw.get('arg')) if x.dtype != dtypes.void else None
-
-def _prop_mulacc(a, b, c, **kw):
-  return UOp(Ops.MULACC, c.dtype, (a, b, c), kw.get('arg')) if c.dtype != dtypes.void else None
-
-def _prop_where(cond, t, f, **kw):
-  dt = _first_nonvoid(t, f)
-  return UOp(Ops.WHERE, dt, (cond, t, f), kw.get('arg')) if dt != dtypes.void else None
-
-def _prop_cat(x):
-  total_bits = sum(p.dtype.itemsize * 8 for p in x.src if p.dtype != dtypes.void)
-  dt = dtypes.uint64 if total_bits > 32 else dtypes.uint32 if total_bits > 0 else dtypes.void
-  return UOp(Ops.CAT, dt, x.src, x.arg) if dt != dtypes.void else None
-
-def _prop_customi(base, hi, lo, **kw):
-  if hi is lo:  # array element access - use base type (register files like SGPR/VGPR are uint32)
-    dt = base.dtype if base.dtype != dtypes.void else dtypes.uint32
-  elif hi.op == Ops.CONST and lo.op == Ops.CONST:  # slice with const bounds
-    dt = dtypes.uint64 if abs(int(hi.arg) - int(lo.arg)) + 1 > 32 else dtypes.uint32
-  else:  # slice with variable bounds - assume uint32
-    dt = dtypes.uint32
-  return UOp(Ops.CUSTOMI, dt, (base, hi, lo), kw.get('arg'))
-
-_PASSTHROUGH_FNS = {'abs', 'cvtToQuietNAN'}  # these preserve input type
+def _prop_binop(l, r, __OP__):
+  if __OP__.op in {Ops.SHL, Ops.SHR}: dt = l.dtype if l.dtype != dtypes.void else r.dtype
+  elif l.dtype != dtypes.void and r.dtype != dtypes.void: dt = l.dtype if l.dtype.itemsize >= r.dtype.itemsize else r.dtype
+  else: dt = l.dtype if l.dtype != dtypes.void else r.dtype
+  return UOp(__OP__.op, dt, (l, r), __OP__.arg) if dt != dtypes.void else None
 
 def _prop_custom(x):
-  if x.arg in _BOOL_FNS: dt = dtypes.bool
-  elif x.arg in _U32_FNS: dt = dtypes.uint32
-  elif x.arg in _CVT_FNS: dt = _CVT_FNS[x.arg]
-  elif x.arg == 'trig_preop_result': dt = dtypes.float64
-  elif x.arg == 'ConvertFromFormat': dt = dtypes.uint32  # format conversion returns uint32
-  elif x.arg == 'nop': dt = dtypes.uint32  # nop is a no-op
-  elif x.arg == 'MEM': return None  # MEM gets type from BITCAST
-  elif x.arg in _PASSTHROUGH_FNS: return None  # these get type from source, handled by CAST wrapper
-  else: dt = _first_nonvoid(*x.src) if x.src else dtypes.void
+  if x.arg in _CUSTOM_TYPES: return UOp(Ops.CUSTOM, _CUSTOM_TYPES[x.arg], x.src, x.arg)
+  if x.arg in {'MEM', 'abs', 'cvtToQuietNAN'}: return None  # wrapped by BITCAST/CAST
+  dt = next((s.dtype for s in x.src if s.dtype != dtypes.void), dtypes.void)
   assert dt != dtypes.void, f"cannot infer type for CUSTOM op '{x.arg}'"
   return UOp(Ops.CUSTOM, dt, x.src, x.arg)
+
+def _prop_customi(base, hi, lo):
+  if hi is lo: return UOp(Ops.CUSTOMI, base.dtype if base.dtype != dtypes.void else dtypes.uint32, (base, hi, lo))
+  if hi.op == Ops.CONST and lo.op == Ops.CONST:
+    return UOp(Ops.CUSTOMI, dtypes.uint64 if abs(int(hi.arg) - int(lo.arg)) + 1 > 32 else dtypes.uint32, (base, hi, lo))
+  return UOp(Ops.CUSTOMI, dtypes.uint32, (base, hi, lo))
+
+def _fix_binop(op, x, y):
+  if x.dtype == dtypes.void or y.dtype == dtypes.void or x.dtype == y.dtype: return None
+  if x.dtype.itemsize >= y.dtype.itemsize: return UOp(op.op, op.dtype, (x, UOp(Ops.CAST, x.dtype, (y,))), op.arg)
+  return UOp(op.op, op.dtype, (UOp(Ops.CAST, y.dtype, (x,)), y), op.arg)
+
+def _backprop(op, v, t):
+  if t.dtype == dtypes.void: return None
+  new_var = UOp(Ops.DEFINE_VAR, t.dtype, arg=v.arg)
+  return UOp(op.op, op.dtype, (new_var, t) if op.src[0] is v else (t, new_var), op.arg)
+
+def _prop_unop(x, __OP__):
+  return UOp(__OP__.op, x.dtype, (x,), __OP__.arg) if x.dtype != dtypes.void else None
+
+def _prop_mulacc(a, b, c):
+  dt = next((x.dtype for x in (a, b, c) if x.dtype != dtypes.void), dtypes.void)
+  return UOp(Ops.MULACC, dt, (a, b, c)) if dt != dtypes.void else None
+
+def _prop_where(cond, t, f):
+  dt = t.dtype if t.dtype != dtypes.void else f.dtype
+  return UOp(Ops.WHERE, dt, (cond, t, f)) if dt != dtypes.void else None
+
+def _prop_cat(x):
+  if not x.src: return None
+  bits = sum(s.dtype.itemsize * 8 if s.dtype != dtypes.void else 0 for s in x.src)
+  return UOp(Ops.CAT, dtypes.uint64 if bits > 32 else dtypes.uint32, x.src) if bits > 0 else None
+
+def _typed_cast(x, op):
+  if op.arg not in _CAST_MAP: return None
+  return UOp(Ops.CAST, _CAST_MAP[op.arg], (x,))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATTERN MATCHER
@@ -171,8 +162,8 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='fma', src=(_fpat, UPat.var('b'), UPat.var('c'))), lambda x, b, c: UOp(Ops.MULACC, x.dtype, (x, b, c))),
   (UPat(Ops.CUSTOM, arg='abs', src=(_fpat,)), lambda x: UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, _typed_const(x, 0))), UOp(Ops.NEG, x.dtype, (x,)), x))),
   (UPat(Ops.CUSTOM, arg='cos', src=(_fpat,)), lambda x: UOp(Ops.SIN, x.dtype, (UOp(Ops.ADD, x.dtype, (x, _typed_const(x, 1.5707963267948966))),))),
-  (UPat(Ops.CUSTOM, arg='floor', src=(_fpat,)), lambda x: _floor(x, x.dtype)),
-  (UPat(Ops.CUSTOM, arg='fract', src=(_fpat,)), lambda x: UOp(Ops.SUB, x.dtype, (x, _floor(x, x.dtype)))),
+  (UPat(Ops.CUSTOM, arg='floor', src=(_fpat,)), lambda x: _floor(x)),
+  (UPat(Ops.CUSTOM, arg='fract', src=(_fpat,)), lambda x: UOp(Ops.SUB, x.dtype, (x, _floor(x)))),
   (UPat(Ops.CUSTOM, arg='rsqrt', src=(_fpat,)), lambda x: UOp(Ops.RECIPROCAL, x.dtype, (UOp(Ops.SQRT, x.dtype, (x,)),))),
   # Boolean functions
   (UPat(Ops.CUSTOM, arg='isNAN', src=(UPat.var('x'),)), lambda x: UOp(Ops.CMPNE, dtypes.bool, (x, x))),
@@ -182,8 +173,8 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='min', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, True)),
   (UPat(Ops.CUSTOM, arg='max', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _minmax(a, b, False)),
   (UPat(Ops.CUSTOM, arg='clamp', src=(UPat.var('x'), UPat.var('lo'), UPat.var('hi'))), lambda x, lo, hi: _minmax(_minmax(x, lo, False), hi, True)),
-  (UPat(Ops.CUSTOM, src=(UPat.var('a'), UPat.var('b')), name='op'), _typed_minmax2),
-  (UPat(Ops.CUSTOM, src=(UPat.var('a'), UPat.var('b'), UPat.var('c')), name='op'), _typed_minmax3),
+  (UPat(Ops.CUSTOM, src=(UPat.var('a'), UPat.var('b')), name='op'), lambda op, a, b: _typed_minmax(op, a, b)),
+  (UPat(Ops.CUSTOM, src=(UPat.var('a'), UPat.var('b'), UPat.var('c')), name='op'), lambda op, a, b, c: _typed_minmax(op, a, b, c)),
   # Type conversions
   (UPat(Ops.CUSTOM, src=(UPat.var('x'),), name='op'), _typed_cast),
   (UPat(Ops.CUSTOM, arg='signext', src=(UPat.var('x', dtype=dtypes.ints),)), lambda x: UOp(Ops.CAST, dtypes.int64, (x,))),
@@ -248,10 +239,10 @@ pcode_pm = PatternMatcher([
   # Back-propagate types to void DEFINE_VAR sources
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR),
         src=(UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='v'), UPat.var('t')), name='op'),
-   lambda op, v, t: _backprop_binop(None, op, v, t) if t.dtype != dtypes.void else None),
+   lambda op, v, t: _backprop(op, v, t)),
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR),
         src=(UPat.var('t'), UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='v')), name='op'),
-   lambda op, t, v: _backprop_binop(None, op, v, t) if t.dtype != dtypes.void else None),
+   lambda op, t, v: _backprop(op, v, t)),
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
