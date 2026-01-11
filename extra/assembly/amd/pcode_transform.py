@@ -24,10 +24,10 @@ _CAST_MAP.update({f'v_cvt_{d}_{s}': _DT_SUFFIX[d] for s in _DT_SUFFIX for d in _
 
 # CUSTOM op return types (ops that stay as CUSTOM after transformation)
 _CUSTOM_TYPES = {
-  'sign': dtypes.uint32, 'exponent': dtypes.uint32, 'mantissa': dtypes.float32, 'BYTE_PERMUTE': dtypes.uint32,
+  'sign': dtypes.uint32, 'exponent': dtypes.uint32, 'mantissa': dtypes.float32,  # can have void-typed args in lambdas
   'count_ones': dtypes.uint32, 'countbits': dtypes.uint32, 'reverse_bits': dtypes.uint32,
   's_ff1_i32_b32': dtypes.uint32, 's_ff1_i32_b64': dtypes.uint32,
-  'v_sad_u8': dtypes.uint32, 'v_msad_u8': dtypes.uint32, 'ConvertFromFormat': dtypes.uint32, 'nop': dtypes.uint32,
+  'ConvertFromFormat': dtypes.uint32, 'nop': dtypes.uint32,
   'trig_preop_result': dtypes.float64,
 }
 # Constants: name -> (dtype, value) - replaced with CONST during transformation
@@ -75,6 +75,45 @@ def _is_denorm(x: UOp) -> UOp:
   exp = UOp(Ops.AND, uint_dt, (UOp(Ops.SHR, uint_dt, (bits, UOp.const(uint_dt, exp_shift))), UOp.const(uint_dt, exp_mask)))
   mant = UOp(Ops.AND, uint_dt, (bits, UOp.const(uint_dt, mant_mask)))
   return UOp(Ops.AND, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (exp, UOp.const(uint_dt, 0))), UOp(Ops.CMPNE, dtypes.bool, (mant, UOp.const(uint_dt, 0)))))
+
+def _fp_extract(x: UOp, field: str) -> UOp:
+  uint_dt, sign_shift, exp_shift, exp_mask, mant_mask, bias, _ = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
+  bits = UOp(Ops.BITCAST, uint_dt, (x,))
+  if field == 'sign':
+    return UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (UOp(Ops.SHR, uint_dt, (bits, UOp.const(uint_dt, sign_shift))),)),
+                                        UOp.const(dtypes.uint32, 1)))
+  if field == 'exp':
+    return UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (UOp(Ops.SHR, uint_dt, (bits, UOp.const(uint_dt, exp_shift))),)),
+                                        UOp.const(dtypes.uint32, exp_mask)))
+  # mantissa: preserve sign, set exponent to bias-1, keep mantissa bits
+  mant = UOp(Ops.BITCAST, x.dtype, (UOp(Ops.OR, uint_dt, (UOp(Ops.AND, uint_dt, (bits, UOp.const(uint_dt, (1 << sign_shift) | mant_mask))),
+                                                          UOp.const(uint_dt, (bias - 1) << exp_shift))),))
+  return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPEQ, dtypes.bool, (x, UOp.const(x.dtype, 0.0))), x, mant))
+
+def _v_sad_u8(a: UOp, b: UOp, c: UOp) -> UOp:
+  u32, c8, c0x80 = dtypes.uint32, UOp.const(dtypes.uint32, 0xff), UOp.const(dtypes.uint32, 0x80000000)
+  result = c
+  for i in range(4):
+    shift = UOp.const(u32, i * 8)
+    ba, bb = UOp(Ops.AND, u32, (UOp(Ops.SHR, u32, (a, shift)), c8)), UOp(Ops.AND, u32, (UOp(Ops.SHR, u32, (b, shift)), c8))
+    diff = UOp(Ops.SUB, u32, (ba, bb))
+    result = UOp(Ops.ADD, u32, (result, UOp(Ops.WHERE, u32, (UOp(Ops.CMPLT, dtypes.bool, (diff, c0x80)), diff, UOp(Ops.SUB, u32, (UOp.const(u32, 0), diff))))))
+  return result
+
+def _byte_permute(data: UOp, sel: UOp) -> UOp:
+  u32, u64, c = dtypes.uint32, dtypes.uint64, lambda dt, v: UOp.const(dt, v)
+  src64 = UOp(Ops.CAST, u64, (data,))
+  sel_m = UOp(Ops.AND, u32, (UOp(Ops.CAST, u32, (sel,)), c(u32, 0xff)))
+  sel_idx, sel_nib = UOp(Ops.AND, u32, (sel_m, c(u32, 7))), UOp(Ops.AND, u32, (sel_m, c(u32, 0xf)))
+  shift = UOp(Ops.CAST, u64, (UOp(Ops.SHL, u32, (sel_idx, c(u32, 3))),))
+  result = UOp(Ops.CAST, u32, (UOp(Ops.AND, u64, (UOp(Ops.SHR, u64, (src64, shift)), c(u64, 0xff))),))
+  for i, pos in enumerate([15, 31, 47, 63], 8):  # sign extension from byte boundaries
+    sbit = UOp(Ops.WHERE, u32, (UOp(Ops.CMPNE, dtypes.bool, (UOp(Ops.AND, u64, (UOp(Ops.SHR, u64, (src64, c(u64, pos))), c(u64, 1))), c(u64, 0))),
+                                 c(u32, 0xff), c(u32, 0)))
+    result = UOp(Ops.WHERE, u32, (UOp(Ops.CMPEQ, dtypes.bool, (sel_nib, c(u32, i))), sbit, result))
+  result = UOp(Ops.WHERE, u32, (UOp(Ops.CMPEQ, dtypes.bool, (sel_nib, c(u32, 12))), c(u32, 0), result))  # sel=12 -> 0
+  result = UOp(Ops.WHERE, u32, (UOp(Ops.CMPLT, dtypes.bool, (c(u32, 12), sel_nib)), c(u32, 0xff), result))  # sel>12 -> 0xff
+  return UOp(Ops.WHERE, u32, (UOp(Ops.CMPNE, dtypes.bool, (UOp(Ops.AND, u32, (sel_m, c(u32, 0x80))), c(u32, 0))), c(u32, 0), result))  # high bit -> 0
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATTERN HANDLERS
@@ -205,6 +244,10 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='isINF', src=(UPat.var('x'),)), lambda x: UOp(Ops.OR, dtypes.bool, (
     UOp(Ops.CMPEQ, dtypes.bool, (x, _tc(x, float('inf')))), UOp(Ops.CMPEQ, dtypes.bool, (x, _tc(x, float('-inf'))))))),
   (UPat(Ops.CUSTOM, arg='isDENORM', src=(_fpat,)), _is_denorm),
+  # Float component extraction
+  (UPat(Ops.CUSTOM, arg='sign', src=(_fpat,)), lambda x: _fp_extract(x, 'sign')),
+  (UPat(Ops.CUSTOM, arg='exponent', src=(_fpat,)), lambda x: _fp_extract(x, 'exp')),
+  (UPat(Ops.CUSTOM, arg='mantissa', src=(_fpat,)), lambda x: _fp_extract(x, 'mant')),
   # ABSDIFF: |a - b| for unsigned
   (UPat(Ops.CUSTOM, arg='ABSDIFF', src=(UPat.var('a'), UPat.var('b'))),
    lambda a, b: UOp(Ops.WHERE, a.dtype, (UOp(Ops.CMPLT, dtypes.bool, (b, a)),
@@ -252,6 +295,13 @@ pcode_pm = PatternMatcher([
    lambda x: UOp(Ops.CAST, dtypes.uint16, (UOp(Ops.MUL, x.dtype, (_minmax(_minmax(x, _tc(x, 0.0), False), _tc(x, 1.0), True), _tc(x, 65535.0))),))),
   # signext_from_bit: sign extend from bit position
   (UPat(Ops.CUSTOM, arg='signext_from_bit', src=(UPat.var('x'), UPat.var('n'))), _signext_from_bit),
+  # v_sad_u8/v_msad_u8: sum of absolute differences of packed bytes
+  (UPat(Ops.CUSTOM, arg='v_sad_u8', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), _v_sad_u8),
+  (UPat(Ops.CUSTOM, arg='v_msad_u8', src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), _v_sad_u8),  # same impl
+  (UPat(Ops.CUSTOM, arg='v_sad_u8', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _v_sad_u8(a, b, UOp.const(dtypes.uint32, 0))),
+  (UPat(Ops.CUSTOM, arg='v_msad_u8', src=(UPat.var('a'), UPat.var('b'))), lambda a, b: _v_sad_u8(a, b, UOp.const(dtypes.uint32, 0))),
+  # BYTE_PERMUTE: byte selection from 64-bit value
+  (UPat(Ops.CUSTOM, arg='BYTE_PERMUTE', src=(UPat.var('data'), UPat.var('sel'))), _byte_permute),
 ]) + PatternMatcher([
   # Named constants from _CONSTS dict
   (UPat(Ops.DEFINE_VAR, name='u'), lambda u: UOp.const(*_CONSTS[u.arg[0]]) if isinstance(u.arg, tuple) and u.arg[0] in _CONSTS else None),
