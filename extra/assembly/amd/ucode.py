@@ -120,34 +120,18 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
         return _cast(inner_resolved, dt)
       return UOp(Ops.CAST, dt, (inner_resolved,))
 
-    # Unary ops (unary XOR/CMPEQ already converted to binary by pcode_transform)
-    case UOp(op, _, (src,)) if op in (Ops.NEG, Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL):
-      val = _expr(src, ctx, hint); return UOp(op, val.dtype, (val,))
-
-    # MULACC (fma)
-    case UOp(Ops.MULACC, _, (a, b, c)): return UOp(Ops.MULACC, _expr(c, ctx, hint).dtype, (_expr(a, ctx, hint), _expr(b, ctx, hint), _expr(c, ctx, hint)))
-
-    case UOp(Ops.WHERE, _, (cond, tv, fv)):
-      c, t = _expr(cond, ctx), _expr(tv, ctx, hint)
-      return UOp(Ops.WHERE, t.dtype, (c, t, _expr(fv, ctx, t.dtype)))
-
-    case UOp(op, _, (l_expr, r_expr)) if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.IDIV,
-                                                 Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE):
-      l, r = _expr(l_expr, ctx, hint), _expr(r_expr, ctx, hint)
-      if op in (Ops.ADD, Ops.SUB, Ops.MUL) and l.dtype in (dtypes.int32, dtypes.int64):
-        udt = {dtypes.int32: dtypes.uint32, dtypes.int64: dtypes.uint64}[l.dtype]
-        return UOp(op, udt, (_cast(l, udt), _cast(r, udt)))
-      if op in (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE): return UOp(op, dtypes.bool, (l, r))
-      return UOp(op, l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype, (l, r))
-
-    case UOp(Ops.CUSTOM, dt, args, name):
-      return UOp(Ops.CUSTOM, dt, tuple(_expr(a, ctx, hint) for a in args), name)
+    case UOp(Ops.WHERE, dt, (cond, tv, fv)):
+      return UOp(Ops.WHERE, dt, (_expr(cond, ctx), _expr(tv, ctx, dt), _expr(fv, ctx, dt)))
 
     # Memory operations: INDEX from pcode_transform -> LOAD with actual buffer
     case UOp(Ops.INDEX, dt, (buf, addr)):
       actual_buf = ctx.mem_buf if buf is PCODE_MEM_BUF else buf
       idx = UOp(Ops.INDEX, dt.ptr(0, ctx.mem_buf.dtype.addrspace), (actual_buf, _expr(addr, ctx, dtypes.uint64)))
       return UOp(Ops.LOAD, dt, (idx,))
+
+    # Generic recursion: just transform children, preserve op and dtype
+    case UOp(op, dt, srcs, arg):
+      return UOp(op, dt, tuple(_expr(s, ctx, hint) for s in srcs), arg)
   raise ValueError(f"Cannot transform expression: {node}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
