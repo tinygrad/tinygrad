@@ -191,6 +191,23 @@ class TestVALUChains(unittest.TestCase):
   def test_chain_20(self): self._chain(20)
 
 
+class TestVALUChainsWithNops(unittest.TestCase):
+  """VALU dependency chains with nops before to isolate warmup effects."""
+  def _chain_with_nops(self, n, num_nops=5):
+    instrs = [s_nop(0) for _ in range(num_nops)]
+    instrs += [v_mov_b32_e32(v[0], 1.0)] + [v_add_f32_e32(v[i], v[i-1], v[i-1]) for i in range(1, n)]
+    issue, execd = get_deltas(instrs)
+    return execd
+
+  def test_chain_2_with_nops(self): self.assertEqual(self._chain_with_nops(2), [6])
+  def test_chain_3_with_nops(self): self.assertEqual(self._chain_with_nops(3), [6, 5])
+  def test_chain_4_with_nops(self): self.assertEqual(self._chain_with_nops(4), [6, 5, 5])
+  def test_chain_5_with_nops(self): self.assertEqual(self._chain_with_nops(5), [6, 5, 5, 9])
+  def test_chain_6_with_nops(self): self.assertEqual(self._chain_with_nops(6), [6, 5, 5, 9, 9])
+  def test_chain_7_with_nops(self): self.assertEqual(self._chain_with_nops(7), [6, 5, 5, 5, 9, 9])
+  def test_chain_8_with_nops(self): self.assertEqual(self._chain_with_nops(8), [6, 5, 5, 5, 9, 9, 9])
+
+
 class TestVALUIndependent(unittest.TestCase):
   """Independent VALU instructions."""
   def _ind(self, n):
