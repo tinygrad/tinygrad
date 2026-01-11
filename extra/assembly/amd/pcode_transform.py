@@ -1,6 +1,6 @@
 # Transform parsed pcode CUSTOM ops to UOps using PatternMatcher
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, graph_rewrite
-from tinygrad.uop.spec import shared_spec, type_verify
+from tinygrad.uop.spec import program_spec, type_verify
 from tinygrad.dtype import dtypes, DType
 from extra.assembly.amd.pcode_parse import parse, If, For, Lambda, Break, Return
 import math
@@ -356,29 +356,20 @@ pcode_pm = PatternMatcher([
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PCODE SPEC (extends shared_spec with pcode-specific patterns)
+# PCODE SPEC (extends program_spec with pcode-specific exceptions)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 pcode_spec = PatternMatcher([
-  # DEFINE_VAR: pcode uses string names, not (name, min, max) tuples with ints
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg, (str, tuple))),
-  # ASSIGN: dtype must match rhs and neither can be void
+  # DEFINE_VAR: pcode uses (name, None, None) tuples for unresolved vars, or string for declared locals
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg, str) or (isinstance(x.arg, tuple) and len(x.arg) == 3)),
+  # ASSIGN: pcode assignment statement (dtype must match rhs)
   (UPat(Ops.ASSIGN, src=(UPat.var("lhs"), UPat.var("rhs")), name="a"),
    lambda a, lhs, rhs: a.dtype == rhs.dtype and rhs.dtype != dtypes.void),
-  # BITCAST: void source allowed (type view on untyped register)
-  (UPat(Ops.BITCAST, src=(UPat(),)), lambda: True),
-  # CUSTOMI/CAT: must be typed (slice bounds or bit concat determine type)
-  (UPat(Ops.CUSTOMI, name="x"), lambda x: x.dtype != dtypes.void),
+  # CAT: bit concatenation must be typed
   (UPat(Ops.CAT, name="x"), lambda x: x.dtype != dtypes.void),
-  # CUSTOM: passthrough ops (abs, cvtToQuietNAN) can be void (wrapped by BITCAST/CAST)
-  (UPat(Ops.CUSTOM, name="x"), lambda x: x.dtype != dtypes.void or x.arg in {'abs', 'cvtToQuietNAN'}),
-  # POW allows int exponent with float base
+  # POW: allow int exponent with float base (e.g. 2.0 ** 32)
   (UPat(Ops.POW, dtype=dtypes.floats, src=(UPat(dtype=dtypes.floats), UPat(dtype=dtypes.ints))), lambda: True),
-  # Memory ops: STORE is void, INDEX has element type, DEFINE_GLOBAL is ptr
-  (UPat(Ops.STORE, dtype=dtypes.void), lambda: True),
-  (UPat(Ops.INDEX), lambda: True),
-  (UPat(Ops.DEFINE_GLOBAL), lambda: True),
-]) + shared_spec
+]) + program_spec
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TRANSFORM
