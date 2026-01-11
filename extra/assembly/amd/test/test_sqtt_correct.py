@@ -141,21 +141,30 @@ class TestVALUChains(unittest.TestCase):
   def test_chain_20(self): self._chain(20, [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 5, 5, 5, 5, 5], [6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 9, 9, 9, 9, 9, 9, 9, 9])
 
 
-class TestVALUChainsWithNops(unittest.TestCase):
-  """VALU dependency chains with nops before to isolate warmup effects."""
-  def _chain_with_nops(self, n, num_nops=5):
-    instrs = [s_nop(0) for _ in range(num_nops)]
+class TestVALUChainsWithWarmup(unittest.TestCase):
+  """VALU dependency chains with early VALUs to isolate warmup effects."""
+  # just the first stupid VALU takes 6
+  def _chain_with_nops(self, n, warmup=True):
+    instrs = [v_mov_b32_e32(v[0], 1.0), s_nop(100)] if warmup else [s_nop(100)]
     instrs += [v_mov_b32_e32(v[0], 1.0)] + [v_add_f32_e32(v[i], v[i-1], v[i-1]) for i in range(1, n)]
     issue, execd = get_deltas(instrs)
-    return execd
+    return execd[1:] if warmup else execd
 
-  def test_chain_2_with_nops(self): self.assertEqual(self._chain_with_nops(2), [6])
-  def test_chain_3_with_nops(self): self.assertEqual(self._chain_with_nops(3), [6, 5])
-  def test_chain_4_with_nops(self): self.assertEqual(self._chain_with_nops(4), [6, 5, 5])
-  def test_chain_5_with_nops(self): self.assertEqual(self._chain_with_nops(5), [6, 5, 5, 9])
-  def test_chain_6_with_nops(self): self.assertEqual(self._chain_with_nops(6), [6, 5, 5, 9, 9])
-  def test_chain_7_with_nops(self): self.assertEqual(self._chain_with_nops(7), [6, 5, 5, 5, 9, 9])
-  def test_chain_8_with_nops(self): self.assertEqual(self._chain_with_nops(8), [6, 5, 5, 5, 9, 9, 9])
+  def test_chain_2_with_nops(self): self.assertEqual(self._chain_with_nops(2), [5])
+  def test_chain_3_with_nops(self): self.assertEqual(self._chain_with_nops(3), [5, 5])
+  def test_chain_4_with_nops(self): self.assertEqual(self._chain_with_nops(4), [5, 5, 5])
+  def test_chain_5_with_nops(self): self.assertEqual(self._chain_with_nops(5), [5, 5, 5, 9])
+  def test_chain_6_with_nops(self): self.assertEqual(self._chain_with_nops(6), [5, 5, 5, 5, 9])
+  def test_chain_7_with_nops(self): self.assertEqual(self._chain_with_nops(7), [5, 5, 5, 5, 9, 9])
+  def test_chain_8_with_nops(self): self.assertEqual(self._chain_with_nops(8), [5, 5, 5, 5, 9, 9, 9])
+
+  def test_chain_2(self): self.assertEqual(self._chain_with_nops(2, False), [6])
+  def test_chain_3(self): self.assertEqual(self._chain_with_nops(3, False), [6, 5])
+  def test_chain_4(self): self.assertEqual(self._chain_with_nops(4, False), [6, 5, 5])
+  def test_chain_5(self): self.assertEqual(self._chain_with_nops(5, False), [6, 5, 5, 9])
+  def test_chain_6(self): self.assertEqual(self._chain_with_nops(6, False), [6, 5, 5, 9, 9])
+  def test_chain_7(self): self.assertEqual(self._chain_with_nops(7, False), [6, 5, 5, 5, 9, 9])
+  def test_chain_8(self): self.assertEqual(self._chain_with_nops(8, False), [6, 5, 5, 5, 9, 9, 9])
 
 
 class TestVALUIndependent(unittest.TestCase):
