@@ -26,8 +26,6 @@ _CUSTOM_TYPES = {
   'count_ones': dtypes.uint32, 'countbits': dtypes.uint32, 'reverse_bits': dtypes.uint32,
   's_ff1_i32_b32': dtypes.uint32, 's_ff1_i32_b64': dtypes.uint32,
   'v_sad_u8': dtypes.uint32, 'v_msad_u8': dtypes.uint32, 'ConvertFromFormat': dtypes.uint32, 'nop': dtypes.uint32,
-  'f32_to_u32': dtypes.uint32, 'f64_to_u32': dtypes.uint32, 'signext_from_bit': dtypes.int64,
-  'f16_to_snorm': dtypes.int16, 'f16_to_unorm': dtypes.uint16, 'f32_to_snorm': dtypes.int16, 'f32_to_unorm': dtypes.uint16,
   'trig_preop_result': dtypes.float64,
 }
 # Constants: name -> (dtype, value) - replaced with CONST during transformation
@@ -56,6 +54,10 @@ def _minmax(a: UOp, b: UOp, is_min: bool, dt: DType|None = None) -> UOp:
 def _vn(u: UOp) -> str|None:  # var name
   if u.op == Ops.DEFINE_VAR: return u.arg[0] if isinstance(u.arg, tuple) else u.arg
   return _vn(u.src[0]) if u.op == Ops.CUSTOMI and u.src[0].op == Ops.DEFINE_VAR else None
+
+def _signext_from_bit(x: UOp, n: UOp) -> UOp:
+  sign = UOp(Ops.SHL, x.dtype, (_tc(x, 1), UOp(Ops.SUB, x.dtype, (UOp(Ops.CAST, x.dtype, (n,)), _tc(x, 1)))))
+  return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPEQ, dtypes.bool, (n, _tc(n, 0))), _tc(x, 0), UOp(Ops.SUB, x.dtype, (UOp(Ops.XOR, x.dtype, (x, sign)), sign))))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATTERN HANDLERS
@@ -210,6 +212,22 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='u32_to_u16', src=(UPat.var('x', dtype=dtypes.uint32),)), lambda x: UOp(Ops.AND, dtypes.uint32, (x, UOp.const(dtypes.uint32, 0xffff)))),
   (UPat(Ops.CUSTOM, arg='i32_to_i16', src=(UPat.var('x', dtype=dtypes.int32),)),
    lambda x: UOp(Ops.CAST, dtypes.int16, (UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xffff))),))),
+  # f32_to_u32, f64_to_u32: clamp negative to 0, then cast
+  (UPat(Ops.CUSTOM, arg='f32_to_u32', src=(UPat.var('x', dtype=dtypes.float32),)),
+   lambda x: UOp(Ops.CAST, dtypes.uint32, (UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, _tc(x, 0.0))), _tc(x, 0.0), x)),))),
+  (UPat(Ops.CUSTOM, arg='f64_to_u32', src=(UPat.var('x', dtype=dtypes.float64),)),
+   lambda x: UOp(Ops.CAST, dtypes.uint32, (UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPLT, dtypes.bool, (x, _tc(x, 0.0))), _tc(x, 0.0), x)),))),
+  # snorm/unorm: clamp to [-1,1] or [0,1], scale, cast
+  (UPat(Ops.CUSTOM, arg='f16_to_snorm', src=(UPat.var('x', dtype=dtypes.float16),)),
+   lambda x: UOp(Ops.CAST, dtypes.int16, (UOp(Ops.MUL, x.dtype, (_minmax(_minmax(x, _tc(x, -1.0), False), _tc(x, 1.0), True), _tc(x, 32767.0))),))),
+  (UPat(Ops.CUSTOM, arg='f32_to_snorm', src=(UPat.var('x', dtype=dtypes.float32),)),
+   lambda x: UOp(Ops.CAST, dtypes.int16, (UOp(Ops.MUL, x.dtype, (_minmax(_minmax(x, _tc(x, -1.0), False), _tc(x, 1.0), True), _tc(x, 32767.0))),))),
+  (UPat(Ops.CUSTOM, arg='f16_to_unorm', src=(UPat.var('x', dtype=dtypes.float16),)),
+   lambda x: UOp(Ops.CAST, dtypes.uint16, (UOp(Ops.MUL, x.dtype, (_minmax(_minmax(x, _tc(x, 0.0), False), _tc(x, 1.0), True), _tc(x, 65535.0))),))),
+  (UPat(Ops.CUSTOM, arg='f32_to_unorm', src=(UPat.var('x', dtype=dtypes.float32),)),
+   lambda x: UOp(Ops.CAST, dtypes.uint16, (UOp(Ops.MUL, x.dtype, (_minmax(_minmax(x, _tc(x, 0.0), False), _tc(x, 1.0), True), _tc(x, 65535.0))),))),
+  # signext_from_bit: sign extend from bit position
+  (UPat(Ops.CUSTOM, arg='signext_from_bit', src=(UPat.var('x'), UPat.var('n'))), _signext_from_bit),
 ]) + PatternMatcher([
   # Named constants from _CONSTS dict
   (UPat(Ops.DEFINE_VAR, name='u'), lambda u: UOp.const(*_CONSTS[u.arg[0]]) if isinstance(u.arg, tuple) and u.arg[0] in _CONSTS else None),

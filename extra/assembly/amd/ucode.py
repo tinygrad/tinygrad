@@ -191,9 +191,6 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
 # FUNCTION CALLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Conversions that need special handling (clamping negative to 0 before cast)
-CVT_MAP = {'f32_to_u32': (dtypes.uint32, True), 'f64_to_u32': (dtypes.uint32, True)}
-
 def _fp_bits(v: UOp) -> tuple[UOp, int, int, int]:
   """Get float as bits with its layout info. Unwraps CAST to check original float type."""
   # For NaN checking, we need to use the original float's bit layout (not the casted one)
@@ -232,10 +229,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     result = UOp(Ops.BITCAST, a[0].dtype, (UOp(Ops.OR, uint_dt, (UOp(Ops.AND, uint_dt, (bits, UOp.const(uint_dt, (1 << sign_shift) | mant_mask))),
                                                                   UOp.const(uint_dt, (bias - 1) << exp_shift))),))
     return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0.0))), a[0], result))
-  if name == 'signext_from_bit':
-    sign = UOp(Ops.SHL, a[0].dtype, (UOp.const(a[0].dtype, 1), UOp(Ops.SUB, a[0].dtype, (_cast(a[1], a[0].dtype), UOp.const(a[0].dtype, 1)))))
-    result = UOp(Ops.SUB, a[0].dtype, (UOp(Ops.XOR, a[0].dtype, (a[0], sign)), sign))
-    return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPEQ, dtypes.bool, (a[1], UOp.const(a[1].dtype, 0))), UOp.const(a[0].dtype, 0), result))
   if name == 'BYTE_PERMUTE':
     src64, sel = _cast(a[0], dtypes.uint64), UOp(Ops.AND, dtypes.uint32, (_cast(a[1], dtypes.uint32), UOp.const(dtypes.uint32, 0xff)))
     sel_idx, sel_nib = UOp(Ops.AND, dtypes.uint32, (sel, UOp.const(dtypes.uint32, 7))), UOp(Ops.AND, dtypes.uint32, (sel, UOp.const(dtypes.uint32, 0xf)))
@@ -251,15 +244,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 's_ff1_i32_b32': return UOp(Ops.CUSTOM, dtypes.int32, (_cast(a[0], dtypes.uint32),), arg='s_ff1_i32_b32')
   if name == 's_ff1_i32_b64': return UOp(Ops.CUSTOM, dtypes.int32, (_cast(a[0], dtypes.uint64),), arg='s_ff1_i32_b64')
 
-  if name in CVT_MAP:
-    dt, clamp = CVT_MAP[name]
-    v = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0.0))), UOp.const(a[0].dtype, 0.0), a[0])) if clamp else a[0]
-    return UOp(Ops.CAST, dt, (v,))
-  if 'snorm' in name or 'unorm' in name:
-    lo, scale, out = (-1.0, 32767.0, dtypes.int16) if 'snorm' in name else (0.0, 65535.0, dtypes.uint16)
-    c = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], UOp.const(a[0].dtype, lo))), UOp.const(a[0].dtype, lo), a[0]))
-    c = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (UOp.const(a[0].dtype, 1.0), c)), UOp.const(a[0].dtype, 1.0), c))
-    return UOp(Ops.CAST, out, (UOp(Ops.MUL, a[0].dtype, (c, UOp.const(a[0].dtype, scale))),))
   if name in ('v_sad_u8', 'v_msad_u8'):
     result = a[2] if len(a) > 2 else UOp.const(dtypes.uint32, 0)
     for i in range(4):
