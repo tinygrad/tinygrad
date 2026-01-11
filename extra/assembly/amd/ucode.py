@@ -49,18 +49,11 @@ class Ctx:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _resolve_special_var(name: str, ctx: Ctx, hint: DType = None) -> UOp | None:
-  """Resolve special variables and constants."""
-  if name == 'PI': return UOp.const(hint or dtypes.float64, math.pi)
-  if name == 'MAX_FLOAT_F32': return UOp.const(dtypes.float32, 3.402823466e+38)
-  if name in ('OVERFLOW_F32', 'UNDERFLOW_F32'): return UOp.const(dtypes.float32, float('inf') if 'OVER' in name else 0.0)
-  if name in ('OVERFLOW_F64', 'UNDERFLOW_F64'): return UOp.const(dtypes.float64, float('inf') if 'OVER' in name else 0.0)
+  """Resolve special variables and constants (most constants now handled by pcode_transform)."""
   if name == 'NAN.f32': return UOp.const(dtypes.float32, float('nan'))
   if name.startswith('DENORM.'): return UOp.const(dtypes.float64 if '64' in name else dtypes.float32, 2.2250738585072014e-308 if '64' in name else 1.17549435e-38)
   if name in ('WAVE_MODE.IEEE', 'WAVE32'): return UOp.const(dtypes.uint32, 1)
   if name in ('WAVE64', 'ROUND_MODE') or name.startswith('WAVE_STATUS.COND_DBG'): return UOp.const(dtypes.uint32, 0)
-  if 'INF' in name and name.replace('+', '').replace('-', '').replace('.f16', '').replace('.f32', '').replace('.f64', '') == 'INF':
-    dt = dtypes.float16 if '.f16' in name else dtypes.float32 if '.f32' in name else hint or dtypes.float64
-    return UOp.const(dt, float('-inf') if name.startswith('-') else float('inf'))
   # Register aliases
   if name in ('VCCZ', 'EXECZ'):
     return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars['VCC' if 'VCC' in name else 'EXEC'], UOp.const(dtypes.uint64, 0))), dtypes.uint32)
@@ -164,12 +157,8 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
         return _cast(inner_resolved, dt)
       return UOp(Ops.CAST, dt, (inner_resolved,))
 
-    case UOp(Ops.NEG, _, (src,)): val = _expr(src, ctx, hint); return UOp(Ops.NEG, val.dtype, (val,))
-    case UOp(Ops.XOR, _, (src,)) if len(node.src) == 1: val = _expr(src, ctx, hint); return UOp(Ops.XOR, val.dtype, (val, UOp.const(val.dtype, -1)))
-    case UOp(Ops.CMPEQ, _, (src,)) if len(node.src) == 1: val = _expr(src, ctx, hint); return UOp(Ops.CMPEQ, dtypes.bool, (val, UOp.const(val.dtype, 0)))
-
-    # Unary math ops
-    case UOp(op, _, (src,)) if op in (Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL):
+    # Unary ops (unary XOR/CMPEQ already converted to binary by pcode_transform)
+    case UOp(op, _, (src,)) if op in (Ops.NEG, Ops.TRUNC, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.RECIPROCAL):
       val = _expr(src, ctx, hint); return UOp(op, val.dtype, (val,))
 
     # MULACC (fma)
