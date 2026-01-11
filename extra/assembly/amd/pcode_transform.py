@@ -141,20 +141,25 @@ def _prop_assign(ctx, lhs, rhs):
   return UOp(Ops.ASSIGN, rhs.dtype, (UOp(Ops.DEFINE_VAR, rhs.dtype, arg=lhs.arg), rhs))
 
 def _prop_binop(l, r, __OP__):
-  if __OP__.op in {Ops.SHL, Ops.SHR}: dt = l.dtype if l.dtype != dtypes.void else r.dtype
-  elif l.dtype != dtypes.void and r.dtype != dtypes.void: dt = l.dtype if l.dtype.itemsize >= r.dtype.itemsize else r.dtype
-  else: dt = l.dtype if l.dtype != dtypes.void else r.dtype
-  return UOp(__OP__.op, dt, (l, r), __OP__.arg) if dt != dtypes.void else None
+  # Don't infer type if either operand is void - wait for variable typing first
+  if l.dtype == dtypes.void or r.dtype == dtypes.void: return None
+  if __OP__.op in {Ops.SHL, Ops.SHR}: dt = l.dtype
+  else: dt = l.dtype if l.dtype.itemsize >= r.dtype.itemsize else r.dtype
+  return UOp(__OP__.op, dt, (l, r), __OP__.arg)
 
 def _prop_custom(x):
   if x.arg in _CUSTOM_TYPES: return UOp(Ops.CUSTOM, _CUSTOM_TYPES[x.arg], x.src, x.arg)
   if x.arg in {'MEM', 'abs', 'cvtToQuietNAN'}: return None  # wrapped by BITCAST/CAST
   dt = next((s.dtype for s in x.src if s.dtype != dtypes.void), dtypes.void)
-  assert dt != dtypes.void, f"cannot infer type for CUSTOM op '{x.arg}'"
+  if dt == dtypes.void: return None  # wait for sources to be typed first
   return UOp(Ops.CUSTOM, dt, x.src, x.arg)
 
 def _prop_customi(base, hi, lo):
-  if hi is lo: return UOp(Ops.CUSTOMI, base.dtype if base.dtype != dtypes.void else dtypes.uint32, (base, hi, lo))
+  if base.dtype == dtypes.void: return None  # wait for base to be typed
+  if hi is lo:
+    # Array element access: use scalar element type
+    dt = base.dtype.scalar() if base.dtype.count > 1 else base.dtype
+    return UOp(Ops.CUSTOMI, dt, (base, hi, lo))
   if hi.op == Ops.CONST and lo.op == Ops.CONST:
     return UOp(Ops.CUSTOMI, dtypes.uint64 if abs(int(hi.arg) - int(lo.arg)) + 1 > 32 else dtypes.uint32, (base, hi, lo))
   return UOp(Ops.CUSTOMI, dtypes.uint32, (base, hi, lo))
@@ -164,8 +169,11 @@ def _fix_binop(op, x, y):
   if x.dtype.itemsize >= y.dtype.itemsize: return UOp(op.op, op.dtype, (x, UOp(Ops.CAST, x.dtype, (y,))), op.arg)
   return UOp(op.op, op.dtype, (UOp(Ops.CAST, y.dtype, (x,)), y), op.arg)
 
-def _backprop(op, v, t):
+def _backprop(ctx, op, v, t):
   if t.dtype == dtypes.void: return None
+  name = v.arg[0] if isinstance(v.arg, tuple) else v.arg
+  # Don't back-propagate if variable already has a type in context
+  if ctx is not None and name in ctx: return None
   new_var = UOp(Ops.DEFINE_VAR, t.dtype, arg=v.arg)
   return UOp(op.op, op.dtype, (new_var, t) if op.src[0] is v else (t, new_var), op.arg)
 
@@ -184,6 +192,25 @@ def _prop_cat(x):
   if not x.src: return None
   bits = sum(s.dtype.itemsize * 8 if s.dtype != dtypes.void else 0 for s in x.src)
   return UOp(Ops.CAT, dtypes.uint64 if bits > 32 else dtypes.uint32, x.src) if bits > 0 else None
+
+def _lower_cat(hi, lo):
+  """Lower CAT {hi, lo} to (hi << shift) | lo."""
+  if lo.dtype.itemsize >= 4:  # 32-bit lo -> 64-bit result
+    return (hi.cast(dtypes.uint64) << 32) | lo.cast(dtypes.uint64)
+  # 16-bit lo -> 32-bit result
+  return (hi.cast(dtypes.uint32) << 16) | (lo.cast(dtypes.uint32) & 0xffff)
+
+def _lower_cat_assign(lhs_parts, rhs):
+  """Lower {hi, lo} = rhs into GROUP(ASSIGN(lo, rhs & mask), ASSIGN(hi, rhs >> shift))."""
+  rhs_bits = rhs.cast(dtypes.uint64) if rhs.dtype != dtypes.uint64 else rhs
+  assigns, offset = [], 0
+  for part in reversed(lhs_parts):  # lo first, then hi
+    bits = 1 if part.dtype.name == 'u1' else 64 if part.dtype == dtypes.uint64 else part.dtype.itemsize * 8
+    mask = (1 << bits) - 1
+    val = ((rhs_bits >> offset) & mask).cast(part.dtype)
+    assigns.append(UOp(Ops.ASSIGN, part.dtype, (part, val)))
+    offset += bits
+  return UOp(Ops.GROUP, dtypes.void, tuple(assigns))
 
 def _typed_cast(x, op):
   if op.arg not in _CAST_MAP: return None
@@ -312,6 +339,9 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.ASSIGN, dtype=dtypes.void, src=(UPat.var('lhs'), UPat.var('rhs'))),
    lambda lhs, rhs: UOp(Ops.ASSIGN, rhs.dtype, (lhs, rhs)) if rhs.dtype != dtypes.void else
                     UOp(Ops.ASSIGN, lhs.dtype, (lhs, rhs.replace(dtype=lhs.dtype))) if lhs.dtype != dtypes.void else None),
+  # Fix ASSIGN type mismatch: ensure dtype matches rhs, cast rhs if needed to match lhs
+  (UPat(Ops.ASSIGN, src=(UPat.var('lhs'), UPat.var('rhs')), name='a'),
+   lambda a, lhs, rhs: UOp(Ops.ASSIGN, lhs.dtype, (lhs, UOp(Ops.CAST, lhs.dtype, (rhs,)))) if lhs.dtype != dtypes.void and rhs.dtype != dtypes.void and a.dtype != rhs.dtype else None),
   # Dtype propagation for void-typed ops
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.MOD, Ops.POW),
         dtype=dtypes.void, src=(UPat.var('l'), UPat.var('r')), name='__OP__'), _prop_binop),
@@ -325,7 +355,13 @@ pcode_pm = PatternMatcher([
    lambda x: UOp(Ops.CMPEQ, dtypes.bool, (x, UOp.const(x.dtype if x.dtype != dtypes.void else dtypes.uint32, 0)))),
   (UPat(Ops.MULACC, dtype=dtypes.void, src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), _prop_mulacc),
   (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var('cond'), UPat.var('t'), UPat.var('f'))), _prop_where),
+  # Lower ASSIGN with CAT LHS to GROUP of ASSIGNs (bottom_up=True matches ASSIGN before CAT is lowered)
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.CAT, src=(UPat.var('hi'), UPat.var('lo'))), UPat.var('rhs'))),
+   lambda hi, lo, rhs: _lower_cat_assign((hi, lo), rhs)),
+  # Type void CAT
   (UPat(Ops.CAT, dtype=dtypes.void, name='x'), _prop_cat),
+  # Lower typed CAT (RHS) to SHL+OR
+  (UPat(Ops.CAT, dtype={dtypes.uint32, dtypes.uint64}, src=(UPat.var('hi'), UPat.var('lo'))), _lower_cat),
   (UPat(Ops.CUSTOMI, dtype=dtypes.void, src=(UPat.var('base'), UPat.var('hi'), UPat.var('lo'))), _prop_customi),
   (UPat(Ops.CUSTOM, dtype=dtypes.void, name='x'), _prop_custom),
   # Fix comparison type mismatches: cast to larger type
@@ -343,16 +379,16 @@ pcode_pm = PatternMatcher([
    lambda x, y: UOp(Ops.AND, dtypes.bool, (UOp(Ops.CMPNE, dtypes.bool, (x, UOp.const(x.dtype, 0))), y))),
   # Fix binary op type mismatches: cast smaller to larger (excluding POW which allows int exponent)
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR), src=(UPat.var('x'), UPat.var('y')), name='op'),
-   lambda op, x, y: UOp(op.op, op.dtype, (x, UOp(Ops.CAST, x.dtype, (y,)))) if x.dtype != dtypes.void and y.dtype != dtypes.void and x.dtype != y.dtype and x.dtype.itemsize >= y.dtype.itemsize else None),
+   lambda op, x, y: UOp(op.op, x.dtype, (x, UOp(Ops.CAST, x.dtype, (y,)))) if x.dtype != dtypes.void and y.dtype != dtypes.void and x.dtype != y.dtype and x.dtype.itemsize >= y.dtype.itemsize else None),
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR), src=(UPat.var('x'), UPat.var('y')), name='op'),
-   lambda op, x, y: UOp(op.op, op.dtype, (UOp(Ops.CAST, y.dtype, (x,)), y)) if x.dtype != dtypes.void and y.dtype != dtypes.void and x.dtype != y.dtype and y.dtype.itemsize > x.dtype.itemsize else None),
-  # Back-propagate types to void DEFINE_VAR sources
+   lambda op, x, y: UOp(op.op, y.dtype, (UOp(Ops.CAST, y.dtype, (x,)), y)) if x.dtype != dtypes.void and y.dtype != dtypes.void and x.dtype != y.dtype and y.dtype.itemsize > x.dtype.itemsize else None),
+  # Back-propagate types to void DEFINE_VAR sources (skip if var already has type in ctx)
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR),
         src=(UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='v'), UPat.var('t')), name='op'),
-   lambda op, v, t: _backprop(op, v, t)),
+   lambda ctx, op, v, t: _backprop(ctx, op, v, t)),
   (UPat((Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR),
         src=(UPat.var('t'), UPat(Ops.DEFINE_VAR, dtype=dtypes.void, name='v')), name='op'),
-   lambda op, t, v: _backprop(op, v, t)),
+   lambda ctx, op, t, v: _backprop(ctx, op, v, t)),
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -365,8 +401,6 @@ pcode_spec = PatternMatcher([
   # ASSIGN: pcode assignment statement (dtype must match rhs)
   (UPat(Ops.ASSIGN, src=(UPat.var("lhs"), UPat.var("rhs")), name="a"),
    lambda a, lhs, rhs: a.dtype == rhs.dtype and rhs.dtype != dtypes.void),
-  # CAT: bit concatenation must be typed
-  (UPat(Ops.CAT, name="x"), lambda x: x.dtype != dtypes.void),
   # POW: allow int exponent with float base (e.g. 2.0 ** 32)
   (UPat(Ops.POW, dtype=dtypes.floats, src=(UPat(dtype=dtypes.floats), UPat(dtype=dtypes.ints))), lambda: True),
 ]) + program_spec
@@ -376,7 +410,7 @@ pcode_spec = PatternMatcher([
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _transform_uop(u: UOp, ctx: dict) -> UOp:
-  result = graph_rewrite(u, pcode_pm, ctx=ctx)
+  result = graph_rewrite(u, pcode_pm, ctx=ctx, bottom_up=True)
   type_verify(result, pcode_spec)
   return result
 

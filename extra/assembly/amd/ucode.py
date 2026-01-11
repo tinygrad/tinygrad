@@ -167,13 +167,6 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
 
     case UOp(Ops.CUSTOM, _, args, name): return _transform_call(name, [_expr(a, ctx, hint) for a in args], hint)
 
-    case UOp(Ops.CAT, _, exprs):  # Pack {hi, lo}
-      hi, lo = _expr(exprs[0], ctx), _expr(exprs[1], ctx)
-      if lo.dtype.itemsize >= 4:
-        return UOp(Ops.OR, dtypes.uint64, (UOp(Ops.SHL, dtypes.uint64, (_cast(hi, dtypes.uint64), UOp.const(dtypes.uint64, 32))), _cast(lo, dtypes.uint64)))
-      return UOp(Ops.OR, dtypes.uint32, (UOp(Ops.SHL, dtypes.uint32, (_cast(hi, dtypes.uint32), UOp.const(dtypes.uint32, 16))),
-                                         UOp(Ops.AND, dtypes.uint32, (_cast(lo, dtypes.uint32), UOp.const(dtypes.uint32, 0xffff)))))
-
     # Memory operations: INDEX from pcode_transform -> LOAD with actual buffer
     # dt is element type (e.g. uint32), not ptr type
     case UOp(Ops.INDEX, dt, (buf, addr)):
@@ -287,22 +280,13 @@ def _stmt(stmt, ctx: Ctx):
       ctx.mem_stores.append(UOp(Ops.STORE, dtypes.void, (idx_expr, val_expr)))
       return
 
+    # GROUP: execute all statements in the group
+    case UOp(Ops.GROUP, _, stmts):
+      for s in stmts: _stmt(s, ctx)
+      return
+
     # Assignment: ASSIGN(lhs, rhs)
     case UOp(Ops.ASSIGN, _, (lhs, rhs)):
-      # CAT assignment: {D1.u1, D0.u64} = ...
-      if lhs.op == Ops.CAT:
-        rhs_uop, offset = _expr(rhs, ctx), 0
-        for part in reversed(lhs.src):
-          if part.op == Ops.BITCAST and part.src[0].op == Ops.DEFINE_VAR:
-            dt, name = part.dtype, part.src[0].arg[0]
-            bits = 1 if dt.name == 'u1' else 64 if dt == dtypes.ulong or dt.name == 'ulong' else dt.itemsize * 8
-            real_dt = dtypes.uint32 if bits == 1 else dtypes.uint64 if bits == 64 else dt
-            val = _cast(UOp(Ops.AND, rhs_uop.dtype, (UOp(Ops.SHR, rhs_uop.dtype, (rhs_uop, UOp.const(rhs_uop.dtype, offset))), UOp.const(rhs_uop.dtype, (1 << bits) - 1))), real_dt)
-            ctx.vars[name] = val
-            if name in OUT_VARS: ctx.outputs.append((name, val, real_dt))
-            offset += bits
-        return
-
       var, dtype, hi, lo, idx_var, array_idx, dynamic_idx = _get_lhs_info(lhs, ctx)
 
       # VGPR write
