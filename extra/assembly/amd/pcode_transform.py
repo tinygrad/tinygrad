@@ -165,6 +165,24 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='floor', src=(_fpat,)), lambda x: _floor(x)),
   (UPat(Ops.CUSTOM, arg='fract', src=(_fpat,)), lambda x: UOp(Ops.SUB, x.dtype, (x, _floor(x)))),
   (UPat(Ops.CUSTOM, arg='rsqrt', src=(_fpat,)), lambda x: UOp(Ops.RECIPROCAL, x.dtype, (UOp(Ops.SQRT, x.dtype, (x,)),))),
+  # pow() function: pow(2.0, x) -> EXP2(x), pow(a, b) -> EXP2(b * LOG2(a))
+  (UPat(Ops.CUSTOM, arg='pow', src=(UPat(Ops.CONST, arg=2.0), UPat.var('x'))), lambda x: UOp(Ops.EXP2, x.dtype, (x,))),
+  (UPat(Ops.CUSTOM, arg='pow', src=(UPat.var('a', dtype=dtypes.floats), UPat.var('b'))),
+   lambda a, b: UOp(Ops.EXP2, a.dtype, (UOp(Ops.MUL, a.dtype, (UOp(Ops.CAST, a.dtype, (b,)) if b.dtype != a.dtype else b, UOp(Ops.LOG2, a.dtype, (a,)))),))),
+  # POW operator: 2.0 ** x -> EXP2(x), a ** b -> EXP2(b * LOG2(a))
+  (UPat(Ops.POW, src=(UPat(Ops.CONST, arg=2.0), UPat.var('x'))), lambda x: UOp(Ops.EXP2, x.dtype, (x,)) if x.dtype in dtypes.floats else UOp(Ops.EXP2, dtypes.float32, (UOp(Ops.CAST, dtypes.float32, (x,)),))),
+  (UPat(Ops.POW, dtype=dtypes.floats, src=(UPat.var('a'), UPat.var('b')), name='p'), lambda p, a, b: UOp(Ops.EXP2, p.dtype, (UOp(Ops.MUL, p.dtype, (UOp(Ops.CAST, p.dtype, (b,)) if b.dtype != p.dtype else b, UOp(Ops.LOG2, p.dtype, (a,)))),))),
+  # MOD: a % b -> a - (a / b) * b
+  (UPat(Ops.MOD, dtype=dtypes.ints, src=(UPat.var('a'), UPat.var('b')), name='m'), lambda m, a, b: UOp(Ops.SUB, m.dtype, (a, UOp(Ops.MUL, m.dtype, (UOp(Ops.IDIV, m.dtype, (a, b)), b))))),
+  # ldexp(x, n) = x * 2^n
+  (UPat(Ops.CUSTOM, arg='ldexp', src=(UPat.var('x', dtype=dtypes.floats), UPat.var('n'))),
+   lambda x, n: UOp(Ops.MUL, x.dtype, (x, UOp(Ops.EXP2, x.dtype, (UOp(Ops.CAST, x.dtype, (n,)) if n.dtype != x.dtype else n,))))),
+  # Mask conversions
+  (UPat(Ops.CUSTOM, arg='u8_to_u32', src=(UPat.var('x'),)), lambda x: UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xff)))),
+  (UPat(Ops.CUSTOM, arg='u4_to_u32', src=(UPat.var('x'),)), lambda x: UOp(Ops.AND, dtypes.uint32, (UOp(Ops.CAST, dtypes.uint32, (x,)), UOp.const(dtypes.uint32, 0xf)))),
+  # isEven: check if integer part is even
+  (UPat(Ops.CUSTOM, arg='isEven', src=(UPat.var('x'),)),
+   lambda x: UOp(Ops.CMPEQ, dtypes.bool, (UOp(Ops.AND, dtypes.int64, (UOp(Ops.CAST, dtypes.int64, (x,)), UOp.const(dtypes.int64, 1))), UOp.const(dtypes.int64, 0)))),
   # Boolean functions
   (UPat(Ops.CUSTOM, arg='isNAN', src=(UPat.var('x'),)), lambda x: UOp(Ops.CMPNE, dtypes.bool, (x, x))),
   (UPat(Ops.CUSTOM, arg='isINF', src=(UPat.var('x'),)), lambda x: UOp(Ops.OR, dtypes.bool, (
