@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, DType, AddrSpace
 from extra.assembly.amd.pcode_parse import If, For
 from extra.assembly.amd.pcode_transform import parse_transform, MEM_BUF as PCODE_MEM_BUF
 
-SIGNED, FLOATS = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64), (dtypes.float16, dtypes.float32, dtypes.float64)
+FLOATS = (dtypes.float16, dtypes.float32, dtypes.float64)
 MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
 
 def _ftz32(bits: int) -> float:
@@ -40,8 +40,6 @@ class Ctx:
 # EXPRESSION TRANSFORM
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-
 def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
   """Transform parsed UOp expression to resolved UOp."""
   match node:
@@ -69,7 +67,7 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
           return masked if 'uint' in dt.name else UOp(Ops.SUB, dtypes.int32, (UOp(Ops.XOR, dtypes.int32, (masked, UOp.const(dtypes.int32, 0x800000))), UOp.const(dtypes.int32, 0x800000)))
         if dt == dtypes.float16: return UOp(Ops.BITCAST, dtypes.float16, (UOp(Ops.AND, dtypes.uint16, (_cast(base, dtypes.uint16), UOp.const(dtypes.uint16, 0xffff))),))
         if dt in FLOATS: return UOp(Ops.BITCAST, dt, (base,))
-        if dt in SIGNED: return _cast(ctx.vars.get(name + '_64', base) if dt == dtypes.int64 else base, dt)
+        if dt in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64): return _cast(ctx.vars.get(name + '_64', base) if dt == dtypes.int64 else base, dt)
         return _cast(base, dt)
       inner_resolved = _expr(inner, ctx, dt)
       if dt in (dtypes.float16, dtypes.bfloat16): return UOp(Ops.BITCAST, dt, (_cast(inner_resolved, dtypes.uint16),))
