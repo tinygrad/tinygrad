@@ -6,11 +6,7 @@ using multiprocessing, which can significantly speed up first-run compile times.
 from __future__ import annotations
 import multiprocessing as mp
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 from tinygrad.helpers import getenv, DEBUG
-
-if TYPE_CHECKING:
-  from tinygrad.device import Compiler
 
 # Environment variable to control parallel compilation
 PARALLEL_COMPILE = getenv("PARALLEL_COMPILE", 1)
