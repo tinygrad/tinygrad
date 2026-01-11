@@ -222,10 +222,14 @@ class TestForwardingGap(unittest.TestCase):
   def test_gap2(self): self.assertEqual(self._last_exec_delta(2), 4)
   def test_gap3(self): self.assertEqual(self._last_exec_delta(3), 3)
   def test_gap4(self): self.assertEqual(self._last_exec_delta(4), 3)
-  def test_gap5(self): self.assertEqual(self._last_exec_delta(5), 4)
+  def test_gap5(self): self.assertEqual(self._last_exec_delta(5), 4)  # anomaly
   def test_gap6(self): self.assertEqual(self._last_exec_delta(6), 3)
   def test_gap7(self): self.assertEqual(self._last_exec_delta(7), 3)
   def test_gap8(self): self.assertEqual(self._last_exec_delta(8), 3)
+  def test_gap9(self): self.assertEqual(self._last_exec_delta(9), 3)
+  def test_gap10(self): self.assertEqual(self._last_exec_delta(10), 3)
+  def test_gap11(self): self.assertEqual(self._last_exec_delta(11), 3)
+  def test_gap12(self): self.assertEqual(self._last_exec_delta(12), 3)
 
 
 class TestChainWithNop(unittest.TestCase):
