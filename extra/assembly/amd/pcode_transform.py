@@ -289,9 +289,9 @@ pcode_pm = PatternMatcher([
 pcode_spec = PatternMatcher([
   # DEFINE_VAR: pcode uses string names, not (name, min, max) tuples with ints
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg, (str, tuple))),
-  # ASSIGN: dtype matches rhs (unless both void)
+  # ASSIGN: dtype must match rhs and neither can be void
   (UPat(Ops.ASSIGN, src=(UPat.var("lhs"), UPat.var("rhs")), name="a"),
-   lambda a, lhs, rhs: a.dtype == rhs.dtype and (rhs.dtype != dtypes.void or lhs.dtype == dtypes.void)),
+   lambda a, lhs, rhs: a.dtype == rhs.dtype and rhs.dtype != dtypes.void),
   # BITCAST: void source allowed (type view on untyped register)
   (UPat(Ops.BITCAST, src=(UPat(),)), lambda: True),
   # CUSTOMI/CAT: must be typed (slice bounds or bit concat determine type)
