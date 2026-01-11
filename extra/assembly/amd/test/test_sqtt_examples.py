@@ -6,6 +6,8 @@ from tinygrad.helpers import DEBUG, colored
 from tinygrad.runtime.autogen import rocprof
 from tinygrad.runtime.support.elf import elf_loader
 from extra.assembly.amd.asm import detect_format, disasm
+from extra.assembly.amd.autogen.rdna3.ins import SOPP
+from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
                                      ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, AluSrc, MemSrc)
 
@@ -92,7 +94,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
     except (ValueError, AssertionError):
       mem_size_ptr[0] = 0
       return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    if instr_text == "s_endpgm": mem_size_ptr[0] = 0
+    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: mem_size_ptr[0] = 0
     if (max_sz := size_ptr[0]) == 0: return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES
     instr_bytes = instr_text.encode()
     ctypes.memmove(instr_ptr, instr_bytes, min(len(instr_bytes), max_sz - 1))
