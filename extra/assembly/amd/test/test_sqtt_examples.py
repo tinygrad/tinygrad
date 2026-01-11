@@ -30,15 +30,12 @@ def format_packet(p, time_offset: int = 0) -> str:
   color = PACKET_COLORS.get(name, "white")
   return f"{cycle:8}: {colored(f'{name:18}', color)} {fields}"
 
-def print_packets(packets: list, wave_only: bool = True) -> None:
-  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3"}
-  in_wave = not wave_only
-  time_offset = 0
+def print_packets(packets: list) -> None:
+  timing_skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3"}
+  extra_skip = {"REG", "EVENT"}
+  time_offset = packets[0]._time if packets else 0
   for p in packets:
-    name = type(p).__name__
-    if isinstance(p, WAVESTART): in_wave, time_offset = True, p._time
-    if in_wave and name not in skip: print(format_packet(p, time_offset))
-    if isinstance(p, WAVEEND): in_wave = not wave_only
+    if type(p).__name__ not in timing_skip.union(extra_skip): print(format_packet(p, time_offset))
 
 class TestSQTTExamples(unittest.TestCase):
   @classmethod
