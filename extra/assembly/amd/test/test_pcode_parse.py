@@ -37,7 +37,14 @@ def _pr(n, d=0):
       if 'f' in dt.name or 'float' in dt.name: return f"{bits}'{v}"
       if 'i' in dt.name or 'int' in dt.name: return f"{bits}'{int(v)}"
       return f"{v}"
-    case UOp(Ops.DEFINE_VAR, _, _, (name, _, _)): return name
+    case UOp(Ops.DEFINE_VAR, dt, _, (name, _, _)):
+      if dt == dtypes.void: return name  # reference
+      # declaration
+      bits = _dt_bits(dt.scalar()) if dt.count > 1 else _dt_bits(dt)
+      base = dt.scalar() if dt.count > 1 else dt
+      tchar = 'U' if 'uint' in base.name or base.name.startswith('u') else 'I' if 'int' in base.name or base.name.startswith('i') else 'F' if 'float' in base.name else 'B'
+      arr = f"[{dt.count}]" if dt.count > 1 else ""
+      return f"declare {name} : {bits}'{tchar}{arr}"
     case UOp(Ops.BITCAST, dt, (e,)): return f"{_pr(e)}.{_DT_STR.get(dt, dt.name)}"
     case UOp(Ops.CUSTOMI, _, (e, h, l)):
       if h is l: return f"{_pr(e)}[{_pr(h)}]"
