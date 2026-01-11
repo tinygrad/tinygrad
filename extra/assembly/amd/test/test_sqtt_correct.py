@@ -232,6 +232,30 @@ class TestForwardingGap(unittest.TestCase):
   def test_gap12(self): self.assertEqual(self._last_exec_delta(12), 3)
 
 
+class TestVALULatency(unittest.TestCase):
+  """VALU latency depends on uncached VGPR source reads.
+  6 cycles: no VGPR source (constant only)
+  9 cycles: uncached VGPR source read
+  """
+  def _get_latency(self, instr):
+    packets = run_sqtt([instr])
+    deltas = get_timing_deltas(packets)
+    time, valu_time, exec_time = 0, None, None
+    for ptype, delta in deltas:
+      time += delta
+      if ptype == 'VALUINST' and valu_time is None: valu_time = time
+      if ptype == 'ALUEXEC' and exec_time is None: exec_time = time
+    return exec_time - valu_time
+
+  # 6-cycle latency: no VGPR source (constant)
+  def test_mov_const(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], 1.0)), 6)
+  def test_mov_literal(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], 565.0)), 6)
+
+  # 9-cycle latency: uncached VGPR source read
+  def test_mov_vgpr(self): self.assertEqual(self._get_latency(v_mov_b32_e32(v[0], v[1])), 9)
+  def test_add_vgpr(self): self.assertEqual(self._get_latency(v_add_f32_e32(v[0], v[1], v[2])), 9)
+
+
 class TestChainWithNop(unittest.TestCase):
   """Dependency chain with s_nop between instructions."""
   def _test(self, nop_val, expected_issue, expected_exec):
