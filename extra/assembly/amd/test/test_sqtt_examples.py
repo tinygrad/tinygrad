@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Tests for SQTT packet decoding using real captured examples."""
+import pickle, unittest
+from pathlib import Path
+from tinygrad.helpers import DEBUG, colored
+from extra.assembly.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, AluSrc, MemSrc
+
+EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
+
+PACKET_COLORS = {
+  "INST": "WHITE", "VALUINST": "BLACK", "VMEMEXEC": "yellow", "ALUEXEC": "yellow",
+  "IMMEDIATE": "YELLOW", "IMMEDIATE_MASK": "YELLOW", "WAVERDY": "cyan", "WAVEALLOC": "cyan",
+  "WAVEEND": "blue", "WAVESTART": "blue", "PERF": "magenta", "EVENT": "red", "EVENT_BIG": "red",
+  "REG": "green", "LAYOUT_HEADER": "white", "SNAPSHOT": "white", "UTILCTR": "green",
+}
+
+def format_packet(p, time_offset: int = 0) -> str:
+  name, cycle = type(p).__name__, p._time - time_offset
+  if isinstance(p, INST):
+    op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+  elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
+  elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
+  elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
+  elif isinstance(p, (WAVESTART, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
+  elif hasattr(p, '_values'):
+    fields = " ".join(f"{k}=0x{v:x}" if k in {'snap', 'val32'} else f"{k}={v}"
+                      for k, v in p._values.items() if not k.startswith('_') and k != 'delta')
+  else: fields = ""
+  color = PACKET_COLORS.get(name, "white")
+  return f"{cycle:8}: {colored(f'{name:18}', color)} {fields}"
+
+def print_packets(packets: list, wave_only: bool = True) -> None:
+  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3"}
+  in_wave = not wave_only
+  time_offset = 0
+  for p in packets:
+    name = type(p).__name__
+    if isinstance(p, WAVESTART): in_wave, time_offset = True, p._time
+    if in_wave and name not in skip: print(format_packet(p, time_offset))
+    if isinstance(p, WAVEEND): in_wave = not wave_only
+
+class TestSQTTExamples(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    cls.examples = {}
+    for pkl_path in sorted(EXAMPLES_DIR.glob("*.pkl")):
+      with open(pkl_path, "rb") as f:
+        data = pickle.load(f)
+      sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+      if sqtt_events: cls.examples[pkl_path.stem] = sqtt_events
+
+  def test_examples_loaded(self):
+    self.assertGreater(len(self.examples), 0, "no example files found")
+
+  def test_decode_all_examples(self):
+    for name, events in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          packets = decode(event.blob)
+          if DEBUG >= 2: print(f"\n=== {name} event {i} ==="); print_packets(packets)
+          self.assertGreater(len(packets), 0, f"no packets decoded from {name} event {i}")
+          self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
+
+  def test_packet_types_valid(self):
+    for name, events in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          packets = decode(event.blob)
+          for pkt in packets:
+            self.assertIn(type(pkt), PACKET_TYPES, f"unknown packet type {type(pkt)} in {name}")
+
+  def test_wave_lifecycle(self):
+    for name, events in self.examples.items():
+      if "empty" in name: continue
+      with self.subTest(example=name):
+        all_packets = [p for e in events for p in decode(e.blob)]
+        starts = [p for p in all_packets if isinstance(p, WAVESTART)]
+        ends = [p for p in all_packets if isinstance(p, WAVEEND)]
+        self.assertGreater(len(starts), 0, f"no WAVESTART in {name}")
+        self.assertGreater(len(ends), 0, f"no WAVEEND in {name}")
+
+  def test_time_monotonic(self):
+    for name, events in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          packets = decode(event.blob)
+          times = [p._time for p in packets]
+          self.assertEqual(times, sorted(times), f"timestamps not monotonic in {name}")
+
+  def test_gemm_has_instructions(self):
+    for name, events in self.examples.items():
+      if "gemm" not in name: continue
+      with self.subTest(example=name):
+        all_packets = [p for e in events for p in decode(e.blob)]
+        insts = [p for p in all_packets if isinstance(p, INST)]
+        self.assertGreater(len(insts), 0, f"no INST packets in gemm example {name}")
+
+if __name__ == "__main__":
+  unittest.main()
