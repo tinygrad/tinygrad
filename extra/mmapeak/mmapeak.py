@@ -1,23 +1,21 @@
-import os, pathlib
+import os
 
 # TODO: there is a timing bug without this
 os.environ["AMD_AQL"] = "1"
 
 from tinygrad.device import Device
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.runtime.ops_amd import AMDProgram
 from tinygrad.helpers import unwrap
+from extra.amd_elf import build_hsaco
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
 NUM_WAVES = 2
 FLOPS_PER_MATMUL = 16*16*16*2
-INTERNAL_LOOP = 1
-INSTRUCTIONS_PER_LOOP = 1
-DIRECTIVE = ".amdhsa_wavefront_size32 1"
+INTERNAL_LOOP = 1_000_00
+INSTRUCTIONS_PER_LOOP = 200
 INST_ADD_I32 = None
-
-assemblyTemplate = (pathlib.Path(__file__).parent / "template.s").read_text()
+KD:dict = {}
 
 def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs):
   if accum:
@@ -27,12 +25,11 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   else:
     instructions = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[3]:vgprIndices[4]], v[vgprIndices[5]])
 
-  insts = [s_mov_b32(s[1], INTERNAL_LOOP), s_mov_b32(s[2], 0)]
-  insts += ["loop:"]+[instructions]*INSTRUCTIONS_PER_LOOP+[unwrap(INST_ADD_I32)(s[1], 0xffff), s_cmp_lg_i32(s[1], s[2]),
-                                                           s_cbranch_scc1("loop"), s_endpgm()]
-  src = assemblyTemplate.replace("INSTRUCTIONS", "\n".join([i if isinstance(i, str) else i.disasm() for i in insts]))
-  src = src.replace("DIRECTIVE", DIRECTIVE)
-  lib = COMPILER.compile(src)
+  setup = [s_mov_b32(s[1], INTERNAL_LOOP), s_mov_b32(s[2], 0)]
+  loop_body = [instructions]*INSTRUCTIONS_PER_LOOP + [unwrap(INST_ADD_I32)(s[1], 0xffff), s_cmp_lg_i32(s[1], s[2])]
+  loop_size = sum(i.size() for i in loop_body)
+  insts = setup + loop_body + [s_cbranch_scc1(-(loop_size + 4) // 4), s_endpgm()]
+  lib = build_hsaco(insts, KD)
   fxn = AMDProgram(DEV, "matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
@@ -45,10 +42,12 @@ if __name__=="__main__":
   except:
     raise RuntimeError("Error while initiating AMD device")
 
-  COMPILER = HIPCompiler(DEV.arch)
   if DEV.arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
     from extra.assembly.amd.autogen.rdna3.ins import *
     INST_ADD_I32 = s_add_i32
+    KD = {"group_segment_fixed_size":0, "private_segment_fixed_size":0, "kernarg_size":0, "next_free_vgpr":32, "next_free_sgpr":8, "memory_ordered":1,
+          "system_sgpr_workgroup_id_x":1, "system_sgpr_workgroup_id_y":0, "system_sgpr_workgroup_id_z":0, "wavefront_size32":1, "forward_progress":0,
+          "user_sgpr_kernarg_segment_ptr":0, "user_sgpr_count":0, "workgroup_processor_mode":1, "uses_dynamic_stack":0}
     if DEV.arch == 'gfx1103': NUM_WORKGROUPS = 8
     if DEV.arch == 'gfx1151': NUM_WORKGROUPS = 32
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (7,8,15))
@@ -60,6 +59,7 @@ if __name__=="__main__":
   elif DEV.arch in {'gfx1200', 'gfx1201'}:
     from extra.assembly.amd.autogen.rdna4.ins import *
     INST_ADD_I32 = s_addk_co_i32
+    KD = {"next_free_vgpr":32, "next_free_sgpr":8, "wavefront_size32":1}
     NUM_WORKGROUPS = 64
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (3,4,7))
     launchBenchmark(v_wmma_f16_16x16x16_f16, (3,4,7))
@@ -88,7 +88,7 @@ if __name__=="__main__":
   elif DEV.arch == 'gfx950':
     from extra.assembly.amd.autogen.cdna.ins import *
     INST_ADD_I32 = s_add_i32
-    DIRECTIVE = ".amdhsa_accum_offset 4"
+    KD = {"amdhsa_accum_offset":4}
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64
     NUM_WAVES = 4
