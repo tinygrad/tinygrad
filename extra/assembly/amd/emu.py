@@ -3,7 +3,8 @@
 from __future__ import annotations
 import ctypes, functools
 from tinygrad.runtime.autogen import hsa
-from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
+from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64
+from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.pcode import compile_pseudocode
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
