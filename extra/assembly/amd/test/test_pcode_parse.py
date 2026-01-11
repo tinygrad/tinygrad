@@ -241,8 +241,8 @@ def _test_arch(test, pcode_strings, min_parse, min_roundtrip, min_transform, nam
 
 class TestQcodeParseAndRoundtrip(unittest.TestCase):
   def test_rdna3(self): _test_arch(self, RDNA3_PCODE, min_parse=98, min_roundtrip=98, min_transform=97, name="RDNA3")
-  def test_rdna4(self): _test_arch(self, RDNA4_PCODE, min_parse=96, min_roundtrip=96, min_transform=93, name="RDNA4")
-  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=95, min_roundtrip=93, min_transform=90, name="CDNA")
+  def test_rdna4(self): _test_arch(self, RDNA4_PCODE, min_parse=96, min_roundtrip=96, min_transform=96, name="RDNA4")
+  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=95, min_roundtrip=93, min_transform=92, name="CDNA")
 
 if __name__ == "__main__":
   unittest.main()
