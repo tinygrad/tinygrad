@@ -179,27 +179,8 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
 # FUNCTION CALLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _fp_bits(v: UOp) -> tuple[UOp, int, int, int]:
-  """Get float as bits with its layout info. Unwraps CAST to check original float type."""
-  # For NaN checking, we need to use the original float's bit layout (not the casted one)
-  # because Python's float cast doesn't preserve signaling vs quiet NaN
-  while v.op == Ops.CAST and v.src[0].dtype in FLOATS: v = v.src[0]
-  uint_dt, _, exp_shift, exp_mask, mant_mask, _ = FP_INFO.get(v.dtype, FP_INFO[dtypes.float32])
-  return UOp(Ops.BITCAST, uint_dt, (v,)), exp_shift, exp_mask, mant_mask
 def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'MEM': return a[0]
-  if name in ('isQuietNAN', 'isSignalNAN'):
-    bits, exp_shift, exp_mask, mant_mask = _fp_bits(a[0])
-    # Use the dtype from bits (uint32/uint64/uint16) to determine which quiet bit to use
-    float_dt = {dtypes.uint64: dtypes.float64, dtypes.uint32: dtypes.float32, dtypes.uint16: dtypes.float16}.get(bits.dtype, dtypes.float32)
-    quiet_bit = {dtypes.float64: 0x8000000000000, dtypes.float32: 0x400000, dtypes.float16: 0x200}.get(float_dt, 0x400000)
-    exp = UOp(Ops.AND, bits.dtype, (UOp(Ops.SHR, bits.dtype, (bits, UOp.const(bits.dtype, exp_shift))), UOp.const(bits.dtype, exp_mask)))
-    is_exp_all = UOp(Ops.CMPEQ, dtypes.bool, (exp, UOp.const(bits.dtype, exp_mask)))
-    quiet_check = UOp(Ops.AND, bits.dtype, (bits, UOp.const(bits.dtype, quiet_bit)))
-    if name == 'isQuietNAN': return UOp(Ops.AND, dtypes.bool, (is_exp_all, UOp(Ops.CMPNE, dtypes.bool, (quiet_check, UOp.const(bits.dtype, 0)))))
-    mant = UOp(Ops.AND, bits.dtype, (bits, UOp.const(bits.dtype, mant_mask)))
-    return UOp(Ops.AND, dtypes.bool, (UOp(Ops.AND, dtypes.bool, (is_exp_all, UOp(Ops.CMPNE, dtypes.bool, (mant, UOp.const(bits.dtype, 0))))),
-                                      UOp(Ops.CMPEQ, dtypes.bool, (quiet_check, UOp.const(bits.dtype, 0)))))
   if name == 'sign':
     uint_dt, sign_shift, _, _, _, _ = FP_INFO.get(a[0].dtype, FP_INFO[dtypes.float32])
     return UOp(Ops.AND, dtypes.uint32, (_cast(UOp(Ops.SHR, uint_dt, (UOp(Ops.BITCAST, uint_dt, (a[0],)), UOp.const(uint_dt, sign_shift))), dtypes.uint32), UOp.const(dtypes.uint32, 1)))

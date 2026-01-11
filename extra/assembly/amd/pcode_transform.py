@@ -79,6 +79,23 @@ def _is_denorm(x: UOp) -> UOp:
   exp, mant = (bits >> exp_shift) & exp_mask, bits & mant_mask
   return exp.eq(0) & mant.ne(0)
 
+def _is_quiet_nan(x: UOp) -> UOp:
+  uint_dt, _, exp_shift, exp_mask, mant_mask, _, quiet_bit = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
+  bits = x.bitcast(uint_dt)
+  exp = (bits >> exp_shift) & exp_mask
+  exp_all = UOp(Ops.CMPEQ, dtypes.bool, (exp, UOp.const(uint_dt, exp_mask)))
+  quiet_set = UOp(Ops.CMPNE, dtypes.bool, (bits & quiet_bit, UOp.const(uint_dt, 0)))
+  return exp_all & quiet_set
+
+def _is_signal_nan(x: UOp) -> UOp:
+  uint_dt, _, exp_shift, exp_mask, mant_mask, _, quiet_bit = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
+  bits = x.bitcast(uint_dt)
+  exp, mant = (bits >> exp_shift) & exp_mask, bits & mant_mask
+  exp_all = UOp(Ops.CMPEQ, dtypes.bool, (exp, UOp.const(uint_dt, exp_mask)))
+  mant_nz = UOp(Ops.CMPNE, dtypes.bool, (mant, UOp.const(uint_dt, 0)))
+  quiet_clear = UOp(Ops.CMPEQ, dtypes.bool, (bits & quiet_bit, UOp.const(uint_dt, 0)))
+  return exp_all & mant_nz & quiet_clear
+
 def _fp_extract(x: UOp, field: str) -> UOp:
   uint_dt, sign_shift, exp_shift, exp_mask, mant_mask, bias, _ = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
   bits = x.bitcast(uint_dt)
@@ -218,6 +235,8 @@ def _typed_cast(x, op):
 _fpat = UPat.var('x', dtype=dtypes.floats)
 
 pcode_pm = PatternMatcher([
+  # Eliminate round-trip BITCAST: BITCAST(dtype, BITCAST(_, x)) -> x when x.dtype == dtype (avoids NaN canonicalization)
+  (UPat(Ops.BITCAST, src=(UPat(Ops.BITCAST, src=(UPat.var('x'),)),), name='bc'), lambda bc, x: x if x.dtype == bc.dtype else None),
   # MEM read: BITCAST(CUSTOM('MEM', addr)) -> INDEX(buf, addr) with element type
   (UPat(Ops.BITCAST, name='bc', src=(UPat(Ops.CUSTOM, arg='MEM', src=(UPat.var('addr'),)),)),
    lambda bc, addr: UOp(Ops.INDEX, bc.dtype, (MEM_BUF, addr))),
@@ -260,6 +279,11 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='isINF', src=(UPat.var('x'),)), lambda x: UOp(Ops.OR, dtypes.bool, (
     UOp(Ops.CMPEQ, dtypes.bool, (x, _tc(x, float('inf')))), UOp(Ops.CMPEQ, dtypes.bool, (x, _tc(x, float('-inf'))))))),
   (UPat(Ops.CUSTOM, arg='isDENORM', src=(_fpat,)), _is_denorm),
+  # isQuietNAN/isSignalNAN with CAST to float64: check the original float directly (avoids NaN canonicalization through Python)
+  (UPat(Ops.CUSTOM, arg='isQuietNAN', src=(UPat(Ops.CAST, dtype=dtypes.float64, src=(UPat.var('x', dtype=dtypes.floats),)),)), _is_quiet_nan),
+  (UPat(Ops.CUSTOM, arg='isSignalNAN', src=(UPat(Ops.CAST, dtype=dtypes.float64, src=(UPat.var('x', dtype=dtypes.floats),)),)), _is_signal_nan),
+  (UPat(Ops.CUSTOM, arg='isQuietNAN', src=(_fpat,)), _is_quiet_nan),
+  (UPat(Ops.CUSTOM, arg='isSignalNAN', src=(_fpat,)), _is_signal_nan),
   # Float component extraction
   (UPat(Ops.CUSTOM, arg='sign', src=(_fpat,)), lambda x: _fp_extract(x, 'sign')),
   (UPat(Ops.CUSTOM, arg='exponent', src=(_fpat,)), lambda x: _fp_extract(x, 'exp')),
