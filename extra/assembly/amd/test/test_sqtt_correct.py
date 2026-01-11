@@ -302,6 +302,7 @@ class TestVALUExecWithNop(unittest.TestCase):
       if ptype == 'ALUEXEC' and exec_time is None: exec_time = time
     return exec_time - valu_time
 
+  # Boundary: s_nop(0-3) = 6 cycles, s_nop(4+) = 10 cycles
   def test_nop0(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(0)]), 6)
   def test_nop1(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(1)]), 6)
   def test_nop2(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(2)]), 6)
@@ -313,8 +314,14 @@ class TestVALUExecWithNop(unittest.TestCase):
   def test_nop8(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(8)]), 10)
   def test_nop9(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(9)]), 10)
   def test_nop10(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(10)]), 10)
-  def test_bare(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0)]), 6)
-  def test_bare_no_padding(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0)], nops=0), 10)
+  # No nop = slow path, one s_nop(0) padding = fast path
+  def test_no_padding(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0)], nops=0), 10)
+  def test_one_padding(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0)], nops=1), 6)
+  # Multiple s_nop(0)s don't accumulate - still fast path
+  def test_nop0_x2(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(0), s_nop(0)]), 6)
+  # First nop determines path: s_nop(0) then s_nop(4) = fast, s_nop(4) then s_nop(0) = slow
+  def test_nop0_nop4(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(0), s_nop(4)]), 6)
+  def test_nop4_nop0(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(4), s_nop(0)]), 10)
 
 
 if __name__ == "__main__":
