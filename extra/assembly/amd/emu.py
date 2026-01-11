@@ -2,10 +2,10 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, colored, ansilen
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.pcode import Reg
-from extra.assembly.amd.asm import detect_format
+from extra.assembly.amd.asm import detect_format, disasm
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
   SrcEnum, SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
@@ -474,19 +474,31 @@ class SQTTState:
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
 
   def _fmt_alu(self) -> str:
-    return '[' + ','.join(f'v{v}' if v is not None else '-' for v in self.alu) + ']'
+    # Fixed width: each slot 3 chars, total ALU[xxx,xxx,xxx,xxx] = 20 chars
+    slots = [f'v{v}' if v is not None else '-' for v in self.alu]
+    return 'ALU[' + ','.join(f'{s:>3}' for s in slots) + ']'
+
+  def _fmt_fwd(self) -> str:
+    s = f'v{self.forward}' if self.forward is not None else '-'
+    content = f'FWD[{s:>3}]'
+    return colored(content, 'yellow') if self.forward is not None else content
 
   def _fmt_iq(self) -> str:
-    if not self.issue_queue: return '[]'
-    return '[' + ','.join(f'v{d}' + (f'@{r}' if r > 0 else '') for d, _, r in self.issue_queue) + ']'
+    if not self.issue_queue: return 'IQ[]'
+    items = [f'v{d}' + (f'@{r}' if r > 0 else '') for d, _, r in self.issue_queue]
+    return 'IQ[' + ','.join(items) + ']'
 
-  def _fmt_if(self) -> str:
-    return f'{len(self.in_flight)}/14'
-
-  def _debug_line(self, events: str = ""):
-    if DEBUG >= 3:
-      fwd = f'v{self.forward}' if self.forward is not None else '-'
-      print(f"C{self.cycle}: ALU{self._fmt_alu()} FWD[{fwd}] IQ{self._fmt_iq()} IF[{self._fmt_if()}] {events}")
+  def _debug_line(self, events: list[str] | None = None):
+    if DEBUG < 3: return
+    # Skip empty cycles (nothing in ALU, no events, no IQ)
+    has_alu = any(s is not None for s in self.alu)
+    if not has_alu and not events and not self.issue_queue: return
+    cycle = colored(f'C{self.cycle:>3}:', 'cyan')
+    alu = self._fmt_alu()
+    fwd = self._fmt_fwd()
+    iq = self._fmt_iq()
+    ev_str = ' '.join(events) if events else ''
+    print(f"{cycle} {alu} {fwd} {iq:<20} {ev_str}")
 
   def _can_issue(self) -> bool:
     return len(self.in_flight) < 14
@@ -518,7 +530,7 @@ class SQTTState:
     exiting = self.alu[3]
     if exiting is not None:
       self.emit(ALUEXEC, src=AluSrc.VALU)
-      events.append(f"EXEC v{exiting}")
+      events.append(colored(f"EXEC v{exiting}", 'red'))
 
     # 2. Slide ALU pipeline
     self.alu[3] = self.alu[2]
@@ -535,16 +547,16 @@ class SQTTState:
         ready, uses_fwd = self._all_srcs_ready(srcs)
         if not ready:
           continue
-        # Cold start penalty: first dependent instruction has +2 cycle delay
-        # (1 cycle for forwarding setup + 1 cycle to enter ALU)
+        # Cold start penalty: first dependent instruction has +1 cycle delay
         has_deps = len(srcs) > 0
         if has_deps and not self.forward_warm:
-          self.issue_queue[i] = (dest, srcs, self.cycle + 2)
+          self.issue_queue[i] = (dest, srcs, self.cycle + 1)
           continue
         # Enter ALU
         self.alu[0] = dest
         self.issue_queue.pop(i)
-        events.append(f"v{dest}->ALU" + ("(fwd)" if uses_fwd else ""))
+        if uses_fwd: self.forward_warm = True  # Forwarding path is warm after first use
+        events.append(colored(f"v{dest}->ALU" + ("(fwd)" if uses_fwd else ""), 'green'))
         break
 
     # 4. Update forwarding: previous forward goes to completed, exiting goes to forward
@@ -556,7 +568,7 @@ class SQTTState:
       assert self.in_flight and self.in_flight[0][0] == exiting, f"FIFO violation: expected {exiting} at front, got {self.in_flight}"
       self.in_flight.pop(0)
 
-    self._debug_line(' '.join(events))
+    self._debug_line(events)
 
   def _pipeline_empty(self) -> bool:
     if any(s is not None for s in self.alu): return False
@@ -566,8 +578,6 @@ class SQTTState:
     return True
 
   def process_instruction(self, inst: Inst):
-    if DEBUG >= 3: print(f"  {inst}")
-
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_DELAY_ALU:
       # TODO: implement s_delay_alu properly
       return
@@ -577,6 +587,9 @@ class SQTTState:
       cycles = inst.simm16 + 1
       if SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX:
         cycles += SNOP_EXTRA_DELAY_CYCLES
+      if DEBUG >= 3:
+        cycle = colored(f'C{self.cycle:>3}:', 'cyan')
+        print(f"{cycle} {' ' * 50} {disasm(inst)}")
       for _ in range(cycles): self.tick()
       self.emit(IMMEDIATE, wave=self.wave_id)
 
@@ -597,7 +610,10 @@ class SQTTState:
       self.issue_queue.append((dest, srcs, 0))  # ready_at=0 initially (no restriction)
       self.emit(VALUINST, wave=self.wave_id)
 
-      if DEBUG >= 3: print(f"    ISSUE v{dest} srcs={srcs}")
+      if DEBUG >= 3:
+        cycle = colored(f'C{self.cycle:>3}:', 'cyan')
+        issue = colored(f'ISSUE v{dest}', 'magenta')
+        print(f"{cycle} {issue}{' ' * (50 - ansilen(issue))} {disasm(inst)}")
 
       # One cycle per instruction issued, then try to enter ALU
       self.tick()
