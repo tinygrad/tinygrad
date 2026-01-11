@@ -205,6 +205,47 @@ class TestForwardingGap(unittest.TestCase):
   def test_gap9(self): self.assertEqual(self._exec_deltas(9), [1, 1, 1, 1, 1, 1, 1, 1, 1, 3])
 
 
+class TestChainWithIndependentGap(unittest.TestCase):
+  """Chain of dependent VALUs with independent VALUs inserted before the last one.
+
+  Hardware observation: In a chain v0->v1->v2->v3->v4, if we insert N independent VALUs
+  before v4, the forwarding behavior changes:
+  - 0-1 independent VALUs: v4 cannot forward from v3 (delta=9)
+  - 2+ independent VALUs: v4 can forward from v3 (delta=5)
+
+  This suggests forwarding eligibility depends on whether the direct source is in the ALU
+  at issue time, not just at dispatch time.
+  """
+  def _chain5_gap(self, n_ind):
+    """Chain v0->v1->v2->v3->v4 with N independent VALUs before v4. Returns v3->v4 delta."""
+    instrs = [s_nop(100),
+              v_mov_b32_e32(v[0], 1.0),
+              v_mov_b32_e32(v[1], v[0]),
+              v_mov_b32_e32(v[2], v[1]),
+              v_mov_b32_e32(v[3], v[2])]
+    instrs += [v_mov_b32_e32(v[10+i], float(i)) for i in range(n_ind)]
+    instrs += [v_mov_b32_e32(v[4], v[3])]
+    _, execd = get_deltas(instrs)
+    # Chain execs are at indices 0,1,2,3 and last one. Independent ones are in between.
+    # v3->v4 delta = last exec time - 4th exec time (index 3)
+    # With n_ind independent VALUs, execd has 4 + n_ind entries
+    # We want delta between exec[3] (v3) and exec[4+n_ind-1] (v4)
+    # Actually execd is already deltas, so we need absolute times
+    time, exec_times = 0, []
+    packets = run_sqtt(instrs)
+    for ptype, delta in get_timing_deltas(packets):
+      time += delta
+      if ptype == 'ALUEXEC': exec_times.append(time)
+    # v0,v1,v2,v3 are first 4, v4 is last
+    return exec_times[-1] - exec_times[3]
+
+  def test_gap0(self): self.assertEqual(self._chain5_gap(0), 9)
+  def test_gap1(self): self.assertEqual(self._chain5_gap(1), 9)
+  def test_gap2(self): self.assertEqual(self._chain5_gap(2), 5)
+  def test_gap3(self): self.assertEqual(self._chain5_gap(3), 5)
+  def test_gap4(self): self.assertEqual(self._chain5_gap(4), 5)
+
+
 class TestVALULatency(unittest.TestCase):
   """VALU latency depends on VGPR source reads.
   6 cycles: no VGPR source (constant only), stays 6 regardless of warmup

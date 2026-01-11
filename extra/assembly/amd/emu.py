@@ -470,6 +470,9 @@ class SQTTState:
     # Cold start: first forwarding use has +1 cycle penalty
     self.forward_warm = False
 
+    # Forwarding exhaustion: after N consecutive uses, must wait for regfile
+    self.fwd_uses = 0  # consecutive forwarding uses
+
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
 
@@ -552,10 +555,18 @@ class SQTTState:
         if has_deps and not self.forward_warm:
           self.issue_queue[i] = (dest, srcs, self.cycle + 1)
           continue
+        # Forwarding exhaustion: after 3 consecutive uses, must wait for regfile (+4 cycles)
+        if uses_fwd and self.fwd_uses >= 3:
+          self.issue_queue[i] = (dest, srcs, self.cycle + 4)
+          continue
         # Enter ALU
         self.alu[0] = dest
         self.issue_queue.pop(i)
-        if uses_fwd: self.forward_warm = True  # Forwarding path is warm after first use
+        if uses_fwd:
+          self.forward_warm = True  # Forwarding path is warm after first use
+          self.fwd_uses += 1
+        else:
+          self.fwd_uses = 0  # reset on non-forwarding instruction
         events.append(colored(f"v{dest}->ALU" + ("(fwd)" if uses_fwd else ""), 'green'))
         break
 
@@ -606,6 +617,9 @@ class SQTTState:
       # Issue: add to in_flight and issue_queue
       srcs = _get_src_vgprs(inst)
       dest = inst.vdst
+      # Clear stale completed/forward state for this dest (WAW hazard)
+      self.completed.discard(dest)
+      if self.forward == dest: self.forward = None
       self.in_flight.append((dest, srcs))
       self.issue_queue.append((dest, srcs, 0))  # ready_at=0 initially (no restriction)
       self.emit(VALUINST, wave=self.wave_id)
