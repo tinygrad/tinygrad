@@ -142,10 +142,8 @@ def _pp(stmt, indent=0) -> str:
   """Pretty print a parsed statement with proper indentation."""
   pad = "  " * indent
   match stmt:
-    case UOp(Ops.ASSIGN, _, (lhs, rhs)) if isinstance(rhs, UOp) and rhs.op == Ops.ASSIGN:
-      return f"{pad}Assign({lhs},\n{pad}       Assign({rhs.src[0]},\n{pad}              {rhs.src[1]}))"
-    case UOp(Ops.ASSIGN, _, (lhs, rhs)): return f"{pad}Assign({lhs},\n{pad}       {rhs})"
-    case UOp(Ops.DEFINE_VAR, dt, _, name) if isinstance(name, str): return f"{pad}Declare({name!r}, {dt})"
+    case UOp():
+      return f"{stmt}"
     case If(branches):
       lines = [f"{pad}If("]
       for cond, body in branches:
@@ -171,9 +169,10 @@ def _pp(stmt, indent=0) -> str:
       return "\n".join(lines)
     case _: return f"{pad}{stmt}"
 
-def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
-  ok, fail, match = 0, 0, 0
-  errs: dict[str, list[str]] = {}
+def _test_arch(test, pcode_strings, min_parse, min_roundtrip, min_transform, name=""):
+  ok, fail, match, transform_ok, transform_fail = 0, 0, 0, 0, 0
+  parse_errs: dict[str, list[str]] = {}
+  transform_errs: dict[str, list[str]] = {}
 
   # test in random order
   triples = []
@@ -182,23 +181,34 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
   random.shuffle(triples)
 
   for cls, op, pc in triples:
+    # Phase 1: parse
     try:
       ast = parse(pc)
       ok += 1
     except Exception as e:
       fail += 1
       key = str(e)[:60]
-      if key not in errs: errs[key] = []
-      errs[key].append(f"{cls.__name__}.{op.name}")
+      if key not in parse_errs: parse_errs[key] = []
+      parse_errs[key].append(f"{cls.__name__}.{op.name}")
       continue
+    # Phase 2: transform (separate metric)
+    try:
+      ast_pt = parse_transform(pc)
+      transform_ok += 1
+    except Exception as e:
+      transform_fail += 1
+      key = str(e)[:60]
+      if key not in transform_errs: transform_errs[key] = []
+      transform_errs[key].append(f"{cls.__name__}.{op.name}")
+      ast_pt = None
+    # Phase 3: roundtrip
     rendered = _pr(ast)
     if _norm(pc) == _norm(rendered):
       match += 1
       if DEBUG >= 2:
         print(f"{'='*60}\n\033[32m{op.name}\033[0m\n{'='*60}")
         print(pc)
-        if DEBUG >= 3:
-          ast_pt = parse_transform(pc)
+        if DEBUG >= 3 and ast_pt:
           for stmt in ast_pt: print(_pp(stmt))
     elif DEBUG:
       orig_lines = [l for l in _norm(pc, keep_structure=True).split('\n') if l.strip()]
@@ -215,18 +225,24 @@ def _test_arch(test, pcode_strings, min_parse=98, min_roundtrip=98):
         print(f"{color}{oline:<{w}} | {rline}{reset}")
   total = ok + fail
   parse_rate = 100 * ok / total
-  roundtrip_rate = 100 * match / ok if ok > 0 else 0
-  print(f"Parsed: {ok}/{total} ({parse_rate:.1f}%), Match: {match}/{ok} ({roundtrip_rate:.1f}%)")
+  roundtrip_rate = 100 * match / total
+  transform_rate = 100 * transform_ok / total
+  print(f"{name}: Parsed: {ok}/{total} ({parse_rate:.1f}%), Roundtrip: {match}/{total} ({roundtrip_rate:.1f}%), Transform: {transform_ok}/{total} ({transform_rate:.1f}%)")
   if DEBUG:
-    for e, ops in sorted(errs.items(), key=lambda x: -len(x[1])):
-      print(f"  {len(ops)}: {e} ({ops[0]})")
+    if parse_errs:
+      print("Parse errors:")
+      for e, ops in sorted(parse_errs.items(), key=lambda x: -len(x[1])): print(f"  {len(ops)}: {e} ({ops[0]})")
+    if transform_errs:
+      print("Transform errors:")
+      for e, ops in sorted(transform_errs.items(), key=lambda x: -len(x[1])): print(f"  {len(ops)}: {e} ({ops[0]})")
   test.assertGreater(parse_rate, min_parse, f"Parse rate {parse_rate:.1f}% should be >{min_parse}%")
   test.assertGreater(roundtrip_rate, min_roundtrip, f"Roundtrip rate {roundtrip_rate:.1f}% should be >{min_roundtrip}%")
+  test.assertGreater(transform_rate, min_transform, f"Transform rate {transform_rate:.1f}% should be >{min_transform}%")
 
 class TestQcodeParseAndRoundtrip(unittest.TestCase):
-  def test_rdna3(self): _test_arch(self, RDNA3_PCODE)
-  def test_rdna4(self): _test_arch(self, RDNA4_PCODE, min_parse=96)
-  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=95, min_roundtrip=97)
+  def test_rdna3(self): _test_arch(self, RDNA3_PCODE, min_parse=98, min_roundtrip=98, min_transform=97, name="RDNA3")
+  def test_rdna4(self): _test_arch(self, RDNA4_PCODE, min_parse=96, min_roundtrip=96, min_transform=93, name="RDNA4")
+  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=95, min_roundtrip=93, min_transform=90, name="CDNA")
 
 if __name__ == "__main__":
   unittest.main()
