@@ -499,5 +499,35 @@ class TestDelayALU(unittest.TestCase):
     self.assertEqual(self._exec_delta(instrs), 4)
 
 
+class TestNopTimingSensitivity(unittest.TestCase):
+  """Forwarding behavior changes based on nop warmup timing.
+
+  Hardware observation: s_nop(200-203) before a chain allows one extra forward
+  compared to s_nop(199) or s_nop(204+). This suggests the forwarding limit
+  is sensitive to exact cycle alignment, possibly due to wave scheduling.
+  """
+  def _chain6_fwd_count(self, nop_size):
+    """Count initial consecutive forwards for a 6-instruction chain after s_nop(n)."""
+    instrs = [s_nop(nop_size), v_mov_b32_e32(v[99], 1.0)]
+    instrs += [v_mov_b32_e32(v[0], 1.0)]
+    for i in range(1, 6):
+      instrs += [v_mov_b32_e32(v[i], v[i-1])]
+    _, execd = get_deltas(instrs)
+    # Count forwards (delta=5) in chain portion (skip warmup)
+    chain_deltas = execd[1:]
+    fwd_count = 0
+    for d in chain_deltas:
+      if d == 5: fwd_count += 1
+      else: break
+    return fwd_count
+
+  def test_nop199(self): self.assertEqual(self._chain6_fwd_count(199), 4)
+  def test_nop200(self): self.assertEqual(self._chain6_fwd_count(200), 5)  # anomaly: extra forward
+  def test_nop201(self): self.assertEqual(self._chain6_fwd_count(201), 5)
+  def test_nop202(self): self.assertEqual(self._chain6_fwd_count(202), 5)
+  def test_nop203(self): self.assertEqual(self._chain6_fwd_count(203), 5)
+  def test_nop204(self): self.assertEqual(self._chain6_fwd_count(204), 4)
+
+
 if __name__ == "__main__":
   unittest.main()

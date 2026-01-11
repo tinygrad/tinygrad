@@ -457,9 +457,10 @@ class SQTTState:
     # In-flight instructions: max 14 at a time, each is (dest_vgpr, srcs)
     self.in_flight: list[tuple[int, list[int]]] = []
 
-    # Issue queue: list of (dest_vgpr, srcs, ready_at) waiting for deps to enter ALU
+    # Issue queue: list of (dest_vgpr, srcs, ready_at, use_regfile) waiting for deps
     # ready_at: cycle when this instruction can enter ALU (0 = no restriction)
-    self.issue_queue: list[tuple[int, list[int], int]] = []
+    # use_regfile: True if this instruction must use regfile (forward limit reached)
+    self.issue_queue: list[tuple[int, list[int], int, bool]] = []
 
     # Forwarding register: dest_vgpr available for bypass this cycle, or None
     self.forward: int | None = None
@@ -470,8 +471,9 @@ class SQTTState:
     # Cold start: first forwarding use has +1 cycle penalty
     self.forward_warm = False
 
-    # Forwarding exhaustion: after N consecutive uses, must wait for regfile
-    self.fwd_uses = 0  # consecutive forwarding uses
+    # Forwarding limit: based on queue depth when root producer completes
+    self.fwd_count = 0  # consecutive forward uses
+    self.fwd_limit = 3  # base limit, increases with queue depth
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
@@ -488,7 +490,12 @@ class SQTTState:
 
   def _fmt_iq(self) -> str:
     if not self.issue_queue: return 'IQ[]'
-    items = [f'v{d}' + (f'@{r}' if r > 0 else '') for d, _, r in self.issue_queue]
+    def fmt_item(d, r, ur):
+      s = f'v{d}'
+      if r > 0: s += f'@{r}'
+      if ur: s += 'R'
+      return s
+    items = [fmt_item(d, r, ur) for d, _, r, ur in self.issue_queue]
     return 'IQ[' + ','.join(items) + ']'
 
   def _debug_line(self, events: list[str] | None = None):
@@ -543,30 +550,37 @@ class SQTTState:
 
     # 3. Try to promote from issue_queue to ALU[0] (before updating forward!)
     if self.alu[0] is None and self.issue_queue:
-      for i, (dest, srcs, ready_at) in enumerate(self.issue_queue):
+      for i, (dest, srcs, ready_at, use_regfile) in enumerate(self.issue_queue):
         # Check if instruction has a minimum ready cycle
         if ready_at > 0 and self.cycle < ready_at:
           continue
+        # Check if sources are ready
         ready, uses_fwd = self._all_srcs_ready(srcs)
+        has_deps = len(srcs) > 0
+        # If marked to use regfile, can't use forward even if available
+        if use_regfile:
+          if not all(src in self.completed for src in srcs):
+            continue
+          uses_fwd = False
+        # If would use forwarding, check limit
+        elif uses_fwd and self.fwd_count >= self.fwd_limit:
+          self.issue_queue[i] = (dest, srcs, self.cycle + 4, True)  # +4 cycles regfile penalty
+          continue
         if not ready:
           continue
         # Cold start penalty: first dependent instruction has +1 cycle delay
-        has_deps = len(srcs) > 0
         if has_deps and not self.forward_warm:
-          self.issue_queue[i] = (dest, srcs, self.cycle + 1)
-          continue
-        # Forwarding exhaustion: after 3 consecutive uses, must wait for regfile (+4 cycles)
-        if uses_fwd and self.fwd_uses >= 3:
-          self.issue_queue[i] = (dest, srcs, self.cycle + 4)
+          self.issue_queue[i] = (dest, srcs, self.cycle + 1, use_regfile)
           continue
         # Enter ALU
         self.alu[0] = dest
         self.issue_queue.pop(i)
         if uses_fwd:
-          self.forward_warm = True  # Forwarding path is warm after first use
-          self.fwd_uses += 1
-        else:
-          self.fwd_uses = 0  # reset on non-forwarding instruction
+          self.forward_warm = True
+          self.fwd_count += 1
+        elif has_deps:
+          # Using regfile resets counter
+          self.fwd_count = 0
         events.append(colored(f"v{dest}->ALU" + ("(fwd)" if uses_fwd else ""), 'green'))
         break
 
@@ -576,8 +590,14 @@ class SQTTState:
       self.forward_warm = True  # Forwarding is warm once we've had a result go through
     self.forward = exiting
     if exiting is not None:
-      assert self.in_flight and self.in_flight[0][0] == exiting, f"FIFO violation: expected {exiting} at front, got {self.in_flight}"
-      self.in_flight.pop(0)
+      # Remove from in_flight (not necessarily FIFO due to out-of-order dispatch)
+      for idx, (d, _) in enumerate(self.in_flight):
+        if d == exiting:
+          self.in_flight.pop(idx)
+          break
+      # Update forwarding limit based on queue depth: +1 forward per 5 instructions waiting
+      queue_depth = len(self.issue_queue)
+      self.fwd_limit = 3 + queue_depth // 5
 
     self._debug_line(events)
 
@@ -621,7 +641,7 @@ class SQTTState:
       self.completed.discard(dest)
       if self.forward == dest: self.forward = None
       self.in_flight.append((dest, srcs))
-      self.issue_queue.append((dest, srcs, 0))  # ready_at=0 initially (no restriction)
+      self.issue_queue.append((dest, srcs, 0, False))  # use_regfile=False initially
       self.emit(VALUINST, wave=self.wave_id)
 
       if DEBUG >= 3:
