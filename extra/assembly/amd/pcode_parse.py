@@ -91,6 +91,11 @@ def _fop(s, ops):
 
 def _get_dtype(name: str) -> DType | None: return _QDTYPES.get(name.lower())
 
+def _var(name: str, dt: DType = dtypes.void) -> UOp:
+  """Create DEFINE_VAR with proper min/max bounds based on dtype."""
+  if dt == dtypes.void: return UOp(Ops.DEFINE_VAR, dt, arg=(name, -float('inf'), float('inf')))  # unbounded for unresolved vars
+  return UOp(Ops.DEFINE_VAR, dt, arg=(name, dtypes.min(dt), dtypes.max(dt)))
+
 def expr(s: str) -> UOp:
   s = s.strip().rstrip(';')
   if s.endswith('.') and not (len(s) > 1 and s[-2].isdigit()): s = s[:-1]
@@ -192,9 +197,8 @@ def expr(s: str) -> UOp:
         assert dt != dtypes.void, f"BITCAST target type should not be void: {s}"
         return UOp(Ops.BITCAST, dt, (expr(s[:i]),))
   # Variable
-  if s[:5] == 'eval ': return UOp(Ops.DEFINE_VAR, dtypes.void, arg=(s, None, None))
-  if re.match(r'^[A-Za-z_][\w.]*$', s):
-    return UOp(Ops.DEFINE_VAR, dtypes.void, arg=(s, None, None))
+  if s[:5] == 'eval ': return _var(s)
+  if re.match(r'^[A-Za-z_][\w.]*$', s): return _var(s)
   # Numeric literal
   # NOTE: hex constants are unsigned (uint32) even without U suffix
   try:
@@ -221,7 +225,7 @@ def stmt(line: str) -> Stmt|None:
   if not line: return None
   if line == 'break': return Break()
   if line[:7] == 'return ': return Return(expr(line[7:]))
-  if line[:5] == 'eval ': return UOp(Ops.ASSIGN, dtypes.void, (UOp(Ops.DEFINE_VAR, dtypes.void, arg=('_eval', None, None)), UOp(Ops.DEFINE_VAR, dtypes.void, arg=(line, None, None))))
+  if line[:5] == 'eval ': return UOp(Ops.ASSIGN, dtypes.void, (_var('_eval'), _var(line)))
   if line[:8] == 'declare ' and ':' in line:
     n, t = line[8:].split(':', 1)
     t = t.strip()
@@ -230,7 +234,7 @@ def stmt(line: str) -> Stmt|None:
     if m := re.match(r"^(\d+)'([IUFB])$", t):
       dt = _QDTYPES[f"{m[2].lower()}{m[1]}"]
       final_dt = dt.vec(vec_count) if vec_count > 1 else dt
-      return UOp(Ops.DEFINE_VAR, final_dt, arg=n.strip())
+      return _var(n.strip(), final_dt)
     return None  # unsupported declare type
   for op, uop in [('+=', Ops.ADD), ('-=', Ops.SUB), ('|=', Ops.OR), ('&=', Ops.AND), ('^=', Ops.XOR), ('<<=', Ops.SHL), ('>>=', Ops.SHR)]:
     if op in line:

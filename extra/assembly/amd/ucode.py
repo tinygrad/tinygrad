@@ -73,15 +73,15 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       dt = dt if dt != dtypes.int32 or hint is None else hint
       return UOp.const(dtypes.float32 if isinstance(val, float) and dt not in FLOATS else dt, val)
 
-    case UOp(Ops.DEFINE_VAR, _, _, (name, None, None)):
+    case UOp(Ops.DEFINE_VAR, dt, _, (name, _, _)):
       if (resolved := _resolve_special_var(name, ctx, hint)) is not None: return resolved
       if name.startswith('eval '): return ctx.vars.get('_eval', UOp.const(dtypes.uint32, 0))
       if name not in ctx.vars: raise ValueError(f"Unknown variable: {name}")
-      return _cast(ctx.vars[name], hint or ctx.vars[name].dtype)
+      return _cast(ctx.vars[name], hint or dt if dt != dtypes.void else ctx.vars[name].dtype)
 
     case UOp(Ops.BITCAST, dt, (inner,)):
       # Typed variable access: Var.type (INF, NAN, DENORM handled by pcode_transform)
-      if inner.op == Ops.DEFINE_VAR and inner.arg[1] is None:
+      if inner.op == Ops.DEFINE_VAR and inner.dtype == dtypes.void:
         name = inner.arg[0]
         if (resolved := _resolve_special_var(name, ctx, dt)) is not None: return _cast(resolved, dt)
         vn = name + '_64' if dt.itemsize == 8 and name.isupper() else name
@@ -110,7 +110,7 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       if base_expr.op == Ops.DEFINE_VAR and base_expr.arg[0] == 'SGPR' and hi_expr is lo_expr:
         return UOp(Ops.CUSTOM, dtypes.uint32, (_expr(hi_expr, ctx, dtypes.uint32),), arg='sgpr_read')
       # Array element access
-      if base_expr.op == Ops.DEFINE_VAR and base_expr.arg[1] is None and hi_expr is lo_expr:
+      if base_expr.op == Ops.DEFINE_VAR and isinstance(base_expr.arg, tuple) and hi_expr is lo_expr:
         name, var_dtype = base_expr.arg[0], ctx.decls.get(base_expr.arg[0])
         if var_dtype is not None and var_dtype.count > 1:
           idx_uop = _expr(hi_expr, ctx).simplify()
@@ -205,7 +205,7 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
 OUT_VARS = ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC', 'SDATA', 'VDATA', 'RETURN_DATA')
 
 def _get_var_name(u: UOp) -> str|None:
-  if u.op == Ops.DEFINE_VAR and u.arg[1] is None: return u.arg[0]
+  if u.op == Ops.DEFINE_VAR and isinstance(u.arg, tuple): return u.arg[0]
   if u.op == Ops.BITCAST and u.src[0].op == Ops.DEFINE_VAR: return u.src[0].arg[0]
   return None
 
@@ -243,8 +243,8 @@ def _get_lhs_info(lhs: UOp, ctx: Ctx) -> tuple[str, DType, int|None, int|None, s
 
 def _stmt(stmt, ctx: Ctx):
   match stmt:
-    # Declaration: DEFINE_VAR with dtype and name arg
-    case UOp(Ops.DEFINE_VAR, dtype, arg=name) if name is not None and dtype != dtypes.void:
+    # Declaration: DEFINE_VAR with dtype and name arg (arg is tuple: (name, min, max))
+    case UOp(Ops.DEFINE_VAR, dtype, arg=(name, _, _)) if name is not None and dtype != dtypes.void:
       ctx.decls[name] = dtype
       if name == 'S' and dtype.count == 3:
         ctx.vars['S_0'], ctx.vars['S_1'], ctx.vars['S_2'] = ctx.vars['S0'], ctx.vars['S1'], ctx.vars['S2']

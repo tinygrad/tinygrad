@@ -144,13 +144,15 @@ def _track_var(ctx, u):
 def _prop_var(ctx, u):
   if ctx is None: return None
   name = u.arg[0] if isinstance(u.arg, tuple) else u.arg
-  return UOp(Ops.DEFINE_VAR, ctx[name], arg=u.arg) if name in ctx else None
+  if name not in ctx: return None
+  dt = ctx[name]
+  return UOp(Ops.DEFINE_VAR, dt, arg=(name, dtypes.min(dt), dtypes.max(dt)))
 
 def _prop_assign(ctx, lhs, rhs):
   if ctx is None or rhs.dtype == dtypes.void or lhs.op != Ops.DEFINE_VAR: return None
   if (name := _vn(lhs)) is None or name in ctx: return None
   ctx[name] = rhs.dtype
-  return UOp(Ops.ASSIGN, rhs.dtype, (UOp(Ops.DEFINE_VAR, rhs.dtype, arg=lhs.arg), rhs))
+  return UOp(Ops.ASSIGN, rhs.dtype, (UOp(Ops.DEFINE_VAR, rhs.dtype, arg=(name, dtypes.min(rhs.dtype), dtypes.max(rhs.dtype))), rhs))
 
 def _prop_binop(l, r, __OP__):
   # Don't infer type if either operand is void - wait for variable typing first
@@ -229,7 +231,22 @@ def _typed_cast(x, op):
 
 _fpat = UPat.var('x', dtype=dtypes.floats)
 
+def _cast_const_to_bitcast(bc, c):
+  """CAST(float, CONST(uint, val)) -> CONST with proper float bit pattern (preserves NaN)."""
+  import struct
+  val = c.arg
+  if bc.dtype == dtypes.float32 and c.dtype == dtypes.uint32:
+    return UOp(Ops.CONST, dtypes.float32, arg=struct.unpack('f', struct.pack('I', val))[0])
+  if bc.dtype == dtypes.float64 and c.dtype == dtypes.uint64:
+    return UOp(Ops.CONST, dtypes.float64, arg=struct.unpack('d', struct.pack('Q', val))[0])
+  if bc.dtype == dtypes.float16 and c.dtype == dtypes.uint16:
+    import numpy as np
+    return UOp(Ops.CONST, dtypes.float16, arg=float(np.frombuffer(struct.pack('H', val), dtype=np.float16)[0]))
+  return None
+
 pcode_pm = PatternMatcher([
+  # CAST(float, CONST(uint)) -> proper bitcast to preserve NaN bit patterns (e.g., 32'F(0xffc00000))
+  (UPat(Ops.CAST, dtype=dtypes.floats, src=(UPat(Ops.CONST, dtype=dtypes.uints, name='c'),), name='bc'), _cast_const_to_bitcast),
   # Eliminate round-trip BITCAST: BITCAST(dtype, BITCAST(_, x)) -> x when x.dtype == dtype (avoids NaN canonicalization)
   (UPat(Ops.BITCAST, src=(UPat(Ops.BITCAST, src=(UPat.var('x'),)),), name='bc'), lambda bc, x: x if x.dtype == bc.dtype else None),
   # MEM read: BITCAST(CUSTOM('MEM', addr)) -> INDEX(buf, addr) with element type
@@ -341,9 +358,9 @@ pcode_pm = PatternMatcher([
   # Named constants from _CONSTS dict
   (UPat(Ops.DEFINE_VAR, name='u'), lambda u: UOp.const(*_CONSTS[u.arg[0]]) if isinstance(u.arg, tuple) and u.arg[0] in _CONSTS else None),
   # Typed constants: INF.f32, NAN.f64, DENORM.f32, etc. (BITCAST of untyped var to target type)
-  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('INF', None, None)),), name='x'), lambda x: UOp.const(x.dtype, float('inf'))),
-  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('NAN', None, None)),), name='x'), lambda x: UOp.const(x.dtype, float('nan'))),
-  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('DENORM', None, None)),), name='x'),
+  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('INF', -float('inf'), float('inf'))),), name='x'), lambda x: UOp.const(x.dtype, float('inf'))),
+  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('NAN', -float('inf'), float('inf'))),), name='x'), lambda x: UOp.const(x.dtype, float('nan'))),
+  (UPat(Ops.BITCAST, dtype=dtypes.floats, src=(UPat(Ops.DEFINE_VAR, arg=('DENORM', -float('inf'), float('inf'))),), name='x'),
    lambda x: UOp.const(x.dtype, FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])[4] * 2**(-FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])[5]))),
   # Variable type tracking and propagation
   (UPat(Ops.DEFINE_VAR, name='u'), _track_var),
@@ -407,8 +424,8 @@ pcode_pm = PatternMatcher([
 # ═══════════════════════════════════════════════════════════════════════════════
 
 pcode_spec = PatternMatcher([
-  # DEFINE_VAR: pcode uses (name, None, None) tuples for unresolved vars, or string for declared locals
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg, str) or (isinstance(x.arg, tuple) and len(x.arg) == 3)),
+  # DEFINE_VAR: pcode uses (name, min, max) tuples for all vars
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 3),
   # ASSIGN: pcode assignment statement (dtype must match rhs)
   (UPat(Ops.ASSIGN, src=(UPat.var("lhs"), UPat.var("rhs")), name="a"),
    lambda a, lhs, rhs: a.dtype == rhs.dtype and rhs.dtype != dtypes.void),
@@ -419,7 +436,7 @@ pcode_spec = PatternMatcher([
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _transform_uop(u: UOp, ctx: dict) -> UOp:
-  result = graph_rewrite(u, pcode_pm, ctx=ctx, bottom_up=True)
+  result = graph_rewrite(u, pcode_pm, ctx=ctx, bottom_up=True).simplify()
   type_verify(result, pcode_spec)
   return result
 
