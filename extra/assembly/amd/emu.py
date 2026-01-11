@@ -427,8 +427,6 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
 WAVESTART_TO_INST_CYCLES = 32
 SNOP_EXTRA_DELAY_MIN, SNOP_EXTRA_DELAY_MAX = 11, 22  # s_nop(11-22) has +4 penalty
 SNOP_EXTRA_DELAY_CYCLES = 4
-ALU_STAGES = 5  # 5-stage ALU pipeline (RDNA: "5 cycles of latency are exposed")
-ISSUE_QUEUE_DEPTH = 14  # Maximum in-flight VALUs before issue stalls
 
 from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE, VALUINST, ALUEXEC, AluSrc
 
@@ -441,173 +439,137 @@ def _get_src_vgprs(inst: Inst) -> list[int]:
 class SQTTState:
   """SQTT tracing with cycle-accurate RDNA VALU pipeline model.
 
-  Pipeline stages:
-    Issue (VALUINST) -> ALU[0-4] (5 stages) -> Writeback (ALUEXEC)
-
-  Timing (const source, no deps):
-    Cycle 0: Issue (VALUINST emitted), instruction enters issue queue
-    Cycle 1: Enters ALU[0]
-    Cycle 2-5: ALU[1-4]
-    Cycle 6: Writeback (ALUEXEC emitted)
-    Total latency: 6 cycles
-
-  Dependencies:
-    - If instruction has VGPR deps, it waits in issue queue until producer completes
-    - Forwarding: dependent can enter ALU[0] same cycle as producer's writeback (saves 1 cycle)
-    - First dependent in chain: exec delta = 6 (no forwarding benefit)
-    - Subsequent dependents: exec delta = 5 (forwarding benefit)
-    - When forwarding exhausted: exec delta = 9 (regfile read penalty)
-
-  Issue queue:
-    - Tracks last N issued VALUs (for s_delay_alu)
-    - When queue depth exceeds ISSUE_QUEUE_DEPTH, issue stalls
+  Physical model:
+    - alu[4]: 4-stage ALU pipeline, each slot holds dest_vgpr or None
+    - in_flight[14]: 14 in-flight slots for issued instructions
+    - issue_queue: instructions waiting for dependencies
+    - forward: forwarding register (result available for bypass)
+    - completed: set of vgprs that have completed (in register file)
   """
   def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
     self.cycle = 0
     self.packets = []
 
-    # Issue queue: list of (issue_cycle, dest_vgpr, srcs, inst, in_alu)
-    # Tracks all issued VALUs until they complete writeback
-    self.issue_queue: list[tuple] = []
+    # 4-stage ALU pipeline: each slot holds dest_vgpr or None
+    self.alu = [None, None, None, None]
 
-    # ALU pipeline: 5 stages, each holds (inst, dest_vgpr, issue_cycle) or None
-    self.alu: list = [None] * ALU_STAGES
+    # In-flight instructions: max 14 at a time, each is (dest_vgpr, srcs)
+    self.in_flight: list[tuple[int, list[int]]] = []
 
-    # Writeback stage: (inst, dest_vgpr, issue_cycle) or None
-    self.writeback = None
+    # Issue queue: list of (dest_vgpr, srcs, ready_at) waiting for deps to enter ALU
+    # ready_at: cycle when this instruction can enter ALU (0 = no restriction)
+    self.issue_queue: list[tuple[int, list[int], int]] = []
 
-    # Forwarding: vgpr available for forwarding THIS cycle (from previous tick's writeback)
-    self.forward_vgpr: int | None = None
-    # VGPR that just completed THIS tick (cannot be used for promotion until next tick)
-    self.just_completed_vgpr: int | None = None
+    # Forwarding register: dest_vgpr available for bypass this cycle, or None
+    self.forward: int | None = None
+
+    # Set of completed vgprs (in register file, always available)
+    self.completed: set[int] = set()
+
+    # Cold start: first forwarding use has +1 cycle penalty
+    self.forward_warm = False
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
 
-  def _in_flight_count(self) -> int:
-    """Count instructions that are issued but not yet in ALU (waiting for deps)."""
-    return sum(1 for item in self.issue_queue if not item[4])
+  def _fmt_alu(self) -> str:
+    return '[' + ','.join(f'v{v}' if v is not None else '-' for v in self.alu) + ']'
 
-  def _vgpr_in_alu(self, vgpr: int) -> bool:
-    """Check if vgpr is being written by an instruction currently in ALU or writeback."""
-    for slot in self.alu:
-      if slot is not None and slot[1] == vgpr: return True
-    if self.writeback is not None and self.writeback[1] == vgpr: return True
+  def _fmt_iq(self) -> str:
+    if not self.issue_queue: return '[]'
+    return '[' + ','.join(f'v{d}' + (f'@{r}' if r > 0 else '') for d, _, r in self.issue_queue) + ']'
+
+  def _fmt_if(self) -> str:
+    return f'{len(self.in_flight)}/14'
+
+  def _debug_line(self, events: str = ""):
+    if DEBUG >= 3:
+      fwd = f'v{self.forward}' if self.forward is not None else '-'
+      print(f"C{self.cycle}: ALU{self._fmt_alu()} FWD[{fwd}] IQ{self._fmt_iq()} IF[{self._fmt_if()}] {events}")
+
+  def _can_issue(self) -> bool:
+    return len(self.in_flight) < 14
+
+  def _src_ready(self, src: int) -> bool:
+    """Check if src vgpr is available (completed or in forward register)."""
+    if src in self.completed: return True
+    if src == self.forward: return True
     return False
 
-  def _vgpr_pending(self, vgpr: int) -> bool:
-    """Check if vgpr is being written by any in-flight instruction."""
-    for item in self.issue_queue:
-      if item[1] == vgpr: return True
-    return False
-
-  def _find_producer_complete_cycle(self, vgpr: int) -> int | None:
-    """Find the cycle when vgpr's producer will complete (writeback)."""
-    for item in self.issue_queue:
-      if item[1] == vgpr:
-        issue_cycle = item[0]
-        # Producer completes at issue_cycle + 1 (enter ALU) + 5 (ALU stages) = issue_cycle + 6
-        return issue_cycle + ALU_STAGES + 1
-    return None
+  def _all_srcs_ready(self, srcs: list[int]) -> tuple[bool, bool]:
+    """Returns (all_ready, uses_forward)."""
+    uses_fwd = False
+    for src in srcs:
+      if src in self.completed:
+        continue
+      if src == self.forward:
+        uses_fwd = True
+        continue
+      return False, False
+    return True, uses_fwd
 
   def tick(self):
     self.cycle += 1
-    if DEBUG >= 3: print(f"C{self.cycle}:", end="")
+    if self.cycle > 10000: raise RuntimeError("cycle limit exceeded")
+    events = []
 
-    # Pipeline timing for 6-cycle latency (VALUINST@0 -> ALUEXEC@6):
-    #   Cycle 0: Issue (VALUINST)
-    #   Cycle 1: Enter ALU[0]
-    #   Cycle 2-5: ALU[1-4]
-    #   Cycle 6: Exit ALU[4], emit ALUEXEC, forwarding available NEXT cycle
-    #
-    # Forwarding timing:
-    #   - When instruction exits ALU[4], its result is available for forwarding
-    #   - FIRST dependent: enters ALU the cycle AFTER producer's ALUEXEC -> delta 6
-    #   - SUBSEQUENT dependents: can enter ALU same cycle as their producer's ALUEXEC -> delta 5
-    #
-    # The key is that forward_vgpr from cycle N is used for promotion in cycle N+1.
+    # 1. ALU[3] exits - instruction completes
+    exiting = self.alu[3]
+    if exiting is not None:
+      self.emit(ALUEXEC, src=AluSrc.VALU)
+      events.append(f"EXEC v{exiting}")
 
-    # 1. Shift ALU pipeline and capture what exits ALU[4]
-    exiting = self.alu[ALU_STAGES - 1]
-    for i in range(ALU_STAGES - 1, 0, -1):
-      self.alu[i] = self.alu[i - 1]
+    # 2. Slide ALU pipeline
+    self.alu[3] = self.alu[2]
+    self.alu[2] = self.alu[1]
+    self.alu[1] = self.alu[0]
     self.alu[0] = None
 
-    # 2. Emit ALUEXEC for instruction that exited ALU[4]
+    # 3. Try to promote from issue_queue to ALU[0] (before updating forward!)
+    if self.alu[0] is None and self.issue_queue:
+      for i, (dest, srcs, ready_at) in enumerate(self.issue_queue):
+        # Check if instruction has a minimum ready cycle
+        if ready_at > 0 and self.cycle < ready_at:
+          continue
+        ready, uses_fwd = self._all_srcs_ready(srcs)
+        if not ready:
+          continue
+        # Cold start penalty: first dependent instruction has +2 cycle delay
+        # (1 cycle for forwarding setup + 1 cycle to enter ALU)
+        has_deps = len(srcs) > 0
+        if has_deps and not self.forward_warm:
+          self.issue_queue[i] = (dest, srcs, self.cycle + 2)
+          continue
+        # Enter ALU
+        self.alu[0] = dest
+        self.issue_queue.pop(i)
+        events.append(f"v{dest}->ALU" + ("(fwd)" if uses_fwd else ""))
+        break
+
+    # 4. Update forwarding: previous forward goes to completed, exiting goes to forward
+    if self.forward is not None:
+      self.completed.add(self.forward)
+      self.forward_warm = True  # Forwarding is warm once we've had a result go through
+    self.forward = exiting
     if exiting is not None:
-      inst, dest, issue_cycle = exiting
-      self.emit(ALUEXEC, src=AluSrc.VALU)
-      # Remove from issue queue
-      self.issue_queue = [item for item in self.issue_queue if item[1] != dest or item[0] != issue_cycle]
-      if DEBUG >= 3: print(f" ALUEXEC v{dest}", end="")
+      assert self.in_flight and self.in_flight[0][0] == exiting, f"FIFO violation: expected {exiting} at front, got {self.in_flight}"
+      self.in_flight.pop(0)
 
-    # 3. Issue queue -> ALU[0]: find first instruction whose deps are ready
-    #    Uses forward_vgpr from PREVIOUS tick (carried over from last tick)
-    #    After this tick, forward_vgpr will be updated for the NEXT tick
-    promoted = False
-    for item in self.issue_queue:
-      issue_cycle, dest, srcs, inst, in_alu = item
-      if in_alu: continue  # Already in ALU pipeline
-
-      # Check if all source deps are ready
-      deps_ready = True
-      uses_forward = False
-      for src_vgpr in srcs:
-        if src_vgpr == self.forward_vgpr:
-          uses_forward = True
-          continue  # Can forward from previous cycle's writeback
-        if self._vgpr_pending(src_vgpr):
-          deps_ready = False
-          break
-
-      if not deps_ready: continue
-
-      # Check minimum time in issue queue (1 cycle from issue to ALU[0] entry)
-      if self.cycle <= issue_cycle: continue
-
-      # Enter ALU[0]
-      self.alu[0] = (inst, dest, issue_cycle)
-      # Mark as in_alu
-      idx = self.issue_queue.index(item)
-      self.issue_queue[idx] = (issue_cycle, dest, srcs, inst, True)
-      promoted = True
-      if DEBUG >= 3: print(f" IQ->ALU[0] v{dest}{'(fwd)' if uses_forward else ''}", end="")
-      break
-
-    # 4. Update forward_vgpr for NEXT tick
-    #    If something exited this tick, its result is available for forwarding next tick
-    if exiting is not None:
-      self.forward_vgpr = exiting[1]  # dest vgpr
-    else:
-      self.forward_vgpr = None
-
-    if DEBUG >= 3: print()
+    self._debug_line(' '.join(events))
 
   def _pipeline_empty(self) -> bool:
-    """Check if pipeline has no in-flight instructions."""
-    if self.writeback is not None: return False
-    if any(slot is not None for slot in self.alu): return False
+    if any(s is not None for s in self.alu): return False
     if self.issue_queue: return False
+    if self.in_flight: return False
+    if self.forward is not None: return False
     return True
 
   def process_instruction(self, inst: Inst):
-    if DEBUG >= 2: print(f"Process: {inst}")
+    if DEBUG >= 3: print(f"  {inst}")
 
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_DELAY_ALU:
-      # s_delay_alu affects timing by inserting wait cycles based on instid
-      # instid0 (bits 3:0): wait for VALU N instructions back (1-4), 0=none
-      simm16 = inst.simm16
-      instid0 = simm16 & 0xf
-      if instid0 > 0 and instid0 <= len(self.issue_queue):
-        # Find the instruction instid0 back in the issue queue
-        target_idx = len(self.issue_queue) - instid0
-        if target_idx >= 0:
-          target = self.issue_queue[target_idx]
-          complete_cycle = target[0] + ALU_STAGES + 1
-          # Wait until that instruction completes
-          while self.cycle < complete_cycle:
-            self.tick()
+      # TODO: implement s_delay_alu properly
       return
 
     elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_NOP:
@@ -624,17 +586,20 @@ class SQTTState:
       self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
 
     elif isinstance(inst, (VOP1, VOP2, VOP3)):
-      # Check for issue stall (too many in-flight instructions)
-      while self._in_flight_count() >= ISSUE_QUEUE_DEPTH:
+      # Check for issue stall (no free in-flight slots)
+      while not self._can_issue():
         self.tick()
 
-      # Issue: emit VALUINST, add to issue queue
+      # Issue: add to in_flight and issue_queue
       srcs = _get_src_vgprs(inst)
-      self.issue_queue.append((self.cycle, inst.vdst, srcs, inst, False))
+      dest = inst.vdst
+      self.in_flight.append((dest, srcs))
+      self.issue_queue.append((dest, srcs, 0))  # ready_at=0 initially (no restriction)
       self.emit(VALUINST, wave=self.wave_id)
-      if DEBUG >= 3: print(f"C{self.cycle}: Issue {inst.op_name} v{inst.vdst} srcs={srcs}")
 
-      # One cycle per instruction issued
+      if DEBUG >= 3: print(f"    ISSUE v{dest} srcs={srcs}")
+
+      # One cycle per instruction issued, then try to enter ALU
       self.tick()
       return
 
