@@ -1,11 +1,11 @@
-import pathlib
-import numpy as np
+# ruff: noqa: F405, F403
+# allow define from star imports
+
 from tinygrad import Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 from extra.assembly.amd.autogen.rdna4.ins import *
 from extra.gemm.amd_uop_matmul import N, test_matmul
-from extra.gemm.asm.rdna4.divmod import u32_div_floor_f32_refine, u32_divmod_floor_f32_refine, u32_div_ceil_f32
 
 # tiny hsaco packer
 import tempfile, subprocess, os
@@ -27,10 +27,21 @@ TN = (N + C_TILE - 1) // C_TILE
 NUM_WG = TN * TN
 THREADS_PER_WG = 128
 assert N % THREADS_PER_WG == 0, "N must be divisible by THREADS_PER_WG"
+assert N % C_TILE == 0, "N must be divisible by C_TILE for shift-based division"
+assert (TN & (TN - 1)) == 0, "TN must be a power of 2 for shift-based division"
 
-kd = {"group_segment_fixed_size":50176, "private_segment_fixed_size":0, "kernarg_size":32, "next_free_vgpr":256, "next_free_sgpr":16, "memory_ordered":1,
+# Shift constants for power-of-2 divisions
+C_TILE_SHIFT = C_TILE.bit_length() - 1  # 7 for C_TILE=128
+TN_SHIFT = TN.bit_length() - 1          # log2(TN)
+TN_MASK = TN - 1
+TN_SQ_SHIFT = 2 * TN_SHIFT              # log2(TN*TN)
+TN_SQ_MASK = TN * TN - 1
+TILE_GROUP_SHIFT = TILE_GROUP_HEIGHT.bit_length() - 1  # 3 for TILE_GROUP_HEIGHT=8
+TILE_GROUP_MASK = TILE_GROUP_HEIGHT - 1
+
+kd = {"group_segment_fixed_size":50176, "private_segment_fixed_size":0, "kernarg_size":32, "next_free_vgpr":256, "next_free_sgpr":16,
       "system_sgpr_workgroup_id_x":1, "system_sgpr_workgroup_id_y":0, "system_sgpr_workgroup_id_z":0, "wavefront_size32":1, "forward_progress":0,
-      "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "workgroup_processor_mode":1, "uses_dynamic_stack":0 }
+      "user_sgpr_kernarg_segment_ptr":1, "user_sgpr_count":2, "workgroup_processor_mode":1, "uses_dynamic_stack":0, "memory_ordered":1}
 template = ".text\n.section\t.text.\n.global\ttest\n.p2align\t8\n.type\tgemm,@function\ntest:\nINSTRUCTIONS\n.section .rodata,\"a\",@progbits\n"+\
     ".p2align 6, 0x0\n.amdhsa_kernel test\n" + "".join(f"  .amdhsa_{k} {v}\n" for k,v in kd.items()) + ".end_amdhsa_kernel\n"
 
@@ -216,31 +227,16 @@ def custom_gemm(N:int, dev:str) -> UOp:
   v_lshl_add_u32(v_lds_B_base, v[6], 5, v_lds_B_base),
   v_add_co_u32(v_lds_B_base, VCC_LO, 0x2000, v_lds_B_base),
   s_wait_kmcnt(0x0),
-  # v[6] = ceil(s_N / C_TILE), then read lane.
-  v_mov_b32_e32(v[8], C_TILE),
-  v_mov_b32_e32(v[7], s_N),
-  *u32_div_ceil_f32(v[6], v[7], v[8], v[9], v[10]),
-  v_readfirstlane_b32_e32(RawImm(14), v[6]),
-  v_mov_b32_e32(v[8], C_TILE),
-  v_mov_b32_e32(v[7], s_N),
-  *u32_div_ceil_f32(v[6], v[7], v[8], v[9], v[10]),
-  v_readfirstlane_b32_e32(RawImm(15), v[6]),
-  # denom = s[14] * s[15]
-  s_mul_i32(s[16], s[14], s[15]),
-  # q = floor(s[2] / denom) in v[6], remainder in v[7]
-  *u32_divmod_floor_f32_refine(v[6], v[7], s[2], s[16], v[9]),
-  v_readfirstlane_b32_e32(RawImm(16), v[6]),
-  s_mov_b32(s[4], s[16]),
-  s_mul_i32(s[16], s[15], s[14]),
-  s_mul_i32(s[16], s[16], s[4]),
-  s_mul_i32(s[16], s[16], s[17]),
-  s_sub_co_u32(s[2], s[2], s[16]),
-  # q = floor(s[2] / s[14]) in v[6], remainder in v[7]
-  *u32_divmod_floor_f32_refine(v[6], v[7], s[2], s[14], v[9]),
-  v_readfirstlane_b32_e32(RawImm(16), v[6]),
-  s_mov_b32(s[3], s[16]),
-  s_mul_i32(s[16], s[3], s[14]),
-  s_sub_co_u32(s[2], s[2], s[16]),
+  # TN = N / C_TILE (N is divisible by C_TILE, so ceil = floor)
+  s_lshr_b32(s[14], s_N, C_TILE_SHIFT),  # s[14] = TN
+  s_mov_b32(s[15], s[14]),               # s[15] = TN (same value)
+  # q = floor(s[2] / (TN*TN)), r = s[2] % (TN*TN) - all scalar ops
+  s_lshr_b32(s[17], s[2], TN_SQ_SHIFT),        # s[17] = q = s[2] >> log2(TN*TN)
+  s_and_b32(s[16], s[2], TN_SQ_MASK),          # s[16] = r = s[2] & (TN*TN - 1)
+  s_mov_b32(s[2], s[16]),                      # s[2] = remainder
+  # q = floor(s[2] / TN), r = s[2] % TN - all scalar ops
+  s_lshr_b32(s[3], s[2], TN_SHIFT),            # s[3] = q = s[2] >> log2(TN)
+  s_and_b32(s[2], s[2], TN_MASK),              # s[2] = r = s[2] & (TN - 1)
   s_mov_b32(s[66], 0x5040100),
   s_mov_b32(s[67], 0x7060302),
   s_sub_co_u32(s[32], s[32], 16),
@@ -250,57 +246,24 @@ def custom_gemm(N:int, dev:str) -> UOp:
   s_mov_b32(s[8], 1),
   s_mov_b32(s[9], 1),
   s_mov_b32(s[16], TILE_GROUP_HEIGHT),
-  v_cvt_f64_u32_e32(v[6:7], s[16]),
-  v_rcp_f64_e32(v[6:7], v[6:7]),
-  v_cvt_f64_u32_e32(v[8:9], s[3]),
-  v_mul_f64_e32(v[6:7], v[6:7], v[8:9]),
-  v_cvt_u32_f64_e32(v[6], v[6:7]),
-  v_mul_lo_u32(v[7], v[6], s[16]),
-  v_sub_nc_u32_e32(v[8], s[3], v[7]),
-  v_cmp_ge_u32_e64(RawImm(106), v[8], s[16]),
-  s_mov_b32(EXEC_LO, VCC_LO),
-  v_add_nc_u32_e64(v[6], v[6], 1),
-  s_mov_b32(EXEC_LO, -1),
-  v_readfirstlane_b32_e32(RawImm(17), v[6]),
+  # s[17] = s[3] / TILE_GROUP_HEIGHT using shift (TILE_GROUP_HEIGHT = 8 = 2^3)
+  s_lshr_b32(s[17], s[3], TILE_GROUP_SHIFT),
   s_mul_i32(s[20], s[17], s[16]),
   s_sub_co_u32(s[20], s[3], s[20]),
   s_mul_i32(s[20], s[20], s[14]),
   s_add_co_u32(s[20], s[20], s[2]),
-  v_cvt_f64_u32_e32(v[6:7], s[16]),
-  v_rcp_f64_e32(v[6:7], v[6:7]),
-  v_cvt_f64_u32_e32(v[8:9], s[15]),
-  v_mul_f64_e32(v[6:7], v[6:7], v[8:9]),
-  v_cvt_u32_f64_e32(v[6], v[6:7]),
-  v_mul_lo_u32(v[7], v[6], s[16]),
-  v_sub_nc_u32_e32(v[8], s[15], v[7]),
-  v_cmp_ge_u32_e64(RawImm(106), v[8], s[16]),
-  s_mov_b32(EXEC_LO, VCC_LO),
-  v_add_nc_u32_e64(v[6], v[6], 1),
-  s_mov_b32(EXEC_LO, -1),
-  v_readfirstlane_b32_e32(RawImm(18), v[6]),
+  # s[18] = s[15] / TILE_GROUP_HEIGHT using shift
+  s_lshr_b32(s[18], s[15], TILE_GROUP_SHIFT),
   s_mul_i32(s[19], s[16], s[18]),
   s_sub_co_u32(s[19], s[15], s[19]),
   s_cmp_eq_u32(s[19], 0),
   s_cmov_b32(s[19], s[16]),
   s_cmp_ge_u32(s[17], s[18]),
   s_cselect_b32(s[18], s[19], s[16]),
-  v_cvt_f64_u32_e32(v[6:7], s[18]),
-  v_rcp_f64_e32(v[6:7], v[6:7]),
-  v_cvt_f64_u32_e32(v[8:9], s[20]),
-  v_mul_f64_e32(v[6:7], v[6:7], v[8:9]),
-  v_cvt_u32_f64_e32(v[6], v[6:7]),
-  v_mul_lo_u32(v[7], v[6], s[18]),
-  v_sub_nc_u32_e32(v[8], s[20], v[7]),
-  v_cmp_ge_u32_e64(RawImm(106), v[8], s[18]),
-  s_mov_b32(EXEC_LO, VCC_LO),
-  v_add_nc_u32_e64(v[6], v[6], 1),
-  s_mov_b32(EXEC_LO, -1),
-  v_mul_lo_u32(v[7], v[6], s[18]),
-  v_sub_nc_u32_e32(v[8], s[20], v[7]),
-  v_readfirstlane_b32_e32(RawImm(2), v[6]),
-  v_readfirstlane_b32_e32(RawImm(3), v[8]),
-  s_mul_i32(s[3], s[2], s[18]),
-  s_sub_co_u32(s[3], s[20], s[3]),
+  # For power-of-2 sizes, s[18] = TILE_GROUP_HEIGHT = 8, so we use shift
+  # s[2] = s[20] / s[18], s[3] = s[20] % s[18]
+  s_lshr_b32(s[2], s[20], TILE_GROUP_SHIFT),   # quotient
+  s_and_b32(s[3], s[20], TILE_GROUP_MASK),     # remainder
   s_mul_i32(s[17], s[17], s[16]),
   s_add_co_u32(s[3], s[3], s[17]),
   v_dual_mov_b32(VOPDOp.V_DUAL_MOV_B32, v[6], v[7], v[0], v[2]),
@@ -890,10 +853,11 @@ def custom_gemm(N:int, dev:str) -> UOp:
     insts += pack_f16(v[tmpv+1], v[base+16], v[base+24])
     insts += [buffer_store_b64(v[tmpv:tmpv+1], vaddr, soffset=NULL, format=1, offen=1, rsrc=saddr)]
   insts += [s_endpgm()]
+  src = "\n".join([i if isinstance(i, str) else f"\t{i.disasm()}" for i in insts])
+  lib = pack_hsaco(template.replace("INSTRUCTIONS", src), "gfx1200")
   sink = UOp.sink(A, B, C, lidx, gidx, arg=KernelInfo(name="gemm"))
-  src = template.replace("INSTRUCTIONS", "\n".join([i if isinstance(i, str) else f"\t{i.disasm()}" for i in insts]))
-  lib = pack_hsaco(src, "gfx1200")
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dev), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=())
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dev), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                               UOp(Ops.BINARY, arg=lib)), arg=())
 
 if __name__ == "__main__":
   test_matmul(custom_gemm(N, Device.DEFAULT), dtype=dtypes.half, N=N)
