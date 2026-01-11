@@ -5,6 +5,7 @@ from tinygrad.uop import Ops, X86Ops, GroupOp, X86GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import Register, ISARenderer, IselContext
 from tinygrad.codegen.late.regalloc import assign
+from tinygrad.helpers import getenv, CPU_COUNT
 
 # ***** X86 legalization *****
 
@@ -176,9 +177,11 @@ def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
   return x.replace(src=x.src[:i] + fuse_address(x.src[i].src[0]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == x.src.count(x.src[i]) == 1 else None
 
 def abi(ctx:IselContext, x:UOp):
-  def _stack_arg(disp:int): return UOp(X86Ops.MOV, x.dtype, (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(X86Ops.FRAME_INDEX, dtypes.int32, arg=disp)))
-  if sys.platform == "win32": return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg(((RCX, RDX, GPR[8], GPR[9])[x.arg],))) if x.arg < 4 else _stack_arg((x.arg-3)*8+32)
-  return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg(((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[x.arg],))) if x.arg < 6 else _stack_arg((x.arg-5)*8)
+  i = ctx.func_args.index(x)
+  def _stack_arg(disp:int):
+    return UOp(X86Ops.MOV, x.dtype, (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(X86Ops.FRAME_INDEX, dtypes.int32, arg=disp)))
+  if sys.platform == "win32": return def_reg(x.dtype, (RCX, RDX, GPR[8], GPR[9])[i]) if i < 4 else _stack_arg((i-3)*8+32)
+  return def_reg(x.dtype, (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]) if i < 6 else _stack_arg((i-5)*8)
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if dt.vec(l).itemsize == 2 and dt.vec(l) not in dtypes.int16s)
@@ -196,14 +199,10 @@ isel_matcher = PatternMatcher([
   # HACK: annoying hack so const doesn't get rewritten because linearizer needs it
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].replace(tag=1 if x.src[0].op is Ops.CONST else None),) + x.src[1:], arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None),
   # function abi constraints
-  (UPat(Ops.DEFINE_GLOBAL, name="x"), abi),
-  # HACK: the register that holds the DEFINE_VAR is unknown until after linearizing, we add vreg to it that can't be allocated to any register
-  # after linearizing we know the position of DEFINE_VAR in the function args and rewrite the vreg to the real reg
-  # the right fix for this is to add the function arg position to DEFINE_VAR like DEFINE_GLOBAL
-  #(UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x: x.replace(arg=ctx.vreg())),
+  (UPat((Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
   (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"),
-   lambda ctx,x: x.replace(op=X86Ops.LEA, src=(UOp(X86Ops.DEFINE_REG, x.dtype, arg=RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))), arg=None)), # noqa: E501
+   lambda ctx,x: x.replace(op=X86Ops.LEA, src=(def_reg(x.dtype, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))), arg=None)),
   # constants that can't be immediates, move them to registers
   (UPat(Ops.CONST, dtypes.float16, name="x"), lambda x: UOp(X86Ops.VPINSRW, x.dtype, (def_reg(x.dtype), UOp(X86Ops.MOVi, dtypes.int16, (imm(x.dtype, x.arg),)), imm(dtypes.uint8, 0)))),
   (UPat(Ops.CONST, dtypes.float32, name="x"), lambda x: UOp(X86Ops.VMOVD, x.dtype, (UOp(X86Ops.MOVi, dtypes.int32, (imm(x.dtype, x.arg),)),))),
@@ -633,14 +632,11 @@ encodings = PatternMatcher([
   (UPat(X86Ops.RET), lambda: bytes([0xC3])),
 ])
 
-from tinygrad.helpers import getenv, CPU_COUNT
 class X86Renderer(ISARenderer):
   device = "CPU"
-  max_vec_sz = 16
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  #global_max = (CPU_COUNT.value, 0, 0)
-  global_max = None
+  global_max = (CPU_COUNT.value, 0, 0)
   extra_matcher = extra_matcher
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher

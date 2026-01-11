@@ -101,9 +101,9 @@ def loop_prologue(ctx:RegallocContext, x:UOp, i:int):
   loads = []
   for v in sorted_uses:
     # if all the possible registers are already in live_in there's no space for this var
-    if set(v.cons).issubset(live_in.values()): assert v in ctx.spills; continue
+    if set(v.cons if v.cons else (v,)).issubset(live_in.values()): assert v in ctx.spills; continue
     if v not in ctx.live:
-      ctx.live[v] = alloc(ctx, v.cons, i)
+      ctx.live[v] = alloc(ctx, v.cons if v.cons else (v,), i)
       s = ctx.vreg_to_rewrite[v]
       loads.append(load(ctx, s.dtype, ctx.spills[v], ctx.live[v]))
     assert ctx.live[v] not in live_in.values()

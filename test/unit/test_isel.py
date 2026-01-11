@@ -30,7 +30,7 @@ class TestIselX86(unittest.TestCase):
     f = d + e
     n = self.isel_rewrite(f)
     # the comparison instruction depends on the user, int cmove uses flag while float cmove uses mask
-    # so both flag producing and mask producing comparisons must be present 
+    # so both flag producing and mask producing comparisons must be present
     self.assertTrue(n.src[0].op is X86Ops.CMOVB and n.src[0].src[2].op is X86Ops.VUCOMISS)
     self.assertTrue(n.src[1].op is X86Ops.VBLENDVPS and n.src[1].src[2].op is X86Ops.VCMPSS and n.src[1].src[2].src[2].arg == 1)
 

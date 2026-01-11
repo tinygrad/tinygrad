@@ -27,12 +27,13 @@ class IselContext:
     self.uses = sink.get_consumer_map()
     self.reg_n = itertools.count()
     self.stack_size = 0
+    self.func_args = sorted([u for u in self.uses if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR, Ops.SPECIAL)], key=lambda k: (k.op, k.arg))
 
   def inc_stack(self, amt:int):
     ret = self.stack_size
     self.stack_size += amt
     return ret
-  
+
   def vreg(self, cons:tuple[Register, ...]|Register|None=None):
     return Register(f"v{next(self.reg_n)}", 0, cons=cons if isinstance(cons, tuple) else (cons,) if cons is not None else ())
 
