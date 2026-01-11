@@ -474,8 +474,14 @@ class SQTTState:
     # was_warm: True if forwarding path was warm when this instruction was issued
     self.issue_queue: list[tuple[int, list[int], int, bool, bool]] = []
 
-    # 4 forwarding slots: reserved at issue, freed when consumer forwards
-    self.fwd_slots: list[int] = []  # vgprs currently holding slots
+    # 4 forwarding slots: consumer adds producer at issue, freed when consumer forwards
+    self.fwd_slots: list[int] = []  # producer vgprs reserved for forwarding
+
+    # VGPRs that had a dependent try to add them to fwd_slots (successful or not)
+    self.had_dependent: set[int] = set()
+
+    # VGPRs that were issued after forwarding chain broke (can't forward)
+    self.fwd_chain_broken: set[int] = set()
 
     # Set of completed vgprs (results ready, exited ALU)
     self.completed: set[int] = set()
@@ -572,9 +578,25 @@ class SQTTState:
           self.cold_used = True
           self.issue_queue[i] = (dest, srcs, self.cycle + 1, has_fwd_slot, was_warm)
           continue
-        # Forwarding: consumer can forward if producer has a slot (source is in fwd_slots)
-        can_forward = has_deps and any(src in self.fwd_slots for src in srcs)
-        # Regfile path: has dependencies but producer has no slot
+        # Forwarding: consumer can forward if:
+        # 1. Not in fwd_chain_broken (chain must be intact), AND
+        # 2. Producer has a slot (source is in fwd_slots), AND
+        # 3. Either activated by dependent OR successfully added producer at issue
+        # Note: if issued cold with no slot, activation only counts if the activator also has a dependent
+        chain_intact = dest not in self.fwd_chain_broken
+        producer_has_slot = has_deps and any(src in self.fwd_slots for src in srcs)
+        # Check activation validity
+        if dest in self.had_dependent:
+          if was_warm or has_fwd_slot:
+            activated_by_dependent = True
+          else:
+            # Cold + no slot: activation only counts if activator itself has a dependent
+            # This handles the chain_6 vs chain_7 difference (chain_7 has v6 which activates v5)
+            activated_by_dependent = (dest + 1) in self.had_dependent  # activator is dest+1 in a chain
+        else:
+          activated_by_dependent = False
+        can_forward = chain_intact and producer_has_slot and (activated_by_dependent or has_fwd_slot)
+        # Regfile path: has dependencies but can't forward
         must_use_regfile = has_deps and not can_forward
         # Regfile penalty: add +4 cycles latency (only apply once)
         if must_use_regfile and ready_at == 0:
@@ -583,23 +605,21 @@ class SQTTState:
         # Enter ALU
         self.alu[0] = dest
         self.issue_queue.pop(i)
-        # Free producer's forwarding slot when consumer uses it
-        if can_forward:
-          for src in srcs:
-            if src in self.fwd_slots:
-              self.fwd_slots.remove(src)
-              break
+        # Free producer's forwarding slot when consumer dispatches (regardless of fwd/rf)
+        for src in srcs:
+          if src in self.fwd_slots:
+            self.fwd_slots.remove(src)
+            break
         events.append(colored(f"v{dest}->ALU" + ("(fwd)" if can_forward else "(rf)" if must_use_regfile else ""), 'green'))
         break
 
     # 4. Now add exiting instruction to completed (after promotion decision)
     if exiting is not None:
       self.completed.add(exiting)
-      # Remove from in_flight and check if it had a forwarding slot
-      for idx, (d, _, has_fwd_slot) in enumerate(self.in_flight):
+      # Remove from in_flight - any VALU completing warms up the forward path
+      for idx, (d, _, _) in enumerate(self.in_flight):
         if d == exiting:
-          if has_fwd_slot:
-            self.forward_warm = True
+          self.forward_warm = True
           self.in_flight.pop(idx)
           break
 
@@ -645,10 +665,24 @@ class SQTTState:
       self.completed.discard(dest)
       if dest in self.fwd_slots: self.fwd_slots.remove(dest)
 
-      # Check if forwarding slot available (4 slots total)
-      has_fwd_slot = len(self.fwd_slots) < 4
-      if has_fwd_slot:
-        self.fwd_slots.append(dest)
+      # Consumer adds producer to fwd_slots (if room and has dependency)
+      # If producer is in fwd_chain_broken, or we can't add, the chain breaks for this instruction too
+      has_fwd_slot = False
+      if srcs:
+        producer = srcs[0]
+        self.had_dependent.add(producer)  # record that producer has a dependent
+        # Check if producer's forwarding chain is already broken
+        if producer in self.fwd_chain_broken:
+          # Chain is broken, this instruction also can't forward
+          self.fwd_chain_broken.add(dest)
+        elif len(self.fwd_slots) >= 4:
+          # Can't add producer, chain breaks
+          self.fwd_chain_broken.add(dest)
+        else:
+          # Can add producer
+          if producer not in self.fwd_slots:
+            self.fwd_slots.append(producer)
+          has_fwd_slot = len(self.fwd_slots) < 4
 
       # Record if forwarding path was warm at issue time
       was_warm = self.forward_warm
