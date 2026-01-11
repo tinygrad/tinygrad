@@ -208,6 +208,26 @@ class TestVALUIndependent(unittest.TestCase):
   def test_ind_8(self): self._ind(8)
 
 
+class TestForwardingGap(unittest.TestCase):
+  """Producer + N independent instructions + consumer - tests forwarding window."""
+  def _last_exec_delta(self, n_gap):
+    instrs = [v_mov_b32_e32(v[0], 1.0)]
+    instrs += [v_mov_b32_e32(v[10+i], float(i)) for i in range(n_gap)]
+    instrs += [v_add_f32_e32(v[1], v[0], v[0])]
+    _, execd = get_deltas(instrs)
+    return execd[-1]
+
+  def test_gap0(self): self.assertEqual(self._last_exec_delta(0), 6)
+  def test_gap1(self): self.assertEqual(self._last_exec_delta(1), 5)
+  def test_gap2(self): self.assertEqual(self._last_exec_delta(2), 4)
+  def test_gap3(self): self.assertEqual(self._last_exec_delta(3), 3)
+  def test_gap4(self): self.assertEqual(self._last_exec_delta(4), 3)
+  def test_gap5(self): self.assertEqual(self._last_exec_delta(5), 4)
+  def test_gap6(self): self.assertEqual(self._last_exec_delta(6), 3)
+  def test_gap7(self): self.assertEqual(self._last_exec_delta(7), 3)
+  def test_gap8(self): self.assertEqual(self._last_exec_delta(8), 3)
+
+
 class TestChainWithNop(unittest.TestCase):
   """Dependency chain with s_nop between instructions."""
   def _test(self, nop_val, expected_issue, expected_exec):
