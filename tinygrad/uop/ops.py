@@ -95,6 +95,7 @@ class UOpMetaClass(type):
 # some uops map to other stuff
 buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
+_simplify_cache: dict['UOp', 'UOp'] = {}  # cache for UOp.simplify() results (UOps are immutable)
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property(property):
@@ -104,6 +105,8 @@ class recursive_property(property):
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
+    # Fast path: return cached value without toposort traversal
+    if self.nm in x.__dict__: return x.__dict__[self.nm]
     for node in x.toposort(gate=lambda node: self.nm not in node.__dict__): node.__dict__[self.nm] = self.fxn(node)
     return x.__dict__[self.nm]
 
@@ -323,11 +326,18 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** uop evaluation ***
 
   def simplify(self, tracked=False):
+    # Fast paths for already-simple ops
     if self.op in {Ops.CONST, Ops.VCONST}: return self
+    if self.op in {Ops.DEFINE_VAR, Ops.RANGE} and not self.src: return self
+    # Check cache
+    if not tracked and (cached := _simplify_cache.get(self)) is not None: return cached
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      result = graph_rewrite(self, symbolic, name="simplify")
+    # Cache the result (only if not tracking)
+    if not tracked: _simplify_cache[self] = result
+    return result
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def sintify(self) -> sint: return self.arg if self.op is Ops.CONST else self
   def _eval(self, dtype, expected_type:Type[T]) -> T:
@@ -681,7 +691,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.src[0], self.src[1].arg
   def unbind_all(self) -> tuple[UOp, dict[Variable, int]]:
     ret:dict[Variable, int] = {}
-    return graph_rewrite(self, pm_unbind, ctx=ret), ret
+    return graph_rewrite(self, pm_unbind, ctx=ret, name="unbind_all"), ret
   @property
   def val(self) -> int: return self.unbind()[1]
   def vars(self) -> set[UOp]:
@@ -1292,7 +1302,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.index else s for s in n.src))),
 ])
-def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
+def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype, name="index_to_concrete").src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
