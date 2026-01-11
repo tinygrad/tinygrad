@@ -23,9 +23,11 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   elif dense:
     instructions = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[1]:vgprIndices[2]], 1)
   else:
-    instructions = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[3]:vgprIndices[4]], vgprIndices[5])
+    instructions = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[3]:vgprIndices[4]], v[vgprIndices[5]])
 
-  src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", (instructions.disasm()+"\n")*INSTRUCTIONS_PER_LOOP)
+  insts = [s_mov_b32(s[1], INTERNAL_LOOP), s_mov_b32(s[2], 0)]
+  insts += ["loop:"]+[instructions]*INSTRUCTIONS_PER_LOOP+[s_addk_co_i32(s[1], 0xffff), s_cmp_lg_i32(s[1], s[2]), s_cbranch_scc1("loop"), s_endpgm()]
+  src = assemblyTemplate.replace("INSTRUCTIONS", "\n".join([i if isinstance(i, str) else i.disasm() for i in insts]))
   src = src.replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
   fxn = AMDProgram(DEV, "matmul", lib)
@@ -42,7 +44,7 @@ if __name__=="__main__":
 
   COMPILER = HIPCompiler(DEV.arch)
   if DEV.arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
-    from extra.assembly.amd.rdna3 import *
+    from extra.assembly.amd.autogen.rdna3 import *
     if DEV.arch == 'gfx1103': NUM_WORKGROUPS = 8
     if DEV.arch == 'gfx1151': NUM_WORKGROUPS = 32
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (7,8,15))
@@ -79,7 +81,7 @@ if __name__=="__main__":
     FLOPS_PER_MATMUL = 16*16*64*2
     launchBenchmark(v_swmmac_i32_16x16x64_iu4, (7,8,9,10,13,14), False)
   elif DEV.arch == 'gfx950':
-    from extra.assembly.amd.cdna import *
+    from extra.assembly.amd.autogen.cdna import *
     DIRECTIVE = ".amdhsa_accum_offset 4"
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64

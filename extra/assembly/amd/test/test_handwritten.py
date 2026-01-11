@@ -3,6 +3,7 @@
 
 import unittest, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
+from extra.assembly.amd.autogen.rdna4.ins import v_swmmac_f32_16x16x32_f16
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.asm import asm
 from extra.assembly.amd.test.test_roundtrip import compile_asm
@@ -13,7 +14,7 @@ class TestIntegration(unittest.TestCase):
     if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
     st = self.inst.disasm()
-    reasm = asm(st)
+    reasm = asm(st, "rdna4")
     desc = f"{st:25s} {self.inst} {b!r} {reasm}"
     self.assertEqual(b, compile_asm(st), desc)
     # TODO: this compare should work for valid things
