@@ -21,16 +21,21 @@ class _Device:
   # NOTE: you can't cache canonicalize in case Device.DEFAULT changes
   def canonicalize(self, device:str|None) -> str: return self._canonicalize(device if device is not None else Device.DEFAULT)
   def __getitem__(self, ix:str) -> Compiled: return self.__get_canonicalized_item(self.canonicalize(ix))
-  @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
-  def __get_canonicalized_item(self, ix:str) -> Compiled:
+  @functools.cache
+  def __get_canonicalized_cls(self, ix:str) -> type[Compiled]:
     assert ALLOW_DEVICE_USAGE or ix.split(":")[0] in ["DISK", "TINYFS", "NPY", "PYTHON"], f"usage of device {ix} disallowed"
     base = (__package__ or __name__).split('.')[0]  # tinygrad
     x = ix.split(":")[0].lower()
-    ret = [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.runtime.ops_{x}')) \
-           if (cname.lower() == x + "device")][0](ix)
+    return [cls for cname, cls in inspect.getmembers(importlib.import_module(f'{base}.runtime.ops_{x}')) if (cname.lower() == x + "device")][0]
+  @functools.cache  # this class is a singleton, pylint: disable=method-cache-max-size-none
+  def __get_canonicalized_item(self, ix:str) -> Compiled:
+    ret = self.__get_canonicalized_cls(ix)(ix)
     if DEBUG >= 1: print(f"opened device {ix} from pid:{os.getpid()}")
     self._opened_devices.add(ix)
     return ret
+  def device_count(self, ix:str) -> int:
+    with contextlib.suppress(Exception): return self.__get_canonicalized_cls(ix).early_init()
+    return 0
   @property
   def default(self) -> Compiled: return self[self.DEFAULT]
   def get_available_devices(self) -> Iterator[str]:
@@ -412,7 +417,7 @@ def enumerate_devices_str() -> Generator[str, None, None]:
       result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"
-    yield f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}"
+    yield f"{'*' if device == Device.DEFAULT else ' '} {device:10s} (x{Device.device_count(device)}): {result}"
 
 if __name__ == "__main__":
   for s in enumerate_devices_str(): print(s)

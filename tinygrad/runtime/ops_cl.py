@@ -95,16 +95,22 @@ class CLAllocator(LRUAllocator['CLDevice']):
 
 class CLDevice(Compiled):
   device_ids = None                 # this is global and only initted once
-  def __init__(self, device:str=""):
-    if CLDevice.device_ids is None:
+
+  @classmethod
+  def early_init(cls) -> int:
+    if cls.device_ids is None:
       check(cl.clGetPlatformIDs(0, None, num_platforms := ctypes.c_uint32()))
-      check(cl.clGetPlatformIDs(num_platforms.value, platform_ids := (cl.cl_platform_id * num_platforms.value)(), None))
-      for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
-        err = cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, num_devices := ctypes.c_uint32())
-        if err == 0 and num_devices.value != 0: break
-      if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
-      CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(),
-                                       lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))
+        check(cl.clGetPlatformIDs(num_platforms.value, platform_ids := (cl.cl_platform_id * num_platforms.value)(), None))
+        for device_type in [cl.CL_DEVICE_TYPE_GPU, cl.CL_DEVICE_TYPE_DEFAULT]:
+          err = cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, num_devices := ctypes.c_uint32())
+          if err == 0 and num_devices.value != 0: break
+        if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
+        cls.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(),
+                                        lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))
+    return len(cls.device_ids)
+
+  def __init__(self, device:str=""):
+    self.early_init()
 
     self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
     self.device_name = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_NAME, 256,

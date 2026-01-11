@@ -9,6 +9,9 @@ def check(status):
   if status != 0: raise RuntimeError(f"HIP Error {status}, {ctypes.string_at(hip.hipGetErrorString(status)).decode()}")
 
 class HIPDevice(Compiled):
+  @classmethod
+  def early_init(cls) -> int: return init_c_var(ctypes.c_int(), lambda x: check(hip.hipGetDeviceCount(x)))
+
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
