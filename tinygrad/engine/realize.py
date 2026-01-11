@@ -3,10 +3,14 @@ import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
+from tinygrad.helpers import getenv
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
 from tinygrad.codegen import get_program
+
+# Parallel compilation settings
+PARALLEL_COMPILE = getenv("PARALLEL_COMPILE", 1)
 
 # **************** Runners ****************
 
@@ -120,6 +124,15 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
+def _get_cache_key(device: str, ast: UOp) -> tuple:
+  """Get the cache key for an AST."""
+  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value)
+  return (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
+
+def _render_program(device: str, ast: UOp) -> ProgramSpec:
+  """Render a program without compiling it."""
+  return get_program(ast, Device[device].renderer, skip_compile=True)
+
 # **************** lowering functions ****************
 
 # NOTE: ctx is the buffers
@@ -185,11 +198,110 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
+# **************** parallel compilation ****************
+
+def _batch_compile_kernels(items: list[ExecItem]) -> None:
+  """Batch compile multiple kernels in parallel.
+
+  This function:
+  1. Identifies kernels that need compilation (not in cache)
+  2. Renders them all (sequential, due to shared UOp state)
+  3. Compiles them in parallel using multiprocessing
+  4. Populates the method_cache with results
+  """
+  from tinygrad.engine.parallel_compile import parallel_compile
+  from tinygrad.device import Compiler
+
+  # Collect kernels that need compilation
+  to_compile: list[tuple[tuple, str, ProgramSpec, str]] = []  # (cache_key, device, prg, source)
+  has_real_compiler = False  # Track if any kernel has a non-trivial compiler
+
+  for ei in items:
+    if ei.ast.op not in (Ops.SINK, Ops.PROGRAM):
+      continue
+
+    device = ei.bufs[0].device
+    cache_key = _get_cache_key(device, ei.ast)
+
+    # Skip if already cached
+    if cache_key in method_cache:
+      continue
+
+    # Render the program (without compiling)
+    prg = _render_program(device, ei.ast)
+
+    # Skip if no compiler or no source
+    if prg.src is None or Device[device].compiler is None:
+      # Still need to cache a runner for it
+      method_cache[cache_key] = CompiledRunner(replace(prg, device=device))
+      continue
+
+    # Check if this is a real compiler (not just the base Compiler that does src.encode())
+    compiler = Device[device].compiler
+    if type(compiler) is not Compiler:
+      has_real_compiler = True
+
+    to_compile.append((cache_key, device, prg, prg.src))
+
+  if not to_compile:
+    return
+
+  # Skip parallel compilation if all compilers are trivial (base Compiler class)
+  # This avoids multiprocessing overhead for devices like NULL that don't do real compilation
+  if not has_real_compiler:
+    for cache_key, device, prg, source in to_compile:
+      compiler = Device[device].compiler
+      lib = compiler.compile_cached(source)
+      method_cache[cache_key] = CompiledRunner(replace(prg, lib=lib, device=device))
+    return
+
+  if DEBUG >= 2:
+    print(f"parallel compile: {len(to_compile)} kernels")
+
+  # Prepare tasks for parallel compilation
+  # Group by compiler type for efficiency
+  tasks: list[tuple[bytes, str, type, str | None]] = []
+  prg_map: dict[bytes, tuple[tuple, str, ProgramSpec]] = {}
+
+  for cache_key, device, prg, source in to_compile:
+    compiler = Device[device].compiler
+    task_key = prg.ast.key  # Use ast.key as task key
+    tasks.append((task_key, source, type(compiler), compiler.cachekey))
+    prg_map[task_key] = (cache_key, device, prg)
+
+  # Compile in parallel
+  compiled_binaries = parallel_compile(tasks)
+
+  # Populate method_cache with results
+  for task_key, binary in compiled_binaries.items():
+    cache_key, device, prg = prg_map[task_key]
+    prg_with_lib = replace(prg, lib=binary, device=device)
+    method_cache[cache_key] = CompiledRunner(prg_with_lib)
+
 # **************** main run function ****************
 
 capturing: list = []  # put classes with an add method in here
 
+# Minimum kernels to trigger parallel compilation (overhead isn't worth it for small batches)
+PARALLEL_COMPILE_THRESHOLD = getenv("PARALLEL_COMPILE_THRESHOLD", 4)
+
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
+  # Parallel compilation: batch compile kernels before executing (only for real compilers)
+  if PARALLEL_COMPILE and len(schedule) >= PARALLEL_COMPILE_THRESHOLD:
+    # Quick check: if the first device has a trivial compiler, skip parallel compilation entirely
+    # This avoids overhead for devices like NULL that don't do real compilation
+    from tinygrad.device import Compiler
+    first_device = next((ei.bufs[0].device for ei in schedule if ei.ast.op in (Ops.SINK, Ops.PROGRAM) and ei.bufs), None)
+    if first_device is not None and type(Device[first_device].compiler) is not Compiler:
+      # Count how many kernels need compilation (not in cache)
+      uncached_count = sum(1 for ei in schedule
+                           if ei.ast.op in (Ops.SINK, Ops.PROGRAM) and ei.bufs
+                           and _get_cache_key(ei.bufs[0].device, ei.ast) not in method_cache)
+      if uncached_count >= PARALLEL_COMPILE_THRESHOLD:
+        if DEBUG >= 1:
+          print(f"parallel compile: batching {uncached_count} kernels")
+        _batch_compile_kernels(schedule)
+
   while len(schedule):
     ei = schedule.pop(0).lower()
     if len(capturing) and CAPTURING: capturing[0].add(ei)
