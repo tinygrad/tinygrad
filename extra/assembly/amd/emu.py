@@ -470,6 +470,7 @@ class SQTTState:
 
     # Cold start: first forwarding use has +1 cycle penalty
     self.forward_warm = False
+    self.cold_used = False  # True if cold start penalty was applied (counts as a forward attempt)
 
     # Forwarding limit: based on queue depth when first forward is used
     self.fwd_count = 0  # consecutive forward uses
@@ -562,23 +563,29 @@ class SQTTState:
           if not all(src in self.completed for src in srcs):
             continue
           uses_fwd = False
-        # If would use forwarding, check limit
-        elif uses_fwd:
-          # Set limit on first forward based on total chain size (items in queue + already processed)
-          if self.fwd_limit is None:
-            # Chain size = current queue + items already dispatched (fwd_count so far)
-            # Plus 1 for the current instruction
-            chain_size = len(self.issue_queue) + self.fwd_count + 1
-            self.fwd_limit = 3 + chain_size // 5
-          if self.fwd_count >= self.fwd_limit:
-            self.issue_queue[i] = (dest, srcs, self.cycle + 4, True)  # +4 cycles regfile penalty
-            continue
         if not ready:
           continue
         # Cold start penalty: first dependent instruction has +1 cycle delay
-        if has_deps and not self.forward_warm:
+        # This counts as a "forward attempt" even though it won't actually use forwarding
+        # Check this BEFORE calculating fwd_limit so chain_size is correct
+        if has_deps and not self.forward_warm and not self.cold_used:
+          self.cold_used = True
+          self.fwd_count += 1  # cold start consumes one forward slot
           self.issue_queue[i] = (dest, srcs, self.cycle + 1, use_regfile)
           continue
+        # If would use forwarding, check limit
+        if uses_fwd:
+          # Set limit on first forward based on total chain size
+          # chain_size = items in queue + already forwarded + 1 for current instruction
+          if self.fwd_limit is None:
+            chain_size = len(self.issue_queue) + self.fwd_count + 1
+            # Warmup: fwd_limit = 3 + (chain_size - 1)//5
+            # Cold: fwd_limit = 3 + (chain_size - 2)//5 (cold_used already True means cold took a slot)
+            adj = 2 if self.cold_used else 1
+            self.fwd_limit = 3 + (chain_size - adj) // 5
+          if self.fwd_count >= self.fwd_limit:
+            self.issue_queue[i] = (dest, srcs, self.cycle + 4, True)  # +4 cycles regfile penalty
+            continue
         # Enter ALU
         self.alu[0] = dest
         self.issue_queue.pop(i)
