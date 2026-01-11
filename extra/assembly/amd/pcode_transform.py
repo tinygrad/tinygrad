@@ -37,6 +37,7 @@ _CONSTS = {
   'MAX_FLOAT_F32': (dtypes.float32, 3.4028235e+38), 'MAX_FLOAT_F64': (dtypes.float64, 1.7976931348623157e+308),
   'OVERFLOW_F32': (dtypes.float32, math.inf), 'OVERFLOW_F64': (dtypes.float64, math.inf),
   'UNDERFLOW_F32': (dtypes.float32, 0.0), 'UNDERFLOW_F64': (dtypes.float64, 0.0),
+  'WAVE32': (dtypes.uint32, 1), 'WAVE64': (dtypes.uint32, 0),  # RDNA3 is wave32 mode
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
