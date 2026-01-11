@@ -3,7 +3,6 @@ from tinygrad.uop import X86Ops, Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
 from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.renderer.isa import IselContext, Register
-from tinygrad import dtypes
 
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp):

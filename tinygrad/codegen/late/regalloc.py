@@ -44,7 +44,7 @@ def load(ctx:RegallocContext, dt:DType, disp:UOp, reg:Register):
   return ret.replace(dtype=dt)
 def store(ctx:RegallocContext, disp:UOp, x:UOp):
   nx = x.replace(dtype=dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype)
-  ret = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(disp).store(nx))#  ,  UOp(Ops.STORE, src=(ctx.ren.stack_pointer(), disp, nx)))
+  ret = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(disp).store(nx))
   assert ret is not None
   return ret.replace(src=(s if s is not nx else x for s in ret.src))
 
@@ -71,7 +71,7 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
       # then those moves are removed after regalloc if they move to the same register. I think this is the llvm approach
       # alternatively you could beef up the register class to include constraints on the srcs, then you check those here
       if v not in ctx.live:
-        ctx.live[v] = alloc(ctx, v.cons if v.cons else (v,), i)
+        ctx.live[v] = alloc(ctx, v.cons or (v,), i)
         s = load(ctx, s.dtype, ctx.spills[v], ctx.live[v])
         loads.append(s)
       else: s = load(ctx, s.dtype, ctx.spills[v], ctx.live[v])
@@ -79,10 +79,11 @@ def regalloc(ctx:RegallocContext, x:UOp, i:int) -> tuple[UOp, list[UOp]]:
   # allocate destination
   if isinstance(v:=x.arg, Register) and v not in ctx.live:
     # if no cons it's a real register, so it can only be assigned to itself
-    cons = v.cons if v.cons else (v,)
+    cons = v.cons or (v,)
     # two address instructions (src is used in dest) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
     if (j:=ctx.ren.two_address(x)) is not None:
-      cons = (ctx.live[ctx.rewrite_to_vreg[x.src[j]]],) + tuple(r for r in cons if r not in tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src))
+      cons = (ctx.live[ctx.rewrite_to_vreg[x.src[j]]],) + \
+        tuple(r for r in cons if r not in tuple(ctx.live.get(ctx.rewrite_to_vreg[s]) for s in x.src))
     ctx.live[v] = alloc(ctx, cons, i+1)
 
   nx = x.replace(src=tuple(nsrc), arg=ctx.live.get(v, v))
@@ -101,9 +102,9 @@ def loop_prologue(ctx:RegallocContext, x:UOp, i:int):
   loads = []
   for v in sorted_uses:
     # if all the possible registers are already in live_in there's no space for this var
-    if set(v.cons if v.cons else (v,)).issubset(live_in.values()): assert v in ctx.spills; continue
+    if set(v.cons or (v,)).issubset(live_in.values()): continue
     if v not in ctx.live:
-      ctx.live[v] = alloc(ctx, v.cons if v.cons else (v,), i)
+      ctx.live[v] = alloc(ctx, v.cons or (v,), i)
       s = ctx.vreg_to_rewrite[v]
       loads.append(load(ctx, s.dtype, ctx.spills[v], ctx.live[v]))
     assert ctx.live[v] not in live_in.values()
@@ -132,5 +133,6 @@ pm_regalloc = PatternMatcher([
 # annoying that this is another pm
 pm_insert_spills = PatternMatcher([
   # insert spill after definition
-  (UPat(X86GroupOp.All | {Ops.RANGE}, name="x"), lambda ctx,x: (x, [x, store(ctx, y, x)]) if (y:=ctx.spills.get(ctx.rewrite_to_vreg.get(x))) is not None else None),
+  (UPat(X86GroupOp.All | {Ops.RANGE}, name="x"), lambda ctx,x:
+   (x, [x, store(ctx, y, x)]) if (y:=ctx.spills.get(ctx.rewrite_to_vreg.get(x))) is not None else None),
 ])

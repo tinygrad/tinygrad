@@ -217,9 +217,9 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.CONST, dtypes.int64s, name="x"), lambda x: UOp(X86Ops.MOVABS, x.dtype, (imm(x.dtype, x.arg),)) if x.tag is None else None),
   (UPat(Ops.CONST, dtypes.ints+(dtypes.bool,), name="x"), lambda x: UOp(X86Ops.MOVi, x.dtype, (imm(x.dtype, x.arg),)) if x.tag is None else None),
   # conditional moves that use masks NOTE: these currently assume a mask producing cmp exists
-  (UPat(name="m").where(UPat.var("a", dtypes.ints), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VPBLENDVB, src=(b, a, m.replace(dtype=m.src[0].dtype))) if x.dtype.count > 1 else None), # noqa: E501
-  (UPat(name="m").where(UPat.var("a", dtypes.float32), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VBLENDVPS, src=(b, a, m.replace(dtype=m.src[0].dtype)))), # noqa: E501
-  (UPat(name="m").where(UPat.var("a", dtypes.float64), UPat.var("b")).named("x"), lambda m,a,b,x: x.replace(op=X86Ops.VBLENDVPD, src=(b, a, m.replace(dtype=m.src[0].dtype)))), # noqa: E501
+  (UPat.var("m").where(UPat.var("a", dtypes.ints), UPat.var("b")), lambda m,a,b: UOp(X86Ops.VPBLENDVB, a.dtype, (b, a, m.replace(dtype=m.src[0].dtype))) if a.dtype.count > 1 else None), # noqa: E501
+  (UPat.var("m").where(UPat.var("a", dtypes.float32), UPat.var("b")), lambda m,a,b: UOp(X86Ops.VBLENDVPS, a.dtype, (b, a, m.replace(dtype=m.src[0].dtype)))), # noqa: E501
+  (UPat.var("m").where(UPat.var("a", dtypes.float64), UPat.var("b")), lambda m,a,b: UOp(X86Ops.VBLENDVPD, a.dtype, (b, a, m.replace(dtype=m.src[0].dtype)))), # noqa: E501
   # in this case we have a mask producing comparison whose user expects a bool, so we convert to bool
   (UPat(GroupOp.Comparison, dtypes.bool, (UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.replace(dtype=x.src[0].dtype).bitcast(dtypes.int32).bitwise_and(1).f(Ops.NOOP, dtype=dtypes.bool)), # noqa: E501
   (UPat(GroupOp.Comparison, dtypes.bool, (UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.replace(dtype=x.src[0].dtype).bitcast(dtypes.int64).bitwise_and(1).f(Ops.NOOP, dtype=dtypes.bool)), # noqa: E501
