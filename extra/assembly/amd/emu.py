@@ -3,8 +3,9 @@
 from __future__ import annotations
 import ctypes, functools
 from tinygrad.runtime.autogen import hsa
-from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
-from extra.assembly.amd.asm import detect_format
+from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64
+from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
+from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.pcode import compile_pseudocode
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
 from extra.assembly.amd.dsl import SrcEnum
@@ -362,7 +363,7 @@ def decode_program(data: bytes) -> dict[int, Inst]:
   result: dict[int, Inst] = {}
   i = 0
   while i < len(data):
-    inst = detect_format(data[i:]).from_bytes(data[i:])
+    inst = decode_inst(data[i:])
     inst._words = inst.size() // 4
 
     # Determine dispatch function and pcode function
