@@ -87,8 +87,8 @@ if __name__=="__main__":
     launchBenchmark(v_swmmac_i32_16x16x64_iu4, (7,8,9,10,13,14), False)
   elif DEV.arch == 'gfx950':
     from extra.assembly.amd.autogen.cdna.ins import *
-    INST_LOOP_STEP = s_add_i32
-    KD = {"amdhsa_accum_offset":4}
+    INST_LOOP_STEP = s_add_i32(S_LOOP_N, S_LOOP_N, -1)
+    KD = {"amdhsa_accum_offset":4, "next_free_vgpr":32, "next_free_sgpr":8}
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64
     NUM_WAVES = 4
