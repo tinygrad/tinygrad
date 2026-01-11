@@ -1,7 +1,7 @@
 # library for RDNA3 assembly DSL
 # mypy: ignore-errors
 from __future__ import annotations
-import re
+import re, struct
 from enum import IntEnum
 from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
@@ -27,6 +27,10 @@ OFF = NULL
 
 # Common masks
 MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
+
+# Float/int bit conversion (simple versions for literal encoding)
+def _i32(f: float) -> int: return struct.unpack("<I", struct.pack("<f", f))[0]
+def _i64(f: float) -> int: return struct.unpack("<Q", struct.pack("<d", f))[0]
 
 # Instruction spec - register counts and dtypes derived from instruction names
 _REGS = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16,

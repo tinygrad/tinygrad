@@ -1,8 +1,7 @@
 # RDNA3/RDNA4/CDNA disassembler
 from __future__ import annotations
 import re
-from extra.assembly.amd.dsl import Inst, decode_src
-from extra.assembly.amd.dsl import SPECIAL_GPRS, SPECIAL_PAIRS, SPECIAL_PAIRS_CDNA
+from extra.assembly.amd.dsl import Inst, decode_src, SPECIAL_GPRS, SPECIAL_GPRS_CDNA, SPECIAL_PAIRS, SPECIAL_PAIRS_CDNA
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP,
   VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp)
 from extra.assembly.amd.autogen.rdna3.enum import BufFmt
@@ -46,7 +45,6 @@ def _ttmp(b: int, n: int = 1) -> str: return _reg("ttmp", b - 108, n) if 108 <= 
 def _sreg_or_ttmp(b: int, n: int = 1) -> str: return _ttmp(b, n) or _sreg(b, n)
 
 def _fmt_sdst(v: int, n: int = 1, cdna: bool = False) -> str:
-  from extra.assembly.amd.dsl import SPECIAL_PAIRS_CDNA, SPECIAL_GPRS_CDNA
   if t := _ttmp(v, n): return t
   pairs = SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS
   gprs = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
@@ -54,7 +52,6 @@ def _fmt_sdst(v: int, n: int = 1, cdna: bool = False) -> str:
   return gprs.get(v, f"s{v}")
 
 def _fmt_src(v: int, n: int = 1, cdna: bool = False) -> str:
-  from extra.assembly.amd.dsl import SPECIAL_PAIRS_CDNA
   if n == 1: return decode_src(v, cdna)
   if v >= 256: return _vreg(v - 256, n)
   if v <= 101: return _sreg(v, n)  # s0-s101 can be pairs, but 102+ are special on CDNA
