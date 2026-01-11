@@ -237,6 +237,9 @@ class TestVALULatency(unittest.TestCase):
   6 cycles: no VGPR source (constant only), stays 6 regardless of warmup
   8-11 cycles: VGPR source read, decreases with warmup (11->10->9->8)
   s_nop(0) after VALU immediately drops VGPR read latency to 8
+  Anomalies:
+    - 7 consecutive VALUs (no s_nop) causes +1 cycle penalty
+    - n=0 or n=3 const VALUs + nop + vgpr = 9 cycles (not 8)
   """
   def _get_latency(self, instrs):
     if not isinstance(instrs, list): instrs = [instrs]
@@ -272,6 +275,22 @@ class TestVALULatency(unittest.TestCase):
 
   # s_nop(0) immediately drops VGPR read latency to 8
   def test_vgpr_nop_warmup(self): self.assertEqual(self._get_latency([v_mov_b32_e32(v[0], 1.0), s_nop(0), v_mov_b32_e32(v[1], v[99])]), 8)
+
+  # s_nop + vgpr read: latency depends on # of const VALUs before nop
+  def _n_const_nop_vgpr(self, n):
+    """N const VALUs + s_nop(0) + vgpr read."""
+    instrs = [v_mov_b32_e32(v[i], float(i)) for i in range(n)]
+    instrs += [s_nop(0)]
+    instrs += [v_mov_b32_e32(v[10], v[99])]
+    return self._get_latency(instrs)
+  def test_0_const_nop_vgpr(self): self.assertEqual(self._n_const_nop_vgpr(0), 9)
+  def test_1_const_nop_vgpr(self): self.assertEqual(self._n_const_nop_vgpr(1), 8)
+  def test_2_const_nop_vgpr(self): self.assertEqual(self._n_const_nop_vgpr(2), 8)
+  def test_3_const_nop_vgpr(self): self.assertEqual(self._n_const_nop_vgpr(3), 9)  # anomaly
+  def test_4_const_nop_vgpr(self): self.assertEqual(self._n_const_nop_vgpr(4), 8)
+  def test_5_const_nop_vgpr(self): self.assertEqual(self._n_const_nop_vgpr(5), 8)
+  def test_6_const_nop_vgpr(self): self.assertEqual(self._n_const_nop_vgpr(6), 8)
+  def test_7_const_nop_vgpr(self): self.assertEqual(self._n_const_nop_vgpr(7), 8)
 
 
 class TestChainWithNop(unittest.TestCase):
