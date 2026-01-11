@@ -83,29 +83,30 @@ def _fp_extract(x: UOp, field: str) -> UOp:
   if field == 'exp': return bits.alu(Ops.SHR, UOp.const(uint_dt, exp_shift)).cast(dtypes.uint32).alu(Ops.AND, UOp.const(dtypes.uint32, exp_mask))
   # mantissa: preserve sign, set exponent to bias-1, keep mantissa bits
   mant = bits.alu(Ops.AND, UOp.const(uint_dt, (1 << sign_shift) | mant_mask)).alu(Ops.OR, UOp.const(uint_dt, (bias - 1) << exp_shift)).bitcast(x.dtype)
-  return x.alu(Ops.CMPEQ, UOp.const(x.dtype, 0.0)).where(x, mant)
+  return x.eq(0.0).where(x, mant)
 
 def _v_sad_u8(a: UOp, b: UOp, c: UOp) -> UOp:
+  u32, c0xff = dtypes.uint32, UOp.const(dtypes.uint32, 0xff)
   result = c
   for i in range(4):
-    ba, bb = (a.alu(Ops.SHR, UOp.const(dtypes.uint32, i * 8)) & 0xff), (b.alu(Ops.SHR, UOp.const(dtypes.uint32, i * 8)) & 0xff)
+    ba = a.alu(Ops.SHR, UOp.const(u32, i * 8)).alu(Ops.AND, c0xff)
+    bb = b.alu(Ops.SHR, UOp.const(u32, i * 8)).alu(Ops.AND, c0xff)
     diff = ba - bb
-    result = result + diff.alu(Ops.CMPLT, UOp.const(dtypes.uint32, 0x80000000)).where(diff, 0 - diff)
+    result = result + diff.lt(0x80000000).where(diff, 0 - diff)
   return result
 
 def _byte_permute(data: UOp, sel: UOp) -> UOp:
   u32, u64 = dtypes.uint32, dtypes.uint64
   src64 = data.cast(u64)
   sel_m = sel.cast(u32).alu(Ops.AND, UOp.const(u32, 0xff))
-  sel_idx = sel_m.alu(Ops.AND, UOp.const(u32, 7))
-  sel_nib = sel_m.alu(Ops.AND, UOp.const(u32, 0xf))
+  sel_idx, sel_nib = sel_m.alu(Ops.AND, UOp.const(u32, 7)), sel_m.alu(Ops.AND, UOp.const(u32, 0xf))
   result = src64.alu(Ops.SHR, sel_idx.alu(Ops.SHL, UOp.const(u32, 3)).cast(u64)).alu(Ops.AND, UOp.const(u64, 0xff)).cast(u32)
   for i, pos in enumerate([15, 31, 47, 63], 8):  # sign extension from byte boundaries
-    sbit = src64.alu(Ops.SHR, UOp.const(u64, pos)).alu(Ops.AND, UOp.const(u64, 1)).alu(Ops.CMPNE, UOp.const(u64, 0)).where(UOp.const(u32, 0xff), UOp.const(u32, 0))
-    result = sel_nib.alu(Ops.CMPEQ, UOp.const(u32, i)).where(sbit, result)
-  result = sel_nib.alu(Ops.CMPEQ, UOp.const(u32, 12)).where(UOp.const(u32, 0), result)
-  result = UOp.const(u32, 12).alu(Ops.CMPLT, sel_nib).where(UOp.const(u32, 0xff), result)
-  return sel_m.alu(Ops.AND, UOp.const(u32, 0x80)).alu(Ops.CMPNE, UOp.const(u32, 0)).where(UOp.const(u32, 0), result)
+    sbit = src64.alu(Ops.SHR, UOp.const(u64, pos)).alu(Ops.AND, UOp.const(u64, 1)).ne(0).where(UOp.const(u32, 0xff), UOp.const(u32, 0))
+    result = sel_nib.eq(i).where(sbit, result)
+  result = sel_nib.eq(12).where(UOp.const(u32, 0), result)
+  result = (sel_nib > 12).where(UOp.const(u32, 0xff), result)
+  return sel_m.alu(Ops.AND, UOp.const(u32, 0x80)).ne(0).where(UOp.const(u32, 0), result)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATTERN HANDLERS
