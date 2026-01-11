@@ -429,8 +429,11 @@ def _transform_if(branches: tuple, ctx: Ctx):
       ctx.outputs.append((var, result, dtype))
 
 def _transform_for(var: str, start: UOp, end: UOp, body: tuple, ctx: Ctx):
-  start_val = start.arg if start.op == Ops.CONST else int(_expr(start, ctx).arg)
-  end_val = end.arg if end.op == Ops.CONST else int(_expr(end, ctx).arg)
+  start_expr = _expr(start, ctx).simplify() if start.op != Ops.CONST else start
+  end_expr = _expr(end, ctx).simplify() if end.op != Ops.CONST else end
+  start_val = start_expr.arg if start_expr.op == Ops.CONST else _eval_uop(start_expr)
+  end_val = end_expr.arg if end_expr.op == Ops.CONST else _eval_uop(end_expr)
+  if start_val is None or end_val is None: raise ValueError(f"For loop bounds must be constant: start={start_expr}, end={end_expr}")
   for i in range(int(end_val), int(start_val) - 1, -1):
     ctx.vars[var] = UOp.const(ctx.decls.get(var, dtypes.uint32), i)
     for s in body:
