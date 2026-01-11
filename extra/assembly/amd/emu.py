@@ -425,42 +425,10 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 WAVESTART_TO_INST_CYCLES = 32
-VALU_LATENCY = 6
-SNOP_PIPELINE_DELAY = 3
-SNOP_EXTRA_DELAY_MIN, SNOP_EXTRA_DELAY_MAX = 7, 18  # extra +4 delay range (no pending)
-SNOP_EXTRA_DELAY_MIN_PENDING, SNOP_EXTRA_DELAY_MAX_PENDING = 11, 22  # extra +4 delay range (pending)
+SNOP_EXTRA_DELAY_MIN, SNOP_EXTRA_DELAY_MAX = 11, 22  # s_nop(11-22) has +4 penalty
 SNOP_EXTRA_DELAY_CYCLES = 4
-FORWARD_DEPTH_LIMIT = 4  # chain depth where forwarding exhaustion starts
-FORWARD_DEEP_LATENCY = 9  # latency for exhausted forwarding
-REGCACHE_BYPASS_TIMEOUT = 4  # s_nop(N>=4) triggers bypass penalty
-REGCACHE_BYPASS_PENALTY = 4
 
 from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE, VALUINST, ALUEXEC, AluSrc
-
-# hand coded simple
-
-# S_WAITCNT -- SIMM16 = { VMcnt[5:0], LGKMcnt[5:0], 1’b0, EXPcnt[2:0] }
-#  VMcnt
-#  VScnt
-#  LGKMcnt
-#  EXPcnt
-
-# S_DELAY_ALU
-#  InstID0  = SIMM16[3:0]
-#  InstSkip = SIMM16[6:4]
-#  InstID1  = SIMM16[10:7]
-
-class VQueueItem:
-  def __init__(self, inst, deps):
-    self.inst = inst
-    self.deps = deps
-    # TODO: this should track through the phases of VQueue
-    self.cycles = 7
-  def tick(self):
-    if any(not d.finished() for d in self.deps): return
-    self.cycles -= 1
-  def finished(self):
-    return self.cycles <= 0
 
 def _get_src_vgprs(inst: Inst) -> list[int]:
   if isinstance(inst, VOP1): return [inst.src0 - 256] if inst.src0 >= 256 else []
@@ -469,66 +437,136 @@ def _get_src_vgprs(inst: Inst) -> list[int]:
   return []
 
 class SQTTState:
+  """SQTT tracing with real pipeline model.
+
+  Pipeline: Issue -> DepFetch -> ALU[0-3] -> Writeback
+  - Issue: 1 instruction per cycle
+  - DepFetch: wait for operands (const=immediate, vgpr=forward or regfile)
+  - ALU: 4 stages, shifts each cycle
+  - Writeback: 1 per cycle, emits ALUEXEC, result available for forwarding
+  """
   def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
     self.cycle = 0
     self.packets = []
-    self.last_inst = None
-    self.vqueue:list[VQueueItem] = []
-    self.vgpr_pends = {}
-    self.delay_alu = 0
+
+    # Pipeline state
+    self.alu = [None, None, None, None]  # ALU stages 0-3, each holds (inst, dest_vgpr) or None
+    self.writeback = None  # Instruction in writeback stage
+    self.dep_fetch = []  # Instructions waiting for operands: [(inst, dest_vgpr, src_vgprs, ready_cycle)]
+    #                     ready_cycle = earliest cycle this instruction can enter ALU[0]
+
+    # Forwarding: vgpr available for forwarding this cycle (set during writeback)
+    self.forward_vgpr = None
+
+    # Track which vgprs are being written by in-flight instructions
+    self.vgpr_in_flight = {}  # vgpr -> True if in pipeline
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
 
+  def _is_in_flight(self, vgpr: int) -> bool:
+    """Check if vgpr is being written by an instruction in the pipeline."""
+    for slot in self.alu:
+      if slot is not None and slot[1] == vgpr: return True
+    if self.writeback is not None and self.writeback[1] == vgpr: return True
+    for item in self.dep_fetch:
+      if item[1] == vgpr: return True
+    return False
+
+  def _deps_ready(self, srcs: list[int], forward_vgpr: int = None) -> bool:
+    """Check if all source vgprs are available (via forwarding or not in flight)."""
+    for vgpr in srcs:
+      # Can forward if this vgpr was written back last cycle
+      if vgpr == forward_vgpr:
+        continue
+      # If vgpr is in flight, must wait for forwarding
+      if self._is_in_flight(vgpr):
+        return False
+    return True
+
   def tick(self):
-    # TODO: build a real model here of when things are getting scheduled
-    # think about the resources used at each cycle of the pipeline
-    for q in self.vqueue: q.tick()
-    # if this instruction is finished, mark it as finished
-    if len(self.vqueue) and self.vqueue[0].finished():
-      self.emit(ALUEXEC, src=AluSrc.VALU)
-      self.vqueue.pop(0)
     self.cycle += 1
+    if DEBUG >= 3: print(f"C{self.cycle}:", end="")
+
+    # 1. Clear forward from previous cycle (forward only lasts 1 cycle)
+    prev_forward = self.forward_vgpr
+    self.forward_vgpr = None
+
+    # 2. DepFetch -> ALU[0]: check if any instruction can enter ALU
+    #    - Must always wait until ready_cycle (1 cycle in dep_fetch)
+    #    - If forwarding available: deps resolved, just wait for ready_cycle
+    #    - If no forwarding and VGPR cold: extra wait for regfile read
+    for item in self.dep_fetch[:]:
+      inst, dest, srcs, ready_cycle = item
+      if not self._deps_ready(srcs, prev_forward): continue  # deps not resolved yet
+      if self.cycle < ready_cycle: continue  # must wait for dep_fetch cycle
+      self.dep_fetch.remove(item)
+      self.alu[0] = (inst, dest)
+      uses_forwarding = prev_forward is not None and prev_forward in srcs
+      if DEBUG >= 3: print(f" DepFetch->ALU[0] v{dest}{'(fwd)' if uses_forwarding else ''}", end="")
+      break
+
+    # 3. Shift ALU pipeline: [0]->[1]->[2]->[3]
+    #    But first save ALU[3] for writeback
+    alu3_out = self.alu[3]
+    self.alu[3] = self.alu[2]
+    self.alu[2] = self.alu[1]
+    self.alu[1] = self.alu[0]
+    self.alu[0] = None
+
+    # 4. Writeback: emit ALUEXEC, make forward available for NEXT cycle
+    if self.writeback is not None:
+      inst, dest = self.writeback
+      self.emit(ALUEXEC, src=AluSrc.VALU)
+      self.forward_vgpr = dest  # Available for next cycle's dep resolution
+      if DEBUG >= 3: print(f" WB v{dest}", end="")
+
+    # 5. ALU[3] output -> Writeback for next cycle
+    self.writeback = alu3_out
+    if alu3_out is not None and DEBUG >= 3: print(f" ALU[3]->WB", end="")
+
+    if DEBUG >= 3: print()
+
+  def _pipeline_empty(self) -> bool:
+    """Check if pipeline has no in-flight instructions."""
+    if self.writeback is not None: return False
+    if any(slot is not None for slot in self.alu): return False
+    if self.dep_fetch: return False
+    return True
 
   def process_instruction(self, inst: Inst):
-    if DEBUG >= 2: print(inst)
+    if DEBUG >= 2: print(f"Process: {inst}")
+
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_DELAY_ALU:
-      # delay alu isn't a dispatch
-      self.delay_alu = inst.simm16
+      # TODO: model delay_alu properly
       return
+
     elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_NOP:
-      # this repros with s_nop(0), s_nop(7)
-      # why does this happen?
-      # TODO: i think the 4 cycles is a generic stall, it's also seen in non indep valu chains
-      in_range = (SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX and self.last_inst is not None)
-      cycles = inst.simm16
-      # 2 extra cycles
-      if isinstance(self.last_inst, (VOP1, VOP2, VOP3)): cycles += 2
-      if in_range: cycles += SNOP_EXTRA_DELAY_CYCLES
+      # s_nop(N) delays N+1 cycles, plus extra penalty for s_nop(11-22)
+      cycles = inst.simm16 + 1
+      if SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX:
+        cycles += SNOP_EXTRA_DELAY_CYCLES
       for _ in range(cycles): self.tick()
       self.emit(IMMEDIATE, wave=self.wave_id)
-    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM:
-      while len(self.vqueue): self.tick()
-      self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
-    elif isinstance(inst, (VOP1, VOP2, VOP3)):
-      # delay_alu delays the dispatch
-      if self.delay_alu and len(self.vqueue):
-        # TODO: support other delay_alus
-        while self.vqueue[-1].cycles > 2: self.tick()
-      # TODO: if vqueue is full, there's a delay on enqueuing
-      deps = []
-      for src in _get_src_vgprs(inst):
-        if src in self.vgpr_pends:
-          deps.append(self.vgpr_pends[src])
-      self.vqueue.append(VQueueItem(inst, deps))
-      self.vgpr_pends[inst.vdst] = self.vqueue[-1]
-      self.emit(VALUINST, wave=self.wave_id)
 
-    # we can only issue one instruction per cycle
+    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM:
+      # Drain pipeline before ending
+      while not self._pipeline_empty(): self.tick()
+      self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+
+    elif isinstance(inst, (VOP1, VOP2, VOP3)):
+      # Issue: add to dep_fetch queue with ready_cycle (dep_fetch takes 1 cycle)
+      # After issue, tick() advances cycle. Instruction needs 1 full cycle in dep_fetch,
+      # so ready_cycle = cycle + 2 (current cycle + tick + 1 cycle dep_fetch)
+      srcs = _get_src_vgprs(inst)
+      ready_cycle = self.cycle + 2  # Can enter ALU[0] after dep_fetch completes
+      self.dep_fetch.append((inst, inst.vdst, srcs, ready_cycle))
+      self.emit(VALUINST, wave=self.wave_id)
+      if DEBUG >= 3: print(f"C{self.cycle}: Issue {inst.op_name} v{inst.vdst} srcs={srcs} ready@{ready_cycle}")
+
+    # One cycle per instruction issued
     self.tick()
-    self.last_inst = inst
-    self.delay_alu = 0
 
   def emit_wavestart(self):
     self.emit(WAVESTART, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
