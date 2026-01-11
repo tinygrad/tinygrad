@@ -471,9 +471,9 @@ class SQTTState:
     # Cold start: first forwarding use has +1 cycle penalty
     self.forward_warm = False
 
-    # Forwarding limit: based on queue depth when root producer completes
+    # Forwarding limit: based on queue depth when first forward is used
     self.fwd_count = 0  # consecutive forward uses
-    self.fwd_limit = 3  # base limit, increases with queue depth
+    self.fwd_limit = None  # set on first forward based on queue depth
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
@@ -563,9 +563,16 @@ class SQTTState:
             continue
           uses_fwd = False
         # If would use forwarding, check limit
-        elif uses_fwd and self.fwd_count >= self.fwd_limit:
-          self.issue_queue[i] = (dest, srcs, self.cycle + 4, True)  # +4 cycles regfile penalty
-          continue
+        elif uses_fwd:
+          # Set limit on first forward based on total chain size (items in queue + already processed)
+          if self.fwd_limit is None:
+            # Chain size = current queue + items already dispatched (fwd_count so far)
+            # Plus 1 for the current instruction
+            chain_size = len(self.issue_queue) + self.fwd_count + 1
+            self.fwd_limit = 3 + chain_size // 5
+          if self.fwd_count >= self.fwd_limit:
+            self.issue_queue[i] = (dest, srcs, self.cycle + 4, True)  # +4 cycles regfile penalty
+            continue
         if not ready:
           continue
         # Cold start penalty: first dependent instruction has +1 cycle delay
@@ -578,9 +585,7 @@ class SQTTState:
         if uses_fwd:
           self.forward_warm = True
           self.fwd_count += 1
-        elif has_deps:
-          # Using regfile resets counter
-          self.fwd_count = 0
+        # Note: don't reset fwd_count/fwd_limit on regfile use - once exhausted, stay exhausted
         events.append(colored(f"v{dest}->ALU" + ("(fwd)" if uses_fwd else ""), 'green'))
         break
 
@@ -595,9 +600,7 @@ class SQTTState:
         if d == exiting:
           self.in_flight.pop(idx)
           break
-      # Update forwarding limit based on queue depth: +1 forward per 5 instructions waiting
-      queue_depth = len(self.issue_queue)
-      self.fwd_limit = 3 + queue_depth // 5
+
 
     self._debug_line(events)
 

@@ -500,11 +500,13 @@ class TestDelayALU(unittest.TestCase):
 
 
 class TestNopTimingSensitivity(unittest.TestCase):
-  """Forwarding behavior changes based on nop warmup timing.
+  """Forwarding behavior has 128-cycle periodicity.
 
-  Hardware observation: s_nop(200-203) before a chain allows one extra forward
-  compared to s_nop(199) or s_nop(204+). This suggests the forwarding limit
-  is sensitive to exact cycle alignment, possibly due to wave scheduling.
+  Hardware observation: when nop_cycles % 128 is in [72, 75], chain_6 gets 5 forwards
+  instead of 4. This 4-cycle window repeats every 128 cycles, suggesting alignment
+  with some hardware scheduling period (possibly wave scheduler or cache).
+
+  Windows found: nop 72-75, 200-203, 328-331, 456-459, ...
   """
   def _chain6_fwd_count(self, nop_size):
     """Count initial consecutive forwards for a 6-instruction chain after s_nop(n)."""
@@ -513,7 +515,6 @@ class TestNopTimingSensitivity(unittest.TestCase):
     for i in range(1, 6):
       instrs += [v_mov_b32_e32(v[i], v[i-1])]
     _, execd = get_deltas(instrs)
-    # Count forwards (delta=5) in chain portion (skip warmup)
     chain_deltas = execd[1:]
     fwd_count = 0
     for d in chain_deltas:
@@ -521,12 +522,19 @@ class TestNopTimingSensitivity(unittest.TestCase):
       else: break
     return fwd_count
 
+  # Normal case: 4 forwards
+  def test_nop71(self): self.assertEqual(self._chain6_fwd_count(71), 4)
+  def test_nop76(self): self.assertEqual(self._chain6_fwd_count(76), 4)
   def test_nop199(self): self.assertEqual(self._chain6_fwd_count(199), 4)
-  def test_nop200(self): self.assertEqual(self._chain6_fwd_count(200), 5)  # anomaly: extra forward
-  def test_nop201(self): self.assertEqual(self._chain6_fwd_count(201), 5)
-  def test_nop202(self): self.assertEqual(self._chain6_fwd_count(202), 5)
-  def test_nop203(self): self.assertEqual(self._chain6_fwd_count(203), 5)
   def test_nop204(self): self.assertEqual(self._chain6_fwd_count(204), 4)
+
+  # Anomaly window at nop % 128 == 72-75: 5 forwards
+  def test_nop72(self): self.assertEqual(self._chain6_fwd_count(72), 5)
+  def test_nop75(self): self.assertEqual(self._chain6_fwd_count(75), 5)
+  def test_nop200(self): self.assertEqual(self._chain6_fwd_count(200), 5)
+  def test_nop203(self): self.assertEqual(self._chain6_fwd_count(203), 5)
+  def test_nop328(self): self.assertEqual(self._chain6_fwd_count(328), 5)
+  def test_nop331(self): self.assertEqual(self._chain6_fwd_count(331), 5)
 
 
 if __name__ == "__main__":
