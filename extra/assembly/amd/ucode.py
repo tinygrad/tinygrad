@@ -44,31 +44,28 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
   """Transform parsed UOp expression to resolved UOp."""
   match node:
     case UOp(Ops.CONST, dtypes.void, (type_src,), val):  # Deferred const: infer type from type_src
-      resolved_src = _expr(type_src, ctx, hint)
-      return UOp.const(resolved_src.dtype, val)
-    case UOp(Ops.CONST, dt, _, val):
-      dt = dt if dt != dtypes.int32 or hint is None else hint
-      return UOp.const(dtypes.float32 if isinstance(val, float) and dt not in FLOATS else dt, val)
+      return UOp.const(_expr(type_src, ctx, hint).dtype, val)
+    case UOp(Ops.CONST, dt, _, val): return UOp.const(dt, val)
 
     case UOp(Ops.DEFINE_VAR, dt, _, (name, _, _)):
-      if name.startswith('eval '): return ctx.vars.get('_eval', UOp.const(dtypes.uint32, 0))
       if name not in ctx.vars: raise ValueError(f"Unknown variable: {name}")
       return _cast(ctx.vars[name], hint or dt if dt != dtypes.void else ctx.vars[name].dtype)
 
     case UOp(Ops.BITCAST, dt, (inner,)):
-      # Typed variable access: Var.type (special vars and constants handled by pcode_transform)
+      # Typed variable access: S0.f32 -> look up S0 and cast/bitcast to f32
       if inner.op == Ops.DEFINE_VAR and inner.dtype == dtypes.void:
         name = inner.arg[0]
         vn = name + '_64' if dt.itemsize == 8 and name.isupper() else name
         base = ctx.vars.get(vn) if vn in ctx.vars else ctx.vars.get(name)
         if base is None: raise ValueError(f"Unknown variable: {name}")
-        if dt.itemsize == 3 and 'int' in dt.name:
+        if dt.itemsize == 3 and 'int' in dt.name:  # 24-bit int
           masked = UOp(Ops.AND, dtypes.uint32, (base, UOp.const(dtypes.uint32, 0xffffff)))
           return masked if 'uint' in dt.name else UOp(Ops.SUB, dtypes.int32, (UOp(Ops.XOR, dtypes.int32, (masked, UOp.const(dtypes.int32, 0x800000))), UOp.const(dtypes.int32, 0x800000)))
         if dt == dtypes.float16: return UOp(Ops.BITCAST, dtypes.float16, (UOp(Ops.AND, dtypes.uint16, (_cast(base, dtypes.uint16), UOp.const(dtypes.uint16, 0xffff))),))
         if dt in FLOATS: return UOp(Ops.BITCAST, dt, (base,))
         if dt in (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.int64): return _cast(ctx.vars.get(name + '_64', base) if dt == dtypes.int64 else base, dt)
         return _cast(base, dt)
+      # Non-variable BITCAST: ensure proper types for float16/bfloat16
       inner_resolved = _expr(inner, ctx, dt)
       if dt in (dtypes.float16, dtypes.bfloat16): return UOp(Ops.BITCAST, dt, (_cast(inner_resolved, dtypes.uint16),))
       if dt in FLOATS: return UOp(Ops.BITCAST, dt, (inner_resolved,))
@@ -109,16 +106,6 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
         shifted = UOp(Ops.SHR, base.dtype, (base, UOp.const(base.dtype, lo_val))) if lo_val else base
         return UOp(Ops.AND, dtypes.uint32, (_cast(shifted, dtypes.uint32), UOp.const(dtypes.uint32, (1 << (hi_val - lo_val + 1)) - 1)))
       raise ValueError(f"Non-constant slice bounds: {node}")
-
-    case UOp(Ops.CAST, dt, (inner,)):
-      inner_resolved = _expr(inner, ctx, dt)
-      if dt in FLOATS and inner_resolved.op == Ops.CONST and inner_resolved.dtype not in FLOATS:
-        return UOp(Ops.BITCAST, dt, (inner_resolved,))
-      # Same-size casts between same kind (int<->int or float<->float) can use bitcast
-      # But float<->int needs actual CAST even if same size
-      if inner_resolved.dtype.itemsize == dt.itemsize and (inner_resolved.dtype in FLOATS) == (dt in FLOATS):
-        return _cast(inner_resolved, dt)
-      return UOp(Ops.CAST, dt, (inner_resolved,))
 
     case UOp(Ops.WHERE, dt, (cond, tv, fv)):
       return UOp(Ops.WHERE, dt, (_expr(cond, ctx), _expr(tv, ctx, dt), _expr(fv, ctx, dt)))

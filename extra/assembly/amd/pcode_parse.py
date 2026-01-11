@@ -197,7 +197,6 @@ def expr(s: str) -> UOp:
         assert dt != dtypes.void, f"BITCAST target type should not be void: {s}"
         return UOp(Ops.BITCAST, dt, (expr(s[:i]),))
   # Variable
-  if s[:5] == 'eval ': return _var(s)
   if re.match(r'^[A-Za-z_][\w.]*$', s): return _var(s)
   # Numeric literal
   # NOTE: hex constants are unsigned (uint32) even without U suffix
@@ -225,7 +224,6 @@ def stmt(line: str) -> Stmt|None:
   if not line: return None
   if line == 'break': return Break()
   if line[:7] == 'return ': return Return(expr(line[7:]))
-  if line[:5] == 'eval ': return UOp(Ops.ASSIGN, dtypes.void, (_var('_eval'), _var(line)))
   if line[:8] == 'declare ' and ':' in line:
     n, t = line[8:].split(':', 1)
     t = t.strip()
