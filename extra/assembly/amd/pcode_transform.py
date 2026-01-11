@@ -73,28 +73,23 @@ def _signext_from_bit(x: UOp, n: UOp) -> UOp:
   sign = UOp(Ops.SHL, x.dtype, (_tc(x, 1), UOp(Ops.SUB, x.dtype, (UOp(Ops.CAST, x.dtype, (n,)), _tc(x, 1)))))
   return UOp(Ops.WHERE, x.dtype, (n.eq(0), _tc(x, 0), UOp(Ops.SUB, x.dtype, (UOp(Ops.XOR, x.dtype, (x, sign)), sign))))
 
-def _is_denorm(x: UOp) -> UOp:
-  uint_dt, _, exp_shift, exp_mask, mant_mask, _, _ = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
+def _fp_bits(x: UOp) -> tuple[UOp, UOp, UOp, int, int]:
+  """Extract float bit components. Returns (exp, mant, bits, exp_mask, quiet_bit)."""
+  uint_dt, _, exp_shift, exp_mask, mant_mask, _, quiet_bit = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
   bits = x.bitcast(uint_dt)
-  exp, mant = (bits >> exp_shift) & exp_mask, bits & mant_mask
+  return (bits >> exp_shift) & exp_mask, bits & mant_mask, bits, exp_mask, quiet_bit
+
+def _is_denorm(x: UOp) -> UOp:
+  exp, mant, _, _, _ = _fp_bits(x)
   return exp.eq(0) & mant.ne(0)
 
 def _is_quiet_nan(x: UOp) -> UOp:
-  uint_dt, _, exp_shift, exp_mask, mant_mask, _, quiet_bit = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
-  bits = x.bitcast(uint_dt)
-  exp = (bits >> exp_shift) & exp_mask
-  exp_all = UOp(Ops.CMPEQ, dtypes.bool, (exp, UOp.const(uint_dt, exp_mask)))
-  quiet_set = UOp(Ops.CMPNE, dtypes.bool, (bits & quiet_bit, UOp.const(uint_dt, 0)))
-  return exp_all & quiet_set
+  exp, _, bits, exp_mask, quiet_bit = _fp_bits(x)
+  return exp.eq(exp_mask) & (bits & quiet_bit).ne(0)
 
 def _is_signal_nan(x: UOp) -> UOp:
-  uint_dt, _, exp_shift, exp_mask, mant_mask, _, quiet_bit = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
-  bits = x.bitcast(uint_dt)
-  exp, mant = (bits >> exp_shift) & exp_mask, bits & mant_mask
-  exp_all = UOp(Ops.CMPEQ, dtypes.bool, (exp, UOp.const(uint_dt, exp_mask)))
-  mant_nz = UOp(Ops.CMPNE, dtypes.bool, (mant, UOp.const(uint_dt, 0)))
-  quiet_clear = UOp(Ops.CMPEQ, dtypes.bool, (bits & quiet_bit, UOp.const(uint_dt, 0)))
-  return exp_all & mant_nz & quiet_clear
+  exp, mant, bits, exp_mask, quiet_bit = _fp_bits(x)
+  return exp.eq(exp_mask) & mant.ne(0) & (bits & quiet_bit).eq(0)
 
 def _fp_extract(x: UOp, field: str) -> UOp:
   uint_dt, sign_shift, exp_shift, exp_mask, mant_mask, bias, _ = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
