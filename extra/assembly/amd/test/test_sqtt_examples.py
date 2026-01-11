@@ -12,7 +12,12 @@ from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, 
                                      ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, AluSrc, MemSrc)
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
-OTHER_OP_RANGE = range(0x50, 0x60)  # INST ops for non-traced SIMDs
+# INST ops for non-traced SIMDs (excluded from instruction count)
+OTHER_SIMD_OPS = {InstOp.OTHER_LDS_LOAD, InstOp.OTHER_LDS_STORE, InstOp.OTHER_LDS_STORE_64, InstOp.OTHER_LDS_STORE_128,
+                  InstOp.OTHER_FLAT_LOAD, InstOp.OTHER_FLAT_STORE, InstOp.OTHER_FLAT_STORE_64, InstOp.OTHER_FLAT_STORE_96,
+                  InstOp.OTHER_FLAT_STORE_128, InstOp.OTHER_GLOBAL_LOAD, InstOp.OTHER_GLOBAL_LOAD_VADDR,
+                  InstOp.OTHER_GLOBAL_STORE_64, InstOp.OTHER_GLOBAL_STORE_96, InstOp.OTHER_GLOBAL_STORE_128,
+                  InstOp.OTHER_GLOBAL_STORE_VADDR_128}
 
 PACKET_COLORS = {
   "INST": "WHITE", "VALUINST": "BLACK", "VMEMEXEC": "yellow", "ALUEXEC": "yellow",
@@ -88,8 +93,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
       mem_size_ptr[0] = 0
       return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
     try:
-      fmt = detect_format(bytes(image[offset:]))
-      inst = fmt.from_bytes(bytes(image[offset:]))
+      inst = detect_format(data := image[offset:]).from_bytes(data)
       mem_size_ptr[0] = inst._size()
     except (ValueError, AssertionError):
       mem_size_ptr[0] = 0
@@ -191,9 +195,7 @@ class TestSQTTExamples(unittest.TestCase):
         our_insts: list[int] = []
         for event in events:
           for p in decode(event.blob):
-            if isinstance(p, INST):
-              op_val = p.op if isinstance(p.op, int) else p.op.value
-              if op_val not in OTHER_OP_RANGE: our_insts.append(p._time)
+            if isinstance(p, INST) and p.op not in OTHER_SIMD_OPS: our_insts.append(p._time)
             elif isinstance(p, VALUINST): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE_MASK):
