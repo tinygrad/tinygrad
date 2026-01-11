@@ -119,6 +119,24 @@ class PacketType:
     cls._extract_info = [(name, bf.lo, bf.mask(), cls._field_types.get(name)) for name, bf in cls._fields.items()]
     cls._size_nibbles = ((max((f.hi for f in cls._fields.values()), default=0) + 4) // 4)
 
+  def __init__(self, _time: int = 0, **kwargs):
+    """Construct packet from named fields (like assembly instructions)."""
+    raw = 0
+    if self._encoding:
+      bf, pattern = self._encoding
+      raw |= pattern << bf.lo
+    for name, bf in self._fields.items():
+      val = kwargs.get(name, 0)
+      if isinstance(val, IntEnum): val = val.value
+      raw |= (val & bf.mask()) << bf.lo
+    self._raw, self._time, self._values = raw, _time, {}
+    for name, lo, mask, enum_type in self._extract_info:
+      val = (raw >> lo) & mask
+      if enum_type is not None:
+        try: val = enum_type(val)
+        except ValueError: pass
+      self._values[name] = val
+
   @classmethod
   def from_raw(cls, raw: int, time: int = 0):
     inst = object.__new__(cls)
@@ -305,6 +323,8 @@ PACKET_TYPES: list[type[PacketType]] = [
   NOP,
 ]
 
+PACKET_BY_NAME: dict[str, type[PacketType]] = {cls.__name__: cls for cls in PACKET_TYPES}
+
 def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
   table = [len(PACKET_TYPES) - 1] * 256  # default to NOP
   opcode_to_class: dict[int, type[PacketType]] = {i: cls for i, cls in enumerate(PACKET_TYPES)}
@@ -320,6 +340,11 @@ def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
   return bytes(table), opcode_to_class
 
 STATE_TO_OPCODE, OPCODE_TO_CLASS = _build_state_table()
+
+OPCODE_TO_BYTES: dict[int, list[int]] = {}
+for _byte_val, _opcode in enumerate(STATE_TO_OPCODE):
+  if _opcode not in OPCODE_TO_BYTES: OPCODE_TO_BYTES[_opcode] = []
+  OPCODE_TO_BYTES[_opcode].append(_byte_val)
 
 # Precompute special case opcodes
 _TS_DELTA_OR_MARK_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_OR_MARK)
@@ -379,3 +404,47 @@ def decode(data: bytes) -> list[PacketType]:
     packets_append(pkt_cls.from_raw(reg, time))
 
   return packets
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENCODER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def encode(packets: list[PacketType]) -> bytes:
+  """Encode a list of packet instances into raw SQTT blob."""
+  if not packets: return b''
+
+  read_lengths = [16]
+  for p in packets[:-1]:
+    read_lengths.append(type(p)._size_nibbles)
+
+  total_nibbles = sum(read_lengths)
+  bits_arr = [0] * (total_nibbles * 4)
+
+  cumulative = 0
+  for i, p in enumerate(packets):
+    cumulative += read_lengths[i]
+    pkt_cls = type(p)
+    opcode = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is pkt_cls)
+
+    byte_vals = OPCODE_TO_BYTES.get(opcode)
+    if not byte_vals: raise ValueError(f"No encoding for {pkt_cls.__name__}")
+    opcode_byte = byte_vals[0]
+
+    delta_field = getattr(pkt_cls, 'delta', None)
+    if delta_field is not None and delta_field.hi < 8:
+      delta = p._values.get('delta', 0)
+      if isinstance(delta, IntEnum): delta = delta.value
+      if pkt_cls is TS_DELTA_SHORT: delta = max(0, delta - 8)
+      delta = delta & delta_field.mask()
+      opcode_byte = (opcode_byte & ~(delta_field.mask() << delta_field.lo)) | (delta << delta_field.lo)
+
+    opcode_nibble_pos = max(0, cumulative - 16)
+    opcode_bit_pos = opcode_nibble_pos * 4
+
+    for b in range(8):
+      if opcode_bit_pos + b < len(bits_arr):
+        bits_arr[opcode_bit_pos + b] = (opcode_byte >> b) & 1
+
+  nibbles = [sum(bits_arr[i + j] << j for j in range(4) if i + j < len(bits_arr)) for i in range(0, len(bits_arr), 4)]
+  while len(nibbles) % 2: nibbles.append(0)
+  return bytes(nibbles[i] | (nibbles[i + 1] << 4) for i in range(0, len(nibbles), 2))

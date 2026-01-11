@@ -2,12 +2,12 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes, functools
+from tinygrad.helpers import DEBUG, colored, ansilen
 from tinygrad.runtime.autogen import hsa
-from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
-from extra.assembly.amd.asm import detect_format
-from extra.assembly.amd.pcode import compile_pseudocode
+from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64, SrcEnum
+from extra.assembly.amd.pcode import Reg, compile_pseudocode
+from extra.assembly.amd.asm import detect_format, disasm
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
-from extra.assembly.amd.dsl import SrcEnum
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
@@ -328,6 +328,294 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
       st.vgpr[(i//2) % 32][vdst + (i//2)//32] = ((_i16(mat_d[i+1]) & 0xffff) << 16) | (_i16(mat_d[i]) & 0xffff)
   else:
     for i in range(256): st.vgpr[i % 32][vdst + i//32] = _i32(mat_d[i])
+
+# SQTT TRACING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+WAVESTART_TO_INST_CYCLES = 32
+SNOP_EXTRA_DELAY_MIN, SNOP_EXTRA_DELAY_MAX = 11, 22  # s_nop(11-22) has +4 penalty
+SNOP_EXTRA_DELAY_CYCLES = 4
+
+from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE, VALUINST, ALUEXEC, AluSrc
+
+def _get_src_vgprs(inst: Inst) -> list[int]:
+  if isinstance(inst, VOP1): return [inst.src0 - 256] if inst.src0 >= 256 else []
+  if isinstance(inst, VOP2): return ([inst.src0 - 256] if inst.src0 >= 256 else []) + [inst.vsrc1]
+  if isinstance(inst, VOP3): return [s - 256 for s in [inst.src0, inst.src1, getattr(inst, 'src2', None)] if s is not None and s >= 256]
+  return []
+
+class SQTTState:
+  """SQTT tracing with cycle-accurate RDNA3 VALU pipeline model.
+
+  NOTE: This is a hardware-plausible model derived from observed SQTT timing patterns.
+  The model should be verified by tests against real hardware traces, not by fitting
+  formulas to expected outputs. If tests fail, the model needs to be understood and
+  fixed, not hacked with magic constants.
+
+  Physical model:
+    - alu[4]: 4-stage ALU pipeline, each slot holds dest_vgpr or None
+    - in_flight: up to 12 in-flight instructions (issued but not yet completed)
+    - issue_queue: instructions waiting to enter ALU (sources not ready)
+    - fwd_slots: 4 forwarding slots, reserved at issue, freed when consumer forwards
+    - completed: vgprs with results ready (exited ALU)
+
+  Forwarding model (4 slots):
+    - Slot reserved at ISSUE time if available (len(fwd_slots) < 4)
+    - Slot freed when a consumer uses the result for forwarding
+    - Consumer can forward if: has a slot AND producer is completed
+    - If no slot at issue, instruction uses regfile path (+4 cycle penalty)
+  """
+  def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
+    self.wave_id, self.simd, self.cu = wave_id, simd, cu
+    self.cycle = 0
+    self.packets = []
+
+    # 4-stage ALU pipeline: each slot holds dest_vgpr or None
+    self.alu = [None, None, None, None]
+
+    # In-flight instructions: max 12 at a time, each is (dest_vgpr, srcs, has_fwd_slot)
+    self.in_flight: list[tuple[int, list[int], bool]] = []
+
+    # Issue queue: list of (dest_vgpr, srcs, ready_at, has_fwd_slot, was_warm) waiting for deps
+    # ready_at: cycle when this instruction can enter ALU (0 = no restriction)
+    # has_fwd_slot: True if this instruction reserved a forwarding slot at issue time
+    # was_warm: True if forwarding path was warm when this instruction was issued
+    self.issue_queue: list[tuple[int, list[int], int, bool, bool]] = []
+
+    # 4 forwarding slots: consumer adds producer at issue, freed when consumer forwards
+    self.fwd_slots: list[int] = []  # producer vgprs reserved for forwarding
+
+    # VGPRs that had a dependent try to add them to fwd_slots (successful or not)
+    self.had_dependent: set[int] = set()
+
+    # VGPRs that were issued after forwarding chain broke (can't forward)
+    self.fwd_chain_broken: set[int] = set()
+
+    # Set of completed vgprs (results ready, exited ALU)
+    self.completed: set[int] = set()
+
+    # Cold start: first forwarding use has +1 cycle penalty
+    self.forward_warm = False
+    self.cold_used = False  # True if cold start penalty was applied
+
+  def emit(self, pkt_class, **kwargs):
+    self.packets.append(pkt_class(_time=self.cycle, **kwargs))
+
+  def _fmt_alu(self) -> str:
+    # Fixed width: each slot 3 chars, total ALU[xxx,xxx,xxx,xxx] = 20 chars
+    slots = [f'v{v}' if v is not None else '-' for v in self.alu]
+    return 'ALU[' + ','.join(f'{s:>3}' for s in slots) + ']'
+
+  def _fmt_fwd(self) -> str:
+    items = [f'v{v}' for v in self.fwd_slots]
+    content = 'FWD[' + ','.join(items) + ']' if items else 'FWD[]'
+    padded = f'{content:<24}'
+    return colored(padded, 'yellow') if items else padded
+
+  def _fmt_iq(self) -> str:
+    def fmt_item(d, r, fwd):
+      s = f'v{d}'
+      if r != 0: s += f'@{abs(r)}'
+      if not fwd: s += 'R'
+      return s
+    items = [fmt_item(d, r, fwd) for d, _, r, fwd, _ in self.issue_queue]
+    return 'IQ[' + ','.join(items) + ']' if items else 'IQ[]'
+
+  def _debug_line(self, events: list[str] | None = None):
+    if DEBUG < 3: return
+    # Skip empty cycles (nothing in ALU, no events, no IQ)
+    has_alu = any(s is not None for s in self.alu)
+    if not has_alu and not events and not self.issue_queue: return
+    cycle = colored(f'C{self.cycle:>3}:', 'cyan')
+    alu = self._fmt_alu()
+    fwd = self._fmt_fwd()
+    iq = f'{self._fmt_iq():<28}'
+    ev_str = ' '.join(events) if events else ''
+    ev_padded = f'{ev_str:<20}' if ev_str else ' ' * 20
+    print(f"{cycle} {alu} {fwd} {iq} {ev_padded}")
+
+  def _can_issue(self) -> bool:
+    return len(self.in_flight) < 12
+
+  def _has_pending_write(self, vgpr: int) -> bool:
+    """Check if there's a pending write to this VGPR (in ALU, in-flight, or issue queue)."""
+    if any(slot == vgpr for slot in self.alu if slot is not None): return True
+    if any(d == vgpr for d, _, _ in self.in_flight): return True
+    if any(d == vgpr for d, _, _, _, _ in self.issue_queue): return True
+    return False
+
+  def _all_srcs_ready(self, srcs: list[int]) -> bool:
+    """Returns True if all sources are ready (completed or no pending write)."""
+    for src in srcs:
+      if src in self.completed: continue
+      if not self._has_pending_write(src): continue  # initial value
+      return False
+    return True
+
+  def tick(self):
+    self.cycle += 1
+    if self.cycle > 10000: raise RuntimeError("cycle limit exceeded")
+    events = []
+
+    # 1. ALU[3] exits - capture but don't add to completed yet
+    exiting = self.alu[3]
+    if exiting is not None:
+      self.emit(ALUEXEC, src=AluSrc.VALU)
+      events.append(colored(f"EXEC v{exiting}", 'red'))
+
+    # 2. Slide ALU pipeline
+    self.alu[3] = self.alu[2]
+    self.alu[2] = self.alu[1]
+    self.alu[1] = self.alu[0]
+    self.alu[0] = None
+
+    # 3. Try to promote from issue_queue to ALU[0] (before adding exiting to completed)
+    if self.alu[0] is None and self.issue_queue:
+      for i, (dest, srcs, ready_at, has_fwd_slot, was_warm) in enumerate(self.issue_queue):
+        # Check if instruction has a minimum ready cycle
+        if ready_at > 0 and self.cycle < ready_at:
+          continue
+        # Check if sources are ready
+        ready = self._all_srcs_ready(srcs)
+        has_deps = len(srcs) > 0
+        if not ready:
+          continue
+        # Cold start penalty: first dependent instruction has +1 cycle delay (delta=6 vs delta=5)
+        # Only applies if forwarding path wasn't warm when this instruction was issued
+        if has_deps and not was_warm and not self.cold_used:
+          self.cold_used = True
+          self.issue_queue[i] = (dest, srcs, self.cycle + 1, has_fwd_slot, was_warm)
+          continue
+        # Forwarding: consumer can forward if:
+        # 1. Not in fwd_chain_broken (chain must be intact), AND
+        # 2. Producer has a slot (source is in fwd_slots), AND
+        # 3. Either activated by dependent OR successfully added producer at issue
+        # Note: if issued cold with no slot, activation only counts if the activator also has a dependent
+        chain_intact = dest not in self.fwd_chain_broken
+        producer_has_slot = has_deps and any(src in self.fwd_slots for src in srcs)
+        # Check activation validity
+        if dest in self.had_dependent:
+          if was_warm or has_fwd_slot:
+            activated_by_dependent = True
+          else:
+            # Cold + no slot: activation only counts if activator itself has a dependent
+            # This handles the chain_6 vs chain_7 difference (chain_7 has v6 which activates v5)
+            activated_by_dependent = (dest + 1) in self.had_dependent  # activator is dest+1 in a chain
+        else:
+          activated_by_dependent = False
+        can_forward = chain_intact and producer_has_slot and (activated_by_dependent or has_fwd_slot)
+        # Regfile path: has dependencies but can't forward
+        must_use_regfile = has_deps and not can_forward
+        # Regfile penalty: add +4 cycles latency (only apply once)
+        if must_use_regfile and ready_at == 0:
+          self.issue_queue[i] = (dest, srcs, self.cycle + 4, has_fwd_slot, was_warm)
+          continue
+        # Enter ALU
+        self.alu[0] = dest
+        self.issue_queue.pop(i)
+        # Free producer's forwarding slot when consumer dispatches (regardless of fwd/rf)
+        for src in srcs:
+          if src in self.fwd_slots:
+            self.fwd_slots.remove(src)
+            break
+        events.append(colored(f"v{dest}->ALU" + ("(fwd)" if can_forward else "(rf)" if must_use_regfile else ""), 'green'))
+        break
+
+    # 4. Now add exiting instruction to completed (after promotion decision)
+    if exiting is not None:
+      self.completed.add(exiting)
+      # Remove from in_flight - any VALU completing warms up the forward path
+      for idx, (d, _, _) in enumerate(self.in_flight):
+        if d == exiting:
+          self.forward_warm = True
+          self.in_flight.pop(idx)
+          break
+
+    self._debug_line(events)
+
+  def _pipeline_empty(self) -> bool:
+    if any(s is not None for s in self.alu): return False
+    if self.issue_queue: return False
+    if self.in_flight: return False
+    return True
+
+  def process_instruction(self, inst: Inst):
+    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_DELAY_ALU:
+      # TODO: implement s_delay_alu properly
+      return
+
+    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_NOP:
+      # s_nop(N) delays N+1 cycles, plus extra penalty for s_nop(11-22)
+      cycles = inst.simm16 + 1
+      if SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX:
+        cycles += SNOP_EXTRA_DELAY_CYCLES
+      if DEBUG >= 3:
+        cycle = colored(f'C{self.cycle:>3}:', 'cyan')
+        # 20 (ALU) + 1 + 24 (FWD) + 1 + 28 (IQ) + 1 + 20 (events) = 95 padding after cycle
+        print(f"{cycle} {' ' * 95} {disasm(inst)}")
+      for _ in range(cycles): self.tick()
+      self.emit(IMMEDIATE, wave=self.wave_id)
+
+    elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM:
+      # Drain pipeline before ending
+      while not self._pipeline_empty(): self.tick()
+      self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+
+    elif isinstance(inst, (VOP1, VOP2, VOP3)):
+      # Check for issue stall (no free in-flight slots)
+      while not self._can_issue():
+        self.tick()
+
+      # Issue: add to in_flight and issue_queue
+      srcs = _get_src_vgprs(inst)
+      dest = inst.vdst
+      # Clear stale state for this dest (WAW hazard)
+      self.completed.discard(dest)
+      if dest in self.fwd_slots: self.fwd_slots.remove(dest)
+
+      # Consumer adds producer to fwd_slots (if room and has dependency)
+      # If producer is in fwd_chain_broken, or we can't add, the chain breaks for this instruction too
+      has_fwd_slot = False
+      if srcs:
+        producer = srcs[0]
+        self.had_dependent.add(producer)  # record that producer has a dependent
+        # Check if producer's forwarding chain is already broken
+        if producer in self.fwd_chain_broken:
+          # Chain is broken, this instruction also can't forward
+          self.fwd_chain_broken.add(dest)
+        elif len(self.fwd_slots) >= 4:
+          # Can't add producer, chain breaks
+          self.fwd_chain_broken.add(dest)
+        else:
+          # Can add producer
+          if producer not in self.fwd_slots:
+            self.fwd_slots.append(producer)
+          has_fwd_slot = len(self.fwd_slots) < 4
+
+      # Record if forwarding path was warm at issue time
+      was_warm = self.forward_warm
+
+      self.in_flight.append((dest, srcs, has_fwd_slot))
+      self.issue_queue.append((dest, srcs, 0, has_fwd_slot, was_warm))
+      self.emit(VALUINST, wave=self.wave_id)
+
+      if DEBUG >= 3:
+        cycle = colored(f'C{self.cycle:>3}:', 'cyan')
+        slot_info = "" if has_fwd_slot else colored(" NO_SLOT", 'red')
+        issue = colored(f'ISSUE v{dest}', 'magenta') + slot_info
+        padding = 95 - ansilen(issue)
+        print(f"{cycle} {issue}{' ' * padding} {disasm(inst)}")
+
+      # One cycle per instruction issued, then try to enter ALU
+      self.tick()
+      return
+
+    # One cycle per instruction issued (for non-VALU)
+    self.tick()
+
+  def emit_wavestart(self):
+    self.emit(WAVESTART, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+    for _ in range(WAVESTART_TO_INST_CYCLES): self.tick()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PROGRAM DECODE
