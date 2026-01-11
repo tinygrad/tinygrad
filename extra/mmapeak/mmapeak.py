@@ -5,7 +5,8 @@ os.environ["AMD_AQL"] = "1"
 
 from tinygrad.device import Device
 from tinygrad.runtime.ops_amd import AMDProgram
-from tinygrad.helpers import unwrap
+
+from extra.assembly.amd.dsl import s, v
 from extra.amd_elf import build_hsaco
 
 NUM_WORKGROUPS = 96
@@ -14,7 +15,8 @@ NUM_WAVES = 2
 FLOPS_PER_MATMUL = 16*16*16*2
 INTERNAL_LOOP = 1_000_00
 INSTRUCTIONS_PER_LOOP = 200
-INST_ADD_I32 = None
+INST_LOOP_STEP = None
+S_LOOP_N = s[1]
 KD:dict = {}
 
 def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs):
@@ -25,8 +27,8 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   else:
     instructions = instruction(v[0:vgprIndices[0]], v[vgprIndices[1]:vgprIndices[2]], v[vgprIndices[3]:vgprIndices[4]], v[vgprIndices[5]])
 
-  setup = [s_mov_b32(s[1], INTERNAL_LOOP), s_mov_b32(s[2], 0)]
-  loop_body = [instructions]*INSTRUCTIONS_PER_LOOP + [unwrap(INST_ADD_I32)(s[1], 0xffff), s_cmp_lg_i32(s[1], s[2])]
+  setup = [s_mov_b32(S_LOOP_N, INTERNAL_LOOP), s_mov_b32(s[2], 0)]
+  loop_body = [instructions]*INSTRUCTIONS_PER_LOOP + [INST_LOOP_STEP, s_cmp_lg_i32(S_LOOP_N, s[2])]
   loop_size = sum(i.size() for i in loop_body)
   insts = setup + loop_body + [s_cbranch_scc1(-(loop_size + 4) // 4), s_endpgm()]
   lib = build_hsaco(insts, KD)
@@ -44,10 +46,8 @@ if __name__=="__main__":
 
   if DEV.arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
     from extra.assembly.amd.autogen.rdna3.ins import *
-    INST_ADD_I32 = s_add_i32
-    KD = {"group_segment_fixed_size":0, "private_segment_fixed_size":0, "kernarg_size":0, "next_free_vgpr":32, "next_free_sgpr":8, "memory_ordered":1,
-          "system_sgpr_workgroup_id_x":1, "system_sgpr_workgroup_id_y":0, "system_sgpr_workgroup_id_z":0, "wavefront_size32":1, "forward_progress":0,
-          "user_sgpr_kernarg_segment_ptr":0, "user_sgpr_count":0, "workgroup_processor_mode":1, "uses_dynamic_stack":0}
+    INST_LOOP_STEP = s_add_i32(S_LOOP_N, S_LOOP_N, -1)
+    KD = {"next_free_vgpr":32, "next_free_sgpr":8, "wavefront_size32":1}
     if DEV.arch == 'gfx1103': NUM_WORKGROUPS = 8
     if DEV.arch == 'gfx1151': NUM_WORKGROUPS = 32
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (7,8,15))
@@ -58,7 +58,7 @@ if __name__=="__main__":
     launchBenchmark(v_wmma_i32_16x16x16_iu8, (7,8,11))
   elif DEV.arch in {'gfx1200', 'gfx1201'}:
     from extra.assembly.amd.autogen.rdna4.ins import *
-    INST_ADD_I32 = s_addk_co_i32
+    INST_LOOP_STEP = s_add_i32(S_LOOP_N, 0xffff)
     KD = {"next_free_vgpr":32, "next_free_sgpr":8, "wavefront_size32":1}
     NUM_WORKGROUPS = 64
     launchBenchmark(v_wmma_bf16_16x16x16_bf16, (3,4,7))
@@ -87,7 +87,7 @@ if __name__=="__main__":
     launchBenchmark(v_swmmac_i32_16x16x64_iu4, (7,8,9,10,13,14), False)
   elif DEV.arch == 'gfx950':
     from extra.assembly.amd.autogen.cdna.ins import *
-    INST_ADD_I32 = s_add_i32
+    INST_LOOP_STEP = s_add_i32
     KD = {"amdhsa_accum_offset":4}
     NUM_WORKGROUPS = 256
     WAVE_SIZE = 64
