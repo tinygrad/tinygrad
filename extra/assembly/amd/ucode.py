@@ -226,29 +226,9 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
     result = UOp(Ops.BITCAST, a[0].dtype, (UOp(Ops.OR, uint_dt, (UOp(Ops.AND, uint_dt, (bits, UOp.const(uint_dt, (1 << sign_shift) | mant_mask))),
                                                                   UOp.const(uint_dt, (bias - 1) << exp_shift))),))
     return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0.0))), a[0], result))
-  if name == 'BYTE_PERMUTE':
-    src64, sel = _cast(a[0], dtypes.uint64), UOp(Ops.AND, dtypes.uint32, (_cast(a[1], dtypes.uint32), UOp.const(dtypes.uint32, 0xff)))
-    sel_idx, sel_nib = UOp(Ops.AND, dtypes.uint32, (sel, UOp.const(dtypes.uint32, 7))), UOp(Ops.AND, dtypes.uint32, (sel, UOp.const(dtypes.uint32, 0xf)))
-    byte_val = _cast(UOp(Ops.AND, dtypes.uint64, (UOp(Ops.SHR, dtypes.uint64, (src64, _cast(UOp(Ops.SHL, dtypes.uint32, (sel_idx, UOp.const(dtypes.uint32, 3))), dtypes.uint64))), UOp.const(dtypes.uint64, 0xff))), dtypes.uint32)
-    def sign_bit(pos): return UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPNE, dtypes.bool, (UOp(Ops.AND, dtypes.uint64, (UOp(Ops.SHR, dtypes.uint64, (src64, UOp.const(dtypes.uint64, pos))), UOp.const(dtypes.uint64, 1))), UOp.const(dtypes.uint64, 0))), UOp.const(dtypes.uint32, 0xff), UOp.const(dtypes.uint32, 0)))
-    result = byte_val
-    for i, pos in enumerate([15, 31, 47, 63], 8):
-      result = UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPEQ, dtypes.bool, (sel_nib, UOp.const(dtypes.uint32, i))), sign_bit(pos), result))
-    result = UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPEQ, dtypes.bool, (sel_nib, UOp.const(dtypes.uint32, 12))), UOp.const(dtypes.uint32, 0), result))
-    result = UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPLT, dtypes.bool, (UOp.const(dtypes.uint32, 12), sel_nib)), UOp.const(dtypes.uint32, 0xff), result))
-    return UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPNE, dtypes.bool, (UOp(Ops.AND, dtypes.uint32, (sel, UOp.const(dtypes.uint32, 0x80))), UOp.const(dtypes.uint32, 0))), UOp.const(dtypes.uint32, 0), result))
   if name == 'trig_preop_result': return UOp(Ops.CUSTOM, dtypes.float64, (a[0],), arg='trig_preop_result')
   if name == 's_ff1_i32_b32': return UOp(Ops.CUSTOM, dtypes.int32, (_cast(a[0], dtypes.uint32),), arg='s_ff1_i32_b32')
   if name == 's_ff1_i32_b64': return UOp(Ops.CUSTOM, dtypes.int32, (_cast(a[0], dtypes.uint64),), arg='s_ff1_i32_b64')
-
-  if name in ('v_sad_u8', 'v_msad_u8'):
-    result = a[2] if len(a) > 2 else UOp.const(dtypes.uint32, 0)
-    for i in range(4):
-      ba = UOp(Ops.AND, dtypes.uint32, (UOp(Ops.SHR, dtypes.uint32, (a[0], UOp.const(dtypes.uint32, i*8))), UOp.const(dtypes.uint32, 0xff)))
-      bb = UOp(Ops.AND, dtypes.uint32, (UOp(Ops.SHR, dtypes.uint32, (a[1], UOp.const(dtypes.uint32, i*8))), UOp.const(dtypes.uint32, 0xff)))
-      diff = UOp(Ops.SUB, dtypes.uint32, (ba, bb))
-      result = UOp(Ops.ADD, dtypes.uint32, (result, UOp(Ops.WHERE, dtypes.uint32, (UOp(Ops.CMPLT, dtypes.bool, (diff, UOp.const(dtypes.uint32, 0x80000000))), diff, UOp(Ops.SUB, dtypes.uint32, (UOp.const(dtypes.uint32, 0), diff))))))
-    return result
   raise ValueError(f"Unknown function: {name}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
