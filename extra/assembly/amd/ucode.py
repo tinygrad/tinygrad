@@ -40,19 +40,7 @@ class Ctx:
 # EXPRESSION TRANSFORM
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _resolve_special_var(name: str, ctx: Ctx, hint: DType = None) -> UOp | None:
-  """Resolve context-dependent special variables (constants handled by pcode_transform)."""
-  # Register aliases
-  if name in ('VCCZ', 'EXECZ'):
-    return _cast(UOp(Ops.CMPEQ, dtypes.bool, (ctx.vars['VCC' if 'VCC' in name else 'EXEC'], UOp.const(dtypes.uint64, 0))), dtypes.uint32)
-  if name in ('EXEC_LO', 'VCC_LO'):
-    return _cast(UOp(Ops.AND, dtypes.uint64, (ctx.vars['EXEC' if 'EXEC' in name else 'VCC'], UOp.const(dtypes.uint64, MASK32))), hint or dtypes.uint32)
-  if name in ('EXEC_HI', 'VCC_HI'):
-    return _cast(UOp(Ops.SHR, dtypes.uint64, (ctx.vars['EXEC' if 'EXEC' in name else 'VCC'], UOp.const(dtypes.uint64, 32))), hint or dtypes.uint32)
-  if name in ('laneID', 'laneId'): return ctx.vars.get('laneId', UOp.const(dtypes.uint32, 0))
-  if name == 'ThreadMask': return _cast(ctx.vars.get('EXEC'), hint or dtypes.uint32)
-  if name == 'DST': return ctx.vars.get('VDST', UOp.const(dtypes.uint32, 0))
-  return None
+
 
 def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
   """Transform parsed UOp expression to resolved UOp."""
@@ -65,16 +53,14 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       return UOp.const(dtypes.float32 if isinstance(val, float) and dt not in FLOATS else dt, val)
 
     case UOp(Ops.DEFINE_VAR, dt, _, (name, _, _)):
-      if (resolved := _resolve_special_var(name, ctx, hint)) is not None: return resolved
       if name.startswith('eval '): return ctx.vars.get('_eval', UOp.const(dtypes.uint32, 0))
       if name not in ctx.vars: raise ValueError(f"Unknown variable: {name}")
       return _cast(ctx.vars[name], hint or dt if dt != dtypes.void else ctx.vars[name].dtype)
 
     case UOp(Ops.BITCAST, dt, (inner,)):
-      # Typed variable access: Var.type (INF, NAN, DENORM handled by pcode_transform)
+      # Typed variable access: Var.type (special vars and constants handled by pcode_transform)
       if inner.op == Ops.DEFINE_VAR and inner.dtype == dtypes.void:
         name = inner.arg[0]
-        if (resolved := _resolve_special_var(name, ctx, dt)) is not None: return _cast(resolved, dt)
         vn = name + '_64' if dt.itemsize == 8 and name.isupper() else name
         base = ctx.vars.get(vn) if vn in ctx.vars else ctx.vars.get(name)
         if base is None: raise ValueError(f"Unknown variable: {name}")
