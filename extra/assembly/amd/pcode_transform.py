@@ -23,8 +23,9 @@ _CAST_MAP = {f'{s}_to_{d}': _DT_SUFFIX[d] for s in _DT_SUFFIX for d in _DT_SUFFI
 _CAST_MAP.update({f'v_cvt_{d}_{s}': _DT_SUFFIX[d] for s in _DT_SUFFIX for d in _DT_SUFFIX if s != d and f'{s}_to_{d}' not in _SPECIAL_CASTS})
 
 # CUSTOM op return types (ops that stay as CUSTOM after transformation)
+# sign/exponent/mantissa stay as CUSTOM when args are void-typed (e.g., in lambda params)
 _CUSTOM_TYPES = {
-  'sign': dtypes.uint32, 'exponent': dtypes.uint32, 'mantissa': dtypes.float32,  # can have void-typed args in lambdas
+  'sign': dtypes.uint32, 'exponent': dtypes.uint32, 'mantissa': dtypes.float32,
   'count_ones': dtypes.uint32, 'countbits': dtypes.uint32, 'reverse_bits': dtypes.uint32,
   's_ff1_i32_b32': dtypes.uint32, 's_ff1_i32_b64': dtypes.uint32,
   'ConvertFromFormat': dtypes.uint32, 'nop': dtypes.uint32,
@@ -41,6 +42,8 @@ _CONSTS = {
   'NAN.f32': (dtypes.float32, float('nan')), 'NAN.f64': (dtypes.float64, float('nan')),
   'DENORM.f32': (dtypes.float32, 1.17549435e-38), 'DENORM.f64': (dtypes.float64, 2.2250738585072014e-308),
   'LDS': (dtypes.uint64, 0),
+  # Debug condition flags (typically 0 in normal execution)
+  'WAVE_STATUS.COND_DBG_SYS': (dtypes.uint32, 0), 'WAVE_STATUS.COND_DBG_USER': (dtypes.uint32, 0),
 }
 
 # Float bit layout: (uint_type, sign_shift, exp_shift, exp_mask, mantissa_mask, bias, quiet_bit)
