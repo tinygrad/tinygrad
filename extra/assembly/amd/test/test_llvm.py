@@ -2,7 +2,8 @@
 """Test AMD assembler/disassembler against LLVM test vectors."""
 import unittest, re, subprocess, functools
 from tinygrad.helpers import fetch
-from extra.assembly.amd.asm import asm, disasm, detect_format
+from extra.assembly.amd.asm import asm, disasm
+from extra.assembly.amd.decode import decode_inst, detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/test/MC/AMDGPU"
@@ -92,7 +93,7 @@ def _make_test(f: str, arch: str, test_type: str):
       to_test = []
       for _, data in tests:
         try:
-          decoded = detect_format(data, arch).from_bytes(data)
+          decoded = decode_inst(data, arch)
           # Skip if roundtrip fails, disasm fails, or op_name is missing (disasm starts with space)
           if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)) and not d.startswith(' '): to_test.append((data, d))
         except: pass

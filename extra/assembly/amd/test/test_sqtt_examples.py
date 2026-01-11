@@ -5,7 +5,7 @@ from pathlib import Path
 from tinygrad.helpers import DEBUG, colored
 from tinygrad.runtime.autogen import rocprof
 from tinygrad.runtime.support.elf import elf_loader
-from extra.assembly.amd.asm import detect_format
+from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
@@ -93,7 +93,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
       mem_size_ptr[0] = 0
       return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
     try:
-      inst = detect_format(data := image[offset:]).from_bytes(data)
+      inst = decode_inst(data := image[offset:])
       mem_size_ptr[0] = inst._size()
     except (ValueError, AssertionError):
       mem_size_ptr[0] = 0
