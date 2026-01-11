@@ -99,7 +99,7 @@ if __name__=="__main__":
     launchBenchmark(v_mfma_f32_16x16x32_bf16, (3,0,3), accum=True)
     FLOPS_PER_MATMUL = 16*16*128*2
     launchBenchmark(v_mfma_f32_16x16x128_f8f6f4, (3,0,7), accum=True) # fp8
-    launchBenchmark(v_mfma_f32_16x16x128_f8f6f4, (3,0,5), accum=True, cbsz=2, blgp=2) # fp6
-    launchBenchmark(v_mfma_f32_16x16x128_f8f6f4, (3,0,3), accum=True, cbsz=2, blgp=2) # fp4
+    launchBenchmark(v_mfma_f32_16x16x128_f8f6f4, (3,0,5), accum=True, neg=2, neg_hi=2) # fp6
+    launchBenchmark(v_mfma_f32_16x16x128_f8f6f4, (3,0,3), accum=True, neg=2, neg_hi=4) # fp4
   else:
     raise RuntimeError(f"arch {DEV.arch} not supported.")
