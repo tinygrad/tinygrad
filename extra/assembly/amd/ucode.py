@@ -168,19 +168,14 @@ def _expr(node: UOp, ctx: Ctx, hint: DType = None) -> UOp:
       c, t = _expr(cond, ctx), _expr(tv, ctx, hint)
       return UOp(Ops.WHERE, t.dtype, (c, t, _expr(fv, ctx, t.dtype)))
 
-    case UOp(op, _, (l_expr, r_expr)) if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR,
-                                                 Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE, Ops.POW, Ops.MOD):
+    case UOp(op, _, (l_expr, r_expr)) if op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.FDIV, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.IDIV,
+                                                 Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE):
       l, r = _expr(l_expr, ctx, hint), _expr(r_expr, ctx, hint)
       if op in (Ops.ADD, Ops.SUB, Ops.MUL) and l.dtype in (dtypes.int32, dtypes.int64):
         udt = {dtypes.int32: dtypes.uint32, dtypes.int64: dtypes.uint64}[l.dtype]
         return UOp(op, udt, (_cast(l, udt), _cast(r, udt)))
       if op in (Ops.CMPLT, Ops.CMPLE, Ops.CMPEQ, Ops.CMPNE): return UOp(op, dtypes.bool, (l, r))
-      result_dt = l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype
-      if op is Ops.POW:
-        if l.op == Ops.CONST and l.arg == 2.0: return UOp(Ops.EXP2, result_dt, (UOp(Ops.CAST, result_dt, (r,)) if r.dtype != result_dt else r,))
-        return UOp(Ops.EXP2, result_dt, (UOp(Ops.MUL, result_dt, (UOp(Ops.CAST, result_dt, (r,)), UOp(Ops.LOG2, result_dt, (l,)))),))
-      if op is Ops.MOD: return UOp(Ops.SUB, result_dt, (l, UOp(Ops.MUL, result_dt, (UOp(Ops.IDIV, result_dt, (l, r)), r))))
-      return UOp(op, result_dt, (l, r))
+      return UOp(op, l.dtype if l.dtype in FLOATS else r.dtype if r.dtype in FLOATS else l.dtype, (l, r))
 
     case UOp(Ops.CUSTOM, _, args, name): return _transform_call(name, [_expr(a, ctx, hint) for a in args], hint)
 
@@ -238,8 +233,6 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
                                                                   UOp.const(uint_dt, (bias - 1) << exp_shift))),))
     return UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPEQ, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0.0))), a[0], result))
   if name == 'cvtToQuietNAN': return a[0]
-  if name == 'isEven':
-    return UOp(Ops.CMPEQ, dtypes.bool, (UOp(Ops.AND, dtypes.int64, (UOp(Ops.CAST, dtypes.int64, (a[0],)), UOp.const(dtypes.int64, 1))), UOp.const(dtypes.int64, 0)))
   if name == 'signext_from_bit':
     sign = UOp(Ops.SHL, a[0].dtype, (UOp.const(a[0].dtype, 1), UOp(Ops.SUB, a[0].dtype, (_cast(a[1], a[0].dtype), UOp.const(a[0].dtype, 1)))))
     result = UOp(Ops.SUB, a[0].dtype, (UOp(Ops.XOR, a[0].dtype, (a[0], sign)), sign))
@@ -265,13 +258,7 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
   if name == 'trig_preop_result': return UOp(Ops.CUSTOM, dtypes.float64, (a[0],), arg='trig_preop_result')
   if name == 's_ff1_i32_b32': return UOp(Ops.CUSTOM, dtypes.int32, (_cast(a[0], dtypes.uint32),), arg='s_ff1_i32_b32')
   if name == 's_ff1_i32_b64': return UOp(Ops.CUSTOM, dtypes.int32, (_cast(a[0], dtypes.uint64),), arg='s_ff1_i32_b64')
-  if name in ('u8_to_u32', 'u4_to_u32'):
-    mask = 0xff if '8' in name else 0xf
-    return UOp(Ops.AND, dtypes.uint32, (_cast(a[0], dtypes.uint32), UOp.const(dtypes.uint32, mask)))
-  if name == 'pow':
-    assert a[0].op == Ops.CONST and a[0].arg == 2.0
-    return UOp(Ops.EXP2, a[0].dtype, (a[1] if a[1].dtype == a[0].dtype else UOp(Ops.CAST, a[0].dtype, (a[1],)),))
-  if name == 'ldexp': return UOp(Ops.MUL, a[0].dtype, (a[0], UOp(Ops.EXP2, a[0].dtype, (UOp(Ops.CAST, a[0].dtype, (a[1],)),))))
+
   if name in CVT_MAP:
     dt, clamp = CVT_MAP[name]
     v = UOp(Ops.WHERE, a[0].dtype, (UOp(Ops.CMPLT, dtypes.bool, (a[0], UOp.const(a[0].dtype, 0.0))), UOp.const(a[0].dtype, 0.0), a[0])) if clamp else a[0]
@@ -300,40 +287,41 @@ def _transform_call(name: str, a: list[UOp], hint: DType) -> UOp:
 
 OUT_VARS = ('D0', 'D1', 'SCC', 'VCC', 'EXEC', 'PC', 'SDATA', 'VDATA', 'RETURN_DATA')
 
+def _get_var_name(u: UOp) -> str|None:
+  if u.op == Ops.DEFINE_VAR and u.arg[1] is None: return u.arg[0]
+  if u.op == Ops.BITCAST and u.src[0].op == Ops.DEFINE_VAR: return u.src[0].arg[0]
+  return None
+
 def _get_lhs_info(lhs: UOp, ctx: Ctx) -> tuple[str, DType, int|None, int|None, str|None, int|str|None, UOp|tuple|None]:
   """Extract: (var_name, dtype, hi_bit, lo_bit, idx_var, array_idx, dynamic_idx)"""
-  match lhs:
-    case UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)): return name, dt, None, None, None, None, None
-    case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))),)):
-      return name, dt, int(hi), int(lo), None, None, None
-    case UOp(Ops.BITCAST, _, (UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)),)) if lhs.src[0].src[1] is lhs.src[0].src[2]:
-      return name, dtypes.uint64, None, None, idx, None, None
-    case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)),)) if lhs.src[0].src[1] is lhs.src[0].src[2]:
+  # Simple variable: D or D.type
+  if lhs.op == Ops.DEFINE_VAR: return lhs.arg[0], ctx.vars.get(lhs.arg[0], UOp.const(dtypes.uint32, 0)).dtype, None, None, None, None, None
+  if lhs.op == Ops.BITCAST and (name := _get_var_name(lhs.src[0])): return name, lhs.dtype, None, None, None, None, None
+  # Indexed access: base[idx] or base[hi:lo]
+  if lhs.op == Ops.CUSTOMI or (lhs.op == Ops.BITCAST and lhs.src[0].op == Ops.CUSTOMI):
+    outer_dt = lhs.dtype if lhs.op == Ops.BITCAST else None
+    ci = lhs.src[0] if lhs.op == Ops.BITCAST else lhs
+    base, hi_u, lo_u = ci.src
+    # VGPR[lane][reg]
+    if base.op == Ops.CUSTOMI and _get_var_name(base.src[0]) == 'VGPR':
+      return 'VGPR', outer_dt or dtypes.uint32, None, None, None, None, (base.src[1], hi_u)
+    # SGPR[reg]
+    if (name := _get_var_name(base)) == 'SGPR': return 'SGPR', outer_dt or dtypes.uint32, None, None, None, None, hi_u
+    if name is None: raise ValueError(f"Cannot parse LHS: {lhs}")
+    dt = outer_dt or (base.dtype if base.op == Ops.BITCAST else dtypes.uint32)
+    is_single = hi_u is lo_u
+    # Constant indices
+    if hi_u.op == Ops.CONST and lo_u.op == Ops.CONST:
+      hi, lo = int(hi_u.arg), int(lo_u.arg)
+      if is_single and (vdt := ctx.decls.get(name)) and vdt.count > 1: return name, vdt.scalar(), None, None, None, hi, None
+      return name, dt, hi, lo, None, None, None
+    # Variable index
+    if is_single and hi_u.op == Ops.DEFINE_VAR:
+      idx = hi_u.arg[0]
+      if (vdt := ctx.decls.get(name)) and vdt.count > 1: return name, vdt.scalar(), None, None, None, idx, None
       return name, dt, None, None, idx, None, None
-    case UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))):
-      return name, dtypes.uint32, int(hi), int(lo), None, None, None
-    case UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.CONST, _, _, idx), _)) if lhs.src[1] is lhs.src[2]:
-      var_dtype = ctx.decls.get(name)
-      if var_dtype is not None and var_dtype.count > 1: return name, var_dtype.scalar(), None, None, None, int(idx), None
-      return name, dtypes.uint32, int(idx), int(idx), None, None, None
-    case UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.CONST, _, _, hi), UOp(Ops.CONST, _, _, lo))):
-      return name, dtypes.uint32, int(hi), int(lo), None, None, None
-    case UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)) if lhs.src[1] is lhs.src[2]:
-      return name, dt, None, None, idx, None, None
-    case UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)), UOp(Ops.DEFINE_VAR, _, _, (idx, None, None)), idx2)) if lhs.src[1] is lhs.src[2]:
-      var_dtype = ctx.decls.get(name)
-      if var_dtype is not None and var_dtype.count > 1: return name, var_dtype.scalar(), None, None, None, idx, None
-      return name, dtypes.uint32, None, None, idx, None, None
-    case UOp(Ops.CUSTOMI, _, (UOp(Ops.BITCAST, dt, (UOp(Ops.DEFINE_VAR, _, _, (name, None, None)),)), idx_expr, idx_expr2)) if lhs.src[1] is lhs.src[2]:
-      return name, dt, None, None, None, None, idx_expr
-    case UOp(Ops.CUSTOMI, _, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, ('VGPR', None, None)), lane, _)), reg, _)):
-      return 'VGPR', dtypes.uint32, None, None, None, None, (lane, reg)
-    case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, ('VGPR', None, None)), lane, _)), reg, _)),)):
-      return 'VGPR', dt, None, None, None, None, (lane, reg)
-    case UOp(Ops.BITCAST, dt, (UOp(Ops.CUSTOMI, _, (UOp(Ops.DEFINE_VAR, _, _, ('SGPR', None, None)), reg, _)),)):
-      return 'SGPR', dt, None, None, None, None, reg
-    case UOp(Ops.DEFINE_VAR, _, _, (name, None, None)):
-      return name, ctx.vars.get(name, UOp.const(dtypes.uint32, 0)).dtype, None, None, None, None, None
+    # Dynamic expression index
+    if is_single: return name, dt, None, None, None, None, hi_u
   raise ValueError(f"Cannot parse LHS: {lhs}")
 
 def _stmt(stmt, ctx: Ctx):
@@ -388,9 +376,9 @@ def _stmt(stmt, ctx: Ctx):
         idx_uop, rhs_uop = _expr(dynamic_idx, ctx, dtypes.uint32), _expr(rhs, ctx, dtypes.uint32)
         op_dt = dtypes.uint64 if dtype.itemsize == 8 else dtypes.uint32
         base = _cast(ctx.vars.get(var, UOp.const(op_dt, 0)), op_dt)
-        one, bit_mask = UOp.const(op_dt, 1), UOp(Ops.SHL, op_dt, (UOp.const(op_dt, 1), _cast(idx_uop, op_dt)))
+        bit_mask = UOp(Ops.SHL, op_dt, (UOp.const(op_dt, 1), _cast(idx_uop, op_dt)))
         result = UOp(Ops.OR, op_dt, (UOp(Ops.AND, op_dt, (base, UOp(Ops.XOR, op_dt, (bit_mask, UOp.const(op_dt, -1))))),
-                                     UOp(Ops.SHL, op_dt, (UOp(Ops.AND, op_dt, (_cast(rhs_uop, op_dt), one)), _cast(idx_uop, op_dt)))))
+                                     UOp(Ops.SHL, op_dt, (UOp(Ops.AND, op_dt, (_cast(rhs_uop, op_dt), UOp.const(op_dt, 1))), _cast(idx_uop, op_dt)))))
         ctx.vars[var] = result
         if var in OUT_VARS:
           ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
@@ -410,9 +398,9 @@ def _stmt(stmt, ctx: Ctx):
       # Variable bit index: var[idx_var] = cond
       if idx_var is not None:
         base, idx, cond = ctx.vars.get(var), ctx.vars.get(idx_var), _expr(rhs, ctx)
-        one, bit_mask = UOp.const(dtype, 1), UOp(Ops.SHL, dtype, (UOp.const(dtype, 1), _cast(idx, dtype)))
+        bit_mask = UOp(Ops.SHL, dtype, (UOp.const(dtype, 1), _cast(idx, dtype)))
         result = UOp(Ops.OR, dtype, (UOp(Ops.AND, dtype, (base, UOp(Ops.XOR, dtype, (bit_mask, UOp.const(dtype, -1))))),
-                                     UOp(Ops.SHL, dtype, (UOp(Ops.AND, dtype, (_cast(cond, dtype), one)), _cast(idx, dtype)))))
+                                     UOp(Ops.SHL, dtype, (UOp(Ops.AND, dtype, (_cast(cond, dtype), UOp.const(dtype, 1))), _cast(idx, dtype)))))
         ctx.vars[var] = result
         if var in OUT_VARS: ctx.outputs.append((var, result, dtype))
         return
