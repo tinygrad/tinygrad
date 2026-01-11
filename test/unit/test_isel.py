@@ -3,7 +3,9 @@ from tinygrad.uop import X86Ops, Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
 from tinygrad.renderer.x86 import X86Renderer
 from tinygrad.renderer.isa import IselContext, Register
+from tinygrad.helpers import SPEC
 
+@unittest.skipIf(SPEC > 1, "x86 spec not supported in full_spec")
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp):
     x = graph_rewrite(x, X86Renderer().pre_isel_matcher)
