@@ -5,6 +5,9 @@ from tinygrad.dtype import dtypes, DType
 from extra.assembly.amd.pcode_parse import parse, If, For, Lambda, Break, Return
 import math
 
+# Placeholder buffer for MEM operations - substituted in ucode with actual buffer
+MEM_BUF = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(0), arg=0)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TYPE MAPPINGS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -146,6 +149,12 @@ def _typed_cast(x, op):
 _fpat = UPat.var('x', dtype=dtypes.floats)
 
 pcode_pm = PatternMatcher([
+  # MEM read: BITCAST(CUSTOM('MEM', addr)) -> INDEX(buf, addr) with element type
+  (UPat(Ops.BITCAST, name='bc', src=(UPat(Ops.CUSTOM, arg='MEM', src=(UPat.var('addr'),)),)),
+   lambda bc, addr: UOp(Ops.INDEX, bc.dtype, (MEM_BUF, addr))),
+  # MEM write: ASSIGN(INDEX, val) -> STORE (INDEX created by MEM read pattern above)
+  (UPat(Ops.ASSIGN, src=(UPat(Ops.INDEX, name='idx'), UPat.var('val'))),
+   lambda idx, val: UOp(Ops.STORE, dtypes.void, (idx, val))),
   # Float ops (preserve input type)
   (UPat(Ops.CUSTOM, arg='trunc', src=(_fpat,)), lambda x: UOp(Ops.TRUNC, x.dtype, (x,))),
   (UPat(Ops.CUSTOM, arg='sqrt', src=(_fpat,)), lambda x: UOp(Ops.SQRT, x.dtype, (x,))),
@@ -297,10 +306,14 @@ pcode_spec = PatternMatcher([
   # CUSTOMI/CAT: must be typed (slice bounds or bit concat determine type)
   (UPat(Ops.CUSTOMI, name="x"), lambda x: x.dtype != dtypes.void),
   (UPat(Ops.CAT, name="x"), lambda x: x.dtype != dtypes.void),
-  # CUSTOM: MEM and passthrough ops (abs, cvtToQuietNAN) can be void (wrapped by BITCAST/CAST)
-  (UPat(Ops.CUSTOM, name="x"), lambda x: x.dtype != dtypes.void or x.arg in {'MEM', 'abs', 'cvtToQuietNAN'}),
+  # CUSTOM: passthrough ops (abs, cvtToQuietNAN) can be void (wrapped by BITCAST/CAST)
+  (UPat(Ops.CUSTOM, name="x"), lambda x: x.dtype != dtypes.void or x.arg in {'abs', 'cvtToQuietNAN'}),
   # POW allows int exponent with float base
   (UPat(Ops.POW, dtype=dtypes.floats, src=(UPat(dtype=dtypes.floats), UPat(dtype=dtypes.ints))), lambda: True),
+  # Memory ops: STORE is void, INDEX has element type, DEFINE_GLOBAL is ptr
+  (UPat(Ops.STORE, dtype=dtypes.void), lambda: True),
+  (UPat(Ops.INDEX), lambda: True),
+  (UPat(Ops.DEFINE_GLOBAL), lambda: True),
 ]) + shared_spec
 
 # ═══════════════════════════════════════════════════════════════════════════════
