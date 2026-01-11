@@ -24,8 +24,7 @@ _CAST_MAP.update({f'v_cvt_{d}_{s}': _DT_SUFFIX[d] for s in _DT_SUFFIX for d in _
 
 # CUSTOM op return types (ops that stay as CUSTOM after transformation)
 _CUSTOM_TYPES = {
-  'isDENORM': dtypes.bool, 'isQuietNAN': dtypes.bool, 'isSignalNAN': dtypes.bool,
-  'sign': dtypes.uint32, 'exponent': dtypes.uint32, 'BYTE_PERMUTE': dtypes.uint32,
+  'sign': dtypes.uint32, 'exponent': dtypes.uint32, 'mantissa': dtypes.float32, 'BYTE_PERMUTE': dtypes.uint32,
   'count_ones': dtypes.uint32, 'countbits': dtypes.uint32, 'reverse_bits': dtypes.uint32,
   's_ff1_i32_b32': dtypes.uint32, 's_ff1_i32_b64': dtypes.uint32,
   'v_sad_u8': dtypes.uint32, 'v_msad_u8': dtypes.uint32, 'ConvertFromFormat': dtypes.uint32, 'nop': dtypes.uint32,
@@ -38,6 +37,13 @@ _CONSTS = {
   'OVERFLOW_F32': (dtypes.float32, math.inf), 'OVERFLOW_F64': (dtypes.float64, math.inf),
   'UNDERFLOW_F32': (dtypes.float32, 0.0), 'UNDERFLOW_F64': (dtypes.float64, 0.0),
   'WAVE32': (dtypes.uint32, 1), 'WAVE64': (dtypes.uint32, 0),  # RDNA3 is wave32 mode
+}
+
+# Float bit layout: (uint_type, sign_shift, exp_shift, exp_mask, mantissa_mask, bias, quiet_bit)
+FP_INFO = {
+  dtypes.float64: (dtypes.uint64, 63, 52, 0x7ff, 0xfffffffffffff, 1023, 0x8000000000000),
+  dtypes.float32: (dtypes.uint32, 31, 23, 0xff, 0x7fffff, 127, 0x400000),
+  dtypes.float16: (dtypes.uint16, 15, 10, 0x1f, 0x3ff, 15, 0x200),
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -62,6 +68,13 @@ def _vn(u: UOp) -> str|None:  # var name
 def _signext_from_bit(x: UOp, n: UOp) -> UOp:
   sign = UOp(Ops.SHL, x.dtype, (_tc(x, 1), UOp(Ops.SUB, x.dtype, (UOp(Ops.CAST, x.dtype, (n,)), _tc(x, 1)))))
   return UOp(Ops.WHERE, x.dtype, (UOp(Ops.CMPEQ, dtypes.bool, (n, _tc(n, 0))), _tc(x, 0), UOp(Ops.SUB, x.dtype, (UOp(Ops.XOR, x.dtype, (x, sign)), sign))))
+
+def _is_denorm(x: UOp) -> UOp:
+  uint_dt, _, exp_shift, exp_mask, mant_mask, _, _ = FP_INFO.get(x.dtype, FP_INFO[dtypes.float32])
+  bits = UOp(Ops.BITCAST, uint_dt, (x,))
+  exp = UOp(Ops.AND, uint_dt, (UOp(Ops.SHR, uint_dt, (bits, UOp.const(uint_dt, exp_shift))), UOp.const(uint_dt, exp_mask)))
+  mant = UOp(Ops.AND, uint_dt, (bits, UOp.const(uint_dt, mant_mask)))
+  return UOp(Ops.AND, dtypes.bool, (UOp(Ops.CMPEQ, dtypes.bool, (exp, UOp.const(uint_dt, 0))), UOp(Ops.CMPNE, dtypes.bool, (mant, UOp.const(uint_dt, 0)))))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATTERN HANDLERS
@@ -191,6 +204,7 @@ pcode_pm = PatternMatcher([
   (UPat(Ops.CUSTOM, arg='isNAN', src=(UPat.var('x'),)), lambda x: UOp(Ops.CMPNE, dtypes.bool, (x, x))),
   (UPat(Ops.CUSTOM, arg='isINF', src=(UPat.var('x'),)), lambda x: UOp(Ops.OR, dtypes.bool, (
     UOp(Ops.CMPEQ, dtypes.bool, (x, _tc(x, float('inf')))), UOp(Ops.CMPEQ, dtypes.bool, (x, _tc(x, float('-inf'))))))),
+  (UPat(Ops.CUSTOM, arg='isDENORM', src=(_fpat,)), _is_denorm),
   # ABSDIFF: |a - b| for unsigned
   (UPat(Ops.CUSTOM, arg='ABSDIFF', src=(UPat.var('a'), UPat.var('b'))),
    lambda a, b: UOp(Ops.WHERE, a.dtype, (UOp(Ops.CMPLT, dtypes.bool, (b, a)),
