@@ -219,6 +219,9 @@ pcode_pm = PatternMatcher([
   # Unary XOR (NOT) -> binary XOR with all ones
   (UPat(Ops.XOR, src=(UPat.var('x'),)),
    lambda x: UOp(Ops.XOR, x.dtype, (x, UOp.const(x.dtype, -1))) if x.dtype != dtypes.void else None),
+  # Unary CMPEQ (logical NOT) -> CMPEQ(x, 0) with matching type (default to uint32 for void)
+  (UPat(Ops.CMPEQ, dtype=dtypes.bool, src=(UPat.var('x'),)),
+   lambda x: UOp(Ops.CMPEQ, dtypes.bool, (x, UOp.const(x.dtype if x.dtype != dtypes.void else dtypes.uint32, 0)))),
   (UPat(Ops.MULACC, dtype=dtypes.void, src=(UPat.var('a'), UPat.var('b'), UPat.var('c'))), _prop_mulacc),
   (UPat(Ops.WHERE, dtype=dtypes.void, src=(UPat.var('cond'), UPat.var('t'), UPat.var('f'))), _prop_where),
   (UPat(Ops.CAT, dtype=dtypes.void, name='x'), _prop_cat),
@@ -264,8 +267,6 @@ pcode_spec = PatternMatcher([
   # Pcode-specific ops (void sources allowed - type comes from context)
   (UPat(Ops.BITCAST, src=(UPat(),)), lambda: True),
   (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.CAT)), lambda: True),
-  # Unary comparison (sign check, e.g. !sign(x) parses as CMPEQ(sign(x)))
-  (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE), dtype=dtypes.bool, src=(UPat(),)), lambda: True),
   # POW allows int exponent with float base
   (UPat(Ops.POW, dtype=dtypes.floats, src=(UPat(dtype=dtypes.floats), UPat(dtype=dtypes.ints))), lambda: True),
 ]) + shared_spec
