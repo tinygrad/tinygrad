@@ -20,7 +20,7 @@ if USE_HW:
 
 from extra.assembly.amd.emu import SQTTState, decode_program, exec_wave, WaveState, LDSMem
 from extra.assembly.amd.sqtt import WAVESTART, WAVEEND
-from extra.assembly.amd.autogen.rdna3.ins import v_mov_b32_e32, v_add_f32_e32, s_nop, s_endpgm
+from extra.assembly.amd.autogen.rdna3.ins import v_mov_b32_e32, v_add_f32_e32, s_nop, s_endpgm, s_delay_alu
 from extra.assembly.amd.dsl import v
 
 def assemble(instructions: list) -> bytes:
@@ -424,6 +424,80 @@ class TestVALUExecWithNop(unittest.TestCase):
   # First nop determines path: s_nop(0) then s_nop(4) = fast, s_nop(4) then s_nop(0) = slow
   def test_nop0_nop4(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(0), s_nop(4)]), 6)
   def test_nop4_nop0(self): self.assertEqual(self._get_delay([v_mov_b32_e32(v[0], 1.0), s_nop(4), s_nop(0)]), 10)
+
+
+class TestDelayALU(unittest.TestCase):
+  """s_delay_alu behavior - helps understand hardware pipeline latencies.
+
+  s_delay_alu(simm16) where simm16 encodes:
+    instid0[3:0] = dependency on VALU N instructions back (1-4), 0=none
+    skip[6:4] = skip count for second dependency
+    instid1[10:7] = second dependency
+
+  Key insight: s_delay_alu tells hardware to wait for a previous VALU to complete.
+  The hardware determines how many cycles to stall based on pipeline state.
+  """
+  def _exec_delta(self, instrs):
+    """Return exec delta for last instruction."""
+    _, execd = get_deltas(instrs)
+    return execd[-1] if execd else None
+
+  # Direct dependency (producer -> consumer), instid0=1 means "wait for VALU 1 back"
+  def test_direct_no_delay(self):
+    # Without s_delay_alu: 6 cycles
+    self.assertEqual(self._exec_delta([v_mov_b32_e32(v[0], 1.0), v_add_f32_e32(v[1], v[0], v[0])]), 6)
+
+  def test_direct_delay1(self):
+    # With s_delay_alu(instid0=1): 7 cycles (+1 from the delay instruction)
+    self.assertEqual(self._exec_delta([v_mov_b32_e32(v[0], 1.0), s_delay_alu(simm16=1), v_add_f32_e32(v[1], v[0], v[0])]), 7)
+
+  def test_direct_delay2(self):
+    # instid0=2 doesn't apply (only 1 VALU back), so no extra delay
+    self.assertEqual(self._exec_delta([v_mov_b32_e32(v[0], 1.0), s_delay_alu(simm16=2), v_add_f32_e32(v[1], v[0], v[0])]), 6)
+
+  def test_direct_delay3(self):
+    self.assertEqual(self._exec_delta([v_mov_b32_e32(v[0], 1.0), s_delay_alu(simm16=3), v_add_f32_e32(v[1], v[0], v[0])]), 6)
+
+  def test_direct_delay4(self):
+    self.assertEqual(self._exec_delta([v_mov_b32_e32(v[0], 1.0), s_delay_alu(simm16=4), v_add_f32_e32(v[1], v[0], v[0])]), 6)
+
+  # With 1 independent instruction between producer and consumer
+  def test_gap1_delay1(self):
+    # instid0=1 waits for the independent instruction (not the producer)
+    instrs = [v_mov_b32_e32(v[0], 1.0), v_mov_b32_e32(v[5], 5.0), s_delay_alu(simm16=1), v_add_f32_e32(v[1], v[0], v[0])]
+    self.assertEqual(self._exec_delta(instrs), 8)
+
+  def test_gap1_delay2(self):
+    # instid0=2 waits for the producer (2 VALUs back)
+    instrs = [v_mov_b32_e32(v[0], 1.0), v_mov_b32_e32(v[5], 5.0), s_delay_alu(simm16=2), v_add_f32_e32(v[1], v[0], v[0])]
+    self.assertEqual(self._exec_delta(instrs), 6)
+
+  def test_gap1_delay3(self):
+    # instid0=3 doesn't apply (only 2 VALUs back)
+    instrs = [v_mov_b32_e32(v[0], 1.0), v_mov_b32_e32(v[5], 5.0), s_delay_alu(simm16=3), v_add_f32_e32(v[1], v[0], v[0])]
+    self.assertEqual(self._exec_delta(instrs), 5)
+
+  # With 2 independent instructions between
+  def test_gap2_delay1(self):
+    instrs = [v_mov_b32_e32(v[0], 1.0), v_mov_b32_e32(v[5], 5.0), v_mov_b32_e32(v[6], 6.0),
+              s_delay_alu(simm16=1), v_add_f32_e32(v[1], v[0], v[0])]
+    self.assertEqual(self._exec_delta(instrs), 7)
+
+  def test_gap2_delay2(self):
+    instrs = [v_mov_b32_e32(v[0], 1.0), v_mov_b32_e32(v[5], 5.0), v_mov_b32_e32(v[6], 6.0),
+              s_delay_alu(simm16=2), v_add_f32_e32(v[1], v[0], v[0])]
+    self.assertEqual(self._exec_delta(instrs), 7)
+
+  def test_gap2_delay3(self):
+    # instid0=3 waits for the producer (3 VALUs back)
+    instrs = [v_mov_b32_e32(v[0], 1.0), v_mov_b32_e32(v[5], 5.0), v_mov_b32_e32(v[6], 6.0),
+              s_delay_alu(simm16=3), v_add_f32_e32(v[1], v[0], v[0])]
+    self.assertEqual(self._exec_delta(instrs), 5)
+
+  def test_gap2_delay4(self):
+    instrs = [v_mov_b32_e32(v[0], 1.0), v_mov_b32_e32(v[5], 5.0), v_mov_b32_e32(v[6], 6.0),
+              s_delay_alu(simm16=4), v_add_f32_e32(v[1], v[0], v[0])]
+    self.assertEqual(self._exec_delta(instrs), 4)
 
 
 if __name__ == "__main__":

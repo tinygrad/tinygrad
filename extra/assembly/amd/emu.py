@@ -489,42 +489,48 @@ class SQTTState:
     self.cycle += 1
     if DEBUG >= 3: print(f"C{self.cycle}:", end="")
 
-    # 1. Clear forward from previous cycle (forward only lasts 1 cycle)
-    prev_forward = self.forward_vgpr
-    self.forward_vgpr = None
+    # Pipeline timing model for 6,5,5 pattern:
+    # - Base latency (const source): 6 cycles from issue to exec
+    # - First dependent: 6 cycles from producer exec (no forwarding benefit)
+    # - Subsequent dependents: 5 cycles from producer exec (forwarding saves 1 cycle)
+    #
+    # Forwarding is available from ALU[3] output. When instruction exits ALU[3]->WB,
+    # a waiting dependent can enter ALU[0] on the SAME cycle, giving delta=5.
+    # But the FIRST dependent can't benefit because it arrives before producer is in ALU[3].
 
-    # 2. DepFetch -> ALU[0]: check if any instruction can enter ALU
-    #    - Must always wait until ready_cycle (1 cycle in dep_fetch)
-    #    - If forwarding available: deps resolved, just wait for ready_cycle
-    #    - If no forwarding and VGPR cold: extra wait for regfile read
-    for item in self.dep_fetch[:]:
-      inst, dest, srcs, ready_cycle = item
-      if not self._deps_ready(srcs, prev_forward): continue  # deps not resolved yet
-      if self.cycle < ready_cycle: continue  # must wait for dep_fetch cycle
-      self.dep_fetch.remove(item)
-      self.alu[0] = (inst, dest)
-      uses_forwarding = prev_forward is not None and prev_forward in srcs
-      if DEBUG >= 3: print(f" DepFetch->ALU[0] v{dest}{'(fwd)' if uses_forwarding else ''}", end="")
-      break
+    # 1. Writeback: emit ALUEXEC
+    if self.writeback is not None:
+      inst, dest = self.writeback
+      self.emit(ALUEXEC, src=AluSrc.VALU)
+      if DEBUG >= 3: print(f" WB v{dest}", end="")
+    self.writeback = None
+
+    # 2. ALU[3] -> Writeback, and set forwarding from ALU[3] output
+    #    Forwarding is available THIS cycle for instructions entering ALU[0]
+    alu3_out = self.alu[3]
+    self.alu[3] = None
+    forward_this_cycle = alu3_out[1] if alu3_out is not None else None
+    if alu3_out is not None:
+      self.writeback = alu3_out
+      if DEBUG >= 3: print(f" ALU[3]->WB", end="")
 
     # 3. Shift ALU pipeline: [0]->[1]->[2]->[3]
-    #    But first save ALU[3] for writeback
-    alu3_out = self.alu[3]
     self.alu[3] = self.alu[2]
     self.alu[2] = self.alu[1]
     self.alu[1] = self.alu[0]
     self.alu[0] = None
 
-    # 4. Writeback: emit ALUEXEC, make forward available for NEXT cycle
-    if self.writeback is not None:
-      inst, dest = self.writeback
-      self.emit(ALUEXEC, src=AluSrc.VALU)
-      self.forward_vgpr = dest  # Available for next cycle's dep resolution
-      if DEBUG >= 3: print(f" WB v{dest}", end="")
-
-    # 5. ALU[3] output -> Writeback for next cycle
-    self.writeback = alu3_out
-    if alu3_out is not None and DEBUG >= 3: print(f" ALU[3]->WB", end="")
+    # 4. DepFetch -> ALU[0]: check if any instruction can enter ALU
+    #    Forwarding from ALU[3] output is available THIS cycle (not next cycle)
+    for item in self.dep_fetch[:]:
+      inst, dest, srcs, ready_cycle = item
+      if not self._deps_ready(srcs, forward_this_cycle): continue  # deps not resolved yet
+      if self.cycle < ready_cycle: continue  # must wait for dep_fetch cycle
+      self.dep_fetch.remove(item)
+      self.alu[0] = (inst, dest)
+      uses_forwarding = forward_this_cycle is not None and forward_this_cycle in srcs
+      if DEBUG >= 3: print(f" DepFetch->ALU[0] v{dest}{'(fwd)' if uses_forwarding else ''}", end="")
+      break
 
     if DEBUG >= 3: print()
 
