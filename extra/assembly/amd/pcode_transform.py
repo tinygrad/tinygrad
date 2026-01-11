@@ -164,11 +164,6 @@ def _prop_customi(base, hi, lo):
     return UOp(Ops.CUSTOMI, dtypes.uint64 if abs(int(hi.arg) - int(lo.arg)) + 1 > 32 else dtypes.uint32, (base, hi, lo))
   return UOp(Ops.CUSTOMI, dtypes.uint32, (base, hi, lo))
 
-def _fix_binop(op, x, y):
-  if x.dtype == dtypes.void or y.dtype == dtypes.void or x.dtype == y.dtype: return None
-  if x.dtype.itemsize >= y.dtype.itemsize: return UOp(op.op, op.dtype, (x, UOp(Ops.CAST, x.dtype, (y,))), op.arg)
-  return UOp(op.op, op.dtype, (UOp(Ops.CAST, y.dtype, (x,)), y), op.arg)
-
 def _backprop(ctx, op, v, t):
   if t.dtype == dtypes.void: return None
   name = v.arg[0] if isinstance(v.arg, tuple) else v.arg
@@ -398,8 +393,6 @@ pcode_spec = PatternMatcher([
   # ASSIGN: pcode assignment statement (dtype must match rhs)
   (UPat(Ops.ASSIGN, src=(UPat.var("lhs"), UPat.var("rhs")), name="a"),
    lambda a, lhs, rhs: a.dtype == rhs.dtype and rhs.dtype != dtypes.void),
-  # POW: allow int exponent with float base (e.g. 2.0 ** 32)
-  (UPat(Ops.POW, dtype=dtypes.floats, src=(UPat(dtype=dtypes.floats), UPat(dtype=dtypes.ints))), lambda: True),
 ]) + program_spec
 
 # ═══════════════════════════════════════════════════════════════════════════════
