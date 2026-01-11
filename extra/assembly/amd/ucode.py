@@ -438,7 +438,10 @@ def _transform_for(var: str, start: UOp, end: UOp, body: tuple, ctx: Ctx):
   end_expr = _expr(end, ctx).simplify() if end.op != Ops.CONST else end
   start_val = start_expr.arg if start_expr.op == Ops.CONST else _eval_uop(start_expr)
   end_val = end_expr.arg if end_expr.op == Ops.CONST else _eval_uop(end_expr)
-  if start_val is None or end_val is None: raise ValueError(f"For loop bounds must be constant: start={start_expr}, end={end_expr}")
+  # Handle dynamic loop bounds - if body is just nop(), skip entirely
+  if start_val is None or end_val is None:
+    if all(isinstance(s, UOp) and s.op == Ops.CUSTOM and s.arg == 'nop' for s in body): return
+    raise ValueError(f"For loop bounds must be constant: start={start_expr}, end={end_expr}")
   for i in range(int(end_val), int(start_val) - 1, -1):
     ctx.vars[var] = UOp.const(ctx.decls.get(var, dtypes.uint32), i)
     for s in body:
