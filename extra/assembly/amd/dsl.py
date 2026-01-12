@@ -166,7 +166,7 @@ class Inst:
 
   def __init__(self, *args, **kwargs):
     self._raw = 0
-    self._literal: int | None = None
+    self._literal: int | None = kwargs.pop('literal', None)
     args_iter = iter(args)
     for name, field in self._fields:
       if isinstance(field, FixedBitField): val = None
