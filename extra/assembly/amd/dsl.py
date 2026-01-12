@@ -203,20 +203,22 @@ class Inst:
 
   @property
   def op_name(self) -> str: return self.op.name
+  @property
+  def types(self) -> tuple[str|None, str|None, str|None, str|None]: return get_types(self.op)
   def is_src_64(self, n: int) -> bool:
-    dtype = get_types(self.op)[n + 1]
+    dtype = self.types[n + 1]
     return dtype in ('f64', 'u64', 'i64', 'b64')
   def is_src_16(self, n: int) -> bool:
-    dtype = get_types(self.op)[n + 1]
+    dtype = self.types[n + 1]
     return dtype in ('f16', 'u16', 'i16', 'b16')
   def is_dst_16(self) -> bool:
-    dtype = get_types(self.op)[0]
+    dtype = self.types[0]
     return dtype in ('f16', 'u16', 'i16', 'b16')
   def dst_regs(self) -> int:
-    dtype = get_types(self.op)[0]
+    dtype = self.types[0]
     return 2 if dtype in ('f64', 'u64', 'i64', 'b64') else 1
   def src_regs(self, n: int) -> int:
-    dtype = get_types(self.op)[n + 1]
+    dtype = self.types[n + 1]
     return 2 if dtype in ('f64', 'u64', 'i64', 'b64') else 1
   @classmethod
   def _size(cls) -> int: return cls._base_size
