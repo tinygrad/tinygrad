@@ -477,14 +477,27 @@ def _transform_uop(u: UOp, ctx: dict) -> UOp:
   type_verify(result, pcode_spec)
   return result
 
+def _subst(u: UOp, var: str, val: UOp) -> UOp:
+  if u.op == Ops.DEFINE_VAR and isinstance(u.arg, tuple) and u.arg[0] == var: return val
+  return u.replace(src=tuple(_subst(s, var, val) for s in u.src)) if u.src else u
+
+def _subst_stmt(stmt, var: str, val: UOp):
+  if isinstance(stmt, UOp): return _subst(stmt, var, val)
+  if isinstance(stmt, If): return If(tuple((_subst(c, var, val) if c is not None else None, tuple(_subst_stmt(s, var, val) for s in b)) for c, b in stmt.branches))
+  if isinstance(stmt, For): return For(stmt.var, _subst(stmt.start, var, val), _subst(stmt.end, var, val), tuple(_subst_stmt(s, var, val) for s in stmt.body))
+  return stmt
+
+def _expand_for(stmt: For, ctx: dict) -> list | None:
+  start_v, end_v = _transform_uop(stmt.start, ctx).simplify(), _transform_uop(stmt.end, ctx).simplify()
+  if start_v.op != Ops.CONST or end_v.op != Ops.CONST: return None  # keep For if bounds aren't constant
+  return [r for i in range(int(end_v.arg), int(start_v.arg) - 1, -1) for s in stmt.body if (r := _transform_stmt(_subst_stmt(s, stmt.var, UOp.const(ctx.get(stmt.var, dtypes.uint32), i)), ctx)) is not None]
+
 def _transform_stmt(stmt, ctx: dict):
-  match stmt:
-    case If(branches): return If(tuple((_transform_uop(c, ctx) if c is not None else None, tuple(_transform_stmt(s, ctx) for s in b)) for c, b in branches))
-    case For(var, start, end, body): return For(var, _transform_uop(start, ctx), _transform_uop(end, ctx), tuple(_transform_stmt(s, ctx) for s in body))
-    case Lambda(name, params, body): return Lambda(name, params, _transform_uop(body, ctx) if isinstance(body, UOp) else tuple(_transform_stmt(s, ctx) for s in body))
-    case Return(v): return Return(_transform_uop(v, ctx))
-    case UOp(): return _transform_uop(stmt, ctx)
-    case _: return stmt
+  if isinstance(stmt, If): return If(tuple((_transform_uop(c, ctx) if c is not None else None, tuple(_transform_stmt(s, ctx) for s in b)) for c, b in stmt.branches))
+  if isinstance(stmt, For): return For(stmt.var, _transform_uop(stmt.start, ctx), _transform_uop(stmt.end, ctx), tuple(_transform_stmt(s, ctx) for s in stmt.body)) if (stmts := _expand_for(stmt, ctx)) is None else (UOp(Ops.GROUP, dtypes.void, tuple(stmts)) if stmts else None)
+  if isinstance(stmt, Lambda): return Lambda(stmt.name, stmt.params, _transform_uop(stmt.body, ctx) if isinstance(stmt.body, UOp) else tuple(_transform_stmt(s, ctx) for s in stmt.body))
+  if isinstance(stmt, Return): return Return(_transform_uop(stmt.value, ctx))
+  return _transform_uop(stmt, ctx) if isinstance(stmt, UOp) else stmt
 
 def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
   """Apply known fixes for PDF pseudocode bugs."""

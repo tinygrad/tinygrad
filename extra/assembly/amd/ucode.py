@@ -2,6 +2,7 @@
 import functools, struct, math
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes, DType, AddrSpace
+
 from extra.assembly.amd.pcode_parse import If, For
 from extra.assembly.amd.pcode_transform import parse_transform, MEM_BUF as PCODE_MEM_BUF
 
@@ -259,50 +260,33 @@ def _stmt(stmt, ctx: Ctx):
       # Simple assignment
       rhs_uop = _expr(rhs, ctx, dtype)
       ctx.vars[var] = rhs_uop
-      if dtype.itemsize == 8 and var in ('D0', 'D1', 'S0', 'S1'): ctx.vars[var + '_64'] = rhs_uop
-      if var in OUT_VARS: ctx.outputs.append((var, rhs_uop, dtype))
+      out_dtype = rhs_uop.dtype if rhs_uop.dtype != dtypes.void else dtype
+      if out_dtype.itemsize == 8 and var in ('D0', 'D1', 'S0', 'S1'): ctx.vars[var + '_64'] = rhs_uop
+      if var in OUT_VARS:
+        ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
+        ctx.outputs.append((var, rhs_uop, out_dtype))
 
-    case If(branches): _transform_if(branches, ctx)
-    case For(var, start, end, body): _transform_for(var, start, end, body, ctx)
+    case UOp(Ops.GROUP, _, stmts):
+      for s in stmts: _stmt(s, ctx)
 
-def _transform_if(branches: tuple, ctx: Ctx):
-  parsed = []
-  for cond, body in branches:
-    sub_ctx = Ctx(mem_buf=ctx.mem_buf)
-    sub_ctx.vars, sub_ctx.decls = dict(ctx.vars), dict(ctx.decls)
-    for s in body: _stmt(s, sub_ctx)
-    parsed.append((_expr(cond, ctx) if cond is not None else None, sub_ctx))
+    case If(branches):
+      parsed = [((_expr(c, ctx) if c is not None else None), (sc := Ctx(ctx.mem_buf), sc.vars.update(ctx.vars), sc.decls.update(ctx.decls), [_stmt(s, sc) for s in b], sc)[-1]) for c, b in branches]
+      assigned = {n for _, sc in parsed for n, _, _ in sc.outputs if n in OUT_VARS} | {n for _, sc in parsed for n, v in sc.vars.items() if n not in ctx.vars or ctx.vars[n] is not v if n not in OUT_VARS and n not in INPUT_VARS}
+      for var in assigned:
+        is_out, dtype = var in OUT_VARS, next((d for _, sc in parsed for n, _, d in sc.outputs if n == var), ctx.decls.get(var, dtypes.uint32))
+        result = ctx.vars.get(var, UOp.const(dtype, 0))
+        for cond_uop, sub_ctx in reversed(parsed):
+          val = next((u for n, u, _ in sub_ctx.outputs if n == var), None) if is_out else sub_ctx.vars.get(var) if var in sub_ctx.vars and sub_ctx.vars[var] is not ctx.vars.get(var) else None
+          if val is not None: result = val if cond_uop is None else UOp(Ops.WHERE, val.dtype, (cond_uop, val, _cast(result, val.dtype)))
+        ctx.vars[var] = result
+        if is_out: ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var] + [(var, result, dtype)]
 
-  assigned = {n for _, sc in parsed for n, _, _ in sc.outputs if n in OUT_VARS}
-  assigned |= {n for _, sc in parsed for n, v in sc.vars.items() if n not in ctx.vars or ctx.vars[n] is not v if n not in OUT_VARS and n not in INPUT_VARS}
-
-  for var in assigned:
-    is_out = var in OUT_VARS
-    dtype = next((d for _, sc in parsed for n, _, d in sc.outputs if n == var), ctx.decls.get(var, dtypes.uint32))
-    result = ctx.vars.get(var, UOp.const(dtype, 0))
-    for cond_uop, sub_ctx in reversed(parsed):
-      val = next((u for n, u, _ in sub_ctx.outputs if n == var), None) if is_out else sub_ctx.vars.get(var) if var in sub_ctx.vars and sub_ctx.vars[var] is not ctx.vars.get(var) else None
-      if val is not None:
-        result = val if cond_uop is None else UOp(Ops.WHERE, val.dtype, (cond_uop, val, _cast(result, val.dtype)))
-    ctx.vars[var] = result
-    if is_out:
-      ctx.outputs = [(n, u, d) for n, u, d in ctx.outputs if n != var]
-      ctx.outputs.append((var, result, dtype))
-
-def _transform_for(var: str, start: UOp, end: UOp, body: tuple, ctx: Ctx):
-  start_expr = _expr(start, ctx).simplify() if start.op != Ops.CONST else start
-  end_expr = _expr(end, ctx).simplify() if end.op != Ops.CONST else end
-  start_val = start_expr.arg if start_expr.op == Ops.CONST else _eval_uop(start_expr)
-  end_val = end_expr.arg if end_expr.op == Ops.CONST else _eval_uop(end_expr)
-  # Handle dynamic loop bounds - if body is just nop(), skip entirely
-  if start_val is None or end_val is None:
-    if all(isinstance(s, UOp) and s.op == Ops.CUSTOM and s.arg == 'nop' for s in body): return
-    raise ValueError(f"For loop bounds must be constant: start={start_expr}, end={end_expr}")
-  for i in range(int(end_val), int(start_val) - 1, -1):
-    ctx.vars[var] = UOp.const(ctx.decls.get(var, dtypes.uint32), i)
-    for s in body:
-      if isinstance(s, If): _transform_if(s.branches, ctx)
-      elif isinstance(s, UOp) and s.op == Ops.ASSIGN: _stmt(s, ctx)
+    case For(var, start, end, body):
+      start_v, end_v = _expr(start, ctx).simplify(), _expr(end, ctx).simplify()
+      if start_v.op != Ops.CONST or end_v.op != Ops.CONST: raise ValueError(f"For loop bounds must be constant: {start_v}, {end_v}")
+      for i in range(int(end_v.arg), int(start_v.arg) - 1, -1):
+        ctx.vars[var] = UOp.const(ctx.decls.get(var, dtypes.uint32), i)
+        for s in body: _stmt(s, ctx)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CODE GENERATION
