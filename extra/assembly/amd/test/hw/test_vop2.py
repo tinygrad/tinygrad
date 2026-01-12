@@ -46,7 +46,7 @@ class TestBasicArithmetic(unittest.TestCase):
     instructions = [
       v_mov_b32_e32(v[0], 2.0),
       v_mov_b32_e32(v[1], 4.0),
-      v_fmaak_f32_e32(v[2], v[0], v[1], 0x3f800000),
+      v_fmaak_f32_e32(v[2], v[0], v[1], literal=0x3f800000),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 9.0, places=5)
@@ -56,7 +56,7 @@ class TestBasicArithmetic(unittest.TestCase):
     instructions = [
       v_mov_b32_e32(v[0], 2.0),
       v_mov_b32_e32(v[1], 1.0),
-      v_fmamk_f32_e32(v[2], v[0], 0x40800000, v[1]),
+      v_fmamk_f32_e32(v[2], v[0], v[1], literal=0x40800000),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 9.0, places=5)
@@ -66,7 +66,7 @@ class TestBasicArithmetic(unittest.TestCase):
     instructions = [
       v_mov_b32_e32(v[0], 4.0),
       v_mov_b32_e32(v[1], 1.0),
-      v_fmamk_f32_e32(v[2], v[0], f2i(0.5), v[1]),
+      v_fmamk_f32_e32(v[2], v[0], v[1], literal=f2i(0.5)),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 3.0, places=5)
@@ -244,7 +244,7 @@ class TestF16Ops(unittest.TestCase):
       s_mov_b32(s[1], 0x4200),  # f16 3.0
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_fmaak_f16_e32(v[2], v[0], v[1], 0x3c00),  # + f16 1.0
+      v_fmaak_f16_e32(v[2], v[0], v[1], literal=0x3c00),  # + f16 1.0
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2] & 0xffff

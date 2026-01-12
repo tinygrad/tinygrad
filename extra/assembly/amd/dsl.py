@@ -212,6 +212,8 @@ class Inst:
       if isinstance(field, FixedBitField): vals[name] = None
       elif name in kwargs: vals[name] = kwargs[name]
       else: vals[name] = next(args_iter, None)
+    remaining = list(args_iter)
+    assert not remaining, f"too many positional args: {remaining}"
     # Extract modifiers from Reg objects and merge into neg/abs/opsel
     neg_bits, abs_bits, opsel_bits = 0, 0, 0
     for name, bit in [('src0', 0), ('src1', 1), ('src2', 2)]:
