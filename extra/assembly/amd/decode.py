@@ -1,6 +1,6 @@
 # Instruction format detection and decoding
 from __future__ import annotations
-from extra.assembly.amd.dsl import Inst
+from extra.assembly.amd.dsl2 import Inst, FixedBitField
 from extra.assembly.amd.autogen.rdna3.ins import VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP
 from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
   VOPC as R4_VOPC, VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
@@ -11,9 +11,10 @@ from extra.assembly.amd.autogen.cdna.ins import (VOP1 as C_VOP1, VOP2 as C_VOP2,
 
 def _matches_encoding(word: int, cls: type[Inst]) -> bool:
   """Check if word matches the encoding pattern of an instruction class."""
-  if cls._encoding is None: return False
-  bf, val = cls._encoding
-  return ((word >> bf.lo) & bf.mask()) == val
+  enc = next(((n, f) for n, f in cls._fields if isinstance(f, FixedBitField) and n == 'encoding'), None)
+  if enc is None: return False
+  bf = enc[1]
+  return ((word >> bf.lo) & bf.mask()) == bf.default
 
 # Order matters: more specific encodings first, VOP2 last (it's a catch-all for bit31=0)
 _RDNA_FORMATS_64 = [VOPD, VOP3P, VINTERP, VOP3, DS, FLAT, MUBUF, MTBUF, MIMG, SMEM, EXP]
@@ -24,6 +25,7 @@ _CDNA_VOP3B_OPS = {281, 282, 283, 284, 285, 286, 480, 481, 488, 489}  # VOP3B op
 _RDNA4_FORMATS_64 = [R4_VOPD, R4_VOP3P, R4_VINTERP, R4_VOP3, R4_DS, R4_VBUFFER, R4_SMEM, R4_VEXPORT]
 _RDNA4_FORMATS_32 = [R4_SOP1, R4_SOPC, R4_SOPP, R4_SOPK, R4_VOPC, R4_VOP1, R4_SOP2, R4_VOP2]
 _RDNA4_VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
+_RDNA3_VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
 def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
@@ -51,7 +53,7 @@ def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   if (word >> 30) == 0b11:
     for cls in _RDNA_FORMATS_64:
       if _matches_encoding(word, cls):
-        return VOP3SD if cls is VOP3 and ((word >> 16) & 0x3ff) in Inst._VOP3SD_OPS else cls
+        return VOP3SD if cls is VOP3 and ((word >> 16) & 0x3ff) in _RDNA3_VOP3SD_OPS else cls
     raise ValueError(f"unknown 64-bit format word={word:#010x}")
   for cls in _RDNA_FORMATS_32:
     if _matches_encoding(word, cls): return cls

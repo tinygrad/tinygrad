@@ -375,7 +375,7 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP_E32: inst._dispatch = dispatch_nop
     elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name: inst._dispatch = dispatch_wmma
     elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32_E64: inst._dispatch = dispatch_writelane
-    elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32_E32, VOP3Op.V_READFIRSTLANE_B32_E64, VOP3Op.V_READLANE_B32_E64): inst._dispatch = dispatch_readlane
+    elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32_E32, VOP3Op.V_READFIRSTLANE_B32_E64, VOP3Op.V_READLANE_B32): inst._dispatch = dispatch_readlane
     elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
     elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)

@@ -223,7 +223,7 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
     if name in ('sdst', 'sdata', 'soffset', 'saddr') and bits == 7: return f"SGPRField({hi}, {lo})"
     if (name.startswith('ssrc') or name in ('saddr', 'soffset')) and bits == 8: return f"SSrcField({hi}, {lo})"
     if (name in ('src0', 'srcx0', 'srcy0') or name.startswith('src') and name[3:].isdigit()) and bits == 9: return f"SrcField({hi}, {lo})"
-    if name.startswith('simm'): return f"SignedBitField({hi}, {lo})"
+    if name.startswith('simm'): return f"SignedBitField({hi}, {lo}, default=0)"
     if name in FLAG_FIELDS: return f"BitField({hi}, {lo}, default=0)"
     return f"BitField({hi}, {lo})"
   field_priority = ['encoding', 'op', 'opx', 'opy', 'vdst', 'vdstx', 'vdsty', 'sdst', 'vdata', 'sdata', 'addr', 'vaddr', 'data', 'data0', 'data1',
@@ -248,6 +248,9 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
           if name == 'encoding': lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings['FLAT']})")
           elif name == 'seg': lines.append(f"  seg = FixedBitField({hi}, {lo}, {seg_val})")
           elif name == 'op': lines.append(f"  op = EnumBitField({hi}, {lo}, {op_enum})")
+          elif name == 'vdst': lines.append(f"  vdst = VGPRField({hi}, {lo}, default=v[0])")
+          elif name == 'data': lines.append(f"  data = VGPRField({hi}, {lo}, default=v[0])")
+          elif name == 'offset': lines.append(f"  offset = BitField({hi}, {lo}, default=0)")
           else: lines.append(f"  {name} = {field_def(name, hi, lo, 'FLAT')}")
         lines.append("")
     else:

@@ -70,12 +70,12 @@ class SOPK(Inst):
   encoding = FixedBitField(31, 28, 0b1011)
   op = EnumBitField(27, 23, SOPKOp)
   sdst = SGPRField(22, 16)
-  simm16 = SignedBitField(15, 0)
+  simm16 = SignedBitField(15, 0, default=0)
 
 class SOPP(Inst):
   encoding = FixedBitField(31, 23, 0b101111111)
   op = EnumBitField(22, 16, SOPPOp)
-  simm16 = SignedBitField(15, 0)
+  simm16 = SignedBitField(15, 0, default=0)
 
 class VBUFFER(Inst):
   encoding = FixedBitField(31, 26, 0b110001)

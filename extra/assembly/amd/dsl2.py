@@ -114,8 +114,8 @@ class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
   _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 
-  def __init__(self, hi: int, lo: int):
-    super().__init__(hi, lo)
+  def __init__(self, hi: int, lo: int, default=None):
+    super().__init__(hi, lo, default)
     expected_size = self._valid_range[1] - self._valid_range[0] + 1
     actual_size = 1 << (hi - lo + 1)
     if actual_size != expected_size:
@@ -192,10 +192,16 @@ class Inst:
       if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
         self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
 
-  def __getitem__(self, name: str):
-    field = next(f for n, f in self._fields if n == name)
-    return field.get(self._raw)
+  def __getattribute__(self, name: str):
+    if name.startswith('_') or name in ('size', 'to_bytes', 'from_bytes', 'op_name'):
+      return object.__getattribute__(self, name)
+    fields = object.__getattribute__(self, '_fields')
+    field = next((f for n, f in fields if n == name), None)
+    if field is None: return object.__getattribute__(self, name)
+    return field.get(object.__getattribute__(self, '_raw'))
 
+  @property
+  def op_name(self) -> str: return self.op.name
   def size(self) -> int: return self._size + (4 if self._literal is not None else 0)
 
   def to_bytes(self) -> bytes:
@@ -218,7 +224,7 @@ class Inst:
 
   def __repr__(self):
     args = [n for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
-    return f"{self['op'].name.lower()}({', '.join(repr(self[n]) for n in args)})"
+    return f"{self.op.name.lower()}({', '.join(repr(getattr(self, n)) for n in args)})"
 
 # ══════════════════════════════════════════════════════════════
 # VOP1
