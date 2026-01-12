@@ -1,7 +1,7 @@
 # library for RDNA3 assembly DSL
 # mypy: ignore-errors
 from __future__ import annotations
-import struct, math, re
+import re, struct
 from enum import IntEnum
 from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
@@ -25,40 +25,12 @@ POS_HALF, NEG_HALF, POS_ONE, NEG_ONE, POS_TWO, NEG_TWO = SrcEnum.POS_HALF, SrcEn
 POS_FOUR, NEG_FOUR, INV_2PI, VCCZ, EXECZ, SCC, LDS_DIRECT = SrcEnum.POS_FOUR, SrcEnum.NEG_FOUR, SrcEnum.INV_2PI, SrcEnum.VCCZ, SrcEnum.EXECZ, SrcEnum.SCC, SrcEnum.LDS_DIRECT
 OFF = NULL
 
-# Common masks and bit conversion functions
+# Common masks
 MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
-_struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
-_struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
-_struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")
-def _f32(i):
-  i = i & MASK32
-  # RDNA3 default mode: flush f32 denormals to zero (FTZ)
-  # Denormal: exponent=0 (bits 23-30) and mantissa!=0 (bits 0-22)
-  if (i & 0x7f800000) == 0 and (i & 0x007fffff) != 0: return 0.0
-  return _struct_f.unpack(_struct_I.pack(i))[0]
-def _i32(f):
-  if isinstance(f, int): f = float(f)
-  if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
-  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
-  try:
-    bits = _struct_I.unpack(_struct_f.pack(f))[0]
-    # RDNA3 default mode: flush f32 denormals to zero (FTZ)
-    if (bits & 0x7f800000) == 0 and (bits & 0x007fffff) != 0: return 0x80000000 if bits & 0x80000000 else 0
-    return bits
-  except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
-def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
-def _f16(i): return _struct_e.unpack(_struct_H.pack(i & 0xffff))[0]
-def _i16(f):
-  if math.isnan(f): return 0x7e00
-  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
-  try: return _struct_H.unpack(_struct_e.pack(f))[0]
-  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
-def _f64(i): return _struct_d.unpack(_struct_Q.pack(i & MASK64))[0]
-def _i64(f):
-  if math.isnan(f): return 0x7ff8000000000000
-  if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
-  try: return _struct_Q.unpack(_struct_d.pack(f))[0]
-  except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+
+# Float/int bit conversion (simple versions for literal encoding)
+def _i32(f: float) -> int: return struct.unpack("<I", struct.pack("<f", f))[0]
+def _i64(f: float) -> int: return struct.unpack("<Q", struct.pack("<d", f))[0]
 
 # Instruction spec - register counts and dtypes derived from instruction names
 _REGS = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16,

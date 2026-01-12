@@ -3,7 +3,7 @@
 import unittest
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import encode_src, RawImm
-from extra.assembly.amd.asm import detect_format
+from extra.assembly.amd.decode import detect_format
 
 class TestMUBUF(unittest.TestCase):
   """Test MUBUF (buffer) instructions."""
