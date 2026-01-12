@@ -3,7 +3,7 @@
 # ruff: noqa: E501
 from extra.assembly.amd.autogen.rdna4.enum import DSOp, SMEMOp, SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VBUFFEROp, VFLATOp, VGLOBALOp, VIMAGEOp, VINTERPOp, VOP1Op, VOP2Op, VOP3Op, VOP3POp, VOP3SDOp, VOPCOp, VOPDOp, VSAMPLEOp, VSCRATCHOp
 
-DSOp_PCODE = {
+PCODE = {
   DSOp.DS_ADD_U32: 'addr = CalcDsAddr(vgpr_a.b32, offset.b32);\ntmp = MEM[addr].u32;\nMEM[addr].u32 += DATA.u32;\nRETURN_DATA.u32 = tmp',
   DSOp.DS_SUB_U32: 'addr = CalcDsAddr(vgpr_a.b32, offset.b32);\ntmp = MEM[addr].u32;\nMEM[addr].u32 -= DATA.u32;\nRETURN_DATA.u32 = tmp',
   DSOp.DS_RSUB_U32: 'addr = CalcDsAddr(vgpr_a.b32, offset.b32);\ntmp = MEM[addr].u32;\nMEM[addr].u32 = DATA.u32 - MEM[addr].u32;\nRETURN_DATA.u32 = tmp',
@@ -126,9 +126,6 @@ DSOp_PCODE = {
   DSOp.DS_BVH_STACK_PUSH8_POP2_RTN_B64: "declare stack_base : 32'B;\ndeclare stack_index : 32'U;\ndeclare DATA1 : 32'B;\ndeclare last_node_ptr : 32'B;\ndeclare INVALID_NODE : 32'B;\nDATA_VALID = lambda(data) (\nif data == INVALID_NODE then\nreturn 1'0U\nelsif ((last_node_ptr != INVALID_NODE) && (data == last_node_ptr)) then\n// Match last_node_ptr\nreturn 1'0U\nelse\nreturn 1'1U\nendif);\n// main code\n{ stack_base, stack_index } = 64'B(DECODE_ADDR(ADDR, OFFSET0));\nlast_node_ptr = DATA0.b32;\n// First 7 passes: push data onto stack\nfor i in 0 : 6 do\nif DATA_VALID(DATA1[i * 32 + 31 : i * 32]) then\nMEM[stack_base.u32 + stack_index] = DATA1[i * 32 + 31 : i * 32];\nstack_index += 1U\nelsif DATA1[i].b32 == last_node_ptr then\n// Treat all further data as invalid as well.\nbreak\nendif\nendfor;\n// Last pass: return data or pop\nif DATA_VALID(DATA1[255 : 224]) then\nRETURN_DATA[31 : 0] = DATA1[255 : 224]\nelse\nRETURN_DATA[31 : 0] = MEM[stack_base.u32 + stack_index];\nMEM[stack_base.u32 + stack_index] = INVALID_NODE;\nstack_index -= 1U\nendif;\n// Attempt a second pop\nif DATA_VALID(MEM[stack_base.u32 + stack_index]) then\nRETURN_DATA[63 : 32] = MEM[stack_base.u32 + stack_index];\nMEM[stack_base.u32 + stack_index] = INVALID_NODE;\nstack_index -= 1U\nendif;\nRETURN_ADDR[31 : 0] = 32'B(ENCODE_ADDR(stack_base, stack_index))",
   DSOp.DS_LOAD_B96: 'addr = CalcDsAddr(vgpr_a.b32, 0x0);\nRETURN_DATA[31 : 0] = MEM[addr + OFFSET.u32].b32;\nRETURN_DATA[63 : 32] = MEM[addr + OFFSET.u32 + 4U].b32;\nRETURN_DATA[95 : 64] = MEM[addr + OFFSET.u32 + 8U].b32',
   DSOp.DS_LOAD_B128: 'addr = CalcDsAddr(vgpr_a.b32, 0x0);\nRETURN_DATA[31 : 0] = MEM[addr + OFFSET.u32].b32;\nRETURN_DATA[63 : 32] = MEM[addr + OFFSET.u32 + 4U].b32;\nRETURN_DATA[95 : 64] = MEM[addr + OFFSET.u32 + 8U].b32;\nRETURN_DATA[127 : 96] = MEM[addr + OFFSET.u32 + 12U].b32',
-}
-
-SMEMOp_PCODE = {
   SMEMOp.S_LOAD_B32: 'addr = CalcGlobalAddr(sgpr_base.b64, offset.b64);\nSDATA[31 : 0] = MEM[addr].b32',
   SMEMOp.S_LOAD_B64: 'addr = CalcGlobalAddr(sgpr_base.b64, offset.b64);\nSDATA[31 : 0] = MEM[addr].b32;\nSDATA[63 : 32] = MEM[addr + 4U].b32',
   SMEMOp.S_LOAD_B128: 'addr = CalcGlobalAddr(sgpr_base.b64, offset.b64);\nSDATA[31 : 0] = MEM[addr].b32;\nSDATA[63 : 32] = MEM[addr + 4U].b32;\nSDATA[95 : 64] = MEM[addr + 8U].b32;\nSDATA[127 : 96] = MEM[addr + 12U].b32',
@@ -154,9 +151,6 @@ SMEMOp_PCODE = {
   SMEMOp.S_PREFETCH_DATA: "if MODE.SCALAR_PREFETCH_EN.u1 then\nmem_addr = (64'U(S0[63 : 0].i64 + 64'I(IOFFSET.i24)) & 0xffffffffffffff80ULL);\n// Force 128B alignment\nlength = S2.u32;\n// SGPR or M0\nlength += SDATA.u32;\n// SDATA is an immediate\nlength = (length & 31U);\n// Length restricted to 0..31\nlength = (length + 1U) * 128U;\n// Prefetch 1-32 cachelines, units of 128B\nPrefetchScalarData(mem_addr, length)\nendif",
   SMEMOp.S_BUFFER_PREFETCH_DATA: "if MODE.SCALAR_PREFETCH_EN.u1 then\nmem_addr = (64'U(S0[47 : 0].i64 + 64'I(IOFFSET.i24)) & 0xffffffffffffff80ULL);\n// Force 128B alignment\nlength = S2.u32;\n// SGPR or M0\nlength += SDATA.u32;\n// SDATA is an immediate\nlength = (length & 31U);\n// Length restricted to 0..31\nlength = (length + 1U) * 128U;\n// Prefetch 1-32 cachelines, units of 128B\nPrefetchScalarData(mem_addr, length)\nendif",
   SMEMOp.S_PREFETCH_DATA_PC_REL: "if MODE.SCALAR_PREFETCH_EN.u1 then\nmem_addr = (64'U(PC[63 : 0].i64 + 8LL + 64'I(IOFFSET.i24)) & 0xffffffffffffff80ULL);\n// Force 128B alignment\nlength = S1.u32;\n// SGPR or M0\nlength += SDATA.u32;\n// SDATA is an immediate\nlength = (length & 31U);\n// Length restricted to 0..31\nlength = (length + 1U) * 128U;\n// Prefetch 1-32 cachelines, units of 128B\nPrefetchScalarData(mem_addr, length)\nendif",
-}
-
-SOP1Op_PCODE = {
   SOP1Op.S_MOV_B32: 'D0.b32 = S0.b32',
   SOP1Op.S_MOV_B64: 'D0.b64 = S0.b64',
   SOP1Op.S_CMOV_B32: 'if SCC then\nD0.b32 = S0.b32\nendif',
@@ -239,9 +233,6 @@ SOP1Op_PCODE = {
   SOP1Op.S_FLOOR_F16: "D0.f16 = trunc(S0.f16);\nif ((S0.f16 < 16'0.0) && (S0.f16 != D0.f16)) then\nD0.f16 += -16'1.0\nendif",
   SOP1Op.S_TRUNC_F16: 'D0.f16 = trunc(S0.f16)',
   SOP1Op.S_RNDNE_F16: "D0.f16 = floor(S0.f16 + 16'0.5);\nif (isEven(64'F(floor(S0.f16))) && (fract(S0.f16) == 16'0.5)) then\nD0.f16 -= 16'1.0\nendif",
-}
-
-SOP2Op_PCODE = {
   SOP2Op.S_ADD_CO_U32: "tmp = 64'U(S0.u32) + 64'U(S1.u32);\nSCC = tmp >= 0x100000000ULL ? 1'1U : 1'0U;\n// unsigned overflow or carry-out for S_ADD_CO_CI_U32.\nD0.u32 = tmp.u32",
   SOP2Op.S_SUB_CO_U32: "tmp = S0.u32 - S1.u32;\nSCC = S1.u32 > S0.u32 ? 1'1U : 1'0U;\n// unsigned overflow or carry-out for S_SUB_CO_CI_U32.\nD0.u32 = tmp.u32",
   SOP2Op.S_ADD_CO_I32: 'tmp = S0.i32 + S1.i32;\nSCC = ((S0.u32[31] == S1.u32[31]) && (S0.u32[31] != tmp.u32[31]));\n// signed overflow.\nD0.i32 = tmp.i32',
@@ -316,9 +307,6 @@ SOP2Op_PCODE = {
   SOP2Op.S_ADD_NC_U64: 'D0.u64 = S0.u64 + S1.u64',
   SOP2Op.S_SUB_NC_U64: 'D0.u64 = S0.u64 - S1.u64',
   SOP2Op.S_MUL_U64: 'D0.u64 = S0.u64 * S1.u64',
-}
-
-SOPCOp_PCODE = {
   SOPCOp.S_CMP_EQ_I32: 'SCC = S0.i32 == S1.i32',
   SOPCOp.S_CMP_LG_I32: 'SCC = S0.i32 <> S1.i32',
   SOPCOp.S_CMP_GT_I32: 'SCC = S0.i32 > S1.i32',
@@ -365,9 +353,6 @@ SOPCOp_PCODE = {
   SOPCOp.S_CMP_NLE_F16: 'SCC = !(S0.f16 <= S1.f16);\n// With NAN inputs this is not the same operation as >',
   SOPCOp.S_CMP_NEQ_F16: 'SCC = !(S0.f16 == S1.f16);\n// With NAN inputs this is not the same operation as !=',
   SOPCOp.S_CMP_NLT_F16: 'SCC = !(S0.f16 < S1.f16);\n// With NAN inputs this is not the same operation as >=',
-}
-
-SOPKOp_PCODE = {
   SOPKOp.S_MOVK_I32: "D0.i32 = 32'I(signext(S0.i16))",
   SOPKOp.S_VERSION: 'nop();\n// Do nothing - for use by tools only',
   SOPKOp.S_CMOVK_I32: "if SCC then\nD0.i32 = 32'I(signext(S0.i16))\nendif",
@@ -377,9 +362,6 @@ SOPKOp_PCODE = {
   SOPKOp.S_SETREG_B32: "hwRegId = SIMM16.u16[5 : 0];\noffset = SIMM16.u16[10 : 6];\nsize = SIMM16.u16[15 : 11].u32 + 1U;\n// logical size is in range 1:32\nmask = (1 << size) - 1;\nmask = (mask << offset.u32);\nmask = (mask & HwRegWriteMask(hwRegId, WAVE_STATUS.PRIV));\n// Mask of bits that can be modified\nvalue = ((S0.u32 << offset.u32) & mask.u32);\nvalue = (value | 32'U(HW_REGISTERS[hwRegId].i32 & ~mask));\nHW_REGISTERS[hwRegId] = value.b32;\n// Side-effects may trigger here if certain bits are modified",
   SOPKOp.S_SETREG_IMM32_B32: "hwRegId = SIMM16.u16[5 : 0];\noffset = SIMM16.u16[10 : 6];\nsize = SIMM16.u16[15 : 11].u32 + 1U;\n// logical size is in range 1:32\nmask = (1 << size) - 1;\nmask = (mask << offset.u32);\nmask = (mask & HwRegWriteMask(hwRegId, WAVE_STATUS.PRIV));\n// Mask of bits that can be modified\nvalue = ((SIMM32.u32 << offset.u32) & mask.u32);\nvalue = (value | 32'U(HW_REGISTERS[hwRegId].i32 & ~mask));\nHW_REGISTERS[hwRegId] = value.b32;\n// Side-effects may trigger here if certain bits are modified",
   SOPKOp.S_CALL_B64: "D0.i64 = PC + 4LL;\nPC = PC + signext(SIMM16.i16 * 16'4) + 4LL",
-}
-
-SOPPOp_PCODE = {
   SOPPOp.S_NOP: 'for i in 0U : SIMM16.u16[3 : 0].u32 do\nnop()\nendfor',
   SOPPOp.S_SLEEP: 's_sleep { duration: 0 }       // Wait for 0 clocks.\ns_sleep { duration: 1 }       // Wait for 1-64 clocks.\ns_sleep { duration: 2 }       // Wait for 65-128 clocks.\ns_sleep { sleep_forever: 1 }        // Wait until an event occurs.',
   SOPPOp.S_DELAY_ALU: 'v_mov_b32 v3, v0\nv_lshlrev_b32   v30, 1, v31\nv_lshlrev_b32   v24, 1, v25\ns_delay_alu { instid0: INSTID_VALU_DEP_3, instskip: INSTSKIP_SKIP_1, instid1: INSTID_VALU_DEP_1 }\n// 1 cycle delay here\nv_add_f32  v0, v1, v3\nv_sub_f32  v11, v9, v9\n// 2 cycles delay here\nv_mul_f32  v10, v13, v11',
@@ -394,9 +376,6 @@ SOPPOp_PCODE = {
   SOPPOp.S_CBRANCH_EXECZ: "if EXECZ.u1 == 1'1U then\nPC = PC + signext(SIMM16.i16 * 16'4) + 4LL\nelse\nPC = PC + 4LL\nendif",
   SOPPOp.S_CBRANCH_EXECNZ: "if EXECZ.u1 == 1'0U then\nPC = PC + signext(SIMM16.i16 * 16'4) + 4LL\nelse\nPC = PC + 4LL\nendif",
   SOPPOp.S_SETPRIO: 'SysUserPrio = MIN(3, SysPrio[1:0] + UserPrio[1:0]). Priority = {SysUserPrio[1:0], WaveAge[3:0]}',
-}
-
-VBUFFEROp_PCODE = {
   VBUFFEROp.BUFFER_LOAD_FORMAT_X: 'addr = CalcBufferAddr(vgpr_a.b64, sgpr_o.b64);\nVDATA[31 : 0].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetX()]);\n// Mem access size depends on format',
   VBUFFEROp.BUFFER_LOAD_FORMAT_XY: 'addr = CalcBufferAddr(vgpr_a.b64, sgpr_o.b64);\nVDATA[31 : 0].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetX()]);\n// Mem access size depends on format\nVDATA[63 : 32].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetY()])',
   VBUFFEROp.BUFFER_LOAD_FORMAT_XYZ: 'addr = CalcBufferAddr(vgpr_a.b64, sgpr_o.b64);\nVDATA[31 : 0].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetX()]);\n// Mem access size depends on format\nVDATA[63 : 32].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetY()]);\nVDATA[95 : 64].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetZ()])',
@@ -486,9 +465,6 @@ VBUFFEROp_PCODE = {
   VBUFFEROp.TBUFFER_STORE_D16_FORMAT_XY: "addr = CalcBufferAddr(vgpr_a.b64, sgpr_o.b64);\nMEM[addr + ChannelOffsetX()] = ConvertToFormat(32'B(VDATA[15 : 0].b16));\n// Mem access size depends on format\nMEM[addr + ChannelOffsetY()] = ConvertToFormat(32'B(VDATA[31 : 16].b16))",
   VBUFFEROp.TBUFFER_STORE_D16_FORMAT_XYZ: "addr = CalcBufferAddr(vgpr_a.b64, sgpr_o.b64);\nMEM[addr + ChannelOffsetX()] = ConvertToFormat(32'B(VDATA[15 : 0].b16));\n// Mem access size depends on format\nMEM[addr + ChannelOffsetY()] = ConvertToFormat(32'B(VDATA[31 : 16].b16));\nMEM[addr + ChannelOffsetZ()] = ConvertToFormat(32'B(VDATA[47 : 32].b16))",
   VBUFFEROp.TBUFFER_STORE_D16_FORMAT_XYZW: "addr = CalcBufferAddr(vgpr_a.b64, sgpr_o.b64);\nMEM[addr + ChannelOffsetX()] = ConvertToFormat(32'B(VDATA[15 : 0].b16));\n// Mem access size depends on format\nMEM[addr + ChannelOffsetY()] = ConvertToFormat(32'B(VDATA[31 : 16].b16));\nMEM[addr + ChannelOffsetZ()] = ConvertToFormat(32'B(VDATA[47 : 32].b16));\nMEM[addr + ChannelOffsetW()] = ConvertToFormat(32'B(VDATA[63 : 48].b16))",
-}
-
-VFLATOp_PCODE = {
   VFLATOp.FLAT_LOAD_U8: "addr = CalcFlatAddr(v_addr.b64, flat_scratch.b64);\nVDATA.u32 = 32'U({ 24'0U, MEM[addr].u8 })",
   VFLATOp.FLAT_LOAD_I8: "addr = CalcFlatAddr(v_addr.b64, flat_scratch.b64);\nVDATA.i32 = 32'I(signext(MEM[addr].i8))",
   VFLATOp.FLAT_LOAD_U16: "addr = CalcFlatAddr(v_addr.b64, flat_scratch.b64);\nVDATA.u32 = 32'U({ 16'0U, MEM[addr].u16 })",
@@ -544,9 +520,6 @@ VFLATOp_PCODE = {
   VFLATOp.FLAT_ATOMIC_ADD_F32: 'addr = CalcFlatAddr(v_addr.b64, flat_scratch.b64);\ntmp = MEM[addr].f32;\nMEM[addr].f32 += DATA.f32;\nRETURN_DATA.f32 = tmp',
   VFLATOp.FLAT_ATOMIC_PK_ADD_F16: 'tmp = MEM[ADDR].b32;\nsrc = DATA.b32;\ndst[15 : 0].f16 = src[15 : 0].f16 + tmp[15 : 0].f16;\ndst[31 : 16].f16 = src[31 : 16].f16 + tmp[31 : 16].f16;\nMEM[ADDR].b32 = dst.b32;\nRETURN_DATA.b32 = tmp.b32',
   VFLATOp.FLAT_ATOMIC_PK_ADD_BF16: 'tmp = MEM[ADDR].b32;\nsrc = DATA.b32;\ndst[15 : 0].bf16 = src[15 : 0].bf16 + tmp[15 : 0].bf16;\ndst[31 : 16].bf16 = src[31 : 16].bf16 + tmp[31 : 16].bf16;\nMEM[ADDR].b32 = dst.b32;\nRETURN_DATA.b32 = tmp.b32',
-}
-
-VGLOBALOp_PCODE = {
   VGLOBALOp.GLOBAL_LOAD_U8: "addr = CalcGlobalAddr(v_addr.b64, s_saddr.b64);\nVDATA.u32 = 32'U({ 24'0U, MEM[addr].u8 })",
   VGLOBALOp.GLOBAL_LOAD_I8: "addr = CalcGlobalAddr(v_addr.b64, s_saddr.b64);\nVDATA.i32 = 32'I(signext(MEM[addr].i8))",
   VGLOBALOp.GLOBAL_LOAD_U16: "addr = CalcGlobalAddr(v_addr.b64, s_saddr.b64);\nVDATA.u32 = 32'U({ 16'0U, MEM[addr].u16 })",
@@ -607,9 +580,6 @@ VGLOBALOp_PCODE = {
   VGLOBALOp.GLOBAL_ATOMIC_PK_ADD_F16: 'tmp = MEM[ADDR].b32;\nsrc = DATA.b32;\ndst[15 : 0].f16 = src[15 : 0].f16 + tmp[15 : 0].f16;\ndst[31 : 16].f16 = src[31 : 16].f16 + tmp[31 : 16].f16;\nMEM[ADDR].b32 = dst.b32;\nRETURN_DATA.b32 = tmp.b32',
   VGLOBALOp.GLOBAL_ATOMIC_PK_ADD_BF16: 'tmp = MEM[ADDR].b32;\nsrc = DATA.b32;\ndst[15 : 0].bf16 = src[15 : 0].bf16 + tmp[15 : 0].bf16;\ndst[31 : 16].bf16 = src[31 : 16].bf16 + tmp[31 : 16].bf16;\nMEM[ADDR].b32 = dst.b32;\nRETURN_DATA.b32 = tmp.b32',
   VGLOBALOp.GLOBAL_ATOMIC_ORDERED_ADD_B64: "shader_id = DATA[31 : 0];\nshader_offset = DATA[63 : 32];\nold_mem_id = MEM[ADDR].b32;\nold_mem_value = MEM[ADDR + 4U].b32;\nif old_mem_id == shader_id then\nMEM[ADDR].b32 = 32'B((old_mem_id.i32 + 1) & VGT_GS_MAX_WAVE_ID.i32);\n// increment the ordered ID in memory\nMEM[ADDR + 4U].b32 = old_mem_value + shader_offset;\n// add the streamout offset\nendif;\nRETURN_DATA[31 : 0].b32 = old_mem_id;\nRETURN_DATA[63 : 32].b32 = old_mem_value",
-}
-
-VIMAGEOp_PCODE = {
   VIMAGEOp.IMAGE_ATOMIC_SWAP: 'addr = CalcImageAddr(v_addr.b128);\ntmp = MEM[addr].b32;\nMEM[addr].b32 = DATA.b32;\nRETURN_DATA.b32 = tmp',
   VIMAGEOp.IMAGE_ATOMIC_CMPSWAP: 'addr = CalcImageAddr(v_addr.b128);\ntmp = MEM[addr].u32;\nsrc = DATA[31 : 0].u32;\ncmp = DATA[63 : 32].u32;\nMEM[addr].u32 = tmp == cmp ? src : tmp;\nRETURN_DATA.u32 = tmp',
   VIMAGEOp.IMAGE_ATOMIC_ADD_UINT: 'addr = CalcImageAddr(v_addr.b128);\ntmp = MEM[addr].u32;\nMEM[addr].u32 += DATA.u32;\nRETURN_DATA.u32 = tmp',
@@ -628,18 +598,12 @@ VIMAGEOp_PCODE = {
   VIMAGEOp.IMAGE_ATOMIC_MAX_FLT: "tmp = MEM[ADDR].f32;\nsrc = DATA.f32;\nif (isNAN(64'F(src.f32)) && isNAN(64'F(tmp.f32))) then\nMEM[ADDR].f32 = 32'F(cvtToQuietNAN(64'F(src.f32)))\nelsif isNAN(64'F(src.f32)) then\nMEM[ADDR].f32 = tmp.f32\nelsif isNAN(64'F(tmp.f32)) then\nMEM[ADDR].f32 = src.f32\nelsif ((src.f32 > tmp.f32) || ((abs(src.f32) == 0.0F) && (abs(tmp.f32) == 0.0F) && !sign(src.f32) &&\nsign(tmp.f32))) then\n// NOTE: +0>-0 is TRUE in this comparison\nMEM[ADDR].f32 = src.f32\nelse\nMEM[ADDR].f32 = tmp.f32\nendif;\nRETURN_DATA.f32 = tmp",
   VIMAGEOp.IMAGE_ATOMIC_PK_ADD_F16: 'tmp = MEM[ADDR].b32;\nsrc = DATA.b32;\ndst[15 : 0].f16 = src[15 : 0].f16 + tmp[15 : 0].f16;\ndst[31 : 16].f16 = src[31 : 16].f16 + tmp[31 : 16].f16;\nMEM[ADDR].b32 = dst.b32;\nRETURN_DATA.b32 = tmp.b32',
   VIMAGEOp.IMAGE_ATOMIC_PK_ADD_BF16: 'tmp = MEM[ADDR].b32;\nsrc = DATA.b32;\ndst[15 : 0].bf16 = src[15 : 0].bf16 + tmp[15 : 0].bf16;\ndst[31 : 16].bf16 = src[31 : 16].bf16 + tmp[31 : 16].bf16;\nMEM[ADDR].b32 = dst.b32;\nRETURN_DATA.b32 = tmp.b32',
-}
-
-VINTERPOp_PCODE = {
   VINTERPOp.V_INTERP_P10_F32: 'D0.f32 = fma(VGPR[(laneId.u32 & 0xfffffffcU) + 1U][SRC0.u32].f32, S1.f32, VGPR[laneId.u32 &\n0xfffffffcU][SRC2.u32].f32)',
   VINTERPOp.V_INTERP_P2_F32: 'D0.f32 = fma(VGPR[(laneId.u32 & 0xfffffffcU) + 2U][SRC0.u32].f32, S1.f32, S2.f32)',
   VINTERPOp.V_INTERP_P10_F16_F32: "D0.f32 = fma(32'F(VGPR[(laneId.u32 & 0xfffffffcU) + 1U][SRC0.u32].f16), S1.f32, 32'F(VGPR[laneId.u32 &\n0xfffffffcU][SRC2.u32].f16))",
   VINTERPOp.V_INTERP_P2_F16_F32: "D0.f16 = 16'F(fma(32'F(VGPR[(laneId.u32 & 0xfffffffcU) + 2U][SRC0.u32].f16), S1.f32, S2.f32))",
   VINTERPOp.V_INTERP_P10_RTZ_F16_F32: "D0.f32 = fma(32'F(VGPR[(laneId.u32 & 0xfffffffcU) + 1U][SRC0.u32].f16), S1.f32, 32'F(VGPR[laneId.u32 &\n0xfffffffcU][SRC2.u32].f16))",
   VINTERPOp.V_INTERP_P2_RTZ_F16_F32: "D0.f32 = fma(32'F(VGPR[(laneId.u32 & 0xfffffffcU) + 2U][SRC0.u32].f16), S1.f32, S2.f32)",
-}
-
-VOP1Op_PCODE = {
   VOP1Op.V_MOV_B32_E32: 'D0.b32 = S0.b32',
   VOP1Op.V_READFIRSTLANE_B32_E32: "declare lane : 32'U;\nif WAVE64 then\n// 64 lanes\nif EXEC == 0x0LL then\nlane = 0U;\n// Force lane 0 if all lanes are disabled\nelse\nlane = 32'U(s_ff1_i32_b64(EXEC));\n// Lowest active lane\nendif\nelse\n// 32 lanes\nif EXEC_LO.i32 == 0 then\nlane = 0U;\n// Force lane 0 if all lanes are disabled\nelse\nlane = 32'U(s_ff1_i32_b32(EXEC_LO));\n// Lowest active lane\nendif\nendif;\nD0.b32 = VGPR[lane][SRC0.u32]",
   VOP1Op.V_CVT_I32_F64_E32: 'D0.i32 = f64_to_i32(S0.f64)',
@@ -728,9 +692,6 @@ VOP1Op_PCODE = {
   VOP1Op.V_CVT_F32_BF8_E32: "if OPSEL[1 : 0].u2 == 2'0U then\nD0.f32 = bf8_to_f32(VGPR[laneId][SRC0.u32][7 : 0].bf8)\nelsif OPSEL[1 : 0].u2 == 2'2U then\n// Byte select bits are reversed\nD0.f32 = bf8_to_f32(VGPR[laneId][SRC0.u32][15 : 8].bf8)\nelsif OPSEL[1 : 0].u2 == 2'1U then\nD0.f32 = bf8_to_f32(VGPR[laneId][SRC0.u32][23 : 16].bf8)\nelse\nD0.f32 = bf8_to_f32(VGPR[laneId][SRC0.u32][31 : 24].bf8)\nendif",
   VOP1Op.V_CVT_PK_F32_FP8_E32: 'tmp = OPSEL[0].u1 ? VGPR[laneId][SRC0.u32][31 : 16] : VGPR[laneId][SRC0.u32][15 : 0];\nD0[31 : 0].f32 = fp8_to_f32(tmp[7 : 0].fp8);\nD0[63 : 32].f32 = fp8_to_f32(tmp[15 : 8].fp8)',
   VOP1Op.V_CVT_PK_F32_BF8_E32: 'tmp = OPSEL[0].u1 ? VGPR[laneId][SRC0.u32][31 : 16] : VGPR[laneId][SRC0.u32][15 : 0];\nD0[31 : 0].f32 = bf8_to_f32(tmp[7 : 0].bf8);\nD0[63 : 32].f32 = bf8_to_f32(tmp[15 : 8].bf8)',
-}
-
-VOP2Op_PCODE = {
   VOP2Op.V_CNDMASK_B32_E32: 'D0.u32 = VCC.u64[laneId] ? S1.u32 : S0.u32',
   VOP2Op.V_ADD_F64_E32: 'D0.f64 = S0.f64 + S1.f64',
   VOP2Op.V_ADD_F32_E32: 'D0.f32 = S0.f32 + S1.f32',
@@ -780,9 +741,6 @@ VOP2Op_PCODE = {
   VOP2Op.V_FMAAK_F16_E32: 'D0.f16 = fma(S0.f16, S1.f16, SIMM32.f16)',
   VOP2Op.V_LDEXP_F16_E32: "D0.f16 = S0.f16 * 16'F(2.0F ** 32'I(S1.i16))",
   VOP2Op.V_PK_FMAC_F16_E32: 'D0[31 : 16].f16 = fma(S0[31 : 16].f16, S1[31 : 16].f16, D0[31 : 16].f16);\nD0[15 : 0].f16 = fma(S0[15 : 0].f16, S1[15 : 0].f16, D0[15 : 0].f16)',
-}
-
-VOP3Op_PCODE = {
   VOP3Op.V_CMP_LT_F16_E64: 'D0.u64[laneId] = S0.f16 < S1.f16;\n// D0 = VCC in VOPC encoding.',
   VOP3Op.V_CMP_EQ_F16_E64: 'D0.u64[laneId] = S0.f16 == S1.f16;\n// D0 = VCC in VOPC encoding.',
   VOP3Op.V_CMP_LE_F16_E64: 'D0.u64[laneId] = S0.f16 <= S1.f16;\n// D0 = VCC in VOPC encoding.',
@@ -1215,9 +1173,6 @@ VOP3Op_PCODE = {
   VOP3Op.V_CVT_PK_BF8_F32: 'prev_mode = ROUND_MODE;\nROUND_MODE = ROUND_NEAREST_EVEN;\nif OPSEL[3].u32 == 0U then\nVGPR[laneId][VDST.u32][15 : 0].b16 = { f32_to_bf8(S1.f32), f32_to_bf8(S0.f32) };\n// D0[31:16] are preserved\nelse\nVGPR[laneId][VDST.u32][31 : 16].b16 = { f32_to_bf8(S1.f32), f32_to_bf8(S0.f32) };\n// D0[15:0] are preserved\nendif;\nROUND_MODE = prev_mode',
   VOP3Op.V_CVT_SR_FP8_F32: "prev_mode = ROUND_MODE;\nROUND_MODE = ROUND_NEAREST_EVEN;\ns = sign(S0.f32);\ne = exponent(S0.f32);\nm = 23'U(32'U(23'B(mantissa(S0.f32))) + S1[31 : 12].u32);\ntmp = float32(s, e, m);\n// Add stochastic value to mantissa, wrap around on overflow\nif OPSEL[3 : 2].u2 == 2'0U then\nVGPR[laneId][VDST.u32][7 : 0].fp8 = f32_to_fp8(tmp.f32)\nelsif OPSEL[3 : 2].u2 == 2'1U then\nVGPR[laneId][VDST.u32][15 : 8].fp8 = f32_to_fp8(tmp.f32)\nelsif OPSEL[3 : 2].u2 == 2'2U then\nVGPR[laneId][VDST.u32][23 : 16].fp8 = f32_to_fp8(tmp.f32)\nelse\nVGPR[laneId][VDST.u32][31 : 24].fp8 = f32_to_fp8(tmp.f32)\nendif;\n// Unwritten bytes of D are preserved.\nROUND_MODE = prev_mode",
   VOP3Op.V_CVT_SR_BF8_F32: "prev_mode = ROUND_MODE;\nROUND_MODE = ROUND_NEAREST_EVEN;\ns = sign(S0.f32);\ne = exponent(S0.f32);\nm = 23'U(32'U(23'B(mantissa(S0.f32))) + S1[31 : 11].u32);\ntmp = float32(s, e, m);\n// Add stochastic value to mantissa, wrap around on overflow\nif OPSEL[3 : 2].u2 == 2'0U then\nVGPR[laneId][VDST.u32][7 : 0].bf8 = f32_to_bf8(tmp.f32)\nelsif OPSEL[3 : 2].u2 == 2'1U then\nVGPR[laneId][VDST.u32][15 : 8].bf8 = f32_to_bf8(tmp.f32)\nelsif OPSEL[3 : 2].u2 == 2'2U then\nVGPR[laneId][VDST.u32][23 : 16].bf8 = f32_to_bf8(tmp.f32)\nelse\nVGPR[laneId][VDST.u32][31 : 24].bf8 = f32_to_bf8(tmp.f32)\nendif;\n// Unwritten bytes of D are preserved.\nROUND_MODE = prev_mode",
-}
-
-VOP3POp_PCODE = {
   VOP3POp.V_PK_MAD_I16: "declare tmp : 32'B;\ntmp[15 : 0].i16 = S0[15 : 0].i16 * S1[15 : 0].i16 + S2[15 : 0].i16;\ntmp[31 : 16].i16 = S0[31 : 16].i16 * S1[31 : 16].i16 + S2[31 : 16].i16;\nD0.b32 = tmp",
   VOP3POp.V_PK_MUL_LO_U16: 'tmp[31 : 16].u16 = S0[31 : 16].u16 * S1[31 : 16].u16;\ntmp[15 : 0].u16 = S0[15 : 0].u16 * S1[15 : 0].u16;\nD0.b32 = tmp.b32',
   VOP3POp.V_PK_ADD_I16: "declare tmp : 32'B;\ntmp[15 : 0].i16 = S0[15 : 0].i16 + S1[15 : 0].i16;\ntmp[31 : 16].i16 = S0[31 : 16].i16 + S1[31 : 16].i16;\nD0.b32 = tmp",
@@ -1274,9 +1229,6 @@ VOP3POp_PCODE = {
   VOP3POp.V_SWMMAC_F32_16X16X32_FP8_BF8: 'D = A (sparse 16x32) * B (32x16) + D (16x16)',
   VOP3POp.V_SWMMAC_F32_16X16X32_BF8_FP8: 'D = A (sparse 16x32) * B (32x16) + D (16x16)',
   VOP3POp.V_SWMMAC_F32_16X16X32_BF8_BF8: 'D = A (sparse 16x32) * B (32x16) + D (16x16)',
-}
-
-VOP3SDOp_PCODE = {
   VOP3SDOp.V_ADD_CO_CI_U32: "tmp = 64'U(S0.u32) + 64'U(S1.u32) + VCC.u64[laneId].u64;\nVCC.u64[laneId] = tmp >= 0x100000000ULL ? 1'1U : 1'0U;\n// VCC is an UNSIGNED overflow/carry-out for V_ADD_CO_CI_U32.\nD0.u32 = tmp.u32",
   VOP3SDOp.V_SUB_CO_CI_U32: "tmp = S0.u32 - S1.u32 - VCC.u64[laneId].u32;\nVCC.u64[laneId] = 64'U(S1.u32) + VCC.u64[laneId].u64 > 64'U(S0.u32) ? 1'1U : 1'0U;\n// VCC is an UNSIGNED overflow/carry-out for V_SUB_CO_CI_U32.\nD0.u32 = tmp.u32",
   VOP3SDOp.V_SUBREV_CO_CI_U32: "tmp = S1.u32 - S0.u32 - VCC.u64[laneId].u32;\nVCC.u64[laneId] = 64'U(S0.u32) + VCC.u64[laneId].u64 > 64'U(S1.u32) ? 1'1U : 1'0U;\n// VCC is an UNSIGNED overflow/carry-out for V_SUB_CO_CI_U32.\nD0.u32 = tmp.u32",
@@ -1287,9 +1239,6 @@ VOP3SDOp_PCODE = {
   VOP3SDOp.V_ADD_CO_U32: "tmp = 64'U(S0.u32) + 64'U(S1.u32);\nVCC.u64[laneId] = tmp >= 0x100000000ULL ? 1'1U : 1'0U;\n// VCC is an UNSIGNED overflow/carry-out for V_ADD_CO_CI_U32.\nD0.u32 = tmp.u32",
   VOP3SDOp.V_SUB_CO_U32: "tmp = S0.u32 - S1.u32;\nVCC.u64[laneId] = S1.u32 > S0.u32 ? 1'1U : 1'0U;\n// VCC is an UNSIGNED overflow/carry-out for V_SUB_CO_CI_U32.\nD0.u32 = tmp.u32",
   VOP3SDOp.V_SUBREV_CO_U32: "tmp = S1.u32 - S0.u32;\nVCC.u64[laneId] = S0.u32 > S1.u32 ? 1'1U : 1'0U;\n// VCC is an UNSIGNED overflow/carry-out for V_SUB_CO_CI_U32.\nD0.u32 = tmp.u32",
-}
-
-VOPCOp_PCODE = {
   VOPCOp.V_CMP_LT_F16_E32: 'D0.u64[laneId] = S0.f16 < S1.f16;\n// D0 = VCC in VOPC encoding.',
   VOPCOp.V_CMP_EQ_F16_E32: 'D0.u64[laneId] = S0.f16 == S1.f16;\n// D0 = VCC in VOPC encoding.',
   VOPCOp.V_CMP_LE_F16_E32: 'D0.u64[laneId] = S0.f16 <= S1.f16;\n// D0 = VCC in VOPC encoding.',
@@ -1452,9 +1401,6 @@ VOPCOp_PCODE = {
   VOPCOp.V_CMPX_CLASS_F16_E32: "declare result : 1'U;\nif isSignalNAN(64'F(S0.f16)) then\nresult = S1.u32[0]\nelsif isQuietNAN(64'F(S0.f16)) then\nresult = S1.u32[1]\nelsif exponent(S0.f16) == 31 then\n// +-INF\nresult = S1.u32[sign(S0.f16) ? 2 : 9]\nelsif exponent(S0.f16) > 0 then\n// +-normal value\nresult = S1.u32[sign(S0.f16) ? 3 : 8]\nelsif 64'F(abs(S0.f16)) > 0.0 then\n// +-denormal value\nresult = S1.u32[sign(S0.f16) ? 4 : 7]\nelse\n// +-0.0\nresult = S1.u32[sign(S0.f16) ? 5 : 6]\nendif;\nEXEC.u64[laneId] = result",
   VOPCOp.V_CMPX_CLASS_F32_E32: "declare result : 1'U;\nif isSignalNAN(64'F(S0.f32)) then\nresult = S1.u32[0]\nelsif isQuietNAN(64'F(S0.f32)) then\nresult = S1.u32[1]\nelsif exponent(S0.f32) == 255 then\n// +-INF\nresult = S1.u32[sign(S0.f32) ? 2 : 9]\nelsif exponent(S0.f32) > 0 then\n// +-normal value\nresult = S1.u32[sign(S0.f32) ? 3 : 8]\nelsif 64'F(abs(S0.f32)) > 0.0 then\n// +-denormal value\nresult = S1.u32[sign(S0.f32) ? 4 : 7]\nelse\n// +-0.0\nresult = S1.u32[sign(S0.f32) ? 5 : 6]\nendif;\nEXEC.u64[laneId] = result",
   VOPCOp.V_CMPX_CLASS_F64_E32: "declare result : 1'U;\nif isSignalNAN(S0.f64) then\nresult = S1.u32[0]\nelsif isQuietNAN(S0.f64) then\nresult = S1.u32[1]\nelsif exponent(S0.f64) == 2047 then\n// +-INF\nresult = S1.u32[sign(S0.f64) ? 2 : 9]\nelsif exponent(S0.f64) > 0 then\n// +-normal value\nresult = S1.u32[sign(S0.f64) ? 3 : 8]\nelsif abs(S0.f64) > 0.0 then\n// +-denormal value\nresult = S1.u32[sign(S0.f64) ? 4 : 7]\nelse\n// +-0.0\nresult = S1.u32[sign(S0.f64) ? 5 : 6]\nendif;\nEXEC.u64[laneId] = result",
-}
-
-VOPDOp_PCODE = {
   VOPDOp.V_DUAL_FMAC_F32: 'D0.f32 = fma(S0.f32, S1.f32, D0.f32)',
   VOPDOp.V_DUAL_FMAAK_F32: 'D0.f32 = fma(S0.f32, S1.f32, SIMM32.f32)',
   VOPDOp.V_DUAL_FMAMK_F32: 'D0.f32 = fma(S0.f32, SIMM32.f32, S1.f32)',
@@ -1472,13 +1418,7 @@ VOPDOp_PCODE = {
   VOPDOp.V_DUAL_ADD_NC_U32: 'D0.u32 = S0.u32 + S1.u32',
   VOPDOp.V_DUAL_LSHLREV_B32: 'D0.u32 = (S1.u32 << S0[4 : 0].u32)',
   VOPDOp.V_DUAL_AND_B32: 'D0.u32 = (S0.u32 & S1.u32)',
-}
-
-VSAMPLEOp_PCODE = {
   VSAMPLEOp.IMAGE_GET_LOD: 'VDATA[0] = clampedLOD;\nVDATA[1] = rawLOD.',
-}
-
-VSCRATCHOp_PCODE = {
   VSCRATCHOp.SCRATCH_LOAD_U8: "addr = CalcScratchAddr(v_addr_off.b64, s_saddr_off.b64);\nVDATA.u32 = 32'U({ 24'0U, MEM[addr].u8 })",
   VSCRATCHOp.SCRATCH_LOAD_I8: "addr = CalcScratchAddr(v_addr_off.b64, s_saddr_off.b64);\nVDATA.i32 = 32'I(signext(MEM[addr].i8))",
   VSCRATCHOp.SCRATCH_LOAD_U16: "addr = CalcScratchAddr(v_addr_off.b64, s_saddr_off.b64);\nVDATA.u32 = 32'U({ 16'0U, MEM[addr].u16 })",
@@ -1504,5 +1444,3 @@ VSCRATCHOp_PCODE = {
   VSCRATCHOp.SCRATCH_LOAD_BLOCK: 'for i in 0 : 31 do\n// Algorithm can skip over "holes" both in the memory block and VGPR block.\nif M0[i].u1 then\nVGPR[laneId][VDST.u32 + i.u32] = MEM[VGPR[laneId][ADDR].i32 + i * 4].b32\nendif\nendfor',
   VSCRATCHOp.SCRATCH_STORE_BLOCK: 'for i in 0 : 31 do\n// Algorithm can skip over "holes" both in the memory block and VGPR block.\nif M0[i].u1 then\nMEM[VGPR[laneId][ADDR].i32 + i * 4] = VGPR[laneId][VDATA.u32 + i.u32].b32\nendif\nendfor',
 }
-
-PSEUDOCODE_STRINGS = {DSOp: DSOp_PCODE, SMEMOp: SMEMOp_PCODE, SOP1Op: SOP1Op_PCODE, SOP2Op: SOP2Op_PCODE, SOPCOp: SOPCOp_PCODE, SOPKOp: SOPKOp_PCODE, SOPPOp: SOPPOp_PCODE, VBUFFEROp: VBUFFEROp_PCODE, VFLATOp: VFLATOp_PCODE, VGLOBALOp: VGLOBALOp_PCODE, VIMAGEOp: VIMAGEOp_PCODE, VINTERPOp: VINTERPOp_PCODE, VOP1Op: VOP1Op_PCODE, VOP2Op: VOP2Op_PCODE, VOP3Op: VOP3Op_PCODE, VOP3POp: VOP3POp_PCODE, VOP3SDOp: VOP3SDOp_PCODE, VOPCOp: VOPCOp_PCODE, VOPDOp: VOPDOp_PCODE, VSAMPLEOp: VSAMPLEOp_PCODE, VSCRATCHOp: VSCRATCHOp_PCODE}

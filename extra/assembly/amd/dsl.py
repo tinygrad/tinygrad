@@ -153,6 +153,23 @@ class VDSTYField(BitField):
   def decode(self, raw): return raw  # raw value, actual vdsty = (raw << 1) | ((vdstx & 1) ^ 1)
 
 # ══════════════════════════════════════════════════════════════
+# Pcode type extraction
+# ══════════════════════════════════════════════════════════════
+
+import re, functools
+
+@functools.cache
+def get_types(op) -> tuple[str|None, str|None, str|None, str|None]:
+  """Get (d0_dtype, s0_dtype, s1_dtype, s2_dtype) from pcode for an opcode."""
+  from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
+  pcode = PCODE.get(op)
+  if pcode is None: return (None, None, None, None)
+  def get_dtype(name: str) -> str | None:
+    if m := re.search(rf'{name}\.([a-z]\d+)', pcode): return m.group(1)
+    return None
+  return (get_dtype('D0'), get_dtype('S0'), get_dtype('S1'), get_dtype('S2'))
+
+# ══════════════════════════════════════════════════════════════
 # Inst base class
 # ══════════════════════════════════════════════════════════════
 
@@ -179,6 +196,9 @@ class Inst:
 
   @property
   def op_name(self) -> str: return self.op.name
+  def is_src_64(self, n: int) -> bool:
+    dtype = get_types(self.op)[n + 1]
+    return dtype in ('f64', 'u64', 'i64', 'b64')
   @classmethod
   def _size(cls) -> int: return cls._base_size
   def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)

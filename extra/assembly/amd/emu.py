@@ -8,7 +8,7 @@ from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.pcode import compile_pseudocode
-from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
+from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
@@ -393,11 +393,11 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     # Compile pcode for instructions that use it (not VOPD which has _fnx/_fny, not special dispatches)
     # VOPD needs separate functions for X and Y ops
     if isinstance(inst, VOPD):
-      def _compile_vopd_op(op): return compile_pseudocode(type(op).__name__, op.name, PSEUDOCODE_STRINGS[type(op)][op])
+      def _compile_vopd_op(op): return compile_pseudocode(type(op).__name__, op.name, PCODE[op])
       inst._fnx, inst._fny = _compile_vopd_op(_VOPD_TO_VOP[inst.opx]), _compile_vopd_op(_VOPD_TO_VOP[inst.opy])
     elif inst._dispatch not in (dispatch_endpgm, dispatch_barrier, dispatch_nop, dispatch_wmma, dispatch_writelane):
       assert type(inst.op) != int, f"inst op of {inst} is int"
-      inst._fn = compile_pseudocode(type(inst.op).__name__, inst.op.name, PSEUDOCODE_STRINGS[type(inst.op)][inst.op])
+      inst._fn = compile_pseudocode(type(inst.op).__name__, inst.op.name, PCODE[inst.op])
     result[i // 4] = inst
     i += inst._words * 4
   return result
