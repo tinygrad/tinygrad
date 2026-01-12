@@ -198,6 +198,7 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(o.inner.a, 20)
     self.assertEqual(o.b, 10)
 
+  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_struct_pointer_interop(self):
     @record
     class Foo:
@@ -272,6 +273,7 @@ typedef struct
     assert frts_cmd.readVbiosDesc.__class__ is FWSECLIC_READ_VBIOS_DESC
     assert frts_cmd.frtsRegionDesc.__class__ is FWSECLIC_FRTS_REGION_DESC
 
+  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_fields(self):
     ns = self.run_gen("""#include <stdint.h>
 typedef struct die_info
