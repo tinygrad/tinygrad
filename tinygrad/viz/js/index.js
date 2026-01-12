@@ -25,17 +25,18 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
+let timeout = null;
 const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
-  const msgEl = d3.select("#progress-message");
+  clearTimeout(timeout);
+  const msgEl = d3.select("#progress-message").style("display", "none");
+  const customEl = d3.select("#custom").style("display", "none");
   if (st === Status.STARTED) {
-    msgEl.text(msg).style("display", "block");
-  } else if (st === Status.COMPLETE) {
-    msgEl.style("display", "none");
+    msgEl.text(msg);
+    timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
   } else if (st === Status.ERR) {
-    msgEl.style("display", "none");
     displaySelection("#custom");
-    d3.select("#custom").html("").append("div").classed("raw-text", true).append(() => codeBlock(msg));
+    customEl.html("").append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -127,7 +128,8 @@ async function initWorker() {
 }
 
 function renderDag(layoutSpec, { recenter }) {
-  updateProgress(Status.STARTED, "Loading...");
+  // start calculating the new layout (non-blocking)
+  updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
   worker.postMessage(layoutSpec);
@@ -762,7 +764,6 @@ async function main() {
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   if (currentCtx == -1) return;
-  updateProgress(Status.STARTED, "Loading...");
   const ctx = ctxs[currentCtx];
   const step = ctx.steps[currentStep];
   const ckey = step?.query;
@@ -804,10 +805,8 @@ async function main() {
     // graph render
     if (ret.data != null) {
       metadata.prepend(showGraph.label);
-    } else {
-      displaySelection("#custom");
-      updateProgress(Status.COMPLETE);
-    }
+      renderDag(ret, { recenter:true });
+    } else displaySelection("#custom");
     // table / plaintext render
     const root = d3.create("div").classed("raw-text", true);
     function renderTable(root, ret) {
