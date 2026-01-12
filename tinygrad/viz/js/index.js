@@ -30,13 +30,12 @@ const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
   clearTimeout(timeout);
   const msgEl = d3.select("#progress-message").style("display", "none");
-  const customEl = d3.select("#custom").style("display", "none");
   if (st === Status.STARTED) {
     msgEl.text(msg);
     timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
   } else if (st === Status.ERR) {
     displaySelection("#custom");
-    customEl.html("").append("div").classed("raw-text", true).append(() => codeBlock(msg));
+    d3.select("#custom").html("").append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -127,14 +126,14 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-function renderDag(layoutSpec, { recenter }) {
+function renderDag(layoutSpec, { recenter, display=true }) {
   // start calculating the new layout (non-blocking)
   updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
   worker.postMessage(layoutSpec);
   worker.onmessage = (e) => {
-    displaySelection("#graph");
+    if (display) displaySelection("#graph");
     updateProgress(Status.COMPLETE);
     drawGraph(e.data);
     addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
@@ -803,10 +802,11 @@ async function main() {
       metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
     });
     // graph render
+    const isSqtt = ckey.includes("sqtt");
     if (ret.data != null) {
       metadata.prepend(showGraph.label);
-      renderDag(ret, { recenter:true });
-    } else displaySelection("#custom");
+      showGraph.toggle.checked = !isSqtt;
+    }
     // table / plaintext render
     const root = d3.create("div").classed("raw-text", true);
     function renderTable(root, ret) {
@@ -836,7 +836,8 @@ async function main() {
       }
       return table;
     }
-    if (ret.data != null) renderDag(ret, { recenter:true });
+    if (ret.data != null) renderDag(ret, { recenter:true, display:!isSqtt });
+    if (isSqtt || ret.data == null) displaySelection("#custom");
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     return document.querySelector("#custom").replaceChildren(root.node());
