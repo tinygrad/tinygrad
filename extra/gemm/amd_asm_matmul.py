@@ -13,7 +13,7 @@ from pathlib import Path
 from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.helpers import getenv, colored
 from tinygrad.engine.realize import Runner, Estimates, ExecItem
-from extra.assembly.amd.dsl2 import s, v, VCC_LO, EXEC_LO, NULL
+from extra.assembly.amd.dsl import s, v, VCC_LO, EXEC_LO, NULL
 from extra.assembly.amd.autogen.rdna3.ins import *
 
 # =============================================================================

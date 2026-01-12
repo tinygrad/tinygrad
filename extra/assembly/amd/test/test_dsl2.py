@@ -1,6 +1,6 @@
 import unittest
-from extra.assembly.amd.dsl2 import *
-from extra.assembly.amd.dsl2 import VOP2Op, VDSTYField
+from extra.assembly.amd.dsl import *
+from extra.assembly.amd.dsl import VOP2Op, VDSTYField
 
 class TestRegisters(unittest.TestCase):
   def test_vgpr_single(self):
