@@ -130,6 +130,5 @@ class TestWhisper(unittest.TestCase):
     reference = TRANSCRIPTION_3
     self.assertWER(reference[:len(reference)//2], reference, 0.524)
 
-
 if __name__ == '__main__':
   unittest.main()
