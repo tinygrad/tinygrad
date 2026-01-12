@@ -4,6 +4,8 @@
 # Registers - unified src encoding space (0-511)
 # ══════════════════════════════════════════════════════════════
 
+def _reg_size(t: str | None) -> int: return 2 if t in ('f64', 'u64', 'i64', 'b64') else 1
+
 class Reg:
   _NAMES = {106: "VCC_LO", 107: "VCC_HI", 124: "NULL", 125: "M0", 126: "EXEC_LO", 127: "EXEC_HI",
             240: "0.5", 241: "-0.5", 242: "1.0", 243: "-1.0", 244: "2.0", 245: "-2.0", 246: "4.0", 247: "-4.0",
@@ -259,15 +261,11 @@ class Inst:
       # Capture literal for SrcFields that encoded to 255
       if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
         self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
-    # Validate register sizes against types (only if types are known)
-    for names, type_idx in [(['vdst', 'sdst', 'sdata'], 0), (['ssrc0', 'src0'], 1), (['ssrc1', 'src1'], 2), (['src2'], 3)]:
-      if (dtype := self.types[type_idx]) is None: continue
-      expected = 2 if dtype in ('f64', 'u64', 'i64', 'b64') else 1
-      for name in names:
-        if (val := vals.get(name)) is None: continue
-        if isinstance(val, Reg) and val.sz != expected:
-          raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
-        if type_idx == 0: break  # only validate first destination
+    # Validate register sizes against types (skip special registers like NULL, VCC, EXEC)
+    for name, expected in self._field_sizes.items():
+      if (val := vals.get(name)) is None: continue
+      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or val.offset == 253):
+        raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
 
   @property
   def op_name(self) -> str: return self.op.name
@@ -275,21 +273,19 @@ class Inst:
   def types(self) -> tuple[str|None, str|None, str|None, str|None]:
     if not hasattr(self, 'op'): return (None, None, None, None)
     return get_types(self.op)
-  def is_src_64(self, n: int) -> bool:
-    dtype = self.types[n + 1]
-    return dtype in ('f64', 'u64', 'i64', 'b64')
-  def is_src_16(self, n: int) -> bool:
-    dtype = self.types[n + 1]
-    return dtype in ('f16', 'u16', 'i16', 'b16')
-  def is_dst_16(self) -> bool:
-    dtype = self.types[0]
-    return dtype in ('f16', 'u16', 'i16', 'b16')
-  def dst_regs(self) -> int:
-    dtype = self.types[0]
-    return 2 if dtype in ('f64', 'u64', 'i64', 'b64') else 1
-  def src_regs(self, n: int) -> int:
-    dtype = self.types[n + 1]
-    return 2 if dtype in ('f64', 'u64', 'i64', 'b64') else 1
+  @property
+  def _field_sizes(self) -> dict[str, int]:
+    """Map field names to expected register sizes based on instruction types."""
+    types, fields = self.types, dict(self._fields)
+    # for destinations, only validate first field that exists (vdst before sdst before sdata)
+    dst = next((n for n in ['vdst', 'sdst', 'sdata'] if n in fields), None)
+    return {n: _reg_size(types[i]) for names, i in [([dst], 0), (['ssrc0', 'src0'], 1), (['ssrc1', 'src1'], 2), (['src2'], 3)]
+            if types[i] is not None for n in names if n and n in fields}
+  def is_src_64(self, n: int) -> bool: return _reg_size(self.types[n + 1]) == 2
+  def is_src_16(self, n: int) -> bool: return self.types[n + 1] in ('f16', 'u16', 'i16', 'b16')
+  def is_dst_16(self) -> bool: return self.types[0] in ('f16', 'u16', 'i16', 'b16')
+  def dst_regs(self) -> int: return _reg_size(self.types[0])
+  def src_regs(self, n: int) -> int: return _reg_size(self.types[n + 1])
   @classmethod
   def _size(cls) -> int: return cls._base_size
   def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)
@@ -325,7 +321,12 @@ class Inst:
   def __hash__(self): return hash((type(self), self._raw, self._literal))
   def __repr__(self):
     # collect (repr, is_default) pairs, strip trailing defaults so repr roundtrips with eval
-    name = self.op.name.lower() if hasattr(self, 'op') else type(self).__name__
-    parts = [(repr(v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
+    name, sizes = self.op.name.lower() if hasattr(self, 'op') else type(self).__name__, self._field_sizes
+    def fmt(n, val):
+      # resize regular registers to match type, but skip special registers (NULL, VCC, EXEC, etc)
+      if isinstance(val, Reg) and (sz := sizes.get(n, 1)) > 1 and not (106 <= val.offset <= 127 or val.offset == 253):
+        return repr(Reg(val.offset, sz, neg=val.neg, abs_=val.abs_, hi=val.hi))
+      return repr(val)
+    parts = [(fmt(n, v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
     while parts and parts[-1][1]: parts.pop()
     return f"{name}({', '.join(p[0] for p in parts)})"
