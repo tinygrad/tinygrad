@@ -24,7 +24,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   if accum:
     instructions = instruction(v[0:vgprIndices[0]],
                                v[vgprIndices[1]:vgprIndices[2]],
-                               v[vgprIndices[1]:vgprIndices[2]], **kwargs)
+                               v[vgprIndices[1]:vgprIndices[2]], 1, **kwargs)
   elif dense:
     instructions = instruction(v[0:vgprIndices[0]],
                                v[vgprIndices[1]:vgprIndices[2]],
@@ -41,7 +41,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   fxn = AMDProgram(DEV, "matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
-  print(f"{(instructions.op.name.lower()):<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
+  print(f"{(instructions.op_name.lower()):<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
 
 if __name__=="__main__":
   DEVICENUM = os.getenv("DEVICENUM", "0")
