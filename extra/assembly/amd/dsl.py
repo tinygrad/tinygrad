@@ -19,6 +19,13 @@ class Reg:
       return Reg(self.offset + start, stop - start + 1)  # inclusive
     if key < 0 or key >= self.sz: raise RuntimeError(f"index {key} out of bounds for size {self.sz}")
     return Reg(self.offset + key, 1)
+  def __eq__(self, other):
+    if isinstance(other, Reg): return self.offset == other.offset and self.sz == other.sz
+    return NotImplemented
+  def __hash__(self): return hash((self.offset, self.sz))
+  def __add__(self, other):
+    if isinstance(other, int): return Reg(self.offset + other, self.sz)
+    return NotImplemented
   def __repr__(self):
     o, sz = self.offset, self.sz
     if 256 <= o < 512:
@@ -199,6 +206,18 @@ class Inst:
   def is_src_64(self, n: int) -> bool:
     dtype = get_types(self.op)[n + 1]
     return dtype in ('f64', 'u64', 'i64', 'b64')
+  def is_src_16(self, n: int) -> bool:
+    dtype = get_types(self.op)[n + 1]
+    return dtype in ('f16', 'u16', 'i16', 'b16')
+  def is_dst_16(self) -> bool:
+    dtype = get_types(self.op)[0]
+    return dtype in ('f16', 'u16', 'i16', 'b16')
+  def dst_regs(self) -> int:
+    dtype = get_types(self.op)[0]
+    return 2 if dtype in ('f64', 'u64', 'i64', 'b64') else 1
+  def src_regs(self, n: int) -> int:
+    dtype = get_types(self.op)[n + 1]
+    return 2 if dtype in ('f64', 'u64', 'i64', 'b64') else 1
   @classmethod
   def _size(cls) -> int: return cls._base_size
   def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)
