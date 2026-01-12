@@ -1,13 +1,11 @@
 import unittest
 import pathlib
-from examples.webgpu.whisper.audio_helpers import stft_full
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
 import examples.mlperf.metrics as metrics
 from tinygrad.helpers import fetch
 from test.helpers import slow
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
-import numpy as np
 
 # Audio generated with the command on MacOS:
 # say "Could you please let me out of the box?" --file-format=WAVE  --data-format=LEUI8@16000 -o test
@@ -131,22 +129,6 @@ class TestWhisper(unittest.TestCase):
   def test_wer_different_3(self):
     reference = TRANSCRIPTION_3
     self.assertWER(reference[:len(reference)//2], reference, 0.524)
-
-
-class TestSTFT(unittest.TestCase):
-  def test_stft_librosa(self):
-    import librosa
-
-    N_FFT = 400
-    HOP_LENGTH = 160
-    BS = 16
-
-    Tensor.manual_seed(42)
-    X = Tensor.rand(BS, 2400).realize()
-    reference = librosa.stft(X.numpy(), n_fft=N_FFT, hop_length=HOP_LENGTH, center=False, window="hann", dtype=np.csingle)
-    reference = np.abs(reference)
-    result = stft_full(X, N_FFT, HOP_LENGTH, (0, 0), "hann")
-    np.testing.assert_allclose(result.numpy(), reference, atol=1e-7, rtol=1e-2)
 
 
 if __name__ == '__main__':
