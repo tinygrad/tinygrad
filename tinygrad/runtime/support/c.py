@@ -1,6 +1,8 @@
-import ctypes, functools, os, pathlib, re, sys, sysconfig, typing
+from __future__ import annotations
+import ctypes, functools, os, pathlib, re, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
 from _ctypes import _SimpleCData
+from typing import TYPE_CHECKING, get_type_hints, get_args, overload, Any, TypeVar, Generic
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -38,6 +40,18 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
 _pending_records = []
 
+T = TypeVar("T")
+U = TypeVar("U")
+V = TypeVar("V")
+class Array(Generic[T, U]):
+  if TYPE_CHECKING:
+    @overload
+    def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
+    @overload
+    def __getitem__(self: Array[T, Any], key: int) -> T: ...
+    def __getitem__(self, key: int) -> Any: ...
+  def __class_getitem__(cls, key): return key[0] * get_args(key[1])[0]
+
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
 def mv(st) -> memoryview: return memoryview(st).cast('B')
@@ -53,7 +67,7 @@ def record(cls):
 
 def init_records():
   for cls, struct, ns in _pending_records:
-    for nm, t in typing.get_type_hints(cls, globalns=ns, include_extras=True).items(): setattr(struct, nm, field(t.__origin__, *t.__metadata__))
+    for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items(): setattr(struct, nm, field(t.__origin__, *t.__metadata__))
   _pending_records.clear()
 
 def field(typ, off:int, bit_width=None, bit_off=0):
@@ -108,7 +122,7 @@ class DLL(ctypes.CDLL):
     return fn
 
   def bind(self, fn):
-    restype, argtypes = None if (rt:=(hints:=typing.get_type_hints(fn)).pop('return', None)) is type(None) else rt, tuple(hints.values())
+    restype, argtypes = None if (rt:=(hints:=get_type_hints(fn)).pop('return', None)) is type(None) else rt, tuple(hints.values())
     return lambda *args: self._get_func(fn.__name__, argtypes, restype)(*args)
 
   def __getattr__(self, nm):
