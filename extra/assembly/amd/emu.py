@@ -2,15 +2,24 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes, functools
+from enum import IntEnum
 from tinygrad.runtime.autogen import hsa
-from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64
+from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.pcode import compile_pseudocode
 from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS
-from extra.assembly.amd.dsl import SrcEnum
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
+
+# Constants and helpers defined locally (not imported from dsl.py)
+MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
+FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
+def unwrap(v): return v.offset if hasattr(v, 'offset') else v
+
+class SrcEnum(IntEnum):
+  VCC_LO = 106; VCC_HI = 107; NULL = 124; M0 = 125; EXEC_LO = 126; EXEC_HI = 127; SCC = 253
+  POS_ONE = 242; NEG_ONE = 243; POS_TWO = 244; NEG_TWO = 245
 
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
 VCC_LO, VCC_HI, NULL, EXEC_LO, EXEC_HI, SCC = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.SCC

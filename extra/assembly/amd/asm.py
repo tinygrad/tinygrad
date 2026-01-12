@@ -1,9 +1,27 @@
 # RDNA3/RDNA4/CDNA assembler
 from __future__ import annotations
 import re
-from extra.assembly.amd.dsl import RawImm, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory
-from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
-from extra.assembly.amd.dsl import FLOAT_ENC
+from extra.assembly.amd.dsl import Reg, s, v, ttmp
+from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL
+
+# Assembler-specific types (not part of clean DSL)
+class RawImm(Reg):
+  """Raw immediate value - bypasses normal encoding, used for special register encodings."""
+  def __init__(self, val: int): super().__init__(val, 1)
+
+class SrcMod(Reg):
+  """Source with modifiers - wraps a value with neg/abs flags."""
+  def __init__(self, val: int, neg: bool = False, abs_: bool = False):
+    super().__init__(255 if not (-16 <= val <= 64) else (128 + val if val >= 0 else 192 - val), 1)
+    self.val, self.neg, self.abs_ = val, neg, abs_
+
+# Type aliases for register factories
+_RegFactory = type(s)
+SGPR, VGPR, TTMP = s, v, ttmp
+OFF = NULL  # OFF is alias for NULL (encoding 124)
+
+# Float encoding constants
+FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import VOP2Op, VOPDOp, SOPKOp
 from extra.assembly.amd.autogen.rdna3.enum import BufFmt
