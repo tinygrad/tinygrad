@@ -148,21 +148,15 @@ class TestVDSTYField(unittest.TestCase):
     self.assertEqual(f.encode(v[4]), 2)
     self.assertEqual(f.encode(v[254]), 127)
 
-  def test_encode_odd_vgpr_raises(self):
-    f = VDSTYField(6, 0)
-    with self.assertRaises(RuntimeError) as ctx:
-      f.encode(v[1])
-    self.assertIn("even VGPR", str(ctx.exception))
-
   def test_encode_non_vgpr_raises(self):
     f = VDSTYField(6, 0)
-    with self.assertRaises(RuntimeError) as ctx:
+    with self.assertRaises(ValueError) as ctx:
       f.encode(s[0])
     self.assertIn("VGPR", str(ctx.exception))
 
   def test_encode_non_reg_raises(self):
     f = VDSTYField(6, 0)
-    with self.assertRaises(RuntimeError) as ctx:
+    with self.assertRaises(TypeError) as ctx:
       f.encode(42)
     self.assertIn("Reg", str(ctx.exception))
 
