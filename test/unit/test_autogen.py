@@ -22,6 +22,29 @@ class TestAutogen(unittest.TestCase):
       return namespace
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_packed_struct(self):
+    @record
+    class Baz:
+      SIZE = 8
+      a: Annotated[ctypes.c_uint, 0, 30]
+      b: Annotated[ctypes.c_uint, 3, 30, 6]
+      c: Annotated[ctypes.c_uint, 7, 2, 4]
+      d: Annotated[ctypes.c_uint, 7, 2, 6]
+    init_records()
+
+    b = Baz(0x3AAADEAD, 0xBEEF, 1, 0)
+    assert b.a == 0x3AAADEAD
+    assert b.b == 0xBEEF
+    assert b.c == 1
+    assert b.d == 0
+
+    b.a = 0xCAFE
+    assert b.a == 0xCAFE
+    assert b.b == 0xBEEF
+    assert b.c == 1
+    assert b.d == 0
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_struct_interop(self):
     @record
     class Baz:

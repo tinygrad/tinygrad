@@ -38,11 +38,15 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
 _pending_records = []
 
+def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
+def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
+def mv(st) -> memoryview: return memoryview(st).cast('B')
+
 def record(cls):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
     for f,v in [*zip(self._real_fields_, args), *kwargs.items()]: setattr(self, f, v)
-  struct = type(cls.__name__, (ctypes.Structure,), {'__init__':__init__, '_fields_': [('_mem_', ctypes.c_char * cls.SIZE)],
+  struct = type(cls.__name__, (ctypes.Structure,), {'__init__':__init__, '_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)],
                                                     '_real_fields_':tuple(cls.__annotations__.keys())})
   _pending_records.append((cls, struct, sys._getframe().f_back.f_globals))
   return struct
@@ -54,15 +58,14 @@ def init_records():
 
 def field(typ, off:int, bit_width=None, bit_off=0):
   if bit_width is not None:
-    sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
+    sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width+bit_off, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
     # FIXME: signedness
-    return property(lambda self: (int.from_bytes(memoryview(self).cast('B')[sl], sys.byteorder) >> bit_off) & mask,
-                    lambda self,v: memoryview(self).cast('B').__setitem__(sl, ((int.from_bytes(self._mem_[sl]) & set_mask) |
-                                                                               (v << bit_off)).to_bytes(sz, sys.byteorder)))
+    return property(lambda self: (b2i(mv(self)[sl]) >> bit_off) & mask,
+                    lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
 
   sl = slice(off, off + ctypes.sizeof(typ))
-  return property(lambda self: v.value if isinstance(v:=typ.from_buffer(memoryview(self).cast('B')[sl]), _SimpleCData) else v,
-                  lambda self, v: memoryview(self).cast('B').__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v))))
+  return property(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v,
+                  lambda self, v: mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v))))
 
 class DLL(ctypes.CDLL):
   @staticmethod
