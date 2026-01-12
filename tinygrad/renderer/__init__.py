@@ -66,6 +66,7 @@ class ProgramSpec:
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
   lib:bytes|None=None
+  aux:list=field(default_factory=list)
 
   # filled in from uops (via from_uop)
   global_size:list[int]=field(default_factory=lambda: [1,1,1])
@@ -123,7 +124,7 @@ class ProgramSpec:
         # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
 
-    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, global_size, local_size,
+    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, list(prg.arg) if prg.arg else [], global_size, local_size,
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
 
 class Renderer:
@@ -134,6 +135,7 @@ class Renderer:
   has_local: bool = True
   has_threads: bool = False
   has_shared: bool = True
+  has_aux: bool = False # additional program info, eg. image shapes
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
@@ -146,3 +148,4 @@ class Renderer:
 
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")

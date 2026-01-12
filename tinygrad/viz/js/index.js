@@ -30,13 +30,13 @@ const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
   clearTimeout(timeout);
   const msgEl = d3.select("#progress-message").style("display", "none");
-  const customEl = d3.select("#custom").html("");
+  const customEl = d3.select("#custom").style("display", "none");
   if (st === Status.STARTED) {
     msgEl.text(msg);
     timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
   } else if (st === Status.ERR) {
     displaySelection("#custom");
-    customEl.append("div").classed("raw-text", true).append(() => codeBlock(msg));
+    customEl.html("").append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -55,8 +55,11 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
+const colorScale = d3.scaleSequential(t => t > 0 ? d3.interpolateLab(colorScheme.ACTIVE[1], colorScheme.ACTIVE[2])(t) : colorScheme.ACTIVE[0]).clamp(true);
+
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
+  if (data.value.colorDomain != null) colorScale.domain(data.value.colorDomain);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
@@ -67,17 +70,19 @@ const drawGraph = (data) => {
       if (parents == null && children == null) return;
       const src = [...parents, ...children, d.id];
       nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
+      if (!e.target.classList.contains("token")) labels.selectAll("rect.bg").classed("highlight", false);
       const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
       d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
       d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
       e.stopPropagation();
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-    .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
-  const STROKE_WIDTH = 1.4;
+    .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
+  const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
-  labels.selectAll("text").data(d => {
+  const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
+  const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
     if (Array.isArray(d.label)) return [d.label];
     const ret = [[]];
     for (const s of parseColors(d.label, defaultColor="initial")) {
@@ -87,8 +92,20 @@ const drawGraph = (data) => {
       for (let i=1; i<lines.length; i++) ret.push([{ st:lines[i], color }]);
     }
     return [ret];
-  }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
-    .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve").style("font-family", g.graph().font);
+  }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
+    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 && d.st !== "," ? textSpace: 0).text(d => d.st).attr("xml:space", "preserve")
+    .classed("token", true).attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color));
+  const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => {
+    const ret = [];
+    d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").each((d, i, nodes) => {
+      if (!d.keys?.length) return;
+      const b = nodes[i].getBBox(); ret.push({ keys:d.keys, x:b.x, y:b.y, width:b.width, height:b.height });
+    });
+    return ret;
+  }).join("rect").attr("class", "bg").attr("x", d => d.x).attr("y", d => d.y).attr("width", d => d.width).attr("height", d => d.height);
+  tokens.on("click", (e, { keys }) => {
+    tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
+  });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
@@ -145,16 +162,20 @@ function renderDag(layoutSpec, { recenter }) {
 
 // ** profiler graph
 
-function formatMicroseconds(ts, dur=ts) {
-  if (dur<=1e3) return `${ts.toFixed(2)}us`;
-  if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
-  return `${(ts*1e-6).toFixed(2)}s`;
+function formatMicroseconds(ts, showUs=true) {
+  const s = Math.floor(ts / 1e6), ms = Math.floor((ts % 1e6) / 1e3), us = Math.round(ts % 1e3);
+  const parts = [];
+  if (s) parts.push(`${s}s`);
+  if (ms || (!showUs && !s)) parts.push(`${ms}ms`);
+  if (showUs && (us || (!ms && !s))) parts.push(`${us}us`);
+  return parts.join(' ');
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),}
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
+  ACTIVE:["#565f89", "#c8d3f5", "#7aa2f7"]}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
@@ -475,13 +496,17 @@ async function renderProfiler(path, unit, opts) {
     // draw axes
     ctx.translate(0, baseOffset);
     drawLine(ctx, xscale.range(), [0, 0]);
+    let lastLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
-      // tick line
       const x = xscale(tick);
-      drawLine(ctx, [x, x], [0, tickSize])
-      // tick label
+      drawLine(ctx, [x, x], [0, tickSize]);
+      const labelX = x+ctx.lineWidth+2;
+      if (labelX <= lastLabelEnd) continue;
+
+      const label = formatTime(tick, et-st <= 1e3 ? true : false);
       ctx.textBaseline = "top";
-      ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
+      ctx.fillText(label, labelX, tickSize);
+      lastLabelEnd = labelX + ctx.measureText(label).width + 4;
     }
     if (data.axes.y != null) {
       drawLine(ctx, [0, 0], data.axes.y.range);
@@ -685,9 +710,15 @@ window.addEventListener("popstate", (e) => {
   if (e.state != null) setState(e.state);
 });
 
-const toggleLabel = d3.create("label").text("Show indexing (r)").node();
-const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
-toggleLabel.prepend(toggle);
+const createToggle = (id, text) => {
+  const label = d3.create("label").text(text).node();
+  const toggle = d3.create("input").attr("type", "checkbox").attr("id", id).property("checked", true).node();
+  label.prepend(toggle);
+  return { toggle, label };
+}
+const { toggle, label:toggleLabel } = createToggle("show-indexing", "Show indexing (r)");
+const showGraph = createToggle("show-graph", "Show graph (g)");
+showGraph.toggle.onchange = () => displaySelection(rect("#graph").width > 0 ? "#custom" : "#graph");
 
 function appendSteps(root, idx, steps) {
   const stack = [];
@@ -748,7 +779,6 @@ async function main() {
   if (ckey in cache) {
     ret = cache[ckey];
   }
-  // ** Text view
   if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     if (ret.steps?.length > 0) {
@@ -760,15 +790,25 @@ async function main() {
       appendSteps(el.ctx, state.currentCtx, ctx.steps);
       return setState({ currentStep:state.currentStep+1, expandSteps:true });
     }
-    // cycles on the x axis
+    // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
       return renderProfiler(ckey, "clk", opts);
     }
-    displaySelection("#custom");
     metadata.innerHTML = "";
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
+        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
+      })).node());
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
+    });
+    // graph render
+    if (ret.data != null) {
+      metadata.prepend(showGraph.label);
+      renderDag(ret, { recenter:true });
+    } else displaySelection("#custom");
+    // table / plaintext render
     const root = d3.create("div").classed("raw-text", true);
-    // detailed assembly view
     function renderTable(root, ret) {
       const table = root.append("table");
       const thead = table.append("thead");
@@ -796,15 +836,9 @@ async function main() {
       }
       return table;
     }
+    if (ret.data != null) renderDag(ret, { recenter:true });
     if (ret.cols != null) renderTable(root, ret);
-    else if (ret.data != null) renderDag(ret, { recenter:true });
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
-    ret.metadata?.forEach(m => {
-      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
-        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
-      })).node());
-      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
-    });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** Graph view
@@ -961,9 +995,9 @@ document.addEventListener("keydown", (event) => {
     document.getElementById("zoom-to-fit-btn").click();
   }
   // r key toggles indexing
-  if (event.key === "r") {
-    toggle.click();
-  }
+  if (event.key === "r") toggle.click();
+  // g key toggles graph
+  if (event.key === "g") showGraph.toggle.click();
 });
 
 main()

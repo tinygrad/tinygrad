@@ -3,6 +3,7 @@ import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
+from tinygrad.uop.ops import consumer_map_from_toposort
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
@@ -163,13 +164,13 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="get realize")
 
-  # get the traversal order
-  with cpu_profile("reverse toposort", "TINY"):
-    tsink_reverse_toposort = tsink.reverse_toposort(consumer_map:=tsink.get_consumer_map())
+  # get the consumer map
+  with cpu_profile("consumer map in rangeify", "TINY"):
+    consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink.toposort())
 
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
-  for x in tsink_reverse_toposort:
+  for x in reversed(tsink_toposort):
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
 
     # no ranges on kernels, they are internal

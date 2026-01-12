@@ -1,6 +1,6 @@
 [project]
 name = "tinygrad"
-version = "0.11.0"
+version = "0.12.0"
 description = "You like pytorch? You like micrograd? You love tinygrad! <3"
 authors = [{ name = "George Hotz" }]
 
@@ -49,7 +49,7 @@ arm = ["unicorn"]
 triton = ["triton-nightly>=2.1.0.dev20231014192330"]
 linting = [
   "pylint",
-  "mypy==1.18.1",
+  "mypy==1.19.1",
   "typing-extensions",
   "pre-commit",
   "ruff",
@@ -61,15 +61,15 @@ linting = [
 # ]
 testing_minimal = [
   "numpy",
-  "torch==2.9.0",
+  "torch==2.9.1",
   "pytest",
   "pytest-xdist",
   "pytest-timeout",
   "pytest-split",
-  "hypothesis",
+  "hypothesis>=6.148.9",
   "z3-solver",
 ]
-testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai"]
+testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai", "ggml-python"]
 testing = [
   "tinygrad[testing_unit]",
   "pillow",
@@ -87,7 +87,6 @@ testing = [
   "networkx",
   "nibabel",
   "bottle",
-  "ggml-python",
   "capstone",
   "pycocotools",
   "boto3",
@@ -135,8 +134,13 @@ check_untyped_defs = true
 explicit_package_bases = true
 warn_unreachable = true
 warn_redundant_casts = true
+strict_equality = true
 # NOTE: had to comment this out to make mypy pass on both CI and OSX
 #warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "extra.*"
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 norecursedirs = [
@@ -188,7 +192,6 @@ select = [
   "E72",
   "E112",   # no-indented-block
   "E113",   # unexpected-indentation
-  # "E124",
   "E203",   # whitespace-before-punctuation
   "E272",   # multiple-spaces-before-keyword
   "E275",   # missing-whitespace-after-keyword

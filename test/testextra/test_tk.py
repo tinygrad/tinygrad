@@ -241,18 +241,18 @@ class TestTK(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), ref.numpy())
     np.testing.assert_allclose(c.numpy(), ref.numpy())
 
-  @unittest.skip("TODO")
   def test_load_store_group(self):
-    N = 256
+    N = 1024
     BLOCK_SIZE = 64
-    with Kernel("load_store_group", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS * 2) as ker:
+    NUM_WORKERS = 4
+    with Kernel("load_store_group", (N // (BLOCK_SIZE * NUM_WORKERS), N // BLOCK_SIZE, 1), WARP_THREADS * NUM_WORKERS) as ker:
       warp = ker.warp
-      group = ker.group(2)
+      group = ker.group(NUM_WORKERS)
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
       a = ker.gl((1, 1, N, N), dtypes.float32)
 
-      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE * NUM_WORKERS), dtypes.float32)
 
       a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
       b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
@@ -260,9 +260,9 @@ class TestTK(unittest.TestCase):
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
       a_smem = group.load(a_smem, a, (), (0, 0, row, col), axis=2)
-      a_reg = warp.load(a_reg, a_smem)
+      a_reg = warp.load(a_reg, a_smem, (), (0, ker.warpid,))
       b_reg = warp.copy(b_reg, a_reg)
-      b = warp.store(b, b_reg, (0, 0, row, col), (), axis=2)
+      b = warp.store(b, b_reg, (0, 0, row, col * NUM_WORKERS + ker.warpid), (), axis=2)
 
       sink = ker.finish()
 
@@ -799,6 +799,96 @@ class TestTK(unittest.TestCase):
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
     np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
+
+  def test_fast_fa_bwd_causal(self):
+    from extra.thunder.tiny.fa import flash_attention
+
+    Tensor.manual_seed(42)
+
+    B, N, H, H_KV, D = 1, 1024, 32, 32, 128
+
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      Tensor.realize(q, k, v)
+
+      do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
+      Tensor.realize(do)
+
+    q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+    out = flash_attention(q_, k_, v_, is_causal=True)
+    out = out.float().transpose(1, 2)
+    out.backward(do)
+    Tensor.realize(q.grad, k.grad, v.grad)
+
+    with Context(DEBUG=0):
+      q_ref = q.detach().clone().requires_grad_(True)
+      k_ref = k.detach().clone().requires_grad_(True)
+      v_ref = v.detach().clone().requires_grad_(True)
+      Tensor.realize(q_ref, k_ref, v_ref)
+
+    q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
+    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True)
+    ref = ref.float().transpose(1, 2)
+    ref.backward(do)
+    Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
+
+    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
+
+  @unittest.expectedFailure
+  def test_fast_fa_bwd_causal_jitted(self):
+    from extra.thunder.tiny.fa import flash_attention
+
+    Tensor.manual_seed(42)
+
+    B, N, H, H_KV, D = 1, 1024, 32, 32, 128
+
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      Tensor.realize(q, k, v)
+
+      do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
+      Tensor.realize(do)
+
+    def fn(q, k, v, do):
+      q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+      out = flash_attention(q_, k_, v_, is_causal=True)
+      out = out.float().transpose(1, 2)
+      out.backward(do)
+      Tensor.realize(out, q.grad, k.grad, v.grad)
+      return q.grad, k.grad, v.grad
+
+    fn_jitted = TinyJit(fn)
+
+    for _ in range(10):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      Tensor.realize(q, k, v)
+      do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
+      Tensor.realize(do)
+      q.grad, k.grad, v.grad = fn_jitted(q, k, v, do)
+
+    with Context(DEBUG=0):
+      q_ref = q.detach().clone().requires_grad_(True)
+      k_ref = k.detach().clone().requires_grad_(True)
+      v_ref = v.detach().clone().requires_grad_(True)
+      Tensor.realize(q_ref, k_ref, v_ref)
+
+    q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
+    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True)
+    ref = ref.float().transpose(1, 2)
+    ref.backward(do)
+    Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
+
+    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
     np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
     np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
 
