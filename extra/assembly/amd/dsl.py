@@ -10,36 +10,53 @@ class Reg:
             248: "INV_2PI", 250: "DPP16", 253: "SCC", 255: "LIT"}
   _PAIRS = {106: "VCC", 126: "EXEC"}
 
-  def __init__(self, offset: int = 0, sz: int = 512):
+  def __init__(self, offset: int = 0, sz: int = 512, *, neg: bool = False, abs_: bool = False, hi: bool = False):
     self.offset, self.sz = offset, sz
+    self.neg, self.abs_, self.hi = neg, abs_, hi
   def __getitem__(self, key):
     if isinstance(key, slice):
       start, stop = key.start or 0, key.stop or (self.sz - 1)
       if start < 0 or stop >= self.sz: raise RuntimeError(f"slice [{start}:{stop}] out of bounds for size {self.sz}")
-      return Reg(self.offset + start, stop - start + 1)  # inclusive
+      return Reg(self.offset + start, stop - start + 1)
     if key < 0 or key >= self.sz: raise RuntimeError(f"index {key} out of bounds for size {self.sz}")
     return Reg(self.offset + key, 1)
   def __eq__(self, other):
-    if isinstance(other, Reg): return self.offset == other.offset and self.sz == other.sz
+    if isinstance(other, Reg):
+      return (self.offset == other.offset and self.sz == other.sz and
+              self.neg == other.neg and self.abs_ == other.abs_ and self.hi == other.hi)
     return NotImplemented
-  def __hash__(self): return hash((self.offset, self.sz))
+  def __hash__(self): return hash((self.offset, self.sz, self.neg, self.abs_, self.hi))
   def __add__(self, other):
     if isinstance(other, int): return Reg(self.offset + other, self.sz)
     return NotImplemented
+  def __neg__(self) -> 'Reg':
+    return Reg(self.offset, self.sz, neg=not self.neg, abs_=self.abs_, hi=self.hi)
+  def __abs__(self) -> 'Reg':
+    return Reg(self.offset, self.sz, neg=self.neg, abs_=True, hi=self.hi)
+  @property
+  def h(self) -> 'Reg':
+    return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=True)
+  @property
+  def l(self) -> 'Reg':
+    return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=False)
   def __repr__(self):
     o, sz = self.offset, self.sz
     if 256 <= o < 512:
       idx = o - 256
-      return f"v[{idx}]" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
-    if o < 106: return f"s[{o}]" if sz == 1 else f"s[{o}:{o + sz - 1}]"
-    if sz == 2 and o in self._PAIRS: return self._PAIRS[o]
-    if sz == 1 and o in self._NAMES: return self._NAMES[o]
-    if 108 <= o < 124:
+      base = f"v[{idx}]" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
+    elif o < 106: base = f"s[{o}]" if sz == 1 else f"s[{o}:{o + sz - 1}]"
+    elif sz == 2 and o in self._PAIRS: base = self._PAIRS[o]
+    elif sz == 1 and o in self._NAMES: base = self._NAMES[o]
+    elif 108 <= o < 124:
       idx = o - 108
-      return f"ttmp[{idx}]" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
-    if sz == 1 and 128 <= o <= 192: return str(o - 128)  # integers 0-64
-    if sz == 1 and 193 <= o <= 208: return str(-(o - 192))  # integers -1 to -16
-    raise RuntimeError(f"unknown register: offset={o}, sz={sz}")
+      base = f"ttmp[{idx}]" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
+    elif sz == 1 and 128 <= o <= 192: base = str(o - 128)
+    elif sz == 1 and 193 <= o <= 208: base = str(-(o - 192))
+    else: raise RuntimeError(f"unknown register: offset={o}, sz={sz}")
+    if self.hi: base += ".h"
+    if self.abs_: base = f"abs({base})"
+    if self.neg: base = f"-{base}"
+    return base
 
 # Full src encoding space
 src = Reg(0, 512)
@@ -191,11 +208,29 @@ class Inst:
   def __init__(self, *args, **kwargs):
     self._raw = 0
     self._literal: int | None = kwargs.pop('literal', None)
+    # Map positional args to field names (skip FixedBitFields)
     args_iter = iter(args)
+    vals = {}
     for name, field in self._fields:
-      if isinstance(field, FixedBitField): val = None
-      elif name in kwargs: val = kwargs[name]
-      else: val = next(args_iter, None)
+      if isinstance(field, FixedBitField): vals[name] = None
+      elif name in kwargs: vals[name] = kwargs[name]
+      else: vals[name] = next(args_iter, None)
+    # Extract modifiers from Reg objects and merge into neg/abs/opsel
+    neg_bits, abs_bits, opsel_bits = 0, 0, 0
+    for name, bit in [('src0', 0), ('src1', 1), ('src2', 2)]:
+      if name in vals and isinstance(vals[name], Reg):
+        reg = vals[name]
+        if reg.neg: neg_bits |= (1 << bit)
+        if reg.abs_: abs_bits |= (1 << bit)
+        if reg.hi: opsel_bits |= (1 << bit)
+    if 'vdst' in vals and isinstance(vals['vdst'], Reg) and vals['vdst'].hi:
+      opsel_bits |= (1 << 3)
+    if neg_bits: vals['neg'] = (vals.get('neg') or 0) | neg_bits
+    if abs_bits: vals['abs'] = (vals.get('abs') or 0) | abs_bits
+    if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
+    # Set all field values
+    for name, field in self._fields:
+      val = vals[name]
       self._raw = field.set(self._raw, val)
       # Capture literal for SrcFields that encoded to 255
       if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
