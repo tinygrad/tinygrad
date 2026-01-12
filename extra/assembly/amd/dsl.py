@@ -252,6 +252,13 @@ class Inst:
     if neg_bits: vals['neg'] = (vals.get('neg') or 0) | neg_bits
     if abs_bits: vals['abs'] = (vals.get('abs') or 0) | abs_bits
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
+    # VOP3P: set opsel_hi defaults (all VOP3P except fma_mix default to opsel_hi=3, opsel_hi2=1)
+    if 'opsel_hi' in dict(self._fields) and 'opsel_hi2' in dict(self._fields):
+      op = vals.get('op')
+      op_val = op.value if hasattr(op, 'value') else op
+      is_fma_mix = op_val in (32, 33, 34) if op_val is not None else False
+      if vals.get('opsel_hi') is None and vals.get('opsel_hi2') is None and not is_fma_mix:
+        vals['opsel_hi'], vals['opsel_hi2'] = 3, 1
     # Set all field values
     for name, field in self._fields:
       val = vals[name]
