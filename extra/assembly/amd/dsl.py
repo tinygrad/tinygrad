@@ -146,9 +146,9 @@ class SrcField(BitField):
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
     elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
     elif isinstance(val, int): offset = 255  # literal
-    else: raise RuntimeError(f"invalid src value {val}")
+    else: raise TypeError(f"invalid src value {val}")
     if not (self._valid_range[0] <= offset <= self._valid_range[1]):
-      raise RuntimeError(f"{self.__class__.__name__}: {val} (offset {offset}) out of range {self._valid_range}")
+      raise TypeError(f"{self.__class__.__name__}: {val} (offset {offset}) out of range {self._valid_range}")
     return offset - self._valid_range[0]
 
   def decode(self, raw): return src[raw + self._valid_range[0]]
@@ -157,11 +157,12 @@ class VGPRField(SrcField):
   _valid_range = (256, 511)
   def __init__(self, hi: int, lo: int, default=v[0]): super().__init__(hi, lo, default)
   def encode(self, val) -> int:
+    if not isinstance(val, Reg): raise TypeError(f"VGPRField requires Reg, got {type(val).__name__}")
     # For 8-bit vdst fields in VOP1/VOP2 16-bit ops, bit 7 is opsel for dest half
     encoded = super().encode(val)
-    if isinstance(val, Reg) and val.hi and (self.hi - self.lo + 1) == 8:
+    if val.hi and (self.hi - self.lo + 1) == 8:
       if encoded >= 128:
-        raise RuntimeError(f"VGPRField: v[{encoded}].h not encodable in 8-bit field (v[0:127] only for .h)")
+        raise ValueError(f"VGPRField: v[{encoded}].h not encodable in 8-bit field (v[0:127] only for .h)")
       encoded |= 0x80
     return encoded
 class SGPRField(SrcField): _valid_range = (0, 127)
@@ -172,9 +173,9 @@ class AlignedSGPRField(BitField):
   _align: int = 2
   def encode(self, val):
     if isinstance(val, int) and val == 0: return 0  # default: encode as s[0]
-    if not isinstance(val, Reg): raise RuntimeError(f"{self.__class__.__name__} requires Reg, got {type(val).__name__}")
-    if not (0 <= val.offset < 128): raise RuntimeError(f"{self.__class__.__name__} requires SGPR, got offset {val.offset}")
-    if val.offset & (self._align - 1): raise RuntimeError(f"{self.__class__.__name__} requires {self._align}-aligned SGPR, got s[{val.offset}]")
+    if not isinstance(val, Reg): raise TypeError(f"{self.__class__.__name__} requires Reg, got {type(val).__name__}")
+    if not (0 <= val.offset < 128): raise ValueError(f"{self.__class__.__name__} requires SGPR, got offset {val.offset}")
+    if val.offset & (self._align - 1): raise ValueError(f"{self.__class__.__name__} requires {self._align}-aligned SGPR, got s[{val.offset}]")
     return val.offset >> (self._align.bit_length() - 1)
   def decode(self, raw): return src[raw << (self._align.bit_length() - 1)]
 
@@ -184,8 +185,8 @@ class SRsrcField(AlignedSGPRField): _align = 4
 class VDSTYField(BitField):
   """VOPD vdsty: encoded = vgpr_idx >> 1. Actual vgpr = (encoded << 1) | ((vdstx & 1) ^ 1)."""
   def encode(self, val):
-    if not isinstance(val, Reg): raise RuntimeError(f"VDSTYField requires Reg, got {type(val).__name__}")
-    if not (256 <= val.offset < 512): raise RuntimeError(f"VDSTYField requires VGPR, got offset {val.offset}")
+    if not isinstance(val, Reg): raise TypeError(f"VDSTYField requires Reg, got {type(val).__name__}")
+    if not (256 <= val.offset < 512): raise ValueError(f"VDSTYField requires VGPR, got offset {val.offset}")
     return (val.offset - 256) >> 1
   def decode(self, raw): return raw  # raw value, actual vdsty = (raw << 1) | ((vdstx & 1) ^ 1)
 
@@ -307,6 +308,8 @@ class Inst:
     inst._literal = int.from_bytes(data[cls._base_size:cls._base_size + 4], 'little') if inst.has_literal() else None
     return inst
 
+  def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw and self._literal == other._literal
+  def __hash__(self): return hash((type(self), self._raw, self._literal))
   def __repr__(self):
     args = [n for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
     return f"{self.op.name.lower()}({', '.join(repr(getattr(self, n)) for n in args)})"
