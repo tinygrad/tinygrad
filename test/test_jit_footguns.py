@@ -6,14 +6,14 @@ Each test shows behavior that works without JIT but changes with JIT.
 Comments marked "should be X!" indicate the intuitively expected value.
 
 SILENT MISMATCHES (highest priority - wrong results, no error):
-  tensors_in_containers_ignored      EASY   only checks t.__class__ is Tensor, could scan lists/dicts
-  non_tensor_outputs_frozen          EASY   could warn/error if return contains non-Tensor values
   class_method_shared_across_instances EASY could check if first arg is self and warn
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
   python_constants_frozen            HARD   inherent to tracing JITs
   conditional_branches_frozen        HARD   inherent to tracing JITs
 
 ERRORS RAISED (lower priority - at least users know):
+  unrealized_const_input_error       EASY   raises JitError for unrealized const inputs
+  non_tensor_outputs_error           EASY   raises JitError if return contains non-Tensor values
   positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
   duplicate_inputs_fail              MED    would need to handle aliasing in input_replace
   nested_jit_fails_on_second_call    MED    could fail on first call instead of second
@@ -21,6 +21,7 @@ ERRORS RAISED (lower priority - at least users know):
 import unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit
+from tinygrad.engine.jit import JitError
 
 class TestJitFootguns(unittest.TestCase):
 
@@ -48,21 +49,11 @@ class TestJitFootguns(unittest.TestCase):
 
     self.assertEqual([r1.item(), r2.item(), r3.item()], [2, 4, 6])
 
-  def test_non_tensor_outputs_frozen(self):
-    """Non-tensor return values are frozen at capture time."""
+  def test_non_tensor_outputs_error(self):
     @TinyJit
     def f(x, mult): return (x * 2).realize(), mult * 10
-
-    # collect results, copying tensor values immediately (buffer reuse!)
-    results = []
-    for i in range(5):
-      t, s = f(Tensor([i]), i)
-      results.append((t.item(), s))
-
-    # tensor outputs work correctly
-    self.assertEqual([r[0] for r in results[2:]], [4, 6, 8])
-    # scalar outputs frozen at capture (i=1) - should be 20, 30, 40!
-    self.assertEqual([r[1] for r in results[2:]], [10, 10, 10])
+    with self.assertRaises(JitError):
+      for i in range(3): f(Tensor([i]), i)
 
   def test_duplicate_inputs_fail(self):
     """JIT cannot handle the same tensor passed as multiple arguments."""
@@ -70,23 +61,15 @@ class TestJitFootguns(unittest.TestCase):
     def f(a, b): return (a + b).realize()
 
     x = Tensor([1, 2, 3])
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       f(x, x)
 
-  def test_tensors_in_containers_ignored(self):
-    """Tensors inside lists/dicts are not tracked as inputs."""
+  def test_tensors_in_containers(self):
     @TinyJit
     def f(a, arr): return (a + arr[0]).realize()
-
-    results = []
     for i in range(4):
       a, b = Tensor([1, 1, 1]).realize(), Tensor([i, i, i]).realize()
-      results.append(f(a, [b]).numpy().copy())
-
-    np.testing.assert_array_equal(results[0], [1, 1, 1])  # warmup
-    np.testing.assert_array_equal(results[1], [2, 2, 2])  # capture
-    np.testing.assert_array_equal(results[2], [2, 2, 2])  # should be [3,3,3]!
-    np.testing.assert_array_equal(results[3], [2, 2, 2])  # should be [4,4,4]!
+      np.testing.assert_array_equal(f(a, [b]).numpy(), [1+i, 1+i, 1+i])
 
   def test_nested_jit_fails_on_second_call(self):
     """Nested JIT works on first call but fails on second."""
@@ -116,7 +99,7 @@ class TestJitFootguns(unittest.TestCase):
     def f(a): return (a + 1).realize()
 
     base = Tensor.randn(10, 10).realize()
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       for i in range(1, 5):
         f(base[:, i:i+2])  # different offset each time
 
@@ -128,7 +111,7 @@ class TestJitFootguns(unittest.TestCase):
     f(Tensor.randn(10, 10), Tensor.randn(10, 10))  # warmup
     f(Tensor.randn(10, 10), Tensor.randn(10, 10))  # capture
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       f(Tensor.randn(20, 20), Tensor.randn(20, 20))
 
   def test_python_constants_frozen(self):
@@ -147,6 +130,21 @@ class TestJitFootguns(unittest.TestCase):
     self.assertEqual(results[1], 20)   # capture, mult=2
     self.assertEqual(results[2], 20)   # should be 30!
     self.assertEqual(results[3], 20)   # should be 40!
+
+  def test_unrealized_const_input_error(self):
+    """Const tensors have no buffer to replace, so JIT raises an error. Even explicit .realize() doesn't help."""
+    @TinyJit
+    def f(a, b): return (a * b).realize()
+
+    # unrealized const fails
+    with self.assertRaises(JitError):
+      f(Tensor([1, 2, 3]).realize(), Tensor(2))
+
+    # explicit .realize() on const still fails - const cannot be realized to have a buffer
+    @TinyJit
+    def g(a, b): return (a * b).realize()
+    with self.assertRaises(JitError):
+      g(Tensor([1, 2, 3]).realize(), Tensor(2).realize())
 
   def test_conditional_branches_frozen(self):
     """Only the branch taken during capture runs thereafter."""
@@ -170,7 +168,7 @@ class TestJitFootguns(unittest.TestCase):
     f(Tensor([1]), Tensor([2]))  # warmup with positional
     f(Tensor([1]), Tensor([2]))  # capture with positional
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       f(a=Tensor([3]), b=Tensor([4]))  # kwargs fail
 
   def test_class_method_shared_across_instances(self):
@@ -213,9 +211,38 @@ class TestJitFootguns(unittest.TestCase):
     @TinyJit
     def f(a, b): return None
 
-    with self.assertRaises(AssertionError):
+    with self.assertRaises(JitError):
       for _ in range(3):
         f(Tensor([1]), Tensor([2]))
+
+  def test_item_creates_unrealized_return(self):
+    """.item() in shape computation creates unrealized return with baked-in shape."""
+    @TinyJit
+    def f(x): return Tensor.zeros(x.sum().item())
+
+    for _ in range(3): f(Tensor([1, 1, 1]))  # captures with sum=3
+    result = f(Tensor([2, 2, 2]))  # sum=6, but shape is baked in
+    assert result.shape == (3,)  # should be (6,)!
+
+  def test_item_bakes_in_values(self):
+    """.item() value is baked in, causing wrong output shapes (silent failure)."""
+    @TinyJit
+    def f(x, mask): return x.masked_select(mask)
+
+    mask_2 = Tensor([True, False, True, False])
+    for _ in range(3): f(Tensor([1, 2, 3, 4]), mask_2)
+    mask_3 = Tensor([True, True, True, False])
+    result = f(Tensor([1, 2, 3, 4]), mask_3)
+    assert result.shape == (2,)  # should be (3,)!
+
+  def test_tolist_bakes_in_values(self):
+    """.tolist() returns Python values that get baked in (silent failure)."""
+    @TinyJit
+    def f(x): return Tensor(x.tolist())
+
+    for _ in range(3): f(Tensor([1, 2, 3]))
+    result = f(Tensor([4, 5, 6]))
+    np.testing.assert_equal(result.numpy(), [1, 2, 3])  # should be [4,5,6]!
 
 
 class TestJitCorrectBehavior(unittest.TestCase):

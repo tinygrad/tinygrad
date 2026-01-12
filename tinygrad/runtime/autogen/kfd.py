@@ -11,7 +11,7 @@ class struct_kfd_ioctl_get_version_args:
 __u32 = ctypes.c_uint32
 @record
 class struct_kfd_ioctl_create_queue_args:
-  SIZE = 88
+  SIZE = 96
   ring_base_address: Annotated[ctypes.c_uint64, 0]
   write_pointer_address: Annotated[ctypes.c_uint64, 8]
   read_pointer_address: Annotated[ctypes.c_uint64, 16]
@@ -27,6 +27,8 @@ class struct_kfd_ioctl_create_queue_args:
   ctx_save_restore_address: Annotated[ctypes.c_uint64, 72]
   ctx_save_restore_size: Annotated[ctypes.c_uint32, 80]
   ctl_stack_size: Annotated[ctypes.c_uint32, 84]
+  sdma_engine_id: Annotated[ctypes.c_uint32, 88]
+  pad: Annotated[ctypes.c_uint32, 92]
 __u64 = ctypes.c_uint64
 @record
 class struct_kfd_ioctl_destroy_queue_args:
@@ -150,6 +152,17 @@ class struct_kfd_ioctl_dbg_wave_control_args:
   content_ptr: Annotated[ctypes.c_uint64, 0]
   gpu_id: Annotated[ctypes.c_uint32, 8]
   buf_size_in_bytes: Annotated[ctypes.c_uint32, 12]
+@record
+class struct_kfd_ioctl_dbg_trap_args_deprecated:
+  SIZE = 40
+  exception_mask: Annotated[ctypes.c_uint64, 0]
+  ptr: Annotated[ctypes.c_uint64, 8]
+  pid: Annotated[ctypes.c_uint32, 16]
+  op: Annotated[ctypes.c_uint32, 20]
+  data1: Annotated[ctypes.c_uint32, 24]
+  data2: Annotated[ctypes.c_uint32, 28]
+  data3: Annotated[ctypes.c_uint32, 32]
+  data4: Annotated[ctypes.c_uint32, 36]
 @record
 class struct_kfd_ioctl_create_event_args:
   SIZE = 32
@@ -341,6 +354,21 @@ class struct_kfd_ioctl_smi_events_args:
   SIZE = 8
   gpuid: Annotated[ctypes.c_uint32, 0]
   anon_fd: Annotated[ctypes.c_uint32, 4]
+enum_kfd_ioctl_spm_op = CEnum(ctypes.c_uint32)
+KFD_IOCTL_SPM_OP_ACQUIRE = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_ACQUIRE', 0)
+KFD_IOCTL_SPM_OP_RELEASE = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_RELEASE', 1)
+KFD_IOCTL_SPM_OP_SET_DEST_BUF = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_SET_DEST_BUF', 2)
+
+@record
+class struct_kfd_ioctl_spm_args:
+  SIZE = 32
+  dest_buf: Annotated[ctypes.c_uint64, 0]
+  buf_size: Annotated[ctypes.c_uint32, 8]
+  op: Annotated[ctypes.c_uint32, 12]
+  timeout: Annotated[ctypes.c_uint32, 16]
+  gpu_id: Annotated[ctypes.c_uint32, 20]
+  bytes_copied: Annotated[ctypes.c_uint32, 24]
+  has_data_loss: Annotated[ctypes.c_uint32, 28]
 enum_kfd_criu_op = CEnum(ctypes.c_uint32)
 KFD_CRIU_OP_PROCESS_INFO = enum_kfd_criu_op.define('KFD_CRIU_OP_PROCESS_INFO', 0)
 KFD_CRIU_OP_CHECKPOINT = enum_kfd_criu_op.define('KFD_CRIU_OP_CHECKPOINT', 1)
@@ -382,6 +410,32 @@ enum_kfd_mmio_remap = CEnum(ctypes.c_uint32)
 KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL', 0)
 KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL', 4)
 
+@record
+class struct_kfd_ioctl_ipc_export_handle_args:
+  SIZE = 32
+  handle: Annotated[ctypes.c_uint64, 0]
+  share_handle: Annotated[(ctypes.c_uint32* 4), 8]
+  gpu_id: Annotated[ctypes.c_uint32, 24]
+  flags: Annotated[ctypes.c_uint32, 28]
+@record
+class struct_kfd_ioctl_ipc_import_handle_args:
+  SIZE = 48
+  handle: Annotated[ctypes.c_uint64, 0]
+  va_addr: Annotated[ctypes.c_uint64, 8]
+  mmap_offset: Annotated[ctypes.c_uint64, 16]
+  share_handle: Annotated[(ctypes.c_uint32* 4), 24]
+  gpu_id: Annotated[ctypes.c_uint32, 40]
+  flags: Annotated[ctypes.c_uint32, 44]
+@record
+class struct_kfd_ioctl_cross_memory_copy_deprecated_args:
+  SIZE = 48
+  pid: Annotated[ctypes.c_uint32, 0]
+  flags: Annotated[ctypes.c_uint32, 4]
+  src_mem_range_array: Annotated[ctypes.c_uint64, 8]
+  src_mem_array_size: Annotated[ctypes.c_uint64, 16]
+  dst_mem_range_array: Annotated[ctypes.c_uint64, 24]
+  dst_mem_array_size: Annotated[ctypes.c_uint64, 32]
+  bytes_copied: Annotated[ctypes.c_uint64, 40]
 enum_kfd_ioctl_svm_op = CEnum(ctypes.c_uint32)
 KFD_IOCTL_SVM_OP_SET_ATTR = enum_kfd_ioctl_svm_op.define('KFD_IOCTL_SVM_OP_SET_ATTR', 0)
 KFD_IOCTL_SVM_OP_GET_ATTR = enum_kfd_ioctl_svm_op.define('KFD_IOCTL_SVM_OP_GET_ATTR', 1)
@@ -448,6 +502,7 @@ KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL = enum_kfd_dbg_trap_address_watch_mode.defin
 
 enum_kfd_dbg_trap_flags = CEnum(ctypes.c_uint32)
 KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP = enum_kfd_dbg_trap_flags.define('KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP', 1)
+KFD_DBG_TRAP_FLAG_SINGLE_ALU_OP = enum_kfd_dbg_trap_flags.define('KFD_DBG_TRAP_FLAG_SINGLE_ALU_OP', 2)
 
 enum_kfd_dbg_trap_exception_code = CEnum(ctypes.c_uint32)
 EC_NONE = enum_kfd_dbg_trap_exception_code.define('EC_NONE', 0)
@@ -648,13 +703,67 @@ class struct_kfd_ioctl_dbg_trap_args:
   query_exception_info: Annotated[struct_kfd_ioctl_dbg_trap_query_exception_info_args, 8]
   queue_snapshot: Annotated[struct_kfd_ioctl_dbg_trap_queue_snapshot_args, 8]
   device_snapshot: Annotated[struct_kfd_ioctl_dbg_trap_device_snapshot_args, 8]
+enum_kfd_ioctl_pc_sample_op = CEnum(ctypes.c_uint32)
+KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES', 0)
+KFD_IOCTL_PCS_OP_CREATE = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_CREATE', 1)
+KFD_IOCTL_PCS_OP_DESTROY = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_DESTROY', 2)
+KFD_IOCTL_PCS_OP_START = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_START', 3)
+KFD_IOCTL_PCS_OP_STOP = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_STOP', 4)
+
+enum_kfd_ioctl_pc_sample_method = CEnum(ctypes.c_uint32)
+KFD_IOCTL_PCS_METHOD_HOSTTRAP = enum_kfd_ioctl_pc_sample_method.define('KFD_IOCTL_PCS_METHOD_HOSTTRAP', 1)
+KFD_IOCTL_PCS_METHOD_STOCHASTIC = enum_kfd_ioctl_pc_sample_method.define('KFD_IOCTL_PCS_METHOD_STOCHASTIC', 2)
+
+enum_kfd_ioctl_pc_sample_type = CEnum(ctypes.c_uint32)
+KFD_IOCTL_PCS_TYPE_TIME_US = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_TIME_US', 0)
+KFD_IOCTL_PCS_TYPE_CLOCK_CYCLES = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_CLOCK_CYCLES', 1)
+KFD_IOCTL_PCS_TYPE_INSTRUCTIONS = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_INSTRUCTIONS', 2)
+
+@record
+class struct_kfd_pc_sample_info:
+  SIZE = 40
+  interval: Annotated[ctypes.c_uint64, 0]
+  interval_min: Annotated[ctypes.c_uint64, 8]
+  interval_max: Annotated[ctypes.c_uint64, 16]
+  flags: Annotated[ctypes.c_uint64, 24]
+  method: Annotated[ctypes.c_uint32, 32]
+  type: Annotated[ctypes.c_uint32, 36]
+@record
+class struct_kfd_ioctl_pc_sample_args:
+  SIZE = 32
+  sample_info_ptr: Annotated[ctypes.c_uint64, 0]
+  num_sample_info: Annotated[ctypes.c_uint32, 8]
+  op: Annotated[ctypes.c_uint32, 12]
+  gpu_id: Annotated[ctypes.c_uint32, 16]
+  trace_id: Annotated[ctypes.c_uint32, 20]
+  flags: Annotated[ctypes.c_uint32, 24]
+  version: Annotated[ctypes.c_uint32, 28]
+enum_kfd_profiler_ops = CEnum(ctypes.c_uint32)
+KFD_IOC_PROFILER_PMC = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_PMC', 0)
+KFD_IOC_PROFILER_PC_SAMPLE = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_PC_SAMPLE', 1)
+KFD_IOC_PROFILER_VERSION = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_VERSION', 2)
+
+@record
+class struct_kfd_ioctl_pmc_settings:
+  SIZE = 12
+  gpu_id: Annotated[ctypes.c_uint32, 0]
+  lock: Annotated[ctypes.c_uint32, 4]
+  perfcount_enable: Annotated[ctypes.c_uint32, 8]
+@record
+class struct_kfd_ioctl_profiler_args:
+  SIZE = 40
+  op: Annotated[ctypes.c_uint32, 0]
+  pc_sample: Annotated[struct_kfd_ioctl_pc_sample_args, 8]
+  pmc: Annotated[struct_kfd_ioctl_pmc_settings, 8]
+  version: Annotated[ctypes.c_uint32, 8]
 init_records()
 KFD_IOCTL_MAJOR_VERSION = 1
-KFD_IOCTL_MINOR_VERSION = 14
+KFD_IOCTL_MINOR_VERSION = 17
 KFD_IOC_QUEUE_TYPE_COMPUTE = 0x0
 KFD_IOC_QUEUE_TYPE_SDMA = 0x1
 KFD_IOC_QUEUE_TYPE_COMPUTE_AQL = 0x2
 KFD_IOC_QUEUE_TYPE_SDMA_XGMI = 0x3
+KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID = 0x4
 KFD_MAX_QUEUE_PERCENTAGE = 100
 KFD_MAX_QUEUE_PRIORITY = 15
 KFD_IOC_CACHE_POLICY_COHERENT = 0
@@ -698,6 +807,7 @@ KFD_IOC_ALLOC_MEM_FLAGS_AQL_QUEUE_MEM = (1 << 27)
 KFD_IOC_ALLOC_MEM_FLAGS_COHERENT = (1 << 26)
 KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED = (1 << 25)
 KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT = (1 << 24)
+KFD_IOC_ALLOC_MEM_FLAGS_CONTIGUOUS = (1 << 23)
 KFD_SMI_EVENT_MASK_FROM_INDEX = lambda i: (1 << ((i) - 1))
 KFD_SMI_EVENT_MSG_SIZE = 96
 KFD_IOCTL_SVM_FLAG_HOST_ACCESS = 0x00000001
@@ -724,6 +834,9 @@ KFD_DBG_QUEUE_ERROR_BIT = 30
 KFD_DBG_QUEUE_INVALID_BIT = 31
 KFD_DBG_QUEUE_ERROR_MASK = (1 << KFD_DBG_QUEUE_ERROR_BIT)
 KFD_DBG_QUEUE_INVALID_MASK = (1 << KFD_DBG_QUEUE_INVALID_BIT)
+KFD_IOCTL_PCS_FLAG_POWER_OF_2 = 0x00000001
+KFD_IOCTL_PCS_QUERY_TYPE_FULL = (1 << 0)
+KFD_IOC_PROFILER_VERSION_NUM = 1
 AMDKFD_IOCTL_BASE = 'K'
 AMDKFD_IO = lambda nr: _IO(AMDKFD_IOCTL_BASE, nr)
 AMDKFD_IOR = lambda nr,type: _IOR(AMDKFD_IOCTL_BASE, nr, type)
@@ -769,3 +882,12 @@ AMDKFD_IOC_RUNTIME_ENABLE = AMDKFD_IOWR(0x25, struct_kfd_ioctl_runtime_enable_ar
 AMDKFD_IOC_DBG_TRAP = AMDKFD_IOWR(0x26, struct_kfd_ioctl_dbg_trap_args)
 AMDKFD_COMMAND_START = 0x01
 AMDKFD_COMMAND_END = 0x27
+AMDKFD_IOC_IPC_IMPORT_HANDLE = AMDKFD_IOWR(0x80, struct_kfd_ioctl_ipc_import_handle_args)
+AMDKFD_IOC_IPC_EXPORT_HANDLE = AMDKFD_IOWR(0x81, struct_kfd_ioctl_ipc_export_handle_args)
+AMDKFD_IOC_DBG_TRAP_DEPRECATED = AMDKFD_IOWR(0x82, struct_kfd_ioctl_dbg_trap_args_deprecated)
+AMDKFD_IOC_CROSS_MEMORY_COPY_DEPRECATED = AMDKFD_IOWR(0x83, struct_kfd_ioctl_cross_memory_copy_deprecated_args)
+AMDKFD_IOC_RLC_SPM = AMDKFD_IOWR(0x84, struct_kfd_ioctl_spm_args)
+AMDKFD_IOC_PC_SAMPLE = AMDKFD_IOWR(0x85, struct_kfd_ioctl_pc_sample_args)
+AMDKFD_IOC_PROFILER = AMDKFD_IOWR(0x86, struct_kfd_ioctl_profiler_args)
+AMDKFD_COMMAND_START_2 = 0x80
+AMDKFD_COMMAND_END_2 = 0x87
