@@ -118,8 +118,7 @@ class MIMG(Inst):
   a16 = BitField(16, 16)
   d16 = BitField(17, 17)
   lwe = BitField(54, 54)
-  addr1 = BitField(71, 64)
-  addr2 = BitField(79, 72)
+  # NOTE: addr1/addr2 fields (bits 64+) for NSA mode not included - base MIMG is 64 bits
 
 class MTBUF(Inst):
   encoding = FixedBitField(31, 26, 0b111010)

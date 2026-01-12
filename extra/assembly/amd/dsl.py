@@ -80,6 +80,11 @@ v = src[256:511]         # VGPR0-255
 # BitField
 # ══════════════════════════════════════════════════════════════
 
+class _Bits:
+  """Helper for defining bit fields with slice syntax: bits[hi:lo] or bits[n]."""
+  def __getitem__(self, key) -> 'BitField': return BitField(key.start, key.stop) if isinstance(key, slice) else BitField(key, key)
+bits = _Bits()
+
 class BitField:
   def __init__(self, hi: int, lo: int, default: int = 0):
     self.hi, self.lo, self.default, self.name = hi, lo, default, None
@@ -162,6 +167,7 @@ class AlignedSGPRField(BitField):
   """SGPR field with alignment requirement. Encoded as sgpr_index // alignment."""
   _align: int = 2
   def encode(self, val):
+    if isinstance(val, int) and val == 0: return 0  # default: encode as s[0]
     if not isinstance(val, Reg): raise RuntimeError(f"{self.__class__.__name__} requires Reg, got {type(val).__name__}")
     if not (0 <= val.offset < 128): raise RuntimeError(f"{self.__class__.__name__} requires SGPR, got offset {val.offset}")
     if val.offset & (self._align - 1): raise RuntimeError(f"{self.__class__.__name__} requires {self._align}-aligned SGPR, got s[{val.offset}]")
@@ -172,13 +178,11 @@ class SBaseField(AlignedSGPRField): _align = 2
 class SRsrcField(AlignedSGPRField): _align = 4
 
 class VDSTYField(BitField):
-  """VOPD vdsty: encoded = vgpr_idx >> 1. Only even VGPRs allowed (vdstx determines LSB)."""
+  """VOPD vdsty: encoded = vgpr_idx >> 1. Actual vgpr = (encoded << 1) | ((vdstx & 1) ^ 1)."""
   def encode(self, val):
     if not isinstance(val, Reg): raise RuntimeError(f"VDSTYField requires Reg, got {type(val).__name__}")
     if not (256 <= val.offset < 512): raise RuntimeError(f"VDSTYField requires VGPR, got offset {val.offset}")
-    idx = val.offset - 256
-    if idx & 1: raise RuntimeError(f"VDSTYField requires even VGPR index, got v[{idx}]")
-    return idx >> 1
+    return (val.offset - 256) >> 1
   def decode(self, raw): return raw  # raw value, actual vdsty = (raw << 1) | ((vdstx & 1) ^ 1)
 
 # ══════════════════════════════════════════════════════════════

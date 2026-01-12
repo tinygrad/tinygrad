@@ -2,7 +2,8 @@
 """Test MUBUF, MTBUF, MIMG, EXP, DS formats against LLVM."""
 import unittest
 from extra.assembly.amd.autogen.rdna3.ins import *
-from extra.assembly.amd.dsl import encode_src, RawImm
+from extra.assembly.amd.dsl import VCC_HI, EXEC_LO, NULL
+OFF = NULL  # OFF is alias for NULL
 from extra.assembly.amd.decode import detect_format
 
 class TestMUBUF(unittest.TestCase):
@@ -309,23 +310,20 @@ class TestVOP3Literal(unittest.TestCase):
   def test_vop3_with_literal(self):
     # v_add3_u32 v5, vcc_hi, 0xaf123456, v255
     # GFX11: encoding: [0x05,0x00,0x55,0xd6,0x6b,0xfe,0xfd,0x07,0x56,0x34,0x12,0xaf]
-    from extra.assembly.amd.dsl import RawImm
-    inst = VOP3(VOP3Op.V_ADD3_U32, vdst=v[5], src0=RawImm(107), src1=0xaf123456, src2=v[255])
+    inst = VOP3(VOP3Op.V_ADD3_U32, vdst=v[5], src0=VCC_HI, src1=0xaf123456, src2=v[255])
     expected = bytes([0x05,0x00,0x55,0xd6,0x6b,0xfe,0xfd,0x07,0x56,0x34,0x12,0xaf])
     self.assertEqual(inst.to_bytes(), expected)
 
   def test_vop3_literal_null_operand(self):
     # v_add3_u32 v5, null, exec_lo, 0xaf123456
     # GFX11: encoding: [0x05,0x00,0x55,0xd6,0x7c,0xfc,0xfc,0x03,0x56,0x34,0x12,0xaf]
-    from extra.assembly.amd.dsl import RawImm
-    inst = VOP3(VOP3Op.V_ADD3_U32, vdst=v[5], src0=NULL, src1=RawImm(126), src2=0xaf123456)
+    inst = VOP3(VOP3Op.V_ADD3_U32, vdst=v[5], src0=NULL, src1=EXEC_LO, src2=0xaf123456)
     expected = bytes([0x05,0x00,0x55,0xd6,0x7c,0xfc,0xfc,0x03,0x56,0x34,0x12,0xaf])
     self.assertEqual(inst.to_bytes(), expected)
 
   def test_vop3p_with_literal(self):
     # Test VOP3P literal encoding (also uses Inst64)
-    from extra.assembly.amd.dsl import RawImm
-    inst = VOP3P(VOP3POp.V_PK_ADD_F16, vdst=v[5], src0=RawImm(240), src1=0x12345678, src2=v[0])
+    inst = VOP3P(VOP3POp.V_PK_ADD_F16, vdst=v[5], src0=0.5, src1=0x12345678, src2=v[0])
     self.assertEqual(len(inst.to_bytes()), 12)  # 8 bytes + 4 byte literal
 
 
@@ -371,16 +369,16 @@ class TestDetectFormat(unittest.TestCase):
     self.assertEqual(detect_format(VOP3P(VOP3POp.V_PK_ADD_F16, v[0], v[1], v[2], v[3]).to_bytes()), VOP3P)
 
   def test_detect_smem(self):
-    self.assertEqual(detect_format(s_load_b32(s[0], s[2:3], 0).to_bytes()), SMEM)
-    self.assertEqual(detect_format(s_load_b64(s[0:1], s[2:3], s[5]).to_bytes()), SMEM)
+    self.assertEqual(detect_format(s_load_b32(sdata=s[0], sbase=s[2:4], offset=0).to_bytes()), SMEM)
+    self.assertEqual(detect_format(s_load_b64(sdata=s[0:2], sbase=s[2:4], soffset=s[5]).to_bytes()), SMEM)
 
   def test_detect_ds(self):
     self.assertEqual(detect_format(ds_load_b32(v[0], v[1]).to_bytes()), DS)
     self.assertEqual(detect_format(ds_store_b32(v[0], v[1]).to_bytes()), DS)
 
   def test_detect_flat(self):
-    self.assertEqual(detect_format(global_load_b32(v[0], v[1:3], RawImm(124)).to_bytes()), FLAT)
-    self.assertEqual(detect_format(global_store_b32(v[0:2], v[2], RawImm(124)).to_bytes()), FLAT)
+    self.assertEqual(detect_format(global_load_b32(vdst=v[0], addr=v[1:3], saddr=NULL).to_bytes()), FLAT)
+    self.assertEqual(detect_format(global_store_b32(addr=v[0:2], data=v[2], saddr=NULL).to_bytes()), FLAT)
 
   def test_detect_mubuf(self):
     self.assertEqual(detect_format(buffer_load_b32(v[0], v[1], s[0:4], s[5]).to_bytes()), MUBUF)
