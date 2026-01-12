@@ -203,6 +203,8 @@ def get_types(op) -> tuple[str|None, str|None, str|None, str|None]:
   pcode = PCODE.get(op)
   if pcode is None: return (None, None, None, None)
   def get_dtype(name: str) -> str | None:
+    # Lane mask destinations (e.g., D0.u64[laneId]) are wave-size dependent, skip validation
+    if re.search(rf'{name}\.u64\[laneId\]', pcode): return None
     if m := re.search(rf'{name}\.([a-z]\d+)', pcode): return m.group(1)
     return None
   return (get_dtype('D0'), get_dtype('S0'), get_dtype('S1'), get_dtype('S2'))

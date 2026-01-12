@@ -337,21 +337,15 @@ class TestCmpInt(unittest.TestCase):
     self.assertEqual(st.vcc & 1, 1, "Lo halves should be equal")
 
   def test_cmp_eq_u16_opsel_hi_hi(self):
-    """V_CMP_EQ_U16 comparing hi halves with VOP3 opsel.
-
-    VOPC doesn't have opsel, so we use VOP3 form for hi-half comparisons.
-    VOP3 compares write result to SGPR via vdst field.
-    """
+    """V_CMP_EQ_U16 comparing hi halves with VOP3 opsel."""
     instructions = [
       s_mov_b32(s[2], 0x00051234),  # hi=5, lo=0x1234
       v_mov_b32_e32(v[0], s[2]),
       s_mov_b32(s[2], 0x0005ABCD),  # hi=5, lo=0xABCD
       v_mov_b32_e32(v[1], s[2]),
-      # opsel=3 means compare hi halves, vdst=v[0] actually writes to s[0]
-      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),
+      v_cmp_eq_u16_e64(vdst=s[0], src0=v[0], src1=v[1], opsel=3),
     ]
     st = run_program(instructions, n_lanes=1)
-    # Result is in sgpr[0], not vcc
     self.assertEqual(st.sgpr[0] & 1, 1, "Hi halves should be equal: 5==5")
 
   def test_cmp_eq_u16_opsel_hi_hi_equal(self):
@@ -361,7 +355,7 @@ class TestCmpInt(unittest.TestCase):
       v_mov_b32_e32(v[0], s[2]),
       s_mov_b32(s[2], 0x12340009),  # lo=9, hi=0x1234
       v_mov_b32_e32(v[1], s[2]),
-      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),
+      v_cmp_eq_u16_e64(vdst=s[0], src0=v[0], src1=v[1], opsel=3),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[0] & 1, 1, "hi==hi should be true: 0x1234==0x1234")
@@ -373,7 +367,7 @@ class TestCmpInt(unittest.TestCase):
       v_mov_b32_e32(v[0], s[2]),
       s_mov_b32(s[2], 0x12340005),  # lo=5, hi=0x1234
       v_mov_b32_e32(v[1], s[2]),
-      VOP3(VOP3Op.V_CMP_GT_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),
+      v_cmp_gt_u16_e64(vdst=s[0], src0=v[0], src1=v[1], opsel=3),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[0] & 1, 1, "hi>hi should be true: 0x9999>0x1234")
@@ -389,11 +383,9 @@ class TestCmpFloat(unittest.TestCase):
       v_mov_b32_e32(v[0], s[2]),
       s_mov_b32(s[2], 0x40000000),  # hi=2.0 (f16), lo=0
       v_mov_b32_e32(v[1], s[2]),
-      # opsel=3 means read hi halves for both src0 and src1
-      VOP3(VOP3Op.V_CMP_LT_F16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),
+      v_cmp_lt_f16_e64(vdst=s[0], src0=v[0], src1=v[1], opsel=3),
     ]
     st = run_program(instructions, n_lanes=1)
-    # Result is in sgpr[0]
     self.assertEqual(st.sgpr[0] & 1, 1, "1.0 < 2.0 should be true")
 
   def test_v_cmp_gt_f16_vsrc1_hi(self):
@@ -403,11 +395,9 @@ class TestCmpFloat(unittest.TestCase):
       v_mov_b32_e32(v[0], s[2]),
       s_mov_b32(s[2], 0x3c000000),  # hi=1.0 (f16), lo=0
       v_mov_b32_e32(v[1], s[2]),
-      # opsel=3 means read hi halves for both src0 and src1
-      VOP3(VOP3Op.V_CMP_GT_F16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),
+      v_cmp_gt_f16_e64(vdst=s[0], src0=v[0], src1=v[1], opsel=3),
     ]
     st = run_program(instructions, n_lanes=1)
-    # Result is in sgpr[0]
     self.assertEqual(st.sgpr[0] & 1, 1, "2.0 > 1.0 should be true")
 
   def test_v_cmp_eq_f16_vsrc1_hi_equal(self):
