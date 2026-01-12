@@ -269,7 +269,11 @@ class Inst:
     for name, field in self._fields:
       if isinstance(field, SrcField) and getattr(self, name).offset == 255:
         return True
-    return hasattr(self, 'op') and self.op.name.startswith(('V_FMAMK', 'V_FMAAK', 'S_FMAMK', 'S_FMAAK'))
+    # Check op, opx, opy for instructions that always have literals
+    for attr in ('op', 'opx', 'opy'):
+      if hasattr(self, attr) and any(x in getattr(self, attr).name for x in ('FMAMK', 'FMAAK', 'MADMK', 'MADAK', 'SETREG_IMM32')):
+        return True
+    return False
 
   @classmethod
   def from_bytes(cls, data: bytes):
