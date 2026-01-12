@@ -197,9 +197,13 @@ def write_enums(enums: dict[str, dict[int, str]], arch: str, path: str):
     # Add encoding suffix to op names: _E32 for VOP1/VOP2/VOPC, _E64 for VOP3 (ops < 512)
     member_suffix = "_E32" if name in ("VOP1", "VOP2", "VOPC") else "_E64" if name == "VOP3" else ""
     lines.append(f"class {name}{class_suffix}(Enum):")
+    aliases = []
     for val, member in sorted(values.items()):
       msuf = member_suffix if name != "VOP3" or val < 512 else ""
       lines.append(f"  {prefix}{member}{msuf} = {val}")
+      if msuf: aliases.append((member, f"{member}{msuf}"))
+    for alias, canonical in aliases:
+      lines.append(f"  {prefix}{alias} = {prefix}{canonical}")
     lines.append("")
   with open(path, "w") as f:
     f.write("\n".join(lines))
