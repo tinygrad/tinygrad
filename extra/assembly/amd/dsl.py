@@ -192,16 +192,18 @@ class Inst:
       result += (self._literal & 0xFFFFFFFF).to_bytes(4, 'little')
     return result
 
+  def has_literal(self) -> bool:
+    """Check if instruction has a 32-bit literal constant."""
+    for name, field in self._fields:
+      if isinstance(field, SrcField) and getattr(self, name).offset == 255:
+        return True
+    return hasattr(self, 'op') and self.op.name.startswith(('V_FMAMK', 'V_FMAAK', 'S_FMAMK', 'S_FMAAK'))
+
   @classmethod
   def from_bytes(cls, data: bytes):
     inst = object.__new__(cls)
     inst._raw = int.from_bytes(data[:cls._base_size], 'little')
-    inst._literal = None
-    for name, field in cls._fields:
-      if isinstance(field, SrcField) and getattr(inst, name).offset == 255:
-        assert len(data) >= cls._base_size + 4, f"literal marker found but data too short: {len(data)} < {cls._base_size + 4}"
-        inst._literal = int.from_bytes(data[cls._base_size:cls._base_size + 4], 'little')
-        break
+    inst._literal = int.from_bytes(data[cls._base_size:cls._base_size + 4], 'little') if inst.has_literal() else None
     return inst
 
   def __repr__(self):
