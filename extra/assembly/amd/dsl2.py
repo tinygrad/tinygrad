@@ -1,6 +1,8 @@
 # dsl2.py - clean DSL for AMD assembly
 from __future__ import annotations
 from enum import Enum
+from functools import cache
+import re
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
@@ -189,7 +191,6 @@ class Inst:
       if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
         self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
 
-  # ugly
   @property
   def op_name(self) -> str: return self.op.name
   @classmethod
