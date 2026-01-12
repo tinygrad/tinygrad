@@ -257,11 +257,22 @@ class Inst:
       # Capture literal for SrcFields that encoded to 255
       if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
         self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
+    # Validate register sizes against types (only if types are known)
+    for names, type_idx in [(['vdst', 'sdst', 'sdata'], 0), (['ssrc0', 'src0'], 1), (['ssrc1', 'src1'], 2), (['src2'], 3)]:
+      if (dtype := self.types[type_idx]) is None: continue
+      expected = 2 if dtype in ('f64', 'u64', 'i64', 'b64') else 1
+      for name in names:
+        if (val := vals.get(name)) is None: continue
+        if isinstance(val, Reg) and val.sz != expected:
+          raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
+        if type_idx == 0: break  # only validate first destination
 
   @property
   def op_name(self) -> str: return self.op.name
   @property
-  def types(self) -> tuple[str|None, str|None, str|None, str|None]: return get_types(self.op)
+  def types(self) -> tuple[str|None, str|None, str|None, str|None]:
+    if not hasattr(self, 'op'): return (None, None, None, None)
+    return get_types(self.op)
   def is_src_64(self, n: int) -> bool:
     dtype = self.types[n + 1]
     return dtype in ('f64', 'u64', 'i64', 'b64')
@@ -312,4 +323,5 @@ class Inst:
   def __hash__(self): return hash((type(self), self._raw, self._literal))
   def __repr__(self):
     args = [n for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
-    return f"{self.op.name.lower()}({', '.join(repr(getattr(self, n)) for n in args)})"
+    name = self.op.name.lower() if hasattr(self, 'op') else type(self).__name__
+    return f"{name}({', '.join(repr(getattr(self, n)) for n in args)})"
