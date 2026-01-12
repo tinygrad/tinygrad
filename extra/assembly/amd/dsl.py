@@ -13,6 +13,7 @@ class Reg:
   def __init__(self, offset: int = 0, sz: int = 512, *, neg: bool = False, abs_: bool = False, hi: bool = False):
     self.offset, self.sz = offset, sz
     self.neg, self.abs_, self.hi = neg, abs_, hi
+  def __hash__(self): return hash((self.offset, self.sz, self.neg, self.abs_, self.hi))
   def __getitem__(self, key):
     if isinstance(key, slice):
       start, stop = key.start or 0, key.stop or (self.sz - 1)
@@ -25,20 +26,15 @@ class Reg:
       return (self.offset == other.offset and self.sz == other.sz and
               self.neg == other.neg and self.abs_ == other.abs_ and self.hi == other.hi)
     return NotImplemented
-  def __hash__(self): return hash((self.offset, self.sz, self.neg, self.abs_, self.hi))
   def __add__(self, other):
     if isinstance(other, int): return Reg(self.offset + other, self.sz)
     return NotImplemented
-  def __neg__(self) -> 'Reg':
-    return Reg(self.offset, self.sz, neg=not self.neg, abs_=self.abs_, hi=self.hi)
-  def __abs__(self) -> 'Reg':
-    return Reg(self.offset, self.sz, neg=self.neg, abs_=True, hi=self.hi)
+  def __neg__(self) -> 'Reg': return Reg(self.offset, self.sz, neg=not self.neg, abs_=self.abs_, hi=self.hi)
+  def __abs__(self) -> 'Reg': return Reg(self.offset, self.sz, neg=self.neg, abs_=True, hi=self.hi)
   @property
-  def h(self) -> 'Reg':
-    return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=True)
+  def h(self) -> 'Reg': return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=True)
   @property
-  def l(self) -> 'Reg':
-    return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=False)
+  def l(self) -> 'Reg': return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=False)
   def __repr__(self):
     o, sz = self.offset, self.sz
     if 256 <= o < 512:

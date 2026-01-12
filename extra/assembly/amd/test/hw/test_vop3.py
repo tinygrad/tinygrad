@@ -178,7 +178,7 @@ class TestDivFmas(unittest.TestCase):
   def test_div_fmas_f32_no_scale(self):
     """V_DIV_FMAS_F32: VCC=0 -> normal FMA."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),
+      s_mov_b32(VCC_LO, 0),
       v_mov_b32_e32(v[0], 2.0),
       v_mov_b32_e32(v[1], 3.0),
       v_mov_b32_e32(v[2], 1.0),
@@ -190,7 +190,7 @@ class TestDivFmas(unittest.TestCase):
   def test_div_fmas_f32_scale_up(self):
     """V_DIV_FMAS_F32: VCC=1 with S2 >= 2.0 -> scale by 2^+64."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),
+      s_mov_b32(VCC_LO, 1),
       v_mov_b32_e32(v[0], 1.0),
       v_mov_b32_e32(v[1], 1.0),
       v_mov_b32_e32(v[2], 2.0),
@@ -203,7 +203,7 @@ class TestDivFmas(unittest.TestCase):
   def test_div_fmas_f32_scale_down(self):
     """V_DIV_FMAS_F32: VCC=1 with S2 < 2.0 -> scale by 2^-64."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),
+      s_mov_b32(VCC_LO, 1),
       v_mov_b32_e32(v[0], 2.0),
       v_mov_b32_e32(v[1], 3.0),
       v_mov_b32_e32(v[2], 1.0),
@@ -216,7 +216,7 @@ class TestDivFmas(unittest.TestCase):
   def test_div_fmas_f32_per_lane_vcc(self):
     """V_DIV_FMAS_F32: different VCC per lane with S2 < 2.0."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0b0101),
+      s_mov_b32(VCC_LO, 0b0101),
       v_mov_b32_e32(v[0], 1.0),
       v_mov_b32_e32(v[1], 1.0),
       v_mov_b32_e32(v[2], 1.0),
@@ -1455,7 +1455,7 @@ class TestModifierInteractions(unittest.TestCase):
     """-|x| should negate the absolute value."""
     instructions = [
       v_mov_b32_e32(v[0], -5.0),
-      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], neg=0b10, abs_=0b10),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], neg=0b10, abs=0b10),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][1]), -5.0, places=5)
@@ -1466,8 +1466,8 @@ class TestModifierInteractions(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], neg_zero),
       v_mov_b32_e32(v[0], s[0]),
-      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], abs_=0b10),
-      VOP3(VOP3Op.V_MUL_F32, vdst=v[2], src0=1.0, src1=v[0], neg=0b10, abs_=0b10),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], abs=0b10),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[2], src0=1.0, src1=v[0], neg=0b10, abs=0b10),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][1], 0x00000000, "|(-0.0)| = +0.0")
