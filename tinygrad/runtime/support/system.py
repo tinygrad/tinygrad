@@ -293,7 +293,7 @@ class LNXPCIIfaceBase:
 class APLPCIIfaceBase(LNXPCIIfaceBase):
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size, base_class:int|None=None):
     self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(dev.__class__.__name__[:2], pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
-    assert (read_vendor:=self.pci_dev.read_config(0x00, 2)) == vendor, f"Vendor ID mismatch: expected {vendor:#x}, got {read_vendor:#x}"
+    assert (read_vendor:=self.pci_dev.read_config(pci.PCI_VENDOR_ID, 2)) == vendor, f"Vendor ID mismatch: expected {vendor:#x}, got {read_vendor:#x}"
   def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
 PCIIfaceBase:type = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
