@@ -74,8 +74,9 @@ def pretty_print(x:UOp, cache=None, d=0)->str:
   cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
 
-from typing import TypeVar, Generic
-OpT = TypeVar("OpT", Ops, X86Ops)
+from typing import Generic
+from typing_extensions import TypeVar
+OpT = TypeVar("OpT", Ops, X86Ops, default=Ops)
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
