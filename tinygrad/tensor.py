@@ -2262,9 +2262,10 @@ class Tensor(OpMixin):
     print(t.conv2d(w).numpy())
     ```
     """
-    if any(d <= 0 for d in make_tuple(dilation, 2)): raise RuntimeError("non-positive dilation is not supported")
+    HW = weight.shape[2:]
+    if any(d <= 0 for d in make_tuple(dilation, len(HW))): raise RuntimeError("non-positive dilation is not supported")
     if IMAGE: return self.image_conv2d(weight, bias, groups, stride, dilation, padding, dtype)
-    (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
+    (bs,cin_), (cout,cin) = self.shape[:2], weight.shape[:2]
     padding_ = self._resolve_pool_pads(padding, len(HW))
     assert groups*cin == cin_ and len(self.shape) == len(weight.shape),\
         f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
