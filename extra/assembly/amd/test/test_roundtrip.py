@@ -10,7 +10,7 @@ from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump
 ARCH_CONFIG = {
   'rdna3': ('gfx1100', '+real-true16,+wavefrontsize32'),
   'rdna4': ('gfx1200', '+real-true16,+wavefrontsize32'),
-  'cdna': ('gfx942', '+wavefrontsize64'),
+  'cdna': ('gfx950', '+wavefrontsize64'),
 }
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
