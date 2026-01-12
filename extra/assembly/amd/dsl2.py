@@ -1,8 +1,4 @@
 # dsl2.py - clean DSL for AMD assembly
-from __future__ import annotations
-from enum import Enum
-from functools import cache
-import re
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
@@ -64,19 +60,18 @@ v = src[256:511]         # VGPR0-255
 # ══════════════════════════════════════════════════════════════
 
 class BitField:
-  def __init__(self, hi: int, lo: int, default: int | None = None):
-    self.hi, self.lo, self.default = hi, lo, default
+  def __init__(self, hi: int, lo: int, default: int = 0):
+    self.hi, self.lo, self.default, self.name = hi, lo, default, None
+  def __set_name__(self, owner, name): self.name = name
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
   def encode(self, val) -> int:
     assert isinstance(val, int), f"BitField.encode expects int, got {type(val).__name__}"
     return val
   def decode(self, val): return val
   def set(self, raw: int, val) -> int:
-    if val is None:
-      if self.default is None: raise RuntimeError("no value provided and no default set")
-      val = self.default
+    if val is None: val = self.default
     encoded = self.encode(val)
-    if encoded < 0 or encoded > self.mask(): raise RuntimeError(f"value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
+    if encoded < 0 or encoded > self.mask(): raise RuntimeError(f"field '{self.name}': value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
     return (raw & ~(self.mask() << self.lo)) | (encoded << self.lo)
   def __get__(self, obj, objtype=None):
     if obj is None: return self
@@ -96,17 +91,6 @@ class EnumBitField(BitField):
     return val.value
   def decode(self, raw): return self._enum(raw)
 
-class SignedBitField(BitField):
-  """Signed immediate field - encode validates range, decode performs sign extension."""
-  def encode(self, val):
-    bits = self.hi - self.lo + 1
-    min_val, max_val = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
-    if not (min_val <= val <= max_val): raise RuntimeError(f"signed value {val} out of range [{min_val}, {max_val}] for {bits}-bit field")
-    return val & ((1 << bits) - 1)  # two's complement
-  def decode(self, raw):
-    bits = self.hi - self.lo + 1
-    return raw - (1 << bits) if raw >= (1 << (bits - 1)) else raw
-
 # ══════════════════════════════════════════════════════════════
 # Typed fields
 # ══════════════════════════════════════════════════════════════
@@ -118,7 +102,7 @@ class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
   _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 
-  def __init__(self, hi: int, lo: int, default=None):
+  def __init__(self, hi: int, lo: int, default=s[0]):
     super().__init__(hi, lo, default)
     expected_size = self._valid_range[1] - self._valid_range[0] + 1
     actual_size = 1 << (hi - lo + 1)
@@ -139,7 +123,9 @@ class SrcField(BitField):
 
   def decode(self, raw): return src[raw + self._valid_range[0]]
 
-class VGPRField(SrcField): _valid_range = (256, 511)
+class VGPRField(SrcField):
+  _valid_range = (256, 511)
+  def __init__(self, hi: int, lo: int, default=v[0]): super().__init__(hi, lo, default)
 class SGPRField(SrcField): _valid_range = (0, 127)
 class SSrcField(SrcField): _valid_range = (0, 255)
 

@@ -210,25 +210,20 @@ def write_enums(enums: dict[str, dict[int, str]], arch: str, path: str):
 
 def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[str, str], enums: dict[str, dict[int, str]], arch: str, path: str):
   """Write ins.py file from extracted formats and enums."""
-  # Flag fields that default to 0
-  FLAG_FIELDS = {'glc', 'dlc', 'slc', 'tfe', 'sve', 'gds', 'done', 'row', 'clmp', 'omod',
-                 'neg', 'neg_hi', 'abs', 'opsel', 'opsel_hi', 'opsel_hi2', 'fi', 'bc',
-                 'src0_neg', 'src0_abs', 'src1_neg', 'src1_abs', 'a16', 'd16', 'r128', 'lwe', 'unrm'}
-  # Field types and ordering
   def field_def(name, hi, lo, fmt):
     """Generate field definition string for dsl2."""
     bits = hi - lo + 1
     if name == 'op' and fmt in enums: return f"EnumBitField({hi}, {lo}, {fmt}Op)"
     if name in ('opx', 'opy'): return f"EnumBitField({hi}, {lo}, VOPDOp)"
     if name == 'vdsty': return f"VDSTYField({hi}, {lo})"
-    if name in ('vdst', 'vsrc1', 'vaddr', 'vdata', 'data', 'data0', 'data1', 'addr', 'vsrc0', 'vsrc2', 'vsrc3') and bits == 8: return f"VGPRField({hi}, {lo})"
+    if name in ('vdst', 'vdstx', 'vsrc1', 'vsrcx1', 'vsrcy1', 'vaddr', 'vdata', 'data', 'data0', 'data1', 'addr', 'vsrc0', 'vsrc2', 'vsrc3') and bits == 8: return f"VGPRField({hi}, {lo})"
     if name == 'sbase' and bits == 6: return f"SBaseField({hi}, {lo})"
     if name in ('srsrc', 'ssamp') and bits == 5: return f"SRsrcField({hi}, {lo})"
-    if name in ('sdst', 'sdata', 'soffset', 'saddr') and bits == 7: return f"SGPRField({hi}, {lo})"
-    if (name.startswith('ssrc') or name in ('saddr', 'soffset')) and bits == 8: return f"SSrcField({hi}, {lo})"
+    if name in ('sdst', 'sdata') and bits == 7: return f"SGPRField({hi}, {lo})"
+    if name in ('soffset', 'saddr') and bits == 7: return f"SGPRField({hi}, {lo}, default=NULL)"
+    if name.startswith('ssrc') and bits == 8: return f"SSrcField({hi}, {lo})"
+    if name in ('saddr', 'soffset') and bits == 8: return f"SSrcField({hi}, {lo}, default=NULL)"
     if (name in ('src0', 'srcx0', 'srcy0') or name.startswith('src') and name[3:].isdigit()) and bits == 9: return f"SrcField({hi}, {lo})"
-    if name.startswith('simm'): return f"SignedBitField({hi}, {lo}, default=0)"
-    if name in FLAG_FIELDS: return f"BitField({hi}, {lo}, default=0)"
     return f"BitField({hi}, {lo})"
   field_priority = ['encoding', 'op', 'opx', 'opy', 'vdst', 'vdstx', 'vdsty', 'sdst', 'vdata', 'sdata', 'addr', 'vaddr', 'data', 'data0', 'data1',
                     'src0', 'srcx0', 'srcy0', 'vsrc0', 'ssrc0', 'src1', 'vsrc1', 'vsrcx1', 'vsrcy1', 'ssrc1', 'src2', 'vsrc2', 'src3', 'vsrc3',
@@ -257,6 +252,22 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
           elif name == 'offset': lines.append(f"  offset = BitField({hi}, {lo}, default=0)")
           else: lines.append(f"  {name} = {field_def(name, hi, lo, 'FLAT')}")
         lines.append("")
+    elif fmt_name == 'DS':
+      lines.append(f"class DS(Inst):")
+      for name, hi, lo in sort_fields(fields):
+        if name == 'encoding': lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings['DS']})")
+        elif name == 'vdst': lines.append(f"  vdst = VGPRField({hi}, {lo}, default=v[0])")
+        elif name in ('data0', 'data1'): lines.append(f"  {name} = VGPRField({hi}, {lo}, default=v[0])")
+        elif name in ('offset0', 'offset1'): lines.append(f"  {name} = BitField({hi}, {lo}, default=0)")
+        else: lines.append(f"  {name} = {field_def(name, hi, lo, 'DS')}")
+      lines.append("")
+    elif fmt_name == 'VOPD':
+      lines.append(f"class VOPD(Inst):")
+      for name, hi, lo in sort_fields(fields):
+        if name == 'encoding': lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings['VOPD']})")
+        elif name in ('vsrcx1', 'vsrcy1'): lines.append(f"  {name} = VGPRField({hi}, {lo}, default=v[0])")
+        else: lines.append(f"  {name} = {field_def(name, hi, lo, 'VOPD')}")
+      lines.append("")
     else:
       lines.append(f"class {fmt_name}(Inst):")
       for name, hi, lo in sort_fields(fields):
