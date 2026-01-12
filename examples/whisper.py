@@ -158,10 +158,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=
   magnitudes = (stft[..., :-1] ** 2)
   mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
 
-  def log10(x:Tensor):
-    return x.log2() * (math.log(2) / math.log(10))
-
-  log_spec = log10(mel_spec.clip(1e-10, None))
+  log_spec = mel_spec.clip(1e-10, None).log10()
   log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
   log_spec = log_spec.numpy()
