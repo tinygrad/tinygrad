@@ -89,6 +89,10 @@ class BitField:
   def __init__(self, hi: int, lo: int, default: int = 0):
     self.hi, self.lo, self.default, self.name = hi, lo, default, None
   def __set_name__(self, owner, name): self.name = name
+  def __eq__(self, other) -> 'FixedBitField':
+    if isinstance(other, int): return FixedBitField(self.hi, self.lo, other)
+    return NotImplemented
+  def enum(self, enum_cls) -> 'EnumBitField': return EnumBitField(self.hi, self.lo, enum_cls)
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
   def encode(self, val) -> int:
     assert isinstance(val, int), f"BitField.encode expects int, got {type(val).__name__}"
