@@ -63,7 +63,7 @@ VCC_LO = src[106]
 VCC_HI = src[107]
 VCC = src[106:107]
 ttmp = src[108:123]      # TTMP0-15
-NULL = src[124]
+NULL = OFF = src[124]
 M0 = src[125]
 EXEC_LO = src[126]
 EXEC_HI = src[127]
