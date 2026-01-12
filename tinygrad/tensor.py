@@ -2262,6 +2262,7 @@ class Tensor(OpMixin):
     print(t.conv2d(w).numpy())
     ```
     """
+    if any(d <= 0 for d in make_tuple(dilation, 2)): raise RuntimeError("non-positive dilation is not supported")
     if IMAGE: return self.image_conv2d(weight, bias, groups, stride, dilation, padding, dtype)
     (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     padding_ = self._resolve_pool_pads(padding, len(HW))
@@ -2343,6 +2344,7 @@ class Tensor(OpMixin):
     HW = weight.shape[2:]
     padding = _flat_to_grouped(self._resolve_pool_pads(padding, len(HW)))
     stride, dilation, output_padding = [make_tuple(x, len(HW)) for x in (stride, dilation, output_padding)]
+    if any(d <= 0 for d in dilation): raise RuntimeError("non-positive dilation is not supported")
     if any(s>1 for s in stride):
       # handle strides: (k) -> reshape -> (k,1) -> pad -> (k,s) -> reshape -> (k*s) -> shrink (k-(s-1))
       x = x.reshape(None, None, *flatten((k,1) for k in x.shape[2:]))
