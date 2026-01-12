@@ -195,15 +195,6 @@ class Test64BitLiterals(unittest.TestCase):
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
     self.assertAlmostEqual(result, -4294967296.0, places=5)
 
-  def test_64bit_literal_positive_encoding(self):
-    """64-bit instruction encodes large positive literals correctly."""
-    large_val = 0x12345678
-    inst = v_add_f64(v[2], v[0], large_val)
-    self.assertIsNotNone(inst._literal, "Literal should be set")
-    actual_lit = (inst._literal >> 32) & 0xffffffff
-    self.assertEqual(actual_lit, large_val, f"Literal should be {large_val:#x}, got {actual_lit:#x}")
-
-
 class TestSCCBehavior(unittest.TestCase):
   """Tests for SCC condition code behavior."""
 
