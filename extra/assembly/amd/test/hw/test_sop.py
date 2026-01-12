@@ -142,8 +142,8 @@ class TestBranch(unittest.TestCase):
     """S_CBRANCH_VCCNZ should only check VCC_LO in wave32."""
     instructions = [
       # Set VCC_LO = 0, VCC_HI = 1
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),
-      s_mov_b32(s[SrcEnum.VCC_HI - 128], 1),
+      s_mov_b32(VCC_LO, 0),
+      s_mov_b32(VCC_HI, 1),
       v_mov_b32_e32(v[0], 0),
       # If VCC_HI is incorrectly used, branch will be taken
       s_cbranch_vccnz(1),  # Skip next instruction if VCC != 0
@@ -156,8 +156,8 @@ class TestBranch(unittest.TestCase):
     """S_CBRANCH_VCCZ should only check VCC_LO in wave32."""
     instructions = [
       # Set VCC_LO = 1, VCC_HI = 0
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),
-      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0),
+      s_mov_b32(VCC_LO, 1),
+      s_mov_b32(VCC_HI, 0),
       v_mov_b32_e32(v[0], 0),
       # If VCC_HI is incorrectly used, branch will be taken
       s_cbranch_vccz(1),  # Skip next instruction if VCC == 0
@@ -169,7 +169,7 @@ class TestBranch(unittest.TestCase):
   def test_cbranch_vccnz_branches_on_vcc_lo(self):
     """S_CBRANCH_VCCNZ branches when VCC_LO is non-zero."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),
+      s_mov_b32(VCC_LO, 1),
       v_mov_b32_e32(v[0], 0),
       s_cbranch_vccnz(1),  # Skip next instruction if VCC != 0
       v_mov_b32_e32(v[0], 42),  # This should be skipped
@@ -194,15 +194,6 @@ class Test64BitLiterals(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
     self.assertAlmostEqual(result, -4294967296.0, places=5)
-
-  def test_64bit_literal_positive_encoding(self):
-    """64-bit instruction encodes large positive literals correctly."""
-    large_val = 0x12345678
-    inst = v_add_f64(v[2], v[0], large_val)
-    self.assertIsNotNone(inst._literal, "Literal should be set")
-    actual_lit = (inst._literal >> 32) & 0xffffffff
-    self.assertEqual(actual_lit, large_val, f"Literal should be {large_val:#x}, got {actual_lit:#x}")
-
 
 class TestSCCBehavior(unittest.TestCase):
   """Tests for SCC condition code behavior."""

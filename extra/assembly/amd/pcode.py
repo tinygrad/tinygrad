@@ -1,6 +1,7 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
 import struct, math, re, functools
-from extra.assembly.amd.dsl import MASK32, MASK64
+
+MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
 
 # Float/int bit conversion functions
 _struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")

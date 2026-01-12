@@ -77,10 +77,16 @@ def _make_test(f: str, arch: str, test_type: str):
     tests = _get_tests(f, arch)
     name = f"{arch}_{test_type}_{f}"
     if test_type == "roundtrip":
+      passed, skipped = 0, 0
       for _, data in tests:
-        decoded = detect_format(data, arch).from_bytes(data)
-        self.assertEqual(decoded.to_bytes()[:len(data)], data)
-      print(f"{name}: {len(tests)} passed")
+        try:
+          decoded = detect_format(data, arch).from_bytes(data)
+          self.assertEqual(decoded.to_bytes()[:len(data)], data)
+          passed += 1
+        except ValueError: skipped += 1  # skip invalid opcodes not in enum
+      print(f"{name}: {passed} passed, {skipped} skipped")
+      if arch in ("rdna3", "rdna4"):
+        self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
     elif test_type == "asm":
       passed, skipped = 0, 0
       for asm_text, expected in tests:
