@@ -88,6 +88,17 @@ class EnumBitField(BitField):
     return val.value
   def decode(self, raw): return self._enum(raw)
 
+class SignedBitField(BitField):
+  """Signed immediate field - encode validates range, decode performs sign extension."""
+  def encode(self, val):
+    bits = self.hi - self.lo + 1
+    min_val, max_val = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+    if not (min_val <= val <= max_val): raise RuntimeError(f"signed value {val} out of range [{min_val}, {max_val}] for {bits}-bit field")
+    return val & ((1 << bits) - 1)  # two's complement
+  def decode(self, raw):
+    bits = self.hi - self.lo + 1
+    return raw - (1 << bits) if raw >= (1 << (bits - 1)) else raw
+
 # ══════════════════════════════════════════════════════════════
 # Typed fields
 # ══════════════════════════════════════════════════════════════
@@ -120,6 +131,16 @@ class SrcField(BitField):
 class VGPRField(SrcField): _valid_range = (256, 511)
 class SGPRField(SrcField): _valid_range = (0, 127)
 class SSrcField(SrcField): _valid_range = (0, 255)
+
+class VDSTYField(BitField):
+  """VOPD vdsty: encoded = vgpr_idx >> 1. Only even VGPRs allowed (vdstx determines LSB)."""
+  def encode(self, val):
+    if not isinstance(val, Reg): raise RuntimeError(f"VDSTYField requires Reg, got {type(val).__name__}")
+    if not (256 <= val.offset < 512): raise RuntimeError(f"VDSTYField requires VGPR, got offset {val.offset}")
+    idx = val.offset - 256
+    if idx & 1: raise RuntimeError(f"VDSTYField requires even VGPR index, got v[{idx}]")
+    return idx >> 1
+  def decode(self, raw): return raw  # raw value, actual vdsty = (raw << 1) | ((vdstx & 1) ^ 1)
 
 # ══════════════════════════════════════════════════════════════
 # Inst base class

@@ -1,6 +1,6 @@
 import unittest
 from extra.assembly.amd.dsl2 import *
-from extra.assembly.amd.dsl2 import VOP2Op
+from extra.assembly.amd.dsl2 import VOP2Op, SignedBitField, VDSTYField
 
 class TestRegisters(unittest.TestCase):
   def test_vgpr_single(self):
@@ -137,6 +137,86 @@ class TestVOP1(unittest.TestCase):
     i1 = VOP1(VOP1Op.V_MOV_B32_E32, v[5], v[6])
     i2 = VOP1(VOP1Op.V_MOV_B32_E32, src0=v[6], vdst=v[5])
     self.assertEqual(i1._raw, i2._raw)
+
+class TestSignedBitField(unittest.TestCase):
+  def test_positive_value(self):
+    f = SignedBitField(15, 0)  # 16-bit signed
+    self.assertEqual(f.decode(0), 0)
+    self.assertEqual(f.decode(1), 1)
+    self.assertEqual(f.decode(0x7FFF), 32767)
+
+  def test_negative_value(self):
+    f = SignedBitField(15, 0)  # 16-bit signed
+    self.assertEqual(f.decode(0xFFFF), -1)
+    self.assertEqual(f.decode(0x8000), -32768)
+    self.assertEqual(f.decode(0xFFFE), -2)
+
+  def test_8bit_signed(self):
+    f = SignedBitField(7, 0)  # 8-bit signed
+    self.assertEqual(f.decode(0x7F), 127)
+    self.assertEqual(f.decode(0x80), -128)
+    self.assertEqual(f.decode(0xFF), -1)
+
+  def test_encode_positive(self):
+    f = SignedBitField(15, 0)
+    self.assertEqual(f.encode(0), 0)
+    self.assertEqual(f.encode(100), 100)
+    self.assertEqual(f.encode(32767), 32767)
+
+  def test_encode_negative(self):
+    f = SignedBitField(15, 0)  # 16-bit signed
+    self.assertEqual(f.encode(-1), 0xFFFF)
+    self.assertEqual(f.encode(-32768), 0x8000)
+
+  def test_encode_out_of_range_raises(self):
+    f = SignedBitField(15, 0)  # 16-bit signed: [-32768, 32767]
+    with self.assertRaises(RuntimeError) as ctx:
+      f.encode(32768)
+    self.assertIn("out of range", str(ctx.exception))
+    with self.assertRaises(RuntimeError) as ctx:
+      f.encode(-32769)
+    self.assertIn("out of range", str(ctx.exception))
+
+  def test_encode_8bit_range(self):
+    f = SignedBitField(7, 0)  # 8-bit signed: [-128, 127]
+    self.assertEqual(f.encode(127), 127)
+    self.assertEqual(f.encode(-128), 0x80)
+    with self.assertRaises(RuntimeError):
+      f.encode(128)
+    with self.assertRaises(RuntimeError):
+      f.encode(-129)
+
+class TestVDSTYField(unittest.TestCase):
+  def test_encode_even_vgpr(self):
+    f = VDSTYField(6, 0)  # 7-bit field
+    self.assertEqual(f.encode(v[0]), 0)
+    self.assertEqual(f.encode(v[2]), 1)
+    self.assertEqual(f.encode(v[4]), 2)
+    self.assertEqual(f.encode(v[254]), 127)
+
+  def test_encode_odd_vgpr_raises(self):
+    f = VDSTYField(6, 0)
+    with self.assertRaises(RuntimeError) as ctx:
+      f.encode(v[1])
+    self.assertIn("even VGPR", str(ctx.exception))
+
+  def test_encode_non_vgpr_raises(self):
+    f = VDSTYField(6, 0)
+    with self.assertRaises(RuntimeError) as ctx:
+      f.encode(s[0])
+    self.assertIn("VGPR", str(ctx.exception))
+
+  def test_encode_non_reg_raises(self):
+    f = VDSTYField(6, 0)
+    with self.assertRaises(RuntimeError) as ctx:
+      f.encode(42)
+    self.assertIn("Reg", str(ctx.exception))
+
+  def test_decode_returns_raw(self):
+    f = VDSTYField(6, 0)
+    # decode returns raw value, actual vdsty computed with vdstx context
+    self.assertEqual(f.decode(0), 0)
+    self.assertEqual(f.decode(127), 127)
 
 if __name__ == "__main__":
   unittest.main()
