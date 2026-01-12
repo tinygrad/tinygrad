@@ -126,9 +126,9 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         # check for forward declaration
         if _nm in types: types[_nm] = (tnm:=types[_nm][0]), len(fields(t)) != 0, (ln:=types[_nm][2])
         else:
-          if clang.clang_Cursor_isAnonymous(decl): types[_nm] = (tnm:=(suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl
-                                                                                                  else 'union'}{anoncnt()}")), True, (ln:=len(lines)))
-          else: types[_nm] = (tnm:=_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
+          real_nm = ((suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}"))
+                     if clang.clang_Cursor_isAnonymous(decl) else _nm)
+          types[_nm] = (tnm:=real_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
           lines.append(f"class {tnm}(ctypes.{'Structure' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
           if typedef: lines.append(f"{typedef} = {tnm}")
         ff=[(f, tname(clang.clang_getCursorType(f)), offset) + ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
