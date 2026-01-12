@@ -170,11 +170,11 @@ class VDSTYField(BitField):
 
 class Inst:
   _fields: list[tuple[str, BitField]]
-  _size: int
+  _base_size: int
 
   def __init_subclass__(cls):
     cls._fields = [(name, val) for name, val in cls.__dict__.items() if isinstance(val, BitField)]
-    cls._size = (max(f.hi for _, f in cls._fields) + 8) // 8
+    cls._base_size = (max(f.hi for _, f in cls._fields) + 8) // 8
 
   def __init__(self, *args, **kwargs):
     self._raw = 0
@@ -189,12 +189,18 @@ class Inst:
       if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
         self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
 
+  # ugly
   @property
   def op_name(self) -> str: return self.op.name
-  def size(self) -> int: return self._size + (4 if self._literal is not None else 0)
+  @classmethod
+  def _size(cls) -> int: return cls._base_size
+  def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)
+  def disasm(self) -> str:
+    from extra.assembly.amd.asm import disasm
+    return disasm(self)
 
   def to_bytes(self) -> bytes:
-    result = self._raw.to_bytes(self._size, 'little')
+    result = self._raw.to_bytes(self._base_size, 'little')
     if self._literal is not None:
       result += (self._literal & 0xFFFFFFFF).to_bytes(4, 'little')
     return result
@@ -202,12 +208,12 @@ class Inst:
   @classmethod
   def from_bytes(cls, data: bytes):
     inst = object.__new__(cls)
-    inst._raw = int.from_bytes(data[:cls._size], 'little')
+    inst._raw = int.from_bytes(data[:cls._base_size], 'little')
     inst._literal = None
     for name, field in cls._fields:
       if isinstance(field, SrcField) and getattr(inst, name).offset == 255:
-        assert len(data) >= cls._size + 4, f"literal marker found but data too short: {len(data)} < {cls._size + 4}"
-        inst._literal = int.from_bytes(data[cls._size:cls._size + 4], 'little')
+        assert len(data) >= cls._base_size + 4, f"literal marker found but data too short: {len(data)} < {cls._base_size + 4}"
+        inst._literal = int.from_bytes(data[cls._base_size:cls._base_size + 4], 'little')
         break
     return inst
 
