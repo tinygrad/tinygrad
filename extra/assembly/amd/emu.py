@@ -334,7 +334,7 @@ def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
   else: d0 = V[vdst]
 
   if isinstance(inst, VOP3SD) and 'CO_CI' in inst.op_name: vcc_for_fn = st.rsgpr64(inst.src2)
-  elif isinstance(inst, VOP3) and inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16_E64) and src2 is not None and src2.offset < 256: vcc_for_fn = st.rsgpr64(src2)
+  elif isinstance(inst, VOP3) and inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16) and src2 is not None and src2.offset < 256: vcc_for_fn = st.rsgpr64(src2)
   else: vcc_for_fn = st.vcc
   src0_off = src0.offset if src0 is not None else 0
   src0_idx = (src0_off - 256) if src0_off >= 256 else src0_off
@@ -346,7 +346,9 @@ def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
   is_vopc = isinstance(inst.op, VOPCOp) or (isinstance(inst, VOP3) and inst.op.value < 256)
   if 'VCC' in result:
     if isinstance(inst, VOP3SD): st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
-    else: st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['VCC'] >> lane) & 1)
+    elif isinstance(inst, VOP2) and 'CO_CI' in inst.op_name: st.pend_sgpr_lane(VCC_LO, lane, (result['VCC'] >> lane) & 1)
+    elif is_vopc: st.pend_sgpr_lane(vdst, lane, (result['VCC'] >> lane) & 1)  # vdst is VCC_LO for VOPC
+    else: st.pend_sgpr_lane(VCC_LO, lane, (result['VCC'] >> lane) & 1)
   if 'EXEC' in result:
     st.pend_sgpr_lane(EXEC_LO, lane, (result['EXEC'] >> lane) & 1)
   elif is_vopc:
@@ -423,8 +425,8 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)): inst._dispatch = exec_scalar
     elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP_E32: inst._dispatch = dispatch_nop
     elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name: inst._dispatch = dispatch_wmma
-    elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32_E64: inst._dispatch = dispatch_writelane
-    elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32_E32, VOP3Op.V_READFIRSTLANE_B32_E64, VOP3Op.V_READLANE_B32): inst._dispatch = dispatch_readlane
+    elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32: inst._dispatch = dispatch_writelane
+    elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32_E32, VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32): inst._dispatch = dispatch_readlane
     elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
     elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)

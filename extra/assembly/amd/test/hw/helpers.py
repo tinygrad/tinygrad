@@ -7,7 +7,18 @@ import ctypes, os, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.asm import RawImm
 from extra.assembly.amd.emu import WaveState, run_asm, set_valid_mem_ranges
+from extra.assembly.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
 from extra.assembly.amd.pcode import _i32, _f32
+
+# For backwards compatibility with tests using SrcEnum.NULL etc.
+class SrcEnum:
+  NULL = NULL
+  VCC_LO = VCC_LO
+  VCC_HI = VCC_HI
+  EXEC_LO = EXEC_LO
+  EXEC_HI = EXEC_HI
+  SCC = SCC
+  M0 = M0
 
 VCC = VCC_LO  # For VOP3SD sdst field (VCC_LO is exported from dsl)
 USE_HW = os.environ.get("USE_HW", "0") == "1"
