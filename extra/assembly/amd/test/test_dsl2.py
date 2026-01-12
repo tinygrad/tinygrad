@@ -77,9 +77,9 @@ class TestOpField(unittest.TestCase):
 
 class TestVOP1(unittest.TestCase):
   def test_class_setup(self):
-    self.assertIsNotNone(VOP1._encoding)
     self.assertEqual(VOP1._size, 4)
     field_names = [n for n, _ in VOP1._fields]
+    self.assertIn('encoding', field_names)
     self.assertIn('op', field_names)
     self.assertIn('vdst', field_names)
     self.assertIn('src0', field_names)

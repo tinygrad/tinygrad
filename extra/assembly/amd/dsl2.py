@@ -68,7 +68,19 @@ class BitField:
     if self.required_size is not None and (hi - lo + 1) != self.required_size:
       raise RuntimeError(f"wrong size field: expected {self.required_size}, got {hi - lo + 1}")
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
-  def __eq__(self, val): return (self, val)
+  def set(self, raw: int, val) -> int:
+    encoded = self.encode(val) if hasattr(self, 'encode') else (val.value if hasattr(val, 'value') else val)
+    return (raw & ~(self.mask() << self.lo)) | ((encoded & self.mask()) << self.lo)
+  def get(self, raw: int):
+    val = (raw >> self.lo) & self.mask()
+    return self.decode(val) if hasattr(self, 'decode') else val
+
+class FixedBitField(BitField):
+  def __init__(self, hi: int, lo: int, val: int):
+    super().__init__(hi, lo)
+    self.val = val
+    if val >= (1 << (hi - lo + 1)): raise RuntimeError(f"value {val} doesn't fit in {hi - lo + 1} bits")
+  def set(self, raw: int, val=None) -> int: return super().set(raw, self.val)
 
 # ══════════════════════════════════════════════════════════════
 # OpField with auto IntEnum
@@ -83,6 +95,8 @@ class OpFieldMeta(type):
 
 class OpField(BitField, metaclass=OpFieldMeta):
   _enum = None
+  def encode(self, val): return val.value if hasattr(val, 'value') else val
+  def decode(self, raw): return self._enum(raw) if self._enum else raw
 
 # ══════════════════════════════════════════════════════════════
 # Typed fields
@@ -90,64 +104,46 @@ class OpField(BitField, metaclass=OpFieldMeta):
 
 class VGPRField(BitField):
   required_size = 8
+  def encode(self, val):
+    if not isinstance(val, Reg) or val.offset < 256 or val.offset >= 512:
+      raise RuntimeError(f"VGPRField requires VGPR, got {val}")
+    return val.offset - 256
+  def decode(self, raw): return src[256 + raw]
 
 class SrcField(BitField):
   required_size = 9
+  _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
+  def encode(self, val):
+    if isinstance(val, Reg): return val.offset
+    if isinstance(val, float):
+      if val not in self._FLOAT_ENC: raise RuntimeError(f"SrcField: unsupported float constant {val}")
+      return self._FLOAT_ENC[val]
+    if isinstance(val, int) and 0 <= val <= 64: return 128 + val
+    if isinstance(val, int) and -16 <= val < 0: return 192 - val
+    raise RuntimeError(f"SrcField: invalid value {val}")
+  def decode(self, raw): return src[raw]
 
 # ══════════════════════════════════════════════════════════════
 # Inst base class
 # ══════════════════════════════════════════════════════════════
 
 class Inst:
-  _encoding: tuple[BitField, int] | None = None
   _fields: list[tuple[str, BitField]]
-  _size: int = 4
+  _size: int
 
   def __init_subclass__(cls):
-    cls._encoding = None
-    cls._fields = []
-    for name, val in cls.__dict__.items():
-      if isinstance(val, tuple) and len(val) == 2 and isinstance(val[0], BitField):
-        cls._encoding = val
-      elif isinstance(val, BitField):
-        cls._fields.append((name, val))
-    cls._fields.sort(key=lambda x: -x[1].hi)
-    if cls._fields: cls._size = (max(f.hi for _, f in cls._fields) + 8) // 8
+    cls._fields = [(name, val) for name, val in cls.__dict__.items() if isinstance(val, BitField)]
+    cls._size = (max(f.hi for _, f in cls._fields) + 8) // 8
 
-  def __init__(self, op, *args):
+  def __init__(self, *args):
     self._raw = 0
-    if self._encoding:
-      bf, val = self._encoding
-      self._raw |= (val & bf.mask()) << bf.lo
-    # Set fields: op first, then remaining fields from args
-    self._set('op', op)
-    non_op = [(n, f) for n, f in self._fields if n != 'op']
-    for (name, _), val in zip(non_op, args): self._set(name, val)
+    args_iter = iter(args)
+    for name, field in self._fields:
+      self._raw = field.set(self._raw, None if isinstance(field, FixedBitField) else next(args_iter, None))
 
-  # Float encoding map
-  _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
-
-  def _set(self, name: str, val):
+  def __getitem__(self, name: str):
     field = next(f for n, f in self._fields if n == name)
-    if isinstance(field, VGPRField):
-      raw = (val.offset - 256) if isinstance(val, Reg) else val
-    elif isinstance(field, SrcField):
-      if isinstance(val, Reg): raw = val.offset
-      elif isinstance(val, float): raw = self._FLOAT_ENC.get(val, 255)  # 255 = literal
-      elif isinstance(val, int) and 0 <= val <= 64: raw = 128 + val
-      elif isinstance(val, int) and -16 <= val < 0: raw = 192 - val
-      else: raw = val
-    else:
-      raw = val.value if hasattr(val, 'value') else val
-    self._raw = (self._raw & ~(field.mask() << field.lo)) | ((raw & field.mask()) << field.lo)
-
-  def _get(self, name: str):
-    field = next(f for n, f in self._fields if n == name)
-    raw = (self._raw >> field.lo) & field.mask()
-    if isinstance(field, VGPRField): return src[256 + raw]
-    if isinstance(field, SrcField): return src[raw]
-    if isinstance(field, OpField) and field._enum: return field._enum(raw)
-    return raw
+    return field.get(self._raw)
 
   def to_bytes(self) -> bytes: return self._raw.to_bytes(self._size, 'little')
 
@@ -158,10 +154,8 @@ class Inst:
     return inst
 
   def __repr__(self):
-    op = self._get('op')
-    name = op.name.lower() if hasattr(op, 'name') else f"op{op}"
-    args = [repr(self._get(n)) for n, _ in self._fields if n != 'op']
-    return f"{name}({', '.join(args)})"
+    args = [n for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
+    return f"{self['op'].name.lower()}({', '.join(repr(self[n]) for n in args)})"
 
 # ══════════════════════════════════════════════════════════════
 # VOP1
@@ -172,7 +166,7 @@ class VOP1Op(OpField):
   V_MOV_B32_E32 = 1
 
 class VOP1(Inst):
-  encoding = BitField(31, 25) == 0b0111111
+  encoding = FixedBitField(31, 25, 0b0111111)
   op = VOP1Op(16, 9)
   vdst = VGPRField(24, 17)
   src0 = SrcField(8, 0)
