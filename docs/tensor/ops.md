@@ -31,6 +31,7 @@
 ::: tinygrad.Tensor.einsum
 ::: tinygrad.Tensor.cumsum
 ::: tinygrad.Tensor.cummax
+::: tinygrad.Tensor.cummin
 ::: tinygrad.Tensor.triu
 ::: tinygrad.Tensor.tril
 ::: tinygrad.Tensor.interpolate
@@ -38,6 +39,7 @@
 ::: tinygrad.Tensor.scatter_reduce
 ::: tinygrad.Tensor.masked_select
 ::: tinygrad.Tensor.masked_fill
+::: tinygrad.Tensor.nonzero
 ::: tinygrad.Tensor.sort
 ::: tinygrad.Tensor.topk
 ::: tinygrad.Tensor.multinomial
