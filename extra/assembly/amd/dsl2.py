@@ -135,11 +135,14 @@ class Inst:
     cls._fields = [(name, val) for name, val in cls.__dict__.items() if isinstance(val, BitField)]
     cls._size = (max(f.hi for _, f in cls._fields) + 8) // 8
 
-  def __init__(self, *args):
+  def __init__(self, *args, **kwargs):
     self._raw = 0
     args_iter = iter(args)
     for name, field in self._fields:
-      self._raw = field.set(self._raw, None if isinstance(field, FixedBitField) else next(args_iter, None))
+      if isinstance(field, FixedBitField): val = None
+      elif name in kwargs: val = kwargs[name]
+      else: val = next(args_iter, None)
+      self._raw = field.set(self._raw, val)
 
   def __getitem__(self, name: str):
     field = next(f for n, f in self._fields if n == name)

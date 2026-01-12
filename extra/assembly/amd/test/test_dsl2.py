@@ -118,5 +118,15 @@ class TestVOP1(unittest.TestCase):
     i = VOP1(VOP1Op.V_MOV_B32_E32, v[5], s[10])
     self.assertEqual(repr(i), "v_mov_b32_e32(v[5], s[10])")
 
+  def test_kwargs(self):
+    i1 = VOP1(VOP1Op.V_MOV_B32_E32, v[5], v[6])
+    i2 = VOP1(op=VOP1Op.V_MOV_B32_E32, vdst=v[5], src0=v[6])
+    self.assertEqual(i1._raw, i2._raw)
+
+  def test_kwargs_partial(self):
+    i1 = VOP1(VOP1Op.V_MOV_B32_E32, v[5], v[6])
+    i2 = VOP1(VOP1Op.V_MOV_B32_E32, src0=v[6], vdst=v[5])
+    self.assertEqual(i1._raw, i2._raw)
+
 if __name__ == "__main__":
   unittest.main()
