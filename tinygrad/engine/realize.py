@@ -8,9 +8,37 @@ from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
 from tinygrad.codegen import get_program
+import hashlib
 
 # Parallel compilation settings
 PARALLEL_COMPILE = getenv("PARALLEL_COMPILE", 1)
+
+# **************** Kernel Structure Key (for deduplication) ****************
+
+def get_kernel_structure_key(ast: UOp) -> bytes:
+  """Generate a key based on kernel structure, ignoring buffer-specific values.
+
+  Two kernels with the same structure but different buffer indices should have the same key.
+  This enables kernel deduplication where we compile once and reuse with buffer remapping.
+  """
+  # Map buffer arg values to normalized positions
+  buffer_positions: dict[int, int] = {}
+  next_pos = 0
+
+  def normalize(u: UOp) -> tuple:
+    nonlocal next_pos
+    if u.op is Ops.DEFINE_GLOBAL:
+      # Normalize buffer index to position order
+      buf_idx = u.arg
+      if buf_idx not in buffer_positions:
+        buffer_positions[buf_idx] = next_pos
+        next_pos += 1
+      normalized_idx = buffer_positions[buf_idx]
+      return (u.op, u.dtype, normalized_idx, tuple(normalize(s) for s in u.src))
+    return (u.op, u.dtype, u.arg, tuple(normalize(s) for s in u.src))
+
+  normalized = normalize(ast)
+  return hashlib.sha256(str(normalized).encode()).digest()
 
 # **************** Runners ****************
 
