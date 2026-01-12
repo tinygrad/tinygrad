@@ -365,7 +365,7 @@ def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
 
 def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
   """Execute WMMA instruction - 16x16x16 matrix multiply across the wave."""
-  src0, src1, src2, vdst = inst.src0, inst.src1, inst.src2, inst.vdst
+  src0, src1, src2, vdst = inst.src0.offset, inst.src1.offset, inst.src2.offset, inst.vdst.offset
   # Read 16x16 f16 matrix from 16 lanes × 8 VGPRs (2 f16 per VGPR)
   def read_f16_mat(src):
     return [f for l in range(16) for r in range(8) for v in [st.vgpr[l][src-256+r] if src >= 256 else st.rsgpr(src+r)] for f in [_f16(v&0xffff), _f16((v>>16)&0xffff)]]
@@ -377,9 +377,9 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
   # Write result - f16 packed or f32
   if op == VOP3POp.V_WMMA_F16_16X16X16_F16:
     for i in range(0, 256, 2):
-      st.vgpr[(i//2) % 32][vdst + (i//2)//32] = ((_i16(mat_d[i+1]) & 0xffff) << 16) | (_i16(mat_d[i]) & 0xffff)
+      st.vgpr[(i//2) % 32][vdst - 256 + (i//2)//32] = ((_i16(mat_d[i+1]) & 0xffff) << 16) | (_i16(mat_d[i]) & 0xffff)
   else:
-    for i in range(256): st.vgpr[i % 32][vdst + i//32] = _i32(mat_d[i])
+    for i in range(256): st.vgpr[i % 32][vdst - 256 + i//32] = _i32(mat_d[i])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PROGRAM DECODE
