@@ -2760,6 +2760,18 @@ class Tensor(OpMixin):
     """
     return self.log2()*math.log(2)
 
+  def log10(self) -> Tensor:
+    """
+    Computes the base-10 logarithm element-wise.
+
+    See: https://en.wikipedia.org/wiki/Logarithm
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 4., 8.]).log10().numpy())
+    ```
+    """
+    return self.log2()*math.log10(2)
+
   def log2(self) -> Tensor:
     """
     Computes the base-2 logarithm element-wise.
