@@ -1,5 +1,6 @@
 import unittest
 from extra.assembly.amd.dsl2 import *
+from extra.assembly.amd.dsl2 import VOP2Op
 
 class TestRegisters(unittest.TestCase):
   def test_vgpr_single(self):
@@ -64,7 +65,7 @@ class TestRegisters(unittest.TestCase):
     self.assertEqual(repr(src[193]), "-1")
     self.assertEqual(repr(src[208]), "-16")
 
-class TestOpField(unittest.TestCase):
+class TestEnumBitField(unittest.TestCase):
   def test_enum_name(self):
     self.assertEqual(VOP1Op.V_MOV_B32_E32.name, "V_MOV_B32_E32")
 
@@ -74,6 +75,15 @@ class TestOpField(unittest.TestCase):
   def test_enum_comparison(self):
     self.assertEqual(VOP1Op.V_MOV_B32_E32, VOP1Op.V_MOV_B32_E32)
     self.assertNotEqual(VOP1Op.V_NOP_E32, VOP1Op.V_MOV_B32_E32)
+
+  def test_enum_different_types(self):
+    # VOP1Op and VOP2Op are different enums, even if same value
+    self.assertNotEqual(VOP1Op.V_MOV_B32_E32, VOP2Op.V_CNDMASK_B32_E32)
+
+  def test_wrong_enum_type_raises(self):
+    # Passing VOP2Op to VOP1 should raise
+    with self.assertRaises(RuntimeError):
+      VOP1(VOP2Op.V_CNDMASK_B32_E32, v[5], v[6])
 
 class TestVOP1(unittest.TestCase):
   def test_class_setup(self):

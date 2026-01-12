@@ -1,6 +1,6 @@
 # dsl2.py - clean DSL for AMD assembly
 from __future__ import annotations
-from enum import IntEnum
+from enum import Enum
 
 # ══════════════════════════════════════════════════════════════
 # Registers - unified src encoding space (0-511)
@@ -68,35 +68,28 @@ class BitField:
     if self.required_size is not None and (hi - lo + 1) != self.required_size:
       raise RuntimeError(f"wrong size field: expected {self.required_size}, got {hi - lo + 1}")
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
+  def encode(self, val) -> int: return val
+  def decode(self, val): return val
   def set(self, raw: int, val) -> int:
-    encoded = self.encode(val) if hasattr(self, 'encode') else (val.value if hasattr(val, 'value') else val)
-    return (raw & ~(self.mask() << self.lo)) | ((encoded & self.mask()) << self.lo)
-  def get(self, raw: int):
-    val = (raw >> self.lo) & self.mask()
-    return self.decode(val) if hasattr(self, 'decode') else val
+    encoded = self.encode(val)
+    if encoded < 0 or encoded > self.mask(): raise RuntimeError(f"value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
+    return (raw & ~(self.mask() << self.lo)) | (encoded << self.lo)
+  def get(self, raw: int): return self.decode((raw >> self.lo) & self.mask())
 
 class FixedBitField(BitField):
   def __init__(self, hi: int, lo: int, val: int):
     super().__init__(hi, lo)
     self.val = val
-    if val >= (1 << (hi - lo + 1)): raise RuntimeError(f"value {val} doesn't fit in {hi - lo + 1} bits")
   def set(self, raw: int, val=None) -> int: return super().set(raw, self.val)
 
-# ══════════════════════════════════════════════════════════════
-# OpField with auto IntEnum
-# ══════════════════════════════════════════════════════════════
-
-class OpFieldMeta(type):
-  def __new__(mcs, name, bases, ns):
-    members = {k: v for k, v in ns.items() if isinstance(v, int) and not k.startswith('_')}
-    cls = super().__new__(mcs, name, bases, {k: v for k, v in ns.items() if k not in members})
-    if members: cls._enum = IntEnum(name, members); [setattr(cls, k, cls._enum[k]) for k in members]
-    return cls
-
-class OpField(BitField, metaclass=OpFieldMeta):
-  _enum = None
-  def encode(self, val): return val.value if hasattr(val, 'value') else val
-  def decode(self, raw): return self._enum(raw) if self._enum else raw
+class EnumBitField(BitField):
+  def __init__(self, hi: int, lo: int, enum_cls):
+    super().__init__(hi, lo)
+    self._enum = enum_cls
+  def encode(self, val) -> int:
+    if not isinstance(val, self._enum): raise RuntimeError(f"expected {self._enum.__name__}, got {type(val).__name__}")
+    return val.value
+  def decode(self, raw): return self._enum(raw)
 
 # ══════════════════════════════════════════════════════════════
 # Typed fields
@@ -164,12 +157,15 @@ class Inst:
 # VOP1
 # ══════════════════════════════════════════════════════════════
 
-class VOP1Op(OpField):
+class VOP1Op(Enum):
   V_NOP_E32 = 0
   V_MOV_B32_E32 = 1
 
+class VOP2Op(Enum):
+  V_CNDMASK_B32_E32 = 1
+
 class VOP1(Inst):
   encoding = FixedBitField(31, 25, 0b0111111)
-  op = VOP1Op(16, 9)
+  op = EnumBitField(16, 9, VOP1Op)
   vdst = VGPRField(24, 17)
   src0 = SrcField(8, 0)
