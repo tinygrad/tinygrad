@@ -4,7 +4,7 @@ from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, T
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.dtype import dtypes, PtrDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType
 from tinygrad.helpers import panic
 from tinygrad.codegen.opt import Opt
 
@@ -13,7 +13,7 @@ from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
-from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
+from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, load_store_indexing_no_image, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads
 from tinygrad.codegen.opt.postrange import apply_opts, make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
@@ -85,14 +85,18 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   # add loads
   sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
 
+  # detect if workload has images - skip expensive image patterns if not (saves ~1s for non-image workloads)
+  has_images = any(isinstance(u.dtype, ImageDType) for u in sink.toposort())
+  pm_indexing = load_store_indexing if has_images else load_store_indexing_no_image
+
   # devectorize (TODO: does this need opts?)
-  if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
-  elif DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
-  else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
+  if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+pm_indexing
+  elif DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+pm_indexing
+  else: pm_devectorize = sym+load_store_folding+correct_load_store+pm_indexing
   sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
 
   # lower the index dtype to a concrete int
-  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing, ctx=ren.device, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_index_dtype+pm_indexing, ctx=ren.device, name="lower all index dtypes")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # optional pre matcher

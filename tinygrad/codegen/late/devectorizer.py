@@ -45,6 +45,14 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   return buf.index(idx.valid(new_valid) if new_valid is not None else idx, ptr=True)
 
 
+# Non-image version: only includes patterns that are useful for non-image workloads
+# This skips simplify_valid_load which has 0% match rate for non-image workloads but costs ~900ms
+load_store_indexing_no_image = PatternMatcher([
+  # drop true gate
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x, ptr=True)),
+])
+
+# Full version with image-specific patterns
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
