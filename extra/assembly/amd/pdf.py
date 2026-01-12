@@ -247,27 +247,8 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
           if name == 'encoding': lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings['FLAT']})")
           elif name == 'seg': lines.append(f"  seg = FixedBitField({hi}, {lo}, {seg_val})")
           elif name == 'op': lines.append(f"  op = EnumBitField({hi}, {lo}, {op_enum})")
-          elif name == 'vdst': lines.append(f"  vdst = VGPRField({hi}, {lo}, default=v[0])")
-          elif name == 'data': lines.append(f"  data = VGPRField({hi}, {lo}, default=v[0])")
-          elif name == 'offset': lines.append(f"  offset = BitField({hi}, {lo}, default=0)")
           else: lines.append(f"  {name} = {field_def(name, hi, lo, 'FLAT')}")
         lines.append("")
-    elif fmt_name == 'DS':
-      lines.append(f"class DS(Inst):")
-      for name, hi, lo in sort_fields(fields):
-        if name == 'encoding': lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings['DS']})")
-        elif name == 'vdst': lines.append(f"  vdst = VGPRField({hi}, {lo}, default=v[0])")
-        elif name in ('data0', 'data1'): lines.append(f"  {name} = VGPRField({hi}, {lo}, default=v[0])")
-        elif name in ('offset0', 'offset1'): lines.append(f"  {name} = BitField({hi}, {lo}, default=0)")
-        else: lines.append(f"  {name} = {field_def(name, hi, lo, 'DS')}")
-      lines.append("")
-    elif fmt_name == 'VOPD':
-      lines.append(f"class VOPD(Inst):")
-      for name, hi, lo in sort_fields(fields):
-        if name == 'encoding': lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings['VOPD']})")
-        elif name in ('vsrcx1', 'vsrcy1'): lines.append(f"  {name} = VGPRField({hi}, {lo}, default=v[0])")
-        else: lines.append(f"  {name} = {field_def(name, hi, lo, 'VOPD')}")
-      lines.append("")
     else:
       lines.append(f"class {fmt_name}(Inst):")
       for name, hi, lo in sort_fields(fields):

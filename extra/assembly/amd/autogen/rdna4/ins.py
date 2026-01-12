@@ -30,12 +30,12 @@ class DPP8(Inst):
 class DS(Inst):
   encoding = FixedBitField(31, 26, 0b110110)
   op = EnumBitField(25, 18, DSOp)
-  vdst = VGPRField(63, 56, default=v[0])
+  vdst = VGPRField(63, 56)
   addr = VGPRField(39, 32)
-  data0 = VGPRField(47, 40, default=v[0])
-  data1 = VGPRField(55, 48, default=v[0])
-  offset0 = BitField(7, 0, default=0)
-  offset1 = BitField(15, 8, default=0)
+  data0 = VGPRField(47, 40)
+  data1 = VGPRField(55, 48)
+  offset0 = BitField(7, 0)
+  offset1 = BitField(15, 8)
 
 class SMEM(Inst):
   encoding = FixedBitField(31, 26, 0b111101)
@@ -209,8 +209,8 @@ class VOPD(Inst):
   vdsty = VDSTYField(55, 49)
   srcx0 = SrcField(8, 0)
   srcy0 = SrcField(40, 32)
-  vsrcx1 = VGPRField(16, 9, default=v[0])
-  vsrcy1 = VGPRField(48, 41, default=v[0])
+  vsrcx1 = VGPRField(16, 9)
+  vsrcy1 = VGPRField(48, 41)
 
 class VSAMPLE(Inst):
   encoding = FixedBitField(31, 26, 0b111001)

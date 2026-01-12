@@ -1,6 +1,8 @@
 import unittest
 from extra.assembly.amd.dsl import *
-from extra.assembly.amd.dsl import VOP2Op, VDSTYField
+from extra.assembly.amd.dsl import VDSTYField
+from extra.assembly.amd.autogen.rdna3.enum import VOP1Op, VOP2Op
+from extra.assembly.amd.autogen.rdna3.ins import VOP1
 
 class TestRegisters(unittest.TestCase):
   def test_vgpr_single(self):
@@ -87,7 +89,7 @@ class TestEnumBitField(unittest.TestCase):
 
 class TestVOP1(unittest.TestCase):
   def test_class_setup(self):
-    self.assertEqual(VOP1._size, 4)
+    self.assertEqual(VOP1._size(), 4)
     field_names = [n for n, _ in VOP1._fields]
     self.assertIn('encoding', field_names)
     self.assertIn('op', field_names)
