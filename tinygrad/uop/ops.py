@@ -1027,7 +1027,7 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None):
-    if len(pats:=self.pdict.get(uop.op, [])):
+    if pats:=self.pdict.get(uop.op):
       ler = {u.op for u in uop.src}
       for _,match,early_reject in pats:
         if not early_reject.issubset(ler): continue
