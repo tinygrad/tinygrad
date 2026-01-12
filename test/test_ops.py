@@ -916,6 +916,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], torch.log, Tensor.log)
     helper_test_op(None, torch.log, Tensor.log, vals=[[math.inf, -math.inf, math.nan]])
     helper_test_op([()], torch.log, Tensor.log)
+  def test_log10(self):
+    helper_test_op([(45,65)], torch.log10, Tensor.log10)
+    helper_test_op(None, torch.log10, Tensor.log10, vals=[[math.inf, -math.inf, math.nan]])
+    helper_test_op([()], torch.log10, Tensor.log10)
   def test_log2(self):
     helper_test_op([(45,65)], torch.log2, Tensor.log2)
     helper_test_op(None, torch.log2, Tensor.log2, vals=[[math.inf, -math.inf, math.nan]])
