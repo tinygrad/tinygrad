@@ -145,13 +145,13 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=
   assert sr == RATE, f"waveforms must be resampled to {RATE}, got {sr}"
   waveforms = [Tensor(wv).flatten() for wv in waveforms]
   max_len = max(len(wav) for wav in waveforms)
-  waveforms = Tensor.cat(*[wv.pad((0, max_len-wv.shape[-1]))[None] for wv in waveforms])
+  waveforms = Tensor.cat(*[wv.pad_to((max_len, ))[None] for wv in waveforms])
   max_len = SAMPLES_PER_SEGMENT if truncate else max_len
 
   if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
 
   assert waveforms.shape[0] <= batch_size
-  waveforms = waveforms.pad(((0, batch_size-waveforms.shape[0]), (0, max_len-waveforms.shape[-1])))
+  waveforms = waveforms.pad_to((batch_size, max_len))
   # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
   stft = stft_full(waveforms, N_FFT, stride=HOP_LENGTH, pad=(200, 200), window="hann", pad_mode="reflect")
   magnitudes = (stft[..., :-1] ** 2)
