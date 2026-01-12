@@ -252,13 +252,6 @@ class Inst:
     if neg_bits: vals['neg'] = (vals.get('neg') or 0) | neg_bits
     if abs_bits: vals['abs'] = (vals.get('abs') or 0) | abs_bits
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
-    # VOP3P: set opsel_hi defaults (all VOP3P except fma_mix default to opsel_hi=3, opsel_hi2=1)
-    if 'opsel_hi' in dict(self._fields) and 'opsel_hi2' in dict(self._fields):
-      op = vals.get('op')
-      op_val = op.value if hasattr(op, 'value') else op
-      is_fma_mix = op_val in (32, 33, 34) if op_val is not None else False
-      if vals.get('opsel_hi') is None and vals.get('opsel_hi2') is None and not is_fma_mix:
-        vals['opsel_hi'], vals['opsel_hi2'] = 3, 1
     # Set all field values
     for name, field in self._fields:
       val = vals[name]
@@ -331,6 +324,8 @@ class Inst:
   def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw and self._literal == other._literal
   def __hash__(self): return hash((type(self), self._raw, self._literal))
   def __repr__(self):
-    args = [n for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
+    # collect (repr, is_default) pairs, strip trailing defaults so repr roundtrips with eval
     name = self.op.name.lower() if hasattr(self, 'op') else type(self).__name__
-    return f"{name}({', '.join(repr(getattr(self, n)) for n in args)})"
+    parts = [(repr(v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
+    while parts and parts[-1][1]: parts.pop()
+    return f"{name}({', '.join(p[0] for p in parts)})"

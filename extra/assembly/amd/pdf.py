@@ -224,6 +224,9 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
     if name.startswith('ssrc') and bits == 8: return f"SSrcField({hi}, {lo})"
     if name in ('saddr', 'soffset') and bits == 8: return f"SSrcField({hi}, {lo}, default=NULL)"
     if (name in ('src0', 'srcx0', 'srcy0') or name.startswith('src') and name[3:].isdigit()) and bits == 9: return f"SrcField({hi}, {lo})"
+    # VOP3P opsel_hi defaults to match LLVM (all 1s except fma_mix which is handled separately)
+    if fmt == 'VOP3P' and name == 'opsel_hi': return f"BitField({hi}, {lo}, default=3)"
+    if fmt == 'VOP3P' and name == 'opsel_hi2': return f"BitField({hi}, {lo}, default=1)"
     return f"BitField({hi}, {lo})"
   field_priority = ['encoding', 'op', 'opx', 'opy', 'vdst', 'vdstx', 'vdsty', 'sdst', 'vdata', 'sdata', 'addr', 'vaddr', 'data', 'data0', 'data1',
                     'src0', 'srcx0', 'srcy0', 'vsrc0', 'ssrc0', 'src1', 'vsrc1', 'vsrcx1', 'vsrcy1', 'ssrc1', 'src2', 'vsrc2', 'src3', 'vsrc3',
@@ -257,6 +260,8 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
     else:
       lines.append(f"class {fmt_name}(Inst):")
       for name, hi, lo in sort_fields(fields):
+        # Skip MIMG addr1/addr2 fields (bits 64+) for NSA mode - base MIMG is 64 bits
+        if fmt_name == 'MIMG' and name in ('addr1', 'addr2'): continue
         if name == 'encoding' and fmt_name in encodings: lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings[fmt_name]})")
         else: lines.append(f"  {name} = {field_def(name, hi, lo, fmt_name)}")
       lines.append("")

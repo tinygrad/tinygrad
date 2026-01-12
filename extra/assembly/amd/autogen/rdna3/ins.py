@@ -118,7 +118,6 @@ class MIMG(Inst):
   a16 = BitField(16, 16)
   d16 = BitField(17, 17)
   lwe = BitField(54, 54)
-  # NOTE: addr1/addr2 fields (bits 64+) for NSA mode not included - base MIMG is 64 bits
 
 class MTBUF(Inst):
   encoding = FixedBitField(31, 26, 0b111010)
@@ -241,8 +240,8 @@ class VOP3P(Inst):
   neg_hi = BitField(10, 8)
   clmp = BitField(15, 15)
   opsel = BitField(13, 11)
-  opsel_hi = BitField(60, 59)
-  opsel_hi2 = BitField(14, 14)
+  opsel_hi = BitField(60, 59, default=3)
+  opsel_hi2 = BitField(14, 14, default=1)
 
 class VOP3SD(Inst):
   encoding = FixedBitField(31, 26, 0b110101)

@@ -236,8 +236,8 @@ class VOP3P(Inst):
   neg_hi = BitField(10, 8)
   clmp = BitField(15, 15)
   opsel = BitField(13, 11)
-  opsel_hi = BitField(60, 59)
-  opsel_hi2 = BitField(14, 14)
+  opsel_hi = BitField(60, 59, default=3)
+  opsel_hi2 = BitField(14, 14, default=1)
 
 class VOPC(Inst):
   encoding = FixedBitField(31, 25, 0b0111110)

@@ -179,8 +179,8 @@ class VOP3P(Inst):
   neg = BitField(63, 61)
   neg_hi = BitField(10, 8)
   opsel = BitField(13, 11)
-  opsel_hi = BitField(60, 59)
-  opsel_hi2 = BitField(14, 14)
+  opsel_hi = BitField(60, 59, default=3)
+  opsel_hi2 = BitField(14, 14, default=1)
   cm = BitField(15, 15)
 
 class VOP3SD(Inst):
