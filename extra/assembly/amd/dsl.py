@@ -197,11 +197,14 @@ class VDSTYField(BitField):
 # ══════════════════════════════════════════════════════════════
 
 import re, functools
+from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE as PCODE_RDNA3
+from extra.assembly.amd.autogen.rdna4.str_pcode import PCODE as PCODE_RDNA4
+from extra.assembly.amd.autogen.cdna.str_pcode import PCODE as PCODE_CDNA
+PCODE = {**PCODE_CDNA, **PCODE_RDNA3, **PCODE_RDNA4}
 
 @functools.cache
 def get_types(op) -> tuple[str|None, str|None, str|None, str|None]:
   """Get (d0_dtype, s0_dtype, s1_dtype, s2_dtype) from pcode for an opcode."""
-  from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
   pcode = PCODE.get(op)
   if pcode is None: return (None, None, None, None)
   def get_dtype(name: str) -> str | None:
