@@ -142,8 +142,8 @@ class TestBranch(unittest.TestCase):
     """S_CBRANCH_VCCNZ should only check VCC_LO in wave32."""
     instructions = [
       # Set VCC_LO = 0, VCC_HI = 1
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),
-      s_mov_b32(s[SrcEnum.VCC_HI - 128], 1),
+      s_mov_b32(VCC_LO, 0),
+      s_mov_b32(VCC_HI, 1),
       v_mov_b32_e32(v[0], 0),
       # If VCC_HI is incorrectly used, branch will be taken
       s_cbranch_vccnz(1),  # Skip next instruction if VCC != 0
@@ -156,8 +156,8 @@ class TestBranch(unittest.TestCase):
     """S_CBRANCH_VCCZ should only check VCC_LO in wave32."""
     instructions = [
       # Set VCC_LO = 1, VCC_HI = 0
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),
-      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0),
+      s_mov_b32(VCC_LO, 1),
+      s_mov_b32(VCC_HI, 0),
       v_mov_b32_e32(v[0], 0),
       # If VCC_HI is incorrectly used, branch will be taken
       s_cbranch_vccz(1),  # Skip next instruction if VCC == 0
@@ -169,7 +169,7 @@ class TestBranch(unittest.TestCase):
   def test_cbranch_vccnz_branches_on_vcc_lo(self):
     """S_CBRANCH_VCCNZ branches when VCC_LO is non-zero."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),
+      s_mov_b32(VCC_LO, 1),
       v_mov_b32_e32(v[0], 0),
       s_cbranch_vccnz(1),  # Skip next instruction if VCC != 0
       v_mov_b32_e32(v[0], 42),  # This should be skipped

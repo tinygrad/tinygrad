@@ -39,20 +39,20 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
     prologue.append(v_mov_b32_e32(v[i], 0))
   for i in range(N_SGPRS):
     prologue.append(s_mov_b32(s[i], 0))
-  prologue.append(s_mov_b32(s[SrcEnum.VCC_LO - 128], 0))
+  prologue.append(s_mov_b32(VCC_LO, 0))
 
   epilogue = [
-    s_mov_b32(s[90], SrcEnum.VCC_LO),
+    s_mov_b32(s[90], VCC_LO),
     s_cselect_b32(s[91], 1, 0),
-    s_load_b64(s[92:93], s[80], 0, soffset=SrcEnum.NULL),
-    s_waitcnt(lgkmcnt=0),
+    s_load_b64(s[92:93], s[80], 0, soffset=NULL),
+    s_waitcnt(0),  # simm16=0 waits for all
     v_lshlrev_b32_e32(v[240], 2, v[255]),
   ]
   for i in range(N_VGPRS):
     epilogue.append(global_store_b32(addr=v[240], data=v[i], saddr=s[92], offset=i * WAVE_SIZE * 4))
   epilogue.append(v_mov_b32_e32(v[241], 0))
   epilogue.append(v_cmp_eq_u32_e32(v[255], v[241]))
-  epilogue.append(s_and_saveexec_b32(s[94], SrcEnum.VCC_LO))
+  epilogue.append(s_and_saveexec_b32(s[94], VCC_LO))
   epilogue.append(v_mov_b32_e32(v[240], 0))
   for i in range(N_SGPRS):
     epilogue.append(v_mov_b32_e32(v[243], s[i]))
@@ -61,7 +61,7 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
   epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92], offset=VGPR_BYTES + SGPR_BYTES))
   epilogue.append(v_mov_b32_e32(v[243], s[91]))
   epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92], offset=VGPR_BYTES + SGPR_BYTES + 4))
-  epilogue.append(s_mov_b32(s[SrcEnum.EXEC_LO - 128], s[94]))
+  epilogue.append(s_mov_b32(EXEC_LO, s[94]))
   epilogue.append(s_endpgm())
   return prologue, epilogue
 

@@ -62,22 +62,26 @@ v = src[256:511]         # VGPR0-255
 # ══════════════════════════════════════════════════════════════
 
 class BitField:
-  def __init__(self, hi: int, lo: int):
-    self.hi, self.lo = hi, lo
+  def __init__(self, hi: int, lo: int, default: int | None = None):
+    self.hi, self.lo, self.default = hi, lo, default
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
-  def encode(self, val) -> int: return val
+  def encode(self, val) -> int:
+    assert isinstance(val, int), f"BitField.encode expects int, got {type(val).__name__}"
+    return val
   def decode(self, val): return val
   def set(self, raw: int, val) -> int:
+    if val is None:
+      if self.default is None: raise RuntimeError("no value provided and no default set")
+      val = self.default
     encoded = self.encode(val)
     if encoded < 0 or encoded > self.mask(): raise RuntimeError(f"value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
     return (raw & ~(self.mask() << self.lo)) | (encoded << self.lo)
   def get(self, raw: int): return self.decode((raw >> self.lo) & self.mask())
 
 class FixedBitField(BitField):
-  def __init__(self, hi: int, lo: int, val: int):
-    super().__init__(hi, lo)
-    self.val = val
-  def set(self, raw: int, val=None) -> int: return super().set(raw, self.val)
+  def set(self, raw: int, val=None) -> int:
+    assert val is None, f"FixedBitField does not accept values, got {val}"
+    return super().set(raw, self.default)
 
 class EnumBitField(BitField):
   def __init__(self, hi: int, lo: int, enum_cls):
@@ -103,6 +107,9 @@ class SignedBitField(BitField):
 # Typed fields
 # ══════════════════════════════════════════════════════════════
 
+import struct
+def _f32(f: float) -> int: return struct.unpack('I', struct.pack('f', f))[0]
+
 class SrcField(BitField):
   _valid_range = (0, 511)  # inclusive
   _FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
@@ -114,14 +121,14 @@ class SrcField(BitField):
     if actual_size != expected_size:
       raise RuntimeError(f"{self.__class__.__name__}: field size {hi - lo + 1} bits ({actual_size}) doesn't match range {self._valid_range} ({expected_size})")
 
-  def encode(self, val):
+  def encode(self, val) -> int:
+    """Encode value. Returns 255 (literal marker) for out-of-range values."""
     if isinstance(val, Reg): offset = val.offset
-    elif isinstance(val, float):
-      if val not in self._FLOAT_ENC: raise RuntimeError(f"unsupported float constant {val}")
-      offset = self._FLOAT_ENC[val]
+    elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255)
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
     elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
-    else: raise RuntimeError(f"invalid value {val}")
+    elif isinstance(val, int): offset = 255  # literal
+    else: raise RuntimeError(f"invalid src value {val}")
     if not (self._valid_range[0] <= offset <= self._valid_range[1]):
       raise RuntimeError(f"{self.__class__.__name__}: {val} (offset {offset}) out of range {self._valid_range}")
     return offset - self._valid_range[0]
@@ -131,6 +138,24 @@ class SrcField(BitField):
 class VGPRField(SrcField): _valid_range = (256, 511)
 class SGPRField(SrcField): _valid_range = (0, 127)
 class SSrcField(SrcField): _valid_range = (0, 255)
+
+class SBaseField(BitField):
+  """SMEM sbase field: encoded = sgpr_index // 2. Must be even-aligned SGPR."""
+  def encode(self, val):
+    if not isinstance(val, Reg): raise RuntimeError(f"SBaseField requires Reg, got {type(val).__name__}")
+    if not (0 <= val.offset < 128): raise RuntimeError(f"SBaseField requires SGPR, got offset {val.offset}")
+    if val.offset & 1: raise RuntimeError(f"SBaseField requires even SGPR index, got s[{val.offset}]")
+    return val.offset >> 1
+  def decode(self, raw): return src[raw << 1]
+
+class SRsrcField(BitField):
+  """MIMG/MUBUF srsrc/ssamp field: encoded = sgpr_index // 4. Must be 4-aligned SGPR."""
+  def encode(self, val):
+    if not isinstance(val, Reg): raise RuntimeError(f"SRsrcField requires Reg, got {type(val).__name__}")
+    if not (0 <= val.offset < 128): raise RuntimeError(f"SRsrcField requires SGPR, got offset {val.offset}")
+    if val.offset & 3: raise RuntimeError(f"SRsrcField requires 4-aligned SGPR index, got s[{val.offset}]")
+    return val.offset >> 2
+  def decode(self, raw): return src[raw << 2]
 
 class VDSTYField(BitField):
   """VOPD vdsty: encoded = vgpr_idx >> 1. Only even VGPRs allowed (vdstx determines LSB)."""
@@ -156,23 +181,39 @@ class Inst:
 
   def __init__(self, *args, **kwargs):
     self._raw = 0
+    self._literal: int | None = None
     args_iter = iter(args)
     for name, field in self._fields:
       if isinstance(field, FixedBitField): val = None
       elif name in kwargs: val = kwargs[name]
       else: val = next(args_iter, None)
       self._raw = field.set(self._raw, val)
+      # Capture literal for SrcFields that encoded to 255
+      if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
+        self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
 
   def __getitem__(self, name: str):
     field = next(f for n, f in self._fields if n == name)
     return field.get(self._raw)
 
-  def to_bytes(self) -> bytes: return self._raw.to_bytes(self._size, 'little')
+  def size(self) -> int: return self._size + (4 if self._literal is not None else 0)
+
+  def to_bytes(self) -> bytes:
+    result = self._raw.to_bytes(self._size, 'little')
+    if self._literal is not None:
+      result += (self._literal & 0xFFFFFFFF).to_bytes(4, 'little')
+    return result
 
   @classmethod
   def from_bytes(cls, data: bytes):
     inst = object.__new__(cls)
     inst._raw = int.from_bytes(data[:cls._size], 'little')
+    inst._literal = None
+    for name, field in cls._fields:
+      if isinstance(field, SrcField) and field.get(inst._raw).offset == 255:
+        assert len(data) >= cls._size + 4, f"literal marker found but data too short: {len(data)} < {cls._size + 4}"
+        inst._literal = int.from_bytes(data[cls._size:cls._size + 4], 'little')
+        break
     return inst
 
   def __repr__(self):

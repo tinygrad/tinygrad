@@ -206,6 +206,10 @@ def write_enums(enums: dict[str, dict[int, str]], arch: str, path: str):
 
 def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[str, str], enums: dict[str, dict[int, str]], arch: str, path: str):
   """Write ins.py file from extracted formats and enums."""
+  # Flag fields that default to 0
+  FLAG_FIELDS = {'glc', 'dlc', 'slc', 'tfe', 'sve', 'gds', 'done', 'row', 'clmp', 'omod',
+                 'neg', 'neg_hi', 'abs', 'opsel', 'opsel_hi', 'opsel_hi2', 'fi', 'bc',
+                 'src0_neg', 'src0_abs', 'src1_neg', 'src1_abs', 'a16', 'd16', 'r128', 'lwe', 'unrm'}
   # Field types and ordering
   def field_def(name, hi, lo, fmt):
     """Generate field definition string for dsl2."""
@@ -214,10 +218,13 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
     if name in ('opx', 'opy'): return f"EnumBitField({hi}, {lo}, VOPDOp)"
     if name == 'vdsty': return f"VDSTYField({hi}, {lo})"
     if name in ('vdst', 'vsrc1', 'vaddr', 'vdata', 'data', 'data0', 'data1', 'addr', 'vsrc0', 'vsrc2', 'vsrc3') and bits == 8: return f"VGPRField({hi}, {lo})"
-    if name in ('sdst', 'sbase', 'sdata', 'srsrc', 'ssamp') and bits == 7: return f"SGPRField({hi}, {lo})"
+    if name == 'sbase' and bits == 6: return f"SBaseField({hi}, {lo})"
+    if name in ('srsrc', 'ssamp') and bits == 5: return f"SRsrcField({hi}, {lo})"
+    if name in ('sdst', 'sdata', 'soffset', 'saddr') and bits == 7: return f"SGPRField({hi}, {lo})"
     if (name.startswith('ssrc') or name in ('saddr', 'soffset')) and bits == 8: return f"SSrcField({hi}, {lo})"
     if (name in ('src0', 'srcx0', 'srcy0') or name.startswith('src') and name[3:].isdigit()) and bits == 9: return f"SrcField({hi}, {lo})"
     if name.startswith('simm'): return f"SignedBitField({hi}, {lo})"
+    if name in FLAG_FIELDS: return f"BitField({hi}, {lo}, default=0)"
     return f"BitField({hi}, {lo})"
   field_priority = ['encoding', 'op', 'opx', 'opy', 'vdst', 'vdstx', 'vdsty', 'sdst', 'vdata', 'sdata', 'addr', 'vaddr', 'data', 'data0', 'data1',
                     'src0', 'srcx0', 'srcy0', 'vsrc0', 'ssrc0', 'src1', 'vsrc1', 'vsrcx1', 'vsrcy1', 'ssrc1', 'src2', 'vsrc2', 'src3', 'vsrc3',
@@ -233,22 +240,32 @@ def write_ins(formats: dict[str, list[tuple[str, int, int]]], encodings: dict[st
            "from extra.assembly.amd.dsl2 import *",
            f"from extra.assembly.amd.autogen.{arch}.enum import *", "import functools", ""]
   for fmt_name, fields in sorted(formats.items()):
-    lines.append(f"class {fmt_name}(Inst):")
-    for name, hi, lo in sort_fields(fields):
-      if name == 'encoding' and fmt_name in encodings: lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings[fmt_name]})")
-      else: lines.append(f"  {name} = {field_def(name, hi, lo, fmt_name)}")
-    lines.append("")
+    # FLAT generates FLAT/GLOBAL/SCRATCH classes with fixed seg values
+    if fmt_name == 'FLAT':
+      for cls_name, seg_val, op_enum in [('FLAT', 0, 'FLATOp'), ('GLOBAL', 2, 'GLOBALOp'), ('SCRATCH', 1, 'SCRATCHOp')]:
+        lines.append(f"class {cls_name}(Inst):")
+        for name, hi, lo in sort_fields(fields):
+          if name == 'encoding': lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings['FLAT']})")
+          elif name == 'seg': lines.append(f"  seg = FixedBitField({hi}, {lo}, {seg_val})")
+          elif name == 'op': lines.append(f"  op = EnumBitField({hi}, {lo}, {op_enum})")
+          else: lines.append(f"  {name} = {field_def(name, hi, lo, 'FLAT')}")
+        lines.append("")
+    else:
+      lines.append(f"class {fmt_name}(Inst):")
+      for name, hi, lo in sort_fields(fields):
+        if name == 'encoding' and fmt_name in encodings: lines.append(f"  encoding = FixedBitField({hi}, {lo}, 0b{encodings[fmt_name]})")
+        else: lines.append(f"  {name} = {field_def(name, hi, lo, fmt_name)}")
+      lines.append("")
 
   # Generate instruction helpers
   lines.append("# instruction helpers")
   for fmt_name, ops in sorted(enums.items()):
-    seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=1"}.get(fmt_name, "")
-    tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt_name, f"{fmt_name}, {fmt_name}Op")
+    tgt = f"{fmt_name}, {fmt_name}Op"
     member_suffix = "_E32" if fmt_name in ("VOP1", "VOP2", "VOPC") else "_E64" if fmt_name == "VOP3" else ""
     if fmt_name in formats or fmt_name in ("GLOBAL", "SCRATCH"):
       for op_val, name in sorted(ops.items()):
         msuf = member_suffix if fmt_name != "VOP3" or op_val < 512 else ""
-        lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({tgt}.{name}{msuf}{seg})")
+        lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({tgt}.{name}{msuf})")
 
   with open(path, "w") as f:
     f.write("\n".join(lines))
