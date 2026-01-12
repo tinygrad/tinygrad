@@ -4,7 +4,7 @@
 # Registers - unified src encoding space (0-511)
 # ══════════════════════════════════════════════════════════════
 
-def _reg_size(t: str | None) -> int: return 4 if t == 'b128' else 2 if t in ('f64', 'u64', 'i64', 'b64') else 1
+def _reg_size(t: str | None) -> int: return {'b64': 2, 'f64': 2, 'u64': 2, 'i64': 2, 'b128': 4}.get(t, 1)
 
 class Reg:
   _NAMES = {106: "VCC_LO", 107: "VCC_HI", 124: "NULL", 125: "M0", 126: "EXEC_LO", 127: "EXEC_HI",
@@ -203,8 +203,8 @@ from extra.assembly.amd.autogen.cdna.str_pcode import PCODE as PCODE_CDNA
 PCODE = {**PCODE_CDNA, **PCODE_RDNA3, **PCODE_RDNA4}
 
 @functools.cache
-def get_types(op) -> tuple[str|None, str|None, str|None, str|None]:
-  """Get (d0_dtype, s0_dtype, s1_dtype, s2_dtype) from pcode for an opcode."""
+def _get_types(op) -> tuple[str|None, str|None, str|None, str|None]:
+  """Get (d0_dtype, s0_dtype, s1_dtype, s2_dtype) from pcode for an opcode. Use inst.types instead."""
   pcode = PCODE.get(op)
   if pcode is None: return (None, None, None, None)
   def get_dtype(name: str) -> str | None:
@@ -275,7 +275,7 @@ class Inst:
   @property
   def types(self) -> tuple[str|None, str|None, str|None, str|None]:
     if not hasattr(self, 'op'): return (None, None, None, None)
-    return get_types(self.op)
+    return _get_types(self.op)
   @property
   def _field_sizes(self) -> dict[str, int]:
     """Map field names to expected register sizes based on instruction types."""
