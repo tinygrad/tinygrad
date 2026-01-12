@@ -133,16 +133,14 @@ HOP_LENGTH = 160
 N_MELS = 80
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=RATE) -> np.ndarray:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
                      Used to prevent JIT mismatch errors since the encoder does not accept symbolic shapes
   :param truncate: If true, truncates (or pads) audio to exactly 30s for a single encoder pass
-  :param sr: Sample rate of all waveforms. Waveforms will be resampled to 16000Hz if different.
   :return: mel spectrogram of the given waveforms
   """
-  assert sr == RATE, f"waveforms must be resampled to {RATE}, got {sr}"
   waveforms = [Tensor(wv).flatten() for wv in waveforms]
   max_len = max(len(wav) for wav in waveforms)
   waveforms = Tensor.cat(*[wv.pad_to((max_len, ))[None] for wv in waveforms])
