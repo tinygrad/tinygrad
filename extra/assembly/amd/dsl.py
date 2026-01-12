@@ -70,6 +70,7 @@ EXEC_HI = src[127]
 EXEC = src[126:127]
 # 128: 0, 129-192: integers 1-64, 193-208: integers -1 to -16
 # 240-248: float constants (0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 4.0, -4.0, 1/(2*PI))
+INV_2PI = src[248]
 DPP16 = src[250]
 SCC = src[253]
 # 255: literal constant

@@ -347,7 +347,7 @@ class TestCndmask(unittest.TestCase):
   def test_v_cndmask_b16_select_src0(self):
     """V_CNDMASK_B16 selects src0 when VCC bit is 0."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC = 0
+      s_mov_b32(VCC_LO, 0),  # VCC = 0
       s_mov_b32(s[0], 0x3c00),  # f16 1.0
       s_mov_b32(s[1], 0x4000),  # f16 2.0
       v_mov_b32_e32(v[0], s[0]),
@@ -361,7 +361,7 @@ class TestCndmask(unittest.TestCase):
   def test_v_cndmask_b16_select_src1(self):
     """V_CNDMASK_B16 selects src1 when VCC bit is 1."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC = 1
+      s_mov_b32(VCC_LO, 1),  # VCC = 1
       s_mov_b32(s[0], 0x3c00),  # f16 1.0
       s_mov_b32(s[1], 0x4000),  # f16 2.0
       v_mov_b32_e32(v[0], s[0]),
@@ -381,7 +381,7 @@ class TestCndmask(unittest.TestCase):
       v_mov_b32_e32(v[1], s[1]),
       s_mov_b32(s[2], 0xDEAD0000),  # v2 initial: hi=0xDEAD, lo=0
       v_mov_b32_e32(v[2], s[2]),
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # vcc = 0, select src0
+      s_mov_b32(VCC_LO, 0),  # vcc = 0, select src0
       # opsel=0b1011: bit0=src0 hi, bit1=src1 hi, bit3=dst hi
       VOP3(VOP3Op.V_CNDMASK_B16, vdst=v[2], src0=v[0], src1=v[1], src2=SrcEnum.VCC_LO, opsel=0b1011),
     ]

@@ -19,6 +19,14 @@ class SrcEnum:
   EXEC_HI = EXEC_HI
   SCC = SCC
   M0 = M0
+  POS_HALF = 0.5
+  NEG_HALF = -0.5
+  POS_ONE = 1.0
+  NEG_ONE = -1.0
+  POS_TWO = 2.0
+  NEG_TWO = -2.0
+  POS_FOUR = 4.0
+  NEG_FOUR = -4.0
 
 VCC = VCC_LO  # For VOP3SD sdst field (VCC_LO is exported from dsl)
 USE_HW = os.environ.get("USE_HW", "0") == "1"

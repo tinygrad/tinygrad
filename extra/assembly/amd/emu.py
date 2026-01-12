@@ -214,7 +214,7 @@ class WaveState:
   def rsrc64(self, reg, lane: int, literal: int = 0) -> int:
     v = reg.offset if hasattr(reg, 'offset') else reg
     if 128 <= v < 255: return _INLINE_CONSTS_F64[v - 128]
-    if v == 255: return literal  # literal is already shifted in from_bytes for 64-bit ops
+    if v == 255: return literal << 32  # 32-bit literal forms upper 32 bits of 64-bit value
     return self.rsrc(v, lane, literal) | ((self.rsrc(v+1, lane, literal) if v < VCC_LO.offset or 256 <= v <= 511 else 0) << 32)
 
   def pend_sgpr_lane(self, reg, lane: int, val: int):
