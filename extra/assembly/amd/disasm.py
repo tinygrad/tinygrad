@@ -242,17 +242,16 @@ def _disasm_vop2(inst: VOP2) -> str:
   if cdna: name = _CDNA_DISASM_ALIASES.get(name, name)  # apply CDNA aliases
   suf = "" if cdna or name.endswith('_e32') or (not cdna and inst.op == VOP2Op.V_DOT2ACC_F32_F16_E32) else "_e32"
   lit = getattr(inst, '_literal', None)
-  # v_dot2acc_f32_f16 has f32 output and packed f16 inputs - not 16-bit format
-  is16 = not cdna and _is_16bit(inst) and 'dot2acc' not in name
+  # Use pcode types for 16-bit and register size detection
+  dst_type, src0_type, src1_type = inst.types[0], inst.types[1], inst.types[2]
+  is16 = not cdna and dst_type in ('f16', 'u16', 'i16', 'b16')
   # fmaak/madak: dst = src0 * vsrc1 + K, fmamk/madmk: dst = src0 * K + vsrc1
-  # Note: For these instructions, K is always present in the encoding but from_bytes may not read it
-  # if src0 is not 255 (literal marker). Skip disasm if lit is None (decoder bug workaround).
   if 'fmaak' in name or 'madak' in name or (not cdna and inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAAK_F16_E32)):
-    if lit is None: return f"op_{inst.op.value if hasattr(inst.op, 'value') else inst.op}"  # can't disasm without literal
+    if lit is None: return f"op_{inst.op.value if hasattr(inst.op, 'value') else inst.op}"
     if is16: return f"{name}{suf} {_fmt_v16(inst.vdst)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1)}, 0x{lit:x}"
     return f"{name}{suf} {_vreg(inst.vdst)}, {_lit(inst, inst.src0)}, {_vreg(inst.vsrc1)}, 0x{lit:x}"
   if 'fmamk' in name or 'madmk' in name or (not cdna and inst.op in (VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAMK_F16_E32)):
-    if lit is None: return f"op_{inst.op.value if hasattr(inst.op, 'value') else inst.op}"  # can't disasm without literal
+    if lit is None: return f"op_{inst.op.value if hasattr(inst.op, 'value') else inst.op}"
     if is16: return f"{name}{suf} {_fmt_v16(inst.vdst)}, {_src16(inst, inst.src0)}, 0x{lit:x}, {_fmt_v16(inst.vsrc1)}"
     return f"{name}{suf} {_vreg(inst.vdst)}, {_lit(inst, inst.src0)}, 0x{lit:x}, {_vreg(inst.vsrc1)}"
   if is16: return f"{name}{suf} {_fmt_v16(inst.vdst)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1)}"
@@ -260,38 +259,36 @@ def _disasm_vop2(inst: VOP2) -> str:
   # CDNA carry ops output vcc after vdst
   if cdna and name in _VOP2_CARRY_OUT: return f"{name}{suf} {_vreg(inst.vdst)}, {vcc}, {_lit(inst, inst.src0)}, {_vreg(inst.vsrc1)}"
   if cdna and name in _VOP2_CARRY_INOUT: return f"{name}{suf} {_vreg(inst.vdst)}, {vcc}, {_lit(inst, inst.src0)}, {_vreg(inst.vsrc1)}, {vcc}"
-  # RDNA carry-in/out ops: v_add_co_ci_u32, etc. - format: vdst, vcc_lo, src0, vsrc1, vcc_lo
+  # RDNA carry-in/out ops: v_add_co_ci_u32, etc.
   if not cdna and name in _VOP2_CARRY_INOUT_RDNA: return f"{name}{suf} {_vreg(inst.vdst)}, {vcc}, {_lit(inst, inst.src0)}, {_vreg(inst.vsrc1)}, {vcc}"
-  # Handle 64-bit register operands (v_add_f64, v_mul_f64, v_lshlrev_b64, etc.)
-  n_up = name.upper()
-  is_64_op = '_F64' in n_up or '_B64' in n_up or '_I64' in n_up or '_U64' in n_up
-  is_shift_64 = 'LSHLREV_B64' in n_up or 'LSHRREV_B64' in n_up or 'ASHRREV_I64' in n_up  # shift ops have 32-bit src0
-  dn = 2 if is_64_op else inst.dst_regs()
-  sn0 = 1 if is_shift_64 else (2 if is_64_op else inst.src_regs(0))
-  sn1 = 2 if is_64_op else inst.src_regs(1)
+  # Use pcode types for register sizes - pcode is complete for all VOP2 ops
+  dn, sn0, sn1 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1)
   if dn > 1 or sn0 > 1 or sn1 > 1:
-    dst = _vreg(inst.vdst, dn) if dn > 1 else _vreg(inst.vdst)
+    dst = _vreg(inst.vdst, dn)
     src0 = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else _fmt_src(inst.src0, sn0, cdna)
-    src1 = _vreg(inst.vsrc1, sn1) if sn1 > 1 else _vreg(inst.vsrc1)
-    base_name = name.replace('_e32', '').replace('_E32', '')
-    return f"{base_name} {dst}, {src0}, {src1}"
+    src1 = _vreg(inst.vsrc1, sn1)
+    return f"{name.replace('_e32', '')} {dst}, {src0}, {src1}"
   return f"{name}{suf} {_vreg(inst.vdst)}, {_lit(inst, inst.src0)}, {_vreg(inst.vsrc1)}" + (f", {vcc}" if name == 'v_cndmask_b32' else "")
 
 def _disasm_vopc(inst: VOPC) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
-  # Derive operand size from name: f64/i64/u64 = 2 regs, f16/i16/u16 = 16-bit
-  is_64 = '_f64' in name or '_i64' in name or '_u64' in name
-  is_class = '_class_' in name  # v_cmp_class_* has 64-bit src0 but 32-bit class mask src1
-  r0 = 2 if is_64 else inst.src_regs(0)
-  r1 = 1 if is_class else (2 if is_64 else inst.src_regs(1))
+  # Use pcode types for register sizes
+  src0_type, src1_type = inst.types[1], inst.types[2]
+  r0, r1 = inst.src_regs(0), inst.src_regs(1)
+  n_up = name.upper()
+  # Fallback for 64-bit ops with incomplete pcode (e.g., V_CMP_T_F64 has all None types)
+  if r0 == 1 and src0_type is None and ('_F64' in n_up or '_I64' in n_up or '_U64' in n_up):
+    r0, r1 = 2, 2
+  # 16-bit detection: use pcode type, with name-based fallback for ops with None types (e.g., V_CMP_T_F16)
+  is16 = src0_type in ('f16', 'u16', 'i16', 'b16') or (src0_type is None and _is_16bit(inst))
   if cdna:
     s0 = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else _fmt_src(inst.src0, r0, cdna)
     s1 = _vreg(inst.vsrc1, r1) if r1 > 1 else _vreg(inst.vsrc1)
     return f"{name} vcc, {s0}, {s1}"  # CDNA VOPC always outputs vcc
   # RDNA: v_cmpx_* writes to exec (no vcc), v_cmp_* writes to vcc_lo
   has_vcc = 'cmpx' not in name
-  s0 = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else _fmt_src(inst.src0, r0) if r0 > 1 else _src16(inst, _unwrap(inst.src0)) if _is_16bit(inst) else _lit(inst, inst.src0)
-  s1 = _vreg(inst.vsrc1, r1) if r1 > 1 else _fmt_v16(inst.vsrc1) if _is_16bit(inst) else _vreg(inst.vsrc1)
+  s0 = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else _fmt_src(inst.src0, r0) if r0 > 1 else _src16(inst, _unwrap(inst.src0)) if is16 else _lit(inst, inst.src0)
+  s1 = _vreg(inst.vsrc1, r1) if r1 > 1 else _fmt_v16(inst.vsrc1) if is16 else _vreg(inst.vsrc1)
   suf = "" if name.endswith('_e32') else "_e32"
   return f"{name}{suf} vcc_lo, {s0}, {s1}" if has_vcc else f"{name}{suf} {s0}, {s1}"
 
@@ -517,23 +514,15 @@ def _disasm_vop3(inst: VOP3) -> str:
 
 def _disasm_vop3sd(inst: VOP3SD) -> str:
   name = inst.op_name.lower()
-  # Determine register widths for VOP3SD ops
-  is_f64 = '_f64' in name
-  is_mad64 = 'mad' in name and '64' in name
+  # Use pcode types for register sizes
+  dn, sr0, sr1, sr2 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
   def src(v, neg, n):
     v = _unwrap(v)
     s = _lit(inst, v) if v == 255 else ("src_scc" if v == 253 else (_fmt_src(v, n) if n > 1 else _lit(inst, v)))
     return f"neg({s})" if neg and v == 255 else (f"-{s}" if neg else s)
-  # v_div_scale_f64: all 3 sources are 64-bit; v_mad_*64*: src0/src1=32-bit, src2=64-bit
-  sr0 = 2 if is_f64 else inst.src_regs(0)
-  sr1 = 2 if is_f64 else inst.src_regs(1)
-  sr2 = 2 if is_f64 or is_mad64 else inst.src_regs(2)
   s0, s1, s2 = src(inst.src0, inst.neg & 1, sr0), src(inst.src1, inst.neg & 2, sr1), src(inst.src2, inst.neg & 4, sr2)
-  # v_div_scale_f64 and v_mad_*64* have 64-bit dst
-  dn = 2 if is_f64 or is_mad64 else inst.dst_regs()
-  dst = _vreg(inst.vdst, dn) if dn > 1 else _vreg(inst.vdst)
+  dst = _vreg(inst.vdst, dn)
   # VOP3SD: _co_ ops (add/sub) without _ci_ have only 2 sources, all others (mad, div_scale, _co_ci_) have 3 sources
-  # Note: v_mad_co_u64_u32 has _co_ but is a mad with 3 sources (plus 64-bit accumulator)
   has_only_two_srcs = '_co_' in name and '_ci_' not in name and 'mad' not in name
   srcs = f"{s0}, {s1}" if has_only_two_srcs else f"{s0}, {s1}, {s2}"
   clamp = getattr(inst, 'cm', None) or getattr(inst, 'clmp', 0)
@@ -674,41 +663,31 @@ def _disasm_sop1(inst: SOP1) -> str:
   if inst.op_name in sop1_src_only: return f"{name} {src}"
   return f"{name} {_fmt_sdst(inst.sdst, dst_regs, cdna)}, {src}"
 
-def _sop2_regs(op_name: str, inst_dst: int, inst_s0: int, inst_s1: int) -> tuple[int, int, int]:
-  """Determine dst, s0, s1 register counts for SOP2."""
-  # BFM: s_bfm_b64 has 64-bit dst, 32-bit sources (width and offset)
-  if 'BFM' in op_name and op_name.endswith('_B64'): return 2, 1, 1
-  # Most _B64/_U64/_I64 ops: all operands are 64-bit
-  if op_name.endswith('_B64') or op_name.endswith('_U64') or op_name.endswith('_I64'):
-    # LSHL/LSHR/ASHR: dst and s0 are 64-bit, s1 (shift amount) is 32-bit
-    if 'LSHL' in op_name or 'LSHR' in op_name or 'ASHR' in op_name: return 2, 2, 1
-    # BFE: dst is 64-bit, s0 is 64-bit, s1 (offset/width) is 32-bit
-    if 'BFE' in op_name: return 2, 2, 1
-    return 2, 2, 2
-  return inst_dst, inst_s0, inst_s1
-
 def _disasm_sop2(inst: SOP2) -> str:
   cdna, name = _is_cdna(inst), inst.op_name.lower()
   lit = getattr(inst, '_literal', None)
-  dst_regs, s0_regs, s1_regs = _sop2_regs(inst.op_name, inst.dst_regs(), inst.src_regs(0), inst.src_regs(1))
-  s0 = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, s0_regs, cdna)
-  s1 = _lit(inst, inst.ssrc1) if _unwrap(inst.ssrc1) == 255 else _fmt_src(inst.ssrc1, s1_regs, cdna)
-  dst = _fmt_sdst(inst.sdst, dst_regs, cdna)
+  # Use pcode types for register sizes
+  dn, s0n, s1n = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1)
+  # Fallback for ops with incomplete pcode (src1 is often None for shift/bfe/bfm ops)
+  n_up = inst.op_name
+  if s0n == 1 and inst.types[1] is None and (n_up.endswith('_B64') or n_up.endswith('_U64') or n_up.endswith('_I64')):
+    # BFM: both sources are 32-bit (width, offset)
+    if 'BFM' in n_up: s0n, s1n = 1, 1
+    else: s0n = 2  # Most 64-bit ops have 64-bit src0
+  if s1n == 1 and inst.types[2] is None and (n_up.endswith('_B64') or n_up.endswith('_U64') or n_up.endswith('_I64')):
+    # LSHL/LSHR/ASHR/BFE: src1 is 32-bit shift amount or offset/width
+    if not ('LSHL' in n_up or 'LSHR' in n_up or 'ASHR' in n_up or 'BFE' in n_up or 'BFM' in n_up):
+      s1n = 2  # Other 64-bit ops have 64-bit src1
+  s0 = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, s0n, cdna)
+  s1 = _lit(inst, inst.ssrc1) if _unwrap(inst.ssrc1) == 255 else _fmt_src(inst.ssrc1, s1n, cdna)
+  dst = _fmt_sdst(inst.sdst, dn, cdna)
   if 'fmamk' in name and lit is not None: return f"{name} {dst}, {s0}, 0x{lit:x}, {s1}"
   if 'fmaak' in name and lit is not None: return f"{name} {dst}, {s0}, {s1}, 0x{lit:x}"
   return f"{name} {dst}, {s0}, {s1}"
 
-def _sopc_regs(op_name: str, inst_s0: int, inst_s1: int) -> tuple[int, int]:
-  """Determine src0, src1 register counts for SOPC."""
-  # _U64 ops: both sources are 64-bit (e.g. s_cmp_eq_u64)
-  if op_name.endswith('_U64'): return 2, 2
-  # BITCMP with _B64: s0 is 64-bit, s1 (bit index) is 32-bit
-  if ('BITCMP0' in op_name or 'BITCMP1' in op_name) and '_B64' in op_name: return 2, 1
-  return inst_s0, inst_s1
-
 def _disasm_sopc(inst: SOPC) -> str:
   cdna = _is_cdna(inst)
-  s0_regs, s1_regs = _sopc_regs(inst.op_name, inst.src_regs(0), inst.src_regs(1))
+  s0_regs, s1_regs = inst.src_regs(0), inst.src_regs(1)  # pcode types are complete for all SOPC ops
   s0 = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, s0_regs, cdna)
   s1 = _lit(inst, inst.ssrc1) if _unwrap(inst.ssrc1) == 255 else _fmt_src(inst.ssrc1, s1_regs, cdna)
   return f"{inst.op_name.lower()} {s0}, {s1}"
@@ -731,9 +710,7 @@ def _disasm_sopk(inst: SOPK) -> str:
     return f"{name} {hs}, {_fmt_sdst(inst.sdst, 1, cdna)}" if 'setreg' in name else f"{name} {_fmt_sdst(inst.sdst, 1, cdna)}, {hs}"
   if name in ('s_subvector_loop_begin', 's_subvector_loop_end'):
     return f"{name} {_fmt_sdst(inst.sdst, 1)}, 0x{inst.simm16:x}"
-  # Handle _B64 suffix for dst register count
-  dst_regs = 2 if inst.op_name.endswith('_B64') else inst.dst_regs()
-  return f"{name} {_fmt_sdst(inst.sdst, dst_regs, cdna)}, 0x{inst.simm16:x}"
+  return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs(), cdna)}, 0x{inst.simm16:x}"  # pcode types are complete for SOPK
 
 def _disasm_vinterp(inst: VINTERP) -> str:
   mods = _mods((inst.waitexp, f"wait_exp:{inst.waitexp}"), (inst.clmp, "clamp"))
