@@ -256,6 +256,11 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
+  def test_allreduce_all2all(self):
+    with Context(ALL2ALL=2):
+      a,b = _test_allreduce(Tensor.rand(256, 256))
+      np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
+
   def test_copy_jit(self):
     @TinyJit
     def copy_tensor(x:Tensor): return (x.to(f"{x.device.split(':')[0]}:1") + 1)
@@ -535,6 +540,37 @@ class TestMultiTensor(unittest.TestCase):
       r = jf()
       np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
     assert len(jf.jit_cache) > 0
+
+  def test_multitensor_jit_in_list(self):
+    # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
+    @TinyJit
+    def f(a, arr): return (a + arr[0]).realize()
+    for i in range(5):
+      a = Tensor.full((4,), i).contiguous().realize().shard(devices_2, 0).realize()
+      b = Tensor.ones(4).contiguous().realize().shard(devices_2, 0).realize()
+      out = f(a, [b])
+      np.testing.assert_allclose(out.numpy(), np.full(4, i) + np.ones(4), atol=1e-4, rtol=1e-5)
+
+  def test_multitensor_jit_multiple_inputs(self):
+    # test multiple MULTI tensors as inputs - each gets unpacked to component UOps
+    @TinyJit
+    def f(a, b, c): return (a + b + c).realize()
+    for i in range(5):
+      a = Tensor.full((4,), i).contiguous().realize().shard(devices_2, 0).realize()
+      b = Tensor.full((4,), i*2).contiguous().realize().shard(devices_2, 0).realize()
+      c = Tensor.ones(4).contiguous().realize().shard(devices_2, 0).realize()
+      out = f(a, b, c)
+      np.testing.assert_allclose(out.numpy(), np.full(4, i) + np.full(4, i*2) + np.ones(4), atol=1e-4, rtol=1e-5)
+
+  def test_multitensor_jit_different_sharding(self):
+    # test MULTI tensors with different sharding - one sharded on axis 0, one broadcast (axis=None)
+    @TinyJit
+    def f(a, b): return (a + b).realize()
+    for i in range(5):
+      a = Tensor.full((4, 4), i).contiguous().realize().shard(devices_2, 0).realize()
+      b = Tensor.full((4, 4), i*2).contiguous().realize().shard(devices_2, None).realize()
+      out = f(a, b)
+      np.testing.assert_allclose(out.numpy(), np.full((4, 4), i) + np.full((4, 4), i*2), atol=1e-4, rtol=1e-5)
 
   @unittest.skip("test broken")
   def test_multi_device_jit_graph(self):
@@ -979,7 +1015,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     np.testing.assert_equal((a+a).numpy(), na+na)
     np.testing.assert_equal((b+b).numpy(), nb+nb)
 
-  # @unittest.skip("why didn't this work?")
   def test_add_two_partitions(self):
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)

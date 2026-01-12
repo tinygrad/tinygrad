@@ -2,7 +2,7 @@
 # the Inst constructor should be looking at the types of the fields to correctly set the value
 
 import unittest, struct
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.asm import asm
 from extra.assembly.amd.test.test_roundtrip import compile_asm
@@ -20,6 +20,9 @@ class TestIntegration(unittest.TestCase):
     #self.assertEqual(self.inst, reasm)
     self.assertEqual(repr(self.inst), repr(reasm))
     print(desc)
+
+  def test_wmma(self):
+    self.inst = v_wmma_f32_16x16x16_f16(v[0:7], v[189:192], v[140:143], v[0:7])
 
   def test_load_b128(self):
     self.inst = s_load_b128(s[4:7], s[0:1], NULL, 0)

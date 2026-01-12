@@ -43,16 +43,13 @@ def _test_cast(a:Tensor, target_dtype:DType):
   if a.is_floating_point() and dtypes.is_unsigned(target_dtype):
     # converting negative float to unsigned integer is undefined
     a = a.abs()
-  if target_dtype == dtypes.half and Device.DEFAULT == "PYTHON":
-    # TODO: struct.pack cannot pack value > 65504 (max of half) into e format
-    a = (a > 65504).where(65504, a)
 
   expected = list(a.numpy().astype(_to_np_dtype(target_dtype)))
-  if target_dtype in dtypes.fp8s: expected = list(map(lambda x: truncate[target_dtype](x), expected))
+  if target_dtype in dtypes.fp8s: expected = [truncate[target_dtype](x) for x in expected]
   _test_op(lambda: a.cast(target_dtype), target_dtype, expected)
 def _test_bitcast(a:Tensor, target_dtype:DType, target=None):
   expected = torch.tensor(a.tolist(), dtype=_to_torch_storage_type(a.dtype)).view(_to_torch_dtype(target_dtype)).tolist()
-  if target_dtype in dtypes.fp8s: expected = list(map(lambda x: fp8_to_float(x, target_dtype), expected))
+  if target_dtype in dtypes.fp8s: expected = [fp8_to_float(x, target_dtype) for x in expected]
   _test_op(lambda: a.bitcast(target_dtype), target_dtype, target or expected)
 
 class TestDType(unittest.TestCase):
@@ -68,37 +65,34 @@ class TestDType(unittest.TestCase):
   def test_to_np(self):
     _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
 
-  def test_casts_to(self): list(map(
-    lambda dtype: _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE),
-    get_available_cast_dtypes(self.DTYPE)
-  ))
-  def test_casts_from(self): list(map(
-    lambda dtype: _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype),
-    get_available_cast_dtypes(self.DTYPE)
-  ))
+  def test_casts_to(self):
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      _test_cast(Tensor(self.DATA, dtype=dtype), self.DTYPE)
+
+  def test_casts_from(self):
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      _test_cast(Tensor(self.DATA, dtype=self.DTYPE), dtype)
 
   def test_same_size_ops(self):
-    list(map(
-      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize == self.DTYPE.itemsize else None,
-      get_available_cast_dtypes(self.DTYPE)
-    ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype.itemsize == self.DTYPE.itemsize:
+        _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
+
   def test_upcast_ops(self):
-    list(map(
-      lambda dtype: _test_ops(a_dtype=self.DTYPE, b_dtype=dtype) if dtype.itemsize > self.DTYPE.itemsize else None,
-      get_available_cast_dtypes(self.DTYPE)
-  ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype.itemsize > self.DTYPE.itemsize:
+        _test_ops(a_dtype=self.DTYPE, b_dtype=dtype)
+
   def test_upcast_to_ops(self):
-    list(map(
-      lambda dtype: _test_ops(a_dtype=dtype, b_dtype=self.DTYPE) if dtype.itemsize < self.DTYPE.itemsize else None,
-      get_available_cast_dtypes(self.DTYPE)
-  ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype.itemsize < self.DTYPE.itemsize:
+        _test_ops(a_dtype=dtype, b_dtype=self.DTYPE)
+
   def test_bitcast(self):
     if self.DTYPE == dtypes.bool: raise unittest.SkipTest("no bools in bitcast")
-    list(map(
-      lambda dtype:
-        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype) if dtype != dtypes.bool else None,
-     get_available_cast_dtypes(self.DTYPE)
-    ))
+    for dtype in get_available_cast_dtypes(self.DTYPE):
+      if dtype != dtypes.bool:
+        _test_bitcast(Tensor(self.DATA[:8], dtype=self.DTYPE), dtype)
 
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "skip for now")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "skip for now")
@@ -131,7 +125,7 @@ class TestDType(unittest.TestCase):
   def test_finfo(self):
     if self.DTYPE not in [dtypes.float16, dtypes.float32, dtypes.float64]: return
     info = np.finfo(_to_np_dtype(self.DTYPE))
-    self.assertEqual(info.bits, self.DTYPE.itemsize*8)
+    self.assertEqual(info.bits, self.DTYPE.bitsize)
     self.assertEqual((info.nexp, info.nmant), dtypes.finfo(self.DTYPE))
 
 def _test_ops(a_dtype:DType, b_dtype:DType, target_dtype=None):
@@ -219,7 +213,7 @@ class TestBFloat16DType(unittest.TestCase):
     back = t.cast(dtypes.float32)
     assert tuple(back.numpy().tolist()) == (9984., -1, -1000, -9984, 20)
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
+@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16) and is_dtype_supported(dtypes.float16), "bfloat16 or float16 not supported")
 class TestBFloat16DTypeCast(unittest.TestCase):
   def test_f16_to_bf16_conversion(self):
     original_tensor = Tensor([1.0, 2.0, 3.0], dtype=dtypes.float16)
@@ -307,7 +301,7 @@ class TestBitCast(unittest.TestCase):
     data = rand_for_dtype(dt1, 32).reshape(2, 2, 8)
     expected = torch.tensor(data.tolist(), dtype=_to_torch_storage_type(dt1)).view(_to_torch_dtype(dt2))
     if dt2 in dtypes.fp8s:
-      expected = torch.tensor(list(map(lambda x: fp8_to_float(x, dt2), expected.view(-1).tolist()))).view_as(expected)
+      expected = torch.tensor([fp8_to_float(x, dt2) for x in expected.view(-1).tolist()]).view_as(expected)
     _test_op(lambda: Tensor(data, dtype=dt1).bitcast(dt2), dt2, expected.tolist())
 
   def test_shape_change_bitcast_exceptions(self):
@@ -429,7 +423,6 @@ class TestDtypeUsage(unittest.TestCase):
 class TestOpsBFloat16(unittest.TestCase):
   def test_cast(self):
     # TODO: helper_test_op breaks in unrelated part
-    # TODO: wrong output with CL=1 on mac
     data = [60000.0, 70000.0, 80000.0]
     np.testing.assert_allclose(Tensor(data).cast("bfloat16").numpy(), torch.tensor(data).type(torch.bfloat16).float().numpy())
 

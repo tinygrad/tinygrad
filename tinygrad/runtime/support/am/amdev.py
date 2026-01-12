@@ -1,12 +1,12 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
-from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
+from tinygrad.helpers import mv_address, getenv, DEBUG, fetch, lo32, hi32
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.system import PCIDevice, PCIDevImplBase
-from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.am.ip import AM_IP, AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -55,7 +55,8 @@ class AMFirmware:
     # SDMA firmware
     blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", versioned_header="struct_sdma_firmware_header")
     if hdr.header.header_version_major == 1:
-      self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SDMA0)]
+      self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SDMA0,
+                               am.GFX_FW_TYPE_SDMA1, am.GFX_FW_TYPE_SDMA2, am.GFX_FW_TYPE_SDMA3)]
     elif hdr.header.header_version_major == 2:
       self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
       self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
@@ -161,36 +162,34 @@ class AMDev(PCIDevImplBase):
     # To enable this, AM uses a separate boot memory that is guaranteed not to be overwritten. This physical memory is utilized for
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
+    # To determine if the previous AM session finalized correctly, AM uses regSCRATCH_REG6 as a flag.
     self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
     self.init_sw(smi_dev=False)
 
     self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
-    if self.partial_boot and (self.reg("regGCVM_CONTEXT0_CNTL").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
+    if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive():
-        if self.gmc.xgmi_seg_sz > 0:
+        if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
         self.smu.mode1_reset()
-      for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
-        ip.init_hw()
-        if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+      self.init_hw(self.soc, self.gmc, self.ih, self.psp, self.smu)
 
     # Booting done
     self.is_booting = False
 
     # Re-initialize main blocks
-    for ip in [self.gfx, self.sdma]:
-      ip.init_hw()
-      if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+    self.init_hw(self.gfx, self.sdma)
 
     self.smu.set_clocks(level=-1) # last level, max perf.
     for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(AMDev.Version)
+    self.reg("regSCRATCH_REG6").write(1) # set initialized state.
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
@@ -214,11 +213,19 @@ class AMDev(PCIDevImplBase):
     # Init sw for all IP blocks
     for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu, self.gfx, self.sdma]: ip.init_sw()
 
+  def init_hw(self, *blocks:AM_IP):
+    for ip in blocks:
+      ip.init_hw()
+      if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
+    self.reg("regSCRATCH_REG6").write(0) # set finalized state.
+
+  def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
   def paddr2xgmi(self, paddr:int) -> int: return self.gmc.paddr_base + paddr
@@ -250,10 +257,11 @@ class AMDev(PCIDevImplBase):
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
 
   def indirect_wreg_pcie(self, reg:int, val:int, aid:int=0):
-    self.reg("regBIF_BX0_PCIE_INDEX2").write(reg * 4 + ((((aid & 0b11) << 32) | (1 << 34)) if aid > 0 else 0))
-    self.reg("regBIF_BX0_PCIE_INDEX2").read()
+    reg_addr = reg * 4 + ((((aid & 0b11) << 32) | (1 << 34)) if aid > 0 else 0)
+    self.reg("regBIF_BX0_PCIE_INDEX2").write(lo32(reg_addr))
+    if reg_addr >> 32: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(hi32(reg_addr) & 0xff)
     self.reg("regBIF_BX0_PCIE_DATA2").write(val)
-    self.reg("regBIF_BX0_PCIE_DATA2").read()
+    if reg_addr >> 32: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(0)
 
   def _read_vram(self, addr, size) -> bytes:
     assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"

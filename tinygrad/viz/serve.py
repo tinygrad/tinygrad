@@ -266,7 +266,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
         # run our decoder on startup, we don't use this since it only works on gfx11
         from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
         for e in sqtt: parse_sqtt_print_packets(e.blob)
-    ctxs.append({"name":f"Exec {name} n{run_number[k]}", "steps":steps})
+    ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -285,7 +285,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     n = next(inst_units[u])
     if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
     events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
+    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "prg":p, "run_number":n, "loc":loc}
   # * OCC waves
   units:dict[str, itertools.count] = {}
   wave_start:dict[str, int] = {}
@@ -393,6 +393,15 @@ def parse_branch(asm:str) -> int|None:
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
 
+def amdgpu_tokenize(st:str) -> list[str]:
+  try:
+    from extra.assembly.amd.dsl import s, v, Reg, VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
+    from extra.assembly.amd.asm import _op2dsl
+    dsl = eval(_op2dsl(st), {'s':s, 'v':v, 'VCC_LO':VCC_LO, 'VCC_HI':VCC_HI, 'VCC':VCC, 'EXEC_LO':EXEC_LO, 'EXEC_HI':EXEC_HI, 'EXEC':EXEC,
+                             'SCC':SCC, 'M0':M0, 'NULL':NULL, 'OFF':OFF})
+    return [f"{type(dsl).__name__[0].lower()}{dsl.idx + i}" for i in range(dsl.count)] if isinstance(dsl, Reg) else [st]
+  except (ImportError, NameError, SyntaxError, TypeError): return []
+
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
@@ -406,7 +415,10 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
   paths:dict[int, dict[int, int]] = {}
+  lines:list[str] = []
+  asm_width = max(len(asm) for asm, _ in pc_table.values())
   for pc, (asm, sz) in pc_table.items():
+    lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
       blocks[pc] = []
@@ -420,11 +432,16 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
       if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
-  return {"blocks":blocks, "paths":paths, "pc_table":pc_table, "colors":cfg_colors}
+  pc_tokens:dict[int, list[dict]] = {}
+  for pc, (text, _) in pc_table.items():
+    pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s) if i>0 else [s], "kind":int(i>0)} for i,s in enumerate(text.replace(",", " , ").split(" "))]
+  return {"data":{"blocks":blocks, "paths":paths, "colors":cfg_colors, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
 
-def get_render(i:int, j:int, fmt:str) -> dict:
+def get_render(query:str) -> dict:
+  url = urlparse(query)
+  i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(trace.rewrites[i][j]), "content_type":"text/event-stream"}
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
@@ -433,7 +450,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     ret:dict = {"metadata":[]}
     if data.device.startswith("AMD") and data.lib is not None:
       with soft_err(lambda err: ret.update(err)):
-        ret["data"] = amdgpu_cfg(lib:=data.lib, device_props[data.device]["gfx_target_version"])
+        ret.update(amdgpu_cfg(lib:=data.lib, device_props[data.device]["gfx_target_version"]))
         with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
     else: ret["src"] = get_stdout(lambda: (compiler:=Device[data.device].compiler).disassemble(compiler.compile(data.src)))
     return ret
@@ -485,7 +502,9 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary]}
+    cfg = amdgpu_cfg((p:=data["prg"]).lib, device_props[p.device]["gfx_target_version"])["data"]
+    cfg["counters"] = {pc-p.base:v for pc,v in rows.items()}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "data":cfg}
   return data
 
 # ** HTTP server
@@ -504,16 +523,17 @@ class Handler(HTTPRequestHandler):
         if url.path.endswith(".js"): content_type = "application/javascript"
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
-    elif (query:=parse_qs(url.query)):
-      render_src = get_render(get_int(query, "ctx"), get_int(query, "step"), url.path.lstrip("/"))
-      if "content_type" in render_src: ret, content_type = render_src["value"], render_src["content_type"]
-      else: ret, content_type = json.dumps(render_src).encode(), "application/json"
-      if content_type == "text/event-stream": return self.stream_json(render_src["value"])
+
     elif url.path == "/ctxs":
       lst = [{**c, "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in ctxs]
       ret, content_type = json.dumps(lst).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
-    else: status_code = 404
+    else:
+      if not (render_src:=get_render(self.path)): status_code = 404
+      else:
+        if "content_type" in render_src: ret, content_type = render_src["value"], render_src["content_type"]
+        else: ret, content_type = json.dumps(render_src).encode(), "application/json"
+        if content_type == "text/event-stream": return self.stream_json(render_src["value"])
 
     return self.send_data(ret, content_type, status_code)
 

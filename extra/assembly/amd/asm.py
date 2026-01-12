@@ -1,605 +1,444 @@
-# RDNA3 assembler and disassembler
+# RDNA3/RDNA4/CDNA assembler
 from __future__ import annotations
 import re
-from extra.assembly.amd.dsl import Inst, RawImm, Reg, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory, FLOAT_ENC, SRC_FIELDS, unwrap
+from extra.assembly.amd.dsl import RawImm, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory
+from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
+from extra.assembly.amd.dsl import FLOAT_ENC
+from extra.assembly.amd.autogen.rdna3 import ins
+from extra.assembly.amd.autogen.rdna3.ins import VOP2Op, VOPDOp, SOPKOp
+from extra.assembly.amd.autogen.rdna3.enum import BufFmt
+from extra.assembly.amd.autogen.rdna4 import ins as rdna4_ins
 
-# Decoding helpers
-SPECIAL_GPRS = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", 253: "scc"}
-SPECIAL_DEC = {**SPECIAL_GPRS, **{v: str(k) for k, v in FLOAT_ENC.items()}}
-SPECIAL_PAIRS = {106: "vcc", 126: "exec"}  # Special register pairs (for 64-bit ops)
-# GFX11 hwreg names (IDs 16-17 are TBA - not supported, IDs 18-19 are PERF_SNAPSHOT)
-HWREG_NAMES = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_HW_ID', 5: 'HW_REG_GPR_ALLOC',
-               6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS', 15: 'HW_REG_SH_MEM_BASES', 18: 'HW_REG_PERF_SNAPSHOT_PC_LO',
-               19: 'HW_REG_PERF_SNAPSHOT_PC_HI', 20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI',
-               22: 'HW_REG_XNACK_MASK', 23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER', 28: 'HW_REG_IB_STS2'}
-HWREG_IDS = {v.lower(): k for k, v in HWREG_NAMES.items()}  # Reverse map for assembler
-MSG_NAMES = {128: 'MSG_RTN_GET_DOORBELL', 129: 'MSG_RTN_GET_DDID', 130: 'MSG_RTN_GET_TMA',
-             131: 'MSG_RTN_GET_REALTIME', 132: 'MSG_RTN_SAVE_WAVE', 133: 'MSG_RTN_GET_TBA'}
-_16BIT_TYPES = ('f16', 'i16', 'u16', 'b16')
-def _is_16bit(s: str) -> bool: return any(s.endswith(x) for x in _16BIT_TYPES)
+# Re-export disasm for backwards compatibility
+from extra.assembly.amd.disasm import disasm, HWREG, HWREG_RDNA4
 
-def decode_src(val: int) -> str:
-  if val <= 105: return f"s{val}"
-  if val in SPECIAL_DEC: return SPECIAL_DEC[val]
-  if 108 <= val <= 123: return f"ttmp{val - 108}"
-  if 128 <= val <= 192: return str(val - 128)
-  if 193 <= val <= 208: return str(-(val - 192))
-  if 256 <= val <= 511: return f"v{val - 256}"
-  return "lit" if val == 255 else f"?{val}"
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONSTANTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def _reg(prefix: str, base: int, cnt: int = 1) -> str: return f"{prefix}{base}" if cnt == 1 else f"{prefix}[{base}:{base+cnt-1}]"
-def _sreg(base: int, cnt: int = 1) -> str: return _reg("s", base, cnt)
-def _vreg(base: int, cnt: int = 1) -> str: return _reg("v", base, cnt)
+# RDNA unified buffer format
+BUF_FMT = {e.name: e.value for e in BufFmt}
+_BUF_FMT_EXT = {'BUF_FMT_32_32_32_32_SINT': 62, 'BUF_FMT_32_32_32_32_FLOAT': 63, 'BUF_FMT_8_FLOAT': 108}
+BUF_FMT.update(_BUF_FMT_EXT)
+def _parse_buf_fmt_combo(s: str) -> int:
+  parts = [p.strip().replace('BUF_DATA_FORMAT_', '').replace('BUF_NUM_FORMAT_', '') for p in s.split(',')]
+  return BUF_FMT.get(f'BUF_FMT_{parts[0]}_{parts[1]}') if len(parts) == 2 else None
 
-def _fmt_sdst(v: int, cnt: int = 1) -> str:
-  """Format SGPR destination with special register names."""
-  if v == 124: return "null"
-  if 108 <= v <= 123: return _reg("ttmp", v - 108, cnt)
-  if cnt > 1 and v in SPECIAL_PAIRS: return SPECIAL_PAIRS[v]
-  if cnt > 1: return _sreg(v, cnt)
-  return {126: "exec_lo", 127: "exec_hi", 106: "vcc_lo", 107: "vcc_hi", 125: "m0"}.get(v, f"s{v}")
-
-def _fmt_ssrc(v: int, cnt: int = 1) -> str:
-  """Format SGPR source with special register names and pairs."""
-  if cnt == 2:
-    if v in SPECIAL_PAIRS: return SPECIAL_PAIRS[v]
-    if v <= 105: return _sreg(v, 2)
-    if 108 <= v <= 123: return _reg("ttmp", v - 108, 2)
-  return decode_src(v)
-
-def _fmt_src_n(v: int, cnt: int) -> str:
-  """Format source with given register count (1, 2, or 4)."""
-  if cnt == 1: return decode_src(v)
-  if v >= 256: return _vreg(v - 256, cnt)
-  if v <= 105: return _sreg(v, cnt)
-  if cnt == 2 and v in SPECIAL_PAIRS: return SPECIAL_PAIRS[v]
-  if 108 <= v <= 123: return _reg("ttmp", v - 108, cnt)
-  return decode_src(v)
-
-def _fmt_src64(v: int) -> str:
-  """Format 64-bit source (VGPR pair, SGPR pair, or special pair)."""
-  return _fmt_src_n(v, 2)
-
-def _parse_sop_sizes(op_name: str) -> tuple[int, ...]:
-  """Parse dst and src sizes from SOP instruction name. Returns (dst_cnt, src0_cnt) or (dst_cnt, src0_cnt, src1_cnt)."""
-  if op_name in ('s_bitset0_b64', 's_bitset1_b64'): return (2, 1)
-  if op_name in ('s_lshl_b64', 's_lshr_b64', 's_ashr_i64', 's_bfe_u64', 's_bfe_i64'): return (2, 2, 1)
-  if op_name in ('s_bfm_b64',): return (2, 1, 1)
-  # SOPC: s_bitcmp0_b64, s_bitcmp1_b64 - 64-bit src0, 32-bit src1 (bit index)
-  if op_name in ('s_bitcmp0_b64', 's_bitcmp1_b64'): return (1, 2, 1)
-  if m := re.search(r'_(b|i|u)(32|64)_(b|i|u)(32|64)$', op_name):
-    return (2 if m.group(2) == '64' else 1, 2 if m.group(4) == '64' else 1)
-  if m := re.search(r'_(b|i|u)(32|64)$', op_name):
-    sz = 2 if m.group(2) == '64' else 1
-    return (sz, sz)
-  return (1, 1)
-
-# Waitcnt helpers (RDNA3 format: bits 15:10=vmcnt, bits 9:4=lgkmcnt, bits 3:0=expcnt)
 def waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
   return (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
-def decode_waitcnt(val: int) -> tuple[int, int, int]:
-  return (val >> 10) & 0x3f, val & 0xf, (val >> 4) & 0x3f  # vmcnt, expcnt, lgkmcnt
 
-# VOP3SD opcodes (shared encoding with VOP3 but different field layout)
-# Note: opcodes 0-255 are VOPC promoted to VOP3 - never treat as VOP3SD
-VOP3SD_OPCODES = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
+# ═══════════════════════════════════════════════════════════════════════════════
+# ASSEMBLER
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# Disassembler
-def disasm(inst: Inst) -> str:
-  op_val = unwrap(inst._values.get('op', 0))
-  cls_name = inst.__class__.__name__
-  # VOP3 and VOP3SD share encoding - check opcode to determine which
-  is_vop3sd = cls_name == 'VOP3' and op_val in VOP3SD_OPCODES
-  try:
-    from extra.assembly.amd.autogen import rdna3 as autogen
-    if is_vop3sd:
-      op_name = autogen.VOP3SDOp(op_val).name.lower()
-    else:
-      op_name = getattr(autogen, f"{cls_name}Op")(op_val).name.lower() if hasattr(autogen, f"{cls_name}Op") else f"op_{op_val}"
-  except (ValueError, KeyError): op_name = f"op_{op_val}"
-  def fmt_src(v): return f"0x{inst._literal:x}" if v == 255 and inst._literal is not None else decode_src(v)
-
-  # VOP1
-  if cls_name == 'VOP1':
-    vdst, src0 = unwrap(inst._values['vdst']), unwrap(inst._values['src0'])
-    if op_name == 'v_nop': return 'v_nop'
-    if op_name == 'v_pipeflush': return 'v_pipeflush'
-    parts = op_name.split('_')
-    is_16bit_dst = any(p in _16BIT_TYPES for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in _16BIT_TYPES and 'cvt' not in op_name)
-    is_16bit_src = parts[-1] in _16BIT_TYPES and 'sat_pk' not in op_name
-    _F64_OPS = ('v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64')
-    is_f64_dst = op_name in _F64_OPS or op_name in ('v_cvt_f64_f32', 'v_cvt_f64_i32', 'v_cvt_f64_u32')
-    is_f64_src = op_name in _F64_OPS or op_name in ('v_cvt_f32_f64', 'v_cvt_i32_f64', 'v_cvt_u32_f64', 'v_frexp_exp_i32_f64')
-    if op_name == 'v_readfirstlane_b32':
-      return f"v_readfirstlane_b32 {decode_src(vdst)}, v{src0 - 256 if src0 >= 256 else src0}"
-    dst_str = _vreg(vdst, 2) if is_f64_dst else f"v{vdst & 0x7f}.{'h' if vdst >= 128 else 'l'}" if is_16bit_dst else f"v{vdst}"
-    src_str = _fmt_src64(src0) if is_f64_src else f"v{(src0 - 256) & 0x7f}.{'h' if src0 >= 384 else 'l'}" if is_16bit_src and src0 >= 256 else fmt_src(src0)
-    return f"{op_name}_e32 {dst_str}, {src_str}"
-
-  # VOP2
-  if cls_name == 'VOP2':
-    vdst, src0_raw, vsrc1 = unwrap(inst._values['vdst']), unwrap(inst._values['src0']), unwrap(inst._values['vsrc1'])
-    suffix = "" if op_name == "v_dot2acc_f32_f16" else "_e32"
-    is_16bit_op = ('_f16' in op_name or '_i16' in op_name or '_u16' in op_name) and '_f32' not in op_name and '_i32' not in op_name and 'pk_' not in op_name
-    if is_16bit_op:
-      dst_str = f"v{vdst & 0x7f}.{'h' if vdst >= 128 else 'l'}"
-      src0_str = f"v{(src0_raw - 256) & 0x7f}.{'h' if src0_raw >= 384 else 'l'}" if src0_raw >= 256 else fmt_src(src0_raw)
-      vsrc1_str = f"v{vsrc1 & 0x7f}.{'h' if vsrc1 >= 128 else 'l'}"
-    else:
-      dst_str, src0_str, vsrc1_str = f"v{vdst}", fmt_src(src0_raw), f"v{vsrc1}"
-    return f"{op_name}{suffix} {dst_str}, {src0_str}, {vsrc1_str}" + (", vcc_lo" if op_name == "v_cndmask_b32" else "")
-
-  # VOPC
-  if cls_name == 'VOPC':
-    src0, vsrc1 = unwrap(inst._values['src0']), unwrap(inst._values['vsrc1'])
-    is_64bit = any(x in op_name for x in ('f64', 'i64', 'u64'))
-    is_64bit_vsrc1 = is_64bit and 'class' not in op_name
-    is_16bit = any(x in op_name for x in ('_f16', '_i16', '_u16')) and 'f32' not in op_name
-    is_cmpx = op_name.startswith('v_cmpx')  # VOPCX writes to exec, no vcc destination
-    src0_str = _fmt_src64(src0) if is_64bit else f"v{(src0 - 256) & 0x7f}.{'h' if src0 >= 384 else 'l'}" if is_16bit and src0 >= 256 else fmt_src(src0)
-    vsrc1_str = _vreg(vsrc1, 2) if is_64bit_vsrc1 else f"v{vsrc1 & 0x7f}.{'h' if vsrc1 >= 128 else 'l'}" if is_16bit else f"v{vsrc1}"
-    return f"{op_name}_e32 {src0_str}, {vsrc1_str}" if is_cmpx else f"{op_name}_e32 vcc_lo, {src0_str}, {vsrc1_str}"
-
-  # SOPP
-  if cls_name == 'SOPP':
-    simm16 = unwrap(inst._values.get('simm16', 0))
-    # No-operand instructions (simm16 is ignored)
-    no_imm_ops = ('s_endpgm', 's_barrier', 's_wakeup', 's_icache_inv', 's_ttracedata', 's_ttracedata_imm',
-                  's_wait_idle', 's_endpgm_saved', 's_code_end', 's_endpgm_ordered_ps_done')
-    if op_name in no_imm_ops: return op_name
-    if op_name == 's_waitcnt':
-      vmcnt, expcnt, lgkmcnt = decode_waitcnt(simm16)
-      parts = []
-      if vmcnt != 0x3f: parts.append(f"vmcnt({vmcnt})")
-      if expcnt != 0x7: parts.append(f"expcnt({expcnt})")
-      if lgkmcnt != 0x3f: parts.append(f"lgkmcnt({lgkmcnt})")
-      return f"s_waitcnt {' '.join(parts)}" if parts else "s_waitcnt 0"
-    if op_name == 's_delay_alu':
-      dep_names = ['VALU_DEP_1','VALU_DEP_2','VALU_DEP_3','VALU_DEP_4','TRANS32_DEP_1','TRANS32_DEP_2','TRANS32_DEP_3','FMA_ACCUM_CYCLE_1','SALU_CYCLE_1','SALU_CYCLE_2','SALU_CYCLE_3']
-      skip_names = ['SAME','NEXT','SKIP_1','SKIP_2','SKIP_3','SKIP_4']
-      id0, skip, id1 = simm16 & 0xf, (simm16 >> 4) & 0x7, (simm16 >> 7) & 0xf
-      def dep_name(v): return dep_names[v-1] if 0 < v <= len(dep_names) else str(v)
-      parts = [f"instid0({dep_name(id0)})"] if id0 else []
-      if skip: parts.append(f"instskip({skip_names[skip]})")
-      if id1: parts.append(f"instid1({dep_name(id1)})")
-      return f"s_delay_alu {' | '.join(p for p in parts if p)}" if parts else "s_delay_alu 0"
-    if op_name.startswith('s_cbranch') or op_name.startswith('s_branch'):
-      return f"{op_name} {simm16}"
-    # Most SOPP ops require immediate (s_nop, s_setkill, s_sethalt, s_sleep, s_setprio, s_sendmsg*, etc.)
-    return f"{op_name} 0x{simm16:x}"
-
-  # SMEM
-  if cls_name == 'SMEM':
-    if op_name in ('s_gl1_inv', 's_dcache_inv'): return op_name
-    sdata, sbase, soffset, offset = unwrap(inst._values['sdata']), unwrap(inst._values['sbase']), unwrap(inst._values['soffset']), unwrap(inst._values.get('offset', 0))
-    glc, dlc = unwrap(inst._values.get('glc', 0)), unwrap(inst._values.get('dlc', 0))
-    # Format offset: "soffset offset:X" if both, "0x{offset:x}" if only imm, or decode_src(soffset)
-    off_str = f"{decode_src(soffset)} offset:0x{offset:x}" if offset and soffset != 124 else f"0x{offset:x}" if offset else decode_src(soffset)
-    sbase_idx, sbase_cnt = sbase * 2, 4 if (8 <= op_val <= 12 or op_name == 's_atc_probe_buffer') else 2
-    sbase_str = _fmt_ssrc(sbase_idx, sbase_cnt) if sbase_cnt == 2 else _sreg(sbase_idx, sbase_cnt) if sbase_idx <= 105 else _reg("ttmp", sbase_idx - 108, sbase_cnt)
-    if op_name in ('s_atc_probe', 's_atc_probe_buffer'): return f"{op_name} {sdata}, {sbase_str}, {off_str}"
-    width = {0:1, 1:2, 2:4, 3:8, 4:16, 8:1, 9:2, 10:4, 11:8, 12:16}.get(op_val, 1)
-    mods = [m for m in ["glc" if glc else "", "dlc" if dlc else ""] if m]
-    return f"{op_name} {_fmt_sdst(sdata, width)}, {sbase_str}, {off_str}" + (" " + " ".join(mods) if mods else "")
-
-  # FLAT
-  if cls_name == 'FLAT':
-    vdst, addr, data, saddr, offset, seg = [unwrap(inst._values.get(f, 0)) for f in ['vdst', 'addr', 'data', 'saddr', 'offset', 'seg']]
-    instr = f"{['flat', 'scratch', 'global'][seg] if seg < 3 else 'flat'}_{op_name.split('_', 1)[1] if '_' in op_name else op_name}"
-    width = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'u8':1, 'i8':1, 'u16':1, 'i16':1}.get(op_name.split('_')[-1], 1)
-    addr_str = _vreg(addr, 2) if saddr == 0x7F else _vreg(addr)
-    saddr_str = "" if saddr == 0x7F else f", {_sreg(saddr, 2)}" if saddr < 106 else ", off" if saddr == 124 else f", {decode_src(saddr)}"
-    off_str = f" offset:{offset}" if offset else ""
-    vdata_str = _vreg(data if 'store' in op_name else vdst, width)
-    return f"{instr} {addr_str}, {vdata_str}{saddr_str}{off_str}" if 'store' in op_name else f"{instr} {vdata_str}, {addr_str}{saddr_str}{off_str}"
-
-  # VOP3: vector ops with modifiers (can be 1, 2, or 3 sources depending on opcode range)
-  if cls_name == 'VOP3':
-    # Handle VOP3SD opcodes (same encoding, different field layout)
-    if is_vop3sd:
-      vdst = unwrap(inst._values.get('vdst', 0))
-      # VOP3SD: sdst is at bits [14:8], but VOP3 decodes opsel at [14:11], abs at [10:8], clmp at [15]
-      # We need to reconstruct sdst from these fields
-      opsel_raw = unwrap(inst._values.get('opsel', 0))
-      abs_raw = unwrap(inst._values.get('abs', 0))
-      clmp_raw = unwrap(inst._values.get('clmp', 0))
-      sdst = (clmp_raw << 7) | (opsel_raw << 3) | abs_raw
-      src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
-      neg = unwrap(inst._values.get('neg', 0))
-      omod = unwrap(inst._values.get('omod', 0))
-      omod_str = {1: " mul:2", 2: " mul:4", 3: " div:2"}.get(omod, "")
-      is_f64 = 'f64' in op_name
-      # v_mad_i64_i32/v_mad_u64_u32: 64-bit dst and src2, 32-bit src0/src1
-      is_mad64 = 'mad_i64_i32' in op_name or 'mad_u64_u32' in op_name
-      def fmt_sd_src(v, neg_bit, is_64bit=False):
-        s = _fmt_src64(v) if (is_64bit or is_f64) else fmt_src(v)
-        return f"-{s}" if neg_bit else s
-      src0_str, src1_str = fmt_sd_src(src0, neg & 1), fmt_sd_src(src1, neg & 2)
-      src2_str = fmt_sd_src(src2, neg & 4, is_mad64)
-      dst_str = _vreg(vdst, 2) if (is_f64 or is_mad64) else f"v{vdst}"
-      sdst_str = _fmt_sdst(sdst, 1)
-      # v_add_co_u32, v_sub_co_u32, v_subrev_co_u32, v_add_co_ci_u32, etc. only use 2 sources
-      if op_name in ('v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32', 'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'):
-        return f"{op_name} {dst_str}, {sdst_str}, {src0_str}, {src1_str}"
-      # v_div_scale uses 3 sources
-      return f"{op_name} {dst_str}, {sdst_str}, {src0_str}, {src1_str}, {src2_str}" + omod_str
-
-    vdst = unwrap(inst._values.get('vdst', 0))
-    src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
-    neg, abs_, clmp = unwrap(inst._values.get('neg', 0)), unwrap(inst._values.get('abs', 0)), unwrap(inst._values.get('clmp', 0))
-    opsel = unwrap(inst._values.get('opsel', 0))
-    # Check if 64-bit op (needs register pairs)
-    is_f64 = 'f64' in op_name or 'i64' in op_name or 'u64' in op_name or 'b64' in op_name
-    # v_cmp_class_* has 64-bit src0 but 32-bit src1 (class mask)
-    is_class = 'class' in op_name
-    # Shift ops: v_*rev_*64 have 32-bit shift amount (src0), 64-bit value (src1)
-    is_shift64 = 'rev' in op_name and '64' in op_name and op_name.startswith('v_')
-    # v_ldexp_f64: 64-bit src0 (mantissa), 32-bit src1 (exponent)
-    is_ldexp64 = op_name == 'v_ldexp_f64'
-    # v_trig_preop_f64: 64-bit dst/src0, 32-bit src1 (exponent/scale)
-    is_trig_preop = op_name == 'v_trig_preop_f64'
-    # v_readlane_b32: destination is SGPR (despite vdst field)
-    is_readlane = op_name == 'v_readlane_b32'
-    # SAD/QSAD/MQSAD instructions have mixed sizes
-    # v_qsad_pk_u16_u8, v_mqsad_pk_u16_u8: 64-bit dst/src0/src2, 32-bit src1
-    # v_mqsad_u32_u8: 128-bit (4 reg) dst/src2, 64-bit src0, 32-bit src1
-    is_sad64 = any(x in op_name for x in ('qsad_pk', 'mqsad_pk'))
-    is_mqsad_u32 = 'mqsad_u32' in op_name
-    # Detect 16-bit and 64-bit operand sizes for various instruction patterns
-    if 'cvt_pk' in op_name:
-      is_f16_dst, is_f16_src, is_f16_src2 = False, op_name.endswith('16'), False
-    elif m := re.match(r'v_(?:cvt|frexp_exp)_([a-z0-9_]+)_([a-z0-9]+)', op_name):
-      dst_type, src_type = m.group(1), m.group(2)
-      is_f16_dst, is_f16_src, is_f16_src2 = _is_16bit(dst_type), _is_16bit(src_type), _is_16bit(src_type)
-      is_f64_dst, is_f64_src, is_f64 = '64' in dst_type, '64' in src_type, False
-    elif re.match(r'v_mad_[iu]32_[iu]16', op_name):
-      is_f16_dst, is_f16_src, is_f16_src2 = False, True, False  # 32-bit dst, 16-bit src0/src1, 32-bit src2
-    elif 'pack_b32' in op_name:
-      is_f16_dst, is_f16_src, is_f16_src2 = False, True, True  # 32-bit dst, 16-bit sources
-    else:
-      is_16bit_op = any(x in op_name for x in _16BIT_TYPES) and not any(x in op_name for x in ('dot2', 'pk_', 'sad', 'msad', 'qsad', 'mqsad'))
-      is_f16_dst = is_f16_src = is_f16_src2 = is_16bit_op
-    # Check if any opsel bit is set (any operand uses .h) - if so, we need explicit .l for low-half
-    any_hi = opsel != 0
-    def fmt_vop3_src(v, neg_bit, abs_bit, hi_bit=False, reg_cnt=1, is_16=False):
-      s = _fmt_src_n(v, reg_cnt) if reg_cnt > 1 else f"v{v - 256}.h" if is_16 and v >= 256 and hi_bit else f"v{v - 256}.l" if is_16 and v >= 256 and any_hi else fmt_src(v)
-      if abs_bit: s = f"|{s}|"
-      return f"-{s}" if neg_bit else s
-    # Determine register count for each source (check for cvt-specific 64-bit flags first)
-    is_src0_64 = locals().get('is_f64_src', is_f64 and not is_shift64) or is_sad64 or is_mqsad_u32
-    is_src1_64 = is_f64 and not is_class and not is_ldexp64 and not is_trig_preop
-    src0_cnt = 2 if is_src0_64 else 1
-    src1_cnt = 2 if is_src1_64 else 1
-    src2_cnt = 4 if is_mqsad_u32 else 2 if (is_f64 or is_sad64) else 1
-    src0_str = fmt_vop3_src(src0, neg & 1, abs_ & 1, opsel & 1, src0_cnt, is_f16_src)
-    src1_str = fmt_vop3_src(src1, neg & 2, abs_ & 2, opsel & 2, src1_cnt, is_f16_src)
-    src2_str = fmt_vop3_src(src2, neg & 4, abs_ & 4, opsel & 4, src2_cnt, is_f16_src2)
-    # Format destination - for 16-bit ops, use .h/.l suffix; readlane uses SGPR dest
-    is_dst_64 = locals().get('is_f64_dst', is_f64) or is_sad64
-    dst_cnt = 4 if is_mqsad_u32 else 2 if is_dst_64 else 1
-    if is_readlane:
-      dst_str = _fmt_sdst(vdst, 1)
-    elif dst_cnt > 1:
-      dst_str = _vreg(vdst, dst_cnt)
-    elif is_f16_dst:
-      dst_str = f"v{vdst}.h" if (opsel & 8) else f"v{vdst}.l" if any_hi else f"v{vdst}"
-    else:
-      dst_str = f"v{vdst}"
-    clamp_str = " clamp" if clmp else ""
-    omod = unwrap(inst._values.get('omod', 0))
-    omod_str = {1: " mul:2", 2: " mul:4", 3: " div:2"}.get(omod, "")
-    # op_sel for non-VGPR sources (when opsel bits are set but source is not a VGPR)
-    # For 16-bit ops with VGPR sources, opsel is encoded in .h/.l suffix
-    # For non-VGPR sources or non-16-bit ops, we need explicit op_sel
-    has_nonvgpr_opsel = (src0 < 256 and (opsel & 1)) or (src1 < 256 and (opsel & 2)) or (src2 < 256 and (opsel & 4))
-    need_opsel = has_nonvgpr_opsel or (opsel and not is_f16_src)
-    # Helper to format opsel string based on source count
-    def fmt_opsel(num_src):
-      if not need_opsel: return ""
-      # When dst is .h (for 16-bit ops) and non-VGPR sources have opsel, use all 1s
-      if is_f16_dst and (opsel & 8):  # dst is .h
-        return f" op_sel:[1,1,1{',1' if num_src == 3 else ''}]"
-      # Otherwise output actual opsel values
-      if num_src == 3:
-        return f" op_sel:[{opsel & 1},{(opsel >> 1) & 1},{(opsel >> 2) & 1},{(opsel >> 3) & 1}]"
-      return f" op_sel:[{opsel & 1},{(opsel >> 1) & 1},{(opsel >> 2) & 1}]"
-    # Determine number of sources based on opcode range:
-    # 0-255: VOPC promoted (comparison, 2 src, sdst)
-    # 256-383: VOP2 promoted (2 src)
-    # 384-511: VOP1 promoted (1 src)
-    # 512+: Native VOP3 (2 or 3 src depending on instruction)
-    if op_val < 256:  # VOPC promoted
-      # VOPCX (v_cmpx_*) writes to exec, no explicit destination
-      if op_name.startswith('v_cmpx'):
-        return f"{op_name}_e64 {src0_str}, {src1_str}"
-      return f"{op_name}_e64 {_fmt_sdst(vdst, 1)}, {src0_str}, {src1_str}"
-    elif op_val < 384:  # VOP2 promoted
-      # v_cndmask_b32 in VOP3 format has 3 sources (src2 is mask selector)
-      if 'cndmask' in op_name:
-        return f"{op_name}_e64 {dst_str}, {src0_str}, {src1_str}, {src2_str}" + fmt_opsel(3) + clamp_str + omod_str
-      return f"{op_name}_e64 {dst_str}, {src0_str}, {src1_str}" + fmt_opsel(2) + clamp_str + omod_str
-    elif op_val < 512:  # VOP1 promoted
-      if op_name in ('v_nop', 'v_pipeflush'): return f"{op_name}_e64"
-      return f"{op_name}_e64 {dst_str}, {src0_str}" + fmt_opsel(1) + clamp_str + omod_str
-    else:  # Native VOP3 - determine 2 vs 3 sources based on instruction name
-      # 3-source ops: fma, mad, min3, max3, med3, div_fixup, div_fmas, sad, msad, qsad, mqsad, lerp, alignbit/byte, cubeid/sc/tc/ma, bfe, bfi, perm_b32, permlane, cndmask
-      # Note: v_writelane_b32 is 2-src (src0, src1 with vdst as 3rd operand - read-modify-write)
-      is_3src = any(x in op_name for x in ('fma', 'mad', 'min3', 'max3', 'med3', 'div_fix', 'div_fmas', 'sad', 'lerp', 'align', 'cube',
-                                            'bfe', 'bfi', 'perm_b32', 'permlane', 'cndmask', 'xor3', 'or3', 'add3', 'lshl_or', 'and_or', 'lshl_add',
-                                            'add_lshl', 'xad', 'maxmin', 'minmax', 'dot2', 'cvt_pk_u8', 'mullit'))
-      if is_3src:
-        return f"{op_name} {dst_str}, {src0_str}, {src1_str}, {src2_str}" + fmt_opsel(3) + clamp_str + omod_str
-      return f"{op_name} {dst_str}, {src0_str}, {src1_str}" + fmt_opsel(2) + clamp_str + omod_str
-
-  # VOP3SD: 3-source with scalar destination (v_div_scale_*, v_add_co_u32, v_mad_*64_*32, etc.)
-  if cls_name == 'VOP3SD':
-    vdst, sdst = unwrap(inst._values.get('vdst', 0)), unwrap(inst._values.get('sdst', 0))
-    src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
-    neg, omod, clmp = unwrap(inst._values.get('neg', 0)), unwrap(inst._values.get('omod', 0)), unwrap(inst._values.get('clmp', 0))
-    is_f64, is_mad64 = 'f64' in op_name, 'mad_i64_i32' in op_name or 'mad_u64_u32' in op_name
-    def fmt_neg(v, neg_bit, is_64=False): return f"-{_fmt_src64(v) if (is_64 or is_f64) else fmt_src(v)}" if neg_bit else _fmt_src64(v) if (is_64 or is_f64) else fmt_src(v)
-    srcs = [fmt_neg(src0, neg & 1), fmt_neg(src1, neg & 2), fmt_neg(src2, neg & 4, is_mad64)]
-    dst_str, sdst_str = _vreg(vdst, 2) if (is_f64 or is_mad64) else f"v{vdst}", _fmt_sdst(sdst, 1)
-    clamp_str, omod_str = " clamp" if clmp else "", {1: " mul:2", 2: " mul:4", 3: " div:2"}.get(omod, "")
-    is_2src = op_name in ('v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32')
-    suffix = "_e64" if op_name.startswith('v_') and 'co_' in op_name else ""
-    return f"{op_name}{suffix} {dst_str}, {sdst_str}, {', '.join(srcs[:2] if is_2src else srcs)}" + clamp_str + omod_str
-
-  # VOPD: dual-issue instructions
-  if cls_name == 'VOPD':
-    from extra.assembly.amd.autogen import rdna3 as autogen
-    opx, opy, vdstx, vdsty_enc = [unwrap(inst._values.get(f, 0)) for f in ('opx', 'opy', 'vdstx', 'vdsty')]
-    srcx0, vsrcx1, srcy0, vsrcy1 = [unwrap(inst._values.get(f, 0)) for f in ('srcx0', 'vsrcx1', 'srcy0', 'vsrcy1')]
-    vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1)  # Decode vdsty
-    def fmt_vopd(op, vdst, src0, vsrc1):
-      try: name = autogen.VOPDOp(op).name.lower()
-      except (ValueError, KeyError): name = f"op_{op}"
-      return f"{name} v{vdst}, {fmt_src(src0)}" if 'mov' in name else f"{name} v{vdst}, {fmt_src(src0)}, v{vsrc1}"
-    return f"{fmt_vopd(opx, vdstx, srcx0, vsrcx1)} :: {fmt_vopd(opy, vdsty, srcy0, vsrcy1)}"
-
-  # VOP3P: packed vector ops
-  if cls_name == 'VOP3P':
-    vdst, clmp = unwrap(inst._values.get('vdst', 0)), unwrap(inst._values.get('clmp', 0))
-    src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
-    neg, neg_hi = unwrap(inst._values.get('neg', 0)), unwrap(inst._values.get('neg_hi', 0))
-    opsel, opsel_hi, opsel_hi2 = unwrap(inst._values.get('opsel', 0)), unwrap(inst._values.get('opsel_hi', 0)), unwrap(inst._values.get('opsel_hi2', 0))
-    is_wmma, is_3src = 'wmma' in op_name, any(x in op_name for x in ('fma', 'mad', 'dot', 'wmma'))
-    def fmt_bits(name, val, n): return f"{name}:[{','.join(str((val >> i) & 1) for i in range(n))}]"
-    # WMMA: f16/bf16 use 8-reg sources, iu8 uses 4-reg, iu4 uses 2-reg; all have 8-reg dst
-    if is_wmma:
-      src_cnt = 2 if 'iu4' in op_name else 4 if 'iu8' in op_name else 8
-      src0_str, src1_str, src2_str = _fmt_src_n(src0, src_cnt), _fmt_src_n(src1, src_cnt), _fmt_src_n(src2, 8)
-      dst_str = _vreg(vdst, 8)
-    else:
-      src0_str, src1_str, src2_str = _fmt_src_n(src0, 1), _fmt_src_n(src1, 1), _fmt_src_n(src2, 1)
-      dst_str = f"v{vdst}"
-    n = 3 if is_3src else 2
-    full_opsel_hi = opsel_hi | (opsel_hi2 << 2)
-    mods = [fmt_bits("op_sel", opsel, n)] if opsel else []
-    if full_opsel_hi != (0b111 if is_3src else 0b11): mods.append(fmt_bits("op_sel_hi", full_opsel_hi, n))
-    if neg: mods.append(fmt_bits("neg_lo", neg, n))
-    if neg_hi: mods.append(fmt_bits("neg_hi", neg_hi, n))
-    if clmp: mods.append("clamp")
-    mod_str = " " + " ".join(mods) if mods else ""
-    return f"{op_name} {dst_str}, {src0_str}, {src1_str}, {src2_str}{mod_str}" if is_3src else f"{op_name} {dst_str}, {src0_str}, {src1_str}{mod_str}"
-
-  # VINTERP: interpolation instructions
-  if cls_name == 'VINTERP':
-    vdst = unwrap(inst._values.get('vdst', 0))
-    src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
-    neg, waitexp, clmp = unwrap(inst._values.get('neg', 0)), unwrap(inst._values.get('waitexp', 0)), unwrap(inst._values.get('clmp', 0))
-    def fmt_neg_vi(v, neg_bit): return f"-{v}" if neg_bit else v
-    srcs = [fmt_neg_vi(f"v{s - 256}" if s >= 256 else fmt_src(s), neg & (1 << i)) for i, s in enumerate([src0, src1, src2])]
-    mods = [m for m in [f"wait_exp:{waitexp}" if waitexp else "", "clamp" if clmp else ""] if m]
-    return f"{op_name} v{vdst}, {', '.join(srcs)}" + (" " + " ".join(mods) if mods else "")
-
-  # MUBUF/MTBUF helpers
-  def _buf_vaddr(vaddr, offen, idxen): return _vreg(vaddr, 2) if offen and idxen else f"v{vaddr}" if offen or idxen else "off"
-  def _buf_srsrc(srsrc): srsrc_base = srsrc * 4; return _reg("ttmp", srsrc_base - 108, 4) if 108 <= srsrc_base <= 123 else _sreg(srsrc_base, 4)
-
-  # MUBUF: buffer load/store
-  if cls_name == 'MUBUF':
-    vdata, vaddr, srsrc, soffset = [unwrap(inst._values.get(f, 0)) for f in ('vdata', 'vaddr', 'srsrc', 'soffset')]
-    offset, offen, idxen = unwrap(inst._values.get('offset', 0)), unwrap(inst._values.get('offen', 0)), unwrap(inst._values.get('idxen', 0))
-    glc, dlc, slc, tfe = [unwrap(inst._values.get(f, 0)) for f in ('glc', 'dlc', 'slc', 'tfe')]
-    if op_name in ('buffer_gl0_inv', 'buffer_gl1_inv'): return op_name
-    # Determine data width from op name
-    if 'd16' in op_name: width = 2 if any(x in op_name for x in ('xyz', 'xyzw')) else 1
-    elif 'atomic' in op_name:
-      base_width = 2 if any(x in op_name for x in ('b64', 'u64', 'i64')) else 1
-      width = base_width * 2 if 'cmpswap' in op_name else base_width
-    else: width = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'b16':1, 'x':1, 'xy':2, 'xyz':3, 'xyzw':4}.get(op_name.split('_')[-1], 1)
-    if tfe: width += 1
-    mods = [m for m in ["offen" if offen else "", "idxen" if idxen else "", f"offset:{offset}" if offset else "",
-                        "glc" if glc else "", "dlc" if dlc else "", "slc" if slc else "", "tfe" if tfe else ""] if m]
-    return f"{op_name} {_vreg(vdata, width)}, {_buf_vaddr(vaddr, offen, idxen)}, {_buf_srsrc(srsrc)}, {decode_src(soffset)}" + (" " + " ".join(mods) if mods else "")
-
-  # MTBUF: typed buffer load/store
-  if cls_name == 'MTBUF':
-    vdata, vaddr, srsrc, soffset = [unwrap(inst._values.get(f, 0)) for f in ('vdata', 'vaddr', 'srsrc', 'soffset')]
-    offset, tbuf_fmt, offen, idxen = [unwrap(inst._values.get(f, 0)) for f in ('offset', 'format', 'offen', 'idxen')]
-    glc, dlc, slc = [unwrap(inst._values.get(f, 0)) for f in ('glc', 'dlc', 'slc')]
-    mods = [f"format:{tbuf_fmt}"] + [m for m in ["idxen" if idxen else "", "offen" if offen else "", f"offset:{offset}" if offset else "",
-                                                  "glc" if glc else "", "dlc" if dlc else "", "slc" if slc else ""] if m]
-    width = 2 if 'd16' in op_name and any(x in op_name for x in ('xyz', 'xyzw')) else 1 if 'd16' in op_name else {'x':1, 'xy':2, 'xyz':3, 'xyzw':4}.get(op_name.split('_')[-1], 1)
-    return f"{op_name} {_vreg(vdata, width)}, {_buf_vaddr(vaddr, offen, idxen)}, {_buf_srsrc(srsrc)}, {decode_src(soffset)} {' '.join(mods)}"
-
-  # SOP1/SOP2/SOPC/SOPK
-  if cls_name in ('SOP1', 'SOP2', 'SOPC', 'SOPK'):
-    sizes = _parse_sop_sizes(op_name)
-    dst_cnt, src0_cnt = sizes[0], sizes[1]
-    src1_cnt = sizes[2] if len(sizes) > 2 else src0_cnt
-    if cls_name == 'SOP1':
-      sdst, ssrc0 = unwrap(inst._values.get('sdst', 0)), unwrap(inst._values.get('ssrc0', 0))
-      if op_name == 's_getpc_b64': return f"{op_name} {_fmt_sdst(sdst, 2)}"
-      if op_name in ('s_setpc_b64', 's_rfe_b64'): return f"{op_name} {_fmt_ssrc(ssrc0, 2)}"
-      if op_name == 's_swappc_b64': return f"{op_name} {_fmt_sdst(sdst, 2)}, {_fmt_ssrc(ssrc0, 2)}"
-      if op_name in ('s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'):
-        return f"{op_name} {_fmt_sdst(sdst, 2 if 'b64' in op_name else 1)}, sendmsg({MSG_NAMES.get(ssrc0, str(ssrc0))})"
-      ssrc0_str = fmt_src(ssrc0) if src0_cnt == 1 else _fmt_ssrc(ssrc0, src0_cnt)
-      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {ssrc0_str}"
-    if cls_name == 'SOP2':
-      sdst, ssrc0, ssrc1 = [unwrap(inst._values.get(f, 0)) for f in ('sdst', 'ssrc0', 'ssrc1')]
-      ssrc0_str = fmt_src(ssrc0) if ssrc0 == 255 else _fmt_ssrc(ssrc0, src0_cnt)
-      ssrc1_str = fmt_src(ssrc1) if ssrc1 == 255 else _fmt_ssrc(ssrc1, src1_cnt)
-      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {ssrc0_str}, {ssrc1_str}"
-    if cls_name == 'SOPC':
-      return f"{op_name} {_fmt_ssrc(unwrap(inst._values.get('ssrc0', 0)), src0_cnt)}, {_fmt_ssrc(unwrap(inst._values.get('ssrc1', 0)), src1_cnt)}"
-    if cls_name == 'SOPK':
-      sdst, simm16 = unwrap(inst._values.get('sdst', 0)), unwrap(inst._values.get('simm16', 0))
-      if op_name == 's_version': return f"{op_name} 0x{simm16:x}"
-      if op_name in ('s_setreg_b32', 's_getreg_b32'):
-        hwreg_id, hwreg_offset, hwreg_size = simm16 & 0x3f, (simm16 >> 6) & 0x1f, ((simm16 >> 11) & 0x1f) + 1
-        hwreg_str = f"0x{simm16:x}" if hwreg_id in (16, 17) else f"hwreg({HWREG_NAMES.get(hwreg_id, str(hwreg_id))}, {hwreg_offset}, {hwreg_size})"
-        return f"{op_name} {hwreg_str}, {_fmt_sdst(sdst, 1)}" if op_name == 's_setreg_b32' else f"{op_name} {_fmt_sdst(sdst, 1)}, {hwreg_str}"
-      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, 0x{simm16:x}"
-
-  # Generic fallback
-  def fmt_field(n, v):
-    v = unwrap(v)
-    if n in SRC_FIELDS: return fmt_src(v) if v != 255 else "0xff"
-    if n in ('sdst', 'vdst'): return f"{'s' if n == 'sdst' else 'v'}{v}"
-    return f"v{v}" if n == 'vsrc1' else f"0x{v:x}" if n == 'simm16' else str(v)
-  ops = [fmt_field(n, inst._values.get(n, 0)) for n in inst._fields if n not in ('encoding', 'op')]
-  return f"{op_name} {', '.join(ops)}" if ops else op_name
-
-# Assembler
-SPECIAL_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'null': RawImm(124), 'off': RawImm(124), 'm0': RawImm(125), 'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'scc': RawImm(253)}
-FLOAT_CONSTS = {'0.5': 0.5, '-0.5': -0.5, '1.0': 1.0, '-1.0': -1.0, '2.0': 2.0, '-2.0': -2.0, '4.0': 4.0, '-4.0': -4.0}
+SPEC_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'vcc': RawImm(106), 'null': RawImm(124), 'off': RawImm(124), 'm0': RawImm(125),
+             'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'exec': RawImm(126), 'scc': RawImm(253), 'src_scc': RawImm(253)}
+FLOATS = {str(k): k for k in FLOAT_ENC}  # Valid float literal strings: '0.5', '-0.5', '1.0', etc.
 REG_MAP: dict[str, _RegFactory] = {'s': s, 'v': v, 't': ttmp, 'ttmp': ttmp}
+SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b96', 's_load_b128', 's_load_b256', 's_load_b512',
+            's_load_i8', 's_load_u8', 's_load_i16', 's_load_u16',
+            's_buffer_load_b32', 's_buffer_load_b64', 's_buffer_load_b96', 's_buffer_load_b128', 's_buffer_load_b256', 's_buffer_load_b512',
+            's_buffer_load_i8', 's_buffer_load_u8', 's_buffer_load_i16', 's_buffer_load_u16',
+            's_atc_probe', 's_atc_probe_buffer'}
+SPEC_DSL = {'vcc_lo': 'VCC_LO', 'vcc_hi': 'VCC_HI', 'vcc': 'VCC_LO', 'null': 'NULL', 'off': 'OFF', 'm0': 'M0',
+            'exec_lo': 'EXEC_LO', 'exec_hi': 'EXEC_HI', 'exec': 'EXEC_LO', 'scc': 'SCC', 'src_scc': 'SCC'}
 
-def parse_operand(op: str) -> tuple:
-  op = op.strip().lower()
-  neg = op.startswith('-') and not op[1:2].isdigit(); op = op[1:] if neg else op
-  abs_ = op.startswith('|') and op.endswith('|') or op.startswith('abs(') and op.endswith(')')
-  op = op[1:-1] if op.startswith('|') else op[4:-1] if op.startswith('abs(') else op
-  hi_half = op.endswith('.h')
-  op = re.sub(r'\.[lh]$', '', op)
-  if op in FLOAT_CONSTS: return (FLOAT_CONSTS[op], neg, abs_, hi_half)
-  if re.match(r'^-?\d+$', op): return (int(op), neg, abs_, hi_half)
-  if m := re.match(r'^-?0x([0-9a-f]+)$', op):
-    v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
-    return (v, neg, abs_, hi_half)
-  if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_, hi_half)
-  if op == 'lit': return (RawImm(255), neg, abs_, hi_half)  # literal marker (actual value comes from literal word)
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))], neg, abs_, hi_half)
-  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op):
-    reg = REG_MAP[m.group(1)][int(m.group(2))]
-    reg.hi = hi_half
-    return (reg, neg, abs_, hi_half)
-  # hwreg(name, offset, size) or hwreg(name) -> simm16 encoding
-  if m := re.match(r'^hwreg\((\w+)(?:,\s*(\d+),\s*(\d+))?\)$', op):
-    name_str = m.group(1).lower()
-    hwreg_id = HWREG_IDS.get(name_str, int(name_str) if name_str.isdigit() else None)
-    if hwreg_id is None: raise ValueError(f"unknown hwreg name: {name_str}")
-    offset, size = int(m.group(2)) if m.group(2) else 0, int(m.group(3)) if m.group(3) else 32
-    return (((size - 1) << 11) | (offset << 6) | hwreg_id, neg, abs_, hi_half)
-  raise ValueError(f"cannot parse operand: {op}")
+def _op2dsl(op: str) -> str:
+  op = op.strip()
+  neg = op.startswith('-') and not (op[1:2].isdigit() or (len(op) > 2 and op[1] == '0' and op[2] in 'xX'))
+  if neg: op = op[1:]
+  if op.startswith('neg(') and op.endswith(')'): neg = True; op = op[4:-1]
+  abs_ = (op.startswith('|') and op.endswith('|')) or (op.startswith('abs(') and op.endswith(')'))
+  if abs_: op = op[1:-1] if op.startswith('|') else op[4:-1]
+  hi = ".h" if op.endswith('.h') else ".l" if op.endswith('.l') else ""
+  if hi: op = op[:-2]
+  lo = op.lower()
+  def wrap(b): return f"{'-' if neg else ''}abs({b}){hi}" if abs_ else f"-{b}{hi}" if neg else f"{b}{hi}"
+  if lo in SPEC_DSL: return wrap(SPEC_DSL[lo])
+  if op in FLOATS: return wrap(op)
+  rp = {'s': 's', 'v': 'v', 't': 'ttmp', 'ttmp': 'ttmp'}
+  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return wrap(f"{rp[m.group(1)]}[{m.group(2)}:{m.group(3)}]")
+  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', lo): return wrap(f"{rp[m.group(1)]}[{m.group(2)}]")
+  if re.match(r'^-?\d+$|^-?0x[0-9a-fA-F]+$', op): return f"SrcMod({op}, neg={neg}, abs_={abs_})" if neg or abs_ else op
+  return wrap(op)
 
-SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b128', 's_load_b256', 's_load_b512',
-            's_buffer_load_b32', 's_buffer_load_b64', 's_buffer_load_b128', 's_buffer_load_b256', 's_buffer_load_b512'}
-SOP1_SRC_ONLY = {'s_setpc_b64', 's_rfe_b64'}
-SOP1_MSG_IMM = {'s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'}
-SOPK_IMM_ONLY = {'s_version'}
-SOPK_IMM_FIRST = {'s_setreg_b32'}
-SOPK_UNSUPPORTED = {'s_setreg_imm32_b32'}
+def _parse_ops(s: str) -> list[str]:
+  ops, cur, depth, pipe = [], "", 0, False
+  for c in s:
+    if c in '[(': depth += 1
+    elif c in '])': depth -= 1
+    elif c == '|': pipe = not pipe
+    if c == ',' and depth == 0 and not pipe: ops.append(cur.strip()); cur = ""
+    else: cur += c
+  if cur.strip(): ops.append(cur.strip())
+  return ops
 
-def asm(text: str) -> Inst:
-  from extra.assembly.amd.autogen import rdna3 as autogen
-  text = text.strip()
-  clamp = 'clamp' in text.lower()
-  if clamp: text = re.sub(r'\s+clamp\s*$', '', text, flags=re.I)
-  modifiers = {}
-  if m := re.search(r'\s+wait_exp:(\d+)', text, re.I): modifiers['waitexp'] = int(m.group(1)); text = text[:m.start()] + text[m.end():]
+def _extract(text: str, pat: str, flags=re.I):
+  if m := re.search(pat, text, flags): return m, text[:m.start()] + ' ' + text[m.end():]
+  return None, text
+
+# Instruction aliases: LLVM uses different names for some instructions
+_ALIASES = {
+  'v_cmp_tru_f16': 'v_cmp_t_f16', 'v_cmp_tru_f32': 'v_cmp_t_f32', 'v_cmp_tru_f64': 'v_cmp_t_f64',
+  'v_cmpx_tru_f16': 'v_cmpx_t_f16', 'v_cmpx_tru_f32': 'v_cmpx_t_f32', 'v_cmpx_tru_f64': 'v_cmpx_t_f64',
+  'v_cvt_flr_i32_f32': 'v_cvt_floor_i32_f32', 'v_cvt_rpi_i32_f32': 'v_cvt_nearest_i32_f32',
+  'v_ffbh_i32': 'v_cls_i32', 'v_ffbh_u32': 'v_clz_i32_u32', 'v_ffbl_b32': 'v_ctz_i32_b32',
+  'v_cvt_pkrtz_f16_f32': 'v_cvt_pk_rtz_f16_f32', 'v_fmac_legacy_f32': 'v_fmac_dx9_zero_f32', 'v_mul_legacy_f32': 'v_mul_dx9_zero_f32',
+  's_load_dword': 's_load_b32', 's_load_dwordx2': 's_load_b64', 's_load_dwordx4': 's_load_b128',
+  's_load_dwordx8': 's_load_b256', 's_load_dwordx16': 's_load_b512',
+  's_buffer_load_dword': 's_buffer_load_b32', 's_buffer_load_dwordx2': 's_buffer_load_b64',
+  's_buffer_load_dwordx4': 's_buffer_load_b128', 's_buffer_load_dwordx8': 's_buffer_load_b256',
+  's_buffer_load_dwordx16': 's_buffer_load_b512',
+  'v_cvt_pknorm_i16_f16': 'v_cvt_pk_norm_i16_f16', 'v_cvt_pknorm_u16_f16': 'v_cvt_pk_norm_u16_f16',
+  'v_add3_nc_u32': 'v_add3_u32', 'v_xor_add_u32': 'v_xad_u32',
+  'v_interp_p2_new_f32': 'v_interp_p2_f32',
+  's_ff1_i32_b32': 's_ctz_i32_b32', 's_ff1_i32_b64': 's_ctz_i32_b64',
+  's_flbit_i32_b32': 's_clz_i32_u32', 's_flbit_i32_b64': 's_clz_i32_u64', 's_flbit_i32': 's_cls_i32', 's_flbit_i32_i64': 's_cls_i32_i64',
+  's_andn1_saveexec_b32': 's_and_not0_saveexec_b32', 's_andn1_saveexec_b64': 's_and_not0_saveexec_b64',
+  's_andn1_wrexec_b32': 's_and_not0_wrexec_b32', 's_andn1_wrexec_b64': 's_and_not0_wrexec_b64',
+  's_andn2_saveexec_b32': 's_and_not1_saveexec_b32', 's_andn2_saveexec_b64': 's_and_not1_saveexec_b64',
+  's_andn2_wrexec_b32': 's_and_not1_wrexec_b32', 's_andn2_wrexec_b64': 's_and_not1_wrexec_b64',
+  's_orn1_saveexec_b32': 's_or_not0_saveexec_b32', 's_orn1_saveexec_b64': 's_or_not0_saveexec_b64',
+  's_orn2_saveexec_b32': 's_or_not1_saveexec_b32', 's_orn2_saveexec_b64': 's_or_not1_saveexec_b64',
+  's_andn2_b32': 's_and_not1_b32', 's_andn2_b64': 's_and_not1_b64',
+  's_orn2_b32': 's_or_not1_b32', 's_orn2_b64': 's_or_not1_b64',
+  'v_dot2c_f32_f16': 'v_dot2acc_f32_f16',
+  'v_fma_legacy_f32': 'v_fma_dx9_zero_f32',
+  'ds_read_b32': 'ds_load_b32', 'ds_read_b64': 'ds_load_b64', 'ds_read_b96': 'ds_load_b96', 'ds_read_b128': 'ds_load_b128',
+  'ds_read_i8': 'ds_load_i8', 'ds_read_u8': 'ds_load_u8', 'ds_read_i16': 'ds_load_i16', 'ds_read_u16': 'ds_load_u16',
+  'ds_read_i8_d16': 'ds_load_i8_d16', 'ds_read_u8_d16': 'ds_load_u8_d16', 'ds_read_i8_d16_hi': 'ds_load_i8_d16_hi', 'ds_read_u8_d16_hi': 'ds_load_u8_d16_hi',
+  'ds_read_u16_d16': 'ds_load_u16_d16', 'ds_read_u16_d16_hi': 'ds_load_u16_d16_hi',
+  'ds_read2_b32': 'ds_load_2addr_b32', 'ds_read2_b64': 'ds_load_2addr_b64',
+  'ds_read2st64_b32': 'ds_load_2addr_stride64_b32', 'ds_read2st64_b64': 'ds_load_2addr_stride64_b64',
+  'ds_read_addtid_b32': 'ds_load_addtid_b32', 'ds_write_addtid_b32': 'ds_store_addtid_b32',
+  'ds_write_b32': 'ds_store_b32', 'ds_write_b64': 'ds_store_b64', 'ds_write_b96': 'ds_store_b96', 'ds_write_b128': 'ds_store_b128',
+  'ds_write_b8': 'ds_store_b8', 'ds_write_b16': 'ds_store_b16',
+  'ds_write_b8_d16_hi': 'ds_store_b8_d16_hi', 'ds_write_b16_d16_hi': 'ds_store_b16_d16_hi',
+  'ds_write2_b32': 'ds_store_2addr_b32', 'ds_write2_b64': 'ds_store_2addr_b64',
+  'ds_write2st64_b32': 'ds_store_2addr_stride64_b32', 'ds_write2st64_b64': 'ds_store_2addr_stride64_b64',
+  'ds_wrxchg_rtn_b32': 'ds_storexchg_rtn_b32', 'ds_wrxchg_rtn_b64': 'ds_storexchg_rtn_b64',
+  'ds_wrxchg2_rtn_b32': 'ds_storexchg_2addr_rtn_b32', 'ds_wrxchg2_rtn_b64': 'ds_storexchg_2addr_rtn_b64',
+  'ds_wrxchg2st64_rtn_b32': 'ds_storexchg_2addr_stride64_rtn_b32', 'ds_wrxchg2st64_rtn_b64': 'ds_storexchg_2addr_stride64_rtn_b64',
+}
+
+def _apply_alias(text: str) -> str:
+  mn = text.split()[0].lower() if ' ' in text else text.lower().rstrip('_')
+  for m in (mn, mn.removesuffix('_e32'), mn.removesuffix('_e64')):
+    if m in _ALIASES: return _ALIASES[m] + text[len(m):]
+  return text
+
+def _has(op: str, *subs) -> bool: return any(s in op for s in subs)
+
+def get_dsl(text: str, arch: str = "rdna3") -> str:
+  text, kw = _apply_alias(text.strip()), []
+  # Extract modifiers
+  for pat, val in [(r'\s+mul:2(?:\s|$)', 1), (r'\s+mul:4(?:\s|$)', 2), (r'\s+div:2(?:\s|$)', 3)]:
+    if (m := _extract(text, pat))[0]: kw.append(f'omod={val}'); text = m[1]; break
+  clamp_found = False
+  if (m := _extract(text, r'\s+clamp(?:\s|$)'))[0]: clamp_found = True; text = m[1]
+  opsel, m, text = None, *_extract(text, r'\s+op_sel:\[([^\]]+)\]')
+  if m:
+    bits, mn = [int(x.strip()) for x in m.group(1).split(',')], text.split()[0].lower()
+    is3p = mn.startswith(('v_pk_', 'v_wmma_', 'v_dot', 'v_fma_mix'))
+    opsel = (bits[0] | (bits[1] << 1) | (bits[2] << 2)) if len(bits) == 3 and is3p else \
+            (bits[0] | (bits[1] << 1) | (bits[2] << 3)) if len(bits) == 3 else sum(b << i for i, b in enumerate(bits))
+  opsel_hi_val, m, text = None, *_extract(text, r'\s+op_sel_hi:\[([^\]]+)\]')
+  if m: opsel_hi_val = [int(x.strip()) for x in m.group(1).split(',')]
+  m, text = _extract(text, r'\s+wait_exp:(\d+)'); waitexp = m.group(1) if m else None
+  m, text = _extract(text, r'\s+offset:(0x[0-9a-fA-F]+|-?\d+)'); off_val = m.group(1) if m else None
+  m, text = _extract(text, r'\s+dlc(?:\s|$)'); dlc = 1 if m else None
+  m, text = _extract(text, r'\s+glc(?:\s|$)'); glc = 1 if m else None
+  m, text = _extract(text, r'\s+slc(?:\s|$)'); slc = 1 if m else None
+  m, text = _extract(text, r'\s+tfe(?:\s|$)'); tfe = 1 if m else None
+  m, text = _extract(text, r'\s+offen(?:\s|$)'); offen = 1 if m else None
+  m, text = _extract(text, r'\s+idxen(?:\s|$)'); idxen = 1 if m else None
+  m, text = _extract(text, r'\s+format:\[([^\]]+)\]'); fmt_val = m.group(1) if m else None
+  m, text = _extract(text, r'\s+format:(\d+)'); fmt_val = m.group(1) if m and not fmt_val else fmt_val
+  m, text = _extract(text, r'\s+neg_lo:\[([^\]]+)\]'); neg_lo = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+  m, text = _extract(text, r'\s+neg_hi:\[([^\]]+)\]'); neg_hi = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+  m, text = _extract(text, r'\s+byte_sel:(\d+)'); byte_sel = int(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+offset0:(\d+)'); ds_off0 = int(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+offset1:(\d+)'); ds_off1 = int(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+index_key:(\d+)'); index_key = int(m.group(1)) if m else None
+  if waitexp: kw.append(f'waitexp={waitexp}')
+  if byte_sel is not None:
+    if opsel is None: opsel = 0
+    opsel |= (byte_sel << 2)
+  if ds_off0 is not None: kw.append(f'offset0={ds_off0}')
+  if ds_off1 is not None: kw.append(f'offset1={ds_off1}')
+  if index_key is not None: kw.append(f'opsel={index_key}')
+
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
-  mnemonic, op_str = parts[0].lower(), text[len(parts[0]):].strip()
-  # Handle s_waitcnt specially before operand parsing
-  if mnemonic == 's_waitcnt':
-    vmcnt, expcnt, lgkmcnt = 0x3f, 0x7, 0x3f
-    for part in op_str.replace(',', ' ').split():
-      if m := re.match(r'vmcnt\((\d+)\)', part): vmcnt = int(m.group(1))
-      elif m := re.match(r'expcnt\((\d+)\)', part): expcnt = int(m.group(1))
-      elif m := re.match(r'lgkmcnt\((\d+)\)', part): lgkmcnt = int(m.group(1))
-      elif re.match(r'^0x[0-9a-f]+$|^\d+$', part): return autogen.s_waitcnt(simm16=int(part, 0))
-    return autogen.s_waitcnt(simm16=waitcnt(vmcnt, expcnt, lgkmcnt))
-  # Handle VOPD dual-issue instructions: opx dst, src :: opy dst, src
+  mn, op_str = parts[0].lower(), text[len(parts[0]):].strip()
+  ops, args = _parse_ops(op_str), [_op2dsl(o) for o in _parse_ops(op_str)]
+
+  # s_waitcnt
+  if mn == 's_waitcnt':
+    vm, exp, lgkm = 0x3f, 0x7, 0x3f
+    for p in op_str.replace(',', ' ').split():
+      if m := re.match(r'vmcnt\((\d+)\)', p): vm = int(m.group(1))
+      elif m := re.match(r'expcnt\((\d+)\)', p): exp = int(m.group(1))
+      elif m := re.match(r'lgkmcnt\((\d+)\)', p): lgkm = int(m.group(1))
+      elif re.match(r'^0x[0-9a-f]+$|^\d+$', p): return f"s_waitcnt(simm16={int(p, 0)})"
+    return f"s_waitcnt(simm16={waitcnt(vm, exp, lgkm)})"
+
+  # VOPD
   if '::' in text:
-    x_part, y_part = text.split('::')
-    x_parts, y_parts = x_part.strip().replace(',', ' ').split(), y_part.strip().replace(',', ' ').split()
-    opx_name, opy_name = x_parts[0].upper(), y_parts[0].upper()
-    opx, opy = autogen.VOPDOp[opx_name], autogen.VOPDOp[opy_name]
-    x_ops, y_ops = [parse_operand(p)[0] for p in x_parts[1:]], [parse_operand(p)[0] for p in y_parts[1:]]
-    vdstx, srcx0 = x_ops[0], x_ops[1] if len(x_ops) > 1 else 0
-    vsrcx1 = x_ops[2] if len(x_ops) > 2 else VGPR(0)
-    vdsty, srcy0 = y_ops[0], y_ops[1] if len(y_ops) > 1 else 0
-    vsrcy1 = y_ops[2] if len(y_ops) > 2 else VGPR(0)
-    # Handle fmaak/fmamk literals (4th operand on x or y side)
-    lit = None
-    if 'fmaak' in opx_name.lower() and len(x_ops) > 3: lit = unwrap(x_ops[3])
-    elif 'fmamk' in opx_name.lower() and len(x_ops) > 3: lit, vsrcx1 = unwrap(x_ops[2]), x_ops[3]
-    elif 'fmaak' in opy_name.lower() and len(y_ops) > 3: lit = unwrap(y_ops[3])
-    elif 'fmamk' in opy_name.lower() and len(y_ops) > 3: lit, vsrcy1 = unwrap(y_ops[2]), y_ops[3]
-    return autogen.VOPD(opx, opy, vdstx=vdstx, vdsty=vdsty, srcx0=srcx0, vsrcx1=vsrcx1, srcy0=srcy0, vsrcy1=vsrcy1, literal=lit)
-  operands, current, depth, in_pipe = [], "", 0, False
-  for ch in op_str:
-    if ch in '[(': depth += 1
-    elif ch in '])': depth -= 1
-    elif ch == '|': in_pipe = not in_pipe
-    if ch == ',' and depth == 0 and not in_pipe: operands.append(current.strip()); current = ""
-    else: current += ch
-  if current.strip(): operands.append(current.strip())
-  parsed = [parse_operand(op) for op in operands]
-  values = [p[0] for p in parsed]
-  neg_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[1])
-  abs_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[2])
-  opsel_bits = (8 if len(parsed) > 0 and parsed[0][3] else 0) | sum((1 << i) for i, p in enumerate(parsed[1:4]) if p[3])
-  lit = None
-  if mnemonic in ('v_fmaak_f32', 'v_fmaak_f16') and len(values) == 4: lit, values = unwrap(values[3]), values[:3]
-  elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4: lit, values = unwrap(values[2]), [values[0], values[1], values[3]]
-  vcc_ops = {'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32', 'v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32'}
-  if mnemonic.replace('_e32', '') in vcc_ops and len(values) >= 5: values = [values[0], values[2], values[3]]
-  # v_cmp_*_e32: strip implicit vcc_lo dest. v_cmp_*_e64: keep vdst (vcc_lo encodes to 106)
-  if mnemonic.startswith('v_cmp') and not mnemonic.endswith('_e64') and len(values) >= 3 and operands[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'):
-    values = values[1:]
-  # CMPX instructions with _e64 suffix: prepend implicit EXEC_LO destination (vdst=126)
-  if 'cmpx' in mnemonic and mnemonic.endswith('_e64') and len(values) == 2:
-    values = [VGPR(126, 1)] + values
-    # Recalculate modifiers: parsed[0]=src0, parsed[1]=src1 (no vdst in user input)
-    neg_bits = sum((1 << i) for i, p in enumerate(parsed[:3]) if p[1])
-    abs_bits = sum((1 << i) for i, p in enumerate(parsed[:3]) if p[2])
-    opsel_bits = sum((1 << i) for i, p in enumerate(parsed[:2]) if p[3])
-  vop3sd_ops = {'v_div_scale_f32', 'v_div_scale_f64'}
-  if mnemonic in vop3sd_ops and len(parsed) >= 5:
-    neg_bits = sum((1 << i) for i, p in enumerate(parsed[2:5]) if p[1])
-    abs_bits = sum((1 << i) for i, p in enumerate(parsed[2:5]) if p[2])
-  if mnemonic in SOPK_UNSUPPORTED: raise ValueError(f"unsupported instruction: {mnemonic}")
-  elif mnemonic in SOP1_SRC_ONLY:
-    return getattr(autogen, mnemonic)(ssrc0=values[0])
-  elif mnemonic in SOP1_MSG_IMM:
-    return getattr(autogen, mnemonic)(sdst=values[0], ssrc0=RawImm(unwrap(values[1])))
-  elif mnemonic in SOPK_IMM_ONLY:
-    return getattr(autogen, mnemonic)(simm16=values[0])
-  elif mnemonic in SOPK_IMM_FIRST:
-    return getattr(autogen, mnemonic)(simm16=values[0], sdst=values[1])
-  elif mnemonic in SMEM_OPS and len(operands) >= 3 and re.match(r'^-?[0-9]|^-?0x', operands[2].strip().lower()):
-    return getattr(autogen, mnemonic)(sdata=values[0], sbase=values[1], offset=values[2], soffset=RawImm(124))
-  elif mnemonic.startswith('buffer_') and len(operands) >= 2 and operands[1].strip().lower() == 'off':
-    return getattr(autogen, mnemonic)(vdata=values[0], vaddr=0, srsrc=values[2], soffset=RawImm(unwrap(values[3])) if len(values) > 3 else RawImm(0))
-  elif (mnemonic.startswith('flat_load') or mnemonic.startswith('global_load') or mnemonic.startswith('scratch_load')) and len(values) >= 3:
-    offset = int(m.group(1)) if (m := re.search(r'offset:(-?\d+)', op_str)) else 0
-    return getattr(autogen, mnemonic)(vdst=values[0], addr=values[1], saddr=values[2], offset=offset)
-  elif (mnemonic.startswith('flat_store') or mnemonic.startswith('global_store') or mnemonic.startswith('scratch_store')) and len(values) >= 3:
-    offset = int(m.group(1)) if (m := re.search(r'offset:(-?\d+)', op_str)) else 0
-    return getattr(autogen, mnemonic)(addr=values[0], data=values[1], saddr=values[2], offset=offset)
-  for suffix in (['_e32', ''] if not (neg_bits or abs_bits or clamp) else ['', '_e32']):
-    if hasattr(autogen, name := mnemonic.replace('.', '_') + suffix):
-      use_opsel = 'opsel' in getattr(autogen, name).func._fields
-      vals = [type(v)(v.idx, v.count, False) if isinstance(v, Reg) and v.hi and use_opsel else v for v in values]
-      inst = getattr(autogen, name)(*vals, literal=lit, **modifiers)
-      if neg_bits and 'neg' in inst._fields: inst._values['neg'] = neg_bits
-      if opsel_bits and use_opsel: inst._values['opsel'] = opsel_bits
-      if abs_bits and 'abs' in inst._fields: inst._values['abs'] = abs_bits
-      if clamp and 'clmp' in inst._fields: inst._values['clmp'] = 1
-      return inst
-  raise ValueError(f"unknown instruction: {mnemonic}")
+    xp, yp = text.split('::')
+    xps, yps = xp.strip().replace(',', ' ').split(), yp.strip().replace(',', ' ').split()
+    xo, yo = [_op2dsl(p) for p in xps[1:]], [_op2dsl(p) for p in yps[1:]]
+    vdx, sx0, vsx1 = xo[0], xo[1] if len(xo) > 1 else '0', xo[2] if len(xo) > 2 else 'v[0]'
+    vdy, sy0, vsy1 = yo[0], yo[1] if len(yo) > 1 else '0', yo[2] if len(yo) > 2 else 'v[0]'
+    lit = xo[3] if 'fmaak' in xps[0].lower() and len(xo) > 3 else yo[3] if 'fmaak' in yps[0].lower() and len(yo) > 3 else None
+    if 'fmamk' in xps[0].lower() and len(xo) > 3: lit, vsx1 = xo[2], xo[3]
+    elif 'fmamk' in yps[0].lower() and len(yo) > 3: lit, vsy1 = yo[2], yo[3]
+    return f"VOPD(VOPDOp.{xps[0].upper()}, VOPDOp.{yps[0].upper()}, vdstx={vdx}, vdsty={vdy}, srcx0={sx0}, vsrcx1={vsx1}, srcy0={sy0}, vsrcy1={vsy1}{f', literal={lit}' if lit else ''})"
+
+  # Special instructions
+  if mn == 's_setreg_imm32_b32': raise ValueError(f"unsupported: {mn}")
+  sop1_no_dest = ('s_alloc_vgpr', 's_barrier_init', 's_barrier_join', 's_barrier_signal', 's_barrier_signal_isfirst', 's_sleep_var')
+  if mn in sop1_no_dest:
+    return f"{mn}(sdst=RawImm(128), ssrc0={args[0]})"
+  if mn in ('s_setpc_b64', 's_rfe_b64'): return f"{mn}(ssrc0={args[0]})"
+  if mn in ('s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'): return f"{mn}(sdst={args[0]}, ssrc0=RawImm({args[1].strip()}))"
+  if mn == 's_version': return f"{mn}(simm16={args[0]})"
+  if mn == 's_setreg_b32': return f"{mn}(simm16={args[0]}, sdst={args[1]})"
+
+  # Export instructions (RDNA4 VEXPORT)
+  if mn == 'export':
+    target_map = {**{f'mrt{i}': i for i in range(8)}, 'mrtz': 8, **{f'pos{i}': 12+i for i in range(4)}}
+    m, exp_str = _extract(op_str, r'\s+done(?:\s|$)')
+    done_val = 1 if m else 0
+    exp_parts = exp_str.replace(',', ' ').split()
+    target_name = exp_parts[0].lower().strip()
+    target = target_map.get(target_name, 0)
+    vsrcs, en = [], 0
+    for i, o in enumerate(exp_parts[1:5]):
+      o = o.strip().lower()
+      if o == 'off': vsrcs.append('v[0]')
+      else: vsrcs.append(_op2dsl(o)); en |= (1 << i)
+    return f"VEXPORT(target={target}, en={en}, vsrc0={vsrcs[0]}, vsrc1={vsrcs[1]}, vsrc2={vsrcs[2]}, vsrc3={vsrcs[3]}, done={done_val})"
+
+  # SMEM
+  if mn in SMEM_OPS:
+    gs, ds = ", glc=1" if glc else "", ", dlc=1" if dlc else ""
+    off_field = "ioffset" if arch == "rdna4" else "offset"
+    th_s, scope_s, smem_str = "", "", op_str
+    if arch == "rdna4":
+      m, smem_str = _extract(op_str, r'\s+th:TH_(\w+)')
+      th_val = {'LOAD_RT': 0, 'LOAD_NT': 1, 'LOAD_HT': 2, 'LOAD_LU': 3, 'STORE_RT': 0, 'STORE_NT': 1, 'STORE_HT': 2, 'STORE_LU': 3}.get(m.group(1), 0) if m else None
+      m, smem_str = _extract(smem_str, r'\s+scope:SCOPE_(\w+)')
+      scope_val = {'CU': 0, 'SE': 1, 'DEV': 2, 'SYS': 3}.get(m.group(1), 0) if m else None
+      if scope_val is None:
+        m, smem_str = _extract(smem_str, r'\s+scope:(0?x?[0-9a-fA-F]+)')
+        scope_val = int(m.group(1), 0) if m else None
+      th_s = f", th={th_val}" if th_val else ""
+      scope_s = f", scope={scope_val}" if scope_val else ""
+    smem_ops = _parse_ops(smem_str)
+    smem_args = [_op2dsl(o) for o in smem_ops]
+    if len(smem_ops) >= 3 and re.match(r'^-?[0-9]|^-?0x', smem_ops[2].strip().lower()):
+      return f"{mn}(sdata={smem_args[0]}, sbase={smem_args[1]}, {off_field}={smem_ops[2].strip()}, soffset=RawImm(124){gs}{ds}{th_s}{scope_s})"
+    if off_val and len(smem_ops) >= 3: return f"{mn}(sdata={smem_args[0]}, sbase={smem_args[1]}, {off_field}={off_val}, soffset={smem_args[2]}{gs}{ds}{th_s}{scope_s})"
+    if len(smem_ops) >= 3: return f"{mn}(sdata={smem_args[0]}, sbase={smem_args[1]}, soffset={smem_args[2]}{gs}{ds}{th_s}{scope_s})"
+
+  # Buffer (MUBUF/MTBUF/VBUFFER) instructions
+  if mn.startswith(('buffer_', 'tbuffer_')):
+    is_tbuf = mn.startswith('tbuffer_')
+    fmt_num = None
+    if fmt_val is not None:
+      if fmt_val.isdigit(): fmt_num = int(fmt_val)
+      else: fmt_num = BUF_FMT.get(fmt_val.replace(' ', '')) or _parse_buf_fmt_combo(fmt_val)
+    if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}()"
+    if arch == "rdna4":
+      m, buf_text = _extract(op_str, r'\s+th:TH_(\w+)')
+      th_val = {'LOAD_RT': 0, 'LOAD_NT': 1, 'LOAD_HT': 2, 'LOAD_BYPASS': 3, 'LOAD_LU': 4, 'LOAD_RT_NT': 5, 'LOAD_NT_HT': 6, 'LOAD_RT_WB': 7,
+                'STORE_RT': 0, 'STORE_NT': 1, 'STORE_HT': 2, 'STORE_BYPASS': 3, 'STORE_LU': 4, 'STORE_RT_NT': 5, 'STORE_NT_HT': 6,
+                'ATOMIC_RT': 0, 'ATOMIC_NT': 1, 'ATOMIC_RETURN': 1, 'ATOMIC_RT_RETURN': 1, 'ATOMIC_NT_RETURN': 3, 'ATOMIC_CASCADE_RT': 6, 'ATOMIC_CASCADE_NT': 6}.get(m.group(1), 0) if m else 0
+      m, buf_text = _extract(buf_text, r'\s+scope:SCOPE_(\w+)')
+      scope_val = {'CU': 0, 'SE': 1, 'DEV': 2, 'SYS': 3}.get(m.group(1), 0) if m else 0
+      buf_ops = _parse_ops(buf_text)
+      buf_args = [_op2dsl(o) for o in buf_ops]
+      vbuf_mods = "".join([f", ioffset={off_val}" if off_val else "", ", offen=1" if offen else "", ", idxen=1" if idxen else "",
+                          f", th={th_val}" if th_val else "", f", scope={scope_val}" if scope_val else "",
+                          ", tfe=1" if tfe else ""])
+      if is_tbuf and fmt_num is not None: vbuf_mods = f", format={fmt_num}" + vbuf_mods
+      elif is_tbuf: vbuf_mods = ", format=1" + vbuf_mods
+      else: vbuf_mods = ", format=1" + vbuf_mods
+      vaddr_idx = 1
+      if len(buf_ops) > vaddr_idx and buf_ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
+      else: vaddr_val = buf_args[vaddr_idx] if len(buf_args) > vaddr_idx else "v[0]"
+      rsrc_idx, soff_idx = (2, 3) if len(buf_ops) > 1 else (1, 2)
+      rsrc_raw = buf_ops[rsrc_idx].strip() if len(buf_ops) > rsrc_idx else "s[0:3]"
+      if m := re.match(r's\[(\d+):\d+\]', rsrc_raw.lower()): rsrc_val = m.group(1)
+      elif m := re.match(r's(\d+)', rsrc_raw.lower()): rsrc_val = m.group(1)
+      elif m := re.match(r'ttmp\[(\d+):\d+\]', rsrc_raw.lower()): rsrc_val = str(108 + int(m.group(1)))
+      elif m := re.match(r'ttmp(\d+)', rsrc_raw.lower()): rsrc_val = str(108 + int(m.group(1)))
+      else: rsrc_val = "0"
+      soff_raw = buf_ops[soff_idx].strip() if len(buf_ops) > soff_idx else "0"
+      soff_lower = soff_raw.lower()
+      if soff_lower == 'm0': soff_val = "RawImm(125)"
+      elif soff_lower in ('null', 'off'): soff_val = "RawImm(124)"
+      elif m := re.match(r's(\d+)', soff_lower): soff_val = f"RawImm({m.group(1)})"
+      else: soff_val = f"RawImm({soff_raw})"
+      return f"{mn}(vdata={buf_args[0]}, vaddr={vaddr_val}, rsrc={rsrc_val}, soffset={soff_val}{vbuf_mods})"
+    buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
+                        ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
+    if is_tbuf and fmt_num is not None: buf_mods = f", format={fmt_num}" + buf_mods
+    vaddr_idx = 1
+    if len(ops) > vaddr_idx and ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
+    else: vaddr_val = args[vaddr_idx] if len(args) > vaddr_idx else "v[0]"
+    srsrc_idx, soff_idx = (2, 3) if len(ops) > 1 else (1, 2)
+    srsrc_val = args[srsrc_idx] if len(args) > srsrc_idx else "s[0:3]"
+    soff_val = args[soff_idx] if len(args) > soff_idx else "0"
+    return f"{mn}(vdata={args[0]}, vaddr={vaddr_val}, srsrc={srsrc_val}, soffset={soff_val}{buf_mods})"
+
+  # FLAT/GLOBAL/SCRATCH load/store/atomic
+  def _saddr(a): return 'RawImm(124)' if a in ('OFF', 'NULL') else a
+  flat_mods = f"{f', offset={off_val}' if off_val else ''}{', glc=1' if glc else ''}{', slc=1' if slc else ''}{', dlc=1' if dlc else ''}"
+  for pre, flds in [('flat_load','vdst,addr,saddr'), ('global_load','vdst,addr,saddr'), ('scratch_load','vdst,addr,saddr'),
+                    ('flat_store','addr,data,saddr'), ('global_store','addr,data,saddr'), ('scratch_store','addr,data,saddr')]:
+    if mn.startswith(pre) and len(args) >= 2:
+      f0, f1, f2 = flds.split(',')
+      return f"{mn}({f0}={args[0]}, {f1}={args[1]}{f', {f2}={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
+  for pre in ('flat_atomic', 'global_atomic', 'scratch_atomic'):
+    if mn.startswith(pre):
+      if glc and len(args) >= 3: return f"{mn}(vdst={args[0]}, addr={args[1]}, data={args[2]}{f', saddr={_saddr(args[3])}' if len(args) >= 4 else ', saddr=RawImm(124)'}{flat_mods})"
+      if len(args) >= 2: return f"{mn}(addr={args[0]}, data={args[1]}{f', saddr={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
+
+  # DS instructions
+  if mn.startswith('ds_'):
+    if ds_off0 is not None or ds_off1 is not None:
+      off0, off1 = str(ds_off0 or 0), str(ds_off1 or 0)
+    elif off_val:
+      off0, off1 = str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)
+    else:
+      off0, off1 = "0", "0"
+    gds_s = ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
+    off_kw = f", offset0={off0}, offset1={off1}{gds_s}"
+    if mn == 'ds_nop' or mn in ('ds_gws_sema_v', 'ds_gws_sema_p', 'ds_gws_sema_release_all'): return f"{mn}({off_kw.lstrip(', ')})"
+    if 'gws_' in mn: return f"{mn}(addr={args[0]}{off_kw})"
+    if 'consume' in mn or 'append' in mn: return f"{mn}(vdst={args[0]}{off_kw})"
+    if 'gs_reg' in mn: return f"{mn}(vdst={args[0]}, data0={args[1]}{off_kw})"
+    if '2addr' in mn:
+      if 'load' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+      if 'store' in mn and 'xchg' not in mn: return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
+      return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
+    if 'load' in mn: return f"{mn}(vdst={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'store' in mn and not _has(mn, 'cmp', 'xchg'):
+      return f"{mn}(data0={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
+    if 'swizzle' in mn or 'ordered_count' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'permute' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
+    if 'bvh' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
+    if 'condxchg' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
+    if _has(mn, 'cmpstore', 'mskor', 'wrap'):
+      return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
+    return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
+
+  # v_fmaak/v_fmamk literal extraction
+  lit_s = ""
+  if mn in ('v_fmaak_f32', 'v_fmaak_f16') and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
+  elif mn in ('v_fmamk_f32', 'v_fmamk_f16') and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
+  elif mn in ('s_fmaak_f32',) and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
+  elif mn in ('s_fmamk_f32',) and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
+  elif mn in ('v_cndmask_b32', 'v_cndmask_b32_e32') and len(args) == 4 and ops[3].strip().lower() in ('vcc_lo', 'vcc'):
+    mn, args = 'v_cndmask_b32_e32', args[:3]
+
+  _SGPR_NAMES = {'vcc_lo': 106, 'vcc_hi': 107, 'vcc': 106, 'null': 124, 'm0': 125, 'exec_lo': 126, 'exec_hi': 127}
+  vcc_ops = {'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'}
+  if mn.replace('_e32', '') in vcc_ops and len(args) >= 5:
+    carry_in = ops[4].strip().lower() if len(ops) > 4 else 'vcc_lo'
+    carry_out = ops[1].strip().lower() if len(ops) > 1 else 'vcc_lo'
+    if carry_in in ('vcc_lo', 'vcc') and carry_out in ('vcc_lo', 'vcc'):
+      mn, args = mn.replace('_e32', '') + '_e32', [args[0], args[2], args[3]]
+    else:
+      mn_base = mn.replace('_e32', '').replace('_e64', '')
+      sdst = _SGPR_NAMES.get(carry_out, 124) if carry_out in _SGPR_NAMES else (int(carry_out[1:]) if carry_out.startswith('s') and carry_out[1:].isdigit() else 124)
+      src2 = _SGPR_NAMES.get(carry_in, 0) if carry_in in _SGPR_NAMES else (int(carry_in[1:]) if carry_in.startswith('s') and carry_in[1:].isdigit() else 0)
+      return f"{mn_base}(vdst={args[0]}, sdst=RawImm({sdst}), src0={args[2]}, src1={args[3]}, src2=RawImm({src2}))"
+  if mn.replace('_e64', '') in vcc_ops and mn.endswith('_e64'): mn = mn.replace('_e64', '')
+  if mn.startswith('v_cmp') and not mn.endswith('_e64') and len(args) >= 3 and ops[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'): args = args[1:]
+  if 'cmpx' in mn and mn.endswith('_e64') and len(args) == 2: args = ['RawImm(126)'] + args
+  if ((mn.startswith('v_cmp') and 'cmpx' not in mn and mn.endswith('_e64')) or mn.startswith('v_s_') or mn in ('v_readlane_b32', 'v_readfirstlane_b32')) and len(args) >= 1:
+    dst = ops[0].strip().lower()
+    if dst.startswith('s') and dst[1:].isdigit(): args[0] = f'RawImm({int(dst[1:])})'
+    elif dst.startswith('s[') and ':' in dst: args[0] = f'RawImm({int(dst[2:].split(":")[0])})'
+    elif dst.startswith('ttmp') and dst[4:].isdigit(): args[0] = f'RawImm({108 + int(dst[4:])})'
+    elif dst.startswith('ttmp[') and ':' in dst: args[0] = f'RawImm({108 + int(dst[5:].split(":")[0])})'
+    elif dst in _SGPR_NAMES: args[0] = f'RawImm({_SGPR_NAMES[dst]})'
+
+  fn = mn.replace('.', '_')
+  if opsel is not None: args = [re.sub(r'\.[hl]$', '', a) for a in args]
+
+  # v_fma_mix*: extract inline neg/abs modifiers
+  if 'fma_mix' in mn and neg_lo is None and neg_hi is None:
+    inline_neg, inline_abs, clean_args = 0, 0, [args[0]]
+    for i, op in enumerate(ops[1:4]):
+      op = op.strip()
+      neg = op.startswith('-') and not (op[1:2].isdigit() or (len(op) > 2 and op[1] == '0' and op[2] in 'xX'))
+      if neg: op = op[1:]
+      abs_ = op.startswith('|') and op.endswith('|')
+      if abs_: op = op[1:-1]
+      if neg: inline_neg |= (1 << i)
+      if abs_: inline_abs |= (1 << i)
+      clean_args.append(_op2dsl(op))
+    args = clean_args + args[4:]
+    if inline_neg: neg_lo = inline_neg
+    if inline_abs: neg_hi = inline_abs
+
+  all_kw = list(kw)
+  if lit_s: all_kw.append(lit_s.lstrip(', '))
+  if opsel is not None: all_kw.append(f'opsel={opsel}')
+  if neg_lo is not None: all_kw.append(f'neg={neg_lo}')
+  if neg_hi is not None: all_kw.append(f'neg_hi={neg_hi}')
+  if 'bvh' in mn and 'intersect_ray' in mn: all_kw.extend(['dmask=15', 'unrm=1', 'r128=1'])
+  vop3p_ops = {'v_pk_', 'v_dot2', 'v_dot4', 'v_dot8', 'v_wmma', 'v_swmmac'}
+  is_vop3p = any(mn.startswith(p) for p in vop3p_ops)
+  is_fma_mix = 'fma_mix' in mn
+  if opsel_hi_val is not None:
+    opsel_hi_enc = opsel_hi_val[0] | (opsel_hi_val[1] << 1) if len(opsel_hi_val) >= 2 else opsel_hi_val[0]
+    opsel_hi2_enc = opsel_hi_val[2] if len(opsel_hi_val) >= 3 else (0 if is_fma_mix else 1)
+    all_kw.extend([f'opsel_hi={opsel_hi_enc}', f'opsel_hi2={opsel_hi2_enc}'])
+  elif is_vop3p and not is_fma_mix:
+    all_kw.extend(['opsel_hi=3', 'opsel_hi2=1'])
+  if clamp_found:
+    if arch == 'rdna4': all_kw.append('cm=1')
+    else: all_kw.append('clmp=1')
+
+  a_str, kw_str = ', '.join(args), ', '.join(all_kw)
+  return f"{fn}({a_str}, {kw_str})" if kw_str and a_str else f"{fn}({kw_str})" if kw_str else f"{fn}({a_str})"
+
+def _hwreg(id_, offset=0, size=32): return id_ | (offset << 6) | ((size - 1) << 11)
+def _sendmsg(id_, op=0, stream=0): return id_ | (op << 4) | (stream << 8)
+
+_HWREG_NAMES = {'HW_REG_MODE': 1, 'HW_REG_STATUS': 2, 'HW_REG_TRAPSTS': 3, 'HW_REG_HW_ID': 4, 'HW_REG_GPR_ALLOC': 5,
+  'HW_REG_LDS_ALLOC': 6, 'HW_REG_IB_STS': 7, 'HW_REG_PC_LO': 8, 'HW_REG_PC_HI': 9, 'HW_REG_INST_DW0': 10, 'HW_REG_INST_DW1': 11,
+  'HW_REG_IB_DBG0': 12, 'HW_REG_IB_DBG1': 13, 'HW_REG_FLUSH_IB': 14, 'HW_REG_SH_MEM_BASES': 15, 'HW_REG_SQ_SHADER_TBA_LO': 16,
+  'HW_REG_SQ_SHADER_TBA_HI': 17, 'HW_REG_SQ_SHADER_TMA_LO': 18, 'HW_REG_SQ_SHADER_TMA_HI': 19, 'HW_REG_FLAT_SCR_LO': 20,
+  'HW_REG_FLAT_SCR_HI': 21, 'HW_REG_XNACK_MASK': 22, 'HW_REG_HW_ID1': 23, 'HW_REG_HW_ID2': 24, 'HW_REG_POPS_PACKER': 25,
+  'HW_REG_PERF_SNAPSHOT_DATA': 26, 'HW_REG_PERF_SNAPSHOT_PC_LO': 27, 'HW_REG_PERF_SNAPSHOT_PC_HI': 28, 'HW_REG_SHADER_CYCLES': 29,
+  'HW_REG_SHADER_CYCLES_HI': 30, 'HW_REG_WAVE_MODE': 31, 'HW_REG_WAVE_SCRATCH_BASE': 32}
+_HWREG_NAMES_RDNA4 = {v: k for k, v in HWREG_RDNA4.items()}
+_SENDMSG_NAMES = {'MSG_INTERRUPT': 1, 'MSG_GS': 2, 'MSG_GS_DONE': 3, 'MSG_SAVEWAVE': 4, 'MSG_STALL_WAVE_GEN': 5,
+  'MSG_HALT_WAVES': 6, 'MSG_ORDERED_PS_DONE': 7, 'MSG_EARLY_PRIM_DEALLOC': 8, 'MSG_GS_ALLOC_REQ': 9, 'MSG_GET_DOORBELL': 10,
+  'MSG_GET_DDID': 11, 'MSG_HS_TESSFACTOR': 2, 'MSG_DEALLOC_VGPRS': 10, 'MSG_RTN_GET_DOORBELL': 128, 'MSG_RTN_GET_DDID': 129,
+  'MSG_RTN_GET_TMA': 130, 'MSG_RTN_GET_REALTIME': 131, 'MSG_RTN_SAVE_WAVE': 132, 'MSG_RTN_GET_TBA': 133,
+  'MSG_RTN_GET_TBA_TO_PC': 134, 'MSG_RTN_GET_SE_AID_ID': 135}
+
+def asm(text: str, arch: str = "rdna3") -> Inst:
+  dsl = get_dsl(text, arch)
+  if arch == "rdna4":
+    ns = {n: getattr(rdna4_ins, n) for n in dir(rdna4_ins) if not n.startswith('_')}
+    hwreg_names = _HWREG_NAMES_RDNA4
+  else:
+    ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
+    hwreg_names = _HWREG_NAMES
+  def hwreg(id_, offset=0, size=32): return _hwreg(hwreg_names.get(id_, id_) if isinstance(id_, str) else id_, offset, size)
+  def sendmsg(id_, op=0, stream=0): return _sendmsg(_SENDMSG_NAMES.get(id_, id_) if isinstance(id_, str) else id_, op, stream)
+  ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
+             'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF,
+             'hwreg': hwreg, 'sendmsg': sendmsg, **{k: k for k in hwreg_names}, **{k: k for k in _SENDMSG_NAMES}})
+  try: return eval(dsl, ns)
+  except NameError:
+    if m := re.match(r'^(v_\w+)(\(.*\))$', dsl): return eval(f"{m.group(1)}_e32{m.group(2)}", ns)
+    raise

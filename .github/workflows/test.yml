@@ -5,6 +5,7 @@ env:
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
+  IGNORE_OOB: 0
 
 on:
   push:
@@ -36,6 +37,8 @@ jobs:
     name: Docs
     runs-on: ubuntu-22.04
     timeout-minutes: 10
+    env:
+      IGNORE_OOB: 1
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -102,15 +105,11 @@ jobs:
       run: |
         sudo apt update || true
         sudo apt install -y --no-install-recommends ninja-build
-    - name: Lint with ruff
-      run: |
-        pip3 install --upgrade --force-reinstall ruff==0.11.0
-        python3 -m ruff check extra/torch_backend/backend.py
     - name: Test one op
       run: FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test ResNet-18
       run: DEBUG=2 python3 extra/torch_backend/example.py
-    - name: My (custom) tests
+    - name: custom tests
       run: python3 extra/torch_backend/test.py
     - name: Test one op in torch tests
       run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
@@ -219,7 +218,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # TODO: run the pre-commit hook to replace a lot of this
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -233,13 +231,14 @@ jobs:
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff==0.11.0
-        python3 -m ruff check .
+        pip3 install --upgrade --force-reinstall ruff==0.14.10
+        pre-commit run ruff --all-files
         python3 -m ruff check examples/mlperf/ --ignore E501
         python3 -m ruff check extra/thunder/tiny/ --ignore E501 --ignore F841 --ignore E722
+        python3 -m ruff check extra/torch_backend/backend.py
     - name: Run mypy
       run: |
-        python -m mypy --strict-equality --lineprecision-report .
+        python -m mypy --lineprecision-report .
         cat lineprecision.txt
     - name: Run TYPED=1
       run: TYPED=1 python -c "import tinygrad"
@@ -258,6 +257,7 @@ jobs:
         key: unittest-12
         pydeps: "pillow numpy ftfy regex"
         deps: testing_unit
+        llvm: 'true'
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
@@ -310,7 +310,7 @@ jobs:
         deps: testing_unit
         python-version: '3.14'
     - name: Test SPEC=2
-      run: IGNORE_OOB=0 SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --ignore test/unit/test_autogen.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -473,6 +473,8 @@ jobs:
     name: Test LLM
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      IGNORE_OOB: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -603,9 +605,7 @@ jobs:
         WEBGPU=1 DEBUG=4 FORWARD_ONLY=1 python3 test/test_ops.py TestOps.test_add
     - name: Run selected webgpu tests
       run: |
-          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit \
-          --ignore=test/test_copy_speed.py --ignore=test/test_rearrange_einops.py \
-          --ignore=test/test_fuzz_shape_ops.py --durations=20
+          WEBGPU=1 WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -654,7 +654,7 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
-  testrdna3:
+  testamdasm:
     name: AMD ASM IDE
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -667,6 +667,11 @@ jobs:
           key: rdna3-emu
           deps: testing_minimal
           amd: 'true'
+          python-version: '3.13'
+      - name: Verify AMD autogen is up to date
+        run: |
+          python -m extra.assembly.amd.pdf
+          git diff --exit-code extra/assembly/amd/autogen/
       - name: Install LLVM 21
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
@@ -675,15 +680,19 @@ jobs:
           sudo apt-get install llvm-21 llvm-21-tools cloc
       - name: RDNA3 Line Count
         run: cloc --by-file extra/assembly/amd/*.py
+      - name: Install rocprof-trace-decoder
+        run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
       - name: Run RDNA3 emulator tests
         run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
-      - name: Install pdfplumber
-        run: pip install pdfplumber
-      - name: Verify AMD autogen is up to date
-        run: |
-          python -m extra.assembly.amd.dsl --arch all
-          python -m extra.assembly.amd.pcode --arch all
-          git diff --exit-code extra/assembly/amd/autogen/
+      - name: Run RDNA3 emulator tests (AMD_LLVM=1)
+        run: AMD_LLVM=1 python -m pytest -n=auto extra/assembly/amd/ --durations 20
+      - name: Run RDNA3 dtype tests
+        run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+      - name: Run RDNA3 dtype tests (AMD_LLVM=1)
+        run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+      # TODO: run all once emulator is faster
+      - name: Run RDNA3 ops tests
+        run: SKIP_SLOW_TEST=1 AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril"
 
   testnvidia:
     strategy:
@@ -772,6 +781,8 @@ jobs:
         ocelot: 'true'
         llvm: 'true'
     - name: Run unit tests
+      env:
+        LIBCLANG_PATH: '/opt/homebrew/opt/llvm@20/lib/libclang.dylib'
       run: METAL=1 python -m pytest -n=auto test/unit/ --durations=20
     - name: Run ONNX
       run: METAL=1 python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20

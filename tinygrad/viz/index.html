@@ -127,10 +127,17 @@
     fill: none;
     stroke-width: 1.4px;
   }
-  g.node.highlight rect, .edgePath.highlight, g.port circle {
+  g.label rect.bg {
+    fill: transparent;
+    stroke: none;
+  }
+  g.label rect.bg.highlight {
+    fill: #5f0059;
+  }
+  g.node.highlight rect.node, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
   }
-  g.highlight.child rect, .edgePath.highlight.child {
+  g.highlight.child rect.node, .edgePath.highlight.child {
     stroke: #C888B0;
   }
   #edge-labels g.port.highlight {

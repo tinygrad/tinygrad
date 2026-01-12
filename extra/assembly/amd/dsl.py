@@ -1,27 +1,140 @@
 # library for RDNA3 assembly DSL
 # mypy: ignore-errors
 from __future__ import annotations
+import re, struct
 from enum import IntEnum
+from functools import cache
 from typing import overload, Annotated, TypeVar, Generic
+from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
+  SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
+from extra.assembly.amd.autogen.cdna.enum import VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op
+from extra.assembly.amd.autogen.rdna4.enum import (VOP1Op as RDNA4_VOP1Op, VOP2Op as RDNA4_VOP2Op, VOP3Op as RDNA4_VOP3Op,
+  VOP3SDOp as RDNA4_VOP3SDOp, VOP3POp as RDNA4_VOP3POp, VOPCOp as RDNA4_VOPCOp, VOPDOp as RDNA4_VOPDOp,
+  SOP1Op as RDNA4_SOP1Op, SOP2Op as RDNA4_SOP2Op, SOPCOp as RDNA4_SOPCOp, SOPKOp as RDNA4_SOPKOp, SOPPOp as RDNA4_SOPPOp,
+  SMEMOp as RDNA4_SMEMOp, DSOp as RDNA4_DSOp, VBUFFEROp as RDNA4_VBUFFEROp, VINTERPOp as RDNA4_VINTERPOp)
+
+# Source operand encoding - constant across all AMD ISAs
+class SrcEnum(IntEnum):
+  VCC_LO=106; VCC_HI=107; NULL=124; M0=125; EXEC_LO=126; EXEC_HI=127; ZERO=128
+  DPP8=233; DPP8FI=234; SHARED_BASE=235; SHARED_LIMIT=236; PRIVATE_BASE=237; PRIVATE_LIMIT=238
+  POS_HALF=240; NEG_HALF=241; POS_ONE=242; NEG_ONE=243; POS_TWO=244; NEG_TWO=245
+  POS_FOUR=246; NEG_FOUR=247; INV_2PI=248; DPP16=250; VCCZ=251; EXECZ=252; SCC=253; LDS_DIRECT=254
+VCC_LO, VCC_HI, NULL, M0, EXEC_LO, EXEC_HI, ZERO = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.M0, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.ZERO
+DPP8FI, SHARED_BASE, SHARED_LIMIT, PRIVATE_BASE, PRIVATE_LIMIT = SrcEnum.DPP8FI, SrcEnum.SHARED_BASE, SrcEnum.SHARED_LIMIT, SrcEnum.PRIVATE_BASE, SrcEnum.PRIVATE_LIMIT
+POS_HALF, NEG_HALF, POS_ONE, NEG_ONE, POS_TWO, NEG_TWO = SrcEnum.POS_HALF, SrcEnum.NEG_HALF, SrcEnum.POS_ONE, SrcEnum.NEG_ONE, SrcEnum.POS_TWO, SrcEnum.NEG_TWO
+POS_FOUR, NEG_FOUR, INV_2PI, VCCZ, EXECZ, SCC, LDS_DIRECT = SrcEnum.POS_FOUR, SrcEnum.NEG_FOUR, SrcEnum.INV_2PI, SrcEnum.VCCZ, SrcEnum.EXECZ, SrcEnum.SCC, SrcEnum.LDS_DIRECT
+OFF = NULL
+
+# Common masks
+MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
+
+# Float/int bit conversion (simple versions for literal encoding)
+def _i32(f: float) -> int: return struct.unpack("<I", struct.pack("<f", f))[0]
+def _i64(f: float) -> int: return struct.unpack("<Q", struct.pack("<d", f))[0]
+
+# Instruction spec - register counts and dtypes derived from instruction names
+_REGS = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16,
+         'F32': 1, 'I32': 1, 'U32': 1, 'F64': 2, 'I64': 2, 'U64': 2,
+         'F16': 1, 'I16': 1, 'U16': 1, 'B16': 1, 'I8': 1, 'U8': 1, 'B8': 1,
+         'DWORD': 1, 'DWORDX2': 2, 'DWORDX3': 3, 'DWORDX4': 4, 'DWORDX8': 8, 'DWORDX16': 16,
+         'BYTE': 1, 'SHORT': 1, 'UBYTE': 1, 'SBYTE': 1, 'USHORT': 1, 'SSHORT': 1}
+_CVT_RE = re.compile(r'CVT_([FIUB]\d+)_([FIUB]\d+)$')
+_MAD_MUL_RE = re.compile(r'(?:MAD|MUL)_([IU]\d+)_([IU]\d+)$')
+_PACK_RE = re.compile(r'PACK_([FIUB]\d+)_([FIUB]\d+)$')
+_DST_SRC_RE = re.compile(r'_([FIUB]\d+)_([FIUB]\d+)$')
+_SINGLE_RE = re.compile(r'_([FIUB](?:32|64|16|8|96|128|256|512)|DWORD(?:X(?:2|3|4|8|16))?|[US]?BYTE|[US]?SHORT)$')
+@cache
+def _suffix(name: str) -> tuple[str | None, str | None]:
+  name = name.upper()
+  if m := _CVT_RE.search(name): return m.group(1), m.group(2)
+  if m := _MAD_MUL_RE.search(name): return m.group(1), m.group(2)
+  if m := _PACK_RE.search(name): return m.group(1), m.group(2)
+  if m := _DST_SRC_RE.search(name): return m.group(1), m.group(2)
+  if m := _SINGLE_RE.search(name): return m.group(1), m.group(1)
+  return None, None
+_SPECIAL_REGS = {
+  'V_LSHLREV_B64': (2, 1, 2, 1), 'V_LSHRREV_B64': (2, 1, 2, 1), 'V_ASHRREV_I64': (2, 1, 2, 1),
+  'S_LSHL_B64': (2, 2, 1, 1), 'S_LSHR_B64': (2, 2, 1, 1), 'S_ASHR_I64': (2, 2, 1, 1),
+  'S_BFE_U64': (2, 2, 1, 1), 'S_BFE_I64': (2, 2, 1, 1), 'S_BFM_B64': (2, 1, 1, 1),
+  'S_BITSET0_B64': (2, 1, 1, 1), 'S_BITSET1_B64': (2, 1, 1, 1),
+  'S_BITCMP0_B64': (1, 2, 1, 1), 'S_BITCMP1_B64': (1, 2, 1, 1),
+  'V_LDEXP_F64': (2, 2, 1, 1), 'V_TRIG_PREOP_F64': (2, 2, 1, 1),
+  'V_CMP_CLASS_F64': (1, 2, 1, 1), 'V_CMPX_CLASS_F64': (1, 2, 1, 1),
+  'V_CMP_CLASS_F32': (1, 1, 1, 1), 'V_CMPX_CLASS_F32': (1, 1, 1, 1),
+  'V_CMP_CLASS_F16': (1, 1, 1, 1), 'V_CMPX_CLASS_F16': (1, 1, 1, 1),
+  'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2),
+  'V_QSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_U32_U8': (4, 2, 1, 4),
+  'V_CVT_PK_F32_BF8': (2, 1, 1, 1), 'V_CVT_PK_F32_FP8': (2, 1, 1, 1),
+}
+_SPECIAL_DTYPE = {
+  'V_LSHLREV_B64': ('B64', 'U32', 'B64', None), 'V_LSHRREV_B64': ('B64', 'U32', 'B64', None), 'V_ASHRREV_I64': ('I64', 'U32', 'I64', None),
+  'S_LSHL_B64': ('B64', 'B64', 'U32', None), 'S_LSHR_B64': ('B64', 'B64', 'U32', None), 'S_ASHR_I64': ('I64', 'I64', 'U32', None),
+  'S_BFE_U64': ('U64', 'U64', 'U32', None), 'S_BFE_I64': ('I64', 'I64', 'U32', None),
+  'S_BFM_B64': ('B64', 'U32', 'U32', None), 'S_BITSET0_B64': ('B64', 'U32', None, None), 'S_BITSET1_B64': ('B64', 'U32', None, None),
+  'S_BITCMP0_B64': ('SCC', 'B64', 'U32', None), 'S_BITCMP1_B64': ('SCC', 'B64', 'U32', None),
+  'V_LDEXP_F64': ('F64', 'F64', 'I32', None), 'V_TRIG_PREOP_F64': ('F64', 'F64', 'U32', None),
+  'V_CMP_CLASS_F64': ('VCC', 'F64', 'U32', None), 'V_CMPX_CLASS_F64': ('EXEC', 'F64', 'U32', None),
+  'V_CMP_CLASS_F32': ('VCC', 'F32', 'U32', None), 'V_CMPX_CLASS_F32': ('EXEC', 'F32', 'U32', None),
+  'V_CMP_CLASS_F16': ('VCC', 'F16', 'U32', None), 'V_CMPX_CLASS_F16': ('EXEC', 'F16', 'U32', None),
+  'V_MAD_U64_U32': ('U64', 'U32', 'U32', 'U64'), 'V_MAD_I64_I32': ('I64', 'I32', 'I32', 'I64'),
+  'V_QSAD_PK_U16_U8': ('B64', 'B64', 'B64', 'B64'), 'V_MQSAD_PK_U16_U8': ('B64', 'B64', 'B64', 'B64'),
+  'V_MQSAD_U32_U8': ('B128', 'B64', 'B64', 'B128'),
+}
+@cache
+def spec_regs(name: str) -> tuple[int, int, int, int]:
+  uname = name.upper()
+  if uname in _SPECIAL_REGS: return _SPECIAL_REGS[uname]
+  if 'SAD' in uname and 'U8' in uname and 'QSAD' not in uname and 'MQSAD' not in uname: return 1, 1, 1, 1
+  dst_suf, src_suf = _suffix(name)
+  return _REGS.get(dst_suf, 1), _REGS.get(src_suf, 1), _REGS.get(src_suf, 1), _REGS.get(src_suf, 1)
+@cache
+def spec_dtype(name: str) -> tuple[str | None, str | None, str | None, str | None]:
+  uname = name.upper()
+  if uname in _SPECIAL_DTYPE: return _SPECIAL_DTYPE[uname]
+  if 'SAD' in uname and ('U8' in uname or 'U16' in uname) and 'QSAD' not in uname and 'MQSAD' not in uname: return 'U32', 'U32', 'U32', 'U32'
+  if '_CMP_' in uname or '_CMPX_' in uname:
+    dst_suf, src_suf = _suffix(name)
+    return 'EXEC' if '_CMPX_' in uname else 'VCC', src_suf, src_suf, None
+  dst_suf, src_suf = _suffix(name)
+  return dst_suf, src_suf, src_suf, src_suf
+_F16_RE = re.compile(r'_[FIUB]16(?:_|$)')
+_F64_RE = re.compile(r'_[FIUB]64(?:_|$)')
+@cache
+def spec_is_16bit(name: str) -> bool:
+  uname = name.upper()
+  if 'SAD' in uname or 'PACK' in uname or '_PK_' in uname or 'SAT_PK' in uname or 'DOT2' in uname: return False
+  if '_F32' in uname or '_I32' in uname or '_U32' in uname or '_B32' in uname: return False
+  return bool(_F16_RE.search(uname))
+@cache
+def spec_is_64bit(name: str) -> bool: return bool(_F64_RE.search(name.upper()))
+_3SRC = {'FMA', 'MAD', 'MIN3', 'MAX3', 'MED3', 'DIV_FIX', 'DIV_FMAS', 'DIV_SCALE', 'SAD', 'LERP', 'ALIGN', 'CUBE', 'BFE', 'BFI',
+         'PERM_B32', 'PERMLANE', 'CNDMASK', 'XOR3', 'OR3', 'ADD3', 'LSHL_OR', 'AND_OR', 'LSHL_ADD', 'ADD_LSHL', 'XAD', 'MAXMIN',
+         'MINMAX', 'MINIMUMMAXIMUM', 'MAXIMUMMINIMUM', 'MINIMUM3', 'MAXIMUM3', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
+_2SRC = {'FMAC', 'PERMLANE16_VAR', 'PERMLANEX16_VAR'}  # FMAC uses dst as implicit accumulator, _VAR permlane only 2 sources
+def spec_num_srcs(name: str) -> int:
+  name = name.upper()
+  if any(k in name for k in _2SRC): return 2
+  return 3 if any(k in name for k in _3SRC) else 2
+def is_dtype_16(dt: str | None) -> bool: return dt is not None and '16' in dt
+def is_dtype_64(dt: str | None) -> bool: return dt is not None and '64' in dt
 
 # Bit field DSL
 class BitField:
-  def __init__(self, hi: int, lo: int, name: str | None = None): self.hi, self.lo, self.name = hi, lo, name
-  def __set_name__(self, owner, name): self.name, self._owner = name, owner
+  def __init__(self, hi: int, lo: int, name: str | None = None): self.hi, self.lo, self.name, self._marker = hi, lo, name, None
+  def __set_name__(self, owner, name):
+    import typing
+    self.name, self._owner = name, owner
+    # Cache marker at class definition time
+    hints = typing.get_type_hints(owner, include_extras=True)
+    if name in hints:
+      hint = hints[name]
+      if typing.get_origin(hint) is Annotated:
+        args = typing.get_args(hint)
+        self._marker = args[1] if len(args) > 1 else None
   def __eq__(self, val: int) -> tuple[BitField, int]: return (self, val)  # type: ignore
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
   @property
-  def marker(self) -> type | None:
-    # Get marker from Annotated type hint if present
-    import typing
-    if hasattr(self, '_owner') and self.name:
-      hints = typing.get_type_hints(self._owner, include_extras=True)
-      if self.name in hints:
-        hint = hints[self.name]
-        if typing.get_origin(hint) is Annotated:
-          args = typing.get_args(hint)
-          return args[1] if len(args) > 1 else None
-    return None
+  def marker(self) -> type | None: return self._marker
   @overload
   def __get__(self, obj: None, objtype: type) -> BitField: ...
   @overload
@@ -31,6 +144,10 @@ class BitField:
     val = unwrap(obj._values.get(self.name, 0))
     # Convert to IntEnum if marker is an IntEnum subclass
     if self.marker and isinstance(self.marker, type) and issubclass(self.marker, IntEnum):
+      # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
+      if self.marker is VOP3Op:
+        if val < 256: return VOPCOp(val)
+        if val in Inst._VOP3SD_OPS: return VOP3SDOp(val)
       try: return self.marker(val)
       except ValueError: pass
     return val
@@ -39,11 +156,27 @@ class _Bits:
   def __getitem__(self, key) -> BitField: return BitField(key.start, key.stop) if isinstance(key, slice) else BitField(key, key)
 bits = _Bits()
 
+# Source operand with modifiers - base class for anything that can be a src with neg/abs
+class SrcMod:
+  __slots__ = ('val', 'neg', 'abs_')
+  def __init__(self, val: int, neg: bool = False, abs_: bool = False): self.val, self.neg, self.abs_ = val, neg, abs_
+  def __repr__(self): return f"{'-' if self.neg else ''}{'|' if self.abs_ else ''}{self.val}{'|' if self.abs_ else ''}"
+  def __neg__(self): return SrcMod(self.val, not self.neg, self.abs_)
+  def __abs__(self): return SrcMod(self.val, self.neg, True)
+
 # Register types
-class Reg:
-  def __init__(self, idx: int, count: int = 1, hi: bool = False, neg: bool = False): self.idx, self.count, self.hi, self.neg = idx, count, hi, neg
+class Reg(SrcMod):
+  __slots__ = ('idx', 'count', 'hi')
+  def __init__(self, idx: int, count: int = 1, hi: bool = False, neg: bool = False, abs_: bool = False):
+    self.idx, self.count, self.hi = idx, count, hi
+    super().__init__(idx, neg, abs_)
   def __repr__(self): return f"{self.__class__.__name__.lower()[0]}[{self.idx}]" if self.count == 1 else f"{self.__class__.__name__.lower()[0]}[{self.idx}:{self.idx + self.count}]"
-  def __neg__(self): return self.__class__(self.idx, self.count, self.hi, neg=not self.neg)
+  def __neg__(self): return self.__class__(self.idx, self.count, self.hi, not self.neg, self.abs_)
+  def __abs__(self): return self.__class__(self.idx, self.count, self.hi, self.neg, True)
+  @property
+  def l(self): return self.__class__(self.idx, self.count, False, self.neg, self.abs_)
+  @property
+  def h(self): return self.__class__(self.idx, self.count, True, self.neg, self.abs_)
 
 T = TypeVar('T', bound=Reg)
 class _RegFactory(Generic[T]):
@@ -62,6 +195,11 @@ class TTMP(Reg): pass
 s: _RegFactory[SGPR] = _RegFactory(SGPR, "SGPR")
 v: _RegFactory[VGPR] = _RegFactory(VGPR, "VGPR")
 ttmp: _RegFactory[TTMP] = _RegFactory(TTMP, "TTMP")
+
+# Special registers as SrcMod objects (support -VCC_LO, abs(EXEC_LO), etc.)
+VCC_LO, VCC_HI, VCC = SrcMod(106), SrcMod(107), SrcMod(106)
+EXEC_LO, EXEC_HI, EXEC = SrcMod(126), SrcMod(127), SrcMod(126)
+SCC, M0, NULL, OFF = SrcMod(253), SrcMod(125), SrcMod(124), SrcMod(124)
 
 # Field type markers (runtime classes for validation)
 class _SSrc: pass
@@ -86,23 +224,52 @@ class RawImm:
   def __eq__(self, other): return isinstance(other, RawImm) and self.val == other.val
 
 def unwrap(val) -> int:
-  return val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
+  if isinstance(val, RawImm): return val.val
+  if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val  # Special registers like VCC_LO, NULL
+  if hasattr(val, 'value'): return val.value  # IntEnum
+  if hasattr(val, 'idx'): return val.idx  # Reg
+  return val
 
-# Encoding helpers
+# Encoding/decoding constants
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
+FLOAT_DEC = {v: str(k) for k, v in FLOAT_ENC.items()}
+SPECIAL_GPRS = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", 253: "scc"}
+SPECIAL_GPRS_CDNA = {102: "flat_scratch_lo", 103: "flat_scratch_hi", 104: "xnack_mask_lo", 105: "xnack_mask_hi",
+                    106: "vcc_lo", 107: "vcc_hi", 124: "m0", 126: "exec_lo", 127: "exec_hi",
+                    251: "src_vccz", 252: "src_execz", 253: "src_scc", 254: "src_lds_direct"}
+SPECIAL_PAIRS = {106: "vcc", 126: "exec"}
+SPECIAL_PAIRS_CDNA = {102: "flat_scratch", 104: "xnack_mask", 106: "vcc", 126: "exec"}
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
-RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata'}
+RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata', 'vsrc1'}
 
-def _encode_reg(val) -> int:
-  if isinstance(val, TTMP): return 108 + val.idx
-  return val.idx | (0x80 if val.hi else 0)
+def _encode_reg(val: Reg) -> int: return (108 if isinstance(val, TTMP) else 0) + val.idx
+
+def _is_encoded_src(v: int) -> bool: return 106 <= v <= 127 or 128 <= v <= 208 or 240 <= v <= 255  # Special regs (106-127) or inline const
 
 def encode_src(val) -> int:
   if isinstance(val, VGPR): return 256 + _encode_reg(val)
   if isinstance(val, Reg): return _encode_reg(val)
-  if hasattr(val, 'value'): return val.value
+  if isinstance(val, SrcMod) and not isinstance(val, Reg):
+    v = val.val
+    if _is_encoded_src(v): return v  # Already encoded (special reg 106-127 or inline const 128-208 or float 240-255)
+    if isinstance(v, int) and 0 <= v <= 64: return 128 + v  # Encode as inline constant
+    if isinstance(v, int) and -16 <= v <= -1: return 192 - v
+    return 255  # Literal
+  if hasattr(val, 'value'): return val.value  # IntEnum
   if isinstance(val, float): return 128 if val == 0.0 else FLOAT_ENC.get(val, 255)
-  return 128 + val if isinstance(val, int) and 0 <= val <= 64 else 192 + (-val) if isinstance(val, int) and -16 <= val <= -1 else 255
+  if isinstance(val, int): return 128 + val if 0 <= val <= 64 else 192 - val if -16 <= val <= -1 else 255
+  return 255
+
+def decode_src(val: int, cdna: bool = False) -> str:
+  special = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
+  if val in special: return special[val]
+  if val <= 105: return f"s{val}"
+  if val in FLOAT_DEC: return FLOAT_DEC[val]
+  if 108 <= val <= 123: return f"ttmp{val - 108}"
+  if 128 <= val <= 192: return str(val - 128)
+  if 193 <= val <= 208: return str(-(val - 192))
+  if 256 <= val <= 511: return f"v{val - 256}"
+  return "lit" if val == 255 else f"?{val}"
 
 # Instruction base class
 class Inst:
@@ -115,85 +282,153 @@ class Inst:
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
-    cls._fields = {n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))}
+    # Merge fields from parent classes
+    cls._fields = {}
+    for base in reversed(cls.__mro__):
+      if base is Inst or not hasattr(base, '_fields'): continue
+      cls._fields.update(base._fields)
+    # Add this class's own fields (overrides parents)
+    cls._fields.update({n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))})
+    # Compute size from max bit (exclude optional MIMG NSA fields: addr1/addr2 at bits 64+)
+    optional_nsa = {'addr1', 'addr2'}
+    max_bit = max((bf.hi for n, bf in cls._fields.items() if n not in optional_nsa), default=0) if cls._fields else 0
+    cls._sz = 12 if max_bit > 63 else 8 if max_bit > 31 else 4
     if 'encoding' in cls._fields and isinstance(cls.__dict__.get('encoding'), tuple): cls._encoding = cls.__dict__['encoding']
 
+  def _or_field(self, name: str, bit: int):
+    cur = self._values.get(name, 0)
+    self._values[name] = (cur.val if isinstance(cur, RawImm) else cur) | bit
+
+  def _encode_src(self, name: str, val):
+    """Encode a source field, handling modifiers and literals."""
+    encoded = encode_src(val)
+    has_opsel = 'opsel' in self._fields
+    if isinstance(val, Reg) and val.hi and not has_opsel: encoded |= 0x80  # hi bit in src for VOP1/2/C
+    self._values[name] = RawImm(encoded)
+    # Handle neg/abs/opsel modifiers
+    if isinstance(val, SrcMod):
+      mod_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
+      if val.neg and 'neg' in self._fields: self._or_field('neg', mod_bit)
+      if val.abs_ and 'abs' in self._fields: self._or_field('abs', mod_bit)
+    if isinstance(val, Reg) and val.hi and has_opsel:
+      self._or_field('opsel', {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0))
+    # Track literal value if needed
+    if encoded == 255 and self._literal is None:
+      import struct
+      # Check if THIS source uses 64-bit encoding (not just src0)
+      src_idx = {'src0': 0, 'src1': 1, 'src2': 2, 'ssrc0': 0, 'ssrc1': 1}.get(name, 0)
+      src_regs = self.src_regs(src_idx)
+      is_64 = src_regs == 2
+      if isinstance(val, SrcMod) and not isinstance(val, Reg): lit32 = val.val & MASK32
+      elif isinstance(val, int) and not isinstance(val, IntEnum): lit32 = val & MASK32
+      elif isinstance(val, float): lit32 = (_i64(val) >> 32) if is_64 else _i32(val)  # f64: high 32 bits of f64 repr
+      else: return
+      self._literal = (lit32 << 32) if is_64 else lit32
+
+  def _encode_raw(self, name: str, val):
+    """Encode a raw register field (vdst, vdata, etc.)."""
+    if isinstance(val, Reg):
+      encoded = _encode_reg(val)
+      if val.hi and 'opsel' not in self._fields: encoded |= 0x80
+      self._values[name] = encoded
+      if name == 'vdst' and val.hi and 'opsel' in self._fields: self._or_field('opsel', 8)
+    elif hasattr(val, 'value'): self._values[name] = val.value
+
+  def _validate(self, orig_args: dict):
+    """Format-specific validation. Override in subclass or check by class name."""
+    cls_name, op = self.__class__.__name__, orig_args.get('op')
+    op_val = op.value if hasattr(op, 'value') else op
+    op_name = op.name if hasattr(op, 'name') else None
+    # SMEM: register count must match opcode (derive from name: b32=1, b64=2, b96=3, b128=4, b256=8, b512=16, i8/u8/i16/u16=1)
+    if cls_name == 'SMEM' and op_name:
+      expected = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16, 'I8': 1, 'U8': 1, 'I16': 1, 'U16': 1}.get(op_name.split('_')[-1])
+      sdata = orig_args.get('sdata')
+      if expected and isinstance(sdata, Reg) and sdata.count != expected:
+        raise ValueError(f"SMEM op {op_name} expects {expected} registers, got {sdata.count}")
+    # SOP1: derive expected register sizes from op name (e.g., S_MOV_B64 -> dst=2, src=2; S_CTZ_I32_B64 -> dst=1, src=2)
+    if cls_name == 'SOP1' and hasattr(orig_args.get('op'), 'name'):
+      op_name = orig_args['op'].name
+      # Special cases: BITSET takes bit index (1 reg) regardless of dst size
+      if 'BITSET' in op_name:
+        dst_size = 2 if op_name.endswith('_B64') else 1
+        src_size = 1  # bit index is always 1 reg
+      else:
+        # Extract sizes from name: last suffix is src type, second-to-last (if exists) is dst type
+        sizes = {'B32': 1, 'I32': 1, 'U32': 1, 'B64': 2, 'I64': 2, 'U64': 2, 'B128': 4, 'B256': 8, 'B512': 16}
+        parts = op_name.split('_')
+        src_size = sizes.get(parts[-1], 1) if parts[-1] in sizes else 1
+        dst_size = sizes.get(parts[-2], src_size) if len(parts) >= 2 and parts[-2] in sizes else src_size
+      for fld, expected in [('sdst', dst_size), ('ssrc0', src_size)]:
+        if isinstance(orig_args.get(fld), Reg) and orig_args[fld].count != expected:
+          raise ValueError(f"SOP1 {op_name} expects {expected} register(s) for {fld}, got {orig_args[fld].count}")
+
   def __init__(self, *args, literal: int | None = None, **kwargs):
-    self._values, self._literal = dict(self._defaults), literal
-    # Map positional args to field names
+    self._values, self._literal = dict(self._defaults), None
     field_names = [n for n in self._fields if n != 'encoding']
-    orig_args = dict(zip(field_names, args))
-    orig_args.update(kwargs)
+    # Map Python-friendly names to actual field names (abs_ -> abs for Python reserved word)
+    if 'abs_' in kwargs: kwargs['abs'] = kwargs.pop('abs_')
+    # If more args than fields, treat extra arg as literal (for FMAAK/FMAMK style instructions)
+    # FMAMK has K in middle (vdst, src0, K, vsrc1), FMAAK has K at end (vdst, src0, vsrc1, K)
+    args = list(args)
+    if len(args) > len(field_names) and literal is None:
+      for i, a in enumerate(args):
+        if isinstance(a, int) and not isinstance(a, SrcEnum) and i < len(field_names) and field_names[i] in ('vsrc1',):
+          literal = args.pop(i)
+          break
+      else:
+        literal = args.pop()  # fallback: last arg is literal
+    orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
-    # Validate register counts for SMEM instructions (before encoding)
-    if self.__class__.__name__ == 'SMEM':
-      op_val = orig_args.get(field_names[0]) if args else orig_args.get('op')
-      if op_val is not None:
-        if hasattr(op_val, 'value'): op_val = op_val.value
-        expected_cnt = {0:1, 1:2, 2:4, 3:8, 4:16, 8:1, 9:2, 10:4, 11:8, 12:16}.get(op_val)
-        sdata_val = orig_args.get('sdata')
-        if expected_cnt is not None and isinstance(sdata_val, Reg) and sdata_val.count != expected_cnt:
-          raise ValueError(f"SMEM op {op_val} expects {expected_cnt} registers, got {sdata_val.count}")
-    # Validate register counts for SOP1 instructions (b32 = 1 reg, b64 = 2 regs)
-    if self.__class__.__name__ == 'SOP1':
-      op_val = orig_args.get(field_names[0]) if args else orig_args.get('op')
-      if op_val is not None and hasattr(op_val, 'name'):
-        expected = 2 if op_val.name.endswith('_B64') else 1
-        sdst_val, ssrc0_val = orig_args.get('sdst'), orig_args.get('ssrc0')
-        if isinstance(sdst_val, Reg) and sdst_val.count != expected:
-          raise ValueError(f"SOP1 {op_val.name} expects {expected} destination register(s), got {sdst_val.count}")
-        if isinstance(ssrc0_val, Reg) and ssrc0_val.count != expected:
-          raise ValueError(f"SOP1 {op_val.name} expects {expected} source register(s), got {ssrc0_val.count}")
-    # Type check and encode values
+    self._precompute()
+    self._validate(orig_args)
+    # Pre-shift literal for 64-bit sources (literal param is always raw 32-bit value from user)
+    if literal is not None:
+      # Find which source uses the literal (255) and check its register count
+      for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
+        v = orig_args.get(n)
+        if (isinstance(v, RawImm) and v.val == 255) or (isinstance(v, int) and v == 255):
+          self._literal = (literal << 32) if self.src_regs(idx) == 2 else literal
+          break
+      else:
+        self._literal = literal  # fallback if no literal source found
+    cls_name = self.__class__.__name__
+
+    # Format-specific setup
+    if cls_name == 'FLAT' and 'sve' in self._fields:
+      seg = self._values.get('seg', 0)
+      if (seg.val if isinstance(seg, RawImm) else seg) == 1 and isinstance(orig_args.get('addr'), VGPR): self._values['sve'] = 1
+    if cls_name == 'VOP3P':
+      op = orig_args.get('op')
+      if hasattr(op, 'value'): op = op.value
+      # fma_mix ops (32-34) default to opsel_hi=0, WMMA ops (64-69) default to opsel_hi=7 to match LLVM
+      if op in (32, 33, 34) and 'opsel_hi' not in orig_args: self._values['opsel_hi'] = self._values['opsel_hi2'] = 0
+      if op in range(64, 70) and 'opsel_hi' not in orig_args: self._values['opsel_hi'], self._values['opsel_hi2'] = 3, 1
+
+    # Encode all fields
     for name, val in list(self._values.items()):
       if name == 'encoding': continue
-      # For RawImm, only process RAW_FIELDS to unwrap to int
       if isinstance(val, RawImm):
         if name in RAW_FIELDS: self._values[name] = val.val
         continue
       field = self._fields.get(name)
       marker = field.marker if field else None
       # Type validation
-      if marker is _SGPRField:
-        if isinstance(val, VGPR): raise TypeError(f"field '{name}' requires SGPR, got VGPR")
-        if not isinstance(val, (SGPR, TTMP, int, RawImm)): raise TypeError(f"field '{name}' requires SGPR, got {type(val).__name__}")
-      if marker is _VGPRField:
-        if not isinstance(val, VGPR): raise TypeError(f"field '{name}' requires VGPR, got {type(val).__name__}")
+      if marker is _SGPRField and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires SGPR, got VGPR")
+      if marker is _VGPRField and not isinstance(val, VGPR): raise TypeError(f"field '{name}' requires VGPR, got {type(val).__name__}")
       if marker is _SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
-      # Encode source fields as RawImm for consistent disassembly
-      if name in SRC_FIELDS:
-        encoded = encode_src(val)
-        self._values[name] = RawImm(encoded)
-        # Handle negation modifier for VOP3 instructions
-        if isinstance(val, Reg) and val.neg and 'neg' in self._fields:
-          neg_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
-          cur_neg = self._values.get('neg', 0)
-          self._values['neg'] = (cur_neg.val if isinstance(cur_neg, RawImm) else cur_neg) | neg_bit
-        # Track literal value if needed (encoded as 255)
-        # For 64-bit ops, store literal in high 32 bits (to match from_bytes decoding and to_bytes encoding)
-        if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
-          self._literal = (val << 32) if self._is_64bit_op() else val
-        elif encoded == 255 and self._literal is None and isinstance(val, float):
-          import struct
-          lit32 = struct.unpack('<I', struct.pack('<f', val))[0]
-          self._literal = (lit32 << 32) if self._is_64bit_op() else lit32
-      # Encode raw register fields for consistent repr
-      elif name in RAW_FIELDS:
-        if isinstance(val, Reg): self._values[name] = _encode_reg(val)
-        elif hasattr(val, 'value'): self._values[name] = val.value  # IntEnum like SrcEnum.NULL
-      # Encode sbase (divided by 2) and srsrc/ssamp (divided by 4)
-      elif name == 'sbase' and isinstance(val, Reg):
-        self._values[name] = val.idx // 2
-      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg):
-        self._values[name] = val.idx // 4
-      # VOPD vdsty: encode as actual >> 1 (constraint: vdsty parity must be opposite of vdstx)
-      elif marker is _VDSTYEnc and isinstance(val, VGPR):
-        self._values[name] = val.idx >> 1
+      # Encode by field type
+      if name in SRC_FIELDS: self._encode_src(name, val)
+      elif name in RAW_FIELDS: self._encode_raw(name, val)
+      elif name == 'sbase': self._values[name] = (val.idx if isinstance(val, Reg) else val.val if isinstance(val, SrcMod) else val * 2) // 2
+      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg): self._values[name] = _encode_reg(val) // 4
+      elif marker is _VDSTYEnc and isinstance(val, VGPR): self._values[name] = val.idx >> 1
+    self._precompute_fields()
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
-    if name in {'srsrc', 'ssamp'}: return val.idx // 4 if isinstance(val, Reg) else val
-    if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val
+    if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val  # Special regs like VCC_LO
+    if name in {'srsrc', 'ssamp'}: return _encode_reg(val) // 4 if isinstance(val, Reg) else val
+    if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val.val // 2 if isinstance(val, SrcMod) else val
     if name in RAW_FIELDS: return _encode_reg(val) if isinstance(val, Reg) else val
     if isinstance(val, Reg) or name in SRC_FIELDS: return encode_src(val)
     return val.value if hasattr(val, 'value') else val
@@ -210,31 +445,39 @@ class Inst:
     return None
 
   def _is_64bit_op(self) -> bool:
-    """Check if this instruction uses 64-bit operands (and thus 64-bit literals).
-    Exception: V_LDEXP_F64 has 32-bit integer src1, so its literal is 32-bit."""
+    """Check if this instruction uses 64-bit operands (and thus 64-bit literals)."""
     op = self._values.get('op')
     if op is None: return False
-    # op may be an enum (from __init__) or an int (from from_int)
     op_name = op.name if hasattr(op, 'name') else None
+    # Look up op name from int if needed (happens in from_bytes path)
     if op_name is None and self.__class__.__name__ == 'VOP3':
-      from extra.assembly.amd.autogen.rdna3 import VOP3Op
       try: op_name = VOP3Op(op).name
       except ValueError: pass
+    if op_name is None and self.__class__.__name__ == 'VOPC':
+      try: op_name = VOPCOp(op).name
+      except ValueError: pass
     if op_name is None: return False
-    # V_LDEXP_F64 has 32-bit integer exponent in src1, so literal is 32-bit
-    if op_name == 'V_LDEXP_F64': return False
-    return op_name.endswith(('_F64', '_B64', '_I64', '_U64'))
+    # V_LDEXP_F64 has 32-bit integer src1, so literal is 32-bit
+    return op_name != 'V_LDEXP_F64' and op_name.endswith(('_F64', '_B64', '_I64', '_U64'))
 
   def to_bytes(self) -> bytes:
     result = self.to_int().to_bytes(self._size(), 'little')
     lit = self._get_literal() or getattr(self, '_literal', None)
     if lit is None: return result
-    # For 64-bit ops, literal is stored in high 32 bits internally, but encoded as 4 bytes
-    lit32 = (lit >> 32) if self._is_64bit_op() else lit
-    return result + (lit32 & 0xffffffff).to_bytes(4, 'little')
+    # For 64-bit sources, literal is stored in high 32 bits internally, but encoded as 4 bytes
+    # Find which source uses the literal (255) and check its register count
+    lit_src_is_64 = False
+    for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
+      if n not in self._values: continue
+      v = self._values[n]
+      if (isinstance(v, RawImm) and v.val == 255) or (isinstance(v, int) and v == 255):
+        lit_src_is_64 = self.is_src_64(idx)
+        break
+    lit32 = (lit >> 32) if lit_src_is_64 else lit
+    return result + (lit32 & MASK32).to_bytes(4, 'little')
 
   @classmethod
-  def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
+  def _size(cls) -> int: return cls._sz
   def size(self) -> int:
     # Literal is always 4 bytes in the binary (for 64-bit ops, it's in high 32 bits)
     return self._size() + (4 if self._literal is not None else 0)
@@ -244,22 +487,40 @@ class Inst:
     inst = object.__new__(cls)
     inst._values = {n: RawImm(v) if n in SRC_FIELDS else v for n, bf in cls._fields.items() if n != 'encoding' for v in [(word >> bf.lo) & bf.mask()]}
     inst._literal = None
+    inst._precompute()
+    inst._precompute_fields()
     return inst
 
   @classmethod
   def from_bytes(cls, data: bytes):
+    import typing
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
     op_val = inst._values.get('op', 0)
-    has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
-    has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
+    # Check for instructions that always have a literal constant (FMAMK/FMAAK/MADMK/MADAK, SETREG_IMM32)
+    op_name = ''
+    if cls.__name__ in ('VOP2', 'SOP2', 'SOPK') and 'op' in (hints := typing.get_type_hints(cls, include_extras=True)):
+      if typing.get_origin(hints['op']) is typing.Annotated:
+        try: op_name = typing.get_args(hints['op'])[1](op_val).name
+        except (ValueError, TypeError): pass
+    has_literal = any(x in op_name for x in ('FMAMK', 'FMAAK', 'MADMK', 'MADAK', 'SETREG_IMM32'))
+    # VOPD fmaak/fmamk always have a literal (opx/opy value 1 or 2)
+    opx, opy = inst._values.get('opx', 0), inst._values.get('opy', 0)
+    has_literal = has_literal or (cls.__name__ == 'VOPD' and (opx in (1, 2) or opy in (1, 2)))
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
     if has_literal:
       # For 64-bit ops, the literal is 32 bits placed in the HIGH 32 bits of the 64-bit value
       # (low 32 bits are zero). This is how AMD hardware interprets 32-bit literals for 64-bit ops.
+      # Check which source uses the literal and whether THAT source is 64-bit
       if len(data) >= cls._size() + 4:
         lit32 = int.from_bytes(data[cls._size():cls._size()+4], 'little')
-        inst._literal = (lit32 << 32) if inst._is_64bit_op() else lit32
+        # Find which source has literal (255) and check its register count
+        lit_src_is_64 = False
+        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
+          if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255:
+            lit_src_is_64 = inst.src_regs(idx) == 2
+            break
+        inst._literal = (lit32 << 32) if lit_src_is_64 else lit32
     return inst
 
   def __repr__(self):
@@ -269,6 +530,19 @@ class Inst:
              and not (is_zero(self._values[k]) and k not in {'op'})]
     lit = f", literal={hex(self._literal)}" if self._literal is not None else ""
     return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in items)}{lit})"
+
+  def __getattr__(self, name: str):
+    if name.startswith('_'): raise AttributeError(name)
+    return unwrap(self._values.get(name, 0))
+
+  def lit(self, v: int, neg: bool = False) -> str:
+    if v == 255 and self._literal is not None:
+      # For 64-bit sources, literal is stored shifted - extract the 32-bit value
+      lit32 = (self._literal >> 32) if self._literal > 0xffffffff else self._literal
+      s = f"0x{lit32:x}"
+    else:
+      s = decode_src(v, 'cdna' in self.__class__.__module__)
+    return f"-{s}" if neg else s
 
   def __eq__(self, other):
     if not isinstance(other, Inst): return NotImplemented
@@ -280,298 +554,60 @@ class Inst:
     from extra.assembly.amd.asm import disasm
     return disasm(self)
 
-class Inst32(Inst): pass
-class Inst64(Inst): pass
+  _enum_map = {'VOP1': VOP1Op, 'VOP2': VOP2Op, 'VOP3': VOP3Op, 'VOP3SD': VOP3SDOp, 'VOP3P': VOP3POp, 'VOPC': VOPCOp,
+               'SOP1': SOP1Op, 'SOP2': SOP2Op, 'SOPC': SOPCOp, 'SOPK': SOPKOp, 'SOPP': SOPPOp,
+               'SMEM': SMEMOp, 'DS': DSOp, 'FLAT': FLATOp, 'MUBUF': MUBUFOp, 'MTBUF': MTBUFOp, 'MIMG': MIMGOp,
+               'VOPD': VOPDOp, 'VINTERP': VINTERPOp}
+  _VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CODE GENERATION: generates autogen/__init__.py by parsing AMD ISA PDFs
-# Supports both RDNA3.5 and CDNA4 instruction set PDFs - auto-detects format
-# ═══════════════════════════════════════════════════════════════════════════════
+  def _precompute(self):
+    """Precompute op, op_name, _spec_regs, _spec_dtype for fast access."""
+    val = self._values.get('op')
+    if val is None: self.op = None
+    elif hasattr(val, 'name'): self.op = val
+    else:
+      cls_name = self.__class__.__name__
+      is_cdna = cls_name in ('VOP3A', 'VOP3B')
+      # Try marker enum first (VOP3AOp, VOP3BOp, etc.)
+      marker = self._fields['op'].marker if 'op' in self._fields else None
+      if marker and issubclass(marker, IntEnum):
+        try: self.op = marker(val)
+        except ValueError: self.op = val
+      elif cls_name in self._enum_map:
+        try: self.op = self._enum_map[cls_name](val)
+        except ValueError: self.op = val
+      else: self.op = val
+      # Fallback for promoted instructions when marker lookup failed
+      if not hasattr(self.op, 'name') and cls_name in ('VOP3', 'VOP3A', 'VOP3B') and isinstance(val, int):
+        if val < 256:
+          try: self.op = VOPCOp(val)
+          except ValueError: pass
+        elif is_cdna and 256 <= val < 512:
+          try: self.op = (CDNA_VOP1Op(val - 320) if val >= 320 else CDNA_VOP2Op(val - 256))
+          except ValueError: pass
+        elif val in self._VOP3SD_OPS and not is_cdna:
+          try: self.op = VOP3SDOp(val)
+          except ValueError: pass
+        elif 256 <= val < 512 and not is_cdna:
+          try: self.op = VOP1Op(val - 384) if val >= 384 else VOP2Op(val - 256)
+          except ValueError: pass
+    self.op_name = self.op.name if hasattr(self.op, 'name') else ''
+    self._spec_regs = spec_regs(self.op_name)
+    self._spec_dtype = spec_dtype(self.op_name)
 
-PDF_URLS = {
-  "rdna3": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content",  # RDNA3.5
-  "rdna4": "https://docs.amd.com/api/khub/documents/uQpkEvk3pv~kfAb2x~j4uw/content",
-  "cdna": ["https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf",
-           "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"],
-}
-FIELD_TYPES = {'SSRC0': 'SSrc', 'SSRC1': 'SSrc', 'SOFFSET': 'SSrc', 'SADDR': 'SSrc', 'SRC0': 'Src', 'SRC1': 'Src', 'SRC2': 'Src',
-  'SDST': 'SGPRField', 'SBASE': 'SGPRField', 'SDATA': 'SGPRField', 'SRSRC': 'SGPRField', 'VDST': 'VGPRField', 'VSRC1': 'VGPRField', 'VDATA': 'VGPRField',
-  'VADDR': 'VGPRField', 'ADDR': 'VGPRField', 'DATA': 'VGPRField', 'DATA0': 'VGPRField', 'DATA1': 'VGPRField', 'SIMM16': 'SImm', 'OFFSET': 'Imm',
-  'OPX': 'VOPDOp', 'OPY': 'VOPDOp', 'SRCX0': 'Src', 'SRCY0': 'Src', 'VSRCX1': 'VGPRField', 'VSRCY1': 'VGPRField', 'VDSTX': 'VGPRField', 'VDSTY': 'VDSTYEnc'}
-FIELD_ORDER = {
-  'SOP2': ['op', 'sdst', 'ssrc0', 'ssrc1'], 'SOP1': ['op', 'sdst', 'ssrc0'], 'SOPC': ['op', 'ssrc0', 'ssrc1'],
-  'SOPK': ['op', 'sdst', 'simm16'], 'SOPP': ['op', 'simm16'], 'VOP1': ['op', 'vdst', 'src0'], 'VOPC': ['op', 'src0', 'vsrc1'],
-  'VOP2': ['op', 'vdst', 'src0', 'vsrc1'], 'VOP3SD': ['op', 'vdst', 'sdst', 'src0', 'src1', 'src2', 'clmp'],
-  'SMEM': ['op', 'sdata', 'sbase', 'soffset', 'offset', 'glc', 'dlc'], 'DS': ['op', 'vdst', 'addr', 'data0', 'data1'],
-  'VOP3': ['op', 'vdst', 'src0', 'src1', 'src2', 'omod', 'neg', 'abs', 'clmp', 'opsel'],
-  'VOP3P': ['op', 'vdst', 'src0', 'src1', 'src2', 'neg', 'neg_hi', 'opsel', 'opsel_hi', 'clmp'],
-  'FLAT': ['op', 'vdst', 'addr', 'data', 'saddr', 'offset', 'seg', 'dlc', 'glc', 'slc'],
-  'MUBUF': ['op', 'vdata', 'vaddr', 'srsrc', 'soffset', 'offset', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe'],
-  'MTBUF': ['op', 'vdata', 'vaddr', 'srsrc', 'soffset', 'offset', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe'],
-  'MIMG': ['op', 'vdata', 'vaddr', 'srsrc', 'ssamp', 'dmask', 'dim', 'unrm', 'dlc', 'glc', 'slc'],
-  'EXP': ['en', 'target', 'vsrc0', 'vsrc1', 'vsrc2', 'vsrc3', 'done', 'row'],
-  'VINTERP': ['op', 'vdst', 'src0', 'src1', 'src2', 'waitexp', 'clmp', 'opsel', 'neg'],
-  'VOPD': ['opx', 'opy', 'vdstx', 'vdsty', 'srcx0', 'vsrcx1', 'srcy0', 'vsrcy1'],
-  'LDSDIR': ['op', 'vdst', 'attr', 'attr_chan', 'wait_va']}
-SRC_EXTRAS = {233: 'DPP8', 234: 'DPP8FI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 254: 'LDS_DIRECT'}
-FLOAT_MAP = {'0.5': 'POS_HALF', '-0.5': 'NEG_HALF', '1.0': 'POS_ONE', '-1.0': 'NEG_ONE', '2.0': 'POS_TWO', '-2.0': 'NEG_TWO',
-  '4.0': 'POS_FOUR', '-4.0': 'NEG_FOUR', '1/(2*PI)': 'INV_2PI', '0': 'ZERO'}
+  def _precompute_fields(self):
+    """Unwrap all field values as direct attributes for fast access."""
+    for name, val in self._values.items():
+      if name != 'op': setattr(self, name, unwrap(val))
+  def dst_regs(self) -> int: return self._spec_regs[0]
+  def src_regs(self, n: int) -> int: return self._spec_regs[n + 1]
+  def num_srcs(self) -> int: return spec_num_srcs(self.op_name)
+  def dst_dtype(self) -> str | None: return self._spec_dtype[0]
+  def src_dtype(self, n: int) -> str | None: return self._spec_dtype[n + 1]
+  def is_src_16(self, n: int) -> bool: return self._spec_regs[n + 1] == 1 and is_dtype_16(self._spec_dtype[n + 1])
+  def is_src_64(self, n: int) -> bool: return self._spec_regs[n + 1] == 2
+  def is_16bit(self) -> bool: return spec_is_16bit(self.op_name)
+  def is_64bit(self) -> bool: return spec_is_64bit(self.op_name)
+  def is_dst_16(self) -> bool: return self._spec_regs[0] == 1 and is_dtype_16(self._spec_dtype[0])
 
-def _parse_bits(s: str) -> tuple[int, int] | None:
-  import re
-  return (int(m.group(1)), int(m.group(2) or m.group(1))) if (m := re.match(r'\[(\d+)(?::(\d+))?\]', s)) else None
 
-def _parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
-  import re
-  fields = []
-  for row in table[1:]:
-    if not row or not row[0]: continue
-    name, bits_str = row[0].split('\n')[0].strip(), (row[1] or '').split('\n')[0].strip()
-    if not (bits := _parse_bits(bits_str)): continue
-    enc_val, hi, lo = None, bits[0], bits[1]
-    if name == 'ENCODING' and row[2]:
-      # Handle both RDNA3 ('bXX) and CDNA4 (Must be: XX) encoding formats
-      if m := re.search(r"(?:'b|Must be:\s*)([01_]+)", row[2]):
-        enc_bits = m.group(1).replace('_', '')
-        enc_val = int(enc_bits, 2)
-        declared_width, actual_width = hi - lo + 1, len(enc_bits)
-        if actual_width > declared_width: lo = hi - actual_width + 1
-    ftype = f"{fmt}Op" if name == 'OP' and f"{fmt}Op" in enums else FIELD_TYPES.get(name.upper())
-    fields.append((name, hi, lo, enc_val, ftype))
-  return fields
-
-def _parse_single_pdf(url: str) -> dict:
-  """Parse a single PDF and return raw data (formats, enums, src_enum, doc_name, is_cdna)."""
-  import re, pdfplumber
-  from tinygrad.helpers import fetch
-
-  pdf = pdfplumber.open(fetch(url))
-
-  # Auto-detect document type from first page
-  first_page_text = pdf.pages[0].extract_text() or ''
-  is_cdna4 = 'CDNA4' in first_page_text or 'CDNA 4' in first_page_text
-  is_cdna3 = 'CDNA3' in first_page_text or 'CDNA 3' in first_page_text or 'MI300' in first_page_text
-  is_cdna = is_cdna3 or is_cdna4
-  is_rdna4 = 'RDNA4' in first_page_text or 'RDNA 4' in first_page_text
-  is_rdna35 = 'RDNA3.5' in first_page_text or 'RDNA 3.5' in first_page_text  # Check 3.5 before 3
-  is_rdna3 = not is_rdna35 and ('RDNA3' in first_page_text or 'RDNA 3' in first_page_text)
-  doc_name = "CDNA4" if is_cdna4 else "CDNA3" if is_cdna3 else "RDNA4" if is_rdna4 else "RDNA3.5" if is_rdna35 else "RDNA3" if is_rdna3 else "Unknown"
-
-  # Find the "Microcode Formats" section - search for SOP2 format definition
-  microcode_start = None
-  total_pages = len(pdf.pages)
-  # Search from likely locations (formats are typically 20-95% through the document - RDNA3 has them at ~25%)
-  for i in range(int(total_pages * 0.2), total_pages):
-    text = pdf.pages[i].extract_text() or ''
-    # Look for "X.Y.Z. SOP2" section header or "Chapter X. Microcode Formats"
-    if re.search(r'\d+\.\d+\.\d+\.\s+SOP2\b', text) or re.search(r'Chapter \d+\.\s+Microcode Formats', text):
-      microcode_start = i
-      break
-  if microcode_start is None: microcode_start = int(total_pages * 0.9)
-
-  pages = pdf.pages[microcode_start:microcode_start + 50]
-  page_texts = [p.extract_text() or '' for p in pages]
-  page_tables = [[t.extract() for t in p.find_tables()] for p in pages]
-  full_text = '\n'.join(page_texts)
-
-  # parse SSRC encoding from first page with VCC_LO
-  src_enum = dict(SRC_EXTRAS)
-  for text in page_texts[:10]:
-    if 'SSRC0' in text and 'VCC_LO' in text:
-      for m in re.finditer(r'^(\d+)\s+(\S+)', text, re.M):
-        val, name = int(m.group(1)), m.group(2).rstrip('.:')
-        if name in FLOAT_MAP: src_enum[val] = FLOAT_MAP[name]
-        elif re.match(r'^[A-Z][A-Z0-9_]*$', name): src_enum[val] = name
-      break
-
-  # parse opcode tables
-  enums: dict[str, dict[int, str]] = {}
-  for m in re.finditer(r'Table \d+\. (\w+) Opcodes(.*?)(?=Table \d+\.|\n\d+\.\d+\.\d+\.\s+\w+\s*\nDescription|$)', full_text, re.S):
-    if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+([A-Z][A-Z0-9_]+)', m.group(2))}:
-      enums[m.group(1) + "Op"] = ops
-  if vopd_m := re.search(r'Table \d+\. VOPD Y-Opcodes\n(.*?)(?=Table \d+\.|15\.\d)', full_text, re.S):
-    if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+(V_DUAL_\w+)', vopd_m.group(1))}:
-      enums["VOPDOp"] = ops
-  enum_names = set(enums.keys())
-
-  def is_fields_table(t) -> bool: return t and len(t) > 1 and t[0] and 'Field' in str(t[0][0] or '')
-  def has_encoding(fields) -> bool: return any(f[0] == 'ENCODING' for f in fields)
-  def has_header_before_fields(text) -> bool:
-    return (pos := text.find('Field Name')) != -1 and bool(re.search(r'\d+\.\d+\.\d+\.\s+\w+\s*\n', text[:pos]))
-
-  # find format headers with their page indices
-  format_headers = []
-  for i, text in enumerate(page_texts):
-    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text): format_headers.append((m.group(1), i, m.start()))
-    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n', text):
-      fmt_name = m.group(1)
-      if is_cdna and fmt_name.isupper() and len(fmt_name) >= 2:
-        format_headers.append((fmt_name, i, m.start()))
-      elif m.start() > len(text) - 200 and 'Description' not in text[m.end():] and i + 1 < len(page_texts):
-        next_text = page_texts[i + 1].lstrip()
-        if next_text.startswith('Description') or (next_text.startswith('"RDNA') and 'Description' in next_text[:200]):
-          format_headers.append((fmt_name, i, m.start()))
-
-  # parse instruction formats
-  formats: dict[str, list] = {}
-  for fmt_name, page_idx, header_pos in format_headers:
-    if fmt_name in formats: continue
-    text, tables = page_texts[page_idx], page_tables[page_idx]
-    field_pos = text.find('Field Name', header_pos)
-
-    fields = None
-    for offset in range(3):
-      if page_idx + offset >= len(pages): break
-      if offset > 0 and has_header_before_fields(page_texts[page_idx + offset]): break
-      for t in page_tables[page_idx + offset] if offset > 0 or field_pos > header_pos else []:
-        if is_fields_table(t) and (f := _parse_fields_table(t, fmt_name, enum_names)) and has_encoding(f):
-          fields = f
-          break
-      if fields: break
-
-    if not fields and field_pos > header_pos:
-      for t in tables:
-        if is_fields_table(t) and (f := _parse_fields_table(t, fmt_name, enum_names)):
-          fields = f
-          break
-
-    if not fields: continue
-    field_names = {f[0] for f in fields}
-
-    for pg_offset in range(1, 3):
-      if page_idx + pg_offset >= len(pages) or has_header_before_fields(page_texts[page_idx + pg_offset]): break
-      for t in page_tables[page_idx + pg_offset]:
-        if is_fields_table(t) and (extra := _parse_fields_table(t, fmt_name, enum_names)) and not has_encoding(extra):
-          for ef in extra:
-            if ef[0] not in field_names:
-              fields.append(ef)
-              field_names.add(ef[0])
-          break
-    formats[fmt_name] = fields
-
-  # fix known PDF errors
-  if 'SMEM' in formats:
-    formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
-                       for n, h, l, e, t in formats['SMEM']]
-
-  return {"formats": formats, "enums": enums, "src_enum": src_enum, "doc_name": doc_name, "is_cdna": is_cdna}
-
-def _merge_results(results: list[dict]) -> dict:
-  """Merge multiple PDF parse results into a superset. Asserts if any conflicts."""
-  merged = {"formats": {}, "enums": {}, "src_enum": dict(SRC_EXTRAS), "doc_names": [], "is_cdna": False}
-  for r in results:
-    merged["doc_names"].append(r["doc_name"])
-    merged["is_cdna"] = merged["is_cdna"] or r["is_cdna"]
-    # Merge src_enum (union, assert no conflicts)
-    for val, name in r["src_enum"].items():
-      if val in merged["src_enum"]:
-        assert merged["src_enum"][val] == name, f"SrcEnum conflict: {val} = {merged['src_enum'][val]} vs {name}"
-      else:
-        merged["src_enum"][val] = name
-    # Merge enums (union of ops per enum, assert no conflicts)
-    for enum_name, ops in r["enums"].items():
-      if enum_name not in merged["enums"]: merged["enums"][enum_name] = {}
-      for val, name in ops.items():
-        if val in merged["enums"][enum_name]:
-          assert merged["enums"][enum_name][val] == name, f"{enum_name} conflict: {val} = {merged['enums'][enum_name][val]} vs {name}"
-        else:
-          merged["enums"][enum_name][val] = name
-    # Merge formats (union of fields, assert no bit position conflicts for same field name)
-    for fmt_name, fields in r["formats"].items():
-      if fmt_name not in merged["formats"]:
-        merged["formats"][fmt_name] = list(fields)
-      else:
-        existing = {f[0]: (f[1], f[2]) for f in merged["formats"][fmt_name]}  # name -> (hi, lo)
-        for f in fields:
-          name, hi, lo = f[0], f[1], f[2]
-          if name in existing:
-            assert existing[name] == (hi, lo), f"Format {fmt_name} field {name} conflict: bits {existing[name]} vs ({hi}, {lo})"
-          else:
-            merged["formats"][fmt_name].append(f)
-  return merged
-
-def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
-  """Generate instruction definitions from AMD ISA PDF(s). Returns dict with formats for testing."""
-  urls = PDF_URLS[arch]
-  if isinstance(urls, str): urls = [urls]
-
-  # Parse all PDFs and merge
-  results = [_parse_single_pdf(url) for url in urls]
-  if len(results) == 1:
-    merged = results[0]
-    doc_name = merged["doc_name"]
-  else:
-    merged = _merge_results(results)
-    doc_name = "+".join(merged["doc_names"])
-
-  formats, enums, src_enum = merged["formats"], merged["enums"], merged["src_enum"]
-
-  # generate output
-  def enum_lines(name, items):
-    return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]
-  def field_key(f): return order.index(f[0].lower()) if f[0].lower() in order else 1000
-  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by dsl.py - do not edit", "from enum import IntEnum",
-           "from typing import Annotated",
-           "from extra.assembly.amd.dsl import bits, BitField, Inst32, Inst64, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField",
-           "import functools", ""]
-  lines += enum_lines("SrcEnum", src_enum) + sum([enum_lines(n, ops) for n, ops in sorted(enums.items())], [])
-  # Format-specific field defaults (verified against LLVM test vectors)
-  format_defaults = {'VOP3P': {'opsel_hi': 3, 'opsel_hi2': 1}}
-  lines.append("# instruction formats")
-  for fmt_name, fields in sorted(formats.items()):
-    base = "Inst64" if max(f[1] for f in fields) > 31 or fmt_name == 'VOP3SD' else "Inst32"
-    order = FIELD_ORDER.get(fmt_name, [])
-    lines.append(f"class {fmt_name}({base}):")
-    if enc := next((f for f in fields if f[0] == 'ENCODING'), None):
-      enc_str = f"bits[{enc[1]}:{enc[2]}] == 0b{enc[3]:b}" if enc[1] != enc[2] else f"bits[{enc[1]}] == {enc[3]}"
-      lines.append(f"  encoding = {enc_str}")
-    if defaults := format_defaults.get(fmt_name):
-      lines.append(f"  _defaults = {defaults}")
-    for name, hi, lo, _, ftype in sorted([f for f in fields if f[0] != 'ENCODING'], key=field_key):
-      if ftype and ftype.endswith('Op'):
-        ann = f":Annotated[BitField, {ftype}]"
-      else:
-        ann = f":{ftype}" if ftype else ""
-      lines.append(f"  {name.lower()}{ann} = bits[{hi}]" if hi == lo else f"  {name.lower()}{ann} = bits[{hi}:{lo}]")
-    lines.append("")
-  lines.append("# instruction helpers")
-  for cls_name, ops in sorted(enums.items()):
-    fmt = cls_name[:-2]
-    for op_val, name in sorted(ops.items()):
-      seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=2"}.get(fmt, "")
-      tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt, f"{fmt}, {cls_name}")
-      if fmt in formats or fmt in ("GLOBAL", "SCRATCH"):
-        if fmt in ("VOP1", "VOP2", "VOPC"):
-          suffix = "_e32"
-        elif fmt == "VOP3" and op_val < 512:
-          suffix = "_e64"
-        else:
-          suffix = ""
-        if name in ('V_FMAMK_F32', 'V_FMAMK_F16'):
-          lines.append(f"def {name.lower()}{suffix}(vdst, src0, K, vsrc1): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
-        elif name in ('V_FMAAK_F32', 'V_FMAAK_F16'):
-          lines.append(f"def {name.lower()}{suffix}(vdst, src0, vsrc1, K): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
-        else:
-          lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
-  skip_exports = {'DPP8', 'DPP16'}
-  src_names = {name for _, name in src_enum.items()}
-  lines += [""] + [f"{name} = SrcEnum.{name}" for _, name in sorted(src_enum.items()) if name not in skip_exports]
-  if "NULL" in src_names: lines.append("OFF = NULL\n")
-
-  if output_path is not None:
-    import pathlib
-    pathlib.Path(output_path).write_text('\n'.join(lines))
-  return {"formats": formats, "enums": enums, "src_enum": src_enum}
-
-if __name__ == "__main__":
-  import argparse
-  parser = argparse.ArgumentParser(description="Generate instruction definitions from AMD ISA PDF")
-  parser.add_argument("--arch", choices=list(PDF_URLS.keys()) + ["all"], default="rdna3", help="Target architecture (default: rdna3)")
-  args = parser.parse_args()
-  if args.arch == "all":
-    for arch in PDF_URLS.keys():
-      result = generate(f"extra/assembly/amd/autogen/{arch}/__init__.py", arch=arch)
-      print(f"{arch}: generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")
-  else:
-    result = generate(f"extra/assembly/amd/autogen/{args.arch}/__init__.py", arch=args.arch)
-    print(f"generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")

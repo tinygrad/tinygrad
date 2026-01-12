@@ -1,6 +1,7 @@
 import ctypes, subprocess, tempfile, unittest
 from tinygrad.helpers import WIN
 from tinygrad.runtime.support.c import Struct
+from tinygrad.runtime.support.autogen import gen
 
 class TestAutogen(unittest.TestCase):
   def test_packed_struct_sizeof(self):
@@ -158,5 +159,98 @@ class TestAutogen(unittest.TestCase):
     assert ihdr.version == 0x0004
     assert ihdr.num_dies == 1
     assert ihdr.base_addr_64_bit == 1
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_gen_from_header(self):
+    header_content = """
+    typedef struct {
+      int x;
+      int y;
+    } Point;
+
+    typedef enum {
+      RED = 0,
+      GREEN = 1,
+      BLUE = 2
+    } Color;
+
+    typedef struct {
+      Point origin;
+      int width;
+      int height;
+      Color color;
+    } Rectangle;
+
+    int add_points(Point a, Point b);
+    """
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
+      f.write(header_content)
+      f.flush()
+
+      generated_code = gen(name="test_header", dll=None, files=[f.name])
+
+      namespace = {}
+      exec(generated_code, namespace)
+
+      self.assertIn('Point', namespace)
+      self.assertIn('Color', namespace)
+      self.assertIn('Rectangle', namespace)
+      self.assertIn('RED', namespace)
+      self.assertIn('GREEN', namespace)
+      self.assertIn('BLUE', namespace)
+
+      self.assertEqual(namespace['RED'], 0)
+      self.assertEqual(namespace['GREEN'], 1)
+      self.assertEqual(namespace['BLUE'], 2)
+
+      Point = namespace['Point']
+      p = Point()
+      self.assertIsInstance(p, Struct)
+      self.assertTrue(hasattr(p, 'x'))
+      self.assertTrue(hasattr(p, 'y'))
+
+      Rectangle = namespace['Rectangle']
+      rect = Rectangle()
+      self.assertTrue(hasattr(rect, 'origin'))
+      self.assertTrue(hasattr(rect, 'width'))
+      self.assertTrue(hasattr(rect, 'height'))
+      self.assertTrue(hasattr(rect, 'color'))
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_struct_ordering(self):
+    header_content = """
+    struct A;
+    struct C;
+    typedef struct A A;
+
+    struct B {
+      struct C *c_ptr;
+    };
+
+    struct C {
+      struct A *a_ptr;
+    };
+
+    struct A {
+      int x;
+      struct B *b_ptr;
+    };
+    """
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.h') as f:
+      f.write(header_content)
+      f.flush()
+      generated_code = gen(name="test_ordering", dll=None, files=[f.name])
+      namespace = {}
+      exec(generated_code, namespace)
+      self.assertIn('struct_A', namespace)
+      self.assertIn('struct_B', namespace)
+      self.assertIn('struct_C', namespace)
+      A, B, C = namespace['struct_A'], namespace['struct_B'], namespace['struct_C']
+      a, b, c = A(), B(), C()
+      self.assertTrue(hasattr(a, 'x'))
+      self.assertTrue(hasattr(a, 'b_ptr'))
+      self.assertTrue(hasattr(b, 'c_ptr'))
+      self.assertTrue(hasattr(c, 'a_ptr'))
 
 if __name__ == "__main__": unittest.main()

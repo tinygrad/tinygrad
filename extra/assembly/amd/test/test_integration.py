@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Integration test: round-trip RDNA3 assembly through AMD toolchain."""
 import unittest, re, io, sys, subprocess
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.asm import waitcnt, asm
 from extra.assembly.amd.test.helpers import get_llvm_mc
 
