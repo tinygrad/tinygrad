@@ -9,7 +9,7 @@ from extra.assembly.amd.dsl import RawImm
 from extra.assembly.amd.emu import WaveState, run_asm, set_valid_mem_ranges
 from extra.assembly.amd.pcode import _i32, _f32
 
-VCC = SrcEnum.VCC_LO  # For VOP3SD sdst field
+VCC = VCC_LO  # For VOP3SD sdst field (VCC_LO is exported from dsl2)
 USE_HW = os.environ.get("USE_HW", "0") == "1"
 FLOAT_TOLERANCE = 1e-5
 

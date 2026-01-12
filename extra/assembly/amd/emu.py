@@ -130,12 +130,12 @@ SMEM_DST_COUNT = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128
 
 # VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
 _VOPD_TO_VOP = {
-  VOPDOp.V_DUAL_FMAC_F32: VOP3Op.V_FMAC_F32, VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32,
-  VOPDOp.V_DUAL_MUL_F32: VOP3Op.V_MUL_F32, VOPDOp.V_DUAL_ADD_F32: VOP3Op.V_ADD_F32, VOPDOp.V_DUAL_SUB_F32: VOP3Op.V_SUB_F32,
-  VOPDOp.V_DUAL_SUBREV_F32: VOP3Op.V_SUBREV_F32, VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: VOP3Op.V_MUL_DX9_ZERO_F32,
-  VOPDOp.V_DUAL_MOV_B32: VOP3Op.V_MOV_B32, VOPDOp.V_DUAL_CNDMASK_B32: VOP3Op.V_CNDMASK_B32,
-  VOPDOp.V_DUAL_MAX_F32: VOP3Op.V_MAX_F32, VOPDOp.V_DUAL_MIN_F32: VOP3Op.V_MIN_F32,
-  VOPDOp.V_DUAL_ADD_NC_U32: VOP3Op.V_ADD_NC_U32, VOPDOp.V_DUAL_LSHLREV_B32: VOP3Op.V_LSHLREV_B32, VOPDOp.V_DUAL_AND_B32: VOP3Op.V_AND_B32,
+  VOPDOp.V_DUAL_FMAC_F32: VOP3Op.V_FMAC_F32_E64, VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
+  VOPDOp.V_DUAL_MUL_F32: VOP3Op.V_MUL_F32_E64, VOPDOp.V_DUAL_ADD_F32: VOP3Op.V_ADD_F32_E64, VOPDOp.V_DUAL_SUB_F32: VOP3Op.V_SUB_F32_E64,
+  VOPDOp.V_DUAL_SUBREV_F32: VOP3Op.V_SUBREV_F32_E64, VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: VOP3Op.V_MUL_DX9_ZERO_F32_E64,
+  VOPDOp.V_DUAL_MOV_B32: VOP3Op.V_MOV_B32_E64, VOPDOp.V_DUAL_CNDMASK_B32: VOP3Op.V_CNDMASK_B32_E64,
+  VOPDOp.V_DUAL_MAX_F32: VOP3Op.V_MAX_F32_E64, VOPDOp.V_DUAL_MIN_F32: VOP3Op.V_MIN_F32_E64,
+  VOPDOp.V_DUAL_ADD_NC_U32: VOP3Op.V_ADD_NC_U32_E64, VOPDOp.V_DUAL_LSHLREV_B32: VOP3Op.V_LSHLREV_B32_E64, VOPDOp.V_DUAL_AND_B32: VOP3Op.V_AND_B32_E64,
 }
 
 
@@ -287,7 +287,7 @@ def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
   else: d0 = V[vdst]
 
   if isinstance(inst, VOP3SD) and 'CO_CI' in inst.op_name: vcc_for_fn = st.rsgpr64(inst.src2)
-  elif isinstance(inst, VOP3) and inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and src2 is not None and src2 < 256: vcc_for_fn = st.rsgpr64(src2)
+  elif isinstance(inst, VOP3) and inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16_E64) and src2 is not None and src2 < 256: vcc_for_fn = st.rsgpr64(src2)
   else: vcc_for_fn = st.vcc
   src0_idx = (src0 - 256) if src0 is not None and src0 >= 256 else (src0 if src0 is not None else 0)
   extra_kwargs = {'opsel': opsel, 'opsel_hi': inst.opsel_hi | (inst.opsel_hi2 << 2)} if isinstance(inst, VOP3P) and 'FMA_MIX' in inst.op_name else {}
@@ -372,10 +372,10 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER: inst._dispatch = dispatch_barrier
     elif isinstance(inst, SOPP) and inst.op in (SOPPOp.S_CLAUSE, SOPPOp.S_WAITCNT, SOPPOp.S_WAITCNT_DEPCTR, SOPPOp.S_SENDMSG, SOPPOp.S_SET_INST_PREFETCH_DISTANCE, SOPPOp.S_DELAY_ALU): inst._dispatch = dispatch_nop
     elif isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)): inst._dispatch = exec_scalar
-    elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: inst._dispatch = dispatch_nop
+    elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP_E32: inst._dispatch = dispatch_nop
     elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name: inst._dispatch = dispatch_wmma
-    elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32: inst._dispatch = dispatch_writelane
-    elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32, VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32): inst._dispatch = dispatch_readlane
+    elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32_E64: inst._dispatch = dispatch_writelane
+    elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32_E32, VOP3Op.V_READFIRSTLANE_B32_E64, VOP3Op.V_READLANE_B32_E64): inst._dispatch = dispatch_readlane
     elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
     elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)
