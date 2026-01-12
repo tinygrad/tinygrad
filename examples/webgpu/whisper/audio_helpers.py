@@ -28,24 +28,6 @@ def make_stft_basis_buffers(n_fft: int, window: Tensor) -> Tensor:
   return Tensor.cat(*make_basis_buffers(n_fft, Tensor.arange((n_fft // 2) + 1)[None].T, window)).reshape(n_fft + 2, 1, n_fft)
 
 
-class STFT:
-  def __init__(self, n_fft: int, stride: int, pad: tuple[int, int], window="hann", pad_mode="constant"):
-    assert window == "hann", "other window types not implemented yet"
-    self.n_fft = n_fft
-    self.stride = stride
-    self.pad = pad
-    self.pad_mode = pad_mode
-    self.forward_basis_buffers = make_stft_basis_buffers(n_fft, hann_window(n_fft)).realize()
-
-  def __call__(self, waveforms) -> Tensor:
-    return self.forward(waveforms)
-
-  def forward(self, x: Tensor) -> Tensor:
-    x = x.reshape(-1, x.shape[-1])
-    spec = stft(x, self.forward_basis_buffers, self.n_fft, self.stride, self.pad, self.pad_mode)
-    return spec
-
-
 def make_basis_buffers(N_FFT: int, k_freq_bin: int | Tensor, window: Tensor) -> tuple[Tensor, Tensor]:
   n = Tensor.arange(N_FFT)
   angle = 2 * math.pi * k_freq_bin * n / N_FFT
