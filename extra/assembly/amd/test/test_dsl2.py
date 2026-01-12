@@ -4,21 +4,65 @@ from extra.assembly.amd.dsl2 import *
 class TestRegisters(unittest.TestCase):
   def test_vgpr_single(self):
     self.assertEqual(repr(v[5]), "v[5]")
-    self.assertEqual(v[5].idx, 5)
-    self.assertEqual(v[5].count, 1)
+    self.assertEqual(v[5].offset, 261)  # 256 + 5
+    self.assertEqual(v[5].sz, 1)
 
   def test_sgpr_single(self):
     self.assertEqual(repr(s[10]), "s[10]")
-    self.assertEqual(s[10].idx, 10)
+    self.assertEqual(s[10].offset, 10)
 
   def test_vgpr_range(self):
-    self.assertEqual(repr(v[0:4]), "v[0:3]")
-    self.assertEqual(v[0:4].idx, 0)
-    self.assertEqual(v[0:4].count, 4)
+    self.assertEqual(repr(v[0:3]), "v[0:3]")
+    self.assertEqual(v[0:3].offset, 256)
+    self.assertEqual(v[0:3].sz, 4)
 
   def test_sgpr_range(self):
-    self.assertEqual(repr(s[4:6]), "s[4:5]")
-    self.assertEqual(s[4:6].count, 2)
+    self.assertEqual(repr(s[4:5]), "s[4:5]")
+    self.assertEqual(s[4:5].sz, 2)
+
+  def test_ttmp_reslice(self):
+    # ttmp is src[108:123], so ttmp[0] should be src[108]
+    self.assertEqual(ttmp[0].offset, 108)
+    self.assertEqual(ttmp[1].offset, 109)
+    # ttmp[0:1] is 2 elements (inclusive slicing)
+    self.assertEqual(ttmp[0:1].offset, 108)
+    self.assertEqual(ttmp[0:1].sz, 2)
+    # ttmp[0:1][0] should be src[108]
+    self.assertEqual(ttmp[0:1][0].offset, 108)
+
+  def test_special_regs(self):
+    self.assertEqual(NULL.offset, 124)
+    self.assertEqual(M0.offset, 125)
+    self.assertEqual(EXEC_LO.offset, 126)
+    self.assertEqual(EXEC_HI.offset, 127)
+    # Check repr round-trips
+    self.assertEqual(repr(NULL), "NULL")
+    self.assertEqual(repr(M0), "M0")
+    self.assertEqual(repr(EXEC_LO), "EXEC_LO")
+    self.assertEqual(repr(EXEC), "EXEC")
+
+  def test_vcc(self):
+    self.assertEqual(VCC.offset, 106)
+    self.assertEqual(VCC.sz, 2)
+    self.assertEqual(VCC_LO.offset, 106)
+    self.assertEqual(VCC_HI.offset, 107)
+    # Check repr round-trips
+    self.assertEqual(repr(VCC_LO), "VCC_LO")
+    self.assertEqual(repr(VCC_HI), "VCC_HI")
+    self.assertEqual(repr(VCC), "VCC")
+
+  def test_float_constants(self):
+    self.assertEqual(src[240].offset, 240)
+    self.assertEqual(repr(src[240]), "0.5")
+    self.assertEqual(repr(src[242]), "1.0")
+    self.assertEqual(repr(src[243]), "-1.0")
+
+  def test_int_constants(self):
+    self.assertEqual(repr(src[128]), "0")
+    self.assertEqual(repr(src[129]), "1")
+    self.assertEqual(repr(src[192]), "64")
+    self.assertEqual(repr(src[193]), "-1")
+    self.assertEqual(repr(src[208]), "-16")
 
 class TestOpField(unittest.TestCase):
   def test_enum_name(self):
@@ -45,14 +89,14 @@ class TestVOP1(unittest.TestCase):
     raw = i._raw
     # Check each field
     self.assertEqual((raw >> 25) & 0x7f, 0b0111111)  # encoding
-    self.assertEqual((raw >> 17) & 0xff, 5)          # vdst
+    self.assertEqual((raw >> 17) & 0xff, 5)          # vdst (just VGPR index)
     self.assertEqual((raw >> 9) & 0xff, 1)           # op
-    self.assertEqual(raw & 0x1ff, 256 + 6)           # src0 (VGPR encoded)
+    self.assertEqual(raw & 0x1ff, 262)               # src0 (256 + 6)
 
   def test_encoding_vgpr_sgpr(self):
     i = VOP1(VOP1Op.V_MOV_B32_E32, v[5], s[10])
     raw = i._raw
-    self.assertEqual((raw >> 17) & 0xff, 5)   # vdst
+    self.assertEqual((raw >> 17) & 0xff, 5)    # vdst (just VGPR index)
     self.assertEqual(raw & 0x1ff, 10)          # src0 (SGPR encoded)
 
   def test_to_bytes(self):
