@@ -390,3 +390,24 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
 
   return kv_data, state_dict
+
+@accept_filename
+def png_load(t:Tensor) -> Tensor:
+  f = io.BufferedReader(TensorIO(t))
+  assert f.read(8) == b'\x89PNG\r\n\x1a\n', "not a PNG"
+  idats = []
+  while (slen:=f.read(4)):
+    typ, dat = f.read(4), f.read(struct.unpack(">I", slen)[0])
+    if DEBUG >= 3: print(len(dat), typ)
+    if typ == b'IHDR':
+      width, height, depth, color_type = struct.unpack(">IIBB", dat[:10])
+      assert depth == 8 and color_type in [2, 6], f"only 8-bit RGB/RGBA PNG supported {depth=} {color_type=}"
+      bpp = 3 if color_type == 2 else 4
+    if typ == b'IDAT': idats.append(dat)
+    f.seek(4, 1)
+  data = Tensor(zlib.decompress(b''.join(idats))).reshape(height, width * bpp + 1)
+  filters, pixels = data[:, 0], data[:, 1:].reshape(height, width, bpp)
+  assert filters.max().item() <= 1, f"only PNG filters 0/1 supported, got {set(filters.tolist())}"  # type: ignore[arg-type]
+  # Sub filter (type 1): each pixel adds the pixel to its left, which is cumsum along width
+  pixels = (filters == 1).reshape(height, 1, 1).where(pixels.cast(dtypes.int16).cumsum(axis=1).bitwise_and(0xff).cast(dtypes.uint8), pixels)
+  return pixels[:, :, :3]

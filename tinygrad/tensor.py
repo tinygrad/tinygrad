@@ -317,6 +317,12 @@ class Tensor(OpMixin):
     assert all_int(self.shape), f"no data if shape is symbolic, {self.shape=}"
     return self._buffer().as_typed_buffer(self.shape)
 
+  def tobytes(self) -> bytes:
+    """
+    Returns the data of this tensor as bytes, like numpy's `.tobytes()`.
+    """
+    return bytes(self.data())
+
   def item(self) -> ConstType:
     """
     Returns the value of this tensor as a standard Python number.
