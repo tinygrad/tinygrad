@@ -493,7 +493,7 @@ class TestMad64(unittest.TestCase):
       s_mov_b32(s[1], 4),
       v_mov_b32_e32(v[2], 5),
       v_mov_b32_e32(v[3], 0),
-      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+      v_mad_u64_u32(v[4:5], SrcEnum.NULL, s[0], s[1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result_lo = st.vgpr[0][4]
@@ -508,7 +508,7 @@ class TestMad64(unittest.TestCase):
       s_mov_b32(s[1], 2),
       v_mov_b32_e32(v[2], 0),
       v_mov_b32_e32(v[3], 0),
-      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+      v_mad_u64_u32(v[4:5], SrcEnum.NULL, s[0], s[1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result_lo = st.vgpr[0][4]
@@ -901,7 +901,7 @@ class TestF64Ops(unittest.TestCase):
       s_mov_b32(s[1], one_f64 >> 32),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_add_f64(v[2:4], v[0:2], SrcEnum.POS_ONE),  # 1.0 + 1.0 = 2.0
+      v_add_f64(v[2:3], v[0:1], SrcEnum.POS_ONE),  # 1.0 + 1.0 = 2.0
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
@@ -920,7 +920,7 @@ class TestF64Ops(unittest.TestCase):
       v_mov_b32_e32(v[1], s[1]),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      v_mul_f64(v[4:6], v[0:2], v[2:4]),
+      v_mul_f64(v[4:5], v[0:1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
@@ -936,7 +936,7 @@ class TestF64Ops(unittest.TestCase):
       v_mov_b32_e32(v[1], s[1]),
       s_mov_b32(s[2], 0xDEADBEEF),
       v_mov_b32_e32(v[3], s[2]),     # Canary in v3
-      v_cvt_i32_f64_e32(v[2], v[0:2]),
+      v_cvt_i32_f64_e32(v[2], v[0:1]),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0xffffffff, "-1.0 converts to -1")
@@ -952,7 +952,7 @@ class TestF64Ops(unittest.TestCase):
       s_mov_b32(s[1], val_bits >> 32),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_ldexp_f64(v[2:4], v[0:2], 0xffffffe0),  # -32
+      v_ldexp_f64(v[2:3], v[0:1], 0xffffffe0),  # -32
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
@@ -964,8 +964,8 @@ class TestF64Ops(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], two_f64 & 0xffffffff),
       s_mov_b32(s[1], two_f64 >> 32),
-      v_frexp_mant_f64_e32(v[0:2], s[0:2]),
-      v_frexp_exp_i32_f64_e32(v[2], s[0:2]),
+      v_frexp_mant_f64_e32(v[0:1], s[0:1]),
+      v_frexp_exp_i32_f64_e32(v[2], s[0:1]),
     ]
     st = run_program(instructions, n_lanes=1)
     mant = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -988,7 +988,7 @@ class TestF64Ops(unittest.TestCase):
       s_mov_b32(s[3], one_f64 >> 32),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4], sdst=s[10], src0=v[0], src1=v[0], src2=v[2]),
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=s[10], src0=v[0:1], src1=v[0:1], src2=v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
@@ -1003,14 +1003,14 @@ class TestF64Ops(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], val & 0xffffffff),
       s_mov_b32(s[1], (val >> 32) & 0xffffffff),
-      v_trunc_f64_e32(v[0:2], s[0:2]),
-      v_ldexp_f64(v[2:4], v[0:2], 0xffffffe0),  # -32
-      v_floor_f64_e32(v[2:4], v[2:4]),
+      v_trunc_f64_e32(v[0:1], s[0:1]),
+      v_ldexp_f64(v[2:3], v[0:1], 0xffffffe0),  # -32
+      v_floor_f64_e32(v[2:3], v[2:3]),
       s_mov_b32(s[2], f2i64(-4294967296.0) & 0xffffffff),
       s_mov_b32(s[3], f2i64(-4294967296.0) >> 32),
-      v_fma_f64(v[0:2], s[2:4], v[2:4], v[0:2]),
-      v_cvt_u32_f64_e32(v[4], v[0:2]),
-      v_cvt_i32_f64_e32(v[5], v[2:4]),
+      v_fma_f64(v[0:1], s[2:3], v[2:3], v[0:1]),
+      v_cvt_u32_f64_e32(v[4], v[0:1]),
+      v_cvt_i32_f64_e32(v[5], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     lo = st.vgpr[0][4]
@@ -1025,7 +1025,7 @@ class TestF64Ops(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
       s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1038,9 +1038,9 @@ class TestF64Ops(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
       s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
-      v_trig_preop_f64(v[2], abs(s[0]), 1),
-      v_trig_preop_f64(v[4], abs(s[0]), 2),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
+      v_trig_preop_f64(v[2:3], abs(s[0:1]), 1),
+      v_trig_preop_f64(v[4:5], abs(s[0:1]), 2),
     ]
     st = run_program(instructions, n_lanes=1)
     p0 = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1075,7 +1075,7 @@ class TestF64Ops(unittest.TestCase):
       v_mov_b32_e32(v[3], s[3]),
       v_mov_b32_e32(v[4], s[4]),
       v_mov_b32_e32(v[5], s[5]),
-      v_fma_f64(v[6], v[0], v[2], v[4]),
+      v_fma_f64(v[6:7], v[0:1], v[2:3], v[4:5]),
     ]
     # run_program with USE_HW=1 will verify exact bit match with hardware
     st = run_program(instructions, n_lanes=1)
@@ -1093,7 +1093,7 @@ class TestMad64More(unittest.TestCase):
       s_mov_b32(s[1], 1000),
       v_mov_b32_e32(v[2], 0),  # S2 lo
       v_mov_b32_e32(v[3], 1),  # S2 hi = 0x100000000
-      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+      v_mad_u64_u32(v[4:5], SrcEnum.NULL, s[0], s[1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result_lo = st.vgpr[0][4]
@@ -1109,7 +1109,7 @@ class TestMad64More(unittest.TestCase):
       s_mov_b32(s[1], 0xFFFFFFFF),
       v_mov_b32_e32(v[2], 0),
       v_mov_b32_e32(v[3], 0),
-      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+      v_mad_u64_u32(v[4:5], SrcEnum.NULL, s[0], s[1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result_lo = st.vgpr[0][4]
@@ -1185,7 +1185,7 @@ class TestF64LiteralOps(unittest.TestCase):
       s_mov_b32(s[3], (val_m1 >> 32) & 0xffffffff),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      VOP3(VOP3Op.V_FMA_F64, vdst=v[4], src0=lit, src1=v[2], src2=v[0]),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[4:5], src0=lit, src1=v[2:3], src2=v[0:1]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
@@ -1201,7 +1201,7 @@ class TestF64LiteralOps(unittest.TestCase):
       s_mov_b32(s[1], (val >> 32) & 0xffffffff),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),  # -32
+      v_ldexp_f64(v[2:3], v[0:1], 0xFFFFFFE0),  # -32
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
@@ -1220,12 +1220,12 @@ class TestF64ToI64Conversion(unittest.TestCase):
       s_mov_b32(s[1], (val >> 32) & 0xffffffff),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_trunc_f64_e32(v[0:2], v[0:2]),
-      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),
-      v_floor_f64_e32(v[2:4], v[2:4]),
-      VOP3(VOP3Op.V_FMA_F64, vdst=v[0], src0=lit, src1=v[2], src2=v[0]),
-      v_cvt_u32_f64_e32(v[4], v[0:2]),
-      v_cvt_i32_f64_e32(v[5], v[2:4]),
+      v_trunc_f64_e32(v[0:1], v[0:1]),
+      v_ldexp_f64(v[2:3], v[0:1], 0xFFFFFFE0),
+      v_floor_f64_e32(v[2:3], v[2:3]),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[0:1], src0=lit, src1=v[2:3], src2=v[0:1]),
+      v_cvt_u32_f64_e32(v[4], v[0:1]),
+      v_cvt_i32_f64_e32(v[5], v[2:3]),
     ]
     return instructions
 
@@ -1385,7 +1385,7 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
       s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1396,7 +1396,7 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),
       s_mov_b32(s[1], 0x3ff00000),
-      v_trig_preop_f64(v[0], abs(s[0]), 1),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 1),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1408,7 +1408,7 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),
       s_mov_b32(s[1], 0x3ff00000),
-      v_trig_preop_f64(v[0], abs(s[0]), 2),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 2),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1421,9 +1421,9 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),
       s_mov_b32(s[1], 0x3ff00000),
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
-      v_trig_preop_f64(v[2], abs(s[0]), 1),
-      v_trig_preop_f64(v[4], abs(s[0]), 2),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
+      v_trig_preop_f64(v[2:3], abs(s[0:1]), 1),
+      v_trig_preop_f64(v[4:5], abs(s[0:1]), 2),
     ]
     st = run_program(instructions, n_lanes=1)
     p0 = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1440,7 +1440,7 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], large_bits & 0xffffffff),
       s_mov_b32(s[1], (large_bits >> 32) & 0xffffffff),
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
