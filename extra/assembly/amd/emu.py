@@ -27,6 +27,8 @@ class SGPRArray:
     return i
   def __getitem__(self, key): return self._data[self._idx(key)]
   def __setitem__(self, key, val): self._data[self._idx(key)] = val
+  def __len__(self): return len(self._data)
+  def __iter__(self): return iter(self._data)
 
 class VGPRLane:
   """Single lane of VGPRs that accepts Reg or int index. Validates VGPR range (256-511)."""
@@ -39,6 +41,8 @@ class VGPRLane:
     return i
   def __getitem__(self, key): return self._data[self._idx(key)]
   def __setitem__(self, key, val): self._data[self._idx(key)] = val
+  def __len__(self): return len(self._data)
+  def __iter__(self): return iter(self._data)
 
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
 
