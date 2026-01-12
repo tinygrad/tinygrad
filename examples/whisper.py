@@ -153,8 +153,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=
   assert waveforms.shape[0] <= batch_size
   waveforms = waveforms.pad(((0, batch_size-waveforms.shape[0]), (0, max_len-waveforms.shape[-1])))
   # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
-  # TODO: pad_mode="reflect" to match openai
-  stft = stft_full(waveforms, N_FFT, stride=HOP_LENGTH, pad=(200, 200))
+  stft = stft_full(waveforms, N_FFT, stride=HOP_LENGTH, pad=(200, 200), window="hann", pad_mode="reflect")
   magnitudes = (stft[..., :-1] ** 2)
   mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
 
