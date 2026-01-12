@@ -5,7 +5,7 @@ Set USE_HW=1 to run on both emulator and real hardware, comparing results.
 """
 import ctypes, os, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
-from extra.assembly.amd.asm import RawImm
+
 from extra.assembly.amd.emu import WaveState, run_asm, set_valid_mem_ranges
 from extra.assembly.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
 from extra.assembly.amd.pcode import _i32, _f32

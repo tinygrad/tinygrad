@@ -147,6 +147,14 @@ class SrcField(BitField):
 class VGPRField(SrcField):
   _valid_range = (256, 511)
   def __init__(self, hi: int, lo: int, default=v[0]): super().__init__(hi, lo, default)
+  def encode(self, val) -> int:
+    # For 8-bit vdst fields in VOP1/VOP2 16-bit ops, bit 7 is opsel for dest half
+    encoded = super().encode(val)
+    if isinstance(val, Reg) and val.hi and (self.hi - self.lo + 1) == 8:
+      if encoded >= 128:
+        raise RuntimeError(f"VGPRField: v[{encoded}].h not encodable in 8-bit field (v[0:127] only for .h)")
+      encoded |= 0x80
+    return encoded
 class SGPRField(SrcField): _valid_range = (0, 127)
 class SSrcField(SrcField): _valid_range = (0, 255)
 

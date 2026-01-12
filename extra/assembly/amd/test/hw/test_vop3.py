@@ -861,7 +861,7 @@ class TestF16Modifiers(unittest.TestCase):
       s_mov_b32(s[1], 0x38000000),  # v1 = {hi=0.5, lo=0.0}
       v_mov_b32_e32(v[1], s[1]),
       # v_fmac_f16 v0.h, literal(0.318...), v1.l: D.h = D.h + S0 * S1 = 0.5 + 0.318 * 0.0 = 0.5
-      VOP2(VOP2Op.V_FMAC_F16, vdst=RawImm(128), src0=RawImm(255), vsrc1=RawImm(1), literal=0x3518),
+      v_fmac_f16_e32(v[0].h, 0x3518, v[1]),
     ]
     st = run_program(instructions, n_lanes=1)
     v0 = st.vgpr[0][0]
@@ -1185,7 +1185,7 @@ class TestF64LiteralOps(unittest.TestCase):
       s_mov_b32(s[3], (val_m1 >> 32) & 0xffffffff),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      VOP3(VOP3Op.V_FMA_F64, vdst=v[4], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[4], src0=lit, src1=v[2], src2=v[0]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
@@ -1223,7 +1223,7 @@ class TestF64ToI64Conversion(unittest.TestCase):
       v_trunc_f64_e32(v[0:2], v[0:2]),
       v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),
       v_floor_f64_e32(v[2:4], v[2:4]),
-      VOP3(VOP3Op.V_FMA_F64, vdst=v[0], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[0], src0=lit, src1=v[2], src2=v[0]),
       v_cvt_u32_f64_e32(v[4], v[0:2]),
       v_cvt_i32_f64_e32(v[5], v[2:4]),
     ]
