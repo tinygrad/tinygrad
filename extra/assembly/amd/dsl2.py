@@ -76,7 +76,9 @@ class BitField:
     encoded = self.encode(val)
     if encoded < 0 or encoded > self.mask(): raise RuntimeError(f"value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
     return (raw & ~(self.mask() << self.lo)) | (encoded << self.lo)
-  def get(self, raw: int): return self.decode((raw >> self.lo) & self.mask())
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    return self.decode((obj._raw >> self.lo) & self.mask())
 
 class FixedBitField(BitField):
   def set(self, raw: int, val=None) -> int:
@@ -139,23 +141,18 @@ class VGPRField(SrcField): _valid_range = (256, 511)
 class SGPRField(SrcField): _valid_range = (0, 127)
 class SSrcField(SrcField): _valid_range = (0, 255)
 
-class SBaseField(BitField):
-  """SMEM sbase field: encoded = sgpr_index // 2. Must be even-aligned SGPR."""
+class AlignedSGPRField(BitField):
+  """SGPR field with alignment requirement. Encoded as sgpr_index // alignment."""
+  _align: int = 2
   def encode(self, val):
-    if not isinstance(val, Reg): raise RuntimeError(f"SBaseField requires Reg, got {type(val).__name__}")
-    if not (0 <= val.offset < 128): raise RuntimeError(f"SBaseField requires SGPR, got offset {val.offset}")
-    if val.offset & 1: raise RuntimeError(f"SBaseField requires even SGPR index, got s[{val.offset}]")
-    return val.offset >> 1
-  def decode(self, raw): return src[raw << 1]
+    if not isinstance(val, Reg): raise RuntimeError(f"{self.__class__.__name__} requires Reg, got {type(val).__name__}")
+    if not (0 <= val.offset < 128): raise RuntimeError(f"{self.__class__.__name__} requires SGPR, got offset {val.offset}")
+    if val.offset & (self._align - 1): raise RuntimeError(f"{self.__class__.__name__} requires {self._align}-aligned SGPR, got s[{val.offset}]")
+    return val.offset >> (self._align.bit_length() - 1)
+  def decode(self, raw): return src[raw << (self._align.bit_length() - 1)]
 
-class SRsrcField(BitField):
-  """MIMG/MUBUF srsrc/ssamp field: encoded = sgpr_index // 4. Must be 4-aligned SGPR."""
-  def encode(self, val):
-    if not isinstance(val, Reg): raise RuntimeError(f"SRsrcField requires Reg, got {type(val).__name__}")
-    if not (0 <= val.offset < 128): raise RuntimeError(f"SRsrcField requires SGPR, got offset {val.offset}")
-    if val.offset & 3: raise RuntimeError(f"SRsrcField requires 4-aligned SGPR index, got s[{val.offset}]")
-    return val.offset >> 2
-  def decode(self, raw): return src[raw << 2]
+class SBaseField(AlignedSGPRField): _align = 2
+class SRsrcField(AlignedSGPRField): _align = 4
 
 class VDSTYField(BitField):
   """VOPD vdsty: encoded = vgpr_idx >> 1. Only even VGPRs allowed (vdstx determines LSB)."""
@@ -192,14 +189,6 @@ class Inst:
       if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
         self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
 
-  def __getattribute__(self, name: str):
-    if name.startswith('_') or name in ('size', 'to_bytes', 'from_bytes', 'op_name'):
-      return object.__getattribute__(self, name)
-    fields = object.__getattribute__(self, '_fields')
-    field = next((f for n, f in fields if n == name), None)
-    if field is None: return object.__getattribute__(self, name)
-    return field.get(object.__getattribute__(self, '_raw'))
-
   @property
   def op_name(self) -> str: return self.op.name
   def size(self) -> int: return self._size + (4 if self._literal is not None else 0)
@@ -216,7 +205,7 @@ class Inst:
     inst._raw = int.from_bytes(data[:cls._size], 'little')
     inst._literal = None
     for name, field in cls._fields:
-      if isinstance(field, SrcField) and field.get(inst._raw).offset == 255:
+      if isinstance(field, SrcField) and getattr(inst, name).offset == 255:
         assert len(data) >= cls._size + 4, f"literal marker found but data too short: {len(data)} < {cls._size + 4}"
         inst._literal = int.from_bytes(data[cls._size:cls._size + 4], 'little')
         break
@@ -225,20 +214,3 @@ class Inst:
   def __repr__(self):
     args = [n for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
     return f"{self.op.name.lower()}({', '.join(repr(getattr(self, n)) for n in args)})"
-
-# ══════════════════════════════════════════════════════════════
-# VOP1
-# ══════════════════════════════════════════════════════════════
-
-class VOP1Op(Enum):
-  V_NOP_E32 = 0
-  V_MOV_B32_E32 = 1
-
-class VOP2Op(Enum):
-  V_CNDMASK_B32_E32 = 1
-
-class VOP1(Inst):
-  encoding = FixedBitField(31, 25, 0b0111111)
-  op = EnumBitField(16, 9, VOP1Op)
-  vdst = VGPRField(24, 17)
-  src0 = SrcField(8, 0)
