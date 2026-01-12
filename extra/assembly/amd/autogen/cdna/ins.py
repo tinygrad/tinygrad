@@ -245,6 +245,9 @@ class VOPC(Inst):
   src0 = SrcField(8, 0)
   vsrc1 = VGPRField(16, 9)
 
+class VOP1_SDST(VOP1):
+  vdst = SSrcField(24, 17)
+
 # instruction helpers
 ds_add_u32 = functools.partial(DS, DSOp.DS_ADD_U32)
 ds_sub_u32 = functools.partial(DS, DSOp.DS_SUB_U32)
@@ -865,7 +868,7 @@ s_set_gpr_idx_off = functools.partial(SOPP, SOPPOp.S_SET_GPR_IDX_OFF)
 s_set_gpr_idx_mode = functools.partial(SOPP, SOPPOp.S_SET_GPR_IDX_MODE)
 v_nop_e32 = functools.partial(VOP1, VOP1Op.V_NOP_E32)
 v_mov_b32_e32 = functools.partial(VOP1, VOP1Op.V_MOV_B32_E32)
-v_readfirstlane_b32_e32 = functools.partial(VOP1, VOP1Op.V_READFIRSTLANE_B32_E32)
+v_readfirstlane_b32_e32 = functools.partial(VOP1_SDST, VOP1Op.V_READFIRSTLANE_B32_E32)
 v_cvt_i32_f64_e32 = functools.partial(VOP1, VOP1Op.V_CVT_I32_F64_E32)
 v_cvt_f64_i32_e32 = functools.partial(VOP1, VOP1Op.V_CVT_F64_I32_E32)
 v_cvt_f32_i32_e32 = functools.partial(VOP1, VOP1Op.V_CVT_F32_I32_E32)

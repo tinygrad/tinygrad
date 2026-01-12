@@ -390,12 +390,13 @@ def dispatch_endpgm(st, inst): return -1
 def dispatch_barrier(st, inst): st.pc += inst._words; return -2
 def dispatch_nop(st, inst): st.pc += inst._words; return 0
 def dispatch_wmma(st, inst): exec_wmma(st, inst, inst.op); st.pc += inst._words; return 0
-def dispatch_writelane(st, inst): st.vgpr[st.rsrc(inst.src1, 0, inst._literal) & 0x1f][inst.vdst] = st.rsrc(inst.src0, 0, inst._literal) & MASK32; st.pc += inst._words; return 0
+def dispatch_writelane(st, inst): st.vgpr[st.rsrc(inst.src1, 0, inst._literal) & 0x1f][inst.vdst.offset - 256] = st.rsrc(inst.src0, 0, inst._literal) & MASK32; st.pc += inst._words; return 0
 def dispatch_readlane(st, inst):
-  src0_idx = (inst.src0 - 256) if inst.src0 >= 256 else inst.src0
+  src0_off = inst.src0.offset
+  src0_idx = (src0_off - 256) if src0_off >= 256 else src0_off
   s1 = st.rsrc(inst.src1, 0, inst._literal) if getattr(inst, 'src1', None) is not None else 0
-  result = inst._fn(0, s1, 0, 0, st.scc, st.vcc, 0, st.exec_mask, inst._literal, st.vgpr, src0_idx, inst.vdst)
-  st.wsgpr(inst.vdst, result['D0'])
+  result = inst._fn(0, s1, 0, 0, st.scc, st.vcc, 0, st.exec_mask, inst._literal, st.vgpr, src0_idx, inst.vdst.offset)
+  st.wsgpr(inst.vdst.offset, result['D0'])
   st.pc += inst._words; return 0
 
 # Per-lane dispatch wrapper: wraps per-lane exec functions into wave-level dispatch

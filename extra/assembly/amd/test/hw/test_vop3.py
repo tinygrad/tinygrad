@@ -520,8 +520,8 @@ class TestMad64(unittest.TestCase):
 class TestLaneOps(unittest.TestCase):
   """Tests for lane operations (readlane, writelane)."""
 
-  def _readlane(self, sdst_idx, vsrc, lane_idx):
-    return VOP3(VOP3Op.V_READLANE_B32, vdst=RawImm(sdst_idx), src0=vsrc, src1=lane_idx)
+  def _readlane(self, sdst, vsrc, lane_idx):
+    return v_readlane_b32(sdst, vsrc, lane_idx)
 
   def test_v_readlane_b32_basic(self):
     """V_READLANE_B32 reads a value from a specific lane's VGPR."""
@@ -529,7 +529,7 @@ class TestLaneOps(unittest.TestCase):
       v_lshlrev_b32_e32(v[0], 1, v[255]),
       v_lshlrev_b32_e32(v[1], 3, v[255]),
       v_add_nc_u32_e32(v[0], v[0], v[1]),
-      self._readlane(0, v[0], 2),
+      self._readlane(s[0], v[0], 2),
       v_mov_b32_e32(v[2], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -541,7 +541,7 @@ class TestLaneOps(unittest.TestCase):
     instructions = [
       v_lshlrev_b32_e32(v[0], 2, v[255]),  # v0 = lane_id * 4
       v_add_nc_u32_e32(v[0], 100, v[0]),   # v0 = 100 + lane_id * 4
-      self._readlane(0, v[0], 0),          # s0 = lane 0's v0 = 100
+      self._readlane(s[0], v[0], 0),       # s0 = lane 0's v0 = 100
       v_mov_b32_e32(v[1], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -553,7 +553,7 @@ class TestLaneOps(unittest.TestCase):
     instructions = [
       v_lshlrev_b32_e32(v[0], 2, v[255]),  # v0 = lane_id * 4
       v_add_nc_u32_e32(v[0], 100, v[0]),   # v0 = 100 + lane_id * 4
-      self._readlane(0, v[0], 3),          # s0 = lane 3's v0 = 112
+      self._readlane(s[0], v[0], 3),       # s0 = lane 3's v0 = 112
       v_mov_b32_e32(v[1], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -565,7 +565,7 @@ class TestLaneOps(unittest.TestCase):
     instructions = [
       v_lshlrev_b32_e32(v[5], 3, v[255]),  # v5 = lane_id * 8
       v_add_nc_u32_e32(v[5], 50, v[5]),    # v5 = 50 + lane_id * 8
-      self._readlane(0, v[5], 1),          # s0 = lane 1's v5 = 58
+      self._readlane(s[0], v[5], 1),       # s0 = lane 1's v5 = 58
       v_mov_b32_e32(v[6], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -592,7 +592,7 @@ class TestLaneOps(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[0], 0xdeadbeef),
       v_writelane_b32(v[0], s[0], 1),      # Write to lane 1
-      self._readlane(1, v[0], 1),          # Read back from lane 1 into s1
+      self._readlane(s[1], v[0], 1),       # Read back from lane 1 into s1
       v_mov_b32_e32(v[1], s[1]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -603,12 +603,12 @@ class TestLaneOps(unittest.TestCase):
     """Simulate a wave reduction using readlane - common WMMA/reduction pattern."""
     instructions = [
       v_add_nc_u32_e32(v[0], 1, v[255]),   # v0 = lane_id + 1 (1, 2, 3, 4)
-      self._readlane(0, v[0], 0),          # s0 = 1
-      self._readlane(1, v[0], 1),          # s1 = 2
+      self._readlane(s[0], v[0], 0),       # s0 = 1
+      self._readlane(s[1], v[0], 1),       # s1 = 2
       s_add_u32(s[0], s[0], s[1]),         # s0 = 3
-      self._readlane(1, v[0], 2),          # s1 = 3
+      self._readlane(s[1], v[0], 2),       # s1 = 3
       s_add_u32(s[0], s[0], s[1]),         # s0 = 6
-      self._readlane(1, v[0], 3),          # s1 = 4
+      self._readlane(s[1], v[0], 3),       # s1 = 4
       s_add_u32(s[0], s[0], s[1]),         # s0 = 10
       v_mov_b32_e32(v[1], s[0]),           # Broadcast sum to all lanes
     ]
@@ -711,7 +711,7 @@ class TestLaneOps(unittest.TestCase):
       v_mov_b32_e32(v[8], 0),              # Initialize v8 = 0
       s_mov_b32(s[0], 0xABCD1234),
       v_writelane_b32(v[8], s[0], 2),      # Write to lane 2's v8
-      self._readlane(1, v[8], 2),          # Read back from lane 2's v8 into s1
+      self._readlane(s[1], v[8], 2),       # Read back from lane 2's v8 into s1
       v_mov_b32_e32(v[1], s[1]),           # Broadcast to all lanes
     ]
     st = run_program(instructions, n_lanes=4)
@@ -741,12 +741,12 @@ class TestLaneOps(unittest.TestCase):
       s_mov_b32(s[0], 40),
       v_writelane_b32(v[6], s[0], 3),      # lane 3 gets 40
       # Now read them all back and sum
-      self._readlane(0, v[6], 0),          # s0 = 10
-      self._readlane(1, v[6], 1),          # s1 = 20
+      self._readlane(s[0], v[6], 0),       # s0 = 10
+      self._readlane(s[1], v[6], 1),       # s1 = 20
       s_add_u32(s[0], s[0], s[1]),         # s0 = 30
-      self._readlane(1, v[6], 2),          # s1 = 30
+      self._readlane(s[1], v[6], 2),       # s1 = 30
       s_add_u32(s[0], s[0], s[1]),         # s0 = 60
-      self._readlane(1, v[6], 3),          # s1 = 40
+      self._readlane(s[1], v[6], 3),       # s1 = 40
       s_add_u32(s[0], s[0], s[1]),         # s0 = 100
       v_mov_b32_e32(v[7], s[0]),           # Broadcast sum to all lanes
     ]
@@ -1636,15 +1636,12 @@ class TestReadlane(unittest.TestCase):
 
   def test_reduction_pattern(self):
     """Test reduction using readlane."""
-    def _readlane(sdst_idx, vsrc, lane_idx):
-      return VOP3(VOP3Op.V_READLANE_B32, vdst=RawImm(sdst_idx), src0=vsrc, src1=lane_idx)
-
     instructions = [
       v_mov_b32_e32(v[0], v[255]),
-      _readlane(0, v[0], 0),
-      _readlane(1, v[0], 1),
-      _readlane(2, v[0], 2),
-      _readlane(3, v[0], 3),
+      v_readlane_b32(s[0], v[0], 0),
+      v_readlane_b32(s[1], v[0], 1),
+      v_readlane_b32(s[2], v[0], 2),
+      v_readlane_b32(s[3], v[0], 3),
       s_add_u32(s[4], s[0], s[1]),
       s_add_u32(s[4], s[4], s[2]),
       s_add_u32(s[4], s[4], s[3]),

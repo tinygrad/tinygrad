@@ -271,7 +271,7 @@ class TestCmpClassF16(unittest.TestCase):
     instructions = [
       v_mov_b32_e32(v[0], 0),         # f16 +0.0
       s_mov_b32(s[0], 0x1f8),         # class mask
-      VOP3(VOP3Op.V_CMP_CLASS_F16, vdst=RawImm(VCC), src0=v[0], src1=s[0]),
+      v_cmp_class_f16_e64(VCC_LO, v[0], s[0]),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "VCC should be 1 for +zero with VOP3 encoding")
@@ -282,7 +282,7 @@ class TestCmpClassF16(unittest.TestCase):
       s_mov_b32(s[0], 0x3c00),        # f16 +1.0
       v_mov_b32_e32(v[0], s[0]),
       s_mov_b32(s[1], 0x1f8),         # class mask
-      VOP3(VOP3Op.V_CMP_CLASS_F16, vdst=RawImm(VCC), src0=v[0], src1=s[1]),
+      v_cmp_class_f16_e64(VCC_LO, v[0], s[1]),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "VCC should be 1 for +1.0 (normal) with mask 0x1f8")
@@ -293,7 +293,7 @@ class TestCmpClassF16(unittest.TestCase):
       s_mov_b32(s[0], 0x7e00),        # f16 quiet NaN
       v_mov_b32_e32(v[0], s[0]),
       s_mov_b32(s[1], 0x1f8),         # class mask
-      VOP3(VOP3Op.V_CMP_CLASS_F16, vdst=RawImm(VCC), src0=v[0], src1=s[1]),
+      v_cmp_class_f16_e64(VCC_LO, v[0], s[1]),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 0, "VCC should be 0 for NaN with mask 0x1f8 (no NaN bits)")
@@ -304,7 +304,7 @@ class TestCmpClassF16(unittest.TestCase):
       s_mov_b32(s[0], 0x7c00),        # f16 +inf
       v_mov_b32_e32(v[0], s[0]),
       s_mov_b32(s[1], 0x1f8),         # class mask
-      VOP3(VOP3Op.V_CMP_CLASS_F16, vdst=RawImm(VCC), src0=v[0], src1=s[1]),
+      v_cmp_class_f16_e64(VCC_LO, v[0], s[1]),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 0, "VCC should be 0 for +inf with mask 0x1f8 (no inf bits)")

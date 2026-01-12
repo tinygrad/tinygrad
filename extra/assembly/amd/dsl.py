@@ -199,7 +199,13 @@ class Inst:
   _base_size: int
 
   def __init_subclass__(cls):
-    cls._fields = [(name, val) for name, val in cls.__dict__.items() if isinstance(val, BitField)]
+    # Collect fields from all parent classes, then override with this class's fields
+    inherited = {}
+    for base in reversed(cls.__mro__[1:]):
+      if hasattr(base, '_fields'):
+        inherited.update({name: field for name, field in base._fields})
+    inherited.update({name: val for name, val in cls.__dict__.items() if isinstance(val, BitField)})
+    cls._fields = list(inherited.items())
     cls._base_size = (max(f.hi for _, f in cls._fields) + 8) // 8
 
   def __init__(self, *args, **kwargs):

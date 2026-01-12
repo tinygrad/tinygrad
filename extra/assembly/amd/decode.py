@@ -1,8 +1,10 @@
 # Instruction format detection and decoding
 from __future__ import annotations
 from extra.assembly.amd.dsl import Inst, FixedBitField
-from extra.assembly.amd.autogen.rdna3.ins import VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP
-from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
+from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC, VOPD, VINTERP,
+  SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP)
+from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2,
+  VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
   VOPC as R4_VOPC, VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
   SMEM as R4_SMEM, DS as R4_DS, VBUFFER as R4_VBUFFER, VEXPORT as R4_VEXPORT)
 from extra.assembly.amd.autogen.cdna.ins import (VOP1 as C_VOP1, VOP2 as C_VOP2, VOPC as C_VOPC, VOP3A, VOP3B, VOP3P as C_VOP3P,
@@ -26,6 +28,10 @@ _RDNA4_FORMATS_64 = [R4_VOPD, R4_VOP3P, R4_VINTERP, R4_VOP3, R4_DS, R4_VBUFFER, 
 _RDNA4_FORMATS_32 = [R4_SOP1, R4_SOPC, R4_SOPP, R4_SOPK, R4_VOPC, R4_VOP1, R4_SOP2, R4_VOP2]
 _RDNA4_VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 _RDNA3_VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
+# Instructions with SGPR destination (READLANE, READFIRSTLANE, and VOP3-encoded VOPC)
+_VOP1_SDST_OPS = {2}  # V_READFIRSTLANE_B32_E32
+_VOP3_SDST_OPS = {386, 864}  # V_READFIRSTLANE_B32_E64, V_READLANE_B32 (V_WRITELANE_B32=865 writes to VGPR)
+# VOP3-encoded VOPC instructions (opcodes < 256) also have SGPR destination
 
 def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
@@ -44,19 +50,31 @@ def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
     if (word >> 30) == 0b11:
       for cls in _RDNA4_FORMATS_64:
         if _matches_encoding(word, cls):
-          return R4_VOP3SD if cls is R4_VOP3 and ((word >> 16) & 0x3ff) in _RDNA4_VOP3SD_OPS else cls
+          if cls is R4_VOP3:
+            opcode = (word >> 16) & 0x3ff
+            if opcode in _RDNA4_VOP3SD_OPS: return R4_VOP3SD
+            if opcode in _VOP3_SDST_OPS or opcode < 256: return R4_VOP3_SDST  # VOP3-encoded VOPC (op < 256) writes to SGPR
+          return cls
       raise ValueError(f"unknown RDNA4 64-bit format word={word:#010x}")
     for cls in _RDNA4_FORMATS_32:
-      if _matches_encoding(word, cls): return cls
+      if _matches_encoding(word, cls):
+        if cls is R4_VOP1 and ((word >> 9) & 0xff) in _VOP1_SDST_OPS: return R4_VOP1_SDST
+        return cls
     raise ValueError(f"unknown RDNA4 32-bit format word={word:#010x}")
   # RDNA3 (default)
   if (word >> 30) == 0b11:
     for cls in _RDNA_FORMATS_64:
       if _matches_encoding(word, cls):
-        return VOP3SD if cls is VOP3 and ((word >> 16) & 0x3ff) in _RDNA3_VOP3SD_OPS else cls
+        if cls is VOP3:
+          opcode = (word >> 16) & 0x3ff
+          if opcode in _RDNA3_VOP3SD_OPS: return VOP3SD
+          if opcode in _VOP3_SDST_OPS or opcode < 256: return VOP3_SDST  # VOP3-encoded VOPC (op < 256) writes to SGPR
+        return cls
     raise ValueError(f"unknown 64-bit format word={word:#010x}")
   for cls in _RDNA_FORMATS_32:
-    if _matches_encoding(word, cls): return cls
+    if _matches_encoding(word, cls):
+      if cls is VOP1 and ((word >> 9) & 0xff) in _VOP1_SDST_OPS: return VOP1_SDST
+      return cls
   raise ValueError(f"unknown 32-bit format word={word:#010x}")
 
 def decode_inst(data: bytes, arch: str = "rdna3") -> Inst:
