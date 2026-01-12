@@ -76,33 +76,7 @@ def _is_16bit(inst) -> bool:
   if '_PK_' in name.upper(): return False
   return any(x in name.upper() for x in ('_F16', '_I16', '_U16', '_B16'))
 
-def _src_regs_override(name: str, idx: int) -> int | None:
-  """Override source register count for instructions with incomplete pcode info."""
-  n = name.upper()
-  # v_qsad_pk_u16_u8 and v_mqsad_pk_u16_u8: src0=64-bit, src1=32-bit, src2=64-bit
-  if 'QSAD_PK' in n: return [2, 1, 2][idx] if idx < 3 else None
-  # v_mqsad_u32_u8: src0=64-bit, src1=32-bit, src2=128-bit (4 regs), dst=128-bit (4 regs)
-  if 'MQSAD_U32' in n: return [2, 1, 4][idx] if idx < 3 else None
-  # 64-bit operations: src0 and src1 are 64-bit (2 regs), except some with 32-bit src0 or src1
-  # Skip CVT instructions - they derive src/dst width from the type in the name
-  if ('_F64' in n or '_I64' in n or '_U64' in n or '_B64' in n) and 'CVT' not in n:
-    if any(x in n for x in ('CLASS', 'TRIG_PREOP', 'LDEXP', 'FREXP_EXP', 'FREXP_MANT')): return 2 if idx == 0 else None
-    if any(x in n for x in ('ASHRREV', 'LSHRREV', 'LSHLREV')): return 2 if idx == 1 else None  # src0=32-bit shift, src1=64-bit
-    # FMA/MAD f64 ops have 3 64-bit sources
-    if any(x in n for x in ('FMA_F64', 'MAD_F64', 'DIV_FMAS_F64', 'DIV_FIXUP_F64')): return 2 if idx < 3 else None
-    if idx < 2: return 2
-  return None
 
-def _dst_regs_override(name: str) -> int | None:
-  """Override destination register count for instructions with incomplete pcode info."""
-  n = name.upper()
-  if 'MQSAD_U32' in n: return 4
-  if 'QSAD_PK' in n or 'MQSAD_PK' in n: return 2  # 64-bit dst
-  # v_cvt_pk_f32_fp8 and v_cvt_pk_f32_bf8 output 2 VGPRs (packed f32)
-  if 'CVT_PK_F32_FP8' in n or 'CVT_PK_F32_BF8' in n: return 2
-  # 64-bit operations have 64-bit dst (except those with 32-bit dst like FREXP_EXP)
-  if ('_F64' in n or '_I64' in n or '_U64' in n or '_B64' in n) and 'CVT' not in n and 'FREXP_EXP' not in n: return 2
-  return None
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # IMPORTS
@@ -555,16 +529,21 @@ def _disasm_vop3(inst: VOP3) -> str:
   elif 'DOT2' in n: pass  # DOT2 ops use packed 32-bit registers
   else: is16_d = is16_s = is16_s2 = _is_16bit(inst)
 
-  # Use override for instructions with incomplete pcode info, fallback to inst.src_regs()
-  r0 = _src_regs_override(name, 0) or (2 if cvt_src_64 else inst.src_regs(0))
-  r1 = _src_regs_override(name, 1) or inst.src_regs(1)
-  r2 = _src_regs_override(name, 2) or inst.src_regs(2)
+  # Special instructions with non-standard source sizes (pcode doesn't use S0.type notation)
+  # QSAD/MQSAD: src0=64-bit, src1=32-bit, src2=64-bit; MQSAD_U32: src2=128-bit
+  # VOPC 64-bit compares (V_CMP_*_F64, etc.) - pcode may not mention S0/S1 types (e.g. V_CMP_T_F64)
+  # CLASS instructions have correct pcode types (src0=f64, src1=u32), don't override
+  is_cmp_64 = ('_F64' in n or '_I64' in n or '_U64' in n) and 'CMP' in n and 'CLASS' not in n
+  if 'QSAD_PK' in n: r0, r1, r2 = 2, 1, 2
+  elif 'MQSAD_U32' in n: r0, r1, r2 = 2, 1, 4
+  elif is_cmp_64: r0, r1, r2 = 2, 2, inst.src_regs(2)
+  else: r0, r1, r2 = 2 if cvt_src_64 else inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
   s0 = _vop3_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.opsel&1, r0, is16_s)
   s1 = _vop3_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.opsel&2, r1, is16_s)
   s2 = _vop3_src(inst, inst.src2, inst.neg&4, inst.abs&4, inst.opsel&4, r2, is16_s2)
 
-  # Destination
-  dn = _dst_regs_override(name) or (2 if cvt_dst_64 else inst.dst_regs())
+  # Destination - v_cvt_pk_f32_fp8/bf8 output 2 VGPRs but pcode doesn't use .f64 notation
+  dn = 2 if cvt_dst_64 or 'CVT_PK_F32_FP8' in n or 'CVT_PK_F32_BF8' in n else inst.dst_regs()
   # v_readlane_b32 writes to SGPR; for VOP3_SDST vdst is already SGPR index, for VOP3 it has +256
   if 'readlane' in name:
     vdst_raw = _unwrap(inst.vdst)

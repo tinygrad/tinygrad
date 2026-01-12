@@ -4,7 +4,7 @@
 # Registers - unified src encoding space (0-511)
 # ══════════════════════════════════════════════════════════════
 
-def _reg_size(t: str | None) -> int: return 2 if t in ('f64', 'u64', 'i64', 'b64') else 1
+def _reg_size(t: str | None) -> int: return 4 if t == 'b128' else 2 if t in ('f64', 'u64', 'i64', 'b64') else 1
 
 class Reg:
   _NAMES = {106: "VCC_LO", 107: "VCC_HI", 124: "NULL", 125: "M0", 126: "EXEC_LO", 127: "EXEC_HI",
