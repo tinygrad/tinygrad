@@ -38,6 +38,10 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
   return _CEnum
 
+def del_an(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
+def POINTER(p): return ctypes.POINTER(del_an(p))
+def CFUNCTYPE(*args): return ctypes.CFUNCTYPE(*(del_an(a) for a in args))
+
 _pending_records = []
 
 T = TypeVar("T")
@@ -124,8 +128,7 @@ class DLL(ctypes.CDLL):
     return fn
 
   def bind(self, fn):
-    def strip(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
-    restype, argtypes = strip((hints:=get_type_hints(fn, include_extras=True)).pop('return', None)), tuple(strip(h) for h in hints.values())
+    restype, argtypes = del_an((hints:=get_type_hints(fn, include_extras=True)).pop('return', None)), tuple(del_an(h) for h in hints.values())
     return lambda *args: self._get_func(fn.__name__, argtypes, restype)(*args)
 
   def __getattr__(self, nm):

@@ -107,10 +107,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     if t.kind in tmap: return tmap[t.kind]
     if nm(t) in types and types[nm(t)][1]: return types[nm(t)][0]
     if ((f:=t).kind in fps) or (t.kind == clang.CXType_Pointer and (f:=clang.clang_getPointeeType(t)).kind in fps):
-      return (f"ctypes.CFUNCTYPE({tname(clang.clang_getResultType(f))}" +
+      return (f"CFUNCTYPE({tname(clang.clang_getResultType(f))}" +
               ((', '+', '.join(map(tname, arguments(f)))) if f.kind==clang.CXType_FunctionProto else '') + ")")
     match t.kind:
-      case clang.CXType_Pointer: return f"ctypes.POINTER({tname(clang.clang_getPointeeType(t))})"
+      case clang.CXType_Pointer: return f"POINTER({tname(clang.clang_getPointeeType(t))})"
       case clang.CXType_ObjCObjectPointer: return tname(clang.clang_getPointeeType(t)) # TODO: this seems wrong
       case clang.CXType_Elaborated: return tname(clang.clang_Type_getNamedType(t), suggested_name)
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
@@ -252,7 +252,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
   main = '\n'.join(["from __future__ import annotations", "import ctypes", "from typing import Annotated, Literal",
-                    "from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records",
+                    "from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records",
                     *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines,
                     "init_records()"]) + '\n'
