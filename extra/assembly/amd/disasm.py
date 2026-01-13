@@ -495,16 +495,9 @@ def _disasm_vop3p(inst: VOP3P) -> str:
   def get_src(v, sc):
     uv = _unwrap(v)
     return _lit(inst, uv) if uv == 255 else _fmt_src(uv, sc)
-  if is_swmmac:
-    dn, s0n, s1n, s2n = _swmmac_regs(name)
-    src0, src1, src2, dst = get_src(inst.src0, s0n), get_src(inst.src1, s1n), get_src(inst.src2, s2n), _vreg(inst.vdst, dn)
-  elif is_wmma:
-    is_rdna4_wmma = 'rdna4' in inst.__class__.__module__
-    sc = 1 if '16x16x16_iu4' in name else 2 if ('iu4' in name or 'iu8' in name or 'fp8' in name or 'bf8' in name) else 4
-    if not is_rdna4_wmma: sc *= 2
-    dc = 8 if not is_rdna4_wmma else (4 if ('f16_16x16' in name or 'bf16_16x16' in name) and 'f32' not in name else 8)
-    src0, src1, src2, dst = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, dc), _vreg(inst.vdst, dc)
-  else: src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), _vreg(inst.vdst)
+  # Use operand info for register sizes
+  dn, s0n, s1n, s2n = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
+  src0, src1, src2, dst = get_src(inst.src0, s0n), get_src(inst.src1, s1n), get_src(inst.src2, s2n), _vreg(inst.vdst, dn)
   opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
   clamp = getattr(inst, 'cm', None) or getattr(inst, 'clmp', 0)
   if is_fma_mix:

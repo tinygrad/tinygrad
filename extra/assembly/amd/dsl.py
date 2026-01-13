@@ -299,8 +299,7 @@ class Inst:
     """Get size in bits for a field from operand info."""
     return self.operands.get(name, (None, 0, None))[1]
   def is_src_64(self, n: int) -> bool:
-    src = ['src0', 'vsrc0', 'ssrc0'][0] if n == 0 else ['src1', 'vsrc1', 'ssrc1'][0] if n == 1 else 'src2'
-    for name in ([src] if isinstance(src, str) else src):
+    for name in (['src0', 'vsrc0', 'ssrc0'] if n == 0 else ['src1', 'vsrc1', 'ssrc1'] if n == 1 else ['src2']):
       if name in self.operands: return self.operands[name][1] == 64
     return False
   def is_src_16(self, n: int) -> bool:
