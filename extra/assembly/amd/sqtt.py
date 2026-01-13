@@ -322,36 +322,36 @@ for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
 
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances."""
-  n = len(data)
-  reg = 0
-  offset = 0
-  nib_count = 16
-  time = 0
-  state_to_opcode = STATE_TO_OPCODE
-  decode_info = _DECODE_INFO
-  mask64 = (1 << 64) - 1
+  n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
+  state_to_opcode, decode_info = STATE_TO_OPCODE, _DECODE_INFO
 
-  while (offset >> 3) < n:
-    target = offset + nib_count * 4
-    while offset < target and (offset >> 3) < n:
-      byte = data[offset >> 3]
-      nib = (byte >> (offset & 4)) & 0xF
-      reg = ((reg >> 4) | (nib << 60)) & mask64
-      offset += 4
-    if offset < target: break
+  while pos < n:
+    need = nib_count
+    # 1. if unaligned, read high nibble to align
+    if nib_off and need:
+      reg = (reg >> 4) | ((data[pos] >> 4) << 60)
+      pos += 1
+      nib_off = 0
+      need -= 1
+    # 2. read all full bytes at once
+    byte_count = need >> 1
+    if byte_count:
+      if pos + byte_count > n: break
+      chunk = int.from_bytes(data[pos:pos + byte_count], 'little')
+      reg = (reg >> (byte_count * 8)) | (chunk << (64 - byte_count * 8))
+      pos += byte_count
+      need &= 1
+    # 3. if 1 more nibble needed, read low nibble
+    if need:
+      if pos >= n: break
+      reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
+      nib_off = 1
 
     opcode = state_to_opcode[reg & 0xFF]
     pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
-
     delta = (reg >> delta_lo) & delta_mask
-
-    if special == 1:  # TS_DELTA_OR_MARK
-      bit8 = (reg >> _TS_DELTA_OR_MARK_BIT8[0]) & _TS_DELTA_OR_MARK_BIT8[1]
-      bit9 = (reg >> _TS_DELTA_OR_MARK_BIT9[0]) & _TS_DELTA_OR_MARK_BIT9[1]
-      if bit9 and not bit8: delta = 0
-    elif special == 2:  # TS_DELTA_SHORT
-      delta = delta + 8
-
+    if special == 1 and (reg >> 9) & 1 and not (reg >> 8) & 1: delta = 0  # TS_DELTA_OR_MARK marker
+    elif special == 2: delta += 8  # TS_DELTA_SHORT
     time += delta
     yield pkt_cls.from_raw(reg, time)
 
