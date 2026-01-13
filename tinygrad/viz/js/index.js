@@ -836,7 +836,10 @@ async function main() {
       }
       return table;
     }
-    if (ret.data != null) renderDag(ret, { recenter:true });
+    if (ret.ref != null) {
+      const disasmIdx = ctxs[ret.ref+1].steps.findIndex(s => s.name === "View Disassembly")
+      metadata.appendChild(d3.create("a").text("View Program Graph").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
+    }
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     return document.querySelector("#custom").replaceChildren(root.node());
