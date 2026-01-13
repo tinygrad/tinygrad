@@ -106,7 +106,7 @@ class TestCfg(unittest.TestCase):
         s_endpgm(),
     ])
     _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
-    _ = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])
+    cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])
 
   def test_loop(self):
     run_asm("simple_loop", [
