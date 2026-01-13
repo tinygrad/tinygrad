@@ -5,8 +5,9 @@ The format is nibble-based with variable-width packets determined by a state mac
 Uses BitField infrastructure from dsl.py, similar to GPU instruction encoding.
 """
 from __future__ import annotations
+from typing import Iterator
 from enum import Enum
-from extra.assembly.amd.dsl import BitField, EnumBitField, FixedBitField, bits
+from extra.assembly.amd.dsl import BitField, FixedBitField, bits
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIELD ENUMS
@@ -319,10 +320,8 @@ for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
 # DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def decode(data: bytes) -> list[PacketType]:
-  """Decode raw SQTT blob into list of packet instances."""
-  packets: list[PacketType] = []
-  packets_append = packets.append
+def decode(data: bytes) -> Iterator[PacketType]:
+  """Decode raw SQTT blob, yielding packet instances."""
   n = len(data)
   reg = 0
   offset = 0
@@ -354,6 +353,48 @@ def decode(data: bytes) -> list[PacketType]:
       delta = delta + 8
 
     time += delta
-    packets_append(pkt_cls.from_raw(reg, time))
+    yield pkt_cls.from_raw(reg, time)
 
-  return packets
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRINTER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PACKET_COLORS = {
+  "INST": "WHITE", "VALUINST": "BLACK", "VMEMEXEC": "yellow", "ALUEXEC": "yellow",
+  "IMMEDIATE": "YELLOW", "IMMEDIATE_MASK": "YELLOW", "WAVERDY": "cyan", "WAVEALLOC": "cyan",
+  "WAVEEND": "blue", "WAVESTART": "blue", "PERF": "magenta", "EVENT": "red", "EVENT_BIG": "red",
+  "REG": "green", "LAYOUT_HEADER": "white", "SNAPSHOT": "white", "UTILCTR": "green",
+}
+
+def format_packet(p) -> str:
+  from tinygrad.helpers import colored
+  name = type(p).__name__
+  if isinstance(p, INST):
+    op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+  elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
+  elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
+  elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
+  elif isinstance(p, (WAVESTART, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
+  elif hasattr(p, '_values'):
+    fields = " ".join(f"{k}=0x{v:x}" if k in {'snap', 'val32'} else f"{k}={v}"
+                      for k, v in p._values.items() if not k.startswith('_') and k != 'delta')
+  else: fields = ""
+  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name, 'white'))} {fields}"
+
+def print_packets(packets) -> None:
+  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"}
+  for p in packets:
+    if type(p).__name__ not in skip: print(format_packet(p))
+
+if __name__ == "__main__":
+  import sys, pickle
+  if len(sys.argv) < 2:
+    print("Usage: python sqtt.py <pkl_file>")
+    sys.exit(1)
+  with open(sys.argv[1], "rb") as f:
+    data = pickle.load(f)
+  sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+  for i, event in enumerate(sqtt_events):
+    print(f"\n=== event {i} ===")
+    print_packets(decode(event.blob))
