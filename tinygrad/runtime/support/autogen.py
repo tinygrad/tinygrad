@@ -91,7 +91,7 @@ fps, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
 def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
-def an(py, dt): return f"Annotated[{py}, ctypes.{dt}]"
+def an(py, dt): return f"Annotated[{py}, ctypes.c_{dt}]"
 
 def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
   macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
