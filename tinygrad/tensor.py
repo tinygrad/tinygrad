@@ -2454,7 +2454,7 @@ class Tensor(OpMixin):
     print(indices.numpy())
     ```
     """
-    if self.ndim == 0 or 0 in self.shape: return self, Tensor.zeros(self.shape, dtype=dtypes.int32, device=self.device)
+    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), Tensor.zeros(self.shape, dtype=dtypes.int32, device=self.device)
     values, n = self._split_cumalu(axis, Ops.MAX), self.shape[axis]
     x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
     match = (x.unsqueeze(-1) == values_t.unsqueeze(-2)) * Tensor.ones(n, n, requires_grad=False, device=self.device).triu()
