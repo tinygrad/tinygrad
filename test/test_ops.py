@@ -3278,21 +3278,6 @@ class TestOps(unittest.TestCase):
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
 
-  @unittest.skip("we have test_linalg, no need to test here. TODO: should be in torch backend tests")
-  def test_svd(self):
-    # test for tiny backend. real svd tests are in test_linalg
-    A = torch.randn(5, 5)
-    U, S, Vh = torch.linalg.svd(A)
-    np.testing.assert_equal(U.shape, (5,5))
-    np.testing.assert_equal(Vh.shape, (5,5))
-    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
-
-    A = torch.randn(5, 3)
-    U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    np.testing.assert_equal(U.shape, (5,3))
-    np.testing.assert_equal(Vh.shape, (3,3))
-    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
-
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):
   def test_cast(self):
