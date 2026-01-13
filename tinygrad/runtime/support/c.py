@@ -20,7 +20,13 @@ def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if is
 def del_an(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
 def CFUNCTYPE(*args): return ctypes.CFUNCTYPE(*(del_an(a) for a in args))
 
-def CEnum(typ):
+_pending_records = []
+
+T = TypeVar("T")
+U = TypeVar("U")
+V = TypeVar("V")
+
+def CEnum(typ: type[T]) -> type[T]:
   class _CEnum(del_an(typ)): # type: ignore
     _val_to_name_: dict[int,str] = {}
 
@@ -41,11 +47,6 @@ def CEnum(typ):
 
   return _CEnum
 
-_pending_records = []
-
-T = TypeVar("T")
-U = TypeVar("U")
-V = TypeVar("V")
 class Array(Generic[T, U]):
   @overload
   def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
@@ -60,9 +61,7 @@ class Array(Generic[T, U]):
   def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
 
 if TYPE_CHECKING:
-  from _ctypes import _CData
-  CT = TypeVar("CT", bound=_CData)
-  class POINTER(_Pointer[CT]): ...
+  class POINTER(_Pointer[T]): ...
 else:
   class POINTER:
     def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key))
