@@ -2,7 +2,7 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 @c.record
 class struct_sqtt_data_info(c.Struct):
@@ -11,7 +11,7 @@ class struct_sqtt_data_info(c.Struct):
   trace_status: Annotated[uint32_t, 4]
   gfx9_write_counter: Annotated[uint32_t, 8]
   gfx10_dropped_cntr: Annotated[uint32_t, 8]
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @c.record
 class struct_sqtt_data_se(c.Struct):
   SIZE = 32
@@ -19,29 +19,29 @@ class struct_sqtt_data_se(c.Struct):
   data_ptr: Annotated[c.POINTER[None], 16]
   shader_engine: Annotated[uint32_t, 24]
   compute_unit: Annotated[uint32_t, 28]
-enum_sqtt_version = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_VERSION_NONE = enum_sqtt_version.define('SQTT_VERSION_NONE', 0) # type: ignore
-SQTT_VERSION_2_2 = enum_sqtt_version.define('SQTT_VERSION_2_2', 5) # type: ignore
-SQTT_VERSION_2_3 = enum_sqtt_version.define('SQTT_VERSION_2_3', 6) # type: ignore
-SQTT_VERSION_2_4 = enum_sqtt_version.define('SQTT_VERSION_2_4', 7) # type: ignore
-SQTT_VERSION_3_2 = enum_sqtt_version.define('SQTT_VERSION_3_2', 11) # type: ignore
-SQTT_VERSION_3_3 = enum_sqtt_version.define('SQTT_VERSION_3_3', 12) # type: ignore
+class enum_sqtt_version(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_VERSION_NONE = enum_sqtt_version.define('SQTT_VERSION_NONE', 0)
+SQTT_VERSION_2_2 = enum_sqtt_version.define('SQTT_VERSION_2_2', 5)
+SQTT_VERSION_2_3 = enum_sqtt_version.define('SQTT_VERSION_2_3', 6)
+SQTT_VERSION_2_4 = enum_sqtt_version.define('SQTT_VERSION_2_4', 7)
+SQTT_VERSION_3_2 = enum_sqtt_version.define('SQTT_VERSION_3_2', 11)
+SQTT_VERSION_3_3 = enum_sqtt_version.define('SQTT_VERSION_3_3', 12)
 
-enum_sqtt_file_chunk_type = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_FILE_CHUNK_TYPE_ASIC_INFO = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_ASIC_INFO', 0) # type: ignore
-SQTT_FILE_CHUNK_TYPE_SQTT_DESC = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_SQTT_DESC', 1) # type: ignore
-SQTT_FILE_CHUNK_TYPE_SQTT_DATA = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_SQTT_DATA', 2) # type: ignore
-SQTT_FILE_CHUNK_TYPE_API_INFO = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_API_INFO', 3) # type: ignore
-SQTT_FILE_CHUNK_TYPE_RESERVED = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_RESERVED', 4) # type: ignore
-SQTT_FILE_CHUNK_TYPE_QUEUE_EVENT_TIMINGS = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_QUEUE_EVENT_TIMINGS', 5) # type: ignore
-SQTT_FILE_CHUNK_TYPE_CLOCK_CALIBRATION = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_CLOCK_CALIBRATION', 6) # type: ignore
-SQTT_FILE_CHUNK_TYPE_CPU_INFO = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_CPU_INFO', 7) # type: ignore
-SQTT_FILE_CHUNK_TYPE_SPM_DB = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_SPM_DB', 8) # type: ignore
-SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_DATABASE = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_DATABASE', 9) # type: ignore
-SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_LOADER_EVENTS = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_LOADER_EVENTS', 10) # type: ignore
-SQTT_FILE_CHUNK_TYPE_PSO_CORRELATION = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_PSO_CORRELATION', 11) # type: ignore
-SQTT_FILE_CHUNK_TYPE_INSTRUMENTATION_TABLE = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_INSTRUMENTATION_TABLE', 12) # type: ignore
-SQTT_FILE_CHUNK_TYPE_COUNT = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_COUNT', 13) # type: ignore
+class enum_sqtt_file_chunk_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_FILE_CHUNK_TYPE_ASIC_INFO = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_ASIC_INFO', 0)
+SQTT_FILE_CHUNK_TYPE_SQTT_DESC = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_SQTT_DESC', 1)
+SQTT_FILE_CHUNK_TYPE_SQTT_DATA = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_SQTT_DATA', 2)
+SQTT_FILE_CHUNK_TYPE_API_INFO = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_API_INFO', 3)
+SQTT_FILE_CHUNK_TYPE_RESERVED = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_RESERVED', 4)
+SQTT_FILE_CHUNK_TYPE_QUEUE_EVENT_TIMINGS = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_QUEUE_EVENT_TIMINGS', 5)
+SQTT_FILE_CHUNK_TYPE_CLOCK_CALIBRATION = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_CLOCK_CALIBRATION', 6)
+SQTT_FILE_CHUNK_TYPE_CPU_INFO = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_CPU_INFO', 7)
+SQTT_FILE_CHUNK_TYPE_SPM_DB = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_SPM_DB', 8)
+SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_DATABASE = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_DATABASE', 9)
+SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_LOADER_EVENTS = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_CODE_OBJECT_LOADER_EVENTS', 10)
+SQTT_FILE_CHUNK_TYPE_PSO_CORRELATION = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_PSO_CORRELATION', 11)
+SQTT_FILE_CHUNK_TYPE_INSTRUMENTATION_TABLE = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_INSTRUMENTATION_TABLE', 12)
+SQTT_FILE_CHUNK_TYPE_COUNT = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_COUNT', 13)
 
 @c.record
 class struct_sqtt_file_chunk_id(c.Struct):
@@ -49,7 +49,7 @@ class struct_sqtt_file_chunk_id(c.Struct):
   type: Annotated[int32_t, 0, 8, 0]
   index: Annotated[int32_t, 1, 8, 0]
   reserved: Annotated[int32_t, 2, 16, 0]
-int32_t = Annotated[int, ctypes.c_int32]
+int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
 @c.record
 class struct_sqtt_file_chunk_header(c.Struct):
   SIZE = 16
@@ -58,7 +58,7 @@ class struct_sqtt_file_chunk_header(c.Struct):
   major_version: Annotated[uint16_t, 6]
   size_in_bytes: Annotated[int32_t, 8]
   padding: Annotated[int32_t, 12]
-uint16_t = Annotated[int, ctypes.c_uint16]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 @c.record
 class struct_sqtt_file_header_flags(c.Struct):
   SIZE = 4
@@ -95,46 +95,46 @@ class struct_sqtt_file_chunk_cpu_info(c.Struct):
   num_logical_cores: Annotated[uint32_t, 100]
   num_physical_cores: Annotated[uint32_t, 104]
   system_ram_size: Annotated[uint32_t, 108]
-uint64_t = Annotated[int, ctypes.c_uint64]
-enum_sqtt_file_chunk_asic_info_flags = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING = enum_sqtt_file_chunk_asic_info_flags.define('SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING', 1) # type: ignore
-SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED = enum_sqtt_file_chunk_asic_info_flags.define('SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED', 2) # type: ignore
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+class enum_sqtt_file_chunk_asic_info_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING = enum_sqtt_file_chunk_asic_info_flags.define('SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING', 1)
+SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED = enum_sqtt_file_chunk_asic_info_flags.define('SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED', 2)
 
-enum_sqtt_gpu_type = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_GPU_TYPE_UNKNOWN = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_UNKNOWN', 0) # type: ignore
-SQTT_GPU_TYPE_INTEGRATED = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_INTEGRATED', 1) # type: ignore
-SQTT_GPU_TYPE_DISCRETE = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_DISCRETE', 2) # type: ignore
-SQTT_GPU_TYPE_VIRTUAL = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_VIRTUAL', 3) # type: ignore
+class enum_sqtt_gpu_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_GPU_TYPE_UNKNOWN = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_UNKNOWN', 0)
+SQTT_GPU_TYPE_INTEGRATED = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_INTEGRATED', 1)
+SQTT_GPU_TYPE_DISCRETE = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_DISCRETE', 2)
+SQTT_GPU_TYPE_VIRTUAL = enum_sqtt_gpu_type.define('SQTT_GPU_TYPE_VIRTUAL', 3)
 
-enum_sqtt_gfxip_level = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_GFXIP_LEVEL_NONE = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_NONE', 0) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_6 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_6', 1) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_7 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_7', 2) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_8 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_8', 3) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_8_1 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_8_1', 4) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_9 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_9', 5) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_10_1 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_10_1', 7) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_10_3 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_10_3', 9) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_11_0 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_11_0', 12) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_11_5 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_11_5', 13) # type: ignore
-SQTT_GFXIP_LEVEL_GFXIP_12 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_12', 16) # type: ignore
+class enum_sqtt_gfxip_level(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_GFXIP_LEVEL_NONE = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_NONE', 0)
+SQTT_GFXIP_LEVEL_GFXIP_6 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_6', 1)
+SQTT_GFXIP_LEVEL_GFXIP_7 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_7', 2)
+SQTT_GFXIP_LEVEL_GFXIP_8 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_8', 3)
+SQTT_GFXIP_LEVEL_GFXIP_8_1 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_8_1', 4)
+SQTT_GFXIP_LEVEL_GFXIP_9 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_9', 5)
+SQTT_GFXIP_LEVEL_GFXIP_10_1 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_10_1', 7)
+SQTT_GFXIP_LEVEL_GFXIP_10_3 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_10_3', 9)
+SQTT_GFXIP_LEVEL_GFXIP_11_0 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_11_0', 12)
+SQTT_GFXIP_LEVEL_GFXIP_11_5 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_11_5', 13)
+SQTT_GFXIP_LEVEL_GFXIP_12 = enum_sqtt_gfxip_level.define('SQTT_GFXIP_LEVEL_GFXIP_12', 16)
 
-enum_sqtt_memory_type = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_MEMORY_TYPE_UNKNOWN = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_UNKNOWN', 0) # type: ignore
-SQTT_MEMORY_TYPE_DDR = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR', 1) # type: ignore
-SQTT_MEMORY_TYPE_DDR2 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR2', 2) # type: ignore
-SQTT_MEMORY_TYPE_DDR3 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR3', 3) # type: ignore
-SQTT_MEMORY_TYPE_DDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR4', 4) # type: ignore
-SQTT_MEMORY_TYPE_DDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR5', 5) # type: ignore
-SQTT_MEMORY_TYPE_GDDR3 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_GDDR3', 16) # type: ignore
-SQTT_MEMORY_TYPE_GDDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_GDDR4', 17) # type: ignore
-SQTT_MEMORY_TYPE_GDDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_GDDR5', 18) # type: ignore
-SQTT_MEMORY_TYPE_GDDR6 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_GDDR6', 19) # type: ignore
-SQTT_MEMORY_TYPE_HBM = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_HBM', 32) # type: ignore
-SQTT_MEMORY_TYPE_HBM2 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_HBM2', 33) # type: ignore
-SQTT_MEMORY_TYPE_HBM3 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_HBM3', 34) # type: ignore
-SQTT_MEMORY_TYPE_LPDDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR4', 48) # type: ignore
-SQTT_MEMORY_TYPE_LPDDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR5', 49) # type: ignore
+class enum_sqtt_memory_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_MEMORY_TYPE_UNKNOWN = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_UNKNOWN', 0)
+SQTT_MEMORY_TYPE_DDR = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR', 1)
+SQTT_MEMORY_TYPE_DDR2 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR2', 2)
+SQTT_MEMORY_TYPE_DDR3 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR3', 3)
+SQTT_MEMORY_TYPE_DDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR4', 4)
+SQTT_MEMORY_TYPE_DDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_DDR5', 5)
+SQTT_MEMORY_TYPE_GDDR3 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_GDDR3', 16)
+SQTT_MEMORY_TYPE_GDDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_GDDR4', 17)
+SQTT_MEMORY_TYPE_GDDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_GDDR5', 18)
+SQTT_MEMORY_TYPE_GDDR6 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_GDDR6', 19)
+SQTT_MEMORY_TYPE_HBM = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_HBM', 32)
+SQTT_MEMORY_TYPE_HBM2 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_HBM2', 33)
+SQTT_MEMORY_TYPE_HBM3 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_HBM3', 34)
+SQTT_MEMORY_TYPE_LPDDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR4', 48)
+SQTT_MEMORY_TYPE_LPDDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR5', 49)
 
 @c.record
 class struct_sqtt_file_chunk_asic_info(c.Struct):
@@ -190,23 +190,23 @@ class struct_sqtt_file_chunk_asic_info(c.Struct):
   scalar_cache_size: Annotated[uint32_t, 756]
   mall_cache_size: Annotated[uint32_t, 760]
   padding: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[4]], 764]
-int64_t = Annotated[int, ctypes.c_int64]
-enum_sqtt_api_type = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_API_TYPE_DIRECTX_12 = enum_sqtt_api_type.define('SQTT_API_TYPE_DIRECTX_12', 0) # type: ignore
-SQTT_API_TYPE_VULKAN = enum_sqtt_api_type.define('SQTT_API_TYPE_VULKAN', 1) # type: ignore
-SQTT_API_TYPE_GENERIC = enum_sqtt_api_type.define('SQTT_API_TYPE_GENERIC', 2) # type: ignore
-SQTT_API_TYPE_OPENCL = enum_sqtt_api_type.define('SQTT_API_TYPE_OPENCL', 3) # type: ignore
+int64_t: TypeAlias = Annotated[int, ctypes.c_int64]
+class enum_sqtt_api_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_API_TYPE_DIRECTX_12 = enum_sqtt_api_type.define('SQTT_API_TYPE_DIRECTX_12', 0)
+SQTT_API_TYPE_VULKAN = enum_sqtt_api_type.define('SQTT_API_TYPE_VULKAN', 1)
+SQTT_API_TYPE_GENERIC = enum_sqtt_api_type.define('SQTT_API_TYPE_GENERIC', 2)
+SQTT_API_TYPE_OPENCL = enum_sqtt_api_type.define('SQTT_API_TYPE_OPENCL', 3)
 
-enum_sqtt_instruction_trace_mode = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_INSTRUCTION_TRACE_DISABLED = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_DISABLED', 0) # type: ignore
-SQTT_INSTRUCTION_TRACE_FULL_FRAME = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_FULL_FRAME', 1) # type: ignore
-SQTT_INSTRUCTION_TRACE_API_PSO = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_API_PSO', 2) # type: ignore
+class enum_sqtt_instruction_trace_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_INSTRUCTION_TRACE_DISABLED = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_DISABLED', 0)
+SQTT_INSTRUCTION_TRACE_FULL_FRAME = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_FULL_FRAME', 1)
+SQTT_INSTRUCTION_TRACE_API_PSO = enum_sqtt_instruction_trace_mode.define('SQTT_INSTRUCTION_TRACE_API_PSO', 2)
 
-enum_sqtt_profiling_mode = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_PROFILING_MODE_PRESENT = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_PRESENT', 0) # type: ignore
-SQTT_PROFILING_MODE_USER_MARKERS = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_USER_MARKERS', 1) # type: ignore
-SQTT_PROFILING_MODE_INDEX = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_INDEX', 2) # type: ignore
-SQTT_PROFILING_MODE_TAG = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_TAG', 3) # type: ignore
+class enum_sqtt_profiling_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_PROFILING_MODE_PRESENT = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_PRESENT', 0)
+SQTT_PROFILING_MODE_USER_MARKERS = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_USER_MARKERS', 1)
+SQTT_PROFILING_MODE_INDEX = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_INDEX', 2)
+SQTT_PROFILING_MODE_TAG = enum_sqtt_profiling_mode.define('SQTT_PROFILING_MODE_TAG', 3)
 
 @c.record
 class union_sqtt_profiling_mode_data(c.Struct):
@@ -317,7 +317,7 @@ class struct_sqtt_file_chunk_sqtt_desc_v1(c.Struct):
   instrumentation_spec_version: Annotated[int16_t, 0]
   instrumentation_api_version: Annotated[int16_t, 2]
   compute_unit_index: Annotated[int32_t, 4]
-int16_t = Annotated[int, ctypes.c_int16]
+int16_t: TypeAlias = Annotated[int, ctypes.c_int16]
 @c.record
 class struct_sqtt_file_chunk_sqtt_data(c.Struct):
   SIZE = 24
@@ -332,20 +332,20 @@ class struct_sqtt_file_chunk_queue_event_timings(c.Struct):
   queue_info_table_size: Annotated[uint32_t, 20]
   queue_event_table_record_count: Annotated[uint32_t, 24]
   queue_event_table_size: Annotated[uint32_t, 28]
-enum_sqtt_queue_type = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_QUEUE_TYPE_UNKNOWN = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_UNKNOWN', 0) # type: ignore
-SQTT_QUEUE_TYPE_UNIVERSAL = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_UNIVERSAL', 1) # type: ignore
-SQTT_QUEUE_TYPE_COMPUTE = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_COMPUTE', 2) # type: ignore
-SQTT_QUEUE_TYPE_DMA = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_DMA', 3) # type: ignore
+class enum_sqtt_queue_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_QUEUE_TYPE_UNKNOWN = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_UNKNOWN', 0)
+SQTT_QUEUE_TYPE_UNIVERSAL = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_UNIVERSAL', 1)
+SQTT_QUEUE_TYPE_COMPUTE = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_COMPUTE', 2)
+SQTT_QUEUE_TYPE_DMA = enum_sqtt_queue_type.define('SQTT_QUEUE_TYPE_DMA', 3)
 
-enum_sqtt_engine_type = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_ENGINE_TYPE_UNKNOWN = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_UNKNOWN', 0) # type: ignore
-SQTT_ENGINE_TYPE_UNIVERSAL = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_UNIVERSAL', 1) # type: ignore
-SQTT_ENGINE_TYPE_COMPUTE = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_COMPUTE', 2) # type: ignore
-SQTT_ENGINE_TYPE_EXCLUSIVE_COMPUTE = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_EXCLUSIVE_COMPUTE', 3) # type: ignore
-SQTT_ENGINE_TYPE_DMA = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_DMA', 4) # type: ignore
-SQTT_ENGINE_TYPE_HIGH_PRIORITY_UNIVERSAL = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_HIGH_PRIORITY_UNIVERSAL', 7) # type: ignore
-SQTT_ENGINE_TYPE_HIGH_PRIORITY_GRAPHICS = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_HIGH_PRIORITY_GRAPHICS', 8) # type: ignore
+class enum_sqtt_engine_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_ENGINE_TYPE_UNKNOWN = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_UNKNOWN', 0)
+SQTT_ENGINE_TYPE_UNIVERSAL = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_UNIVERSAL', 1)
+SQTT_ENGINE_TYPE_COMPUTE = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_COMPUTE', 2)
+SQTT_ENGINE_TYPE_EXCLUSIVE_COMPUTE = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_EXCLUSIVE_COMPUTE', 3)
+SQTT_ENGINE_TYPE_DMA = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_DMA', 4)
+SQTT_ENGINE_TYPE_HIGH_PRIORITY_UNIVERSAL = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_HIGH_PRIORITY_UNIVERSAL', 7)
+SQTT_ENGINE_TYPE_HIGH_PRIORITY_GRAPHICS = enum_sqtt_engine_type.define('SQTT_ENGINE_TYPE_HIGH_PRIORITY_GRAPHICS', 8)
 
 @c.record
 class struct_sqtt_queue_hardware_info(c.Struct):
@@ -361,11 +361,11 @@ class struct_sqtt_queue_info_record(c.Struct):
   queue_context: Annotated[uint64_t, 8]
   hardware_info: Annotated[struct_sqtt_queue_hardware_info, 16]
   reserved: Annotated[uint32_t, 20]
-enum_sqtt_queue_event_type = CEnum(Annotated[int, ctypes.c_uint32])
-SQTT_QUEUE_TIMING_EVENT_CMDBUF_SUBMIT = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_CMDBUF_SUBMIT', 0) # type: ignore
-SQTT_QUEUE_TIMING_EVENT_SIGNAL_SEMAPHORE = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_SIGNAL_SEMAPHORE', 1) # type: ignore
-SQTT_QUEUE_TIMING_EVENT_WAIT_SEMAPHORE = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_WAIT_SEMAPHORE', 2) # type: ignore
-SQTT_QUEUE_TIMING_EVENT_PRESENT = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_PRESENT', 3) # type: ignore
+class enum_sqtt_queue_event_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SQTT_QUEUE_TIMING_EVENT_CMDBUF_SUBMIT = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_CMDBUF_SUBMIT', 0)
+SQTT_QUEUE_TIMING_EVENT_SIGNAL_SEMAPHORE = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_SIGNAL_SEMAPHORE', 1)
+SQTT_QUEUE_TIMING_EVENT_WAIT_SEMAPHORE = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_WAIT_SEMAPHORE', 2)
+SQTT_QUEUE_TIMING_EVENT_PRESENT = enum_sqtt_queue_event_type.define('SQTT_QUEUE_TIMING_EVENT_PRESENT', 3)
 
 @c.record
 class struct_sqtt_queue_event_record(c.Struct):
@@ -385,14 +385,14 @@ class struct_sqtt_file_chunk_clock_calibration(c.Struct):
   cpu_timestamp: Annotated[uint64_t, 16]
   gpu_timestamp: Annotated[uint64_t, 24]
   reserved: Annotated[uint64_t, 32]
-enum_elf_gfxip_level = CEnum(Annotated[int, ctypes.c_uint32])
-EF_AMDGPU_MACH_AMDGCN_GFX801 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX801', 40) # type: ignore
-EF_AMDGPU_MACH_AMDGCN_GFX900 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX900', 44) # type: ignore
-EF_AMDGPU_MACH_AMDGCN_GFX1010 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1010', 51) # type: ignore
-EF_AMDGPU_MACH_AMDGCN_GFX1030 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1030', 54) # type: ignore
-EF_AMDGPU_MACH_AMDGCN_GFX1100 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1100', 65) # type: ignore
-EF_AMDGPU_MACH_AMDGCN_GFX1150 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1150', 67) # type: ignore
-EF_AMDGPU_MACH_AMDGCN_GFX1200 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1200', 78) # type: ignore
+class enum_elf_gfxip_level(Annotated[int, ctypes.c_uint32], c.Enum): pass
+EF_AMDGPU_MACH_AMDGCN_GFX801 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX801', 40)
+EF_AMDGPU_MACH_AMDGCN_GFX900 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX900', 44)
+EF_AMDGPU_MACH_AMDGCN_GFX1010 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1010', 51)
+EF_AMDGPU_MACH_AMDGCN_GFX1030 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1030', 54)
+EF_AMDGPU_MACH_AMDGCN_GFX1100 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1100', 65)
+EF_AMDGPU_MACH_AMDGCN_GFX1150 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1150', 67)
+EF_AMDGPU_MACH_AMDGCN_GFX1200 = enum_elf_gfxip_level.define('EF_AMDGPU_MACH_AMDGCN_GFX1200', 78)
 
 @c.record
 class struct_sqtt_file_chunk_spm_db(c.Struct):
@@ -404,23 +404,23 @@ class struct_sqtt_file_chunk_spm_db(c.Struct):
   num_spm_counter_info: Annotated[uint32_t, 28]
   spm_counter_info_size: Annotated[uint32_t, 32]
   sample_interval: Annotated[uint32_t, 36]
-enum_rgp_sqtt_marker_identifier = CEnum(Annotated[int, ctypes.c_uint32])
-RGP_SQTT_MARKER_IDENTIFIER_EVENT = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_EVENT', 0) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_CB_START = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_CB_START', 1) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_CB_END = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_CB_END', 2) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_BARRIER_START = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_BARRIER_START', 3) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_BARRIER_END = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_BARRIER_END', 4) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_USER_EVENT = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_USER_EVENT', 5) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_GENERAL_API = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_GENERAL_API', 6) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_SYNC = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_SYNC', 7) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_PRESENT = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_PRESENT', 8) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_LAYOUT_TRANSITION = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_LAYOUT_TRANSITION', 9) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_RENDER_PASS = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RENDER_PASS', 10) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_RESERVED2 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED2', 11) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE', 12) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_RESERVED4 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED4', 13) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_RESERVED5 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED5', 14) # type: ignore
-RGP_SQTT_MARKER_IDENTIFIER_RESERVED6 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED6', 15) # type: ignore
+class enum_rgp_sqtt_marker_identifier(Annotated[int, ctypes.c_uint32], c.Enum): pass
+RGP_SQTT_MARKER_IDENTIFIER_EVENT = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_EVENT', 0)
+RGP_SQTT_MARKER_IDENTIFIER_CB_START = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_CB_START', 1)
+RGP_SQTT_MARKER_IDENTIFIER_CB_END = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_CB_END', 2)
+RGP_SQTT_MARKER_IDENTIFIER_BARRIER_START = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_BARRIER_START', 3)
+RGP_SQTT_MARKER_IDENTIFIER_BARRIER_END = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_BARRIER_END', 4)
+RGP_SQTT_MARKER_IDENTIFIER_USER_EVENT = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_USER_EVENT', 5)
+RGP_SQTT_MARKER_IDENTIFIER_GENERAL_API = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_GENERAL_API', 6)
+RGP_SQTT_MARKER_IDENTIFIER_SYNC = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_SYNC', 7)
+RGP_SQTT_MARKER_IDENTIFIER_PRESENT = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_PRESENT', 8)
+RGP_SQTT_MARKER_IDENTIFIER_LAYOUT_TRANSITION = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_LAYOUT_TRANSITION', 9)
+RGP_SQTT_MARKER_IDENTIFIER_RENDER_PASS = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RENDER_PASS', 10)
+RGP_SQTT_MARKER_IDENTIFIER_RESERVED2 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED2', 11)
+RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_BIND_PIPELINE', 12)
+RGP_SQTT_MARKER_IDENTIFIER_RESERVED4 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED4', 13)
+RGP_SQTT_MARKER_IDENTIFIER_RESERVED5 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED5', 14)
+RGP_SQTT_MARKER_IDENTIFIER_RESERVED6 = enum_rgp_sqtt_marker_identifier.define('RGP_SQTT_MARKER_IDENTIFIER_RESERVED6', 15)
 
 @c.record
 class union_rgp_sqtt_marker_cb_id(c.Struct):
@@ -467,58 +467,58 @@ class struct_rgp_sqtt_marker_cb_end(c.Struct):
   dword02: Annotated[uint32_t, 4]
   device_id_high: Annotated[uint32_t, 8]
   dword03: Annotated[uint32_t, 8]
-enum_rgp_sqtt_marker_general_api_type = CEnum(Annotated[int, ctypes.c_uint32])
-ApiCmdBindPipeline = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindPipeline', 0) # type: ignore
-ApiCmdBindDescriptorSets = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindDescriptorSets', 1) # type: ignore
-ApiCmdBindIndexBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindIndexBuffer', 2) # type: ignore
-ApiCmdBindVertexBuffers = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindVertexBuffers', 3) # type: ignore
-ApiCmdDraw = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDraw', 4) # type: ignore
-ApiCmdDrawIndexed = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndexed', 5) # type: ignore
-ApiCmdDrawIndirect = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndirect', 6) # type: ignore
-ApiCmdDrawIndexedIndirect = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndexedIndirect', 7) # type: ignore
-ApiCmdDrawIndirectCountAMD = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndirectCountAMD', 8) # type: ignore
-ApiCmdDrawIndexedIndirectCountAMD = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndexedIndirectCountAMD', 9) # type: ignore
-ApiCmdDispatch = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDispatch', 10) # type: ignore
-ApiCmdDispatchIndirect = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDispatchIndirect', 11) # type: ignore
-ApiCmdCopyBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyBuffer', 12) # type: ignore
-ApiCmdCopyImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyImage', 13) # type: ignore
-ApiCmdBlitImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBlitImage', 14) # type: ignore
-ApiCmdCopyBufferToImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyBufferToImage', 15) # type: ignore
-ApiCmdCopyImageToBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyImageToBuffer', 16) # type: ignore
-ApiCmdUpdateBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdUpdateBuffer', 17) # type: ignore
-ApiCmdFillBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdFillBuffer', 18) # type: ignore
-ApiCmdClearColorImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdClearColorImage', 19) # type: ignore
-ApiCmdClearDepthStencilImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdClearDepthStencilImage', 20) # type: ignore
-ApiCmdClearAttachments = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdClearAttachments', 21) # type: ignore
-ApiCmdResolveImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdResolveImage', 22) # type: ignore
-ApiCmdWaitEvents = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdWaitEvents', 23) # type: ignore
-ApiCmdPipelineBarrier = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdPipelineBarrier', 24) # type: ignore
-ApiCmdBeginQuery = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBeginQuery', 25) # type: ignore
-ApiCmdEndQuery = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdEndQuery', 26) # type: ignore
-ApiCmdResetQueryPool = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdResetQueryPool', 27) # type: ignore
-ApiCmdWriteTimestamp = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdWriteTimestamp', 28) # type: ignore
-ApiCmdCopyQueryPoolResults = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyQueryPoolResults', 29) # type: ignore
-ApiCmdPushConstants = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdPushConstants', 30) # type: ignore
-ApiCmdBeginRenderPass = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBeginRenderPass', 31) # type: ignore
-ApiCmdNextSubpass = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdNextSubpass', 32) # type: ignore
-ApiCmdEndRenderPass = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdEndRenderPass', 33) # type: ignore
-ApiCmdExecuteCommands = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdExecuteCommands', 34) # type: ignore
-ApiCmdSetViewport = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetViewport', 35) # type: ignore
-ApiCmdSetScissor = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetScissor', 36) # type: ignore
-ApiCmdSetLineWidth = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetLineWidth', 37) # type: ignore
-ApiCmdSetDepthBias = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetDepthBias', 38) # type: ignore
-ApiCmdSetBlendConstants = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetBlendConstants', 39) # type: ignore
-ApiCmdSetDepthBounds = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetDepthBounds', 40) # type: ignore
-ApiCmdSetStencilCompareMask = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetStencilCompareMask', 41) # type: ignore
-ApiCmdSetStencilWriteMask = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetStencilWriteMask', 42) # type: ignore
-ApiCmdSetStencilReference = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetStencilReference', 43) # type: ignore
-ApiCmdDrawIndirectCount = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndirectCount', 44) # type: ignore
-ApiCmdDrawIndexedIndirectCount = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndexedIndirectCount', 45) # type: ignore
-ApiCmdDrawMeshTasksEXT = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawMeshTasksEXT', 47) # type: ignore
-ApiCmdDrawMeshTasksIndirectCountEXT = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawMeshTasksIndirectCountEXT', 48) # type: ignore
-ApiCmdDrawMeshTasksIndirectEXT = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawMeshTasksIndirectEXT', 49) # type: ignore
-ApiRayTracingSeparateCompiled = enum_rgp_sqtt_marker_general_api_type.define('ApiRayTracingSeparateCompiled', 8388608) # type: ignore
-ApiInvalid = enum_rgp_sqtt_marker_general_api_type.define('ApiInvalid', 4294967295) # type: ignore
+class enum_rgp_sqtt_marker_general_api_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ApiCmdBindPipeline = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindPipeline', 0)
+ApiCmdBindDescriptorSets = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindDescriptorSets', 1)
+ApiCmdBindIndexBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindIndexBuffer', 2)
+ApiCmdBindVertexBuffers = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBindVertexBuffers', 3)
+ApiCmdDraw = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDraw', 4)
+ApiCmdDrawIndexed = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndexed', 5)
+ApiCmdDrawIndirect = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndirect', 6)
+ApiCmdDrawIndexedIndirect = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndexedIndirect', 7)
+ApiCmdDrawIndirectCountAMD = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndirectCountAMD', 8)
+ApiCmdDrawIndexedIndirectCountAMD = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndexedIndirectCountAMD', 9)
+ApiCmdDispatch = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDispatch', 10)
+ApiCmdDispatchIndirect = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDispatchIndirect', 11)
+ApiCmdCopyBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyBuffer', 12)
+ApiCmdCopyImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyImage', 13)
+ApiCmdBlitImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBlitImage', 14)
+ApiCmdCopyBufferToImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyBufferToImage', 15)
+ApiCmdCopyImageToBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyImageToBuffer', 16)
+ApiCmdUpdateBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdUpdateBuffer', 17)
+ApiCmdFillBuffer = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdFillBuffer', 18)
+ApiCmdClearColorImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdClearColorImage', 19)
+ApiCmdClearDepthStencilImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdClearDepthStencilImage', 20)
+ApiCmdClearAttachments = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdClearAttachments', 21)
+ApiCmdResolveImage = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdResolveImage', 22)
+ApiCmdWaitEvents = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdWaitEvents', 23)
+ApiCmdPipelineBarrier = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdPipelineBarrier', 24)
+ApiCmdBeginQuery = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBeginQuery', 25)
+ApiCmdEndQuery = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdEndQuery', 26)
+ApiCmdResetQueryPool = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdResetQueryPool', 27)
+ApiCmdWriteTimestamp = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdWriteTimestamp', 28)
+ApiCmdCopyQueryPoolResults = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdCopyQueryPoolResults', 29)
+ApiCmdPushConstants = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdPushConstants', 30)
+ApiCmdBeginRenderPass = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdBeginRenderPass', 31)
+ApiCmdNextSubpass = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdNextSubpass', 32)
+ApiCmdEndRenderPass = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdEndRenderPass', 33)
+ApiCmdExecuteCommands = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdExecuteCommands', 34)
+ApiCmdSetViewport = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetViewport', 35)
+ApiCmdSetScissor = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetScissor', 36)
+ApiCmdSetLineWidth = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetLineWidth', 37)
+ApiCmdSetDepthBias = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetDepthBias', 38)
+ApiCmdSetBlendConstants = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetBlendConstants', 39)
+ApiCmdSetDepthBounds = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetDepthBounds', 40)
+ApiCmdSetStencilCompareMask = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetStencilCompareMask', 41)
+ApiCmdSetStencilWriteMask = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetStencilWriteMask', 42)
+ApiCmdSetStencilReference = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdSetStencilReference', 43)
+ApiCmdDrawIndirectCount = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndirectCount', 44)
+ApiCmdDrawIndexedIndirectCount = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawIndexedIndirectCount', 45)
+ApiCmdDrawMeshTasksEXT = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawMeshTasksEXT', 47)
+ApiCmdDrawMeshTasksIndirectCountEXT = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawMeshTasksIndirectCountEXT', 48)
+ApiCmdDrawMeshTasksIndirectEXT = enum_rgp_sqtt_marker_general_api_type.define('ApiCmdDrawMeshTasksIndirectEXT', 49)
+ApiRayTracingSeparateCompiled = enum_rgp_sqtt_marker_general_api_type.define('ApiRayTracingSeparateCompiled', 8388608)
+ApiInvalid = enum_rgp_sqtt_marker_general_api_type.define('ApiInvalid', 4294967295)
 
 @c.record
 class struct_rgp_sqtt_marker_general_api(c.Struct):
@@ -529,48 +529,48 @@ class struct_rgp_sqtt_marker_general_api(c.Struct):
   is_end: Annotated[uint32_t, 3, 1, 3]
   reserved: Annotated[uint32_t, 3, 4, 4]
   dword01: Annotated[uint32_t, 0]
-enum_rgp_sqtt_marker_event_type = CEnum(Annotated[int, ctypes.c_uint32])
-EventCmdDraw = enum_rgp_sqtt_marker_event_type.define('EventCmdDraw', 0) # type: ignore
-EventCmdDrawIndexed = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexed', 1) # type: ignore
-EventCmdDrawIndirect = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndirect', 2) # type: ignore
-EventCmdDrawIndexedIndirect = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexedIndirect', 3) # type: ignore
-EventCmdDrawIndirectCountAMD = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndirectCountAMD', 4) # type: ignore
-EventCmdDrawIndexedIndirectCountAMD = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexedIndirectCountAMD', 5) # type: ignore
-EventCmdDispatch = enum_rgp_sqtt_marker_event_type.define('EventCmdDispatch', 6) # type: ignore
-EventCmdDispatchIndirect = enum_rgp_sqtt_marker_event_type.define('EventCmdDispatchIndirect', 7) # type: ignore
-EventCmdCopyBuffer = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyBuffer', 8) # type: ignore
-EventCmdCopyImage = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyImage', 9) # type: ignore
-EventCmdBlitImage = enum_rgp_sqtt_marker_event_type.define('EventCmdBlitImage', 10) # type: ignore
-EventCmdCopyBufferToImage = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyBufferToImage', 11) # type: ignore
-EventCmdCopyImageToBuffer = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyImageToBuffer', 12) # type: ignore
-EventCmdUpdateBuffer = enum_rgp_sqtt_marker_event_type.define('EventCmdUpdateBuffer', 13) # type: ignore
-EventCmdFillBuffer = enum_rgp_sqtt_marker_event_type.define('EventCmdFillBuffer', 14) # type: ignore
-EventCmdClearColorImage = enum_rgp_sqtt_marker_event_type.define('EventCmdClearColorImage', 15) # type: ignore
-EventCmdClearDepthStencilImage = enum_rgp_sqtt_marker_event_type.define('EventCmdClearDepthStencilImage', 16) # type: ignore
-EventCmdClearAttachments = enum_rgp_sqtt_marker_event_type.define('EventCmdClearAttachments', 17) # type: ignore
-EventCmdResolveImage = enum_rgp_sqtt_marker_event_type.define('EventCmdResolveImage', 18) # type: ignore
-EventCmdWaitEvents = enum_rgp_sqtt_marker_event_type.define('EventCmdWaitEvents', 19) # type: ignore
-EventCmdPipelineBarrier = enum_rgp_sqtt_marker_event_type.define('EventCmdPipelineBarrier', 20) # type: ignore
-EventCmdResetQueryPool = enum_rgp_sqtt_marker_event_type.define('EventCmdResetQueryPool', 21) # type: ignore
-EventCmdCopyQueryPoolResults = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyQueryPoolResults', 22) # type: ignore
-EventRenderPassColorClear = enum_rgp_sqtt_marker_event_type.define('EventRenderPassColorClear', 23) # type: ignore
-EventRenderPassDepthStencilClear = enum_rgp_sqtt_marker_event_type.define('EventRenderPassDepthStencilClear', 24) # type: ignore
-EventRenderPassResolve = enum_rgp_sqtt_marker_event_type.define('EventRenderPassResolve', 25) # type: ignore
-EventInternalUnknown = enum_rgp_sqtt_marker_event_type.define('EventInternalUnknown', 26) # type: ignore
-EventCmdDrawIndirectCount = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndirectCount', 27) # type: ignore
-EventCmdDrawIndexedIndirectCount = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexedIndirectCount', 28) # type: ignore
-EventCmdTraceRaysKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdTraceRaysKHR', 30) # type: ignore
-EventCmdTraceRaysIndirectKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdTraceRaysIndirectKHR', 31) # type: ignore
-EventCmdBuildAccelerationStructuresKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdBuildAccelerationStructuresKHR', 32) # type: ignore
-EventCmdBuildAccelerationStructuresIndirectKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdBuildAccelerationStructuresIndirectKHR', 33) # type: ignore
-EventCmdCopyAccelerationStructureKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyAccelerationStructureKHR', 34) # type: ignore
-EventCmdCopyAccelerationStructureToMemoryKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyAccelerationStructureToMemoryKHR', 35) # type: ignore
-EventCmdCopyMemoryToAccelerationStructureKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyMemoryToAccelerationStructureKHR', 36) # type: ignore
-EventCmdDrawMeshTasksEXT = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawMeshTasksEXT', 41) # type: ignore
-EventCmdDrawMeshTasksIndirectCountEXT = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawMeshTasksIndirectCountEXT', 42) # type: ignore
-EventCmdDrawMeshTasksIndirectEXT = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawMeshTasksIndirectEXT', 43) # type: ignore
-EventUnknown = enum_rgp_sqtt_marker_event_type.define('EventUnknown', 32767) # type: ignore
-EventInvalid = enum_rgp_sqtt_marker_event_type.define('EventInvalid', 4294967295) # type: ignore
+class enum_rgp_sqtt_marker_event_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+EventCmdDraw = enum_rgp_sqtt_marker_event_type.define('EventCmdDraw', 0)
+EventCmdDrawIndexed = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexed', 1)
+EventCmdDrawIndirect = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndirect', 2)
+EventCmdDrawIndexedIndirect = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexedIndirect', 3)
+EventCmdDrawIndirectCountAMD = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndirectCountAMD', 4)
+EventCmdDrawIndexedIndirectCountAMD = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexedIndirectCountAMD', 5)
+EventCmdDispatch = enum_rgp_sqtt_marker_event_type.define('EventCmdDispatch', 6)
+EventCmdDispatchIndirect = enum_rgp_sqtt_marker_event_type.define('EventCmdDispatchIndirect', 7)
+EventCmdCopyBuffer = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyBuffer', 8)
+EventCmdCopyImage = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyImage', 9)
+EventCmdBlitImage = enum_rgp_sqtt_marker_event_type.define('EventCmdBlitImage', 10)
+EventCmdCopyBufferToImage = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyBufferToImage', 11)
+EventCmdCopyImageToBuffer = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyImageToBuffer', 12)
+EventCmdUpdateBuffer = enum_rgp_sqtt_marker_event_type.define('EventCmdUpdateBuffer', 13)
+EventCmdFillBuffer = enum_rgp_sqtt_marker_event_type.define('EventCmdFillBuffer', 14)
+EventCmdClearColorImage = enum_rgp_sqtt_marker_event_type.define('EventCmdClearColorImage', 15)
+EventCmdClearDepthStencilImage = enum_rgp_sqtt_marker_event_type.define('EventCmdClearDepthStencilImage', 16)
+EventCmdClearAttachments = enum_rgp_sqtt_marker_event_type.define('EventCmdClearAttachments', 17)
+EventCmdResolveImage = enum_rgp_sqtt_marker_event_type.define('EventCmdResolveImage', 18)
+EventCmdWaitEvents = enum_rgp_sqtt_marker_event_type.define('EventCmdWaitEvents', 19)
+EventCmdPipelineBarrier = enum_rgp_sqtt_marker_event_type.define('EventCmdPipelineBarrier', 20)
+EventCmdResetQueryPool = enum_rgp_sqtt_marker_event_type.define('EventCmdResetQueryPool', 21)
+EventCmdCopyQueryPoolResults = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyQueryPoolResults', 22)
+EventRenderPassColorClear = enum_rgp_sqtt_marker_event_type.define('EventRenderPassColorClear', 23)
+EventRenderPassDepthStencilClear = enum_rgp_sqtt_marker_event_type.define('EventRenderPassDepthStencilClear', 24)
+EventRenderPassResolve = enum_rgp_sqtt_marker_event_type.define('EventRenderPassResolve', 25)
+EventInternalUnknown = enum_rgp_sqtt_marker_event_type.define('EventInternalUnknown', 26)
+EventCmdDrawIndirectCount = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndirectCount', 27)
+EventCmdDrawIndexedIndirectCount = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawIndexedIndirectCount', 28)
+EventCmdTraceRaysKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdTraceRaysKHR', 30)
+EventCmdTraceRaysIndirectKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdTraceRaysIndirectKHR', 31)
+EventCmdBuildAccelerationStructuresKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdBuildAccelerationStructuresKHR', 32)
+EventCmdBuildAccelerationStructuresIndirectKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdBuildAccelerationStructuresIndirectKHR', 33)
+EventCmdCopyAccelerationStructureKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyAccelerationStructureKHR', 34)
+EventCmdCopyAccelerationStructureToMemoryKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyAccelerationStructureToMemoryKHR', 35)
+EventCmdCopyMemoryToAccelerationStructureKHR = enum_rgp_sqtt_marker_event_type.define('EventCmdCopyMemoryToAccelerationStructureKHR', 36)
+EventCmdDrawMeshTasksEXT = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawMeshTasksEXT', 41)
+EventCmdDrawMeshTasksIndirectCountEXT = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawMeshTasksIndirectCountEXT', 42)
+EventCmdDrawMeshTasksIndirectEXT = enum_rgp_sqtt_marker_event_type.define('EventCmdDrawMeshTasksIndirectEXT', 43)
+EventUnknown = enum_rgp_sqtt_marker_event_type.define('EventUnknown', 32767)
+EventInvalid = enum_rgp_sqtt_marker_event_type.define('EventInvalid', 4294967295)
 
 @c.record
 class struct_rgp_sqtt_marker_event(c.Struct):
@@ -665,11 +665,11 @@ class struct_rgp_sqtt_marker_user_event_with_length(c.Struct):
   SIZE = 8
   user_event: Annotated[struct_rgp_sqtt_marker_user_event, 0]
   length: Annotated[uint32_t, 4]
-enum_rgp_sqtt_marker_user_event_type = CEnum(Annotated[int, ctypes.c_uint32])
-UserEventTrigger = enum_rgp_sqtt_marker_user_event_type.define('UserEventTrigger', 0) # type: ignore
-UserEventPop = enum_rgp_sqtt_marker_user_event_type.define('UserEventPop', 1) # type: ignore
-UserEventPush = enum_rgp_sqtt_marker_user_event_type.define('UserEventPush', 2) # type: ignore
-UserEventObjectName = enum_rgp_sqtt_marker_user_event_type.define('UserEventObjectName', 3) # type: ignore
+class enum_rgp_sqtt_marker_user_event_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+UserEventTrigger = enum_rgp_sqtt_marker_user_event_type.define('UserEventTrigger', 0)
+UserEventPop = enum_rgp_sqtt_marker_user_event_type.define('UserEventPop', 1)
+UserEventPush = enum_rgp_sqtt_marker_user_event_type.define('UserEventPush', 2)
+UserEventObjectName = enum_rgp_sqtt_marker_user_event_type.define('UserEventObjectName', 3)
 
 @c.record
 class struct_rgp_sqtt_marker_pipeline_bind(c.Struct):

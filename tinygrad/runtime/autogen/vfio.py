@@ -2,7 +2,7 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 @c.record
 class struct_vfio_info_cap_header(c.Struct):
@@ -10,8 +10,8 @@ class struct_vfio_info_cap_header(c.Struct):
   id: Annotated[Annotated[int, ctypes.c_uint16], 0]
   version: Annotated[Annotated[int, ctypes.c_uint16], 2]
   next: Annotated[Annotated[int, ctypes.c_uint32], 4]
-__u16 = Annotated[int, ctypes.c_uint16]
-__u32 = Annotated[int, ctypes.c_uint32]
+__u16: TypeAlias = Annotated[int, ctypes.c_uint16]
+__u32: TypeAlias = Annotated[int, ctypes.c_uint32]
 @c.record
 class struct_vfio_group_status(c.Struct):
   SIZE = 8
@@ -41,7 +41,7 @@ class struct_vfio_region_info(c.Struct):
   cap_offset: Annotated[Annotated[int, ctypes.c_uint32], 12]
   size: Annotated[Annotated[int, ctypes.c_uint64], 16]
   offset: Annotated[Annotated[int, ctypes.c_uint64], 24]
-__u64 = Annotated[int, ctypes.c_uint64]
+__u64: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class struct_vfio_region_sparse_mmap_area(c.Struct):
   SIZE = 16
@@ -104,40 +104,40 @@ class struct_vfio_irq_set(c.Struct):
   start: Annotated[Annotated[int, ctypes.c_uint32], 12]
   count: Annotated[Annotated[int, ctypes.c_uint32], 16]
   data: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 20]
-__u8 = Annotated[int, ctypes.c_ubyte]
-_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
-VFIO_PCI_BAR0_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR0_REGION_INDEX', 0) # type: ignore
-VFIO_PCI_BAR1_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR1_REGION_INDEX', 1) # type: ignore
-VFIO_PCI_BAR2_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR2_REGION_INDEX', 2) # type: ignore
-VFIO_PCI_BAR3_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR3_REGION_INDEX', 3) # type: ignore
-VFIO_PCI_BAR4_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR4_REGION_INDEX', 4) # type: ignore
-VFIO_PCI_BAR5_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR5_REGION_INDEX', 5) # type: ignore
-VFIO_PCI_ROM_REGION_INDEX = _anonenum0.define('VFIO_PCI_ROM_REGION_INDEX', 6) # type: ignore
-VFIO_PCI_CONFIG_REGION_INDEX = _anonenum0.define('VFIO_PCI_CONFIG_REGION_INDEX', 7) # type: ignore
-VFIO_PCI_VGA_REGION_INDEX = _anonenum0.define('VFIO_PCI_VGA_REGION_INDEX', 8) # type: ignore
-VFIO_PCI_NUM_REGIONS = _anonenum0.define('VFIO_PCI_NUM_REGIONS', 9) # type: ignore
+__u8: TypeAlias = Annotated[int, ctypes.c_ubyte]
+class _anonenum0(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_PCI_BAR0_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR0_REGION_INDEX', 0)
+VFIO_PCI_BAR1_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR1_REGION_INDEX', 1)
+VFIO_PCI_BAR2_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR2_REGION_INDEX', 2)
+VFIO_PCI_BAR3_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR3_REGION_INDEX', 3)
+VFIO_PCI_BAR4_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR4_REGION_INDEX', 4)
+VFIO_PCI_BAR5_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR5_REGION_INDEX', 5)
+VFIO_PCI_ROM_REGION_INDEX = _anonenum0.define('VFIO_PCI_ROM_REGION_INDEX', 6)
+VFIO_PCI_CONFIG_REGION_INDEX = _anonenum0.define('VFIO_PCI_CONFIG_REGION_INDEX', 7)
+VFIO_PCI_VGA_REGION_INDEX = _anonenum0.define('VFIO_PCI_VGA_REGION_INDEX', 8)
+VFIO_PCI_NUM_REGIONS = _anonenum0.define('VFIO_PCI_NUM_REGIONS', 9)
 
-_anonenum1 = CEnum(Annotated[int, ctypes.c_uint32])
-VFIO_PCI_INTX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_INTX_IRQ_INDEX', 0) # type: ignore
-VFIO_PCI_MSI_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSI_IRQ_INDEX', 1) # type: ignore
-VFIO_PCI_MSIX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSIX_IRQ_INDEX', 2) # type: ignore
-VFIO_PCI_ERR_IRQ_INDEX = _anonenum1.define('VFIO_PCI_ERR_IRQ_INDEX', 3) # type: ignore
-VFIO_PCI_REQ_IRQ_INDEX = _anonenum1.define('VFIO_PCI_REQ_IRQ_INDEX', 4) # type: ignore
-VFIO_PCI_NUM_IRQS = _anonenum1.define('VFIO_PCI_NUM_IRQS', 5) # type: ignore
+class _anonenum1(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_PCI_INTX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_INTX_IRQ_INDEX', 0)
+VFIO_PCI_MSI_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSI_IRQ_INDEX', 1)
+VFIO_PCI_MSIX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSIX_IRQ_INDEX', 2)
+VFIO_PCI_ERR_IRQ_INDEX = _anonenum1.define('VFIO_PCI_ERR_IRQ_INDEX', 3)
+VFIO_PCI_REQ_IRQ_INDEX = _anonenum1.define('VFIO_PCI_REQ_IRQ_INDEX', 4)
+VFIO_PCI_NUM_IRQS = _anonenum1.define('VFIO_PCI_NUM_IRQS', 5)
 
-_anonenum2 = CEnum(Annotated[int, ctypes.c_uint32])
-VFIO_CCW_CONFIG_REGION_INDEX = _anonenum2.define('VFIO_CCW_CONFIG_REGION_INDEX', 0) # type: ignore
-VFIO_CCW_NUM_REGIONS = _anonenum2.define('VFIO_CCW_NUM_REGIONS', 1) # type: ignore
+class _anonenum2(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_CCW_CONFIG_REGION_INDEX = _anonenum2.define('VFIO_CCW_CONFIG_REGION_INDEX', 0)
+VFIO_CCW_NUM_REGIONS = _anonenum2.define('VFIO_CCW_NUM_REGIONS', 1)
 
-_anonenum3 = CEnum(Annotated[int, ctypes.c_uint32])
-VFIO_CCW_IO_IRQ_INDEX = _anonenum3.define('VFIO_CCW_IO_IRQ_INDEX', 0) # type: ignore
-VFIO_CCW_CRW_IRQ_INDEX = _anonenum3.define('VFIO_CCW_CRW_IRQ_INDEX', 1) # type: ignore
-VFIO_CCW_REQ_IRQ_INDEX = _anonenum3.define('VFIO_CCW_REQ_IRQ_INDEX', 2) # type: ignore
-VFIO_CCW_NUM_IRQS = _anonenum3.define('VFIO_CCW_NUM_IRQS', 3) # type: ignore
+class _anonenum3(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_CCW_IO_IRQ_INDEX = _anonenum3.define('VFIO_CCW_IO_IRQ_INDEX', 0)
+VFIO_CCW_CRW_IRQ_INDEX = _anonenum3.define('VFIO_CCW_CRW_IRQ_INDEX', 1)
+VFIO_CCW_REQ_IRQ_INDEX = _anonenum3.define('VFIO_CCW_REQ_IRQ_INDEX', 2)
+VFIO_CCW_NUM_IRQS = _anonenum3.define('VFIO_CCW_NUM_IRQS', 3)
 
-_anonenum4 = CEnum(Annotated[int, ctypes.c_uint32])
-VFIO_AP_REQ_IRQ_INDEX = _anonenum4.define('VFIO_AP_REQ_IRQ_INDEX', 0) # type: ignore
-VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 1) # type: ignore
+class _anonenum4(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_AP_REQ_IRQ_INDEX = _anonenum4.define('VFIO_AP_REQ_IRQ_INDEX', 0)
+VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 1)
 
 @c.record
 class struct_vfio_pci_dependent_device(c.Struct):
@@ -161,7 +161,7 @@ class struct_vfio_pci_hot_reset(c.Struct):
   flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
   count: Annotated[Annotated[int, ctypes.c_uint32], 8]
   group_fds: Annotated[c.Array[Annotated[int, ctypes.c_int32], Literal[0]], 12]
-__s32 = Annotated[int, ctypes.c_int32]
+__s32: TypeAlias = Annotated[int, ctypes.c_int32]
 @c.record
 class struct_vfio_device_gfx_plane_info(c.Struct):
   SIZE = 64
@@ -223,16 +223,16 @@ class struct_vfio_device_feature_mig_state(c.Struct):
   SIZE = 8
   device_state: Annotated[Annotated[int, ctypes.c_uint32], 0]
   data_fd: Annotated[Annotated[int, ctypes.c_int32], 4]
-enum_vfio_device_mig_state = CEnum(Annotated[int, ctypes.c_uint32])
-VFIO_DEVICE_STATE_ERROR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_ERROR', 0) # type: ignore
-VFIO_DEVICE_STATE_STOP = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP', 1) # type: ignore
-VFIO_DEVICE_STATE_RUNNING = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RUNNING', 2) # type: ignore
-VFIO_DEVICE_STATE_STOP_COPY = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP_COPY', 3) # type: ignore
-VFIO_DEVICE_STATE_RESUMING = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RESUMING', 4) # type: ignore
-VFIO_DEVICE_STATE_RUNNING_P2P = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RUNNING_P2P', 5) # type: ignore
-VFIO_DEVICE_STATE_PRE_COPY = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_PRE_COPY', 6) # type: ignore
-VFIO_DEVICE_STATE_PRE_COPY_P2P = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_PRE_COPY_P2P', 7) # type: ignore
-VFIO_DEVICE_STATE_NR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_NR', 8) # type: ignore
+class enum_vfio_device_mig_state(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VFIO_DEVICE_STATE_ERROR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_ERROR', 0)
+VFIO_DEVICE_STATE_STOP = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP', 1)
+VFIO_DEVICE_STATE_RUNNING = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RUNNING', 2)
+VFIO_DEVICE_STATE_STOP_COPY = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP_COPY', 3)
+VFIO_DEVICE_STATE_RESUMING = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RESUMING', 4)
+VFIO_DEVICE_STATE_RUNNING_P2P = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RUNNING_P2P', 5)
+VFIO_DEVICE_STATE_PRE_COPY = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_PRE_COPY', 6)
+VFIO_DEVICE_STATE_PRE_COPY_P2P = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_PRE_COPY_P2P', 7)
+VFIO_DEVICE_STATE_NR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_NR', 8)
 
 @c.record
 class struct_vfio_precopy_info(c.Struct):

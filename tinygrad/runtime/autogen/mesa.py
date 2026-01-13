@@ -2,18 +2,18 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 import gzip, base64
 dll = c.DLL('mesa', ['tinymesa_cpu', 'tinymesa'])
 class struct_u_printf_info(ctypes.Structure): pass
-u_printf_info = struct_u_printf_info
-uint32_t = Annotated[int, ctypes.c_uint32]
+u_printf_info: TypeAlias = struct_u_printf_info
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 try: nir_debug = uint32_t.in_dll(dll, 'nir_debug')
 except (ValueError,AttributeError): pass
 try: nir_debug_print_shader = c.Array[Annotated[bool, ctypes.c_bool], Literal[15]].in_dll(dll, 'nir_debug_print_shader')
 except (ValueError,AttributeError): pass
-nir_component_mask_t = Annotated[int, ctypes.c_uint16]
+nir_component_mask_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 @dll.bind
 def nir_process_debug_variable() -> None: ...
 @dll.bind
@@ -24,53 +24,53 @@ def nir_component_mask_reinterpret(mask:nir_component_mask_t, old_bit_size:Annot
 class struct_nir_state_slot(c.Struct):
   SIZE = 8
   tokens: Annotated[c.Array[gl_state_index16, Literal[4]], 0]
-gl_state_index16 = Annotated[int, ctypes.c_int16]
-nir_state_slot = struct_nir_state_slot
-nir_rounding_mode = CEnum(Annotated[int, ctypes.c_uint32])
-nir_rounding_mode_undef = nir_rounding_mode.define('nir_rounding_mode_undef', 0) # type: ignore
-nir_rounding_mode_rtne = nir_rounding_mode.define('nir_rounding_mode_rtne', 1) # type: ignore
-nir_rounding_mode_ru = nir_rounding_mode.define('nir_rounding_mode_ru', 2) # type: ignore
-nir_rounding_mode_rd = nir_rounding_mode.define('nir_rounding_mode_rd', 3) # type: ignore
-nir_rounding_mode_rtz = nir_rounding_mode.define('nir_rounding_mode_rtz', 4) # type: ignore
+gl_state_index16: TypeAlias = Annotated[int, ctypes.c_int16]
+nir_state_slot: TypeAlias = struct_nir_state_slot
+class nir_rounding_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_rounding_mode_undef = nir_rounding_mode.define('nir_rounding_mode_undef', 0)
+nir_rounding_mode_rtne = nir_rounding_mode.define('nir_rounding_mode_rtne', 1)
+nir_rounding_mode_ru = nir_rounding_mode.define('nir_rounding_mode_ru', 2)
+nir_rounding_mode_rd = nir_rounding_mode.define('nir_rounding_mode_rd', 3)
+nir_rounding_mode_rtz = nir_rounding_mode.define('nir_rounding_mode_rtz', 4)
 
-nir_ray_query_value = CEnum(Annotated[int, ctypes.c_uint32])
-nir_ray_query_value_intersection_type = nir_ray_query_value.define('nir_ray_query_value_intersection_type', 0) # type: ignore
-nir_ray_query_value_intersection_t = nir_ray_query_value.define('nir_ray_query_value_intersection_t', 1) # type: ignore
-nir_ray_query_value_intersection_instance_custom_index = nir_ray_query_value.define('nir_ray_query_value_intersection_instance_custom_index', 2) # type: ignore
-nir_ray_query_value_intersection_instance_id = nir_ray_query_value.define('nir_ray_query_value_intersection_instance_id', 3) # type: ignore
-nir_ray_query_value_intersection_instance_sbt_index = nir_ray_query_value.define('nir_ray_query_value_intersection_instance_sbt_index', 4) # type: ignore
-nir_ray_query_value_intersection_geometry_index = nir_ray_query_value.define('nir_ray_query_value_intersection_geometry_index', 5) # type: ignore
-nir_ray_query_value_intersection_primitive_index = nir_ray_query_value.define('nir_ray_query_value_intersection_primitive_index', 6) # type: ignore
-nir_ray_query_value_intersection_barycentrics = nir_ray_query_value.define('nir_ray_query_value_intersection_barycentrics', 7) # type: ignore
-nir_ray_query_value_intersection_front_face = nir_ray_query_value.define('nir_ray_query_value_intersection_front_face', 8) # type: ignore
-nir_ray_query_value_intersection_object_ray_direction = nir_ray_query_value.define('nir_ray_query_value_intersection_object_ray_direction', 9) # type: ignore
-nir_ray_query_value_intersection_object_ray_origin = nir_ray_query_value.define('nir_ray_query_value_intersection_object_ray_origin', 10) # type: ignore
-nir_ray_query_value_intersection_object_to_world = nir_ray_query_value.define('nir_ray_query_value_intersection_object_to_world', 11) # type: ignore
-nir_ray_query_value_intersection_world_to_object = nir_ray_query_value.define('nir_ray_query_value_intersection_world_to_object', 12) # type: ignore
-nir_ray_query_value_intersection_candidate_aabb_opaque = nir_ray_query_value.define('nir_ray_query_value_intersection_candidate_aabb_opaque', 13) # type: ignore
-nir_ray_query_value_tmin = nir_ray_query_value.define('nir_ray_query_value_tmin', 14) # type: ignore
-nir_ray_query_value_flags = nir_ray_query_value.define('nir_ray_query_value_flags', 15) # type: ignore
-nir_ray_query_value_world_ray_direction = nir_ray_query_value.define('nir_ray_query_value_world_ray_direction', 16) # type: ignore
-nir_ray_query_value_world_ray_origin = nir_ray_query_value.define('nir_ray_query_value_world_ray_origin', 17) # type: ignore
-nir_ray_query_value_intersection_triangle_vertex_positions = nir_ray_query_value.define('nir_ray_query_value_intersection_triangle_vertex_positions', 18) # type: ignore
+class nir_ray_query_value(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_ray_query_value_intersection_type = nir_ray_query_value.define('nir_ray_query_value_intersection_type', 0)
+nir_ray_query_value_intersection_t = nir_ray_query_value.define('nir_ray_query_value_intersection_t', 1)
+nir_ray_query_value_intersection_instance_custom_index = nir_ray_query_value.define('nir_ray_query_value_intersection_instance_custom_index', 2)
+nir_ray_query_value_intersection_instance_id = nir_ray_query_value.define('nir_ray_query_value_intersection_instance_id', 3)
+nir_ray_query_value_intersection_instance_sbt_index = nir_ray_query_value.define('nir_ray_query_value_intersection_instance_sbt_index', 4)
+nir_ray_query_value_intersection_geometry_index = nir_ray_query_value.define('nir_ray_query_value_intersection_geometry_index', 5)
+nir_ray_query_value_intersection_primitive_index = nir_ray_query_value.define('nir_ray_query_value_intersection_primitive_index', 6)
+nir_ray_query_value_intersection_barycentrics = nir_ray_query_value.define('nir_ray_query_value_intersection_barycentrics', 7)
+nir_ray_query_value_intersection_front_face = nir_ray_query_value.define('nir_ray_query_value_intersection_front_face', 8)
+nir_ray_query_value_intersection_object_ray_direction = nir_ray_query_value.define('nir_ray_query_value_intersection_object_ray_direction', 9)
+nir_ray_query_value_intersection_object_ray_origin = nir_ray_query_value.define('nir_ray_query_value_intersection_object_ray_origin', 10)
+nir_ray_query_value_intersection_object_to_world = nir_ray_query_value.define('nir_ray_query_value_intersection_object_to_world', 11)
+nir_ray_query_value_intersection_world_to_object = nir_ray_query_value.define('nir_ray_query_value_intersection_world_to_object', 12)
+nir_ray_query_value_intersection_candidate_aabb_opaque = nir_ray_query_value.define('nir_ray_query_value_intersection_candidate_aabb_opaque', 13)
+nir_ray_query_value_tmin = nir_ray_query_value.define('nir_ray_query_value_tmin', 14)
+nir_ray_query_value_flags = nir_ray_query_value.define('nir_ray_query_value_flags', 15)
+nir_ray_query_value_world_ray_direction = nir_ray_query_value.define('nir_ray_query_value_world_ray_direction', 16)
+nir_ray_query_value_world_ray_origin = nir_ray_query_value.define('nir_ray_query_value_world_ray_origin', 17)
+nir_ray_query_value_intersection_triangle_vertex_positions = nir_ray_query_value.define('nir_ray_query_value_intersection_triangle_vertex_positions', 18)
 
-nir_resource_data_intel = CEnum(Annotated[int, ctypes.c_uint32])
-nir_resource_intel_bindless = nir_resource_data_intel.define('nir_resource_intel_bindless', 1) # type: ignore
-nir_resource_intel_pushable = nir_resource_data_intel.define('nir_resource_intel_pushable', 2) # type: ignore
-nir_resource_intel_sampler = nir_resource_data_intel.define('nir_resource_intel_sampler', 4) # type: ignore
-nir_resource_intel_non_uniform = nir_resource_data_intel.define('nir_resource_intel_non_uniform', 8) # type: ignore
-nir_resource_intel_sampler_embedded = nir_resource_data_intel.define('nir_resource_intel_sampler_embedded', 16) # type: ignore
+class nir_resource_data_intel(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_resource_intel_bindless = nir_resource_data_intel.define('nir_resource_intel_bindless', 1)
+nir_resource_intel_pushable = nir_resource_data_intel.define('nir_resource_intel_pushable', 2)
+nir_resource_intel_sampler = nir_resource_data_intel.define('nir_resource_intel_sampler', 4)
+nir_resource_intel_non_uniform = nir_resource_data_intel.define('nir_resource_intel_non_uniform', 8)
+nir_resource_intel_sampler_embedded = nir_resource_data_intel.define('nir_resource_intel_sampler_embedded', 16)
 
-nir_preamble_class = CEnum(Annotated[int, ctypes.c_uint32])
-nir_preamble_class_general = nir_preamble_class.define('nir_preamble_class_general', 0) # type: ignore
-nir_preamble_class_image = nir_preamble_class.define('nir_preamble_class_image', 1) # type: ignore
-nir_preamble_num_classes = nir_preamble_class.define('nir_preamble_num_classes', 2) # type: ignore
+class nir_preamble_class(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_preamble_class_general = nir_preamble_class.define('nir_preamble_class_general', 0)
+nir_preamble_class_image = nir_preamble_class.define('nir_preamble_class_image', 1)
+nir_preamble_num_classes = nir_preamble_class.define('nir_preamble_num_classes', 2)
 
-nir_cmat_signed = CEnum(Annotated[int, ctypes.c_uint32])
-NIR_CMAT_A_SIGNED = nir_cmat_signed.define('NIR_CMAT_A_SIGNED', 1) # type: ignore
-NIR_CMAT_B_SIGNED = nir_cmat_signed.define('NIR_CMAT_B_SIGNED', 2) # type: ignore
-NIR_CMAT_C_SIGNED = nir_cmat_signed.define('NIR_CMAT_C_SIGNED', 4) # type: ignore
-NIR_CMAT_RESULT_SIGNED = nir_cmat_signed.define('NIR_CMAT_RESULT_SIGNED', 8) # type: ignore
+class nir_cmat_signed(Annotated[int, ctypes.c_uint32], c.Enum): pass
+NIR_CMAT_A_SIGNED = nir_cmat_signed.define('NIR_CMAT_A_SIGNED', 1)
+NIR_CMAT_B_SIGNED = nir_cmat_signed.define('NIR_CMAT_B_SIGNED', 2)
+NIR_CMAT_C_SIGNED = nir_cmat_signed.define('NIR_CMAT_C_SIGNED', 4)
+NIR_CMAT_RESULT_SIGNED = nir_cmat_signed.define('NIR_CMAT_RESULT_SIGNED', 8)
 
 @c.record
 class nir_const_value(c.Struct):
@@ -86,13 +86,13 @@ class nir_const_value(c.Struct):
   u32: Annotated[uint32_t, 0]
   i64: Annotated[int64_t, 0]
   u64: Annotated[uint64_t, 0]
-int8_t = Annotated[int, ctypes.c_byte]
-uint8_t = Annotated[int, ctypes.c_ubyte]
-int16_t = Annotated[int, ctypes.c_int16]
-uint16_t = Annotated[int, ctypes.c_uint16]
-int32_t = Annotated[int, ctypes.c_int32]
-int64_t = Annotated[int, ctypes.c_int64]
-uint64_t = Annotated[int, ctypes.c_uint64]
+int8_t: TypeAlias = Annotated[int, ctypes.c_byte]
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+int16_t: TypeAlias = Annotated[int, ctypes.c_int16]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
+int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
+int64_t: TypeAlias = Annotated[int, ctypes.c_int64]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def nir_const_value_for_float(b:Annotated[float, ctypes.c_double], bit_size:Annotated[int, ctypes.c_uint32]) -> nir_const_value: ...
 @dll.bind
@@ -104,18 +104,18 @@ class struct_nir_constant(c.Struct):
   is_null_constant: Annotated[Annotated[bool, ctypes.c_bool], 128]
   num_elements: Annotated[Annotated[int, ctypes.c_uint32], 132]
   elements: Annotated[c.POINTER[c.POINTER[nir_constant]], 136]
-nir_constant = struct_nir_constant
-nir_depth_layout = CEnum(Annotated[int, ctypes.c_uint32])
-nir_depth_layout_none = nir_depth_layout.define('nir_depth_layout_none', 0) # type: ignore
-nir_depth_layout_any = nir_depth_layout.define('nir_depth_layout_any', 1) # type: ignore
-nir_depth_layout_greater = nir_depth_layout.define('nir_depth_layout_greater', 2) # type: ignore
-nir_depth_layout_less = nir_depth_layout.define('nir_depth_layout_less', 3) # type: ignore
-nir_depth_layout_unchanged = nir_depth_layout.define('nir_depth_layout_unchanged', 4) # type: ignore
+nir_constant: TypeAlias = struct_nir_constant
+class nir_depth_layout(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_depth_layout_none = nir_depth_layout.define('nir_depth_layout_none', 0)
+nir_depth_layout_any = nir_depth_layout.define('nir_depth_layout_any', 1)
+nir_depth_layout_greater = nir_depth_layout.define('nir_depth_layout_greater', 2)
+nir_depth_layout_less = nir_depth_layout.define('nir_depth_layout_less', 3)
+nir_depth_layout_unchanged = nir_depth_layout.define('nir_depth_layout_unchanged', 4)
 
-nir_var_declaration_type = CEnum(Annotated[int, ctypes.c_uint32])
-nir_var_declared_normally = nir_var_declaration_type.define('nir_var_declared_normally', 0) # type: ignore
-nir_var_declared_implicitly = nir_var_declaration_type.define('nir_var_declared_implicitly', 1) # type: ignore
-nir_var_hidden = nir_var_declaration_type.define('nir_var_hidden', 2) # type: ignore
+class nir_var_declaration_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_var_declared_normally = nir_var_declaration_type.define('nir_var_declared_normally', 0)
+nir_var_declared_implicitly = nir_var_declaration_type.define('nir_var_declared_implicitly', 1)
+nir_var_hidden = nir_var_declaration_type.define('nir_var_hidden', 2)
 
 @c.record
 class struct_nir_variable_data(c.Struct):
@@ -176,476 +176,476 @@ class struct_nir_variable_data(c.Struct):
 class struct_nir_variable_data_image(c.Struct):
   SIZE = 4
   format: Annotated[enum_pipe_format, 0]
-enum_pipe_format = CEnum(Annotated[int, ctypes.c_uint32])
-PIPE_FORMAT_NONE = enum_pipe_format.define('PIPE_FORMAT_NONE', 0) # type: ignore
-PIPE_FORMAT_R64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64_UINT', 1) # type: ignore
-PIPE_FORMAT_R64G64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64G64_UINT', 2) # type: ignore
-PIPE_FORMAT_R64G64B64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64_UINT', 3) # type: ignore
-PIPE_FORMAT_R64G64B64A64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64A64_UINT', 4) # type: ignore
-PIPE_FORMAT_R64_SINT = enum_pipe_format.define('PIPE_FORMAT_R64_SINT', 5) # type: ignore
-PIPE_FORMAT_R64G64_SINT = enum_pipe_format.define('PIPE_FORMAT_R64G64_SINT', 6) # type: ignore
-PIPE_FORMAT_R64G64B64_SINT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64_SINT', 7) # type: ignore
-PIPE_FORMAT_R64G64B64A64_SINT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64A64_SINT', 8) # type: ignore
-PIPE_FORMAT_R64_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R64_FLOAT', 9) # type: ignore
-PIPE_FORMAT_R64G64_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R64G64_FLOAT', 10) # type: ignore
-PIPE_FORMAT_R64G64B64_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64_FLOAT', 11) # type: ignore
-PIPE_FORMAT_R64G64B64A64_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64A64_FLOAT', 12) # type: ignore
-PIPE_FORMAT_R32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32_FLOAT', 13) # type: ignore
-PIPE_FORMAT_R32G32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32G32_FLOAT', 14) # type: ignore
-PIPE_FORMAT_R32G32B32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_FLOAT', 15) # type: ignore
-PIPE_FORMAT_R32G32B32A32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_FLOAT', 16) # type: ignore
-PIPE_FORMAT_R32_UNORM = enum_pipe_format.define('PIPE_FORMAT_R32_UNORM', 17) # type: ignore
-PIPE_FORMAT_R32G32_UNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32_UNORM', 18) # type: ignore
-PIPE_FORMAT_R32G32B32_UNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_UNORM', 19) # type: ignore
-PIPE_FORMAT_R32G32B32A32_UNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_UNORM', 20) # type: ignore
-PIPE_FORMAT_R32_USCALED = enum_pipe_format.define('PIPE_FORMAT_R32_USCALED', 21) # type: ignore
-PIPE_FORMAT_R32G32_USCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32_USCALED', 22) # type: ignore
-PIPE_FORMAT_R32G32B32_USCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_USCALED', 23) # type: ignore
-PIPE_FORMAT_R32G32B32A32_USCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_USCALED', 24) # type: ignore
-PIPE_FORMAT_R32_SNORM = enum_pipe_format.define('PIPE_FORMAT_R32_SNORM', 25) # type: ignore
-PIPE_FORMAT_R32G32_SNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32_SNORM', 26) # type: ignore
-PIPE_FORMAT_R32G32B32_SNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_SNORM', 27) # type: ignore
-PIPE_FORMAT_R32G32B32A32_SNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_SNORM', 28) # type: ignore
-PIPE_FORMAT_R32_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R32_SSCALED', 29) # type: ignore
-PIPE_FORMAT_R32G32_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32_SSCALED', 30) # type: ignore
-PIPE_FORMAT_R32G32B32_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_SSCALED', 31) # type: ignore
-PIPE_FORMAT_R32G32B32A32_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_SSCALED', 32) # type: ignore
-PIPE_FORMAT_R16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16_UNORM', 33) # type: ignore
-PIPE_FORMAT_R16G16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16_UNORM', 34) # type: ignore
-PIPE_FORMAT_R16G16B16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_UNORM', 35) # type: ignore
-PIPE_FORMAT_R16G16B16A16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_UNORM', 36) # type: ignore
-PIPE_FORMAT_R16_USCALED = enum_pipe_format.define('PIPE_FORMAT_R16_USCALED', 37) # type: ignore
-PIPE_FORMAT_R16G16_USCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16_USCALED', 38) # type: ignore
-PIPE_FORMAT_R16G16B16_USCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_USCALED', 39) # type: ignore
-PIPE_FORMAT_R16G16B16A16_USCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_USCALED', 40) # type: ignore
-PIPE_FORMAT_R16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16_SNORM', 41) # type: ignore
-PIPE_FORMAT_R16G16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16_SNORM', 42) # type: ignore
-PIPE_FORMAT_R16G16B16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_SNORM', 43) # type: ignore
-PIPE_FORMAT_R16G16B16A16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_SNORM', 44) # type: ignore
-PIPE_FORMAT_R16_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R16_SSCALED', 45) # type: ignore
-PIPE_FORMAT_R16G16_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16_SSCALED', 46) # type: ignore
-PIPE_FORMAT_R16G16B16_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_SSCALED', 47) # type: ignore
-PIPE_FORMAT_R16G16B16A16_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_SSCALED', 48) # type: ignore
-PIPE_FORMAT_R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_UNORM', 49) # type: ignore
-PIPE_FORMAT_R8G8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8_UNORM', 50) # type: ignore
-PIPE_FORMAT_R8G8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_UNORM', 51) # type: ignore
-PIPE_FORMAT_B8G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_UNORM', 52) # type: ignore
-PIPE_FORMAT_R8G8B8A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_UNORM', 53) # type: ignore
-PIPE_FORMAT_B8G8R8A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_UNORM', 54) # type: ignore
-PIPE_FORMAT_R8_USCALED = enum_pipe_format.define('PIPE_FORMAT_R8_USCALED', 55) # type: ignore
-PIPE_FORMAT_R8G8_USCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8_USCALED', 56) # type: ignore
-PIPE_FORMAT_R8G8B8_USCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_USCALED', 57) # type: ignore
-PIPE_FORMAT_B8G8R8_USCALED = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_USCALED', 58) # type: ignore
-PIPE_FORMAT_R8G8B8A8_USCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_USCALED', 59) # type: ignore
-PIPE_FORMAT_B8G8R8A8_USCALED = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_USCALED', 60) # type: ignore
-PIPE_FORMAT_A8B8G8R8_USCALED = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_USCALED', 61) # type: ignore
-PIPE_FORMAT_R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8_SNORM', 62) # type: ignore
-PIPE_FORMAT_R8G8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8_SNORM', 63) # type: ignore
-PIPE_FORMAT_R8G8B8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_SNORM', 64) # type: ignore
-PIPE_FORMAT_B8G8R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_SNORM', 65) # type: ignore
-PIPE_FORMAT_R8G8B8A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_SNORM', 66) # type: ignore
-PIPE_FORMAT_B8G8R8A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_SNORM', 67) # type: ignore
-PIPE_FORMAT_R8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R8_SSCALED', 68) # type: ignore
-PIPE_FORMAT_R8G8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8_SSCALED', 69) # type: ignore
-PIPE_FORMAT_R8G8B8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_SSCALED', 70) # type: ignore
-PIPE_FORMAT_B8G8R8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_SSCALED', 71) # type: ignore
-PIPE_FORMAT_R8G8B8A8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_SSCALED', 72) # type: ignore
-PIPE_FORMAT_B8G8R8A8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_SSCALED', 73) # type: ignore
-PIPE_FORMAT_A8B8G8R8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_SSCALED', 74) # type: ignore
-PIPE_FORMAT_A8R8G8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_UNORM', 75) # type: ignore
-PIPE_FORMAT_R32_FIXED = enum_pipe_format.define('PIPE_FORMAT_R32_FIXED', 76) # type: ignore
-PIPE_FORMAT_R32G32_FIXED = enum_pipe_format.define('PIPE_FORMAT_R32G32_FIXED', 77) # type: ignore
-PIPE_FORMAT_R32G32B32_FIXED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_FIXED', 78) # type: ignore
-PIPE_FORMAT_R32G32B32A32_FIXED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_FIXED', 79) # type: ignore
-PIPE_FORMAT_R16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16_FLOAT', 80) # type: ignore
-PIPE_FORMAT_R16G16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16G16_FLOAT', 81) # type: ignore
-PIPE_FORMAT_R16G16B16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_FLOAT', 82) # type: ignore
-PIPE_FORMAT_R16G16B16A16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_FLOAT', 83) # type: ignore
-PIPE_FORMAT_R8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8_UINT', 84) # type: ignore
-PIPE_FORMAT_R8G8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8G8_UINT', 85) # type: ignore
-PIPE_FORMAT_R8G8B8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_UINT', 86) # type: ignore
-PIPE_FORMAT_B8G8R8_UINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_UINT', 87) # type: ignore
-PIPE_FORMAT_R8G8B8A8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_UINT', 88) # type: ignore
-PIPE_FORMAT_B8G8R8A8_UINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_UINT', 89) # type: ignore
-PIPE_FORMAT_R8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8_SINT', 90) # type: ignore
-PIPE_FORMAT_R8G8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8G8_SINT', 91) # type: ignore
-PIPE_FORMAT_R8G8B8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_SINT', 92) # type: ignore
-PIPE_FORMAT_B8G8R8_SINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_SINT', 93) # type: ignore
-PIPE_FORMAT_R8G8B8A8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_SINT', 94) # type: ignore
-PIPE_FORMAT_B8G8R8A8_SINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_SINT', 95) # type: ignore
-PIPE_FORMAT_R16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16_UINT', 96) # type: ignore
-PIPE_FORMAT_R16G16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16G16_UINT', 97) # type: ignore
-PIPE_FORMAT_R16G16B16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_UINT', 98) # type: ignore
-PIPE_FORMAT_R16G16B16A16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_UINT', 99) # type: ignore
-PIPE_FORMAT_R16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16_SINT', 100) # type: ignore
-PIPE_FORMAT_R16G16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16G16_SINT', 101) # type: ignore
-PIPE_FORMAT_R16G16B16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_SINT', 102) # type: ignore
-PIPE_FORMAT_R16G16B16A16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_SINT', 103) # type: ignore
-PIPE_FORMAT_R32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32_UINT', 104) # type: ignore
-PIPE_FORMAT_R32G32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32G32_UINT', 105) # type: ignore
-PIPE_FORMAT_R32G32B32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_UINT', 106) # type: ignore
-PIPE_FORMAT_R32G32B32A32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_UINT', 107) # type: ignore
-PIPE_FORMAT_R32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32_SINT', 108) # type: ignore
-PIPE_FORMAT_R32G32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32G32_SINT', 109) # type: ignore
-PIPE_FORMAT_R32G32B32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_SINT', 110) # type: ignore
-PIPE_FORMAT_R32G32B32A32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_SINT', 111) # type: ignore
-PIPE_FORMAT_R10G10B10A2_UNORM = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_UNORM', 112) # type: ignore
-PIPE_FORMAT_R10G10B10A2_SNORM = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_SNORM', 113) # type: ignore
-PIPE_FORMAT_R10G10B10A2_USCALED = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_USCALED', 114) # type: ignore
-PIPE_FORMAT_R10G10B10A2_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_SSCALED', 115) # type: ignore
-PIPE_FORMAT_B10G10R10A2_UNORM = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_UNORM', 116) # type: ignore
-PIPE_FORMAT_B10G10R10A2_SNORM = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_SNORM', 117) # type: ignore
-PIPE_FORMAT_B10G10R10A2_USCALED = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_USCALED', 118) # type: ignore
-PIPE_FORMAT_B10G10R10A2_SSCALED = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_SSCALED', 119) # type: ignore
-PIPE_FORMAT_R11G11B10_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R11G11B10_FLOAT', 120) # type: ignore
-PIPE_FORMAT_R10G10B10A2_UINT = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_UINT', 121) # type: ignore
-PIPE_FORMAT_R10G10B10A2_SINT = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_SINT', 122) # type: ignore
-PIPE_FORMAT_B10G10R10A2_UINT = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_UINT', 123) # type: ignore
-PIPE_FORMAT_B10G10R10A2_SINT = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_SINT', 124) # type: ignore
-PIPE_FORMAT_B8G8R8X8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_UNORM', 125) # type: ignore
-PIPE_FORMAT_X8B8G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_X8B8G8R8_UNORM', 126) # type: ignore
-PIPE_FORMAT_X8R8G8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_X8R8G8B8_UNORM', 127) # type: ignore
-PIPE_FORMAT_B5G5R5A1_UNORM = enum_pipe_format.define('PIPE_FORMAT_B5G5R5A1_UNORM', 128) # type: ignore
-PIPE_FORMAT_R4G4B4A4_UNORM = enum_pipe_format.define('PIPE_FORMAT_R4G4B4A4_UNORM', 129) # type: ignore
-PIPE_FORMAT_B4G4R4A4_UNORM = enum_pipe_format.define('PIPE_FORMAT_B4G4R4A4_UNORM', 130) # type: ignore
-PIPE_FORMAT_R5G6B5_UNORM = enum_pipe_format.define('PIPE_FORMAT_R5G6B5_UNORM', 131) # type: ignore
-PIPE_FORMAT_B5G6R5_UNORM = enum_pipe_format.define('PIPE_FORMAT_B5G6R5_UNORM', 132) # type: ignore
-PIPE_FORMAT_L8_UNORM = enum_pipe_format.define('PIPE_FORMAT_L8_UNORM', 133) # type: ignore
-PIPE_FORMAT_A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_A8_UNORM', 134) # type: ignore
-PIPE_FORMAT_I8_UNORM = enum_pipe_format.define('PIPE_FORMAT_I8_UNORM', 135) # type: ignore
-PIPE_FORMAT_L8A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_L8A8_UNORM', 136) # type: ignore
-PIPE_FORMAT_L16_UNORM = enum_pipe_format.define('PIPE_FORMAT_L16_UNORM', 137) # type: ignore
-PIPE_FORMAT_UYVY = enum_pipe_format.define('PIPE_FORMAT_UYVY', 138) # type: ignore
-PIPE_FORMAT_VYUY = enum_pipe_format.define('PIPE_FORMAT_VYUY', 139) # type: ignore
-PIPE_FORMAT_YUYV = enum_pipe_format.define('PIPE_FORMAT_YUYV', 140) # type: ignore
-PIPE_FORMAT_YVYU = enum_pipe_format.define('PIPE_FORMAT_YVYU', 141) # type: ignore
-PIPE_FORMAT_Z16_UNORM = enum_pipe_format.define('PIPE_FORMAT_Z16_UNORM', 142) # type: ignore
-PIPE_FORMAT_Z16_UNORM_S8_UINT = enum_pipe_format.define('PIPE_FORMAT_Z16_UNORM_S8_UINT', 143) # type: ignore
-PIPE_FORMAT_Z32_UNORM = enum_pipe_format.define('PIPE_FORMAT_Z32_UNORM', 144) # type: ignore
-PIPE_FORMAT_Z32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_Z32_FLOAT', 145) # type: ignore
-PIPE_FORMAT_Z24_UNORM_S8_UINT = enum_pipe_format.define('PIPE_FORMAT_Z24_UNORM_S8_UINT', 146) # type: ignore
-PIPE_FORMAT_S8_UINT_Z24_UNORM = enum_pipe_format.define('PIPE_FORMAT_S8_UINT_Z24_UNORM', 147) # type: ignore
-PIPE_FORMAT_Z24X8_UNORM = enum_pipe_format.define('PIPE_FORMAT_Z24X8_UNORM', 148) # type: ignore
-PIPE_FORMAT_X8Z24_UNORM = enum_pipe_format.define('PIPE_FORMAT_X8Z24_UNORM', 149) # type: ignore
-PIPE_FORMAT_S8_UINT = enum_pipe_format.define('PIPE_FORMAT_S8_UINT', 150) # type: ignore
-PIPE_FORMAT_L8_SRGB = enum_pipe_format.define('PIPE_FORMAT_L8_SRGB', 151) # type: ignore
-PIPE_FORMAT_R8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8_SRGB', 152) # type: ignore
-PIPE_FORMAT_L8A8_SRGB = enum_pipe_format.define('PIPE_FORMAT_L8A8_SRGB', 153) # type: ignore
-PIPE_FORMAT_R8G8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8G8_SRGB', 154) # type: ignore
-PIPE_FORMAT_R8G8B8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_SRGB', 155) # type: ignore
-PIPE_FORMAT_B8G8R8_SRGB = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_SRGB', 156) # type: ignore
-PIPE_FORMAT_A8B8G8R8_SRGB = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_SRGB', 157) # type: ignore
-PIPE_FORMAT_X8B8G8R8_SRGB = enum_pipe_format.define('PIPE_FORMAT_X8B8G8R8_SRGB', 158) # type: ignore
-PIPE_FORMAT_B8G8R8A8_SRGB = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_SRGB', 159) # type: ignore
-PIPE_FORMAT_B8G8R8X8_SRGB = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_SRGB', 160) # type: ignore
-PIPE_FORMAT_A8R8G8B8_SRGB = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_SRGB', 161) # type: ignore
-PIPE_FORMAT_X8R8G8B8_SRGB = enum_pipe_format.define('PIPE_FORMAT_X8R8G8B8_SRGB', 162) # type: ignore
-PIPE_FORMAT_R8G8B8A8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_SRGB', 163) # type: ignore
-PIPE_FORMAT_DXT1_RGB = enum_pipe_format.define('PIPE_FORMAT_DXT1_RGB', 164) # type: ignore
-PIPE_FORMAT_DXT1_RGBA = enum_pipe_format.define('PIPE_FORMAT_DXT1_RGBA', 165) # type: ignore
-PIPE_FORMAT_DXT3_RGBA = enum_pipe_format.define('PIPE_FORMAT_DXT3_RGBA', 166) # type: ignore
-PIPE_FORMAT_DXT5_RGBA = enum_pipe_format.define('PIPE_FORMAT_DXT5_RGBA', 167) # type: ignore
-PIPE_FORMAT_DXT1_SRGB = enum_pipe_format.define('PIPE_FORMAT_DXT1_SRGB', 168) # type: ignore
-PIPE_FORMAT_DXT1_SRGBA = enum_pipe_format.define('PIPE_FORMAT_DXT1_SRGBA', 169) # type: ignore
-PIPE_FORMAT_DXT3_SRGBA = enum_pipe_format.define('PIPE_FORMAT_DXT3_SRGBA', 170) # type: ignore
-PIPE_FORMAT_DXT5_SRGBA = enum_pipe_format.define('PIPE_FORMAT_DXT5_SRGBA', 171) # type: ignore
-PIPE_FORMAT_RGTC1_UNORM = enum_pipe_format.define('PIPE_FORMAT_RGTC1_UNORM', 172) # type: ignore
-PIPE_FORMAT_RGTC1_SNORM = enum_pipe_format.define('PIPE_FORMAT_RGTC1_SNORM', 173) # type: ignore
-PIPE_FORMAT_RGTC2_UNORM = enum_pipe_format.define('PIPE_FORMAT_RGTC2_UNORM', 174) # type: ignore
-PIPE_FORMAT_RGTC2_SNORM = enum_pipe_format.define('PIPE_FORMAT_RGTC2_SNORM', 175) # type: ignore
-PIPE_FORMAT_R8G8_B8G8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8_B8G8_UNORM', 176) # type: ignore
-PIPE_FORMAT_G8R8_G8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8R8_G8B8_UNORM', 177) # type: ignore
-PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM', 178) # type: ignore
-PIPE_FORMAT_X4G12_X4B12X4R12_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_X4G12_X4B12X4R12_420_UNORM', 179) # type: ignore
-PIPE_FORMAT_X6R10_UNORM = enum_pipe_format.define('PIPE_FORMAT_X6R10_UNORM', 180) # type: ignore
-PIPE_FORMAT_X6R10X6G10_UNORM = enum_pipe_format.define('PIPE_FORMAT_X6R10X6G10_UNORM', 181) # type: ignore
-PIPE_FORMAT_X4R12_UNORM = enum_pipe_format.define('PIPE_FORMAT_X4R12_UNORM', 182) # type: ignore
-PIPE_FORMAT_X4R12X4G12_UNORM = enum_pipe_format.define('PIPE_FORMAT_X4R12X4G12_UNORM', 183) # type: ignore
-PIPE_FORMAT_R8SG8SB8UX8U_NORM = enum_pipe_format.define('PIPE_FORMAT_R8SG8SB8UX8U_NORM', 184) # type: ignore
-PIPE_FORMAT_R5SG5SB6U_NORM = enum_pipe_format.define('PIPE_FORMAT_R5SG5SB6U_NORM', 185) # type: ignore
-PIPE_FORMAT_A8B8G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_UNORM', 186) # type: ignore
-PIPE_FORMAT_B5G5R5X1_UNORM = enum_pipe_format.define('PIPE_FORMAT_B5G5R5X1_UNORM', 187) # type: ignore
-PIPE_FORMAT_R9G9B9E5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R9G9B9E5_FLOAT', 188) # type: ignore
-PIPE_FORMAT_Z32_FLOAT_S8X24_UINT = enum_pipe_format.define('PIPE_FORMAT_Z32_FLOAT_S8X24_UINT', 189) # type: ignore
-PIPE_FORMAT_R1_UNORM = enum_pipe_format.define('PIPE_FORMAT_R1_UNORM', 190) # type: ignore
-PIPE_FORMAT_R10G10B10X2_USCALED = enum_pipe_format.define('PIPE_FORMAT_R10G10B10X2_USCALED', 191) # type: ignore
-PIPE_FORMAT_R10G10B10X2_SNORM = enum_pipe_format.define('PIPE_FORMAT_R10G10B10X2_SNORM', 192) # type: ignore
-PIPE_FORMAT_L4A4_UNORM = enum_pipe_format.define('PIPE_FORMAT_L4A4_UNORM', 193) # type: ignore
-PIPE_FORMAT_A2R10G10B10_UNORM = enum_pipe_format.define('PIPE_FORMAT_A2R10G10B10_UNORM', 194) # type: ignore
-PIPE_FORMAT_A2B10G10R10_UNORM = enum_pipe_format.define('PIPE_FORMAT_A2B10G10R10_UNORM', 195) # type: ignore
-PIPE_FORMAT_R10SG10SB10SA2U_NORM = enum_pipe_format.define('PIPE_FORMAT_R10SG10SB10SA2U_NORM', 196) # type: ignore
-PIPE_FORMAT_R8G8Bx_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8Bx_SNORM', 197) # type: ignore
-PIPE_FORMAT_R8G8B8X8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_UNORM', 198) # type: ignore
-PIPE_FORMAT_B4G4R4X4_UNORM = enum_pipe_format.define('PIPE_FORMAT_B4G4R4X4_UNORM', 199) # type: ignore
-PIPE_FORMAT_X24S8_UINT = enum_pipe_format.define('PIPE_FORMAT_X24S8_UINT', 200) # type: ignore
-PIPE_FORMAT_S8X24_UINT = enum_pipe_format.define('PIPE_FORMAT_S8X24_UINT', 201) # type: ignore
-PIPE_FORMAT_X32_S8X24_UINT = enum_pipe_format.define('PIPE_FORMAT_X32_S8X24_UINT', 202) # type: ignore
-PIPE_FORMAT_R3G3B2_UNORM = enum_pipe_format.define('PIPE_FORMAT_R3G3B2_UNORM', 203) # type: ignore
-PIPE_FORMAT_B2G3R3_UNORM = enum_pipe_format.define('PIPE_FORMAT_B2G3R3_UNORM', 204) # type: ignore
-PIPE_FORMAT_L16A16_UNORM = enum_pipe_format.define('PIPE_FORMAT_L16A16_UNORM', 205) # type: ignore
-PIPE_FORMAT_A16_UNORM = enum_pipe_format.define('PIPE_FORMAT_A16_UNORM', 206) # type: ignore
-PIPE_FORMAT_I16_UNORM = enum_pipe_format.define('PIPE_FORMAT_I16_UNORM', 207) # type: ignore
-PIPE_FORMAT_LATC1_UNORM = enum_pipe_format.define('PIPE_FORMAT_LATC1_UNORM', 208) # type: ignore
-PIPE_FORMAT_LATC1_SNORM = enum_pipe_format.define('PIPE_FORMAT_LATC1_SNORM', 209) # type: ignore
-PIPE_FORMAT_LATC2_UNORM = enum_pipe_format.define('PIPE_FORMAT_LATC2_UNORM', 210) # type: ignore
-PIPE_FORMAT_LATC2_SNORM = enum_pipe_format.define('PIPE_FORMAT_LATC2_SNORM', 211) # type: ignore
-PIPE_FORMAT_A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_A8_SNORM', 212) # type: ignore
-PIPE_FORMAT_L8_SNORM = enum_pipe_format.define('PIPE_FORMAT_L8_SNORM', 213) # type: ignore
-PIPE_FORMAT_L8A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_L8A8_SNORM', 214) # type: ignore
-PIPE_FORMAT_I8_SNORM = enum_pipe_format.define('PIPE_FORMAT_I8_SNORM', 215) # type: ignore
-PIPE_FORMAT_A16_SNORM = enum_pipe_format.define('PIPE_FORMAT_A16_SNORM', 216) # type: ignore
-PIPE_FORMAT_L16_SNORM = enum_pipe_format.define('PIPE_FORMAT_L16_SNORM', 217) # type: ignore
-PIPE_FORMAT_L16A16_SNORM = enum_pipe_format.define('PIPE_FORMAT_L16A16_SNORM', 218) # type: ignore
-PIPE_FORMAT_I16_SNORM = enum_pipe_format.define('PIPE_FORMAT_I16_SNORM', 219) # type: ignore
-PIPE_FORMAT_A16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_A16_FLOAT', 220) # type: ignore
-PIPE_FORMAT_L16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_L16_FLOAT', 221) # type: ignore
-PIPE_FORMAT_L16A16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_L16A16_FLOAT', 222) # type: ignore
-PIPE_FORMAT_I16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_I16_FLOAT', 223) # type: ignore
-PIPE_FORMAT_A32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_A32_FLOAT', 224) # type: ignore
-PIPE_FORMAT_L32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_L32_FLOAT', 225) # type: ignore
-PIPE_FORMAT_L32A32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_L32A32_FLOAT', 226) # type: ignore
-PIPE_FORMAT_I32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_I32_FLOAT', 227) # type: ignore
-PIPE_FORMAT_YV12 = enum_pipe_format.define('PIPE_FORMAT_YV12', 228) # type: ignore
-PIPE_FORMAT_YV16 = enum_pipe_format.define('PIPE_FORMAT_YV16', 229) # type: ignore
-PIPE_FORMAT_IYUV = enum_pipe_format.define('PIPE_FORMAT_IYUV', 230) # type: ignore
-PIPE_FORMAT_NV12 = enum_pipe_format.define('PIPE_FORMAT_NV12', 231) # type: ignore
-PIPE_FORMAT_NV21 = enum_pipe_format.define('PIPE_FORMAT_NV21', 232) # type: ignore
-PIPE_FORMAT_NV16 = enum_pipe_format.define('PIPE_FORMAT_NV16', 233) # type: ignore
-PIPE_FORMAT_NV15 = enum_pipe_format.define('PIPE_FORMAT_NV15', 234) # type: ignore
-PIPE_FORMAT_NV20 = enum_pipe_format.define('PIPE_FORMAT_NV20', 235) # type: ignore
-PIPE_FORMAT_Y8_400_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_400_UNORM', 236) # type: ignore
-PIPE_FORMAT_Y8_U8_V8_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_U8_V8_422_UNORM', 237) # type: ignore
-PIPE_FORMAT_Y8_U8_V8_444_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_U8_V8_444_UNORM', 238) # type: ignore
-PIPE_FORMAT_Y8_U8_V8_440_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_U8_V8_440_UNORM', 239) # type: ignore
-PIPE_FORMAT_Y10X6_U10X6_V10X6_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y10X6_U10X6_V10X6_420_UNORM', 240) # type: ignore
-PIPE_FORMAT_Y10X6_U10X6_V10X6_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y10X6_U10X6_V10X6_422_UNORM', 241) # type: ignore
-PIPE_FORMAT_Y10X6_U10X6_V10X6_444_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y10X6_U10X6_V10X6_444_UNORM', 242) # type: ignore
-PIPE_FORMAT_Y12X4_U12X4_V12X4_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y12X4_U12X4_V12X4_420_UNORM', 243) # type: ignore
-PIPE_FORMAT_Y12X4_U12X4_V12X4_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y12X4_U12X4_V12X4_422_UNORM', 244) # type: ignore
-PIPE_FORMAT_Y12X4_U12X4_V12X4_444_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y12X4_U12X4_V12X4_444_UNORM', 245) # type: ignore
-PIPE_FORMAT_Y16_U16_V16_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y16_U16_V16_420_UNORM', 246) # type: ignore
-PIPE_FORMAT_Y16_U16_V16_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y16_U16_V16_422_UNORM', 247) # type: ignore
-PIPE_FORMAT_Y16_U16V16_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y16_U16V16_422_UNORM', 248) # type: ignore
-PIPE_FORMAT_Y16_U16_V16_444_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y16_U16_V16_444_UNORM', 249) # type: ignore
-PIPE_FORMAT_Y8U8V8_420_UNORM_PACKED = enum_pipe_format.define('PIPE_FORMAT_Y8U8V8_420_UNORM_PACKED', 250) # type: ignore
-PIPE_FORMAT_Y10U10V10_420_UNORM_PACKED = enum_pipe_format.define('PIPE_FORMAT_Y10U10V10_420_UNORM_PACKED', 251) # type: ignore
-PIPE_FORMAT_A4R4_UNORM = enum_pipe_format.define('PIPE_FORMAT_A4R4_UNORM', 252) # type: ignore
-PIPE_FORMAT_R4A4_UNORM = enum_pipe_format.define('PIPE_FORMAT_R4A4_UNORM', 253) # type: ignore
-PIPE_FORMAT_R8A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8A8_UNORM', 254) # type: ignore
-PIPE_FORMAT_A8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_A8R8_UNORM', 255) # type: ignore
-PIPE_FORMAT_A8_UINT = enum_pipe_format.define('PIPE_FORMAT_A8_UINT', 256) # type: ignore
-PIPE_FORMAT_I8_UINT = enum_pipe_format.define('PIPE_FORMAT_I8_UINT', 257) # type: ignore
-PIPE_FORMAT_L8_UINT = enum_pipe_format.define('PIPE_FORMAT_L8_UINT', 258) # type: ignore
-PIPE_FORMAT_L8A8_UINT = enum_pipe_format.define('PIPE_FORMAT_L8A8_UINT', 259) # type: ignore
-PIPE_FORMAT_A8_SINT = enum_pipe_format.define('PIPE_FORMAT_A8_SINT', 260) # type: ignore
-PIPE_FORMAT_I8_SINT = enum_pipe_format.define('PIPE_FORMAT_I8_SINT', 261) # type: ignore
-PIPE_FORMAT_L8_SINT = enum_pipe_format.define('PIPE_FORMAT_L8_SINT', 262) # type: ignore
-PIPE_FORMAT_L8A8_SINT = enum_pipe_format.define('PIPE_FORMAT_L8A8_SINT', 263) # type: ignore
-PIPE_FORMAT_A16_UINT = enum_pipe_format.define('PIPE_FORMAT_A16_UINT', 264) # type: ignore
-PIPE_FORMAT_I16_UINT = enum_pipe_format.define('PIPE_FORMAT_I16_UINT', 265) # type: ignore
-PIPE_FORMAT_L16_UINT = enum_pipe_format.define('PIPE_FORMAT_L16_UINT', 266) # type: ignore
-PIPE_FORMAT_L16A16_UINT = enum_pipe_format.define('PIPE_FORMAT_L16A16_UINT', 267) # type: ignore
-PIPE_FORMAT_A16_SINT = enum_pipe_format.define('PIPE_FORMAT_A16_SINT', 268) # type: ignore
-PIPE_FORMAT_I16_SINT = enum_pipe_format.define('PIPE_FORMAT_I16_SINT', 269) # type: ignore
-PIPE_FORMAT_L16_SINT = enum_pipe_format.define('PIPE_FORMAT_L16_SINT', 270) # type: ignore
-PIPE_FORMAT_L16A16_SINT = enum_pipe_format.define('PIPE_FORMAT_L16A16_SINT', 271) # type: ignore
-PIPE_FORMAT_A32_UINT = enum_pipe_format.define('PIPE_FORMAT_A32_UINT', 272) # type: ignore
-PIPE_FORMAT_I32_UINT = enum_pipe_format.define('PIPE_FORMAT_I32_UINT', 273) # type: ignore
-PIPE_FORMAT_L32_UINT = enum_pipe_format.define('PIPE_FORMAT_L32_UINT', 274) # type: ignore
-PIPE_FORMAT_L32A32_UINT = enum_pipe_format.define('PIPE_FORMAT_L32A32_UINT', 275) # type: ignore
-PIPE_FORMAT_A32_SINT = enum_pipe_format.define('PIPE_FORMAT_A32_SINT', 276) # type: ignore
-PIPE_FORMAT_I32_SINT = enum_pipe_format.define('PIPE_FORMAT_I32_SINT', 277) # type: ignore
-PIPE_FORMAT_L32_SINT = enum_pipe_format.define('PIPE_FORMAT_L32_SINT', 278) # type: ignore
-PIPE_FORMAT_L32A32_SINT = enum_pipe_format.define('PIPE_FORMAT_L32A32_SINT', 279) # type: ignore
-PIPE_FORMAT_A8R8G8B8_UINT = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_UINT', 280) # type: ignore
-PIPE_FORMAT_A8B8G8R8_UINT = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_UINT', 281) # type: ignore
-PIPE_FORMAT_A2R10G10B10_UINT = enum_pipe_format.define('PIPE_FORMAT_A2R10G10B10_UINT', 282) # type: ignore
-PIPE_FORMAT_A2B10G10R10_UINT = enum_pipe_format.define('PIPE_FORMAT_A2B10G10R10_UINT', 283) # type: ignore
-PIPE_FORMAT_R5G6B5_UINT = enum_pipe_format.define('PIPE_FORMAT_R5G6B5_UINT', 284) # type: ignore
-PIPE_FORMAT_B5G6R5_UINT = enum_pipe_format.define('PIPE_FORMAT_B5G6R5_UINT', 285) # type: ignore
-PIPE_FORMAT_R5G5B5A1_UINT = enum_pipe_format.define('PIPE_FORMAT_R5G5B5A1_UINT', 286) # type: ignore
-PIPE_FORMAT_B5G5R5A1_UINT = enum_pipe_format.define('PIPE_FORMAT_B5G5R5A1_UINT', 287) # type: ignore
-PIPE_FORMAT_A1R5G5B5_UINT = enum_pipe_format.define('PIPE_FORMAT_A1R5G5B5_UINT', 288) # type: ignore
-PIPE_FORMAT_A1B5G5R5_UINT = enum_pipe_format.define('PIPE_FORMAT_A1B5G5R5_UINT', 289) # type: ignore
-PIPE_FORMAT_R4G4B4A4_UINT = enum_pipe_format.define('PIPE_FORMAT_R4G4B4A4_UINT', 290) # type: ignore
-PIPE_FORMAT_B4G4R4A4_UINT = enum_pipe_format.define('PIPE_FORMAT_B4G4R4A4_UINT', 291) # type: ignore
-PIPE_FORMAT_A4R4G4B4_UINT = enum_pipe_format.define('PIPE_FORMAT_A4R4G4B4_UINT', 292) # type: ignore
-PIPE_FORMAT_A4B4G4R4_UINT = enum_pipe_format.define('PIPE_FORMAT_A4B4G4R4_UINT', 293) # type: ignore
-PIPE_FORMAT_R3G3B2_UINT = enum_pipe_format.define('PIPE_FORMAT_R3G3B2_UINT', 294) # type: ignore
-PIPE_FORMAT_B2G3R3_UINT = enum_pipe_format.define('PIPE_FORMAT_B2G3R3_UINT', 295) # type: ignore
-PIPE_FORMAT_ETC1_RGB8 = enum_pipe_format.define('PIPE_FORMAT_ETC1_RGB8', 296) # type: ignore
-PIPE_FORMAT_R8G8_R8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8_R8B8_UNORM', 297) # type: ignore
-PIPE_FORMAT_R8B8_R8G8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8B8_R8G8_UNORM', 298) # type: ignore
-PIPE_FORMAT_G8R8_B8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8R8_B8R8_UNORM', 299) # type: ignore
-PIPE_FORMAT_B8R8_G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8R8_G8R8_UNORM', 300) # type: ignore
-PIPE_FORMAT_G8B8_G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8B8_G8R8_UNORM', 301) # type: ignore
-PIPE_FORMAT_B8G8_R8G8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8_R8G8_UNORM', 302) # type: ignore
-PIPE_FORMAT_R8G8B8X8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_SNORM', 303) # type: ignore
-PIPE_FORMAT_R8G8B8X8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_SRGB', 304) # type: ignore
-PIPE_FORMAT_R8G8B8X8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_UINT', 305) # type: ignore
-PIPE_FORMAT_R8G8B8X8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_SINT', 306) # type: ignore
-PIPE_FORMAT_B10G10R10X2_UNORM = enum_pipe_format.define('PIPE_FORMAT_B10G10R10X2_UNORM', 307) # type: ignore
-PIPE_FORMAT_R16G16B16X16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_UNORM', 308) # type: ignore
-PIPE_FORMAT_R16G16B16X16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_SNORM', 309) # type: ignore
-PIPE_FORMAT_R16G16B16X16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_FLOAT', 310) # type: ignore
-PIPE_FORMAT_R16G16B16X16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_UINT', 311) # type: ignore
-PIPE_FORMAT_R16G16B16X16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_SINT', 312) # type: ignore
-PIPE_FORMAT_R32G32B32X32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32X32_FLOAT', 313) # type: ignore
-PIPE_FORMAT_R32G32B32X32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32X32_UINT', 314) # type: ignore
-PIPE_FORMAT_R32G32B32X32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32X32_SINT', 315) # type: ignore
-PIPE_FORMAT_R8A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8A8_SNORM', 316) # type: ignore
-PIPE_FORMAT_R16A16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16A16_UNORM', 317) # type: ignore
-PIPE_FORMAT_R16A16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16A16_SNORM', 318) # type: ignore
-PIPE_FORMAT_R16A16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16A16_FLOAT', 319) # type: ignore
-PIPE_FORMAT_R32A32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32A32_FLOAT', 320) # type: ignore
-PIPE_FORMAT_R8A8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8A8_UINT', 321) # type: ignore
-PIPE_FORMAT_R8A8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8A8_SINT', 322) # type: ignore
-PIPE_FORMAT_R16A16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16A16_UINT', 323) # type: ignore
-PIPE_FORMAT_R16A16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16A16_SINT', 324) # type: ignore
-PIPE_FORMAT_R32A32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32A32_UINT', 325) # type: ignore
-PIPE_FORMAT_R32A32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32A32_SINT', 326) # type: ignore
-PIPE_FORMAT_B5G6R5_SRGB = enum_pipe_format.define('PIPE_FORMAT_B5G6R5_SRGB', 327) # type: ignore
-PIPE_FORMAT_BPTC_RGBA_UNORM = enum_pipe_format.define('PIPE_FORMAT_BPTC_RGBA_UNORM', 328) # type: ignore
-PIPE_FORMAT_BPTC_SRGBA = enum_pipe_format.define('PIPE_FORMAT_BPTC_SRGBA', 329) # type: ignore
-PIPE_FORMAT_BPTC_RGB_FLOAT = enum_pipe_format.define('PIPE_FORMAT_BPTC_RGB_FLOAT', 330) # type: ignore
-PIPE_FORMAT_BPTC_RGB_UFLOAT = enum_pipe_format.define('PIPE_FORMAT_BPTC_RGB_UFLOAT', 331) # type: ignore
-PIPE_FORMAT_G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8R8_UNORM', 332) # type: ignore
-PIPE_FORMAT_G8R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_G8R8_SNORM', 333) # type: ignore
-PIPE_FORMAT_G16R16_UNORM = enum_pipe_format.define('PIPE_FORMAT_G16R16_UNORM', 334) # type: ignore
-PIPE_FORMAT_G16R16_SNORM = enum_pipe_format.define('PIPE_FORMAT_G16R16_SNORM', 335) # type: ignore
-PIPE_FORMAT_A8B8G8R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_SNORM', 336) # type: ignore
-PIPE_FORMAT_X8B8G8R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_X8B8G8R8_SNORM', 337) # type: ignore
-PIPE_FORMAT_ETC2_RGB8 = enum_pipe_format.define('PIPE_FORMAT_ETC2_RGB8', 338) # type: ignore
-PIPE_FORMAT_ETC2_SRGB8 = enum_pipe_format.define('PIPE_FORMAT_ETC2_SRGB8', 339) # type: ignore
-PIPE_FORMAT_ETC2_RGB8A1 = enum_pipe_format.define('PIPE_FORMAT_ETC2_RGB8A1', 340) # type: ignore
-PIPE_FORMAT_ETC2_SRGB8A1 = enum_pipe_format.define('PIPE_FORMAT_ETC2_SRGB8A1', 341) # type: ignore
-PIPE_FORMAT_ETC2_RGBA8 = enum_pipe_format.define('PIPE_FORMAT_ETC2_RGBA8', 342) # type: ignore
-PIPE_FORMAT_ETC2_SRGBA8 = enum_pipe_format.define('PIPE_FORMAT_ETC2_SRGBA8', 343) # type: ignore
-PIPE_FORMAT_ETC2_R11_UNORM = enum_pipe_format.define('PIPE_FORMAT_ETC2_R11_UNORM', 344) # type: ignore
-PIPE_FORMAT_ETC2_R11_SNORM = enum_pipe_format.define('PIPE_FORMAT_ETC2_R11_SNORM', 345) # type: ignore
-PIPE_FORMAT_ETC2_RG11_UNORM = enum_pipe_format.define('PIPE_FORMAT_ETC2_RG11_UNORM', 346) # type: ignore
-PIPE_FORMAT_ETC2_RG11_SNORM = enum_pipe_format.define('PIPE_FORMAT_ETC2_RG11_SNORM', 347) # type: ignore
-PIPE_FORMAT_ASTC_4x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4', 348) # type: ignore
-PIPE_FORMAT_ASTC_5x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4', 349) # type: ignore
-PIPE_FORMAT_ASTC_5x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5', 350) # type: ignore
-PIPE_FORMAT_ASTC_6x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5', 351) # type: ignore
-PIPE_FORMAT_ASTC_6x6 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6', 352) # type: ignore
-PIPE_FORMAT_ASTC_8x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x5', 353) # type: ignore
-PIPE_FORMAT_ASTC_8x6 = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x6', 354) # type: ignore
-PIPE_FORMAT_ASTC_8x8 = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x8', 355) # type: ignore
-PIPE_FORMAT_ASTC_10x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x5', 356) # type: ignore
-PIPE_FORMAT_ASTC_10x6 = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x6', 357) # type: ignore
-PIPE_FORMAT_ASTC_10x8 = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x8', 358) # type: ignore
-PIPE_FORMAT_ASTC_10x10 = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x10', 359) # type: ignore
-PIPE_FORMAT_ASTC_12x10 = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x10', 360) # type: ignore
-PIPE_FORMAT_ASTC_12x12 = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x12', 361) # type: ignore
-PIPE_FORMAT_ASTC_4x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4_SRGB', 362) # type: ignore
-PIPE_FORMAT_ASTC_5x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4_SRGB', 363) # type: ignore
-PIPE_FORMAT_ASTC_5x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5_SRGB', 364) # type: ignore
-PIPE_FORMAT_ASTC_6x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5_SRGB', 365) # type: ignore
-PIPE_FORMAT_ASTC_6x6_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6_SRGB', 366) # type: ignore
-PIPE_FORMAT_ASTC_8x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x5_SRGB', 367) # type: ignore
-PIPE_FORMAT_ASTC_8x6_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x6_SRGB', 368) # type: ignore
-PIPE_FORMAT_ASTC_8x8_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x8_SRGB', 369) # type: ignore
-PIPE_FORMAT_ASTC_10x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x5_SRGB', 370) # type: ignore
-PIPE_FORMAT_ASTC_10x6_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x6_SRGB', 371) # type: ignore
-PIPE_FORMAT_ASTC_10x8_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x8_SRGB', 372) # type: ignore
-PIPE_FORMAT_ASTC_10x10_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x10_SRGB', 373) # type: ignore
-PIPE_FORMAT_ASTC_12x10_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x10_SRGB', 374) # type: ignore
-PIPE_FORMAT_ASTC_12x12_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x12_SRGB', 375) # type: ignore
-PIPE_FORMAT_ASTC_3x3x3 = enum_pipe_format.define('PIPE_FORMAT_ASTC_3x3x3', 376) # type: ignore
-PIPE_FORMAT_ASTC_4x3x3 = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x3x3', 377) # type: ignore
-PIPE_FORMAT_ASTC_4x4x3 = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4x3', 378) # type: ignore
-PIPE_FORMAT_ASTC_4x4x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4x4', 379) # type: ignore
-PIPE_FORMAT_ASTC_5x4x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4x4', 380) # type: ignore
-PIPE_FORMAT_ASTC_5x5x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5x4', 381) # type: ignore
-PIPE_FORMAT_ASTC_5x5x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5x5', 382) # type: ignore
-PIPE_FORMAT_ASTC_6x5x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5x5', 383) # type: ignore
-PIPE_FORMAT_ASTC_6x6x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6x5', 384) # type: ignore
-PIPE_FORMAT_ASTC_6x6x6 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6x6', 385) # type: ignore
-PIPE_FORMAT_ASTC_3x3x3_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_3x3x3_SRGB', 386) # type: ignore
-PIPE_FORMAT_ASTC_4x3x3_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x3x3_SRGB', 387) # type: ignore
-PIPE_FORMAT_ASTC_4x4x3_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4x3_SRGB', 388) # type: ignore
-PIPE_FORMAT_ASTC_4x4x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4x4_SRGB', 389) # type: ignore
-PIPE_FORMAT_ASTC_5x4x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4x4_SRGB', 390) # type: ignore
-PIPE_FORMAT_ASTC_5x5x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5x4_SRGB', 391) # type: ignore
-PIPE_FORMAT_ASTC_5x5x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5x5_SRGB', 392) # type: ignore
-PIPE_FORMAT_ASTC_6x5x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5x5_SRGB', 393) # type: ignore
-PIPE_FORMAT_ASTC_6x6x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6x5_SRGB', 394) # type: ignore
-PIPE_FORMAT_ASTC_6x6x6_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6x6_SRGB', 395) # type: ignore
-PIPE_FORMAT_ASTC_4x4_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4_FLOAT', 396) # type: ignore
-PIPE_FORMAT_ASTC_5x4_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4_FLOAT', 397) # type: ignore
-PIPE_FORMAT_ASTC_5x5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5_FLOAT', 398) # type: ignore
-PIPE_FORMAT_ASTC_6x5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5_FLOAT', 399) # type: ignore
-PIPE_FORMAT_ASTC_6x6_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6_FLOAT', 400) # type: ignore
-PIPE_FORMAT_ASTC_8x5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x5_FLOAT', 401) # type: ignore
-PIPE_FORMAT_ASTC_8x6_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x6_FLOAT', 402) # type: ignore
-PIPE_FORMAT_ASTC_8x8_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x8_FLOAT', 403) # type: ignore
-PIPE_FORMAT_ASTC_10x5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x5_FLOAT', 404) # type: ignore
-PIPE_FORMAT_ASTC_10x6_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x6_FLOAT', 405) # type: ignore
-PIPE_FORMAT_ASTC_10x8_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x8_FLOAT', 406) # type: ignore
-PIPE_FORMAT_ASTC_10x10_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x10_FLOAT', 407) # type: ignore
-PIPE_FORMAT_ASTC_12x10_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x10_FLOAT', 408) # type: ignore
-PIPE_FORMAT_ASTC_12x12_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x12_FLOAT', 409) # type: ignore
-PIPE_FORMAT_FXT1_RGB = enum_pipe_format.define('PIPE_FORMAT_FXT1_RGB', 410) # type: ignore
-PIPE_FORMAT_FXT1_RGBA = enum_pipe_format.define('PIPE_FORMAT_FXT1_RGBA', 411) # type: ignore
-PIPE_FORMAT_P010 = enum_pipe_format.define('PIPE_FORMAT_P010', 412) # type: ignore
-PIPE_FORMAT_P012 = enum_pipe_format.define('PIPE_FORMAT_P012', 413) # type: ignore
-PIPE_FORMAT_P016 = enum_pipe_format.define('PIPE_FORMAT_P016', 414) # type: ignore
-PIPE_FORMAT_P030 = enum_pipe_format.define('PIPE_FORMAT_P030', 415) # type: ignore
-PIPE_FORMAT_Y210 = enum_pipe_format.define('PIPE_FORMAT_Y210', 416) # type: ignore
-PIPE_FORMAT_Y212 = enum_pipe_format.define('PIPE_FORMAT_Y212', 417) # type: ignore
-PIPE_FORMAT_Y216 = enum_pipe_format.define('PIPE_FORMAT_Y216', 418) # type: ignore
-PIPE_FORMAT_Y410 = enum_pipe_format.define('PIPE_FORMAT_Y410', 419) # type: ignore
-PIPE_FORMAT_Y412 = enum_pipe_format.define('PIPE_FORMAT_Y412', 420) # type: ignore
-PIPE_FORMAT_Y416 = enum_pipe_format.define('PIPE_FORMAT_Y416', 421) # type: ignore
-PIPE_FORMAT_R10G10B10X2_UNORM = enum_pipe_format.define('PIPE_FORMAT_R10G10B10X2_UNORM', 422) # type: ignore
-PIPE_FORMAT_A1R5G5B5_UNORM = enum_pipe_format.define('PIPE_FORMAT_A1R5G5B5_UNORM', 423) # type: ignore
-PIPE_FORMAT_A1B5G5R5_UNORM = enum_pipe_format.define('PIPE_FORMAT_A1B5G5R5_UNORM', 424) # type: ignore
-PIPE_FORMAT_X1B5G5R5_UNORM = enum_pipe_format.define('PIPE_FORMAT_X1B5G5R5_UNORM', 425) # type: ignore
-PIPE_FORMAT_R5G5B5A1_UNORM = enum_pipe_format.define('PIPE_FORMAT_R5G5B5A1_UNORM', 426) # type: ignore
-PIPE_FORMAT_A4R4G4B4_UNORM = enum_pipe_format.define('PIPE_FORMAT_A4R4G4B4_UNORM', 427) # type: ignore
-PIPE_FORMAT_A4B4G4R4_UNORM = enum_pipe_format.define('PIPE_FORMAT_A4B4G4R4_UNORM', 428) # type: ignore
-PIPE_FORMAT_G8R8_SINT = enum_pipe_format.define('PIPE_FORMAT_G8R8_SINT', 429) # type: ignore
-PIPE_FORMAT_A8B8G8R8_SINT = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_SINT', 430) # type: ignore
-PIPE_FORMAT_X8B8G8R8_SINT = enum_pipe_format.define('PIPE_FORMAT_X8B8G8R8_SINT', 431) # type: ignore
-PIPE_FORMAT_ATC_RGB = enum_pipe_format.define('PIPE_FORMAT_ATC_RGB', 432) # type: ignore
-PIPE_FORMAT_ATC_RGBA_EXPLICIT = enum_pipe_format.define('PIPE_FORMAT_ATC_RGBA_EXPLICIT', 433) # type: ignore
-PIPE_FORMAT_ATC_RGBA_INTERPOLATED = enum_pipe_format.define('PIPE_FORMAT_ATC_RGBA_INTERPOLATED', 434) # type: ignore
-PIPE_FORMAT_Z24_UNORM_S8_UINT_AS_R8G8B8A8 = enum_pipe_format.define('PIPE_FORMAT_Z24_UNORM_S8_UINT_AS_R8G8B8A8', 435) # type: ignore
-PIPE_FORMAT_AYUV = enum_pipe_format.define('PIPE_FORMAT_AYUV', 436) # type: ignore
-PIPE_FORMAT_XYUV = enum_pipe_format.define('PIPE_FORMAT_XYUV', 437) # type: ignore
-PIPE_FORMAT_R8G8B8_420_UNORM_PACKED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_420_UNORM_PACKED', 438) # type: ignore
-PIPE_FORMAT_R8_G8B8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_G8B8_420_UNORM', 439) # type: ignore
-PIPE_FORMAT_R8_B8G8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_B8G8_420_UNORM', 440) # type: ignore
-PIPE_FORMAT_G8_B8R8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8_B8R8_420_UNORM', 441) # type: ignore
-PIPE_FORMAT_R10G10B10_420_UNORM_PACKED = enum_pipe_format.define('PIPE_FORMAT_R10G10B10_420_UNORM_PACKED', 442) # type: ignore
-PIPE_FORMAT_R10_G10B10_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R10_G10B10_420_UNORM', 443) # type: ignore
-PIPE_FORMAT_R10_G10B10_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_R10_G10B10_422_UNORM', 444) # type: ignore
-PIPE_FORMAT_R8_G8_B8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_G8_B8_420_UNORM', 445) # type: ignore
-PIPE_FORMAT_R8_B8_G8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_B8_G8_420_UNORM', 446) # type: ignore
-PIPE_FORMAT_G8_B8_R8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8_B8_R8_420_UNORM', 447) # type: ignore
-PIPE_FORMAT_R8_G8B8_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_G8B8_422_UNORM', 448) # type: ignore
-PIPE_FORMAT_R8_B8G8_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_B8G8_422_UNORM', 449) # type: ignore
-PIPE_FORMAT_G8_B8R8_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8_B8R8_422_UNORM', 450) # type: ignore
-PIPE_FORMAT_R8_G8_B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_G8_B8_UNORM', 451) # type: ignore
-PIPE_FORMAT_Y8_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_UNORM', 452) # type: ignore
-PIPE_FORMAT_B8G8R8X8_SNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_SNORM', 453) # type: ignore
-PIPE_FORMAT_B8G8R8X8_UINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_UINT', 454) # type: ignore
-PIPE_FORMAT_B8G8R8X8_SINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_SINT', 455) # type: ignore
-PIPE_FORMAT_A8R8G8B8_SNORM = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_SNORM', 456) # type: ignore
-PIPE_FORMAT_A8R8G8B8_SINT = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_SINT', 457) # type: ignore
-PIPE_FORMAT_X8R8G8B8_SNORM = enum_pipe_format.define('PIPE_FORMAT_X8R8G8B8_SNORM', 458) # type: ignore
-PIPE_FORMAT_X8R8G8B8_SINT = enum_pipe_format.define('PIPE_FORMAT_X8R8G8B8_SINT', 459) # type: ignore
-PIPE_FORMAT_R5G5B5X1_UNORM = enum_pipe_format.define('PIPE_FORMAT_R5G5B5X1_UNORM', 460) # type: ignore
-PIPE_FORMAT_X1R5G5B5_UNORM = enum_pipe_format.define('PIPE_FORMAT_X1R5G5B5_UNORM', 461) # type: ignore
-PIPE_FORMAT_R4G4B4X4_UNORM = enum_pipe_format.define('PIPE_FORMAT_R4G4B4X4_UNORM', 462) # type: ignore
-PIPE_FORMAT_B10G10R10X2_SNORM = enum_pipe_format.define('PIPE_FORMAT_B10G10R10X2_SNORM', 463) # type: ignore
-PIPE_FORMAT_R5G6B5_SRGB = enum_pipe_format.define('PIPE_FORMAT_R5G6B5_SRGB', 464) # type: ignore
-PIPE_FORMAT_R10G10B10X2_SINT = enum_pipe_format.define('PIPE_FORMAT_R10G10B10X2_SINT', 465) # type: ignore
-PIPE_FORMAT_B10G10R10X2_SINT = enum_pipe_format.define('PIPE_FORMAT_B10G10R10X2_SINT', 466) # type: ignore
-PIPE_FORMAT_G16R16_SINT = enum_pipe_format.define('PIPE_FORMAT_G16R16_SINT', 467) # type: ignore
-PIPE_FORMAT_COUNT = enum_pipe_format.define('PIPE_FORMAT_COUNT', 468) # type: ignore
+class enum_pipe_format(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PIPE_FORMAT_NONE = enum_pipe_format.define('PIPE_FORMAT_NONE', 0)
+PIPE_FORMAT_R64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64_UINT', 1)
+PIPE_FORMAT_R64G64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64G64_UINT', 2)
+PIPE_FORMAT_R64G64B64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64_UINT', 3)
+PIPE_FORMAT_R64G64B64A64_UINT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64A64_UINT', 4)
+PIPE_FORMAT_R64_SINT = enum_pipe_format.define('PIPE_FORMAT_R64_SINT', 5)
+PIPE_FORMAT_R64G64_SINT = enum_pipe_format.define('PIPE_FORMAT_R64G64_SINT', 6)
+PIPE_FORMAT_R64G64B64_SINT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64_SINT', 7)
+PIPE_FORMAT_R64G64B64A64_SINT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64A64_SINT', 8)
+PIPE_FORMAT_R64_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R64_FLOAT', 9)
+PIPE_FORMAT_R64G64_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R64G64_FLOAT', 10)
+PIPE_FORMAT_R64G64B64_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64_FLOAT', 11)
+PIPE_FORMAT_R64G64B64A64_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R64G64B64A64_FLOAT', 12)
+PIPE_FORMAT_R32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32_FLOAT', 13)
+PIPE_FORMAT_R32G32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32G32_FLOAT', 14)
+PIPE_FORMAT_R32G32B32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_FLOAT', 15)
+PIPE_FORMAT_R32G32B32A32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_FLOAT', 16)
+PIPE_FORMAT_R32_UNORM = enum_pipe_format.define('PIPE_FORMAT_R32_UNORM', 17)
+PIPE_FORMAT_R32G32_UNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32_UNORM', 18)
+PIPE_FORMAT_R32G32B32_UNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_UNORM', 19)
+PIPE_FORMAT_R32G32B32A32_UNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_UNORM', 20)
+PIPE_FORMAT_R32_USCALED = enum_pipe_format.define('PIPE_FORMAT_R32_USCALED', 21)
+PIPE_FORMAT_R32G32_USCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32_USCALED', 22)
+PIPE_FORMAT_R32G32B32_USCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_USCALED', 23)
+PIPE_FORMAT_R32G32B32A32_USCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_USCALED', 24)
+PIPE_FORMAT_R32_SNORM = enum_pipe_format.define('PIPE_FORMAT_R32_SNORM', 25)
+PIPE_FORMAT_R32G32_SNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32_SNORM', 26)
+PIPE_FORMAT_R32G32B32_SNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_SNORM', 27)
+PIPE_FORMAT_R32G32B32A32_SNORM = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_SNORM', 28)
+PIPE_FORMAT_R32_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R32_SSCALED', 29)
+PIPE_FORMAT_R32G32_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32_SSCALED', 30)
+PIPE_FORMAT_R32G32B32_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_SSCALED', 31)
+PIPE_FORMAT_R32G32B32A32_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_SSCALED', 32)
+PIPE_FORMAT_R16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16_UNORM', 33)
+PIPE_FORMAT_R16G16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16_UNORM', 34)
+PIPE_FORMAT_R16G16B16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_UNORM', 35)
+PIPE_FORMAT_R16G16B16A16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_UNORM', 36)
+PIPE_FORMAT_R16_USCALED = enum_pipe_format.define('PIPE_FORMAT_R16_USCALED', 37)
+PIPE_FORMAT_R16G16_USCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16_USCALED', 38)
+PIPE_FORMAT_R16G16B16_USCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_USCALED', 39)
+PIPE_FORMAT_R16G16B16A16_USCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_USCALED', 40)
+PIPE_FORMAT_R16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16_SNORM', 41)
+PIPE_FORMAT_R16G16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16_SNORM', 42)
+PIPE_FORMAT_R16G16B16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_SNORM', 43)
+PIPE_FORMAT_R16G16B16A16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_SNORM', 44)
+PIPE_FORMAT_R16_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R16_SSCALED', 45)
+PIPE_FORMAT_R16G16_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16_SSCALED', 46)
+PIPE_FORMAT_R16G16B16_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_SSCALED', 47)
+PIPE_FORMAT_R16G16B16A16_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_SSCALED', 48)
+PIPE_FORMAT_R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_UNORM', 49)
+PIPE_FORMAT_R8G8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8_UNORM', 50)
+PIPE_FORMAT_R8G8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_UNORM', 51)
+PIPE_FORMAT_B8G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_UNORM', 52)
+PIPE_FORMAT_R8G8B8A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_UNORM', 53)
+PIPE_FORMAT_B8G8R8A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_UNORM', 54)
+PIPE_FORMAT_R8_USCALED = enum_pipe_format.define('PIPE_FORMAT_R8_USCALED', 55)
+PIPE_FORMAT_R8G8_USCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8_USCALED', 56)
+PIPE_FORMAT_R8G8B8_USCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_USCALED', 57)
+PIPE_FORMAT_B8G8R8_USCALED = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_USCALED', 58)
+PIPE_FORMAT_R8G8B8A8_USCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_USCALED', 59)
+PIPE_FORMAT_B8G8R8A8_USCALED = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_USCALED', 60)
+PIPE_FORMAT_A8B8G8R8_USCALED = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_USCALED', 61)
+PIPE_FORMAT_R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8_SNORM', 62)
+PIPE_FORMAT_R8G8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8_SNORM', 63)
+PIPE_FORMAT_R8G8B8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_SNORM', 64)
+PIPE_FORMAT_B8G8R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_SNORM', 65)
+PIPE_FORMAT_R8G8B8A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_SNORM', 66)
+PIPE_FORMAT_B8G8R8A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_SNORM', 67)
+PIPE_FORMAT_R8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R8_SSCALED', 68)
+PIPE_FORMAT_R8G8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8_SSCALED', 69)
+PIPE_FORMAT_R8G8B8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_SSCALED', 70)
+PIPE_FORMAT_B8G8R8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_SSCALED', 71)
+PIPE_FORMAT_R8G8B8A8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_SSCALED', 72)
+PIPE_FORMAT_B8G8R8A8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_SSCALED', 73)
+PIPE_FORMAT_A8B8G8R8_SSCALED = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_SSCALED', 74)
+PIPE_FORMAT_A8R8G8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_UNORM', 75)
+PIPE_FORMAT_R32_FIXED = enum_pipe_format.define('PIPE_FORMAT_R32_FIXED', 76)
+PIPE_FORMAT_R32G32_FIXED = enum_pipe_format.define('PIPE_FORMAT_R32G32_FIXED', 77)
+PIPE_FORMAT_R32G32B32_FIXED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_FIXED', 78)
+PIPE_FORMAT_R32G32B32A32_FIXED = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_FIXED', 79)
+PIPE_FORMAT_R16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16_FLOAT', 80)
+PIPE_FORMAT_R16G16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16G16_FLOAT', 81)
+PIPE_FORMAT_R16G16B16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_FLOAT', 82)
+PIPE_FORMAT_R16G16B16A16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_FLOAT', 83)
+PIPE_FORMAT_R8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8_UINT', 84)
+PIPE_FORMAT_R8G8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8G8_UINT', 85)
+PIPE_FORMAT_R8G8B8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_UINT', 86)
+PIPE_FORMAT_B8G8R8_UINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_UINT', 87)
+PIPE_FORMAT_R8G8B8A8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_UINT', 88)
+PIPE_FORMAT_B8G8R8A8_UINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_UINT', 89)
+PIPE_FORMAT_R8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8_SINT', 90)
+PIPE_FORMAT_R8G8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8G8_SINT', 91)
+PIPE_FORMAT_R8G8B8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_SINT', 92)
+PIPE_FORMAT_B8G8R8_SINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_SINT', 93)
+PIPE_FORMAT_R8G8B8A8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_SINT', 94)
+PIPE_FORMAT_B8G8R8A8_SINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_SINT', 95)
+PIPE_FORMAT_R16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16_UINT', 96)
+PIPE_FORMAT_R16G16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16G16_UINT', 97)
+PIPE_FORMAT_R16G16B16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_UINT', 98)
+PIPE_FORMAT_R16G16B16A16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_UINT', 99)
+PIPE_FORMAT_R16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16_SINT', 100)
+PIPE_FORMAT_R16G16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16G16_SINT', 101)
+PIPE_FORMAT_R16G16B16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16_SINT', 102)
+PIPE_FORMAT_R16G16B16A16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16A16_SINT', 103)
+PIPE_FORMAT_R32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32_UINT', 104)
+PIPE_FORMAT_R32G32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32G32_UINT', 105)
+PIPE_FORMAT_R32G32B32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_UINT', 106)
+PIPE_FORMAT_R32G32B32A32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_UINT', 107)
+PIPE_FORMAT_R32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32_SINT', 108)
+PIPE_FORMAT_R32G32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32G32_SINT', 109)
+PIPE_FORMAT_R32G32B32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32_SINT', 110)
+PIPE_FORMAT_R32G32B32A32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32A32_SINT', 111)
+PIPE_FORMAT_R10G10B10A2_UNORM = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_UNORM', 112)
+PIPE_FORMAT_R10G10B10A2_SNORM = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_SNORM', 113)
+PIPE_FORMAT_R10G10B10A2_USCALED = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_USCALED', 114)
+PIPE_FORMAT_R10G10B10A2_SSCALED = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_SSCALED', 115)
+PIPE_FORMAT_B10G10R10A2_UNORM = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_UNORM', 116)
+PIPE_FORMAT_B10G10R10A2_SNORM = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_SNORM', 117)
+PIPE_FORMAT_B10G10R10A2_USCALED = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_USCALED', 118)
+PIPE_FORMAT_B10G10R10A2_SSCALED = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_SSCALED', 119)
+PIPE_FORMAT_R11G11B10_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R11G11B10_FLOAT', 120)
+PIPE_FORMAT_R10G10B10A2_UINT = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_UINT', 121)
+PIPE_FORMAT_R10G10B10A2_SINT = enum_pipe_format.define('PIPE_FORMAT_R10G10B10A2_SINT', 122)
+PIPE_FORMAT_B10G10R10A2_UINT = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_UINT', 123)
+PIPE_FORMAT_B10G10R10A2_SINT = enum_pipe_format.define('PIPE_FORMAT_B10G10R10A2_SINT', 124)
+PIPE_FORMAT_B8G8R8X8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_UNORM', 125)
+PIPE_FORMAT_X8B8G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_X8B8G8R8_UNORM', 126)
+PIPE_FORMAT_X8R8G8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_X8R8G8B8_UNORM', 127)
+PIPE_FORMAT_B5G5R5A1_UNORM = enum_pipe_format.define('PIPE_FORMAT_B5G5R5A1_UNORM', 128)
+PIPE_FORMAT_R4G4B4A4_UNORM = enum_pipe_format.define('PIPE_FORMAT_R4G4B4A4_UNORM', 129)
+PIPE_FORMAT_B4G4R4A4_UNORM = enum_pipe_format.define('PIPE_FORMAT_B4G4R4A4_UNORM', 130)
+PIPE_FORMAT_R5G6B5_UNORM = enum_pipe_format.define('PIPE_FORMAT_R5G6B5_UNORM', 131)
+PIPE_FORMAT_B5G6R5_UNORM = enum_pipe_format.define('PIPE_FORMAT_B5G6R5_UNORM', 132)
+PIPE_FORMAT_L8_UNORM = enum_pipe_format.define('PIPE_FORMAT_L8_UNORM', 133)
+PIPE_FORMAT_A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_A8_UNORM', 134)
+PIPE_FORMAT_I8_UNORM = enum_pipe_format.define('PIPE_FORMAT_I8_UNORM', 135)
+PIPE_FORMAT_L8A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_L8A8_UNORM', 136)
+PIPE_FORMAT_L16_UNORM = enum_pipe_format.define('PIPE_FORMAT_L16_UNORM', 137)
+PIPE_FORMAT_UYVY = enum_pipe_format.define('PIPE_FORMAT_UYVY', 138)
+PIPE_FORMAT_VYUY = enum_pipe_format.define('PIPE_FORMAT_VYUY', 139)
+PIPE_FORMAT_YUYV = enum_pipe_format.define('PIPE_FORMAT_YUYV', 140)
+PIPE_FORMAT_YVYU = enum_pipe_format.define('PIPE_FORMAT_YVYU', 141)
+PIPE_FORMAT_Z16_UNORM = enum_pipe_format.define('PIPE_FORMAT_Z16_UNORM', 142)
+PIPE_FORMAT_Z16_UNORM_S8_UINT = enum_pipe_format.define('PIPE_FORMAT_Z16_UNORM_S8_UINT', 143)
+PIPE_FORMAT_Z32_UNORM = enum_pipe_format.define('PIPE_FORMAT_Z32_UNORM', 144)
+PIPE_FORMAT_Z32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_Z32_FLOAT', 145)
+PIPE_FORMAT_Z24_UNORM_S8_UINT = enum_pipe_format.define('PIPE_FORMAT_Z24_UNORM_S8_UINT', 146)
+PIPE_FORMAT_S8_UINT_Z24_UNORM = enum_pipe_format.define('PIPE_FORMAT_S8_UINT_Z24_UNORM', 147)
+PIPE_FORMAT_Z24X8_UNORM = enum_pipe_format.define('PIPE_FORMAT_Z24X8_UNORM', 148)
+PIPE_FORMAT_X8Z24_UNORM = enum_pipe_format.define('PIPE_FORMAT_X8Z24_UNORM', 149)
+PIPE_FORMAT_S8_UINT = enum_pipe_format.define('PIPE_FORMAT_S8_UINT', 150)
+PIPE_FORMAT_L8_SRGB = enum_pipe_format.define('PIPE_FORMAT_L8_SRGB', 151)
+PIPE_FORMAT_R8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8_SRGB', 152)
+PIPE_FORMAT_L8A8_SRGB = enum_pipe_format.define('PIPE_FORMAT_L8A8_SRGB', 153)
+PIPE_FORMAT_R8G8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8G8_SRGB', 154)
+PIPE_FORMAT_R8G8B8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_SRGB', 155)
+PIPE_FORMAT_B8G8R8_SRGB = enum_pipe_format.define('PIPE_FORMAT_B8G8R8_SRGB', 156)
+PIPE_FORMAT_A8B8G8R8_SRGB = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_SRGB', 157)
+PIPE_FORMAT_X8B8G8R8_SRGB = enum_pipe_format.define('PIPE_FORMAT_X8B8G8R8_SRGB', 158)
+PIPE_FORMAT_B8G8R8A8_SRGB = enum_pipe_format.define('PIPE_FORMAT_B8G8R8A8_SRGB', 159)
+PIPE_FORMAT_B8G8R8X8_SRGB = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_SRGB', 160)
+PIPE_FORMAT_A8R8G8B8_SRGB = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_SRGB', 161)
+PIPE_FORMAT_X8R8G8B8_SRGB = enum_pipe_format.define('PIPE_FORMAT_X8R8G8B8_SRGB', 162)
+PIPE_FORMAT_R8G8B8A8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8G8B8A8_SRGB', 163)
+PIPE_FORMAT_DXT1_RGB = enum_pipe_format.define('PIPE_FORMAT_DXT1_RGB', 164)
+PIPE_FORMAT_DXT1_RGBA = enum_pipe_format.define('PIPE_FORMAT_DXT1_RGBA', 165)
+PIPE_FORMAT_DXT3_RGBA = enum_pipe_format.define('PIPE_FORMAT_DXT3_RGBA', 166)
+PIPE_FORMAT_DXT5_RGBA = enum_pipe_format.define('PIPE_FORMAT_DXT5_RGBA', 167)
+PIPE_FORMAT_DXT1_SRGB = enum_pipe_format.define('PIPE_FORMAT_DXT1_SRGB', 168)
+PIPE_FORMAT_DXT1_SRGBA = enum_pipe_format.define('PIPE_FORMAT_DXT1_SRGBA', 169)
+PIPE_FORMAT_DXT3_SRGBA = enum_pipe_format.define('PIPE_FORMAT_DXT3_SRGBA', 170)
+PIPE_FORMAT_DXT5_SRGBA = enum_pipe_format.define('PIPE_FORMAT_DXT5_SRGBA', 171)
+PIPE_FORMAT_RGTC1_UNORM = enum_pipe_format.define('PIPE_FORMAT_RGTC1_UNORM', 172)
+PIPE_FORMAT_RGTC1_SNORM = enum_pipe_format.define('PIPE_FORMAT_RGTC1_SNORM', 173)
+PIPE_FORMAT_RGTC2_UNORM = enum_pipe_format.define('PIPE_FORMAT_RGTC2_UNORM', 174)
+PIPE_FORMAT_RGTC2_SNORM = enum_pipe_format.define('PIPE_FORMAT_RGTC2_SNORM', 175)
+PIPE_FORMAT_R8G8_B8G8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8_B8G8_UNORM', 176)
+PIPE_FORMAT_G8R8_G8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8R8_G8B8_UNORM', 177)
+PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_X6G10_X6B10X6R10_420_UNORM', 178)
+PIPE_FORMAT_X4G12_X4B12X4R12_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_X4G12_X4B12X4R12_420_UNORM', 179)
+PIPE_FORMAT_X6R10_UNORM = enum_pipe_format.define('PIPE_FORMAT_X6R10_UNORM', 180)
+PIPE_FORMAT_X6R10X6G10_UNORM = enum_pipe_format.define('PIPE_FORMAT_X6R10X6G10_UNORM', 181)
+PIPE_FORMAT_X4R12_UNORM = enum_pipe_format.define('PIPE_FORMAT_X4R12_UNORM', 182)
+PIPE_FORMAT_X4R12X4G12_UNORM = enum_pipe_format.define('PIPE_FORMAT_X4R12X4G12_UNORM', 183)
+PIPE_FORMAT_R8SG8SB8UX8U_NORM = enum_pipe_format.define('PIPE_FORMAT_R8SG8SB8UX8U_NORM', 184)
+PIPE_FORMAT_R5SG5SB6U_NORM = enum_pipe_format.define('PIPE_FORMAT_R5SG5SB6U_NORM', 185)
+PIPE_FORMAT_A8B8G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_UNORM', 186)
+PIPE_FORMAT_B5G5R5X1_UNORM = enum_pipe_format.define('PIPE_FORMAT_B5G5R5X1_UNORM', 187)
+PIPE_FORMAT_R9G9B9E5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R9G9B9E5_FLOAT', 188)
+PIPE_FORMAT_Z32_FLOAT_S8X24_UINT = enum_pipe_format.define('PIPE_FORMAT_Z32_FLOAT_S8X24_UINT', 189)
+PIPE_FORMAT_R1_UNORM = enum_pipe_format.define('PIPE_FORMAT_R1_UNORM', 190)
+PIPE_FORMAT_R10G10B10X2_USCALED = enum_pipe_format.define('PIPE_FORMAT_R10G10B10X2_USCALED', 191)
+PIPE_FORMAT_R10G10B10X2_SNORM = enum_pipe_format.define('PIPE_FORMAT_R10G10B10X2_SNORM', 192)
+PIPE_FORMAT_L4A4_UNORM = enum_pipe_format.define('PIPE_FORMAT_L4A4_UNORM', 193)
+PIPE_FORMAT_A2R10G10B10_UNORM = enum_pipe_format.define('PIPE_FORMAT_A2R10G10B10_UNORM', 194)
+PIPE_FORMAT_A2B10G10R10_UNORM = enum_pipe_format.define('PIPE_FORMAT_A2B10G10R10_UNORM', 195)
+PIPE_FORMAT_R10SG10SB10SA2U_NORM = enum_pipe_format.define('PIPE_FORMAT_R10SG10SB10SA2U_NORM', 196)
+PIPE_FORMAT_R8G8Bx_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8Bx_SNORM', 197)
+PIPE_FORMAT_R8G8B8X8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_UNORM', 198)
+PIPE_FORMAT_B4G4R4X4_UNORM = enum_pipe_format.define('PIPE_FORMAT_B4G4R4X4_UNORM', 199)
+PIPE_FORMAT_X24S8_UINT = enum_pipe_format.define('PIPE_FORMAT_X24S8_UINT', 200)
+PIPE_FORMAT_S8X24_UINT = enum_pipe_format.define('PIPE_FORMAT_S8X24_UINT', 201)
+PIPE_FORMAT_X32_S8X24_UINT = enum_pipe_format.define('PIPE_FORMAT_X32_S8X24_UINT', 202)
+PIPE_FORMAT_R3G3B2_UNORM = enum_pipe_format.define('PIPE_FORMAT_R3G3B2_UNORM', 203)
+PIPE_FORMAT_B2G3R3_UNORM = enum_pipe_format.define('PIPE_FORMAT_B2G3R3_UNORM', 204)
+PIPE_FORMAT_L16A16_UNORM = enum_pipe_format.define('PIPE_FORMAT_L16A16_UNORM', 205)
+PIPE_FORMAT_A16_UNORM = enum_pipe_format.define('PIPE_FORMAT_A16_UNORM', 206)
+PIPE_FORMAT_I16_UNORM = enum_pipe_format.define('PIPE_FORMAT_I16_UNORM', 207)
+PIPE_FORMAT_LATC1_UNORM = enum_pipe_format.define('PIPE_FORMAT_LATC1_UNORM', 208)
+PIPE_FORMAT_LATC1_SNORM = enum_pipe_format.define('PIPE_FORMAT_LATC1_SNORM', 209)
+PIPE_FORMAT_LATC2_UNORM = enum_pipe_format.define('PIPE_FORMAT_LATC2_UNORM', 210)
+PIPE_FORMAT_LATC2_SNORM = enum_pipe_format.define('PIPE_FORMAT_LATC2_SNORM', 211)
+PIPE_FORMAT_A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_A8_SNORM', 212)
+PIPE_FORMAT_L8_SNORM = enum_pipe_format.define('PIPE_FORMAT_L8_SNORM', 213)
+PIPE_FORMAT_L8A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_L8A8_SNORM', 214)
+PIPE_FORMAT_I8_SNORM = enum_pipe_format.define('PIPE_FORMAT_I8_SNORM', 215)
+PIPE_FORMAT_A16_SNORM = enum_pipe_format.define('PIPE_FORMAT_A16_SNORM', 216)
+PIPE_FORMAT_L16_SNORM = enum_pipe_format.define('PIPE_FORMAT_L16_SNORM', 217)
+PIPE_FORMAT_L16A16_SNORM = enum_pipe_format.define('PIPE_FORMAT_L16A16_SNORM', 218)
+PIPE_FORMAT_I16_SNORM = enum_pipe_format.define('PIPE_FORMAT_I16_SNORM', 219)
+PIPE_FORMAT_A16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_A16_FLOAT', 220)
+PIPE_FORMAT_L16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_L16_FLOAT', 221)
+PIPE_FORMAT_L16A16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_L16A16_FLOAT', 222)
+PIPE_FORMAT_I16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_I16_FLOAT', 223)
+PIPE_FORMAT_A32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_A32_FLOAT', 224)
+PIPE_FORMAT_L32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_L32_FLOAT', 225)
+PIPE_FORMAT_L32A32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_L32A32_FLOAT', 226)
+PIPE_FORMAT_I32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_I32_FLOAT', 227)
+PIPE_FORMAT_YV12 = enum_pipe_format.define('PIPE_FORMAT_YV12', 228)
+PIPE_FORMAT_YV16 = enum_pipe_format.define('PIPE_FORMAT_YV16', 229)
+PIPE_FORMAT_IYUV = enum_pipe_format.define('PIPE_FORMAT_IYUV', 230)
+PIPE_FORMAT_NV12 = enum_pipe_format.define('PIPE_FORMAT_NV12', 231)
+PIPE_FORMAT_NV21 = enum_pipe_format.define('PIPE_FORMAT_NV21', 232)
+PIPE_FORMAT_NV16 = enum_pipe_format.define('PIPE_FORMAT_NV16', 233)
+PIPE_FORMAT_NV15 = enum_pipe_format.define('PIPE_FORMAT_NV15', 234)
+PIPE_FORMAT_NV20 = enum_pipe_format.define('PIPE_FORMAT_NV20', 235)
+PIPE_FORMAT_Y8_400_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_400_UNORM', 236)
+PIPE_FORMAT_Y8_U8_V8_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_U8_V8_422_UNORM', 237)
+PIPE_FORMAT_Y8_U8_V8_444_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_U8_V8_444_UNORM', 238)
+PIPE_FORMAT_Y8_U8_V8_440_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_U8_V8_440_UNORM', 239)
+PIPE_FORMAT_Y10X6_U10X6_V10X6_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y10X6_U10X6_V10X6_420_UNORM', 240)
+PIPE_FORMAT_Y10X6_U10X6_V10X6_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y10X6_U10X6_V10X6_422_UNORM', 241)
+PIPE_FORMAT_Y10X6_U10X6_V10X6_444_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y10X6_U10X6_V10X6_444_UNORM', 242)
+PIPE_FORMAT_Y12X4_U12X4_V12X4_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y12X4_U12X4_V12X4_420_UNORM', 243)
+PIPE_FORMAT_Y12X4_U12X4_V12X4_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y12X4_U12X4_V12X4_422_UNORM', 244)
+PIPE_FORMAT_Y12X4_U12X4_V12X4_444_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y12X4_U12X4_V12X4_444_UNORM', 245)
+PIPE_FORMAT_Y16_U16_V16_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y16_U16_V16_420_UNORM', 246)
+PIPE_FORMAT_Y16_U16_V16_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y16_U16_V16_422_UNORM', 247)
+PIPE_FORMAT_Y16_U16V16_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y16_U16V16_422_UNORM', 248)
+PIPE_FORMAT_Y16_U16_V16_444_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y16_U16_V16_444_UNORM', 249)
+PIPE_FORMAT_Y8U8V8_420_UNORM_PACKED = enum_pipe_format.define('PIPE_FORMAT_Y8U8V8_420_UNORM_PACKED', 250)
+PIPE_FORMAT_Y10U10V10_420_UNORM_PACKED = enum_pipe_format.define('PIPE_FORMAT_Y10U10V10_420_UNORM_PACKED', 251)
+PIPE_FORMAT_A4R4_UNORM = enum_pipe_format.define('PIPE_FORMAT_A4R4_UNORM', 252)
+PIPE_FORMAT_R4A4_UNORM = enum_pipe_format.define('PIPE_FORMAT_R4A4_UNORM', 253)
+PIPE_FORMAT_R8A8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8A8_UNORM', 254)
+PIPE_FORMAT_A8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_A8R8_UNORM', 255)
+PIPE_FORMAT_A8_UINT = enum_pipe_format.define('PIPE_FORMAT_A8_UINT', 256)
+PIPE_FORMAT_I8_UINT = enum_pipe_format.define('PIPE_FORMAT_I8_UINT', 257)
+PIPE_FORMAT_L8_UINT = enum_pipe_format.define('PIPE_FORMAT_L8_UINT', 258)
+PIPE_FORMAT_L8A8_UINT = enum_pipe_format.define('PIPE_FORMAT_L8A8_UINT', 259)
+PIPE_FORMAT_A8_SINT = enum_pipe_format.define('PIPE_FORMAT_A8_SINT', 260)
+PIPE_FORMAT_I8_SINT = enum_pipe_format.define('PIPE_FORMAT_I8_SINT', 261)
+PIPE_FORMAT_L8_SINT = enum_pipe_format.define('PIPE_FORMAT_L8_SINT', 262)
+PIPE_FORMAT_L8A8_SINT = enum_pipe_format.define('PIPE_FORMAT_L8A8_SINT', 263)
+PIPE_FORMAT_A16_UINT = enum_pipe_format.define('PIPE_FORMAT_A16_UINT', 264)
+PIPE_FORMAT_I16_UINT = enum_pipe_format.define('PIPE_FORMAT_I16_UINT', 265)
+PIPE_FORMAT_L16_UINT = enum_pipe_format.define('PIPE_FORMAT_L16_UINT', 266)
+PIPE_FORMAT_L16A16_UINT = enum_pipe_format.define('PIPE_FORMAT_L16A16_UINT', 267)
+PIPE_FORMAT_A16_SINT = enum_pipe_format.define('PIPE_FORMAT_A16_SINT', 268)
+PIPE_FORMAT_I16_SINT = enum_pipe_format.define('PIPE_FORMAT_I16_SINT', 269)
+PIPE_FORMAT_L16_SINT = enum_pipe_format.define('PIPE_FORMAT_L16_SINT', 270)
+PIPE_FORMAT_L16A16_SINT = enum_pipe_format.define('PIPE_FORMAT_L16A16_SINT', 271)
+PIPE_FORMAT_A32_UINT = enum_pipe_format.define('PIPE_FORMAT_A32_UINT', 272)
+PIPE_FORMAT_I32_UINT = enum_pipe_format.define('PIPE_FORMAT_I32_UINT', 273)
+PIPE_FORMAT_L32_UINT = enum_pipe_format.define('PIPE_FORMAT_L32_UINT', 274)
+PIPE_FORMAT_L32A32_UINT = enum_pipe_format.define('PIPE_FORMAT_L32A32_UINT', 275)
+PIPE_FORMAT_A32_SINT = enum_pipe_format.define('PIPE_FORMAT_A32_SINT', 276)
+PIPE_FORMAT_I32_SINT = enum_pipe_format.define('PIPE_FORMAT_I32_SINT', 277)
+PIPE_FORMAT_L32_SINT = enum_pipe_format.define('PIPE_FORMAT_L32_SINT', 278)
+PIPE_FORMAT_L32A32_SINT = enum_pipe_format.define('PIPE_FORMAT_L32A32_SINT', 279)
+PIPE_FORMAT_A8R8G8B8_UINT = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_UINT', 280)
+PIPE_FORMAT_A8B8G8R8_UINT = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_UINT', 281)
+PIPE_FORMAT_A2R10G10B10_UINT = enum_pipe_format.define('PIPE_FORMAT_A2R10G10B10_UINT', 282)
+PIPE_FORMAT_A2B10G10R10_UINT = enum_pipe_format.define('PIPE_FORMAT_A2B10G10R10_UINT', 283)
+PIPE_FORMAT_R5G6B5_UINT = enum_pipe_format.define('PIPE_FORMAT_R5G6B5_UINT', 284)
+PIPE_FORMAT_B5G6R5_UINT = enum_pipe_format.define('PIPE_FORMAT_B5G6R5_UINT', 285)
+PIPE_FORMAT_R5G5B5A1_UINT = enum_pipe_format.define('PIPE_FORMAT_R5G5B5A1_UINT', 286)
+PIPE_FORMAT_B5G5R5A1_UINT = enum_pipe_format.define('PIPE_FORMAT_B5G5R5A1_UINT', 287)
+PIPE_FORMAT_A1R5G5B5_UINT = enum_pipe_format.define('PIPE_FORMAT_A1R5G5B5_UINT', 288)
+PIPE_FORMAT_A1B5G5R5_UINT = enum_pipe_format.define('PIPE_FORMAT_A1B5G5R5_UINT', 289)
+PIPE_FORMAT_R4G4B4A4_UINT = enum_pipe_format.define('PIPE_FORMAT_R4G4B4A4_UINT', 290)
+PIPE_FORMAT_B4G4R4A4_UINT = enum_pipe_format.define('PIPE_FORMAT_B4G4R4A4_UINT', 291)
+PIPE_FORMAT_A4R4G4B4_UINT = enum_pipe_format.define('PIPE_FORMAT_A4R4G4B4_UINT', 292)
+PIPE_FORMAT_A4B4G4R4_UINT = enum_pipe_format.define('PIPE_FORMAT_A4B4G4R4_UINT', 293)
+PIPE_FORMAT_R3G3B2_UINT = enum_pipe_format.define('PIPE_FORMAT_R3G3B2_UINT', 294)
+PIPE_FORMAT_B2G3R3_UINT = enum_pipe_format.define('PIPE_FORMAT_B2G3R3_UINT', 295)
+PIPE_FORMAT_ETC1_RGB8 = enum_pipe_format.define('PIPE_FORMAT_ETC1_RGB8', 296)
+PIPE_FORMAT_R8G8_R8B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8_R8B8_UNORM', 297)
+PIPE_FORMAT_R8B8_R8G8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8B8_R8G8_UNORM', 298)
+PIPE_FORMAT_G8R8_B8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8R8_B8R8_UNORM', 299)
+PIPE_FORMAT_B8R8_G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8R8_G8R8_UNORM', 300)
+PIPE_FORMAT_G8B8_G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8B8_G8R8_UNORM', 301)
+PIPE_FORMAT_B8G8_R8G8_UNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8_R8G8_UNORM', 302)
+PIPE_FORMAT_R8G8B8X8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_SNORM', 303)
+PIPE_FORMAT_R8G8B8X8_SRGB = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_SRGB', 304)
+PIPE_FORMAT_R8G8B8X8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_UINT', 305)
+PIPE_FORMAT_R8G8B8X8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8G8B8X8_SINT', 306)
+PIPE_FORMAT_B10G10R10X2_UNORM = enum_pipe_format.define('PIPE_FORMAT_B10G10R10X2_UNORM', 307)
+PIPE_FORMAT_R16G16B16X16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_UNORM', 308)
+PIPE_FORMAT_R16G16B16X16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_SNORM', 309)
+PIPE_FORMAT_R16G16B16X16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_FLOAT', 310)
+PIPE_FORMAT_R16G16B16X16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_UINT', 311)
+PIPE_FORMAT_R16G16B16X16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16G16B16X16_SINT', 312)
+PIPE_FORMAT_R32G32B32X32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32X32_FLOAT', 313)
+PIPE_FORMAT_R32G32B32X32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32X32_UINT', 314)
+PIPE_FORMAT_R32G32B32X32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32G32B32X32_SINT', 315)
+PIPE_FORMAT_R8A8_SNORM = enum_pipe_format.define('PIPE_FORMAT_R8A8_SNORM', 316)
+PIPE_FORMAT_R16A16_UNORM = enum_pipe_format.define('PIPE_FORMAT_R16A16_UNORM', 317)
+PIPE_FORMAT_R16A16_SNORM = enum_pipe_format.define('PIPE_FORMAT_R16A16_SNORM', 318)
+PIPE_FORMAT_R16A16_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R16A16_FLOAT', 319)
+PIPE_FORMAT_R32A32_FLOAT = enum_pipe_format.define('PIPE_FORMAT_R32A32_FLOAT', 320)
+PIPE_FORMAT_R8A8_UINT = enum_pipe_format.define('PIPE_FORMAT_R8A8_UINT', 321)
+PIPE_FORMAT_R8A8_SINT = enum_pipe_format.define('PIPE_FORMAT_R8A8_SINT', 322)
+PIPE_FORMAT_R16A16_UINT = enum_pipe_format.define('PIPE_FORMAT_R16A16_UINT', 323)
+PIPE_FORMAT_R16A16_SINT = enum_pipe_format.define('PIPE_FORMAT_R16A16_SINT', 324)
+PIPE_FORMAT_R32A32_UINT = enum_pipe_format.define('PIPE_FORMAT_R32A32_UINT', 325)
+PIPE_FORMAT_R32A32_SINT = enum_pipe_format.define('PIPE_FORMAT_R32A32_SINT', 326)
+PIPE_FORMAT_B5G6R5_SRGB = enum_pipe_format.define('PIPE_FORMAT_B5G6R5_SRGB', 327)
+PIPE_FORMAT_BPTC_RGBA_UNORM = enum_pipe_format.define('PIPE_FORMAT_BPTC_RGBA_UNORM', 328)
+PIPE_FORMAT_BPTC_SRGBA = enum_pipe_format.define('PIPE_FORMAT_BPTC_SRGBA', 329)
+PIPE_FORMAT_BPTC_RGB_FLOAT = enum_pipe_format.define('PIPE_FORMAT_BPTC_RGB_FLOAT', 330)
+PIPE_FORMAT_BPTC_RGB_UFLOAT = enum_pipe_format.define('PIPE_FORMAT_BPTC_RGB_UFLOAT', 331)
+PIPE_FORMAT_G8R8_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8R8_UNORM', 332)
+PIPE_FORMAT_G8R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_G8R8_SNORM', 333)
+PIPE_FORMAT_G16R16_UNORM = enum_pipe_format.define('PIPE_FORMAT_G16R16_UNORM', 334)
+PIPE_FORMAT_G16R16_SNORM = enum_pipe_format.define('PIPE_FORMAT_G16R16_SNORM', 335)
+PIPE_FORMAT_A8B8G8R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_SNORM', 336)
+PIPE_FORMAT_X8B8G8R8_SNORM = enum_pipe_format.define('PIPE_FORMAT_X8B8G8R8_SNORM', 337)
+PIPE_FORMAT_ETC2_RGB8 = enum_pipe_format.define('PIPE_FORMAT_ETC2_RGB8', 338)
+PIPE_FORMAT_ETC2_SRGB8 = enum_pipe_format.define('PIPE_FORMAT_ETC2_SRGB8', 339)
+PIPE_FORMAT_ETC2_RGB8A1 = enum_pipe_format.define('PIPE_FORMAT_ETC2_RGB8A1', 340)
+PIPE_FORMAT_ETC2_SRGB8A1 = enum_pipe_format.define('PIPE_FORMAT_ETC2_SRGB8A1', 341)
+PIPE_FORMAT_ETC2_RGBA8 = enum_pipe_format.define('PIPE_FORMAT_ETC2_RGBA8', 342)
+PIPE_FORMAT_ETC2_SRGBA8 = enum_pipe_format.define('PIPE_FORMAT_ETC2_SRGBA8', 343)
+PIPE_FORMAT_ETC2_R11_UNORM = enum_pipe_format.define('PIPE_FORMAT_ETC2_R11_UNORM', 344)
+PIPE_FORMAT_ETC2_R11_SNORM = enum_pipe_format.define('PIPE_FORMAT_ETC2_R11_SNORM', 345)
+PIPE_FORMAT_ETC2_RG11_UNORM = enum_pipe_format.define('PIPE_FORMAT_ETC2_RG11_UNORM', 346)
+PIPE_FORMAT_ETC2_RG11_SNORM = enum_pipe_format.define('PIPE_FORMAT_ETC2_RG11_SNORM', 347)
+PIPE_FORMAT_ASTC_4x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4', 348)
+PIPE_FORMAT_ASTC_5x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4', 349)
+PIPE_FORMAT_ASTC_5x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5', 350)
+PIPE_FORMAT_ASTC_6x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5', 351)
+PIPE_FORMAT_ASTC_6x6 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6', 352)
+PIPE_FORMAT_ASTC_8x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x5', 353)
+PIPE_FORMAT_ASTC_8x6 = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x6', 354)
+PIPE_FORMAT_ASTC_8x8 = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x8', 355)
+PIPE_FORMAT_ASTC_10x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x5', 356)
+PIPE_FORMAT_ASTC_10x6 = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x6', 357)
+PIPE_FORMAT_ASTC_10x8 = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x8', 358)
+PIPE_FORMAT_ASTC_10x10 = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x10', 359)
+PIPE_FORMAT_ASTC_12x10 = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x10', 360)
+PIPE_FORMAT_ASTC_12x12 = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x12', 361)
+PIPE_FORMAT_ASTC_4x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4_SRGB', 362)
+PIPE_FORMAT_ASTC_5x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4_SRGB', 363)
+PIPE_FORMAT_ASTC_5x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5_SRGB', 364)
+PIPE_FORMAT_ASTC_6x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5_SRGB', 365)
+PIPE_FORMAT_ASTC_6x6_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6_SRGB', 366)
+PIPE_FORMAT_ASTC_8x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x5_SRGB', 367)
+PIPE_FORMAT_ASTC_8x6_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x6_SRGB', 368)
+PIPE_FORMAT_ASTC_8x8_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x8_SRGB', 369)
+PIPE_FORMAT_ASTC_10x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x5_SRGB', 370)
+PIPE_FORMAT_ASTC_10x6_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x6_SRGB', 371)
+PIPE_FORMAT_ASTC_10x8_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x8_SRGB', 372)
+PIPE_FORMAT_ASTC_10x10_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x10_SRGB', 373)
+PIPE_FORMAT_ASTC_12x10_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x10_SRGB', 374)
+PIPE_FORMAT_ASTC_12x12_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x12_SRGB', 375)
+PIPE_FORMAT_ASTC_3x3x3 = enum_pipe_format.define('PIPE_FORMAT_ASTC_3x3x3', 376)
+PIPE_FORMAT_ASTC_4x3x3 = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x3x3', 377)
+PIPE_FORMAT_ASTC_4x4x3 = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4x3', 378)
+PIPE_FORMAT_ASTC_4x4x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4x4', 379)
+PIPE_FORMAT_ASTC_5x4x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4x4', 380)
+PIPE_FORMAT_ASTC_5x5x4 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5x4', 381)
+PIPE_FORMAT_ASTC_5x5x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5x5', 382)
+PIPE_FORMAT_ASTC_6x5x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5x5', 383)
+PIPE_FORMAT_ASTC_6x6x5 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6x5', 384)
+PIPE_FORMAT_ASTC_6x6x6 = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6x6', 385)
+PIPE_FORMAT_ASTC_3x3x3_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_3x3x3_SRGB', 386)
+PIPE_FORMAT_ASTC_4x3x3_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x3x3_SRGB', 387)
+PIPE_FORMAT_ASTC_4x4x3_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4x3_SRGB', 388)
+PIPE_FORMAT_ASTC_4x4x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4x4_SRGB', 389)
+PIPE_FORMAT_ASTC_5x4x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4x4_SRGB', 390)
+PIPE_FORMAT_ASTC_5x5x4_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5x4_SRGB', 391)
+PIPE_FORMAT_ASTC_5x5x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5x5_SRGB', 392)
+PIPE_FORMAT_ASTC_6x5x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5x5_SRGB', 393)
+PIPE_FORMAT_ASTC_6x6x5_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6x5_SRGB', 394)
+PIPE_FORMAT_ASTC_6x6x6_SRGB = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6x6_SRGB', 395)
+PIPE_FORMAT_ASTC_4x4_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_4x4_FLOAT', 396)
+PIPE_FORMAT_ASTC_5x4_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x4_FLOAT', 397)
+PIPE_FORMAT_ASTC_5x5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_5x5_FLOAT', 398)
+PIPE_FORMAT_ASTC_6x5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x5_FLOAT', 399)
+PIPE_FORMAT_ASTC_6x6_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_6x6_FLOAT', 400)
+PIPE_FORMAT_ASTC_8x5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x5_FLOAT', 401)
+PIPE_FORMAT_ASTC_8x6_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x6_FLOAT', 402)
+PIPE_FORMAT_ASTC_8x8_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_8x8_FLOAT', 403)
+PIPE_FORMAT_ASTC_10x5_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x5_FLOAT', 404)
+PIPE_FORMAT_ASTC_10x6_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x6_FLOAT', 405)
+PIPE_FORMAT_ASTC_10x8_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x8_FLOAT', 406)
+PIPE_FORMAT_ASTC_10x10_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_10x10_FLOAT', 407)
+PIPE_FORMAT_ASTC_12x10_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x10_FLOAT', 408)
+PIPE_FORMAT_ASTC_12x12_FLOAT = enum_pipe_format.define('PIPE_FORMAT_ASTC_12x12_FLOAT', 409)
+PIPE_FORMAT_FXT1_RGB = enum_pipe_format.define('PIPE_FORMAT_FXT1_RGB', 410)
+PIPE_FORMAT_FXT1_RGBA = enum_pipe_format.define('PIPE_FORMAT_FXT1_RGBA', 411)
+PIPE_FORMAT_P010 = enum_pipe_format.define('PIPE_FORMAT_P010', 412)
+PIPE_FORMAT_P012 = enum_pipe_format.define('PIPE_FORMAT_P012', 413)
+PIPE_FORMAT_P016 = enum_pipe_format.define('PIPE_FORMAT_P016', 414)
+PIPE_FORMAT_P030 = enum_pipe_format.define('PIPE_FORMAT_P030', 415)
+PIPE_FORMAT_Y210 = enum_pipe_format.define('PIPE_FORMAT_Y210', 416)
+PIPE_FORMAT_Y212 = enum_pipe_format.define('PIPE_FORMAT_Y212', 417)
+PIPE_FORMAT_Y216 = enum_pipe_format.define('PIPE_FORMAT_Y216', 418)
+PIPE_FORMAT_Y410 = enum_pipe_format.define('PIPE_FORMAT_Y410', 419)
+PIPE_FORMAT_Y412 = enum_pipe_format.define('PIPE_FORMAT_Y412', 420)
+PIPE_FORMAT_Y416 = enum_pipe_format.define('PIPE_FORMAT_Y416', 421)
+PIPE_FORMAT_R10G10B10X2_UNORM = enum_pipe_format.define('PIPE_FORMAT_R10G10B10X2_UNORM', 422)
+PIPE_FORMAT_A1R5G5B5_UNORM = enum_pipe_format.define('PIPE_FORMAT_A1R5G5B5_UNORM', 423)
+PIPE_FORMAT_A1B5G5R5_UNORM = enum_pipe_format.define('PIPE_FORMAT_A1B5G5R5_UNORM', 424)
+PIPE_FORMAT_X1B5G5R5_UNORM = enum_pipe_format.define('PIPE_FORMAT_X1B5G5R5_UNORM', 425)
+PIPE_FORMAT_R5G5B5A1_UNORM = enum_pipe_format.define('PIPE_FORMAT_R5G5B5A1_UNORM', 426)
+PIPE_FORMAT_A4R4G4B4_UNORM = enum_pipe_format.define('PIPE_FORMAT_A4R4G4B4_UNORM', 427)
+PIPE_FORMAT_A4B4G4R4_UNORM = enum_pipe_format.define('PIPE_FORMAT_A4B4G4R4_UNORM', 428)
+PIPE_FORMAT_G8R8_SINT = enum_pipe_format.define('PIPE_FORMAT_G8R8_SINT', 429)
+PIPE_FORMAT_A8B8G8R8_SINT = enum_pipe_format.define('PIPE_FORMAT_A8B8G8R8_SINT', 430)
+PIPE_FORMAT_X8B8G8R8_SINT = enum_pipe_format.define('PIPE_FORMAT_X8B8G8R8_SINT', 431)
+PIPE_FORMAT_ATC_RGB = enum_pipe_format.define('PIPE_FORMAT_ATC_RGB', 432)
+PIPE_FORMAT_ATC_RGBA_EXPLICIT = enum_pipe_format.define('PIPE_FORMAT_ATC_RGBA_EXPLICIT', 433)
+PIPE_FORMAT_ATC_RGBA_INTERPOLATED = enum_pipe_format.define('PIPE_FORMAT_ATC_RGBA_INTERPOLATED', 434)
+PIPE_FORMAT_Z24_UNORM_S8_UINT_AS_R8G8B8A8 = enum_pipe_format.define('PIPE_FORMAT_Z24_UNORM_S8_UINT_AS_R8G8B8A8', 435)
+PIPE_FORMAT_AYUV = enum_pipe_format.define('PIPE_FORMAT_AYUV', 436)
+PIPE_FORMAT_XYUV = enum_pipe_format.define('PIPE_FORMAT_XYUV', 437)
+PIPE_FORMAT_R8G8B8_420_UNORM_PACKED = enum_pipe_format.define('PIPE_FORMAT_R8G8B8_420_UNORM_PACKED', 438)
+PIPE_FORMAT_R8_G8B8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_G8B8_420_UNORM', 439)
+PIPE_FORMAT_R8_B8G8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_B8G8_420_UNORM', 440)
+PIPE_FORMAT_G8_B8R8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8_B8R8_420_UNORM', 441)
+PIPE_FORMAT_R10G10B10_420_UNORM_PACKED = enum_pipe_format.define('PIPE_FORMAT_R10G10B10_420_UNORM_PACKED', 442)
+PIPE_FORMAT_R10_G10B10_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R10_G10B10_420_UNORM', 443)
+PIPE_FORMAT_R10_G10B10_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_R10_G10B10_422_UNORM', 444)
+PIPE_FORMAT_R8_G8_B8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_G8_B8_420_UNORM', 445)
+PIPE_FORMAT_R8_B8_G8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_B8_G8_420_UNORM', 446)
+PIPE_FORMAT_G8_B8_R8_420_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8_B8_R8_420_UNORM', 447)
+PIPE_FORMAT_R8_G8B8_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_G8B8_422_UNORM', 448)
+PIPE_FORMAT_R8_B8G8_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_B8G8_422_UNORM', 449)
+PIPE_FORMAT_G8_B8R8_422_UNORM = enum_pipe_format.define('PIPE_FORMAT_G8_B8R8_422_UNORM', 450)
+PIPE_FORMAT_R8_G8_B8_UNORM = enum_pipe_format.define('PIPE_FORMAT_R8_G8_B8_UNORM', 451)
+PIPE_FORMAT_Y8_UNORM = enum_pipe_format.define('PIPE_FORMAT_Y8_UNORM', 452)
+PIPE_FORMAT_B8G8R8X8_SNORM = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_SNORM', 453)
+PIPE_FORMAT_B8G8R8X8_UINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_UINT', 454)
+PIPE_FORMAT_B8G8R8X8_SINT = enum_pipe_format.define('PIPE_FORMAT_B8G8R8X8_SINT', 455)
+PIPE_FORMAT_A8R8G8B8_SNORM = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_SNORM', 456)
+PIPE_FORMAT_A8R8G8B8_SINT = enum_pipe_format.define('PIPE_FORMAT_A8R8G8B8_SINT', 457)
+PIPE_FORMAT_X8R8G8B8_SNORM = enum_pipe_format.define('PIPE_FORMAT_X8R8G8B8_SNORM', 458)
+PIPE_FORMAT_X8R8G8B8_SINT = enum_pipe_format.define('PIPE_FORMAT_X8R8G8B8_SINT', 459)
+PIPE_FORMAT_R5G5B5X1_UNORM = enum_pipe_format.define('PIPE_FORMAT_R5G5B5X1_UNORM', 460)
+PIPE_FORMAT_X1R5G5B5_UNORM = enum_pipe_format.define('PIPE_FORMAT_X1R5G5B5_UNORM', 461)
+PIPE_FORMAT_R4G4B4X4_UNORM = enum_pipe_format.define('PIPE_FORMAT_R4G4B4X4_UNORM', 462)
+PIPE_FORMAT_B10G10R10X2_SNORM = enum_pipe_format.define('PIPE_FORMAT_B10G10R10X2_SNORM', 463)
+PIPE_FORMAT_R5G6B5_SRGB = enum_pipe_format.define('PIPE_FORMAT_R5G6B5_SRGB', 464)
+PIPE_FORMAT_R10G10B10X2_SINT = enum_pipe_format.define('PIPE_FORMAT_R10G10B10X2_SINT', 465)
+PIPE_FORMAT_B10G10R10X2_SINT = enum_pipe_format.define('PIPE_FORMAT_B10G10R10X2_SINT', 466)
+PIPE_FORMAT_G16R16_SINT = enum_pipe_format.define('PIPE_FORMAT_G16R16_SINT', 467)
+PIPE_FORMAT_COUNT = enum_pipe_format.define('PIPE_FORMAT_COUNT', 468)
 
 @c.record
 class struct_nir_variable_data_sampler(c.Struct):
@@ -659,7 +659,7 @@ class struct_nir_variable_data_xfb(c.Struct):
   SIZE = 4
   buffer: Annotated[uint16_t, 0, 2, 0]
   stride: Annotated[uint16_t, 2]
-nir_variable_data = struct_nir_variable_data
+nir_variable_data: TypeAlias = struct_nir_variable_data
 @c.record
 class struct_nir_variable(c.Struct):
   SIZE = 152
@@ -702,33 +702,33 @@ class struct_glsl_type(c.Struct):
   explicit_stride: Annotated[Annotated[int, ctypes.c_uint32], 32]
   explicit_alignment: Annotated[Annotated[int, ctypes.c_uint32], 36]
   fields: Annotated[struct_glsl_type_fields, 40]
-enum_glsl_base_type = CEnum(Annotated[int, ctypes.c_uint32])
-GLSL_TYPE_UINT = enum_glsl_base_type.define('GLSL_TYPE_UINT', 0) # type: ignore
-GLSL_TYPE_INT = enum_glsl_base_type.define('GLSL_TYPE_INT', 1) # type: ignore
-GLSL_TYPE_FLOAT = enum_glsl_base_type.define('GLSL_TYPE_FLOAT', 2) # type: ignore
-GLSL_TYPE_FLOAT16 = enum_glsl_base_type.define('GLSL_TYPE_FLOAT16', 3) # type: ignore
-GLSL_TYPE_BFLOAT16 = enum_glsl_base_type.define('GLSL_TYPE_BFLOAT16', 4) # type: ignore
-GLSL_TYPE_FLOAT_E4M3FN = enum_glsl_base_type.define('GLSL_TYPE_FLOAT_E4M3FN', 5) # type: ignore
-GLSL_TYPE_FLOAT_E5M2 = enum_glsl_base_type.define('GLSL_TYPE_FLOAT_E5M2', 6) # type: ignore
-GLSL_TYPE_DOUBLE = enum_glsl_base_type.define('GLSL_TYPE_DOUBLE', 7) # type: ignore
-GLSL_TYPE_UINT8 = enum_glsl_base_type.define('GLSL_TYPE_UINT8', 8) # type: ignore
-GLSL_TYPE_INT8 = enum_glsl_base_type.define('GLSL_TYPE_INT8', 9) # type: ignore
-GLSL_TYPE_UINT16 = enum_glsl_base_type.define('GLSL_TYPE_UINT16', 10) # type: ignore
-GLSL_TYPE_INT16 = enum_glsl_base_type.define('GLSL_TYPE_INT16', 11) # type: ignore
-GLSL_TYPE_UINT64 = enum_glsl_base_type.define('GLSL_TYPE_UINT64', 12) # type: ignore
-GLSL_TYPE_INT64 = enum_glsl_base_type.define('GLSL_TYPE_INT64', 13) # type: ignore
-GLSL_TYPE_BOOL = enum_glsl_base_type.define('GLSL_TYPE_BOOL', 14) # type: ignore
-GLSL_TYPE_COOPERATIVE_MATRIX = enum_glsl_base_type.define('GLSL_TYPE_COOPERATIVE_MATRIX', 15) # type: ignore
-GLSL_TYPE_SAMPLER = enum_glsl_base_type.define('GLSL_TYPE_SAMPLER', 16) # type: ignore
-GLSL_TYPE_TEXTURE = enum_glsl_base_type.define('GLSL_TYPE_TEXTURE', 17) # type: ignore
-GLSL_TYPE_IMAGE = enum_glsl_base_type.define('GLSL_TYPE_IMAGE', 18) # type: ignore
-GLSL_TYPE_ATOMIC_UINT = enum_glsl_base_type.define('GLSL_TYPE_ATOMIC_UINT', 19) # type: ignore
-GLSL_TYPE_STRUCT = enum_glsl_base_type.define('GLSL_TYPE_STRUCT', 20) # type: ignore
-GLSL_TYPE_INTERFACE = enum_glsl_base_type.define('GLSL_TYPE_INTERFACE', 21) # type: ignore
-GLSL_TYPE_ARRAY = enum_glsl_base_type.define('GLSL_TYPE_ARRAY', 22) # type: ignore
-GLSL_TYPE_VOID = enum_glsl_base_type.define('GLSL_TYPE_VOID', 23) # type: ignore
-GLSL_TYPE_SUBROUTINE = enum_glsl_base_type.define('GLSL_TYPE_SUBROUTINE', 24) # type: ignore
-GLSL_TYPE_ERROR = enum_glsl_base_type.define('GLSL_TYPE_ERROR', 25) # type: ignore
+class enum_glsl_base_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+GLSL_TYPE_UINT = enum_glsl_base_type.define('GLSL_TYPE_UINT', 0)
+GLSL_TYPE_INT = enum_glsl_base_type.define('GLSL_TYPE_INT', 1)
+GLSL_TYPE_FLOAT = enum_glsl_base_type.define('GLSL_TYPE_FLOAT', 2)
+GLSL_TYPE_FLOAT16 = enum_glsl_base_type.define('GLSL_TYPE_FLOAT16', 3)
+GLSL_TYPE_BFLOAT16 = enum_glsl_base_type.define('GLSL_TYPE_BFLOAT16', 4)
+GLSL_TYPE_FLOAT_E4M3FN = enum_glsl_base_type.define('GLSL_TYPE_FLOAT_E4M3FN', 5)
+GLSL_TYPE_FLOAT_E5M2 = enum_glsl_base_type.define('GLSL_TYPE_FLOAT_E5M2', 6)
+GLSL_TYPE_DOUBLE = enum_glsl_base_type.define('GLSL_TYPE_DOUBLE', 7)
+GLSL_TYPE_UINT8 = enum_glsl_base_type.define('GLSL_TYPE_UINT8', 8)
+GLSL_TYPE_INT8 = enum_glsl_base_type.define('GLSL_TYPE_INT8', 9)
+GLSL_TYPE_UINT16 = enum_glsl_base_type.define('GLSL_TYPE_UINT16', 10)
+GLSL_TYPE_INT16 = enum_glsl_base_type.define('GLSL_TYPE_INT16', 11)
+GLSL_TYPE_UINT64 = enum_glsl_base_type.define('GLSL_TYPE_UINT64', 12)
+GLSL_TYPE_INT64 = enum_glsl_base_type.define('GLSL_TYPE_INT64', 13)
+GLSL_TYPE_BOOL = enum_glsl_base_type.define('GLSL_TYPE_BOOL', 14)
+GLSL_TYPE_COOPERATIVE_MATRIX = enum_glsl_base_type.define('GLSL_TYPE_COOPERATIVE_MATRIX', 15)
+GLSL_TYPE_SAMPLER = enum_glsl_base_type.define('GLSL_TYPE_SAMPLER', 16)
+GLSL_TYPE_TEXTURE = enum_glsl_base_type.define('GLSL_TYPE_TEXTURE', 17)
+GLSL_TYPE_IMAGE = enum_glsl_base_type.define('GLSL_TYPE_IMAGE', 18)
+GLSL_TYPE_ATOMIC_UINT = enum_glsl_base_type.define('GLSL_TYPE_ATOMIC_UINT', 19)
+GLSL_TYPE_STRUCT = enum_glsl_base_type.define('GLSL_TYPE_STRUCT', 20)
+GLSL_TYPE_INTERFACE = enum_glsl_base_type.define('GLSL_TYPE_INTERFACE', 21)
+GLSL_TYPE_ARRAY = enum_glsl_base_type.define('GLSL_TYPE_ARRAY', 22)
+GLSL_TYPE_VOID = enum_glsl_base_type.define('GLSL_TYPE_VOID', 23)
+GLSL_TYPE_SUBROUTINE = enum_glsl_base_type.define('GLSL_TYPE_SUBROUTINE', 24)
+GLSL_TYPE_ERROR = enum_glsl_base_type.define('GLSL_TYPE_ERROR', 25)
 
 @c.record
 class struct_glsl_cmat_description(c.Struct):
@@ -738,13 +738,13 @@ class struct_glsl_cmat_description(c.Struct):
   rows: Annotated[uint8_t, 1]
   cols: Annotated[uint8_t, 2]
   use: Annotated[uint8_t, 3]
-uintptr_t = Annotated[int, ctypes.c_uint64]
+uintptr_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class struct_glsl_type_fields(c.Struct):
   SIZE = 8
   array: Annotated[c.POINTER[glsl_type], 0]
   structure: Annotated[c.POINTER[glsl_struct_field], 0]
-glsl_type = struct_glsl_type
+glsl_type: TypeAlias = struct_glsl_type
 @c.record
 class struct_glsl_struct_field(c.Struct):
   SIZE = 48
@@ -771,18 +771,18 @@ class struct_glsl_struct_field(c.Struct):
   implicit_sized_array: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 0]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 40]
 glsl_struct_field: TypeAlias = struct_glsl_struct_field
-nir_variable = struct_nir_variable
-nir_instr_type = CEnum(Annotated[int, ctypes.c_ubyte])
-nir_instr_type_alu = nir_instr_type.define('nir_instr_type_alu', 0) # type: ignore
-nir_instr_type_deref = nir_instr_type.define('nir_instr_type_deref', 1) # type: ignore
-nir_instr_type_call = nir_instr_type.define('nir_instr_type_call', 2) # type: ignore
-nir_instr_type_tex = nir_instr_type.define('nir_instr_type_tex', 3) # type: ignore
-nir_instr_type_intrinsic = nir_instr_type.define('nir_instr_type_intrinsic', 4) # type: ignore
-nir_instr_type_load_const = nir_instr_type.define('nir_instr_type_load_const', 5) # type: ignore
-nir_instr_type_jump = nir_instr_type.define('nir_instr_type_jump', 6) # type: ignore
-nir_instr_type_undef = nir_instr_type.define('nir_instr_type_undef', 7) # type: ignore
-nir_instr_type_phi = nir_instr_type.define('nir_instr_type_phi', 8) # type: ignore
-nir_instr_type_parallel_copy = nir_instr_type.define('nir_instr_type_parallel_copy', 9) # type: ignore
+nir_variable: TypeAlias = struct_nir_variable
+class nir_instr_type(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+nir_instr_type_alu = nir_instr_type.define('nir_instr_type_alu', 0)
+nir_instr_type_deref = nir_instr_type.define('nir_instr_type_deref', 1)
+nir_instr_type_call = nir_instr_type.define('nir_instr_type_call', 2)
+nir_instr_type_tex = nir_instr_type.define('nir_instr_type_tex', 3)
+nir_instr_type_intrinsic = nir_instr_type.define('nir_instr_type_intrinsic', 4)
+nir_instr_type_load_const = nir_instr_type.define('nir_instr_type_load_const', 5)
+nir_instr_type_jump = nir_instr_type.define('nir_instr_type_jump', 6)
+nir_instr_type_undef = nir_instr_type.define('nir_instr_type_undef', 7)
+nir_instr_type_phi = nir_instr_type.define('nir_instr_type_phi', 8)
+nir_instr_type_parallel_copy = nir_instr_type.define('nir_instr_type_parallel_copy', 9)
 
 @c.record
 class struct_nir_instr(c.Struct):
@@ -820,19 +820,19 @@ class struct_nir_cf_node(c.Struct):
   type: Annotated[nir_cf_node_type, 16]
   parent: Annotated[c.POINTER[nir_cf_node], 24]
 nir_cf_node: TypeAlias = struct_nir_cf_node
-nir_cf_node_type = CEnum(Annotated[int, ctypes.c_uint32])
-nir_cf_node_block = nir_cf_node_type.define('nir_cf_node_block', 0) # type: ignore
-nir_cf_node_if = nir_cf_node_type.define('nir_cf_node_if', 1) # type: ignore
-nir_cf_node_loop = nir_cf_node_type.define('nir_cf_node_loop', 2) # type: ignore
-nir_cf_node_function = nir_cf_node_type.define('nir_cf_node_function', 3) # type: ignore
+class nir_cf_node_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_cf_node_block = nir_cf_node_type.define('nir_cf_node_block', 0)
+nir_cf_node_if = nir_cf_node_type.define('nir_cf_node_if', 1)
+nir_cf_node_loop = nir_cf_node_type.define('nir_cf_node_loop', 2)
+nir_cf_node_function = nir_cf_node_type.define('nir_cf_node_function', 3)
 
-nir_cf_node = struct_nir_cf_node
+nir_cf_node: TypeAlias = struct_nir_cf_node
 @c.record
 class struct_exec_list(c.Struct):
   SIZE = 32
   head_sentinel: Annotated[struct_exec_node, 0]
   tail_sentinel: Annotated[struct_exec_node, 16]
-nir_block = struct_nir_block
+nir_block: TypeAlias = struct_nir_block
 @c.record
 class struct_set(c.Struct):
   SIZE = 72
@@ -853,7 +853,7 @@ class struct_set_entry(c.Struct):
   SIZE = 16
   hash: Annotated[uint32_t, 0]
   key: Annotated[c.POINTER[None], 8]
-nir_instr = struct_nir_instr
+nir_instr: TypeAlias = struct_nir_instr
 @c.record
 class struct_nir_def(c.Struct):
   SIZE = 32
@@ -869,14 +869,14 @@ class struct_list_head(c.Struct):
   SIZE = 16
   prev: Annotated[c.POINTER[struct_list_head], 0]
   next: Annotated[c.POINTER[struct_list_head], 8]
-nir_def = struct_nir_def
+nir_def: TypeAlias = struct_nir_def
 @c.record
 class struct_nir_src(c.Struct):
   SIZE = 32
   _parent: Annotated[uintptr_t, 0]
   use_link: Annotated[struct_list_head, 8]
   ssa: Annotated[c.POINTER[nir_def], 24]
-nir_src = struct_nir_src
+nir_src: TypeAlias = struct_nir_src
 @dll.bind
 def nir_src_is_divergent(src:c.POINTER[nir_src]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -884,548 +884,548 @@ class struct_nir_alu_src(c.Struct):
   SIZE = 48
   src: Annotated[nir_src, 0]
   swizzle: Annotated[c.Array[uint8_t, Literal[16]], 32]
-nir_alu_src = struct_nir_alu_src
-nir_alu_type = CEnum(Annotated[int, ctypes.c_ubyte])
-nir_type_invalid = nir_alu_type.define('nir_type_invalid', 0) # type: ignore
-nir_type_int = nir_alu_type.define('nir_type_int', 2) # type: ignore
-nir_type_uint = nir_alu_type.define('nir_type_uint', 4) # type: ignore
-nir_type_bool = nir_alu_type.define('nir_type_bool', 6) # type: ignore
-nir_type_float = nir_alu_type.define('nir_type_float', 128) # type: ignore
-nir_type_bool1 = nir_alu_type.define('nir_type_bool1', 7) # type: ignore
-nir_type_bool8 = nir_alu_type.define('nir_type_bool8', 14) # type: ignore
-nir_type_bool16 = nir_alu_type.define('nir_type_bool16', 22) # type: ignore
-nir_type_bool32 = nir_alu_type.define('nir_type_bool32', 38) # type: ignore
-nir_type_int1 = nir_alu_type.define('nir_type_int1', 3) # type: ignore
-nir_type_int8 = nir_alu_type.define('nir_type_int8', 10) # type: ignore
-nir_type_int16 = nir_alu_type.define('nir_type_int16', 18) # type: ignore
-nir_type_int32 = nir_alu_type.define('nir_type_int32', 34) # type: ignore
-nir_type_int64 = nir_alu_type.define('nir_type_int64', 66) # type: ignore
-nir_type_uint1 = nir_alu_type.define('nir_type_uint1', 5) # type: ignore
-nir_type_uint8 = nir_alu_type.define('nir_type_uint8', 12) # type: ignore
-nir_type_uint16 = nir_alu_type.define('nir_type_uint16', 20) # type: ignore
-nir_type_uint32 = nir_alu_type.define('nir_type_uint32', 36) # type: ignore
-nir_type_uint64 = nir_alu_type.define('nir_type_uint64', 68) # type: ignore
-nir_type_float16 = nir_alu_type.define('nir_type_float16', 144) # type: ignore
-nir_type_float32 = nir_alu_type.define('nir_type_float32', 160) # type: ignore
-nir_type_float64 = nir_alu_type.define('nir_type_float64', 192) # type: ignore
+nir_alu_src: TypeAlias = struct_nir_alu_src
+class nir_alu_type(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+nir_type_invalid = nir_alu_type.define('nir_type_invalid', 0)
+nir_type_int = nir_alu_type.define('nir_type_int', 2)
+nir_type_uint = nir_alu_type.define('nir_type_uint', 4)
+nir_type_bool = nir_alu_type.define('nir_type_bool', 6)
+nir_type_float = nir_alu_type.define('nir_type_float', 128)
+nir_type_bool1 = nir_alu_type.define('nir_type_bool1', 7)
+nir_type_bool8 = nir_alu_type.define('nir_type_bool8', 14)
+nir_type_bool16 = nir_alu_type.define('nir_type_bool16', 22)
+nir_type_bool32 = nir_alu_type.define('nir_type_bool32', 38)
+nir_type_int1 = nir_alu_type.define('nir_type_int1', 3)
+nir_type_int8 = nir_alu_type.define('nir_type_int8', 10)
+nir_type_int16 = nir_alu_type.define('nir_type_int16', 18)
+nir_type_int32 = nir_alu_type.define('nir_type_int32', 34)
+nir_type_int64 = nir_alu_type.define('nir_type_int64', 66)
+nir_type_uint1 = nir_alu_type.define('nir_type_uint1', 5)
+nir_type_uint8 = nir_alu_type.define('nir_type_uint8', 12)
+nir_type_uint16 = nir_alu_type.define('nir_type_uint16', 20)
+nir_type_uint32 = nir_alu_type.define('nir_type_uint32', 36)
+nir_type_uint64 = nir_alu_type.define('nir_type_uint64', 68)
+nir_type_float16 = nir_alu_type.define('nir_type_float16', 144)
+nir_type_float32 = nir_alu_type.define('nir_type_float32', 160)
+nir_type_float64 = nir_alu_type.define('nir_type_float64', 192)
 
 @dll.bind
 def nir_get_nir_type_for_glsl_base_type(base_type:enum_glsl_base_type) -> nir_alu_type: ...
 @dll.bind
 def nir_get_glsl_base_type_for_nir_type(base_type:nir_alu_type) -> enum_glsl_base_type: ...
-nir_op = CEnum(Annotated[int, ctypes.c_uint32])
-nir_op_alignbyte_amd = nir_op.define('nir_op_alignbyte_amd', 0) # type: ignore
-nir_op_amul = nir_op.define('nir_op_amul', 1) # type: ignore
-nir_op_andg_ir3 = nir_op.define('nir_op_andg_ir3', 2) # type: ignore
-nir_op_b16all_fequal16 = nir_op.define('nir_op_b16all_fequal16', 3) # type: ignore
-nir_op_b16all_fequal2 = nir_op.define('nir_op_b16all_fequal2', 4) # type: ignore
-nir_op_b16all_fequal3 = nir_op.define('nir_op_b16all_fequal3', 5) # type: ignore
-nir_op_b16all_fequal4 = nir_op.define('nir_op_b16all_fequal4', 6) # type: ignore
-nir_op_b16all_fequal5 = nir_op.define('nir_op_b16all_fequal5', 7) # type: ignore
-nir_op_b16all_fequal8 = nir_op.define('nir_op_b16all_fequal8', 8) # type: ignore
-nir_op_b16all_iequal16 = nir_op.define('nir_op_b16all_iequal16', 9) # type: ignore
-nir_op_b16all_iequal2 = nir_op.define('nir_op_b16all_iequal2', 10) # type: ignore
-nir_op_b16all_iequal3 = nir_op.define('nir_op_b16all_iequal3', 11) # type: ignore
-nir_op_b16all_iequal4 = nir_op.define('nir_op_b16all_iequal4', 12) # type: ignore
-nir_op_b16all_iequal5 = nir_op.define('nir_op_b16all_iequal5', 13) # type: ignore
-nir_op_b16all_iequal8 = nir_op.define('nir_op_b16all_iequal8', 14) # type: ignore
-nir_op_b16any_fnequal16 = nir_op.define('nir_op_b16any_fnequal16', 15) # type: ignore
-nir_op_b16any_fnequal2 = nir_op.define('nir_op_b16any_fnequal2', 16) # type: ignore
-nir_op_b16any_fnequal3 = nir_op.define('nir_op_b16any_fnequal3', 17) # type: ignore
-nir_op_b16any_fnequal4 = nir_op.define('nir_op_b16any_fnequal4', 18) # type: ignore
-nir_op_b16any_fnequal5 = nir_op.define('nir_op_b16any_fnequal5', 19) # type: ignore
-nir_op_b16any_fnequal8 = nir_op.define('nir_op_b16any_fnequal8', 20) # type: ignore
-nir_op_b16any_inequal16 = nir_op.define('nir_op_b16any_inequal16', 21) # type: ignore
-nir_op_b16any_inequal2 = nir_op.define('nir_op_b16any_inequal2', 22) # type: ignore
-nir_op_b16any_inequal3 = nir_op.define('nir_op_b16any_inequal3', 23) # type: ignore
-nir_op_b16any_inequal4 = nir_op.define('nir_op_b16any_inequal4', 24) # type: ignore
-nir_op_b16any_inequal5 = nir_op.define('nir_op_b16any_inequal5', 25) # type: ignore
-nir_op_b16any_inequal8 = nir_op.define('nir_op_b16any_inequal8', 26) # type: ignore
-nir_op_b16csel = nir_op.define('nir_op_b16csel', 27) # type: ignore
-nir_op_b2b1 = nir_op.define('nir_op_b2b1', 28) # type: ignore
-nir_op_b2b16 = nir_op.define('nir_op_b2b16', 29) # type: ignore
-nir_op_b2b32 = nir_op.define('nir_op_b2b32', 30) # type: ignore
-nir_op_b2b8 = nir_op.define('nir_op_b2b8', 31) # type: ignore
-nir_op_b2f16 = nir_op.define('nir_op_b2f16', 32) # type: ignore
-nir_op_b2f32 = nir_op.define('nir_op_b2f32', 33) # type: ignore
-nir_op_b2f64 = nir_op.define('nir_op_b2f64', 34) # type: ignore
-nir_op_b2i1 = nir_op.define('nir_op_b2i1', 35) # type: ignore
-nir_op_b2i16 = nir_op.define('nir_op_b2i16', 36) # type: ignore
-nir_op_b2i32 = nir_op.define('nir_op_b2i32', 37) # type: ignore
-nir_op_b2i64 = nir_op.define('nir_op_b2i64', 38) # type: ignore
-nir_op_b2i8 = nir_op.define('nir_op_b2i8', 39) # type: ignore
-nir_op_b32all_fequal16 = nir_op.define('nir_op_b32all_fequal16', 40) # type: ignore
-nir_op_b32all_fequal2 = nir_op.define('nir_op_b32all_fequal2', 41) # type: ignore
-nir_op_b32all_fequal3 = nir_op.define('nir_op_b32all_fequal3', 42) # type: ignore
-nir_op_b32all_fequal4 = nir_op.define('nir_op_b32all_fequal4', 43) # type: ignore
-nir_op_b32all_fequal5 = nir_op.define('nir_op_b32all_fequal5', 44) # type: ignore
-nir_op_b32all_fequal8 = nir_op.define('nir_op_b32all_fequal8', 45) # type: ignore
-nir_op_b32all_iequal16 = nir_op.define('nir_op_b32all_iequal16', 46) # type: ignore
-nir_op_b32all_iequal2 = nir_op.define('nir_op_b32all_iequal2', 47) # type: ignore
-nir_op_b32all_iequal3 = nir_op.define('nir_op_b32all_iequal3', 48) # type: ignore
-nir_op_b32all_iequal4 = nir_op.define('nir_op_b32all_iequal4', 49) # type: ignore
-nir_op_b32all_iequal5 = nir_op.define('nir_op_b32all_iequal5', 50) # type: ignore
-nir_op_b32all_iequal8 = nir_op.define('nir_op_b32all_iequal8', 51) # type: ignore
-nir_op_b32any_fnequal16 = nir_op.define('nir_op_b32any_fnequal16', 52) # type: ignore
-nir_op_b32any_fnequal2 = nir_op.define('nir_op_b32any_fnequal2', 53) # type: ignore
-nir_op_b32any_fnequal3 = nir_op.define('nir_op_b32any_fnequal3', 54) # type: ignore
-nir_op_b32any_fnequal4 = nir_op.define('nir_op_b32any_fnequal4', 55) # type: ignore
-nir_op_b32any_fnequal5 = nir_op.define('nir_op_b32any_fnequal5', 56) # type: ignore
-nir_op_b32any_fnequal8 = nir_op.define('nir_op_b32any_fnequal8', 57) # type: ignore
-nir_op_b32any_inequal16 = nir_op.define('nir_op_b32any_inequal16', 58) # type: ignore
-nir_op_b32any_inequal2 = nir_op.define('nir_op_b32any_inequal2', 59) # type: ignore
-nir_op_b32any_inequal3 = nir_op.define('nir_op_b32any_inequal3', 60) # type: ignore
-nir_op_b32any_inequal4 = nir_op.define('nir_op_b32any_inequal4', 61) # type: ignore
-nir_op_b32any_inequal5 = nir_op.define('nir_op_b32any_inequal5', 62) # type: ignore
-nir_op_b32any_inequal8 = nir_op.define('nir_op_b32any_inequal8', 63) # type: ignore
-nir_op_b32csel = nir_op.define('nir_op_b32csel', 64) # type: ignore
-nir_op_b32fcsel_mdg = nir_op.define('nir_op_b32fcsel_mdg', 65) # type: ignore
-nir_op_b8all_fequal16 = nir_op.define('nir_op_b8all_fequal16', 66) # type: ignore
-nir_op_b8all_fequal2 = nir_op.define('nir_op_b8all_fequal2', 67) # type: ignore
-nir_op_b8all_fequal3 = nir_op.define('nir_op_b8all_fequal3', 68) # type: ignore
-nir_op_b8all_fequal4 = nir_op.define('nir_op_b8all_fequal4', 69) # type: ignore
-nir_op_b8all_fequal5 = nir_op.define('nir_op_b8all_fequal5', 70) # type: ignore
-nir_op_b8all_fequal8 = nir_op.define('nir_op_b8all_fequal8', 71) # type: ignore
-nir_op_b8all_iequal16 = nir_op.define('nir_op_b8all_iequal16', 72) # type: ignore
-nir_op_b8all_iequal2 = nir_op.define('nir_op_b8all_iequal2', 73) # type: ignore
-nir_op_b8all_iequal3 = nir_op.define('nir_op_b8all_iequal3', 74) # type: ignore
-nir_op_b8all_iequal4 = nir_op.define('nir_op_b8all_iequal4', 75) # type: ignore
-nir_op_b8all_iequal5 = nir_op.define('nir_op_b8all_iequal5', 76) # type: ignore
-nir_op_b8all_iequal8 = nir_op.define('nir_op_b8all_iequal8', 77) # type: ignore
-nir_op_b8any_fnequal16 = nir_op.define('nir_op_b8any_fnequal16', 78) # type: ignore
-nir_op_b8any_fnequal2 = nir_op.define('nir_op_b8any_fnequal2', 79) # type: ignore
-nir_op_b8any_fnequal3 = nir_op.define('nir_op_b8any_fnequal3', 80) # type: ignore
-nir_op_b8any_fnequal4 = nir_op.define('nir_op_b8any_fnequal4', 81) # type: ignore
-nir_op_b8any_fnequal5 = nir_op.define('nir_op_b8any_fnequal5', 82) # type: ignore
-nir_op_b8any_fnequal8 = nir_op.define('nir_op_b8any_fnequal8', 83) # type: ignore
-nir_op_b8any_inequal16 = nir_op.define('nir_op_b8any_inequal16', 84) # type: ignore
-nir_op_b8any_inequal2 = nir_op.define('nir_op_b8any_inequal2', 85) # type: ignore
-nir_op_b8any_inequal3 = nir_op.define('nir_op_b8any_inequal3', 86) # type: ignore
-nir_op_b8any_inequal4 = nir_op.define('nir_op_b8any_inequal4', 87) # type: ignore
-nir_op_b8any_inequal5 = nir_op.define('nir_op_b8any_inequal5', 88) # type: ignore
-nir_op_b8any_inequal8 = nir_op.define('nir_op_b8any_inequal8', 89) # type: ignore
-nir_op_b8csel = nir_op.define('nir_op_b8csel', 90) # type: ignore
-nir_op_ball_fequal16 = nir_op.define('nir_op_ball_fequal16', 91) # type: ignore
-nir_op_ball_fequal2 = nir_op.define('nir_op_ball_fequal2', 92) # type: ignore
-nir_op_ball_fequal3 = nir_op.define('nir_op_ball_fequal3', 93) # type: ignore
-nir_op_ball_fequal4 = nir_op.define('nir_op_ball_fequal4', 94) # type: ignore
-nir_op_ball_fequal5 = nir_op.define('nir_op_ball_fequal5', 95) # type: ignore
-nir_op_ball_fequal8 = nir_op.define('nir_op_ball_fequal8', 96) # type: ignore
-nir_op_ball_iequal16 = nir_op.define('nir_op_ball_iequal16', 97) # type: ignore
-nir_op_ball_iequal2 = nir_op.define('nir_op_ball_iequal2', 98) # type: ignore
-nir_op_ball_iequal3 = nir_op.define('nir_op_ball_iequal3', 99) # type: ignore
-nir_op_ball_iequal4 = nir_op.define('nir_op_ball_iequal4', 100) # type: ignore
-nir_op_ball_iequal5 = nir_op.define('nir_op_ball_iequal5', 101) # type: ignore
-nir_op_ball_iequal8 = nir_op.define('nir_op_ball_iequal8', 102) # type: ignore
-nir_op_bany_fnequal16 = nir_op.define('nir_op_bany_fnequal16', 103) # type: ignore
-nir_op_bany_fnequal2 = nir_op.define('nir_op_bany_fnequal2', 104) # type: ignore
-nir_op_bany_fnequal3 = nir_op.define('nir_op_bany_fnequal3', 105) # type: ignore
-nir_op_bany_fnequal4 = nir_op.define('nir_op_bany_fnequal4', 106) # type: ignore
-nir_op_bany_fnequal5 = nir_op.define('nir_op_bany_fnequal5', 107) # type: ignore
-nir_op_bany_fnequal8 = nir_op.define('nir_op_bany_fnequal8', 108) # type: ignore
-nir_op_bany_inequal16 = nir_op.define('nir_op_bany_inequal16', 109) # type: ignore
-nir_op_bany_inequal2 = nir_op.define('nir_op_bany_inequal2', 110) # type: ignore
-nir_op_bany_inequal3 = nir_op.define('nir_op_bany_inequal3', 111) # type: ignore
-nir_op_bany_inequal4 = nir_op.define('nir_op_bany_inequal4', 112) # type: ignore
-nir_op_bany_inequal5 = nir_op.define('nir_op_bany_inequal5', 113) # type: ignore
-nir_op_bany_inequal8 = nir_op.define('nir_op_bany_inequal8', 114) # type: ignore
-nir_op_bcsel = nir_op.define('nir_op_bcsel', 115) # type: ignore
-nir_op_bf2f = nir_op.define('nir_op_bf2f', 116) # type: ignore
-nir_op_bfdot16 = nir_op.define('nir_op_bfdot16', 117) # type: ignore
-nir_op_bfdot2 = nir_op.define('nir_op_bfdot2', 118) # type: ignore
-nir_op_bfdot2_bfadd = nir_op.define('nir_op_bfdot2_bfadd', 119) # type: ignore
-nir_op_bfdot3 = nir_op.define('nir_op_bfdot3', 120) # type: ignore
-nir_op_bfdot4 = nir_op.define('nir_op_bfdot4', 121) # type: ignore
-nir_op_bfdot5 = nir_op.define('nir_op_bfdot5', 122) # type: ignore
-nir_op_bfdot8 = nir_op.define('nir_op_bfdot8', 123) # type: ignore
-nir_op_bffma = nir_op.define('nir_op_bffma', 124) # type: ignore
-nir_op_bfi = nir_op.define('nir_op_bfi', 125) # type: ignore
-nir_op_bfm = nir_op.define('nir_op_bfm', 126) # type: ignore
-nir_op_bfmul = nir_op.define('nir_op_bfmul', 127) # type: ignore
-nir_op_bit_count = nir_op.define('nir_op_bit_count', 128) # type: ignore
-nir_op_bitfield_insert = nir_op.define('nir_op_bitfield_insert', 129) # type: ignore
-nir_op_bitfield_reverse = nir_op.define('nir_op_bitfield_reverse', 130) # type: ignore
-nir_op_bitfield_select = nir_op.define('nir_op_bitfield_select', 131) # type: ignore
-nir_op_bitnz = nir_op.define('nir_op_bitnz', 132) # type: ignore
-nir_op_bitnz16 = nir_op.define('nir_op_bitnz16', 133) # type: ignore
-nir_op_bitnz32 = nir_op.define('nir_op_bitnz32', 134) # type: ignore
-nir_op_bitnz8 = nir_op.define('nir_op_bitnz8', 135) # type: ignore
-nir_op_bitz = nir_op.define('nir_op_bitz', 136) # type: ignore
-nir_op_bitz16 = nir_op.define('nir_op_bitz16', 137) # type: ignore
-nir_op_bitz32 = nir_op.define('nir_op_bitz32', 138) # type: ignore
-nir_op_bitz8 = nir_op.define('nir_op_bitz8', 139) # type: ignore
-nir_op_bounds_agx = nir_op.define('nir_op_bounds_agx', 140) # type: ignore
-nir_op_byte_perm_amd = nir_op.define('nir_op_byte_perm_amd', 141) # type: ignore
-nir_op_cube_amd = nir_op.define('nir_op_cube_amd', 142) # type: ignore
-nir_op_e4m3fn2f = nir_op.define('nir_op_e4m3fn2f', 143) # type: ignore
-nir_op_e5m22f = nir_op.define('nir_op_e5m22f', 144) # type: ignore
-nir_op_extr_agx = nir_op.define('nir_op_extr_agx', 145) # type: ignore
-nir_op_extract_i16 = nir_op.define('nir_op_extract_i16', 146) # type: ignore
-nir_op_extract_i8 = nir_op.define('nir_op_extract_i8', 147) # type: ignore
-nir_op_extract_u16 = nir_op.define('nir_op_extract_u16', 148) # type: ignore
-nir_op_extract_u8 = nir_op.define('nir_op_extract_u8', 149) # type: ignore
-nir_op_f2bf = nir_op.define('nir_op_f2bf', 150) # type: ignore
-nir_op_f2e4m3fn = nir_op.define('nir_op_f2e4m3fn', 151) # type: ignore
-nir_op_f2e4m3fn_sat = nir_op.define('nir_op_f2e4m3fn_sat', 152) # type: ignore
-nir_op_f2e4m3fn_satfn = nir_op.define('nir_op_f2e4m3fn_satfn', 153) # type: ignore
-nir_op_f2e5m2 = nir_op.define('nir_op_f2e5m2', 154) # type: ignore
-nir_op_f2e5m2_sat = nir_op.define('nir_op_f2e5m2_sat', 155) # type: ignore
-nir_op_f2f16 = nir_op.define('nir_op_f2f16', 156) # type: ignore
-nir_op_f2f16_rtne = nir_op.define('nir_op_f2f16_rtne', 157) # type: ignore
-nir_op_f2f16_rtz = nir_op.define('nir_op_f2f16_rtz', 158) # type: ignore
-nir_op_f2f32 = nir_op.define('nir_op_f2f32', 159) # type: ignore
-nir_op_f2f64 = nir_op.define('nir_op_f2f64', 160) # type: ignore
-nir_op_f2fmp = nir_op.define('nir_op_f2fmp', 161) # type: ignore
-nir_op_f2i1 = nir_op.define('nir_op_f2i1', 162) # type: ignore
-nir_op_f2i16 = nir_op.define('nir_op_f2i16', 163) # type: ignore
-nir_op_f2i32 = nir_op.define('nir_op_f2i32', 164) # type: ignore
-nir_op_f2i64 = nir_op.define('nir_op_f2i64', 165) # type: ignore
-nir_op_f2i8 = nir_op.define('nir_op_f2i8', 166) # type: ignore
-nir_op_f2imp = nir_op.define('nir_op_f2imp', 167) # type: ignore
-nir_op_f2snorm_16_v3d = nir_op.define('nir_op_f2snorm_16_v3d', 168) # type: ignore
-nir_op_f2u1 = nir_op.define('nir_op_f2u1', 169) # type: ignore
-nir_op_f2u16 = nir_op.define('nir_op_f2u16', 170) # type: ignore
-nir_op_f2u32 = nir_op.define('nir_op_f2u32', 171) # type: ignore
-nir_op_f2u64 = nir_op.define('nir_op_f2u64', 172) # type: ignore
-nir_op_f2u8 = nir_op.define('nir_op_f2u8', 173) # type: ignore
-nir_op_f2ump = nir_op.define('nir_op_f2ump', 174) # type: ignore
-nir_op_f2unorm_16_v3d = nir_op.define('nir_op_f2unorm_16_v3d', 175) # type: ignore
-nir_op_fabs = nir_op.define('nir_op_fabs', 176) # type: ignore
-nir_op_fadd = nir_op.define('nir_op_fadd', 177) # type: ignore
-nir_op_fall_equal16 = nir_op.define('nir_op_fall_equal16', 178) # type: ignore
-nir_op_fall_equal2 = nir_op.define('nir_op_fall_equal2', 179) # type: ignore
-nir_op_fall_equal3 = nir_op.define('nir_op_fall_equal3', 180) # type: ignore
-nir_op_fall_equal4 = nir_op.define('nir_op_fall_equal4', 181) # type: ignore
-nir_op_fall_equal5 = nir_op.define('nir_op_fall_equal5', 182) # type: ignore
-nir_op_fall_equal8 = nir_op.define('nir_op_fall_equal8', 183) # type: ignore
-nir_op_fany_nequal16 = nir_op.define('nir_op_fany_nequal16', 184) # type: ignore
-nir_op_fany_nequal2 = nir_op.define('nir_op_fany_nequal2', 185) # type: ignore
-nir_op_fany_nequal3 = nir_op.define('nir_op_fany_nequal3', 186) # type: ignore
-nir_op_fany_nequal4 = nir_op.define('nir_op_fany_nequal4', 187) # type: ignore
-nir_op_fany_nequal5 = nir_op.define('nir_op_fany_nequal5', 188) # type: ignore
-nir_op_fany_nequal8 = nir_op.define('nir_op_fany_nequal8', 189) # type: ignore
-nir_op_fceil = nir_op.define('nir_op_fceil', 190) # type: ignore
-nir_op_fclamp_pos = nir_op.define('nir_op_fclamp_pos', 191) # type: ignore
-nir_op_fcos = nir_op.define('nir_op_fcos', 192) # type: ignore
-nir_op_fcos_amd = nir_op.define('nir_op_fcos_amd', 193) # type: ignore
-nir_op_fcos_mdg = nir_op.define('nir_op_fcos_mdg', 194) # type: ignore
-nir_op_fcsel = nir_op.define('nir_op_fcsel', 195) # type: ignore
-nir_op_fcsel_ge = nir_op.define('nir_op_fcsel_ge', 196) # type: ignore
-nir_op_fcsel_gt = nir_op.define('nir_op_fcsel_gt', 197) # type: ignore
-nir_op_fdiv = nir_op.define('nir_op_fdiv', 198) # type: ignore
-nir_op_fdot16 = nir_op.define('nir_op_fdot16', 199) # type: ignore
-nir_op_fdot16_replicated = nir_op.define('nir_op_fdot16_replicated', 200) # type: ignore
-nir_op_fdot2 = nir_op.define('nir_op_fdot2', 201) # type: ignore
-nir_op_fdot2_replicated = nir_op.define('nir_op_fdot2_replicated', 202) # type: ignore
-nir_op_fdot3 = nir_op.define('nir_op_fdot3', 203) # type: ignore
-nir_op_fdot3_replicated = nir_op.define('nir_op_fdot3_replicated', 204) # type: ignore
-nir_op_fdot4 = nir_op.define('nir_op_fdot4', 205) # type: ignore
-nir_op_fdot4_replicated = nir_op.define('nir_op_fdot4_replicated', 206) # type: ignore
-nir_op_fdot5 = nir_op.define('nir_op_fdot5', 207) # type: ignore
-nir_op_fdot5_replicated = nir_op.define('nir_op_fdot5_replicated', 208) # type: ignore
-nir_op_fdot8 = nir_op.define('nir_op_fdot8', 209) # type: ignore
-nir_op_fdot8_replicated = nir_op.define('nir_op_fdot8_replicated', 210) # type: ignore
-nir_op_fdph = nir_op.define('nir_op_fdph', 211) # type: ignore
-nir_op_fdph_replicated = nir_op.define('nir_op_fdph_replicated', 212) # type: ignore
-nir_op_feq = nir_op.define('nir_op_feq', 213) # type: ignore
-nir_op_feq16 = nir_op.define('nir_op_feq16', 214) # type: ignore
-nir_op_feq32 = nir_op.define('nir_op_feq32', 215) # type: ignore
-nir_op_feq8 = nir_op.define('nir_op_feq8', 216) # type: ignore
-nir_op_fequ = nir_op.define('nir_op_fequ', 217) # type: ignore
-nir_op_fequ16 = nir_op.define('nir_op_fequ16', 218) # type: ignore
-nir_op_fequ32 = nir_op.define('nir_op_fequ32', 219) # type: ignore
-nir_op_fequ8 = nir_op.define('nir_op_fequ8', 220) # type: ignore
-nir_op_fexp2 = nir_op.define('nir_op_fexp2', 221) # type: ignore
-nir_op_ffloor = nir_op.define('nir_op_ffloor', 222) # type: ignore
-nir_op_ffma = nir_op.define('nir_op_ffma', 223) # type: ignore
-nir_op_ffmaz = nir_op.define('nir_op_ffmaz', 224) # type: ignore
-nir_op_ffract = nir_op.define('nir_op_ffract', 225) # type: ignore
-nir_op_fge = nir_op.define('nir_op_fge', 226) # type: ignore
-nir_op_fge16 = nir_op.define('nir_op_fge16', 227) # type: ignore
-nir_op_fge32 = nir_op.define('nir_op_fge32', 228) # type: ignore
-nir_op_fge8 = nir_op.define('nir_op_fge8', 229) # type: ignore
-nir_op_fgeu = nir_op.define('nir_op_fgeu', 230) # type: ignore
-nir_op_fgeu16 = nir_op.define('nir_op_fgeu16', 231) # type: ignore
-nir_op_fgeu32 = nir_op.define('nir_op_fgeu32', 232) # type: ignore
-nir_op_fgeu8 = nir_op.define('nir_op_fgeu8', 233) # type: ignore
-nir_op_find_lsb = nir_op.define('nir_op_find_lsb', 234) # type: ignore
-nir_op_fisfinite = nir_op.define('nir_op_fisfinite', 235) # type: ignore
-nir_op_fisfinite32 = nir_op.define('nir_op_fisfinite32', 236) # type: ignore
-nir_op_fisnormal = nir_op.define('nir_op_fisnormal', 237) # type: ignore
-nir_op_flog2 = nir_op.define('nir_op_flog2', 238) # type: ignore
-nir_op_flrp = nir_op.define('nir_op_flrp', 239) # type: ignore
-nir_op_flt = nir_op.define('nir_op_flt', 240) # type: ignore
-nir_op_flt16 = nir_op.define('nir_op_flt16', 241) # type: ignore
-nir_op_flt32 = nir_op.define('nir_op_flt32', 242) # type: ignore
-nir_op_flt8 = nir_op.define('nir_op_flt8', 243) # type: ignore
-nir_op_fltu = nir_op.define('nir_op_fltu', 244) # type: ignore
-nir_op_fltu16 = nir_op.define('nir_op_fltu16', 245) # type: ignore
-nir_op_fltu32 = nir_op.define('nir_op_fltu32', 246) # type: ignore
-nir_op_fltu8 = nir_op.define('nir_op_fltu8', 247) # type: ignore
-nir_op_fmax = nir_op.define('nir_op_fmax', 248) # type: ignore
-nir_op_fmax_agx = nir_op.define('nir_op_fmax_agx', 249) # type: ignore
-nir_op_fmin = nir_op.define('nir_op_fmin', 250) # type: ignore
-nir_op_fmin_agx = nir_op.define('nir_op_fmin_agx', 251) # type: ignore
-nir_op_fmod = nir_op.define('nir_op_fmod', 252) # type: ignore
-nir_op_fmul = nir_op.define('nir_op_fmul', 253) # type: ignore
-nir_op_fmulz = nir_op.define('nir_op_fmulz', 254) # type: ignore
-nir_op_fneg = nir_op.define('nir_op_fneg', 255) # type: ignore
-nir_op_fneo = nir_op.define('nir_op_fneo', 256) # type: ignore
-nir_op_fneo16 = nir_op.define('nir_op_fneo16', 257) # type: ignore
-nir_op_fneo32 = nir_op.define('nir_op_fneo32', 258) # type: ignore
-nir_op_fneo8 = nir_op.define('nir_op_fneo8', 259) # type: ignore
-nir_op_fneu = nir_op.define('nir_op_fneu', 260) # type: ignore
-nir_op_fneu16 = nir_op.define('nir_op_fneu16', 261) # type: ignore
-nir_op_fneu32 = nir_op.define('nir_op_fneu32', 262) # type: ignore
-nir_op_fneu8 = nir_op.define('nir_op_fneu8', 263) # type: ignore
-nir_op_ford = nir_op.define('nir_op_ford', 264) # type: ignore
-nir_op_ford16 = nir_op.define('nir_op_ford16', 265) # type: ignore
-nir_op_ford32 = nir_op.define('nir_op_ford32', 266) # type: ignore
-nir_op_ford8 = nir_op.define('nir_op_ford8', 267) # type: ignore
-nir_op_fpow = nir_op.define('nir_op_fpow', 268) # type: ignore
-nir_op_fquantize2f16 = nir_op.define('nir_op_fquantize2f16', 269) # type: ignore
-nir_op_frcp = nir_op.define('nir_op_frcp', 270) # type: ignore
-nir_op_frem = nir_op.define('nir_op_frem', 271) # type: ignore
-nir_op_frexp_exp = nir_op.define('nir_op_frexp_exp', 272) # type: ignore
-nir_op_frexp_sig = nir_op.define('nir_op_frexp_sig', 273) # type: ignore
-nir_op_fround_even = nir_op.define('nir_op_fround_even', 274) # type: ignore
-nir_op_frsq = nir_op.define('nir_op_frsq', 275) # type: ignore
-nir_op_fsat = nir_op.define('nir_op_fsat', 276) # type: ignore
-nir_op_fsat_signed = nir_op.define('nir_op_fsat_signed', 277) # type: ignore
-nir_op_fsign = nir_op.define('nir_op_fsign', 278) # type: ignore
-nir_op_fsin = nir_op.define('nir_op_fsin', 279) # type: ignore
-nir_op_fsin_agx = nir_op.define('nir_op_fsin_agx', 280) # type: ignore
-nir_op_fsin_amd = nir_op.define('nir_op_fsin_amd', 281) # type: ignore
-nir_op_fsin_mdg = nir_op.define('nir_op_fsin_mdg', 282) # type: ignore
-nir_op_fsqrt = nir_op.define('nir_op_fsqrt', 283) # type: ignore
-nir_op_fsub = nir_op.define('nir_op_fsub', 284) # type: ignore
-nir_op_fsum2 = nir_op.define('nir_op_fsum2', 285) # type: ignore
-nir_op_fsum3 = nir_op.define('nir_op_fsum3', 286) # type: ignore
-nir_op_fsum4 = nir_op.define('nir_op_fsum4', 287) # type: ignore
-nir_op_ftrunc = nir_op.define('nir_op_ftrunc', 288) # type: ignore
-nir_op_funord = nir_op.define('nir_op_funord', 289) # type: ignore
-nir_op_funord16 = nir_op.define('nir_op_funord16', 290) # type: ignore
-nir_op_funord32 = nir_op.define('nir_op_funord32', 291) # type: ignore
-nir_op_funord8 = nir_op.define('nir_op_funord8', 292) # type: ignore
-nir_op_i2f16 = nir_op.define('nir_op_i2f16', 293) # type: ignore
-nir_op_i2f32 = nir_op.define('nir_op_i2f32', 294) # type: ignore
-nir_op_i2f64 = nir_op.define('nir_op_i2f64', 295) # type: ignore
-nir_op_i2fmp = nir_op.define('nir_op_i2fmp', 296) # type: ignore
-nir_op_i2i1 = nir_op.define('nir_op_i2i1', 297) # type: ignore
-nir_op_i2i16 = nir_op.define('nir_op_i2i16', 298) # type: ignore
-nir_op_i2i32 = nir_op.define('nir_op_i2i32', 299) # type: ignore
-nir_op_i2i64 = nir_op.define('nir_op_i2i64', 300) # type: ignore
-nir_op_i2i8 = nir_op.define('nir_op_i2i8', 301) # type: ignore
-nir_op_i2imp = nir_op.define('nir_op_i2imp', 302) # type: ignore
-nir_op_i32csel_ge = nir_op.define('nir_op_i32csel_ge', 303) # type: ignore
-nir_op_i32csel_gt = nir_op.define('nir_op_i32csel_gt', 304) # type: ignore
-nir_op_iabs = nir_op.define('nir_op_iabs', 305) # type: ignore
-nir_op_iadd = nir_op.define('nir_op_iadd', 306) # type: ignore
-nir_op_iadd3 = nir_op.define('nir_op_iadd3', 307) # type: ignore
-nir_op_iadd_sat = nir_op.define('nir_op_iadd_sat', 308) # type: ignore
-nir_op_iand = nir_op.define('nir_op_iand', 309) # type: ignore
-nir_op_ibfe = nir_op.define('nir_op_ibfe', 310) # type: ignore
-nir_op_ibitfield_extract = nir_op.define('nir_op_ibitfield_extract', 311) # type: ignore
-nir_op_icsel_eqz = nir_op.define('nir_op_icsel_eqz', 312) # type: ignore
-nir_op_idiv = nir_op.define('nir_op_idiv', 313) # type: ignore
-nir_op_ieq = nir_op.define('nir_op_ieq', 314) # type: ignore
-nir_op_ieq16 = nir_op.define('nir_op_ieq16', 315) # type: ignore
-nir_op_ieq32 = nir_op.define('nir_op_ieq32', 316) # type: ignore
-nir_op_ieq8 = nir_op.define('nir_op_ieq8', 317) # type: ignore
-nir_op_ifind_msb = nir_op.define('nir_op_ifind_msb', 318) # type: ignore
-nir_op_ifind_msb_rev = nir_op.define('nir_op_ifind_msb_rev', 319) # type: ignore
-nir_op_ige = nir_op.define('nir_op_ige', 320) # type: ignore
-nir_op_ige16 = nir_op.define('nir_op_ige16', 321) # type: ignore
-nir_op_ige32 = nir_op.define('nir_op_ige32', 322) # type: ignore
-nir_op_ige8 = nir_op.define('nir_op_ige8', 323) # type: ignore
-nir_op_ihadd = nir_op.define('nir_op_ihadd', 324) # type: ignore
-nir_op_ilea_agx = nir_op.define('nir_op_ilea_agx', 325) # type: ignore
-nir_op_ilt = nir_op.define('nir_op_ilt', 326) # type: ignore
-nir_op_ilt16 = nir_op.define('nir_op_ilt16', 327) # type: ignore
-nir_op_ilt32 = nir_op.define('nir_op_ilt32', 328) # type: ignore
-nir_op_ilt8 = nir_op.define('nir_op_ilt8', 329) # type: ignore
-nir_op_imad = nir_op.define('nir_op_imad', 330) # type: ignore
-nir_op_imad24_ir3 = nir_op.define('nir_op_imad24_ir3', 331) # type: ignore
-nir_op_imadsh_mix16 = nir_op.define('nir_op_imadsh_mix16', 332) # type: ignore
-nir_op_imadshl_agx = nir_op.define('nir_op_imadshl_agx', 333) # type: ignore
-nir_op_imax = nir_op.define('nir_op_imax', 334) # type: ignore
-nir_op_imin = nir_op.define('nir_op_imin', 335) # type: ignore
-nir_op_imod = nir_op.define('nir_op_imod', 336) # type: ignore
-nir_op_imsubshl_agx = nir_op.define('nir_op_imsubshl_agx', 337) # type: ignore
-nir_op_imul = nir_op.define('nir_op_imul', 338) # type: ignore
-nir_op_imul24 = nir_op.define('nir_op_imul24', 339) # type: ignore
-nir_op_imul24_relaxed = nir_op.define('nir_op_imul24_relaxed', 340) # type: ignore
-nir_op_imul_2x32_64 = nir_op.define('nir_op_imul_2x32_64', 341) # type: ignore
-nir_op_imul_32x16 = nir_op.define('nir_op_imul_32x16', 342) # type: ignore
-nir_op_imul_high = nir_op.define('nir_op_imul_high', 343) # type: ignore
-nir_op_ine = nir_op.define('nir_op_ine', 344) # type: ignore
-nir_op_ine16 = nir_op.define('nir_op_ine16', 345) # type: ignore
-nir_op_ine32 = nir_op.define('nir_op_ine32', 346) # type: ignore
-nir_op_ine8 = nir_op.define('nir_op_ine8', 347) # type: ignore
-nir_op_ineg = nir_op.define('nir_op_ineg', 348) # type: ignore
-nir_op_inot = nir_op.define('nir_op_inot', 349) # type: ignore
-nir_op_insert_u16 = nir_op.define('nir_op_insert_u16', 350) # type: ignore
-nir_op_insert_u8 = nir_op.define('nir_op_insert_u8', 351) # type: ignore
-nir_op_interleave_agx = nir_op.define('nir_op_interleave_agx', 352) # type: ignore
-nir_op_ior = nir_op.define('nir_op_ior', 353) # type: ignore
-nir_op_irem = nir_op.define('nir_op_irem', 354) # type: ignore
-nir_op_irhadd = nir_op.define('nir_op_irhadd', 355) # type: ignore
-nir_op_ishl = nir_op.define('nir_op_ishl', 356) # type: ignore
-nir_op_ishr = nir_op.define('nir_op_ishr', 357) # type: ignore
-nir_op_isign = nir_op.define('nir_op_isign', 358) # type: ignore
-nir_op_isub = nir_op.define('nir_op_isub', 359) # type: ignore
-nir_op_isub_sat = nir_op.define('nir_op_isub_sat', 360) # type: ignore
-nir_op_ixor = nir_op.define('nir_op_ixor', 361) # type: ignore
-nir_op_ldexp = nir_op.define('nir_op_ldexp', 362) # type: ignore
-nir_op_ldexp16_pan = nir_op.define('nir_op_ldexp16_pan', 363) # type: ignore
-nir_op_lea_nv = nir_op.define('nir_op_lea_nv', 364) # type: ignore
-nir_op_mov = nir_op.define('nir_op_mov', 365) # type: ignore
-nir_op_mqsad_4x8 = nir_op.define('nir_op_mqsad_4x8', 366) # type: ignore
-nir_op_msad_4x8 = nir_op.define('nir_op_msad_4x8', 367) # type: ignore
-nir_op_pack_2x16_to_snorm_2x8_v3d = nir_op.define('nir_op_pack_2x16_to_snorm_2x8_v3d', 368) # type: ignore
-nir_op_pack_2x16_to_unorm_10_2_v3d = nir_op.define('nir_op_pack_2x16_to_unorm_10_2_v3d', 369) # type: ignore
-nir_op_pack_2x16_to_unorm_2x10_v3d = nir_op.define('nir_op_pack_2x16_to_unorm_2x10_v3d', 370) # type: ignore
-nir_op_pack_2x16_to_unorm_2x8_v3d = nir_op.define('nir_op_pack_2x16_to_unorm_2x8_v3d', 371) # type: ignore
-nir_op_pack_2x32_to_2x16_v3d = nir_op.define('nir_op_pack_2x32_to_2x16_v3d', 372) # type: ignore
-nir_op_pack_32_2x16 = nir_op.define('nir_op_pack_32_2x16', 373) # type: ignore
-nir_op_pack_32_2x16_split = nir_op.define('nir_op_pack_32_2x16_split', 374) # type: ignore
-nir_op_pack_32_4x8 = nir_op.define('nir_op_pack_32_4x8', 375) # type: ignore
-nir_op_pack_32_4x8_split = nir_op.define('nir_op_pack_32_4x8_split', 376) # type: ignore
-nir_op_pack_32_to_r11g11b10_v3d = nir_op.define('nir_op_pack_32_to_r11g11b10_v3d', 377) # type: ignore
-nir_op_pack_4x16_to_4x8_v3d = nir_op.define('nir_op_pack_4x16_to_4x8_v3d', 378) # type: ignore
-nir_op_pack_64_2x32 = nir_op.define('nir_op_pack_64_2x32', 379) # type: ignore
-nir_op_pack_64_2x32_split = nir_op.define('nir_op_pack_64_2x32_split', 380) # type: ignore
-nir_op_pack_64_4x16 = nir_op.define('nir_op_pack_64_4x16', 381) # type: ignore
-nir_op_pack_double_2x32_dxil = nir_op.define('nir_op_pack_double_2x32_dxil', 382) # type: ignore
-nir_op_pack_half_2x16 = nir_op.define('nir_op_pack_half_2x16', 383) # type: ignore
-nir_op_pack_half_2x16_rtz_split = nir_op.define('nir_op_pack_half_2x16_rtz_split', 384) # type: ignore
-nir_op_pack_half_2x16_split = nir_op.define('nir_op_pack_half_2x16_split', 385) # type: ignore
-nir_op_pack_sint_2x16 = nir_op.define('nir_op_pack_sint_2x16', 386) # type: ignore
-nir_op_pack_snorm_2x16 = nir_op.define('nir_op_pack_snorm_2x16', 387) # type: ignore
-nir_op_pack_snorm_4x8 = nir_op.define('nir_op_pack_snorm_4x8', 388) # type: ignore
-nir_op_pack_uint_2x16 = nir_op.define('nir_op_pack_uint_2x16', 389) # type: ignore
-nir_op_pack_uint_32_to_r10g10b10a2_v3d = nir_op.define('nir_op_pack_uint_32_to_r10g10b10a2_v3d', 390) # type: ignore
-nir_op_pack_unorm_2x16 = nir_op.define('nir_op_pack_unorm_2x16', 391) # type: ignore
-nir_op_pack_unorm_4x8 = nir_op.define('nir_op_pack_unorm_4x8', 392) # type: ignore
-nir_op_pack_uvec2_to_uint = nir_op.define('nir_op_pack_uvec2_to_uint', 393) # type: ignore
-nir_op_pack_uvec4_to_uint = nir_op.define('nir_op_pack_uvec4_to_uint', 394) # type: ignore
-nir_op_prmt_nv = nir_op.define('nir_op_prmt_nv', 395) # type: ignore
-nir_op_sdot_2x16_iadd = nir_op.define('nir_op_sdot_2x16_iadd', 396) # type: ignore
-nir_op_sdot_2x16_iadd_sat = nir_op.define('nir_op_sdot_2x16_iadd_sat', 397) # type: ignore
-nir_op_sdot_4x8_iadd = nir_op.define('nir_op_sdot_4x8_iadd', 398) # type: ignore
-nir_op_sdot_4x8_iadd_sat = nir_op.define('nir_op_sdot_4x8_iadd_sat', 399) # type: ignore
-nir_op_seq = nir_op.define('nir_op_seq', 400) # type: ignore
-nir_op_sge = nir_op.define('nir_op_sge', 401) # type: ignore
-nir_op_shfr = nir_op.define('nir_op_shfr', 402) # type: ignore
-nir_op_shlg_ir3 = nir_op.define('nir_op_shlg_ir3', 403) # type: ignore
-nir_op_shlm_ir3 = nir_op.define('nir_op_shlm_ir3', 404) # type: ignore
-nir_op_shrg_ir3 = nir_op.define('nir_op_shrg_ir3', 405) # type: ignore
-nir_op_shrm_ir3 = nir_op.define('nir_op_shrm_ir3', 406) # type: ignore
-nir_op_slt = nir_op.define('nir_op_slt', 407) # type: ignore
-nir_op_sne = nir_op.define('nir_op_sne', 408) # type: ignore
-nir_op_sudot_4x8_iadd = nir_op.define('nir_op_sudot_4x8_iadd', 409) # type: ignore
-nir_op_sudot_4x8_iadd_sat = nir_op.define('nir_op_sudot_4x8_iadd_sat', 410) # type: ignore
-nir_op_u2f16 = nir_op.define('nir_op_u2f16', 411) # type: ignore
-nir_op_u2f32 = nir_op.define('nir_op_u2f32', 412) # type: ignore
-nir_op_u2f64 = nir_op.define('nir_op_u2f64', 413) # type: ignore
-nir_op_u2fmp = nir_op.define('nir_op_u2fmp', 414) # type: ignore
-nir_op_u2u1 = nir_op.define('nir_op_u2u1', 415) # type: ignore
-nir_op_u2u16 = nir_op.define('nir_op_u2u16', 416) # type: ignore
-nir_op_u2u32 = nir_op.define('nir_op_u2u32', 417) # type: ignore
-nir_op_u2u64 = nir_op.define('nir_op_u2u64', 418) # type: ignore
-nir_op_u2u8 = nir_op.define('nir_op_u2u8', 419) # type: ignore
-nir_op_uabs_isub = nir_op.define('nir_op_uabs_isub', 420) # type: ignore
-nir_op_uabs_usub = nir_op.define('nir_op_uabs_usub', 421) # type: ignore
-nir_op_uadd_carry = nir_op.define('nir_op_uadd_carry', 422) # type: ignore
-nir_op_uadd_sat = nir_op.define('nir_op_uadd_sat', 423) # type: ignore
-nir_op_ubfe = nir_op.define('nir_op_ubfe', 424) # type: ignore
-nir_op_ubitfield_extract = nir_op.define('nir_op_ubitfield_extract', 425) # type: ignore
-nir_op_uclz = nir_op.define('nir_op_uclz', 426) # type: ignore
-nir_op_udiv = nir_op.define('nir_op_udiv', 427) # type: ignore
-nir_op_udiv_aligned_4 = nir_op.define('nir_op_udiv_aligned_4', 428) # type: ignore
-nir_op_udot_2x16_uadd = nir_op.define('nir_op_udot_2x16_uadd', 429) # type: ignore
-nir_op_udot_2x16_uadd_sat = nir_op.define('nir_op_udot_2x16_uadd_sat', 430) # type: ignore
-nir_op_udot_4x8_uadd = nir_op.define('nir_op_udot_4x8_uadd', 431) # type: ignore
-nir_op_udot_4x8_uadd_sat = nir_op.define('nir_op_udot_4x8_uadd_sat', 432) # type: ignore
-nir_op_ufind_msb = nir_op.define('nir_op_ufind_msb', 433) # type: ignore
-nir_op_ufind_msb_rev = nir_op.define('nir_op_ufind_msb_rev', 434) # type: ignore
-nir_op_uge = nir_op.define('nir_op_uge', 435) # type: ignore
-nir_op_uge16 = nir_op.define('nir_op_uge16', 436) # type: ignore
-nir_op_uge32 = nir_op.define('nir_op_uge32', 437) # type: ignore
-nir_op_uge8 = nir_op.define('nir_op_uge8', 438) # type: ignore
-nir_op_uhadd = nir_op.define('nir_op_uhadd', 439) # type: ignore
-nir_op_ulea_agx = nir_op.define('nir_op_ulea_agx', 440) # type: ignore
-nir_op_ult = nir_op.define('nir_op_ult', 441) # type: ignore
-nir_op_ult16 = nir_op.define('nir_op_ult16', 442) # type: ignore
-nir_op_ult32 = nir_op.define('nir_op_ult32', 443) # type: ignore
-nir_op_ult8 = nir_op.define('nir_op_ult8', 444) # type: ignore
-nir_op_umad24 = nir_op.define('nir_op_umad24', 445) # type: ignore
-nir_op_umad24_relaxed = nir_op.define('nir_op_umad24_relaxed', 446) # type: ignore
-nir_op_umax = nir_op.define('nir_op_umax', 447) # type: ignore
-nir_op_umax_4x8_vc4 = nir_op.define('nir_op_umax_4x8_vc4', 448) # type: ignore
-nir_op_umin = nir_op.define('nir_op_umin', 449) # type: ignore
-nir_op_umin_4x8_vc4 = nir_op.define('nir_op_umin_4x8_vc4', 450) # type: ignore
-nir_op_umod = nir_op.define('nir_op_umod', 451) # type: ignore
-nir_op_umul24 = nir_op.define('nir_op_umul24', 452) # type: ignore
-nir_op_umul24_relaxed = nir_op.define('nir_op_umul24_relaxed', 453) # type: ignore
-nir_op_umul_2x32_64 = nir_op.define('nir_op_umul_2x32_64', 454) # type: ignore
-nir_op_umul_32x16 = nir_op.define('nir_op_umul_32x16', 455) # type: ignore
-nir_op_umul_high = nir_op.define('nir_op_umul_high', 456) # type: ignore
-nir_op_umul_low = nir_op.define('nir_op_umul_low', 457) # type: ignore
-nir_op_umul_unorm_4x8_vc4 = nir_op.define('nir_op_umul_unorm_4x8_vc4', 458) # type: ignore
-nir_op_unpack_32_2x16 = nir_op.define('nir_op_unpack_32_2x16', 459) # type: ignore
-nir_op_unpack_32_2x16_split_x = nir_op.define('nir_op_unpack_32_2x16_split_x', 460) # type: ignore
-nir_op_unpack_32_2x16_split_y = nir_op.define('nir_op_unpack_32_2x16_split_y', 461) # type: ignore
-nir_op_unpack_32_4x8 = nir_op.define('nir_op_unpack_32_4x8', 462) # type: ignore
-nir_op_unpack_64_2x32 = nir_op.define('nir_op_unpack_64_2x32', 463) # type: ignore
-nir_op_unpack_64_2x32_split_x = nir_op.define('nir_op_unpack_64_2x32_split_x', 464) # type: ignore
-nir_op_unpack_64_2x32_split_y = nir_op.define('nir_op_unpack_64_2x32_split_y', 465) # type: ignore
-nir_op_unpack_64_4x16 = nir_op.define('nir_op_unpack_64_4x16', 466) # type: ignore
-nir_op_unpack_double_2x32_dxil = nir_op.define('nir_op_unpack_double_2x32_dxil', 467) # type: ignore
-nir_op_unpack_half_2x16 = nir_op.define('nir_op_unpack_half_2x16', 468) # type: ignore
-nir_op_unpack_half_2x16_split_x = nir_op.define('nir_op_unpack_half_2x16_split_x', 469) # type: ignore
-nir_op_unpack_half_2x16_split_y = nir_op.define('nir_op_unpack_half_2x16_split_y', 470) # type: ignore
-nir_op_unpack_snorm_2x16 = nir_op.define('nir_op_unpack_snorm_2x16', 471) # type: ignore
-nir_op_unpack_snorm_4x8 = nir_op.define('nir_op_unpack_snorm_4x8', 472) # type: ignore
-nir_op_unpack_unorm_2x16 = nir_op.define('nir_op_unpack_unorm_2x16', 473) # type: ignore
-nir_op_unpack_unorm_4x8 = nir_op.define('nir_op_unpack_unorm_4x8', 474) # type: ignore
-nir_op_urhadd = nir_op.define('nir_op_urhadd', 475) # type: ignore
-nir_op_urol = nir_op.define('nir_op_urol', 476) # type: ignore
-nir_op_uror = nir_op.define('nir_op_uror', 477) # type: ignore
-nir_op_usadd_4x8_vc4 = nir_op.define('nir_op_usadd_4x8_vc4', 478) # type: ignore
-nir_op_ushr = nir_op.define('nir_op_ushr', 479) # type: ignore
-nir_op_ussub_4x8_vc4 = nir_op.define('nir_op_ussub_4x8_vc4', 480) # type: ignore
-nir_op_usub_borrow = nir_op.define('nir_op_usub_borrow', 481) # type: ignore
-nir_op_usub_sat = nir_op.define('nir_op_usub_sat', 482) # type: ignore
-nir_op_vec16 = nir_op.define('nir_op_vec16', 483) # type: ignore
-nir_op_vec2 = nir_op.define('nir_op_vec2', 484) # type: ignore
-nir_op_vec3 = nir_op.define('nir_op_vec3', 485) # type: ignore
-nir_op_vec4 = nir_op.define('nir_op_vec4', 486) # type: ignore
-nir_op_vec5 = nir_op.define('nir_op_vec5', 487) # type: ignore
-nir_op_vec8 = nir_op.define('nir_op_vec8', 488) # type: ignore
-nir_last_opcode = nir_op.define('nir_last_opcode', 488) # type: ignore
-nir_num_opcodes = nir_op.define('nir_num_opcodes', 489) # type: ignore
+class nir_op(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_op_alignbyte_amd = nir_op.define('nir_op_alignbyte_amd', 0)
+nir_op_amul = nir_op.define('nir_op_amul', 1)
+nir_op_andg_ir3 = nir_op.define('nir_op_andg_ir3', 2)
+nir_op_b16all_fequal16 = nir_op.define('nir_op_b16all_fequal16', 3)
+nir_op_b16all_fequal2 = nir_op.define('nir_op_b16all_fequal2', 4)
+nir_op_b16all_fequal3 = nir_op.define('nir_op_b16all_fequal3', 5)
+nir_op_b16all_fequal4 = nir_op.define('nir_op_b16all_fequal4', 6)
+nir_op_b16all_fequal5 = nir_op.define('nir_op_b16all_fequal5', 7)
+nir_op_b16all_fequal8 = nir_op.define('nir_op_b16all_fequal8', 8)
+nir_op_b16all_iequal16 = nir_op.define('nir_op_b16all_iequal16', 9)
+nir_op_b16all_iequal2 = nir_op.define('nir_op_b16all_iequal2', 10)
+nir_op_b16all_iequal3 = nir_op.define('nir_op_b16all_iequal3', 11)
+nir_op_b16all_iequal4 = nir_op.define('nir_op_b16all_iequal4', 12)
+nir_op_b16all_iequal5 = nir_op.define('nir_op_b16all_iequal5', 13)
+nir_op_b16all_iequal8 = nir_op.define('nir_op_b16all_iequal8', 14)
+nir_op_b16any_fnequal16 = nir_op.define('nir_op_b16any_fnequal16', 15)
+nir_op_b16any_fnequal2 = nir_op.define('nir_op_b16any_fnequal2', 16)
+nir_op_b16any_fnequal3 = nir_op.define('nir_op_b16any_fnequal3', 17)
+nir_op_b16any_fnequal4 = nir_op.define('nir_op_b16any_fnequal4', 18)
+nir_op_b16any_fnequal5 = nir_op.define('nir_op_b16any_fnequal5', 19)
+nir_op_b16any_fnequal8 = nir_op.define('nir_op_b16any_fnequal8', 20)
+nir_op_b16any_inequal16 = nir_op.define('nir_op_b16any_inequal16', 21)
+nir_op_b16any_inequal2 = nir_op.define('nir_op_b16any_inequal2', 22)
+nir_op_b16any_inequal3 = nir_op.define('nir_op_b16any_inequal3', 23)
+nir_op_b16any_inequal4 = nir_op.define('nir_op_b16any_inequal4', 24)
+nir_op_b16any_inequal5 = nir_op.define('nir_op_b16any_inequal5', 25)
+nir_op_b16any_inequal8 = nir_op.define('nir_op_b16any_inequal8', 26)
+nir_op_b16csel = nir_op.define('nir_op_b16csel', 27)
+nir_op_b2b1 = nir_op.define('nir_op_b2b1', 28)
+nir_op_b2b16 = nir_op.define('nir_op_b2b16', 29)
+nir_op_b2b32 = nir_op.define('nir_op_b2b32', 30)
+nir_op_b2b8 = nir_op.define('nir_op_b2b8', 31)
+nir_op_b2f16 = nir_op.define('nir_op_b2f16', 32)
+nir_op_b2f32 = nir_op.define('nir_op_b2f32', 33)
+nir_op_b2f64 = nir_op.define('nir_op_b2f64', 34)
+nir_op_b2i1 = nir_op.define('nir_op_b2i1', 35)
+nir_op_b2i16 = nir_op.define('nir_op_b2i16', 36)
+nir_op_b2i32 = nir_op.define('nir_op_b2i32', 37)
+nir_op_b2i64 = nir_op.define('nir_op_b2i64', 38)
+nir_op_b2i8 = nir_op.define('nir_op_b2i8', 39)
+nir_op_b32all_fequal16 = nir_op.define('nir_op_b32all_fequal16', 40)
+nir_op_b32all_fequal2 = nir_op.define('nir_op_b32all_fequal2', 41)
+nir_op_b32all_fequal3 = nir_op.define('nir_op_b32all_fequal3', 42)
+nir_op_b32all_fequal4 = nir_op.define('nir_op_b32all_fequal4', 43)
+nir_op_b32all_fequal5 = nir_op.define('nir_op_b32all_fequal5', 44)
+nir_op_b32all_fequal8 = nir_op.define('nir_op_b32all_fequal8', 45)
+nir_op_b32all_iequal16 = nir_op.define('nir_op_b32all_iequal16', 46)
+nir_op_b32all_iequal2 = nir_op.define('nir_op_b32all_iequal2', 47)
+nir_op_b32all_iequal3 = nir_op.define('nir_op_b32all_iequal3', 48)
+nir_op_b32all_iequal4 = nir_op.define('nir_op_b32all_iequal4', 49)
+nir_op_b32all_iequal5 = nir_op.define('nir_op_b32all_iequal5', 50)
+nir_op_b32all_iequal8 = nir_op.define('nir_op_b32all_iequal8', 51)
+nir_op_b32any_fnequal16 = nir_op.define('nir_op_b32any_fnequal16', 52)
+nir_op_b32any_fnequal2 = nir_op.define('nir_op_b32any_fnequal2', 53)
+nir_op_b32any_fnequal3 = nir_op.define('nir_op_b32any_fnequal3', 54)
+nir_op_b32any_fnequal4 = nir_op.define('nir_op_b32any_fnequal4', 55)
+nir_op_b32any_fnequal5 = nir_op.define('nir_op_b32any_fnequal5', 56)
+nir_op_b32any_fnequal8 = nir_op.define('nir_op_b32any_fnequal8', 57)
+nir_op_b32any_inequal16 = nir_op.define('nir_op_b32any_inequal16', 58)
+nir_op_b32any_inequal2 = nir_op.define('nir_op_b32any_inequal2', 59)
+nir_op_b32any_inequal3 = nir_op.define('nir_op_b32any_inequal3', 60)
+nir_op_b32any_inequal4 = nir_op.define('nir_op_b32any_inequal4', 61)
+nir_op_b32any_inequal5 = nir_op.define('nir_op_b32any_inequal5', 62)
+nir_op_b32any_inequal8 = nir_op.define('nir_op_b32any_inequal8', 63)
+nir_op_b32csel = nir_op.define('nir_op_b32csel', 64)
+nir_op_b32fcsel_mdg = nir_op.define('nir_op_b32fcsel_mdg', 65)
+nir_op_b8all_fequal16 = nir_op.define('nir_op_b8all_fequal16', 66)
+nir_op_b8all_fequal2 = nir_op.define('nir_op_b8all_fequal2', 67)
+nir_op_b8all_fequal3 = nir_op.define('nir_op_b8all_fequal3', 68)
+nir_op_b8all_fequal4 = nir_op.define('nir_op_b8all_fequal4', 69)
+nir_op_b8all_fequal5 = nir_op.define('nir_op_b8all_fequal5', 70)
+nir_op_b8all_fequal8 = nir_op.define('nir_op_b8all_fequal8', 71)
+nir_op_b8all_iequal16 = nir_op.define('nir_op_b8all_iequal16', 72)
+nir_op_b8all_iequal2 = nir_op.define('nir_op_b8all_iequal2', 73)
+nir_op_b8all_iequal3 = nir_op.define('nir_op_b8all_iequal3', 74)
+nir_op_b8all_iequal4 = nir_op.define('nir_op_b8all_iequal4', 75)
+nir_op_b8all_iequal5 = nir_op.define('nir_op_b8all_iequal5', 76)
+nir_op_b8all_iequal8 = nir_op.define('nir_op_b8all_iequal8', 77)
+nir_op_b8any_fnequal16 = nir_op.define('nir_op_b8any_fnequal16', 78)
+nir_op_b8any_fnequal2 = nir_op.define('nir_op_b8any_fnequal2', 79)
+nir_op_b8any_fnequal3 = nir_op.define('nir_op_b8any_fnequal3', 80)
+nir_op_b8any_fnequal4 = nir_op.define('nir_op_b8any_fnequal4', 81)
+nir_op_b8any_fnequal5 = nir_op.define('nir_op_b8any_fnequal5', 82)
+nir_op_b8any_fnequal8 = nir_op.define('nir_op_b8any_fnequal8', 83)
+nir_op_b8any_inequal16 = nir_op.define('nir_op_b8any_inequal16', 84)
+nir_op_b8any_inequal2 = nir_op.define('nir_op_b8any_inequal2', 85)
+nir_op_b8any_inequal3 = nir_op.define('nir_op_b8any_inequal3', 86)
+nir_op_b8any_inequal4 = nir_op.define('nir_op_b8any_inequal4', 87)
+nir_op_b8any_inequal5 = nir_op.define('nir_op_b8any_inequal5', 88)
+nir_op_b8any_inequal8 = nir_op.define('nir_op_b8any_inequal8', 89)
+nir_op_b8csel = nir_op.define('nir_op_b8csel', 90)
+nir_op_ball_fequal16 = nir_op.define('nir_op_ball_fequal16', 91)
+nir_op_ball_fequal2 = nir_op.define('nir_op_ball_fequal2', 92)
+nir_op_ball_fequal3 = nir_op.define('nir_op_ball_fequal3', 93)
+nir_op_ball_fequal4 = nir_op.define('nir_op_ball_fequal4', 94)
+nir_op_ball_fequal5 = nir_op.define('nir_op_ball_fequal5', 95)
+nir_op_ball_fequal8 = nir_op.define('nir_op_ball_fequal8', 96)
+nir_op_ball_iequal16 = nir_op.define('nir_op_ball_iequal16', 97)
+nir_op_ball_iequal2 = nir_op.define('nir_op_ball_iequal2', 98)
+nir_op_ball_iequal3 = nir_op.define('nir_op_ball_iequal3', 99)
+nir_op_ball_iequal4 = nir_op.define('nir_op_ball_iequal4', 100)
+nir_op_ball_iequal5 = nir_op.define('nir_op_ball_iequal5', 101)
+nir_op_ball_iequal8 = nir_op.define('nir_op_ball_iequal8', 102)
+nir_op_bany_fnequal16 = nir_op.define('nir_op_bany_fnequal16', 103)
+nir_op_bany_fnequal2 = nir_op.define('nir_op_bany_fnequal2', 104)
+nir_op_bany_fnequal3 = nir_op.define('nir_op_bany_fnequal3', 105)
+nir_op_bany_fnequal4 = nir_op.define('nir_op_bany_fnequal4', 106)
+nir_op_bany_fnequal5 = nir_op.define('nir_op_bany_fnequal5', 107)
+nir_op_bany_fnequal8 = nir_op.define('nir_op_bany_fnequal8', 108)
+nir_op_bany_inequal16 = nir_op.define('nir_op_bany_inequal16', 109)
+nir_op_bany_inequal2 = nir_op.define('nir_op_bany_inequal2', 110)
+nir_op_bany_inequal3 = nir_op.define('nir_op_bany_inequal3', 111)
+nir_op_bany_inequal4 = nir_op.define('nir_op_bany_inequal4', 112)
+nir_op_bany_inequal5 = nir_op.define('nir_op_bany_inequal5', 113)
+nir_op_bany_inequal8 = nir_op.define('nir_op_bany_inequal8', 114)
+nir_op_bcsel = nir_op.define('nir_op_bcsel', 115)
+nir_op_bf2f = nir_op.define('nir_op_bf2f', 116)
+nir_op_bfdot16 = nir_op.define('nir_op_bfdot16', 117)
+nir_op_bfdot2 = nir_op.define('nir_op_bfdot2', 118)
+nir_op_bfdot2_bfadd = nir_op.define('nir_op_bfdot2_bfadd', 119)
+nir_op_bfdot3 = nir_op.define('nir_op_bfdot3', 120)
+nir_op_bfdot4 = nir_op.define('nir_op_bfdot4', 121)
+nir_op_bfdot5 = nir_op.define('nir_op_bfdot5', 122)
+nir_op_bfdot8 = nir_op.define('nir_op_bfdot8', 123)
+nir_op_bffma = nir_op.define('nir_op_bffma', 124)
+nir_op_bfi = nir_op.define('nir_op_bfi', 125)
+nir_op_bfm = nir_op.define('nir_op_bfm', 126)
+nir_op_bfmul = nir_op.define('nir_op_bfmul', 127)
+nir_op_bit_count = nir_op.define('nir_op_bit_count', 128)
+nir_op_bitfield_insert = nir_op.define('nir_op_bitfield_insert', 129)
+nir_op_bitfield_reverse = nir_op.define('nir_op_bitfield_reverse', 130)
+nir_op_bitfield_select = nir_op.define('nir_op_bitfield_select', 131)
+nir_op_bitnz = nir_op.define('nir_op_bitnz', 132)
+nir_op_bitnz16 = nir_op.define('nir_op_bitnz16', 133)
+nir_op_bitnz32 = nir_op.define('nir_op_bitnz32', 134)
+nir_op_bitnz8 = nir_op.define('nir_op_bitnz8', 135)
+nir_op_bitz = nir_op.define('nir_op_bitz', 136)
+nir_op_bitz16 = nir_op.define('nir_op_bitz16', 137)
+nir_op_bitz32 = nir_op.define('nir_op_bitz32', 138)
+nir_op_bitz8 = nir_op.define('nir_op_bitz8', 139)
+nir_op_bounds_agx = nir_op.define('nir_op_bounds_agx', 140)
+nir_op_byte_perm_amd = nir_op.define('nir_op_byte_perm_amd', 141)
+nir_op_cube_amd = nir_op.define('nir_op_cube_amd', 142)
+nir_op_e4m3fn2f = nir_op.define('nir_op_e4m3fn2f', 143)
+nir_op_e5m22f = nir_op.define('nir_op_e5m22f', 144)
+nir_op_extr_agx = nir_op.define('nir_op_extr_agx', 145)
+nir_op_extract_i16 = nir_op.define('nir_op_extract_i16', 146)
+nir_op_extract_i8 = nir_op.define('nir_op_extract_i8', 147)
+nir_op_extract_u16 = nir_op.define('nir_op_extract_u16', 148)
+nir_op_extract_u8 = nir_op.define('nir_op_extract_u8', 149)
+nir_op_f2bf = nir_op.define('nir_op_f2bf', 150)
+nir_op_f2e4m3fn = nir_op.define('nir_op_f2e4m3fn', 151)
+nir_op_f2e4m3fn_sat = nir_op.define('nir_op_f2e4m3fn_sat', 152)
+nir_op_f2e4m3fn_satfn = nir_op.define('nir_op_f2e4m3fn_satfn', 153)
+nir_op_f2e5m2 = nir_op.define('nir_op_f2e5m2', 154)
+nir_op_f2e5m2_sat = nir_op.define('nir_op_f2e5m2_sat', 155)
+nir_op_f2f16 = nir_op.define('nir_op_f2f16', 156)
+nir_op_f2f16_rtne = nir_op.define('nir_op_f2f16_rtne', 157)
+nir_op_f2f16_rtz = nir_op.define('nir_op_f2f16_rtz', 158)
+nir_op_f2f32 = nir_op.define('nir_op_f2f32', 159)
+nir_op_f2f64 = nir_op.define('nir_op_f2f64', 160)
+nir_op_f2fmp = nir_op.define('nir_op_f2fmp', 161)
+nir_op_f2i1 = nir_op.define('nir_op_f2i1', 162)
+nir_op_f2i16 = nir_op.define('nir_op_f2i16', 163)
+nir_op_f2i32 = nir_op.define('nir_op_f2i32', 164)
+nir_op_f2i64 = nir_op.define('nir_op_f2i64', 165)
+nir_op_f2i8 = nir_op.define('nir_op_f2i8', 166)
+nir_op_f2imp = nir_op.define('nir_op_f2imp', 167)
+nir_op_f2snorm_16_v3d = nir_op.define('nir_op_f2snorm_16_v3d', 168)
+nir_op_f2u1 = nir_op.define('nir_op_f2u1', 169)
+nir_op_f2u16 = nir_op.define('nir_op_f2u16', 170)
+nir_op_f2u32 = nir_op.define('nir_op_f2u32', 171)
+nir_op_f2u64 = nir_op.define('nir_op_f2u64', 172)
+nir_op_f2u8 = nir_op.define('nir_op_f2u8', 173)
+nir_op_f2ump = nir_op.define('nir_op_f2ump', 174)
+nir_op_f2unorm_16_v3d = nir_op.define('nir_op_f2unorm_16_v3d', 175)
+nir_op_fabs = nir_op.define('nir_op_fabs', 176)
+nir_op_fadd = nir_op.define('nir_op_fadd', 177)
+nir_op_fall_equal16 = nir_op.define('nir_op_fall_equal16', 178)
+nir_op_fall_equal2 = nir_op.define('nir_op_fall_equal2', 179)
+nir_op_fall_equal3 = nir_op.define('nir_op_fall_equal3', 180)
+nir_op_fall_equal4 = nir_op.define('nir_op_fall_equal4', 181)
+nir_op_fall_equal5 = nir_op.define('nir_op_fall_equal5', 182)
+nir_op_fall_equal8 = nir_op.define('nir_op_fall_equal8', 183)
+nir_op_fany_nequal16 = nir_op.define('nir_op_fany_nequal16', 184)
+nir_op_fany_nequal2 = nir_op.define('nir_op_fany_nequal2', 185)
+nir_op_fany_nequal3 = nir_op.define('nir_op_fany_nequal3', 186)
+nir_op_fany_nequal4 = nir_op.define('nir_op_fany_nequal4', 187)
+nir_op_fany_nequal5 = nir_op.define('nir_op_fany_nequal5', 188)
+nir_op_fany_nequal8 = nir_op.define('nir_op_fany_nequal8', 189)
+nir_op_fceil = nir_op.define('nir_op_fceil', 190)
+nir_op_fclamp_pos = nir_op.define('nir_op_fclamp_pos', 191)
+nir_op_fcos = nir_op.define('nir_op_fcos', 192)
+nir_op_fcos_amd = nir_op.define('nir_op_fcos_amd', 193)
+nir_op_fcos_mdg = nir_op.define('nir_op_fcos_mdg', 194)
+nir_op_fcsel = nir_op.define('nir_op_fcsel', 195)
+nir_op_fcsel_ge = nir_op.define('nir_op_fcsel_ge', 196)
+nir_op_fcsel_gt = nir_op.define('nir_op_fcsel_gt', 197)
+nir_op_fdiv = nir_op.define('nir_op_fdiv', 198)
+nir_op_fdot16 = nir_op.define('nir_op_fdot16', 199)
+nir_op_fdot16_replicated = nir_op.define('nir_op_fdot16_replicated', 200)
+nir_op_fdot2 = nir_op.define('nir_op_fdot2', 201)
+nir_op_fdot2_replicated = nir_op.define('nir_op_fdot2_replicated', 202)
+nir_op_fdot3 = nir_op.define('nir_op_fdot3', 203)
+nir_op_fdot3_replicated = nir_op.define('nir_op_fdot3_replicated', 204)
+nir_op_fdot4 = nir_op.define('nir_op_fdot4', 205)
+nir_op_fdot4_replicated = nir_op.define('nir_op_fdot4_replicated', 206)
+nir_op_fdot5 = nir_op.define('nir_op_fdot5', 207)
+nir_op_fdot5_replicated = nir_op.define('nir_op_fdot5_replicated', 208)
+nir_op_fdot8 = nir_op.define('nir_op_fdot8', 209)
+nir_op_fdot8_replicated = nir_op.define('nir_op_fdot8_replicated', 210)
+nir_op_fdph = nir_op.define('nir_op_fdph', 211)
+nir_op_fdph_replicated = nir_op.define('nir_op_fdph_replicated', 212)
+nir_op_feq = nir_op.define('nir_op_feq', 213)
+nir_op_feq16 = nir_op.define('nir_op_feq16', 214)
+nir_op_feq32 = nir_op.define('nir_op_feq32', 215)
+nir_op_feq8 = nir_op.define('nir_op_feq8', 216)
+nir_op_fequ = nir_op.define('nir_op_fequ', 217)
+nir_op_fequ16 = nir_op.define('nir_op_fequ16', 218)
+nir_op_fequ32 = nir_op.define('nir_op_fequ32', 219)
+nir_op_fequ8 = nir_op.define('nir_op_fequ8', 220)
+nir_op_fexp2 = nir_op.define('nir_op_fexp2', 221)
+nir_op_ffloor = nir_op.define('nir_op_ffloor', 222)
+nir_op_ffma = nir_op.define('nir_op_ffma', 223)
+nir_op_ffmaz = nir_op.define('nir_op_ffmaz', 224)
+nir_op_ffract = nir_op.define('nir_op_ffract', 225)
+nir_op_fge = nir_op.define('nir_op_fge', 226)
+nir_op_fge16 = nir_op.define('nir_op_fge16', 227)
+nir_op_fge32 = nir_op.define('nir_op_fge32', 228)
+nir_op_fge8 = nir_op.define('nir_op_fge8', 229)
+nir_op_fgeu = nir_op.define('nir_op_fgeu', 230)
+nir_op_fgeu16 = nir_op.define('nir_op_fgeu16', 231)
+nir_op_fgeu32 = nir_op.define('nir_op_fgeu32', 232)
+nir_op_fgeu8 = nir_op.define('nir_op_fgeu8', 233)
+nir_op_find_lsb = nir_op.define('nir_op_find_lsb', 234)
+nir_op_fisfinite = nir_op.define('nir_op_fisfinite', 235)
+nir_op_fisfinite32 = nir_op.define('nir_op_fisfinite32', 236)
+nir_op_fisnormal = nir_op.define('nir_op_fisnormal', 237)
+nir_op_flog2 = nir_op.define('nir_op_flog2', 238)
+nir_op_flrp = nir_op.define('nir_op_flrp', 239)
+nir_op_flt = nir_op.define('nir_op_flt', 240)
+nir_op_flt16 = nir_op.define('nir_op_flt16', 241)
+nir_op_flt32 = nir_op.define('nir_op_flt32', 242)
+nir_op_flt8 = nir_op.define('nir_op_flt8', 243)
+nir_op_fltu = nir_op.define('nir_op_fltu', 244)
+nir_op_fltu16 = nir_op.define('nir_op_fltu16', 245)
+nir_op_fltu32 = nir_op.define('nir_op_fltu32', 246)
+nir_op_fltu8 = nir_op.define('nir_op_fltu8', 247)
+nir_op_fmax = nir_op.define('nir_op_fmax', 248)
+nir_op_fmax_agx = nir_op.define('nir_op_fmax_agx', 249)
+nir_op_fmin = nir_op.define('nir_op_fmin', 250)
+nir_op_fmin_agx = nir_op.define('nir_op_fmin_agx', 251)
+nir_op_fmod = nir_op.define('nir_op_fmod', 252)
+nir_op_fmul = nir_op.define('nir_op_fmul', 253)
+nir_op_fmulz = nir_op.define('nir_op_fmulz', 254)
+nir_op_fneg = nir_op.define('nir_op_fneg', 255)
+nir_op_fneo = nir_op.define('nir_op_fneo', 256)
+nir_op_fneo16 = nir_op.define('nir_op_fneo16', 257)
+nir_op_fneo32 = nir_op.define('nir_op_fneo32', 258)
+nir_op_fneo8 = nir_op.define('nir_op_fneo8', 259)
+nir_op_fneu = nir_op.define('nir_op_fneu', 260)
+nir_op_fneu16 = nir_op.define('nir_op_fneu16', 261)
+nir_op_fneu32 = nir_op.define('nir_op_fneu32', 262)
+nir_op_fneu8 = nir_op.define('nir_op_fneu8', 263)
+nir_op_ford = nir_op.define('nir_op_ford', 264)
+nir_op_ford16 = nir_op.define('nir_op_ford16', 265)
+nir_op_ford32 = nir_op.define('nir_op_ford32', 266)
+nir_op_ford8 = nir_op.define('nir_op_ford8', 267)
+nir_op_fpow = nir_op.define('nir_op_fpow', 268)
+nir_op_fquantize2f16 = nir_op.define('nir_op_fquantize2f16', 269)
+nir_op_frcp = nir_op.define('nir_op_frcp', 270)
+nir_op_frem = nir_op.define('nir_op_frem', 271)
+nir_op_frexp_exp = nir_op.define('nir_op_frexp_exp', 272)
+nir_op_frexp_sig = nir_op.define('nir_op_frexp_sig', 273)
+nir_op_fround_even = nir_op.define('nir_op_fround_even', 274)
+nir_op_frsq = nir_op.define('nir_op_frsq', 275)
+nir_op_fsat = nir_op.define('nir_op_fsat', 276)
+nir_op_fsat_signed = nir_op.define('nir_op_fsat_signed', 277)
+nir_op_fsign = nir_op.define('nir_op_fsign', 278)
+nir_op_fsin = nir_op.define('nir_op_fsin', 279)
+nir_op_fsin_agx = nir_op.define('nir_op_fsin_agx', 280)
+nir_op_fsin_amd = nir_op.define('nir_op_fsin_amd', 281)
+nir_op_fsin_mdg = nir_op.define('nir_op_fsin_mdg', 282)
+nir_op_fsqrt = nir_op.define('nir_op_fsqrt', 283)
+nir_op_fsub = nir_op.define('nir_op_fsub', 284)
+nir_op_fsum2 = nir_op.define('nir_op_fsum2', 285)
+nir_op_fsum3 = nir_op.define('nir_op_fsum3', 286)
+nir_op_fsum4 = nir_op.define('nir_op_fsum4', 287)
+nir_op_ftrunc = nir_op.define('nir_op_ftrunc', 288)
+nir_op_funord = nir_op.define('nir_op_funord', 289)
+nir_op_funord16 = nir_op.define('nir_op_funord16', 290)
+nir_op_funord32 = nir_op.define('nir_op_funord32', 291)
+nir_op_funord8 = nir_op.define('nir_op_funord8', 292)
+nir_op_i2f16 = nir_op.define('nir_op_i2f16', 293)
+nir_op_i2f32 = nir_op.define('nir_op_i2f32', 294)
+nir_op_i2f64 = nir_op.define('nir_op_i2f64', 295)
+nir_op_i2fmp = nir_op.define('nir_op_i2fmp', 296)
+nir_op_i2i1 = nir_op.define('nir_op_i2i1', 297)
+nir_op_i2i16 = nir_op.define('nir_op_i2i16', 298)
+nir_op_i2i32 = nir_op.define('nir_op_i2i32', 299)
+nir_op_i2i64 = nir_op.define('nir_op_i2i64', 300)
+nir_op_i2i8 = nir_op.define('nir_op_i2i8', 301)
+nir_op_i2imp = nir_op.define('nir_op_i2imp', 302)
+nir_op_i32csel_ge = nir_op.define('nir_op_i32csel_ge', 303)
+nir_op_i32csel_gt = nir_op.define('nir_op_i32csel_gt', 304)
+nir_op_iabs = nir_op.define('nir_op_iabs', 305)
+nir_op_iadd = nir_op.define('nir_op_iadd', 306)
+nir_op_iadd3 = nir_op.define('nir_op_iadd3', 307)
+nir_op_iadd_sat = nir_op.define('nir_op_iadd_sat', 308)
+nir_op_iand = nir_op.define('nir_op_iand', 309)
+nir_op_ibfe = nir_op.define('nir_op_ibfe', 310)
+nir_op_ibitfield_extract = nir_op.define('nir_op_ibitfield_extract', 311)
+nir_op_icsel_eqz = nir_op.define('nir_op_icsel_eqz', 312)
+nir_op_idiv = nir_op.define('nir_op_idiv', 313)
+nir_op_ieq = nir_op.define('nir_op_ieq', 314)
+nir_op_ieq16 = nir_op.define('nir_op_ieq16', 315)
+nir_op_ieq32 = nir_op.define('nir_op_ieq32', 316)
+nir_op_ieq8 = nir_op.define('nir_op_ieq8', 317)
+nir_op_ifind_msb = nir_op.define('nir_op_ifind_msb', 318)
+nir_op_ifind_msb_rev = nir_op.define('nir_op_ifind_msb_rev', 319)
+nir_op_ige = nir_op.define('nir_op_ige', 320)
+nir_op_ige16 = nir_op.define('nir_op_ige16', 321)
+nir_op_ige32 = nir_op.define('nir_op_ige32', 322)
+nir_op_ige8 = nir_op.define('nir_op_ige8', 323)
+nir_op_ihadd = nir_op.define('nir_op_ihadd', 324)
+nir_op_ilea_agx = nir_op.define('nir_op_ilea_agx', 325)
+nir_op_ilt = nir_op.define('nir_op_ilt', 326)
+nir_op_ilt16 = nir_op.define('nir_op_ilt16', 327)
+nir_op_ilt32 = nir_op.define('nir_op_ilt32', 328)
+nir_op_ilt8 = nir_op.define('nir_op_ilt8', 329)
+nir_op_imad = nir_op.define('nir_op_imad', 330)
+nir_op_imad24_ir3 = nir_op.define('nir_op_imad24_ir3', 331)
+nir_op_imadsh_mix16 = nir_op.define('nir_op_imadsh_mix16', 332)
+nir_op_imadshl_agx = nir_op.define('nir_op_imadshl_agx', 333)
+nir_op_imax = nir_op.define('nir_op_imax', 334)
+nir_op_imin = nir_op.define('nir_op_imin', 335)
+nir_op_imod = nir_op.define('nir_op_imod', 336)
+nir_op_imsubshl_agx = nir_op.define('nir_op_imsubshl_agx', 337)
+nir_op_imul = nir_op.define('nir_op_imul', 338)
+nir_op_imul24 = nir_op.define('nir_op_imul24', 339)
+nir_op_imul24_relaxed = nir_op.define('nir_op_imul24_relaxed', 340)
+nir_op_imul_2x32_64 = nir_op.define('nir_op_imul_2x32_64', 341)
+nir_op_imul_32x16 = nir_op.define('nir_op_imul_32x16', 342)
+nir_op_imul_high = nir_op.define('nir_op_imul_high', 343)
+nir_op_ine = nir_op.define('nir_op_ine', 344)
+nir_op_ine16 = nir_op.define('nir_op_ine16', 345)
+nir_op_ine32 = nir_op.define('nir_op_ine32', 346)
+nir_op_ine8 = nir_op.define('nir_op_ine8', 347)
+nir_op_ineg = nir_op.define('nir_op_ineg', 348)
+nir_op_inot = nir_op.define('nir_op_inot', 349)
+nir_op_insert_u16 = nir_op.define('nir_op_insert_u16', 350)
+nir_op_insert_u8 = nir_op.define('nir_op_insert_u8', 351)
+nir_op_interleave_agx = nir_op.define('nir_op_interleave_agx', 352)
+nir_op_ior = nir_op.define('nir_op_ior', 353)
+nir_op_irem = nir_op.define('nir_op_irem', 354)
+nir_op_irhadd = nir_op.define('nir_op_irhadd', 355)
+nir_op_ishl = nir_op.define('nir_op_ishl', 356)
+nir_op_ishr = nir_op.define('nir_op_ishr', 357)
+nir_op_isign = nir_op.define('nir_op_isign', 358)
+nir_op_isub = nir_op.define('nir_op_isub', 359)
+nir_op_isub_sat = nir_op.define('nir_op_isub_sat', 360)
+nir_op_ixor = nir_op.define('nir_op_ixor', 361)
+nir_op_ldexp = nir_op.define('nir_op_ldexp', 362)
+nir_op_ldexp16_pan = nir_op.define('nir_op_ldexp16_pan', 363)
+nir_op_lea_nv = nir_op.define('nir_op_lea_nv', 364)
+nir_op_mov = nir_op.define('nir_op_mov', 365)
+nir_op_mqsad_4x8 = nir_op.define('nir_op_mqsad_4x8', 366)
+nir_op_msad_4x8 = nir_op.define('nir_op_msad_4x8', 367)
+nir_op_pack_2x16_to_snorm_2x8_v3d = nir_op.define('nir_op_pack_2x16_to_snorm_2x8_v3d', 368)
+nir_op_pack_2x16_to_unorm_10_2_v3d = nir_op.define('nir_op_pack_2x16_to_unorm_10_2_v3d', 369)
+nir_op_pack_2x16_to_unorm_2x10_v3d = nir_op.define('nir_op_pack_2x16_to_unorm_2x10_v3d', 370)
+nir_op_pack_2x16_to_unorm_2x8_v3d = nir_op.define('nir_op_pack_2x16_to_unorm_2x8_v3d', 371)
+nir_op_pack_2x32_to_2x16_v3d = nir_op.define('nir_op_pack_2x32_to_2x16_v3d', 372)
+nir_op_pack_32_2x16 = nir_op.define('nir_op_pack_32_2x16', 373)
+nir_op_pack_32_2x16_split = nir_op.define('nir_op_pack_32_2x16_split', 374)
+nir_op_pack_32_4x8 = nir_op.define('nir_op_pack_32_4x8', 375)
+nir_op_pack_32_4x8_split = nir_op.define('nir_op_pack_32_4x8_split', 376)
+nir_op_pack_32_to_r11g11b10_v3d = nir_op.define('nir_op_pack_32_to_r11g11b10_v3d', 377)
+nir_op_pack_4x16_to_4x8_v3d = nir_op.define('nir_op_pack_4x16_to_4x8_v3d', 378)
+nir_op_pack_64_2x32 = nir_op.define('nir_op_pack_64_2x32', 379)
+nir_op_pack_64_2x32_split = nir_op.define('nir_op_pack_64_2x32_split', 380)
+nir_op_pack_64_4x16 = nir_op.define('nir_op_pack_64_4x16', 381)
+nir_op_pack_double_2x32_dxil = nir_op.define('nir_op_pack_double_2x32_dxil', 382)
+nir_op_pack_half_2x16 = nir_op.define('nir_op_pack_half_2x16', 383)
+nir_op_pack_half_2x16_rtz_split = nir_op.define('nir_op_pack_half_2x16_rtz_split', 384)
+nir_op_pack_half_2x16_split = nir_op.define('nir_op_pack_half_2x16_split', 385)
+nir_op_pack_sint_2x16 = nir_op.define('nir_op_pack_sint_2x16', 386)
+nir_op_pack_snorm_2x16 = nir_op.define('nir_op_pack_snorm_2x16', 387)
+nir_op_pack_snorm_4x8 = nir_op.define('nir_op_pack_snorm_4x8', 388)
+nir_op_pack_uint_2x16 = nir_op.define('nir_op_pack_uint_2x16', 389)
+nir_op_pack_uint_32_to_r10g10b10a2_v3d = nir_op.define('nir_op_pack_uint_32_to_r10g10b10a2_v3d', 390)
+nir_op_pack_unorm_2x16 = nir_op.define('nir_op_pack_unorm_2x16', 391)
+nir_op_pack_unorm_4x8 = nir_op.define('nir_op_pack_unorm_4x8', 392)
+nir_op_pack_uvec2_to_uint = nir_op.define('nir_op_pack_uvec2_to_uint', 393)
+nir_op_pack_uvec4_to_uint = nir_op.define('nir_op_pack_uvec4_to_uint', 394)
+nir_op_prmt_nv = nir_op.define('nir_op_prmt_nv', 395)
+nir_op_sdot_2x16_iadd = nir_op.define('nir_op_sdot_2x16_iadd', 396)
+nir_op_sdot_2x16_iadd_sat = nir_op.define('nir_op_sdot_2x16_iadd_sat', 397)
+nir_op_sdot_4x8_iadd = nir_op.define('nir_op_sdot_4x8_iadd', 398)
+nir_op_sdot_4x8_iadd_sat = nir_op.define('nir_op_sdot_4x8_iadd_sat', 399)
+nir_op_seq = nir_op.define('nir_op_seq', 400)
+nir_op_sge = nir_op.define('nir_op_sge', 401)
+nir_op_shfr = nir_op.define('nir_op_shfr', 402)
+nir_op_shlg_ir3 = nir_op.define('nir_op_shlg_ir3', 403)
+nir_op_shlm_ir3 = nir_op.define('nir_op_shlm_ir3', 404)
+nir_op_shrg_ir3 = nir_op.define('nir_op_shrg_ir3', 405)
+nir_op_shrm_ir3 = nir_op.define('nir_op_shrm_ir3', 406)
+nir_op_slt = nir_op.define('nir_op_slt', 407)
+nir_op_sne = nir_op.define('nir_op_sne', 408)
+nir_op_sudot_4x8_iadd = nir_op.define('nir_op_sudot_4x8_iadd', 409)
+nir_op_sudot_4x8_iadd_sat = nir_op.define('nir_op_sudot_4x8_iadd_sat', 410)
+nir_op_u2f16 = nir_op.define('nir_op_u2f16', 411)
+nir_op_u2f32 = nir_op.define('nir_op_u2f32', 412)
+nir_op_u2f64 = nir_op.define('nir_op_u2f64', 413)
+nir_op_u2fmp = nir_op.define('nir_op_u2fmp', 414)
+nir_op_u2u1 = nir_op.define('nir_op_u2u1', 415)
+nir_op_u2u16 = nir_op.define('nir_op_u2u16', 416)
+nir_op_u2u32 = nir_op.define('nir_op_u2u32', 417)
+nir_op_u2u64 = nir_op.define('nir_op_u2u64', 418)
+nir_op_u2u8 = nir_op.define('nir_op_u2u8', 419)
+nir_op_uabs_isub = nir_op.define('nir_op_uabs_isub', 420)
+nir_op_uabs_usub = nir_op.define('nir_op_uabs_usub', 421)
+nir_op_uadd_carry = nir_op.define('nir_op_uadd_carry', 422)
+nir_op_uadd_sat = nir_op.define('nir_op_uadd_sat', 423)
+nir_op_ubfe = nir_op.define('nir_op_ubfe', 424)
+nir_op_ubitfield_extract = nir_op.define('nir_op_ubitfield_extract', 425)
+nir_op_uclz = nir_op.define('nir_op_uclz', 426)
+nir_op_udiv = nir_op.define('nir_op_udiv', 427)
+nir_op_udiv_aligned_4 = nir_op.define('nir_op_udiv_aligned_4', 428)
+nir_op_udot_2x16_uadd = nir_op.define('nir_op_udot_2x16_uadd', 429)
+nir_op_udot_2x16_uadd_sat = nir_op.define('nir_op_udot_2x16_uadd_sat', 430)
+nir_op_udot_4x8_uadd = nir_op.define('nir_op_udot_4x8_uadd', 431)
+nir_op_udot_4x8_uadd_sat = nir_op.define('nir_op_udot_4x8_uadd_sat', 432)
+nir_op_ufind_msb = nir_op.define('nir_op_ufind_msb', 433)
+nir_op_ufind_msb_rev = nir_op.define('nir_op_ufind_msb_rev', 434)
+nir_op_uge = nir_op.define('nir_op_uge', 435)
+nir_op_uge16 = nir_op.define('nir_op_uge16', 436)
+nir_op_uge32 = nir_op.define('nir_op_uge32', 437)
+nir_op_uge8 = nir_op.define('nir_op_uge8', 438)
+nir_op_uhadd = nir_op.define('nir_op_uhadd', 439)
+nir_op_ulea_agx = nir_op.define('nir_op_ulea_agx', 440)
+nir_op_ult = nir_op.define('nir_op_ult', 441)
+nir_op_ult16 = nir_op.define('nir_op_ult16', 442)
+nir_op_ult32 = nir_op.define('nir_op_ult32', 443)
+nir_op_ult8 = nir_op.define('nir_op_ult8', 444)
+nir_op_umad24 = nir_op.define('nir_op_umad24', 445)
+nir_op_umad24_relaxed = nir_op.define('nir_op_umad24_relaxed', 446)
+nir_op_umax = nir_op.define('nir_op_umax', 447)
+nir_op_umax_4x8_vc4 = nir_op.define('nir_op_umax_4x8_vc4', 448)
+nir_op_umin = nir_op.define('nir_op_umin', 449)
+nir_op_umin_4x8_vc4 = nir_op.define('nir_op_umin_4x8_vc4', 450)
+nir_op_umod = nir_op.define('nir_op_umod', 451)
+nir_op_umul24 = nir_op.define('nir_op_umul24', 452)
+nir_op_umul24_relaxed = nir_op.define('nir_op_umul24_relaxed', 453)
+nir_op_umul_2x32_64 = nir_op.define('nir_op_umul_2x32_64', 454)
+nir_op_umul_32x16 = nir_op.define('nir_op_umul_32x16', 455)
+nir_op_umul_high = nir_op.define('nir_op_umul_high', 456)
+nir_op_umul_low = nir_op.define('nir_op_umul_low', 457)
+nir_op_umul_unorm_4x8_vc4 = nir_op.define('nir_op_umul_unorm_4x8_vc4', 458)
+nir_op_unpack_32_2x16 = nir_op.define('nir_op_unpack_32_2x16', 459)
+nir_op_unpack_32_2x16_split_x = nir_op.define('nir_op_unpack_32_2x16_split_x', 460)
+nir_op_unpack_32_2x16_split_y = nir_op.define('nir_op_unpack_32_2x16_split_y', 461)
+nir_op_unpack_32_4x8 = nir_op.define('nir_op_unpack_32_4x8', 462)
+nir_op_unpack_64_2x32 = nir_op.define('nir_op_unpack_64_2x32', 463)
+nir_op_unpack_64_2x32_split_x = nir_op.define('nir_op_unpack_64_2x32_split_x', 464)
+nir_op_unpack_64_2x32_split_y = nir_op.define('nir_op_unpack_64_2x32_split_y', 465)
+nir_op_unpack_64_4x16 = nir_op.define('nir_op_unpack_64_4x16', 466)
+nir_op_unpack_double_2x32_dxil = nir_op.define('nir_op_unpack_double_2x32_dxil', 467)
+nir_op_unpack_half_2x16 = nir_op.define('nir_op_unpack_half_2x16', 468)
+nir_op_unpack_half_2x16_split_x = nir_op.define('nir_op_unpack_half_2x16_split_x', 469)
+nir_op_unpack_half_2x16_split_y = nir_op.define('nir_op_unpack_half_2x16_split_y', 470)
+nir_op_unpack_snorm_2x16 = nir_op.define('nir_op_unpack_snorm_2x16', 471)
+nir_op_unpack_snorm_4x8 = nir_op.define('nir_op_unpack_snorm_4x8', 472)
+nir_op_unpack_unorm_2x16 = nir_op.define('nir_op_unpack_unorm_2x16', 473)
+nir_op_unpack_unorm_4x8 = nir_op.define('nir_op_unpack_unorm_4x8', 474)
+nir_op_urhadd = nir_op.define('nir_op_urhadd', 475)
+nir_op_urol = nir_op.define('nir_op_urol', 476)
+nir_op_uror = nir_op.define('nir_op_uror', 477)
+nir_op_usadd_4x8_vc4 = nir_op.define('nir_op_usadd_4x8_vc4', 478)
+nir_op_ushr = nir_op.define('nir_op_ushr', 479)
+nir_op_ussub_4x8_vc4 = nir_op.define('nir_op_ussub_4x8_vc4', 480)
+nir_op_usub_borrow = nir_op.define('nir_op_usub_borrow', 481)
+nir_op_usub_sat = nir_op.define('nir_op_usub_sat', 482)
+nir_op_vec16 = nir_op.define('nir_op_vec16', 483)
+nir_op_vec2 = nir_op.define('nir_op_vec2', 484)
+nir_op_vec3 = nir_op.define('nir_op_vec3', 485)
+nir_op_vec4 = nir_op.define('nir_op_vec4', 486)
+nir_op_vec5 = nir_op.define('nir_op_vec5', 487)
+nir_op_vec8 = nir_op.define('nir_op_vec8', 488)
+nir_last_opcode = nir_op.define('nir_last_opcode', 488)
+nir_num_opcodes = nir_op.define('nir_num_opcodes', 489)
 
 @dll.bind
 def nir_type_conversion_op(src:nir_alu_type, dst:nir_alu_type, rnd:nir_rounding_mode) -> nir_op: ...
-nir_atomic_op = CEnum(Annotated[int, ctypes.c_uint32])
-nir_atomic_op_iadd = nir_atomic_op.define('nir_atomic_op_iadd', 0) # type: ignore
-nir_atomic_op_imin = nir_atomic_op.define('nir_atomic_op_imin', 1) # type: ignore
-nir_atomic_op_umin = nir_atomic_op.define('nir_atomic_op_umin', 2) # type: ignore
-nir_atomic_op_imax = nir_atomic_op.define('nir_atomic_op_imax', 3) # type: ignore
-nir_atomic_op_umax = nir_atomic_op.define('nir_atomic_op_umax', 4) # type: ignore
-nir_atomic_op_iand = nir_atomic_op.define('nir_atomic_op_iand', 5) # type: ignore
-nir_atomic_op_ior = nir_atomic_op.define('nir_atomic_op_ior', 6) # type: ignore
-nir_atomic_op_ixor = nir_atomic_op.define('nir_atomic_op_ixor', 7) # type: ignore
-nir_atomic_op_xchg = nir_atomic_op.define('nir_atomic_op_xchg', 8) # type: ignore
-nir_atomic_op_fadd = nir_atomic_op.define('nir_atomic_op_fadd', 9) # type: ignore
-nir_atomic_op_fmin = nir_atomic_op.define('nir_atomic_op_fmin', 10) # type: ignore
-nir_atomic_op_fmax = nir_atomic_op.define('nir_atomic_op_fmax', 11) # type: ignore
-nir_atomic_op_cmpxchg = nir_atomic_op.define('nir_atomic_op_cmpxchg', 12) # type: ignore
-nir_atomic_op_fcmpxchg = nir_atomic_op.define('nir_atomic_op_fcmpxchg', 13) # type: ignore
-nir_atomic_op_inc_wrap = nir_atomic_op.define('nir_atomic_op_inc_wrap', 14) # type: ignore
-nir_atomic_op_dec_wrap = nir_atomic_op.define('nir_atomic_op_dec_wrap', 15) # type: ignore
-nir_atomic_op_ordered_add_gfx12_amd = nir_atomic_op.define('nir_atomic_op_ordered_add_gfx12_amd', 16) # type: ignore
+class nir_atomic_op(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_atomic_op_iadd = nir_atomic_op.define('nir_atomic_op_iadd', 0)
+nir_atomic_op_imin = nir_atomic_op.define('nir_atomic_op_imin', 1)
+nir_atomic_op_umin = nir_atomic_op.define('nir_atomic_op_umin', 2)
+nir_atomic_op_imax = nir_atomic_op.define('nir_atomic_op_imax', 3)
+nir_atomic_op_umax = nir_atomic_op.define('nir_atomic_op_umax', 4)
+nir_atomic_op_iand = nir_atomic_op.define('nir_atomic_op_iand', 5)
+nir_atomic_op_ior = nir_atomic_op.define('nir_atomic_op_ior', 6)
+nir_atomic_op_ixor = nir_atomic_op.define('nir_atomic_op_ixor', 7)
+nir_atomic_op_xchg = nir_atomic_op.define('nir_atomic_op_xchg', 8)
+nir_atomic_op_fadd = nir_atomic_op.define('nir_atomic_op_fadd', 9)
+nir_atomic_op_fmin = nir_atomic_op.define('nir_atomic_op_fmin', 10)
+nir_atomic_op_fmax = nir_atomic_op.define('nir_atomic_op_fmax', 11)
+nir_atomic_op_cmpxchg = nir_atomic_op.define('nir_atomic_op_cmpxchg', 12)
+nir_atomic_op_fcmpxchg = nir_atomic_op.define('nir_atomic_op_fcmpxchg', 13)
+nir_atomic_op_inc_wrap = nir_atomic_op.define('nir_atomic_op_inc_wrap', 14)
+nir_atomic_op_dec_wrap = nir_atomic_op.define('nir_atomic_op_dec_wrap', 15)
+nir_atomic_op_ordered_add_gfx12_amd = nir_atomic_op.define('nir_atomic_op_ordered_add_gfx12_amd', 16)
 
 @dll.bind
 def nir_atomic_op_to_alu(op:nir_atomic_op) -> nir_op: ...
@@ -1433,10 +1433,10 @@ def nir_atomic_op_to_alu(op:nir_atomic_op) -> nir_op: ...
 def nir_op_vec(num_components:Annotated[int, ctypes.c_uint32]) -> nir_op: ...
 @dll.bind
 def nir_op_is_vec(op:nir_op) -> Annotated[bool, ctypes.c_bool]: ...
-nir_op_algebraic_property = CEnum(Annotated[int, ctypes.c_uint32])
-NIR_OP_IS_2SRC_COMMUTATIVE = nir_op_algebraic_property.define('NIR_OP_IS_2SRC_COMMUTATIVE', 1) # type: ignore
-NIR_OP_IS_ASSOCIATIVE = nir_op_algebraic_property.define('NIR_OP_IS_ASSOCIATIVE', 2) # type: ignore
-NIR_OP_IS_SELECTION = nir_op_algebraic_property.define('NIR_OP_IS_SELECTION', 4) # type: ignore
+class nir_op_algebraic_property(Annotated[int, ctypes.c_uint32], c.Enum): pass
+NIR_OP_IS_2SRC_COMMUTATIVE = nir_op_algebraic_property.define('NIR_OP_IS_2SRC_COMMUTATIVE', 1)
+NIR_OP_IS_ASSOCIATIVE = nir_op_algebraic_property.define('NIR_OP_IS_ASSOCIATIVE', 2)
+NIR_OP_IS_SELECTION = nir_op_algebraic_property.define('NIR_OP_IS_SELECTION', 4)
 
 @c.record
 class struct_nir_op_info(c.Struct):
@@ -1449,7 +1449,7 @@ class struct_nir_op_info(c.Struct):
   input_types: Annotated[c.Array[nir_alu_type, Literal[16]], 27]
   algebraic_properties: Annotated[nir_op_algebraic_property, 44]
   is_conversion: Annotated[Annotated[bool, ctypes.c_bool], 48]
-nir_op_info = struct_nir_op_info
+nir_op_info: TypeAlias = struct_nir_op_info
 try: nir_op_infos = c.Array[nir_op_info, Literal[489]].in_dll(dll, 'nir_op_infos')
 except (ValueError,AttributeError): pass
 @c.record
@@ -1463,7 +1463,7 @@ class struct_nir_alu_instr(c.Struct):
   fp_fast_math: Annotated[uint32_t, 36, 9, 3]
   _def: Annotated[nir_def, 40]
   src: Annotated[c.Array[nir_alu_src, Literal[0]], 72]
-nir_alu_instr = struct_nir_alu_instr
+nir_alu_instr: TypeAlias = struct_nir_alu_instr
 @dll.bind
 def nir_alu_src_copy(dest:c.POINTER[nir_alu_src], src:c.POINTER[nir_alu_src]) -> None: ...
 @dll.bind
@@ -1482,13 +1482,13 @@ def nir_alu_srcs_negative_equal_typed(alu1:c.POINTER[nir_alu_instr], alu2:c.POIN
 def nir_alu_srcs_negative_equal(alu1:c.POINTER[nir_alu_instr], alu2:c.POINTER[nir_alu_instr], src1:Annotated[int, ctypes.c_uint32], src2:Annotated[int, ctypes.c_uint32]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_alu_src_is_trivial_ssa(alu:c.POINTER[nir_alu_instr], srcn:Annotated[int, ctypes.c_uint32]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_deref_type = CEnum(Annotated[int, ctypes.c_uint32])
-nir_deref_type_var = nir_deref_type.define('nir_deref_type_var', 0) # type: ignore
-nir_deref_type_array = nir_deref_type.define('nir_deref_type_array', 1) # type: ignore
-nir_deref_type_array_wildcard = nir_deref_type.define('nir_deref_type_array_wildcard', 2) # type: ignore
-nir_deref_type_ptr_as_array = nir_deref_type.define('nir_deref_type_ptr_as_array', 3) # type: ignore
-nir_deref_type_struct = nir_deref_type.define('nir_deref_type_struct', 4) # type: ignore
-nir_deref_type_cast = nir_deref_type.define('nir_deref_type_cast', 5) # type: ignore
+class nir_deref_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_deref_type_var = nir_deref_type.define('nir_deref_type_var', 0)
+nir_deref_type_array = nir_deref_type.define('nir_deref_type_array', 1)
+nir_deref_type_array_wildcard = nir_deref_type.define('nir_deref_type_array_wildcard', 2)
+nir_deref_type_ptr_as_array = nir_deref_type.define('nir_deref_type_ptr_as_array', 3)
+nir_deref_type_struct = nir_deref_type.define('nir_deref_type_struct', 4)
+nir_deref_type_cast = nir_deref_type.define('nir_deref_type_cast', 5)
 
 @c.record
 class struct_nir_deref_instr(c.Struct):
@@ -1503,33 +1503,33 @@ class struct_nir_deref_instr(c.Struct):
   strct: Annotated[struct_nir_deref_instr_strct, 80]
   cast: Annotated[struct_nir_deref_instr_cast, 80]
   _def: Annotated[nir_def, 120]
-nir_variable_mode = CEnum(Annotated[int, ctypes.c_uint32])
-nir_var_system_value = nir_variable_mode.define('nir_var_system_value', 1) # type: ignore
-nir_var_uniform = nir_variable_mode.define('nir_var_uniform', 2) # type: ignore
-nir_var_shader_in = nir_variable_mode.define('nir_var_shader_in', 4) # type: ignore
-nir_var_shader_out = nir_variable_mode.define('nir_var_shader_out', 8) # type: ignore
-nir_var_image = nir_variable_mode.define('nir_var_image', 16) # type: ignore
-nir_var_shader_call_data = nir_variable_mode.define('nir_var_shader_call_data', 32) # type: ignore
-nir_var_ray_hit_attrib = nir_variable_mode.define('nir_var_ray_hit_attrib', 64) # type: ignore
-nir_var_mem_ubo = nir_variable_mode.define('nir_var_mem_ubo', 128) # type: ignore
-nir_var_mem_push_const = nir_variable_mode.define('nir_var_mem_push_const', 256) # type: ignore
-nir_var_mem_ssbo = nir_variable_mode.define('nir_var_mem_ssbo', 512) # type: ignore
-nir_var_mem_constant = nir_variable_mode.define('nir_var_mem_constant', 1024) # type: ignore
-nir_var_mem_task_payload = nir_variable_mode.define('nir_var_mem_task_payload', 2048) # type: ignore
-nir_var_mem_node_payload = nir_variable_mode.define('nir_var_mem_node_payload', 4096) # type: ignore
-nir_var_mem_node_payload_in = nir_variable_mode.define('nir_var_mem_node_payload_in', 8192) # type: ignore
-nir_var_function_in = nir_variable_mode.define('nir_var_function_in', 16384) # type: ignore
-nir_var_function_out = nir_variable_mode.define('nir_var_function_out', 32768) # type: ignore
-nir_var_function_inout = nir_variable_mode.define('nir_var_function_inout', 65536) # type: ignore
-nir_var_shader_temp = nir_variable_mode.define('nir_var_shader_temp', 131072) # type: ignore
-nir_var_function_temp = nir_variable_mode.define('nir_var_function_temp', 262144) # type: ignore
-nir_var_mem_shared = nir_variable_mode.define('nir_var_mem_shared', 524288) # type: ignore
-nir_var_mem_global = nir_variable_mode.define('nir_var_mem_global', 1048576) # type: ignore
-nir_var_mem_generic = nir_variable_mode.define('nir_var_mem_generic', 1966080) # type: ignore
-nir_var_read_only_modes = nir_variable_mode.define('nir_var_read_only_modes', 1159) # type: ignore
-nir_var_vec_indexable_modes = nir_variable_mode.define('nir_var_vec_indexable_modes', 1969033) # type: ignore
-nir_num_variable_modes = nir_variable_mode.define('nir_num_variable_modes', 21) # type: ignore
-nir_var_all = nir_variable_mode.define('nir_var_all', 2097151) # type: ignore
+class nir_variable_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_var_system_value = nir_variable_mode.define('nir_var_system_value', 1)
+nir_var_uniform = nir_variable_mode.define('nir_var_uniform', 2)
+nir_var_shader_in = nir_variable_mode.define('nir_var_shader_in', 4)
+nir_var_shader_out = nir_variable_mode.define('nir_var_shader_out', 8)
+nir_var_image = nir_variable_mode.define('nir_var_image', 16)
+nir_var_shader_call_data = nir_variable_mode.define('nir_var_shader_call_data', 32)
+nir_var_ray_hit_attrib = nir_variable_mode.define('nir_var_ray_hit_attrib', 64)
+nir_var_mem_ubo = nir_variable_mode.define('nir_var_mem_ubo', 128)
+nir_var_mem_push_const = nir_variable_mode.define('nir_var_mem_push_const', 256)
+nir_var_mem_ssbo = nir_variable_mode.define('nir_var_mem_ssbo', 512)
+nir_var_mem_constant = nir_variable_mode.define('nir_var_mem_constant', 1024)
+nir_var_mem_task_payload = nir_variable_mode.define('nir_var_mem_task_payload', 2048)
+nir_var_mem_node_payload = nir_variable_mode.define('nir_var_mem_node_payload', 4096)
+nir_var_mem_node_payload_in = nir_variable_mode.define('nir_var_mem_node_payload_in', 8192)
+nir_var_function_in = nir_variable_mode.define('nir_var_function_in', 16384)
+nir_var_function_out = nir_variable_mode.define('nir_var_function_out', 32768)
+nir_var_function_inout = nir_variable_mode.define('nir_var_function_inout', 65536)
+nir_var_shader_temp = nir_variable_mode.define('nir_var_shader_temp', 131072)
+nir_var_function_temp = nir_variable_mode.define('nir_var_function_temp', 262144)
+nir_var_mem_shared = nir_variable_mode.define('nir_var_mem_shared', 524288)
+nir_var_mem_global = nir_variable_mode.define('nir_var_mem_global', 1048576)
+nir_var_mem_generic = nir_variable_mode.define('nir_var_mem_generic', 1966080)
+nir_var_read_only_modes = nir_variable_mode.define('nir_var_read_only_modes', 1159)
+nir_var_vec_indexable_modes = nir_variable_mode.define('nir_var_vec_indexable_modes', 1969033)
+nir_num_variable_modes = nir_variable_mode.define('nir_num_variable_modes', 21)
+nir_var_all = nir_variable_mode.define('nir_var_all', 2097151)
 
 @c.record
 class struct_nir_deref_instr_arr(c.Struct):
@@ -1546,17 +1546,17 @@ class struct_nir_deref_instr_cast(c.Struct):
   ptr_stride: Annotated[Annotated[int, ctypes.c_uint32], 0]
   align_mul: Annotated[Annotated[int, ctypes.c_uint32], 4]
   align_offset: Annotated[Annotated[int, ctypes.c_uint32], 8]
-nir_deref_instr = struct_nir_deref_instr
+nir_deref_instr: TypeAlias = struct_nir_deref_instr
 @dll.bind
 def nir_deref_cast_is_trivial(cast:c.POINTER[nir_deref_instr]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_deref_instr_has_indirect(instr:c.POINTER[nir_deref_instr]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_deref_instr_is_known_out_of_bounds(instr:c.POINTER[nir_deref_instr]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_deref_instr_has_complex_use_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_deref_instr_has_complex_use_allow_memcpy_src = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_src', 1) # type: ignore
-nir_deref_instr_has_complex_use_allow_memcpy_dst = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_dst', 2) # type: ignore
-nir_deref_instr_has_complex_use_allow_atomics = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_atomics', 4) # type: ignore
+class nir_deref_instr_has_complex_use_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_deref_instr_has_complex_use_allow_memcpy_src = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_src', 1)
+nir_deref_instr_has_complex_use_allow_memcpy_dst = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_dst', 2)
+nir_deref_instr_has_complex_use_allow_atomics = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_atomics', 4)
 
 @dll.bind
 def nir_deref_instr_has_complex_use(instr:c.POINTER[nir_deref_instr], opts:nir_deref_instr_has_complex_use_options) -> Annotated[bool, ctypes.c_bool]: ...
@@ -1795,79 +1795,79 @@ class struct_nir_shader_compiler_options(c.Struct):
   varying_estimate_instr_cost: Annotated[c.CFUNCTYPE(Annotated[int, ctypes.c_uint32], c.POINTER[struct_nir_instr]), 232]
   max_varying_expression_cost: Annotated[Annotated[int, ctypes.c_uint32], 240]
 nir_shader_compiler_options: TypeAlias = struct_nir_shader_compiler_options
-nir_instr_filter_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_instr], c.POINTER[None])
-nir_lower_int64_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_imul64 = nir_lower_int64_options.define('nir_lower_imul64', 1) # type: ignore
-nir_lower_isign64 = nir_lower_int64_options.define('nir_lower_isign64', 2) # type: ignore
-nir_lower_divmod64 = nir_lower_int64_options.define('nir_lower_divmod64', 4) # type: ignore
-nir_lower_imul_high64 = nir_lower_int64_options.define('nir_lower_imul_high64', 8) # type: ignore
-nir_lower_bcsel64 = nir_lower_int64_options.define('nir_lower_bcsel64', 16) # type: ignore
-nir_lower_icmp64 = nir_lower_int64_options.define('nir_lower_icmp64', 32) # type: ignore
-nir_lower_iadd64 = nir_lower_int64_options.define('nir_lower_iadd64', 64) # type: ignore
-nir_lower_iabs64 = nir_lower_int64_options.define('nir_lower_iabs64', 128) # type: ignore
-nir_lower_ineg64 = nir_lower_int64_options.define('nir_lower_ineg64', 256) # type: ignore
-nir_lower_logic64 = nir_lower_int64_options.define('nir_lower_logic64', 512) # type: ignore
-nir_lower_minmax64 = nir_lower_int64_options.define('nir_lower_minmax64', 1024) # type: ignore
-nir_lower_shift64 = nir_lower_int64_options.define('nir_lower_shift64', 2048) # type: ignore
-nir_lower_imul_2x32_64 = nir_lower_int64_options.define('nir_lower_imul_2x32_64', 4096) # type: ignore
-nir_lower_extract64 = nir_lower_int64_options.define('nir_lower_extract64', 8192) # type: ignore
-nir_lower_ufind_msb64 = nir_lower_int64_options.define('nir_lower_ufind_msb64', 16384) # type: ignore
-nir_lower_bit_count64 = nir_lower_int64_options.define('nir_lower_bit_count64', 32768) # type: ignore
-nir_lower_subgroup_shuffle64 = nir_lower_int64_options.define('nir_lower_subgroup_shuffle64', 65536) # type: ignore
-nir_lower_scan_reduce_bitwise64 = nir_lower_int64_options.define('nir_lower_scan_reduce_bitwise64', 131072) # type: ignore
-nir_lower_scan_reduce_iadd64 = nir_lower_int64_options.define('nir_lower_scan_reduce_iadd64', 262144) # type: ignore
-nir_lower_vote_ieq64 = nir_lower_int64_options.define('nir_lower_vote_ieq64', 524288) # type: ignore
-nir_lower_usub_sat64 = nir_lower_int64_options.define('nir_lower_usub_sat64', 1048576) # type: ignore
-nir_lower_iadd_sat64 = nir_lower_int64_options.define('nir_lower_iadd_sat64', 2097152) # type: ignore
-nir_lower_find_lsb64 = nir_lower_int64_options.define('nir_lower_find_lsb64', 4194304) # type: ignore
-nir_lower_conv64 = nir_lower_int64_options.define('nir_lower_conv64', 8388608) # type: ignore
-nir_lower_uadd_sat64 = nir_lower_int64_options.define('nir_lower_uadd_sat64', 16777216) # type: ignore
-nir_lower_iadd3_64 = nir_lower_int64_options.define('nir_lower_iadd3_64', 33554432) # type: ignore
-nir_lower_bitfield_reverse64 = nir_lower_int64_options.define('nir_lower_bitfield_reverse64', 67108864) # type: ignore
-nir_lower_bitfield_extract64 = nir_lower_int64_options.define('nir_lower_bitfield_extract64', 134217728) # type: ignore
+nir_instr_filter_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_instr], c.POINTER[None])
+class nir_lower_int64_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_imul64 = nir_lower_int64_options.define('nir_lower_imul64', 1)
+nir_lower_isign64 = nir_lower_int64_options.define('nir_lower_isign64', 2)
+nir_lower_divmod64 = nir_lower_int64_options.define('nir_lower_divmod64', 4)
+nir_lower_imul_high64 = nir_lower_int64_options.define('nir_lower_imul_high64', 8)
+nir_lower_bcsel64 = nir_lower_int64_options.define('nir_lower_bcsel64', 16)
+nir_lower_icmp64 = nir_lower_int64_options.define('nir_lower_icmp64', 32)
+nir_lower_iadd64 = nir_lower_int64_options.define('nir_lower_iadd64', 64)
+nir_lower_iabs64 = nir_lower_int64_options.define('nir_lower_iabs64', 128)
+nir_lower_ineg64 = nir_lower_int64_options.define('nir_lower_ineg64', 256)
+nir_lower_logic64 = nir_lower_int64_options.define('nir_lower_logic64', 512)
+nir_lower_minmax64 = nir_lower_int64_options.define('nir_lower_minmax64', 1024)
+nir_lower_shift64 = nir_lower_int64_options.define('nir_lower_shift64', 2048)
+nir_lower_imul_2x32_64 = nir_lower_int64_options.define('nir_lower_imul_2x32_64', 4096)
+nir_lower_extract64 = nir_lower_int64_options.define('nir_lower_extract64', 8192)
+nir_lower_ufind_msb64 = nir_lower_int64_options.define('nir_lower_ufind_msb64', 16384)
+nir_lower_bit_count64 = nir_lower_int64_options.define('nir_lower_bit_count64', 32768)
+nir_lower_subgroup_shuffle64 = nir_lower_int64_options.define('nir_lower_subgroup_shuffle64', 65536)
+nir_lower_scan_reduce_bitwise64 = nir_lower_int64_options.define('nir_lower_scan_reduce_bitwise64', 131072)
+nir_lower_scan_reduce_iadd64 = nir_lower_int64_options.define('nir_lower_scan_reduce_iadd64', 262144)
+nir_lower_vote_ieq64 = nir_lower_int64_options.define('nir_lower_vote_ieq64', 524288)
+nir_lower_usub_sat64 = nir_lower_int64_options.define('nir_lower_usub_sat64', 1048576)
+nir_lower_iadd_sat64 = nir_lower_int64_options.define('nir_lower_iadd_sat64', 2097152)
+nir_lower_find_lsb64 = nir_lower_int64_options.define('nir_lower_find_lsb64', 4194304)
+nir_lower_conv64 = nir_lower_int64_options.define('nir_lower_conv64', 8388608)
+nir_lower_uadd_sat64 = nir_lower_int64_options.define('nir_lower_uadd_sat64', 16777216)
+nir_lower_iadd3_64 = nir_lower_int64_options.define('nir_lower_iadd3_64', 33554432)
+nir_lower_bitfield_reverse64 = nir_lower_int64_options.define('nir_lower_bitfield_reverse64', 67108864)
+nir_lower_bitfield_extract64 = nir_lower_int64_options.define('nir_lower_bitfield_extract64', 134217728)
 
-nir_lower_doubles_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_drcp = nir_lower_doubles_options.define('nir_lower_drcp', 1) # type: ignore
-nir_lower_dsqrt = nir_lower_doubles_options.define('nir_lower_dsqrt', 2) # type: ignore
-nir_lower_drsq = nir_lower_doubles_options.define('nir_lower_drsq', 4) # type: ignore
-nir_lower_dtrunc = nir_lower_doubles_options.define('nir_lower_dtrunc', 8) # type: ignore
-nir_lower_dfloor = nir_lower_doubles_options.define('nir_lower_dfloor', 16) # type: ignore
-nir_lower_dceil = nir_lower_doubles_options.define('nir_lower_dceil', 32) # type: ignore
-nir_lower_dfract = nir_lower_doubles_options.define('nir_lower_dfract', 64) # type: ignore
-nir_lower_dround_even = nir_lower_doubles_options.define('nir_lower_dround_even', 128) # type: ignore
-nir_lower_dmod = nir_lower_doubles_options.define('nir_lower_dmod', 256) # type: ignore
-nir_lower_dsub = nir_lower_doubles_options.define('nir_lower_dsub', 512) # type: ignore
-nir_lower_ddiv = nir_lower_doubles_options.define('nir_lower_ddiv', 1024) # type: ignore
-nir_lower_dsign = nir_lower_doubles_options.define('nir_lower_dsign', 2048) # type: ignore
-nir_lower_dminmax = nir_lower_doubles_options.define('nir_lower_dminmax', 4096) # type: ignore
-nir_lower_dsat = nir_lower_doubles_options.define('nir_lower_dsat', 8192) # type: ignore
-nir_lower_fp64_full_software = nir_lower_doubles_options.define('nir_lower_fp64_full_software', 16384) # type: ignore
+class nir_lower_doubles_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_drcp = nir_lower_doubles_options.define('nir_lower_drcp', 1)
+nir_lower_dsqrt = nir_lower_doubles_options.define('nir_lower_dsqrt', 2)
+nir_lower_drsq = nir_lower_doubles_options.define('nir_lower_drsq', 4)
+nir_lower_dtrunc = nir_lower_doubles_options.define('nir_lower_dtrunc', 8)
+nir_lower_dfloor = nir_lower_doubles_options.define('nir_lower_dfloor', 16)
+nir_lower_dceil = nir_lower_doubles_options.define('nir_lower_dceil', 32)
+nir_lower_dfract = nir_lower_doubles_options.define('nir_lower_dfract', 64)
+nir_lower_dround_even = nir_lower_doubles_options.define('nir_lower_dround_even', 128)
+nir_lower_dmod = nir_lower_doubles_options.define('nir_lower_dmod', 256)
+nir_lower_dsub = nir_lower_doubles_options.define('nir_lower_dsub', 512)
+nir_lower_ddiv = nir_lower_doubles_options.define('nir_lower_ddiv', 1024)
+nir_lower_dsign = nir_lower_doubles_options.define('nir_lower_dsign', 2048)
+nir_lower_dminmax = nir_lower_doubles_options.define('nir_lower_dminmax', 4096)
+nir_lower_dsat = nir_lower_doubles_options.define('nir_lower_dsat', 8192)
+nir_lower_fp64_full_software = nir_lower_doubles_options.define('nir_lower_fp64_full_software', 16384)
 
-nir_divergence_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_divergence_single_prim_per_subgroup = nir_divergence_options.define('nir_divergence_single_prim_per_subgroup', 1) # type: ignore
-nir_divergence_single_patch_per_tcs_subgroup = nir_divergence_options.define('nir_divergence_single_patch_per_tcs_subgroup', 2) # type: ignore
-nir_divergence_single_patch_per_tes_subgroup = nir_divergence_options.define('nir_divergence_single_patch_per_tes_subgroup', 4) # type: ignore
-nir_divergence_view_index_uniform = nir_divergence_options.define('nir_divergence_view_index_uniform', 8) # type: ignore
-nir_divergence_single_frag_shading_rate_per_subgroup = nir_divergence_options.define('nir_divergence_single_frag_shading_rate_per_subgroup', 16) # type: ignore
-nir_divergence_multiple_workgroup_per_compute_subgroup = nir_divergence_options.define('nir_divergence_multiple_workgroup_per_compute_subgroup', 32) # type: ignore
-nir_divergence_shader_record_ptr_uniform = nir_divergence_options.define('nir_divergence_shader_record_ptr_uniform', 64) # type: ignore
-nir_divergence_uniform_load_tears = nir_divergence_options.define('nir_divergence_uniform_load_tears', 128) # type: ignore
-nir_divergence_ignore_undef_if_phi_srcs = nir_divergence_options.define('nir_divergence_ignore_undef_if_phi_srcs', 256) # type: ignore
+class nir_divergence_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_divergence_single_prim_per_subgroup = nir_divergence_options.define('nir_divergence_single_prim_per_subgroup', 1)
+nir_divergence_single_patch_per_tcs_subgroup = nir_divergence_options.define('nir_divergence_single_patch_per_tcs_subgroup', 2)
+nir_divergence_single_patch_per_tes_subgroup = nir_divergence_options.define('nir_divergence_single_patch_per_tes_subgroup', 4)
+nir_divergence_view_index_uniform = nir_divergence_options.define('nir_divergence_view_index_uniform', 8)
+nir_divergence_single_frag_shading_rate_per_subgroup = nir_divergence_options.define('nir_divergence_single_frag_shading_rate_per_subgroup', 16)
+nir_divergence_multiple_workgroup_per_compute_subgroup = nir_divergence_options.define('nir_divergence_multiple_workgroup_per_compute_subgroup', 32)
+nir_divergence_shader_record_ptr_uniform = nir_divergence_options.define('nir_divergence_shader_record_ptr_uniform', 64)
+nir_divergence_uniform_load_tears = nir_divergence_options.define('nir_divergence_uniform_load_tears', 128)
+nir_divergence_ignore_undef_if_phi_srcs = nir_divergence_options.define('nir_divergence_ignore_undef_if_phi_srcs', 256)
 
-nir_io_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_io_has_flexible_input_interpolation_except_flat = nir_io_options.define('nir_io_has_flexible_input_interpolation_except_flat', 1) # type: ignore
-nir_io_dont_use_pos_for_non_fs_varyings = nir_io_options.define('nir_io_dont_use_pos_for_non_fs_varyings', 2) # type: ignore
-nir_io_16bit_input_output_support = nir_io_options.define('nir_io_16bit_input_output_support', 4) # type: ignore
-nir_io_mediump_is_32bit = nir_io_options.define('nir_io_mediump_is_32bit', 8) # type: ignore
-nir_io_prefer_scalar_fs_inputs = nir_io_options.define('nir_io_prefer_scalar_fs_inputs', 16) # type: ignore
-nir_io_mix_convergent_flat_with_interpolated = nir_io_options.define('nir_io_mix_convergent_flat_with_interpolated', 32) # type: ignore
-nir_io_vectorizer_ignores_types = nir_io_options.define('nir_io_vectorizer_ignores_types', 64) # type: ignore
-nir_io_always_interpolate_convergent_fs_inputs = nir_io_options.define('nir_io_always_interpolate_convergent_fs_inputs', 128) # type: ignore
-nir_io_compaction_rotates_color_channels = nir_io_options.define('nir_io_compaction_rotates_color_channels', 256) # type: ignore
-nir_io_compaction_groups_tes_inputs_into_pos_and_var_groups = nir_io_options.define('nir_io_compaction_groups_tes_inputs_into_pos_and_var_groups', 512) # type: ignore
-nir_io_radv_intrinsic_component_workaround = nir_io_options.define('nir_io_radv_intrinsic_component_workaround', 1024) # type: ignore
-nir_io_has_intrinsics = nir_io_options.define('nir_io_has_intrinsics', 65536) # type: ignore
-nir_io_separate_clip_cull_distance_arrays = nir_io_options.define('nir_io_separate_clip_cull_distance_arrays', 131072) # type: ignore
+class nir_io_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_io_has_flexible_input_interpolation_except_flat = nir_io_options.define('nir_io_has_flexible_input_interpolation_except_flat', 1)
+nir_io_dont_use_pos_for_non_fs_varyings = nir_io_options.define('nir_io_dont_use_pos_for_non_fs_varyings', 2)
+nir_io_16bit_input_output_support = nir_io_options.define('nir_io_16bit_input_output_support', 4)
+nir_io_mediump_is_32bit = nir_io_options.define('nir_io_mediump_is_32bit', 8)
+nir_io_prefer_scalar_fs_inputs = nir_io_options.define('nir_io_prefer_scalar_fs_inputs', 16)
+nir_io_mix_convergent_flat_with_interpolated = nir_io_options.define('nir_io_mix_convergent_flat_with_interpolated', 32)
+nir_io_vectorizer_ignores_types = nir_io_options.define('nir_io_vectorizer_ignores_types', 64)
+nir_io_always_interpolate_convergent_fs_inputs = nir_io_options.define('nir_io_always_interpolate_convergent_fs_inputs', 128)
+nir_io_compaction_rotates_color_channels = nir_io_options.define('nir_io_compaction_rotates_color_channels', 256)
+nir_io_compaction_groups_tes_inputs_into_pos_and_var_groups = nir_io_options.define('nir_io_compaction_groups_tes_inputs_into_pos_and_var_groups', 512)
+nir_io_radv_intrinsic_component_workaround = nir_io_options.define('nir_io_radv_intrinsic_component_workaround', 1024)
+nir_io_has_intrinsics = nir_io_options.define('nir_io_has_intrinsics', 65536)
+nir_io_separate_clip_cull_distance_arrays = nir_io_options.define('nir_io_separate_clip_cull_distance_arrays', 131072)
 
 @c.record
 class struct_shader_info(c.Struct):
@@ -1958,52 +1958,52 @@ class struct_shader_info(c.Struct):
   cs: Annotated[struct_shader_info_cs, 312]
   tess: Annotated[struct_shader_info_tess, 312]
   mesh: Annotated[struct_shader_info_mesh, 312]
-blake3_hash = c.Array[Annotated[int, ctypes.c_ubyte], Literal[32]]
-enum_pipe_shader_type = CEnum(Annotated[int, ctypes.c_int32])
-MESA_SHADER_NONE = enum_pipe_shader_type.define('MESA_SHADER_NONE', -1) # type: ignore
-MESA_SHADER_VERTEX = enum_pipe_shader_type.define('MESA_SHADER_VERTEX', 0) # type: ignore
-PIPE_SHADER_VERTEX = enum_pipe_shader_type.define('PIPE_SHADER_VERTEX', 0) # type: ignore
-MESA_SHADER_TESS_CTRL = enum_pipe_shader_type.define('MESA_SHADER_TESS_CTRL', 1) # type: ignore
-PIPE_SHADER_TESS_CTRL = enum_pipe_shader_type.define('PIPE_SHADER_TESS_CTRL', 1) # type: ignore
-MESA_SHADER_TESS_EVAL = enum_pipe_shader_type.define('MESA_SHADER_TESS_EVAL', 2) # type: ignore
-PIPE_SHADER_TESS_EVAL = enum_pipe_shader_type.define('PIPE_SHADER_TESS_EVAL', 2) # type: ignore
-MESA_SHADER_GEOMETRY = enum_pipe_shader_type.define('MESA_SHADER_GEOMETRY', 3) # type: ignore
-PIPE_SHADER_GEOMETRY = enum_pipe_shader_type.define('PIPE_SHADER_GEOMETRY', 3) # type: ignore
-MESA_SHADER_FRAGMENT = enum_pipe_shader_type.define('MESA_SHADER_FRAGMENT', 4) # type: ignore
-PIPE_SHADER_FRAGMENT = enum_pipe_shader_type.define('PIPE_SHADER_FRAGMENT', 4) # type: ignore
-MESA_SHADER_COMPUTE = enum_pipe_shader_type.define('MESA_SHADER_COMPUTE', 5) # type: ignore
-PIPE_SHADER_COMPUTE = enum_pipe_shader_type.define('PIPE_SHADER_COMPUTE', 5) # type: ignore
-PIPE_SHADER_TYPES = enum_pipe_shader_type.define('PIPE_SHADER_TYPES', 6) # type: ignore
-MESA_SHADER_TASK = enum_pipe_shader_type.define('MESA_SHADER_TASK', 6) # type: ignore
-PIPE_SHADER_TASK = enum_pipe_shader_type.define('PIPE_SHADER_TASK', 6) # type: ignore
-MESA_SHADER_MESH = enum_pipe_shader_type.define('MESA_SHADER_MESH', 7) # type: ignore
-PIPE_SHADER_MESH = enum_pipe_shader_type.define('PIPE_SHADER_MESH', 7) # type: ignore
-PIPE_SHADER_MESH_TYPES = enum_pipe_shader_type.define('PIPE_SHADER_MESH_TYPES', 8) # type: ignore
-MESA_SHADER_RAYGEN = enum_pipe_shader_type.define('MESA_SHADER_RAYGEN', 8) # type: ignore
-MESA_SHADER_ANY_HIT = enum_pipe_shader_type.define('MESA_SHADER_ANY_HIT', 9) # type: ignore
-MESA_SHADER_CLOSEST_HIT = enum_pipe_shader_type.define('MESA_SHADER_CLOSEST_HIT', 10) # type: ignore
-MESA_SHADER_MISS = enum_pipe_shader_type.define('MESA_SHADER_MISS', 11) # type: ignore
-MESA_SHADER_INTERSECTION = enum_pipe_shader_type.define('MESA_SHADER_INTERSECTION', 12) # type: ignore
-MESA_SHADER_CALLABLE = enum_pipe_shader_type.define('MESA_SHADER_CALLABLE', 13) # type: ignore
-MESA_SHADER_KERNEL = enum_pipe_shader_type.define('MESA_SHADER_KERNEL', 14) # type: ignore
+blake3_hash: TypeAlias = c.Array[Annotated[int, ctypes.c_ubyte], Literal[32]]
+class enum_pipe_shader_type(Annotated[int, ctypes.c_int32], c.Enum): pass
+MESA_SHADER_NONE = enum_pipe_shader_type.define('MESA_SHADER_NONE', -1)
+MESA_SHADER_VERTEX = enum_pipe_shader_type.define('MESA_SHADER_VERTEX', 0)
+PIPE_SHADER_VERTEX = enum_pipe_shader_type.define('PIPE_SHADER_VERTEX', 0)
+MESA_SHADER_TESS_CTRL = enum_pipe_shader_type.define('MESA_SHADER_TESS_CTRL', 1)
+PIPE_SHADER_TESS_CTRL = enum_pipe_shader_type.define('PIPE_SHADER_TESS_CTRL', 1)
+MESA_SHADER_TESS_EVAL = enum_pipe_shader_type.define('MESA_SHADER_TESS_EVAL', 2)
+PIPE_SHADER_TESS_EVAL = enum_pipe_shader_type.define('PIPE_SHADER_TESS_EVAL', 2)
+MESA_SHADER_GEOMETRY = enum_pipe_shader_type.define('MESA_SHADER_GEOMETRY', 3)
+PIPE_SHADER_GEOMETRY = enum_pipe_shader_type.define('PIPE_SHADER_GEOMETRY', 3)
+MESA_SHADER_FRAGMENT = enum_pipe_shader_type.define('MESA_SHADER_FRAGMENT', 4)
+PIPE_SHADER_FRAGMENT = enum_pipe_shader_type.define('PIPE_SHADER_FRAGMENT', 4)
+MESA_SHADER_COMPUTE = enum_pipe_shader_type.define('MESA_SHADER_COMPUTE', 5)
+PIPE_SHADER_COMPUTE = enum_pipe_shader_type.define('PIPE_SHADER_COMPUTE', 5)
+PIPE_SHADER_TYPES = enum_pipe_shader_type.define('PIPE_SHADER_TYPES', 6)
+MESA_SHADER_TASK = enum_pipe_shader_type.define('MESA_SHADER_TASK', 6)
+PIPE_SHADER_TASK = enum_pipe_shader_type.define('PIPE_SHADER_TASK', 6)
+MESA_SHADER_MESH = enum_pipe_shader_type.define('MESA_SHADER_MESH', 7)
+PIPE_SHADER_MESH = enum_pipe_shader_type.define('PIPE_SHADER_MESH', 7)
+PIPE_SHADER_MESH_TYPES = enum_pipe_shader_type.define('PIPE_SHADER_MESH_TYPES', 8)
+MESA_SHADER_RAYGEN = enum_pipe_shader_type.define('MESA_SHADER_RAYGEN', 8)
+MESA_SHADER_ANY_HIT = enum_pipe_shader_type.define('MESA_SHADER_ANY_HIT', 9)
+MESA_SHADER_CLOSEST_HIT = enum_pipe_shader_type.define('MESA_SHADER_CLOSEST_HIT', 10)
+MESA_SHADER_MISS = enum_pipe_shader_type.define('MESA_SHADER_MISS', 11)
+MESA_SHADER_INTERSECTION = enum_pipe_shader_type.define('MESA_SHADER_INTERSECTION', 12)
+MESA_SHADER_CALLABLE = enum_pipe_shader_type.define('MESA_SHADER_CALLABLE', 13)
+MESA_SHADER_KERNEL = enum_pipe_shader_type.define('MESA_SHADER_KERNEL', 14)
 
 gl_shader_stage: TypeAlias = enum_pipe_shader_type
-enum_gl_subgroup_size = CEnum(Annotated[int, ctypes.c_ubyte])
-SUBGROUP_SIZE_VARYING = enum_gl_subgroup_size.define('SUBGROUP_SIZE_VARYING', 0) # type: ignore
-SUBGROUP_SIZE_UNIFORM = enum_gl_subgroup_size.define('SUBGROUP_SIZE_UNIFORM', 1) # type: ignore
-SUBGROUP_SIZE_API_CONSTANT = enum_gl_subgroup_size.define('SUBGROUP_SIZE_API_CONSTANT', 2) # type: ignore
-SUBGROUP_SIZE_FULL_SUBGROUPS = enum_gl_subgroup_size.define('SUBGROUP_SIZE_FULL_SUBGROUPS', 3) # type: ignore
-SUBGROUP_SIZE_REQUIRE_4 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_4', 4) # type: ignore
-SUBGROUP_SIZE_REQUIRE_8 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_8', 8) # type: ignore
-SUBGROUP_SIZE_REQUIRE_16 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_16', 16) # type: ignore
-SUBGROUP_SIZE_REQUIRE_32 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_32', 32) # type: ignore
-SUBGROUP_SIZE_REQUIRE_64 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_64', 64) # type: ignore
-SUBGROUP_SIZE_REQUIRE_128 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_128', 128) # type: ignore
+class enum_gl_subgroup_size(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+SUBGROUP_SIZE_VARYING = enum_gl_subgroup_size.define('SUBGROUP_SIZE_VARYING', 0)
+SUBGROUP_SIZE_UNIFORM = enum_gl_subgroup_size.define('SUBGROUP_SIZE_UNIFORM', 1)
+SUBGROUP_SIZE_API_CONSTANT = enum_gl_subgroup_size.define('SUBGROUP_SIZE_API_CONSTANT', 2)
+SUBGROUP_SIZE_FULL_SUBGROUPS = enum_gl_subgroup_size.define('SUBGROUP_SIZE_FULL_SUBGROUPS', 3)
+SUBGROUP_SIZE_REQUIRE_4 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_4', 4)
+SUBGROUP_SIZE_REQUIRE_8 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_8', 8)
+SUBGROUP_SIZE_REQUIRE_16 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_16', 16)
+SUBGROUP_SIZE_REQUIRE_32 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_32', 32)
+SUBGROUP_SIZE_REQUIRE_64 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_64', 64)
+SUBGROUP_SIZE_REQUIRE_128 = enum_gl_subgroup_size.define('SUBGROUP_SIZE_REQUIRE_128', 128)
 
-enum_gl_derivative_group = CEnum(Annotated[int, ctypes.c_uint32])
-DERIVATIVE_GROUP_NONE = enum_gl_derivative_group.define('DERIVATIVE_GROUP_NONE', 0) # type: ignore
-DERIVATIVE_GROUP_QUADS = enum_gl_derivative_group.define('DERIVATIVE_GROUP_QUADS', 1) # type: ignore
-DERIVATIVE_GROUP_LINEAR = enum_gl_derivative_group.define('DERIVATIVE_GROUP_LINEAR', 2) # type: ignore
+class enum_gl_derivative_group(Annotated[int, ctypes.c_uint32], c.Enum): pass
+DERIVATIVE_GROUP_NONE = enum_gl_derivative_group.define('DERIVATIVE_GROUP_NONE', 0)
+DERIVATIVE_GROUP_QUADS = enum_gl_derivative_group.define('DERIVATIVE_GROUP_QUADS', 1)
+DERIVATIVE_GROUP_LINEAR = enum_gl_derivative_group.define('DERIVATIVE_GROUP_LINEAR', 2)
 
 @c.record
 class struct_shader_info_vs(c.Struct):
@@ -2023,25 +2023,25 @@ class struct_shader_info_gs(c.Struct):
   vertices_in: Annotated[uint8_t, 5, 3, 0]
   uses_end_primitive: Annotated[Annotated[bool, ctypes.c_bool], 5, 1, 3]
   active_stream_mask: Annotated[uint8_t, 5, 4, 4]
-enum_mesa_prim = CEnum(Annotated[int, ctypes.c_ubyte])
-MESA_PRIM_POINTS = enum_mesa_prim.define('MESA_PRIM_POINTS', 0) # type: ignore
-MESA_PRIM_LINES = enum_mesa_prim.define('MESA_PRIM_LINES', 1) # type: ignore
-MESA_PRIM_LINE_LOOP = enum_mesa_prim.define('MESA_PRIM_LINE_LOOP', 2) # type: ignore
-MESA_PRIM_LINE_STRIP = enum_mesa_prim.define('MESA_PRIM_LINE_STRIP', 3) # type: ignore
-MESA_PRIM_TRIANGLES = enum_mesa_prim.define('MESA_PRIM_TRIANGLES', 4) # type: ignore
-MESA_PRIM_TRIANGLE_STRIP = enum_mesa_prim.define('MESA_PRIM_TRIANGLE_STRIP', 5) # type: ignore
-MESA_PRIM_TRIANGLE_FAN = enum_mesa_prim.define('MESA_PRIM_TRIANGLE_FAN', 6) # type: ignore
-MESA_PRIM_QUADS = enum_mesa_prim.define('MESA_PRIM_QUADS', 7) # type: ignore
-MESA_PRIM_QUAD_STRIP = enum_mesa_prim.define('MESA_PRIM_QUAD_STRIP', 8) # type: ignore
-MESA_PRIM_POLYGON = enum_mesa_prim.define('MESA_PRIM_POLYGON', 9) # type: ignore
-MESA_PRIM_LINES_ADJACENCY = enum_mesa_prim.define('MESA_PRIM_LINES_ADJACENCY', 10) # type: ignore
-MESA_PRIM_LINE_STRIP_ADJACENCY = enum_mesa_prim.define('MESA_PRIM_LINE_STRIP_ADJACENCY', 11) # type: ignore
-MESA_PRIM_TRIANGLES_ADJACENCY = enum_mesa_prim.define('MESA_PRIM_TRIANGLES_ADJACENCY', 12) # type: ignore
-MESA_PRIM_TRIANGLE_STRIP_ADJACENCY = enum_mesa_prim.define('MESA_PRIM_TRIANGLE_STRIP_ADJACENCY', 13) # type: ignore
-MESA_PRIM_PATCHES = enum_mesa_prim.define('MESA_PRIM_PATCHES', 14) # type: ignore
-MESA_PRIM_MAX = enum_mesa_prim.define('MESA_PRIM_MAX', 14) # type: ignore
-MESA_PRIM_COUNT = enum_mesa_prim.define('MESA_PRIM_COUNT', 15) # type: ignore
-MESA_PRIM_UNKNOWN = enum_mesa_prim.define('MESA_PRIM_UNKNOWN', 28) # type: ignore
+class enum_mesa_prim(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+MESA_PRIM_POINTS = enum_mesa_prim.define('MESA_PRIM_POINTS', 0)
+MESA_PRIM_LINES = enum_mesa_prim.define('MESA_PRIM_LINES', 1)
+MESA_PRIM_LINE_LOOP = enum_mesa_prim.define('MESA_PRIM_LINE_LOOP', 2)
+MESA_PRIM_LINE_STRIP = enum_mesa_prim.define('MESA_PRIM_LINE_STRIP', 3)
+MESA_PRIM_TRIANGLES = enum_mesa_prim.define('MESA_PRIM_TRIANGLES', 4)
+MESA_PRIM_TRIANGLE_STRIP = enum_mesa_prim.define('MESA_PRIM_TRIANGLE_STRIP', 5)
+MESA_PRIM_TRIANGLE_FAN = enum_mesa_prim.define('MESA_PRIM_TRIANGLE_FAN', 6)
+MESA_PRIM_QUADS = enum_mesa_prim.define('MESA_PRIM_QUADS', 7)
+MESA_PRIM_QUAD_STRIP = enum_mesa_prim.define('MESA_PRIM_QUAD_STRIP', 8)
+MESA_PRIM_POLYGON = enum_mesa_prim.define('MESA_PRIM_POLYGON', 9)
+MESA_PRIM_LINES_ADJACENCY = enum_mesa_prim.define('MESA_PRIM_LINES_ADJACENCY', 10)
+MESA_PRIM_LINE_STRIP_ADJACENCY = enum_mesa_prim.define('MESA_PRIM_LINE_STRIP_ADJACENCY', 11)
+MESA_PRIM_TRIANGLES_ADJACENCY = enum_mesa_prim.define('MESA_PRIM_TRIANGLES_ADJACENCY', 12)
+MESA_PRIM_TRIANGLE_STRIP_ADJACENCY = enum_mesa_prim.define('MESA_PRIM_TRIANGLE_STRIP_ADJACENCY', 13)
+MESA_PRIM_PATCHES = enum_mesa_prim.define('MESA_PRIM_PATCHES', 14)
+MESA_PRIM_MAX = enum_mesa_prim.define('MESA_PRIM_MAX', 14)
+MESA_PRIM_COUNT = enum_mesa_prim.define('MESA_PRIM_COUNT', 15)
+MESA_PRIM_UNKNOWN = enum_mesa_prim.define('MESA_PRIM_UNKNOWN', 28)
 
 @c.record
 class struct_shader_info_fs(c.Struct):
@@ -2077,19 +2077,19 @@ class struct_shader_info_fs(c.Struct):
   early_and_late_fragment_tests: Annotated[Annotated[bool, ctypes.c_bool], 12, 1, 0]
   stencil_front_layout: Annotated[enum_gl_frag_stencil_layout, 12, 3, 1]
   stencil_back_layout: Annotated[enum_gl_frag_stencil_layout, 12, 3, 4]
-enum_gl_frag_depth_layout = CEnum(Annotated[int, ctypes.c_uint32])
-FRAG_DEPTH_LAYOUT_NONE = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_NONE', 0) # type: ignore
-FRAG_DEPTH_LAYOUT_ANY = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_ANY', 1) # type: ignore
-FRAG_DEPTH_LAYOUT_GREATER = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_GREATER', 2) # type: ignore
-FRAG_DEPTH_LAYOUT_LESS = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_LESS', 3) # type: ignore
-FRAG_DEPTH_LAYOUT_UNCHANGED = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_UNCHANGED', 4) # type: ignore
+class enum_gl_frag_depth_layout(Annotated[int, ctypes.c_uint32], c.Enum): pass
+FRAG_DEPTH_LAYOUT_NONE = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_NONE', 0)
+FRAG_DEPTH_LAYOUT_ANY = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_ANY', 1)
+FRAG_DEPTH_LAYOUT_GREATER = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_GREATER', 2)
+FRAG_DEPTH_LAYOUT_LESS = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_LESS', 3)
+FRAG_DEPTH_LAYOUT_UNCHANGED = enum_gl_frag_depth_layout.define('FRAG_DEPTH_LAYOUT_UNCHANGED', 4)
 
-enum_gl_frag_stencil_layout = CEnum(Annotated[int, ctypes.c_uint32])
-FRAG_STENCIL_LAYOUT_NONE = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_NONE', 0) # type: ignore
-FRAG_STENCIL_LAYOUT_ANY = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_ANY', 1) # type: ignore
-FRAG_STENCIL_LAYOUT_GREATER = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_GREATER', 2) # type: ignore
-FRAG_STENCIL_LAYOUT_LESS = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_LESS', 3) # type: ignore
-FRAG_STENCIL_LAYOUT_UNCHANGED = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_UNCHANGED', 4) # type: ignore
+class enum_gl_frag_stencil_layout(Annotated[int, ctypes.c_uint32], c.Enum): pass
+FRAG_STENCIL_LAYOUT_NONE = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_NONE', 0)
+FRAG_STENCIL_LAYOUT_ANY = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_ANY', 1)
+FRAG_STENCIL_LAYOUT_GREATER = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_GREATER', 2)
+FRAG_STENCIL_LAYOUT_LESS = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_LESS', 3)
+FRAG_STENCIL_LAYOUT_UNCHANGED = enum_gl_frag_stencil_layout.define('FRAG_STENCIL_LAYOUT_UNCHANGED', 4)
 
 @c.record
 class struct_shader_info_cs(c.Struct):
@@ -2118,11 +2118,11 @@ class struct_shader_info_tess(c.Struct):
   tcs_outputs_read_by_tes: Annotated[uint64_t, 40]
   tcs_patch_outputs_read_by_tes: Annotated[uint32_t, 48]
   tcs_outputs_read_by_tes_16bit: Annotated[uint16_t, 52]
-enum_tess_primitive_mode = CEnum(Annotated[int, ctypes.c_uint32])
-TESS_PRIMITIVE_UNSPECIFIED = enum_tess_primitive_mode.define('TESS_PRIMITIVE_UNSPECIFIED', 0) # type: ignore
-TESS_PRIMITIVE_TRIANGLES = enum_tess_primitive_mode.define('TESS_PRIMITIVE_TRIANGLES', 1) # type: ignore
-TESS_PRIMITIVE_QUADS = enum_tess_primitive_mode.define('TESS_PRIMITIVE_QUADS', 2) # type: ignore
-TESS_PRIMITIVE_ISOLINES = enum_tess_primitive_mode.define('TESS_PRIMITIVE_ISOLINES', 3) # type: ignore
+class enum_tess_primitive_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TESS_PRIMITIVE_UNSPECIFIED = enum_tess_primitive_mode.define('TESS_PRIMITIVE_UNSPECIFIED', 0)
+TESS_PRIMITIVE_TRIANGLES = enum_tess_primitive_mode.define('TESS_PRIMITIVE_TRIANGLES', 1)
+TESS_PRIMITIVE_QUADS = enum_tess_primitive_mode.define('TESS_PRIMITIVE_QUADS', 2)
+TESS_PRIMITIVE_ISOLINES = enum_tess_primitive_mode.define('TESS_PRIMITIVE_ISOLINES', 3)
 
 @c.record
 class struct_shader_info_mesh(c.Struct):
@@ -2164,20 +2164,20 @@ class struct_nir_function_impl(c.Struct):
   loop_analysis_indirect_mask: Annotated[nir_variable_mode, 136]
   loop_analysis_force_unroll_sampler_indirect: Annotated[Annotated[bool, ctypes.c_bool], 140]
 nir_function_impl: TypeAlias = struct_nir_function_impl
-nir_function = struct_nir_function
-nir_metadata = CEnum(Annotated[int, ctypes.c_int32])
-nir_metadata_none = nir_metadata.define('nir_metadata_none', 0) # type: ignore
-nir_metadata_block_index = nir_metadata.define('nir_metadata_block_index', 1) # type: ignore
-nir_metadata_dominance = nir_metadata.define('nir_metadata_dominance', 2) # type: ignore
-nir_metadata_live_defs = nir_metadata.define('nir_metadata_live_defs', 4) # type: ignore
-nir_metadata_not_properly_reset = nir_metadata.define('nir_metadata_not_properly_reset', 8) # type: ignore
-nir_metadata_loop_analysis = nir_metadata.define('nir_metadata_loop_analysis', 16) # type: ignore
-nir_metadata_instr_index = nir_metadata.define('nir_metadata_instr_index', 32) # type: ignore
-nir_metadata_divergence = nir_metadata.define('nir_metadata_divergence', 64) # type: ignore
-nir_metadata_control_flow = nir_metadata.define('nir_metadata_control_flow', 3) # type: ignore
-nir_metadata_all = nir_metadata.define('nir_metadata_all', -9) # type: ignore
+nir_function: TypeAlias = struct_nir_function
+class nir_metadata(Annotated[int, ctypes.c_int32], c.Enum): pass
+nir_metadata_none = nir_metadata.define('nir_metadata_none', 0)
+nir_metadata_block_index = nir_metadata.define('nir_metadata_block_index', 1)
+nir_metadata_dominance = nir_metadata.define('nir_metadata_dominance', 2)
+nir_metadata_live_defs = nir_metadata.define('nir_metadata_live_defs', 4)
+nir_metadata_not_properly_reset = nir_metadata.define('nir_metadata_not_properly_reset', 8)
+nir_metadata_loop_analysis = nir_metadata.define('nir_metadata_loop_analysis', 16)
+nir_metadata_instr_index = nir_metadata.define('nir_metadata_instr_index', 32)
+nir_metadata_divergence = nir_metadata.define('nir_metadata_divergence', 64)
+nir_metadata_control_flow = nir_metadata.define('nir_metadata_control_flow', 3)
+nir_metadata_all = nir_metadata.define('nir_metadata_all', -9)
 
-nir_call_instr = struct_nir_call_instr
+nir_call_instr: TypeAlias = struct_nir_call_instr
 @c.record
 class struct_nir_intrinsic_instr(c.Struct):
   SIZE = 120
@@ -2188,755 +2188,755 @@ class struct_nir_intrinsic_instr(c.Struct):
   const_index: Annotated[c.Array[Annotated[int, ctypes.c_int32], Literal[8]], 76]
   name: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 112]
   src: Annotated[c.Array[nir_src, Literal[0]], 120]
-nir_intrinsic_op = CEnum(Annotated[int, ctypes.c_uint32])
-nir_intrinsic_accept_ray_intersection = nir_intrinsic_op.define('nir_intrinsic_accept_ray_intersection', 0) # type: ignore
-nir_intrinsic_addr_mode_is = nir_intrinsic_op.define('nir_intrinsic_addr_mode_is', 1) # type: ignore
-nir_intrinsic_al2p_nv = nir_intrinsic_op.define('nir_intrinsic_al2p_nv', 2) # type: ignore
-nir_intrinsic_ald_nv = nir_intrinsic_op.define('nir_intrinsic_ald_nv', 3) # type: ignore
-nir_intrinsic_alpha_to_coverage = nir_intrinsic_op.define('nir_intrinsic_alpha_to_coverage', 4) # type: ignore
-nir_intrinsic_as_uniform = nir_intrinsic_op.define('nir_intrinsic_as_uniform', 5) # type: ignore
-nir_intrinsic_ast_nv = nir_intrinsic_op.define('nir_intrinsic_ast_nv', 6) # type: ignore
-nir_intrinsic_atomic_add_gen_prim_count_amd = nir_intrinsic_op.define('nir_intrinsic_atomic_add_gen_prim_count_amd', 7) # type: ignore
-nir_intrinsic_atomic_add_gs_emit_prim_count_amd = nir_intrinsic_op.define('nir_intrinsic_atomic_add_gs_emit_prim_count_amd', 8) # type: ignore
-nir_intrinsic_atomic_add_shader_invocation_count_amd = nir_intrinsic_op.define('nir_intrinsic_atomic_add_shader_invocation_count_amd', 9) # type: ignore
-nir_intrinsic_atomic_add_xfb_prim_count_amd = nir_intrinsic_op.define('nir_intrinsic_atomic_add_xfb_prim_count_amd', 10) # type: ignore
-nir_intrinsic_atomic_counter_add = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_add', 11) # type: ignore
-nir_intrinsic_atomic_counter_add_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_add_deref', 12) # type: ignore
-nir_intrinsic_atomic_counter_and = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_and', 13) # type: ignore
-nir_intrinsic_atomic_counter_and_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_and_deref', 14) # type: ignore
-nir_intrinsic_atomic_counter_comp_swap = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_comp_swap', 15) # type: ignore
-nir_intrinsic_atomic_counter_comp_swap_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_comp_swap_deref', 16) # type: ignore
-nir_intrinsic_atomic_counter_exchange = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_exchange', 17) # type: ignore
-nir_intrinsic_atomic_counter_exchange_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_exchange_deref', 18) # type: ignore
-nir_intrinsic_atomic_counter_inc = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_inc', 19) # type: ignore
-nir_intrinsic_atomic_counter_inc_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_inc_deref', 20) # type: ignore
-nir_intrinsic_atomic_counter_max = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_max', 21) # type: ignore
-nir_intrinsic_atomic_counter_max_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_max_deref', 22) # type: ignore
-nir_intrinsic_atomic_counter_min = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_min', 23) # type: ignore
-nir_intrinsic_atomic_counter_min_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_min_deref', 24) # type: ignore
-nir_intrinsic_atomic_counter_or = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_or', 25) # type: ignore
-nir_intrinsic_atomic_counter_or_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_or_deref', 26) # type: ignore
-nir_intrinsic_atomic_counter_post_dec = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_post_dec', 27) # type: ignore
-nir_intrinsic_atomic_counter_post_dec_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_post_dec_deref', 28) # type: ignore
-nir_intrinsic_atomic_counter_pre_dec = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_pre_dec', 29) # type: ignore
-nir_intrinsic_atomic_counter_pre_dec_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_pre_dec_deref', 30) # type: ignore
-nir_intrinsic_atomic_counter_read = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_read', 31) # type: ignore
-nir_intrinsic_atomic_counter_read_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_read_deref', 32) # type: ignore
-nir_intrinsic_atomic_counter_xor = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_xor', 33) # type: ignore
-nir_intrinsic_atomic_counter_xor_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_xor_deref', 34) # type: ignore
-nir_intrinsic_ballot = nir_intrinsic_op.define('nir_intrinsic_ballot', 35) # type: ignore
-nir_intrinsic_ballot_bit_count_exclusive = nir_intrinsic_op.define('nir_intrinsic_ballot_bit_count_exclusive', 36) # type: ignore
-nir_intrinsic_ballot_bit_count_inclusive = nir_intrinsic_op.define('nir_intrinsic_ballot_bit_count_inclusive', 37) # type: ignore
-nir_intrinsic_ballot_bit_count_reduce = nir_intrinsic_op.define('nir_intrinsic_ballot_bit_count_reduce', 38) # type: ignore
-nir_intrinsic_ballot_bitfield_extract = nir_intrinsic_op.define('nir_intrinsic_ballot_bitfield_extract', 39) # type: ignore
-nir_intrinsic_ballot_find_lsb = nir_intrinsic_op.define('nir_intrinsic_ballot_find_lsb', 40) # type: ignore
-nir_intrinsic_ballot_find_msb = nir_intrinsic_op.define('nir_intrinsic_ballot_find_msb', 41) # type: ignore
-nir_intrinsic_ballot_relaxed = nir_intrinsic_op.define('nir_intrinsic_ballot_relaxed', 42) # type: ignore
-nir_intrinsic_bar_break_nv = nir_intrinsic_op.define('nir_intrinsic_bar_break_nv', 43) # type: ignore
-nir_intrinsic_bar_set_nv = nir_intrinsic_op.define('nir_intrinsic_bar_set_nv', 44) # type: ignore
-nir_intrinsic_bar_sync_nv = nir_intrinsic_op.define('nir_intrinsic_bar_sync_nv', 45) # type: ignore
-nir_intrinsic_barrier = nir_intrinsic_op.define('nir_intrinsic_barrier', 46) # type: ignore
-nir_intrinsic_begin_invocation_interlock = nir_intrinsic_op.define('nir_intrinsic_begin_invocation_interlock', 47) # type: ignore
-nir_intrinsic_bindgen_return = nir_intrinsic_op.define('nir_intrinsic_bindgen_return', 48) # type: ignore
-nir_intrinsic_bindless_image_agx = nir_intrinsic_op.define('nir_intrinsic_bindless_image_agx', 49) # type: ignore
-nir_intrinsic_bindless_image_atomic = nir_intrinsic_op.define('nir_intrinsic_bindless_image_atomic', 50) # type: ignore
-nir_intrinsic_bindless_image_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_bindless_image_atomic_swap', 51) # type: ignore
-nir_intrinsic_bindless_image_descriptor_amd = nir_intrinsic_op.define('nir_intrinsic_bindless_image_descriptor_amd', 52) # type: ignore
-nir_intrinsic_bindless_image_format = nir_intrinsic_op.define('nir_intrinsic_bindless_image_format', 53) # type: ignore
-nir_intrinsic_bindless_image_fragment_mask_load_amd = nir_intrinsic_op.define('nir_intrinsic_bindless_image_fragment_mask_load_amd', 54) # type: ignore
-nir_intrinsic_bindless_image_levels = nir_intrinsic_op.define('nir_intrinsic_bindless_image_levels', 55) # type: ignore
-nir_intrinsic_bindless_image_load = nir_intrinsic_op.define('nir_intrinsic_bindless_image_load', 56) # type: ignore
-nir_intrinsic_bindless_image_load_raw_intel = nir_intrinsic_op.define('nir_intrinsic_bindless_image_load_raw_intel', 57) # type: ignore
-nir_intrinsic_bindless_image_order = nir_intrinsic_op.define('nir_intrinsic_bindless_image_order', 58) # type: ignore
-nir_intrinsic_bindless_image_samples = nir_intrinsic_op.define('nir_intrinsic_bindless_image_samples', 59) # type: ignore
-nir_intrinsic_bindless_image_samples_identical = nir_intrinsic_op.define('nir_intrinsic_bindless_image_samples_identical', 60) # type: ignore
-nir_intrinsic_bindless_image_size = nir_intrinsic_op.define('nir_intrinsic_bindless_image_size', 61) # type: ignore
-nir_intrinsic_bindless_image_sparse_load = nir_intrinsic_op.define('nir_intrinsic_bindless_image_sparse_load', 62) # type: ignore
-nir_intrinsic_bindless_image_store = nir_intrinsic_op.define('nir_intrinsic_bindless_image_store', 63) # type: ignore
-nir_intrinsic_bindless_image_store_block_agx = nir_intrinsic_op.define('nir_intrinsic_bindless_image_store_block_agx', 64) # type: ignore
-nir_intrinsic_bindless_image_store_raw_intel = nir_intrinsic_op.define('nir_intrinsic_bindless_image_store_raw_intel', 65) # type: ignore
-nir_intrinsic_bindless_image_texel_address = nir_intrinsic_op.define('nir_intrinsic_bindless_image_texel_address', 66) # type: ignore
-nir_intrinsic_bindless_resource_ir3 = nir_intrinsic_op.define('nir_intrinsic_bindless_resource_ir3', 67) # type: ignore
-nir_intrinsic_brcst_active_ir3 = nir_intrinsic_op.define('nir_intrinsic_brcst_active_ir3', 68) # type: ignore
-nir_intrinsic_btd_retire_intel = nir_intrinsic_op.define('nir_intrinsic_btd_retire_intel', 69) # type: ignore
-nir_intrinsic_btd_spawn_intel = nir_intrinsic_op.define('nir_intrinsic_btd_spawn_intel', 70) # type: ignore
-nir_intrinsic_btd_stack_push_intel = nir_intrinsic_op.define('nir_intrinsic_btd_stack_push_intel', 71) # type: ignore
-nir_intrinsic_bvh64_intersect_ray_amd = nir_intrinsic_op.define('nir_intrinsic_bvh64_intersect_ray_amd', 72) # type: ignore
-nir_intrinsic_bvh8_intersect_ray_amd = nir_intrinsic_op.define('nir_intrinsic_bvh8_intersect_ray_amd', 73) # type: ignore
-nir_intrinsic_bvh_stack_rtn_amd = nir_intrinsic_op.define('nir_intrinsic_bvh_stack_rtn_amd', 74) # type: ignore
-nir_intrinsic_cmat_binary_op = nir_intrinsic_op.define('nir_intrinsic_cmat_binary_op', 75) # type: ignore
-nir_intrinsic_cmat_bitcast = nir_intrinsic_op.define('nir_intrinsic_cmat_bitcast', 76) # type: ignore
-nir_intrinsic_cmat_construct = nir_intrinsic_op.define('nir_intrinsic_cmat_construct', 77) # type: ignore
-nir_intrinsic_cmat_convert = nir_intrinsic_op.define('nir_intrinsic_cmat_convert', 78) # type: ignore
-nir_intrinsic_cmat_copy = nir_intrinsic_op.define('nir_intrinsic_cmat_copy', 79) # type: ignore
-nir_intrinsic_cmat_extract = nir_intrinsic_op.define('nir_intrinsic_cmat_extract', 80) # type: ignore
-nir_intrinsic_cmat_insert = nir_intrinsic_op.define('nir_intrinsic_cmat_insert', 81) # type: ignore
-nir_intrinsic_cmat_length = nir_intrinsic_op.define('nir_intrinsic_cmat_length', 82) # type: ignore
-nir_intrinsic_cmat_load = nir_intrinsic_op.define('nir_intrinsic_cmat_load', 83) # type: ignore
-nir_intrinsic_cmat_muladd = nir_intrinsic_op.define('nir_intrinsic_cmat_muladd', 84) # type: ignore
-nir_intrinsic_cmat_muladd_amd = nir_intrinsic_op.define('nir_intrinsic_cmat_muladd_amd', 85) # type: ignore
-nir_intrinsic_cmat_muladd_nv = nir_intrinsic_op.define('nir_intrinsic_cmat_muladd_nv', 86) # type: ignore
-nir_intrinsic_cmat_scalar_op = nir_intrinsic_op.define('nir_intrinsic_cmat_scalar_op', 87) # type: ignore
-nir_intrinsic_cmat_store = nir_intrinsic_op.define('nir_intrinsic_cmat_store', 88) # type: ignore
-nir_intrinsic_cmat_transpose = nir_intrinsic_op.define('nir_intrinsic_cmat_transpose', 89) # type: ignore
-nir_intrinsic_cmat_unary_op = nir_intrinsic_op.define('nir_intrinsic_cmat_unary_op', 90) # type: ignore
-nir_intrinsic_convert_alu_types = nir_intrinsic_op.define('nir_intrinsic_convert_alu_types', 91) # type: ignore
-nir_intrinsic_convert_cmat_intel = nir_intrinsic_op.define('nir_intrinsic_convert_cmat_intel', 92) # type: ignore
-nir_intrinsic_copy_deref = nir_intrinsic_op.define('nir_intrinsic_copy_deref', 93) # type: ignore
-nir_intrinsic_copy_fs_outputs_nv = nir_intrinsic_op.define('nir_intrinsic_copy_fs_outputs_nv', 94) # type: ignore
-nir_intrinsic_copy_global_to_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_copy_global_to_uniform_ir3', 95) # type: ignore
-nir_intrinsic_copy_push_const_to_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_copy_push_const_to_uniform_ir3', 96) # type: ignore
-nir_intrinsic_copy_ubo_to_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_copy_ubo_to_uniform_ir3', 97) # type: ignore
-nir_intrinsic_ddx = nir_intrinsic_op.define('nir_intrinsic_ddx', 98) # type: ignore
-nir_intrinsic_ddx_coarse = nir_intrinsic_op.define('nir_intrinsic_ddx_coarse', 99) # type: ignore
-nir_intrinsic_ddx_fine = nir_intrinsic_op.define('nir_intrinsic_ddx_fine', 100) # type: ignore
-nir_intrinsic_ddy = nir_intrinsic_op.define('nir_intrinsic_ddy', 101) # type: ignore
-nir_intrinsic_ddy_coarse = nir_intrinsic_op.define('nir_intrinsic_ddy_coarse', 102) # type: ignore
-nir_intrinsic_ddy_fine = nir_intrinsic_op.define('nir_intrinsic_ddy_fine', 103) # type: ignore
-nir_intrinsic_debug_break = nir_intrinsic_op.define('nir_intrinsic_debug_break', 104) # type: ignore
-nir_intrinsic_decl_reg = nir_intrinsic_op.define('nir_intrinsic_decl_reg', 105) # type: ignore
-nir_intrinsic_demote = nir_intrinsic_op.define('nir_intrinsic_demote', 106) # type: ignore
-nir_intrinsic_demote_if = nir_intrinsic_op.define('nir_intrinsic_demote_if', 107) # type: ignore
-nir_intrinsic_demote_samples = nir_intrinsic_op.define('nir_intrinsic_demote_samples', 108) # type: ignore
-nir_intrinsic_deref_atomic = nir_intrinsic_op.define('nir_intrinsic_deref_atomic', 109) # type: ignore
-nir_intrinsic_deref_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_deref_atomic_swap', 110) # type: ignore
-nir_intrinsic_deref_buffer_array_length = nir_intrinsic_op.define('nir_intrinsic_deref_buffer_array_length', 111) # type: ignore
-nir_intrinsic_deref_implicit_array_length = nir_intrinsic_op.define('nir_intrinsic_deref_implicit_array_length', 112) # type: ignore
-nir_intrinsic_deref_mode_is = nir_intrinsic_op.define('nir_intrinsic_deref_mode_is', 113) # type: ignore
-nir_intrinsic_deref_texture_src = nir_intrinsic_op.define('nir_intrinsic_deref_texture_src', 114) # type: ignore
-nir_intrinsic_doorbell_agx = nir_intrinsic_op.define('nir_intrinsic_doorbell_agx', 115) # type: ignore
-nir_intrinsic_dpas_intel = nir_intrinsic_op.define('nir_intrinsic_dpas_intel', 116) # type: ignore
-nir_intrinsic_dpp16_shift_amd = nir_intrinsic_op.define('nir_intrinsic_dpp16_shift_amd', 117) # type: ignore
-nir_intrinsic_elect = nir_intrinsic_op.define('nir_intrinsic_elect', 118) # type: ignore
-nir_intrinsic_elect_any_ir3 = nir_intrinsic_op.define('nir_intrinsic_elect_any_ir3', 119) # type: ignore
-nir_intrinsic_emit_primitive_poly = nir_intrinsic_op.define('nir_intrinsic_emit_primitive_poly', 120) # type: ignore
-nir_intrinsic_emit_vertex = nir_intrinsic_op.define('nir_intrinsic_emit_vertex', 121) # type: ignore
-nir_intrinsic_emit_vertex_nv = nir_intrinsic_op.define('nir_intrinsic_emit_vertex_nv', 122) # type: ignore
-nir_intrinsic_emit_vertex_with_counter = nir_intrinsic_op.define('nir_intrinsic_emit_vertex_with_counter', 123) # type: ignore
-nir_intrinsic_end_invocation_interlock = nir_intrinsic_op.define('nir_intrinsic_end_invocation_interlock', 124) # type: ignore
-nir_intrinsic_end_primitive = nir_intrinsic_op.define('nir_intrinsic_end_primitive', 125) # type: ignore
-nir_intrinsic_end_primitive_nv = nir_intrinsic_op.define('nir_intrinsic_end_primitive_nv', 126) # type: ignore
-nir_intrinsic_end_primitive_with_counter = nir_intrinsic_op.define('nir_intrinsic_end_primitive_with_counter', 127) # type: ignore
-nir_intrinsic_enqueue_node_payloads = nir_intrinsic_op.define('nir_intrinsic_enqueue_node_payloads', 128) # type: ignore
-nir_intrinsic_exclusive_scan = nir_intrinsic_op.define('nir_intrinsic_exclusive_scan', 129) # type: ignore
-nir_intrinsic_exclusive_scan_clusters_ir3 = nir_intrinsic_op.define('nir_intrinsic_exclusive_scan_clusters_ir3', 130) # type: ignore
-nir_intrinsic_execute_callable = nir_intrinsic_op.define('nir_intrinsic_execute_callable', 131) # type: ignore
-nir_intrinsic_execute_closest_hit_amd = nir_intrinsic_op.define('nir_intrinsic_execute_closest_hit_amd', 132) # type: ignore
-nir_intrinsic_execute_miss_amd = nir_intrinsic_op.define('nir_intrinsic_execute_miss_amd', 133) # type: ignore
-nir_intrinsic_export_agx = nir_intrinsic_op.define('nir_intrinsic_export_agx', 134) # type: ignore
-nir_intrinsic_export_amd = nir_intrinsic_op.define('nir_intrinsic_export_amd', 135) # type: ignore
-nir_intrinsic_export_dual_src_blend_amd = nir_intrinsic_op.define('nir_intrinsic_export_dual_src_blend_amd', 136) # type: ignore
-nir_intrinsic_export_row_amd = nir_intrinsic_op.define('nir_intrinsic_export_row_amd', 137) # type: ignore
-nir_intrinsic_fence_helper_exit_agx = nir_intrinsic_op.define('nir_intrinsic_fence_helper_exit_agx', 138) # type: ignore
-nir_intrinsic_fence_mem_to_tex_agx = nir_intrinsic_op.define('nir_intrinsic_fence_mem_to_tex_agx', 139) # type: ignore
-nir_intrinsic_fence_pbe_to_tex_agx = nir_intrinsic_op.define('nir_intrinsic_fence_pbe_to_tex_agx', 140) # type: ignore
-nir_intrinsic_fence_pbe_to_tex_pixel_agx = nir_intrinsic_op.define('nir_intrinsic_fence_pbe_to_tex_pixel_agx', 141) # type: ignore
-nir_intrinsic_final_primitive_nv = nir_intrinsic_op.define('nir_intrinsic_final_primitive_nv', 142) # type: ignore
-nir_intrinsic_finalize_incoming_node_payload = nir_intrinsic_op.define('nir_intrinsic_finalize_incoming_node_payload', 143) # type: ignore
-nir_intrinsic_first_invocation = nir_intrinsic_op.define('nir_intrinsic_first_invocation', 144) # type: ignore
-nir_intrinsic_fs_out_nv = nir_intrinsic_op.define('nir_intrinsic_fs_out_nv', 145) # type: ignore
-nir_intrinsic_gds_atomic_add_amd = nir_intrinsic_op.define('nir_intrinsic_gds_atomic_add_amd', 146) # type: ignore
-nir_intrinsic_get_ssbo_size = nir_intrinsic_op.define('nir_intrinsic_get_ssbo_size', 147) # type: ignore
-nir_intrinsic_get_ubo_size = nir_intrinsic_op.define('nir_intrinsic_get_ubo_size', 148) # type: ignore
-nir_intrinsic_global_atomic = nir_intrinsic_op.define('nir_intrinsic_global_atomic', 149) # type: ignore
-nir_intrinsic_global_atomic_2x32 = nir_intrinsic_op.define('nir_intrinsic_global_atomic_2x32', 150) # type: ignore
-nir_intrinsic_global_atomic_agx = nir_intrinsic_op.define('nir_intrinsic_global_atomic_agx', 151) # type: ignore
-nir_intrinsic_global_atomic_amd = nir_intrinsic_op.define('nir_intrinsic_global_atomic_amd', 152) # type: ignore
-nir_intrinsic_global_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_global_atomic_swap', 153) # type: ignore
-nir_intrinsic_global_atomic_swap_2x32 = nir_intrinsic_op.define('nir_intrinsic_global_atomic_swap_2x32', 154) # type: ignore
-nir_intrinsic_global_atomic_swap_agx = nir_intrinsic_op.define('nir_intrinsic_global_atomic_swap_agx', 155) # type: ignore
-nir_intrinsic_global_atomic_swap_amd = nir_intrinsic_op.define('nir_intrinsic_global_atomic_swap_amd', 156) # type: ignore
-nir_intrinsic_ignore_ray_intersection = nir_intrinsic_op.define('nir_intrinsic_ignore_ray_intersection', 157) # type: ignore
-nir_intrinsic_imadsp_nv = nir_intrinsic_op.define('nir_intrinsic_imadsp_nv', 158) # type: ignore
-nir_intrinsic_image_atomic = nir_intrinsic_op.define('nir_intrinsic_image_atomic', 159) # type: ignore
-nir_intrinsic_image_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_image_atomic_swap', 160) # type: ignore
-nir_intrinsic_image_deref_atomic = nir_intrinsic_op.define('nir_intrinsic_image_deref_atomic', 161) # type: ignore
-nir_intrinsic_image_deref_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_image_deref_atomic_swap', 162) # type: ignore
-nir_intrinsic_image_deref_descriptor_amd = nir_intrinsic_op.define('nir_intrinsic_image_deref_descriptor_amd', 163) # type: ignore
-nir_intrinsic_image_deref_format = nir_intrinsic_op.define('nir_intrinsic_image_deref_format', 164) # type: ignore
-nir_intrinsic_image_deref_fragment_mask_load_amd = nir_intrinsic_op.define('nir_intrinsic_image_deref_fragment_mask_load_amd', 165) # type: ignore
-nir_intrinsic_image_deref_levels = nir_intrinsic_op.define('nir_intrinsic_image_deref_levels', 166) # type: ignore
-nir_intrinsic_image_deref_load = nir_intrinsic_op.define('nir_intrinsic_image_deref_load', 167) # type: ignore
-nir_intrinsic_image_deref_load_info_nv = nir_intrinsic_op.define('nir_intrinsic_image_deref_load_info_nv', 168) # type: ignore
-nir_intrinsic_image_deref_load_param_intel = nir_intrinsic_op.define('nir_intrinsic_image_deref_load_param_intel', 169) # type: ignore
-nir_intrinsic_image_deref_load_raw_intel = nir_intrinsic_op.define('nir_intrinsic_image_deref_load_raw_intel', 170) # type: ignore
-nir_intrinsic_image_deref_order = nir_intrinsic_op.define('nir_intrinsic_image_deref_order', 171) # type: ignore
-nir_intrinsic_image_deref_samples = nir_intrinsic_op.define('nir_intrinsic_image_deref_samples', 172) # type: ignore
-nir_intrinsic_image_deref_samples_identical = nir_intrinsic_op.define('nir_intrinsic_image_deref_samples_identical', 173) # type: ignore
-nir_intrinsic_image_deref_size = nir_intrinsic_op.define('nir_intrinsic_image_deref_size', 174) # type: ignore
-nir_intrinsic_image_deref_sparse_load = nir_intrinsic_op.define('nir_intrinsic_image_deref_sparse_load', 175) # type: ignore
-nir_intrinsic_image_deref_store = nir_intrinsic_op.define('nir_intrinsic_image_deref_store', 176) # type: ignore
-nir_intrinsic_image_deref_store_block_agx = nir_intrinsic_op.define('nir_intrinsic_image_deref_store_block_agx', 177) # type: ignore
-nir_intrinsic_image_deref_store_raw_intel = nir_intrinsic_op.define('nir_intrinsic_image_deref_store_raw_intel', 178) # type: ignore
-nir_intrinsic_image_deref_texel_address = nir_intrinsic_op.define('nir_intrinsic_image_deref_texel_address', 179) # type: ignore
-nir_intrinsic_image_descriptor_amd = nir_intrinsic_op.define('nir_intrinsic_image_descriptor_amd', 180) # type: ignore
-nir_intrinsic_image_format = nir_intrinsic_op.define('nir_intrinsic_image_format', 181) # type: ignore
-nir_intrinsic_image_fragment_mask_load_amd = nir_intrinsic_op.define('nir_intrinsic_image_fragment_mask_load_amd', 182) # type: ignore
-nir_intrinsic_image_levels = nir_intrinsic_op.define('nir_intrinsic_image_levels', 183) # type: ignore
-nir_intrinsic_image_load = nir_intrinsic_op.define('nir_intrinsic_image_load', 184) # type: ignore
-nir_intrinsic_image_load_raw_intel = nir_intrinsic_op.define('nir_intrinsic_image_load_raw_intel', 185) # type: ignore
-nir_intrinsic_image_order = nir_intrinsic_op.define('nir_intrinsic_image_order', 186) # type: ignore
-nir_intrinsic_image_samples = nir_intrinsic_op.define('nir_intrinsic_image_samples', 187) # type: ignore
-nir_intrinsic_image_samples_identical = nir_intrinsic_op.define('nir_intrinsic_image_samples_identical', 188) # type: ignore
-nir_intrinsic_image_size = nir_intrinsic_op.define('nir_intrinsic_image_size', 189) # type: ignore
-nir_intrinsic_image_sparse_load = nir_intrinsic_op.define('nir_intrinsic_image_sparse_load', 190) # type: ignore
-nir_intrinsic_image_store = nir_intrinsic_op.define('nir_intrinsic_image_store', 191) # type: ignore
-nir_intrinsic_image_store_block_agx = nir_intrinsic_op.define('nir_intrinsic_image_store_block_agx', 192) # type: ignore
-nir_intrinsic_image_store_raw_intel = nir_intrinsic_op.define('nir_intrinsic_image_store_raw_intel', 193) # type: ignore
-nir_intrinsic_image_texel_address = nir_intrinsic_op.define('nir_intrinsic_image_texel_address', 194) # type: ignore
-nir_intrinsic_inclusive_scan = nir_intrinsic_op.define('nir_intrinsic_inclusive_scan', 195) # type: ignore
-nir_intrinsic_inclusive_scan_clusters_ir3 = nir_intrinsic_op.define('nir_intrinsic_inclusive_scan_clusters_ir3', 196) # type: ignore
-nir_intrinsic_initialize_node_payloads = nir_intrinsic_op.define('nir_intrinsic_initialize_node_payloads', 197) # type: ignore
-nir_intrinsic_interp_deref_at_centroid = nir_intrinsic_op.define('nir_intrinsic_interp_deref_at_centroid', 198) # type: ignore
-nir_intrinsic_interp_deref_at_offset = nir_intrinsic_op.define('nir_intrinsic_interp_deref_at_offset', 199) # type: ignore
-nir_intrinsic_interp_deref_at_sample = nir_intrinsic_op.define('nir_intrinsic_interp_deref_at_sample', 200) # type: ignore
-nir_intrinsic_interp_deref_at_vertex = nir_intrinsic_op.define('nir_intrinsic_interp_deref_at_vertex', 201) # type: ignore
-nir_intrinsic_inverse_ballot = nir_intrinsic_op.define('nir_intrinsic_inverse_ballot', 202) # type: ignore
-nir_intrinsic_ipa_nv = nir_intrinsic_op.define('nir_intrinsic_ipa_nv', 203) # type: ignore
-nir_intrinsic_is_helper_invocation = nir_intrinsic_op.define('nir_intrinsic_is_helper_invocation', 204) # type: ignore
-nir_intrinsic_is_sparse_resident_zink = nir_intrinsic_op.define('nir_intrinsic_is_sparse_resident_zink', 205) # type: ignore
-nir_intrinsic_is_sparse_texels_resident = nir_intrinsic_op.define('nir_intrinsic_is_sparse_texels_resident', 206) # type: ignore
-nir_intrinsic_is_subgroup_invocation_lt_amd = nir_intrinsic_op.define('nir_intrinsic_is_subgroup_invocation_lt_amd', 207) # type: ignore
-nir_intrinsic_isberd_nv = nir_intrinsic_op.define('nir_intrinsic_isberd_nv', 208) # type: ignore
-nir_intrinsic_lane_permute_16_amd = nir_intrinsic_op.define('nir_intrinsic_lane_permute_16_amd', 209) # type: ignore
-nir_intrinsic_last_invocation = nir_intrinsic_op.define('nir_intrinsic_last_invocation', 210) # type: ignore
-nir_intrinsic_launch_mesh_workgroups = nir_intrinsic_op.define('nir_intrinsic_launch_mesh_workgroups', 211) # type: ignore
-nir_intrinsic_launch_mesh_workgroups_with_payload_deref = nir_intrinsic_op.define('nir_intrinsic_launch_mesh_workgroups_with_payload_deref', 212) # type: ignore
-nir_intrinsic_ldc_nv = nir_intrinsic_op.define('nir_intrinsic_ldc_nv', 213) # type: ignore
-nir_intrinsic_ldcx_nv = nir_intrinsic_op.define('nir_intrinsic_ldcx_nv', 214) # type: ignore
-nir_intrinsic_ldtram_nv = nir_intrinsic_op.define('nir_intrinsic_ldtram_nv', 215) # type: ignore
-nir_intrinsic_load_aa_line_width = nir_intrinsic_op.define('nir_intrinsic_load_aa_line_width', 216) # type: ignore
-nir_intrinsic_load_accel_struct_amd = nir_intrinsic_op.define('nir_intrinsic_load_accel_struct_amd', 217) # type: ignore
-nir_intrinsic_load_active_samples_agx = nir_intrinsic_op.define('nir_intrinsic_load_active_samples_agx', 218) # type: ignore
-nir_intrinsic_load_active_subgroup_count_agx = nir_intrinsic_op.define('nir_intrinsic_load_active_subgroup_count_agx', 219) # type: ignore
-nir_intrinsic_load_active_subgroup_invocation_agx = nir_intrinsic_op.define('nir_intrinsic_load_active_subgroup_invocation_agx', 220) # type: ignore
-nir_intrinsic_load_agx = nir_intrinsic_op.define('nir_intrinsic_load_agx', 221) # type: ignore
-nir_intrinsic_load_alpha_reference_amd = nir_intrinsic_op.define('nir_intrinsic_load_alpha_reference_amd', 222) # type: ignore
-nir_intrinsic_load_api_sample_mask_agx = nir_intrinsic_op.define('nir_intrinsic_load_api_sample_mask_agx', 223) # type: ignore
-nir_intrinsic_load_attrib_clamp_agx = nir_intrinsic_op.define('nir_intrinsic_load_attrib_clamp_agx', 224) # type: ignore
-nir_intrinsic_load_attribute_pan = nir_intrinsic_op.define('nir_intrinsic_load_attribute_pan', 225) # type: ignore
-nir_intrinsic_load_back_face_agx = nir_intrinsic_op.define('nir_intrinsic_load_back_face_agx', 226) # type: ignore
-nir_intrinsic_load_barycentric_at_offset = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_at_offset', 227) # type: ignore
-nir_intrinsic_load_barycentric_at_offset_nv = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_at_offset_nv', 228) # type: ignore
-nir_intrinsic_load_barycentric_at_sample = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_at_sample', 229) # type: ignore
-nir_intrinsic_load_barycentric_centroid = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_centroid', 230) # type: ignore
-nir_intrinsic_load_barycentric_coord_at_offset = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_at_offset', 231) # type: ignore
-nir_intrinsic_load_barycentric_coord_at_sample = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_at_sample', 232) # type: ignore
-nir_intrinsic_load_barycentric_coord_centroid = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_centroid', 233) # type: ignore
-nir_intrinsic_load_barycentric_coord_pixel = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_pixel', 234) # type: ignore
-nir_intrinsic_load_barycentric_coord_sample = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_sample', 235) # type: ignore
-nir_intrinsic_load_barycentric_model = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_model', 236) # type: ignore
-nir_intrinsic_load_barycentric_optimize_amd = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_optimize_amd', 237) # type: ignore
-nir_intrinsic_load_barycentric_pixel = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_pixel', 238) # type: ignore
-nir_intrinsic_load_barycentric_sample = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_sample', 239) # type: ignore
-nir_intrinsic_load_base_global_invocation_id = nir_intrinsic_op.define('nir_intrinsic_load_base_global_invocation_id', 240) # type: ignore
-nir_intrinsic_load_base_instance = nir_intrinsic_op.define('nir_intrinsic_load_base_instance', 241) # type: ignore
-nir_intrinsic_load_base_vertex = nir_intrinsic_op.define('nir_intrinsic_load_base_vertex', 242) # type: ignore
-nir_intrinsic_load_base_workgroup_id = nir_intrinsic_op.define('nir_intrinsic_load_base_workgroup_id', 243) # type: ignore
-nir_intrinsic_load_blend_const_color_a_float = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_a_float', 244) # type: ignore
-nir_intrinsic_load_blend_const_color_aaaa8888_unorm = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_aaaa8888_unorm', 245) # type: ignore
-nir_intrinsic_load_blend_const_color_b_float = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_b_float', 246) # type: ignore
-nir_intrinsic_load_blend_const_color_g_float = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_g_float', 247) # type: ignore
-nir_intrinsic_load_blend_const_color_r_float = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_r_float', 248) # type: ignore
-nir_intrinsic_load_blend_const_color_rgba = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_rgba', 249) # type: ignore
-nir_intrinsic_load_blend_const_color_rgba8888_unorm = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_rgba8888_unorm', 250) # type: ignore
-nir_intrinsic_load_btd_global_arg_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_global_arg_addr_intel', 251) # type: ignore
-nir_intrinsic_load_btd_local_arg_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_local_arg_addr_intel', 252) # type: ignore
-nir_intrinsic_load_btd_resume_sbt_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_resume_sbt_addr_intel', 253) # type: ignore
-nir_intrinsic_load_btd_shader_type_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_shader_type_intel', 254) # type: ignore
-nir_intrinsic_load_btd_stack_id_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_stack_id_intel', 255) # type: ignore
-nir_intrinsic_load_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_load_buffer_amd', 256) # type: ignore
-nir_intrinsic_load_callable_sbt_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_callable_sbt_addr_intel', 257) # type: ignore
-nir_intrinsic_load_callable_sbt_stride_intel = nir_intrinsic_op.define('nir_intrinsic_load_callable_sbt_stride_intel', 258) # type: ignore
-nir_intrinsic_load_clamp_vertex_color_amd = nir_intrinsic_op.define('nir_intrinsic_load_clamp_vertex_color_amd', 259) # type: ignore
-nir_intrinsic_load_clip_half_line_width_amd = nir_intrinsic_op.define('nir_intrinsic_load_clip_half_line_width_amd', 260) # type: ignore
-nir_intrinsic_load_clip_z_coeff_agx = nir_intrinsic_op.define('nir_intrinsic_load_clip_z_coeff_agx', 261) # type: ignore
-nir_intrinsic_load_coalesced_input_count = nir_intrinsic_op.define('nir_intrinsic_load_coalesced_input_count', 262) # type: ignore
-nir_intrinsic_load_coefficients_agx = nir_intrinsic_op.define('nir_intrinsic_load_coefficients_agx', 263) # type: ignore
-nir_intrinsic_load_color0 = nir_intrinsic_op.define('nir_intrinsic_load_color0', 264) # type: ignore
-nir_intrinsic_load_color1 = nir_intrinsic_op.define('nir_intrinsic_load_color1', 265) # type: ignore
-nir_intrinsic_load_const_buf_base_addr_lvp = nir_intrinsic_op.define('nir_intrinsic_load_const_buf_base_addr_lvp', 266) # type: ignore
-nir_intrinsic_load_const_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_const_ir3', 267) # type: ignore
-nir_intrinsic_load_constant = nir_intrinsic_op.define('nir_intrinsic_load_constant', 268) # type: ignore
-nir_intrinsic_load_constant_agx = nir_intrinsic_op.define('nir_intrinsic_load_constant_agx', 269) # type: ignore
-nir_intrinsic_load_constant_base_ptr = nir_intrinsic_op.define('nir_intrinsic_load_constant_base_ptr', 270) # type: ignore
-nir_intrinsic_load_converted_output_pan = nir_intrinsic_op.define('nir_intrinsic_load_converted_output_pan', 271) # type: ignore
-nir_intrinsic_load_core_id_agx = nir_intrinsic_op.define('nir_intrinsic_load_core_id_agx', 272) # type: ignore
-nir_intrinsic_load_cull_any_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_any_enabled_amd', 273) # type: ignore
-nir_intrinsic_load_cull_back_face_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_back_face_enabled_amd', 274) # type: ignore
-nir_intrinsic_load_cull_ccw_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_ccw_amd', 275) # type: ignore
-nir_intrinsic_load_cull_front_face_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_front_face_enabled_amd', 276) # type: ignore
-nir_intrinsic_load_cull_line_viewport_xy_scale_and_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_line_viewport_xy_scale_and_offset_amd', 277) # type: ignore
-nir_intrinsic_load_cull_mask = nir_intrinsic_op.define('nir_intrinsic_load_cull_mask', 278) # type: ignore
-nir_intrinsic_load_cull_mask_and_flags_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_mask_and_flags_amd', 279) # type: ignore
-nir_intrinsic_load_cull_small_line_precision_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_small_line_precision_amd', 280) # type: ignore
-nir_intrinsic_load_cull_small_lines_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_small_lines_enabled_amd', 281) # type: ignore
-nir_intrinsic_load_cull_small_triangle_precision_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_small_triangle_precision_amd', 282) # type: ignore
-nir_intrinsic_load_cull_small_triangles_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_small_triangles_enabled_amd', 283) # type: ignore
-nir_intrinsic_load_cull_triangle_viewport_xy_scale_and_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_triangle_viewport_xy_scale_and_offset_amd', 284) # type: ignore
-nir_intrinsic_load_debug_log_desc_amd = nir_intrinsic_op.define('nir_intrinsic_load_debug_log_desc_amd', 285) # type: ignore
-nir_intrinsic_load_depth_never_agx = nir_intrinsic_op.define('nir_intrinsic_load_depth_never_agx', 286) # type: ignore
-nir_intrinsic_load_deref = nir_intrinsic_op.define('nir_intrinsic_load_deref', 287) # type: ignore
-nir_intrinsic_load_deref_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_deref_block_intel', 288) # type: ignore
-nir_intrinsic_load_draw_id = nir_intrinsic_op.define('nir_intrinsic_load_draw_id', 289) # type: ignore
-nir_intrinsic_load_esgs_vertex_stride_amd = nir_intrinsic_op.define('nir_intrinsic_load_esgs_vertex_stride_amd', 290) # type: ignore
-nir_intrinsic_load_exported_agx = nir_intrinsic_op.define('nir_intrinsic_load_exported_agx', 291) # type: ignore
-nir_intrinsic_load_fb_layers_v3d = nir_intrinsic_op.define('nir_intrinsic_load_fb_layers_v3d', 292) # type: ignore
-nir_intrinsic_load_fbfetch_image_desc_amd = nir_intrinsic_op.define('nir_intrinsic_load_fbfetch_image_desc_amd', 293) # type: ignore
-nir_intrinsic_load_fbfetch_image_fmask_desc_amd = nir_intrinsic_op.define('nir_intrinsic_load_fbfetch_image_fmask_desc_amd', 294) # type: ignore
-nir_intrinsic_load_fep_w_v3d = nir_intrinsic_op.define('nir_intrinsic_load_fep_w_v3d', 295) # type: ignore
-nir_intrinsic_load_first_vertex = nir_intrinsic_op.define('nir_intrinsic_load_first_vertex', 296) # type: ignore
-nir_intrinsic_load_fixed_point_size_agx = nir_intrinsic_op.define('nir_intrinsic_load_fixed_point_size_agx', 297) # type: ignore
-nir_intrinsic_load_flat_mask = nir_intrinsic_op.define('nir_intrinsic_load_flat_mask', 298) # type: ignore
-nir_intrinsic_load_force_vrs_rates_amd = nir_intrinsic_op.define('nir_intrinsic_load_force_vrs_rates_amd', 299) # type: ignore
-nir_intrinsic_load_frag_coord = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord', 300) # type: ignore
-nir_intrinsic_load_frag_coord_unscaled_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord_unscaled_ir3', 301) # type: ignore
-nir_intrinsic_load_frag_coord_w = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord_w', 302) # type: ignore
-nir_intrinsic_load_frag_coord_z = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord_z', 303) # type: ignore
-nir_intrinsic_load_frag_coord_zw_pan = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord_zw_pan', 304) # type: ignore
-nir_intrinsic_load_frag_invocation_count = nir_intrinsic_op.define('nir_intrinsic_load_frag_invocation_count', 305) # type: ignore
-nir_intrinsic_load_frag_offset_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_frag_offset_ir3', 306) # type: ignore
-nir_intrinsic_load_frag_shading_rate = nir_intrinsic_op.define('nir_intrinsic_load_frag_shading_rate', 307) # type: ignore
-nir_intrinsic_load_frag_size = nir_intrinsic_op.define('nir_intrinsic_load_frag_size', 308) # type: ignore
-nir_intrinsic_load_frag_size_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_frag_size_ir3', 309) # type: ignore
-nir_intrinsic_load_from_texture_handle_agx = nir_intrinsic_op.define('nir_intrinsic_load_from_texture_handle_agx', 310) # type: ignore
-nir_intrinsic_load_front_face = nir_intrinsic_op.define('nir_intrinsic_load_front_face', 311) # type: ignore
-nir_intrinsic_load_front_face_fsign = nir_intrinsic_op.define('nir_intrinsic_load_front_face_fsign', 312) # type: ignore
-nir_intrinsic_load_fs_input_interp_deltas = nir_intrinsic_op.define('nir_intrinsic_load_fs_input_interp_deltas', 313) # type: ignore
-nir_intrinsic_load_fs_msaa_intel = nir_intrinsic_op.define('nir_intrinsic_load_fs_msaa_intel', 314) # type: ignore
-nir_intrinsic_load_fully_covered = nir_intrinsic_op.define('nir_intrinsic_load_fully_covered', 315) # type: ignore
-nir_intrinsic_load_geometry_param_buffer_poly = nir_intrinsic_op.define('nir_intrinsic_load_geometry_param_buffer_poly', 316) # type: ignore
-nir_intrinsic_load_global = nir_intrinsic_op.define('nir_intrinsic_load_global', 317) # type: ignore
-nir_intrinsic_load_global_2x32 = nir_intrinsic_op.define('nir_intrinsic_load_global_2x32', 318) # type: ignore
-nir_intrinsic_load_global_amd = nir_intrinsic_op.define('nir_intrinsic_load_global_amd', 319) # type: ignore
-nir_intrinsic_load_global_base_ptr = nir_intrinsic_op.define('nir_intrinsic_load_global_base_ptr', 320) # type: ignore
-nir_intrinsic_load_global_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_global_block_intel', 321) # type: ignore
-nir_intrinsic_load_global_bounded = nir_intrinsic_op.define('nir_intrinsic_load_global_bounded', 322) # type: ignore
-nir_intrinsic_load_global_constant = nir_intrinsic_op.define('nir_intrinsic_load_global_constant', 323) # type: ignore
-nir_intrinsic_load_global_constant_bounded = nir_intrinsic_op.define('nir_intrinsic_load_global_constant_bounded', 324) # type: ignore
-nir_intrinsic_load_global_constant_offset = nir_intrinsic_op.define('nir_intrinsic_load_global_constant_offset', 325) # type: ignore
-nir_intrinsic_load_global_constant_uniform_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_global_constant_uniform_block_intel', 326) # type: ignore
-nir_intrinsic_load_global_etna = nir_intrinsic_op.define('nir_intrinsic_load_global_etna', 327) # type: ignore
-nir_intrinsic_load_global_invocation_id = nir_intrinsic_op.define('nir_intrinsic_load_global_invocation_id', 328) # type: ignore
-nir_intrinsic_load_global_invocation_index = nir_intrinsic_op.define('nir_intrinsic_load_global_invocation_index', 329) # type: ignore
-nir_intrinsic_load_global_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_global_ir3', 330) # type: ignore
-nir_intrinsic_load_global_size = nir_intrinsic_op.define('nir_intrinsic_load_global_size', 331) # type: ignore
-nir_intrinsic_load_gs_header_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_gs_header_ir3', 332) # type: ignore
-nir_intrinsic_load_gs_vertex_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_gs_vertex_offset_amd', 333) # type: ignore
-nir_intrinsic_load_gs_wave_id_amd = nir_intrinsic_op.define('nir_intrinsic_load_gs_wave_id_amd', 334) # type: ignore
-nir_intrinsic_load_helper_arg_hi_agx = nir_intrinsic_op.define('nir_intrinsic_load_helper_arg_hi_agx', 335) # type: ignore
-nir_intrinsic_load_helper_arg_lo_agx = nir_intrinsic_op.define('nir_intrinsic_load_helper_arg_lo_agx', 336) # type: ignore
-nir_intrinsic_load_helper_invocation = nir_intrinsic_op.define('nir_intrinsic_load_helper_invocation', 337) # type: ignore
-nir_intrinsic_load_helper_op_id_agx = nir_intrinsic_op.define('nir_intrinsic_load_helper_op_id_agx', 338) # type: ignore
-nir_intrinsic_load_hit_attrib_amd = nir_intrinsic_op.define('nir_intrinsic_load_hit_attrib_amd', 339) # type: ignore
-nir_intrinsic_load_hs_out_patch_data_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_hs_out_patch_data_offset_amd', 340) # type: ignore
-nir_intrinsic_load_hs_patch_stride_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_hs_patch_stride_ir3', 341) # type: ignore
-nir_intrinsic_load_initial_edgeflags_amd = nir_intrinsic_op.define('nir_intrinsic_load_initial_edgeflags_amd', 342) # type: ignore
-nir_intrinsic_load_inline_data_intel = nir_intrinsic_op.define('nir_intrinsic_load_inline_data_intel', 343) # type: ignore
-nir_intrinsic_load_input = nir_intrinsic_op.define('nir_intrinsic_load_input', 344) # type: ignore
-nir_intrinsic_load_input_assembly_buffer_poly = nir_intrinsic_op.define('nir_intrinsic_load_input_assembly_buffer_poly', 345) # type: ignore
-nir_intrinsic_load_input_attachment_conv_pan = nir_intrinsic_op.define('nir_intrinsic_load_input_attachment_conv_pan', 346) # type: ignore
-nir_intrinsic_load_input_attachment_coord = nir_intrinsic_op.define('nir_intrinsic_load_input_attachment_coord', 347) # type: ignore
-nir_intrinsic_load_input_attachment_target_pan = nir_intrinsic_op.define('nir_intrinsic_load_input_attachment_target_pan', 348) # type: ignore
-nir_intrinsic_load_input_topology_poly = nir_intrinsic_op.define('nir_intrinsic_load_input_topology_poly', 349) # type: ignore
-nir_intrinsic_load_input_vertex = nir_intrinsic_op.define('nir_intrinsic_load_input_vertex', 350) # type: ignore
-nir_intrinsic_load_instance_id = nir_intrinsic_op.define('nir_intrinsic_load_instance_id', 351) # type: ignore
-nir_intrinsic_load_interpolated_input = nir_intrinsic_op.define('nir_intrinsic_load_interpolated_input', 352) # type: ignore
-nir_intrinsic_load_intersection_opaque_amd = nir_intrinsic_op.define('nir_intrinsic_load_intersection_opaque_amd', 353) # type: ignore
-nir_intrinsic_load_invocation_id = nir_intrinsic_op.define('nir_intrinsic_load_invocation_id', 354) # type: ignore
-nir_intrinsic_load_is_first_fan_agx = nir_intrinsic_op.define('nir_intrinsic_load_is_first_fan_agx', 355) # type: ignore
-nir_intrinsic_load_is_indexed_draw = nir_intrinsic_op.define('nir_intrinsic_load_is_indexed_draw', 356) # type: ignore
-nir_intrinsic_load_kernel_input = nir_intrinsic_op.define('nir_intrinsic_load_kernel_input', 357) # type: ignore
-nir_intrinsic_load_layer_id = nir_intrinsic_op.define('nir_intrinsic_load_layer_id', 358) # type: ignore
-nir_intrinsic_load_lds_ngg_gs_out_vertex_base_amd = nir_intrinsic_op.define('nir_intrinsic_load_lds_ngg_gs_out_vertex_base_amd', 359) # type: ignore
-nir_intrinsic_load_leaf_opaque_intel = nir_intrinsic_op.define('nir_intrinsic_load_leaf_opaque_intel', 360) # type: ignore
-nir_intrinsic_load_leaf_procedural_intel = nir_intrinsic_op.define('nir_intrinsic_load_leaf_procedural_intel', 361) # type: ignore
-nir_intrinsic_load_line_coord = nir_intrinsic_op.define('nir_intrinsic_load_line_coord', 362) # type: ignore
-nir_intrinsic_load_line_width = nir_intrinsic_op.define('nir_intrinsic_load_line_width', 363) # type: ignore
-nir_intrinsic_load_local_invocation_id = nir_intrinsic_op.define('nir_intrinsic_load_local_invocation_id', 364) # type: ignore
-nir_intrinsic_load_local_invocation_index = nir_intrinsic_op.define('nir_intrinsic_load_local_invocation_index', 365) # type: ignore
-nir_intrinsic_load_local_pixel_agx = nir_intrinsic_op.define('nir_intrinsic_load_local_pixel_agx', 366) # type: ignore
-nir_intrinsic_load_local_shared_r600 = nir_intrinsic_op.define('nir_intrinsic_load_local_shared_r600', 367) # type: ignore
-nir_intrinsic_load_lshs_vertex_stride_amd = nir_intrinsic_op.define('nir_intrinsic_load_lshs_vertex_stride_amd', 368) # type: ignore
-nir_intrinsic_load_max_polygon_intel = nir_intrinsic_op.define('nir_intrinsic_load_max_polygon_intel', 369) # type: ignore
-nir_intrinsic_load_merged_wave_info_amd = nir_intrinsic_op.define('nir_intrinsic_load_merged_wave_info_amd', 370) # type: ignore
-nir_intrinsic_load_mesh_view_count = nir_intrinsic_op.define('nir_intrinsic_load_mesh_view_count', 371) # type: ignore
-nir_intrinsic_load_mesh_view_indices = nir_intrinsic_op.define('nir_intrinsic_load_mesh_view_indices', 372) # type: ignore
-nir_intrinsic_load_multisampled_pan = nir_intrinsic_op.define('nir_intrinsic_load_multisampled_pan', 373) # type: ignore
-nir_intrinsic_load_noperspective_varyings_pan = nir_intrinsic_op.define('nir_intrinsic_load_noperspective_varyings_pan', 374) # type: ignore
-nir_intrinsic_load_num_subgroups = nir_intrinsic_op.define('nir_intrinsic_load_num_subgroups', 375) # type: ignore
-nir_intrinsic_load_num_vertices = nir_intrinsic_op.define('nir_intrinsic_load_num_vertices', 376) # type: ignore
-nir_intrinsic_load_num_vertices_per_primitive_amd = nir_intrinsic_op.define('nir_intrinsic_load_num_vertices_per_primitive_amd', 377) # type: ignore
-nir_intrinsic_load_num_workgroups = nir_intrinsic_op.define('nir_intrinsic_load_num_workgroups', 378) # type: ignore
-nir_intrinsic_load_ordered_id_amd = nir_intrinsic_op.define('nir_intrinsic_load_ordered_id_amd', 379) # type: ignore
-nir_intrinsic_load_output = nir_intrinsic_op.define('nir_intrinsic_load_output', 380) # type: ignore
-nir_intrinsic_load_packed_passthrough_primitive_amd = nir_intrinsic_op.define('nir_intrinsic_load_packed_passthrough_primitive_amd', 381) # type: ignore
-nir_intrinsic_load_param = nir_intrinsic_op.define('nir_intrinsic_load_param', 382) # type: ignore
-nir_intrinsic_load_patch_vertices_in = nir_intrinsic_op.define('nir_intrinsic_load_patch_vertices_in', 383) # type: ignore
-nir_intrinsic_load_per_primitive_input = nir_intrinsic_op.define('nir_intrinsic_load_per_primitive_input', 384) # type: ignore
-nir_intrinsic_load_per_primitive_output = nir_intrinsic_op.define('nir_intrinsic_load_per_primitive_output', 385) # type: ignore
-nir_intrinsic_load_per_primitive_remap_intel = nir_intrinsic_op.define('nir_intrinsic_load_per_primitive_remap_intel', 386) # type: ignore
-nir_intrinsic_load_per_vertex_input = nir_intrinsic_op.define('nir_intrinsic_load_per_vertex_input', 387) # type: ignore
-nir_intrinsic_load_per_vertex_output = nir_intrinsic_op.define('nir_intrinsic_load_per_vertex_output', 388) # type: ignore
-nir_intrinsic_load_per_view_output = nir_intrinsic_op.define('nir_intrinsic_load_per_view_output', 389) # type: ignore
-nir_intrinsic_load_persp_center_rhw_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_persp_center_rhw_ir3', 390) # type: ignore
-nir_intrinsic_load_pipeline_stat_query_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_pipeline_stat_query_enabled_amd', 391) # type: ignore
-nir_intrinsic_load_pixel_coord = nir_intrinsic_op.define('nir_intrinsic_load_pixel_coord', 392) # type: ignore
-nir_intrinsic_load_point_coord = nir_intrinsic_op.define('nir_intrinsic_load_point_coord', 393) # type: ignore
-nir_intrinsic_load_point_coord_maybe_flipped = nir_intrinsic_op.define('nir_intrinsic_load_point_coord_maybe_flipped', 394) # type: ignore
-nir_intrinsic_load_poly_line_smooth_enabled = nir_intrinsic_op.define('nir_intrinsic_load_poly_line_smooth_enabled', 395) # type: ignore
-nir_intrinsic_load_polygon_stipple_agx = nir_intrinsic_op.define('nir_intrinsic_load_polygon_stipple_agx', 396) # type: ignore
-nir_intrinsic_load_polygon_stipple_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_load_polygon_stipple_buffer_amd', 397) # type: ignore
-nir_intrinsic_load_preamble = nir_intrinsic_op.define('nir_intrinsic_load_preamble', 398) # type: ignore
-nir_intrinsic_load_prim_gen_query_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_prim_gen_query_enabled_amd', 399) # type: ignore
-nir_intrinsic_load_prim_xfb_query_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_prim_xfb_query_enabled_amd', 400) # type: ignore
-nir_intrinsic_load_primitive_id = nir_intrinsic_op.define('nir_intrinsic_load_primitive_id', 401) # type: ignore
-nir_intrinsic_load_primitive_location_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_primitive_location_ir3', 402) # type: ignore
-nir_intrinsic_load_printf_buffer_address = nir_intrinsic_op.define('nir_intrinsic_load_printf_buffer_address', 403) # type: ignore
-nir_intrinsic_load_printf_buffer_size = nir_intrinsic_op.define('nir_intrinsic_load_printf_buffer_size', 404) # type: ignore
-nir_intrinsic_load_provoking_last = nir_intrinsic_op.define('nir_intrinsic_load_provoking_last', 405) # type: ignore
-nir_intrinsic_load_provoking_vtx_amd = nir_intrinsic_op.define('nir_intrinsic_load_provoking_vtx_amd', 406) # type: ignore
-nir_intrinsic_load_provoking_vtx_in_prim_amd = nir_intrinsic_op.define('nir_intrinsic_load_provoking_vtx_in_prim_amd', 407) # type: ignore
-nir_intrinsic_load_push_constant = nir_intrinsic_op.define('nir_intrinsic_load_push_constant', 408) # type: ignore
-nir_intrinsic_load_push_constant_zink = nir_intrinsic_op.define('nir_intrinsic_load_push_constant_zink', 409) # type: ignore
-nir_intrinsic_load_r600_indirect_per_vertex_input = nir_intrinsic_op.define('nir_intrinsic_load_r600_indirect_per_vertex_input', 410) # type: ignore
-nir_intrinsic_load_rasterization_primitive_amd = nir_intrinsic_op.define('nir_intrinsic_load_rasterization_primitive_amd', 411) # type: ignore
-nir_intrinsic_load_rasterization_samples_amd = nir_intrinsic_op.define('nir_intrinsic_load_rasterization_samples_amd', 412) # type: ignore
-nir_intrinsic_load_rasterization_stream = nir_intrinsic_op.define('nir_intrinsic_load_rasterization_stream', 413) # type: ignore
-nir_intrinsic_load_raw_output_pan = nir_intrinsic_op.define('nir_intrinsic_load_raw_output_pan', 414) # type: ignore
-nir_intrinsic_load_raw_vertex_id_pan = nir_intrinsic_op.define('nir_intrinsic_load_raw_vertex_id_pan', 415) # type: ignore
-nir_intrinsic_load_raw_vertex_offset_pan = nir_intrinsic_op.define('nir_intrinsic_load_raw_vertex_offset_pan', 416) # type: ignore
-nir_intrinsic_load_ray_base_mem_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_base_mem_addr_intel', 417) # type: ignore
-nir_intrinsic_load_ray_flags = nir_intrinsic_op.define('nir_intrinsic_load_ray_flags', 418) # type: ignore
-nir_intrinsic_load_ray_geometry_index = nir_intrinsic_op.define('nir_intrinsic_load_ray_geometry_index', 419) # type: ignore
-nir_intrinsic_load_ray_hit_kind = nir_intrinsic_op.define('nir_intrinsic_load_ray_hit_kind', 420) # type: ignore
-nir_intrinsic_load_ray_hit_sbt_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_hit_sbt_addr_intel', 421) # type: ignore
-nir_intrinsic_load_ray_hit_sbt_stride_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_hit_sbt_stride_intel', 422) # type: ignore
-nir_intrinsic_load_ray_hw_stack_size_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_hw_stack_size_intel', 423) # type: ignore
-nir_intrinsic_load_ray_instance_custom_index = nir_intrinsic_op.define('nir_intrinsic_load_ray_instance_custom_index', 424) # type: ignore
-nir_intrinsic_load_ray_launch_id = nir_intrinsic_op.define('nir_intrinsic_load_ray_launch_id', 425) # type: ignore
-nir_intrinsic_load_ray_launch_size = nir_intrinsic_op.define('nir_intrinsic_load_ray_launch_size', 426) # type: ignore
-nir_intrinsic_load_ray_miss_sbt_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_miss_sbt_addr_intel', 427) # type: ignore
-nir_intrinsic_load_ray_miss_sbt_stride_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_miss_sbt_stride_intel', 428) # type: ignore
-nir_intrinsic_load_ray_num_dss_rt_stacks_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_num_dss_rt_stacks_intel', 429) # type: ignore
-nir_intrinsic_load_ray_object_direction = nir_intrinsic_op.define('nir_intrinsic_load_ray_object_direction', 430) # type: ignore
-nir_intrinsic_load_ray_object_origin = nir_intrinsic_op.define('nir_intrinsic_load_ray_object_origin', 431) # type: ignore
-nir_intrinsic_load_ray_object_to_world = nir_intrinsic_op.define('nir_intrinsic_load_ray_object_to_world', 432) # type: ignore
-nir_intrinsic_load_ray_query_global_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_query_global_intel', 433) # type: ignore
-nir_intrinsic_load_ray_sw_stack_size_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_sw_stack_size_intel', 434) # type: ignore
-nir_intrinsic_load_ray_t_max = nir_intrinsic_op.define('nir_intrinsic_load_ray_t_max', 435) # type: ignore
-nir_intrinsic_load_ray_t_min = nir_intrinsic_op.define('nir_intrinsic_load_ray_t_min', 436) # type: ignore
-nir_intrinsic_load_ray_tracing_stack_base_lvp = nir_intrinsic_op.define('nir_intrinsic_load_ray_tracing_stack_base_lvp', 437) # type: ignore
-nir_intrinsic_load_ray_triangle_vertex_positions = nir_intrinsic_op.define('nir_intrinsic_load_ray_triangle_vertex_positions', 438) # type: ignore
-nir_intrinsic_load_ray_world_direction = nir_intrinsic_op.define('nir_intrinsic_load_ray_world_direction', 439) # type: ignore
-nir_intrinsic_load_ray_world_origin = nir_intrinsic_op.define('nir_intrinsic_load_ray_world_origin', 440) # type: ignore
-nir_intrinsic_load_ray_world_to_object = nir_intrinsic_op.define('nir_intrinsic_load_ray_world_to_object', 441) # type: ignore
-nir_intrinsic_load_readonly_output_pan = nir_intrinsic_op.define('nir_intrinsic_load_readonly_output_pan', 442) # type: ignore
-nir_intrinsic_load_reg = nir_intrinsic_op.define('nir_intrinsic_load_reg', 443) # type: ignore
-nir_intrinsic_load_reg_indirect = nir_intrinsic_op.define('nir_intrinsic_load_reg_indirect', 444) # type: ignore
-nir_intrinsic_load_rel_patch_id_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_rel_patch_id_ir3', 445) # type: ignore
-nir_intrinsic_load_reloc_const_intel = nir_intrinsic_op.define('nir_intrinsic_load_reloc_const_intel', 446) # type: ignore
-nir_intrinsic_load_resume_shader_address_amd = nir_intrinsic_op.define('nir_intrinsic_load_resume_shader_address_amd', 447) # type: ignore
-nir_intrinsic_load_ring_attr_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_attr_amd', 448) # type: ignore
-nir_intrinsic_load_ring_attr_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_attr_offset_amd', 449) # type: ignore
-nir_intrinsic_load_ring_es2gs_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_es2gs_offset_amd', 450) # type: ignore
-nir_intrinsic_load_ring_esgs_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_esgs_amd', 451) # type: ignore
-nir_intrinsic_load_ring_gs2vs_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_gs2vs_offset_amd', 452) # type: ignore
-nir_intrinsic_load_ring_gsvs_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_gsvs_amd', 453) # type: ignore
-nir_intrinsic_load_ring_mesh_scratch_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_mesh_scratch_amd', 454) # type: ignore
-nir_intrinsic_load_ring_mesh_scratch_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_mesh_scratch_offset_amd', 455) # type: ignore
-nir_intrinsic_load_ring_task_draw_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_task_draw_amd', 456) # type: ignore
-nir_intrinsic_load_ring_task_payload_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_task_payload_amd', 457) # type: ignore
-nir_intrinsic_load_ring_tess_factors_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_tess_factors_amd', 458) # type: ignore
-nir_intrinsic_load_ring_tess_factors_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_tess_factors_offset_amd', 459) # type: ignore
-nir_intrinsic_load_ring_tess_offchip_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_tess_offchip_amd', 460) # type: ignore
-nir_intrinsic_load_ring_tess_offchip_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_tess_offchip_offset_amd', 461) # type: ignore
-nir_intrinsic_load_root_agx = nir_intrinsic_op.define('nir_intrinsic_load_root_agx', 462) # type: ignore
-nir_intrinsic_load_rt_arg_scratch_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_rt_arg_scratch_offset_amd', 463) # type: ignore
-nir_intrinsic_load_rt_conversion_pan = nir_intrinsic_op.define('nir_intrinsic_load_rt_conversion_pan', 464) # type: ignore
-nir_intrinsic_load_sample_id = nir_intrinsic_op.define('nir_intrinsic_load_sample_id', 465) # type: ignore
-nir_intrinsic_load_sample_id_no_per_sample = nir_intrinsic_op.define('nir_intrinsic_load_sample_id_no_per_sample', 466) # type: ignore
-nir_intrinsic_load_sample_mask = nir_intrinsic_op.define('nir_intrinsic_load_sample_mask', 467) # type: ignore
-nir_intrinsic_load_sample_mask_in = nir_intrinsic_op.define('nir_intrinsic_load_sample_mask_in', 468) # type: ignore
-nir_intrinsic_load_sample_pos = nir_intrinsic_op.define('nir_intrinsic_load_sample_pos', 469) # type: ignore
-nir_intrinsic_load_sample_pos_from_id = nir_intrinsic_op.define('nir_intrinsic_load_sample_pos_from_id', 470) # type: ignore
-nir_intrinsic_load_sample_pos_or_center = nir_intrinsic_op.define('nir_intrinsic_load_sample_pos_or_center', 471) # type: ignore
-nir_intrinsic_load_sample_positions_agx = nir_intrinsic_op.define('nir_intrinsic_load_sample_positions_agx', 472) # type: ignore
-nir_intrinsic_load_sample_positions_amd = nir_intrinsic_op.define('nir_intrinsic_load_sample_positions_amd', 473) # type: ignore
-nir_intrinsic_load_sample_positions_pan = nir_intrinsic_op.define('nir_intrinsic_load_sample_positions_pan', 474) # type: ignore
-nir_intrinsic_load_sampler_handle_agx = nir_intrinsic_op.define('nir_intrinsic_load_sampler_handle_agx', 475) # type: ignore
-nir_intrinsic_load_sampler_lod_parameters = nir_intrinsic_op.define('nir_intrinsic_load_sampler_lod_parameters', 476) # type: ignore
-nir_intrinsic_load_samples_log2_agx = nir_intrinsic_op.define('nir_intrinsic_load_samples_log2_agx', 477) # type: ignore
-nir_intrinsic_load_sbt_base_amd = nir_intrinsic_op.define('nir_intrinsic_load_sbt_base_amd', 478) # type: ignore
-nir_intrinsic_load_sbt_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_sbt_offset_amd', 479) # type: ignore
-nir_intrinsic_load_sbt_stride_amd = nir_intrinsic_op.define('nir_intrinsic_load_sbt_stride_amd', 480) # type: ignore
-nir_intrinsic_load_scalar_arg_amd = nir_intrinsic_op.define('nir_intrinsic_load_scalar_arg_amd', 481) # type: ignore
-nir_intrinsic_load_scratch = nir_intrinsic_op.define('nir_intrinsic_load_scratch', 482) # type: ignore
-nir_intrinsic_load_scratch_base_ptr = nir_intrinsic_op.define('nir_intrinsic_load_scratch_base_ptr', 483) # type: ignore
-nir_intrinsic_load_shader_call_data_offset_lvp = nir_intrinsic_op.define('nir_intrinsic_load_shader_call_data_offset_lvp', 484) # type: ignore
-nir_intrinsic_load_shader_index = nir_intrinsic_op.define('nir_intrinsic_load_shader_index', 485) # type: ignore
-nir_intrinsic_load_shader_output_pan = nir_intrinsic_op.define('nir_intrinsic_load_shader_output_pan', 486) # type: ignore
-nir_intrinsic_load_shader_part_tests_zs_agx = nir_intrinsic_op.define('nir_intrinsic_load_shader_part_tests_zs_agx', 487) # type: ignore
-nir_intrinsic_load_shader_record_ptr = nir_intrinsic_op.define('nir_intrinsic_load_shader_record_ptr', 488) # type: ignore
-nir_intrinsic_load_shared = nir_intrinsic_op.define('nir_intrinsic_load_shared', 489) # type: ignore
-nir_intrinsic_load_shared2_amd = nir_intrinsic_op.define('nir_intrinsic_load_shared2_amd', 490) # type: ignore
-nir_intrinsic_load_shared_base_ptr = nir_intrinsic_op.define('nir_intrinsic_load_shared_base_ptr', 491) # type: ignore
-nir_intrinsic_load_shared_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_shared_block_intel', 492) # type: ignore
-nir_intrinsic_load_shared_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_shared_ir3', 493) # type: ignore
-nir_intrinsic_load_shared_lock_nv = nir_intrinsic_op.define('nir_intrinsic_load_shared_lock_nv', 494) # type: ignore
-nir_intrinsic_load_shared_uniform_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_shared_uniform_block_intel', 495) # type: ignore
-nir_intrinsic_load_simd_width_intel = nir_intrinsic_op.define('nir_intrinsic_load_simd_width_intel', 496) # type: ignore
-nir_intrinsic_load_sm_count_nv = nir_intrinsic_op.define('nir_intrinsic_load_sm_count_nv', 497) # type: ignore
-nir_intrinsic_load_sm_id_nv = nir_intrinsic_op.define('nir_intrinsic_load_sm_id_nv', 498) # type: ignore
-nir_intrinsic_load_smem_amd = nir_intrinsic_op.define('nir_intrinsic_load_smem_amd', 499) # type: ignore
-nir_intrinsic_load_ssbo = nir_intrinsic_op.define('nir_intrinsic_load_ssbo', 500) # type: ignore
-nir_intrinsic_load_ssbo_address = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_address', 501) # type: ignore
-nir_intrinsic_load_ssbo_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_block_intel', 502) # type: ignore
-nir_intrinsic_load_ssbo_intel = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_intel', 503) # type: ignore
-nir_intrinsic_load_ssbo_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_ir3', 504) # type: ignore
-nir_intrinsic_load_ssbo_uniform_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_uniform_block_intel', 505) # type: ignore
-nir_intrinsic_load_stack = nir_intrinsic_op.define('nir_intrinsic_load_stack', 506) # type: ignore
-nir_intrinsic_load_stat_query_address_agx = nir_intrinsic_op.define('nir_intrinsic_load_stat_query_address_agx', 507) # type: ignore
-nir_intrinsic_load_streamout_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_load_streamout_buffer_amd', 508) # type: ignore
-nir_intrinsic_load_streamout_config_amd = nir_intrinsic_op.define('nir_intrinsic_load_streamout_config_amd', 509) # type: ignore
-nir_intrinsic_load_streamout_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_streamout_offset_amd', 510) # type: ignore
-nir_intrinsic_load_streamout_write_index_amd = nir_intrinsic_op.define('nir_intrinsic_load_streamout_write_index_amd', 511) # type: ignore
-nir_intrinsic_load_subgroup_eq_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_eq_mask', 512) # type: ignore
-nir_intrinsic_load_subgroup_ge_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_ge_mask', 513) # type: ignore
-nir_intrinsic_load_subgroup_gt_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_gt_mask', 514) # type: ignore
-nir_intrinsic_load_subgroup_id = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_id', 515) # type: ignore
-nir_intrinsic_load_subgroup_id_shift_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_id_shift_ir3', 516) # type: ignore
-nir_intrinsic_load_subgroup_invocation = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_invocation', 517) # type: ignore
-nir_intrinsic_load_subgroup_le_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_le_mask', 518) # type: ignore
-nir_intrinsic_load_subgroup_lt_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_lt_mask', 519) # type: ignore
-nir_intrinsic_load_subgroup_size = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_size', 520) # type: ignore
-nir_intrinsic_load_sysval_agx = nir_intrinsic_op.define('nir_intrinsic_load_sysval_agx', 521) # type: ignore
-nir_intrinsic_load_sysval_nv = nir_intrinsic_op.define('nir_intrinsic_load_sysval_nv', 522) # type: ignore
-nir_intrinsic_load_task_payload = nir_intrinsic_op.define('nir_intrinsic_load_task_payload', 523) # type: ignore
-nir_intrinsic_load_task_ring_entry_amd = nir_intrinsic_op.define('nir_intrinsic_load_task_ring_entry_amd', 524) # type: ignore
-nir_intrinsic_load_tcs_header_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_header_ir3', 525) # type: ignore
-nir_intrinsic_load_tcs_in_param_base_r600 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_in_param_base_r600', 526) # type: ignore
-nir_intrinsic_load_tcs_mem_attrib_stride = nir_intrinsic_op.define('nir_intrinsic_load_tcs_mem_attrib_stride', 527) # type: ignore
-nir_intrinsic_load_tcs_num_patches_amd = nir_intrinsic_op.define('nir_intrinsic_load_tcs_num_patches_amd', 528) # type: ignore
-nir_intrinsic_load_tcs_out_param_base_r600 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_out_param_base_r600', 529) # type: ignore
-nir_intrinsic_load_tcs_primitive_mode_amd = nir_intrinsic_op.define('nir_intrinsic_load_tcs_primitive_mode_amd', 530) # type: ignore
-nir_intrinsic_load_tcs_rel_patch_id_r600 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_rel_patch_id_r600', 531) # type: ignore
-nir_intrinsic_load_tcs_tess_factor_base_r600 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_tess_factor_base_r600', 532) # type: ignore
-nir_intrinsic_load_tcs_tess_levels_to_tes_amd = nir_intrinsic_op.define('nir_intrinsic_load_tcs_tess_levels_to_tes_amd', 533) # type: ignore
-nir_intrinsic_load_tess_coord = nir_intrinsic_op.define('nir_intrinsic_load_tess_coord', 534) # type: ignore
-nir_intrinsic_load_tess_coord_xy = nir_intrinsic_op.define('nir_intrinsic_load_tess_coord_xy', 535) # type: ignore
-nir_intrinsic_load_tess_factor_base_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_tess_factor_base_ir3', 536) # type: ignore
-nir_intrinsic_load_tess_level_inner = nir_intrinsic_op.define('nir_intrinsic_load_tess_level_inner', 537) # type: ignore
-nir_intrinsic_load_tess_level_inner_default = nir_intrinsic_op.define('nir_intrinsic_load_tess_level_inner_default', 538) # type: ignore
-nir_intrinsic_load_tess_level_outer = nir_intrinsic_op.define('nir_intrinsic_load_tess_level_outer', 539) # type: ignore
-nir_intrinsic_load_tess_level_outer_default = nir_intrinsic_op.define('nir_intrinsic_load_tess_level_outer_default', 540) # type: ignore
-nir_intrinsic_load_tess_param_base_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_tess_param_base_ir3', 541) # type: ignore
-nir_intrinsic_load_tess_param_buffer_poly = nir_intrinsic_op.define('nir_intrinsic_load_tess_param_buffer_poly', 542) # type: ignore
-nir_intrinsic_load_tess_rel_patch_id_amd = nir_intrinsic_op.define('nir_intrinsic_load_tess_rel_patch_id_amd', 543) # type: ignore
-nir_intrinsic_load_tex_sprite_mask_agx = nir_intrinsic_op.define('nir_intrinsic_load_tex_sprite_mask_agx', 544) # type: ignore
-nir_intrinsic_load_texture_handle_agx = nir_intrinsic_op.define('nir_intrinsic_load_texture_handle_agx', 545) # type: ignore
-nir_intrinsic_load_texture_scale = nir_intrinsic_op.define('nir_intrinsic_load_texture_scale', 546) # type: ignore
-nir_intrinsic_load_texture_size_etna = nir_intrinsic_op.define('nir_intrinsic_load_texture_size_etna', 547) # type: ignore
-nir_intrinsic_load_tlb_color_brcm = nir_intrinsic_op.define('nir_intrinsic_load_tlb_color_brcm', 548) # type: ignore
-nir_intrinsic_load_topology_id_intel = nir_intrinsic_op.define('nir_intrinsic_load_topology_id_intel', 549) # type: ignore
-nir_intrinsic_load_typed_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_load_typed_buffer_amd', 550) # type: ignore
-nir_intrinsic_load_uav_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_uav_ir3', 551) # type: ignore
-nir_intrinsic_load_ubo = nir_intrinsic_op.define('nir_intrinsic_load_ubo', 552) # type: ignore
-nir_intrinsic_load_ubo_uniform_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_ubo_uniform_block_intel', 553) # type: ignore
-nir_intrinsic_load_ubo_vec4 = nir_intrinsic_op.define('nir_intrinsic_load_ubo_vec4', 554) # type: ignore
-nir_intrinsic_load_uniform = nir_intrinsic_op.define('nir_intrinsic_load_uniform', 555) # type: ignore
-nir_intrinsic_load_user_clip_plane = nir_intrinsic_op.define('nir_intrinsic_load_user_clip_plane', 556) # type: ignore
-nir_intrinsic_load_user_data_amd = nir_intrinsic_op.define('nir_intrinsic_load_user_data_amd', 557) # type: ignore
-nir_intrinsic_load_uvs_index_agx = nir_intrinsic_op.define('nir_intrinsic_load_uvs_index_agx', 558) # type: ignore
-nir_intrinsic_load_vbo_base_agx = nir_intrinsic_op.define('nir_intrinsic_load_vbo_base_agx', 559) # type: ignore
-nir_intrinsic_load_vector_arg_amd = nir_intrinsic_op.define('nir_intrinsic_load_vector_arg_amd', 560) # type: ignore
-nir_intrinsic_load_vertex_id = nir_intrinsic_op.define('nir_intrinsic_load_vertex_id', 561) # type: ignore
-nir_intrinsic_load_vertex_id_zero_base = nir_intrinsic_op.define('nir_intrinsic_load_vertex_id_zero_base', 562) # type: ignore
-nir_intrinsic_load_view_index = nir_intrinsic_op.define('nir_intrinsic_load_view_index', 563) # type: ignore
-nir_intrinsic_load_viewport_offset = nir_intrinsic_op.define('nir_intrinsic_load_viewport_offset', 564) # type: ignore
-nir_intrinsic_load_viewport_scale = nir_intrinsic_op.define('nir_intrinsic_load_viewport_scale', 565) # type: ignore
-nir_intrinsic_load_viewport_x_offset = nir_intrinsic_op.define('nir_intrinsic_load_viewport_x_offset', 566) # type: ignore
-nir_intrinsic_load_viewport_x_scale = nir_intrinsic_op.define('nir_intrinsic_load_viewport_x_scale', 567) # type: ignore
-nir_intrinsic_load_viewport_y_offset = nir_intrinsic_op.define('nir_intrinsic_load_viewport_y_offset', 568) # type: ignore
-nir_intrinsic_load_viewport_y_scale = nir_intrinsic_op.define('nir_intrinsic_load_viewport_y_scale', 569) # type: ignore
-nir_intrinsic_load_viewport_z_offset = nir_intrinsic_op.define('nir_intrinsic_load_viewport_z_offset', 570) # type: ignore
-nir_intrinsic_load_viewport_z_scale = nir_intrinsic_op.define('nir_intrinsic_load_viewport_z_scale', 571) # type: ignore
-nir_intrinsic_load_vs_output_buffer_poly = nir_intrinsic_op.define('nir_intrinsic_load_vs_output_buffer_poly', 572) # type: ignore
-nir_intrinsic_load_vs_outputs_poly = nir_intrinsic_op.define('nir_intrinsic_load_vs_outputs_poly', 573) # type: ignore
-nir_intrinsic_load_vs_primitive_stride_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_vs_primitive_stride_ir3', 574) # type: ignore
-nir_intrinsic_load_vs_vertex_stride_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_vs_vertex_stride_ir3', 575) # type: ignore
-nir_intrinsic_load_vulkan_descriptor = nir_intrinsic_op.define('nir_intrinsic_load_vulkan_descriptor', 576) # type: ignore
-nir_intrinsic_load_warp_id_nv = nir_intrinsic_op.define('nir_intrinsic_load_warp_id_nv', 577) # type: ignore
-nir_intrinsic_load_warps_per_sm_nv = nir_intrinsic_op.define('nir_intrinsic_load_warps_per_sm_nv', 578) # type: ignore
-nir_intrinsic_load_work_dim = nir_intrinsic_op.define('nir_intrinsic_load_work_dim', 579) # type: ignore
-nir_intrinsic_load_workgroup_id = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_id', 580) # type: ignore
-nir_intrinsic_load_workgroup_index = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_index', 581) # type: ignore
-nir_intrinsic_load_workgroup_num_input_primitives_amd = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_num_input_primitives_amd', 582) # type: ignore
-nir_intrinsic_load_workgroup_num_input_vertices_amd = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_num_input_vertices_amd', 583) # type: ignore
-nir_intrinsic_load_workgroup_size = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_size', 584) # type: ignore
-nir_intrinsic_load_xfb_address = nir_intrinsic_op.define('nir_intrinsic_load_xfb_address', 585) # type: ignore
-nir_intrinsic_load_xfb_index_buffer = nir_intrinsic_op.define('nir_intrinsic_load_xfb_index_buffer', 586) # type: ignore
-nir_intrinsic_load_xfb_size = nir_intrinsic_op.define('nir_intrinsic_load_xfb_size', 587) # type: ignore
-nir_intrinsic_load_xfb_state_address_gfx12_amd = nir_intrinsic_op.define('nir_intrinsic_load_xfb_state_address_gfx12_amd', 588) # type: ignore
-nir_intrinsic_masked_swizzle_amd = nir_intrinsic_op.define('nir_intrinsic_masked_swizzle_amd', 589) # type: ignore
-nir_intrinsic_mbcnt_amd = nir_intrinsic_op.define('nir_intrinsic_mbcnt_amd', 590) # type: ignore
-nir_intrinsic_memcpy_deref = nir_intrinsic_op.define('nir_intrinsic_memcpy_deref', 591) # type: ignore
-nir_intrinsic_nop = nir_intrinsic_op.define('nir_intrinsic_nop', 592) # type: ignore
-nir_intrinsic_nop_amd = nir_intrinsic_op.define('nir_intrinsic_nop_amd', 593) # type: ignore
-nir_intrinsic_optimization_barrier_sgpr_amd = nir_intrinsic_op.define('nir_intrinsic_optimization_barrier_sgpr_amd', 594) # type: ignore
-nir_intrinsic_optimization_barrier_vgpr_amd = nir_intrinsic_op.define('nir_intrinsic_optimization_barrier_vgpr_amd', 595) # type: ignore
-nir_intrinsic_ordered_add_loop_gfx12_amd = nir_intrinsic_op.define('nir_intrinsic_ordered_add_loop_gfx12_amd', 596) # type: ignore
-nir_intrinsic_ordered_xfb_counter_add_gfx11_amd = nir_intrinsic_op.define('nir_intrinsic_ordered_xfb_counter_add_gfx11_amd', 597) # type: ignore
-nir_intrinsic_overwrite_tes_arguments_amd = nir_intrinsic_op.define('nir_intrinsic_overwrite_tes_arguments_amd', 598) # type: ignore
-nir_intrinsic_overwrite_vs_arguments_amd = nir_intrinsic_op.define('nir_intrinsic_overwrite_vs_arguments_amd', 599) # type: ignore
-nir_intrinsic_pin_cx_handle_nv = nir_intrinsic_op.define('nir_intrinsic_pin_cx_handle_nv', 600) # type: ignore
-nir_intrinsic_preamble_end_ir3 = nir_intrinsic_op.define('nir_intrinsic_preamble_end_ir3', 601) # type: ignore
-nir_intrinsic_preamble_start_ir3 = nir_intrinsic_op.define('nir_intrinsic_preamble_start_ir3', 602) # type: ignore
-nir_intrinsic_prefetch_sam_ir3 = nir_intrinsic_op.define('nir_intrinsic_prefetch_sam_ir3', 603) # type: ignore
-nir_intrinsic_prefetch_tex_ir3 = nir_intrinsic_op.define('nir_intrinsic_prefetch_tex_ir3', 604) # type: ignore
-nir_intrinsic_prefetch_ubo_ir3 = nir_intrinsic_op.define('nir_intrinsic_prefetch_ubo_ir3', 605) # type: ignore
-nir_intrinsic_printf = nir_intrinsic_op.define('nir_intrinsic_printf', 606) # type: ignore
-nir_intrinsic_printf_abort = nir_intrinsic_op.define('nir_intrinsic_printf_abort', 607) # type: ignore
-nir_intrinsic_quad_ballot_agx = nir_intrinsic_op.define('nir_intrinsic_quad_ballot_agx', 608) # type: ignore
-nir_intrinsic_quad_broadcast = nir_intrinsic_op.define('nir_intrinsic_quad_broadcast', 609) # type: ignore
-nir_intrinsic_quad_swap_diagonal = nir_intrinsic_op.define('nir_intrinsic_quad_swap_diagonal', 610) # type: ignore
-nir_intrinsic_quad_swap_horizontal = nir_intrinsic_op.define('nir_intrinsic_quad_swap_horizontal', 611) # type: ignore
-nir_intrinsic_quad_swap_vertical = nir_intrinsic_op.define('nir_intrinsic_quad_swap_vertical', 612) # type: ignore
-nir_intrinsic_quad_swizzle_amd = nir_intrinsic_op.define('nir_intrinsic_quad_swizzle_amd', 613) # type: ignore
-nir_intrinsic_quad_vote_all = nir_intrinsic_op.define('nir_intrinsic_quad_vote_all', 614) # type: ignore
-nir_intrinsic_quad_vote_any = nir_intrinsic_op.define('nir_intrinsic_quad_vote_any', 615) # type: ignore
-nir_intrinsic_r600_indirect_vertex_at_index = nir_intrinsic_op.define('nir_intrinsic_r600_indirect_vertex_at_index', 616) # type: ignore
-nir_intrinsic_ray_intersection_ir3 = nir_intrinsic_op.define('nir_intrinsic_ray_intersection_ir3', 617) # type: ignore
-nir_intrinsic_read_attribute_payload_intel = nir_intrinsic_op.define('nir_intrinsic_read_attribute_payload_intel', 618) # type: ignore
-nir_intrinsic_read_first_invocation = nir_intrinsic_op.define('nir_intrinsic_read_first_invocation', 619) # type: ignore
-nir_intrinsic_read_getlast_ir3 = nir_intrinsic_op.define('nir_intrinsic_read_getlast_ir3', 620) # type: ignore
-nir_intrinsic_read_invocation = nir_intrinsic_op.define('nir_intrinsic_read_invocation', 621) # type: ignore
-nir_intrinsic_read_invocation_cond_ir3 = nir_intrinsic_op.define('nir_intrinsic_read_invocation_cond_ir3', 622) # type: ignore
-nir_intrinsic_reduce = nir_intrinsic_op.define('nir_intrinsic_reduce', 623) # type: ignore
-nir_intrinsic_reduce_clusters_ir3 = nir_intrinsic_op.define('nir_intrinsic_reduce_clusters_ir3', 624) # type: ignore
-nir_intrinsic_report_ray_intersection = nir_intrinsic_op.define('nir_intrinsic_report_ray_intersection', 625) # type: ignore
-nir_intrinsic_resource_intel = nir_intrinsic_op.define('nir_intrinsic_resource_intel', 626) # type: ignore
-nir_intrinsic_rotate = nir_intrinsic_op.define('nir_intrinsic_rotate', 627) # type: ignore
-nir_intrinsic_rq_confirm_intersection = nir_intrinsic_op.define('nir_intrinsic_rq_confirm_intersection', 628) # type: ignore
-nir_intrinsic_rq_generate_intersection = nir_intrinsic_op.define('nir_intrinsic_rq_generate_intersection', 629) # type: ignore
-nir_intrinsic_rq_initialize = nir_intrinsic_op.define('nir_intrinsic_rq_initialize', 630) # type: ignore
-nir_intrinsic_rq_load = nir_intrinsic_op.define('nir_intrinsic_rq_load', 631) # type: ignore
-nir_intrinsic_rq_proceed = nir_intrinsic_op.define('nir_intrinsic_rq_proceed', 632) # type: ignore
-nir_intrinsic_rq_terminate = nir_intrinsic_op.define('nir_intrinsic_rq_terminate', 633) # type: ignore
-nir_intrinsic_rt_execute_callable = nir_intrinsic_op.define('nir_intrinsic_rt_execute_callable', 634) # type: ignore
-nir_intrinsic_rt_resume = nir_intrinsic_op.define('nir_intrinsic_rt_resume', 635) # type: ignore
-nir_intrinsic_rt_return_amd = nir_intrinsic_op.define('nir_intrinsic_rt_return_amd', 636) # type: ignore
-nir_intrinsic_rt_trace_ray = nir_intrinsic_op.define('nir_intrinsic_rt_trace_ray', 637) # type: ignore
-nir_intrinsic_sample_mask_agx = nir_intrinsic_op.define('nir_intrinsic_sample_mask_agx', 638) # type: ignore
-nir_intrinsic_select_vertex_poly = nir_intrinsic_op.define('nir_intrinsic_select_vertex_poly', 639) # type: ignore
-nir_intrinsic_sendmsg_amd = nir_intrinsic_op.define('nir_intrinsic_sendmsg_amd', 640) # type: ignore
-nir_intrinsic_set_vertex_and_primitive_count = nir_intrinsic_op.define('nir_intrinsic_set_vertex_and_primitive_count', 641) # type: ignore
-nir_intrinsic_shader_clock = nir_intrinsic_op.define('nir_intrinsic_shader_clock', 642) # type: ignore
-nir_intrinsic_shared_append_amd = nir_intrinsic_op.define('nir_intrinsic_shared_append_amd', 643) # type: ignore
-nir_intrinsic_shared_atomic = nir_intrinsic_op.define('nir_intrinsic_shared_atomic', 644) # type: ignore
-nir_intrinsic_shared_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_shared_atomic_swap', 645) # type: ignore
-nir_intrinsic_shared_consume_amd = nir_intrinsic_op.define('nir_intrinsic_shared_consume_amd', 646) # type: ignore
-nir_intrinsic_shuffle = nir_intrinsic_op.define('nir_intrinsic_shuffle', 647) # type: ignore
-nir_intrinsic_shuffle_down = nir_intrinsic_op.define('nir_intrinsic_shuffle_down', 648) # type: ignore
-nir_intrinsic_shuffle_down_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_shuffle_down_uniform_ir3', 649) # type: ignore
-nir_intrinsic_shuffle_up = nir_intrinsic_op.define('nir_intrinsic_shuffle_up', 650) # type: ignore
-nir_intrinsic_shuffle_up_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_shuffle_up_uniform_ir3', 651) # type: ignore
-nir_intrinsic_shuffle_xor = nir_intrinsic_op.define('nir_intrinsic_shuffle_xor', 652) # type: ignore
-nir_intrinsic_shuffle_xor_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_shuffle_xor_uniform_ir3', 653) # type: ignore
-nir_intrinsic_sleep_amd = nir_intrinsic_op.define('nir_intrinsic_sleep_amd', 654) # type: ignore
-nir_intrinsic_sparse_residency_code_and = nir_intrinsic_op.define('nir_intrinsic_sparse_residency_code_and', 655) # type: ignore
-nir_intrinsic_ssa_bar_nv = nir_intrinsic_op.define('nir_intrinsic_ssa_bar_nv', 656) # type: ignore
-nir_intrinsic_ssbo_atomic = nir_intrinsic_op.define('nir_intrinsic_ssbo_atomic', 657) # type: ignore
-nir_intrinsic_ssbo_atomic_ir3 = nir_intrinsic_op.define('nir_intrinsic_ssbo_atomic_ir3', 658) # type: ignore
-nir_intrinsic_ssbo_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_ssbo_atomic_swap', 659) # type: ignore
-nir_intrinsic_ssbo_atomic_swap_ir3 = nir_intrinsic_op.define('nir_intrinsic_ssbo_atomic_swap_ir3', 660) # type: ignore
-nir_intrinsic_stack_map_agx = nir_intrinsic_op.define('nir_intrinsic_stack_map_agx', 661) # type: ignore
-nir_intrinsic_stack_unmap_agx = nir_intrinsic_op.define('nir_intrinsic_stack_unmap_agx', 662) # type: ignore
-nir_intrinsic_store_agx = nir_intrinsic_op.define('nir_intrinsic_store_agx', 663) # type: ignore
-nir_intrinsic_store_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_store_buffer_amd', 664) # type: ignore
-nir_intrinsic_store_combined_output_pan = nir_intrinsic_op.define('nir_intrinsic_store_combined_output_pan', 665) # type: ignore
-nir_intrinsic_store_const_ir3 = nir_intrinsic_op.define('nir_intrinsic_store_const_ir3', 666) # type: ignore
-nir_intrinsic_store_deref = nir_intrinsic_op.define('nir_intrinsic_store_deref', 667) # type: ignore
-nir_intrinsic_store_deref_block_intel = nir_intrinsic_op.define('nir_intrinsic_store_deref_block_intel', 668) # type: ignore
-nir_intrinsic_store_global = nir_intrinsic_op.define('nir_intrinsic_store_global', 669) # type: ignore
-nir_intrinsic_store_global_2x32 = nir_intrinsic_op.define('nir_intrinsic_store_global_2x32', 670) # type: ignore
-nir_intrinsic_store_global_amd = nir_intrinsic_op.define('nir_intrinsic_store_global_amd', 671) # type: ignore
-nir_intrinsic_store_global_block_intel = nir_intrinsic_op.define('nir_intrinsic_store_global_block_intel', 672) # type: ignore
-nir_intrinsic_store_global_etna = nir_intrinsic_op.define('nir_intrinsic_store_global_etna', 673) # type: ignore
-nir_intrinsic_store_global_ir3 = nir_intrinsic_op.define('nir_intrinsic_store_global_ir3', 674) # type: ignore
-nir_intrinsic_store_hit_attrib_amd = nir_intrinsic_op.define('nir_intrinsic_store_hit_attrib_amd', 675) # type: ignore
-nir_intrinsic_store_local_pixel_agx = nir_intrinsic_op.define('nir_intrinsic_store_local_pixel_agx', 676) # type: ignore
-nir_intrinsic_store_local_shared_r600 = nir_intrinsic_op.define('nir_intrinsic_store_local_shared_r600', 677) # type: ignore
-nir_intrinsic_store_output = nir_intrinsic_op.define('nir_intrinsic_store_output', 678) # type: ignore
-nir_intrinsic_store_per_primitive_output = nir_intrinsic_op.define('nir_intrinsic_store_per_primitive_output', 679) # type: ignore
-nir_intrinsic_store_per_primitive_payload_intel = nir_intrinsic_op.define('nir_intrinsic_store_per_primitive_payload_intel', 680) # type: ignore
-nir_intrinsic_store_per_vertex_output = nir_intrinsic_op.define('nir_intrinsic_store_per_vertex_output', 681) # type: ignore
-nir_intrinsic_store_per_view_output = nir_intrinsic_op.define('nir_intrinsic_store_per_view_output', 682) # type: ignore
-nir_intrinsic_store_preamble = nir_intrinsic_op.define('nir_intrinsic_store_preamble', 683) # type: ignore
-nir_intrinsic_store_raw_output_pan = nir_intrinsic_op.define('nir_intrinsic_store_raw_output_pan', 684) # type: ignore
-nir_intrinsic_store_reg = nir_intrinsic_op.define('nir_intrinsic_store_reg', 685) # type: ignore
-nir_intrinsic_store_reg_indirect = nir_intrinsic_op.define('nir_intrinsic_store_reg_indirect', 686) # type: ignore
-nir_intrinsic_store_scalar_arg_amd = nir_intrinsic_op.define('nir_intrinsic_store_scalar_arg_amd', 687) # type: ignore
-nir_intrinsic_store_scratch = nir_intrinsic_op.define('nir_intrinsic_store_scratch', 688) # type: ignore
-nir_intrinsic_store_shared = nir_intrinsic_op.define('nir_intrinsic_store_shared', 689) # type: ignore
-nir_intrinsic_store_shared2_amd = nir_intrinsic_op.define('nir_intrinsic_store_shared2_amd', 690) # type: ignore
-nir_intrinsic_store_shared_block_intel = nir_intrinsic_op.define('nir_intrinsic_store_shared_block_intel', 691) # type: ignore
-nir_intrinsic_store_shared_ir3 = nir_intrinsic_op.define('nir_intrinsic_store_shared_ir3', 692) # type: ignore
-nir_intrinsic_store_shared_unlock_nv = nir_intrinsic_op.define('nir_intrinsic_store_shared_unlock_nv', 693) # type: ignore
-nir_intrinsic_store_ssbo = nir_intrinsic_op.define('nir_intrinsic_store_ssbo', 694) # type: ignore
-nir_intrinsic_store_ssbo_block_intel = nir_intrinsic_op.define('nir_intrinsic_store_ssbo_block_intel', 695) # type: ignore
-nir_intrinsic_store_ssbo_intel = nir_intrinsic_op.define('nir_intrinsic_store_ssbo_intel', 696) # type: ignore
-nir_intrinsic_store_ssbo_ir3 = nir_intrinsic_op.define('nir_intrinsic_store_ssbo_ir3', 697) # type: ignore
-nir_intrinsic_store_stack = nir_intrinsic_op.define('nir_intrinsic_store_stack', 698) # type: ignore
-nir_intrinsic_store_task_payload = nir_intrinsic_op.define('nir_intrinsic_store_task_payload', 699) # type: ignore
-nir_intrinsic_store_tf_r600 = nir_intrinsic_op.define('nir_intrinsic_store_tf_r600', 700) # type: ignore
-nir_intrinsic_store_tlb_sample_color_v3d = nir_intrinsic_op.define('nir_intrinsic_store_tlb_sample_color_v3d', 701) # type: ignore
-nir_intrinsic_store_uvs_agx = nir_intrinsic_op.define('nir_intrinsic_store_uvs_agx', 702) # type: ignore
-nir_intrinsic_store_vector_arg_amd = nir_intrinsic_op.define('nir_intrinsic_store_vector_arg_amd', 703) # type: ignore
-nir_intrinsic_store_zs_agx = nir_intrinsic_op.define('nir_intrinsic_store_zs_agx', 704) # type: ignore
-nir_intrinsic_strict_wqm_coord_amd = nir_intrinsic_op.define('nir_intrinsic_strict_wqm_coord_amd', 705) # type: ignore
-nir_intrinsic_subfm_nv = nir_intrinsic_op.define('nir_intrinsic_subfm_nv', 706) # type: ignore
-nir_intrinsic_suclamp_nv = nir_intrinsic_op.define('nir_intrinsic_suclamp_nv', 707) # type: ignore
-nir_intrinsic_sueau_nv = nir_intrinsic_op.define('nir_intrinsic_sueau_nv', 708) # type: ignore
-nir_intrinsic_suldga_nv = nir_intrinsic_op.define('nir_intrinsic_suldga_nv', 709) # type: ignore
-nir_intrinsic_sustga_nv = nir_intrinsic_op.define('nir_intrinsic_sustga_nv', 710) # type: ignore
-nir_intrinsic_task_payload_atomic = nir_intrinsic_op.define('nir_intrinsic_task_payload_atomic', 711) # type: ignore
-nir_intrinsic_task_payload_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_task_payload_atomic_swap', 712) # type: ignore
-nir_intrinsic_terminate = nir_intrinsic_op.define('nir_intrinsic_terminate', 713) # type: ignore
-nir_intrinsic_terminate_if = nir_intrinsic_op.define('nir_intrinsic_terminate_if', 714) # type: ignore
-nir_intrinsic_terminate_ray = nir_intrinsic_op.define('nir_intrinsic_terminate_ray', 715) # type: ignore
-nir_intrinsic_trace_ray = nir_intrinsic_op.define('nir_intrinsic_trace_ray', 716) # type: ignore
-nir_intrinsic_trace_ray_intel = nir_intrinsic_op.define('nir_intrinsic_trace_ray_intel', 717) # type: ignore
-nir_intrinsic_unit_test_amd = nir_intrinsic_op.define('nir_intrinsic_unit_test_amd', 718) # type: ignore
-nir_intrinsic_unit_test_divergent_amd = nir_intrinsic_op.define('nir_intrinsic_unit_test_divergent_amd', 719) # type: ignore
-nir_intrinsic_unit_test_uniform_amd = nir_intrinsic_op.define('nir_intrinsic_unit_test_uniform_amd', 720) # type: ignore
-nir_intrinsic_unpin_cx_handle_nv = nir_intrinsic_op.define('nir_intrinsic_unpin_cx_handle_nv', 721) # type: ignore
-nir_intrinsic_use = nir_intrinsic_op.define('nir_intrinsic_use', 722) # type: ignore
-nir_intrinsic_vild_nv = nir_intrinsic_op.define('nir_intrinsic_vild_nv', 723) # type: ignore
-nir_intrinsic_vote_all = nir_intrinsic_op.define('nir_intrinsic_vote_all', 724) # type: ignore
-nir_intrinsic_vote_any = nir_intrinsic_op.define('nir_intrinsic_vote_any', 725) # type: ignore
-nir_intrinsic_vote_feq = nir_intrinsic_op.define('nir_intrinsic_vote_feq', 726) # type: ignore
-nir_intrinsic_vote_ieq = nir_intrinsic_op.define('nir_intrinsic_vote_ieq', 727) # type: ignore
-nir_intrinsic_vulkan_resource_index = nir_intrinsic_op.define('nir_intrinsic_vulkan_resource_index', 728) # type: ignore
-nir_intrinsic_vulkan_resource_reindex = nir_intrinsic_op.define('nir_intrinsic_vulkan_resource_reindex', 729) # type: ignore
-nir_intrinsic_write_invocation_amd = nir_intrinsic_op.define('nir_intrinsic_write_invocation_amd', 730) # type: ignore
-nir_intrinsic_xfb_counter_sub_gfx11_amd = nir_intrinsic_op.define('nir_intrinsic_xfb_counter_sub_gfx11_amd', 731) # type: ignore
-nir_last_intrinsic = nir_intrinsic_op.define('nir_last_intrinsic', 731) # type: ignore
-nir_num_intrinsics = nir_intrinsic_op.define('nir_num_intrinsics', 732) # type: ignore
+class nir_intrinsic_op(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_intrinsic_accept_ray_intersection = nir_intrinsic_op.define('nir_intrinsic_accept_ray_intersection', 0)
+nir_intrinsic_addr_mode_is = nir_intrinsic_op.define('nir_intrinsic_addr_mode_is', 1)
+nir_intrinsic_al2p_nv = nir_intrinsic_op.define('nir_intrinsic_al2p_nv', 2)
+nir_intrinsic_ald_nv = nir_intrinsic_op.define('nir_intrinsic_ald_nv', 3)
+nir_intrinsic_alpha_to_coverage = nir_intrinsic_op.define('nir_intrinsic_alpha_to_coverage', 4)
+nir_intrinsic_as_uniform = nir_intrinsic_op.define('nir_intrinsic_as_uniform', 5)
+nir_intrinsic_ast_nv = nir_intrinsic_op.define('nir_intrinsic_ast_nv', 6)
+nir_intrinsic_atomic_add_gen_prim_count_amd = nir_intrinsic_op.define('nir_intrinsic_atomic_add_gen_prim_count_amd', 7)
+nir_intrinsic_atomic_add_gs_emit_prim_count_amd = nir_intrinsic_op.define('nir_intrinsic_atomic_add_gs_emit_prim_count_amd', 8)
+nir_intrinsic_atomic_add_shader_invocation_count_amd = nir_intrinsic_op.define('nir_intrinsic_atomic_add_shader_invocation_count_amd', 9)
+nir_intrinsic_atomic_add_xfb_prim_count_amd = nir_intrinsic_op.define('nir_intrinsic_atomic_add_xfb_prim_count_amd', 10)
+nir_intrinsic_atomic_counter_add = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_add', 11)
+nir_intrinsic_atomic_counter_add_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_add_deref', 12)
+nir_intrinsic_atomic_counter_and = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_and', 13)
+nir_intrinsic_atomic_counter_and_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_and_deref', 14)
+nir_intrinsic_atomic_counter_comp_swap = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_comp_swap', 15)
+nir_intrinsic_atomic_counter_comp_swap_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_comp_swap_deref', 16)
+nir_intrinsic_atomic_counter_exchange = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_exchange', 17)
+nir_intrinsic_atomic_counter_exchange_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_exchange_deref', 18)
+nir_intrinsic_atomic_counter_inc = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_inc', 19)
+nir_intrinsic_atomic_counter_inc_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_inc_deref', 20)
+nir_intrinsic_atomic_counter_max = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_max', 21)
+nir_intrinsic_atomic_counter_max_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_max_deref', 22)
+nir_intrinsic_atomic_counter_min = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_min', 23)
+nir_intrinsic_atomic_counter_min_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_min_deref', 24)
+nir_intrinsic_atomic_counter_or = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_or', 25)
+nir_intrinsic_atomic_counter_or_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_or_deref', 26)
+nir_intrinsic_atomic_counter_post_dec = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_post_dec', 27)
+nir_intrinsic_atomic_counter_post_dec_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_post_dec_deref', 28)
+nir_intrinsic_atomic_counter_pre_dec = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_pre_dec', 29)
+nir_intrinsic_atomic_counter_pre_dec_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_pre_dec_deref', 30)
+nir_intrinsic_atomic_counter_read = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_read', 31)
+nir_intrinsic_atomic_counter_read_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_read_deref', 32)
+nir_intrinsic_atomic_counter_xor = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_xor', 33)
+nir_intrinsic_atomic_counter_xor_deref = nir_intrinsic_op.define('nir_intrinsic_atomic_counter_xor_deref', 34)
+nir_intrinsic_ballot = nir_intrinsic_op.define('nir_intrinsic_ballot', 35)
+nir_intrinsic_ballot_bit_count_exclusive = nir_intrinsic_op.define('nir_intrinsic_ballot_bit_count_exclusive', 36)
+nir_intrinsic_ballot_bit_count_inclusive = nir_intrinsic_op.define('nir_intrinsic_ballot_bit_count_inclusive', 37)
+nir_intrinsic_ballot_bit_count_reduce = nir_intrinsic_op.define('nir_intrinsic_ballot_bit_count_reduce', 38)
+nir_intrinsic_ballot_bitfield_extract = nir_intrinsic_op.define('nir_intrinsic_ballot_bitfield_extract', 39)
+nir_intrinsic_ballot_find_lsb = nir_intrinsic_op.define('nir_intrinsic_ballot_find_lsb', 40)
+nir_intrinsic_ballot_find_msb = nir_intrinsic_op.define('nir_intrinsic_ballot_find_msb', 41)
+nir_intrinsic_ballot_relaxed = nir_intrinsic_op.define('nir_intrinsic_ballot_relaxed', 42)
+nir_intrinsic_bar_break_nv = nir_intrinsic_op.define('nir_intrinsic_bar_break_nv', 43)
+nir_intrinsic_bar_set_nv = nir_intrinsic_op.define('nir_intrinsic_bar_set_nv', 44)
+nir_intrinsic_bar_sync_nv = nir_intrinsic_op.define('nir_intrinsic_bar_sync_nv', 45)
+nir_intrinsic_barrier = nir_intrinsic_op.define('nir_intrinsic_barrier', 46)
+nir_intrinsic_begin_invocation_interlock = nir_intrinsic_op.define('nir_intrinsic_begin_invocation_interlock', 47)
+nir_intrinsic_bindgen_return = nir_intrinsic_op.define('nir_intrinsic_bindgen_return', 48)
+nir_intrinsic_bindless_image_agx = nir_intrinsic_op.define('nir_intrinsic_bindless_image_agx', 49)
+nir_intrinsic_bindless_image_atomic = nir_intrinsic_op.define('nir_intrinsic_bindless_image_atomic', 50)
+nir_intrinsic_bindless_image_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_bindless_image_atomic_swap', 51)
+nir_intrinsic_bindless_image_descriptor_amd = nir_intrinsic_op.define('nir_intrinsic_bindless_image_descriptor_amd', 52)
+nir_intrinsic_bindless_image_format = nir_intrinsic_op.define('nir_intrinsic_bindless_image_format', 53)
+nir_intrinsic_bindless_image_fragment_mask_load_amd = nir_intrinsic_op.define('nir_intrinsic_bindless_image_fragment_mask_load_amd', 54)
+nir_intrinsic_bindless_image_levels = nir_intrinsic_op.define('nir_intrinsic_bindless_image_levels', 55)
+nir_intrinsic_bindless_image_load = nir_intrinsic_op.define('nir_intrinsic_bindless_image_load', 56)
+nir_intrinsic_bindless_image_load_raw_intel = nir_intrinsic_op.define('nir_intrinsic_bindless_image_load_raw_intel', 57)
+nir_intrinsic_bindless_image_order = nir_intrinsic_op.define('nir_intrinsic_bindless_image_order', 58)
+nir_intrinsic_bindless_image_samples = nir_intrinsic_op.define('nir_intrinsic_bindless_image_samples', 59)
+nir_intrinsic_bindless_image_samples_identical = nir_intrinsic_op.define('nir_intrinsic_bindless_image_samples_identical', 60)
+nir_intrinsic_bindless_image_size = nir_intrinsic_op.define('nir_intrinsic_bindless_image_size', 61)
+nir_intrinsic_bindless_image_sparse_load = nir_intrinsic_op.define('nir_intrinsic_bindless_image_sparse_load', 62)
+nir_intrinsic_bindless_image_store = nir_intrinsic_op.define('nir_intrinsic_bindless_image_store', 63)
+nir_intrinsic_bindless_image_store_block_agx = nir_intrinsic_op.define('nir_intrinsic_bindless_image_store_block_agx', 64)
+nir_intrinsic_bindless_image_store_raw_intel = nir_intrinsic_op.define('nir_intrinsic_bindless_image_store_raw_intel', 65)
+nir_intrinsic_bindless_image_texel_address = nir_intrinsic_op.define('nir_intrinsic_bindless_image_texel_address', 66)
+nir_intrinsic_bindless_resource_ir3 = nir_intrinsic_op.define('nir_intrinsic_bindless_resource_ir3', 67)
+nir_intrinsic_brcst_active_ir3 = nir_intrinsic_op.define('nir_intrinsic_brcst_active_ir3', 68)
+nir_intrinsic_btd_retire_intel = nir_intrinsic_op.define('nir_intrinsic_btd_retire_intel', 69)
+nir_intrinsic_btd_spawn_intel = nir_intrinsic_op.define('nir_intrinsic_btd_spawn_intel', 70)
+nir_intrinsic_btd_stack_push_intel = nir_intrinsic_op.define('nir_intrinsic_btd_stack_push_intel', 71)
+nir_intrinsic_bvh64_intersect_ray_amd = nir_intrinsic_op.define('nir_intrinsic_bvh64_intersect_ray_amd', 72)
+nir_intrinsic_bvh8_intersect_ray_amd = nir_intrinsic_op.define('nir_intrinsic_bvh8_intersect_ray_amd', 73)
+nir_intrinsic_bvh_stack_rtn_amd = nir_intrinsic_op.define('nir_intrinsic_bvh_stack_rtn_amd', 74)
+nir_intrinsic_cmat_binary_op = nir_intrinsic_op.define('nir_intrinsic_cmat_binary_op', 75)
+nir_intrinsic_cmat_bitcast = nir_intrinsic_op.define('nir_intrinsic_cmat_bitcast', 76)
+nir_intrinsic_cmat_construct = nir_intrinsic_op.define('nir_intrinsic_cmat_construct', 77)
+nir_intrinsic_cmat_convert = nir_intrinsic_op.define('nir_intrinsic_cmat_convert', 78)
+nir_intrinsic_cmat_copy = nir_intrinsic_op.define('nir_intrinsic_cmat_copy', 79)
+nir_intrinsic_cmat_extract = nir_intrinsic_op.define('nir_intrinsic_cmat_extract', 80)
+nir_intrinsic_cmat_insert = nir_intrinsic_op.define('nir_intrinsic_cmat_insert', 81)
+nir_intrinsic_cmat_length = nir_intrinsic_op.define('nir_intrinsic_cmat_length', 82)
+nir_intrinsic_cmat_load = nir_intrinsic_op.define('nir_intrinsic_cmat_load', 83)
+nir_intrinsic_cmat_muladd = nir_intrinsic_op.define('nir_intrinsic_cmat_muladd', 84)
+nir_intrinsic_cmat_muladd_amd = nir_intrinsic_op.define('nir_intrinsic_cmat_muladd_amd', 85)
+nir_intrinsic_cmat_muladd_nv = nir_intrinsic_op.define('nir_intrinsic_cmat_muladd_nv', 86)
+nir_intrinsic_cmat_scalar_op = nir_intrinsic_op.define('nir_intrinsic_cmat_scalar_op', 87)
+nir_intrinsic_cmat_store = nir_intrinsic_op.define('nir_intrinsic_cmat_store', 88)
+nir_intrinsic_cmat_transpose = nir_intrinsic_op.define('nir_intrinsic_cmat_transpose', 89)
+nir_intrinsic_cmat_unary_op = nir_intrinsic_op.define('nir_intrinsic_cmat_unary_op', 90)
+nir_intrinsic_convert_alu_types = nir_intrinsic_op.define('nir_intrinsic_convert_alu_types', 91)
+nir_intrinsic_convert_cmat_intel = nir_intrinsic_op.define('nir_intrinsic_convert_cmat_intel', 92)
+nir_intrinsic_copy_deref = nir_intrinsic_op.define('nir_intrinsic_copy_deref', 93)
+nir_intrinsic_copy_fs_outputs_nv = nir_intrinsic_op.define('nir_intrinsic_copy_fs_outputs_nv', 94)
+nir_intrinsic_copy_global_to_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_copy_global_to_uniform_ir3', 95)
+nir_intrinsic_copy_push_const_to_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_copy_push_const_to_uniform_ir3', 96)
+nir_intrinsic_copy_ubo_to_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_copy_ubo_to_uniform_ir3', 97)
+nir_intrinsic_ddx = nir_intrinsic_op.define('nir_intrinsic_ddx', 98)
+nir_intrinsic_ddx_coarse = nir_intrinsic_op.define('nir_intrinsic_ddx_coarse', 99)
+nir_intrinsic_ddx_fine = nir_intrinsic_op.define('nir_intrinsic_ddx_fine', 100)
+nir_intrinsic_ddy = nir_intrinsic_op.define('nir_intrinsic_ddy', 101)
+nir_intrinsic_ddy_coarse = nir_intrinsic_op.define('nir_intrinsic_ddy_coarse', 102)
+nir_intrinsic_ddy_fine = nir_intrinsic_op.define('nir_intrinsic_ddy_fine', 103)
+nir_intrinsic_debug_break = nir_intrinsic_op.define('nir_intrinsic_debug_break', 104)
+nir_intrinsic_decl_reg = nir_intrinsic_op.define('nir_intrinsic_decl_reg', 105)
+nir_intrinsic_demote = nir_intrinsic_op.define('nir_intrinsic_demote', 106)
+nir_intrinsic_demote_if = nir_intrinsic_op.define('nir_intrinsic_demote_if', 107)
+nir_intrinsic_demote_samples = nir_intrinsic_op.define('nir_intrinsic_demote_samples', 108)
+nir_intrinsic_deref_atomic = nir_intrinsic_op.define('nir_intrinsic_deref_atomic', 109)
+nir_intrinsic_deref_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_deref_atomic_swap', 110)
+nir_intrinsic_deref_buffer_array_length = nir_intrinsic_op.define('nir_intrinsic_deref_buffer_array_length', 111)
+nir_intrinsic_deref_implicit_array_length = nir_intrinsic_op.define('nir_intrinsic_deref_implicit_array_length', 112)
+nir_intrinsic_deref_mode_is = nir_intrinsic_op.define('nir_intrinsic_deref_mode_is', 113)
+nir_intrinsic_deref_texture_src = nir_intrinsic_op.define('nir_intrinsic_deref_texture_src', 114)
+nir_intrinsic_doorbell_agx = nir_intrinsic_op.define('nir_intrinsic_doorbell_agx', 115)
+nir_intrinsic_dpas_intel = nir_intrinsic_op.define('nir_intrinsic_dpas_intel', 116)
+nir_intrinsic_dpp16_shift_amd = nir_intrinsic_op.define('nir_intrinsic_dpp16_shift_amd', 117)
+nir_intrinsic_elect = nir_intrinsic_op.define('nir_intrinsic_elect', 118)
+nir_intrinsic_elect_any_ir3 = nir_intrinsic_op.define('nir_intrinsic_elect_any_ir3', 119)
+nir_intrinsic_emit_primitive_poly = nir_intrinsic_op.define('nir_intrinsic_emit_primitive_poly', 120)
+nir_intrinsic_emit_vertex = nir_intrinsic_op.define('nir_intrinsic_emit_vertex', 121)
+nir_intrinsic_emit_vertex_nv = nir_intrinsic_op.define('nir_intrinsic_emit_vertex_nv', 122)
+nir_intrinsic_emit_vertex_with_counter = nir_intrinsic_op.define('nir_intrinsic_emit_vertex_with_counter', 123)
+nir_intrinsic_end_invocation_interlock = nir_intrinsic_op.define('nir_intrinsic_end_invocation_interlock', 124)
+nir_intrinsic_end_primitive = nir_intrinsic_op.define('nir_intrinsic_end_primitive', 125)
+nir_intrinsic_end_primitive_nv = nir_intrinsic_op.define('nir_intrinsic_end_primitive_nv', 126)
+nir_intrinsic_end_primitive_with_counter = nir_intrinsic_op.define('nir_intrinsic_end_primitive_with_counter', 127)
+nir_intrinsic_enqueue_node_payloads = nir_intrinsic_op.define('nir_intrinsic_enqueue_node_payloads', 128)
+nir_intrinsic_exclusive_scan = nir_intrinsic_op.define('nir_intrinsic_exclusive_scan', 129)
+nir_intrinsic_exclusive_scan_clusters_ir3 = nir_intrinsic_op.define('nir_intrinsic_exclusive_scan_clusters_ir3', 130)
+nir_intrinsic_execute_callable = nir_intrinsic_op.define('nir_intrinsic_execute_callable', 131)
+nir_intrinsic_execute_closest_hit_amd = nir_intrinsic_op.define('nir_intrinsic_execute_closest_hit_amd', 132)
+nir_intrinsic_execute_miss_amd = nir_intrinsic_op.define('nir_intrinsic_execute_miss_amd', 133)
+nir_intrinsic_export_agx = nir_intrinsic_op.define('nir_intrinsic_export_agx', 134)
+nir_intrinsic_export_amd = nir_intrinsic_op.define('nir_intrinsic_export_amd', 135)
+nir_intrinsic_export_dual_src_blend_amd = nir_intrinsic_op.define('nir_intrinsic_export_dual_src_blend_amd', 136)
+nir_intrinsic_export_row_amd = nir_intrinsic_op.define('nir_intrinsic_export_row_amd', 137)
+nir_intrinsic_fence_helper_exit_agx = nir_intrinsic_op.define('nir_intrinsic_fence_helper_exit_agx', 138)
+nir_intrinsic_fence_mem_to_tex_agx = nir_intrinsic_op.define('nir_intrinsic_fence_mem_to_tex_agx', 139)
+nir_intrinsic_fence_pbe_to_tex_agx = nir_intrinsic_op.define('nir_intrinsic_fence_pbe_to_tex_agx', 140)
+nir_intrinsic_fence_pbe_to_tex_pixel_agx = nir_intrinsic_op.define('nir_intrinsic_fence_pbe_to_tex_pixel_agx', 141)
+nir_intrinsic_final_primitive_nv = nir_intrinsic_op.define('nir_intrinsic_final_primitive_nv', 142)
+nir_intrinsic_finalize_incoming_node_payload = nir_intrinsic_op.define('nir_intrinsic_finalize_incoming_node_payload', 143)
+nir_intrinsic_first_invocation = nir_intrinsic_op.define('nir_intrinsic_first_invocation', 144)
+nir_intrinsic_fs_out_nv = nir_intrinsic_op.define('nir_intrinsic_fs_out_nv', 145)
+nir_intrinsic_gds_atomic_add_amd = nir_intrinsic_op.define('nir_intrinsic_gds_atomic_add_amd', 146)
+nir_intrinsic_get_ssbo_size = nir_intrinsic_op.define('nir_intrinsic_get_ssbo_size', 147)
+nir_intrinsic_get_ubo_size = nir_intrinsic_op.define('nir_intrinsic_get_ubo_size', 148)
+nir_intrinsic_global_atomic = nir_intrinsic_op.define('nir_intrinsic_global_atomic', 149)
+nir_intrinsic_global_atomic_2x32 = nir_intrinsic_op.define('nir_intrinsic_global_atomic_2x32', 150)
+nir_intrinsic_global_atomic_agx = nir_intrinsic_op.define('nir_intrinsic_global_atomic_agx', 151)
+nir_intrinsic_global_atomic_amd = nir_intrinsic_op.define('nir_intrinsic_global_atomic_amd', 152)
+nir_intrinsic_global_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_global_atomic_swap', 153)
+nir_intrinsic_global_atomic_swap_2x32 = nir_intrinsic_op.define('nir_intrinsic_global_atomic_swap_2x32', 154)
+nir_intrinsic_global_atomic_swap_agx = nir_intrinsic_op.define('nir_intrinsic_global_atomic_swap_agx', 155)
+nir_intrinsic_global_atomic_swap_amd = nir_intrinsic_op.define('nir_intrinsic_global_atomic_swap_amd', 156)
+nir_intrinsic_ignore_ray_intersection = nir_intrinsic_op.define('nir_intrinsic_ignore_ray_intersection', 157)
+nir_intrinsic_imadsp_nv = nir_intrinsic_op.define('nir_intrinsic_imadsp_nv', 158)
+nir_intrinsic_image_atomic = nir_intrinsic_op.define('nir_intrinsic_image_atomic', 159)
+nir_intrinsic_image_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_image_atomic_swap', 160)
+nir_intrinsic_image_deref_atomic = nir_intrinsic_op.define('nir_intrinsic_image_deref_atomic', 161)
+nir_intrinsic_image_deref_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_image_deref_atomic_swap', 162)
+nir_intrinsic_image_deref_descriptor_amd = nir_intrinsic_op.define('nir_intrinsic_image_deref_descriptor_amd', 163)
+nir_intrinsic_image_deref_format = nir_intrinsic_op.define('nir_intrinsic_image_deref_format', 164)
+nir_intrinsic_image_deref_fragment_mask_load_amd = nir_intrinsic_op.define('nir_intrinsic_image_deref_fragment_mask_load_amd', 165)
+nir_intrinsic_image_deref_levels = nir_intrinsic_op.define('nir_intrinsic_image_deref_levels', 166)
+nir_intrinsic_image_deref_load = nir_intrinsic_op.define('nir_intrinsic_image_deref_load', 167)
+nir_intrinsic_image_deref_load_info_nv = nir_intrinsic_op.define('nir_intrinsic_image_deref_load_info_nv', 168)
+nir_intrinsic_image_deref_load_param_intel = nir_intrinsic_op.define('nir_intrinsic_image_deref_load_param_intel', 169)
+nir_intrinsic_image_deref_load_raw_intel = nir_intrinsic_op.define('nir_intrinsic_image_deref_load_raw_intel', 170)
+nir_intrinsic_image_deref_order = nir_intrinsic_op.define('nir_intrinsic_image_deref_order', 171)
+nir_intrinsic_image_deref_samples = nir_intrinsic_op.define('nir_intrinsic_image_deref_samples', 172)
+nir_intrinsic_image_deref_samples_identical = nir_intrinsic_op.define('nir_intrinsic_image_deref_samples_identical', 173)
+nir_intrinsic_image_deref_size = nir_intrinsic_op.define('nir_intrinsic_image_deref_size', 174)
+nir_intrinsic_image_deref_sparse_load = nir_intrinsic_op.define('nir_intrinsic_image_deref_sparse_load', 175)
+nir_intrinsic_image_deref_store = nir_intrinsic_op.define('nir_intrinsic_image_deref_store', 176)
+nir_intrinsic_image_deref_store_block_agx = nir_intrinsic_op.define('nir_intrinsic_image_deref_store_block_agx', 177)
+nir_intrinsic_image_deref_store_raw_intel = nir_intrinsic_op.define('nir_intrinsic_image_deref_store_raw_intel', 178)
+nir_intrinsic_image_deref_texel_address = nir_intrinsic_op.define('nir_intrinsic_image_deref_texel_address', 179)
+nir_intrinsic_image_descriptor_amd = nir_intrinsic_op.define('nir_intrinsic_image_descriptor_amd', 180)
+nir_intrinsic_image_format = nir_intrinsic_op.define('nir_intrinsic_image_format', 181)
+nir_intrinsic_image_fragment_mask_load_amd = nir_intrinsic_op.define('nir_intrinsic_image_fragment_mask_load_amd', 182)
+nir_intrinsic_image_levels = nir_intrinsic_op.define('nir_intrinsic_image_levels', 183)
+nir_intrinsic_image_load = nir_intrinsic_op.define('nir_intrinsic_image_load', 184)
+nir_intrinsic_image_load_raw_intel = nir_intrinsic_op.define('nir_intrinsic_image_load_raw_intel', 185)
+nir_intrinsic_image_order = nir_intrinsic_op.define('nir_intrinsic_image_order', 186)
+nir_intrinsic_image_samples = nir_intrinsic_op.define('nir_intrinsic_image_samples', 187)
+nir_intrinsic_image_samples_identical = nir_intrinsic_op.define('nir_intrinsic_image_samples_identical', 188)
+nir_intrinsic_image_size = nir_intrinsic_op.define('nir_intrinsic_image_size', 189)
+nir_intrinsic_image_sparse_load = nir_intrinsic_op.define('nir_intrinsic_image_sparse_load', 190)
+nir_intrinsic_image_store = nir_intrinsic_op.define('nir_intrinsic_image_store', 191)
+nir_intrinsic_image_store_block_agx = nir_intrinsic_op.define('nir_intrinsic_image_store_block_agx', 192)
+nir_intrinsic_image_store_raw_intel = nir_intrinsic_op.define('nir_intrinsic_image_store_raw_intel', 193)
+nir_intrinsic_image_texel_address = nir_intrinsic_op.define('nir_intrinsic_image_texel_address', 194)
+nir_intrinsic_inclusive_scan = nir_intrinsic_op.define('nir_intrinsic_inclusive_scan', 195)
+nir_intrinsic_inclusive_scan_clusters_ir3 = nir_intrinsic_op.define('nir_intrinsic_inclusive_scan_clusters_ir3', 196)
+nir_intrinsic_initialize_node_payloads = nir_intrinsic_op.define('nir_intrinsic_initialize_node_payloads', 197)
+nir_intrinsic_interp_deref_at_centroid = nir_intrinsic_op.define('nir_intrinsic_interp_deref_at_centroid', 198)
+nir_intrinsic_interp_deref_at_offset = nir_intrinsic_op.define('nir_intrinsic_interp_deref_at_offset', 199)
+nir_intrinsic_interp_deref_at_sample = nir_intrinsic_op.define('nir_intrinsic_interp_deref_at_sample', 200)
+nir_intrinsic_interp_deref_at_vertex = nir_intrinsic_op.define('nir_intrinsic_interp_deref_at_vertex', 201)
+nir_intrinsic_inverse_ballot = nir_intrinsic_op.define('nir_intrinsic_inverse_ballot', 202)
+nir_intrinsic_ipa_nv = nir_intrinsic_op.define('nir_intrinsic_ipa_nv', 203)
+nir_intrinsic_is_helper_invocation = nir_intrinsic_op.define('nir_intrinsic_is_helper_invocation', 204)
+nir_intrinsic_is_sparse_resident_zink = nir_intrinsic_op.define('nir_intrinsic_is_sparse_resident_zink', 205)
+nir_intrinsic_is_sparse_texels_resident = nir_intrinsic_op.define('nir_intrinsic_is_sparse_texels_resident', 206)
+nir_intrinsic_is_subgroup_invocation_lt_amd = nir_intrinsic_op.define('nir_intrinsic_is_subgroup_invocation_lt_amd', 207)
+nir_intrinsic_isberd_nv = nir_intrinsic_op.define('nir_intrinsic_isberd_nv', 208)
+nir_intrinsic_lane_permute_16_amd = nir_intrinsic_op.define('nir_intrinsic_lane_permute_16_amd', 209)
+nir_intrinsic_last_invocation = nir_intrinsic_op.define('nir_intrinsic_last_invocation', 210)
+nir_intrinsic_launch_mesh_workgroups = nir_intrinsic_op.define('nir_intrinsic_launch_mesh_workgroups', 211)
+nir_intrinsic_launch_mesh_workgroups_with_payload_deref = nir_intrinsic_op.define('nir_intrinsic_launch_mesh_workgroups_with_payload_deref', 212)
+nir_intrinsic_ldc_nv = nir_intrinsic_op.define('nir_intrinsic_ldc_nv', 213)
+nir_intrinsic_ldcx_nv = nir_intrinsic_op.define('nir_intrinsic_ldcx_nv', 214)
+nir_intrinsic_ldtram_nv = nir_intrinsic_op.define('nir_intrinsic_ldtram_nv', 215)
+nir_intrinsic_load_aa_line_width = nir_intrinsic_op.define('nir_intrinsic_load_aa_line_width', 216)
+nir_intrinsic_load_accel_struct_amd = nir_intrinsic_op.define('nir_intrinsic_load_accel_struct_amd', 217)
+nir_intrinsic_load_active_samples_agx = nir_intrinsic_op.define('nir_intrinsic_load_active_samples_agx', 218)
+nir_intrinsic_load_active_subgroup_count_agx = nir_intrinsic_op.define('nir_intrinsic_load_active_subgroup_count_agx', 219)
+nir_intrinsic_load_active_subgroup_invocation_agx = nir_intrinsic_op.define('nir_intrinsic_load_active_subgroup_invocation_agx', 220)
+nir_intrinsic_load_agx = nir_intrinsic_op.define('nir_intrinsic_load_agx', 221)
+nir_intrinsic_load_alpha_reference_amd = nir_intrinsic_op.define('nir_intrinsic_load_alpha_reference_amd', 222)
+nir_intrinsic_load_api_sample_mask_agx = nir_intrinsic_op.define('nir_intrinsic_load_api_sample_mask_agx', 223)
+nir_intrinsic_load_attrib_clamp_agx = nir_intrinsic_op.define('nir_intrinsic_load_attrib_clamp_agx', 224)
+nir_intrinsic_load_attribute_pan = nir_intrinsic_op.define('nir_intrinsic_load_attribute_pan', 225)
+nir_intrinsic_load_back_face_agx = nir_intrinsic_op.define('nir_intrinsic_load_back_face_agx', 226)
+nir_intrinsic_load_barycentric_at_offset = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_at_offset', 227)
+nir_intrinsic_load_barycentric_at_offset_nv = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_at_offset_nv', 228)
+nir_intrinsic_load_barycentric_at_sample = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_at_sample', 229)
+nir_intrinsic_load_barycentric_centroid = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_centroid', 230)
+nir_intrinsic_load_barycentric_coord_at_offset = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_at_offset', 231)
+nir_intrinsic_load_barycentric_coord_at_sample = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_at_sample', 232)
+nir_intrinsic_load_barycentric_coord_centroid = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_centroid', 233)
+nir_intrinsic_load_barycentric_coord_pixel = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_pixel', 234)
+nir_intrinsic_load_barycentric_coord_sample = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_coord_sample', 235)
+nir_intrinsic_load_barycentric_model = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_model', 236)
+nir_intrinsic_load_barycentric_optimize_amd = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_optimize_amd', 237)
+nir_intrinsic_load_barycentric_pixel = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_pixel', 238)
+nir_intrinsic_load_barycentric_sample = nir_intrinsic_op.define('nir_intrinsic_load_barycentric_sample', 239)
+nir_intrinsic_load_base_global_invocation_id = nir_intrinsic_op.define('nir_intrinsic_load_base_global_invocation_id', 240)
+nir_intrinsic_load_base_instance = nir_intrinsic_op.define('nir_intrinsic_load_base_instance', 241)
+nir_intrinsic_load_base_vertex = nir_intrinsic_op.define('nir_intrinsic_load_base_vertex', 242)
+nir_intrinsic_load_base_workgroup_id = nir_intrinsic_op.define('nir_intrinsic_load_base_workgroup_id', 243)
+nir_intrinsic_load_blend_const_color_a_float = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_a_float', 244)
+nir_intrinsic_load_blend_const_color_aaaa8888_unorm = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_aaaa8888_unorm', 245)
+nir_intrinsic_load_blend_const_color_b_float = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_b_float', 246)
+nir_intrinsic_load_blend_const_color_g_float = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_g_float', 247)
+nir_intrinsic_load_blend_const_color_r_float = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_r_float', 248)
+nir_intrinsic_load_blend_const_color_rgba = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_rgba', 249)
+nir_intrinsic_load_blend_const_color_rgba8888_unorm = nir_intrinsic_op.define('nir_intrinsic_load_blend_const_color_rgba8888_unorm', 250)
+nir_intrinsic_load_btd_global_arg_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_global_arg_addr_intel', 251)
+nir_intrinsic_load_btd_local_arg_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_local_arg_addr_intel', 252)
+nir_intrinsic_load_btd_resume_sbt_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_resume_sbt_addr_intel', 253)
+nir_intrinsic_load_btd_shader_type_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_shader_type_intel', 254)
+nir_intrinsic_load_btd_stack_id_intel = nir_intrinsic_op.define('nir_intrinsic_load_btd_stack_id_intel', 255)
+nir_intrinsic_load_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_load_buffer_amd', 256)
+nir_intrinsic_load_callable_sbt_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_callable_sbt_addr_intel', 257)
+nir_intrinsic_load_callable_sbt_stride_intel = nir_intrinsic_op.define('nir_intrinsic_load_callable_sbt_stride_intel', 258)
+nir_intrinsic_load_clamp_vertex_color_amd = nir_intrinsic_op.define('nir_intrinsic_load_clamp_vertex_color_amd', 259)
+nir_intrinsic_load_clip_half_line_width_amd = nir_intrinsic_op.define('nir_intrinsic_load_clip_half_line_width_amd', 260)
+nir_intrinsic_load_clip_z_coeff_agx = nir_intrinsic_op.define('nir_intrinsic_load_clip_z_coeff_agx', 261)
+nir_intrinsic_load_coalesced_input_count = nir_intrinsic_op.define('nir_intrinsic_load_coalesced_input_count', 262)
+nir_intrinsic_load_coefficients_agx = nir_intrinsic_op.define('nir_intrinsic_load_coefficients_agx', 263)
+nir_intrinsic_load_color0 = nir_intrinsic_op.define('nir_intrinsic_load_color0', 264)
+nir_intrinsic_load_color1 = nir_intrinsic_op.define('nir_intrinsic_load_color1', 265)
+nir_intrinsic_load_const_buf_base_addr_lvp = nir_intrinsic_op.define('nir_intrinsic_load_const_buf_base_addr_lvp', 266)
+nir_intrinsic_load_const_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_const_ir3', 267)
+nir_intrinsic_load_constant = nir_intrinsic_op.define('nir_intrinsic_load_constant', 268)
+nir_intrinsic_load_constant_agx = nir_intrinsic_op.define('nir_intrinsic_load_constant_agx', 269)
+nir_intrinsic_load_constant_base_ptr = nir_intrinsic_op.define('nir_intrinsic_load_constant_base_ptr', 270)
+nir_intrinsic_load_converted_output_pan = nir_intrinsic_op.define('nir_intrinsic_load_converted_output_pan', 271)
+nir_intrinsic_load_core_id_agx = nir_intrinsic_op.define('nir_intrinsic_load_core_id_agx', 272)
+nir_intrinsic_load_cull_any_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_any_enabled_amd', 273)
+nir_intrinsic_load_cull_back_face_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_back_face_enabled_amd', 274)
+nir_intrinsic_load_cull_ccw_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_ccw_amd', 275)
+nir_intrinsic_load_cull_front_face_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_front_face_enabled_amd', 276)
+nir_intrinsic_load_cull_line_viewport_xy_scale_and_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_line_viewport_xy_scale_and_offset_amd', 277)
+nir_intrinsic_load_cull_mask = nir_intrinsic_op.define('nir_intrinsic_load_cull_mask', 278)
+nir_intrinsic_load_cull_mask_and_flags_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_mask_and_flags_amd', 279)
+nir_intrinsic_load_cull_small_line_precision_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_small_line_precision_amd', 280)
+nir_intrinsic_load_cull_small_lines_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_small_lines_enabled_amd', 281)
+nir_intrinsic_load_cull_small_triangle_precision_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_small_triangle_precision_amd', 282)
+nir_intrinsic_load_cull_small_triangles_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_small_triangles_enabled_amd', 283)
+nir_intrinsic_load_cull_triangle_viewport_xy_scale_and_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_cull_triangle_viewport_xy_scale_and_offset_amd', 284)
+nir_intrinsic_load_debug_log_desc_amd = nir_intrinsic_op.define('nir_intrinsic_load_debug_log_desc_amd', 285)
+nir_intrinsic_load_depth_never_agx = nir_intrinsic_op.define('nir_intrinsic_load_depth_never_agx', 286)
+nir_intrinsic_load_deref = nir_intrinsic_op.define('nir_intrinsic_load_deref', 287)
+nir_intrinsic_load_deref_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_deref_block_intel', 288)
+nir_intrinsic_load_draw_id = nir_intrinsic_op.define('nir_intrinsic_load_draw_id', 289)
+nir_intrinsic_load_esgs_vertex_stride_amd = nir_intrinsic_op.define('nir_intrinsic_load_esgs_vertex_stride_amd', 290)
+nir_intrinsic_load_exported_agx = nir_intrinsic_op.define('nir_intrinsic_load_exported_agx', 291)
+nir_intrinsic_load_fb_layers_v3d = nir_intrinsic_op.define('nir_intrinsic_load_fb_layers_v3d', 292)
+nir_intrinsic_load_fbfetch_image_desc_amd = nir_intrinsic_op.define('nir_intrinsic_load_fbfetch_image_desc_amd', 293)
+nir_intrinsic_load_fbfetch_image_fmask_desc_amd = nir_intrinsic_op.define('nir_intrinsic_load_fbfetch_image_fmask_desc_amd', 294)
+nir_intrinsic_load_fep_w_v3d = nir_intrinsic_op.define('nir_intrinsic_load_fep_w_v3d', 295)
+nir_intrinsic_load_first_vertex = nir_intrinsic_op.define('nir_intrinsic_load_first_vertex', 296)
+nir_intrinsic_load_fixed_point_size_agx = nir_intrinsic_op.define('nir_intrinsic_load_fixed_point_size_agx', 297)
+nir_intrinsic_load_flat_mask = nir_intrinsic_op.define('nir_intrinsic_load_flat_mask', 298)
+nir_intrinsic_load_force_vrs_rates_amd = nir_intrinsic_op.define('nir_intrinsic_load_force_vrs_rates_amd', 299)
+nir_intrinsic_load_frag_coord = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord', 300)
+nir_intrinsic_load_frag_coord_unscaled_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord_unscaled_ir3', 301)
+nir_intrinsic_load_frag_coord_w = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord_w', 302)
+nir_intrinsic_load_frag_coord_z = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord_z', 303)
+nir_intrinsic_load_frag_coord_zw_pan = nir_intrinsic_op.define('nir_intrinsic_load_frag_coord_zw_pan', 304)
+nir_intrinsic_load_frag_invocation_count = nir_intrinsic_op.define('nir_intrinsic_load_frag_invocation_count', 305)
+nir_intrinsic_load_frag_offset_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_frag_offset_ir3', 306)
+nir_intrinsic_load_frag_shading_rate = nir_intrinsic_op.define('nir_intrinsic_load_frag_shading_rate', 307)
+nir_intrinsic_load_frag_size = nir_intrinsic_op.define('nir_intrinsic_load_frag_size', 308)
+nir_intrinsic_load_frag_size_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_frag_size_ir3', 309)
+nir_intrinsic_load_from_texture_handle_agx = nir_intrinsic_op.define('nir_intrinsic_load_from_texture_handle_agx', 310)
+nir_intrinsic_load_front_face = nir_intrinsic_op.define('nir_intrinsic_load_front_face', 311)
+nir_intrinsic_load_front_face_fsign = nir_intrinsic_op.define('nir_intrinsic_load_front_face_fsign', 312)
+nir_intrinsic_load_fs_input_interp_deltas = nir_intrinsic_op.define('nir_intrinsic_load_fs_input_interp_deltas', 313)
+nir_intrinsic_load_fs_msaa_intel = nir_intrinsic_op.define('nir_intrinsic_load_fs_msaa_intel', 314)
+nir_intrinsic_load_fully_covered = nir_intrinsic_op.define('nir_intrinsic_load_fully_covered', 315)
+nir_intrinsic_load_geometry_param_buffer_poly = nir_intrinsic_op.define('nir_intrinsic_load_geometry_param_buffer_poly', 316)
+nir_intrinsic_load_global = nir_intrinsic_op.define('nir_intrinsic_load_global', 317)
+nir_intrinsic_load_global_2x32 = nir_intrinsic_op.define('nir_intrinsic_load_global_2x32', 318)
+nir_intrinsic_load_global_amd = nir_intrinsic_op.define('nir_intrinsic_load_global_amd', 319)
+nir_intrinsic_load_global_base_ptr = nir_intrinsic_op.define('nir_intrinsic_load_global_base_ptr', 320)
+nir_intrinsic_load_global_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_global_block_intel', 321)
+nir_intrinsic_load_global_bounded = nir_intrinsic_op.define('nir_intrinsic_load_global_bounded', 322)
+nir_intrinsic_load_global_constant = nir_intrinsic_op.define('nir_intrinsic_load_global_constant', 323)
+nir_intrinsic_load_global_constant_bounded = nir_intrinsic_op.define('nir_intrinsic_load_global_constant_bounded', 324)
+nir_intrinsic_load_global_constant_offset = nir_intrinsic_op.define('nir_intrinsic_load_global_constant_offset', 325)
+nir_intrinsic_load_global_constant_uniform_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_global_constant_uniform_block_intel', 326)
+nir_intrinsic_load_global_etna = nir_intrinsic_op.define('nir_intrinsic_load_global_etna', 327)
+nir_intrinsic_load_global_invocation_id = nir_intrinsic_op.define('nir_intrinsic_load_global_invocation_id', 328)
+nir_intrinsic_load_global_invocation_index = nir_intrinsic_op.define('nir_intrinsic_load_global_invocation_index', 329)
+nir_intrinsic_load_global_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_global_ir3', 330)
+nir_intrinsic_load_global_size = nir_intrinsic_op.define('nir_intrinsic_load_global_size', 331)
+nir_intrinsic_load_gs_header_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_gs_header_ir3', 332)
+nir_intrinsic_load_gs_vertex_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_gs_vertex_offset_amd', 333)
+nir_intrinsic_load_gs_wave_id_amd = nir_intrinsic_op.define('nir_intrinsic_load_gs_wave_id_amd', 334)
+nir_intrinsic_load_helper_arg_hi_agx = nir_intrinsic_op.define('nir_intrinsic_load_helper_arg_hi_agx', 335)
+nir_intrinsic_load_helper_arg_lo_agx = nir_intrinsic_op.define('nir_intrinsic_load_helper_arg_lo_agx', 336)
+nir_intrinsic_load_helper_invocation = nir_intrinsic_op.define('nir_intrinsic_load_helper_invocation', 337)
+nir_intrinsic_load_helper_op_id_agx = nir_intrinsic_op.define('nir_intrinsic_load_helper_op_id_agx', 338)
+nir_intrinsic_load_hit_attrib_amd = nir_intrinsic_op.define('nir_intrinsic_load_hit_attrib_amd', 339)
+nir_intrinsic_load_hs_out_patch_data_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_hs_out_patch_data_offset_amd', 340)
+nir_intrinsic_load_hs_patch_stride_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_hs_patch_stride_ir3', 341)
+nir_intrinsic_load_initial_edgeflags_amd = nir_intrinsic_op.define('nir_intrinsic_load_initial_edgeflags_amd', 342)
+nir_intrinsic_load_inline_data_intel = nir_intrinsic_op.define('nir_intrinsic_load_inline_data_intel', 343)
+nir_intrinsic_load_input = nir_intrinsic_op.define('nir_intrinsic_load_input', 344)
+nir_intrinsic_load_input_assembly_buffer_poly = nir_intrinsic_op.define('nir_intrinsic_load_input_assembly_buffer_poly', 345)
+nir_intrinsic_load_input_attachment_conv_pan = nir_intrinsic_op.define('nir_intrinsic_load_input_attachment_conv_pan', 346)
+nir_intrinsic_load_input_attachment_coord = nir_intrinsic_op.define('nir_intrinsic_load_input_attachment_coord', 347)
+nir_intrinsic_load_input_attachment_target_pan = nir_intrinsic_op.define('nir_intrinsic_load_input_attachment_target_pan', 348)
+nir_intrinsic_load_input_topology_poly = nir_intrinsic_op.define('nir_intrinsic_load_input_topology_poly', 349)
+nir_intrinsic_load_input_vertex = nir_intrinsic_op.define('nir_intrinsic_load_input_vertex', 350)
+nir_intrinsic_load_instance_id = nir_intrinsic_op.define('nir_intrinsic_load_instance_id', 351)
+nir_intrinsic_load_interpolated_input = nir_intrinsic_op.define('nir_intrinsic_load_interpolated_input', 352)
+nir_intrinsic_load_intersection_opaque_amd = nir_intrinsic_op.define('nir_intrinsic_load_intersection_opaque_amd', 353)
+nir_intrinsic_load_invocation_id = nir_intrinsic_op.define('nir_intrinsic_load_invocation_id', 354)
+nir_intrinsic_load_is_first_fan_agx = nir_intrinsic_op.define('nir_intrinsic_load_is_first_fan_agx', 355)
+nir_intrinsic_load_is_indexed_draw = nir_intrinsic_op.define('nir_intrinsic_load_is_indexed_draw', 356)
+nir_intrinsic_load_kernel_input = nir_intrinsic_op.define('nir_intrinsic_load_kernel_input', 357)
+nir_intrinsic_load_layer_id = nir_intrinsic_op.define('nir_intrinsic_load_layer_id', 358)
+nir_intrinsic_load_lds_ngg_gs_out_vertex_base_amd = nir_intrinsic_op.define('nir_intrinsic_load_lds_ngg_gs_out_vertex_base_amd', 359)
+nir_intrinsic_load_leaf_opaque_intel = nir_intrinsic_op.define('nir_intrinsic_load_leaf_opaque_intel', 360)
+nir_intrinsic_load_leaf_procedural_intel = nir_intrinsic_op.define('nir_intrinsic_load_leaf_procedural_intel', 361)
+nir_intrinsic_load_line_coord = nir_intrinsic_op.define('nir_intrinsic_load_line_coord', 362)
+nir_intrinsic_load_line_width = nir_intrinsic_op.define('nir_intrinsic_load_line_width', 363)
+nir_intrinsic_load_local_invocation_id = nir_intrinsic_op.define('nir_intrinsic_load_local_invocation_id', 364)
+nir_intrinsic_load_local_invocation_index = nir_intrinsic_op.define('nir_intrinsic_load_local_invocation_index', 365)
+nir_intrinsic_load_local_pixel_agx = nir_intrinsic_op.define('nir_intrinsic_load_local_pixel_agx', 366)
+nir_intrinsic_load_local_shared_r600 = nir_intrinsic_op.define('nir_intrinsic_load_local_shared_r600', 367)
+nir_intrinsic_load_lshs_vertex_stride_amd = nir_intrinsic_op.define('nir_intrinsic_load_lshs_vertex_stride_amd', 368)
+nir_intrinsic_load_max_polygon_intel = nir_intrinsic_op.define('nir_intrinsic_load_max_polygon_intel', 369)
+nir_intrinsic_load_merged_wave_info_amd = nir_intrinsic_op.define('nir_intrinsic_load_merged_wave_info_amd', 370)
+nir_intrinsic_load_mesh_view_count = nir_intrinsic_op.define('nir_intrinsic_load_mesh_view_count', 371)
+nir_intrinsic_load_mesh_view_indices = nir_intrinsic_op.define('nir_intrinsic_load_mesh_view_indices', 372)
+nir_intrinsic_load_multisampled_pan = nir_intrinsic_op.define('nir_intrinsic_load_multisampled_pan', 373)
+nir_intrinsic_load_noperspective_varyings_pan = nir_intrinsic_op.define('nir_intrinsic_load_noperspective_varyings_pan', 374)
+nir_intrinsic_load_num_subgroups = nir_intrinsic_op.define('nir_intrinsic_load_num_subgroups', 375)
+nir_intrinsic_load_num_vertices = nir_intrinsic_op.define('nir_intrinsic_load_num_vertices', 376)
+nir_intrinsic_load_num_vertices_per_primitive_amd = nir_intrinsic_op.define('nir_intrinsic_load_num_vertices_per_primitive_amd', 377)
+nir_intrinsic_load_num_workgroups = nir_intrinsic_op.define('nir_intrinsic_load_num_workgroups', 378)
+nir_intrinsic_load_ordered_id_amd = nir_intrinsic_op.define('nir_intrinsic_load_ordered_id_amd', 379)
+nir_intrinsic_load_output = nir_intrinsic_op.define('nir_intrinsic_load_output', 380)
+nir_intrinsic_load_packed_passthrough_primitive_amd = nir_intrinsic_op.define('nir_intrinsic_load_packed_passthrough_primitive_amd', 381)
+nir_intrinsic_load_param = nir_intrinsic_op.define('nir_intrinsic_load_param', 382)
+nir_intrinsic_load_patch_vertices_in = nir_intrinsic_op.define('nir_intrinsic_load_patch_vertices_in', 383)
+nir_intrinsic_load_per_primitive_input = nir_intrinsic_op.define('nir_intrinsic_load_per_primitive_input', 384)
+nir_intrinsic_load_per_primitive_output = nir_intrinsic_op.define('nir_intrinsic_load_per_primitive_output', 385)
+nir_intrinsic_load_per_primitive_remap_intel = nir_intrinsic_op.define('nir_intrinsic_load_per_primitive_remap_intel', 386)
+nir_intrinsic_load_per_vertex_input = nir_intrinsic_op.define('nir_intrinsic_load_per_vertex_input', 387)
+nir_intrinsic_load_per_vertex_output = nir_intrinsic_op.define('nir_intrinsic_load_per_vertex_output', 388)
+nir_intrinsic_load_per_view_output = nir_intrinsic_op.define('nir_intrinsic_load_per_view_output', 389)
+nir_intrinsic_load_persp_center_rhw_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_persp_center_rhw_ir3', 390)
+nir_intrinsic_load_pipeline_stat_query_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_pipeline_stat_query_enabled_amd', 391)
+nir_intrinsic_load_pixel_coord = nir_intrinsic_op.define('nir_intrinsic_load_pixel_coord', 392)
+nir_intrinsic_load_point_coord = nir_intrinsic_op.define('nir_intrinsic_load_point_coord', 393)
+nir_intrinsic_load_point_coord_maybe_flipped = nir_intrinsic_op.define('nir_intrinsic_load_point_coord_maybe_flipped', 394)
+nir_intrinsic_load_poly_line_smooth_enabled = nir_intrinsic_op.define('nir_intrinsic_load_poly_line_smooth_enabled', 395)
+nir_intrinsic_load_polygon_stipple_agx = nir_intrinsic_op.define('nir_intrinsic_load_polygon_stipple_agx', 396)
+nir_intrinsic_load_polygon_stipple_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_load_polygon_stipple_buffer_amd', 397)
+nir_intrinsic_load_preamble = nir_intrinsic_op.define('nir_intrinsic_load_preamble', 398)
+nir_intrinsic_load_prim_gen_query_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_prim_gen_query_enabled_amd', 399)
+nir_intrinsic_load_prim_xfb_query_enabled_amd = nir_intrinsic_op.define('nir_intrinsic_load_prim_xfb_query_enabled_amd', 400)
+nir_intrinsic_load_primitive_id = nir_intrinsic_op.define('nir_intrinsic_load_primitive_id', 401)
+nir_intrinsic_load_primitive_location_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_primitive_location_ir3', 402)
+nir_intrinsic_load_printf_buffer_address = nir_intrinsic_op.define('nir_intrinsic_load_printf_buffer_address', 403)
+nir_intrinsic_load_printf_buffer_size = nir_intrinsic_op.define('nir_intrinsic_load_printf_buffer_size', 404)
+nir_intrinsic_load_provoking_last = nir_intrinsic_op.define('nir_intrinsic_load_provoking_last', 405)
+nir_intrinsic_load_provoking_vtx_amd = nir_intrinsic_op.define('nir_intrinsic_load_provoking_vtx_amd', 406)
+nir_intrinsic_load_provoking_vtx_in_prim_amd = nir_intrinsic_op.define('nir_intrinsic_load_provoking_vtx_in_prim_amd', 407)
+nir_intrinsic_load_push_constant = nir_intrinsic_op.define('nir_intrinsic_load_push_constant', 408)
+nir_intrinsic_load_push_constant_zink = nir_intrinsic_op.define('nir_intrinsic_load_push_constant_zink', 409)
+nir_intrinsic_load_r600_indirect_per_vertex_input = nir_intrinsic_op.define('nir_intrinsic_load_r600_indirect_per_vertex_input', 410)
+nir_intrinsic_load_rasterization_primitive_amd = nir_intrinsic_op.define('nir_intrinsic_load_rasterization_primitive_amd', 411)
+nir_intrinsic_load_rasterization_samples_amd = nir_intrinsic_op.define('nir_intrinsic_load_rasterization_samples_amd', 412)
+nir_intrinsic_load_rasterization_stream = nir_intrinsic_op.define('nir_intrinsic_load_rasterization_stream', 413)
+nir_intrinsic_load_raw_output_pan = nir_intrinsic_op.define('nir_intrinsic_load_raw_output_pan', 414)
+nir_intrinsic_load_raw_vertex_id_pan = nir_intrinsic_op.define('nir_intrinsic_load_raw_vertex_id_pan', 415)
+nir_intrinsic_load_raw_vertex_offset_pan = nir_intrinsic_op.define('nir_intrinsic_load_raw_vertex_offset_pan', 416)
+nir_intrinsic_load_ray_base_mem_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_base_mem_addr_intel', 417)
+nir_intrinsic_load_ray_flags = nir_intrinsic_op.define('nir_intrinsic_load_ray_flags', 418)
+nir_intrinsic_load_ray_geometry_index = nir_intrinsic_op.define('nir_intrinsic_load_ray_geometry_index', 419)
+nir_intrinsic_load_ray_hit_kind = nir_intrinsic_op.define('nir_intrinsic_load_ray_hit_kind', 420)
+nir_intrinsic_load_ray_hit_sbt_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_hit_sbt_addr_intel', 421)
+nir_intrinsic_load_ray_hit_sbt_stride_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_hit_sbt_stride_intel', 422)
+nir_intrinsic_load_ray_hw_stack_size_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_hw_stack_size_intel', 423)
+nir_intrinsic_load_ray_instance_custom_index = nir_intrinsic_op.define('nir_intrinsic_load_ray_instance_custom_index', 424)
+nir_intrinsic_load_ray_launch_id = nir_intrinsic_op.define('nir_intrinsic_load_ray_launch_id', 425)
+nir_intrinsic_load_ray_launch_size = nir_intrinsic_op.define('nir_intrinsic_load_ray_launch_size', 426)
+nir_intrinsic_load_ray_miss_sbt_addr_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_miss_sbt_addr_intel', 427)
+nir_intrinsic_load_ray_miss_sbt_stride_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_miss_sbt_stride_intel', 428)
+nir_intrinsic_load_ray_num_dss_rt_stacks_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_num_dss_rt_stacks_intel', 429)
+nir_intrinsic_load_ray_object_direction = nir_intrinsic_op.define('nir_intrinsic_load_ray_object_direction', 430)
+nir_intrinsic_load_ray_object_origin = nir_intrinsic_op.define('nir_intrinsic_load_ray_object_origin', 431)
+nir_intrinsic_load_ray_object_to_world = nir_intrinsic_op.define('nir_intrinsic_load_ray_object_to_world', 432)
+nir_intrinsic_load_ray_query_global_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_query_global_intel', 433)
+nir_intrinsic_load_ray_sw_stack_size_intel = nir_intrinsic_op.define('nir_intrinsic_load_ray_sw_stack_size_intel', 434)
+nir_intrinsic_load_ray_t_max = nir_intrinsic_op.define('nir_intrinsic_load_ray_t_max', 435)
+nir_intrinsic_load_ray_t_min = nir_intrinsic_op.define('nir_intrinsic_load_ray_t_min', 436)
+nir_intrinsic_load_ray_tracing_stack_base_lvp = nir_intrinsic_op.define('nir_intrinsic_load_ray_tracing_stack_base_lvp', 437)
+nir_intrinsic_load_ray_triangle_vertex_positions = nir_intrinsic_op.define('nir_intrinsic_load_ray_triangle_vertex_positions', 438)
+nir_intrinsic_load_ray_world_direction = nir_intrinsic_op.define('nir_intrinsic_load_ray_world_direction', 439)
+nir_intrinsic_load_ray_world_origin = nir_intrinsic_op.define('nir_intrinsic_load_ray_world_origin', 440)
+nir_intrinsic_load_ray_world_to_object = nir_intrinsic_op.define('nir_intrinsic_load_ray_world_to_object', 441)
+nir_intrinsic_load_readonly_output_pan = nir_intrinsic_op.define('nir_intrinsic_load_readonly_output_pan', 442)
+nir_intrinsic_load_reg = nir_intrinsic_op.define('nir_intrinsic_load_reg', 443)
+nir_intrinsic_load_reg_indirect = nir_intrinsic_op.define('nir_intrinsic_load_reg_indirect', 444)
+nir_intrinsic_load_rel_patch_id_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_rel_patch_id_ir3', 445)
+nir_intrinsic_load_reloc_const_intel = nir_intrinsic_op.define('nir_intrinsic_load_reloc_const_intel', 446)
+nir_intrinsic_load_resume_shader_address_amd = nir_intrinsic_op.define('nir_intrinsic_load_resume_shader_address_amd', 447)
+nir_intrinsic_load_ring_attr_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_attr_amd', 448)
+nir_intrinsic_load_ring_attr_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_attr_offset_amd', 449)
+nir_intrinsic_load_ring_es2gs_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_es2gs_offset_amd', 450)
+nir_intrinsic_load_ring_esgs_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_esgs_amd', 451)
+nir_intrinsic_load_ring_gs2vs_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_gs2vs_offset_amd', 452)
+nir_intrinsic_load_ring_gsvs_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_gsvs_amd', 453)
+nir_intrinsic_load_ring_mesh_scratch_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_mesh_scratch_amd', 454)
+nir_intrinsic_load_ring_mesh_scratch_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_mesh_scratch_offset_amd', 455)
+nir_intrinsic_load_ring_task_draw_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_task_draw_amd', 456)
+nir_intrinsic_load_ring_task_payload_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_task_payload_amd', 457)
+nir_intrinsic_load_ring_tess_factors_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_tess_factors_amd', 458)
+nir_intrinsic_load_ring_tess_factors_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_tess_factors_offset_amd', 459)
+nir_intrinsic_load_ring_tess_offchip_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_tess_offchip_amd', 460)
+nir_intrinsic_load_ring_tess_offchip_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_ring_tess_offchip_offset_amd', 461)
+nir_intrinsic_load_root_agx = nir_intrinsic_op.define('nir_intrinsic_load_root_agx', 462)
+nir_intrinsic_load_rt_arg_scratch_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_rt_arg_scratch_offset_amd', 463)
+nir_intrinsic_load_rt_conversion_pan = nir_intrinsic_op.define('nir_intrinsic_load_rt_conversion_pan', 464)
+nir_intrinsic_load_sample_id = nir_intrinsic_op.define('nir_intrinsic_load_sample_id', 465)
+nir_intrinsic_load_sample_id_no_per_sample = nir_intrinsic_op.define('nir_intrinsic_load_sample_id_no_per_sample', 466)
+nir_intrinsic_load_sample_mask = nir_intrinsic_op.define('nir_intrinsic_load_sample_mask', 467)
+nir_intrinsic_load_sample_mask_in = nir_intrinsic_op.define('nir_intrinsic_load_sample_mask_in', 468)
+nir_intrinsic_load_sample_pos = nir_intrinsic_op.define('nir_intrinsic_load_sample_pos', 469)
+nir_intrinsic_load_sample_pos_from_id = nir_intrinsic_op.define('nir_intrinsic_load_sample_pos_from_id', 470)
+nir_intrinsic_load_sample_pos_or_center = nir_intrinsic_op.define('nir_intrinsic_load_sample_pos_or_center', 471)
+nir_intrinsic_load_sample_positions_agx = nir_intrinsic_op.define('nir_intrinsic_load_sample_positions_agx', 472)
+nir_intrinsic_load_sample_positions_amd = nir_intrinsic_op.define('nir_intrinsic_load_sample_positions_amd', 473)
+nir_intrinsic_load_sample_positions_pan = nir_intrinsic_op.define('nir_intrinsic_load_sample_positions_pan', 474)
+nir_intrinsic_load_sampler_handle_agx = nir_intrinsic_op.define('nir_intrinsic_load_sampler_handle_agx', 475)
+nir_intrinsic_load_sampler_lod_parameters = nir_intrinsic_op.define('nir_intrinsic_load_sampler_lod_parameters', 476)
+nir_intrinsic_load_samples_log2_agx = nir_intrinsic_op.define('nir_intrinsic_load_samples_log2_agx', 477)
+nir_intrinsic_load_sbt_base_amd = nir_intrinsic_op.define('nir_intrinsic_load_sbt_base_amd', 478)
+nir_intrinsic_load_sbt_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_sbt_offset_amd', 479)
+nir_intrinsic_load_sbt_stride_amd = nir_intrinsic_op.define('nir_intrinsic_load_sbt_stride_amd', 480)
+nir_intrinsic_load_scalar_arg_amd = nir_intrinsic_op.define('nir_intrinsic_load_scalar_arg_amd', 481)
+nir_intrinsic_load_scratch = nir_intrinsic_op.define('nir_intrinsic_load_scratch', 482)
+nir_intrinsic_load_scratch_base_ptr = nir_intrinsic_op.define('nir_intrinsic_load_scratch_base_ptr', 483)
+nir_intrinsic_load_shader_call_data_offset_lvp = nir_intrinsic_op.define('nir_intrinsic_load_shader_call_data_offset_lvp', 484)
+nir_intrinsic_load_shader_index = nir_intrinsic_op.define('nir_intrinsic_load_shader_index', 485)
+nir_intrinsic_load_shader_output_pan = nir_intrinsic_op.define('nir_intrinsic_load_shader_output_pan', 486)
+nir_intrinsic_load_shader_part_tests_zs_agx = nir_intrinsic_op.define('nir_intrinsic_load_shader_part_tests_zs_agx', 487)
+nir_intrinsic_load_shader_record_ptr = nir_intrinsic_op.define('nir_intrinsic_load_shader_record_ptr', 488)
+nir_intrinsic_load_shared = nir_intrinsic_op.define('nir_intrinsic_load_shared', 489)
+nir_intrinsic_load_shared2_amd = nir_intrinsic_op.define('nir_intrinsic_load_shared2_amd', 490)
+nir_intrinsic_load_shared_base_ptr = nir_intrinsic_op.define('nir_intrinsic_load_shared_base_ptr', 491)
+nir_intrinsic_load_shared_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_shared_block_intel', 492)
+nir_intrinsic_load_shared_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_shared_ir3', 493)
+nir_intrinsic_load_shared_lock_nv = nir_intrinsic_op.define('nir_intrinsic_load_shared_lock_nv', 494)
+nir_intrinsic_load_shared_uniform_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_shared_uniform_block_intel', 495)
+nir_intrinsic_load_simd_width_intel = nir_intrinsic_op.define('nir_intrinsic_load_simd_width_intel', 496)
+nir_intrinsic_load_sm_count_nv = nir_intrinsic_op.define('nir_intrinsic_load_sm_count_nv', 497)
+nir_intrinsic_load_sm_id_nv = nir_intrinsic_op.define('nir_intrinsic_load_sm_id_nv', 498)
+nir_intrinsic_load_smem_amd = nir_intrinsic_op.define('nir_intrinsic_load_smem_amd', 499)
+nir_intrinsic_load_ssbo = nir_intrinsic_op.define('nir_intrinsic_load_ssbo', 500)
+nir_intrinsic_load_ssbo_address = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_address', 501)
+nir_intrinsic_load_ssbo_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_block_intel', 502)
+nir_intrinsic_load_ssbo_intel = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_intel', 503)
+nir_intrinsic_load_ssbo_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_ir3', 504)
+nir_intrinsic_load_ssbo_uniform_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_ssbo_uniform_block_intel', 505)
+nir_intrinsic_load_stack = nir_intrinsic_op.define('nir_intrinsic_load_stack', 506)
+nir_intrinsic_load_stat_query_address_agx = nir_intrinsic_op.define('nir_intrinsic_load_stat_query_address_agx', 507)
+nir_intrinsic_load_streamout_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_load_streamout_buffer_amd', 508)
+nir_intrinsic_load_streamout_config_amd = nir_intrinsic_op.define('nir_intrinsic_load_streamout_config_amd', 509)
+nir_intrinsic_load_streamout_offset_amd = nir_intrinsic_op.define('nir_intrinsic_load_streamout_offset_amd', 510)
+nir_intrinsic_load_streamout_write_index_amd = nir_intrinsic_op.define('nir_intrinsic_load_streamout_write_index_amd', 511)
+nir_intrinsic_load_subgroup_eq_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_eq_mask', 512)
+nir_intrinsic_load_subgroup_ge_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_ge_mask', 513)
+nir_intrinsic_load_subgroup_gt_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_gt_mask', 514)
+nir_intrinsic_load_subgroup_id = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_id', 515)
+nir_intrinsic_load_subgroup_id_shift_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_id_shift_ir3', 516)
+nir_intrinsic_load_subgroup_invocation = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_invocation', 517)
+nir_intrinsic_load_subgroup_le_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_le_mask', 518)
+nir_intrinsic_load_subgroup_lt_mask = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_lt_mask', 519)
+nir_intrinsic_load_subgroup_size = nir_intrinsic_op.define('nir_intrinsic_load_subgroup_size', 520)
+nir_intrinsic_load_sysval_agx = nir_intrinsic_op.define('nir_intrinsic_load_sysval_agx', 521)
+nir_intrinsic_load_sysval_nv = nir_intrinsic_op.define('nir_intrinsic_load_sysval_nv', 522)
+nir_intrinsic_load_task_payload = nir_intrinsic_op.define('nir_intrinsic_load_task_payload', 523)
+nir_intrinsic_load_task_ring_entry_amd = nir_intrinsic_op.define('nir_intrinsic_load_task_ring_entry_amd', 524)
+nir_intrinsic_load_tcs_header_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_header_ir3', 525)
+nir_intrinsic_load_tcs_in_param_base_r600 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_in_param_base_r600', 526)
+nir_intrinsic_load_tcs_mem_attrib_stride = nir_intrinsic_op.define('nir_intrinsic_load_tcs_mem_attrib_stride', 527)
+nir_intrinsic_load_tcs_num_patches_amd = nir_intrinsic_op.define('nir_intrinsic_load_tcs_num_patches_amd', 528)
+nir_intrinsic_load_tcs_out_param_base_r600 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_out_param_base_r600', 529)
+nir_intrinsic_load_tcs_primitive_mode_amd = nir_intrinsic_op.define('nir_intrinsic_load_tcs_primitive_mode_amd', 530)
+nir_intrinsic_load_tcs_rel_patch_id_r600 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_rel_patch_id_r600', 531)
+nir_intrinsic_load_tcs_tess_factor_base_r600 = nir_intrinsic_op.define('nir_intrinsic_load_tcs_tess_factor_base_r600', 532)
+nir_intrinsic_load_tcs_tess_levels_to_tes_amd = nir_intrinsic_op.define('nir_intrinsic_load_tcs_tess_levels_to_tes_amd', 533)
+nir_intrinsic_load_tess_coord = nir_intrinsic_op.define('nir_intrinsic_load_tess_coord', 534)
+nir_intrinsic_load_tess_coord_xy = nir_intrinsic_op.define('nir_intrinsic_load_tess_coord_xy', 535)
+nir_intrinsic_load_tess_factor_base_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_tess_factor_base_ir3', 536)
+nir_intrinsic_load_tess_level_inner = nir_intrinsic_op.define('nir_intrinsic_load_tess_level_inner', 537)
+nir_intrinsic_load_tess_level_inner_default = nir_intrinsic_op.define('nir_intrinsic_load_tess_level_inner_default', 538)
+nir_intrinsic_load_tess_level_outer = nir_intrinsic_op.define('nir_intrinsic_load_tess_level_outer', 539)
+nir_intrinsic_load_tess_level_outer_default = nir_intrinsic_op.define('nir_intrinsic_load_tess_level_outer_default', 540)
+nir_intrinsic_load_tess_param_base_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_tess_param_base_ir3', 541)
+nir_intrinsic_load_tess_param_buffer_poly = nir_intrinsic_op.define('nir_intrinsic_load_tess_param_buffer_poly', 542)
+nir_intrinsic_load_tess_rel_patch_id_amd = nir_intrinsic_op.define('nir_intrinsic_load_tess_rel_patch_id_amd', 543)
+nir_intrinsic_load_tex_sprite_mask_agx = nir_intrinsic_op.define('nir_intrinsic_load_tex_sprite_mask_agx', 544)
+nir_intrinsic_load_texture_handle_agx = nir_intrinsic_op.define('nir_intrinsic_load_texture_handle_agx', 545)
+nir_intrinsic_load_texture_scale = nir_intrinsic_op.define('nir_intrinsic_load_texture_scale', 546)
+nir_intrinsic_load_texture_size_etna = nir_intrinsic_op.define('nir_intrinsic_load_texture_size_etna', 547)
+nir_intrinsic_load_tlb_color_brcm = nir_intrinsic_op.define('nir_intrinsic_load_tlb_color_brcm', 548)
+nir_intrinsic_load_topology_id_intel = nir_intrinsic_op.define('nir_intrinsic_load_topology_id_intel', 549)
+nir_intrinsic_load_typed_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_load_typed_buffer_amd', 550)
+nir_intrinsic_load_uav_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_uav_ir3', 551)
+nir_intrinsic_load_ubo = nir_intrinsic_op.define('nir_intrinsic_load_ubo', 552)
+nir_intrinsic_load_ubo_uniform_block_intel = nir_intrinsic_op.define('nir_intrinsic_load_ubo_uniform_block_intel', 553)
+nir_intrinsic_load_ubo_vec4 = nir_intrinsic_op.define('nir_intrinsic_load_ubo_vec4', 554)
+nir_intrinsic_load_uniform = nir_intrinsic_op.define('nir_intrinsic_load_uniform', 555)
+nir_intrinsic_load_user_clip_plane = nir_intrinsic_op.define('nir_intrinsic_load_user_clip_plane', 556)
+nir_intrinsic_load_user_data_amd = nir_intrinsic_op.define('nir_intrinsic_load_user_data_amd', 557)
+nir_intrinsic_load_uvs_index_agx = nir_intrinsic_op.define('nir_intrinsic_load_uvs_index_agx', 558)
+nir_intrinsic_load_vbo_base_agx = nir_intrinsic_op.define('nir_intrinsic_load_vbo_base_agx', 559)
+nir_intrinsic_load_vector_arg_amd = nir_intrinsic_op.define('nir_intrinsic_load_vector_arg_amd', 560)
+nir_intrinsic_load_vertex_id = nir_intrinsic_op.define('nir_intrinsic_load_vertex_id', 561)
+nir_intrinsic_load_vertex_id_zero_base = nir_intrinsic_op.define('nir_intrinsic_load_vertex_id_zero_base', 562)
+nir_intrinsic_load_view_index = nir_intrinsic_op.define('nir_intrinsic_load_view_index', 563)
+nir_intrinsic_load_viewport_offset = nir_intrinsic_op.define('nir_intrinsic_load_viewport_offset', 564)
+nir_intrinsic_load_viewport_scale = nir_intrinsic_op.define('nir_intrinsic_load_viewport_scale', 565)
+nir_intrinsic_load_viewport_x_offset = nir_intrinsic_op.define('nir_intrinsic_load_viewport_x_offset', 566)
+nir_intrinsic_load_viewport_x_scale = nir_intrinsic_op.define('nir_intrinsic_load_viewport_x_scale', 567)
+nir_intrinsic_load_viewport_y_offset = nir_intrinsic_op.define('nir_intrinsic_load_viewport_y_offset', 568)
+nir_intrinsic_load_viewport_y_scale = nir_intrinsic_op.define('nir_intrinsic_load_viewport_y_scale', 569)
+nir_intrinsic_load_viewport_z_offset = nir_intrinsic_op.define('nir_intrinsic_load_viewport_z_offset', 570)
+nir_intrinsic_load_viewport_z_scale = nir_intrinsic_op.define('nir_intrinsic_load_viewport_z_scale', 571)
+nir_intrinsic_load_vs_output_buffer_poly = nir_intrinsic_op.define('nir_intrinsic_load_vs_output_buffer_poly', 572)
+nir_intrinsic_load_vs_outputs_poly = nir_intrinsic_op.define('nir_intrinsic_load_vs_outputs_poly', 573)
+nir_intrinsic_load_vs_primitive_stride_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_vs_primitive_stride_ir3', 574)
+nir_intrinsic_load_vs_vertex_stride_ir3 = nir_intrinsic_op.define('nir_intrinsic_load_vs_vertex_stride_ir3', 575)
+nir_intrinsic_load_vulkan_descriptor = nir_intrinsic_op.define('nir_intrinsic_load_vulkan_descriptor', 576)
+nir_intrinsic_load_warp_id_nv = nir_intrinsic_op.define('nir_intrinsic_load_warp_id_nv', 577)
+nir_intrinsic_load_warps_per_sm_nv = nir_intrinsic_op.define('nir_intrinsic_load_warps_per_sm_nv', 578)
+nir_intrinsic_load_work_dim = nir_intrinsic_op.define('nir_intrinsic_load_work_dim', 579)
+nir_intrinsic_load_workgroup_id = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_id', 580)
+nir_intrinsic_load_workgroup_index = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_index', 581)
+nir_intrinsic_load_workgroup_num_input_primitives_amd = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_num_input_primitives_amd', 582)
+nir_intrinsic_load_workgroup_num_input_vertices_amd = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_num_input_vertices_amd', 583)
+nir_intrinsic_load_workgroup_size = nir_intrinsic_op.define('nir_intrinsic_load_workgroup_size', 584)
+nir_intrinsic_load_xfb_address = nir_intrinsic_op.define('nir_intrinsic_load_xfb_address', 585)
+nir_intrinsic_load_xfb_index_buffer = nir_intrinsic_op.define('nir_intrinsic_load_xfb_index_buffer', 586)
+nir_intrinsic_load_xfb_size = nir_intrinsic_op.define('nir_intrinsic_load_xfb_size', 587)
+nir_intrinsic_load_xfb_state_address_gfx12_amd = nir_intrinsic_op.define('nir_intrinsic_load_xfb_state_address_gfx12_amd', 588)
+nir_intrinsic_masked_swizzle_amd = nir_intrinsic_op.define('nir_intrinsic_masked_swizzle_amd', 589)
+nir_intrinsic_mbcnt_amd = nir_intrinsic_op.define('nir_intrinsic_mbcnt_amd', 590)
+nir_intrinsic_memcpy_deref = nir_intrinsic_op.define('nir_intrinsic_memcpy_deref', 591)
+nir_intrinsic_nop = nir_intrinsic_op.define('nir_intrinsic_nop', 592)
+nir_intrinsic_nop_amd = nir_intrinsic_op.define('nir_intrinsic_nop_amd', 593)
+nir_intrinsic_optimization_barrier_sgpr_amd = nir_intrinsic_op.define('nir_intrinsic_optimization_barrier_sgpr_amd', 594)
+nir_intrinsic_optimization_barrier_vgpr_amd = nir_intrinsic_op.define('nir_intrinsic_optimization_barrier_vgpr_amd', 595)
+nir_intrinsic_ordered_add_loop_gfx12_amd = nir_intrinsic_op.define('nir_intrinsic_ordered_add_loop_gfx12_amd', 596)
+nir_intrinsic_ordered_xfb_counter_add_gfx11_amd = nir_intrinsic_op.define('nir_intrinsic_ordered_xfb_counter_add_gfx11_amd', 597)
+nir_intrinsic_overwrite_tes_arguments_amd = nir_intrinsic_op.define('nir_intrinsic_overwrite_tes_arguments_amd', 598)
+nir_intrinsic_overwrite_vs_arguments_amd = nir_intrinsic_op.define('nir_intrinsic_overwrite_vs_arguments_amd', 599)
+nir_intrinsic_pin_cx_handle_nv = nir_intrinsic_op.define('nir_intrinsic_pin_cx_handle_nv', 600)
+nir_intrinsic_preamble_end_ir3 = nir_intrinsic_op.define('nir_intrinsic_preamble_end_ir3', 601)
+nir_intrinsic_preamble_start_ir3 = nir_intrinsic_op.define('nir_intrinsic_preamble_start_ir3', 602)
+nir_intrinsic_prefetch_sam_ir3 = nir_intrinsic_op.define('nir_intrinsic_prefetch_sam_ir3', 603)
+nir_intrinsic_prefetch_tex_ir3 = nir_intrinsic_op.define('nir_intrinsic_prefetch_tex_ir3', 604)
+nir_intrinsic_prefetch_ubo_ir3 = nir_intrinsic_op.define('nir_intrinsic_prefetch_ubo_ir3', 605)
+nir_intrinsic_printf = nir_intrinsic_op.define('nir_intrinsic_printf', 606)
+nir_intrinsic_printf_abort = nir_intrinsic_op.define('nir_intrinsic_printf_abort', 607)
+nir_intrinsic_quad_ballot_agx = nir_intrinsic_op.define('nir_intrinsic_quad_ballot_agx', 608)
+nir_intrinsic_quad_broadcast = nir_intrinsic_op.define('nir_intrinsic_quad_broadcast', 609)
+nir_intrinsic_quad_swap_diagonal = nir_intrinsic_op.define('nir_intrinsic_quad_swap_diagonal', 610)
+nir_intrinsic_quad_swap_horizontal = nir_intrinsic_op.define('nir_intrinsic_quad_swap_horizontal', 611)
+nir_intrinsic_quad_swap_vertical = nir_intrinsic_op.define('nir_intrinsic_quad_swap_vertical', 612)
+nir_intrinsic_quad_swizzle_amd = nir_intrinsic_op.define('nir_intrinsic_quad_swizzle_amd', 613)
+nir_intrinsic_quad_vote_all = nir_intrinsic_op.define('nir_intrinsic_quad_vote_all', 614)
+nir_intrinsic_quad_vote_any = nir_intrinsic_op.define('nir_intrinsic_quad_vote_any', 615)
+nir_intrinsic_r600_indirect_vertex_at_index = nir_intrinsic_op.define('nir_intrinsic_r600_indirect_vertex_at_index', 616)
+nir_intrinsic_ray_intersection_ir3 = nir_intrinsic_op.define('nir_intrinsic_ray_intersection_ir3', 617)
+nir_intrinsic_read_attribute_payload_intel = nir_intrinsic_op.define('nir_intrinsic_read_attribute_payload_intel', 618)
+nir_intrinsic_read_first_invocation = nir_intrinsic_op.define('nir_intrinsic_read_first_invocation', 619)
+nir_intrinsic_read_getlast_ir3 = nir_intrinsic_op.define('nir_intrinsic_read_getlast_ir3', 620)
+nir_intrinsic_read_invocation = nir_intrinsic_op.define('nir_intrinsic_read_invocation', 621)
+nir_intrinsic_read_invocation_cond_ir3 = nir_intrinsic_op.define('nir_intrinsic_read_invocation_cond_ir3', 622)
+nir_intrinsic_reduce = nir_intrinsic_op.define('nir_intrinsic_reduce', 623)
+nir_intrinsic_reduce_clusters_ir3 = nir_intrinsic_op.define('nir_intrinsic_reduce_clusters_ir3', 624)
+nir_intrinsic_report_ray_intersection = nir_intrinsic_op.define('nir_intrinsic_report_ray_intersection', 625)
+nir_intrinsic_resource_intel = nir_intrinsic_op.define('nir_intrinsic_resource_intel', 626)
+nir_intrinsic_rotate = nir_intrinsic_op.define('nir_intrinsic_rotate', 627)
+nir_intrinsic_rq_confirm_intersection = nir_intrinsic_op.define('nir_intrinsic_rq_confirm_intersection', 628)
+nir_intrinsic_rq_generate_intersection = nir_intrinsic_op.define('nir_intrinsic_rq_generate_intersection', 629)
+nir_intrinsic_rq_initialize = nir_intrinsic_op.define('nir_intrinsic_rq_initialize', 630)
+nir_intrinsic_rq_load = nir_intrinsic_op.define('nir_intrinsic_rq_load', 631)
+nir_intrinsic_rq_proceed = nir_intrinsic_op.define('nir_intrinsic_rq_proceed', 632)
+nir_intrinsic_rq_terminate = nir_intrinsic_op.define('nir_intrinsic_rq_terminate', 633)
+nir_intrinsic_rt_execute_callable = nir_intrinsic_op.define('nir_intrinsic_rt_execute_callable', 634)
+nir_intrinsic_rt_resume = nir_intrinsic_op.define('nir_intrinsic_rt_resume', 635)
+nir_intrinsic_rt_return_amd = nir_intrinsic_op.define('nir_intrinsic_rt_return_amd', 636)
+nir_intrinsic_rt_trace_ray = nir_intrinsic_op.define('nir_intrinsic_rt_trace_ray', 637)
+nir_intrinsic_sample_mask_agx = nir_intrinsic_op.define('nir_intrinsic_sample_mask_agx', 638)
+nir_intrinsic_select_vertex_poly = nir_intrinsic_op.define('nir_intrinsic_select_vertex_poly', 639)
+nir_intrinsic_sendmsg_amd = nir_intrinsic_op.define('nir_intrinsic_sendmsg_amd', 640)
+nir_intrinsic_set_vertex_and_primitive_count = nir_intrinsic_op.define('nir_intrinsic_set_vertex_and_primitive_count', 641)
+nir_intrinsic_shader_clock = nir_intrinsic_op.define('nir_intrinsic_shader_clock', 642)
+nir_intrinsic_shared_append_amd = nir_intrinsic_op.define('nir_intrinsic_shared_append_amd', 643)
+nir_intrinsic_shared_atomic = nir_intrinsic_op.define('nir_intrinsic_shared_atomic', 644)
+nir_intrinsic_shared_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_shared_atomic_swap', 645)
+nir_intrinsic_shared_consume_amd = nir_intrinsic_op.define('nir_intrinsic_shared_consume_amd', 646)
+nir_intrinsic_shuffle = nir_intrinsic_op.define('nir_intrinsic_shuffle', 647)
+nir_intrinsic_shuffle_down = nir_intrinsic_op.define('nir_intrinsic_shuffle_down', 648)
+nir_intrinsic_shuffle_down_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_shuffle_down_uniform_ir3', 649)
+nir_intrinsic_shuffle_up = nir_intrinsic_op.define('nir_intrinsic_shuffle_up', 650)
+nir_intrinsic_shuffle_up_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_shuffle_up_uniform_ir3', 651)
+nir_intrinsic_shuffle_xor = nir_intrinsic_op.define('nir_intrinsic_shuffle_xor', 652)
+nir_intrinsic_shuffle_xor_uniform_ir3 = nir_intrinsic_op.define('nir_intrinsic_shuffle_xor_uniform_ir3', 653)
+nir_intrinsic_sleep_amd = nir_intrinsic_op.define('nir_intrinsic_sleep_amd', 654)
+nir_intrinsic_sparse_residency_code_and = nir_intrinsic_op.define('nir_intrinsic_sparse_residency_code_and', 655)
+nir_intrinsic_ssa_bar_nv = nir_intrinsic_op.define('nir_intrinsic_ssa_bar_nv', 656)
+nir_intrinsic_ssbo_atomic = nir_intrinsic_op.define('nir_intrinsic_ssbo_atomic', 657)
+nir_intrinsic_ssbo_atomic_ir3 = nir_intrinsic_op.define('nir_intrinsic_ssbo_atomic_ir3', 658)
+nir_intrinsic_ssbo_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_ssbo_atomic_swap', 659)
+nir_intrinsic_ssbo_atomic_swap_ir3 = nir_intrinsic_op.define('nir_intrinsic_ssbo_atomic_swap_ir3', 660)
+nir_intrinsic_stack_map_agx = nir_intrinsic_op.define('nir_intrinsic_stack_map_agx', 661)
+nir_intrinsic_stack_unmap_agx = nir_intrinsic_op.define('nir_intrinsic_stack_unmap_agx', 662)
+nir_intrinsic_store_agx = nir_intrinsic_op.define('nir_intrinsic_store_agx', 663)
+nir_intrinsic_store_buffer_amd = nir_intrinsic_op.define('nir_intrinsic_store_buffer_amd', 664)
+nir_intrinsic_store_combined_output_pan = nir_intrinsic_op.define('nir_intrinsic_store_combined_output_pan', 665)
+nir_intrinsic_store_const_ir3 = nir_intrinsic_op.define('nir_intrinsic_store_const_ir3', 666)
+nir_intrinsic_store_deref = nir_intrinsic_op.define('nir_intrinsic_store_deref', 667)
+nir_intrinsic_store_deref_block_intel = nir_intrinsic_op.define('nir_intrinsic_store_deref_block_intel', 668)
+nir_intrinsic_store_global = nir_intrinsic_op.define('nir_intrinsic_store_global', 669)
+nir_intrinsic_store_global_2x32 = nir_intrinsic_op.define('nir_intrinsic_store_global_2x32', 670)
+nir_intrinsic_store_global_amd = nir_intrinsic_op.define('nir_intrinsic_store_global_amd', 671)
+nir_intrinsic_store_global_block_intel = nir_intrinsic_op.define('nir_intrinsic_store_global_block_intel', 672)
+nir_intrinsic_store_global_etna = nir_intrinsic_op.define('nir_intrinsic_store_global_etna', 673)
+nir_intrinsic_store_global_ir3 = nir_intrinsic_op.define('nir_intrinsic_store_global_ir3', 674)
+nir_intrinsic_store_hit_attrib_amd = nir_intrinsic_op.define('nir_intrinsic_store_hit_attrib_amd', 675)
+nir_intrinsic_store_local_pixel_agx = nir_intrinsic_op.define('nir_intrinsic_store_local_pixel_agx', 676)
+nir_intrinsic_store_local_shared_r600 = nir_intrinsic_op.define('nir_intrinsic_store_local_shared_r600', 677)
+nir_intrinsic_store_output = nir_intrinsic_op.define('nir_intrinsic_store_output', 678)
+nir_intrinsic_store_per_primitive_output = nir_intrinsic_op.define('nir_intrinsic_store_per_primitive_output', 679)
+nir_intrinsic_store_per_primitive_payload_intel = nir_intrinsic_op.define('nir_intrinsic_store_per_primitive_payload_intel', 680)
+nir_intrinsic_store_per_vertex_output = nir_intrinsic_op.define('nir_intrinsic_store_per_vertex_output', 681)
+nir_intrinsic_store_per_view_output = nir_intrinsic_op.define('nir_intrinsic_store_per_view_output', 682)
+nir_intrinsic_store_preamble = nir_intrinsic_op.define('nir_intrinsic_store_preamble', 683)
+nir_intrinsic_store_raw_output_pan = nir_intrinsic_op.define('nir_intrinsic_store_raw_output_pan', 684)
+nir_intrinsic_store_reg = nir_intrinsic_op.define('nir_intrinsic_store_reg', 685)
+nir_intrinsic_store_reg_indirect = nir_intrinsic_op.define('nir_intrinsic_store_reg_indirect', 686)
+nir_intrinsic_store_scalar_arg_amd = nir_intrinsic_op.define('nir_intrinsic_store_scalar_arg_amd', 687)
+nir_intrinsic_store_scratch = nir_intrinsic_op.define('nir_intrinsic_store_scratch', 688)
+nir_intrinsic_store_shared = nir_intrinsic_op.define('nir_intrinsic_store_shared', 689)
+nir_intrinsic_store_shared2_amd = nir_intrinsic_op.define('nir_intrinsic_store_shared2_amd', 690)
+nir_intrinsic_store_shared_block_intel = nir_intrinsic_op.define('nir_intrinsic_store_shared_block_intel', 691)
+nir_intrinsic_store_shared_ir3 = nir_intrinsic_op.define('nir_intrinsic_store_shared_ir3', 692)
+nir_intrinsic_store_shared_unlock_nv = nir_intrinsic_op.define('nir_intrinsic_store_shared_unlock_nv', 693)
+nir_intrinsic_store_ssbo = nir_intrinsic_op.define('nir_intrinsic_store_ssbo', 694)
+nir_intrinsic_store_ssbo_block_intel = nir_intrinsic_op.define('nir_intrinsic_store_ssbo_block_intel', 695)
+nir_intrinsic_store_ssbo_intel = nir_intrinsic_op.define('nir_intrinsic_store_ssbo_intel', 696)
+nir_intrinsic_store_ssbo_ir3 = nir_intrinsic_op.define('nir_intrinsic_store_ssbo_ir3', 697)
+nir_intrinsic_store_stack = nir_intrinsic_op.define('nir_intrinsic_store_stack', 698)
+nir_intrinsic_store_task_payload = nir_intrinsic_op.define('nir_intrinsic_store_task_payload', 699)
+nir_intrinsic_store_tf_r600 = nir_intrinsic_op.define('nir_intrinsic_store_tf_r600', 700)
+nir_intrinsic_store_tlb_sample_color_v3d = nir_intrinsic_op.define('nir_intrinsic_store_tlb_sample_color_v3d', 701)
+nir_intrinsic_store_uvs_agx = nir_intrinsic_op.define('nir_intrinsic_store_uvs_agx', 702)
+nir_intrinsic_store_vector_arg_amd = nir_intrinsic_op.define('nir_intrinsic_store_vector_arg_amd', 703)
+nir_intrinsic_store_zs_agx = nir_intrinsic_op.define('nir_intrinsic_store_zs_agx', 704)
+nir_intrinsic_strict_wqm_coord_amd = nir_intrinsic_op.define('nir_intrinsic_strict_wqm_coord_amd', 705)
+nir_intrinsic_subfm_nv = nir_intrinsic_op.define('nir_intrinsic_subfm_nv', 706)
+nir_intrinsic_suclamp_nv = nir_intrinsic_op.define('nir_intrinsic_suclamp_nv', 707)
+nir_intrinsic_sueau_nv = nir_intrinsic_op.define('nir_intrinsic_sueau_nv', 708)
+nir_intrinsic_suldga_nv = nir_intrinsic_op.define('nir_intrinsic_suldga_nv', 709)
+nir_intrinsic_sustga_nv = nir_intrinsic_op.define('nir_intrinsic_sustga_nv', 710)
+nir_intrinsic_task_payload_atomic = nir_intrinsic_op.define('nir_intrinsic_task_payload_atomic', 711)
+nir_intrinsic_task_payload_atomic_swap = nir_intrinsic_op.define('nir_intrinsic_task_payload_atomic_swap', 712)
+nir_intrinsic_terminate = nir_intrinsic_op.define('nir_intrinsic_terminate', 713)
+nir_intrinsic_terminate_if = nir_intrinsic_op.define('nir_intrinsic_terminate_if', 714)
+nir_intrinsic_terminate_ray = nir_intrinsic_op.define('nir_intrinsic_terminate_ray', 715)
+nir_intrinsic_trace_ray = nir_intrinsic_op.define('nir_intrinsic_trace_ray', 716)
+nir_intrinsic_trace_ray_intel = nir_intrinsic_op.define('nir_intrinsic_trace_ray_intel', 717)
+nir_intrinsic_unit_test_amd = nir_intrinsic_op.define('nir_intrinsic_unit_test_amd', 718)
+nir_intrinsic_unit_test_divergent_amd = nir_intrinsic_op.define('nir_intrinsic_unit_test_divergent_amd', 719)
+nir_intrinsic_unit_test_uniform_amd = nir_intrinsic_op.define('nir_intrinsic_unit_test_uniform_amd', 720)
+nir_intrinsic_unpin_cx_handle_nv = nir_intrinsic_op.define('nir_intrinsic_unpin_cx_handle_nv', 721)
+nir_intrinsic_use = nir_intrinsic_op.define('nir_intrinsic_use', 722)
+nir_intrinsic_vild_nv = nir_intrinsic_op.define('nir_intrinsic_vild_nv', 723)
+nir_intrinsic_vote_all = nir_intrinsic_op.define('nir_intrinsic_vote_all', 724)
+nir_intrinsic_vote_any = nir_intrinsic_op.define('nir_intrinsic_vote_any', 725)
+nir_intrinsic_vote_feq = nir_intrinsic_op.define('nir_intrinsic_vote_feq', 726)
+nir_intrinsic_vote_ieq = nir_intrinsic_op.define('nir_intrinsic_vote_ieq', 727)
+nir_intrinsic_vulkan_resource_index = nir_intrinsic_op.define('nir_intrinsic_vulkan_resource_index', 728)
+nir_intrinsic_vulkan_resource_reindex = nir_intrinsic_op.define('nir_intrinsic_vulkan_resource_reindex', 729)
+nir_intrinsic_write_invocation_amd = nir_intrinsic_op.define('nir_intrinsic_write_invocation_amd', 730)
+nir_intrinsic_xfb_counter_sub_gfx11_amd = nir_intrinsic_op.define('nir_intrinsic_xfb_counter_sub_gfx11_amd', 731)
+nir_last_intrinsic = nir_intrinsic_op.define('nir_last_intrinsic', 731)
+nir_num_intrinsics = nir_intrinsic_op.define('nir_num_intrinsics', 732)
 
-nir_intrinsic_instr = struct_nir_intrinsic_instr
-nir_memory_semantics = CEnum(Annotated[int, ctypes.c_uint32])
-NIR_MEMORY_ACQUIRE = nir_memory_semantics.define('NIR_MEMORY_ACQUIRE', 1) # type: ignore
-NIR_MEMORY_RELEASE = nir_memory_semantics.define('NIR_MEMORY_RELEASE', 2) # type: ignore
-NIR_MEMORY_ACQ_REL = nir_memory_semantics.define('NIR_MEMORY_ACQ_REL', 3) # type: ignore
-NIR_MEMORY_MAKE_AVAILABLE = nir_memory_semantics.define('NIR_MEMORY_MAKE_AVAILABLE', 4) # type: ignore
-NIR_MEMORY_MAKE_VISIBLE = nir_memory_semantics.define('NIR_MEMORY_MAKE_VISIBLE', 8) # type: ignore
+nir_intrinsic_instr: TypeAlias = struct_nir_intrinsic_instr
+class nir_memory_semantics(Annotated[int, ctypes.c_uint32], c.Enum): pass
+NIR_MEMORY_ACQUIRE = nir_memory_semantics.define('NIR_MEMORY_ACQUIRE', 1)
+NIR_MEMORY_RELEASE = nir_memory_semantics.define('NIR_MEMORY_RELEASE', 2)
+NIR_MEMORY_ACQ_REL = nir_memory_semantics.define('NIR_MEMORY_ACQ_REL', 3)
+NIR_MEMORY_MAKE_AVAILABLE = nir_memory_semantics.define('NIR_MEMORY_MAKE_AVAILABLE', 4)
+NIR_MEMORY_MAKE_VISIBLE = nir_memory_semantics.define('NIR_MEMORY_MAKE_VISIBLE', 8)
 
-nir_intrinsic_semantic_flag = CEnum(Annotated[int, ctypes.c_uint32])
-NIR_INTRINSIC_CAN_ELIMINATE = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_CAN_ELIMINATE', 1) # type: ignore
-NIR_INTRINSIC_CAN_REORDER = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_CAN_REORDER', 2) # type: ignore
-NIR_INTRINSIC_SUBGROUP = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_SUBGROUP', 4) # type: ignore
-NIR_INTRINSIC_QUADGROUP = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_QUADGROUP', 8) # type: ignore
+class nir_intrinsic_semantic_flag(Annotated[int, ctypes.c_uint32], c.Enum): pass
+NIR_INTRINSIC_CAN_ELIMINATE = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_CAN_ELIMINATE', 1)
+NIR_INTRINSIC_CAN_REORDER = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_CAN_REORDER', 2)
+NIR_INTRINSIC_SUBGROUP = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_SUBGROUP', 4)
+NIR_INTRINSIC_QUADGROUP = nir_intrinsic_semantic_flag.define('NIR_INTRINSIC_QUADGROUP', 8)
 
 @c.record
 class struct_nir_io_semantics(c.Struct):
@@ -2955,7 +2955,7 @@ class struct_nir_io_semantics(c.Struct):
   no_sysval_output: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 5]
   interp_explicit_strict: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 6]
   _pad: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 7]
-nir_io_semantics = struct_nir_io_semantics
+nir_io_semantics: TypeAlias = struct_nir_io_semantics
 @c.record
 class struct_nir_io_xfb(c.Struct):
   SIZE = 4
@@ -2966,7 +2966,7 @@ class struct_nir_io_xfb_out(c.Struct):
   num_components: Annotated[uint8_t, 0, 4, 0]
   buffer: Annotated[uint8_t, 0, 4, 4]
   offset: Annotated[uint8_t, 1]
-nir_io_xfb = struct_nir_io_xfb
+nir_io_xfb: TypeAlias = struct_nir_io_xfb
 @dll.bind
 def nir_instr_xfb_write_mask(instr:c.POINTER[nir_intrinsic_instr]) -> Annotated[int, ctypes.c_uint32]: ...
 @c.record
@@ -2983,7 +2983,7 @@ class struct_nir_intrinsic_info(c.Struct):
   indices: Annotated[c.Array[uint8_t, Literal[8]], 25]
   index_map: Annotated[c.Array[uint8_t, Literal[75]], 33]
   flags: Annotated[nir_intrinsic_semantic_flag, 108]
-nir_intrinsic_info = struct_nir_intrinsic_info
+nir_intrinsic_info: TypeAlias = struct_nir_intrinsic_info
 try: nir_intrinsic_infos = c.Array[nir_intrinsic_info, Literal[732]].in_dll(dll, 'nir_intrinsic_infos')
 except (ValueError,AttributeError): pass
 @dll.bind
@@ -3004,31 +3004,31 @@ def nir_rewrite_image_intrinsic(instr:c.POINTER[nir_intrinsic_instr], handle:c.P
 def nir_intrinsic_can_reorder(instr:c.POINTER[nir_intrinsic_instr]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_intrinsic_writes_external_memory(instr:c.POINTER[nir_intrinsic_instr]) -> Annotated[bool, ctypes.c_bool]: ...
-enum_nir_tex_src_type = CEnum(Annotated[int, ctypes.c_uint32])
-nir_tex_src_coord = enum_nir_tex_src_type.define('nir_tex_src_coord', 0) # type: ignore
-nir_tex_src_projector = enum_nir_tex_src_type.define('nir_tex_src_projector', 1) # type: ignore
-nir_tex_src_comparator = enum_nir_tex_src_type.define('nir_tex_src_comparator', 2) # type: ignore
-nir_tex_src_offset = enum_nir_tex_src_type.define('nir_tex_src_offset', 3) # type: ignore
-nir_tex_src_bias = enum_nir_tex_src_type.define('nir_tex_src_bias', 4) # type: ignore
-nir_tex_src_lod = enum_nir_tex_src_type.define('nir_tex_src_lod', 5) # type: ignore
-nir_tex_src_min_lod = enum_nir_tex_src_type.define('nir_tex_src_min_lod', 6) # type: ignore
-nir_tex_src_lod_bias_min_agx = enum_nir_tex_src_type.define('nir_tex_src_lod_bias_min_agx', 7) # type: ignore
-nir_tex_src_ms_index = enum_nir_tex_src_type.define('nir_tex_src_ms_index', 8) # type: ignore
-nir_tex_src_ms_mcs_intel = enum_nir_tex_src_type.define('nir_tex_src_ms_mcs_intel', 9) # type: ignore
-nir_tex_src_ddx = enum_nir_tex_src_type.define('nir_tex_src_ddx', 10) # type: ignore
-nir_tex_src_ddy = enum_nir_tex_src_type.define('nir_tex_src_ddy', 11) # type: ignore
-nir_tex_src_texture_deref = enum_nir_tex_src_type.define('nir_tex_src_texture_deref', 12) # type: ignore
-nir_tex_src_sampler_deref = enum_nir_tex_src_type.define('nir_tex_src_sampler_deref', 13) # type: ignore
-nir_tex_src_texture_offset = enum_nir_tex_src_type.define('nir_tex_src_texture_offset', 14) # type: ignore
-nir_tex_src_sampler_offset = enum_nir_tex_src_type.define('nir_tex_src_sampler_offset', 15) # type: ignore
-nir_tex_src_texture_handle = enum_nir_tex_src_type.define('nir_tex_src_texture_handle', 16) # type: ignore
-nir_tex_src_sampler_handle = enum_nir_tex_src_type.define('nir_tex_src_sampler_handle', 17) # type: ignore
-nir_tex_src_sampler_deref_intrinsic = enum_nir_tex_src_type.define('nir_tex_src_sampler_deref_intrinsic', 18) # type: ignore
-nir_tex_src_texture_deref_intrinsic = enum_nir_tex_src_type.define('nir_tex_src_texture_deref_intrinsic', 19) # type: ignore
-nir_tex_src_plane = enum_nir_tex_src_type.define('nir_tex_src_plane', 20) # type: ignore
-nir_tex_src_backend1 = enum_nir_tex_src_type.define('nir_tex_src_backend1', 21) # type: ignore
-nir_tex_src_backend2 = enum_nir_tex_src_type.define('nir_tex_src_backend2', 22) # type: ignore
-nir_num_tex_src_types = enum_nir_tex_src_type.define('nir_num_tex_src_types', 23) # type: ignore
+class enum_nir_tex_src_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_tex_src_coord = enum_nir_tex_src_type.define('nir_tex_src_coord', 0)
+nir_tex_src_projector = enum_nir_tex_src_type.define('nir_tex_src_projector', 1)
+nir_tex_src_comparator = enum_nir_tex_src_type.define('nir_tex_src_comparator', 2)
+nir_tex_src_offset = enum_nir_tex_src_type.define('nir_tex_src_offset', 3)
+nir_tex_src_bias = enum_nir_tex_src_type.define('nir_tex_src_bias', 4)
+nir_tex_src_lod = enum_nir_tex_src_type.define('nir_tex_src_lod', 5)
+nir_tex_src_min_lod = enum_nir_tex_src_type.define('nir_tex_src_min_lod', 6)
+nir_tex_src_lod_bias_min_agx = enum_nir_tex_src_type.define('nir_tex_src_lod_bias_min_agx', 7)
+nir_tex_src_ms_index = enum_nir_tex_src_type.define('nir_tex_src_ms_index', 8)
+nir_tex_src_ms_mcs_intel = enum_nir_tex_src_type.define('nir_tex_src_ms_mcs_intel', 9)
+nir_tex_src_ddx = enum_nir_tex_src_type.define('nir_tex_src_ddx', 10)
+nir_tex_src_ddy = enum_nir_tex_src_type.define('nir_tex_src_ddy', 11)
+nir_tex_src_texture_deref = enum_nir_tex_src_type.define('nir_tex_src_texture_deref', 12)
+nir_tex_src_sampler_deref = enum_nir_tex_src_type.define('nir_tex_src_sampler_deref', 13)
+nir_tex_src_texture_offset = enum_nir_tex_src_type.define('nir_tex_src_texture_offset', 14)
+nir_tex_src_sampler_offset = enum_nir_tex_src_type.define('nir_tex_src_sampler_offset', 15)
+nir_tex_src_texture_handle = enum_nir_tex_src_type.define('nir_tex_src_texture_handle', 16)
+nir_tex_src_sampler_handle = enum_nir_tex_src_type.define('nir_tex_src_sampler_handle', 17)
+nir_tex_src_sampler_deref_intrinsic = enum_nir_tex_src_type.define('nir_tex_src_sampler_deref_intrinsic', 18)
+nir_tex_src_texture_deref_intrinsic = enum_nir_tex_src_type.define('nir_tex_src_texture_deref_intrinsic', 19)
+nir_tex_src_plane = enum_nir_tex_src_type.define('nir_tex_src_plane', 20)
+nir_tex_src_backend1 = enum_nir_tex_src_type.define('nir_tex_src_backend1', 21)
+nir_tex_src_backend2 = enum_nir_tex_src_type.define('nir_tex_src_backend2', 22)
+nir_num_tex_src_types = enum_nir_tex_src_type.define('nir_num_tex_src_types', 23)
 
 nir_tex_src_type: TypeAlias = enum_nir_tex_src_type
 @c.record
@@ -3036,33 +3036,33 @@ class struct_nir_tex_src(c.Struct):
   SIZE = 40
   src: Annotated[nir_src, 0]
   src_type: Annotated[nir_tex_src_type, 32]
-nir_tex_src = struct_nir_tex_src
-enum_nir_texop = CEnum(Annotated[int, ctypes.c_uint32])
-nir_texop_tex = enum_nir_texop.define('nir_texop_tex', 0) # type: ignore
-nir_texop_txb = enum_nir_texop.define('nir_texop_txb', 1) # type: ignore
-nir_texop_txl = enum_nir_texop.define('nir_texop_txl', 2) # type: ignore
-nir_texop_txd = enum_nir_texop.define('nir_texop_txd', 3) # type: ignore
-nir_texop_txf = enum_nir_texop.define('nir_texop_txf', 4) # type: ignore
-nir_texop_txf_ms = enum_nir_texop.define('nir_texop_txf_ms', 5) # type: ignore
-nir_texop_txf_ms_fb = enum_nir_texop.define('nir_texop_txf_ms_fb', 6) # type: ignore
-nir_texop_txf_ms_mcs_intel = enum_nir_texop.define('nir_texop_txf_ms_mcs_intel', 7) # type: ignore
-nir_texop_txs = enum_nir_texop.define('nir_texop_txs', 8) # type: ignore
-nir_texop_lod = enum_nir_texop.define('nir_texop_lod', 9) # type: ignore
-nir_texop_tg4 = enum_nir_texop.define('nir_texop_tg4', 10) # type: ignore
-nir_texop_query_levels = enum_nir_texop.define('nir_texop_query_levels', 11) # type: ignore
-nir_texop_texture_samples = enum_nir_texop.define('nir_texop_texture_samples', 12) # type: ignore
-nir_texop_samples_identical = enum_nir_texop.define('nir_texop_samples_identical', 13) # type: ignore
-nir_texop_tex_prefetch = enum_nir_texop.define('nir_texop_tex_prefetch', 14) # type: ignore
-nir_texop_lod_bias = enum_nir_texop.define('nir_texop_lod_bias', 15) # type: ignore
-nir_texop_fragment_fetch_amd = enum_nir_texop.define('nir_texop_fragment_fetch_amd', 16) # type: ignore
-nir_texop_fragment_mask_fetch_amd = enum_nir_texop.define('nir_texop_fragment_mask_fetch_amd', 17) # type: ignore
-nir_texop_descriptor_amd = enum_nir_texop.define('nir_texop_descriptor_amd', 18) # type: ignore
-nir_texop_sampler_descriptor_amd = enum_nir_texop.define('nir_texop_sampler_descriptor_amd', 19) # type: ignore
-nir_texop_image_min_lod_agx = enum_nir_texop.define('nir_texop_image_min_lod_agx', 20) # type: ignore
-nir_texop_has_custom_border_color_agx = enum_nir_texop.define('nir_texop_has_custom_border_color_agx', 21) # type: ignore
-nir_texop_custom_border_color_agx = enum_nir_texop.define('nir_texop_custom_border_color_agx', 22) # type: ignore
-nir_texop_hdr_dim_nv = enum_nir_texop.define('nir_texop_hdr_dim_nv', 23) # type: ignore
-nir_texop_tex_type_nv = enum_nir_texop.define('nir_texop_tex_type_nv', 24) # type: ignore
+nir_tex_src: TypeAlias = struct_nir_tex_src
+class enum_nir_texop(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_texop_tex = enum_nir_texop.define('nir_texop_tex', 0)
+nir_texop_txb = enum_nir_texop.define('nir_texop_txb', 1)
+nir_texop_txl = enum_nir_texop.define('nir_texop_txl', 2)
+nir_texop_txd = enum_nir_texop.define('nir_texop_txd', 3)
+nir_texop_txf = enum_nir_texop.define('nir_texop_txf', 4)
+nir_texop_txf_ms = enum_nir_texop.define('nir_texop_txf_ms', 5)
+nir_texop_txf_ms_fb = enum_nir_texop.define('nir_texop_txf_ms_fb', 6)
+nir_texop_txf_ms_mcs_intel = enum_nir_texop.define('nir_texop_txf_ms_mcs_intel', 7)
+nir_texop_txs = enum_nir_texop.define('nir_texop_txs', 8)
+nir_texop_lod = enum_nir_texop.define('nir_texop_lod', 9)
+nir_texop_tg4 = enum_nir_texop.define('nir_texop_tg4', 10)
+nir_texop_query_levels = enum_nir_texop.define('nir_texop_query_levels', 11)
+nir_texop_texture_samples = enum_nir_texop.define('nir_texop_texture_samples', 12)
+nir_texop_samples_identical = enum_nir_texop.define('nir_texop_samples_identical', 13)
+nir_texop_tex_prefetch = enum_nir_texop.define('nir_texop_tex_prefetch', 14)
+nir_texop_lod_bias = enum_nir_texop.define('nir_texop_lod_bias', 15)
+nir_texop_fragment_fetch_amd = enum_nir_texop.define('nir_texop_fragment_fetch_amd', 16)
+nir_texop_fragment_mask_fetch_amd = enum_nir_texop.define('nir_texop_fragment_mask_fetch_amd', 17)
+nir_texop_descriptor_amd = enum_nir_texop.define('nir_texop_descriptor_amd', 18)
+nir_texop_sampler_descriptor_amd = enum_nir_texop.define('nir_texop_sampler_descriptor_amd', 19)
+nir_texop_image_min_lod_agx = enum_nir_texop.define('nir_texop_image_min_lod_agx', 20)
+nir_texop_has_custom_border_color_agx = enum_nir_texop.define('nir_texop_has_custom_border_color_agx', 21)
+nir_texop_custom_border_color_agx = enum_nir_texop.define('nir_texop_custom_border_color_agx', 22)
+nir_texop_hdr_dim_nv = enum_nir_texop.define('nir_texop_hdr_dim_nv', 23)
+nir_texop_tex_type_nv = enum_nir_texop.define('nir_texop_tex_type_nv', 24)
 
 nir_texop: TypeAlias = enum_nir_texop
 @c.record
@@ -3091,19 +3091,19 @@ class struct_nir_tex_instr(c.Struct):
   texture_index: Annotated[Annotated[int, ctypes.c_uint32], 112]
   sampler_index: Annotated[Annotated[int, ctypes.c_uint32], 116]
   backend_flags: Annotated[uint32_t, 120]
-enum_glsl_sampler_dim = CEnum(Annotated[int, ctypes.c_uint32])
-GLSL_SAMPLER_DIM_1D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_1D', 0) # type: ignore
-GLSL_SAMPLER_DIM_2D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_2D', 1) # type: ignore
-GLSL_SAMPLER_DIM_3D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_3D', 2) # type: ignore
-GLSL_SAMPLER_DIM_CUBE = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_CUBE', 3) # type: ignore
-GLSL_SAMPLER_DIM_RECT = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_RECT', 4) # type: ignore
-GLSL_SAMPLER_DIM_BUF = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_BUF', 5) # type: ignore
-GLSL_SAMPLER_DIM_EXTERNAL = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_EXTERNAL', 6) # type: ignore
-GLSL_SAMPLER_DIM_MS = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_MS', 7) # type: ignore
-GLSL_SAMPLER_DIM_SUBPASS = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_SUBPASS', 8) # type: ignore
-GLSL_SAMPLER_DIM_SUBPASS_MS = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_SUBPASS_MS', 9) # type: ignore
+class enum_glsl_sampler_dim(Annotated[int, ctypes.c_uint32], c.Enum): pass
+GLSL_SAMPLER_DIM_1D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_1D', 0)
+GLSL_SAMPLER_DIM_2D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_2D', 1)
+GLSL_SAMPLER_DIM_3D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_3D', 2)
+GLSL_SAMPLER_DIM_CUBE = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_CUBE', 3)
+GLSL_SAMPLER_DIM_RECT = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_RECT', 4)
+GLSL_SAMPLER_DIM_BUF = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_BUF', 5)
+GLSL_SAMPLER_DIM_EXTERNAL = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_EXTERNAL', 6)
+GLSL_SAMPLER_DIM_MS = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_MS', 7)
+GLSL_SAMPLER_DIM_SUBPASS = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_SUBPASS', 8)
+GLSL_SAMPLER_DIM_SUBPASS_MS = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_SUBPASS_MS', 9)
 
-nir_tex_instr = struct_nir_tex_instr
+nir_tex_instr: TypeAlias = struct_nir_tex_instr
 @dll.bind
 def nir_tex_instr_need_sampler(instr:c.POINTER[nir_tex_instr]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -3128,14 +3128,14 @@ class struct_nir_load_const_instr(c.Struct):
   instr: Annotated[nir_instr, 0]
   _def: Annotated[nir_def, 32]
   value: Annotated[c.Array[nir_const_value, Literal[0]], 64]
-nir_load_const_instr = struct_nir_load_const_instr
-nir_jump_type = CEnum(Annotated[int, ctypes.c_uint32])
-nir_jump_return = nir_jump_type.define('nir_jump_return', 0) # type: ignore
-nir_jump_halt = nir_jump_type.define('nir_jump_halt', 1) # type: ignore
-nir_jump_break = nir_jump_type.define('nir_jump_break', 2) # type: ignore
-nir_jump_continue = nir_jump_type.define('nir_jump_continue', 3) # type: ignore
-nir_jump_goto = nir_jump_type.define('nir_jump_goto', 4) # type: ignore
-nir_jump_goto_if = nir_jump_type.define('nir_jump_goto_if', 5) # type: ignore
+nir_load_const_instr: TypeAlias = struct_nir_load_const_instr
+class nir_jump_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_jump_return = nir_jump_type.define('nir_jump_return', 0)
+nir_jump_halt = nir_jump_type.define('nir_jump_halt', 1)
+nir_jump_break = nir_jump_type.define('nir_jump_break', 2)
+nir_jump_continue = nir_jump_type.define('nir_jump_continue', 3)
+nir_jump_goto = nir_jump_type.define('nir_jump_goto', 4)
+nir_jump_goto_if = nir_jump_type.define('nir_jump_goto_if', 5)
 
 @c.record
 class struct_nir_jump_instr(c.Struct):
@@ -3145,27 +3145,27 @@ class struct_nir_jump_instr(c.Struct):
   condition: Annotated[nir_src, 40]
   target: Annotated[c.POINTER[nir_block], 72]
   else_target: Annotated[c.POINTER[nir_block], 80]
-nir_jump_instr = struct_nir_jump_instr
+nir_jump_instr: TypeAlias = struct_nir_jump_instr
 @c.record
 class struct_nir_undef_instr(c.Struct):
   SIZE = 64
   instr: Annotated[nir_instr, 0]
   _def: Annotated[nir_def, 32]
-nir_undef_instr = struct_nir_undef_instr
+nir_undef_instr: TypeAlias = struct_nir_undef_instr
 @c.record
 class struct_nir_phi_src(c.Struct):
   SIZE = 56
   node: Annotated[struct_exec_node, 0]
   pred: Annotated[c.POINTER[nir_block], 16]
   src: Annotated[nir_src, 24]
-nir_phi_src = struct_nir_phi_src
+nir_phi_src: TypeAlias = struct_nir_phi_src
 @c.record
 class struct_nir_phi_instr(c.Struct):
   SIZE = 96
   instr: Annotated[nir_instr, 0]
   srcs: Annotated[struct_exec_list, 32]
   _def: Annotated[nir_def, 64]
-nir_phi_instr = struct_nir_phi_instr
+nir_phi_instr: TypeAlias = struct_nir_phi_instr
 @c.record
 class struct_nir_parallel_copy_entry(c.Struct):
   SIZE = 88
@@ -3179,13 +3179,13 @@ class struct_nir_parallel_copy_entry_dest(c.Struct):
   SIZE = 32
   _def: Annotated[nir_def, 0]
   reg: Annotated[nir_src, 0]
-nir_parallel_copy_entry = struct_nir_parallel_copy_entry
+nir_parallel_copy_entry: TypeAlias = struct_nir_parallel_copy_entry
 @c.record
 class struct_nir_parallel_copy_instr(c.Struct):
   SIZE = 64
   instr: Annotated[nir_instr, 0]
   entries: Annotated[struct_exec_list, 32]
-nir_parallel_copy_instr = struct_nir_parallel_copy_instr
+nir_parallel_copy_instr: TypeAlias = struct_nir_parallel_copy_instr
 @c.record
 class struct_nir_instr_debug_info(c.Struct):
   SIZE = 64
@@ -3196,13 +3196,13 @@ class struct_nir_instr_debug_info(c.Struct):
   nir_line: Annotated[uint32_t, 20]
   variable_name: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 24]
   instr: Annotated[nir_instr, 32]
-nir_instr_debug_info = struct_nir_instr_debug_info
+nir_instr_debug_info: TypeAlias = struct_nir_instr_debug_info
 @c.record
 class struct_nir_scalar(c.Struct):
   SIZE = 16
   _def: Annotated[c.POINTER[nir_def], 0]
   comp: Annotated[Annotated[int, ctypes.c_uint32], 8]
-nir_scalar = struct_nir_scalar
+nir_scalar: TypeAlias = struct_nir_scalar
 @dll.bind
 def nir_scalar_chase_movs(s:nir_scalar) -> nir_scalar: ...
 @c.record
@@ -3215,18 +3215,18 @@ class struct_nir_binding(c.Struct):
   num_indices: Annotated[Annotated[int, ctypes.c_uint32], 24]
   indices: Annotated[c.Array[nir_src, Literal[4]], 32]
   read_first_invocation: Annotated[Annotated[bool, ctypes.c_bool], 160]
-nir_binding = struct_nir_binding
+nir_binding: TypeAlias = struct_nir_binding
 @dll.bind
 def nir_chase_binding(rsrc:nir_src) -> nir_binding: ...
 @dll.bind
 def nir_get_binding_variable(shader:c.POINTER[nir_shader], binding:nir_binding) -> c.POINTER[nir_variable]: ...
 @dll.bind
 def nir_block_contains_work(block:c.POINTER[nir_block]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_selection_control = CEnum(Annotated[int, ctypes.c_uint32])
-nir_selection_control_none = nir_selection_control.define('nir_selection_control_none', 0) # type: ignore
-nir_selection_control_flatten = nir_selection_control.define('nir_selection_control_flatten', 1) # type: ignore
-nir_selection_control_dont_flatten = nir_selection_control.define('nir_selection_control_dont_flatten', 2) # type: ignore
-nir_selection_control_divergent_always_taken = nir_selection_control.define('nir_selection_control_divergent_always_taken', 3) # type: ignore
+class nir_selection_control(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_selection_control_none = nir_selection_control.define('nir_selection_control_none', 0)
+nir_selection_control_flatten = nir_selection_control.define('nir_selection_control_flatten', 1)
+nir_selection_control_dont_flatten = nir_selection_control.define('nir_selection_control_dont_flatten', 2)
+nir_selection_control_divergent_always_taken = nir_selection_control.define('nir_selection_control_divergent_always_taken', 3)
 
 @c.record
 class struct_nir_if(c.Struct):
@@ -3236,7 +3236,7 @@ class struct_nir_if(c.Struct):
   control: Annotated[nir_selection_control, 64]
   then_list: Annotated[struct_exec_list, 72]
   else_list: Annotated[struct_exec_list, 104]
-nir_if = struct_nir_if
+nir_if: TypeAlias = struct_nir_if
 @c.record
 class struct_nir_loop_terminator(c.Struct):
   SIZE = 56
@@ -3248,7 +3248,7 @@ class struct_nir_loop_terminator(c.Struct):
   induction_rhs: Annotated[Annotated[bool, ctypes.c_bool], 33]
   exact_trip_count_unknown: Annotated[Annotated[bool, ctypes.c_bool], 34]
   loop_terminator_link: Annotated[struct_list_head, 40]
-nir_loop_terminator = struct_nir_loop_terminator
+nir_loop_terminator: TypeAlias = struct_nir_loop_terminator
 @c.record
 class struct_nir_loop_induction_variable(c.Struct):
   SIZE = 32
@@ -3256,7 +3256,7 @@ class struct_nir_loop_induction_variable(c.Struct):
   _def: Annotated[c.POINTER[nir_def], 8]
   init_src: Annotated[c.POINTER[nir_src], 16]
   update_src: Annotated[c.POINTER[nir_alu_src], 24]
-nir_loop_induction_variable = struct_nir_loop_induction_variable
+nir_loop_induction_variable: TypeAlias = struct_nir_loop_induction_variable
 @c.record
 class struct_nir_loop_info(c.Struct):
   SIZE = 56
@@ -3291,11 +3291,11 @@ class struct_hash_entry(c.Struct):
   hash: Annotated[uint32_t, 0]
   key: Annotated[c.POINTER[None], 8]
   data: Annotated[c.POINTER[None], 16]
-nir_loop_info = struct_nir_loop_info
-nir_loop_control = CEnum(Annotated[int, ctypes.c_uint32])
-nir_loop_control_none = nir_loop_control.define('nir_loop_control_none', 0) # type: ignore
-nir_loop_control_unroll = nir_loop_control.define('nir_loop_control_unroll', 1) # type: ignore
-nir_loop_control_dont_unroll = nir_loop_control.define('nir_loop_control_dont_unroll', 2) # type: ignore
+nir_loop_info: TypeAlias = struct_nir_loop_info
+class nir_loop_control(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_loop_control_none = nir_loop_control.define('nir_loop_control_none', 0)
+nir_loop_control_unroll = nir_loop_control.define('nir_loop_control_unroll', 1)
+nir_loop_control_dont_unroll = nir_loop_control.define('nir_loop_control_dont_unroll', 2)
 
 @c.record
 class struct_nir_loop(c.Struct):
@@ -3308,9 +3308,9 @@ class struct_nir_loop(c.Struct):
   partially_unrolled: Annotated[Annotated[bool, ctypes.c_bool], 108]
   divergent_continue: Annotated[Annotated[bool, ctypes.c_bool], 109]
   divergent_break: Annotated[Annotated[bool, ctypes.c_bool], 110]
-nir_loop = struct_nir_loop
-nir_intrin_filter_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None])
-nir_vectorize_cb = c.CFUNCTYPE(Annotated[int, ctypes.c_ubyte], c.POINTER[struct_nir_instr], c.POINTER[None])
+nir_loop: TypeAlias = struct_nir_loop
+nir_intrin_filter_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None])
+nir_vectorize_cb: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_ubyte], c.POINTER[struct_nir_instr], c.POINTER[None])
 @dll.bind
 def nir_remove_non_entrypoints(shader:c.POINTER[nir_shader]) -> None: ...
 @dll.bind
@@ -3319,7 +3319,7 @@ def nir_remove_non_exported(shader:c.POINTER[nir_shader]) -> None: ...
 def nir_remove_entrypoints(shader:c.POINTER[nir_shader]) -> None: ...
 @dll.bind
 def nir_fixup_is_exported(shader:c.POINTER[nir_shader]) -> None: ...
-shader_info = struct_shader_info
+shader_info: TypeAlias = struct_shader_info
 @dll.bind
 def nir_shader_create(mem_ctx:c.POINTER[None], stage:gl_shader_stage, options:c.POINTER[nir_shader_compiler_options], si:c.POINTER[shader_info]) -> c.POINTER[nir_shader]: ...
 @dll.bind
@@ -3390,11 +3390,11 @@ def nir_parallel_copy_instr_create(shader:c.POINTER[nir_shader]) -> c.POINTER[ni
 def nir_undef_instr_create(shader:c.POINTER[nir_shader], num_components:Annotated[int, ctypes.c_uint32], bit_size:Annotated[int, ctypes.c_uint32]) -> c.POINTER[nir_undef_instr]: ...
 @dll.bind
 def nir_alu_binop_identity(binop:nir_op, bit_size:Annotated[int, ctypes.c_uint32]) -> nir_const_value: ...
-nir_cursor_option = CEnum(Annotated[int, ctypes.c_uint32])
-nir_cursor_before_block = nir_cursor_option.define('nir_cursor_before_block', 0) # type: ignore
-nir_cursor_after_block = nir_cursor_option.define('nir_cursor_after_block', 1) # type: ignore
-nir_cursor_before_instr = nir_cursor_option.define('nir_cursor_before_instr', 2) # type: ignore
-nir_cursor_after_instr = nir_cursor_option.define('nir_cursor_after_instr', 3) # type: ignore
+class nir_cursor_option(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_cursor_before_block = nir_cursor_option.define('nir_cursor_before_block', 0)
+nir_cursor_after_block = nir_cursor_option.define('nir_cursor_after_block', 1)
+nir_cursor_before_instr = nir_cursor_option.define('nir_cursor_before_instr', 2)
+nir_cursor_after_instr = nir_cursor_option.define('nir_cursor_after_instr', 3)
 
 @c.record
 class struct_nir_cursor(c.Struct):
@@ -3402,7 +3402,7 @@ class struct_nir_cursor(c.Struct):
   option: Annotated[nir_cursor_option, 0]
   block: Annotated[c.POINTER[nir_block], 8]
   instr: Annotated[c.POINTER[nir_instr], 8]
-nir_cursor = struct_nir_cursor
+nir_cursor: TypeAlias = struct_nir_cursor
 @dll.bind
 def nir_cursors_equal(a:nir_cursor, b:nir_cursor) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -3419,8 +3419,8 @@ def nir_instr_free_list(list:c.POINTER[struct_exec_list]) -> None: ...
 def nir_instr_free_and_dce(instr:c.POINTER[nir_instr]) -> nir_cursor: ...
 @dll.bind
 def nir_instr_def(instr:c.POINTER[nir_instr]) -> c.POINTER[nir_def]: ...
-nir_foreach_def_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_def], c.POINTER[None])
-nir_foreach_src_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_src], c.POINTER[None])
+nir_foreach_def_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_def], c.POINTER[None])
+nir_foreach_src_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_src], c.POINTER[None])
 @dll.bind
 def nir_foreach_phi_src_leaving_block(instr:c.POINTER[nir_block], cb:nir_foreach_src_cb, state:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -3529,12 +3529,12 @@ class struct__IO_FILE(c.Struct):
   _unused2: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[20]], 196]
 FILE: TypeAlias = struct__IO_FILE
 class struct__IO_marker(ctypes.Structure): pass
-__off_t = Annotated[int, ctypes.c_int64]
-_IO_lock_t = None
-__off64_t = Annotated[int, ctypes.c_int64]
+__off_t: TypeAlias = Annotated[int, ctypes.c_int64]
+_IO_lock_t: TypeAlias = None
+__off64_t: TypeAlias = Annotated[int, ctypes.c_int64]
 class struct__IO_codecvt(ctypes.Structure): pass
 class struct__IO_wide_data(ctypes.Structure): pass
-size_t = Annotated[int, ctypes.c_uint64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def nir_print_shader(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE]) -> None: ...
 @dll.bind
@@ -3545,11 +3545,11 @@ def nir_print_shader_annotated(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE],
 def nir_print_instr(instr:c.POINTER[nir_instr], fp:c.POINTER[FILE]) -> None: ...
 @dll.bind
 def nir_print_deref(deref:c.POINTER[nir_deref_instr], fp:c.POINTER[FILE]) -> None: ...
-enum_mesa_log_level = CEnum(Annotated[int, ctypes.c_uint32])
-MESA_LOG_ERROR = enum_mesa_log_level.define('MESA_LOG_ERROR', 0) # type: ignore
-MESA_LOG_WARN = enum_mesa_log_level.define('MESA_LOG_WARN', 1) # type: ignore
-MESA_LOG_INFO = enum_mesa_log_level.define('MESA_LOG_INFO', 2) # type: ignore
-MESA_LOG_DEBUG = enum_mesa_log_level.define('MESA_LOG_DEBUG', 3) # type: ignore
+class enum_mesa_log_level(Annotated[int, ctypes.c_uint32], c.Enum): pass
+MESA_LOG_ERROR = enum_mesa_log_level.define('MESA_LOG_ERROR', 0)
+MESA_LOG_WARN = enum_mesa_log_level.define('MESA_LOG_WARN', 1)
+MESA_LOG_INFO = enum_mesa_log_level.define('MESA_LOG_INFO', 2)
+MESA_LOG_DEBUG = enum_mesa_log_level.define('MESA_LOG_DEBUG', 3)
 
 @dll.bind
 def nir_log_shader_annotated_tagged(level:enum_mesa_log_level, tag:c.POINTER[Annotated[bytes, ctypes.c_char]], shader:c.POINTER[nir_shader], annotations:c.POINTER[struct_hash_table]) -> None: ...
@@ -3593,7 +3593,7 @@ def nir_metadata_set_validation_flag(shader:c.POINTER[nir_shader]) -> None: ...
 def nir_metadata_check_validation_flag(shader:c.POINTER[nir_shader]) -> None: ...
 @dll.bind
 def nir_metadata_require_all(shader:c.POINTER[nir_shader]) -> None: ...
-nir_instr_writemask_filter_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_instr], Annotated[int, ctypes.c_uint32], c.POINTER[None])
+nir_instr_writemask_filter_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_instr], Annotated[int, ctypes.c_uint32], c.POINTER[None])
 @c.record
 class struct_nir_builder(c.Struct):
   SIZE = 40
@@ -3602,7 +3602,7 @@ class struct_nir_builder(c.Struct):
   fp_fast_math: Annotated[uint32_t, 20]
   shader: Annotated[c.POINTER[nir_shader], 24]
   impl: Annotated[c.POINTER[nir_function_impl], 32]
-nir_lower_instr_cb = c.CFUNCTYPE(c.POINTER[struct_nir_def], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], c.POINTER[None])
+nir_lower_instr_cb: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_nir_def], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], c.POINTER[None])
 @dll.bind
 def nir_function_impl_lower_instructions(impl:c.POINTER[nir_function_impl], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -3631,9 +3631,9 @@ def nir_dump_cfg_impl(impl:c.POINTER[nir_function_impl], fp:c.POINTER[FILE]) -> 
 def nir_dump_cfg(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE]) -> None: ...
 @dll.bind
 def nir_gs_count_vertices_and_primitives(shader:c.POINTER[nir_shader], out_vtxcnt:c.POINTER[Annotated[int, ctypes.c_int32]], out_prmcnt:c.POINTER[Annotated[int, ctypes.c_int32]], out_decomposed_prmcnt:c.POINTER[Annotated[int, ctypes.c_int32]], num_streams:Annotated[int, ctypes.c_uint32]) -> None: ...
-nir_load_grouping = CEnum(Annotated[int, ctypes.c_uint32])
-nir_group_all = nir_load_grouping.define('nir_group_all', 0) # type: ignore
-nir_group_same_resource_only = nir_load_grouping.define('nir_group_same_resource_only', 1) # type: ignore
+class nir_load_grouping(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_group_all = nir_load_grouping.define('nir_group_all', 0)
+nir_group_same_resource_only = nir_load_grouping.define('nir_group_same_resource_only', 1)
 
 @dll.bind
 def nir_group_loads(shader:c.POINTER[nir_shader], grouping:nir_load_grouping, max_distance:Annotated[int, ctypes.c_uint32]) -> Annotated[bool, ctypes.c_bool]: ...
@@ -3651,7 +3651,7 @@ def nir_split_struct_vars(shader:c.POINTER[nir_shader], modes:nir_variable_mode)
 def nir_lower_returns_impl(impl:c.POINTER[nir_function_impl]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_returns(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_builder = struct_nir_builder
+nir_builder: TypeAlias = struct_nir_builder
 @dll.bind
 def nir_inline_function_impl(b:c.POINTER[nir_builder], impl:c.POINTER[nir_function_impl], params:c.POINTER[c.POINTER[nir_def]], shader_var_remap:c.POINTER[struct_hash_table]) -> c.POINTER[nir_def]: ...
 @dll.bind
@@ -3690,11 +3690,11 @@ def nir_fixup_deref_types(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctype
 def nir_lower_global_vars_to_local(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_constant_to_temp(shader:c.POINTER[nir_shader]) -> None: ...
-nir_lower_array_deref_of_vec_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_direct_array_deref_of_vec_load = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_load', 1) # type: ignore
-nir_lower_indirect_array_deref_of_vec_load = nir_lower_array_deref_of_vec_options.define('nir_lower_indirect_array_deref_of_vec_load', 2) # type: ignore
-nir_lower_direct_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_store', 4) # type: ignore
-nir_lower_indirect_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_indirect_array_deref_of_vec_store', 8) # type: ignore
+class nir_lower_array_deref_of_vec_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_direct_array_deref_of_vec_load = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_load', 1)
+nir_lower_indirect_array_deref_of_vec_load = nir_lower_array_deref_of_vec_options.define('nir_lower_indirect_array_deref_of_vec_load', 2)
+nir_lower_direct_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_store', 4)
+nir_lower_indirect_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_indirect_array_deref_of_vec_store', 8)
 
 @dll.bind
 def nir_lower_array_deref_of_vec(shader:c.POINTER[nir_shader], modes:nir_variable_mode, filter:c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[nir_variable]), options:nir_lower_array_deref_of_vec_options) -> Annotated[bool, ctypes.c_bool]: ...
@@ -3706,7 +3706,7 @@ def nir_lower_indirect_var_derefs(shader:c.POINTER[nir_shader], vars:c.POINTER[s
 def nir_lower_locals_to_regs(shader:c.POINTER[nir_shader], bool_bitsize:uint8_t) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_io_vars_to_temporaries(shader:c.POINTER[nir_shader], entrypoint:c.POINTER[nir_function_impl], outputs:Annotated[bool, ctypes.c_bool], inputs:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
-glsl_type_size_align_func = c.CFUNCTYPE(None, c.POINTER[struct_glsl_type], c.POINTER[Annotated[int, ctypes.c_uint32]], c.POINTER[Annotated[int, ctypes.c_uint32]])
+glsl_type_size_align_func: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_glsl_type], c.POINTER[Annotated[int, ctypes.c_uint32]], c.POINTER[Annotated[int, ctypes.c_uint32]])
 @dll.bind
 def nir_lower_vars_to_scratch(shader:c.POINTER[nir_shader], modes:nir_variable_mode, size_threshold:Annotated[int, ctypes.c_int32], variable_size_align:glsl_type_size_align_func, scratch_layout_size_align:glsl_type_size_align_func) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -3733,131 +3733,131 @@ def nir_link_varying_precision(producer:c.POINTER[nir_shader], consumer:c.POINTE
 def nir_clone_uniform_variable(nir:c.POINTER[nir_shader], uniform:c.POINTER[nir_variable], spirv:Annotated[bool, ctypes.c_bool]) -> c.POINTER[nir_variable]: ...
 @dll.bind
 def nir_clone_deref_instr(b:c.POINTER[nir_builder], var:c.POINTER[nir_variable], deref:c.POINTER[nir_deref_instr]) -> c.POINTER[nir_deref_instr]: ...
-nir_opt_varyings_progress = CEnum(Annotated[int, ctypes.c_uint32])
-nir_progress_producer = nir_opt_varyings_progress.define('nir_progress_producer', 1) # type: ignore
-nir_progress_consumer = nir_opt_varyings_progress.define('nir_progress_consumer', 2) # type: ignore
+class nir_opt_varyings_progress(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_progress_producer = nir_opt_varyings_progress.define('nir_progress_producer', 1)
+nir_progress_consumer = nir_opt_varyings_progress.define('nir_progress_consumer', 2)
 
 @dll.bind
 def nir_opt_varyings(producer:c.POINTER[nir_shader], consumer:c.POINTER[nir_shader], spirv:Annotated[bool, ctypes.c_bool], max_uniform_components:Annotated[int, ctypes.c_uint32], max_ubos_per_stage:Annotated[int, ctypes.c_uint32], debug_no_algebraic:Annotated[bool, ctypes.c_bool]) -> nir_opt_varyings_progress: ...
-gl_varying_slot = CEnum(Annotated[int, ctypes.c_uint32])
-VARYING_SLOT_POS = gl_varying_slot.define('VARYING_SLOT_POS', 0) # type: ignore
-VARYING_SLOT_COL0 = gl_varying_slot.define('VARYING_SLOT_COL0', 1) # type: ignore
-VARYING_SLOT_COL1 = gl_varying_slot.define('VARYING_SLOT_COL1', 2) # type: ignore
-VARYING_SLOT_FOGC = gl_varying_slot.define('VARYING_SLOT_FOGC', 3) # type: ignore
-VARYING_SLOT_TEX0 = gl_varying_slot.define('VARYING_SLOT_TEX0', 4) # type: ignore
-VARYING_SLOT_TEX1 = gl_varying_slot.define('VARYING_SLOT_TEX1', 5) # type: ignore
-VARYING_SLOT_TEX2 = gl_varying_slot.define('VARYING_SLOT_TEX2', 6) # type: ignore
-VARYING_SLOT_TEX3 = gl_varying_slot.define('VARYING_SLOT_TEX3', 7) # type: ignore
-VARYING_SLOT_TEX4 = gl_varying_slot.define('VARYING_SLOT_TEX4', 8) # type: ignore
-VARYING_SLOT_TEX5 = gl_varying_slot.define('VARYING_SLOT_TEX5', 9) # type: ignore
-VARYING_SLOT_TEX6 = gl_varying_slot.define('VARYING_SLOT_TEX6', 10) # type: ignore
-VARYING_SLOT_TEX7 = gl_varying_slot.define('VARYING_SLOT_TEX7', 11) # type: ignore
-VARYING_SLOT_PSIZ = gl_varying_slot.define('VARYING_SLOT_PSIZ', 12) # type: ignore
-VARYING_SLOT_BFC0 = gl_varying_slot.define('VARYING_SLOT_BFC0', 13) # type: ignore
-VARYING_SLOT_BFC1 = gl_varying_slot.define('VARYING_SLOT_BFC1', 14) # type: ignore
-VARYING_SLOT_EDGE = gl_varying_slot.define('VARYING_SLOT_EDGE', 15) # type: ignore
-VARYING_SLOT_CLIP_VERTEX = gl_varying_slot.define('VARYING_SLOT_CLIP_VERTEX', 16) # type: ignore
-VARYING_SLOT_CLIP_DIST0 = gl_varying_slot.define('VARYING_SLOT_CLIP_DIST0', 17) # type: ignore
-VARYING_SLOT_CLIP_DIST1 = gl_varying_slot.define('VARYING_SLOT_CLIP_DIST1', 18) # type: ignore
-VARYING_SLOT_CULL_DIST0 = gl_varying_slot.define('VARYING_SLOT_CULL_DIST0', 19) # type: ignore
-VARYING_SLOT_CULL_DIST1 = gl_varying_slot.define('VARYING_SLOT_CULL_DIST1', 20) # type: ignore
-VARYING_SLOT_PRIMITIVE_ID = gl_varying_slot.define('VARYING_SLOT_PRIMITIVE_ID', 21) # type: ignore
-VARYING_SLOT_LAYER = gl_varying_slot.define('VARYING_SLOT_LAYER', 22) # type: ignore
-VARYING_SLOT_VIEWPORT = gl_varying_slot.define('VARYING_SLOT_VIEWPORT', 23) # type: ignore
-VARYING_SLOT_FACE = gl_varying_slot.define('VARYING_SLOT_FACE', 24) # type: ignore
-VARYING_SLOT_PNTC = gl_varying_slot.define('VARYING_SLOT_PNTC', 25) # type: ignore
-VARYING_SLOT_TESS_LEVEL_OUTER = gl_varying_slot.define('VARYING_SLOT_TESS_LEVEL_OUTER', 26) # type: ignore
-VARYING_SLOT_TESS_LEVEL_INNER = gl_varying_slot.define('VARYING_SLOT_TESS_LEVEL_INNER', 27) # type: ignore
-VARYING_SLOT_BOUNDING_BOX0 = gl_varying_slot.define('VARYING_SLOT_BOUNDING_BOX0', 28) # type: ignore
-VARYING_SLOT_BOUNDING_BOX1 = gl_varying_slot.define('VARYING_SLOT_BOUNDING_BOX1', 29) # type: ignore
-VARYING_SLOT_VIEW_INDEX = gl_varying_slot.define('VARYING_SLOT_VIEW_INDEX', 30) # type: ignore
-VARYING_SLOT_VIEWPORT_MASK = gl_varying_slot.define('VARYING_SLOT_VIEWPORT_MASK', 31) # type: ignore
-VARYING_SLOT_PRIMITIVE_SHADING_RATE = gl_varying_slot.define('VARYING_SLOT_PRIMITIVE_SHADING_RATE', 24) # type: ignore
-VARYING_SLOT_PRIMITIVE_COUNT = gl_varying_slot.define('VARYING_SLOT_PRIMITIVE_COUNT', 26) # type: ignore
-VARYING_SLOT_PRIMITIVE_INDICES = gl_varying_slot.define('VARYING_SLOT_PRIMITIVE_INDICES', 27) # type: ignore
-VARYING_SLOT_TASK_COUNT = gl_varying_slot.define('VARYING_SLOT_TASK_COUNT', 28) # type: ignore
-VARYING_SLOT_CULL_PRIMITIVE = gl_varying_slot.define('VARYING_SLOT_CULL_PRIMITIVE', 28) # type: ignore
-VARYING_SLOT_VAR0 = gl_varying_slot.define('VARYING_SLOT_VAR0', 32) # type: ignore
-VARYING_SLOT_VAR1 = gl_varying_slot.define('VARYING_SLOT_VAR1', 33) # type: ignore
-VARYING_SLOT_VAR2 = gl_varying_slot.define('VARYING_SLOT_VAR2', 34) # type: ignore
-VARYING_SLOT_VAR3 = gl_varying_slot.define('VARYING_SLOT_VAR3', 35) # type: ignore
-VARYING_SLOT_VAR4 = gl_varying_slot.define('VARYING_SLOT_VAR4', 36) # type: ignore
-VARYING_SLOT_VAR5 = gl_varying_slot.define('VARYING_SLOT_VAR5', 37) # type: ignore
-VARYING_SLOT_VAR6 = gl_varying_slot.define('VARYING_SLOT_VAR6', 38) # type: ignore
-VARYING_SLOT_VAR7 = gl_varying_slot.define('VARYING_SLOT_VAR7', 39) # type: ignore
-VARYING_SLOT_VAR8 = gl_varying_slot.define('VARYING_SLOT_VAR8', 40) # type: ignore
-VARYING_SLOT_VAR9 = gl_varying_slot.define('VARYING_SLOT_VAR9', 41) # type: ignore
-VARYING_SLOT_VAR10 = gl_varying_slot.define('VARYING_SLOT_VAR10', 42) # type: ignore
-VARYING_SLOT_VAR11 = gl_varying_slot.define('VARYING_SLOT_VAR11', 43) # type: ignore
-VARYING_SLOT_VAR12 = gl_varying_slot.define('VARYING_SLOT_VAR12', 44) # type: ignore
-VARYING_SLOT_VAR13 = gl_varying_slot.define('VARYING_SLOT_VAR13', 45) # type: ignore
-VARYING_SLOT_VAR14 = gl_varying_slot.define('VARYING_SLOT_VAR14', 46) # type: ignore
-VARYING_SLOT_VAR15 = gl_varying_slot.define('VARYING_SLOT_VAR15', 47) # type: ignore
-VARYING_SLOT_VAR16 = gl_varying_slot.define('VARYING_SLOT_VAR16', 48) # type: ignore
-VARYING_SLOT_VAR17 = gl_varying_slot.define('VARYING_SLOT_VAR17', 49) # type: ignore
-VARYING_SLOT_VAR18 = gl_varying_slot.define('VARYING_SLOT_VAR18', 50) # type: ignore
-VARYING_SLOT_VAR19 = gl_varying_slot.define('VARYING_SLOT_VAR19', 51) # type: ignore
-VARYING_SLOT_VAR20 = gl_varying_slot.define('VARYING_SLOT_VAR20', 52) # type: ignore
-VARYING_SLOT_VAR21 = gl_varying_slot.define('VARYING_SLOT_VAR21', 53) # type: ignore
-VARYING_SLOT_VAR22 = gl_varying_slot.define('VARYING_SLOT_VAR22', 54) # type: ignore
-VARYING_SLOT_VAR23 = gl_varying_slot.define('VARYING_SLOT_VAR23', 55) # type: ignore
-VARYING_SLOT_VAR24 = gl_varying_slot.define('VARYING_SLOT_VAR24', 56) # type: ignore
-VARYING_SLOT_VAR25 = gl_varying_slot.define('VARYING_SLOT_VAR25', 57) # type: ignore
-VARYING_SLOT_VAR26 = gl_varying_slot.define('VARYING_SLOT_VAR26', 58) # type: ignore
-VARYING_SLOT_VAR27 = gl_varying_slot.define('VARYING_SLOT_VAR27', 59) # type: ignore
-VARYING_SLOT_VAR28 = gl_varying_slot.define('VARYING_SLOT_VAR28', 60) # type: ignore
-VARYING_SLOT_VAR29 = gl_varying_slot.define('VARYING_SLOT_VAR29', 61) # type: ignore
-VARYING_SLOT_VAR30 = gl_varying_slot.define('VARYING_SLOT_VAR30', 62) # type: ignore
-VARYING_SLOT_VAR31 = gl_varying_slot.define('VARYING_SLOT_VAR31', 63) # type: ignore
-VARYING_SLOT_PATCH0 = gl_varying_slot.define('VARYING_SLOT_PATCH0', 64) # type: ignore
-VARYING_SLOT_PATCH1 = gl_varying_slot.define('VARYING_SLOT_PATCH1', 65) # type: ignore
-VARYING_SLOT_PATCH2 = gl_varying_slot.define('VARYING_SLOT_PATCH2', 66) # type: ignore
-VARYING_SLOT_PATCH3 = gl_varying_slot.define('VARYING_SLOT_PATCH3', 67) # type: ignore
-VARYING_SLOT_PATCH4 = gl_varying_slot.define('VARYING_SLOT_PATCH4', 68) # type: ignore
-VARYING_SLOT_PATCH5 = gl_varying_slot.define('VARYING_SLOT_PATCH5', 69) # type: ignore
-VARYING_SLOT_PATCH6 = gl_varying_slot.define('VARYING_SLOT_PATCH6', 70) # type: ignore
-VARYING_SLOT_PATCH7 = gl_varying_slot.define('VARYING_SLOT_PATCH7', 71) # type: ignore
-VARYING_SLOT_PATCH8 = gl_varying_slot.define('VARYING_SLOT_PATCH8', 72) # type: ignore
-VARYING_SLOT_PATCH9 = gl_varying_slot.define('VARYING_SLOT_PATCH9', 73) # type: ignore
-VARYING_SLOT_PATCH10 = gl_varying_slot.define('VARYING_SLOT_PATCH10', 74) # type: ignore
-VARYING_SLOT_PATCH11 = gl_varying_slot.define('VARYING_SLOT_PATCH11', 75) # type: ignore
-VARYING_SLOT_PATCH12 = gl_varying_slot.define('VARYING_SLOT_PATCH12', 76) # type: ignore
-VARYING_SLOT_PATCH13 = gl_varying_slot.define('VARYING_SLOT_PATCH13', 77) # type: ignore
-VARYING_SLOT_PATCH14 = gl_varying_slot.define('VARYING_SLOT_PATCH14', 78) # type: ignore
-VARYING_SLOT_PATCH15 = gl_varying_slot.define('VARYING_SLOT_PATCH15', 79) # type: ignore
-VARYING_SLOT_PATCH16 = gl_varying_slot.define('VARYING_SLOT_PATCH16', 80) # type: ignore
-VARYING_SLOT_PATCH17 = gl_varying_slot.define('VARYING_SLOT_PATCH17', 81) # type: ignore
-VARYING_SLOT_PATCH18 = gl_varying_slot.define('VARYING_SLOT_PATCH18', 82) # type: ignore
-VARYING_SLOT_PATCH19 = gl_varying_slot.define('VARYING_SLOT_PATCH19', 83) # type: ignore
-VARYING_SLOT_PATCH20 = gl_varying_slot.define('VARYING_SLOT_PATCH20', 84) # type: ignore
-VARYING_SLOT_PATCH21 = gl_varying_slot.define('VARYING_SLOT_PATCH21', 85) # type: ignore
-VARYING_SLOT_PATCH22 = gl_varying_slot.define('VARYING_SLOT_PATCH22', 86) # type: ignore
-VARYING_SLOT_PATCH23 = gl_varying_slot.define('VARYING_SLOT_PATCH23', 87) # type: ignore
-VARYING_SLOT_PATCH24 = gl_varying_slot.define('VARYING_SLOT_PATCH24', 88) # type: ignore
-VARYING_SLOT_PATCH25 = gl_varying_slot.define('VARYING_SLOT_PATCH25', 89) # type: ignore
-VARYING_SLOT_PATCH26 = gl_varying_slot.define('VARYING_SLOT_PATCH26', 90) # type: ignore
-VARYING_SLOT_PATCH27 = gl_varying_slot.define('VARYING_SLOT_PATCH27', 91) # type: ignore
-VARYING_SLOT_PATCH28 = gl_varying_slot.define('VARYING_SLOT_PATCH28', 92) # type: ignore
-VARYING_SLOT_PATCH29 = gl_varying_slot.define('VARYING_SLOT_PATCH29', 93) # type: ignore
-VARYING_SLOT_PATCH30 = gl_varying_slot.define('VARYING_SLOT_PATCH30', 94) # type: ignore
-VARYING_SLOT_PATCH31 = gl_varying_slot.define('VARYING_SLOT_PATCH31', 95) # type: ignore
-VARYING_SLOT_VAR0_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR0_16BIT', 96) # type: ignore
-VARYING_SLOT_VAR1_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR1_16BIT', 97) # type: ignore
-VARYING_SLOT_VAR2_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR2_16BIT', 98) # type: ignore
-VARYING_SLOT_VAR3_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR3_16BIT', 99) # type: ignore
-VARYING_SLOT_VAR4_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR4_16BIT', 100) # type: ignore
-VARYING_SLOT_VAR5_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR5_16BIT', 101) # type: ignore
-VARYING_SLOT_VAR6_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR6_16BIT', 102) # type: ignore
-VARYING_SLOT_VAR7_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR7_16BIT', 103) # type: ignore
-VARYING_SLOT_VAR8_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR8_16BIT', 104) # type: ignore
-VARYING_SLOT_VAR9_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR9_16BIT', 105) # type: ignore
-VARYING_SLOT_VAR10_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR10_16BIT', 106) # type: ignore
-VARYING_SLOT_VAR11_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR11_16BIT', 107) # type: ignore
-VARYING_SLOT_VAR12_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR12_16BIT', 108) # type: ignore
-VARYING_SLOT_VAR13_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR13_16BIT', 109) # type: ignore
-VARYING_SLOT_VAR14_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR14_16BIT', 110) # type: ignore
-VARYING_SLOT_VAR15_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR15_16BIT', 111) # type: ignore
-NUM_TOTAL_VARYING_SLOTS = gl_varying_slot.define('NUM_TOTAL_VARYING_SLOTS', 112) # type: ignore
+class gl_varying_slot(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VARYING_SLOT_POS = gl_varying_slot.define('VARYING_SLOT_POS', 0)
+VARYING_SLOT_COL0 = gl_varying_slot.define('VARYING_SLOT_COL0', 1)
+VARYING_SLOT_COL1 = gl_varying_slot.define('VARYING_SLOT_COL1', 2)
+VARYING_SLOT_FOGC = gl_varying_slot.define('VARYING_SLOT_FOGC', 3)
+VARYING_SLOT_TEX0 = gl_varying_slot.define('VARYING_SLOT_TEX0', 4)
+VARYING_SLOT_TEX1 = gl_varying_slot.define('VARYING_SLOT_TEX1', 5)
+VARYING_SLOT_TEX2 = gl_varying_slot.define('VARYING_SLOT_TEX2', 6)
+VARYING_SLOT_TEX3 = gl_varying_slot.define('VARYING_SLOT_TEX3', 7)
+VARYING_SLOT_TEX4 = gl_varying_slot.define('VARYING_SLOT_TEX4', 8)
+VARYING_SLOT_TEX5 = gl_varying_slot.define('VARYING_SLOT_TEX5', 9)
+VARYING_SLOT_TEX6 = gl_varying_slot.define('VARYING_SLOT_TEX6', 10)
+VARYING_SLOT_TEX7 = gl_varying_slot.define('VARYING_SLOT_TEX7', 11)
+VARYING_SLOT_PSIZ = gl_varying_slot.define('VARYING_SLOT_PSIZ', 12)
+VARYING_SLOT_BFC0 = gl_varying_slot.define('VARYING_SLOT_BFC0', 13)
+VARYING_SLOT_BFC1 = gl_varying_slot.define('VARYING_SLOT_BFC1', 14)
+VARYING_SLOT_EDGE = gl_varying_slot.define('VARYING_SLOT_EDGE', 15)
+VARYING_SLOT_CLIP_VERTEX = gl_varying_slot.define('VARYING_SLOT_CLIP_VERTEX', 16)
+VARYING_SLOT_CLIP_DIST0 = gl_varying_slot.define('VARYING_SLOT_CLIP_DIST0', 17)
+VARYING_SLOT_CLIP_DIST1 = gl_varying_slot.define('VARYING_SLOT_CLIP_DIST1', 18)
+VARYING_SLOT_CULL_DIST0 = gl_varying_slot.define('VARYING_SLOT_CULL_DIST0', 19)
+VARYING_SLOT_CULL_DIST1 = gl_varying_slot.define('VARYING_SLOT_CULL_DIST1', 20)
+VARYING_SLOT_PRIMITIVE_ID = gl_varying_slot.define('VARYING_SLOT_PRIMITIVE_ID', 21)
+VARYING_SLOT_LAYER = gl_varying_slot.define('VARYING_SLOT_LAYER', 22)
+VARYING_SLOT_VIEWPORT = gl_varying_slot.define('VARYING_SLOT_VIEWPORT', 23)
+VARYING_SLOT_FACE = gl_varying_slot.define('VARYING_SLOT_FACE', 24)
+VARYING_SLOT_PNTC = gl_varying_slot.define('VARYING_SLOT_PNTC', 25)
+VARYING_SLOT_TESS_LEVEL_OUTER = gl_varying_slot.define('VARYING_SLOT_TESS_LEVEL_OUTER', 26)
+VARYING_SLOT_TESS_LEVEL_INNER = gl_varying_slot.define('VARYING_SLOT_TESS_LEVEL_INNER', 27)
+VARYING_SLOT_BOUNDING_BOX0 = gl_varying_slot.define('VARYING_SLOT_BOUNDING_BOX0', 28)
+VARYING_SLOT_BOUNDING_BOX1 = gl_varying_slot.define('VARYING_SLOT_BOUNDING_BOX1', 29)
+VARYING_SLOT_VIEW_INDEX = gl_varying_slot.define('VARYING_SLOT_VIEW_INDEX', 30)
+VARYING_SLOT_VIEWPORT_MASK = gl_varying_slot.define('VARYING_SLOT_VIEWPORT_MASK', 31)
+VARYING_SLOT_PRIMITIVE_SHADING_RATE = gl_varying_slot.define('VARYING_SLOT_PRIMITIVE_SHADING_RATE', 24)
+VARYING_SLOT_PRIMITIVE_COUNT = gl_varying_slot.define('VARYING_SLOT_PRIMITIVE_COUNT', 26)
+VARYING_SLOT_PRIMITIVE_INDICES = gl_varying_slot.define('VARYING_SLOT_PRIMITIVE_INDICES', 27)
+VARYING_SLOT_TASK_COUNT = gl_varying_slot.define('VARYING_SLOT_TASK_COUNT', 28)
+VARYING_SLOT_CULL_PRIMITIVE = gl_varying_slot.define('VARYING_SLOT_CULL_PRIMITIVE', 28)
+VARYING_SLOT_VAR0 = gl_varying_slot.define('VARYING_SLOT_VAR0', 32)
+VARYING_SLOT_VAR1 = gl_varying_slot.define('VARYING_SLOT_VAR1', 33)
+VARYING_SLOT_VAR2 = gl_varying_slot.define('VARYING_SLOT_VAR2', 34)
+VARYING_SLOT_VAR3 = gl_varying_slot.define('VARYING_SLOT_VAR3', 35)
+VARYING_SLOT_VAR4 = gl_varying_slot.define('VARYING_SLOT_VAR4', 36)
+VARYING_SLOT_VAR5 = gl_varying_slot.define('VARYING_SLOT_VAR5', 37)
+VARYING_SLOT_VAR6 = gl_varying_slot.define('VARYING_SLOT_VAR6', 38)
+VARYING_SLOT_VAR7 = gl_varying_slot.define('VARYING_SLOT_VAR7', 39)
+VARYING_SLOT_VAR8 = gl_varying_slot.define('VARYING_SLOT_VAR8', 40)
+VARYING_SLOT_VAR9 = gl_varying_slot.define('VARYING_SLOT_VAR9', 41)
+VARYING_SLOT_VAR10 = gl_varying_slot.define('VARYING_SLOT_VAR10', 42)
+VARYING_SLOT_VAR11 = gl_varying_slot.define('VARYING_SLOT_VAR11', 43)
+VARYING_SLOT_VAR12 = gl_varying_slot.define('VARYING_SLOT_VAR12', 44)
+VARYING_SLOT_VAR13 = gl_varying_slot.define('VARYING_SLOT_VAR13', 45)
+VARYING_SLOT_VAR14 = gl_varying_slot.define('VARYING_SLOT_VAR14', 46)
+VARYING_SLOT_VAR15 = gl_varying_slot.define('VARYING_SLOT_VAR15', 47)
+VARYING_SLOT_VAR16 = gl_varying_slot.define('VARYING_SLOT_VAR16', 48)
+VARYING_SLOT_VAR17 = gl_varying_slot.define('VARYING_SLOT_VAR17', 49)
+VARYING_SLOT_VAR18 = gl_varying_slot.define('VARYING_SLOT_VAR18', 50)
+VARYING_SLOT_VAR19 = gl_varying_slot.define('VARYING_SLOT_VAR19', 51)
+VARYING_SLOT_VAR20 = gl_varying_slot.define('VARYING_SLOT_VAR20', 52)
+VARYING_SLOT_VAR21 = gl_varying_slot.define('VARYING_SLOT_VAR21', 53)
+VARYING_SLOT_VAR22 = gl_varying_slot.define('VARYING_SLOT_VAR22', 54)
+VARYING_SLOT_VAR23 = gl_varying_slot.define('VARYING_SLOT_VAR23', 55)
+VARYING_SLOT_VAR24 = gl_varying_slot.define('VARYING_SLOT_VAR24', 56)
+VARYING_SLOT_VAR25 = gl_varying_slot.define('VARYING_SLOT_VAR25', 57)
+VARYING_SLOT_VAR26 = gl_varying_slot.define('VARYING_SLOT_VAR26', 58)
+VARYING_SLOT_VAR27 = gl_varying_slot.define('VARYING_SLOT_VAR27', 59)
+VARYING_SLOT_VAR28 = gl_varying_slot.define('VARYING_SLOT_VAR28', 60)
+VARYING_SLOT_VAR29 = gl_varying_slot.define('VARYING_SLOT_VAR29', 61)
+VARYING_SLOT_VAR30 = gl_varying_slot.define('VARYING_SLOT_VAR30', 62)
+VARYING_SLOT_VAR31 = gl_varying_slot.define('VARYING_SLOT_VAR31', 63)
+VARYING_SLOT_PATCH0 = gl_varying_slot.define('VARYING_SLOT_PATCH0', 64)
+VARYING_SLOT_PATCH1 = gl_varying_slot.define('VARYING_SLOT_PATCH1', 65)
+VARYING_SLOT_PATCH2 = gl_varying_slot.define('VARYING_SLOT_PATCH2', 66)
+VARYING_SLOT_PATCH3 = gl_varying_slot.define('VARYING_SLOT_PATCH3', 67)
+VARYING_SLOT_PATCH4 = gl_varying_slot.define('VARYING_SLOT_PATCH4', 68)
+VARYING_SLOT_PATCH5 = gl_varying_slot.define('VARYING_SLOT_PATCH5', 69)
+VARYING_SLOT_PATCH6 = gl_varying_slot.define('VARYING_SLOT_PATCH6', 70)
+VARYING_SLOT_PATCH7 = gl_varying_slot.define('VARYING_SLOT_PATCH7', 71)
+VARYING_SLOT_PATCH8 = gl_varying_slot.define('VARYING_SLOT_PATCH8', 72)
+VARYING_SLOT_PATCH9 = gl_varying_slot.define('VARYING_SLOT_PATCH9', 73)
+VARYING_SLOT_PATCH10 = gl_varying_slot.define('VARYING_SLOT_PATCH10', 74)
+VARYING_SLOT_PATCH11 = gl_varying_slot.define('VARYING_SLOT_PATCH11', 75)
+VARYING_SLOT_PATCH12 = gl_varying_slot.define('VARYING_SLOT_PATCH12', 76)
+VARYING_SLOT_PATCH13 = gl_varying_slot.define('VARYING_SLOT_PATCH13', 77)
+VARYING_SLOT_PATCH14 = gl_varying_slot.define('VARYING_SLOT_PATCH14', 78)
+VARYING_SLOT_PATCH15 = gl_varying_slot.define('VARYING_SLOT_PATCH15', 79)
+VARYING_SLOT_PATCH16 = gl_varying_slot.define('VARYING_SLOT_PATCH16', 80)
+VARYING_SLOT_PATCH17 = gl_varying_slot.define('VARYING_SLOT_PATCH17', 81)
+VARYING_SLOT_PATCH18 = gl_varying_slot.define('VARYING_SLOT_PATCH18', 82)
+VARYING_SLOT_PATCH19 = gl_varying_slot.define('VARYING_SLOT_PATCH19', 83)
+VARYING_SLOT_PATCH20 = gl_varying_slot.define('VARYING_SLOT_PATCH20', 84)
+VARYING_SLOT_PATCH21 = gl_varying_slot.define('VARYING_SLOT_PATCH21', 85)
+VARYING_SLOT_PATCH22 = gl_varying_slot.define('VARYING_SLOT_PATCH22', 86)
+VARYING_SLOT_PATCH23 = gl_varying_slot.define('VARYING_SLOT_PATCH23', 87)
+VARYING_SLOT_PATCH24 = gl_varying_slot.define('VARYING_SLOT_PATCH24', 88)
+VARYING_SLOT_PATCH25 = gl_varying_slot.define('VARYING_SLOT_PATCH25', 89)
+VARYING_SLOT_PATCH26 = gl_varying_slot.define('VARYING_SLOT_PATCH26', 90)
+VARYING_SLOT_PATCH27 = gl_varying_slot.define('VARYING_SLOT_PATCH27', 91)
+VARYING_SLOT_PATCH28 = gl_varying_slot.define('VARYING_SLOT_PATCH28', 92)
+VARYING_SLOT_PATCH29 = gl_varying_slot.define('VARYING_SLOT_PATCH29', 93)
+VARYING_SLOT_PATCH30 = gl_varying_slot.define('VARYING_SLOT_PATCH30', 94)
+VARYING_SLOT_PATCH31 = gl_varying_slot.define('VARYING_SLOT_PATCH31', 95)
+VARYING_SLOT_VAR0_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR0_16BIT', 96)
+VARYING_SLOT_VAR1_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR1_16BIT', 97)
+VARYING_SLOT_VAR2_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR2_16BIT', 98)
+VARYING_SLOT_VAR3_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR3_16BIT', 99)
+VARYING_SLOT_VAR4_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR4_16BIT', 100)
+VARYING_SLOT_VAR5_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR5_16BIT', 101)
+VARYING_SLOT_VAR6_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR6_16BIT', 102)
+VARYING_SLOT_VAR7_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR7_16BIT', 103)
+VARYING_SLOT_VAR8_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR8_16BIT', 104)
+VARYING_SLOT_VAR9_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR9_16BIT', 105)
+VARYING_SLOT_VAR10_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR10_16BIT', 106)
+VARYING_SLOT_VAR11_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR11_16BIT', 107)
+VARYING_SLOT_VAR12_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR12_16BIT', 108)
+VARYING_SLOT_VAR13_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR13_16BIT', 109)
+VARYING_SLOT_VAR14_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR14_16BIT', 110)
+VARYING_SLOT_VAR15_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR15_16BIT', 111)
+NUM_TOTAL_VARYING_SLOTS = gl_varying_slot.define('NUM_TOTAL_VARYING_SLOTS', 112)
 
 @dll.bind
 def nir_slot_is_sysval_output(slot:gl_varying_slot, next_shader:gl_shader_stage) -> Annotated[bool, ctypes.c_bool]: ...
@@ -3879,11 +3879,11 @@ def nir_sort_variables_by_location(shader:c.POINTER[nir_shader], mode:nir_variab
 def nir_assign_io_var_locations(shader:c.POINTER[nir_shader], mode:nir_variable_mode, size:c.POINTER[Annotated[int, ctypes.c_uint32]], stage:gl_shader_stage) -> None: ...
 @dll.bind
 def nir_opt_clip_cull_const(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_io_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_io_lower_64bit_to_32 = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32', 1) # type: ignore
-nir_lower_io_lower_64bit_float_to_32 = nir_lower_io_options.define('nir_lower_io_lower_64bit_float_to_32', 2) # type: ignore
-nir_lower_io_lower_64bit_to_32_new = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32_new', 4) # type: ignore
-nir_lower_io_use_interpolated_input_intrinsics = nir_lower_io_options.define('nir_lower_io_use_interpolated_input_intrinsics', 8) # type: ignore
+class nir_lower_io_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_io_lower_64bit_to_32 = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32', 1)
+nir_lower_io_lower_64bit_float_to_32 = nir_lower_io_options.define('nir_lower_io_lower_64bit_float_to_32', 2)
+nir_lower_io_lower_64bit_to_32_new = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32_new', 4)
+nir_lower_io_use_interpolated_input_intrinsics = nir_lower_io_options.define('nir_lower_io_use_interpolated_input_intrinsics', 8)
 
 @dll.bind
 def nir_lower_io(shader:c.POINTER[nir_shader], modes:nir_variable_mode, type_size:c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[struct_glsl_type], Annotated[bool, ctypes.c_bool]), _3:nir_lower_io_options) -> Annotated[bool, ctypes.c_bool]: ...
@@ -3901,19 +3901,19 @@ def nir_lower_vars_to_explicit_types(shader:c.POINTER[nir_shader], modes:nir_var
 def nir_gather_explicit_io_initializers(shader:c.POINTER[nir_shader], dst:c.POINTER[None], dst_size:size_t, mode:nir_variable_mode) -> None: ...
 @dll.bind
 def nir_lower_vec3_to_vec4(shader:c.POINTER[nir_shader], modes:nir_variable_mode) -> Annotated[bool, ctypes.c_bool]: ...
-nir_address_format = CEnum(Annotated[int, ctypes.c_uint32])
-nir_address_format_32bit_global = nir_address_format.define('nir_address_format_32bit_global', 0) # type: ignore
-nir_address_format_64bit_global = nir_address_format.define('nir_address_format_64bit_global', 1) # type: ignore
-nir_address_format_2x32bit_global = nir_address_format.define('nir_address_format_2x32bit_global', 2) # type: ignore
-nir_address_format_64bit_global_32bit_offset = nir_address_format.define('nir_address_format_64bit_global_32bit_offset', 3) # type: ignore
-nir_address_format_64bit_bounded_global = nir_address_format.define('nir_address_format_64bit_bounded_global', 4) # type: ignore
-nir_address_format_32bit_index_offset = nir_address_format.define('nir_address_format_32bit_index_offset', 5) # type: ignore
-nir_address_format_32bit_index_offset_pack64 = nir_address_format.define('nir_address_format_32bit_index_offset_pack64', 6) # type: ignore
-nir_address_format_vec2_index_32bit_offset = nir_address_format.define('nir_address_format_vec2_index_32bit_offset', 7) # type: ignore
-nir_address_format_62bit_generic = nir_address_format.define('nir_address_format_62bit_generic', 8) # type: ignore
-nir_address_format_32bit_offset = nir_address_format.define('nir_address_format_32bit_offset', 9) # type: ignore
-nir_address_format_32bit_offset_as_64bit = nir_address_format.define('nir_address_format_32bit_offset_as_64bit', 10) # type: ignore
-nir_address_format_logical = nir_address_format.define('nir_address_format_logical', 11) # type: ignore
+class nir_address_format(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_address_format_32bit_global = nir_address_format.define('nir_address_format_32bit_global', 0)
+nir_address_format_64bit_global = nir_address_format.define('nir_address_format_64bit_global', 1)
+nir_address_format_2x32bit_global = nir_address_format.define('nir_address_format_2x32bit_global', 2)
+nir_address_format_64bit_global_32bit_offset = nir_address_format.define('nir_address_format_64bit_global_32bit_offset', 3)
+nir_address_format_64bit_bounded_global = nir_address_format.define('nir_address_format_64bit_bounded_global', 4)
+nir_address_format_32bit_index_offset = nir_address_format.define('nir_address_format_32bit_index_offset', 5)
+nir_address_format_32bit_index_offset_pack64 = nir_address_format.define('nir_address_format_32bit_index_offset_pack64', 6)
+nir_address_format_vec2_index_32bit_offset = nir_address_format.define('nir_address_format_vec2_index_32bit_offset', 7)
+nir_address_format_62bit_generic = nir_address_format.define('nir_address_format_62bit_generic', 8)
+nir_address_format_32bit_offset = nir_address_format.define('nir_address_format_32bit_offset', 9)
+nir_address_format_32bit_offset_as_64bit = nir_address_format.define('nir_address_format_32bit_offset_as_64bit', 10)
+nir_address_format_logical = nir_address_format.define('nir_address_format_logical', 11)
 
 @dll.bind
 def nir_address_format_bit_size(addr_format:nir_address_format) -> Annotated[int, ctypes.c_uint32]: ...
@@ -3937,10 +3937,10 @@ def nir_get_explicit_deref_align(deref:c.POINTER[nir_deref_instr], default_to_ty
 def nir_lower_explicit_io_instr(b:c.POINTER[nir_builder], io_instr:c.POINTER[nir_intrinsic_instr], addr:c.POINTER[nir_def], addr_format:nir_address_format) -> None: ...
 @dll.bind
 def nir_lower_explicit_io(shader:c.POINTER[nir_shader], modes:nir_variable_mode, _2:nir_address_format) -> Annotated[bool, ctypes.c_bool]: ...
-nir_mem_access_shift_method = CEnum(Annotated[int, ctypes.c_uint32])
-nir_mem_access_shift_method_scalar = nir_mem_access_shift_method.define('nir_mem_access_shift_method_scalar', 0) # type: ignore
-nir_mem_access_shift_method_shift64 = nir_mem_access_shift_method.define('nir_mem_access_shift_method_shift64', 1) # type: ignore
-nir_mem_access_shift_method_bytealign_amd = nir_mem_access_shift_method.define('nir_mem_access_shift_method_bytealign_amd', 2) # type: ignore
+class nir_mem_access_shift_method(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_mem_access_shift_method_scalar = nir_mem_access_shift_method.define('nir_mem_access_shift_method_scalar', 0)
+nir_mem_access_shift_method_shift64 = nir_mem_access_shift_method.define('nir_mem_access_shift_method_shift64', 1)
+nir_mem_access_shift_method_bytealign_amd = nir_mem_access_shift_method.define('nir_mem_access_shift_method_bytealign_amd', 2)
 
 @c.record
 class struct_nir_mem_access_size_align(c.Struct):
@@ -3949,25 +3949,25 @@ class struct_nir_mem_access_size_align(c.Struct):
   bit_size: Annotated[uint8_t, 1]
   align: Annotated[uint16_t, 2]
   shift: Annotated[nir_mem_access_shift_method, 4]
-nir_mem_access_size_align = struct_nir_mem_access_size_align
-enum_gl_access_qualifier = CEnum(Annotated[int, ctypes.c_uint32])
-ACCESS_COHERENT = enum_gl_access_qualifier.define('ACCESS_COHERENT', 1) # type: ignore
-ACCESS_RESTRICT = enum_gl_access_qualifier.define('ACCESS_RESTRICT', 2) # type: ignore
-ACCESS_VOLATILE = enum_gl_access_qualifier.define('ACCESS_VOLATILE', 4) # type: ignore
-ACCESS_NON_READABLE = enum_gl_access_qualifier.define('ACCESS_NON_READABLE', 8) # type: ignore
-ACCESS_NON_WRITEABLE = enum_gl_access_qualifier.define('ACCESS_NON_WRITEABLE', 16) # type: ignore
-ACCESS_NON_UNIFORM = enum_gl_access_qualifier.define('ACCESS_NON_UNIFORM', 32) # type: ignore
-ACCESS_CAN_REORDER = enum_gl_access_qualifier.define('ACCESS_CAN_REORDER', 64) # type: ignore
-ACCESS_NON_TEMPORAL = enum_gl_access_qualifier.define('ACCESS_NON_TEMPORAL', 128) # type: ignore
-ACCESS_INCLUDE_HELPERS = enum_gl_access_qualifier.define('ACCESS_INCLUDE_HELPERS', 256) # type: ignore
-ACCESS_IS_SWIZZLED_AMD = enum_gl_access_qualifier.define('ACCESS_IS_SWIZZLED_AMD', 512) # type: ignore
-ACCESS_USES_FORMAT_AMD = enum_gl_access_qualifier.define('ACCESS_USES_FORMAT_AMD', 1024) # type: ignore
-ACCESS_FMASK_LOWERED_AMD = enum_gl_access_qualifier.define('ACCESS_FMASK_LOWERED_AMD', 2048) # type: ignore
-ACCESS_CAN_SPECULATE = enum_gl_access_qualifier.define('ACCESS_CAN_SPECULATE', 4096) # type: ignore
-ACCESS_CP_GE_COHERENT_AMD = enum_gl_access_qualifier.define('ACCESS_CP_GE_COHERENT_AMD', 8192) # type: ignore
-ACCESS_IN_BOUNDS = enum_gl_access_qualifier.define('ACCESS_IN_BOUNDS', 16384) # type: ignore
-ACCESS_KEEP_SCALAR = enum_gl_access_qualifier.define('ACCESS_KEEP_SCALAR', 32768) # type: ignore
-ACCESS_SMEM_AMD = enum_gl_access_qualifier.define('ACCESS_SMEM_AMD', 65536) # type: ignore
+nir_mem_access_size_align: TypeAlias = struct_nir_mem_access_size_align
+class enum_gl_access_qualifier(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ACCESS_COHERENT = enum_gl_access_qualifier.define('ACCESS_COHERENT', 1)
+ACCESS_RESTRICT = enum_gl_access_qualifier.define('ACCESS_RESTRICT', 2)
+ACCESS_VOLATILE = enum_gl_access_qualifier.define('ACCESS_VOLATILE', 4)
+ACCESS_NON_READABLE = enum_gl_access_qualifier.define('ACCESS_NON_READABLE', 8)
+ACCESS_NON_WRITEABLE = enum_gl_access_qualifier.define('ACCESS_NON_WRITEABLE', 16)
+ACCESS_NON_UNIFORM = enum_gl_access_qualifier.define('ACCESS_NON_UNIFORM', 32)
+ACCESS_CAN_REORDER = enum_gl_access_qualifier.define('ACCESS_CAN_REORDER', 64)
+ACCESS_NON_TEMPORAL = enum_gl_access_qualifier.define('ACCESS_NON_TEMPORAL', 128)
+ACCESS_INCLUDE_HELPERS = enum_gl_access_qualifier.define('ACCESS_INCLUDE_HELPERS', 256)
+ACCESS_IS_SWIZZLED_AMD = enum_gl_access_qualifier.define('ACCESS_IS_SWIZZLED_AMD', 512)
+ACCESS_USES_FORMAT_AMD = enum_gl_access_qualifier.define('ACCESS_USES_FORMAT_AMD', 1024)
+ACCESS_FMASK_LOWERED_AMD = enum_gl_access_qualifier.define('ACCESS_FMASK_LOWERED_AMD', 2048)
+ACCESS_CAN_SPECULATE = enum_gl_access_qualifier.define('ACCESS_CAN_SPECULATE', 4096)
+ACCESS_CP_GE_COHERENT_AMD = enum_gl_access_qualifier.define('ACCESS_CP_GE_COHERENT_AMD', 8192)
+ACCESS_IN_BOUNDS = enum_gl_access_qualifier.define('ACCESS_IN_BOUNDS', 16384)
+ACCESS_KEEP_SCALAR = enum_gl_access_qualifier.define('ACCESS_KEEP_SCALAR', 32768)
+ACCESS_SMEM_AMD = enum_gl_access_qualifier.define('ACCESS_SMEM_AMD', 65536)
 
 nir_lower_mem_access_bit_sizes_cb: TypeAlias = c.CFUNCTYPE(struct_nir_mem_access_size_align, nir_intrinsic_op, Annotated[int, ctypes.c_ubyte], Annotated[int, ctypes.c_ubyte], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[bool, ctypes.c_bool], enum_gl_access_qualifier, c.POINTER[None])
 @c.record
@@ -3977,12 +3977,12 @@ class struct_nir_lower_mem_access_bit_sizes_options(c.Struct):
   modes: Annotated[nir_variable_mode, 8]
   may_lower_unaligned_stores_to_atomics: Annotated[Annotated[bool, ctypes.c_bool], 12]
   cb_data: Annotated[c.POINTER[None], 16]
-nir_lower_mem_access_bit_sizes_options = struct_nir_lower_mem_access_bit_sizes_options
+nir_lower_mem_access_bit_sizes_options: TypeAlias = struct_nir_lower_mem_access_bit_sizes_options
 @dll.bind
 def nir_lower_mem_access_bit_sizes(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_mem_access_bit_sizes_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_robust_access(s:c.POINTER[nir_shader], filter:nir_intrin_filter_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_should_vectorize_mem_func = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_int64], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None])
+nir_should_vectorize_mem_func: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_int64], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None])
 @c.record
 class struct_nir_load_store_vectorize_options(c.Struct):
   SIZE = 32
@@ -3991,12 +3991,12 @@ class struct_nir_load_store_vectorize_options(c.Struct):
   robust_modes: Annotated[nir_variable_mode, 12]
   cb_data: Annotated[c.POINTER[None], 16]
   has_shared2_amd: Annotated[Annotated[bool, ctypes.c_bool], 24]
-nir_load_store_vectorize_options = struct_nir_load_store_vectorize_options
+nir_load_store_vectorize_options: TypeAlias = struct_nir_load_store_vectorize_options
 @dll.bind
 def nir_opt_load_store_vectorize(shader:c.POINTER[nir_shader], options:c.POINTER[nir_load_store_vectorize_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_opt_load_store_update_alignments(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_shader_calls_should_remat_func = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_instr], c.POINTER[None])
+nir_lower_shader_calls_should_remat_func: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_instr], c.POINTER[None])
 @c.record
 class struct_nir_lower_shader_calls_options(c.Struct):
   SIZE = 48
@@ -4007,7 +4007,7 @@ class struct_nir_lower_shader_calls_options(c.Struct):
   vectorizer_data: Annotated[c.POINTER[None], 24]
   should_remat_callback: Annotated[nir_lower_shader_calls_should_remat_func, 32]
   should_remat_data: Annotated[c.POINTER[None], 40]
-nir_lower_shader_calls_options = struct_nir_lower_shader_calls_options
+nir_lower_shader_calls_options: TypeAlias = struct_nir_lower_shader_calls_options
 @dll.bind
 def nir_lower_shader_calls(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_shader_calls_options], resume_shaders_out:c.POINTER[c.POINTER[c.POINTER[nir_shader]]], num_resume_shaders_out:c.POINTER[uint32_t], mem_ctx:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4043,7 +4043,7 @@ class struct_nir_remove_dead_variables_options(c.Struct):
   SIZE = 16
   can_remove_var: Annotated[c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[nir_variable], c.POINTER[None]), 0]
   can_remove_var_data: Annotated[c.POINTER[None], 8]
-nir_remove_dead_variables_options = struct_nir_remove_dead_variables_options
+nir_remove_dead_variables_options: TypeAlias = struct_nir_remove_dead_variables_options
 @dll.bind
 def nir_remove_dead_variables(shader:c.POINTER[nir_shader], modes:nir_variable_mode, options:c.POINTER[nir_remove_dead_variables_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4052,10 +4052,10 @@ def nir_lower_variable_initializers(shader:c.POINTER[nir_shader], modes:nir_vari
 def nir_zero_initialize_shared_memory(shader:c.POINTER[nir_shader], shared_size:Annotated[int, ctypes.c_uint32], chunk_size:Annotated[int, ctypes.c_uint32]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_clear_shared_memory(shader:c.POINTER[nir_shader], shared_size:Annotated[int, ctypes.c_uint32], chunk_size:Annotated[int, ctypes.c_uint32]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_opt_move_to_top_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_move_to_entry_block_only = nir_opt_move_to_top_options.define('nir_move_to_entry_block_only', 1) # type: ignore
-nir_move_to_top_input_loads = nir_opt_move_to_top_options.define('nir_move_to_top_input_loads', 2) # type: ignore
-nir_move_to_top_load_smem_amd = nir_opt_move_to_top_options.define('nir_move_to_top_load_smem_amd', 4) # type: ignore
+class nir_opt_move_to_top_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_move_to_entry_block_only = nir_opt_move_to_top_options.define('nir_move_to_entry_block_only', 1)
+nir_move_to_top_input_loads = nir_opt_move_to_top_options.define('nir_move_to_top_input_loads', 2)
+nir_move_to_top_load_smem_amd = nir_opt_move_to_top_options.define('nir_move_to_top_load_smem_amd', 4)
 
 @dll.bind
 def nir_opt_move_to_top(nir:c.POINTER[nir_shader], options:nir_opt_move_to_top_options) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4065,15 +4065,15 @@ def nir_move_vec_src_uses_to_dest(shader:c.POINTER[nir_shader], skip_const_srcs:
 def nir_move_output_stores_to_end(nir:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_vec_to_regs(shader:c.POINTER[nir_shader], cb:nir_instr_writemask_filter_cb, _data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
-enum_compare_func = CEnum(Annotated[int, ctypes.c_uint32])
-COMPARE_FUNC_NEVER = enum_compare_func.define('COMPARE_FUNC_NEVER', 0) # type: ignore
-COMPARE_FUNC_LESS = enum_compare_func.define('COMPARE_FUNC_LESS', 1) # type: ignore
-COMPARE_FUNC_EQUAL = enum_compare_func.define('COMPARE_FUNC_EQUAL', 2) # type: ignore
-COMPARE_FUNC_LEQUAL = enum_compare_func.define('COMPARE_FUNC_LEQUAL', 3) # type: ignore
-COMPARE_FUNC_GREATER = enum_compare_func.define('COMPARE_FUNC_GREATER', 4) # type: ignore
-COMPARE_FUNC_NOTEQUAL = enum_compare_func.define('COMPARE_FUNC_NOTEQUAL', 5) # type: ignore
-COMPARE_FUNC_GEQUAL = enum_compare_func.define('COMPARE_FUNC_GEQUAL', 6) # type: ignore
-COMPARE_FUNC_ALWAYS = enum_compare_func.define('COMPARE_FUNC_ALWAYS', 7) # type: ignore
+class enum_compare_func(Annotated[int, ctypes.c_uint32], c.Enum): pass
+COMPARE_FUNC_NEVER = enum_compare_func.define('COMPARE_FUNC_NEVER', 0)
+COMPARE_FUNC_LESS = enum_compare_func.define('COMPARE_FUNC_LESS', 1)
+COMPARE_FUNC_EQUAL = enum_compare_func.define('COMPARE_FUNC_EQUAL', 2)
+COMPARE_FUNC_LEQUAL = enum_compare_func.define('COMPARE_FUNC_LEQUAL', 3)
+COMPARE_FUNC_GREATER = enum_compare_func.define('COMPARE_FUNC_GREATER', 4)
+COMPARE_FUNC_NOTEQUAL = enum_compare_func.define('COMPARE_FUNC_NOTEQUAL', 5)
+COMPARE_FUNC_GEQUAL = enum_compare_func.define('COMPARE_FUNC_GEQUAL', 6)
+COMPARE_FUNC_ALWAYS = enum_compare_func.define('COMPARE_FUNC_ALWAYS', 7)
 
 @dll.bind
 def nir_lower_alpha_test(shader:c.POINTER[nir_shader], func:enum_compare_func, alpha_to_one:Annotated[bool, ctypes.c_bool], alpha_ref_state_tokens:c.POINTER[gl_state_index16]) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4188,7 +4188,7 @@ class struct_nir_lower_subgroups_options(c.Struct):
   lower_reduce: Annotated[Annotated[bool, ctypes.c_bool], 21, 1, 6]
   lower_boolean_reduce: Annotated[Annotated[bool, ctypes.c_bool], 21, 1, 7]
   lower_boolean_shuffle: Annotated[Annotated[bool, ctypes.c_bool], 22, 1, 0]
-nir_lower_subgroups_options = struct_nir_lower_subgroups_options
+nir_lower_subgroups_options: TypeAlias = struct_nir_lower_subgroups_options
 @dll.bind
 def nir_lower_subgroups(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_subgroups_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4208,7 +4208,7 @@ class struct_nir_lower_compute_system_values_options(c.Struct):
   global_id_is_32bit: Annotated[Annotated[bool, ctypes.c_bool], 0, 1, 7]
   shortcut_1d_workgroup_id: Annotated[Annotated[bool, ctypes.c_bool], 1, 1, 0]
   num_workgroups: Annotated[c.Array[uint32_t, Literal[3]], 4]
-nir_lower_compute_system_values_options = struct_nir_lower_compute_system_values_options
+nir_lower_compute_system_values_options: TypeAlias = struct_nir_lower_compute_system_values_options
 @dll.bind
 def nir_lower_compute_system_values(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_compute_system_values_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -4217,13 +4217,13 @@ class struct_nir_lower_sysvals_to_varyings_options(c.Struct):
   frag_coord: Annotated[Annotated[bool, ctypes.c_bool], 0, 1, 0]
   front_face: Annotated[Annotated[bool, ctypes.c_bool], 0, 1, 1]
   point_coord: Annotated[Annotated[bool, ctypes.c_bool], 0, 1, 2]
-nir_lower_sysvals_to_varyings_options = struct_nir_lower_sysvals_to_varyings_options
+nir_lower_sysvals_to_varyings_options: TypeAlias = struct_nir_lower_sysvals_to_varyings_options
 @dll.bind
 def nir_lower_sysvals_to_varyings(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_sysvals_to_varyings_options]) -> Annotated[bool, ctypes.c_bool]: ...
-enum_nir_lower_tex_packing = CEnum(Annotated[int, ctypes.c_ubyte])
-nir_lower_tex_packing_none = enum_nir_lower_tex_packing.define('nir_lower_tex_packing_none', 0) # type: ignore
-nir_lower_tex_packing_16 = enum_nir_lower_tex_packing.define('nir_lower_tex_packing_16', 1) # type: ignore
-nir_lower_tex_packing_8 = enum_nir_lower_tex_packing.define('nir_lower_tex_packing_8', 2) # type: ignore
+class enum_nir_lower_tex_packing(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+nir_lower_tex_packing_none = enum_nir_lower_tex_packing.define('nir_lower_tex_packing_none', 0)
+nir_lower_tex_packing_16 = enum_nir_lower_tex_packing.define('nir_lower_tex_packing_16', 1)
+nir_lower_tex_packing_8 = enum_nir_lower_tex_packing.define('nir_lower_tex_packing_8', 2)
 
 @c.record
 class struct_nir_lower_tex_options(c.Struct):
@@ -4284,7 +4284,7 @@ class struct_nir_lower_tex_options(c.Struct):
   lower_invalid_implicit_lod: Annotated[Annotated[bool, ctypes.c_bool], 402]
   lower_index_to_offset: Annotated[Annotated[bool, ctypes.c_bool], 403]
   callback_data: Annotated[c.POINTER[None], 408]
-nir_lower_tex_options = struct_nir_lower_tex_options
+nir_lower_tex_options: TypeAlias = struct_nir_lower_tex_options
 @dll.bind
 def nir_lower_tex(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_tex_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -4294,7 +4294,7 @@ class struct_nir_lower_tex_shadow_swizzle(c.Struct):
   swizzle_g: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 3]
   swizzle_b: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 6]
   swizzle_a: Annotated[Annotated[int, ctypes.c_uint32], 1, 3, 1]
-nir_lower_tex_shadow_swizzle = struct_nir_lower_tex_shadow_swizzle
+nir_lower_tex_shadow_swizzle: TypeAlias = struct_nir_lower_tex_shadow_swizzle
 @dll.bind
 def nir_lower_tex_shadow(s:c.POINTER[nir_shader], n_states:Annotated[int, ctypes.c_uint32], compare_func:c.POINTER[enum_compare_func], tex_swizzles:c.POINTER[nir_lower_tex_shadow_swizzle], is_fixed_point_format:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -4303,24 +4303,24 @@ class struct_nir_lower_image_options(c.Struct):
   lower_cube_size: Annotated[Annotated[bool, ctypes.c_bool], 0]
   lower_to_fragment_mask_load_amd: Annotated[Annotated[bool, ctypes.c_bool], 1]
   lower_image_samples_to_one: Annotated[Annotated[bool, ctypes.c_bool], 2]
-nir_lower_image_options = struct_nir_lower_image_options
+nir_lower_image_options: TypeAlias = struct_nir_lower_image_options
 @dll.bind
 def nir_lower_image(nir:c.POINTER[nir_shader], options:c.POINTER[nir_lower_image_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_image_atomics_to_global(s:c.POINTER[nir_shader], filter:nir_intrin_filter_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_readonly_images_to_tex(shader:c.POINTER[nir_shader], per_variable:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
-enum_nir_lower_non_uniform_access_type = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_non_uniform_ubo_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_ubo_access', 1) # type: ignore
-nir_lower_non_uniform_ssbo_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_ssbo_access', 2) # type: ignore
-nir_lower_non_uniform_texture_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_access', 4) # type: ignore
-nir_lower_non_uniform_image_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_image_access', 8) # type: ignore
-nir_lower_non_uniform_get_ssbo_size = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_get_ssbo_size', 16) # type: ignore
-nir_lower_non_uniform_texture_offset_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_offset_access', 32) # type: ignore
-nir_lower_non_uniform_access_type_count = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_access_type_count', 6) # type: ignore
+class enum_nir_lower_non_uniform_access_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_non_uniform_ubo_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_ubo_access', 1)
+nir_lower_non_uniform_ssbo_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_ssbo_access', 2)
+nir_lower_non_uniform_texture_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_access', 4)
+nir_lower_non_uniform_image_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_image_access', 8)
+nir_lower_non_uniform_get_ssbo_size = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_get_ssbo_size', 16)
+nir_lower_non_uniform_texture_offset_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_offset_access', 32)
+nir_lower_non_uniform_access_type_count = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_access_type_count', 6)
 
-nir_lower_non_uniform_src_access_callback = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_tex_instr], Annotated[int, ctypes.c_uint32], c.POINTER[None])
-nir_lower_non_uniform_access_callback = c.CFUNCTYPE(Annotated[int, ctypes.c_uint16], c.POINTER[struct_nir_src], c.POINTER[None])
+nir_lower_non_uniform_src_access_callback: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_tex_instr], Annotated[int, ctypes.c_uint32], c.POINTER[None])
+nir_lower_non_uniform_access_callback: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_uint16], c.POINTER[struct_nir_src], c.POINTER[None])
 @c.record
 class struct_nir_lower_non_uniform_access_options(c.Struct):
   SIZE = 32
@@ -4328,7 +4328,7 @@ class struct_nir_lower_non_uniform_access_options(c.Struct):
   tex_src_callback: Annotated[nir_lower_non_uniform_src_access_callback, 8]
   callback: Annotated[nir_lower_non_uniform_access_callback, 16]
   callback_data: Annotated[c.POINTER[None], 24]
-nir_lower_non_uniform_access_options = struct_nir_lower_non_uniform_access_options
+nir_lower_non_uniform_access_options: TypeAlias = struct_nir_lower_non_uniform_access_options
 @dll.bind
 def nir_has_non_uniform_access(shader:c.POINTER[nir_shader], types:enum_nir_lower_non_uniform_access_type) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4339,7 +4339,7 @@ def nir_lower_non_uniform_access(shader:c.POINTER[nir_shader], options:c.POINTER
 class struct_nir_lower_idiv_options(c.Struct):
   SIZE = 1
   allow_fp16: Annotated[Annotated[bool, ctypes.c_bool], 0]
-nir_lower_idiv_options = struct_nir_lower_idiv_options
+nir_lower_idiv_options: TypeAlias = struct_nir_lower_idiv_options
 @dll.bind
 def nir_lower_idiv(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_idiv_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -4351,7 +4351,7 @@ class struct_nir_input_attachment_options(c.Struct):
   use_view_id_for_layer: Annotated[Annotated[bool, ctypes.c_bool], 3]
   unscaled_depth_stencil_ir3: Annotated[Annotated[bool, ctypes.c_bool], 4]
   unscaled_input_attachment_ir3: Annotated[uint32_t, 8]
-nir_input_attachment_options = struct_nir_input_attachment_options
+nir_input_attachment_options: TypeAlias = struct_nir_input_attachment_options
 @dll.bind
 def nir_lower_input_attachments(shader:c.POINTER[nir_shader], options:c.POINTER[nir_input_attachment_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4388,7 +4388,7 @@ class struct_nir_lower_wpos_ytransform_options(c.Struct):
   fs_coord_origin_lower_left: Annotated[Annotated[bool, ctypes.c_bool], 8, 1, 1]
   fs_coord_pixel_center_integer: Annotated[Annotated[bool, ctypes.c_bool], 8, 1, 2]
   fs_coord_pixel_center_half_integer: Annotated[Annotated[bool, ctypes.c_bool], 8, 1, 3]
-nir_lower_wpos_ytransform_options = struct_nir_lower_wpos_ytransform_options
+nir_lower_wpos_ytransform_options: TypeAlias = struct_nir_lower_wpos_ytransform_options
 @dll.bind
 def nir_lower_wpos_ytransform(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_wpos_ytransform_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4409,7 +4409,7 @@ class struct_nir_lower_drawpixels_options(c.Struct):
   pixelmap_sampler: Annotated[Annotated[int, ctypes.c_uint32], 28]
   pixel_maps: Annotated[Annotated[bool, ctypes.c_bool], 32, 1, 0]
   scale_and_bias: Annotated[Annotated[bool, ctypes.c_bool], 32, 1, 1]
-nir_lower_drawpixels_options = struct_nir_lower_drawpixels_options
+nir_lower_drawpixels_options: TypeAlias = struct_nir_lower_drawpixels_options
 @dll.bind
 def nir_lower_drawpixels(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_drawpixels_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -4417,16 +4417,16 @@ class struct_nir_lower_bitmap_options(c.Struct):
   SIZE = 8
   sampler: Annotated[Annotated[int, ctypes.c_uint32], 0]
   swizzle_xxxx: Annotated[Annotated[bool, ctypes.c_bool], 4]
-nir_lower_bitmap_options = struct_nir_lower_bitmap_options
+nir_lower_bitmap_options: TypeAlias = struct_nir_lower_bitmap_options
 @dll.bind
 def nir_lower_bitmap(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_bitmap_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_atomics_to_ssbo(shader:c.POINTER[nir_shader], offset_align_state:Annotated[int, ctypes.c_uint32]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_gs_intrinsics_flags = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_gs_intrinsics_per_stream = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_per_stream', 1) # type: ignore
-nir_lower_gs_intrinsics_count_primitives = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_primitives', 2) # type: ignore
-nir_lower_gs_intrinsics_count_vertices_per_primitive = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_vertices_per_primitive', 4) # type: ignore
-nir_lower_gs_intrinsics_overwrite_incomplete = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_overwrite_incomplete', 8) # type: ignore
+class nir_lower_gs_intrinsics_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_gs_intrinsics_per_stream = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_per_stream', 1)
+nir_lower_gs_intrinsics_count_primitives = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_primitives', 2)
+nir_lower_gs_intrinsics_count_vertices_per_primitive = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_vertices_per_primitive', 4)
+nir_lower_gs_intrinsics_overwrite_incomplete = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_overwrite_incomplete', 8)
 
 @dll.bind
 def nir_lower_gs_intrinsics(shader:c.POINTER[nir_shader], options:nir_lower_gs_intrinsics_flags) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4440,10 +4440,10 @@ class struct_nir_lower_task_shader_options(c.Struct):
   payload_to_shared_for_atomics: Annotated[Annotated[bool, ctypes.c_bool], 0, 1, 0]
   payload_to_shared_for_small_types: Annotated[Annotated[bool, ctypes.c_bool], 0, 1, 1]
   payload_offset_in_bytes: Annotated[uint32_t, 4]
-nir_lower_task_shader_options = struct_nir_lower_task_shader_options
+nir_lower_task_shader_options: TypeAlias = struct_nir_lower_task_shader_options
 @dll.bind
 def nir_lower_task_shader(shader:c.POINTER[nir_shader], options:nir_lower_task_shader_options) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_bit_size_callback = c.CFUNCTYPE(Annotated[int, ctypes.c_uint32], c.POINTER[struct_nir_instr], c.POINTER[None])
+nir_lower_bit_size_callback: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_uint32], c.POINTER[struct_nir_instr], c.POINTER[None])
 @dll.bind
 def nir_lower_bit_size(shader:c.POINTER[nir_shader], callback:nir_lower_bit_size_callback, callback_data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4454,7 +4454,7 @@ class struct_nir_split_conversions_options(c.Struct):
   callback: Annotated[nir_lower_bit_size_callback, 0]
   callback_data: Annotated[c.POINTER[None], 8]
   has_convert_alu_types: Annotated[Annotated[bool, ctypes.c_bool], 16]
-nir_split_conversions_options = struct_nir_split_conversions_options
+nir_split_conversions_options: TypeAlias = struct_nir_split_conversions_options
 @dll.bind
 def nir_split_conversions(shader:c.POINTER[nir_shader], options:c.POINTER[nir_split_conversions_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4486,7 +4486,7 @@ class struct_nir_opt_tex_srcs_options(c.Struct):
   SIZE = 8
   sampler_dims: Annotated[Annotated[int, ctypes.c_uint32], 0]
   src_types: Annotated[Annotated[int, ctypes.c_uint32], 4]
-nir_opt_tex_srcs_options = struct_nir_opt_tex_srcs_options
+nir_opt_tex_srcs_options: TypeAlias = struct_nir_opt_tex_srcs_options
 @c.record
 class struct_nir_opt_16bit_tex_image_options(c.Struct):
   SIZE = 24
@@ -4498,7 +4498,7 @@ class struct_nir_opt_16bit_tex_image_options(c.Struct):
   opt_image_srcs: Annotated[Annotated[bool, ctypes.c_bool], 8]
   opt_srcs_options_count: Annotated[Annotated[int, ctypes.c_uint32], 12]
   opt_srcs_options: Annotated[c.POINTER[nir_opt_tex_srcs_options], 16]
-nir_opt_16bit_tex_image_options = struct_nir_opt_16bit_tex_image_options
+nir_opt_16bit_tex_image_options: TypeAlias = struct_nir_opt_16bit_tex_image_options
 @dll.bind
 def nir_opt_16bit_tex_image(nir:c.POINTER[nir_shader], options:c.POINTER[nir_opt_16bit_tex_image_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -4507,8 +4507,8 @@ class struct_nir_tex_src_type_constraint(c.Struct):
   legalize_type: Annotated[Annotated[bool, ctypes.c_bool], 0]
   bit_size: Annotated[uint8_t, 1]
   match_src: Annotated[nir_tex_src_type, 4]
-nir_tex_src_type_constraint = struct_nir_tex_src_type_constraint
-nir_tex_src_type_constraints = c.Array[struct_nir_tex_src_type_constraint, Literal[23]]
+nir_tex_src_type_constraint: TypeAlias = struct_nir_tex_src_type_constraint
+nir_tex_src_type_constraints: TypeAlias = c.Array[struct_nir_tex_src_type_constraint, Literal[23]]
 @dll.bind
 def nir_legalize_16bit_sampler_srcs(nir:c.POINTER[nir_shader], constraints:nir_tex_src_type_constraints) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4519,19 +4519,19 @@ def nir_lower_default_point_size(nir:c.POINTER[nir_shader]) -> Annotated[bool, c
 def nir_lower_texcoord_replace(s:c.POINTER[nir_shader], coord_replace:Annotated[int, ctypes.c_uint32], point_coord_is_sysval:Annotated[bool, ctypes.c_bool], yinvert:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_texcoord_replace_late(s:c.POINTER[nir_shader], coord_replace:Annotated[int, ctypes.c_uint32], point_coord_is_sysval:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_interpolation_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_interpolation_at_sample = nir_lower_interpolation_options.define('nir_lower_interpolation_at_sample', 2) # type: ignore
-nir_lower_interpolation_at_offset = nir_lower_interpolation_options.define('nir_lower_interpolation_at_offset', 4) # type: ignore
-nir_lower_interpolation_centroid = nir_lower_interpolation_options.define('nir_lower_interpolation_centroid', 8) # type: ignore
-nir_lower_interpolation_pixel = nir_lower_interpolation_options.define('nir_lower_interpolation_pixel', 16) # type: ignore
-nir_lower_interpolation_sample = nir_lower_interpolation_options.define('nir_lower_interpolation_sample', 32) # type: ignore
+class nir_lower_interpolation_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_interpolation_at_sample = nir_lower_interpolation_options.define('nir_lower_interpolation_at_sample', 2)
+nir_lower_interpolation_at_offset = nir_lower_interpolation_options.define('nir_lower_interpolation_at_offset', 4)
+nir_lower_interpolation_centroid = nir_lower_interpolation_options.define('nir_lower_interpolation_centroid', 8)
+nir_lower_interpolation_pixel = nir_lower_interpolation_options.define('nir_lower_interpolation_pixel', 16)
+nir_lower_interpolation_sample = nir_lower_interpolation_options.define('nir_lower_interpolation_sample', 32)
 
 @dll.bind
 def nir_lower_interpolation(shader:c.POINTER[nir_shader], options:nir_lower_interpolation_options) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_discard_if_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_demote_if_to_cf = nir_lower_discard_if_options.define('nir_lower_demote_if_to_cf', 1) # type: ignore
-nir_lower_terminate_if_to_cf = nir_lower_discard_if_options.define('nir_lower_terminate_if_to_cf', 2) # type: ignore
-nir_move_terminate_out_of_loops = nir_lower_discard_if_options.define('nir_move_terminate_out_of_loops', 4) # type: ignore
+class nir_lower_discard_if_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_demote_if_to_cf = nir_lower_discard_if_options.define('nir_lower_demote_if_to_cf', 1)
+nir_lower_terminate_if_to_cf = nir_lower_discard_if_options.define('nir_lower_terminate_if_to_cf', 2)
+nir_move_terminate_out_of_loops = nir_lower_discard_if_options.define('nir_move_terminate_out_of_loops', 4)
 
 @dll.bind
 def nir_lower_discard_if(shader:c.POINTER[nir_shader], options:nir_lower_discard_if_options) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4548,7 +4548,7 @@ class struct_nir_lower_multiview_options(c.Struct):
   SIZE = 16
   view_mask: Annotated[uint32_t, 0]
   allowed_per_view_outputs: Annotated[uint64_t, 8]
-nir_lower_multiview_options = struct_nir_lower_multiview_options
+nir_lower_multiview_options: TypeAlias = struct_nir_lower_multiview_options
 @dll.bind
 def nir_shader_uses_view_index(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4557,13 +4557,13 @@ def nir_can_lower_multiview(shader:c.POINTER[nir_shader], options:nir_lower_mult
 def nir_lower_multiview(shader:c.POINTER[nir_shader], options:nir_lower_multiview_options) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_view_index_to_device_index(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_fp16_cast_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_fp16_rtz = nir_lower_fp16_cast_options.define('nir_lower_fp16_rtz', 1) # type: ignore
-nir_lower_fp16_rtne = nir_lower_fp16_cast_options.define('nir_lower_fp16_rtne', 2) # type: ignore
-nir_lower_fp16_ru = nir_lower_fp16_cast_options.define('nir_lower_fp16_ru', 4) # type: ignore
-nir_lower_fp16_rd = nir_lower_fp16_cast_options.define('nir_lower_fp16_rd', 8) # type: ignore
-nir_lower_fp16_all = nir_lower_fp16_cast_options.define('nir_lower_fp16_all', 15) # type: ignore
-nir_lower_fp16_split_fp64 = nir_lower_fp16_cast_options.define('nir_lower_fp16_split_fp64', 16) # type: ignore
+class nir_lower_fp16_cast_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_fp16_rtz = nir_lower_fp16_cast_options.define('nir_lower_fp16_rtz', 1)
+nir_lower_fp16_rtne = nir_lower_fp16_cast_options.define('nir_lower_fp16_rtne', 2)
+nir_lower_fp16_ru = nir_lower_fp16_cast_options.define('nir_lower_fp16_ru', 4)
+nir_lower_fp16_rd = nir_lower_fp16_cast_options.define('nir_lower_fp16_rd', 8)
+nir_lower_fp16_all = nir_lower_fp16_cast_options.define('nir_lower_fp16_all', 15)
+nir_lower_fp16_split_fp64 = nir_lower_fp16_cast_options.define('nir_lower_fp16_split_fp64', 16)
 
 @dll.bind
 def nir_lower_fp16_casts(shader:c.POINTER[nir_shader], options:nir_lower_fp16_cast_options) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4618,7 +4618,7 @@ class struct_nir_lower_ssbo_options(c.Struct):
   SIZE = 2
   native_loads: Annotated[Annotated[bool, ctypes.c_bool], 0]
   native_offset: Annotated[Annotated[bool, ctypes.c_bool], 1]
-nir_lower_ssbo_options = struct_nir_lower_ssbo_options
+nir_lower_ssbo_options: TypeAlias = struct_nir_lower_ssbo_options
 @dll.bind
 def nir_lower_ssbo(shader:c.POINTER[nir_shader], opts:c.POINTER[nir_lower_ssbo_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4629,7 +4629,7 @@ class struct_nir_lower_printf_options(c.Struct):
   max_buffer_size: Annotated[Annotated[int, ctypes.c_uint32], 0]
   ptr_bit_size: Annotated[Annotated[int, ctypes.c_uint32], 4]
   hash_format_strings: Annotated[Annotated[bool, ctypes.c_bool], 8]
-nir_lower_printf_options = struct_nir_lower_printf_options
+nir_lower_printf_options: TypeAlias = struct_nir_lower_printf_options
 @dll.bind
 def nir_lower_printf(nir:c.POINTER[nir_shader], options:c.POINTER[nir_lower_printf_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4642,7 +4642,7 @@ def nir_opt_comparison_pre(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctyp
 class struct_nir_opt_access_options(c.Struct):
   SIZE = 1
   is_vulkan: Annotated[Annotated[bool, ctypes.c_bool], 0]
-nir_opt_access_options = struct_nir_opt_access_options
+nir_opt_access_options: TypeAlias = struct_nir_opt_access_options
 @dll.bind
 def nir_opt_access(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_access_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4661,17 +4661,17 @@ def nir_opt_algebraic_integer_promotion(shader:c.POINTER[nir_shader]) -> Annotat
 def nir_opt_reassociate_matrix_mul(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_opt_constant_folding(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_combine_barrier_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None])
+nir_combine_barrier_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None])
 @dll.bind
 def nir_opt_combine_barriers(shader:c.POINTER[nir_shader], combine_cb:nir_combine_barrier_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
-mesa_scope = CEnum(Annotated[int, ctypes.c_uint32])
-SCOPE_NONE = mesa_scope.define('SCOPE_NONE', 0) # type: ignore
-SCOPE_INVOCATION = mesa_scope.define('SCOPE_INVOCATION', 1) # type: ignore
-SCOPE_SUBGROUP = mesa_scope.define('SCOPE_SUBGROUP', 2) # type: ignore
-SCOPE_SHADER_CALL = mesa_scope.define('SCOPE_SHADER_CALL', 3) # type: ignore
-SCOPE_WORKGROUP = mesa_scope.define('SCOPE_WORKGROUP', 4) # type: ignore
-SCOPE_QUEUE_FAMILY = mesa_scope.define('SCOPE_QUEUE_FAMILY', 5) # type: ignore
-SCOPE_DEVICE = mesa_scope.define('SCOPE_DEVICE', 6) # type: ignore
+class mesa_scope(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SCOPE_NONE = mesa_scope.define('SCOPE_NONE', 0)
+SCOPE_INVOCATION = mesa_scope.define('SCOPE_INVOCATION', 1)
+SCOPE_SUBGROUP = mesa_scope.define('SCOPE_SUBGROUP', 2)
+SCOPE_SHADER_CALL = mesa_scope.define('SCOPE_SHADER_CALL', 3)
+SCOPE_WORKGROUP = mesa_scope.define('SCOPE_WORKGROUP', 4)
+SCOPE_QUEUE_FAMILY = mesa_scope.define('SCOPE_QUEUE_FAMILY', 5)
+SCOPE_DEVICE = mesa_scope.define('SCOPE_DEVICE', 6)
 
 @dll.bind
 def nir_opt_acquire_release_barriers(shader:c.POINTER[nir_shader], max_scope:mesa_scope) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4713,9 +4713,9 @@ def nir_opt_generate_bfi(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes
 def nir_opt_idiv_const(shader:c.POINTER[nir_shader], min_bit_size:Annotated[int, ctypes.c_uint32]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_opt_mqsad(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_opt_if_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_opt_if_optimize_phi_true_false = nir_opt_if_options.define('nir_opt_if_optimize_phi_true_false', 1) # type: ignore
-nir_opt_if_avoid_64bit_phis = nir_opt_if_options.define('nir_opt_if_avoid_64bit_phis', 2) # type: ignore
+class nir_opt_if_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_opt_if_optimize_phi_true_false = nir_opt_if_options.define('nir_opt_if_optimize_phi_true_false', 1)
+nir_opt_if_avoid_64bit_phis = nir_opt_if_options.define('nir_opt_if_avoid_64bit_phis', 2)
 
 @dll.bind
 def nir_opt_if(shader:c.POINTER[nir_shader], options:nir_opt_if_options) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4729,16 +4729,16 @@ def nir_opt_licm(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]
 def nir_opt_loop(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_opt_loop_unroll(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_move_options = CEnum(Annotated[int, ctypes.c_uint32])
-nir_move_const_undef = nir_move_options.define('nir_move_const_undef', 1) # type: ignore
-nir_move_load_ubo = nir_move_options.define('nir_move_load_ubo', 2) # type: ignore
-nir_move_load_input = nir_move_options.define('nir_move_load_input', 4) # type: ignore
-nir_move_comparisons = nir_move_options.define('nir_move_comparisons', 8) # type: ignore
-nir_move_copies = nir_move_options.define('nir_move_copies', 16) # type: ignore
-nir_move_load_ssbo = nir_move_options.define('nir_move_load_ssbo', 32) # type: ignore
-nir_move_load_uniform = nir_move_options.define('nir_move_load_uniform', 64) # type: ignore
-nir_move_alu = nir_move_options.define('nir_move_alu', 128) # type: ignore
-nir_dont_move_byte_word_vecs = nir_move_options.define('nir_dont_move_byte_word_vecs', 256) # type: ignore
+class nir_move_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_move_const_undef = nir_move_options.define('nir_move_const_undef', 1)
+nir_move_load_ubo = nir_move_options.define('nir_move_load_ubo', 2)
+nir_move_load_input = nir_move_options.define('nir_move_load_input', 4)
+nir_move_comparisons = nir_move_options.define('nir_move_comparisons', 8)
+nir_move_copies = nir_move_options.define('nir_move_copies', 16)
+nir_move_load_ssbo = nir_move_options.define('nir_move_load_ssbo', 32)
+nir_move_load_uniform = nir_move_options.define('nir_move_load_uniform', 64)
+nir_move_alu = nir_move_options.define('nir_move_alu', 128)
+nir_dont_move_byte_word_vecs = nir_move_options.define('nir_dont_move_byte_word_vecs', 256)
 
 @dll.bind
 def nir_can_move_instr(instr:c.POINTER[nir_instr], options:nir_move_options) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4757,7 +4757,7 @@ class struct_nir_opt_offsets_options(c.Struct):
   max_offset_cb: Annotated[c.CFUNCTYPE(uint32_t, c.POINTER[nir_intrinsic_instr], c.POINTER[None]), 24]
   max_offset_data: Annotated[c.POINTER[None], 32]
   allow_offset_wrap: Annotated[Annotated[bool, ctypes.c_bool], 40]
-nir_opt_offsets_options = struct_nir_opt_offsets_options
+nir_opt_offsets_options: TypeAlias = struct_nir_opt_offsets_options
 @dll.bind
 def nir_opt_offsets(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_offsets_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -4767,7 +4767,7 @@ class struct_nir_opt_peephole_select_options(c.Struct):
   indirect_load_ok: Annotated[Annotated[bool, ctypes.c_bool], 4]
   expensive_alu_ok: Annotated[Annotated[bool, ctypes.c_bool], 5]
   discard_ok: Annotated[Annotated[bool, ctypes.c_bool], 6]
-nir_opt_peephole_select_options = struct_nir_opt_peephole_select_options
+nir_opt_peephole_select_options: TypeAlias = struct_nir_opt_peephole_select_options
 @dll.bind
 def nir_opt_peephole_select(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_peephole_select_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4808,107 +4808,107 @@ def nir_opt_ray_query_ranges(shader:c.POINTER[nir_shader]) -> Annotated[bool, ct
 def nir_opt_tex_skip_helpers(shader:c.POINTER[nir_shader], no_add_divergence:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_sweep(shader:c.POINTER[nir_shader]) -> None: ...
-gl_system_value = CEnum(Annotated[int, ctypes.c_uint32])
-SYSTEM_VALUE_SUBGROUP_SIZE = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_SIZE', 0) # type: ignore
-SYSTEM_VALUE_SUBGROUP_INVOCATION = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_INVOCATION', 1) # type: ignore
-SYSTEM_VALUE_SUBGROUP_EQ_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_EQ_MASK', 2) # type: ignore
-SYSTEM_VALUE_SUBGROUP_GE_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_GE_MASK', 3) # type: ignore
-SYSTEM_VALUE_SUBGROUP_GT_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_GT_MASK', 4) # type: ignore
-SYSTEM_VALUE_SUBGROUP_LE_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_LE_MASK', 5) # type: ignore
-SYSTEM_VALUE_SUBGROUP_LT_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_LT_MASK', 6) # type: ignore
-SYSTEM_VALUE_NUM_SUBGROUPS = gl_system_value.define('SYSTEM_VALUE_NUM_SUBGROUPS', 7) # type: ignore
-SYSTEM_VALUE_SUBGROUP_ID = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_ID', 8) # type: ignore
-SYSTEM_VALUE_VERTEX_ID = gl_system_value.define('SYSTEM_VALUE_VERTEX_ID', 9) # type: ignore
-SYSTEM_VALUE_INSTANCE_ID = gl_system_value.define('SYSTEM_VALUE_INSTANCE_ID', 10) # type: ignore
-SYSTEM_VALUE_INSTANCE_INDEX = gl_system_value.define('SYSTEM_VALUE_INSTANCE_INDEX', 11) # type: ignore
-SYSTEM_VALUE_VERTEX_ID_ZERO_BASE = gl_system_value.define('SYSTEM_VALUE_VERTEX_ID_ZERO_BASE', 12) # type: ignore
-SYSTEM_VALUE_BASE_VERTEX = gl_system_value.define('SYSTEM_VALUE_BASE_VERTEX', 13) # type: ignore
-SYSTEM_VALUE_FIRST_VERTEX = gl_system_value.define('SYSTEM_VALUE_FIRST_VERTEX', 14) # type: ignore
-SYSTEM_VALUE_IS_INDEXED_DRAW = gl_system_value.define('SYSTEM_VALUE_IS_INDEXED_DRAW', 15) # type: ignore
-SYSTEM_VALUE_BASE_INSTANCE = gl_system_value.define('SYSTEM_VALUE_BASE_INSTANCE', 16) # type: ignore
-SYSTEM_VALUE_DRAW_ID = gl_system_value.define('SYSTEM_VALUE_DRAW_ID', 17) # type: ignore
-SYSTEM_VALUE_INVOCATION_ID = gl_system_value.define('SYSTEM_VALUE_INVOCATION_ID', 18) # type: ignore
-SYSTEM_VALUE_FRAG_COORD = gl_system_value.define('SYSTEM_VALUE_FRAG_COORD', 19) # type: ignore
-SYSTEM_VALUE_PIXEL_COORD = gl_system_value.define('SYSTEM_VALUE_PIXEL_COORD', 20) # type: ignore
-SYSTEM_VALUE_FRAG_COORD_Z = gl_system_value.define('SYSTEM_VALUE_FRAG_COORD_Z', 21) # type: ignore
-SYSTEM_VALUE_FRAG_COORD_W = gl_system_value.define('SYSTEM_VALUE_FRAG_COORD_W', 22) # type: ignore
-SYSTEM_VALUE_POINT_COORD = gl_system_value.define('SYSTEM_VALUE_POINT_COORD', 23) # type: ignore
-SYSTEM_VALUE_LINE_COORD = gl_system_value.define('SYSTEM_VALUE_LINE_COORD', 24) # type: ignore
-SYSTEM_VALUE_FRONT_FACE = gl_system_value.define('SYSTEM_VALUE_FRONT_FACE', 25) # type: ignore
-SYSTEM_VALUE_FRONT_FACE_FSIGN = gl_system_value.define('SYSTEM_VALUE_FRONT_FACE_FSIGN', 26) # type: ignore
-SYSTEM_VALUE_SAMPLE_ID = gl_system_value.define('SYSTEM_VALUE_SAMPLE_ID', 27) # type: ignore
-SYSTEM_VALUE_SAMPLE_POS = gl_system_value.define('SYSTEM_VALUE_SAMPLE_POS', 28) # type: ignore
-SYSTEM_VALUE_SAMPLE_POS_OR_CENTER = gl_system_value.define('SYSTEM_VALUE_SAMPLE_POS_OR_CENTER', 29) # type: ignore
-SYSTEM_VALUE_SAMPLE_MASK_IN = gl_system_value.define('SYSTEM_VALUE_SAMPLE_MASK_IN', 30) # type: ignore
-SYSTEM_VALUE_LAYER_ID = gl_system_value.define('SYSTEM_VALUE_LAYER_ID', 31) # type: ignore
-SYSTEM_VALUE_HELPER_INVOCATION = gl_system_value.define('SYSTEM_VALUE_HELPER_INVOCATION', 32) # type: ignore
-SYSTEM_VALUE_COLOR0 = gl_system_value.define('SYSTEM_VALUE_COLOR0', 33) # type: ignore
-SYSTEM_VALUE_COLOR1 = gl_system_value.define('SYSTEM_VALUE_COLOR1', 34) # type: ignore
-SYSTEM_VALUE_TESS_COORD = gl_system_value.define('SYSTEM_VALUE_TESS_COORD', 35) # type: ignore
-SYSTEM_VALUE_VERTICES_IN = gl_system_value.define('SYSTEM_VALUE_VERTICES_IN', 36) # type: ignore
-SYSTEM_VALUE_PRIMITIVE_ID = gl_system_value.define('SYSTEM_VALUE_PRIMITIVE_ID', 37) # type: ignore
-SYSTEM_VALUE_TESS_LEVEL_OUTER = gl_system_value.define('SYSTEM_VALUE_TESS_LEVEL_OUTER', 38) # type: ignore
-SYSTEM_VALUE_TESS_LEVEL_INNER = gl_system_value.define('SYSTEM_VALUE_TESS_LEVEL_INNER', 39) # type: ignore
-SYSTEM_VALUE_TESS_LEVEL_OUTER_DEFAULT = gl_system_value.define('SYSTEM_VALUE_TESS_LEVEL_OUTER_DEFAULT', 40) # type: ignore
-SYSTEM_VALUE_TESS_LEVEL_INNER_DEFAULT = gl_system_value.define('SYSTEM_VALUE_TESS_LEVEL_INNER_DEFAULT', 41) # type: ignore
-SYSTEM_VALUE_LOCAL_INVOCATION_ID = gl_system_value.define('SYSTEM_VALUE_LOCAL_INVOCATION_ID', 42) # type: ignore
-SYSTEM_VALUE_LOCAL_INVOCATION_INDEX = gl_system_value.define('SYSTEM_VALUE_LOCAL_INVOCATION_INDEX', 43) # type: ignore
-SYSTEM_VALUE_GLOBAL_INVOCATION_ID = gl_system_value.define('SYSTEM_VALUE_GLOBAL_INVOCATION_ID', 44) # type: ignore
-SYSTEM_VALUE_BASE_GLOBAL_INVOCATION_ID = gl_system_value.define('SYSTEM_VALUE_BASE_GLOBAL_INVOCATION_ID', 45) # type: ignore
-SYSTEM_VALUE_GLOBAL_INVOCATION_INDEX = gl_system_value.define('SYSTEM_VALUE_GLOBAL_INVOCATION_INDEX', 46) # type: ignore
-SYSTEM_VALUE_WORKGROUP_ID = gl_system_value.define('SYSTEM_VALUE_WORKGROUP_ID', 47) # type: ignore
-SYSTEM_VALUE_BASE_WORKGROUP_ID = gl_system_value.define('SYSTEM_VALUE_BASE_WORKGROUP_ID', 48) # type: ignore
-SYSTEM_VALUE_WORKGROUP_INDEX = gl_system_value.define('SYSTEM_VALUE_WORKGROUP_INDEX', 49) # type: ignore
-SYSTEM_VALUE_NUM_WORKGROUPS = gl_system_value.define('SYSTEM_VALUE_NUM_WORKGROUPS', 50) # type: ignore
-SYSTEM_VALUE_WORKGROUP_SIZE = gl_system_value.define('SYSTEM_VALUE_WORKGROUP_SIZE', 51) # type: ignore
-SYSTEM_VALUE_GLOBAL_GROUP_SIZE = gl_system_value.define('SYSTEM_VALUE_GLOBAL_GROUP_SIZE', 52) # type: ignore
-SYSTEM_VALUE_WORK_DIM = gl_system_value.define('SYSTEM_VALUE_WORK_DIM', 53) # type: ignore
-SYSTEM_VALUE_USER_DATA_AMD = gl_system_value.define('SYSTEM_VALUE_USER_DATA_AMD', 54) # type: ignore
-SYSTEM_VALUE_DEVICE_INDEX = gl_system_value.define('SYSTEM_VALUE_DEVICE_INDEX', 55) # type: ignore
-SYSTEM_VALUE_VIEW_INDEX = gl_system_value.define('SYSTEM_VALUE_VIEW_INDEX', 56) # type: ignore
-SYSTEM_VALUE_VERTEX_CNT = gl_system_value.define('SYSTEM_VALUE_VERTEX_CNT', 57) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_PERSP_PIXEL = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_PIXEL', 58) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_PERSP_SAMPLE = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_SAMPLE', 59) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTROID = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTROID', 60) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTER_RHW = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTER_RHW', 61) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_LINEAR_PIXEL = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_LINEAR_PIXEL', 62) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_LINEAR_CENTROID = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_LINEAR_CENTROID', 63) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_LINEAR_SAMPLE = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_LINEAR_SAMPLE', 64) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_PULL_MODEL = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PULL_MODEL', 65) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD', 66) # type: ignore
-SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD', 67) # type: ignore
-SYSTEM_VALUE_RAY_LAUNCH_ID = gl_system_value.define('SYSTEM_VALUE_RAY_LAUNCH_ID', 68) # type: ignore
-SYSTEM_VALUE_RAY_LAUNCH_SIZE = gl_system_value.define('SYSTEM_VALUE_RAY_LAUNCH_SIZE', 69) # type: ignore
-SYSTEM_VALUE_RAY_WORLD_ORIGIN = gl_system_value.define('SYSTEM_VALUE_RAY_WORLD_ORIGIN', 70) # type: ignore
-SYSTEM_VALUE_RAY_WORLD_DIRECTION = gl_system_value.define('SYSTEM_VALUE_RAY_WORLD_DIRECTION', 71) # type: ignore
-SYSTEM_VALUE_RAY_OBJECT_ORIGIN = gl_system_value.define('SYSTEM_VALUE_RAY_OBJECT_ORIGIN', 72) # type: ignore
-SYSTEM_VALUE_RAY_OBJECT_DIRECTION = gl_system_value.define('SYSTEM_VALUE_RAY_OBJECT_DIRECTION', 73) # type: ignore
-SYSTEM_VALUE_RAY_T_MIN = gl_system_value.define('SYSTEM_VALUE_RAY_T_MIN', 74) # type: ignore
-SYSTEM_VALUE_RAY_T_MAX = gl_system_value.define('SYSTEM_VALUE_RAY_T_MAX', 75) # type: ignore
-SYSTEM_VALUE_RAY_OBJECT_TO_WORLD = gl_system_value.define('SYSTEM_VALUE_RAY_OBJECT_TO_WORLD', 76) # type: ignore
-SYSTEM_VALUE_RAY_WORLD_TO_OBJECT = gl_system_value.define('SYSTEM_VALUE_RAY_WORLD_TO_OBJECT', 77) # type: ignore
-SYSTEM_VALUE_RAY_HIT_KIND = gl_system_value.define('SYSTEM_VALUE_RAY_HIT_KIND', 78) # type: ignore
-SYSTEM_VALUE_RAY_FLAGS = gl_system_value.define('SYSTEM_VALUE_RAY_FLAGS', 79) # type: ignore
-SYSTEM_VALUE_RAY_GEOMETRY_INDEX = gl_system_value.define('SYSTEM_VALUE_RAY_GEOMETRY_INDEX', 80) # type: ignore
-SYSTEM_VALUE_RAY_INSTANCE_CUSTOM_INDEX = gl_system_value.define('SYSTEM_VALUE_RAY_INSTANCE_CUSTOM_INDEX', 81) # type: ignore
-SYSTEM_VALUE_CULL_MASK = gl_system_value.define('SYSTEM_VALUE_CULL_MASK', 82) # type: ignore
-SYSTEM_VALUE_RAY_TRIANGLE_VERTEX_POSITIONS = gl_system_value.define('SYSTEM_VALUE_RAY_TRIANGLE_VERTEX_POSITIONS', 83) # type: ignore
-SYSTEM_VALUE_MESH_VIEW_COUNT = gl_system_value.define('SYSTEM_VALUE_MESH_VIEW_COUNT', 84) # type: ignore
-SYSTEM_VALUE_MESH_VIEW_INDICES = gl_system_value.define('SYSTEM_VALUE_MESH_VIEW_INDICES', 85) # type: ignore
-SYSTEM_VALUE_GS_HEADER_IR3 = gl_system_value.define('SYSTEM_VALUE_GS_HEADER_IR3', 86) # type: ignore
-SYSTEM_VALUE_TCS_HEADER_IR3 = gl_system_value.define('SYSTEM_VALUE_TCS_HEADER_IR3', 87) # type: ignore
-SYSTEM_VALUE_REL_PATCH_ID_IR3 = gl_system_value.define('SYSTEM_VALUE_REL_PATCH_ID_IR3', 88) # type: ignore
-SYSTEM_VALUE_FRAG_SHADING_RATE = gl_system_value.define('SYSTEM_VALUE_FRAG_SHADING_RATE', 89) # type: ignore
-SYSTEM_VALUE_FULLY_COVERED = gl_system_value.define('SYSTEM_VALUE_FULLY_COVERED', 90) # type: ignore
-SYSTEM_VALUE_FRAG_SIZE = gl_system_value.define('SYSTEM_VALUE_FRAG_SIZE', 91) # type: ignore
-SYSTEM_VALUE_FRAG_INVOCATION_COUNT = gl_system_value.define('SYSTEM_VALUE_FRAG_INVOCATION_COUNT', 92) # type: ignore
-SYSTEM_VALUE_SHADER_INDEX = gl_system_value.define('SYSTEM_VALUE_SHADER_INDEX', 93) # type: ignore
-SYSTEM_VALUE_COALESCED_INPUT_COUNT = gl_system_value.define('SYSTEM_VALUE_COALESCED_INPUT_COUNT', 94) # type: ignore
-SYSTEM_VALUE_WARPS_PER_SM_NV = gl_system_value.define('SYSTEM_VALUE_WARPS_PER_SM_NV', 95) # type: ignore
-SYSTEM_VALUE_SM_COUNT_NV = gl_system_value.define('SYSTEM_VALUE_SM_COUNT_NV', 96) # type: ignore
-SYSTEM_VALUE_WARP_ID_NV = gl_system_value.define('SYSTEM_VALUE_WARP_ID_NV', 97) # type: ignore
-SYSTEM_VALUE_SM_ID_NV = gl_system_value.define('SYSTEM_VALUE_SM_ID_NV', 98) # type: ignore
-SYSTEM_VALUE_MAX = gl_system_value.define('SYSTEM_VALUE_MAX', 99) # type: ignore
+class gl_system_value(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SYSTEM_VALUE_SUBGROUP_SIZE = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_SIZE', 0)
+SYSTEM_VALUE_SUBGROUP_INVOCATION = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_INVOCATION', 1)
+SYSTEM_VALUE_SUBGROUP_EQ_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_EQ_MASK', 2)
+SYSTEM_VALUE_SUBGROUP_GE_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_GE_MASK', 3)
+SYSTEM_VALUE_SUBGROUP_GT_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_GT_MASK', 4)
+SYSTEM_VALUE_SUBGROUP_LE_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_LE_MASK', 5)
+SYSTEM_VALUE_SUBGROUP_LT_MASK = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_LT_MASK', 6)
+SYSTEM_VALUE_NUM_SUBGROUPS = gl_system_value.define('SYSTEM_VALUE_NUM_SUBGROUPS', 7)
+SYSTEM_VALUE_SUBGROUP_ID = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_ID', 8)
+SYSTEM_VALUE_VERTEX_ID = gl_system_value.define('SYSTEM_VALUE_VERTEX_ID', 9)
+SYSTEM_VALUE_INSTANCE_ID = gl_system_value.define('SYSTEM_VALUE_INSTANCE_ID', 10)
+SYSTEM_VALUE_INSTANCE_INDEX = gl_system_value.define('SYSTEM_VALUE_INSTANCE_INDEX', 11)
+SYSTEM_VALUE_VERTEX_ID_ZERO_BASE = gl_system_value.define('SYSTEM_VALUE_VERTEX_ID_ZERO_BASE', 12)
+SYSTEM_VALUE_BASE_VERTEX = gl_system_value.define('SYSTEM_VALUE_BASE_VERTEX', 13)
+SYSTEM_VALUE_FIRST_VERTEX = gl_system_value.define('SYSTEM_VALUE_FIRST_VERTEX', 14)
+SYSTEM_VALUE_IS_INDEXED_DRAW = gl_system_value.define('SYSTEM_VALUE_IS_INDEXED_DRAW', 15)
+SYSTEM_VALUE_BASE_INSTANCE = gl_system_value.define('SYSTEM_VALUE_BASE_INSTANCE', 16)
+SYSTEM_VALUE_DRAW_ID = gl_system_value.define('SYSTEM_VALUE_DRAW_ID', 17)
+SYSTEM_VALUE_INVOCATION_ID = gl_system_value.define('SYSTEM_VALUE_INVOCATION_ID', 18)
+SYSTEM_VALUE_FRAG_COORD = gl_system_value.define('SYSTEM_VALUE_FRAG_COORD', 19)
+SYSTEM_VALUE_PIXEL_COORD = gl_system_value.define('SYSTEM_VALUE_PIXEL_COORD', 20)
+SYSTEM_VALUE_FRAG_COORD_Z = gl_system_value.define('SYSTEM_VALUE_FRAG_COORD_Z', 21)
+SYSTEM_VALUE_FRAG_COORD_W = gl_system_value.define('SYSTEM_VALUE_FRAG_COORD_W', 22)
+SYSTEM_VALUE_POINT_COORD = gl_system_value.define('SYSTEM_VALUE_POINT_COORD', 23)
+SYSTEM_VALUE_LINE_COORD = gl_system_value.define('SYSTEM_VALUE_LINE_COORD', 24)
+SYSTEM_VALUE_FRONT_FACE = gl_system_value.define('SYSTEM_VALUE_FRONT_FACE', 25)
+SYSTEM_VALUE_FRONT_FACE_FSIGN = gl_system_value.define('SYSTEM_VALUE_FRONT_FACE_FSIGN', 26)
+SYSTEM_VALUE_SAMPLE_ID = gl_system_value.define('SYSTEM_VALUE_SAMPLE_ID', 27)
+SYSTEM_VALUE_SAMPLE_POS = gl_system_value.define('SYSTEM_VALUE_SAMPLE_POS', 28)
+SYSTEM_VALUE_SAMPLE_POS_OR_CENTER = gl_system_value.define('SYSTEM_VALUE_SAMPLE_POS_OR_CENTER', 29)
+SYSTEM_VALUE_SAMPLE_MASK_IN = gl_system_value.define('SYSTEM_VALUE_SAMPLE_MASK_IN', 30)
+SYSTEM_VALUE_LAYER_ID = gl_system_value.define('SYSTEM_VALUE_LAYER_ID', 31)
+SYSTEM_VALUE_HELPER_INVOCATION = gl_system_value.define('SYSTEM_VALUE_HELPER_INVOCATION', 32)
+SYSTEM_VALUE_COLOR0 = gl_system_value.define('SYSTEM_VALUE_COLOR0', 33)
+SYSTEM_VALUE_COLOR1 = gl_system_value.define('SYSTEM_VALUE_COLOR1', 34)
+SYSTEM_VALUE_TESS_COORD = gl_system_value.define('SYSTEM_VALUE_TESS_COORD', 35)
+SYSTEM_VALUE_VERTICES_IN = gl_system_value.define('SYSTEM_VALUE_VERTICES_IN', 36)
+SYSTEM_VALUE_PRIMITIVE_ID = gl_system_value.define('SYSTEM_VALUE_PRIMITIVE_ID', 37)
+SYSTEM_VALUE_TESS_LEVEL_OUTER = gl_system_value.define('SYSTEM_VALUE_TESS_LEVEL_OUTER', 38)
+SYSTEM_VALUE_TESS_LEVEL_INNER = gl_system_value.define('SYSTEM_VALUE_TESS_LEVEL_INNER', 39)
+SYSTEM_VALUE_TESS_LEVEL_OUTER_DEFAULT = gl_system_value.define('SYSTEM_VALUE_TESS_LEVEL_OUTER_DEFAULT', 40)
+SYSTEM_VALUE_TESS_LEVEL_INNER_DEFAULT = gl_system_value.define('SYSTEM_VALUE_TESS_LEVEL_INNER_DEFAULT', 41)
+SYSTEM_VALUE_LOCAL_INVOCATION_ID = gl_system_value.define('SYSTEM_VALUE_LOCAL_INVOCATION_ID', 42)
+SYSTEM_VALUE_LOCAL_INVOCATION_INDEX = gl_system_value.define('SYSTEM_VALUE_LOCAL_INVOCATION_INDEX', 43)
+SYSTEM_VALUE_GLOBAL_INVOCATION_ID = gl_system_value.define('SYSTEM_VALUE_GLOBAL_INVOCATION_ID', 44)
+SYSTEM_VALUE_BASE_GLOBAL_INVOCATION_ID = gl_system_value.define('SYSTEM_VALUE_BASE_GLOBAL_INVOCATION_ID', 45)
+SYSTEM_VALUE_GLOBAL_INVOCATION_INDEX = gl_system_value.define('SYSTEM_VALUE_GLOBAL_INVOCATION_INDEX', 46)
+SYSTEM_VALUE_WORKGROUP_ID = gl_system_value.define('SYSTEM_VALUE_WORKGROUP_ID', 47)
+SYSTEM_VALUE_BASE_WORKGROUP_ID = gl_system_value.define('SYSTEM_VALUE_BASE_WORKGROUP_ID', 48)
+SYSTEM_VALUE_WORKGROUP_INDEX = gl_system_value.define('SYSTEM_VALUE_WORKGROUP_INDEX', 49)
+SYSTEM_VALUE_NUM_WORKGROUPS = gl_system_value.define('SYSTEM_VALUE_NUM_WORKGROUPS', 50)
+SYSTEM_VALUE_WORKGROUP_SIZE = gl_system_value.define('SYSTEM_VALUE_WORKGROUP_SIZE', 51)
+SYSTEM_VALUE_GLOBAL_GROUP_SIZE = gl_system_value.define('SYSTEM_VALUE_GLOBAL_GROUP_SIZE', 52)
+SYSTEM_VALUE_WORK_DIM = gl_system_value.define('SYSTEM_VALUE_WORK_DIM', 53)
+SYSTEM_VALUE_USER_DATA_AMD = gl_system_value.define('SYSTEM_VALUE_USER_DATA_AMD', 54)
+SYSTEM_VALUE_DEVICE_INDEX = gl_system_value.define('SYSTEM_VALUE_DEVICE_INDEX', 55)
+SYSTEM_VALUE_VIEW_INDEX = gl_system_value.define('SYSTEM_VALUE_VIEW_INDEX', 56)
+SYSTEM_VALUE_VERTEX_CNT = gl_system_value.define('SYSTEM_VALUE_VERTEX_CNT', 57)
+SYSTEM_VALUE_BARYCENTRIC_PERSP_PIXEL = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_PIXEL', 58)
+SYSTEM_VALUE_BARYCENTRIC_PERSP_SAMPLE = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_SAMPLE', 59)
+SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTROID = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTROID', 60)
+SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTER_RHW = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTER_RHW', 61)
+SYSTEM_VALUE_BARYCENTRIC_LINEAR_PIXEL = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_LINEAR_PIXEL', 62)
+SYSTEM_VALUE_BARYCENTRIC_LINEAR_CENTROID = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_LINEAR_CENTROID', 63)
+SYSTEM_VALUE_BARYCENTRIC_LINEAR_SAMPLE = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_LINEAR_SAMPLE', 64)
+SYSTEM_VALUE_BARYCENTRIC_PULL_MODEL = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PULL_MODEL', 65)
+SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD', 66)
+SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD = gl_system_value.define('SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD', 67)
+SYSTEM_VALUE_RAY_LAUNCH_ID = gl_system_value.define('SYSTEM_VALUE_RAY_LAUNCH_ID', 68)
+SYSTEM_VALUE_RAY_LAUNCH_SIZE = gl_system_value.define('SYSTEM_VALUE_RAY_LAUNCH_SIZE', 69)
+SYSTEM_VALUE_RAY_WORLD_ORIGIN = gl_system_value.define('SYSTEM_VALUE_RAY_WORLD_ORIGIN', 70)
+SYSTEM_VALUE_RAY_WORLD_DIRECTION = gl_system_value.define('SYSTEM_VALUE_RAY_WORLD_DIRECTION', 71)
+SYSTEM_VALUE_RAY_OBJECT_ORIGIN = gl_system_value.define('SYSTEM_VALUE_RAY_OBJECT_ORIGIN', 72)
+SYSTEM_VALUE_RAY_OBJECT_DIRECTION = gl_system_value.define('SYSTEM_VALUE_RAY_OBJECT_DIRECTION', 73)
+SYSTEM_VALUE_RAY_T_MIN = gl_system_value.define('SYSTEM_VALUE_RAY_T_MIN', 74)
+SYSTEM_VALUE_RAY_T_MAX = gl_system_value.define('SYSTEM_VALUE_RAY_T_MAX', 75)
+SYSTEM_VALUE_RAY_OBJECT_TO_WORLD = gl_system_value.define('SYSTEM_VALUE_RAY_OBJECT_TO_WORLD', 76)
+SYSTEM_VALUE_RAY_WORLD_TO_OBJECT = gl_system_value.define('SYSTEM_VALUE_RAY_WORLD_TO_OBJECT', 77)
+SYSTEM_VALUE_RAY_HIT_KIND = gl_system_value.define('SYSTEM_VALUE_RAY_HIT_KIND', 78)
+SYSTEM_VALUE_RAY_FLAGS = gl_system_value.define('SYSTEM_VALUE_RAY_FLAGS', 79)
+SYSTEM_VALUE_RAY_GEOMETRY_INDEX = gl_system_value.define('SYSTEM_VALUE_RAY_GEOMETRY_INDEX', 80)
+SYSTEM_VALUE_RAY_INSTANCE_CUSTOM_INDEX = gl_system_value.define('SYSTEM_VALUE_RAY_INSTANCE_CUSTOM_INDEX', 81)
+SYSTEM_VALUE_CULL_MASK = gl_system_value.define('SYSTEM_VALUE_CULL_MASK', 82)
+SYSTEM_VALUE_RAY_TRIANGLE_VERTEX_POSITIONS = gl_system_value.define('SYSTEM_VALUE_RAY_TRIANGLE_VERTEX_POSITIONS', 83)
+SYSTEM_VALUE_MESH_VIEW_COUNT = gl_system_value.define('SYSTEM_VALUE_MESH_VIEW_COUNT', 84)
+SYSTEM_VALUE_MESH_VIEW_INDICES = gl_system_value.define('SYSTEM_VALUE_MESH_VIEW_INDICES', 85)
+SYSTEM_VALUE_GS_HEADER_IR3 = gl_system_value.define('SYSTEM_VALUE_GS_HEADER_IR3', 86)
+SYSTEM_VALUE_TCS_HEADER_IR3 = gl_system_value.define('SYSTEM_VALUE_TCS_HEADER_IR3', 87)
+SYSTEM_VALUE_REL_PATCH_ID_IR3 = gl_system_value.define('SYSTEM_VALUE_REL_PATCH_ID_IR3', 88)
+SYSTEM_VALUE_FRAG_SHADING_RATE = gl_system_value.define('SYSTEM_VALUE_FRAG_SHADING_RATE', 89)
+SYSTEM_VALUE_FULLY_COVERED = gl_system_value.define('SYSTEM_VALUE_FULLY_COVERED', 90)
+SYSTEM_VALUE_FRAG_SIZE = gl_system_value.define('SYSTEM_VALUE_FRAG_SIZE', 91)
+SYSTEM_VALUE_FRAG_INVOCATION_COUNT = gl_system_value.define('SYSTEM_VALUE_FRAG_INVOCATION_COUNT', 92)
+SYSTEM_VALUE_SHADER_INDEX = gl_system_value.define('SYSTEM_VALUE_SHADER_INDEX', 93)
+SYSTEM_VALUE_COALESCED_INPUT_COUNT = gl_system_value.define('SYSTEM_VALUE_COALESCED_INPUT_COUNT', 94)
+SYSTEM_VALUE_WARPS_PER_SM_NV = gl_system_value.define('SYSTEM_VALUE_WARPS_PER_SM_NV', 95)
+SYSTEM_VALUE_SM_COUNT_NV = gl_system_value.define('SYSTEM_VALUE_SM_COUNT_NV', 96)
+SYSTEM_VALUE_WARP_ID_NV = gl_system_value.define('SYSTEM_VALUE_WARP_ID_NV', 97)
+SYSTEM_VALUE_SM_ID_NV = gl_system_value.define('SYSTEM_VALUE_SM_ID_NV', 98)
+SYSTEM_VALUE_MAX = gl_system_value.define('SYSTEM_VALUE_MAX', 99)
 
 @dll.bind
 def nir_intrinsic_from_system_value(val:gl_system_value) -> nir_intrinsic_op: ...
@@ -4923,7 +4923,7 @@ class struct_nir_unsigned_upper_bound_config(c.Struct):
   max_workgroup_count: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[3]], 12]
   max_workgroup_size: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[3]], 24]
   vertex_attrib_max: Annotated[c.Array[uint32_t, Literal[32]], 36]
-nir_unsigned_upper_bound_config = struct_nir_unsigned_upper_bound_config
+nir_unsigned_upper_bound_config: TypeAlias = struct_nir_unsigned_upper_bound_config
 @dll.bind
 def nir_unsigned_upper_bound(shader:c.POINTER[nir_shader], range_ht:c.POINTER[struct_hash_table], scalar:nir_scalar, config:c.POINTER[nir_unsigned_upper_bound_config]) -> uint32_t: ...
 @dll.bind
@@ -4940,7 +4940,7 @@ class struct_nir_opt_preamble_options(c.Struct):
   rewrite_cost_cb: Annotated[c.CFUNCTYPE(Annotated[float, ctypes.c_float], c.POINTER[nir_def], c.POINTER[None]), 32]
   avoid_instr_cb: Annotated[nir_instr_filter_cb, 40]
   cb_data: Annotated[c.POINTER[None], 48]
-nir_opt_preamble_options = struct_nir_opt_preamble_options
+nir_opt_preamble_options: TypeAlias = struct_nir_opt_preamble_options
 @dll.bind
 def nir_opt_preamble(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_preamble_options], size:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4958,7 +4958,7 @@ def nir_trivialize_registers(s:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.
 @dll.bind
 def nir_static_workgroup_size(s:c.POINTER[nir_shader]) -> Annotated[int, ctypes.c_uint32]: ...
 class struct_nir_use_dominance_state(ctypes.Structure): pass
-nir_use_dominance_state = struct_nir_use_dominance_state
+nir_use_dominance_state: TypeAlias = struct_nir_use_dominance_state
 @dll.bind
 def nir_calc_use_dominance_impl(impl:c.POINTER[nir_function_impl], post_dominance:Annotated[bool, ctypes.c_bool]) -> c.POINTER[nir_use_dominance_state]: ...
 @dll.bind
@@ -5007,11 +5007,11 @@ class nir_output_clipper_var_groups(c.Struct):
 def nir_gather_output_clipper_var_groups(nir:c.POINTER[nir_shader], groups:c.POINTER[nir_output_clipper_var_groups]) -> None: ...
 @dll.bind
 def nir_builder_init_simple_shader(stage:gl_shader_stage, options:c.POINTER[nir_shader_compiler_options], name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> nir_builder: ...
-nir_instr_pass_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], c.POINTER[None])
-nir_intrinsic_pass_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None])
-nir_alu_pass_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_alu_instr], c.POINTER[None])
-nir_tex_pass_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_tex_instr], c.POINTER[None])
-nir_phi_pass_cb = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_phi_instr], c.POINTER[None])
+nir_instr_pass_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], c.POINTER[None])
+nir_intrinsic_pass_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None])
+nir_alu_pass_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_alu_instr], c.POINTER[None])
+nir_tex_pass_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_tex_instr], c.POINTER[None])
+nir_phi_pass_cb: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], c.POINTER[struct_nir_builder], c.POINTER[struct_nir_phi_instr], c.POINTER[None])
 @dll.bind
 def nir_builder_instr_insert(build:c.POINTER[nir_builder], instr:c.POINTER[nir_instr]) -> None: ...
 @dll.bind
@@ -5070,16 +5070,16 @@ def nir_printf_fmt(b:c.POINTER[nir_builder], ptr_bit_size:Annotated[int, ctypes.
 def nir_printf_fmt_at_px(b:c.POINTER[nir_builder], ptr_bit_size:Annotated[int, ctypes.c_uint32], x:Annotated[int, ctypes.c_uint32], y:Annotated[int, ctypes.c_uint32], fmt:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
 @dll.bind
 def nir_call_serialized(build:c.POINTER[nir_builder], serialized:c.POINTER[uint32_t], serialized_size_B:size_t, args:c.POINTER[c.POINTER[nir_def]]) -> c.POINTER[nir_def]: ...
-nir_lower_packing_op = CEnum(Annotated[int, ctypes.c_uint32])
-nir_lower_packing_op_pack_64_2x32 = nir_lower_packing_op.define('nir_lower_packing_op_pack_64_2x32', 0) # type: ignore
-nir_lower_packing_op_unpack_64_2x32 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_64_2x32', 1) # type: ignore
-nir_lower_packing_op_pack_64_4x16 = nir_lower_packing_op.define('nir_lower_packing_op_pack_64_4x16', 2) # type: ignore
-nir_lower_packing_op_unpack_64_4x16 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_64_4x16', 3) # type: ignore
-nir_lower_packing_op_pack_32_2x16 = nir_lower_packing_op.define('nir_lower_packing_op_pack_32_2x16', 4) # type: ignore
-nir_lower_packing_op_unpack_32_2x16 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_32_2x16', 5) # type: ignore
-nir_lower_packing_op_pack_32_4x8 = nir_lower_packing_op.define('nir_lower_packing_op_pack_32_4x8', 6) # type: ignore
-nir_lower_packing_op_unpack_32_4x8 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_32_4x8', 7) # type: ignore
-nir_lower_packing_num_ops = nir_lower_packing_op.define('nir_lower_packing_num_ops', 8) # type: ignore
+class nir_lower_packing_op(Annotated[int, ctypes.c_uint32], c.Enum): pass
+nir_lower_packing_op_pack_64_2x32 = nir_lower_packing_op.define('nir_lower_packing_op_pack_64_2x32', 0)
+nir_lower_packing_op_unpack_64_2x32 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_64_2x32', 1)
+nir_lower_packing_op_pack_64_4x16 = nir_lower_packing_op.define('nir_lower_packing_op_pack_64_4x16', 2)
+nir_lower_packing_op_unpack_64_4x16 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_64_4x16', 3)
+nir_lower_packing_op_pack_32_2x16 = nir_lower_packing_op.define('nir_lower_packing_op_pack_32_2x16', 4)
+nir_lower_packing_op_unpack_32_2x16 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_32_2x16', 5)
+nir_lower_packing_op_pack_32_4x8 = nir_lower_packing_op.define('nir_lower_packing_op_pack_32_4x8', 6)
+nir_lower_packing_op_unpack_32_4x8 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_32_4x8', 7)
+nir_lower_packing_num_ops = nir_lower_packing_op.define('nir_lower_packing_num_ops', 8)
 
 @c.record
 class struct_blob(c.Struct):
@@ -5104,90 +5104,90 @@ def nir_deserialize(mem_ctx:c.POINTER[None], options:c.POINTER[struct_nir_shader
 def nir_serialize_function(blob:c.POINTER[struct_blob], fxn:c.POINTER[nir_function]) -> None: ...
 @dll.bind
 def nir_deserialize_function(mem_ctx:c.POINTER[None], options:c.POINTER[struct_nir_shader_compiler_options], blob:c.POINTER[struct_blob_reader]) -> c.POINTER[nir_function]: ...
-nir_intrinsic_index_flag = CEnum(Annotated[int, ctypes.c_uint32])
-NIR_INTRINSIC_BASE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BASE', 0) # type: ignore
-NIR_INTRINSIC_WRITE_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_WRITE_MASK', 1) # type: ignore
-NIR_INTRINSIC_STREAM_ID = nir_intrinsic_index_flag.define('NIR_INTRINSIC_STREAM_ID', 2) # type: ignore
-NIR_INTRINSIC_UCP_ID = nir_intrinsic_index_flag.define('NIR_INTRINSIC_UCP_ID', 3) # type: ignore
-NIR_INTRINSIC_RANGE_BASE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RANGE_BASE', 4) # type: ignore
-NIR_INTRINSIC_RANGE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RANGE', 5) # type: ignore
-NIR_INTRINSIC_DESC_SET = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DESC_SET', 6) # type: ignore
-NIR_INTRINSIC_BINDING = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BINDING', 7) # type: ignore
-NIR_INTRINSIC_COMPONENT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_COMPONENT', 8) # type: ignore
-NIR_INTRINSIC_COLUMN = nir_intrinsic_index_flag.define('NIR_INTRINSIC_COLUMN', 9) # type: ignore
-NIR_INTRINSIC_INTERP_MODE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_INTERP_MODE', 10) # type: ignore
-NIR_INTRINSIC_REDUCTION_OP = nir_intrinsic_index_flag.define('NIR_INTRINSIC_REDUCTION_OP', 11) # type: ignore
-NIR_INTRINSIC_CLUSTER_SIZE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_CLUSTER_SIZE', 12) # type: ignore
-NIR_INTRINSIC_PARAM_IDX = nir_intrinsic_index_flag.define('NIR_INTRINSIC_PARAM_IDX', 13) # type: ignore
-NIR_INTRINSIC_IMAGE_DIM = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IMAGE_DIM', 14) # type: ignore
-NIR_INTRINSIC_IMAGE_ARRAY = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IMAGE_ARRAY', 15) # type: ignore
-NIR_INTRINSIC_FORMAT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_FORMAT', 16) # type: ignore
-NIR_INTRINSIC_ACCESS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ACCESS', 17) # type: ignore
-NIR_INTRINSIC_CALL_IDX = nir_intrinsic_index_flag.define('NIR_INTRINSIC_CALL_IDX', 18) # type: ignore
-NIR_INTRINSIC_STACK_SIZE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_STACK_SIZE', 19) # type: ignore
-NIR_INTRINSIC_ALIGN_MUL = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ALIGN_MUL', 20) # type: ignore
-NIR_INTRINSIC_ALIGN_OFFSET = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ALIGN_OFFSET', 21) # type: ignore
-NIR_INTRINSIC_DESC_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DESC_TYPE', 22) # type: ignore
-NIR_INTRINSIC_SRC_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_TYPE', 23) # type: ignore
-NIR_INTRINSIC_DEST_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DEST_TYPE', 24) # type: ignore
-NIR_INTRINSIC_SRC_BASE_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_BASE_TYPE', 25) # type: ignore
-NIR_INTRINSIC_SRC_BASE_TYPE2 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_BASE_TYPE2', 26) # type: ignore
-NIR_INTRINSIC_DEST_BASE_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DEST_BASE_TYPE', 27) # type: ignore
-NIR_INTRINSIC_SWIZZLE_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SWIZZLE_MASK', 28) # type: ignore
-NIR_INTRINSIC_FETCH_INACTIVE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_FETCH_INACTIVE', 29) # type: ignore
-NIR_INTRINSIC_OFFSET0 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_OFFSET0', 30) # type: ignore
-NIR_INTRINSIC_OFFSET1 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_OFFSET1', 31) # type: ignore
-NIR_INTRINSIC_ST64 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ST64', 32) # type: ignore
-NIR_INTRINSIC_ARG_UPPER_BOUND_U32_AMD = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ARG_UPPER_BOUND_U32_AMD', 33) # type: ignore
-NIR_INTRINSIC_DST_ACCESS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DST_ACCESS', 34) # type: ignore
-NIR_INTRINSIC_SRC_ACCESS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_ACCESS', 35) # type: ignore
-NIR_INTRINSIC_DRIVER_LOCATION = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DRIVER_LOCATION', 36) # type: ignore
-NIR_INTRINSIC_MEMORY_SEMANTICS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_MEMORY_SEMANTICS', 37) # type: ignore
-NIR_INTRINSIC_MEMORY_MODES = nir_intrinsic_index_flag.define('NIR_INTRINSIC_MEMORY_MODES', 38) # type: ignore
-NIR_INTRINSIC_MEMORY_SCOPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_MEMORY_SCOPE', 39) # type: ignore
-NIR_INTRINSIC_EXECUTION_SCOPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_EXECUTION_SCOPE', 40) # type: ignore
-NIR_INTRINSIC_IO_SEMANTICS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IO_SEMANTICS', 41) # type: ignore
-NIR_INTRINSIC_IO_XFB = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IO_XFB', 42) # type: ignore
-NIR_INTRINSIC_IO_XFB2 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IO_XFB2', 43) # type: ignore
-NIR_INTRINSIC_RAY_QUERY_VALUE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RAY_QUERY_VALUE', 44) # type: ignore
-NIR_INTRINSIC_COMMITTED = nir_intrinsic_index_flag.define('NIR_INTRINSIC_COMMITTED', 45) # type: ignore
-NIR_INTRINSIC_ROUNDING_MODE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ROUNDING_MODE', 46) # type: ignore
-NIR_INTRINSIC_SATURATE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SATURATE', 47) # type: ignore
-NIR_INTRINSIC_SYNCHRONOUS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SYNCHRONOUS', 48) # type: ignore
-NIR_INTRINSIC_VALUE_ID = nir_intrinsic_index_flag.define('NIR_INTRINSIC_VALUE_ID', 49) # type: ignore
-NIR_INTRINSIC_SIGN_EXTEND = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SIGN_EXTEND', 50) # type: ignore
-NIR_INTRINSIC_FLAGS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_FLAGS', 51) # type: ignore
-NIR_INTRINSIC_ATOMIC_OP = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ATOMIC_OP', 52) # type: ignore
-NIR_INTRINSIC_RESOURCE_BLOCK_INTEL = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RESOURCE_BLOCK_INTEL', 53) # type: ignore
-NIR_INTRINSIC_RESOURCE_ACCESS_INTEL = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RESOURCE_ACCESS_INTEL', 54) # type: ignore
-NIR_INTRINSIC_NUM_COMPONENTS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NUM_COMPONENTS', 55) # type: ignore
-NIR_INTRINSIC_NUM_ARRAY_ELEMS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NUM_ARRAY_ELEMS', 56) # type: ignore
-NIR_INTRINSIC_BIT_SIZE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BIT_SIZE', 57) # type: ignore
-NIR_INTRINSIC_DIVERGENT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DIVERGENT', 58) # type: ignore
-NIR_INTRINSIC_LEGACY_FABS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_LEGACY_FABS', 59) # type: ignore
-NIR_INTRINSIC_LEGACY_FNEG = nir_intrinsic_index_flag.define('NIR_INTRINSIC_LEGACY_FNEG', 60) # type: ignore
-NIR_INTRINSIC_LEGACY_FSAT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_LEGACY_FSAT', 61) # type: ignore
-NIR_INTRINSIC_CMAT_DESC = nir_intrinsic_index_flag.define('NIR_INTRINSIC_CMAT_DESC', 62) # type: ignore
-NIR_INTRINSIC_MATRIX_LAYOUT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_MATRIX_LAYOUT', 63) # type: ignore
-NIR_INTRINSIC_CMAT_SIGNED_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_CMAT_SIGNED_MASK', 64) # type: ignore
-NIR_INTRINSIC_ALU_OP = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ALU_OP', 65) # type: ignore
-NIR_INTRINSIC_NEG_LO_AMD = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NEG_LO_AMD', 66) # type: ignore
-NIR_INTRINSIC_NEG_HI_AMD = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NEG_HI_AMD', 67) # type: ignore
-NIR_INTRINSIC_SYSTOLIC_DEPTH = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SYSTOLIC_DEPTH', 68) # type: ignore
-NIR_INTRINSIC_REPEAT_COUNT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_REPEAT_COUNT', 69) # type: ignore
-NIR_INTRINSIC_DST_CMAT_DESC = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DST_CMAT_DESC', 70) # type: ignore
-NIR_INTRINSIC_SRC_CMAT_DESC = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_CMAT_DESC', 71) # type: ignore
-NIR_INTRINSIC_EXPLICIT_COORD = nir_intrinsic_index_flag.define('NIR_INTRINSIC_EXPLICIT_COORD', 72) # type: ignore
-NIR_INTRINSIC_FMT_IDX = nir_intrinsic_index_flag.define('NIR_INTRINSIC_FMT_IDX', 73) # type: ignore
-NIR_INTRINSIC_PREAMBLE_CLASS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_PREAMBLE_CLASS', 74) # type: ignore
-NIR_INTRINSIC_NUM_INDEX_FLAGS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NUM_INDEX_FLAGS', 75) # type: ignore
+class nir_intrinsic_index_flag(Annotated[int, ctypes.c_uint32], c.Enum): pass
+NIR_INTRINSIC_BASE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BASE', 0)
+NIR_INTRINSIC_WRITE_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_WRITE_MASK', 1)
+NIR_INTRINSIC_STREAM_ID = nir_intrinsic_index_flag.define('NIR_INTRINSIC_STREAM_ID', 2)
+NIR_INTRINSIC_UCP_ID = nir_intrinsic_index_flag.define('NIR_INTRINSIC_UCP_ID', 3)
+NIR_INTRINSIC_RANGE_BASE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RANGE_BASE', 4)
+NIR_INTRINSIC_RANGE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RANGE', 5)
+NIR_INTRINSIC_DESC_SET = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DESC_SET', 6)
+NIR_INTRINSIC_BINDING = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BINDING', 7)
+NIR_INTRINSIC_COMPONENT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_COMPONENT', 8)
+NIR_INTRINSIC_COLUMN = nir_intrinsic_index_flag.define('NIR_INTRINSIC_COLUMN', 9)
+NIR_INTRINSIC_INTERP_MODE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_INTERP_MODE', 10)
+NIR_INTRINSIC_REDUCTION_OP = nir_intrinsic_index_flag.define('NIR_INTRINSIC_REDUCTION_OP', 11)
+NIR_INTRINSIC_CLUSTER_SIZE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_CLUSTER_SIZE', 12)
+NIR_INTRINSIC_PARAM_IDX = nir_intrinsic_index_flag.define('NIR_INTRINSIC_PARAM_IDX', 13)
+NIR_INTRINSIC_IMAGE_DIM = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IMAGE_DIM', 14)
+NIR_INTRINSIC_IMAGE_ARRAY = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IMAGE_ARRAY', 15)
+NIR_INTRINSIC_FORMAT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_FORMAT', 16)
+NIR_INTRINSIC_ACCESS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ACCESS', 17)
+NIR_INTRINSIC_CALL_IDX = nir_intrinsic_index_flag.define('NIR_INTRINSIC_CALL_IDX', 18)
+NIR_INTRINSIC_STACK_SIZE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_STACK_SIZE', 19)
+NIR_INTRINSIC_ALIGN_MUL = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ALIGN_MUL', 20)
+NIR_INTRINSIC_ALIGN_OFFSET = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ALIGN_OFFSET', 21)
+NIR_INTRINSIC_DESC_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DESC_TYPE', 22)
+NIR_INTRINSIC_SRC_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_TYPE', 23)
+NIR_INTRINSIC_DEST_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DEST_TYPE', 24)
+NIR_INTRINSIC_SRC_BASE_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_BASE_TYPE', 25)
+NIR_INTRINSIC_SRC_BASE_TYPE2 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_BASE_TYPE2', 26)
+NIR_INTRINSIC_DEST_BASE_TYPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DEST_BASE_TYPE', 27)
+NIR_INTRINSIC_SWIZZLE_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SWIZZLE_MASK', 28)
+NIR_INTRINSIC_FETCH_INACTIVE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_FETCH_INACTIVE', 29)
+NIR_INTRINSIC_OFFSET0 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_OFFSET0', 30)
+NIR_INTRINSIC_OFFSET1 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_OFFSET1', 31)
+NIR_INTRINSIC_ST64 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ST64', 32)
+NIR_INTRINSIC_ARG_UPPER_BOUND_U32_AMD = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ARG_UPPER_BOUND_U32_AMD', 33)
+NIR_INTRINSIC_DST_ACCESS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DST_ACCESS', 34)
+NIR_INTRINSIC_SRC_ACCESS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_ACCESS', 35)
+NIR_INTRINSIC_DRIVER_LOCATION = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DRIVER_LOCATION', 36)
+NIR_INTRINSIC_MEMORY_SEMANTICS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_MEMORY_SEMANTICS', 37)
+NIR_INTRINSIC_MEMORY_MODES = nir_intrinsic_index_flag.define('NIR_INTRINSIC_MEMORY_MODES', 38)
+NIR_INTRINSIC_MEMORY_SCOPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_MEMORY_SCOPE', 39)
+NIR_INTRINSIC_EXECUTION_SCOPE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_EXECUTION_SCOPE', 40)
+NIR_INTRINSIC_IO_SEMANTICS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IO_SEMANTICS', 41)
+NIR_INTRINSIC_IO_XFB = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IO_XFB', 42)
+NIR_INTRINSIC_IO_XFB2 = nir_intrinsic_index_flag.define('NIR_INTRINSIC_IO_XFB2', 43)
+NIR_INTRINSIC_RAY_QUERY_VALUE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RAY_QUERY_VALUE', 44)
+NIR_INTRINSIC_COMMITTED = nir_intrinsic_index_flag.define('NIR_INTRINSIC_COMMITTED', 45)
+NIR_INTRINSIC_ROUNDING_MODE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ROUNDING_MODE', 46)
+NIR_INTRINSIC_SATURATE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SATURATE', 47)
+NIR_INTRINSIC_SYNCHRONOUS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SYNCHRONOUS', 48)
+NIR_INTRINSIC_VALUE_ID = nir_intrinsic_index_flag.define('NIR_INTRINSIC_VALUE_ID', 49)
+NIR_INTRINSIC_SIGN_EXTEND = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SIGN_EXTEND', 50)
+NIR_INTRINSIC_FLAGS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_FLAGS', 51)
+NIR_INTRINSIC_ATOMIC_OP = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ATOMIC_OP', 52)
+NIR_INTRINSIC_RESOURCE_BLOCK_INTEL = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RESOURCE_BLOCK_INTEL', 53)
+NIR_INTRINSIC_RESOURCE_ACCESS_INTEL = nir_intrinsic_index_flag.define('NIR_INTRINSIC_RESOURCE_ACCESS_INTEL', 54)
+NIR_INTRINSIC_NUM_COMPONENTS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NUM_COMPONENTS', 55)
+NIR_INTRINSIC_NUM_ARRAY_ELEMS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NUM_ARRAY_ELEMS', 56)
+NIR_INTRINSIC_BIT_SIZE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BIT_SIZE', 57)
+NIR_INTRINSIC_DIVERGENT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DIVERGENT', 58)
+NIR_INTRINSIC_LEGACY_FABS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_LEGACY_FABS', 59)
+NIR_INTRINSIC_LEGACY_FNEG = nir_intrinsic_index_flag.define('NIR_INTRINSIC_LEGACY_FNEG', 60)
+NIR_INTRINSIC_LEGACY_FSAT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_LEGACY_FSAT', 61)
+NIR_INTRINSIC_CMAT_DESC = nir_intrinsic_index_flag.define('NIR_INTRINSIC_CMAT_DESC', 62)
+NIR_INTRINSIC_MATRIX_LAYOUT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_MATRIX_LAYOUT', 63)
+NIR_INTRINSIC_CMAT_SIGNED_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_CMAT_SIGNED_MASK', 64)
+NIR_INTRINSIC_ALU_OP = nir_intrinsic_index_flag.define('NIR_INTRINSIC_ALU_OP', 65)
+NIR_INTRINSIC_NEG_LO_AMD = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NEG_LO_AMD', 66)
+NIR_INTRINSIC_NEG_HI_AMD = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NEG_HI_AMD', 67)
+NIR_INTRINSIC_SYSTOLIC_DEPTH = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SYSTOLIC_DEPTH', 68)
+NIR_INTRINSIC_REPEAT_COUNT = nir_intrinsic_index_flag.define('NIR_INTRINSIC_REPEAT_COUNT', 69)
+NIR_INTRINSIC_DST_CMAT_DESC = nir_intrinsic_index_flag.define('NIR_INTRINSIC_DST_CMAT_DESC', 70)
+NIR_INTRINSIC_SRC_CMAT_DESC = nir_intrinsic_index_flag.define('NIR_INTRINSIC_SRC_CMAT_DESC', 71)
+NIR_INTRINSIC_EXPLICIT_COORD = nir_intrinsic_index_flag.define('NIR_INTRINSIC_EXPLICIT_COORD', 72)
+NIR_INTRINSIC_FMT_IDX = nir_intrinsic_index_flag.define('NIR_INTRINSIC_FMT_IDX', 73)
+NIR_INTRINSIC_PREAMBLE_CLASS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_PREAMBLE_CLASS', 74)
+NIR_INTRINSIC_NUM_INDEX_FLAGS = nir_intrinsic_index_flag.define('NIR_INTRINSIC_NUM_INDEX_FLAGS', 75)
 
 try: nir_intrinsic_index_names = c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[75]].in_dll(dll, 'nir_intrinsic_index_names')
 except (ValueError,AttributeError): pass
-enum_nv_device_type = CEnum(Annotated[int, ctypes.c_ubyte])
-NV_DEVICE_TYPE_IGP = enum_nv_device_type.define('NV_DEVICE_TYPE_IGP', 0) # type: ignore
-NV_DEVICE_TYPE_DIS = enum_nv_device_type.define('NV_DEVICE_TYPE_DIS', 1) # type: ignore
-NV_DEVICE_TYPE_SOC = enum_nv_device_type.define('NV_DEVICE_TYPE_SOC', 2) # type: ignore
+class enum_nv_device_type(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+NV_DEVICE_TYPE_IGP = enum_nv_device_type.define('NV_DEVICE_TYPE_IGP', 0)
+NV_DEVICE_TYPE_DIS = enum_nv_device_type.define('NV_DEVICE_TYPE_DIS', 1)
+NV_DEVICE_TYPE_SOC = enum_nv_device_type.define('NV_DEVICE_TYPE_SOC', 2)
 
 @c.record
 class struct_nv_device_info(c.Struct):
@@ -5251,21 +5251,21 @@ class struct_nak_fs_key(c.Struct):
   sample_masks_offset: Annotated[uint32_t, 8]
 @dll.bind
 def nak_postprocess_nir(nir:c.POINTER[nir_shader], nak:c.POINTER[struct_nak_compiler], robust2_modes:nir_variable_mode, fs_key:c.POINTER[struct_nak_fs_key]) -> None: ...
-enum_nak_ts_domain = CEnum(Annotated[int, ctypes.c_ubyte])
-NAK_TS_DOMAIN_ISOLINE = enum_nak_ts_domain.define('NAK_TS_DOMAIN_ISOLINE', 0) # type: ignore
-NAK_TS_DOMAIN_TRIANGLE = enum_nak_ts_domain.define('NAK_TS_DOMAIN_TRIANGLE', 1) # type: ignore
-NAK_TS_DOMAIN_QUAD = enum_nak_ts_domain.define('NAK_TS_DOMAIN_QUAD', 2) # type: ignore
+class enum_nak_ts_domain(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+NAK_TS_DOMAIN_ISOLINE = enum_nak_ts_domain.define('NAK_TS_DOMAIN_ISOLINE', 0)
+NAK_TS_DOMAIN_TRIANGLE = enum_nak_ts_domain.define('NAK_TS_DOMAIN_TRIANGLE', 1)
+NAK_TS_DOMAIN_QUAD = enum_nak_ts_domain.define('NAK_TS_DOMAIN_QUAD', 2)
 
-enum_nak_ts_spacing = CEnum(Annotated[int, ctypes.c_ubyte])
-NAK_TS_SPACING_INTEGER = enum_nak_ts_spacing.define('NAK_TS_SPACING_INTEGER', 0) # type: ignore
-NAK_TS_SPACING_FRACT_ODD = enum_nak_ts_spacing.define('NAK_TS_SPACING_FRACT_ODD', 1) # type: ignore
-NAK_TS_SPACING_FRACT_EVEN = enum_nak_ts_spacing.define('NAK_TS_SPACING_FRACT_EVEN', 2) # type: ignore
+class enum_nak_ts_spacing(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+NAK_TS_SPACING_INTEGER = enum_nak_ts_spacing.define('NAK_TS_SPACING_INTEGER', 0)
+NAK_TS_SPACING_FRACT_ODD = enum_nak_ts_spacing.define('NAK_TS_SPACING_FRACT_ODD', 1)
+NAK_TS_SPACING_FRACT_EVEN = enum_nak_ts_spacing.define('NAK_TS_SPACING_FRACT_EVEN', 2)
 
-enum_nak_ts_prims = CEnum(Annotated[int, ctypes.c_ubyte])
-NAK_TS_PRIMS_POINTS = enum_nak_ts_prims.define('NAK_TS_PRIMS_POINTS', 0) # type: ignore
-NAK_TS_PRIMS_LINES = enum_nak_ts_prims.define('NAK_TS_PRIMS_LINES', 1) # type: ignore
-NAK_TS_PRIMS_TRIANGLES_CW = enum_nak_ts_prims.define('NAK_TS_PRIMS_TRIANGLES_CW', 2) # type: ignore
-NAK_TS_PRIMS_TRIANGLES_CCW = enum_nak_ts_prims.define('NAK_TS_PRIMS_TRIANGLES_CCW', 3) # type: ignore
+class enum_nak_ts_prims(Annotated[int, ctypes.c_ubyte], c.Enum): pass
+NAK_TS_PRIMS_POINTS = enum_nak_ts_prims.define('NAK_TS_PRIMS_POINTS', 0)
+NAK_TS_PRIMS_LINES = enum_nak_ts_prims.define('NAK_TS_PRIMS_LINES', 1)
+NAK_TS_PRIMS_TRIANGLES_CW = enum_nak_ts_prims.define('NAK_TS_PRIMS_TRIANGLES_CW', 2)
+NAK_TS_PRIMS_TRIANGLES_CCW = enum_nak_ts_prims.define('NAK_TS_PRIMS_TRIANGLES_CCW', 3)
 
 @c.record
 class struct_nak_xfb_info(c.Struct):
@@ -5386,15 +5386,15 @@ class struct_lp_context_ref(c.Struct):
   ref: Annotated[LLVMContextRef, 0]
   owned: Annotated[Annotated[bool, ctypes.c_bool], 8]
 class struct_LLVMOpaqueContext(ctypes.Structure): pass
-LLVMContextRef = c.POINTER[struct_LLVMOpaqueContext]
-lp_context_ref = struct_lp_context_ref
+LLVMContextRef: TypeAlias = c.POINTER[struct_LLVMOpaqueContext]
+lp_context_ref: TypeAlias = struct_lp_context_ref
 class struct_lp_passmgr(ctypes.Structure): pass
 class struct_LLVMOpaqueModule(ctypes.Structure): pass
-LLVMModuleRef = c.POINTER[struct_LLVMOpaqueModule]
+LLVMModuleRef: TypeAlias = c.POINTER[struct_LLVMOpaqueModule]
 @dll.bind
 def lp_passmgr_create(module:LLVMModuleRef, mgr:c.POINTER[c.POINTER[struct_lp_passmgr]]) -> Annotated[bool, ctypes.c_bool]: ...
 class struct_LLVMOpaqueTargetMachine(ctypes.Structure): pass
-LLVMTargetMachineRef = c.POINTER[struct_LLVMOpaqueTargetMachine]
+LLVMTargetMachineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetMachine]
 @dll.bind
 def lp_passmgr_run(mgr:c.POINTER[struct_lp_passmgr], module:LLVMModuleRef, tm:LLVMTargetMachineRef, module_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
 @dll.bind
@@ -5408,7 +5408,7 @@ class struct_lp_cached_code(c.Struct):
   jit_obj_cache: Annotated[c.POINTER[None], 24]
 class struct_lp_generated_code(ctypes.Structure): pass
 class struct_LLVMOpaqueTargetLibraryInfotData(ctypes.Structure): pass
-LLVMTargetLibraryInfoRef = c.POINTER[struct_LLVMOpaqueTargetLibraryInfotData]
+LLVMTargetLibraryInfoRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetLibraryInfotData]
 @dll.bind
 def gallivm_create_target_library_info(triple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMTargetLibraryInfoRef: ...
 @dll.bind
@@ -5418,9 +5418,9 @@ def lp_set_target_options() -> None: ...
 @dll.bind
 def lp_bld_init_native_targets() -> None: ...
 class struct_LLVMOpaqueExecutionEngine(ctypes.Structure): pass
-LLVMExecutionEngineRef = c.POINTER[struct_LLVMOpaqueExecutionEngine]
+LLVMExecutionEngineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueExecutionEngine]
 class struct_LLVMOpaqueMCJITMemoryManager(ctypes.Structure): pass
-LLVMMCJITMemoryManagerRef = c.POINTER[struct_LLVMOpaqueMCJITMemoryManager]
+LLVMMCJITMemoryManagerRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMCJITMemoryManager]
 @dll.bind
 def lp_build_create_jit_compiler_for_module(OutJIT:c.POINTER[LLVMExecutionEngineRef], OutCode:c.POINTER[c.POINTER[struct_lp_generated_code]], cache_out:c.POINTER[struct_lp_cached_code], M:LLVMModuleRef, MM:LLVMMCJITMemoryManagerRef, OptLevel:Annotated[int, ctypes.c_uint32], OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -5430,7 +5430,7 @@ def lp_get_default_memory_manager() -> LLVMMCJITMemoryManagerRef: ...
 @dll.bind
 def lp_free_memory_manager(memorymgr:LLVMMCJITMemoryManagerRef) -> None: ...
 class struct_LLVMOpaqueValue(ctypes.Structure): pass
-LLVMValueRef = c.POINTER[struct_LLVMOpaqueValue]
+LLVMValueRef: TypeAlias = c.POINTER[struct_LLVMOpaqueValue]
 @dll.bind
 def lp_get_called_value(call:LLVMValueRef) -> LLVMValueRef: ...
 @dll.bind
@@ -5492,7 +5492,7 @@ class struct_gallivm_state(c.Struct):
   texture_dynamic_state: Annotated[c.POINTER[struct_lp_jit_texture], 176]
   sampler_descriptor: Annotated[LLVMValueRef, 184]
 class struct_LLVMOpaqueType(ctypes.Structure): pass
-LLVMTypeRef = c.POINTER[struct_LLVMOpaqueType]
+LLVMTypeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueType]
 @dll.bind
 def lp_build_elem_type(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
 @dll.bind
@@ -5517,27 +5517,27 @@ def lp_int_type(type:struct_lp_type) -> struct_lp_type: ...
 def lp_wider_type(type:struct_lp_type) -> struct_lp_type: ...
 @dll.bind
 def lp_sizeof_llvm_type(t:LLVMTypeRef) -> Annotated[int, ctypes.c_uint32]: ...
-LLVMTypeKind = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMVoidTypeKind = LLVMTypeKind.define('LLVMVoidTypeKind', 0) # type: ignore
-LLVMHalfTypeKind = LLVMTypeKind.define('LLVMHalfTypeKind', 1) # type: ignore
-LLVMFloatTypeKind = LLVMTypeKind.define('LLVMFloatTypeKind', 2) # type: ignore
-LLVMDoubleTypeKind = LLVMTypeKind.define('LLVMDoubleTypeKind', 3) # type: ignore
-LLVMX86_FP80TypeKind = LLVMTypeKind.define('LLVMX86_FP80TypeKind', 4) # type: ignore
-LLVMFP128TypeKind = LLVMTypeKind.define('LLVMFP128TypeKind', 5) # type: ignore
-LLVMPPC_FP128TypeKind = LLVMTypeKind.define('LLVMPPC_FP128TypeKind', 6) # type: ignore
-LLVMLabelTypeKind = LLVMTypeKind.define('LLVMLabelTypeKind', 7) # type: ignore
-LLVMIntegerTypeKind = LLVMTypeKind.define('LLVMIntegerTypeKind', 8) # type: ignore
-LLVMFunctionTypeKind = LLVMTypeKind.define('LLVMFunctionTypeKind', 9) # type: ignore
-LLVMStructTypeKind = LLVMTypeKind.define('LLVMStructTypeKind', 10) # type: ignore
-LLVMArrayTypeKind = LLVMTypeKind.define('LLVMArrayTypeKind', 11) # type: ignore
-LLVMPointerTypeKind = LLVMTypeKind.define('LLVMPointerTypeKind', 12) # type: ignore
-LLVMVectorTypeKind = LLVMTypeKind.define('LLVMVectorTypeKind', 13) # type: ignore
-LLVMMetadataTypeKind = LLVMTypeKind.define('LLVMMetadataTypeKind', 14) # type: ignore
-LLVMTokenTypeKind = LLVMTypeKind.define('LLVMTokenTypeKind', 16) # type: ignore
-LLVMScalableVectorTypeKind = LLVMTypeKind.define('LLVMScalableVectorTypeKind', 17) # type: ignore
-LLVMBFloatTypeKind = LLVMTypeKind.define('LLVMBFloatTypeKind', 18) # type: ignore
-LLVMX86_AMXTypeKind = LLVMTypeKind.define('LLVMX86_AMXTypeKind', 19) # type: ignore
-LLVMTargetExtTypeKind = LLVMTypeKind.define('LLVMTargetExtTypeKind', 20) # type: ignore
+class LLVMTypeKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMVoidTypeKind = LLVMTypeKind.define('LLVMVoidTypeKind', 0)
+LLVMHalfTypeKind = LLVMTypeKind.define('LLVMHalfTypeKind', 1)
+LLVMFloatTypeKind = LLVMTypeKind.define('LLVMFloatTypeKind', 2)
+LLVMDoubleTypeKind = LLVMTypeKind.define('LLVMDoubleTypeKind', 3)
+LLVMX86_FP80TypeKind = LLVMTypeKind.define('LLVMX86_FP80TypeKind', 4)
+LLVMFP128TypeKind = LLVMTypeKind.define('LLVMFP128TypeKind', 5)
+LLVMPPC_FP128TypeKind = LLVMTypeKind.define('LLVMPPC_FP128TypeKind', 6)
+LLVMLabelTypeKind = LLVMTypeKind.define('LLVMLabelTypeKind', 7)
+LLVMIntegerTypeKind = LLVMTypeKind.define('LLVMIntegerTypeKind', 8)
+LLVMFunctionTypeKind = LLVMTypeKind.define('LLVMFunctionTypeKind', 9)
+LLVMStructTypeKind = LLVMTypeKind.define('LLVMStructTypeKind', 10)
+LLVMArrayTypeKind = LLVMTypeKind.define('LLVMArrayTypeKind', 11)
+LLVMPointerTypeKind = LLVMTypeKind.define('LLVMPointerTypeKind', 12)
+LLVMVectorTypeKind = LLVMTypeKind.define('LLVMVectorTypeKind', 13)
+LLVMMetadataTypeKind = LLVMTypeKind.define('LLVMMetadataTypeKind', 14)
+LLVMTokenTypeKind = LLVMTypeKind.define('LLVMTokenTypeKind', 16)
+LLVMScalableVectorTypeKind = LLVMTypeKind.define('LLVMScalableVectorTypeKind', 17)
+LLVMBFloatTypeKind = LLVMTypeKind.define('LLVMBFloatTypeKind', 18)
+LLVMX86_AMXTypeKind = LLVMTypeKind.define('LLVMX86_AMXTypeKind', 19)
+LLVMTargetExtTypeKind = LLVMTypeKind.define('LLVMTargetExtTypeKind', 20)
 
 @dll.bind
 def lp_typekind_name(t:LLVMTypeKind) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
@@ -5562,13 +5562,13 @@ class struct_lp_jit_texture(c.Struct):
   mip_offsets: Annotated[c.Array[uint32_t, Literal[16]], 148]
   sampler_index: Annotated[uint32_t, 212]
 class struct_LLVMOpaqueTargetData(ctypes.Structure): pass
-LLVMTargetDataRef = c.POINTER[struct_LLVMOpaqueTargetData]
+LLVMTargetDataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetData]
 class struct_LLVMOpaqueBuilder(ctypes.Structure): pass
-LLVMBuilderRef = c.POINTER[struct_LLVMOpaqueBuilder]
+LLVMBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBuilder]
 class struct_LLVMOpaqueDIBuilder(ctypes.Structure): pass
-LLVMDIBuilderRef = c.POINTER[struct_LLVMOpaqueDIBuilder]
+LLVMDIBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDIBuilder]
 class struct_LLVMOpaqueMetadata(ctypes.Structure): pass
-LLVMMetadataRef = c.POINTER[struct_LLVMOpaqueMetadata]
+LLVMMetadataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMetadata]
 @dll.bind
 def lp_build_init_native_width() -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
@@ -5585,7 +5585,7 @@ def gallivm_verify_function(gallivm:c.POINTER[struct_gallivm_state], func:LLVMVa
 def gallivm_add_global_mapping(gallivm:c.POINTER[struct_gallivm_state], sym:LLVMValueRef, addr:c.POINTER[None]) -> None: ...
 @dll.bind
 def gallivm_compile_module(gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
-func_pointer = c.CFUNCTYPE(None, )
+func_pointer: TypeAlias = c.CFUNCTYPE(None, )
 @dll.bind
 def gallivm_jit_function(gallivm:c.POINTER[struct_gallivm_state], func:LLVMValueRef, func_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> func_pointer: ...
 @dll.bind
@@ -5643,7 +5643,7 @@ class struct_lp_build_skip_context(c.Struct):
   gallivm: Annotated[c.POINTER[struct_gallivm_state], 0]
   block: Annotated[LLVMBasicBlockRef, 8]
 class struct_LLVMOpaqueBasicBlock(ctypes.Structure): pass
-LLVMBasicBlockRef = c.POINTER[struct_LLVMOpaqueBasicBlock]
+LLVMBasicBlockRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBasicBlock]
 @c.record
 class struct_lp_bld_tgsi_system_values(c.Struct):
   SIZE = 272
@@ -5725,10 +5725,10 @@ class struct_lp_sampler_size_query_params(c.Struct):
   exec_mask: Annotated[LLVMValueRef, 80]
   exec_mask_nz: Annotated[Annotated[bool, ctypes.c_bool], 88]
   format: Annotated[enum_pipe_format, 92]
-enum_lp_sampler_lod_property = CEnum(Annotated[int, ctypes.c_uint32])
-LP_SAMPLER_LOD_SCALAR = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_SCALAR', 0) # type: ignore
-LP_SAMPLER_LOD_PER_ELEMENT = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_PER_ELEMENT', 1) # type: ignore
-LP_SAMPLER_LOD_PER_QUAD = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_PER_QUAD', 2) # type: ignore
+class enum_lp_sampler_lod_property(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_SAMPLER_LOD_SCALAR = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_SCALAR', 0)
+LP_SAMPLER_LOD_PER_ELEMENT = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_PER_ELEMENT', 1)
+LP_SAMPLER_LOD_PER_QUAD = enum_lp_sampler_lod_property.define('LP_SAMPLER_LOD_PER_QUAD', 2)
 
 @c.record
 class struct_tgsi_shader_info(c.Struct):
@@ -5852,26 +5852,26 @@ class struct_lp_img_params(c.Struct):
   outdata: Annotated[c.POINTER[LLVMValueRef], 168]
   resource: Annotated[LLVMValueRef, 176]
   format: Annotated[enum_pipe_format, 184]
-LLVMAtomicRMWBinOp = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMAtomicRMWBinOpXchg = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXchg', 0) # type: ignore
-LLVMAtomicRMWBinOpAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAdd', 1) # type: ignore
-LLVMAtomicRMWBinOpSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpSub', 2) # type: ignore
-LLVMAtomicRMWBinOpAnd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAnd', 3) # type: ignore
-LLVMAtomicRMWBinOpNand = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpNand', 4) # type: ignore
-LLVMAtomicRMWBinOpOr = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpOr', 5) # type: ignore
-LLVMAtomicRMWBinOpXor = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXor', 6) # type: ignore
-LLVMAtomicRMWBinOpMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpMax', 7) # type: ignore
-LLVMAtomicRMWBinOpMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpMin', 8) # type: ignore
-LLVMAtomicRMWBinOpUMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUMax', 9) # type: ignore
-LLVMAtomicRMWBinOpUMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUMin', 10) # type: ignore
-LLVMAtomicRMWBinOpFAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFAdd', 11) # type: ignore
-LLVMAtomicRMWBinOpFSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFSub', 12) # type: ignore
-LLVMAtomicRMWBinOpFMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFMax', 13) # type: ignore
-LLVMAtomicRMWBinOpFMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFMin', 14) # type: ignore
-LLVMAtomicRMWBinOpUIncWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUIncWrap', 15) # type: ignore
-LLVMAtomicRMWBinOpUDecWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUDecWrap', 16) # type: ignore
-LLVMAtomicRMWBinOpUSubCond = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubCond', 17) # type: ignore
-LLVMAtomicRMWBinOpUSubSat = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubSat', 18) # type: ignore
+class LLVMAtomicRMWBinOp(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMAtomicRMWBinOpXchg = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXchg', 0)
+LLVMAtomicRMWBinOpAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAdd', 1)
+LLVMAtomicRMWBinOpSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpSub', 2)
+LLVMAtomicRMWBinOpAnd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAnd', 3)
+LLVMAtomicRMWBinOpNand = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpNand', 4)
+LLVMAtomicRMWBinOpOr = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpOr', 5)
+LLVMAtomicRMWBinOpXor = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXor', 6)
+LLVMAtomicRMWBinOpMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpMax', 7)
+LLVMAtomicRMWBinOpMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpMin', 8)
+LLVMAtomicRMWBinOpUMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUMax', 9)
+LLVMAtomicRMWBinOpUMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUMin', 10)
+LLVMAtomicRMWBinOpFAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFAdd', 11)
+LLVMAtomicRMWBinOpFSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFSub', 12)
+LLVMAtomicRMWBinOpFMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFMax', 13)
+LLVMAtomicRMWBinOpFMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFMin', 14)
+LLVMAtomicRMWBinOpUIncWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUIncWrap', 15)
+LLVMAtomicRMWBinOpUDecWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUDecWrap', 16)
+LLVMAtomicRMWBinOpUSubCond = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubCond', 17)
+LLVMAtomicRMWBinOpUSubSat = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubSat', 18)
 
 class struct_lp_build_coro_suspend_info(ctypes.Structure): pass
 @c.record
@@ -5887,35 +5887,35 @@ def lp_build_nir_soa_func(gallivm:c.POINTER[struct_gallivm_state], shader:c.POIN
 class struct_lp_build_sampler_aos(c.Struct):
   SIZE = 8
   emit_fetch_texel: Annotated[c.CFUNCTYPE(LLVMValueRef, c.POINTER[struct_lp_build_sampler_aos], c.POINTER[struct_lp_build_context], enum_tgsi_texture_type, Annotated[int, ctypes.c_uint32], LLVMValueRef, struct_lp_derivatives, enum_lp_build_tex_modifier), 0]
-enum_tgsi_texture_type = CEnum(Annotated[int, ctypes.c_uint32])
-TGSI_TEXTURE_BUFFER = enum_tgsi_texture_type.define('TGSI_TEXTURE_BUFFER', 0) # type: ignore
-TGSI_TEXTURE_1D = enum_tgsi_texture_type.define('TGSI_TEXTURE_1D', 1) # type: ignore
-TGSI_TEXTURE_2D = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D', 2) # type: ignore
-TGSI_TEXTURE_3D = enum_tgsi_texture_type.define('TGSI_TEXTURE_3D', 3) # type: ignore
-TGSI_TEXTURE_CUBE = enum_tgsi_texture_type.define('TGSI_TEXTURE_CUBE', 4) # type: ignore
-TGSI_TEXTURE_RECT = enum_tgsi_texture_type.define('TGSI_TEXTURE_RECT', 5) # type: ignore
-TGSI_TEXTURE_SHADOW1D = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOW1D', 6) # type: ignore
-TGSI_TEXTURE_SHADOW2D = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOW2D', 7) # type: ignore
-TGSI_TEXTURE_SHADOWRECT = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOWRECT', 8) # type: ignore
-TGSI_TEXTURE_1D_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_1D_ARRAY', 9) # type: ignore
-TGSI_TEXTURE_2D_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D_ARRAY', 10) # type: ignore
-TGSI_TEXTURE_SHADOW1D_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOW1D_ARRAY', 11) # type: ignore
-TGSI_TEXTURE_SHADOW2D_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOW2D_ARRAY', 12) # type: ignore
-TGSI_TEXTURE_SHADOWCUBE = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOWCUBE', 13) # type: ignore
-TGSI_TEXTURE_2D_MSAA = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D_MSAA', 14) # type: ignore
-TGSI_TEXTURE_2D_ARRAY_MSAA = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D_ARRAY_MSAA', 15) # type: ignore
-TGSI_TEXTURE_CUBE_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_CUBE_ARRAY', 16) # type: ignore
-TGSI_TEXTURE_SHADOWCUBE_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOWCUBE_ARRAY', 17) # type: ignore
-TGSI_TEXTURE_UNKNOWN = enum_tgsi_texture_type.define('TGSI_TEXTURE_UNKNOWN', 18) # type: ignore
-TGSI_TEXTURE_COUNT = enum_tgsi_texture_type.define('TGSI_TEXTURE_COUNT', 19) # type: ignore
+class enum_tgsi_texture_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TGSI_TEXTURE_BUFFER = enum_tgsi_texture_type.define('TGSI_TEXTURE_BUFFER', 0)
+TGSI_TEXTURE_1D = enum_tgsi_texture_type.define('TGSI_TEXTURE_1D', 1)
+TGSI_TEXTURE_2D = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D', 2)
+TGSI_TEXTURE_3D = enum_tgsi_texture_type.define('TGSI_TEXTURE_3D', 3)
+TGSI_TEXTURE_CUBE = enum_tgsi_texture_type.define('TGSI_TEXTURE_CUBE', 4)
+TGSI_TEXTURE_RECT = enum_tgsi_texture_type.define('TGSI_TEXTURE_RECT', 5)
+TGSI_TEXTURE_SHADOW1D = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOW1D', 6)
+TGSI_TEXTURE_SHADOW2D = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOW2D', 7)
+TGSI_TEXTURE_SHADOWRECT = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOWRECT', 8)
+TGSI_TEXTURE_1D_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_1D_ARRAY', 9)
+TGSI_TEXTURE_2D_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D_ARRAY', 10)
+TGSI_TEXTURE_SHADOW1D_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOW1D_ARRAY', 11)
+TGSI_TEXTURE_SHADOW2D_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOW2D_ARRAY', 12)
+TGSI_TEXTURE_SHADOWCUBE = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOWCUBE', 13)
+TGSI_TEXTURE_2D_MSAA = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D_MSAA', 14)
+TGSI_TEXTURE_2D_ARRAY_MSAA = enum_tgsi_texture_type.define('TGSI_TEXTURE_2D_ARRAY_MSAA', 15)
+TGSI_TEXTURE_CUBE_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_CUBE_ARRAY', 16)
+TGSI_TEXTURE_SHADOWCUBE_ARRAY = enum_tgsi_texture_type.define('TGSI_TEXTURE_SHADOWCUBE_ARRAY', 17)
+TGSI_TEXTURE_UNKNOWN = enum_tgsi_texture_type.define('TGSI_TEXTURE_UNKNOWN', 18)
+TGSI_TEXTURE_COUNT = enum_tgsi_texture_type.define('TGSI_TEXTURE_COUNT', 19)
 
-enum_lp_build_tex_modifier = CEnum(Annotated[int, ctypes.c_uint32])
-LP_BLD_TEX_MODIFIER_NONE = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_NONE', 0) # type: ignore
-LP_BLD_TEX_MODIFIER_PROJECTED = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_PROJECTED', 1) # type: ignore
-LP_BLD_TEX_MODIFIER_LOD_BIAS = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_LOD_BIAS', 2) # type: ignore
-LP_BLD_TEX_MODIFIER_EXPLICIT_LOD = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_EXPLICIT_LOD', 3) # type: ignore
-LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV', 4) # type: ignore
-LP_BLD_TEX_MODIFIER_LOD_ZERO = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_LOD_ZERO', 5) # type: ignore
+class enum_lp_build_tex_modifier(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_BLD_TEX_MODIFIER_NONE = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_NONE', 0)
+LP_BLD_TEX_MODIFIER_PROJECTED = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_PROJECTED', 1)
+LP_BLD_TEX_MODIFIER_LOD_BIAS = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_LOD_BIAS', 2)
+LP_BLD_TEX_MODIFIER_EXPLICIT_LOD = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_EXPLICIT_LOD', 3)
+LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV', 4)
+LP_BLD_TEX_MODIFIER_LOD_ZERO = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MODIFIER_LOD_ZERO', 5)
 
 @dll.bind
 def lp_build_nir_aos(gallivm:c.POINTER[struct_gallivm_state], shader:c.POINTER[struct_nir_shader], type:struct_lp_type, swizzles:c.Array[Annotated[int, ctypes.c_ubyte], Literal[4]], consts_ptr:LLVMValueRef, inputs:c.POINTER[LLVMValueRef], outputs:c.POINTER[LLVMValueRef], sampler:c.POINTER[struct_lp_build_sampler_aos]) -> None: ...
@@ -5936,25 +5936,25 @@ def lp_build_nir_sample_key(stage:gl_shader_stage, instr:c.POINTER[nir_tex_instr
 def lp_img_op_from_intrinsic(params:c.POINTER[struct_lp_img_params], instr:c.POINTER[nir_intrinsic_instr]) -> None: ...
 @dll.bind
 def lp_packed_img_op_from_intrinsic(instr:c.POINTER[nir_intrinsic_instr]) -> uint32_t: ...
-enum_lp_nir_call_context_args = CEnum(Annotated[int, ctypes.c_uint32])
-LP_NIR_CALL_CONTEXT_CONTEXT = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_CONTEXT', 0) # type: ignore
-LP_NIR_CALL_CONTEXT_RESOURCES = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_RESOURCES', 1) # type: ignore
-LP_NIR_CALL_CONTEXT_SHARED = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_SHARED', 2) # type: ignore
-LP_NIR_CALL_CONTEXT_SCRATCH = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_SCRATCH', 3) # type: ignore
-LP_NIR_CALL_CONTEXT_WORK_DIM = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_WORK_DIM', 4) # type: ignore
-LP_NIR_CALL_CONTEXT_THREAD_ID_0 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_THREAD_ID_0', 5) # type: ignore
-LP_NIR_CALL_CONTEXT_THREAD_ID_1 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_THREAD_ID_1', 6) # type: ignore
-LP_NIR_CALL_CONTEXT_THREAD_ID_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_THREAD_ID_2', 7) # type: ignore
-LP_NIR_CALL_CONTEXT_BLOCK_ID_0 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_ID_0', 8) # type: ignore
-LP_NIR_CALL_CONTEXT_BLOCK_ID_1 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_ID_1', 9) # type: ignore
-LP_NIR_CALL_CONTEXT_BLOCK_ID_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_ID_2', 10) # type: ignore
-LP_NIR_CALL_CONTEXT_GRID_SIZE_0 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_GRID_SIZE_0', 11) # type: ignore
-LP_NIR_CALL_CONTEXT_GRID_SIZE_1 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_GRID_SIZE_1', 12) # type: ignore
-LP_NIR_CALL_CONTEXT_GRID_SIZE_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_GRID_SIZE_2', 13) # type: ignore
-LP_NIR_CALL_CONTEXT_BLOCK_SIZE_0 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_SIZE_0', 14) # type: ignore
-LP_NIR_CALL_CONTEXT_BLOCK_SIZE_1 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_SIZE_1', 15) # type: ignore
-LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2', 16) # type: ignore
-LP_NIR_CALL_CONTEXT_MAX_ARGS = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_MAX_ARGS', 17) # type: ignore
+class enum_lp_nir_call_context_args(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_NIR_CALL_CONTEXT_CONTEXT = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_CONTEXT', 0)
+LP_NIR_CALL_CONTEXT_RESOURCES = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_RESOURCES', 1)
+LP_NIR_CALL_CONTEXT_SHARED = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_SHARED', 2)
+LP_NIR_CALL_CONTEXT_SCRATCH = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_SCRATCH', 3)
+LP_NIR_CALL_CONTEXT_WORK_DIM = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_WORK_DIM', 4)
+LP_NIR_CALL_CONTEXT_THREAD_ID_0 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_THREAD_ID_0', 5)
+LP_NIR_CALL_CONTEXT_THREAD_ID_1 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_THREAD_ID_1', 6)
+LP_NIR_CALL_CONTEXT_THREAD_ID_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_THREAD_ID_2', 7)
+LP_NIR_CALL_CONTEXT_BLOCK_ID_0 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_ID_0', 8)
+LP_NIR_CALL_CONTEXT_BLOCK_ID_1 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_ID_1', 9)
+LP_NIR_CALL_CONTEXT_BLOCK_ID_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_ID_2', 10)
+LP_NIR_CALL_CONTEXT_GRID_SIZE_0 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_GRID_SIZE_0', 11)
+LP_NIR_CALL_CONTEXT_GRID_SIZE_1 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_GRID_SIZE_1', 12)
+LP_NIR_CALL_CONTEXT_GRID_SIZE_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_GRID_SIZE_2', 13)
+LP_NIR_CALL_CONTEXT_BLOCK_SIZE_0 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_SIZE_0', 14)
+LP_NIR_CALL_CONTEXT_BLOCK_SIZE_1 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_SIZE_1', 15)
+LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2', 16)
+LP_NIR_CALL_CONTEXT_MAX_ARGS = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_MAX_ARGS', 17)
 
 @dll.bind
 def lp_build_cs_func_call_context(gallivm:c.POINTER[struct_gallivm_state], length:Annotated[int, ctypes.c_int32], context_type:LLVMTypeRef, resources_type:LLVMTypeRef) -> LLVMTypeRef: ...
@@ -6001,10 +6001,10 @@ class struct_lp_jit_buffer(c.Struct):
   u: Annotated[c.POINTER[uint32_t], 0]
   f: Annotated[c.POINTER[Annotated[float, ctypes.c_float]], 0]
   num_elements: Annotated[uint32_t, 8]
-_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
-LP_JIT_BUFFER_BASE = _anonenum0.define('LP_JIT_BUFFER_BASE', 0) # type: ignore
-LP_JIT_BUFFER_NUM_ELEMENTS = _anonenum0.define('LP_JIT_BUFFER_NUM_ELEMENTS', 1) # type: ignore
-LP_JIT_BUFFER_NUM_FIELDS = _anonenum0.define('LP_JIT_BUFFER_NUM_FIELDS', 2) # type: ignore
+class _anonenum0(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_JIT_BUFFER_BASE = _anonenum0.define('LP_JIT_BUFFER_BASE', 0)
+LP_JIT_BUFFER_NUM_ELEMENTS = _anonenum0.define('LP_JIT_BUFFER_NUM_ELEMENTS', 1)
+LP_JIT_BUFFER_NUM_FIELDS = _anonenum0.define('LP_JIT_BUFFER_NUM_FIELDS', 2)
 
 @dll.bind
 def lp_llvm_descriptor_base(gallivm:c.POINTER[struct_gallivm_state], buffers_ptr:LLVMValueRef, index:LLVMValueRef, buffers_limit:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
@@ -6012,18 +6012,18 @@ def lp_llvm_descriptor_base(gallivm:c.POINTER[struct_gallivm_state], buffers_ptr
 def lp_llvm_buffer_base(gallivm:c.POINTER[struct_gallivm_state], buffers_ptr:LLVMValueRef, buffers_offset:LLVMValueRef, buffers_limit:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
 @dll.bind
 def lp_llvm_buffer_num_elements(gallivm:c.POINTER[struct_gallivm_state], buffers_ptr:LLVMValueRef, buffers_offset:LLVMValueRef, buffers_limit:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
-_anonenum1 = CEnum(Annotated[int, ctypes.c_uint32])
-LP_JIT_TEXTURE_BASE = _anonenum1.define('LP_JIT_TEXTURE_BASE', 0) # type: ignore
-LP_JIT_TEXTURE_WIDTH = _anonenum1.define('LP_JIT_TEXTURE_WIDTH', 1) # type: ignore
-LP_JIT_TEXTURE_HEIGHT = _anonenum1.define('LP_JIT_TEXTURE_HEIGHT', 2) # type: ignore
-LP_JIT_TEXTURE_DEPTH = _anonenum1.define('LP_JIT_TEXTURE_DEPTH', 3) # type: ignore
-LP_JIT_TEXTURE_ROW_STRIDE = _anonenum1.define('LP_JIT_TEXTURE_ROW_STRIDE', 4) # type: ignore
-LP_JIT_TEXTURE_IMG_STRIDE = _anonenum1.define('LP_JIT_TEXTURE_IMG_STRIDE', 5) # type: ignore
-LP_JIT_TEXTURE_FIRST_LEVEL = _anonenum1.define('LP_JIT_TEXTURE_FIRST_LEVEL', 6) # type: ignore
-LP_JIT_TEXTURE_LAST_LEVEL = _anonenum1.define('LP_JIT_TEXTURE_LAST_LEVEL', 7) # type: ignore
-LP_JIT_TEXTURE_MIP_OFFSETS = _anonenum1.define('LP_JIT_TEXTURE_MIP_OFFSETS', 8) # type: ignore
-LP_JIT_SAMPLER_INDEX_DUMMY = _anonenum1.define('LP_JIT_SAMPLER_INDEX_DUMMY', 9) # type: ignore
-LP_JIT_TEXTURE_NUM_FIELDS = _anonenum1.define('LP_JIT_TEXTURE_NUM_FIELDS', 10) # type: ignore
+class _anonenum1(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_JIT_TEXTURE_BASE = _anonenum1.define('LP_JIT_TEXTURE_BASE', 0)
+LP_JIT_TEXTURE_WIDTH = _anonenum1.define('LP_JIT_TEXTURE_WIDTH', 1)
+LP_JIT_TEXTURE_HEIGHT = _anonenum1.define('LP_JIT_TEXTURE_HEIGHT', 2)
+LP_JIT_TEXTURE_DEPTH = _anonenum1.define('LP_JIT_TEXTURE_DEPTH', 3)
+LP_JIT_TEXTURE_ROW_STRIDE = _anonenum1.define('LP_JIT_TEXTURE_ROW_STRIDE', 4)
+LP_JIT_TEXTURE_IMG_STRIDE = _anonenum1.define('LP_JIT_TEXTURE_IMG_STRIDE', 5)
+LP_JIT_TEXTURE_FIRST_LEVEL = _anonenum1.define('LP_JIT_TEXTURE_FIRST_LEVEL', 6)
+LP_JIT_TEXTURE_LAST_LEVEL = _anonenum1.define('LP_JIT_TEXTURE_LAST_LEVEL', 7)
+LP_JIT_TEXTURE_MIP_OFFSETS = _anonenum1.define('LP_JIT_TEXTURE_MIP_OFFSETS', 8)
+LP_JIT_SAMPLER_INDEX_DUMMY = _anonenum1.define('LP_JIT_SAMPLER_INDEX_DUMMY', 9)
+LP_JIT_TEXTURE_NUM_FIELDS = _anonenum1.define('LP_JIT_TEXTURE_NUM_FIELDS', 10)
 
 @c.record
 class struct_lp_jit_sampler(c.Struct):
@@ -6032,12 +6032,12 @@ class struct_lp_jit_sampler(c.Struct):
   max_lod: Annotated[Annotated[float, ctypes.c_float], 4]
   lod_bias: Annotated[Annotated[float, ctypes.c_float], 8]
   border_color: Annotated[c.Array[Annotated[float, ctypes.c_float], Literal[4]], 12]
-_anonenum2 = CEnum(Annotated[int, ctypes.c_uint32])
-LP_JIT_SAMPLER_MIN_LOD = _anonenum2.define('LP_JIT_SAMPLER_MIN_LOD', 0) # type: ignore
-LP_JIT_SAMPLER_MAX_LOD = _anonenum2.define('LP_JIT_SAMPLER_MAX_LOD', 1) # type: ignore
-LP_JIT_SAMPLER_LOD_BIAS = _anonenum2.define('LP_JIT_SAMPLER_LOD_BIAS', 2) # type: ignore
-LP_JIT_SAMPLER_BORDER_COLOR = _anonenum2.define('LP_JIT_SAMPLER_BORDER_COLOR', 3) # type: ignore
-LP_JIT_SAMPLER_NUM_FIELDS = _anonenum2.define('LP_JIT_SAMPLER_NUM_FIELDS', 4) # type: ignore
+class _anonenum2(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_JIT_SAMPLER_MIN_LOD = _anonenum2.define('LP_JIT_SAMPLER_MIN_LOD', 0)
+LP_JIT_SAMPLER_MAX_LOD = _anonenum2.define('LP_JIT_SAMPLER_MAX_LOD', 1)
+LP_JIT_SAMPLER_LOD_BIAS = _anonenum2.define('LP_JIT_SAMPLER_LOD_BIAS', 2)
+LP_JIT_SAMPLER_BORDER_COLOR = _anonenum2.define('LP_JIT_SAMPLER_BORDER_COLOR', 3)
+LP_JIT_SAMPLER_NUM_FIELDS = _anonenum2.define('LP_JIT_SAMPLER_NUM_FIELDS', 4)
 
 @c.record
 class struct_lp_jit_image(c.Struct):
@@ -6052,18 +6052,18 @@ class struct_lp_jit_image(c.Struct):
   img_stride: Annotated[uint32_t, 28]
   residency: Annotated[c.POINTER[None], 32]
   base_offset: Annotated[uint32_t, 40]
-_anonenum3 = CEnum(Annotated[int, ctypes.c_uint32])
-LP_JIT_IMAGE_BASE = _anonenum3.define('LP_JIT_IMAGE_BASE', 0) # type: ignore
-LP_JIT_IMAGE_WIDTH = _anonenum3.define('LP_JIT_IMAGE_WIDTH', 1) # type: ignore
-LP_JIT_IMAGE_HEIGHT = _anonenum3.define('LP_JIT_IMAGE_HEIGHT', 2) # type: ignore
-LP_JIT_IMAGE_DEPTH = _anonenum3.define('LP_JIT_IMAGE_DEPTH', 3) # type: ignore
-LP_JIT_IMAGE_NUM_SAMPLES = _anonenum3.define('LP_JIT_IMAGE_NUM_SAMPLES', 4) # type: ignore
-LP_JIT_IMAGE_SAMPLE_STRIDE = _anonenum3.define('LP_JIT_IMAGE_SAMPLE_STRIDE', 5) # type: ignore
-LP_JIT_IMAGE_ROW_STRIDE = _anonenum3.define('LP_JIT_IMAGE_ROW_STRIDE', 6) # type: ignore
-LP_JIT_IMAGE_IMG_STRIDE = _anonenum3.define('LP_JIT_IMAGE_IMG_STRIDE', 7) # type: ignore
-LP_JIT_IMAGE_RESIDENCY = _anonenum3.define('LP_JIT_IMAGE_RESIDENCY', 8) # type: ignore
-LP_JIT_IMAGE_BASE_OFFSET = _anonenum3.define('LP_JIT_IMAGE_BASE_OFFSET', 9) # type: ignore
-LP_JIT_IMAGE_NUM_FIELDS = _anonenum3.define('LP_JIT_IMAGE_NUM_FIELDS', 10) # type: ignore
+class _anonenum3(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_JIT_IMAGE_BASE = _anonenum3.define('LP_JIT_IMAGE_BASE', 0)
+LP_JIT_IMAGE_WIDTH = _anonenum3.define('LP_JIT_IMAGE_WIDTH', 1)
+LP_JIT_IMAGE_HEIGHT = _anonenum3.define('LP_JIT_IMAGE_HEIGHT', 2)
+LP_JIT_IMAGE_DEPTH = _anonenum3.define('LP_JIT_IMAGE_DEPTH', 3)
+LP_JIT_IMAGE_NUM_SAMPLES = _anonenum3.define('LP_JIT_IMAGE_NUM_SAMPLES', 4)
+LP_JIT_IMAGE_SAMPLE_STRIDE = _anonenum3.define('LP_JIT_IMAGE_SAMPLE_STRIDE', 5)
+LP_JIT_IMAGE_ROW_STRIDE = _anonenum3.define('LP_JIT_IMAGE_ROW_STRIDE', 6)
+LP_JIT_IMAGE_IMG_STRIDE = _anonenum3.define('LP_JIT_IMAGE_IMG_STRIDE', 7)
+LP_JIT_IMAGE_RESIDENCY = _anonenum3.define('LP_JIT_IMAGE_RESIDENCY', 8)
+LP_JIT_IMAGE_BASE_OFFSET = _anonenum3.define('LP_JIT_IMAGE_BASE_OFFSET', 9)
+LP_JIT_IMAGE_NUM_FIELDS = _anonenum3.define('LP_JIT_IMAGE_NUM_FIELDS', 10)
 
 @c.record
 class struct_lp_jit_resources(c.Struct):
@@ -6073,20 +6073,20 @@ class struct_lp_jit_resources(c.Struct):
   textures: Annotated[c.Array[struct_lp_jit_texture, Literal[128]], 768]
   samplers: Annotated[c.Array[struct_lp_jit_sampler, Literal[32]], 28416]
   images: Annotated[c.Array[struct_lp_jit_image, Literal[64]], 29312]
-_anonenum4 = CEnum(Annotated[int, ctypes.c_uint32])
-LP_JIT_RES_CONSTANTS = _anonenum4.define('LP_JIT_RES_CONSTANTS', 0) # type: ignore
-LP_JIT_RES_SSBOS = _anonenum4.define('LP_JIT_RES_SSBOS', 1) # type: ignore
-LP_JIT_RES_TEXTURES = _anonenum4.define('LP_JIT_RES_TEXTURES', 2) # type: ignore
-LP_JIT_RES_SAMPLERS = _anonenum4.define('LP_JIT_RES_SAMPLERS', 3) # type: ignore
-LP_JIT_RES_IMAGES = _anonenum4.define('LP_JIT_RES_IMAGES', 4) # type: ignore
-LP_JIT_RES_COUNT = _anonenum4.define('LP_JIT_RES_COUNT', 5) # type: ignore
+class _anonenum4(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_JIT_RES_CONSTANTS = _anonenum4.define('LP_JIT_RES_CONSTANTS', 0)
+LP_JIT_RES_SSBOS = _anonenum4.define('LP_JIT_RES_SSBOS', 1)
+LP_JIT_RES_TEXTURES = _anonenum4.define('LP_JIT_RES_TEXTURES', 2)
+LP_JIT_RES_SAMPLERS = _anonenum4.define('LP_JIT_RES_SAMPLERS', 3)
+LP_JIT_RES_IMAGES = _anonenum4.define('LP_JIT_RES_IMAGES', 4)
+LP_JIT_RES_COUNT = _anonenum4.define('LP_JIT_RES_COUNT', 5)
 
 @dll.bind
 def lp_build_jit_resources_type(gallivm:c.POINTER[struct_gallivm_state]) -> LLVMTypeRef: ...
-_anonenum5 = CEnum(Annotated[int, ctypes.c_uint32])
-LP_JIT_VERTEX_HEADER_VERTEX_ID = _anonenum5.define('LP_JIT_VERTEX_HEADER_VERTEX_ID', 0) # type: ignore
-LP_JIT_VERTEX_HEADER_CLIP_POS = _anonenum5.define('LP_JIT_VERTEX_HEADER_CLIP_POS', 1) # type: ignore
-LP_JIT_VERTEX_HEADER_DATA = _anonenum5.define('LP_JIT_VERTEX_HEADER_DATA', 2) # type: ignore
+class _anonenum5(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LP_JIT_VERTEX_HEADER_VERTEX_ID = _anonenum5.define('LP_JIT_VERTEX_HEADER_VERTEX_ID', 0)
+LP_JIT_VERTEX_HEADER_CLIP_POS = _anonenum5.define('LP_JIT_VERTEX_HEADER_CLIP_POS', 1)
+LP_JIT_VERTEX_HEADER_DATA = _anonenum5.define('LP_JIT_VERTEX_HEADER_DATA', 2)
 
 @dll.bind
 def lp_build_create_jit_vertex_header_type(gallivm:c.POINTER[struct_gallivm_state], data_elems:Annotated[int, ctypes.c_int32]) -> LLVMTypeRef: ...
@@ -6122,17 +6122,17 @@ class struct_lp_static_texture_state(c.Struct):
   level_zero_only: Annotated[Annotated[int, ctypes.c_uint32], 11, 1, 1]
   tiled: Annotated[Annotated[int, ctypes.c_uint32], 11, 1, 2]
   tiled_samples: Annotated[Annotated[int, ctypes.c_uint32], 11, 5, 3]
-enum_pipe_texture_target = CEnum(Annotated[int, ctypes.c_uint32])
-PIPE_BUFFER = enum_pipe_texture_target.define('PIPE_BUFFER', 0) # type: ignore
-PIPE_TEXTURE_1D = enum_pipe_texture_target.define('PIPE_TEXTURE_1D', 1) # type: ignore
-PIPE_TEXTURE_2D = enum_pipe_texture_target.define('PIPE_TEXTURE_2D', 2) # type: ignore
-PIPE_TEXTURE_3D = enum_pipe_texture_target.define('PIPE_TEXTURE_3D', 3) # type: ignore
-PIPE_TEXTURE_CUBE = enum_pipe_texture_target.define('PIPE_TEXTURE_CUBE', 4) # type: ignore
-PIPE_TEXTURE_RECT = enum_pipe_texture_target.define('PIPE_TEXTURE_RECT', 5) # type: ignore
-PIPE_TEXTURE_1D_ARRAY = enum_pipe_texture_target.define('PIPE_TEXTURE_1D_ARRAY', 6) # type: ignore
-PIPE_TEXTURE_2D_ARRAY = enum_pipe_texture_target.define('PIPE_TEXTURE_2D_ARRAY', 7) # type: ignore
-PIPE_TEXTURE_CUBE_ARRAY = enum_pipe_texture_target.define('PIPE_TEXTURE_CUBE_ARRAY', 8) # type: ignore
-PIPE_MAX_TEXTURE_TYPES = enum_pipe_texture_target.define('PIPE_MAX_TEXTURE_TYPES', 9) # type: ignore
+class enum_pipe_texture_target(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PIPE_BUFFER = enum_pipe_texture_target.define('PIPE_BUFFER', 0)
+PIPE_TEXTURE_1D = enum_pipe_texture_target.define('PIPE_TEXTURE_1D', 1)
+PIPE_TEXTURE_2D = enum_pipe_texture_target.define('PIPE_TEXTURE_2D', 2)
+PIPE_TEXTURE_3D = enum_pipe_texture_target.define('PIPE_TEXTURE_3D', 3)
+PIPE_TEXTURE_CUBE = enum_pipe_texture_target.define('PIPE_TEXTURE_CUBE', 4)
+PIPE_TEXTURE_RECT = enum_pipe_texture_target.define('PIPE_TEXTURE_RECT', 5)
+PIPE_TEXTURE_1D_ARRAY = enum_pipe_texture_target.define('PIPE_TEXTURE_1D_ARRAY', 6)
+PIPE_TEXTURE_2D_ARRAY = enum_pipe_texture_target.define('PIPE_TEXTURE_2D_ARRAY', 7)
+PIPE_TEXTURE_CUBE_ARRAY = enum_pipe_texture_target.define('PIPE_TEXTURE_CUBE_ARRAY', 8)
+PIPE_MAX_TEXTURE_TYPES = enum_pipe_texture_target.define('PIPE_MAX_TEXTURE_TYPES', 9)
 
 @c.record
 class struct_lp_texture_functions(c.Struct):
@@ -6201,17 +6201,17 @@ def lp_build_loop_end(state:c.POINTER[struct_lp_build_loop_state], end:LLVMValue
 def lp_build_loop_force_set_counter(state:c.POINTER[struct_lp_build_loop_state], end:LLVMValueRef) -> None: ...
 @dll.bind
 def lp_build_loop_force_reload_counter(state:c.POINTER[struct_lp_build_loop_state]) -> None: ...
-LLVMIntPredicate = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMIntEQ = LLVMIntPredicate.define('LLVMIntEQ', 32) # type: ignore
-LLVMIntNE = LLVMIntPredicate.define('LLVMIntNE', 33) # type: ignore
-LLVMIntUGT = LLVMIntPredicate.define('LLVMIntUGT', 34) # type: ignore
-LLVMIntUGE = LLVMIntPredicate.define('LLVMIntUGE', 35) # type: ignore
-LLVMIntULT = LLVMIntPredicate.define('LLVMIntULT', 36) # type: ignore
-LLVMIntULE = LLVMIntPredicate.define('LLVMIntULE', 37) # type: ignore
-LLVMIntSGT = LLVMIntPredicate.define('LLVMIntSGT', 38) # type: ignore
-LLVMIntSGE = LLVMIntPredicate.define('LLVMIntSGE', 39) # type: ignore
-LLVMIntSLT = LLVMIntPredicate.define('LLVMIntSLT', 40) # type: ignore
-LLVMIntSLE = LLVMIntPredicate.define('LLVMIntSLE', 41) # type: ignore
+class LLVMIntPredicate(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMIntEQ = LLVMIntPredicate.define('LLVMIntEQ', 32)
+LLVMIntNE = LLVMIntPredicate.define('LLVMIntNE', 33)
+LLVMIntUGT = LLVMIntPredicate.define('LLVMIntUGT', 34)
+LLVMIntUGE = LLVMIntPredicate.define('LLVMIntUGE', 35)
+LLVMIntULT = LLVMIntPredicate.define('LLVMIntULT', 36)
+LLVMIntULE = LLVMIntPredicate.define('LLVMIntULE', 37)
+LLVMIntSGT = LLVMIntPredicate.define('LLVMIntSGT', 38)
+LLVMIntSGE = LLVMIntPredicate.define('LLVMIntSGE', 39)
+LLVMIntSLT = LLVMIntPredicate.define('LLVMIntSLT', 40)
+LLVMIntSLE = LLVMIntPredicate.define('LLVMIntSLE', 41)
 
 @dll.bind
 def lp_build_loop_end_cond(state:c.POINTER[struct_lp_build_loop_state], end:LLVMValueRef, step:LLVMValueRef, cond:LLVMIntPredicate) -> None: ...
@@ -6553,16 +6553,16 @@ class struct_ir3_compiler(c.Struct):
   delay_slots: Annotated[struct_ir3_compiler_delay_slots, 444]
 class struct_fd_device(ctypes.Structure): pass
 class struct_disk_cache(ctypes.Structure): pass
-type_t = CEnum(Annotated[int, ctypes.c_uint32])
-TYPE_F16 = type_t.define('TYPE_F16', 0) # type: ignore
-TYPE_F32 = type_t.define('TYPE_F32', 1) # type: ignore
-TYPE_U16 = type_t.define('TYPE_U16', 2) # type: ignore
-TYPE_U32 = type_t.define('TYPE_U32', 3) # type: ignore
-TYPE_S16 = type_t.define('TYPE_S16', 4) # type: ignore
-TYPE_S32 = type_t.define('TYPE_S32', 5) # type: ignore
-TYPE_ATOMIC_U64 = type_t.define('TYPE_ATOMIC_U64', 6) # type: ignore
-TYPE_U8 = type_t.define('TYPE_U8', 6) # type: ignore
-TYPE_U8_32 = type_t.define('TYPE_U8_32', 7) # type: ignore
+class type_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TYPE_F16 = type_t.define('TYPE_F16', 0)
+TYPE_F32 = type_t.define('TYPE_F32', 1)
+TYPE_U16 = type_t.define('TYPE_U16', 2)
+TYPE_U32 = type_t.define('TYPE_U32', 3)
+TYPE_S16 = type_t.define('TYPE_S16', 4)
+TYPE_S32 = type_t.define('TYPE_S32', 5)
+TYPE_ATOMIC_U64 = type_t.define('TYPE_ATOMIC_U64', 6)
+TYPE_U8 = type_t.define('TYPE_U8', 6)
+TYPE_U8_32 = type_t.define('TYPE_U8_32', 7)
 
 @c.record
 class struct_ir3_compiler_delay_slots(c.Struct):
@@ -6683,32 +6683,32 @@ def ir3_disk_cache_store(shader:c.POINTER[struct_ir3_shader], v:c.POINTER[struct
 def ir3_get_compiler_options(compiler:c.POINTER[struct_ir3_compiler]) -> c.POINTER[nir_shader_compiler_options]: ...
 @dll.bind
 def ir3_compile_shader_nir(compiler:c.POINTER[struct_ir3_compiler], shader:c.POINTER[struct_ir3_shader], so:c.POINTER[struct_ir3_shader_variant]) -> Annotated[int, ctypes.c_int32]: ...
-enum_ir3_shader_debug = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_DBG_SHADER_VS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_VS', 1) # type: ignore
-IR3_DBG_SHADER_TCS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_TCS', 2) # type: ignore
-IR3_DBG_SHADER_TES = enum_ir3_shader_debug.define('IR3_DBG_SHADER_TES', 4) # type: ignore
-IR3_DBG_SHADER_GS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_GS', 8) # type: ignore
-IR3_DBG_SHADER_FS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_FS', 16) # type: ignore
-IR3_DBG_SHADER_CS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_CS', 32) # type: ignore
-IR3_DBG_DISASM = enum_ir3_shader_debug.define('IR3_DBG_DISASM', 64) # type: ignore
-IR3_DBG_OPTMSGS = enum_ir3_shader_debug.define('IR3_DBG_OPTMSGS', 128) # type: ignore
-IR3_DBG_FORCES2EN = enum_ir3_shader_debug.define('IR3_DBG_FORCES2EN', 256) # type: ignore
-IR3_DBG_NOUBOOPT = enum_ir3_shader_debug.define('IR3_DBG_NOUBOOPT', 512) # type: ignore
-IR3_DBG_NOFP16 = enum_ir3_shader_debug.define('IR3_DBG_NOFP16', 1024) # type: ignore
-IR3_DBG_NOCACHE = enum_ir3_shader_debug.define('IR3_DBG_NOCACHE', 2048) # type: ignore
-IR3_DBG_SPILLALL = enum_ir3_shader_debug.define('IR3_DBG_SPILLALL', 4096) # type: ignore
-IR3_DBG_NOPREAMBLE = enum_ir3_shader_debug.define('IR3_DBG_NOPREAMBLE', 8192) # type: ignore
-IR3_DBG_SHADER_INTERNAL = enum_ir3_shader_debug.define('IR3_DBG_SHADER_INTERNAL', 16384) # type: ignore
-IR3_DBG_FULLSYNC = enum_ir3_shader_debug.define('IR3_DBG_FULLSYNC', 32768) # type: ignore
-IR3_DBG_FULLNOP = enum_ir3_shader_debug.define('IR3_DBG_FULLNOP', 65536) # type: ignore
-IR3_DBG_NOEARLYPREAMBLE = enum_ir3_shader_debug.define('IR3_DBG_NOEARLYPREAMBLE', 131072) # type: ignore
-IR3_DBG_NODESCPREFETCH = enum_ir3_shader_debug.define('IR3_DBG_NODESCPREFETCH', 262144) # type: ignore
-IR3_DBG_EXPANDRPT = enum_ir3_shader_debug.define('IR3_DBG_EXPANDRPT', 524288) # type: ignore
-IR3_DBG_ASM_ROUNDTRIP = enum_ir3_shader_debug.define('IR3_DBG_ASM_ROUNDTRIP', 1048576) # type: ignore
-IR3_DBG_SCHEDMSGS = enum_ir3_shader_debug.define('IR3_DBG_SCHEDMSGS', 2097152) # type: ignore
-IR3_DBG_RAMSGS = enum_ir3_shader_debug.define('IR3_DBG_RAMSGS', 4194304) # type: ignore
-IR3_DBG_NOALIASTEX = enum_ir3_shader_debug.define('IR3_DBG_NOALIASTEX', 8388608) # type: ignore
-IR3_DBG_NOALIASRT = enum_ir3_shader_debug.define('IR3_DBG_NOALIASRT', 16777216) # type: ignore
+class enum_ir3_shader_debug(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_DBG_SHADER_VS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_VS', 1)
+IR3_DBG_SHADER_TCS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_TCS', 2)
+IR3_DBG_SHADER_TES = enum_ir3_shader_debug.define('IR3_DBG_SHADER_TES', 4)
+IR3_DBG_SHADER_GS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_GS', 8)
+IR3_DBG_SHADER_FS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_FS', 16)
+IR3_DBG_SHADER_CS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_CS', 32)
+IR3_DBG_DISASM = enum_ir3_shader_debug.define('IR3_DBG_DISASM', 64)
+IR3_DBG_OPTMSGS = enum_ir3_shader_debug.define('IR3_DBG_OPTMSGS', 128)
+IR3_DBG_FORCES2EN = enum_ir3_shader_debug.define('IR3_DBG_FORCES2EN', 256)
+IR3_DBG_NOUBOOPT = enum_ir3_shader_debug.define('IR3_DBG_NOUBOOPT', 512)
+IR3_DBG_NOFP16 = enum_ir3_shader_debug.define('IR3_DBG_NOFP16', 1024)
+IR3_DBG_NOCACHE = enum_ir3_shader_debug.define('IR3_DBG_NOCACHE', 2048)
+IR3_DBG_SPILLALL = enum_ir3_shader_debug.define('IR3_DBG_SPILLALL', 4096)
+IR3_DBG_NOPREAMBLE = enum_ir3_shader_debug.define('IR3_DBG_NOPREAMBLE', 8192)
+IR3_DBG_SHADER_INTERNAL = enum_ir3_shader_debug.define('IR3_DBG_SHADER_INTERNAL', 16384)
+IR3_DBG_FULLSYNC = enum_ir3_shader_debug.define('IR3_DBG_FULLSYNC', 32768)
+IR3_DBG_FULLNOP = enum_ir3_shader_debug.define('IR3_DBG_FULLNOP', 65536)
+IR3_DBG_NOEARLYPREAMBLE = enum_ir3_shader_debug.define('IR3_DBG_NOEARLYPREAMBLE', 131072)
+IR3_DBG_NODESCPREFETCH = enum_ir3_shader_debug.define('IR3_DBG_NODESCPREFETCH', 262144)
+IR3_DBG_EXPANDRPT = enum_ir3_shader_debug.define('IR3_DBG_EXPANDRPT', 524288)
+IR3_DBG_ASM_ROUNDTRIP = enum_ir3_shader_debug.define('IR3_DBG_ASM_ROUNDTRIP', 1048576)
+IR3_DBG_SCHEDMSGS = enum_ir3_shader_debug.define('IR3_DBG_SCHEDMSGS', 2097152)
+IR3_DBG_RAMSGS = enum_ir3_shader_debug.define('IR3_DBG_RAMSGS', 4194304)
+IR3_DBG_NOALIASTEX = enum_ir3_shader_debug.define('IR3_DBG_NOALIASTEX', 8388608)
+IR3_DBG_NOALIASRT = enum_ir3_shader_debug.define('IR3_DBG_NOALIASRT', 16777216)
 
 try: ir3_shader_debug = enum_ir3_shader_debug.in_dll(dll, 'ir3_shader_debug')
 except (ValueError,AttributeError): pass
@@ -6773,20 +6773,20 @@ class struct_ir3_driver_params_fs(c.Struct):
   __pad_09: Annotated[uint32_t, 36]
   frag_offset: Annotated[uint32_t, 40]
   __pad_11_12: Annotated[c.Array[uint32_t, Literal[2]], 44]
-enum_ir3_bary = CEnum(Annotated[int, ctypes.c_uint32])
-IJ_PERSP_PIXEL = enum_ir3_bary.define('IJ_PERSP_PIXEL', 0) # type: ignore
-IJ_PERSP_SAMPLE = enum_ir3_bary.define('IJ_PERSP_SAMPLE', 1) # type: ignore
-IJ_PERSP_CENTROID = enum_ir3_bary.define('IJ_PERSP_CENTROID', 2) # type: ignore
-IJ_PERSP_CENTER_RHW = enum_ir3_bary.define('IJ_PERSP_CENTER_RHW', 3) # type: ignore
-IJ_LINEAR_PIXEL = enum_ir3_bary.define('IJ_LINEAR_PIXEL', 4) # type: ignore
-IJ_LINEAR_CENTROID = enum_ir3_bary.define('IJ_LINEAR_CENTROID', 5) # type: ignore
-IJ_LINEAR_SAMPLE = enum_ir3_bary.define('IJ_LINEAR_SAMPLE', 6) # type: ignore
-IJ_COUNT = enum_ir3_bary.define('IJ_COUNT', 7) # type: ignore
+class enum_ir3_bary(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IJ_PERSP_PIXEL = enum_ir3_bary.define('IJ_PERSP_PIXEL', 0)
+IJ_PERSP_SAMPLE = enum_ir3_bary.define('IJ_PERSP_SAMPLE', 1)
+IJ_PERSP_CENTROID = enum_ir3_bary.define('IJ_PERSP_CENTROID', 2)
+IJ_PERSP_CENTER_RHW = enum_ir3_bary.define('IJ_PERSP_CENTER_RHW', 3)
+IJ_LINEAR_PIXEL = enum_ir3_bary.define('IJ_LINEAR_PIXEL', 4)
+IJ_LINEAR_CENTROID = enum_ir3_bary.define('IJ_LINEAR_CENTROID', 5)
+IJ_LINEAR_SAMPLE = enum_ir3_bary.define('IJ_LINEAR_SAMPLE', 6)
+IJ_COUNT = enum_ir3_bary.define('IJ_COUNT', 7)
 
-enum_ir3_wavesize_option = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_SINGLE_ONLY = enum_ir3_wavesize_option.define('IR3_SINGLE_ONLY', 0) # type: ignore
-IR3_SINGLE_OR_DOUBLE = enum_ir3_wavesize_option.define('IR3_SINGLE_OR_DOUBLE', 1) # type: ignore
-IR3_DOUBLE_ONLY = enum_ir3_wavesize_option.define('IR3_DOUBLE_ONLY', 2) # type: ignore
+class enum_ir3_wavesize_option(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_SINGLE_ONLY = enum_ir3_wavesize_option.define('IR3_SINGLE_ONLY', 0)
+IR3_SINGLE_OR_DOUBLE = enum_ir3_wavesize_option.define('IR3_SINGLE_OR_DOUBLE', 1)
+IR3_DOUBLE_ONLY = enum_ir3_wavesize_option.define('IR3_DOUBLE_ONLY', 2)
 
 @c.record
 class struct_ir3_ubo_info(c.Struct):
@@ -6809,31 +6809,31 @@ class struct_ir3_ubo_analysis_state(c.Struct):
   range: Annotated[c.Array[struct_ir3_ubo_range, Literal[32]], 0]
   num_enabled: Annotated[uint32_t, 1024]
   size: Annotated[uint32_t, 1028]
-enum_ir3_push_consts_type = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_PUSH_CONSTS_NONE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_NONE', 0) # type: ignore
-IR3_PUSH_CONSTS_PER_STAGE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_PER_STAGE', 1) # type: ignore
-IR3_PUSH_CONSTS_SHARED = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_SHARED', 2) # type: ignore
-IR3_PUSH_CONSTS_SHARED_PREAMBLE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_SHARED_PREAMBLE', 3) # type: ignore
+class enum_ir3_push_consts_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_PUSH_CONSTS_NONE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_NONE', 0)
+IR3_PUSH_CONSTS_PER_STAGE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_PER_STAGE', 1)
+IR3_PUSH_CONSTS_SHARED = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_SHARED', 2)
+IR3_PUSH_CONSTS_SHARED_PREAMBLE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_SHARED_PREAMBLE', 3)
 
 @c.record
 class struct_ir3_driver_ubo(c.Struct):
   SIZE = 8
   idx: Annotated[int32_t, 0]
   size: Annotated[uint32_t, 4]
-enum_ir3_const_alloc_type = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_CONST_ALLOC_PUSH_CONSTS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PUSH_CONSTS', 0) # type: ignore
-IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET', 1) # type: ignore
-IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS', 2) # type: ignore
-IR3_CONST_ALLOC_DRIVER_PARAMS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_DRIVER_PARAMS', 3) # type: ignore
-IR3_CONST_ALLOC_UBO_RANGES = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_UBO_RANGES', 4) # type: ignore
-IR3_CONST_ALLOC_PREAMBLE = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PREAMBLE', 5) # type: ignore
-IR3_CONST_ALLOC_GLOBAL = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_GLOBAL', 6) # type: ignore
-IR3_CONST_ALLOC_UBO_PTRS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_UBO_PTRS', 7) # type: ignore
-IR3_CONST_ALLOC_IMAGE_DIMS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_IMAGE_DIMS', 8) # type: ignore
-IR3_CONST_ALLOC_TFBO = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_TFBO', 9) # type: ignore
-IR3_CONST_ALLOC_PRIMITIVE_PARAM = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PRIMITIVE_PARAM', 10) # type: ignore
-IR3_CONST_ALLOC_PRIMITIVE_MAP = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PRIMITIVE_MAP', 11) # type: ignore
-IR3_CONST_ALLOC_MAX = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_MAX', 12) # type: ignore
+class enum_ir3_const_alloc_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_CONST_ALLOC_PUSH_CONSTS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PUSH_CONSTS', 0)
+IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET', 1)
+IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS', 2)
+IR3_CONST_ALLOC_DRIVER_PARAMS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_DRIVER_PARAMS', 3)
+IR3_CONST_ALLOC_UBO_RANGES = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_UBO_RANGES', 4)
+IR3_CONST_ALLOC_PREAMBLE = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PREAMBLE', 5)
+IR3_CONST_ALLOC_GLOBAL = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_GLOBAL', 6)
+IR3_CONST_ALLOC_UBO_PTRS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_UBO_PTRS', 7)
+IR3_CONST_ALLOC_IMAGE_DIMS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_IMAGE_DIMS', 8)
+IR3_CONST_ALLOC_TFBO = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_TFBO', 9)
+IR3_CONST_ALLOC_PRIMITIVE_PARAM = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PRIMITIVE_PARAM', 10)
+IR3_CONST_ALLOC_PRIMITIVE_MAP = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PRIMITIVE_MAP', 11)
+IR3_CONST_ALLOC_MAX = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_MAX', 12)
 
 @c.record
 class struct_ir3_const_allocation(c.Struct):
@@ -6904,284 +6904,284 @@ class struct_ir3_sampler_prefetch(c.Struct):
   wrmask: Annotated[uint8_t, 9]
   half_precision: Annotated[uint8_t, 10]
   tex_opc: Annotated[opc_t, 12]
-opc_t = CEnum(Annotated[int, ctypes.c_uint32])
-OPC_NOP = opc_t.define('OPC_NOP', 0) # type: ignore
-OPC_JUMP = opc_t.define('OPC_JUMP', 2) # type: ignore
-OPC_CALL = opc_t.define('OPC_CALL', 3) # type: ignore
-OPC_RET = opc_t.define('OPC_RET', 4) # type: ignore
-OPC_KILL = opc_t.define('OPC_KILL', 5) # type: ignore
-OPC_END = opc_t.define('OPC_END', 6) # type: ignore
-OPC_EMIT = opc_t.define('OPC_EMIT', 7) # type: ignore
-OPC_CUT = opc_t.define('OPC_CUT', 8) # type: ignore
-OPC_CHMASK = opc_t.define('OPC_CHMASK', 9) # type: ignore
-OPC_CHSH = opc_t.define('OPC_CHSH', 10) # type: ignore
-OPC_FLOW_REV = opc_t.define('OPC_FLOW_REV', 11) # type: ignore
-OPC_BKT = opc_t.define('OPC_BKT', 16) # type: ignore
-OPC_STKS = opc_t.define('OPC_STKS', 17) # type: ignore
-OPC_STKR = opc_t.define('OPC_STKR', 18) # type: ignore
-OPC_XSET = opc_t.define('OPC_XSET', 19) # type: ignore
-OPC_XCLR = opc_t.define('OPC_XCLR', 20) # type: ignore
-OPC_GETONE = opc_t.define('OPC_GETONE', 21) # type: ignore
-OPC_DBG = opc_t.define('OPC_DBG', 22) # type: ignore
-OPC_SHPS = opc_t.define('OPC_SHPS', 23) # type: ignore
-OPC_SHPE = opc_t.define('OPC_SHPE', 24) # type: ignore
-OPC_GETLAST = opc_t.define('OPC_GETLAST', 25) # type: ignore
-OPC_PREDT = opc_t.define('OPC_PREDT', 29) # type: ignore
-OPC_PREDF = opc_t.define('OPC_PREDF', 30) # type: ignore
-OPC_PREDE = opc_t.define('OPC_PREDE', 31) # type: ignore
-OPC_BR = opc_t.define('OPC_BR', 40) # type: ignore
-OPC_BRAO = opc_t.define('OPC_BRAO', 41) # type: ignore
-OPC_BRAA = opc_t.define('OPC_BRAA', 42) # type: ignore
-OPC_BRAC = opc_t.define('OPC_BRAC', 43) # type: ignore
-OPC_BANY = opc_t.define('OPC_BANY', 44) # type: ignore
-OPC_BALL = opc_t.define('OPC_BALL', 45) # type: ignore
-OPC_BRAX = opc_t.define('OPC_BRAX', 46) # type: ignore
-OPC_DEMOTE = opc_t.define('OPC_DEMOTE', 47) # type: ignore
-OPC_MOV = opc_t.define('OPC_MOV', 128) # type: ignore
-OPC_MOVP = opc_t.define('OPC_MOVP', 129) # type: ignore
-OPC_MOVS = opc_t.define('OPC_MOVS', 130) # type: ignore
-OPC_MOVMSK = opc_t.define('OPC_MOVMSK', 131) # type: ignore
-OPC_SWZ = opc_t.define('OPC_SWZ', 132) # type: ignore
-OPC_GAT = opc_t.define('OPC_GAT', 133) # type: ignore
-OPC_SCT = opc_t.define('OPC_SCT', 134) # type: ignore
-OPC_MOV_IMMED = opc_t.define('OPC_MOV_IMMED', 168) # type: ignore
-OPC_MOV_CONST = opc_t.define('OPC_MOV_CONST', 169) # type: ignore
-OPC_MOV_GPR = opc_t.define('OPC_MOV_GPR', 170) # type: ignore
-OPC_MOV_RELGPR = opc_t.define('OPC_MOV_RELGPR', 171) # type: ignore
-OPC_MOV_RELCONST = opc_t.define('OPC_MOV_RELCONST', 172) # type: ignore
-OPC_MOVS_IMMED = opc_t.define('OPC_MOVS_IMMED', 173) # type: ignore
-OPC_MOVS_A0 = opc_t.define('OPC_MOVS_A0', 174) # type: ignore
-OPC_BALLOT_MACRO = opc_t.define('OPC_BALLOT_MACRO', 178) # type: ignore
-OPC_ANY_MACRO = opc_t.define('OPC_ANY_MACRO', 179) # type: ignore
-OPC_ALL_MACRO = opc_t.define('OPC_ALL_MACRO', 180) # type: ignore
-OPC_ELECT_MACRO = opc_t.define('OPC_ELECT_MACRO', 181) # type: ignore
-OPC_READ_COND_MACRO = opc_t.define('OPC_READ_COND_MACRO', 182) # type: ignore
-OPC_READ_FIRST_MACRO = opc_t.define('OPC_READ_FIRST_MACRO', 183) # type: ignore
-OPC_SHPS_MACRO = opc_t.define('OPC_SHPS_MACRO', 184) # type: ignore
-OPC_READ_GETLAST_MACRO = opc_t.define('OPC_READ_GETLAST_MACRO', 185) # type: ignore
-OPC_SCAN_MACRO = opc_t.define('OPC_SCAN_MACRO', 186) # type: ignore
-OPC_SCAN_CLUSTERS_MACRO = opc_t.define('OPC_SCAN_CLUSTERS_MACRO', 188) # type: ignore
-OPC_ADD_F = opc_t.define('OPC_ADD_F', 256) # type: ignore
-OPC_MIN_F = opc_t.define('OPC_MIN_F', 257) # type: ignore
-OPC_MAX_F = opc_t.define('OPC_MAX_F', 258) # type: ignore
-OPC_MUL_F = opc_t.define('OPC_MUL_F', 259) # type: ignore
-OPC_SIGN_F = opc_t.define('OPC_SIGN_F', 260) # type: ignore
-OPC_CMPS_F = opc_t.define('OPC_CMPS_F', 261) # type: ignore
-OPC_ABSNEG_F = opc_t.define('OPC_ABSNEG_F', 262) # type: ignore
-OPC_CMPV_F = opc_t.define('OPC_CMPV_F', 263) # type: ignore
-OPC_FLOOR_F = opc_t.define('OPC_FLOOR_F', 265) # type: ignore
-OPC_CEIL_F = opc_t.define('OPC_CEIL_F', 266) # type: ignore
-OPC_RNDNE_F = opc_t.define('OPC_RNDNE_F', 267) # type: ignore
-OPC_RNDAZ_F = opc_t.define('OPC_RNDAZ_F', 268) # type: ignore
-OPC_TRUNC_F = opc_t.define('OPC_TRUNC_F', 269) # type: ignore
-OPC_ADD_U = opc_t.define('OPC_ADD_U', 272) # type: ignore
-OPC_ADD_S = opc_t.define('OPC_ADD_S', 273) # type: ignore
-OPC_SUB_U = opc_t.define('OPC_SUB_U', 274) # type: ignore
-OPC_SUB_S = opc_t.define('OPC_SUB_S', 275) # type: ignore
-OPC_CMPS_U = opc_t.define('OPC_CMPS_U', 276) # type: ignore
-OPC_CMPS_S = opc_t.define('OPC_CMPS_S', 277) # type: ignore
-OPC_MIN_U = opc_t.define('OPC_MIN_U', 278) # type: ignore
-OPC_MIN_S = opc_t.define('OPC_MIN_S', 279) # type: ignore
-OPC_MAX_U = opc_t.define('OPC_MAX_U', 280) # type: ignore
-OPC_MAX_S = opc_t.define('OPC_MAX_S', 281) # type: ignore
-OPC_ABSNEG_S = opc_t.define('OPC_ABSNEG_S', 282) # type: ignore
-OPC_AND_B = opc_t.define('OPC_AND_B', 284) # type: ignore
-OPC_OR_B = opc_t.define('OPC_OR_B', 285) # type: ignore
-OPC_NOT_B = opc_t.define('OPC_NOT_B', 286) # type: ignore
-OPC_XOR_B = opc_t.define('OPC_XOR_B', 287) # type: ignore
-OPC_CMPV_U = opc_t.define('OPC_CMPV_U', 289) # type: ignore
-OPC_CMPV_S = opc_t.define('OPC_CMPV_S', 290) # type: ignore
-OPC_MUL_U24 = opc_t.define('OPC_MUL_U24', 304) # type: ignore
-OPC_MUL_S24 = opc_t.define('OPC_MUL_S24', 305) # type: ignore
-OPC_MULL_U = opc_t.define('OPC_MULL_U', 306) # type: ignore
-OPC_BFREV_B = opc_t.define('OPC_BFREV_B', 307) # type: ignore
-OPC_CLZ_S = opc_t.define('OPC_CLZ_S', 308) # type: ignore
-OPC_CLZ_B = opc_t.define('OPC_CLZ_B', 309) # type: ignore
-OPC_SHL_B = opc_t.define('OPC_SHL_B', 310) # type: ignore
-OPC_SHR_B = opc_t.define('OPC_SHR_B', 311) # type: ignore
-OPC_ASHR_B = opc_t.define('OPC_ASHR_B', 312) # type: ignore
-OPC_BARY_F = opc_t.define('OPC_BARY_F', 313) # type: ignore
-OPC_MGEN_B = opc_t.define('OPC_MGEN_B', 314) # type: ignore
-OPC_GETBIT_B = opc_t.define('OPC_GETBIT_B', 315) # type: ignore
-OPC_SETRM = opc_t.define('OPC_SETRM', 316) # type: ignore
-OPC_CBITS_B = opc_t.define('OPC_CBITS_B', 317) # type: ignore
-OPC_SHB = opc_t.define('OPC_SHB', 318) # type: ignore
-OPC_MSAD = opc_t.define('OPC_MSAD', 319) # type: ignore
-OPC_FLAT_B = opc_t.define('OPC_FLAT_B', 320) # type: ignore
-OPC_MAD_U16 = opc_t.define('OPC_MAD_U16', 384) # type: ignore
-OPC_MADSH_U16 = opc_t.define('OPC_MADSH_U16', 385) # type: ignore
-OPC_MAD_S16 = opc_t.define('OPC_MAD_S16', 386) # type: ignore
-OPC_MADSH_M16 = opc_t.define('OPC_MADSH_M16', 387) # type: ignore
-OPC_MAD_U24 = opc_t.define('OPC_MAD_U24', 388) # type: ignore
-OPC_MAD_S24 = opc_t.define('OPC_MAD_S24', 389) # type: ignore
-OPC_MAD_F16 = opc_t.define('OPC_MAD_F16', 390) # type: ignore
-OPC_MAD_F32 = opc_t.define('OPC_MAD_F32', 391) # type: ignore
-OPC_SEL_B16 = opc_t.define('OPC_SEL_B16', 392) # type: ignore
-OPC_SEL_B32 = opc_t.define('OPC_SEL_B32', 393) # type: ignore
-OPC_SEL_S16 = opc_t.define('OPC_SEL_S16', 394) # type: ignore
-OPC_SEL_S32 = opc_t.define('OPC_SEL_S32', 395) # type: ignore
-OPC_SEL_F16 = opc_t.define('OPC_SEL_F16', 396) # type: ignore
-OPC_SEL_F32 = opc_t.define('OPC_SEL_F32', 397) # type: ignore
-OPC_SAD_S16 = opc_t.define('OPC_SAD_S16', 398) # type: ignore
-OPC_SAD_S32 = opc_t.define('OPC_SAD_S32', 399) # type: ignore
-OPC_SHRM = opc_t.define('OPC_SHRM', 400) # type: ignore
-OPC_SHLM = opc_t.define('OPC_SHLM', 401) # type: ignore
-OPC_SHRG = opc_t.define('OPC_SHRG', 402) # type: ignore
-OPC_SHLG = opc_t.define('OPC_SHLG', 403) # type: ignore
-OPC_ANDG = opc_t.define('OPC_ANDG', 404) # type: ignore
-OPC_DP2ACC = opc_t.define('OPC_DP2ACC', 405) # type: ignore
-OPC_DP4ACC = opc_t.define('OPC_DP4ACC', 406) # type: ignore
-OPC_WMM = opc_t.define('OPC_WMM', 407) # type: ignore
-OPC_WMM_ACCU = opc_t.define('OPC_WMM_ACCU', 408) # type: ignore
-OPC_RCP = opc_t.define('OPC_RCP', 512) # type: ignore
-OPC_RSQ = opc_t.define('OPC_RSQ', 513) # type: ignore
-OPC_LOG2 = opc_t.define('OPC_LOG2', 514) # type: ignore
-OPC_EXP2 = opc_t.define('OPC_EXP2', 515) # type: ignore
-OPC_SIN = opc_t.define('OPC_SIN', 516) # type: ignore
-OPC_COS = opc_t.define('OPC_COS', 517) # type: ignore
-OPC_SQRT = opc_t.define('OPC_SQRT', 518) # type: ignore
-OPC_HRSQ = opc_t.define('OPC_HRSQ', 521) # type: ignore
-OPC_HLOG2 = opc_t.define('OPC_HLOG2', 522) # type: ignore
-OPC_HEXP2 = opc_t.define('OPC_HEXP2', 523) # type: ignore
-OPC_ISAM = opc_t.define('OPC_ISAM', 640) # type: ignore
-OPC_ISAML = opc_t.define('OPC_ISAML', 641) # type: ignore
-OPC_ISAMM = opc_t.define('OPC_ISAMM', 642) # type: ignore
-OPC_SAM = opc_t.define('OPC_SAM', 643) # type: ignore
-OPC_SAMB = opc_t.define('OPC_SAMB', 644) # type: ignore
-OPC_SAML = opc_t.define('OPC_SAML', 645) # type: ignore
-OPC_SAMGQ = opc_t.define('OPC_SAMGQ', 646) # type: ignore
-OPC_GETLOD = opc_t.define('OPC_GETLOD', 647) # type: ignore
-OPC_CONV = opc_t.define('OPC_CONV', 648) # type: ignore
-OPC_CONVM = opc_t.define('OPC_CONVM', 649) # type: ignore
-OPC_GETSIZE = opc_t.define('OPC_GETSIZE', 650) # type: ignore
-OPC_GETBUF = opc_t.define('OPC_GETBUF', 651) # type: ignore
-OPC_GETPOS = opc_t.define('OPC_GETPOS', 652) # type: ignore
-OPC_GETINFO = opc_t.define('OPC_GETINFO', 653) # type: ignore
-OPC_DSX = opc_t.define('OPC_DSX', 654) # type: ignore
-OPC_DSY = opc_t.define('OPC_DSY', 655) # type: ignore
-OPC_GATHER4R = opc_t.define('OPC_GATHER4R', 656) # type: ignore
-OPC_GATHER4G = opc_t.define('OPC_GATHER4G', 657) # type: ignore
-OPC_GATHER4B = opc_t.define('OPC_GATHER4B', 658) # type: ignore
-OPC_GATHER4A = opc_t.define('OPC_GATHER4A', 659) # type: ignore
-OPC_SAMGP0 = opc_t.define('OPC_SAMGP0', 660) # type: ignore
-OPC_SAMGP1 = opc_t.define('OPC_SAMGP1', 661) # type: ignore
-OPC_SAMGP2 = opc_t.define('OPC_SAMGP2', 662) # type: ignore
-OPC_SAMGP3 = opc_t.define('OPC_SAMGP3', 663) # type: ignore
-OPC_DSXPP_1 = opc_t.define('OPC_DSXPP_1', 664) # type: ignore
-OPC_DSYPP_1 = opc_t.define('OPC_DSYPP_1', 665) # type: ignore
-OPC_RGETPOS = opc_t.define('OPC_RGETPOS', 666) # type: ignore
-OPC_RGETINFO = opc_t.define('OPC_RGETINFO', 667) # type: ignore
-OPC_BRCST_ACTIVE = opc_t.define('OPC_BRCST_ACTIVE', 668) # type: ignore
-OPC_QUAD_SHUFFLE_BRCST = opc_t.define('OPC_QUAD_SHUFFLE_BRCST', 669) # type: ignore
-OPC_QUAD_SHUFFLE_HORIZ = opc_t.define('OPC_QUAD_SHUFFLE_HORIZ', 670) # type: ignore
-OPC_QUAD_SHUFFLE_VERT = opc_t.define('OPC_QUAD_SHUFFLE_VERT', 671) # type: ignore
-OPC_QUAD_SHUFFLE_DIAG = opc_t.define('OPC_QUAD_SHUFFLE_DIAG', 672) # type: ignore
-OPC_TCINV = opc_t.define('OPC_TCINV', 673) # type: ignore
-OPC_DSXPP_MACRO = opc_t.define('OPC_DSXPP_MACRO', 675) # type: ignore
-OPC_DSYPP_MACRO = opc_t.define('OPC_DSYPP_MACRO', 676) # type: ignore
-OPC_LDG = opc_t.define('OPC_LDG', 768) # type: ignore
-OPC_LDL = opc_t.define('OPC_LDL', 769) # type: ignore
-OPC_LDP = opc_t.define('OPC_LDP', 770) # type: ignore
-OPC_STG = opc_t.define('OPC_STG', 771) # type: ignore
-OPC_STL = opc_t.define('OPC_STL', 772) # type: ignore
-OPC_STP = opc_t.define('OPC_STP', 773) # type: ignore
-OPC_LDIB = opc_t.define('OPC_LDIB', 774) # type: ignore
-OPC_G2L = opc_t.define('OPC_G2L', 775) # type: ignore
-OPC_L2G = opc_t.define('OPC_L2G', 776) # type: ignore
-OPC_PREFETCH = opc_t.define('OPC_PREFETCH', 777) # type: ignore
-OPC_LDLW = opc_t.define('OPC_LDLW', 778) # type: ignore
-OPC_STLW = opc_t.define('OPC_STLW', 779) # type: ignore
-OPC_RESFMT = opc_t.define('OPC_RESFMT', 782) # type: ignore
-OPC_RESINFO = opc_t.define('OPC_RESINFO', 783) # type: ignore
-OPC_ATOMIC_ADD = opc_t.define('OPC_ATOMIC_ADD', 784) # type: ignore
-OPC_ATOMIC_SUB = opc_t.define('OPC_ATOMIC_SUB', 785) # type: ignore
-OPC_ATOMIC_XCHG = opc_t.define('OPC_ATOMIC_XCHG', 786) # type: ignore
-OPC_ATOMIC_INC = opc_t.define('OPC_ATOMIC_INC', 787) # type: ignore
-OPC_ATOMIC_DEC = opc_t.define('OPC_ATOMIC_DEC', 788) # type: ignore
-OPC_ATOMIC_CMPXCHG = opc_t.define('OPC_ATOMIC_CMPXCHG', 789) # type: ignore
-OPC_ATOMIC_MIN = opc_t.define('OPC_ATOMIC_MIN', 790) # type: ignore
-OPC_ATOMIC_MAX = opc_t.define('OPC_ATOMIC_MAX', 791) # type: ignore
-OPC_ATOMIC_AND = opc_t.define('OPC_ATOMIC_AND', 792) # type: ignore
-OPC_ATOMIC_OR = opc_t.define('OPC_ATOMIC_OR', 793) # type: ignore
-OPC_ATOMIC_XOR = opc_t.define('OPC_ATOMIC_XOR', 794) # type: ignore
-OPC_LDGB = opc_t.define('OPC_LDGB', 795) # type: ignore
-OPC_STGB = opc_t.define('OPC_STGB', 796) # type: ignore
-OPC_STIB = opc_t.define('OPC_STIB', 797) # type: ignore
-OPC_LDC = opc_t.define('OPC_LDC', 798) # type: ignore
-OPC_LDLV = opc_t.define('OPC_LDLV', 799) # type: ignore
-OPC_PIPR = opc_t.define('OPC_PIPR', 800) # type: ignore
-OPC_PIPC = opc_t.define('OPC_PIPC', 801) # type: ignore
-OPC_EMIT2 = opc_t.define('OPC_EMIT2', 802) # type: ignore
-OPC_ENDLS = opc_t.define('OPC_ENDLS', 803) # type: ignore
-OPC_GETSPID = opc_t.define('OPC_GETSPID', 804) # type: ignore
-OPC_GETWID = opc_t.define('OPC_GETWID', 805) # type: ignore
-OPC_GETFIBERID = opc_t.define('OPC_GETFIBERID', 806) # type: ignore
-OPC_SHFL = opc_t.define('OPC_SHFL', 807) # type: ignore
-OPC_STC = opc_t.define('OPC_STC', 808) # type: ignore
-OPC_RESINFO_B = opc_t.define('OPC_RESINFO_B', 809) # type: ignore
-OPC_LDIB_B = opc_t.define('OPC_LDIB_B', 810) # type: ignore
-OPC_STIB_B = opc_t.define('OPC_STIB_B', 811) # type: ignore
-OPC_ATOMIC_B_ADD = opc_t.define('OPC_ATOMIC_B_ADD', 812) # type: ignore
-OPC_ATOMIC_B_SUB = opc_t.define('OPC_ATOMIC_B_SUB', 813) # type: ignore
-OPC_ATOMIC_B_XCHG = opc_t.define('OPC_ATOMIC_B_XCHG', 814) # type: ignore
-OPC_ATOMIC_B_INC = opc_t.define('OPC_ATOMIC_B_INC', 815) # type: ignore
-OPC_ATOMIC_B_DEC = opc_t.define('OPC_ATOMIC_B_DEC', 816) # type: ignore
-OPC_ATOMIC_B_CMPXCHG = opc_t.define('OPC_ATOMIC_B_CMPXCHG', 817) # type: ignore
-OPC_ATOMIC_B_MIN = opc_t.define('OPC_ATOMIC_B_MIN', 818) # type: ignore
-OPC_ATOMIC_B_MAX = opc_t.define('OPC_ATOMIC_B_MAX', 819) # type: ignore
-OPC_ATOMIC_B_AND = opc_t.define('OPC_ATOMIC_B_AND', 820) # type: ignore
-OPC_ATOMIC_B_OR = opc_t.define('OPC_ATOMIC_B_OR', 821) # type: ignore
-OPC_ATOMIC_B_XOR = opc_t.define('OPC_ATOMIC_B_XOR', 822) # type: ignore
-OPC_ATOMIC_S_ADD = opc_t.define('OPC_ATOMIC_S_ADD', 823) # type: ignore
-OPC_ATOMIC_S_SUB = opc_t.define('OPC_ATOMIC_S_SUB', 824) # type: ignore
-OPC_ATOMIC_S_XCHG = opc_t.define('OPC_ATOMIC_S_XCHG', 825) # type: ignore
-OPC_ATOMIC_S_INC = opc_t.define('OPC_ATOMIC_S_INC', 826) # type: ignore
-OPC_ATOMIC_S_DEC = opc_t.define('OPC_ATOMIC_S_DEC', 827) # type: ignore
-OPC_ATOMIC_S_CMPXCHG = opc_t.define('OPC_ATOMIC_S_CMPXCHG', 828) # type: ignore
-OPC_ATOMIC_S_MIN = opc_t.define('OPC_ATOMIC_S_MIN', 829) # type: ignore
-OPC_ATOMIC_S_MAX = opc_t.define('OPC_ATOMIC_S_MAX', 830) # type: ignore
-OPC_ATOMIC_S_AND = opc_t.define('OPC_ATOMIC_S_AND', 831) # type: ignore
-OPC_ATOMIC_S_OR = opc_t.define('OPC_ATOMIC_S_OR', 832) # type: ignore
-OPC_ATOMIC_S_XOR = opc_t.define('OPC_ATOMIC_S_XOR', 833) # type: ignore
-OPC_ATOMIC_G_ADD = opc_t.define('OPC_ATOMIC_G_ADD', 834) # type: ignore
-OPC_ATOMIC_G_SUB = opc_t.define('OPC_ATOMIC_G_SUB', 835) # type: ignore
-OPC_ATOMIC_G_XCHG = opc_t.define('OPC_ATOMIC_G_XCHG', 836) # type: ignore
-OPC_ATOMIC_G_INC = opc_t.define('OPC_ATOMIC_G_INC', 837) # type: ignore
-OPC_ATOMIC_G_DEC = opc_t.define('OPC_ATOMIC_G_DEC', 838) # type: ignore
-OPC_ATOMIC_G_CMPXCHG = opc_t.define('OPC_ATOMIC_G_CMPXCHG', 839) # type: ignore
-OPC_ATOMIC_G_MIN = opc_t.define('OPC_ATOMIC_G_MIN', 840) # type: ignore
-OPC_ATOMIC_G_MAX = opc_t.define('OPC_ATOMIC_G_MAX', 841) # type: ignore
-OPC_ATOMIC_G_AND = opc_t.define('OPC_ATOMIC_G_AND', 842) # type: ignore
-OPC_ATOMIC_G_OR = opc_t.define('OPC_ATOMIC_G_OR', 843) # type: ignore
-OPC_ATOMIC_G_XOR = opc_t.define('OPC_ATOMIC_G_XOR', 844) # type: ignore
-OPC_LDG_A = opc_t.define('OPC_LDG_A', 845) # type: ignore
-OPC_STG_A = opc_t.define('OPC_STG_A', 846) # type: ignore
-OPC_SPILL_MACRO = opc_t.define('OPC_SPILL_MACRO', 847) # type: ignore
-OPC_RELOAD_MACRO = opc_t.define('OPC_RELOAD_MACRO', 848) # type: ignore
-OPC_LDC_K = opc_t.define('OPC_LDC_K', 849) # type: ignore
-OPC_STSC = opc_t.define('OPC_STSC', 850) # type: ignore
-OPC_LDG_K = opc_t.define('OPC_LDG_K', 851) # type: ignore
-OPC_PUSH_CONSTS_LOAD_MACRO = opc_t.define('OPC_PUSH_CONSTS_LOAD_MACRO', 852) # type: ignore
-OPC_RAY_INTERSECTION = opc_t.define('OPC_RAY_INTERSECTION', 858) # type: ignore
-OPC_RESBASE = opc_t.define('OPC_RESBASE', 859) # type: ignore
-OPC_BAR = opc_t.define('OPC_BAR', 896) # type: ignore
-OPC_FENCE = opc_t.define('OPC_FENCE', 897) # type: ignore
-OPC_SLEEP = opc_t.define('OPC_SLEEP', 898) # type: ignore
-OPC_ICINV = opc_t.define('OPC_ICINV', 899) # type: ignore
-OPC_DCCLN = opc_t.define('OPC_DCCLN', 900) # type: ignore
-OPC_DCINV = opc_t.define('OPC_DCINV', 901) # type: ignore
-OPC_DCFLU = opc_t.define('OPC_DCFLU', 902) # type: ignore
-OPC_LOCK = opc_t.define('OPC_LOCK', 903) # type: ignore
-OPC_UNLOCK = opc_t.define('OPC_UNLOCK', 904) # type: ignore
-OPC_ALIAS = opc_t.define('OPC_ALIAS', 905) # type: ignore
-OPC_CCINV = opc_t.define('OPC_CCINV', 906) # type: ignore
-OPC_META_INPUT = opc_t.define('OPC_META_INPUT', 1024) # type: ignore
-OPC_META_SPLIT = opc_t.define('OPC_META_SPLIT', 1026) # type: ignore
-OPC_META_COLLECT = opc_t.define('OPC_META_COLLECT', 1027) # type: ignore
-OPC_META_TEX_PREFETCH = opc_t.define('OPC_META_TEX_PREFETCH', 1028) # type: ignore
-OPC_META_PARALLEL_COPY = opc_t.define('OPC_META_PARALLEL_COPY', 1029) # type: ignore
-OPC_META_PHI = opc_t.define('OPC_META_PHI', 1030) # type: ignore
-OPC_META_RAW = opc_t.define('OPC_META_RAW', 1031) # type: ignore
+class opc_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+OPC_NOP = opc_t.define('OPC_NOP', 0)
+OPC_JUMP = opc_t.define('OPC_JUMP', 2)
+OPC_CALL = opc_t.define('OPC_CALL', 3)
+OPC_RET = opc_t.define('OPC_RET', 4)
+OPC_KILL = opc_t.define('OPC_KILL', 5)
+OPC_END = opc_t.define('OPC_END', 6)
+OPC_EMIT = opc_t.define('OPC_EMIT', 7)
+OPC_CUT = opc_t.define('OPC_CUT', 8)
+OPC_CHMASK = opc_t.define('OPC_CHMASK', 9)
+OPC_CHSH = opc_t.define('OPC_CHSH', 10)
+OPC_FLOW_REV = opc_t.define('OPC_FLOW_REV', 11)
+OPC_BKT = opc_t.define('OPC_BKT', 16)
+OPC_STKS = opc_t.define('OPC_STKS', 17)
+OPC_STKR = opc_t.define('OPC_STKR', 18)
+OPC_XSET = opc_t.define('OPC_XSET', 19)
+OPC_XCLR = opc_t.define('OPC_XCLR', 20)
+OPC_GETONE = opc_t.define('OPC_GETONE', 21)
+OPC_DBG = opc_t.define('OPC_DBG', 22)
+OPC_SHPS = opc_t.define('OPC_SHPS', 23)
+OPC_SHPE = opc_t.define('OPC_SHPE', 24)
+OPC_GETLAST = opc_t.define('OPC_GETLAST', 25)
+OPC_PREDT = opc_t.define('OPC_PREDT', 29)
+OPC_PREDF = opc_t.define('OPC_PREDF', 30)
+OPC_PREDE = opc_t.define('OPC_PREDE', 31)
+OPC_BR = opc_t.define('OPC_BR', 40)
+OPC_BRAO = opc_t.define('OPC_BRAO', 41)
+OPC_BRAA = opc_t.define('OPC_BRAA', 42)
+OPC_BRAC = opc_t.define('OPC_BRAC', 43)
+OPC_BANY = opc_t.define('OPC_BANY', 44)
+OPC_BALL = opc_t.define('OPC_BALL', 45)
+OPC_BRAX = opc_t.define('OPC_BRAX', 46)
+OPC_DEMOTE = opc_t.define('OPC_DEMOTE', 47)
+OPC_MOV = opc_t.define('OPC_MOV', 128)
+OPC_MOVP = opc_t.define('OPC_MOVP', 129)
+OPC_MOVS = opc_t.define('OPC_MOVS', 130)
+OPC_MOVMSK = opc_t.define('OPC_MOVMSK', 131)
+OPC_SWZ = opc_t.define('OPC_SWZ', 132)
+OPC_GAT = opc_t.define('OPC_GAT', 133)
+OPC_SCT = opc_t.define('OPC_SCT', 134)
+OPC_MOV_IMMED = opc_t.define('OPC_MOV_IMMED', 168)
+OPC_MOV_CONST = opc_t.define('OPC_MOV_CONST', 169)
+OPC_MOV_GPR = opc_t.define('OPC_MOV_GPR', 170)
+OPC_MOV_RELGPR = opc_t.define('OPC_MOV_RELGPR', 171)
+OPC_MOV_RELCONST = opc_t.define('OPC_MOV_RELCONST', 172)
+OPC_MOVS_IMMED = opc_t.define('OPC_MOVS_IMMED', 173)
+OPC_MOVS_A0 = opc_t.define('OPC_MOVS_A0', 174)
+OPC_BALLOT_MACRO = opc_t.define('OPC_BALLOT_MACRO', 178)
+OPC_ANY_MACRO = opc_t.define('OPC_ANY_MACRO', 179)
+OPC_ALL_MACRO = opc_t.define('OPC_ALL_MACRO', 180)
+OPC_ELECT_MACRO = opc_t.define('OPC_ELECT_MACRO', 181)
+OPC_READ_COND_MACRO = opc_t.define('OPC_READ_COND_MACRO', 182)
+OPC_READ_FIRST_MACRO = opc_t.define('OPC_READ_FIRST_MACRO', 183)
+OPC_SHPS_MACRO = opc_t.define('OPC_SHPS_MACRO', 184)
+OPC_READ_GETLAST_MACRO = opc_t.define('OPC_READ_GETLAST_MACRO', 185)
+OPC_SCAN_MACRO = opc_t.define('OPC_SCAN_MACRO', 186)
+OPC_SCAN_CLUSTERS_MACRO = opc_t.define('OPC_SCAN_CLUSTERS_MACRO', 188)
+OPC_ADD_F = opc_t.define('OPC_ADD_F', 256)
+OPC_MIN_F = opc_t.define('OPC_MIN_F', 257)
+OPC_MAX_F = opc_t.define('OPC_MAX_F', 258)
+OPC_MUL_F = opc_t.define('OPC_MUL_F', 259)
+OPC_SIGN_F = opc_t.define('OPC_SIGN_F', 260)
+OPC_CMPS_F = opc_t.define('OPC_CMPS_F', 261)
+OPC_ABSNEG_F = opc_t.define('OPC_ABSNEG_F', 262)
+OPC_CMPV_F = opc_t.define('OPC_CMPV_F', 263)
+OPC_FLOOR_F = opc_t.define('OPC_FLOOR_F', 265)
+OPC_CEIL_F = opc_t.define('OPC_CEIL_F', 266)
+OPC_RNDNE_F = opc_t.define('OPC_RNDNE_F', 267)
+OPC_RNDAZ_F = opc_t.define('OPC_RNDAZ_F', 268)
+OPC_TRUNC_F = opc_t.define('OPC_TRUNC_F', 269)
+OPC_ADD_U = opc_t.define('OPC_ADD_U', 272)
+OPC_ADD_S = opc_t.define('OPC_ADD_S', 273)
+OPC_SUB_U = opc_t.define('OPC_SUB_U', 274)
+OPC_SUB_S = opc_t.define('OPC_SUB_S', 275)
+OPC_CMPS_U = opc_t.define('OPC_CMPS_U', 276)
+OPC_CMPS_S = opc_t.define('OPC_CMPS_S', 277)
+OPC_MIN_U = opc_t.define('OPC_MIN_U', 278)
+OPC_MIN_S = opc_t.define('OPC_MIN_S', 279)
+OPC_MAX_U = opc_t.define('OPC_MAX_U', 280)
+OPC_MAX_S = opc_t.define('OPC_MAX_S', 281)
+OPC_ABSNEG_S = opc_t.define('OPC_ABSNEG_S', 282)
+OPC_AND_B = opc_t.define('OPC_AND_B', 284)
+OPC_OR_B = opc_t.define('OPC_OR_B', 285)
+OPC_NOT_B = opc_t.define('OPC_NOT_B', 286)
+OPC_XOR_B = opc_t.define('OPC_XOR_B', 287)
+OPC_CMPV_U = opc_t.define('OPC_CMPV_U', 289)
+OPC_CMPV_S = opc_t.define('OPC_CMPV_S', 290)
+OPC_MUL_U24 = opc_t.define('OPC_MUL_U24', 304)
+OPC_MUL_S24 = opc_t.define('OPC_MUL_S24', 305)
+OPC_MULL_U = opc_t.define('OPC_MULL_U', 306)
+OPC_BFREV_B = opc_t.define('OPC_BFREV_B', 307)
+OPC_CLZ_S = opc_t.define('OPC_CLZ_S', 308)
+OPC_CLZ_B = opc_t.define('OPC_CLZ_B', 309)
+OPC_SHL_B = opc_t.define('OPC_SHL_B', 310)
+OPC_SHR_B = opc_t.define('OPC_SHR_B', 311)
+OPC_ASHR_B = opc_t.define('OPC_ASHR_B', 312)
+OPC_BARY_F = opc_t.define('OPC_BARY_F', 313)
+OPC_MGEN_B = opc_t.define('OPC_MGEN_B', 314)
+OPC_GETBIT_B = opc_t.define('OPC_GETBIT_B', 315)
+OPC_SETRM = opc_t.define('OPC_SETRM', 316)
+OPC_CBITS_B = opc_t.define('OPC_CBITS_B', 317)
+OPC_SHB = opc_t.define('OPC_SHB', 318)
+OPC_MSAD = opc_t.define('OPC_MSAD', 319)
+OPC_FLAT_B = opc_t.define('OPC_FLAT_B', 320)
+OPC_MAD_U16 = opc_t.define('OPC_MAD_U16', 384)
+OPC_MADSH_U16 = opc_t.define('OPC_MADSH_U16', 385)
+OPC_MAD_S16 = opc_t.define('OPC_MAD_S16', 386)
+OPC_MADSH_M16 = opc_t.define('OPC_MADSH_M16', 387)
+OPC_MAD_U24 = opc_t.define('OPC_MAD_U24', 388)
+OPC_MAD_S24 = opc_t.define('OPC_MAD_S24', 389)
+OPC_MAD_F16 = opc_t.define('OPC_MAD_F16', 390)
+OPC_MAD_F32 = opc_t.define('OPC_MAD_F32', 391)
+OPC_SEL_B16 = opc_t.define('OPC_SEL_B16', 392)
+OPC_SEL_B32 = opc_t.define('OPC_SEL_B32', 393)
+OPC_SEL_S16 = opc_t.define('OPC_SEL_S16', 394)
+OPC_SEL_S32 = opc_t.define('OPC_SEL_S32', 395)
+OPC_SEL_F16 = opc_t.define('OPC_SEL_F16', 396)
+OPC_SEL_F32 = opc_t.define('OPC_SEL_F32', 397)
+OPC_SAD_S16 = opc_t.define('OPC_SAD_S16', 398)
+OPC_SAD_S32 = opc_t.define('OPC_SAD_S32', 399)
+OPC_SHRM = opc_t.define('OPC_SHRM', 400)
+OPC_SHLM = opc_t.define('OPC_SHLM', 401)
+OPC_SHRG = opc_t.define('OPC_SHRG', 402)
+OPC_SHLG = opc_t.define('OPC_SHLG', 403)
+OPC_ANDG = opc_t.define('OPC_ANDG', 404)
+OPC_DP2ACC = opc_t.define('OPC_DP2ACC', 405)
+OPC_DP4ACC = opc_t.define('OPC_DP4ACC', 406)
+OPC_WMM = opc_t.define('OPC_WMM', 407)
+OPC_WMM_ACCU = opc_t.define('OPC_WMM_ACCU', 408)
+OPC_RCP = opc_t.define('OPC_RCP', 512)
+OPC_RSQ = opc_t.define('OPC_RSQ', 513)
+OPC_LOG2 = opc_t.define('OPC_LOG2', 514)
+OPC_EXP2 = opc_t.define('OPC_EXP2', 515)
+OPC_SIN = opc_t.define('OPC_SIN', 516)
+OPC_COS = opc_t.define('OPC_COS', 517)
+OPC_SQRT = opc_t.define('OPC_SQRT', 518)
+OPC_HRSQ = opc_t.define('OPC_HRSQ', 521)
+OPC_HLOG2 = opc_t.define('OPC_HLOG2', 522)
+OPC_HEXP2 = opc_t.define('OPC_HEXP2', 523)
+OPC_ISAM = opc_t.define('OPC_ISAM', 640)
+OPC_ISAML = opc_t.define('OPC_ISAML', 641)
+OPC_ISAMM = opc_t.define('OPC_ISAMM', 642)
+OPC_SAM = opc_t.define('OPC_SAM', 643)
+OPC_SAMB = opc_t.define('OPC_SAMB', 644)
+OPC_SAML = opc_t.define('OPC_SAML', 645)
+OPC_SAMGQ = opc_t.define('OPC_SAMGQ', 646)
+OPC_GETLOD = opc_t.define('OPC_GETLOD', 647)
+OPC_CONV = opc_t.define('OPC_CONV', 648)
+OPC_CONVM = opc_t.define('OPC_CONVM', 649)
+OPC_GETSIZE = opc_t.define('OPC_GETSIZE', 650)
+OPC_GETBUF = opc_t.define('OPC_GETBUF', 651)
+OPC_GETPOS = opc_t.define('OPC_GETPOS', 652)
+OPC_GETINFO = opc_t.define('OPC_GETINFO', 653)
+OPC_DSX = opc_t.define('OPC_DSX', 654)
+OPC_DSY = opc_t.define('OPC_DSY', 655)
+OPC_GATHER4R = opc_t.define('OPC_GATHER4R', 656)
+OPC_GATHER4G = opc_t.define('OPC_GATHER4G', 657)
+OPC_GATHER4B = opc_t.define('OPC_GATHER4B', 658)
+OPC_GATHER4A = opc_t.define('OPC_GATHER4A', 659)
+OPC_SAMGP0 = opc_t.define('OPC_SAMGP0', 660)
+OPC_SAMGP1 = opc_t.define('OPC_SAMGP1', 661)
+OPC_SAMGP2 = opc_t.define('OPC_SAMGP2', 662)
+OPC_SAMGP3 = opc_t.define('OPC_SAMGP3', 663)
+OPC_DSXPP_1 = opc_t.define('OPC_DSXPP_1', 664)
+OPC_DSYPP_1 = opc_t.define('OPC_DSYPP_1', 665)
+OPC_RGETPOS = opc_t.define('OPC_RGETPOS', 666)
+OPC_RGETINFO = opc_t.define('OPC_RGETINFO', 667)
+OPC_BRCST_ACTIVE = opc_t.define('OPC_BRCST_ACTIVE', 668)
+OPC_QUAD_SHUFFLE_BRCST = opc_t.define('OPC_QUAD_SHUFFLE_BRCST', 669)
+OPC_QUAD_SHUFFLE_HORIZ = opc_t.define('OPC_QUAD_SHUFFLE_HORIZ', 670)
+OPC_QUAD_SHUFFLE_VERT = opc_t.define('OPC_QUAD_SHUFFLE_VERT', 671)
+OPC_QUAD_SHUFFLE_DIAG = opc_t.define('OPC_QUAD_SHUFFLE_DIAG', 672)
+OPC_TCINV = opc_t.define('OPC_TCINV', 673)
+OPC_DSXPP_MACRO = opc_t.define('OPC_DSXPP_MACRO', 675)
+OPC_DSYPP_MACRO = opc_t.define('OPC_DSYPP_MACRO', 676)
+OPC_LDG = opc_t.define('OPC_LDG', 768)
+OPC_LDL = opc_t.define('OPC_LDL', 769)
+OPC_LDP = opc_t.define('OPC_LDP', 770)
+OPC_STG = opc_t.define('OPC_STG', 771)
+OPC_STL = opc_t.define('OPC_STL', 772)
+OPC_STP = opc_t.define('OPC_STP', 773)
+OPC_LDIB = opc_t.define('OPC_LDIB', 774)
+OPC_G2L = opc_t.define('OPC_G2L', 775)
+OPC_L2G = opc_t.define('OPC_L2G', 776)
+OPC_PREFETCH = opc_t.define('OPC_PREFETCH', 777)
+OPC_LDLW = opc_t.define('OPC_LDLW', 778)
+OPC_STLW = opc_t.define('OPC_STLW', 779)
+OPC_RESFMT = opc_t.define('OPC_RESFMT', 782)
+OPC_RESINFO = opc_t.define('OPC_RESINFO', 783)
+OPC_ATOMIC_ADD = opc_t.define('OPC_ATOMIC_ADD', 784)
+OPC_ATOMIC_SUB = opc_t.define('OPC_ATOMIC_SUB', 785)
+OPC_ATOMIC_XCHG = opc_t.define('OPC_ATOMIC_XCHG', 786)
+OPC_ATOMIC_INC = opc_t.define('OPC_ATOMIC_INC', 787)
+OPC_ATOMIC_DEC = opc_t.define('OPC_ATOMIC_DEC', 788)
+OPC_ATOMIC_CMPXCHG = opc_t.define('OPC_ATOMIC_CMPXCHG', 789)
+OPC_ATOMIC_MIN = opc_t.define('OPC_ATOMIC_MIN', 790)
+OPC_ATOMIC_MAX = opc_t.define('OPC_ATOMIC_MAX', 791)
+OPC_ATOMIC_AND = opc_t.define('OPC_ATOMIC_AND', 792)
+OPC_ATOMIC_OR = opc_t.define('OPC_ATOMIC_OR', 793)
+OPC_ATOMIC_XOR = opc_t.define('OPC_ATOMIC_XOR', 794)
+OPC_LDGB = opc_t.define('OPC_LDGB', 795)
+OPC_STGB = opc_t.define('OPC_STGB', 796)
+OPC_STIB = opc_t.define('OPC_STIB', 797)
+OPC_LDC = opc_t.define('OPC_LDC', 798)
+OPC_LDLV = opc_t.define('OPC_LDLV', 799)
+OPC_PIPR = opc_t.define('OPC_PIPR', 800)
+OPC_PIPC = opc_t.define('OPC_PIPC', 801)
+OPC_EMIT2 = opc_t.define('OPC_EMIT2', 802)
+OPC_ENDLS = opc_t.define('OPC_ENDLS', 803)
+OPC_GETSPID = opc_t.define('OPC_GETSPID', 804)
+OPC_GETWID = opc_t.define('OPC_GETWID', 805)
+OPC_GETFIBERID = opc_t.define('OPC_GETFIBERID', 806)
+OPC_SHFL = opc_t.define('OPC_SHFL', 807)
+OPC_STC = opc_t.define('OPC_STC', 808)
+OPC_RESINFO_B = opc_t.define('OPC_RESINFO_B', 809)
+OPC_LDIB_B = opc_t.define('OPC_LDIB_B', 810)
+OPC_STIB_B = opc_t.define('OPC_STIB_B', 811)
+OPC_ATOMIC_B_ADD = opc_t.define('OPC_ATOMIC_B_ADD', 812)
+OPC_ATOMIC_B_SUB = opc_t.define('OPC_ATOMIC_B_SUB', 813)
+OPC_ATOMIC_B_XCHG = opc_t.define('OPC_ATOMIC_B_XCHG', 814)
+OPC_ATOMIC_B_INC = opc_t.define('OPC_ATOMIC_B_INC', 815)
+OPC_ATOMIC_B_DEC = opc_t.define('OPC_ATOMIC_B_DEC', 816)
+OPC_ATOMIC_B_CMPXCHG = opc_t.define('OPC_ATOMIC_B_CMPXCHG', 817)
+OPC_ATOMIC_B_MIN = opc_t.define('OPC_ATOMIC_B_MIN', 818)
+OPC_ATOMIC_B_MAX = opc_t.define('OPC_ATOMIC_B_MAX', 819)
+OPC_ATOMIC_B_AND = opc_t.define('OPC_ATOMIC_B_AND', 820)
+OPC_ATOMIC_B_OR = opc_t.define('OPC_ATOMIC_B_OR', 821)
+OPC_ATOMIC_B_XOR = opc_t.define('OPC_ATOMIC_B_XOR', 822)
+OPC_ATOMIC_S_ADD = opc_t.define('OPC_ATOMIC_S_ADD', 823)
+OPC_ATOMIC_S_SUB = opc_t.define('OPC_ATOMIC_S_SUB', 824)
+OPC_ATOMIC_S_XCHG = opc_t.define('OPC_ATOMIC_S_XCHG', 825)
+OPC_ATOMIC_S_INC = opc_t.define('OPC_ATOMIC_S_INC', 826)
+OPC_ATOMIC_S_DEC = opc_t.define('OPC_ATOMIC_S_DEC', 827)
+OPC_ATOMIC_S_CMPXCHG = opc_t.define('OPC_ATOMIC_S_CMPXCHG', 828)
+OPC_ATOMIC_S_MIN = opc_t.define('OPC_ATOMIC_S_MIN', 829)
+OPC_ATOMIC_S_MAX = opc_t.define('OPC_ATOMIC_S_MAX', 830)
+OPC_ATOMIC_S_AND = opc_t.define('OPC_ATOMIC_S_AND', 831)
+OPC_ATOMIC_S_OR = opc_t.define('OPC_ATOMIC_S_OR', 832)
+OPC_ATOMIC_S_XOR = opc_t.define('OPC_ATOMIC_S_XOR', 833)
+OPC_ATOMIC_G_ADD = opc_t.define('OPC_ATOMIC_G_ADD', 834)
+OPC_ATOMIC_G_SUB = opc_t.define('OPC_ATOMIC_G_SUB', 835)
+OPC_ATOMIC_G_XCHG = opc_t.define('OPC_ATOMIC_G_XCHG', 836)
+OPC_ATOMIC_G_INC = opc_t.define('OPC_ATOMIC_G_INC', 837)
+OPC_ATOMIC_G_DEC = opc_t.define('OPC_ATOMIC_G_DEC', 838)
+OPC_ATOMIC_G_CMPXCHG = opc_t.define('OPC_ATOMIC_G_CMPXCHG', 839)
+OPC_ATOMIC_G_MIN = opc_t.define('OPC_ATOMIC_G_MIN', 840)
+OPC_ATOMIC_G_MAX = opc_t.define('OPC_ATOMIC_G_MAX', 841)
+OPC_ATOMIC_G_AND = opc_t.define('OPC_ATOMIC_G_AND', 842)
+OPC_ATOMIC_G_OR = opc_t.define('OPC_ATOMIC_G_OR', 843)
+OPC_ATOMIC_G_XOR = opc_t.define('OPC_ATOMIC_G_XOR', 844)
+OPC_LDG_A = opc_t.define('OPC_LDG_A', 845)
+OPC_STG_A = opc_t.define('OPC_STG_A', 846)
+OPC_SPILL_MACRO = opc_t.define('OPC_SPILL_MACRO', 847)
+OPC_RELOAD_MACRO = opc_t.define('OPC_RELOAD_MACRO', 848)
+OPC_LDC_K = opc_t.define('OPC_LDC_K', 849)
+OPC_STSC = opc_t.define('OPC_STSC', 850)
+OPC_LDG_K = opc_t.define('OPC_LDG_K', 851)
+OPC_PUSH_CONSTS_LOAD_MACRO = opc_t.define('OPC_PUSH_CONSTS_LOAD_MACRO', 852)
+OPC_RAY_INTERSECTION = opc_t.define('OPC_RAY_INTERSECTION', 858)
+OPC_RESBASE = opc_t.define('OPC_RESBASE', 859)
+OPC_BAR = opc_t.define('OPC_BAR', 896)
+OPC_FENCE = opc_t.define('OPC_FENCE', 897)
+OPC_SLEEP = opc_t.define('OPC_SLEEP', 898)
+OPC_ICINV = opc_t.define('OPC_ICINV', 899)
+OPC_DCCLN = opc_t.define('OPC_DCCLN', 900)
+OPC_DCINV = opc_t.define('OPC_DCINV', 901)
+OPC_DCFLU = opc_t.define('OPC_DCFLU', 902)
+OPC_LOCK = opc_t.define('OPC_LOCK', 903)
+OPC_UNLOCK = opc_t.define('OPC_UNLOCK', 904)
+OPC_ALIAS = opc_t.define('OPC_ALIAS', 905)
+OPC_CCINV = opc_t.define('OPC_CCINV', 906)
+OPC_META_INPUT = opc_t.define('OPC_META_INPUT', 1024)
+OPC_META_SPLIT = opc_t.define('OPC_META_SPLIT', 1026)
+OPC_META_COLLECT = opc_t.define('OPC_META_COLLECT', 1027)
+OPC_META_TEX_PREFETCH = opc_t.define('OPC_META_TEX_PREFETCH', 1028)
+OPC_META_PARALLEL_COPY = opc_t.define('OPC_META_PARALLEL_COPY', 1029)
+OPC_META_PHI = opc_t.define('OPC_META_PHI', 1030)
+OPC_META_RAW = opc_t.define('OPC_META_RAW', 1031)
 
 @c.record
 class struct_ir3_shader_key(c.Struct):
@@ -7341,30 +7341,30 @@ class struct_ir3_block(c.Struct):
   dom_pre_index: Annotated[uint32_t, 184]
   dom_post_index: Annotated[uint32_t, 188]
   loop_depth: Annotated[uint32_t, 192]
-enum_ir3_instruction_flags = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_INSTR_SY = enum_ir3_instruction_flags.define('IR3_INSTR_SY', 1) # type: ignore
-IR3_INSTR_SS = enum_ir3_instruction_flags.define('IR3_INSTR_SS', 2) # type: ignore
-IR3_INSTR_JP = enum_ir3_instruction_flags.define('IR3_INSTR_JP', 4) # type: ignore
-IR3_INSTR_EQ = enum_ir3_instruction_flags.define('IR3_INSTR_EQ', 8) # type: ignore
-IR3_INSTR_UL = enum_ir3_instruction_flags.define('IR3_INSTR_UL', 16) # type: ignore
-IR3_INSTR_3D = enum_ir3_instruction_flags.define('IR3_INSTR_3D', 32) # type: ignore
-IR3_INSTR_A = enum_ir3_instruction_flags.define('IR3_INSTR_A', 64) # type: ignore
-IR3_INSTR_O = enum_ir3_instruction_flags.define('IR3_INSTR_O', 128) # type: ignore
-IR3_INSTR_P = enum_ir3_instruction_flags.define('IR3_INSTR_P', 256) # type: ignore
-IR3_INSTR_S = enum_ir3_instruction_flags.define('IR3_INSTR_S', 512) # type: ignore
-IR3_INSTR_S2EN = enum_ir3_instruction_flags.define('IR3_INSTR_S2EN', 1024) # type: ignore
-IR3_INSTR_SAT = enum_ir3_instruction_flags.define('IR3_INSTR_SAT', 2048) # type: ignore
-IR3_INSTR_B = enum_ir3_instruction_flags.define('IR3_INSTR_B', 4096) # type: ignore
-IR3_INSTR_NONUNIF = enum_ir3_instruction_flags.define('IR3_INSTR_NONUNIF', 8192) # type: ignore
-IR3_INSTR_A1EN = enum_ir3_instruction_flags.define('IR3_INSTR_A1EN', 16384) # type: ignore
-IR3_INSTR_U = enum_ir3_instruction_flags.define('IR3_INSTR_U', 32768) # type: ignore
-IR3_INSTR_MARK = enum_ir3_instruction_flags.define('IR3_INSTR_MARK', 65536) # type: ignore
-IR3_INSTR_SHARED_SPILL = enum_ir3_instruction_flags.define('IR3_INSTR_SHARED_SPILL', 65536) # type: ignore
-IR3_INSTR_UNUSED = enum_ir3_instruction_flags.define('IR3_INSTR_UNUSED', 131072) # type: ignore
-IR3_INSTR_NEEDS_HELPERS = enum_ir3_instruction_flags.define('IR3_INSTR_NEEDS_HELPERS', 262144) # type: ignore
-IR3_INSTR_V = enum_ir3_instruction_flags.define('IR3_INSTR_V', 524288) # type: ignore
-IR3_INSTR_INV_1D = enum_ir3_instruction_flags.define('IR3_INSTR_INV_1D', 1048576) # type: ignore
-IR3_INSTR_IMM_OFFSET = enum_ir3_instruction_flags.define('IR3_INSTR_IMM_OFFSET', 2097152) # type: ignore
+class enum_ir3_instruction_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_INSTR_SY = enum_ir3_instruction_flags.define('IR3_INSTR_SY', 1)
+IR3_INSTR_SS = enum_ir3_instruction_flags.define('IR3_INSTR_SS', 2)
+IR3_INSTR_JP = enum_ir3_instruction_flags.define('IR3_INSTR_JP', 4)
+IR3_INSTR_EQ = enum_ir3_instruction_flags.define('IR3_INSTR_EQ', 8)
+IR3_INSTR_UL = enum_ir3_instruction_flags.define('IR3_INSTR_UL', 16)
+IR3_INSTR_3D = enum_ir3_instruction_flags.define('IR3_INSTR_3D', 32)
+IR3_INSTR_A = enum_ir3_instruction_flags.define('IR3_INSTR_A', 64)
+IR3_INSTR_O = enum_ir3_instruction_flags.define('IR3_INSTR_O', 128)
+IR3_INSTR_P = enum_ir3_instruction_flags.define('IR3_INSTR_P', 256)
+IR3_INSTR_S = enum_ir3_instruction_flags.define('IR3_INSTR_S', 512)
+IR3_INSTR_S2EN = enum_ir3_instruction_flags.define('IR3_INSTR_S2EN', 1024)
+IR3_INSTR_SAT = enum_ir3_instruction_flags.define('IR3_INSTR_SAT', 2048)
+IR3_INSTR_B = enum_ir3_instruction_flags.define('IR3_INSTR_B', 4096)
+IR3_INSTR_NONUNIF = enum_ir3_instruction_flags.define('IR3_INSTR_NONUNIF', 8192)
+IR3_INSTR_A1EN = enum_ir3_instruction_flags.define('IR3_INSTR_A1EN', 16384)
+IR3_INSTR_U = enum_ir3_instruction_flags.define('IR3_INSTR_U', 32768)
+IR3_INSTR_MARK = enum_ir3_instruction_flags.define('IR3_INSTR_MARK', 65536)
+IR3_INSTR_SHARED_SPILL = enum_ir3_instruction_flags.define('IR3_INSTR_SHARED_SPILL', 65536)
+IR3_INSTR_UNUSED = enum_ir3_instruction_flags.define('IR3_INSTR_UNUSED', 131072)
+IR3_INSTR_NEEDS_HELPERS = enum_ir3_instruction_flags.define('IR3_INSTR_NEEDS_HELPERS', 262144)
+IR3_INSTR_V = enum_ir3_instruction_flags.define('IR3_INSTR_V', 524288)
+IR3_INSTR_INV_1D = enum_ir3_instruction_flags.define('IR3_INSTR_INV_1D', 1048576)
+IR3_INSTR_IMM_OFFSET = enum_ir3_instruction_flags.define('IR3_INSTR_IMM_OFFSET', 2097152)
 
 @c.record
 class struct_ir3_register(c.Struct):
@@ -7387,30 +7387,30 @@ class struct_ir3_register(c.Struct):
   merge_set: Annotated[c.POINTER[struct_ir3_merge_set], 64]
   interval_start: Annotated[Annotated[int, ctypes.c_uint32], 72]
   interval_end: Annotated[Annotated[int, ctypes.c_uint32], 76]
-enum_ir3_register_flags = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_REG_CONST = enum_ir3_register_flags.define('IR3_REG_CONST', 1) # type: ignore
-IR3_REG_IMMED = enum_ir3_register_flags.define('IR3_REG_IMMED', 2) # type: ignore
-IR3_REG_HALF = enum_ir3_register_flags.define('IR3_REG_HALF', 4) # type: ignore
-IR3_REG_SHARED = enum_ir3_register_flags.define('IR3_REG_SHARED', 8) # type: ignore
-IR3_REG_RELATIV = enum_ir3_register_flags.define('IR3_REG_RELATIV', 16) # type: ignore
-IR3_REG_R = enum_ir3_register_flags.define('IR3_REG_R', 32) # type: ignore
-IR3_REG_FNEG = enum_ir3_register_flags.define('IR3_REG_FNEG', 64) # type: ignore
-IR3_REG_FABS = enum_ir3_register_flags.define('IR3_REG_FABS', 128) # type: ignore
-IR3_REG_SNEG = enum_ir3_register_flags.define('IR3_REG_SNEG', 256) # type: ignore
-IR3_REG_SABS = enum_ir3_register_flags.define('IR3_REG_SABS', 512) # type: ignore
-IR3_REG_BNOT = enum_ir3_register_flags.define('IR3_REG_BNOT', 1024) # type: ignore
-IR3_REG_EI = enum_ir3_register_flags.define('IR3_REG_EI', 2048) # type: ignore
-IR3_REG_SSA = enum_ir3_register_flags.define('IR3_REG_SSA', 4096) # type: ignore
-IR3_REG_ARRAY = enum_ir3_register_flags.define('IR3_REG_ARRAY', 8192) # type: ignore
-IR3_REG_KILL = enum_ir3_register_flags.define('IR3_REG_KILL', 16384) # type: ignore
-IR3_REG_FIRST_KILL = enum_ir3_register_flags.define('IR3_REG_FIRST_KILL', 32768) # type: ignore
-IR3_REG_UNUSED = enum_ir3_register_flags.define('IR3_REG_UNUSED', 65536) # type: ignore
-IR3_REG_EARLY_CLOBBER = enum_ir3_register_flags.define('IR3_REG_EARLY_CLOBBER', 131072) # type: ignore
-IR3_REG_LAST_USE = enum_ir3_register_flags.define('IR3_REG_LAST_USE', 262144) # type: ignore
-IR3_REG_PREDICATE = enum_ir3_register_flags.define('IR3_REG_PREDICATE', 524288) # type: ignore
-IR3_REG_RT = enum_ir3_register_flags.define('IR3_REG_RT', 1048576) # type: ignore
-IR3_REG_ALIAS = enum_ir3_register_flags.define('IR3_REG_ALIAS', 2097152) # type: ignore
-IR3_REG_FIRST_ALIAS = enum_ir3_register_flags.define('IR3_REG_FIRST_ALIAS', 4194304) # type: ignore
+class enum_ir3_register_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_REG_CONST = enum_ir3_register_flags.define('IR3_REG_CONST', 1)
+IR3_REG_IMMED = enum_ir3_register_flags.define('IR3_REG_IMMED', 2)
+IR3_REG_HALF = enum_ir3_register_flags.define('IR3_REG_HALF', 4)
+IR3_REG_SHARED = enum_ir3_register_flags.define('IR3_REG_SHARED', 8)
+IR3_REG_RELATIV = enum_ir3_register_flags.define('IR3_REG_RELATIV', 16)
+IR3_REG_R = enum_ir3_register_flags.define('IR3_REG_R', 32)
+IR3_REG_FNEG = enum_ir3_register_flags.define('IR3_REG_FNEG', 64)
+IR3_REG_FABS = enum_ir3_register_flags.define('IR3_REG_FABS', 128)
+IR3_REG_SNEG = enum_ir3_register_flags.define('IR3_REG_SNEG', 256)
+IR3_REG_SABS = enum_ir3_register_flags.define('IR3_REG_SABS', 512)
+IR3_REG_BNOT = enum_ir3_register_flags.define('IR3_REG_BNOT', 1024)
+IR3_REG_EI = enum_ir3_register_flags.define('IR3_REG_EI', 2048)
+IR3_REG_SSA = enum_ir3_register_flags.define('IR3_REG_SSA', 4096)
+IR3_REG_ARRAY = enum_ir3_register_flags.define('IR3_REG_ARRAY', 8192)
+IR3_REG_KILL = enum_ir3_register_flags.define('IR3_REG_KILL', 16384)
+IR3_REG_FIRST_KILL = enum_ir3_register_flags.define('IR3_REG_FIRST_KILL', 32768)
+IR3_REG_UNUSED = enum_ir3_register_flags.define('IR3_REG_UNUSED', 65536)
+IR3_REG_EARLY_CLOBBER = enum_ir3_register_flags.define('IR3_REG_EARLY_CLOBBER', 131072)
+IR3_REG_LAST_USE = enum_ir3_register_flags.define('IR3_REG_LAST_USE', 262144)
+IR3_REG_PREDICATE = enum_ir3_register_flags.define('IR3_REG_PREDICATE', 524288)
+IR3_REG_RT = enum_ir3_register_flags.define('IR3_REG_RT', 1048576)
+IR3_REG_ALIAS = enum_ir3_register_flags.define('IR3_REG_ALIAS', 2097152)
+IR3_REG_FIRST_ALIAS = enum_ir3_register_flags.define('IR3_REG_FIRST_ALIAS', 4194304)
 
 @c.record
 class struct_ir3_register_array(c.Struct):
@@ -7444,38 +7444,38 @@ class struct_ir3_instruction_cat1(c.Struct):
   dst_type: Annotated[type_t, 4]
   round: Annotated[round_t, 8]
   reduce_op: Annotated[reduce_op_t, 12]
-round_t = CEnum(Annotated[int, ctypes.c_uint32])
-ROUND_ZERO = round_t.define('ROUND_ZERO', 0) # type: ignore
-ROUND_EVEN = round_t.define('ROUND_EVEN', 1) # type: ignore
-ROUND_POS_INF = round_t.define('ROUND_POS_INF', 2) # type: ignore
-ROUND_NEG_INF = round_t.define('ROUND_NEG_INF', 3) # type: ignore
+class round_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ROUND_ZERO = round_t.define('ROUND_ZERO', 0)
+ROUND_EVEN = round_t.define('ROUND_EVEN', 1)
+ROUND_POS_INF = round_t.define('ROUND_POS_INF', 2)
+ROUND_NEG_INF = round_t.define('ROUND_NEG_INF', 3)
 
-reduce_op_t = CEnum(Annotated[int, ctypes.c_uint32])
-REDUCE_OP_ADD_U = reduce_op_t.define('REDUCE_OP_ADD_U', 0) # type: ignore
-REDUCE_OP_ADD_F = reduce_op_t.define('REDUCE_OP_ADD_F', 1) # type: ignore
-REDUCE_OP_MUL_U = reduce_op_t.define('REDUCE_OP_MUL_U', 2) # type: ignore
-REDUCE_OP_MUL_F = reduce_op_t.define('REDUCE_OP_MUL_F', 3) # type: ignore
-REDUCE_OP_MIN_U = reduce_op_t.define('REDUCE_OP_MIN_U', 4) # type: ignore
-REDUCE_OP_MIN_S = reduce_op_t.define('REDUCE_OP_MIN_S', 5) # type: ignore
-REDUCE_OP_MIN_F = reduce_op_t.define('REDUCE_OP_MIN_F', 6) # type: ignore
-REDUCE_OP_MAX_U = reduce_op_t.define('REDUCE_OP_MAX_U', 7) # type: ignore
-REDUCE_OP_MAX_S = reduce_op_t.define('REDUCE_OP_MAX_S', 8) # type: ignore
-REDUCE_OP_MAX_F = reduce_op_t.define('REDUCE_OP_MAX_F', 9) # type: ignore
-REDUCE_OP_AND_B = reduce_op_t.define('REDUCE_OP_AND_B', 10) # type: ignore
-REDUCE_OP_OR_B = reduce_op_t.define('REDUCE_OP_OR_B', 11) # type: ignore
-REDUCE_OP_XOR_B = reduce_op_t.define('REDUCE_OP_XOR_B', 12) # type: ignore
+class reduce_op_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+REDUCE_OP_ADD_U = reduce_op_t.define('REDUCE_OP_ADD_U', 0)
+REDUCE_OP_ADD_F = reduce_op_t.define('REDUCE_OP_ADD_F', 1)
+REDUCE_OP_MUL_U = reduce_op_t.define('REDUCE_OP_MUL_U', 2)
+REDUCE_OP_MUL_F = reduce_op_t.define('REDUCE_OP_MUL_F', 3)
+REDUCE_OP_MIN_U = reduce_op_t.define('REDUCE_OP_MIN_U', 4)
+REDUCE_OP_MIN_S = reduce_op_t.define('REDUCE_OP_MIN_S', 5)
+REDUCE_OP_MIN_F = reduce_op_t.define('REDUCE_OP_MIN_F', 6)
+REDUCE_OP_MAX_U = reduce_op_t.define('REDUCE_OP_MAX_U', 7)
+REDUCE_OP_MAX_S = reduce_op_t.define('REDUCE_OP_MAX_S', 8)
+REDUCE_OP_MAX_F = reduce_op_t.define('REDUCE_OP_MAX_F', 9)
+REDUCE_OP_AND_B = reduce_op_t.define('REDUCE_OP_AND_B', 10)
+REDUCE_OP_OR_B = reduce_op_t.define('REDUCE_OP_OR_B', 11)
+REDUCE_OP_XOR_B = reduce_op_t.define('REDUCE_OP_XOR_B', 12)
 
 @c.record
 class struct_ir3_instruction_cat2(c.Struct):
   SIZE = 4
   condition: Annotated[struct_ir3_instruction_cat2_condition, 0]
-struct_ir3_instruction_cat2_condition = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_COND_LT = struct_ir3_instruction_cat2_condition.define('IR3_COND_LT', 0) # type: ignore
-IR3_COND_LE = struct_ir3_instruction_cat2_condition.define('IR3_COND_LE', 1) # type: ignore
-IR3_COND_GT = struct_ir3_instruction_cat2_condition.define('IR3_COND_GT', 2) # type: ignore
-IR3_COND_GE = struct_ir3_instruction_cat2_condition.define('IR3_COND_GE', 3) # type: ignore
-IR3_COND_EQ = struct_ir3_instruction_cat2_condition.define('IR3_COND_EQ', 4) # type: ignore
-IR3_COND_NE = struct_ir3_instruction_cat2_condition.define('IR3_COND_NE', 5) # type: ignore
+class struct_ir3_instruction_cat2_condition(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_COND_LT = struct_ir3_instruction_cat2_condition.define('IR3_COND_LT', 0)
+IR3_COND_LE = struct_ir3_instruction_cat2_condition.define('IR3_COND_LE', 1)
+IR3_COND_GT = struct_ir3_instruction_cat2_condition.define('IR3_COND_GT', 2)
+IR3_COND_GE = struct_ir3_instruction_cat2_condition.define('IR3_COND_GE', 3)
+IR3_COND_EQ = struct_ir3_instruction_cat2_condition.define('IR3_COND_EQ', 4)
+IR3_COND_NE = struct_ir3_instruction_cat2_condition.define('IR3_COND_NE', 5)
 
 @c.record
 class struct_ir3_instruction_cat3(c.Struct):
@@ -7483,13 +7483,13 @@ class struct_ir3_instruction_cat3(c.Struct):
   signedness: Annotated[struct_ir3_instruction_cat3_signedness, 0]
   packed: Annotated[struct_ir3_instruction_cat3_packed, 4]
   swapped: Annotated[Annotated[bool, ctypes.c_bool], 8]
-struct_ir3_instruction_cat3_signedness = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_SRC_UNSIGNED = struct_ir3_instruction_cat3_signedness.define('IR3_SRC_UNSIGNED', 0) # type: ignore
-IR3_SRC_MIXED = struct_ir3_instruction_cat3_signedness.define('IR3_SRC_MIXED', 1) # type: ignore
+class struct_ir3_instruction_cat3_signedness(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_SRC_UNSIGNED = struct_ir3_instruction_cat3_signedness.define('IR3_SRC_UNSIGNED', 0)
+IR3_SRC_MIXED = struct_ir3_instruction_cat3_signedness.define('IR3_SRC_MIXED', 1)
 
-struct_ir3_instruction_cat3_packed = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_SRC_PACKED_LOW = struct_ir3_instruction_cat3_packed.define('IR3_SRC_PACKED_LOW', 0) # type: ignore
-IR3_SRC_PACKED_HIGH = struct_ir3_instruction_cat3_packed.define('IR3_SRC_PACKED_HIGH', 1) # type: ignore
+class struct_ir3_instruction_cat3_packed(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_SRC_PACKED_LOW = struct_ir3_instruction_cat3_packed.define('IR3_SRC_PACKED_LOW', 0)
+IR3_SRC_PACKED_HIGH = struct_ir3_instruction_cat3_packed.define('IR3_SRC_PACKED_HIGH', 1)
 
 @c.record
 class struct_ir3_instruction_cat5(c.Struct):
@@ -7509,12 +7509,12 @@ class struct_ir3_instruction_cat6(c.Struct):
   typed: Annotated[Annotated[bool, ctypes.c_bool], 12, 1, 3]
   base: Annotated[Annotated[int, ctypes.c_uint32], 12, 3, 4]
   shfl_mode: Annotated[ir3_shfl_mode, 12, 3, 7]
-ir3_shfl_mode = CEnum(Annotated[int, ctypes.c_uint32])
-SHFL_XOR = ir3_shfl_mode.define('SHFL_XOR', 1) # type: ignore
-SHFL_UP = ir3_shfl_mode.define('SHFL_UP', 2) # type: ignore
-SHFL_DOWN = ir3_shfl_mode.define('SHFL_DOWN', 3) # type: ignore
-SHFL_RUP = ir3_shfl_mode.define('SHFL_RUP', 6) # type: ignore
-SHFL_RDOWN = ir3_shfl_mode.define('SHFL_RDOWN', 7) # type: ignore
+class ir3_shfl_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SHFL_XOR = ir3_shfl_mode.define('SHFL_XOR', 1)
+SHFL_UP = ir3_shfl_mode.define('SHFL_UP', 2)
+SHFL_DOWN = ir3_shfl_mode.define('SHFL_DOWN', 3)
+SHFL_RUP = ir3_shfl_mode.define('SHFL_RUP', 6)
+SHFL_RDOWN = ir3_shfl_mode.define('SHFL_RDOWN', 7)
 
 @c.record
 class struct_ir3_instruction_cat7(c.Struct):
@@ -7526,10 +7526,10 @@ class struct_ir3_instruction_cat7(c.Struct):
   alias_scope: Annotated[ir3_alias_scope, 4]
   alias_table_size_minus_one: Annotated[Annotated[int, ctypes.c_uint32], 8]
   alias_type_float: Annotated[Annotated[bool, ctypes.c_bool], 12]
-ir3_alias_scope = CEnum(Annotated[int, ctypes.c_uint32])
-ALIAS_TEX = ir3_alias_scope.define('ALIAS_TEX', 0) # type: ignore
-ALIAS_RT = ir3_alias_scope.define('ALIAS_RT', 1) # type: ignore
-ALIAS_MEM = ir3_alias_scope.define('ALIAS_MEM', 2) # type: ignore
+class ir3_alias_scope(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ALIAS_TEX = ir3_alias_scope.define('ALIAS_TEX', 0)
+ALIAS_RT = ir3_alias_scope.define('ALIAS_RT', 1)
+ALIAS_MEM = ir3_alias_scope.define('ALIAS_MEM', 2)
 
 @c.record
 class struct_ir3_instruction_split(c.Struct):
@@ -7567,21 +7567,21 @@ class struct_ir3_instruction_push_consts(c.Struct):
 class struct_ir3_instruction_raw(c.Struct):
   SIZE = 8
   value: Annotated[uint64_t, 0]
-struct_ir3_instruction_barrier_class = CEnum(Annotated[int, ctypes.c_uint32])
-IR3_BARRIER_EVERYTHING = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_EVERYTHING', 1) # type: ignore
-IR3_BARRIER_SHARED_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_SHARED_R', 2) # type: ignore
-IR3_BARRIER_SHARED_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_SHARED_W', 4) # type: ignore
-IR3_BARRIER_IMAGE_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_IMAGE_R', 8) # type: ignore
-IR3_BARRIER_IMAGE_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_IMAGE_W', 16) # type: ignore
-IR3_BARRIER_BUFFER_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_BUFFER_R', 32) # type: ignore
-IR3_BARRIER_BUFFER_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_BUFFER_W', 64) # type: ignore
-IR3_BARRIER_ARRAY_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ARRAY_R', 128) # type: ignore
-IR3_BARRIER_ARRAY_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ARRAY_W', 256) # type: ignore
-IR3_BARRIER_PRIVATE_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_PRIVATE_R', 512) # type: ignore
-IR3_BARRIER_PRIVATE_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_PRIVATE_W', 1024) # type: ignore
-IR3_BARRIER_CONST_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_CONST_W', 2048) # type: ignore
-IR3_BARRIER_ACTIVE_FIBERS_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ACTIVE_FIBERS_R', 4096) # type: ignore
-IR3_BARRIER_ACTIVE_FIBERS_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ACTIVE_FIBERS_W', 8192) # type: ignore
+class struct_ir3_instruction_barrier_class(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IR3_BARRIER_EVERYTHING = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_EVERYTHING', 1)
+IR3_BARRIER_SHARED_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_SHARED_R', 2)
+IR3_BARRIER_SHARED_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_SHARED_W', 4)
+IR3_BARRIER_IMAGE_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_IMAGE_R', 8)
+IR3_BARRIER_IMAGE_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_IMAGE_W', 16)
+IR3_BARRIER_BUFFER_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_BUFFER_R', 32)
+IR3_BARRIER_BUFFER_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_BUFFER_W', 64)
+IR3_BARRIER_ARRAY_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ARRAY_R', 128)
+IR3_BARRIER_ARRAY_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ARRAY_W', 256)
+IR3_BARRIER_PRIVATE_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_PRIVATE_R', 512)
+IR3_BARRIER_PRIVATE_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_PRIVATE_W', 1024)
+IR3_BARRIER_CONST_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_CONST_W', 2048)
+IR3_BARRIER_ACTIVE_FIBERS_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ACTIVE_FIBERS_R', 4096)
+IR3_BARRIER_ACTIVE_FIBERS_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ACTIVE_FIBERS_W', 8192)
 
 @c.record
 class struct_ir3_info(c.Struct):
@@ -7644,11 +7644,11 @@ class struct_ir3_shader_variant_tess(c.Struct):
   spacing: Annotated[enum_gl_tess_spacing, 5, 2, 0]
   ccw: Annotated[Annotated[bool, ctypes.c_bool], 5, 1, 2]
   point_mode: Annotated[Annotated[bool, ctypes.c_bool], 5, 1, 3]
-enum_gl_tess_spacing = CEnum(Annotated[int, ctypes.c_uint32])
-TESS_SPACING_UNSPECIFIED = enum_gl_tess_spacing.define('TESS_SPACING_UNSPECIFIED', 0) # type: ignore
-TESS_SPACING_EQUAL = enum_gl_tess_spacing.define('TESS_SPACING_EQUAL', 1) # type: ignore
-TESS_SPACING_FRACTIONAL_ODD = enum_gl_tess_spacing.define('TESS_SPACING_FRACTIONAL_ODD', 2) # type: ignore
-TESS_SPACING_FRACTIONAL_EVEN = enum_gl_tess_spacing.define('TESS_SPACING_FRACTIONAL_EVEN', 3) # type: ignore
+class enum_gl_tess_spacing(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TESS_SPACING_UNSPECIFIED = enum_gl_tess_spacing.define('TESS_SPACING_UNSPECIFIED', 0)
+TESS_SPACING_EQUAL = enum_gl_tess_spacing.define('TESS_SPACING_EQUAL', 1)
+TESS_SPACING_FRACTIONAL_ODD = enum_gl_tess_spacing.define('TESS_SPACING_FRACTIONAL_ODD', 2)
+TESS_SPACING_FRACTIONAL_EVEN = enum_gl_tess_spacing.define('TESS_SPACING_FRACTIONAL_EVEN', 3)
 
 @c.record
 class struct_ir3_shader_variant_gs(c.Struct):
@@ -7706,7 +7706,7 @@ class struct___pthread_internal_list(c.Struct):
   __prev: Annotated[c.POINTER[struct___pthread_internal_list], 0]
   __next: Annotated[c.POINTER[struct___pthread_internal_list], 8]
 __pthread_list_t: TypeAlias = struct___pthread_internal_list
-cache_key = c.Array[Annotated[int, ctypes.c_ubyte], Literal[20]]
+cache_key: TypeAlias = c.Array[Annotated[int, ctypes.c_ubyte], Literal[20]]
 @dll.bind
 def ir3_const_ensure_imm_size(v:c.POINTER[struct_ir3_shader_variant], size:Annotated[int, ctypes.c_uint32]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -7904,22 +7904,22 @@ def decode_type_from_blob(blob:c.POINTER[struct_blob_reader]) -> c.POINTER[glsl_
 def glsl_apply_signedness_to_base_type(type:enum_glsl_base_type, signedness:Annotated[bool, ctypes.c_bool]) -> enum_glsl_base_type: ...
 @dll.bind
 def glsl_get_sampler_dim_coordinate_components(dim:enum_glsl_sampler_dim) -> Annotated[int, ctypes.c_int32]: ...
-enum_glsl_matrix_layout = CEnum(Annotated[int, ctypes.c_uint32])
-GLSL_MATRIX_LAYOUT_INHERITED = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_INHERITED', 0) # type: ignore
-GLSL_MATRIX_LAYOUT_COLUMN_MAJOR = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_COLUMN_MAJOR', 1) # type: ignore
-GLSL_MATRIX_LAYOUT_ROW_MAJOR = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_ROW_MAJOR', 2) # type: ignore
+class enum_glsl_matrix_layout(Annotated[int, ctypes.c_uint32], c.Enum): pass
+GLSL_MATRIX_LAYOUT_INHERITED = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_INHERITED', 0)
+GLSL_MATRIX_LAYOUT_COLUMN_MAJOR = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_COLUMN_MAJOR', 1)
+GLSL_MATRIX_LAYOUT_ROW_MAJOR = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_ROW_MAJOR', 2)
 
-_anonenum6 = CEnum(Annotated[int, ctypes.c_uint32])
-GLSL_PRECISION_NONE = _anonenum6.define('GLSL_PRECISION_NONE', 0) # type: ignore
-GLSL_PRECISION_HIGH = _anonenum6.define('GLSL_PRECISION_HIGH', 1) # type: ignore
-GLSL_PRECISION_MEDIUM = _anonenum6.define('GLSL_PRECISION_MEDIUM', 2) # type: ignore
-GLSL_PRECISION_LOW = _anonenum6.define('GLSL_PRECISION_LOW', 3) # type: ignore
+class _anonenum6(Annotated[int, ctypes.c_uint32], c.Enum): pass
+GLSL_PRECISION_NONE = _anonenum6.define('GLSL_PRECISION_NONE', 0)
+GLSL_PRECISION_HIGH = _anonenum6.define('GLSL_PRECISION_HIGH', 1)
+GLSL_PRECISION_MEDIUM = _anonenum6.define('GLSL_PRECISION_MEDIUM', 2)
+GLSL_PRECISION_LOW = _anonenum6.define('GLSL_PRECISION_LOW', 3)
 
-enum_glsl_cmat_use = CEnum(Annotated[int, ctypes.c_uint32])
-GLSL_CMAT_USE_NONE = enum_glsl_cmat_use.define('GLSL_CMAT_USE_NONE', 0) # type: ignore
-GLSL_CMAT_USE_A = enum_glsl_cmat_use.define('GLSL_CMAT_USE_A', 1) # type: ignore
-GLSL_CMAT_USE_B = enum_glsl_cmat_use.define('GLSL_CMAT_USE_B', 2) # type: ignore
-GLSL_CMAT_USE_ACCUMULATOR = enum_glsl_cmat_use.define('GLSL_CMAT_USE_ACCUMULATOR', 3) # type: ignore
+class enum_glsl_cmat_use(Annotated[int, ctypes.c_uint32], c.Enum): pass
+GLSL_CMAT_USE_NONE = enum_glsl_cmat_use.define('GLSL_CMAT_USE_NONE', 0)
+GLSL_CMAT_USE_A = enum_glsl_cmat_use.define('GLSL_CMAT_USE_A', 1)
+GLSL_CMAT_USE_B = enum_glsl_cmat_use.define('GLSL_CMAT_USE_B', 2)
+GLSL_CMAT_USE_ACCUMULATOR = enum_glsl_cmat_use.define('GLSL_CMAT_USE_ACCUMULATOR', 3)
 
 @dll.bind
 def glsl_get_type_name(type:c.POINTER[glsl_type]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
@@ -8045,11 +8045,11 @@ def glsl_array_type(element:c.POINTER[glsl_type], array_size:Annotated[int, ctyp
 def glsl_cmat_type(desc:c.POINTER[struct_glsl_cmat_description]) -> c.POINTER[glsl_type]: ...
 @dll.bind
 def glsl_struct_type_with_explicit_alignment(fields:c.POINTER[glsl_struct_field], num_fields:Annotated[int, ctypes.c_uint32], name:c.POINTER[Annotated[bytes, ctypes.c_char]], packed:Annotated[bool, ctypes.c_bool], explicit_alignment:Annotated[int, ctypes.c_uint32]) -> c.POINTER[glsl_type]: ...
-enum_glsl_interface_packing = CEnum(Annotated[int, ctypes.c_uint32])
-GLSL_INTERFACE_PACKING_STD140 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD140', 0) # type: ignore
-GLSL_INTERFACE_PACKING_SHARED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_SHARED', 1) # type: ignore
-GLSL_INTERFACE_PACKING_PACKED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_PACKED', 2) # type: ignore
-GLSL_INTERFACE_PACKING_STD430 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD430', 3) # type: ignore
+class enum_glsl_interface_packing(Annotated[int, ctypes.c_uint32], c.Enum): pass
+GLSL_INTERFACE_PACKING_STD140 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD140', 0)
+GLSL_INTERFACE_PACKING_SHARED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_SHARED', 1)
+GLSL_INTERFACE_PACKING_PACKED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_PACKED', 2)
+GLSL_INTERFACE_PACKING_STD430 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD430', 3)
 
 @dll.bind
 def glsl_interface_type(fields:c.POINTER[glsl_struct_field], num_fields:Annotated[int, ctypes.c_uint32], packing:enum_glsl_interface_packing, row_major:Annotated[bool, ctypes.c_bool], block_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[glsl_type]: ...
@@ -8137,7 +8137,7 @@ def blob_finish_get_buffer(blob:c.POINTER[struct_blob], buffer:c.POINTER[c.POINT
 def blob_align(blob:c.POINTER[struct_blob], alignment:size_t) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def blob_write_bytes(blob:c.POINTER[struct_blob], bytes:c.POINTER[None], to_write:size_t) -> Annotated[bool, ctypes.c_bool]: ...
-intptr_t = Annotated[int, ctypes.c_int64]
+intptr_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def blob_reserve_bytes(blob:c.POINTER[struct_blob], to_write:size_t) -> intptr_t: ...
 @dll.bind
@@ -8235,7 +8235,7 @@ class struct___va_list_tag(c.Struct):
   fp_offset: Annotated[Annotated[int, ctypes.c_uint32], 4]
   overflow_arg_area: Annotated[c.POINTER[None], 8]
   reg_save_area: Annotated[c.POINTER[None], 16]
-va_list = c.Array[struct___va_list_tag, Literal[1]]
+va_list: TypeAlias = c.Array[struct___va_list_tag, Literal[1]]
 @dll.bind
 def ralloc_vasprintf(ctx:c.POINTER[None], fmt:c.POINTER[Annotated[bytes, ctypes.c_char]], args:va_list) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
@@ -8265,7 +8265,7 @@ def gc_mark_live(ctx:c.POINTER[gc_ctx], mem:c.POINTER[None]) -> None: ...
 @dll.bind
 def gc_sweep_end(ctx:c.POINTER[gc_ctx]) -> None: ...
 class struct_linear_ctx(ctypes.Structure): pass
-linear_ctx = struct_linear_ctx
+linear_ctx: TypeAlias = struct_linear_ctx
 @dll.bind
 def linear_alloc_child(ctx:c.POINTER[linear_ctx], size:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
 @c.record
@@ -8304,8 +8304,8 @@ def linear_asprintf_rewrite_tail(ctx:c.POINTER[linear_ctx], str:c.POINTER[c.POIN
 def linear_vasprintf_rewrite_tail(ctx:c.POINTER[linear_ctx], str:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], start:c.POINTER[size_t], fmt:c.POINTER[Annotated[bytes, ctypes.c_char]], args:va_list) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def linear_strcat(ctx:c.POINTER[linear_ctx], dest:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], str:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[bool, ctypes.c_bool]: ...
-_anonenum7 = CEnum(Annotated[int, ctypes.c_uint32])
-RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum7.define('RALLOC_PRINT_INFO_SUMMARY_ONLY', 1) # type: ignore
+class _anonenum7(Annotated[int, ctypes.c_uint32], c.Enum): pass
+RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum7.define('RALLOC_PRINT_INFO_SUMMARY_ONLY', 1)
 
 @dll.bind
 def ralloc_print_info(f:c.POINTER[FILE], p:c.POINTER[None], flags:Annotated[int, ctypes.c_uint32]) -> None: ...
@@ -8937,997 +8937,997 @@ try: glsl_type_builtin_utextureSubpassInput = struct_glsl_type.in_dll(dll, 'glsl
 except (ValueError,AttributeError): pass
 try: glsl_type_builtin_utextureSubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureSubpassInputMS')
 except (ValueError,AttributeError): pass
-enum_a6xx_shift_amount = CEnum(Annotated[int, ctypes.c_uint32])
-NO_SHIFT = enum_a6xx_shift_amount.define('NO_SHIFT', 0) # type: ignore
-HALF_PIXEL_SHIFT = enum_a6xx_shift_amount.define('HALF_PIXEL_SHIFT', 1) # type: ignore
-FULL_PIXEL_SHIFT = enum_a6xx_shift_amount.define('FULL_PIXEL_SHIFT', 2) # type: ignore
-
-enum_a6xx_sequenced_thread_dist = CEnum(Annotated[int, ctypes.c_uint32])
-DIST_SCREEN_COORD = enum_a6xx_sequenced_thread_dist.define('DIST_SCREEN_COORD', 0) # type: ignore
-DIST_ALL_TO_RB0 = enum_a6xx_sequenced_thread_dist.define('DIST_ALL_TO_RB0', 1) # type: ignore
-
-enum_a6xx_single_prim_mode = CEnum(Annotated[int, ctypes.c_uint32])
-NO_FLUSH = enum_a6xx_single_prim_mode.define('NO_FLUSH', 0) # type: ignore
-FLUSH_PER_OVERLAP_AND_OVERWRITE = enum_a6xx_single_prim_mode.define('FLUSH_PER_OVERLAP_AND_OVERWRITE', 1) # type: ignore
-FLUSH_PER_OVERLAP = enum_a6xx_single_prim_mode.define('FLUSH_PER_OVERLAP', 3) # type: ignore
-
-enum_a6xx_raster_mode = CEnum(Annotated[int, ctypes.c_uint32])
-TYPE_TILED = enum_a6xx_raster_mode.define('TYPE_TILED', 0) # type: ignore
-TYPE_WRITER = enum_a6xx_raster_mode.define('TYPE_WRITER', 1) # type: ignore
-
-enum_a6xx_raster_direction = CEnum(Annotated[int, ctypes.c_uint32])
-LR_TB = enum_a6xx_raster_direction.define('LR_TB', 0) # type: ignore
-RL_TB = enum_a6xx_raster_direction.define('RL_TB', 1) # type: ignore
-LR_BT = enum_a6xx_raster_direction.define('LR_BT', 2) # type: ignore
-RB_BT = enum_a6xx_raster_direction.define('RB_BT', 3) # type: ignore
-
-enum_a6xx_render_mode = CEnum(Annotated[int, ctypes.c_uint32])
-RENDERING_PASS = enum_a6xx_render_mode.define('RENDERING_PASS', 0) # type: ignore
-BINNING_PASS = enum_a6xx_render_mode.define('BINNING_PASS', 1) # type: ignore
-
-enum_a6xx_buffers_location = CEnum(Annotated[int, ctypes.c_uint32])
-BUFFERS_IN_GMEM = enum_a6xx_buffers_location.define('BUFFERS_IN_GMEM', 0) # type: ignore
-BUFFERS_IN_SYSMEM = enum_a6xx_buffers_location.define('BUFFERS_IN_SYSMEM', 3) # type: ignore
-
-enum_a6xx_lrz_feedback_mask = CEnum(Annotated[int, ctypes.c_uint32])
-LRZ_FEEDBACK_NONE = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_NONE', 0) # type: ignore
-LRZ_FEEDBACK_EARLY_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z', 1) # type: ignore
-LRZ_FEEDBACK_EARLY_Z_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z_LATE_Z', 2) # type: ignore
-LRZ_FEEDBACK_EARLY_Z_OR_EARLY_Z_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z_OR_EARLY_Z_LATE_Z', 3) # type: ignore
-LRZ_FEEDBACK_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_LATE_Z', 4) # type: ignore
-
-enum_a6xx_fsr_combiner = CEnum(Annotated[int, ctypes.c_uint32])
-FSR_COMBINER_OP_KEEP = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_KEEP', 0) # type: ignore
-FSR_COMBINER_OP_REPLACE = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_REPLACE', 1) # type: ignore
-FSR_COMBINER_OP_MIN = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MIN', 2) # type: ignore
-FSR_COMBINER_OP_MAX = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MAX', 3) # type: ignore
-FSR_COMBINER_OP_MUL = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MUL', 4) # type: ignore
-
-enum_a6xx_lrz_dir_status = CEnum(Annotated[int, ctypes.c_uint32])
-LRZ_DIR_LE = enum_a6xx_lrz_dir_status.define('LRZ_DIR_LE', 1) # type: ignore
-LRZ_DIR_GE = enum_a6xx_lrz_dir_status.define('LRZ_DIR_GE', 2) # type: ignore
-LRZ_DIR_INVALID = enum_a6xx_lrz_dir_status.define('LRZ_DIR_INVALID', 3) # type: ignore
-
-enum_a6xx_fragcoord_sample_mode = CEnum(Annotated[int, ctypes.c_uint32])
-FRAGCOORD_CENTER = enum_a6xx_fragcoord_sample_mode.define('FRAGCOORD_CENTER', 0) # type: ignore
-FRAGCOORD_SAMPLE = enum_a6xx_fragcoord_sample_mode.define('FRAGCOORD_SAMPLE', 3) # type: ignore
-
-enum_a6xx_rotation = CEnum(Annotated[int, ctypes.c_uint32])
-ROTATE_0 = enum_a6xx_rotation.define('ROTATE_0', 0) # type: ignore
-ROTATE_90 = enum_a6xx_rotation.define('ROTATE_90', 1) # type: ignore
-ROTATE_180 = enum_a6xx_rotation.define('ROTATE_180', 2) # type: ignore
-ROTATE_270 = enum_a6xx_rotation.define('ROTATE_270', 3) # type: ignore
-ROTATE_HFLIP = enum_a6xx_rotation.define('ROTATE_HFLIP', 4) # type: ignore
-ROTATE_VFLIP = enum_a6xx_rotation.define('ROTATE_VFLIP', 5) # type: ignore
-
-enum_a6xx_blit_event_type = CEnum(Annotated[int, ctypes.c_uint32])
-BLIT_EVENT_STORE = enum_a6xx_blit_event_type.define('BLIT_EVENT_STORE', 0) # type: ignore
-BLIT_EVENT_STORE_AND_CLEAR = enum_a6xx_blit_event_type.define('BLIT_EVENT_STORE_AND_CLEAR', 1) # type: ignore
-BLIT_EVENT_CLEAR = enum_a6xx_blit_event_type.define('BLIT_EVENT_CLEAR', 2) # type: ignore
-BLIT_EVENT_LOAD = enum_a6xx_blit_event_type.define('BLIT_EVENT_LOAD', 3) # type: ignore
-
-enum_a7xx_blit_clear_mode = CEnum(Annotated[int, ctypes.c_uint32])
-CLEAR_MODE_SYSMEM = enum_a7xx_blit_clear_mode.define('CLEAR_MODE_SYSMEM', 0) # type: ignore
-CLEAR_MODE_GMEM = enum_a7xx_blit_clear_mode.define('CLEAR_MODE_GMEM', 1) # type: ignore
-
-enum_a6xx_ccu_cache_size = CEnum(Annotated[int, ctypes.c_uint32])
-CCU_CACHE_SIZE_FULL = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_FULL', 0) # type: ignore
-CCU_CACHE_SIZE_HALF = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_HALF', 1) # type: ignore
-CCU_CACHE_SIZE_QUARTER = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_QUARTER', 2) # type: ignore
-CCU_CACHE_SIZE_EIGHTH = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_EIGHTH', 3) # type: ignore
-
-enum_a7xx_concurrent_resolve_mode = CEnum(Annotated[int, ctypes.c_uint32])
-CONCURRENT_RESOLVE_MODE_DISABLED = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_DISABLED', 0) # type: ignore
-CONCURRENT_RESOLVE_MODE_1 = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_1', 1) # type: ignore
-CONCURRENT_RESOLVE_MODE_2 = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_2', 2) # type: ignore
-
-enum_a7xx_concurrent_unresolve_mode = CEnum(Annotated[int, ctypes.c_uint32])
-CONCURRENT_UNRESOLVE_MODE_DISABLED = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_DISABLED', 0) # type: ignore
-CONCURRENT_UNRESOLVE_MODE_PARTIAL = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_PARTIAL', 1) # type: ignore
-CONCURRENT_UNRESOLVE_MODE_FULL = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_FULL', 3) # type: ignore
-
-enum_a6xx_varying_interp_mode = CEnum(Annotated[int, ctypes.c_uint32])
-INTERP_SMOOTH = enum_a6xx_varying_interp_mode.define('INTERP_SMOOTH', 0) # type: ignore
-INTERP_FLAT = enum_a6xx_varying_interp_mode.define('INTERP_FLAT', 1) # type: ignore
-INTERP_ZERO = enum_a6xx_varying_interp_mode.define('INTERP_ZERO', 2) # type: ignore
-INTERP_ONE = enum_a6xx_varying_interp_mode.define('INTERP_ONE', 3) # type: ignore
-
-enum_a6xx_varying_ps_repl_mode = CEnum(Annotated[int, ctypes.c_uint32])
-PS_REPL_NONE = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_NONE', 0) # type: ignore
-PS_REPL_S = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_S', 1) # type: ignore
-PS_REPL_T = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_T', 2) # type: ignore
-PS_REPL_ONE_MINUS_T = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_ONE_MINUS_T', 3) # type: ignore
-
-enum_a6xx_threadsize = CEnum(Annotated[int, ctypes.c_uint32])
-THREAD64 = enum_a6xx_threadsize.define('THREAD64', 0) # type: ignore
-THREAD128 = enum_a6xx_threadsize.define('THREAD128', 1) # type: ignore
-
-enum_a6xx_const_ram_mode = CEnum(Annotated[int, ctypes.c_uint32])
-CONSTLEN_128 = enum_a6xx_const_ram_mode.define('CONSTLEN_128', 0) # type: ignore
-CONSTLEN_192 = enum_a6xx_const_ram_mode.define('CONSTLEN_192', 1) # type: ignore
-CONSTLEN_256 = enum_a6xx_const_ram_mode.define('CONSTLEN_256', 2) # type: ignore
-CONSTLEN_512 = enum_a6xx_const_ram_mode.define('CONSTLEN_512', 3) # type: ignore
-
-enum_a7xx_workitem_rast_order = CEnum(Annotated[int, ctypes.c_uint32])
-WORKITEMRASTORDER_LINEAR = enum_a7xx_workitem_rast_order.define('WORKITEMRASTORDER_LINEAR', 0) # type: ignore
-WORKITEMRASTORDER_TILED = enum_a7xx_workitem_rast_order.define('WORKITEMRASTORDER_TILED', 1) # type: ignore
-
-enum_a6xx_bindless_descriptor_size = CEnum(Annotated[int, ctypes.c_uint32])
-BINDLESS_DESCRIPTOR_16B = enum_a6xx_bindless_descriptor_size.define('BINDLESS_DESCRIPTOR_16B', 1) # type: ignore
-BINDLESS_DESCRIPTOR_64B = enum_a6xx_bindless_descriptor_size.define('BINDLESS_DESCRIPTOR_64B', 3) # type: ignore
-
-enum_a6xx_isam_mode = CEnum(Annotated[int, ctypes.c_uint32])
-ISAMMODE_CL = enum_a6xx_isam_mode.define('ISAMMODE_CL', 1) # type: ignore
-ISAMMODE_GL = enum_a6xx_isam_mode.define('ISAMMODE_GL', 2) # type: ignore
-
-enum_a6xx_sp_a2d_output_ifmt_type = CEnum(Annotated[int, ctypes.c_uint32])
-OUTPUT_IFMT_2D_FLOAT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_FLOAT', 0) # type: ignore
-OUTPUT_IFMT_2D_SINT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_SINT', 1) # type: ignore
-OUTPUT_IFMT_2D_UINT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_UINT', 2) # type: ignore
-
-enum_a6xx_coord_round = CEnum(Annotated[int, ctypes.c_uint32])
-COORD_TRUNCATE = enum_a6xx_coord_round.define('COORD_TRUNCATE', 0) # type: ignore
-COORD_ROUND_NEAREST_EVEN = enum_a6xx_coord_round.define('COORD_ROUND_NEAREST_EVEN', 1) # type: ignore
-
-enum_a6xx_nearest_mode = CEnum(Annotated[int, ctypes.c_uint32])
-ROUND_CLAMP_TRUNCATE = enum_a6xx_nearest_mode.define('ROUND_CLAMP_TRUNCATE', 0) # type: ignore
-CLAMP_ROUND_TRUNCATE = enum_a6xx_nearest_mode.define('CLAMP_ROUND_TRUNCATE', 1) # type: ignore
-
-enum_a7xx_cs_yalign = CEnum(Annotated[int, ctypes.c_uint32])
-CS_YALIGN_1 = enum_a7xx_cs_yalign.define('CS_YALIGN_1', 8) # type: ignore
-CS_YALIGN_2 = enum_a7xx_cs_yalign.define('CS_YALIGN_2', 4) # type: ignore
-CS_YALIGN_4 = enum_a7xx_cs_yalign.define('CS_YALIGN_4', 2) # type: ignore
-CS_YALIGN_8 = enum_a7xx_cs_yalign.define('CS_YALIGN_8', 1) # type: ignore
-
-enum_vgt_event_type = CEnum(Annotated[int, ctypes.c_uint32])
-VS_DEALLOC = enum_vgt_event_type.define('VS_DEALLOC', 0) # type: ignore
-PS_DEALLOC = enum_vgt_event_type.define('PS_DEALLOC', 1) # type: ignore
-VS_DONE_TS = enum_vgt_event_type.define('VS_DONE_TS', 2) # type: ignore
-PS_DONE_TS = enum_vgt_event_type.define('PS_DONE_TS', 3) # type: ignore
-CACHE_FLUSH_TS = enum_vgt_event_type.define('CACHE_FLUSH_TS', 4) # type: ignore
-CONTEXT_DONE = enum_vgt_event_type.define('CONTEXT_DONE', 5) # type: ignore
-CACHE_FLUSH = enum_vgt_event_type.define('CACHE_FLUSH', 6) # type: ignore
-VIZQUERY_START = enum_vgt_event_type.define('VIZQUERY_START', 7) # type: ignore
-HLSQ_FLUSH = enum_vgt_event_type.define('HLSQ_FLUSH', 7) # type: ignore
-VIZQUERY_END = enum_vgt_event_type.define('VIZQUERY_END', 8) # type: ignore
-SC_WAIT_WC = enum_vgt_event_type.define('SC_WAIT_WC', 9) # type: ignore
-WRITE_PRIMITIVE_COUNTS = enum_vgt_event_type.define('WRITE_PRIMITIVE_COUNTS', 9) # type: ignore
-START_PRIMITIVE_CTRS = enum_vgt_event_type.define('START_PRIMITIVE_CTRS', 11) # type: ignore
-STOP_PRIMITIVE_CTRS = enum_vgt_event_type.define('STOP_PRIMITIVE_CTRS', 12) # type: ignore
-RST_PIX_CNT = enum_vgt_event_type.define('RST_PIX_CNT', 13) # type: ignore
-RST_VTX_CNT = enum_vgt_event_type.define('RST_VTX_CNT', 14) # type: ignore
-TILE_FLUSH = enum_vgt_event_type.define('TILE_FLUSH', 15) # type: ignore
-STAT_EVENT = enum_vgt_event_type.define('STAT_EVENT', 16) # type: ignore
-CACHE_FLUSH_AND_INV_TS_EVENT = enum_vgt_event_type.define('CACHE_FLUSH_AND_INV_TS_EVENT', 20) # type: ignore
-ZPASS_DONE = enum_vgt_event_type.define('ZPASS_DONE', 21) # type: ignore
-CACHE_FLUSH_AND_INV_EVENT = enum_vgt_event_type.define('CACHE_FLUSH_AND_INV_EVENT', 22) # type: ignore
-RB_DONE_TS = enum_vgt_event_type.define('RB_DONE_TS', 22) # type: ignore
-PERFCOUNTER_START = enum_vgt_event_type.define('PERFCOUNTER_START', 23) # type: ignore
-PERFCOUNTER_STOP = enum_vgt_event_type.define('PERFCOUNTER_STOP', 24) # type: ignore
-VS_FETCH_DONE = enum_vgt_event_type.define('VS_FETCH_DONE', 27) # type: ignore
-FACENESS_FLUSH = enum_vgt_event_type.define('FACENESS_FLUSH', 28) # type: ignore
-WT_DONE_TS = enum_vgt_event_type.define('WT_DONE_TS', 8) # type: ignore
-START_FRAGMENT_CTRS = enum_vgt_event_type.define('START_FRAGMENT_CTRS', 13) # type: ignore
-STOP_FRAGMENT_CTRS = enum_vgt_event_type.define('STOP_FRAGMENT_CTRS', 14) # type: ignore
-START_COMPUTE_CTRS = enum_vgt_event_type.define('START_COMPUTE_CTRS', 15) # type: ignore
-STOP_COMPUTE_CTRS = enum_vgt_event_type.define('STOP_COMPUTE_CTRS', 16) # type: ignore
-FLUSH_SO_0 = enum_vgt_event_type.define('FLUSH_SO_0', 17) # type: ignore
-FLUSH_SO_1 = enum_vgt_event_type.define('FLUSH_SO_1', 18) # type: ignore
-FLUSH_SO_2 = enum_vgt_event_type.define('FLUSH_SO_2', 19) # type: ignore
-FLUSH_SO_3 = enum_vgt_event_type.define('FLUSH_SO_3', 20) # type: ignore
-PC_CCU_INVALIDATE_DEPTH = enum_vgt_event_type.define('PC_CCU_INVALIDATE_DEPTH', 24) # type: ignore
-PC_CCU_INVALIDATE_COLOR = enum_vgt_event_type.define('PC_CCU_INVALIDATE_COLOR', 25) # type: ignore
-PC_CCU_RESOLVE_TS = enum_vgt_event_type.define('PC_CCU_RESOLVE_TS', 26) # type: ignore
-PC_CCU_FLUSH_DEPTH_TS = enum_vgt_event_type.define('PC_CCU_FLUSH_DEPTH_TS', 28) # type: ignore
-PC_CCU_FLUSH_COLOR_TS = enum_vgt_event_type.define('PC_CCU_FLUSH_COLOR_TS', 29) # type: ignore
-BLIT = enum_vgt_event_type.define('BLIT', 30) # type: ignore
-LRZ_FLIP_BUFFER = enum_vgt_event_type.define('LRZ_FLIP_BUFFER', 36) # type: ignore
-LRZ_CLEAR = enum_vgt_event_type.define('LRZ_CLEAR', 37) # type: ignore
-LRZ_FLUSH = enum_vgt_event_type.define('LRZ_FLUSH', 38) # type: ignore
-BLIT_OP_FILL_2D = enum_vgt_event_type.define('BLIT_OP_FILL_2D', 39) # type: ignore
-BLIT_OP_COPY_2D = enum_vgt_event_type.define('BLIT_OP_COPY_2D', 40) # type: ignore
-UNK_40 = enum_vgt_event_type.define('UNK_40', 40) # type: ignore
-LRZ_Q_CACHE_INVALIDATE = enum_vgt_event_type.define('LRZ_Q_CACHE_INVALIDATE', 41) # type: ignore
-BLIT_OP_SCALE_2D = enum_vgt_event_type.define('BLIT_OP_SCALE_2D', 42) # type: ignore
-CONTEXT_DONE_2D = enum_vgt_event_type.define('CONTEXT_DONE_2D', 43) # type: ignore
-UNK_2C = enum_vgt_event_type.define('UNK_2C', 44) # type: ignore
-UNK_2D = enum_vgt_event_type.define('UNK_2D', 45) # type: ignore
-CACHE_INVALIDATE = enum_vgt_event_type.define('CACHE_INVALIDATE', 49) # type: ignore
-LABEL = enum_vgt_event_type.define('LABEL', 63) # type: ignore
-DUMMY_EVENT = enum_vgt_event_type.define('DUMMY_EVENT', 1) # type: ignore
-CCU_INVALIDATE_DEPTH = enum_vgt_event_type.define('CCU_INVALIDATE_DEPTH', 24) # type: ignore
-CCU_INVALIDATE_COLOR = enum_vgt_event_type.define('CCU_INVALIDATE_COLOR', 25) # type: ignore
-CCU_RESOLVE_CLEAN = enum_vgt_event_type.define('CCU_RESOLVE_CLEAN', 26) # type: ignore
-CCU_FLUSH_DEPTH = enum_vgt_event_type.define('CCU_FLUSH_DEPTH', 28) # type: ignore
-CCU_FLUSH_COLOR = enum_vgt_event_type.define('CCU_FLUSH_COLOR', 29) # type: ignore
-CCU_RESOLVE = enum_vgt_event_type.define('CCU_RESOLVE', 30) # type: ignore
-CCU_END_RESOLVE_GROUP = enum_vgt_event_type.define('CCU_END_RESOLVE_GROUP', 31) # type: ignore
-CCU_CLEAN_DEPTH = enum_vgt_event_type.define('CCU_CLEAN_DEPTH', 32) # type: ignore
-CCU_CLEAN_COLOR = enum_vgt_event_type.define('CCU_CLEAN_COLOR', 33) # type: ignore
-CACHE_RESET = enum_vgt_event_type.define('CACHE_RESET', 48) # type: ignore
-CACHE_CLEAN = enum_vgt_event_type.define('CACHE_CLEAN', 49) # type: ignore
-CACHE_FLUSH7 = enum_vgt_event_type.define('CACHE_FLUSH7', 50) # type: ignore
-CACHE_INVALIDATE7 = enum_vgt_event_type.define('CACHE_INVALIDATE7', 51) # type: ignore
-
-enum_pc_di_primtype = CEnum(Annotated[int, ctypes.c_uint32])
-DI_PT_NONE = enum_pc_di_primtype.define('DI_PT_NONE', 0) # type: ignore
-DI_PT_POINTLIST_PSIZE = enum_pc_di_primtype.define('DI_PT_POINTLIST_PSIZE', 1) # type: ignore
-DI_PT_LINELIST = enum_pc_di_primtype.define('DI_PT_LINELIST', 2) # type: ignore
-DI_PT_LINESTRIP = enum_pc_di_primtype.define('DI_PT_LINESTRIP', 3) # type: ignore
-DI_PT_TRILIST = enum_pc_di_primtype.define('DI_PT_TRILIST', 4) # type: ignore
-DI_PT_TRIFAN = enum_pc_di_primtype.define('DI_PT_TRIFAN', 5) # type: ignore
-DI_PT_TRISTRIP = enum_pc_di_primtype.define('DI_PT_TRISTRIP', 6) # type: ignore
-DI_PT_LINELOOP = enum_pc_di_primtype.define('DI_PT_LINELOOP', 7) # type: ignore
-DI_PT_RECTLIST = enum_pc_di_primtype.define('DI_PT_RECTLIST', 8) # type: ignore
-DI_PT_POINTLIST = enum_pc_di_primtype.define('DI_PT_POINTLIST', 9) # type: ignore
-DI_PT_LINE_ADJ = enum_pc_di_primtype.define('DI_PT_LINE_ADJ', 10) # type: ignore
-DI_PT_LINESTRIP_ADJ = enum_pc_di_primtype.define('DI_PT_LINESTRIP_ADJ', 11) # type: ignore
-DI_PT_TRI_ADJ = enum_pc_di_primtype.define('DI_PT_TRI_ADJ', 12) # type: ignore
-DI_PT_TRISTRIP_ADJ = enum_pc_di_primtype.define('DI_PT_TRISTRIP_ADJ', 13) # type: ignore
-DI_PT_PATCHES0 = enum_pc_di_primtype.define('DI_PT_PATCHES0', 31) # type: ignore
-DI_PT_PATCHES1 = enum_pc_di_primtype.define('DI_PT_PATCHES1', 32) # type: ignore
-DI_PT_PATCHES2 = enum_pc_di_primtype.define('DI_PT_PATCHES2', 33) # type: ignore
-DI_PT_PATCHES3 = enum_pc_di_primtype.define('DI_PT_PATCHES3', 34) # type: ignore
-DI_PT_PATCHES4 = enum_pc_di_primtype.define('DI_PT_PATCHES4', 35) # type: ignore
-DI_PT_PATCHES5 = enum_pc_di_primtype.define('DI_PT_PATCHES5', 36) # type: ignore
-DI_PT_PATCHES6 = enum_pc_di_primtype.define('DI_PT_PATCHES6', 37) # type: ignore
-DI_PT_PATCHES7 = enum_pc_di_primtype.define('DI_PT_PATCHES7', 38) # type: ignore
-DI_PT_PATCHES8 = enum_pc_di_primtype.define('DI_PT_PATCHES8', 39) # type: ignore
-DI_PT_PATCHES9 = enum_pc_di_primtype.define('DI_PT_PATCHES9', 40) # type: ignore
-DI_PT_PATCHES10 = enum_pc_di_primtype.define('DI_PT_PATCHES10', 41) # type: ignore
-DI_PT_PATCHES11 = enum_pc_di_primtype.define('DI_PT_PATCHES11', 42) # type: ignore
-DI_PT_PATCHES12 = enum_pc_di_primtype.define('DI_PT_PATCHES12', 43) # type: ignore
-DI_PT_PATCHES13 = enum_pc_di_primtype.define('DI_PT_PATCHES13', 44) # type: ignore
-DI_PT_PATCHES14 = enum_pc_di_primtype.define('DI_PT_PATCHES14', 45) # type: ignore
-DI_PT_PATCHES15 = enum_pc_di_primtype.define('DI_PT_PATCHES15', 46) # type: ignore
-DI_PT_PATCHES16 = enum_pc_di_primtype.define('DI_PT_PATCHES16', 47) # type: ignore
-DI_PT_PATCHES17 = enum_pc_di_primtype.define('DI_PT_PATCHES17', 48) # type: ignore
-DI_PT_PATCHES18 = enum_pc_di_primtype.define('DI_PT_PATCHES18', 49) # type: ignore
-DI_PT_PATCHES19 = enum_pc_di_primtype.define('DI_PT_PATCHES19', 50) # type: ignore
-DI_PT_PATCHES20 = enum_pc_di_primtype.define('DI_PT_PATCHES20', 51) # type: ignore
-DI_PT_PATCHES21 = enum_pc_di_primtype.define('DI_PT_PATCHES21', 52) # type: ignore
-DI_PT_PATCHES22 = enum_pc_di_primtype.define('DI_PT_PATCHES22', 53) # type: ignore
-DI_PT_PATCHES23 = enum_pc_di_primtype.define('DI_PT_PATCHES23', 54) # type: ignore
-DI_PT_PATCHES24 = enum_pc_di_primtype.define('DI_PT_PATCHES24', 55) # type: ignore
-DI_PT_PATCHES25 = enum_pc_di_primtype.define('DI_PT_PATCHES25', 56) # type: ignore
-DI_PT_PATCHES26 = enum_pc_di_primtype.define('DI_PT_PATCHES26', 57) # type: ignore
-DI_PT_PATCHES27 = enum_pc_di_primtype.define('DI_PT_PATCHES27', 58) # type: ignore
-DI_PT_PATCHES28 = enum_pc_di_primtype.define('DI_PT_PATCHES28', 59) # type: ignore
-DI_PT_PATCHES29 = enum_pc_di_primtype.define('DI_PT_PATCHES29', 60) # type: ignore
-DI_PT_PATCHES30 = enum_pc_di_primtype.define('DI_PT_PATCHES30', 61) # type: ignore
-DI_PT_PATCHES31 = enum_pc_di_primtype.define('DI_PT_PATCHES31', 62) # type: ignore
-
-enum_pc_di_src_sel = CEnum(Annotated[int, ctypes.c_uint32])
-DI_SRC_SEL_DMA = enum_pc_di_src_sel.define('DI_SRC_SEL_DMA', 0) # type: ignore
-DI_SRC_SEL_IMMEDIATE = enum_pc_di_src_sel.define('DI_SRC_SEL_IMMEDIATE', 1) # type: ignore
-DI_SRC_SEL_AUTO_INDEX = enum_pc_di_src_sel.define('DI_SRC_SEL_AUTO_INDEX', 2) # type: ignore
-DI_SRC_SEL_AUTO_XFB = enum_pc_di_src_sel.define('DI_SRC_SEL_AUTO_XFB', 3) # type: ignore
-
-enum_pc_di_face_cull_sel = CEnum(Annotated[int, ctypes.c_uint32])
-DI_FACE_CULL_NONE = enum_pc_di_face_cull_sel.define('DI_FACE_CULL_NONE', 0) # type: ignore
-DI_FACE_CULL_FETCH = enum_pc_di_face_cull_sel.define('DI_FACE_CULL_FETCH', 1) # type: ignore
-DI_FACE_BACKFACE_CULL = enum_pc_di_face_cull_sel.define('DI_FACE_BACKFACE_CULL', 2) # type: ignore
-DI_FACE_FRONTFACE_CULL = enum_pc_di_face_cull_sel.define('DI_FACE_FRONTFACE_CULL', 3) # type: ignore
-
-enum_pc_di_index_size = CEnum(Annotated[int, ctypes.c_uint32])
-INDEX_SIZE_IGN = enum_pc_di_index_size.define('INDEX_SIZE_IGN', 0) # type: ignore
-INDEX_SIZE_16_BIT = enum_pc_di_index_size.define('INDEX_SIZE_16_BIT', 0) # type: ignore
-INDEX_SIZE_32_BIT = enum_pc_di_index_size.define('INDEX_SIZE_32_BIT', 1) # type: ignore
-INDEX_SIZE_8_BIT = enum_pc_di_index_size.define('INDEX_SIZE_8_BIT', 2) # type: ignore
-INDEX_SIZE_INVALID = enum_pc_di_index_size.define('INDEX_SIZE_INVALID', 0) # type: ignore
-
-enum_pc_di_vis_cull_mode = CEnum(Annotated[int, ctypes.c_uint32])
-IGNORE_VISIBILITY = enum_pc_di_vis_cull_mode.define('IGNORE_VISIBILITY', 0) # type: ignore
-USE_VISIBILITY = enum_pc_di_vis_cull_mode.define('USE_VISIBILITY', 1) # type: ignore
-
-enum_adreno_pm4_packet_type = CEnum(Annotated[int, ctypes.c_uint32])
-CP_TYPE0_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE0_PKT', 0) # type: ignore
-CP_TYPE1_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE1_PKT', 1073741824) # type: ignore
-CP_TYPE2_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE2_PKT', 2147483648) # type: ignore
-CP_TYPE3_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE3_PKT', 3221225472) # type: ignore
-CP_TYPE4_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE4_PKT', 1073741824) # type: ignore
-CP_TYPE7_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE7_PKT', 1879048192) # type: ignore
-
-enum_adreno_pm4_type3_packets = CEnum(Annotated[int, ctypes.c_uint32])
-CP_ME_INIT = enum_adreno_pm4_type3_packets.define('CP_ME_INIT', 72) # type: ignore
-CP_NOP = enum_adreno_pm4_type3_packets.define('CP_NOP', 16) # type: ignore
-CP_PREEMPT_ENABLE = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE', 28) # type: ignore
-CP_PREEMPT_TOKEN = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_TOKEN', 30) # type: ignore
-CP_INDIRECT_BUFFER = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER', 63) # type: ignore
-CP_INDIRECT_BUFFER_CHAIN = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_CHAIN', 87) # type: ignore
-CP_INDIRECT_BUFFER_PFD = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_PFD', 55) # type: ignore
-CP_WAIT_FOR_IDLE = enum_adreno_pm4_type3_packets.define('CP_WAIT_FOR_IDLE', 38) # type: ignore
-CP_WAIT_REG_MEM = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_MEM', 60) # type: ignore
-CP_WAIT_REG_EQ = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_EQ', 82) # type: ignore
-CP_WAIT_REG_GTE = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_GTE', 83) # type: ignore
-CP_WAIT_UNTIL_READ = enum_adreno_pm4_type3_packets.define('CP_WAIT_UNTIL_READ', 92) # type: ignore
-CP_WAIT_IB_PFD_COMPLETE = enum_adreno_pm4_type3_packets.define('CP_WAIT_IB_PFD_COMPLETE', 93) # type: ignore
-CP_REG_RMW = enum_adreno_pm4_type3_packets.define('CP_REG_RMW', 33) # type: ignore
-CP_SET_BIN_DATA = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA', 47) # type: ignore
-CP_SET_BIN_DATA5 = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA5', 47) # type: ignore
-CP_REG_TO_MEM = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM', 62) # type: ignore
-CP_MEM_WRITE = enum_adreno_pm4_type3_packets.define('CP_MEM_WRITE', 61) # type: ignore
-CP_MEM_WRITE_CNTR = enum_adreno_pm4_type3_packets.define('CP_MEM_WRITE_CNTR', 79) # type: ignore
-CP_COND_EXEC = enum_adreno_pm4_type3_packets.define('CP_COND_EXEC', 68) # type: ignore
-CP_COND_WRITE = enum_adreno_pm4_type3_packets.define('CP_COND_WRITE', 69) # type: ignore
-CP_COND_WRITE5 = enum_adreno_pm4_type3_packets.define('CP_COND_WRITE5', 69) # type: ignore
-CP_EVENT_WRITE = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE', 70) # type: ignore
-CP_EVENT_WRITE7 = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE7', 70) # type: ignore
-CP_EVENT_WRITE_SHD = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_SHD', 88) # type: ignore
-CP_EVENT_WRITE_CFL = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_CFL', 89) # type: ignore
-CP_EVENT_WRITE_ZPD = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_ZPD', 91) # type: ignore
-CP_RUN_OPENCL = enum_adreno_pm4_type3_packets.define('CP_RUN_OPENCL', 49) # type: ignore
-CP_DRAW_INDX = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX', 34) # type: ignore
-CP_DRAW_INDX_2 = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_2', 54) # type: ignore
-CP_DRAW_INDX_BIN = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_BIN', 52) # type: ignore
-CP_DRAW_INDX_2_BIN = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_2_BIN', 53) # type: ignore
-CP_VIZ_QUERY = enum_adreno_pm4_type3_packets.define('CP_VIZ_QUERY', 35) # type: ignore
-CP_SET_STATE = enum_adreno_pm4_type3_packets.define('CP_SET_STATE', 37) # type: ignore
-CP_SET_CONSTANT = enum_adreno_pm4_type3_packets.define('CP_SET_CONSTANT', 45) # type: ignore
-CP_IM_LOAD = enum_adreno_pm4_type3_packets.define('CP_IM_LOAD', 39) # type: ignore
-CP_IM_LOAD_IMMEDIATE = enum_adreno_pm4_type3_packets.define('CP_IM_LOAD_IMMEDIATE', 43) # type: ignore
-CP_LOAD_CONSTANT_CONTEXT = enum_adreno_pm4_type3_packets.define('CP_LOAD_CONSTANT_CONTEXT', 46) # type: ignore
-CP_INVALIDATE_STATE = enum_adreno_pm4_type3_packets.define('CP_INVALIDATE_STATE', 59) # type: ignore
-CP_SET_SHADER_BASES = enum_adreno_pm4_type3_packets.define('CP_SET_SHADER_BASES', 74) # type: ignore
-CP_SET_BIN_MASK = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_MASK', 80) # type: ignore
-CP_SET_BIN_SELECT = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_SELECT', 81) # type: ignore
-CP_CONTEXT_UPDATE = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_UPDATE', 94) # type: ignore
-CP_INTERRUPT = enum_adreno_pm4_type3_packets.define('CP_INTERRUPT', 64) # type: ignore
-CP_IM_STORE = enum_adreno_pm4_type3_packets.define('CP_IM_STORE', 44) # type: ignore
-CP_SET_DRAW_INIT_FLAGS = enum_adreno_pm4_type3_packets.define('CP_SET_DRAW_INIT_FLAGS', 75) # type: ignore
-CP_SET_PROTECTED_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_PROTECTED_MODE', 95) # type: ignore
-CP_BOOTSTRAP_UCODE = enum_adreno_pm4_type3_packets.define('CP_BOOTSTRAP_UCODE', 111) # type: ignore
-CP_LOAD_STATE = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE', 48) # type: ignore
-CP_LOAD_STATE4 = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE4', 48) # type: ignore
-CP_COND_INDIRECT_BUFFER_PFE = enum_adreno_pm4_type3_packets.define('CP_COND_INDIRECT_BUFFER_PFE', 58) # type: ignore
-CP_COND_INDIRECT_BUFFER_PFD = enum_adreno_pm4_type3_packets.define('CP_COND_INDIRECT_BUFFER_PFD', 50) # type: ignore
-CP_INDIRECT_BUFFER_PFE = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_PFE', 63) # type: ignore
-CP_SET_BIN = enum_adreno_pm4_type3_packets.define('CP_SET_BIN', 76) # type: ignore
-CP_TEST_TWO_MEMS = enum_adreno_pm4_type3_packets.define('CP_TEST_TWO_MEMS', 113) # type: ignore
-CP_REG_WR_NO_CTXT = enum_adreno_pm4_type3_packets.define('CP_REG_WR_NO_CTXT', 120) # type: ignore
-CP_RECORD_PFP_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_RECORD_PFP_TIMESTAMP', 17) # type: ignore
-CP_SET_SECURE_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_SECURE_MODE', 102) # type: ignore
-CP_WAIT_FOR_ME = enum_adreno_pm4_type3_packets.define('CP_WAIT_FOR_ME', 19) # type: ignore
-CP_SET_DRAW_STATE = enum_adreno_pm4_type3_packets.define('CP_SET_DRAW_STATE', 67) # type: ignore
-CP_DRAW_INDX_OFFSET = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_OFFSET', 56) # type: ignore
-CP_DRAW_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDIRECT', 40) # type: ignore
-CP_DRAW_INDX_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_INDIRECT', 41) # type: ignore
-CP_DRAW_INDIRECT_MULTI = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDIRECT_MULTI', 42) # type: ignore
-CP_DRAW_AUTO = enum_adreno_pm4_type3_packets.define('CP_DRAW_AUTO', 36) # type: ignore
-CP_DRAW_PRED_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_ENABLE_GLOBAL', 25) # type: ignore
-CP_DRAW_PRED_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_ENABLE_LOCAL', 26) # type: ignore
-CP_DRAW_PRED_SET = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_SET', 78) # type: ignore
-CP_WIDE_REG_WRITE = enum_adreno_pm4_type3_packets.define('CP_WIDE_REG_WRITE', 116) # type: ignore
-CP_SCRATCH_TO_REG = enum_adreno_pm4_type3_packets.define('CP_SCRATCH_TO_REG', 77) # type: ignore
-CP_REG_TO_SCRATCH = enum_adreno_pm4_type3_packets.define('CP_REG_TO_SCRATCH', 74) # type: ignore
-CP_WAIT_MEM_WRITES = enum_adreno_pm4_type3_packets.define('CP_WAIT_MEM_WRITES', 18) # type: ignore
-CP_COND_REG_EXEC = enum_adreno_pm4_type3_packets.define('CP_COND_REG_EXEC', 71) # type: ignore
-CP_MEM_TO_REG = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_REG', 66) # type: ignore
-CP_EXEC_CS_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_EXEC_CS_INDIRECT', 65) # type: ignore
-CP_EXEC_CS = enum_adreno_pm4_type3_packets.define('CP_EXEC_CS', 51) # type: ignore
-CP_PERFCOUNTER_ACTION = enum_adreno_pm4_type3_packets.define('CP_PERFCOUNTER_ACTION', 80) # type: ignore
-CP_SMMU_TABLE_UPDATE = enum_adreno_pm4_type3_packets.define('CP_SMMU_TABLE_UPDATE', 83) # type: ignore
-CP_SET_MARKER = enum_adreno_pm4_type3_packets.define('CP_SET_MARKER', 101) # type: ignore
-CP_SET_PSEUDO_REG = enum_adreno_pm4_type3_packets.define('CP_SET_PSEUDO_REG', 86) # type: ignore
-CP_CONTEXT_REG_BUNCH = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_REG_BUNCH', 92) # type: ignore
-CP_YIELD_ENABLE = enum_adreno_pm4_type3_packets.define('CP_YIELD_ENABLE', 28) # type: ignore
-CP_SKIP_IB2_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_SKIP_IB2_ENABLE_GLOBAL', 29) # type: ignore
-CP_SKIP_IB2_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_SKIP_IB2_ENABLE_LOCAL', 35) # type: ignore
-CP_SET_SUBDRAW_SIZE = enum_adreno_pm4_type3_packets.define('CP_SET_SUBDRAW_SIZE', 53) # type: ignore
-CP_WHERE_AM_I = enum_adreno_pm4_type3_packets.define('CP_WHERE_AM_I', 98) # type: ignore
-CP_SET_VISIBILITY_OVERRIDE = enum_adreno_pm4_type3_packets.define('CP_SET_VISIBILITY_OVERRIDE', 100) # type: ignore
-CP_PREEMPT_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE_GLOBAL', 105) # type: ignore
-CP_PREEMPT_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE_LOCAL', 106) # type: ignore
-CP_CONTEXT_SWITCH_YIELD = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_SWITCH_YIELD', 107) # type: ignore
-CP_SET_RENDER_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_RENDER_MODE', 108) # type: ignore
-CP_COMPUTE_CHECKPOINT = enum_adreno_pm4_type3_packets.define('CP_COMPUTE_CHECKPOINT', 110) # type: ignore
-CP_MEM_TO_MEM = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_MEM', 115) # type: ignore
-CP_BLIT = enum_adreno_pm4_type3_packets.define('CP_BLIT', 44) # type: ignore
-CP_REG_TEST = enum_adreno_pm4_type3_packets.define('CP_REG_TEST', 57) # type: ignore
-CP_SET_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_MODE', 99) # type: ignore
-CP_LOAD_STATE6_GEOM = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6_GEOM', 50) # type: ignore
-CP_LOAD_STATE6_FRAG = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6_FRAG', 52) # type: ignore
-CP_LOAD_STATE6 = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6', 54) # type: ignore
-IN_IB_PREFETCH_END = enum_adreno_pm4_type3_packets.define('IN_IB_PREFETCH_END', 23) # type: ignore
-IN_SUBBLK_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_SUBBLK_PREFETCH', 31) # type: ignore
-IN_INSTR_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_INSTR_PREFETCH', 32) # type: ignore
-IN_INSTR_MATCH = enum_adreno_pm4_type3_packets.define('IN_INSTR_MATCH', 71) # type: ignore
-IN_CONST_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_CONST_PREFETCH', 73) # type: ignore
-IN_INCR_UPDT_STATE = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_STATE', 85) # type: ignore
-IN_INCR_UPDT_CONST = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_CONST', 86) # type: ignore
-IN_INCR_UPDT_INSTR = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_INSTR', 87) # type: ignore
-PKT4 = enum_adreno_pm4_type3_packets.define('PKT4', 4) # type: ignore
-IN_IB_END = enum_adreno_pm4_type3_packets.define('IN_IB_END', 10) # type: ignore
-IN_GMU_INTERRUPT = enum_adreno_pm4_type3_packets.define('IN_GMU_INTERRUPT', 11) # type: ignore
-IN_PREEMPT = enum_adreno_pm4_type3_packets.define('IN_PREEMPT', 15) # type: ignore
-CP_SCRATCH_WRITE = enum_adreno_pm4_type3_packets.define('CP_SCRATCH_WRITE', 76) # type: ignore
-CP_REG_TO_MEM_OFFSET_MEM = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM_OFFSET_MEM', 116) # type: ignore
-CP_REG_TO_MEM_OFFSET_REG = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM_OFFSET_REG', 114) # type: ignore
-CP_WAIT_MEM_GTE = enum_adreno_pm4_type3_packets.define('CP_WAIT_MEM_GTE', 20) # type: ignore
-CP_WAIT_TWO_REGS = enum_adreno_pm4_type3_packets.define('CP_WAIT_TWO_REGS', 112) # type: ignore
-CP_MEMCPY = enum_adreno_pm4_type3_packets.define('CP_MEMCPY', 117) # type: ignore
-CP_SET_BIN_DATA5_OFFSET = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA5_OFFSET', 46) # type: ignore
-CP_SET_UNK_BIN_DATA = enum_adreno_pm4_type3_packets.define('CP_SET_UNK_BIN_DATA', 45) # type: ignore
-CP_CONTEXT_SWITCH = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_SWITCH', 84) # type: ignore
-CP_SET_AMBLE = enum_adreno_pm4_type3_packets.define('CP_SET_AMBLE', 85) # type: ignore
-CP_REG_WRITE = enum_adreno_pm4_type3_packets.define('CP_REG_WRITE', 109) # type: ignore
-CP_START_BIN = enum_adreno_pm4_type3_packets.define('CP_START_BIN', 80) # type: ignore
-CP_END_BIN = enum_adreno_pm4_type3_packets.define('CP_END_BIN', 81) # type: ignore
-CP_PREEMPT_DISABLE = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_DISABLE', 108) # type: ignore
-CP_WAIT_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_WAIT_TIMESTAMP', 20) # type: ignore
-CP_GLOBAL_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_GLOBAL_TIMESTAMP', 21) # type: ignore
-CP_LOCAL_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_LOCAL_TIMESTAMP', 22) # type: ignore
-CP_THREAD_CONTROL = enum_adreno_pm4_type3_packets.define('CP_THREAD_CONTROL', 23) # type: ignore
-CP_RESOURCE_LIST = enum_adreno_pm4_type3_packets.define('CP_RESOURCE_LIST', 24) # type: ignore
-CP_BV_BR_COUNT_OPS = enum_adreno_pm4_type3_packets.define('CP_BV_BR_COUNT_OPS', 27) # type: ignore
-CP_MODIFY_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_MODIFY_TIMESTAMP', 28) # type: ignore
-CP_CONTEXT_REG_BUNCH2 = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_REG_BUNCH2', 93) # type: ignore
-CP_MEM_TO_SCRATCH_MEM = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_SCRATCH_MEM', 73) # type: ignore
-CP_FIXED_STRIDE_DRAW_TABLE = enum_adreno_pm4_type3_packets.define('CP_FIXED_STRIDE_DRAW_TABLE', 127) # type: ignore
-CP_RESET_CONTEXT_STATE = enum_adreno_pm4_type3_packets.define('CP_RESET_CONTEXT_STATE', 31) # type: ignore
-CP_CCHE_INVALIDATE = enum_adreno_pm4_type3_packets.define('CP_CCHE_INVALIDATE', 58) # type: ignore
-CP_SCOPE_CNTL = enum_adreno_pm4_type3_packets.define('CP_SCOPE_CNTL', 108) # type: ignore
-
-enum_adreno_state_block = CEnum(Annotated[int, ctypes.c_uint32])
-SB_VERT_TEX = enum_adreno_state_block.define('SB_VERT_TEX', 0) # type: ignore
-SB_VERT_MIPADDR = enum_adreno_state_block.define('SB_VERT_MIPADDR', 1) # type: ignore
-SB_FRAG_TEX = enum_adreno_state_block.define('SB_FRAG_TEX', 2) # type: ignore
-SB_FRAG_MIPADDR = enum_adreno_state_block.define('SB_FRAG_MIPADDR', 3) # type: ignore
-SB_VERT_SHADER = enum_adreno_state_block.define('SB_VERT_SHADER', 4) # type: ignore
-SB_GEOM_SHADER = enum_adreno_state_block.define('SB_GEOM_SHADER', 5) # type: ignore
-SB_FRAG_SHADER = enum_adreno_state_block.define('SB_FRAG_SHADER', 6) # type: ignore
-SB_COMPUTE_SHADER = enum_adreno_state_block.define('SB_COMPUTE_SHADER', 7) # type: ignore
-
-enum_adreno_state_type = CEnum(Annotated[int, ctypes.c_uint32])
-ST_SHADER = enum_adreno_state_type.define('ST_SHADER', 0) # type: ignore
-ST_CONSTANTS = enum_adreno_state_type.define('ST_CONSTANTS', 1) # type: ignore
-
-enum_adreno_state_src = CEnum(Annotated[int, ctypes.c_uint32])
-SS_DIRECT = enum_adreno_state_src.define('SS_DIRECT', 0) # type: ignore
-SS_INVALID_ALL_IC = enum_adreno_state_src.define('SS_INVALID_ALL_IC', 2) # type: ignore
-SS_INVALID_PART_IC = enum_adreno_state_src.define('SS_INVALID_PART_IC', 3) # type: ignore
-SS_INDIRECT = enum_adreno_state_src.define('SS_INDIRECT', 4) # type: ignore
-SS_INDIRECT_TCM = enum_adreno_state_src.define('SS_INDIRECT_TCM', 5) # type: ignore
-SS_INDIRECT_STM = enum_adreno_state_src.define('SS_INDIRECT_STM', 6) # type: ignore
-
-enum_a4xx_state_block = CEnum(Annotated[int, ctypes.c_uint32])
-SB4_VS_TEX = enum_a4xx_state_block.define('SB4_VS_TEX', 0) # type: ignore
-SB4_HS_TEX = enum_a4xx_state_block.define('SB4_HS_TEX', 1) # type: ignore
-SB4_DS_TEX = enum_a4xx_state_block.define('SB4_DS_TEX', 2) # type: ignore
-SB4_GS_TEX = enum_a4xx_state_block.define('SB4_GS_TEX', 3) # type: ignore
-SB4_FS_TEX = enum_a4xx_state_block.define('SB4_FS_TEX', 4) # type: ignore
-SB4_CS_TEX = enum_a4xx_state_block.define('SB4_CS_TEX', 5) # type: ignore
-SB4_VS_SHADER = enum_a4xx_state_block.define('SB4_VS_SHADER', 8) # type: ignore
-SB4_HS_SHADER = enum_a4xx_state_block.define('SB4_HS_SHADER', 9) # type: ignore
-SB4_DS_SHADER = enum_a4xx_state_block.define('SB4_DS_SHADER', 10) # type: ignore
-SB4_GS_SHADER = enum_a4xx_state_block.define('SB4_GS_SHADER', 11) # type: ignore
-SB4_FS_SHADER = enum_a4xx_state_block.define('SB4_FS_SHADER', 12) # type: ignore
-SB4_CS_SHADER = enum_a4xx_state_block.define('SB4_CS_SHADER', 13) # type: ignore
-SB4_SSBO = enum_a4xx_state_block.define('SB4_SSBO', 14) # type: ignore
-SB4_CS_SSBO = enum_a4xx_state_block.define('SB4_CS_SSBO', 15) # type: ignore
-
-enum_a4xx_state_type = CEnum(Annotated[int, ctypes.c_uint32])
-ST4_SHADER = enum_a4xx_state_type.define('ST4_SHADER', 0) # type: ignore
-ST4_CONSTANTS = enum_a4xx_state_type.define('ST4_CONSTANTS', 1) # type: ignore
-ST4_UBO = enum_a4xx_state_type.define('ST4_UBO', 2) # type: ignore
-
-enum_a4xx_state_src = CEnum(Annotated[int, ctypes.c_uint32])
-SS4_DIRECT = enum_a4xx_state_src.define('SS4_DIRECT', 0) # type: ignore
-SS4_INDIRECT = enum_a4xx_state_src.define('SS4_INDIRECT', 2) # type: ignore
-
-enum_a6xx_state_block = CEnum(Annotated[int, ctypes.c_uint32])
-SB6_VS_TEX = enum_a6xx_state_block.define('SB6_VS_TEX', 0) # type: ignore
-SB6_HS_TEX = enum_a6xx_state_block.define('SB6_HS_TEX', 1) # type: ignore
-SB6_DS_TEX = enum_a6xx_state_block.define('SB6_DS_TEX', 2) # type: ignore
-SB6_GS_TEX = enum_a6xx_state_block.define('SB6_GS_TEX', 3) # type: ignore
-SB6_FS_TEX = enum_a6xx_state_block.define('SB6_FS_TEX', 4) # type: ignore
-SB6_CS_TEX = enum_a6xx_state_block.define('SB6_CS_TEX', 5) # type: ignore
-SB6_VS_SHADER = enum_a6xx_state_block.define('SB6_VS_SHADER', 8) # type: ignore
-SB6_HS_SHADER = enum_a6xx_state_block.define('SB6_HS_SHADER', 9) # type: ignore
-SB6_DS_SHADER = enum_a6xx_state_block.define('SB6_DS_SHADER', 10) # type: ignore
-SB6_GS_SHADER = enum_a6xx_state_block.define('SB6_GS_SHADER', 11) # type: ignore
-SB6_FS_SHADER = enum_a6xx_state_block.define('SB6_FS_SHADER', 12) # type: ignore
-SB6_CS_SHADER = enum_a6xx_state_block.define('SB6_CS_SHADER', 13) # type: ignore
-SB6_UAV = enum_a6xx_state_block.define('SB6_UAV', 14) # type: ignore
-SB6_CS_UAV = enum_a6xx_state_block.define('SB6_CS_UAV', 15) # type: ignore
-
-enum_a6xx_state_type = CEnum(Annotated[int, ctypes.c_uint32])
-ST6_SHADER = enum_a6xx_state_type.define('ST6_SHADER', 0) # type: ignore
-ST6_CONSTANTS = enum_a6xx_state_type.define('ST6_CONSTANTS', 1) # type: ignore
-ST6_UBO = enum_a6xx_state_type.define('ST6_UBO', 2) # type: ignore
-ST6_UAV = enum_a6xx_state_type.define('ST6_UAV', 3) # type: ignore
-
-enum_a6xx_state_src = CEnum(Annotated[int, ctypes.c_uint32])
-SS6_DIRECT = enum_a6xx_state_src.define('SS6_DIRECT', 0) # type: ignore
-SS6_BINDLESS = enum_a6xx_state_src.define('SS6_BINDLESS', 1) # type: ignore
-SS6_INDIRECT = enum_a6xx_state_src.define('SS6_INDIRECT', 2) # type: ignore
-SS6_UBO = enum_a6xx_state_src.define('SS6_UBO', 3) # type: ignore
-
-enum_a4xx_index_size = CEnum(Annotated[int, ctypes.c_uint32])
-INDEX4_SIZE_8_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_8_BIT', 0) # type: ignore
-INDEX4_SIZE_16_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_16_BIT', 1) # type: ignore
-INDEX4_SIZE_32_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_32_BIT', 2) # type: ignore
-
-enum_a6xx_patch_type = CEnum(Annotated[int, ctypes.c_uint32])
-TESS_QUADS = enum_a6xx_patch_type.define('TESS_QUADS', 0) # type: ignore
-TESS_TRIANGLES = enum_a6xx_patch_type.define('TESS_TRIANGLES', 1) # type: ignore
-TESS_ISOLINES = enum_a6xx_patch_type.define('TESS_ISOLINES', 2) # type: ignore
-
-enum_a6xx_draw_indirect_opcode = CEnum(Annotated[int, ctypes.c_uint32])
-INDIRECT_OP_NORMAL = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_NORMAL', 2) # type: ignore
-INDIRECT_OP_INDEXED = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDEXED', 4) # type: ignore
-INDIRECT_OP_INDIRECT_COUNT = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDIRECT_COUNT', 6) # type: ignore
-INDIRECT_OP_INDIRECT_COUNT_INDEXED = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDIRECT_COUNT_INDEXED', 7) # type: ignore
-
-enum_cp_draw_pred_src = CEnum(Annotated[int, ctypes.c_uint32])
-PRED_SRC_MEM = enum_cp_draw_pred_src.define('PRED_SRC_MEM', 5) # type: ignore
-
-enum_cp_draw_pred_test = CEnum(Annotated[int, ctypes.c_uint32])
-NE_0_PASS = enum_cp_draw_pred_test.define('NE_0_PASS', 0) # type: ignore
-EQ_0_PASS = enum_cp_draw_pred_test.define('EQ_0_PASS', 1) # type: ignore
-
-enum_a7xx_abs_mask_mode = CEnum(Annotated[int, ctypes.c_uint32])
-ABS_MASK = enum_a7xx_abs_mask_mode.define('ABS_MASK', 1) # type: ignore
-NO_ABS_MASK = enum_a7xx_abs_mask_mode.define('NO_ABS_MASK', 0) # type: ignore
-
-enum_cp_cond_function = CEnum(Annotated[int, ctypes.c_uint32])
-WRITE_ALWAYS = enum_cp_cond_function.define('WRITE_ALWAYS', 0) # type: ignore
-WRITE_LT = enum_cp_cond_function.define('WRITE_LT', 1) # type: ignore
-WRITE_LE = enum_cp_cond_function.define('WRITE_LE', 2) # type: ignore
-WRITE_EQ = enum_cp_cond_function.define('WRITE_EQ', 3) # type: ignore
-WRITE_NE = enum_cp_cond_function.define('WRITE_NE', 4) # type: ignore
-WRITE_GE = enum_cp_cond_function.define('WRITE_GE', 5) # type: ignore
-WRITE_GT = enum_cp_cond_function.define('WRITE_GT', 6) # type: ignore
-
-enum_poll_memory_type = CEnum(Annotated[int, ctypes.c_uint32])
-POLL_REGISTER = enum_poll_memory_type.define('POLL_REGISTER', 0) # type: ignore
-POLL_MEMORY = enum_poll_memory_type.define('POLL_MEMORY', 1) # type: ignore
-POLL_SCRATCH = enum_poll_memory_type.define('POLL_SCRATCH', 2) # type: ignore
-POLL_ON_CHIP = enum_poll_memory_type.define('POLL_ON_CHIP', 3) # type: ignore
-
-enum_render_mode_cmd = CEnum(Annotated[int, ctypes.c_uint32])
-BYPASS = enum_render_mode_cmd.define('BYPASS', 1) # type: ignore
-BINNING = enum_render_mode_cmd.define('BINNING', 2) # type: ignore
-GMEM = enum_render_mode_cmd.define('GMEM', 3) # type: ignore
-BLIT2D = enum_render_mode_cmd.define('BLIT2D', 5) # type: ignore
-BLIT2DSCALE = enum_render_mode_cmd.define('BLIT2DSCALE', 7) # type: ignore
-END2D = enum_render_mode_cmd.define('END2D', 8) # type: ignore
-
-enum_event_write_src = CEnum(Annotated[int, ctypes.c_uint32])
-EV_WRITE_USER_32B = enum_event_write_src.define('EV_WRITE_USER_32B', 0) # type: ignore
-EV_WRITE_USER_64B = enum_event_write_src.define('EV_WRITE_USER_64B', 1) # type: ignore
-EV_WRITE_TIMESTAMP_SUM = enum_event_write_src.define('EV_WRITE_TIMESTAMP_SUM', 2) # type: ignore
-EV_WRITE_ALWAYSON = enum_event_write_src.define('EV_WRITE_ALWAYSON', 3) # type: ignore
-EV_WRITE_REGS_CONTENT = enum_event_write_src.define('EV_WRITE_REGS_CONTENT', 4) # type: ignore
-
-enum_event_write_dst = CEnum(Annotated[int, ctypes.c_uint32])
-EV_DST_RAM = enum_event_write_dst.define('EV_DST_RAM', 0) # type: ignore
-EV_DST_ONCHIP = enum_event_write_dst.define('EV_DST_ONCHIP', 1) # type: ignore
-
-enum_cp_blit_cmd = CEnum(Annotated[int, ctypes.c_uint32])
-BLIT_OP_FILL = enum_cp_blit_cmd.define('BLIT_OP_FILL', 0) # type: ignore
-BLIT_OP_COPY = enum_cp_blit_cmd.define('BLIT_OP_COPY', 1) # type: ignore
-BLIT_OP_SCALE = enum_cp_blit_cmd.define('BLIT_OP_SCALE', 3) # type: ignore
-
-enum_set_marker_mode = CEnum(Annotated[int, ctypes.c_uint32])
-SET_RENDER_MODE = enum_set_marker_mode.define('SET_RENDER_MODE', 0) # type: ignore
-SET_IFPC_MODE = enum_set_marker_mode.define('SET_IFPC_MODE', 1) # type: ignore
-
-enum_a6xx_ifpc_mode = CEnum(Annotated[int, ctypes.c_uint32])
-IFPC_ENABLE = enum_a6xx_ifpc_mode.define('IFPC_ENABLE', 0) # type: ignore
-IFPC_DISABLE = enum_a6xx_ifpc_mode.define('IFPC_DISABLE', 1) # type: ignore
-
-enum_a6xx_marker = CEnum(Annotated[int, ctypes.c_uint32])
-RM6_DIRECT_RENDER = enum_a6xx_marker.define('RM6_DIRECT_RENDER', 1) # type: ignore
-RM6_BIN_VISIBILITY = enum_a6xx_marker.define('RM6_BIN_VISIBILITY', 2) # type: ignore
-RM6_BIN_DIRECT = enum_a6xx_marker.define('RM6_BIN_DIRECT', 3) # type: ignore
-RM6_BIN_RENDER_START = enum_a6xx_marker.define('RM6_BIN_RENDER_START', 4) # type: ignore
-RM6_BIN_END_OF_DRAWS = enum_a6xx_marker.define('RM6_BIN_END_OF_DRAWS', 5) # type: ignore
-RM6_BIN_RESOLVE = enum_a6xx_marker.define('RM6_BIN_RESOLVE', 6) # type: ignore
-RM6_BIN_RENDER_END = enum_a6xx_marker.define('RM6_BIN_RENDER_END', 7) # type: ignore
-RM6_COMPUTE = enum_a6xx_marker.define('RM6_COMPUTE', 8) # type: ignore
-RM6_BLIT2DSCALE = enum_a6xx_marker.define('RM6_BLIT2DSCALE', 12) # type: ignore
-RM6_IB1LIST_START = enum_a6xx_marker.define('RM6_IB1LIST_START', 13) # type: ignore
-RM6_IB1LIST_END = enum_a6xx_marker.define('RM6_IB1LIST_END', 14) # type: ignore
-
-enum_pseudo_reg = CEnum(Annotated[int, ctypes.c_uint32])
-SMMU_INFO = enum_pseudo_reg.define('SMMU_INFO', 0) # type: ignore
-NON_SECURE_SAVE_ADDR = enum_pseudo_reg.define('NON_SECURE_SAVE_ADDR', 1) # type: ignore
-SECURE_SAVE_ADDR = enum_pseudo_reg.define('SECURE_SAVE_ADDR', 2) # type: ignore
-NON_PRIV_SAVE_ADDR = enum_pseudo_reg.define('NON_PRIV_SAVE_ADDR', 3) # type: ignore
-COUNTER = enum_pseudo_reg.define('COUNTER', 4) # type: ignore
-VSC_PIPE_DATA_DRAW_BASE = enum_pseudo_reg.define('VSC_PIPE_DATA_DRAW_BASE', 8) # type: ignore
-VSC_SIZE_BASE = enum_pseudo_reg.define('VSC_SIZE_BASE', 9) # type: ignore
-VSC_PIPE_DATA_PRIM_BASE = enum_pseudo_reg.define('VSC_PIPE_DATA_PRIM_BASE', 10) # type: ignore
-UNK_STRM_ADDRESS = enum_pseudo_reg.define('UNK_STRM_ADDRESS', 11) # type: ignore
-UNK_STRM_SIZE_ADDRESS = enum_pseudo_reg.define('UNK_STRM_SIZE_ADDRESS', 12) # type: ignore
-BINDLESS_BASE_0_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_0_ADDR', 16) # type: ignore
-BINDLESS_BASE_1_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_1_ADDR', 17) # type: ignore
-BINDLESS_BASE_2_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_2_ADDR', 18) # type: ignore
-BINDLESS_BASE_3_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_3_ADDR', 19) # type: ignore
-BINDLESS_BASE_4_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_4_ADDR', 20) # type: ignore
-BINDLESS_BASE_5_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_5_ADDR', 21) # type: ignore
-BINDLESS_BASE_6_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_6_ADDR', 22) # type: ignore
-
-enum_source_type = CEnum(Annotated[int, ctypes.c_uint32])
-SOURCE_REG = enum_source_type.define('SOURCE_REG', 0) # type: ignore
-SOURCE_SCRATCH_MEM = enum_source_type.define('SOURCE_SCRATCH_MEM', 1) # type: ignore
-
-enum_compare_mode = CEnum(Annotated[int, ctypes.c_uint32])
-PRED_TEST = enum_compare_mode.define('PRED_TEST', 1) # type: ignore
-REG_COMPARE = enum_compare_mode.define('REG_COMPARE', 2) # type: ignore
-RENDER_MODE = enum_compare_mode.define('RENDER_MODE', 3) # type: ignore
-REG_COMPARE_IMM = enum_compare_mode.define('REG_COMPARE_IMM', 4) # type: ignore
-THREAD_MODE = enum_compare_mode.define('THREAD_MODE', 5) # type: ignore
-
-enum_amble_type = CEnum(Annotated[int, ctypes.c_uint32])
-PREAMBLE_AMBLE_TYPE = enum_amble_type.define('PREAMBLE_AMBLE_TYPE', 0) # type: ignore
-BIN_PREAMBLE_AMBLE_TYPE = enum_amble_type.define('BIN_PREAMBLE_AMBLE_TYPE', 1) # type: ignore
-POSTAMBLE_AMBLE_TYPE = enum_amble_type.define('POSTAMBLE_AMBLE_TYPE', 2) # type: ignore
-KMD_AMBLE_TYPE = enum_amble_type.define('KMD_AMBLE_TYPE', 3) # type: ignore
-
-enum_reg_tracker = CEnum(Annotated[int, ctypes.c_uint32])
-TRACK_CNTL_REG = enum_reg_tracker.define('TRACK_CNTL_REG', 1) # type: ignore
-TRACK_RENDER_CNTL = enum_reg_tracker.define('TRACK_RENDER_CNTL', 2) # type: ignore
-UNK_EVENT_WRITE = enum_reg_tracker.define('UNK_EVENT_WRITE', 4) # type: ignore
-TRACK_LRZ = enum_reg_tracker.define('TRACK_LRZ', 8) # type: ignore
-
-enum_ts_wait_value_src = CEnum(Annotated[int, ctypes.c_uint32])
-TS_WAIT_GE_32B = enum_ts_wait_value_src.define('TS_WAIT_GE_32B', 0) # type: ignore
-TS_WAIT_GE_64B = enum_ts_wait_value_src.define('TS_WAIT_GE_64B', 1) # type: ignore
-TS_WAIT_GE_TIMESTAMP_SUM = enum_ts_wait_value_src.define('TS_WAIT_GE_TIMESTAMP_SUM', 2) # type: ignore
-
-enum_ts_wait_type = CEnum(Annotated[int, ctypes.c_uint32])
-TS_WAIT_RAM = enum_ts_wait_type.define('TS_WAIT_RAM', 0) # type: ignore
-TS_WAIT_ONCHIP = enum_ts_wait_type.define('TS_WAIT_ONCHIP', 1) # type: ignore
-
-enum_pipe_count_op = CEnum(Annotated[int, ctypes.c_uint32])
-PIPE_CLEAR_BV_BR = enum_pipe_count_op.define('PIPE_CLEAR_BV_BR', 1) # type: ignore
-PIPE_SET_BR_OFFSET = enum_pipe_count_op.define('PIPE_SET_BR_OFFSET', 2) # type: ignore
-PIPE_BR_WAIT_FOR_BV = enum_pipe_count_op.define('PIPE_BR_WAIT_FOR_BV', 3) # type: ignore
-PIPE_BV_WAIT_FOR_BR = enum_pipe_count_op.define('PIPE_BV_WAIT_FOR_BR', 4) # type: ignore
-
-enum_timestamp_op = CEnum(Annotated[int, ctypes.c_uint32])
-MODIFY_TIMESTAMP_CLEAR = enum_timestamp_op.define('MODIFY_TIMESTAMP_CLEAR', 0) # type: ignore
-MODIFY_TIMESTAMP_ADD_GLOBAL = enum_timestamp_op.define('MODIFY_TIMESTAMP_ADD_GLOBAL', 1) # type: ignore
-MODIFY_TIMESTAMP_ADD_LOCAL = enum_timestamp_op.define('MODIFY_TIMESTAMP_ADD_LOCAL', 2) # type: ignore
-
-enum_cp_thread = CEnum(Annotated[int, ctypes.c_uint32])
-CP_SET_THREAD_BR = enum_cp_thread.define('CP_SET_THREAD_BR', 1) # type: ignore
-CP_SET_THREAD_BV = enum_cp_thread.define('CP_SET_THREAD_BV', 2) # type: ignore
-CP_SET_THREAD_BOTH = enum_cp_thread.define('CP_SET_THREAD_BOTH', 3) # type: ignore
-
-enum_cp_scope = CEnum(Annotated[int, ctypes.c_uint32])
-INTERRUPTS = enum_cp_scope.define('INTERRUPTS', 0) # type: ignore
-
-enum_a6xx_tile_mode = CEnum(Annotated[int, ctypes.c_uint32])
-TILE6_LINEAR = enum_a6xx_tile_mode.define('TILE6_LINEAR', 0) # type: ignore
-TILE6_2 = enum_a6xx_tile_mode.define('TILE6_2', 2) # type: ignore
-TILE6_3 = enum_a6xx_tile_mode.define('TILE6_3', 3) # type: ignore
-
-enum_a6xx_format = CEnum(Annotated[int, ctypes.c_uint32])
-FMT6_A8_UNORM = enum_a6xx_format.define('FMT6_A8_UNORM', 2) # type: ignore
-FMT6_8_UNORM = enum_a6xx_format.define('FMT6_8_UNORM', 3) # type: ignore
-FMT6_8_SNORM = enum_a6xx_format.define('FMT6_8_SNORM', 4) # type: ignore
-FMT6_8_UINT = enum_a6xx_format.define('FMT6_8_UINT', 5) # type: ignore
-FMT6_8_SINT = enum_a6xx_format.define('FMT6_8_SINT', 6) # type: ignore
-FMT6_4_4_4_4_UNORM = enum_a6xx_format.define('FMT6_4_4_4_4_UNORM', 8) # type: ignore
-FMT6_5_5_5_1_UNORM = enum_a6xx_format.define('FMT6_5_5_5_1_UNORM', 10) # type: ignore
-FMT6_1_5_5_5_UNORM = enum_a6xx_format.define('FMT6_1_5_5_5_UNORM', 12) # type: ignore
-FMT6_5_6_5_UNORM = enum_a6xx_format.define('FMT6_5_6_5_UNORM', 14) # type: ignore
-FMT6_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_UNORM', 15) # type: ignore
-FMT6_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_SNORM', 16) # type: ignore
-FMT6_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_UINT', 17) # type: ignore
-FMT6_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_SINT', 18) # type: ignore
-FMT6_L8_A8_UNORM = enum_a6xx_format.define('FMT6_L8_A8_UNORM', 19) # type: ignore
-FMT6_16_UNORM = enum_a6xx_format.define('FMT6_16_UNORM', 21) # type: ignore
-FMT6_16_SNORM = enum_a6xx_format.define('FMT6_16_SNORM', 22) # type: ignore
-FMT6_16_FLOAT = enum_a6xx_format.define('FMT6_16_FLOAT', 23) # type: ignore
-FMT6_16_UINT = enum_a6xx_format.define('FMT6_16_UINT', 24) # type: ignore
-FMT6_16_SINT = enum_a6xx_format.define('FMT6_16_SINT', 25) # type: ignore
-FMT6_8_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_UNORM', 33) # type: ignore
-FMT6_8_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_8_SNORM', 34) # type: ignore
-FMT6_8_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_8_UINT', 35) # type: ignore
-FMT6_8_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_8_SINT', 36) # type: ignore
-FMT6_8_8_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_8_UNORM', 48) # type: ignore
-FMT6_8_8_8_X8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_X8_UNORM', 49) # type: ignore
-FMT6_8_8_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_8_8_SNORM', 50) # type: ignore
-FMT6_8_8_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_8_8_UINT', 51) # type: ignore
-FMT6_8_8_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_8_8_SINT', 52) # type: ignore
-FMT6_9_9_9_E5_FLOAT = enum_a6xx_format.define('FMT6_9_9_9_E5_FLOAT', 53) # type: ignore
-FMT6_10_10_10_2_UNORM = enum_a6xx_format.define('FMT6_10_10_10_2_UNORM', 54) # type: ignore
-FMT6_10_10_10_2_UNORM_DEST = enum_a6xx_format.define('FMT6_10_10_10_2_UNORM_DEST', 55) # type: ignore
-FMT6_10_10_10_2_SNORM = enum_a6xx_format.define('FMT6_10_10_10_2_SNORM', 57) # type: ignore
-FMT6_10_10_10_2_UINT = enum_a6xx_format.define('FMT6_10_10_10_2_UINT', 58) # type: ignore
-FMT6_10_10_10_2_SINT = enum_a6xx_format.define('FMT6_10_10_10_2_SINT', 59) # type: ignore
-FMT6_11_11_10_FLOAT = enum_a6xx_format.define('FMT6_11_11_10_FLOAT', 66) # type: ignore
-FMT6_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_UNORM', 67) # type: ignore
-FMT6_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_SNORM', 68) # type: ignore
-FMT6_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_FLOAT', 69) # type: ignore
-FMT6_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_UINT', 70) # type: ignore
-FMT6_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_SINT', 71) # type: ignore
-FMT6_32_UNORM = enum_a6xx_format.define('FMT6_32_UNORM', 72) # type: ignore
-FMT6_32_SNORM = enum_a6xx_format.define('FMT6_32_SNORM', 73) # type: ignore
-FMT6_32_FLOAT = enum_a6xx_format.define('FMT6_32_FLOAT', 74) # type: ignore
-FMT6_32_UINT = enum_a6xx_format.define('FMT6_32_UINT', 75) # type: ignore
-FMT6_32_SINT = enum_a6xx_format.define('FMT6_32_SINT', 76) # type: ignore
-FMT6_32_FIXED = enum_a6xx_format.define('FMT6_32_FIXED', 77) # type: ignore
-FMT6_16_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_16_UNORM', 88) # type: ignore
-FMT6_16_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_16_SNORM', 89) # type: ignore
-FMT6_16_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_16_FLOAT', 90) # type: ignore
-FMT6_16_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_16_UINT', 91) # type: ignore
-FMT6_16_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_16_SINT', 92) # type: ignore
-FMT6_16_16_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_16_16_UNORM', 96) # type: ignore
-FMT6_16_16_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_16_16_SNORM', 97) # type: ignore
-FMT6_16_16_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_16_16_FLOAT', 98) # type: ignore
-FMT6_16_16_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_16_16_UINT', 99) # type: ignore
-FMT6_16_16_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_16_16_SINT', 100) # type: ignore
-FMT6_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_UNORM', 101) # type: ignore
-FMT6_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_SNORM', 102) # type: ignore
-FMT6_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_FLOAT', 103) # type: ignore
-FMT6_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_UINT', 104) # type: ignore
-FMT6_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_SINT', 105) # type: ignore
-FMT6_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_FIXED', 106) # type: ignore
-FMT6_32_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_32_UNORM', 112) # type: ignore
-FMT6_32_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_32_SNORM', 113) # type: ignore
-FMT6_32_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_32_UINT', 114) # type: ignore
-FMT6_32_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_32_SINT', 115) # type: ignore
-FMT6_32_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_32_FLOAT', 116) # type: ignore
-FMT6_32_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_32_FIXED', 117) # type: ignore
-FMT6_32_32_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_32_32_UNORM', 128) # type: ignore
-FMT6_32_32_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_32_32_SNORM', 129) # type: ignore
-FMT6_32_32_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_32_32_FLOAT', 130) # type: ignore
-FMT6_32_32_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_32_32_UINT', 131) # type: ignore
-FMT6_32_32_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_32_32_SINT', 132) # type: ignore
-FMT6_32_32_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_32_32_FIXED', 133) # type: ignore
-FMT6_G8R8B8R8_422_UNORM = enum_a6xx_format.define('FMT6_G8R8B8R8_422_UNORM', 140) # type: ignore
-FMT6_R8G8R8B8_422_UNORM = enum_a6xx_format.define('FMT6_R8G8R8B8_422_UNORM', 141) # type: ignore
-FMT6_R8_G8B8_2PLANE_420_UNORM = enum_a6xx_format.define('FMT6_R8_G8B8_2PLANE_420_UNORM', 142) # type: ignore
-FMT6_NV21 = enum_a6xx_format.define('FMT6_NV21', 143) # type: ignore
-FMT6_R8_G8_B8_3PLANE_420_UNORM = enum_a6xx_format.define('FMT6_R8_G8_B8_3PLANE_420_UNORM', 144) # type: ignore
-FMT6_Z24_UNORM_S8_UINT_AS_R8G8B8A8 = enum_a6xx_format.define('FMT6_Z24_UNORM_S8_UINT_AS_R8G8B8A8', 145) # type: ignore
-FMT6_NV12_Y = enum_a6xx_format.define('FMT6_NV12_Y', 148) # type: ignore
-FMT6_NV12_UV = enum_a6xx_format.define('FMT6_NV12_UV', 149) # type: ignore
-FMT6_NV12_VU = enum_a6xx_format.define('FMT6_NV12_VU', 150) # type: ignore
-FMT6_NV12_4R = enum_a6xx_format.define('FMT6_NV12_4R', 151) # type: ignore
-FMT6_NV12_4R_Y = enum_a6xx_format.define('FMT6_NV12_4R_Y', 152) # type: ignore
-FMT6_NV12_4R_UV = enum_a6xx_format.define('FMT6_NV12_4R_UV', 153) # type: ignore
-FMT6_P010 = enum_a6xx_format.define('FMT6_P010', 154) # type: ignore
-FMT6_P010_Y = enum_a6xx_format.define('FMT6_P010_Y', 155) # type: ignore
-FMT6_P010_UV = enum_a6xx_format.define('FMT6_P010_UV', 156) # type: ignore
-FMT6_TP10 = enum_a6xx_format.define('FMT6_TP10', 157) # type: ignore
-FMT6_TP10_Y = enum_a6xx_format.define('FMT6_TP10_Y', 158) # type: ignore
-FMT6_TP10_UV = enum_a6xx_format.define('FMT6_TP10_UV', 159) # type: ignore
-FMT6_Z24_UNORM_S8_UINT = enum_a6xx_format.define('FMT6_Z24_UNORM_S8_UINT', 160) # type: ignore
-FMT6_ETC2_RG11_UNORM = enum_a6xx_format.define('FMT6_ETC2_RG11_UNORM', 171) # type: ignore
-FMT6_ETC2_RG11_SNORM = enum_a6xx_format.define('FMT6_ETC2_RG11_SNORM', 172) # type: ignore
-FMT6_ETC2_R11_UNORM = enum_a6xx_format.define('FMT6_ETC2_R11_UNORM', 173) # type: ignore
-FMT6_ETC2_R11_SNORM = enum_a6xx_format.define('FMT6_ETC2_R11_SNORM', 174) # type: ignore
-FMT6_ETC1 = enum_a6xx_format.define('FMT6_ETC1', 175) # type: ignore
-FMT6_ETC2_RGB8 = enum_a6xx_format.define('FMT6_ETC2_RGB8', 176) # type: ignore
-FMT6_ETC2_RGBA8 = enum_a6xx_format.define('FMT6_ETC2_RGBA8', 177) # type: ignore
-FMT6_ETC2_RGB8A1 = enum_a6xx_format.define('FMT6_ETC2_RGB8A1', 178) # type: ignore
-FMT6_DXT1 = enum_a6xx_format.define('FMT6_DXT1', 179) # type: ignore
-FMT6_DXT3 = enum_a6xx_format.define('FMT6_DXT3', 180) # type: ignore
-FMT6_DXT5 = enum_a6xx_format.define('FMT6_DXT5', 181) # type: ignore
-FMT6_RGTC1_UNORM = enum_a6xx_format.define('FMT6_RGTC1_UNORM', 182) # type: ignore
-FMT6_RGTC1_UNORM_FAST = enum_a6xx_format.define('FMT6_RGTC1_UNORM_FAST', 183) # type: ignore
-FMT6_RGTC1_SNORM = enum_a6xx_format.define('FMT6_RGTC1_SNORM', 184) # type: ignore
-FMT6_RGTC1_SNORM_FAST = enum_a6xx_format.define('FMT6_RGTC1_SNORM_FAST', 185) # type: ignore
-FMT6_RGTC2_UNORM = enum_a6xx_format.define('FMT6_RGTC2_UNORM', 186) # type: ignore
-FMT6_RGTC2_UNORM_FAST = enum_a6xx_format.define('FMT6_RGTC2_UNORM_FAST', 187) # type: ignore
-FMT6_RGTC2_SNORM = enum_a6xx_format.define('FMT6_RGTC2_SNORM', 188) # type: ignore
-FMT6_RGTC2_SNORM_FAST = enum_a6xx_format.define('FMT6_RGTC2_SNORM_FAST', 189) # type: ignore
-FMT6_BPTC_UFLOAT = enum_a6xx_format.define('FMT6_BPTC_UFLOAT', 190) # type: ignore
-FMT6_BPTC_FLOAT = enum_a6xx_format.define('FMT6_BPTC_FLOAT', 191) # type: ignore
-FMT6_BPTC = enum_a6xx_format.define('FMT6_BPTC', 192) # type: ignore
-FMT6_ASTC_4x4 = enum_a6xx_format.define('FMT6_ASTC_4x4', 193) # type: ignore
-FMT6_ASTC_5x4 = enum_a6xx_format.define('FMT6_ASTC_5x4', 194) # type: ignore
-FMT6_ASTC_5x5 = enum_a6xx_format.define('FMT6_ASTC_5x5', 195) # type: ignore
-FMT6_ASTC_6x5 = enum_a6xx_format.define('FMT6_ASTC_6x5', 196) # type: ignore
-FMT6_ASTC_6x6 = enum_a6xx_format.define('FMT6_ASTC_6x6', 197) # type: ignore
-FMT6_ASTC_8x5 = enum_a6xx_format.define('FMT6_ASTC_8x5', 198) # type: ignore
-FMT6_ASTC_8x6 = enum_a6xx_format.define('FMT6_ASTC_8x6', 199) # type: ignore
-FMT6_ASTC_8x8 = enum_a6xx_format.define('FMT6_ASTC_8x8', 200) # type: ignore
-FMT6_ASTC_10x5 = enum_a6xx_format.define('FMT6_ASTC_10x5', 201) # type: ignore
-FMT6_ASTC_10x6 = enum_a6xx_format.define('FMT6_ASTC_10x6', 202) # type: ignore
-FMT6_ASTC_10x8 = enum_a6xx_format.define('FMT6_ASTC_10x8', 203) # type: ignore
-FMT6_ASTC_10x10 = enum_a6xx_format.define('FMT6_ASTC_10x10', 204) # type: ignore
-FMT6_ASTC_12x10 = enum_a6xx_format.define('FMT6_ASTC_12x10', 205) # type: ignore
-FMT6_ASTC_12x12 = enum_a6xx_format.define('FMT6_ASTC_12x12', 206) # type: ignore
-FMT6_Z24_UINT_S8_UINT = enum_a6xx_format.define('FMT6_Z24_UINT_S8_UINT', 234) # type: ignore
-FMT6_NONE = enum_a6xx_format.define('FMT6_NONE', 255) # type: ignore
-
-enum_a6xx_polygon_mode = CEnum(Annotated[int, ctypes.c_uint32])
-POLYMODE6_POINTS = enum_a6xx_polygon_mode.define('POLYMODE6_POINTS', 1) # type: ignore
-POLYMODE6_LINES = enum_a6xx_polygon_mode.define('POLYMODE6_LINES', 2) # type: ignore
-POLYMODE6_TRIANGLES = enum_a6xx_polygon_mode.define('POLYMODE6_TRIANGLES', 3) # type: ignore
-
-enum_a6xx_depth_format = CEnum(Annotated[int, ctypes.c_uint32])
-DEPTH6_NONE = enum_a6xx_depth_format.define('DEPTH6_NONE', 0) # type: ignore
-DEPTH6_16 = enum_a6xx_depth_format.define('DEPTH6_16', 1) # type: ignore
-DEPTH6_24_8 = enum_a6xx_depth_format.define('DEPTH6_24_8', 2) # type: ignore
-DEPTH6_32 = enum_a6xx_depth_format.define('DEPTH6_32', 4) # type: ignore
-
-enum_a6xx_shader_id = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_TP0_TMO_DATA = enum_a6xx_shader_id.define('A6XX_TP0_TMO_DATA', 9) # type: ignore
-A6XX_TP0_SMO_DATA = enum_a6xx_shader_id.define('A6XX_TP0_SMO_DATA', 10) # type: ignore
-A6XX_TP0_MIPMAP_BASE_DATA = enum_a6xx_shader_id.define('A6XX_TP0_MIPMAP_BASE_DATA', 11) # type: ignore
-A6XX_TP1_TMO_DATA = enum_a6xx_shader_id.define('A6XX_TP1_TMO_DATA', 25) # type: ignore
-A6XX_TP1_SMO_DATA = enum_a6xx_shader_id.define('A6XX_TP1_SMO_DATA', 26) # type: ignore
-A6XX_TP1_MIPMAP_BASE_DATA = enum_a6xx_shader_id.define('A6XX_TP1_MIPMAP_BASE_DATA', 27) # type: ignore
-A6XX_SP_INST_DATA = enum_a6xx_shader_id.define('A6XX_SP_INST_DATA', 41) # type: ignore
-A6XX_SP_LB_0_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_0_DATA', 42) # type: ignore
-A6XX_SP_LB_1_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_1_DATA', 43) # type: ignore
-A6XX_SP_LB_2_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_2_DATA', 44) # type: ignore
-A6XX_SP_LB_3_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_3_DATA', 45) # type: ignore
-A6XX_SP_LB_4_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_4_DATA', 46) # type: ignore
-A6XX_SP_LB_5_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_5_DATA', 47) # type: ignore
-A6XX_SP_CB_BINDLESS_DATA = enum_a6xx_shader_id.define('A6XX_SP_CB_BINDLESS_DATA', 48) # type: ignore
-A6XX_SP_CB_LEGACY_DATA = enum_a6xx_shader_id.define('A6XX_SP_CB_LEGACY_DATA', 49) # type: ignore
-A6XX_SP_GFX_UAV_BASE_DATA = enum_a6xx_shader_id.define('A6XX_SP_GFX_UAV_BASE_DATA', 50) # type: ignore
-A6XX_SP_INST_TAG = enum_a6xx_shader_id.define('A6XX_SP_INST_TAG', 51) # type: ignore
-A6XX_SP_CB_BINDLESS_TAG = enum_a6xx_shader_id.define('A6XX_SP_CB_BINDLESS_TAG', 52) # type: ignore
-A6XX_SP_TMO_UMO_TAG = enum_a6xx_shader_id.define('A6XX_SP_TMO_UMO_TAG', 53) # type: ignore
-A6XX_SP_SMO_TAG = enum_a6xx_shader_id.define('A6XX_SP_SMO_TAG', 54) # type: ignore
-A6XX_SP_STATE_DATA = enum_a6xx_shader_id.define('A6XX_SP_STATE_DATA', 55) # type: ignore
-A6XX_HLSQ_CHUNK_CVS_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CVS_RAM', 73) # type: ignore
-A6XX_HLSQ_CHUNK_CPS_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CPS_RAM', 74) # type: ignore
-A6XX_HLSQ_CHUNK_CVS_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CVS_RAM_TAG', 75) # type: ignore
-A6XX_HLSQ_CHUNK_CPS_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CPS_RAM_TAG', 76) # type: ignore
-A6XX_HLSQ_ICB_CVS_CB_BASE_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_ICB_CVS_CB_BASE_TAG', 77) # type: ignore
-A6XX_HLSQ_ICB_CPS_CB_BASE_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_ICB_CPS_CB_BASE_TAG', 78) # type: ignore
-A6XX_HLSQ_CVS_MISC_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CVS_MISC_RAM', 80) # type: ignore
-A6XX_HLSQ_CPS_MISC_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CPS_MISC_RAM', 81) # type: ignore
-A6XX_HLSQ_INST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM', 82) # type: ignore
-A6XX_HLSQ_GFX_CVS_CONST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CVS_CONST_RAM', 83) # type: ignore
-A6XX_HLSQ_GFX_CPS_CONST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CPS_CONST_RAM', 84) # type: ignore
-A6XX_HLSQ_CVS_MISC_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CVS_MISC_RAM_TAG', 85) # type: ignore
-A6XX_HLSQ_CPS_MISC_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CPS_MISC_RAM_TAG', 86) # type: ignore
-A6XX_HLSQ_INST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM_TAG', 87) # type: ignore
-A6XX_HLSQ_GFX_CVS_CONST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CVS_CONST_RAM_TAG', 88) # type: ignore
-A6XX_HLSQ_GFX_CPS_CONST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CPS_CONST_RAM_TAG', 89) # type: ignore
-A6XX_HLSQ_PWR_REST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_PWR_REST_RAM', 90) # type: ignore
-A6XX_HLSQ_PWR_REST_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_PWR_REST_TAG', 91) # type: ignore
-A6XX_HLSQ_DATAPATH_META = enum_a6xx_shader_id.define('A6XX_HLSQ_DATAPATH_META', 96) # type: ignore
-A6XX_HLSQ_FRONTEND_META = enum_a6xx_shader_id.define('A6XX_HLSQ_FRONTEND_META', 97) # type: ignore
-A6XX_HLSQ_INDIRECT_META = enum_a6xx_shader_id.define('A6XX_HLSQ_INDIRECT_META', 98) # type: ignore
-A6XX_HLSQ_BACKEND_META = enum_a6xx_shader_id.define('A6XX_HLSQ_BACKEND_META', 99) # type: ignore
-A6XX_SP_LB_6_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_6_DATA', 112) # type: ignore
-A6XX_SP_LB_7_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_7_DATA', 113) # type: ignore
-A6XX_HLSQ_INST_RAM_1 = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM_1', 115) # type: ignore
-
-enum_a6xx_debugbus_id = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_DBGBUS_CP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CP', 1) # type: ignore
-A6XX_DBGBUS_RBBM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RBBM', 2) # type: ignore
-A6XX_DBGBUS_VBIF = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VBIF', 3) # type: ignore
-A6XX_DBGBUS_HLSQ = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_HLSQ', 4) # type: ignore
-A6XX_DBGBUS_UCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_UCHE', 5) # type: ignore
-A6XX_DBGBUS_DPM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DPM', 6) # type: ignore
-A6XX_DBGBUS_TESS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TESS', 7) # type: ignore
-A6XX_DBGBUS_PC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_PC', 8) # type: ignore
-A6XX_DBGBUS_VFDP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFDP', 9) # type: ignore
-A6XX_DBGBUS_VPC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VPC', 10) # type: ignore
-A6XX_DBGBUS_TSE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TSE', 11) # type: ignore
-A6XX_DBGBUS_RAS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RAS', 12) # type: ignore
-A6XX_DBGBUS_VSC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VSC', 13) # type: ignore
-A6XX_DBGBUS_COM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_COM', 14) # type: ignore
-A6XX_DBGBUS_LRZ = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_LRZ', 16) # type: ignore
-A6XX_DBGBUS_A2D = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_A2D', 17) # type: ignore
-A6XX_DBGBUS_CCUFCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCUFCHE', 18) # type: ignore
-A6XX_DBGBUS_GMU_CX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GMU_CX', 19) # type: ignore
-A6XX_DBGBUS_RBP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RBP', 20) # type: ignore
-A6XX_DBGBUS_DCS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DCS', 21) # type: ignore
-A6XX_DBGBUS_DBGC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DBGC', 22) # type: ignore
-A6XX_DBGBUS_CX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CX', 23) # type: ignore
-A6XX_DBGBUS_GMU_GX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GMU_GX', 24) # type: ignore
-A6XX_DBGBUS_TPFCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPFCHE', 25) # type: ignore
-A6XX_DBGBUS_GBIF_GX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GBIF_GX', 26) # type: ignore
-A6XX_DBGBUS_GPC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GPC', 29) # type: ignore
-A6XX_DBGBUS_LARC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_LARC', 30) # type: ignore
-A6XX_DBGBUS_HLSQ_SPTP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_HLSQ_SPTP', 31) # type: ignore
-A6XX_DBGBUS_RB_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_0', 32) # type: ignore
-A6XX_DBGBUS_RB_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_1', 33) # type: ignore
-A6XX_DBGBUS_RB_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_2', 34) # type: ignore
-A6XX_DBGBUS_UCHE_WRAPPER = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_UCHE_WRAPPER', 36) # type: ignore
-A6XX_DBGBUS_CCU_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_0', 40) # type: ignore
-A6XX_DBGBUS_CCU_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_1', 41) # type: ignore
-A6XX_DBGBUS_CCU_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_2', 42) # type: ignore
-A6XX_DBGBUS_VFD_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_0', 56) # type: ignore
-A6XX_DBGBUS_VFD_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_1', 57) # type: ignore
-A6XX_DBGBUS_VFD_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_2', 58) # type: ignore
-A6XX_DBGBUS_VFD_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_3', 59) # type: ignore
-A6XX_DBGBUS_VFD_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_4', 60) # type: ignore
-A6XX_DBGBUS_VFD_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_5', 61) # type: ignore
-A6XX_DBGBUS_SP_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_0', 64) # type: ignore
-A6XX_DBGBUS_SP_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_1', 65) # type: ignore
-A6XX_DBGBUS_SP_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_2', 66) # type: ignore
-A6XX_DBGBUS_TPL1_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_0', 72) # type: ignore
-A6XX_DBGBUS_TPL1_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_1', 73) # type: ignore
-A6XX_DBGBUS_TPL1_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_2', 74) # type: ignore
-A6XX_DBGBUS_TPL1_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_3', 75) # type: ignore
-A6XX_DBGBUS_TPL1_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_4', 76) # type: ignore
-A6XX_DBGBUS_TPL1_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_5', 77) # type: ignore
-A6XX_DBGBUS_SPTP_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_0', 88) # type: ignore
-A6XX_DBGBUS_SPTP_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_1', 89) # type: ignore
-A6XX_DBGBUS_SPTP_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_2', 90) # type: ignore
-A6XX_DBGBUS_SPTP_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_3', 91) # type: ignore
-A6XX_DBGBUS_SPTP_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_4', 92) # type: ignore
-A6XX_DBGBUS_SPTP_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_5', 93) # type: ignore
-
-enum_a6xx_2d_ifmt = CEnum(Annotated[int, ctypes.c_uint32])
-R2D_INT32 = enum_a6xx_2d_ifmt.define('R2D_INT32', 7) # type: ignore
-R2D_INT16 = enum_a6xx_2d_ifmt.define('R2D_INT16', 6) # type: ignore
-R2D_INT8 = enum_a6xx_2d_ifmt.define('R2D_INT8', 5) # type: ignore
-R2D_FLOAT32 = enum_a6xx_2d_ifmt.define('R2D_FLOAT32', 4) # type: ignore
-R2D_FLOAT16 = enum_a6xx_2d_ifmt.define('R2D_FLOAT16', 3) # type: ignore
-R2D_SNORM8 = enum_a6xx_2d_ifmt.define('R2D_SNORM8', 2) # type: ignore
-R2D_UNORM8_SRGB = enum_a6xx_2d_ifmt.define('R2D_UNORM8_SRGB', 1) # type: ignore
-R2D_UNORM8 = enum_a6xx_2d_ifmt.define('R2D_UNORM8', 0) # type: ignore
-
-enum_a6xx_tex_type = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_TEX_1D = enum_a6xx_tex_type.define('A6XX_TEX_1D', 0) # type: ignore
-A6XX_TEX_2D = enum_a6xx_tex_type.define('A6XX_TEX_2D', 1) # type: ignore
-A6XX_TEX_CUBE = enum_a6xx_tex_type.define('A6XX_TEX_CUBE', 2) # type: ignore
-A6XX_TEX_3D = enum_a6xx_tex_type.define('A6XX_TEX_3D', 3) # type: ignore
-A6XX_TEX_BUFFER = enum_a6xx_tex_type.define('A6XX_TEX_BUFFER', 4) # type: ignore
-A6XX_TEX_IMG_BUFFER = enum_a6xx_tex_type.define('A6XX_TEX_IMG_BUFFER', 5) # type: ignore
-
-enum_a6xx_ztest_mode = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_EARLY_Z = enum_a6xx_ztest_mode.define('A6XX_EARLY_Z', 0) # type: ignore
-A6XX_LATE_Z = enum_a6xx_ztest_mode.define('A6XX_LATE_Z', 1) # type: ignore
-A6XX_EARLY_Z_LATE_Z = enum_a6xx_ztest_mode.define('A6XX_EARLY_Z_LATE_Z', 2) # type: ignore
-A6XX_INVALID_ZTEST = enum_a6xx_ztest_mode.define('A6XX_INVALID_ZTEST', 3) # type: ignore
-
-enum_a6xx_tess_spacing = CEnum(Annotated[int, ctypes.c_uint32])
-TESS_EQUAL = enum_a6xx_tess_spacing.define('TESS_EQUAL', 0) # type: ignore
-TESS_FRACTIONAL_ODD = enum_a6xx_tess_spacing.define('TESS_FRACTIONAL_ODD', 2) # type: ignore
-TESS_FRACTIONAL_EVEN = enum_a6xx_tess_spacing.define('TESS_FRACTIONAL_EVEN', 3) # type: ignore
-
-enum_a6xx_tess_output = CEnum(Annotated[int, ctypes.c_uint32])
-TESS_POINTS = enum_a6xx_tess_output.define('TESS_POINTS', 0) # type: ignore
-TESS_LINES = enum_a6xx_tess_output.define('TESS_LINES', 1) # type: ignore
-TESS_CW_TRIS = enum_a6xx_tess_output.define('TESS_CW_TRIS', 2) # type: ignore
-TESS_CCW_TRIS = enum_a6xx_tess_output.define('TESS_CCW_TRIS', 3) # type: ignore
-
-enum_a6xx_tex_filter = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_TEX_NEAREST = enum_a6xx_tex_filter.define('A6XX_TEX_NEAREST', 0) # type: ignore
-A6XX_TEX_LINEAR = enum_a6xx_tex_filter.define('A6XX_TEX_LINEAR', 1) # type: ignore
-A6XX_TEX_ANISO = enum_a6xx_tex_filter.define('A6XX_TEX_ANISO', 2) # type: ignore
-A6XX_TEX_CUBIC = enum_a6xx_tex_filter.define('A6XX_TEX_CUBIC', 3) # type: ignore
-
-enum_a6xx_tex_clamp = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_TEX_REPEAT = enum_a6xx_tex_clamp.define('A6XX_TEX_REPEAT', 0) # type: ignore
-A6XX_TEX_CLAMP_TO_EDGE = enum_a6xx_tex_clamp.define('A6XX_TEX_CLAMP_TO_EDGE', 1) # type: ignore
-A6XX_TEX_MIRROR_REPEAT = enum_a6xx_tex_clamp.define('A6XX_TEX_MIRROR_REPEAT', 2) # type: ignore
-A6XX_TEX_CLAMP_TO_BORDER = enum_a6xx_tex_clamp.define('A6XX_TEX_CLAMP_TO_BORDER', 3) # type: ignore
-A6XX_TEX_MIRROR_CLAMP = enum_a6xx_tex_clamp.define('A6XX_TEX_MIRROR_CLAMP', 4) # type: ignore
-
-enum_a6xx_tex_aniso = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_TEX_ANISO_1 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_1', 0) # type: ignore
-A6XX_TEX_ANISO_2 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_2', 1) # type: ignore
-A6XX_TEX_ANISO_4 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_4', 2) # type: ignore
-A6XX_TEX_ANISO_8 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_8', 3) # type: ignore
-A6XX_TEX_ANISO_16 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_16', 4) # type: ignore
-
-enum_a6xx_reduction_mode = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_REDUCTION_MODE_AVERAGE = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_AVERAGE', 0) # type: ignore
-A6XX_REDUCTION_MODE_MIN = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_MIN', 1) # type: ignore
-A6XX_REDUCTION_MODE_MAX = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_MAX', 2) # type: ignore
-
-enum_a6xx_fast_border_color = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_BORDER_COLOR_0_0_0_0 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_0_0_0_0', 0) # type: ignore
-A6XX_BORDER_COLOR_0_0_0_1 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_0_0_0_1', 1) # type: ignore
-A6XX_BORDER_COLOR_1_1_1_0 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_1_1_1_0', 2) # type: ignore
-A6XX_BORDER_COLOR_1_1_1_1 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_1_1_1_1', 3) # type: ignore
-
-enum_a6xx_tex_swiz = CEnum(Annotated[int, ctypes.c_uint32])
-A6XX_TEX_X = enum_a6xx_tex_swiz.define('A6XX_TEX_X', 0) # type: ignore
-A6XX_TEX_Y = enum_a6xx_tex_swiz.define('A6XX_TEX_Y', 1) # type: ignore
-A6XX_TEX_Z = enum_a6xx_tex_swiz.define('A6XX_TEX_Z', 2) # type: ignore
-A6XX_TEX_W = enum_a6xx_tex_swiz.define('A6XX_TEX_W', 3) # type: ignore
-A6XX_TEX_ZERO = enum_a6xx_tex_swiz.define('A6XX_TEX_ZERO', 4) # type: ignore
-A6XX_TEX_ONE = enum_a6xx_tex_swiz.define('A6XX_TEX_ONE', 5) # type: ignore
+class enum_a6xx_shift_amount(Annotated[int, ctypes.c_uint32], c.Enum): pass
+NO_SHIFT = enum_a6xx_shift_amount.define('NO_SHIFT', 0)
+HALF_PIXEL_SHIFT = enum_a6xx_shift_amount.define('HALF_PIXEL_SHIFT', 1)
+FULL_PIXEL_SHIFT = enum_a6xx_shift_amount.define('FULL_PIXEL_SHIFT', 2)
+
+class enum_a6xx_sequenced_thread_dist(Annotated[int, ctypes.c_uint32], c.Enum): pass
+DIST_SCREEN_COORD = enum_a6xx_sequenced_thread_dist.define('DIST_SCREEN_COORD', 0)
+DIST_ALL_TO_RB0 = enum_a6xx_sequenced_thread_dist.define('DIST_ALL_TO_RB0', 1)
+
+class enum_a6xx_single_prim_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+NO_FLUSH = enum_a6xx_single_prim_mode.define('NO_FLUSH', 0)
+FLUSH_PER_OVERLAP_AND_OVERWRITE = enum_a6xx_single_prim_mode.define('FLUSH_PER_OVERLAP_AND_OVERWRITE', 1)
+FLUSH_PER_OVERLAP = enum_a6xx_single_prim_mode.define('FLUSH_PER_OVERLAP', 3)
+
+class enum_a6xx_raster_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TYPE_TILED = enum_a6xx_raster_mode.define('TYPE_TILED', 0)
+TYPE_WRITER = enum_a6xx_raster_mode.define('TYPE_WRITER', 1)
+
+class enum_a6xx_raster_direction(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LR_TB = enum_a6xx_raster_direction.define('LR_TB', 0)
+RL_TB = enum_a6xx_raster_direction.define('RL_TB', 1)
+LR_BT = enum_a6xx_raster_direction.define('LR_BT', 2)
+RB_BT = enum_a6xx_raster_direction.define('RB_BT', 3)
+
+class enum_a6xx_render_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+RENDERING_PASS = enum_a6xx_render_mode.define('RENDERING_PASS', 0)
+BINNING_PASS = enum_a6xx_render_mode.define('BINNING_PASS', 1)
+
+class enum_a6xx_buffers_location(Annotated[int, ctypes.c_uint32], c.Enum): pass
+BUFFERS_IN_GMEM = enum_a6xx_buffers_location.define('BUFFERS_IN_GMEM', 0)
+BUFFERS_IN_SYSMEM = enum_a6xx_buffers_location.define('BUFFERS_IN_SYSMEM', 3)
+
+class enum_a6xx_lrz_feedback_mask(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LRZ_FEEDBACK_NONE = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_NONE', 0)
+LRZ_FEEDBACK_EARLY_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z', 1)
+LRZ_FEEDBACK_EARLY_Z_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z_LATE_Z', 2)
+LRZ_FEEDBACK_EARLY_Z_OR_EARLY_Z_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z_OR_EARLY_Z_LATE_Z', 3)
+LRZ_FEEDBACK_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_LATE_Z', 4)
+
+class enum_a6xx_fsr_combiner(Annotated[int, ctypes.c_uint32], c.Enum): pass
+FSR_COMBINER_OP_KEEP = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_KEEP', 0)
+FSR_COMBINER_OP_REPLACE = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_REPLACE', 1)
+FSR_COMBINER_OP_MIN = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MIN', 2)
+FSR_COMBINER_OP_MAX = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MAX', 3)
+FSR_COMBINER_OP_MUL = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MUL', 4)
+
+class enum_a6xx_lrz_dir_status(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LRZ_DIR_LE = enum_a6xx_lrz_dir_status.define('LRZ_DIR_LE', 1)
+LRZ_DIR_GE = enum_a6xx_lrz_dir_status.define('LRZ_DIR_GE', 2)
+LRZ_DIR_INVALID = enum_a6xx_lrz_dir_status.define('LRZ_DIR_INVALID', 3)
+
+class enum_a6xx_fragcoord_sample_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+FRAGCOORD_CENTER = enum_a6xx_fragcoord_sample_mode.define('FRAGCOORD_CENTER', 0)
+FRAGCOORD_SAMPLE = enum_a6xx_fragcoord_sample_mode.define('FRAGCOORD_SAMPLE', 3)
+
+class enum_a6xx_rotation(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ROTATE_0 = enum_a6xx_rotation.define('ROTATE_0', 0)
+ROTATE_90 = enum_a6xx_rotation.define('ROTATE_90', 1)
+ROTATE_180 = enum_a6xx_rotation.define('ROTATE_180', 2)
+ROTATE_270 = enum_a6xx_rotation.define('ROTATE_270', 3)
+ROTATE_HFLIP = enum_a6xx_rotation.define('ROTATE_HFLIP', 4)
+ROTATE_VFLIP = enum_a6xx_rotation.define('ROTATE_VFLIP', 5)
+
+class enum_a6xx_blit_event_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+BLIT_EVENT_STORE = enum_a6xx_blit_event_type.define('BLIT_EVENT_STORE', 0)
+BLIT_EVENT_STORE_AND_CLEAR = enum_a6xx_blit_event_type.define('BLIT_EVENT_STORE_AND_CLEAR', 1)
+BLIT_EVENT_CLEAR = enum_a6xx_blit_event_type.define('BLIT_EVENT_CLEAR', 2)
+BLIT_EVENT_LOAD = enum_a6xx_blit_event_type.define('BLIT_EVENT_LOAD', 3)
+
+class enum_a7xx_blit_clear_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CLEAR_MODE_SYSMEM = enum_a7xx_blit_clear_mode.define('CLEAR_MODE_SYSMEM', 0)
+CLEAR_MODE_GMEM = enum_a7xx_blit_clear_mode.define('CLEAR_MODE_GMEM', 1)
+
+class enum_a6xx_ccu_cache_size(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CCU_CACHE_SIZE_FULL = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_FULL', 0)
+CCU_CACHE_SIZE_HALF = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_HALF', 1)
+CCU_CACHE_SIZE_QUARTER = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_QUARTER', 2)
+CCU_CACHE_SIZE_EIGHTH = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_EIGHTH', 3)
+
+class enum_a7xx_concurrent_resolve_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CONCURRENT_RESOLVE_MODE_DISABLED = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_DISABLED', 0)
+CONCURRENT_RESOLVE_MODE_1 = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_1', 1)
+CONCURRENT_RESOLVE_MODE_2 = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_2', 2)
+
+class enum_a7xx_concurrent_unresolve_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CONCURRENT_UNRESOLVE_MODE_DISABLED = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_DISABLED', 0)
+CONCURRENT_UNRESOLVE_MODE_PARTIAL = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_PARTIAL', 1)
+CONCURRENT_UNRESOLVE_MODE_FULL = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_FULL', 3)
+
+class enum_a6xx_varying_interp_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+INTERP_SMOOTH = enum_a6xx_varying_interp_mode.define('INTERP_SMOOTH', 0)
+INTERP_FLAT = enum_a6xx_varying_interp_mode.define('INTERP_FLAT', 1)
+INTERP_ZERO = enum_a6xx_varying_interp_mode.define('INTERP_ZERO', 2)
+INTERP_ONE = enum_a6xx_varying_interp_mode.define('INTERP_ONE', 3)
+
+class enum_a6xx_varying_ps_repl_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PS_REPL_NONE = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_NONE', 0)
+PS_REPL_S = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_S', 1)
+PS_REPL_T = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_T', 2)
+PS_REPL_ONE_MINUS_T = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_ONE_MINUS_T', 3)
+
+class enum_a6xx_threadsize(Annotated[int, ctypes.c_uint32], c.Enum): pass
+THREAD64 = enum_a6xx_threadsize.define('THREAD64', 0)
+THREAD128 = enum_a6xx_threadsize.define('THREAD128', 1)
+
+class enum_a6xx_const_ram_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CONSTLEN_128 = enum_a6xx_const_ram_mode.define('CONSTLEN_128', 0)
+CONSTLEN_192 = enum_a6xx_const_ram_mode.define('CONSTLEN_192', 1)
+CONSTLEN_256 = enum_a6xx_const_ram_mode.define('CONSTLEN_256', 2)
+CONSTLEN_512 = enum_a6xx_const_ram_mode.define('CONSTLEN_512', 3)
+
+class enum_a7xx_workitem_rast_order(Annotated[int, ctypes.c_uint32], c.Enum): pass
+WORKITEMRASTORDER_LINEAR = enum_a7xx_workitem_rast_order.define('WORKITEMRASTORDER_LINEAR', 0)
+WORKITEMRASTORDER_TILED = enum_a7xx_workitem_rast_order.define('WORKITEMRASTORDER_TILED', 1)
+
+class enum_a6xx_bindless_descriptor_size(Annotated[int, ctypes.c_uint32], c.Enum): pass
+BINDLESS_DESCRIPTOR_16B = enum_a6xx_bindless_descriptor_size.define('BINDLESS_DESCRIPTOR_16B', 1)
+BINDLESS_DESCRIPTOR_64B = enum_a6xx_bindless_descriptor_size.define('BINDLESS_DESCRIPTOR_64B', 3)
+
+class enum_a6xx_isam_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ISAMMODE_CL = enum_a6xx_isam_mode.define('ISAMMODE_CL', 1)
+ISAMMODE_GL = enum_a6xx_isam_mode.define('ISAMMODE_GL', 2)
+
+class enum_a6xx_sp_a2d_output_ifmt_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+OUTPUT_IFMT_2D_FLOAT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_FLOAT', 0)
+OUTPUT_IFMT_2D_SINT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_SINT', 1)
+OUTPUT_IFMT_2D_UINT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_UINT', 2)
+
+class enum_a6xx_coord_round(Annotated[int, ctypes.c_uint32], c.Enum): pass
+COORD_TRUNCATE = enum_a6xx_coord_round.define('COORD_TRUNCATE', 0)
+COORD_ROUND_NEAREST_EVEN = enum_a6xx_coord_round.define('COORD_ROUND_NEAREST_EVEN', 1)
+
+class enum_a6xx_nearest_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ROUND_CLAMP_TRUNCATE = enum_a6xx_nearest_mode.define('ROUND_CLAMP_TRUNCATE', 0)
+CLAMP_ROUND_TRUNCATE = enum_a6xx_nearest_mode.define('CLAMP_ROUND_TRUNCATE', 1)
+
+class enum_a7xx_cs_yalign(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CS_YALIGN_1 = enum_a7xx_cs_yalign.define('CS_YALIGN_1', 8)
+CS_YALIGN_2 = enum_a7xx_cs_yalign.define('CS_YALIGN_2', 4)
+CS_YALIGN_4 = enum_a7xx_cs_yalign.define('CS_YALIGN_4', 2)
+CS_YALIGN_8 = enum_a7xx_cs_yalign.define('CS_YALIGN_8', 1)
+
+class enum_vgt_event_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VS_DEALLOC = enum_vgt_event_type.define('VS_DEALLOC', 0)
+PS_DEALLOC = enum_vgt_event_type.define('PS_DEALLOC', 1)
+VS_DONE_TS = enum_vgt_event_type.define('VS_DONE_TS', 2)
+PS_DONE_TS = enum_vgt_event_type.define('PS_DONE_TS', 3)
+CACHE_FLUSH_TS = enum_vgt_event_type.define('CACHE_FLUSH_TS', 4)
+CONTEXT_DONE = enum_vgt_event_type.define('CONTEXT_DONE', 5)
+CACHE_FLUSH = enum_vgt_event_type.define('CACHE_FLUSH', 6)
+VIZQUERY_START = enum_vgt_event_type.define('VIZQUERY_START', 7)
+HLSQ_FLUSH = enum_vgt_event_type.define('HLSQ_FLUSH', 7)
+VIZQUERY_END = enum_vgt_event_type.define('VIZQUERY_END', 8)
+SC_WAIT_WC = enum_vgt_event_type.define('SC_WAIT_WC', 9)
+WRITE_PRIMITIVE_COUNTS = enum_vgt_event_type.define('WRITE_PRIMITIVE_COUNTS', 9)
+START_PRIMITIVE_CTRS = enum_vgt_event_type.define('START_PRIMITIVE_CTRS', 11)
+STOP_PRIMITIVE_CTRS = enum_vgt_event_type.define('STOP_PRIMITIVE_CTRS', 12)
+RST_PIX_CNT = enum_vgt_event_type.define('RST_PIX_CNT', 13)
+RST_VTX_CNT = enum_vgt_event_type.define('RST_VTX_CNT', 14)
+TILE_FLUSH = enum_vgt_event_type.define('TILE_FLUSH', 15)
+STAT_EVENT = enum_vgt_event_type.define('STAT_EVENT', 16)
+CACHE_FLUSH_AND_INV_TS_EVENT = enum_vgt_event_type.define('CACHE_FLUSH_AND_INV_TS_EVENT', 20)
+ZPASS_DONE = enum_vgt_event_type.define('ZPASS_DONE', 21)
+CACHE_FLUSH_AND_INV_EVENT = enum_vgt_event_type.define('CACHE_FLUSH_AND_INV_EVENT', 22)
+RB_DONE_TS = enum_vgt_event_type.define('RB_DONE_TS', 22)
+PERFCOUNTER_START = enum_vgt_event_type.define('PERFCOUNTER_START', 23)
+PERFCOUNTER_STOP = enum_vgt_event_type.define('PERFCOUNTER_STOP', 24)
+VS_FETCH_DONE = enum_vgt_event_type.define('VS_FETCH_DONE', 27)
+FACENESS_FLUSH = enum_vgt_event_type.define('FACENESS_FLUSH', 28)
+WT_DONE_TS = enum_vgt_event_type.define('WT_DONE_TS', 8)
+START_FRAGMENT_CTRS = enum_vgt_event_type.define('START_FRAGMENT_CTRS', 13)
+STOP_FRAGMENT_CTRS = enum_vgt_event_type.define('STOP_FRAGMENT_CTRS', 14)
+START_COMPUTE_CTRS = enum_vgt_event_type.define('START_COMPUTE_CTRS', 15)
+STOP_COMPUTE_CTRS = enum_vgt_event_type.define('STOP_COMPUTE_CTRS', 16)
+FLUSH_SO_0 = enum_vgt_event_type.define('FLUSH_SO_0', 17)
+FLUSH_SO_1 = enum_vgt_event_type.define('FLUSH_SO_1', 18)
+FLUSH_SO_2 = enum_vgt_event_type.define('FLUSH_SO_2', 19)
+FLUSH_SO_3 = enum_vgt_event_type.define('FLUSH_SO_3', 20)
+PC_CCU_INVALIDATE_DEPTH = enum_vgt_event_type.define('PC_CCU_INVALIDATE_DEPTH', 24)
+PC_CCU_INVALIDATE_COLOR = enum_vgt_event_type.define('PC_CCU_INVALIDATE_COLOR', 25)
+PC_CCU_RESOLVE_TS = enum_vgt_event_type.define('PC_CCU_RESOLVE_TS', 26)
+PC_CCU_FLUSH_DEPTH_TS = enum_vgt_event_type.define('PC_CCU_FLUSH_DEPTH_TS', 28)
+PC_CCU_FLUSH_COLOR_TS = enum_vgt_event_type.define('PC_CCU_FLUSH_COLOR_TS', 29)
+BLIT = enum_vgt_event_type.define('BLIT', 30)
+LRZ_FLIP_BUFFER = enum_vgt_event_type.define('LRZ_FLIP_BUFFER', 36)
+LRZ_CLEAR = enum_vgt_event_type.define('LRZ_CLEAR', 37)
+LRZ_FLUSH = enum_vgt_event_type.define('LRZ_FLUSH', 38)
+BLIT_OP_FILL_2D = enum_vgt_event_type.define('BLIT_OP_FILL_2D', 39)
+BLIT_OP_COPY_2D = enum_vgt_event_type.define('BLIT_OP_COPY_2D', 40)
+UNK_40 = enum_vgt_event_type.define('UNK_40', 40)
+LRZ_Q_CACHE_INVALIDATE = enum_vgt_event_type.define('LRZ_Q_CACHE_INVALIDATE', 41)
+BLIT_OP_SCALE_2D = enum_vgt_event_type.define('BLIT_OP_SCALE_2D', 42)
+CONTEXT_DONE_2D = enum_vgt_event_type.define('CONTEXT_DONE_2D', 43)
+UNK_2C = enum_vgt_event_type.define('UNK_2C', 44)
+UNK_2D = enum_vgt_event_type.define('UNK_2D', 45)
+CACHE_INVALIDATE = enum_vgt_event_type.define('CACHE_INVALIDATE', 49)
+LABEL = enum_vgt_event_type.define('LABEL', 63)
+DUMMY_EVENT = enum_vgt_event_type.define('DUMMY_EVENT', 1)
+CCU_INVALIDATE_DEPTH = enum_vgt_event_type.define('CCU_INVALIDATE_DEPTH', 24)
+CCU_INVALIDATE_COLOR = enum_vgt_event_type.define('CCU_INVALIDATE_COLOR', 25)
+CCU_RESOLVE_CLEAN = enum_vgt_event_type.define('CCU_RESOLVE_CLEAN', 26)
+CCU_FLUSH_DEPTH = enum_vgt_event_type.define('CCU_FLUSH_DEPTH', 28)
+CCU_FLUSH_COLOR = enum_vgt_event_type.define('CCU_FLUSH_COLOR', 29)
+CCU_RESOLVE = enum_vgt_event_type.define('CCU_RESOLVE', 30)
+CCU_END_RESOLVE_GROUP = enum_vgt_event_type.define('CCU_END_RESOLVE_GROUP', 31)
+CCU_CLEAN_DEPTH = enum_vgt_event_type.define('CCU_CLEAN_DEPTH', 32)
+CCU_CLEAN_COLOR = enum_vgt_event_type.define('CCU_CLEAN_COLOR', 33)
+CACHE_RESET = enum_vgt_event_type.define('CACHE_RESET', 48)
+CACHE_CLEAN = enum_vgt_event_type.define('CACHE_CLEAN', 49)
+CACHE_FLUSH7 = enum_vgt_event_type.define('CACHE_FLUSH7', 50)
+CACHE_INVALIDATE7 = enum_vgt_event_type.define('CACHE_INVALIDATE7', 51)
+
+class enum_pc_di_primtype(Annotated[int, ctypes.c_uint32], c.Enum): pass
+DI_PT_NONE = enum_pc_di_primtype.define('DI_PT_NONE', 0)
+DI_PT_POINTLIST_PSIZE = enum_pc_di_primtype.define('DI_PT_POINTLIST_PSIZE', 1)
+DI_PT_LINELIST = enum_pc_di_primtype.define('DI_PT_LINELIST', 2)
+DI_PT_LINESTRIP = enum_pc_di_primtype.define('DI_PT_LINESTRIP', 3)
+DI_PT_TRILIST = enum_pc_di_primtype.define('DI_PT_TRILIST', 4)
+DI_PT_TRIFAN = enum_pc_di_primtype.define('DI_PT_TRIFAN', 5)
+DI_PT_TRISTRIP = enum_pc_di_primtype.define('DI_PT_TRISTRIP', 6)
+DI_PT_LINELOOP = enum_pc_di_primtype.define('DI_PT_LINELOOP', 7)
+DI_PT_RECTLIST = enum_pc_di_primtype.define('DI_PT_RECTLIST', 8)
+DI_PT_POINTLIST = enum_pc_di_primtype.define('DI_PT_POINTLIST', 9)
+DI_PT_LINE_ADJ = enum_pc_di_primtype.define('DI_PT_LINE_ADJ', 10)
+DI_PT_LINESTRIP_ADJ = enum_pc_di_primtype.define('DI_PT_LINESTRIP_ADJ', 11)
+DI_PT_TRI_ADJ = enum_pc_di_primtype.define('DI_PT_TRI_ADJ', 12)
+DI_PT_TRISTRIP_ADJ = enum_pc_di_primtype.define('DI_PT_TRISTRIP_ADJ', 13)
+DI_PT_PATCHES0 = enum_pc_di_primtype.define('DI_PT_PATCHES0', 31)
+DI_PT_PATCHES1 = enum_pc_di_primtype.define('DI_PT_PATCHES1', 32)
+DI_PT_PATCHES2 = enum_pc_di_primtype.define('DI_PT_PATCHES2', 33)
+DI_PT_PATCHES3 = enum_pc_di_primtype.define('DI_PT_PATCHES3', 34)
+DI_PT_PATCHES4 = enum_pc_di_primtype.define('DI_PT_PATCHES4', 35)
+DI_PT_PATCHES5 = enum_pc_di_primtype.define('DI_PT_PATCHES5', 36)
+DI_PT_PATCHES6 = enum_pc_di_primtype.define('DI_PT_PATCHES6', 37)
+DI_PT_PATCHES7 = enum_pc_di_primtype.define('DI_PT_PATCHES7', 38)
+DI_PT_PATCHES8 = enum_pc_di_primtype.define('DI_PT_PATCHES8', 39)
+DI_PT_PATCHES9 = enum_pc_di_primtype.define('DI_PT_PATCHES9', 40)
+DI_PT_PATCHES10 = enum_pc_di_primtype.define('DI_PT_PATCHES10', 41)
+DI_PT_PATCHES11 = enum_pc_di_primtype.define('DI_PT_PATCHES11', 42)
+DI_PT_PATCHES12 = enum_pc_di_primtype.define('DI_PT_PATCHES12', 43)
+DI_PT_PATCHES13 = enum_pc_di_primtype.define('DI_PT_PATCHES13', 44)
+DI_PT_PATCHES14 = enum_pc_di_primtype.define('DI_PT_PATCHES14', 45)
+DI_PT_PATCHES15 = enum_pc_di_primtype.define('DI_PT_PATCHES15', 46)
+DI_PT_PATCHES16 = enum_pc_di_primtype.define('DI_PT_PATCHES16', 47)
+DI_PT_PATCHES17 = enum_pc_di_primtype.define('DI_PT_PATCHES17', 48)
+DI_PT_PATCHES18 = enum_pc_di_primtype.define('DI_PT_PATCHES18', 49)
+DI_PT_PATCHES19 = enum_pc_di_primtype.define('DI_PT_PATCHES19', 50)
+DI_PT_PATCHES20 = enum_pc_di_primtype.define('DI_PT_PATCHES20', 51)
+DI_PT_PATCHES21 = enum_pc_di_primtype.define('DI_PT_PATCHES21', 52)
+DI_PT_PATCHES22 = enum_pc_di_primtype.define('DI_PT_PATCHES22', 53)
+DI_PT_PATCHES23 = enum_pc_di_primtype.define('DI_PT_PATCHES23', 54)
+DI_PT_PATCHES24 = enum_pc_di_primtype.define('DI_PT_PATCHES24', 55)
+DI_PT_PATCHES25 = enum_pc_di_primtype.define('DI_PT_PATCHES25', 56)
+DI_PT_PATCHES26 = enum_pc_di_primtype.define('DI_PT_PATCHES26', 57)
+DI_PT_PATCHES27 = enum_pc_di_primtype.define('DI_PT_PATCHES27', 58)
+DI_PT_PATCHES28 = enum_pc_di_primtype.define('DI_PT_PATCHES28', 59)
+DI_PT_PATCHES29 = enum_pc_di_primtype.define('DI_PT_PATCHES29', 60)
+DI_PT_PATCHES30 = enum_pc_di_primtype.define('DI_PT_PATCHES30', 61)
+DI_PT_PATCHES31 = enum_pc_di_primtype.define('DI_PT_PATCHES31', 62)
+
+class enum_pc_di_src_sel(Annotated[int, ctypes.c_uint32], c.Enum): pass
+DI_SRC_SEL_DMA = enum_pc_di_src_sel.define('DI_SRC_SEL_DMA', 0)
+DI_SRC_SEL_IMMEDIATE = enum_pc_di_src_sel.define('DI_SRC_SEL_IMMEDIATE', 1)
+DI_SRC_SEL_AUTO_INDEX = enum_pc_di_src_sel.define('DI_SRC_SEL_AUTO_INDEX', 2)
+DI_SRC_SEL_AUTO_XFB = enum_pc_di_src_sel.define('DI_SRC_SEL_AUTO_XFB', 3)
+
+class enum_pc_di_face_cull_sel(Annotated[int, ctypes.c_uint32], c.Enum): pass
+DI_FACE_CULL_NONE = enum_pc_di_face_cull_sel.define('DI_FACE_CULL_NONE', 0)
+DI_FACE_CULL_FETCH = enum_pc_di_face_cull_sel.define('DI_FACE_CULL_FETCH', 1)
+DI_FACE_BACKFACE_CULL = enum_pc_di_face_cull_sel.define('DI_FACE_BACKFACE_CULL', 2)
+DI_FACE_FRONTFACE_CULL = enum_pc_di_face_cull_sel.define('DI_FACE_FRONTFACE_CULL', 3)
+
+class enum_pc_di_index_size(Annotated[int, ctypes.c_uint32], c.Enum): pass
+INDEX_SIZE_IGN = enum_pc_di_index_size.define('INDEX_SIZE_IGN', 0)
+INDEX_SIZE_16_BIT = enum_pc_di_index_size.define('INDEX_SIZE_16_BIT', 0)
+INDEX_SIZE_32_BIT = enum_pc_di_index_size.define('INDEX_SIZE_32_BIT', 1)
+INDEX_SIZE_8_BIT = enum_pc_di_index_size.define('INDEX_SIZE_8_BIT', 2)
+INDEX_SIZE_INVALID = enum_pc_di_index_size.define('INDEX_SIZE_INVALID', 0)
+
+class enum_pc_di_vis_cull_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IGNORE_VISIBILITY = enum_pc_di_vis_cull_mode.define('IGNORE_VISIBILITY', 0)
+USE_VISIBILITY = enum_pc_di_vis_cull_mode.define('USE_VISIBILITY', 1)
+
+class enum_adreno_pm4_packet_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CP_TYPE0_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE0_PKT', 0)
+CP_TYPE1_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE1_PKT', 1073741824)
+CP_TYPE2_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE2_PKT', 2147483648)
+CP_TYPE3_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE3_PKT', 3221225472)
+CP_TYPE4_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE4_PKT', 1073741824)
+CP_TYPE7_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE7_PKT', 1879048192)
+
+class enum_adreno_pm4_type3_packets(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CP_ME_INIT = enum_adreno_pm4_type3_packets.define('CP_ME_INIT', 72)
+CP_NOP = enum_adreno_pm4_type3_packets.define('CP_NOP', 16)
+CP_PREEMPT_ENABLE = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE', 28)
+CP_PREEMPT_TOKEN = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_TOKEN', 30)
+CP_INDIRECT_BUFFER = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER', 63)
+CP_INDIRECT_BUFFER_CHAIN = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_CHAIN', 87)
+CP_INDIRECT_BUFFER_PFD = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_PFD', 55)
+CP_WAIT_FOR_IDLE = enum_adreno_pm4_type3_packets.define('CP_WAIT_FOR_IDLE', 38)
+CP_WAIT_REG_MEM = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_MEM', 60)
+CP_WAIT_REG_EQ = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_EQ', 82)
+CP_WAIT_REG_GTE = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_GTE', 83)
+CP_WAIT_UNTIL_READ = enum_adreno_pm4_type3_packets.define('CP_WAIT_UNTIL_READ', 92)
+CP_WAIT_IB_PFD_COMPLETE = enum_adreno_pm4_type3_packets.define('CP_WAIT_IB_PFD_COMPLETE', 93)
+CP_REG_RMW = enum_adreno_pm4_type3_packets.define('CP_REG_RMW', 33)
+CP_SET_BIN_DATA = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA', 47)
+CP_SET_BIN_DATA5 = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA5', 47)
+CP_REG_TO_MEM = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM', 62)
+CP_MEM_WRITE = enum_adreno_pm4_type3_packets.define('CP_MEM_WRITE', 61)
+CP_MEM_WRITE_CNTR = enum_adreno_pm4_type3_packets.define('CP_MEM_WRITE_CNTR', 79)
+CP_COND_EXEC = enum_adreno_pm4_type3_packets.define('CP_COND_EXEC', 68)
+CP_COND_WRITE = enum_adreno_pm4_type3_packets.define('CP_COND_WRITE', 69)
+CP_COND_WRITE5 = enum_adreno_pm4_type3_packets.define('CP_COND_WRITE5', 69)
+CP_EVENT_WRITE = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE', 70)
+CP_EVENT_WRITE7 = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE7', 70)
+CP_EVENT_WRITE_SHD = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_SHD', 88)
+CP_EVENT_WRITE_CFL = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_CFL', 89)
+CP_EVENT_WRITE_ZPD = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_ZPD', 91)
+CP_RUN_OPENCL = enum_adreno_pm4_type3_packets.define('CP_RUN_OPENCL', 49)
+CP_DRAW_INDX = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX', 34)
+CP_DRAW_INDX_2 = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_2', 54)
+CP_DRAW_INDX_BIN = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_BIN', 52)
+CP_DRAW_INDX_2_BIN = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_2_BIN', 53)
+CP_VIZ_QUERY = enum_adreno_pm4_type3_packets.define('CP_VIZ_QUERY', 35)
+CP_SET_STATE = enum_adreno_pm4_type3_packets.define('CP_SET_STATE', 37)
+CP_SET_CONSTANT = enum_adreno_pm4_type3_packets.define('CP_SET_CONSTANT', 45)
+CP_IM_LOAD = enum_adreno_pm4_type3_packets.define('CP_IM_LOAD', 39)
+CP_IM_LOAD_IMMEDIATE = enum_adreno_pm4_type3_packets.define('CP_IM_LOAD_IMMEDIATE', 43)
+CP_LOAD_CONSTANT_CONTEXT = enum_adreno_pm4_type3_packets.define('CP_LOAD_CONSTANT_CONTEXT', 46)
+CP_INVALIDATE_STATE = enum_adreno_pm4_type3_packets.define('CP_INVALIDATE_STATE', 59)
+CP_SET_SHADER_BASES = enum_adreno_pm4_type3_packets.define('CP_SET_SHADER_BASES', 74)
+CP_SET_BIN_MASK = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_MASK', 80)
+CP_SET_BIN_SELECT = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_SELECT', 81)
+CP_CONTEXT_UPDATE = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_UPDATE', 94)
+CP_INTERRUPT = enum_adreno_pm4_type3_packets.define('CP_INTERRUPT', 64)
+CP_IM_STORE = enum_adreno_pm4_type3_packets.define('CP_IM_STORE', 44)
+CP_SET_DRAW_INIT_FLAGS = enum_adreno_pm4_type3_packets.define('CP_SET_DRAW_INIT_FLAGS', 75)
+CP_SET_PROTECTED_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_PROTECTED_MODE', 95)
+CP_BOOTSTRAP_UCODE = enum_adreno_pm4_type3_packets.define('CP_BOOTSTRAP_UCODE', 111)
+CP_LOAD_STATE = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE', 48)
+CP_LOAD_STATE4 = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE4', 48)
+CP_COND_INDIRECT_BUFFER_PFE = enum_adreno_pm4_type3_packets.define('CP_COND_INDIRECT_BUFFER_PFE', 58)
+CP_COND_INDIRECT_BUFFER_PFD = enum_adreno_pm4_type3_packets.define('CP_COND_INDIRECT_BUFFER_PFD', 50)
+CP_INDIRECT_BUFFER_PFE = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_PFE', 63)
+CP_SET_BIN = enum_adreno_pm4_type3_packets.define('CP_SET_BIN', 76)
+CP_TEST_TWO_MEMS = enum_adreno_pm4_type3_packets.define('CP_TEST_TWO_MEMS', 113)
+CP_REG_WR_NO_CTXT = enum_adreno_pm4_type3_packets.define('CP_REG_WR_NO_CTXT', 120)
+CP_RECORD_PFP_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_RECORD_PFP_TIMESTAMP', 17)
+CP_SET_SECURE_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_SECURE_MODE', 102)
+CP_WAIT_FOR_ME = enum_adreno_pm4_type3_packets.define('CP_WAIT_FOR_ME', 19)
+CP_SET_DRAW_STATE = enum_adreno_pm4_type3_packets.define('CP_SET_DRAW_STATE', 67)
+CP_DRAW_INDX_OFFSET = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_OFFSET', 56)
+CP_DRAW_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDIRECT', 40)
+CP_DRAW_INDX_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_INDIRECT', 41)
+CP_DRAW_INDIRECT_MULTI = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDIRECT_MULTI', 42)
+CP_DRAW_AUTO = enum_adreno_pm4_type3_packets.define('CP_DRAW_AUTO', 36)
+CP_DRAW_PRED_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_ENABLE_GLOBAL', 25)
+CP_DRAW_PRED_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_ENABLE_LOCAL', 26)
+CP_DRAW_PRED_SET = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_SET', 78)
+CP_WIDE_REG_WRITE = enum_adreno_pm4_type3_packets.define('CP_WIDE_REG_WRITE', 116)
+CP_SCRATCH_TO_REG = enum_adreno_pm4_type3_packets.define('CP_SCRATCH_TO_REG', 77)
+CP_REG_TO_SCRATCH = enum_adreno_pm4_type3_packets.define('CP_REG_TO_SCRATCH', 74)
+CP_WAIT_MEM_WRITES = enum_adreno_pm4_type3_packets.define('CP_WAIT_MEM_WRITES', 18)
+CP_COND_REG_EXEC = enum_adreno_pm4_type3_packets.define('CP_COND_REG_EXEC', 71)
+CP_MEM_TO_REG = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_REG', 66)
+CP_EXEC_CS_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_EXEC_CS_INDIRECT', 65)
+CP_EXEC_CS = enum_adreno_pm4_type3_packets.define('CP_EXEC_CS', 51)
+CP_PERFCOUNTER_ACTION = enum_adreno_pm4_type3_packets.define('CP_PERFCOUNTER_ACTION', 80)
+CP_SMMU_TABLE_UPDATE = enum_adreno_pm4_type3_packets.define('CP_SMMU_TABLE_UPDATE', 83)
+CP_SET_MARKER = enum_adreno_pm4_type3_packets.define('CP_SET_MARKER', 101)
+CP_SET_PSEUDO_REG = enum_adreno_pm4_type3_packets.define('CP_SET_PSEUDO_REG', 86)
+CP_CONTEXT_REG_BUNCH = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_REG_BUNCH', 92)
+CP_YIELD_ENABLE = enum_adreno_pm4_type3_packets.define('CP_YIELD_ENABLE', 28)
+CP_SKIP_IB2_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_SKIP_IB2_ENABLE_GLOBAL', 29)
+CP_SKIP_IB2_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_SKIP_IB2_ENABLE_LOCAL', 35)
+CP_SET_SUBDRAW_SIZE = enum_adreno_pm4_type3_packets.define('CP_SET_SUBDRAW_SIZE', 53)
+CP_WHERE_AM_I = enum_adreno_pm4_type3_packets.define('CP_WHERE_AM_I', 98)
+CP_SET_VISIBILITY_OVERRIDE = enum_adreno_pm4_type3_packets.define('CP_SET_VISIBILITY_OVERRIDE', 100)
+CP_PREEMPT_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE_GLOBAL', 105)
+CP_PREEMPT_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE_LOCAL', 106)
+CP_CONTEXT_SWITCH_YIELD = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_SWITCH_YIELD', 107)
+CP_SET_RENDER_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_RENDER_MODE', 108)
+CP_COMPUTE_CHECKPOINT = enum_adreno_pm4_type3_packets.define('CP_COMPUTE_CHECKPOINT', 110)
+CP_MEM_TO_MEM = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_MEM', 115)
+CP_BLIT = enum_adreno_pm4_type3_packets.define('CP_BLIT', 44)
+CP_REG_TEST = enum_adreno_pm4_type3_packets.define('CP_REG_TEST', 57)
+CP_SET_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_MODE', 99)
+CP_LOAD_STATE6_GEOM = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6_GEOM', 50)
+CP_LOAD_STATE6_FRAG = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6_FRAG', 52)
+CP_LOAD_STATE6 = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6', 54)
+IN_IB_PREFETCH_END = enum_adreno_pm4_type3_packets.define('IN_IB_PREFETCH_END', 23)
+IN_SUBBLK_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_SUBBLK_PREFETCH', 31)
+IN_INSTR_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_INSTR_PREFETCH', 32)
+IN_INSTR_MATCH = enum_adreno_pm4_type3_packets.define('IN_INSTR_MATCH', 71)
+IN_CONST_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_CONST_PREFETCH', 73)
+IN_INCR_UPDT_STATE = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_STATE', 85)
+IN_INCR_UPDT_CONST = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_CONST', 86)
+IN_INCR_UPDT_INSTR = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_INSTR', 87)
+PKT4 = enum_adreno_pm4_type3_packets.define('PKT4', 4)
+IN_IB_END = enum_adreno_pm4_type3_packets.define('IN_IB_END', 10)
+IN_GMU_INTERRUPT = enum_adreno_pm4_type3_packets.define('IN_GMU_INTERRUPT', 11)
+IN_PREEMPT = enum_adreno_pm4_type3_packets.define('IN_PREEMPT', 15)
+CP_SCRATCH_WRITE = enum_adreno_pm4_type3_packets.define('CP_SCRATCH_WRITE', 76)
+CP_REG_TO_MEM_OFFSET_MEM = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM_OFFSET_MEM', 116)
+CP_REG_TO_MEM_OFFSET_REG = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM_OFFSET_REG', 114)
+CP_WAIT_MEM_GTE = enum_adreno_pm4_type3_packets.define('CP_WAIT_MEM_GTE', 20)
+CP_WAIT_TWO_REGS = enum_adreno_pm4_type3_packets.define('CP_WAIT_TWO_REGS', 112)
+CP_MEMCPY = enum_adreno_pm4_type3_packets.define('CP_MEMCPY', 117)
+CP_SET_BIN_DATA5_OFFSET = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA5_OFFSET', 46)
+CP_SET_UNK_BIN_DATA = enum_adreno_pm4_type3_packets.define('CP_SET_UNK_BIN_DATA', 45)
+CP_CONTEXT_SWITCH = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_SWITCH', 84)
+CP_SET_AMBLE = enum_adreno_pm4_type3_packets.define('CP_SET_AMBLE', 85)
+CP_REG_WRITE = enum_adreno_pm4_type3_packets.define('CP_REG_WRITE', 109)
+CP_START_BIN = enum_adreno_pm4_type3_packets.define('CP_START_BIN', 80)
+CP_END_BIN = enum_adreno_pm4_type3_packets.define('CP_END_BIN', 81)
+CP_PREEMPT_DISABLE = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_DISABLE', 108)
+CP_WAIT_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_WAIT_TIMESTAMP', 20)
+CP_GLOBAL_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_GLOBAL_TIMESTAMP', 21)
+CP_LOCAL_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_LOCAL_TIMESTAMP', 22)
+CP_THREAD_CONTROL = enum_adreno_pm4_type3_packets.define('CP_THREAD_CONTROL', 23)
+CP_RESOURCE_LIST = enum_adreno_pm4_type3_packets.define('CP_RESOURCE_LIST', 24)
+CP_BV_BR_COUNT_OPS = enum_adreno_pm4_type3_packets.define('CP_BV_BR_COUNT_OPS', 27)
+CP_MODIFY_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_MODIFY_TIMESTAMP', 28)
+CP_CONTEXT_REG_BUNCH2 = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_REG_BUNCH2', 93)
+CP_MEM_TO_SCRATCH_MEM = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_SCRATCH_MEM', 73)
+CP_FIXED_STRIDE_DRAW_TABLE = enum_adreno_pm4_type3_packets.define('CP_FIXED_STRIDE_DRAW_TABLE', 127)
+CP_RESET_CONTEXT_STATE = enum_adreno_pm4_type3_packets.define('CP_RESET_CONTEXT_STATE', 31)
+CP_CCHE_INVALIDATE = enum_adreno_pm4_type3_packets.define('CP_CCHE_INVALIDATE', 58)
+CP_SCOPE_CNTL = enum_adreno_pm4_type3_packets.define('CP_SCOPE_CNTL', 108)
+
+class enum_adreno_state_block(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SB_VERT_TEX = enum_adreno_state_block.define('SB_VERT_TEX', 0)
+SB_VERT_MIPADDR = enum_adreno_state_block.define('SB_VERT_MIPADDR', 1)
+SB_FRAG_TEX = enum_adreno_state_block.define('SB_FRAG_TEX', 2)
+SB_FRAG_MIPADDR = enum_adreno_state_block.define('SB_FRAG_MIPADDR', 3)
+SB_VERT_SHADER = enum_adreno_state_block.define('SB_VERT_SHADER', 4)
+SB_GEOM_SHADER = enum_adreno_state_block.define('SB_GEOM_SHADER', 5)
+SB_FRAG_SHADER = enum_adreno_state_block.define('SB_FRAG_SHADER', 6)
+SB_COMPUTE_SHADER = enum_adreno_state_block.define('SB_COMPUTE_SHADER', 7)
+
+class enum_adreno_state_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ST_SHADER = enum_adreno_state_type.define('ST_SHADER', 0)
+ST_CONSTANTS = enum_adreno_state_type.define('ST_CONSTANTS', 1)
+
+class enum_adreno_state_src(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SS_DIRECT = enum_adreno_state_src.define('SS_DIRECT', 0)
+SS_INVALID_ALL_IC = enum_adreno_state_src.define('SS_INVALID_ALL_IC', 2)
+SS_INVALID_PART_IC = enum_adreno_state_src.define('SS_INVALID_PART_IC', 3)
+SS_INDIRECT = enum_adreno_state_src.define('SS_INDIRECT', 4)
+SS_INDIRECT_TCM = enum_adreno_state_src.define('SS_INDIRECT_TCM', 5)
+SS_INDIRECT_STM = enum_adreno_state_src.define('SS_INDIRECT_STM', 6)
+
+class enum_a4xx_state_block(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SB4_VS_TEX = enum_a4xx_state_block.define('SB4_VS_TEX', 0)
+SB4_HS_TEX = enum_a4xx_state_block.define('SB4_HS_TEX', 1)
+SB4_DS_TEX = enum_a4xx_state_block.define('SB4_DS_TEX', 2)
+SB4_GS_TEX = enum_a4xx_state_block.define('SB4_GS_TEX', 3)
+SB4_FS_TEX = enum_a4xx_state_block.define('SB4_FS_TEX', 4)
+SB4_CS_TEX = enum_a4xx_state_block.define('SB4_CS_TEX', 5)
+SB4_VS_SHADER = enum_a4xx_state_block.define('SB4_VS_SHADER', 8)
+SB4_HS_SHADER = enum_a4xx_state_block.define('SB4_HS_SHADER', 9)
+SB4_DS_SHADER = enum_a4xx_state_block.define('SB4_DS_SHADER', 10)
+SB4_GS_SHADER = enum_a4xx_state_block.define('SB4_GS_SHADER', 11)
+SB4_FS_SHADER = enum_a4xx_state_block.define('SB4_FS_SHADER', 12)
+SB4_CS_SHADER = enum_a4xx_state_block.define('SB4_CS_SHADER', 13)
+SB4_SSBO = enum_a4xx_state_block.define('SB4_SSBO', 14)
+SB4_CS_SSBO = enum_a4xx_state_block.define('SB4_CS_SSBO', 15)
+
+class enum_a4xx_state_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ST4_SHADER = enum_a4xx_state_type.define('ST4_SHADER', 0)
+ST4_CONSTANTS = enum_a4xx_state_type.define('ST4_CONSTANTS', 1)
+ST4_UBO = enum_a4xx_state_type.define('ST4_UBO', 2)
+
+class enum_a4xx_state_src(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SS4_DIRECT = enum_a4xx_state_src.define('SS4_DIRECT', 0)
+SS4_INDIRECT = enum_a4xx_state_src.define('SS4_INDIRECT', 2)
+
+class enum_a6xx_state_block(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SB6_VS_TEX = enum_a6xx_state_block.define('SB6_VS_TEX', 0)
+SB6_HS_TEX = enum_a6xx_state_block.define('SB6_HS_TEX', 1)
+SB6_DS_TEX = enum_a6xx_state_block.define('SB6_DS_TEX', 2)
+SB6_GS_TEX = enum_a6xx_state_block.define('SB6_GS_TEX', 3)
+SB6_FS_TEX = enum_a6xx_state_block.define('SB6_FS_TEX', 4)
+SB6_CS_TEX = enum_a6xx_state_block.define('SB6_CS_TEX', 5)
+SB6_VS_SHADER = enum_a6xx_state_block.define('SB6_VS_SHADER', 8)
+SB6_HS_SHADER = enum_a6xx_state_block.define('SB6_HS_SHADER', 9)
+SB6_DS_SHADER = enum_a6xx_state_block.define('SB6_DS_SHADER', 10)
+SB6_GS_SHADER = enum_a6xx_state_block.define('SB6_GS_SHADER', 11)
+SB6_FS_SHADER = enum_a6xx_state_block.define('SB6_FS_SHADER', 12)
+SB6_CS_SHADER = enum_a6xx_state_block.define('SB6_CS_SHADER', 13)
+SB6_UAV = enum_a6xx_state_block.define('SB6_UAV', 14)
+SB6_CS_UAV = enum_a6xx_state_block.define('SB6_CS_UAV', 15)
+
+class enum_a6xx_state_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ST6_SHADER = enum_a6xx_state_type.define('ST6_SHADER', 0)
+ST6_CONSTANTS = enum_a6xx_state_type.define('ST6_CONSTANTS', 1)
+ST6_UBO = enum_a6xx_state_type.define('ST6_UBO', 2)
+ST6_UAV = enum_a6xx_state_type.define('ST6_UAV', 3)
+
+class enum_a6xx_state_src(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SS6_DIRECT = enum_a6xx_state_src.define('SS6_DIRECT', 0)
+SS6_BINDLESS = enum_a6xx_state_src.define('SS6_BINDLESS', 1)
+SS6_INDIRECT = enum_a6xx_state_src.define('SS6_INDIRECT', 2)
+SS6_UBO = enum_a6xx_state_src.define('SS6_UBO', 3)
+
+class enum_a4xx_index_size(Annotated[int, ctypes.c_uint32], c.Enum): pass
+INDEX4_SIZE_8_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_8_BIT', 0)
+INDEX4_SIZE_16_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_16_BIT', 1)
+INDEX4_SIZE_32_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_32_BIT', 2)
+
+class enum_a6xx_patch_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TESS_QUADS = enum_a6xx_patch_type.define('TESS_QUADS', 0)
+TESS_TRIANGLES = enum_a6xx_patch_type.define('TESS_TRIANGLES', 1)
+TESS_ISOLINES = enum_a6xx_patch_type.define('TESS_ISOLINES', 2)
+
+class enum_a6xx_draw_indirect_opcode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+INDIRECT_OP_NORMAL = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_NORMAL', 2)
+INDIRECT_OP_INDEXED = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDEXED', 4)
+INDIRECT_OP_INDIRECT_COUNT = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDIRECT_COUNT', 6)
+INDIRECT_OP_INDIRECT_COUNT_INDEXED = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDIRECT_COUNT_INDEXED', 7)
+
+class enum_cp_draw_pred_src(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PRED_SRC_MEM = enum_cp_draw_pred_src.define('PRED_SRC_MEM', 5)
+
+class enum_cp_draw_pred_test(Annotated[int, ctypes.c_uint32], c.Enum): pass
+NE_0_PASS = enum_cp_draw_pred_test.define('NE_0_PASS', 0)
+EQ_0_PASS = enum_cp_draw_pred_test.define('EQ_0_PASS', 1)
+
+class enum_a7xx_abs_mask_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+ABS_MASK = enum_a7xx_abs_mask_mode.define('ABS_MASK', 1)
+NO_ABS_MASK = enum_a7xx_abs_mask_mode.define('NO_ABS_MASK', 0)
+
+class enum_cp_cond_function(Annotated[int, ctypes.c_uint32], c.Enum): pass
+WRITE_ALWAYS = enum_cp_cond_function.define('WRITE_ALWAYS', 0)
+WRITE_LT = enum_cp_cond_function.define('WRITE_LT', 1)
+WRITE_LE = enum_cp_cond_function.define('WRITE_LE', 2)
+WRITE_EQ = enum_cp_cond_function.define('WRITE_EQ', 3)
+WRITE_NE = enum_cp_cond_function.define('WRITE_NE', 4)
+WRITE_GE = enum_cp_cond_function.define('WRITE_GE', 5)
+WRITE_GT = enum_cp_cond_function.define('WRITE_GT', 6)
+
+class enum_poll_memory_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+POLL_REGISTER = enum_poll_memory_type.define('POLL_REGISTER', 0)
+POLL_MEMORY = enum_poll_memory_type.define('POLL_MEMORY', 1)
+POLL_SCRATCH = enum_poll_memory_type.define('POLL_SCRATCH', 2)
+POLL_ON_CHIP = enum_poll_memory_type.define('POLL_ON_CHIP', 3)
+
+class enum_render_mode_cmd(Annotated[int, ctypes.c_uint32], c.Enum): pass
+BYPASS = enum_render_mode_cmd.define('BYPASS', 1)
+BINNING = enum_render_mode_cmd.define('BINNING', 2)
+GMEM = enum_render_mode_cmd.define('GMEM', 3)
+BLIT2D = enum_render_mode_cmd.define('BLIT2D', 5)
+BLIT2DSCALE = enum_render_mode_cmd.define('BLIT2DSCALE', 7)
+END2D = enum_render_mode_cmd.define('END2D', 8)
+
+class enum_event_write_src(Annotated[int, ctypes.c_uint32], c.Enum): pass
+EV_WRITE_USER_32B = enum_event_write_src.define('EV_WRITE_USER_32B', 0)
+EV_WRITE_USER_64B = enum_event_write_src.define('EV_WRITE_USER_64B', 1)
+EV_WRITE_TIMESTAMP_SUM = enum_event_write_src.define('EV_WRITE_TIMESTAMP_SUM', 2)
+EV_WRITE_ALWAYSON = enum_event_write_src.define('EV_WRITE_ALWAYSON', 3)
+EV_WRITE_REGS_CONTENT = enum_event_write_src.define('EV_WRITE_REGS_CONTENT', 4)
+
+class enum_event_write_dst(Annotated[int, ctypes.c_uint32], c.Enum): pass
+EV_DST_RAM = enum_event_write_dst.define('EV_DST_RAM', 0)
+EV_DST_ONCHIP = enum_event_write_dst.define('EV_DST_ONCHIP', 1)
+
+class enum_cp_blit_cmd(Annotated[int, ctypes.c_uint32], c.Enum): pass
+BLIT_OP_FILL = enum_cp_blit_cmd.define('BLIT_OP_FILL', 0)
+BLIT_OP_COPY = enum_cp_blit_cmd.define('BLIT_OP_COPY', 1)
+BLIT_OP_SCALE = enum_cp_blit_cmd.define('BLIT_OP_SCALE', 3)
+
+class enum_set_marker_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SET_RENDER_MODE = enum_set_marker_mode.define('SET_RENDER_MODE', 0)
+SET_IFPC_MODE = enum_set_marker_mode.define('SET_IFPC_MODE', 1)
+
+class enum_a6xx_ifpc_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IFPC_ENABLE = enum_a6xx_ifpc_mode.define('IFPC_ENABLE', 0)
+IFPC_DISABLE = enum_a6xx_ifpc_mode.define('IFPC_DISABLE', 1)
+
+class enum_a6xx_marker(Annotated[int, ctypes.c_uint32], c.Enum): pass
+RM6_DIRECT_RENDER = enum_a6xx_marker.define('RM6_DIRECT_RENDER', 1)
+RM6_BIN_VISIBILITY = enum_a6xx_marker.define('RM6_BIN_VISIBILITY', 2)
+RM6_BIN_DIRECT = enum_a6xx_marker.define('RM6_BIN_DIRECT', 3)
+RM6_BIN_RENDER_START = enum_a6xx_marker.define('RM6_BIN_RENDER_START', 4)
+RM6_BIN_END_OF_DRAWS = enum_a6xx_marker.define('RM6_BIN_END_OF_DRAWS', 5)
+RM6_BIN_RESOLVE = enum_a6xx_marker.define('RM6_BIN_RESOLVE', 6)
+RM6_BIN_RENDER_END = enum_a6xx_marker.define('RM6_BIN_RENDER_END', 7)
+RM6_COMPUTE = enum_a6xx_marker.define('RM6_COMPUTE', 8)
+RM6_BLIT2DSCALE = enum_a6xx_marker.define('RM6_BLIT2DSCALE', 12)
+RM6_IB1LIST_START = enum_a6xx_marker.define('RM6_IB1LIST_START', 13)
+RM6_IB1LIST_END = enum_a6xx_marker.define('RM6_IB1LIST_END', 14)
+
+class enum_pseudo_reg(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMMU_INFO = enum_pseudo_reg.define('SMMU_INFO', 0)
+NON_SECURE_SAVE_ADDR = enum_pseudo_reg.define('NON_SECURE_SAVE_ADDR', 1)
+SECURE_SAVE_ADDR = enum_pseudo_reg.define('SECURE_SAVE_ADDR', 2)
+NON_PRIV_SAVE_ADDR = enum_pseudo_reg.define('NON_PRIV_SAVE_ADDR', 3)
+COUNTER = enum_pseudo_reg.define('COUNTER', 4)
+VSC_PIPE_DATA_DRAW_BASE = enum_pseudo_reg.define('VSC_PIPE_DATA_DRAW_BASE', 8)
+VSC_SIZE_BASE = enum_pseudo_reg.define('VSC_SIZE_BASE', 9)
+VSC_PIPE_DATA_PRIM_BASE = enum_pseudo_reg.define('VSC_PIPE_DATA_PRIM_BASE', 10)
+UNK_STRM_ADDRESS = enum_pseudo_reg.define('UNK_STRM_ADDRESS', 11)
+UNK_STRM_SIZE_ADDRESS = enum_pseudo_reg.define('UNK_STRM_SIZE_ADDRESS', 12)
+BINDLESS_BASE_0_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_0_ADDR', 16)
+BINDLESS_BASE_1_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_1_ADDR', 17)
+BINDLESS_BASE_2_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_2_ADDR', 18)
+BINDLESS_BASE_3_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_3_ADDR', 19)
+BINDLESS_BASE_4_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_4_ADDR', 20)
+BINDLESS_BASE_5_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_5_ADDR', 21)
+BINDLESS_BASE_6_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_6_ADDR', 22)
+
+class enum_source_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SOURCE_REG = enum_source_type.define('SOURCE_REG', 0)
+SOURCE_SCRATCH_MEM = enum_source_type.define('SOURCE_SCRATCH_MEM', 1)
+
+class enum_compare_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PRED_TEST = enum_compare_mode.define('PRED_TEST', 1)
+REG_COMPARE = enum_compare_mode.define('REG_COMPARE', 2)
+RENDER_MODE = enum_compare_mode.define('RENDER_MODE', 3)
+REG_COMPARE_IMM = enum_compare_mode.define('REG_COMPARE_IMM', 4)
+THREAD_MODE = enum_compare_mode.define('THREAD_MODE', 5)
+
+class enum_amble_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PREAMBLE_AMBLE_TYPE = enum_amble_type.define('PREAMBLE_AMBLE_TYPE', 0)
+BIN_PREAMBLE_AMBLE_TYPE = enum_amble_type.define('BIN_PREAMBLE_AMBLE_TYPE', 1)
+POSTAMBLE_AMBLE_TYPE = enum_amble_type.define('POSTAMBLE_AMBLE_TYPE', 2)
+KMD_AMBLE_TYPE = enum_amble_type.define('KMD_AMBLE_TYPE', 3)
+
+class enum_reg_tracker(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TRACK_CNTL_REG = enum_reg_tracker.define('TRACK_CNTL_REG', 1)
+TRACK_RENDER_CNTL = enum_reg_tracker.define('TRACK_RENDER_CNTL', 2)
+UNK_EVENT_WRITE = enum_reg_tracker.define('UNK_EVENT_WRITE', 4)
+TRACK_LRZ = enum_reg_tracker.define('TRACK_LRZ', 8)
+
+class enum_ts_wait_value_src(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TS_WAIT_GE_32B = enum_ts_wait_value_src.define('TS_WAIT_GE_32B', 0)
+TS_WAIT_GE_64B = enum_ts_wait_value_src.define('TS_WAIT_GE_64B', 1)
+TS_WAIT_GE_TIMESTAMP_SUM = enum_ts_wait_value_src.define('TS_WAIT_GE_TIMESTAMP_SUM', 2)
+
+class enum_ts_wait_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TS_WAIT_RAM = enum_ts_wait_type.define('TS_WAIT_RAM', 0)
+TS_WAIT_ONCHIP = enum_ts_wait_type.define('TS_WAIT_ONCHIP', 1)
+
+class enum_pipe_count_op(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PIPE_CLEAR_BV_BR = enum_pipe_count_op.define('PIPE_CLEAR_BV_BR', 1)
+PIPE_SET_BR_OFFSET = enum_pipe_count_op.define('PIPE_SET_BR_OFFSET', 2)
+PIPE_BR_WAIT_FOR_BV = enum_pipe_count_op.define('PIPE_BR_WAIT_FOR_BV', 3)
+PIPE_BV_WAIT_FOR_BR = enum_pipe_count_op.define('PIPE_BV_WAIT_FOR_BR', 4)
+
+class enum_timestamp_op(Annotated[int, ctypes.c_uint32], c.Enum): pass
+MODIFY_TIMESTAMP_CLEAR = enum_timestamp_op.define('MODIFY_TIMESTAMP_CLEAR', 0)
+MODIFY_TIMESTAMP_ADD_GLOBAL = enum_timestamp_op.define('MODIFY_TIMESTAMP_ADD_GLOBAL', 1)
+MODIFY_TIMESTAMP_ADD_LOCAL = enum_timestamp_op.define('MODIFY_TIMESTAMP_ADD_LOCAL', 2)
+
+class enum_cp_thread(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CP_SET_THREAD_BR = enum_cp_thread.define('CP_SET_THREAD_BR', 1)
+CP_SET_THREAD_BV = enum_cp_thread.define('CP_SET_THREAD_BV', 2)
+CP_SET_THREAD_BOTH = enum_cp_thread.define('CP_SET_THREAD_BOTH', 3)
+
+class enum_cp_scope(Annotated[int, ctypes.c_uint32], c.Enum): pass
+INTERRUPTS = enum_cp_scope.define('INTERRUPTS', 0)
+
+class enum_a6xx_tile_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TILE6_LINEAR = enum_a6xx_tile_mode.define('TILE6_LINEAR', 0)
+TILE6_2 = enum_a6xx_tile_mode.define('TILE6_2', 2)
+TILE6_3 = enum_a6xx_tile_mode.define('TILE6_3', 3)
+
+class enum_a6xx_format(Annotated[int, ctypes.c_uint32], c.Enum): pass
+FMT6_A8_UNORM = enum_a6xx_format.define('FMT6_A8_UNORM', 2)
+FMT6_8_UNORM = enum_a6xx_format.define('FMT6_8_UNORM', 3)
+FMT6_8_SNORM = enum_a6xx_format.define('FMT6_8_SNORM', 4)
+FMT6_8_UINT = enum_a6xx_format.define('FMT6_8_UINT', 5)
+FMT6_8_SINT = enum_a6xx_format.define('FMT6_8_SINT', 6)
+FMT6_4_4_4_4_UNORM = enum_a6xx_format.define('FMT6_4_4_4_4_UNORM', 8)
+FMT6_5_5_5_1_UNORM = enum_a6xx_format.define('FMT6_5_5_5_1_UNORM', 10)
+FMT6_1_5_5_5_UNORM = enum_a6xx_format.define('FMT6_1_5_5_5_UNORM', 12)
+FMT6_5_6_5_UNORM = enum_a6xx_format.define('FMT6_5_6_5_UNORM', 14)
+FMT6_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_UNORM', 15)
+FMT6_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_SNORM', 16)
+FMT6_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_UINT', 17)
+FMT6_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_SINT', 18)
+FMT6_L8_A8_UNORM = enum_a6xx_format.define('FMT6_L8_A8_UNORM', 19)
+FMT6_16_UNORM = enum_a6xx_format.define('FMT6_16_UNORM', 21)
+FMT6_16_SNORM = enum_a6xx_format.define('FMT6_16_SNORM', 22)
+FMT6_16_FLOAT = enum_a6xx_format.define('FMT6_16_FLOAT', 23)
+FMT6_16_UINT = enum_a6xx_format.define('FMT6_16_UINT', 24)
+FMT6_16_SINT = enum_a6xx_format.define('FMT6_16_SINT', 25)
+FMT6_8_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_UNORM', 33)
+FMT6_8_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_8_SNORM', 34)
+FMT6_8_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_8_UINT', 35)
+FMT6_8_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_8_SINT', 36)
+FMT6_8_8_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_8_UNORM', 48)
+FMT6_8_8_8_X8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_X8_UNORM', 49)
+FMT6_8_8_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_8_8_SNORM', 50)
+FMT6_8_8_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_8_8_UINT', 51)
+FMT6_8_8_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_8_8_SINT', 52)
+FMT6_9_9_9_E5_FLOAT = enum_a6xx_format.define('FMT6_9_9_9_E5_FLOAT', 53)
+FMT6_10_10_10_2_UNORM = enum_a6xx_format.define('FMT6_10_10_10_2_UNORM', 54)
+FMT6_10_10_10_2_UNORM_DEST = enum_a6xx_format.define('FMT6_10_10_10_2_UNORM_DEST', 55)
+FMT6_10_10_10_2_SNORM = enum_a6xx_format.define('FMT6_10_10_10_2_SNORM', 57)
+FMT6_10_10_10_2_UINT = enum_a6xx_format.define('FMT6_10_10_10_2_UINT', 58)
+FMT6_10_10_10_2_SINT = enum_a6xx_format.define('FMT6_10_10_10_2_SINT', 59)
+FMT6_11_11_10_FLOAT = enum_a6xx_format.define('FMT6_11_11_10_FLOAT', 66)
+FMT6_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_UNORM', 67)
+FMT6_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_SNORM', 68)
+FMT6_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_FLOAT', 69)
+FMT6_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_UINT', 70)
+FMT6_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_SINT', 71)
+FMT6_32_UNORM = enum_a6xx_format.define('FMT6_32_UNORM', 72)
+FMT6_32_SNORM = enum_a6xx_format.define('FMT6_32_SNORM', 73)
+FMT6_32_FLOAT = enum_a6xx_format.define('FMT6_32_FLOAT', 74)
+FMT6_32_UINT = enum_a6xx_format.define('FMT6_32_UINT', 75)
+FMT6_32_SINT = enum_a6xx_format.define('FMT6_32_SINT', 76)
+FMT6_32_FIXED = enum_a6xx_format.define('FMT6_32_FIXED', 77)
+FMT6_16_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_16_UNORM', 88)
+FMT6_16_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_16_SNORM', 89)
+FMT6_16_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_16_FLOAT', 90)
+FMT6_16_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_16_UINT', 91)
+FMT6_16_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_16_SINT', 92)
+FMT6_16_16_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_16_16_UNORM', 96)
+FMT6_16_16_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_16_16_SNORM', 97)
+FMT6_16_16_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_16_16_FLOAT', 98)
+FMT6_16_16_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_16_16_UINT', 99)
+FMT6_16_16_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_16_16_SINT', 100)
+FMT6_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_UNORM', 101)
+FMT6_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_SNORM', 102)
+FMT6_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_FLOAT', 103)
+FMT6_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_UINT', 104)
+FMT6_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_SINT', 105)
+FMT6_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_FIXED', 106)
+FMT6_32_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_32_UNORM', 112)
+FMT6_32_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_32_SNORM', 113)
+FMT6_32_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_32_UINT', 114)
+FMT6_32_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_32_SINT', 115)
+FMT6_32_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_32_FLOAT', 116)
+FMT6_32_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_32_FIXED', 117)
+FMT6_32_32_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_32_32_UNORM', 128)
+FMT6_32_32_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_32_32_SNORM', 129)
+FMT6_32_32_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_32_32_FLOAT', 130)
+FMT6_32_32_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_32_32_UINT', 131)
+FMT6_32_32_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_32_32_SINT', 132)
+FMT6_32_32_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_32_32_FIXED', 133)
+FMT6_G8R8B8R8_422_UNORM = enum_a6xx_format.define('FMT6_G8R8B8R8_422_UNORM', 140)
+FMT6_R8G8R8B8_422_UNORM = enum_a6xx_format.define('FMT6_R8G8R8B8_422_UNORM', 141)
+FMT6_R8_G8B8_2PLANE_420_UNORM = enum_a6xx_format.define('FMT6_R8_G8B8_2PLANE_420_UNORM', 142)
+FMT6_NV21 = enum_a6xx_format.define('FMT6_NV21', 143)
+FMT6_R8_G8_B8_3PLANE_420_UNORM = enum_a6xx_format.define('FMT6_R8_G8_B8_3PLANE_420_UNORM', 144)
+FMT6_Z24_UNORM_S8_UINT_AS_R8G8B8A8 = enum_a6xx_format.define('FMT6_Z24_UNORM_S8_UINT_AS_R8G8B8A8', 145)
+FMT6_NV12_Y = enum_a6xx_format.define('FMT6_NV12_Y', 148)
+FMT6_NV12_UV = enum_a6xx_format.define('FMT6_NV12_UV', 149)
+FMT6_NV12_VU = enum_a6xx_format.define('FMT6_NV12_VU', 150)
+FMT6_NV12_4R = enum_a6xx_format.define('FMT6_NV12_4R', 151)
+FMT6_NV12_4R_Y = enum_a6xx_format.define('FMT6_NV12_4R_Y', 152)
+FMT6_NV12_4R_UV = enum_a6xx_format.define('FMT6_NV12_4R_UV', 153)
+FMT6_P010 = enum_a6xx_format.define('FMT6_P010', 154)
+FMT6_P010_Y = enum_a6xx_format.define('FMT6_P010_Y', 155)
+FMT6_P010_UV = enum_a6xx_format.define('FMT6_P010_UV', 156)
+FMT6_TP10 = enum_a6xx_format.define('FMT6_TP10', 157)
+FMT6_TP10_Y = enum_a6xx_format.define('FMT6_TP10_Y', 158)
+FMT6_TP10_UV = enum_a6xx_format.define('FMT6_TP10_UV', 159)
+FMT6_Z24_UNORM_S8_UINT = enum_a6xx_format.define('FMT6_Z24_UNORM_S8_UINT', 160)
+FMT6_ETC2_RG11_UNORM = enum_a6xx_format.define('FMT6_ETC2_RG11_UNORM', 171)
+FMT6_ETC2_RG11_SNORM = enum_a6xx_format.define('FMT6_ETC2_RG11_SNORM', 172)
+FMT6_ETC2_R11_UNORM = enum_a6xx_format.define('FMT6_ETC2_R11_UNORM', 173)
+FMT6_ETC2_R11_SNORM = enum_a6xx_format.define('FMT6_ETC2_R11_SNORM', 174)
+FMT6_ETC1 = enum_a6xx_format.define('FMT6_ETC1', 175)
+FMT6_ETC2_RGB8 = enum_a6xx_format.define('FMT6_ETC2_RGB8', 176)
+FMT6_ETC2_RGBA8 = enum_a6xx_format.define('FMT6_ETC2_RGBA8', 177)
+FMT6_ETC2_RGB8A1 = enum_a6xx_format.define('FMT6_ETC2_RGB8A1', 178)
+FMT6_DXT1 = enum_a6xx_format.define('FMT6_DXT1', 179)
+FMT6_DXT3 = enum_a6xx_format.define('FMT6_DXT3', 180)
+FMT6_DXT5 = enum_a6xx_format.define('FMT6_DXT5', 181)
+FMT6_RGTC1_UNORM = enum_a6xx_format.define('FMT6_RGTC1_UNORM', 182)
+FMT6_RGTC1_UNORM_FAST = enum_a6xx_format.define('FMT6_RGTC1_UNORM_FAST', 183)
+FMT6_RGTC1_SNORM = enum_a6xx_format.define('FMT6_RGTC1_SNORM', 184)
+FMT6_RGTC1_SNORM_FAST = enum_a6xx_format.define('FMT6_RGTC1_SNORM_FAST', 185)
+FMT6_RGTC2_UNORM = enum_a6xx_format.define('FMT6_RGTC2_UNORM', 186)
+FMT6_RGTC2_UNORM_FAST = enum_a6xx_format.define('FMT6_RGTC2_UNORM_FAST', 187)
+FMT6_RGTC2_SNORM = enum_a6xx_format.define('FMT6_RGTC2_SNORM', 188)
+FMT6_RGTC2_SNORM_FAST = enum_a6xx_format.define('FMT6_RGTC2_SNORM_FAST', 189)
+FMT6_BPTC_UFLOAT = enum_a6xx_format.define('FMT6_BPTC_UFLOAT', 190)
+FMT6_BPTC_FLOAT = enum_a6xx_format.define('FMT6_BPTC_FLOAT', 191)
+FMT6_BPTC = enum_a6xx_format.define('FMT6_BPTC', 192)
+FMT6_ASTC_4x4 = enum_a6xx_format.define('FMT6_ASTC_4x4', 193)
+FMT6_ASTC_5x4 = enum_a6xx_format.define('FMT6_ASTC_5x4', 194)
+FMT6_ASTC_5x5 = enum_a6xx_format.define('FMT6_ASTC_5x5', 195)
+FMT6_ASTC_6x5 = enum_a6xx_format.define('FMT6_ASTC_6x5', 196)
+FMT6_ASTC_6x6 = enum_a6xx_format.define('FMT6_ASTC_6x6', 197)
+FMT6_ASTC_8x5 = enum_a6xx_format.define('FMT6_ASTC_8x5', 198)
+FMT6_ASTC_8x6 = enum_a6xx_format.define('FMT6_ASTC_8x6', 199)
+FMT6_ASTC_8x8 = enum_a6xx_format.define('FMT6_ASTC_8x8', 200)
+FMT6_ASTC_10x5 = enum_a6xx_format.define('FMT6_ASTC_10x5', 201)
+FMT6_ASTC_10x6 = enum_a6xx_format.define('FMT6_ASTC_10x6', 202)
+FMT6_ASTC_10x8 = enum_a6xx_format.define('FMT6_ASTC_10x8', 203)
+FMT6_ASTC_10x10 = enum_a6xx_format.define('FMT6_ASTC_10x10', 204)
+FMT6_ASTC_12x10 = enum_a6xx_format.define('FMT6_ASTC_12x10', 205)
+FMT6_ASTC_12x12 = enum_a6xx_format.define('FMT6_ASTC_12x12', 206)
+FMT6_Z24_UINT_S8_UINT = enum_a6xx_format.define('FMT6_Z24_UINT_S8_UINT', 234)
+FMT6_NONE = enum_a6xx_format.define('FMT6_NONE', 255)
+
+class enum_a6xx_polygon_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+POLYMODE6_POINTS = enum_a6xx_polygon_mode.define('POLYMODE6_POINTS', 1)
+POLYMODE6_LINES = enum_a6xx_polygon_mode.define('POLYMODE6_LINES', 2)
+POLYMODE6_TRIANGLES = enum_a6xx_polygon_mode.define('POLYMODE6_TRIANGLES', 3)
+
+class enum_a6xx_depth_format(Annotated[int, ctypes.c_uint32], c.Enum): pass
+DEPTH6_NONE = enum_a6xx_depth_format.define('DEPTH6_NONE', 0)
+DEPTH6_16 = enum_a6xx_depth_format.define('DEPTH6_16', 1)
+DEPTH6_24_8 = enum_a6xx_depth_format.define('DEPTH6_24_8', 2)
+DEPTH6_32 = enum_a6xx_depth_format.define('DEPTH6_32', 4)
+
+class enum_a6xx_shader_id(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_TP0_TMO_DATA = enum_a6xx_shader_id.define('A6XX_TP0_TMO_DATA', 9)
+A6XX_TP0_SMO_DATA = enum_a6xx_shader_id.define('A6XX_TP0_SMO_DATA', 10)
+A6XX_TP0_MIPMAP_BASE_DATA = enum_a6xx_shader_id.define('A6XX_TP0_MIPMAP_BASE_DATA', 11)
+A6XX_TP1_TMO_DATA = enum_a6xx_shader_id.define('A6XX_TP1_TMO_DATA', 25)
+A6XX_TP1_SMO_DATA = enum_a6xx_shader_id.define('A6XX_TP1_SMO_DATA', 26)
+A6XX_TP1_MIPMAP_BASE_DATA = enum_a6xx_shader_id.define('A6XX_TP1_MIPMAP_BASE_DATA', 27)
+A6XX_SP_INST_DATA = enum_a6xx_shader_id.define('A6XX_SP_INST_DATA', 41)
+A6XX_SP_LB_0_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_0_DATA', 42)
+A6XX_SP_LB_1_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_1_DATA', 43)
+A6XX_SP_LB_2_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_2_DATA', 44)
+A6XX_SP_LB_3_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_3_DATA', 45)
+A6XX_SP_LB_4_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_4_DATA', 46)
+A6XX_SP_LB_5_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_5_DATA', 47)
+A6XX_SP_CB_BINDLESS_DATA = enum_a6xx_shader_id.define('A6XX_SP_CB_BINDLESS_DATA', 48)
+A6XX_SP_CB_LEGACY_DATA = enum_a6xx_shader_id.define('A6XX_SP_CB_LEGACY_DATA', 49)
+A6XX_SP_GFX_UAV_BASE_DATA = enum_a6xx_shader_id.define('A6XX_SP_GFX_UAV_BASE_DATA', 50)
+A6XX_SP_INST_TAG = enum_a6xx_shader_id.define('A6XX_SP_INST_TAG', 51)
+A6XX_SP_CB_BINDLESS_TAG = enum_a6xx_shader_id.define('A6XX_SP_CB_BINDLESS_TAG', 52)
+A6XX_SP_TMO_UMO_TAG = enum_a6xx_shader_id.define('A6XX_SP_TMO_UMO_TAG', 53)
+A6XX_SP_SMO_TAG = enum_a6xx_shader_id.define('A6XX_SP_SMO_TAG', 54)
+A6XX_SP_STATE_DATA = enum_a6xx_shader_id.define('A6XX_SP_STATE_DATA', 55)
+A6XX_HLSQ_CHUNK_CVS_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CVS_RAM', 73)
+A6XX_HLSQ_CHUNK_CPS_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CPS_RAM', 74)
+A6XX_HLSQ_CHUNK_CVS_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CVS_RAM_TAG', 75)
+A6XX_HLSQ_CHUNK_CPS_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CPS_RAM_TAG', 76)
+A6XX_HLSQ_ICB_CVS_CB_BASE_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_ICB_CVS_CB_BASE_TAG', 77)
+A6XX_HLSQ_ICB_CPS_CB_BASE_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_ICB_CPS_CB_BASE_TAG', 78)
+A6XX_HLSQ_CVS_MISC_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CVS_MISC_RAM', 80)
+A6XX_HLSQ_CPS_MISC_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CPS_MISC_RAM', 81)
+A6XX_HLSQ_INST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM', 82)
+A6XX_HLSQ_GFX_CVS_CONST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CVS_CONST_RAM', 83)
+A6XX_HLSQ_GFX_CPS_CONST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CPS_CONST_RAM', 84)
+A6XX_HLSQ_CVS_MISC_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CVS_MISC_RAM_TAG', 85)
+A6XX_HLSQ_CPS_MISC_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CPS_MISC_RAM_TAG', 86)
+A6XX_HLSQ_INST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM_TAG', 87)
+A6XX_HLSQ_GFX_CVS_CONST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CVS_CONST_RAM_TAG', 88)
+A6XX_HLSQ_GFX_CPS_CONST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CPS_CONST_RAM_TAG', 89)
+A6XX_HLSQ_PWR_REST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_PWR_REST_RAM', 90)
+A6XX_HLSQ_PWR_REST_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_PWR_REST_TAG', 91)
+A6XX_HLSQ_DATAPATH_META = enum_a6xx_shader_id.define('A6XX_HLSQ_DATAPATH_META', 96)
+A6XX_HLSQ_FRONTEND_META = enum_a6xx_shader_id.define('A6XX_HLSQ_FRONTEND_META', 97)
+A6XX_HLSQ_INDIRECT_META = enum_a6xx_shader_id.define('A6XX_HLSQ_INDIRECT_META', 98)
+A6XX_HLSQ_BACKEND_META = enum_a6xx_shader_id.define('A6XX_HLSQ_BACKEND_META', 99)
+A6XX_SP_LB_6_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_6_DATA', 112)
+A6XX_SP_LB_7_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_7_DATA', 113)
+A6XX_HLSQ_INST_RAM_1 = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM_1', 115)
+
+class enum_a6xx_debugbus_id(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_DBGBUS_CP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CP', 1)
+A6XX_DBGBUS_RBBM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RBBM', 2)
+A6XX_DBGBUS_VBIF = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VBIF', 3)
+A6XX_DBGBUS_HLSQ = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_HLSQ', 4)
+A6XX_DBGBUS_UCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_UCHE', 5)
+A6XX_DBGBUS_DPM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DPM', 6)
+A6XX_DBGBUS_TESS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TESS', 7)
+A6XX_DBGBUS_PC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_PC', 8)
+A6XX_DBGBUS_VFDP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFDP', 9)
+A6XX_DBGBUS_VPC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VPC', 10)
+A6XX_DBGBUS_TSE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TSE', 11)
+A6XX_DBGBUS_RAS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RAS', 12)
+A6XX_DBGBUS_VSC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VSC', 13)
+A6XX_DBGBUS_COM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_COM', 14)
+A6XX_DBGBUS_LRZ = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_LRZ', 16)
+A6XX_DBGBUS_A2D = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_A2D', 17)
+A6XX_DBGBUS_CCUFCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCUFCHE', 18)
+A6XX_DBGBUS_GMU_CX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GMU_CX', 19)
+A6XX_DBGBUS_RBP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RBP', 20)
+A6XX_DBGBUS_DCS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DCS', 21)
+A6XX_DBGBUS_DBGC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DBGC', 22)
+A6XX_DBGBUS_CX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CX', 23)
+A6XX_DBGBUS_GMU_GX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GMU_GX', 24)
+A6XX_DBGBUS_TPFCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPFCHE', 25)
+A6XX_DBGBUS_GBIF_GX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GBIF_GX', 26)
+A6XX_DBGBUS_GPC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GPC', 29)
+A6XX_DBGBUS_LARC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_LARC', 30)
+A6XX_DBGBUS_HLSQ_SPTP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_HLSQ_SPTP', 31)
+A6XX_DBGBUS_RB_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_0', 32)
+A6XX_DBGBUS_RB_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_1', 33)
+A6XX_DBGBUS_RB_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_2', 34)
+A6XX_DBGBUS_UCHE_WRAPPER = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_UCHE_WRAPPER', 36)
+A6XX_DBGBUS_CCU_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_0', 40)
+A6XX_DBGBUS_CCU_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_1', 41)
+A6XX_DBGBUS_CCU_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_2', 42)
+A6XX_DBGBUS_VFD_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_0', 56)
+A6XX_DBGBUS_VFD_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_1', 57)
+A6XX_DBGBUS_VFD_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_2', 58)
+A6XX_DBGBUS_VFD_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_3', 59)
+A6XX_DBGBUS_VFD_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_4', 60)
+A6XX_DBGBUS_VFD_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_5', 61)
+A6XX_DBGBUS_SP_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_0', 64)
+A6XX_DBGBUS_SP_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_1', 65)
+A6XX_DBGBUS_SP_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_2', 66)
+A6XX_DBGBUS_TPL1_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_0', 72)
+A6XX_DBGBUS_TPL1_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_1', 73)
+A6XX_DBGBUS_TPL1_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_2', 74)
+A6XX_DBGBUS_TPL1_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_3', 75)
+A6XX_DBGBUS_TPL1_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_4', 76)
+A6XX_DBGBUS_TPL1_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_5', 77)
+A6XX_DBGBUS_SPTP_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_0', 88)
+A6XX_DBGBUS_SPTP_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_1', 89)
+A6XX_DBGBUS_SPTP_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_2', 90)
+A6XX_DBGBUS_SPTP_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_3', 91)
+A6XX_DBGBUS_SPTP_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_4', 92)
+A6XX_DBGBUS_SPTP_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_5', 93)
+
+class enum_a6xx_2d_ifmt(Annotated[int, ctypes.c_uint32], c.Enum): pass
+R2D_INT32 = enum_a6xx_2d_ifmt.define('R2D_INT32', 7)
+R2D_INT16 = enum_a6xx_2d_ifmt.define('R2D_INT16', 6)
+R2D_INT8 = enum_a6xx_2d_ifmt.define('R2D_INT8', 5)
+R2D_FLOAT32 = enum_a6xx_2d_ifmt.define('R2D_FLOAT32', 4)
+R2D_FLOAT16 = enum_a6xx_2d_ifmt.define('R2D_FLOAT16', 3)
+R2D_SNORM8 = enum_a6xx_2d_ifmt.define('R2D_SNORM8', 2)
+R2D_UNORM8_SRGB = enum_a6xx_2d_ifmt.define('R2D_UNORM8_SRGB', 1)
+R2D_UNORM8 = enum_a6xx_2d_ifmt.define('R2D_UNORM8', 0)
+
+class enum_a6xx_tex_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_TEX_1D = enum_a6xx_tex_type.define('A6XX_TEX_1D', 0)
+A6XX_TEX_2D = enum_a6xx_tex_type.define('A6XX_TEX_2D', 1)
+A6XX_TEX_CUBE = enum_a6xx_tex_type.define('A6XX_TEX_CUBE', 2)
+A6XX_TEX_3D = enum_a6xx_tex_type.define('A6XX_TEX_3D', 3)
+A6XX_TEX_BUFFER = enum_a6xx_tex_type.define('A6XX_TEX_BUFFER', 4)
+A6XX_TEX_IMG_BUFFER = enum_a6xx_tex_type.define('A6XX_TEX_IMG_BUFFER', 5)
+
+class enum_a6xx_ztest_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_EARLY_Z = enum_a6xx_ztest_mode.define('A6XX_EARLY_Z', 0)
+A6XX_LATE_Z = enum_a6xx_ztest_mode.define('A6XX_LATE_Z', 1)
+A6XX_EARLY_Z_LATE_Z = enum_a6xx_ztest_mode.define('A6XX_EARLY_Z_LATE_Z', 2)
+A6XX_INVALID_ZTEST = enum_a6xx_ztest_mode.define('A6XX_INVALID_ZTEST', 3)
+
+class enum_a6xx_tess_spacing(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TESS_EQUAL = enum_a6xx_tess_spacing.define('TESS_EQUAL', 0)
+TESS_FRACTIONAL_ODD = enum_a6xx_tess_spacing.define('TESS_FRACTIONAL_ODD', 2)
+TESS_FRACTIONAL_EVEN = enum_a6xx_tess_spacing.define('TESS_FRACTIONAL_EVEN', 3)
+
+class enum_a6xx_tess_output(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TESS_POINTS = enum_a6xx_tess_output.define('TESS_POINTS', 0)
+TESS_LINES = enum_a6xx_tess_output.define('TESS_LINES', 1)
+TESS_CW_TRIS = enum_a6xx_tess_output.define('TESS_CW_TRIS', 2)
+TESS_CCW_TRIS = enum_a6xx_tess_output.define('TESS_CCW_TRIS', 3)
+
+class enum_a6xx_tex_filter(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_TEX_NEAREST = enum_a6xx_tex_filter.define('A6XX_TEX_NEAREST', 0)
+A6XX_TEX_LINEAR = enum_a6xx_tex_filter.define('A6XX_TEX_LINEAR', 1)
+A6XX_TEX_ANISO = enum_a6xx_tex_filter.define('A6XX_TEX_ANISO', 2)
+A6XX_TEX_CUBIC = enum_a6xx_tex_filter.define('A6XX_TEX_CUBIC', 3)
+
+class enum_a6xx_tex_clamp(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_TEX_REPEAT = enum_a6xx_tex_clamp.define('A6XX_TEX_REPEAT', 0)
+A6XX_TEX_CLAMP_TO_EDGE = enum_a6xx_tex_clamp.define('A6XX_TEX_CLAMP_TO_EDGE', 1)
+A6XX_TEX_MIRROR_REPEAT = enum_a6xx_tex_clamp.define('A6XX_TEX_MIRROR_REPEAT', 2)
+A6XX_TEX_CLAMP_TO_BORDER = enum_a6xx_tex_clamp.define('A6XX_TEX_CLAMP_TO_BORDER', 3)
+A6XX_TEX_MIRROR_CLAMP = enum_a6xx_tex_clamp.define('A6XX_TEX_MIRROR_CLAMP', 4)
+
+class enum_a6xx_tex_aniso(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_TEX_ANISO_1 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_1', 0)
+A6XX_TEX_ANISO_2 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_2', 1)
+A6XX_TEX_ANISO_4 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_4', 2)
+A6XX_TEX_ANISO_8 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_8', 3)
+A6XX_TEX_ANISO_16 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_16', 4)
+
+class enum_a6xx_reduction_mode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_REDUCTION_MODE_AVERAGE = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_AVERAGE', 0)
+A6XX_REDUCTION_MODE_MIN = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_MIN', 1)
+A6XX_REDUCTION_MODE_MAX = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_MAX', 2)
+
+class enum_a6xx_fast_border_color(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_BORDER_COLOR_0_0_0_0 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_0_0_0_0', 0)
+A6XX_BORDER_COLOR_0_0_0_1 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_0_0_0_1', 1)
+A6XX_BORDER_COLOR_1_1_1_0 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_1_1_1_0', 2)
+A6XX_BORDER_COLOR_1_1_1_1 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_1_1_1_1', 3)
+
+class enum_a6xx_tex_swiz(Annotated[int, ctypes.c_uint32], c.Enum): pass
+A6XX_TEX_X = enum_a6xx_tex_swiz.define('A6XX_TEX_X', 0)
+A6XX_TEX_Y = enum_a6xx_tex_swiz.define('A6XX_TEX_Y', 1)
+A6XX_TEX_Z = enum_a6xx_tex_swiz.define('A6XX_TEX_Z', 2)
+A6XX_TEX_W = enum_a6xx_tex_swiz.define('A6XX_TEX_W', 3)
+A6XX_TEX_ZERO = enum_a6xx_tex_swiz.define('A6XX_TEX_ZERO', 4)
+A6XX_TEX_ONE = enum_a6xx_tex_swiz.define('A6XX_TEX_ONE', 5)
 
 c.init_records()
 NIR_DEBUG_CLONE = (1 << 0) # type: ignore

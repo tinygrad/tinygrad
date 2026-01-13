@@ -2,11 +2,11 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 from tinygrad.helpers import WIN, OSX
 dll = c.DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
-intmax_t = Annotated[int, ctypes.c_int64]
+intmax_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def imaxabs(__n:intmax_t) -> intmax_t: ...
 @c.record
@@ -18,10 +18,10 @@ class imaxdiv_t(c.Struct):
 def imaxdiv(__numer:intmax_t, __denom:intmax_t) -> imaxdiv_t: ...
 @dll.bind
 def strtoimax(__nptr:c.POINTER[Annotated[bytes, ctypes.c_char]], __endptr:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], __base:Annotated[int, ctypes.c_int32]) -> intmax_t: ...
-uintmax_t = Annotated[int, ctypes.c_uint64]
+uintmax_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def strtoumax(__nptr:c.POINTER[Annotated[bytes, ctypes.c_char]], __endptr:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], __base:Annotated[int, ctypes.c_int32]) -> uintmax_t: ...
-__gwchar_t = Annotated[int, ctypes.c_int32]
+__gwchar_t: TypeAlias = Annotated[int, ctypes.c_int32]
 @dll.bind
 def wcstoimax(__nptr:c.POINTER[Annotated[int, ctypes.c_int32]], __endptr:c.POINTER[c.POINTER[Annotated[int, ctypes.c_int32]]], __base:Annotated[int, ctypes.c_int32]) -> intmax_t: ...
 @dll.bind
@@ -30,14 +30,14 @@ def wcstoumax(__nptr:c.POINTER[Annotated[int, ctypes.c_int32]], __endptr:c.POINT
 class fd_set(c.Struct):
   SIZE = 128
   fds_bits: Annotated[c.Array[Annotated[int, ctypes.c_int64], Literal[16]], 0]
-__fd_mask = Annotated[int, ctypes.c_int64]
+__fd_mask: TypeAlias = Annotated[int, ctypes.c_int64]
 @c.record
 class struct_timeval(c.Struct):
   SIZE = 16
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_usec: Annotated[Annotated[int, ctypes.c_int64], 8]
-__time_t = Annotated[int, ctypes.c_int64]
-__suseconds_t = Annotated[int, ctypes.c_int64]
+__time_t: TypeAlias = Annotated[int, ctypes.c_int64]
+__suseconds_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def select(__nfds:Annotated[int, ctypes.c_int32], __readfds:c.POINTER[fd_set], __writefds:c.POINTER[fd_set], __exceptfds:c.POINTER[fd_set], __timeout:c.POINTER[struct_timeval]) -> Annotated[int, ctypes.c_int32]: ...
 @c.record
@@ -45,25 +45,25 @@ class struct_timespec(c.Struct):
   SIZE = 16
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_nsec: Annotated[Annotated[int, ctypes.c_int64], 8]
-__syscall_slong_t = Annotated[int, ctypes.c_int64]
+__syscall_slong_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @c.record
 class __sigset_t(c.Struct):
   SIZE = 128
   __val: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[16]], 0]
 @dll.bind
 def pselect(__nfds:Annotated[int, ctypes.c_int32], __readfds:c.POINTER[fd_set], __writefds:c.POINTER[fd_set], __exceptfds:c.POINTER[fd_set], __timeout:c.POINTER[struct_timespec], __sigmask:c.POINTER[__sigset_t]) -> Annotated[int, ctypes.c_int32]: ...
-LLVMVerifierFailureAction = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMAbortProcessAction = LLVMVerifierFailureAction.define('LLVMAbortProcessAction', 0) # type: ignore
-LLVMPrintMessageAction = LLVMVerifierFailureAction.define('LLVMPrintMessageAction', 1) # type: ignore
-LLVMReturnStatusAction = LLVMVerifierFailureAction.define('LLVMReturnStatusAction', 2) # type: ignore
+class LLVMVerifierFailureAction(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMAbortProcessAction = LLVMVerifierFailureAction.define('LLVMAbortProcessAction', 0)
+LLVMPrintMessageAction = LLVMVerifierFailureAction.define('LLVMPrintMessageAction', 1)
+LLVMReturnStatusAction = LLVMVerifierFailureAction.define('LLVMReturnStatusAction', 2)
 
 class struct_LLVMOpaqueModule(ctypes.Structure): pass
-LLVMModuleRef = c.POINTER[struct_LLVMOpaqueModule]
-LLVMBool = Annotated[int, ctypes.c_int32]
+LLVMModuleRef: TypeAlias = c.POINTER[struct_LLVMOpaqueModule]
+LLVMBool: TypeAlias = Annotated[int, ctypes.c_int32]
 @dll.bind
 def LLVMVerifyModule(M:LLVMModuleRef, Action:LLVMVerifierFailureAction, OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
 class struct_LLVMOpaqueValue(ctypes.Structure): pass
-LLVMValueRef = c.POINTER[struct_LLVMOpaqueValue]
+LLVMValueRef: TypeAlias = c.POINTER[struct_LLVMOpaqueValue]
 @dll.bind
 def LLVMVerifyFunction(Fn:LLVMValueRef, Action:LLVMVerifierFailureAction) -> LLVMBool: ...
 @dll.bind
@@ -71,13 +71,13 @@ def LLVMViewFunctionCFG(Fn:LLVMValueRef) -> None: ...
 @dll.bind
 def LLVMViewFunctionCFGOnly(Fn:LLVMValueRef) -> None: ...
 class struct_LLVMOpaqueMemoryBuffer(ctypes.Structure): pass
-LLVMMemoryBufferRef = c.POINTER[struct_LLVMOpaqueMemoryBuffer]
+LLVMMemoryBufferRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMemoryBuffer]
 @dll.bind
 def LLVMParseBitcode(MemBuf:LLVMMemoryBufferRef, OutModule:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
 @dll.bind
 def LLVMParseBitcode2(MemBuf:LLVMMemoryBufferRef, OutModule:c.POINTER[LLVMModuleRef]) -> LLVMBool: ...
 class struct_LLVMOpaqueContext(ctypes.Structure): pass
-LLVMContextRef = c.POINTER[struct_LLVMOpaqueContext]
+LLVMContextRef: TypeAlias = c.POINTER[struct_LLVMOpaqueContext]
 @dll.bind
 def LLVMParseBitcodeInContext(ContextRef:LLVMContextRef, MemBuf:LLVMMemoryBufferRef, OutModule:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
 @dll.bind
@@ -98,15 +98,15 @@ def LLVMWriteBitcodeToFD(M:LLVMModuleRef, FD:Annotated[int, ctypes.c_int32], Sho
 def LLVMWriteBitcodeToFileHandle(M:LLVMModuleRef, Handle:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def LLVMWriteBitcodeToMemoryBuffer(M:LLVMModuleRef) -> LLVMMemoryBufferRef: ...
-LLVMComdatSelectionKind = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMAnyComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMAnyComdatSelectionKind', 0) # type: ignore
-LLVMExactMatchComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMExactMatchComdatSelectionKind', 1) # type: ignore
-LLVMLargestComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMLargestComdatSelectionKind', 2) # type: ignore
-LLVMNoDeduplicateComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMNoDeduplicateComdatSelectionKind', 3) # type: ignore
-LLVMSameSizeComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMSameSizeComdatSelectionKind', 4) # type: ignore
+class LLVMComdatSelectionKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMAnyComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMAnyComdatSelectionKind', 0)
+LLVMExactMatchComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMExactMatchComdatSelectionKind', 1)
+LLVMLargestComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMLargestComdatSelectionKind', 2)
+LLVMNoDeduplicateComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMNoDeduplicateComdatSelectionKind', 3)
+LLVMSameSizeComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMSameSizeComdatSelectionKind', 4)
 
 class struct_LLVMComdat(ctypes.Structure): pass
-LLVMComdatRef = c.POINTER[struct_LLVMComdat]
+LLVMComdatRef: TypeAlias = c.POINTER[struct_LLVMComdat]
 @dll.bind
 def LLVMGetOrInsertComdat(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMComdatRef: ...
 @dll.bind
@@ -117,329 +117,329 @@ def LLVMSetComdat(V:LLVMValueRef, C:LLVMComdatRef) -> None: ...
 def LLVMGetComdatSelectionKind(C:LLVMComdatRef) -> LLVMComdatSelectionKind: ...
 @dll.bind
 def LLVMSetComdatSelectionKind(C:LLVMComdatRef, Kind:LLVMComdatSelectionKind) -> None: ...
-LLVMFatalErrorHandler = c.CFUNCTYPE(None, c.POINTER[Annotated[bytes, ctypes.c_char]])
+LLVMFatalErrorHandler: TypeAlias = c.CFUNCTYPE(None, c.POINTER[Annotated[bytes, ctypes.c_char]])
 @dll.bind
 def LLVMInstallFatalErrorHandler(Handler:LLVMFatalErrorHandler) -> None: ...
 @dll.bind
 def LLVMResetFatalErrorHandler() -> None: ...
 @dll.bind
 def LLVMEnablePrettyStackTrace() -> None: ...
-LLVMOpcode = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMRet = LLVMOpcode.define('LLVMRet', 1) # type: ignore
-LLVMBr = LLVMOpcode.define('LLVMBr', 2) # type: ignore
-LLVMSwitch = LLVMOpcode.define('LLVMSwitch', 3) # type: ignore
-LLVMIndirectBr = LLVMOpcode.define('LLVMIndirectBr', 4) # type: ignore
-LLVMInvoke = LLVMOpcode.define('LLVMInvoke', 5) # type: ignore
-LLVMUnreachable = LLVMOpcode.define('LLVMUnreachable', 7) # type: ignore
-LLVMCallBr = LLVMOpcode.define('LLVMCallBr', 67) # type: ignore
-LLVMFNeg = LLVMOpcode.define('LLVMFNeg', 66) # type: ignore
-LLVMAdd = LLVMOpcode.define('LLVMAdd', 8) # type: ignore
-LLVMFAdd = LLVMOpcode.define('LLVMFAdd', 9) # type: ignore
-LLVMSub = LLVMOpcode.define('LLVMSub', 10) # type: ignore
-LLVMFSub = LLVMOpcode.define('LLVMFSub', 11) # type: ignore
-LLVMMul = LLVMOpcode.define('LLVMMul', 12) # type: ignore
-LLVMFMul = LLVMOpcode.define('LLVMFMul', 13) # type: ignore
-LLVMUDiv = LLVMOpcode.define('LLVMUDiv', 14) # type: ignore
-LLVMSDiv = LLVMOpcode.define('LLVMSDiv', 15) # type: ignore
-LLVMFDiv = LLVMOpcode.define('LLVMFDiv', 16) # type: ignore
-LLVMURem = LLVMOpcode.define('LLVMURem', 17) # type: ignore
-LLVMSRem = LLVMOpcode.define('LLVMSRem', 18) # type: ignore
-LLVMFRem = LLVMOpcode.define('LLVMFRem', 19) # type: ignore
-LLVMShl = LLVMOpcode.define('LLVMShl', 20) # type: ignore
-LLVMLShr = LLVMOpcode.define('LLVMLShr', 21) # type: ignore
-LLVMAShr = LLVMOpcode.define('LLVMAShr', 22) # type: ignore
-LLVMAnd = LLVMOpcode.define('LLVMAnd', 23) # type: ignore
-LLVMOr = LLVMOpcode.define('LLVMOr', 24) # type: ignore
-LLVMXor = LLVMOpcode.define('LLVMXor', 25) # type: ignore
-LLVMAlloca = LLVMOpcode.define('LLVMAlloca', 26) # type: ignore
-LLVMLoad = LLVMOpcode.define('LLVMLoad', 27) # type: ignore
-LLVMStore = LLVMOpcode.define('LLVMStore', 28) # type: ignore
-LLVMGetElementPtr = LLVMOpcode.define('LLVMGetElementPtr', 29) # type: ignore
-LLVMTrunc = LLVMOpcode.define('LLVMTrunc', 30) # type: ignore
-LLVMZExt = LLVMOpcode.define('LLVMZExt', 31) # type: ignore
-LLVMSExt = LLVMOpcode.define('LLVMSExt', 32) # type: ignore
-LLVMFPToUI = LLVMOpcode.define('LLVMFPToUI', 33) # type: ignore
-LLVMFPToSI = LLVMOpcode.define('LLVMFPToSI', 34) # type: ignore
-LLVMUIToFP = LLVMOpcode.define('LLVMUIToFP', 35) # type: ignore
-LLVMSIToFP = LLVMOpcode.define('LLVMSIToFP', 36) # type: ignore
-LLVMFPTrunc = LLVMOpcode.define('LLVMFPTrunc', 37) # type: ignore
-LLVMFPExt = LLVMOpcode.define('LLVMFPExt', 38) # type: ignore
-LLVMPtrToInt = LLVMOpcode.define('LLVMPtrToInt', 39) # type: ignore
-LLVMIntToPtr = LLVMOpcode.define('LLVMIntToPtr', 40) # type: ignore
-LLVMBitCast = LLVMOpcode.define('LLVMBitCast', 41) # type: ignore
-LLVMAddrSpaceCast = LLVMOpcode.define('LLVMAddrSpaceCast', 60) # type: ignore
-LLVMICmp = LLVMOpcode.define('LLVMICmp', 42) # type: ignore
-LLVMFCmp = LLVMOpcode.define('LLVMFCmp', 43) # type: ignore
-LLVMPHI = LLVMOpcode.define('LLVMPHI', 44) # type: ignore
-LLVMCall = LLVMOpcode.define('LLVMCall', 45) # type: ignore
-LLVMSelect = LLVMOpcode.define('LLVMSelect', 46) # type: ignore
-LLVMUserOp1 = LLVMOpcode.define('LLVMUserOp1', 47) # type: ignore
-LLVMUserOp2 = LLVMOpcode.define('LLVMUserOp2', 48) # type: ignore
-LLVMVAArg = LLVMOpcode.define('LLVMVAArg', 49) # type: ignore
-LLVMExtractElement = LLVMOpcode.define('LLVMExtractElement', 50) # type: ignore
-LLVMInsertElement = LLVMOpcode.define('LLVMInsertElement', 51) # type: ignore
-LLVMShuffleVector = LLVMOpcode.define('LLVMShuffleVector', 52) # type: ignore
-LLVMExtractValue = LLVMOpcode.define('LLVMExtractValue', 53) # type: ignore
-LLVMInsertValue = LLVMOpcode.define('LLVMInsertValue', 54) # type: ignore
-LLVMFreeze = LLVMOpcode.define('LLVMFreeze', 68) # type: ignore
-LLVMFence = LLVMOpcode.define('LLVMFence', 55) # type: ignore
-LLVMAtomicCmpXchg = LLVMOpcode.define('LLVMAtomicCmpXchg', 56) # type: ignore
-LLVMAtomicRMW = LLVMOpcode.define('LLVMAtomicRMW', 57) # type: ignore
-LLVMResume = LLVMOpcode.define('LLVMResume', 58) # type: ignore
-LLVMLandingPad = LLVMOpcode.define('LLVMLandingPad', 59) # type: ignore
-LLVMCleanupRet = LLVMOpcode.define('LLVMCleanupRet', 61) # type: ignore
-LLVMCatchRet = LLVMOpcode.define('LLVMCatchRet', 62) # type: ignore
-LLVMCatchPad = LLVMOpcode.define('LLVMCatchPad', 63) # type: ignore
-LLVMCleanupPad = LLVMOpcode.define('LLVMCleanupPad', 64) # type: ignore
-LLVMCatchSwitch = LLVMOpcode.define('LLVMCatchSwitch', 65) # type: ignore
+class LLVMOpcode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMRet = LLVMOpcode.define('LLVMRet', 1)
+LLVMBr = LLVMOpcode.define('LLVMBr', 2)
+LLVMSwitch = LLVMOpcode.define('LLVMSwitch', 3)
+LLVMIndirectBr = LLVMOpcode.define('LLVMIndirectBr', 4)
+LLVMInvoke = LLVMOpcode.define('LLVMInvoke', 5)
+LLVMUnreachable = LLVMOpcode.define('LLVMUnreachable', 7)
+LLVMCallBr = LLVMOpcode.define('LLVMCallBr', 67)
+LLVMFNeg = LLVMOpcode.define('LLVMFNeg', 66)
+LLVMAdd = LLVMOpcode.define('LLVMAdd', 8)
+LLVMFAdd = LLVMOpcode.define('LLVMFAdd', 9)
+LLVMSub = LLVMOpcode.define('LLVMSub', 10)
+LLVMFSub = LLVMOpcode.define('LLVMFSub', 11)
+LLVMMul = LLVMOpcode.define('LLVMMul', 12)
+LLVMFMul = LLVMOpcode.define('LLVMFMul', 13)
+LLVMUDiv = LLVMOpcode.define('LLVMUDiv', 14)
+LLVMSDiv = LLVMOpcode.define('LLVMSDiv', 15)
+LLVMFDiv = LLVMOpcode.define('LLVMFDiv', 16)
+LLVMURem = LLVMOpcode.define('LLVMURem', 17)
+LLVMSRem = LLVMOpcode.define('LLVMSRem', 18)
+LLVMFRem = LLVMOpcode.define('LLVMFRem', 19)
+LLVMShl = LLVMOpcode.define('LLVMShl', 20)
+LLVMLShr = LLVMOpcode.define('LLVMLShr', 21)
+LLVMAShr = LLVMOpcode.define('LLVMAShr', 22)
+LLVMAnd = LLVMOpcode.define('LLVMAnd', 23)
+LLVMOr = LLVMOpcode.define('LLVMOr', 24)
+LLVMXor = LLVMOpcode.define('LLVMXor', 25)
+LLVMAlloca = LLVMOpcode.define('LLVMAlloca', 26)
+LLVMLoad = LLVMOpcode.define('LLVMLoad', 27)
+LLVMStore = LLVMOpcode.define('LLVMStore', 28)
+LLVMGetElementPtr = LLVMOpcode.define('LLVMGetElementPtr', 29)
+LLVMTrunc = LLVMOpcode.define('LLVMTrunc', 30)
+LLVMZExt = LLVMOpcode.define('LLVMZExt', 31)
+LLVMSExt = LLVMOpcode.define('LLVMSExt', 32)
+LLVMFPToUI = LLVMOpcode.define('LLVMFPToUI', 33)
+LLVMFPToSI = LLVMOpcode.define('LLVMFPToSI', 34)
+LLVMUIToFP = LLVMOpcode.define('LLVMUIToFP', 35)
+LLVMSIToFP = LLVMOpcode.define('LLVMSIToFP', 36)
+LLVMFPTrunc = LLVMOpcode.define('LLVMFPTrunc', 37)
+LLVMFPExt = LLVMOpcode.define('LLVMFPExt', 38)
+LLVMPtrToInt = LLVMOpcode.define('LLVMPtrToInt', 39)
+LLVMIntToPtr = LLVMOpcode.define('LLVMIntToPtr', 40)
+LLVMBitCast = LLVMOpcode.define('LLVMBitCast', 41)
+LLVMAddrSpaceCast = LLVMOpcode.define('LLVMAddrSpaceCast', 60)
+LLVMICmp = LLVMOpcode.define('LLVMICmp', 42)
+LLVMFCmp = LLVMOpcode.define('LLVMFCmp', 43)
+LLVMPHI = LLVMOpcode.define('LLVMPHI', 44)
+LLVMCall = LLVMOpcode.define('LLVMCall', 45)
+LLVMSelect = LLVMOpcode.define('LLVMSelect', 46)
+LLVMUserOp1 = LLVMOpcode.define('LLVMUserOp1', 47)
+LLVMUserOp2 = LLVMOpcode.define('LLVMUserOp2', 48)
+LLVMVAArg = LLVMOpcode.define('LLVMVAArg', 49)
+LLVMExtractElement = LLVMOpcode.define('LLVMExtractElement', 50)
+LLVMInsertElement = LLVMOpcode.define('LLVMInsertElement', 51)
+LLVMShuffleVector = LLVMOpcode.define('LLVMShuffleVector', 52)
+LLVMExtractValue = LLVMOpcode.define('LLVMExtractValue', 53)
+LLVMInsertValue = LLVMOpcode.define('LLVMInsertValue', 54)
+LLVMFreeze = LLVMOpcode.define('LLVMFreeze', 68)
+LLVMFence = LLVMOpcode.define('LLVMFence', 55)
+LLVMAtomicCmpXchg = LLVMOpcode.define('LLVMAtomicCmpXchg', 56)
+LLVMAtomicRMW = LLVMOpcode.define('LLVMAtomicRMW', 57)
+LLVMResume = LLVMOpcode.define('LLVMResume', 58)
+LLVMLandingPad = LLVMOpcode.define('LLVMLandingPad', 59)
+LLVMCleanupRet = LLVMOpcode.define('LLVMCleanupRet', 61)
+LLVMCatchRet = LLVMOpcode.define('LLVMCatchRet', 62)
+LLVMCatchPad = LLVMOpcode.define('LLVMCatchPad', 63)
+LLVMCleanupPad = LLVMOpcode.define('LLVMCleanupPad', 64)
+LLVMCatchSwitch = LLVMOpcode.define('LLVMCatchSwitch', 65)
 
-LLVMTypeKind = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMVoidTypeKind = LLVMTypeKind.define('LLVMVoidTypeKind', 0) # type: ignore
-LLVMHalfTypeKind = LLVMTypeKind.define('LLVMHalfTypeKind', 1) # type: ignore
-LLVMFloatTypeKind = LLVMTypeKind.define('LLVMFloatTypeKind', 2) # type: ignore
-LLVMDoubleTypeKind = LLVMTypeKind.define('LLVMDoubleTypeKind', 3) # type: ignore
-LLVMX86_FP80TypeKind = LLVMTypeKind.define('LLVMX86_FP80TypeKind', 4) # type: ignore
-LLVMFP128TypeKind = LLVMTypeKind.define('LLVMFP128TypeKind', 5) # type: ignore
-LLVMPPC_FP128TypeKind = LLVMTypeKind.define('LLVMPPC_FP128TypeKind', 6) # type: ignore
-LLVMLabelTypeKind = LLVMTypeKind.define('LLVMLabelTypeKind', 7) # type: ignore
-LLVMIntegerTypeKind = LLVMTypeKind.define('LLVMIntegerTypeKind', 8) # type: ignore
-LLVMFunctionTypeKind = LLVMTypeKind.define('LLVMFunctionTypeKind', 9) # type: ignore
-LLVMStructTypeKind = LLVMTypeKind.define('LLVMStructTypeKind', 10) # type: ignore
-LLVMArrayTypeKind = LLVMTypeKind.define('LLVMArrayTypeKind', 11) # type: ignore
-LLVMPointerTypeKind = LLVMTypeKind.define('LLVMPointerTypeKind', 12) # type: ignore
-LLVMVectorTypeKind = LLVMTypeKind.define('LLVMVectorTypeKind', 13) # type: ignore
-LLVMMetadataTypeKind = LLVMTypeKind.define('LLVMMetadataTypeKind', 14) # type: ignore
-LLVMTokenTypeKind = LLVMTypeKind.define('LLVMTokenTypeKind', 16) # type: ignore
-LLVMScalableVectorTypeKind = LLVMTypeKind.define('LLVMScalableVectorTypeKind', 17) # type: ignore
-LLVMBFloatTypeKind = LLVMTypeKind.define('LLVMBFloatTypeKind', 18) # type: ignore
-LLVMX86_AMXTypeKind = LLVMTypeKind.define('LLVMX86_AMXTypeKind', 19) # type: ignore
-LLVMTargetExtTypeKind = LLVMTypeKind.define('LLVMTargetExtTypeKind', 20) # type: ignore
+class LLVMTypeKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMVoidTypeKind = LLVMTypeKind.define('LLVMVoidTypeKind', 0)
+LLVMHalfTypeKind = LLVMTypeKind.define('LLVMHalfTypeKind', 1)
+LLVMFloatTypeKind = LLVMTypeKind.define('LLVMFloatTypeKind', 2)
+LLVMDoubleTypeKind = LLVMTypeKind.define('LLVMDoubleTypeKind', 3)
+LLVMX86_FP80TypeKind = LLVMTypeKind.define('LLVMX86_FP80TypeKind', 4)
+LLVMFP128TypeKind = LLVMTypeKind.define('LLVMFP128TypeKind', 5)
+LLVMPPC_FP128TypeKind = LLVMTypeKind.define('LLVMPPC_FP128TypeKind', 6)
+LLVMLabelTypeKind = LLVMTypeKind.define('LLVMLabelTypeKind', 7)
+LLVMIntegerTypeKind = LLVMTypeKind.define('LLVMIntegerTypeKind', 8)
+LLVMFunctionTypeKind = LLVMTypeKind.define('LLVMFunctionTypeKind', 9)
+LLVMStructTypeKind = LLVMTypeKind.define('LLVMStructTypeKind', 10)
+LLVMArrayTypeKind = LLVMTypeKind.define('LLVMArrayTypeKind', 11)
+LLVMPointerTypeKind = LLVMTypeKind.define('LLVMPointerTypeKind', 12)
+LLVMVectorTypeKind = LLVMTypeKind.define('LLVMVectorTypeKind', 13)
+LLVMMetadataTypeKind = LLVMTypeKind.define('LLVMMetadataTypeKind', 14)
+LLVMTokenTypeKind = LLVMTypeKind.define('LLVMTokenTypeKind', 16)
+LLVMScalableVectorTypeKind = LLVMTypeKind.define('LLVMScalableVectorTypeKind', 17)
+LLVMBFloatTypeKind = LLVMTypeKind.define('LLVMBFloatTypeKind', 18)
+LLVMX86_AMXTypeKind = LLVMTypeKind.define('LLVMX86_AMXTypeKind', 19)
+LLVMTargetExtTypeKind = LLVMTypeKind.define('LLVMTargetExtTypeKind', 20)
 
-LLVMLinkage = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMExternalLinkage = LLVMLinkage.define('LLVMExternalLinkage', 0) # type: ignore
-LLVMAvailableExternallyLinkage = LLVMLinkage.define('LLVMAvailableExternallyLinkage', 1) # type: ignore
-LLVMLinkOnceAnyLinkage = LLVMLinkage.define('LLVMLinkOnceAnyLinkage', 2) # type: ignore
-LLVMLinkOnceODRLinkage = LLVMLinkage.define('LLVMLinkOnceODRLinkage', 3) # type: ignore
-LLVMLinkOnceODRAutoHideLinkage = LLVMLinkage.define('LLVMLinkOnceODRAutoHideLinkage', 4) # type: ignore
-LLVMWeakAnyLinkage = LLVMLinkage.define('LLVMWeakAnyLinkage', 5) # type: ignore
-LLVMWeakODRLinkage = LLVMLinkage.define('LLVMWeakODRLinkage', 6) # type: ignore
-LLVMAppendingLinkage = LLVMLinkage.define('LLVMAppendingLinkage', 7) # type: ignore
-LLVMInternalLinkage = LLVMLinkage.define('LLVMInternalLinkage', 8) # type: ignore
-LLVMPrivateLinkage = LLVMLinkage.define('LLVMPrivateLinkage', 9) # type: ignore
-LLVMDLLImportLinkage = LLVMLinkage.define('LLVMDLLImportLinkage', 10) # type: ignore
-LLVMDLLExportLinkage = LLVMLinkage.define('LLVMDLLExportLinkage', 11) # type: ignore
-LLVMExternalWeakLinkage = LLVMLinkage.define('LLVMExternalWeakLinkage', 12) # type: ignore
-LLVMGhostLinkage = LLVMLinkage.define('LLVMGhostLinkage', 13) # type: ignore
-LLVMCommonLinkage = LLVMLinkage.define('LLVMCommonLinkage', 14) # type: ignore
-LLVMLinkerPrivateLinkage = LLVMLinkage.define('LLVMLinkerPrivateLinkage', 15) # type: ignore
-LLVMLinkerPrivateWeakLinkage = LLVMLinkage.define('LLVMLinkerPrivateWeakLinkage', 16) # type: ignore
+class LLVMLinkage(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMExternalLinkage = LLVMLinkage.define('LLVMExternalLinkage', 0)
+LLVMAvailableExternallyLinkage = LLVMLinkage.define('LLVMAvailableExternallyLinkage', 1)
+LLVMLinkOnceAnyLinkage = LLVMLinkage.define('LLVMLinkOnceAnyLinkage', 2)
+LLVMLinkOnceODRLinkage = LLVMLinkage.define('LLVMLinkOnceODRLinkage', 3)
+LLVMLinkOnceODRAutoHideLinkage = LLVMLinkage.define('LLVMLinkOnceODRAutoHideLinkage', 4)
+LLVMWeakAnyLinkage = LLVMLinkage.define('LLVMWeakAnyLinkage', 5)
+LLVMWeakODRLinkage = LLVMLinkage.define('LLVMWeakODRLinkage', 6)
+LLVMAppendingLinkage = LLVMLinkage.define('LLVMAppendingLinkage', 7)
+LLVMInternalLinkage = LLVMLinkage.define('LLVMInternalLinkage', 8)
+LLVMPrivateLinkage = LLVMLinkage.define('LLVMPrivateLinkage', 9)
+LLVMDLLImportLinkage = LLVMLinkage.define('LLVMDLLImportLinkage', 10)
+LLVMDLLExportLinkage = LLVMLinkage.define('LLVMDLLExportLinkage', 11)
+LLVMExternalWeakLinkage = LLVMLinkage.define('LLVMExternalWeakLinkage', 12)
+LLVMGhostLinkage = LLVMLinkage.define('LLVMGhostLinkage', 13)
+LLVMCommonLinkage = LLVMLinkage.define('LLVMCommonLinkage', 14)
+LLVMLinkerPrivateLinkage = LLVMLinkage.define('LLVMLinkerPrivateLinkage', 15)
+LLVMLinkerPrivateWeakLinkage = LLVMLinkage.define('LLVMLinkerPrivateWeakLinkage', 16)
 
-LLVMVisibility = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMDefaultVisibility = LLVMVisibility.define('LLVMDefaultVisibility', 0) # type: ignore
-LLVMHiddenVisibility = LLVMVisibility.define('LLVMHiddenVisibility', 1) # type: ignore
-LLVMProtectedVisibility = LLVMVisibility.define('LLVMProtectedVisibility', 2) # type: ignore
+class LLVMVisibility(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMDefaultVisibility = LLVMVisibility.define('LLVMDefaultVisibility', 0)
+LLVMHiddenVisibility = LLVMVisibility.define('LLVMHiddenVisibility', 1)
+LLVMProtectedVisibility = LLVMVisibility.define('LLVMProtectedVisibility', 2)
 
-LLVMUnnamedAddr = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMNoUnnamedAddr = LLVMUnnamedAddr.define('LLVMNoUnnamedAddr', 0) # type: ignore
-LLVMLocalUnnamedAddr = LLVMUnnamedAddr.define('LLVMLocalUnnamedAddr', 1) # type: ignore
-LLVMGlobalUnnamedAddr = LLVMUnnamedAddr.define('LLVMGlobalUnnamedAddr', 2) # type: ignore
+class LLVMUnnamedAddr(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMNoUnnamedAddr = LLVMUnnamedAddr.define('LLVMNoUnnamedAddr', 0)
+LLVMLocalUnnamedAddr = LLVMUnnamedAddr.define('LLVMLocalUnnamedAddr', 1)
+LLVMGlobalUnnamedAddr = LLVMUnnamedAddr.define('LLVMGlobalUnnamedAddr', 2)
 
-LLVMDLLStorageClass = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMDefaultStorageClass = LLVMDLLStorageClass.define('LLVMDefaultStorageClass', 0) # type: ignore
-LLVMDLLImportStorageClass = LLVMDLLStorageClass.define('LLVMDLLImportStorageClass', 1) # type: ignore
-LLVMDLLExportStorageClass = LLVMDLLStorageClass.define('LLVMDLLExportStorageClass', 2) # type: ignore
+class LLVMDLLStorageClass(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMDefaultStorageClass = LLVMDLLStorageClass.define('LLVMDefaultStorageClass', 0)
+LLVMDLLImportStorageClass = LLVMDLLStorageClass.define('LLVMDLLImportStorageClass', 1)
+LLVMDLLExportStorageClass = LLVMDLLStorageClass.define('LLVMDLLExportStorageClass', 2)
 
-LLVMCallConv = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMCCallConv = LLVMCallConv.define('LLVMCCallConv', 0) # type: ignore
-LLVMFastCallConv = LLVMCallConv.define('LLVMFastCallConv', 8) # type: ignore
-LLVMColdCallConv = LLVMCallConv.define('LLVMColdCallConv', 9) # type: ignore
-LLVMGHCCallConv = LLVMCallConv.define('LLVMGHCCallConv', 10) # type: ignore
-LLVMHiPECallConv = LLVMCallConv.define('LLVMHiPECallConv', 11) # type: ignore
-LLVMAnyRegCallConv = LLVMCallConv.define('LLVMAnyRegCallConv', 13) # type: ignore
-LLVMPreserveMostCallConv = LLVMCallConv.define('LLVMPreserveMostCallConv', 14) # type: ignore
-LLVMPreserveAllCallConv = LLVMCallConv.define('LLVMPreserveAllCallConv', 15) # type: ignore
-LLVMSwiftCallConv = LLVMCallConv.define('LLVMSwiftCallConv', 16) # type: ignore
-LLVMCXXFASTTLSCallConv = LLVMCallConv.define('LLVMCXXFASTTLSCallConv', 17) # type: ignore
-LLVMX86StdcallCallConv = LLVMCallConv.define('LLVMX86StdcallCallConv', 64) # type: ignore
-LLVMX86FastcallCallConv = LLVMCallConv.define('LLVMX86FastcallCallConv', 65) # type: ignore
-LLVMARMAPCSCallConv = LLVMCallConv.define('LLVMARMAPCSCallConv', 66) # type: ignore
-LLVMARMAAPCSCallConv = LLVMCallConv.define('LLVMARMAAPCSCallConv', 67) # type: ignore
-LLVMARMAAPCSVFPCallConv = LLVMCallConv.define('LLVMARMAAPCSVFPCallConv', 68) # type: ignore
-LLVMMSP430INTRCallConv = LLVMCallConv.define('LLVMMSP430INTRCallConv', 69) # type: ignore
-LLVMX86ThisCallCallConv = LLVMCallConv.define('LLVMX86ThisCallCallConv', 70) # type: ignore
-LLVMPTXKernelCallConv = LLVMCallConv.define('LLVMPTXKernelCallConv', 71) # type: ignore
-LLVMPTXDeviceCallConv = LLVMCallConv.define('LLVMPTXDeviceCallConv', 72) # type: ignore
-LLVMSPIRFUNCCallConv = LLVMCallConv.define('LLVMSPIRFUNCCallConv', 75) # type: ignore
-LLVMSPIRKERNELCallConv = LLVMCallConv.define('LLVMSPIRKERNELCallConv', 76) # type: ignore
-LLVMIntelOCLBICallConv = LLVMCallConv.define('LLVMIntelOCLBICallConv', 77) # type: ignore
-LLVMX8664SysVCallConv = LLVMCallConv.define('LLVMX8664SysVCallConv', 78) # type: ignore
-LLVMWin64CallConv = LLVMCallConv.define('LLVMWin64CallConv', 79) # type: ignore
-LLVMX86VectorCallCallConv = LLVMCallConv.define('LLVMX86VectorCallCallConv', 80) # type: ignore
-LLVMHHVMCallConv = LLVMCallConv.define('LLVMHHVMCallConv', 81) # type: ignore
-LLVMHHVMCCallConv = LLVMCallConv.define('LLVMHHVMCCallConv', 82) # type: ignore
-LLVMX86INTRCallConv = LLVMCallConv.define('LLVMX86INTRCallConv', 83) # type: ignore
-LLVMAVRINTRCallConv = LLVMCallConv.define('LLVMAVRINTRCallConv', 84) # type: ignore
-LLVMAVRSIGNALCallConv = LLVMCallConv.define('LLVMAVRSIGNALCallConv', 85) # type: ignore
-LLVMAVRBUILTINCallConv = LLVMCallConv.define('LLVMAVRBUILTINCallConv', 86) # type: ignore
-LLVMAMDGPUVSCallConv = LLVMCallConv.define('LLVMAMDGPUVSCallConv', 87) # type: ignore
-LLVMAMDGPUGSCallConv = LLVMCallConv.define('LLVMAMDGPUGSCallConv', 88) # type: ignore
-LLVMAMDGPUPSCallConv = LLVMCallConv.define('LLVMAMDGPUPSCallConv', 89) # type: ignore
-LLVMAMDGPUCSCallConv = LLVMCallConv.define('LLVMAMDGPUCSCallConv', 90) # type: ignore
-LLVMAMDGPUKERNELCallConv = LLVMCallConv.define('LLVMAMDGPUKERNELCallConv', 91) # type: ignore
-LLVMX86RegCallCallConv = LLVMCallConv.define('LLVMX86RegCallCallConv', 92) # type: ignore
-LLVMAMDGPUHSCallConv = LLVMCallConv.define('LLVMAMDGPUHSCallConv', 93) # type: ignore
-LLVMMSP430BUILTINCallConv = LLVMCallConv.define('LLVMMSP430BUILTINCallConv', 94) # type: ignore
-LLVMAMDGPULSCallConv = LLVMCallConv.define('LLVMAMDGPULSCallConv', 95) # type: ignore
-LLVMAMDGPUESCallConv = LLVMCallConv.define('LLVMAMDGPUESCallConv', 96) # type: ignore
+class LLVMCallConv(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMCCallConv = LLVMCallConv.define('LLVMCCallConv', 0)
+LLVMFastCallConv = LLVMCallConv.define('LLVMFastCallConv', 8)
+LLVMColdCallConv = LLVMCallConv.define('LLVMColdCallConv', 9)
+LLVMGHCCallConv = LLVMCallConv.define('LLVMGHCCallConv', 10)
+LLVMHiPECallConv = LLVMCallConv.define('LLVMHiPECallConv', 11)
+LLVMAnyRegCallConv = LLVMCallConv.define('LLVMAnyRegCallConv', 13)
+LLVMPreserveMostCallConv = LLVMCallConv.define('LLVMPreserveMostCallConv', 14)
+LLVMPreserveAllCallConv = LLVMCallConv.define('LLVMPreserveAllCallConv', 15)
+LLVMSwiftCallConv = LLVMCallConv.define('LLVMSwiftCallConv', 16)
+LLVMCXXFASTTLSCallConv = LLVMCallConv.define('LLVMCXXFASTTLSCallConv', 17)
+LLVMX86StdcallCallConv = LLVMCallConv.define('LLVMX86StdcallCallConv', 64)
+LLVMX86FastcallCallConv = LLVMCallConv.define('LLVMX86FastcallCallConv', 65)
+LLVMARMAPCSCallConv = LLVMCallConv.define('LLVMARMAPCSCallConv', 66)
+LLVMARMAAPCSCallConv = LLVMCallConv.define('LLVMARMAAPCSCallConv', 67)
+LLVMARMAAPCSVFPCallConv = LLVMCallConv.define('LLVMARMAAPCSVFPCallConv', 68)
+LLVMMSP430INTRCallConv = LLVMCallConv.define('LLVMMSP430INTRCallConv', 69)
+LLVMX86ThisCallCallConv = LLVMCallConv.define('LLVMX86ThisCallCallConv', 70)
+LLVMPTXKernelCallConv = LLVMCallConv.define('LLVMPTXKernelCallConv', 71)
+LLVMPTXDeviceCallConv = LLVMCallConv.define('LLVMPTXDeviceCallConv', 72)
+LLVMSPIRFUNCCallConv = LLVMCallConv.define('LLVMSPIRFUNCCallConv', 75)
+LLVMSPIRKERNELCallConv = LLVMCallConv.define('LLVMSPIRKERNELCallConv', 76)
+LLVMIntelOCLBICallConv = LLVMCallConv.define('LLVMIntelOCLBICallConv', 77)
+LLVMX8664SysVCallConv = LLVMCallConv.define('LLVMX8664SysVCallConv', 78)
+LLVMWin64CallConv = LLVMCallConv.define('LLVMWin64CallConv', 79)
+LLVMX86VectorCallCallConv = LLVMCallConv.define('LLVMX86VectorCallCallConv', 80)
+LLVMHHVMCallConv = LLVMCallConv.define('LLVMHHVMCallConv', 81)
+LLVMHHVMCCallConv = LLVMCallConv.define('LLVMHHVMCCallConv', 82)
+LLVMX86INTRCallConv = LLVMCallConv.define('LLVMX86INTRCallConv', 83)
+LLVMAVRINTRCallConv = LLVMCallConv.define('LLVMAVRINTRCallConv', 84)
+LLVMAVRSIGNALCallConv = LLVMCallConv.define('LLVMAVRSIGNALCallConv', 85)
+LLVMAVRBUILTINCallConv = LLVMCallConv.define('LLVMAVRBUILTINCallConv', 86)
+LLVMAMDGPUVSCallConv = LLVMCallConv.define('LLVMAMDGPUVSCallConv', 87)
+LLVMAMDGPUGSCallConv = LLVMCallConv.define('LLVMAMDGPUGSCallConv', 88)
+LLVMAMDGPUPSCallConv = LLVMCallConv.define('LLVMAMDGPUPSCallConv', 89)
+LLVMAMDGPUCSCallConv = LLVMCallConv.define('LLVMAMDGPUCSCallConv', 90)
+LLVMAMDGPUKERNELCallConv = LLVMCallConv.define('LLVMAMDGPUKERNELCallConv', 91)
+LLVMX86RegCallCallConv = LLVMCallConv.define('LLVMX86RegCallCallConv', 92)
+LLVMAMDGPUHSCallConv = LLVMCallConv.define('LLVMAMDGPUHSCallConv', 93)
+LLVMMSP430BUILTINCallConv = LLVMCallConv.define('LLVMMSP430BUILTINCallConv', 94)
+LLVMAMDGPULSCallConv = LLVMCallConv.define('LLVMAMDGPULSCallConv', 95)
+LLVMAMDGPUESCallConv = LLVMCallConv.define('LLVMAMDGPUESCallConv', 96)
 
-LLVMValueKind = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMArgumentValueKind = LLVMValueKind.define('LLVMArgumentValueKind', 0) # type: ignore
-LLVMBasicBlockValueKind = LLVMValueKind.define('LLVMBasicBlockValueKind', 1) # type: ignore
-LLVMMemoryUseValueKind = LLVMValueKind.define('LLVMMemoryUseValueKind', 2) # type: ignore
-LLVMMemoryDefValueKind = LLVMValueKind.define('LLVMMemoryDefValueKind', 3) # type: ignore
-LLVMMemoryPhiValueKind = LLVMValueKind.define('LLVMMemoryPhiValueKind', 4) # type: ignore
-LLVMFunctionValueKind = LLVMValueKind.define('LLVMFunctionValueKind', 5) # type: ignore
-LLVMGlobalAliasValueKind = LLVMValueKind.define('LLVMGlobalAliasValueKind', 6) # type: ignore
-LLVMGlobalIFuncValueKind = LLVMValueKind.define('LLVMGlobalIFuncValueKind', 7) # type: ignore
-LLVMGlobalVariableValueKind = LLVMValueKind.define('LLVMGlobalVariableValueKind', 8) # type: ignore
-LLVMBlockAddressValueKind = LLVMValueKind.define('LLVMBlockAddressValueKind', 9) # type: ignore
-LLVMConstantExprValueKind = LLVMValueKind.define('LLVMConstantExprValueKind', 10) # type: ignore
-LLVMConstantArrayValueKind = LLVMValueKind.define('LLVMConstantArrayValueKind', 11) # type: ignore
-LLVMConstantStructValueKind = LLVMValueKind.define('LLVMConstantStructValueKind', 12) # type: ignore
-LLVMConstantVectorValueKind = LLVMValueKind.define('LLVMConstantVectorValueKind', 13) # type: ignore
-LLVMUndefValueValueKind = LLVMValueKind.define('LLVMUndefValueValueKind', 14) # type: ignore
-LLVMConstantAggregateZeroValueKind = LLVMValueKind.define('LLVMConstantAggregateZeroValueKind', 15) # type: ignore
-LLVMConstantDataArrayValueKind = LLVMValueKind.define('LLVMConstantDataArrayValueKind', 16) # type: ignore
-LLVMConstantDataVectorValueKind = LLVMValueKind.define('LLVMConstantDataVectorValueKind', 17) # type: ignore
-LLVMConstantIntValueKind = LLVMValueKind.define('LLVMConstantIntValueKind', 18) # type: ignore
-LLVMConstantFPValueKind = LLVMValueKind.define('LLVMConstantFPValueKind', 19) # type: ignore
-LLVMConstantPointerNullValueKind = LLVMValueKind.define('LLVMConstantPointerNullValueKind', 20) # type: ignore
-LLVMConstantTokenNoneValueKind = LLVMValueKind.define('LLVMConstantTokenNoneValueKind', 21) # type: ignore
-LLVMMetadataAsValueValueKind = LLVMValueKind.define('LLVMMetadataAsValueValueKind', 22) # type: ignore
-LLVMInlineAsmValueKind = LLVMValueKind.define('LLVMInlineAsmValueKind', 23) # type: ignore
-LLVMInstructionValueKind = LLVMValueKind.define('LLVMInstructionValueKind', 24) # type: ignore
-LLVMPoisonValueValueKind = LLVMValueKind.define('LLVMPoisonValueValueKind', 25) # type: ignore
-LLVMConstantTargetNoneValueKind = LLVMValueKind.define('LLVMConstantTargetNoneValueKind', 26) # type: ignore
-LLVMConstantPtrAuthValueKind = LLVMValueKind.define('LLVMConstantPtrAuthValueKind', 27) # type: ignore
+class LLVMValueKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMArgumentValueKind = LLVMValueKind.define('LLVMArgumentValueKind', 0)
+LLVMBasicBlockValueKind = LLVMValueKind.define('LLVMBasicBlockValueKind', 1)
+LLVMMemoryUseValueKind = LLVMValueKind.define('LLVMMemoryUseValueKind', 2)
+LLVMMemoryDefValueKind = LLVMValueKind.define('LLVMMemoryDefValueKind', 3)
+LLVMMemoryPhiValueKind = LLVMValueKind.define('LLVMMemoryPhiValueKind', 4)
+LLVMFunctionValueKind = LLVMValueKind.define('LLVMFunctionValueKind', 5)
+LLVMGlobalAliasValueKind = LLVMValueKind.define('LLVMGlobalAliasValueKind', 6)
+LLVMGlobalIFuncValueKind = LLVMValueKind.define('LLVMGlobalIFuncValueKind', 7)
+LLVMGlobalVariableValueKind = LLVMValueKind.define('LLVMGlobalVariableValueKind', 8)
+LLVMBlockAddressValueKind = LLVMValueKind.define('LLVMBlockAddressValueKind', 9)
+LLVMConstantExprValueKind = LLVMValueKind.define('LLVMConstantExprValueKind', 10)
+LLVMConstantArrayValueKind = LLVMValueKind.define('LLVMConstantArrayValueKind', 11)
+LLVMConstantStructValueKind = LLVMValueKind.define('LLVMConstantStructValueKind', 12)
+LLVMConstantVectorValueKind = LLVMValueKind.define('LLVMConstantVectorValueKind', 13)
+LLVMUndefValueValueKind = LLVMValueKind.define('LLVMUndefValueValueKind', 14)
+LLVMConstantAggregateZeroValueKind = LLVMValueKind.define('LLVMConstantAggregateZeroValueKind', 15)
+LLVMConstantDataArrayValueKind = LLVMValueKind.define('LLVMConstantDataArrayValueKind', 16)
+LLVMConstantDataVectorValueKind = LLVMValueKind.define('LLVMConstantDataVectorValueKind', 17)
+LLVMConstantIntValueKind = LLVMValueKind.define('LLVMConstantIntValueKind', 18)
+LLVMConstantFPValueKind = LLVMValueKind.define('LLVMConstantFPValueKind', 19)
+LLVMConstantPointerNullValueKind = LLVMValueKind.define('LLVMConstantPointerNullValueKind', 20)
+LLVMConstantTokenNoneValueKind = LLVMValueKind.define('LLVMConstantTokenNoneValueKind', 21)
+LLVMMetadataAsValueValueKind = LLVMValueKind.define('LLVMMetadataAsValueValueKind', 22)
+LLVMInlineAsmValueKind = LLVMValueKind.define('LLVMInlineAsmValueKind', 23)
+LLVMInstructionValueKind = LLVMValueKind.define('LLVMInstructionValueKind', 24)
+LLVMPoisonValueValueKind = LLVMValueKind.define('LLVMPoisonValueValueKind', 25)
+LLVMConstantTargetNoneValueKind = LLVMValueKind.define('LLVMConstantTargetNoneValueKind', 26)
+LLVMConstantPtrAuthValueKind = LLVMValueKind.define('LLVMConstantPtrAuthValueKind', 27)
 
-LLVMIntPredicate = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMIntEQ = LLVMIntPredicate.define('LLVMIntEQ', 32) # type: ignore
-LLVMIntNE = LLVMIntPredicate.define('LLVMIntNE', 33) # type: ignore
-LLVMIntUGT = LLVMIntPredicate.define('LLVMIntUGT', 34) # type: ignore
-LLVMIntUGE = LLVMIntPredicate.define('LLVMIntUGE', 35) # type: ignore
-LLVMIntULT = LLVMIntPredicate.define('LLVMIntULT', 36) # type: ignore
-LLVMIntULE = LLVMIntPredicate.define('LLVMIntULE', 37) # type: ignore
-LLVMIntSGT = LLVMIntPredicate.define('LLVMIntSGT', 38) # type: ignore
-LLVMIntSGE = LLVMIntPredicate.define('LLVMIntSGE', 39) # type: ignore
-LLVMIntSLT = LLVMIntPredicate.define('LLVMIntSLT', 40) # type: ignore
-LLVMIntSLE = LLVMIntPredicate.define('LLVMIntSLE', 41) # type: ignore
+class LLVMIntPredicate(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMIntEQ = LLVMIntPredicate.define('LLVMIntEQ', 32)
+LLVMIntNE = LLVMIntPredicate.define('LLVMIntNE', 33)
+LLVMIntUGT = LLVMIntPredicate.define('LLVMIntUGT', 34)
+LLVMIntUGE = LLVMIntPredicate.define('LLVMIntUGE', 35)
+LLVMIntULT = LLVMIntPredicate.define('LLVMIntULT', 36)
+LLVMIntULE = LLVMIntPredicate.define('LLVMIntULE', 37)
+LLVMIntSGT = LLVMIntPredicate.define('LLVMIntSGT', 38)
+LLVMIntSGE = LLVMIntPredicate.define('LLVMIntSGE', 39)
+LLVMIntSLT = LLVMIntPredicate.define('LLVMIntSLT', 40)
+LLVMIntSLE = LLVMIntPredicate.define('LLVMIntSLE', 41)
 
-LLVMRealPredicate = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMRealPredicateFalse = LLVMRealPredicate.define('LLVMRealPredicateFalse', 0) # type: ignore
-LLVMRealOEQ = LLVMRealPredicate.define('LLVMRealOEQ', 1) # type: ignore
-LLVMRealOGT = LLVMRealPredicate.define('LLVMRealOGT', 2) # type: ignore
-LLVMRealOGE = LLVMRealPredicate.define('LLVMRealOGE', 3) # type: ignore
-LLVMRealOLT = LLVMRealPredicate.define('LLVMRealOLT', 4) # type: ignore
-LLVMRealOLE = LLVMRealPredicate.define('LLVMRealOLE', 5) # type: ignore
-LLVMRealONE = LLVMRealPredicate.define('LLVMRealONE', 6) # type: ignore
-LLVMRealORD = LLVMRealPredicate.define('LLVMRealORD', 7) # type: ignore
-LLVMRealUNO = LLVMRealPredicate.define('LLVMRealUNO', 8) # type: ignore
-LLVMRealUEQ = LLVMRealPredicate.define('LLVMRealUEQ', 9) # type: ignore
-LLVMRealUGT = LLVMRealPredicate.define('LLVMRealUGT', 10) # type: ignore
-LLVMRealUGE = LLVMRealPredicate.define('LLVMRealUGE', 11) # type: ignore
-LLVMRealULT = LLVMRealPredicate.define('LLVMRealULT', 12) # type: ignore
-LLVMRealULE = LLVMRealPredicate.define('LLVMRealULE', 13) # type: ignore
-LLVMRealUNE = LLVMRealPredicate.define('LLVMRealUNE', 14) # type: ignore
-LLVMRealPredicateTrue = LLVMRealPredicate.define('LLVMRealPredicateTrue', 15) # type: ignore
+class LLVMRealPredicate(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMRealPredicateFalse = LLVMRealPredicate.define('LLVMRealPredicateFalse', 0)
+LLVMRealOEQ = LLVMRealPredicate.define('LLVMRealOEQ', 1)
+LLVMRealOGT = LLVMRealPredicate.define('LLVMRealOGT', 2)
+LLVMRealOGE = LLVMRealPredicate.define('LLVMRealOGE', 3)
+LLVMRealOLT = LLVMRealPredicate.define('LLVMRealOLT', 4)
+LLVMRealOLE = LLVMRealPredicate.define('LLVMRealOLE', 5)
+LLVMRealONE = LLVMRealPredicate.define('LLVMRealONE', 6)
+LLVMRealORD = LLVMRealPredicate.define('LLVMRealORD', 7)
+LLVMRealUNO = LLVMRealPredicate.define('LLVMRealUNO', 8)
+LLVMRealUEQ = LLVMRealPredicate.define('LLVMRealUEQ', 9)
+LLVMRealUGT = LLVMRealPredicate.define('LLVMRealUGT', 10)
+LLVMRealUGE = LLVMRealPredicate.define('LLVMRealUGE', 11)
+LLVMRealULT = LLVMRealPredicate.define('LLVMRealULT', 12)
+LLVMRealULE = LLVMRealPredicate.define('LLVMRealULE', 13)
+LLVMRealUNE = LLVMRealPredicate.define('LLVMRealUNE', 14)
+LLVMRealPredicateTrue = LLVMRealPredicate.define('LLVMRealPredicateTrue', 15)
 
-LLVMLandingPadClauseTy = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMLandingPadCatch = LLVMLandingPadClauseTy.define('LLVMLandingPadCatch', 0) # type: ignore
-LLVMLandingPadFilter = LLVMLandingPadClauseTy.define('LLVMLandingPadFilter', 1) # type: ignore
+class LLVMLandingPadClauseTy(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMLandingPadCatch = LLVMLandingPadClauseTy.define('LLVMLandingPadCatch', 0)
+LLVMLandingPadFilter = LLVMLandingPadClauseTy.define('LLVMLandingPadFilter', 1)
 
-LLVMThreadLocalMode = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMNotThreadLocal = LLVMThreadLocalMode.define('LLVMNotThreadLocal', 0) # type: ignore
-LLVMGeneralDynamicTLSModel = LLVMThreadLocalMode.define('LLVMGeneralDynamicTLSModel', 1) # type: ignore
-LLVMLocalDynamicTLSModel = LLVMThreadLocalMode.define('LLVMLocalDynamicTLSModel', 2) # type: ignore
-LLVMInitialExecTLSModel = LLVMThreadLocalMode.define('LLVMInitialExecTLSModel', 3) # type: ignore
-LLVMLocalExecTLSModel = LLVMThreadLocalMode.define('LLVMLocalExecTLSModel', 4) # type: ignore
+class LLVMThreadLocalMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMNotThreadLocal = LLVMThreadLocalMode.define('LLVMNotThreadLocal', 0)
+LLVMGeneralDynamicTLSModel = LLVMThreadLocalMode.define('LLVMGeneralDynamicTLSModel', 1)
+LLVMLocalDynamicTLSModel = LLVMThreadLocalMode.define('LLVMLocalDynamicTLSModel', 2)
+LLVMInitialExecTLSModel = LLVMThreadLocalMode.define('LLVMInitialExecTLSModel', 3)
+LLVMLocalExecTLSModel = LLVMThreadLocalMode.define('LLVMLocalExecTLSModel', 4)
 
-LLVMAtomicOrdering = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMAtomicOrderingNotAtomic = LLVMAtomicOrdering.define('LLVMAtomicOrderingNotAtomic', 0) # type: ignore
-LLVMAtomicOrderingUnordered = LLVMAtomicOrdering.define('LLVMAtomicOrderingUnordered', 1) # type: ignore
-LLVMAtomicOrderingMonotonic = LLVMAtomicOrdering.define('LLVMAtomicOrderingMonotonic', 2) # type: ignore
-LLVMAtomicOrderingAcquire = LLVMAtomicOrdering.define('LLVMAtomicOrderingAcquire', 4) # type: ignore
-LLVMAtomicOrderingRelease = LLVMAtomicOrdering.define('LLVMAtomicOrderingRelease', 5) # type: ignore
-LLVMAtomicOrderingAcquireRelease = LLVMAtomicOrdering.define('LLVMAtomicOrderingAcquireRelease', 6) # type: ignore
-LLVMAtomicOrderingSequentiallyConsistent = LLVMAtomicOrdering.define('LLVMAtomicOrderingSequentiallyConsistent', 7) # type: ignore
+class LLVMAtomicOrdering(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMAtomicOrderingNotAtomic = LLVMAtomicOrdering.define('LLVMAtomicOrderingNotAtomic', 0)
+LLVMAtomicOrderingUnordered = LLVMAtomicOrdering.define('LLVMAtomicOrderingUnordered', 1)
+LLVMAtomicOrderingMonotonic = LLVMAtomicOrdering.define('LLVMAtomicOrderingMonotonic', 2)
+LLVMAtomicOrderingAcquire = LLVMAtomicOrdering.define('LLVMAtomicOrderingAcquire', 4)
+LLVMAtomicOrderingRelease = LLVMAtomicOrdering.define('LLVMAtomicOrderingRelease', 5)
+LLVMAtomicOrderingAcquireRelease = LLVMAtomicOrdering.define('LLVMAtomicOrderingAcquireRelease', 6)
+LLVMAtomicOrderingSequentiallyConsistent = LLVMAtomicOrdering.define('LLVMAtomicOrderingSequentiallyConsistent', 7)
 
-LLVMAtomicRMWBinOp = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMAtomicRMWBinOpXchg = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXchg', 0) # type: ignore
-LLVMAtomicRMWBinOpAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAdd', 1) # type: ignore
-LLVMAtomicRMWBinOpSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpSub', 2) # type: ignore
-LLVMAtomicRMWBinOpAnd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAnd', 3) # type: ignore
-LLVMAtomicRMWBinOpNand = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpNand', 4) # type: ignore
-LLVMAtomicRMWBinOpOr = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpOr', 5) # type: ignore
-LLVMAtomicRMWBinOpXor = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXor', 6) # type: ignore
-LLVMAtomicRMWBinOpMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpMax', 7) # type: ignore
-LLVMAtomicRMWBinOpMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpMin', 8) # type: ignore
-LLVMAtomicRMWBinOpUMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUMax', 9) # type: ignore
-LLVMAtomicRMWBinOpUMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUMin', 10) # type: ignore
-LLVMAtomicRMWBinOpFAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFAdd', 11) # type: ignore
-LLVMAtomicRMWBinOpFSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFSub', 12) # type: ignore
-LLVMAtomicRMWBinOpFMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFMax', 13) # type: ignore
-LLVMAtomicRMWBinOpFMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFMin', 14) # type: ignore
-LLVMAtomicRMWBinOpUIncWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUIncWrap', 15) # type: ignore
-LLVMAtomicRMWBinOpUDecWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUDecWrap', 16) # type: ignore
-LLVMAtomicRMWBinOpUSubCond = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubCond', 17) # type: ignore
-LLVMAtomicRMWBinOpUSubSat = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubSat', 18) # type: ignore
+class LLVMAtomicRMWBinOp(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMAtomicRMWBinOpXchg = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXchg', 0)
+LLVMAtomicRMWBinOpAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAdd', 1)
+LLVMAtomicRMWBinOpSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpSub', 2)
+LLVMAtomicRMWBinOpAnd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpAnd', 3)
+LLVMAtomicRMWBinOpNand = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpNand', 4)
+LLVMAtomicRMWBinOpOr = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpOr', 5)
+LLVMAtomicRMWBinOpXor = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpXor', 6)
+LLVMAtomicRMWBinOpMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpMax', 7)
+LLVMAtomicRMWBinOpMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpMin', 8)
+LLVMAtomicRMWBinOpUMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUMax', 9)
+LLVMAtomicRMWBinOpUMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUMin', 10)
+LLVMAtomicRMWBinOpFAdd = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFAdd', 11)
+LLVMAtomicRMWBinOpFSub = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFSub', 12)
+LLVMAtomicRMWBinOpFMax = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFMax', 13)
+LLVMAtomicRMWBinOpFMin = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpFMin', 14)
+LLVMAtomicRMWBinOpUIncWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUIncWrap', 15)
+LLVMAtomicRMWBinOpUDecWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUDecWrap', 16)
+LLVMAtomicRMWBinOpUSubCond = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubCond', 17)
+LLVMAtomicRMWBinOpUSubSat = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubSat', 18)
 
-LLVMDiagnosticSeverity = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMDSError = LLVMDiagnosticSeverity.define('LLVMDSError', 0) # type: ignore
-LLVMDSWarning = LLVMDiagnosticSeverity.define('LLVMDSWarning', 1) # type: ignore
-LLVMDSRemark = LLVMDiagnosticSeverity.define('LLVMDSRemark', 2) # type: ignore
-LLVMDSNote = LLVMDiagnosticSeverity.define('LLVMDSNote', 3) # type: ignore
+class LLVMDiagnosticSeverity(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMDSError = LLVMDiagnosticSeverity.define('LLVMDSError', 0)
+LLVMDSWarning = LLVMDiagnosticSeverity.define('LLVMDSWarning', 1)
+LLVMDSRemark = LLVMDiagnosticSeverity.define('LLVMDSRemark', 2)
+LLVMDSNote = LLVMDiagnosticSeverity.define('LLVMDSNote', 3)
 
-LLVMInlineAsmDialect = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMInlineAsmDialectATT = LLVMInlineAsmDialect.define('LLVMInlineAsmDialectATT', 0) # type: ignore
-LLVMInlineAsmDialectIntel = LLVMInlineAsmDialect.define('LLVMInlineAsmDialectIntel', 1) # type: ignore
+class LLVMInlineAsmDialect(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMInlineAsmDialectATT = LLVMInlineAsmDialect.define('LLVMInlineAsmDialectATT', 0)
+LLVMInlineAsmDialectIntel = LLVMInlineAsmDialect.define('LLVMInlineAsmDialectIntel', 1)
 
-LLVMModuleFlagBehavior = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMModuleFlagBehaviorError = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorError', 0) # type: ignore
-LLVMModuleFlagBehaviorWarning = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorWarning', 1) # type: ignore
-LLVMModuleFlagBehaviorRequire = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorRequire', 2) # type: ignore
-LLVMModuleFlagBehaviorOverride = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorOverride', 3) # type: ignore
-LLVMModuleFlagBehaviorAppend = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorAppend', 4) # type: ignore
-LLVMModuleFlagBehaviorAppendUnique = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorAppendUnique', 5) # type: ignore
+class LLVMModuleFlagBehavior(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMModuleFlagBehaviorError = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorError', 0)
+LLVMModuleFlagBehaviorWarning = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorWarning', 1)
+LLVMModuleFlagBehaviorRequire = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorRequire', 2)
+LLVMModuleFlagBehaviorOverride = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorOverride', 3)
+LLVMModuleFlagBehaviorAppend = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorAppend', 4)
+LLVMModuleFlagBehaviorAppendUnique = LLVMModuleFlagBehavior.define('LLVMModuleFlagBehaviorAppendUnique', 5)
 
-_anonenum0 = CEnum(Annotated[int, ctypes.c_int32])
-LLVMAttributeReturnIndex = _anonenum0.define('LLVMAttributeReturnIndex', 0) # type: ignore
-LLVMAttributeFunctionIndex = _anonenum0.define('LLVMAttributeFunctionIndex', -1) # type: ignore
+class _anonenum0(Annotated[int, ctypes.c_int32], c.Enum): pass
+LLVMAttributeReturnIndex = _anonenum0.define('LLVMAttributeReturnIndex', 0)
+LLVMAttributeFunctionIndex = _anonenum0.define('LLVMAttributeFunctionIndex', -1)
 
-LLVMAttributeIndex = Annotated[int, ctypes.c_uint32]
-LLVMTailCallKind = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMTailCallKindNone = LLVMTailCallKind.define('LLVMTailCallKindNone', 0) # type: ignore
-LLVMTailCallKindTail = LLVMTailCallKind.define('LLVMTailCallKindTail', 1) # type: ignore
-LLVMTailCallKindMustTail = LLVMTailCallKind.define('LLVMTailCallKindMustTail', 2) # type: ignore
-LLVMTailCallKindNoTail = LLVMTailCallKind.define('LLVMTailCallKindNoTail', 3) # type: ignore
+LLVMAttributeIndex: TypeAlias = Annotated[int, ctypes.c_uint32]
+class LLVMTailCallKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMTailCallKindNone = LLVMTailCallKind.define('LLVMTailCallKindNone', 0)
+LLVMTailCallKindTail = LLVMTailCallKind.define('LLVMTailCallKindTail', 1)
+LLVMTailCallKindMustTail = LLVMTailCallKind.define('LLVMTailCallKindMustTail', 2)
+LLVMTailCallKindNoTail = LLVMTailCallKind.define('LLVMTailCallKindNoTail', 3)
 
-_anonenum1 = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMFastMathAllowReassoc = _anonenum1.define('LLVMFastMathAllowReassoc', 1) # type: ignore
-LLVMFastMathNoNaNs = _anonenum1.define('LLVMFastMathNoNaNs', 2) # type: ignore
-LLVMFastMathNoInfs = _anonenum1.define('LLVMFastMathNoInfs', 4) # type: ignore
-LLVMFastMathNoSignedZeros = _anonenum1.define('LLVMFastMathNoSignedZeros', 8) # type: ignore
-LLVMFastMathAllowReciprocal = _anonenum1.define('LLVMFastMathAllowReciprocal', 16) # type: ignore
-LLVMFastMathAllowContract = _anonenum1.define('LLVMFastMathAllowContract', 32) # type: ignore
-LLVMFastMathApproxFunc = _anonenum1.define('LLVMFastMathApproxFunc', 64) # type: ignore
-LLVMFastMathNone = _anonenum1.define('LLVMFastMathNone', 0) # type: ignore
-LLVMFastMathAll = _anonenum1.define('LLVMFastMathAll', 127) # type: ignore
+class _anonenum1(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMFastMathAllowReassoc = _anonenum1.define('LLVMFastMathAllowReassoc', 1)
+LLVMFastMathNoNaNs = _anonenum1.define('LLVMFastMathNoNaNs', 2)
+LLVMFastMathNoInfs = _anonenum1.define('LLVMFastMathNoInfs', 4)
+LLVMFastMathNoSignedZeros = _anonenum1.define('LLVMFastMathNoSignedZeros', 8)
+LLVMFastMathAllowReciprocal = _anonenum1.define('LLVMFastMathAllowReciprocal', 16)
+LLVMFastMathAllowContract = _anonenum1.define('LLVMFastMathAllowContract', 32)
+LLVMFastMathApproxFunc = _anonenum1.define('LLVMFastMathApproxFunc', 64)
+LLVMFastMathNone = _anonenum1.define('LLVMFastMathNone', 0)
+LLVMFastMathAll = _anonenum1.define('LLVMFastMathAll', 127)
 
-LLVMFastMathFlags = Annotated[int, ctypes.c_uint32]
-_anonenum2 = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMGEPFlagInBounds = _anonenum2.define('LLVMGEPFlagInBounds', 1) # type: ignore
-LLVMGEPFlagNUSW = _anonenum2.define('LLVMGEPFlagNUSW', 2) # type: ignore
-LLVMGEPFlagNUW = _anonenum2.define('LLVMGEPFlagNUW', 4) # type: ignore
+LLVMFastMathFlags: TypeAlias = Annotated[int, ctypes.c_uint32]
+class _anonenum2(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMGEPFlagInBounds = _anonenum2.define('LLVMGEPFlagInBounds', 1)
+LLVMGEPFlagNUSW = _anonenum2.define('LLVMGEPFlagNUSW', 2)
+LLVMGEPFlagNUW = _anonenum2.define('LLVMGEPFlagNUW', 4)
 
-LLVMGEPNoWrapFlags = Annotated[int, ctypes.c_uint32]
+LLVMGEPNoWrapFlags: TypeAlias = Annotated[int, ctypes.c_uint32]
 @dll.bind
 def LLVMShutdown() -> None: ...
 @dll.bind
@@ -449,8 +449,8 @@ def LLVMCreateMessage(Message:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.P
 @dll.bind
 def LLVMDisposeMessage(Message:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
 class struct_LLVMOpaqueDiagnosticInfo(ctypes.Structure): pass
-LLVMDiagnosticHandler = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueDiagnosticInfo], c.POINTER[None])
-LLVMYieldCallback = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueContext], c.POINTER[None])
+LLVMDiagnosticHandler: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueDiagnosticInfo], c.POINTER[None])
+LLVMYieldCallback: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueContext], c.POINTER[None])
 @dll.bind
 def LLVMContextCreate() -> LLVMContextRef: ...
 @dll.bind
@@ -469,7 +469,7 @@ def LLVMContextShouldDiscardValueNames(C:LLVMContextRef) -> LLVMBool: ...
 def LLVMContextSetDiscardValueNames(C:LLVMContextRef, Discard:LLVMBool) -> None: ...
 @dll.bind
 def LLVMContextDispose(C:LLVMContextRef) -> None: ...
-LLVMDiagnosticInfoRef = c.POINTER[struct_LLVMOpaqueDiagnosticInfo]
+LLVMDiagnosticInfoRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDiagnosticInfo]
 @dll.bind
 def LLVMGetDiagInfoDescription(DI:LLVMDiagnosticInfoRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
@@ -478,16 +478,16 @@ def LLVMGetDiagInfoSeverity(DI:LLVMDiagnosticInfoRef) -> LLVMDiagnosticSeverity:
 def LLVMGetMDKindIDInContext(C:LLVMContextRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
 def LLVMGetMDKindID(Name:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
-size_t = Annotated[int, ctypes.c_uint64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def LLVMGetSyncScopeID(C:LLVMContextRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:size_t) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
 def LLVMGetEnumAttributeKindForName(Name:c.POINTER[Annotated[bytes, ctypes.c_char]], SLen:size_t) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
 def LLVMGetLastEnumAttributeKind() -> Annotated[int, ctypes.c_uint32]: ...
-uint64_t = Annotated[int, ctypes.c_uint64]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 class struct_LLVMOpaqueAttributeRef(ctypes.Structure): pass
-LLVMAttributeRef = c.POINTER[struct_LLVMOpaqueAttributeRef]
+LLVMAttributeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueAttributeRef]
 @dll.bind
 def LLVMCreateEnumAttribute(C:LLVMContextRef, KindID:Annotated[int, ctypes.c_uint32], Val:uint64_t) -> LLVMAttributeRef: ...
 @dll.bind
@@ -495,7 +495,7 @@ def LLVMGetEnumAttributeKind(A:LLVMAttributeRef) -> Annotated[int, ctypes.c_uint
 @dll.bind
 def LLVMGetEnumAttributeValue(A:LLVMAttributeRef) -> uint64_t: ...
 class struct_LLVMOpaqueType(ctypes.Structure): pass
-LLVMTypeRef = c.POINTER[struct_LLVMOpaqueType]
+LLVMTypeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueType]
 @dll.bind
 def LLVMCreateTypeAttribute(C:LLVMContextRef, KindID:Annotated[int, ctypes.c_uint32], type_ref:LLVMTypeRef) -> LLVMAttributeRef: ...
 @dll.bind
@@ -557,7 +557,7 @@ def LLVMModuleFlagEntriesGetFlagBehavior(Entries:c.POINTER[LLVMModuleFlagEntry],
 @dll.bind
 def LLVMModuleFlagEntriesGetKey(Entries:c.POINTER[LLVMModuleFlagEntry], Index:Annotated[int, ctypes.c_uint32], Len:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 class struct_LLVMOpaqueMetadata(ctypes.Structure): pass
-LLVMMetadataRef = c.POINTER[struct_LLVMOpaqueMetadata]
+LLVMMetadataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMetadata]
 @dll.bind
 def LLVMModuleFlagEntriesGetMetadata(Entries:c.POINTER[LLVMModuleFlagEntry], Index:Annotated[int, ctypes.c_uint32]) -> LLVMMetadataRef: ...
 @dll.bind
@@ -597,7 +597,7 @@ def LLVMGetModuleContext(M:LLVMModuleRef) -> LLVMContextRef: ...
 @dll.bind
 def LLVMGetTypeByName(M:LLVMModuleRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMTypeRef: ...
 class struct_LLVMOpaqueNamedMDNode(ctypes.Structure): pass
-LLVMNamedMDNodeRef = c.POINTER[struct_LLVMOpaqueNamedMDNode]
+LLVMNamedMDNodeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueNamedMDNode]
 @dll.bind
 def LLVMGetFirstNamedMetadata(M:LLVMModuleRef) -> LLVMNamedMDNodeRef: ...
 @dll.bind
@@ -821,7 +821,7 @@ def LLVMPrintValueToString(Val:LLVMValueRef) -> c.POINTER[Annotated[bytes, ctype
 @dll.bind
 def LLVMGetValueContext(Val:LLVMValueRef) -> LLVMContextRef: ...
 class struct_LLVMOpaqueDbgRecord(ctypes.Structure): pass
-LLVMDbgRecordRef = c.POINTER[struct_LLVMOpaqueDbgRecord]
+LLVMDbgRecordRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDbgRecord]
 @dll.bind
 def LLVMPrintDbgRecordToString(Record:LLVMDbgRecordRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
@@ -1021,7 +1021,7 @@ def LLVMGetValueName(Val:LLVMValueRef) -> c.POINTER[Annotated[bytes, ctypes.c_ch
 @dll.bind
 def LLVMSetValueName(Val:LLVMValueRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
 class struct_LLVMOpaqueUse(ctypes.Structure): pass
-LLVMUseRef = c.POINTER[struct_LLVMOpaqueUse]
+LLVMUseRef: TypeAlias = c.POINTER[struct_LLVMOpaqueUse]
 @dll.bind
 def LLVMGetFirstUse(Val:LLVMValueRef) -> LLVMUseRef: ...
 @dll.bind
@@ -1054,7 +1054,7 @@ def LLVMConstPointerNull(Ty:LLVMTypeRef) -> LLVMValueRef: ...
 def LLVMConstInt(IntTy:LLVMTypeRef, N:Annotated[int, ctypes.c_uint64], SignExtend:LLVMBool) -> LLVMValueRef: ...
 @dll.bind
 def LLVMConstIntOfArbitraryPrecision(IntTy:LLVMTypeRef, NumWords:Annotated[int, ctypes.c_uint32], Words:c.Array[uint64_t, Literal[0]]) -> LLVMValueRef: ...
-uint8_t = Annotated[int, ctypes.c_ubyte]
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
 @dll.bind
 def LLVMConstIntOfString(IntTy:LLVMTypeRef, Text:c.POINTER[Annotated[bytes, ctypes.c_char]], Radix:uint8_t) -> LLVMValueRef: ...
 @dll.bind
@@ -1160,7 +1160,7 @@ def LLVMConstInsertElement(VectorConstant:LLVMValueRef, ElementValueConstant:LLV
 @dll.bind
 def LLVMConstShuffleVector(VectorAConstant:LLVMValueRef, VectorBConstant:LLVMValueRef, MaskConstant:LLVMValueRef) -> LLVMValueRef: ...
 class struct_LLVMOpaqueBasicBlock(ctypes.Structure): pass
-LLVMBasicBlockRef = c.POINTER[struct_LLVMOpaqueBasicBlock]
+LLVMBasicBlockRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBasicBlock]
 @dll.bind
 def LLVMBlockAddress(F:LLVMValueRef, BB:LLVMBasicBlockRef) -> LLVMValueRef: ...
 @dll.bind
@@ -1396,7 +1396,7 @@ def LLVMMDNodeInContext(C:LLVMContextRef, Vals:c.POINTER[LLVMValueRef], Count:An
 @dll.bind
 def LLVMMDNode(Vals:c.POINTER[LLVMValueRef], Count:Annotated[int, ctypes.c_uint32]) -> LLVMValueRef: ...
 class struct_LLVMOpaqueOperandBundle(ctypes.Structure): pass
-LLVMOperandBundleRef = c.POINTER[struct_LLVMOpaqueOperandBundle]
+LLVMOperandBundleRef: TypeAlias = c.POINTER[struct_LLVMOpaqueOperandBundle]
 @dll.bind
 def LLVMCreateOperandBundle(Tag:c.POINTER[Annotated[bytes, ctypes.c_char]], TagLen:size_t, Args:c.POINTER[LLVMValueRef], NumArgs:Annotated[int, ctypes.c_uint32]) -> LLVMOperandBundleRef: ...
 @dll.bind
@@ -1434,7 +1434,7 @@ def LLVMGetPreviousBasicBlock(BB:LLVMBasicBlockRef) -> LLVMBasicBlockRef: ...
 @dll.bind
 def LLVMGetEntryBasicBlock(Fn:LLVMValueRef) -> LLVMBasicBlockRef: ...
 class struct_LLVMOpaqueBuilder(ctypes.Structure): pass
-LLVMBuilderRef = c.POINTER[struct_LLVMOpaqueBuilder]
+LLVMBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBuilder]
 @dll.bind
 def LLVMInsertExistingBasicBlockAfterInsertBlock(Builder:LLVMBuilderRef, BB:LLVMBasicBlockRef) -> None: ...
 @dll.bind
@@ -1946,7 +1946,7 @@ def LLVMGetCmpXchgFailureOrdering(CmpXchgInst:LLVMValueRef) -> LLVMAtomicOrderin
 @dll.bind
 def LLVMSetCmpXchgFailureOrdering(CmpXchgInst:LLVMValueRef, Ordering:LLVMAtomicOrdering) -> None: ...
 class struct_LLVMOpaqueModuleProvider(ctypes.Structure): pass
-LLVMModuleProviderRef = c.POINTER[struct_LLVMOpaqueModuleProvider]
+LLVMModuleProviderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueModuleProvider]
 @dll.bind
 def LLVMCreateModuleProviderForExistingModule(M:LLVMModuleRef) -> LLVMModuleProviderRef: ...
 @dll.bind
@@ -1966,7 +1966,7 @@ def LLVMGetBufferSize(MemBuf:LLVMMemoryBufferRef) -> size_t: ...
 @dll.bind
 def LLVMDisposeMemoryBuffer(MemBuf:LLVMMemoryBufferRef) -> None: ...
 class struct_LLVMOpaquePassManager(ctypes.Structure): pass
-LLVMPassManagerRef = c.POINTER[struct_LLVMOpaquePassManager]
+LLVMPassManagerRef: TypeAlias = c.POINTER[struct_LLVMOpaquePassManager]
 @dll.bind
 def LLVMCreatePassManager() -> LLVMPassManagerRef: ...
 @dll.bind
@@ -1989,159 +1989,159 @@ def LLVMStartMultithreaded() -> LLVMBool: ...
 def LLVMStopMultithreaded() -> None: ...
 @dll.bind
 def LLVMIsMultithreaded() -> LLVMBool: ...
-LLVMDIFlags = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMDIFlagZero = LLVMDIFlags.define('LLVMDIFlagZero', 0) # type: ignore
-LLVMDIFlagPrivate = LLVMDIFlags.define('LLVMDIFlagPrivate', 1) # type: ignore
-LLVMDIFlagProtected = LLVMDIFlags.define('LLVMDIFlagProtected', 2) # type: ignore
-LLVMDIFlagPublic = LLVMDIFlags.define('LLVMDIFlagPublic', 3) # type: ignore
-LLVMDIFlagFwdDecl = LLVMDIFlags.define('LLVMDIFlagFwdDecl', 4) # type: ignore
-LLVMDIFlagAppleBlock = LLVMDIFlags.define('LLVMDIFlagAppleBlock', 8) # type: ignore
-LLVMDIFlagReservedBit4 = LLVMDIFlags.define('LLVMDIFlagReservedBit4', 16) # type: ignore
-LLVMDIFlagVirtual = LLVMDIFlags.define('LLVMDIFlagVirtual', 32) # type: ignore
-LLVMDIFlagArtificial = LLVMDIFlags.define('LLVMDIFlagArtificial', 64) # type: ignore
-LLVMDIFlagExplicit = LLVMDIFlags.define('LLVMDIFlagExplicit', 128) # type: ignore
-LLVMDIFlagPrototyped = LLVMDIFlags.define('LLVMDIFlagPrototyped', 256) # type: ignore
-LLVMDIFlagObjcClassComplete = LLVMDIFlags.define('LLVMDIFlagObjcClassComplete', 512) # type: ignore
-LLVMDIFlagObjectPointer = LLVMDIFlags.define('LLVMDIFlagObjectPointer', 1024) # type: ignore
-LLVMDIFlagVector = LLVMDIFlags.define('LLVMDIFlagVector', 2048) # type: ignore
-LLVMDIFlagStaticMember = LLVMDIFlags.define('LLVMDIFlagStaticMember', 4096) # type: ignore
-LLVMDIFlagLValueReference = LLVMDIFlags.define('LLVMDIFlagLValueReference', 8192) # type: ignore
-LLVMDIFlagRValueReference = LLVMDIFlags.define('LLVMDIFlagRValueReference', 16384) # type: ignore
-LLVMDIFlagReserved = LLVMDIFlags.define('LLVMDIFlagReserved', 32768) # type: ignore
-LLVMDIFlagSingleInheritance = LLVMDIFlags.define('LLVMDIFlagSingleInheritance', 65536) # type: ignore
-LLVMDIFlagMultipleInheritance = LLVMDIFlags.define('LLVMDIFlagMultipleInheritance', 131072) # type: ignore
-LLVMDIFlagVirtualInheritance = LLVMDIFlags.define('LLVMDIFlagVirtualInheritance', 196608) # type: ignore
-LLVMDIFlagIntroducedVirtual = LLVMDIFlags.define('LLVMDIFlagIntroducedVirtual', 262144) # type: ignore
-LLVMDIFlagBitField = LLVMDIFlags.define('LLVMDIFlagBitField', 524288) # type: ignore
-LLVMDIFlagNoReturn = LLVMDIFlags.define('LLVMDIFlagNoReturn', 1048576) # type: ignore
-LLVMDIFlagTypePassByValue = LLVMDIFlags.define('LLVMDIFlagTypePassByValue', 4194304) # type: ignore
-LLVMDIFlagTypePassByReference = LLVMDIFlags.define('LLVMDIFlagTypePassByReference', 8388608) # type: ignore
-LLVMDIFlagEnumClass = LLVMDIFlags.define('LLVMDIFlagEnumClass', 16777216) # type: ignore
-LLVMDIFlagFixedEnum = LLVMDIFlags.define('LLVMDIFlagFixedEnum', 16777216) # type: ignore
-LLVMDIFlagThunk = LLVMDIFlags.define('LLVMDIFlagThunk', 33554432) # type: ignore
-LLVMDIFlagNonTrivial = LLVMDIFlags.define('LLVMDIFlagNonTrivial', 67108864) # type: ignore
-LLVMDIFlagBigEndian = LLVMDIFlags.define('LLVMDIFlagBigEndian', 134217728) # type: ignore
-LLVMDIFlagLittleEndian = LLVMDIFlags.define('LLVMDIFlagLittleEndian', 268435456) # type: ignore
-LLVMDIFlagIndirectVirtualBase = LLVMDIFlags.define('LLVMDIFlagIndirectVirtualBase', 36) # type: ignore
-LLVMDIFlagAccessibility = LLVMDIFlags.define('LLVMDIFlagAccessibility', 3) # type: ignore
-LLVMDIFlagPtrToMemberRep = LLVMDIFlags.define('LLVMDIFlagPtrToMemberRep', 196608) # type: ignore
+class LLVMDIFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMDIFlagZero = LLVMDIFlags.define('LLVMDIFlagZero', 0)
+LLVMDIFlagPrivate = LLVMDIFlags.define('LLVMDIFlagPrivate', 1)
+LLVMDIFlagProtected = LLVMDIFlags.define('LLVMDIFlagProtected', 2)
+LLVMDIFlagPublic = LLVMDIFlags.define('LLVMDIFlagPublic', 3)
+LLVMDIFlagFwdDecl = LLVMDIFlags.define('LLVMDIFlagFwdDecl', 4)
+LLVMDIFlagAppleBlock = LLVMDIFlags.define('LLVMDIFlagAppleBlock', 8)
+LLVMDIFlagReservedBit4 = LLVMDIFlags.define('LLVMDIFlagReservedBit4', 16)
+LLVMDIFlagVirtual = LLVMDIFlags.define('LLVMDIFlagVirtual', 32)
+LLVMDIFlagArtificial = LLVMDIFlags.define('LLVMDIFlagArtificial', 64)
+LLVMDIFlagExplicit = LLVMDIFlags.define('LLVMDIFlagExplicit', 128)
+LLVMDIFlagPrototyped = LLVMDIFlags.define('LLVMDIFlagPrototyped', 256)
+LLVMDIFlagObjcClassComplete = LLVMDIFlags.define('LLVMDIFlagObjcClassComplete', 512)
+LLVMDIFlagObjectPointer = LLVMDIFlags.define('LLVMDIFlagObjectPointer', 1024)
+LLVMDIFlagVector = LLVMDIFlags.define('LLVMDIFlagVector', 2048)
+LLVMDIFlagStaticMember = LLVMDIFlags.define('LLVMDIFlagStaticMember', 4096)
+LLVMDIFlagLValueReference = LLVMDIFlags.define('LLVMDIFlagLValueReference', 8192)
+LLVMDIFlagRValueReference = LLVMDIFlags.define('LLVMDIFlagRValueReference', 16384)
+LLVMDIFlagReserved = LLVMDIFlags.define('LLVMDIFlagReserved', 32768)
+LLVMDIFlagSingleInheritance = LLVMDIFlags.define('LLVMDIFlagSingleInheritance', 65536)
+LLVMDIFlagMultipleInheritance = LLVMDIFlags.define('LLVMDIFlagMultipleInheritance', 131072)
+LLVMDIFlagVirtualInheritance = LLVMDIFlags.define('LLVMDIFlagVirtualInheritance', 196608)
+LLVMDIFlagIntroducedVirtual = LLVMDIFlags.define('LLVMDIFlagIntroducedVirtual', 262144)
+LLVMDIFlagBitField = LLVMDIFlags.define('LLVMDIFlagBitField', 524288)
+LLVMDIFlagNoReturn = LLVMDIFlags.define('LLVMDIFlagNoReturn', 1048576)
+LLVMDIFlagTypePassByValue = LLVMDIFlags.define('LLVMDIFlagTypePassByValue', 4194304)
+LLVMDIFlagTypePassByReference = LLVMDIFlags.define('LLVMDIFlagTypePassByReference', 8388608)
+LLVMDIFlagEnumClass = LLVMDIFlags.define('LLVMDIFlagEnumClass', 16777216)
+LLVMDIFlagFixedEnum = LLVMDIFlags.define('LLVMDIFlagFixedEnum', 16777216)
+LLVMDIFlagThunk = LLVMDIFlags.define('LLVMDIFlagThunk', 33554432)
+LLVMDIFlagNonTrivial = LLVMDIFlags.define('LLVMDIFlagNonTrivial', 67108864)
+LLVMDIFlagBigEndian = LLVMDIFlags.define('LLVMDIFlagBigEndian', 134217728)
+LLVMDIFlagLittleEndian = LLVMDIFlags.define('LLVMDIFlagLittleEndian', 268435456)
+LLVMDIFlagIndirectVirtualBase = LLVMDIFlags.define('LLVMDIFlagIndirectVirtualBase', 36)
+LLVMDIFlagAccessibility = LLVMDIFlags.define('LLVMDIFlagAccessibility', 3)
+LLVMDIFlagPtrToMemberRep = LLVMDIFlags.define('LLVMDIFlagPtrToMemberRep', 196608)
 
-LLVMDWARFSourceLanguage = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMDWARFSourceLanguageC89 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC89', 0) # type: ignore
-LLVMDWARFSourceLanguageC = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC', 1) # type: ignore
-LLVMDWARFSourceLanguageAda83 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda83', 2) # type: ignore
-LLVMDWARFSourceLanguageC_plus_plus = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus', 3) # type: ignore
-LLVMDWARFSourceLanguageCobol74 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageCobol74', 4) # type: ignore
-LLVMDWARFSourceLanguageCobol85 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageCobol85', 5) # type: ignore
-LLVMDWARFSourceLanguageFortran77 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran77', 6) # type: ignore
-LLVMDWARFSourceLanguageFortran90 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran90', 7) # type: ignore
-LLVMDWARFSourceLanguagePascal83 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguagePascal83', 8) # type: ignore
-LLVMDWARFSourceLanguageModula2 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageModula2', 9) # type: ignore
-LLVMDWARFSourceLanguageJava = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageJava', 10) # type: ignore
-LLVMDWARFSourceLanguageC99 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC99', 11) # type: ignore
-LLVMDWARFSourceLanguageAda95 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda95', 12) # type: ignore
-LLVMDWARFSourceLanguageFortran95 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran95', 13) # type: ignore
-LLVMDWARFSourceLanguagePLI = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguagePLI', 14) # type: ignore
-LLVMDWARFSourceLanguageObjC = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageObjC', 15) # type: ignore
-LLVMDWARFSourceLanguageObjC_plus_plus = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageObjC_plus_plus', 16) # type: ignore
-LLVMDWARFSourceLanguageUPC = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageUPC', 17) # type: ignore
-LLVMDWARFSourceLanguageD = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageD', 18) # type: ignore
-LLVMDWARFSourceLanguagePython = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguagePython', 19) # type: ignore
-LLVMDWARFSourceLanguageOpenCL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageOpenCL', 20) # type: ignore
-LLVMDWARFSourceLanguageGo = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGo', 21) # type: ignore
-LLVMDWARFSourceLanguageModula3 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageModula3', 22) # type: ignore
-LLVMDWARFSourceLanguageHaskell = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageHaskell', 23) # type: ignore
-LLVMDWARFSourceLanguageC_plus_plus_03 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_03', 24) # type: ignore
-LLVMDWARFSourceLanguageC_plus_plus_11 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_11', 25) # type: ignore
-LLVMDWARFSourceLanguageOCaml = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageOCaml', 26) # type: ignore
-LLVMDWARFSourceLanguageRust = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageRust', 27) # type: ignore
-LLVMDWARFSourceLanguageC11 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC11', 28) # type: ignore
-LLVMDWARFSourceLanguageSwift = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageSwift', 29) # type: ignore
-LLVMDWARFSourceLanguageJulia = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageJulia', 30) # type: ignore
-LLVMDWARFSourceLanguageDylan = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageDylan', 31) # type: ignore
-LLVMDWARFSourceLanguageC_plus_plus_14 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_14', 32) # type: ignore
-LLVMDWARFSourceLanguageFortran03 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran03', 33) # type: ignore
-LLVMDWARFSourceLanguageFortran08 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran08', 34) # type: ignore
-LLVMDWARFSourceLanguageRenderScript = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageRenderScript', 35) # type: ignore
-LLVMDWARFSourceLanguageBLISS = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageBLISS', 36) # type: ignore
-LLVMDWARFSourceLanguageKotlin = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageKotlin', 37) # type: ignore
-LLVMDWARFSourceLanguageZig = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageZig', 38) # type: ignore
-LLVMDWARFSourceLanguageCrystal = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageCrystal', 39) # type: ignore
-LLVMDWARFSourceLanguageC_plus_plus_17 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_17', 40) # type: ignore
-LLVMDWARFSourceLanguageC_plus_plus_20 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_20', 41) # type: ignore
-LLVMDWARFSourceLanguageC17 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC17', 42) # type: ignore
-LLVMDWARFSourceLanguageFortran18 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran18', 43) # type: ignore
-LLVMDWARFSourceLanguageAda2005 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda2005', 44) # type: ignore
-LLVMDWARFSourceLanguageAda2012 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda2012', 45) # type: ignore
-LLVMDWARFSourceLanguageHIP = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageHIP', 46) # type: ignore
-LLVMDWARFSourceLanguageAssembly = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAssembly', 47) # type: ignore
-LLVMDWARFSourceLanguageC_sharp = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_sharp', 48) # type: ignore
-LLVMDWARFSourceLanguageMojo = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageMojo', 49) # type: ignore
-LLVMDWARFSourceLanguageGLSL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGLSL', 50) # type: ignore
-LLVMDWARFSourceLanguageGLSL_ES = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGLSL_ES', 51) # type: ignore
-LLVMDWARFSourceLanguageHLSL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageHLSL', 52) # type: ignore
-LLVMDWARFSourceLanguageOpenCL_CPP = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageOpenCL_CPP', 53) # type: ignore
-LLVMDWARFSourceLanguageCPP_for_OpenCL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageCPP_for_OpenCL', 54) # type: ignore
-LLVMDWARFSourceLanguageSYCL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageSYCL', 55) # type: ignore
-LLVMDWARFSourceLanguageRuby = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageRuby', 56) # type: ignore
-LLVMDWARFSourceLanguageMove = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageMove', 57) # type: ignore
-LLVMDWARFSourceLanguageHylo = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageHylo', 58) # type: ignore
-LLVMDWARFSourceLanguageMetal = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageMetal', 59) # type: ignore
-LLVMDWARFSourceLanguageMips_Assembler = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageMips_Assembler', 60) # type: ignore
-LLVMDWARFSourceLanguageGOOGLE_RenderScript = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGOOGLE_RenderScript', 61) # type: ignore
-LLVMDWARFSourceLanguageBORLAND_Delphi = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageBORLAND_Delphi', 62) # type: ignore
+class LLVMDWARFSourceLanguage(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMDWARFSourceLanguageC89 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC89', 0)
+LLVMDWARFSourceLanguageC = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC', 1)
+LLVMDWARFSourceLanguageAda83 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda83', 2)
+LLVMDWARFSourceLanguageC_plus_plus = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus', 3)
+LLVMDWARFSourceLanguageCobol74 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageCobol74', 4)
+LLVMDWARFSourceLanguageCobol85 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageCobol85', 5)
+LLVMDWARFSourceLanguageFortran77 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran77', 6)
+LLVMDWARFSourceLanguageFortran90 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran90', 7)
+LLVMDWARFSourceLanguagePascal83 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguagePascal83', 8)
+LLVMDWARFSourceLanguageModula2 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageModula2', 9)
+LLVMDWARFSourceLanguageJava = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageJava', 10)
+LLVMDWARFSourceLanguageC99 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC99', 11)
+LLVMDWARFSourceLanguageAda95 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda95', 12)
+LLVMDWARFSourceLanguageFortran95 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran95', 13)
+LLVMDWARFSourceLanguagePLI = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguagePLI', 14)
+LLVMDWARFSourceLanguageObjC = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageObjC', 15)
+LLVMDWARFSourceLanguageObjC_plus_plus = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageObjC_plus_plus', 16)
+LLVMDWARFSourceLanguageUPC = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageUPC', 17)
+LLVMDWARFSourceLanguageD = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageD', 18)
+LLVMDWARFSourceLanguagePython = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguagePython', 19)
+LLVMDWARFSourceLanguageOpenCL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageOpenCL', 20)
+LLVMDWARFSourceLanguageGo = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGo', 21)
+LLVMDWARFSourceLanguageModula3 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageModula3', 22)
+LLVMDWARFSourceLanguageHaskell = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageHaskell', 23)
+LLVMDWARFSourceLanguageC_plus_plus_03 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_03', 24)
+LLVMDWARFSourceLanguageC_plus_plus_11 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_11', 25)
+LLVMDWARFSourceLanguageOCaml = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageOCaml', 26)
+LLVMDWARFSourceLanguageRust = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageRust', 27)
+LLVMDWARFSourceLanguageC11 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC11', 28)
+LLVMDWARFSourceLanguageSwift = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageSwift', 29)
+LLVMDWARFSourceLanguageJulia = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageJulia', 30)
+LLVMDWARFSourceLanguageDylan = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageDylan', 31)
+LLVMDWARFSourceLanguageC_plus_plus_14 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_14', 32)
+LLVMDWARFSourceLanguageFortran03 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran03', 33)
+LLVMDWARFSourceLanguageFortran08 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran08', 34)
+LLVMDWARFSourceLanguageRenderScript = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageRenderScript', 35)
+LLVMDWARFSourceLanguageBLISS = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageBLISS', 36)
+LLVMDWARFSourceLanguageKotlin = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageKotlin', 37)
+LLVMDWARFSourceLanguageZig = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageZig', 38)
+LLVMDWARFSourceLanguageCrystal = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageCrystal', 39)
+LLVMDWARFSourceLanguageC_plus_plus_17 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_17', 40)
+LLVMDWARFSourceLanguageC_plus_plus_20 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_plus_plus_20', 41)
+LLVMDWARFSourceLanguageC17 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC17', 42)
+LLVMDWARFSourceLanguageFortran18 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageFortran18', 43)
+LLVMDWARFSourceLanguageAda2005 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda2005', 44)
+LLVMDWARFSourceLanguageAda2012 = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAda2012', 45)
+LLVMDWARFSourceLanguageHIP = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageHIP', 46)
+LLVMDWARFSourceLanguageAssembly = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageAssembly', 47)
+LLVMDWARFSourceLanguageC_sharp = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageC_sharp', 48)
+LLVMDWARFSourceLanguageMojo = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageMojo', 49)
+LLVMDWARFSourceLanguageGLSL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGLSL', 50)
+LLVMDWARFSourceLanguageGLSL_ES = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGLSL_ES', 51)
+LLVMDWARFSourceLanguageHLSL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageHLSL', 52)
+LLVMDWARFSourceLanguageOpenCL_CPP = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageOpenCL_CPP', 53)
+LLVMDWARFSourceLanguageCPP_for_OpenCL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageCPP_for_OpenCL', 54)
+LLVMDWARFSourceLanguageSYCL = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageSYCL', 55)
+LLVMDWARFSourceLanguageRuby = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageRuby', 56)
+LLVMDWARFSourceLanguageMove = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageMove', 57)
+LLVMDWARFSourceLanguageHylo = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageHylo', 58)
+LLVMDWARFSourceLanguageMetal = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageMetal', 59)
+LLVMDWARFSourceLanguageMips_Assembler = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageMips_Assembler', 60)
+LLVMDWARFSourceLanguageGOOGLE_RenderScript = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageGOOGLE_RenderScript', 61)
+LLVMDWARFSourceLanguageBORLAND_Delphi = LLVMDWARFSourceLanguage.define('LLVMDWARFSourceLanguageBORLAND_Delphi', 62)
 
-LLVMDWARFEmissionKind = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMDWARFEmissionNone = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionNone', 0) # type: ignore
-LLVMDWARFEmissionFull = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionFull', 1) # type: ignore
-LLVMDWARFEmissionLineTablesOnly = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionLineTablesOnly', 2) # type: ignore
+class LLVMDWARFEmissionKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMDWARFEmissionNone = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionNone', 0)
+LLVMDWARFEmissionFull = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionFull', 1)
+LLVMDWARFEmissionLineTablesOnly = LLVMDWARFEmissionKind.define('LLVMDWARFEmissionLineTablesOnly', 2)
 
-_anonenum3 = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMMDStringMetadataKind = _anonenum3.define('LLVMMDStringMetadataKind', 0) # type: ignore
-LLVMConstantAsMetadataMetadataKind = _anonenum3.define('LLVMConstantAsMetadataMetadataKind', 1) # type: ignore
-LLVMLocalAsMetadataMetadataKind = _anonenum3.define('LLVMLocalAsMetadataMetadataKind', 2) # type: ignore
-LLVMDistinctMDOperandPlaceholderMetadataKind = _anonenum3.define('LLVMDistinctMDOperandPlaceholderMetadataKind', 3) # type: ignore
-LLVMMDTupleMetadataKind = _anonenum3.define('LLVMMDTupleMetadataKind', 4) # type: ignore
-LLVMDILocationMetadataKind = _anonenum3.define('LLVMDILocationMetadataKind', 5) # type: ignore
-LLVMDIExpressionMetadataKind = _anonenum3.define('LLVMDIExpressionMetadataKind', 6) # type: ignore
-LLVMDIGlobalVariableExpressionMetadataKind = _anonenum3.define('LLVMDIGlobalVariableExpressionMetadataKind', 7) # type: ignore
-LLVMGenericDINodeMetadataKind = _anonenum3.define('LLVMGenericDINodeMetadataKind', 8) # type: ignore
-LLVMDISubrangeMetadataKind = _anonenum3.define('LLVMDISubrangeMetadataKind', 9) # type: ignore
-LLVMDIEnumeratorMetadataKind = _anonenum3.define('LLVMDIEnumeratorMetadataKind', 10) # type: ignore
-LLVMDIBasicTypeMetadataKind = _anonenum3.define('LLVMDIBasicTypeMetadataKind', 11) # type: ignore
-LLVMDIDerivedTypeMetadataKind = _anonenum3.define('LLVMDIDerivedTypeMetadataKind', 12) # type: ignore
-LLVMDICompositeTypeMetadataKind = _anonenum3.define('LLVMDICompositeTypeMetadataKind', 13) # type: ignore
-LLVMDISubroutineTypeMetadataKind = _anonenum3.define('LLVMDISubroutineTypeMetadataKind', 14) # type: ignore
-LLVMDIFileMetadataKind = _anonenum3.define('LLVMDIFileMetadataKind', 15) # type: ignore
-LLVMDICompileUnitMetadataKind = _anonenum3.define('LLVMDICompileUnitMetadataKind', 16) # type: ignore
-LLVMDISubprogramMetadataKind = _anonenum3.define('LLVMDISubprogramMetadataKind', 17) # type: ignore
-LLVMDILexicalBlockMetadataKind = _anonenum3.define('LLVMDILexicalBlockMetadataKind', 18) # type: ignore
-LLVMDILexicalBlockFileMetadataKind = _anonenum3.define('LLVMDILexicalBlockFileMetadataKind', 19) # type: ignore
-LLVMDINamespaceMetadataKind = _anonenum3.define('LLVMDINamespaceMetadataKind', 20) # type: ignore
-LLVMDIModuleMetadataKind = _anonenum3.define('LLVMDIModuleMetadataKind', 21) # type: ignore
-LLVMDITemplateTypeParameterMetadataKind = _anonenum3.define('LLVMDITemplateTypeParameterMetadataKind', 22) # type: ignore
-LLVMDITemplateValueParameterMetadataKind = _anonenum3.define('LLVMDITemplateValueParameterMetadataKind', 23) # type: ignore
-LLVMDIGlobalVariableMetadataKind = _anonenum3.define('LLVMDIGlobalVariableMetadataKind', 24) # type: ignore
-LLVMDILocalVariableMetadataKind = _anonenum3.define('LLVMDILocalVariableMetadataKind', 25) # type: ignore
-LLVMDILabelMetadataKind = _anonenum3.define('LLVMDILabelMetadataKind', 26) # type: ignore
-LLVMDIObjCPropertyMetadataKind = _anonenum3.define('LLVMDIObjCPropertyMetadataKind', 27) # type: ignore
-LLVMDIImportedEntityMetadataKind = _anonenum3.define('LLVMDIImportedEntityMetadataKind', 28) # type: ignore
-LLVMDIMacroMetadataKind = _anonenum3.define('LLVMDIMacroMetadataKind', 29) # type: ignore
-LLVMDIMacroFileMetadataKind = _anonenum3.define('LLVMDIMacroFileMetadataKind', 30) # type: ignore
-LLVMDICommonBlockMetadataKind = _anonenum3.define('LLVMDICommonBlockMetadataKind', 31) # type: ignore
-LLVMDIStringTypeMetadataKind = _anonenum3.define('LLVMDIStringTypeMetadataKind', 32) # type: ignore
-LLVMDIGenericSubrangeMetadataKind = _anonenum3.define('LLVMDIGenericSubrangeMetadataKind', 33) # type: ignore
-LLVMDIArgListMetadataKind = _anonenum3.define('LLVMDIArgListMetadataKind', 34) # type: ignore
-LLVMDIAssignIDMetadataKind = _anonenum3.define('LLVMDIAssignIDMetadataKind', 35) # type: ignore
+class _anonenum3(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMMDStringMetadataKind = _anonenum3.define('LLVMMDStringMetadataKind', 0)
+LLVMConstantAsMetadataMetadataKind = _anonenum3.define('LLVMConstantAsMetadataMetadataKind', 1)
+LLVMLocalAsMetadataMetadataKind = _anonenum3.define('LLVMLocalAsMetadataMetadataKind', 2)
+LLVMDistinctMDOperandPlaceholderMetadataKind = _anonenum3.define('LLVMDistinctMDOperandPlaceholderMetadataKind', 3)
+LLVMMDTupleMetadataKind = _anonenum3.define('LLVMMDTupleMetadataKind', 4)
+LLVMDILocationMetadataKind = _anonenum3.define('LLVMDILocationMetadataKind', 5)
+LLVMDIExpressionMetadataKind = _anonenum3.define('LLVMDIExpressionMetadataKind', 6)
+LLVMDIGlobalVariableExpressionMetadataKind = _anonenum3.define('LLVMDIGlobalVariableExpressionMetadataKind', 7)
+LLVMGenericDINodeMetadataKind = _anonenum3.define('LLVMGenericDINodeMetadataKind', 8)
+LLVMDISubrangeMetadataKind = _anonenum3.define('LLVMDISubrangeMetadataKind', 9)
+LLVMDIEnumeratorMetadataKind = _anonenum3.define('LLVMDIEnumeratorMetadataKind', 10)
+LLVMDIBasicTypeMetadataKind = _anonenum3.define('LLVMDIBasicTypeMetadataKind', 11)
+LLVMDIDerivedTypeMetadataKind = _anonenum3.define('LLVMDIDerivedTypeMetadataKind', 12)
+LLVMDICompositeTypeMetadataKind = _anonenum3.define('LLVMDICompositeTypeMetadataKind', 13)
+LLVMDISubroutineTypeMetadataKind = _anonenum3.define('LLVMDISubroutineTypeMetadataKind', 14)
+LLVMDIFileMetadataKind = _anonenum3.define('LLVMDIFileMetadataKind', 15)
+LLVMDICompileUnitMetadataKind = _anonenum3.define('LLVMDICompileUnitMetadataKind', 16)
+LLVMDISubprogramMetadataKind = _anonenum3.define('LLVMDISubprogramMetadataKind', 17)
+LLVMDILexicalBlockMetadataKind = _anonenum3.define('LLVMDILexicalBlockMetadataKind', 18)
+LLVMDILexicalBlockFileMetadataKind = _anonenum3.define('LLVMDILexicalBlockFileMetadataKind', 19)
+LLVMDINamespaceMetadataKind = _anonenum3.define('LLVMDINamespaceMetadataKind', 20)
+LLVMDIModuleMetadataKind = _anonenum3.define('LLVMDIModuleMetadataKind', 21)
+LLVMDITemplateTypeParameterMetadataKind = _anonenum3.define('LLVMDITemplateTypeParameterMetadataKind', 22)
+LLVMDITemplateValueParameterMetadataKind = _anonenum3.define('LLVMDITemplateValueParameterMetadataKind', 23)
+LLVMDIGlobalVariableMetadataKind = _anonenum3.define('LLVMDIGlobalVariableMetadataKind', 24)
+LLVMDILocalVariableMetadataKind = _anonenum3.define('LLVMDILocalVariableMetadataKind', 25)
+LLVMDILabelMetadataKind = _anonenum3.define('LLVMDILabelMetadataKind', 26)
+LLVMDIObjCPropertyMetadataKind = _anonenum3.define('LLVMDIObjCPropertyMetadataKind', 27)
+LLVMDIImportedEntityMetadataKind = _anonenum3.define('LLVMDIImportedEntityMetadataKind', 28)
+LLVMDIMacroMetadataKind = _anonenum3.define('LLVMDIMacroMetadataKind', 29)
+LLVMDIMacroFileMetadataKind = _anonenum3.define('LLVMDIMacroFileMetadataKind', 30)
+LLVMDICommonBlockMetadataKind = _anonenum3.define('LLVMDICommonBlockMetadataKind', 31)
+LLVMDIStringTypeMetadataKind = _anonenum3.define('LLVMDIStringTypeMetadataKind', 32)
+LLVMDIGenericSubrangeMetadataKind = _anonenum3.define('LLVMDIGenericSubrangeMetadataKind', 33)
+LLVMDIArgListMetadataKind = _anonenum3.define('LLVMDIArgListMetadataKind', 34)
+LLVMDIAssignIDMetadataKind = _anonenum3.define('LLVMDIAssignIDMetadataKind', 35)
 
-LLVMMetadataKind = Annotated[int, ctypes.c_uint32]
-LLVMDWARFTypeEncoding = Annotated[int, ctypes.c_uint32]
-LLVMDWARFMacinfoRecordType = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMDWARFMacinfoRecordTypeDefine = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeDefine', 1) # type: ignore
-LLVMDWARFMacinfoRecordTypeMacro = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeMacro', 2) # type: ignore
-LLVMDWARFMacinfoRecordTypeStartFile = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeStartFile', 3) # type: ignore
-LLVMDWARFMacinfoRecordTypeEndFile = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeEndFile', 4) # type: ignore
-LLVMDWARFMacinfoRecordTypeVendorExt = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeVendorExt', 255) # type: ignore
+LLVMMetadataKind: TypeAlias = Annotated[int, ctypes.c_uint32]
+LLVMDWARFTypeEncoding: TypeAlias = Annotated[int, ctypes.c_uint32]
+class LLVMDWARFMacinfoRecordType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMDWARFMacinfoRecordTypeDefine = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeDefine', 1)
+LLVMDWARFMacinfoRecordTypeMacro = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeMacro', 2)
+LLVMDWARFMacinfoRecordTypeStartFile = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeStartFile', 3)
+LLVMDWARFMacinfoRecordTypeEndFile = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeEndFile', 4)
+LLVMDWARFMacinfoRecordTypeVendorExt = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeVendorExt', 255)
 
 @dll.bind
 def LLVMDebugMetadataVersion() -> Annotated[int, ctypes.c_uint32]: ...
@@ -2150,7 +2150,7 @@ def LLVMGetModuleDebugMetadataVersion(Module:LLVMModuleRef) -> Annotated[int, ct
 @dll.bind
 def LLVMStripModuleDebugInfo(Module:LLVMModuleRef) -> LLVMBool: ...
 class struct_LLVMOpaqueDIBuilder(ctypes.Structure): pass
-LLVMDIBuilderRef = c.POINTER[struct_LLVMOpaqueDIBuilder]
+LLVMDIBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDIBuilder]
 @dll.bind
 def LLVMCreateDIBuilderDisallowUnresolved(M:LLVMModuleRef) -> LLVMDIBuilderRef: ...
 @dll.bind
@@ -2209,10 +2209,10 @@ def LLVMDIBuilderCreateSubroutineType(Builder:LLVMDIBuilderRef, File:LLVMMetadat
 def LLVMDIBuilderCreateMacro(Builder:LLVMDIBuilderRef, ParentMacroFile:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], RecordType:LLVMDWARFMacinfoRecordType, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Value:c.POINTER[Annotated[bytes, ctypes.c_char]], ValueLen:size_t) -> LLVMMetadataRef: ...
 @dll.bind
 def LLVMDIBuilderCreateTempMacroFile(Builder:LLVMDIBuilderRef, ParentMacroFile:LLVMMetadataRef, Line:Annotated[int, ctypes.c_uint32], File:LLVMMetadataRef) -> LLVMMetadataRef: ...
-int64_t = Annotated[int, ctypes.c_int64]
+int64_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def LLVMDIBuilderCreateEnumerator(Builder:LLVMDIBuilderRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Value:int64_t, IsUnsigned:LLVMBool) -> LLVMMetadataRef: ...
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @dll.bind
 def LLVMDIBuilderCreateEnumerationType(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, File:LLVMMetadataRef, LineNumber:Annotated[int, ctypes.c_uint32], SizeInBits:uint64_t, AlignInBits:uint32_t, Elements:c.POINTER[LLVMMetadataRef], NumElements:Annotated[int, ctypes.c_uint32], ClassTy:LLVMMetadataRef) -> LLVMMetadataRef: ...
 @dll.bind
@@ -2283,7 +2283,7 @@ def LLVMDIBuilderCreateExpression(Builder:LLVMDIBuilderRef, Addr:c.POINTER[uint6
 def LLVMDIBuilderCreateConstantValueExpression(Builder:LLVMDIBuilderRef, Value:uint64_t) -> LLVMMetadataRef: ...
 @dll.bind
 def LLVMDIBuilderCreateGlobalVariableExpression(Builder:LLVMDIBuilderRef, Scope:LLVMMetadataRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]], NameLen:size_t, Linkage:c.POINTER[Annotated[bytes, ctypes.c_char]], LinkLen:size_t, File:LLVMMetadataRef, LineNo:Annotated[int, ctypes.c_uint32], Ty:LLVMMetadataRef, LocalToUnit:LLVMBool, Expr:LLVMMetadataRef, Decl:LLVMMetadataRef, AlignInBits:uint32_t) -> LLVMMetadataRef: ...
-uint16_t = Annotated[int, ctypes.c_uint16]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 @dll.bind
 def LLVMGetDINodeTag(MD:LLVMMetadataRef) -> uint16_t: ...
 @dll.bind
@@ -2334,9 +2334,9 @@ def LLVMDIBuilderInsertLabelBefore(Builder:LLVMDIBuilderRef, LabelInfo:LLVMMetad
 def LLVMDIBuilderInsertLabelAtEnd(Builder:LLVMDIBuilderRef, LabelInfo:LLVMMetadataRef, Location:LLVMMetadataRef, InsertAtEnd:LLVMBasicBlockRef) -> LLVMDbgRecordRef: ...
 @dll.bind
 def LLVMGetMetadataKind(Metadata:LLVMMetadataRef) -> LLVMMetadataKind: ...
-LLVMOpInfoCallback = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_int32], c.POINTER[None])
-LLVMSymbolLookupCallback = c.CFUNCTYPE(c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None], Annotated[int, ctypes.c_uint64], c.POINTER[Annotated[int, ctypes.c_uint64]], Annotated[int, ctypes.c_uint64], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]])
-LLVMDisasmContextRef = c.POINTER[None]
+LLVMOpInfoCallback: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_int32], c.POINTER[None])
+LLVMSymbolLookupCallback: TypeAlias = c.CFUNCTYPE(c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None], Annotated[int, ctypes.c_uint64], c.POINTER[Annotated[int, ctypes.c_uint64]], Annotated[int, ctypes.c_uint64], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]])
+LLVMDisasmContextRef: TypeAlias = c.POINTER[None]
 @dll.bind
 def LLVMCreateDisasm(TripleName:c.POINTER[Annotated[bytes, ctypes.c_char]], DisInfo:c.POINTER[None], TagType:Annotated[int, ctypes.c_int32], GetOpInfo:LLVMOpInfoCallback, SymbolLookUp:LLVMSymbolLookupCallback) -> LLVMDisasmContextRef: ...
 @dll.bind
@@ -2363,8 +2363,8 @@ class struct_LLVMOpInfo1(c.Struct):
   Value: Annotated[uint64_t, 48]
   VariantKind: Annotated[uint64_t, 56]
 class struct_LLVMOpaqueError(ctypes.Structure): pass
-LLVMErrorRef = c.POINTER[struct_LLVMOpaqueError]
-LLVMErrorTypeId = c.POINTER[None]
+LLVMErrorRef: TypeAlias = c.POINTER[struct_LLVMOpaqueError]
+LLVMErrorTypeId: TypeAlias = c.POINTER[None]
 @dll.bind
 def LLVMGetErrorTypeId(Err:LLVMErrorRef) -> LLVMErrorTypeId: ...
 @dll.bind
@@ -2634,7 +2634,7 @@ def LLVMInitializeM68kDisassembler() -> None: ...
 @dll.bind
 def LLVMInitializeXtensaDisassembler() -> None: ...
 class struct_LLVMOpaqueTargetData(ctypes.Structure): pass
-LLVMTargetDataRef = c.POINTER[struct_LLVMOpaqueTargetData]
+LLVMTargetDataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetData]
 @dll.bind
 def LLVMGetModuleDataLayout(M:LLVMModuleRef) -> LLVMTargetDataRef: ...
 @dll.bind
@@ -2644,14 +2644,14 @@ def LLVMCreateTargetData(StringRep:c.POINTER[Annotated[bytes, ctypes.c_char]]) -
 @dll.bind
 def LLVMDisposeTargetData(TD:LLVMTargetDataRef) -> None: ...
 class struct_LLVMOpaqueTargetLibraryInfotData(ctypes.Structure): pass
-LLVMTargetLibraryInfoRef = c.POINTER[struct_LLVMOpaqueTargetLibraryInfotData]
+LLVMTargetLibraryInfoRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetLibraryInfotData]
 @dll.bind
 def LLVMAddTargetLibraryInfo(TLI:LLVMTargetLibraryInfoRef, PM:LLVMPassManagerRef) -> None: ...
 @dll.bind
 def LLVMCopyStringRepOfTargetData(TD:LLVMTargetDataRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-enum_LLVMByteOrdering = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMBigEndian = enum_LLVMByteOrdering.define('LLVMBigEndian', 0) # type: ignore
-LLVMLittleEndian = enum_LLVMByteOrdering.define('LLVMLittleEndian', 1) # type: ignore
+class enum_LLVMByteOrdering(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMBigEndian = enum_LLVMByteOrdering.define('LLVMBigEndian', 0)
+LLVMLittleEndian = enum_LLVMByteOrdering.define('LLVMLittleEndian', 1)
 
 @dll.bind
 def LLVMByteOrder(TD:LLVMTargetDataRef) -> enum_LLVMByteOrdering: ...
@@ -2686,7 +2686,7 @@ def LLVMElementAtOffset(TD:LLVMTargetDataRef, StructTy:LLVMTypeRef, Offset:Annot
 @dll.bind
 def LLVMOffsetOfElement(TD:LLVMTargetDataRef, StructTy:LLVMTypeRef, Element:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint64]: ...
 class struct_LLVMTarget(ctypes.Structure): pass
-LLVMTargetRef = c.POINTER[struct_LLVMTarget]
+LLVMTargetRef: TypeAlias = c.POINTER[struct_LLVMTarget]
 @dll.bind
 def LLVMGetFirstTarget() -> LLVMTargetRef: ...
 @dll.bind
@@ -2706,7 +2706,7 @@ def LLVMTargetHasTargetMachine(T:LLVMTargetRef) -> LLVMBool: ...
 @dll.bind
 def LLVMTargetHasAsmBackend(T:LLVMTargetRef) -> LLVMBool: ...
 class struct_LLVMOpaqueTargetMachineOptions(ctypes.Structure): pass
-LLVMTargetMachineOptionsRef = c.POINTER[struct_LLVMOpaqueTargetMachineOptions]
+LLVMTargetMachineOptionsRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetMachineOptions]
 @dll.bind
 def LLVMCreateTargetMachineOptions() -> LLVMTargetMachineOptionsRef: ...
 @dll.bind
@@ -2717,38 +2717,38 @@ def LLVMTargetMachineOptionsSetCPU(Options:LLVMTargetMachineOptionsRef, CPU:c.PO
 def LLVMTargetMachineOptionsSetFeatures(Options:LLVMTargetMachineOptionsRef, Features:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
 @dll.bind
 def LLVMTargetMachineOptionsSetABI(Options:LLVMTargetMachineOptionsRef, ABI:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
-LLVMCodeGenOptLevel = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMCodeGenLevelNone = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelNone', 0) # type: ignore
-LLVMCodeGenLevelLess = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelLess', 1) # type: ignore
-LLVMCodeGenLevelDefault = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelDefault', 2) # type: ignore
-LLVMCodeGenLevelAggressive = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelAggressive', 3) # type: ignore
+class LLVMCodeGenOptLevel(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMCodeGenLevelNone = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelNone', 0)
+LLVMCodeGenLevelLess = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelLess', 1)
+LLVMCodeGenLevelDefault = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelDefault', 2)
+LLVMCodeGenLevelAggressive = LLVMCodeGenOptLevel.define('LLVMCodeGenLevelAggressive', 3)
 
 @dll.bind
 def LLVMTargetMachineOptionsSetCodeGenOptLevel(Options:LLVMTargetMachineOptionsRef, Level:LLVMCodeGenOptLevel) -> None: ...
-LLVMRelocMode = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMRelocDefault = LLVMRelocMode.define('LLVMRelocDefault', 0) # type: ignore
-LLVMRelocStatic = LLVMRelocMode.define('LLVMRelocStatic', 1) # type: ignore
-LLVMRelocPIC = LLVMRelocMode.define('LLVMRelocPIC', 2) # type: ignore
-LLVMRelocDynamicNoPic = LLVMRelocMode.define('LLVMRelocDynamicNoPic', 3) # type: ignore
-LLVMRelocROPI = LLVMRelocMode.define('LLVMRelocROPI', 4) # type: ignore
-LLVMRelocRWPI = LLVMRelocMode.define('LLVMRelocRWPI', 5) # type: ignore
-LLVMRelocROPI_RWPI = LLVMRelocMode.define('LLVMRelocROPI_RWPI', 6) # type: ignore
+class LLVMRelocMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMRelocDefault = LLVMRelocMode.define('LLVMRelocDefault', 0)
+LLVMRelocStatic = LLVMRelocMode.define('LLVMRelocStatic', 1)
+LLVMRelocPIC = LLVMRelocMode.define('LLVMRelocPIC', 2)
+LLVMRelocDynamicNoPic = LLVMRelocMode.define('LLVMRelocDynamicNoPic', 3)
+LLVMRelocROPI = LLVMRelocMode.define('LLVMRelocROPI', 4)
+LLVMRelocRWPI = LLVMRelocMode.define('LLVMRelocRWPI', 5)
+LLVMRelocROPI_RWPI = LLVMRelocMode.define('LLVMRelocROPI_RWPI', 6)
 
 @dll.bind
 def LLVMTargetMachineOptionsSetRelocMode(Options:LLVMTargetMachineOptionsRef, Reloc:LLVMRelocMode) -> None: ...
-LLVMCodeModel = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMCodeModelDefault = LLVMCodeModel.define('LLVMCodeModelDefault', 0) # type: ignore
-LLVMCodeModelJITDefault = LLVMCodeModel.define('LLVMCodeModelJITDefault', 1) # type: ignore
-LLVMCodeModelTiny = LLVMCodeModel.define('LLVMCodeModelTiny', 2) # type: ignore
-LLVMCodeModelSmall = LLVMCodeModel.define('LLVMCodeModelSmall', 3) # type: ignore
-LLVMCodeModelKernel = LLVMCodeModel.define('LLVMCodeModelKernel', 4) # type: ignore
-LLVMCodeModelMedium = LLVMCodeModel.define('LLVMCodeModelMedium', 5) # type: ignore
-LLVMCodeModelLarge = LLVMCodeModel.define('LLVMCodeModelLarge', 6) # type: ignore
+class LLVMCodeModel(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMCodeModelDefault = LLVMCodeModel.define('LLVMCodeModelDefault', 0)
+LLVMCodeModelJITDefault = LLVMCodeModel.define('LLVMCodeModelJITDefault', 1)
+LLVMCodeModelTiny = LLVMCodeModel.define('LLVMCodeModelTiny', 2)
+LLVMCodeModelSmall = LLVMCodeModel.define('LLVMCodeModelSmall', 3)
+LLVMCodeModelKernel = LLVMCodeModel.define('LLVMCodeModelKernel', 4)
+LLVMCodeModelMedium = LLVMCodeModel.define('LLVMCodeModelMedium', 5)
+LLVMCodeModelLarge = LLVMCodeModel.define('LLVMCodeModelLarge', 6)
 
 @dll.bind
 def LLVMTargetMachineOptionsSetCodeModel(Options:LLVMTargetMachineOptionsRef, CodeModel:LLVMCodeModel) -> None: ...
 class struct_LLVMOpaqueTargetMachine(ctypes.Structure): pass
-LLVMTargetMachineRef = c.POINTER[struct_LLVMOpaqueTargetMachine]
+LLVMTargetMachineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetMachine]
 @dll.bind
 def LLVMCreateTargetMachineWithOptions(T:LLVMTargetRef, Triple:c.POINTER[Annotated[bytes, ctypes.c_char]], Options:LLVMTargetMachineOptionsRef) -> LLVMTargetMachineRef: ...
 @dll.bind
@@ -2771,18 +2771,18 @@ def LLVMSetTargetMachineAsmVerbosity(T:LLVMTargetMachineRef, VerboseAsm:LLVMBool
 def LLVMSetTargetMachineFastISel(T:LLVMTargetMachineRef, Enable:LLVMBool) -> None: ...
 @dll.bind
 def LLVMSetTargetMachineGlobalISel(T:LLVMTargetMachineRef, Enable:LLVMBool) -> None: ...
-LLVMGlobalISelAbortMode = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMGlobalISelAbortEnable = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortEnable', 0) # type: ignore
-LLVMGlobalISelAbortDisable = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortDisable', 1) # type: ignore
-LLVMGlobalISelAbortDisableWithDiag = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortDisableWithDiag', 2) # type: ignore
+class LLVMGlobalISelAbortMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMGlobalISelAbortEnable = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortEnable', 0)
+LLVMGlobalISelAbortDisable = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortDisable', 1)
+LLVMGlobalISelAbortDisableWithDiag = LLVMGlobalISelAbortMode.define('LLVMGlobalISelAbortDisableWithDiag', 2)
 
 @dll.bind
 def LLVMSetTargetMachineGlobalISelAbort(T:LLVMTargetMachineRef, Mode:LLVMGlobalISelAbortMode) -> None: ...
 @dll.bind
 def LLVMSetTargetMachineMachineOutliner(T:LLVMTargetMachineRef, Enable:LLVMBool) -> None: ...
-LLVMCodeGenFileType = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMAssemblyFile = LLVMCodeGenFileType.define('LLVMAssemblyFile', 0) # type: ignore
-LLVMObjectFile = LLVMCodeGenFileType.define('LLVMObjectFile', 1) # type: ignore
+class LLVMCodeGenFileType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMAssemblyFile = LLVMCodeGenFileType.define('LLVMAssemblyFile', 0)
+LLVMObjectFile = LLVMCodeGenFileType.define('LLVMObjectFile', 1)
 
 @dll.bind
 def LLVMTargetMachineEmitToFile(T:LLVMTargetMachineRef, M:LLVMModuleRef, Filename:c.POINTER[Annotated[bytes, ctypes.c_char]], codegen:LLVMCodeGenFileType, ErrorMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
@@ -2803,11 +2803,11 @@ def LLVMLinkInMCJIT() -> None: ...
 @dll.bind
 def LLVMLinkInInterpreter() -> None: ...
 class struct_LLVMOpaqueGenericValue(ctypes.Structure): pass
-LLVMGenericValueRef = c.POINTER[struct_LLVMOpaqueGenericValue]
+LLVMGenericValueRef: TypeAlias = c.POINTER[struct_LLVMOpaqueGenericValue]
 class struct_LLVMOpaqueExecutionEngine(ctypes.Structure): pass
-LLVMExecutionEngineRef = c.POINTER[struct_LLVMOpaqueExecutionEngine]
+LLVMExecutionEngineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueExecutionEngine]
 class struct_LLVMOpaqueMCJITMemoryManager(ctypes.Structure): pass
-LLVMMCJITMemoryManagerRef = c.POINTER[struct_LLVMOpaqueMCJITMemoryManager]
+LLVMMCJITMemoryManagerRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMCJITMemoryManager]
 @c.record
 class struct_LLVMMCJITCompilerOptions(c.Struct):
   SIZE = 24
@@ -2876,16 +2876,16 @@ def LLVMGetGlobalValueAddress(EE:LLVMExecutionEngineRef, Name:c.POINTER[Annotate
 def LLVMGetFunctionAddress(EE:LLVMExecutionEngineRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> uint64_t: ...
 @dll.bind
 def LLVMExecutionEngineGetErrMsg(EE:LLVMExecutionEngineRef, OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
-LLVMMemoryManagerAllocateCodeSectionCallback = c.CFUNCTYPE(c.POINTER[Annotated[int, ctypes.c_ubyte]], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]])
-LLVMMemoryManagerAllocateDataSectionCallback = c.CFUNCTYPE(c.POINTER[Annotated[int, ctypes.c_ubyte]], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]], Annotated[int, ctypes.c_int32])
-LLVMMemoryManagerFinalizeMemoryCallback = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]])
-LLVMMemoryManagerDestroyCallback = c.CFUNCTYPE(None, c.POINTER[None])
+LLVMMemoryManagerAllocateCodeSectionCallback: TypeAlias = c.CFUNCTYPE(c.POINTER[Annotated[int, ctypes.c_ubyte]], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]])
+LLVMMemoryManagerAllocateDataSectionCallback: TypeAlias = c.CFUNCTYPE(c.POINTER[Annotated[int, ctypes.c_ubyte]], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]], Annotated[int, ctypes.c_int32])
+LLVMMemoryManagerFinalizeMemoryCallback: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]])
+LLVMMemoryManagerDestroyCallback: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
 @dll.bind
 def LLVMCreateSimpleMCJITMemoryManager(Opaque:c.POINTER[None], AllocateCodeSection:LLVMMemoryManagerAllocateCodeSectionCallback, AllocateDataSection:LLVMMemoryManagerAllocateDataSectionCallback, FinalizeMemory:LLVMMemoryManagerFinalizeMemoryCallback, Destroy:LLVMMemoryManagerDestroyCallback) -> LLVMMCJITMemoryManagerRef: ...
 @dll.bind
 def LLVMDisposeMCJITMemoryManager(MM:LLVMMCJITMemoryManagerRef) -> None: ...
 class struct_LLVMOpaqueJITEventListener(ctypes.Structure): pass
-LLVMJITEventListenerRef = c.POINTER[struct_LLVMOpaqueJITEventListener]
+LLVMJITEventListenerRef: TypeAlias = c.POINTER[struct_LLVMOpaqueJITEventListener]
 @dll.bind
 def LLVMCreateGDBRegistrationListener() -> LLVMJITEventListenerRef: ...
 @dll.bind
@@ -2897,23 +2897,23 @@ def LLVMCreatePerfJITEventListener() -> LLVMJITEventListenerRef: ...
 @dll.bind
 def LLVMParseIRInContext(ContextRef:LLVMContextRef, MemBuf:LLVMMemoryBufferRef, OutM:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
 class struct_LLVMOrcOpaqueExecutionSession(ctypes.Structure): pass
-LLVMOrcExecutionSessionRef = c.POINTER[struct_LLVMOrcOpaqueExecutionSession]
-LLVMOrcErrorReporterFunction = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOpaqueError])
+LLVMOrcExecutionSessionRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueExecutionSession]
+LLVMOrcErrorReporterFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOpaqueError])
 @dll.bind
 def LLVMOrcExecutionSessionSetErrorReporter(ES:LLVMOrcExecutionSessionRef, ReportError:LLVMOrcErrorReporterFunction, Ctx:c.POINTER[None]) -> None: ...
 class struct_LLVMOrcOpaqueSymbolStringPool(ctypes.Structure): pass
-LLVMOrcSymbolStringPoolRef = c.POINTER[struct_LLVMOrcOpaqueSymbolStringPool]
+LLVMOrcSymbolStringPoolRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueSymbolStringPool]
 @dll.bind
 def LLVMOrcExecutionSessionGetSymbolStringPool(ES:LLVMOrcExecutionSessionRef) -> LLVMOrcSymbolStringPoolRef: ...
 @dll.bind
 def LLVMOrcSymbolStringPoolClearDeadEntries(SSP:LLVMOrcSymbolStringPoolRef) -> None: ...
 class struct_LLVMOrcOpaqueSymbolStringPoolEntry(ctypes.Structure): pass
-LLVMOrcSymbolStringPoolEntryRef = c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry]
+LLVMOrcSymbolStringPoolEntryRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry]
 @dll.bind
 def LLVMOrcExecutionSessionIntern(ES:LLVMOrcExecutionSessionRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcSymbolStringPoolEntryRef: ...
-LLVMOrcLookupKind = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMOrcLookupKindStatic = LLVMOrcLookupKind.define('LLVMOrcLookupKindStatic', 0) # type: ignore
-LLVMOrcLookupKindDLSym = LLVMOrcLookupKind.define('LLVMOrcLookupKindDLSym', 1) # type: ignore
+class LLVMOrcLookupKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMOrcLookupKindStatic = LLVMOrcLookupKind.define('LLVMOrcLookupKindStatic', 0)
+LLVMOrcLookupKindDLSym = LLVMOrcLookupKind.define('LLVMOrcLookupKindDLSym', 1)
 
 @c.record
 class LLVMOrcCJITDylibSearchOrderElement(c.Struct):
@@ -2921,22 +2921,22 @@ class LLVMOrcCJITDylibSearchOrderElement(c.Struct):
   JD: Annotated[LLVMOrcJITDylibRef, 0]
   JDLookupFlags: Annotated[LLVMOrcJITDylibLookupFlags, 8]
 class struct_LLVMOrcOpaqueJITDylib(ctypes.Structure): pass
-LLVMOrcJITDylibRef = c.POINTER[struct_LLVMOrcOpaqueJITDylib]
-LLVMOrcJITDylibLookupFlags = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly', 0) # type: ignore
-LLVMOrcJITDylibLookupFlagsMatchAllSymbols = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchAllSymbols', 1) # type: ignore
+LLVMOrcJITDylibRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueJITDylib]
+class LLVMOrcJITDylibLookupFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly', 0)
+LLVMOrcJITDylibLookupFlagsMatchAllSymbols = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchAllSymbols', 1)
 
-LLVMOrcCJITDylibSearchOrder = c.POINTER[LLVMOrcCJITDylibSearchOrderElement]
+LLVMOrcCJITDylibSearchOrder: TypeAlias = c.POINTER[LLVMOrcCJITDylibSearchOrderElement]
 @c.record
 class LLVMOrcCLookupSetElement(c.Struct):
   SIZE = 16
   Name: Annotated[LLVMOrcSymbolStringPoolEntryRef, 0]
   LookupFlags: Annotated[LLVMOrcSymbolLookupFlags, 8]
-LLVMOrcSymbolLookupFlags = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMOrcSymbolLookupFlagsRequiredSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsRequiredSymbol', 0) # type: ignore
-LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol', 1) # type: ignore
+class LLVMOrcSymbolLookupFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMOrcSymbolLookupFlagsRequiredSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsRequiredSymbol', 0)
+LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol', 1)
 
-LLVMOrcCLookupSet = c.POINTER[LLVMOrcCLookupSetElement]
+LLVMOrcCLookupSet: TypeAlias = c.POINTER[LLVMOrcCLookupSetElement]
 @c.record
 class LLVMOrcCSymbolMapPair(c.Struct):
   SIZE = 24
@@ -2947,13 +2947,13 @@ class LLVMJITEvaluatedSymbol(c.Struct):
   SIZE = 16
   Address: Annotated[LLVMOrcExecutorAddress, 0]
   Flags: Annotated[LLVMJITSymbolFlags, 8]
-LLVMOrcExecutorAddress = Annotated[int, ctypes.c_uint64]
+LLVMOrcExecutorAddress: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class LLVMJITSymbolFlags(c.Struct):
   SIZE = 2
   GenericFlags: Annotated[uint8_t, 0]
   TargetFlags: Annotated[uint8_t, 1]
-LLVMOrcExecutionSessionLookupHandleResultFunction = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueError], c.POINTER[LLVMOrcCSymbolMapPair], Annotated[int, ctypes.c_uint64], c.POINTER[None])
+LLVMOrcExecutionSessionLookupHandleResultFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueError], c.POINTER[LLVMOrcCSymbolMapPair], Annotated[int, ctypes.c_uint64], c.POINTER[None])
 @dll.bind
 def LLVMOrcExecutionSessionLookup(ES:LLVMOrcExecutionSessionRef, K:LLVMOrcLookupKind, SearchOrder:LLVMOrcCJITDylibSearchOrder, SearchOrderSize:size_t, Symbols:LLVMOrcCLookupSet, SymbolsSize:size_t, HandleResult:LLVMOrcExecutionSessionLookupHandleResultFunction, Ctx:c.POINTER[None]) -> None: ...
 @dll.bind
@@ -2963,7 +2963,7 @@ def LLVMOrcReleaseSymbolStringPoolEntry(S:LLVMOrcSymbolStringPoolEntryRef) -> No
 @dll.bind
 def LLVMOrcSymbolStringPoolEntryStr(S:LLVMOrcSymbolStringPoolEntryRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 class struct_LLVMOrcOpaqueResourceTracker(ctypes.Structure): pass
-LLVMOrcResourceTrackerRef = c.POINTER[struct_LLVMOrcOpaqueResourceTracker]
+LLVMOrcResourceTrackerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueResourceTracker]
 @dll.bind
 def LLVMOrcReleaseResourceTracker(RT:LLVMOrcResourceTrackerRef) -> None: ...
 @dll.bind
@@ -2971,11 +2971,11 @@ def LLVMOrcResourceTrackerTransferTo(SrcRT:LLVMOrcResourceTrackerRef, DstRT:LLVM
 @dll.bind
 def LLVMOrcResourceTrackerRemove(RT:LLVMOrcResourceTrackerRef) -> LLVMErrorRef: ...
 class struct_LLVMOrcOpaqueDefinitionGenerator(ctypes.Structure): pass
-LLVMOrcDefinitionGeneratorRef = c.POINTER[struct_LLVMOrcOpaqueDefinitionGenerator]
+LLVMOrcDefinitionGeneratorRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueDefinitionGenerator]
 @dll.bind
 def LLVMOrcDisposeDefinitionGenerator(DG:LLVMOrcDefinitionGeneratorRef) -> None: ...
 class struct_LLVMOrcOpaqueMaterializationUnit(ctypes.Structure): pass
-LLVMOrcMaterializationUnitRef = c.POINTER[struct_LLVMOrcOpaqueMaterializationUnit]
+LLVMOrcMaterializationUnitRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueMaterializationUnit]
 @dll.bind
 def LLVMOrcDisposeMaterializationUnit(MU:LLVMOrcMaterializationUnitRef) -> None: ...
 @c.record
@@ -2983,20 +2983,20 @@ class LLVMOrcCSymbolFlagsMapPair(c.Struct):
   SIZE = 16
   Name: Annotated[LLVMOrcSymbolStringPoolEntryRef, 0]
   Flags: Annotated[LLVMJITSymbolFlags, 8]
-LLVMOrcCSymbolFlagsMapPairs = c.POINTER[LLVMOrcCSymbolFlagsMapPair]
+LLVMOrcCSymbolFlagsMapPairs: TypeAlias = c.POINTER[LLVMOrcCSymbolFlagsMapPair]
 class struct_LLVMOrcOpaqueMaterializationResponsibility(ctypes.Structure): pass
-LLVMOrcMaterializationUnitMaterializeFunction = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility])
-LLVMOrcMaterializationUnitDiscardFunction = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueJITDylib], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry])
-LLVMOrcMaterializationUnitDestroyFunction = c.CFUNCTYPE(None, c.POINTER[None])
+LLVMOrcMaterializationUnitMaterializeFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility])
+LLVMOrcMaterializationUnitDiscardFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueJITDylib], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry])
+LLVMOrcMaterializationUnitDestroyFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
 @dll.bind
 def LLVMOrcCreateCustomMaterializationUnit(Name:c.POINTER[Annotated[bytes, ctypes.c_char]], Ctx:c.POINTER[None], Syms:LLVMOrcCSymbolFlagsMapPairs, NumSyms:size_t, InitSym:LLVMOrcSymbolStringPoolEntryRef, Materialize:LLVMOrcMaterializationUnitMaterializeFunction, Discard:LLVMOrcMaterializationUnitDiscardFunction, Destroy:LLVMOrcMaterializationUnitDestroyFunction) -> LLVMOrcMaterializationUnitRef: ...
-LLVMOrcCSymbolMapPairs = c.POINTER[LLVMOrcCSymbolMapPair]
+LLVMOrcCSymbolMapPairs: TypeAlias = c.POINTER[LLVMOrcCSymbolMapPair]
 @dll.bind
 def LLVMOrcAbsoluteSymbols(Syms:LLVMOrcCSymbolMapPairs, NumPairs:size_t) -> LLVMOrcMaterializationUnitRef: ...
 class struct_LLVMOrcOpaqueLazyCallThroughManager(ctypes.Structure): pass
-LLVMOrcLazyCallThroughManagerRef = c.POINTER[struct_LLVMOrcOpaqueLazyCallThroughManager]
+LLVMOrcLazyCallThroughManagerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLazyCallThroughManager]
 class struct_LLVMOrcOpaqueIndirectStubsManager(ctypes.Structure): pass
-LLVMOrcIndirectStubsManagerRef = c.POINTER[struct_LLVMOrcOpaqueIndirectStubsManager]
+LLVMOrcIndirectStubsManagerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueIndirectStubsManager]
 @c.record
 class LLVMOrcCSymbolAliasMapPair(c.Struct):
   SIZE = 24
@@ -3007,10 +3007,10 @@ class LLVMOrcCSymbolAliasMapEntry(c.Struct):
   SIZE = 16
   Name: Annotated[LLVMOrcSymbolStringPoolEntryRef, 0]
   Flags: Annotated[LLVMJITSymbolFlags, 8]
-LLVMOrcCSymbolAliasMapPairs = c.POINTER[LLVMOrcCSymbolAliasMapPair]
+LLVMOrcCSymbolAliasMapPairs: TypeAlias = c.POINTER[LLVMOrcCSymbolAliasMapPair]
 @dll.bind
 def LLVMOrcLazyReexports(LCTM:LLVMOrcLazyCallThroughManagerRef, ISM:LLVMOrcIndirectStubsManagerRef, SourceRef:LLVMOrcJITDylibRef, CallableAliases:LLVMOrcCSymbolAliasMapPairs, NumPairs:size_t) -> LLVMOrcMaterializationUnitRef: ...
-LLVMOrcMaterializationResponsibilityRef = c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility]
+LLVMOrcMaterializationResponsibilityRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility]
 @dll.bind
 def LLVMOrcDisposeMaterializationResponsibility(MR:LLVMOrcMaterializationResponsibilityRef) -> None: ...
 @dll.bind
@@ -3045,7 +3045,7 @@ class LLVMOrcCDependenceMapPair(c.Struct):
   SIZE = 24
   JD: Annotated[LLVMOrcJITDylibRef, 0]
   Names: Annotated[LLVMOrcCSymbolsList, 8]
-LLVMOrcCDependenceMapPairs = c.POINTER[LLVMOrcCDependenceMapPair]
+LLVMOrcCDependenceMapPairs: TypeAlias = c.POINTER[LLVMOrcCDependenceMapPair]
 @dll.bind
 def LLVMOrcMaterializationResponsibilityNotifyEmitted(MR:LLVMOrcMaterializationResponsibilityRef, SymbolDepGroups:c.POINTER[LLVMOrcCSymbolDependenceGroup], NumSymbolDepGroups:size_t) -> LLVMErrorRef: ...
 @dll.bind
@@ -3073,24 +3073,24 @@ def LLVMOrcJITDylibClear(JD:LLVMOrcJITDylibRef) -> LLVMErrorRef: ...
 @dll.bind
 def LLVMOrcJITDylibAddGenerator(JD:LLVMOrcJITDylibRef, DG:LLVMOrcDefinitionGeneratorRef) -> None: ...
 class struct_LLVMOrcOpaqueLookupState(ctypes.Structure): pass
-LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[struct_LLVMOrcOpaqueDefinitionGenerator], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOrcOpaqueLookupState]], LLVMOrcLookupKind, c.POINTER[struct_LLVMOrcOpaqueJITDylib], LLVMOrcJITDylibLookupFlags, c.POINTER[LLVMOrcCLookupSetElement], Annotated[int, ctypes.c_uint64])
-LLVMOrcDisposeCAPIDefinitionGeneratorFunction = c.CFUNCTYPE(None, c.POINTER[None])
+LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[struct_LLVMOrcOpaqueDefinitionGenerator], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOrcOpaqueLookupState]], LLVMOrcLookupKind, c.POINTER[struct_LLVMOrcOpaqueJITDylib], LLVMOrcJITDylibLookupFlags, c.POINTER[LLVMOrcCLookupSetElement], Annotated[int, ctypes.c_uint64])
+LLVMOrcDisposeCAPIDefinitionGeneratorFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
 @dll.bind
 def LLVMOrcCreateCustomCAPIDefinitionGenerator(F:LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, Ctx:c.POINTER[None], Dispose:LLVMOrcDisposeCAPIDefinitionGeneratorFunction) -> LLVMOrcDefinitionGeneratorRef: ...
-LLVMOrcLookupStateRef = c.POINTER[struct_LLVMOrcOpaqueLookupState]
+LLVMOrcLookupStateRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLookupState]
 @dll.bind
 def LLVMOrcLookupStateContinueLookup(S:LLVMOrcLookupStateRef, Err:LLVMErrorRef) -> None: ...
-LLVMOrcSymbolPredicate = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry])
+LLVMOrcSymbolPredicate: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry])
 @dll.bind
 def LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess(Result:c.POINTER[LLVMOrcDefinitionGeneratorRef], GlobalPrefx:Annotated[bytes, ctypes.c_char], Filter:LLVMOrcSymbolPredicate, FilterCtx:c.POINTER[None]) -> LLVMErrorRef: ...
 @dll.bind
 def LLVMOrcCreateDynamicLibrarySearchGeneratorForPath(Result:c.POINTER[LLVMOrcDefinitionGeneratorRef], FileName:c.POINTER[Annotated[bytes, ctypes.c_char]], GlobalPrefix:Annotated[bytes, ctypes.c_char], Filter:LLVMOrcSymbolPredicate, FilterCtx:c.POINTER[None]) -> LLVMErrorRef: ...
 class struct_LLVMOrcOpaqueObjectLayer(ctypes.Structure): pass
-LLVMOrcObjectLayerRef = c.POINTER[struct_LLVMOrcOpaqueObjectLayer]
+LLVMOrcObjectLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueObjectLayer]
 @dll.bind
 def LLVMOrcCreateStaticLibrarySearchGeneratorForPath(Result:c.POINTER[LLVMOrcDefinitionGeneratorRef], ObjLayer:LLVMOrcObjectLayerRef, FileName:c.POINTER[Annotated[bytes, ctypes.c_char]], TargetTriple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMErrorRef: ...
 class struct_LLVMOrcOpaqueThreadSafeContext(ctypes.Structure): pass
-LLVMOrcThreadSafeContextRef = c.POINTER[struct_LLVMOrcOpaqueThreadSafeContext]
+LLVMOrcThreadSafeContextRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueThreadSafeContext]
 @dll.bind
 def LLVMOrcCreateNewThreadSafeContext() -> LLVMOrcThreadSafeContextRef: ...
 @dll.bind
@@ -3098,16 +3098,16 @@ def LLVMOrcThreadSafeContextGetContext(TSCtx:LLVMOrcThreadSafeContextRef) -> LLV
 @dll.bind
 def LLVMOrcDisposeThreadSafeContext(TSCtx:LLVMOrcThreadSafeContextRef) -> None: ...
 class struct_LLVMOrcOpaqueThreadSafeModule(ctypes.Structure): pass
-LLVMOrcThreadSafeModuleRef = c.POINTER[struct_LLVMOrcOpaqueThreadSafeModule]
+LLVMOrcThreadSafeModuleRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueThreadSafeModule]
 @dll.bind
 def LLVMOrcCreateNewThreadSafeModule(M:LLVMModuleRef, TSCtx:LLVMOrcThreadSafeContextRef) -> LLVMOrcThreadSafeModuleRef: ...
 @dll.bind
 def LLVMOrcDisposeThreadSafeModule(TSM:LLVMOrcThreadSafeModuleRef) -> None: ...
-LLVMOrcGenericIRModuleOperationFunction = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[struct_LLVMOpaqueModule])
+LLVMOrcGenericIRModuleOperationFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[struct_LLVMOpaqueModule])
 @dll.bind
 def LLVMOrcThreadSafeModuleWithModuleDo(TSM:LLVMOrcThreadSafeModuleRef, F:LLVMOrcGenericIRModuleOperationFunction, Ctx:c.POINTER[None]) -> LLVMErrorRef: ...
 class struct_LLVMOrcOpaqueJITTargetMachineBuilder(ctypes.Structure): pass
-LLVMOrcJITTargetMachineBuilderRef = c.POINTER[struct_LLVMOrcOpaqueJITTargetMachineBuilder]
+LLVMOrcJITTargetMachineBuilderRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueJITTargetMachineBuilder]
 @dll.bind
 def LLVMOrcJITTargetMachineBuilderDetectHost(Result:c.POINTER[LLVMOrcJITTargetMachineBuilderRef]) -> LLVMErrorRef: ...
 @dll.bind
@@ -3127,39 +3127,39 @@ def LLVMOrcObjectLayerEmit(ObjLayer:LLVMOrcObjectLayerRef, R:LLVMOrcMaterializat
 @dll.bind
 def LLVMOrcDisposeObjectLayer(ObjLayer:LLVMOrcObjectLayerRef) -> None: ...
 class struct_LLVMOrcOpaqueIRTransformLayer(ctypes.Structure): pass
-LLVMOrcIRTransformLayerRef = c.POINTER[struct_LLVMOrcOpaqueIRTransformLayer]
+LLVMOrcIRTransformLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueIRTransformLayer]
 @dll.bind
 def LLVMOrcIRTransformLayerEmit(IRTransformLayer:LLVMOrcIRTransformLayerRef, MR:LLVMOrcMaterializationResponsibilityRef, TSM:LLVMOrcThreadSafeModuleRef) -> None: ...
-LLVMOrcIRTransformLayerTransformFunction = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOrcOpaqueThreadSafeModule]], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility])
+LLVMOrcIRTransformLayerTransformFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOrcOpaqueThreadSafeModule]], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility])
 @dll.bind
 def LLVMOrcIRTransformLayerSetTransform(IRTransformLayer:LLVMOrcIRTransformLayerRef, TransformFunction:LLVMOrcIRTransformLayerTransformFunction, Ctx:c.POINTER[None]) -> None: ...
 class struct_LLVMOrcOpaqueObjectTransformLayer(ctypes.Structure): pass
-LLVMOrcObjectTransformLayerRef = c.POINTER[struct_LLVMOrcOpaqueObjectTransformLayer]
-LLVMOrcObjectTransformLayerTransformFunction = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOpaqueMemoryBuffer]])
+LLVMOrcObjectTransformLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueObjectTransformLayer]
+LLVMOrcObjectTransformLayerTransformFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOpaqueMemoryBuffer]])
 @dll.bind
 def LLVMOrcObjectTransformLayerSetTransform(ObjTransformLayer:LLVMOrcObjectTransformLayerRef, TransformFunction:LLVMOrcObjectTransformLayerTransformFunction, Ctx:c.POINTER[None]) -> None: ...
 @dll.bind
 def LLVMOrcCreateLocalIndirectStubsManager(TargetTriple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcIndirectStubsManagerRef: ...
 @dll.bind
 def LLVMOrcDisposeIndirectStubsManager(ISM:LLVMOrcIndirectStubsManagerRef) -> None: ...
-LLVMOrcJITTargetAddress = Annotated[int, ctypes.c_uint64]
+LLVMOrcJITTargetAddress: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def LLVMOrcCreateLocalLazyCallThroughManager(TargetTriple:c.POINTER[Annotated[bytes, ctypes.c_char]], ES:LLVMOrcExecutionSessionRef, ErrorHandlerAddr:LLVMOrcJITTargetAddress, LCTM:c.POINTER[LLVMOrcLazyCallThroughManagerRef]) -> LLVMErrorRef: ...
 @dll.bind
 def LLVMOrcDisposeLazyCallThroughManager(LCTM:LLVMOrcLazyCallThroughManagerRef) -> None: ...
 class struct_LLVMOrcOpaqueDumpObjects(ctypes.Structure): pass
-LLVMOrcDumpObjectsRef = c.POINTER[struct_LLVMOrcOpaqueDumpObjects]
+LLVMOrcDumpObjectsRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueDumpObjects]
 @dll.bind
 def LLVMOrcCreateDumpObjects(DumpDir:c.POINTER[Annotated[bytes, ctypes.c_char]], IdentifierOverride:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMOrcDumpObjectsRef: ...
 @dll.bind
 def LLVMOrcDisposeDumpObjects(DumpObjects:LLVMOrcDumpObjectsRef) -> None: ...
 @dll.bind
 def LLVMOrcDumpObjects_CallOperator(DumpObjects:LLVMOrcDumpObjectsRef, ObjBuffer:c.POINTER[LLVMMemoryBufferRef]) -> LLVMErrorRef: ...
-LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction = c.CFUNCTYPE(c.POINTER[struct_LLVMOrcOpaqueObjectLayer], c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueExecutionSession], c.POINTER[Annotated[bytes, ctypes.c_char]])
+LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOrcOpaqueObjectLayer], c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueExecutionSession], c.POINTER[Annotated[bytes, ctypes.c_char]])
 class struct_LLVMOrcOpaqueLLJITBuilder(ctypes.Structure): pass
-LLVMOrcLLJITBuilderRef = c.POINTER[struct_LLVMOrcOpaqueLLJITBuilder]
+LLVMOrcLLJITBuilderRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLLJITBuilder]
 class struct_LLVMOrcOpaqueLLJIT(ctypes.Structure): pass
-LLVMOrcLLJITRef = c.POINTER[struct_LLVMOrcOpaqueLLJIT]
+LLVMOrcLLJITRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLLJIT]
 @dll.bind
 def LLVMOrcCreateLLJITBuilder() -> LLVMOrcLLJITBuilderRef: ...
 @dll.bind
@@ -3202,38 +3202,38 @@ def LLVMOrcLLJITGetIRTransformLayer(J:LLVMOrcLLJITRef) -> LLVMOrcIRTransformLaye
 def LLVMOrcLLJITGetDataLayoutStr(J:LLVMOrcLLJITRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
 def LLVMOrcLLJITEnableDebugSupport(J:LLVMOrcLLJITRef) -> LLVMErrorRef: ...
-LLVMLinkerMode = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMLinkerDestroySource = LLVMLinkerMode.define('LLVMLinkerDestroySource', 0) # type: ignore
-LLVMLinkerPreserveSource_Removed = LLVMLinkerMode.define('LLVMLinkerPreserveSource_Removed', 1) # type: ignore
+class LLVMLinkerMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMLinkerDestroySource = LLVMLinkerMode.define('LLVMLinkerDestroySource', 0)
+LLVMLinkerPreserveSource_Removed = LLVMLinkerMode.define('LLVMLinkerPreserveSource_Removed', 1)
 
 @dll.bind
 def LLVMLinkModules2(Dest:LLVMModuleRef, Src:LLVMModuleRef) -> LLVMBool: ...
 class struct_LLVMOpaqueSectionIterator(ctypes.Structure): pass
-LLVMSectionIteratorRef = c.POINTER[struct_LLVMOpaqueSectionIterator]
+LLVMSectionIteratorRef: TypeAlias = c.POINTER[struct_LLVMOpaqueSectionIterator]
 class struct_LLVMOpaqueSymbolIterator(ctypes.Structure): pass
-LLVMSymbolIteratorRef = c.POINTER[struct_LLVMOpaqueSymbolIterator]
+LLVMSymbolIteratorRef: TypeAlias = c.POINTER[struct_LLVMOpaqueSymbolIterator]
 class struct_LLVMOpaqueRelocationIterator(ctypes.Structure): pass
-LLVMRelocationIteratorRef = c.POINTER[struct_LLVMOpaqueRelocationIterator]
-LLVMBinaryType = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMBinaryTypeArchive = LLVMBinaryType.define('LLVMBinaryTypeArchive', 0) # type: ignore
-LLVMBinaryTypeMachOUniversalBinary = LLVMBinaryType.define('LLVMBinaryTypeMachOUniversalBinary', 1) # type: ignore
-LLVMBinaryTypeCOFFImportFile = LLVMBinaryType.define('LLVMBinaryTypeCOFFImportFile', 2) # type: ignore
-LLVMBinaryTypeIR = LLVMBinaryType.define('LLVMBinaryTypeIR', 3) # type: ignore
-LLVMBinaryTypeWinRes = LLVMBinaryType.define('LLVMBinaryTypeWinRes', 4) # type: ignore
-LLVMBinaryTypeCOFF = LLVMBinaryType.define('LLVMBinaryTypeCOFF', 5) # type: ignore
-LLVMBinaryTypeELF32L = LLVMBinaryType.define('LLVMBinaryTypeELF32L', 6) # type: ignore
-LLVMBinaryTypeELF32B = LLVMBinaryType.define('LLVMBinaryTypeELF32B', 7) # type: ignore
-LLVMBinaryTypeELF64L = LLVMBinaryType.define('LLVMBinaryTypeELF64L', 8) # type: ignore
-LLVMBinaryTypeELF64B = LLVMBinaryType.define('LLVMBinaryTypeELF64B', 9) # type: ignore
-LLVMBinaryTypeMachO32L = LLVMBinaryType.define('LLVMBinaryTypeMachO32L', 10) # type: ignore
-LLVMBinaryTypeMachO32B = LLVMBinaryType.define('LLVMBinaryTypeMachO32B', 11) # type: ignore
-LLVMBinaryTypeMachO64L = LLVMBinaryType.define('LLVMBinaryTypeMachO64L', 12) # type: ignore
-LLVMBinaryTypeMachO64B = LLVMBinaryType.define('LLVMBinaryTypeMachO64B', 13) # type: ignore
-LLVMBinaryTypeWasm = LLVMBinaryType.define('LLVMBinaryTypeWasm', 14) # type: ignore
-LLVMBinaryTypeOffload = LLVMBinaryType.define('LLVMBinaryTypeOffload', 15) # type: ignore
+LLVMRelocationIteratorRef: TypeAlias = c.POINTER[struct_LLVMOpaqueRelocationIterator]
+class LLVMBinaryType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMBinaryTypeArchive = LLVMBinaryType.define('LLVMBinaryTypeArchive', 0)
+LLVMBinaryTypeMachOUniversalBinary = LLVMBinaryType.define('LLVMBinaryTypeMachOUniversalBinary', 1)
+LLVMBinaryTypeCOFFImportFile = LLVMBinaryType.define('LLVMBinaryTypeCOFFImportFile', 2)
+LLVMBinaryTypeIR = LLVMBinaryType.define('LLVMBinaryTypeIR', 3)
+LLVMBinaryTypeWinRes = LLVMBinaryType.define('LLVMBinaryTypeWinRes', 4)
+LLVMBinaryTypeCOFF = LLVMBinaryType.define('LLVMBinaryTypeCOFF', 5)
+LLVMBinaryTypeELF32L = LLVMBinaryType.define('LLVMBinaryTypeELF32L', 6)
+LLVMBinaryTypeELF32B = LLVMBinaryType.define('LLVMBinaryTypeELF32B', 7)
+LLVMBinaryTypeELF64L = LLVMBinaryType.define('LLVMBinaryTypeELF64L', 8)
+LLVMBinaryTypeELF64B = LLVMBinaryType.define('LLVMBinaryTypeELF64B', 9)
+LLVMBinaryTypeMachO32L = LLVMBinaryType.define('LLVMBinaryTypeMachO32L', 10)
+LLVMBinaryTypeMachO32B = LLVMBinaryType.define('LLVMBinaryTypeMachO32B', 11)
+LLVMBinaryTypeMachO64L = LLVMBinaryType.define('LLVMBinaryTypeMachO64L', 12)
+LLVMBinaryTypeMachO64B = LLVMBinaryType.define('LLVMBinaryTypeMachO64B', 13)
+LLVMBinaryTypeWasm = LLVMBinaryType.define('LLVMBinaryTypeWasm', 14)
+LLVMBinaryTypeOffload = LLVMBinaryType.define('LLVMBinaryTypeOffload', 15)
 
 class struct_LLVMOpaqueBinary(ctypes.Structure): pass
-LLVMBinaryRef = c.POINTER[struct_LLVMOpaqueBinary]
+LLVMBinaryRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBinary]
 @dll.bind
 def LLVMCreateBinary(MemBuf:LLVMMemoryBufferRef, Context:LLVMContextRef, ErrorMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBinaryRef: ...
 @dll.bind
@@ -3297,7 +3297,7 @@ def LLVMGetRelocationTypeName(RI:LLVMRelocationIteratorRef) -> c.POINTER[Annotat
 @dll.bind
 def LLVMGetRelocationValueString(RI:LLVMRelocationIteratorRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 class struct_LLVMOpaqueObjectFile(ctypes.Structure): pass
-LLVMObjectFileRef = c.POINTER[struct_LLVMOpaqueObjectFile]
+LLVMObjectFileRef: TypeAlias = c.POINTER[struct_LLVMOpaqueObjectFile]
 @dll.bind
 def LLVMCreateObjectFile(MemBuf:LLVMMemoryBufferRef) -> LLVMObjectFileRef: ...
 @dll.bind
@@ -3310,41 +3310,41 @@ def LLVMIsSectionIteratorAtEnd(ObjectFile:LLVMObjectFileRef, SI:LLVMSectionItera
 def LLVMGetSymbols(ObjectFile:LLVMObjectFileRef) -> LLVMSymbolIteratorRef: ...
 @dll.bind
 def LLVMIsSymbolIteratorAtEnd(ObjectFile:LLVMObjectFileRef, SI:LLVMSymbolIteratorRef) -> LLVMBool: ...
-LLVMJITSymbolGenericFlags = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMJITSymbolGenericFlagsNone = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsNone', 0) # type: ignore
-LLVMJITSymbolGenericFlagsExported = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsExported', 1) # type: ignore
-LLVMJITSymbolGenericFlagsWeak = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsWeak', 2) # type: ignore
-LLVMJITSymbolGenericFlagsCallable = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsCallable', 4) # type: ignore
-LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly', 8) # type: ignore
+class LLVMJITSymbolGenericFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMJITSymbolGenericFlagsNone = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsNone', 0)
+LLVMJITSymbolGenericFlagsExported = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsExported', 1)
+LLVMJITSymbolGenericFlagsWeak = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsWeak', 2)
+LLVMJITSymbolGenericFlagsCallable = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsCallable', 4)
+LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly', 8)
 
-LLVMJITSymbolTargetFlags = Annotated[int, ctypes.c_ubyte]
+LLVMJITSymbolTargetFlags: TypeAlias = Annotated[int, ctypes.c_ubyte]
 class struct_LLVMOrcOpaqueObjectLinkingLayer(ctypes.Structure): pass
-LLVMOrcObjectLinkingLayerRef = c.POINTER[struct_LLVMOrcOpaqueObjectLinkingLayer]
-LLVMMemoryManagerCreateContextCallback = c.CFUNCTYPE(c.POINTER[None], c.POINTER[None])
-LLVMMemoryManagerNotifyTerminatingCallback = c.CFUNCTYPE(None, c.POINTER[None])
+LLVMOrcObjectLinkingLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueObjectLinkingLayer]
+LLVMMemoryManagerCreateContextCallback: TypeAlias = c.CFUNCTYPE(c.POINTER[None], c.POINTER[None])
+LLVMMemoryManagerNotifyTerminatingCallback: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
 @dll.bind
 def LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager(ES:LLVMOrcExecutionSessionRef) -> LLVMOrcObjectLayerRef: ...
 @dll.bind
 def LLVMOrcCreateRTDyldObjectLinkingLayerWithMCJITMemoryManagerLikeCallbacks(ES:LLVMOrcExecutionSessionRef, CreateContextCtx:c.POINTER[None], CreateContext:LLVMMemoryManagerCreateContextCallback, NotifyTerminating:LLVMMemoryManagerNotifyTerminatingCallback, AllocateCodeSection:LLVMMemoryManagerAllocateCodeSectionCallback, AllocateDataSection:LLVMMemoryManagerAllocateDataSectionCallback, FinalizeMemory:LLVMMemoryManagerFinalizeMemoryCallback, Destroy:LLVMMemoryManagerDestroyCallback) -> LLVMOrcObjectLayerRef: ...
 @dll.bind
 def LLVMOrcRTDyldObjectLinkingLayerRegisterJITEventListener(RTDyldObjLinkingLayer:LLVMOrcObjectLayerRef, Listener:LLVMJITEventListenerRef) -> None: ...
-enum_LLVMRemarkType = CEnum(Annotated[int, ctypes.c_uint32])
-LLVMRemarkTypeUnknown = enum_LLVMRemarkType.define('LLVMRemarkTypeUnknown', 0) # type: ignore
-LLVMRemarkTypePassed = enum_LLVMRemarkType.define('LLVMRemarkTypePassed', 1) # type: ignore
-LLVMRemarkTypeMissed = enum_LLVMRemarkType.define('LLVMRemarkTypeMissed', 2) # type: ignore
-LLVMRemarkTypeAnalysis = enum_LLVMRemarkType.define('LLVMRemarkTypeAnalysis', 3) # type: ignore
-LLVMRemarkTypeAnalysisFPCommute = enum_LLVMRemarkType.define('LLVMRemarkTypeAnalysisFPCommute', 4) # type: ignore
-LLVMRemarkTypeAnalysisAliasing = enum_LLVMRemarkType.define('LLVMRemarkTypeAnalysisAliasing', 5) # type: ignore
-LLVMRemarkTypeFailure = enum_LLVMRemarkType.define('LLVMRemarkTypeFailure', 6) # type: ignore
+class enum_LLVMRemarkType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LLVMRemarkTypeUnknown = enum_LLVMRemarkType.define('LLVMRemarkTypeUnknown', 0)
+LLVMRemarkTypePassed = enum_LLVMRemarkType.define('LLVMRemarkTypePassed', 1)
+LLVMRemarkTypeMissed = enum_LLVMRemarkType.define('LLVMRemarkTypeMissed', 2)
+LLVMRemarkTypeAnalysis = enum_LLVMRemarkType.define('LLVMRemarkTypeAnalysis', 3)
+LLVMRemarkTypeAnalysisFPCommute = enum_LLVMRemarkType.define('LLVMRemarkTypeAnalysisFPCommute', 4)
+LLVMRemarkTypeAnalysisAliasing = enum_LLVMRemarkType.define('LLVMRemarkTypeAnalysisAliasing', 5)
+LLVMRemarkTypeFailure = enum_LLVMRemarkType.define('LLVMRemarkTypeFailure', 6)
 
 class struct_LLVMRemarkOpaqueString(ctypes.Structure): pass
-LLVMRemarkStringRef = c.POINTER[struct_LLVMRemarkOpaqueString]
+LLVMRemarkStringRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueString]
 @dll.bind
 def LLVMRemarkStringGetData(String:LLVMRemarkStringRef) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
 def LLVMRemarkStringGetLen(String:LLVMRemarkStringRef) -> uint32_t: ...
 class struct_LLVMRemarkOpaqueDebugLoc(ctypes.Structure): pass
-LLVMRemarkDebugLocRef = c.POINTER[struct_LLVMRemarkOpaqueDebugLoc]
+LLVMRemarkDebugLocRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueDebugLoc]
 @dll.bind
 def LLVMRemarkDebugLocGetSourceFilePath(DL:LLVMRemarkDebugLocRef) -> LLVMRemarkStringRef: ...
 @dll.bind
@@ -3352,7 +3352,7 @@ def LLVMRemarkDebugLocGetSourceLine(DL:LLVMRemarkDebugLocRef) -> uint32_t: ...
 @dll.bind
 def LLVMRemarkDebugLocGetSourceColumn(DL:LLVMRemarkDebugLocRef) -> uint32_t: ...
 class struct_LLVMRemarkOpaqueArg(ctypes.Structure): pass
-LLVMRemarkArgRef = c.POINTER[struct_LLVMRemarkOpaqueArg]
+LLVMRemarkArgRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueArg]
 @dll.bind
 def LLVMRemarkArgGetKey(Arg:LLVMRemarkArgRef) -> LLVMRemarkStringRef: ...
 @dll.bind
@@ -3360,7 +3360,7 @@ def LLVMRemarkArgGetValue(Arg:LLVMRemarkArgRef) -> LLVMRemarkStringRef: ...
 @dll.bind
 def LLVMRemarkArgGetDebugLoc(Arg:LLVMRemarkArgRef) -> LLVMRemarkDebugLocRef: ...
 class struct_LLVMRemarkOpaqueEntry(ctypes.Structure): pass
-LLVMRemarkEntryRef = c.POINTER[struct_LLVMRemarkOpaqueEntry]
+LLVMRemarkEntryRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueEntry]
 @dll.bind
 def LLVMRemarkEntryDispose(Remark:LLVMRemarkEntryRef) -> None: ...
 @dll.bind
@@ -3382,7 +3382,7 @@ def LLVMRemarkEntryGetFirstArg(Remark:LLVMRemarkEntryRef) -> LLVMRemarkArgRef: .
 @dll.bind
 def LLVMRemarkEntryGetNextArg(It:LLVMRemarkArgRef, Remark:LLVMRemarkEntryRef) -> LLVMRemarkArgRef: ...
 class struct_LLVMRemarkOpaqueParser(ctypes.Structure): pass
-LLVMRemarkParserRef = c.POINTER[struct_LLVMRemarkOpaqueParser]
+LLVMRemarkParserRef: TypeAlias = c.POINTER[struct_LLVMRemarkOpaqueParser]
 @dll.bind
 def LLVMRemarkParserCreateYAML(Buf:c.POINTER[None], Size:uint64_t) -> LLVMRemarkParserRef: ...
 @dll.bind
@@ -3406,7 +3406,7 @@ def LLVMSearchForAddressOfSymbol(symbolName:c.POINTER[Annotated[bytes, ctypes.c_
 @dll.bind
 def LLVMAddSymbol(symbolName:c.POINTER[Annotated[bytes, ctypes.c_char]], symbolValue:c.POINTER[None]) -> None: ...
 class struct_LLVMOpaquePassBuilderOptions(ctypes.Structure): pass
-LLVMPassBuilderOptionsRef = c.POINTER[struct_LLVMOpaquePassBuilderOptions]
+LLVMPassBuilderOptionsRef: TypeAlias = c.POINTER[struct_LLVMOpaquePassBuilderOptions]
 @dll.bind
 def LLVMRunPasses(M:LLVMModuleRef, Passes:c.POINTER[Annotated[bytes, ctypes.c_char]], TM:LLVMTargetMachineRef, Options:LLVMPassBuilderOptionsRef) -> LLVMErrorRef: ...
 @dll.bind
@@ -3475,44 +3475,44 @@ def llvm_blake3_hasher_finalize(self:c.POINTER[llvm_blake3_hasher], out:c.POINTE
 def llvm_blake3_hasher_finalize_seek(self:c.POINTER[llvm_blake3_hasher], seek:uint64_t, out:c.POINTER[uint8_t], out_len:size_t) -> None: ...
 @dll.bind
 def llvm_blake3_hasher_reset(self:c.POINTER[llvm_blake3_hasher]) -> None: ...
-lto_bool_t = Annotated[bool, ctypes.c_bool]
-lto_symbol_attributes = CEnum(Annotated[int, ctypes.c_uint32])
-LTO_SYMBOL_ALIGNMENT_MASK = lto_symbol_attributes.define('LTO_SYMBOL_ALIGNMENT_MASK', 31) # type: ignore
-LTO_SYMBOL_PERMISSIONS_MASK = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_MASK', 224) # type: ignore
-LTO_SYMBOL_PERMISSIONS_CODE = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_CODE', 160) # type: ignore
-LTO_SYMBOL_PERMISSIONS_DATA = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_DATA', 192) # type: ignore
-LTO_SYMBOL_PERMISSIONS_RODATA = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_RODATA', 128) # type: ignore
-LTO_SYMBOL_DEFINITION_MASK = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_MASK', 1792) # type: ignore
-LTO_SYMBOL_DEFINITION_REGULAR = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_REGULAR', 256) # type: ignore
-LTO_SYMBOL_DEFINITION_TENTATIVE = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_TENTATIVE', 512) # type: ignore
-LTO_SYMBOL_DEFINITION_WEAK = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_WEAK', 768) # type: ignore
-LTO_SYMBOL_DEFINITION_UNDEFINED = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_UNDEFINED', 1024) # type: ignore
-LTO_SYMBOL_DEFINITION_WEAKUNDEF = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_WEAKUNDEF', 1280) # type: ignore
-LTO_SYMBOL_SCOPE_MASK = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_MASK', 14336) # type: ignore
-LTO_SYMBOL_SCOPE_INTERNAL = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_INTERNAL', 2048) # type: ignore
-LTO_SYMBOL_SCOPE_HIDDEN = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_HIDDEN', 4096) # type: ignore
-LTO_SYMBOL_SCOPE_PROTECTED = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_PROTECTED', 8192) # type: ignore
-LTO_SYMBOL_SCOPE_DEFAULT = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_DEFAULT', 6144) # type: ignore
-LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN', 10240) # type: ignore
-LTO_SYMBOL_COMDAT = lto_symbol_attributes.define('LTO_SYMBOL_COMDAT', 16384) # type: ignore
-LTO_SYMBOL_ALIAS = lto_symbol_attributes.define('LTO_SYMBOL_ALIAS', 32768) # type: ignore
+lto_bool_t: TypeAlias = Annotated[bool, ctypes.c_bool]
+class lto_symbol_attributes(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LTO_SYMBOL_ALIGNMENT_MASK = lto_symbol_attributes.define('LTO_SYMBOL_ALIGNMENT_MASK', 31)
+LTO_SYMBOL_PERMISSIONS_MASK = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_MASK', 224)
+LTO_SYMBOL_PERMISSIONS_CODE = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_CODE', 160)
+LTO_SYMBOL_PERMISSIONS_DATA = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_DATA', 192)
+LTO_SYMBOL_PERMISSIONS_RODATA = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_RODATA', 128)
+LTO_SYMBOL_DEFINITION_MASK = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_MASK', 1792)
+LTO_SYMBOL_DEFINITION_REGULAR = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_REGULAR', 256)
+LTO_SYMBOL_DEFINITION_TENTATIVE = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_TENTATIVE', 512)
+LTO_SYMBOL_DEFINITION_WEAK = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_WEAK', 768)
+LTO_SYMBOL_DEFINITION_UNDEFINED = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_UNDEFINED', 1024)
+LTO_SYMBOL_DEFINITION_WEAKUNDEF = lto_symbol_attributes.define('LTO_SYMBOL_DEFINITION_WEAKUNDEF', 1280)
+LTO_SYMBOL_SCOPE_MASK = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_MASK', 14336)
+LTO_SYMBOL_SCOPE_INTERNAL = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_INTERNAL', 2048)
+LTO_SYMBOL_SCOPE_HIDDEN = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_HIDDEN', 4096)
+LTO_SYMBOL_SCOPE_PROTECTED = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_PROTECTED', 8192)
+LTO_SYMBOL_SCOPE_DEFAULT = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_DEFAULT', 6144)
+LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN = lto_symbol_attributes.define('LTO_SYMBOL_SCOPE_DEFAULT_CAN_BE_HIDDEN', 10240)
+LTO_SYMBOL_COMDAT = lto_symbol_attributes.define('LTO_SYMBOL_COMDAT', 16384)
+LTO_SYMBOL_ALIAS = lto_symbol_attributes.define('LTO_SYMBOL_ALIAS', 32768)
 
-lto_debug_model = CEnum(Annotated[int, ctypes.c_uint32])
-LTO_DEBUG_MODEL_NONE = lto_debug_model.define('LTO_DEBUG_MODEL_NONE', 0) # type: ignore
-LTO_DEBUG_MODEL_DWARF = lto_debug_model.define('LTO_DEBUG_MODEL_DWARF', 1) # type: ignore
+class lto_debug_model(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LTO_DEBUG_MODEL_NONE = lto_debug_model.define('LTO_DEBUG_MODEL_NONE', 0)
+LTO_DEBUG_MODEL_DWARF = lto_debug_model.define('LTO_DEBUG_MODEL_DWARF', 1)
 
-lto_codegen_model = CEnum(Annotated[int, ctypes.c_uint32])
-LTO_CODEGEN_PIC_MODEL_STATIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_STATIC', 0) # type: ignore
-LTO_CODEGEN_PIC_MODEL_DYNAMIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DYNAMIC', 1) # type: ignore
-LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC', 2) # type: ignore
-LTO_CODEGEN_PIC_MODEL_DEFAULT = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DEFAULT', 3) # type: ignore
+class lto_codegen_model(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LTO_CODEGEN_PIC_MODEL_STATIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_STATIC', 0)
+LTO_CODEGEN_PIC_MODEL_DYNAMIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DYNAMIC', 1)
+LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC', 2)
+LTO_CODEGEN_PIC_MODEL_DEFAULT = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DEFAULT', 3)
 
 class struct_LLVMOpaqueLTOModule(ctypes.Structure): pass
-lto_module_t = c.POINTER[struct_LLVMOpaqueLTOModule]
+lto_module_t: TypeAlias = c.POINTER[struct_LLVMOpaqueLTOModule]
 class struct_LLVMOpaqueLTOCodeGenerator(ctypes.Structure): pass
-lto_code_gen_t = c.POINTER[struct_LLVMOpaqueLTOCodeGenerator]
+lto_code_gen_t: TypeAlias = c.POINTER[struct_LLVMOpaqueLTOCodeGenerator]
 class struct_LLVMOpaqueThinLTOCodeGenerator(ctypes.Structure): pass
-thinlto_code_gen_t = c.POINTER[struct_LLVMOpaqueThinLTOCodeGenerator]
+thinlto_code_gen_t: TypeAlias = c.POINTER[struct_LLVMOpaqueThinLTOCodeGenerator]
 @dll.bind
 def lto_get_version() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
@@ -3539,7 +3539,7 @@ def lto_module_create_in_local_context(mem:c.POINTER[None], length:size_t, path:
 def lto_module_create_in_codegen_context(mem:c.POINTER[None], length:size_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]], cg:lto_code_gen_t) -> lto_module_t: ...
 @dll.bind
 def lto_module_create_from_fd(fd:Annotated[int, ctypes.c_int32], path:c.POINTER[Annotated[bytes, ctypes.c_char]], file_size:size_t) -> lto_module_t: ...
-off_t = Annotated[int, ctypes.c_int64]
+off_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def lto_module_create_from_fd_at_offset(fd:Annotated[int, ctypes.c_int32], path:c.POINTER[Annotated[bytes, ctypes.c_char]], file_size:size_t, map_size:size_t, offset:off_t) -> lto_module_t: ...
 @dll.bind
@@ -3560,13 +3560,13 @@ def lto_module_get_linkeropts(mod:lto_module_t) -> c.POINTER[Annotated[bytes, ct
 def lto_module_get_macho_cputype(mod:lto_module_t, out_cputype:c.POINTER[Annotated[int, ctypes.c_uint32]], out_cpusubtype:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> lto_bool_t: ...
 @dll.bind
 def lto_module_has_ctor_dtor(mod:lto_module_t) -> lto_bool_t: ...
-lto_codegen_diagnostic_severity_t = CEnum(Annotated[int, ctypes.c_uint32])
-LTO_DS_ERROR = lto_codegen_diagnostic_severity_t.define('LTO_DS_ERROR', 0) # type: ignore
-LTO_DS_WARNING = lto_codegen_diagnostic_severity_t.define('LTO_DS_WARNING', 1) # type: ignore
-LTO_DS_REMARK = lto_codegen_diagnostic_severity_t.define('LTO_DS_REMARK', 3) # type: ignore
-LTO_DS_NOTE = lto_codegen_diagnostic_severity_t.define('LTO_DS_NOTE', 2) # type: ignore
+class lto_codegen_diagnostic_severity_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+LTO_DS_ERROR = lto_codegen_diagnostic_severity_t.define('LTO_DS_ERROR', 0)
+LTO_DS_WARNING = lto_codegen_diagnostic_severity_t.define('LTO_DS_WARNING', 1)
+LTO_DS_REMARK = lto_codegen_diagnostic_severity_t.define('LTO_DS_REMARK', 3)
+LTO_DS_NOTE = lto_codegen_diagnostic_severity_t.define('LTO_DS_NOTE', 2)
 
-lto_diagnostic_handler_t = c.CFUNCTYPE(None, lto_codegen_diagnostic_severity_t, c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None])
+lto_diagnostic_handler_t: TypeAlias = c.CFUNCTYPE(None, lto_codegen_diagnostic_severity_t, c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None])
 @dll.bind
 def lto_codegen_set_diagnostic_handler(_0:lto_code_gen_t, _1:lto_diagnostic_handler_t, _2:c.POINTER[None]) -> None: ...
 @dll.bind
@@ -3616,7 +3616,7 @@ def lto_codegen_set_should_internalize(cg:lto_code_gen_t, ShouldInternalize:lto_
 @dll.bind
 def lto_codegen_set_should_embed_uselists(cg:lto_code_gen_t, ShouldEmbedUselists:lto_bool_t) -> None: ...
 class struct_LLVMOpaqueLTOInput(ctypes.Structure): pass
-lto_input_t = c.POINTER[struct_LLVMOpaqueLTOInput]
+lto_input_t: TypeAlias = c.POINTER[struct_LLVMOpaqueLTOInput]
 @dll.bind
 def lto_input_create(buffer:c.POINTER[None], buffer_size:size_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> lto_input_t: ...
 @dll.bind

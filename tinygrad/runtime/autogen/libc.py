@@ -2,13 +2,13 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 dll = c.DLL('libc', 'c', use_errno=True)
-off_t = Annotated[int, ctypes.c_int64]
-mode_t = Annotated[int, ctypes.c_uint32]
-size_t = Annotated[int, ctypes.c_uint64]
-__off_t = Annotated[int, ctypes.c_int64]
+off_t: TypeAlias = Annotated[int, ctypes.c_int64]
+mode_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+__off_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def mmap(__addr:c.POINTER[None], __len:size_t, __prot:Annotated[int, ctypes.c_int32], __flags:Annotated[int, ctypes.c_int32], __fd:Annotated[int, ctypes.c_int32], __offset:Annotated[int, ctypes.c_int64]) -> c.POINTER[None]: ...
 @dll.bind
@@ -74,7 +74,7 @@ class struct___locale_struct(c.Struct):
   __ctype_toupper: Annotated[c.POINTER[Annotated[int, ctypes.c_int32]], 120]
   __names: Annotated[c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[13]], 128]
 class struct___locale_data(ctypes.Structure): pass
-locale_t = c.POINTER[struct___locale_struct]
+locale_t: TypeAlias = c.POINTER[struct___locale_struct]
 @dll.bind
 def strcoll_l(__s1:c.POINTER[Annotated[bytes, ctypes.c_char]], __s2:c.POINTER[Annotated[bytes, ctypes.c_char]], __l:locale_t) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -139,24 +139,24 @@ def stpncpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[A
 def strlcpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> size_t: ...
 @dll.bind
 def strlcat(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> size_t: ...
-Elf32_Half = Annotated[int, ctypes.c_uint16]
-Elf64_Half = Annotated[int, ctypes.c_uint16]
-Elf32_Word = Annotated[int, ctypes.c_uint32]
-Elf32_Sword = Annotated[int, ctypes.c_int32]
-Elf64_Word = Annotated[int, ctypes.c_uint32]
-Elf64_Sword = Annotated[int, ctypes.c_int32]
-Elf32_Xword = Annotated[int, ctypes.c_uint64]
-Elf32_Sxword = Annotated[int, ctypes.c_int64]
-Elf64_Xword = Annotated[int, ctypes.c_uint64]
-Elf64_Sxword = Annotated[int, ctypes.c_int64]
-Elf32_Addr = Annotated[int, ctypes.c_uint32]
-Elf64_Addr = Annotated[int, ctypes.c_uint64]
-Elf32_Off = Annotated[int, ctypes.c_uint32]
-Elf64_Off = Annotated[int, ctypes.c_uint64]
-Elf32_Section = Annotated[int, ctypes.c_uint16]
-Elf64_Section = Annotated[int, ctypes.c_uint16]
-Elf32_Versym = Annotated[int, ctypes.c_uint16]
-Elf64_Versym = Annotated[int, ctypes.c_uint16]
+Elf32_Half: TypeAlias = Annotated[int, ctypes.c_uint16]
+Elf64_Half: TypeAlias = Annotated[int, ctypes.c_uint16]
+Elf32_Word: TypeAlias = Annotated[int, ctypes.c_uint32]
+Elf32_Sword: TypeAlias = Annotated[int, ctypes.c_int32]
+Elf64_Word: TypeAlias = Annotated[int, ctypes.c_uint32]
+Elf64_Sword: TypeAlias = Annotated[int, ctypes.c_int32]
+Elf32_Xword: TypeAlias = Annotated[int, ctypes.c_uint64]
+Elf32_Sxword: TypeAlias = Annotated[int, ctypes.c_int64]
+Elf64_Xword: TypeAlias = Annotated[int, ctypes.c_uint64]
+Elf64_Sxword: TypeAlias = Annotated[int, ctypes.c_int64]
+Elf32_Addr: TypeAlias = Annotated[int, ctypes.c_uint32]
+Elf64_Addr: TypeAlias = Annotated[int, ctypes.c_uint64]
+Elf32_Off: TypeAlias = Annotated[int, ctypes.c_uint32]
+Elf64_Off: TypeAlias = Annotated[int, ctypes.c_uint64]
+Elf32_Section: TypeAlias = Annotated[int, ctypes.c_uint16]
+Elf64_Section: TypeAlias = Annotated[int, ctypes.c_uint16]
+Elf32_Versym: TypeAlias = Annotated[int, ctypes.c_uint16]
+Elf64_Versym: TypeAlias = Annotated[int, ctypes.c_uint16]
 @c.record
 class Elf32_Ehdr(c.Struct):
   SIZE = 52
@@ -280,8 +280,8 @@ class Elf64_Rela(c.Struct):
   r_offset: Annotated[Elf64_Addr, 0]
   r_info: Annotated[Elf64_Xword, 8]
   r_addend: Annotated[Elf64_Sxword, 16]
-Elf32_Relr = Annotated[int, ctypes.c_uint32]
-Elf64_Relr = Annotated[int, ctypes.c_uint64]
+Elf32_Relr: TypeAlias = Annotated[int, ctypes.c_uint32]
+Elf64_Relr: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class Elf32_Phdr(c.Struct):
   SIZE = 32
@@ -391,7 +391,7 @@ class Elf32_auxv_t(c.Struct):
   SIZE = 8
   a_type: Annotated[uint32_t, 0]
   a_un: Annotated[Elf32_auxv_t_a_un, 4]
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @c.record
 class Elf32_auxv_t_a_un(c.Struct):
   SIZE = 4
@@ -401,7 +401,7 @@ class Elf64_auxv_t(c.Struct):
   SIZE = 16
   a_type: Annotated[uint64_t, 0]
   a_un: Annotated[Elf64_auxv_t_a_un, 8]
-uint64_t = Annotated[int, ctypes.c_uint64]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class Elf64_auxv_t_a_un(c.Struct):
   SIZE = 8
@@ -483,7 +483,7 @@ class Elf64_Lib(c.Struct):
   l_checksum: Annotated[Elf64_Word, 8]
   l_version: Annotated[Elf64_Word, 12]
   l_flags: Annotated[Elf64_Word, 16]
-Elf32_Conflict = Annotated[int, ctypes.c_uint32]
+Elf32_Conflict: TypeAlias = Annotated[int, ctypes.c_uint32]
 @c.record
 class Elf_MIPS_ABIFlags_v0(c.Struct):
   SIZE = 24
@@ -498,24 +498,24 @@ class Elf_MIPS_ABIFlags_v0(c.Struct):
   ases: Annotated[Elf32_Word, 12]
   flags1: Annotated[Elf32_Word, 16]
   flags2: Annotated[Elf32_Word, 20]
-_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
-Val_GNU_MIPS_ABI_FP_ANY = _anonenum0.define('Val_GNU_MIPS_ABI_FP_ANY', 0) # type: ignore
-Val_GNU_MIPS_ABI_FP_DOUBLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_DOUBLE', 1) # type: ignore
-Val_GNU_MIPS_ABI_FP_SINGLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SINGLE', 2) # type: ignore
-Val_GNU_MIPS_ABI_FP_SOFT = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SOFT', 3) # type: ignore
-Val_GNU_MIPS_ABI_FP_OLD_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_OLD_64', 4) # type: ignore
-Val_GNU_MIPS_ABI_FP_XX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_XX', 5) # type: ignore
-Val_GNU_MIPS_ABI_FP_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64', 6) # type: ignore
-Val_GNU_MIPS_ABI_FP_64A = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64A', 7) # type: ignore
-Val_GNU_MIPS_ABI_FP_MAX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_MAX', 7) # type: ignore
+class _anonenum0(Annotated[int, ctypes.c_uint32], c.Enum): pass
+Val_GNU_MIPS_ABI_FP_ANY = _anonenum0.define('Val_GNU_MIPS_ABI_FP_ANY', 0)
+Val_GNU_MIPS_ABI_FP_DOUBLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_DOUBLE', 1)
+Val_GNU_MIPS_ABI_FP_SINGLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SINGLE', 2)
+Val_GNU_MIPS_ABI_FP_SOFT = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SOFT', 3)
+Val_GNU_MIPS_ABI_FP_OLD_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_OLD_64', 4)
+Val_GNU_MIPS_ABI_FP_XX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_XX', 5)
+Val_GNU_MIPS_ABI_FP_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64', 6)
+Val_GNU_MIPS_ABI_FP_64A = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64A', 7)
+Val_GNU_MIPS_ABI_FP_MAX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_MAX', 7)
 
-ssize_t = Annotated[int, ctypes.c_int64]
-gid_t = Annotated[int, ctypes.c_uint32]
-uid_t = Annotated[int, ctypes.c_uint32]
-useconds_t = Annotated[int, ctypes.c_uint32]
-pid_t = Annotated[int, ctypes.c_int32]
-intptr_t = Annotated[int, ctypes.c_int64]
-socklen_t = Annotated[int, ctypes.c_uint32]
+ssize_t: TypeAlias = Annotated[int, ctypes.c_int64]
+gid_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+uid_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+useconds_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+pid_t: TypeAlias = Annotated[int, ctypes.c_int32]
+intptr_t: TypeAlias = Annotated[int, ctypes.c_int64]
+socklen_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @dll.bind
 def access(__name:c.POINTER[Annotated[bytes, ctypes.c_char]], __type:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -540,15 +540,15 @@ def pipe(__pipedes:c.Array[Annotated[int, ctypes.c_int32], Literal[2]]) -> Annot
 def alarm(__seconds:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
 def sleep(__seconds:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
-__useconds_t = Annotated[int, ctypes.c_uint32]
+__useconds_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @dll.bind
 def ualarm(__value:Annotated[int, ctypes.c_uint32], __interval:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
 def usleep(__useconds:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def pause() -> Annotated[int, ctypes.c_int32]: ...
-__uid_t = Annotated[int, ctypes.c_uint32]
-__gid_t = Annotated[int, ctypes.c_uint32]
+__uid_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+__gid_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @dll.bind
 def chown(__file:c.POINTER[Annotated[bytes, ctypes.c_char]], __owner:Annotated[int, ctypes.c_uint32], __group:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -597,7 +597,7 @@ def fpathconf(__fd:Annotated[int, ctypes.c_int32], __name:Annotated[int, ctypes.
 def sysconf(__name:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int64]: ...
 @dll.bind
 def confstr(__name:Annotated[int, ctypes.c_int32], __buf:c.POINTER[Annotated[bytes, ctypes.c_char]], __len:size_t) -> size_t: ...
-__pid_t = Annotated[int, ctypes.c_int32]
+__pid_t: TypeAlias = Annotated[int, ctypes.c_int32]
 @dll.bind
 def getpid() -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind

@@ -2,87 +2,87 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 dll = c.DLL('opencl', 'OpenCL')
 class struct__cl_platform_id(ctypes.Structure): pass
-cl_platform_id = c.POINTER[struct__cl_platform_id]
+cl_platform_id: TypeAlias = c.POINTER[struct__cl_platform_id]
 class struct__cl_device_id(ctypes.Structure): pass
-cl_device_id = c.POINTER[struct__cl_device_id]
+cl_device_id: TypeAlias = c.POINTER[struct__cl_device_id]
 class struct__cl_context(ctypes.Structure): pass
-cl_context = c.POINTER[struct__cl_context]
+cl_context: TypeAlias = c.POINTER[struct__cl_context]
 class struct__cl_command_queue(ctypes.Structure): pass
-cl_command_queue = c.POINTER[struct__cl_command_queue]
+cl_command_queue: TypeAlias = c.POINTER[struct__cl_command_queue]
 class struct__cl_mem(ctypes.Structure): pass
-cl_mem = c.POINTER[struct__cl_mem]
+cl_mem: TypeAlias = c.POINTER[struct__cl_mem]
 class struct__cl_program(ctypes.Structure): pass
-cl_program = c.POINTER[struct__cl_program]
+cl_program: TypeAlias = c.POINTER[struct__cl_program]
 class struct__cl_kernel(ctypes.Structure): pass
-cl_kernel = c.POINTER[struct__cl_kernel]
+cl_kernel: TypeAlias = c.POINTER[struct__cl_kernel]
 class struct__cl_event(ctypes.Structure): pass
-cl_event = c.POINTER[struct__cl_event]
+cl_event: TypeAlias = c.POINTER[struct__cl_event]
 class struct__cl_sampler(ctypes.Structure): pass
-cl_sampler = c.POINTER[struct__cl_sampler]
-cl_bool = Annotated[int, ctypes.c_uint32]
-cl_bitfield = Annotated[int, ctypes.c_uint64]
-cl_properties = Annotated[int, ctypes.c_uint64]
-cl_device_type = Annotated[int, ctypes.c_uint64]
-cl_platform_info = Annotated[int, ctypes.c_uint32]
-cl_device_info = Annotated[int, ctypes.c_uint32]
-cl_device_fp_config = Annotated[int, ctypes.c_uint64]
-cl_device_mem_cache_type = Annotated[int, ctypes.c_uint32]
-cl_device_local_mem_type = Annotated[int, ctypes.c_uint32]
-cl_device_exec_capabilities = Annotated[int, ctypes.c_uint64]
-cl_device_svm_capabilities = Annotated[int, ctypes.c_uint64]
-cl_command_queue_properties = Annotated[int, ctypes.c_uint64]
-cl_device_partition_property = Annotated[int, ctypes.c_int64]
-cl_device_affinity_domain = Annotated[int, ctypes.c_uint64]
-cl_context_properties = Annotated[int, ctypes.c_int64]
-cl_context_info = Annotated[int, ctypes.c_uint32]
-cl_queue_properties = Annotated[int, ctypes.c_uint64]
-cl_command_queue_info = Annotated[int, ctypes.c_uint32]
-cl_channel_order = Annotated[int, ctypes.c_uint32]
-cl_channel_type = Annotated[int, ctypes.c_uint32]
-cl_mem_flags = Annotated[int, ctypes.c_uint64]
-cl_svm_mem_flags = Annotated[int, ctypes.c_uint64]
-cl_mem_object_type = Annotated[int, ctypes.c_uint32]
-cl_mem_info = Annotated[int, ctypes.c_uint32]
-cl_mem_migration_flags = Annotated[int, ctypes.c_uint64]
-cl_image_info = Annotated[int, ctypes.c_uint32]
-cl_buffer_create_type = Annotated[int, ctypes.c_uint32]
-cl_addressing_mode = Annotated[int, ctypes.c_uint32]
-cl_filter_mode = Annotated[int, ctypes.c_uint32]
-cl_sampler_info = Annotated[int, ctypes.c_uint32]
-cl_map_flags = Annotated[int, ctypes.c_uint64]
-cl_pipe_properties = Annotated[int, ctypes.c_int64]
-cl_pipe_info = Annotated[int, ctypes.c_uint32]
-cl_program_info = Annotated[int, ctypes.c_uint32]
-cl_program_build_info = Annotated[int, ctypes.c_uint32]
-cl_program_binary_type = Annotated[int, ctypes.c_uint32]
-cl_build_status = Annotated[int, ctypes.c_int32]
-cl_kernel_info = Annotated[int, ctypes.c_uint32]
-cl_kernel_arg_info = Annotated[int, ctypes.c_uint32]
-cl_kernel_arg_address_qualifier = Annotated[int, ctypes.c_uint32]
-cl_kernel_arg_access_qualifier = Annotated[int, ctypes.c_uint32]
-cl_kernel_arg_type_qualifier = Annotated[int, ctypes.c_uint64]
-cl_kernel_work_group_info = Annotated[int, ctypes.c_uint32]
-cl_kernel_sub_group_info = Annotated[int, ctypes.c_uint32]
-cl_event_info = Annotated[int, ctypes.c_uint32]
-cl_command_type = Annotated[int, ctypes.c_uint32]
-cl_profiling_info = Annotated[int, ctypes.c_uint32]
-cl_sampler_properties = Annotated[int, ctypes.c_uint64]
-cl_kernel_exec_info = Annotated[int, ctypes.c_uint32]
-cl_device_atomic_capabilities = Annotated[int, ctypes.c_uint64]
-cl_device_device_enqueue_capabilities = Annotated[int, ctypes.c_uint64]
-cl_khronos_vendor_id = Annotated[int, ctypes.c_uint32]
-cl_mem_properties = Annotated[int, ctypes.c_uint64]
-cl_version = Annotated[int, ctypes.c_uint32]
+cl_sampler: TypeAlias = c.POINTER[struct__cl_sampler]
+cl_bool: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_bitfield: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_type: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_platform_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_fp_config: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_mem_cache_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_local_mem_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_exec_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_svm_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_command_queue_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_partition_property: TypeAlias = Annotated[int, ctypes.c_int64]
+cl_device_affinity_domain: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_context_properties: TypeAlias = Annotated[int, ctypes.c_int64]
+cl_context_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_queue_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_command_queue_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_channel_order: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_channel_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_mem_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_svm_mem_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_mem_object_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_mem_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_mem_migration_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_image_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_buffer_create_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_addressing_mode: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_filter_mode: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_sampler_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_map_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_pipe_properties: TypeAlias = Annotated[int, ctypes.c_int64]
+cl_pipe_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_program_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_program_build_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_program_binary_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_build_status: TypeAlias = Annotated[int, ctypes.c_int32]
+cl_kernel_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_arg_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_arg_address_qualifier: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_arg_access_qualifier: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_arg_type_qualifier: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_kernel_work_group_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_sub_group_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_event_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_command_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_profiling_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_sampler_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_kernel_exec_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_atomic_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_device_enqueue_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_khronos_vendor_id: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_mem_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_version: TypeAlias = Annotated[int, ctypes.c_uint32]
 @c.record
 class struct__cl_image_format(c.Struct):
   SIZE = 8
   image_channel_order: Annotated[cl_channel_order, 0]
   image_channel_data_type: Annotated[cl_channel_type, 4]
-cl_image_format = struct__cl_image_format
+cl_image_format: TypeAlias = struct__cl_image_format
 @c.record
 class struct__cl_image_desc(c.Struct):
   SIZE = 72
@@ -97,22 +97,22 @@ class struct__cl_image_desc(c.Struct):
   num_samples: Annotated[cl_uint, 60]
   buffer: Annotated[cl_mem, 64]
   mem_object: Annotated[cl_mem, 64]
-size_t = Annotated[int, ctypes.c_uint64]
-cl_uint = Annotated[int, ctypes.c_uint32]
-cl_image_desc = struct__cl_image_desc
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_uint: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_image_desc: TypeAlias = struct__cl_image_desc
 @c.record
 class struct__cl_buffer_region(c.Struct):
   SIZE = 16
   origin: Annotated[size_t, 0]
   size: Annotated[size_t, 8]
-cl_buffer_region = struct__cl_buffer_region
+cl_buffer_region: TypeAlias = struct__cl_buffer_region
 @c.record
 class struct__cl_name_version(c.Struct):
   SIZE = 68
   version: Annotated[cl_version, 0]
   name: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[64]], 4]
-cl_name_version = struct__cl_name_version
-cl_int = Annotated[int, ctypes.c_int32]
+cl_name_version: TypeAlias = struct__cl_name_version
+cl_int: TypeAlias = Annotated[int, ctypes.c_int32]
 @dll.bind
 def clGetPlatformIDs(num_entries:cl_uint, platforms:c.POINTER[cl_platform_id], num_platforms:c.POINTER[cl_uint]) -> cl_int: ...
 @dll.bind
@@ -129,7 +129,7 @@ def clRetainDevice(device:cl_device_id) -> cl_int: ...
 def clReleaseDevice(device:cl_device_id) -> cl_int: ...
 @dll.bind
 def clSetDefaultDeviceCommandQueue(context:cl_context, device:cl_device_id, command_queue:cl_command_queue) -> cl_int: ...
-cl_ulong = Annotated[int, ctypes.c_uint64]
+cl_ulong: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def clGetDeviceAndHostTimer(device:cl_device_id, device_timestamp:c.POINTER[cl_ulong], host_timestamp:c.POINTER[cl_ulong]) -> cl_int: ...
 @dll.bind

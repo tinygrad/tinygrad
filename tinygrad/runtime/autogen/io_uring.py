@@ -2,7 +2,7 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 @c.record
 class struct_io_uring_sq(c.Struct):
@@ -66,13 +66,13 @@ class struct_io_uring_sqe(c.Struct):
   addr3: Annotated[Annotated[int, ctypes.c_uint64], 0]
   __pad2: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[1]], 8]
   cmd: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 48]
-__u8 = Annotated[int, ctypes.c_ubyte]
-__u16 = Annotated[int, ctypes.c_uint16]
-__s32 = Annotated[int, ctypes.c_int32]
-__u64 = Annotated[int, ctypes.c_uint64]
-__u32 = Annotated[int, ctypes.c_uint32]
-__kernel_rwf_t = Annotated[int, ctypes.c_int32]
-size_t = Annotated[int, ctypes.c_uint64]
+__u8: TypeAlias = Annotated[int, ctypes.c_ubyte]
+__u16: TypeAlias = Annotated[int, ctypes.c_uint16]
+__s32: TypeAlias = Annotated[int, ctypes.c_int32]
+__u64: TypeAlias = Annotated[int, ctypes.c_uint64]
+__u32: TypeAlias = Annotated[int, ctypes.c_uint32]
+__kernel_rwf_t: TypeAlias = Annotated[int, ctypes.c_int32]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class struct_io_uring_cq(c.Struct):
   SIZE = 88
@@ -140,81 +140,81 @@ class struct_statx_timestamp(c.Struct):
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_nsec: Annotated[Annotated[int, ctypes.c_uint32], 8]
   __reserved: Annotated[Annotated[int, ctypes.c_int32], 12]
-__s64 = Annotated[int, ctypes.c_int64]
+__s64: TypeAlias = Annotated[int, ctypes.c_int64]
 class struct_epoll_event(ctypes.Structure): pass
-_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
-IOSQE_FIXED_FILE_BIT = _anonenum0.define('IOSQE_FIXED_FILE_BIT', 0) # type: ignore
-IOSQE_IO_DRAIN_BIT = _anonenum0.define('IOSQE_IO_DRAIN_BIT', 1) # type: ignore
-IOSQE_IO_LINK_BIT = _anonenum0.define('IOSQE_IO_LINK_BIT', 2) # type: ignore
-IOSQE_IO_HARDLINK_BIT = _anonenum0.define('IOSQE_IO_HARDLINK_BIT', 3) # type: ignore
-IOSQE_ASYNC_BIT = _anonenum0.define('IOSQE_ASYNC_BIT', 4) # type: ignore
-IOSQE_BUFFER_SELECT_BIT = _anonenum0.define('IOSQE_BUFFER_SELECT_BIT', 5) # type: ignore
-IOSQE_CQE_SKIP_SUCCESS_BIT = _anonenum0.define('IOSQE_CQE_SKIP_SUCCESS_BIT', 6) # type: ignore
+class _anonenum0(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IOSQE_FIXED_FILE_BIT = _anonenum0.define('IOSQE_FIXED_FILE_BIT', 0)
+IOSQE_IO_DRAIN_BIT = _anonenum0.define('IOSQE_IO_DRAIN_BIT', 1)
+IOSQE_IO_LINK_BIT = _anonenum0.define('IOSQE_IO_LINK_BIT', 2)
+IOSQE_IO_HARDLINK_BIT = _anonenum0.define('IOSQE_IO_HARDLINK_BIT', 3)
+IOSQE_ASYNC_BIT = _anonenum0.define('IOSQE_ASYNC_BIT', 4)
+IOSQE_BUFFER_SELECT_BIT = _anonenum0.define('IOSQE_BUFFER_SELECT_BIT', 5)
+IOSQE_CQE_SKIP_SUCCESS_BIT = _anonenum0.define('IOSQE_CQE_SKIP_SUCCESS_BIT', 6)
 
-enum_io_uring_op = CEnum(Annotated[int, ctypes.c_uint32])
-IORING_OP_NOP = enum_io_uring_op.define('IORING_OP_NOP', 0) # type: ignore
-IORING_OP_READV = enum_io_uring_op.define('IORING_OP_READV', 1) # type: ignore
-IORING_OP_WRITEV = enum_io_uring_op.define('IORING_OP_WRITEV', 2) # type: ignore
-IORING_OP_FSYNC = enum_io_uring_op.define('IORING_OP_FSYNC', 3) # type: ignore
-IORING_OP_READ_FIXED = enum_io_uring_op.define('IORING_OP_READ_FIXED', 4) # type: ignore
-IORING_OP_WRITE_FIXED = enum_io_uring_op.define('IORING_OP_WRITE_FIXED', 5) # type: ignore
-IORING_OP_POLL_ADD = enum_io_uring_op.define('IORING_OP_POLL_ADD', 6) # type: ignore
-IORING_OP_POLL_REMOVE = enum_io_uring_op.define('IORING_OP_POLL_REMOVE', 7) # type: ignore
-IORING_OP_SYNC_FILE_RANGE = enum_io_uring_op.define('IORING_OP_SYNC_FILE_RANGE', 8) # type: ignore
-IORING_OP_SENDMSG = enum_io_uring_op.define('IORING_OP_SENDMSG', 9) # type: ignore
-IORING_OP_RECVMSG = enum_io_uring_op.define('IORING_OP_RECVMSG', 10) # type: ignore
-IORING_OP_TIMEOUT = enum_io_uring_op.define('IORING_OP_TIMEOUT', 11) # type: ignore
-IORING_OP_TIMEOUT_REMOVE = enum_io_uring_op.define('IORING_OP_TIMEOUT_REMOVE', 12) # type: ignore
-IORING_OP_ACCEPT = enum_io_uring_op.define('IORING_OP_ACCEPT', 13) # type: ignore
-IORING_OP_ASYNC_CANCEL = enum_io_uring_op.define('IORING_OP_ASYNC_CANCEL', 14) # type: ignore
-IORING_OP_LINK_TIMEOUT = enum_io_uring_op.define('IORING_OP_LINK_TIMEOUT', 15) # type: ignore
-IORING_OP_CONNECT = enum_io_uring_op.define('IORING_OP_CONNECT', 16) # type: ignore
-IORING_OP_FALLOCATE = enum_io_uring_op.define('IORING_OP_FALLOCATE', 17) # type: ignore
-IORING_OP_OPENAT = enum_io_uring_op.define('IORING_OP_OPENAT', 18) # type: ignore
-IORING_OP_CLOSE = enum_io_uring_op.define('IORING_OP_CLOSE', 19) # type: ignore
-IORING_OP_FILES_UPDATE = enum_io_uring_op.define('IORING_OP_FILES_UPDATE', 20) # type: ignore
-IORING_OP_STATX = enum_io_uring_op.define('IORING_OP_STATX', 21) # type: ignore
-IORING_OP_READ = enum_io_uring_op.define('IORING_OP_READ', 22) # type: ignore
-IORING_OP_WRITE = enum_io_uring_op.define('IORING_OP_WRITE', 23) # type: ignore
-IORING_OP_FADVISE = enum_io_uring_op.define('IORING_OP_FADVISE', 24) # type: ignore
-IORING_OP_MADVISE = enum_io_uring_op.define('IORING_OP_MADVISE', 25) # type: ignore
-IORING_OP_SEND = enum_io_uring_op.define('IORING_OP_SEND', 26) # type: ignore
-IORING_OP_RECV = enum_io_uring_op.define('IORING_OP_RECV', 27) # type: ignore
-IORING_OP_OPENAT2 = enum_io_uring_op.define('IORING_OP_OPENAT2', 28) # type: ignore
-IORING_OP_EPOLL_CTL = enum_io_uring_op.define('IORING_OP_EPOLL_CTL', 29) # type: ignore
-IORING_OP_SPLICE = enum_io_uring_op.define('IORING_OP_SPLICE', 30) # type: ignore
-IORING_OP_PROVIDE_BUFFERS = enum_io_uring_op.define('IORING_OP_PROVIDE_BUFFERS', 31) # type: ignore
-IORING_OP_REMOVE_BUFFERS = enum_io_uring_op.define('IORING_OP_REMOVE_BUFFERS', 32) # type: ignore
-IORING_OP_TEE = enum_io_uring_op.define('IORING_OP_TEE', 33) # type: ignore
-IORING_OP_SHUTDOWN = enum_io_uring_op.define('IORING_OP_SHUTDOWN', 34) # type: ignore
-IORING_OP_RENAMEAT = enum_io_uring_op.define('IORING_OP_RENAMEAT', 35) # type: ignore
-IORING_OP_UNLINKAT = enum_io_uring_op.define('IORING_OP_UNLINKAT', 36) # type: ignore
-IORING_OP_MKDIRAT = enum_io_uring_op.define('IORING_OP_MKDIRAT', 37) # type: ignore
-IORING_OP_SYMLINKAT = enum_io_uring_op.define('IORING_OP_SYMLINKAT', 38) # type: ignore
-IORING_OP_LINKAT = enum_io_uring_op.define('IORING_OP_LINKAT', 39) # type: ignore
-IORING_OP_MSG_RING = enum_io_uring_op.define('IORING_OP_MSG_RING', 40) # type: ignore
-IORING_OP_FSETXATTR = enum_io_uring_op.define('IORING_OP_FSETXATTR', 41) # type: ignore
-IORING_OP_SETXATTR = enum_io_uring_op.define('IORING_OP_SETXATTR', 42) # type: ignore
-IORING_OP_FGETXATTR = enum_io_uring_op.define('IORING_OP_FGETXATTR', 43) # type: ignore
-IORING_OP_GETXATTR = enum_io_uring_op.define('IORING_OP_GETXATTR', 44) # type: ignore
-IORING_OP_SOCKET = enum_io_uring_op.define('IORING_OP_SOCKET', 45) # type: ignore
-IORING_OP_URING_CMD = enum_io_uring_op.define('IORING_OP_URING_CMD', 46) # type: ignore
-IORING_OP_SEND_ZC = enum_io_uring_op.define('IORING_OP_SEND_ZC', 47) # type: ignore
-IORING_OP_SENDMSG_ZC = enum_io_uring_op.define('IORING_OP_SENDMSG_ZC', 48) # type: ignore
-IORING_OP_READ_MULTISHOT = enum_io_uring_op.define('IORING_OP_READ_MULTISHOT', 49) # type: ignore
-IORING_OP_WAITID = enum_io_uring_op.define('IORING_OP_WAITID', 50) # type: ignore
-IORING_OP_FUTEX_WAIT = enum_io_uring_op.define('IORING_OP_FUTEX_WAIT', 51) # type: ignore
-IORING_OP_FUTEX_WAKE = enum_io_uring_op.define('IORING_OP_FUTEX_WAKE', 52) # type: ignore
-IORING_OP_FUTEX_WAITV = enum_io_uring_op.define('IORING_OP_FUTEX_WAITV', 53) # type: ignore
-IORING_OP_FIXED_FD_INSTALL = enum_io_uring_op.define('IORING_OP_FIXED_FD_INSTALL', 54) # type: ignore
-IORING_OP_LAST = enum_io_uring_op.define('IORING_OP_LAST', 55) # type: ignore
+class enum_io_uring_op(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IORING_OP_NOP = enum_io_uring_op.define('IORING_OP_NOP', 0)
+IORING_OP_READV = enum_io_uring_op.define('IORING_OP_READV', 1)
+IORING_OP_WRITEV = enum_io_uring_op.define('IORING_OP_WRITEV', 2)
+IORING_OP_FSYNC = enum_io_uring_op.define('IORING_OP_FSYNC', 3)
+IORING_OP_READ_FIXED = enum_io_uring_op.define('IORING_OP_READ_FIXED', 4)
+IORING_OP_WRITE_FIXED = enum_io_uring_op.define('IORING_OP_WRITE_FIXED', 5)
+IORING_OP_POLL_ADD = enum_io_uring_op.define('IORING_OP_POLL_ADD', 6)
+IORING_OP_POLL_REMOVE = enum_io_uring_op.define('IORING_OP_POLL_REMOVE', 7)
+IORING_OP_SYNC_FILE_RANGE = enum_io_uring_op.define('IORING_OP_SYNC_FILE_RANGE', 8)
+IORING_OP_SENDMSG = enum_io_uring_op.define('IORING_OP_SENDMSG', 9)
+IORING_OP_RECVMSG = enum_io_uring_op.define('IORING_OP_RECVMSG', 10)
+IORING_OP_TIMEOUT = enum_io_uring_op.define('IORING_OP_TIMEOUT', 11)
+IORING_OP_TIMEOUT_REMOVE = enum_io_uring_op.define('IORING_OP_TIMEOUT_REMOVE', 12)
+IORING_OP_ACCEPT = enum_io_uring_op.define('IORING_OP_ACCEPT', 13)
+IORING_OP_ASYNC_CANCEL = enum_io_uring_op.define('IORING_OP_ASYNC_CANCEL', 14)
+IORING_OP_LINK_TIMEOUT = enum_io_uring_op.define('IORING_OP_LINK_TIMEOUT', 15)
+IORING_OP_CONNECT = enum_io_uring_op.define('IORING_OP_CONNECT', 16)
+IORING_OP_FALLOCATE = enum_io_uring_op.define('IORING_OP_FALLOCATE', 17)
+IORING_OP_OPENAT = enum_io_uring_op.define('IORING_OP_OPENAT', 18)
+IORING_OP_CLOSE = enum_io_uring_op.define('IORING_OP_CLOSE', 19)
+IORING_OP_FILES_UPDATE = enum_io_uring_op.define('IORING_OP_FILES_UPDATE', 20)
+IORING_OP_STATX = enum_io_uring_op.define('IORING_OP_STATX', 21)
+IORING_OP_READ = enum_io_uring_op.define('IORING_OP_READ', 22)
+IORING_OP_WRITE = enum_io_uring_op.define('IORING_OP_WRITE', 23)
+IORING_OP_FADVISE = enum_io_uring_op.define('IORING_OP_FADVISE', 24)
+IORING_OP_MADVISE = enum_io_uring_op.define('IORING_OP_MADVISE', 25)
+IORING_OP_SEND = enum_io_uring_op.define('IORING_OP_SEND', 26)
+IORING_OP_RECV = enum_io_uring_op.define('IORING_OP_RECV', 27)
+IORING_OP_OPENAT2 = enum_io_uring_op.define('IORING_OP_OPENAT2', 28)
+IORING_OP_EPOLL_CTL = enum_io_uring_op.define('IORING_OP_EPOLL_CTL', 29)
+IORING_OP_SPLICE = enum_io_uring_op.define('IORING_OP_SPLICE', 30)
+IORING_OP_PROVIDE_BUFFERS = enum_io_uring_op.define('IORING_OP_PROVIDE_BUFFERS', 31)
+IORING_OP_REMOVE_BUFFERS = enum_io_uring_op.define('IORING_OP_REMOVE_BUFFERS', 32)
+IORING_OP_TEE = enum_io_uring_op.define('IORING_OP_TEE', 33)
+IORING_OP_SHUTDOWN = enum_io_uring_op.define('IORING_OP_SHUTDOWN', 34)
+IORING_OP_RENAMEAT = enum_io_uring_op.define('IORING_OP_RENAMEAT', 35)
+IORING_OP_UNLINKAT = enum_io_uring_op.define('IORING_OP_UNLINKAT', 36)
+IORING_OP_MKDIRAT = enum_io_uring_op.define('IORING_OP_MKDIRAT', 37)
+IORING_OP_SYMLINKAT = enum_io_uring_op.define('IORING_OP_SYMLINKAT', 38)
+IORING_OP_LINKAT = enum_io_uring_op.define('IORING_OP_LINKAT', 39)
+IORING_OP_MSG_RING = enum_io_uring_op.define('IORING_OP_MSG_RING', 40)
+IORING_OP_FSETXATTR = enum_io_uring_op.define('IORING_OP_FSETXATTR', 41)
+IORING_OP_SETXATTR = enum_io_uring_op.define('IORING_OP_SETXATTR', 42)
+IORING_OP_FGETXATTR = enum_io_uring_op.define('IORING_OP_FGETXATTR', 43)
+IORING_OP_GETXATTR = enum_io_uring_op.define('IORING_OP_GETXATTR', 44)
+IORING_OP_SOCKET = enum_io_uring_op.define('IORING_OP_SOCKET', 45)
+IORING_OP_URING_CMD = enum_io_uring_op.define('IORING_OP_URING_CMD', 46)
+IORING_OP_SEND_ZC = enum_io_uring_op.define('IORING_OP_SEND_ZC', 47)
+IORING_OP_SENDMSG_ZC = enum_io_uring_op.define('IORING_OP_SENDMSG_ZC', 48)
+IORING_OP_READ_MULTISHOT = enum_io_uring_op.define('IORING_OP_READ_MULTISHOT', 49)
+IORING_OP_WAITID = enum_io_uring_op.define('IORING_OP_WAITID', 50)
+IORING_OP_FUTEX_WAIT = enum_io_uring_op.define('IORING_OP_FUTEX_WAIT', 51)
+IORING_OP_FUTEX_WAKE = enum_io_uring_op.define('IORING_OP_FUTEX_WAKE', 52)
+IORING_OP_FUTEX_WAITV = enum_io_uring_op.define('IORING_OP_FUTEX_WAITV', 53)
+IORING_OP_FIXED_FD_INSTALL = enum_io_uring_op.define('IORING_OP_FIXED_FD_INSTALL', 54)
+IORING_OP_LAST = enum_io_uring_op.define('IORING_OP_LAST', 55)
 
-_anonenum1 = CEnum(Annotated[int, ctypes.c_uint32])
-IORING_MSG_DATA = _anonenum1.define('IORING_MSG_DATA', 0) # type: ignore
-IORING_MSG_SEND_FD = _anonenum1.define('IORING_MSG_SEND_FD', 1) # type: ignore
+class _anonenum1(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IORING_MSG_DATA = _anonenum1.define('IORING_MSG_DATA', 0)
+IORING_MSG_SEND_FD = _anonenum1.define('IORING_MSG_SEND_FD', 1)
 
-_anonenum2 = CEnum(Annotated[int, ctypes.c_uint32])
-IORING_CQE_BUFFER_SHIFT = _anonenum2.define('IORING_CQE_BUFFER_SHIFT', 16) # type: ignore
+class _anonenum2(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IORING_CQE_BUFFER_SHIFT = _anonenum2.define('IORING_CQE_BUFFER_SHIFT', 16)
 
 @c.record
 class struct_io_sqring_offsets(c.Struct):
@@ -253,40 +253,40 @@ class struct_io_uring_params(c.Struct):
   resv: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[3]], 28]
   sq_off: Annotated[struct_io_sqring_offsets, 40]
   cq_off: Annotated[struct_io_cqring_offsets, 80]
-_anonenum3 = CEnum(Annotated[int, ctypes.c_uint32])
-IORING_REGISTER_BUFFERS = _anonenum3.define('IORING_REGISTER_BUFFERS', 0) # type: ignore
-IORING_UNREGISTER_BUFFERS = _anonenum3.define('IORING_UNREGISTER_BUFFERS', 1) # type: ignore
-IORING_REGISTER_FILES = _anonenum3.define('IORING_REGISTER_FILES', 2) # type: ignore
-IORING_UNREGISTER_FILES = _anonenum3.define('IORING_UNREGISTER_FILES', 3) # type: ignore
-IORING_REGISTER_EVENTFD = _anonenum3.define('IORING_REGISTER_EVENTFD', 4) # type: ignore
-IORING_UNREGISTER_EVENTFD = _anonenum3.define('IORING_UNREGISTER_EVENTFD', 5) # type: ignore
-IORING_REGISTER_FILES_UPDATE = _anonenum3.define('IORING_REGISTER_FILES_UPDATE', 6) # type: ignore
-IORING_REGISTER_EVENTFD_ASYNC = _anonenum3.define('IORING_REGISTER_EVENTFD_ASYNC', 7) # type: ignore
-IORING_REGISTER_PROBE = _anonenum3.define('IORING_REGISTER_PROBE', 8) # type: ignore
-IORING_REGISTER_PERSONALITY = _anonenum3.define('IORING_REGISTER_PERSONALITY', 9) # type: ignore
-IORING_UNREGISTER_PERSONALITY = _anonenum3.define('IORING_UNREGISTER_PERSONALITY', 10) # type: ignore
-IORING_REGISTER_RESTRICTIONS = _anonenum3.define('IORING_REGISTER_RESTRICTIONS', 11) # type: ignore
-IORING_REGISTER_ENABLE_RINGS = _anonenum3.define('IORING_REGISTER_ENABLE_RINGS', 12) # type: ignore
-IORING_REGISTER_FILES2 = _anonenum3.define('IORING_REGISTER_FILES2', 13) # type: ignore
-IORING_REGISTER_FILES_UPDATE2 = _anonenum3.define('IORING_REGISTER_FILES_UPDATE2', 14) # type: ignore
-IORING_REGISTER_BUFFERS2 = _anonenum3.define('IORING_REGISTER_BUFFERS2', 15) # type: ignore
-IORING_REGISTER_BUFFERS_UPDATE = _anonenum3.define('IORING_REGISTER_BUFFERS_UPDATE', 16) # type: ignore
-IORING_REGISTER_IOWQ_AFF = _anonenum3.define('IORING_REGISTER_IOWQ_AFF', 17) # type: ignore
-IORING_UNREGISTER_IOWQ_AFF = _anonenum3.define('IORING_UNREGISTER_IOWQ_AFF', 18) # type: ignore
-IORING_REGISTER_IOWQ_MAX_WORKERS = _anonenum3.define('IORING_REGISTER_IOWQ_MAX_WORKERS', 19) # type: ignore
-IORING_REGISTER_RING_FDS = _anonenum3.define('IORING_REGISTER_RING_FDS', 20) # type: ignore
-IORING_UNREGISTER_RING_FDS = _anonenum3.define('IORING_UNREGISTER_RING_FDS', 21) # type: ignore
-IORING_REGISTER_PBUF_RING = _anonenum3.define('IORING_REGISTER_PBUF_RING', 22) # type: ignore
-IORING_UNREGISTER_PBUF_RING = _anonenum3.define('IORING_UNREGISTER_PBUF_RING', 23) # type: ignore
-IORING_REGISTER_SYNC_CANCEL = _anonenum3.define('IORING_REGISTER_SYNC_CANCEL', 24) # type: ignore
-IORING_REGISTER_FILE_ALLOC_RANGE = _anonenum3.define('IORING_REGISTER_FILE_ALLOC_RANGE', 25) # type: ignore
-IORING_REGISTER_PBUF_STATUS = _anonenum3.define('IORING_REGISTER_PBUF_STATUS', 26) # type: ignore
-IORING_REGISTER_LAST = _anonenum3.define('IORING_REGISTER_LAST', 27) # type: ignore
-IORING_REGISTER_USE_REGISTERED_RING = _anonenum3.define('IORING_REGISTER_USE_REGISTERED_RING', 2147483648) # type: ignore
+class _anonenum3(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IORING_REGISTER_BUFFERS = _anonenum3.define('IORING_REGISTER_BUFFERS', 0)
+IORING_UNREGISTER_BUFFERS = _anonenum3.define('IORING_UNREGISTER_BUFFERS', 1)
+IORING_REGISTER_FILES = _anonenum3.define('IORING_REGISTER_FILES', 2)
+IORING_UNREGISTER_FILES = _anonenum3.define('IORING_UNREGISTER_FILES', 3)
+IORING_REGISTER_EVENTFD = _anonenum3.define('IORING_REGISTER_EVENTFD', 4)
+IORING_UNREGISTER_EVENTFD = _anonenum3.define('IORING_UNREGISTER_EVENTFD', 5)
+IORING_REGISTER_FILES_UPDATE = _anonenum3.define('IORING_REGISTER_FILES_UPDATE', 6)
+IORING_REGISTER_EVENTFD_ASYNC = _anonenum3.define('IORING_REGISTER_EVENTFD_ASYNC', 7)
+IORING_REGISTER_PROBE = _anonenum3.define('IORING_REGISTER_PROBE', 8)
+IORING_REGISTER_PERSONALITY = _anonenum3.define('IORING_REGISTER_PERSONALITY', 9)
+IORING_UNREGISTER_PERSONALITY = _anonenum3.define('IORING_UNREGISTER_PERSONALITY', 10)
+IORING_REGISTER_RESTRICTIONS = _anonenum3.define('IORING_REGISTER_RESTRICTIONS', 11)
+IORING_REGISTER_ENABLE_RINGS = _anonenum3.define('IORING_REGISTER_ENABLE_RINGS', 12)
+IORING_REGISTER_FILES2 = _anonenum3.define('IORING_REGISTER_FILES2', 13)
+IORING_REGISTER_FILES_UPDATE2 = _anonenum3.define('IORING_REGISTER_FILES_UPDATE2', 14)
+IORING_REGISTER_BUFFERS2 = _anonenum3.define('IORING_REGISTER_BUFFERS2', 15)
+IORING_REGISTER_BUFFERS_UPDATE = _anonenum3.define('IORING_REGISTER_BUFFERS_UPDATE', 16)
+IORING_REGISTER_IOWQ_AFF = _anonenum3.define('IORING_REGISTER_IOWQ_AFF', 17)
+IORING_UNREGISTER_IOWQ_AFF = _anonenum3.define('IORING_UNREGISTER_IOWQ_AFF', 18)
+IORING_REGISTER_IOWQ_MAX_WORKERS = _anonenum3.define('IORING_REGISTER_IOWQ_MAX_WORKERS', 19)
+IORING_REGISTER_RING_FDS = _anonenum3.define('IORING_REGISTER_RING_FDS', 20)
+IORING_UNREGISTER_RING_FDS = _anonenum3.define('IORING_UNREGISTER_RING_FDS', 21)
+IORING_REGISTER_PBUF_RING = _anonenum3.define('IORING_REGISTER_PBUF_RING', 22)
+IORING_UNREGISTER_PBUF_RING = _anonenum3.define('IORING_UNREGISTER_PBUF_RING', 23)
+IORING_REGISTER_SYNC_CANCEL = _anonenum3.define('IORING_REGISTER_SYNC_CANCEL', 24)
+IORING_REGISTER_FILE_ALLOC_RANGE = _anonenum3.define('IORING_REGISTER_FILE_ALLOC_RANGE', 25)
+IORING_REGISTER_PBUF_STATUS = _anonenum3.define('IORING_REGISTER_PBUF_STATUS', 26)
+IORING_REGISTER_LAST = _anonenum3.define('IORING_REGISTER_LAST', 27)
+IORING_REGISTER_USE_REGISTERED_RING = _anonenum3.define('IORING_REGISTER_USE_REGISTERED_RING', 2147483648)
 
-_anonenum4 = CEnum(Annotated[int, ctypes.c_uint32])
-IO_WQ_BOUND = _anonenum4.define('IO_WQ_BOUND', 0) # type: ignore
-IO_WQ_UNBOUND = _anonenum4.define('IO_WQ_UNBOUND', 1) # type: ignore
+class _anonenum4(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IO_WQ_BOUND = _anonenum4.define('IO_WQ_BOUND', 0)
+IO_WQ_UNBOUND = _anonenum4.define('IO_WQ_UNBOUND', 1)
 
 @c.record
 class struct_io_uring_files_update(c.Struct):
@@ -358,8 +358,8 @@ class struct_io_uring_buf_ring(c.Struct):
   __empty_bufs: Annotated[struct_io_uring_buf_ring___empty_bufs, 0]
   bufs: Annotated[c.Array[struct_io_uring_buf, Literal[0]], 0]
 class struct_io_uring_buf_ring___empty_bufs(ctypes.Structure): pass
-_anonenum5 = CEnum(Annotated[int, ctypes.c_uint32])
-IOU_PBUF_RING_MMAP = _anonenum5.define('IOU_PBUF_RING_MMAP', 1) # type: ignore
+class _anonenum5(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IOU_PBUF_RING_MMAP = _anonenum5.define('IOU_PBUF_RING_MMAP', 1)
 
 @c.record
 class struct_io_uring_buf_reg(c.Struct):
@@ -375,12 +375,12 @@ class struct_io_uring_buf_status(c.Struct):
   buf_group: Annotated[Annotated[int, ctypes.c_uint32], 0]
   head: Annotated[Annotated[int, ctypes.c_uint32], 4]
   resv: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[8]], 8]
-_anonenum6 = CEnum(Annotated[int, ctypes.c_uint32])
-IORING_RESTRICTION_REGISTER_OP = _anonenum6.define('IORING_RESTRICTION_REGISTER_OP', 0) # type: ignore
-IORING_RESTRICTION_SQE_OP = _anonenum6.define('IORING_RESTRICTION_SQE_OP', 1) # type: ignore
-IORING_RESTRICTION_SQE_FLAGS_ALLOWED = _anonenum6.define('IORING_RESTRICTION_SQE_FLAGS_ALLOWED', 2) # type: ignore
-IORING_RESTRICTION_SQE_FLAGS_REQUIRED = _anonenum6.define('IORING_RESTRICTION_SQE_FLAGS_REQUIRED', 3) # type: ignore
-IORING_RESTRICTION_LAST = _anonenum6.define('IORING_RESTRICTION_LAST', 4) # type: ignore
+class _anonenum6(Annotated[int, ctypes.c_uint32], c.Enum): pass
+IORING_RESTRICTION_REGISTER_OP = _anonenum6.define('IORING_RESTRICTION_REGISTER_OP', 0)
+IORING_RESTRICTION_SQE_OP = _anonenum6.define('IORING_RESTRICTION_SQE_OP', 1)
+IORING_RESTRICTION_SQE_FLAGS_ALLOWED = _anonenum6.define('IORING_RESTRICTION_SQE_FLAGS_ALLOWED', 2)
+IORING_RESTRICTION_SQE_FLAGS_REQUIRED = _anonenum6.define('IORING_RESTRICTION_SQE_FLAGS_REQUIRED', 3)
+IORING_RESTRICTION_LAST = _anonenum6.define('IORING_RESTRICTION_LAST', 4)
 
 @c.record
 class struct_io_uring_getevents_arg(c.Struct):
@@ -404,7 +404,7 @@ class struct___kernel_timespec(c.Struct):
   SIZE = 16
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_nsec: Annotated[Annotated[int, ctypes.c_int64], 8]
-__kernel_time64_t = Annotated[int, ctypes.c_int64]
+__kernel_time64_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @c.record
 class struct_io_uring_file_index_range(c.Struct):
   SIZE = 16
@@ -418,11 +418,11 @@ class struct_io_uring_recvmsg_out(c.Struct):
   controllen: Annotated[Annotated[int, ctypes.c_uint32], 4]
   payloadlen: Annotated[Annotated[int, ctypes.c_uint32], 8]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 12]
-_anonenum7 = CEnum(Annotated[int, ctypes.c_uint32])
-SOCKET_URING_OP_SIOCINQ = _anonenum7.define('SOCKET_URING_OP_SIOCINQ', 0) # type: ignore
-SOCKET_URING_OP_SIOCOUTQ = _anonenum7.define('SOCKET_URING_OP_SIOCOUTQ', 1) # type: ignore
-SOCKET_URING_OP_GETSOCKOPT = _anonenum7.define('SOCKET_URING_OP_GETSOCKOPT', 2) # type: ignore
-SOCKET_URING_OP_SETSOCKOPT = _anonenum7.define('SOCKET_URING_OP_SETSOCKOPT', 3) # type: ignore
+class _anonenum7(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SOCKET_URING_OP_SIOCINQ = _anonenum7.define('SOCKET_URING_OP_SIOCINQ', 0)
+SOCKET_URING_OP_SIOCOUTQ = _anonenum7.define('SOCKET_URING_OP_SIOCOUTQ', 1)
+SOCKET_URING_OP_GETSOCKOPT = _anonenum7.define('SOCKET_URING_OP_GETSOCKOPT', 2)
+SOCKET_URING_OP_SETSOCKOPT = _anonenum7.define('SOCKET_URING_OP_SETSOCKOPT', 3)
 
 c.init_records()
 _XOPEN_SOURCE = 500 # type: ignore

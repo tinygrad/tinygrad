@@ -2,82 +2,82 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-FEATURE_PWR_DOMAIN_e = CEnum(Annotated[int, ctypes.c_uint32])
-FEATURE_PWR_ALL = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_ALL', 0) # type: ignore
-FEATURE_PWR_S5 = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_S5', 1) # type: ignore
-FEATURE_PWR_BACO = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_BACO', 2) # type: ignore
-FEATURE_PWR_SOC = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_SOC', 3) # type: ignore
-FEATURE_PWR_GFX = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_GFX', 4) # type: ignore
-FEATURE_PWR_DOMAIN_COUNT = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_DOMAIN_COUNT', 5) # type: ignore
+class FEATURE_PWR_DOMAIN_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+FEATURE_PWR_ALL = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_ALL', 0)
+FEATURE_PWR_S5 = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_S5', 1)
+FEATURE_PWR_BACO = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_BACO', 2)
+FEATURE_PWR_SOC = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_SOC', 3)
+FEATURE_PWR_GFX = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_GFX', 4)
+FEATURE_PWR_DOMAIN_COUNT = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_DOMAIN_COUNT', 5)
 
-SVI_PSI_e = CEnum(Annotated[int, ctypes.c_uint32])
-SVI_PSI_0 = SVI_PSI_e.define('SVI_PSI_0', 0) # type: ignore
-SVI_PSI_1 = SVI_PSI_e.define('SVI_PSI_1', 1) # type: ignore
-SVI_PSI_2 = SVI_PSI_e.define('SVI_PSI_2', 2) # type: ignore
-SVI_PSI_3 = SVI_PSI_e.define('SVI_PSI_3', 3) # type: ignore
-SVI_PSI_4 = SVI_PSI_e.define('SVI_PSI_4', 4) # type: ignore
-SVI_PSI_5 = SVI_PSI_e.define('SVI_PSI_5', 5) # type: ignore
-SVI_PSI_6 = SVI_PSI_e.define('SVI_PSI_6', 6) # type: ignore
-SVI_PSI_7 = SVI_PSI_e.define('SVI_PSI_7', 7) # type: ignore
+class SVI_PSI_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SVI_PSI_0 = SVI_PSI_e.define('SVI_PSI_0', 0)
+SVI_PSI_1 = SVI_PSI_e.define('SVI_PSI_1', 1)
+SVI_PSI_2 = SVI_PSI_e.define('SVI_PSI_2', 2)
+SVI_PSI_3 = SVI_PSI_e.define('SVI_PSI_3', 3)
+SVI_PSI_4 = SVI_PSI_e.define('SVI_PSI_4', 4)
+SVI_PSI_5 = SVI_PSI_e.define('SVI_PSI_5', 5)
+SVI_PSI_6 = SVI_PSI_e.define('SVI_PSI_6', 6)
+SVI_PSI_7 = SVI_PSI_e.define('SVI_PSI_7', 7)
 
-SMARTSHIFT_VERSION_e = CEnum(Annotated[int, ctypes.c_uint32])
-SMARTSHIFT_VERSION_1 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_1', 0) # type: ignore
-SMARTSHIFT_VERSION_2 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_2', 1) # type: ignore
-SMARTSHIFT_VERSION_3 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_3', 2) # type: ignore
+class SMARTSHIFT_VERSION_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMARTSHIFT_VERSION_1 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_1', 0)
+SMARTSHIFT_VERSION_2 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_2', 1)
+SMARTSHIFT_VERSION_3 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_3', 2)
 
-FOPT_CALC_e = CEnum(Annotated[int, ctypes.c_uint32])
-FOPT_CALC_AC_CALC_DC = FOPT_CALC_e.define('FOPT_CALC_AC_CALC_DC', 0) # type: ignore
-FOPT_PPTABLE_AC_CALC_DC = FOPT_CALC_e.define('FOPT_PPTABLE_AC_CALC_DC', 1) # type: ignore
-FOPT_CALC_AC_PPTABLE_DC = FOPT_CALC_e.define('FOPT_CALC_AC_PPTABLE_DC', 2) # type: ignore
-FOPT_PPTABLE_AC_PPTABLE_DC = FOPT_CALC_e.define('FOPT_PPTABLE_AC_PPTABLE_DC', 3) # type: ignore
+class FOPT_CALC_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+FOPT_CALC_AC_CALC_DC = FOPT_CALC_e.define('FOPT_CALC_AC_CALC_DC', 0)
+FOPT_PPTABLE_AC_CALC_DC = FOPT_CALC_e.define('FOPT_PPTABLE_AC_CALC_DC', 1)
+FOPT_CALC_AC_PPTABLE_DC = FOPT_CALC_e.define('FOPT_CALC_AC_PPTABLE_DC', 2)
+FOPT_PPTABLE_AC_PPTABLE_DC = FOPT_CALC_e.define('FOPT_PPTABLE_AC_PPTABLE_DC', 3)
 
-DRAM_BIT_WIDTH_TYPE_e = CEnum(Annotated[int, ctypes.c_uint32])
-DRAM_BIT_WIDTH_DISABLED = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_DISABLED', 0) # type: ignore
-DRAM_BIT_WIDTH_X_8 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_8', 8) # type: ignore
-DRAM_BIT_WIDTH_X_16 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_16', 16) # type: ignore
-DRAM_BIT_WIDTH_X_32 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_32', 32) # type: ignore
-DRAM_BIT_WIDTH_X_64 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_64', 64) # type: ignore
-DRAM_BIT_WIDTH_X_128 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_128', 128) # type: ignore
-DRAM_BIT_WIDTH_COUNT = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_COUNT', 129) # type: ignore
+class DRAM_BIT_WIDTH_TYPE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+DRAM_BIT_WIDTH_DISABLED = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_DISABLED', 0)
+DRAM_BIT_WIDTH_X_8 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_8', 8)
+DRAM_BIT_WIDTH_X_16 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_16', 16)
+DRAM_BIT_WIDTH_X_32 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_32', 32)
+DRAM_BIT_WIDTH_X_64 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_64', 64)
+DRAM_BIT_WIDTH_X_128 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_128', 128)
+DRAM_BIT_WIDTH_COUNT = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_COUNT', 129)
 
-I2cControllerPort_e = CEnum(Annotated[int, ctypes.c_uint32])
-I2C_CONTROLLER_PORT_0 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_0', 0) # type: ignore
-I2C_CONTROLLER_PORT_1 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_1', 1) # type: ignore
-I2C_CONTROLLER_PORT_COUNT = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_COUNT', 2) # type: ignore
+class I2cControllerPort_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+I2C_CONTROLLER_PORT_0 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_0', 0)
+I2C_CONTROLLER_PORT_1 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_1', 1)
+I2C_CONTROLLER_PORT_COUNT = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_COUNT', 2)
 
-I2cControllerName_e = CEnum(Annotated[int, ctypes.c_uint32])
-I2C_CONTROLLER_NAME_VR_GFX = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_GFX', 0) # type: ignore
-I2C_CONTROLLER_NAME_VR_SOC = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_SOC', 1) # type: ignore
-I2C_CONTROLLER_NAME_VR_VMEMP = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_VMEMP', 2) # type: ignore
-I2C_CONTROLLER_NAME_VR_VDDIO = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_VDDIO', 3) # type: ignore
-I2C_CONTROLLER_NAME_LIQUID0 = I2cControllerName_e.define('I2C_CONTROLLER_NAME_LIQUID0', 4) # type: ignore
-I2C_CONTROLLER_NAME_LIQUID1 = I2cControllerName_e.define('I2C_CONTROLLER_NAME_LIQUID1', 5) # type: ignore
-I2C_CONTROLLER_NAME_PLX = I2cControllerName_e.define('I2C_CONTROLLER_NAME_PLX', 6) # type: ignore
-I2C_CONTROLLER_NAME_FAN_INTAKE = I2cControllerName_e.define('I2C_CONTROLLER_NAME_FAN_INTAKE', 7) # type: ignore
-I2C_CONTROLLER_NAME_COUNT = I2cControllerName_e.define('I2C_CONTROLLER_NAME_COUNT', 8) # type: ignore
+class I2cControllerName_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+I2C_CONTROLLER_NAME_VR_GFX = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_GFX', 0)
+I2C_CONTROLLER_NAME_VR_SOC = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_SOC', 1)
+I2C_CONTROLLER_NAME_VR_VMEMP = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_VMEMP', 2)
+I2C_CONTROLLER_NAME_VR_VDDIO = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_VDDIO', 3)
+I2C_CONTROLLER_NAME_LIQUID0 = I2cControllerName_e.define('I2C_CONTROLLER_NAME_LIQUID0', 4)
+I2C_CONTROLLER_NAME_LIQUID1 = I2cControllerName_e.define('I2C_CONTROLLER_NAME_LIQUID1', 5)
+I2C_CONTROLLER_NAME_PLX = I2cControllerName_e.define('I2C_CONTROLLER_NAME_PLX', 6)
+I2C_CONTROLLER_NAME_FAN_INTAKE = I2cControllerName_e.define('I2C_CONTROLLER_NAME_FAN_INTAKE', 7)
+I2C_CONTROLLER_NAME_COUNT = I2cControllerName_e.define('I2C_CONTROLLER_NAME_COUNT', 8)
 
-I2cControllerThrottler_e = CEnum(Annotated[int, ctypes.c_uint32])
-I2C_CONTROLLER_THROTTLER_TYPE_NONE = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_TYPE_NONE', 0) # type: ignore
-I2C_CONTROLLER_THROTTLER_VR_GFX = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_GFX', 1) # type: ignore
-I2C_CONTROLLER_THROTTLER_VR_SOC = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_SOC', 2) # type: ignore
-I2C_CONTROLLER_THROTTLER_VR_VMEMP = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_VMEMP', 3) # type: ignore
-I2C_CONTROLLER_THROTTLER_VR_VDDIO = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_VDDIO', 4) # type: ignore
-I2C_CONTROLLER_THROTTLER_LIQUID0 = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_LIQUID0', 5) # type: ignore
-I2C_CONTROLLER_THROTTLER_LIQUID1 = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_LIQUID1', 6) # type: ignore
-I2C_CONTROLLER_THROTTLER_PLX = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_PLX', 7) # type: ignore
-I2C_CONTROLLER_THROTTLER_FAN_INTAKE = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_FAN_INTAKE', 8) # type: ignore
-I2C_CONTROLLER_THROTTLER_INA3221 = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_INA3221', 9) # type: ignore
-I2C_CONTROLLER_THROTTLER_COUNT = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_COUNT', 10) # type: ignore
+class I2cControllerThrottler_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+I2C_CONTROLLER_THROTTLER_TYPE_NONE = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_TYPE_NONE', 0)
+I2C_CONTROLLER_THROTTLER_VR_GFX = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_GFX', 1)
+I2C_CONTROLLER_THROTTLER_VR_SOC = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_SOC', 2)
+I2C_CONTROLLER_THROTTLER_VR_VMEMP = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_VMEMP', 3)
+I2C_CONTROLLER_THROTTLER_VR_VDDIO = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_VDDIO', 4)
+I2C_CONTROLLER_THROTTLER_LIQUID0 = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_LIQUID0', 5)
+I2C_CONTROLLER_THROTTLER_LIQUID1 = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_LIQUID1', 6)
+I2C_CONTROLLER_THROTTLER_PLX = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_PLX', 7)
+I2C_CONTROLLER_THROTTLER_FAN_INTAKE = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_FAN_INTAKE', 8)
+I2C_CONTROLLER_THROTTLER_INA3221 = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_INA3221', 9)
+I2C_CONTROLLER_THROTTLER_COUNT = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_COUNT', 10)
 
-I2cControllerProtocol_e = CEnum(Annotated[int, ctypes.c_uint32])
-I2C_CONTROLLER_PROTOCOL_VR_XPDE132G5 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_VR_XPDE132G5', 0) # type: ignore
-I2C_CONTROLLER_PROTOCOL_VR_IR35217 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_VR_IR35217', 1) # type: ignore
-I2C_CONTROLLER_PROTOCOL_TMP_MAX31875 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_TMP_MAX31875', 2) # type: ignore
-I2C_CONTROLLER_PROTOCOL_INA3221 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_INA3221', 3) # type: ignore
-I2C_CONTROLLER_PROTOCOL_TMP_MAX6604 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_TMP_MAX6604', 4) # type: ignore
-I2C_CONTROLLER_PROTOCOL_COUNT = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_COUNT', 5) # type: ignore
+class I2cControllerProtocol_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+I2C_CONTROLLER_PROTOCOL_VR_XPDE132G5 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_VR_XPDE132G5', 0)
+I2C_CONTROLLER_PROTOCOL_VR_IR35217 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_VR_IR35217', 1)
+I2C_CONTROLLER_PROTOCOL_TMP_MAX31875 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_TMP_MAX31875', 2)
+I2C_CONTROLLER_PROTOCOL_INA3221 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_INA3221', 3)
+I2C_CONTROLLER_PROTOCOL_TMP_MAX6604 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_TMP_MAX6604', 4)
+I2C_CONTROLLER_PROTOCOL_COUNT = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_COUNT', 5)
 
 @c.record
 class I2cControllerConfig_t(c.Struct):
@@ -90,24 +90,24 @@ class I2cControllerConfig_t(c.Struct):
   ThermalThrotter: Annotated[uint8_t, 5]
   I2cProtocol: Annotated[uint8_t, 6]
   PaddingConfig: Annotated[uint8_t, 7]
-uint8_t = Annotated[int, ctypes.c_ubyte]
-I2cPort_e = CEnum(Annotated[int, ctypes.c_uint32])
-I2C_PORT_SVD_SCL = I2cPort_e.define('I2C_PORT_SVD_SCL', 0) # type: ignore
-I2C_PORT_GPIO = I2cPort_e.define('I2C_PORT_GPIO', 1) # type: ignore
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+class I2cPort_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+I2C_PORT_SVD_SCL = I2cPort_e.define('I2C_PORT_SVD_SCL', 0)
+I2C_PORT_GPIO = I2cPort_e.define('I2C_PORT_GPIO', 1)
 
-I2cSpeed_e = CEnum(Annotated[int, ctypes.c_uint32])
-I2C_SPEED_FAST_50K = I2cSpeed_e.define('I2C_SPEED_FAST_50K', 0) # type: ignore
-I2C_SPEED_FAST_100K = I2cSpeed_e.define('I2C_SPEED_FAST_100K', 1) # type: ignore
-I2C_SPEED_FAST_400K = I2cSpeed_e.define('I2C_SPEED_FAST_400K', 2) # type: ignore
-I2C_SPEED_FAST_PLUS_1M = I2cSpeed_e.define('I2C_SPEED_FAST_PLUS_1M', 3) # type: ignore
-I2C_SPEED_HIGH_1M = I2cSpeed_e.define('I2C_SPEED_HIGH_1M', 4) # type: ignore
-I2C_SPEED_HIGH_2M = I2cSpeed_e.define('I2C_SPEED_HIGH_2M', 5) # type: ignore
-I2C_SPEED_COUNT = I2cSpeed_e.define('I2C_SPEED_COUNT', 6) # type: ignore
+class I2cSpeed_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+I2C_SPEED_FAST_50K = I2cSpeed_e.define('I2C_SPEED_FAST_50K', 0)
+I2C_SPEED_FAST_100K = I2cSpeed_e.define('I2C_SPEED_FAST_100K', 1)
+I2C_SPEED_FAST_400K = I2cSpeed_e.define('I2C_SPEED_FAST_400K', 2)
+I2C_SPEED_FAST_PLUS_1M = I2cSpeed_e.define('I2C_SPEED_FAST_PLUS_1M', 3)
+I2C_SPEED_HIGH_1M = I2cSpeed_e.define('I2C_SPEED_HIGH_1M', 4)
+I2C_SPEED_HIGH_2M = I2cSpeed_e.define('I2C_SPEED_HIGH_2M', 5)
+I2C_SPEED_COUNT = I2cSpeed_e.define('I2C_SPEED_COUNT', 6)
 
-I2cCmdType_e = CEnum(Annotated[int, ctypes.c_uint32])
-I2C_CMD_READ = I2cCmdType_e.define('I2C_CMD_READ', 0) # type: ignore
-I2C_CMD_WRITE = I2cCmdType_e.define('I2C_CMD_WRITE', 1) # type: ignore
-I2C_CMD_COUNT = I2cCmdType_e.define('I2C_CMD_COUNT', 2) # type: ignore
+class I2cCmdType_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+I2C_CMD_READ = I2cCmdType_e.define('I2C_CMD_READ', 0)
+I2C_CMD_WRITE = I2cCmdType_e.define('I2C_CMD_WRITE', 1)
+I2C_CMD_COUNT = I2cCmdType_e.define('I2C_CMD_COUNT', 2)
 
 @c.record
 class SwI2cCmd_t(c.Struct):
@@ -128,7 +128,7 @@ class SwI2cRequestExternal_t(c.Struct):
   SwI2cRequest: Annotated[SwI2cRequest_t, 0]
   Spare: Annotated[c.Array[uint32_t, Literal[8]], 52]
   MmHubPadding: Annotated[c.Array[uint32_t, Literal[8]], 84]
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @c.record
 class EccInfo_t(c.Struct):
   SIZE = 24
@@ -137,26 +137,26 @@ class EccInfo_t(c.Struct):
   ce_count_lo_chip: Annotated[uint16_t, 16]
   ce_count_hi_chip: Annotated[uint16_t, 18]
   eccPadding: Annotated[uint32_t, 20]
-uint64_t = Annotated[int, ctypes.c_uint64]
-uint16_t = Annotated[int, ctypes.c_uint16]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 @c.record
 class EccInfoTable_t(c.Struct):
   SIZE = 576
   EccInfo: Annotated[c.Array[EccInfo_t, Literal[24]], 0]
-D3HOTSequence_e = CEnum(Annotated[int, ctypes.c_uint32])
-BACO_SEQUENCE = D3HOTSequence_e.define('BACO_SEQUENCE', 0) # type: ignore
-MSR_SEQUENCE = D3HOTSequence_e.define('MSR_SEQUENCE', 1) # type: ignore
-BAMACO_SEQUENCE = D3HOTSequence_e.define('BAMACO_SEQUENCE', 2) # type: ignore
-ULPS_SEQUENCE = D3HOTSequence_e.define('ULPS_SEQUENCE', 3) # type: ignore
-D3HOT_SEQUENCE_COUNT = D3HOTSequence_e.define('D3HOT_SEQUENCE_COUNT', 4) # type: ignore
+class D3HOTSequence_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+BACO_SEQUENCE = D3HOTSequence_e.define('BACO_SEQUENCE', 0)
+MSR_SEQUENCE = D3HOTSequence_e.define('MSR_SEQUENCE', 1)
+BAMACO_SEQUENCE = D3HOTSequence_e.define('BAMACO_SEQUENCE', 2)
+ULPS_SEQUENCE = D3HOTSequence_e.define('ULPS_SEQUENCE', 3)
+D3HOT_SEQUENCE_COUNT = D3HOTSequence_e.define('D3HOT_SEQUENCE_COUNT', 4)
 
-PowerGatingMode_e = CEnum(Annotated[int, ctypes.c_uint32])
-PG_DYNAMIC_MODE = PowerGatingMode_e.define('PG_DYNAMIC_MODE', 0) # type: ignore
-PG_STATIC_MODE = PowerGatingMode_e.define('PG_STATIC_MODE', 1) # type: ignore
+class PowerGatingMode_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PG_DYNAMIC_MODE = PowerGatingMode_e.define('PG_DYNAMIC_MODE', 0)
+PG_STATIC_MODE = PowerGatingMode_e.define('PG_STATIC_MODE', 1)
 
-PowerGatingSettings_e = CEnum(Annotated[int, ctypes.c_uint32])
-PG_POWER_DOWN = PowerGatingSettings_e.define('PG_POWER_DOWN', 0) # type: ignore
-PG_POWER_UP = PowerGatingSettings_e.define('PG_POWER_UP', 1) # type: ignore
+class PowerGatingSettings_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PG_POWER_DOWN = PowerGatingSettings_e.define('PG_POWER_DOWN', 0)
+PG_POWER_UP = PowerGatingSettings_e.define('PG_POWER_UP', 1)
 
 @c.record
 class QuadraticInt_t(c.Struct):
@@ -175,63 +175,63 @@ class DroopInt_t(c.Struct):
   a: Annotated[uint32_t, 0]
   b: Annotated[uint32_t, 4]
   c: Annotated[uint32_t, 8]
-DCS_ARCH_e = CEnum(Annotated[int, ctypes.c_uint32])
-DCS_ARCH_DISABLED = DCS_ARCH_e.define('DCS_ARCH_DISABLED', 0) # type: ignore
-DCS_ARCH_FADCS = DCS_ARCH_e.define('DCS_ARCH_FADCS', 1) # type: ignore
-DCS_ARCH_ASYNC = DCS_ARCH_e.define('DCS_ARCH_ASYNC', 2) # type: ignore
+class DCS_ARCH_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+DCS_ARCH_DISABLED = DCS_ARCH_e.define('DCS_ARCH_DISABLED', 0)
+DCS_ARCH_FADCS = DCS_ARCH_e.define('DCS_ARCH_FADCS', 1)
+DCS_ARCH_ASYNC = DCS_ARCH_e.define('DCS_ARCH_ASYNC', 2)
 
-PPCLK_e = CEnum(Annotated[int, ctypes.c_uint32])
-PPCLK_GFXCLK = PPCLK_e.define('PPCLK_GFXCLK', 0) # type: ignore
-PPCLK_SOCCLK = PPCLK_e.define('PPCLK_SOCCLK', 1) # type: ignore
-PPCLK_UCLK = PPCLK_e.define('PPCLK_UCLK', 2) # type: ignore
-PPCLK_FCLK = PPCLK_e.define('PPCLK_FCLK', 3) # type: ignore
-PPCLK_DCLK_0 = PPCLK_e.define('PPCLK_DCLK_0', 4) # type: ignore
-PPCLK_VCLK_0 = PPCLK_e.define('PPCLK_VCLK_0', 5) # type: ignore
-PPCLK_DCLK_1 = PPCLK_e.define('PPCLK_DCLK_1', 6) # type: ignore
-PPCLK_VCLK_1 = PPCLK_e.define('PPCLK_VCLK_1', 7) # type: ignore
-PPCLK_DISPCLK = PPCLK_e.define('PPCLK_DISPCLK', 8) # type: ignore
-PPCLK_DPPCLK = PPCLK_e.define('PPCLK_DPPCLK', 9) # type: ignore
-PPCLK_DPREFCLK = PPCLK_e.define('PPCLK_DPREFCLK', 10) # type: ignore
-PPCLK_DCFCLK = PPCLK_e.define('PPCLK_DCFCLK', 11) # type: ignore
-PPCLK_DTBCLK = PPCLK_e.define('PPCLK_DTBCLK', 12) # type: ignore
-PPCLK_COUNT = PPCLK_e.define('PPCLK_COUNT', 13) # type: ignore
+class PPCLK_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PPCLK_GFXCLK = PPCLK_e.define('PPCLK_GFXCLK', 0)
+PPCLK_SOCCLK = PPCLK_e.define('PPCLK_SOCCLK', 1)
+PPCLK_UCLK = PPCLK_e.define('PPCLK_UCLK', 2)
+PPCLK_FCLK = PPCLK_e.define('PPCLK_FCLK', 3)
+PPCLK_DCLK_0 = PPCLK_e.define('PPCLK_DCLK_0', 4)
+PPCLK_VCLK_0 = PPCLK_e.define('PPCLK_VCLK_0', 5)
+PPCLK_DCLK_1 = PPCLK_e.define('PPCLK_DCLK_1', 6)
+PPCLK_VCLK_1 = PPCLK_e.define('PPCLK_VCLK_1', 7)
+PPCLK_DISPCLK = PPCLK_e.define('PPCLK_DISPCLK', 8)
+PPCLK_DPPCLK = PPCLK_e.define('PPCLK_DPPCLK', 9)
+PPCLK_DPREFCLK = PPCLK_e.define('PPCLK_DPREFCLK', 10)
+PPCLK_DCFCLK = PPCLK_e.define('PPCLK_DCFCLK', 11)
+PPCLK_DTBCLK = PPCLK_e.define('PPCLK_DTBCLK', 12)
+PPCLK_COUNT = PPCLK_e.define('PPCLK_COUNT', 13)
 
-VOLTAGE_MODE_e = CEnum(Annotated[int, ctypes.c_uint32])
-VOLTAGE_MODE_PPTABLE = VOLTAGE_MODE_e.define('VOLTAGE_MODE_PPTABLE', 0) # type: ignore
-VOLTAGE_MODE_FUSES = VOLTAGE_MODE_e.define('VOLTAGE_MODE_FUSES', 1) # type: ignore
-VOLTAGE_MODE_COUNT = VOLTAGE_MODE_e.define('VOLTAGE_MODE_COUNT', 2) # type: ignore
+class VOLTAGE_MODE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+VOLTAGE_MODE_PPTABLE = VOLTAGE_MODE_e.define('VOLTAGE_MODE_PPTABLE', 0)
+VOLTAGE_MODE_FUSES = VOLTAGE_MODE_e.define('VOLTAGE_MODE_FUSES', 1)
+VOLTAGE_MODE_COUNT = VOLTAGE_MODE_e.define('VOLTAGE_MODE_COUNT', 2)
 
-AVFS_VOLTAGE_TYPE_e = CEnum(Annotated[int, ctypes.c_uint32])
-AVFS_VOLTAGE_GFX = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_GFX', 0) # type: ignore
-AVFS_VOLTAGE_SOC = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_SOC', 1) # type: ignore
-AVFS_VOLTAGE_COUNT = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_COUNT', 2) # type: ignore
+class AVFS_VOLTAGE_TYPE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+AVFS_VOLTAGE_GFX = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_GFX', 0)
+AVFS_VOLTAGE_SOC = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_SOC', 1)
+AVFS_VOLTAGE_COUNT = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_COUNT', 2)
 
-AVFS_TEMP_e = CEnum(Annotated[int, ctypes.c_uint32])
-AVFS_TEMP_COLD = AVFS_TEMP_e.define('AVFS_TEMP_COLD', 0) # type: ignore
-AVFS_TEMP_HOT = AVFS_TEMP_e.define('AVFS_TEMP_HOT', 1) # type: ignore
-AVFS_TEMP_COUNT = AVFS_TEMP_e.define('AVFS_TEMP_COUNT', 2) # type: ignore
+class AVFS_TEMP_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+AVFS_TEMP_COLD = AVFS_TEMP_e.define('AVFS_TEMP_COLD', 0)
+AVFS_TEMP_HOT = AVFS_TEMP_e.define('AVFS_TEMP_HOT', 1)
+AVFS_TEMP_COUNT = AVFS_TEMP_e.define('AVFS_TEMP_COUNT', 2)
 
-AVFS_D_e = CEnum(Annotated[int, ctypes.c_uint32])
-AVFS_D_G = AVFS_D_e.define('AVFS_D_G', 0) # type: ignore
-AVFS_D_M_B = AVFS_D_e.define('AVFS_D_M_B', 1) # type: ignore
-AVFS_D_M_S = AVFS_D_e.define('AVFS_D_M_S', 2) # type: ignore
-AVFS_D_COUNT = AVFS_D_e.define('AVFS_D_COUNT', 3) # type: ignore
+class AVFS_D_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+AVFS_D_G = AVFS_D_e.define('AVFS_D_G', 0)
+AVFS_D_M_B = AVFS_D_e.define('AVFS_D_M_B', 1)
+AVFS_D_M_S = AVFS_D_e.define('AVFS_D_M_S', 2)
+AVFS_D_COUNT = AVFS_D_e.define('AVFS_D_COUNT', 3)
 
-UCLK_DIV_e = CEnum(Annotated[int, ctypes.c_uint32])
-UCLK_DIV_BY_1 = UCLK_DIV_e.define('UCLK_DIV_BY_1', 0) # type: ignore
-UCLK_DIV_BY_2 = UCLK_DIV_e.define('UCLK_DIV_BY_2', 1) # type: ignore
-UCLK_DIV_BY_4 = UCLK_DIV_e.define('UCLK_DIV_BY_4', 2) # type: ignore
-UCLK_DIV_BY_8 = UCLK_DIV_e.define('UCLK_DIV_BY_8', 3) # type: ignore
+class UCLK_DIV_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+UCLK_DIV_BY_1 = UCLK_DIV_e.define('UCLK_DIV_BY_1', 0)
+UCLK_DIV_BY_2 = UCLK_DIV_e.define('UCLK_DIV_BY_2', 1)
+UCLK_DIV_BY_4 = UCLK_DIV_e.define('UCLK_DIV_BY_4', 2)
+UCLK_DIV_BY_8 = UCLK_DIV_e.define('UCLK_DIV_BY_8', 3)
 
-GpioIntPolarity_e = CEnum(Annotated[int, ctypes.c_uint32])
-GPIO_INT_POLARITY_ACTIVE_LOW = GpioIntPolarity_e.define('GPIO_INT_POLARITY_ACTIVE_LOW', 0) # type: ignore
-GPIO_INT_POLARITY_ACTIVE_HIGH = GpioIntPolarity_e.define('GPIO_INT_POLARITY_ACTIVE_HIGH', 1) # type: ignore
+class GpioIntPolarity_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+GPIO_INT_POLARITY_ACTIVE_LOW = GpioIntPolarity_e.define('GPIO_INT_POLARITY_ACTIVE_LOW', 0)
+GPIO_INT_POLARITY_ACTIVE_HIGH = GpioIntPolarity_e.define('GPIO_INT_POLARITY_ACTIVE_HIGH', 1)
 
-PwrConfig_e = CEnum(Annotated[int, ctypes.c_uint32])
-PWR_CONFIG_TDP = PwrConfig_e.define('PWR_CONFIG_TDP', 0) # type: ignore
-PWR_CONFIG_TGP = PwrConfig_e.define('PWR_CONFIG_TGP', 1) # type: ignore
-PWR_CONFIG_TCP_ESTIMATED = PwrConfig_e.define('PWR_CONFIG_TCP_ESTIMATED', 2) # type: ignore
-PWR_CONFIG_TCP_MEASURED = PwrConfig_e.define('PWR_CONFIG_TCP_MEASURED', 3) # type: ignore
+class PwrConfig_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PWR_CONFIG_TDP = PwrConfig_e.define('PWR_CONFIG_TDP', 0)
+PWR_CONFIG_TGP = PwrConfig_e.define('PWR_CONFIG_TGP', 1)
+PWR_CONFIG_TCP_ESTIMATED = PwrConfig_e.define('PWR_CONFIG_TCP_ESTIMATED', 2)
+PWR_CONFIG_TCP_MEASURED = PwrConfig_e.define('PWR_CONFIG_TCP_MEASURED', 3)
 
 @c.record
 class DpmDescriptor_t(c.Struct):
@@ -246,149 +246,149 @@ class DpmDescriptor_t(c.Struct):
   FoptimalDc: Annotated[uint16_t, 26]
   FoptimalAc: Annotated[uint16_t, 28]
   Padding2: Annotated[uint16_t, 30]
-PPT_THROTTLER_e = CEnum(Annotated[int, ctypes.c_uint32])
-PPT_THROTTLER_PPT0 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT0', 0) # type: ignore
-PPT_THROTTLER_PPT1 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT1', 1) # type: ignore
-PPT_THROTTLER_PPT2 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT2', 2) # type: ignore
-PPT_THROTTLER_PPT3 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT3', 3) # type: ignore
-PPT_THROTTLER_COUNT = PPT_THROTTLER_e.define('PPT_THROTTLER_COUNT', 4) # type: ignore
+class PPT_THROTTLER_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PPT_THROTTLER_PPT0 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT0', 0)
+PPT_THROTTLER_PPT1 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT1', 1)
+PPT_THROTTLER_PPT2 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT2', 2)
+PPT_THROTTLER_PPT3 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT3', 3)
+PPT_THROTTLER_COUNT = PPT_THROTTLER_e.define('PPT_THROTTLER_COUNT', 4)
 
-TEMP_e = CEnum(Annotated[int, ctypes.c_uint32])
-TEMP_EDGE = TEMP_e.define('TEMP_EDGE', 0) # type: ignore
-TEMP_HOTSPOT = TEMP_e.define('TEMP_HOTSPOT', 1) # type: ignore
-TEMP_HOTSPOT_G = TEMP_e.define('TEMP_HOTSPOT_G', 2) # type: ignore
-TEMP_HOTSPOT_M = TEMP_e.define('TEMP_HOTSPOT_M', 3) # type: ignore
-TEMP_MEM = TEMP_e.define('TEMP_MEM', 4) # type: ignore
-TEMP_VR_GFX = TEMP_e.define('TEMP_VR_GFX', 5) # type: ignore
-TEMP_VR_MEM0 = TEMP_e.define('TEMP_VR_MEM0', 6) # type: ignore
-TEMP_VR_MEM1 = TEMP_e.define('TEMP_VR_MEM1', 7) # type: ignore
-TEMP_VR_SOC = TEMP_e.define('TEMP_VR_SOC', 8) # type: ignore
-TEMP_VR_U = TEMP_e.define('TEMP_VR_U', 9) # type: ignore
-TEMP_LIQUID0 = TEMP_e.define('TEMP_LIQUID0', 10) # type: ignore
-TEMP_LIQUID1 = TEMP_e.define('TEMP_LIQUID1', 11) # type: ignore
-TEMP_PLX = TEMP_e.define('TEMP_PLX', 12) # type: ignore
-TEMP_COUNT = TEMP_e.define('TEMP_COUNT', 13) # type: ignore
+class TEMP_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TEMP_EDGE = TEMP_e.define('TEMP_EDGE', 0)
+TEMP_HOTSPOT = TEMP_e.define('TEMP_HOTSPOT', 1)
+TEMP_HOTSPOT_G = TEMP_e.define('TEMP_HOTSPOT_G', 2)
+TEMP_HOTSPOT_M = TEMP_e.define('TEMP_HOTSPOT_M', 3)
+TEMP_MEM = TEMP_e.define('TEMP_MEM', 4)
+TEMP_VR_GFX = TEMP_e.define('TEMP_VR_GFX', 5)
+TEMP_VR_MEM0 = TEMP_e.define('TEMP_VR_MEM0', 6)
+TEMP_VR_MEM1 = TEMP_e.define('TEMP_VR_MEM1', 7)
+TEMP_VR_SOC = TEMP_e.define('TEMP_VR_SOC', 8)
+TEMP_VR_U = TEMP_e.define('TEMP_VR_U', 9)
+TEMP_LIQUID0 = TEMP_e.define('TEMP_LIQUID0', 10)
+TEMP_LIQUID1 = TEMP_e.define('TEMP_LIQUID1', 11)
+TEMP_PLX = TEMP_e.define('TEMP_PLX', 12)
+TEMP_COUNT = TEMP_e.define('TEMP_COUNT', 13)
 
-TDC_THROTTLER_e = CEnum(Annotated[int, ctypes.c_uint32])
-TDC_THROTTLER_GFX = TDC_THROTTLER_e.define('TDC_THROTTLER_GFX', 0) # type: ignore
-TDC_THROTTLER_SOC = TDC_THROTTLER_e.define('TDC_THROTTLER_SOC', 1) # type: ignore
-TDC_THROTTLER_U = TDC_THROTTLER_e.define('TDC_THROTTLER_U', 2) # type: ignore
-TDC_THROTTLER_COUNT = TDC_THROTTLER_e.define('TDC_THROTTLER_COUNT', 3) # type: ignore
+class TDC_THROTTLER_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+TDC_THROTTLER_GFX = TDC_THROTTLER_e.define('TDC_THROTTLER_GFX', 0)
+TDC_THROTTLER_SOC = TDC_THROTTLER_e.define('TDC_THROTTLER_SOC', 1)
+TDC_THROTTLER_U = TDC_THROTTLER_e.define('TDC_THROTTLER_U', 2)
+TDC_THROTTLER_COUNT = TDC_THROTTLER_e.define('TDC_THROTTLER_COUNT', 3)
 
-SVI_PLANE_e = CEnum(Annotated[int, ctypes.c_uint32])
-SVI_PLANE_GFX = SVI_PLANE_e.define('SVI_PLANE_GFX', 0) # type: ignore
-SVI_PLANE_SOC = SVI_PLANE_e.define('SVI_PLANE_SOC', 1) # type: ignore
-SVI_PLANE_VMEMP = SVI_PLANE_e.define('SVI_PLANE_VMEMP', 2) # type: ignore
-SVI_PLANE_VDDIO_MEM = SVI_PLANE_e.define('SVI_PLANE_VDDIO_MEM', 3) # type: ignore
-SVI_PLANE_U = SVI_PLANE_e.define('SVI_PLANE_U', 4) # type: ignore
-SVI_PLANE_COUNT = SVI_PLANE_e.define('SVI_PLANE_COUNT', 5) # type: ignore
+class SVI_PLANE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SVI_PLANE_GFX = SVI_PLANE_e.define('SVI_PLANE_GFX', 0)
+SVI_PLANE_SOC = SVI_PLANE_e.define('SVI_PLANE_SOC', 1)
+SVI_PLANE_VMEMP = SVI_PLANE_e.define('SVI_PLANE_VMEMP', 2)
+SVI_PLANE_VDDIO_MEM = SVI_PLANE_e.define('SVI_PLANE_VDDIO_MEM', 3)
+SVI_PLANE_U = SVI_PLANE_e.define('SVI_PLANE_U', 4)
+SVI_PLANE_COUNT = SVI_PLANE_e.define('SVI_PLANE_COUNT', 5)
 
-PMFW_VOLT_PLANE_e = CEnum(Annotated[int, ctypes.c_uint32])
-PMFW_VOLT_PLANE_GFX = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_GFX', 0) # type: ignore
-PMFW_VOLT_PLANE_SOC = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_SOC', 1) # type: ignore
-PMFW_VOLT_PLANE_COUNT = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_COUNT', 2) # type: ignore
+class PMFW_VOLT_PLANE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PMFW_VOLT_PLANE_GFX = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_GFX', 0)
+PMFW_VOLT_PLANE_SOC = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_SOC', 1)
+PMFW_VOLT_PLANE_COUNT = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_COUNT', 2)
 
-CUSTOMER_VARIANT_e = CEnum(Annotated[int, ctypes.c_uint32])
-CUSTOMER_VARIANT_ROW = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_ROW', 0) # type: ignore
-CUSTOMER_VARIANT_FALCON = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_FALCON', 1) # type: ignore
-CUSTOMER_VARIANT_COUNT = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_COUNT', 2) # type: ignore
+class CUSTOMER_VARIANT_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+CUSTOMER_VARIANT_ROW = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_ROW', 0)
+CUSTOMER_VARIANT_FALCON = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_FALCON', 1)
+CUSTOMER_VARIANT_COUNT = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_COUNT', 2)
 
-POWER_SOURCE_e = CEnum(Annotated[int, ctypes.c_uint32])
-POWER_SOURCE_AC = POWER_SOURCE_e.define('POWER_SOURCE_AC', 0) # type: ignore
-POWER_SOURCE_DC = POWER_SOURCE_e.define('POWER_SOURCE_DC', 1) # type: ignore
-POWER_SOURCE_COUNT = POWER_SOURCE_e.define('POWER_SOURCE_COUNT', 2) # type: ignore
+class POWER_SOURCE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+POWER_SOURCE_AC = POWER_SOURCE_e.define('POWER_SOURCE_AC', 0)
+POWER_SOURCE_DC = POWER_SOURCE_e.define('POWER_SOURCE_DC', 1)
+POWER_SOURCE_COUNT = POWER_SOURCE_e.define('POWER_SOURCE_COUNT', 2)
 
-MEM_VENDOR_e = CEnum(Annotated[int, ctypes.c_uint32])
-MEM_VENDOR_PLACEHOLDER0 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER0', 0) # type: ignore
-MEM_VENDOR_SAMSUNG = MEM_VENDOR_e.define('MEM_VENDOR_SAMSUNG', 1) # type: ignore
-MEM_VENDOR_INFINEON = MEM_VENDOR_e.define('MEM_VENDOR_INFINEON', 2) # type: ignore
-MEM_VENDOR_ELPIDA = MEM_VENDOR_e.define('MEM_VENDOR_ELPIDA', 3) # type: ignore
-MEM_VENDOR_ETRON = MEM_VENDOR_e.define('MEM_VENDOR_ETRON', 4) # type: ignore
-MEM_VENDOR_NANYA = MEM_VENDOR_e.define('MEM_VENDOR_NANYA', 5) # type: ignore
-MEM_VENDOR_HYNIX = MEM_VENDOR_e.define('MEM_VENDOR_HYNIX', 6) # type: ignore
-MEM_VENDOR_MOSEL = MEM_VENDOR_e.define('MEM_VENDOR_MOSEL', 7) # type: ignore
-MEM_VENDOR_WINBOND = MEM_VENDOR_e.define('MEM_VENDOR_WINBOND', 8) # type: ignore
-MEM_VENDOR_ESMT = MEM_VENDOR_e.define('MEM_VENDOR_ESMT', 9) # type: ignore
-MEM_VENDOR_PLACEHOLDER1 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER1', 10) # type: ignore
-MEM_VENDOR_PLACEHOLDER2 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER2', 11) # type: ignore
-MEM_VENDOR_PLACEHOLDER3 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER3', 12) # type: ignore
-MEM_VENDOR_PLACEHOLDER4 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER4', 13) # type: ignore
-MEM_VENDOR_PLACEHOLDER5 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER5', 14) # type: ignore
-MEM_VENDOR_MICRON = MEM_VENDOR_e.define('MEM_VENDOR_MICRON', 15) # type: ignore
-MEM_VENDOR_COUNT = MEM_VENDOR_e.define('MEM_VENDOR_COUNT', 16) # type: ignore
+class MEM_VENDOR_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+MEM_VENDOR_PLACEHOLDER0 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER0', 0)
+MEM_VENDOR_SAMSUNG = MEM_VENDOR_e.define('MEM_VENDOR_SAMSUNG', 1)
+MEM_VENDOR_INFINEON = MEM_VENDOR_e.define('MEM_VENDOR_INFINEON', 2)
+MEM_VENDOR_ELPIDA = MEM_VENDOR_e.define('MEM_VENDOR_ELPIDA', 3)
+MEM_VENDOR_ETRON = MEM_VENDOR_e.define('MEM_VENDOR_ETRON', 4)
+MEM_VENDOR_NANYA = MEM_VENDOR_e.define('MEM_VENDOR_NANYA', 5)
+MEM_VENDOR_HYNIX = MEM_VENDOR_e.define('MEM_VENDOR_HYNIX', 6)
+MEM_VENDOR_MOSEL = MEM_VENDOR_e.define('MEM_VENDOR_MOSEL', 7)
+MEM_VENDOR_WINBOND = MEM_VENDOR_e.define('MEM_VENDOR_WINBOND', 8)
+MEM_VENDOR_ESMT = MEM_VENDOR_e.define('MEM_VENDOR_ESMT', 9)
+MEM_VENDOR_PLACEHOLDER1 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER1', 10)
+MEM_VENDOR_PLACEHOLDER2 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER2', 11)
+MEM_VENDOR_PLACEHOLDER3 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER3', 12)
+MEM_VENDOR_PLACEHOLDER4 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER4', 13)
+MEM_VENDOR_PLACEHOLDER5 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER5', 14)
+MEM_VENDOR_MICRON = MEM_VENDOR_e.define('MEM_VENDOR_MICRON', 15)
+MEM_VENDOR_COUNT = MEM_VENDOR_e.define('MEM_VENDOR_COUNT', 16)
 
-PP_GRTAVFS_HW_FUSE_e = CEnum(Annotated[int, ctypes.c_uint32])
-PP_GRTAVFS_HW_CPO_CTL_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE0', 0) # type: ignore
-PP_GRTAVFS_HW_CPO_CTL_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE1', 1) # type: ignore
-PP_GRTAVFS_HW_CPO_CTL_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE2', 2) # type: ignore
-PP_GRTAVFS_HW_CPO_CTL_ZONE3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE3', 3) # type: ignore
-PP_GRTAVFS_HW_CPO_CTL_ZONE4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE4', 4) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_0_31_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE0', 5) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_32_63_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE0', 6) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_0_31_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE1', 7) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_32_63_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE1', 8) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_0_31_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE2', 9) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_32_63_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE2', 10) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_0_31_ZONE3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE3', 11) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_32_63_ZONE3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE3', 12) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_0_31_ZONE4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE4', 13) # type: ignore
-PP_GRTAVFS_HW_CPO_EN_32_63_ZONE4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE4', 14) # type: ignore
-PP_GRTAVFS_HW_ZONE0_VF = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_ZONE0_VF', 15) # type: ignore
-PP_GRTAVFS_HW_ZONE1_VF1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_ZONE1_VF1', 16) # type: ignore
-PP_GRTAVFS_HW_ZONE2_VF2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_ZONE2_VF2', 17) # type: ignore
-PP_GRTAVFS_HW_ZONE3_VF3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_ZONE3_VF3', 18) # type: ignore
-PP_GRTAVFS_HW_VOLTAGE_GB = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_VOLTAGE_GB', 19) # type: ignore
-PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE0', 20) # type: ignore
-PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE1', 21) # type: ignore
-PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE2', 22) # type: ignore
-PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE3', 23) # type: ignore
-PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE4', 24) # type: ignore
-PP_GRTAVFS_HW_RESERVED_0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_0', 25) # type: ignore
-PP_GRTAVFS_HW_RESERVED_1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_1', 26) # type: ignore
-PP_GRTAVFS_HW_RESERVED_2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_2', 27) # type: ignore
-PP_GRTAVFS_HW_RESERVED_3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_3', 28) # type: ignore
-PP_GRTAVFS_HW_RESERVED_4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_4', 29) # type: ignore
-PP_GRTAVFS_HW_RESERVED_5 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_5', 30) # type: ignore
-PP_GRTAVFS_HW_RESERVED_6 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_6', 31) # type: ignore
-PP_GRTAVFS_HW_FUSE_COUNT = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_FUSE_COUNT', 32) # type: ignore
+class PP_GRTAVFS_HW_FUSE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PP_GRTAVFS_HW_CPO_CTL_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE0', 0)
+PP_GRTAVFS_HW_CPO_CTL_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE1', 1)
+PP_GRTAVFS_HW_CPO_CTL_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE2', 2)
+PP_GRTAVFS_HW_CPO_CTL_ZONE3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE3', 3)
+PP_GRTAVFS_HW_CPO_CTL_ZONE4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE4', 4)
+PP_GRTAVFS_HW_CPO_EN_0_31_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE0', 5)
+PP_GRTAVFS_HW_CPO_EN_32_63_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE0', 6)
+PP_GRTAVFS_HW_CPO_EN_0_31_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE1', 7)
+PP_GRTAVFS_HW_CPO_EN_32_63_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE1', 8)
+PP_GRTAVFS_HW_CPO_EN_0_31_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE2', 9)
+PP_GRTAVFS_HW_CPO_EN_32_63_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE2', 10)
+PP_GRTAVFS_HW_CPO_EN_0_31_ZONE3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE3', 11)
+PP_GRTAVFS_HW_CPO_EN_32_63_ZONE3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE3', 12)
+PP_GRTAVFS_HW_CPO_EN_0_31_ZONE4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_0_31_ZONE4', 13)
+PP_GRTAVFS_HW_CPO_EN_32_63_ZONE4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_EN_32_63_ZONE4', 14)
+PP_GRTAVFS_HW_ZONE0_VF = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_ZONE0_VF', 15)
+PP_GRTAVFS_HW_ZONE1_VF1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_ZONE1_VF1', 16)
+PP_GRTAVFS_HW_ZONE2_VF2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_ZONE2_VF2', 17)
+PP_GRTAVFS_HW_ZONE3_VF3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_ZONE3_VF3', 18)
+PP_GRTAVFS_HW_VOLTAGE_GB = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_VOLTAGE_GB', 19)
+PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE0', 20)
+PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE1', 21)
+PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE2', 22)
+PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE3', 23)
+PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPOSCALINGCTRL_ZONE4', 24)
+PP_GRTAVFS_HW_RESERVED_0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_0', 25)
+PP_GRTAVFS_HW_RESERVED_1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_1', 26)
+PP_GRTAVFS_HW_RESERVED_2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_2', 27)
+PP_GRTAVFS_HW_RESERVED_3 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_3', 28)
+PP_GRTAVFS_HW_RESERVED_4 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_4', 29)
+PP_GRTAVFS_HW_RESERVED_5 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_5', 30)
+PP_GRTAVFS_HW_RESERVED_6 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_6', 31)
+PP_GRTAVFS_HW_FUSE_COUNT = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_FUSE_COUNT', 32)
 
-PP_GRTAVFS_FW_COMMON_FUSE_e = CEnum(Annotated[int, ctypes.c_uint32])
-PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_HOT_T0', 0) # type: ignore
-PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_COLD_T0', 1) # type: ignore
-PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_HOT_T0', 2) # type: ignore
-PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_COLD_T0', 3) # type: ignore
-PP_GRTAVFS_FW_COMMON_PPVMIN_Z3_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z3_HOT_T0', 4) # type: ignore
-PP_GRTAVFS_FW_COMMON_PPVMIN_Z3_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z3_COLD_T0', 5) # type: ignore
-PP_GRTAVFS_FW_COMMON_PPVMIN_Z4_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z4_HOT_T0', 6) # type: ignore
-PP_GRTAVFS_FW_COMMON_PPVMIN_Z4_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z4_COLD_T0', 7) # type: ignore
-PP_GRTAVFS_FW_COMMON_SRAM_RM_Z0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z0', 8) # type: ignore
-PP_GRTAVFS_FW_COMMON_SRAM_RM_Z1 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z1', 9) # type: ignore
-PP_GRTAVFS_FW_COMMON_SRAM_RM_Z2 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z2', 10) # type: ignore
-PP_GRTAVFS_FW_COMMON_SRAM_RM_Z3 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z3', 11) # type: ignore
-PP_GRTAVFS_FW_COMMON_SRAM_RM_Z4 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z4', 12) # type: ignore
-PP_GRTAVFS_FW_COMMON_FUSE_COUNT = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_FUSE_COUNT', 13) # type: ignore
+class PP_GRTAVFS_FW_COMMON_FUSE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_HOT_T0', 0)
+PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_COLD_T0', 1)
+PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_HOT_T0', 2)
+PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_COLD_T0', 3)
+PP_GRTAVFS_FW_COMMON_PPVMIN_Z3_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z3_HOT_T0', 4)
+PP_GRTAVFS_FW_COMMON_PPVMIN_Z3_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z3_COLD_T0', 5)
+PP_GRTAVFS_FW_COMMON_PPVMIN_Z4_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z4_HOT_T0', 6)
+PP_GRTAVFS_FW_COMMON_PPVMIN_Z4_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z4_COLD_T0', 7)
+PP_GRTAVFS_FW_COMMON_SRAM_RM_Z0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z0', 8)
+PP_GRTAVFS_FW_COMMON_SRAM_RM_Z1 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z1', 9)
+PP_GRTAVFS_FW_COMMON_SRAM_RM_Z2 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z2', 10)
+PP_GRTAVFS_FW_COMMON_SRAM_RM_Z3 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z3', 11)
+PP_GRTAVFS_FW_COMMON_SRAM_RM_Z4 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z4', 12)
+PP_GRTAVFS_FW_COMMON_FUSE_COUNT = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_FUSE_COUNT', 13)
 
-PP_GRTAVFS_FW_SEP_FUSE_e = CEnum(Annotated[int, ctypes.c_uint32])
-PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_NEG_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_NEG_1', 0) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_0 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_0', 1) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_1', 2) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_2 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_2', 3) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_3 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_3', 4) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_4 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_4', 5) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_NEG_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_NEG_1', 6) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_0 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_0', 7) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_1', 8) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_2 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_2', 9) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_3 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_3', 10) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_4 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_4', 11) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_VF_NEG_1_FREQUENCY = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_VF_NEG_1_FREQUENCY', 12) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_VF4_FREQUENCY = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_VF4_FREQUENCY', 13) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_0 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_0', 14) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_1', 15) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_2 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_2', 16) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_3 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_3', 17) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4', 18) # type: ignore
-PP_GRTAVFS_FW_SEP_FUSE_COUNT = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_COUNT', 19) # type: ignore
+class PP_GRTAVFS_FW_SEP_FUSE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_NEG_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_NEG_1', 0)
+PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_0 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_0', 1)
+PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_1', 2)
+PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_2 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_2', 3)
+PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_3 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_3', 4)
+PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_4 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_4', 5)
+PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_NEG_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_NEG_1', 6)
+PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_0 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_0', 7)
+PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_1', 8)
+PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_2 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_2', 9)
+PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_3 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_3', 10)
+PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_4 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB2_PWL_VOLTAGE_4', 11)
+PP_GRTAVFS_FW_SEP_FUSE_VF_NEG_1_FREQUENCY = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_VF_NEG_1_FREQUENCY', 12)
+PP_GRTAVFS_FW_SEP_FUSE_VF4_FREQUENCY = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_VF4_FREQUENCY', 13)
+PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_0 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_0', 14)
+PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_1', 15)
+PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_2 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_2', 16)
+PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_3 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_3', 17)
+PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4', 18)
+PP_GRTAVFS_FW_SEP_FUSE_COUNT = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_COUNT', 19)
 
 @c.record
 class SviTelemetryScale_t(c.Struct):
@@ -396,10 +396,10 @@ class SviTelemetryScale_t(c.Struct):
   Offset: Annotated[int8_t, 0]
   Padding: Annotated[uint8_t, 1]
   MaxCurrent: Annotated[uint16_t, 2]
-int8_t = Annotated[int, ctypes.c_byte]
-FanMode_e = CEnum(Annotated[int, ctypes.c_uint32])
-FAN_MODE_AUTO = FanMode_e.define('FAN_MODE_AUTO', 0) # type: ignore
-FAN_MODE_MANUAL_LINEAR = FanMode_e.define('FAN_MODE_MANUAL_LINEAR', 1) # type: ignore
+int8_t: TypeAlias = Annotated[int, ctypes.c_byte]
+class FanMode_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+FAN_MODE_AUTO = FanMode_e.define('FAN_MODE_AUTO', 0)
+FAN_MODE_MANUAL_LINEAR = FanMode_e.define('FAN_MODE_MANUAL_LINEAR', 1)
 
 @c.record
 class OverDriveTable_t(c.Struct):
@@ -425,7 +425,7 @@ class OverDriveTable_t(c.Struct):
   MaxOpTemp: Annotated[uint8_t, 55]
   Spare: Annotated[c.Array[uint32_t, Literal[13]], 56]
   MmHubPadding: Annotated[c.Array[uint32_t, Literal[8]], 108]
-int16_t = Annotated[int, ctypes.c_int16]
+int16_t: TypeAlias = Annotated[int, ctypes.c_int16]
 @c.record
 class OverDriveTableExternal_t(c.Struct):
   SIZE = 140
@@ -454,51 +454,51 @@ class OverDriveLimits_t(c.Struct):
   FanMode: Annotated[uint8_t, 34]
   MaxOpTemp: Annotated[uint8_t, 35]
   Spare: Annotated[c.Array[uint32_t, Literal[13]], 36]
-BOARD_GPIO_TYPE_e = CEnum(Annotated[int, ctypes.c_uint32])
-BOARD_GPIO_SMUIO_0 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_0', 0) # type: ignore
-BOARD_GPIO_SMUIO_1 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_1', 1) # type: ignore
-BOARD_GPIO_SMUIO_2 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_2', 2) # type: ignore
-BOARD_GPIO_SMUIO_3 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_3', 3) # type: ignore
-BOARD_GPIO_SMUIO_4 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_4', 4) # type: ignore
-BOARD_GPIO_SMUIO_5 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_5', 5) # type: ignore
-BOARD_GPIO_SMUIO_6 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_6', 6) # type: ignore
-BOARD_GPIO_SMUIO_7 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_7', 7) # type: ignore
-BOARD_GPIO_SMUIO_8 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_8', 8) # type: ignore
-BOARD_GPIO_SMUIO_9 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_9', 9) # type: ignore
-BOARD_GPIO_SMUIO_10 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_10', 10) # type: ignore
-BOARD_GPIO_SMUIO_11 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_11', 11) # type: ignore
-BOARD_GPIO_SMUIO_12 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_12', 12) # type: ignore
-BOARD_GPIO_SMUIO_13 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_13', 13) # type: ignore
-BOARD_GPIO_SMUIO_14 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_14', 14) # type: ignore
-BOARD_GPIO_SMUIO_15 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_15', 15) # type: ignore
-BOARD_GPIO_SMUIO_16 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_16', 16) # type: ignore
-BOARD_GPIO_SMUIO_17 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_17', 17) # type: ignore
-BOARD_GPIO_SMUIO_18 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_18', 18) # type: ignore
-BOARD_GPIO_SMUIO_19 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_19', 19) # type: ignore
-BOARD_GPIO_SMUIO_20 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_20', 20) # type: ignore
-BOARD_GPIO_SMUIO_21 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_21', 21) # type: ignore
-BOARD_GPIO_SMUIO_22 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_22', 22) # type: ignore
-BOARD_GPIO_SMUIO_23 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_23', 23) # type: ignore
-BOARD_GPIO_SMUIO_24 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_24', 24) # type: ignore
-BOARD_GPIO_SMUIO_25 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_25', 25) # type: ignore
-BOARD_GPIO_SMUIO_26 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_26', 26) # type: ignore
-BOARD_GPIO_SMUIO_27 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_27', 27) # type: ignore
-BOARD_GPIO_SMUIO_28 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_28', 28) # type: ignore
-BOARD_GPIO_SMUIO_29 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_29', 29) # type: ignore
-BOARD_GPIO_SMUIO_30 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_30', 30) # type: ignore
-BOARD_GPIO_SMUIO_31 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_31', 31) # type: ignore
-MAX_BOARD_GPIO_SMUIO_NUM = BOARD_GPIO_TYPE_e.define('MAX_BOARD_GPIO_SMUIO_NUM', 32) # type: ignore
-BOARD_GPIO_DC_GEN_A = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_A', 33) # type: ignore
-BOARD_GPIO_DC_GEN_B = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_B', 34) # type: ignore
-BOARD_GPIO_DC_GEN_C = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_C', 35) # type: ignore
-BOARD_GPIO_DC_GEN_D = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_D', 36) # type: ignore
-BOARD_GPIO_DC_GEN_E = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_E', 37) # type: ignore
-BOARD_GPIO_DC_GEN_F = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_F', 38) # type: ignore
-BOARD_GPIO_DC_GEN_G = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_G', 39) # type: ignore
-BOARD_GPIO_DC_GENLK_CLK = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GENLK_CLK', 40) # type: ignore
-BOARD_GPIO_DC_GENLK_VSYNC = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GENLK_VSYNC', 41) # type: ignore
-BOARD_GPIO_DC_SWAPLOCK_A = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_SWAPLOCK_A', 42) # type: ignore
-BOARD_GPIO_DC_SWAPLOCK_B = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_SWAPLOCK_B', 43) # type: ignore
+class BOARD_GPIO_TYPE_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+BOARD_GPIO_SMUIO_0 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_0', 0)
+BOARD_GPIO_SMUIO_1 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_1', 1)
+BOARD_GPIO_SMUIO_2 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_2', 2)
+BOARD_GPIO_SMUIO_3 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_3', 3)
+BOARD_GPIO_SMUIO_4 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_4', 4)
+BOARD_GPIO_SMUIO_5 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_5', 5)
+BOARD_GPIO_SMUIO_6 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_6', 6)
+BOARD_GPIO_SMUIO_7 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_7', 7)
+BOARD_GPIO_SMUIO_8 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_8', 8)
+BOARD_GPIO_SMUIO_9 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_9', 9)
+BOARD_GPIO_SMUIO_10 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_10', 10)
+BOARD_GPIO_SMUIO_11 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_11', 11)
+BOARD_GPIO_SMUIO_12 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_12', 12)
+BOARD_GPIO_SMUIO_13 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_13', 13)
+BOARD_GPIO_SMUIO_14 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_14', 14)
+BOARD_GPIO_SMUIO_15 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_15', 15)
+BOARD_GPIO_SMUIO_16 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_16', 16)
+BOARD_GPIO_SMUIO_17 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_17', 17)
+BOARD_GPIO_SMUIO_18 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_18', 18)
+BOARD_GPIO_SMUIO_19 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_19', 19)
+BOARD_GPIO_SMUIO_20 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_20', 20)
+BOARD_GPIO_SMUIO_21 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_21', 21)
+BOARD_GPIO_SMUIO_22 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_22', 22)
+BOARD_GPIO_SMUIO_23 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_23', 23)
+BOARD_GPIO_SMUIO_24 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_24', 24)
+BOARD_GPIO_SMUIO_25 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_25', 25)
+BOARD_GPIO_SMUIO_26 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_26', 26)
+BOARD_GPIO_SMUIO_27 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_27', 27)
+BOARD_GPIO_SMUIO_28 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_28', 28)
+BOARD_GPIO_SMUIO_29 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_29', 29)
+BOARD_GPIO_SMUIO_30 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_30', 30)
+BOARD_GPIO_SMUIO_31 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_31', 31)
+MAX_BOARD_GPIO_SMUIO_NUM = BOARD_GPIO_TYPE_e.define('MAX_BOARD_GPIO_SMUIO_NUM', 32)
+BOARD_GPIO_DC_GEN_A = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_A', 33)
+BOARD_GPIO_DC_GEN_B = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_B', 34)
+BOARD_GPIO_DC_GEN_C = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_C', 35)
+BOARD_GPIO_DC_GEN_D = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_D', 36)
+BOARD_GPIO_DC_GEN_E = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_E', 37)
+BOARD_GPIO_DC_GEN_F = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_F', 38)
+BOARD_GPIO_DC_GEN_G = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GEN_G', 39)
+BOARD_GPIO_DC_GENLK_CLK = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GENLK_CLK', 40)
+BOARD_GPIO_DC_GENLK_VSYNC = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_GENLK_VSYNC', 41)
+BOARD_GPIO_DC_SWAPLOCK_A = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_SWAPLOCK_A', 42)
+BOARD_GPIO_DC_SWAPLOCK_B = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_DC_SWAPLOCK_B', 43)
 
 @c.record
 class BootValues_t(c.Struct):
@@ -793,7 +793,7 @@ class SkuTable_t(c.Struct):
   TemperatureFwCtfLimit_Micron: Annotated[uint16_t, 3286]
   Spare: Annotated[c.Array[uint32_t, Literal[41]], 3288]
   MmHubPadding: Annotated[c.Array[uint32_t, Literal[8]], 3452]
-int32_t = Annotated[int, ctypes.c_int32]
+int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
 @c.record
 class BoardTable_t(c.Struct):
   SIZE = 488
@@ -946,11 +946,11 @@ class WatermarkRowGeneric_t(c.Struct):
   WmSetting: Annotated[uint8_t, 0]
   Flags: Annotated[uint8_t, 1]
   Padding: Annotated[c.Array[uint8_t, Literal[2]], 2]
-WATERMARKS_FLAGS_e = CEnum(Annotated[int, ctypes.c_uint32])
-WATERMARKS_CLOCK_RANGE = WATERMARKS_FLAGS_e.define('WATERMARKS_CLOCK_RANGE', 0) # type: ignore
-WATERMARKS_DUMMY_PSTATE = WATERMARKS_FLAGS_e.define('WATERMARKS_DUMMY_PSTATE', 1) # type: ignore
-WATERMARKS_MALL = WATERMARKS_FLAGS_e.define('WATERMARKS_MALL', 2) # type: ignore
-WATERMARKS_COUNT = WATERMARKS_FLAGS_e.define('WATERMARKS_COUNT', 3) # type: ignore
+class WATERMARKS_FLAGS_e(Annotated[int, ctypes.c_uint32], c.Enum): pass
+WATERMARKS_CLOCK_RANGE = WATERMARKS_FLAGS_e.define('WATERMARKS_CLOCK_RANGE', 0)
+WATERMARKS_DUMMY_PSTATE = WATERMARKS_FLAGS_e.define('WATERMARKS_DUMMY_PSTATE', 1)
+WATERMARKS_MALL = WATERMARKS_FLAGS_e.define('WATERMARKS_MALL', 2)
+WATERMARKS_COUNT = WATERMARKS_FLAGS_e.define('WATERMARKS_COUNT', 3)
 
 @c.record
 class Watermarks_t(c.Struct):
@@ -1020,37 +1020,37 @@ class struct_smu_hw_power_state(c.Struct):
   SIZE = 4
   magic: Annotated[Annotated[int, ctypes.c_uint32], 0]
 class struct_smu_power_state(ctypes.Structure): pass
-enum_smu_state_ui_label = CEnum(Annotated[int, ctypes.c_uint32])
-SMU_STATE_UI_LABEL_NONE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_NONE', 0) # type: ignore
-SMU_STATE_UI_LABEL_BATTERY = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BATTERY', 1) # type: ignore
-SMU_STATE_UI_TABEL_MIDDLE_LOW = enum_smu_state_ui_label.define('SMU_STATE_UI_TABEL_MIDDLE_LOW', 2) # type: ignore
-SMU_STATE_UI_LABEL_BALLANCED = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BALLANCED', 3) # type: ignore
-SMU_STATE_UI_LABEL_MIDDLE_HIGHT = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_MIDDLE_HIGHT', 4) # type: ignore
-SMU_STATE_UI_LABEL_PERFORMANCE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_PERFORMANCE', 5) # type: ignore
-SMU_STATE_UI_LABEL_BACO = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BACO', 6) # type: ignore
+class enum_smu_state_ui_label(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMU_STATE_UI_LABEL_NONE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_NONE', 0)
+SMU_STATE_UI_LABEL_BATTERY = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BATTERY', 1)
+SMU_STATE_UI_TABEL_MIDDLE_LOW = enum_smu_state_ui_label.define('SMU_STATE_UI_TABEL_MIDDLE_LOW', 2)
+SMU_STATE_UI_LABEL_BALLANCED = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BALLANCED', 3)
+SMU_STATE_UI_LABEL_MIDDLE_HIGHT = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_MIDDLE_HIGHT', 4)
+SMU_STATE_UI_LABEL_PERFORMANCE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_PERFORMANCE', 5)
+SMU_STATE_UI_LABEL_BACO = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BACO', 6)
 
-enum_smu_state_classification_flag = CEnum(Annotated[int, ctypes.c_uint32])
-SMU_STATE_CLASSIFICATION_FLAG_BOOT = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_BOOT', 1) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_THERMAL = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_THERMAL', 2) # type: ignore
-SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE', 4) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_RESET = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_RESET', 8) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_FORCED = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_FORCED', 16) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_USER_3D_PERFORMANCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_USER_3D_PERFORMANCE', 32) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_USER_2D_PERFORMANCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_USER_2D_PERFORMANCE', 64) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_3D_PERFORMANCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_3D_PERFORMANCE', 128) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_AC_OVERDIRVER_TEMPLATE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_AC_OVERDIRVER_TEMPLATE', 256) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_UVD = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD', 512) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_3D_PERFORMANCE_LOW = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_3D_PERFORMANCE_LOW', 1024) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_ACPI = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_ACPI', 2048) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_HD2 = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_HD2', 4096) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_UVD_HD = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_HD', 8192) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_UVD_SD = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_SD', 16384) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_USER_DC_PERFORMANCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_USER_DC_PERFORMANCE', 32768) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_DC_OVERDIRVER_TEMPLATE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_DC_OVERDIRVER_TEMPLATE', 65536) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_BACO = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_BACO', 131072) # type: ignore
-SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE2 = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE2', 262144) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_ULV = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_ULV', 524288) # type: ignore
-SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC', 1048576) # type: ignore
+class enum_smu_state_classification_flag(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMU_STATE_CLASSIFICATION_FLAG_BOOT = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_BOOT', 1)
+SMU_STATE_CLASSIFICATION_FLAG_THERMAL = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_THERMAL', 2)
+SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE', 4)
+SMU_STATE_CLASSIFICATION_FLAG_RESET = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_RESET', 8)
+SMU_STATE_CLASSIFICATION_FLAG_FORCED = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_FORCED', 16)
+SMU_STATE_CLASSIFICATION_FLAG_USER_3D_PERFORMANCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_USER_3D_PERFORMANCE', 32)
+SMU_STATE_CLASSIFICATION_FLAG_USER_2D_PERFORMANCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_USER_2D_PERFORMANCE', 64)
+SMU_STATE_CLASSIFICATION_FLAG_3D_PERFORMANCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_3D_PERFORMANCE', 128)
+SMU_STATE_CLASSIFICATION_FLAG_AC_OVERDIRVER_TEMPLATE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_AC_OVERDIRVER_TEMPLATE', 256)
+SMU_STATE_CLASSIFICATION_FLAG_UVD = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD', 512)
+SMU_STATE_CLASSIFICATION_FLAG_3D_PERFORMANCE_LOW = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_3D_PERFORMANCE_LOW', 1024)
+SMU_STATE_CLASSIFICATION_FLAG_ACPI = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_ACPI', 2048)
+SMU_STATE_CLASSIFICATION_FLAG_HD2 = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_HD2', 4096)
+SMU_STATE_CLASSIFICATION_FLAG_UVD_HD = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_HD', 8192)
+SMU_STATE_CLASSIFICATION_FLAG_UVD_SD = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_SD', 16384)
+SMU_STATE_CLASSIFICATION_FLAG_USER_DC_PERFORMANCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_USER_DC_PERFORMANCE', 32768)
+SMU_STATE_CLASSIFICATION_FLAG_DC_OVERDIRVER_TEMPLATE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_DC_OVERDIRVER_TEMPLATE', 65536)
+SMU_STATE_CLASSIFICATION_FLAG_BACO = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_BACO', 131072)
+SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE2 = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE2', 262144)
+SMU_STATE_CLASSIFICATION_FLAG_ULV = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_ULV', 524288)
+SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_UVD_MVC', 1048576)
 
 @c.record
 class struct_smu_state_classification_block(c.Struct):
@@ -1064,9 +1064,9 @@ class struct_smu_state_classification_block(c.Struct):
 class struct_smu_state_pcie_block(c.Struct):
   SIZE = 4
   lanes: Annotated[Annotated[int, ctypes.c_uint32], 0]
-enum_smu_refreshrate_source = CEnum(Annotated[int, ctypes.c_uint32])
-SMU_REFRESHRATE_SOURCE_EDID = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EDID', 0) # type: ignore
-SMU_REFRESHRATE_SOURCE_EXPLICIT = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EXPLICIT', 1) # type: ignore
+class enum_smu_refreshrate_source(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMU_REFRESHRATE_SOURCE_EDID = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EDID', 0)
+SMU_REFRESHRATE_SOURCE_EXPLICIT = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EXPLICIT', 1)
 
 @c.record
 class struct_smu_state_display_block(c.Struct):
@@ -1113,58 +1113,58 @@ class struct_smu_uvd_clocks(c.Struct):
   SIZE = 8
   vclk: Annotated[Annotated[int, ctypes.c_uint32], 0]
   dclk: Annotated[Annotated[int, ctypes.c_uint32], 4]
-enum_smu_power_src_type = CEnum(Annotated[int, ctypes.c_uint32])
-SMU_POWER_SOURCE_AC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_AC', 0) # type: ignore
-SMU_POWER_SOURCE_DC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_DC', 1) # type: ignore
-SMU_POWER_SOURCE_COUNT = enum_smu_power_src_type.define('SMU_POWER_SOURCE_COUNT', 2) # type: ignore
+class enum_smu_power_src_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMU_POWER_SOURCE_AC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_AC', 0)
+SMU_POWER_SOURCE_DC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_DC', 1)
+SMU_POWER_SOURCE_COUNT = enum_smu_power_src_type.define('SMU_POWER_SOURCE_COUNT', 2)
 
-enum_smu_ppt_limit_type = CEnum(Annotated[int, ctypes.c_uint32])
-SMU_DEFAULT_PPT_LIMIT = enum_smu_ppt_limit_type.define('SMU_DEFAULT_PPT_LIMIT', 0) # type: ignore
-SMU_FAST_PPT_LIMIT = enum_smu_ppt_limit_type.define('SMU_FAST_PPT_LIMIT', 1) # type: ignore
+class enum_smu_ppt_limit_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMU_DEFAULT_PPT_LIMIT = enum_smu_ppt_limit_type.define('SMU_DEFAULT_PPT_LIMIT', 0)
+SMU_FAST_PPT_LIMIT = enum_smu_ppt_limit_type.define('SMU_FAST_PPT_LIMIT', 1)
 
-enum_smu_ppt_limit_level = CEnum(Annotated[int, ctypes.c_int32])
-SMU_PPT_LIMIT_MIN = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_MIN', -1) # type: ignore
-SMU_PPT_LIMIT_CURRENT = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_CURRENT', 0) # type: ignore
-SMU_PPT_LIMIT_DEFAULT = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_DEFAULT', 1) # type: ignore
-SMU_PPT_LIMIT_MAX = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_MAX', 2) # type: ignore
+class enum_smu_ppt_limit_level(Annotated[int, ctypes.c_int32], c.Enum): pass
+SMU_PPT_LIMIT_MIN = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_MIN', -1)
+SMU_PPT_LIMIT_CURRENT = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_CURRENT', 0)
+SMU_PPT_LIMIT_DEFAULT = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_DEFAULT', 1)
+SMU_PPT_LIMIT_MAX = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_MAX', 2)
 
-enum_smu_memory_pool_size = CEnum(Annotated[int, ctypes.c_uint32])
-SMU_MEMORY_POOL_SIZE_ZERO = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_ZERO', 0) # type: ignore
-SMU_MEMORY_POOL_SIZE_256_MB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_256_MB', 268435456) # type: ignore
-SMU_MEMORY_POOL_SIZE_512_MB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_512_MB', 536870912) # type: ignore
-SMU_MEMORY_POOL_SIZE_1_GB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_1_GB', 1073741824) # type: ignore
-SMU_MEMORY_POOL_SIZE_2_GB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_2_GB', 2147483648) # type: ignore
+class enum_smu_memory_pool_size(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMU_MEMORY_POOL_SIZE_ZERO = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_ZERO', 0)
+SMU_MEMORY_POOL_SIZE_256_MB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_256_MB', 268435456)
+SMU_MEMORY_POOL_SIZE_512_MB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_512_MB', 536870912)
+SMU_MEMORY_POOL_SIZE_1_GB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_1_GB', 1073741824)
+SMU_MEMORY_POOL_SIZE_2_GB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_2_GB', 2147483648)
 
-enum_smu_clk_type = CEnum(Annotated[int, ctypes.c_uint32])
-SMU_GFXCLK = enum_smu_clk_type.define('SMU_GFXCLK', 0) # type: ignore
-SMU_VCLK = enum_smu_clk_type.define('SMU_VCLK', 1) # type: ignore
-SMU_DCLK = enum_smu_clk_type.define('SMU_DCLK', 2) # type: ignore
-SMU_VCLK1 = enum_smu_clk_type.define('SMU_VCLK1', 3) # type: ignore
-SMU_DCLK1 = enum_smu_clk_type.define('SMU_DCLK1', 4) # type: ignore
-SMU_ECLK = enum_smu_clk_type.define('SMU_ECLK', 5) # type: ignore
-SMU_SOCCLK = enum_smu_clk_type.define('SMU_SOCCLK', 6) # type: ignore
-SMU_UCLK = enum_smu_clk_type.define('SMU_UCLK', 7) # type: ignore
-SMU_DCEFCLK = enum_smu_clk_type.define('SMU_DCEFCLK', 8) # type: ignore
-SMU_DISPCLK = enum_smu_clk_type.define('SMU_DISPCLK', 9) # type: ignore
-SMU_PIXCLK = enum_smu_clk_type.define('SMU_PIXCLK', 10) # type: ignore
-SMU_PHYCLK = enum_smu_clk_type.define('SMU_PHYCLK', 11) # type: ignore
-SMU_FCLK = enum_smu_clk_type.define('SMU_FCLK', 12) # type: ignore
-SMU_SCLK = enum_smu_clk_type.define('SMU_SCLK', 13) # type: ignore
-SMU_MCLK = enum_smu_clk_type.define('SMU_MCLK', 14) # type: ignore
-SMU_PCIE = enum_smu_clk_type.define('SMU_PCIE', 15) # type: ignore
-SMU_LCLK = enum_smu_clk_type.define('SMU_LCLK', 16) # type: ignore
-SMU_OD_CCLK = enum_smu_clk_type.define('SMU_OD_CCLK', 17) # type: ignore
-SMU_OD_SCLK = enum_smu_clk_type.define('SMU_OD_SCLK', 18) # type: ignore
-SMU_OD_MCLK = enum_smu_clk_type.define('SMU_OD_MCLK', 19) # type: ignore
-SMU_OD_VDDC_CURVE = enum_smu_clk_type.define('SMU_OD_VDDC_CURVE', 20) # type: ignore
-SMU_OD_RANGE = enum_smu_clk_type.define('SMU_OD_RANGE', 21) # type: ignore
-SMU_OD_VDDGFX_OFFSET = enum_smu_clk_type.define('SMU_OD_VDDGFX_OFFSET', 22) # type: ignore
-SMU_OD_FAN_CURVE = enum_smu_clk_type.define('SMU_OD_FAN_CURVE', 23) # type: ignore
-SMU_OD_ACOUSTIC_LIMIT = enum_smu_clk_type.define('SMU_OD_ACOUSTIC_LIMIT', 24) # type: ignore
-SMU_OD_ACOUSTIC_TARGET = enum_smu_clk_type.define('SMU_OD_ACOUSTIC_TARGET', 25) # type: ignore
-SMU_OD_FAN_TARGET_TEMPERATURE = enum_smu_clk_type.define('SMU_OD_FAN_TARGET_TEMPERATURE', 26) # type: ignore
-SMU_OD_FAN_MINIMUM_PWM = enum_smu_clk_type.define('SMU_OD_FAN_MINIMUM_PWM', 27) # type: ignore
-SMU_CLK_COUNT = enum_smu_clk_type.define('SMU_CLK_COUNT', 28) # type: ignore
+class enum_smu_clk_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMU_GFXCLK = enum_smu_clk_type.define('SMU_GFXCLK', 0)
+SMU_VCLK = enum_smu_clk_type.define('SMU_VCLK', 1)
+SMU_DCLK = enum_smu_clk_type.define('SMU_DCLK', 2)
+SMU_VCLK1 = enum_smu_clk_type.define('SMU_VCLK1', 3)
+SMU_DCLK1 = enum_smu_clk_type.define('SMU_DCLK1', 4)
+SMU_ECLK = enum_smu_clk_type.define('SMU_ECLK', 5)
+SMU_SOCCLK = enum_smu_clk_type.define('SMU_SOCCLK', 6)
+SMU_UCLK = enum_smu_clk_type.define('SMU_UCLK', 7)
+SMU_DCEFCLK = enum_smu_clk_type.define('SMU_DCEFCLK', 8)
+SMU_DISPCLK = enum_smu_clk_type.define('SMU_DISPCLK', 9)
+SMU_PIXCLK = enum_smu_clk_type.define('SMU_PIXCLK', 10)
+SMU_PHYCLK = enum_smu_clk_type.define('SMU_PHYCLK', 11)
+SMU_FCLK = enum_smu_clk_type.define('SMU_FCLK', 12)
+SMU_SCLK = enum_smu_clk_type.define('SMU_SCLK', 13)
+SMU_MCLK = enum_smu_clk_type.define('SMU_MCLK', 14)
+SMU_PCIE = enum_smu_clk_type.define('SMU_PCIE', 15)
+SMU_LCLK = enum_smu_clk_type.define('SMU_LCLK', 16)
+SMU_OD_CCLK = enum_smu_clk_type.define('SMU_OD_CCLK', 17)
+SMU_OD_SCLK = enum_smu_clk_type.define('SMU_OD_SCLK', 18)
+SMU_OD_MCLK = enum_smu_clk_type.define('SMU_OD_MCLK', 19)
+SMU_OD_VDDC_CURVE = enum_smu_clk_type.define('SMU_OD_VDDC_CURVE', 20)
+SMU_OD_RANGE = enum_smu_clk_type.define('SMU_OD_RANGE', 21)
+SMU_OD_VDDGFX_OFFSET = enum_smu_clk_type.define('SMU_OD_VDDGFX_OFFSET', 22)
+SMU_OD_FAN_CURVE = enum_smu_clk_type.define('SMU_OD_FAN_CURVE', 23)
+SMU_OD_ACOUSTIC_LIMIT = enum_smu_clk_type.define('SMU_OD_ACOUSTIC_LIMIT', 24)
+SMU_OD_ACOUSTIC_TARGET = enum_smu_clk_type.define('SMU_OD_ACOUSTIC_TARGET', 25)
+SMU_OD_FAN_TARGET_TEMPERATURE = enum_smu_clk_type.define('SMU_OD_FAN_TARGET_TEMPERATURE', 26)
+SMU_OD_FAN_MINIMUM_PWM = enum_smu_clk_type.define('SMU_OD_FAN_MINIMUM_PWM', 27)
+SMU_CLK_COUNT = enum_smu_clk_type.define('SMU_CLK_COUNT', 28)
 
 @c.record
 class struct_smu_user_dpm_profile(c.Struct):
@@ -1188,9 +1188,9 @@ class struct_smu_table(c.Struct):
   bo: Annotated[c.POINTER[struct_amdgpu_bo], 32]
   version: Annotated[Annotated[int, ctypes.c_uint32], 40]
 class struct_amdgpu_bo(ctypes.Structure): pass
-enum_smu_perf_level_designation = CEnum(Annotated[int, ctypes.c_uint32])
-PERF_LEVEL_ACTIVITY = enum_smu_perf_level_designation.define('PERF_LEVEL_ACTIVITY', 0) # type: ignore
-PERF_LEVEL_POWER_CONTAINMENT = enum_smu_perf_level_designation.define('PERF_LEVEL_POWER_CONTAINMENT', 1) # type: ignore
+class enum_smu_perf_level_designation(Annotated[int, ctypes.c_uint32], c.Enum): pass
+PERF_LEVEL_ACTIVITY = enum_smu_perf_level_designation.define('PERF_LEVEL_ACTIVITY', 0)
+PERF_LEVEL_POWER_CONTAINMENT = enum_smu_perf_level_designation.define('PERF_LEVEL_POWER_CONTAINMENT', 1)
 
 @c.record
 class struct_smu_performance_level(c.Struct):
@@ -1232,25 +1232,25 @@ class struct_smu_bios_boot_up_values(c.Struct):
   fclk: Annotated[Annotated[int, ctypes.c_uint32], 56]
   lclk: Annotated[Annotated[int, ctypes.c_uint32], 60]
   firmware_caps: Annotated[Annotated[int, ctypes.c_uint32], 64]
-enum_smu_table_id = CEnum(Annotated[int, ctypes.c_uint32])
-SMU_TABLE_PPTABLE = enum_smu_table_id.define('SMU_TABLE_PPTABLE', 0) # type: ignore
-SMU_TABLE_WATERMARKS = enum_smu_table_id.define('SMU_TABLE_WATERMARKS', 1) # type: ignore
-SMU_TABLE_CUSTOM_DPM = enum_smu_table_id.define('SMU_TABLE_CUSTOM_DPM', 2) # type: ignore
-SMU_TABLE_DPMCLOCKS = enum_smu_table_id.define('SMU_TABLE_DPMCLOCKS', 3) # type: ignore
-SMU_TABLE_AVFS = enum_smu_table_id.define('SMU_TABLE_AVFS', 4) # type: ignore
-SMU_TABLE_AVFS_PSM_DEBUG = enum_smu_table_id.define('SMU_TABLE_AVFS_PSM_DEBUG', 5) # type: ignore
-SMU_TABLE_AVFS_FUSE_OVERRIDE = enum_smu_table_id.define('SMU_TABLE_AVFS_FUSE_OVERRIDE', 6) # type: ignore
-SMU_TABLE_PMSTATUSLOG = enum_smu_table_id.define('SMU_TABLE_PMSTATUSLOG', 7) # type: ignore
-SMU_TABLE_SMU_METRICS = enum_smu_table_id.define('SMU_TABLE_SMU_METRICS', 8) # type: ignore
-SMU_TABLE_DRIVER_SMU_CONFIG = enum_smu_table_id.define('SMU_TABLE_DRIVER_SMU_CONFIG', 9) # type: ignore
-SMU_TABLE_ACTIVITY_MONITOR_COEFF = enum_smu_table_id.define('SMU_TABLE_ACTIVITY_MONITOR_COEFF', 10) # type: ignore
-SMU_TABLE_OVERDRIVE = enum_smu_table_id.define('SMU_TABLE_OVERDRIVE', 11) # type: ignore
-SMU_TABLE_I2C_COMMANDS = enum_smu_table_id.define('SMU_TABLE_I2C_COMMANDS', 12) # type: ignore
-SMU_TABLE_PACE = enum_smu_table_id.define('SMU_TABLE_PACE', 13) # type: ignore
-SMU_TABLE_ECCINFO = enum_smu_table_id.define('SMU_TABLE_ECCINFO', 14) # type: ignore
-SMU_TABLE_COMBO_PPTABLE = enum_smu_table_id.define('SMU_TABLE_COMBO_PPTABLE', 15) # type: ignore
-SMU_TABLE_WIFIBAND = enum_smu_table_id.define('SMU_TABLE_WIFIBAND', 16) # type: ignore
-SMU_TABLE_COUNT = enum_smu_table_id.define('SMU_TABLE_COUNT', 17) # type: ignore
+class enum_smu_table_id(Annotated[int, ctypes.c_uint32], c.Enum): pass
+SMU_TABLE_PPTABLE = enum_smu_table_id.define('SMU_TABLE_PPTABLE', 0)
+SMU_TABLE_WATERMARKS = enum_smu_table_id.define('SMU_TABLE_WATERMARKS', 1)
+SMU_TABLE_CUSTOM_DPM = enum_smu_table_id.define('SMU_TABLE_CUSTOM_DPM', 2)
+SMU_TABLE_DPMCLOCKS = enum_smu_table_id.define('SMU_TABLE_DPMCLOCKS', 3)
+SMU_TABLE_AVFS = enum_smu_table_id.define('SMU_TABLE_AVFS', 4)
+SMU_TABLE_AVFS_PSM_DEBUG = enum_smu_table_id.define('SMU_TABLE_AVFS_PSM_DEBUG', 5)
+SMU_TABLE_AVFS_FUSE_OVERRIDE = enum_smu_table_id.define('SMU_TABLE_AVFS_FUSE_OVERRIDE', 6)
+SMU_TABLE_PMSTATUSLOG = enum_smu_table_id.define('SMU_TABLE_PMSTATUSLOG', 7)
+SMU_TABLE_SMU_METRICS = enum_smu_table_id.define('SMU_TABLE_SMU_METRICS', 8)
+SMU_TABLE_DRIVER_SMU_CONFIG = enum_smu_table_id.define('SMU_TABLE_DRIVER_SMU_CONFIG', 9)
+SMU_TABLE_ACTIVITY_MONITOR_COEFF = enum_smu_table_id.define('SMU_TABLE_ACTIVITY_MONITOR_COEFF', 10)
+SMU_TABLE_OVERDRIVE = enum_smu_table_id.define('SMU_TABLE_OVERDRIVE', 11)
+SMU_TABLE_I2C_COMMANDS = enum_smu_table_id.define('SMU_TABLE_I2C_COMMANDS', 12)
+SMU_TABLE_PACE = enum_smu_table_id.define('SMU_TABLE_PACE', 13)
+SMU_TABLE_ECCINFO = enum_smu_table_id.define('SMU_TABLE_ECCINFO', 14)
+SMU_TABLE_COMBO_PPTABLE = enum_smu_table_id.define('SMU_TABLE_COMBO_PPTABLE', 15)
+SMU_TABLE_WIFIBAND = enum_smu_table_id.define('SMU_TABLE_WIFIBAND', 16)
+SMU_TABLE_COUNT = enum_smu_table_id.define('SMU_TABLE_COUNT', 17)
 
 c.init_records()
 PPSMC_VERSION = 0x1 # type: ignore

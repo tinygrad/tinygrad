@@ -2,97 +2,97 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 import os
 dll = c.DLL('hip', os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so')
 class ihipModuleSymbol_t(ctypes.Structure): pass
-hipFunction_t = c.POINTER[ihipModuleSymbol_t]
-uint32_t = Annotated[int, ctypes.c_uint32]
-size_t = Annotated[int, ctypes.c_uint64]
+hipFunction_t: TypeAlias = c.POINTER[ihipModuleSymbol_t]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 class ihipStream_t(ctypes.Structure): pass
-hipStream_t = c.POINTER[ihipStream_t]
+hipStream_t: TypeAlias = c.POINTER[ihipStream_t]
 class ihipEvent_t(ctypes.Structure): pass
-hipEvent_t = c.POINTER[ihipEvent_t]
-hipError_t = CEnum(Annotated[int, ctypes.c_uint32])
-hipSuccess = hipError_t.define('hipSuccess', 0) # type: ignore
-hipErrorInvalidValue = hipError_t.define('hipErrorInvalidValue', 1) # type: ignore
-hipErrorOutOfMemory = hipError_t.define('hipErrorOutOfMemory', 2) # type: ignore
-hipErrorMemoryAllocation = hipError_t.define('hipErrorMemoryAllocation', 2) # type: ignore
-hipErrorNotInitialized = hipError_t.define('hipErrorNotInitialized', 3) # type: ignore
-hipErrorInitializationError = hipError_t.define('hipErrorInitializationError', 3) # type: ignore
-hipErrorDeinitialized = hipError_t.define('hipErrorDeinitialized', 4) # type: ignore
-hipErrorProfilerDisabled = hipError_t.define('hipErrorProfilerDisabled', 5) # type: ignore
-hipErrorProfilerNotInitialized = hipError_t.define('hipErrorProfilerNotInitialized', 6) # type: ignore
-hipErrorProfilerAlreadyStarted = hipError_t.define('hipErrorProfilerAlreadyStarted', 7) # type: ignore
-hipErrorProfilerAlreadyStopped = hipError_t.define('hipErrorProfilerAlreadyStopped', 8) # type: ignore
-hipErrorInvalidConfiguration = hipError_t.define('hipErrorInvalidConfiguration', 9) # type: ignore
-hipErrorInvalidPitchValue = hipError_t.define('hipErrorInvalidPitchValue', 12) # type: ignore
-hipErrorInvalidSymbol = hipError_t.define('hipErrorInvalidSymbol', 13) # type: ignore
-hipErrorInvalidDevicePointer = hipError_t.define('hipErrorInvalidDevicePointer', 17) # type: ignore
-hipErrorInvalidMemcpyDirection = hipError_t.define('hipErrorInvalidMemcpyDirection', 21) # type: ignore
-hipErrorInsufficientDriver = hipError_t.define('hipErrorInsufficientDriver', 35) # type: ignore
-hipErrorMissingConfiguration = hipError_t.define('hipErrorMissingConfiguration', 52) # type: ignore
-hipErrorPriorLaunchFailure = hipError_t.define('hipErrorPriorLaunchFailure', 53) # type: ignore
-hipErrorInvalidDeviceFunction = hipError_t.define('hipErrorInvalidDeviceFunction', 98) # type: ignore
-hipErrorNoDevice = hipError_t.define('hipErrorNoDevice', 100) # type: ignore
-hipErrorInvalidDevice = hipError_t.define('hipErrorInvalidDevice', 101) # type: ignore
-hipErrorInvalidImage = hipError_t.define('hipErrorInvalidImage', 200) # type: ignore
-hipErrorInvalidContext = hipError_t.define('hipErrorInvalidContext', 201) # type: ignore
-hipErrorContextAlreadyCurrent = hipError_t.define('hipErrorContextAlreadyCurrent', 202) # type: ignore
-hipErrorMapFailed = hipError_t.define('hipErrorMapFailed', 205) # type: ignore
-hipErrorMapBufferObjectFailed = hipError_t.define('hipErrorMapBufferObjectFailed', 205) # type: ignore
-hipErrorUnmapFailed = hipError_t.define('hipErrorUnmapFailed', 206) # type: ignore
-hipErrorArrayIsMapped = hipError_t.define('hipErrorArrayIsMapped', 207) # type: ignore
-hipErrorAlreadyMapped = hipError_t.define('hipErrorAlreadyMapped', 208) # type: ignore
-hipErrorNoBinaryForGpu = hipError_t.define('hipErrorNoBinaryForGpu', 209) # type: ignore
-hipErrorAlreadyAcquired = hipError_t.define('hipErrorAlreadyAcquired', 210) # type: ignore
-hipErrorNotMapped = hipError_t.define('hipErrorNotMapped', 211) # type: ignore
-hipErrorNotMappedAsArray = hipError_t.define('hipErrorNotMappedAsArray', 212) # type: ignore
-hipErrorNotMappedAsPointer = hipError_t.define('hipErrorNotMappedAsPointer', 213) # type: ignore
-hipErrorECCNotCorrectable = hipError_t.define('hipErrorECCNotCorrectable', 214) # type: ignore
-hipErrorUnsupportedLimit = hipError_t.define('hipErrorUnsupportedLimit', 215) # type: ignore
-hipErrorContextAlreadyInUse = hipError_t.define('hipErrorContextAlreadyInUse', 216) # type: ignore
-hipErrorPeerAccessUnsupported = hipError_t.define('hipErrorPeerAccessUnsupported', 217) # type: ignore
-hipErrorInvalidKernelFile = hipError_t.define('hipErrorInvalidKernelFile', 218) # type: ignore
-hipErrorInvalidGraphicsContext = hipError_t.define('hipErrorInvalidGraphicsContext', 219) # type: ignore
-hipErrorInvalidSource = hipError_t.define('hipErrorInvalidSource', 300) # type: ignore
-hipErrorFileNotFound = hipError_t.define('hipErrorFileNotFound', 301) # type: ignore
-hipErrorSharedObjectSymbolNotFound = hipError_t.define('hipErrorSharedObjectSymbolNotFound', 302) # type: ignore
-hipErrorSharedObjectInitFailed = hipError_t.define('hipErrorSharedObjectInitFailed', 303) # type: ignore
-hipErrorOperatingSystem = hipError_t.define('hipErrorOperatingSystem', 304) # type: ignore
-hipErrorInvalidHandle = hipError_t.define('hipErrorInvalidHandle', 400) # type: ignore
-hipErrorInvalidResourceHandle = hipError_t.define('hipErrorInvalidResourceHandle', 400) # type: ignore
-hipErrorIllegalState = hipError_t.define('hipErrorIllegalState', 401) # type: ignore
-hipErrorNotFound = hipError_t.define('hipErrorNotFound', 500) # type: ignore
-hipErrorNotReady = hipError_t.define('hipErrorNotReady', 600) # type: ignore
-hipErrorIllegalAddress = hipError_t.define('hipErrorIllegalAddress', 700) # type: ignore
-hipErrorLaunchOutOfResources = hipError_t.define('hipErrorLaunchOutOfResources', 701) # type: ignore
-hipErrorLaunchTimeOut = hipError_t.define('hipErrorLaunchTimeOut', 702) # type: ignore
-hipErrorPeerAccessAlreadyEnabled = hipError_t.define('hipErrorPeerAccessAlreadyEnabled', 704) # type: ignore
-hipErrorPeerAccessNotEnabled = hipError_t.define('hipErrorPeerAccessNotEnabled', 705) # type: ignore
-hipErrorSetOnActiveProcess = hipError_t.define('hipErrorSetOnActiveProcess', 708) # type: ignore
-hipErrorContextIsDestroyed = hipError_t.define('hipErrorContextIsDestroyed', 709) # type: ignore
-hipErrorAssert = hipError_t.define('hipErrorAssert', 710) # type: ignore
-hipErrorHostMemoryAlreadyRegistered = hipError_t.define('hipErrorHostMemoryAlreadyRegistered', 712) # type: ignore
-hipErrorHostMemoryNotRegistered = hipError_t.define('hipErrorHostMemoryNotRegistered', 713) # type: ignore
-hipErrorLaunchFailure = hipError_t.define('hipErrorLaunchFailure', 719) # type: ignore
-hipErrorCooperativeLaunchTooLarge = hipError_t.define('hipErrorCooperativeLaunchTooLarge', 720) # type: ignore
-hipErrorNotSupported = hipError_t.define('hipErrorNotSupported', 801) # type: ignore
-hipErrorStreamCaptureUnsupported = hipError_t.define('hipErrorStreamCaptureUnsupported', 900) # type: ignore
-hipErrorStreamCaptureInvalidated = hipError_t.define('hipErrorStreamCaptureInvalidated', 901) # type: ignore
-hipErrorStreamCaptureMerge = hipError_t.define('hipErrorStreamCaptureMerge', 902) # type: ignore
-hipErrorStreamCaptureUnmatched = hipError_t.define('hipErrorStreamCaptureUnmatched', 903) # type: ignore
-hipErrorStreamCaptureUnjoined = hipError_t.define('hipErrorStreamCaptureUnjoined', 904) # type: ignore
-hipErrorStreamCaptureIsolation = hipError_t.define('hipErrorStreamCaptureIsolation', 905) # type: ignore
-hipErrorStreamCaptureImplicit = hipError_t.define('hipErrorStreamCaptureImplicit', 906) # type: ignore
-hipErrorCapturedEvent = hipError_t.define('hipErrorCapturedEvent', 907) # type: ignore
-hipErrorStreamCaptureWrongThread = hipError_t.define('hipErrorStreamCaptureWrongThread', 908) # type: ignore
-hipErrorGraphExecUpdateFailure = hipError_t.define('hipErrorGraphExecUpdateFailure', 910) # type: ignore
-hipErrorUnknown = hipError_t.define('hipErrorUnknown', 999) # type: ignore
-hipErrorRuntimeMemory = hipError_t.define('hipErrorRuntimeMemory', 1052) # type: ignore
-hipErrorRuntimeOther = hipError_t.define('hipErrorRuntimeOther', 1053) # type: ignore
-hipErrorTbd = hipError_t.define('hipErrorTbd', 1054) # type: ignore
+hipEvent_t: TypeAlias = c.POINTER[ihipEvent_t]
+class hipError_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipSuccess = hipError_t.define('hipSuccess', 0)
+hipErrorInvalidValue = hipError_t.define('hipErrorInvalidValue', 1)
+hipErrorOutOfMemory = hipError_t.define('hipErrorOutOfMemory', 2)
+hipErrorMemoryAllocation = hipError_t.define('hipErrorMemoryAllocation', 2)
+hipErrorNotInitialized = hipError_t.define('hipErrorNotInitialized', 3)
+hipErrorInitializationError = hipError_t.define('hipErrorInitializationError', 3)
+hipErrorDeinitialized = hipError_t.define('hipErrorDeinitialized', 4)
+hipErrorProfilerDisabled = hipError_t.define('hipErrorProfilerDisabled', 5)
+hipErrorProfilerNotInitialized = hipError_t.define('hipErrorProfilerNotInitialized', 6)
+hipErrorProfilerAlreadyStarted = hipError_t.define('hipErrorProfilerAlreadyStarted', 7)
+hipErrorProfilerAlreadyStopped = hipError_t.define('hipErrorProfilerAlreadyStopped', 8)
+hipErrorInvalidConfiguration = hipError_t.define('hipErrorInvalidConfiguration', 9)
+hipErrorInvalidPitchValue = hipError_t.define('hipErrorInvalidPitchValue', 12)
+hipErrorInvalidSymbol = hipError_t.define('hipErrorInvalidSymbol', 13)
+hipErrorInvalidDevicePointer = hipError_t.define('hipErrorInvalidDevicePointer', 17)
+hipErrorInvalidMemcpyDirection = hipError_t.define('hipErrorInvalidMemcpyDirection', 21)
+hipErrorInsufficientDriver = hipError_t.define('hipErrorInsufficientDriver', 35)
+hipErrorMissingConfiguration = hipError_t.define('hipErrorMissingConfiguration', 52)
+hipErrorPriorLaunchFailure = hipError_t.define('hipErrorPriorLaunchFailure', 53)
+hipErrorInvalidDeviceFunction = hipError_t.define('hipErrorInvalidDeviceFunction', 98)
+hipErrorNoDevice = hipError_t.define('hipErrorNoDevice', 100)
+hipErrorInvalidDevice = hipError_t.define('hipErrorInvalidDevice', 101)
+hipErrorInvalidImage = hipError_t.define('hipErrorInvalidImage', 200)
+hipErrorInvalidContext = hipError_t.define('hipErrorInvalidContext', 201)
+hipErrorContextAlreadyCurrent = hipError_t.define('hipErrorContextAlreadyCurrent', 202)
+hipErrorMapFailed = hipError_t.define('hipErrorMapFailed', 205)
+hipErrorMapBufferObjectFailed = hipError_t.define('hipErrorMapBufferObjectFailed', 205)
+hipErrorUnmapFailed = hipError_t.define('hipErrorUnmapFailed', 206)
+hipErrorArrayIsMapped = hipError_t.define('hipErrorArrayIsMapped', 207)
+hipErrorAlreadyMapped = hipError_t.define('hipErrorAlreadyMapped', 208)
+hipErrorNoBinaryForGpu = hipError_t.define('hipErrorNoBinaryForGpu', 209)
+hipErrorAlreadyAcquired = hipError_t.define('hipErrorAlreadyAcquired', 210)
+hipErrorNotMapped = hipError_t.define('hipErrorNotMapped', 211)
+hipErrorNotMappedAsArray = hipError_t.define('hipErrorNotMappedAsArray', 212)
+hipErrorNotMappedAsPointer = hipError_t.define('hipErrorNotMappedAsPointer', 213)
+hipErrorECCNotCorrectable = hipError_t.define('hipErrorECCNotCorrectable', 214)
+hipErrorUnsupportedLimit = hipError_t.define('hipErrorUnsupportedLimit', 215)
+hipErrorContextAlreadyInUse = hipError_t.define('hipErrorContextAlreadyInUse', 216)
+hipErrorPeerAccessUnsupported = hipError_t.define('hipErrorPeerAccessUnsupported', 217)
+hipErrorInvalidKernelFile = hipError_t.define('hipErrorInvalidKernelFile', 218)
+hipErrorInvalidGraphicsContext = hipError_t.define('hipErrorInvalidGraphicsContext', 219)
+hipErrorInvalidSource = hipError_t.define('hipErrorInvalidSource', 300)
+hipErrorFileNotFound = hipError_t.define('hipErrorFileNotFound', 301)
+hipErrorSharedObjectSymbolNotFound = hipError_t.define('hipErrorSharedObjectSymbolNotFound', 302)
+hipErrorSharedObjectInitFailed = hipError_t.define('hipErrorSharedObjectInitFailed', 303)
+hipErrorOperatingSystem = hipError_t.define('hipErrorOperatingSystem', 304)
+hipErrorInvalidHandle = hipError_t.define('hipErrorInvalidHandle', 400)
+hipErrorInvalidResourceHandle = hipError_t.define('hipErrorInvalidResourceHandle', 400)
+hipErrorIllegalState = hipError_t.define('hipErrorIllegalState', 401)
+hipErrorNotFound = hipError_t.define('hipErrorNotFound', 500)
+hipErrorNotReady = hipError_t.define('hipErrorNotReady', 600)
+hipErrorIllegalAddress = hipError_t.define('hipErrorIllegalAddress', 700)
+hipErrorLaunchOutOfResources = hipError_t.define('hipErrorLaunchOutOfResources', 701)
+hipErrorLaunchTimeOut = hipError_t.define('hipErrorLaunchTimeOut', 702)
+hipErrorPeerAccessAlreadyEnabled = hipError_t.define('hipErrorPeerAccessAlreadyEnabled', 704)
+hipErrorPeerAccessNotEnabled = hipError_t.define('hipErrorPeerAccessNotEnabled', 705)
+hipErrorSetOnActiveProcess = hipError_t.define('hipErrorSetOnActiveProcess', 708)
+hipErrorContextIsDestroyed = hipError_t.define('hipErrorContextIsDestroyed', 709)
+hipErrorAssert = hipError_t.define('hipErrorAssert', 710)
+hipErrorHostMemoryAlreadyRegistered = hipError_t.define('hipErrorHostMemoryAlreadyRegistered', 712)
+hipErrorHostMemoryNotRegistered = hipError_t.define('hipErrorHostMemoryNotRegistered', 713)
+hipErrorLaunchFailure = hipError_t.define('hipErrorLaunchFailure', 719)
+hipErrorCooperativeLaunchTooLarge = hipError_t.define('hipErrorCooperativeLaunchTooLarge', 720)
+hipErrorNotSupported = hipError_t.define('hipErrorNotSupported', 801)
+hipErrorStreamCaptureUnsupported = hipError_t.define('hipErrorStreamCaptureUnsupported', 900)
+hipErrorStreamCaptureInvalidated = hipError_t.define('hipErrorStreamCaptureInvalidated', 901)
+hipErrorStreamCaptureMerge = hipError_t.define('hipErrorStreamCaptureMerge', 902)
+hipErrorStreamCaptureUnmatched = hipError_t.define('hipErrorStreamCaptureUnmatched', 903)
+hipErrorStreamCaptureUnjoined = hipError_t.define('hipErrorStreamCaptureUnjoined', 904)
+hipErrorStreamCaptureIsolation = hipError_t.define('hipErrorStreamCaptureIsolation', 905)
+hipErrorStreamCaptureImplicit = hipError_t.define('hipErrorStreamCaptureImplicit', 906)
+hipErrorCapturedEvent = hipError_t.define('hipErrorCapturedEvent', 907)
+hipErrorStreamCaptureWrongThread = hipError_t.define('hipErrorStreamCaptureWrongThread', 908)
+hipErrorGraphExecUpdateFailure = hipError_t.define('hipErrorGraphExecUpdateFailure', 910)
+hipErrorUnknown = hipError_t.define('hipErrorUnknown', 999)
+hipErrorRuntimeMemory = hipError_t.define('hipErrorRuntimeMemory', 1052)
+hipErrorRuntimeOther = hipError_t.define('hipErrorRuntimeOther', 1053)
+hipErrorTbd = hipError_t.define('hipErrorTbd', 1054)
 
 @dll.bind
 def hipExtModuleLaunchKernel(f:hipFunction_t, globalWorkSizeX:uint32_t, globalWorkSizeY:uint32_t, globalWorkSizeZ:uint32_t, localWorkSizeX:uint32_t, localWorkSizeY:uint32_t, localWorkSizeZ:uint32_t, sharedMemBytes:size_t, hStream:hipStream_t, kernelParams:c.POINTER[c.POINTER[None]], extra:c.POINTER[c.POINTER[None]], startEvent:hipEvent_t, stopEvent:hipEvent_t, flags:uint32_t) -> hipError_t: ...
@@ -106,72 +106,72 @@ class dim3(c.Struct):
   z: Annotated[uint32_t, 8]
 @dll.bind
 def hipExtLaunchKernel(function_address:c.POINTER[None], numBlocks:dim3, dimBlocks:dim3, args:c.POINTER[c.POINTER[None]], sharedMemBytes:size_t, stream:hipStream_t, startEvent:hipEvent_t, stopEvent:hipEvent_t, flags:Annotated[int, ctypes.c_int32]) -> hipError_t: ...
-hiprtcResult = CEnum(Annotated[int, ctypes.c_uint32])
-HIPRTC_SUCCESS = hiprtcResult.define('HIPRTC_SUCCESS', 0) # type: ignore
-HIPRTC_ERROR_OUT_OF_MEMORY = hiprtcResult.define('HIPRTC_ERROR_OUT_OF_MEMORY', 1) # type: ignore
-HIPRTC_ERROR_PROGRAM_CREATION_FAILURE = hiprtcResult.define('HIPRTC_ERROR_PROGRAM_CREATION_FAILURE', 2) # type: ignore
-HIPRTC_ERROR_INVALID_INPUT = hiprtcResult.define('HIPRTC_ERROR_INVALID_INPUT', 3) # type: ignore
-HIPRTC_ERROR_INVALID_PROGRAM = hiprtcResult.define('HIPRTC_ERROR_INVALID_PROGRAM', 4) # type: ignore
-HIPRTC_ERROR_INVALID_OPTION = hiprtcResult.define('HIPRTC_ERROR_INVALID_OPTION', 5) # type: ignore
-HIPRTC_ERROR_COMPILATION = hiprtcResult.define('HIPRTC_ERROR_COMPILATION', 6) # type: ignore
-HIPRTC_ERROR_BUILTIN_OPERATION_FAILURE = hiprtcResult.define('HIPRTC_ERROR_BUILTIN_OPERATION_FAILURE', 7) # type: ignore
-HIPRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION = hiprtcResult.define('HIPRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION', 8) # type: ignore
-HIPRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION = hiprtcResult.define('HIPRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION', 9) # type: ignore
-HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID = hiprtcResult.define('HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID', 10) # type: ignore
-HIPRTC_ERROR_INTERNAL_ERROR = hiprtcResult.define('HIPRTC_ERROR_INTERNAL_ERROR', 11) # type: ignore
-HIPRTC_ERROR_LINKING = hiprtcResult.define('HIPRTC_ERROR_LINKING', 100) # type: ignore
+class hiprtcResult(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIPRTC_SUCCESS = hiprtcResult.define('HIPRTC_SUCCESS', 0)
+HIPRTC_ERROR_OUT_OF_MEMORY = hiprtcResult.define('HIPRTC_ERROR_OUT_OF_MEMORY', 1)
+HIPRTC_ERROR_PROGRAM_CREATION_FAILURE = hiprtcResult.define('HIPRTC_ERROR_PROGRAM_CREATION_FAILURE', 2)
+HIPRTC_ERROR_INVALID_INPUT = hiprtcResult.define('HIPRTC_ERROR_INVALID_INPUT', 3)
+HIPRTC_ERROR_INVALID_PROGRAM = hiprtcResult.define('HIPRTC_ERROR_INVALID_PROGRAM', 4)
+HIPRTC_ERROR_INVALID_OPTION = hiprtcResult.define('HIPRTC_ERROR_INVALID_OPTION', 5)
+HIPRTC_ERROR_COMPILATION = hiprtcResult.define('HIPRTC_ERROR_COMPILATION', 6)
+HIPRTC_ERROR_BUILTIN_OPERATION_FAILURE = hiprtcResult.define('HIPRTC_ERROR_BUILTIN_OPERATION_FAILURE', 7)
+HIPRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION = hiprtcResult.define('HIPRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION', 8)
+HIPRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION = hiprtcResult.define('HIPRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION', 9)
+HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID = hiprtcResult.define('HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID', 10)
+HIPRTC_ERROR_INTERNAL_ERROR = hiprtcResult.define('HIPRTC_ERROR_INTERNAL_ERROR', 11)
+HIPRTC_ERROR_LINKING = hiprtcResult.define('HIPRTC_ERROR_LINKING', 100)
 
-hiprtcJIT_option = CEnum(Annotated[int, ctypes.c_uint32])
-HIPRTC_JIT_MAX_REGISTERS = hiprtcJIT_option.define('HIPRTC_JIT_MAX_REGISTERS', 0) # type: ignore
-HIPRTC_JIT_THREADS_PER_BLOCK = hiprtcJIT_option.define('HIPRTC_JIT_THREADS_PER_BLOCK', 1) # type: ignore
-HIPRTC_JIT_WALL_TIME = hiprtcJIT_option.define('HIPRTC_JIT_WALL_TIME', 2) # type: ignore
-HIPRTC_JIT_INFO_LOG_BUFFER = hiprtcJIT_option.define('HIPRTC_JIT_INFO_LOG_BUFFER', 3) # type: ignore
-HIPRTC_JIT_INFO_LOG_BUFFER_SIZE_BYTES = hiprtcJIT_option.define('HIPRTC_JIT_INFO_LOG_BUFFER_SIZE_BYTES', 4) # type: ignore
-HIPRTC_JIT_ERROR_LOG_BUFFER = hiprtcJIT_option.define('HIPRTC_JIT_ERROR_LOG_BUFFER', 5) # type: ignore
-HIPRTC_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = hiprtcJIT_option.define('HIPRTC_JIT_ERROR_LOG_BUFFER_SIZE_BYTES', 6) # type: ignore
-HIPRTC_JIT_OPTIMIZATION_LEVEL = hiprtcJIT_option.define('HIPRTC_JIT_OPTIMIZATION_LEVEL', 7) # type: ignore
-HIPRTC_JIT_TARGET_FROM_HIPCONTEXT = hiprtcJIT_option.define('HIPRTC_JIT_TARGET_FROM_HIPCONTEXT', 8) # type: ignore
-HIPRTC_JIT_TARGET = hiprtcJIT_option.define('HIPRTC_JIT_TARGET', 9) # type: ignore
-HIPRTC_JIT_FALLBACK_STRATEGY = hiprtcJIT_option.define('HIPRTC_JIT_FALLBACK_STRATEGY', 10) # type: ignore
-HIPRTC_JIT_GENERATE_DEBUG_INFO = hiprtcJIT_option.define('HIPRTC_JIT_GENERATE_DEBUG_INFO', 11) # type: ignore
-HIPRTC_JIT_LOG_VERBOSE = hiprtcJIT_option.define('HIPRTC_JIT_LOG_VERBOSE', 12) # type: ignore
-HIPRTC_JIT_GENERATE_LINE_INFO = hiprtcJIT_option.define('HIPRTC_JIT_GENERATE_LINE_INFO', 13) # type: ignore
-HIPRTC_JIT_CACHE_MODE = hiprtcJIT_option.define('HIPRTC_JIT_CACHE_MODE', 14) # type: ignore
-HIPRTC_JIT_NEW_SM3X_OPT = hiprtcJIT_option.define('HIPRTC_JIT_NEW_SM3X_OPT', 15) # type: ignore
-HIPRTC_JIT_FAST_COMPILE = hiprtcJIT_option.define('HIPRTC_JIT_FAST_COMPILE', 16) # type: ignore
-HIPRTC_JIT_GLOBAL_SYMBOL_NAMES = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_NAMES', 17) # type: ignore
-HIPRTC_JIT_GLOBAL_SYMBOL_ADDRESS = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_ADDRESS', 18) # type: ignore
-HIPRTC_JIT_GLOBAL_SYMBOL_COUNT = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_COUNT', 19) # type: ignore
-HIPRTC_JIT_LTO = hiprtcJIT_option.define('HIPRTC_JIT_LTO', 20) # type: ignore
-HIPRTC_JIT_FTZ = hiprtcJIT_option.define('HIPRTC_JIT_FTZ', 21) # type: ignore
-HIPRTC_JIT_PREC_DIV = hiprtcJIT_option.define('HIPRTC_JIT_PREC_DIV', 22) # type: ignore
-HIPRTC_JIT_PREC_SQRT = hiprtcJIT_option.define('HIPRTC_JIT_PREC_SQRT', 23) # type: ignore
-HIPRTC_JIT_FMA = hiprtcJIT_option.define('HIPRTC_JIT_FMA', 24) # type: ignore
-HIPRTC_JIT_NUM_OPTIONS = hiprtcJIT_option.define('HIPRTC_JIT_NUM_OPTIONS', 25) # type: ignore
-HIPRTC_JIT_IR_TO_ISA_OPT_EXT = hiprtcJIT_option.define('HIPRTC_JIT_IR_TO_ISA_OPT_EXT', 10000) # type: ignore
-HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT = hiprtcJIT_option.define('HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT', 10001) # type: ignore
+class hiprtcJIT_option(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIPRTC_JIT_MAX_REGISTERS = hiprtcJIT_option.define('HIPRTC_JIT_MAX_REGISTERS', 0)
+HIPRTC_JIT_THREADS_PER_BLOCK = hiprtcJIT_option.define('HIPRTC_JIT_THREADS_PER_BLOCK', 1)
+HIPRTC_JIT_WALL_TIME = hiprtcJIT_option.define('HIPRTC_JIT_WALL_TIME', 2)
+HIPRTC_JIT_INFO_LOG_BUFFER = hiprtcJIT_option.define('HIPRTC_JIT_INFO_LOG_BUFFER', 3)
+HIPRTC_JIT_INFO_LOG_BUFFER_SIZE_BYTES = hiprtcJIT_option.define('HIPRTC_JIT_INFO_LOG_BUFFER_SIZE_BYTES', 4)
+HIPRTC_JIT_ERROR_LOG_BUFFER = hiprtcJIT_option.define('HIPRTC_JIT_ERROR_LOG_BUFFER', 5)
+HIPRTC_JIT_ERROR_LOG_BUFFER_SIZE_BYTES = hiprtcJIT_option.define('HIPRTC_JIT_ERROR_LOG_BUFFER_SIZE_BYTES', 6)
+HIPRTC_JIT_OPTIMIZATION_LEVEL = hiprtcJIT_option.define('HIPRTC_JIT_OPTIMIZATION_LEVEL', 7)
+HIPRTC_JIT_TARGET_FROM_HIPCONTEXT = hiprtcJIT_option.define('HIPRTC_JIT_TARGET_FROM_HIPCONTEXT', 8)
+HIPRTC_JIT_TARGET = hiprtcJIT_option.define('HIPRTC_JIT_TARGET', 9)
+HIPRTC_JIT_FALLBACK_STRATEGY = hiprtcJIT_option.define('HIPRTC_JIT_FALLBACK_STRATEGY', 10)
+HIPRTC_JIT_GENERATE_DEBUG_INFO = hiprtcJIT_option.define('HIPRTC_JIT_GENERATE_DEBUG_INFO', 11)
+HIPRTC_JIT_LOG_VERBOSE = hiprtcJIT_option.define('HIPRTC_JIT_LOG_VERBOSE', 12)
+HIPRTC_JIT_GENERATE_LINE_INFO = hiprtcJIT_option.define('HIPRTC_JIT_GENERATE_LINE_INFO', 13)
+HIPRTC_JIT_CACHE_MODE = hiprtcJIT_option.define('HIPRTC_JIT_CACHE_MODE', 14)
+HIPRTC_JIT_NEW_SM3X_OPT = hiprtcJIT_option.define('HIPRTC_JIT_NEW_SM3X_OPT', 15)
+HIPRTC_JIT_FAST_COMPILE = hiprtcJIT_option.define('HIPRTC_JIT_FAST_COMPILE', 16)
+HIPRTC_JIT_GLOBAL_SYMBOL_NAMES = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_NAMES', 17)
+HIPRTC_JIT_GLOBAL_SYMBOL_ADDRESS = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_ADDRESS', 18)
+HIPRTC_JIT_GLOBAL_SYMBOL_COUNT = hiprtcJIT_option.define('HIPRTC_JIT_GLOBAL_SYMBOL_COUNT', 19)
+HIPRTC_JIT_LTO = hiprtcJIT_option.define('HIPRTC_JIT_LTO', 20)
+HIPRTC_JIT_FTZ = hiprtcJIT_option.define('HIPRTC_JIT_FTZ', 21)
+HIPRTC_JIT_PREC_DIV = hiprtcJIT_option.define('HIPRTC_JIT_PREC_DIV', 22)
+HIPRTC_JIT_PREC_SQRT = hiprtcJIT_option.define('HIPRTC_JIT_PREC_SQRT', 23)
+HIPRTC_JIT_FMA = hiprtcJIT_option.define('HIPRTC_JIT_FMA', 24)
+HIPRTC_JIT_NUM_OPTIONS = hiprtcJIT_option.define('HIPRTC_JIT_NUM_OPTIONS', 25)
+HIPRTC_JIT_IR_TO_ISA_OPT_EXT = hiprtcJIT_option.define('HIPRTC_JIT_IR_TO_ISA_OPT_EXT', 10000)
+HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT = hiprtcJIT_option.define('HIPRTC_JIT_IR_TO_ISA_OPT_COUNT_EXT', 10001)
 
-hiprtcJITInputType = CEnum(Annotated[int, ctypes.c_uint32])
-HIPRTC_JIT_INPUT_CUBIN = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_CUBIN', 0) # type: ignore
-HIPRTC_JIT_INPUT_PTX = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_PTX', 1) # type: ignore
-HIPRTC_JIT_INPUT_FATBINARY = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_FATBINARY', 2) # type: ignore
-HIPRTC_JIT_INPUT_OBJECT = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_OBJECT', 3) # type: ignore
-HIPRTC_JIT_INPUT_LIBRARY = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LIBRARY', 4) # type: ignore
-HIPRTC_JIT_INPUT_NVVM = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_NVVM', 5) # type: ignore
-HIPRTC_JIT_NUM_LEGACY_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_LEGACY_INPUT_TYPES', 6) # type: ignore
-HIPRTC_JIT_INPUT_LLVM_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_BITCODE', 100) # type: ignore
-HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE', 101) # type: ignore
-HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE', 102) # type: ignore
-HIPRTC_JIT_NUM_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_INPUT_TYPES', 9) # type: ignore
+class hiprtcJITInputType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIPRTC_JIT_INPUT_CUBIN = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_CUBIN', 0)
+HIPRTC_JIT_INPUT_PTX = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_PTX', 1)
+HIPRTC_JIT_INPUT_FATBINARY = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_FATBINARY', 2)
+HIPRTC_JIT_INPUT_OBJECT = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_OBJECT', 3)
+HIPRTC_JIT_INPUT_LIBRARY = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LIBRARY', 4)
+HIPRTC_JIT_INPUT_NVVM = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_NVVM', 5)
+HIPRTC_JIT_NUM_LEGACY_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_LEGACY_INPUT_TYPES', 6)
+HIPRTC_JIT_INPUT_LLVM_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_BITCODE', 100)
+HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_BUNDLED_BITCODE', 101)
+HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE = hiprtcJITInputType.define('HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE', 102)
+HIPRTC_JIT_NUM_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_INPUT_TYPES', 9)
 
 class ihiprtcLinkState(ctypes.Structure): pass
-hiprtcLinkState = c.POINTER[ihiprtcLinkState]
+hiprtcLinkState: TypeAlias = c.POINTER[ihiprtcLinkState]
 @dll.bind
 def hiprtcGetErrorString(result:hiprtcResult) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
 def hiprtcVersion(major:c.POINTER[Annotated[int, ctypes.c_int32]], minor:c.POINTER[Annotated[int, ctypes.c_int32]]) -> hiprtcResult: ...
 class _hiprtcProgram(ctypes.Structure): pass
-hiprtcProgram = c.POINTER[_hiprtcProgram]
+hiprtcProgram: TypeAlias = c.POINTER[_hiprtcProgram]
 @dll.bind
 def hiprtcAddNameExpression(prog:hiprtcProgram, name_expression:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> hiprtcResult: ...
 @dll.bind
@@ -204,11 +204,11 @@ def hiprtcLinkAddData(hip_link_state:hiprtcLinkState, input_type:hiprtcJITInputT
 def hiprtcLinkComplete(hip_link_state:hiprtcLinkState, bin_out:c.POINTER[c.POINTER[None]], size_out:c.POINTER[size_t]) -> hiprtcResult: ...
 @dll.bind
 def hiprtcLinkDestroy(hip_link_state:hiprtcLinkState) -> hiprtcResult: ...
-_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_SUCCESS = _anonenum0.define('HIP_SUCCESS', 0) # type: ignore
-HIP_ERROR_INVALID_VALUE = _anonenum0.define('HIP_ERROR_INVALID_VALUE', 1) # type: ignore
-HIP_ERROR_NOT_INITIALIZED = _anonenum0.define('HIP_ERROR_NOT_INITIALIZED', 2) # type: ignore
-HIP_ERROR_LAUNCH_OUT_OF_RESOURCES = _anonenum0.define('HIP_ERROR_LAUNCH_OUT_OF_RESOURCES', 3) # type: ignore
+class _anonenum0(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_SUCCESS = _anonenum0.define('HIP_SUCCESS', 0)
+HIP_ERROR_INVALID_VALUE = _anonenum0.define('HIP_ERROR_INVALID_VALUE', 1)
+HIP_ERROR_NOT_INITIALIZED = _anonenum0.define('HIP_ERROR_NOT_INITIALIZED', 2)
+HIP_ERROR_LAUNCH_OUT_OF_RESOURCES = _anonenum0.define('HIP_ERROR_LAUNCH_OUT_OF_RESOURCES', 3)
 
 @c.record
 class hipDeviceArch_t(c.Struct):
@@ -234,7 +234,7 @@ class hipDeviceArch_t(c.Struct):
 class hipUUID_t(c.Struct):
   SIZE = 16
   bytes: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[16]], 0]
-hipUUID = hipUUID_t
+hipUUID: TypeAlias = hipUUID_t
 @c.record
 class hipDeviceProp_tR0600(c.Struct):
   SIZE = 1472
@@ -345,13 +345,13 @@ class hipDeviceProp_tR0600(c.Struct):
   cooperativeMultiDeviceUnmatchedSharedMem: Annotated[Annotated[int, ctypes.c_int32], 1460]
   isLargeBar: Annotated[Annotated[int, ctypes.c_int32], 1464]
   asicRevision: Annotated[Annotated[int, ctypes.c_int32], 1468]
-hipMemoryType = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemoryTypeUnregistered = hipMemoryType.define('hipMemoryTypeUnregistered', 0) # type: ignore
-hipMemoryTypeHost = hipMemoryType.define('hipMemoryTypeHost', 1) # type: ignore
-hipMemoryTypeDevice = hipMemoryType.define('hipMemoryTypeDevice', 2) # type: ignore
-hipMemoryTypeManaged = hipMemoryType.define('hipMemoryTypeManaged', 3) # type: ignore
-hipMemoryTypeArray = hipMemoryType.define('hipMemoryTypeArray', 10) # type: ignore
-hipMemoryTypeUnified = hipMemoryType.define('hipMemoryTypeUnified', 11) # type: ignore
+class hipMemoryType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemoryTypeUnregistered = hipMemoryType.define('hipMemoryTypeUnregistered', 0)
+hipMemoryTypeHost = hipMemoryType.define('hipMemoryTypeHost', 1)
+hipMemoryTypeDevice = hipMemoryType.define('hipMemoryTypeDevice', 2)
+hipMemoryTypeManaged = hipMemoryType.define('hipMemoryTypeManaged', 3)
+hipMemoryTypeArray = hipMemoryType.define('hipMemoryTypeArray', 10)
+hipMemoryTypeUnified = hipMemoryType.define('hipMemoryTypeUnified', 11)
 
 @c.record
 class hipPointerAttribute_t(c.Struct):
@@ -362,168 +362,168 @@ class hipPointerAttribute_t(c.Struct):
   hostPointer: Annotated[c.POINTER[None], 16]
   isManaged: Annotated[Annotated[int, ctypes.c_int32], 24]
   allocationFlags: Annotated[Annotated[int, ctypes.c_uint32], 28]
-hipDeviceAttribute_t = CEnum(Annotated[int, ctypes.c_uint32])
-hipDeviceAttributeCudaCompatibleBegin = hipDeviceAttribute_t.define('hipDeviceAttributeCudaCompatibleBegin', 0) # type: ignore
-hipDeviceAttributeEccEnabled = hipDeviceAttribute_t.define('hipDeviceAttributeEccEnabled', 0) # type: ignore
-hipDeviceAttributeAccessPolicyMaxWindowSize = hipDeviceAttribute_t.define('hipDeviceAttributeAccessPolicyMaxWindowSize', 1) # type: ignore
-hipDeviceAttributeAsyncEngineCount = hipDeviceAttribute_t.define('hipDeviceAttributeAsyncEngineCount', 2) # type: ignore
-hipDeviceAttributeCanMapHostMemory = hipDeviceAttribute_t.define('hipDeviceAttributeCanMapHostMemory', 3) # type: ignore
-hipDeviceAttributeCanUseHostPointerForRegisteredMem = hipDeviceAttribute_t.define('hipDeviceAttributeCanUseHostPointerForRegisteredMem', 4) # type: ignore
-hipDeviceAttributeClockRate = hipDeviceAttribute_t.define('hipDeviceAttributeClockRate', 5) # type: ignore
-hipDeviceAttributeComputeMode = hipDeviceAttribute_t.define('hipDeviceAttributeComputeMode', 6) # type: ignore
-hipDeviceAttributeComputePreemptionSupported = hipDeviceAttribute_t.define('hipDeviceAttributeComputePreemptionSupported', 7) # type: ignore
-hipDeviceAttributeConcurrentKernels = hipDeviceAttribute_t.define('hipDeviceAttributeConcurrentKernels', 8) # type: ignore
-hipDeviceAttributeConcurrentManagedAccess = hipDeviceAttribute_t.define('hipDeviceAttributeConcurrentManagedAccess', 9) # type: ignore
-hipDeviceAttributeCooperativeLaunch = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeLaunch', 10) # type: ignore
-hipDeviceAttributeCooperativeMultiDeviceLaunch = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceLaunch', 11) # type: ignore
-hipDeviceAttributeDeviceOverlap = hipDeviceAttribute_t.define('hipDeviceAttributeDeviceOverlap', 12) # type: ignore
-hipDeviceAttributeDirectManagedMemAccessFromHost = hipDeviceAttribute_t.define('hipDeviceAttributeDirectManagedMemAccessFromHost', 13) # type: ignore
-hipDeviceAttributeGlobalL1CacheSupported = hipDeviceAttribute_t.define('hipDeviceAttributeGlobalL1CacheSupported', 14) # type: ignore
-hipDeviceAttributeHostNativeAtomicSupported = hipDeviceAttribute_t.define('hipDeviceAttributeHostNativeAtomicSupported', 15) # type: ignore
-hipDeviceAttributeIntegrated = hipDeviceAttribute_t.define('hipDeviceAttributeIntegrated', 16) # type: ignore
-hipDeviceAttributeIsMultiGpuBoard = hipDeviceAttribute_t.define('hipDeviceAttributeIsMultiGpuBoard', 17) # type: ignore
-hipDeviceAttributeKernelExecTimeout = hipDeviceAttribute_t.define('hipDeviceAttributeKernelExecTimeout', 18) # type: ignore
-hipDeviceAttributeL2CacheSize = hipDeviceAttribute_t.define('hipDeviceAttributeL2CacheSize', 19) # type: ignore
-hipDeviceAttributeLocalL1CacheSupported = hipDeviceAttribute_t.define('hipDeviceAttributeLocalL1CacheSupported', 20) # type: ignore
-hipDeviceAttributeLuid = hipDeviceAttribute_t.define('hipDeviceAttributeLuid', 21) # type: ignore
-hipDeviceAttributeLuidDeviceNodeMask = hipDeviceAttribute_t.define('hipDeviceAttributeLuidDeviceNodeMask', 22) # type: ignore
-hipDeviceAttributeComputeCapabilityMajor = hipDeviceAttribute_t.define('hipDeviceAttributeComputeCapabilityMajor', 23) # type: ignore
-hipDeviceAttributeManagedMemory = hipDeviceAttribute_t.define('hipDeviceAttributeManagedMemory', 24) # type: ignore
-hipDeviceAttributeMaxBlocksPerMultiProcessor = hipDeviceAttribute_t.define('hipDeviceAttributeMaxBlocksPerMultiProcessor', 25) # type: ignore
-hipDeviceAttributeMaxBlockDimX = hipDeviceAttribute_t.define('hipDeviceAttributeMaxBlockDimX', 26) # type: ignore
-hipDeviceAttributeMaxBlockDimY = hipDeviceAttribute_t.define('hipDeviceAttributeMaxBlockDimY', 27) # type: ignore
-hipDeviceAttributeMaxBlockDimZ = hipDeviceAttribute_t.define('hipDeviceAttributeMaxBlockDimZ', 28) # type: ignore
-hipDeviceAttributeMaxGridDimX = hipDeviceAttribute_t.define('hipDeviceAttributeMaxGridDimX', 29) # type: ignore
-hipDeviceAttributeMaxGridDimY = hipDeviceAttribute_t.define('hipDeviceAttributeMaxGridDimY', 30) # type: ignore
-hipDeviceAttributeMaxGridDimZ = hipDeviceAttribute_t.define('hipDeviceAttributeMaxGridDimZ', 31) # type: ignore
-hipDeviceAttributeMaxSurface1D = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface1D', 32) # type: ignore
-hipDeviceAttributeMaxSurface1DLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface1DLayered', 33) # type: ignore
-hipDeviceAttributeMaxSurface2D = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface2D', 34) # type: ignore
-hipDeviceAttributeMaxSurface2DLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface2DLayered', 35) # type: ignore
-hipDeviceAttributeMaxSurface3D = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface3D', 36) # type: ignore
-hipDeviceAttributeMaxSurfaceCubemap = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurfaceCubemap', 37) # type: ignore
-hipDeviceAttributeMaxSurfaceCubemapLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurfaceCubemapLayered', 38) # type: ignore
-hipDeviceAttributeMaxTexture1DWidth = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture1DWidth', 39) # type: ignore
-hipDeviceAttributeMaxTexture1DLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture1DLayered', 40) # type: ignore
-hipDeviceAttributeMaxTexture1DLinear = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture1DLinear', 41) # type: ignore
-hipDeviceAttributeMaxTexture1DMipmap = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture1DMipmap', 42) # type: ignore
-hipDeviceAttributeMaxTexture2DWidth = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DWidth', 43) # type: ignore
-hipDeviceAttributeMaxTexture2DHeight = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DHeight', 44) # type: ignore
-hipDeviceAttributeMaxTexture2DGather = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DGather', 45) # type: ignore
-hipDeviceAttributeMaxTexture2DLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DLayered', 46) # type: ignore
-hipDeviceAttributeMaxTexture2DLinear = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DLinear', 47) # type: ignore
-hipDeviceAttributeMaxTexture2DMipmap = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DMipmap', 48) # type: ignore
-hipDeviceAttributeMaxTexture3DWidth = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture3DWidth', 49) # type: ignore
-hipDeviceAttributeMaxTexture3DHeight = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture3DHeight', 50) # type: ignore
-hipDeviceAttributeMaxTexture3DDepth = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture3DDepth', 51) # type: ignore
-hipDeviceAttributeMaxTexture3DAlt = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture3DAlt', 52) # type: ignore
-hipDeviceAttributeMaxTextureCubemap = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTextureCubemap', 53) # type: ignore
-hipDeviceAttributeMaxTextureCubemapLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTextureCubemapLayered', 54) # type: ignore
-hipDeviceAttributeMaxThreadsDim = hipDeviceAttribute_t.define('hipDeviceAttributeMaxThreadsDim', 55) # type: ignore
-hipDeviceAttributeMaxThreadsPerBlock = hipDeviceAttribute_t.define('hipDeviceAttributeMaxThreadsPerBlock', 56) # type: ignore
-hipDeviceAttributeMaxThreadsPerMultiProcessor = hipDeviceAttribute_t.define('hipDeviceAttributeMaxThreadsPerMultiProcessor', 57) # type: ignore
-hipDeviceAttributeMaxPitch = hipDeviceAttribute_t.define('hipDeviceAttributeMaxPitch', 58) # type: ignore
-hipDeviceAttributeMemoryBusWidth = hipDeviceAttribute_t.define('hipDeviceAttributeMemoryBusWidth', 59) # type: ignore
-hipDeviceAttributeMemoryClockRate = hipDeviceAttribute_t.define('hipDeviceAttributeMemoryClockRate', 60) # type: ignore
-hipDeviceAttributeComputeCapabilityMinor = hipDeviceAttribute_t.define('hipDeviceAttributeComputeCapabilityMinor', 61) # type: ignore
-hipDeviceAttributeMultiGpuBoardGroupID = hipDeviceAttribute_t.define('hipDeviceAttributeMultiGpuBoardGroupID', 62) # type: ignore
-hipDeviceAttributeMultiprocessorCount = hipDeviceAttribute_t.define('hipDeviceAttributeMultiprocessorCount', 63) # type: ignore
-hipDeviceAttributeUnused1 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused1', 64) # type: ignore
-hipDeviceAttributePageableMemoryAccess = hipDeviceAttribute_t.define('hipDeviceAttributePageableMemoryAccess', 65) # type: ignore
-hipDeviceAttributePageableMemoryAccessUsesHostPageTables = hipDeviceAttribute_t.define('hipDeviceAttributePageableMemoryAccessUsesHostPageTables', 66) # type: ignore
-hipDeviceAttributePciBusId = hipDeviceAttribute_t.define('hipDeviceAttributePciBusId', 67) # type: ignore
-hipDeviceAttributePciDeviceId = hipDeviceAttribute_t.define('hipDeviceAttributePciDeviceId', 68) # type: ignore
-hipDeviceAttributePciDomainID = hipDeviceAttribute_t.define('hipDeviceAttributePciDomainID', 69) # type: ignore
-hipDeviceAttributePersistingL2CacheMaxSize = hipDeviceAttribute_t.define('hipDeviceAttributePersistingL2CacheMaxSize', 70) # type: ignore
-hipDeviceAttributeMaxRegistersPerBlock = hipDeviceAttribute_t.define('hipDeviceAttributeMaxRegistersPerBlock', 71) # type: ignore
-hipDeviceAttributeMaxRegistersPerMultiprocessor = hipDeviceAttribute_t.define('hipDeviceAttributeMaxRegistersPerMultiprocessor', 72) # type: ignore
-hipDeviceAttributeReservedSharedMemPerBlock = hipDeviceAttribute_t.define('hipDeviceAttributeReservedSharedMemPerBlock', 73) # type: ignore
-hipDeviceAttributeMaxSharedMemoryPerBlock = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSharedMemoryPerBlock', 74) # type: ignore
-hipDeviceAttributeSharedMemPerBlockOptin = hipDeviceAttribute_t.define('hipDeviceAttributeSharedMemPerBlockOptin', 75) # type: ignore
-hipDeviceAttributeSharedMemPerMultiprocessor = hipDeviceAttribute_t.define('hipDeviceAttributeSharedMemPerMultiprocessor', 76) # type: ignore
-hipDeviceAttributeSingleToDoublePrecisionPerfRatio = hipDeviceAttribute_t.define('hipDeviceAttributeSingleToDoublePrecisionPerfRatio', 77) # type: ignore
-hipDeviceAttributeStreamPrioritiesSupported = hipDeviceAttribute_t.define('hipDeviceAttributeStreamPrioritiesSupported', 78) # type: ignore
-hipDeviceAttributeSurfaceAlignment = hipDeviceAttribute_t.define('hipDeviceAttributeSurfaceAlignment', 79) # type: ignore
-hipDeviceAttributeTccDriver = hipDeviceAttribute_t.define('hipDeviceAttributeTccDriver', 80) # type: ignore
-hipDeviceAttributeTextureAlignment = hipDeviceAttribute_t.define('hipDeviceAttributeTextureAlignment', 81) # type: ignore
-hipDeviceAttributeTexturePitchAlignment = hipDeviceAttribute_t.define('hipDeviceAttributeTexturePitchAlignment', 82) # type: ignore
-hipDeviceAttributeTotalConstantMemory = hipDeviceAttribute_t.define('hipDeviceAttributeTotalConstantMemory', 83) # type: ignore
-hipDeviceAttributeTotalGlobalMem = hipDeviceAttribute_t.define('hipDeviceAttributeTotalGlobalMem', 84) # type: ignore
-hipDeviceAttributeUnifiedAddressing = hipDeviceAttribute_t.define('hipDeviceAttributeUnifiedAddressing', 85) # type: ignore
-hipDeviceAttributeUnused2 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused2', 86) # type: ignore
-hipDeviceAttributeWarpSize = hipDeviceAttribute_t.define('hipDeviceAttributeWarpSize', 87) # type: ignore
-hipDeviceAttributeMemoryPoolsSupported = hipDeviceAttribute_t.define('hipDeviceAttributeMemoryPoolsSupported', 88) # type: ignore
-hipDeviceAttributeVirtualMemoryManagementSupported = hipDeviceAttribute_t.define('hipDeviceAttributeVirtualMemoryManagementSupported', 89) # type: ignore
-hipDeviceAttributeHostRegisterSupported = hipDeviceAttribute_t.define('hipDeviceAttributeHostRegisterSupported', 90) # type: ignore
-hipDeviceAttributeMemoryPoolSupportedHandleTypes = hipDeviceAttribute_t.define('hipDeviceAttributeMemoryPoolSupportedHandleTypes', 91) # type: ignore
-hipDeviceAttributeCudaCompatibleEnd = hipDeviceAttribute_t.define('hipDeviceAttributeCudaCompatibleEnd', 9999) # type: ignore
-hipDeviceAttributeAmdSpecificBegin = hipDeviceAttribute_t.define('hipDeviceAttributeAmdSpecificBegin', 10000) # type: ignore
-hipDeviceAttributeClockInstructionRate = hipDeviceAttribute_t.define('hipDeviceAttributeClockInstructionRate', 10000) # type: ignore
-hipDeviceAttributeUnused3 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused3', 10001) # type: ignore
-hipDeviceAttributeMaxSharedMemoryPerMultiprocessor = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSharedMemoryPerMultiprocessor', 10002) # type: ignore
-hipDeviceAttributeUnused4 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused4', 10003) # type: ignore
-hipDeviceAttributeUnused5 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused5', 10004) # type: ignore
-hipDeviceAttributeHdpMemFlushCntl = hipDeviceAttribute_t.define('hipDeviceAttributeHdpMemFlushCntl', 10005) # type: ignore
-hipDeviceAttributeHdpRegFlushCntl = hipDeviceAttribute_t.define('hipDeviceAttributeHdpRegFlushCntl', 10006) # type: ignore
-hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc', 10007) # type: ignore
-hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim', 10008) # type: ignore
-hipDeviceAttributeCooperativeMultiDeviceUnmatchedBlockDim = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceUnmatchedBlockDim', 10009) # type: ignore
-hipDeviceAttributeCooperativeMultiDeviceUnmatchedSharedMem = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceUnmatchedSharedMem', 10010) # type: ignore
-hipDeviceAttributeIsLargeBar = hipDeviceAttribute_t.define('hipDeviceAttributeIsLargeBar', 10011) # type: ignore
-hipDeviceAttributeAsicRevision = hipDeviceAttribute_t.define('hipDeviceAttributeAsicRevision', 10012) # type: ignore
-hipDeviceAttributeCanUseStreamWaitValue = hipDeviceAttribute_t.define('hipDeviceAttributeCanUseStreamWaitValue', 10013) # type: ignore
-hipDeviceAttributeImageSupport = hipDeviceAttribute_t.define('hipDeviceAttributeImageSupport', 10014) # type: ignore
-hipDeviceAttributePhysicalMultiProcessorCount = hipDeviceAttribute_t.define('hipDeviceAttributePhysicalMultiProcessorCount', 10015) # type: ignore
-hipDeviceAttributeFineGrainSupport = hipDeviceAttribute_t.define('hipDeviceAttributeFineGrainSupport', 10016) # type: ignore
-hipDeviceAttributeWallClockRate = hipDeviceAttribute_t.define('hipDeviceAttributeWallClockRate', 10017) # type: ignore
-hipDeviceAttributeAmdSpecificEnd = hipDeviceAttribute_t.define('hipDeviceAttributeAmdSpecificEnd', 19999) # type: ignore
-hipDeviceAttributeVendorSpecificBegin = hipDeviceAttribute_t.define('hipDeviceAttributeVendorSpecificBegin', 20000) # type: ignore
+class hipDeviceAttribute_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipDeviceAttributeCudaCompatibleBegin = hipDeviceAttribute_t.define('hipDeviceAttributeCudaCompatibleBegin', 0)
+hipDeviceAttributeEccEnabled = hipDeviceAttribute_t.define('hipDeviceAttributeEccEnabled', 0)
+hipDeviceAttributeAccessPolicyMaxWindowSize = hipDeviceAttribute_t.define('hipDeviceAttributeAccessPolicyMaxWindowSize', 1)
+hipDeviceAttributeAsyncEngineCount = hipDeviceAttribute_t.define('hipDeviceAttributeAsyncEngineCount', 2)
+hipDeviceAttributeCanMapHostMemory = hipDeviceAttribute_t.define('hipDeviceAttributeCanMapHostMemory', 3)
+hipDeviceAttributeCanUseHostPointerForRegisteredMem = hipDeviceAttribute_t.define('hipDeviceAttributeCanUseHostPointerForRegisteredMem', 4)
+hipDeviceAttributeClockRate = hipDeviceAttribute_t.define('hipDeviceAttributeClockRate', 5)
+hipDeviceAttributeComputeMode = hipDeviceAttribute_t.define('hipDeviceAttributeComputeMode', 6)
+hipDeviceAttributeComputePreemptionSupported = hipDeviceAttribute_t.define('hipDeviceAttributeComputePreemptionSupported', 7)
+hipDeviceAttributeConcurrentKernels = hipDeviceAttribute_t.define('hipDeviceAttributeConcurrentKernels', 8)
+hipDeviceAttributeConcurrentManagedAccess = hipDeviceAttribute_t.define('hipDeviceAttributeConcurrentManagedAccess', 9)
+hipDeviceAttributeCooperativeLaunch = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeLaunch', 10)
+hipDeviceAttributeCooperativeMultiDeviceLaunch = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceLaunch', 11)
+hipDeviceAttributeDeviceOverlap = hipDeviceAttribute_t.define('hipDeviceAttributeDeviceOverlap', 12)
+hipDeviceAttributeDirectManagedMemAccessFromHost = hipDeviceAttribute_t.define('hipDeviceAttributeDirectManagedMemAccessFromHost', 13)
+hipDeviceAttributeGlobalL1CacheSupported = hipDeviceAttribute_t.define('hipDeviceAttributeGlobalL1CacheSupported', 14)
+hipDeviceAttributeHostNativeAtomicSupported = hipDeviceAttribute_t.define('hipDeviceAttributeHostNativeAtomicSupported', 15)
+hipDeviceAttributeIntegrated = hipDeviceAttribute_t.define('hipDeviceAttributeIntegrated', 16)
+hipDeviceAttributeIsMultiGpuBoard = hipDeviceAttribute_t.define('hipDeviceAttributeIsMultiGpuBoard', 17)
+hipDeviceAttributeKernelExecTimeout = hipDeviceAttribute_t.define('hipDeviceAttributeKernelExecTimeout', 18)
+hipDeviceAttributeL2CacheSize = hipDeviceAttribute_t.define('hipDeviceAttributeL2CacheSize', 19)
+hipDeviceAttributeLocalL1CacheSupported = hipDeviceAttribute_t.define('hipDeviceAttributeLocalL1CacheSupported', 20)
+hipDeviceAttributeLuid = hipDeviceAttribute_t.define('hipDeviceAttributeLuid', 21)
+hipDeviceAttributeLuidDeviceNodeMask = hipDeviceAttribute_t.define('hipDeviceAttributeLuidDeviceNodeMask', 22)
+hipDeviceAttributeComputeCapabilityMajor = hipDeviceAttribute_t.define('hipDeviceAttributeComputeCapabilityMajor', 23)
+hipDeviceAttributeManagedMemory = hipDeviceAttribute_t.define('hipDeviceAttributeManagedMemory', 24)
+hipDeviceAttributeMaxBlocksPerMultiProcessor = hipDeviceAttribute_t.define('hipDeviceAttributeMaxBlocksPerMultiProcessor', 25)
+hipDeviceAttributeMaxBlockDimX = hipDeviceAttribute_t.define('hipDeviceAttributeMaxBlockDimX', 26)
+hipDeviceAttributeMaxBlockDimY = hipDeviceAttribute_t.define('hipDeviceAttributeMaxBlockDimY', 27)
+hipDeviceAttributeMaxBlockDimZ = hipDeviceAttribute_t.define('hipDeviceAttributeMaxBlockDimZ', 28)
+hipDeviceAttributeMaxGridDimX = hipDeviceAttribute_t.define('hipDeviceAttributeMaxGridDimX', 29)
+hipDeviceAttributeMaxGridDimY = hipDeviceAttribute_t.define('hipDeviceAttributeMaxGridDimY', 30)
+hipDeviceAttributeMaxGridDimZ = hipDeviceAttribute_t.define('hipDeviceAttributeMaxGridDimZ', 31)
+hipDeviceAttributeMaxSurface1D = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface1D', 32)
+hipDeviceAttributeMaxSurface1DLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface1DLayered', 33)
+hipDeviceAttributeMaxSurface2D = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface2D', 34)
+hipDeviceAttributeMaxSurface2DLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface2DLayered', 35)
+hipDeviceAttributeMaxSurface3D = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurface3D', 36)
+hipDeviceAttributeMaxSurfaceCubemap = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurfaceCubemap', 37)
+hipDeviceAttributeMaxSurfaceCubemapLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSurfaceCubemapLayered', 38)
+hipDeviceAttributeMaxTexture1DWidth = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture1DWidth', 39)
+hipDeviceAttributeMaxTexture1DLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture1DLayered', 40)
+hipDeviceAttributeMaxTexture1DLinear = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture1DLinear', 41)
+hipDeviceAttributeMaxTexture1DMipmap = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture1DMipmap', 42)
+hipDeviceAttributeMaxTexture2DWidth = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DWidth', 43)
+hipDeviceAttributeMaxTexture2DHeight = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DHeight', 44)
+hipDeviceAttributeMaxTexture2DGather = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DGather', 45)
+hipDeviceAttributeMaxTexture2DLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DLayered', 46)
+hipDeviceAttributeMaxTexture2DLinear = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DLinear', 47)
+hipDeviceAttributeMaxTexture2DMipmap = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture2DMipmap', 48)
+hipDeviceAttributeMaxTexture3DWidth = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture3DWidth', 49)
+hipDeviceAttributeMaxTexture3DHeight = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture3DHeight', 50)
+hipDeviceAttributeMaxTexture3DDepth = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture3DDepth', 51)
+hipDeviceAttributeMaxTexture3DAlt = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTexture3DAlt', 52)
+hipDeviceAttributeMaxTextureCubemap = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTextureCubemap', 53)
+hipDeviceAttributeMaxTextureCubemapLayered = hipDeviceAttribute_t.define('hipDeviceAttributeMaxTextureCubemapLayered', 54)
+hipDeviceAttributeMaxThreadsDim = hipDeviceAttribute_t.define('hipDeviceAttributeMaxThreadsDim', 55)
+hipDeviceAttributeMaxThreadsPerBlock = hipDeviceAttribute_t.define('hipDeviceAttributeMaxThreadsPerBlock', 56)
+hipDeviceAttributeMaxThreadsPerMultiProcessor = hipDeviceAttribute_t.define('hipDeviceAttributeMaxThreadsPerMultiProcessor', 57)
+hipDeviceAttributeMaxPitch = hipDeviceAttribute_t.define('hipDeviceAttributeMaxPitch', 58)
+hipDeviceAttributeMemoryBusWidth = hipDeviceAttribute_t.define('hipDeviceAttributeMemoryBusWidth', 59)
+hipDeviceAttributeMemoryClockRate = hipDeviceAttribute_t.define('hipDeviceAttributeMemoryClockRate', 60)
+hipDeviceAttributeComputeCapabilityMinor = hipDeviceAttribute_t.define('hipDeviceAttributeComputeCapabilityMinor', 61)
+hipDeviceAttributeMultiGpuBoardGroupID = hipDeviceAttribute_t.define('hipDeviceAttributeMultiGpuBoardGroupID', 62)
+hipDeviceAttributeMultiprocessorCount = hipDeviceAttribute_t.define('hipDeviceAttributeMultiprocessorCount', 63)
+hipDeviceAttributeUnused1 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused1', 64)
+hipDeviceAttributePageableMemoryAccess = hipDeviceAttribute_t.define('hipDeviceAttributePageableMemoryAccess', 65)
+hipDeviceAttributePageableMemoryAccessUsesHostPageTables = hipDeviceAttribute_t.define('hipDeviceAttributePageableMemoryAccessUsesHostPageTables', 66)
+hipDeviceAttributePciBusId = hipDeviceAttribute_t.define('hipDeviceAttributePciBusId', 67)
+hipDeviceAttributePciDeviceId = hipDeviceAttribute_t.define('hipDeviceAttributePciDeviceId', 68)
+hipDeviceAttributePciDomainID = hipDeviceAttribute_t.define('hipDeviceAttributePciDomainID', 69)
+hipDeviceAttributePersistingL2CacheMaxSize = hipDeviceAttribute_t.define('hipDeviceAttributePersistingL2CacheMaxSize', 70)
+hipDeviceAttributeMaxRegistersPerBlock = hipDeviceAttribute_t.define('hipDeviceAttributeMaxRegistersPerBlock', 71)
+hipDeviceAttributeMaxRegistersPerMultiprocessor = hipDeviceAttribute_t.define('hipDeviceAttributeMaxRegistersPerMultiprocessor', 72)
+hipDeviceAttributeReservedSharedMemPerBlock = hipDeviceAttribute_t.define('hipDeviceAttributeReservedSharedMemPerBlock', 73)
+hipDeviceAttributeMaxSharedMemoryPerBlock = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSharedMemoryPerBlock', 74)
+hipDeviceAttributeSharedMemPerBlockOptin = hipDeviceAttribute_t.define('hipDeviceAttributeSharedMemPerBlockOptin', 75)
+hipDeviceAttributeSharedMemPerMultiprocessor = hipDeviceAttribute_t.define('hipDeviceAttributeSharedMemPerMultiprocessor', 76)
+hipDeviceAttributeSingleToDoublePrecisionPerfRatio = hipDeviceAttribute_t.define('hipDeviceAttributeSingleToDoublePrecisionPerfRatio', 77)
+hipDeviceAttributeStreamPrioritiesSupported = hipDeviceAttribute_t.define('hipDeviceAttributeStreamPrioritiesSupported', 78)
+hipDeviceAttributeSurfaceAlignment = hipDeviceAttribute_t.define('hipDeviceAttributeSurfaceAlignment', 79)
+hipDeviceAttributeTccDriver = hipDeviceAttribute_t.define('hipDeviceAttributeTccDriver', 80)
+hipDeviceAttributeTextureAlignment = hipDeviceAttribute_t.define('hipDeviceAttributeTextureAlignment', 81)
+hipDeviceAttributeTexturePitchAlignment = hipDeviceAttribute_t.define('hipDeviceAttributeTexturePitchAlignment', 82)
+hipDeviceAttributeTotalConstantMemory = hipDeviceAttribute_t.define('hipDeviceAttributeTotalConstantMemory', 83)
+hipDeviceAttributeTotalGlobalMem = hipDeviceAttribute_t.define('hipDeviceAttributeTotalGlobalMem', 84)
+hipDeviceAttributeUnifiedAddressing = hipDeviceAttribute_t.define('hipDeviceAttributeUnifiedAddressing', 85)
+hipDeviceAttributeUnused2 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused2', 86)
+hipDeviceAttributeWarpSize = hipDeviceAttribute_t.define('hipDeviceAttributeWarpSize', 87)
+hipDeviceAttributeMemoryPoolsSupported = hipDeviceAttribute_t.define('hipDeviceAttributeMemoryPoolsSupported', 88)
+hipDeviceAttributeVirtualMemoryManagementSupported = hipDeviceAttribute_t.define('hipDeviceAttributeVirtualMemoryManagementSupported', 89)
+hipDeviceAttributeHostRegisterSupported = hipDeviceAttribute_t.define('hipDeviceAttributeHostRegisterSupported', 90)
+hipDeviceAttributeMemoryPoolSupportedHandleTypes = hipDeviceAttribute_t.define('hipDeviceAttributeMemoryPoolSupportedHandleTypes', 91)
+hipDeviceAttributeCudaCompatibleEnd = hipDeviceAttribute_t.define('hipDeviceAttributeCudaCompatibleEnd', 9999)
+hipDeviceAttributeAmdSpecificBegin = hipDeviceAttribute_t.define('hipDeviceAttributeAmdSpecificBegin', 10000)
+hipDeviceAttributeClockInstructionRate = hipDeviceAttribute_t.define('hipDeviceAttributeClockInstructionRate', 10000)
+hipDeviceAttributeUnused3 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused3', 10001)
+hipDeviceAttributeMaxSharedMemoryPerMultiprocessor = hipDeviceAttribute_t.define('hipDeviceAttributeMaxSharedMemoryPerMultiprocessor', 10002)
+hipDeviceAttributeUnused4 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused4', 10003)
+hipDeviceAttributeUnused5 = hipDeviceAttribute_t.define('hipDeviceAttributeUnused5', 10004)
+hipDeviceAttributeHdpMemFlushCntl = hipDeviceAttribute_t.define('hipDeviceAttributeHdpMemFlushCntl', 10005)
+hipDeviceAttributeHdpRegFlushCntl = hipDeviceAttribute_t.define('hipDeviceAttributeHdpRegFlushCntl', 10006)
+hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceUnmatchedFunc', 10007)
+hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceUnmatchedGridDim', 10008)
+hipDeviceAttributeCooperativeMultiDeviceUnmatchedBlockDim = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceUnmatchedBlockDim', 10009)
+hipDeviceAttributeCooperativeMultiDeviceUnmatchedSharedMem = hipDeviceAttribute_t.define('hipDeviceAttributeCooperativeMultiDeviceUnmatchedSharedMem', 10010)
+hipDeviceAttributeIsLargeBar = hipDeviceAttribute_t.define('hipDeviceAttributeIsLargeBar', 10011)
+hipDeviceAttributeAsicRevision = hipDeviceAttribute_t.define('hipDeviceAttributeAsicRevision', 10012)
+hipDeviceAttributeCanUseStreamWaitValue = hipDeviceAttribute_t.define('hipDeviceAttributeCanUseStreamWaitValue', 10013)
+hipDeviceAttributeImageSupport = hipDeviceAttribute_t.define('hipDeviceAttributeImageSupport', 10014)
+hipDeviceAttributePhysicalMultiProcessorCount = hipDeviceAttribute_t.define('hipDeviceAttributePhysicalMultiProcessorCount', 10015)
+hipDeviceAttributeFineGrainSupport = hipDeviceAttribute_t.define('hipDeviceAttributeFineGrainSupport', 10016)
+hipDeviceAttributeWallClockRate = hipDeviceAttribute_t.define('hipDeviceAttributeWallClockRate', 10017)
+hipDeviceAttributeAmdSpecificEnd = hipDeviceAttribute_t.define('hipDeviceAttributeAmdSpecificEnd', 19999)
+hipDeviceAttributeVendorSpecificBegin = hipDeviceAttribute_t.define('hipDeviceAttributeVendorSpecificBegin', 20000)
 
-hipDriverProcAddressQueryResult = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_GET_PROC_ADDRESS_SUCCESS = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_SUCCESS', 0) # type: ignore
-HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND', 1) # type: ignore
-HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT', 2) # type: ignore
+class hipDriverProcAddressQueryResult(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_GET_PROC_ADDRESS_SUCCESS = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_SUCCESS', 0)
+HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND', 1)
+HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT = hipDriverProcAddressQueryResult.define('HIP_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT', 2)
 
-hipComputeMode = CEnum(Annotated[int, ctypes.c_uint32])
-hipComputeModeDefault = hipComputeMode.define('hipComputeModeDefault', 0) # type: ignore
-hipComputeModeExclusive = hipComputeMode.define('hipComputeModeExclusive', 1) # type: ignore
-hipComputeModeProhibited = hipComputeMode.define('hipComputeModeProhibited', 2) # type: ignore
-hipComputeModeExclusiveProcess = hipComputeMode.define('hipComputeModeExclusiveProcess', 3) # type: ignore
+class hipComputeMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipComputeModeDefault = hipComputeMode.define('hipComputeModeDefault', 0)
+hipComputeModeExclusive = hipComputeMode.define('hipComputeModeExclusive', 1)
+hipComputeModeProhibited = hipComputeMode.define('hipComputeModeProhibited', 2)
+hipComputeModeExclusiveProcess = hipComputeMode.define('hipComputeModeExclusiveProcess', 3)
 
-hipFlushGPUDirectRDMAWritesOptions = CEnum(Annotated[int, ctypes.c_uint32])
-hipFlushGPUDirectRDMAWritesOptionHost = hipFlushGPUDirectRDMAWritesOptions.define('hipFlushGPUDirectRDMAWritesOptionHost', 1) # type: ignore
-hipFlushGPUDirectRDMAWritesOptionMemOps = hipFlushGPUDirectRDMAWritesOptions.define('hipFlushGPUDirectRDMAWritesOptionMemOps', 2) # type: ignore
+class hipFlushGPUDirectRDMAWritesOptions(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipFlushGPUDirectRDMAWritesOptionHost = hipFlushGPUDirectRDMAWritesOptions.define('hipFlushGPUDirectRDMAWritesOptionHost', 1)
+hipFlushGPUDirectRDMAWritesOptionMemOps = hipFlushGPUDirectRDMAWritesOptions.define('hipFlushGPUDirectRDMAWritesOptionMemOps', 2)
 
-hipGPUDirectRDMAWritesOrdering = CEnum(Annotated[int, ctypes.c_uint32])
-hipGPUDirectRDMAWritesOrderingNone = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingNone', 0) # type: ignore
-hipGPUDirectRDMAWritesOrderingOwner = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingOwner', 100) # type: ignore
-hipGPUDirectRDMAWritesOrderingAllDevices = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingAllDevices', 200) # type: ignore
+class hipGPUDirectRDMAWritesOrdering(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGPUDirectRDMAWritesOrderingNone = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingNone', 0)
+hipGPUDirectRDMAWritesOrderingOwner = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingOwner', 100)
+hipGPUDirectRDMAWritesOrderingAllDevices = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingAllDevices', 200)
 
 @dll.bind
 def hip_init() -> hipError_t: ...
 class ihipCtx_t(ctypes.Structure): pass
-hipCtx_t = c.POINTER[ihipCtx_t]
-hipDevice_t = Annotated[int, ctypes.c_int32]
-hipDeviceP2PAttr = CEnum(Annotated[int, ctypes.c_uint32])
-hipDevP2PAttrPerformanceRank = hipDeviceP2PAttr.define('hipDevP2PAttrPerformanceRank', 0) # type: ignore
-hipDevP2PAttrAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrAccessSupported', 1) # type: ignore
-hipDevP2PAttrNativeAtomicSupported = hipDeviceP2PAttr.define('hipDevP2PAttrNativeAtomicSupported', 2) # type: ignore
-hipDevP2PAttrHipArrayAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrHipArrayAccessSupported', 3) # type: ignore
+hipCtx_t: TypeAlias = c.POINTER[ihipCtx_t]
+hipDevice_t: TypeAlias = Annotated[int, ctypes.c_int32]
+class hipDeviceP2PAttr(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipDevP2PAttrPerformanceRank = hipDeviceP2PAttr.define('hipDevP2PAttrPerformanceRank', 0)
+hipDevP2PAttrAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrAccessSupported', 1)
+hipDevP2PAttrNativeAtomicSupported = hipDeviceP2PAttr.define('hipDevP2PAttrNativeAtomicSupported', 2)
+hipDevP2PAttrHipArrayAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrHipArrayAccessSupported', 3)
 
 @c.record
 class hipIpcMemHandle_st(c.Struct):
   SIZE = 64
   reserved: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[64]], 0]
-hipIpcMemHandle_t = hipIpcMemHandle_st
+hipIpcMemHandle_t: TypeAlias = hipIpcMemHandle_st
 @c.record
 class hipIpcEventHandle_st(c.Struct):
   SIZE = 64
   reserved: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[64]], 0]
-hipIpcEventHandle_t = hipIpcEventHandle_st
+hipIpcEventHandle_t: TypeAlias = hipIpcEventHandle_st
 class ihipModule_t(ctypes.Structure): pass
-hipModule_t = c.POINTER[ihipModule_t]
+hipModule_t: TypeAlias = c.POINTER[ihipModule_t]
 class ihipMemPoolHandle_t(ctypes.Structure): pass
-hipMemPool_t = c.POINTER[ihipMemPoolHandle_t]
+hipMemPool_t: TypeAlias = c.POINTER[ihipMemPoolHandle_t]
 @c.record
 class hipFuncAttributes(c.Struct):
   SIZE = 56
@@ -537,73 +537,73 @@ class hipFuncAttributes(c.Struct):
   preferredShmemCarveout: Annotated[Annotated[int, ctypes.c_int32], 36]
   ptxVersion: Annotated[Annotated[int, ctypes.c_int32], 40]
   sharedSizeBytes: Annotated[size_t, 48]
-hipLimit_t = CEnum(Annotated[int, ctypes.c_uint32])
-hipLimitStackSize = hipLimit_t.define('hipLimitStackSize', 0) # type: ignore
-hipLimitPrintfFifoSize = hipLimit_t.define('hipLimitPrintfFifoSize', 1) # type: ignore
-hipLimitMallocHeapSize = hipLimit_t.define('hipLimitMallocHeapSize', 2) # type: ignore
-hipLimitRange = hipLimit_t.define('hipLimitRange', 3) # type: ignore
+class hipLimit_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipLimitStackSize = hipLimit_t.define('hipLimitStackSize', 0)
+hipLimitPrintfFifoSize = hipLimit_t.define('hipLimitPrintfFifoSize', 1)
+hipLimitMallocHeapSize = hipLimit_t.define('hipLimitMallocHeapSize', 2)
+hipLimitRange = hipLimit_t.define('hipLimitRange', 3)
 
-hipMemoryAdvise = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemAdviseSetReadMostly = hipMemoryAdvise.define('hipMemAdviseSetReadMostly', 1) # type: ignore
-hipMemAdviseUnsetReadMostly = hipMemoryAdvise.define('hipMemAdviseUnsetReadMostly', 2) # type: ignore
-hipMemAdviseSetPreferredLocation = hipMemoryAdvise.define('hipMemAdviseSetPreferredLocation', 3) # type: ignore
-hipMemAdviseUnsetPreferredLocation = hipMemoryAdvise.define('hipMemAdviseUnsetPreferredLocation', 4) # type: ignore
-hipMemAdviseSetAccessedBy = hipMemoryAdvise.define('hipMemAdviseSetAccessedBy', 5) # type: ignore
-hipMemAdviseUnsetAccessedBy = hipMemoryAdvise.define('hipMemAdviseUnsetAccessedBy', 6) # type: ignore
-hipMemAdviseSetCoarseGrain = hipMemoryAdvise.define('hipMemAdviseSetCoarseGrain', 100) # type: ignore
-hipMemAdviseUnsetCoarseGrain = hipMemoryAdvise.define('hipMemAdviseUnsetCoarseGrain', 101) # type: ignore
+class hipMemoryAdvise(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemAdviseSetReadMostly = hipMemoryAdvise.define('hipMemAdviseSetReadMostly', 1)
+hipMemAdviseUnsetReadMostly = hipMemoryAdvise.define('hipMemAdviseUnsetReadMostly', 2)
+hipMemAdviseSetPreferredLocation = hipMemoryAdvise.define('hipMemAdviseSetPreferredLocation', 3)
+hipMemAdviseUnsetPreferredLocation = hipMemoryAdvise.define('hipMemAdviseUnsetPreferredLocation', 4)
+hipMemAdviseSetAccessedBy = hipMemoryAdvise.define('hipMemAdviseSetAccessedBy', 5)
+hipMemAdviseUnsetAccessedBy = hipMemoryAdvise.define('hipMemAdviseUnsetAccessedBy', 6)
+hipMemAdviseSetCoarseGrain = hipMemoryAdvise.define('hipMemAdviseSetCoarseGrain', 100)
+hipMemAdviseUnsetCoarseGrain = hipMemoryAdvise.define('hipMemAdviseUnsetCoarseGrain', 101)
 
-hipMemRangeCoherencyMode = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemRangeCoherencyModeFineGrain = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeFineGrain', 0) # type: ignore
-hipMemRangeCoherencyModeCoarseGrain = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeCoarseGrain', 1) # type: ignore
-hipMemRangeCoherencyModeIndeterminate = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeIndeterminate', 2) # type: ignore
+class hipMemRangeCoherencyMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemRangeCoherencyModeFineGrain = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeFineGrain', 0)
+hipMemRangeCoherencyModeCoarseGrain = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeCoarseGrain', 1)
+hipMemRangeCoherencyModeIndeterminate = hipMemRangeCoherencyMode.define('hipMemRangeCoherencyModeIndeterminate', 2)
 
-hipMemRangeAttribute = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemRangeAttributeReadMostly = hipMemRangeAttribute.define('hipMemRangeAttributeReadMostly', 1) # type: ignore
-hipMemRangeAttributePreferredLocation = hipMemRangeAttribute.define('hipMemRangeAttributePreferredLocation', 2) # type: ignore
-hipMemRangeAttributeAccessedBy = hipMemRangeAttribute.define('hipMemRangeAttributeAccessedBy', 3) # type: ignore
-hipMemRangeAttributeLastPrefetchLocation = hipMemRangeAttribute.define('hipMemRangeAttributeLastPrefetchLocation', 4) # type: ignore
-hipMemRangeAttributeCoherencyMode = hipMemRangeAttribute.define('hipMemRangeAttributeCoherencyMode', 100) # type: ignore
+class hipMemRangeAttribute(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemRangeAttributeReadMostly = hipMemRangeAttribute.define('hipMemRangeAttributeReadMostly', 1)
+hipMemRangeAttributePreferredLocation = hipMemRangeAttribute.define('hipMemRangeAttributePreferredLocation', 2)
+hipMemRangeAttributeAccessedBy = hipMemRangeAttribute.define('hipMemRangeAttributeAccessedBy', 3)
+hipMemRangeAttributeLastPrefetchLocation = hipMemRangeAttribute.define('hipMemRangeAttributeLastPrefetchLocation', 4)
+hipMemRangeAttributeCoherencyMode = hipMemRangeAttribute.define('hipMemRangeAttributeCoherencyMode', 100)
 
-hipMemPoolAttr = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemPoolReuseFollowEventDependencies = hipMemPoolAttr.define('hipMemPoolReuseFollowEventDependencies', 1) # type: ignore
-hipMemPoolReuseAllowOpportunistic = hipMemPoolAttr.define('hipMemPoolReuseAllowOpportunistic', 2) # type: ignore
-hipMemPoolReuseAllowInternalDependencies = hipMemPoolAttr.define('hipMemPoolReuseAllowInternalDependencies', 3) # type: ignore
-hipMemPoolAttrReleaseThreshold = hipMemPoolAttr.define('hipMemPoolAttrReleaseThreshold', 4) # type: ignore
-hipMemPoolAttrReservedMemCurrent = hipMemPoolAttr.define('hipMemPoolAttrReservedMemCurrent', 5) # type: ignore
-hipMemPoolAttrReservedMemHigh = hipMemPoolAttr.define('hipMemPoolAttrReservedMemHigh', 6) # type: ignore
-hipMemPoolAttrUsedMemCurrent = hipMemPoolAttr.define('hipMemPoolAttrUsedMemCurrent', 7) # type: ignore
-hipMemPoolAttrUsedMemHigh = hipMemPoolAttr.define('hipMemPoolAttrUsedMemHigh', 8) # type: ignore
+class hipMemPoolAttr(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemPoolReuseFollowEventDependencies = hipMemPoolAttr.define('hipMemPoolReuseFollowEventDependencies', 1)
+hipMemPoolReuseAllowOpportunistic = hipMemPoolAttr.define('hipMemPoolReuseAllowOpportunistic', 2)
+hipMemPoolReuseAllowInternalDependencies = hipMemPoolAttr.define('hipMemPoolReuseAllowInternalDependencies', 3)
+hipMemPoolAttrReleaseThreshold = hipMemPoolAttr.define('hipMemPoolAttrReleaseThreshold', 4)
+hipMemPoolAttrReservedMemCurrent = hipMemPoolAttr.define('hipMemPoolAttrReservedMemCurrent', 5)
+hipMemPoolAttrReservedMemHigh = hipMemPoolAttr.define('hipMemPoolAttrReservedMemHigh', 6)
+hipMemPoolAttrUsedMemCurrent = hipMemPoolAttr.define('hipMemPoolAttrUsedMemCurrent', 7)
+hipMemPoolAttrUsedMemHigh = hipMemPoolAttr.define('hipMemPoolAttrUsedMemHigh', 8)
 
-hipMemLocationType = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemLocationTypeInvalid = hipMemLocationType.define('hipMemLocationTypeInvalid', 0) # type: ignore
-hipMemLocationTypeDevice = hipMemLocationType.define('hipMemLocationTypeDevice', 1) # type: ignore
+class hipMemLocationType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemLocationTypeInvalid = hipMemLocationType.define('hipMemLocationTypeInvalid', 0)
+hipMemLocationTypeDevice = hipMemLocationType.define('hipMemLocationTypeDevice', 1)
 
 @c.record
 class hipMemLocation(c.Struct):
   SIZE = 8
   type: Annotated[hipMemLocationType, 0]
   id: Annotated[Annotated[int, ctypes.c_int32], 4]
-hipMemAccessFlags = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemAccessFlagsProtNone = hipMemAccessFlags.define('hipMemAccessFlagsProtNone', 0) # type: ignore
-hipMemAccessFlagsProtRead = hipMemAccessFlags.define('hipMemAccessFlagsProtRead', 1) # type: ignore
-hipMemAccessFlagsProtReadWrite = hipMemAccessFlags.define('hipMemAccessFlagsProtReadWrite', 3) # type: ignore
+class hipMemAccessFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemAccessFlagsProtNone = hipMemAccessFlags.define('hipMemAccessFlagsProtNone', 0)
+hipMemAccessFlagsProtRead = hipMemAccessFlags.define('hipMemAccessFlagsProtRead', 1)
+hipMemAccessFlagsProtReadWrite = hipMemAccessFlags.define('hipMemAccessFlagsProtReadWrite', 3)
 
 @c.record
 class hipMemAccessDesc(c.Struct):
   SIZE = 12
   location: Annotated[hipMemLocation, 0]
   flags: Annotated[hipMemAccessFlags, 8]
-hipMemAllocationType = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemAllocationTypeInvalid = hipMemAllocationType.define('hipMemAllocationTypeInvalid', 0) # type: ignore
-hipMemAllocationTypePinned = hipMemAllocationType.define('hipMemAllocationTypePinned', 1) # type: ignore
-hipMemAllocationTypeMax = hipMemAllocationType.define('hipMemAllocationTypeMax', 2147483647) # type: ignore
+class hipMemAllocationType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemAllocationTypeInvalid = hipMemAllocationType.define('hipMemAllocationTypeInvalid', 0)
+hipMemAllocationTypePinned = hipMemAllocationType.define('hipMemAllocationTypePinned', 1)
+hipMemAllocationTypeMax = hipMemAllocationType.define('hipMemAllocationTypeMax', 2147483647)
 
-hipMemAllocationHandleType = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemHandleTypeNone = hipMemAllocationHandleType.define('hipMemHandleTypeNone', 0) # type: ignore
-hipMemHandleTypePosixFileDescriptor = hipMemAllocationHandleType.define('hipMemHandleTypePosixFileDescriptor', 1) # type: ignore
-hipMemHandleTypeWin32 = hipMemAllocationHandleType.define('hipMemHandleTypeWin32', 2) # type: ignore
-hipMemHandleTypeWin32Kmt = hipMemAllocationHandleType.define('hipMemHandleTypeWin32Kmt', 4) # type: ignore
+class hipMemAllocationHandleType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemHandleTypeNone = hipMemAllocationHandleType.define('hipMemHandleTypeNone', 0)
+hipMemHandleTypePosixFileDescriptor = hipMemAllocationHandleType.define('hipMemHandleTypePosixFileDescriptor', 1)
+hipMemHandleTypeWin32 = hipMemAllocationHandleType.define('hipMemHandleTypeWin32', 2)
+hipMemHandleTypeWin32Kmt = hipMemAllocationHandleType.define('hipMemHandleTypeWin32Kmt', 4)
 
 @c.record
 class hipMemPoolProps(c.Struct):
@@ -618,41 +618,41 @@ class hipMemPoolProps(c.Struct):
 class hipMemPoolPtrExportData(c.Struct):
   SIZE = 64
   reserved: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[64]], 0]
-hipJitOption = CEnum(Annotated[int, ctypes.c_uint32])
-hipJitOptionMaxRegisters = hipJitOption.define('hipJitOptionMaxRegisters', 0) # type: ignore
-hipJitOptionThreadsPerBlock = hipJitOption.define('hipJitOptionThreadsPerBlock', 1) # type: ignore
-hipJitOptionWallTime = hipJitOption.define('hipJitOptionWallTime', 2) # type: ignore
-hipJitOptionInfoLogBuffer = hipJitOption.define('hipJitOptionInfoLogBuffer', 3) # type: ignore
-hipJitOptionInfoLogBufferSizeBytes = hipJitOption.define('hipJitOptionInfoLogBufferSizeBytes', 4) # type: ignore
-hipJitOptionErrorLogBuffer = hipJitOption.define('hipJitOptionErrorLogBuffer', 5) # type: ignore
-hipJitOptionErrorLogBufferSizeBytes = hipJitOption.define('hipJitOptionErrorLogBufferSizeBytes', 6) # type: ignore
-hipJitOptionOptimizationLevel = hipJitOption.define('hipJitOptionOptimizationLevel', 7) # type: ignore
-hipJitOptionTargetFromContext = hipJitOption.define('hipJitOptionTargetFromContext', 8) # type: ignore
-hipJitOptionTarget = hipJitOption.define('hipJitOptionTarget', 9) # type: ignore
-hipJitOptionFallbackStrategy = hipJitOption.define('hipJitOptionFallbackStrategy', 10) # type: ignore
-hipJitOptionGenerateDebugInfo = hipJitOption.define('hipJitOptionGenerateDebugInfo', 11) # type: ignore
-hipJitOptionLogVerbose = hipJitOption.define('hipJitOptionLogVerbose', 12) # type: ignore
-hipJitOptionGenerateLineInfo = hipJitOption.define('hipJitOptionGenerateLineInfo', 13) # type: ignore
-hipJitOptionCacheMode = hipJitOption.define('hipJitOptionCacheMode', 14) # type: ignore
-hipJitOptionSm3xOpt = hipJitOption.define('hipJitOptionSm3xOpt', 15) # type: ignore
-hipJitOptionFastCompile = hipJitOption.define('hipJitOptionFastCompile', 16) # type: ignore
-hipJitOptionNumOptions = hipJitOption.define('hipJitOptionNumOptions', 17) # type: ignore
+class hipJitOption(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipJitOptionMaxRegisters = hipJitOption.define('hipJitOptionMaxRegisters', 0)
+hipJitOptionThreadsPerBlock = hipJitOption.define('hipJitOptionThreadsPerBlock', 1)
+hipJitOptionWallTime = hipJitOption.define('hipJitOptionWallTime', 2)
+hipJitOptionInfoLogBuffer = hipJitOption.define('hipJitOptionInfoLogBuffer', 3)
+hipJitOptionInfoLogBufferSizeBytes = hipJitOption.define('hipJitOptionInfoLogBufferSizeBytes', 4)
+hipJitOptionErrorLogBuffer = hipJitOption.define('hipJitOptionErrorLogBuffer', 5)
+hipJitOptionErrorLogBufferSizeBytes = hipJitOption.define('hipJitOptionErrorLogBufferSizeBytes', 6)
+hipJitOptionOptimizationLevel = hipJitOption.define('hipJitOptionOptimizationLevel', 7)
+hipJitOptionTargetFromContext = hipJitOption.define('hipJitOptionTargetFromContext', 8)
+hipJitOptionTarget = hipJitOption.define('hipJitOptionTarget', 9)
+hipJitOptionFallbackStrategy = hipJitOption.define('hipJitOptionFallbackStrategy', 10)
+hipJitOptionGenerateDebugInfo = hipJitOption.define('hipJitOptionGenerateDebugInfo', 11)
+hipJitOptionLogVerbose = hipJitOption.define('hipJitOptionLogVerbose', 12)
+hipJitOptionGenerateLineInfo = hipJitOption.define('hipJitOptionGenerateLineInfo', 13)
+hipJitOptionCacheMode = hipJitOption.define('hipJitOptionCacheMode', 14)
+hipJitOptionSm3xOpt = hipJitOption.define('hipJitOptionSm3xOpt', 15)
+hipJitOptionFastCompile = hipJitOption.define('hipJitOptionFastCompile', 16)
+hipJitOptionNumOptions = hipJitOption.define('hipJitOptionNumOptions', 17)
 
-hipFuncAttribute = CEnum(Annotated[int, ctypes.c_uint32])
-hipFuncAttributeMaxDynamicSharedMemorySize = hipFuncAttribute.define('hipFuncAttributeMaxDynamicSharedMemorySize', 8) # type: ignore
-hipFuncAttributePreferredSharedMemoryCarveout = hipFuncAttribute.define('hipFuncAttributePreferredSharedMemoryCarveout', 9) # type: ignore
-hipFuncAttributeMax = hipFuncAttribute.define('hipFuncAttributeMax', 10) # type: ignore
+class hipFuncAttribute(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipFuncAttributeMaxDynamicSharedMemorySize = hipFuncAttribute.define('hipFuncAttributeMaxDynamicSharedMemorySize', 8)
+hipFuncAttributePreferredSharedMemoryCarveout = hipFuncAttribute.define('hipFuncAttributePreferredSharedMemoryCarveout', 9)
+hipFuncAttributeMax = hipFuncAttribute.define('hipFuncAttributeMax', 10)
 
-hipFuncCache_t = CEnum(Annotated[int, ctypes.c_uint32])
-hipFuncCachePreferNone = hipFuncCache_t.define('hipFuncCachePreferNone', 0) # type: ignore
-hipFuncCachePreferShared = hipFuncCache_t.define('hipFuncCachePreferShared', 1) # type: ignore
-hipFuncCachePreferL1 = hipFuncCache_t.define('hipFuncCachePreferL1', 2) # type: ignore
-hipFuncCachePreferEqual = hipFuncCache_t.define('hipFuncCachePreferEqual', 3) # type: ignore
+class hipFuncCache_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipFuncCachePreferNone = hipFuncCache_t.define('hipFuncCachePreferNone', 0)
+hipFuncCachePreferShared = hipFuncCache_t.define('hipFuncCachePreferShared', 1)
+hipFuncCachePreferL1 = hipFuncCache_t.define('hipFuncCachePreferL1', 2)
+hipFuncCachePreferEqual = hipFuncCache_t.define('hipFuncCachePreferEqual', 3)
 
-hipSharedMemConfig = CEnum(Annotated[int, ctypes.c_uint32])
-hipSharedMemBankSizeDefault = hipSharedMemConfig.define('hipSharedMemBankSizeDefault', 0) # type: ignore
-hipSharedMemBankSizeFourByte = hipSharedMemConfig.define('hipSharedMemBankSizeFourByte', 1) # type: ignore
-hipSharedMemBankSizeEightByte = hipSharedMemConfig.define('hipSharedMemBankSizeEightByte', 2) # type: ignore
+class hipSharedMemConfig(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipSharedMemBankSizeDefault = hipSharedMemConfig.define('hipSharedMemBankSizeDefault', 0)
+hipSharedMemBankSizeFourByte = hipSharedMemConfig.define('hipSharedMemBankSizeFourByte', 1)
+hipSharedMemBankSizeEightByte = hipSharedMemConfig.define('hipSharedMemBankSizeEightByte', 2)
 
 @c.record
 class hipLaunchParams_t(c.Struct):
@@ -663,7 +663,7 @@ class hipLaunchParams_t(c.Struct):
   args: Annotated[c.POINTER[c.POINTER[None]], 32]
   sharedMem: Annotated[size_t, 40]
   stream: Annotated[hipStream_t, 48]
-hipLaunchParams = hipLaunchParams_t
+hipLaunchParams: TypeAlias = hipLaunchParams_t
 @c.record
 class hipFunctionLaunchParams_t(c.Struct):
   SIZE = 56
@@ -677,16 +677,16 @@ class hipFunctionLaunchParams_t(c.Struct):
   sharedMemBytes: Annotated[Annotated[int, ctypes.c_uint32], 32]
   hStream: Annotated[hipStream_t, 40]
   kernelParams: Annotated[c.POINTER[c.POINTER[None]], 48]
-hipFunctionLaunchParams = hipFunctionLaunchParams_t
-hipExternalMemoryHandleType_enum = CEnum(Annotated[int, ctypes.c_uint32])
-hipExternalMemoryHandleTypeOpaqueFd = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueFd', 1) # type: ignore
-hipExternalMemoryHandleTypeOpaqueWin32 = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueWin32', 2) # type: ignore
-hipExternalMemoryHandleTypeOpaqueWin32Kmt = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueWin32Kmt', 3) # type: ignore
-hipExternalMemoryHandleTypeD3D12Heap = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D12Heap', 4) # type: ignore
-hipExternalMemoryHandleTypeD3D12Resource = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D12Resource', 5) # type: ignore
-hipExternalMemoryHandleTypeD3D11Resource = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D11Resource', 6) # type: ignore
-hipExternalMemoryHandleTypeD3D11ResourceKmt = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D11ResourceKmt', 7) # type: ignore
-hipExternalMemoryHandleTypeNvSciBuf = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeNvSciBuf', 8) # type: ignore
+hipFunctionLaunchParams: TypeAlias = hipFunctionLaunchParams_t
+class hipExternalMemoryHandleType_enum(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipExternalMemoryHandleTypeOpaqueFd = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueFd', 1)
+hipExternalMemoryHandleTypeOpaqueWin32 = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueWin32', 2)
+hipExternalMemoryHandleTypeOpaqueWin32Kmt = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueWin32Kmt', 3)
+hipExternalMemoryHandleTypeD3D12Heap = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D12Heap', 4)
+hipExternalMemoryHandleTypeD3D12Resource = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D12Resource', 5)
+hipExternalMemoryHandleTypeD3D11Resource = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D11Resource', 6)
+hipExternalMemoryHandleTypeD3D11ResourceKmt = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D11ResourceKmt', 7)
+hipExternalMemoryHandleTypeNvSciBuf = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeNvSciBuf', 8)
 
 hipExternalMemoryHandleType: TypeAlias = hipExternalMemoryHandleType_enum
 @c.record
@@ -708,7 +708,7 @@ class hipExternalMemoryHandleDesc_st_handle_win32(c.Struct):
   SIZE = 16
   handle: Annotated[c.POINTER[None], 0]
   name: Annotated[c.POINTER[None], 8]
-hipExternalMemoryHandleDesc = hipExternalMemoryHandleDesc_st
+hipExternalMemoryHandleDesc: TypeAlias = hipExternalMemoryHandleDesc_st
 @c.record
 class hipExternalMemoryBufferDesc_st(c.Struct):
   SIZE = 88
@@ -716,7 +716,7 @@ class hipExternalMemoryBufferDesc_st(c.Struct):
   size: Annotated[Annotated[int, ctypes.c_uint64], 8]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 16]
   reserved: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[16]], 20]
-hipExternalMemoryBufferDesc = hipExternalMemoryBufferDesc_st
+hipExternalMemoryBufferDesc: TypeAlias = hipExternalMemoryBufferDesc_st
 @c.record
 class hipExternalMemoryMipmappedArrayDesc_st(c.Struct):
   SIZE = 64
@@ -733,11 +733,11 @@ class hipChannelFormatDesc(c.Struct):
   z: Annotated[Annotated[int, ctypes.c_int32], 8]
   w: Annotated[Annotated[int, ctypes.c_int32], 12]
   f: Annotated[hipChannelFormatKind, 16]
-hipChannelFormatKind = CEnum(Annotated[int, ctypes.c_uint32])
-hipChannelFormatKindSigned = hipChannelFormatKind.define('hipChannelFormatKindSigned', 0) # type: ignore
-hipChannelFormatKindUnsigned = hipChannelFormatKind.define('hipChannelFormatKindUnsigned', 1) # type: ignore
-hipChannelFormatKindFloat = hipChannelFormatKind.define('hipChannelFormatKindFloat', 2) # type: ignore
-hipChannelFormatKindNone = hipChannelFormatKind.define('hipChannelFormatKindNone', 3) # type: ignore
+class hipChannelFormatKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipChannelFormatKindSigned = hipChannelFormatKind.define('hipChannelFormatKindSigned', 0)
+hipChannelFormatKindUnsigned = hipChannelFormatKind.define('hipChannelFormatKindUnsigned', 1)
+hipChannelFormatKindFloat = hipChannelFormatKind.define('hipChannelFormatKindFloat', 2)
+hipChannelFormatKindNone = hipChannelFormatKind.define('hipChannelFormatKindNone', 3)
 
 @c.record
 class hipExtent(c.Struct):
@@ -745,19 +745,19 @@ class hipExtent(c.Struct):
   width: Annotated[size_t, 0]
   height: Annotated[size_t, 8]
   depth: Annotated[size_t, 16]
-hipExternalMemoryMipmappedArrayDesc = hipExternalMemoryMipmappedArrayDesc_st
-hipExternalMemory_t = c.POINTER[None]
-hipExternalSemaphoreHandleType_enum = CEnum(Annotated[int, ctypes.c_uint32])
-hipExternalSemaphoreHandleTypeOpaqueFd = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueFd', 1) # type: ignore
-hipExternalSemaphoreHandleTypeOpaqueWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueWin32', 2) # type: ignore
-hipExternalSemaphoreHandleTypeOpaqueWin32Kmt = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueWin32Kmt', 3) # type: ignore
-hipExternalSemaphoreHandleTypeD3D12Fence = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeD3D12Fence', 4) # type: ignore
-hipExternalSemaphoreHandleTypeD3D11Fence = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeD3D11Fence', 5) # type: ignore
-hipExternalSemaphoreHandleTypeNvSciSync = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeNvSciSync', 6) # type: ignore
-hipExternalSemaphoreHandleTypeKeyedMutex = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeKeyedMutex', 7) # type: ignore
-hipExternalSemaphoreHandleTypeKeyedMutexKmt = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeKeyedMutexKmt', 8) # type: ignore
-hipExternalSemaphoreHandleTypeTimelineSemaphoreFd = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeTimelineSemaphoreFd', 9) # type: ignore
-hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32', 10) # type: ignore
+hipExternalMemoryMipmappedArrayDesc: TypeAlias = hipExternalMemoryMipmappedArrayDesc_st
+hipExternalMemory_t: TypeAlias = c.POINTER[None]
+class hipExternalSemaphoreHandleType_enum(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipExternalSemaphoreHandleTypeOpaqueFd = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueFd', 1)
+hipExternalSemaphoreHandleTypeOpaqueWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueWin32', 2)
+hipExternalSemaphoreHandleTypeOpaqueWin32Kmt = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueWin32Kmt', 3)
+hipExternalSemaphoreHandleTypeD3D12Fence = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeD3D12Fence', 4)
+hipExternalSemaphoreHandleTypeD3D11Fence = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeD3D11Fence', 5)
+hipExternalSemaphoreHandleTypeNvSciSync = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeNvSciSync', 6)
+hipExternalSemaphoreHandleTypeKeyedMutex = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeKeyedMutex', 7)
+hipExternalSemaphoreHandleTypeKeyedMutexKmt = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeKeyedMutexKmt', 8)
+hipExternalSemaphoreHandleTypeTimelineSemaphoreFd = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeTimelineSemaphoreFd', 9)
+hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32', 10)
 
 hipExternalSemaphoreHandleType: TypeAlias = hipExternalSemaphoreHandleType_enum
 @c.record
@@ -778,8 +778,8 @@ class hipExternalSemaphoreHandleDesc_st_handle_win32(c.Struct):
   SIZE = 16
   handle: Annotated[c.POINTER[None], 0]
   name: Annotated[c.POINTER[None], 8]
-hipExternalSemaphoreHandleDesc = hipExternalSemaphoreHandleDesc_st
-hipExternalSemaphore_t = c.POINTER[None]
+hipExternalSemaphoreHandleDesc: TypeAlias = hipExternalSemaphoreHandleDesc_st
+hipExternalSemaphore_t: TypeAlias = c.POINTER[None]
 @c.record
 class hipExternalSemaphoreSignalParams_st(c.Struct):
   SIZE = 144
@@ -806,7 +806,7 @@ class hipExternalSemaphoreSignalParams_st_params_nvSciSync(c.Struct):
 class hipExternalSemaphoreSignalParams_st_params_keyedMutex(c.Struct):
   SIZE = 8
   key: Annotated[Annotated[int, ctypes.c_uint64], 0]
-hipExternalSemaphoreSignalParams = hipExternalSemaphoreSignalParams_st
+hipExternalSemaphoreSignalParams: TypeAlias = hipExternalSemaphoreSignalParams_st
 @c.record
 class hipExternalSemaphoreWaitParams_st(c.Struct):
   SIZE = 144
@@ -834,45 +834,45 @@ class hipExternalSemaphoreWaitParams_st_params_keyedMutex(c.Struct):
   SIZE = 16
   key: Annotated[Annotated[int, ctypes.c_uint64], 0]
   timeoutMs: Annotated[Annotated[int, ctypes.c_uint32], 8]
-hipExternalSemaphoreWaitParams = hipExternalSemaphoreWaitParams_st
+hipExternalSemaphoreWaitParams: TypeAlias = hipExternalSemaphoreWaitParams_st
 @dll.bind
 def __hipGetPCH(pch:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], size:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
-hipGraphicsRegisterFlags = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphicsRegisterFlagsNone = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsNone', 0) # type: ignore
-hipGraphicsRegisterFlagsReadOnly = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsReadOnly', 1) # type: ignore
-hipGraphicsRegisterFlagsWriteDiscard = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsWriteDiscard', 2) # type: ignore
-hipGraphicsRegisterFlagsSurfaceLoadStore = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsSurfaceLoadStore', 4) # type: ignore
-hipGraphicsRegisterFlagsTextureGather = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsTextureGather', 8) # type: ignore
+class hipGraphicsRegisterFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphicsRegisterFlagsNone = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsNone', 0)
+hipGraphicsRegisterFlagsReadOnly = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsReadOnly', 1)
+hipGraphicsRegisterFlagsWriteDiscard = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsWriteDiscard', 2)
+hipGraphicsRegisterFlagsSurfaceLoadStore = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsSurfaceLoadStore', 4)
+hipGraphicsRegisterFlagsTextureGather = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsTextureGather', 8)
 
 class _hipGraphicsResource(ctypes.Structure): pass
-hipGraphicsResource = _hipGraphicsResource
-hipGraphicsResource_t = c.POINTER[_hipGraphicsResource]
+hipGraphicsResource: TypeAlias = _hipGraphicsResource
+hipGraphicsResource_t: TypeAlias = c.POINTER[_hipGraphicsResource]
 class ihipGraph(ctypes.Structure): pass
-hipGraph_t = c.POINTER[ihipGraph]
+hipGraph_t: TypeAlias = c.POINTER[ihipGraph]
 class hipGraphNode(ctypes.Structure): pass
-hipGraphNode_t = c.POINTER[hipGraphNode]
+hipGraphNode_t: TypeAlias = c.POINTER[hipGraphNode]
 class hipGraphExec(ctypes.Structure): pass
-hipGraphExec_t = c.POINTER[hipGraphExec]
+hipGraphExec_t: TypeAlias = c.POINTER[hipGraphExec]
 class hipUserObject(ctypes.Structure): pass
-hipUserObject_t = c.POINTER[hipUserObject]
-hipGraphNodeType = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphNodeTypeKernel = hipGraphNodeType.define('hipGraphNodeTypeKernel', 0) # type: ignore
-hipGraphNodeTypeMemcpy = hipGraphNodeType.define('hipGraphNodeTypeMemcpy', 1) # type: ignore
-hipGraphNodeTypeMemset = hipGraphNodeType.define('hipGraphNodeTypeMemset', 2) # type: ignore
-hipGraphNodeTypeHost = hipGraphNodeType.define('hipGraphNodeTypeHost', 3) # type: ignore
-hipGraphNodeTypeGraph = hipGraphNodeType.define('hipGraphNodeTypeGraph', 4) # type: ignore
-hipGraphNodeTypeEmpty = hipGraphNodeType.define('hipGraphNodeTypeEmpty', 5) # type: ignore
-hipGraphNodeTypeWaitEvent = hipGraphNodeType.define('hipGraphNodeTypeWaitEvent', 6) # type: ignore
-hipGraphNodeTypeEventRecord = hipGraphNodeType.define('hipGraphNodeTypeEventRecord', 7) # type: ignore
-hipGraphNodeTypeExtSemaphoreSignal = hipGraphNodeType.define('hipGraphNodeTypeExtSemaphoreSignal', 8) # type: ignore
-hipGraphNodeTypeExtSemaphoreWait = hipGraphNodeType.define('hipGraphNodeTypeExtSemaphoreWait', 9) # type: ignore
-hipGraphNodeTypeMemAlloc = hipGraphNodeType.define('hipGraphNodeTypeMemAlloc', 10) # type: ignore
-hipGraphNodeTypeMemFree = hipGraphNodeType.define('hipGraphNodeTypeMemFree', 11) # type: ignore
-hipGraphNodeTypeMemcpyFromSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyFromSymbol', 12) # type: ignore
-hipGraphNodeTypeMemcpyToSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyToSymbol', 13) # type: ignore
-hipGraphNodeTypeCount = hipGraphNodeType.define('hipGraphNodeTypeCount', 14) # type: ignore
+hipUserObject_t: TypeAlias = c.POINTER[hipUserObject]
+class hipGraphNodeType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphNodeTypeKernel = hipGraphNodeType.define('hipGraphNodeTypeKernel', 0)
+hipGraphNodeTypeMemcpy = hipGraphNodeType.define('hipGraphNodeTypeMemcpy', 1)
+hipGraphNodeTypeMemset = hipGraphNodeType.define('hipGraphNodeTypeMemset', 2)
+hipGraphNodeTypeHost = hipGraphNodeType.define('hipGraphNodeTypeHost', 3)
+hipGraphNodeTypeGraph = hipGraphNodeType.define('hipGraphNodeTypeGraph', 4)
+hipGraphNodeTypeEmpty = hipGraphNodeType.define('hipGraphNodeTypeEmpty', 5)
+hipGraphNodeTypeWaitEvent = hipGraphNodeType.define('hipGraphNodeTypeWaitEvent', 6)
+hipGraphNodeTypeEventRecord = hipGraphNodeType.define('hipGraphNodeTypeEventRecord', 7)
+hipGraphNodeTypeExtSemaphoreSignal = hipGraphNodeType.define('hipGraphNodeTypeExtSemaphoreSignal', 8)
+hipGraphNodeTypeExtSemaphoreWait = hipGraphNodeType.define('hipGraphNodeTypeExtSemaphoreWait', 9)
+hipGraphNodeTypeMemAlloc = hipGraphNodeType.define('hipGraphNodeTypeMemAlloc', 10)
+hipGraphNodeTypeMemFree = hipGraphNodeType.define('hipGraphNodeTypeMemFree', 11)
+hipGraphNodeTypeMemcpyFromSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyFromSymbol', 12)
+hipGraphNodeTypeMemcpyToSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyToSymbol', 13)
+hipGraphNodeTypeCount = hipGraphNodeType.define('hipGraphNodeTypeCount', 14)
 
-hipHostFn_t = c.CFUNCTYPE(None, c.POINTER[None])
+hipHostFn_t: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
 @c.record
 class hipHostNodeParams(c.Struct):
   SIZE = 16
@@ -904,10 +904,10 @@ class hipMemAllocNodeParams(c.Struct):
   accessDescCount: Annotated[size_t, 96]
   bytesize: Annotated[size_t, 104]
   dptr: Annotated[c.POINTER[None], 112]
-hipAccessProperty = CEnum(Annotated[int, ctypes.c_uint32])
-hipAccessPropertyNormal = hipAccessProperty.define('hipAccessPropertyNormal', 0) # type: ignore
-hipAccessPropertyStreaming = hipAccessProperty.define('hipAccessPropertyStreaming', 1) # type: ignore
-hipAccessPropertyPersisting = hipAccessProperty.define('hipAccessPropertyPersisting', 2) # type: ignore
+class hipAccessProperty(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipAccessPropertyNormal = hipAccessProperty.define('hipAccessPropertyNormal', 0)
+hipAccessPropertyStreaming = hipAccessProperty.define('hipAccessPropertyStreaming', 1)
+hipAccessPropertyPersisting = hipAccessProperty.define('hipAccessPropertyPersisting', 2)
 
 @c.record
 class hipAccessPolicyWindow(c.Struct):
@@ -917,10 +917,10 @@ class hipAccessPolicyWindow(c.Struct):
   hitRatio: Annotated[Annotated[float, ctypes.c_float], 12]
   missProp: Annotated[hipAccessProperty, 16]
   num_bytes: Annotated[size_t, 24]
-hipLaunchAttributeID = CEnum(Annotated[int, ctypes.c_uint32])
-hipLaunchAttributeAccessPolicyWindow = hipLaunchAttributeID.define('hipLaunchAttributeAccessPolicyWindow', 1) # type: ignore
-hipLaunchAttributeCooperative = hipLaunchAttributeID.define('hipLaunchAttributeCooperative', 2) # type: ignore
-hipLaunchAttributePriority = hipLaunchAttributeID.define('hipLaunchAttributePriority', 8) # type: ignore
+class hipLaunchAttributeID(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipLaunchAttributeAccessPolicyWindow = hipLaunchAttributeID.define('hipLaunchAttributeAccessPolicyWindow', 1)
+hipLaunchAttributeCooperative = hipLaunchAttributeID.define('hipLaunchAttributeCooperative', 2)
+hipLaunchAttributePriority = hipLaunchAttributeID.define('hipLaunchAttributePriority', 8)
 
 @c.record
 class hipLaunchAttributeValue(c.Struct):
@@ -937,67 +937,67 @@ class HIP_MEMSET_NODE_PARAMS(c.Struct):
   elementSize: Annotated[Annotated[int, ctypes.c_uint32], 20]
   width: Annotated[size_t, 24]
   height: Annotated[size_t, 32]
-hipDeviceptr_t = c.POINTER[None]
-hipGraphExecUpdateResult = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphExecUpdateSuccess = hipGraphExecUpdateResult.define('hipGraphExecUpdateSuccess', 0) # type: ignore
-hipGraphExecUpdateError = hipGraphExecUpdateResult.define('hipGraphExecUpdateError', 1) # type: ignore
-hipGraphExecUpdateErrorTopologyChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorTopologyChanged', 2) # type: ignore
-hipGraphExecUpdateErrorNodeTypeChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorNodeTypeChanged', 3) # type: ignore
-hipGraphExecUpdateErrorFunctionChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorFunctionChanged', 4) # type: ignore
-hipGraphExecUpdateErrorParametersChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorParametersChanged', 5) # type: ignore
-hipGraphExecUpdateErrorNotSupported = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorNotSupported', 6) # type: ignore
-hipGraphExecUpdateErrorUnsupportedFunctionChange = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorUnsupportedFunctionChange', 7) # type: ignore
+hipDeviceptr_t: TypeAlias = c.POINTER[None]
+class hipGraphExecUpdateResult(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphExecUpdateSuccess = hipGraphExecUpdateResult.define('hipGraphExecUpdateSuccess', 0)
+hipGraphExecUpdateError = hipGraphExecUpdateResult.define('hipGraphExecUpdateError', 1)
+hipGraphExecUpdateErrorTopologyChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorTopologyChanged', 2)
+hipGraphExecUpdateErrorNodeTypeChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorNodeTypeChanged', 3)
+hipGraphExecUpdateErrorFunctionChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorFunctionChanged', 4)
+hipGraphExecUpdateErrorParametersChanged = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorParametersChanged', 5)
+hipGraphExecUpdateErrorNotSupported = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorNotSupported', 6)
+hipGraphExecUpdateErrorUnsupportedFunctionChange = hipGraphExecUpdateResult.define('hipGraphExecUpdateErrorUnsupportedFunctionChange', 7)
 
-hipStreamCaptureMode = CEnum(Annotated[int, ctypes.c_uint32])
-hipStreamCaptureModeGlobal = hipStreamCaptureMode.define('hipStreamCaptureModeGlobal', 0) # type: ignore
-hipStreamCaptureModeThreadLocal = hipStreamCaptureMode.define('hipStreamCaptureModeThreadLocal', 1) # type: ignore
-hipStreamCaptureModeRelaxed = hipStreamCaptureMode.define('hipStreamCaptureModeRelaxed', 2) # type: ignore
+class hipStreamCaptureMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipStreamCaptureModeGlobal = hipStreamCaptureMode.define('hipStreamCaptureModeGlobal', 0)
+hipStreamCaptureModeThreadLocal = hipStreamCaptureMode.define('hipStreamCaptureModeThreadLocal', 1)
+hipStreamCaptureModeRelaxed = hipStreamCaptureMode.define('hipStreamCaptureModeRelaxed', 2)
 
-hipStreamCaptureStatus = CEnum(Annotated[int, ctypes.c_uint32])
-hipStreamCaptureStatusNone = hipStreamCaptureStatus.define('hipStreamCaptureStatusNone', 0) # type: ignore
-hipStreamCaptureStatusActive = hipStreamCaptureStatus.define('hipStreamCaptureStatusActive', 1) # type: ignore
-hipStreamCaptureStatusInvalidated = hipStreamCaptureStatus.define('hipStreamCaptureStatusInvalidated', 2) # type: ignore
+class hipStreamCaptureStatus(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipStreamCaptureStatusNone = hipStreamCaptureStatus.define('hipStreamCaptureStatusNone', 0)
+hipStreamCaptureStatusActive = hipStreamCaptureStatus.define('hipStreamCaptureStatusActive', 1)
+hipStreamCaptureStatusInvalidated = hipStreamCaptureStatus.define('hipStreamCaptureStatusInvalidated', 2)
 
-hipStreamUpdateCaptureDependenciesFlags = CEnum(Annotated[int, ctypes.c_uint32])
-hipStreamAddCaptureDependencies = hipStreamUpdateCaptureDependenciesFlags.define('hipStreamAddCaptureDependencies', 0) # type: ignore
-hipStreamSetCaptureDependencies = hipStreamUpdateCaptureDependenciesFlags.define('hipStreamSetCaptureDependencies', 1) # type: ignore
+class hipStreamUpdateCaptureDependenciesFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipStreamAddCaptureDependencies = hipStreamUpdateCaptureDependenciesFlags.define('hipStreamAddCaptureDependencies', 0)
+hipStreamSetCaptureDependencies = hipStreamUpdateCaptureDependenciesFlags.define('hipStreamSetCaptureDependencies', 1)
 
-hipGraphMemAttributeType = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphMemAttrUsedMemCurrent = hipGraphMemAttributeType.define('hipGraphMemAttrUsedMemCurrent', 0) # type: ignore
-hipGraphMemAttrUsedMemHigh = hipGraphMemAttributeType.define('hipGraphMemAttrUsedMemHigh', 1) # type: ignore
-hipGraphMemAttrReservedMemCurrent = hipGraphMemAttributeType.define('hipGraphMemAttrReservedMemCurrent', 2) # type: ignore
-hipGraphMemAttrReservedMemHigh = hipGraphMemAttributeType.define('hipGraphMemAttrReservedMemHigh', 3) # type: ignore
+class hipGraphMemAttributeType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphMemAttrUsedMemCurrent = hipGraphMemAttributeType.define('hipGraphMemAttrUsedMemCurrent', 0)
+hipGraphMemAttrUsedMemHigh = hipGraphMemAttributeType.define('hipGraphMemAttrUsedMemHigh', 1)
+hipGraphMemAttrReservedMemCurrent = hipGraphMemAttributeType.define('hipGraphMemAttrReservedMemCurrent', 2)
+hipGraphMemAttrReservedMemHigh = hipGraphMemAttributeType.define('hipGraphMemAttrReservedMemHigh', 3)
 
-hipUserObjectFlags = CEnum(Annotated[int, ctypes.c_uint32])
-hipUserObjectNoDestructorSync = hipUserObjectFlags.define('hipUserObjectNoDestructorSync', 1) # type: ignore
+class hipUserObjectFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipUserObjectNoDestructorSync = hipUserObjectFlags.define('hipUserObjectNoDestructorSync', 1)
 
-hipUserObjectRetainFlags = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphUserObjectMove = hipUserObjectRetainFlags.define('hipGraphUserObjectMove', 1) # type: ignore
+class hipUserObjectRetainFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphUserObjectMove = hipUserObjectRetainFlags.define('hipGraphUserObjectMove', 1)
 
-hipGraphInstantiateFlags = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphInstantiateFlagAutoFreeOnLaunch = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagAutoFreeOnLaunch', 1) # type: ignore
-hipGraphInstantiateFlagUpload = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagUpload', 2) # type: ignore
-hipGraphInstantiateFlagDeviceLaunch = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagDeviceLaunch', 4) # type: ignore
-hipGraphInstantiateFlagUseNodePriority = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagUseNodePriority', 8) # type: ignore
+class hipGraphInstantiateFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphInstantiateFlagAutoFreeOnLaunch = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagAutoFreeOnLaunch', 1)
+hipGraphInstantiateFlagUpload = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagUpload', 2)
+hipGraphInstantiateFlagDeviceLaunch = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagDeviceLaunch', 4)
+hipGraphInstantiateFlagUseNodePriority = hipGraphInstantiateFlags.define('hipGraphInstantiateFlagUseNodePriority', 8)
 
-hipGraphDebugDotFlags = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphDebugDotFlagsVerbose = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsVerbose', 1) # type: ignore
-hipGraphDebugDotFlagsKernelNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsKernelNodeParams', 4) # type: ignore
-hipGraphDebugDotFlagsMemcpyNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsMemcpyNodeParams', 8) # type: ignore
-hipGraphDebugDotFlagsMemsetNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsMemsetNodeParams', 16) # type: ignore
-hipGraphDebugDotFlagsHostNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsHostNodeParams', 32) # type: ignore
-hipGraphDebugDotFlagsEventNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsEventNodeParams', 64) # type: ignore
-hipGraphDebugDotFlagsExtSemasSignalNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsExtSemasSignalNodeParams', 128) # type: ignore
-hipGraphDebugDotFlagsExtSemasWaitNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsExtSemasWaitNodeParams', 256) # type: ignore
-hipGraphDebugDotFlagsKernelNodeAttributes = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsKernelNodeAttributes', 512) # type: ignore
-hipGraphDebugDotFlagsHandles = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsHandles', 1024) # type: ignore
+class hipGraphDebugDotFlags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphDebugDotFlagsVerbose = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsVerbose', 1)
+hipGraphDebugDotFlagsKernelNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsKernelNodeParams', 4)
+hipGraphDebugDotFlagsMemcpyNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsMemcpyNodeParams', 8)
+hipGraphDebugDotFlagsMemsetNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsMemsetNodeParams', 16)
+hipGraphDebugDotFlagsHostNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsHostNodeParams', 32)
+hipGraphDebugDotFlagsEventNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsEventNodeParams', 64)
+hipGraphDebugDotFlagsExtSemasSignalNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsExtSemasSignalNodeParams', 128)
+hipGraphDebugDotFlagsExtSemasWaitNodeParams = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsExtSemasWaitNodeParams', 256)
+hipGraphDebugDotFlagsKernelNodeAttributes = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsKernelNodeAttributes', 512)
+hipGraphDebugDotFlagsHandles = hipGraphDebugDotFlags.define('hipGraphDebugDotFlagsHandles', 1024)
 
-hipGraphInstantiateResult = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphInstantiateSuccess = hipGraphInstantiateResult.define('hipGraphInstantiateSuccess', 0) # type: ignore
-hipGraphInstantiateError = hipGraphInstantiateResult.define('hipGraphInstantiateError', 1) # type: ignore
-hipGraphInstantiateInvalidStructure = hipGraphInstantiateResult.define('hipGraphInstantiateInvalidStructure', 2) # type: ignore
-hipGraphInstantiateNodeOperationNotSupported = hipGraphInstantiateResult.define('hipGraphInstantiateNodeOperationNotSupported', 3) # type: ignore
-hipGraphInstantiateMultipleDevicesNotSupported = hipGraphInstantiateResult.define('hipGraphInstantiateMultipleDevicesNotSupported', 4) # type: ignore
+class hipGraphInstantiateResult(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphInstantiateSuccess = hipGraphInstantiateResult.define('hipGraphInstantiateSuccess', 0)
+hipGraphInstantiateError = hipGraphInstantiateResult.define('hipGraphInstantiateError', 1)
+hipGraphInstantiateInvalidStructure = hipGraphInstantiateResult.define('hipGraphInstantiateInvalidStructure', 2)
+hipGraphInstantiateNodeOperationNotSupported = hipGraphInstantiateResult.define('hipGraphInstantiateNodeOperationNotSupported', 3)
+hipGraphInstantiateMultipleDevicesNotSupported = hipGraphInstantiateResult.define('hipGraphInstantiateMultipleDevicesNotSupported', 4)
 
 @c.record
 class hipGraphInstantiateParams(c.Struct):
@@ -1033,21 +1033,21 @@ class hipExternalSemaphoreWaitNodeParams(c.Struct):
   paramsArray: Annotated[c.POINTER[hipExternalSemaphoreWaitParams], 8]
   numExtSems: Annotated[Annotated[int, ctypes.c_uint32], 16]
 class ihipMemGenericAllocationHandle(ctypes.Structure): pass
-hipMemGenericAllocationHandle_t = c.POINTER[ihipMemGenericAllocationHandle]
-hipMemAllocationGranularity_flags = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemAllocationGranularityMinimum = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityMinimum', 0) # type: ignore
-hipMemAllocationGranularityRecommended = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityRecommended', 1) # type: ignore
+hipMemGenericAllocationHandle_t: TypeAlias = c.POINTER[ihipMemGenericAllocationHandle]
+class hipMemAllocationGranularity_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemAllocationGranularityMinimum = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityMinimum', 0)
+hipMemAllocationGranularityRecommended = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityRecommended', 1)
 
-hipMemHandleType = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemHandleTypeGeneric = hipMemHandleType.define('hipMemHandleTypeGeneric', 0) # type: ignore
+class hipMemHandleType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemHandleTypeGeneric = hipMemHandleType.define('hipMemHandleTypeGeneric', 0)
 
-hipMemOperationType = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemOperationTypeMap = hipMemOperationType.define('hipMemOperationTypeMap', 1) # type: ignore
-hipMemOperationTypeUnmap = hipMemOperationType.define('hipMemOperationTypeUnmap', 2) # type: ignore
+class hipMemOperationType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemOperationTypeMap = hipMemOperationType.define('hipMemOperationTypeMap', 1)
+hipMemOperationTypeUnmap = hipMemOperationType.define('hipMemOperationTypeUnmap', 2)
 
-hipArraySparseSubresourceType = CEnum(Annotated[int, ctypes.c_uint32])
-hipArraySparseSubresourceTypeSparseLevel = hipArraySparseSubresourceType.define('hipArraySparseSubresourceTypeSparseLevel', 0) # type: ignore
-hipArraySparseSubresourceTypeMiptail = hipArraySparseSubresourceType.define('hipArraySparseSubresourceTypeMiptail', 1) # type: ignore
+class hipArraySparseSubresourceType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipArraySparseSubresourceTypeSparseLevel = hipArraySparseSubresourceType.define('hipArraySparseSubresourceTypeSparseLevel', 0)
+hipArraySparseSubresourceTypeMiptail = hipArraySparseSubresourceType.define('hipArraySparseSubresourceTypeMiptail', 1)
 
 @c.record
 class hipArrayMapInfo(c.Struct):
@@ -1063,11 +1063,11 @@ class hipArrayMapInfo(c.Struct):
   deviceBitMask: Annotated[Annotated[int, ctypes.c_uint32], 136]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 140]
   reserved: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[2]], 144]
-hipResourceType = CEnum(Annotated[int, ctypes.c_uint32])
-hipResourceTypeArray = hipResourceType.define('hipResourceTypeArray', 0) # type: ignore
-hipResourceTypeMipmappedArray = hipResourceType.define('hipResourceTypeMipmappedArray', 1) # type: ignore
-hipResourceTypeLinear = hipResourceType.define('hipResourceTypeLinear', 2) # type: ignore
-hipResourceTypePitch2D = hipResourceType.define('hipResourceTypePitch2D', 3) # type: ignore
+class hipResourceType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipResourceTypeArray = hipResourceType.define('hipResourceTypeArray', 0)
+hipResourceTypeMipmappedArray = hipResourceType.define('hipResourceTypeMipmappedArray', 1)
+hipResourceTypeLinear = hipResourceType.define('hipResourceTypeLinear', 2)
+hipResourceTypePitch2D = hipResourceType.define('hipResourceTypePitch2D', 3)
 
 @c.record
 class hipArrayMapInfo_resource(c.Struct):
@@ -1088,18 +1088,18 @@ class hipMipmappedArray(c.Struct):
   flags: Annotated[Annotated[int, ctypes.c_uint32], 52]
   format: Annotated[hipArray_Format, 56]
   num_channels: Annotated[Annotated[int, ctypes.c_uint32], 60]
-hipArray_Format = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_AD_FORMAT_UNSIGNED_INT8 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT8', 1) # type: ignore
-HIP_AD_FORMAT_UNSIGNED_INT16 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT16', 2) # type: ignore
-HIP_AD_FORMAT_UNSIGNED_INT32 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT32', 3) # type: ignore
-HIP_AD_FORMAT_SIGNED_INT8 = hipArray_Format.define('HIP_AD_FORMAT_SIGNED_INT8', 8) # type: ignore
-HIP_AD_FORMAT_SIGNED_INT16 = hipArray_Format.define('HIP_AD_FORMAT_SIGNED_INT16', 9) # type: ignore
-HIP_AD_FORMAT_SIGNED_INT32 = hipArray_Format.define('HIP_AD_FORMAT_SIGNED_INT32', 10) # type: ignore
-HIP_AD_FORMAT_HALF = hipArray_Format.define('HIP_AD_FORMAT_HALF', 16) # type: ignore
-HIP_AD_FORMAT_FLOAT = hipArray_Format.define('HIP_AD_FORMAT_FLOAT', 32) # type: ignore
+class hipArray_Format(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_AD_FORMAT_UNSIGNED_INT8 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT8', 1)
+HIP_AD_FORMAT_UNSIGNED_INT16 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT16', 2)
+HIP_AD_FORMAT_UNSIGNED_INT32 = hipArray_Format.define('HIP_AD_FORMAT_UNSIGNED_INT32', 3)
+HIP_AD_FORMAT_SIGNED_INT8 = hipArray_Format.define('HIP_AD_FORMAT_SIGNED_INT8', 8)
+HIP_AD_FORMAT_SIGNED_INT16 = hipArray_Format.define('HIP_AD_FORMAT_SIGNED_INT16', 9)
+HIP_AD_FORMAT_SIGNED_INT32 = hipArray_Format.define('HIP_AD_FORMAT_SIGNED_INT32', 10)
+HIP_AD_FORMAT_HALF = hipArray_Format.define('HIP_AD_FORMAT_HALF', 16)
+HIP_AD_FORMAT_FLOAT = hipArray_Format.define('HIP_AD_FORMAT_FLOAT', 32)
 
 class hipArray(ctypes.Structure): pass
-hipArray_t = c.POINTER[hipArray]
+hipArray_t: TypeAlias = c.POINTER[hipArray]
 @c.record
 class hipArrayMapInfo_subresource(c.Struct):
   SIZE = 32
@@ -1156,13 +1156,13 @@ class hipPitchedPtr(c.Struct):
   pitch: Annotated[size_t, 8]
   xsize: Annotated[size_t, 16]
   ysize: Annotated[size_t, 24]
-hipMemcpyKind = CEnum(Annotated[int, ctypes.c_uint32])
-hipMemcpyHostToHost = hipMemcpyKind.define('hipMemcpyHostToHost', 0) # type: ignore
-hipMemcpyHostToDevice = hipMemcpyKind.define('hipMemcpyHostToDevice', 1) # type: ignore
-hipMemcpyDeviceToHost = hipMemcpyKind.define('hipMemcpyDeviceToHost', 2) # type: ignore
-hipMemcpyDeviceToDevice = hipMemcpyKind.define('hipMemcpyDeviceToDevice', 3) # type: ignore
-hipMemcpyDefault = hipMemcpyKind.define('hipMemcpyDefault', 4) # type: ignore
-hipMemcpyDeviceToDeviceNoCU = hipMemcpyKind.define('hipMemcpyDeviceToDeviceNoCU', 1024) # type: ignore
+class hipMemcpyKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipMemcpyHostToHost = hipMemcpyKind.define('hipMemcpyHostToHost', 0)
+hipMemcpyHostToDevice = hipMemcpyKind.define('hipMemcpyHostToDevice', 1)
+hipMemcpyDeviceToHost = hipMemcpyKind.define('hipMemcpyDeviceToHost', 2)
+hipMemcpyDeviceToDevice = hipMemcpyKind.define('hipMemcpyDeviceToDevice', 3)
+hipMemcpyDefault = hipMemcpyKind.define('hipMemcpyDefault', 4)
+hipMemcpyDeviceToDeviceNoCU = hipMemcpyKind.define('hipMemcpyDeviceToDeviceNoCU', 1024)
 
 @c.record
 class hipChildGraphNodeParams(c.Struct):
@@ -1198,9 +1198,9 @@ class hipGraphNodeParams(c.Struct):
   alloc: Annotated[hipMemAllocNodeParams, 16]
   free: Annotated[hipMemFreeNodeParams, 16]
   reserved2: Annotated[Annotated[int, ctypes.c_int64], 248]
-hipGraphDependencyType = CEnum(Annotated[int, ctypes.c_uint32])
-hipGraphDependencyTypeDefault = hipGraphDependencyType.define('hipGraphDependencyTypeDefault', 0) # type: ignore
-hipGraphDependencyTypeProgrammatic = hipGraphDependencyType.define('hipGraphDependencyTypeProgrammatic', 1) # type: ignore
+class hipGraphDependencyType(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipGraphDependencyTypeDefault = hipGraphDependencyType.define('hipGraphDependencyTypeDefault', 0)
+hipGraphDependencyTypeProgrammatic = hipGraphDependencyType.define('hipGraphDependencyTypeProgrammatic', 1)
 
 @c.record
 class hipGraphEdgeData(c.Struct):
@@ -1329,12 +1329,12 @@ def hipStreamGetDevice(stream:hipStream_t, device:c.POINTER[hipDevice_t]) -> hip
 def hipExtStreamCreateWithCUMask(stream:c.POINTER[hipStream_t], cuMaskSize:uint32_t, cuMask:c.POINTER[uint32_t]) -> hipError_t: ...
 @dll.bind
 def hipExtStreamGetCUMask(stream:hipStream_t, cuMaskSize:uint32_t, cuMask:c.POINTER[uint32_t]) -> hipError_t: ...
-hipStreamCallback_t = c.CFUNCTYPE(None, c.POINTER[ihipStream_t], hipError_t, c.POINTER[None])
+hipStreamCallback_t: TypeAlias = c.CFUNCTYPE(None, c.POINTER[ihipStream_t], hipError_t, c.POINTER[None])
 @dll.bind
 def hipStreamAddCallback(stream:hipStream_t, callback:hipStreamCallback_t, userData:c.POINTER[None], flags:Annotated[int, ctypes.c_uint32]) -> hipError_t: ...
 @dll.bind
 def hipStreamWaitValue32(stream:hipStream_t, ptr:c.POINTER[None], value:uint32_t, flags:Annotated[int, ctypes.c_uint32], mask:uint32_t) -> hipError_t: ...
-uint64_t = Annotated[int, ctypes.c_uint64]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def hipStreamWaitValue64(stream:hipStream_t, ptr:c.POINTER[None], value:uint64_t, flags:Annotated[int, ctypes.c_uint32], mask:uint64_t) -> hipError_t: ...
 @dll.bind
@@ -1355,24 +1355,24 @@ def hipEventSynchronize(event:hipEvent_t) -> hipError_t: ...
 def hipEventElapsedTime(ms:c.POINTER[Annotated[float, ctypes.c_float]], start:hipEvent_t, stop:hipEvent_t) -> hipError_t: ...
 @dll.bind
 def hipEventQuery(event:hipEvent_t) -> hipError_t: ...
-hipPointer_attribute = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_POINTER_ATTRIBUTE_CONTEXT = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_CONTEXT', 1) # type: ignore
-HIP_POINTER_ATTRIBUTE_MEMORY_TYPE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MEMORY_TYPE', 2) # type: ignore
-HIP_POINTER_ATTRIBUTE_DEVICE_POINTER = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_DEVICE_POINTER', 3) # type: ignore
-HIP_POINTER_ATTRIBUTE_HOST_POINTER = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_HOST_POINTER', 4) # type: ignore
-HIP_POINTER_ATTRIBUTE_P2P_TOKENS = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_P2P_TOKENS', 5) # type: ignore
-HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS', 6) # type: ignore
-HIP_POINTER_ATTRIBUTE_BUFFER_ID = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_BUFFER_ID', 7) # type: ignore
-HIP_POINTER_ATTRIBUTE_IS_MANAGED = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_IS_MANAGED', 8) # type: ignore
-HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL', 9) # type: ignore
-HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE', 10) # type: ignore
-HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR', 11) # type: ignore
-HIP_POINTER_ATTRIBUTE_RANGE_SIZE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_RANGE_SIZE', 12) # type: ignore
-HIP_POINTER_ATTRIBUTE_MAPPED = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MAPPED', 13) # type: ignore
-HIP_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES', 14) # type: ignore
-HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE', 15) # type: ignore
-HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS', 16) # type: ignore
-HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE', 17) # type: ignore
+class hipPointer_attribute(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_POINTER_ATTRIBUTE_CONTEXT = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_CONTEXT', 1)
+HIP_POINTER_ATTRIBUTE_MEMORY_TYPE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MEMORY_TYPE', 2)
+HIP_POINTER_ATTRIBUTE_DEVICE_POINTER = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_DEVICE_POINTER', 3)
+HIP_POINTER_ATTRIBUTE_HOST_POINTER = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_HOST_POINTER', 4)
+HIP_POINTER_ATTRIBUTE_P2P_TOKENS = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_P2P_TOKENS', 5)
+HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS', 6)
+HIP_POINTER_ATTRIBUTE_BUFFER_ID = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_BUFFER_ID', 7)
+HIP_POINTER_ATTRIBUTE_IS_MANAGED = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_IS_MANAGED', 8)
+HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL', 9)
+HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE', 10)
+HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR', 11)
+HIP_POINTER_ATTRIBUTE_RANGE_SIZE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_RANGE_SIZE', 12)
+HIP_POINTER_ATTRIBUTE_MAPPED = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MAPPED', 13)
+HIP_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES', 14)
+HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_IS_GPU_DIRECT_RDMA_CAPABLE', 15)
+HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS', 16)
+HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE = hipPointer_attribute.define('HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE', 17)
 
 @dll.bind
 def hipPointerSetAttribute(value:c.POINTER[None], attribute:hipPointer_attribute, ptr:hipDeviceptr_t) -> hipError_t: ...
@@ -1396,7 +1396,7 @@ def hipImportExternalMemory(extMem_out:c.POINTER[hipExternalMemory_t], memHandle
 def hipExternalMemoryGetMappedBuffer(devPtr:c.POINTER[c.POINTER[None]], extMem:hipExternalMemory_t, bufferDesc:c.POINTER[hipExternalMemoryBufferDesc]) -> hipError_t: ...
 @dll.bind
 def hipDestroyExternalMemory(extMem:hipExternalMemory_t) -> hipError_t: ...
-hipMipmappedArray_t = c.POINTER[hipMipmappedArray]
+hipMipmappedArray_t: TypeAlias = c.POINTER[hipMipmappedArray]
 @dll.bind
 def hipExternalMemoryGetMappedMipmappedArray(mipmap:c.POINTER[hipMipmappedArray_t], extMem:hipExternalMemory_t, mipmapDesc:c.POINTER[hipExternalMemoryMipmappedArrayDesc]) -> hipError_t: ...
 @dll.bind
@@ -1608,7 +1608,7 @@ def hipMemcpy2DAsync(dst:c.POINTER[None], dpitch:size_t, src:c.POINTER[None], sp
 def hipMemcpy2DToArray(dst:hipArray_t, wOffset:size_t, hOffset:size_t, src:c.POINTER[None], spitch:size_t, width:size_t, height:size_t, kind:hipMemcpyKind) -> hipError_t: ...
 @dll.bind
 def hipMemcpy2DToArrayAsync(dst:hipArray_t, wOffset:size_t, hOffset:size_t, src:c.POINTER[None], spitch:size_t, width:size_t, height:size_t, kind:hipMemcpyKind, stream:hipStream_t) -> hipError_t: ...
-hipArray_const_t = c.POINTER[hipArray]
+hipArray_const_t: TypeAlias = c.POINTER[hipArray]
 @dll.bind
 def hipMemcpy2DArrayToArray(dst:hipArray_t, wOffsetDst:size_t, hOffsetDst:size_t, src:hipArray_const_t, wOffsetSrc:size_t, hOffsetSrc:size_t, width:size_t, height:size_t, kind:hipMemcpyKind) -> hipError_t: ...
 @dll.bind
@@ -1719,18 +1719,18 @@ def hipModuleUnload(module:hipModule_t) -> hipError_t: ...
 def hipModuleGetFunction(function:c.POINTER[hipFunction_t], module:hipModule_t, kname:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> hipError_t: ...
 @dll.bind
 def hipFuncGetAttributes(attr:c.POINTER[hipFuncAttributes], func:c.POINTER[None]) -> hipError_t: ...
-hipFunction_attribute = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK', 0) # type: ignore
-HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES', 1) # type: ignore
-HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES', 2) # type: ignore
-HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES', 3) # type: ignore
-HIP_FUNC_ATTRIBUTE_NUM_REGS = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_NUM_REGS', 4) # type: ignore
-HIP_FUNC_ATTRIBUTE_PTX_VERSION = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_PTX_VERSION', 5) # type: ignore
-HIP_FUNC_ATTRIBUTE_BINARY_VERSION = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_BINARY_VERSION', 6) # type: ignore
-HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA', 7) # type: ignore
-HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES', 8) # type: ignore
-HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT', 9) # type: ignore
-HIP_FUNC_ATTRIBUTE_MAX = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX', 10) # type: ignore
+class hipFunction_attribute(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK', 0)
+HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES', 1)
+HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES', 2)
+HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES', 3)
+HIP_FUNC_ATTRIBUTE_NUM_REGS = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_NUM_REGS', 4)
+HIP_FUNC_ATTRIBUTE_PTX_VERSION = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_PTX_VERSION', 5)
+HIP_FUNC_ATTRIBUTE_BINARY_VERSION = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_BINARY_VERSION', 6)
+HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA', 7)
+HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES', 8)
+HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT', 9)
+HIP_FUNC_ATTRIBUTE_MAX = hipFunction_attribute.define('HIP_FUNC_ATTRIBUTE_MAX', 10)
 
 @dll.bind
 def hipFuncGetAttribute(value:c.POINTER[Annotated[int, ctypes.c_int32]], attrib:hipFunction_attribute, hfunc:hipFunction_t) -> hipError_t: ...
@@ -1753,22 +1753,22 @@ class textureReference(c.Struct):
   textureObject: Annotated[hipTextureObject_t, 72]
   numChannels: Annotated[Annotated[int, ctypes.c_int32], 80]
   format: Annotated[hipArray_Format, 84]
-hipTextureReadMode = CEnum(Annotated[int, ctypes.c_uint32])
-hipReadModeElementType = hipTextureReadMode.define('hipReadModeElementType', 0) # type: ignore
-hipReadModeNormalizedFloat = hipTextureReadMode.define('hipReadModeNormalizedFloat', 1) # type: ignore
+class hipTextureReadMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipReadModeElementType = hipTextureReadMode.define('hipReadModeElementType', 0)
+hipReadModeNormalizedFloat = hipTextureReadMode.define('hipReadModeNormalizedFloat', 1)
 
-hipTextureFilterMode = CEnum(Annotated[int, ctypes.c_uint32])
-hipFilterModePoint = hipTextureFilterMode.define('hipFilterModePoint', 0) # type: ignore
-hipFilterModeLinear = hipTextureFilterMode.define('hipFilterModeLinear', 1) # type: ignore
+class hipTextureFilterMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipFilterModePoint = hipTextureFilterMode.define('hipFilterModePoint', 0)
+hipFilterModeLinear = hipTextureFilterMode.define('hipFilterModeLinear', 1)
 
-hipTextureAddressMode = CEnum(Annotated[int, ctypes.c_uint32])
-hipAddressModeWrap = hipTextureAddressMode.define('hipAddressModeWrap', 0) # type: ignore
-hipAddressModeClamp = hipTextureAddressMode.define('hipAddressModeClamp', 1) # type: ignore
-hipAddressModeMirror = hipTextureAddressMode.define('hipAddressModeMirror', 2) # type: ignore
-hipAddressModeBorder = hipTextureAddressMode.define('hipAddressModeBorder', 3) # type: ignore
+class hipTextureAddressMode(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipAddressModeWrap = hipTextureAddressMode.define('hipAddressModeWrap', 0)
+hipAddressModeClamp = hipTextureAddressMode.define('hipAddressModeClamp', 1)
+hipAddressModeMirror = hipTextureAddressMode.define('hipAddressModeMirror', 2)
+hipAddressModeBorder = hipTextureAddressMode.define('hipAddressModeBorder', 3)
 
 class __hip_texture(ctypes.Structure): pass
-hipTextureObject_t = c.POINTER[__hip_texture]
+hipTextureObject_t: TypeAlias = c.POINTER[__hip_texture]
 @dll.bind
 def hipModuleGetTexRef(texRef:c.POINTER[c.POINTER[textureReference]], hmod:hipModule_t, name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> hipError_t: ...
 @dll.bind
@@ -1880,42 +1880,42 @@ class hipResourceViewDesc(c.Struct):
   lastMipmapLevel: Annotated[Annotated[int, ctypes.c_uint32], 36]
   firstLayer: Annotated[Annotated[int, ctypes.c_uint32], 40]
   lastLayer: Annotated[Annotated[int, ctypes.c_uint32], 44]
-hipResourceViewFormat = CEnum(Annotated[int, ctypes.c_uint32])
-hipResViewFormatNone = hipResourceViewFormat.define('hipResViewFormatNone', 0) # type: ignore
-hipResViewFormatUnsignedChar1 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar1', 1) # type: ignore
-hipResViewFormatUnsignedChar2 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar2', 2) # type: ignore
-hipResViewFormatUnsignedChar4 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar4', 3) # type: ignore
-hipResViewFormatSignedChar1 = hipResourceViewFormat.define('hipResViewFormatSignedChar1', 4) # type: ignore
-hipResViewFormatSignedChar2 = hipResourceViewFormat.define('hipResViewFormatSignedChar2', 5) # type: ignore
-hipResViewFormatSignedChar4 = hipResourceViewFormat.define('hipResViewFormatSignedChar4', 6) # type: ignore
-hipResViewFormatUnsignedShort1 = hipResourceViewFormat.define('hipResViewFormatUnsignedShort1', 7) # type: ignore
-hipResViewFormatUnsignedShort2 = hipResourceViewFormat.define('hipResViewFormatUnsignedShort2', 8) # type: ignore
-hipResViewFormatUnsignedShort4 = hipResourceViewFormat.define('hipResViewFormatUnsignedShort4', 9) # type: ignore
-hipResViewFormatSignedShort1 = hipResourceViewFormat.define('hipResViewFormatSignedShort1', 10) # type: ignore
-hipResViewFormatSignedShort2 = hipResourceViewFormat.define('hipResViewFormatSignedShort2', 11) # type: ignore
-hipResViewFormatSignedShort4 = hipResourceViewFormat.define('hipResViewFormatSignedShort4', 12) # type: ignore
-hipResViewFormatUnsignedInt1 = hipResourceViewFormat.define('hipResViewFormatUnsignedInt1', 13) # type: ignore
-hipResViewFormatUnsignedInt2 = hipResourceViewFormat.define('hipResViewFormatUnsignedInt2', 14) # type: ignore
-hipResViewFormatUnsignedInt4 = hipResourceViewFormat.define('hipResViewFormatUnsignedInt4', 15) # type: ignore
-hipResViewFormatSignedInt1 = hipResourceViewFormat.define('hipResViewFormatSignedInt1', 16) # type: ignore
-hipResViewFormatSignedInt2 = hipResourceViewFormat.define('hipResViewFormatSignedInt2', 17) # type: ignore
-hipResViewFormatSignedInt4 = hipResourceViewFormat.define('hipResViewFormatSignedInt4', 18) # type: ignore
-hipResViewFormatHalf1 = hipResourceViewFormat.define('hipResViewFormatHalf1', 19) # type: ignore
-hipResViewFormatHalf2 = hipResourceViewFormat.define('hipResViewFormatHalf2', 20) # type: ignore
-hipResViewFormatHalf4 = hipResourceViewFormat.define('hipResViewFormatHalf4', 21) # type: ignore
-hipResViewFormatFloat1 = hipResourceViewFormat.define('hipResViewFormatFloat1', 22) # type: ignore
-hipResViewFormatFloat2 = hipResourceViewFormat.define('hipResViewFormatFloat2', 23) # type: ignore
-hipResViewFormatFloat4 = hipResourceViewFormat.define('hipResViewFormatFloat4', 24) # type: ignore
-hipResViewFormatUnsignedBlockCompressed1 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed1', 25) # type: ignore
-hipResViewFormatUnsignedBlockCompressed2 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed2', 26) # type: ignore
-hipResViewFormatUnsignedBlockCompressed3 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed3', 27) # type: ignore
-hipResViewFormatUnsignedBlockCompressed4 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed4', 28) # type: ignore
-hipResViewFormatSignedBlockCompressed4 = hipResourceViewFormat.define('hipResViewFormatSignedBlockCompressed4', 29) # type: ignore
-hipResViewFormatUnsignedBlockCompressed5 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed5', 30) # type: ignore
-hipResViewFormatSignedBlockCompressed5 = hipResourceViewFormat.define('hipResViewFormatSignedBlockCompressed5', 31) # type: ignore
-hipResViewFormatUnsignedBlockCompressed6H = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed6H', 32) # type: ignore
-hipResViewFormatSignedBlockCompressed6H = hipResourceViewFormat.define('hipResViewFormatSignedBlockCompressed6H', 33) # type: ignore
-hipResViewFormatUnsignedBlockCompressed7 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed7', 34) # type: ignore
+class hipResourceViewFormat(Annotated[int, ctypes.c_uint32], c.Enum): pass
+hipResViewFormatNone = hipResourceViewFormat.define('hipResViewFormatNone', 0)
+hipResViewFormatUnsignedChar1 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar1', 1)
+hipResViewFormatUnsignedChar2 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar2', 2)
+hipResViewFormatUnsignedChar4 = hipResourceViewFormat.define('hipResViewFormatUnsignedChar4', 3)
+hipResViewFormatSignedChar1 = hipResourceViewFormat.define('hipResViewFormatSignedChar1', 4)
+hipResViewFormatSignedChar2 = hipResourceViewFormat.define('hipResViewFormatSignedChar2', 5)
+hipResViewFormatSignedChar4 = hipResourceViewFormat.define('hipResViewFormatSignedChar4', 6)
+hipResViewFormatUnsignedShort1 = hipResourceViewFormat.define('hipResViewFormatUnsignedShort1', 7)
+hipResViewFormatUnsignedShort2 = hipResourceViewFormat.define('hipResViewFormatUnsignedShort2', 8)
+hipResViewFormatUnsignedShort4 = hipResourceViewFormat.define('hipResViewFormatUnsignedShort4', 9)
+hipResViewFormatSignedShort1 = hipResourceViewFormat.define('hipResViewFormatSignedShort1', 10)
+hipResViewFormatSignedShort2 = hipResourceViewFormat.define('hipResViewFormatSignedShort2', 11)
+hipResViewFormatSignedShort4 = hipResourceViewFormat.define('hipResViewFormatSignedShort4', 12)
+hipResViewFormatUnsignedInt1 = hipResourceViewFormat.define('hipResViewFormatUnsignedInt1', 13)
+hipResViewFormatUnsignedInt2 = hipResourceViewFormat.define('hipResViewFormatUnsignedInt2', 14)
+hipResViewFormatUnsignedInt4 = hipResourceViewFormat.define('hipResViewFormatUnsignedInt4', 15)
+hipResViewFormatSignedInt1 = hipResourceViewFormat.define('hipResViewFormatSignedInt1', 16)
+hipResViewFormatSignedInt2 = hipResourceViewFormat.define('hipResViewFormatSignedInt2', 17)
+hipResViewFormatSignedInt4 = hipResourceViewFormat.define('hipResViewFormatSignedInt4', 18)
+hipResViewFormatHalf1 = hipResourceViewFormat.define('hipResViewFormatHalf1', 19)
+hipResViewFormatHalf2 = hipResourceViewFormat.define('hipResViewFormatHalf2', 20)
+hipResViewFormatHalf4 = hipResourceViewFormat.define('hipResViewFormatHalf4', 21)
+hipResViewFormatFloat1 = hipResourceViewFormat.define('hipResViewFormatFloat1', 22)
+hipResViewFormatFloat2 = hipResourceViewFormat.define('hipResViewFormatFloat2', 23)
+hipResViewFormatFloat4 = hipResourceViewFormat.define('hipResViewFormatFloat4', 24)
+hipResViewFormatUnsignedBlockCompressed1 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed1', 25)
+hipResViewFormatUnsignedBlockCompressed2 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed2', 26)
+hipResViewFormatUnsignedBlockCompressed3 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed3', 27)
+hipResViewFormatUnsignedBlockCompressed4 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed4', 28)
+hipResViewFormatSignedBlockCompressed4 = hipResourceViewFormat.define('hipResViewFormatSignedBlockCompressed4', 29)
+hipResViewFormatUnsignedBlockCompressed5 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed5', 30)
+hipResViewFormatSignedBlockCompressed5 = hipResourceViewFormat.define('hipResViewFormatSignedBlockCompressed5', 31)
+hipResViewFormatUnsignedBlockCompressed6H = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed6H', 32)
+hipResViewFormatSignedBlockCompressed6H = hipResourceViewFormat.define('hipResViewFormatSignedBlockCompressed6H', 33)
+hipResViewFormatUnsignedBlockCompressed7 = hipResourceViewFormat.define('hipResViewFormatUnsignedBlockCompressed7', 34)
 
 @dll.bind
 def hipCreateTextureObject(pTexObject:c.POINTER[hipTextureObject_t], pResDesc:c.POINTER[hipResourceDesc], pTexDesc:c.POINTER[hipTextureDesc], pResViewDesc:c.POINTER[hipResourceViewDesc]) -> hipError_t: ...
@@ -1936,11 +1936,11 @@ class HIP_RESOURCE_DESC_st(c.Struct):
   res: Annotated[HIP_RESOURCE_DESC_st_res, 8]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 136]
 HIP_RESOURCE_DESC: TypeAlias = HIP_RESOURCE_DESC_st
-HIPresourcetype_enum = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_RESOURCE_TYPE_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_ARRAY', 0) # type: ignore
-HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY', 1) # type: ignore
-HIP_RESOURCE_TYPE_LINEAR = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_LINEAR', 2) # type: ignore
-HIP_RESOURCE_TYPE_PITCH2D = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_PITCH2D', 3) # type: ignore
+class HIPresourcetype_enum(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_RESOURCE_TYPE_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_ARRAY', 0)
+HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY', 1)
+HIP_RESOURCE_TYPE_LINEAR = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_LINEAR', 2)
+HIP_RESOURCE_TYPE_PITCH2D = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_PITCH2D', 3)
 
 HIPresourcetype: TypeAlias = HIPresourcetype_enum
 @c.record
@@ -1993,16 +1993,16 @@ class HIP_TEXTURE_DESC_st(c.Struct):
   borderColor: Annotated[c.Array[Annotated[float, ctypes.c_float], Literal[4]], 40]
   reserved: Annotated[c.Array[Annotated[int, ctypes.c_int32], Literal[12]], 56]
 HIP_TEXTURE_DESC: TypeAlias = HIP_TEXTURE_DESC_st
-HIPaddress_mode_enum = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_TR_ADDRESS_MODE_WRAP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_WRAP', 0) # type: ignore
-HIP_TR_ADDRESS_MODE_CLAMP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_CLAMP', 1) # type: ignore
-HIP_TR_ADDRESS_MODE_MIRROR = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_MIRROR', 2) # type: ignore
-HIP_TR_ADDRESS_MODE_BORDER = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_BORDER', 3) # type: ignore
+class HIPaddress_mode_enum(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_TR_ADDRESS_MODE_WRAP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_WRAP', 0)
+HIP_TR_ADDRESS_MODE_CLAMP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_CLAMP', 1)
+HIP_TR_ADDRESS_MODE_MIRROR = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_MIRROR', 2)
+HIP_TR_ADDRESS_MODE_BORDER = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_BORDER', 3)
 
 HIPaddress_mode: TypeAlias = HIPaddress_mode_enum
-HIPfilter_mode_enum = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_TR_FILTER_MODE_POINT = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_POINT', 0) # type: ignore
-HIP_TR_FILTER_MODE_LINEAR = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_LINEAR', 1) # type: ignore
+class HIPfilter_mode_enum(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_TR_FILTER_MODE_POINT = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_POINT', 0)
+HIP_TR_FILTER_MODE_LINEAR = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_LINEAR', 1)
 
 HIPfilter_mode: TypeAlias = HIPfilter_mode_enum
 @c.record
@@ -2018,42 +2018,42 @@ class HIP_RESOURCE_VIEW_DESC_st(c.Struct):
   lastLayer: Annotated[Annotated[int, ctypes.c_uint32], 44]
   reserved: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[16]], 48]
 HIP_RESOURCE_VIEW_DESC: TypeAlias = HIP_RESOURCE_VIEW_DESC_st
-HIPresourceViewFormat_enum = CEnum(Annotated[int, ctypes.c_uint32])
-HIP_RES_VIEW_FORMAT_NONE = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_NONE', 0) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_1X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_1X8', 1) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_2X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_2X8', 2) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_4X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_4X8', 3) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_1X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_1X8', 4) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_2X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_2X8', 5) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_4X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_4X8', 6) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_1X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_1X16', 7) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_2X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_2X16', 8) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_4X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_4X16', 9) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_1X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_1X16', 10) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_2X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_2X16', 11) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_4X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_4X16', 12) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_1X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_1X32', 13) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_2X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_2X32', 14) # type: ignore
-HIP_RES_VIEW_FORMAT_UINT_4X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_4X32', 15) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_1X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_1X32', 16) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_2X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_2X32', 17) # type: ignore
-HIP_RES_VIEW_FORMAT_SINT_4X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_4X32', 18) # type: ignore
-HIP_RES_VIEW_FORMAT_FLOAT_1X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_1X16', 19) # type: ignore
-HIP_RES_VIEW_FORMAT_FLOAT_2X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_2X16', 20) # type: ignore
-HIP_RES_VIEW_FORMAT_FLOAT_4X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_4X16', 21) # type: ignore
-HIP_RES_VIEW_FORMAT_FLOAT_1X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_1X32', 22) # type: ignore
-HIP_RES_VIEW_FORMAT_FLOAT_2X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_2X32', 23) # type: ignore
-HIP_RES_VIEW_FORMAT_FLOAT_4X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_4X32', 24) # type: ignore
-HIP_RES_VIEW_FORMAT_UNSIGNED_BC1 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC1', 25) # type: ignore
-HIP_RES_VIEW_FORMAT_UNSIGNED_BC2 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC2', 26) # type: ignore
-HIP_RES_VIEW_FORMAT_UNSIGNED_BC3 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC3', 27) # type: ignore
-HIP_RES_VIEW_FORMAT_UNSIGNED_BC4 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC4', 28) # type: ignore
-HIP_RES_VIEW_FORMAT_SIGNED_BC4 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SIGNED_BC4', 29) # type: ignore
-HIP_RES_VIEW_FORMAT_UNSIGNED_BC5 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC5', 30) # type: ignore
-HIP_RES_VIEW_FORMAT_SIGNED_BC5 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SIGNED_BC5', 31) # type: ignore
-HIP_RES_VIEW_FORMAT_UNSIGNED_BC6H = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC6H', 32) # type: ignore
-HIP_RES_VIEW_FORMAT_SIGNED_BC6H = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SIGNED_BC6H', 33) # type: ignore
-HIP_RES_VIEW_FORMAT_UNSIGNED_BC7 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC7', 34) # type: ignore
+class HIPresourceViewFormat_enum(Annotated[int, ctypes.c_uint32], c.Enum): pass
+HIP_RES_VIEW_FORMAT_NONE = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_NONE', 0)
+HIP_RES_VIEW_FORMAT_UINT_1X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_1X8', 1)
+HIP_RES_VIEW_FORMAT_UINT_2X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_2X8', 2)
+HIP_RES_VIEW_FORMAT_UINT_4X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_4X8', 3)
+HIP_RES_VIEW_FORMAT_SINT_1X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_1X8', 4)
+HIP_RES_VIEW_FORMAT_SINT_2X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_2X8', 5)
+HIP_RES_VIEW_FORMAT_SINT_4X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_4X8', 6)
+HIP_RES_VIEW_FORMAT_UINT_1X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_1X16', 7)
+HIP_RES_VIEW_FORMAT_UINT_2X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_2X16', 8)
+HIP_RES_VIEW_FORMAT_UINT_4X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_4X16', 9)
+HIP_RES_VIEW_FORMAT_SINT_1X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_1X16', 10)
+HIP_RES_VIEW_FORMAT_SINT_2X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_2X16', 11)
+HIP_RES_VIEW_FORMAT_SINT_4X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_4X16', 12)
+HIP_RES_VIEW_FORMAT_UINT_1X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_1X32', 13)
+HIP_RES_VIEW_FORMAT_UINT_2X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_2X32', 14)
+HIP_RES_VIEW_FORMAT_UINT_4X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_4X32', 15)
+HIP_RES_VIEW_FORMAT_SINT_1X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_1X32', 16)
+HIP_RES_VIEW_FORMAT_SINT_2X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_2X32', 17)
+HIP_RES_VIEW_FORMAT_SINT_4X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SINT_4X32', 18)
+HIP_RES_VIEW_FORMAT_FLOAT_1X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_1X16', 19)
+HIP_RES_VIEW_FORMAT_FLOAT_2X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_2X16', 20)
+HIP_RES_VIEW_FORMAT_FLOAT_4X16 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_4X16', 21)
+HIP_RES_VIEW_FORMAT_FLOAT_1X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_1X32', 22)
+HIP_RES_VIEW_FORMAT_FLOAT_2X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_2X32', 23)
+HIP_RES_VIEW_FORMAT_FLOAT_4X32 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_FLOAT_4X32', 24)
+HIP_RES_VIEW_FORMAT_UNSIGNED_BC1 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC1', 25)
+HIP_RES_VIEW_FORMAT_UNSIGNED_BC2 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC2', 26)
+HIP_RES_VIEW_FORMAT_UNSIGNED_BC3 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC3', 27)
+HIP_RES_VIEW_FORMAT_UNSIGNED_BC4 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC4', 28)
+HIP_RES_VIEW_FORMAT_SIGNED_BC4 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SIGNED_BC4', 29)
+HIP_RES_VIEW_FORMAT_UNSIGNED_BC5 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC5', 30)
+HIP_RES_VIEW_FORMAT_SIGNED_BC5 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SIGNED_BC5', 31)
+HIP_RES_VIEW_FORMAT_UNSIGNED_BC6H = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC6H', 32)
+HIP_RES_VIEW_FORMAT_SIGNED_BC6H = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SIGNED_BC6H', 33)
+HIP_RES_VIEW_FORMAT_UNSIGNED_BC7 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC7', 34)
 
 HIPresourceViewFormat: TypeAlias = HIPresourceViewFormat_enum
 @dll.bind
@@ -2070,7 +2070,7 @@ def hipTexObjectGetTextureDesc(pTexDesc:c.POINTER[HIP_TEXTURE_DESC], texObject:h
 def hipMallocMipmappedArray(mipmappedArray:c.POINTER[hipMipmappedArray_t], desc:c.POINTER[hipChannelFormatDesc], extent:hipExtent, numLevels:Annotated[int, ctypes.c_uint32], flags:Annotated[int, ctypes.c_uint32]) -> hipError_t: ...
 @dll.bind
 def hipFreeMipmappedArray(mipmappedArray:hipMipmappedArray_t) -> hipError_t: ...
-hipMipmappedArray_const_t = c.POINTER[hipMipmappedArray]
+hipMipmappedArray_const_t: TypeAlias = c.POINTER[hipMipmappedArray]
 @dll.bind
 def hipGetMipmappedArrayLevel(levelArray:c.POINTER[hipArray_t], mipmappedArray:hipMipmappedArray_const_t, level:Annotated[int, ctypes.c_uint32]) -> hipError_t: ...
 @dll.bind
@@ -2378,12 +2378,12 @@ def hipGraphicsUnmapResources(count:Annotated[int, ctypes.c_int32], resources:c.
 @dll.bind
 def hipGraphicsUnregisterResource(resource:hipGraphicsResource_t) -> hipError_t: ...
 class __hip_surface(ctypes.Structure): pass
-hipSurfaceObject_t = c.POINTER[__hip_surface]
+hipSurfaceObject_t: TypeAlias = c.POINTER[__hip_surface]
 @dll.bind
 def hipCreateSurfaceObject(pSurfObject:c.POINTER[hipSurfaceObject_t], pResDesc:c.POINTER[hipResourceDesc]) -> hipError_t: ...
 @dll.bind
 def hipDestroySurfaceObject(surfaceObject:hipSurfaceObject_t) -> hipError_t: ...
-hipmipmappedArray = c.POINTER[hipMipmappedArray]
+hipmipmappedArray: TypeAlias = c.POINTER[hipMipmappedArray]
 hipResourcetype: TypeAlias = HIPresourcetype_enum
 c.init_records()
 hipGetDeviceProperties = hipGetDevicePropertiesR0600 # type: ignore
