@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 import os
 dll = DLL('comgr_3', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so', 'amd_comgr'])
 amd_comgr_status_s = CEnum(ctypes.c_uint32)
@@ -141,13 +140,13 @@ def amd_comgr_action_info_set_language(action_info:amd_comgr_action_info_t, lang
 @dll.bind
 def amd_comgr_action_info_get_language(action_info:amd_comgr_action_info_t, language:ctypes.POINTER(amd_comgr_language_t)) -> amd_comgr_status_t: ...
 @dll.bind
-def amd_comgr_action_info_set_option_list(action_info:amd_comgr_action_info_t, options:(ctypes.POINTER(ctypes.c_char) * 0), count:size_t) -> amd_comgr_status_t: ...
+def amd_comgr_action_info_set_option_list(action_info:amd_comgr_action_info_t, options:Array[ctypes.POINTER(ctypes.c_char), Literal[0]], count:size_t) -> amd_comgr_status_t: ...
 @dll.bind
 def amd_comgr_action_info_get_option_list_count(action_info:amd_comgr_action_info_t, count:ctypes.POINTER(size_t)) -> amd_comgr_status_t: ...
 @dll.bind
 def amd_comgr_action_info_get_option_list_item(action_info:amd_comgr_action_info_t, index:size_t, size:ctypes.POINTER(size_t), option:ctypes.POINTER(ctypes.c_char)) -> amd_comgr_status_t: ...
 @dll.bind
-def amd_comgr_action_info_set_bundle_entry_ids(action_info:amd_comgr_action_info_t, bundle_entry_ids:(ctypes.POINTER(ctypes.c_char) * 0), count:size_t) -> amd_comgr_status_t: ...
+def amd_comgr_action_info_set_bundle_entry_ids(action_info:amd_comgr_action_info_t, bundle_entry_ids:Array[ctypes.POINTER(ctypes.c_char), Literal[0]], count:size_t) -> amd_comgr_status_t: ...
 @dll.bind
 def amd_comgr_action_info_get_bundle_entry_id_count(action_info:amd_comgr_action_info_t, count:ctypes.POINTER(size_t)) -> amd_comgr_status_t: ...
 @dll.bind

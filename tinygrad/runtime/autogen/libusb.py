@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 dll = DLL('libusb', 'usb-1.0')
 enum_libusb_class_code = CEnum(ctypes.c_uint32)
 LIBUSB_CLASS_PER_INTERFACE = enum_libusb_class_code.define('LIBUSB_CLASS_PER_INTERFACE', 0)
@@ -205,7 +204,7 @@ class struct_libusb_bos_dev_capability_descriptor:
   bLength: Annotated[uint8_t, 0]
   bDescriptorType: Annotated[uint8_t, 1]
   bDevCapabilityType: Annotated[uint8_t, 2]
-  dev_capability_data: Annotated[(uint8_t * 0), 3]
+  dev_capability_data: Annotated[Array[uint8_t, Literal[0]], 3]
 @record
 class struct_libusb_bos_descriptor:
   SIZE = 8
@@ -213,7 +212,7 @@ class struct_libusb_bos_descriptor:
   bDescriptorType: Annotated[uint8_t, 1]
   wTotalLength: Annotated[uint16_t, 2]
   bNumDeviceCaps: Annotated[uint8_t, 4]
-  dev_capability: Annotated[(ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor) * 0), 8]
+  dev_capability: Annotated[Array[ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), Literal[0]], 8]
 @record
 class struct_libusb_usb_2_0_extension_descriptor:
   SIZE = 8
@@ -240,7 +239,7 @@ class struct_libusb_container_id_descriptor:
   bDescriptorType: Annotated[uint8_t, 1]
   bDevCapabilityType: Annotated[uint8_t, 2]
   bReserved: Annotated[uint8_t, 3]
-  ContainerID: Annotated[(uint8_t* 16), 4]
+  ContainerID: Annotated[Array[uint8_t, Literal[16]], 4]
 @record
 class struct_libusb_platform_descriptor:
   SIZE = 20
@@ -248,8 +247,8 @@ class struct_libusb_platform_descriptor:
   bDescriptorType: Annotated[uint8_t, 1]
   bDevCapabilityType: Annotated[uint8_t, 2]
   bReserved: Annotated[uint8_t, 3]
-  PlatformCapabilityUUID: Annotated[(uint8_t* 16), 4]
-  CapabilityData: Annotated[(uint8_t * 0), 20]
+  PlatformCapabilityUUID: Annotated[Array[uint8_t, Literal[16]], 4]
+  CapabilityData: Annotated[Array[uint8_t, Literal[0]], 20]
 @record
 class struct_libusb_control_setup:
   SIZE = 8
@@ -340,7 +339,7 @@ class struct_libusb_transfer:
   user_data: Annotated[ctypes.POINTER(None), 40]
   buffer: Annotated[ctypes.POINTER(ctypes.c_ubyte), 48]
   num_iso_packets: Annotated[ctypes.c_int32, 56]
-  iso_packet_desc: Annotated[(struct_libusb_iso_packet_descriptor * 0), 60]
+  iso_packet_desc: Annotated[Array[struct_libusb_iso_packet_descriptor, Literal[0]], 60]
 libusb_transfer_cb_fn = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_transfer))
 enum_libusb_capability = CEnum(ctypes.c_uint32)
 LIBUSB_CAP_HAS_CAPABILITY = enum_libusb_capability.define('LIBUSB_CAP_HAS_CAPABILITY', 0)
@@ -380,7 +379,7 @@ class _anonunion0:
 @dll.bind
 def libusb_init(ctx:ctypes.POINTER(ctypes.POINTER(libusb_context))) -> ctypes.c_int32: ...
 @dll.bind
-def libusb_init_context(ctx:ctypes.POINTER(ctypes.POINTER(libusb_context)), options:(struct_libusb_init_option * 0), num_options:ctypes.c_int32) -> ctypes.c_int32: ...
+def libusb_init_context(ctx:ctypes.POINTER(ctypes.POINTER(libusb_context)), options:Array[struct_libusb_init_option, Literal[0]], num_options:ctypes.c_int32) -> ctypes.c_int32: ...
 @dll.bind
 def libusb_exit(ctx:ctypes.POINTER(libusb_context)) -> None: ...
 @dll.bind

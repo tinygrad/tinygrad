@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_io_uring_sq:
   SIZE = 104
@@ -20,7 +19,7 @@ class struct_io_uring_sq:
   ring_ptr: Annotated[ctypes.POINTER(None), 80]
   ring_mask: Annotated[ctypes.c_uint32, 88]
   ring_entries: Annotated[ctypes.c_uint32, 92]
-  pad: Annotated[(ctypes.c_uint32* 2), 96]
+  pad: Annotated[Array[ctypes.c_uint32, Literal[2]], 96]
 @record
 class struct_io_uring_sqe:
   SIZE = 64
@@ -61,10 +60,10 @@ class struct_io_uring_sqe:
   splice_fd_in: Annotated[ctypes.c_int32, 44]
   file_index: Annotated[ctypes.c_uint32, 44]
   addr_len: Annotated[ctypes.c_uint16, 0]
-  __pad3: Annotated[(ctypes.c_uint16* 1), 2]
+  __pad3: Annotated[Array[ctypes.c_uint16, Literal[1]], 2]
   addr3: Annotated[ctypes.c_uint64, 0]
-  __pad2: Annotated[(ctypes.c_uint64* 1), 8]
-  cmd: Annotated[(ctypes.c_ubyte* 0), 48]
+  __pad2: Annotated[Array[ctypes.c_uint64, Literal[1]], 8]
+  cmd: Annotated[Array[ctypes.c_ubyte, Literal[0]], 48]
 __u8 = ctypes.c_ubyte
 __u16 = ctypes.c_uint16
 __s32 = ctypes.c_int32
@@ -86,14 +85,14 @@ class struct_io_uring_cq:
   ring_ptr: Annotated[ctypes.POINTER(None), 64]
   ring_mask: Annotated[ctypes.c_uint32, 72]
   ring_entries: Annotated[ctypes.c_uint32, 76]
-  pad: Annotated[(ctypes.c_uint32* 2), 80]
+  pad: Annotated[Array[ctypes.c_uint32, Literal[2]], 80]
 @record
 class struct_io_uring_cqe:
   SIZE = 16
   user_data: Annotated[ctypes.c_uint64, 0]
   res: Annotated[ctypes.c_int32, 8]
   flags: Annotated[ctypes.c_uint32, 12]
-  big_cqe: Annotated[(ctypes.c_uint64 * 0), 16]
+  big_cqe: Annotated[Array[ctypes.c_uint64, Literal[0]], 16]
 @record
 class struct_io_uring:
   SIZE = 216
@@ -104,7 +103,7 @@ class struct_io_uring:
   features: Annotated[ctypes.c_uint32, 200]
   enter_ring_fd: Annotated[ctypes.c_int32, 204]
   int_flags: Annotated[ctypes.c_ubyte, 208]
-  pad: Annotated[(ctypes.c_ubyte* 3), 209]
+  pad: Annotated[Array[ctypes.c_ubyte, Literal[3]], 209]
   pad2: Annotated[ctypes.c_uint32, 212]
 @record
 class struct_statx:
@@ -116,7 +115,7 @@ class struct_statx:
   stx_uid: Annotated[ctypes.c_uint32, 20]
   stx_gid: Annotated[ctypes.c_uint32, 24]
   stx_mode: Annotated[ctypes.c_uint16, 28]
-  __spare0: Annotated[(ctypes.c_uint16* 1), 30]
+  __spare0: Annotated[Array[ctypes.c_uint16, Literal[1]], 30]
   stx_ino: Annotated[ctypes.c_uint64, 32]
   stx_size: Annotated[ctypes.c_uint64, 40]
   stx_blocks: Annotated[ctypes.c_uint64, 48]
@@ -132,7 +131,7 @@ class struct_statx:
   stx_mnt_id: Annotated[ctypes.c_uint64, 144]
   stx_dio_mem_align: Annotated[ctypes.c_uint32, 152]
   stx_dio_offset_align: Annotated[ctypes.c_uint32, 156]
-  __spare3: Annotated[(ctypes.c_uint64* 12), 160]
+  __spare3: Annotated[Array[ctypes.c_uint64, Literal[12]], 160]
 @record
 class struct_statx_timestamp:
   SIZE = 16
@@ -249,7 +248,7 @@ class struct_io_uring_params:
   sq_thread_idle: Annotated[ctypes.c_uint32, 16]
   features: Annotated[ctypes.c_uint32, 20]
   wq_fd: Annotated[ctypes.c_uint32, 24]
-  resv: Annotated[(ctypes.c_uint32* 3), 28]
+  resv: Annotated[Array[ctypes.c_uint32, Literal[3]], 28]
   sq_off: Annotated[struct_io_sqring_offsets, 40]
   cq_off: Annotated[struct_io_cqring_offsets, 80]
 _anonenum3 = CEnum(ctypes.c_uint32)
@@ -329,8 +328,8 @@ class struct_io_uring_probe:
   last_op: Annotated[ctypes.c_ubyte, 0]
   ops_len: Annotated[ctypes.c_ubyte, 1]
   resv: Annotated[ctypes.c_uint16, 2]
-  resv2: Annotated[(ctypes.c_uint32* 3), 4]
-  ops: Annotated[(struct_io_uring_probe_op * 0), 16]
+  resv2: Annotated[Array[ctypes.c_uint32, Literal[3]], 4]
+  ops: Annotated[Array[struct_io_uring_probe_op, Literal[0]], 16]
 @record
 class struct_io_uring_restriction:
   SIZE = 16
@@ -339,7 +338,7 @@ class struct_io_uring_restriction:
   sqe_op: Annotated[ctypes.c_ubyte, 2]
   sqe_flags: Annotated[ctypes.c_ubyte, 2]
   resv: Annotated[ctypes.c_ubyte, 3]
-  resv2: Annotated[(ctypes.c_uint32* 3), 4]
+  resv2: Annotated[Array[ctypes.c_uint32, Literal[3]], 4]
 @record
 class struct_io_uring_buf:
   SIZE = 16
@@ -355,7 +354,7 @@ class struct_io_uring_buf_ring:
   resv3: Annotated[ctypes.c_uint16, 12]
   tail: Annotated[ctypes.c_uint16, 14]
   __empty_bufs: Annotated[_anonstruct5, 0]
-  bufs: Annotated[(struct_io_uring_buf * 0), 0]
+  bufs: Annotated[Array[struct_io_uring_buf, Literal[0]], 0]
 class _anonstruct5(ctypes.Structure): pass
 _anonenum6 = CEnum(ctypes.c_uint32)
 IOU_PBUF_RING_MMAP = _anonenum6.define('IOU_PBUF_RING_MMAP', 1)
@@ -367,13 +366,13 @@ class struct_io_uring_buf_reg:
   ring_entries: Annotated[ctypes.c_uint32, 8]
   bgid: Annotated[ctypes.c_uint16, 12]
   flags: Annotated[ctypes.c_uint16, 14]
-  resv: Annotated[(ctypes.c_uint64* 3), 16]
+  resv: Annotated[Array[ctypes.c_uint64, Literal[3]], 16]
 @record
 class struct_io_uring_buf_status:
   SIZE = 40
   buf_group: Annotated[ctypes.c_uint32, 0]
   head: Annotated[ctypes.c_uint32, 4]
-  resv: Annotated[(ctypes.c_uint32* 8), 8]
+  resv: Annotated[Array[ctypes.c_uint32, Literal[8]], 8]
 _anonenum7 = CEnum(ctypes.c_uint32)
 IORING_RESTRICTION_REGISTER_OP = _anonenum7.define('IORING_RESTRICTION_REGISTER_OP', 0)
 IORING_RESTRICTION_SQE_OP = _anonenum7.define('IORING_RESTRICTION_SQE_OP', 1)
@@ -396,8 +395,8 @@ class struct_io_uring_sync_cancel_reg:
   flags: Annotated[ctypes.c_uint32, 12]
   timeout: Annotated[struct___kernel_timespec, 16]
   opcode: Annotated[ctypes.c_ubyte, 32]
-  pad: Annotated[(ctypes.c_ubyte* 7), 33]
-  pad2: Annotated[(ctypes.c_uint64* 3), 40]
+  pad: Annotated[Array[ctypes.c_ubyte, Literal[7]], 33]
+  pad2: Annotated[Array[ctypes.c_uint64, Literal[3]], 40]
 @record
 class struct___kernel_timespec:
   SIZE = 16

@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 import sysconfig
 dll = DLL('nvjitlink', 'nvJitLink', f'/usr/local/cuda/targets/{sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0]}/lib')
 nvJitLinkResult = CEnum(ctypes.c_uint32)

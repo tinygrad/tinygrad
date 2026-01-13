@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 enum_kgsl_user_mem_type = CEnum(ctypes.c_uint32)
 KGSL_USER_MEM_TYPE_PMEM = enum_kgsl_user_mem_type.define('KGSL_USER_MEM_TYPE_PMEM', 0)
 KGSL_USER_MEM_TYPE_ASHMEM = enum_kgsl_user_mem_type.define('KGSL_USER_MEM_TYPE_ASHMEM', 1)
@@ -180,7 +179,7 @@ class struct_kgsl_cff_user_event:
   op3: Annotated[ctypes.c_uint32, 12]
   op4: Annotated[ctypes.c_uint32, 16]
   op5: Annotated[ctypes.c_uint32, 20]
-  __pad: Annotated[(ctypes.c_uint32* 2), 24]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[2]], 24]
 @record
 class struct_kgsl_gmem_desc:
   SIZE = 20
@@ -243,7 +242,7 @@ class struct_kgsl_cff_syncmem:
   SIZE = 24
   gpuaddr: Annotated[ctypes.c_uint64, 0]
   len: Annotated[ctypes.c_uint64, 8]
-  __pad: Annotated[(ctypes.c_uint32* 2), 16]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[2]], 16]
 @record
 class struct_kgsl_timestamp_event:
   SIZE = 32
@@ -268,7 +267,7 @@ class struct_kgsl_gpumem_alloc_id:
   size: Annotated[ctypes.c_uint64, 8]
   mmapsize: Annotated[ctypes.c_uint64, 16]
   gpuaddr: Annotated[ctypes.c_uint64, 24]
-  __pad: Annotated[(ctypes.c_uint64* 2), 32]
+  __pad: Annotated[Array[ctypes.c_uint64, Literal[2]], 32]
 @record
 class struct_kgsl_gpumem_free_id:
   SIZE = 8
@@ -283,7 +282,7 @@ class struct_kgsl_gpumem_get_info:
   size: Annotated[ctypes.c_uint64, 16]
   mmapsize: Annotated[ctypes.c_uint64, 24]
   useraddr: Annotated[ctypes.c_uint64, 32]
-  __pad: Annotated[(ctypes.c_uint64* 4), 40]
+  __pad: Annotated[Array[ctypes.c_uint64, Literal[4]], 40]
 @record
 class struct_kgsl_gpumem_sync_cache:
   SIZE = 32
@@ -305,7 +304,7 @@ class struct_kgsl_perfcounter_put:
   SIZE = 16
   groupid: Annotated[ctypes.c_uint32, 0]
   countable: Annotated[ctypes.c_uint32, 4]
-  __pad: Annotated[(ctypes.c_uint32* 2), 8]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[2]], 8]
 @record
 class struct_kgsl_perfcounter_query:
   SIZE = 32
@@ -313,7 +312,7 @@ class struct_kgsl_perfcounter_query:
   countables: Annotated[ctypes.POINTER(ctypes.c_uint32), 8]
   count: Annotated[ctypes.c_uint32, 16]
   max_counters: Annotated[ctypes.c_uint32, 20]
-  __pad: Annotated[(ctypes.c_uint32* 2), 24]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[2]], 24]
 @record
 class struct_kgsl_perfcounter_read_group:
   SIZE = 16
@@ -325,14 +324,14 @@ class struct_kgsl_perfcounter_read:
   SIZE = 24
   reads: Annotated[ctypes.POINTER(struct_kgsl_perfcounter_read_group), 0]
   count: Annotated[ctypes.c_uint32, 8]
-  __pad: Annotated[(ctypes.c_uint32* 2), 12]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[2]], 12]
 @record
 class struct_kgsl_gpumem_sync_cache_bulk:
   SIZE = 24
   id_list: Annotated[ctypes.POINTER(ctypes.c_uint32), 0]
   count: Annotated[ctypes.c_uint32, 8]
   op: Annotated[ctypes.c_uint32, 12]
-  __pad: Annotated[(ctypes.c_uint32* 2), 16]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[2]], 16]
 @record
 class struct_kgsl_cmd_syncpoint_timestamp:
   SIZE = 8
@@ -358,7 +357,7 @@ class struct_kgsl_submit_commands:
   synclist: Annotated[ctypes.POINTER(struct_kgsl_cmd_syncpoint), 24]
   numsyncs: Annotated[ctypes.c_uint32, 32]
   timestamp: Annotated[ctypes.c_uint32, 36]
-  __pad: Annotated[(ctypes.c_uint32* 4), 40]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[4]], 40]
 @record
 class struct_kgsl_device_constraint:
   SIZE = 24
@@ -374,24 +373,24 @@ class struct_kgsl_device_constraint_pwrlevel:
 class struct_kgsl_syncsource_create:
   SIZE = 16
   id: Annotated[ctypes.c_uint32, 0]
-  __pad: Annotated[(ctypes.c_uint32* 3), 4]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[3]], 4]
 @record
 class struct_kgsl_syncsource_destroy:
   SIZE = 16
   id: Annotated[ctypes.c_uint32, 0]
-  __pad: Annotated[(ctypes.c_uint32* 3), 4]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[3]], 4]
 @record
 class struct_kgsl_syncsource_create_fence:
   SIZE = 24
   id: Annotated[ctypes.c_uint32, 0]
   fence_fd: Annotated[ctypes.c_int32, 4]
-  __pad: Annotated[(ctypes.c_uint32* 4), 8]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[4]], 8]
 @record
 class struct_kgsl_syncsource_signal_fence:
   SIZE = 24
   id: Annotated[ctypes.c_uint32, 0]
   fence_fd: Annotated[ctypes.c_int32, 4]
-  __pad: Annotated[(ctypes.c_uint32* 4), 8]
+  __pad: Annotated[Array[ctypes.c_uint32, Literal[4]], 8]
 @record
 class struct_kgsl_cff_sync_gpuobj:
   SIZE = 24

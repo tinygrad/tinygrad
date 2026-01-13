@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 dll = DLL('libclang', ['clang-20', 'clang'])
 CXIndex = ctypes.POINTER(None)
 class struct_CXTargetInfoImpl(ctypes.Structure): pass
@@ -87,7 +86,7 @@ def clang_getFileContents(tu:CXTranslationUnit, file:CXFile, size:ctypes.POINTER
 @record
 class CXSourceLocation:
   SIZE = 24
-  ptr_data: Annotated[(ctypes.POINTER(None)* 2), 0]
+  ptr_data: Annotated[Array[ctypes.POINTER(None), Literal[2]], 0]
   int_data: Annotated[ctypes.c_uint32, 16]
 @dll.bind
 def clang_getLocation(tu:CXTranslationUnit, file:CXFile, line:ctypes.c_uint32, column:ctypes.c_uint32) -> CXSourceLocation: ...
@@ -101,7 +100,7 @@ class CXSourceRangeList:
 @record
 class CXSourceRange:
   SIZE = 24
-  ptr_data: Annotated[(ctypes.POINTER(None)* 2), 0]
+  ptr_data: Annotated[Array[ctypes.POINTER(None), Literal[2]], 0]
   begin_int_data: Annotated[ctypes.c_uint32, 16]
   end_int_data: Annotated[ctypes.c_uint32, 20]
 @dll.bind
@@ -545,7 +544,7 @@ class CXCursor:
   SIZE = 32
   kind: Annotated[enum_CXCursorKind, 0]
   xdata: Annotated[ctypes.c_int32, 4]
-  data: Annotated[(ctypes.POINTER(None)* 3), 8]
+  data: Annotated[Array[ctypes.POINTER(None), Literal[3]], 8]
 @dll.bind
 def clang_getNullCursor() -> CXCursor: ...
 @dll.bind
@@ -823,7 +822,7 @@ CXCallingConv_Unexposed = enum_CXCallingConv.define('CXCallingConv_Unexposed', 2
 class CXType:
   SIZE = 24
   kind: Annotated[enum_CXTypeKind, 0]
-  data: Annotated[(ctypes.POINTER(None)* 2), 8]
+  data: Annotated[Array[ctypes.POINTER(None), Literal[2]], 8]
 @dll.bind
 def clang_getCursorType(C:CXCursor) -> CXType: ...
 @dll.bind
@@ -1276,7 +1275,7 @@ CXTokenKind = enum_CXTokenKind
 @record
 class CXToken:
   SIZE = 24
-  int_data: Annotated[(ctypes.c_uint32* 4), 0]
+  int_data: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
   ptr_data: Annotated[ctypes.POINTER(None), 16]
 @dll.bind
 def clang_getToken(TU:CXTranslationUnit, Location:CXSourceLocation) -> ctypes.POINTER(CXToken): ...
@@ -1494,7 +1493,7 @@ CXIdxClientASTFile = ctypes.POINTER(None)
 @record
 class CXIdxLoc:
   SIZE = 24
-  ptr_data: Annotated[(ctypes.POINTER(None)* 2), 0]
+  ptr_data: Annotated[Array[ctypes.POINTER(None), Literal[2]], 0]
   int_data: Annotated[ctypes.c_uint32, 16]
 @record
 class CXIdxIncludedFileInfo:
@@ -1859,7 +1858,7 @@ def clang_getFileTime(SFile:CXFile) -> time_t: ...
 @record
 class CXFileUniqueID:
   SIZE = 24
-  data: Annotated[(ctypes.c_uint64* 3), 0]
+  data: Annotated[Array[ctypes.c_uint64, Literal[3]], 0]
 @dll.bind
 def clang_getFileUniqueID(file:CXFile, outID:ctypes.POINTER(CXFileUniqueID)) -> ctypes.c_int32: ...
 @dll.bind

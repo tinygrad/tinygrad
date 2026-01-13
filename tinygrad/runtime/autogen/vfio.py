@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_vfio_info_cap_header:
   SIZE = 8
@@ -52,7 +51,7 @@ class struct_vfio_region_info_cap_sparse_mmap:
   header: Annotated[struct_vfio_info_cap_header, 0]
   nr_areas: Annotated[ctypes.c_uint32, 8]
   reserved: Annotated[ctypes.c_uint32, 12]
-  areas: Annotated[(struct_vfio_region_sparse_mmap_area * 0), 16]
+  areas: Annotated[Array[struct_vfio_region_sparse_mmap_area, Literal[0]], 16]
 @record
 class struct_vfio_region_info_cap_type:
   SIZE = 16
@@ -102,7 +101,7 @@ class struct_vfio_irq_set:
   index: Annotated[ctypes.c_uint32, 8]
   start: Annotated[ctypes.c_uint32, 12]
   count: Annotated[ctypes.c_uint32, 16]
-  data: Annotated[(ctypes.c_ubyte * 0), 20]
+  data: Annotated[Array[ctypes.c_ubyte, Literal[0]], 20]
 __u8 = ctypes.c_ubyte
 _anonenum0 = CEnum(ctypes.c_uint32)
 VFIO_PCI_BAR0_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR0_REGION_INDEX', 0)
@@ -152,14 +151,14 @@ class struct_vfio_pci_hot_reset_info:
   argsz: Annotated[ctypes.c_uint32, 0]
   flags: Annotated[ctypes.c_uint32, 4]
   count: Annotated[ctypes.c_uint32, 8]
-  devices: Annotated[(struct_vfio_pci_dependent_device * 0), 12]
+  devices: Annotated[Array[struct_vfio_pci_dependent_device, Literal[0]], 12]
 @record
 class struct_vfio_pci_hot_reset:
   SIZE = 12
   argsz: Annotated[ctypes.c_uint32, 0]
   flags: Annotated[ctypes.c_uint32, 4]
   count: Annotated[ctypes.c_uint32, 8]
-  group_fds: Annotated[(ctypes.c_int32 * 0), 12]
+  group_fds: Annotated[Array[ctypes.c_int32, Literal[0]], 12]
 __s32 = ctypes.c_int32
 @record
 class struct_vfio_device_gfx_plane_info:
@@ -194,7 +193,7 @@ class struct_vfio_device_feature:
   SIZE = 8
   argsz: Annotated[ctypes.c_uint32, 0]
   flags: Annotated[ctypes.c_uint32, 4]
-  data: Annotated[(ctypes.c_ubyte * 0), 8]
+  data: Annotated[Array[ctypes.c_ubyte, Literal[0]], 8]
 @record
 class struct_vfio_device_bind_iommufd:
   SIZE = 16
@@ -291,7 +290,7 @@ class struct_vfio_iommu_type1_info_cap_iova_range:
   header: Annotated[struct_vfio_info_cap_header, 0]
   nr_iovas: Annotated[ctypes.c_uint32, 8]
   reserved: Annotated[ctypes.c_uint32, 12]
-  iova_ranges: Annotated[(struct_vfio_iova_range * 0), 16]
+  iova_ranges: Annotated[Array[struct_vfio_iova_range, Literal[0]], 16]
 @record
 class struct_vfio_iommu_type1_info_cap_migration:
   SIZE = 32
@@ -325,13 +324,13 @@ class struct_vfio_iommu_type1_dma_unmap:
   flags: Annotated[ctypes.c_uint32, 4]
   iova: Annotated[ctypes.c_uint64, 8]
   size: Annotated[ctypes.c_uint64, 16]
-  data: Annotated[(ctypes.c_ubyte * 0), 24]
+  data: Annotated[Array[ctypes.c_ubyte, Literal[0]], 24]
 @record
 class struct_vfio_iommu_type1_dirty_bitmap:
   SIZE = 8
   argsz: Annotated[ctypes.c_uint32, 0]
   flags: Annotated[ctypes.c_uint32, 4]
-  data: Annotated[(ctypes.c_ubyte * 0), 8]
+  data: Annotated[Array[ctypes.c_ubyte, Literal[0]], 8]
 @record
 class struct_vfio_iommu_type1_dirty_bitmap_get:
   SIZE = 40

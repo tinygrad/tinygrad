@@ -1,20 +1,19 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 from tinygrad.runtime.support import objc
 dll = DLL('metal', 'Metal')
 @record
 class MTLDispatchThreadgroupsIndirectArguments:
   SIZE = 12
-  threadgroupsPerGrid: Annotated[(uint32_t* 3), 0]
+  threadgroupsPerGrid: Annotated[Array[uint32_t, Literal[3]], 0]
 uint32_t = ctypes.c_uint32
 @record
 class MTLStageInRegionIndirectArguments:
   SIZE = 24
-  stageInOrigin: Annotated[(uint32_t* 3), 0]
-  stageInSize: Annotated[(uint32_t* 3), 12]
+  stageInOrigin: Annotated[Array[uint32_t, Literal[3]], 0]
+  stageInSize: Annotated[Array[uint32_t, Literal[3]], 12]
 class MTLComputeCommandEncoder(objc.Spec): pass
 class MTLCommandEncoder(objc.Spec): pass
 class MTLComputePipelineState(objc.Spec): pass

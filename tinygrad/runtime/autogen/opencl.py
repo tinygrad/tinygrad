@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 dll = DLL('opencl', 'OpenCL')
 class struct__cl_platform_id(ctypes.Structure): pass
 cl_platform_id = ctypes.POINTER(struct__cl_platform_id)
@@ -109,7 +108,7 @@ cl_buffer_region = struct__cl_buffer_region
 class struct__cl_name_version:
   SIZE = 68
   version: Annotated[cl_version, 0]
-  name: Annotated[(ctypes.c_char* 64), 4]
+  name: Annotated[Array[ctypes.c_char, Literal[64]], 4]
 cl_name_version = struct__cl_name_version
 cl_int = ctypes.c_int32
 @dll.bind
@@ -306,7 +305,7 @@ def clEnqueueMarkerWithWaitList(command_queue:cl_command_queue, num_events_in_wa
 @dll.bind
 def clEnqueueBarrierWithWaitList(command_queue:cl_command_queue, num_events_in_wait_list:cl_uint, event_wait_list:ctypes.POINTER(cl_event), event:ctypes.POINTER(cl_event)) -> cl_int: ...
 @dll.bind
-def clEnqueueSVMFree(command_queue:cl_command_queue, num_svm_pointers:cl_uint, svm_pointers:(ctypes.POINTER(None) * 0), pfn_free_func:ctypes.CFUNCTYPE(None, cl_command_queue, cl_uint, (ctypes.POINTER(None) * 0), ctypes.POINTER(None)), user_data:ctypes.POINTER(None), num_events_in_wait_list:cl_uint, event_wait_list:ctypes.POINTER(cl_event), event:ctypes.POINTER(cl_event)) -> cl_int: ...
+def clEnqueueSVMFree(command_queue:cl_command_queue, num_svm_pointers:cl_uint, svm_pointers:Array[ctypes.POINTER(None), Literal[0]], pfn_free_func:ctypes.CFUNCTYPE(None, cl_command_queue, cl_uint, Array[ctypes.POINTER(None), Literal[0]], ctypes.POINTER(None)), user_data:ctypes.POINTER(None), num_events_in_wait_list:cl_uint, event_wait_list:ctypes.POINTER(cl_event), event:ctypes.POINTER(cl_event)) -> cl_int: ...
 @dll.bind
 def clEnqueueSVMMemcpy(command_queue:cl_command_queue, blocking_copy:cl_bool, dst_ptr:ctypes.POINTER(None), src_ptr:ctypes.POINTER(None), size:size_t, num_events_in_wait_list:cl_uint, event_wait_list:ctypes.POINTER(cl_event), event:ctypes.POINTER(cl_event)) -> cl_int: ...
 @dll.bind

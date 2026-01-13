@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG:
   SIZE = 28
@@ -449,11 +448,11 @@ rocr_AMD_SDMA_PKT_GCR = rocr_AMD_SDMA_PKT_GCR_TAG
 @record
 class IP_BASE_INSTANCE:
   SIZE = 20
-  segment: Annotated[(ctypes.c_uint32* 5), 0]
+  segment: Annotated[Array[ctypes.c_uint32, Literal[5]], 0]
 @record
 class IP_BASE:
   SIZE = 140
-  instance: Annotated[(IP_BASE_INSTANCE* 7), 0]
+  instance: Annotated[Array[IP_BASE_INSTANCE, Literal[7]], 0]
 init_records()
 SDMA_OP_COPY = 1
 SDMA_OP_FENCE = 5

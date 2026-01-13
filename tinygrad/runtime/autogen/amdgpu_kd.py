@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 uint8_t = ctypes.c_ubyte
 _anonenum0 = CEnum(uint8_t)
 FLOAT_ROUND_MODE_NEAR_EVEN = _anonenum0.define('FLOAT_ROUND_MODE_NEAR_EVEN', 0)
@@ -257,15 +256,15 @@ class llvm_amdhsa_kernel_descriptor_t:
   group_segment_fixed_size: Annotated[uint32_t, 0]
   private_segment_fixed_size: Annotated[uint32_t, 4]
   kernarg_size: Annotated[uint32_t, 8]
-  reserved0: Annotated[(uint8_t* 4), 12]
+  reserved0: Annotated[Array[uint8_t, Literal[4]], 12]
   kernel_code_entry_byte_offset: Annotated[int64_t, 16]
-  reserved1: Annotated[(uint8_t* 20), 24]
+  reserved1: Annotated[Array[uint8_t, Literal[20]], 24]
   compute_pgm_rsrc3: Annotated[uint32_t, 44]
   compute_pgm_rsrc1: Annotated[uint32_t, 48]
   compute_pgm_rsrc2: Annotated[uint32_t, 52]
   kernel_code_properties: Annotated[uint16_t, 56]
   kernarg_preload: Annotated[uint16_t, 58]
-  reserved3: Annotated[(uint8_t* 4), 60]
+  reserved3: Annotated[Array[uint8_t, Literal[4]], 60]
 uint32_t = ctypes.c_uint32
 int64_t = ctypes.c_int64
 uint16_t = ctypes.c_uint16

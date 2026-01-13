@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 from tinygrad.helpers import WIN, OSX
 dll = DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
 intmax_t = ctypes.c_int64
@@ -28,7 +27,7 @@ def wcstoumax(__nptr:ctypes.POINTER(ctypes.c_int32), __endptr:ctypes.POINTER(cty
 @record
 class fd_set:
   SIZE = 128
-  fds_bits: Annotated[(ctypes.c_int64* 16), 0]
+  fds_bits: Annotated[Array[ctypes.c_int64, Literal[16]], 0]
 __fd_mask = ctypes.c_int64
 @record
 class struct_timeval:
@@ -48,7 +47,7 @@ __syscall_slong_t = ctypes.c_int64
 @record
 class __sigset_t:
   SIZE = 128
-  __val: Annotated[(ctypes.c_uint64* 16), 0]
+  __val: Annotated[Array[ctypes.c_uint64, Literal[16]], 0]
 @dll.bind
 def pselect(__nfds:ctypes.c_int32, __readfds:ctypes.POINTER(fd_set), __writefds:ctypes.POINTER(fd_set), __exceptfds:ctypes.POINTER(fd_set), __timeout:ctypes.POINTER(struct_timespec), __sigmask:ctypes.POINTER(__sigset_t)) -> ctypes.c_int32: ...
 LLVMVerifierFailureAction = CEnum(ctypes.c_uint32)
@@ -500,7 +499,7 @@ def LLVMCreateTypeAttribute(C:LLVMContextRef, KindID:ctypes.c_uint32, type_ref:L
 @dll.bind
 def LLVMGetTypeAttributeValue(A:LLVMAttributeRef) -> LLVMTypeRef: ...
 @dll.bind
-def LLVMCreateConstantRangeAttribute(C:LLVMContextRef, KindID:ctypes.c_uint32, NumBits:ctypes.c_uint32, LowerWords:(uint64_t * 0), UpperWords:(uint64_t * 0)) -> LLVMAttributeRef: ...
+def LLVMCreateConstantRangeAttribute(C:LLVMContextRef, KindID:ctypes.c_uint32, NumBits:ctypes.c_uint32, LowerWords:Array[uint64_t, Literal[0]], UpperWords:Array[uint64_t, Literal[0]]) -> LLVMAttributeRef: ...
 @dll.bind
 def LLVMCreateStringAttribute(C:LLVMContextRef, K:ctypes.POINTER(ctypes.c_char), KLength:ctypes.c_uint32, V:ctypes.POINTER(ctypes.c_char), VLength:ctypes.c_uint32) -> LLVMAttributeRef: ...
 @dll.bind
@@ -1052,7 +1051,7 @@ def LLVMConstPointerNull(Ty:LLVMTypeRef) -> LLVMValueRef: ...
 @dll.bind
 def LLVMConstInt(IntTy:LLVMTypeRef, N:ctypes.c_uint64, SignExtend:LLVMBool) -> LLVMValueRef: ...
 @dll.bind
-def LLVMConstIntOfArbitraryPrecision(IntTy:LLVMTypeRef, NumWords:ctypes.c_uint32, Words:(uint64_t * 0)) -> LLVMValueRef: ...
+def LLVMConstIntOfArbitraryPrecision(IntTy:LLVMTypeRef, NumWords:ctypes.c_uint32, Words:Array[uint64_t, Literal[0]]) -> LLVMValueRef: ...
 uint8_t = ctypes.c_ubyte
 @dll.bind
 def LLVMConstIntOfString(IntTy:LLVMTypeRef, Text:ctypes.POINTER(ctypes.c_char), Radix:uint8_t) -> LLVMValueRef: ...
@@ -3443,25 +3442,25 @@ def LLVMDisposePassBuilderOptions(Options:LLVMPassBuilderOptionsRef) -> None: ..
 @record
 class llvm_blake3_chunk_state:
   SIZE = 112
-  cv: Annotated[(uint32_t* 8), 0]
+  cv: Annotated[Array[uint32_t, Literal[8]], 0]
   chunk_counter: Annotated[uint64_t, 32]
-  buf: Annotated[(uint8_t* 64), 40]
+  buf: Annotated[Array[uint8_t, Literal[64]], 40]
   buf_len: Annotated[uint8_t, 104]
   blocks_compressed: Annotated[uint8_t, 105]
   flags: Annotated[uint8_t, 106]
 @record
 class llvm_blake3_hasher:
   SIZE = 1912
-  key: Annotated[(uint32_t* 8), 0]
+  key: Annotated[Array[uint32_t, Literal[8]], 0]
   chunk: Annotated[llvm_blake3_chunk_state, 32]
   cv_stack_len: Annotated[uint8_t, 144]
-  cv_stack: Annotated[(uint8_t* 1760), 145]
+  cv_stack: Annotated[Array[uint8_t, Literal[1760]], 145]
 @dll.bind
 def llvm_blake3_version() -> ctypes.POINTER(ctypes.c_char): ...
 @dll.bind
 def llvm_blake3_hasher_init(self:ctypes.POINTER(llvm_blake3_hasher)) -> None: ...
 @dll.bind
-def llvm_blake3_hasher_init_keyed(self:ctypes.POINTER(llvm_blake3_hasher), key:(uint8_t* 32)) -> None: ...
+def llvm_blake3_hasher_init_keyed(self:ctypes.POINTER(llvm_blake3_hasher), key:Array[uint8_t, Literal[32]]) -> None: ...
 @dll.bind
 def llvm_blake3_hasher_init_derive_key(self:ctypes.POINTER(llvm_blake3_hasher), context:ctypes.POINTER(ctypes.c_char)) -> None: ...
 @dll.bind

@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 dll = DLL('cuda', 'cuda')
 cuuint32_t = ctypes.c_uint32
 cuuint64_t = ctypes.c_uint64
@@ -55,18 +54,18 @@ CUuserObject = ctypes.POINTER(struct_CUuserObject_st)
 @record
 class struct_CUuuid_st:
   SIZE = 16
-  bytes: Annotated[(ctypes.c_char* 16), 0]
+  bytes: Annotated[Array[ctypes.c_char, Literal[16]], 0]
 CUuuid = struct_CUuuid_st
 @record
 class struct_CUipcEventHandle_st:
   SIZE = 64
-  reserved: Annotated[(ctypes.c_char* 64), 0]
+  reserved: Annotated[Array[ctypes.c_char, Literal[64]], 0]
 CUipcEventHandle_v1 = struct_CUipcEventHandle_st
 CUipcEventHandle = struct_CUipcEventHandle_st
 @record
 class struct_CUipcMemHandle_st:
   SIZE = 64
-  reserved: Annotated[(ctypes.c_char* 64), 0]
+  reserved: Annotated[Array[ctypes.c_char, Literal[64]], 0]
 CUipcMemHandle_v1 = struct_CUipcMemHandle_st
 CUipcMemHandle = struct_CUipcMemHandle_st
 enum_CUipcMem_flags_enum = CEnum(ctypes.c_uint32)
@@ -169,7 +168,7 @@ class union_CUstreamBatchMemOpParams_union:
   writeValue: Annotated[struct_CUstreamMemOpWriteValueParams_st, 0]
   flushRemoteWrites: Annotated[struct_CUstreamMemOpFlushRemoteWritesParams_st, 0]
   memoryBarrier: Annotated[struct_CUstreamMemOpMemoryBarrierParams_st, 0]
-  pad: Annotated[(cuuint64_t* 6), 0]
+  pad: Annotated[Array[cuuint64_t, Literal[6]], 0]
 @record
 class struct_CUstreamMemOpWaitValueParams_st:
   SIZE = 40
@@ -410,8 +409,8 @@ CUdevice_attribute = enum_CUdevice_attribute_enum
 class struct_CUdevprop_st:
   SIZE = 56
   maxThreadsPerBlock: Annotated[ctypes.c_int32, 0]
-  maxThreadsDim: Annotated[(ctypes.c_int32* 3), 4]
-  maxGridSize: Annotated[(ctypes.c_int32* 3), 16]
+  maxThreadsDim: Annotated[Array[ctypes.c_int32, Literal[3]], 4]
+  maxGridSize: Annotated[Array[ctypes.c_int32, Literal[3]], 16]
   sharedMemPerBlock: Annotated[ctypes.c_int32, 28]
   totalConstantMemory: Annotated[ctypes.c_int32, 32]
   SIMDWidth: Annotated[ctypes.c_int32, 36]
@@ -773,7 +772,7 @@ CUlaunchAttributeID = enum_CUlaunchAttributeID_enum
 @record
 class union_CUlaunchAttributeValue_union:
   SIZE = 64
-  pad: Annotated[(ctypes.c_char* 64), 0]
+  pad: Annotated[Array[ctypes.c_char, Literal[64]], 0]
   accessPolicyWindow: Annotated[CUaccessPolicyWindow, 0]
   cooperative: Annotated[ctypes.c_int32, 0]
   syncPolicy: Annotated[CUsynchronizationPolicy, 0]
@@ -801,7 +800,7 @@ CUlaunchAttributeValue = union_CUlaunchAttributeValue_union
 class struct_CUlaunchAttribute_st:
   SIZE = 72
   id: Annotated[CUlaunchAttributeID, 0]
-  pad: Annotated[(ctypes.c_char* 4), 4]
+  pad: Annotated[Array[ctypes.c_char, Literal[4]], 4]
   value: Annotated[CUlaunchAttributeValue, 8]
 CUlaunchAttribute = struct_CUlaunchAttribute_st
 @record
@@ -1097,7 +1096,7 @@ class struct_CUDA_ARRAY_SPARSE_PROPERTIES_st:
   miptailFirstLevel: Annotated[ctypes.c_uint32, 12]
   miptailSize: Annotated[ctypes.c_uint64, 16]
   flags: Annotated[ctypes.c_uint32, 24]
-  reserved: Annotated[(ctypes.c_uint32* 4), 28]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[4]], 28]
 @record
 class _anonstruct3:
   SIZE = 12
@@ -1111,7 +1110,7 @@ class struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st:
   SIZE = 32
   size: Annotated[size_t, 0]
   alignment: Annotated[size_t, 8]
-  reserved: Annotated[(ctypes.c_uint32* 4), 16]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
 CUDA_ARRAY_MEMORY_REQUIREMENTS_v1 = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
 CUDA_ARRAY_MEMORY_REQUIREMENTS = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
 @record
@@ -1155,13 +1154,13 @@ class _anonstruct8:
 @record
 class _anonstruct9:
   SIZE = 128
-  reserved: Annotated[(ctypes.c_int32* 32), 0]
+  reserved: Annotated[Array[ctypes.c_int32, Literal[32]], 0]
 CUDA_RESOURCE_DESC_v1 = struct_CUDA_RESOURCE_DESC_st
 CUDA_RESOURCE_DESC = struct_CUDA_RESOURCE_DESC_st
 @record
 class struct_CUDA_TEXTURE_DESC_st:
   SIZE = 104
-  addressMode: Annotated[(CUaddress_mode* 3), 0]
+  addressMode: Annotated[Array[CUaddress_mode, Literal[3]], 0]
   filterMode: Annotated[CUfilter_mode, 12]
   flags: Annotated[ctypes.c_uint32, 16]
   maxAnisotropy: Annotated[ctypes.c_uint32, 20]
@@ -1169,8 +1168,8 @@ class struct_CUDA_TEXTURE_DESC_st:
   mipmapLevelBias: Annotated[ctypes.c_float, 28]
   minMipmapLevelClamp: Annotated[ctypes.c_float, 32]
   maxMipmapLevelClamp: Annotated[ctypes.c_float, 36]
-  borderColor: Annotated[(ctypes.c_float* 4), 40]
-  reserved: Annotated[(ctypes.c_int32* 12), 56]
+  borderColor: Annotated[Array[ctypes.c_float, Literal[4]], 40]
+  reserved: Annotated[Array[ctypes.c_int32, Literal[12]], 56]
 CUDA_TEXTURE_DESC_v1 = struct_CUDA_TEXTURE_DESC_st
 CUDA_TEXTURE_DESC = struct_CUDA_TEXTURE_DESC_st
 enum_CUresourceViewFormat_enum = CEnum(ctypes.c_uint32)
@@ -1222,13 +1221,13 @@ class struct_CUDA_RESOURCE_VIEW_DESC_st:
   lastMipmapLevel: Annotated[ctypes.c_uint32, 36]
   firstLayer: Annotated[ctypes.c_uint32, 40]
   lastLayer: Annotated[ctypes.c_uint32, 44]
-  reserved: Annotated[(ctypes.c_uint32* 16), 48]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 48]
 CUDA_RESOURCE_VIEW_DESC_v1 = struct_CUDA_RESOURCE_VIEW_DESC_st
 CUDA_RESOURCE_VIEW_DESC = struct_CUDA_RESOURCE_VIEW_DESC_st
 @record
 class struct_CUtensorMap_st:
   SIZE = 128
-  opaque: Annotated[(cuuint64_t* 16), 0]
+  opaque: Annotated[Array[cuuint64_t, Literal[16]], 0]
 CUtensorMap = struct_CUtensorMap_st
 enum_CUtensorMapDataType_enum = CEnum(ctypes.c_uint32)
 CU_TENSOR_MAP_DATA_TYPE_UINT8 = enum_CUtensorMapDataType_enum.define('CU_TENSOR_MAP_DATA_TYPE_UINT8', 0)
@@ -1317,7 +1316,7 @@ class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st:
   handle: Annotated[_anonunion10, 8]
   size: Annotated[ctypes.c_uint64, 24]
   flags: Annotated[ctypes.c_uint32, 32]
-  reserved: Annotated[(ctypes.c_uint32* 16), 36]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 36]
 @record
 class _anonunion10:
   SIZE = 16
@@ -1337,7 +1336,7 @@ class struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st:
   offset: Annotated[ctypes.c_uint64, 0]
   size: Annotated[ctypes.c_uint64, 8]
   flags: Annotated[ctypes.c_uint32, 16]
-  reserved: Annotated[(ctypes.c_uint32* 16), 20]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 20]
 CUDA_EXTERNAL_MEMORY_BUFFER_DESC_v1 = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
 CUDA_EXTERNAL_MEMORY_BUFFER_DESC = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
 @record
@@ -1346,7 +1345,7 @@ class struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st:
   offset: Annotated[ctypes.c_uint64, 0]
   arrayDesc: Annotated[CUDA_ARRAY3D_DESCRIPTOR, 8]
   numLevels: Annotated[ctypes.c_uint32, 48]
-  reserved: Annotated[(ctypes.c_uint32* 16), 52]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 52]
 CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_v1 = struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st
 CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC = struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st
 enum_CUexternalSemaphoreHandleType_enum = CEnum(ctypes.c_uint32)
@@ -1368,7 +1367,7 @@ class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st:
   type: Annotated[CUexternalSemaphoreHandleType, 0]
   handle: Annotated[_anonunion12, 8]
   flags: Annotated[ctypes.c_uint32, 24]
-  reserved: Annotated[(ctypes.c_uint32* 16), 28]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 28]
 @record
 class _anonunion12:
   SIZE = 16
@@ -1387,14 +1386,14 @@ class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st:
   SIZE = 144
   params: Annotated[_anonstruct14, 0]
   flags: Annotated[ctypes.c_uint32, 72]
-  reserved: Annotated[(ctypes.c_uint32* 16), 76]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 76]
 @record
 class _anonstruct14:
   SIZE = 72
   fence: Annotated[_anonstruct15, 0]
   nvSciSync: Annotated[_anonunion16, 8]
   keyedMutex: Annotated[_anonstruct17, 16]
-  reserved: Annotated[(ctypes.c_uint32* 12), 24]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[12]], 24]
 @record
 class _anonstruct15:
   SIZE = 8
@@ -1415,14 +1414,14 @@ class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st:
   SIZE = 144
   params: Annotated[_anonstruct18, 0]
   flags: Annotated[ctypes.c_uint32, 72]
-  reserved: Annotated[(ctypes.c_uint32* 16), 76]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 76]
 @record
 class _anonstruct18:
   SIZE = 72
   fence: Annotated[_anonstruct19, 0]
   nvSciSync: Annotated[_anonunion20, 8]
   keyedMutex: Annotated[_anonstruct21, 16]
-  reserved: Annotated[(ctypes.c_uint32* 10), 32]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[10]], 32]
 @record
 class _anonstruct19:
   SIZE = 8
@@ -1521,7 +1520,7 @@ class struct_CUarrayMapInfo_st:
   offset: Annotated[ctypes.c_uint64, 72]
   deviceBitMask: Annotated[ctypes.c_uint32, 80]
   flags: Annotated[ctypes.c_uint32, 84]
-  reserved: Annotated[(ctypes.c_uint32* 2), 88]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[2]], 88]
 @record
 class _anonunion22:
   SIZE = 8
@@ -1581,7 +1580,7 @@ class _anonstruct27:
   compressionType: Annotated[ctypes.c_ubyte, 0]
   gpuDirectRDMACapable: Annotated[ctypes.c_ubyte, 1]
   usage: Annotated[ctypes.c_uint16, 2]
-  reserved: Annotated[(ctypes.c_ubyte* 4), 4]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[4]], 4]
 CUmemAllocationProp_v1 = struct_CUmemAllocationProp_st
 CUmemAllocationProp = struct_CUmemAllocationProp_st
 @record
@@ -1629,13 +1628,13 @@ class struct_CUmemPoolProps_st:
   handleTypes: Annotated[CUmemAllocationHandleType, 4]
   location: Annotated[CUmemLocation, 8]
   win32SecurityAttributes: Annotated[ctypes.POINTER(None), 16]
-  reserved: Annotated[(ctypes.c_ubyte* 64), 24]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[64]], 24]
 CUmemPoolProps_v1 = struct_CUmemPoolProps_st
 CUmemPoolProps = struct_CUmemPoolProps_st
 @record
 class struct_CUmemPoolPtrExportData_st:
   SIZE = 64
-  reserved: Annotated[(ctypes.c_ubyte* 64), 0]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[64]], 0]
 CUmemPoolPtrExportData_v1 = struct_CUmemPoolPtrExportData_st
 CUmemPoolPtrExportData = struct_CUmemPoolPtrExportData_st
 @record

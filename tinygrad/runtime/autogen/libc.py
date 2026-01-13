@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 dll = DLL('libc', 'c', use_errno=True)
 off_t = ctypes.c_int64
 mode_t = ctypes.c_uint32
@@ -67,11 +66,11 @@ def strxfrm(__dest:ctypes.POINTER(ctypes.c_char), __src:ctypes.POINTER(ctypes.c_
 @record
 class struct___locale_struct:
   SIZE = 232
-  __locales: Annotated[(ctypes.POINTER(struct___locale_data)* 13), 0]
+  __locales: Annotated[Array[ctypes.POINTER(struct___locale_data), Literal[13]], 0]
   __ctype_b: Annotated[ctypes.POINTER(ctypes.c_uint16), 104]
   __ctype_tolower: Annotated[ctypes.POINTER(ctypes.c_int32), 112]
   __ctype_toupper: Annotated[ctypes.POINTER(ctypes.c_int32), 120]
-  __names: Annotated[(ctypes.POINTER(ctypes.c_char)* 13), 128]
+  __names: Annotated[Array[ctypes.POINTER(ctypes.c_char), Literal[13]], 128]
 class struct___locale_data(ctypes.Structure): pass
 locale_t = ctypes.POINTER(struct___locale_struct)
 @dll.bind
@@ -159,7 +158,7 @@ Elf64_Versym = ctypes.c_uint16
 @record
 class Elf32_Ehdr:
   SIZE = 52
-  e_ident: Annotated[(ctypes.c_ubyte* 16), 0]
+  e_ident: Annotated[Array[ctypes.c_ubyte, Literal[16]], 0]
   e_type: Annotated[Elf32_Half, 16]
   e_machine: Annotated[Elf32_Half, 18]
   e_version: Annotated[Elf32_Word, 20]
@@ -176,7 +175,7 @@ class Elf32_Ehdr:
 @record
 class Elf64_Ehdr:
   SIZE = 64
-  e_ident: Annotated[(ctypes.c_ubyte* 16), 0]
+  e_ident: Annotated[Array[ctypes.c_ubyte, Literal[16]], 0]
   e_type: Annotated[Elf64_Half, 16]
   e_machine: Annotated[Elf64_Half, 18]
   e_version: Annotated[Elf64_Word, 20]
@@ -452,7 +451,7 @@ class _anonstruct5:
 class Elf32_RegInfo:
   SIZE = 24
   ri_gprmask: Annotated[Elf32_Word, 0]
-  ri_cprmask: Annotated[(Elf32_Word* 4), 4]
+  ri_cprmask: Annotated[Array[Elf32_Word, Literal[4]], 4]
   ri_gp_value: Annotated[Elf32_Sword, 20]
 @record
 class Elf_Options:
@@ -534,7 +533,7 @@ def pread(__fd:ctypes.c_int32, __buf:ctypes.POINTER(None), __nbytes:size_t, __of
 @dll.bind
 def pwrite(__fd:ctypes.c_int32, __buf:ctypes.POINTER(None), __n:size_t, __offset:ctypes.c_int64) -> ssize_t: ...
 @dll.bind
-def pipe(__pipedes:(ctypes.c_int32* 2)) -> ctypes.c_int32: ...
+def pipe(__pipedes:Array[ctypes.c_int32, Literal[2]]) -> ctypes.c_int32: ...
 @dll.bind
 def alarm(__seconds:ctypes.c_uint32) -> ctypes.c_uint32: ...
 @dll.bind
@@ -571,17 +570,17 @@ def dup2(__fd:ctypes.c_int32, __fd2:ctypes.c_int32) -> ctypes.c_int32: ...
 try: __environ = ctypes.POINTER(ctypes.POINTER(ctypes.c_char)).in_dll(dll, '__environ')
 except (ValueError,AttributeError): pass
 @dll.bind
-def execve(__path:ctypes.POINTER(ctypes.c_char), __argv:(ctypes.POINTER(ctypes.c_char) * 0), __envp:(ctypes.POINTER(ctypes.c_char) * 0)) -> ctypes.c_int32: ...
+def execve(__path:ctypes.POINTER(ctypes.c_char), __argv:Array[ctypes.POINTER(ctypes.c_char), Literal[0]], __envp:Array[ctypes.POINTER(ctypes.c_char), Literal[0]]) -> ctypes.c_int32: ...
 @dll.bind
-def fexecve(__fd:ctypes.c_int32, __argv:(ctypes.POINTER(ctypes.c_char) * 0), __envp:(ctypes.POINTER(ctypes.c_char) * 0)) -> ctypes.c_int32: ...
+def fexecve(__fd:ctypes.c_int32, __argv:Array[ctypes.POINTER(ctypes.c_char), Literal[0]], __envp:Array[ctypes.POINTER(ctypes.c_char), Literal[0]]) -> ctypes.c_int32: ...
 @dll.bind
-def execv(__path:ctypes.POINTER(ctypes.c_char), __argv:(ctypes.POINTER(ctypes.c_char) * 0)) -> ctypes.c_int32: ...
+def execv(__path:ctypes.POINTER(ctypes.c_char), __argv:Array[ctypes.POINTER(ctypes.c_char), Literal[0]]) -> ctypes.c_int32: ...
 @dll.bind
 def execle(__path:ctypes.POINTER(ctypes.c_char), __arg:ctypes.POINTER(ctypes.c_char)) -> ctypes.c_int32: ...
 @dll.bind
 def execl(__path:ctypes.POINTER(ctypes.c_char), __arg:ctypes.POINTER(ctypes.c_char)) -> ctypes.c_int32: ...
 @dll.bind
-def execvp(__file:ctypes.POINTER(ctypes.c_char), __argv:(ctypes.POINTER(ctypes.c_char) * 0)) -> ctypes.c_int32: ...
+def execvp(__file:ctypes.POINTER(ctypes.c_char), __argv:Array[ctypes.POINTER(ctypes.c_char), Literal[0]]) -> ctypes.c_int32: ...
 @dll.bind
 def execlp(__file:ctypes.POINTER(ctypes.c_char), __arg:ctypes.POINTER(ctypes.c_char)) -> ctypes.c_int32: ...
 @dll.bind
@@ -624,7 +623,7 @@ def getgid() -> ctypes.c_uint32: ...
 @dll.bind
 def getegid() -> ctypes.c_uint32: ...
 @dll.bind
-def getgroups(__size:ctypes.c_int32, __list:(ctypes.c_uint32 * 0)) -> ctypes.c_int32: ...
+def getgroups(__size:ctypes.c_int32, __list:Array[ctypes.c_uint32, Literal[0]]) -> ctypes.c_int32: ...
 @dll.bind
 def setuid(__uid:ctypes.c_uint32) -> ctypes.c_int32: ...
 @dll.bind

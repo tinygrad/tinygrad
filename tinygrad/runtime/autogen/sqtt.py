@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_sqtt_data_info:
   SIZE = 12
@@ -86,9 +85,9 @@ class struct_sqtt_file_header:
 class struct_sqtt_file_chunk_cpu_info:
   SIZE = 112
   header: Annotated[struct_sqtt_file_chunk_header, 0]
-  vendor_id: Annotated[(uint32_t* 4), 16]
-  processor_brand: Annotated[(uint32_t* 12), 32]
-  reserved: Annotated[(uint32_t* 2), 80]
+  vendor_id: Annotated[Array[uint32_t, Literal[4]], 16]
+  processor_brand: Annotated[Array[uint32_t, Literal[12]], 32]
+  reserved: Annotated[Array[uint32_t, Literal[2]], 80]
   cpu_timestamp_freq: Annotated[uint64_t, 88]
   clock_speed: Annotated[uint32_t, 96]
   num_logical_cores: Annotated[uint32_t, 100]
@@ -169,7 +168,7 @@ class struct_sqtt_file_chunk_asic_info:
   l2_cache_size: Annotated[int32_t, 140]
   l1_cache_size: Annotated[int32_t, 144]
   lds_size: Annotated[int32_t, 148]
-  gpu_name: Annotated[(ctypes.c_char* 256), 152]
+  gpu_name: Annotated[Array[ctypes.c_char, Literal[256]], 152]
   alu_per_clock: Annotated[ctypes.c_float, 408]
   texture_per_clock: Annotated[ctypes.c_float, 412]
   prims_per_clock: Annotated[ctypes.c_float, 416]
@@ -180,15 +179,15 @@ class struct_sqtt_file_chunk_asic_info:
   memory_ops_per_clock: Annotated[uint32_t, 448]
   memory_chip_type: Annotated[enum_sqtt_memory_type, 452]
   lds_granularity: Annotated[uint32_t, 456]
-  cu_mask: Annotated[((uint16_t* 2)* 32), 460]
-  reserved1: Annotated[(ctypes.c_char* 128), 588]
-  active_pixel_packer_mask: Annotated[(uint32_t* 4), 716]
-  reserved2: Annotated[(ctypes.c_char* 16), 732]
+  cu_mask: Annotated[Array[Array[uint16_t, Literal[2]], Literal[32]], 460]
+  reserved1: Annotated[Array[ctypes.c_char, Literal[128]], 588]
+  active_pixel_packer_mask: Annotated[Array[uint32_t, Literal[4]], 716]
+  reserved2: Annotated[Array[ctypes.c_char, Literal[16]], 732]
   gl1_cache_size: Annotated[uint32_t, 748]
   instruction_cache_size: Annotated[uint32_t, 752]
   scalar_cache_size: Annotated[uint32_t, 756]
   mall_cache_size: Annotated[uint32_t, 760]
-  padding: Annotated[(ctypes.c_char* 4), 764]
+  padding: Annotated[Array[ctypes.c_char, Literal[4]], 764]
 int64_t = ctypes.c_int64
 enum_sqtt_api_type = CEnum(ctypes.c_uint32)
 SQTT_API_TYPE_DIRECTX_12 = enum_sqtt_api_type.define('SQTT_API_TYPE_DIRECTX_12', 0)
@@ -216,8 +215,8 @@ class union_sqtt_profiling_mode_data:
 @record
 class _anonstruct0:
   SIZE = 512
-  start: Annotated[(ctypes.c_char* 256), 0]
-  end: Annotated[(ctypes.c_char* 256), 256]
+  start: Annotated[Array[ctypes.c_char, Literal[256]], 0]
+  end: Annotated[Array[ctypes.c_char, Literal[256]], 256]
 @record
 class _anonstruct1:
   SIZE = 8
@@ -274,7 +273,7 @@ class struct_sqtt_code_object_loader_events_record:
   loader_event_type: Annotated[uint32_t, 0]
   reserved: Annotated[uint32_t, 4]
   base_address: Annotated[uint64_t, 8]
-  code_object_hash: Annotated[(uint64_t* 2), 16]
+  code_object_hash: Annotated[Array[uint64_t, Literal[2]], 16]
   time_stamp: Annotated[uint64_t, 32]
 @record
 class struct_sqtt_file_chunk_code_object_loader_events:
@@ -288,8 +287,8 @@ class struct_sqtt_file_chunk_code_object_loader_events:
 class struct_sqtt_pso_correlation_record:
   SIZE = 88
   api_pso_hash: Annotated[uint64_t, 0]
-  pipeline_hash: Annotated[(uint64_t* 2), 8]
-  api_level_obj_name: Annotated[(ctypes.c_char* 64), 24]
+  pipeline_hash: Annotated[Array[uint64_t, Literal[2]], 8]
+  api_level_obj_name: Annotated[Array[ctypes.c_char, Literal[64]], 24]
 @record
 class struct_sqtt_file_chunk_pso_correlation:
   SIZE = 32
@@ -376,7 +375,7 @@ class struct_sqtt_queue_event_record:
   submit_sub_index: Annotated[uint32_t, 20]
   api_id: Annotated[uint64_t, 24]
   cpu_timestamp: Annotated[uint64_t, 32]
-  gpu_timestamps: Annotated[(uint64_t* 2), 40]
+  gpu_timestamps: Annotated[Array[uint64_t, Literal[2]], 40]
 @record
 class struct_sqtt_file_chunk_clock_calibration:
   SIZE = 40
@@ -679,7 +678,7 @@ class struct_rgp_sqtt_marker_pipeline_bind:
   cb_id: Annotated[uint32_t, 1, 20, 0]
   reserved: Annotated[uint32_t, 3, 4, 4]
   dword01: Annotated[uint32_t, 0]
-  api_pso_hash: Annotated[(uint32_t* 2), 4]
+  api_pso_hash: Annotated[Array[uint32_t, Literal[2]], 4]
   dword02: Annotated[uint32_t, 0]
   dword03: Annotated[uint32_t, 4]
 init_records()

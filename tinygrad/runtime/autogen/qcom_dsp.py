@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 ion_user_handle_t = ctypes.c_int32
 enum_ion_heap_type = CEnum(ctypes.c_uint32)
 ION_HEAP_TYPE_SYSTEM = enum_ion_heap_type.define('ION_HEAP_TYPE_SYSTEM', 0)
@@ -463,7 +462,7 @@ apps_std_DIR = struct_apps_std_DIR
 class struct_apps_std_DIRENT:
   SIZE = 260
   ino: Annotated[ctypes.c_int32, 0]
-  name: Annotated[(ctypes.c_char* 255), 4]
+  name: Annotated[Array[ctypes.c_char, Literal[255]], 4]
 apps_std_DIRENT = struct_apps_std_DIRENT
 @record
 class struct_apps_std_STAT:

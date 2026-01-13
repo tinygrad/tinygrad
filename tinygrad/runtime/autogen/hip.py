@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 import os
 dll = DLL('hip', os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so')
 class ihipModuleSymbol_t(ctypes.Structure): pass
@@ -232,14 +231,14 @@ class hipDeviceArch_t:
 @record
 class hipUUID_t:
   SIZE = 16
-  bytes: Annotated[(ctypes.c_char* 16), 0]
+  bytes: Annotated[Array[ctypes.c_char, Literal[16]], 0]
 hipUUID = hipUUID_t
 @record
 class hipDeviceProp_tR0600:
   SIZE = 1472
-  name: Annotated[(ctypes.c_char* 256), 0]
+  name: Annotated[Array[ctypes.c_char, Literal[256]], 0]
   uuid: Annotated[hipUUID, 256]
-  luid: Annotated[(ctypes.c_char* 8), 272]
+  luid: Annotated[Array[ctypes.c_char, Literal[8]], 272]
   luidDeviceNodeMask: Annotated[ctypes.c_uint32, 280]
   totalGlobalMem: Annotated[size_t, 288]
   sharedMemPerBlock: Annotated[size_t, 296]
@@ -247,8 +246,8 @@ class hipDeviceProp_tR0600:
   warpSize: Annotated[ctypes.c_int32, 308]
   memPitch: Annotated[size_t, 312]
   maxThreadsPerBlock: Annotated[ctypes.c_int32, 320]
-  maxThreadsDim: Annotated[(ctypes.c_int32* 3), 324]
-  maxGridSize: Annotated[(ctypes.c_int32* 3), 336]
+  maxThreadsDim: Annotated[Array[ctypes.c_int32, Literal[3]], 324]
+  maxGridSize: Annotated[Array[ctypes.c_int32, Literal[3]], 336]
   clockRate: Annotated[ctypes.c_int32, 348]
   totalConstMem: Annotated[size_t, 352]
   major: Annotated[ctypes.c_int32, 360]
@@ -264,23 +263,23 @@ class hipDeviceProp_tR0600:
   maxTexture1D: Annotated[ctypes.c_int32, 408]
   maxTexture1DMipmap: Annotated[ctypes.c_int32, 412]
   maxTexture1DLinear: Annotated[ctypes.c_int32, 416]
-  maxTexture2D: Annotated[(ctypes.c_int32* 2), 420]
-  maxTexture2DMipmap: Annotated[(ctypes.c_int32* 2), 428]
-  maxTexture2DLinear: Annotated[(ctypes.c_int32* 3), 436]
-  maxTexture2DGather: Annotated[(ctypes.c_int32* 2), 448]
-  maxTexture3D: Annotated[(ctypes.c_int32* 3), 456]
-  maxTexture3DAlt: Annotated[(ctypes.c_int32* 3), 468]
+  maxTexture2D: Annotated[Array[ctypes.c_int32, Literal[2]], 420]
+  maxTexture2DMipmap: Annotated[Array[ctypes.c_int32, Literal[2]], 428]
+  maxTexture2DLinear: Annotated[Array[ctypes.c_int32, Literal[3]], 436]
+  maxTexture2DGather: Annotated[Array[ctypes.c_int32, Literal[2]], 448]
+  maxTexture3D: Annotated[Array[ctypes.c_int32, Literal[3]], 456]
+  maxTexture3DAlt: Annotated[Array[ctypes.c_int32, Literal[3]], 468]
   maxTextureCubemap: Annotated[ctypes.c_int32, 480]
-  maxTexture1DLayered: Annotated[(ctypes.c_int32* 2), 484]
-  maxTexture2DLayered: Annotated[(ctypes.c_int32* 3), 492]
-  maxTextureCubemapLayered: Annotated[(ctypes.c_int32* 2), 504]
+  maxTexture1DLayered: Annotated[Array[ctypes.c_int32, Literal[2]], 484]
+  maxTexture2DLayered: Annotated[Array[ctypes.c_int32, Literal[3]], 492]
+  maxTextureCubemapLayered: Annotated[Array[ctypes.c_int32, Literal[2]], 504]
   maxSurface1D: Annotated[ctypes.c_int32, 512]
-  maxSurface2D: Annotated[(ctypes.c_int32* 2), 516]
-  maxSurface3D: Annotated[(ctypes.c_int32* 3), 524]
-  maxSurface1DLayered: Annotated[(ctypes.c_int32* 2), 536]
-  maxSurface2DLayered: Annotated[(ctypes.c_int32* 3), 544]
+  maxSurface2D: Annotated[Array[ctypes.c_int32, Literal[2]], 516]
+  maxSurface3D: Annotated[Array[ctypes.c_int32, Literal[3]], 524]
+  maxSurface1DLayered: Annotated[Array[ctypes.c_int32, Literal[2]], 536]
+  maxSurface2DLayered: Annotated[Array[ctypes.c_int32, Literal[3]], 544]
   maxSurfaceCubemap: Annotated[ctypes.c_int32, 556]
-  maxSurfaceCubemapLayered: Annotated[(ctypes.c_int32* 2), 560]
+  maxSurfaceCubemapLayered: Annotated[Array[ctypes.c_int32, Literal[2]], 560]
   surfaceAlignment: Annotated[size_t, 568]
   concurrentKernels: Annotated[ctypes.c_int32, 576]
   ECCEnabled: Annotated[ctypes.c_int32, 580]
@@ -330,9 +329,9 @@ class hipDeviceProp_tR0600:
   ipcEventSupported: Annotated[ctypes.c_int32, 768]
   clusterLaunch: Annotated[ctypes.c_int32, 772]
   unifiedFunctionPointers: Annotated[ctypes.c_int32, 776]
-  reserved: Annotated[(ctypes.c_int32* 63), 780]
-  hipReserved: Annotated[(ctypes.c_int32* 32), 1032]
-  gcnArchName: Annotated[(ctypes.c_char* 256), 1160]
+  reserved: Annotated[Array[ctypes.c_int32, Literal[63]], 780]
+  hipReserved: Annotated[Array[ctypes.c_int32, Literal[32]], 1032]
+  gcnArchName: Annotated[Array[ctypes.c_char, Literal[256]], 1160]
   maxSharedMemoryPerMultiProcessor: Annotated[size_t, 1416]
   clockInstructionRate: Annotated[ctypes.c_int32, 1424]
   arch: Annotated[hipDeviceArch_t, 1428]
@@ -512,12 +511,12 @@ hipDevP2PAttrHipArrayAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrHip
 @record
 class hipIpcMemHandle_st:
   SIZE = 64
-  reserved: Annotated[(ctypes.c_char* 64), 0]
+  reserved: Annotated[Array[ctypes.c_char, Literal[64]], 0]
 hipIpcMemHandle_t = hipIpcMemHandle_st
 @record
 class hipIpcEventHandle_st:
   SIZE = 64
-  reserved: Annotated[(ctypes.c_char* 64), 0]
+  reserved: Annotated[Array[ctypes.c_char, Literal[64]], 0]
 hipIpcEventHandle_t = hipIpcEventHandle_st
 class ihipModule_t(ctypes.Structure): pass
 hipModule_t = ctypes.POINTER(ihipModule_t)
@@ -612,11 +611,11 @@ class hipMemPoolProps:
   location: Annotated[hipMemLocation, 8]
   win32SecurityAttributes: Annotated[ctypes.POINTER(None), 16]
   maxSize: Annotated[size_t, 24]
-  reserved: Annotated[(ctypes.c_ubyte* 56), 32]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[56]], 32]
 @record
 class hipMemPoolPtrExportData:
   SIZE = 64
-  reserved: Annotated[(ctypes.c_ubyte* 64), 0]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[64]], 0]
 hipJitOption = CEnum(ctypes.c_uint32)
 hipJitOptionMaxRegisters = hipJitOption.define('hipJitOptionMaxRegisters', 0)
 hipJitOptionThreadsPerBlock = hipJitOption.define('hipJitOptionThreadsPerBlock', 1)
@@ -695,7 +694,7 @@ class hipExternalMemoryHandleDesc_st:
   handle: Annotated[_anonunion1, 8]
   size: Annotated[ctypes.c_uint64, 24]
   flags: Annotated[ctypes.c_uint32, 32]
-  reserved: Annotated[(ctypes.c_uint32* 16), 36]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 36]
 @record
 class _anonunion1:
   SIZE = 16
@@ -714,7 +713,7 @@ class hipExternalMemoryBufferDesc_st:
   offset: Annotated[ctypes.c_uint64, 0]
   size: Annotated[ctypes.c_uint64, 8]
   flags: Annotated[ctypes.c_uint32, 16]
-  reserved: Annotated[(ctypes.c_uint32* 16), 20]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 20]
 hipExternalMemoryBufferDesc = hipExternalMemoryBufferDesc_st
 @record
 class hipExternalMemoryMipmappedArrayDesc_st:
@@ -765,7 +764,7 @@ class hipExternalSemaphoreHandleDesc_st:
   type: Annotated[hipExternalSemaphoreHandleType, 0]
   handle: Annotated[_anonunion3, 8]
   flags: Annotated[ctypes.c_uint32, 24]
-  reserved: Annotated[(ctypes.c_uint32* 16), 28]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 28]
 @record
 class _anonunion3:
   SIZE = 16
@@ -784,14 +783,14 @@ class hipExternalSemaphoreSignalParams_st:
   SIZE = 144
   params: Annotated[_anonstruct5, 0]
   flags: Annotated[ctypes.c_uint32, 72]
-  reserved: Annotated[(ctypes.c_uint32* 16), 76]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 76]
 @record
 class _anonstruct5:
   SIZE = 72
   fence: Annotated[_anonstruct6, 0]
   nvSciSync: Annotated[_anonunion7, 8]
   keyedMutex: Annotated[_anonstruct8, 16]
-  reserved: Annotated[(ctypes.c_uint32* 12), 24]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[12]], 24]
 @record
 class _anonstruct6:
   SIZE = 8
@@ -811,14 +810,14 @@ class hipExternalSemaphoreWaitParams_st:
   SIZE = 144
   params: Annotated[_anonstruct9, 0]
   flags: Annotated[ctypes.c_uint32, 72]
-  reserved: Annotated[(ctypes.c_uint32* 16), 76]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 76]
 @record
 class _anonstruct9:
   SIZE = 72
   fence: Annotated[_anonstruct10, 0]
   nvSciSync: Annotated[_anonunion11, 8]
   keyedMutex: Annotated[_anonstruct12, 16]
-  reserved: Annotated[(ctypes.c_uint32* 10), 32]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[10]], 32]
 @record
 class _anonstruct10:
   SIZE = 8
@@ -1061,7 +1060,7 @@ class hipArrayMapInfo:
   offset: Annotated[ctypes.c_uint64, 128]
   deviceBitMask: Annotated[ctypes.c_uint32, 136]
   flags: Annotated[ctypes.c_uint32, 140]
-  reserved: Annotated[(ctypes.c_uint32* 2), 144]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[2]], 144]
 hipResourceType = CEnum(ctypes.c_uint32)
 hipResourceTypeArray = hipResourceType.define('hipResourceTypeArray', 0)
 hipResourceTypeMipmappedArray = hipResourceType.define('hipResourceTypeMipmappedArray', 1)
@@ -1129,7 +1128,7 @@ class _anonunion18:
 class hipMemcpyNodeParams:
   SIZE = 176
   flags: Annotated[ctypes.c_int32, 0]
-  reserved: Annotated[(ctypes.c_int32* 3), 4]
+  reserved: Annotated[Array[ctypes.c_int32, Literal[3]], 4]
   copyParams: Annotated[hipMemcpy3DParms, 16]
 @record
 class hipMemcpy3DParms:
@@ -1183,8 +1182,8 @@ class hipMemFreeNodeParams:
 class hipGraphNodeParams:
   SIZE = 256
   type: Annotated[hipGraphNodeType, 0]
-  reserved0: Annotated[(ctypes.c_int32* 3), 4]
-  reserved1: Annotated[(ctypes.c_int64* 29), 16]
+  reserved0: Annotated[Array[ctypes.c_int32, Literal[3]], 4]
+  reserved1: Annotated[Array[ctypes.c_int64, Literal[29]], 16]
   kernel: Annotated[hipKernelNodeParams, 16]
   memcpy: Annotated[hipMemcpyNodeParams, 16]
   memset: Annotated[hipMemsetParams, 16]
@@ -1205,7 +1204,7 @@ hipGraphDependencyTypeProgrammatic = hipGraphDependencyType.define('hipGraphDepe
 class hipGraphEdgeData:
   SIZE = 8
   from_port: Annotated[ctypes.c_ubyte, 0]
-  reserved: Annotated[(ctypes.c_ubyte* 5), 1]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[5]], 1]
   to_port: Annotated[ctypes.c_ubyte, 6]
   type: Annotated[ctypes.c_ubyte, 7]
 @dll.bind
@@ -1741,7 +1740,7 @@ class textureReference:
   normalized: Annotated[ctypes.c_int32, 0]
   readMode: Annotated[hipTextureReadMode, 4]
   filterMode: Annotated[hipTextureFilterMode, 8]
-  addressMode: Annotated[(hipTextureAddressMode* 3), 12]
+  addressMode: Annotated[Array[hipTextureAddressMode, Literal[3]], 12]
   channelDesc: Annotated[hipChannelFormatDesc, 24]
   sRGB: Annotated[ctypes.c_int32, 44]
   maxAnisotropy: Annotated[ctypes.c_uint32, 48]
@@ -1857,11 +1856,11 @@ class _anonstruct23:
 @record
 class hipTextureDesc:
   SIZE = 64
-  addressMode: Annotated[(hipTextureAddressMode* 3), 0]
+  addressMode: Annotated[Array[hipTextureAddressMode, Literal[3]], 0]
   filterMode: Annotated[hipTextureFilterMode, 12]
   readMode: Annotated[hipTextureReadMode, 16]
   sRGB: Annotated[ctypes.c_int32, 20]
-  borderColor: Annotated[(ctypes.c_float* 4), 24]
+  borderColor: Annotated[Array[ctypes.c_float, Literal[4]], 24]
   normalizedCoords: Annotated[ctypes.c_int32, 40]
   maxAnisotropy: Annotated[ctypes.c_uint32, 44]
   mipmapFilterMode: Annotated[hipTextureFilterMode, 48]
@@ -1977,11 +1976,11 @@ class _anonstruct28:
 @record
 class _anonstruct29:
   SIZE = 128
-  reserved: Annotated[(ctypes.c_int32* 32), 0]
+  reserved: Annotated[Array[ctypes.c_int32, Literal[32]], 0]
 @record
 class HIP_TEXTURE_DESC_st:
   SIZE = 104
-  addressMode: Annotated[(HIPaddress_mode* 3), 0]
+  addressMode: Annotated[Array[HIPaddress_mode, Literal[3]], 0]
   filterMode: Annotated[HIPfilter_mode, 12]
   flags: Annotated[ctypes.c_uint32, 16]
   maxAnisotropy: Annotated[ctypes.c_uint32, 20]
@@ -1989,8 +1988,8 @@ class HIP_TEXTURE_DESC_st:
   mipmapLevelBias: Annotated[ctypes.c_float, 28]
   minMipmapLevelClamp: Annotated[ctypes.c_float, 32]
   maxMipmapLevelClamp: Annotated[ctypes.c_float, 36]
-  borderColor: Annotated[(ctypes.c_float* 4), 40]
-  reserved: Annotated[(ctypes.c_int32* 12), 56]
+  borderColor: Annotated[Array[ctypes.c_float, Literal[4]], 40]
+  reserved: Annotated[Array[ctypes.c_int32, Literal[12]], 56]
 HIP_TEXTURE_DESC = HIP_TEXTURE_DESC_st
 HIPaddress_mode_enum = CEnum(ctypes.c_uint32)
 HIP_TR_ADDRESS_MODE_WRAP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_WRAP', 0)
@@ -2015,7 +2014,7 @@ class HIP_RESOURCE_VIEW_DESC_st:
   lastMipmapLevel: Annotated[ctypes.c_uint32, 36]
   firstLayer: Annotated[ctypes.c_uint32, 40]
   lastLayer: Annotated[ctypes.c_uint32, 44]
-  reserved: Annotated[(ctypes.c_uint32* 16), 48]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[16]], 48]
 HIP_RESOURCE_VIEW_DESC = HIP_RESOURCE_VIEW_DESC_st
 HIPresourceViewFormat_enum = CEnum(ctypes.c_uint32)
 HIP_RES_VIEW_FORMAT_NONE = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_NONE', 0)

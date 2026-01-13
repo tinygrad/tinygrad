@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 import os
 dll = DLL('hsa', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so', 'hsa-runtime64'])
 enum_SQ_RSRC_BUF_TYPE = CEnum(ctypes.c_uint32)
@@ -739,7 +738,7 @@ class struct_hsa_agent_dispatch_packet_s:
   type: Annotated[uint16_t, 2]
   reserved0: Annotated[uint32_t, 4]
   return_address: Annotated[ctypes.POINTER(None), 8]
-  arg: Annotated[(uint64_t* 4), 16]
+  arg: Annotated[Array[uint64_t, Literal[4]], 16]
   reserved2: Annotated[uint64_t, 48]
   completion_signal: Annotated[hsa_signal_t, 56]
 hsa_agent_dispatch_packet_t = struct_hsa_agent_dispatch_packet_s
@@ -749,7 +748,7 @@ class struct_hsa_barrier_and_packet_s:
   header: Annotated[uint16_t, 0]
   reserved0: Annotated[uint16_t, 2]
   reserved1: Annotated[uint32_t, 4]
-  dep_signal: Annotated[(hsa_signal_t* 5), 8]
+  dep_signal: Annotated[Array[hsa_signal_t, Literal[5]], 8]
   reserved2: Annotated[uint64_t, 48]
   completion_signal: Annotated[hsa_signal_t, 56]
 hsa_barrier_and_packet_t = struct_hsa_barrier_and_packet_s
@@ -759,7 +758,7 @@ class struct_hsa_barrier_or_packet_s:
   header: Annotated[uint16_t, 0]
   reserved0: Annotated[uint16_t, 2]
   reserved1: Annotated[uint32_t, 4]
-  dep_signal: Annotated[(hsa_signal_t* 5), 8]
+  dep_signal: Annotated[Array[hsa_signal_t, Literal[5]], 8]
   reserved2: Annotated[uint64_t, 48]
   completion_signal: Annotated[hsa_signal_t, 56]
 hsa_barrier_or_packet_t = struct_hsa_barrier_or_packet_s
@@ -1113,7 +1112,7 @@ HSA_AMD_AIE_ERT_START_NPU_PREEMPT = hsa_amd_aie_ert_cmd_opcode_t.define('HSA_AMD
 class struct_hsa_amd_aie_ert_start_kernel_data_s:
   SIZE = 8
   pdi_addr: Annotated[ctypes.POINTER(None), 0]
-  data: Annotated[(uint32_t * 0), 8]
+  data: Annotated[Array[uint32_t, Literal[0]], 8]
 hsa_amd_aie_ert_start_kernel_data_t = struct_hsa_amd_aie_ert_start_kernel_data_s
 @record
 class struct_hsa_amd_aie_ert_packet_s:
@@ -1288,7 +1287,7 @@ class struct_hsa_amd_image_descriptor_s:
   SIZE = 12
   version: Annotated[uint32_t, 0]
   deviceID: Annotated[uint32_t, 4]
-  data: Annotated[(uint32_t* 1), 8]
+  data: Annotated[Array[uint32_t, Literal[1]], 8]
 hsa_amd_image_descriptor_t = struct_hsa_amd_image_descriptor_s
 @record
 class struct_hsa_ext_image_descriptor_s:
@@ -1484,7 +1483,7 @@ def hsa_amd_pointer_info_set_userdata(ptr:ctypes.POINTER(None), userdata:ctypes.
 @record
 class struct_hsa_amd_ipc_memory_s:
   SIZE = 32
-  handle: Annotated[(uint32_t* 8), 0]
+  handle: Annotated[Array[uint32_t, Literal[8]], 0]
 hsa_amd_ipc_memory_t = struct_hsa_amd_ipc_memory_s
 @dll.bind
 def hsa_amd_ipc_memory_create(ptr:ctypes.POINTER(None), len:size_t, handle:ctypes.POINTER(hsa_amd_ipc_memory_t)) -> hsa_status_t: ...
@@ -1676,7 +1675,7 @@ class struct_hsa_amd_ais_file_handle_s:
   SIZE = 8
   handle: Annotated[ctypes.POINTER(None), 0]
   fd: Annotated[ctypes.c_int32, 0]
-  pad: Annotated[(uint8_t* 8), 0]
+  pad: Annotated[Array[uint8_t, Literal[8]], 0]
 hsa_amd_ais_file_handle_t = struct_hsa_amd_ais_file_handle_s
 int64_t = ctypes.c_int64
 @dll.bind
@@ -1712,13 +1711,13 @@ class struct_amd_signal_s:
   end_ts: Annotated[uint64_t, 40]
   queue_ptr: Annotated[ctypes.POINTER(amd_queue_v2_t), 48]
   reserved2: Annotated[uint64_t, 48]
-  reserved3: Annotated[(uint32_t* 2), 56]
+  reserved3: Annotated[Array[uint32_t, Literal[2]], 56]
 @record
 class struct_amd_queue_v2_s:
   SIZE = 2304
   hsa_queue: Annotated[hsa_queue_t, 0]
   caps: Annotated[uint32_t, 40]
-  reserved1: Annotated[(uint32_t* 3), 44]
+  reserved1: Annotated[Array[uint32_t, Literal[3]], 44]
   write_dispatch_id: Annotated[uint64_t, 56]
   group_segment_aperture_base_hi: Annotated[uint32_t, 64]
   private_segment_aperture_base_hi: Annotated[uint32_t, 68]
@@ -1726,11 +1725,11 @@ class struct_amd_queue_v2_s:
   max_wave_id: Annotated[uint32_t, 76]
   max_legacy_doorbell_dispatch_id_plus_1: Annotated[uint64_t, 80]
   legacy_doorbell_lock: Annotated[uint32_t, 88]
-  reserved2: Annotated[(uint32_t* 9), 92]
+  reserved2: Annotated[Array[uint32_t, Literal[9]], 92]
   read_dispatch_id: Annotated[uint64_t, 128]
   read_dispatch_id_field_base_byte_offset: Annotated[uint32_t, 136]
   compute_tmpring_size: Annotated[uint32_t, 140]
-  scratch_resource_descriptor: Annotated[(uint32_t* 4), 144]
+  scratch_resource_descriptor: Annotated[Array[uint32_t, Literal[4]], 144]
   scratch_backing_memory_location: Annotated[uint64_t, 160]
   scratch_backing_memory_byte_size: Annotated[uint64_t, 168]
   scratch_wave64_lane_byte_size: Annotated[uint32_t, 176]
@@ -1738,7 +1737,7 @@ class struct_amd_queue_v2_s:
   scratch_max_use_index: Annotated[uint64_t, 184]
   queue_inactive_signal: Annotated[hsa_signal_t, 192]
   alt_scratch_max_use_index: Annotated[uint64_t, 200]
-  alt_scratch_resource_descriptor: Annotated[(uint32_t* 4), 208]
+  alt_scratch_resource_descriptor: Annotated[Array[uint32_t, Literal[4]], 208]
   alt_scratch_backing_memory_location: Annotated[uint64_t, 224]
   alt_scratch_dispatch_limit_x: Annotated[uint32_t, 232]
   alt_scratch_dispatch_limit_y: Annotated[uint32_t, 236]
@@ -1746,7 +1745,7 @@ class struct_amd_queue_v2_s:
   alt_scratch_wave64_lane_byte_size: Annotated[uint32_t, 244]
   alt_compute_tmpring_size: Annotated[uint32_t, 248]
   reserved5: Annotated[uint32_t, 252]
-  scratch_last_used_index: Annotated[(scratch_last_used_index_xcc_t* 128), 256]
+  scratch_last_used_index: Annotated[Array[scratch_last_used_index_xcc_t, Literal[128]], 256]
 amd_queue_v2_t = struct_amd_queue_v2_s
 amd_queue_properties32_t = ctypes.c_uint32
 @record
@@ -1790,7 +1789,7 @@ class struct_amd_queue_s:
   SIZE = 256
   hsa_queue: Annotated[hsa_queue_t, 0]
   caps: Annotated[uint32_t, 40]
-  reserved1: Annotated[(uint32_t* 3), 44]
+  reserved1: Annotated[Array[uint32_t, Literal[3]], 44]
   write_dispatch_id: Annotated[uint64_t, 56]
   group_segment_aperture_base_hi: Annotated[uint32_t, 64]
   private_segment_aperture_base_hi: Annotated[uint32_t, 68]
@@ -1798,18 +1797,18 @@ class struct_amd_queue_s:
   max_wave_id: Annotated[uint32_t, 76]
   max_legacy_doorbell_dispatch_id_plus_1: Annotated[uint64_t, 80]
   legacy_doorbell_lock: Annotated[uint32_t, 88]
-  reserved2: Annotated[(uint32_t* 9), 92]
+  reserved2: Annotated[Array[uint32_t, Literal[9]], 92]
   read_dispatch_id: Annotated[uint64_t, 128]
   read_dispatch_id_field_base_byte_offset: Annotated[uint32_t, 136]
   compute_tmpring_size: Annotated[uint32_t, 140]
-  scratch_resource_descriptor: Annotated[(uint32_t* 4), 144]
+  scratch_resource_descriptor: Annotated[Array[uint32_t, Literal[4]], 144]
   scratch_backing_memory_location: Annotated[uint64_t, 160]
-  reserved3: Annotated[(uint32_t* 2), 168]
+  reserved3: Annotated[Array[uint32_t, Literal[2]], 168]
   scratch_wave64_lane_byte_size: Annotated[uint32_t, 176]
   queue_properties: Annotated[amd_queue_properties32_t, 180]
-  reserved4: Annotated[(uint32_t* 2), 184]
+  reserved4: Annotated[Array[uint32_t, Literal[2]], 184]
   queue_inactive_signal: Annotated[hsa_signal_t, 192]
-  reserved5: Annotated[(uint32_t* 14), 200]
+  reserved5: Annotated[Array[uint32_t, Literal[14]], 200]
 amd_queue_t = struct_amd_queue_s
 amd_kernel_code_version32_t = ctypes.c_uint32
 enum_amd_kernel_code_version_t = CEnum(ctypes.c_uint32)
@@ -2053,10 +2052,10 @@ class struct_amd_control_directives_s:
   max_flat_grid_size: Annotated[uint64_t, 16]
   max_flat_workgroup_size: Annotated[uint32_t, 24]
   required_dim: Annotated[uint8_t, 28]
-  reserved1: Annotated[(uint8_t* 3), 29]
-  required_grid_size: Annotated[(uint64_t* 3), 32]
-  required_workgroup_size: Annotated[(uint32_t* 3), 56]
-  reserved2: Annotated[(uint8_t* 60), 68]
+  reserved1: Annotated[Array[uint8_t, Literal[3]], 29]
+  required_grid_size: Annotated[Array[uint64_t, Literal[3]], 32]
+  required_workgroup_size: Annotated[Array[uint32_t, Literal[3]], 56]
+  reserved2: Annotated[Array[uint8_t, Literal[60]], 68]
 amd_control_directives_t = struct_amd_control_directives_s
 @record
 class struct_amd_kernel_code_s:
@@ -2092,7 +2091,7 @@ class struct_amd_kernel_code_s:
   private_segment_alignment: Annotated[amd_powertwo8_t, 102]
   wavefront_size: Annotated[amd_powertwo8_t, 103]
   call_convention: Annotated[int32_t, 104]
-  reserved1: Annotated[(uint8_t* 12), 108]
+  reserved1: Annotated[Array[uint8_t, Literal[12]], 108]
   runtime_loader_kernel_symbol: Annotated[uint64_t, 120]
   control_directives: Annotated[amd_control_directives_t, 128]
 amd_kernel_code_t = struct_amd_kernel_code_s
@@ -2149,10 +2148,10 @@ class struct_hsa_ext_control_directives_s:
   max_flat_grid_size: Annotated[uint64_t, 16]
   max_flat_workgroup_size: Annotated[uint32_t, 24]
   reserved1: Annotated[uint32_t, 28]
-  required_grid_size: Annotated[(uint64_t* 3), 32]
+  required_grid_size: Annotated[Array[uint64_t, Literal[3]], 32]
   required_workgroup_size: Annotated[hsa_dim3_t, 56]
   required_dim: Annotated[uint8_t, 68]
-  reserved2: Annotated[(uint8_t* 75), 69]
+  reserved2: Annotated[Array[uint8_t, Literal[75]], 69]
 hsa_ext_control_directives_t = struct_hsa_ext_control_directives_s
 @dll.bind
 def hsa_ext_program_finalize(program:hsa_ext_program_t, isa:hsa_isa_t, call_convention:int32_t, control_directives:hsa_ext_control_directives_t, options:ctypes.POINTER(ctypes.c_char), code_object_type:hsa_code_object_type_t, code_object:ctypes.POINTER(hsa_code_object_t)) -> hsa_status_t: ...
@@ -2308,7 +2307,7 @@ class struct_hsa_ext_sampler_descriptor_v2_s:
   SIZE = 20
   coordinate_mode: Annotated[hsa_ext_sampler_coordinate_mode32_t, 0]
   filter_mode: Annotated[hsa_ext_sampler_filter_mode32_t, 4]
-  address_modes: Annotated[(hsa_ext_sampler_addressing_mode32_t* 3), 8]
+  address_modes: Annotated[Array[hsa_ext_sampler_addressing_mode32_t, Literal[3]], 8]
 hsa_ext_sampler_descriptor_v2_t = struct_hsa_ext_sampler_descriptor_v2_s
 @dll.bind
 def hsa_ext_sampler_create(agent:hsa_agent_t, sampler_descriptor:ctypes.POINTER(hsa_ext_sampler_descriptor_t), sampler:ctypes.POINTER(hsa_ext_sampler_t)) -> hsa_status_t: ...
@@ -2448,7 +2447,7 @@ class hsa_ven_amd_aqlprofile_profile_t:
 class hsa_ext_amd_aql_pm4_packet_t:
   SIZE = 64
   header: Annotated[uint16_t, 0]
-  pm4_command: Annotated[(uint16_t* 27), 2]
+  pm4_command: Annotated[Array[uint16_t, Literal[27]], 2]
   completion_signal: Annotated[hsa_signal_t, 56]
 @dll.bind
 def hsa_ven_amd_aqlprofile_start(profile:ctypes.POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_start_packet:ctypes.POINTER(hsa_ext_amd_aql_pm4_packet_t)) -> hsa_status_t: ...

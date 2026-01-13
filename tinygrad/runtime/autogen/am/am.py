@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_v11_gfx_mqd:
   SIZE = 2048
@@ -2358,7 +2357,7 @@ class struct_binary_header:
   version_minor: Annotated[uint16_t, 6]
   binary_checksum: Annotated[uint16_t, 8]
   binary_size: Annotated[uint16_t, 10]
-  table_list: Annotated[(table_info* 6), 12]
+  table_list: Annotated[Array[table_info, Literal[6]], 12]
 binary_header = struct_binary_header
 @record
 class struct_die_info:
@@ -2374,8 +2373,8 @@ class struct_ip_discovery_header:
   size: Annotated[uint16_t, 6]
   id: Annotated[uint32_t, 8]
   num_dies: Annotated[uint16_t, 12]
-  die_info: Annotated[(die_info* 16), 14]
-  padding: Annotated[(uint16_t* 1), 78]
+  die_info: Annotated[Array[die_info, Literal[16]], 14]
+  padding: Annotated[Array[uint16_t, Literal[1]], 78]
   base_addr_64_bit: Annotated[uint8_t, 0, 1, 0]
   reserved: Annotated[uint8_t, 0, 7, 1]
   reserved2: Annotated[uint8_t, 1]
@@ -2392,7 +2391,7 @@ class struct_ip:
   revision: Annotated[uint8_t, 6]
   harvest: Annotated[uint8_t, 7, 4, 0]
   reserved: Annotated[uint8_t, 7, 4, 4]
-  base_address: Annotated[(uint32_t * 0), 8]
+  base_address: Annotated[Array[uint32_t, Literal[0]], 8]
 ip = struct_ip
 @record
 class struct_ip_v3:
@@ -2405,7 +2404,7 @@ class struct_ip_v3:
   revision: Annotated[uint8_t, 6]
   sub_revision: Annotated[uint8_t, 7, 4, 0]
   variant: Annotated[uint8_t, 7, 4, 4]
-  base_address: Annotated[(uint32_t * 0), 8]
+  base_address: Annotated[Array[uint32_t, Literal[0]], 8]
 ip_v3 = struct_ip_v3
 @record
 class struct_ip_v4:
@@ -2634,7 +2633,7 @@ harvest_info = struct_harvest_info
 class struct_harvest_table:
   SIZE = 136
   header: Annotated[harvest_info_header, 0]
-  list: Annotated[(harvest_info* 32), 8]
+  list: Annotated[Array[harvest_info, Literal[32]], 8]
 harvest_table = struct_harvest_table
 @record
 class struct_mall_info_header:
@@ -2651,13 +2650,13 @@ class struct_mall_info_v1_0:
   m_s_present: Annotated[uint32_t, 16]
   m_half_use: Annotated[uint32_t, 20]
   m_mall_config: Annotated[uint32_t, 24]
-  reserved: Annotated[(uint32_t* 5), 28]
+  reserved: Annotated[Array[uint32_t, Literal[5]], 28]
 @record
 class struct_mall_info_v2_0:
   SIZE = 48
   header: Annotated[struct_mall_info_header, 0]
   mall_size_per_umc: Annotated[uint32_t, 12]
-  reserved: Annotated[(uint32_t* 8), 16]
+  reserved: Annotated[Array[uint32_t, Literal[8]], 16]
 @record
 class struct_vcn_info_header:
   SIZE = 12
@@ -2670,7 +2669,7 @@ class struct_vcn_instance_info_v1_0:
   SIZE = 16
   instance_num: Annotated[uint32_t, 0]
   fuse_data: Annotated[union__fuse_data, 4]
-  reserved: Annotated[(uint32_t* 2), 8]
+  reserved: Annotated[Array[uint32_t, Literal[2]], 8]
 @record
 class union__fuse_data:
   SIZE = 4
@@ -2689,8 +2688,8 @@ class struct_vcn_info_v1_0:
   SIZE = 96
   header: Annotated[struct_vcn_info_header, 0]
   num_of_instances: Annotated[uint32_t, 12]
-  instance_info: Annotated[(struct_vcn_instance_info_v1_0* 4), 16]
-  reserved: Annotated[(uint32_t* 4), 80]
+  instance_info: Annotated[Array[struct_vcn_instance_info_v1_0, Literal[4]], 16]
+  reserved: Annotated[Array[uint32_t, Literal[4]], 80]
 @record
 class struct_nps_info_header:
   SIZE = 12
@@ -2710,7 +2709,7 @@ class struct_nps_info_v1_0:
   header: Annotated[struct_nps_info_header, 0]
   nps_type: Annotated[uint32_t, 12]
   count: Annotated[uint32_t, 16]
-  instance_info: Annotated[(struct_nps_instance_info_v1_0* 12), 20]
+  instance_info: Annotated[Array[struct_nps_instance_info_v1_0, Literal[12]], 20]
 enum_amd_hw_ip_block_type = CEnum(ctypes.c_uint32)
 GC_HWIP = enum_amd_hw_ip_block_type.define('GC_HWIP', 1)
 HDP_HWIP = enum_amd_hw_ip_block_type.define('HDP_HWIP', 2)
@@ -2850,14 +2849,14 @@ class struct_psp_firmware_header_v2_0:
   SIZE = 52
   header: Annotated[struct_common_firmware_header, 0]
   psp_fw_bin_count: Annotated[ctypes.c_uint32, 32]
-  psp_fw_bin: Annotated[(struct_psp_fw_bin_desc* 1), 36]
+  psp_fw_bin: Annotated[Array[struct_psp_fw_bin_desc, Literal[1]], 36]
 @record
 class struct_psp_firmware_header_v2_1:
   SIZE = 56
   header: Annotated[struct_common_firmware_header, 0]
   psp_fw_bin_count: Annotated[ctypes.c_uint32, 32]
   psp_aux_fw_bin_index: Annotated[ctypes.c_uint32, 36]
-  psp_fw_bin: Annotated[(struct_psp_fw_bin_desc* 1), 40]
+  psp_fw_bin: Annotated[Array[struct_psp_fw_bin_desc, Literal[1]], 40]
 @record
 class struct_ta_firmware_header_v1_0:
   SIZE = 92
@@ -2883,7 +2882,7 @@ class struct_ta_firmware_header_v2_0:
   SIZE = 52
   header: Annotated[struct_common_firmware_header, 0]
   ta_fw_bin_count: Annotated[ctypes.c_uint32, 32]
-  ta_fw_bin: Annotated[(struct_psp_fw_bin_desc* 1), 36]
+  ta_fw_bin: Annotated[Array[struct_psp_fw_bin_desc, Literal[1]], 36]
 @record
 class struct_gfx_firmware_header_v1_0:
   SIZE = 44
@@ -3138,7 +3137,7 @@ class union_amdgpu_firmware_header:
   dmcu: Annotated[struct_dmcu_firmware_header_v1_0, 0]
   dmcub: Annotated[struct_dmcub_firmware_header_v1_0, 0]
   imu: Annotated[struct_imu_firmware_header_v1_0, 0]
-  raw: Annotated[(ctypes.c_ubyte* 256), 0]
+  raw: Annotated[Array[ctypes.c_ubyte, Literal[256]], 0]
 enum_AMDGPU_UCODE_ID = CEnum(ctypes.c_uint32)
 AMDGPU_UCODE_ID_CAP = enum_AMDGPU_UCODE_ID.define('AMDGPU_UCODE_ID_CAP', 0)
 AMDGPU_UCODE_ID_SDMA0 = enum_AMDGPU_UCODE_ID.define('AMDGPU_UCODE_ID_SDMA0', 1)
@@ -3309,7 +3308,7 @@ class struct_psp_gfx_buf_list:
   SIZE = 776
   num_desc: Annotated[ctypes.c_uint32, 0]
   total_size: Annotated[ctypes.c_uint32, 4]
-  buf_desc: Annotated[(struct_psp_gfx_buf_desc* 64), 8]
+  buf_desc: Annotated[Array[struct_psp_gfx_buf_desc, Literal[64]], 8]
 @record
 class struct_psp_gfx_cmd_invoke_cmd:
   SIZE = 784
@@ -3490,7 +3489,7 @@ class union_psp_gfx_commands:
 @record
 class struct_psp_gfx_uresp_reserved:
   SIZE = 32
-  reserved: Annotated[(ctypes.c_uint32* 8), 0]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[8]], 0]
 @record
 class struct_psp_gfx_uresp_fwar_db_info:
   SIZE = 8
@@ -3514,7 +3513,7 @@ class struct_psp_gfx_resp:
   fw_addr_lo: Annotated[ctypes.c_uint32, 8]
   fw_addr_hi: Annotated[ctypes.c_uint32, 12]
   tmr_size: Annotated[ctypes.c_uint32, 16]
-  reserved: Annotated[(ctypes.c_uint32* 11), 20]
+  reserved: Annotated[Array[ctypes.c_uint32, Literal[11]], 20]
   uresp: Annotated[union_psp_gfx_uresp, 64]
 @record
 class struct_psp_gfx_cmd_resp:
@@ -3527,9 +3526,9 @@ class struct_psp_gfx_cmd_resp:
   resp_offset: Annotated[ctypes.c_uint32, 20]
   resp_buf_size: Annotated[ctypes.c_uint32, 24]
   cmd: Annotated[union_psp_gfx_commands, 28]
-  reserved_1: Annotated[(ctypes.c_ubyte* 52), 812]
+  reserved_1: Annotated[Array[ctypes.c_ubyte, Literal[52]], 812]
   resp: Annotated[struct_psp_gfx_resp, 864]
-  reserved_2: Annotated[(ctypes.c_ubyte* 64), 960]
+  reserved_2: Annotated[Array[ctypes.c_ubyte, Literal[64]], 960]
 @record
 class struct_psp_gfx_rb_frame:
   SIZE = 64
@@ -3543,8 +3542,8 @@ class struct_psp_gfx_rb_frame:
   sid_hi: Annotated[ctypes.c_uint32, 28]
   vmid: Annotated[ctypes.c_ubyte, 32]
   frame_type: Annotated[ctypes.c_ubyte, 33]
-  reserved1: Annotated[(ctypes.c_ubyte* 2), 34]
-  reserved2: Annotated[(ctypes.c_uint32* 7), 36]
+  reserved1: Annotated[Array[ctypes.c_ubyte, Literal[2]], 34]
+  reserved2: Annotated[Array[ctypes.c_uint32, Literal[7]], 36]
 enum_tee_error_code = CEnum(ctypes.c_uint32)
 TEE_SUCCESS = enum_tee_error_code.define('TEE_SUCCESS', 0)
 TEE_ERROR_NOT_SUPPORTED = enum_tee_error_code.define('TEE_ERROR_NOT_SUPPORTED', 4294901770)
@@ -3646,7 +3645,7 @@ class struct_amdgpu_iv_entry:
   timestamp_src: Annotated[ctypes.c_uint32, 32]
   pasid: Annotated[ctypes.c_uint32, 36]
   node_id: Annotated[ctypes.c_uint32, 40]
-  src_data: Annotated[(ctypes.c_uint32* 4), 44]
+  src_data: Annotated[Array[ctypes.c_uint32, Literal[4]], 44]
   iv_entry: Annotated[ctypes.POINTER(ctypes.c_uint32), 64]
 enum_interrupt_node_id_per_aid = CEnum(ctypes.c_uint32)
 AID0_NODEID = enum_interrupt_node_id_per_aid.define('AID0_NODEID', 0)
@@ -4534,11 +4533,11 @@ class struct_v9_de_ib_state:
 class struct_v9_gfx_meta_data:
   SIZE = 4096
   ce_payload: Annotated[struct_v9_ce_ib_state, 0]
-  reserved1: Annotated[(uint32_t* 54), 40]
+  reserved1: Annotated[Array[uint32_t, Literal[54]], 40]
   de_payload: Annotated[struct_v9_de_ib_state, 256]
   DeIbBaseAddrLo: Annotated[uint32_t, 364]
   DeIbBaseAddrHi: Annotated[uint32_t, 368]
-  reserved2: Annotated[(uint32_t* 931), 372]
+  reserved2: Annotated[Array[uint32_t, Literal[931]], 372]
 enum_soc15_ih_clientid = CEnum(ctypes.c_uint32)
 SOC15_IH_CLIENTID_IH = enum_soc15_ih_clientid.define('SOC15_IH_CLIENTID_IH', 0)
 SOC15_IH_CLIENTID_ACP = enum_soc15_ih_clientid.define('SOC15_IH_CLIENTID_ACP', 1)

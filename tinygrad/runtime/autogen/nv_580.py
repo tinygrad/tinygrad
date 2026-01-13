@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 _anonenum0 = CEnum(ctypes.c_uint32)
 AES128_NONE = _anonenum0.define('AES128_NONE', 0)
 AES128_CTR = _anonenum0.define('AES128_CTR', 1)
@@ -175,8 +174,8 @@ class struct__nvdec_hevc_main10_444_ext_s:
   log2SaoOffsetScaleLuma: Annotated[ctypes.c_uint32, 5, 3, 3]
   log2SaoOffsetScaleChroma: Annotated[ctypes.c_uint32, 5, 3, 6]
   pps_444_extension_reserved: Annotated[ctypes.c_uint32, 6, 15, 1]
-  cb_qp_adjustment: Annotated[(ctypes.c_char* 6), 8]
-  cr_qp_adjustment: Annotated[(ctypes.c_char* 6), 14]
+  cb_qp_adjustment: Annotated[Array[ctypes.c_char, Literal[6]], 8]
+  cr_qp_adjustment: Annotated[Array[ctypes.c_char, Literal[6]], 14]
   HevcFltAboveOffset: Annotated[ctypes.c_uint32, 20]
   HevcSaoAboveOffset: Annotated[ctypes.c_uint32, 24]
 nvdec_hevc_main10_444_ext_s = struct__nvdec_hevc_main10_444_ext_s
@@ -217,9 +216,9 @@ nvdec_hevc_pic_v3_s = struct__nvdec_hevc_pic_v3_s
 @record
 class struct__nvdec_hevc_pic_s:
   SIZE = 276
-  wrapped_session_key: Annotated[(ctypes.c_uint32* 4), 0]
-  wrapped_content_key: Annotated[(ctypes.c_uint32* 4), 16]
-  initialization_vector: Annotated[(ctypes.c_uint32* 4), 32]
+  wrapped_session_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
+  wrapped_content_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
+  initialization_vector: Annotated[Array[ctypes.c_uint32, Literal[4]], 32]
   stream_len: Annotated[ctypes.c_uint32, 48]
   enable_encryption: Annotated[ctypes.c_uint32, 52]
   key_increment: Annotated[ctypes.c_uint32, 56, 6, 0]
@@ -236,7 +235,7 @@ class struct__nvdec_hevc_pic_s:
   sw_start_code_e: Annotated[ctypes.c_ubyte, 65]
   disp_output_mode: Annotated[ctypes.c_ubyte, 66]
   reserved1: Annotated[ctypes.c_ubyte, 67]
-  framestride: Annotated[(ctypes.c_uint32* 2), 68]
+  framestride: Annotated[Array[ctypes.c_uint32, Literal[2]], 68]
   colMvBuffersize: Annotated[ctypes.c_uint32, 76]
   HevcSaoBufferOffset: Annotated[ctypes.c_uint32, 80]
   HevcBsdCtrlOffset: Annotated[ctypes.c_uint32, 84]
@@ -301,9 +300,9 @@ class struct__nvdec_hevc_pic_s:
   num_ref_frames: Annotated[ctypes.c_ubyte, 112]
   reserved6: Annotated[ctypes.c_ubyte, 113]
   longtermflag: Annotated[ctypes.c_uint16, 114]
-  initreflistidxl0: Annotated[(ctypes.c_ubyte* 16), 116]
-  initreflistidxl1: Annotated[(ctypes.c_ubyte* 16), 132]
-  RefDiffPicOrderCnts: Annotated[(ctypes.c_int16* 16), 148]
+  initreflistidxl0: Annotated[Array[ctypes.c_ubyte, Literal[16]], 116]
+  initreflistidxl1: Annotated[Array[ctypes.c_ubyte, Literal[16]], 132]
+  RefDiffPicOrderCnts: Annotated[Array[ctypes.c_int16, Literal[16]], 148]
   IDR_picture_flag: Annotated[ctypes.c_ubyte, 180]
   RAP_picture_flag: Annotated[ctypes.c_ubyte, 181]
   curr_pic_idx: Annotated[ctypes.c_ubyte, 182]
@@ -403,9 +402,9 @@ VP9_CURR_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_CURR_FRAME_SFC', 3)
 @record
 class struct__nvdec_vp9_pic_s:
   SIZE = 256
-  wrapped_session_key: Annotated[(ctypes.c_uint32* 4), 0]
-  wrapped_content_key: Annotated[(ctypes.c_uint32* 4), 16]
-  initialization_vector: Annotated[(ctypes.c_uint32* 4), 32]
+  wrapped_session_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
+  wrapped_content_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
+  initialization_vector: Annotated[Array[ctypes.c_uint32, Literal[4]], 32]
   stream_len: Annotated[ctypes.c_uint32, 48]
   enable_encryption: Annotated[ctypes.c_uint32, 52]
   key_increment: Annotated[ctypes.c_uint32, 56, 6, 0]
@@ -419,20 +418,20 @@ class struct__nvdec_vp9_pic_s:
   tileformat: Annotated[ctypes.c_ubyte, 64, 2, 0]
   gob_height: Annotated[ctypes.c_ubyte, 64, 3, 2]
   reserverd_surface_format: Annotated[ctypes.c_ubyte, 64, 3, 5]
-  reserved1: Annotated[(ctypes.c_ubyte* 3), 65]
+  reserved1: Annotated[Array[ctypes.c_ubyte, Literal[3]], 65]
   Vp9BsdCtrlOffset: Annotated[ctypes.c_uint32, 68]
   ref0_width: Annotated[ctypes.c_uint16, 72]
   ref0_height: Annotated[ctypes.c_uint16, 74]
-  ref0_stride: Annotated[(ctypes.c_uint16* 2), 76]
+  ref0_stride: Annotated[Array[ctypes.c_uint16, Literal[2]], 76]
   ref1_width: Annotated[ctypes.c_uint16, 80]
   ref1_height: Annotated[ctypes.c_uint16, 82]
-  ref1_stride: Annotated[(ctypes.c_uint16* 2), 84]
+  ref1_stride: Annotated[Array[ctypes.c_uint16, Literal[2]], 84]
   ref2_width: Annotated[ctypes.c_uint16, 88]
   ref2_height: Annotated[ctypes.c_uint16, 90]
-  ref2_stride: Annotated[(ctypes.c_uint16* 2), 92]
+  ref2_stride: Annotated[Array[ctypes.c_uint16, Literal[2]], 92]
   width: Annotated[ctypes.c_uint16, 96]
   height: Annotated[ctypes.c_uint16, 98]
-  framestride: Annotated[(ctypes.c_uint16* 2), 100]
+  framestride: Annotated[Array[ctypes.c_uint16, Literal[2]], 100]
   keyFrame: Annotated[ctypes.c_ubyte, 104, 1, 0]
   prevIsKeyFrame: Annotated[ctypes.c_ubyte, 104, 1, 1]
   resolutionChange: Annotated[ctypes.c_ubyte, 104, 1, 2]
@@ -440,8 +439,8 @@ class struct__nvdec_vp9_pic_s:
   prevShowFrame: Annotated[ctypes.c_ubyte, 104, 1, 4]
   intraOnly: Annotated[ctypes.c_ubyte, 104, 1, 5]
   reserved2: Annotated[ctypes.c_ubyte, 104, 2, 6]
-  reserved3: Annotated[(ctypes.c_ubyte* 3), 105]
-  refFrameSignBias: Annotated[(ctypes.c_ubyte* 4), 108]
+  reserved3: Annotated[Array[ctypes.c_ubyte, Literal[3]], 105]
+  refFrameSignBias: Annotated[Array[ctypes.c_ubyte, Literal[4]], 108]
   loopFilterLevel: Annotated[ctypes.c_char, 112]
   loopFilterSharpness: Annotated[ctypes.c_char, 113]
   qpYAc: Annotated[ctypes.c_ubyte, 114]
@@ -454,18 +453,18 @@ class struct__nvdec_vp9_pic_s:
   mcomp_filter_type: Annotated[ctypes.c_char, 121]
   comp_pred_mode: Annotated[ctypes.c_char, 122]
   comp_fixed_ref: Annotated[ctypes.c_char, 123]
-  comp_var_ref: Annotated[(ctypes.c_char* 2), 124]
+  comp_var_ref: Annotated[Array[ctypes.c_char, Literal[2]], 124]
   log2_tile_columns: Annotated[ctypes.c_char, 126]
   log2_tile_rows: Annotated[ctypes.c_char, 127]
   segmentEnabled: Annotated[ctypes.c_ubyte, 128]
   segmentMapUpdate: Annotated[ctypes.c_ubyte, 129]
   segmentMapTemporalUpdate: Annotated[ctypes.c_ubyte, 130]
   segmentFeatureMode: Annotated[ctypes.c_ubyte, 131]
-  segmentFeatureEnable: Annotated[((ctypes.c_ubyte* 4)* 8), 132]
-  segmentFeatureData: Annotated[((ctypes.c_int16* 4)* 8), 164]
+  segmentFeatureEnable: Annotated[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[8]], 132]
+  segmentFeatureData: Annotated[Array[Array[ctypes.c_int16, Literal[4]], Literal[8]], 164]
   modeRefLfEnabled: Annotated[ctypes.c_char, 228]
-  mbRefLfDelta: Annotated[(ctypes.c_char* 4), 229]
-  mbModeLfDelta: Annotated[(ctypes.c_char* 2), 233]
+  mbRefLfDelta: Annotated[Array[ctypes.c_char, Literal[4]], 229]
+  mbModeLfDelta: Annotated[Array[ctypes.c_char, Literal[2]], 233]
   reserved5: Annotated[ctypes.c_char, 235]
   v1: Annotated[nvdec_vp9_pic_v1_s, 236]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 244]
@@ -473,98 +472,98 @@ nvdec_vp9_pic_s = struct__nvdec_vp9_pic_s
 @record
 class nvdec_nmv_context:
   SIZE = 69
-  joints: Annotated[(ctypes.c_ubyte* 3), 0]
-  sign: Annotated[(ctypes.c_ubyte* 2), 3]
-  class0: Annotated[((ctypes.c_ubyte* 1)* 2), 5]
-  fp: Annotated[((ctypes.c_ubyte* 3)* 2), 7]
-  class0_hp: Annotated[(ctypes.c_ubyte* 2), 13]
-  hp: Annotated[(ctypes.c_ubyte* 2), 15]
-  classes: Annotated[((ctypes.c_ubyte* 10)* 2), 17]
-  class0_fp: Annotated[(((ctypes.c_ubyte* 3)* 2)* 2), 37]
-  bits: Annotated[((ctypes.c_ubyte* 10)* 2), 49]
+  joints: Annotated[Array[ctypes.c_ubyte, Literal[3]], 0]
+  sign: Annotated[Array[ctypes.c_ubyte, Literal[2]], 3]
+  class0: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[2]], 5]
+  fp: Annotated[Array[Array[ctypes.c_ubyte, Literal[3]], Literal[2]], 7]
+  class0_hp: Annotated[Array[ctypes.c_ubyte, Literal[2]], 13]
+  hp: Annotated[Array[ctypes.c_ubyte, Literal[2]], 15]
+  classes: Annotated[Array[Array[ctypes.c_ubyte, Literal[10]], Literal[2]], 17]
+  class0_fp: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[3]], Literal[2]], Literal[2]], 37]
+  bits: Annotated[Array[Array[ctypes.c_ubyte, Literal[10]], Literal[2]], 49]
 @record
 class nvdec_nmv_context_counts:
   SIZE = 424
-  joints: Annotated[(ctypes.c_uint32* 4), 0]
-  sign: Annotated[((ctypes.c_uint32* 2)* 2), 16]
-  classes: Annotated[((ctypes.c_uint32* 11)* 2), 32]
-  class0: Annotated[((ctypes.c_uint32* 2)* 2), 120]
-  bits: Annotated[(((ctypes.c_uint32* 2)* 10)* 2), 136]
-  class0_fp: Annotated[(((ctypes.c_uint32* 4)* 2)* 2), 296]
-  fp: Annotated[((ctypes.c_uint32* 4)* 2), 360]
-  class0_hp: Annotated[((ctypes.c_uint32* 2)* 2), 392]
-  hp: Annotated[((ctypes.c_uint32* 2)* 2), 408]
+  joints: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
+  sign: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 16]
+  classes: Annotated[Array[Array[ctypes.c_uint32, Literal[11]], Literal[2]], 32]
+  class0: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 120]
+  bits: Annotated[Array[Array[Array[ctypes.c_uint32, Literal[2]], Literal[10]], Literal[2]], 136]
+  class0_fp: Annotated[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[2]], Literal[2]], 296]
+  fp: Annotated[Array[Array[ctypes.c_uint32, Literal[4]], Literal[2]], 360]
+  class0_hp: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 392]
+  hp: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 408]
 @record
 class struct_nvdec_vp9AdaptiveEntropyProbs_s:
   SIZE = 2720
-  inter_mode_prob: Annotated[((ctypes.c_ubyte* 4)* 7), 0]
-  intra_inter_prob: Annotated[(ctypes.c_ubyte* 4), 28]
-  uv_mode_prob: Annotated[((ctypes.c_ubyte* 8)* 10), 32]
-  tx8x8_prob: Annotated[((ctypes.c_ubyte* 1)* 2), 112]
-  tx16x16_prob: Annotated[((ctypes.c_ubyte* 2)* 2), 114]
-  tx32x32_prob: Annotated[((ctypes.c_ubyte* 3)* 2), 118]
-  sb_ymode_probB: Annotated[((ctypes.c_ubyte* 1)* 4), 124]
-  sb_ymode_prob: Annotated[((ctypes.c_ubyte* 8)* 4), 128]
-  partition_prob: Annotated[(((ctypes.c_ubyte* 4)* 16)* 2), 160]
-  uv_mode_probB: Annotated[((ctypes.c_ubyte* 1)* 10), 288]
-  switchable_interp_prob: Annotated[((ctypes.c_ubyte* 2)* 4), 298]
-  comp_inter_prob: Annotated[(ctypes.c_ubyte* 5), 306]
-  mbskip_probs: Annotated[(ctypes.c_ubyte* 3), 311]
-  pad1: Annotated[(ctypes.c_ubyte* 1), 314]
+  inter_mode_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[7]], 0]
+  intra_inter_prob: Annotated[Array[ctypes.c_ubyte, Literal[4]], 28]
+  uv_mode_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[10]], 32]
+  tx8x8_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[2]], 112]
+  tx16x16_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[2]], Literal[2]], 114]
+  tx32x32_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[3]], Literal[2]], 118]
+  sb_ymode_probB: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[4]], 124]
+  sb_ymode_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[4]], 128]
+  partition_prob: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[16]], Literal[2]], 160]
+  uv_mode_probB: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[10]], 288]
+  switchable_interp_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[2]], Literal[4]], 298]
+  comp_inter_prob: Annotated[Array[ctypes.c_ubyte, Literal[5]], 306]
+  mbskip_probs: Annotated[Array[ctypes.c_ubyte, Literal[3]], 311]
+  pad1: Annotated[Array[ctypes.c_ubyte, Literal[1]], 314]
   nmvc: Annotated[nvdec_nmv_context, 315]
-  single_ref_prob: Annotated[((ctypes.c_ubyte* 2)* 5), 384]
-  comp_ref_prob: Annotated[(ctypes.c_ubyte* 5), 394]
-  pad2: Annotated[(ctypes.c_ubyte* 17), 399]
-  probCoeffs: Annotated[(((((ctypes.c_ubyte* 4)* 6)* 6)* 2)* 2), 416]
-  probCoeffs8x8: Annotated[(((((ctypes.c_ubyte* 4)* 6)* 6)* 2)* 2), 992]
-  probCoeffs16x16: Annotated[(((((ctypes.c_ubyte* 4)* 6)* 6)* 2)* 2), 1568]
-  probCoeffs32x32: Annotated[(((((ctypes.c_ubyte* 4)* 6)* 6)* 2)* 2), 2144]
+  single_ref_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[2]], Literal[5]], 384]
+  comp_ref_prob: Annotated[Array[ctypes.c_ubyte, Literal[5]], 394]
+  pad2: Annotated[Array[ctypes.c_ubyte, Literal[17]], 399]
+  probCoeffs: Annotated[Array[Array[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 416]
+  probCoeffs8x8: Annotated[Array[Array[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 992]
+  probCoeffs16x16: Annotated[Array[Array[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 1568]
+  probCoeffs32x32: Annotated[Array[Array[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 2144]
 nvdec_vp9AdaptiveEntropyProbs_t = struct_nvdec_vp9AdaptiveEntropyProbs_s
 @record
 class struct_nvdec_vp9EntropyProbs_s:
   SIZE = 3744
-  kf_bmode_prob: Annotated[(((ctypes.c_ubyte* 8)* 10)* 10), 0]
-  kf_bmode_probB: Annotated[(((ctypes.c_ubyte* 1)* 10)* 10), 800]
-  ref_pred_probs: Annotated[(ctypes.c_ubyte* 3), 900]
-  mb_segment_tree_probs: Annotated[(ctypes.c_ubyte* 7), 903]
-  segment_pred_probs: Annotated[(ctypes.c_ubyte* 3), 910]
-  ref_scores: Annotated[(ctypes.c_ubyte* 4), 913]
-  prob_comppred: Annotated[(ctypes.c_ubyte* 2), 917]
-  pad1: Annotated[(ctypes.c_ubyte* 9), 919]
-  kf_uv_mode_prob: Annotated[((ctypes.c_ubyte* 8)* 10), 928]
-  kf_uv_mode_probB: Annotated[((ctypes.c_ubyte* 1)* 10), 1008]
-  pad2: Annotated[(ctypes.c_ubyte* 6), 1018]
+  kf_bmode_prob: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[10]], Literal[10]], 0]
+  kf_bmode_probB: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[10]], Literal[10]], 800]
+  ref_pred_probs: Annotated[Array[ctypes.c_ubyte, Literal[3]], 900]
+  mb_segment_tree_probs: Annotated[Array[ctypes.c_ubyte, Literal[7]], 903]
+  segment_pred_probs: Annotated[Array[ctypes.c_ubyte, Literal[3]], 910]
+  ref_scores: Annotated[Array[ctypes.c_ubyte, Literal[4]], 913]
+  prob_comppred: Annotated[Array[ctypes.c_ubyte, Literal[2]], 917]
+  pad1: Annotated[Array[ctypes.c_ubyte, Literal[9]], 919]
+  kf_uv_mode_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[10]], 928]
+  kf_uv_mode_probB: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[10]], 1008]
+  pad2: Annotated[Array[ctypes.c_ubyte, Literal[6]], 1018]
   a: Annotated[nvdec_vp9AdaptiveEntropyProbs_t, 1024]
 nvdec_vp9EntropyProbs_t = struct_nvdec_vp9EntropyProbs_s
 @record
 class struct_nvdec_vp9EntropyCounts_s:
   SIZE = 13264
-  inter_mode_counts: Annotated[(((ctypes.c_uint32* 2)* 3)* 7), 0]
-  sb_ymode_counts: Annotated[((ctypes.c_uint32* 10)* 4), 168]
-  uv_mode_counts: Annotated[((ctypes.c_uint32* 10)* 10), 328]
-  partition_counts: Annotated[((ctypes.c_uint32* 4)* 16), 728]
-  switchable_interp_counts: Annotated[((ctypes.c_uint32* 3)* 4), 984]
-  intra_inter_count: Annotated[((ctypes.c_uint32* 2)* 4), 1032]
-  comp_inter_count: Annotated[((ctypes.c_uint32* 2)* 5), 1064]
-  single_ref_count: Annotated[(((ctypes.c_uint32* 2)* 2)* 5), 1104]
-  comp_ref_count: Annotated[((ctypes.c_uint32* 2)* 5), 1184]
-  tx32x32_count: Annotated[((ctypes.c_uint32* 4)* 2), 1224]
-  tx16x16_count: Annotated[((ctypes.c_uint32* 3)* 2), 1256]
-  tx8x8_count: Annotated[((ctypes.c_uint32* 2)* 2), 1280]
-  mbskip_count: Annotated[((ctypes.c_uint32* 2)* 3), 1296]
+  inter_mode_counts: Annotated[Array[Array[Array[ctypes.c_uint32, Literal[2]], Literal[3]], Literal[7]], 0]
+  sb_ymode_counts: Annotated[Array[Array[ctypes.c_uint32, Literal[10]], Literal[4]], 168]
+  uv_mode_counts: Annotated[Array[Array[ctypes.c_uint32, Literal[10]], Literal[10]], 328]
+  partition_counts: Annotated[Array[Array[ctypes.c_uint32, Literal[4]], Literal[16]], 728]
+  switchable_interp_counts: Annotated[Array[Array[ctypes.c_uint32, Literal[3]], Literal[4]], 984]
+  intra_inter_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[4]], 1032]
+  comp_inter_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[5]], 1064]
+  single_ref_count: Annotated[Array[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], Literal[5]], 1104]
+  comp_ref_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[5]], 1184]
+  tx32x32_count: Annotated[Array[Array[ctypes.c_uint32, Literal[4]], Literal[2]], 1224]
+  tx16x16_count: Annotated[Array[Array[ctypes.c_uint32, Literal[3]], Literal[2]], 1256]
+  tx8x8_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 1280]
+  mbskip_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[3]], 1296]
   nmvcount: Annotated[nvdec_nmv_context_counts, 1320]
-  countCoeffs: Annotated[(((((ctypes.c_uint32* 4)* 6)* 6)* 2)* 2), 1744]
-  countCoeffs8x8: Annotated[(((((ctypes.c_uint32* 4)* 6)* 6)* 2)* 2), 4048]
-  countCoeffs16x16: Annotated[(((((ctypes.c_uint32* 4)* 6)* 6)* 2)* 2), 6352]
-  countCoeffs32x32: Annotated[(((((ctypes.c_uint32* 4)* 6)* 6)* 2)* 2), 8656]
-  countEobs: Annotated[(((((ctypes.c_uint32* 6)* 6)* 2)* 2)* 4), 10960]
+  countCoeffs: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 1744]
+  countCoeffs8x8: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 4048]
+  countCoeffs16x16: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 6352]
+  countCoeffs32x32: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 8656]
+  countEobs: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[6]], Literal[6]], Literal[2]], Literal[2]], Literal[4]], 10960]
 nvdec_vp9EntropyCounts_t = struct_nvdec_vp9EntropyCounts_s
 @record
 class struct__nvdec_pass2_otf_s:
   SIZE = 52
-  wrapped_session_key: Annotated[(ctypes.c_uint32* 4), 0]
-  wrapped_content_key: Annotated[(ctypes.c_uint32* 4), 16]
-  initialization_vector: Annotated[(ctypes.c_uint32* 4), 32]
+  wrapped_session_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
+  wrapped_content_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
+  initialization_vector: Annotated[Array[ctypes.c_uint32, Literal[4]], 32]
   enable_encryption: Annotated[ctypes.c_uint32, 48, 1, 0]
   key_increment: Annotated[ctypes.c_uint32, 48, 6, 1]
   encryption_mode: Annotated[ctypes.c_uint32, 48, 4, 7]
@@ -584,8 +583,8 @@ class struct__nvdec_display_param_s:
   TilingFormat: Annotated[ctypes.c_uint32, 2, 3, 1]
   OutputStructure: Annotated[ctypes.c_uint32, 2, 1, 4]
   reserved0: Annotated[ctypes.c_uint32, 2, 11, 5]
-  OutputTop: Annotated[(ctypes.c_int32* 2), 4]
-  OutputBottom: Annotated[(ctypes.c_int32* 2), 12]
+  OutputTop: Annotated[Array[ctypes.c_int32, Literal[2]], 4]
+  OutputBottom: Annotated[Array[ctypes.c_int32, Literal[2]], 12]
   enableHistogram: Annotated[ctypes.c_uint32, 20, 1, 0]
   HistogramStartX: Annotated[ctypes.c_uint32, 20, 12, 1]
   HistogramStartY: Annotated[ctypes.c_uint32, 21, 12, 5]
@@ -607,17 +606,17 @@ class struct__nvdec_dpb_entry_s:
   bottom_field_marking: Annotated[ctypes.c_uint32, 2, 4, 5]
   output_memory_layout: Annotated[ctypes.c_uint32, 3, 1, 1]
   reserved: Annotated[ctypes.c_uint32, 3, 6, 2]
-  FieldOrderCnt: Annotated[(ctypes.c_uint32* 2), 4]
+  FieldOrderCnt: Annotated[Array[ctypes.c_uint32, Literal[2]], 4]
   FrameIdx: Annotated[ctypes.c_int32, 12]
 nvdec_dpb_entry_s = struct__nvdec_dpb_entry_s
 @record
 class struct__nvdec_h264_pic_s:
   SIZE = 764
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[(ctypes.c_ubyte* 16), 52]
+  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
   explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 68]
   hint_dump_en: Annotated[ctypes.c_ubyte, 69]
-  reserved0: Annotated[(ctypes.c_ubyte* 2), 70]
+  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[2]], 70]
   stream_len: Annotated[ctypes.c_uint32, 72]
   slice_count: Annotated[ctypes.c_uint32, 76]
   mbhist_buffer_size: Annotated[ctypes.c_uint32, 80]
@@ -666,13 +665,13 @@ class struct__nvdec_h264_pic_s:
   frame_num: Annotated[ctypes.c_uint32, 181, 16, 6]
   frame_surfaces: Annotated[ctypes.c_uint32, 183, 1, 6]
   output_memory_layout: Annotated[ctypes.c_uint32, 183, 1, 7]
-  CurrFieldOrderCnt: Annotated[(ctypes.c_int32* 2), 184]
-  dpb: Annotated[(nvdec_dpb_entry_s* 16), 192]
-  WeightScale: Annotated[(((ctypes.c_ubyte* 4)* 4)* 6), 448]
-  WeightScale8x8: Annotated[(((ctypes.c_ubyte* 8)* 8)* 2), 544]
-  num_inter_view_refs_lX: Annotated[(ctypes.c_ubyte* 2), 672]
-  reserved1: Annotated[(ctypes.c_char* 14), 674]
-  inter_view_refidx_lX: Annotated[((ctypes.c_byte* 16)* 2), 688]
+  CurrFieldOrderCnt: Annotated[Array[ctypes.c_int32, Literal[2]], 184]
+  dpb: Annotated[Array[nvdec_dpb_entry_s, Literal[16]], 192]
+  WeightScale: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[4]], Literal[6]], 448]
+  WeightScale8x8: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[8]], Literal[2]], 544]
+  num_inter_view_refs_lX: Annotated[Array[ctypes.c_ubyte, Literal[2]], 672]
+  reserved1: Annotated[Array[ctypes.c_char, Literal[14]], 674]
+  inter_view_refidx_lX: Annotated[Array[Array[ctypes.c_byte, Literal[16]], Literal[2]], 688]
   lossless_ipred8x8_filter_enable: Annotated[ctypes.c_uint32, 720, 1, 0]
   qpprime_y_zero_transform_bypass_flag: Annotated[ctypes.c_uint32, 720, 1, 1]
   reserved2: Annotated[ctypes.c_uint32, 720, 30, 2]
@@ -722,11 +721,11 @@ vc1_dqprofile_e = enum__vc1_dqprofile_e
 class struct__nvdec_vc1_pic_s:
   SIZE = 404
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[(ctypes.c_ubyte* 16), 52]
-  prefixStartCode: Annotated[(ctypes.c_ubyte* 4), 68]
+  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
+  prefixStartCode: Annotated[Array[ctypes.c_ubyte, Literal[4]], 68]
   bitstream_offset: Annotated[ctypes.c_uint32, 72]
   explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 76]
-  reserved0: Annotated[(ctypes.c_ubyte* 3), 77]
+  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[3]], 77]
   stream_len: Annotated[ctypes.c_uint32, 80]
   slice_count: Annotated[ctypes.c_uint32, 84]
   scratch_pic_buffer_size: Annotated[ctypes.c_uint32, 88]
@@ -756,7 +755,7 @@ class struct__nvdec_vc1_pic_s:
   overlap: Annotated[ctypes.c_ubyte, 118]
   vstransform: Annotated[ctypes.c_ubyte, 119]
   refdist: Annotated[ctypes.c_char, 120]
-  reserved1: Annotated[(ctypes.c_char* 3), 121]
+  reserved1: Annotated[Array[ctypes.c_char, Literal[3]], 121]
   fcm: Annotated[vc1_fcm_e, 124]
   ptype: Annotated[syntax_vc1_ptype_e, 128]
   tfcntr: Annotated[ctypes.c_int32, 132]
@@ -806,7 +805,7 @@ class struct__nvdec_vc1_pic_s:
   twomvbptab: Annotated[ctypes.c_int32, 308]
   rangeredfrm: Annotated[ctypes.c_int32, 312]
   HistBufferSize: Annotated[ctypes.c_uint32, 316]
-  FrameStride: Annotated[(ctypes.c_uint32* 2), 320]
+  FrameStride: Annotated[Array[ctypes.c_uint32, Literal[2]], 320]
   luma_top_offset: Annotated[ctypes.c_uint32, 328]
   luma_bot_offset: Annotated[ctypes.c_uint32, 332]
   luma_frame_offset: Annotated[ctypes.c_uint32, 336]
@@ -818,8 +817,8 @@ class struct__nvdec_vc1_pic_s:
   loopfilter: Annotated[ctypes.c_ubyte, 356]
   fastuvmc: Annotated[ctypes.c_ubyte, 357]
   output_memory_layout: Annotated[ctypes.c_ubyte, 358]
-  ref_memory_layout: Annotated[(ctypes.c_ubyte* 2), 359]
-  reserved3: Annotated[(ctypes.c_ubyte* 3), 361]
+  ref_memory_layout: Annotated[Array[ctypes.c_ubyte, Literal[2]], 359]
+  reserved3: Annotated[Array[ctypes.c_ubyte, Literal[3]], 361]
   displayPara: Annotated[nvdec_display_param_s, 364]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 392]
 nvdec_vc1_pic_s = struct__nvdec_vc1_pic_s
@@ -827,9 +826,9 @@ nvdec_vc1_pic_s = struct__nvdec_vc1_pic_s
 class struct__nvdec_mpeg2_pic_s:
   SIZE = 344
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[(ctypes.c_ubyte* 16), 52]
+  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
   explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 68]
-  reserved0: Annotated[(ctypes.c_ubyte* 3), 69]
+  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[3]], 69]
   stream_len: Annotated[ctypes.c_uint32, 72]
   slice_count: Annotated[ctypes.c_uint32, 76]
   gptimer_timeout_value: Annotated[ctypes.c_uint32, 80]
@@ -845,7 +844,7 @@ class struct__nvdec_mpeg2_pic_s:
   gob_height: Annotated[ctypes.c_ubyte, 94, 3, 2]
   reserverd_surface_format: Annotated[ctypes.c_ubyte, 94, 3, 5]
   reserved1: Annotated[ctypes.c_char, 95]
-  f_code: Annotated[(ctypes.c_char* 4), 96]
+  f_code: Annotated[Array[ctypes.c_char, Literal[4]], 96]
   PicWidthInMbs: Annotated[ctypes.c_uint16, 100]
   FrameHeightInMbs: Annotated[ctypes.c_uint16, 102]
   pitch_luma: Annotated[ctypes.c_uint32, 104]
@@ -866,9 +865,9 @@ class struct__nvdec_mpeg2_pic_s:
   top_field_first: Annotated[ctypes.c_uint32, 156]
   full_pel_fwd_vector: Annotated[ctypes.c_uint32, 160]
   full_pel_bwd_vector: Annotated[ctypes.c_uint32, 164]
-  quant_mat_8x8intra: Annotated[(ctypes.c_ubyte* 64), 168]
-  quant_mat_8x8nonintra: Annotated[(ctypes.c_ubyte* 64), 232]
-  ref_memory_layout: Annotated[(ctypes.c_uint32* 2), 296]
+  quant_mat_8x8intra: Annotated[Array[ctypes.c_ubyte, Literal[64]], 168]
+  quant_mat_8x8nonintra: Annotated[Array[ctypes.c_ubyte, Literal[64]], 232]
+  ref_memory_layout: Annotated[Array[ctypes.c_uint32, Literal[2]], 296]
   displayPara: Annotated[nvdec_display_param_s, 304]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 332]
 nvdec_mpeg2_pic_s = struct__nvdec_mpeg2_pic_s
@@ -876,9 +875,9 @@ nvdec_mpeg2_pic_s = struct__nvdec_mpeg2_pic_s
 class struct__nvdec_mpeg4_pic_s:
   SIZE = 368
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[(ctypes.c_ubyte* 16), 52]
+  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
   explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 68]
-  reserved2: Annotated[(ctypes.c_ubyte* 3), 69]
+  reserved2: Annotated[Array[ctypes.c_ubyte, Literal[3]], 69]
   stream_len: Annotated[ctypes.c_uint32, 72]
   slice_count: Annotated[ctypes.c_uint32, 76]
   scratch_pic_buffer_size: Annotated[ctypes.c_uint32, 80]
@@ -893,7 +892,7 @@ class struct__nvdec_mpeg4_pic_s:
   reserved3: Annotated[ctypes.c_char, 95]
   width: Annotated[ctypes.c_int32, 96]
   height: Annotated[ctypes.c_int32, 100]
-  FrameStride: Annotated[(ctypes.c_uint32* 2), 104]
+  FrameStride: Annotated[Array[ctypes.c_uint32, Literal[2]], 104]
   luma_top_offset: Annotated[ctypes.c_uint32, 112]
   luma_bot_offset: Annotated[ctypes.c_uint32, 116]
   luma_frame_offset: Annotated[ctypes.c_uint32, 120]
@@ -901,8 +900,8 @@ class struct__nvdec_mpeg4_pic_s:
   chroma_bot_offset: Annotated[ctypes.c_uint32, 128]
   chroma_frame_offset: Annotated[ctypes.c_uint32, 132]
   HistBufferSize: Annotated[ctypes.c_uint32, 136]
-  trd: Annotated[(ctypes.c_int32* 2), 140]
-  trb: Annotated[(ctypes.c_int32* 2), 148]
+  trd: Annotated[Array[ctypes.c_int32, Literal[2]], 140]
+  trb: Annotated[Array[ctypes.c_int32, Literal[2]], 148]
   divx_flags: Annotated[ctypes.c_int32, 156]
   vop_fcode_forward: Annotated[ctypes.c_int16, 160]
   vop_fcode_backward: Annotated[ctypes.c_int16, 162]
@@ -915,11 +914,11 @@ class struct__nvdec_mpeg4_pic_s:
   rnd: Annotated[ctypes.c_ubyte, 170]
   alternate_vertical_scan_flag: Annotated[ctypes.c_ubyte, 171]
   top_field_flag: Annotated[ctypes.c_ubyte, 172]
-  reserved0: Annotated[(ctypes.c_ubyte* 3), 173]
-  intra_quant_mat: Annotated[(ctypes.c_ubyte* 64), 176]
-  nonintra_quant_mat: Annotated[(ctypes.c_ubyte* 64), 240]
-  ref_memory_layout: Annotated[(ctypes.c_ubyte* 2), 304]
-  reserved1: Annotated[(ctypes.c_ubyte* 34), 306]
+  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[3]], 173]
+  intra_quant_mat: Annotated[Array[ctypes.c_ubyte, Literal[64]], 176]
+  nonintra_quant_mat: Annotated[Array[ctypes.c_ubyte, Literal[64]], 240]
+  ref_memory_layout: Annotated[Array[ctypes.c_ubyte, Literal[2]], 304]
+  reserved1: Annotated[Array[ctypes.c_ubyte, Literal[34]], 306]
   displayPara: Annotated[nvdec_display_param_s, 340]
 nvdec_mpeg4_pic_s = struct__nvdec_mpeg4_pic_s
 enum_VP8_FRAME_TYPE = CEnum(ctypes.c_uint32)
@@ -948,7 +947,7 @@ class struct__nvdec_vp8_pic_s:
   firstPartSize: Annotated[ctypes.c_uint32, 64]
   HistBufferSize: Annotated[ctypes.c_uint32, 68]
   VLDBufferSize: Annotated[ctypes.c_uint32, 72]
-  FrameStride: Annotated[(ctypes.c_uint32* 2), 76]
+  FrameStride: Annotated[Array[ctypes.c_uint32, Literal[2]], 76]
   luma_top_offset: Annotated[ctypes.c_uint32, 84]
   luma_bot_offset: Annotated[ctypes.c_uint32, 88]
   luma_frame_offset: Annotated[ctypes.c_uint32, 92]
@@ -957,11 +956,11 @@ class struct__nvdec_vp8_pic_s:
   chroma_frame_offset: Annotated[ctypes.c_uint32, 104]
   displayPara: Annotated[nvdec_display_param_s, 108]
   current_output_memory_layout: Annotated[ctypes.c_char, 136]
-  output_memory_layout: Annotated[(ctypes.c_char* 3), 137]
+  output_memory_layout: Annotated[Array[ctypes.c_char, Literal[3]], 137]
   segmentation_feature_data_update: Annotated[ctypes.c_ubyte, 140]
-  reserved1: Annotated[(ctypes.c_ubyte* 3), 141]
+  reserved1: Annotated[Array[ctypes.c_ubyte, Literal[3]], 141]
   resultValue: Annotated[ctypes.c_uint32, 144]
-  partition_offset: Annotated[(ctypes.c_uint32* 8), 148]
+  partition_offset: Annotated[Array[ctypes.c_uint32, Literal[8]], 148]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 180]
 nvdec_vp8_pic_s = struct__nvdec_vp8_pic_s
 @record
@@ -973,9 +972,9 @@ bytes_of_data_s = struct__bytes_of_data_s
 @record
 class struct__nvdec_pass1_input_data_s:
   SIZE = 836
-  sample_size: Annotated[(bytes_of_data_s* 32), 0]
-  initialization_vector: Annotated[((ctypes.c_uint32* 4)* 32), 256]
-  IvValid: Annotated[(ctypes.c_ubyte* 32), 768]
+  sample_size: Annotated[Array[bytes_of_data_s, Literal[32]], 0]
+  initialization_vector: Annotated[Array[Array[ctypes.c_uint32, Literal[4]], Literal[32]], 256]
+  IvValid: Annotated[Array[ctypes.c_ubyte, Literal[32]], 768]
   stream_len: Annotated[ctypes.c_uint32, 800]
   clearBufferSize: Annotated[ctypes.c_uint32, 804]
   reencryptBufferSize: Annotated[ctypes.c_uint32, 808]
@@ -1002,12 +1001,12 @@ class struct__nvdec_pass1_output_data_s:
   bvp9SuperFrame: Annotated[ctypes.c_uint32, 13, 1, 3]
   vp9NumFramesMinus1: Annotated[ctypes.c_uint32, 13, 3, 4]
   reserved1: Annotated[ctypes.c_uint32, 13, 17, 7]
-  wrapped_session_key: Annotated[(ctypes.c_uint32* 4), 16]
-  wrapped_content_key: Annotated[(ctypes.c_uint32* 4), 32]
-  initialization_vector: Annotated[(ctypes.c_uint32* 4), 48]
-  partition_size: Annotated[(ctypes.c_uint32* 8), 64]
-  vp9_frame_sizes: Annotated[(ctypes.c_uint32* 8), 64]
-  vp9_clear_hdr_size: Annotated[(ctypes.c_uint32* 8), 96]
+  wrapped_session_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
+  wrapped_content_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 32]
+  initialization_vector: Annotated[Array[ctypes.c_uint32, Literal[4]], 48]
+  partition_size: Annotated[Array[ctypes.c_uint32, Literal[8]], 64]
+  vp9_frame_sizes: Annotated[Array[ctypes.c_uint32, Literal[8]], 64]
+  vp9_clear_hdr_size: Annotated[Array[ctypes.c_uint32, Literal[8]], 96]
 nvdec_pass1_output_data_s = struct__nvdec_pass1_output_data_s
 @record
 class struct__scale_factors_reference_s:
@@ -1020,7 +1019,7 @@ class struct__frame_info_t:
   SIZE = 12
   width: Annotated[ctypes.c_uint16, 0]
   height: Annotated[ctypes.c_uint16, 2]
-  stride: Annotated[(ctypes.c_uint16* 2), 4]
+  stride: Annotated[Array[ctypes.c_uint16, Literal[2]], 4]
   frame_buffer_idx: Annotated[ctypes.c_uint32, 8]
 frame_info_t = struct__frame_info_t
 @record
@@ -1141,21 +1140,21 @@ class struct__nvdec_av1_pic_s:
   segment_update_map: Annotated[ctypes.c_ubyte, 137]
   reserved7: Annotated[ctypes.c_ubyte, 138]
   segment_temporal_update: Annotated[ctypes.c_ubyte, 139]
-  segment_feature_data: Annotated[((ctypes.c_int16* 8)* 8), 140]
+  segment_feature_data: Annotated[Array[Array[ctypes.c_int16, Literal[8]], Literal[8]], 140]
   last_active_segid: Annotated[ctypes.c_ubyte, 268]
   segid_preskip: Annotated[ctypes.c_ubyte, 269]
   prevsegid_flag: Annotated[ctypes.c_ubyte, 270]
   segment_quant_sign: Annotated[ctypes.c_ubyte, 271, 8, 0]
-  filter_level: Annotated[(ctypes.c_ubyte* 2), 272]
+  filter_level: Annotated[Array[ctypes.c_ubyte, Literal[2]], 272]
   filter_level_u: Annotated[ctypes.c_ubyte, 274]
   filter_level_v: Annotated[ctypes.c_ubyte, 275]
   lf_sharpness_level: Annotated[ctypes.c_ubyte, 276]
-  lf_ref_deltas: Annotated[(ctypes.c_char* 8), 277]
-  lf_mode_deltas: Annotated[(ctypes.c_char* 2), 285]
+  lf_ref_deltas: Annotated[Array[ctypes.c_char, Literal[8]], 277]
+  lf_mode_deltas: Annotated[Array[ctypes.c_char, Literal[2]], 285]
   lr_type: Annotated[ctypes.c_ubyte, 287]
   lr_unit_size: Annotated[ctypes.c_ubyte, 288]
   current_frame: Annotated[frame_info_t, 292]
-  ref_frame: Annotated[(ref_frame_struct_s* 7), 304]
+  ref_frame: Annotated[Array[ref_frame_struct_s, Literal[7]], 304]
   use_temporal0_mvs: Annotated[ctypes.c_uint32, 472, 1, 0]
   use_temporal1_mvs: Annotated[ctypes.c_uint32, 472, 1, 1]
   use_temporal2_mvs: Annotated[ctypes.c_uint32, 472, 1, 2]
@@ -1163,8 +1162,8 @@ class struct__nvdec_av1_pic_s:
   mf2_type: Annotated[ctypes.c_uint32, 472, 3, 6]
   mf3_type: Annotated[ctypes.c_uint32, 473, 3, 1]
   reserved_mfmv: Annotated[ctypes.c_uint32, 473, 20, 4]
-  mfmv_offset: Annotated[((ctypes.c_int16* 7)* 3), 476]
-  mfmv_side: Annotated[((ctypes.c_char* 7)* 3), 518]
+  mfmv_offset: Annotated[Array[Array[ctypes.c_int16, Literal[7]], Literal[3]], 476]
+  mfmv_side: Annotated[Array[Array[ctypes.c_char, Literal[7]], Literal[3]], 518]
   tileformat: Annotated[ctypes.c_ubyte, 539, 2, 0]
   gob_height: Annotated[ctypes.c_ubyte, 539, 3, 2]
   errorConcealOn: Annotated[ctypes.c_ubyte, 539, 1, 5]
@@ -1186,12 +1185,12 @@ nvdec_av1_pic_s = struct__nvdec_av1_pic_s
 @record
 class struct__AV1FilmGrainMemory:
   SIZE = 13056
-  scaling_lut_y: Annotated[(ctypes.c_ubyte* 256), 0]
-  scaling_lut_cb: Annotated[(ctypes.c_ubyte* 256), 256]
-  scaling_lut_cr: Annotated[(ctypes.c_ubyte* 256), 512]
-  cropped_luma_grain_block: Annotated[(ctypes.c_int16* 4096), 768]
-  cropped_cb_grain_block: Annotated[(ctypes.c_int16* 1024), 8960]
-  cropped_cr_grain_block: Annotated[(ctypes.c_int16* 1024), 11008]
+  scaling_lut_y: Annotated[Array[ctypes.c_ubyte, Literal[256]], 0]
+  scaling_lut_cb: Annotated[Array[ctypes.c_ubyte, Literal[256]], 256]
+  scaling_lut_cr: Annotated[Array[ctypes.c_ubyte, Literal[256]], 512]
+  cropped_luma_grain_block: Annotated[Array[ctypes.c_int16, Literal[4096]], 768]
+  cropped_cb_grain_block: Annotated[Array[ctypes.c_int16, Literal[1024]], 8960]
+  cropped_cr_grain_block: Annotated[Array[ctypes.c_int16, Literal[1024]], 11008]
 AV1FilmGrainMemory = struct__AV1FilmGrainMemory
 @record
 class struct__AV1TileInfo_OLD:
@@ -1206,7 +1205,7 @@ class struct__AV1TileInfo_OLD:
   tile_end_b1: Annotated[ctypes.c_ubyte, 7]
   tile_end_b2: Annotated[ctypes.c_ubyte, 8]
   tile_end_b3: Annotated[ctypes.c_ubyte, 9]
-  padding: Annotated[(ctypes.c_ubyte* 6), 10]
+  padding: Annotated[Array[ctypes.c_ubyte, Literal[6]], 10]
 AV1TileInfo_OLD = struct__AV1TileInfo_OLD
 @record
 class struct__AV1TileInfo:
@@ -1221,16 +1220,16 @@ class struct__AV1TileStreamInfo:
   SIZE = 16
   tile_start: Annotated[ctypes.c_uint32, 0]
   tile_end: Annotated[ctypes.c_uint32, 4]
-  padding: Annotated[(ctypes.c_ubyte* 8), 8]
+  padding: Annotated[Array[ctypes.c_ubyte, Literal[8]], 8]
 AV1TileStreamInfo = struct__AV1TileStreamInfo
 @record
 class struct__nvdec_new_h264_pic_s:
   SIZE = 764
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[(ctypes.c_ubyte* 16), 52]
+  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
   explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 68]
   hint_dump_en: Annotated[ctypes.c_ubyte, 69]
-  reserved0: Annotated[(ctypes.c_ubyte* 2), 70]
+  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[2]], 70]
   stream_len: Annotated[ctypes.c_uint32, 72]
   slice_count: Annotated[ctypes.c_uint32, 76]
   mbhist_buffer_size: Annotated[ctypes.c_uint32, 80]
@@ -1279,13 +1278,13 @@ class struct__nvdec_new_h264_pic_s:
   frame_num: Annotated[ctypes.c_uint32, 181, 16, 6]
   frame_surfaces: Annotated[ctypes.c_uint32, 183, 1, 6]
   output_memory_layout: Annotated[ctypes.c_uint32, 183, 1, 7]
-  CurrFieldOrderCnt: Annotated[(ctypes.c_int32* 2), 184]
-  dpb: Annotated[(nvdec_dpb_entry_s* 16), 192]
-  WeightScale: Annotated[(((ctypes.c_ubyte* 4)* 4)* 6), 448]
-  WeightScale8x8: Annotated[(((ctypes.c_ubyte* 8)* 8)* 2), 544]
-  num_inter_view_refs_lX: Annotated[(ctypes.c_ubyte* 2), 672]
-  reserved1: Annotated[(ctypes.c_char* 14), 674]
-  inter_view_refidx_lX: Annotated[((ctypes.c_byte* 16)* 2), 688]
+  CurrFieldOrderCnt: Annotated[Array[ctypes.c_int32, Literal[2]], 184]
+  dpb: Annotated[Array[nvdec_dpb_entry_s, Literal[16]], 192]
+  WeightScale: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[4]], Literal[6]], 448]
+  WeightScale8x8: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[8]], Literal[2]], 544]
+  num_inter_view_refs_lX: Annotated[Array[ctypes.c_ubyte, Literal[2]], 672]
+  reserved1: Annotated[Array[ctypes.c_char, Literal[14]], 674]
+  inter_view_refidx_lX: Annotated[Array[Array[ctypes.c_byte, Literal[16]], Literal[2]], 688]
   lossless_ipred8x8_filter_enable: Annotated[ctypes.c_uint32, 720, 1, 0]
   qpprime_y_zero_transform_bypass_flag: Annotated[ctypes.c_uint32, 720, 1, 1]
   reserved2: Annotated[ctypes.c_uint32, 720, 30, 2]
@@ -1304,22 +1303,22 @@ class nvdec_crc_s:
   dbg_crc_intf_partd: Annotated[ctypes.c_uint32, 2, 6, 0]
   dbg_crc_intf_parte: Annotated[ctypes.c_uint32, 2, 6, 6]
   reserved0: Annotated[ctypes.c_uint32, 3, 4, 4]
-  dbg_crc_partb_golden: Annotated[(ctypes.c_uint32* 4), 4]
-  dbg_crc_partc_golden: Annotated[(ctypes.c_uint32* 4), 20]
-  dbg_crc_partd_golden: Annotated[(ctypes.c_uint32* 4), 36]
-  dbg_crc_parte_golden: Annotated[(ctypes.c_uint32* 4), 52]
+  dbg_crc_partb_golden: Annotated[Array[ctypes.c_uint32, Literal[4]], 4]
+  dbg_crc_partc_golden: Annotated[Array[ctypes.c_uint32, Literal[4]], 20]
+  dbg_crc_partd_golden: Annotated[Array[ctypes.c_uint32, Literal[4]], 36]
+  dbg_crc_parte_golden: Annotated[Array[ctypes.c_uint32, Literal[4]], 52]
   dbg_crc_comp_partb: Annotated[ctypes.c_uint32, 68, 4, 0]
   dbg_crc_comp_partc: Annotated[ctypes.c_uint32, 68, 4, 4]
   dbg_crc_comp_partd: Annotated[ctypes.c_uint32, 69, 4, 0]
   dbg_crc_comp_parte: Annotated[ctypes.c_uint32, 69, 4, 4]
   reserved1: Annotated[ctypes.c_uint32, 70, 16, 0]
-  reserved2: Annotated[(ctypes.c_ubyte* 56), 72]
+  reserved2: Annotated[Array[ctypes.c_ubyte, Literal[56]], 72]
 @record
 class struct_NV0000_ALLOC_PARAMETERS:
   SIZE = 120
   hClient: Annotated[NvHandle, 0]
   processID: Annotated[NvU32, 4]
-  processName: Annotated[(ctypes.c_char* 100), 8]
+  processName: Annotated[Array[ctypes.c_char, Literal[100]], 8]
   pOsPidInfo: Annotated[NvP64, 112]
 NvHandle = ctypes.c_uint32
 NvU32 = ctypes.c_uint32
@@ -1355,11 +1354,11 @@ NV2080_ALLOC_PARAMETERS = struct_NV2080_ALLOC_PARAMETERS
 @record
 class struct__cl2080_tag0:
   SIZE = 7936
-  Reserved00: Annotated[(NvV32* 1984), 0]
+  Reserved00: Annotated[Array[NvV32, Literal[1984]], 0]
 @record
 class volatile_struct__cl2080_tag0:
   SIZE = 7936
-  Reserved00: Annotated[(NvV32* 1984), 0]
+  Reserved00: Annotated[Array[NvV32, Literal[1984]], 0]
 Nv2080Typedef = volatile_struct__cl2080_tag0
 Nv20Subdevice0 = volatile_struct__cl2080_tag0
 @record
@@ -1376,7 +1375,7 @@ class struct_Nv2080PStateChangeNotificationRec:
 @record
 class _anonstruct12:
   SIZE = 8
-  nanoseconds: Annotated[(NvU32* 2), 0]
+  nanoseconds: Annotated[Array[NvU32, Literal[2]], 0]
 Nv2080PStateChangeNotification = struct_Nv2080PStateChangeNotificationRec
 @record
 class struct_Nv2080ClocksChangeNotificationRec:
@@ -1385,7 +1384,7 @@ class struct_Nv2080ClocksChangeNotificationRec:
 @record
 class _anonstruct13:
   SIZE = 8
-  nanoseconds: Annotated[(NvU32* 2), 0]
+  nanoseconds: Annotated[Array[NvU32, Literal[2]], 0]
 Nv2080ClocksChangeNotification = struct_Nv2080ClocksChangeNotificationRec
 @record
 class struct_Nv2080WorkloadModulationChangeNotificationRec:
@@ -1395,7 +1394,7 @@ class struct_Nv2080WorkloadModulationChangeNotificationRec:
 @record
 class _anonstruct14:
   SIZE = 8
-  nanoseconds: Annotated[(NvU32* 2), 0]
+  nanoseconds: Annotated[Array[NvU32, Literal[2]], 0]
 NvBool = ctypes.c_ubyte
 Nv2080WorkloadModulationChangeNotification = struct_Nv2080WorkloadModulationChangeNotificationRec
 @record
@@ -1504,91 +1503,91 @@ class Nv2080VrrSetTimeoutNotification:
 @record
 class struct_Nvc56fControl_struct:
   SIZE = 512
-  Ignored00: Annotated[(NvU32* 16), 0]
+  Ignored00: Annotated[Array[NvU32, Literal[16]], 0]
   Put: Annotated[NvU32, 64]
   Get: Annotated[NvU32, 68]
   Reference: Annotated[NvU32, 72]
   PutHi: Annotated[NvU32, 76]
-  Ignored01: Annotated[(NvU32* 2), 80]
+  Ignored01: Annotated[Array[NvU32, Literal[2]], 80]
   TopLevelGet: Annotated[NvU32, 88]
   TopLevelGetHi: Annotated[NvU32, 92]
   GetHi: Annotated[NvU32, 96]
-  Ignored02: Annotated[(NvU32* 7), 100]
+  Ignored02: Annotated[Array[NvU32, Literal[7]], 100]
   Ignored03: Annotated[NvU32, 128]
-  Ignored04: Annotated[(NvU32* 1), 132]
+  Ignored04: Annotated[Array[NvU32, Literal[1]], 132]
   GPGet: Annotated[NvU32, 136]
   GPPut: Annotated[NvU32, 140]
-  Ignored05: Annotated[(NvU32* 92), 144]
+  Ignored05: Annotated[Array[NvU32, Literal[92]], 144]
 @record
 class volatile_struct_Nvc56fControl_struct:
   SIZE = 512
-  Ignored00: Annotated[(NvU32* 16), 0]
+  Ignored00: Annotated[Array[NvU32, Literal[16]], 0]
   Put: Annotated[NvU32, 64]
   Get: Annotated[NvU32, 68]
   Reference: Annotated[NvU32, 72]
   PutHi: Annotated[NvU32, 76]
-  Ignored01: Annotated[(NvU32* 2), 80]
+  Ignored01: Annotated[Array[NvU32, Literal[2]], 80]
   TopLevelGet: Annotated[NvU32, 88]
   TopLevelGetHi: Annotated[NvU32, 92]
   GetHi: Annotated[NvU32, 96]
-  Ignored02: Annotated[(NvU32* 7), 100]
+  Ignored02: Annotated[Array[NvU32, Literal[7]], 100]
   Ignored03: Annotated[NvU32, 128]
-  Ignored04: Annotated[(NvU32* 1), 132]
+  Ignored04: Annotated[Array[NvU32, Literal[1]], 132]
   GPGet: Annotated[NvU32, 136]
   GPPut: Annotated[NvU32, 140]
-  Ignored05: Annotated[(NvU32* 92), 144]
+  Ignored05: Annotated[Array[NvU32, Literal[92]], 144]
 Nvc56fControl = volatile_struct_Nvc56fControl_struct
 AmpereAControlGPFifo = volatile_struct_Nvc56fControl_struct
 @record
 class struct_Nvc86fControl_struct:
   SIZE = 512
-  Ignored00: Annotated[(NvU32* 16), 0]
+  Ignored00: Annotated[Array[NvU32, Literal[16]], 0]
   Put: Annotated[NvU32, 64]
   Get: Annotated[NvU32, 68]
   Reference: Annotated[NvU32, 72]
   PutHi: Annotated[NvU32, 76]
-  Ignored01: Annotated[(NvU32* 2), 80]
+  Ignored01: Annotated[Array[NvU32, Literal[2]], 80]
   TopLevelGet: Annotated[NvU32, 88]
   TopLevelGetHi: Annotated[NvU32, 92]
   GetHi: Annotated[NvU32, 96]
-  Ignored02: Annotated[(NvU32* 7), 100]
+  Ignored02: Annotated[Array[NvU32, Literal[7]], 100]
   Ignored03: Annotated[NvU32, 128]
-  Ignored04: Annotated[(NvU32* 1), 132]
+  Ignored04: Annotated[Array[NvU32, Literal[1]], 132]
   GPGet: Annotated[NvU32, 136]
   GPPut: Annotated[NvU32, 140]
-  Ignored05: Annotated[(NvU32* 92), 144]
+  Ignored05: Annotated[Array[NvU32, Literal[92]], 144]
 @record
 class volatile_struct_Nvc86fControl_struct:
   SIZE = 512
-  Ignored00: Annotated[(NvU32* 16), 0]
+  Ignored00: Annotated[Array[NvU32, Literal[16]], 0]
   Put: Annotated[NvU32, 64]
   Get: Annotated[NvU32, 68]
   Reference: Annotated[NvU32, 72]
   PutHi: Annotated[NvU32, 76]
-  Ignored01: Annotated[(NvU32* 2), 80]
+  Ignored01: Annotated[Array[NvU32, Literal[2]], 80]
   TopLevelGet: Annotated[NvU32, 88]
   TopLevelGetHi: Annotated[NvU32, 92]
   GetHi: Annotated[NvU32, 96]
-  Ignored02: Annotated[(NvU32* 7), 100]
+  Ignored02: Annotated[Array[NvU32, Literal[7]], 100]
   Ignored03: Annotated[NvU32, 128]
-  Ignored04: Annotated[(NvU32* 1), 132]
+  Ignored04: Annotated[Array[NvU32, Literal[1]], 132]
   GPGet: Annotated[NvU32, 136]
   GPPut: Annotated[NvU32, 140]
-  Ignored05: Annotated[(NvU32* 92), 144]
+  Ignored05: Annotated[Array[NvU32, Literal[92]], 144]
 Nvc86fControl = volatile_struct_Nvc86fControl_struct
 HopperAControlGPFifo = volatile_struct_Nvc86fControl_struct
 @record
 class struct_Nvc96fControl_struct:
   SIZE = 512
-  Ignored00: Annotated[(NvU32* 35), 0]
+  Ignored00: Annotated[Array[NvU32, Literal[35]], 0]
   GPPut: Annotated[NvU32, 140]
-  Ignored01: Annotated[(NvU32* 92), 144]
+  Ignored01: Annotated[Array[NvU32, Literal[92]], 144]
 @record
 class volatile_struct_Nvc96fControl_struct:
   SIZE = 512
-  Ignored00: Annotated[(NvU32* 35), 0]
+  Ignored00: Annotated[Array[NvU32, Literal[35]], 0]
   GPPut: Annotated[NvU32, 140]
-  Ignored01: Annotated[(NvU32* 92), 144]
+  Ignored01: Annotated[Array[NvU32, Literal[92]], 144]
 Nvc96fControl = volatile_struct_Nvc96fControl_struct
 BlackwellAControlGPFifo = volatile_struct_Nvc96fControl_struct
 @record
@@ -1623,7 +1622,7 @@ UvmStream = ctypes.c_uint64
 @record
 class struct_nv_uuid:
   SIZE = 16
-  uuid: Annotated[(NvU8* 16), 0]
+  uuid: Annotated[Array[NvU8, Literal[16]], 0]
 NvProcessorUuid = struct_nv_uuid
 @record
 class UVM_REGION_DECOMMIT_PARAMS:
@@ -1647,7 +1646,7 @@ class UVM_SET_STREAM_RUNNING_PARAMS:
 @record
 class UVM_SET_STREAM_STOPPED_PARAMS:
   SIZE = 272
-  streamIdArray: Annotated[(UvmStream* 32), 0]
+  streamIdArray: Annotated[Array[UvmStream, Literal[32]], 0]
   nStreams: Annotated[NvU64, 256]
   rmStatus: Annotated[NV_STATUS, 264]
 @record
@@ -1679,7 +1678,7 @@ class UVM_REMOVE_SESSION_PARAMS:
 class UVM_ENABLE_COUNTERS_PARAMS:
   SIZE = 908
   sessionIndex: Annotated[NvS32, 0]
-  config: Annotated[(UvmCounterConfig* 32), 4]
+  config: Annotated[Array[UvmCounterConfig, Literal[32]], 4]
   count: Annotated[NvU32, 900]
   rmStatus: Annotated[NV_STATUS, 904]
 @record
@@ -1735,7 +1734,7 @@ class UVM_EVENT_CTRL_PARAMS:
 @record
 class UVM_REGISTER_MPS_SERVER_PARAMS:
   SIZE = 536
-  gpuUuidArray: Annotated[(NvProcessorUuid* 32), 0]
+  gpuUuidArray: Annotated[Array[NvProcessorUuid, Literal[32]], 0]
   numGpus: Annotated[NvU32, 512]
   serverId: Annotated[NvU64, 520]
   rmStatus: Annotated[NV_STATUS, 528]
@@ -1747,7 +1746,7 @@ class UVM_REGISTER_MPS_CLIENT_PARAMS:
 @record
 class UVM_GET_GPU_UUID_TABLE_PARAMS:
   SIZE = 520
-  gpuUuidArray: Annotated[(NvProcessorUuid* 32), 0]
+  gpuUuidArray: Annotated[Array[NvProcessorUuid, Literal[32]], 0]
   validCount: Annotated[NvU32, 512]
   rmStatus: Annotated[NV_STATUS, 516]
 @record
@@ -1815,7 +1814,7 @@ class UVM_MAP_EXTERNAL_ALLOCATION_PARAMS:
   base: Annotated[NvU64, 0]
   length: Annotated[NvU64, 8]
   offset: Annotated[NvU64, 16]
-  perGpuAttributes: Annotated[(UvmGpuMappingAttributes* 256), 24]
+  perGpuAttributes: Annotated[Array[UvmGpuMappingAttributes, Literal[256]], 24]
   gpuAttributesCount: Annotated[NvU64, 9240]
   rmCtrlFd: Annotated[NvS32, 9248]
   hClient: Annotated[NvU32, 9252]
@@ -1865,13 +1864,13 @@ class UVM_PAGEABLE_MEM_ACCESS_PARAMS:
 @record
 class UVM_PREVENT_MIGRATION_RANGE_GROUPS_PARAMS:
   SIZE = 272
-  rangeGroupIds: Annotated[(NvU64* 32), 0]
+  rangeGroupIds: Annotated[Array[NvU64, Literal[32]], 0]
   numGroupIds: Annotated[NvU64, 256]
   rmStatus: Annotated[NV_STATUS, 264]
 @record
 class UVM_ALLOW_MIGRATION_RANGE_GROUPS_PARAMS:
   SIZE = 272
-  rangeGroupIds: Annotated[(NvU64* 32), 0]
+  rangeGroupIds: Annotated[Array[NvU64, Literal[32]], 0]
   numGroupIds: Annotated[NvU64, 256]
   rmStatus: Annotated[NV_STATUS, 264]
 @record
@@ -2022,7 +2021,7 @@ class UVM_ALLOC_SEMAPHORE_POOL_PARAMS:
   SIZE = 9248
   base: Annotated[NvU64, 0]
   length: Annotated[NvU64, 8]
-  perGpuAttributes: Annotated[(UvmGpuMappingAttributes* 256), 16]
+  perGpuAttributes: Annotated[Array[UvmGpuMappingAttributes, Literal[256]], 16]
   gpuAttributesCount: Annotated[NvU64, 9232]
   rmStatus: Annotated[NV_STATUS, 9240]
 @record
@@ -2129,7 +2128,7 @@ class struct_nv_ioctl_card_info:
   fb_address: Annotated[NvU64, 40]
   fb_size: Annotated[NvU64, 48]
   minor_number: Annotated[NvU32, 56]
-  dev_name: Annotated[(NvU8* 10), 60]
+  dev_name: Annotated[Array[NvU8, Literal[10]], 60]
 nv_ioctl_card_info_t = struct_nv_ioctl_card_info
 @record
 class struct_nv_ioctl_alloc_os_event:
@@ -2160,7 +2159,7 @@ class struct_nv_ioctl_rm_api_version:
   SIZE = 72
   cmd: Annotated[NvU32, 0]
   reply: Annotated[NvU32, 4]
-  versionString: Annotated[(ctypes.c_char* 64), 8]
+  versionString: Annotated[Array[ctypes.c_char, Literal[64]], 8]
 nv_ioctl_rm_api_version_t = struct_nv_ioctl_rm_api_version
 @record
 class struct_nv_ioctl_query_device_intr:
@@ -2189,9 +2188,9 @@ class struct_nv_ioctl_export_to_dma_buf_fd:
   totalSize: Annotated[NvU64, 24]
   mappingType: Annotated[NvU8, 32]
   bAllowMmap: Annotated[NvBool, 33]
-  handles: Annotated[(NvHandle* 128), 36]
-  offsets: Annotated[(NvU64* 128), 552]
-  sizes: Annotated[(NvU64* 128), 1576]
+  handles: Annotated[Array[NvHandle, Literal[128]], 36]
+  offsets: Annotated[Array[NvU64, Literal[128]], 552]
+  sizes: Annotated[Array[NvU64, Literal[128]], 1576]
   status: Annotated[NvU32, 2600]
 nv_ioctl_export_to_dma_buf_fd_t = struct_nv_ioctl_export_to_dma_buf_fd
 @record
@@ -2203,7 +2202,7 @@ nv_ioctl_wait_open_complete_t = struct_nv_ioctl_wait_open_complete
 @record
 class struct_offline_addresses:
   SIZE = 520
-  addresses: Annotated[(uint64_t* 64), 0]
+  addresses: Annotated[Array[uint64_t, Literal[64]], 0]
   numEntries: Annotated[uint32_t, 512]
 uint64_t = ctypes.c_uint64
 uint32_t = ctypes.c_uint32
@@ -2276,8 +2275,8 @@ class struct_NV_CHANNEL_ALLOC_PARAMS:
   flags: Annotated[NvU32, 20]
   hContextShare: Annotated[NvHandle, 24]
   hVASpace: Annotated[NvHandle, 28]
-  hUserdMemory: Annotated[(NvHandle* 8), 32]
-  userdOffset: Annotated[(NvU64* 8), 64]
+  hUserdMemory: Annotated[Array[NvHandle, Literal[8]], 32]
+  userdOffset: Annotated[Array[NvU64, Literal[8]], 64]
   engineType: Annotated[NvU32, 128]
   cid: Annotated[NvU32, 132]
   subDeviceId: Annotated[NvU32, 136]
@@ -2292,9 +2291,9 @@ class struct_NV_CHANNEL_ALLOC_PARAMS:
   eccErrorNotifierMem: Annotated[NV_MEMORY_DESC_PARAMS, 272]
   ProcessID: Annotated[NvU32, 296]
   SubProcessID: Annotated[NvU32, 300]
-  encryptIv: Annotated[(NvU32* 3), 304]
-  decryptIv: Annotated[(NvU32* 3), 316]
-  hmacNonce: Annotated[(NvU32* 8), 328]
+  encryptIv: Annotated[Array[NvU32, Literal[3]], 304]
+  decryptIv: Annotated[Array[NvU32, Literal[3]], 316]
+  hmacNonce: Annotated[Array[NvU32, Literal[8]], 328]
   tpcConfigID: Annotated[NvU32, 360]
 NV_CHANNEL_ALLOC_PARAMS = struct_NV_CHANNEL_ALLOC_PARAMS
 NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS = struct_NV_CHANNEL_ALLOC_PARAMS
@@ -2815,7 +2814,7 @@ RS_SHARE_POLICY = struct_RS_SHARE_POLICY
 @record
 class struct_RS_ACCESS_MASK:
   SIZE = 4
-  limbs: Annotated[(RsAccessLimb* 1), 0]
+  limbs: Annotated[Array[RsAccessLimb, Literal[1]], 0]
 RS_ACCESS_MASK = struct_RS_ACCESS_MASK
 RsAccessLimb = ctypes.c_uint32
 NVPOWERSTATE_STAGE = ctypes.c_uint32
@@ -3178,7 +3177,7 @@ class NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS:
   SIZE = 528
   bDirtyTracking: Annotated[NvBool, 0]
   granularity: Annotated[NvU32, 4]
-  accessBitMask: Annotated[(NvU64* 64), 8]
+  accessBitMask: Annotated[Array[NvU64, Literal[64]], 8]
   noOfEntries: Annotated[NvU32, 520]
   addrSpace: Annotated[NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE, 524]
 @record
@@ -3194,7 +3193,7 @@ NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS = struct_NVC36F_CTRL_CMD_GPF
 @record
 class struct_NVC36F_CTRL_GPFIFO_UPDATE_FAULT_METHOD_BUFFER_PARAMS:
   SIZE = 16
-  bar2Addr: Annotated[(NvU64* 2), 0]
+  bar2Addr: Annotated[Array[NvU64, Literal[2]], 0]
 NVC36F_CTRL_GPFIFO_UPDATE_FAULT_METHOD_BUFFER_PARAMS = struct_NVC36F_CTRL_GPFIFO_UPDATE_FAULT_METHOD_BUFFER_PARAMS
 @record
 class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS:
@@ -3247,20 +3246,20 @@ NV_CONF_COMPUTE_CTRL_CMD_GET_NUM_SUPPORTED_CC_SECURE_CHANNELS_PARAMS = struct_NV
 class struct_NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_CERTIFICATE_PARAMS:
   SIZE = 9228
   hSubDevice: Annotated[NvHandle, 0]
-  certChain: Annotated[(NvU8* 4096), 4]
+  certChain: Annotated[Array[NvU8, Literal[4096]], 4]
   certChainSize: Annotated[NvU32, 4100]
-  attestationCertChain: Annotated[(NvU8* 5120), 4104]
+  attestationCertChain: Annotated[Array[NvU8, Literal[5120]], 4104]
   attestationCertChainSize: Annotated[NvU32, 9224]
 NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_CERTIFICATE_PARAMS = struct_NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_CERTIFICATE_PARAMS
 @record
 class struct_NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_ATTESTATION_REPORT_PARAMS:
   SIZE = 12336
   hSubDevice: Annotated[NvHandle, 0]
-  nonce: Annotated[(NvU8* 32), 4]
-  attestationReport: Annotated[(NvU8* 8192), 36]
+  nonce: Annotated[Array[NvU8, Literal[32]], 4]
+  attestationReport: Annotated[Array[NvU8, Literal[8192]], 36]
   attestationReportSize: Annotated[NvU32, 8228]
   isCecAttestationReportPresent: Annotated[NvBool, 8232]
-  cecAttestationReport: Annotated[(NvU8* 4096), 8233]
+  cecAttestationReport: Annotated[Array[NvU8, Literal[4096]], 8233]
   cecAttestationReportSize: Annotated[NvU32, 12332]
 NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_ATTESTATION_REPORT_PARAMS = struct_NV_CONF_COMPUTE_CTRL_CMD_GET_GPU_ATTESTATION_REPORT_PARAMS
 @record
@@ -3334,8 +3333,8 @@ NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_PARAMS = struct_NVA06C_CTRL_PROGRAM_VIDMEM_PR
 @record
 class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS:
   SIZE = 88
-  methodBufferMemdesc: Annotated[(NV2080_CTRL_INTERNAL_MEMDESC_INFO* 2), 0]
-  bar2Addr: Annotated[(NvU64* 2), 64]
+  methodBufferMemdesc: Annotated[Array[NV2080_CTRL_INTERNAL_MEMDESC_INFO, Literal[2]], 0]
+  bar2Addr: Annotated[Array[NvU64, Literal[2]], 64]
   numValidEntries: Annotated[NvU32, 80]
 @record
 class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO:
@@ -3366,7 +3365,7 @@ class struct_NV_CTRL_VASPACE_PAGE_LEVEL:
   SIZE = 112
   pFmt: Annotated[ctypes.POINTER(struct_MMU_FMT_LEVEL), 0]
   levelFmt: Annotated[MMU_FMT_LEVEL, 8]
-  sublevelFmt: Annotated[(MMU_FMT_LEVEL* 2), 32]
+  sublevelFmt: Annotated[Array[MMU_FMT_LEVEL, Literal[2]], 32]
   physAddress: Annotated[NvU64, 80]
   aperture: Annotated[NvU32, 88]
   size: Annotated[NvU64, 96]
@@ -3392,7 +3391,7 @@ class struct_NV90F1_CTRL_VASPACE_GET_PAGE_LEVEL_INFO_PARAMS:
   pageSize: Annotated[NvU64, 16]
   flags: Annotated[NvU64, 24]
   numLevels: Annotated[NvU32, 32]
-  levels: Annotated[(NV_CTRL_VASPACE_PAGE_LEVEL* 6), 40]
+  levels: Annotated[Array[NV_CTRL_VASPACE_PAGE_LEVEL, Literal[6]], 40]
 NV90F1_CTRL_VASPACE_GET_PAGE_LEVEL_INFO_PARAMS = struct_NV90F1_CTRL_VASPACE_GET_PAGE_LEVEL_INFO_PARAMS
 @record
 class struct_NV90F1_CTRL_VASPACE_RESERVE_ENTRIES_PARAMS:
@@ -3422,7 +3421,7 @@ class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS:
   virtAddrLo: Annotated[NvU64, 16]
   virtAddrHi: Annotated[NvU64, 24]
   numLevelsToCopy: Annotated[NvU32, 32]
-  levels: Annotated[(_anonstruct29* 6), 40]
+  levels: Annotated[Array[_anonstruct29, Literal[6]], 40]
 @record
 class _anonstruct29:
   SIZE = 24
@@ -3556,7 +3555,7 @@ class struct_NV0000_CTRL_DIAG_LOCK_METER_ENTRY:
   SIZE = 56
   counter: Annotated[NvU64, 0]
   line: Annotated[NvU32, 8]
-  filename: Annotated[(NvU8* 12), 12]
+  filename: Annotated[Array[NvU8, Literal[12]], 12]
   tag: Annotated[NvU16, 24]
   cpuNum: Annotated[NvU8, 26]
   irql: Annotated[NvU8, 27]
@@ -3569,7 +3568,7 @@ NV0000_CTRL_DIAG_LOCK_METER_ENTRY = struct_NV0000_CTRL_DIAG_LOCK_METER_ENTRY
 class struct_NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS:
   SIZE = 3592
   entryCount: Annotated[NvU32, 0]
-  entries: Annotated[(NV0000_CTRL_DIAG_LOCK_METER_ENTRY* 64), 8]
+  entries: Annotated[Array[NV0000_CTRL_DIAG_LOCK_METER_ENTRY, Literal[64]], 8]
 NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS = struct_NV0000_CTRL_DIAG_GET_LOCK_METER_ENTRIES_PARAMS
 @record
 class struct_RPC_METER_ENTRY:
@@ -3591,7 +3590,7 @@ class struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS:
   outputEntryCount: Annotated[NvU32, 4]
   remainingEntryCount: Annotated[NvU32, 8]
   elapsedTimeInNs: Annotated[NvU64, 16]
-  rpcProfilerBuffer: Annotated[(RPC_METER_ENTRY* 100), 24]
+  rpcProfilerBuffer: Annotated[Array[RPC_METER_ENTRY, Literal[100]], 24]
 NV0000_CTRL_DIAG_DUMP_RPC_PARAMS = struct_NV0000_CTRL_DIAG_DUMP_RPC_PARAMS
 @record
 class struct_NV0000_CTRL_EVENT_SET_NOTIFICATION_PARAMS:
@@ -3637,12 +3636,12 @@ NV0000_CTRL_GET_SYSTEM_EVENT_DATA_PARAMS = struct_NV0000_CTRL_GET_SYSTEM_EVENT_D
 class struct_NV2080_CTRL_NVLINK_LINK_MASK:
   SIZE = 16
   lenMasks: Annotated[NvU8, 0]
-  masks: Annotated[(NvU64* 1), 8]
+  masks: Annotated[Array[NvU64, Literal[1]], 8]
 NV0000_CTRL_NVLINK_LINK_MASK = struct_NV2080_CTRL_NVLINK_LINK_MASK
 @record
 class struct_NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS:
   SIZE = 128
-  gpuIds: Annotated[(NvU32* 32), 0]
+  gpuIds: Annotated[Array[NvU32, Literal[32]], 0]
 NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_ATTACHED_IDS_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_GET_ID_INFO_PARAMS:
@@ -3683,9 +3682,9 @@ NV0000_CTRL_GPU_GET_DEVICE_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_DEVICE_IDS_PA
 @record
 class struct_NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS:
   SIZE = 384
-  gpuIds: Annotated[(NvU32* 32), 0]
-  excludedGpuIds: Annotated[(NvU32* 32), 128]
-  gpuFlags: Annotated[(NvU32* 32), 256]
+  gpuIds: Annotated[Array[NvU32, Literal[32]], 0]
+  excludedGpuIds: Annotated[Array[NvU32, Literal[32]], 128]
+  gpuFlags: Annotated[Array[NvU32, Literal[32]], 256]
 NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_PROBED_IDS_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS:
@@ -3698,24 +3697,24 @@ NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS = struct_NV0000_CTRL_GPU_GET_PCI_INFO_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_ATTACH_IDS_PARAMS:
   SIZE = 132
-  gpuIds: Annotated[(NvU32* 32), 0]
+  gpuIds: Annotated[Array[NvU32, Literal[32]], 0]
   failedId: Annotated[NvU32, 128]
 NV0000_CTRL_GPU_ATTACH_IDS_PARAMS = struct_NV0000_CTRL_GPU_ATTACH_IDS_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_DETACH_IDS_PARAMS:
   SIZE = 128
-  gpuIds: Annotated[(NvU32* 32), 0]
+  gpuIds: Annotated[Array[NvU32, Literal[32]], 0]
 NV0000_CTRL_GPU_DETACH_IDS_PARAMS = struct_NV0000_CTRL_GPU_DETACH_IDS_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_VIDEO_LINKS:
   SIZE = 36
   gpuId: Annotated[NvU32, 0]
-  connectedGpuIds: Annotated[(NvU32* 8), 4]
+  connectedGpuIds: Annotated[Array[NvU32, Literal[8]], 4]
 NV0000_CTRL_GPU_VIDEO_LINKS = struct_NV0000_CTRL_GPU_VIDEO_LINKS
 @record
 class struct_NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS:
   SIZE = 1152
-  links: Annotated[(NV0000_CTRL_GPU_VIDEO_LINKS* 32), 0]
+  links: Annotated[Array[NV0000_CTRL_GPU_VIDEO_LINKS, Literal[32]], 0]
 NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS = struct_NV0000_CTRL_GPU_GET_VIDEO_LINKS_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS:
@@ -3726,7 +3725,7 @@ NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS = struct_NV0000_CTRL_GPU_GET_SVM_SIZE_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_GET_UUID_INFO_PARAMS:
   SIZE = 272
-  gpuUuid: Annotated[(NvU8* 256), 0]
+  gpuUuid: Annotated[Array[NvU8, Literal[256]], 0]
   flags: Annotated[NvU32, 256]
   gpuId: Annotated[NvU32, 260]
   deviceInstance: Annotated[NvU32, 264]
@@ -3737,7 +3736,7 @@ class struct_NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS:
   SIZE = 268
   gpuId: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
-  gpuUuid: Annotated[(NvU8* 256), 8]
+  gpuUuid: Annotated[Array[NvU8, Literal[256]], 8]
   uuidStrLen: Annotated[NvU32, 264]
 NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS = struct_NV0000_CTRL_GPU_GET_UUID_FROM_GPU_ID_PARAMS
 @record
@@ -3791,14 +3790,14 @@ class _anonunion32:
 @record
 class _anonstruct33:
   SIZE = 380
-  paramData: Annotated[(NvU8* 373), 0]
+  paramData: Annotated[Array[NvU8, Literal[373]], 0]
   paramSize: Annotated[NvU32, 376]
 @record
 class _anonstruct34:
   SIZE = 48
   propertyId: Annotated[NvU32, 0]
-  propertyIn: Annotated[(NvU32* 6), 4]
-  propertyOut: Annotated[(NvU32* 5), 28]
+  propertyIn: Annotated[Array[NvU32, Literal[6]], 4]
+  propertyOut: Annotated[Array[NvU32, Literal[5]], 28]
 NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS = struct_NV0000_CTRL_GPU_LEGACY_CONFIG_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_IDLE_CHANNELS_PARAMS:
@@ -3841,7 +3840,7 @@ NV0000_CTRL_GPU_ACTIVE_DEVICE = struct_NV0000_CTRL_GPU_ACTIVE_DEVICE
 class struct_NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS:
   SIZE = 3076
   numDevices: Annotated[NvU32, 0]
-  devices: Annotated[(NV0000_CTRL_GPU_ACTIVE_DEVICE* 256), 4]
+  devices: Annotated[Array[NV0000_CTRL_GPU_ACTIVE_DEVICE, Literal[256]], 4]
 NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS = struct_NV0000_CTRL_GPU_GET_ACTIVE_DEVICE_IDS_PARAMS
 @record
 class struct_NV0000_CTRL_GPU_ASYNC_ATTACH_ID_PARAMS:
@@ -3884,7 +3883,7 @@ class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS:
   SIZE = 16012
   gpuId: Annotated[NvU32, 0]
   pid: Annotated[NvU32, 4]
-  pidTbl: Annotated[(NvU32* 4000), 8]
+  pidTbl: Annotated[Array[NvU32, Literal[4000]], 8]
   pidCount: Annotated[NvU32, 16008]
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS
 @record
@@ -3896,7 +3895,7 @@ NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS = struct_NV0000_CTRL_GPUACCT_CL
 @record
 class struct_NV0000_CTRL_GSYNC_GET_ATTACHED_IDS_PARAMS:
   SIZE = 16
-  gsyncIds: Annotated[(NvU32* 4), 0]
+  gsyncIds: Annotated[Array[NvU32, Literal[4]], 0]
 NV0000_CTRL_GSYNC_GET_ATTACHED_IDS_PARAMS = struct_NV0000_CTRL_GSYNC_GET_ATTACHED_IDS_PARAMS
 @record
 class struct_NV0000_CTRL_GSYNC_GET_ID_INFO_PARAMS:
@@ -3929,10 +3928,10 @@ class struct_NV0000_CTRL_NVD_GET_NVLOG_INFO_PARAMS:
   SIZE = 15404
   component: Annotated[NvU32, 0]
   version: Annotated[NvU32, 4]
-  runtimeSizes: Annotated[(NvU8* 16), 8]
+  runtimeSizes: Annotated[Array[NvU8, Literal[16]], 8]
   printFlags: Annotated[NvU32, 24]
-  signature: Annotated[(NvU32* 4), 28]
-  bufferTags: Annotated[(NvU32* 3840), 44]
+  signature: Annotated[Array[NvU32, Literal[4]], 28]
+  bufferTags: Annotated[Array[NvU32, Literal[3840]], 44]
 NV0000_CTRL_NVD_GET_NVLOG_INFO_PARAMS = struct_NV0000_CTRL_NVD_GET_NVLOG_INFO_PARAMS
 @record
 class struct_NV0000_CTRL_NVD_GET_NVLOG_BUFFER_INFO_PARAMS:
@@ -3952,7 +3951,7 @@ class struct_NV0000_CTRL_NVD_GET_NVLOG_PARAMS:
   buffer: Annotated[NvU32, 4]
   blockNum: Annotated[NvU32, 8]
   size: Annotated[NvU32, 12]
-  data: Annotated[(NvU8* 4000), 16]
+  data: Annotated[Array[NvU8, Literal[4000]], 16]
 NV0000_CTRL_NVD_GET_NVLOG_PARAMS = struct_NV0000_CTRL_NVD_GET_NVLOG_PARAMS
 @record
 class struct_NV0000_CTRL_CMD_NVD_RCERR_RPT_REG_ENTRY:
@@ -3975,7 +3974,7 @@ class struct_NV0000_CTRL_CMD_NVD_GET_RCERR_RPT_PARAMS:
   rptCount: Annotated[NvU16, 24]
   owner: Annotated[NvU32, 28]
   processId: Annotated[NvU32, 32]
-  report: Annotated[(NV0000_CTRL_CMD_NVD_RCERR_RPT_REG_ENTRY* 200), 36]
+  report: Annotated[Array[NV0000_CTRL_CMD_NVD_RCERR_RPT_REG_ENTRY, Literal[200]], 36]
 NV0000_CTRL_CMD_NVD_GET_RCERR_RPT_PARAMS = struct_NV0000_CTRL_CMD_NVD_GET_RCERR_RPT_PARAMS
 @record
 class struct_NV0000_CTRL_NVD_GET_DPC_ISR_TS_PARAMS:
@@ -3987,7 +3986,7 @@ NV0000_CTRL_NVD_GET_DPC_ISR_TS_PARAMS = struct_NV0000_CTRL_NVD_GET_DPC_ISR_TS_PA
 class struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS:
   SIZE = 104
   subProcessID: Annotated[NvU32, 0]
-  subProcessName: Annotated[(ctypes.c_char* 100), 4]
+  subProcessName: Annotated[Array[ctypes.c_char, Literal[100]], 4]
 NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS = struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS
 @record
 class struct_NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS:
@@ -4003,7 +4002,7 @@ NV0000_SYNC_GPU_BOOST_INFO_PARAMS = struct_NV0000_SYNC_GPU_BOOST_INFO_PARAMS
 class struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG:
   SIZE = 140
   gpuCount: Annotated[NvU32, 0]
-  gpuIds: Annotated[(NvU32* 32), 4]
+  gpuIds: Annotated[Array[NvU32, Literal[32]], 4]
   boostGroupId: Annotated[NvU32, 132]
   bBridgeless: Annotated[NvBool, 136]
 NV0000_SYNC_GPU_BOOST_GROUP_CONFIG = struct_NV0000_SYNC_GPU_BOOST_GROUP_CONFIG
@@ -4021,7 +4020,7 @@ NV0000_SYNC_GPU_BOOST_GROUP_DESTROY_PARAMS = struct_NV0000_SYNC_GPU_BOOST_GROUP_
 class struct_NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS:
   SIZE = 2244
   groupCount: Annotated[NvU32, 0]
-  pBoostGroups: Annotated[(NV0000_SYNC_GPU_BOOST_GROUP_CONFIG* 16), 4]
+  pBoostGroups: Annotated[Array[NV0000_SYNC_GPU_BOOST_GROUP_CONFIG, Literal[16]], 4]
 NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS = struct_NV0000_SYNC_GPU_BOOST_GROUP_INFO_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_FEATURES_PARAMS:
@@ -4054,7 +4053,7 @@ class struct_NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS:
   dataCacheLineSize: Annotated[NvU32, 20]
   numLogicalCpus: Annotated[NvU32, 24]
   numPhysicalCpus: Annotated[NvU32, 28]
-  name: Annotated[(NvU8* 52), 32]
+  name: Annotated[Array[NvU8, Literal[52]], 32]
   family: Annotated[NvU32, 84]
   model: Annotated[NvU32, 88]
   stepping: Annotated[NvU8, 92]
@@ -4074,10 +4073,10 @@ class struct_NV0000_CTRL_SYSTEM_GET_CHIPSET_INFO_PARAMS:
   HBsubSysVendorId: Annotated[NvU16, 12]
   HBsubSysDeviceId: Annotated[NvU16, 14]
   sliBondId: Annotated[NvU32, 16]
-  vendorNameString: Annotated[(NvU8* 32), 20]
-  subSysVendorNameString: Annotated[(NvU8* 32), 52]
-  chipsetNameString: Annotated[(NvU8* 32), 84]
-  sliBondNameString: Annotated[(NvU8* 32), 116]
+  vendorNameString: Annotated[Array[NvU8, Literal[32]], 20]
+  subSysVendorNameString: Annotated[Array[NvU8, Literal[32]], 52]
+  chipsetNameString: Annotated[Array[NvU8, Literal[32]], 84]
+  sliBondNameString: Annotated[Array[NvU8, Literal[32]], 116]
   flags: Annotated[NvU32, 148]
 NV0000_CTRL_SYSTEM_GET_CHIPSET_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_CHIPSET_INFO_PARAMS
 @record
@@ -4098,7 +4097,7 @@ NV0000_CTRL_SYSTEM_GET_LOCK_TIMES_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_LOCK_TI
 class struct_NV0000_CTRL_SYSTEM_GET_CLASSLIST_PARAMS:
   SIZE = 132
   numClasses: Annotated[NvU32, 0]
-  classes: Annotated[(NvU32* 32), 4]
+  classes: Annotated[Array[NvU32, Literal[32]], 4]
 NV0000_CTRL_SYSTEM_GET_CLASSLIST_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_CLASSLIST_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_NOTIFY_EVENT_PARAMS:
@@ -4117,7 +4116,7 @@ class struct_NV0000_CTRL_SYSTEM_DEBUG_RMMSG_CTRL_PARAMS:
   SIZE = 520
   cmd: Annotated[NvU32, 0]
   count: Annotated[NvU32, 4]
-  data: Annotated[(NvU8* 512), 8]
+  data: Annotated[Array[NvU8, Literal[512]], 8]
 NV0000_CTRL_SYSTEM_DEBUG_RMMSG_CTRL_PARAMS = struct_NV0000_CTRL_SYSTEM_DEBUG_RMMSG_CTRL_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_HWBC_INFO:
@@ -4130,7 +4129,7 @@ NV0000_CTRL_SYSTEM_HWBC_INFO = struct_NV0000_CTRL_SYSTEM_HWBC_INFO
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_HWBC_INFO_PARAMS:
   SIZE = 2048
-  hwbcInfo: Annotated[(NV0000_CTRL_SYSTEM_HWBC_INFO* 128), 0]
+  hwbcInfo: Annotated[Array[NV0000_CTRL_SYSTEM_HWBC_INFO, Literal[128]], 0]
 NV0000_CTRL_SYSTEM_GET_HWBC_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_HWBC_INFO_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_GPS_CONTROL_PARAMS:
@@ -4144,7 +4143,7 @@ class struct_NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS:
   SIZE = 136
   cmdCount: Annotated[NvU32, 0]
   succeeded: Annotated[NvU32, 4]
-  cmdData: Annotated[(_anonstruct35* 16), 8]
+  cmdData: Annotated[Array[_anonstruct35, Literal[16]], 8]
 @record
 class _anonstruct35:
   SIZE = 8
@@ -4155,47 +4154,47 @@ NV0000_CTRL_SYSTEM_GPS_BATCH_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_BATC
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS:
   SIZE = 176
-  gpuIds: Annotated[(NvU32* 32), 0]
+  gpuIds: Annotated[Array[NvU32, Literal[32]], 0]
   gpuCount: Annotated[NvU32, 128]
   p2pCaps: Annotated[NvU32, 132]
   p2pOptimalReadCEs: Annotated[NvU32, 136]
   p2pOptimalWriteCEs: Annotated[NvU32, 140]
-  p2pCapsStatus: Annotated[(NvU8* 9), 144]
+  p2pCapsStatus: Annotated[Array[NvU8, Literal[9]], 144]
   busPeerIds: Annotated[NvP64, 160]
   busEgmPeerIds: Annotated[NvP64, 168]
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_V2_PARAMS:
   SIZE = 8348
-  gpuIds: Annotated[(NvU32* 32), 0]
+  gpuIds: Annotated[Array[NvU32, Literal[32]], 0]
   gpuCount: Annotated[NvU32, 128]
   p2pCaps: Annotated[NvU32, 132]
   p2pOptimalReadCEs: Annotated[NvU32, 136]
   p2pOptimalWriteCEs: Annotated[NvU32, 140]
-  p2pCapsStatus: Annotated[(NvU8* 9), 144]
-  busPeerIds: Annotated[(NvU32* 1024), 156]
-  busEgmPeerIds: Annotated[(NvU32* 1024), 4252]
+  p2pCapsStatus: Annotated[Array[NvU8, Literal[9]], 144]
+  busPeerIds: Annotated[Array[NvU32, Literal[1024]], 156]
+  busEgmPeerIds: Annotated[Array[NvU32, Literal[1024]], 4252]
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_V2_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_V2_PARAMS
-NV0000_CTRL_P2P_CAPS_MATRIX_ROW = (ctypes.c_uint32* 8)
+NV0000_CTRL_P2P_CAPS_MATRIX_ROW = Array[ctypes.c_uint32, Literal[8]]
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS:
   SIZE = 1352
   grpACount: Annotated[NvU32, 0]
   grpBCount: Annotated[NvU32, 4]
-  gpuIdGrpA: Annotated[(NvU32* 8), 8]
-  gpuIdGrpB: Annotated[(NvU32* 8), 40]
-  p2pCaps: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW* 8), 72]
-  a2bOptimalReadCes: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW* 8), 328]
-  a2bOptimalWriteCes: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW* 8), 584]
-  b2aOptimalReadCes: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW* 8), 840]
-  b2aOptimalWriteCes: Annotated[(NV0000_CTRL_P2P_CAPS_MATRIX_ROW* 8), 1096]
+  gpuIdGrpA: Annotated[Array[NvU32, Literal[8]], 8]
+  gpuIdGrpB: Annotated[Array[NvU32, Literal[8]], 40]
+  p2pCaps: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW, Literal[8]], 72]
+  a2bOptimalReadCes: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW, Literal[8]], 328]
+  a2bOptimalWriteCes: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW, Literal[8]], 584]
+  b2aOptimalReadCes: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW, Literal[8]], 840]
+  b2aOptimalWriteCes: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW, Literal[8]], 1096]
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_GPS_CTRL_PARAMS:
   SIZE = 28
   cmd: Annotated[NvU32, 0]
-  input: Annotated[(NvS32* 2), 4]
-  result: Annotated[(NvS32* 4), 12]
+  input: Annotated[Array[NvS32, Literal[2]], 4]
+  result: Annotated[Array[NvS32, Literal[4]], 12]
 NV0000_CTRL_SYSTEM_GPS_CTRL_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_CTRL_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_GPS_GET_PERF_SENSOR_COUNTERS_PARAMS:
@@ -4205,7 +4204,7 @@ class struct_NV0000_CTRL_SYSTEM_GPS_GET_PERF_SENSOR_COUNTERS_PARAMS:
   nextExpectedSampleTimems: Annotated[NvU32, 8]
   countersReq: Annotated[NvU32, 12]
   countersReturned: Annotated[NvU32, 16]
-  counterBlock: Annotated[(NvU32* 32), 20]
+  counterBlock: Annotated[Array[NvU32, Literal[32]], 20]
 NV0000_CTRL_SYSTEM_GPS_GET_PERF_SENSOR_COUNTERS_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_GET_PERF_SENSOR_COUNTERS_PARAMS
 NV0000_CTRL_SYSTEM_GPS_GET_PERF_SENSORS_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_GET_PERF_SENSOR_COUNTERS_PARAMS
 NV0000_CTRL_SYSTEM_GPS_GET_EXTENDED_PERF_SENSORS_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_GET_PERF_SENSOR_COUNTERS_PARAMS
@@ -4215,7 +4214,7 @@ class struct_NV0000_CTRL_SYSTEM_GPS_CALL_ACPI_PARAMS:
   cmd: Annotated[NvU32, 0]
   input: Annotated[NvU32, 4]
   resultSz: Annotated[NvU32, 8]
-  result: Annotated[(NvU32* 288), 12]
+  result: Annotated[Array[NvU32, Literal[288]], 12]
 NV0000_CTRL_SYSTEM_GPS_CALL_ACPI_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_CALL_ACPI_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_EXECUTE_ACPI_METHOD_PARAMS:
@@ -4244,7 +4243,7 @@ NV0000_CTRL_SYSTEM_GPS_FRM_DATA_SAMPLE = struct_NV0000_CTRL_SYSTEM_GPS_FRM_DATA_
 @record
 class struct_NV0000_CTRL_SYSTEM_GPS_GET_FRM_DATA_PARAMS:
   SIZE = 514
-  samples: Annotated[(NV0000_CTRL_SYSTEM_GPS_FRM_DATA_SAMPLE* 64), 0]
+  samples: Annotated[Array[NV0000_CTRL_SYSTEM_GPS_FRM_DATA_SAMPLE, Literal[64]], 0]
   nextSampleNumber: Annotated[NvU8, 512]
 NV0000_CTRL_SYSTEM_GPS_GET_FRM_DATA_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_GET_FRM_DATA_PARAMS
 @record
@@ -4255,11 +4254,11 @@ NV0000_CTRL_SYSTEM_GPS_SET_FRM_DATA_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_SET_F
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS:
   SIZE = 1288
-  szHostDriverVersionBuffer: Annotated[(ctypes.c_char* 256), 0]
-  szHostVersionBuffer: Annotated[(ctypes.c_char* 256), 256]
-  szHostTitleBuffer: Annotated[(ctypes.c_char* 256), 512]
-  szPluginTitleBuffer: Annotated[(ctypes.c_char* 256), 768]
-  szHostUnameBuffer: Annotated[(ctypes.c_char* 256), 1024]
+  szHostDriverVersionBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 0]
+  szHostVersionBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 256]
+  szHostTitleBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 512]
+  szPluginTitleBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 768]
+  szHostUnameBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 1024]
   iHostChangelistNumber: Annotated[NvU32, 1280]
   iPluginChangelistNumber: Annotated[NvU32, 1284]
 NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS
@@ -4267,8 +4266,8 @@ NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_VG
 class struct_NV0000_CTRL_SYSTEM_GET_GPUS_POWER_STATUS_PARAMS:
   SIZE = 65
   gpuCount: Annotated[NvU8, 0]
-  gpuBus: Annotated[(NvU8* 32), 1]
-  gpuExternalPowerStatus: Annotated[(NvU8* 32), 33]
+  gpuBus: Annotated[Array[NvU8, Literal[32]], 1]
+  gpuExternalPowerStatus: Annotated[Array[NvU8, Literal[32]], 33]
 NV0000_CTRL_SYSTEM_GET_GPUS_POWER_STATUS_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_GPUS_POWER_STATUS_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_PRIVILEGED_STATUS_PARAMS:
@@ -4355,7 +4354,7 @@ class struct_NV0000_CTRL_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS:
   cpuType: Annotated[NvU8, 83]
   gpuType: Annotated[NvU8, 84]
   sysPwrIndex: Annotated[NvU32, 88]
-  sysPwrGetInfo: Annotated[(NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT* 32), 92]
+  sysPwrGetInfo: Annotated[Array[NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT, Literal[32]], 92]
   bIsTspSupported: Annotated[NvBool, 860]
   sysPwrLimitsTableVersion: Annotated[NvU8, 861]
   type: Annotated[NvU32, 864]
@@ -4381,10 +4380,10 @@ NV0000_CTRL_SYSTEM_GET_CLIENT_DATABASE_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_G
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS:
   SIZE = 1032
-  driverVersionBuffer: Annotated[(ctypes.c_char* 256), 0]
-  versionBuffer: Annotated[(ctypes.c_char* 256), 256]
-  driverBranch: Annotated[(ctypes.c_char* 256), 512]
-  titleBuffer: Annotated[(ctypes.c_char* 256), 768]
+  driverVersionBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 0]
+  versionBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 256]
+  driverBranch: Annotated[Array[ctypes.c_char, Literal[256]], 512]
+  titleBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 768]
   changelistNumber: Annotated[NvU32, 1024]
   officialChangelistNumber: Annotated[NvU32, 1028]
 NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS
@@ -4406,7 +4405,7 @@ class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS:
   SIZE = 136
   cmdCount: Annotated[NvU32, 0]
   succeeded: Annotated[NvU32, 4]
-  cmdData: Annotated[(_anonstruct37* 16), 8]
+  cmdData: Annotated[Array[_anonstruct37, Literal[16]], 8]
 @record
 class _anonstruct37:
   SIZE = 8
@@ -4418,8 +4417,8 @@ NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_BATCH_CONTROL_PARAMS = struct_NV0000_CTRL_SYSTE
 class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CTRL_PARAMS:
   SIZE = 28
   cmd: Annotated[NvU32, 0]
-  input: Annotated[(NvS32* 2), 4]
-  result: Annotated[(NvS32* 4), 12]
+  input: Annotated[Array[NvS32, Literal[2]], 4]
+  result: Annotated[Array[NvS32, Literal[4]], 12]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CTRL_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CTRL_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSOR_COUNTERS_PARAMS:
@@ -4429,7 +4428,7 @@ class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSOR_COUNTERS_PARAMS:
   nextExpectedSampleTimems: Annotated[NvU32, 8]
   countersReq: Annotated[NvU32, 12]
   countersReturned: Annotated[NvU32, 16]
-  counterBlock: Annotated[(NvU32* 32), 20]
+  counterBlock: Annotated[Array[NvU32, Literal[32]], 20]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSOR_COUNTERS_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSOR_COUNTERS_PARAMS
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSORS_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSOR_COUNTERS_PARAMS
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_EXTENDED_PERF_SENSORS_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_PERF_SENSOR_COUNTERS_PARAMS
@@ -4439,7 +4438,7 @@ class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CALL_ACPI_PARAMS:
   cmd: Annotated[NvU32, 0]
   input: Annotated[NvU32, 4]
   resultSz: Annotated[NvU32, 8]
-  result: Annotated[(NvU32* 288), 12]
+  result: Annotated[Array[NvU32, Literal[288]], 12]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CALL_ACPI_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_CALL_ACPI_PARAMS
 @record
 class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_FRM_DATA_SAMPLE:
@@ -4453,7 +4452,7 @@ NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_FRM_DATA_SAMPLE = struct_NV0000_CTRL_SYSTEM_PFM
 @record
 class struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_FRM_DATA_PARAMS:
   SIZE = 514
-  samples: Annotated[(NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_FRM_DATA_SAMPLE* 64), 0]
+  samples: Annotated[Array[NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_FRM_DATA_SAMPLE, Literal[64]], 0]
   nextSampleNumber: Annotated[NvU8, 512]
 NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_FRM_DATA_PARAMS = struct_NV0000_CTRL_SYSTEM_PFM_REQ_HNDLR_GET_FRM_DATA_PARAMS
 @record
@@ -4523,14 +4522,14 @@ class struct_NV0000_CTRL_OS_UNIX_GET_EXPORT_OBJECT_INFO_PARAMS:
   deviceInstance: Annotated[NvU32, 4]
   gpuInstanceId: Annotated[NvU32, 8]
   maxObjects: Annotated[NvU16, 12]
-  metadata: Annotated[(NvU8* 64), 14]
+  metadata: Annotated[Array[NvU8, Literal[64]], 14]
 NV0000_CTRL_OS_UNIX_GET_EXPORT_OBJECT_INFO_PARAMS = struct_NV0000_CTRL_OS_UNIX_GET_EXPORT_OBJECT_INFO_PARAMS
 @record
 class struct_NV0000_CTRL_OS_UNIX_CREATE_EXPORT_OBJECT_FD_PARAMS:
   SIZE = 76
   hDevice: Annotated[NvHandle, 0]
   maxObjects: Annotated[NvU16, 4]
-  metadata: Annotated[(NvU8* 64), 6]
+  metadata: Annotated[Array[NvU8, Literal[64]], 6]
   fd: Annotated[NvS32, 72]
 NV0000_CTRL_OS_UNIX_CREATE_EXPORT_OBJECT_FD_PARAMS = struct_NV0000_CTRL_OS_UNIX_CREATE_EXPORT_OBJECT_FD_PARAMS
 @record
@@ -4539,8 +4538,8 @@ class struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECTS_TO_FD_PARAMS:
   fd: Annotated[NvS32, 0]
   hDevice: Annotated[NvHandle, 4]
   maxObjects: Annotated[NvU16, 8]
-  metadata: Annotated[(NvU8* 64), 10]
-  objects: Annotated[(NvHandle* 512), 76]
+  metadata: Annotated[Array[NvU8, Literal[64]], 10]
+  objects: Annotated[Array[NvHandle, Literal[512]], 76]
   numObjects: Annotated[NvU16, 2124]
   index: Annotated[NvU16, 2126]
 NV0000_CTRL_OS_UNIX_EXPORT_OBJECTS_TO_FD_PARAMS = struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECTS_TO_FD_PARAMS
@@ -4549,15 +4548,15 @@ class struct_NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS:
   SIZE = 652
   fd: Annotated[NvS32, 0]
   hParent: Annotated[NvHandle, 4]
-  objects: Annotated[(NvHandle* 128), 8]
-  objectTypes: Annotated[(NvU8* 128), 520]
+  objects: Annotated[Array[NvHandle, Literal[128]], 8]
+  objectTypes: Annotated[Array[NvU8, Literal[128]], 520]
   numObjects: Annotated[NvU16, 648]
   index: Annotated[NvU16, 650]
 NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS = struct_NV0000_CTRL_OS_UNIX_IMPORT_OBJECTS_FROM_FD_PARAMS
 @record
 class struct_NV0000_CTRL_VGPU_CREATE_DEVICE_PARAMS:
   SIZE = 40
-  vgpuName: Annotated[(NvU8* 16), 0]
+  vgpuName: Annotated[Array[NvU8, Literal[16]], 0]
   gpuPciId: Annotated[NvU32, 16]
   gpuPciBdf: Annotated[NvU32, 20]
   vgpuTypeId: Annotated[NvU32, 24]
@@ -4571,13 +4570,13 @@ class struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS:
   gpuPciId: Annotated[NvU32, 0]
   gpuPciBdf: Annotated[NvU32, 4]
   numVgpuTypes: Annotated[NvU32, 8]
-  vgpuTypeIds: Annotated[(NvU32* 128), 12]
-  availableInstances: Annotated[(NvU32* 128), 524]
+  vgpuTypeIds: Annotated[Array[NvU32, Literal[128]], 12]
+  availableInstances: Annotated[Array[NvU32, Literal[128]], 524]
 NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS = struct_NV0000_CTRL_VGPU_GET_INSTANCES_PARAMS
 @record
 class struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS:
   SIZE = 18
-  vgpuName: Annotated[(NvU8* 16), 0]
+  vgpuName: Annotated[Array[NvU8, Literal[16]], 0]
   vgpuId: Annotated[NvU16, 16]
 NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS = struct_NV0000_CTRL_VGPU_DELETE_DEVICE_PARAMS
 @record
@@ -4589,7 +4588,7 @@ NV0000_CTRL_VGPU_VFIO_NOTIFY_RM_STATUS_PARAMS = struct_NV0000_CTRL_VGPU_VFIO_NOT
 @record
 class struct_NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS:
   SIZE = 24
-  vgpuName: Annotated[(NvU8* 16), 0]
+  vgpuName: Annotated[Array[NvU8, Literal[16]], 0]
   mode: Annotated[NvU32, 16]
   sysfs_val: Annotated[NvU32, 20]
 NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS = struct_NV0000_CTRL_GPU_UPDATE_SYSFS_NODE_PARAMS
@@ -4626,7 +4625,7 @@ NV0080_CTRL_BSP_GET_CAPS_PARAMS = struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS
 @record
 class struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2:
   SIZE = 12
-  capsTbl: Annotated[(NvU8* 8), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[8]], 0]
   instanceId: Annotated[NvU32, 8]
 NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2 = struct_NV0080_CTRL_BSP_GET_CAPS_PARAMS_V2
 @record
@@ -4644,7 +4643,7 @@ class struct_NV0080_CTRL_DMA_GET_PTE_INFO_PARAMS:
   gpuAddr: Annotated[NvU64, 0]
   subDeviceId: Annotated[NvU32, 8]
   skipVASpaceInit: Annotated[NvU8, 12]
-  pteBlocks: Annotated[(NV0080_CTRL_DMA_PTE_INFO_PTE_BLOCK* 5), 16]
+  pteBlocks: Annotated[Array[NV0080_CTRL_DMA_PTE_INFO_PTE_BLOCK, Literal[5]], 16]
   hVASpace: Annotated[NvHandle, 176]
 NV0080_CTRL_DMA_GET_PTE_INFO_PARAMS = struct_NV0080_CTRL_DMA_GET_PTE_INFO_PARAMS
 @record
@@ -4652,7 +4651,7 @@ class struct_NV0080_CTRL_DMA_SET_PTE_INFO_PARAMS:
   SIZE = 184
   gpuAddr: Annotated[NvU64, 0]
   subDeviceId: Annotated[NvU32, 8]
-  pteBlocks: Annotated[(NV0080_CTRL_DMA_PTE_INFO_PTE_BLOCK* 5), 16]
+  pteBlocks: Annotated[Array[NV0080_CTRL_DMA_PTE_INFO_PTE_BLOCK, Literal[5]], 16]
   hVASpace: Annotated[NvHandle, 176]
 NV0080_CTRL_DMA_SET_PTE_INFO_PARAMS = struct_NV0080_CTRL_DMA_SET_PTE_INFO_PARAMS
 @record
@@ -4708,7 +4707,7 @@ class struct_NV0080_CTRL_DMA_ADV_SCHED_GET_VA_CAPS_PARAMS:
   dualPageTableSupported: Annotated[NvU32, 20]
   idealVRAMPageSize: Annotated[NvU32, 24]
   pageTableBigFormat: Annotated[NV0080_CTRL_DMA_ADV_SCHED_GET_VA_CAPS_PAGE_TABLE_FORMAT, 28]
-  pageTable4KFormat: Annotated[(NV0080_CTRL_DMA_ADV_SCHED_GET_VA_CAPS_PAGE_TABLE_FORMAT* 16), 36]
+  pageTable4KFormat: Annotated[Array[NV0080_CTRL_DMA_ADV_SCHED_GET_VA_CAPS_PAGE_TABLE_FORMAT, Literal[16]], 36]
   hVASpace: Annotated[NvHandle, 164]
   vaRangeLo: Annotated[NvU64, 168]
   vaSpaceId: Annotated[NvU32, 176]
@@ -4734,7 +4733,7 @@ class struct_NV0080_CTRL_DMA_GET_PDE_INFO_PARAMS:
   pdeAddrSpace: Annotated[NvU32, 20]
   pdeSize: Annotated[NvU32, 24]
   subDeviceId: Annotated[NvU32, 28]
-  pteBlocks: Annotated[(NV0080_CTRL_DMA_PDE_INFO_PTE_BLOCK* 5), 32]
+  pteBlocks: Annotated[Array[NV0080_CTRL_DMA_PDE_INFO_PTE_BLOCK, Literal[5]], 32]
   pdbAddr: Annotated[NvU64, 192]
   hVASpace: Annotated[NvHandle, 200]
 NV0080_CTRL_DMA_GET_PDE_INFO_PARAMS = struct_NV0080_CTRL_DMA_GET_PDE_INFO_PARAMS
@@ -4748,7 +4747,7 @@ NV0080_CTRL_DMA_INVALIDATE_TLB_PARAMS = struct_NV0080_CTRL_DMA_INVALIDATE_TLB_PA
 class struct_NV0080_CTRL_DMA_GET_CAPS_PARAMS:
   SIZE = 12
   capsTblSize: Annotated[NvU32, 0]
-  capsTbl: Annotated[(NvU8* 8), 4]
+  capsTbl: Annotated[Array[NvU8, Literal[8]], 4]
 NV0080_CTRL_DMA_GET_CAPS_PARAMS = struct_NV0080_CTRL_DMA_GET_CAPS_PARAMS
 @record
 class struct_NV0080_CTRL_DMA_SET_VA_SPACE_SIZE_PARAMS:
@@ -4768,7 +4767,7 @@ class struct_NV0080_CTRL_DMA_UPDATE_PDE_2_PARAMS:
   SIZE = 64
   pdeIndex: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
-  ptParams: Annotated[(NV0080_CTRL_DMA_UPDATE_PDE_2_PAGE_TABLE_PARAMS* 2), 8]
+  ptParams: Annotated[Array[NV0080_CTRL_DMA_UPDATE_PDE_2_PAGE_TABLE_PARAMS, Literal[2]], 8]
   hVASpace: Annotated[NvHandle, 40]
   pPdeBuffer: Annotated[NvP64, 48]
   subDeviceId: Annotated[NvU32, 56]
@@ -4827,7 +4826,7 @@ NV0080_CTRL_FB_GET_COMPBIT_STORE_INFO_PARAMS = struct_NV0080_CTRL_FB_GET_COMPBIT
 @record
 class struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS:
   SIZE = 3
-  capsTbl: Annotated[(NvU8* 3), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[3]], 0]
 NV0080_CTRL_FB_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_FB_GET_CAPS_V2_PARAMS
 @record
 class struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS:
@@ -4888,13 +4887,13 @@ NV0080_CTRL_FIFO_START_RUNLIST_PARAMS = struct_NV0080_CTRL_FIFO_START_RUNLIST_PA
 @record
 class struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS:
   SIZE = 2
-  capsTbl: Annotated[(NvU8* 2), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[2]], 0]
 NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_FIFO_GET_CAPS_V2_PARAMS
 @record
 class struct_NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS:
   SIZE = 16396
   numChannels: Annotated[NvU32, 0]
-  hChannels: Annotated[(NvHandle* 4096), 4]
+  hChannels: Annotated[Array[NvHandle, Literal[4096]], 4]
   flags: Annotated[NvU32, 16388]
   timeout: Annotated[NvU32, 16392]
 NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS = struct_NV0080_CTRL_FIFO_IDLE_CHANNELS_PARAMS
@@ -4913,7 +4912,7 @@ NV0080_CTRL_GPU_GET_NUM_SUBDEVICES_PARAMS = struct_NV0080_CTRL_GPU_GET_NUM_SUBDE
 class struct_NV0080_CTRL_GPU_GET_VIDLINK_ORDER_PARAMS:
   SIZE = 36
   ConnectionCount: Annotated[NvU32, 0]
-  Order: Annotated[(NvU32* 8), 4]
+  Order: Annotated[Array[NvU32, Literal[8]], 4]
 NV0080_CTRL_GPU_GET_VIDLINK_ORDER_PARAMS = struct_NV0080_CTRL_GPU_GET_VIDLINK_ORDER_PARAMS
 @record
 class struct_NV0080_CTRL_GPU_SET_DISPLAY_OWNER_PARAMS:
@@ -4989,7 +4988,7 @@ NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS = struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PA
 class struct_NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS:
   SIZE = 804
   numClasses: Annotated[NvU32, 0]
-  classList: Annotated[(NvU32* 200), 4]
+  classList: Annotated[Array[NvU32, Literal[200]], 4]
 NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS = struct_NV0080_CTRL_GPU_GET_CLASSLIST_V2_PARAMS
 @record
 class struct_NV0080_CTRL_GPU_FIND_SUBDEVICE_HANDLE_PARAM:
@@ -5063,7 +5062,7 @@ NV0080_CTRL_GR_SET_TPC_PARTITION_MODE_PARAMS = struct_NV0080_CTRL_GR_TPC_PARTITI
 @record
 class struct_NV0080_CTRL_GR_GET_CAPS_V2_PARAMS:
   SIZE = 48
-  capsTbl: Annotated[(NvU8* 23), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[23]], 0]
   grRouteInfo: Annotated[NV0080_CTRL_GR_ROUTE_INFO, 24]
   bCapsPopulated: Annotated[NvBool, 40]
 NV0080_CTRL_GR_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_GR_GET_CAPS_V2_PARAMS
@@ -5071,7 +5070,7 @@ NV0080_CTRL_GR_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_GR_GET_CAPS_V2_PARAMS
 class struct_NV0080_CTRL_GR_GET_INFO_V2_PARAMS:
   SIZE = 488
   grInfoListSize: Annotated[NvU32, 0]
-  grInfoList: Annotated[(NV0080_CTRL_GR_INFO* 58), 4]
+  grInfoList: Annotated[Array[NV0080_CTRL_GR_INFO, Literal[58]], 4]
   grRouteInfo: Annotated[NV0080_CTRL_GR_ROUTE_INFO, 472]
 NV0080_CTRL_GR_GET_INFO_V2_PARAMS = struct_NV0080_CTRL_GR_GET_INFO_V2_PARAMS
 @record
@@ -5083,7 +5082,7 @@ NV0080_CTRL_HOST_GET_CAPS_PARAMS = struct_NV0080_CTRL_HOST_GET_CAPS_PARAMS
 @record
 class struct_NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS:
   SIZE = 3
-  capsTbl: Annotated[(NvU8* 3), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[3]], 0]
 NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_HOST_GET_CAPS_V2_PARAMS
 @record
 class struct_NV0080_CTRL_CMD_INTERNAL_GR_GET_TPC_PARTITION_MODE_FINN_PARAMS:
@@ -5099,7 +5098,7 @@ NV0080_CTRL_CMD_INTERNAL_GR_SET_TPC_PARTITION_MODE_FINN_PARAMS = struct_NV0080_C
 class struct_NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS:
   SIZE = 804
   numClients: Annotated[NvU32, 0]
-  clientHandles: Annotated[(NvHandle* 200), 4]
+  clientHandles: Annotated[Array[NvHandle, Literal[200]], 4]
 NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS = struct_NV0080_CTRL_INTERNAL_FIFO_RC_AND_PERMANENTLY_DISABLE_CHANNELS_PARAMS
 @record
 class struct_NV0080_CTRL_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_PARAMS:
@@ -5122,13 +5121,13 @@ NV0080_CTRL_MSENC_GET_CAPS_PARAMS = struct_NV0080_CTRL_MSENC_GET_CAPS_PARAMS
 @record
 class struct_NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS:
   SIZE = 12
-  capsTbl: Annotated[(NvU8* 5), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[5]], 0]
   instanceId: Annotated[NvU32, 8]
 NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_MSENC_GET_CAPS_V2_PARAMS
 @record
 class struct_NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS:
   SIZE = 16
-  capsTbl: Annotated[(NvU8* 9), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[9]], 0]
   instanceId: Annotated[NvU32, 12]
 NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS = struct_NV0080_CTRL_NVJPG_GET_CAPS_V2_PARAMS
 @record
@@ -5168,7 +5167,7 @@ NV2080_CTRL_BIOS_GET_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_INFO_PARAMS
 class struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS:
   SIZE = 124
   biosInfoListSize: Annotated[NvU32, 0]
-  biosInfoList: Annotated[(NV2080_CTRL_BIOS_INFO* 15), 4]
+  biosInfoList: Annotated[Array[NV2080_CTRL_BIOS_INFO, Literal[15]], 4]
 NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_BIOS_GET_INFO_V2_PARAMS
 @record
 class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING:
@@ -5179,8 +5178,8 @@ class struct_NV2080_CTRL_BIOS_NBSI_REG_STRING:
 @record
 class _anonunion42:
   SIZE = 512
-  ascii: Annotated[(NvU8* 256), 0]
-  unicode: Annotated[(NvU16* 256), 0]
+  ascii: Annotated[Array[NvU8, Literal[256]], 0]
+  unicode: Annotated[Array[NvU16, Literal[256]], 0]
   hash: Annotated[NvU16, 0]
 NV2080_CTRL_BIOS_NBSI_REG_STRING = struct_NV2080_CTRL_BIOS_NBSI_REG_STRING
 @record
@@ -5199,7 +5198,7 @@ class struct_NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS:
   module: Annotated[NvU32, 0]
   path: Annotated[NV2080_CTRL_BIOS_NBSI_REG_STRING, 4]
   valueName: Annotated[NV2080_CTRL_BIOS_NBSI_REG_STRING, 524]
-  retBuf: Annotated[(NvU8* 256), 1044]
+  retBuf: Annotated[Array[NvU8, Literal[256]], 1044]
   retSize: Annotated[NvU32, 1300]
   errorCode: Annotated[NvU32, 1304]
 NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_V2_PARAMS
@@ -5219,13 +5218,13 @@ NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARA
 class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS:
   SIZE = 48
   BoardID: Annotated[NvU32, 0]
-  chipSKU: Annotated[(ctypes.c_char* 9), 4]
-  chipSKUMod: Annotated[(ctypes.c_char* 5), 13]
+  chipSKU: Annotated[Array[ctypes.c_char, Literal[9]], 4]
+  chipSKUMod: Annotated[Array[ctypes.c_char, Literal[5]], 13]
   skuConfigVersion: Annotated[NvU32, 20]
-  project: Annotated[(ctypes.c_char* 5), 24]
-  projectSKU: Annotated[(ctypes.c_char* 5), 29]
-  CDP: Annotated[(ctypes.c_char* 6), 34]
-  projectSKUMod: Annotated[(ctypes.c_char* 2), 40]
+  project: Annotated[Array[ctypes.c_char, Literal[5]], 24]
+  projectSKU: Annotated[Array[ctypes.c_char, Literal[5]], 29]
+  CDP: Annotated[Array[ctypes.c_char, Literal[6]], 34]
+  projectSKUMod: Annotated[Array[ctypes.c_char, Literal[2]], 40]
   businessCycle: Annotated[NvU32, 44]
 NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
 @record
@@ -5245,7 +5244,7 @@ NV2080_CTRL_BOARDOBJGRP_MASK_PRIMITIVE = ctypes.c_uint32
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK:
   SIZE = 4
-  pData: Annotated[(NvU32* 1), 0]
+  pData: Annotated[Array[NvU32, Literal[1]], 0]
 NV2080_CTRL_BOARDOBJGRP_MASK = struct_NV2080_CTRL_BOARDOBJGRP_MASK
 PNV2080_CTRL_BOARDOBJGRP_MASK = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK)
 @record
@@ -5258,28 +5257,28 @@ PNV2080_CTRL_BOARDOBJGRP_MASK_E32 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGR
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255:
   SIZE = 32
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
-  pDataE255: Annotated[(NvU32* 7), 4]
+  pDataE255: Annotated[Array[NvU32, Literal[7]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E255 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255
 PNV2080_CTRL_BOARDOBJGRP_MASK_E255 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255)
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512:
   SIZE = 64
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
-  pDataE512: Annotated[(NvU32* 15), 4]
+  pDataE512: Annotated[Array[NvU32, Literal[15]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E512 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512
 PNV2080_CTRL_BOARDOBJGRP_MASK_E512 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512)
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024:
   SIZE = 128
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
-  pDataE1024: Annotated[(NvU32* 31), 4]
+  pDataE1024: Annotated[Array[NvU32, Literal[31]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E1024 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024
 PNV2080_CTRL_BOARDOBJGRP_MASK_E1024 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024)
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048:
   SIZE = 256
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
-  pDataE2048: Annotated[(NvU32* 63), 4]
+  pDataE2048: Annotated[Array[NvU32, Literal[63]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E2048 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048
 PNV2080_CTRL_BOARDOBJGRP_MASK_E2048 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048)
 @record
@@ -5646,7 +5645,7 @@ NV2080_CTRL_BUS_GET_INFO_PARAMS = struct_NV2080_CTRL_BUS_GET_INFO_PARAMS
 class struct_NV2080_CTRL_BUS_GET_INFO_V2_PARAMS:
   SIZE = 420
   busInfoListSize: Annotated[NvU32, 0]
-  busInfoList: Annotated[(NV2080_CTRL_BUS_INFO* 52), 4]
+  busInfoList: Annotated[Array[NV2080_CTRL_BUS_INFO, Literal[52]], 4]
 NV2080_CTRL_BUS_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_BUS_GET_INFO_V2_PARAMS
 @record
 class struct_NV2080_CTRL_BUS_PCI_BAR_INFO:
@@ -5660,7 +5659,7 @@ NV2080_CTRL_BUS_PCI_BAR_INFO = struct_NV2080_CTRL_BUS_PCI_BAR_INFO
 class struct_NV2080_CTRL_BUS_GET_PCI_BAR_INFO_PARAMS:
   SIZE = 200
   pciBarCount: Annotated[NvU32, 0]
-  pciBarInfo: Annotated[(NV2080_CTRL_BUS_PCI_BAR_INFO* 8), 8]
+  pciBarInfo: Annotated[Array[NV2080_CTRL_BUS_PCI_BAR_INFO, Literal[8]], 8]
 NV2080_CTRL_BUS_GET_PCI_BAR_INFO_PARAMS = struct_NV2080_CTRL_BUS_GET_PCI_BAR_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_BUS_SET_PCIE_LINK_WIDTH_PARAMS:
@@ -5705,7 +5704,7 @@ class struct_NV2080_CTRL_BUS_GET_PEX_COUNTERS_PARAMS:
   pexTotalNonFatalErrors: Annotated[NvU8, 10]
   pexTotalFatalErrors: Annotated[NvU8, 11]
   pexTotalUnsupportedReqs: Annotated[NvU8, 12]
-  pexCounters: Annotated[(NvU16* 31), 14]
+  pexCounters: Annotated[Array[NvU16, Literal[31]], 14]
 NV2080_CTRL_BUS_GET_PEX_COUNTERS_PARAMS = struct_NV2080_CTRL_BUS_GET_PEX_COUNTERS_PARAMS
 @record
 class struct_NV2080_CTRL_BUS_CLEAR_PEX_COUNTERS_PARAMS:
@@ -5722,7 +5721,7 @@ NV2080_CTRL_BUS_FREEZE_PEX_COUNTERS_PARAMS = struct_NV2080_CTRL_BUS_FREEZE_PEX_C
 class struct_NV2080_CTRL_CMD_BUS_GET_PEX_LANE_COUNTERS_PARAMS:
   SIZE = 18
   pexLaneErrorStatus: Annotated[NvU16, 0]
-  pexLaneCounter: Annotated[(NvU8* 16), 2]
+  pexLaneCounter: Annotated[Array[NvU8, Literal[16]], 2]
 NV2080_CTRL_CMD_BUS_GET_PEX_LANE_COUNTERS_PARAMS = struct_NV2080_CTRL_CMD_BUS_GET_PEX_LANE_COUNTERS_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_LTR_LATENCY_PARAMS:
@@ -5747,7 +5746,7 @@ NV2080_CTRL_CMD_BUS_SET_PCIE_LTR_LATENCY_PARAMS = struct_NV2080_CTRL_CMD_BUS_SET
 class struct_NV2080_CTRL_BUS_GET_PEX_UTIL_COUNTERS_PARAMS:
   SIZE = 32
   pexCounterMask: Annotated[NvU32, 0]
-  pexCounters: Annotated[(NvU32* 7), 4]
+  pexCounters: Annotated[Array[NvU32, Literal[7]], 4]
 NV2080_CTRL_BUS_GET_PEX_UTIL_COUNTERS_PARAMS = struct_NV2080_CTRL_BUS_GET_PEX_UTIL_COUNTERS_PARAMS
 @record
 class struct_NV2080_CTRL_BUS_CLEAR_PEX_UTIL_COUNTERS_PARAMS:
@@ -5768,12 +5767,12 @@ NV2080_CTRL_BUS_GET_BFD_PARAMS = struct_NV2080_CTRL_BUS_GET_BFD_PARAMS
 @record
 class struct_NV2080_CTRL_BUS_GET_BFD_PARAMSARR:
   SIZE = 640
-  params: Annotated[(NV2080_CTRL_BUS_GET_BFD_PARAMS* 32), 0]
+  params: Annotated[Array[NV2080_CTRL_BUS_GET_BFD_PARAMS, Literal[32]], 0]
 NV2080_CTRL_BUS_GET_BFD_PARAMSARR = struct_NV2080_CTRL_BUS_GET_BFD_PARAMSARR
 @record
 class struct_NV2080_CTRL_BUS_GET_ASPM_DISABLE_FLAGS_PARAMS:
   SIZE = 9
-  aspmDisableFlags: Annotated[(NvBool* 9), 0]
+  aspmDisableFlags: Annotated[Array[NvBool, Literal[9]], 0]
 NV2080_CTRL_BUS_GET_ASPM_DISABLE_FLAGS_PARAMS = struct_NV2080_CTRL_BUS_GET_ASPM_DISABLE_FLAGS_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_BUS_CONTROL_PUBLIC_ASPM_BITS_PARAMS:
@@ -5783,7 +5782,7 @@ NV2080_CTRL_CMD_BUS_CONTROL_PUBLIC_ASPM_BITS_PARAMS = struct_NV2080_CTRL_CMD_BUS
 @record
 class struct_NV2080_CTRL_BUS_GET_NVLINK_PEER_ID_MASK_PARAMS:
   SIZE = 128
-  nvlinkPeerIdMask: Annotated[(NvU32* 32), 0]
+  nvlinkPeerIdMask: Annotated[Array[NvU32, Literal[32]], 0]
 NV2080_CTRL_BUS_GET_NVLINK_PEER_ID_MASK_PARAMS = struct_NV2080_CTRL_BUS_GET_NVLINK_PEER_ID_MASK_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_BUS_SET_EOM_PARAMETERS_PARAMS:
@@ -5808,7 +5807,7 @@ class struct_NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS:
   eomBerEyeSel: Annotated[NvU8, 3]
   eomPamEyeSel: Annotated[NvU8, 4]
   laneMask: Annotated[NvU32, 8]
-  eomStatus: Annotated[(NvU16* 32), 12]
+  eomStatus: Annotated[Array[NvU16, Literal[32]], 12]
 NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS = struct_NV2080_CTRL_BUS_GET_EOM_STATUS_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_REQ_ATOMICS_CAPS_PARAMS:
@@ -5828,7 +5827,7 @@ class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS:
   SIZE = 112
   capType: Annotated[NvU32, 0]
   dbdf: Annotated[NvU32, 4]
-  atomicOp: Annotated[(NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO* 13), 8]
+  atomicOp: Annotated[Array[NV2080_CTRL_BUS_PCIE_GPU_ATOMIC_OP_INFO, Literal[13]], 8]
 NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS = struct_NV2080_CTRL_CMD_BUS_GET_PCIE_SUPPORTED_GPU_ATOMICS_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_BUS_GET_C2C_INFO_PARAMS:
@@ -5850,7 +5849,7 @@ NV2080_CTRL_BUS_SYSMEM_ACCESS_PARAMS = struct_NV2080_CTRL_BUS_SYSMEM_ACCESS_PARA
 @record
 class struct_NV2080_CTRL_BUS_GET_C2C_ERR_INFO_PARAMS:
   SIZE = 168
-  errCnts: Annotated[(_anonstruct43* 14), 0]
+  errCnts: Annotated[Array[_anonstruct43, Literal[14]], 0]
 @record
 class _anonstruct43:
   SIZE = 12
@@ -5867,7 +5866,7 @@ class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS:
   bSpaAccessOnly: Annotated[NvBool, 9]
   bUseUuid: Annotated[NvBool, 10]
   remoteGpuId: Annotated[NvU32, 12]
-  remoteGpuUuid: Annotated[(NvU8* 16), 16]
+  remoteGpuUuid: Annotated[Array[NvU8, Literal[16]], 16]
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS
 @record
 class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS:
@@ -5876,7 +5875,7 @@ class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS:
   peerId: Annotated[NvU32, 4]
   bUseUuid: Annotated[NvBool, 8]
   remoteGpuId: Annotated[NvU32, 12]
-  remoteGpuUuid: Annotated[(NvU8* 16), 16]
+  remoteGpuUuid: Annotated[Array[NvU8, Literal[16]], 16]
 NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS = struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_BUS_GET_PCIE_CPL_ATOMICS_CAPS_PARAMS:
@@ -5924,7 +5923,7 @@ NV2080_CTRL_CE_GET_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_CAPS_PARAMS
 class struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS:
   SIZE = 8
   ceEngineType: Annotated[NvU32, 0]
-  capsTbl: Annotated[(NvU8* 2), 4]
+  capsTbl: Annotated[Array[NvU8, Literal[2]], 4]
 NV2080_CTRL_CE_GET_CAPS_V2_PARAMS = struct_NV2080_CTRL_CE_GET_CAPS_V2_PARAMS
 @record
 class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS:
@@ -5936,14 +5935,14 @@ NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PA
 class struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS:
   SIZE = 148
   ceEngineType: Annotated[NvU32, 0]
-  pceLceMap: Annotated[(NvU32* 32), 4]
-  grceSharedLceMap: Annotated[(NvU32* 4), 132]
+  pceLceMap: Annotated[Array[NvU32, Literal[32]], 4]
+  grceSharedLceMap: Annotated[Array[NvU32, Literal[4]], 132]
 NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS = struct_NV2080_CTRL_CE_SET_PCE_LCE_CONFIG_PARAMS
 @record
 class struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS:
   SIZE = 152
-  pceLceMap: Annotated[(NvU32* 32), 0]
-  grceConfig: Annotated[(NvU32* 4), 128]
+  pceLceMap: Annotated[Array[NvU32, Literal[32]], 0]
+  grceConfig: Annotated[Array[NvU32, Literal[4]], 128]
   exposeCeMask: Annotated[NvU32, 144]
   bUpdateNvlinkPceLce: Annotated[NvBool, 148]
 NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS = struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_PARAMS
@@ -5961,13 +5960,13 @@ NV2080_CTRL_CE_GET_FAULT_METHOD_BUFFER_SIZE_PARAMS = struct_NV2080_CTRL_CE_GET_F
 @record
 class struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS:
   SIZE = 132
-  hshubPceMasks: Annotated[(NvU32* 32), 0]
+  hshubPceMasks: Annotated[Array[NvU32, Literal[32]], 0]
   fbhubPceMask: Annotated[NvU32, 128]
 NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS = struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_PARAMS
 @record
 class struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS:
   SIZE = 136
-  capsTbl: Annotated[((NvU8* 2)* 64), 0]
+  capsTbl: Annotated[Array[Array[NvU8, Literal[2]], Literal[64]], 0]
   present: Annotated[NvU64, 128]
 NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS
 NV2080_CTRL_CE_GET_ALL_PHYSICAL_CAPS_PARAMS = struct_NV2080_CTRL_CE_GET_ALL_CAPS_PARAMS
@@ -5981,8 +5980,8 @@ NV2080_CTRL_CE_GET_LCE_SHIM_INFO_PARAMS = struct_NV2080_CTRL_CE_GET_LCE_SHIM_INF
 @record
 class struct_NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS:
   SIZE = 156
-  pceLceMap: Annotated[(NvU32* 32), 0]
-  grceConfig: Annotated[(NvU32* 4), 128]
+  pceLceMap: Annotated[Array[NvU32, Literal[32]], 0]
+  grceConfig: Annotated[Array[NvU32, Literal[4]], 128]
   exposeCeMask: Annotated[NvU32, 144]
   bUpdateNvlinkPceLce: Annotated[NvBool, 148]
   shimInstance: Annotated[NvU32, 152]
@@ -5990,7 +5989,7 @@ NV2080_CTRL_CE_UPDATE_PCE_LCE_MAPPINGS_V2_PARAMS = struct_NV2080_CTRL_CE_UPDATE_
 @record
 class struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS:
   SIZE = 136
-  connectingHubPceMasks: Annotated[(NvU32* 32), 0]
+  connectingHubPceMasks: Annotated[Array[NvU32, Literal[32]], 0]
   fbhubPceMask: Annotated[NvU32, 128]
   shimInstance: Annotated[NvU32, 132]
 NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS = struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS
@@ -6042,7 +6041,7 @@ NV2080_CTRL_DMA_INFO = struct_NVXXXX_CTRL_XXX_INFO
 class struct_NV2080_CTRL_DMA_GET_INFO_PARAMS:
   SIZE = 2052
   dmaInfoTblSize: Annotated[NvU32, 0]
-  dmaInfoTbl: Annotated[(NV2080_CTRL_DMA_INFO* 256), 4]
+  dmaInfoTbl: Annotated[Array[NV2080_CTRL_DMA_INFO, Literal[256]], 4]
 NV2080_CTRL_DMA_GET_INFO_PARAMS = struct_NV2080_CTRL_DMA_GET_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_DMA_UPDATE_COMPTAG_INFO_TILE_INFO:
@@ -6068,7 +6067,7 @@ class struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS:
   totalSize: Annotated[NvU64, 16]
   mappingType: Annotated[NvU8, 24]
   bAllowMmap: Annotated[NvBool, 25]
-  handles: Annotated[(NV2080_CTRL_DMABUF_MEM_HANDLE_INFO* 128), 32]
+  handles: Annotated[Array[NV2080_CTRL_DMABUF_MEM_HANDLE_INFO, Literal[128]], 32]
 NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS = struct_NV2080_CTRL_DMABUF_EXPORT_MEM_PARAMS
 @record
 class struct_NV2080_CTRL_ECC_GET_CLIENT_EXPOSED_COUNTERS_PARAMS:
@@ -6115,7 +6114,7 @@ NV2080_CTRL_ECC_SRAM_UNIQUE_UNCORR_COUNTS_ENTRY = struct_NV2080_CTRL_ECC_SRAM_UN
 class struct_NV2080_CTRL_ECC_GET_SRAM_UNIQUE_UNCORR_COUNTS_PARAMS:
   SIZE = 16804
   entryCount: Annotated[NvU32, 0]
-  entries: Annotated[(NV2080_CTRL_ECC_SRAM_UNIQUE_UNCORR_COUNTS_ENTRY* 600), 4]
+  entries: Annotated[Array[NV2080_CTRL_ECC_SRAM_UNIQUE_UNCORR_COUNTS_ENTRY, Literal[600]], 4]
 NV2080_CTRL_ECC_GET_SRAM_UNIQUE_UNCORR_COUNTS_PARAMS = struct_NV2080_CTRL_ECC_GET_SRAM_UNIQUE_UNCORR_COUNTS_PARAMS
 @record
 class struct_NV2080_CTRL_ECC_INJECT_ERROR_PARAMS:
@@ -6168,7 +6167,7 @@ class struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS:
   guestMSIData: Annotated[NvU32, 8]
   hSemMemory: Annotated[NvHandle, 12]
   isReset: Annotated[NvBool, 16]
-  vgpuUuid: Annotated[(NvU8* 16), 17]
+  vgpuUuid: Annotated[Array[NvU8, Literal[16]], 17]
   domainId: Annotated[NvU64, 40]
 NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS = struct_NV2080_CTRL_EVENT_SET_GUEST_MSI_PARAMS
 @record
@@ -6216,7 +6215,7 @@ NV2080_CTRL_FB_GET_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_INFO_PARAMS
 class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS:
   SIZE = 1028
   fbInfoListSize: Annotated[NvU32, 0]
-  fbInfoList: Annotated[(NV2080_CTRL_FB_INFO* 128), 4]
+  fbInfoList: Annotated[Array[NV2080_CTRL_FB_INFO, Literal[128]], 4]
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS
 @record
 class struct_NV2080_CTRL_FB_GET_BAR1_OFFSET_PARAMS:
@@ -6242,7 +6241,7 @@ NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE_IRQL_PARAMS = struct_NV2080_CTRL_CMD_FB_FLUSH
 @record
 class struct_NV2080_CTRL_FB_FLUSH_GPU_CACHE_PARAMS:
   SIZE = 4024
-  addressArray: Annotated[(NvU64* 500), 0]
+  addressArray: Annotated[Array[NvU64, Literal[500]], 0]
   addressArraySize: Annotated[NvU32, 4000]
   addressAlign: Annotated[NvU32, 4004]
   memBlockSizeBytes: Annotated[NvU64, 4008]
@@ -6263,7 +6262,7 @@ class struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS:
   bypassMode: Annotated[NvU32, 8]
   rcmState: Annotated[NvU32, 12]
 NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS
-NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = (ctypes.c_ubyte* 18)
+NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = Array[ctypes.c_ubyte, Literal[18]]
 @record
 class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO:
   SIZE = 56
@@ -6280,7 +6279,7 @@ NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO = struct_NV2080_CTRL_CMD_FB_GET_
 class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS:
   SIZE = 904
   numFBRegions: Annotated[NvU32, 0]
-  fbRegion: Annotated[(NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO* 16), 8]
+  fbRegion: Annotated[Array[NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, Literal[16]], 8]
 NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO:
@@ -6295,7 +6294,7 @@ NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO = struct_NV2080_CTRL_FB_OFFLINED_ADDRESS_IN
 @record
 class struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS:
   SIZE = 2064
-  offlined: Annotated[(NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO* 64), 0]
+  offlined: Annotated[Array[NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO, Literal[64]], 0]
   pageSize: Annotated[NvU32, 2048]
   validEntries: Annotated[NvU32, 2052]
   numPagesAdded: Annotated[NvU32, 2056]
@@ -6303,7 +6302,7 @@ NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS = struct_NV2080_CTRL_FB_OFFLINE_PAGES_PARAMS
 @record
 class struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS:
   SIZE = 2056
-  offlined: Annotated[(NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO* 64), 0]
+  offlined: Annotated[Array[NV2080_CTRL_FB_OFFLINED_ADDRESS_INFO, Literal[64]], 0]
   validEntries: Annotated[NvU32, 2048]
   bRetirementPending: Annotated[NvBool, 2052]
   retirementPending: Annotated[NvU8, 2053]
@@ -6467,7 +6466,7 @@ NV2080_CTRL_CMD_FB_CBC_OP_PARAMS = struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS
 @record
 class struct_NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS:
   SIZE = 512
-  pCompTags: Annotated[(NvU32* 127), 0]
+  pCompTags: Annotated[Array[NvU32, Literal[127]], 0]
   numCompTags: Annotated[NvU32, 508]
 NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS = struct_NV2080_CTRL_FB_GET_CTAGS_FOR_CBC_EVICTION_PARAMS
 @record
@@ -6517,7 +6516,7 @@ PNV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_
 @record
 class struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS:
   SIZE = 264
-  offlinedPages: Annotated[(NvU32* 64), 0]
+  offlinedPages: Annotated[Array[NvU32, Literal[64]], 0]
   pageSize: Annotated[NvU32, 256]
   validEntries: Annotated[NvU32, 260]
 NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS
@@ -6597,12 +6596,12 @@ class struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS:
   SIZE = 6152
   entryCount: Annotated[NvU32, 0]
   flags: Annotated[NvU8, 4]
-  entries: Annotated[(NV2080_CTRL_FB_REMAP_ENTRY* 512), 8]
+  entries: Annotated[Array[NV2080_CTRL_FB_REMAP_ENTRY, Literal[512]], 8]
 NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS = struct_NV2080_CTRL_FB_GET_REMAPPED_ROWS_PARAMS
 @record
 class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS:
   SIZE = 24
-  data: Annotated[(NvU8* 24), 0]
+  data: Annotated[Array[NvU8, Literal[24]], 0]
 NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS = struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS
 @record
 class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS:
@@ -6722,7 +6721,7 @@ NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS = struct_NV2080_CTRL
 class struct_NV2080_CTRL_FB_FS_INFO_QUERY:
   SIZE = 32
   queryType: Annotated[NvU16, 0]
-  reserved: Annotated[(NvU8* 2), 2]
+  reserved: Annotated[Array[NvU8, Literal[2]], 2]
   status: Annotated[NvU32, 4]
   queryParams: Annotated[_anonunion44, 8]
 @record
@@ -6752,13 +6751,13 @@ NV2080_CTRL_FB_FS_INFO_QUERY = struct_NV2080_CTRL_FB_FS_INFO_QUERY
 class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS:
   SIZE = 3848
   numQueries: Annotated[NvU16, 0]
-  reserved: Annotated[(NvU8* 6), 2]
-  queries: Annotated[(NV2080_CTRL_FB_FS_INFO_QUERY* 120), 8]
+  reserved: Annotated[Array[NvU8, Literal[6]], 2]
+  queries: Annotated[Array[NV2080_CTRL_FB_FS_INFO_QUERY, Literal[120]], 8]
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS:
   SIZE = 20
-  histogram: Annotated[(NvU32* 5), 0]
+  histogram: Annotated[Array[NvU32, Literal[5]], 0]
 NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS = struct_NV2080_CTRL_FB_GET_ROW_REMAPPER_HISTOGRAM_PARAMS
 @record
 class struct_NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO:
@@ -6769,7 +6768,7 @@ NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO = struct_NV2080_CTRL_FB_DYNAMIC_OFF
 @record
 class struct_NV2080_CTRL_FB_GET_DYNAMIC_OFFLINED_PAGES_PARAMS:
   SIZE = 1040
-  offlined: Annotated[(NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO* 64), 0]
+  offlined: Annotated[Array[NV2080_CTRL_FB_DYNAMIC_OFFLINED_ADDRESS_INFO, Literal[64]], 0]
   validEntries: Annotated[NvU32, 1024]
   baseIndex: Annotated[NvU32, 1028]
   bMore: Annotated[NvBool, 1032]
@@ -6788,7 +6787,7 @@ class struct_NV2080_CTRL_CMD_FB_CLIENT_INFO:
   handle: Annotated[NvHandle, 0]
   pid: Annotated[NvU32, 4]
   subProcessID: Annotated[NvU32, 8]
-  subProcessName: Annotated[(ctypes.c_char* 100), 12]
+  subProcessName: Annotated[Array[ctypes.c_char, Literal[100]], 12]
 NV2080_CTRL_CMD_FB_CLIENT_INFO = struct_NV2080_CTRL_CMD_FB_CLIENT_INFO
 @record
 class struct_NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS:
@@ -6810,7 +6809,7 @@ class struct_NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS:
   numaMemAddr: Annotated[NvU64, 8]
   numaMemSize: Annotated[NvU64, 16]
   numaOfflineAddressesCount: Annotated[NvU32, 24]
-  numaOfflineAddresses: Annotated[(NvU64* 64), 32]
+  numaOfflineAddresses: Annotated[Array[NvU64, Literal[64]], 32]
 NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_NUMA_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_FB_GET_SEMAPHORE_SURFACE_LAYOUT_PARAMS:
@@ -6848,7 +6847,7 @@ class struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS:
   SIZE = 4856
   version: Annotated[NvU64, 0]
   fbSizeInfo: Annotated[NV2080_CTRL_CMD_FB_STATS_ENTRY, 8]
-  fbBlockInfo: Annotated[(NV2080_CTRL_CMD_FB_STATS_OWNER_INFO* 200), 56]
+  fbBlockInfo: Annotated[Array[NV2080_CTRL_CMD_FB_STATS_OWNER_INFO, Literal[200]], 56]
 NV2080_CTRL_CMD_FB_STATS_GET_PARAMS = struct_NV2080_CTRL_CMD_FB_STATS_GET_PARAMS
 @record
 class struct_NV2080_CTRL_FB_GET_STATIC_BAR1_INFO_PARAMS:
@@ -6905,7 +6904,7 @@ NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO = struct_NV2080_CTRL_FB_GET_CARVEOUT_REG
 class struct_NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO_PARAMS:
   SIZE = 200
   numCarveoutRegions: Annotated[NvU32, 0]
-  carveoutRegion: Annotated[(NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO* 8), 8]
+  carveoutRegion: Annotated[Array[NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO, Literal[8]], 8]
 NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_SET_GPFIFO_PARAMS:
@@ -6924,7 +6923,7 @@ NV2080_CTRL_FIFO_BIND_CHANNEL = struct_NV2080_CTRL_FIFO_BIND_CHANNEL
 class struct_NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS:
   SIZE = 132
   bindChannelCount: Annotated[NvU32, 0]
-  bindChannels: Annotated[(NV2080_CTRL_FIFO_BIND_CHANNEL* 16), 4]
+  bindChannels: Annotated[Array[NV2080_CTRL_FIFO_BIND_CHANNEL, Literal[16]], 4]
 NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS = struct_NV2080_CTRL_FIFO_BIND_ENGINES_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_SET_OPERATIONAL_PROPERTIES_PARAMS:
@@ -6942,7 +6941,7 @@ NV2080_CTRL_FIFO_INFO = struct_NVXXXX_CTRL_XXX_INFO
 class struct_NV2080_CTRL_FIFO_GET_INFO_PARAMS:
   SIZE = 2056
   fifoInfoTblSize: Annotated[NvU32, 0]
-  fifoInfoTbl: Annotated[(NV2080_CTRL_FIFO_INFO* 256), 4]
+  fifoInfoTbl: Annotated[Array[NV2080_CTRL_FIFO_INFO, Literal[256]], 4]
   engineType: Annotated[NvU32, 2052]
 NV2080_CTRL_FIFO_GET_INFO_PARAMS = struct_NV2080_CTRL_FIFO_GET_INFO_PARAMS
 @record
@@ -6958,8 +6957,8 @@ class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS:
   bOnlyDisableScheduling: Annotated[NvBool, 8]
   bRewindGpPut: Annotated[NvBool, 9]
   pRunlistPreemptEvent: Annotated[NvP64, 16]
-  hClientList: Annotated[(NvHandle* 64), 24]
-  hChannelList: Annotated[(NvHandle* 64), 280]
+  hClientList: Annotated[Array[NvHandle, Literal[64]], 24]
+  hChannelList: Annotated[Array[NvHandle, Literal[64]], 280]
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS
 @record
 class struct_NV2080_CTRL_FIFO_MEM_INFO:
@@ -6973,7 +6972,7 @@ class struct_NV2080_CTRL_FIFO_CHANNEL_MEM_INFO:
   SIZE = 104
   inst: Annotated[NV2080_CTRL_FIFO_MEM_INFO, 0]
   ramfc: Annotated[NV2080_CTRL_FIFO_MEM_INFO, 24]
-  methodBuf: Annotated[(NV2080_CTRL_FIFO_MEM_INFO* 2), 48]
+  methodBuf: Annotated[Array[NV2080_CTRL_FIFO_MEM_INFO, Literal[2]], 48]
   methodBufCount: Annotated[NvU32, 96]
 NV2080_CTRL_FIFO_CHANNEL_MEM_INFO = struct_NV2080_CTRL_FIFO_CHANNEL_MEM_INFO
 @record
@@ -6998,7 +6997,7 @@ class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRY:
   targetTimeSlice: Annotated[NvU32, 24]
   cumulativePreemptionTime: Annotated[NvU64, 32]
   cumulativeIdleTime: Annotated[NvU64, 40]
-  counters: Annotated[(NvU64* 8), 48]
+  counters: Annotated[Array[NvU64, Literal[8]], 48]
 NvS64 = ctypes.c_int64
 NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRY = struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRY
 @record
@@ -7006,7 +7005,7 @@ class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS:
   SIZE = 22424
   engineId: Annotated[NvU32, 0]
   count: Annotated[NvU32, 4]
-  entry: Annotated[(NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRY* 200), 8]
+  entry: Annotated[Array[NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRY, Literal[200]], 8]
   schedPolicy: Annotated[NvU32, 22408]
   arrEnabled: Annotated[NvU32, 22412]
   arrAvgFactor: Annotated[NvU32, 22416]
@@ -7021,11 +7020,11 @@ NV2080_CTRL_FIFO_CONFIG_CTXSW_TIMEOUT_PARAMS = struct_NV2080_CTRL_FIFO_CONFIG_CT
 @record
 class struct_NV2080_CTRL_FIFO_DEVICE_ENTRY:
   SIZE = 100
-  engineData: Annotated[(NvU32* 16), 0]
-  pbdmaIds: Annotated[(NvU32* 2), 64]
-  pbdmaFaultIds: Annotated[(NvU32* 2), 72]
+  engineData: Annotated[Array[NvU32, Literal[16]], 0]
+  pbdmaIds: Annotated[Array[NvU32, Literal[2]], 64]
+  pbdmaFaultIds: Annotated[Array[NvU32, Literal[2]], 72]
   numPbdmas: Annotated[NvU32, 80]
-  engineName: Annotated[(ctypes.c_char* 16), 84]
+  engineName: Annotated[Array[ctypes.c_char, Literal[16]], 84]
 NV2080_CTRL_FIFO_DEVICE_ENTRY = struct_NV2080_CTRL_FIFO_DEVICE_ENTRY
 @record
 class struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS:
@@ -7033,7 +7032,7 @@ class struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS:
   baseIndex: Annotated[NvU32, 0]
   numEntries: Annotated[NvU32, 4]
   bMore: Annotated[NvBool, 8]
-  entries: Annotated[(NV2080_CTRL_FIFO_DEVICE_ENTRY* 32), 12]
+  entries: Annotated[Array[NV2080_CTRL_FIFO_DEVICE_ENTRY, Literal[32]], 12]
 NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS = struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_FIFO_CLEAR_FAULTED_BIT_PARAMS:
@@ -7075,21 +7074,21 @@ NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS = struct_NV2080_CTRL_FIFO_SET
 class struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS:
   SIZE = 516
   runlistId: Annotated[NvU32, 0]
-  bitMask: Annotated[(NvU32* 128), 4]
+  bitMask: Annotated[Array[NvU32, Literal[128]], 4]
 NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS = struct_NV2080_CTRL_FIFO_GET_ALLOCATED_CHANNELS_PARAMS
 @record
 class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS:
   SIZE = 520
   numChannels: Annotated[NvU32, 0]
-  hClientList: Annotated[(NvHandle* 64), 4]
-  hChannelList: Annotated[(NvHandle* 64), 260]
+  hClientList: Annotated[Array[NvHandle, Literal[64]], 4]
+  hChannelList: Annotated[Array[NvHandle, Literal[64]], 260]
   bEnableAfterKeyRotation: Annotated[NvBool, 516]
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_PARAMS
 @record
 class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS:
   SIZE = 264
   numChannels: Annotated[NvU32, 0]
-  hChannelList: Annotated[(NvHandle* 64), 4]
+  hChannelList: Annotated[Array[NvHandle, Literal[64]], 4]
   bEnableAfterKeyRotation: Annotated[NvBool, 260]
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_FOR_KEY_ROTATION_V2_PARAMS
 @record
@@ -7115,7 +7114,7 @@ NV2080_CTRL_FIFO_OBJSCHED_SET_STATE_PARAMS = struct_NV2080_CTRL_FIFO_OBJSCHED_SE
 class struct_NV2080_CTRL_FIFO_OBJSCHED_GET_CAPS_PARAMS:
   SIZE = 44
   engineId: Annotated[NvU32, 0]
-  supportedSchedulers: Annotated[(NvU32* 3), 4]
+  supportedSchedulers: Annotated[Array[NvU32, Literal[3]], 4]
   bIsArrModeSupported: Annotated[NvBool, 16]
   maxTimesliceNs: Annotated[NvU32, 20]
   minTimesliceNs: Annotated[NvU32, 24]
@@ -7131,17 +7130,17 @@ class struct_NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS:
   hChannelOrTsg: Annotated[NvHandle, 4]
   tsgId: Annotated[NvU32, 8]
   numChannels: Annotated[NvU32, 12]
-  channelUniqueID: Annotated[(NvU32* 128), 16]
-  vasUniqueID: Annotated[(NvU32* 128), 528]
-  veid: Annotated[(NvU32* 128), 1040]
+  channelUniqueID: Annotated[Array[NvU32, Literal[128]], 16]
+  vasUniqueID: Annotated[Array[NvU32, Literal[128]], 528]
+  veid: Annotated[Array[NvU32, Literal[128]], 1040]
 NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS = struct_NV2080_CTRL_FIFO_GET_CHANNEL_GROUP_UNIQUE_ID_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS:
   SIZE = 1540
-  hClients: Annotated[(NvHandle* 128), 0]
-  hChannels: Annotated[(NvHandle* 128), 512]
+  hClients: Annotated[Array[NvHandle, Literal[128]], 0]
+  hChannels: Annotated[Array[NvHandle, Literal[128]], 512]
   numChannels: Annotated[NvU32, 1024]
-  channelUniqueIDs: Annotated[(NvU32* 128), 1028]
+  channelUniqueIDs: Annotated[Array[NvU32, Literal[128]], 1028]
 NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS = struct_NV2080_CTRL_FIFO_QUERY_CHANNEL_UNIQUE_ID_PARAMS
 @record
 class struct_NV2080_CTRL_FLA_RANGE_PARAMS:
@@ -7196,7 +7195,7 @@ NV2080_CTRL_FLCN_GET_ENGINE_ARCH_PARAMS = struct_NV2080_CTRL_FLCN_GET_ENGINE_ARC
 @record
 class struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER:
   SIZE = 36
-  mask: Annotated[(NvU8* 36), 0]
+  mask: Annotated[Array[NvU8, Literal[36]], 0]
 NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER = struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER
 @record
 class struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS:
@@ -7232,7 +7231,7 @@ class struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS:
   pageSize: Annotated[NvU32, 56]
   bIsContigous: Annotated[NvBool, 60]
   bDeviceDescendant: Annotated[NvBool, 61]
-  uuid: Annotated[(NvU8* 16), 62]
+  uuid: Annotated[Array[NvU8, Literal[16]], 62]
 NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS = struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_FLCN_GET_CTX_BUFFER_SIZE_PARAMS:
@@ -7275,7 +7274,7 @@ NV2080_CTRL_GPU_GET_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_INFO_PARAMS
 class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS:
   SIZE = 564
   gpuInfoListSize: Annotated[NvU32, 0]
-  gpuInfoList: Annotated[(NV2080_CTRL_GPU_INFO* 70), 4]
+  gpuInfoList: Annotated[Array[NV2080_CTRL_GPU_INFO, Literal[70]], 4]
 NV2080_CTRL_GPU_GET_INFO_V2_PARAMS = struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS:
@@ -7285,13 +7284,13 @@ class struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS:
 @record
 class _anonunion45:
   SIZE = 128
-  ascii: Annotated[(NvU8* 64), 0]
-  unicode: Annotated[(NvU16* 64), 0]
+  ascii: Annotated[Array[NvU8, Literal[64]], 0]
+  unicode: Annotated[Array[NvU16, Literal[64]], 0]
 NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS = struct_NV2080_CTRL_GPU_GET_NAME_STRING_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_SHORT_NAME_STRING_PARAMS:
   SIZE = 64
-  gpuShortNameString: Annotated[(NvU8* 64), 0]
+  gpuShortNameString: Annotated[Array[NvU8, Literal[64]], 0]
 NV2080_CTRL_GPU_GET_SHORT_NAME_STRING_PARAMS = struct_NV2080_CTRL_GPU_GET_SHORT_NAME_STRING_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_SET_POWER_PARAMS:
@@ -7336,7 +7335,7 @@ class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS:
   hClientTarget: Annotated[NvHandle, 0]
   hChannelTarget: Annotated[NvHandle, 4]
   bNonTransactional: Annotated[NvU32, 8]
-  reserved00: Annotated[(NvU32* 2), 12]
+  reserved00: Annotated[Array[NvU32, Literal[2]], 12]
   regOpCount: Annotated[NvU32, 20]
   regOps: Annotated[NvP64, 24]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO, 32]
@@ -7352,7 +7351,7 @@ NV2080_CTRL_GPU_GET_ENGINES_PARAMS = struct_NV2080_CTRL_GPU_GET_ENGINES_PARAMS
 class struct_NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS:
   SIZE = 340
   engineCount: Annotated[NvU32, 0]
-  engineList: Annotated[(NvU32* 84), 4]
+  engineList: Annotated[Array[NvU32, Literal[84]], 4]
 NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS = struct_NV2080_CTRL_GPU_GET_ENGINES_V2_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_ENGINE_CLASSLIST_PARAMS:
@@ -7396,7 +7395,7 @@ class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS:
   virtAddress: Annotated[NvU64, 24]
   size: Annotated[NvU64, 32]
   entryCount: Annotated[NvU32, 40]
-  promoteEntry: Annotated[(NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY* 16), 48]
+  promoteEntry: Annotated[Array[NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY, Literal[16]], 48]
 NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS = struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS
 PNV2080_CTRL_GPU_PROMOTE_CTX_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS)
 @record
@@ -7449,7 +7448,7 @@ NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS = struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_ST
 @record
 class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS:
   SIZE = 1464
-  units: Annotated[(NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS* 36), 0]
+  units: Annotated[Array[NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS, Literal[36]], 0]
   bFatalPoisonError: Annotated[NvBool, 1440]
   uncorrectableError: Annotated[NvU8, 1441]
   flags: Annotated[NvU32, 1444]
@@ -7504,16 +7503,16 @@ NV2080_CTRL_GPU_GET_FERMI_ZCULL_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_FERMI_Z
 class struct_NV2080_CTRL_GPU_GET_OEM_BOARD_INFO_PARAMS:
   SIZE = 136
   buildDate: Annotated[NvU32, 0]
-  marketingName: Annotated[(NvU8* 24), 4]
-  serialNumber: Annotated[(NvU8* 16), 28]
+  marketingName: Annotated[Array[NvU8, Literal[24]], 4]
+  serialNumber: Annotated[Array[NvU8, Literal[16]], 28]
   memoryManufacturer: Annotated[NvU8, 44]
-  memoryPartID: Annotated[(NvU8* 20), 45]
-  memoryDateCode: Annotated[(NvU8* 6), 65]
-  productPartNumber: Annotated[(NvU8* 20), 71]
-  boardRevision: Annotated[(NvU8* 3), 91]
+  memoryPartID: Annotated[Array[NvU8, Literal[20]], 45]
+  memoryDateCode: Annotated[Array[NvU8, Literal[6]], 65]
+  productPartNumber: Annotated[Array[NvU8, Literal[20]], 71]
+  boardRevision: Annotated[Array[NvU8, Literal[3]], 91]
   boardType: Annotated[NvU8, 94]
-  board699PartNumber: Annotated[(NvU8* 20), 95]
-  board965PartNumber: Annotated[(NvU8* 20), 115]
+  board699PartNumber: Annotated[Array[NvU8, Literal[20]], 95]
+  board965PartNumber: Annotated[Array[NvU8, Literal[20]], 115]
 NV2080_CTRL_GPU_GET_OEM_BOARD_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_OEM_BOARD_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_ID_PARAMS:
@@ -7537,7 +7536,7 @@ class struct_NV2080_CTRL_GPU_GET_ENGINE_PARTNERLIST_PARAMS:
   partnershipClassId: Annotated[NvU32, 4]
   runqueue: Annotated[NvU32, 8]
   numPartners: Annotated[NvU32, 12]
-  partnerList: Annotated[(NvU32* 32), 16]
+  partnerList: Annotated[Array[NvU32, Literal[32]], 16]
 NV2080_CTRL_GPU_GET_ENGINE_PARTNERLIST_PARAMS = struct_NV2080_CTRL_GPU_GET_ENGINE_PARTNERLIST_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS:
@@ -7545,12 +7544,12 @@ class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS:
   index: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
   length: Annotated[NvU32, 8]
-  data: Annotated[(NvU8* 256), 12]
+  data: Annotated[Array[NvU8, Literal[256]], 12]
 NV2080_CTRL_GPU_GET_GID_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_INFOROM_OBJECT_VERSION_PARAMS:
   SIZE = 5
-  objectType: Annotated[(ctypes.c_char* 3), 0]
+  objectType: Annotated[Array[ctypes.c_char, Literal[3]], 0]
   version: Annotated[NvU8, 3]
   subversion: Annotated[NvU8, 4]
 NV2080_CTRL_GPU_GET_INFOROM_OBJECT_VERSION_PARAMS = struct_NV2080_CTRL_GPU_GET_INFOROM_OBJECT_VERSION_PARAMS
@@ -7582,7 +7581,7 @@ NV2080_CTRL_GPU_SET_ILLUM_PARAMS = struct_NV2080_CTRL_CMD_GPU_ILLUM_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_INFOROM_IMAGE_VERSION_PARAMS:
   SIZE = 16
-  version: Annotated[(NvU8* 16), 0]
+  version: Annotated[Array[NvU8, Literal[16]], 0]
 NV2080_CTRL_GPU_GET_INFOROM_IMAGE_VERSION_PARAMS = struct_NV2080_CTRL_GPU_GET_INFOROM_IMAGE_VERSION_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_PHYSICAL_BRIDGE_VERSION_PARAMS:
@@ -7596,8 +7595,8 @@ NV2080_CTRL_GPU_PHYSICAL_BRIDGE_VERSION_PARAMS = struct_NV2080_CTRL_GPU_PHYSICAL
 class struct_NV2080_CTRL_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO_PARAMS:
   SIZE = 1204
   bridgeCount: Annotated[NvU8, 0]
-  hPhysicalBridges: Annotated[(NvHandle* 100), 4]
-  bridgeList: Annotated[(NV2080_CTRL_GPU_PHYSICAL_BRIDGE_VERSION_PARAMS* 100), 404]
+  hPhysicalBridges: Annotated[Array[NvHandle, Literal[100]], 4]
+  bridgeList: Annotated[Array[NV2080_CTRL_GPU_PHYSICAL_BRIDGE_VERSION_PARAMS, Literal[100]], 404]
 NV2080_CTRL_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_PHYSICAL_BRIDGE_VERSION_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_BRIDGE_VERSION_PARAMS:
@@ -7615,8 +7614,8 @@ NV2080_CTRL_GPU_BRIDGE_VERSION_PARAMS = struct_NV2080_CTRL_GPU_BRIDGE_VERSION_PA
 class struct_NV2080_CTRL_GPU_GET_ALL_BRIDGES_UPSTREAM_OF_GPU_PARAMS:
   SIZE = 2004
   bridgeCount: Annotated[NvU8, 0]
-  physicalBridgeIds: Annotated[(NvU32* 100), 4]
-  bridgeList: Annotated[(NV2080_CTRL_GPU_BRIDGE_VERSION_PARAMS* 100), 404]
+  physicalBridgeIds: Annotated[Array[NvU32, Literal[100]], 4]
+  bridgeList: Annotated[Array[NV2080_CTRL_GPU_BRIDGE_VERSION_PARAMS, Literal[100]], 404]
 NV2080_CTRL_GPU_GET_ALL_BRIDGES_UPSTREAM_OF_GPU_PARAMS = struct_NV2080_CTRL_GPU_GET_ALL_BRIDGES_UPSTREAM_OF_GPU_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_QUERY_SCRUBBER_STATUS_PARAMS:
@@ -7639,12 +7638,12 @@ class struct_NV2080_CTRL_GPU_GET_PES_INFO_PARAMS:
   numPesInGpc: Annotated[NvU32, 4]
   activePesMask: Annotated[NvU32, 8]
   maxTpcPerGpcCount: Annotated[NvU32, 12]
-  tpcToPesMap: Annotated[(NvU32* 10), 16]
+  tpcToPesMap: Annotated[Array[NvU32, Literal[10]], 16]
 NV2080_CTRL_GPU_GET_PES_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_PES_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_OEM_INFO_PARAMS:
   SIZE = 504
-  oemInfo: Annotated[(NvU8* 504), 0]
+  oemInfo: Annotated[Array[NvU8, Literal[504]], 0]
 NV2080_CTRL_GPU_GET_OEM_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_OEM_INFO_PARAMS
 enum_NV2080_CTRL_VPR_INFO_QUERY_TYPE = CEnum(ctypes.c_uint32)
 NV2080_CTRL_GPU_GET_VPR_INFO_QUERY_VPR_CAPS = enum_NV2080_CTRL_VPR_INFO_QUERY_TYPE.define('NV2080_CTRL_GPU_GET_VPR_INFO_QUERY_VPR_CAPS', 0)
@@ -7729,7 +7728,7 @@ NV2080_CTRL_EXEC_PARTITION_SPAN = struct_NV2080_CTRL_EXEC_PARTITION_SPAN
 class struct_NV2080_CTRL_GPU_SET_PARTITION_INFO:
   SIZE = 48
   swizzId: Annotated[NvU32, 0]
-  uuid: Annotated[(NvU8* 16), 4]
+  uuid: Annotated[Array[NvU8, Literal[16]], 4]
   partitionFlag: Annotated[NvU32, 20]
   bValid: Annotated[NvBool, 24]
   placement: Annotated[NV2080_CTRL_GPU_PARTITION_SPAN, 32]
@@ -7738,7 +7737,7 @@ NV2080_CTRL_GPU_SET_PARTITION_INFO = struct_NV2080_CTRL_GPU_SET_PARTITION_INFO
 class struct_NV2080_CTRL_GPU_SET_PARTITIONS_PARAMS:
   SIZE = 392
   partitionCount: Annotated[NvU32, 0]
-  partitionInfo: Annotated[(NV2080_CTRL_GPU_SET_PARTITION_INFO* 8), 8]
+  partitionInfo: Annotated[Array[NV2080_CTRL_GPU_SET_PARTITION_INFO, Literal[8]], 8]
 NV2080_CTRL_GPU_SET_PARTITIONS_PARAMS = struct_NV2080_CTRL_GPU_SET_PARTITIONS_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_PARTITION_INFO:
@@ -7756,10 +7755,10 @@ class struct_NV2080_CTRL_GPU_GET_PARTITION_INFO:
   gpcCount: Annotated[NvU32, 40]
   virtualGpcCount: Annotated[NvU32, 44]
   gfxGpcCount: Annotated[NvU32, 48]
-  gpcsPerGr: Annotated[(NvU32* 8), 52]
-  virtualGpcsPerGr: Annotated[(NvU32* 8), 84]
-  gfxGpcPerGr: Annotated[(NvU32* 8), 116]
-  veidsPerGr: Annotated[(NvU32* 8), 148]
+  gpcsPerGr: Annotated[Array[NvU32, Literal[8]], 52]
+  virtualGpcsPerGr: Annotated[Array[NvU32, Literal[8]], 84]
+  gfxGpcPerGr: Annotated[Array[NvU32, Literal[8]], 116]
+  veidsPerGr: Annotated[Array[NvU32, Literal[8]], 148]
   memSize: Annotated[NvU64, 184]
   span: Annotated[NV2080_CTRL_GPU_PARTITION_SPAN, 192]
   bValid: Annotated[NvBool, 208]
@@ -7770,7 +7769,7 @@ NV2080_CTRL_GPU_GET_PARTITION_INFO = struct_NV2080_CTRL_GPU_GET_PARTITION_INFO
 @record
 class struct_NV2080_CTRL_GPU_GET_PARTITIONS_PARAMS:
   SIZE = 1864
-  queryPartitionInfo: Annotated[(NV2080_CTRL_GPU_GET_PARTITION_INFO* 8), 0]
+  queryPartitionInfo: Annotated[Array[NV2080_CTRL_GPU_GET_PARTITION_INFO, Literal[8]], 0]
   validPartitionCount: Annotated[NvU32, 1856]
   bGetAllPartitionInfo: Annotated[NvBool, 1860]
 NV2080_CTRL_GPU_GET_PARTITIONS_PARAMS = struct_NV2080_CTRL_GPU_GET_PARTITIONS_PARAMS
@@ -7778,14 +7777,14 @@ NV2080_CTRL_GPU_GET_PARTITIONS_PARAMS = struct_NV2080_CTRL_GPU_GET_PARTITIONS_PA
 class struct_NV2080_CTRL_GPU_CONFIGURE_PARTITION_PARAMS:
   SIZE = 44
   swizzId: Annotated[NvU32, 0]
-  gpcCountPerSmcEng: Annotated[(NvU32* 8), 4]
+  gpcCountPerSmcEng: Annotated[Array[NvU32, Literal[8]], 4]
   updateSmcEngMask: Annotated[NvU32, 36]
   bUseAllGPCs: Annotated[NvBool, 40]
 NV2080_CTRL_GPU_CONFIGURE_PARTITION_PARAMS = struct_NV2080_CTRL_GPU_CONFIGURE_PARTITION_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_FAULT_PACKET:
   SIZE = 32
-  data: Annotated[(NvU8* 32), 0]
+  data: Annotated[Array[NvU8, Literal[32]], 0]
 NV2080_CTRL_GPU_FAULT_PACKET = struct_NV2080_CTRL_GPU_FAULT_PACKET
 @record
 class struct_NV2080_CTRL_GPU_REPORT_NON_REPLAYABLE_FAULT_PARAMS:
@@ -7796,15 +7795,15 @@ NV2080_CTRL_GPU_EXEC_REG_OPS_VGPU_PARAMS = struct_NV2080_CTRL_GPU_EXEC_REG_OPS_P
 @record
 class struct_NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS:
   SIZE = 1008
-  engineList: Annotated[(NvU32* 84), 0]
-  runlistPriBase: Annotated[(NvU32* 84), 336]
-  runlistId: Annotated[(NvU32* 84), 672]
+  engineList: Annotated[Array[NvU32, Literal[84]], 0]
+  runlistPriBase: Annotated[Array[NvU32, Literal[84]], 336]
+  runlistId: Annotated[Array[NvU32, Literal[84]], 672]
 NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS = struct_NV2080_CTRL_GPU_GET_ENGINE_RUNLIST_PRI_BASE_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS:
   SIZE = 672
-  engineList: Annotated[(NvU32* 84), 0]
-  hwEngineID: Annotated[(NvU32* 84), 336]
+  engineList: Annotated[Array[NvU32, Literal[84]], 0]
+  hwEngineID: Annotated[Array[NvU32, Literal[84]], 336]
 NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS = struct_NV2080_CTRL_GPU_GET_HW_ENGINE_ID_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_STATS_PARAMS:
@@ -7834,7 +7833,7 @@ NV2080_CTRL_NVFBC_SW_SESSION_INFO = struct_NV2080_CTRL_NVFBC_SW_SESSION_INFO
 class struct_NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_INFO_PARAMS:
   SIZE = 13316
   sessionInfoCount: Annotated[NvU32, 0]
-  sessionInfoTbl: Annotated[(NV2080_CTRL_NVFBC_SW_SESSION_INFO* 256), 4]
+  sessionInfoTbl: Annotated[Array[NV2080_CTRL_NVFBC_SW_SESSION_INFO, Literal[256]], 4]
 NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_NVFBC_SW_SESSION_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_FIRST_ASYNC_CE_IDX_PARAMS:
@@ -7851,10 +7850,10 @@ class struct_NV2080_CTRL_GPU_GET_PARTITION_CAPACITY_PARAMS:
   SIZE = 280
   partitionFlag: Annotated[NvU32, 0]
   partitionCount: Annotated[NvU32, 4]
-  availableSpans: Annotated[(NV2080_CTRL_GPU_PARTITION_SPAN* 8), 8]
+  availableSpans: Annotated[Array[NV2080_CTRL_GPU_PARTITION_SPAN, Literal[8]], 8]
   availableSpansCount: Annotated[NvU32, 136]
   totalPartitionCount: Annotated[NvU32, 140]
-  totalSpans: Annotated[(NV2080_CTRL_GPU_PARTITION_SPAN* 8), 144]
+  totalSpans: Annotated[Array[NV2080_CTRL_GPU_PARTITION_SPAN, Literal[8]], 144]
   totalSpansCount: Annotated[NvU32, 272]
   bStaticInfo: Annotated[NvBool, 276]
 NV2080_CTRL_GPU_GET_PARTITION_CAPACITY_PARAMS = struct_NV2080_CTRL_GPU_GET_PARTITION_CAPACITY_PARAMS
@@ -7886,7 +7885,7 @@ NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_INFO = struct_NV2080_CTRL_GPU_DESCRIBE_PARTI
 class struct_NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS:
   SIZE = 5768
   descCount: Annotated[NvU32, 0]
-  partitionDescs: Annotated[(NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_INFO* 90), 8]
+  partitionDescs: Annotated[Array[NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_INFO, Literal[90]], 8]
 NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS = struct_NV2080_CTRL_GPU_DESCRIBE_PARTITIONS_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_MAX_SUPPORTED_PAGE_SIZE_PARAMS:
@@ -7903,7 +7902,7 @@ NV2080_CTRL_GPU_GET_NUM_MMUS_PER_GPC_PARAMS = struct_NV2080_CTRL_GPU_GET_NUM_MMU
 @record
 class struct_NV2080_CTRL_GPU_GET_ACTIVE_PARTITION_IDS_PARAMS:
   SIZE = 40
-  swizzId: Annotated[(NvU32* 9), 0]
+  swizzId: Annotated[Array[NvU32, Literal[9]], 0]
   partitionCount: Annotated[NvU32, 36]
 NV2080_CTRL_GPU_GET_ACTIVE_PARTITION_IDS_PARAMS = struct_NV2080_CTRL_GPU_GET_ACTIVE_PARTITION_IDS_PARAMS
 @record
@@ -7912,7 +7911,7 @@ class struct_NV2080_CTRL_GPU_GET_PIDS_PARAMS:
   idType: Annotated[NvU32, 0]
   id: Annotated[NvU32, 4]
   pidTblCount: Annotated[NvU32, 8]
-  pidTbl: Annotated[(NvU32* 950), 12]
+  pidTbl: Annotated[Array[NvU32, Literal[950]], 12]
 NV2080_CTRL_GPU_GET_PIDS_PARAMS = struct_NV2080_CTRL_GPU_GET_PIDS_PARAMS
 @record
 class struct_NV2080_CTRL_SMC_SUBSCRIPTION_INFO:
@@ -7948,7 +7947,7 @@ NV2080_CTRL_GPU_PID_INFO = struct_NV2080_CTRL_GPU_PID_INFO
 class struct_NV2080_CTRL_GPU_GET_PID_INFO_PARAMS:
   SIZE = 14408
   pidInfoListCount: Annotated[NvU32, 0]
-  pidInfoList: Annotated[(NV2080_CTRL_GPU_PID_INFO* 200), 8]
+  pidInfoList: Annotated[Array[NV2080_CTRL_GPU_PID_INFO, Literal[200]], 8]
 NV2080_CTRL_GPU_GET_PID_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_PID_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS:
@@ -7982,7 +7981,7 @@ NV2080_CTRL_GPU_SET_COMPUTE_POLICY_CONFIG_PARAMS = struct_NV2080_CTRL_GPU_SET_CO
 class struct_NV2080_CTRL_GPU_GET_COMPUTE_POLICY_CONFIG_PARAMS:
   SIZE = 260
   numConfigs: Annotated[NvU32, 0]
-  configList: Annotated[(NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG* 32), 4]
+  configList: Annotated[Array[NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG, Literal[32]], 4]
 NV2080_CTRL_GPU_GET_COMPUTE_POLICY_CONFIG_PARAMS = struct_NV2080_CTRL_GPU_GET_COMPUTE_POLICY_CONFIG_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_GFID_PARAMS:
@@ -8012,16 +8011,16 @@ NV2080_CTRL_GPU_VALIDATE_MEM_MAP_REQUEST_PARAMS = struct_NV2080_CTRL_GPU_VALIDAT
 class struct_NV2080_CTRL_GPU_GET_ENGINE_LOAD_TIMES_PARAMS:
   SIZE = 2608
   engineCount: Annotated[NvU32, 0]
-  engineList: Annotated[(NvU32* 200), 4]
-  engineStateLoadTime: Annotated[(NvU64* 200), 808]
-  engineIsInit: Annotated[(NvBool* 200), 2408]
+  engineList: Annotated[Array[NvU32, Literal[200]], 4]
+  engineStateLoadTime: Annotated[Array[NvU64, Literal[200]], 808]
+  engineIsInit: Annotated[Array[NvBool, Literal[200]], 2408]
 NV2080_CTRL_GPU_GET_ENGINE_LOAD_TIMES_PARAMS = struct_NV2080_CTRL_GPU_GET_ENGINE_LOAD_TIMES_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_ID_NAME_MAPPING_PARAMS:
   SIZE = 20804
   engineCount: Annotated[NvU32, 0]
-  engineID: Annotated[(NvU32* 200), 4]
-  engineName: Annotated[((ctypes.c_char* 100)* 200), 804]
+  engineID: Annotated[Array[NvU32, Literal[200]], 4]
+  engineName: Annotated[Array[Array[ctypes.c_char, Literal[100]], Literal[200]], 804]
 NV2080_CTRL_GPU_GET_ID_NAME_MAPPING_PARAMS = struct_NV2080_CTRL_GPU_GET_ID_NAME_MAPPING_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_NOPTRS_PARAMS:
@@ -8029,15 +8028,15 @@ class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_NOPTRS_PARAMS:
   hClientTarget: Annotated[NvHandle, 0]
   hChannelTarget: Annotated[NvHandle, 4]
   bNonTransactional: Annotated[NvU32, 8]
-  reserved00: Annotated[(NvU32* 2), 12]
+  reserved00: Annotated[Array[NvU32, Literal[2]], 12]
   regOpCount: Annotated[NvU32, 20]
-  regOps: Annotated[(NV2080_CTRL_GPU_REG_OP* 100), 24]
+  regOps: Annotated[Array[NV2080_CTRL_GPU_REG_OP, Literal[100]], 24]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO, 3224]
 NV2080_CTRL_GPU_EXEC_REG_OPS_NOPTRS_PARAMS = struct_NV2080_CTRL_GPU_EXEC_REG_OPS_NOPTRS_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_SKYLINE_INFO:
   SIZE = 24
-  skylineVgpcSize: Annotated[(NvU8* 12), 0]
+  skylineVgpcSize: Annotated[Array[NvU8, Literal[12]], 0]
   singletonVgpcMask: Annotated[NvU32, 12]
   maxInstances: Annotated[NvU32, 16]
   computeSizeFlag: Annotated[NvU32, 20]
@@ -8045,18 +8044,18 @@ NV2080_CTRL_GPU_SKYLINE_INFO = struct_NV2080_CTRL_GPU_SKYLINE_INFO
 @record
 class struct_NV2080_CTRL_GPU_GET_SKYLINE_INFO_PARAMS:
   SIZE = 220
-  skylineTable: Annotated[(NV2080_CTRL_GPU_SKYLINE_INFO* 9), 0]
+  skylineTable: Annotated[Array[NV2080_CTRL_GPU_SKYLINE_INFO, Literal[9]], 0]
   validEntries: Annotated[NvU32, 216]
 NV2080_CTRL_GPU_GET_SKYLINE_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_SKYLINE_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO:
   SIZE = 52
   gpuId: Annotated[NvU32, 0]
-  gpuUuid: Annotated[(NvU8* 16), 4]
+  gpuUuid: Annotated[Array[NvU8, Literal[16]], 4]
   p2pCaps: Annotated[NvU32, 20]
   p2pOptimalReadCEs: Annotated[NvU32, 24]
   p2pOptimalWriteCEs: Annotated[NvU32, 28]
-  p2pCapsStatus: Annotated[(NvU8* 9), 32]
+  p2pCapsStatus: Annotated[Array[NvU8, Literal[9]], 32]
   busPeerId: Annotated[NvU32, 44]
   busEgmPeerId: Annotated[NvU32, 48]
 NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO = struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO
@@ -8066,7 +8065,7 @@ class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS:
   bAllCaps: Annotated[NvBool, 0]
   bUseUuid: Annotated[NvBool, 1]
   peerGpuCount: Annotated[NvU32, 4]
-  peerGpuCaps: Annotated[(NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO* 32), 8]
+  peerGpuCaps: Annotated[Array[NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO, Literal[32]], 8]
 NV2080_CTRL_GET_P2P_CAPS_PARAMS = struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_COMPUTE_PROFILE:
@@ -8082,14 +8081,14 @@ class struct_NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS:
   SIZE = 168
   partitionFlag: Annotated[NvU32, 0]
   profileCount: Annotated[NvU32, 4]
-  profiles: Annotated[(NV2080_CTRL_GPU_COMPUTE_PROFILE* 8), 8]
+  profiles: Annotated[Array[NV2080_CTRL_GPU_COMPUTE_PROFILE, Literal[8]], 8]
 NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS = struct_NV2080_CTRL_GPU_GET_COMPUTE_PROFILES_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_GET_GPU_FABRIC_PROBE_INFO_PARAMS:
   SIZE = 56
   state: Annotated[NvU8, 0]
   status: Annotated[NV_STATUS, 4]
-  clusterUuid: Annotated[(NvU8* 16), 8]
+  clusterUuid: Annotated[Array[NvU8, Literal[16]], 8]
   fabricPartitionId: Annotated[NvU16, 24]
   fabricCaps: Annotated[NvU64, 32]
   fabricCliqueId: Annotated[NvU32, 40]
@@ -8100,7 +8099,7 @@ NV2080_CTRL_CMD_GET_GPU_FABRIC_PROBE_INFO_PARAMS = struct_NV2080_CTRL_CMD_GET_GP
 class struct_NV2080_CTRL_GPU_GET_CHIP_DETAILS_PARAMS:
   SIZE = 16
   pciDevId: Annotated[NvU32, 0]
-  chipSku: Annotated[(NvU8* 4), 4]
+  chipSku: Annotated[Array[NvU8, Literal[4]], 4]
   chipMajor: Annotated[NvU32, 8]
   chipMinor: Annotated[NvU32, 12]
 NV2080_CTRL_GPU_GET_CHIP_DETAILS_PARAMS = struct_NV2080_CTRL_GPU_GET_CHIP_DETAILS_PARAMS
@@ -8116,8 +8115,8 @@ class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_CMN_PARAMS:
   hChannelTarget: Annotated[NvHandle, 4]
   bNonTransactional: Annotated[NvU32, 8]
   regOpCount: Annotated[NvU32, 12]
-  smIds: Annotated[(NvU32* 50), 16]
-  regOps: Annotated[(NV2080_CTRL_GPU_REG_OP* 50), 216]
+  smIds: Annotated[Array[NvU32, Literal[50]], 16]
+  regOps: Annotated[Array[NV2080_CTRL_GPU_REG_OP, Literal[50]], 216]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO, 1816]
 NV2080_CTRL_GPU_MIGRATABLE_OPS_CMN_PARAMS = struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_CMN_PARAMS
 NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS = struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_CMN_PARAMS
@@ -8137,7 +8136,7 @@ NV2080_CTRL_GPU_GET_DRAIN_AND_RESET_STATUS_PARAMS = struct_NV2080_CTRL_GPU_GET_D
 class struct_NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_V2_PARAMS:
   SIZE = 16388
   sessionInfoTblEntry: Annotated[NvU32, 0]
-  sessionInfoTbl: Annotated[(NV2080_CTRL_NVENC_SW_SESSION_INFO* 512), 4]
+  sessionInfoTbl: Annotated[Array[NV2080_CTRL_NVENC_SW_SESSION_INFO, Literal[512]], 4]
 NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_V2_PARAMS = struct_NV2080_CTRL_GPU_GET_NVENC_SW_SESSION_INFO_V2_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_CONSTRUCTED_FALCON_INFO:
@@ -8152,7 +8151,7 @@ NV2080_CTRL_GPU_CONSTRUCTED_FALCON_INFO = struct_NV2080_CTRL_GPU_CONSTRUCTED_FAL
 class struct_NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS:
   SIZE = 1284
   numConstructedFalcons: Annotated[NvU32, 0]
-  constructedFalconsTable: Annotated[(NV2080_CTRL_GPU_CONSTRUCTED_FALCON_INFO* 64), 4]
+  constructedFalconsTable: Annotated[Array[NV2080_CTRL_GPU_CONSTRUCTED_FALCON_INFO, Literal[64]], 4]
 NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_CONSTRUCTED_FALCON_INFO_PARAMS
 @record
 class struct_NV2080_VF_MSIX_CAPS:
@@ -8201,9 +8200,9 @@ NV2080_RAFTS_FLOORSWEEP_INFO = struct_NV2080_RAFTS_FLOORSWEEP_INFO
 @record
 class struct_NV2080_CTRL_GPU_GET_RAFTS_FS_MASK_PARAMS:
   SIZE = 344
-  tpcCountMatrix: Annotated[((NvU8* 12)* 2), 0]
+  tpcCountMatrix: Annotated[Array[Array[NvU8, Literal[12]], Literal[2]], 0]
   bValid: Annotated[NvBool, 24]
-  floorSweepConfig: Annotated[(NV2080_RAFTS_FLOORSWEEP_INFO* 26), 28]
+  floorSweepConfig: Annotated[Array[NV2080_RAFTS_FLOORSWEEP_INFO, Literal[26]], 28]
   gfxGpcCount: Annotated[NvU8, 340]
   gfxTpcPerGpcCount: Annotated[NvU8, 341]
   maxUgpuTpcDiff: Annotated[NvU8, 342]
@@ -8214,7 +8213,7 @@ class struct_NV2080_CTRL_GPU_GET_COMPUTE_PROFILE_CAPACITY_PARAMS:
   partitionFlag: Annotated[NvU32, 0]
   computeSize: Annotated[NvU32, 4]
   totalProfileCount: Annotated[NvU32, 8]
-  totalSpans: Annotated[(NV2080_CTRL_EXEC_PARTITION_SPAN* 8), 16]
+  totalSpans: Annotated[Array[NV2080_CTRL_EXEC_PARTITION_SPAN, Literal[8]], 16]
   totalSpansCount: Annotated[NvU32, 144]
 NV2080_CTRL_GPU_GET_COMPUTE_PROFILE_CAPACITY_PARAMS = struct_NV2080_CTRL_GPU_GET_COMPUTE_PROFILE_CAPACITY_PARAMS
 @record
@@ -8330,7 +8329,7 @@ NV2080_CTRL_GR_CTXSW_SETUP_BIND_PARAMS = struct_NV2080_CTRL_GR_CTXSW_SETUP_BIND_
 class struct_NV2080_CTRL_GR_SET_GPC_TILE_MAP_PARAMS:
   SIZE = 152
   mapValueCount: Annotated[NvU32, 0]
-  mapValues: Annotated[(NvU8* 128), 4]
+  mapValues: Annotated[Array[NvU8, Literal[128]], 4]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO, 136]
 NV2080_CTRL_GR_SET_GPC_TILE_MAP_PARAMS = struct_NV2080_CTRL_GR_SET_GPC_TILE_MAP_PARAMS
 @record
@@ -8343,7 +8342,7 @@ NV2080_CTRL_GR_CTXSW_SMPC_MODE_PARAMS = struct_NV2080_CTRL_GR_CTXSW_SMPC_MODE_PA
 @record
 class struct_NV2080_CTRL_GR_GET_SM_TO_GPC_TPC_MAPPINGS_PARAMS:
   SIZE = 1944
-  smId: Annotated[(_anonstruct47* 240), 0]
+  smId: Annotated[Array[_anonstruct47, Literal[240]], 0]
   smCount: Annotated[NvU32, 1920]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO, 1928]
 @record
@@ -8380,7 +8379,7 @@ class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS:
   flags: Annotated[NvU32, 0]
   hClient: Annotated[NvHandle, 4]
   hChannel: Annotated[NvHandle, 8]
-  vMemPtrs: Annotated[(NvU64* 9), 16]
+  vMemPtrs: Annotated[Array[NvU64, Literal[9]], 16]
   gfxpPreemptMode: Annotated[NvU32, 88]
   cilpPreemptMode: Annotated[NvU32, 92]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO, 96]
@@ -8433,7 +8432,7 @@ class struct_NV2080_CTRL_GR_CTX_BUFFER_INFO:
   bGlobalBuffer: Annotated[NvBool, 57]
   bLocalBuffer: Annotated[NvBool, 58]
   bDeviceDescendant: Annotated[NvBool, 59]
-  uuid: Annotated[(NvU8* 16), 60]
+  uuid: Annotated[Array[NvU8, Literal[16]], 60]
 NV2080_CTRL_GR_CTX_BUFFER_INFO = struct_NV2080_CTRL_GR_CTX_BUFFER_INFO
 PNV2080_CTRL_GR_CTX_BUFFER_INFO = ctypes.POINTER(struct_NV2080_CTRL_GR_CTX_BUFFER_INFO)
 @record
@@ -8442,12 +8441,12 @@ class struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS:
   hUserClient: Annotated[NvHandle, 0]
   hChannel: Annotated[NvHandle, 4]
   bufferCount: Annotated[NvU32, 8]
-  ctxBufferInfo: Annotated[(NV2080_CTRL_GR_CTX_BUFFER_INFO* 64), 16]
+  ctxBufferInfo: Annotated[Array[NV2080_CTRL_GR_CTX_BUFFER_INFO, Literal[64]], 16]
 NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS = struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GR_GET_GLOBAL_SM_ORDER_PARAMS:
   SIZE = 9240
-  globalSmId: Annotated[(_anonstruct48* 512), 0]
+  globalSmId: Annotated[Array[_anonstruct48, Literal[512]], 0]
   numSm: Annotated[NvU16, 9216]
   numTpc: Annotated[NvU16, 9218]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO, 9224]
@@ -8481,12 +8480,12 @@ NV2080_CTRL_GR_VAT_ALARM_DATA_PER_TPC = struct_NV2080_CTRL_GR_VAT_ALARM_DATA_PER
 @record
 class struct_NV2080_CTRL_GR_VAT_ALARM_DATA_PER_GPC:
   SIZE = 320
-  tpc: Annotated[(NV2080_CTRL_GR_VAT_ALARM_DATA_PER_TPC* 10), 0]
+  tpc: Annotated[Array[NV2080_CTRL_GR_VAT_ALARM_DATA_PER_TPC, Literal[10]], 0]
 NV2080_CTRL_GR_VAT_ALARM_DATA_PER_GPC = struct_NV2080_CTRL_GR_VAT_ALARM_DATA_PER_GPC
 @record
 class struct_NV2080_CTRL_GR_VAT_ALARM_DATA:
   SIZE = 3200
-  gpc: Annotated[(NV2080_CTRL_GR_VAT_ALARM_DATA_PER_GPC* 10), 0]
+  gpc: Annotated[Array[NV2080_CTRL_GR_VAT_ALARM_DATA_PER_GPC, Literal[10]], 0]
 NV2080_CTRL_GR_VAT_ALARM_DATA = struct_NV2080_CTRL_GR_VAT_ALARM_DATA
 @record
 class struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS:
@@ -8523,7 +8522,7 @@ NV2080_CTRL_GR_GFX_POOL_INITIALIZE_PARAMS = struct_NV2080_CTRL_GR_GFX_POOL_INITI
 class struct_NV2080_CTRL_GR_GFX_POOL_ADD_SLOTS_PARAMS:
   SIZE = 272
   numSlots: Annotated[NvU32, 0]
-  slots: Annotated[(NvU32* 64), 4]
+  slots: Annotated[Array[NvU32, Literal[64]], 4]
   hMemory: Annotated[NvHandle, 260]
   offset: Annotated[NvU32, 264]
   size: Annotated[NvU32, 268]
@@ -8532,7 +8531,7 @@ NV2080_CTRL_GR_GFX_POOL_ADD_SLOTS_PARAMS = struct_NV2080_CTRL_GR_GFX_POOL_ADD_SL
 class struct_NV2080_CTRL_GR_GFX_POOL_REMOVE_SLOTS_PARAMS:
   SIZE = 276
   numSlots: Annotated[NvU32, 0]
-  slots: Annotated[(NvU32* 64), 4]
+  slots: Annotated[Array[NvU32, Literal[64]], 4]
   bRemoveSpecificSlots: Annotated[NvBool, 260]
   hMemory: Annotated[NvHandle, 264]
   offset: Annotated[NvU32, 268]
@@ -8582,14 +8581,14 @@ NV2080_CTRL_GR_SM_ISSUE_RATE_MODIFIER_V2 = struct_NVXXXX_CTRL_XXX_INFO
 class struct_NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_V2_PARAMS:
   SIZE = 2044
   smIssueRateModifierListSize: Annotated[NvU32, 0]
-  smIssueRateModifierList: Annotated[(NV2080_CTRL_GR_SM_ISSUE_RATE_MODIFIER_V2* 255), 4]
+  smIssueRateModifierList: Annotated[Array[NV2080_CTRL_GR_SM_ISSUE_RATE_MODIFIER_V2, Literal[255]], 4]
 NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_V2_PARAMS = struct_NV2080_CTRL_GR_GET_SM_ISSUE_RATE_MODIFIER_V2_PARAMS
 NV2080_CTRL_GR_SM_ISSUE_THROTTLE_CTRL = struct_NVXXXX_CTRL_XXX_INFO
 @record
 class struct_NV2080_CTRL_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS:
   SIZE = 2044
   smIssueThrottleCtrlListSize: Annotated[NvU32, 0]
-  smIssueThrottleCtrlList: Annotated[(NV2080_CTRL_GR_SM_ISSUE_THROTTLE_CTRL* 255), 4]
+  smIssueThrottleCtrlList: Annotated[Array[NV2080_CTRL_GR_SM_ISSUE_THROTTLE_CTRL, Literal[255]], 4]
 NV2080_CTRL_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS = struct_NV2080_CTRL_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS
 enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD = CEnum(ctypes.c_uint32)
 NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD_FULL = enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD.define('NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD_FULL', 0)
@@ -8722,7 +8721,7 @@ class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS:
   SIZE = 12
   swizzId: Annotated[NvU16, 0]
   physSyspipeIdCount: Annotated[NvU16, 2]
-  physSyspipeId: Annotated[(NvU8* 8), 4]
+  physSyspipeId: Annotated[Array[NvU8, Literal[8]], 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS
 @record
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS:
@@ -8752,7 +8751,7 @@ NV2080_CTRL_GRMGR_GR_FS_INFO_GFX_CAPABLE_GPC_MASK_PARAMS = struct_NV2080_CTRL_GR
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS:
   SIZE = 20
   queryType: Annotated[NvU16, 0]
-  reserved: Annotated[(NvU8* 2), 2]
+  reserved: Annotated[Array[NvU8, Literal[2]], 2]
   status: Annotated[NvU32, 4]
   queryData: Annotated[_anonunion49, 8]
 @record
@@ -8775,8 +8774,8 @@ NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_
 class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS:
   SIZE = 1928
   numQueries: Annotated[NvU16, 0]
-  reserved: Annotated[(NvU8* 6), 2]
-  queries: Annotated[(NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS* 96), 8]
+  reserved: Annotated[Array[NvU8, Literal[6]], 2]
+  queries: Annotated[Array[NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS, Literal[96]], 8]
 NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS = struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS:
@@ -8784,7 +8783,7 @@ class struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS:
   gspFeatures: Annotated[NvU32, 0]
   bValid: Annotated[NvBool, 4]
   bDefaultGspRmGpu: Annotated[NvBool, 5]
-  firmwareVersion: Annotated[(NvU8* 64), 6]
+  firmwareVersion: Annotated[Array[NvU8, Literal[64]], 6]
 NV2080_CTRL_GSP_GET_FEATURES_PARAMS = struct_NV2080_CTRL_GSP_GET_FEATURES_PARAMS
 @record
 class struct_NV2080_CTRL_GSP_RM_HEAP_STATS_SNAPSHOT:
@@ -8823,7 +8822,7 @@ NV2080_CTRL_GSP_LIBOS_POOL_STATS = struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS
 @record
 class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS:
   SIZE = 1040
-  poolStats: Annotated[(NV2080_CTRL_GSP_LIBOS_POOL_STATS* 64), 0]
+  poolStats: Annotated[Array[NV2080_CTRL_GSP_LIBOS_POOL_STATS, Literal[64]], 0]
   totalHeapSize: Annotated[NvU64, 1024]
   poolCount: Annotated[NvU8, 1032]
 NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS = struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS
@@ -8846,9 +8845,9 @@ class struct_NV2080_CTRL_I2C_READ_BUFFER_PARAMS:
   port: Annotated[NvU32, 4]
   flags: Annotated[NvU32, 8]
   inputCount: Annotated[NvU32, 12]
-  inputBuffer: Annotated[(NvU8* 256), 16]
+  inputBuffer: Annotated[Array[NvU8, Literal[256]], 16]
   outputCount: Annotated[NvU32, 272]
-  outputBuffer: Annotated[(NvU8* 256), 276]
+  outputBuffer: Annotated[Array[NvU8, Literal[256]], 276]
 NV2080_CTRL_I2C_READ_BUFFER_PARAMS = struct_NV2080_CTRL_I2C_READ_BUFFER_PARAMS
 @record
 class struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS:
@@ -8857,7 +8856,7 @@ class struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS:
   port: Annotated[NvU32, 4]
   flags: Annotated[NvU32, 8]
   inputCount: Annotated[NvU32, 12]
-  inputBuffer: Annotated[(NvU8* 256), 16]
+  inputBuffer: Annotated[Array[NvU8, Literal[256]], 16]
   encrClientID: Annotated[NvU32, 272]
 NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS = struct_NV2080_CTRL_I2C_WRITE_BUFFER_PARAMS
 @record
@@ -8869,7 +8868,7 @@ class struct_NV2080_CTRL_I2C_RW_REG_PARAMS:
   addr: Annotated[NvU32, 12]
   reg: Annotated[NvU8, 16]
   bufsize: Annotated[NvU8, 17]
-  buffer: Annotated[(NvU8* 255), 18]
+  buffer: Annotated[Array[NvU8, Literal[255]], 18]
 NV2080_CTRL_I2C_RW_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
 NV2080_CTRL_I2C_READ_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
 NV2080_CTRL_I2C_WRITE_REG_PARAMS = struct_NV2080_CTRL_I2C_RW_REG_PARAMS
@@ -8930,7 +8929,7 @@ class struct_NV2080_CTRL_INTERNAL_UVM_REGISTER_ACCESS_CNTR_BUFFER_PARAMS:
   SIZE = 520
   accessCounterIndex: Annotated[NvU32, 0]
   bufferSize: Annotated[NvU32, 4]
-  bufferPteArray: Annotated[(NvU64* 64), 8]
+  bufferPteArray: Annotated[Array[NvU64, Literal[64]], 8]
 NV2080_CTRL_INTERNAL_UVM_REGISTER_ACCESS_CNTR_BUFFER_PARAMS = struct_NV2080_CTRL_INTERNAL_UVM_REGISTER_ACCESS_CNTR_BUFFER_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER_PARAMS:
@@ -8940,18 +8939,18 @@ NV2080_CTRL_INTERNAL_UVM_UNREGISTER_ACCESS_CNTR_BUFFER_PARAMS = struct_NV2080_CT
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_CAPS:
   SIZE = 23
-  capsTbl: Annotated[(NvU8* 23), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[23]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_CAPS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_CAPS
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS:
   SIZE = 184
-  engineCaps: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_CAPS* 8), 0]
+  engineCaps: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_CAPS, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CAPS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER:
   SIZE = 4324
-  globalSmId: Annotated[(_anonstruct50* 240), 0]
+  globalSmId: Annotated[Array[_anonstruct50, Literal[240]], 0]
   numSm: Annotated[NvU16, 4320]
   numTpc: Annotated[NvU16, 4322]
 @record
@@ -8970,49 +8969,49 @@ NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER = struct_NV2080_CTRL_INTERNAL_STA
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_GLOBAL_SM_ORDER_PARAMS:
   SIZE = 34592
-  globalSmOrder: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER* 8), 0]
+  globalSmOrder: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_GLOBAL_SM_ORDER, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_GLOBAL_SM_ORDER_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_GLOBAL_SM_ORDER_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_GLOBAL_SM_ORDER_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_GLOBAL_SM_ORDER_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_BSP_CAPS:
   SIZE = 8
-  capsTbl: Annotated[(NvU8* 8), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_BSP_CAPS = struct_NV2080_CTRL_INTERNAL_BSP_CAPS
 @record
 class struct_NV2080_CTRL_INTERNAL_BSP_GET_CAPS_PARAMS:
   SIZE = 72
-  caps: Annotated[(NV2080_CTRL_INTERNAL_BSP_CAPS* 8), 0]
-  valid: Annotated[(NvBool* 8), 64]
+  caps: Annotated[Array[NV2080_CTRL_INTERNAL_BSP_CAPS, Literal[8]], 0]
+  valid: Annotated[Array[NvBool, Literal[8]], 64]
 NV2080_CTRL_INTERNAL_BSP_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_BSP_GET_CAPS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_MSENC_CAPS:
   SIZE = 5
-  capsTbl: Annotated[(NvU8* 5), 0]
+  capsTbl: Annotated[Array[NvU8, Literal[5]], 0]
 NV2080_CTRL_INTERNAL_MSENC_CAPS = struct_NV2080_CTRL_INTERNAL_MSENC_CAPS
 @record
 class struct_NV2080_CTRL_INTERNAL_MSENC_GET_CAPS_PARAMS:
   SIZE = 48
-  caps: Annotated[(NV2080_CTRL_INTERNAL_MSENC_CAPS* 8), 0]
-  valid: Annotated[(NvBool* 8), 40]
+  caps: Annotated[Array[NV2080_CTRL_INTERNAL_MSENC_CAPS, Literal[8]], 0]
+  valid: Annotated[Array[NvBool, Literal[8]], 40]
 NV2080_CTRL_INTERNAL_MSENC_GET_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_MSENC_GET_CAPS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_FLOORSWEEPING_MASKS:
   SIZE = 376
   gpcMask: Annotated[NvU32, 0]
-  tpcMask: Annotated[(NvU32* 16), 4]
-  tpcCount: Annotated[(NvU32* 16), 68]
+  tpcMask: Annotated[Array[NvU32, Literal[16]], 4]
+  tpcCount: Annotated[Array[NvU32, Literal[16]], 68]
   physGpcMask: Annotated[NvU32, 132]
-  mmuPerGpc: Annotated[(NvU32* 16), 136]
-  tpcToPesMap: Annotated[(NvU32* 10), 200]
-  numPesPerGpc: Annotated[(NvU32* 16), 240]
-  zcullMask: Annotated[(NvU32* 16), 304]
+  mmuPerGpc: Annotated[Array[NvU32, Literal[16]], 136]
+  tpcToPesMap: Annotated[Array[NvU32, Literal[10]], 200]
+  numPesPerGpc: Annotated[Array[NvU32, Literal[16]], 240]
+  zcullMask: Annotated[Array[NvU32, Literal[16]], 304]
   physGfxGpcMask: Annotated[NvU32, 368]
   numGfxTpc: Annotated[NvU32, 372]
 NV2080_CTRL_INTERNAL_STATIC_GR_FLOORSWEEPING_MASKS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_FLOORSWEEPING_MASKS
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FLOORSWEEPING_MASKS_PARAMS:
   SIZE = 3008
-  floorsweepingMasks: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_FLOORSWEEPING_MASKS* 8), 0]
+  floorsweepingMasks: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_FLOORSWEEPING_MASKS, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_FLOORSWEEPING_MASKS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FLOORSWEEPING_MASKS_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_FLOORSWEEPING_MASKS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FLOORSWEEPING_MASKS_PARAMS
 @record
@@ -9023,7 +9022,7 @@ class struct_NV2080_CTRL_KGR_GET_CTX_BUFFER_PTES_PARAMS:
   bufferType: Annotated[NvU32, 8]
   firstPage: Annotated[NvU32, 12]
   numPages: Annotated[NvU32, 16]
-  physAddrs: Annotated[(NvU64* 128), 24]
+  physAddrs: Annotated[Array[NvU64, Literal[128]], 24]
   bNoMorePages: Annotated[NvBool, 1048]
 NV2080_CTRL_KGR_GET_CTX_BUFFER_PTES_PARAMS = struct_NV2080_CTRL_KGR_GET_CTX_BUFFER_PTES_PARAMS
 @record
@@ -9035,12 +9034,12 @@ NV2080_CTRL_INTERNAL_GR_INFO = struct_NV2080_CTRL_INTERNAL_GR_INFO
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_INFO:
   SIZE = 464
-  infoList: Annotated[(NV2080_CTRL_INTERNAL_GR_INFO* 58), 0]
+  infoList: Annotated[Array[NV2080_CTRL_INTERNAL_GR_INFO, Literal[58]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_INFO = struct_NV2080_CTRL_INTERNAL_STATIC_GR_INFO
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_INFO_PARAMS:
   SIZE = 3712
-  engineInfo: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_INFO* 8), 0]
+  engineInfo: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_INFO, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_INFO_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_INFO_PARAMS
 @record
@@ -9060,7 +9059,7 @@ NV2080_CTRL_INTERNAL_STATIC_GR_ZCULL_INFO = struct_NV2080_CTRL_INTERNAL_STATIC_G
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_ZCULL_INFO_PARAMS:
   SIZE = 320
-  engineZcullInfo: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_ZCULL_INFO* 8), 0]
+  engineZcullInfo: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_ZCULL_INFO, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_ZCULL_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_ZCULL_INFO_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_ZCULL_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_ZCULL_INFO_PARAMS
 @record
@@ -9073,18 +9072,18 @@ NV2080_CTRL_INTERNAL_STATIC_GR_ROP_INFO = struct_NV2080_CTRL_INTERNAL_STATIC_GR_
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_ROP_INFO_PARAMS:
   SIZE = 96
-  engineRopInfo: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_ROP_INFO* 8), 0]
+  engineRopInfo: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_ROP_INFO, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_ROP_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_ROP_INFO_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_ROP_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_ROP_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_PPC_MASKS:
   SIZE = 64
-  mask: Annotated[(NvU32* 16), 0]
+  mask: Annotated[Array[NvU32, Literal[16]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_PPC_MASKS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_PPC_MASKS
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_PPC_MASKS_PARAMS:
   SIZE = 512
-  enginePpcMasks: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_PPC_MASKS* 8), 0]
+  enginePpcMasks: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_PPC_MASKS, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_PPC_MASKS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_PPC_MASKS_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_PPC_MASKS_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_PPC_MASKS_PARAMS
 @record
@@ -9096,12 +9095,12 @@ NV2080_CTRL_INTERNAL_ENGINE_CONTEXT_BUFFER_INFO = struct_NV2080_CTRL_INTERNAL_EN
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_CONTEXT_BUFFERS_INFO:
   SIZE = 208
-  engine: Annotated[(NV2080_CTRL_INTERNAL_ENGINE_CONTEXT_BUFFER_INFO* 26), 0]
+  engine: Annotated[Array[NV2080_CTRL_INTERNAL_ENGINE_CONTEXT_BUFFER_INFO, Literal[26]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_CONTEXT_BUFFERS_INFO = struct_NV2080_CTRL_INTERNAL_STATIC_GR_CONTEXT_BUFFERS_INFO
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CONTEXT_BUFFERS_INFO_PARAMS:
   SIZE = 1664
-  engineContextBuffersInfo: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_CONTEXT_BUFFERS_INFO* 8), 0]
+  engineContextBuffersInfo: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_CONTEXT_BUFFERS_INFO, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_CONTEXT_BUFFERS_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CONTEXT_BUFFERS_INFO_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_CONTEXT_BUFFERS_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_CONTEXT_BUFFERS_INFO_PARAMS
 @record
@@ -9120,7 +9119,7 @@ NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_RATE_MODIFIER = struct_NV2080_CTRL_INTER
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS:
   SIZE = 72
-  smIssueRateModifier: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_RATE_MODIFIER* 8), 0]
+  smIssueRateModifier: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_RATE_MODIFIER, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_PARAMS
 @record
@@ -9132,7 +9131,7 @@ class struct_NV2080_CTRL_INTERNAL_GPU_GET_CHIP_INFO_PARAMS:
   pciDeviceId: Annotated[NvU32, 12]
   pciSubDeviceId: Annotated[NvU32, 16]
   pciRevisionId: Annotated[NvU32, 20]
-  regBases: Annotated[(NvU32* 16), 24]
+  regBases: Annotated[Array[NvU32, Literal[16]], 24]
 NV2080_CTRL_INTERNAL_GPU_GET_CHIP_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_GPU_GET_CHIP_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_GR_FECS_TRACE_HW_ENABLE_PARAMS:
@@ -9159,7 +9158,7 @@ NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE = struct_NV2080_CTRL_INTERNA
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE_PARAMS:
   SIZE = 32
-  fecsRecordSize: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE* 8), 0]
+  fecsRecordSize: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE_PARAMS
 NV2080_CTRL_CMD_INTERNAL_STATIC_KGR_GET_FECS_RECORD_SIZE_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_RECORD_SIZE_PARAMS
 @record
@@ -9174,7 +9173,7 @@ NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES = struct_NV2080_CTRL_INTER
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES_PARAMS:
   SIZE = 256
-  fecsTraceDefines: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES* 8), 0]
+  fecsTraceDefines: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_FECS_TRACE_DEFINES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_FECS_TRACE_DEFINES_PARAMS
 @record
@@ -9197,16 +9196,16 @@ NV2080_CTRL_INTERNAL_DEVICE_INFO = struct_NV2080_CTRL_INTERNAL_DEVICE_INFO
 class struct_NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS:
   SIZE = 24580
   numEntries: Annotated[NvU32, 0]
-  deviceInfoTable: Annotated[(NV2080_CTRL_INTERNAL_DEVICE_INFO* 512), 4]
+  deviceInfoTable: Annotated[Array[NV2080_CTRL_INTERNAL_DEVICE_INFO, Literal[512]], 4]
 NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS = struct_NV2080_CTRL_INTERNAL_GET_DEVICE_INFO_TABLE_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP_PARAMS:
   SIZE = 8204
   userRegisterAccessMapSize: Annotated[NvU32, 0]
   compressedSize: Annotated[NvU32, 4]
-  compressedData: Annotated[(NvU8* 4096), 8]
+  compressedData: Annotated[Array[NvU8, Literal[4096]], 8]
   profilingRangesSize: Annotated[NvU32, 4104]
-  profilingRanges: Annotated[(NvU8* 4096), 4108]
+  profilingRanges: Annotated[Array[NvU8, Literal[4096]], 4108]
 NV2080_CTRL_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP_PARAMS = struct_NV2080_CTRL_INTERNAL_GPU_GET_USER_REGISTER_ACCESS_MAP_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_NV_RANGE:
@@ -9237,7 +9236,7 @@ NV2080_CTRL_INTERNAL_GPU_CHECK_CTS_ID_VALID_PARAMS = struct_NV2080_CTRL_INTERNAL
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_PDB_PROPERTIES_PARAMS:
   SIZE = 8
-  pdbTable: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_PDB_PROPERTIES* 8), 0]
+  pdbTable: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_PDB_PROPERTIES, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_PDB_PROPERTIES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_PDB_PROPERTIES_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_PDB_PROPERTIES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_PDB_PROPERTIES_PARAMS
 @record
@@ -9289,7 +9288,7 @@ NV2080_CTRL_INTERNAL_MIGMGR_PROFILE_INFO = struct_NV2080_CTRL_INTERNAL_MIGMGR_PR
 class struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PROFILES_PARAMS:
   SIZE = 6488
   count: Annotated[NvU32, 0]
-  table: Annotated[(NV2080_CTRL_INTERNAL_MIGMGR_PROFILE_INFO* 90), 8]
+  table: Annotated[Array[NV2080_CTRL_INTERNAL_MIGMGR_PROFILE_INFO, Literal[90]], 8]
 NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PROFILES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PROFILES_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_MEMSYS_SET_PARTITIONABLE_MEM_PARAMS:
@@ -9303,12 +9302,12 @@ NV2080_CTRL_INTERNAL_MEMSYS_SET_PARTITIONABLE_MEM_PARAMS = struct_NV2080_CTRL_IN
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PARTITIONABLE_ENGINES_PARAMS:
   SIZE = 32
-  engineMask: Annotated[(NvU64* 4), 0]
+  engineMask: Annotated[Array[NvU64, Literal[4]], 0]
 NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PARTITIONABLE_ENGINES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_PARTITIONABLE_ENGINES_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS:
   SIZE = 4112
-  rlBuffers: Annotated[((NV2080_CTRL_INTERNAL_MEMDESC_INFO* 2)* 64), 0]
+  rlBuffers: Annotated[Array[Array[NV2080_CTRL_INTERNAL_MEMDESC_INFO, Literal[2]], Literal[64]], 0]
   runlistIdMask: Annotated[NvU64, 4096]
   swizzId: Annotated[NvU32, 4104]
 NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS = struct_NV2080_CTRL_INTERNAL_FIFO_PROMOTE_RUNLIST_BUFFERS_PARAMS
@@ -9322,7 +9321,7 @@ class struct_TEGRA_IMP_IMPORT_DATA:
   max_iso_bw_kbps: Annotated[NvU32, 0]
   num_dram_channels: Annotated[NvU32, 4]
   num_dram_clk_entries: Annotated[NvU32, 8]
-  dram_clk_instance: Annotated[(DRAM_CLK_INSTANCE* 24), 12]
+  dram_clk_instance: Annotated[Array[DRAM_CLK_INSTANCE, Literal[24]], 12]
 TEGRA_IMP_IMPORT_DATA = struct_TEGRA_IMP_IMPORT_DATA
 @record
 class struct_DRAM_CLK_INSTANCE:
@@ -9384,8 +9383,8 @@ class struct_NV2080_CTRL_INTERNAL_VMMU_GET_SPA_FOR_GPA_ENTRIES_PARAMS:
   SIZE = 2056
   gfid: Annotated[NvU32, 0]
   numEntries: Annotated[NvU32, 4]
-  gpaEntries: Annotated[(NvU64* 128), 8]
-  spaEntries: Annotated[(NvU64* 128), 1032]
+  gpaEntries: Annotated[Array[NvU64, Literal[128]], 8]
+  spaEntries: Annotated[Array[NvU64, Literal[128]], 1032]
 NV2080_CTRL_INTERNAL_VMMU_GET_SPA_FOR_GPA_ENTRIES_PARAMS = struct_NV2080_CTRL_INTERNAL_VMMU_GET_SPA_FOR_GPA_ENTRIES_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_DISPLAY_CHANNEL_PUSHBUFFER_PARAMS:
@@ -9428,8 +9427,8 @@ NV2080_CTRL_INTERNAL_INTR_GET_KERNEL_TABLE_ENTRY = struct_NV2080_CTRL_INTERNAL_I
 class struct_NV2080_CTRL_INTERNAL_INTR_GET_KERNEL_TABLE_PARAMS:
   SIZE = 2112
   tableLen: Annotated[NvU32, 0]
-  table: Annotated[(NV2080_CTRL_INTERNAL_INTR_GET_KERNEL_TABLE_ENTRY* 128), 4]
-  subtreeMap: Annotated[(NV2080_INTR_CATEGORY_SUBTREE_MAP* 7), 2056]
+  table: Annotated[Array[NV2080_CTRL_INTERNAL_INTR_GET_KERNEL_TABLE_ENTRY, Literal[128]], 4]
+  subtreeMap: Annotated[Array[NV2080_INTR_CATEGORY_SUBTREE_MAP, Literal[7]], 2056]
 @record
 class struct_NV2080_INTR_CATEGORY_SUBTREE_MAP:
   SIZE = 8
@@ -9457,7 +9456,7 @@ NV2080_CTRL_INTERNAL_DISPLAY_GET_ACTIVE_DISPLAY_DEVICES_PARAMS = struct_NV2080_C
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES_PARAMS:
   SIZE = 240
-  fbMemPageRanges: Annotated[(NV2080_CTRL_INTERNAL_NV_RANGE* 15), 0]
+  fbMemPageRanges: Annotated[Array[NV2080_CTRL_INTERNAL_NV_RANGE, Literal[15]], 0]
 NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_SWIZZ_ID_FB_MEM_PAGE_RANGES_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_FIFO_GET_NUM_CHANNELS_PARAMS:
@@ -9481,7 +9480,7 @@ NV2080_CTRL_INTERNAL_KMEMSYS_GET_MIG_MEMORY_CONFIG_PARAMS = struct_NV2080_CTRL_I
 @record
 class struct_NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE_PARAMS:
   SIZE = 32
-  data: Annotated[(NvU32* 8), 0]
+  data: Annotated[Array[NvU32, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE_PARAMS = struct_NV2080_CTRL_INTERNAL_MEMSYS_GET_MIG_MEMORY_PARTITION_TABLE_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_PERF_GET_AUX_POWER_STATE_PARAMS:
@@ -9504,7 +9503,7 @@ class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS:
   SIZE = 16
   flags: Annotated[NvU32, 0]
   bBridgeless: Annotated[NvBool, 4]
-  currLimits: Annotated[(NvU32* 2), 8]
+  currLimits: Annotated[Array[NvU32, Literal[2]], 8]
 NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS = struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_GET_INFO_PARAMS:
@@ -9519,7 +9518,7 @@ class struct_NV2080_CTRL_INTERNAL_GMMU_REGISTER_FAULT_BUFFER_PARAMS:
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   faultBufferSize: Annotated[NvU32, 8]
-  faultBufferPteArray: Annotated[(NvU64* 256), 16]
+  faultBufferPteArray: Annotated[Array[NvU64, Literal[256]], 16]
 NV2080_CTRL_INTERNAL_GMMU_REGISTER_FAULT_BUFFER_PARAMS = struct_NV2080_CTRL_INTERNAL_GMMU_REGISTER_FAULT_BUFFER_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_GMMU_REGISTER_CLIENT_SHADOW_FAULT_BUFFER_PARAMS:
@@ -9527,7 +9526,7 @@ class struct_NV2080_CTRL_INTERNAL_GMMU_REGISTER_CLIENT_SHADOW_FAULT_BUFFER_PARAM
   shadowFaultBufferQueuePhysAddr: Annotated[NvU64, 0]
   shadowFaultBufferSize: Annotated[NvU32, 8]
   shadowFaultBufferMetadataSize: Annotated[NvU32, 12]
-  shadowFaultBufferPteArray: Annotated[(NvU64* 3000), 16]
+  shadowFaultBufferPteArray: Annotated[Array[NvU64, Literal[3000]], 16]
   shadowFaultBufferType: Annotated[NvU32, 24016]
   faultBufferSharedMemoryPhysAddr: Annotated[NvU64, 24024]
 NV2080_CTRL_INTERNAL_GMMU_REGISTER_CLIENT_SHADOW_FAULT_BUFFER_PARAMS = struct_NV2080_CTRL_INTERNAL_GMMU_REGISTER_CLIENT_SHADOW_FAULT_BUFFER_PARAMS
@@ -9558,7 +9557,7 @@ NV2080_CTRL_INTERNAL_PERF_BOOST_CLEAR_PARAMS_3X = struct_NV2080_CTRL_INTERNAL_PE
 @record
 class struct_NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO:
   SIZE = 28
-  skylineVgpcSize: Annotated[(NvU8* 12), 0]
+  skylineVgpcSize: Annotated[Array[NvU8, Literal[12]], 0]
   singletonVgpcMask: Annotated[NvU32, 12]
   maxInstances: Annotated[NvU32, 16]
   computeSizeFlag: Annotated[NvU32, 20]
@@ -9567,7 +9566,7 @@ NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO = struct_NV2080_CTRL_INTERNAL_GRMGR_SKYL
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO_PARAMS:
   SIZE = 228
-  skylineTable: Annotated[(NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO* 8), 0]
+  skylineTable: Annotated[Array[NV2080_CTRL_INTERNAL_GRMGR_SKYLINE_INFO, Literal[8]], 0]
   validEntries: Annotated[NvU32, 224]
 NV2080_CTRL_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GRMGR_GET_SKYLINE_INFO_PARAMS
 NV2080_CTRL_INTERNAL_MIGMGR_SET_PARTITIONING_MODE_PARAMS = struct_NV2080_CTRL_GPU_SET_PARTITIONING_MODE_PARAMS
@@ -9582,7 +9581,7 @@ NV2080_CTRL_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_PARAMS = struct_NV2080_CTRL_INTER
 @record
 class struct_NV2080_CTRL_INTERNAL_KMIGMGR_EXPORTED_GPU_INSTANCE_INFO:
   SIZE = 56
-  enginesMask: Annotated[(NvU64* 4), 0]
+  enginesMask: Annotated[Array[NvU64, Literal[4]], 0]
   partitionFlags: Annotated[NvU32, 32]
   gpcMask: Annotated[NvU32, 36]
   virtualGpcCount: Annotated[NvU32, 40]
@@ -9593,7 +9592,7 @@ NV2080_CTRL_INTERNAL_KMIGMGR_EXPORTED_GPU_INSTANCE_INFO = struct_NV2080_CTRL_INT
 class struct_NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_EXPORT_GPU_INSTANCE_PARAMS:
   SIZE = 80
   swizzId: Annotated[NvU32, 0]
-  uuid: Annotated[(NvU8* 16), 4]
+  uuid: Annotated[Array[NvU8, Literal[16]], 4]
   info: Annotated[NV2080_CTRL_INTERNAL_KMIGMGR_EXPORTED_GPU_INSTANCE_INFO, 24]
 NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_EXPORT_GPU_INSTANCE_PARAMS = struct_NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_EXPORT_GPU_INSTANCE_PARAMS
 NV2080_CTRL_INTERNAL_KMIGMGR_EXPORT_GPU_INSTANCE_PARAMS = struct_NV2080_CTRL_INTERNAL_KMIGMGR_IMPORT_EXPORT_GPU_INSTANCE_PARAMS
@@ -9624,7 +9623,7 @@ NV2080_CTRL_INTERNAL_HSHUB_PEER_CONN_CONFIG_PARAMS = struct_NV2080_CTRL_INTERNAL
 class struct_NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_PARAMS:
   SIZE = 36
   linkMask: Annotated[NvU32, 0]
-  hshubIds: Annotated[(NvU8* 32), 4]
+  hshubIds: Annotated[Array[NvU8, Literal[32]], 4]
 NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_PARAMS = struct_NV2080_CTRL_INTERNAL_HSHUB_GET_HSHUB_ID_FOR_LINKS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_HSHUB_GET_NUM_UNITS_PARAMS:
@@ -9678,7 +9677,7 @@ NV2080_CTRL_INTERNAL_CCU_MAP_INFO = struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO
 @record
 class struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS:
   SIZE = 144
-  mapInfo: Annotated[(NV2080_CTRL_INTERNAL_CCU_MAP_INFO* 9), 0]
+  mapInfo: Annotated[Array[NV2080_CTRL_INTERNAL_CCU_MAP_INFO, Literal[9]], 0]
 NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_CCU_MAP_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_CCU_UNMAP_INFO_PARAMS:
@@ -9694,7 +9693,7 @@ class struct_NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO:
   p2pCaps: Annotated[NvU32, 8]
   p2pOptimalReadCEs: Annotated[NvU32, 12]
   p2pOptimalWriteCEs: Annotated[NvU32, 16]
-  p2pCapsStatus: Annotated[(NvU8* 9), 20]
+  p2pCapsStatus: Annotated[Array[NvU8, Literal[9]], 20]
   busPeerId: Annotated[NvU32, 32]
   busEgmPeerId: Annotated[NvU32, 36]
 NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO = struct_NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO
@@ -9702,13 +9701,13 @@ NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO = struct_NV2080_CTRL_INTERNAL_SET_P2
 class struct_NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PARAMS:
   SIZE = 1284
   peerGpuCount: Annotated[NvU32, 0]
-  peerGpuInfos: Annotated[(NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO* 32), 4]
+  peerGpuInfos: Annotated[Array[NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PEER_INFO, Literal[32]], 4]
 NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_SET_P2P_CAPS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_REMOVE_P2P_CAPS_PARAMS:
   SIZE = 132
   peerGpuIdCount: Annotated[NvU32, 0]
-  peerGpuIds: Annotated[(NvU32* 32), 4]
+  peerGpuIds: Annotated[Array[NvU32, Literal[32]], 4]
 NV2080_CTRL_INTERNAL_REMOVE_P2P_CAPS_PARAMS = struct_NV2080_CTRL_INTERNAL_REMOVE_P2P_CAPS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_GET_PCIE_P2P_CAPS_PARAMS:
@@ -9750,7 +9749,7 @@ NV2080_CTRL_INTERNAL_MIGMGR_COMPUTE_PROFILE = struct_NV2080_CTRL_INTERNAL_MIGMGR
 class struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS:
   SIZE = 196
   profileCount: Annotated[NvU32, 0]
-  profiles: Annotated[(NV2080_CTRL_INTERNAL_MIGMGR_COMPUTE_PROFILE* 8), 4]
+  profiles: Annotated[Array[NV2080_CTRL_INTERNAL_MIGMGR_COMPUTE_PROFILE, Literal[8]], 4]
 NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KMIGMGR_GET_COMPUTE_PROFILES_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_MIGMGR_GET_COMPUTE_PROFILES_PARAMS
 @record
@@ -9797,14 +9796,14 @@ NV2080_CTRL_INTERNAL_GSYNC_OPTIMIZE_TIMING_PARAMETERS_PARAMS = struct_NV2080_CTR
 @record
 class struct_NV2080_CTRL_INTERNAL_GSYNC_GET_DISPLAY_IDS_PARAMS:
   SIZE = 16
-  displayIds: Annotated[(NvU32* 4), 0]
+  displayIds: Annotated[Array[NvU32, Literal[4]], 0]
 NV2080_CTRL_INTERNAL_GSYNC_GET_DISPLAY_IDS_PARAMS = struct_NV2080_CTRL_INTERNAL_GSYNC_GET_DISPLAY_IDS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_GSYNC_SET_STREO_SYNC_PARAMS:
   SIZE = 52
-  slave: Annotated[(NvU32* 4), 0]
-  localSlave: Annotated[(NvU32* 4), 16]
-  master: Annotated[(NvU32* 4), 32]
+  slave: Annotated[Array[NvU32, Literal[4]], 0]
+  localSlave: Annotated[Array[NvU32, Literal[4]], 16]
+  master: Annotated[Array[NvU32, Literal[4]], 32]
   regStatus: Annotated[NvU32, 48]
 NV2080_CTRL_INTERNAL_GSYNC_SET_STREO_SYNC_PARAMS = struct_NV2080_CTRL_INTERNAL_GSYNC_SET_STREO_SYNC_PARAMS
 @record
@@ -9850,7 +9849,7 @@ class struct_NV2080_CTRL_INTERNAL_INIT_BRIGHTC_STATE_LOAD_PARAMS:
   SIZE = 4104
   status: Annotated[NvU32, 0]
   backLightDataSize: Annotated[NvU16, 4]
-  backLightData: Annotated[(NvU8* 4096), 6]
+  backLightData: Annotated[Array[NvU8, Literal[4096]], 6]
 NV2080_CTRL_INTERNAL_INIT_BRIGHTC_STATE_LOAD_PARAMS = struct_NV2080_CTRL_INTERNAL_INIT_BRIGHTC_STATE_LOAD_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_GET_NUM_ACTIVE_LINK_PER_IOCTRL_PARAMS:
@@ -9982,13 +9981,13 @@ class struct_NV2080_CTRL_INTERNAL_EDID_DATA:
   status: Annotated[NvU32, 0]
   acpiId: Annotated[NvU32, 4]
   bufferSize: Annotated[NvU32, 8]
-  edidBuffer: Annotated[(NvU8* 512), 12]
+  edidBuffer: Annotated[Array[NvU8, Literal[512]], 12]
 NV2080_CTRL_INTERNAL_EDID_DATA = struct_NV2080_CTRL_INTERNAL_EDID_DATA
 @record
 class struct_NV2080_CTRL_CMD_INTERNAL_SET_STATIC_EDID_DATA_PARAMS:
   SIZE = 8388
   tableLen: Annotated[NvU32, 0]
-  edidTable: Annotated[(NV2080_CTRL_INTERNAL_EDID_DATA* 16), 4]
+  edidTable: Annotated[Array[NV2080_CTRL_INTERNAL_EDID_DATA, Literal[16]], 4]
 NV2080_CTRL_CMD_INTERNAL_SET_STATIC_EDID_DATA_PARAMS = struct_NV2080_CTRL_CMD_INTERNAL_SET_STATIC_EDID_DATA_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_INTERNAL_GET_GPU_FABRIC_PROBE_INFO_PARAMS:
@@ -10015,26 +10014,26 @@ NV2080_CTRL_INTERNAL_CONF_COMPUTE_GET_STATIC_INFO_PARAMS = struct_NV2080_CTRL_IN
 @record
 class struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK:
   SIZE = 12
-  ivMask: Annotated[(NvU32* 3), 0]
+  ivMask: Annotated[Array[NvU32, Literal[3]], 0]
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK = struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK
 @record
 class struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS:
   SIZE = 40
   engineId: Annotated[NvU32, 0]
-  ivMaskSet: Annotated[(NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK* 3), 4]
+  ivMaskSet: Annotated[Array[NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK, Literal[3]], 4]
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS = struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_SWL_KEYS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS:
   SIZE = 76
   engineId: Annotated[NvU32, 0]
-  ivMaskSet: Annotated[(NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK* 6), 4]
+  ivMaskSet: Annotated[Array[NV2080_CTRL_INTERNAL_CONF_COMPUTE_IVMASK, Literal[6]], 4]
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS = struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_DERIVE_LCE_KEYS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS:
   SIZE = 28
   globalH2DKey: Annotated[NvU32, 0]
-  updatedEncryptIVMask: Annotated[(NvU32* 3), 4]
-  updatedDecryptIVMask: Annotated[(NvU32* 3), 16]
+  updatedEncryptIVMask: Annotated[Array[NvU32, Literal[3]], 4]
+  updatedDecryptIVMask: Annotated[Array[NvU32, Literal[3]], 16]
 NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS = struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_ROTATE_KEYS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_CONF_COMPUTE_RC_CHANNELS_FOR_KEY_ROTATION_PARAMS:
@@ -10075,7 +10074,7 @@ NV2080_CTRL_INTERNAL_TRANSFER_SURFACE_INFO = struct_NV2080_CTRL_INTERNAL_TRANSFE
 class struct_NV2080_CTRL_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP_PARAMS:
   SIZE = 96
   src: Annotated[NV2080_CTRL_INTERNAL_TRANSFER_SURFACE_INFO, 0]
-  authTag: Annotated[(NvU8* 16), 32]
+  authTag: Annotated[Array[NvU8, Literal[16]], 32]
   dst: Annotated[NV2080_CTRL_INTERNAL_TRANSFER_SURFACE_INFO, 48]
   transferSize: Annotated[NvU64, 80]
   value: Annotated[NvU32, 88]
@@ -10193,7 +10192,7 @@ NV2080_CTRL_INTERNAL_NVLINK_CALLBACK_GET_DL_LINK_MODE_PARAMS = struct_NV2080_CTR
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS:
   SIZE = 28
-  seedData: Annotated[(NvU32* 7), 0]
+  seedData: Annotated[Array[NvU32, Literal[7]], 0]
 NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_OFF_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS:
@@ -10204,7 +10203,7 @@ NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_PRE_HS_PARAMS = struct_NV2080_CTRL_
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS:
   SIZE = 28
-  seedData: Annotated[(NvU32* 7), 0]
+  seedData: Annotated[Array[NvU32, Literal[7]], 0]
 NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_SET_DL_LINK_MODE_INIT_PHASE1_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_REMOTE_LOCAL_SID_INFO:
@@ -10354,7 +10353,7 @@ NV2080_CTRL_INTERNAL_NVLINK_POST_SETUP_NVLINK_PEER_PARAMS = struct_NV2080_CTRL_I
 class struct_NV2080_CTRL_INTERNAL_LOG_OOB_XID_PARAMS:
   SIZE = 92
   xid: Annotated[NvU32, 0]
-  message: Annotated[(NvU8* 81), 4]
+  message: Annotated[Array[NvU8, Literal[81]], 4]
   len: Annotated[NvU32, 88]
 NV2080_CTRL_INTERNAL_LOG_OOB_XID_PARAMS = struct_NV2080_CTRL_INTERNAL_LOG_OOB_XID_PARAMS
 @record
@@ -10419,7 +10418,7 @@ NV2080_CTRL_INTERNAL_NVLINK_PRE_LINK_TRAIN_ALI_PARAMS = struct_NV2080_CTRL_INTER
 class struct_NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS:
   SIZE = 264
   postRxDetLinkMask: Annotated[NvU64, 0]
-  laneRxdetStatusMask: Annotated[(NvU32* 64), 8]
+  laneRxdetStatusMask: Annotated[Array[NvU32, Literal[64]], 8]
 NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_MASK_POST_RX_DET_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_LINK_TRAIN_ALI_PARAMS:
@@ -10446,7 +10445,7 @@ class struct_NV2080_CTRL_INTERNAL_NVLINK_GET_NVLINK_DEVICE_INFO_PARAMS:
   discoveredLinks: Annotated[NvU64, 16]
   ipVerNvlink: Annotated[NvU32, 24]
   maxSupportedLinks: Annotated[NvU32, 28]
-  linkInfo: Annotated[(NV2080_CTRL_INTERNAL_NVLINK_DEVICE_LINK_VALUES* 64), 32]
+  linkInfo: Annotated[Array[NV2080_CTRL_INTERNAL_NVLINK_DEVICE_LINK_VALUES, Literal[64]], 32]
 NV2080_CTRL_INTERNAL_NVLINK_GET_NVLINK_DEVICE_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_GET_NVLINK_DEVICE_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_DEVICE_IP_REVISION_VALUES:
@@ -10477,7 +10476,7 @@ class struct_NV2080_CTRL_INTERNAL_NVLINK_ARE_LINKS_TRAINED_PARAMS:
   SIZE = 72
   linkMask: Annotated[NvU32, 0]
   bActiveOnly: Annotated[NvBool, 4]
-  bIsLinkActive: Annotated[(NvBool* 64), 5]
+  bIsLinkActive: Annotated[Array[NvBool, Literal[64]], 5]
 NV2080_CTRL_INTERNAL_NVLINK_ARE_LINKS_TRAINED_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_ARE_LINKS_TRAINED_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_RESET_LINKS_PARAMS:
@@ -10518,7 +10517,7 @@ class struct_NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_INFO_PARAMS:
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
   nvlinkRefClkSpeedKHz: Annotated[NvU32, 24]
   bSublinkStateInst: Annotated[NvBool, 28]
-  linkInfo: Annotated[(NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_VALUES* 64), 32]
+  linkInfo: Annotated[Array[NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_VALUES, Literal[64]], 32]
 NV2080_CTRL_NVLINK_LINK_MASK = struct_NV2080_CTRL_NVLINK_LINK_MASK
 NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_GET_LINK_AND_CLOCK_INFO_PARAMS
 @record
@@ -10532,7 +10531,7 @@ class struct_NV2080_CTRL_INTERNAL_NVLINK_PROCESS_FORCED_CONFIGS_PARAMS:
   bLegacyForcedConfig: Annotated[NvBool, 0]
   bOverrideComputePeerMode: Annotated[NvBool, 1]
   phase: Annotated[NvU32, 4]
-  linkConnection: Annotated[(NvU32* 64), 8]
+  linkConnection: Annotated[Array[NvU32, Literal[64]], 8]
 NV2080_CTRL_INTERNAL_NVLINK_PROCESS_FORCED_CONFIGS_PARAMS = struct_NV2080_CTRL_INTERNAL_NVLINK_PROCESS_FORCED_CONFIGS_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_NVLINK_SYNC_NVLINK_SHUTDOWN_PROPS_PARAMS:
@@ -10559,8 +10558,8 @@ NV2080_CTRL_INTERNAL_SEND_CMC_LIBOS_BUFFER_INFO_PARAMS = struct_NV2080_CTRL_INTE
 @record
 class struct_NV2080_CTRL_INTERNAL_GPU_GET_HFRP_INFO_PARAMS:
   SIZE = 40
-  hfrpPrivBase: Annotated[(NvU32* 5), 0]
-  hfrpIntrCtrlReg: Annotated[(NvU32* 5), 20]
+  hfrpPrivBase: Annotated[Array[NvU32, Literal[5]], 0]
+  hfrpIntrCtrlReg: Annotated[Array[NvU32, Literal[5]], 20]
 NV2080_CTRL_INTERNAL_GPU_GET_HFRP_INFO_PARAMS = struct_NV2080_CTRL_INTERNAL_GPU_GET_HFRP_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_SEND_CMC_UMD_API_OP_PARAMS:
@@ -10580,24 +10579,24 @@ NV2080_CTRL_INTERNAL_SEND_CMC_UMD_API_OP_PARAMS = struct_NV2080_CTRL_INTERNAL_SE
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_RATE_MODIFIER_V2:
   SIZE = 2044
   smIssueRateModifierListSize: Annotated[NvU32, 0]
-  smIssueRateModifierList: Annotated[(NV2080_CTRL_GR_SM_ISSUE_RATE_MODIFIER_V2* 255), 4]
+  smIssueRateModifierList: Annotated[Array[NV2080_CTRL_GR_SM_ISSUE_RATE_MODIFIER_V2, Literal[255]], 4]
 NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_RATE_MODIFIER_V2 = struct_NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_RATE_MODIFIER_V2
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_V2_PARAMS:
   SIZE = 16352
-  smIssueRateModifierV2: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_RATE_MODIFIER_V2* 8), 0]
+  smIssueRateModifierV2: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_RATE_MODIFIER_V2, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_V2_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_V2_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_SM_ISSUE_RATE_MODIFIER_V2_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_RATE_MODIFIER_V2_PARAMS
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_THROTTLE_CTRL:
   SIZE = 2044
   smIssueThrottleCtrlListSize: Annotated[NvU32, 0]
-  smIssueThrottleCtrlList: Annotated[(NV2080_CTRL_GR_SM_ISSUE_THROTTLE_CTRL* 255), 4]
+  smIssueThrottleCtrlList: Annotated[Array[NV2080_CTRL_GR_SM_ISSUE_THROTTLE_CTRL, Literal[255]], 4]
 NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_THROTTLE_CTRL = struct_NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_THROTTLE_CTRL
 @record
 class struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS:
   SIZE = 16352
-  smIssueThrottleCtrl: Annotated[(NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_THROTTLE_CTRL* 8), 0]
+  smIssueThrottleCtrl: Annotated[Array[NV2080_CTRL_INTERNAL_STATIC_GR_SM_ISSUE_THROTTLE_CTRL, Literal[8]], 0]
 NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS
 NV2080_CTRL_INTERNAL_STATIC_KGR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS = struct_NV2080_CTRL_INTERNAL_STATIC_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS
 @record
@@ -10643,7 +10642,7 @@ NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY = struct_NV2080_CTRL_MC_ENG
 class struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS:
   SIZE = 2052
   numEntries: Annotated[NvU32, 0]
-  entries: Annotated[(NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY* 256), 4]
+  entries: Annotated[Array[NV2080_CTRL_MC_ENGINE_NOTIFICATION_INTR_VECTOR_ENTRY, Literal[256]], 4]
 NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS = struct_NV2080_CTRL_MC_GET_ENGINE_NOTIFICATION_INTR_VECTORS_PARAMS
 @record
 class struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY:
@@ -10657,7 +10656,7 @@ NV2080_CTRL_MC_STATIC_INTR_ENTRY = struct_NV2080_CTRL_MC_STATIC_INTR_ENTRY
 class struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS:
   SIZE = 516
   numEntries: Annotated[NvU32, 0]
-  entries: Annotated[(NV2080_CTRL_MC_STATIC_INTR_ENTRY* 32), 4]
+  entries: Annotated[Array[NV2080_CTRL_MC_STATIC_INTR_ENTRY, Literal[32]], 4]
 NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS = struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS
 enum_NV2080_INTR_CATEGORY = CEnum(ctypes.c_uint32)
 NV2080_INTR_CATEGORY_DEFAULT = enum_NV2080_INTR_CATEGORY.define('NV2080_INTR_CATEGORY_DEFAULT', 0)
@@ -10673,7 +10672,7 @@ NV2080_INTR_CATEGORY = enum_NV2080_INTR_CATEGORY
 @record
 class struct_NV2080_CTRL_MC_GET_INTR_CATEGORY_SUBTREE_MAP_PARAMS:
   SIZE = 56
-  subtreeMap: Annotated[(NV2080_INTR_CATEGORY_SUBTREE_MAP* 7), 0]
+  subtreeMap: Annotated[Array[NV2080_INTR_CATEGORY_SUBTREE_MAP, Literal[7]], 0]
 NV2080_CTRL_MC_GET_INTR_CATEGORY_SUBTREE_MAP_PARAMS = struct_NV2080_CTRL_MC_GET_INTR_CATEGORY_SUBTREE_MAP_PARAMS
 @record
 class struct_NV2080_CTRL_NVD_GET_DUMP_SIZE_PARAMS:
@@ -10726,8 +10725,8 @@ class struct_NV2080_NOCAT_JOURNAL_GPU_STATE:
   bFullPower: Annotated[NvBool, 26]
   vbiosOemVersion: Annotated[NvU32, 28]
   memoryType: Annotated[NvU16, 32]
-  tag: Annotated[(NvU8* 65), 34]
-  vbiosProject: Annotated[(NvU8* 65), 99]
+  tag: Annotated[Array[NvU8, Literal[65]], 34]
+  vbiosProject: Annotated[Array[NvU8, Literal[65]], 99]
   bInFullchipReset: Annotated[NvBool, 164]
   bInSecBusReset: Annotated[NvBool, 165]
   bInGc6Reset: Annotated[NvBool, 166]
@@ -10739,15 +10738,15 @@ class struct_NV2080_NOCAT_JOURNAL_ENTRY:
   recType: Annotated[NvU8, 0]
   bugcheck: Annotated[NvU32, 4]
   tdrBucketId: Annotated[NvU32, 8]
-  source: Annotated[(NvU8* 65), 12]
+  source: Annotated[Array[NvU8, Literal[65]], 12]
   subsystem: Annotated[NvU32, 80]
   errorCode: Annotated[NvU64, 88]
   diagBufferLen: Annotated[NvU32, 96]
-  diagBuffer: Annotated[(NvU8* 1024), 100]
-  faultingEngine: Annotated[(NvU8* 65), 1124]
+  diagBuffer: Annotated[Array[NvU8, Literal[1024]], 100]
+  faultingEngine: Annotated[Array[NvU8, Literal[65]], 1124]
   mmuFaultType: Annotated[NvU32, 1192]
   mmuErrorSrc: Annotated[NvU32, 1196]
-  tdrReason: Annotated[(NvU8* 65), 1200]
+  tdrReason: Annotated[Array[NvU8, Literal[65]], 1200]
 NV2080_NOCAT_JOURNAL_ENTRY = struct_NV2080_NOCAT_JOURNAL_ENTRY
 @record
 class struct_NV2080_NOCAT_JOURNAL_RECORD:
@@ -10765,15 +10764,15 @@ class struct_NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS:
   flags: Annotated[NvU32, 0]
   nocatRecordCount: Annotated[NvU32, 4]
   nocatOutstandingRecordCount: Annotated[NvU32, 8]
-  journalRecords: Annotated[(NV2080_NOCAT_JOURNAL_RECORD* 10), 16]
-  activityCounters: Annotated[(NvU32* 32), 15456]
-  reserved: Annotated[(NvU8* 65), 15584]
+  journalRecords: Annotated[Array[NV2080_NOCAT_JOURNAL_RECORD, Literal[10]], 16]
+  activityCounters: Annotated[Array[NvU32, Literal[32]], 15456]
+  reserved: Annotated[Array[NvU8, Literal[65]], 15584]
 NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS = struct_NV2080_CTRL_NVD_GET_NOCAT_JOURNAL_PARAMS
 @record
 class struct_NV2080CtrlNocatJournalDataTdrReason:
   SIZE = 96
   flags: Annotated[NvU32, 0]
-  source: Annotated[(NvU8* 65), 4]
+  source: Annotated[Array[NvU8, Literal[65]], 4]
   subsystem: Annotated[NvU32, 72]
   errorCode: Annotated[NvU64, 80]
   reasonCode: Annotated[NvU32, 88]
@@ -10782,7 +10781,7 @@ NV2080CtrlNocatJournalDataTdrReason = struct_NV2080CtrlNocatJournalDataTdrReason
 class struct_NV2080CtrlNocatJournalSetTag:
   SIZE = 72
   flags: Annotated[NvU32, 0]
-  tag: Annotated[(NvU8* 65), 4]
+  tag: Annotated[Array[NvU8, Literal[65]], 4]
 NV2080CtrlNocatJournalSetTag = struct_NV2080CtrlNocatJournalSetTag
 @record
 class struct_NV2080CtrlNocatJournalRclog:
@@ -10793,7 +10792,7 @@ class struct_NV2080CtrlNocatJournalRclog:
   APIType: Annotated[NvU32, 12]
   contextType: Annotated[NvU32, 16]
   exceptType: Annotated[NvU32, 20]
-  processImageName: Annotated[(NvU8* 65), 24]
+  processImageName: Annotated[Array[NvU8, Literal[65]], 24]
 NV2080CtrlNocatJournalRclog = struct_NV2080CtrlNocatJournalRclog
 @record
 class struct_NV2080_CTRL_NVD_SET_NOCAT_JOURNAL_DATA_PARAMS:
@@ -10815,13 +10814,13 @@ class struct_NV2080CtrlNocatJournalInsertRecord:
   timestamp: Annotated[NvU64, 8]
   recType: Annotated[NvU8, 16]
   bugcheck: Annotated[NvU32, 20]
-  source: Annotated[(ctypes.c_char* 65), 24]
+  source: Annotated[Array[ctypes.c_char, Literal[65]], 24]
   subsystem: Annotated[NvU32, 92]
   errorCode: Annotated[NvU64, 96]
-  faultingEngine: Annotated[(ctypes.c_char* 65), 104]
+  faultingEngine: Annotated[Array[ctypes.c_char, Literal[65]], 104]
   tdrReason: Annotated[NvU32, 172]
   diagBufferLen: Annotated[NvU32, 176]
-  diagBuffer: Annotated[(NvU8* 1024), 180]
+  diagBuffer: Annotated[Array[NvU8, Literal[1024]], 180]
 NV2080CtrlNocatJournalInsertRecord = struct_NV2080CtrlNocatJournalInsertRecord
 @record
 class struct_NV2080_CTRL_CMD_NVD_INSERT_NOCAT_JOURNAL_RECORD_PARAMS:
@@ -10851,7 +10850,7 @@ class struct_NV2080_CTRL_NVLINK_DEVICE_INFO:
   function: Annotated[NvU16, 12]
   pciDeviceId: Annotated[NvU32, 16]
   deviceType: Annotated[NvU64, 24]
-  deviceUUID: Annotated[(NvU8* 16), 32]
+  deviceUUID: Annotated[Array[NvU8, Literal[16]], 32]
   fabricRecoveryStatusMask: Annotated[NvU32, 48]
 NV2080_CTRL_NVLINK_DEVICE_INFO = struct_NV2080_CTRL_NVLINK_DEVICE_INFO
 @record
@@ -10901,7 +10900,7 @@ class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS:
   enabledLinks: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
   bSublinkStateInst: Annotated[NvBool, 24]
   bNvleModeEnabled: Annotated[NvBool, 25]
-  linkInfo: Annotated[(NV2080_CTRL_NVLINK_LINK_STATUS_INFO* 64), 32]
+  linkInfo: Annotated[Array[NV2080_CTRL_NVLINK_LINK_STATUS_INFO, Literal[64]], 32]
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_ERR_INFO:
@@ -10946,9 +10945,9 @@ class struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS:
   SIZE = 7224
   linkMask: Annotated[NvU32, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  linkErrInfo: Annotated[(NV2080_CTRL_NVLINK_ERR_INFO* 64), 24]
+  linkErrInfo: Annotated[Array[NV2080_CTRL_NVLINK_ERR_INFO, Literal[64]], 24]
   ioctrlMask: Annotated[NvU32, 7192]
-  commonErrInfo: Annotated[(NV2080_CTRL_NVLINK_COMMON_ERR_INFO* 3), 7196]
+  commonErrInfo: Annotated[Array[NV2080_CTRL_NVLINK_COMMON_ERR_INFO, Literal[3]], 7196]
   ErrInfoFlags: Annotated[NvU8, 7220]
 NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_ERR_INFO_PARAMS
 @record
@@ -10958,7 +10957,7 @@ class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES:
   bTx1TlCounterOverflow: Annotated[NvBool, 1]
   bRx0TlCounterOverflow: Annotated[NvBool, 2]
   bRx1TlCounterOverflow: Annotated[NvBool, 3]
-  value: Annotated[(NvU64* 32), 8]
+  value: Annotated[Array[NvU64, Literal[32]], 8]
 NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES
 @record
 class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS:
@@ -10966,7 +10965,7 @@ class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS:
   counterMask: Annotated[NvU32, 0]
   linkMask: Annotated[NvU64, 8]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 16]
-  counters: Annotated[(NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES* 64), 32]
+  counters: Annotated[Array[NV2080_CTRL_NVLINK_GET_COUNTERS_VALUES, Literal[64]], 32]
 NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_PARAMS:
@@ -10986,15 +10985,15 @@ class struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS:
   SIZE = 28712
   linkMask: Annotated[NvU64, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  counterMask: Annotated[(NvU64* 2), 24]
-  counter: Annotated[((NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES* 28)* 64), 40]
+  counterMask: Annotated[Array[NvU64, Literal[2]], 24]
+  counter: Annotated[Array[Array[NV2080_CTRL_NVLINK_COUNTERS_V2_VALUES, Literal[28]], Literal[64]], 40]
 NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS = struct_NV2080_CTRL_NVLINK_GET_COUNTERS_V2_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS:
   SIZE = 40
   linkMask: Annotated[NvU64, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  counterMask: Annotated[(NvU64* 2), 24]
+  counterMask: Annotated[Array[NvU64, Literal[2]], 24]
 NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS = struct_NV2080_CTRL_NVLINK_CLEAR_COUNTERS_V2_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS:
@@ -11022,7 +11021,7 @@ class struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS:
   SIZE = 1048
   linkMask: Annotated[NvU64, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  errCfg: Annotated[(NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG* 64), 24]
+  errCfg: Annotated[Array[NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG, Literal[64]], 24]
 NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS = struct_NV2080_CTRL_NVLINK_SET_HW_ERROR_INJECT_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO:
@@ -11038,14 +11037,14 @@ class struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS:
   SIZE = 1304
   linkMask: Annotated[NvU64, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  errInfo: Annotated[(NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO* 64), 24]
+  errInfo: Annotated[Array[NV2080_CTRL_NVLINK_HW_ERROR_INJECT_INFO, Literal[64]], 24]
 NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS = struct_NV2080_CTRL_NVLINK_GET_HW_ERROR_INJECT_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS:
   SIZE = 280
   linkMask: Annotated[NvU32, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  numRecoveries: Annotated[(NvU32* 64), 24]
+  numRecoveries: Annotated[Array[NvU32, Literal[64]], 24]
 NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_ERROR_RECOVERIES_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_GET_LINK_LAST_ERROR_REMOTE_TYPE_PARAMS:
@@ -11058,7 +11057,7 @@ class struct_NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS:
   SIZE = 80
   linkId: Annotated[NvU32, 0]
   supportedCounts: Annotated[NvU64, 8]
-  fatalErrorCounts: Annotated[(NvU8* 63), 16]
+  fatalErrorCounts: Annotated[Array[NvU8, Literal[63]], 16]
 NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_FATAL_ERROR_COUNTS_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE:
@@ -11071,9 +11070,9 @@ class struct_NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS:
   SIZE = 92
   linkId: Annotated[NvU32, 0]
   numDailyMaxNonfatalErrorRates: Annotated[NvU32, 4]
-  dailyMaxNonfatalErrorRates: Annotated[(NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE* 5), 8]
+  dailyMaxNonfatalErrorRates: Annotated[Array[NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE, Literal[5]], 8]
   numMonthlyMaxNonfatalErrorRates: Annotated[NvU32, 48]
-  monthlyMaxNonfatalErrorRates: Annotated[(NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE* 5), 52]
+  monthlyMaxNonfatalErrorRates: Annotated[Array[NV2080_CTRL_NVLINK_NONFATAL_ERROR_RATE, Literal[5]], 52]
 NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LINK_NONFATAL_ERROR_RATES_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_SET_ERROR_INJECTION_MODE_PARAMS:
@@ -11135,7 +11134,7 @@ class struct_NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS:
   SIZE = 16
   linkId: Annotated[NvU32, 0]
   numLanes: Annotated[NvU8, 4]
-  figureOfMeritValues: Annotated[(NvU16* 4), 6]
+  figureOfMeritValues: Annotated[Array[NvU16, Literal[4]], 6]
 NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS = struct_NV2080_CTRL_CMD_NVLINK_GET_LINK_FOM_VALUES_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_SET_NVLINK_PEER_PARAMS:
@@ -11161,7 +11160,7 @@ NV2080_CTRL_NVLINK_LANE_ERROR = struct_NV2080_CTRL_NVLINK_LANE_ERROR
 @record
 class struct_NV2080_CTRL_NVLINK_LINK_ECC_ERROR:
   SIZE = 56
-  errorLane: Annotated[(NV2080_CTRL_NVLINK_LANE_ERROR* 4), 0]
+  errorLane: Annotated[Array[NV2080_CTRL_NVLINK_LANE_ERROR, Literal[4]], 0]
   eccDecFailed: Annotated[NvU32, 48]
   eccDecFailedOverflowed: Annotated[NvBool, 52]
 NV2080_CTRL_NVLINK_LINK_ECC_ERROR = struct_NV2080_CTRL_NVLINK_LINK_ECC_ERROR
@@ -11170,12 +11169,12 @@ class struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS:
   SIZE = 3608
   linkMask: Annotated[NvU32, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  errorLink: Annotated[(NV2080_CTRL_NVLINK_LINK_ECC_ERROR* 64), 24]
+  errorLink: Annotated[Array[NV2080_CTRL_NVLINK_LINK_ECC_ERROR, Literal[64]], 24]
 NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_NVLINK_ECC_ERRORS_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES:
   SIZE = 32
-  value: Annotated[(NvU64* 4), 0]
+  value: Annotated[Array[NvU64, Literal[4]], 0]
 NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES = struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES
 @record
 class struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS:
@@ -11183,7 +11182,7 @@ class struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS:
   counterMask: Annotated[NvU16, 0]
   linkMask: Annotated[NvU64, 8]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 16]
-  counters: Annotated[(NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES* 64), 32]
+  counters: Annotated[Array[NV2080_CTRL_NVLINK_READ_TP_COUNTERS_VALUES, Literal[64]], 32]
 NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_READ_TP_COUNTERS_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_NVLINK_LOCK_LINK_POWER_STATE_PARAMS:
@@ -11195,7 +11194,7 @@ class struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS:
   SIZE = 72
   linkId: Annotated[NvU32, 0]
   counterValidMask: Annotated[NvU32, 4]
-  counterValues: Annotated[(NvU32* 16), 8]
+  counterValues: Annotated[Array[NvU32, Literal[16]], 8]
 NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LP_COUNTERS_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_SET_LOOPBACK_MODE_PARAMS:
@@ -11215,7 +11214,7 @@ class struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS:
   SIZE = 216
   linkMask: Annotated[NvU32, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  refreshCount: Annotated[(NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO* 32), 24]
+  refreshCount: Annotated[Array[NV2080_CTRL_NVLINK_PHY_REFRESH_STATUS_INFO, Literal[32]], 24]
 NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_REFRESH_COUNTERS_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_CLEAR_REFRESH_COUNTERS_PARAMS:
@@ -11277,12 +11276,12 @@ class struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS:
   cmd: Annotated[NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND, 0]
   linkId: Annotated[NvU32, 4]
   params: Annotated[NvU32, 8]
-  measurements: Annotated[(NV2080_CTRL_NVLINK_EOM_MEASUREMENT* 4), 12]
+  measurements: Annotated[Array[NV2080_CTRL_NVLINK_EOM_MEASUREMENT, Literal[4]], 12]
 NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS = struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS:
   SIZE = 5124
-  data: Annotated[(NvU8* 5120), 0]
+  data: Annotated[Array[NvU8, Literal[5120]], 0]
   dataSize: Annotated[NvU32, 5120]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS
 @record
@@ -11300,7 +11299,7 @@ NV2080_CTRL_NVLINK_GET_L1_THRESHOLD_PARAMS = struct_NV2080_CTRL_NVLINK_GET_L1_TH
 @record
 class struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS:
   SIZE = 5124
-  buffer: Annotated[(NvU8* 5120), 0]
+  buffer: Annotated[Array[NvU8, Literal[5120]], 0]
   dataSize: Annotated[NvU32, 5120]
 NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS = struct_NV2080_CTRL_NVLINK_INBAND_SEND_DATA_PARAMS
 @record
@@ -11336,7 +11335,7 @@ class struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS:
   nextPortEventIndex: Annotated[NvU64, 8]
   portEventCount: Annotated[NvU32, 16]
   bOverflow: Annotated[NvBool, 20]
-  portEvent: Annotated[(NV2080_CTRL_NVLINK_PORT_EVENT* 64), 24]
+  portEvent: Annotated[Array[NV2080_CTRL_NVLINK_PORT_EVENT, Literal[64]], 24]
 NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_PORT_EVENTS_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_CYCLE_LINK_PARAMS:
@@ -11351,7 +11350,7 @@ NV2080_CTRL_NVLINK_IS_REDUCED_CONFIG_PARAMS = struct_NV2080_CTRL_NVLINK_IS_REDUC
 @record
 class struct_NV2080_CTRL_NVLINK_PRM_DATA:
   SIZE = 496
-  data: Annotated[(NvU8* 496), 0]
+  data: Annotated[Array[NvU8, Literal[496]], 0]
 NV2080_CTRL_NVLINK_PRM_DATA = struct_NV2080_CTRL_NVLINK_PRM_DATA
 @record
 class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PAOS_PARAMS:
@@ -11441,7 +11440,7 @@ class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PPSLC_PARAMS:
   hp_queues_bitmap: Annotated[NvU32, 504]
   l1_hw_active_time: Annotated[NvU16, 508]
   l1_hw_inactive_time: Annotated[NvU16, 510]
-  qem: Annotated[(NvU8* 8), 512]
+  qem: Annotated[Array[NvU8, Literal[8]], 512]
   l0_rx_cap_adv: Annotated[NvBool, 520]
   l0_rx_req_en: Annotated[NvBool, 521]
   l0_tx_cap_adv: Annotated[NvBool, 522]
@@ -11711,7 +11710,7 @@ NV2080_CTRL_NVLINK_PRM_ACCESS_PPLR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS
 @record
 class struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS:
   SIZE = 16
-  counterMask: Annotated[(NvU64* 2), 0]
+  counterMask: Annotated[Array[NvU64, Literal[2]], 0]
 NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_COUNTERS_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MORD_PARAMS:
@@ -11769,7 +11768,7 @@ class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS:
   prm: Annotated[NV2080_CTRL_NVLINK_PRM_DATA, 1]
   enable_all: Annotated[NvU8, 497]
   log_delay: Annotated[NvU8, 498]
-  source_id_bitmask: Annotated[(NvU32* 8), 500]
+  source_id_bitmask: Annotated[Array[NvU32, Literal[8]], 500]
 NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIE_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MTIM_PARAMS:
@@ -11818,8 +11817,8 @@ class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS:
   counter_rst: Annotated[NvBool, 501]
   counter_en: Annotated[NvBool, 502]
   force_count_mask: Annotated[NvU8, 503]
-  cnt_type: Annotated[(NvU8* 8), 504]
-  cnt_val: Annotated[(NvU8* 8), 512]
+  cnt_type: Annotated[Array[NvU8, Literal[8]], 504]
+  cnt_val: Annotated[Array[NvU8, Literal[8]], 512]
 NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MLPC_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS:
@@ -11834,8 +11833,8 @@ NV2080_CTRL_NVLINK_PRM_ACCESS_PLIB_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS
 @record
 class struct_NV2080_CTRL_NVLINK_GET_PLATFORM_INFO_PARAMS:
   SIZE = 39
-  ibGuid: Annotated[(NvU8* 16), 0]
-  rackGuid: Annotated[(NvU8* 16), 16]
+  ibGuid: Annotated[Array[NvU8, Literal[16]], 0]
+  rackGuid: Annotated[Array[NvU8, Literal[16]], 16]
   chassisPhysicalSlotNumber: Annotated[NvU8, 32]
   computeSlotIndex: Annotated[NvU8, 33]
   nodeIndex: Annotated[NvU8, 34]
@@ -11855,13 +11854,13 @@ class struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS:
   SIZE = 536
   linkMask: Annotated[NvU32, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  uphyCmd: Annotated[(NV2080_CTRL_NVLINK_UPHY_CLN_CMD* 64), 24]
-  data: Annotated[(NvU32* 64), 280]
+  uphyCmd: Annotated[Array[NV2080_CTRL_NVLINK_UPHY_CLN_CMD, Literal[64]], 24]
+  data: Annotated[Array[NvU32, Literal[64]], 280]
 NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS = struct_NV2080_CTRL_NVLINK_READ_UPHY_CLN_REG_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS:
   SIZE = 24
-  rbmModesList: Annotated[(NvU8* 23), 0]
+  rbmModesList: Annotated[Array[NvU8, Literal[23]], 0]
   rbmTotalModes: Annotated[NvU8, 23]
 NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_SUPPORTED_BW_MODE_PARAMS
 @record
@@ -11955,7 +11954,7 @@ class struct_NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS:
   SIZE = 536
   linkMask: Annotated[NvU32, 0]
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
-  config: Annotated[(NV2080_CTRL_NVLINK_L1_FORCE_CONFIG* 64), 24]
+  config: Annotated[Array[NV2080_CTRL_NVLINK_L1_FORCE_CONFIG, Literal[64]], 24]
 NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_L1_TOGGLE_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_GET_NVLE_ENCRYPT_EN_INFO_PARAMS:
@@ -11969,7 +11968,7 @@ class struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCSR_PARAMS:
   prm: Annotated[NV2080_CTRL_NVLINK_PRM_DATA, 1]
   base_address: Annotated[NvU32, 500]
   num_addresses: Annotated[NvU16, 504]
-  data: Annotated[(NvU32* 16), 508]
+  data: Annotated[Array[NvU32, Literal[16]], 508]
 NV2080_CTRL_NVLINK_PRM_ACCESS_MCSR_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS_MCSR_PARAMS
 @record
 class struct_NV2080_CTRL_NVLINK_SEMANTIC_VERSION:
@@ -11982,7 +11981,7 @@ NV2080_CTRL_NVLINK_SEMANTIC_VERSION = struct_NV2080_CTRL_NVLINK_SEMANTIC_VERSION
 @record
 class struct_NV2080_CTRL_NVLINK_GET_FIRMWARE_VERSION_INFO_PARAMS:
   SIZE = 264
-  firmwareVersion: Annotated[(NV2080_CTRL_NVLINK_SEMANTIC_VERSION* 16), 0]
+  firmwareVersion: Annotated[Array[NV2080_CTRL_NVLINK_SEMANTIC_VERSION, Literal[16]], 0]
   chipTypeArch: Annotated[NvU8, 256]
   numValidEntries: Annotated[NvU32, 260]
 NV2080_CTRL_NVLINK_GET_FIRMWARE_VERSION_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_FIRMWARE_VERSION_INFO_PARAMS
@@ -12057,7 +12056,7 @@ NV2080_CTRL_NVLINK_PRM_ACCESS_PPRM_PARAMS = struct_NV2080_CTRL_NVLINK_PRM_ACCESS
 @record
 class struct_NV2080_CTRL_NVLINK_NODE_HOSTNAME:
   SIZE = 64
-  name: Annotated[(NvU8* 64), 0]
+  name: Annotated[Array[NvU8, Literal[64]], 0]
 NV2080_CTRL_NVLINK_NODE_HOSTNAME = struct_NV2080_CTRL_NVLINK_NODE_HOSTNAME
 @record
 class struct_NV2080_CTRL_NVLINK_SAVE_NODE_HOSTNAME_PARAMS:
@@ -12130,8 +12129,8 @@ class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS:
   rm: Annotated[_anonstruct55, 0]
   output: Annotated[NV2080_CTRL_PERF_RATED_TDP_ACTION, 8]
   outputVPstate: Annotated[NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE, 12]
-  inputs: Annotated[(NV2080_CTRL_PERF_RATED_TDP_ACTION* 5), 16]
-  vPstateTypes: Annotated[(NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE* 5), 36]
+  inputs: Annotated[Array[NV2080_CTRL_PERF_RATED_TDP_ACTION, Literal[5]], 16]
+  vPstateTypes: Annotated[Array[NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE, Literal[5]], 36]
 @record
 class _anonstruct55:
   SIZE = 8
@@ -12154,7 +12153,7 @@ class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE:
   vgpuScale: Annotated[NvU32, 4]
   procId: Annotated[NvU32, 8]
   subProcessID: Annotated[NvU32, 12]
-  subProcessName: Annotated[(ctypes.c_char* 100), 16]
+  subProcessName: Annotated[Array[ctypes.c_char, Literal[100]], 16]
   pOsPidInfo: Annotated[NvU64, 120]
 NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE = struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE
 @record
@@ -12176,7 +12175,7 @@ class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS:
   bufSize: Annotated[NvU32, 4]
   count: Annotated[NvU32, 8]
   tracker: Annotated[NvU32, 12]
-  samples: Annotated[(NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE* 72), 16]
+  samples: Annotated[Array[NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE, Literal[72]], 16]
 NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS = struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS
 @record
 class struct_NV2080_CTRL_PERF_GPU_IS_IDLE_PARAMS:
@@ -12215,7 +12214,7 @@ class struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS:
   SIZE = 780
   level: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
-  perfGetClkInfoList: Annotated[(NV2080_CTRL_PERF_GET_CLK_INFO* 32), 8]
+  perfGetClkInfoList: Annotated[Array[NV2080_CTRL_PERF_GET_CLK_INFO, Literal[32]], 8]
   perfGetClkInfoListSize: Annotated[NvU32, 776]
 NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS = struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS
 enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint32)
@@ -12322,7 +12321,7 @@ class struct_NV2080_CTRL_RC_GET_ERROR_V2_PARAMS:
   SIZE = 8200
   whichBuffer: Annotated[NvU32, 0]
   outputRecordSize: Annotated[NvU32, 4]
-  recordBuffer: Annotated[(NvU8* 8192), 8]
+  recordBuffer: Annotated[Array[NvU8, Literal[8192]], 8]
 NV2080_CTRL_RC_GET_ERROR_V2_PARAMS = struct_NV2080_CTRL_RC_GET_ERROR_V2_PARAMS
 @record
 class struct_NV2080_CTRL_RC_GET_WATCHDOG_INFO_PARAMS:
@@ -12372,15 +12371,15 @@ PRM_GSP_SPDM_CMD_CC_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_CTRL)
 class struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA:
   SIZE = 68
   cmdType: Annotated[NvU8, 0]
-  rsvd0: Annotated[(NvU32* 2), 4]
+  rsvd0: Annotated[Array[NvU32, Literal[2]], 4]
   rsvd1: Annotated[NvU32, 12]
-  rsvd2: Annotated[(ctypes.c_char* 9), 16]
-  rsvd3: Annotated[(ctypes.c_char* 5), 25]
-  rsvd4: Annotated[(ctypes.c_char* 5), 30]
-  rsvd5: Annotated[(ctypes.c_char* 5), 35]
-  rsvd6: Annotated[(ctypes.c_char* 2), 40]
-  rsvd7: Annotated[(ctypes.c_char* 16), 42]
-  rsvd8: Annotated[(NvU32* 2), 60]
+  rsvd2: Annotated[Array[ctypes.c_char, Literal[9]], 16]
+  rsvd3: Annotated[Array[ctypes.c_char, Literal[5]], 25]
+  rsvd4: Annotated[Array[ctypes.c_char, Literal[5]], 30]
+  rsvd5: Annotated[Array[ctypes.c_char, Literal[5]], 35]
+  rsvd6: Annotated[Array[ctypes.c_char, Literal[2]], 40]
+  rsvd7: Annotated[Array[ctypes.c_char, Literal[16]], 42]
+  rsvd8: Annotated[Array[NvU32, Literal[2]], 60]
 RM_GSP_SPDM_CMD_CC_INIT_RM_DATA = struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA
 PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA)
 @record
@@ -12396,8 +12395,8 @@ class struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST:
   cmdType: Annotated[NvU8, 0]
   isEnc: Annotated[NvU8, 1]
   kmb: Annotated[CC_KMB, 4]
-  text: Annotated[(NvU8* 16), 128]
-  authTag: Annotated[(NvU8* 16), 144]
+  text: Annotated[Array[NvU8, Literal[16]], 128]
+  authTag: Annotated[Array[NvU8, Literal[16]], 144]
 @record
 class struct_CC_KMB:
   SIZE = 124
@@ -12409,15 +12408,15 @@ CC_KMB = struct_CC_KMB
 @record
 class struct_CC_AES_CRYPTOBUNDLE:
   SIZE = 56
-  iv: Annotated[(NvU32* 3), 0]
-  key: Annotated[(NvU32* 8), 12]
-  ivMask: Annotated[(NvU32* 3), 44]
+  iv: Annotated[Array[NvU32, Literal[3]], 0]
+  key: Annotated[Array[NvU32, Literal[8]], 12]
+  ivMask: Annotated[Array[NvU32, Literal[3]], 44]
 CC_AES_CRYPTOBUNDLE = struct_CC_AES_CRYPTOBUNDLE
 @record
 class struct_CC_HMAC_CRYPTOBUNDLE:
   SIZE = 64
-  nonce: Annotated[(NvU32* 8), 0]
-  key: Annotated[(NvU32* 8), 32]
+  nonce: Annotated[Array[NvU32, Literal[8]], 0]
+  key: Annotated[Array[NvU32, Literal[8]], 32]
 CC_HMAC_CRYPTOBUNDLE = struct_CC_HMAC_CRYPTOBUNDLE
 RM_GSP_SPDM_CMD_FIPS_SELFTEST = struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST
 PRM_GSP_SPDM_CMD_FIPS_SELFTEST = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST)
@@ -12455,7 +12454,7 @@ NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS = struct_NV2080_CTRL_INTERNAL_SPDM_PA
 @record
 class struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS:
   SIZE = 9220
-  transcript: Annotated[(NvU8* 9216), 0]
+  transcript: Annotated[Array[NvU8, Literal[9216]], 0]
   transcriptSize: Annotated[NvU32, 9216]
 NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS = struct_NV2080_CTRL_INTERNAL_SPDM_RETRIEVE_TRANSCRIPT_PARAMS
 @record
@@ -12516,7 +12515,7 @@ class union_NV2080_CTRL_THERMAL_SYSTEM_INSTRUCTION_OPERANDS:
   getInfoSensorTarget: Annotated[NV2080_CTRL_THERMAL_SYSTEM_GET_INFO_SENSOR_TARGET_OPERANDS, 0]
   getInfoSensorReadingRange: Annotated[NV2080_CTRL_THERMAL_SYSTEM_GET_INFO_SENSOR_READING_RANGE_OPERANDS, 0]
   getStatusSensorReading: Annotated[NV2080_CTRL_THERMAL_SYSTEM_GET_STATUS_SENSOR_READING_OPERANDS, 0]
-  space: Annotated[(NvU32* 8), 0]
+  space: Annotated[Array[NvU32, Literal[8]], 0]
 NV2080_CTRL_THERMAL_SYSTEM_INSTRUCTION_OPERANDS = union_NV2080_CTRL_THERMAL_SYSTEM_INSTRUCTION_OPERANDS
 @record
 class struct_NV2080_CTRL_THERMAL_SYSTEM_INSTRUCTION:
@@ -12535,7 +12534,7 @@ class struct_NV2080_CTRL_THERMAL_SYSTEM_EXECUTE_V2_PARAMS:
   executeFlags: Annotated[NvU32, 12]
   successfulInstructions: Annotated[NvU32, 16]
   instructionListSize: Annotated[NvU32, 20]
-  instructionList: Annotated[(NV2080_CTRL_THERMAL_SYSTEM_INSTRUCTION* 32), 24]
+  instructionList: Annotated[Array[NV2080_CTRL_THERMAL_SYSTEM_INSTRUCTION, Literal[32]], 24]
 NV2080_CTRL_THERMAL_SYSTEM_EXECUTE_V2_PARAMS = struct_NV2080_CTRL_THERMAL_SYSTEM_EXECUTE_V2_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_TIMER_SCHEDULE_PARAMS:
@@ -12564,7 +12563,7 @@ class struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS:
   SIZE = 264
   cpuClkId: Annotated[NvU8, 0]
   sampleCount: Annotated[NvU8, 1]
-  samples: Annotated[(NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE* 16), 8]
+  samples: Annotated[Array[NV2080_CTRL_TIMER_GPU_CPU_TIME_SAMPLE, Literal[16]], 8]
 NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS = struct_NV2080_CTRL_TIMER_GET_GPU_CPU_TIME_CORRELATION_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS:
@@ -12616,11 +12615,11 @@ class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_BOOTLOAD_GSP_VGPU_PLUGIN_TASK_PARAMS:
   swizzId: Annotated[NvU32, 16]
   numChannels: Annotated[NvU32, 20]
   numPluginChannels: Annotated[NvU32, 24]
-  chidOffset: Annotated[(NvU32* 84), 28]
+  chidOffset: Annotated[Array[NvU32, Literal[84]], 28]
   bDisableDefaultSmcExecPartRestore: Annotated[NvBool, 364]
   numGuestFbSegments: Annotated[NvU32, 368]
-  guestFbPhysAddrList: Annotated[(NvU64* 384), 376]
-  guestFbLengthList: Annotated[(NvU64* 384), 3448]
+  guestFbPhysAddrList: Annotated[Array[NvU64, Literal[384]], 376]
+  guestFbLengthList: Annotated[Array[NvU64, Literal[384]], 3448]
   pluginHeapMemoryPhysAddr: Annotated[NvU64, 6520]
   pluginHeapMemoryLength: Annotated[NvU64, 6528]
   ctrlBuffOffset: Annotated[NvU64, 6536]
@@ -12644,15 +12643,15 @@ class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS:
   SIZE = 694280
   discardVgpuTypes: Annotated[NvBool, 0]
   vgpuInfoCount: Annotated[NvU32, 4]
-  vgpuInfo: Annotated[(NVA081_CTRL_VGPU_INFO* 128), 8]
+  vgpuInfo: Annotated[Array[NVA081_CTRL_VGPU_INFO, Literal[128]], 8]
 @record
 class struct_NVA081_CTRL_VGPU_INFO:
   SIZE = 5424
   vgpuType: Annotated[NvU32, 0]
-  vgpuName: Annotated[(NvU8* 64), 4]
-  vgpuClass: Annotated[(NvU8* 64), 68]
-  vgpuSignature: Annotated[(NvU8* 128), 132]
-  license: Annotated[(NvU8* 128), 260]
+  vgpuName: Annotated[Array[NvU8, Literal[64]], 4]
+  vgpuClass: Annotated[Array[NvU8, Literal[64]], 68]
+  vgpuSignature: Annotated[Array[NvU8, Literal[128]], 132]
+  license: Annotated[Array[NvU8, Literal[128]], 260]
   maxInstance: Annotated[NvU32, 388]
   numHeads: Annotated[NvU32, 392]
   maxResolutionX: Annotated[NvU32, 396]
@@ -12674,11 +12673,11 @@ class struct_NVA081_CTRL_VGPU_INFO:
   bar1Length: Annotated[NvU64, 496]
   frlEnable: Annotated[NvU32, 504]
   vgpuSsvid: Annotated[NvU16, 508]
-  adapterName: Annotated[(NvU8* 64), 510]
-  adapterName_Unicode: Annotated[(NvU16* 64), 574]
-  shortGpuNameString: Annotated[(NvU8* 64), 702]
-  licensedProductName: Annotated[(NvU8* 128), 766]
-  vgpuExtraParams: Annotated[(NvU32* 1024), 896]
+  adapterName: Annotated[Array[NvU8, Literal[64]], 510]
+  adapterName_Unicode: Annotated[Array[NvU16, Literal[64]], 574]
+  shortGpuNameString: Annotated[Array[NvU8, Literal[64]], 702]
+  licensedProductName: Annotated[Array[NvU8, Literal[128]], 766]
+  vgpuExtraParams: Annotated[Array[NvU32, Literal[1024]], 896]
   ftraceEnable: Annotated[NvU32, 4992]
   gpuDirectSupported: Annotated[NvU32, 4996]
   nvlinkP2PSupported: Annotated[NvU32, 5000]
@@ -12689,9 +12688,9 @@ class struct_NVA081_CTRL_VGPU_INFO:
   gpuInstanceProfileId: Annotated[NvU32, 5020]
   placementSize: Annotated[NvU32, 5024]
   homogeneousPlacementCount: Annotated[NvU32, 5028]
-  homogeneousPlacementIds: Annotated[(NvU32* 48), 5032]
+  homogeneousPlacementIds: Annotated[Array[NvU32, Literal[48]], 5032]
   heterogeneousPlacementCount: Annotated[NvU32, 5224]
-  heterogeneousPlacementIds: Annotated[(NvU32* 48), 5228]
+  heterogeneousPlacementIds: Annotated[Array[NvU32, Literal[48]], 5228]
 NVA081_CTRL_VGPU_INFO = struct_NVA081_CTRL_VGPU_INFO
 NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_PGPU_ADD_VGPU_TYPE_PARAMS
 @record
@@ -12706,8 +12705,8 @@ class struct_NV2080_GUEST_VM_INFO:
   licenseState: Annotated[NvU32, 24]
   licenseExpiryTimestamp: Annotated[NvU32, 28]
   licenseExpiryStatus: Annotated[NvU8, 32]
-  guestDriverVersion: Annotated[(NvU8* 64), 33]
-  guestDriverBranch: Annotated[(NvU8* 64), 97]
+  guestDriverVersion: Annotated[Array[NvU8, Literal[64]], 33]
+  guestDriverBranch: Annotated[Array[NvU8, Literal[64]], 97]
   guestVmInfoState: Annotated[GUEST_VM_INFO_STATE, 164]
 enum_GUEST_VM_INFO_STATE = CEnum(ctypes.c_uint32)
 GUEST_VM_INFO_STATE_UNINITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_UNINITIALIZED', 0)
@@ -12737,7 +12736,7 @@ NV2080_VGPU_GUEST = struct_NV2080_VGPU_GUEST
 class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS:
   SIZE = 10376
   numVgpu: Annotated[NvU32, 0]
-  vgpuGuest: Annotated[(NV2080_VGPU_GUEST* 48), 8]
+  vgpuGuest: Annotated[Array[NV2080_VGPU_GUEST, Literal[48]], 8]
 NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_ENUMERATE_VGPU_PER_PGPU_PARAMS
 @record
 class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_CLEAR_GUEST_VM_INFO_PARAMS:
@@ -12754,7 +12753,7 @@ NV2080_VGPU_FB_USAGE = struct_NV2080_VGPU_FB_USAGE
 class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS:
   SIZE = 776
   vgpuCount: Annotated[NvU32, 0]
-  vgpuFbUsage: Annotated[(NV2080_VGPU_FB_USAGE* 48), 8]
+  vgpuFbUsage: Annotated[Array[NV2080_VGPU_FB_USAGE, Literal[48]], 8]
 NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_VGPU_FB_USAGE_PARAMS
 @record
 class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_SET_VGPU_ENCODER_CAPACITY_PARAMS:
@@ -12770,7 +12769,7 @@ NV2080_CTRL_VGPU_MGR_INTERNAL_VGPU_PLUGIN_CLEANUP_PARAMS = struct_NV2080_CTRL_VG
 @record
 class struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS:
   SIZE = 260
-  pgpuString: Annotated[(NvU8* 256), 0]
+  pgpuString: Annotated[Array[NvU8, Literal[256]], 0]
   pgpuStringSize: Annotated[NvU32, 256]
 NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS = struct_NV2080_CTRL_VGPU_MGR_INTERNAL_GET_PGPU_FS_ENCODING_PARAMS
 @record
@@ -12855,7 +12854,7 @@ class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS:
   SIZE = 4824
   hTargetChannel: Annotated[NvHandle, 0]
   numSMsToRead: Annotated[NvU32, 4]
-  smErrorStateArray: Annotated[(NV83DE_SM_ERROR_STATE_REGISTERS* 100), 8]
+  smErrorStateArray: Annotated[Array[NV83DE_SM_ERROR_STATE_REGISTERS, Literal[100]], 8]
   mmuFaultInfo: Annotated[NvU32, 4808]
   mmuFault: Annotated[NV83DE_MMU_FAULT_INFO, 4812]
   startingSM: Annotated[NvU32, 4820]
@@ -12923,7 +12922,7 @@ NV83DE_CTRL_DEBUG_ACCESS_OP = struct_NV83DE_CTRL_DEBUG_ACCESS_OP
 class struct_NV83DE_CTRL_DEBUG_ACCESS_SURFACE_PARAMETERS:
   SIZE = 1544
   count: Annotated[NvU32, 0]
-  opsBuffer: Annotated[(NV83DE_CTRL_DEBUG_ACCESS_OP* 64), 8]
+  opsBuffer: Annotated[Array[NV83DE_CTRL_DEBUG_ACCESS_OP, Literal[64]], 8]
 NV83DE_CTRL_DEBUG_ACCESS_SURFACE_PARAMETERS = struct_NV83DE_CTRL_DEBUG_ACCESS_SURFACE_PARAMETERS
 @record
 class struct_NV83DE_CTRL_DEBUG_GET_MAPPINGS_OP:
@@ -12938,14 +12937,14 @@ class struct_NV83DE_CTRL_DEBUG_GET_MAPPINGS_PARAMETERS:
   vaHi: Annotated[NvU64, 8]
   count: Annotated[NvU32, 16]
   hasMore: Annotated[NvU32, 20]
-  opsBuffer: Annotated[(NV83DE_CTRL_DEBUG_GET_MAPPINGS_OP* 64), 24]
+  opsBuffer: Annotated[Array[NV83DE_CTRL_DEBUG_GET_MAPPINGS_OP, Literal[64]], 24]
 NV83DE_CTRL_DEBUG_GET_MAPPINGS_PARAMETERS = struct_NV83DE_CTRL_DEBUG_GET_MAPPINGS_PARAMETERS
 @record
 class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS:
   SIZE = 3208
   bNonTransactional: Annotated[NvBool, 0]
   regOpCount: Annotated[NvU32, 4]
-  regOps: Annotated[(NV2080_CTRL_GPU_REG_OP* 100), 8]
+  regOps: Annotated[Array[NV2080_CTRL_GPU_REG_OP, Literal[100]], 8]
 NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS = struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS
 @record
 class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS:
@@ -13011,7 +13010,7 @@ class struct_NV83DE_CTRL_DEBUG_ACCESS_MEMORY_PARAMS:
   pData: Annotated[NvP64, 0]
   dataLength: Annotated[NvU32, 8]
   count: Annotated[NvU32, 12]
-  entries: Annotated[(NV83DE_CTRL_DEBUG_ACCESS_MEMORY_ENTRY* 150), 16]
+  entries: Annotated[Array[NV83DE_CTRL_DEBUG_ACCESS_MEMORY_ENTRY, Literal[150]], 16]
 NV83DE_CTRL_DEBUG_ACCESS_MEMORY_PARAMS = struct_NV83DE_CTRL_DEBUG_ACCESS_MEMORY_PARAMS
 @record
 class struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_ENTRY:
@@ -13023,7 +13022,7 @@ NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_ENTRY = struct_NV83DE_CTRL_DEBUG_READ_MMU_
 @record
 class struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS:
   SIZE = 72
-  mmuFaultInfoList: Annotated[(NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_ENTRY* 4), 0]
+  mmuFaultInfoList: Annotated[Array[NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_ENTRY, Literal[4]], 0]
   count: Annotated[NvU32, 64]
 NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS = struct_NV83DE_CTRL_DEBUG_READ_MMU_FAULT_INFO_PARAMS
 @record

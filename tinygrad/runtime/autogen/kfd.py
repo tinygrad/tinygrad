@@ -1,8 +1,7 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_kfd_ioctl_get_version_args:
   SIZE = 8
@@ -121,7 +120,7 @@ class struct_kfd_process_device_apertures:
 @record
 class struct_kfd_ioctl_get_process_apertures_args:
   SIZE = 400
-  process_apertures: Annotated[(struct_kfd_process_device_apertures* 7), 0]
+  process_apertures: Annotated[Array[struct_kfd_process_device_apertures, Literal[7]], 0]
   num_of_nodes: Annotated[ctypes.c_uint32, 392]
   pad: Annotated[ctypes.c_uint32, 396]
 @record
@@ -414,7 +413,7 @@ KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_H
 class struct_kfd_ioctl_ipc_export_handle_args:
   SIZE = 32
   handle: Annotated[ctypes.c_uint64, 0]
-  share_handle: Annotated[(ctypes.c_uint32* 4), 8]
+  share_handle: Annotated[Array[ctypes.c_uint32, Literal[4]], 8]
   gpu_id: Annotated[ctypes.c_uint32, 24]
   flags: Annotated[ctypes.c_uint32, 28]
 @record
@@ -423,7 +422,7 @@ class struct_kfd_ioctl_ipc_import_handle_args:
   handle: Annotated[ctypes.c_uint64, 0]
   va_addr: Annotated[ctypes.c_uint64, 8]
   mmap_offset: Annotated[ctypes.c_uint64, 16]
-  share_handle: Annotated[(ctypes.c_uint32* 4), 24]
+  share_handle: Annotated[Array[ctypes.c_uint32, Literal[4]], 24]
   gpu_id: Annotated[ctypes.c_uint32, 40]
   flags: Annotated[ctypes.c_uint32, 44]
 @record
@@ -466,7 +465,7 @@ class struct_kfd_ioctl_svm_args:
   size: Annotated[ctypes.c_uint64, 8]
   op: Annotated[ctypes.c_uint32, 16]
   nattr: Annotated[ctypes.c_uint32, 20]
-  attrs: Annotated[(struct_kfd_ioctl_svm_attribute * 0), 24]
+  attrs: Annotated[Array[struct_kfd_ioctl_svm_attribute, Literal[0]], 24]
 @record
 class struct_kfd_ioctl_set_xnack_mode_args:
   SIZE = 4

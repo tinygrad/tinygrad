@@ -1,13 +1,12 @@
-# mypy: ignore-errors
 from __future__ import annotations
 import ctypes
-from typing import Annotated
-from tinygrad.runtime.support.c import DLL, record, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from typing import Annotated, Literal
+from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 dll = DLL('ib', 'ibverbs', use_errno=True)
 @record
 class union_ibv_gid:
   SIZE = 16
-  raw: Annotated[(uint8_t* 16), 0]
+  raw: Annotated[Array[uint8_t, Literal[16]], 0]
   _global: Annotated[_anonstruct0, 0]
 uint8_t = ctypes.c_ubyte
 @record
@@ -118,10 +117,10 @@ class struct_ibv_device:
   _ops: Annotated[struct__ibv_device_ops, 0]
   node_type: Annotated[enum_ibv_node_type, 16]
   transport_type: Annotated[enum_ibv_transport_type, 20]
-  name: Annotated[(ctypes.c_char* 64), 24]
-  dev_name: Annotated[(ctypes.c_char* 64), 88]
-  dev_path: Annotated[(ctypes.c_char* 256), 152]
-  ibdev_path: Annotated[(ctypes.c_char* 256), 408]
+  name: Annotated[Array[ctypes.c_char, Literal[64]], 24]
+  dev_name: Annotated[Array[ctypes.c_char, Literal[64]], 88]
+  dev_path: Annotated[Array[ctypes.c_char, Literal[256]], 152]
+  ibdev_path: Annotated[Array[ctypes.c_char, Literal[256]], 408]
 @record
 class struct__ibv_device_ops:
   SIZE = 16
@@ -165,7 +164,7 @@ class struct_ibv_context_ops:
 @record
 class struct_ibv_device_attr:
   SIZE = 232
-  fw_ver: Annotated[(ctypes.c_char* 64), 0]
+  fw_ver: Annotated[Array[ctypes.c_char, Literal[64]], 0]
   node_guid: Annotated[ctypes.c_uint64, 64]
   sys_image_guid: Annotated[ctypes.c_uint64, 72]
   max_mr_size: Annotated[uint64_t, 80]
@@ -263,7 +262,7 @@ class struct_ibv_comp_channel:
 class pthread_mutex_t:
   SIZE = 40
   __data: Annotated[struct___pthread_mutex_s, 0]
-  __size: Annotated[(ctypes.c_char* 40), 0]
+  __size: Annotated[Array[ctypes.c_char, Literal[40]], 0]
   __align: Annotated[ctypes.c_int64, 0]
 @record
 class struct___pthread_mutex_s:
@@ -286,18 +285,18 @@ __pthread_list_t = struct___pthread_internal_list
 class pthread_cond_t:
   SIZE = 48
   __data: Annotated[struct___pthread_cond_s, 0]
-  __size: Annotated[(ctypes.c_char* 48), 0]
+  __size: Annotated[Array[ctypes.c_char, Literal[48]], 0]
   __align: Annotated[ctypes.c_int64, 0]
 @record
 class struct___pthread_cond_s:
   SIZE = 48
   __wseq: Annotated[__atomic_wide_counter, 0]
   __g1_start: Annotated[__atomic_wide_counter, 8]
-  __g_refs: Annotated[(ctypes.c_uint32* 2), 16]
-  __g_size: Annotated[(ctypes.c_uint32* 2), 24]
+  __g_refs: Annotated[Array[ctypes.c_uint32, Literal[2]], 16]
+  __g_size: Annotated[Array[ctypes.c_uint32, Literal[2]], 24]
   __g1_orig_size: Annotated[ctypes.c_uint32, 32]
   __wrefs: Annotated[ctypes.c_uint32, 36]
-  __g_signals: Annotated[(ctypes.c_uint32* 2), 40]
+  __g_signals: Annotated[Array[ctypes.c_uint32, Literal[2]], 40]
 @record
 class __atomic_wide_counter:
   SIZE = 8
@@ -1348,8 +1347,8 @@ IBV_FLOW_SPEC_ACTION_COUNT = enum_ibv_flow_spec_type.define('IBV_FLOW_SPEC_ACTIO
 @record
 class struct_ibv_flow_eth_filter:
   SIZE = 16
-  dst_mac: Annotated[(uint8_t* 6), 0]
-  src_mac: Annotated[(uint8_t* 6), 6]
+  dst_mac: Annotated[Array[uint8_t, Literal[6]], 0]
+  src_mac: Annotated[Array[uint8_t, Literal[6]], 6]
   ether_type: Annotated[uint16_t, 12]
   vlan_tag: Annotated[uint16_t, 14]
 @record
@@ -1390,8 +1389,8 @@ class struct_ibv_flow_spec_ipv4_ext:
 @record
 class struct_ibv_flow_ipv6_filter:
   SIZE = 40
-  src_ip: Annotated[(uint8_t* 16), 0]
-  dst_ip: Annotated[(uint8_t* 16), 16]
+  src_ip: Annotated[Array[uint8_t, Literal[16]], 0]
+  dst_ip: Annotated[Array[uint8_t, Literal[16]], 16]
   flow_label: Annotated[uint32_t, 32]
   next_hdr: Annotated[uint8_t, 36]
   traffic_class: Annotated[uint8_t, 37]
@@ -1818,7 +1817,7 @@ def ibv_port_state_str(port_state:enum_ibv_port_state) -> ctypes.POINTER(ctypes.
 @dll.bind
 def ibv_event_type_str(event:enum_ibv_event_type) -> ctypes.POINTER(ctypes.c_char): ...
 @dll.bind
-def ibv_resolve_eth_l2_from_gid(context:ctypes.POINTER(struct_ibv_context), attr:ctypes.POINTER(struct_ibv_ah_attr), eth_mac:(uint8_t* 6), vid:ctypes.POINTER(uint16_t)) -> ctypes.c_int32: ...
+def ibv_resolve_eth_l2_from_gid(context:ctypes.POINTER(struct_ibv_context), attr:ctypes.POINTER(struct_ibv_ah_attr), eth_mac:Array[uint8_t, Literal[6]], vid:ctypes.POINTER(uint16_t)) -> ctypes.c_int32: ...
 @dll.bind
 def ibv_set_ece(qp:ctypes.POINTER(struct_ibv_qp), ece:ctypes.POINTER(struct_ibv_ece)) -> ctypes.c_int32: ...
 @dll.bind
@@ -1915,7 +1914,7 @@ class struct_ib_uverbs_flow_action_esp_keymat_aes_gcm:
   salt: Annotated[ctypes.c_uint32, 12]
   icv_len: Annotated[ctypes.c_uint32, 16]
   key_len: Annotated[ctypes.c_uint32, 20]
-  aes_key: Annotated[(ctypes.c_uint32* 8), 24]
+  aes_key: Annotated[Array[ctypes.c_uint32, Literal[8]], 24]
 @record
 class struct_ib_uverbs_flow_action_esp_replay_bmp:
   SIZE = 4
@@ -1940,7 +1939,7 @@ class struct_ib_uverbs_query_port_resp_ex:
   SIZE = 48
   legacy_resp: Annotated[struct_ib_uverbs_query_port_resp, 0]
   port_cap_flags2: Annotated[ctypes.c_uint16, 40]
-  reserved: Annotated[(ctypes.c_ubyte* 2), 42]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[2]], 42]
   active_speed_ex: Annotated[ctypes.c_uint32, 44]
 @record
 class struct_ib_uverbs_query_port_resp:
@@ -2008,7 +2007,7 @@ IB_UVERBS_GID_TYPE_ROCE_V2 = enum_ib_uverbs_gid_type.define('IB_UVERBS_GID_TYPE_
 @record
 class struct_ib_uverbs_gid_entry:
   SIZE = 32
-  gid: Annotated[(ctypes.c_uint64* 2), 0]
+  gid: Annotated[Array[ctypes.c_uint64, Literal[2]], 0]
   gid_index: Annotated[ctypes.c_uint32, 16]
   port_num: Annotated[ctypes.c_uint32, 20]
   gid_type: Annotated[ctypes.c_uint32, 24]
@@ -2111,18 +2110,18 @@ class struct_ib_uverbs_ex_cmd_hdr:
 class struct_ib_uverbs_get_context:
   SIZE = 8
   response: Annotated[ctypes.c_uint64, 0]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 8]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_get_context_resp:
   SIZE = 8
   async_fd: Annotated[ctypes.c_uint32, 0]
   num_comp_vectors: Annotated[ctypes.c_uint32, 4]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 8]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_query_device:
   SIZE = 8
   response: Annotated[ctypes.c_uint64, 0]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 8]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_query_device_resp:
   SIZE = 176
@@ -2166,7 +2165,7 @@ class struct_ib_uverbs_query_device_resp:
   max_pkeys: Annotated[ctypes.c_uint16, 168]
   local_ca_ack_delay: Annotated[ctypes.c_ubyte, 170]
   phys_port_cnt: Annotated[ctypes.c_ubyte, 171]
-  reserved: Annotated[(ctypes.c_ubyte* 4), 172]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[4]], 172]
 @record
 class struct_ib_uverbs_ex_query_device:
   SIZE = 8
@@ -2223,18 +2222,18 @@ class struct_ib_uverbs_query_port:
   SIZE = 16
   response: Annotated[ctypes.c_uint64, 0]
   port_num: Annotated[ctypes.c_ubyte, 8]
-  reserved: Annotated[(ctypes.c_ubyte* 7), 9]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 16]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[7]], 9]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 16]
 @record
 class struct_ib_uverbs_alloc_pd:
   SIZE = 8
   response: Annotated[ctypes.c_uint64, 0]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 8]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_alloc_pd_resp:
   SIZE = 4
   pd_handle: Annotated[ctypes.c_uint32, 0]
-  driver_data: Annotated[(ctypes.c_uint32 * 0), 4]
+  driver_data: Annotated[Array[ctypes.c_uint32, Literal[0]], 4]
 @record
 class struct_ib_uverbs_dealloc_pd:
   SIZE = 4
@@ -2245,12 +2244,12 @@ class struct_ib_uverbs_open_xrcd:
   response: Annotated[ctypes.c_uint64, 0]
   fd: Annotated[ctypes.c_uint32, 8]
   oflags: Annotated[ctypes.c_uint32, 12]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 16]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 16]
 @record
 class struct_ib_uverbs_open_xrcd_resp:
   SIZE = 4
   xrcd_handle: Annotated[ctypes.c_uint32, 0]
-  driver_data: Annotated[(ctypes.c_uint32 * 0), 4]
+  driver_data: Annotated[Array[ctypes.c_uint32, Literal[0]], 4]
 @record
 class struct_ib_uverbs_close_xrcd:
   SIZE = 4
@@ -2264,14 +2263,14 @@ class struct_ib_uverbs_reg_mr:
   hca_va: Annotated[ctypes.c_uint64, 24]
   pd_handle: Annotated[ctypes.c_uint32, 32]
   access_flags: Annotated[ctypes.c_uint32, 36]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 40]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 40]
 @record
 class struct_ib_uverbs_reg_mr_resp:
   SIZE = 12
   mr_handle: Annotated[ctypes.c_uint32, 0]
   lkey: Annotated[ctypes.c_uint32, 4]
   rkey: Annotated[ctypes.c_uint32, 8]
-  driver_data: Annotated[(ctypes.c_uint32 * 0), 12]
+  driver_data: Annotated[Array[ctypes.c_uint32, Literal[0]], 12]
 @record
 class struct_ib_uverbs_rereg_mr:
   SIZE = 48
@@ -2283,13 +2282,13 @@ class struct_ib_uverbs_rereg_mr:
   hca_va: Annotated[ctypes.c_uint64, 32]
   pd_handle: Annotated[ctypes.c_uint32, 40]
   access_flags: Annotated[ctypes.c_uint32, 44]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 48]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 48]
 @record
 class struct_ib_uverbs_rereg_mr_resp:
   SIZE = 8
   lkey: Annotated[ctypes.c_uint32, 0]
   rkey: Annotated[ctypes.c_uint32, 4]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 8]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_dereg_mr:
   SIZE = 4
@@ -2300,14 +2299,14 @@ class struct_ib_uverbs_alloc_mw:
   response: Annotated[ctypes.c_uint64, 0]
   pd_handle: Annotated[ctypes.c_uint32, 8]
   mw_type: Annotated[ctypes.c_ubyte, 12]
-  reserved: Annotated[(ctypes.c_ubyte* 3), 13]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 16]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[3]], 13]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 16]
 @record
 class struct_ib_uverbs_alloc_mw_resp:
   SIZE = 8
   mw_handle: Annotated[ctypes.c_uint32, 0]
   rkey: Annotated[ctypes.c_uint32, 4]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 8]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_dealloc_mw:
   SIZE = 4
@@ -2329,7 +2328,7 @@ class struct_ib_uverbs_create_cq:
   comp_vector: Annotated[ctypes.c_uint32, 20]
   comp_channel: Annotated[ctypes.c_int32, 24]
   reserved: Annotated[ctypes.c_uint32, 28]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 32]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 32]
 __s32 = ctypes.c_int32
 enum_ib_uverbs_ex_create_cq_flags = CEnum(ctypes.c_uint32)
 IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION = enum_ib_uverbs_ex_create_cq_flags.define('IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION', 1)
@@ -2350,7 +2349,7 @@ class struct_ib_uverbs_create_cq_resp:
   SIZE = 8
   cq_handle: Annotated[ctypes.c_uint32, 0]
   cqe: Annotated[ctypes.c_uint32, 4]
-  driver_data: Annotated[(ctypes.c_uint64* 0), 8]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_ex_create_cq_resp:
   SIZE = 16
@@ -2363,13 +2362,13 @@ class struct_ib_uverbs_resize_cq:
   response: Annotated[ctypes.c_uint64, 0]
   cq_handle: Annotated[ctypes.c_uint32, 8]
   cqe: Annotated[ctypes.c_uint32, 12]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 16]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 16]
 @record
 class struct_ib_uverbs_resize_cq_resp:
   SIZE = 8
   cqe: Annotated[ctypes.c_uint32, 0]
   reserved: Annotated[ctypes.c_uint32, 4]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 8]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_poll_cq:
   SIZE = 16
@@ -2416,7 +2415,7 @@ class struct_ib_uverbs_poll_cq_resp:
   SIZE = 8
   count: Annotated[ctypes.c_uint32, 0]
   reserved: Annotated[ctypes.c_uint32, 4]
-  wc: Annotated[(struct_ib_uverbs_wc * 0), 8]
+  wc: Annotated[Array[struct_ib_uverbs_wc, Literal[0]], 8]
 @record
 class struct_ib_uverbs_req_notify_cq:
   SIZE = 8
@@ -2436,7 +2435,7 @@ class struct_ib_uverbs_destroy_cq_resp:
 @record
 class struct_ib_uverbs_global_route:
   SIZE = 24
-  dgid: Annotated[(ctypes.c_ubyte* 16), 0]
+  dgid: Annotated[Array[ctypes.c_ubyte, Literal[16]], 0]
   flow_label: Annotated[ctypes.c_uint32, 16]
   sgid_index: Annotated[ctypes.c_ubyte, 20]
   hop_limit: Annotated[ctypes.c_ubyte, 21]
@@ -2486,7 +2485,7 @@ class struct_ib_uverbs_qp_attr:
   rnr_retry: Annotated[ctypes.c_ubyte, 136]
   alt_port_num: Annotated[ctypes.c_ubyte, 137]
   alt_timeout: Annotated[ctypes.c_ubyte, 138]
-  reserved: Annotated[(ctypes.c_ubyte* 5), 139]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[5]], 139]
 @record
 class struct_ib_uverbs_create_qp:
   SIZE = 56
@@ -2505,7 +2504,7 @@ class struct_ib_uverbs_create_qp:
   qp_type: Annotated[ctypes.c_ubyte, 53]
   is_srq: Annotated[ctypes.c_ubyte, 54]
   reserved: Annotated[ctypes.c_ubyte, 55]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 56]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 56]
 enum_ib_uverbs_create_qp_mask = CEnum(ctypes.c_uint32)
 IB_UVERBS_CREATE_QP_MASK_IND_TABLE = enum_ib_uverbs_create_qp_mask.define('IB_UVERBS_CREATE_QP_MASK_IND_TABLE', 1)
 
@@ -2541,8 +2540,8 @@ class struct_ib_uverbs_open_qp:
   pd_handle: Annotated[ctypes.c_uint32, 16]
   qpn: Annotated[ctypes.c_uint32, 20]
   qp_type: Annotated[ctypes.c_ubyte, 24]
-  reserved: Annotated[(ctypes.c_ubyte* 7), 25]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 32]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[7]], 25]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 32]
 @record
 class struct_ib_uverbs_create_qp_resp:
   SIZE = 32
@@ -2554,7 +2553,7 @@ class struct_ib_uverbs_create_qp_resp:
   max_recv_sge: Annotated[ctypes.c_uint32, 20]
   max_inline_data: Annotated[ctypes.c_uint32, 24]
   reserved: Annotated[ctypes.c_uint32, 28]
-  driver_data: Annotated[(ctypes.c_uint32* 0), 32]
+  driver_data: Annotated[Array[ctypes.c_uint32, Literal[0]], 32]
 @record
 class struct_ib_uverbs_ex_create_qp_resp:
   SIZE = 40
@@ -2564,7 +2563,7 @@ class struct_ib_uverbs_ex_create_qp_resp:
 @record
 class struct_ib_uverbs_qp_dest:
   SIZE = 32
-  dgid: Annotated[(ctypes.c_ubyte* 16), 0]
+  dgid: Annotated[Array[ctypes.c_ubyte, Literal[16]], 0]
   flow_label: Annotated[ctypes.c_uint32, 16]
   dlid: Annotated[ctypes.c_uint16, 20]
   reserved: Annotated[ctypes.c_uint16, 22]
@@ -2582,7 +2581,7 @@ class struct_ib_uverbs_query_qp:
   response: Annotated[ctypes.c_uint64, 0]
   qp_handle: Annotated[ctypes.c_uint32, 8]
   attr_mask: Annotated[ctypes.c_uint32, 12]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 16]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 16]
 @record
 class struct_ib_uverbs_query_qp_resp:
   SIZE = 128
@@ -2615,8 +2614,8 @@ class struct_ib_uverbs_query_qp_resp:
   alt_port_num: Annotated[ctypes.c_ubyte, 120]
   alt_timeout: Annotated[ctypes.c_ubyte, 121]
   sq_sig_all: Annotated[ctypes.c_ubyte, 122]
-  reserved: Annotated[(ctypes.c_ubyte* 5), 123]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 128]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[5]], 123]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 128]
 @record
 class struct_ib_uverbs_modify_qp:
   SIZE = 112
@@ -2645,8 +2644,8 @@ class struct_ib_uverbs_modify_qp:
   rnr_retry: Annotated[ctypes.c_ubyte, 107]
   alt_port_num: Annotated[ctypes.c_ubyte, 108]
   alt_timeout: Annotated[ctypes.c_ubyte, 109]
-  reserved: Annotated[(ctypes.c_ubyte* 2), 110]
-  driver_data: Annotated[(ctypes.c_uint64* 0), 112]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[2]], 110]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 112]
 @record
 class struct_ib_uverbs_ex_modify_qp:
   SIZE = 120
@@ -2741,7 +2740,7 @@ class struct_ib_uverbs_post_send:
   wr_count: Annotated[ctypes.c_uint32, 12]
   sge_count: Annotated[ctypes.c_uint32, 16]
   wqe_size: Annotated[ctypes.c_uint32, 20]
-  send_wr: Annotated[(struct_ib_uverbs_send_wr * 0), 24]
+  send_wr: Annotated[Array[struct_ib_uverbs_send_wr, Literal[0]], 24]
 @record
 class struct_ib_uverbs_post_send_resp:
   SIZE = 4
@@ -2760,7 +2759,7 @@ class struct_ib_uverbs_post_recv:
   wr_count: Annotated[ctypes.c_uint32, 12]
   sge_count: Annotated[ctypes.c_uint32, 16]
   wqe_size: Annotated[ctypes.c_uint32, 20]
-  recv_wr: Annotated[(struct_ib_uverbs_recv_wr * 0), 24]
+  recv_wr: Annotated[Array[struct_ib_uverbs_recv_wr, Literal[0]], 24]
 @record
 class struct_ib_uverbs_post_recv_resp:
   SIZE = 4
@@ -2773,7 +2772,7 @@ class struct_ib_uverbs_post_srq_recv:
   wr_count: Annotated[ctypes.c_uint32, 12]
   sge_count: Annotated[ctypes.c_uint32, 16]
   wqe_size: Annotated[ctypes.c_uint32, 20]
-  recv: Annotated[(struct_ib_uverbs_recv_wr * 0), 24]
+  recv: Annotated[Array[struct_ib_uverbs_recv_wr, Literal[0]], 24]
 @record
 class struct_ib_uverbs_post_srq_recv_resp:
   SIZE = 4
@@ -2786,12 +2785,12 @@ class struct_ib_uverbs_create_ah:
   pd_handle: Annotated[ctypes.c_uint32, 16]
   reserved: Annotated[ctypes.c_uint32, 20]
   attr: Annotated[struct_ib_uverbs_ah_attr, 24]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 56]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 56]
 @record
 class struct_ib_uverbs_create_ah_resp:
   SIZE = 4
   ah_handle: Annotated[ctypes.c_uint32, 0]
-  driver_data: Annotated[(ctypes.c_uint32 * 0), 4]
+  driver_data: Annotated[Array[ctypes.c_uint32, Literal[0]], 4]
 @record
 class struct_ib_uverbs_destroy_ah:
   SIZE = 4
@@ -2799,31 +2798,31 @@ class struct_ib_uverbs_destroy_ah:
 @record
 class struct_ib_uverbs_attach_mcast:
   SIZE = 24
-  gid: Annotated[(ctypes.c_ubyte* 16), 0]
+  gid: Annotated[Array[ctypes.c_ubyte, Literal[16]], 0]
   qp_handle: Annotated[ctypes.c_uint32, 16]
   mlid: Annotated[ctypes.c_uint16, 20]
   reserved: Annotated[ctypes.c_uint16, 22]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 24]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 24]
 @record
 class struct_ib_uverbs_detach_mcast:
   SIZE = 24
-  gid: Annotated[(ctypes.c_ubyte* 16), 0]
+  gid: Annotated[Array[ctypes.c_ubyte, Literal[16]], 0]
   qp_handle: Annotated[ctypes.c_uint32, 16]
   mlid: Annotated[ctypes.c_uint16, 20]
   reserved: Annotated[ctypes.c_uint16, 22]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 24]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 24]
 @record
 class struct_ib_uverbs_flow_spec_hdr:
   SIZE = 8
   type: Annotated[ctypes.c_uint32, 0]
   size: Annotated[ctypes.c_uint16, 4]
   reserved: Annotated[ctypes.c_uint16, 6]
-  flow_spec_data: Annotated[(ctypes.c_uint64* 0), 8]
+  flow_spec_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 8]
 @record
 class struct_ib_uverbs_flow_eth_filter:
   SIZE = 16
-  dst_mac: Annotated[(ctypes.c_ubyte* 6), 0]
-  src_mac: Annotated[(ctypes.c_ubyte* 6), 6]
+  dst_mac: Annotated[Array[ctypes.c_ubyte, Literal[6]], 0]
+  src_mac: Annotated[Array[ctypes.c_ubyte, Literal[6]], 6]
   ether_type: Annotated[ctypes.c_uint16, 12]
   vlan_tag: Annotated[ctypes.c_uint16, 14]
 @record
@@ -2870,8 +2869,8 @@ class struct_ib_uverbs_flow_spec_tcp_udp:
 @record
 class struct_ib_uverbs_flow_ipv6_filter:
   SIZE = 40
-  src_ip: Annotated[(ctypes.c_ubyte* 16), 0]
-  dst_ip: Annotated[(ctypes.c_ubyte* 16), 16]
+  src_ip: Annotated[Array[ctypes.c_ubyte, Literal[16]], 0]
+  dst_ip: Annotated[Array[ctypes.c_ubyte, Literal[16]], 16]
   flow_label: Annotated[ctypes.c_uint32, 32]
   next_hdr: Annotated[ctypes.c_ubyte, 36]
   traffic_class: Annotated[ctypes.c_ubyte, 37]
@@ -2982,10 +2981,10 @@ class struct_ib_uverbs_flow_attr:
   size: Annotated[ctypes.c_uint16, 4]
   priority: Annotated[ctypes.c_uint16, 6]
   num_of_specs: Annotated[ctypes.c_ubyte, 8]
-  reserved: Annotated[(ctypes.c_ubyte* 2), 9]
+  reserved: Annotated[Array[ctypes.c_ubyte, Literal[2]], 9]
   port: Annotated[ctypes.c_ubyte, 11]
   flags: Annotated[ctypes.c_uint32, 12]
-  flow_specs: Annotated[(struct_ib_uverbs_flow_spec_hdr * 0), 16]
+  flow_specs: Annotated[Array[struct_ib_uverbs_flow_spec_hdr, Literal[0]], 16]
 @record
 class struct_ib_uverbs_create_flow:
   SIZE = 24
@@ -3011,7 +3010,7 @@ class struct_ib_uverbs_create_srq:
   max_wr: Annotated[ctypes.c_uint32, 20]
   max_sge: Annotated[ctypes.c_uint32, 24]
   srq_limit: Annotated[ctypes.c_uint32, 28]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 32]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 32]
 @record
 class struct_ib_uverbs_create_xsrq:
   SIZE = 48
@@ -3025,7 +3024,7 @@ class struct_ib_uverbs_create_xsrq:
   max_num_tags: Annotated[ctypes.c_uint32, 36]
   xrcd_handle: Annotated[ctypes.c_uint32, 40]
   cq_handle: Annotated[ctypes.c_uint32, 44]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 48]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 48]
 @record
 class struct_ib_uverbs_create_srq_resp:
   SIZE = 16
@@ -3033,7 +3032,7 @@ class struct_ib_uverbs_create_srq_resp:
   max_wr: Annotated[ctypes.c_uint32, 4]
   max_sge: Annotated[ctypes.c_uint32, 8]
   srqn: Annotated[ctypes.c_uint32, 12]
-  driver_data: Annotated[(ctypes.c_uint32 * 0), 16]
+  driver_data: Annotated[Array[ctypes.c_uint32, Literal[0]], 16]
 @record
 class struct_ib_uverbs_modify_srq:
   SIZE = 16
@@ -3041,14 +3040,14 @@ class struct_ib_uverbs_modify_srq:
   attr_mask: Annotated[ctypes.c_uint32, 4]
   max_wr: Annotated[ctypes.c_uint32, 8]
   srq_limit: Annotated[ctypes.c_uint32, 12]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 16]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 16]
 @record
 class struct_ib_uverbs_query_srq:
   SIZE = 16
   response: Annotated[ctypes.c_uint64, 0]
   srq_handle: Annotated[ctypes.c_uint32, 8]
   reserved: Annotated[ctypes.c_uint32, 12]
-  driver_data: Annotated[(ctypes.c_uint64 * 0), 16]
+  driver_data: Annotated[Array[ctypes.c_uint64, Literal[0]], 16]
 @record
 class struct_ib_uverbs_query_srq_resp:
   SIZE = 16
@@ -3113,7 +3112,7 @@ class struct_ib_uverbs_ex_create_rwq_ind_table:
   SIZE = 8
   comp_mask: Annotated[ctypes.c_uint32, 0]
   log_ind_tbl_size: Annotated[ctypes.c_uint32, 4]
-  wq_handles: Annotated[(ctypes.c_uint32 * 0), 8]
+  wq_handles: Annotated[Array[ctypes.c_uint32, Literal[0]], 8]
 @record
 class struct_ib_uverbs_ex_create_rwq_ind_table_resp:
   SIZE = 16
