@@ -7,6 +7,8 @@ import textwrap, functools
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv
+from tinygrad.device import Compiler
+from tinygrad.viz.serve import amdgpu_cfg
 
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
@@ -55,16 +57,23 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
 
-def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, n_threads:int=1, n_workgroups:int=1) -> UOp:
+# TODO: shouldn't need compiler once we can output ELF
+# outputs a text disassembly for humans and a machine readable binary
+def assemble(name:str, insts:list[str|Inst], compiler:Compiler) -> tuple[str, bytes]:
+  asm = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
+  src = template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(asm))
+  return (src, compiler.compile(src))
+
+def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, compiler:Compiler, n_threads:int=1, n_workgroups:int=1) -> UOp:
   lidx = UOp.special(n_threads, "lidx0")
   gidx = UOp.special(n_workgroups, "gidx0")
   sink = UOp.sink(out, lidx, gidx, arg=KernelInfo(name=name))
-  asm = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
-  src = template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(asm))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)), arg=())
+  src, lib = assemble(name, insts, compiler)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=())
 
 def run_asm(name:str, insts:list) -> None:
-  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT)
+  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=Device[Device.DEFAULT].compiler)
   out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
   out.realize()
 
@@ -84,9 +93,11 @@ class TestCfg(unittest.TestCase):
     ])
 
   def test_diamond(self):
-    run_asm("diamond", [
+    run_asm("diamond", insts:=[
       "entry:",
-        s_cmp_eq_i32(s[0], 0),
+        s_mov_b32(s[0], 0),
+        s_mov_b32(s[1], 0),
+        s_cmp_eq_u64(s[0:1], 0),
         "s_cbranch_scc1 if",
         "s_branch else",
       "if:",
@@ -97,6 +108,16 @@ class TestCfg(unittest.TestCase):
       "end:",
         s_endpgm(),
     ])
+    _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
+    cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
+    self.assertEqual(len(cfg["blocks"]), 5)
+    references:dict[str, list[str]] = {}
+    for pc, tokens in cfg["pc_tokens"].items():
+      for t in tokens:
+        for key in t["keys"]: references.setdefault(key, []).append(pc)
+    self.assertEqual(len(references["r0"]), 2)
+    insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
+    self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
 
   def test_loop(self):
     run_asm("simple_loop", [

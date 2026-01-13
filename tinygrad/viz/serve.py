@@ -399,7 +399,7 @@ def amdgpu_tokenize(st:str) -> list[str]:
     from extra.assembly.amd.asm import _op2dsl
     dsl = eval(_op2dsl(st), {'s':s, 'v':v, 'VCC_LO':VCC_LO, 'VCC_HI':VCC_HI, 'VCC':VCC, 'EXEC_LO':EXEC_LO, 'EXEC_HI':EXEC_HI, 'EXEC':EXEC,
                              'SCC':SCC, 'M0':M0, 'NULL':NULL, 'OFF':OFF})
-    return [f"{type(dsl).__name__[0].lower()}{dsl.idx + i}" for i in range(dsl.count)] if isinstance(dsl, Reg) else [st]
+    return [f"{type(dsl).__name__[0].lower()}{dsl.offset + i}" for i in range(dsl.sz)] if isinstance(dsl, Reg) else [st]
   except (ImportError, NameError, SyntaxError, TypeError): return []
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
@@ -502,9 +502,7 @@ def get_render(query:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    cfg = amdgpu_cfg((p:=data["prg"]).lib, device_props[p.device]["gfx_target_version"])["data"]
-    cfg["counters"] = {pc-p.base:v for pc,v in rows.items()}
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "data":cfg}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "ref":ref_map.get(data["prg"].name)}
   return data
 
 # ** HTTP server
