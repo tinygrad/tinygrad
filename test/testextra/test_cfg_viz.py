@@ -57,6 +57,8 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
 
+# TODO: shouldn't need compiler once we can output ELF
+# outputs a text disassembly for humans and a machine readable binary
 def assemble(name:str, insts:list[str|Inst], compiler:Compiler) -> tuple[str, bytes]:
   asm = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
   src = template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(asm))
@@ -66,7 +68,6 @@ def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, compiler:Com
   lidx = UOp.special(n_threads, "lidx0")
   gidx = UOp.special(n_workgroups, "gidx0")
   sink = UOp.sink(out, lidx, gidx, arg=KernelInfo(name=name))
-  # NOTE: shouldn't need compiler once we can output ELF
   src, lib = assemble(name, insts, compiler)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=())
