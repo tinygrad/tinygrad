@@ -12,7 +12,7 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = (g, { blocks, paths, pc_tokens, colors }) => {
+const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
   const lineHeight = 18;
   g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight, textSpace:"1ch" });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
@@ -31,8 +31,9 @@ const layoutCfg = (g, { blocks, paths, pc_tokens, colors }) => {
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
   }
   // paths become edges between basic blocks
+  const pathColors = {0:"#3f7564", 1:"#7a4540", 2:"#3b5f7e"};
   for (const [lead, value] of Object.entries(paths)) {
-    for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, {label:{type:"port", text:""}, color:colors[color]});
+    for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, {label:{type:"port", text:""}, color:pathColors[color]});
   }
   dagre.layout(g);
 }

@@ -403,7 +403,6 @@ def amdgpu_tokenize(st:str) -> list[str]:
   except (ImportError, NameError, SyntaxError, TypeError): return []
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
   # disassemble
   pc_table = llvm_disasm(target, lib)
@@ -435,7 +434,7 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   pc_tokens:dict[int, list[dict]] = {}
   for pc, (text, _) in pc_table.items():
     pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s) if i>0 else [s], "kind":int(i>0)} for i,s in enumerate(text.replace(",", " , ").split(" "))]
-  return {"data":{"blocks":blocks, "paths":paths, "colors":cfg_colors, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
+  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
 
