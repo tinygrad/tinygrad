@@ -1,6 +1,6 @@
 import ctypes, struct, subprocess, tempfile, unittest
 from typing import Annotated
-from tinygrad.helpers import WIN
+from tinygrad.helpers import OSX, WIN
 from tinygrad.runtime.support.c import DLL, record, init_records
 from tinygrad.runtime.support.autogen import gen
 
@@ -274,6 +274,7 @@ typedef struct
     assert frts_cmd.frtsRegionDesc.__class__ is FWSECLIC_FRTS_REGION_DESC
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
+  @unittest.skipIf(OSX, "can't find stdint?")
   def test_packed_fields(self):
     ns = self.run_gen("""#include <stdint.h>
 typedef struct die_info
