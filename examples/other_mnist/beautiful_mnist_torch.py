@@ -28,7 +28,8 @@ class Model(nn.Module):
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
-    device = torch.device("tiny")
+    from extra.torch_backend.test_compile import tiny # noqa: F401
+    device = torch.device("cpu")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1: print(f"using torch backend {device}")
@@ -43,12 +44,19 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
+
+  if getenv("TINY_BACKEND"):
+    @torch.compile(backend="tiny")
+    def forward(X): return model(X)
+  else:
+    def forward(X): return model(X)
+
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
-    out = model(X)
-    loss = loss_fn(out, Y)
     optimizer.zero_grad()
+    out = forward(X)
+    # the loss should be outside of the compiled graph for correct batch norm updates
+    loss = loss_fn(out, Y)
     loss.backward()
     optimizer.step()
     return loss
