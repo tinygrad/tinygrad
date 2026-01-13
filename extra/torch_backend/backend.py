@@ -74,6 +74,7 @@ view_ops = {
   "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
   "aten.permute": Tensor.permute,
   "aten.alias": lambda self: self,
+  "aten.diagonal": Tensor.diagonal,
   }
 
 # torch 2.10 handles this natively
@@ -751,16 +752,3 @@ def _pad_circular(self, padding): return _PadCircular.apply(self, padding)
 
 @torch.library.impl("aten::_pad_circular", "AutogradPrivateUse1")
 def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, padding)
-
-# only needed for test_diag_backward_gradient_values
-# was going through torch before, but now we are using tinygrad directly and tracking views
-# Tensor.diagonal does not support all cases tests in the tests
-@torch.library.impl("aten::diagonal", "privateuseone")
-@wrap_view_op
-def diagonal(self, offset=0, dim1=0, dim2=1):
-  if offset != 0: raise NotImplementedError(f"diagonal with {offset=} not implemented")
-  dim1, dim2 = dim1 % self.ndim, dim2 % self.ndim
-  if dim1 != self.ndim - 2 or dim2 != self.ndim - 1: raise NotImplementedError(f"diagonal with {dim1=}, {dim2=} not implemented, only last two dims supported")
-  batch_shape, m, n = self.shape[:-2], self.shape[-2], self.shape[-1]
-  diag_len = min(m, n)
-  return self.reshape(*batch_shape, m*n).pad(tuple((0,0) for _ in batch_shape) + ((0, diag_len),)).reshape(*batch_shape, diag_len, n+1)[..., :, 0]

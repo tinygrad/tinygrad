@@ -2024,6 +2024,15 @@ class TestOps(unittest.TestCase):
 
   def test_diagonal(self):
     helper_test_op([(5,5)], lambda x: x.diagonal())
+    helper_test_op([(3,4)], lambda x: x.diagonal())  # rectangular
+    helper_test_op([(4,3)], lambda x: x.diagonal())  # rectangular (other way)
+    helper_test_op([(3,3,3)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # batched
+    helper_test_op([(4,5,6)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # batched rectangular
+    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # 4D batched
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=1))  # positive offset
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-1))  # negative offset
+    helper_test_op([(3,5)], lambda x: x.diagonal(offset=2))  # offset on rectangular
+    self.helper_test_exception([(3,3)], lambda x: x.diagonal(dim1=0, dim2=0), expected=RuntimeError)
 
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))

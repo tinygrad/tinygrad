@@ -1440,9 +1440,10 @@ class Tensor(OpMixin):
     if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
     return self.unsqueeze(-1).pad((None,(0,n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
 
-  def diagonal(self) -> Tensor:
+  def diagonal(self, offset:int=0, dim1:int=0, dim2:int=1) -> Tensor:
     """
-    Returns a view of input tensor with its main diagonal elements.
+    Returns a view of the diagonal elements with respect to `dim1` and `dim2`.
+    `offset` controls which diagonal: 0 is main, positive is above, negative is below.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(3, 3)
@@ -1451,9 +1452,15 @@ class Tensor(OpMixin):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.diagonal().numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.diagonal(offset=1).numpy())
+    ```
     """
-    if self.ndim != 2 or (n:=self.shape[0]) != self.shape[1]: raise ValueError(f"only 2-D square tensor is supported, getting {self.shape=}")
-    return self.flatten().pad(((0, n))).reshape(n, n+1)[:, 0]
+    if (dim1:=self._resolve_dim(dim1)) == (dim2:=self._resolve_dim(dim2)): raise RuntimeError("dim1 and dim2 cannot be the same dimension")
+    x = self.permute(*[i for i in range(self.ndim) if i != dim1 and i != dim2], dim1, dim2)
+    x = x[..., :, offset:] if offset >= 0 else x[..., -offset:, :]
+    if (d := min(int(x.shape[-2]), int(x.shape[-1]))) <= 0: return x.reshape(*x.shape[:-2], 0)
+    return x[..., :d, :d].flatten(-2).pad(tuple((0,0) for _ in x.shape[:-2])+((0,d),)).reshape(*x.shape[:-2], d, d+1)[..., 0]
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Tensor:
     """
