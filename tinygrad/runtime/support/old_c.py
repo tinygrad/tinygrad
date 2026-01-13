@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
 from _ctypes import _SimpleCData, _Pointer
-from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, TypeVar, Generic
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -20,16 +20,13 @@ def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if is
 def del_an(ty):
   if isinstance(ty, type) and issubclass(ty, Enum): return del_an(ty.__orig_bases__[0])
   return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
+def CFUNCTYPE(*args): return ctypes.CFUNCTYPE(*(del_an(a) for a in args))
 
 _pending_records = []
 
 T = TypeVar("T")
 U = TypeVar("U")
 V = TypeVar("V")
-P = ParamSpec("P")
-
-class CFUNCTYPE(Generic[T, P]):
-  def __class_getitem__(cls, key): return ctypes.CFUNCTYPE(del_an(key[0]), *(del_an(a) for a in key[1]))
 
 class Enum:
   _val_to_name_: dict[int,str] = {}
@@ -48,6 +45,27 @@ class Enum:
   def __eq__(self, other): return self.value == other
   def __repr__(self): return self.get(self) if self.value in self.__class__._val_to_name_ else str(self.value)
   def __hash__(self): return hash(self.value)
+
+def CEnum(typ: type[T]) -> type[T]:
+  class _CEnum(del_an(typ)): # type: ignore
+    _val_to_name_: dict[int,str] = {}
+
+    @classmethod
+    def from_param(cls, val): return val if isinstance(val, cls) else cls(val)
+    @classmethod
+    def get(cls, val, default="unknown"): return cls._val_to_name_.get(val.value if isinstance(val, cls) else val, default)
+    @classmethod
+    def items(cls): return cls._val_to_name_.items()
+    @classmethod
+    def define(cls, name, val):
+      cls._val_to_name_[val] = name
+      return val
+
+    def __eq__(self, other): return self.value == other
+    def __repr__(self): return self.get(self) if self.value in self.__class__._val_to_name_ else str(self.value)
+    def __hash__(self): return hash(self.value)
+
+  return _CEnum
 
 class Array(Generic[T, U]):
   @overload
