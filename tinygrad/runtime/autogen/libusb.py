@@ -342,7 +342,7 @@ class struct_libusb_transfer(c.Struct):
   buffer: Annotated[c.POINTER[Annotated[int, ctypes.c_ubyte]], 48]
   num_iso_packets: Annotated[Annotated[int, ctypes.c_int32], 56]
   iso_packet_desc: Annotated[c.Array[struct_libusb_iso_packet_descriptor, Literal[0]], 60]
-libusb_transfer_cb_fn: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_libusb_transfer])
+libusb_transfer_cb_fn: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_libusb_transfer]]]
 class enum_libusb_capability(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LIBUSB_CAP_HAS_CAPABILITY = enum_libusb_capability.define('LIBUSB_CAP_HAS_CAPABILITY', 0)
 LIBUSB_CAP_HAS_HOTPLUG = enum_libusb_capability.define('LIBUSB_CAP_HAS_HOTPLUG', 1)
@@ -367,7 +367,7 @@ LIBUSB_OPTION_NO_DEVICE_DISCOVERY = enum_libusb_option.define('LIBUSB_OPTION_NO_
 LIBUSB_OPTION_LOG_CB = enum_libusb_option.define('LIBUSB_OPTION_LOG_CB', 3)
 LIBUSB_OPTION_MAX = enum_libusb_option.define('LIBUSB_OPTION_MAX', 4)
 
-libusb_log_cb: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_libusb_context], enum_libusb_log_level, c.POINTER[Annotated[bytes, ctypes.c_char]])
+libusb_log_cb: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_libusb_context], enum_libusb_log_level, c.POINTER[Annotated[bytes, ctypes.c_char]]]]
 @c.record
 class struct_libusb_init_option(c.Struct):
   SIZE = 16
@@ -573,8 +573,8 @@ class struct_libusb_pollfd(c.Struct):
   SIZE = 8
   fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   events: Annotated[Annotated[int, ctypes.c_int16], 4]
-libusb_pollfd_added_cb: TypeAlias = c.CFUNCTYPE(None, Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int16], c.POINTER[None])
-libusb_pollfd_removed_cb: TypeAlias = c.CFUNCTYPE(None, Annotated[int, ctypes.c_int32], c.POINTER[None])
+libusb_pollfd_added_cb: TypeAlias = c.CFUNCTYPE[None, [Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int16], c.POINTER[None]]]
+libusb_pollfd_removed_cb: TypeAlias = c.CFUNCTYPE[None, [Annotated[int, ctypes.c_int32], c.POINTER[None]]]
 @dll.bind
 def libusb_get_pollfds(ctx:c.POINTER[libusb_context]) -> c.POINTER[c.POINTER[struct_libusb_pollfd]]: ...
 @dll.bind
@@ -589,7 +589,7 @@ LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT = libusb_hotplug_event.define('LIBUSB_HOTPLUG_E
 class libusb_hotplug_flag(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LIBUSB_HOTPLUG_ENUMERATE = libusb_hotplug_flag.define('LIBUSB_HOTPLUG_ENUMERATE', 1)
 
-libusb_hotplug_callback_fn: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[struct_libusb_context], c.POINTER[struct_libusb_device], libusb_hotplug_event, c.POINTER[None])
+libusb_hotplug_callback_fn: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_libusb_context], c.POINTER[struct_libusb_device], libusb_hotplug_event, c.POINTER[None]]]
 @dll.bind
 def libusb_hotplug_register_callback(ctx:c.POINTER[libusb_context], events:Annotated[int, ctypes.c_int32], flags:Annotated[int, ctypes.c_int32], vendor_id:Annotated[int, ctypes.c_int32], product_id:Annotated[int, ctypes.c_int32], dev_class:Annotated[int, ctypes.c_int32], cb_fn:libusb_hotplug_callback_fn, user_data:c.POINTER[None], callback_handle:c.POINTER[libusb_hotplug_callback_handle]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind

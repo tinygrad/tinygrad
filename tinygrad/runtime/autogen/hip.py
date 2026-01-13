@@ -872,7 +872,7 @@ hipGraphNodeTypeMemcpyFromSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemc
 hipGraphNodeTypeMemcpyToSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyToSymbol', 13)
 hipGraphNodeTypeCount = hipGraphNodeType.define('hipGraphNodeTypeCount', 14)
 
-hipHostFn_t: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
+hipHostFn_t: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None]]]
 @c.record
 class hipHostNodeParams(c.Struct):
   SIZE = 16
@@ -1329,7 +1329,7 @@ def hipStreamGetDevice(stream:hipStream_t, device:c.POINTER[hipDevice_t]) -> hip
 def hipExtStreamCreateWithCUMask(stream:c.POINTER[hipStream_t], cuMaskSize:uint32_t, cuMask:c.POINTER[uint32_t]) -> hipError_t: ...
 @dll.bind
 def hipExtStreamGetCUMask(stream:hipStream_t, cuMaskSize:uint32_t, cuMask:c.POINTER[uint32_t]) -> hipError_t: ...
-hipStreamCallback_t: TypeAlias = c.CFUNCTYPE(None, c.POINTER[ihipStream_t], hipError_t, c.POINTER[None])
+hipStreamCallback_t: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[ihipStream_t], hipError_t, c.POINTER[None]]]
 @dll.bind
 def hipStreamAddCallback(stream:hipStream_t, callback:hipStreamCallback_t, userData:c.POINTER[None], flags:Annotated[int, ctypes.c_uint32]) -> hipError_t: ...
 @dll.bind

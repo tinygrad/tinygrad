@@ -296,7 +296,7 @@ FASTRPC_ASYNC_TYPE_MAX = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_TY
 @c.record
 class struct_fastrpc_async_callback(c.Struct):
   SIZE = 16
-  fn: Annotated[c.CFUNCTYPE(None, fastrpc_async_jobid, c.POINTER[None], Annotated[int, ctypes.c_int32]), 0]
+  fn: Annotated[c.CFUNCTYPE[None, [fastrpc_async_jobid, c.POINTER[None], Annotated[int, ctypes.c_int32]]], 0]
   context: Annotated[c.POINTER[None], 8]
 fastrpc_async_callback_t: TypeAlias = struct_fastrpc_async_callback
 @c.record
@@ -412,7 +412,7 @@ FASTRPC_USER_PD_EXCEPTION = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD
 FASTRPC_DSP_SSR = enum_remote_rpc_status_flags.define('FASTRPC_DSP_SSR', 4)
 
 remote_rpc_status_flags_t: TypeAlias = enum_remote_rpc_status_flags
-fastrpc_notif_fn_t: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], enum_remote_rpc_status_flags)
+fastrpc_notif_fn_t: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[None], Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], enum_remote_rpc_status_flags]]
 @c.record
 class struct_remote_rpc_notif_register(c.Struct):
   SIZE = 24

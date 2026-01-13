@@ -251,7 +251,7 @@ MTLTextureSwizzleAlpha = enum_MTLTextureSwizzle.define('MTLTextureSwizzleAlpha',
 
 MTLTextureSwizzle: TypeAlias = enum_MTLTextureSwizzle
 class NSObject(objc.Spec): pass
-IMP: TypeAlias = c.CFUNCTYPE(None, )
+IMP: TypeAlias = c.CFUNCTYPE[None, []]
 class NSInvocation(objc.Spec): pass
 class NSMethodSignature(objc.Spec): pass
 NSMethodSignature._bases_ = [NSObject]

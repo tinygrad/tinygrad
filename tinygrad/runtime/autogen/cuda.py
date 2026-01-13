@@ -634,7 +634,7 @@ CU_RESOURCE_TYPE_LINEAR = enum_CUresourcetype_enum.define('CU_RESOURCE_TYPE_LINE
 CU_RESOURCE_TYPE_PITCH2D = enum_CUresourcetype_enum.define('CU_RESOURCE_TYPE_PITCH2D', 3)
 
 CUresourcetype: TypeAlias = enum_CUresourcetype_enum
-CUhostFn: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
+CUhostFn: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None]]]
 class enum_CUaccessProperty_enum(Annotated[int, ctypes.c_uint32], c.Enum): pass
 CU_ACCESS_PROPERTY_NORMAL = enum_CUaccessProperty_enum.define('CU_ACCESS_PROPERTY_NORMAL', 0)
 CU_ACCESS_PROPERTY_STREAMING = enum_CUaccessProperty_enum.define('CU_ACCESS_PROPERTY_STREAMING', 1)
@@ -988,8 +988,8 @@ CU_DEVICE_P2P_ATTRIBUTE_ACCESS_ACCESS_SUPPORTED = enum_CUdevice_P2PAttribute_enu
 CU_DEVICE_P2P_ATTRIBUTE_CUDA_ARRAY_ACCESS_SUPPORTED = enum_CUdevice_P2PAttribute_enum.define('CU_DEVICE_P2P_ATTRIBUTE_CUDA_ARRAY_ACCESS_SUPPORTED', 4)
 
 CUdevice_P2PAttribute: TypeAlias = enum_CUdevice_P2PAttribute_enum
-CUstreamCallback: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_CUstream_st], enum_cudaError_enum, c.POINTER[None])
-CUoccupancyB2DSize: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_int32])
+CUstreamCallback: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_CUstream_st], enum_cudaError_enum, c.POINTER[None]]]
+CUoccupancyB2DSize: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_uint64], [Annotated[int, ctypes.c_int32]]]
 @c.record
 class struct_CUDA_MEMCPY2D_st(c.Struct):
   SIZE = 128

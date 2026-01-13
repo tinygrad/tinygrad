@@ -566,10 +566,10 @@ class msgqMetadata(c.Struct):
   fcnFlush: Annotated[msgqFcnCacheOp, 208]
   fcnZero: Annotated[msgqFcnCacheOp, 216]
   fcnBarrier: Annotated[msgqFcnBarrier, 224]
-msgqFcnNotifyRemote: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], c.POINTER[None])
-msgqFcnBackendRw: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], c.POINTER[None], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[None])
-msgqFcnCacheOp: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], Annotated[int, ctypes.c_uint32])
-msgqFcnBarrier: TypeAlias = c.CFUNCTYPE(None, )
+msgqFcnNotifyRemote: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [Annotated[int, ctypes.c_int32], c.POINTER[None]]]
+msgqFcnBackendRw: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[None], c.POINTER[None], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[None]]]
+msgqFcnCacheOp: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], Annotated[int, ctypes.c_uint32]]]
+msgqFcnBarrier: TypeAlias = c.CFUNCTYPE[None, []]
 @c.record
 class struct_rpc_set_guest_system_info_v03_00(c.Struct):
   SIZE = 792

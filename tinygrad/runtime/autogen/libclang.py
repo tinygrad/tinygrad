@@ -2,8 +2,8 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.old_c import _IO, _IOW, _IOR, _IOWR
-from tinygrad.runtime.support import old_c as c
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 dll = c.DLL('libclang', ['clang-20', 'clang'])
 CXIndex: TypeAlias = c.POINTER[None]
 class struct_CXTargetInfoImpl(ctypes.Structure): pass
@@ -1065,7 +1065,7 @@ CXChildVisit_Break = enum_CXChildVisitResult.define('CXChildVisit_Break', 0)
 CXChildVisit_Continue = enum_CXChildVisitResult.define('CXChildVisit_Continue', 1)
 CXChildVisit_Recurse = enum_CXChildVisitResult.define('CXChildVisit_Recurse', 2)
 
-CXCursorVisitor: TypeAlias = c.CFUNCTYPE(enum_CXChildVisitResult, CXCursor, CXCursor, c.POINTER[None])
+CXCursorVisitor: TypeAlias = c.CFUNCTYPE[enum_CXChildVisitResult, [CXCursor, CXCursor, c.POINTER[None]]]
 @dll.bind
 def clang_visitChildren(parent:CXCursor, visitor:CXCursorVisitor, client_data:CXClientData) -> Annotated[int, ctypes.c_uint32]: ...
 class struct__CXChildVisitResult(ctypes.Structure): pass
@@ -1302,7 +1302,7 @@ def clang_getDefinitionSpellingAndExtent(_0:CXCursor, startBuf:c.POINTER[c.POINT
 @dll.bind
 def clang_enableStackTraces() -> None: ...
 @dll.bind
-def clang_executeOnThread(fn:c.CFUNCTYPE(None, c.POINTER[None]), user_data:c.POINTER[None], stack_size:Annotated[int, ctypes.c_uint32]) -> None: ...
+def clang_executeOnThread(fn:c.CFUNCTYPE[None, [c.POINTER[None]]], user_data:c.POINTER[None], stack_size:Annotated[int, ctypes.c_uint32]) -> None: ...
 CXCompletionString: TypeAlias = c.POINTER[None]
 @c.record
 class CXCompletionResult(c.Struct):
@@ -1421,7 +1421,7 @@ def clang_codeCompleteGetObjCSelector(Results:c.POINTER[CXCodeCompleteResults]) 
 def clang_getClangVersion() -> CXString: ...
 @dll.bind
 def clang_toggleCrashRecovery(isEnabled:Annotated[int, ctypes.c_uint32]) -> None: ...
-CXInclusionVisitor: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[CXSourceLocation], Annotated[int, ctypes.c_uint32], c.POINTER[None])
+CXInclusionVisitor: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], c.POINTER[CXSourceLocation], Annotated[int, ctypes.c_uint32], c.POINTER[None]]]
 @dll.bind
 def clang_getInclusions(tu:CXTranslationUnit, visitor:CXInclusionVisitor, client_data:CXClientData) -> None: ...
 class CXEvalResultKind(Annotated[int, ctypes.c_uint32], c.Enum): pass
@@ -1471,7 +1471,7 @@ CXVisit_Continue = enum_CXVisitorResult.define('CXVisit_Continue', 1)
 class struct_CXCursorAndRangeVisitor(c.Struct):
   SIZE = 16
   context: Annotated[c.POINTER[None], 0]
-  visit: Annotated[c.CFUNCTYPE(enum_CXVisitorResult, c.POINTER[None], CXCursor, CXSourceRange), 8]
+  visit: Annotated[c.CFUNCTYPE[enum_CXVisitorResult, [c.POINTER[None], CXCursor, CXSourceRange]], 8]
 CXCursorAndRangeVisitor: TypeAlias = struct_CXCursorAndRangeVisitor
 class CXResult(Annotated[int, ctypes.c_uint32], c.Enum): pass
 CXResult_Success = CXResult.define('CXResult_Success', 0)
@@ -1691,14 +1691,14 @@ class CXIdxEntityRefInfo(c.Struct):
 @c.record
 class IndexerCallbacks(c.Struct):
   SIZE = 64
-  abortQuery: Annotated[c.CFUNCTYPE(Annotated[int, ctypes.c_int32], CXClientData, c.POINTER[None]), 0]
-  diagnostic: Annotated[c.CFUNCTYPE(None, CXClientData, CXDiagnosticSet, c.POINTER[None]), 8]
-  enteredMainFile: Annotated[c.CFUNCTYPE(CXIdxClientFile, CXClientData, CXFile, c.POINTER[None]), 16]
-  ppIncludedFile: Annotated[c.CFUNCTYPE(CXIdxClientFile, CXClientData, c.POINTER[CXIdxIncludedFileInfo]), 24]
-  importedASTFile: Annotated[c.CFUNCTYPE(CXIdxClientASTFile, CXClientData, c.POINTER[CXIdxImportedASTFileInfo]), 32]
-  startedTranslationUnit: Annotated[c.CFUNCTYPE(CXIdxClientContainer, CXClientData, c.POINTER[None]), 40]
-  indexDeclaration: Annotated[c.CFUNCTYPE(None, CXClientData, c.POINTER[CXIdxDeclInfo]), 48]
-  indexEntityReference: Annotated[c.CFUNCTYPE(None, CXClientData, c.POINTER[CXIdxEntityRefInfo]), 56]
+  abortQuery: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [CXClientData, c.POINTER[None]]], 0]
+  diagnostic: Annotated[c.CFUNCTYPE[None, [CXClientData, CXDiagnosticSet, c.POINTER[None]]], 8]
+  enteredMainFile: Annotated[c.CFUNCTYPE[CXIdxClientFile, [CXClientData, CXFile, c.POINTER[None]]], 16]
+  ppIncludedFile: Annotated[c.CFUNCTYPE[CXIdxClientFile, [CXClientData, c.POINTER[CXIdxIncludedFileInfo]]], 24]
+  importedASTFile: Annotated[c.CFUNCTYPE[CXIdxClientASTFile, [CXClientData, c.POINTER[CXIdxImportedASTFileInfo]]], 32]
+  startedTranslationUnit: Annotated[c.CFUNCTYPE[CXIdxClientContainer, [CXClientData, c.POINTER[None]]], 40]
+  indexDeclaration: Annotated[c.CFUNCTYPE[None, [CXClientData, c.POINTER[CXIdxDeclInfo]]], 48]
+  indexEntityReference: Annotated[c.CFUNCTYPE[None, [CXClientData, c.POINTER[CXIdxEntityRefInfo]]], 56]
 @dll.bind
 def clang_index_isEntityObjCContainerKind(_0:CXIdxEntityKind) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -1746,7 +1746,7 @@ def clang_indexTranslationUnit(_0:CXIndexAction, client_data:CXClientData, index
 def clang_indexLoc_getFileLocation(loc:CXIdxLoc, indexFile:c.POINTER[CXIdxClientFile], file:c.POINTER[CXFile], line:c.POINTER[Annotated[int, ctypes.c_uint32]], column:c.POINTER[Annotated[int, ctypes.c_uint32]], offset:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
 @dll.bind
 def clang_indexLoc_getCXSourceLocation(loc:CXIdxLoc) -> CXSourceLocation: ...
-CXFieldVisitor: TypeAlias = c.CFUNCTYPE(enum_CXVisitorResult, CXCursor, c.POINTER[None])
+CXFieldVisitor: TypeAlias = c.CFUNCTYPE[enum_CXVisitorResult, [CXCursor, c.POINTER[None]]]
 @dll.bind
 def clang_Type_visitFields(T:CXType, visitor:CXFieldVisitor, client_data:CXClientData) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind

@@ -117,7 +117,7 @@ def LLVMSetComdat(V:LLVMValueRef, C:LLVMComdatRef) -> None: ...
 def LLVMGetComdatSelectionKind(C:LLVMComdatRef) -> LLVMComdatSelectionKind: ...
 @dll.bind
 def LLVMSetComdatSelectionKind(C:LLVMComdatRef, Kind:LLVMComdatSelectionKind) -> None: ...
-LLVMFatalErrorHandler: TypeAlias = c.CFUNCTYPE(None, c.POINTER[Annotated[bytes, ctypes.c_char]])
+LLVMFatalErrorHandler: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[Annotated[bytes, ctypes.c_char]]]]
 @dll.bind
 def LLVMInstallFatalErrorHandler(Handler:LLVMFatalErrorHandler) -> None: ...
 @dll.bind
@@ -449,8 +449,8 @@ def LLVMCreateMessage(Message:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.P
 @dll.bind
 def LLVMDisposeMessage(Message:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
 class struct_LLVMOpaqueDiagnosticInfo(ctypes.Structure): pass
-LLVMDiagnosticHandler: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueDiagnosticInfo], c.POINTER[None])
-LLVMYieldCallback: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueContext], c.POINTER[None])
+LLVMDiagnosticHandler: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_LLVMOpaqueDiagnosticInfo], c.POINTER[None]]]
+LLVMYieldCallback: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_LLVMOpaqueContext], c.POINTER[None]]]
 @dll.bind
 def LLVMContextCreate() -> LLVMContextRef: ...
 @dll.bind
@@ -2334,8 +2334,8 @@ def LLVMDIBuilderInsertLabelBefore(Builder:LLVMDIBuilderRef, LabelInfo:LLVMMetad
 def LLVMDIBuilderInsertLabelAtEnd(Builder:LLVMDIBuilderRef, LabelInfo:LLVMMetadataRef, Location:LLVMMetadataRef, InsertAtEnd:LLVMBasicBlockRef) -> LLVMDbgRecordRef: ...
 @dll.bind
 def LLVMGetMetadataKind(Metadata:LLVMMetadataRef) -> LLVMMetadataKind: ...
-LLVMOpInfoCallback: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_int32], c.POINTER[None])
-LLVMSymbolLookupCallback: TypeAlias = c.CFUNCTYPE(c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None], Annotated[int, ctypes.c_uint64], c.POINTER[Annotated[int, ctypes.c_uint64]], Annotated[int, ctypes.c_uint64], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]])
+LLVMOpInfoCallback: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_int32], c.POINTER[None]]]
+LLVMSymbolLookupCallback: TypeAlias = c.CFUNCTYPE[c.POINTER[Annotated[bytes, ctypes.c_char]], [c.POINTER[None], Annotated[int, ctypes.c_uint64], c.POINTER[Annotated[int, ctypes.c_uint64]], Annotated[int, ctypes.c_uint64], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]]]
 LLVMDisasmContextRef: TypeAlias = c.POINTER[None]
 @dll.bind
 def LLVMCreateDisasm(TripleName:c.POINTER[Annotated[bytes, ctypes.c_char]], DisInfo:c.POINTER[None], TagType:Annotated[int, ctypes.c_int32], GetOpInfo:LLVMOpInfoCallback, SymbolLookUp:LLVMSymbolLookupCallback) -> LLVMDisasmContextRef: ...
@@ -2876,10 +2876,10 @@ def LLVMGetGlobalValueAddress(EE:LLVMExecutionEngineRef, Name:c.POINTER[Annotate
 def LLVMGetFunctionAddress(EE:LLVMExecutionEngineRef, Name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> uint64_t: ...
 @dll.bind
 def LLVMExecutionEngineGetErrMsg(EE:LLVMExecutionEngineRef, OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
-LLVMMemoryManagerAllocateCodeSectionCallback: TypeAlias = c.CFUNCTYPE(c.POINTER[Annotated[int, ctypes.c_ubyte]], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]])
-LLVMMemoryManagerAllocateDataSectionCallback: TypeAlias = c.CFUNCTYPE(c.POINTER[Annotated[int, ctypes.c_ubyte]], c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]], Annotated[int, ctypes.c_int32])
-LLVMMemoryManagerFinalizeMemoryCallback: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]])
-LLVMMemoryManagerDestroyCallback: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
+LLVMMemoryManagerAllocateCodeSectionCallback: TypeAlias = c.CFUNCTYPE[c.POINTER[Annotated[int, ctypes.c_ubyte]], [c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]]]]
+LLVMMemoryManagerAllocateDataSectionCallback: TypeAlias = c.CFUNCTYPE[c.POINTER[Annotated[int, ctypes.c_ubyte]], [c.POINTER[None], Annotated[int, ctypes.c_uint64], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[Annotated[bytes, ctypes.c_char]], Annotated[int, ctypes.c_int32]]]
+LLVMMemoryManagerFinalizeMemoryCallback: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[None], c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]]]
+LLVMMemoryManagerDestroyCallback: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None]]]
 @dll.bind
 def LLVMCreateSimpleMCJITMemoryManager(Opaque:c.POINTER[None], AllocateCodeSection:LLVMMemoryManagerAllocateCodeSectionCallback, AllocateDataSection:LLVMMemoryManagerAllocateDataSectionCallback, FinalizeMemory:LLVMMemoryManagerFinalizeMemoryCallback, Destroy:LLVMMemoryManagerDestroyCallback) -> LLVMMCJITMemoryManagerRef: ...
 @dll.bind
@@ -2898,7 +2898,7 @@ def LLVMCreatePerfJITEventListener() -> LLVMJITEventListenerRef: ...
 def LLVMParseIRInContext(ContextRef:LLVMContextRef, MemBuf:LLVMMemoryBufferRef, OutM:c.POINTER[LLVMModuleRef], OutMessage:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> LLVMBool: ...
 class struct_LLVMOrcOpaqueExecutionSession(ctypes.Structure): pass
 LLVMOrcExecutionSessionRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueExecutionSession]
-LLVMOrcErrorReporterFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOpaqueError])
+LLVMOrcErrorReporterFunction: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], c.POINTER[struct_LLVMOpaqueError]]]
 @dll.bind
 def LLVMOrcExecutionSessionSetErrorReporter(ES:LLVMOrcExecutionSessionRef, ReportError:LLVMOrcErrorReporterFunction, Ctx:c.POINTER[None]) -> None: ...
 class struct_LLVMOrcOpaqueSymbolStringPool(ctypes.Structure): pass
@@ -2953,7 +2953,7 @@ class LLVMJITSymbolFlags(c.Struct):
   SIZE = 2
   GenericFlags: Annotated[uint8_t, 0]
   TargetFlags: Annotated[uint8_t, 1]
-LLVMOrcExecutionSessionLookupHandleResultFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[struct_LLVMOpaqueError], c.POINTER[LLVMOrcCSymbolMapPair], Annotated[int, ctypes.c_uint64], c.POINTER[None])
+LLVMOrcExecutionSessionLookupHandleResultFunction: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_LLVMOpaqueError], c.POINTER[LLVMOrcCSymbolMapPair], Annotated[int, ctypes.c_uint64], c.POINTER[None]]]
 @dll.bind
 def LLVMOrcExecutionSessionLookup(ES:LLVMOrcExecutionSessionRef, K:LLVMOrcLookupKind, SearchOrder:LLVMOrcCJITDylibSearchOrder, SearchOrderSize:size_t, Symbols:LLVMOrcCLookupSet, SymbolsSize:size_t, HandleResult:LLVMOrcExecutionSessionLookupHandleResultFunction, Ctx:c.POINTER[None]) -> None: ...
 @dll.bind
@@ -2985,9 +2985,9 @@ class LLVMOrcCSymbolFlagsMapPair(c.Struct):
   Flags: Annotated[LLVMJITSymbolFlags, 8]
 LLVMOrcCSymbolFlagsMapPairs: TypeAlias = c.POINTER[LLVMOrcCSymbolFlagsMapPair]
 class struct_LLVMOrcOpaqueMaterializationResponsibility(ctypes.Structure): pass
-LLVMOrcMaterializationUnitMaterializeFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility])
-LLVMOrcMaterializationUnitDiscardFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueJITDylib], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry])
-LLVMOrcMaterializationUnitDestroyFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
+LLVMOrcMaterializationUnitMaterializeFunction: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility]]]
+LLVMOrcMaterializationUnitDiscardFunction: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueJITDylib], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry]]]
+LLVMOrcMaterializationUnitDestroyFunction: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None]]]
 @dll.bind
 def LLVMOrcCreateCustomMaterializationUnit(Name:c.POINTER[Annotated[bytes, ctypes.c_char]], Ctx:c.POINTER[None], Syms:LLVMOrcCSymbolFlagsMapPairs, NumSyms:size_t, InitSym:LLVMOrcSymbolStringPoolEntryRef, Materialize:LLVMOrcMaterializationUnitMaterializeFunction, Discard:LLVMOrcMaterializationUnitDiscardFunction, Destroy:LLVMOrcMaterializationUnitDestroyFunction) -> LLVMOrcMaterializationUnitRef: ...
 LLVMOrcCSymbolMapPairs: TypeAlias = c.POINTER[LLVMOrcCSymbolMapPair]
@@ -3073,14 +3073,14 @@ def LLVMOrcJITDylibClear(JD:LLVMOrcJITDylibRef) -> LLVMErrorRef: ...
 @dll.bind
 def LLVMOrcJITDylibAddGenerator(JD:LLVMOrcJITDylibRef, DG:LLVMOrcDefinitionGeneratorRef) -> None: ...
 class struct_LLVMOrcOpaqueLookupState(ctypes.Structure): pass
-LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[struct_LLVMOrcOpaqueDefinitionGenerator], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOrcOpaqueLookupState]], LLVMOrcLookupKind, c.POINTER[struct_LLVMOrcOpaqueJITDylib], LLVMOrcJITDylibLookupFlags, c.POINTER[LLVMOrcCLookupSetElement], Annotated[int, ctypes.c_uint64])
-LLVMOrcDisposeCAPIDefinitionGeneratorFunction: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
+LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueError], [c.POINTER[struct_LLVMOrcOpaqueDefinitionGenerator], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOrcOpaqueLookupState]], LLVMOrcLookupKind, c.POINTER[struct_LLVMOrcOpaqueJITDylib], LLVMOrcJITDylibLookupFlags, c.POINTER[LLVMOrcCLookupSetElement], Annotated[int, ctypes.c_uint64]]]
+LLVMOrcDisposeCAPIDefinitionGeneratorFunction: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None]]]
 @dll.bind
 def LLVMOrcCreateCustomCAPIDefinitionGenerator(F:LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, Ctx:c.POINTER[None], Dispose:LLVMOrcDisposeCAPIDefinitionGeneratorFunction) -> LLVMOrcDefinitionGeneratorRef: ...
 LLVMOrcLookupStateRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLookupState]
 @dll.bind
 def LLVMOrcLookupStateContinueLookup(S:LLVMOrcLookupStateRef, Err:LLVMErrorRef) -> None: ...
-LLVMOrcSymbolPredicate: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry])
+LLVMOrcSymbolPredicate: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueSymbolStringPoolEntry]]]
 @dll.bind
 def LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess(Result:c.POINTER[LLVMOrcDefinitionGeneratorRef], GlobalPrefx:Annotated[bytes, ctypes.c_char], Filter:LLVMOrcSymbolPredicate, FilterCtx:c.POINTER[None]) -> LLVMErrorRef: ...
 @dll.bind
@@ -3103,7 +3103,7 @@ LLVMOrcThreadSafeModuleRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueThreadSafe
 def LLVMOrcCreateNewThreadSafeModule(M:LLVMModuleRef, TSCtx:LLVMOrcThreadSafeContextRef) -> LLVMOrcThreadSafeModuleRef: ...
 @dll.bind
 def LLVMOrcDisposeThreadSafeModule(TSM:LLVMOrcThreadSafeModuleRef) -> None: ...
-LLVMOrcGenericIRModuleOperationFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[struct_LLVMOpaqueModule])
+LLVMOrcGenericIRModuleOperationFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueError], [c.POINTER[None], c.POINTER[struct_LLVMOpaqueModule]]]
 @dll.bind
 def LLVMOrcThreadSafeModuleWithModuleDo(TSM:LLVMOrcThreadSafeModuleRef, F:LLVMOrcGenericIRModuleOperationFunction, Ctx:c.POINTER[None]) -> LLVMErrorRef: ...
 class struct_LLVMOrcOpaqueJITTargetMachineBuilder(ctypes.Structure): pass
@@ -3130,12 +3130,12 @@ class struct_LLVMOrcOpaqueIRTransformLayer(ctypes.Structure): pass
 LLVMOrcIRTransformLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueIRTransformLayer]
 @dll.bind
 def LLVMOrcIRTransformLayerEmit(IRTransformLayer:LLVMOrcIRTransformLayerRef, MR:LLVMOrcMaterializationResponsibilityRef, TSM:LLVMOrcThreadSafeModuleRef) -> None: ...
-LLVMOrcIRTransformLayerTransformFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOrcOpaqueThreadSafeModule]], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility])
+LLVMOrcIRTransformLayerTransformFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueError], [c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOrcOpaqueThreadSafeModule]], c.POINTER[struct_LLVMOrcOpaqueMaterializationResponsibility]]]
 @dll.bind
 def LLVMOrcIRTransformLayerSetTransform(IRTransformLayer:LLVMOrcIRTransformLayerRef, TransformFunction:LLVMOrcIRTransformLayerTransformFunction, Ctx:c.POINTER[None]) -> None: ...
 class struct_LLVMOrcOpaqueObjectTransformLayer(ctypes.Structure): pass
 LLVMOrcObjectTransformLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueObjectTransformLayer]
-LLVMOrcObjectTransformLayerTransformFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOpaqueError], c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOpaqueMemoryBuffer]])
+LLVMOrcObjectTransformLayerTransformFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueError], [c.POINTER[None], c.POINTER[c.POINTER[struct_LLVMOpaqueMemoryBuffer]]]]
 @dll.bind
 def LLVMOrcObjectTransformLayerSetTransform(ObjTransformLayer:LLVMOrcObjectTransformLayerRef, TransformFunction:LLVMOrcObjectTransformLayerTransformFunction, Ctx:c.POINTER[None]) -> None: ...
 @dll.bind
@@ -3155,7 +3155,7 @@ def LLVMOrcCreateDumpObjects(DumpDir:c.POINTER[Annotated[bytes, ctypes.c_char]],
 def LLVMOrcDisposeDumpObjects(DumpObjects:LLVMOrcDumpObjectsRef) -> None: ...
 @dll.bind
 def LLVMOrcDumpObjects_CallOperator(DumpObjects:LLVMOrcDumpObjectsRef, ObjBuffer:c.POINTER[LLVMMemoryBufferRef]) -> LLVMErrorRef: ...
-LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction: TypeAlias = c.CFUNCTYPE(c.POINTER[struct_LLVMOrcOpaqueObjectLayer], c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueExecutionSession], c.POINTER[Annotated[bytes, ctypes.c_char]])
+LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_LLVMOrcOpaqueObjectLayer], [c.POINTER[None], c.POINTER[struct_LLVMOrcOpaqueExecutionSession], c.POINTER[Annotated[bytes, ctypes.c_char]]]]
 class struct_LLVMOrcOpaqueLLJITBuilder(ctypes.Structure): pass
 LLVMOrcLLJITBuilderRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueLLJITBuilder]
 class struct_LLVMOrcOpaqueLLJIT(ctypes.Structure): pass
@@ -3320,8 +3320,8 @@ LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly = LLVMJITSymbolGenericFl
 LLVMJITSymbolTargetFlags: TypeAlias = Annotated[int, ctypes.c_ubyte]
 class struct_LLVMOrcOpaqueObjectLinkingLayer(ctypes.Structure): pass
 LLVMOrcObjectLinkingLayerRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueObjectLinkingLayer]
-LLVMMemoryManagerCreateContextCallback: TypeAlias = c.CFUNCTYPE(c.POINTER[None], c.POINTER[None])
-LLVMMemoryManagerNotifyTerminatingCallback: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
+LLVMMemoryManagerCreateContextCallback: TypeAlias = c.CFUNCTYPE[c.POINTER[None], [c.POINTER[None]]]
+LLVMMemoryManagerNotifyTerminatingCallback: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None]]]
 @dll.bind
 def LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager(ES:LLVMOrcExecutionSessionRef) -> LLVMOrcObjectLayerRef: ...
 @dll.bind
@@ -3566,7 +3566,7 @@ LTO_DS_WARNING = lto_codegen_diagnostic_severity_t.define('LTO_DS_WARNING', 1)
 LTO_DS_REMARK = lto_codegen_diagnostic_severity_t.define('LTO_DS_REMARK', 3)
 LTO_DS_NOTE = lto_codegen_diagnostic_severity_t.define('LTO_DS_NOTE', 2)
 
-lto_diagnostic_handler_t: TypeAlias = c.CFUNCTYPE(None, lto_codegen_diagnostic_severity_t, c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None])
+lto_diagnostic_handler_t: TypeAlias = c.CFUNCTYPE[None, [lto_codegen_diagnostic_severity_t, c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None]]]
 @dll.bind
 def lto_codegen_set_diagnostic_handler(_0:lto_code_gen_t, _1:lto_diagnostic_handler_t, _2:c.POINTER[None]) -> None: ...
 @dll.bind
