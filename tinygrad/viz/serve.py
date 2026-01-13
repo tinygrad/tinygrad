@@ -417,14 +417,14 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   lines:list[str] = []
   asm_width = max(len(asm) for asm, _ in pc_table.values())
   for pc, (asm, sz) in pc_table.items():
+    # skip instructions only used for padding
+    if asm == "s_code_end": continue
     lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
       blocks[pc] = []
     else: assert curr is not None, f"no basic block found for {pc}"
     blocks[curr].append(pc)
-    # control flow ends in endpgm
-    if asm == "s_endpgm": break
     # otherwise a basic block can have exactly one or two paths
     nx = pc+sz
     if (offset:=parse_branch(asm)) is not None:
