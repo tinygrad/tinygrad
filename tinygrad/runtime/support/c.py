@@ -17,8 +17,12 @@ def _IOW(base, nr, typ): return functools.partial(_do_ioctl, 1, ord(base) if isi
 def _IOR(base, nr, typ): return functools.partial(_do_ioctl, 2, ord(base) if isinstance(base, str) else base, nr, typ)
 def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, typ)
 
+def del_an(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
+def POINTER(p): return ctypes.POINTER(del_an(p))
+def CFUNCTYPE(*args): return ctypes.CFUNCTYPE(*(del_an(a) for a in args))
+
 def CEnum(typ: type[ctypes._SimpleCData]):
-  class _CEnum(typ): # type: ignore
+  class _CEnum(del_an(typ)): # type: ignore
     _val_to_name_: dict[int,str] = {}
 
     @classmethod
@@ -37,10 +41,6 @@ def CEnum(typ: type[ctypes._SimpleCData]):
     def __hash__(self): return hash(self.value)
 
   return _CEnum
-
-def del_an(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
-def POINTER(p): return ctypes.POINTER(del_an(p))
-def CFUNCTYPE(*args): return ctypes.CFUNCTYPE(*(del_an(a) for a in args))
 
 _pending_records = []
 
