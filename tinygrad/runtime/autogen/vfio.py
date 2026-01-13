@@ -1,109 +1,109 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_vfio_info_cap_header:
   SIZE = 8
-  id: Annotated[ctypes.c_uint16, 0]
-  version: Annotated[ctypes.c_uint16, 2]
-  next: Annotated[ctypes.c_uint32, 4]
-__u16 = ctypes.c_uint16
-__u32 = ctypes.c_uint32
+  id: Annotated[Annotated[int, ctypes.c_uint16], 0]
+  version: Annotated[Annotated[int, ctypes.c_uint16], 2]
+  next: Annotated[Annotated[int, ctypes.c_uint32], 4]
+__u16 = Annotated[int, ctypes.c_uint16]
+__u32 = Annotated[int, ctypes.c_uint32]
 @record
 class struct_vfio_group_status:
   SIZE = 8
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
 @record
 class struct_vfio_device_info:
   SIZE = 24
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  num_regions: Annotated[ctypes.c_uint32, 8]
-  num_irqs: Annotated[ctypes.c_uint32, 12]
-  cap_offset: Annotated[ctypes.c_uint32, 16]
-  pad: Annotated[ctypes.c_uint32, 20]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  num_regions: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  num_irqs: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  cap_offset: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
 @record
 class struct_vfio_device_info_cap_pci_atomic_comp:
   SIZE = 16
   header: Annotated[struct_vfio_info_cap_header, 0]
-  flags: Annotated[ctypes.c_uint32, 8]
-  reserved: Annotated[ctypes.c_uint32, 12]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 12]
 @record
 class struct_vfio_region_info:
   SIZE = 32
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  index: Annotated[ctypes.c_uint32, 8]
-  cap_offset: Annotated[ctypes.c_uint32, 12]
-  size: Annotated[ctypes.c_uint64, 16]
-  offset: Annotated[ctypes.c_uint64, 24]
-__u64 = ctypes.c_uint64
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  index: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  cap_offset: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  offset: Annotated[Annotated[int, ctypes.c_uint64], 24]
+__u64 = Annotated[int, ctypes.c_uint64]
 @record
 class struct_vfio_region_sparse_mmap_area:
   SIZE = 16
-  offset: Annotated[ctypes.c_uint64, 0]
-  size: Annotated[ctypes.c_uint64, 8]
+  offset: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 8]
 @record
 class struct_vfio_region_info_cap_sparse_mmap:
   SIZE = 16
   header: Annotated[struct_vfio_info_cap_header, 0]
-  nr_areas: Annotated[ctypes.c_uint32, 8]
-  reserved: Annotated[ctypes.c_uint32, 12]
+  nr_areas: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 12]
   areas: Annotated[Array[struct_vfio_region_sparse_mmap_area, Literal[0]], 16]
 @record
 class struct_vfio_region_info_cap_type:
   SIZE = 16
   header: Annotated[struct_vfio_info_cap_header, 0]
-  type: Annotated[ctypes.c_uint32, 8]
-  subtype: Annotated[ctypes.c_uint32, 12]
+  type: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  subtype: Annotated[Annotated[int, ctypes.c_uint32], 12]
 @record
 class struct_vfio_region_gfx_edid:
   SIZE = 24
-  edid_offset: Annotated[ctypes.c_uint32, 0]
-  edid_max_size: Annotated[ctypes.c_uint32, 4]
-  edid_size: Annotated[ctypes.c_uint32, 8]
-  max_xres: Annotated[ctypes.c_uint32, 12]
-  max_yres: Annotated[ctypes.c_uint32, 16]
-  link_state: Annotated[ctypes.c_uint32, 20]
+  edid_offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  edid_max_size: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  edid_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  max_xres: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  max_yres: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  link_state: Annotated[Annotated[int, ctypes.c_uint32], 20]
 @record
 class struct_vfio_device_migration_info:
   SIZE = 32
-  device_state: Annotated[ctypes.c_uint32, 0]
-  reserved: Annotated[ctypes.c_uint32, 4]
-  pending_bytes: Annotated[ctypes.c_uint64, 8]
-  data_offset: Annotated[ctypes.c_uint64, 16]
-  data_size: Annotated[ctypes.c_uint64, 24]
+  device_state: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  pending_bytes: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  data_offset: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  data_size: Annotated[Annotated[int, ctypes.c_uint64], 24]
 @record
 class struct_vfio_region_info_cap_nvlink2_ssatgt:
   SIZE = 16
   header: Annotated[struct_vfio_info_cap_header, 0]
-  tgt: Annotated[ctypes.c_uint64, 8]
+  tgt: Annotated[Annotated[int, ctypes.c_uint64], 8]
 @record
 class struct_vfio_region_info_cap_nvlink2_lnkspd:
   SIZE = 16
   header: Annotated[struct_vfio_info_cap_header, 0]
-  link_speed: Annotated[ctypes.c_uint32, 8]
-  __pad: Annotated[ctypes.c_uint32, 12]
+  link_speed: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  __pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
 @record
 class struct_vfio_irq_info:
   SIZE = 16
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  index: Annotated[ctypes.c_uint32, 8]
-  count: Annotated[ctypes.c_uint32, 12]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  index: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 12]
 @record
 class struct_vfio_irq_set:
   SIZE = 20
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  index: Annotated[ctypes.c_uint32, 8]
-  start: Annotated[ctypes.c_uint32, 12]
-  count: Annotated[ctypes.c_uint32, 16]
-  data: Annotated[Array[ctypes.c_ubyte, Literal[0]], 20]
-__u8 = ctypes.c_ubyte
-_anonenum0 = CEnum(ctypes.c_uint32)
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  index: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  start: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  data: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 20]
+__u8 = Annotated[int, ctypes.c_ubyte]
+_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
 VFIO_PCI_BAR0_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR0_REGION_INDEX', 0)
 VFIO_PCI_BAR1_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR1_REGION_INDEX', 1)
 VFIO_PCI_BAR2_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR2_REGION_INDEX', 2)
@@ -115,7 +115,7 @@ VFIO_PCI_CONFIG_REGION_INDEX = _anonenum0.define('VFIO_PCI_CONFIG_REGION_INDEX',
 VFIO_PCI_VGA_REGION_INDEX = _anonenum0.define('VFIO_PCI_VGA_REGION_INDEX', 8)
 VFIO_PCI_NUM_REGIONS = _anonenum0.define('VFIO_PCI_NUM_REGIONS', 9)
 
-_anonenum1 = CEnum(ctypes.c_uint32)
+_anonenum1 = CEnum(Annotated[int, ctypes.c_uint32])
 VFIO_PCI_INTX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_INTX_IRQ_INDEX', 0)
 VFIO_PCI_MSI_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSI_IRQ_INDEX', 1)
 VFIO_PCI_MSIX_IRQ_INDEX = _anonenum1.define('VFIO_PCI_MSIX_IRQ_INDEX', 2)
@@ -123,105 +123,105 @@ VFIO_PCI_ERR_IRQ_INDEX = _anonenum1.define('VFIO_PCI_ERR_IRQ_INDEX', 3)
 VFIO_PCI_REQ_IRQ_INDEX = _anonenum1.define('VFIO_PCI_REQ_IRQ_INDEX', 4)
 VFIO_PCI_NUM_IRQS = _anonenum1.define('VFIO_PCI_NUM_IRQS', 5)
 
-_anonenum2 = CEnum(ctypes.c_uint32)
+_anonenum2 = CEnum(Annotated[int, ctypes.c_uint32])
 VFIO_CCW_CONFIG_REGION_INDEX = _anonenum2.define('VFIO_CCW_CONFIG_REGION_INDEX', 0)
 VFIO_CCW_NUM_REGIONS = _anonenum2.define('VFIO_CCW_NUM_REGIONS', 1)
 
-_anonenum3 = CEnum(ctypes.c_uint32)
+_anonenum3 = CEnum(Annotated[int, ctypes.c_uint32])
 VFIO_CCW_IO_IRQ_INDEX = _anonenum3.define('VFIO_CCW_IO_IRQ_INDEX', 0)
 VFIO_CCW_CRW_IRQ_INDEX = _anonenum3.define('VFIO_CCW_CRW_IRQ_INDEX', 1)
 VFIO_CCW_REQ_IRQ_INDEX = _anonenum3.define('VFIO_CCW_REQ_IRQ_INDEX', 2)
 VFIO_CCW_NUM_IRQS = _anonenum3.define('VFIO_CCW_NUM_IRQS', 3)
 
-_anonenum4 = CEnum(ctypes.c_uint32)
+_anonenum4 = CEnum(Annotated[int, ctypes.c_uint32])
 VFIO_AP_REQ_IRQ_INDEX = _anonenum4.define('VFIO_AP_REQ_IRQ_INDEX', 0)
 VFIO_AP_NUM_IRQS = _anonenum4.define('VFIO_AP_NUM_IRQS', 1)
 
 @record
 class struct_vfio_pci_dependent_device:
   SIZE = 8
-  group_id: Annotated[ctypes.c_uint32, 0]
-  devid: Annotated[ctypes.c_uint32, 0]
-  segment: Annotated[ctypes.c_uint16, 4]
-  bus: Annotated[ctypes.c_ubyte, 6]
-  devfn: Annotated[ctypes.c_ubyte, 7]
+  group_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  devid: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  segment: Annotated[Annotated[int, ctypes.c_uint16], 4]
+  bus: Annotated[Annotated[int, ctypes.c_ubyte], 6]
+  devfn: Annotated[Annotated[int, ctypes.c_ubyte], 7]
 @record
 class struct_vfio_pci_hot_reset_info:
   SIZE = 12
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  count: Annotated[ctypes.c_uint32, 8]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 8]
   devices: Annotated[Array[struct_vfio_pci_dependent_device, Literal[0]], 12]
 @record
 class struct_vfio_pci_hot_reset:
   SIZE = 12
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  count: Annotated[ctypes.c_uint32, 8]
-  group_fds: Annotated[Array[ctypes.c_int32, Literal[0]], 12]
-__s32 = ctypes.c_int32
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  group_fds: Annotated[Array[Annotated[int, ctypes.c_int32], Literal[0]], 12]
+__s32 = Annotated[int, ctypes.c_int32]
 @record
 class struct_vfio_device_gfx_plane_info:
   SIZE = 64
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  drm_plane_type: Annotated[ctypes.c_uint32, 8]
-  drm_format: Annotated[ctypes.c_uint32, 12]
-  drm_format_mod: Annotated[ctypes.c_uint64, 16]
-  width: Annotated[ctypes.c_uint32, 24]
-  height: Annotated[ctypes.c_uint32, 28]
-  stride: Annotated[ctypes.c_uint32, 32]
-  size: Annotated[ctypes.c_uint32, 36]
-  x_pos: Annotated[ctypes.c_uint32, 40]
-  y_pos: Annotated[ctypes.c_uint32, 44]
-  x_hot: Annotated[ctypes.c_uint32, 48]
-  y_hot: Annotated[ctypes.c_uint32, 52]
-  region_index: Annotated[ctypes.c_uint32, 56]
-  dmabuf_id: Annotated[ctypes.c_uint32, 56]
-  reserved: Annotated[ctypes.c_uint32, 60]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  drm_plane_type: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  drm_format: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  drm_format_mod: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  width: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  height: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  stride: Annotated[Annotated[int, ctypes.c_uint32], 32]
+  size: Annotated[Annotated[int, ctypes.c_uint32], 36]
+  x_pos: Annotated[Annotated[int, ctypes.c_uint32], 40]
+  y_pos: Annotated[Annotated[int, ctypes.c_uint32], 44]
+  x_hot: Annotated[Annotated[int, ctypes.c_uint32], 48]
+  y_hot: Annotated[Annotated[int, ctypes.c_uint32], 52]
+  region_index: Annotated[Annotated[int, ctypes.c_uint32], 56]
+  dmabuf_id: Annotated[Annotated[int, ctypes.c_uint32], 56]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 60]
 @record
 class struct_vfio_device_ioeventfd:
   SIZE = 32
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  offset: Annotated[ctypes.c_uint64, 8]
-  data: Annotated[ctypes.c_uint64, 16]
-  fd: Annotated[ctypes.c_int32, 24]
-  reserved: Annotated[ctypes.c_uint32, 28]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  offset: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  data: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 24]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 28]
 @record
 class struct_vfio_device_feature:
   SIZE = 8
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  data: Annotated[Array[ctypes.c_ubyte, Literal[0]], 8]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  data: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 8]
 @record
 class struct_vfio_device_bind_iommufd:
   SIZE = 16
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  iommufd: Annotated[ctypes.c_int32, 8]
-  out_devid: Annotated[ctypes.c_uint32, 12]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  iommufd: Annotated[Annotated[int, ctypes.c_int32], 8]
+  out_devid: Annotated[Annotated[int, ctypes.c_uint32], 12]
 @record
 class struct_vfio_device_attach_iommufd_pt:
   SIZE = 12
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  pt_id: Annotated[ctypes.c_uint32, 8]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  pt_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
 @record
 class struct_vfio_device_detach_iommufd_pt:
   SIZE = 8
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
 @record
 class struct_vfio_device_feature_migration:
   SIZE = 8
-  flags: Annotated[ctypes.c_uint64, 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint64], 0]
 @record
 class struct_vfio_device_feature_mig_state:
   SIZE = 8
-  device_state: Annotated[ctypes.c_uint32, 0]
-  data_fd: Annotated[ctypes.c_int32, 4]
-enum_vfio_device_mig_state = CEnum(ctypes.c_uint32)
+  device_state: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  data_fd: Annotated[Annotated[int, ctypes.c_int32], 4]
+enum_vfio_device_mig_state = CEnum(Annotated[int, ctypes.c_uint32])
 VFIO_DEVICE_STATE_ERROR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_ERROR', 0)
 VFIO_DEVICE_STATE_STOP = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_STOP', 1)
 VFIO_DEVICE_STATE_RUNNING = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_RUNNING', 2)
@@ -235,160 +235,160 @@ VFIO_DEVICE_STATE_NR = enum_vfio_device_mig_state.define('VFIO_DEVICE_STATE_NR',
 @record
 class struct_vfio_precopy_info:
   SIZE = 24
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  initial_bytes: Annotated[ctypes.c_uint64, 8]
-  dirty_bytes: Annotated[ctypes.c_uint64, 16]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  initial_bytes: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  dirty_bytes: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @record
 class struct_vfio_device_low_power_entry_with_wakeup:
   SIZE = 8
-  wakeup_eventfd: Annotated[ctypes.c_int32, 0]
-  reserved: Annotated[ctypes.c_uint32, 4]
+  wakeup_eventfd: Annotated[Annotated[int, ctypes.c_int32], 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 4]
 @record
 class struct_vfio_device_feature_dma_logging_control:
   SIZE = 24
-  page_size: Annotated[ctypes.c_uint64, 0]
-  num_ranges: Annotated[ctypes.c_uint32, 8]
-  __reserved: Annotated[ctypes.c_uint32, 12]
-  ranges: Annotated[ctypes.c_uint64, 16]
+  page_size: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  num_ranges: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  __reserved: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  ranges: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @record
 class struct_vfio_device_feature_dma_logging_range:
   SIZE = 16
-  iova: Annotated[ctypes.c_uint64, 0]
-  length: Annotated[ctypes.c_uint64, 8]
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  length: Annotated[Annotated[int, ctypes.c_uint64], 8]
 @record
 class struct_vfio_device_feature_dma_logging_report:
   SIZE = 32
-  iova: Annotated[ctypes.c_uint64, 0]
-  length: Annotated[ctypes.c_uint64, 8]
-  page_size: Annotated[ctypes.c_uint64, 16]
-  bitmap: Annotated[ctypes.c_uint64, 24]
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  length: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  page_size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  bitmap: Annotated[Annotated[int, ctypes.c_uint64], 24]
 @record
 class struct_vfio_device_feature_mig_data_size:
   SIZE = 8
-  stop_copy_length: Annotated[ctypes.c_uint64, 0]
+  stop_copy_length: Annotated[Annotated[int, ctypes.c_uint64], 0]
 @record
 class struct_vfio_device_feature_bus_master:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class struct_vfio_iommu_type1_info:
   SIZE = 24
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  iova_pgsizes: Annotated[ctypes.c_uint64, 8]
-  cap_offset: Annotated[ctypes.c_uint32, 16]
-  pad: Annotated[ctypes.c_uint32, 20]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  iova_pgsizes: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  cap_offset: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
 @record
 class struct_vfio_iova_range:
   SIZE = 16
-  start: Annotated[ctypes.c_uint64, 0]
-  end: Annotated[ctypes.c_uint64, 8]
+  start: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  end: Annotated[Annotated[int, ctypes.c_uint64], 8]
 @record
 class struct_vfio_iommu_type1_info_cap_iova_range:
   SIZE = 16
   header: Annotated[struct_vfio_info_cap_header, 0]
-  nr_iovas: Annotated[ctypes.c_uint32, 8]
-  reserved: Annotated[ctypes.c_uint32, 12]
+  nr_iovas: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 12]
   iova_ranges: Annotated[Array[struct_vfio_iova_range, Literal[0]], 16]
 @record
 class struct_vfio_iommu_type1_info_cap_migration:
   SIZE = 32
   header: Annotated[struct_vfio_info_cap_header, 0]
-  flags: Annotated[ctypes.c_uint32, 8]
-  pgsize_bitmap: Annotated[ctypes.c_uint64, 16]
-  max_dirty_bitmap_size: Annotated[ctypes.c_uint64, 24]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  pgsize_bitmap: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  max_dirty_bitmap_size: Annotated[Annotated[int, ctypes.c_uint64], 24]
 @record
 class struct_vfio_iommu_type1_info_dma_avail:
   SIZE = 12
   header: Annotated[struct_vfio_info_cap_header, 0]
-  avail: Annotated[ctypes.c_uint32, 8]
+  avail: Annotated[Annotated[int, ctypes.c_uint32], 8]
 @record
 class struct_vfio_iommu_type1_dma_map:
   SIZE = 32
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  vaddr: Annotated[ctypes.c_uint64, 8]
-  iova: Annotated[ctypes.c_uint64, 16]
-  size: Annotated[ctypes.c_uint64, 24]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  vaddr: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 24]
 @record
 class struct_vfio_bitmap:
   SIZE = 24
-  pgsize: Annotated[ctypes.c_uint64, 0]
-  size: Annotated[ctypes.c_uint64, 8]
-  data: Annotated[ctypes.POINTER(ctypes.c_uint64), 16]
+  pgsize: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  data: Annotated[POINTER(Annotated[int, ctypes.c_uint64]), 16]
 @record
 class struct_vfio_iommu_type1_dma_unmap:
   SIZE = 24
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  iova: Annotated[ctypes.c_uint64, 8]
-  size: Annotated[ctypes.c_uint64, 16]
-  data: Annotated[Array[ctypes.c_ubyte, Literal[0]], 24]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  data: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 24]
 @record
 class struct_vfio_iommu_type1_dirty_bitmap:
   SIZE = 8
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  data: Annotated[Array[ctypes.c_ubyte, Literal[0]], 8]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  data: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 8]
 @record
 class struct_vfio_iommu_type1_dirty_bitmap_get:
   SIZE = 40
-  iova: Annotated[ctypes.c_uint64, 0]
-  size: Annotated[ctypes.c_uint64, 8]
+  iova: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 8]
   bitmap: Annotated[struct_vfio_bitmap, 16]
 @record
 class struct_vfio_iommu_spapr_tce_ddw_info:
   SIZE = 16
-  pgsizes: Annotated[ctypes.c_uint64, 0]
-  max_dynamic_windows_supported: Annotated[ctypes.c_uint32, 8]
-  levels: Annotated[ctypes.c_uint32, 12]
+  pgsizes: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  max_dynamic_windows_supported: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  levels: Annotated[Annotated[int, ctypes.c_uint32], 12]
 @record
 class struct_vfio_iommu_spapr_tce_info:
   SIZE = 32
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  dma32_window_start: Annotated[ctypes.c_uint32, 8]
-  dma32_window_size: Annotated[ctypes.c_uint32, 12]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  dma32_window_start: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  dma32_window_size: Annotated[Annotated[int, ctypes.c_uint32], 12]
   ddw: Annotated[struct_vfio_iommu_spapr_tce_ddw_info, 16]
 @record
 class struct_vfio_eeh_pe_err:
   SIZE = 24
-  type: Annotated[ctypes.c_uint32, 0]
-  func: Annotated[ctypes.c_uint32, 4]
-  addr: Annotated[ctypes.c_uint64, 8]
-  mask: Annotated[ctypes.c_uint64, 16]
+  type: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  func: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  addr: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  mask: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @record
 class struct_vfio_eeh_pe_op:
   SIZE = 40
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  op: Annotated[ctypes.c_uint32, 8]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 8]
   err: Annotated[struct_vfio_eeh_pe_err, 16]
 @record
 class struct_vfio_iommu_spapr_register_memory:
   SIZE = 24
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  vaddr: Annotated[ctypes.c_uint64, 8]
-  size: Annotated[ctypes.c_uint64, 16]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  vaddr: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @record
 class struct_vfio_iommu_spapr_tce_create:
   SIZE = 40
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  page_shift: Annotated[ctypes.c_uint32, 8]
-  __resv1: Annotated[ctypes.c_uint32, 12]
-  window_size: Annotated[ctypes.c_uint64, 16]
-  levels: Annotated[ctypes.c_uint32, 24]
-  __resv2: Annotated[ctypes.c_uint32, 28]
-  start_addr: Annotated[ctypes.c_uint64, 32]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  page_shift: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  __resv1: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  window_size: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  levels: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  __resv2: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  start_addr: Annotated[Annotated[int, ctypes.c_uint64], 32]
 @record
 class struct_vfio_iommu_spapr_tce_remove:
   SIZE = 16
-  argsz: Annotated[ctypes.c_uint32, 0]
-  flags: Annotated[ctypes.c_uint32, 4]
-  start_addr: Annotated[ctypes.c_uint64, 8]
+  argsz: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  start_addr: Annotated[Annotated[int, ctypes.c_uint64], 8]
 init_records()
 VFIO_API_VERSION = 0
 VFIO_TYPE1_IOMMU = 1

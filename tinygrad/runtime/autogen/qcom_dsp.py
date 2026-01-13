@@ -1,9 +1,9 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-ion_user_handle_t = ctypes.c_int32
-enum_ion_heap_type = CEnum(ctypes.c_uint32)
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+ion_user_handle_t = Annotated[int, ctypes.c_int32]
+enum_ion_heap_type = CEnum(Annotated[int, ctypes.c_uint32])
 ION_HEAP_TYPE_SYSTEM = enum_ion_heap_type.define('ION_HEAP_TYPE_SYSTEM', 0)
 ION_HEAP_TYPE_SYSTEM_CONTIG = enum_ion_heap_type.define('ION_HEAP_TYPE_SYSTEM_CONTIG', 1)
 ION_HEAP_TYPE_CARVEOUT = enum_ion_heap_type.define('ION_HEAP_TYPE_CARVEOUT', 2)
@@ -17,15 +17,15 @@ class struct_ion_allocation_data:
   SIZE = 32
   len: Annotated[size_t, 0]
   align: Annotated[size_t, 8]
-  heap_id_mask: Annotated[ctypes.c_uint32, 16]
-  flags: Annotated[ctypes.c_uint32, 20]
+  heap_id_mask: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 20]
   handle: Annotated[ion_user_handle_t, 24]
-size_t = ctypes.c_uint64
+size_t = Annotated[int, ctypes.c_uint64]
 @record
 class struct_ion_fd_data:
   SIZE = 8
   handle: Annotated[ion_user_handle_t, 0]
-  fd: Annotated[ctypes.c_int32, 4]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 4]
 @record
 class struct_ion_handle_data:
   SIZE = 4
@@ -33,15 +33,15 @@ class struct_ion_handle_data:
 @record
 class struct_ion_custom_data:
   SIZE = 16
-  cmd: Annotated[ctypes.c_uint32, 0]
-  arg: Annotated[ctypes.c_uint64, 8]
-enum_msm_ion_heap_types = CEnum(ctypes.c_uint32)
+  cmd: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  arg: Annotated[Annotated[int, ctypes.c_uint64], 8]
+enum_msm_ion_heap_types = CEnum(Annotated[int, ctypes.c_uint32])
 ION_HEAP_TYPE_MSM_START = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_MSM_START', 6)
 ION_HEAP_TYPE_SECURE_DMA = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_SECURE_DMA', 6)
 ION_HEAP_TYPE_SYSTEM_SECURE = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_SYSTEM_SECURE', 7)
 ION_HEAP_TYPE_HYP_CMA = enum_msm_ion_heap_types.define('ION_HEAP_TYPE_HYP_CMA', 8)
 
-enum_ion_heap_ids = CEnum(ctypes.c_int32)
+enum_ion_heap_ids = CEnum(Annotated[int, ctypes.c_int32])
 INVALID_HEAP_ID = enum_ion_heap_ids.define('INVALID_HEAP_ID', -1)
 ION_CP_MM_HEAP_ID = enum_ion_heap_ids.define('ION_CP_MM_HEAP_ID', 8)
 ION_SECURE_HEAP_ID = enum_ion_heap_ids.define('ION_SECURE_HEAP_ID', 9)
@@ -60,13 +60,13 @@ ION_AUDIO_HEAP_ID = enum_ion_heap_ids.define('ION_AUDIO_HEAP_ID', 28)
 ION_MM_FIRMWARE_HEAP_ID = enum_ion_heap_ids.define('ION_MM_FIRMWARE_HEAP_ID', 29)
 ION_HEAP_ID_RESERVED = enum_ion_heap_ids.define('ION_HEAP_ID_RESERVED', 31)
 
-enum_ion_fixed_position = CEnum(ctypes.c_uint32)
+enum_ion_fixed_position = CEnum(Annotated[int, ctypes.c_uint32])
 NOT_FIXED = enum_ion_fixed_position.define('NOT_FIXED', 0)
 FIXED_LOW = enum_ion_fixed_position.define('FIXED_LOW', 1)
 FIXED_MIDDLE = enum_ion_fixed_position.define('FIXED_MIDDLE', 2)
 FIXED_HIGH = enum_ion_fixed_position.define('FIXED_HIGH', 3)
 
-enum_cp_mem_usage = CEnum(ctypes.c_uint32)
+enum_cp_mem_usage = CEnum(Annotated[int, ctypes.c_uint32])
 VIDEO_BITSTREAM = enum_cp_mem_usage.define('VIDEO_BITSTREAM', 1)
 VIDEO_PIXEL = enum_cp_mem_usage.define('VIDEO_PIXEL', 2)
 VIDEO_NONPIXEL = enum_cp_mem_usage.define('VIDEO_NONPIXEL', 3)
@@ -79,36 +79,36 @@ UNKNOWN = enum_cp_mem_usage.define('UNKNOWN', 2147483647)
 class struct_ion_flush_data:
   SIZE = 24
   handle: Annotated[ion_user_handle_t, 0]
-  fd: Annotated[ctypes.c_int32, 4]
-  vaddr: Annotated[ctypes.POINTER(None), 8]
-  offset: Annotated[ctypes.c_uint32, 16]
-  length: Annotated[ctypes.c_uint32, 20]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 4]
+  vaddr: Annotated[POINTER(None), 8]
+  offset: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  length: Annotated[Annotated[int, ctypes.c_uint32], 20]
 @record
 class struct_ion_prefetch_regions:
   SIZE = 24
-  vmid: Annotated[ctypes.c_uint32, 0]
-  sizes: Annotated[ctypes.POINTER(size_t), 8]
-  nr_sizes: Annotated[ctypes.c_uint32, 16]
+  vmid: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  sizes: Annotated[POINTER(size_t), 8]
+  nr_sizes: Annotated[Annotated[int, ctypes.c_uint32], 16]
 @record
 class struct_ion_prefetch_data:
   SIZE = 32
-  heap_id: Annotated[ctypes.c_int32, 0]
-  len: Annotated[ctypes.c_uint64, 8]
-  regions: Annotated[ctypes.POINTER(struct_ion_prefetch_regions), 16]
-  nr_regions: Annotated[ctypes.c_uint32, 24]
+  heap_id: Annotated[Annotated[int, ctypes.c_int32], 0]
+  len: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  regions: Annotated[POINTER(struct_ion_prefetch_regions), 16]
+  nr_regions: Annotated[Annotated[int, ctypes.c_uint32], 24]
 @record
 class struct_remote_buf64:
   SIZE = 16
   pv: Annotated[uint64_t, 0]
   len: Annotated[uint64_t, 8]
-uint64_t = ctypes.c_uint64
+uint64_t = Annotated[int, ctypes.c_uint64]
 @record
 class struct_remote_dma_handle64:
   SIZE = 12
-  fd: Annotated[ctypes.c_int32, 0]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   offset: Annotated[uint32_t, 4]
   len: Annotated[uint32_t, 8]
-uint32_t = ctypes.c_uint32
+uint32_t = Annotated[int, ctypes.c_uint32]
 @record
 class union_remote_arg64:
   SIZE = 16
@@ -118,12 +118,12 @@ class union_remote_arg64:
 @record
 class struct_remote_buf:
   SIZE = 16
-  pv: Annotated[ctypes.POINTER(None), 0]
+  pv: Annotated[POINTER(None), 0]
   len: Annotated[size_t, 8]
 @record
 class struct_remote_dma_handle:
   SIZE = 8
-  fd: Annotated[ctypes.c_int32, 0]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   offset: Annotated[uint32_t, 4]
 @record
 class union_remote_arg:
@@ -136,25 +136,25 @@ class struct_fastrpc_ioctl_invoke:
   SIZE = 16
   handle: Annotated[uint32_t, 0]
   sc: Annotated[uint32_t, 4]
-  pra: Annotated[ctypes.POINTER(union_remote_arg), 8]
+  pra: Annotated[POINTER(union_remote_arg), 8]
 @record
 class struct_fastrpc_ioctl_invoke_fd:
   SIZE = 24
   inv: Annotated[struct_fastrpc_ioctl_invoke, 0]
-  fds: Annotated[ctypes.POINTER(ctypes.c_int32), 16]
+  fds: Annotated[POINTER(Annotated[int, ctypes.c_int32]), 16]
 @record
 class struct_fastrpc_ioctl_invoke_attrs:
   SIZE = 32
   inv: Annotated[struct_fastrpc_ioctl_invoke, 0]
-  fds: Annotated[ctypes.POINTER(ctypes.c_int32), 16]
-  attrs: Annotated[ctypes.POINTER(ctypes.c_uint32), 24]
+  fds: Annotated[POINTER(Annotated[int, ctypes.c_int32]), 16]
+  attrs: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 24]
 @record
 class struct_fastrpc_ioctl_invoke_crc:
   SIZE = 40
   inv: Annotated[struct_fastrpc_ioctl_invoke, 0]
-  fds: Annotated[ctypes.POINTER(ctypes.c_int32), 16]
-  attrs: Annotated[ctypes.POINTER(ctypes.c_uint32), 24]
-  crc: Annotated[ctypes.POINTER(ctypes.c_uint32), 32]
+  fds: Annotated[POINTER(Annotated[int, ctypes.c_int32]), 16]
+  attrs: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 24]
+  crc: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 32]
 @record
 class struct_fastrpc_ioctl_init:
   SIZE = 40
@@ -165,14 +165,14 @@ class struct_fastrpc_ioctl_init:
   mem: Annotated[uintptr_t, 24]
   memlen: Annotated[uint32_t, 32]
   memfd: Annotated[int32_t, 36]
-uintptr_t = ctypes.c_uint64
-int32_t = ctypes.c_int32
+uintptr_t = Annotated[int, ctypes.c_uint64]
+int32_t = Annotated[int, ctypes.c_int32]
 @record
 class struct_fastrpc_ioctl_init_attrs:
   SIZE = 48
   init: Annotated[struct_fastrpc_ioctl_init, 0]
-  attrs: Annotated[ctypes.c_int32, 40]
-  siglen: Annotated[ctypes.c_uint32, 44]
+  attrs: Annotated[Annotated[int, ctypes.c_int32], 40]
+  siglen: Annotated[Annotated[int, ctypes.c_uint32], 44]
 @record
 class struct_fastrpc_ioctl_munmap:
   SIZE = 16
@@ -186,7 +186,7 @@ class struct_fastrpc_ioctl_munmap_64:
 @record
 class struct_fastrpc_ioctl_mmap:
   SIZE = 32
-  fd: Annotated[ctypes.c_int32, 0]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   flags: Annotated[uint32_t, 4]
   vaddrin: Annotated[uintptr_t, 8]
   size: Annotated[size_t, 16]
@@ -194,7 +194,7 @@ class struct_fastrpc_ioctl_mmap:
 @record
 class struct_fastrpc_ioctl_mmap_64:
   SIZE = 32
-  fd: Annotated[ctypes.c_int32, 0]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   flags: Annotated[uint32_t, 4]
   vaddrin: Annotated[uint64_t, 8]
   size: Annotated[size_t, 16]
@@ -202,11 +202,11 @@ class struct_fastrpc_ioctl_mmap_64:
 @record
 class struct_fastrpc_ioctl_munmap_fd:
   SIZE = 24
-  fd: Annotated[ctypes.c_int32, 0]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   flags: Annotated[uint32_t, 4]
   va: Annotated[uintptr_t, 8]
   len: Annotated[ssize_t, 16]
-ssize_t = ctypes.c_int64
+ssize_t = Annotated[int, ctypes.c_int64]
 @record
 class struct_fastrpc_ioctl_perf:
   SIZE = 24
@@ -247,8 +247,8 @@ class struct_smq_phy_page:
 @record
 class struct_smq_invoke_buf:
   SIZE = 8
-  num: Annotated[ctypes.c_int32, 0]
-  pgidx: Annotated[ctypes.c_int32, 4]
+  num: Annotated[Annotated[int, ctypes.c_int32], 0]
+  pgidx: Annotated[Annotated[int, ctypes.c_int32], 4]
 @record
 class struct_smq_invoke:
   SIZE = 32
@@ -264,14 +264,14 @@ class struct_smq_msg:
 class struct_smq_invoke_rsp:
   SIZE = 16
   ctx: Annotated[uint64_t, 0]
-  retval: Annotated[ctypes.c_int32, 8]
-remote_handle = ctypes.c_uint32
-remote_handle64 = ctypes.c_uint64
-fastrpc_async_jobid = ctypes.c_uint64
+  retval: Annotated[Annotated[int, ctypes.c_int32], 8]
+remote_handle = Annotated[int, ctypes.c_uint32]
+remote_handle64 = Annotated[int, ctypes.c_uint64]
+fastrpc_async_jobid = Annotated[int, ctypes.c_uint64]
 @record
 class remote_buf:
   SIZE = 16
-  pv: Annotated[ctypes.POINTER(None), 0]
+  pv: Annotated[POINTER(None), 0]
   nLen: Annotated[size_t, 8]
 @record
 class remote_dma_handle:
@@ -285,7 +285,7 @@ class remote_arg:
   h: Annotated[remote_handle, 0]
   h64: Annotated[remote_handle64, 0]
   dma: Annotated[remote_dma_handle, 0]
-enum_fastrpc_async_notify_type = CEnum(ctypes.c_uint32)
+enum_fastrpc_async_notify_type = CEnum(Annotated[int, ctypes.c_uint32])
 FASTRPC_ASYNC_NO_SYNC = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_NO_SYNC', 0)
 FASTRPC_ASYNC_CALLBACK = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_CALLBACK', 1)
 FASTRPC_ASYNC_POLL = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_POLL', 2)
@@ -294,8 +294,8 @@ FASTRPC_ASYNC_TYPE_MAX = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_TY
 @record
 class struct_fastrpc_async_callback:
   SIZE = 16
-  fn: Annotated[ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.POINTER(None), ctypes.c_int32), 0]
-  context: Annotated[ctypes.POINTER(None), 8]
+  fn: Annotated[CFUNCTYPE(None, fastrpc_async_jobid, POINTER(None), Annotated[int, ctypes.c_int32]), 0]
+  context: Annotated[POINTER(None), 8]
 fastrpc_async_callback_t = struct_fastrpc_async_callback
 @record
 class struct_fastrpc_async_descriptor:
@@ -304,17 +304,17 @@ class struct_fastrpc_async_descriptor:
   jobid: Annotated[fastrpc_async_jobid, 8]
   cb: Annotated[fastrpc_async_callback_t, 16]
 fastrpc_async_descriptor_t = struct_fastrpc_async_descriptor
-enum_fastrpc_process_type = CEnum(ctypes.c_uint32)
+enum_fastrpc_process_type = CEnum(Annotated[int, ctypes.c_uint32])
 PROCESS_TYPE_SIGNED = enum_fastrpc_process_type.define('PROCESS_TYPE_SIGNED', 0)
 PROCESS_TYPE_UNSIGNED = enum_fastrpc_process_type.define('PROCESS_TYPE_UNSIGNED', 1)
 
-enum_handle_control_req_id = CEnum(ctypes.c_uint32)
+enum_handle_control_req_id = CEnum(Annotated[int, ctypes.c_uint32])
 DSPRPC_CONTROL_LATENCY = enum_handle_control_req_id.define('DSPRPC_CONTROL_LATENCY', 1)
 DSPRPC_GET_DSP_INFO = enum_handle_control_req_id.define('DSPRPC_GET_DSP_INFO', 2)
 DSPRPC_CONTROL_WAKELOCK = enum_handle_control_req_id.define('DSPRPC_CONTROL_WAKELOCK', 3)
 DSPRPC_GET_DOMAIN = enum_handle_control_req_id.define('DSPRPC_GET_DOMAIN', 4)
 
-enum_remote_rpc_latency_flags = CEnum(ctypes.c_uint32)
+enum_remote_rpc_latency_flags = CEnum(Annotated[int, ctypes.c_uint32])
 RPC_DISABLE_QOS = enum_remote_rpc_latency_flags.define('RPC_DISABLE_QOS', 0)
 RPC_PM_QOS = enum_remote_rpc_latency_flags.define('RPC_PM_QOS', 1)
 RPC_ADAPTIVE_QOS = enum_remote_rpc_latency_flags.define('RPC_ADAPTIVE_QOS', 2)
@@ -326,7 +326,7 @@ class struct_remote_rpc_control_latency:
   SIZE = 8
   enable: Annotated[remote_rpc_control_latency_t, 0]
   latency: Annotated[uint32_t, 4]
-enum_remote_dsp_attributes = CEnum(ctypes.c_uint32)
+enum_remote_dsp_attributes = CEnum(Annotated[int, ctypes.c_uint32])
 DOMAIN_SUPPORT = enum_remote_dsp_attributes.define('DOMAIN_SUPPORT', 0)
 UNSIGNED_PD_SUPPORT = enum_remote_dsp_attributes.define('UNSIGNED_PD_SUPPORT', 1)
 HVX_SUPPORT_64B = enum_remote_dsp_attributes.define('HVX_SUPPORT_64B', 2)
@@ -354,9 +354,9 @@ class struct_remote_rpc_control_wakelock:
 @record
 class struct_remote_rpc_get_domain:
   SIZE = 4
-  domain: Annotated[ctypes.c_int32, 0]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 0]
 remote_rpc_get_domain_t = struct_remote_rpc_get_domain
-enum_session_control_req_id = CEnum(ctypes.c_uint32)
+enum_session_control_req_id = CEnum(Annotated[int, ctypes.c_uint32])
 FASTRPC_THREAD_PARAMS = enum_session_control_req_id.define('FASTRPC_THREAD_PARAMS', 1)
 DSPRPC_CONTROL_UNSIGNED_MODULE = enum_session_control_req_id.define('DSPRPC_CONTROL_UNSIGNED_MODULE', 2)
 FASTRPC_RELATIVE_THREAD_PRIORITY = enum_session_control_req_id.define('FASTRPC_RELATIVE_THREAD_PRIORITY', 4)
@@ -370,39 +370,39 @@ FASTRPC_REGISTER_STATUS_NOTIFICATIONS = enum_session_control_req_id.define('FAST
 @record
 class struct_remote_rpc_thread_params:
   SIZE = 12
-  domain: Annotated[ctypes.c_int32, 0]
-  prio: Annotated[ctypes.c_int32, 4]
-  stack_size: Annotated[ctypes.c_int32, 8]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 0]
+  prio: Annotated[Annotated[int, ctypes.c_int32], 4]
+  stack_size: Annotated[Annotated[int, ctypes.c_int32], 8]
 @record
 class struct_remote_rpc_control_unsigned_module:
   SIZE = 8
-  domain: Annotated[ctypes.c_int32, 0]
-  enable: Annotated[ctypes.c_int32, 4]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 0]
+  enable: Annotated[Annotated[int, ctypes.c_int32], 4]
 @record
 class struct_remote_rpc_relative_thread_priority:
   SIZE = 8
-  domain: Annotated[ctypes.c_int32, 0]
-  relative_thread_priority: Annotated[ctypes.c_int32, 4]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 0]
+  relative_thread_priority: Annotated[Annotated[int, ctypes.c_int32], 4]
 @record
 class struct_remote_rpc_process_clean_params:
   SIZE = 4
-  domain: Annotated[ctypes.c_int32, 0]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 0]
 @record
 class struct_remote_rpc_session_close:
   SIZE = 4
-  domain: Annotated[ctypes.c_int32, 0]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 0]
 @record
 class struct_remote_rpc_control_pd_dump:
   SIZE = 8
-  domain: Annotated[ctypes.c_int32, 0]
-  enable: Annotated[ctypes.c_int32, 4]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 0]
+  enable: Annotated[Annotated[int, ctypes.c_int32], 4]
 @record
 class struct_remote_process_type:
   SIZE = 8
-  domain: Annotated[ctypes.c_int32, 0]
-  process_type: Annotated[ctypes.c_int32, 4]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 0]
+  process_type: Annotated[Annotated[int, ctypes.c_int32], 4]
 remote_rpc_process_exception = struct_remote_rpc_process_clean_params
-enum_remote_rpc_status_flags = CEnum(ctypes.c_uint32)
+enum_remote_rpc_status_flags = CEnum(Annotated[int, ctypes.c_uint32])
 FASTRPC_USER_PD_UP = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_UP', 0)
 FASTRPC_USER_PD_EXIT = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_EXIT', 1)
 FASTRPC_USER_PD_FORCE_KILL = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_FORCE_KILL', 2)
@@ -410,19 +410,19 @@ FASTRPC_USER_PD_EXCEPTION = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD
 FASTRPC_DSP_SSR = enum_remote_rpc_status_flags.define('FASTRPC_DSP_SSR', 4)
 
 remote_rpc_status_flags_t = enum_remote_rpc_status_flags
-fastrpc_notif_fn_t = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.c_int32, ctypes.c_int32, enum_remote_rpc_status_flags)
+fastrpc_notif_fn_t = CFUNCTYPE(Annotated[int, ctypes.c_int32], POINTER(None), Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], enum_remote_rpc_status_flags)
 @record
 class struct_remote_rpc_notif_register:
   SIZE = 24
-  context: Annotated[ctypes.POINTER(None), 0]
-  domain: Annotated[ctypes.c_int32, 8]
+  context: Annotated[POINTER(None), 0]
+  domain: Annotated[Annotated[int, ctypes.c_int32], 8]
   notifier_fn: Annotated[fastrpc_notif_fn_t, 16]
 remote_rpc_notif_register_t = struct_remote_rpc_notif_register
-enum_remote_mem_map_flags = CEnum(ctypes.c_uint32)
+enum_remote_mem_map_flags = CEnum(Annotated[int, ctypes.c_uint32])
 REMOTE_MAP_MEM_STATIC = enum_remote_mem_map_flags.define('REMOTE_MAP_MEM_STATIC', 0)
 REMOTE_MAP_MAX_FLAG = enum_remote_mem_map_flags.define('REMOTE_MAP_MAX_FLAG', 1)
 
-enum_remote_buf_attributes = CEnum(ctypes.c_uint32)
+enum_remote_buf_attributes = CEnum(Annotated[int, ctypes.c_uint32])
 FASTRPC_ATTR_NON_COHERENT = enum_remote_buf_attributes.define('FASTRPC_ATTR_NON_COHERENT', 2)
 FASTRPC_ATTR_COHERENT = enum_remote_buf_attributes.define('FASTRPC_ATTR_COHERENT', 4)
 FASTRPC_ATTR_KEEP_MAP = enum_remote_buf_attributes.define('FASTRPC_ATTR_KEEP_MAP', 8)
@@ -431,7 +431,7 @@ FASTRPC_ATTR_FORCE_NOFLUSH = enum_remote_buf_attributes.define('FASTRPC_ATTR_FOR
 FASTRPC_ATTR_FORCE_NOINVALIDATE = enum_remote_buf_attributes.define('FASTRPC_ATTR_FORCE_NOINVALIDATE', 64)
 FASTRPC_ATTR_TRY_MAP_STATIC = enum_remote_buf_attributes.define('FASTRPC_ATTR_TRY_MAP_STATIC', 128)
 
-enum_fastrpc_map_flags = CEnum(ctypes.c_uint32)
+enum_fastrpc_map_flags = CEnum(Annotated[int, ctypes.c_uint32])
 FASTRPC_MAP_STATIC = enum_fastrpc_map_flags.define('FASTRPC_MAP_STATIC', 0)
 FASTRPC_MAP_RESERVED = enum_fastrpc_map_flags.define('FASTRPC_MAP_RESERVED', 1)
 FASTRPC_MAP_FD = enum_fastrpc_map_flags.define('FASTRPC_MAP_FD', 2)
@@ -441,11 +441,11 @@ FASTRPC_MAP_MAX = enum_fastrpc_map_flags.define('FASTRPC_MAP_MAX', 4)
 @record
 class struct__cstring1_s:
   SIZE = 16
-  data: Annotated[ctypes.POINTER(ctypes.c_char), 0]
-  dataLen: Annotated[ctypes.c_int32, 8]
+  data: Annotated[POINTER(Annotated[bytes, ctypes.c_char]), 0]
+  dataLen: Annotated[Annotated[int, ctypes.c_int32], 8]
 _cstring1_t = struct__cstring1_s
-apps_std_FILE = ctypes.c_int32
-enum_apps_std_SEEK = CEnum(ctypes.c_uint32)
+apps_std_FILE = Annotated[int, ctypes.c_int32]
+enum_apps_std_SEEK = CEnum(Annotated[int, ctypes.c_uint32])
 APPS_STD_SEEK_SET = enum_apps_std_SEEK.define('APPS_STD_SEEK_SET', 0)
 APPS_STD_SEEK_CUR = enum_apps_std_SEEK.define('APPS_STD_SEEK_CUR', 1)
 APPS_STD_SEEK_END = enum_apps_std_SEEK.define('APPS_STD_SEEK_END', 2)
@@ -456,13 +456,13 @@ apps_std_SEEK = enum_apps_std_SEEK
 class struct_apps_std_DIR:
   SIZE = 8
   handle: Annotated[uint64, 0]
-uint64 = ctypes.c_uint64
+uint64 = Annotated[int, ctypes.c_uint64]
 apps_std_DIR = struct_apps_std_DIR
 @record
 class struct_apps_std_DIRENT:
   SIZE = 260
-  ino: Annotated[ctypes.c_int32, 0]
-  name: Annotated[Array[ctypes.c_char, Literal[255]], 4]
+  ino: Annotated[Annotated[int, ctypes.c_int32], 0]
+  name: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[255]], 4]
 apps_std_DIRENT = struct_apps_std_DIRENT
 @record
 class struct_apps_std_STAT:
@@ -480,8 +480,8 @@ class struct_apps_std_STAT:
   mtimensec: Annotated[int64, 72]
   ctime: Annotated[int64, 80]
   ctimensec: Annotated[int64, 88]
-uint32 = ctypes.c_uint32
-int64 = ctypes.c_int64
+uint32 = Annotated[int, ctypes.c_uint32]
+int64 = Annotated[int, ctypes.c_int64]
 apps_std_STAT = struct_apps_std_STAT
 init_records()
 ION_HEAP_SYSTEM_MASK = ((1 << ION_HEAP_TYPE_SYSTEM))

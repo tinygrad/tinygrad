@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-enum_HEVCNALUnitType = CEnum(ctypes.c_uint32)
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+enum_HEVCNALUnitType = CEnum(Annotated[int, ctypes.c_uint32])
 HEVC_NAL_TRAIL_N = enum_HEVCNALUnitType.define('HEVC_NAL_TRAIL_N', 0)
 HEVC_NAL_TRAIL_R = enum_HEVCNALUnitType.define('HEVC_NAL_TRAIL_R', 1)
 HEVC_NAL_TSA_N = enum_HEVCNALUnitType.define('HEVC_NAL_TSA_N', 2)
@@ -68,12 +68,12 @@ HEVC_NAL_UNSPEC61 = enum_HEVCNALUnitType.define('HEVC_NAL_UNSPEC61', 61)
 HEVC_NAL_UNSPEC62 = enum_HEVCNALUnitType.define('HEVC_NAL_UNSPEC62', 62)
 HEVC_NAL_UNSPEC63 = enum_HEVCNALUnitType.define('HEVC_NAL_UNSPEC63', 63)
 
-enum_HEVCSliceType = CEnum(ctypes.c_uint32)
+enum_HEVCSliceType = CEnum(Annotated[int, ctypes.c_uint32])
 HEVC_SLICE_B = enum_HEVCSliceType.define('HEVC_SLICE_B', 0)
 HEVC_SLICE_P = enum_HEVCSliceType.define('HEVC_SLICE_P', 1)
 HEVC_SLICE_I = enum_HEVCSliceType.define('HEVC_SLICE_I', 2)
 
-_anonenum0 = CEnum(ctypes.c_uint32)
+_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
 HEVC_MAX_LAYERS = _anonenum0.define('HEVC_MAX_LAYERS', 63)
 HEVC_MAX_SUB_LAYERS = _anonenum0.define('HEVC_MAX_SUB_LAYERS', 7)
 HEVC_MAX_LAYER_SETS = _anonenum0.define('HEVC_MAX_LAYER_SETS', 1024)
@@ -98,14 +98,14 @@ HEVC_MAX_SLICE_SEGMENTS = _anonenum0.define('HEVC_MAX_SLICE_SEGMENTS', 600)
 HEVC_MAX_ENTRY_POINT_OFFSETS = _anonenum0.define('HEVC_MAX_ENTRY_POINT_OFFSETS', 2700)
 HEVC_MAX_PALETTE_PREDICTOR_SIZE = _anonenum0.define('HEVC_MAX_PALETTE_PREDICTOR_SIZE', 128)
 
-enum_HEVCScalabilityMask = CEnum(ctypes.c_uint32)
+enum_HEVCScalabilityMask = CEnum(Annotated[int, ctypes.c_uint32])
 HEVC_SCALABILITY_DEPTH = enum_HEVCScalabilityMask.define('HEVC_SCALABILITY_DEPTH', 32768)
 HEVC_SCALABILITY_MULTIVIEW = enum_HEVCScalabilityMask.define('HEVC_SCALABILITY_MULTIVIEW', 16384)
 HEVC_SCALABILITY_SPATIAL = enum_HEVCScalabilityMask.define('HEVC_SCALABILITY_SPATIAL', 8192)
 HEVC_SCALABILITY_AUXILIARY = enum_HEVCScalabilityMask.define('HEVC_SCALABILITY_AUXILIARY', 4096)
 HEVC_SCALABILITY_MASK_MAX = enum_HEVCScalabilityMask.define('HEVC_SCALABILITY_MASK_MAX', 65535)
 
-enum_HEVCAuxId = CEnum(ctypes.c_uint32)
+enum_HEVCAuxId = CEnum(Annotated[int, ctypes.c_uint32])
 HEVC_AUX_ALPHA = enum_HEVCAuxId.define('HEVC_AUX_ALPHA', 1)
 HEVC_AUX_DEPTH = enum_HEVCAuxId.define('HEVC_AUX_DEPTH', 2)
 
@@ -115,7 +115,7 @@ class struct_H265RawNALUnitHeader:
   nal_unit_type: Annotated[uint8_t, 0]
   nuh_layer_id: Annotated[uint8_t, 1]
   nuh_temporal_id_plus1: Annotated[uint8_t, 2]
-uint8_t = ctypes.c_ubyte
+uint8_t = Annotated[int, ctypes.c_ubyte]
 H265RawNALUnitHeader = struct_H265RawNALUnitHeader
 @record
 class struct_H265RawProfileTierLevel:
@@ -171,7 +171,7 @@ class struct_H265RawSubLayerHRDParameters:
   cpb_size_du_value_minus1: Annotated[Array[uint32_t, Literal[32]], 256]
   bit_rate_du_value_minus1: Annotated[Array[uint32_t, Literal[32]], 384]
   cbr_flag: Annotated[Array[uint8_t, Literal[32]], 512]
-uint32_t = ctypes.c_uint32
+uint32_t = Annotated[int, ctypes.c_uint32]
 H265RawSubLayerHRDParameters = struct_H265RawSubLayerHRDParameters
 @record
 class struct_H265RawHRDParameters:
@@ -196,7 +196,7 @@ class struct_H265RawHRDParameters:
   cpb_cnt_minus1: Annotated[Array[uint8_t, Literal[7]], 49]
   nal_sub_layer_hrd_parameters: Annotated[Array[H265RawSubLayerHRDParameters, Literal[7]], 56]
   vcl_sub_layer_hrd_parameters: Annotated[Array[H265RawSubLayerHRDParameters, Literal[7]], 3864]
-uint16_t = ctypes.c_uint16
+uint16_t = Annotated[int, ctypes.c_uint16]
 H265RawHRDParameters = struct_H265RawHRDParameters
 @record
 class struct_H265RawVUI:
@@ -269,8 +269,8 @@ class struct_H265RawScalingList:
   scaling_list_pred_matrix_id_delta: Annotated[Array[Array[uint8_t, Literal[6]], Literal[4]], 24]
   scaling_list_dc_coef_minus8: Annotated[Array[Array[int16_t, Literal[6]], Literal[4]], 48]
   scaling_list_delta_coeff: Annotated[Array[Array[Array[int8_t, Literal[64]], Literal[6]], Literal[4]], 96]
-int16_t = ctypes.c_int16
-int8_t = ctypes.c_byte
+int16_t = Annotated[int, ctypes.c_int16]
+int8_t = Annotated[int, ctypes.c_byte]
 H265RawScalingList = struct_H265RawScalingList
 class struct_H265RawSPS(ctypes.Structure): pass
 H265RawSPS = struct_H265RawSPS
@@ -401,7 +401,7 @@ class struct_H265RawSEIPanScanRect:
   pan_scan_rect_top_offset: Annotated[Array[int32_t, Literal[3]], 32]
   pan_scan_rect_bottom_offset: Annotated[Array[int32_t, Literal[3]], 44]
   pan_scan_rect_persistence_flag: Annotated[uint16_t, 56]
-int32_t = ctypes.c_int32
+int32_t = Annotated[int, ctypes.c_int32]
 H265RawSEIPanScanRect = struct_H265RawSEIPanScanRect
 @record
 class struct_H265RawSEIRecoveryPoint:
@@ -517,21 +517,21 @@ class struct_H265RawSEI:
 @record
 class struct_SEIRawMessageList:
   SIZE = 16
-  messages: Annotated[ctypes.POINTER(SEIRawMessage), 0]
-  nb_messages: Annotated[ctypes.c_int32, 8]
-  nb_messages_allocated: Annotated[ctypes.c_int32, 12]
+  messages: Annotated[POINTER(SEIRawMessage), 0]
+  nb_messages: Annotated[Annotated[int, ctypes.c_int32], 8]
+  nb_messages_allocated: Annotated[Annotated[int, ctypes.c_int32], 12]
 SEIRawMessageList = struct_SEIRawMessageList
 @record
 class struct_SEIRawMessage:
   SIZE = 40
   payload_type: Annotated[uint32_t, 0]
   payload_size: Annotated[uint32_t, 4]
-  payload: Annotated[ctypes.POINTER(None), 8]
-  payload_ref: Annotated[ctypes.POINTER(None), 16]
-  extension_data: Annotated[ctypes.POINTER(uint8_t), 24]
+  payload: Annotated[POINTER(None), 8]
+  payload_ref: Annotated[POINTER(None), 16]
+  extension_data: Annotated[POINTER(uint8_t), 24]
   extension_bit_length: Annotated[size_t, 32]
 SEIRawMessage = struct_SEIRawMessage
-size_t = ctypes.c_uint64
+size_t = Annotated[int, ctypes.c_uint64]
 H265RawSEI = struct_H265RawSEI
 @record
 class struct_H265RawFiller:

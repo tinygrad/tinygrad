@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG:
   SIZE = 28
@@ -15,45 +15,45 @@ class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG:
 @record
 class _anonunion0:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  extra_info: Annotated[ctypes.c_uint32, 2, 16, 0]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  extra_info: Annotated[Annotated[int, ctypes.c_uint32], 2, 16, 0]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion1:
   SIZE = 4
-  count: Annotated[ctypes.c_uint32, 0, 22, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 2, 10, 6]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 0, 22, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 10, 6]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion2:
   SIZE = 4
-  reserved_0: Annotated[ctypes.c_uint32, 0, 16, 0]
-  dst_swap: Annotated[ctypes.c_uint32, 2, 2, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 2, 6, 2]
-  src_swap: Annotated[ctypes.c_uint32, 3, 2, 0]
-  reserved_2: Annotated[ctypes.c_uint32, 3, 6, 2]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
+  dst_swap: Annotated[Annotated[int, ctypes.c_uint32], 2, 2, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 2, 6, 2]
+  src_swap: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 0]
+  reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 3, 6, 2]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion3:
   SIZE = 4
-  src_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+  src_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion4:
   SIZE = 4
-  src_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+  src_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion5:
   SIZE = 4
-  dst_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_5_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion6:
   SIZE = 4
-  dst_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_6_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_6_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_COPY_LINEAR = rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG
 @record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG:
@@ -74,91 +74,91 @@ class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG:
 @record
 class _anonunion7:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  reserved: Annotated[ctypes.c_uint32, 2, 13, 0]
-  element: Annotated[ctypes.c_uint32, 3, 3, 5]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 2, 13, 0]
+  element: Annotated[Annotated[int, ctypes.c_uint32], 3, 3, 5]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion8:
   SIZE = 4
-  src_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  src_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion9:
   SIZE = 4
-  src_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+  src_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion10:
   SIZE = 4
-  src_offset_x: Annotated[ctypes.c_uint32, 0, 14, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 6]
-  src_offset_y: Annotated[ctypes.c_uint32, 2, 14, 0]
-  reserved_2: Annotated[ctypes.c_uint32, 3, 2, 6]
-  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+  src_offset_x: Annotated[Annotated[int, ctypes.c_uint32], 0, 14, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 6]
+  src_offset_y: Annotated[Annotated[int, ctypes.c_uint32], 2, 14, 0]
+  reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
+  DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion11:
   SIZE = 4
-  src_offset_z: Annotated[ctypes.c_uint32, 0, 11, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 3]
-  src_pitch: Annotated[ctypes.c_uint32, 1, 19, 5]
-  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+  src_offset_z: Annotated[Annotated[int, ctypes.c_uint32], 0, 11, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 3]
+  src_pitch: Annotated[Annotated[int, ctypes.c_uint32], 1, 19, 5]
+  DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion12:
   SIZE = 4
-  src_slice_pitch: Annotated[ctypes.c_uint32, 0, 28, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 3, 4, 4]
-  DW_5_DATA: Annotated[ctypes.c_uint32, 0]
+  src_slice_pitch: Annotated[Annotated[int, ctypes.c_uint32], 0, 28, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
+  DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion13:
   SIZE = 4
-  dst_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_6_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_6_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion14:
   SIZE = 4
-  dst_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_7_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_7_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion15:
   SIZE = 4
-  dst_offset_x: Annotated[ctypes.c_uint32, 0, 14, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 6]
-  dst_offset_y: Annotated[ctypes.c_uint32, 2, 14, 0]
-  reserved_2: Annotated[ctypes.c_uint32, 3, 2, 6]
-  DW_8_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_offset_x: Annotated[Annotated[int, ctypes.c_uint32], 0, 14, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 6]
+  dst_offset_y: Annotated[Annotated[int, ctypes.c_uint32], 2, 14, 0]
+  reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
+  DW_8_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion16:
   SIZE = 4
-  dst_offset_z: Annotated[ctypes.c_uint32, 0, 11, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 3]
-  dst_pitch: Annotated[ctypes.c_uint32, 1, 19, 5]
-  DW_9_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_offset_z: Annotated[Annotated[int, ctypes.c_uint32], 0, 11, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 3]
+  dst_pitch: Annotated[Annotated[int, ctypes.c_uint32], 1, 19, 5]
+  DW_9_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion17:
   SIZE = 4
-  dst_slice_pitch: Annotated[ctypes.c_uint32, 0, 28, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 3, 4, 4]
-  DW_10_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_slice_pitch: Annotated[Annotated[int, ctypes.c_uint32], 0, 28, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
+  DW_10_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion18:
   SIZE = 4
-  rect_x: Annotated[ctypes.c_uint32, 0, 14, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 1, 2, 6]
-  rect_y: Annotated[ctypes.c_uint32, 2, 14, 0]
-  reserved_2: Annotated[ctypes.c_uint32, 3, 2, 6]
-  DW_11_DATA: Annotated[ctypes.c_uint32, 0]
+  rect_x: Annotated[Annotated[int, ctypes.c_uint32], 0, 14, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 6]
+  rect_y: Annotated[Annotated[int, ctypes.c_uint32], 2, 14, 0]
+  reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
+  DW_11_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion19:
   SIZE = 4
-  rect_z: Annotated[ctypes.c_uint32, 0, 11, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 1, 5, 3]
-  dst_swap: Annotated[ctypes.c_uint32, 2, 2, 0]
-  reserved_2: Annotated[ctypes.c_uint32, 2, 6, 2]
-  src_swap: Annotated[ctypes.c_uint32, 3, 2, 0]
-  reserved_3: Annotated[ctypes.c_uint32, 3, 6, 2]
-  DW_12_DATA: Annotated[ctypes.c_uint32, 0]
+  rect_z: Annotated[Annotated[int, ctypes.c_uint32], 0, 11, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 5, 3]
+  dst_swap: Annotated[Annotated[int, ctypes.c_uint32], 2, 2, 0]
+  reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 2, 6, 2]
+  src_swap: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 0]
+  reserved_3: Annotated[Annotated[int, ctypes.c_uint32], 3, 6, 2]
+  DW_12_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT = rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG
 @record
 class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG:
@@ -171,33 +171,33 @@ class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG:
 @record
 class _anonunion20:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  sw: Annotated[ctypes.c_uint32, 2, 2, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 2, 12, 2]
-  fillsize: Annotated[ctypes.c_uint32, 3, 2, 6]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  sw: Annotated[Annotated[int, ctypes.c_uint32], 2, 2, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 12, 2]
+  fillsize: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion21:
   SIZE = 4
-  dst_addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion22:
   SIZE = 4
-  dst_addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+  dst_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion23:
   SIZE = 4
-  src_data_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+  src_data_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion24:
   SIZE = 4
-  count: Annotated[ctypes.c_uint32, 0, 22, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 2, 10, 6]
-  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+  count: Annotated[Annotated[int, ctypes.c_uint32], 0, 22, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 10, 6]
+  DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_CONSTANT_FILL = rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG
 @record
 class rocr_AMD_SDMA_PKT_FENCE_TAG:
@@ -209,32 +209,32 @@ class rocr_AMD_SDMA_PKT_FENCE_TAG:
 @record
 class _anonunion25:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  mtype: Annotated[ctypes.c_uint32, 2, 3, 0]
-  gcc: Annotated[ctypes.c_uint32, 2, 1, 3]
-  sys: Annotated[ctypes.c_uint32, 2, 1, 4]
-  pad1: Annotated[ctypes.c_uint32, 2, 1, 5]
-  snp: Annotated[ctypes.c_uint32, 2, 1, 6]
-  gpa: Annotated[ctypes.c_uint32, 2, 1, 7]
-  l2_policy: Annotated[ctypes.c_uint32, 3, 2, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 3, 6, 2]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  mtype: Annotated[Annotated[int, ctypes.c_uint32], 2, 3, 0]
+  gcc: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 3]
+  sys: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 4]
+  pad1: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 5]
+  snp: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 6]
+  gpa: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 7]
+  l2_policy: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 3, 6, 2]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion26:
   SIZE = 4
-  addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion27:
   SIZE = 4
-  addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+  addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion28:
   SIZE = 4
-  data: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+  data: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_FENCE = rocr_AMD_SDMA_PKT_FENCE_TAG
 @record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG:
@@ -248,41 +248,41 @@ class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG:
 @record
 class _anonunion29:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 2, 10, 0]
-  hdp_flush: Annotated[ctypes.c_uint32, 3, 1, 2]
-  reserved_1: Annotated[ctypes.c_uint32, 3, 1, 3]
-  func: Annotated[ctypes.c_uint32, 3, 3, 4]
-  mem_poll: Annotated[ctypes.c_uint32, 3, 1, 7]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 10, 0]
+  hdp_flush: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 2]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 3]
+  func: Annotated[Annotated[int, ctypes.c_uint32], 3, 3, 4]
+  mem_poll: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 7]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion30:
   SIZE = 4
-  addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion31:
   SIZE = 4
-  addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+  addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion32:
   SIZE = 4
-  value: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+  value: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion33:
   SIZE = 4
-  mask: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+  mask: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion34:
   SIZE = 4
-  interval: Annotated[ctypes.c_uint32, 0, 16, 0]
-  retry_count: Annotated[ctypes.c_uint32, 2, 12, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 3, 4, 4]
-  DW_5_DATA: Annotated[ctypes.c_uint32, 0]
+  interval: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
+  retry_count: Annotated[Annotated[int, ctypes.c_uint32], 2, 12, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
+  DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_POLL_REGMEM = rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG
 @record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG:
@@ -298,48 +298,48 @@ class rocr_AMD_SDMA_PKT_ATOMIC_TAG:
 @record
 class _anonunion35:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  l: Annotated[ctypes.c_uint32, 2, 1, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 2, 8, 1]
-  operation: Annotated[ctypes.c_uint32, 3, 7, 1]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  l: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 8, 1]
+  operation: Annotated[Annotated[int, ctypes.c_uint32], 3, 7, 1]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion36:
   SIZE = 4
-  addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion37:
   SIZE = 4
-  addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+  addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion38:
   SIZE = 4
-  src_data_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+  src_data_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion39:
   SIZE = 4
-  src_data_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+  src_data_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion40:
   SIZE = 4
-  cmp_data_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_5_DATA: Annotated[ctypes.c_uint32, 0]
+  cmp_data_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion41:
   SIZE = 4
-  cmp_data_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_6_DATA: Annotated[ctypes.c_uint32, 0]
+  cmp_data_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_6_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion42:
   SIZE = 4
-  loop_interval: Annotated[ctypes.c_uint32, 0, 13, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 1, 19, 5]
-  DW_7_DATA: Annotated[ctypes.c_uint32, 0]
+  loop_interval: Annotated[Annotated[int, ctypes.c_uint32], 0, 13, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 1, 19, 5]
+  DW_7_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_ATOMIC = rocr_AMD_SDMA_PKT_ATOMIC_TAG
 @record
 class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG:
@@ -350,20 +350,20 @@ class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG:
 @record
 class _anonunion43:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 2, 16, 0]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 16, 0]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion44:
   SIZE = 4
-  addr_31_0: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion45:
   SIZE = 4
-  addr_63_32: Annotated[ctypes.c_uint32, 0, 32, 0]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+  addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_TIMESTAMP = rocr_AMD_SDMA_PKT_TIMESTAMP_TAG
 @record
 class rocr_AMD_SDMA_PKT_TRAP_TAG:
@@ -373,26 +373,26 @@ class rocr_AMD_SDMA_PKT_TRAP_TAG:
 @record
 class _anonunion46:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  reserved_0: Annotated[ctypes.c_uint32, 2, 16, 0]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 16, 0]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion47:
   SIZE = 4
-  int_ctx: Annotated[ctypes.c_uint32, 0, 28, 0]
-  reserved_1: Annotated[ctypes.c_uint32, 3, 4, 4]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  int_ctx: Annotated[Annotated[int, ctypes.c_uint32], 0, 28, 0]
+  reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_TRAP = rocr_AMD_SDMA_PKT_TRAP_TAG
 @record
 class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG:
   SIZE = 24
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 4]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 8]
-  DW_3_DATA: Annotated[ctypes.c_uint32, 12]
-  DW_4_DATA: Annotated[ctypes.c_uint32, 16]
-  DW_5_DATA: Annotated[ctypes.c_uint32, 20]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 20]
 rocr_AMD_SDMA_PKT_HDP_FLUSH = rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG
 @record
 class rocr_AMD_SDMA_PKT_GCR_TAG:
@@ -405,45 +405,45 @@ class rocr_AMD_SDMA_PKT_GCR_TAG:
 @record
 class _anonunion48:
   SIZE = 4
-  op: Annotated[ctypes.c_uint32, 0, 8, 0]
-  sub_op: Annotated[ctypes.c_uint32, 1, 8, 0]
-  DW_0_DATA: Annotated[ctypes.c_uint32, 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
+  sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
+  DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion49:
   SIZE = 4
-  BaseVA_LO: Annotated[ctypes.c_uint32, 0, 25, 7]
-  DW_1_DATA: Annotated[ctypes.c_uint32, 0]
+  BaseVA_LO: Annotated[Annotated[int, ctypes.c_uint32], 0, 25, 7]
+  DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion50:
   SIZE = 4
-  BaseVA_HI: Annotated[ctypes.c_uint32, 0, 16, 0]
-  GCR_CONTROL_GLI_INV: Annotated[ctypes.c_uint32, 2, 2, 0]
-  GCR_CONTROL_GL1_RANGE: Annotated[ctypes.c_uint32, 2, 2, 2]
-  GCR_CONTROL_GLM_WB: Annotated[ctypes.c_uint32, 2, 1, 4]
-  GCR_CONTROL_GLM_INV: Annotated[ctypes.c_uint32, 2, 1, 5]
-  GCR_CONTROL_GLK_WB: Annotated[ctypes.c_uint32, 2, 1, 6]
-  GCR_CONTROL_GLK_INV: Annotated[ctypes.c_uint32, 2, 1, 7]
-  GCR_CONTROL_GLV_INV: Annotated[ctypes.c_uint32, 3, 1, 0]
-  GCR_CONTROL_GL1_INV: Annotated[ctypes.c_uint32, 3, 1, 1]
-  GCR_CONTROL_GL2_US: Annotated[ctypes.c_uint32, 3, 1, 2]
-  GCR_CONTROL_GL2_RANGE: Annotated[ctypes.c_uint32, 3, 2, 3]
-  GCR_CONTROL_GL2_DISCARD: Annotated[ctypes.c_uint32, 3, 1, 5]
-  GCR_CONTROL_GL2_INV: Annotated[ctypes.c_uint32, 3, 1, 6]
-  GCR_CONTROL_GL2_WB: Annotated[ctypes.c_uint32, 3, 1, 7]
-  DW_2_DATA: Annotated[ctypes.c_uint32, 0]
+  BaseVA_HI: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
+  GCR_CONTROL_GLI_INV: Annotated[Annotated[int, ctypes.c_uint32], 2, 2, 0]
+  GCR_CONTROL_GL1_RANGE: Annotated[Annotated[int, ctypes.c_uint32], 2, 2, 2]
+  GCR_CONTROL_GLM_WB: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 4]
+  GCR_CONTROL_GLM_INV: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 5]
+  GCR_CONTROL_GLK_WB: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 6]
+  GCR_CONTROL_GLK_INV: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 7]
+  GCR_CONTROL_GLV_INV: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 0]
+  GCR_CONTROL_GL1_INV: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 1]
+  GCR_CONTROL_GL2_US: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 2]
+  GCR_CONTROL_GL2_RANGE: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 3]
+  GCR_CONTROL_GL2_DISCARD: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 5]
+  GCR_CONTROL_GL2_INV: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 6]
+  GCR_CONTROL_GL2_WB: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 7]
+  DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion51:
   SIZE = 4
-  GCR_CONTROL_RANGE_IS_PA: Annotated[ctypes.c_uint32, 0, 1, 0]
-  GCR_CONTROL_SEQ: Annotated[ctypes.c_uint32, 0, 2, 1]
-  LimitVA_LO: Annotated[ctypes.c_uint32, 0, 25, 7]
-  DW_3_DATA: Annotated[ctypes.c_uint32, 0]
+  GCR_CONTROL_RANGE_IS_PA: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
+  GCR_CONTROL_SEQ: Annotated[Annotated[int, ctypes.c_uint32], 0, 2, 1]
+  LimitVA_LO: Annotated[Annotated[int, ctypes.c_uint32], 0, 25, 7]
+  DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class _anonunion52:
   SIZE = 4
-  LimitVA_HI: Annotated[ctypes.c_uint32, 0, 16, 0]
-  VMID: Annotated[ctypes.c_uint32, 3, 4, 0]
-  DW_4_DATA: Annotated[ctypes.c_uint32, 0]
+  LimitVA_HI: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
+  VMID: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 0]
+  DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_GCR = rocr_AMD_SDMA_PKT_GCR_TAG
 init_records()
 SDMA_OP_COPY = 1

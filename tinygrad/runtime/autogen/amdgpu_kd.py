@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-uint8_t = ctypes.c_ubyte
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+uint8_t = Annotated[int, ctypes.c_ubyte]
 _anonenum0 = CEnum(uint8_t)
 FLOAT_ROUND_MODE_NEAR_EVEN = _anonenum0.define('FLOAT_ROUND_MODE_NEAR_EVEN', 0)
 FLOAT_ROUND_MODE_PLUS_INFINITY = _anonenum0.define('FLOAT_ROUND_MODE_PLUS_INFINITY', 1)
@@ -21,7 +21,7 @@ SYSTEM_VGPR_WORKITEM_ID_X_Y = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_X_Y', 1
 SYSTEM_VGPR_WORKITEM_ID_X_Y_Z = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_X_Y_Z', 2)
 SYSTEM_VGPR_WORKITEM_ID_UNDEFINED = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_UNDEFINED', 3)
 
-int32_t = ctypes.c_int32
+int32_t = Annotated[int, ctypes.c_int32]
 _anonenum3 = CEnum(int32_t)
 COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT = _anonenum3.define('COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT', 0)
 COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_WIDTH = _anonenum3.define('COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_WIDTH', 6)
@@ -265,9 +265,9 @@ class llvm_amdhsa_kernel_descriptor_t:
   kernel_code_properties: Annotated[uint16_t, 56]
   kernarg_preload: Annotated[uint16_t, 58]
   reserved3: Annotated[Array[uint8_t, Literal[4]], 60]
-uint32_t = ctypes.c_uint32
-int64_t = ctypes.c_int64
-uint16_t = ctypes.c_uint16
+uint32_t = Annotated[int, ctypes.c_uint32]
+int64_t = Annotated[int, ctypes.c_int64]
+uint16_t = Annotated[int, ctypes.c_uint16]
 _anonenum9 = CEnum(uint32_t)
 GROUP_SEGMENT_FIXED_SIZE_OFFSET = _anonenum9.define('GROUP_SEGMENT_FIXED_SIZE_OFFSET', 0)
 PRIVATE_SEGMENT_FIXED_SIZE_OFFSET = _anonenum9.define('PRIVATE_SEGMENT_FIXED_SIZE_OFFSET', 4)

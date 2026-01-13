@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-FEATURE_PWR_DOMAIN_e = CEnum(ctypes.c_uint32)
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+FEATURE_PWR_DOMAIN_e = CEnum(Annotated[int, ctypes.c_uint32])
 FEATURE_PWR_ALL = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_ALL', 0)
 FEATURE_PWR_S5 = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_S5', 1)
 FEATURE_PWR_BACO = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_BACO', 2)
@@ -10,7 +10,7 @@ FEATURE_PWR_SOC = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_SOC', 3)
 FEATURE_PWR_GFX = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_GFX', 4)
 FEATURE_PWR_DOMAIN_COUNT = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_DOMAIN_COUNT', 5)
 
-SVI_PSI_e = CEnum(ctypes.c_uint32)
+SVI_PSI_e = CEnum(Annotated[int, ctypes.c_uint32])
 SVI_PSI_0 = SVI_PSI_e.define('SVI_PSI_0', 0)
 SVI_PSI_1 = SVI_PSI_e.define('SVI_PSI_1', 1)
 SVI_PSI_2 = SVI_PSI_e.define('SVI_PSI_2', 2)
@@ -20,18 +20,18 @@ SVI_PSI_5 = SVI_PSI_e.define('SVI_PSI_5', 5)
 SVI_PSI_6 = SVI_PSI_e.define('SVI_PSI_6', 6)
 SVI_PSI_7 = SVI_PSI_e.define('SVI_PSI_7', 7)
 
-SMARTSHIFT_VERSION_e = CEnum(ctypes.c_uint32)
+SMARTSHIFT_VERSION_e = CEnum(Annotated[int, ctypes.c_uint32])
 SMARTSHIFT_VERSION_1 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_1', 0)
 SMARTSHIFT_VERSION_2 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_2', 1)
 SMARTSHIFT_VERSION_3 = SMARTSHIFT_VERSION_e.define('SMARTSHIFT_VERSION_3', 2)
 
-FOPT_CALC_e = CEnum(ctypes.c_uint32)
+FOPT_CALC_e = CEnum(Annotated[int, ctypes.c_uint32])
 FOPT_CALC_AC_CALC_DC = FOPT_CALC_e.define('FOPT_CALC_AC_CALC_DC', 0)
 FOPT_PPTABLE_AC_CALC_DC = FOPT_CALC_e.define('FOPT_PPTABLE_AC_CALC_DC', 1)
 FOPT_CALC_AC_PPTABLE_DC = FOPT_CALC_e.define('FOPT_CALC_AC_PPTABLE_DC', 2)
 FOPT_PPTABLE_AC_PPTABLE_DC = FOPT_CALC_e.define('FOPT_PPTABLE_AC_PPTABLE_DC', 3)
 
-DRAM_BIT_WIDTH_TYPE_e = CEnum(ctypes.c_uint32)
+DRAM_BIT_WIDTH_TYPE_e = CEnum(Annotated[int, ctypes.c_uint32])
 DRAM_BIT_WIDTH_DISABLED = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_DISABLED', 0)
 DRAM_BIT_WIDTH_X_8 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_8', 8)
 DRAM_BIT_WIDTH_X_16 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_16', 16)
@@ -40,12 +40,12 @@ DRAM_BIT_WIDTH_X_64 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_64', 64)
 DRAM_BIT_WIDTH_X_128 = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_X_128', 128)
 DRAM_BIT_WIDTH_COUNT = DRAM_BIT_WIDTH_TYPE_e.define('DRAM_BIT_WIDTH_COUNT', 129)
 
-I2cControllerPort_e = CEnum(ctypes.c_uint32)
+I2cControllerPort_e = CEnum(Annotated[int, ctypes.c_uint32])
 I2C_CONTROLLER_PORT_0 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_0', 0)
 I2C_CONTROLLER_PORT_1 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_1', 1)
 I2C_CONTROLLER_PORT_COUNT = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_COUNT', 2)
 
-I2cControllerName_e = CEnum(ctypes.c_uint32)
+I2cControllerName_e = CEnum(Annotated[int, ctypes.c_uint32])
 I2C_CONTROLLER_NAME_VR_GFX = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_GFX', 0)
 I2C_CONTROLLER_NAME_VR_SOC = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_SOC', 1)
 I2C_CONTROLLER_NAME_VR_VMEMP = I2cControllerName_e.define('I2C_CONTROLLER_NAME_VR_VMEMP', 2)
@@ -56,7 +56,7 @@ I2C_CONTROLLER_NAME_PLX = I2cControllerName_e.define('I2C_CONTROLLER_NAME_PLX', 
 I2C_CONTROLLER_NAME_FAN_INTAKE = I2cControllerName_e.define('I2C_CONTROLLER_NAME_FAN_INTAKE', 7)
 I2C_CONTROLLER_NAME_COUNT = I2cControllerName_e.define('I2C_CONTROLLER_NAME_COUNT', 8)
 
-I2cControllerThrottler_e = CEnum(ctypes.c_uint32)
+I2cControllerThrottler_e = CEnum(Annotated[int, ctypes.c_uint32])
 I2C_CONTROLLER_THROTTLER_TYPE_NONE = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_TYPE_NONE', 0)
 I2C_CONTROLLER_THROTTLER_VR_GFX = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_GFX', 1)
 I2C_CONTROLLER_THROTTLER_VR_SOC = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_VR_SOC', 2)
@@ -69,7 +69,7 @@ I2C_CONTROLLER_THROTTLER_FAN_INTAKE = I2cControllerThrottler_e.define('I2C_CONTR
 I2C_CONTROLLER_THROTTLER_INA3221 = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_INA3221', 9)
 I2C_CONTROLLER_THROTTLER_COUNT = I2cControllerThrottler_e.define('I2C_CONTROLLER_THROTTLER_COUNT', 10)
 
-I2cControllerProtocol_e = CEnum(ctypes.c_uint32)
+I2cControllerProtocol_e = CEnum(Annotated[int, ctypes.c_uint32])
 I2C_CONTROLLER_PROTOCOL_VR_XPDE132G5 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_VR_XPDE132G5', 0)
 I2C_CONTROLLER_PROTOCOL_VR_IR35217 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_VR_IR35217', 1)
 I2C_CONTROLLER_PROTOCOL_TMP_MAX31875 = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_TMP_MAX31875', 2)
@@ -88,12 +88,12 @@ class I2cControllerConfig_t:
   ThermalThrotter: Annotated[uint8_t, 5]
   I2cProtocol: Annotated[uint8_t, 6]
   PaddingConfig: Annotated[uint8_t, 7]
-uint8_t = ctypes.c_ubyte
-I2cPort_e = CEnum(ctypes.c_uint32)
+uint8_t = Annotated[int, ctypes.c_ubyte]
+I2cPort_e = CEnum(Annotated[int, ctypes.c_uint32])
 I2C_PORT_SVD_SCL = I2cPort_e.define('I2C_PORT_SVD_SCL', 0)
 I2C_PORT_GPIO = I2cPort_e.define('I2C_PORT_GPIO', 1)
 
-I2cSpeed_e = CEnum(ctypes.c_uint32)
+I2cSpeed_e = CEnum(Annotated[int, ctypes.c_uint32])
 I2C_SPEED_FAST_50K = I2cSpeed_e.define('I2C_SPEED_FAST_50K', 0)
 I2C_SPEED_FAST_100K = I2cSpeed_e.define('I2C_SPEED_FAST_100K', 1)
 I2C_SPEED_FAST_400K = I2cSpeed_e.define('I2C_SPEED_FAST_400K', 2)
@@ -102,7 +102,7 @@ I2C_SPEED_HIGH_1M = I2cSpeed_e.define('I2C_SPEED_HIGH_1M', 4)
 I2C_SPEED_HIGH_2M = I2cSpeed_e.define('I2C_SPEED_HIGH_2M', 5)
 I2C_SPEED_COUNT = I2cSpeed_e.define('I2C_SPEED_COUNT', 6)
 
-I2cCmdType_e = CEnum(ctypes.c_uint32)
+I2cCmdType_e = CEnum(Annotated[int, ctypes.c_uint32])
 I2C_CMD_READ = I2cCmdType_e.define('I2C_CMD_READ', 0)
 I2C_CMD_WRITE = I2cCmdType_e.define('I2C_CMD_WRITE', 1)
 I2C_CMD_COUNT = I2cCmdType_e.define('I2C_CMD_COUNT', 2)
@@ -126,7 +126,7 @@ class SwI2cRequestExternal_t:
   SwI2cRequest: Annotated[SwI2cRequest_t, 0]
   Spare: Annotated[Array[uint32_t, Literal[8]], 52]
   MmHubPadding: Annotated[Array[uint32_t, Literal[8]], 84]
-uint32_t = ctypes.c_uint32
+uint32_t = Annotated[int, ctypes.c_uint32]
 @record
 class EccInfo_t:
   SIZE = 24
@@ -135,24 +135,24 @@ class EccInfo_t:
   ce_count_lo_chip: Annotated[uint16_t, 16]
   ce_count_hi_chip: Annotated[uint16_t, 18]
   eccPadding: Annotated[uint32_t, 20]
-uint64_t = ctypes.c_uint64
-uint16_t = ctypes.c_uint16
+uint64_t = Annotated[int, ctypes.c_uint64]
+uint16_t = Annotated[int, ctypes.c_uint16]
 @record
 class EccInfoTable_t:
   SIZE = 576
   EccInfo: Annotated[Array[EccInfo_t, Literal[24]], 0]
-D3HOTSequence_e = CEnum(ctypes.c_uint32)
+D3HOTSequence_e = CEnum(Annotated[int, ctypes.c_uint32])
 BACO_SEQUENCE = D3HOTSequence_e.define('BACO_SEQUENCE', 0)
 MSR_SEQUENCE = D3HOTSequence_e.define('MSR_SEQUENCE', 1)
 BAMACO_SEQUENCE = D3HOTSequence_e.define('BAMACO_SEQUENCE', 2)
 ULPS_SEQUENCE = D3HOTSequence_e.define('ULPS_SEQUENCE', 3)
 D3HOT_SEQUENCE_COUNT = D3HOTSequence_e.define('D3HOT_SEQUENCE_COUNT', 4)
 
-PowerGatingMode_e = CEnum(ctypes.c_uint32)
+PowerGatingMode_e = CEnum(Annotated[int, ctypes.c_uint32])
 PG_DYNAMIC_MODE = PowerGatingMode_e.define('PG_DYNAMIC_MODE', 0)
 PG_STATIC_MODE = PowerGatingMode_e.define('PG_STATIC_MODE', 1)
 
-PowerGatingSettings_e = CEnum(ctypes.c_uint32)
+PowerGatingSettings_e = CEnum(Annotated[int, ctypes.c_uint32])
 PG_POWER_DOWN = PowerGatingSettings_e.define('PG_POWER_DOWN', 0)
 PG_POWER_UP = PowerGatingSettings_e.define('PG_POWER_UP', 1)
 
@@ -173,12 +173,12 @@ class DroopInt_t:
   a: Annotated[uint32_t, 0]
   b: Annotated[uint32_t, 4]
   c: Annotated[uint32_t, 8]
-DCS_ARCH_e = CEnum(ctypes.c_uint32)
+DCS_ARCH_e = CEnum(Annotated[int, ctypes.c_uint32])
 DCS_ARCH_DISABLED = DCS_ARCH_e.define('DCS_ARCH_DISABLED', 0)
 DCS_ARCH_FADCS = DCS_ARCH_e.define('DCS_ARCH_FADCS', 1)
 DCS_ARCH_ASYNC = DCS_ARCH_e.define('DCS_ARCH_ASYNC', 2)
 
-PPCLK_e = CEnum(ctypes.c_uint32)
+PPCLK_e = CEnum(Annotated[int, ctypes.c_uint32])
 PPCLK_GFXCLK = PPCLK_e.define('PPCLK_GFXCLK', 0)
 PPCLK_SOCCLK = PPCLK_e.define('PPCLK_SOCCLK', 1)
 PPCLK_UCLK = PPCLK_e.define('PPCLK_UCLK', 2)
@@ -194,38 +194,38 @@ PPCLK_DCFCLK = PPCLK_e.define('PPCLK_DCFCLK', 11)
 PPCLK_DTBCLK = PPCLK_e.define('PPCLK_DTBCLK', 12)
 PPCLK_COUNT = PPCLK_e.define('PPCLK_COUNT', 13)
 
-VOLTAGE_MODE_e = CEnum(ctypes.c_uint32)
+VOLTAGE_MODE_e = CEnum(Annotated[int, ctypes.c_uint32])
 VOLTAGE_MODE_PPTABLE = VOLTAGE_MODE_e.define('VOLTAGE_MODE_PPTABLE', 0)
 VOLTAGE_MODE_FUSES = VOLTAGE_MODE_e.define('VOLTAGE_MODE_FUSES', 1)
 VOLTAGE_MODE_COUNT = VOLTAGE_MODE_e.define('VOLTAGE_MODE_COUNT', 2)
 
-AVFS_VOLTAGE_TYPE_e = CEnum(ctypes.c_uint32)
+AVFS_VOLTAGE_TYPE_e = CEnum(Annotated[int, ctypes.c_uint32])
 AVFS_VOLTAGE_GFX = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_GFX', 0)
 AVFS_VOLTAGE_SOC = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_SOC', 1)
 AVFS_VOLTAGE_COUNT = AVFS_VOLTAGE_TYPE_e.define('AVFS_VOLTAGE_COUNT', 2)
 
-AVFS_TEMP_e = CEnum(ctypes.c_uint32)
+AVFS_TEMP_e = CEnum(Annotated[int, ctypes.c_uint32])
 AVFS_TEMP_COLD = AVFS_TEMP_e.define('AVFS_TEMP_COLD', 0)
 AVFS_TEMP_HOT = AVFS_TEMP_e.define('AVFS_TEMP_HOT', 1)
 AVFS_TEMP_COUNT = AVFS_TEMP_e.define('AVFS_TEMP_COUNT', 2)
 
-AVFS_D_e = CEnum(ctypes.c_uint32)
+AVFS_D_e = CEnum(Annotated[int, ctypes.c_uint32])
 AVFS_D_G = AVFS_D_e.define('AVFS_D_G', 0)
 AVFS_D_M_B = AVFS_D_e.define('AVFS_D_M_B', 1)
 AVFS_D_M_S = AVFS_D_e.define('AVFS_D_M_S', 2)
 AVFS_D_COUNT = AVFS_D_e.define('AVFS_D_COUNT', 3)
 
-UCLK_DIV_e = CEnum(ctypes.c_uint32)
+UCLK_DIV_e = CEnum(Annotated[int, ctypes.c_uint32])
 UCLK_DIV_BY_1 = UCLK_DIV_e.define('UCLK_DIV_BY_1', 0)
 UCLK_DIV_BY_2 = UCLK_DIV_e.define('UCLK_DIV_BY_2', 1)
 UCLK_DIV_BY_4 = UCLK_DIV_e.define('UCLK_DIV_BY_4', 2)
 UCLK_DIV_BY_8 = UCLK_DIV_e.define('UCLK_DIV_BY_8', 3)
 
-GpioIntPolarity_e = CEnum(ctypes.c_uint32)
+GpioIntPolarity_e = CEnum(Annotated[int, ctypes.c_uint32])
 GPIO_INT_POLARITY_ACTIVE_LOW = GpioIntPolarity_e.define('GPIO_INT_POLARITY_ACTIVE_LOW', 0)
 GPIO_INT_POLARITY_ACTIVE_HIGH = GpioIntPolarity_e.define('GPIO_INT_POLARITY_ACTIVE_HIGH', 1)
 
-PwrConfig_e = CEnum(ctypes.c_uint32)
+PwrConfig_e = CEnum(Annotated[int, ctypes.c_uint32])
 PWR_CONFIG_TDP = PwrConfig_e.define('PWR_CONFIG_TDP', 0)
 PWR_CONFIG_TGP = PwrConfig_e.define('PWR_CONFIG_TGP', 1)
 PWR_CONFIG_TCP_ESTIMATED = PwrConfig_e.define('PWR_CONFIG_TCP_ESTIMATED', 2)
@@ -244,14 +244,14 @@ class DpmDescriptor_t:
   FoptimalDc: Annotated[uint16_t, 26]
   FoptimalAc: Annotated[uint16_t, 28]
   Padding2: Annotated[uint16_t, 30]
-PPT_THROTTLER_e = CEnum(ctypes.c_uint32)
+PPT_THROTTLER_e = CEnum(Annotated[int, ctypes.c_uint32])
 PPT_THROTTLER_PPT0 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT0', 0)
 PPT_THROTTLER_PPT1 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT1', 1)
 PPT_THROTTLER_PPT2 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT2', 2)
 PPT_THROTTLER_PPT3 = PPT_THROTTLER_e.define('PPT_THROTTLER_PPT3', 3)
 PPT_THROTTLER_COUNT = PPT_THROTTLER_e.define('PPT_THROTTLER_COUNT', 4)
 
-TEMP_e = CEnum(ctypes.c_uint32)
+TEMP_e = CEnum(Annotated[int, ctypes.c_uint32])
 TEMP_EDGE = TEMP_e.define('TEMP_EDGE', 0)
 TEMP_HOTSPOT = TEMP_e.define('TEMP_HOTSPOT', 1)
 TEMP_HOTSPOT_G = TEMP_e.define('TEMP_HOTSPOT_G', 2)
@@ -267,13 +267,13 @@ TEMP_LIQUID1 = TEMP_e.define('TEMP_LIQUID1', 11)
 TEMP_PLX = TEMP_e.define('TEMP_PLX', 12)
 TEMP_COUNT = TEMP_e.define('TEMP_COUNT', 13)
 
-TDC_THROTTLER_e = CEnum(ctypes.c_uint32)
+TDC_THROTTLER_e = CEnum(Annotated[int, ctypes.c_uint32])
 TDC_THROTTLER_GFX = TDC_THROTTLER_e.define('TDC_THROTTLER_GFX', 0)
 TDC_THROTTLER_SOC = TDC_THROTTLER_e.define('TDC_THROTTLER_SOC', 1)
 TDC_THROTTLER_U = TDC_THROTTLER_e.define('TDC_THROTTLER_U', 2)
 TDC_THROTTLER_COUNT = TDC_THROTTLER_e.define('TDC_THROTTLER_COUNT', 3)
 
-SVI_PLANE_e = CEnum(ctypes.c_uint32)
+SVI_PLANE_e = CEnum(Annotated[int, ctypes.c_uint32])
 SVI_PLANE_GFX = SVI_PLANE_e.define('SVI_PLANE_GFX', 0)
 SVI_PLANE_SOC = SVI_PLANE_e.define('SVI_PLANE_SOC', 1)
 SVI_PLANE_VMEMP = SVI_PLANE_e.define('SVI_PLANE_VMEMP', 2)
@@ -281,22 +281,22 @@ SVI_PLANE_VDDIO_MEM = SVI_PLANE_e.define('SVI_PLANE_VDDIO_MEM', 3)
 SVI_PLANE_U = SVI_PLANE_e.define('SVI_PLANE_U', 4)
 SVI_PLANE_COUNT = SVI_PLANE_e.define('SVI_PLANE_COUNT', 5)
 
-PMFW_VOLT_PLANE_e = CEnum(ctypes.c_uint32)
+PMFW_VOLT_PLANE_e = CEnum(Annotated[int, ctypes.c_uint32])
 PMFW_VOLT_PLANE_GFX = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_GFX', 0)
 PMFW_VOLT_PLANE_SOC = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_SOC', 1)
 PMFW_VOLT_PLANE_COUNT = PMFW_VOLT_PLANE_e.define('PMFW_VOLT_PLANE_COUNT', 2)
 
-CUSTOMER_VARIANT_e = CEnum(ctypes.c_uint32)
+CUSTOMER_VARIANT_e = CEnum(Annotated[int, ctypes.c_uint32])
 CUSTOMER_VARIANT_ROW = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_ROW', 0)
 CUSTOMER_VARIANT_FALCON = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_FALCON', 1)
 CUSTOMER_VARIANT_COUNT = CUSTOMER_VARIANT_e.define('CUSTOMER_VARIANT_COUNT', 2)
 
-POWER_SOURCE_e = CEnum(ctypes.c_uint32)
+POWER_SOURCE_e = CEnum(Annotated[int, ctypes.c_uint32])
 POWER_SOURCE_AC = POWER_SOURCE_e.define('POWER_SOURCE_AC', 0)
 POWER_SOURCE_DC = POWER_SOURCE_e.define('POWER_SOURCE_DC', 1)
 POWER_SOURCE_COUNT = POWER_SOURCE_e.define('POWER_SOURCE_COUNT', 2)
 
-MEM_VENDOR_e = CEnum(ctypes.c_uint32)
+MEM_VENDOR_e = CEnum(Annotated[int, ctypes.c_uint32])
 MEM_VENDOR_PLACEHOLDER0 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER0', 0)
 MEM_VENDOR_SAMSUNG = MEM_VENDOR_e.define('MEM_VENDOR_SAMSUNG', 1)
 MEM_VENDOR_INFINEON = MEM_VENDOR_e.define('MEM_VENDOR_INFINEON', 2)
@@ -315,7 +315,7 @@ MEM_VENDOR_PLACEHOLDER5 = MEM_VENDOR_e.define('MEM_VENDOR_PLACEHOLDER5', 14)
 MEM_VENDOR_MICRON = MEM_VENDOR_e.define('MEM_VENDOR_MICRON', 15)
 MEM_VENDOR_COUNT = MEM_VENDOR_e.define('MEM_VENDOR_COUNT', 16)
 
-PP_GRTAVFS_HW_FUSE_e = CEnum(ctypes.c_uint32)
+PP_GRTAVFS_HW_FUSE_e = CEnum(Annotated[int, ctypes.c_uint32])
 PP_GRTAVFS_HW_CPO_CTL_ZONE0 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE0', 0)
 PP_GRTAVFS_HW_CPO_CTL_ZONE1 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE1', 1)
 PP_GRTAVFS_HW_CPO_CTL_ZONE2 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_CPO_CTL_ZONE2', 2)
@@ -350,7 +350,7 @@ PP_GRTAVFS_HW_RESERVED_5 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_5
 PP_GRTAVFS_HW_RESERVED_6 = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_RESERVED_6', 31)
 PP_GRTAVFS_HW_FUSE_COUNT = PP_GRTAVFS_HW_FUSE_e.define('PP_GRTAVFS_HW_FUSE_COUNT', 32)
 
-PP_GRTAVFS_FW_COMMON_FUSE_e = CEnum(ctypes.c_uint32)
+PP_GRTAVFS_FW_COMMON_FUSE_e = CEnum(Annotated[int, ctypes.c_uint32])
 PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_HOT_T0', 0)
 PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_COLD_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z1_COLD_T0', 1)
 PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_HOT_T0 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_PPVMIN_Z2_HOT_T0', 2)
@@ -366,7 +366,7 @@ PP_GRTAVFS_FW_COMMON_SRAM_RM_Z3 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS
 PP_GRTAVFS_FW_COMMON_SRAM_RM_Z4 = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_SRAM_RM_Z4', 12)
 PP_GRTAVFS_FW_COMMON_FUSE_COUNT = PP_GRTAVFS_FW_COMMON_FUSE_e.define('PP_GRTAVFS_FW_COMMON_FUSE_COUNT', 13)
 
-PP_GRTAVFS_FW_SEP_FUSE_e = CEnum(ctypes.c_uint32)
+PP_GRTAVFS_FW_SEP_FUSE_e = CEnum(Annotated[int, ctypes.c_uint32])
 PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_NEG_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_NEG_1', 0)
 PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_0 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_0', 1)
 PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_1 = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_GB1_PWL_VOLTAGE_1', 2)
@@ -394,8 +394,8 @@ class SviTelemetryScale_t:
   Offset: Annotated[int8_t, 0]
   Padding: Annotated[uint8_t, 1]
   MaxCurrent: Annotated[uint16_t, 2]
-int8_t = ctypes.c_byte
-FanMode_e = CEnum(ctypes.c_uint32)
+int8_t = Annotated[int, ctypes.c_byte]
+FanMode_e = CEnum(Annotated[int, ctypes.c_uint32])
 FAN_MODE_AUTO = FanMode_e.define('FAN_MODE_AUTO', 0)
 FAN_MODE_MANUAL_LINEAR = FanMode_e.define('FAN_MODE_MANUAL_LINEAR', 1)
 
@@ -423,7 +423,7 @@ class OverDriveTable_t:
   MaxOpTemp: Annotated[uint8_t, 55]
   Spare: Annotated[Array[uint32_t, Literal[13]], 56]
   MmHubPadding: Annotated[Array[uint32_t, Literal[8]], 108]
-int16_t = ctypes.c_int16
+int16_t = Annotated[int, ctypes.c_int16]
 @record
 class OverDriveTableExternal_t:
   SIZE = 140
@@ -452,7 +452,7 @@ class OverDriveLimits_t:
   FanMode: Annotated[uint8_t, 34]
   MaxOpTemp: Annotated[uint8_t, 35]
   Spare: Annotated[Array[uint32_t, Literal[13]], 36]
-BOARD_GPIO_TYPE_e = CEnum(ctypes.c_uint32)
+BOARD_GPIO_TYPE_e = CEnum(Annotated[int, ctypes.c_uint32])
 BOARD_GPIO_SMUIO_0 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_0', 0)
 BOARD_GPIO_SMUIO_1 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_1', 1)
 BOARD_GPIO_SMUIO_2 = BOARD_GPIO_TYPE_e.define('BOARD_GPIO_SMUIO_2', 2)
@@ -791,7 +791,7 @@ class SkuTable_t:
   TemperatureFwCtfLimit_Micron: Annotated[uint16_t, 3286]
   Spare: Annotated[Array[uint32_t, Literal[41]], 3288]
   MmHubPadding: Annotated[Array[uint32_t, Literal[8]], 3452]
-int32_t = ctypes.c_int32
+int32_t = Annotated[int, ctypes.c_int32]
 @record
 class BoardTable_t:
   SIZE = 488
@@ -944,7 +944,7 @@ class WatermarkRowGeneric_t:
   WmSetting: Annotated[uint8_t, 0]
   Flags: Annotated[uint8_t, 1]
   Padding: Annotated[Array[uint8_t, Literal[2]], 2]
-WATERMARKS_FLAGS_e = CEnum(ctypes.c_uint32)
+WATERMARKS_FLAGS_e = CEnum(Annotated[int, ctypes.c_uint32])
 WATERMARKS_CLOCK_RANGE = WATERMARKS_FLAGS_e.define('WATERMARKS_CLOCK_RANGE', 0)
 WATERMARKS_DUMMY_PSTATE = WATERMARKS_FLAGS_e.define('WATERMARKS_DUMMY_PSTATE', 1)
 WATERMARKS_MALL = WATERMARKS_FLAGS_e.define('WATERMARKS_MALL', 2)
@@ -965,8 +965,8 @@ class AvfsDebugTable_t:
   SIZE = 2568
   avgPsmCount: Annotated[Array[uint16_t, Literal[214]], 0]
   minPsmCount: Annotated[Array[uint16_t, Literal[214]], 428]
-  avgPsmVoltage: Annotated[Array[ctypes.c_float, Literal[214]], 856]
-  minPsmVoltage: Annotated[Array[ctypes.c_float, Literal[214]], 1712]
+  avgPsmVoltage: Annotated[Array[Annotated[float, ctypes.c_float], Literal[214]], 856]
+  minPsmVoltage: Annotated[Array[Annotated[float, ctypes.c_float], Literal[214]], 1712]
 @record
 class AvfsDebugTableExternal_t:
   SIZE = 2600
@@ -1016,9 +1016,9 @@ class DpmActivityMonitorCoeffIntExternal_t:
 @record
 class struct_smu_hw_power_state:
   SIZE = 4
-  magic: Annotated[ctypes.c_uint32, 0]
+  magic: Annotated[Annotated[int, ctypes.c_uint32], 0]
 class struct_smu_power_state(ctypes.Structure): pass
-enum_smu_state_ui_label = CEnum(ctypes.c_uint32)
+enum_smu_state_ui_label = CEnum(Annotated[int, ctypes.c_uint32])
 SMU_STATE_UI_LABEL_NONE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_NONE', 0)
 SMU_STATE_UI_LABEL_BATTERY = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BATTERY', 1)
 SMU_STATE_UI_TABEL_MIDDLE_LOW = enum_smu_state_ui_label.define('SMU_STATE_UI_TABEL_MIDDLE_LOW', 2)
@@ -1027,7 +1027,7 @@ SMU_STATE_UI_LABEL_MIDDLE_HIGHT = enum_smu_state_ui_label.define('SMU_STATE_UI_L
 SMU_STATE_UI_LABEL_PERFORMANCE = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_PERFORMANCE', 5)
 SMU_STATE_UI_LABEL_BACO = enum_smu_state_ui_label.define('SMU_STATE_UI_LABEL_BACO', 6)
 
-enum_smu_state_classification_flag = CEnum(ctypes.c_uint32)
+enum_smu_state_classification_flag = CEnum(Annotated[int, ctypes.c_uint32])
 SMU_STATE_CLASSIFICATION_FLAG_BOOT = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_BOOT', 1)
 SMU_STATE_CLASSIFICATION_FLAG_THERMAL = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATION_FLAG_THERMAL', 2)
 SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE = enum_smu_state_classification_flag.define('SMU_STATE_CLASSIFICATIN_FLAG_LIMITED_POWER_SOURCE', 4)
@@ -1055,85 +1055,85 @@ class struct_smu_state_classification_block:
   SIZE = 16
   ui_label: Annotated[enum_smu_state_ui_label, 0]
   flags: Annotated[enum_smu_state_classification_flag, 4]
-  bios_index: Annotated[ctypes.c_int32, 8]
-  temporary_state: Annotated[ctypes.c_bool, 12]
-  to_be_deleted: Annotated[ctypes.c_bool, 13]
+  bios_index: Annotated[Annotated[int, ctypes.c_int32], 8]
+  temporary_state: Annotated[Annotated[bool, ctypes.c_bool], 12]
+  to_be_deleted: Annotated[Annotated[bool, ctypes.c_bool], 13]
 @record
 class struct_smu_state_pcie_block:
   SIZE = 4
-  lanes: Annotated[ctypes.c_uint32, 0]
-enum_smu_refreshrate_source = CEnum(ctypes.c_uint32)
+  lanes: Annotated[Annotated[int, ctypes.c_uint32], 0]
+enum_smu_refreshrate_source = CEnum(Annotated[int, ctypes.c_uint32])
 SMU_REFRESHRATE_SOURCE_EDID = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EDID', 0)
 SMU_REFRESHRATE_SOURCE_EXPLICIT = enum_smu_refreshrate_source.define('SMU_REFRESHRATE_SOURCE_EXPLICIT', 1)
 
 @record
 class struct_smu_state_display_block:
   SIZE = 20
-  disable_frame_modulation: Annotated[ctypes.c_bool, 0]
-  limit_refreshrate: Annotated[ctypes.c_bool, 1]
+  disable_frame_modulation: Annotated[Annotated[bool, ctypes.c_bool], 0]
+  limit_refreshrate: Annotated[Annotated[bool, ctypes.c_bool], 1]
   refreshrate_source: Annotated[enum_smu_refreshrate_source, 4]
-  explicit_refreshrate: Annotated[ctypes.c_int32, 8]
-  edid_refreshrate_index: Annotated[ctypes.c_int32, 12]
-  enable_vari_bright: Annotated[ctypes.c_bool, 16]
+  explicit_refreshrate: Annotated[Annotated[int, ctypes.c_int32], 8]
+  edid_refreshrate_index: Annotated[Annotated[int, ctypes.c_int32], 12]
+  enable_vari_bright: Annotated[Annotated[bool, ctypes.c_bool], 16]
 @record
 class struct_smu_state_memory_block:
   SIZE = 5
-  dll_off: Annotated[ctypes.c_bool, 0]
-  m3arb: Annotated[ctypes.c_ubyte, 1]
-  unused: Annotated[Array[ctypes.c_ubyte, Literal[3]], 2]
+  dll_off: Annotated[Annotated[bool, ctypes.c_bool], 0]
+  m3arb: Annotated[Annotated[int, ctypes.c_ubyte], 1]
+  unused: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 2]
 @record
 class struct_smu_state_software_algorithm_block:
   SIZE = 2
-  disable_load_balancing: Annotated[ctypes.c_bool, 0]
-  enable_sleep_for_timestamps: Annotated[ctypes.c_bool, 1]
+  disable_load_balancing: Annotated[Annotated[bool, ctypes.c_bool], 0]
+  enable_sleep_for_timestamps: Annotated[Annotated[bool, ctypes.c_bool], 1]
 @record
 class struct_smu_temperature_range:
   SIZE = 44
-  min: Annotated[ctypes.c_int32, 0]
-  max: Annotated[ctypes.c_int32, 4]
-  edge_emergency_max: Annotated[ctypes.c_int32, 8]
-  hotspot_min: Annotated[ctypes.c_int32, 12]
-  hotspot_crit_max: Annotated[ctypes.c_int32, 16]
-  hotspot_emergency_max: Annotated[ctypes.c_int32, 20]
-  mem_min: Annotated[ctypes.c_int32, 24]
-  mem_crit_max: Annotated[ctypes.c_int32, 28]
-  mem_emergency_max: Annotated[ctypes.c_int32, 32]
-  software_shutdown_temp: Annotated[ctypes.c_int32, 36]
-  software_shutdown_temp_offset: Annotated[ctypes.c_int32, 40]
+  min: Annotated[Annotated[int, ctypes.c_int32], 0]
+  max: Annotated[Annotated[int, ctypes.c_int32], 4]
+  edge_emergency_max: Annotated[Annotated[int, ctypes.c_int32], 8]
+  hotspot_min: Annotated[Annotated[int, ctypes.c_int32], 12]
+  hotspot_crit_max: Annotated[Annotated[int, ctypes.c_int32], 16]
+  hotspot_emergency_max: Annotated[Annotated[int, ctypes.c_int32], 20]
+  mem_min: Annotated[Annotated[int, ctypes.c_int32], 24]
+  mem_crit_max: Annotated[Annotated[int, ctypes.c_int32], 28]
+  mem_emergency_max: Annotated[Annotated[int, ctypes.c_int32], 32]
+  software_shutdown_temp: Annotated[Annotated[int, ctypes.c_int32], 36]
+  software_shutdown_temp_offset: Annotated[Annotated[int, ctypes.c_int32], 40]
 @record
 class struct_smu_state_validation_block:
   SIZE = 3
-  single_display_only: Annotated[ctypes.c_bool, 0]
-  disallow_on_dc: Annotated[ctypes.c_bool, 1]
-  supported_power_levels: Annotated[ctypes.c_ubyte, 2]
+  single_display_only: Annotated[Annotated[bool, ctypes.c_bool], 0]
+  disallow_on_dc: Annotated[Annotated[bool, ctypes.c_bool], 1]
+  supported_power_levels: Annotated[Annotated[int, ctypes.c_ubyte], 2]
 @record
 class struct_smu_uvd_clocks:
   SIZE = 8
-  vclk: Annotated[ctypes.c_uint32, 0]
-  dclk: Annotated[ctypes.c_uint32, 4]
-enum_smu_power_src_type = CEnum(ctypes.c_uint32)
+  vclk: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  dclk: Annotated[Annotated[int, ctypes.c_uint32], 4]
+enum_smu_power_src_type = CEnum(Annotated[int, ctypes.c_uint32])
 SMU_POWER_SOURCE_AC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_AC', 0)
 SMU_POWER_SOURCE_DC = enum_smu_power_src_type.define('SMU_POWER_SOURCE_DC', 1)
 SMU_POWER_SOURCE_COUNT = enum_smu_power_src_type.define('SMU_POWER_SOURCE_COUNT', 2)
 
-enum_smu_ppt_limit_type = CEnum(ctypes.c_uint32)
+enum_smu_ppt_limit_type = CEnum(Annotated[int, ctypes.c_uint32])
 SMU_DEFAULT_PPT_LIMIT = enum_smu_ppt_limit_type.define('SMU_DEFAULT_PPT_LIMIT', 0)
 SMU_FAST_PPT_LIMIT = enum_smu_ppt_limit_type.define('SMU_FAST_PPT_LIMIT', 1)
 
-enum_smu_ppt_limit_level = CEnum(ctypes.c_int32)
+enum_smu_ppt_limit_level = CEnum(Annotated[int, ctypes.c_int32])
 SMU_PPT_LIMIT_MIN = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_MIN', -1)
 SMU_PPT_LIMIT_CURRENT = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_CURRENT', 0)
 SMU_PPT_LIMIT_DEFAULT = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_DEFAULT', 1)
 SMU_PPT_LIMIT_MAX = enum_smu_ppt_limit_level.define('SMU_PPT_LIMIT_MAX', 2)
 
-enum_smu_memory_pool_size = CEnum(ctypes.c_uint32)
+enum_smu_memory_pool_size = CEnum(Annotated[int, ctypes.c_uint32])
 SMU_MEMORY_POOL_SIZE_ZERO = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_ZERO', 0)
 SMU_MEMORY_POOL_SIZE_256_MB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_256_MB', 268435456)
 SMU_MEMORY_POOL_SIZE_512_MB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_512_MB', 536870912)
 SMU_MEMORY_POOL_SIZE_1_GB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_1_GB', 1073741824)
 SMU_MEMORY_POOL_SIZE_2_GB = enum_smu_memory_pool_size.define('SMU_MEMORY_POOL_SIZE_2_GB', 2147483648)
 
-enum_smu_clk_type = CEnum(ctypes.c_uint32)
+enum_smu_clk_type = CEnum(Annotated[int, ctypes.c_uint32])
 SMU_GFXCLK = enum_smu_clk_type.define('SMU_GFXCLK', 0)
 SMU_VCLK = enum_smu_clk_type.define('SMU_VCLK', 1)
 SMU_DCLK = enum_smu_clk_type.define('SMU_DCLK', 2)
@@ -1167,70 +1167,70 @@ SMU_CLK_COUNT = enum_smu_clk_type.define('SMU_CLK_COUNT', 28)
 @record
 class struct_smu_user_dpm_profile:
   SIZE = 140
-  fan_mode: Annotated[ctypes.c_uint32, 0]
-  power_limit: Annotated[ctypes.c_uint32, 4]
-  fan_speed_pwm: Annotated[ctypes.c_uint32, 8]
-  fan_speed_rpm: Annotated[ctypes.c_uint32, 12]
-  flags: Annotated[ctypes.c_uint32, 16]
-  user_od: Annotated[ctypes.c_uint32, 20]
-  clk_mask: Annotated[Array[ctypes.c_uint32, Literal[28]], 24]
-  clk_dependency: Annotated[ctypes.c_uint32, 136]
+  fan_mode: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  power_limit: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  fan_speed_pwm: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  fan_speed_rpm: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  user_od: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  clk_mask: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[28]], 24]
+  clk_dependency: Annotated[Annotated[int, ctypes.c_uint32], 136]
 @record
 class struct_smu_table:
   SIZE = 48
-  size: Annotated[ctypes.c_uint64, 0]
-  align: Annotated[ctypes.c_uint32, 8]
-  domain: Annotated[ctypes.c_ubyte, 12]
-  mc_address: Annotated[ctypes.c_uint64, 16]
-  cpu_addr: Annotated[ctypes.POINTER(None), 24]
-  bo: Annotated[ctypes.POINTER(struct_amdgpu_bo), 32]
-  version: Annotated[ctypes.c_uint32, 40]
+  size: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  align: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  domain: Annotated[Annotated[int, ctypes.c_ubyte], 12]
+  mc_address: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  cpu_addr: Annotated[POINTER(None), 24]
+  bo: Annotated[POINTER(struct_amdgpu_bo), 32]
+  version: Annotated[Annotated[int, ctypes.c_uint32], 40]
 class struct_amdgpu_bo(ctypes.Structure): pass
-enum_smu_perf_level_designation = CEnum(ctypes.c_uint32)
+enum_smu_perf_level_designation = CEnum(Annotated[int, ctypes.c_uint32])
 PERF_LEVEL_ACTIVITY = enum_smu_perf_level_designation.define('PERF_LEVEL_ACTIVITY', 0)
 PERF_LEVEL_POWER_CONTAINMENT = enum_smu_perf_level_designation.define('PERF_LEVEL_POWER_CONTAINMENT', 1)
 
 @record
 class struct_smu_performance_level:
   SIZE = 24
-  core_clock: Annotated[ctypes.c_uint32, 0]
-  memory_clock: Annotated[ctypes.c_uint32, 4]
-  vddc: Annotated[ctypes.c_uint32, 8]
-  vddci: Annotated[ctypes.c_uint32, 12]
-  non_local_mem_freq: Annotated[ctypes.c_uint32, 16]
-  non_local_mem_width: Annotated[ctypes.c_uint32, 20]
+  core_clock: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  memory_clock: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  vddc: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  vddci: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  non_local_mem_freq: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  non_local_mem_width: Annotated[Annotated[int, ctypes.c_uint32], 20]
 @record
 class struct_smu_clock_info:
   SIZE = 24
-  min_mem_clk: Annotated[ctypes.c_uint32, 0]
-  max_mem_clk: Annotated[ctypes.c_uint32, 4]
-  min_eng_clk: Annotated[ctypes.c_uint32, 8]
-  max_eng_clk: Annotated[ctypes.c_uint32, 12]
-  min_bus_bandwidth: Annotated[ctypes.c_uint32, 16]
-  max_bus_bandwidth: Annotated[ctypes.c_uint32, 20]
+  min_mem_clk: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  max_mem_clk: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  min_eng_clk: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  max_eng_clk: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  min_bus_bandwidth: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  max_bus_bandwidth: Annotated[Annotated[int, ctypes.c_uint32], 20]
 @record
 class struct_smu_bios_boot_up_values:
   SIZE = 68
-  revision: Annotated[ctypes.c_uint32, 0]
-  gfxclk: Annotated[ctypes.c_uint32, 4]
-  uclk: Annotated[ctypes.c_uint32, 8]
-  socclk: Annotated[ctypes.c_uint32, 12]
-  dcefclk: Annotated[ctypes.c_uint32, 16]
-  eclk: Annotated[ctypes.c_uint32, 20]
-  vclk: Annotated[ctypes.c_uint32, 24]
-  dclk: Annotated[ctypes.c_uint32, 28]
-  vddc: Annotated[ctypes.c_uint16, 32]
-  vddci: Annotated[ctypes.c_uint16, 34]
-  mvddc: Annotated[ctypes.c_uint16, 36]
-  vdd_gfx: Annotated[ctypes.c_uint16, 38]
-  cooling_id: Annotated[ctypes.c_ubyte, 40]
-  pp_table_id: Annotated[ctypes.c_uint32, 44]
-  format_revision: Annotated[ctypes.c_uint32, 48]
-  content_revision: Annotated[ctypes.c_uint32, 52]
-  fclk: Annotated[ctypes.c_uint32, 56]
-  lclk: Annotated[ctypes.c_uint32, 60]
-  firmware_caps: Annotated[ctypes.c_uint32, 64]
-enum_smu_table_id = CEnum(ctypes.c_uint32)
+  revision: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  gfxclk: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  uclk: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  socclk: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  dcefclk: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  eclk: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  vclk: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  dclk: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  vddc: Annotated[Annotated[int, ctypes.c_uint16], 32]
+  vddci: Annotated[Annotated[int, ctypes.c_uint16], 34]
+  mvddc: Annotated[Annotated[int, ctypes.c_uint16], 36]
+  vdd_gfx: Annotated[Annotated[int, ctypes.c_uint16], 38]
+  cooling_id: Annotated[Annotated[int, ctypes.c_ubyte], 40]
+  pp_table_id: Annotated[Annotated[int, ctypes.c_uint32], 44]
+  format_revision: Annotated[Annotated[int, ctypes.c_uint32], 48]
+  content_revision: Annotated[Annotated[int, ctypes.c_uint32], 52]
+  fclk: Annotated[Annotated[int, ctypes.c_uint32], 56]
+  lclk: Annotated[Annotated[int, ctypes.c_uint32], 60]
+  firmware_caps: Annotated[Annotated[int, ctypes.c_uint32], 64]
+enum_smu_table_id = CEnum(Annotated[int, ctypes.c_uint32])
 SMU_TABLE_PPTABLE = enum_smu_table_id.define('SMU_TABLE_PPTABLE', 0)
 SMU_TABLE_WATERMARKS = enum_smu_table_id.define('SMU_TABLE_WATERMARKS', 1)
 SMU_TABLE_CUSTOM_DPM = enum_smu_table_id.define('SMU_TABLE_CUSTOM_DPM', 2)

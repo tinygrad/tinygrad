@@ -1,16 +1,16 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class MCTP_HEADER:
   SIZE = 7
   constBlob: Annotated[NvU32, 0]
   msgType: Annotated[NvU8, 4]
   vendorId: Annotated[NvU16, 5]
-NvU32 = ctypes.c_uint32
-NvU8 = ctypes.c_ubyte
-NvU16 = ctypes.c_uint16
+NvU32 = Annotated[int, ctypes.c_uint32]
+NvU8 = Annotated[int, ctypes.c_ubyte]
+NvU16 = Annotated[int, ctypes.c_uint16]
 @record
 class NVDM_PAYLOAD_COT:
   SIZE = 860
@@ -25,7 +25,7 @@ class NVDM_PAYLOAD_COT:
   publicKey: Annotated[Array[NvU32, Literal[96]], 84]
   signature: Annotated[Array[NvU32, Literal[96]], 468]
   gspBootArgsSysmemOffset: Annotated[NvU64, 852]
-NvU64 = ctypes.c_uint64
+NvU64 = Annotated[int, ctypes.c_uint64]
 @record
 class MESSAGE_QUEUE_INIT_ARGUMENTS:
   SIZE = 32
@@ -33,14 +33,14 @@ class MESSAGE_QUEUE_INIT_ARGUMENTS:
   pageTableEntryCount: Annotated[NvU32, 8]
   cmdQueueOffset: Annotated[NvLength, 16]
   statQueueOffset: Annotated[NvLength, 24]
-NvLength = ctypes.c_uint64
+NvLength = Annotated[int, ctypes.c_uint64]
 @record
 class GSP_SR_INIT_ARGUMENTS:
   SIZE = 12
   oldLevel: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
   bInPMTransition: Annotated[NvBool, 8]
-NvBool = ctypes.c_ubyte
+NvBool = Annotated[int, ctypes.c_ubyte]
 @record
 class GSP_ARGUMENTS_CACHED:
   SIZE = 72
@@ -54,7 +54,7 @@ class _anonstruct0:
   SIZE = 16
   pa: Annotated[NvU64, 0]
   size: Annotated[NvU64, 8]
-GSP_DMA_TARGET = CEnum(ctypes.c_uint32)
+GSP_DMA_TARGET = CEnum(Annotated[int, ctypes.c_uint32])
 GSP_DMA_TARGET_LOCAL_FB = GSP_DMA_TARGET.define('GSP_DMA_TARGET_LOCAL_FB', 0)
 GSP_DMA_TARGET_COHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COHERENT_SYSTEM', 1)
 GSP_DMA_TARGET_NONCOHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_NONCOHERENT_SYSTEM', 2)
@@ -191,7 +191,7 @@ class RM_RISCV_UCODE_DESC:
   swbromDataSize: Annotated[NvU32, 72]
   fbReservedSize: Annotated[NvU32, 76]
   bSignedAsCode: Annotated[NvU32, 80]
-RPC_GR_BUFFER_TYPE = CEnum(ctypes.c_uint32)
+RPC_GR_BUFFER_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 RPC_GR_BUFFER_TYPE_GRAPHICS = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS', 0)
 RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL', 1)
 RPC_GR_BUFFER_TYPE_GRAPHICS_GRAPHICS_PM = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_GRAPHICS_PM', 2)
@@ -207,13 +207,13 @@ RPC_GR_BUFFER_TYPE_GRAPHICS_FECS_EVENT = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFE
 RPC_GR_BUFFER_TYPE_GRAPHICS_PRIV_ACCESS_MAP = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_PRIV_ACCESS_MAP', 12)
 RPC_GR_BUFFER_TYPE_GRAPHICS_MAX = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_MAX', 13)
 
-FECS_ERROR_EVENT_TYPE = CEnum(ctypes.c_uint32)
+FECS_ERROR_EVENT_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 FECS_ERROR_EVENT_TYPE_NONE = FECS_ERROR_EVENT_TYPE.define('FECS_ERROR_EVENT_TYPE_NONE', 0)
 FECS_ERROR_EVENT_TYPE_BUFFER_RESET_REQUIRED = FECS_ERROR_EVENT_TYPE.define('FECS_ERROR_EVENT_TYPE_BUFFER_RESET_REQUIRED', 1)
 FECS_ERROR_EVENT_TYPE_BUFFER_FULL = FECS_ERROR_EVENT_TYPE.define('FECS_ERROR_EVENT_TYPE_BUFFER_FULL', 2)
 FECS_ERROR_EVENT_TYPE_MAX = FECS_ERROR_EVENT_TYPE.define('FECS_ERROR_EVENT_TYPE_MAX', 3)
 
-NV_RPC_UPDATE_PDE_BAR_TYPE = CEnum(ctypes.c_uint32)
+NV_RPC_UPDATE_PDE_BAR_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV_RPC_UPDATE_PDE_BAR_1 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_1', 0)
 NV_RPC_UPDATE_PDE_BAR_2 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_2', 1)
 NV_RPC_UPDATE_PDE_BAR_INVALID = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_INVALID', 2)
@@ -231,12 +231,12 @@ class struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS:
   numHeads: Annotated[NvU32, 0]
   maxNumHeads: Annotated[NvU32, 4]
 VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS = struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS
-GPU_RECOVERY_EVENT_TYPE = CEnum(ctypes.c_uint32)
+GPU_RECOVERY_EVENT_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 GPU_RECOVERY_EVENT_TYPE_REFRESH = GPU_RECOVERY_EVENT_TYPE.define('GPU_RECOVERY_EVENT_TYPE_REFRESH', 0)
 GPU_RECOVERY_EVENT_TYPE_GPU_DRAIN_P2P = GPU_RECOVERY_EVENT_TYPE.define('GPU_RECOVERY_EVENT_TYPE_GPU_DRAIN_P2P', 1)
 GPU_RECOVERY_EVENT_TYPE_SYS_REBOOT = GPU_RECOVERY_EVENT_TYPE.define('GPU_RECOVERY_EVENT_TYPE_SYS_REBOOT', 2)
 
-rpc_fns = CEnum(ctypes.c_uint32)
+rpc_fns = CEnum(Annotated[int, ctypes.c_uint32])
 NV_VGPU_MSG_FUNCTION_NOP = rpc_fns.define('NV_VGPU_MSG_FUNCTION_NOP', 0)
 NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO = rpc_fns.define('NV_VGPU_MSG_FUNCTION_SET_GUEST_SYSTEM_INFO', 1)
 NV_VGPU_MSG_FUNCTION_ALLOC_ROOT = rpc_fns.define('NV_VGPU_MSG_FUNCTION_ALLOC_ROOT', 2)
@@ -462,7 +462,7 @@ NV_VGPU_MSG_FUNCTION_CTRL_RESERVE_CCU_PROF = rpc_fns.define('NV_VGPU_MSG_FUNCTIO
 NV_VGPU_MSG_FUNCTION_CTRL_RELEASE_CCU_PROF = rpc_fns.define('NV_VGPU_MSG_FUNCTION_CTRL_RELEASE_CCU_PROF', 222)
 NV_VGPU_MSG_FUNCTION_NUM_FUNCTIONS = rpc_fns.define('NV_VGPU_MSG_FUNCTION_NUM_FUNCTIONS', 223)
 
-rpc_events = CEnum(ctypes.c_uint32)
+rpc_events = CEnum(Annotated[int, ctypes.c_uint32])
 NV_VGPU_MSG_EVENT_FIRST_EVENT = rpc_events.define('NV_VGPU_MSG_EVENT_FIRST_EVENT', 4096)
 NV_VGPU_MSG_EVENT_GSP_INIT_DONE = rpc_events.define('NV_VGPU_MSG_EVENT_GSP_INIT_DONE', 4097)
 NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER = rpc_events.define('NV_VGPU_MSG_EVENT_GSP_RUN_CPU_SEQUENCER', 4098)
@@ -500,13 +500,13 @@ NV_VGPU_MSG_EVENT_FECS_ERROR = rpc_events.define('NV_VGPU_MSG_EVENT_FECS_ERROR',
 NV_VGPU_MSG_EVENT_RECOVERY_ACTION = rpc_events.define('NV_VGPU_MSG_EVENT_RECOVERY_ACTION', 4130)
 NV_VGPU_MSG_EVENT_NUM_EVENTS = rpc_events.define('NV_VGPU_MSG_EVENT_NUM_EVENTS', 4131)
 
-LibosAddress = ctypes.c_uint64
-LibosMemoryRegionKind = CEnum(ctypes.c_uint32)
+LibosAddress = Annotated[int, ctypes.c_uint64]
+LibosMemoryRegionKind = CEnum(Annotated[int, ctypes.c_uint32])
 LIBOS_MEMORY_REGION_NONE = LibosMemoryRegionKind.define('LIBOS_MEMORY_REGION_NONE', 0)
 LIBOS_MEMORY_REGION_CONTIGUOUS = LibosMemoryRegionKind.define('LIBOS_MEMORY_REGION_CONTIGUOUS', 1)
 LIBOS_MEMORY_REGION_RADIX3 = LibosMemoryRegionKind.define('LIBOS_MEMORY_REGION_RADIX3', 2)
 
-LibosMemoryRegionLoc = CEnum(ctypes.c_uint32)
+LibosMemoryRegionLoc = CEnum(Annotated[int, ctypes.c_uint32])
 LIBOS_MEMORY_REGION_LOC_NONE = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_NONE', 0)
 LIBOS_MEMORY_REGION_LOC_SYSMEM = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_SYSMEM', 1)
 LIBOS_MEMORY_REGION_LOC_FB = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_FB', 2)
@@ -537,16 +537,16 @@ class msgqRxHeader:
 @record
 class msgqMetadata:
   SIZE = 232
-  pOurTxHdr: Annotated[ctypes.POINTER(msgqTxHeader), 0]
-  pTheirTxHdr: Annotated[ctypes.POINTER(msgqTxHeader), 8]
-  pOurRxHdr: Annotated[ctypes.POINTER(msgqRxHeader), 16]
-  pTheirRxHdr: Annotated[ctypes.POINTER(msgqRxHeader), 24]
-  pOurEntries: Annotated[ctypes.POINTER(NvU8), 32]
-  pTheirEntries: Annotated[ctypes.POINTER(NvU8), 40]
-  pReadIncoming: Annotated[ctypes.POINTER(NvU32), 48]
-  pWriteIncoming: Annotated[ctypes.POINTER(NvU32), 56]
-  pReadOutgoing: Annotated[ctypes.POINTER(NvU32), 64]
-  pWriteOutgoing: Annotated[ctypes.POINTER(NvU32), 72]
+  pOurTxHdr: Annotated[POINTER(msgqTxHeader), 0]
+  pTheirTxHdr: Annotated[POINTER(msgqTxHeader), 8]
+  pOurRxHdr: Annotated[POINTER(msgqRxHeader), 16]
+  pTheirRxHdr: Annotated[POINTER(msgqRxHeader), 24]
+  pOurEntries: Annotated[POINTER(NvU8), 32]
+  pTheirEntries: Annotated[POINTER(NvU8), 40]
+  pReadIncoming: Annotated[POINTER(NvU32), 48]
+  pWriteIncoming: Annotated[POINTER(NvU32), 56]
+  pReadOutgoing: Annotated[POINTER(NvU32), 64]
+  pWriteOutgoing: Annotated[POINTER(NvU32), 72]
   tx: Annotated[msgqTxHeader, 80]
   txReadPtr: Annotated[NvU32, 112]
   txFree: Annotated[NvU32, 116]
@@ -557,17 +557,17 @@ class msgqMetadata:
   rxLinked: Annotated[NvBool, 164]
   rxSwapped: Annotated[NvBool, 165]
   fcnNotify: Annotated[msgqFcnNotifyRemote, 168]
-  fcnNotifyArg: Annotated[ctypes.POINTER(None), 176]
+  fcnNotifyArg: Annotated[POINTER(None), 176]
   fcnBackendRw: Annotated[msgqFcnBackendRw, 184]
-  fcnBackendRwArg: Annotated[ctypes.POINTER(None), 192]
+  fcnBackendRwArg: Annotated[POINTER(None), 192]
   fcnInvalidate: Annotated[msgqFcnCacheOp, 200]
   fcnFlush: Annotated[msgqFcnCacheOp, 208]
   fcnZero: Annotated[msgqFcnCacheOp, 216]
   fcnBarrier: Annotated[msgqFcnBarrier, 224]
-msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(None))
-msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.POINTER(None), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(None))
-msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.c_uint32)
-msgqFcnBarrier = ctypes.CFUNCTYPE(None, )
+msgqFcnNotifyRemote = CFUNCTYPE(Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], POINTER(None))
+msgqFcnBackendRw = CFUNCTYPE(Annotated[int, ctypes.c_int32], POINTER(None), POINTER(None), Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], POINTER(None))
+msgqFcnCacheOp = CFUNCTYPE(None, POINTER(None), Annotated[int, ctypes.c_uint32])
+msgqFcnBarrier = CFUNCTYPE(None, )
 @record
 class struct_rpc_set_guest_system_info_v03_00:
   SIZE = 792
@@ -577,15 +577,15 @@ class struct_rpc_set_guest_system_info_v03_00:
   guestVersionBufferLength: Annotated[NvU32, 12]
   guestTitleBufferLength: Annotated[NvU32, 16]
   guestClNum: Annotated[NvU32, 20]
-  guestDriverVersion: Annotated[Array[ctypes.c_char, Literal[256]], 24]
-  guestVersion: Annotated[Array[ctypes.c_char, Literal[256]], 280]
-  guestTitle: Annotated[Array[ctypes.c_char, Literal[256]], 536]
+  guestDriverVersion: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 24]
+  guestVersion: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 280]
+  guestTitle: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 536]
 rpc_set_guest_system_info_v03_00 = struct_rpc_set_guest_system_info_v03_00
 rpc_set_guest_system_info_v = struct_rpc_set_guest_system_info_v03_00
 @record
 class struct_rpc_set_guest_system_info_ext_v15_02:
   SIZE = 264
-  guestDriverBranch: Annotated[Array[ctypes.c_char, Literal[256]], 0]
+  guestDriverBranch: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
   domain: Annotated[NvU32, 256]
   bus: Annotated[NvU16, 260]
   device: Annotated[NvU16, 262]
@@ -593,7 +593,7 @@ rpc_set_guest_system_info_ext_v15_02 = struct_rpc_set_guest_system_info_ext_v15_
 @record
 class struct_rpc_set_guest_system_info_ext_v25_1B:
   SIZE = 268
-  guestDriverBranch: Annotated[Array[ctypes.c_char, Literal[256]], 0]
+  guestDriverBranch: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
   domain: Annotated[NvU32, 256]
   bus: Annotated[NvU16, 260]
   device: Annotated[NvU16, 262]
@@ -605,8 +605,8 @@ class struct_rpc_alloc_root_v07_00:
   SIZE = 108
   hClient: Annotated[NvHandle, 0]
   processID: Annotated[NvU32, 4]
-  processName: Annotated[Array[ctypes.c_char, Literal[100]], 8]
-NvHandle = ctypes.c_uint32
+  processName: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[100]], 8]
+NvHandle = Annotated[int, ctypes.c_uint32]
 rpc_alloc_root_v07_00 = struct_rpc_alloc_root_v07_00
 rpc_alloc_root_v = struct_rpc_alloc_root_v07_00
 @record
@@ -1052,7 +1052,7 @@ class struct_NVOS00_PARAMETERS_v03_00:
   hObjectOld: Annotated[NvHandle, 8]
   status: Annotated[NvV32, 12]
 NVOS00_PARAMETERS_v03_00 = struct_NVOS00_PARAMETERS_v03_00
-NvV32 = ctypes.c_uint32
+NvV32 = Annotated[int, ctypes.c_uint32]
 rpc_free_v03_00 = struct_rpc_free_v03_00
 rpc_free_v = struct_rpc_free_v03_00
 @record
@@ -1060,7 +1060,7 @@ class struct_rpc_log_v03_00:
   SIZE = 8
   level: Annotated[NvU32, 0]
   log_len: Annotated[NvU32, 4]
-  log_msg: Annotated[Array[ctypes.c_char, Literal[0]], 8]
+  log_msg: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[0]], 8]
 rpc_log_v03_00 = struct_rpc_log_v03_00
 rpc_log_v = struct_rpc_log_v03_00
 @record
@@ -1114,7 +1114,7 @@ class struct_NVOS21_PARAMETERS_v03_00:
   pAllocParms: Annotated[NvP64, 16]
   status: Annotated[NvV32, 24]
 NVOS21_PARAMETERS_v03_00 = struct_NVOS21_PARAMETERS_v03_00
-NvP64 = ctypes.POINTER(None)
+NvP64 = POINTER(None)
 rpc_alloc_subdevice_v08_01 = struct_rpc_alloc_subdevice_v08_01
 rpc_alloc_subdevice_v = struct_rpc_alloc_subdevice_v08_01
 @record
@@ -1177,7 +1177,7 @@ class struct_NVOS54_PARAMETERS_v03_00:
   paramsSize: Annotated[NvU32, 24]
   status: Annotated[NvV32, 28]
 NVOS54_PARAMETERS_v03_00 = struct_NVOS54_PARAMETERS_v03_00
-NvRmctrlCmd = ctypes.c_uint32
+NvRmctrlCmd = Annotated[int, ctypes.c_uint32]
 rpc_rm_api_control_v25_0D = struct_rpc_rm_api_control_v25_0D
 @record
 class struct_rpc_rm_api_control_v25_0F:
@@ -1298,7 +1298,7 @@ class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00:
   clkPercentBusy: Annotated[NvU32, 4]
   samplingPeriodUs: Annotated[NvU32, 8]
 NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00 = struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00
-enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CMD_PERF_VID_ENG_NVENC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVENC', 1)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC', 2)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG', 3)
@@ -2272,7 +2272,7 @@ class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07:
   depth: Annotated[NvU32, 32]
   stencil: Annotated[NvU32, 36]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07
-enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = CEnum(ctypes.c_uint32)
+enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID', 0)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR', 1)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_DEPTH = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_DEPTH', 2)
@@ -2459,7 +2459,7 @@ class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F:
   bDirect: Annotated[NvBool, 9]
   regOps: Annotated[Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[124]], 12]
 NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F = struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F
-enum_NVB0CC_REGOPS_MODE = CEnum(ctypes.c_uint32)
+enum_NVB0CC_REGOPS_MODE = CEnum(Annotated[int, ctypes.c_uint32])
 NVB0CC_REGOPS_MODE_ALL_OR_NONE = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_ALL_OR_NONE', 0)
 NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR', 1)
 
@@ -2911,7 +2911,7 @@ class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F:
   clientActiveMask: Annotated[NvU32, 0]
   bRegkeyLimitRatedTdp: Annotated[NvU8, 4]
 PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F = struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F
-enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT', 0)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED', 1)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT', 2)
@@ -2933,7 +2933,7 @@ class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F:
   client: Annotated[NV2080_CTRL_PERF_RATED_TDP_CLIENT, 0]
   input: Annotated[NV2080_CTRL_PERF_RATED_TDP_ACTION, 4]
 NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F
-enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM', 0)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342 = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342', 1)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL', 2)
@@ -3014,7 +3014,7 @@ class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04:
   bEnableAllTpcs: Annotated[NvBool, 8]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 16]
 NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04 = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04
-enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(ctypes.c_uint32)
+enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(Annotated[int, ctypes.c_uint32])
 NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE', 0)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC', 1)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC', 2)
@@ -3593,7 +3593,7 @@ class struct_rpc_os_error_log_v17_00:
   exceptType: Annotated[NvU32, 0]
   runlistId: Annotated[NvU32, 4]
   chid: Annotated[NvU32, 8]
-  errString: Annotated[Array[ctypes.c_char, Literal[256]], 12]
+  errString: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 12]
 rpc_os_error_log_v17_00 = struct_rpc_os_error_log_v17_00
 rpc_os_error_log_v = struct_rpc_os_error_log_v17_00
 @record
@@ -3649,7 +3649,7 @@ rpc_dce_rm_init_v = struct_rpc_dce_rm_init_v01_00
 @record
 class struct_rpc_sim_read_v1E_01:
   SIZE = 264
-  path: Annotated[Array[ctypes.c_char, Literal[256]], 0]
+  path: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
   index: Annotated[NvU32, 256]
   count: Annotated[NvU32, 260]
 rpc_sim_read_v1E_01 = struct_rpc_sim_read_v1E_01
@@ -3657,7 +3657,7 @@ rpc_sim_read_v = struct_rpc_sim_read_v1E_01
 @record
 class struct_rpc_sim_write_v1E_01:
   SIZE = 268
-  path: Annotated[Array[ctypes.c_char, Literal[256]], 0]
+  path: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
   index: Annotated[NvU32, 256]
   count: Annotated[NvU32, 260]
   data: Annotated[NvU32, 264]
@@ -4064,7 +4064,7 @@ class struct_PACKED_REGISTRY_TABLE:
   size: Annotated[NvU32, 0]
   numEntries: Annotated[NvU32, 4]
 PACKED_REGISTRY_TABLE = struct_PACKED_REGISTRY_TABLE
-DISPMUXSTATE = CEnum(ctypes.c_uint32)
+DISPMUXSTATE = CEnum(Annotated[int, ctypes.c_uint32])
 dispMuxState_None = DISPMUXSTATE.define('dispMuxState_None', 0)
 dispMuxState_IntegratedGPU = DISPMUXSTATE.define('dispMuxState_IntegratedGPU', 1)
 dispMuxState_DiscreteGPU = DISPMUXSTATE.define('dispMuxState_DiscreteGPU', 2)
@@ -4091,7 +4091,7 @@ class ACPI_DATA:
   dsmCurrentFunc: Annotated[Array[ACPI_DSM_FUNCTION, Literal[8]], 404]
   dsmCurrentSubFunc: Annotated[Array[NvU32, Literal[8]], 436]
   dsmCurrentFuncSupport: Annotated[NvU32, 468]
-enum__ACPI_DSM_FUNCTION = CEnum(ctypes.c_uint32)
+enum__ACPI_DSM_FUNCTION = CEnum(Annotated[int, ctypes.c_uint32])
 ACPI_DSM_FUNCTION_NBSI = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NBSI', 0)
 ACPI_DSM_FUNCTION_NVHG = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NVHG', 1)
 ACPI_DSM_FUNCTION_MXM = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_MXM', 2)
@@ -4115,7 +4115,7 @@ class struct_DOD_METHOD_DATA:
   status: Annotated[NV_STATUS, 0]
   acpiIdListLen: Annotated[NvU32, 4]
   acpiIdList: Annotated[Array[NvU32, Literal[16]], 8]
-NV_STATUS = ctypes.c_uint32
+NV_STATUS = Annotated[int, ctypes.c_uint32]
 DOD_METHOD_DATA = struct_DOD_METHOD_DATA
 @record
 class struct_JT_METHOD_DATA:
@@ -4155,7 +4155,7 @@ class struct_ACPI_METHOD_DATA:
   muxMethodData: Annotated[MUX_METHOD_DATA, 88]
   capsMethodData: Annotated[CAPS_METHOD_DATA, 668]
 ACPI_METHOD_DATA = struct_ACPI_METHOD_DATA
-RM_ENGINE_TYPE = CEnum(ctypes.c_uint32)
+RM_ENGINE_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 RM_ENGINE_TYPE_NULL = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_NULL', 0)
 RM_ENGINE_TYPE_GR0 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_GR0', 1)
 RM_ENGINE_TYPE_GR1 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_GR1', 2)
@@ -4345,13 +4345,13 @@ NV2080_CTRL_GPU_GET_GID_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS
 class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS:
   SIZE = 48
   BoardID: Annotated[NvU32, 0]
-  chipSKU: Annotated[Array[ctypes.c_char, Literal[9]], 4]
-  chipSKUMod: Annotated[Array[ctypes.c_char, Literal[5]], 13]
+  chipSKU: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[9]], 4]
+  chipSKUMod: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 13]
   skuConfigVersion: Annotated[NvU32, 20]
-  project: Annotated[Array[ctypes.c_char, Literal[5]], 24]
-  projectSKU: Annotated[Array[ctypes.c_char, Literal[5]], 29]
-  CDP: Annotated[Array[ctypes.c_char, Literal[6]], 34]
-  projectSKUMod: Annotated[Array[ctypes.c_char, Literal[2]], 40]
+  project: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 24]
+  projectSKU: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 29]
+  CDP: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[6]], 34]
+  projectSKUMod: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[2]], 40]
   businessCycle: Annotated[NvU32, 44]
 NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
 @record
@@ -4372,7 +4372,7 @@ class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO:
   bProtected: Annotated[NvBool, 30]
   blackList: Annotated[NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG, 31]
 NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO
-NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = Array[ctypes.c_ubyte, Literal[17]]
+NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = Array[Annotated[int, ctypes.c_ubyte], Literal[17]]
 @record
 class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS:
   SIZE = 80
@@ -4483,67 +4483,67 @@ class FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3:
 @record
 class struct_BIT_HEADER_V1_00:
   SIZE = 12
-  Id: Annotated[ctypes.c_uint16, 0]
-  Signature: Annotated[ctypes.c_uint32, 2]
-  BCD_Version: Annotated[ctypes.c_uint16, 6]
-  HeaderSize: Annotated[ctypes.c_ubyte, 8]
-  TokenSize: Annotated[ctypes.c_ubyte, 9]
-  TokenEntries: Annotated[ctypes.c_ubyte, 10]
-  HeaderChksum: Annotated[ctypes.c_ubyte, 11]
+  Id: Annotated[Annotated[int, ctypes.c_uint16], 0]
+  Signature: Annotated[Annotated[int, ctypes.c_uint32], 2]
+  BCD_Version: Annotated[Annotated[int, ctypes.c_uint16], 6]
+  HeaderSize: Annotated[Annotated[int, ctypes.c_ubyte], 8]
+  TokenSize: Annotated[Annotated[int, ctypes.c_ubyte], 9]
+  TokenEntries: Annotated[Annotated[int, ctypes.c_ubyte], 10]
+  HeaderChksum: Annotated[Annotated[int, ctypes.c_ubyte], 11]
 BIT_HEADER_V1_00 = struct_BIT_HEADER_V1_00
 @record
 class struct_BIT_TOKEN_V1_00:
   SIZE = 8
-  TokenId: Annotated[ctypes.c_ubyte, 0]
-  DataVersion: Annotated[ctypes.c_ubyte, 1]
-  DataSize: Annotated[ctypes.c_uint16, 2]
-  DataPtr: Annotated[ctypes.c_uint32, 4]
+  TokenId: Annotated[Annotated[int, ctypes.c_ubyte], 0]
+  DataVersion: Annotated[Annotated[int, ctypes.c_ubyte], 1]
+  DataSize: Annotated[Annotated[int, ctypes.c_uint16], 2]
+  DataPtr: Annotated[Annotated[int, ctypes.c_uint32], 4]
 BIT_TOKEN_V1_00 = struct_BIT_TOKEN_V1_00
 @record
 class BIT_DATA_BIOSDATA_BINVER:
   SIZE = 5
-  Version: Annotated[ctypes.c_uint32, 0]
-  OemVersion: Annotated[ctypes.c_ubyte, 4]
+  Version: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  OemVersion: Annotated[Annotated[int, ctypes.c_ubyte], 4]
 @record
 class BIT_DATA_FALCON_DATA_V2:
   SIZE = 4
-  FalconUcodeTablePtr: Annotated[ctypes.c_uint32, 0]
+  FalconUcodeTablePtr: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class FALCON_UCODE_TABLE_HDR_V1:
   SIZE = 6
-  Version: Annotated[ctypes.c_ubyte, 0]
-  HeaderSize: Annotated[ctypes.c_ubyte, 1]
-  EntrySize: Annotated[ctypes.c_ubyte, 2]
-  EntryCount: Annotated[ctypes.c_ubyte, 3]
-  DescVersion: Annotated[ctypes.c_ubyte, 4]
-  DescSize: Annotated[ctypes.c_ubyte, 5]
+  Version: Annotated[Annotated[int, ctypes.c_ubyte], 0]
+  HeaderSize: Annotated[Annotated[int, ctypes.c_ubyte], 1]
+  EntrySize: Annotated[Annotated[int, ctypes.c_ubyte], 2]
+  EntryCount: Annotated[Annotated[int, ctypes.c_ubyte], 3]
+  DescVersion: Annotated[Annotated[int, ctypes.c_ubyte], 4]
+  DescSize: Annotated[Annotated[int, ctypes.c_ubyte], 5]
 @record
 class FALCON_UCODE_TABLE_ENTRY_V1:
   SIZE = 6
-  ApplicationID: Annotated[ctypes.c_ubyte, 0]
-  TargetID: Annotated[ctypes.c_ubyte, 1]
-  DescPtr: Annotated[ctypes.c_uint32, 2]
+  ApplicationID: Annotated[Annotated[int, ctypes.c_ubyte], 0]
+  TargetID: Annotated[Annotated[int, ctypes.c_ubyte], 1]
+  DescPtr: Annotated[Annotated[int, ctypes.c_uint32], 2]
 @record
 class FALCON_UCODE_DESC_HEADER:
   SIZE = 4
-  vDesc: Annotated[ctypes.c_uint32, 0]
+  vDesc: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @record
 class FALCON_UCODE_DESC_V3:
   SIZE = 44
   Hdr: Annotated[FALCON_UCODE_DESC_HEADER, 0]
-  StoredSize: Annotated[ctypes.c_uint32, 4]
-  PKCDataOffset: Annotated[ctypes.c_uint32, 8]
-  InterfaceOffset: Annotated[ctypes.c_uint32, 12]
-  IMEMPhysBase: Annotated[ctypes.c_uint32, 16]
-  IMEMLoadSize: Annotated[ctypes.c_uint32, 20]
-  IMEMVirtBase: Annotated[ctypes.c_uint32, 24]
-  DMEMPhysBase: Annotated[ctypes.c_uint32, 28]
-  DMEMLoadSize: Annotated[ctypes.c_uint32, 32]
-  EngineIdMask: Annotated[ctypes.c_uint16, 36]
-  UcodeId: Annotated[ctypes.c_ubyte, 38]
-  SignatureCount: Annotated[ctypes.c_ubyte, 39]
-  SignatureVersions: Annotated[ctypes.c_uint16, 40]
-  Reserved: Annotated[ctypes.c_uint16, 42]
+  StoredSize: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  PKCDataOffset: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  InterfaceOffset: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  IMEMPhysBase: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  IMEMLoadSize: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  IMEMVirtBase: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  DMEMPhysBase: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  DMEMLoadSize: Annotated[Annotated[int, ctypes.c_uint32], 32]
+  EngineIdMask: Annotated[Annotated[int, ctypes.c_uint16], 36]
+  UcodeId: Annotated[Annotated[int, ctypes.c_ubyte], 38]
+  SignatureCount: Annotated[Annotated[int, ctypes.c_ubyte], 39]
+  SignatureVersions: Annotated[Annotated[int, ctypes.c_uint16], 40]
+  Reserved: Annotated[Annotated[int, ctypes.c_uint16], 42]
 @record
 class FWSECLIC_READ_VBIOS_DESC:
   SIZE = 24
@@ -4573,7 +4573,7 @@ class struct__PCI_EXP_ROM_STANDARD:
   pciDataStrucPtr: Annotated[NvU16, 24]
   sizeOfBlock: Annotated[NvU32, 26]
 PCI_EXP_ROM_STANDARD = struct__PCI_EXP_ROM_STANDARD
-PPCI_EXP_ROM_STANDARD = ctypes.POINTER(struct__PCI_EXP_ROM_STANDARD)
+PPCI_EXP_ROM_STANDARD = POINTER(struct__PCI_EXP_ROM_STANDARD)
 @record
 class struct__PCI_EXP_ROM_NBSI:
   SIZE = 30
@@ -4583,14 +4583,14 @@ class struct__PCI_EXP_ROM_NBSI:
   pciDataStrucPtr: Annotated[NvU16, 24]
   sizeOfBlock: Annotated[NvU32, 26]
 PCI_EXP_ROM_NBSI = struct__PCI_EXP_ROM_NBSI
-PPCI_EXP_ROM_NBSI = ctypes.POINTER(struct__PCI_EXP_ROM_NBSI)
+PPCI_EXP_ROM_NBSI = POINTER(struct__PCI_EXP_ROM_NBSI)
 @record
 class union__PCI_EXP_ROM:
   SIZE = 30
   standard: Annotated[PCI_EXP_ROM_STANDARD, 0]
   nbsi: Annotated[PCI_EXP_ROM_NBSI, 0]
 PCI_EXP_ROM = union__PCI_EXP_ROM
-PPCI_EXP_ROM = ctypes.POINTER(union__PCI_EXP_ROM)
+PPCI_EXP_ROM = POINTER(union__PCI_EXP_ROM)
 @record
 class struct__PCI_DATA_STRUCT:
   SIZE = 24
@@ -4607,7 +4607,7 @@ class struct__PCI_DATA_STRUCT:
   lastImage: Annotated[NvU8, 21]
   maxRunTimeImageLen: Annotated[NvU16, 22]
 PCI_DATA_STRUCT = struct__PCI_DATA_STRUCT
-PPCI_DATA_STRUCT = ctypes.POINTER(struct__PCI_DATA_STRUCT)
+PPCI_DATA_STRUCT = POINTER(struct__PCI_DATA_STRUCT)
 @record
 class struct__NV_PCI_DATA_EXT_STRUCT:
   SIZE = 12
@@ -4618,7 +4618,7 @@ class struct__NV_PCI_DATA_EXT_STRUCT:
   privLastImage: Annotated[NvU8, 10]
   flags: Annotated[NvU8, 11]
 NV_PCI_DATA_EXT_STRUCT = struct__NV_PCI_DATA_EXT_STRUCT
-PNV_PCI_DATA_EXT_STRUCT = ctypes.POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
+PNV_PCI_DATA_EXT_STRUCT = POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
 init_records()
 GSP_FW_WPR_META_VERIFIED = 0xa0a0a0a0a0a0a0a0
 GSP_FW_WPR_META_REVISION = 1

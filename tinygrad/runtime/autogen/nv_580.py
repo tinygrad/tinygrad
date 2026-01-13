@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-_anonenum0 = CEnum(ctypes.c_uint32)
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
 AES128_NONE = _anonenum0.define('AES128_NONE', 0)
 AES128_CTR = _anonenum0.define('AES128_CTR', 1)
 AES128_CBC = _anonenum0.define('AES128_CBC', 2)
@@ -12,17 +12,17 @@ AES128_CTR_LSB16B = _anonenum0.define('AES128_CTR_LSB16B', 5)
 AES128_CLR_AS_ENCRYPT = _anonenum0.define('AES128_CLR_AS_ENCRYPT', 6)
 AES128_RESERVED = _anonenum0.define('AES128_RESERVED', 7)
 
-_anonenum1 = CEnum(ctypes.c_uint32)
+_anonenum1 = CEnum(Annotated[int, ctypes.c_uint32])
 AES128_CTS_DISABLE = _anonenum1.define('AES128_CTS_DISABLE', 0)
 AES128_CTS_ENABLE = _anonenum1.define('AES128_CTS_ENABLE', 1)
 
-_anonenum2 = CEnum(ctypes.c_uint32)
+_anonenum2 = CEnum(Annotated[int, ctypes.c_uint32])
 AES128_PADDING_NONE = _anonenum2.define('AES128_PADDING_NONE', 0)
 AES128_PADDING_CARRY_OVER = _anonenum2.define('AES128_PADDING_CARRY_OVER', 1)
 AES128_PADDING_RFC2630 = _anonenum2.define('AES128_PADDING_RFC2630', 2)
 AES128_PADDING_RESERVED = _anonenum2.define('AES128_PADDING_RESERVED', 7)
 
-ENCR_MODE = CEnum(ctypes.c_uint32)
+ENCR_MODE = CEnum(Annotated[int, ctypes.c_uint32])
 ENCR_MODE_CTR64 = ENCR_MODE.define('ENCR_MODE_CTR64', 0)
 ENCR_MODE_CBC = ENCR_MODE.define('ENCR_MODE_CBC', 1)
 ENCR_MODE_ECB = ENCR_MODE.define('ENCR_MODE_ECB', 2)
@@ -31,294 +31,294 @@ ENCR_MODE_CBC_PARTIAL = ENCR_MODE.define('ENCR_MODE_CBC_PARTIAL', 4)
 ENCR_MODE_CLEAR_INTO_VPR = ENCR_MODE.define('ENCR_MODE_CLEAR_INTO_VPR', 5)
 ENCR_MODE_FORCE_INTO_VPR = ENCR_MODE.define('ENCR_MODE_FORCE_INTO_VPR', 6)
 
-_anonenum3 = CEnum(ctypes.c_uint32)
+_anonenum3 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_MS_PIFF_CTR = _anonenum3.define('DRM_MS_PIFF_CTR', 17)
 
-_anonenum4 = CEnum(ctypes.c_uint32)
+_anonenum4 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_MS_PIFF_CBC = _anonenum4.define('DRM_MS_PIFF_CBC', 2)
 
-_anonenum5 = CEnum(ctypes.c_uint32)
+_anonenum5 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_MARLIN_CTR = _anonenum5.define('DRM_MARLIN_CTR', 1)
 
-_anonenum6 = CEnum(ctypes.c_uint32)
+_anonenum6 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_MARLIN_CBC = _anonenum6.define('DRM_MARLIN_CBC', 34)
 
-_anonenum7 = CEnum(ctypes.c_uint32)
+_anonenum7 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_WIDEVINE = _anonenum7.define('DRM_WIDEVINE', 10)
 
-_anonenum8 = CEnum(ctypes.c_uint32)
+_anonenum8 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_WIDEVINE_CTR = _anonenum8.define('DRM_WIDEVINE_CTR', 17)
 
-_anonenum9 = CEnum(ctypes.c_uint32)
+_anonenum9 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_ULTRA_VIOLET = _anonenum9.define('DRM_ULTRA_VIOLET', 5)
 
-_anonenum10 = CEnum(ctypes.c_uint32)
+_anonenum10 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_NONE = _anonenum10.define('DRM_NONE', 0)
 
-_anonenum11 = CEnum(ctypes.c_uint32)
+_anonenum11 = CEnum(Annotated[int, ctypes.c_uint32])
 DRM_CLR_AS_ENCRYPT = _anonenum11.define('DRM_CLR_AS_ENCRYPT', 6)
 
 @record
 class struct__nvdec_ssm_s:
   SIZE = 8
-  bytes_of_protected_data: Annotated[ctypes.c_uint32, 0]
-  bytes_of_clear_data: Annotated[ctypes.c_uint32, 4, 16, 0]
-  skip_byte_blk: Annotated[ctypes.c_uint32, 6, 4, 0]
-  crypt_byte_blk: Annotated[ctypes.c_uint32, 6, 4, 4]
-  skip: Annotated[ctypes.c_uint32, 7, 1, 0]
-  last: Annotated[ctypes.c_uint32, 7, 1, 1]
-  pad: Annotated[ctypes.c_uint32, 7, 1, 2]
-  mode: Annotated[ctypes.c_uint32, 7, 1, 3]
-  entry_type: Annotated[ctypes.c_uint32, 7, 1, 4]
-  reserved: Annotated[ctypes.c_uint32, 7, 3, 5]
+  bytes_of_protected_data: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  bytes_of_clear_data: Annotated[Annotated[int, ctypes.c_uint32], 4, 16, 0]
+  skip_byte_blk: Annotated[Annotated[int, ctypes.c_uint32], 6, 4, 0]
+  crypt_byte_blk: Annotated[Annotated[int, ctypes.c_uint32], 6, 4, 4]
+  skip: Annotated[Annotated[int, ctypes.c_uint32], 7, 1, 0]
+  last: Annotated[Annotated[int, ctypes.c_uint32], 7, 1, 1]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 7, 1, 2]
+  mode: Annotated[Annotated[int, ctypes.c_uint32], 7, 1, 3]
+  entry_type: Annotated[Annotated[int, ctypes.c_uint32], 7, 1, 4]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 7, 3, 5]
 nvdec_ssm_s = struct__nvdec_ssm_s
 @record
 class struct__nvdec_pass2_otf_ext_s:
   SIZE = 12
-  ssm_entry_num: Annotated[ctypes.c_uint32, 0, 16, 0]
-  ssm_iv_num: Annotated[ctypes.c_uint32, 2, 16, 0]
-  real_stream_length: Annotated[ctypes.c_uint32, 4]
-  non_slice_data: Annotated[ctypes.c_uint32, 8, 16, 0]
-  drm_mode: Annotated[ctypes.c_uint32, 10, 7, 0]
-  reserved: Annotated[ctypes.c_uint32, 10, 9, 7]
+  ssm_entry_num: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
+  ssm_iv_num: Annotated[Annotated[int, ctypes.c_uint32], 2, 16, 0]
+  real_stream_length: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  non_slice_data: Annotated[Annotated[int, ctypes.c_uint32], 8, 16, 0]
+  drm_mode: Annotated[Annotated[int, ctypes.c_uint32], 10, 7, 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 10, 9, 7]
 nvdec_pass2_otf_ext_s = struct__nvdec_pass2_otf_ext_s
 @record
 class struct__nvdec_substream_entry_s:
   SIZE = 12
-  substream_start_offset: Annotated[ctypes.c_uint32, 0]
-  substream_length: Annotated[ctypes.c_uint32, 4]
-  substream_first_tile_idx: Annotated[ctypes.c_uint32, 8, 8, 0]
-  substream_last_tile_idx: Annotated[ctypes.c_uint32, 9, 8, 0]
-  last_substream_entry_in_frame: Annotated[ctypes.c_uint32, 10, 1, 0]
-  reserved: Annotated[ctypes.c_uint32, 10, 15, 1]
+  substream_start_offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  substream_length: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  substream_first_tile_idx: Annotated[Annotated[int, ctypes.c_uint32], 8, 8, 0]
+  substream_last_tile_idx: Annotated[Annotated[int, ctypes.c_uint32], 9, 8, 0]
+  last_substream_entry_in_frame: Annotated[Annotated[int, ctypes.c_uint32], 10, 1, 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 10, 15, 1]
 nvdec_substream_entry_s = struct__nvdec_substream_entry_s
 @record
 class struct__nvdec_ecdma_config_s:
   SIZE = 24
-  ecdma_enable: Annotated[ctypes.c_uint32, 0]
-  ecdma_blk_x_src: Annotated[ctypes.c_uint16, 4]
-  ecdma_blk_y_src: Annotated[ctypes.c_uint16, 6]
-  ecdma_blk_x_dst: Annotated[ctypes.c_uint16, 8]
-  ecdma_blk_y_dst: Annotated[ctypes.c_uint16, 10]
-  ref_pic_idx: Annotated[ctypes.c_uint16, 12]
-  boundary0_top: Annotated[ctypes.c_uint16, 14]
-  boundary0_bottom: Annotated[ctypes.c_uint16, 16]
-  boundary1_left: Annotated[ctypes.c_uint16, 18]
-  boundary1_right: Annotated[ctypes.c_uint16, 20]
-  blk_copy_flag: Annotated[ctypes.c_ubyte, 22]
-  ctb_size: Annotated[ctypes.c_ubyte, 23]
+  ecdma_enable: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  ecdma_blk_x_src: Annotated[Annotated[int, ctypes.c_uint16], 4]
+  ecdma_blk_y_src: Annotated[Annotated[int, ctypes.c_uint16], 6]
+  ecdma_blk_x_dst: Annotated[Annotated[int, ctypes.c_uint16], 8]
+  ecdma_blk_y_dst: Annotated[Annotated[int, ctypes.c_uint16], 10]
+  ref_pic_idx: Annotated[Annotated[int, ctypes.c_uint16], 12]
+  boundary0_top: Annotated[Annotated[int, ctypes.c_uint16], 14]
+  boundary0_bottom: Annotated[Annotated[int, ctypes.c_uint16], 16]
+  boundary1_left: Annotated[Annotated[int, ctypes.c_uint16], 18]
+  boundary1_right: Annotated[Annotated[int, ctypes.c_uint16], 20]
+  blk_copy_flag: Annotated[Annotated[int, ctypes.c_ubyte], 22]
+  ctb_size: Annotated[Annotated[int, ctypes.c_ubyte], 23]
 nvdec_ecdma_config_s = struct__nvdec_ecdma_config_s
 @record
 class struct__nvdec_status_hevc_s:
   SIZE = 36
-  frame_status_intra_cnt: Annotated[ctypes.c_uint32, 0]
-  frame_status_inter_cnt: Annotated[ctypes.c_uint32, 4]
-  frame_status_skip_cnt: Annotated[ctypes.c_uint32, 8]
-  frame_status_fwd_mvx_cnt: Annotated[ctypes.c_uint32, 12]
-  frame_status_fwd_mvy_cnt: Annotated[ctypes.c_uint32, 16]
-  frame_status_bwd_mvx_cnt: Annotated[ctypes.c_uint32, 20]
-  frame_status_bwd_mvy_cnt: Annotated[ctypes.c_uint32, 24]
-  error_ctb_pos: Annotated[ctypes.c_uint32, 28]
-  error_slice_pos: Annotated[ctypes.c_uint32, 32]
+  frame_status_intra_cnt: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  frame_status_inter_cnt: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  frame_status_skip_cnt: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  frame_status_fwd_mvx_cnt: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  frame_status_fwd_mvy_cnt: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  frame_status_bwd_mvx_cnt: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  frame_status_bwd_mvy_cnt: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  error_ctb_pos: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  error_slice_pos: Annotated[Annotated[int, ctypes.c_uint32], 32]
 nvdec_status_hevc_s = struct__nvdec_status_hevc_s
 @record
 class struct__nvdec_status_vp9_s:
   SIZE = 36
-  frame_status_intra_cnt: Annotated[ctypes.c_uint32, 0]
-  frame_status_inter_cnt: Annotated[ctypes.c_uint32, 4]
-  frame_status_skip_cnt: Annotated[ctypes.c_uint32, 8]
-  frame_status_fwd_mvx_cnt: Annotated[ctypes.c_uint32, 12]
-  frame_status_fwd_mvy_cnt: Annotated[ctypes.c_uint32, 16]
-  frame_status_bwd_mvx_cnt: Annotated[ctypes.c_uint32, 20]
-  frame_status_bwd_mvy_cnt: Annotated[ctypes.c_uint32, 24]
-  error_ctb_pos: Annotated[ctypes.c_uint32, 28]
-  error_slice_pos: Annotated[ctypes.c_uint32, 32]
+  frame_status_intra_cnt: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  frame_status_inter_cnt: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  frame_status_skip_cnt: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  frame_status_fwd_mvx_cnt: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  frame_status_fwd_mvy_cnt: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  frame_status_bwd_mvx_cnt: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  frame_status_bwd_mvy_cnt: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  error_ctb_pos: Annotated[Annotated[int, ctypes.c_uint32], 28]
+  error_slice_pos: Annotated[Annotated[int, ctypes.c_uint32], 32]
 nvdec_status_vp9_s = struct__nvdec_status_vp9_s
 @record
 class struct__nvdec_status_s:
   SIZE = 56
-  mbs_correctly_decoded: Annotated[ctypes.c_uint32, 0]
-  mbs_in_error: Annotated[ctypes.c_uint32, 4]
-  cycle_count: Annotated[ctypes.c_uint32, 8]
-  error_status: Annotated[ctypes.c_uint32, 12]
+  mbs_correctly_decoded: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  mbs_in_error: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  cycle_count: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  error_status: Annotated[Annotated[int, ctypes.c_uint32], 12]
   hevc: Annotated[nvdec_status_hevc_s, 16]
   vp9: Annotated[nvdec_status_vp9_s, 16]
-  slice_header_error_code: Annotated[ctypes.c_uint32, 52]
+  slice_header_error_code: Annotated[Annotated[int, ctypes.c_uint32], 52]
 nvdec_status_s = struct__nvdec_status_s
 @record
 class struct__external_mv_s:
   SIZE = 4
-  mvx: Annotated[ctypes.c_int32, 0, 14, 0]
-  mvy: Annotated[ctypes.c_int32, 1, 14, 6]
-  refidx: Annotated[ctypes.c_uint32, 3, 4, 4]
+  mvx: Annotated[Annotated[int, ctypes.c_int32], 0, 14, 0]
+  mvy: Annotated[Annotated[int, ctypes.c_int32], 1, 14, 6]
+  refidx: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
 external_mv_s = struct__external_mv_s
 @record
 class struct__nvdec_hevc_main10_444_ext_s:
   SIZE = 28
-  transformSkipRotationEnableFlag: Annotated[ctypes.c_uint32, 0, 1, 0]
-  transformSkipContextEnableFlag: Annotated[ctypes.c_uint32, 0, 1, 1]
-  intraBlockCopyEnableFlag: Annotated[ctypes.c_uint32, 0, 1, 2]
-  implicitRdpcmEnableFlag: Annotated[ctypes.c_uint32, 0, 1, 3]
-  explicitRdpcmEnableFlag: Annotated[ctypes.c_uint32, 0, 1, 4]
-  extendedPrecisionProcessingFlag: Annotated[ctypes.c_uint32, 0, 1, 5]
-  intraSmoothingDisabledFlag: Annotated[ctypes.c_uint32, 0, 1, 6]
-  highPrecisionOffsetsEnableFlag: Annotated[ctypes.c_uint32, 0, 1, 7]
-  fastRiceAdaptationEnableFlag: Annotated[ctypes.c_uint32, 1, 1, 0]
-  cabacBypassAlignmentEnableFlag: Annotated[ctypes.c_uint32, 1, 1, 1]
-  sps_444_extension_reserved: Annotated[ctypes.c_uint32, 1, 22, 2]
-  log2MaxTransformSkipSize: Annotated[ctypes.c_uint32, 4, 4, 0]
-  crossComponentPredictionEnableFlag: Annotated[ctypes.c_uint32, 4, 1, 4]
-  chromaQpAdjustmentEnableFlag: Annotated[ctypes.c_uint32, 4, 1, 5]
-  diffCuChromaQpAdjustmentDepth: Annotated[ctypes.c_uint32, 4, 2, 6]
-  chromaQpAdjustmentTableSize: Annotated[ctypes.c_uint32, 5, 3, 0]
-  log2SaoOffsetScaleLuma: Annotated[ctypes.c_uint32, 5, 3, 3]
-  log2SaoOffsetScaleChroma: Annotated[ctypes.c_uint32, 5, 3, 6]
-  pps_444_extension_reserved: Annotated[ctypes.c_uint32, 6, 15, 1]
-  cb_qp_adjustment: Annotated[Array[ctypes.c_char, Literal[6]], 8]
-  cr_qp_adjustment: Annotated[Array[ctypes.c_char, Literal[6]], 14]
-  HevcFltAboveOffset: Annotated[ctypes.c_uint32, 20]
-  HevcSaoAboveOffset: Annotated[ctypes.c_uint32, 24]
+  transformSkipRotationEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
+  transformSkipContextEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 1]
+  intraBlockCopyEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 2]
+  implicitRdpcmEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 3]
+  explicitRdpcmEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 4]
+  extendedPrecisionProcessingFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 5]
+  intraSmoothingDisabledFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 6]
+  highPrecisionOffsetsEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 7]
+  fastRiceAdaptationEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 1, 1, 0]
+  cabacBypassAlignmentEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 1, 1, 1]
+  sps_444_extension_reserved: Annotated[Annotated[int, ctypes.c_uint32], 1, 22, 2]
+  log2MaxTransformSkipSize: Annotated[Annotated[int, ctypes.c_uint32], 4, 4, 0]
+  crossComponentPredictionEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 4, 1, 4]
+  chromaQpAdjustmentEnableFlag: Annotated[Annotated[int, ctypes.c_uint32], 4, 1, 5]
+  diffCuChromaQpAdjustmentDepth: Annotated[Annotated[int, ctypes.c_uint32], 4, 2, 6]
+  chromaQpAdjustmentTableSize: Annotated[Annotated[int, ctypes.c_uint32], 5, 3, 0]
+  log2SaoOffsetScaleLuma: Annotated[Annotated[int, ctypes.c_uint32], 5, 3, 3]
+  log2SaoOffsetScaleChroma: Annotated[Annotated[int, ctypes.c_uint32], 5, 3, 6]
+  pps_444_extension_reserved: Annotated[Annotated[int, ctypes.c_uint32], 6, 15, 1]
+  cb_qp_adjustment: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[6]], 8]
+  cr_qp_adjustment: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[6]], 14]
+  HevcFltAboveOffset: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  HevcSaoAboveOffset: Annotated[Annotated[int, ctypes.c_uint32], 24]
 nvdec_hevc_main10_444_ext_s = struct__nvdec_hevc_main10_444_ext_s
 @record
 class struct__nvdec_hevc_pic_v1_s:
   SIZE = 32
   hevc_main10_444_ext: Annotated[nvdec_hevc_main10_444_ext_s, 0]
-  sw_skip_start_length: Annotated[ctypes.c_uint32, 28, 14, 0]
-  external_ref_mem_dis: Annotated[ctypes.c_uint32, 29, 1, 6]
-  error_recovery_start_pos: Annotated[ctypes.c_uint32, 29, 2, 7]
-  error_external_mv_en: Annotated[ctypes.c_uint32, 30, 1, 1]
-  reserved0: Annotated[ctypes.c_uint32, 30, 14, 2]
+  sw_skip_start_length: Annotated[Annotated[int, ctypes.c_uint32], 28, 14, 0]
+  external_ref_mem_dis: Annotated[Annotated[int, ctypes.c_uint32], 29, 1, 6]
+  error_recovery_start_pos: Annotated[Annotated[int, ctypes.c_uint32], 29, 2, 7]
+  error_external_mv_en: Annotated[Annotated[int, ctypes.c_uint32], 30, 1, 1]
+  reserved0: Annotated[Annotated[int, ctypes.c_uint32], 30, 14, 2]
 nvdec_hevc_pic_v1_s = struct__nvdec_hevc_pic_v1_s
 @record
 class struct__nvdec_hevc_pic_v2_s:
   SIZE = 4
-  mv_hevc_enable: Annotated[ctypes.c_uint32, 0, 1, 0]
-  nuh_layer_id: Annotated[ctypes.c_uint32, 0, 6, 1]
-  default_ref_layers_active_flag: Annotated[ctypes.c_uint32, 0, 1, 7]
-  NumDirectRefLayers: Annotated[ctypes.c_uint32, 1, 6, 0]
-  max_one_active_ref_layer_flag: Annotated[ctypes.c_uint32, 1, 1, 6]
-  NumActiveRefLayerPics: Annotated[ctypes.c_uint32, 1, 6, 7]
-  poc_lsb_not_present_flag: Annotated[ctypes.c_uint32, 2, 1, 5]
-  reserved0: Annotated[ctypes.c_uint32, 2, 10, 6]
+  mv_hevc_enable: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
+  nuh_layer_id: Annotated[Annotated[int, ctypes.c_uint32], 0, 6, 1]
+  default_ref_layers_active_flag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 7]
+  NumDirectRefLayers: Annotated[Annotated[int, ctypes.c_uint32], 1, 6, 0]
+  max_one_active_ref_layer_flag: Annotated[Annotated[int, ctypes.c_uint32], 1, 1, 6]
+  NumActiveRefLayerPics: Annotated[Annotated[int, ctypes.c_uint32], 1, 6, 7]
+  poc_lsb_not_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 5]
+  reserved0: Annotated[Annotated[int, ctypes.c_uint32], 2, 10, 6]
 nvdec_hevc_pic_v2_s = struct__nvdec_hevc_pic_v2_s
 @record
 class struct__nvdec_hevc_pic_v3_s:
   SIZE = 8
-  slice_decoding_enable: Annotated[ctypes.c_uint32, 0, 1, 0]
-  slice_ec_enable: Annotated[ctypes.c_uint32, 0, 1, 1]
-  slice_ec_mv_type: Annotated[ctypes.c_uint32, 0, 2, 2]
-  err_detected_sw: Annotated[ctypes.c_uint32, 0, 1, 4]
-  slice_ec_slice_type: Annotated[ctypes.c_uint32, 0, 2, 5]
-  slice_strm_recfg_en: Annotated[ctypes.c_uint32, 0, 1, 7]
-  reserved: Annotated[ctypes.c_uint32, 1, 24, 0]
-  HevcSliceEdgeOffset: Annotated[ctypes.c_uint32, 4]
+  slice_decoding_enable: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
+  slice_ec_enable: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 1]
+  slice_ec_mv_type: Annotated[Annotated[int, ctypes.c_uint32], 0, 2, 2]
+  err_detected_sw: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 4]
+  slice_ec_slice_type: Annotated[Annotated[int, ctypes.c_uint32], 0, 2, 5]
+  slice_strm_recfg_en: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 7]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 1, 24, 0]
+  HevcSliceEdgeOffset: Annotated[Annotated[int, ctypes.c_uint32], 4]
 nvdec_hevc_pic_v3_s = struct__nvdec_hevc_pic_v3_s
 @record
 class struct__nvdec_hevc_pic_s:
   SIZE = 276
-  wrapped_session_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
-  wrapped_content_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
-  initialization_vector: Annotated[Array[ctypes.c_uint32, Literal[4]], 32]
-  stream_len: Annotated[ctypes.c_uint32, 48]
-  enable_encryption: Annotated[ctypes.c_uint32, 52]
-  key_increment: Annotated[ctypes.c_uint32, 56, 6, 0]
-  encryption_mode: Annotated[ctypes.c_uint32, 56, 4, 6]
-  key_slot_index: Annotated[ctypes.c_uint32, 57, 4, 2]
-  ssm_en: Annotated[ctypes.c_uint32, 57, 1, 6]
-  enable_histogram: Annotated[ctypes.c_uint32, 57, 1, 7]
-  enable_substream_decoding: Annotated[ctypes.c_uint32, 58, 1, 0]
-  reserved0: Annotated[ctypes.c_uint32, 58, 15, 1]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 60]
-  tileformat: Annotated[ctypes.c_ubyte, 64, 2, 0]
-  gob_height: Annotated[ctypes.c_ubyte, 64, 3, 2]
-  reserverd_surface_format: Annotated[ctypes.c_ubyte, 64, 3, 5]
-  sw_start_code_e: Annotated[ctypes.c_ubyte, 65]
-  disp_output_mode: Annotated[ctypes.c_ubyte, 66]
-  reserved1: Annotated[ctypes.c_ubyte, 67]
-  framestride: Annotated[Array[ctypes.c_uint32, Literal[2]], 68]
-  colMvBuffersize: Annotated[ctypes.c_uint32, 76]
-  HevcSaoBufferOffset: Annotated[ctypes.c_uint32, 80]
-  HevcBsdCtrlOffset: Annotated[ctypes.c_uint32, 84]
-  pic_width_in_luma_samples: Annotated[ctypes.c_uint16, 88]
-  pic_height_in_luma_samples: Annotated[ctypes.c_uint16, 90]
-  chroma_format_idc: Annotated[ctypes.c_uint32, 92, 4, 0]
-  bit_depth_luma: Annotated[ctypes.c_uint32, 92, 4, 4]
-  bit_depth_chroma: Annotated[ctypes.c_uint32, 93, 4, 0]
-  log2_min_luma_coding_block_size: Annotated[ctypes.c_uint32, 93, 4, 4]
-  log2_max_luma_coding_block_size: Annotated[ctypes.c_uint32, 94, 4, 0]
-  log2_min_transform_block_size: Annotated[ctypes.c_uint32, 94, 4, 4]
-  log2_max_transform_block_size: Annotated[ctypes.c_uint32, 95, 4, 0]
-  reserved2: Annotated[ctypes.c_uint32, 95, 4, 4]
-  max_transform_hierarchy_depth_inter: Annotated[ctypes.c_uint32, 96, 3, 0]
-  max_transform_hierarchy_depth_intra: Annotated[ctypes.c_uint32, 96, 3, 3]
-  scalingListEnable: Annotated[ctypes.c_uint32, 96, 1, 6]
-  amp_enable_flag: Annotated[ctypes.c_uint32, 96, 1, 7]
-  sample_adaptive_offset_enabled_flag: Annotated[ctypes.c_uint32, 97, 1, 0]
-  pcm_enabled_flag: Annotated[ctypes.c_uint32, 97, 1, 1]
-  pcm_sample_bit_depth_luma: Annotated[ctypes.c_uint32, 97, 4, 2]
-  pcm_sample_bit_depth_chroma: Annotated[ctypes.c_uint32, 97, 4, 6]
-  log2_min_pcm_luma_coding_block_size: Annotated[ctypes.c_uint32, 98, 4, 2]
-  log2_max_pcm_luma_coding_block_size: Annotated[ctypes.c_uint32, 98, 4, 6]
-  pcm_loop_filter_disabled_flag: Annotated[ctypes.c_uint32, 99, 1, 2]
-  sps_temporal_mvp_enabled_flag: Annotated[ctypes.c_uint32, 99, 1, 3]
-  strong_intra_smoothing_enabled_flag: Annotated[ctypes.c_uint32, 99, 1, 4]
-  reserved3: Annotated[ctypes.c_uint32, 99, 3, 5]
-  dependent_slice_segments_enabled_flag: Annotated[ctypes.c_uint32, 100, 1, 0]
-  output_flag_present_flag: Annotated[ctypes.c_uint32, 100, 1, 1]
-  num_extra_slice_header_bits: Annotated[ctypes.c_uint32, 100, 3, 2]
-  sign_data_hiding_enabled_flag: Annotated[ctypes.c_uint32, 100, 1, 5]
-  cabac_init_present_flag: Annotated[ctypes.c_uint32, 100, 1, 6]
-  num_ref_idx_l0_default_active: Annotated[ctypes.c_uint32, 100, 4, 7]
-  num_ref_idx_l1_default_active: Annotated[ctypes.c_uint32, 101, 4, 3]
-  init_qp: Annotated[ctypes.c_uint32, 101, 7, 7]
-  constrained_intra_pred_flag: Annotated[ctypes.c_uint32, 102, 1, 6]
-  transform_skip_enabled_flag: Annotated[ctypes.c_uint32, 102, 1, 7]
-  cu_qp_delta_enabled_flag: Annotated[ctypes.c_uint32, 103, 1, 0]
-  diff_cu_qp_delta_depth: Annotated[ctypes.c_uint32, 103, 2, 1]
-  reserved4: Annotated[ctypes.c_uint32, 103, 5, 3]
-  pps_cb_qp_offset: Annotated[ctypes.c_char, 104]
-  pps_cr_qp_offset: Annotated[ctypes.c_char, 105]
-  pps_beta_offset: Annotated[ctypes.c_char, 106]
-  pps_tc_offset: Annotated[ctypes.c_char, 107]
-  pps_slice_chroma_qp_offsets_present_flag: Annotated[ctypes.c_uint32, 108, 1, 0]
-  weighted_pred_flag: Annotated[ctypes.c_uint32, 108, 1, 1]
-  weighted_bipred_flag: Annotated[ctypes.c_uint32, 108, 1, 2]
-  transquant_bypass_enabled_flag: Annotated[ctypes.c_uint32, 108, 1, 3]
-  tiles_enabled_flag: Annotated[ctypes.c_uint32, 108, 1, 4]
-  entropy_coding_sync_enabled_flag: Annotated[ctypes.c_uint32, 108, 1, 5]
-  num_tile_columns: Annotated[ctypes.c_uint32, 108, 5, 6]
-  num_tile_rows: Annotated[ctypes.c_uint32, 109, 5, 3]
-  loop_filter_across_tiles_enabled_flag: Annotated[ctypes.c_uint32, 110, 1, 0]
-  loop_filter_across_slices_enabled_flag: Annotated[ctypes.c_uint32, 110, 1, 1]
-  deblocking_filter_control_present_flag: Annotated[ctypes.c_uint32, 110, 1, 2]
-  deblocking_filter_override_enabled_flag: Annotated[ctypes.c_uint32, 110, 1, 3]
-  pps_deblocking_filter_disabled_flag: Annotated[ctypes.c_uint32, 110, 1, 4]
-  lists_modification_present_flag: Annotated[ctypes.c_uint32, 110, 1, 5]
-  log2_parallel_merge_level: Annotated[ctypes.c_uint32, 110, 3, 6]
-  slice_segment_header_extension_present_flag: Annotated[ctypes.c_uint32, 111, 1, 1]
-  reserved5: Annotated[ctypes.c_uint32, 111, 6, 2]
-  num_ref_frames: Annotated[ctypes.c_ubyte, 112]
-  reserved6: Annotated[ctypes.c_ubyte, 113]
-  longtermflag: Annotated[ctypes.c_uint16, 114]
-  initreflistidxl0: Annotated[Array[ctypes.c_ubyte, Literal[16]], 116]
-  initreflistidxl1: Annotated[Array[ctypes.c_ubyte, Literal[16]], 132]
-  RefDiffPicOrderCnts: Annotated[Array[ctypes.c_int16, Literal[16]], 148]
-  IDR_picture_flag: Annotated[ctypes.c_ubyte, 180]
-  RAP_picture_flag: Annotated[ctypes.c_ubyte, 181]
-  curr_pic_idx: Annotated[ctypes.c_ubyte, 182]
-  pattern_id: Annotated[ctypes.c_ubyte, 183]
-  sw_hdr_skip_length: Annotated[ctypes.c_uint16, 184]
-  reserved7: Annotated[ctypes.c_uint16, 186]
+  wrapped_session_key: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 0]
+  wrapped_content_key: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 16]
+  initialization_vector: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 32]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 48]
+  enable_encryption: Annotated[Annotated[int, ctypes.c_uint32], 52]
+  key_increment: Annotated[Annotated[int, ctypes.c_uint32], 56, 6, 0]
+  encryption_mode: Annotated[Annotated[int, ctypes.c_uint32], 56, 4, 6]
+  key_slot_index: Annotated[Annotated[int, ctypes.c_uint32], 57, 4, 2]
+  ssm_en: Annotated[Annotated[int, ctypes.c_uint32], 57, 1, 6]
+  enable_histogram: Annotated[Annotated[int, ctypes.c_uint32], 57, 1, 7]
+  enable_substream_decoding: Annotated[Annotated[int, ctypes.c_uint32], 58, 1, 0]
+  reserved0: Annotated[Annotated[int, ctypes.c_uint32], 58, 15, 1]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 60]
+  tileformat: Annotated[Annotated[int, ctypes.c_ubyte], 64, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_ubyte], 64, 3, 2]
+  reserverd_surface_format: Annotated[Annotated[int, ctypes.c_ubyte], 64, 3, 5]
+  sw_start_code_e: Annotated[Annotated[int, ctypes.c_ubyte], 65]
+  disp_output_mode: Annotated[Annotated[int, ctypes.c_ubyte], 66]
+  reserved1: Annotated[Annotated[int, ctypes.c_ubyte], 67]
+  framestride: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[2]], 68]
+  colMvBuffersize: Annotated[Annotated[int, ctypes.c_uint32], 76]
+  HevcSaoBufferOffset: Annotated[Annotated[int, ctypes.c_uint32], 80]
+  HevcBsdCtrlOffset: Annotated[Annotated[int, ctypes.c_uint32], 84]
+  pic_width_in_luma_samples: Annotated[Annotated[int, ctypes.c_uint16], 88]
+  pic_height_in_luma_samples: Annotated[Annotated[int, ctypes.c_uint16], 90]
+  chroma_format_idc: Annotated[Annotated[int, ctypes.c_uint32], 92, 4, 0]
+  bit_depth_luma: Annotated[Annotated[int, ctypes.c_uint32], 92, 4, 4]
+  bit_depth_chroma: Annotated[Annotated[int, ctypes.c_uint32], 93, 4, 0]
+  log2_min_luma_coding_block_size: Annotated[Annotated[int, ctypes.c_uint32], 93, 4, 4]
+  log2_max_luma_coding_block_size: Annotated[Annotated[int, ctypes.c_uint32], 94, 4, 0]
+  log2_min_transform_block_size: Annotated[Annotated[int, ctypes.c_uint32], 94, 4, 4]
+  log2_max_transform_block_size: Annotated[Annotated[int, ctypes.c_uint32], 95, 4, 0]
+  reserved2: Annotated[Annotated[int, ctypes.c_uint32], 95, 4, 4]
+  max_transform_hierarchy_depth_inter: Annotated[Annotated[int, ctypes.c_uint32], 96, 3, 0]
+  max_transform_hierarchy_depth_intra: Annotated[Annotated[int, ctypes.c_uint32], 96, 3, 3]
+  scalingListEnable: Annotated[Annotated[int, ctypes.c_uint32], 96, 1, 6]
+  amp_enable_flag: Annotated[Annotated[int, ctypes.c_uint32], 96, 1, 7]
+  sample_adaptive_offset_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 97, 1, 0]
+  pcm_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 97, 1, 1]
+  pcm_sample_bit_depth_luma: Annotated[Annotated[int, ctypes.c_uint32], 97, 4, 2]
+  pcm_sample_bit_depth_chroma: Annotated[Annotated[int, ctypes.c_uint32], 97, 4, 6]
+  log2_min_pcm_luma_coding_block_size: Annotated[Annotated[int, ctypes.c_uint32], 98, 4, 2]
+  log2_max_pcm_luma_coding_block_size: Annotated[Annotated[int, ctypes.c_uint32], 98, 4, 6]
+  pcm_loop_filter_disabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 99, 1, 2]
+  sps_temporal_mvp_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 99, 1, 3]
+  strong_intra_smoothing_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 99, 1, 4]
+  reserved3: Annotated[Annotated[int, ctypes.c_uint32], 99, 3, 5]
+  dependent_slice_segments_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 100, 1, 0]
+  output_flag_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 100, 1, 1]
+  num_extra_slice_header_bits: Annotated[Annotated[int, ctypes.c_uint32], 100, 3, 2]
+  sign_data_hiding_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 100, 1, 5]
+  cabac_init_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 100, 1, 6]
+  num_ref_idx_l0_default_active: Annotated[Annotated[int, ctypes.c_uint32], 100, 4, 7]
+  num_ref_idx_l1_default_active: Annotated[Annotated[int, ctypes.c_uint32], 101, 4, 3]
+  init_qp: Annotated[Annotated[int, ctypes.c_uint32], 101, 7, 7]
+  constrained_intra_pred_flag: Annotated[Annotated[int, ctypes.c_uint32], 102, 1, 6]
+  transform_skip_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 102, 1, 7]
+  cu_qp_delta_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 103, 1, 0]
+  diff_cu_qp_delta_depth: Annotated[Annotated[int, ctypes.c_uint32], 103, 2, 1]
+  reserved4: Annotated[Annotated[int, ctypes.c_uint32], 103, 5, 3]
+  pps_cb_qp_offset: Annotated[Annotated[bytes, ctypes.c_char], 104]
+  pps_cr_qp_offset: Annotated[Annotated[bytes, ctypes.c_char], 105]
+  pps_beta_offset: Annotated[Annotated[bytes, ctypes.c_char], 106]
+  pps_tc_offset: Annotated[Annotated[bytes, ctypes.c_char], 107]
+  pps_slice_chroma_qp_offsets_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 108, 1, 0]
+  weighted_pred_flag: Annotated[Annotated[int, ctypes.c_uint32], 108, 1, 1]
+  weighted_bipred_flag: Annotated[Annotated[int, ctypes.c_uint32], 108, 1, 2]
+  transquant_bypass_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 108, 1, 3]
+  tiles_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 108, 1, 4]
+  entropy_coding_sync_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 108, 1, 5]
+  num_tile_columns: Annotated[Annotated[int, ctypes.c_uint32], 108, 5, 6]
+  num_tile_rows: Annotated[Annotated[int, ctypes.c_uint32], 109, 5, 3]
+  loop_filter_across_tiles_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 110, 1, 0]
+  loop_filter_across_slices_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 110, 1, 1]
+  deblocking_filter_control_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 110, 1, 2]
+  deblocking_filter_override_enabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 110, 1, 3]
+  pps_deblocking_filter_disabled_flag: Annotated[Annotated[int, ctypes.c_uint32], 110, 1, 4]
+  lists_modification_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 110, 1, 5]
+  log2_parallel_merge_level: Annotated[Annotated[int, ctypes.c_uint32], 110, 3, 6]
+  slice_segment_header_extension_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 111, 1, 1]
+  reserved5: Annotated[Annotated[int, ctypes.c_uint32], 111, 6, 2]
+  num_ref_frames: Annotated[Annotated[int, ctypes.c_ubyte], 112]
+  reserved6: Annotated[Annotated[int, ctypes.c_ubyte], 113]
+  longtermflag: Annotated[Annotated[int, ctypes.c_uint16], 114]
+  initreflistidxl0: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 116]
+  initreflistidxl1: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 132]
+  RefDiffPicOrderCnts: Annotated[Array[Annotated[int, ctypes.c_int16], Literal[16]], 148]
+  IDR_picture_flag: Annotated[Annotated[int, ctypes.c_ubyte], 180]
+  RAP_picture_flag: Annotated[Annotated[int, ctypes.c_ubyte], 181]
+  curr_pic_idx: Annotated[Annotated[int, ctypes.c_ubyte], 182]
+  pattern_id: Annotated[Annotated[int, ctypes.c_ubyte], 183]
+  sw_hdr_skip_length: Annotated[Annotated[int, ctypes.c_uint16], 184]
+  reserved7: Annotated[Annotated[int, ctypes.c_uint16], 186]
   ecdma_cfg: Annotated[nvdec_ecdma_config_s, 188]
-  separate_colour_plane_flag: Annotated[ctypes.c_uint32, 212, 1, 0]
-  log2_max_pic_order_cnt_lsb_minus4: Annotated[ctypes.c_uint32, 212, 4, 1]
-  num_short_term_ref_pic_sets: Annotated[ctypes.c_uint32, 212, 7, 5]
-  num_long_term_ref_pics_sps: Annotated[ctypes.c_uint32, 213, 6, 4]
-  bBitParsingDisable: Annotated[ctypes.c_uint32, 214, 1, 2]
-  num_delta_pocs_of_rps_idx: Annotated[ctypes.c_uint32, 214, 8, 3]
-  long_term_ref_pics_present_flag: Annotated[ctypes.c_uint32, 215, 1, 3]
-  reserved_dxva: Annotated[ctypes.c_uint32, 215, 4, 4]
-  num_bits_short_term_ref_pics_in_slice: Annotated[ctypes.c_uint32, 216]
+  separate_colour_plane_flag: Annotated[Annotated[int, ctypes.c_uint32], 212, 1, 0]
+  log2_max_pic_order_cnt_lsb_minus4: Annotated[Annotated[int, ctypes.c_uint32], 212, 4, 1]
+  num_short_term_ref_pic_sets: Annotated[Annotated[int, ctypes.c_uint32], 212, 7, 5]
+  num_long_term_ref_pics_sps: Annotated[Annotated[int, ctypes.c_uint32], 213, 6, 4]
+  bBitParsingDisable: Annotated[Annotated[int, ctypes.c_uint32], 214, 1, 2]
+  num_delta_pocs_of_rps_idx: Annotated[Annotated[int, ctypes.c_uint32], 214, 8, 3]
+  long_term_ref_pics_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 215, 1, 3]
+  reserved_dxva: Annotated[Annotated[int, ctypes.c_uint32], 215, 4, 4]
+  num_bits_short_term_ref_pics_in_slice: Annotated[Annotated[int, ctypes.c_uint32], 216]
   v1: Annotated[nvdec_hevc_pic_v1_s, 220]
   v2: Annotated[nvdec_hevc_pic_v2_s, 252]
   v3: Annotated[nvdec_hevc_pic_v3_s, 256]
@@ -327,52 +327,52 @@ nvdec_hevc_pic_s = struct__nvdec_hevc_pic_s
 @record
 class struct__hevc_slice_info_s:
   SIZE = 16
-  first_flag: Annotated[ctypes.c_uint32, 0, 1, 0]
-  err_flag: Annotated[ctypes.c_uint32, 0, 1, 1]
-  last_flag: Annotated[ctypes.c_uint32, 0, 1, 2]
-  conceal_partial_slice: Annotated[ctypes.c_uint32, 0, 1, 3]
-  available: Annotated[ctypes.c_uint32, 0, 1, 4]
-  reserved0: Annotated[ctypes.c_uint32, 0, 7, 5]
-  ctb_count: Annotated[ctypes.c_uint32, 1, 20, 4]
-  bs_offset: Annotated[ctypes.c_uint32, 4]
-  bs_length: Annotated[ctypes.c_uint32, 8]
-  start_ctbx: Annotated[ctypes.c_uint16, 12]
-  start_ctby: Annotated[ctypes.c_uint16, 14]
+  first_flag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
+  err_flag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 1]
+  last_flag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 2]
+  conceal_partial_slice: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 3]
+  available: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 4]
+  reserved0: Annotated[Annotated[int, ctypes.c_uint32], 0, 7, 5]
+  ctb_count: Annotated[Annotated[int, ctypes.c_uint32], 1, 20, 4]
+  bs_offset: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  bs_length: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  start_ctbx: Annotated[Annotated[int, ctypes.c_uint16], 12]
+  start_ctby: Annotated[Annotated[int, ctypes.c_uint16], 14]
 hevc_slice_info_s = struct__hevc_slice_info_s
 @record
 class struct__slice_edge_ctb_pos_ctx_s:
   SIZE = 8
-  next_slice_pos_ctbxy: Annotated[ctypes.c_uint32, 0]
-  next_slice_segment_addr: Annotated[ctypes.c_uint32, 4]
+  next_slice_pos_ctbxy: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  next_slice_segment_addr: Annotated[Annotated[int, ctypes.c_uint32], 4]
 slice_edge_ctb_pos_ctx_s = struct__slice_edge_ctb_pos_ctx_s
 @record
 class struct__slice_edge_tile_ctx_s:
   SIZE = 12
-  tileInfo1: Annotated[ctypes.c_uint32, 0]
-  tileInfo2: Annotated[ctypes.c_uint32, 4]
-  tileInfo3: Annotated[ctypes.c_uint32, 8]
+  tileInfo1: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  tileInfo2: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  tileInfo3: Annotated[Annotated[int, ctypes.c_uint32], 8]
 slice_edge_tile_ctx_s = struct__slice_edge_tile_ctx_s
 @record
 class struct__slice_edge_stats_ctx_s:
   SIZE = 32
-  frame_status_intra_cnt: Annotated[ctypes.c_uint32, 0]
-  frame_status_inter_cnt: Annotated[ctypes.c_uint32, 4]
-  frame_status_skip_cnt: Annotated[ctypes.c_uint32, 8]
-  frame_status_fwd_mvx_cnt: Annotated[ctypes.c_uint32, 12]
-  frame_status_fwd_mvy_cnt: Annotated[ctypes.c_uint32, 16]
-  frame_status_bwd_mvx_cnt: Annotated[ctypes.c_uint32, 20]
-  frame_status_bwd_mvy_cnt: Annotated[ctypes.c_uint32, 24]
-  frame_status_mv_cnt_ext: Annotated[ctypes.c_uint32, 28]
+  frame_status_intra_cnt: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  frame_status_inter_cnt: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  frame_status_skip_cnt: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  frame_status_fwd_mvx_cnt: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  frame_status_fwd_mvy_cnt: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  frame_status_bwd_mvx_cnt: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  frame_status_bwd_mvy_cnt: Annotated[Annotated[int, ctypes.c_uint32], 24]
+  frame_status_mv_cnt_ext: Annotated[Annotated[int, ctypes.c_uint32], 28]
 slice_edge_stats_ctx_s = struct__slice_edge_stats_ctx_s
 @record
 class struct__slice_vpc_edge_ctx_s:
   SIZE = 4
-  reserved: Annotated[ctypes.c_uint32, 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 0]
 slice_vpc_edge_ctx_s = struct__slice_vpc_edge_ctx_s
 @record
 class struct__slice_vpc_main_ctx_s:
   SIZE = 4
-  reserved: Annotated[ctypes.c_uint32, 0]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 0]
 slice_vpc_main_ctx_s = struct__slice_vpc_main_ctx_s
 @record
 class struct__slice_edge_ctx_s:
@@ -386,14 +386,14 @@ slice_edge_ctx_s = struct__slice_edge_ctx_s
 @record
 class struct__nvdec_vp9_pic_v1_s:
   SIZE = 8
-  Vp9FltAboveOffset: Annotated[ctypes.c_uint32, 0]
-  external_ref_mem_dis: Annotated[ctypes.c_uint32, 4, 1, 0]
-  bit_depth: Annotated[ctypes.c_uint32, 4, 4, 1]
-  error_recovery_start_pos: Annotated[ctypes.c_uint32, 4, 2, 5]
-  error_external_mv_en: Annotated[ctypes.c_uint32, 4, 1, 7]
-  Reserved0: Annotated[ctypes.c_uint32, 5, 24, 0]
+  Vp9FltAboveOffset: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  external_ref_mem_dis: Annotated[Annotated[int, ctypes.c_uint32], 4, 1, 0]
+  bit_depth: Annotated[Annotated[int, ctypes.c_uint32], 4, 4, 1]
+  error_recovery_start_pos: Annotated[Annotated[int, ctypes.c_uint32], 4, 2, 5]
+  error_external_mv_en: Annotated[Annotated[int, ctypes.c_uint32], 4, 1, 7]
+  Reserved0: Annotated[Annotated[int, ctypes.c_uint32], 5, 24, 0]
 nvdec_vp9_pic_v1_s = struct__nvdec_vp9_pic_v1_s
-enum_VP9_FRAME_SFC_ID = CEnum(ctypes.c_uint32)
+enum_VP9_FRAME_SFC_ID = CEnum(Annotated[int, ctypes.c_uint32])
 VP9_LAST_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_LAST_FRAME_SFC', 0)
 VP9_GOLDEN_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_GOLDEN_FRAME_SFC', 1)
 VP9_ALTREF_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_ALTREF_FRAME_SFC', 2)
@@ -402,289 +402,289 @@ VP9_CURR_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_CURR_FRAME_SFC', 3)
 @record
 class struct__nvdec_vp9_pic_s:
   SIZE = 256
-  wrapped_session_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
-  wrapped_content_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
-  initialization_vector: Annotated[Array[ctypes.c_uint32, Literal[4]], 32]
-  stream_len: Annotated[ctypes.c_uint32, 48]
-  enable_encryption: Annotated[ctypes.c_uint32, 52]
-  key_increment: Annotated[ctypes.c_uint32, 56, 6, 0]
-  encryption_mode: Annotated[ctypes.c_uint32, 56, 4, 6]
-  sw_hdr_skip_length: Annotated[ctypes.c_uint32, 57, 14, 2]
-  key_slot_index: Annotated[ctypes.c_uint32, 59, 4, 0]
-  ssm_en: Annotated[ctypes.c_uint32, 59, 1, 4]
-  enable_histogram: Annotated[ctypes.c_uint32, 59, 1, 5]
-  reserved0: Annotated[ctypes.c_uint32, 59, 2, 6]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 60]
-  tileformat: Annotated[ctypes.c_ubyte, 64, 2, 0]
-  gob_height: Annotated[ctypes.c_ubyte, 64, 3, 2]
-  reserverd_surface_format: Annotated[ctypes.c_ubyte, 64, 3, 5]
-  reserved1: Annotated[Array[ctypes.c_ubyte, Literal[3]], 65]
-  Vp9BsdCtrlOffset: Annotated[ctypes.c_uint32, 68]
-  ref0_width: Annotated[ctypes.c_uint16, 72]
-  ref0_height: Annotated[ctypes.c_uint16, 74]
-  ref0_stride: Annotated[Array[ctypes.c_uint16, Literal[2]], 76]
-  ref1_width: Annotated[ctypes.c_uint16, 80]
-  ref1_height: Annotated[ctypes.c_uint16, 82]
-  ref1_stride: Annotated[Array[ctypes.c_uint16, Literal[2]], 84]
-  ref2_width: Annotated[ctypes.c_uint16, 88]
-  ref2_height: Annotated[ctypes.c_uint16, 90]
-  ref2_stride: Annotated[Array[ctypes.c_uint16, Literal[2]], 92]
-  width: Annotated[ctypes.c_uint16, 96]
-  height: Annotated[ctypes.c_uint16, 98]
-  framestride: Annotated[Array[ctypes.c_uint16, Literal[2]], 100]
-  keyFrame: Annotated[ctypes.c_ubyte, 104, 1, 0]
-  prevIsKeyFrame: Annotated[ctypes.c_ubyte, 104, 1, 1]
-  resolutionChange: Annotated[ctypes.c_ubyte, 104, 1, 2]
-  errorResilient: Annotated[ctypes.c_ubyte, 104, 1, 3]
-  prevShowFrame: Annotated[ctypes.c_ubyte, 104, 1, 4]
-  intraOnly: Annotated[ctypes.c_ubyte, 104, 1, 5]
-  reserved2: Annotated[ctypes.c_ubyte, 104, 2, 6]
-  reserved3: Annotated[Array[ctypes.c_ubyte, Literal[3]], 105]
-  refFrameSignBias: Annotated[Array[ctypes.c_ubyte, Literal[4]], 108]
-  loopFilterLevel: Annotated[ctypes.c_char, 112]
-  loopFilterSharpness: Annotated[ctypes.c_char, 113]
-  qpYAc: Annotated[ctypes.c_ubyte, 114]
-  qpYDc: Annotated[ctypes.c_char, 115]
-  qpChAc: Annotated[ctypes.c_char, 116]
-  qpChDc: Annotated[ctypes.c_char, 117]
-  lossless: Annotated[ctypes.c_char, 118]
-  transform_mode: Annotated[ctypes.c_char, 119]
-  allow_high_precision_mv: Annotated[ctypes.c_char, 120]
-  mcomp_filter_type: Annotated[ctypes.c_char, 121]
-  comp_pred_mode: Annotated[ctypes.c_char, 122]
-  comp_fixed_ref: Annotated[ctypes.c_char, 123]
-  comp_var_ref: Annotated[Array[ctypes.c_char, Literal[2]], 124]
-  log2_tile_columns: Annotated[ctypes.c_char, 126]
-  log2_tile_rows: Annotated[ctypes.c_char, 127]
-  segmentEnabled: Annotated[ctypes.c_ubyte, 128]
-  segmentMapUpdate: Annotated[ctypes.c_ubyte, 129]
-  segmentMapTemporalUpdate: Annotated[ctypes.c_ubyte, 130]
-  segmentFeatureMode: Annotated[ctypes.c_ubyte, 131]
-  segmentFeatureEnable: Annotated[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[8]], 132]
-  segmentFeatureData: Annotated[Array[Array[ctypes.c_int16, Literal[4]], Literal[8]], 164]
-  modeRefLfEnabled: Annotated[ctypes.c_char, 228]
-  mbRefLfDelta: Annotated[Array[ctypes.c_char, Literal[4]], 229]
-  mbModeLfDelta: Annotated[Array[ctypes.c_char, Literal[2]], 233]
-  reserved5: Annotated[ctypes.c_char, 235]
+  wrapped_session_key: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 0]
+  wrapped_content_key: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 16]
+  initialization_vector: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 32]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 48]
+  enable_encryption: Annotated[Annotated[int, ctypes.c_uint32], 52]
+  key_increment: Annotated[Annotated[int, ctypes.c_uint32], 56, 6, 0]
+  encryption_mode: Annotated[Annotated[int, ctypes.c_uint32], 56, 4, 6]
+  sw_hdr_skip_length: Annotated[Annotated[int, ctypes.c_uint32], 57, 14, 2]
+  key_slot_index: Annotated[Annotated[int, ctypes.c_uint32], 59, 4, 0]
+  ssm_en: Annotated[Annotated[int, ctypes.c_uint32], 59, 1, 4]
+  enable_histogram: Annotated[Annotated[int, ctypes.c_uint32], 59, 1, 5]
+  reserved0: Annotated[Annotated[int, ctypes.c_uint32], 59, 2, 6]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 60]
+  tileformat: Annotated[Annotated[int, ctypes.c_ubyte], 64, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_ubyte], 64, 3, 2]
+  reserverd_surface_format: Annotated[Annotated[int, ctypes.c_ubyte], 64, 3, 5]
+  reserved1: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 65]
+  Vp9BsdCtrlOffset: Annotated[Annotated[int, ctypes.c_uint32], 68]
+  ref0_width: Annotated[Annotated[int, ctypes.c_uint16], 72]
+  ref0_height: Annotated[Annotated[int, ctypes.c_uint16], 74]
+  ref0_stride: Annotated[Array[Annotated[int, ctypes.c_uint16], Literal[2]], 76]
+  ref1_width: Annotated[Annotated[int, ctypes.c_uint16], 80]
+  ref1_height: Annotated[Annotated[int, ctypes.c_uint16], 82]
+  ref1_stride: Annotated[Array[Annotated[int, ctypes.c_uint16], Literal[2]], 84]
+  ref2_width: Annotated[Annotated[int, ctypes.c_uint16], 88]
+  ref2_height: Annotated[Annotated[int, ctypes.c_uint16], 90]
+  ref2_stride: Annotated[Array[Annotated[int, ctypes.c_uint16], Literal[2]], 92]
+  width: Annotated[Annotated[int, ctypes.c_uint16], 96]
+  height: Annotated[Annotated[int, ctypes.c_uint16], 98]
+  framestride: Annotated[Array[Annotated[int, ctypes.c_uint16], Literal[2]], 100]
+  keyFrame: Annotated[Annotated[int, ctypes.c_ubyte], 104, 1, 0]
+  prevIsKeyFrame: Annotated[Annotated[int, ctypes.c_ubyte], 104, 1, 1]
+  resolutionChange: Annotated[Annotated[int, ctypes.c_ubyte], 104, 1, 2]
+  errorResilient: Annotated[Annotated[int, ctypes.c_ubyte], 104, 1, 3]
+  prevShowFrame: Annotated[Annotated[int, ctypes.c_ubyte], 104, 1, 4]
+  intraOnly: Annotated[Annotated[int, ctypes.c_ubyte], 104, 1, 5]
+  reserved2: Annotated[Annotated[int, ctypes.c_ubyte], 104, 2, 6]
+  reserved3: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 105]
+  refFrameSignBias: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], 108]
+  loopFilterLevel: Annotated[Annotated[bytes, ctypes.c_char], 112]
+  loopFilterSharpness: Annotated[Annotated[bytes, ctypes.c_char], 113]
+  qpYAc: Annotated[Annotated[int, ctypes.c_ubyte], 114]
+  qpYDc: Annotated[Annotated[bytes, ctypes.c_char], 115]
+  qpChAc: Annotated[Annotated[bytes, ctypes.c_char], 116]
+  qpChDc: Annotated[Annotated[bytes, ctypes.c_char], 117]
+  lossless: Annotated[Annotated[bytes, ctypes.c_char], 118]
+  transform_mode: Annotated[Annotated[bytes, ctypes.c_char], 119]
+  allow_high_precision_mv: Annotated[Annotated[bytes, ctypes.c_char], 120]
+  mcomp_filter_type: Annotated[Annotated[bytes, ctypes.c_char], 121]
+  comp_pred_mode: Annotated[Annotated[bytes, ctypes.c_char], 122]
+  comp_fixed_ref: Annotated[Annotated[bytes, ctypes.c_char], 123]
+  comp_var_ref: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[2]], 124]
+  log2_tile_columns: Annotated[Annotated[bytes, ctypes.c_char], 126]
+  log2_tile_rows: Annotated[Annotated[bytes, ctypes.c_char], 127]
+  segmentEnabled: Annotated[Annotated[int, ctypes.c_ubyte], 128]
+  segmentMapUpdate: Annotated[Annotated[int, ctypes.c_ubyte], 129]
+  segmentMapTemporalUpdate: Annotated[Annotated[int, ctypes.c_ubyte], 130]
+  segmentFeatureMode: Annotated[Annotated[int, ctypes.c_ubyte], 131]
+  segmentFeatureEnable: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[8]], 132]
+  segmentFeatureData: Annotated[Array[Array[Annotated[int, ctypes.c_int16], Literal[4]], Literal[8]], 164]
+  modeRefLfEnabled: Annotated[Annotated[bytes, ctypes.c_char], 228]
+  mbRefLfDelta: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[4]], 229]
+  mbModeLfDelta: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[2]], 233]
+  reserved5: Annotated[Annotated[bytes, ctypes.c_char], 235]
   v1: Annotated[nvdec_vp9_pic_v1_s, 236]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 244]
 nvdec_vp9_pic_s = struct__nvdec_vp9_pic_s
 @record
 class nvdec_nmv_context:
   SIZE = 69
-  joints: Annotated[Array[ctypes.c_ubyte, Literal[3]], 0]
-  sign: Annotated[Array[ctypes.c_ubyte, Literal[2]], 3]
-  class0: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[2]], 5]
-  fp: Annotated[Array[Array[ctypes.c_ubyte, Literal[3]], Literal[2]], 7]
-  class0_hp: Annotated[Array[ctypes.c_ubyte, Literal[2]], 13]
-  hp: Annotated[Array[ctypes.c_ubyte, Literal[2]], 15]
-  classes: Annotated[Array[Array[ctypes.c_ubyte, Literal[10]], Literal[2]], 17]
-  class0_fp: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[3]], Literal[2]], Literal[2]], 37]
-  bits: Annotated[Array[Array[ctypes.c_ubyte, Literal[10]], Literal[2]], 49]
+  joints: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 0]
+  sign: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 3]
+  class0: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[1]], Literal[2]], 5]
+  fp: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], Literal[2]], 7]
+  class0_hp: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 13]
+  hp: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 15]
+  classes: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[10]], Literal[2]], 17]
+  class0_fp: Annotated[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], Literal[2]], Literal[2]], 37]
+  bits: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[10]], Literal[2]], 49]
 @record
 class nvdec_nmv_context_counts:
   SIZE = 424
-  joints: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
-  sign: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 16]
-  classes: Annotated[Array[Array[ctypes.c_uint32, Literal[11]], Literal[2]], 32]
-  class0: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 120]
-  bits: Annotated[Array[Array[Array[ctypes.c_uint32, Literal[2]], Literal[10]], Literal[2]], 136]
-  class0_fp: Annotated[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[2]], Literal[2]], 296]
-  fp: Annotated[Array[Array[ctypes.c_uint32, Literal[4]], Literal[2]], 360]
-  class0_hp: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 392]
-  hp: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 408]
+  joints: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 0]
+  sign: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[2]], 16]
+  classes: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[11]], Literal[2]], 32]
+  class0: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[2]], 120]
+  bits: Annotated[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[10]], Literal[2]], 136]
+  class0_fp: Annotated[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[2]], Literal[2]], 296]
+  fp: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[2]], 360]
+  class0_hp: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[2]], 392]
+  hp: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[2]], 408]
 @record
 class struct_nvdec_vp9AdaptiveEntropyProbs_s:
   SIZE = 2720
-  inter_mode_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[7]], 0]
-  intra_inter_prob: Annotated[Array[ctypes.c_ubyte, Literal[4]], 28]
-  uv_mode_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[10]], 32]
-  tx8x8_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[2]], 112]
-  tx16x16_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[2]], Literal[2]], 114]
-  tx32x32_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[3]], Literal[2]], 118]
-  sb_ymode_probB: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[4]], 124]
-  sb_ymode_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[4]], 128]
-  partition_prob: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[16]], Literal[2]], 160]
-  uv_mode_probB: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[10]], 288]
-  switchable_interp_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[2]], Literal[4]], 298]
-  comp_inter_prob: Annotated[Array[ctypes.c_ubyte, Literal[5]], 306]
-  mbskip_probs: Annotated[Array[ctypes.c_ubyte, Literal[3]], 311]
-  pad1: Annotated[Array[ctypes.c_ubyte, Literal[1]], 314]
+  inter_mode_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[7]], 0]
+  intra_inter_prob: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], 28]
+  uv_mode_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[8]], Literal[10]], 32]
+  tx8x8_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[1]], Literal[2]], 112]
+  tx16x16_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], Literal[2]], 114]
+  tx32x32_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], Literal[2]], 118]
+  sb_ymode_probB: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[1]], Literal[4]], 124]
+  sb_ymode_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[8]], Literal[4]], 128]
+  partition_prob: Annotated[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[16]], Literal[2]], 160]
+  uv_mode_probB: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[1]], Literal[10]], 288]
+  switchable_interp_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], Literal[4]], 298]
+  comp_inter_prob: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[5]], 306]
+  mbskip_probs: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 311]
+  pad1: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[1]], 314]
   nmvc: Annotated[nvdec_nmv_context, 315]
-  single_ref_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[2]], Literal[5]], 384]
-  comp_ref_prob: Annotated[Array[ctypes.c_ubyte, Literal[5]], 394]
-  pad2: Annotated[Array[ctypes.c_ubyte, Literal[17]], 399]
-  probCoeffs: Annotated[Array[Array[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 416]
-  probCoeffs8x8: Annotated[Array[Array[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 992]
-  probCoeffs16x16: Annotated[Array[Array[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 1568]
-  probCoeffs32x32: Annotated[Array[Array[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 2144]
+  single_ref_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], Literal[5]], 384]
+  comp_ref_prob: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[5]], 394]
+  pad2: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[17]], 399]
+  probCoeffs: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 416]
+  probCoeffs8x8: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 992]
+  probCoeffs16x16: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 1568]
+  probCoeffs32x32: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 2144]
 nvdec_vp9AdaptiveEntropyProbs_t = struct_nvdec_vp9AdaptiveEntropyProbs_s
 @record
 class struct_nvdec_vp9EntropyProbs_s:
   SIZE = 3744
-  kf_bmode_prob: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[10]], Literal[10]], 0]
-  kf_bmode_probB: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[10]], Literal[10]], 800]
-  ref_pred_probs: Annotated[Array[ctypes.c_ubyte, Literal[3]], 900]
-  mb_segment_tree_probs: Annotated[Array[ctypes.c_ubyte, Literal[7]], 903]
-  segment_pred_probs: Annotated[Array[ctypes.c_ubyte, Literal[3]], 910]
-  ref_scores: Annotated[Array[ctypes.c_ubyte, Literal[4]], 913]
-  prob_comppred: Annotated[Array[ctypes.c_ubyte, Literal[2]], 917]
-  pad1: Annotated[Array[ctypes.c_ubyte, Literal[9]], 919]
-  kf_uv_mode_prob: Annotated[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[10]], 928]
-  kf_uv_mode_probB: Annotated[Array[Array[ctypes.c_ubyte, Literal[1]], Literal[10]], 1008]
-  pad2: Annotated[Array[ctypes.c_ubyte, Literal[6]], 1018]
+  kf_bmode_prob: Annotated[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[8]], Literal[10]], Literal[10]], 0]
+  kf_bmode_probB: Annotated[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[1]], Literal[10]], Literal[10]], 800]
+  ref_pred_probs: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 900]
+  mb_segment_tree_probs: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[7]], 903]
+  segment_pred_probs: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 910]
+  ref_scores: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], 913]
+  prob_comppred: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 917]
+  pad1: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[9]], 919]
+  kf_uv_mode_prob: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[8]], Literal[10]], 928]
+  kf_uv_mode_probB: Annotated[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[1]], Literal[10]], 1008]
+  pad2: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[6]], 1018]
   a: Annotated[nvdec_vp9AdaptiveEntropyProbs_t, 1024]
 nvdec_vp9EntropyProbs_t = struct_nvdec_vp9EntropyProbs_s
 @record
 class struct_nvdec_vp9EntropyCounts_s:
   SIZE = 13264
-  inter_mode_counts: Annotated[Array[Array[Array[ctypes.c_uint32, Literal[2]], Literal[3]], Literal[7]], 0]
-  sb_ymode_counts: Annotated[Array[Array[ctypes.c_uint32, Literal[10]], Literal[4]], 168]
-  uv_mode_counts: Annotated[Array[Array[ctypes.c_uint32, Literal[10]], Literal[10]], 328]
-  partition_counts: Annotated[Array[Array[ctypes.c_uint32, Literal[4]], Literal[16]], 728]
-  switchable_interp_counts: Annotated[Array[Array[ctypes.c_uint32, Literal[3]], Literal[4]], 984]
-  intra_inter_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[4]], 1032]
-  comp_inter_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[5]], 1064]
-  single_ref_count: Annotated[Array[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], Literal[5]], 1104]
-  comp_ref_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[5]], 1184]
-  tx32x32_count: Annotated[Array[Array[ctypes.c_uint32, Literal[4]], Literal[2]], 1224]
-  tx16x16_count: Annotated[Array[Array[ctypes.c_uint32, Literal[3]], Literal[2]], 1256]
-  tx8x8_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[2]], 1280]
-  mbskip_count: Annotated[Array[Array[ctypes.c_uint32, Literal[2]], Literal[3]], 1296]
+  inter_mode_counts: Annotated[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[3]], Literal[7]], 0]
+  sb_ymode_counts: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[10]], Literal[4]], 168]
+  uv_mode_counts: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[10]], Literal[10]], 328]
+  partition_counts: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[16]], 728]
+  switchable_interp_counts: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[3]], Literal[4]], 984]
+  intra_inter_count: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[4]], 1032]
+  comp_inter_count: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[5]], 1064]
+  single_ref_count: Annotated[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[2]], Literal[5]], 1104]
+  comp_ref_count: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[5]], 1184]
+  tx32x32_count: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[2]], 1224]
+  tx16x16_count: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[3]], Literal[2]], 1256]
+  tx8x8_count: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[2]], 1280]
+  mbskip_count: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[2]], Literal[3]], 1296]
   nmvcount: Annotated[nvdec_nmv_context_counts, 1320]
-  countCoeffs: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 1744]
-  countCoeffs8x8: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 4048]
-  countCoeffs16x16: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 6352]
-  countCoeffs32x32: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 8656]
-  countEobs: Annotated[Array[Array[Array[Array[Array[ctypes.c_uint32, Literal[6]], Literal[6]], Literal[2]], Literal[2]], Literal[4]], 10960]
+  countCoeffs: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 1744]
+  countCoeffs8x8: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 4048]
+  countCoeffs16x16: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 6352]
+  countCoeffs32x32: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[6]], Literal[6]], Literal[2]], Literal[2]], 8656]
+  countEobs: Annotated[Array[Array[Array[Array[Array[Annotated[int, ctypes.c_uint32], Literal[6]], Literal[6]], Literal[2]], Literal[2]], Literal[4]], 10960]
 nvdec_vp9EntropyCounts_t = struct_nvdec_vp9EntropyCounts_s
 @record
 class struct__nvdec_pass2_otf_s:
   SIZE = 52
-  wrapped_session_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 0]
-  wrapped_content_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
-  initialization_vector: Annotated[Array[ctypes.c_uint32, Literal[4]], 32]
-  enable_encryption: Annotated[ctypes.c_uint32, 48, 1, 0]
-  key_increment: Annotated[ctypes.c_uint32, 48, 6, 1]
-  encryption_mode: Annotated[ctypes.c_uint32, 48, 4, 7]
-  key_slot_index: Annotated[ctypes.c_uint32, 49, 4, 3]
-  ssm_en: Annotated[ctypes.c_uint32, 49, 1, 7]
-  reserved1: Annotated[ctypes.c_uint32, 50, 16, 0]
+  wrapped_session_key: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 0]
+  wrapped_content_key: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 16]
+  initialization_vector: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 32]
+  enable_encryption: Annotated[Annotated[int, ctypes.c_uint32], 48, 1, 0]
+  key_increment: Annotated[Annotated[int, ctypes.c_uint32], 48, 6, 1]
+  encryption_mode: Annotated[Annotated[int, ctypes.c_uint32], 48, 4, 7]
+  key_slot_index: Annotated[Annotated[int, ctypes.c_uint32], 49, 4, 3]
+  ssm_en: Annotated[Annotated[int, ctypes.c_uint32], 49, 1, 7]
+  reserved1: Annotated[Annotated[int, ctypes.c_uint32], 50, 16, 0]
 nvdec_pass2_otf_s = struct__nvdec_pass2_otf_s
 @record
 class struct__nvdec_display_param_s:
   SIZE = 28
-  enableTFOutput: Annotated[ctypes.c_uint32, 0, 1, 0]
-  VC1MapYFlag: Annotated[ctypes.c_uint32, 0, 1, 1]
-  MapYValue: Annotated[ctypes.c_uint32, 0, 3, 2]
-  VC1MapUVFlag: Annotated[ctypes.c_uint32, 0, 1, 5]
-  MapUVValue: Annotated[ctypes.c_uint32, 0, 3, 6]
-  OutStride: Annotated[ctypes.c_uint32, 1, 8, 1]
-  TilingFormat: Annotated[ctypes.c_uint32, 2, 3, 1]
-  OutputStructure: Annotated[ctypes.c_uint32, 2, 1, 4]
-  reserved0: Annotated[ctypes.c_uint32, 2, 11, 5]
-  OutputTop: Annotated[Array[ctypes.c_int32, Literal[2]], 4]
-  OutputBottom: Annotated[Array[ctypes.c_int32, Literal[2]], 12]
-  enableHistogram: Annotated[ctypes.c_uint32, 20, 1, 0]
-  HistogramStartX: Annotated[ctypes.c_uint32, 20, 12, 1]
-  HistogramStartY: Annotated[ctypes.c_uint32, 21, 12, 5]
-  reserved1: Annotated[ctypes.c_uint32, 23, 7, 1]
-  HistogramEndX: Annotated[ctypes.c_uint32, 24, 12, 0]
-  HistogramEndY: Annotated[ctypes.c_uint32, 25, 12, 4]
-  reserved2: Annotated[ctypes.c_uint32, 27, 8, 0]
+  enableTFOutput: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
+  VC1MapYFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 1]
+  MapYValue: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 2]
+  VC1MapUVFlag: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 5]
+  MapUVValue: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 6]
+  OutStride: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 1]
+  TilingFormat: Annotated[Annotated[int, ctypes.c_uint32], 2, 3, 1]
+  OutputStructure: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 4]
+  reserved0: Annotated[Annotated[int, ctypes.c_uint32], 2, 11, 5]
+  OutputTop: Annotated[Array[Annotated[int, ctypes.c_int32], Literal[2]], 4]
+  OutputBottom: Annotated[Array[Annotated[int, ctypes.c_int32], Literal[2]], 12]
+  enableHistogram: Annotated[Annotated[int, ctypes.c_uint32], 20, 1, 0]
+  HistogramStartX: Annotated[Annotated[int, ctypes.c_uint32], 20, 12, 1]
+  HistogramStartY: Annotated[Annotated[int, ctypes.c_uint32], 21, 12, 5]
+  reserved1: Annotated[Annotated[int, ctypes.c_uint32], 23, 7, 1]
+  HistogramEndX: Annotated[Annotated[int, ctypes.c_uint32], 24, 12, 0]
+  HistogramEndY: Annotated[Annotated[int, ctypes.c_uint32], 25, 12, 4]
+  reserved2: Annotated[Annotated[int, ctypes.c_uint32], 27, 8, 0]
 nvdec_display_param_s = struct__nvdec_display_param_s
 @record
 class struct__nvdec_dpb_entry_s:
   SIZE = 16
-  index: Annotated[ctypes.c_uint32, 0, 7, 0]
-  col_idx: Annotated[ctypes.c_uint32, 0, 5, 7]
-  state: Annotated[ctypes.c_uint32, 1, 2, 4]
-  is_long_term: Annotated[ctypes.c_uint32, 1, 1, 6]
-  not_existing: Annotated[ctypes.c_uint32, 1, 1, 7]
-  is_field: Annotated[ctypes.c_uint32, 2, 1, 0]
-  top_field_marking: Annotated[ctypes.c_uint32, 2, 4, 1]
-  bottom_field_marking: Annotated[ctypes.c_uint32, 2, 4, 5]
-  output_memory_layout: Annotated[ctypes.c_uint32, 3, 1, 1]
-  reserved: Annotated[ctypes.c_uint32, 3, 6, 2]
-  FieldOrderCnt: Annotated[Array[ctypes.c_uint32, Literal[2]], 4]
-  FrameIdx: Annotated[ctypes.c_int32, 12]
+  index: Annotated[Annotated[int, ctypes.c_uint32], 0, 7, 0]
+  col_idx: Annotated[Annotated[int, ctypes.c_uint32], 0, 5, 7]
+  state: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 4]
+  is_long_term: Annotated[Annotated[int, ctypes.c_uint32], 1, 1, 6]
+  not_existing: Annotated[Annotated[int, ctypes.c_uint32], 1, 1, 7]
+  is_field: Annotated[Annotated[int, ctypes.c_uint32], 2, 1, 0]
+  top_field_marking: Annotated[Annotated[int, ctypes.c_uint32], 2, 4, 1]
+  bottom_field_marking: Annotated[Annotated[int, ctypes.c_uint32], 2, 4, 5]
+  output_memory_layout: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 1]
+  reserved: Annotated[Annotated[int, ctypes.c_uint32], 3, 6, 2]
+  FieldOrderCnt: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[2]], 4]
+  FrameIdx: Annotated[Annotated[int, ctypes.c_int32], 12]
 nvdec_dpb_entry_s = struct__nvdec_dpb_entry_s
 @record
 class struct__nvdec_h264_pic_s:
   SIZE = 764
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
-  explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 68]
-  hint_dump_en: Annotated[ctypes.c_ubyte, 69]
-  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[2]], 70]
-  stream_len: Annotated[ctypes.c_uint32, 72]
-  slice_count: Annotated[ctypes.c_uint32, 76]
-  mbhist_buffer_size: Annotated[ctypes.c_uint32, 80]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 84]
-  log2_max_pic_order_cnt_lsb_minus4: Annotated[ctypes.c_int32, 88]
-  delta_pic_order_always_zero_flag: Annotated[ctypes.c_int32, 92]
-  frame_mbs_only_flag: Annotated[ctypes.c_int32, 96]
-  PicWidthInMbs: Annotated[ctypes.c_int32, 100]
-  FrameHeightInMbs: Annotated[ctypes.c_int32, 104]
-  tileFormat: Annotated[ctypes.c_uint32, 108, 2, 0]
-  gob_height: Annotated[ctypes.c_uint32, 108, 3, 2]
-  reserverd_surface_format: Annotated[ctypes.c_uint32, 108, 27, 5]
-  entropy_coding_mode_flag: Annotated[ctypes.c_int32, 112]
-  pic_order_present_flag: Annotated[ctypes.c_int32, 116]
-  num_ref_idx_l0_active_minus1: Annotated[ctypes.c_int32, 120]
-  num_ref_idx_l1_active_minus1: Annotated[ctypes.c_int32, 124]
-  deblocking_filter_control_present_flag: Annotated[ctypes.c_int32, 128]
-  redundant_pic_cnt_present_flag: Annotated[ctypes.c_int32, 132]
-  transform_8x8_mode_flag: Annotated[ctypes.c_int32, 136]
-  pitch_luma: Annotated[ctypes.c_uint32, 140]
-  pitch_chroma: Annotated[ctypes.c_uint32, 144]
-  luma_top_offset: Annotated[ctypes.c_uint32, 148]
-  luma_bot_offset: Annotated[ctypes.c_uint32, 152]
-  luma_frame_offset: Annotated[ctypes.c_uint32, 156]
-  chroma_top_offset: Annotated[ctypes.c_uint32, 160]
-  chroma_bot_offset: Annotated[ctypes.c_uint32, 164]
-  chroma_frame_offset: Annotated[ctypes.c_uint32, 168]
-  HistBufferSize: Annotated[ctypes.c_uint32, 172]
-  MbaffFrameFlag: Annotated[ctypes.c_uint32, 176, 1, 0]
-  direct_8x8_inference_flag: Annotated[ctypes.c_uint32, 176, 1, 1]
-  weighted_pred_flag: Annotated[ctypes.c_uint32, 176, 1, 2]
-  constrained_intra_pred_flag: Annotated[ctypes.c_uint32, 176, 1, 3]
-  ref_pic_flag: Annotated[ctypes.c_uint32, 176, 1, 4]
-  field_pic_flag: Annotated[ctypes.c_uint32, 176, 1, 5]
-  bottom_field_flag: Annotated[ctypes.c_uint32, 176, 1, 6]
-  second_field: Annotated[ctypes.c_uint32, 176, 1, 7]
-  log2_max_frame_num_minus4: Annotated[ctypes.c_uint32, 177, 4, 0]
-  chroma_format_idc: Annotated[ctypes.c_uint32, 177, 2, 4]
-  pic_order_cnt_type: Annotated[ctypes.c_uint32, 177, 2, 6]
-  pic_init_qp_minus26: Annotated[ctypes.c_int32, 178, 6, 0]
-  chroma_qp_index_offset: Annotated[ctypes.c_int32, 178, 5, 6]
-  second_chroma_qp_index_offset: Annotated[ctypes.c_int32, 179, 5, 3]
-  weighted_bipred_idc: Annotated[ctypes.c_uint32, 180, 2, 0]
-  CurrPicIdx: Annotated[ctypes.c_uint32, 180, 7, 2]
-  CurrColIdx: Annotated[ctypes.c_uint32, 181, 5, 1]
-  frame_num: Annotated[ctypes.c_uint32, 181, 16, 6]
-  frame_surfaces: Annotated[ctypes.c_uint32, 183, 1, 6]
-  output_memory_layout: Annotated[ctypes.c_uint32, 183, 1, 7]
-  CurrFieldOrderCnt: Annotated[Array[ctypes.c_int32, Literal[2]], 184]
+  eos: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 52]
+  explicitEOSPresentFlag: Annotated[Annotated[int, ctypes.c_ubyte], 68]
+  hint_dump_en: Annotated[Annotated[int, ctypes.c_ubyte], 69]
+  reserved0: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 70]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 72]
+  slice_count: Annotated[Annotated[int, ctypes.c_uint32], 76]
+  mbhist_buffer_size: Annotated[Annotated[int, ctypes.c_uint32], 80]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 84]
+  log2_max_pic_order_cnt_lsb_minus4: Annotated[Annotated[int, ctypes.c_int32], 88]
+  delta_pic_order_always_zero_flag: Annotated[Annotated[int, ctypes.c_int32], 92]
+  frame_mbs_only_flag: Annotated[Annotated[int, ctypes.c_int32], 96]
+  PicWidthInMbs: Annotated[Annotated[int, ctypes.c_int32], 100]
+  FrameHeightInMbs: Annotated[Annotated[int, ctypes.c_int32], 104]
+  tileFormat: Annotated[Annotated[int, ctypes.c_uint32], 108, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_uint32], 108, 3, 2]
+  reserverd_surface_format: Annotated[Annotated[int, ctypes.c_uint32], 108, 27, 5]
+  entropy_coding_mode_flag: Annotated[Annotated[int, ctypes.c_int32], 112]
+  pic_order_present_flag: Annotated[Annotated[int, ctypes.c_int32], 116]
+  num_ref_idx_l0_active_minus1: Annotated[Annotated[int, ctypes.c_int32], 120]
+  num_ref_idx_l1_active_minus1: Annotated[Annotated[int, ctypes.c_int32], 124]
+  deblocking_filter_control_present_flag: Annotated[Annotated[int, ctypes.c_int32], 128]
+  redundant_pic_cnt_present_flag: Annotated[Annotated[int, ctypes.c_int32], 132]
+  transform_8x8_mode_flag: Annotated[Annotated[int, ctypes.c_int32], 136]
+  pitch_luma: Annotated[Annotated[int, ctypes.c_uint32], 140]
+  pitch_chroma: Annotated[Annotated[int, ctypes.c_uint32], 144]
+  luma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 148]
+  luma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 152]
+  luma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 156]
+  chroma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 160]
+  chroma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 164]
+  chroma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 168]
+  HistBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 172]
+  MbaffFrameFlag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 0]
+  direct_8x8_inference_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 1]
+  weighted_pred_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 2]
+  constrained_intra_pred_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 3]
+  ref_pic_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 4]
+  field_pic_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 5]
+  bottom_field_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 6]
+  second_field: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 7]
+  log2_max_frame_num_minus4: Annotated[Annotated[int, ctypes.c_uint32], 177, 4, 0]
+  chroma_format_idc: Annotated[Annotated[int, ctypes.c_uint32], 177, 2, 4]
+  pic_order_cnt_type: Annotated[Annotated[int, ctypes.c_uint32], 177, 2, 6]
+  pic_init_qp_minus26: Annotated[Annotated[int, ctypes.c_int32], 178, 6, 0]
+  chroma_qp_index_offset: Annotated[Annotated[int, ctypes.c_int32], 178, 5, 6]
+  second_chroma_qp_index_offset: Annotated[Annotated[int, ctypes.c_int32], 179, 5, 3]
+  weighted_bipred_idc: Annotated[Annotated[int, ctypes.c_uint32], 180, 2, 0]
+  CurrPicIdx: Annotated[Annotated[int, ctypes.c_uint32], 180, 7, 2]
+  CurrColIdx: Annotated[Annotated[int, ctypes.c_uint32], 181, 5, 1]
+  frame_num: Annotated[Annotated[int, ctypes.c_uint32], 181, 16, 6]
+  frame_surfaces: Annotated[Annotated[int, ctypes.c_uint32], 183, 1, 6]
+  output_memory_layout: Annotated[Annotated[int, ctypes.c_uint32], 183, 1, 7]
+  CurrFieldOrderCnt: Annotated[Array[Annotated[int, ctypes.c_int32], Literal[2]], 184]
   dpb: Annotated[Array[nvdec_dpb_entry_s, Literal[16]], 192]
-  WeightScale: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[4]], Literal[6]], 448]
-  WeightScale8x8: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[8]], Literal[2]], 544]
-  num_inter_view_refs_lX: Annotated[Array[ctypes.c_ubyte, Literal[2]], 672]
-  reserved1: Annotated[Array[ctypes.c_char, Literal[14]], 674]
-  inter_view_refidx_lX: Annotated[Array[Array[ctypes.c_byte, Literal[16]], Literal[2]], 688]
-  lossless_ipred8x8_filter_enable: Annotated[ctypes.c_uint32, 720, 1, 0]
-  qpprime_y_zero_transform_bypass_flag: Annotated[ctypes.c_uint32, 720, 1, 1]
-  reserved2: Annotated[ctypes.c_uint32, 720, 30, 2]
+  WeightScale: Annotated[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[4]], Literal[6]], 448]
+  WeightScale8x8: Annotated[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[8]], Literal[8]], Literal[2]], 544]
+  num_inter_view_refs_lX: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 672]
+  reserved1: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[14]], 674]
+  inter_view_refidx_lX: Annotated[Array[Array[Annotated[int, ctypes.c_byte], Literal[16]], Literal[2]], 688]
+  lossless_ipred8x8_filter_enable: Annotated[Annotated[int, ctypes.c_uint32], 720, 1, 0]
+  qpprime_y_zero_transform_bypass_flag: Annotated[Annotated[int, ctypes.c_uint32], 720, 1, 1]
+  reserved2: Annotated[Annotated[int, ctypes.c_uint32], 720, 30, 2]
   displayPara: Annotated[nvdec_display_param_s, 724]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 752]
 nvdec_h264_pic_s = struct__nvdec_h264_pic_s
-enum__vc1_fcm_e = CEnum(ctypes.c_uint32)
+enum__vc1_fcm_e = CEnum(Annotated[int, ctypes.c_uint32])
 FCM_PROGRESSIVE = enum__vc1_fcm_e.define('FCM_PROGRESSIVE', 0)
 FCM_FRAME_INTERLACE = enum__vc1_fcm_e.define('FCM_FRAME_INTERLACE', 2)
 FCM_FIELD_INTERLACE = enum__vc1_fcm_e.define('FCM_FIELD_INTERLACE', 3)
 
 vc1_fcm_e = enum__vc1_fcm_e
-enum__syntax_vc1_ptype_e = CEnum(ctypes.c_uint32)
+enum__syntax_vc1_ptype_e = CEnum(Annotated[int, ctypes.c_uint32])
 PTYPE_I = enum__syntax_vc1_ptype_e.define('PTYPE_I', 0)
 PTYPE_P = enum__syntax_vc1_ptype_e.define('PTYPE_P', 1)
 PTYPE_B = enum__syntax_vc1_ptype_e.define('PTYPE_B', 2)
@@ -692,14 +692,14 @@ PTYPE_BI = enum__syntax_vc1_ptype_e.define('PTYPE_BI', 3)
 PTYPE_SKIPPED = enum__syntax_vc1_ptype_e.define('PTYPE_SKIPPED', 4)
 
 syntax_vc1_ptype_e = enum__syntax_vc1_ptype_e
-enum_vc1_mvmode_e = CEnum(ctypes.c_uint32)
+enum_vc1_mvmode_e = CEnum(Annotated[int, ctypes.c_uint32])
 MVMODE_MIXEDMV = enum_vc1_mvmode_e.define('MVMODE_MIXEDMV', 0)
 MVMODE_1MV = enum_vc1_mvmode_e.define('MVMODE_1MV', 1)
 MVMODE_1MV_HALFPEL = enum_vc1_mvmode_e.define('MVMODE_1MV_HALFPEL', 2)
 MVMODE_1MV_HALFPEL_BILINEAR = enum_vc1_mvmode_e.define('MVMODE_1MV_HALFPEL_BILINEAR', 3)
 MVMODE_INTENSITY_COMPENSATION = enum_vc1_mvmode_e.define('MVMODE_INTENSITY_COMPENSATION', 4)
 
-enum__vc1_fptype_e = CEnum(ctypes.c_uint32)
+enum__vc1_fptype_e = CEnum(Annotated[int, ctypes.c_uint32])
 FPTYPE_I_I = enum__vc1_fptype_e.define('FPTYPE_I_I', 0)
 FPTYPE_I_P = enum__vc1_fptype_e.define('FPTYPE_I_P', 1)
 FPTYPE_P_I = enum__vc1_fptype_e.define('FPTYPE_P_I', 2)
@@ -710,7 +710,7 @@ FPTYPE_BI_B = enum__vc1_fptype_e.define('FPTYPE_BI_B', 6)
 FPTYPE_BI_BI = enum__vc1_fptype_e.define('FPTYPE_BI_BI', 7)
 
 vc1_fptype_e = enum__vc1_fptype_e
-enum__vc1_dqprofile_e = CEnum(ctypes.c_uint32)
+enum__vc1_dqprofile_e = CEnum(Annotated[int, ctypes.c_uint32])
 DQPROFILE_ALL_FOUR_EDGES = enum__vc1_dqprofile_e.define('DQPROFILE_ALL_FOUR_EDGES', 0)
 DQPROFILE_DOUBLE_EDGE = enum__vc1_dqprofile_e.define('DQPROFILE_DOUBLE_EDGE', 1)
 DQPROFILE_SINGLE_EDGE = enum__vc1_dqprofile_e.define('DQPROFILE_SINGLE_EDGE', 2)
@@ -721,104 +721,104 @@ vc1_dqprofile_e = enum__vc1_dqprofile_e
 class struct__nvdec_vc1_pic_s:
   SIZE = 404
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
-  prefixStartCode: Annotated[Array[ctypes.c_ubyte, Literal[4]], 68]
-  bitstream_offset: Annotated[ctypes.c_uint32, 72]
-  explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 76]
-  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[3]], 77]
-  stream_len: Annotated[ctypes.c_uint32, 80]
-  slice_count: Annotated[ctypes.c_uint32, 84]
-  scratch_pic_buffer_size: Annotated[ctypes.c_uint32, 88]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 92]
-  FrameWidth: Annotated[ctypes.c_uint16, 96]
-  FrameHeight: Annotated[ctypes.c_uint16, 98]
-  profile: Annotated[ctypes.c_ubyte, 100]
-  postprocflag: Annotated[ctypes.c_ubyte, 101]
-  pulldown: Annotated[ctypes.c_ubyte, 102]
-  interlace: Annotated[ctypes.c_ubyte, 103]
-  tfcntrflag: Annotated[ctypes.c_ubyte, 104]
-  finterpflag: Annotated[ctypes.c_ubyte, 105]
-  psf: Annotated[ctypes.c_ubyte, 106]
-  tileFormat: Annotated[ctypes.c_ubyte, 107, 2, 0]
-  gob_height: Annotated[ctypes.c_ubyte, 107, 3, 2]
-  reserverd_surface_format: Annotated[ctypes.c_ubyte, 107, 3, 5]
-  multires: Annotated[ctypes.c_ubyte, 108]
-  syncmarker: Annotated[ctypes.c_ubyte, 109]
-  rangered: Annotated[ctypes.c_ubyte, 110]
-  maxbframes: Annotated[ctypes.c_ubyte, 111]
-  dquant: Annotated[ctypes.c_ubyte, 112]
-  panscan_flag: Annotated[ctypes.c_ubyte, 113]
-  refdist_flag: Annotated[ctypes.c_ubyte, 114]
-  quantizer: Annotated[ctypes.c_ubyte, 115]
-  extended_mv: Annotated[ctypes.c_ubyte, 116]
-  extended_dmv: Annotated[ctypes.c_ubyte, 117]
-  overlap: Annotated[ctypes.c_ubyte, 118]
-  vstransform: Annotated[ctypes.c_ubyte, 119]
-  refdist: Annotated[ctypes.c_char, 120]
-  reserved1: Annotated[Array[ctypes.c_char, Literal[3]], 121]
+  eos: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 52]
+  prefixStartCode: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], 68]
+  bitstream_offset: Annotated[Annotated[int, ctypes.c_uint32], 72]
+  explicitEOSPresentFlag: Annotated[Annotated[int, ctypes.c_ubyte], 76]
+  reserved0: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 77]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 80]
+  slice_count: Annotated[Annotated[int, ctypes.c_uint32], 84]
+  scratch_pic_buffer_size: Annotated[Annotated[int, ctypes.c_uint32], 88]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 92]
+  FrameWidth: Annotated[Annotated[int, ctypes.c_uint16], 96]
+  FrameHeight: Annotated[Annotated[int, ctypes.c_uint16], 98]
+  profile: Annotated[Annotated[int, ctypes.c_ubyte], 100]
+  postprocflag: Annotated[Annotated[int, ctypes.c_ubyte], 101]
+  pulldown: Annotated[Annotated[int, ctypes.c_ubyte], 102]
+  interlace: Annotated[Annotated[int, ctypes.c_ubyte], 103]
+  tfcntrflag: Annotated[Annotated[int, ctypes.c_ubyte], 104]
+  finterpflag: Annotated[Annotated[int, ctypes.c_ubyte], 105]
+  psf: Annotated[Annotated[int, ctypes.c_ubyte], 106]
+  tileFormat: Annotated[Annotated[int, ctypes.c_ubyte], 107, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_ubyte], 107, 3, 2]
+  reserverd_surface_format: Annotated[Annotated[int, ctypes.c_ubyte], 107, 3, 5]
+  multires: Annotated[Annotated[int, ctypes.c_ubyte], 108]
+  syncmarker: Annotated[Annotated[int, ctypes.c_ubyte], 109]
+  rangered: Annotated[Annotated[int, ctypes.c_ubyte], 110]
+  maxbframes: Annotated[Annotated[int, ctypes.c_ubyte], 111]
+  dquant: Annotated[Annotated[int, ctypes.c_ubyte], 112]
+  panscan_flag: Annotated[Annotated[int, ctypes.c_ubyte], 113]
+  refdist_flag: Annotated[Annotated[int, ctypes.c_ubyte], 114]
+  quantizer: Annotated[Annotated[int, ctypes.c_ubyte], 115]
+  extended_mv: Annotated[Annotated[int, ctypes.c_ubyte], 116]
+  extended_dmv: Annotated[Annotated[int, ctypes.c_ubyte], 117]
+  overlap: Annotated[Annotated[int, ctypes.c_ubyte], 118]
+  vstransform: Annotated[Annotated[int, ctypes.c_ubyte], 119]
+  refdist: Annotated[Annotated[bytes, ctypes.c_char], 120]
+  reserved1: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[3]], 121]
   fcm: Annotated[vc1_fcm_e, 124]
   ptype: Annotated[syntax_vc1_ptype_e, 128]
-  tfcntr: Annotated[ctypes.c_int32, 132]
-  rptfrm: Annotated[ctypes.c_int32, 136]
-  tff: Annotated[ctypes.c_int32, 140]
-  rndctrl: Annotated[ctypes.c_int32, 144]
-  pqindex: Annotated[ctypes.c_int32, 148]
-  halfqp: Annotated[ctypes.c_int32, 152]
-  pquantizer: Annotated[ctypes.c_int32, 156]
-  postproc: Annotated[ctypes.c_int32, 160]
-  condover: Annotated[ctypes.c_int32, 164]
-  transacfrm: Annotated[ctypes.c_int32, 168]
-  transacfrm2: Annotated[ctypes.c_int32, 172]
-  transdctab: Annotated[ctypes.c_int32, 176]
-  pqdiff: Annotated[ctypes.c_int32, 180]
-  abspq: Annotated[ctypes.c_int32, 184]
-  dquantfrm: Annotated[ctypes.c_int32, 188]
+  tfcntr: Annotated[Annotated[int, ctypes.c_int32], 132]
+  rptfrm: Annotated[Annotated[int, ctypes.c_int32], 136]
+  tff: Annotated[Annotated[int, ctypes.c_int32], 140]
+  rndctrl: Annotated[Annotated[int, ctypes.c_int32], 144]
+  pqindex: Annotated[Annotated[int, ctypes.c_int32], 148]
+  halfqp: Annotated[Annotated[int, ctypes.c_int32], 152]
+  pquantizer: Annotated[Annotated[int, ctypes.c_int32], 156]
+  postproc: Annotated[Annotated[int, ctypes.c_int32], 160]
+  condover: Annotated[Annotated[int, ctypes.c_int32], 164]
+  transacfrm: Annotated[Annotated[int, ctypes.c_int32], 168]
+  transacfrm2: Annotated[Annotated[int, ctypes.c_int32], 172]
+  transdctab: Annotated[Annotated[int, ctypes.c_int32], 176]
+  pqdiff: Annotated[Annotated[int, ctypes.c_int32], 180]
+  abspq: Annotated[Annotated[int, ctypes.c_int32], 184]
+  dquantfrm: Annotated[Annotated[int, ctypes.c_int32], 188]
   dqprofile: Annotated[vc1_dqprofile_e, 192]
-  dqsbedge: Annotated[ctypes.c_int32, 196]
-  dqdbedge: Annotated[ctypes.c_int32, 200]
-  dqbilevel: Annotated[ctypes.c_int32, 204]
-  mvrange: Annotated[ctypes.c_int32, 208]
+  dqsbedge: Annotated[Annotated[int, ctypes.c_int32], 196]
+  dqdbedge: Annotated[Annotated[int, ctypes.c_int32], 200]
+  dqbilevel: Annotated[Annotated[int, ctypes.c_int32], 204]
+  mvrange: Annotated[Annotated[int, ctypes.c_int32], 208]
   mvmode: Annotated[enum_vc1_mvmode_e, 212]
   mvmode2: Annotated[enum_vc1_mvmode_e, 216]
-  lumscale: Annotated[ctypes.c_int32, 220]
-  lumshift: Annotated[ctypes.c_int32, 224]
-  mvtab: Annotated[ctypes.c_int32, 228]
-  cbptab: Annotated[ctypes.c_int32, 232]
-  ttmbf: Annotated[ctypes.c_int32, 236]
-  ttfrm: Annotated[ctypes.c_int32, 240]
-  bfraction: Annotated[ctypes.c_int32, 244]
+  lumscale: Annotated[Annotated[int, ctypes.c_int32], 220]
+  lumshift: Annotated[Annotated[int, ctypes.c_int32], 224]
+  mvtab: Annotated[Annotated[int, ctypes.c_int32], 228]
+  cbptab: Annotated[Annotated[int, ctypes.c_int32], 232]
+  ttmbf: Annotated[Annotated[int, ctypes.c_int32], 236]
+  ttfrm: Annotated[Annotated[int, ctypes.c_int32], 240]
+  bfraction: Annotated[Annotated[int, ctypes.c_int32], 244]
   fptype: Annotated[vc1_fptype_e, 248]
-  numref: Annotated[ctypes.c_int32, 252]
-  reffield: Annotated[ctypes.c_int32, 256]
-  dmvrange: Annotated[ctypes.c_int32, 260]
-  intcompfield: Annotated[ctypes.c_int32, 264]
-  lumscale1: Annotated[ctypes.c_int32, 268]
-  lumshift1: Annotated[ctypes.c_int32, 272]
-  lumscale2: Annotated[ctypes.c_int32, 276]
-  lumshift2: Annotated[ctypes.c_int32, 280]
-  mbmodetab: Annotated[ctypes.c_int32, 284]
-  imvtab: Annotated[ctypes.c_int32, 288]
-  icbptab: Annotated[ctypes.c_int32, 292]
-  fourmvbptab: Annotated[ctypes.c_int32, 296]
-  fourmvswitch: Annotated[ctypes.c_int32, 300]
-  intcomp: Annotated[ctypes.c_int32, 304]
-  twomvbptab: Annotated[ctypes.c_int32, 308]
-  rangeredfrm: Annotated[ctypes.c_int32, 312]
-  HistBufferSize: Annotated[ctypes.c_uint32, 316]
-  FrameStride: Annotated[Array[ctypes.c_uint32, Literal[2]], 320]
-  luma_top_offset: Annotated[ctypes.c_uint32, 328]
-  luma_bot_offset: Annotated[ctypes.c_uint32, 332]
-  luma_frame_offset: Annotated[ctypes.c_uint32, 336]
-  chroma_top_offset: Annotated[ctypes.c_uint32, 340]
-  chroma_bot_offset: Annotated[ctypes.c_uint32, 344]
-  chroma_frame_offset: Annotated[ctypes.c_uint32, 348]
-  CodedWidth: Annotated[ctypes.c_uint16, 352]
-  CodedHeight: Annotated[ctypes.c_uint16, 354]
-  loopfilter: Annotated[ctypes.c_ubyte, 356]
-  fastuvmc: Annotated[ctypes.c_ubyte, 357]
-  output_memory_layout: Annotated[ctypes.c_ubyte, 358]
-  ref_memory_layout: Annotated[Array[ctypes.c_ubyte, Literal[2]], 359]
-  reserved3: Annotated[Array[ctypes.c_ubyte, Literal[3]], 361]
+  numref: Annotated[Annotated[int, ctypes.c_int32], 252]
+  reffield: Annotated[Annotated[int, ctypes.c_int32], 256]
+  dmvrange: Annotated[Annotated[int, ctypes.c_int32], 260]
+  intcompfield: Annotated[Annotated[int, ctypes.c_int32], 264]
+  lumscale1: Annotated[Annotated[int, ctypes.c_int32], 268]
+  lumshift1: Annotated[Annotated[int, ctypes.c_int32], 272]
+  lumscale2: Annotated[Annotated[int, ctypes.c_int32], 276]
+  lumshift2: Annotated[Annotated[int, ctypes.c_int32], 280]
+  mbmodetab: Annotated[Annotated[int, ctypes.c_int32], 284]
+  imvtab: Annotated[Annotated[int, ctypes.c_int32], 288]
+  icbptab: Annotated[Annotated[int, ctypes.c_int32], 292]
+  fourmvbptab: Annotated[Annotated[int, ctypes.c_int32], 296]
+  fourmvswitch: Annotated[Annotated[int, ctypes.c_int32], 300]
+  intcomp: Annotated[Annotated[int, ctypes.c_int32], 304]
+  twomvbptab: Annotated[Annotated[int, ctypes.c_int32], 308]
+  rangeredfrm: Annotated[Annotated[int, ctypes.c_int32], 312]
+  HistBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 316]
+  FrameStride: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[2]], 320]
+  luma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 328]
+  luma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 332]
+  luma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 336]
+  chroma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 340]
+  chroma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 344]
+  chroma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 348]
+  CodedWidth: Annotated[Annotated[int, ctypes.c_uint16], 352]
+  CodedHeight: Annotated[Annotated[int, ctypes.c_uint16], 354]
+  loopfilter: Annotated[Annotated[int, ctypes.c_ubyte], 356]
+  fastuvmc: Annotated[Annotated[int, ctypes.c_ubyte], 357]
+  output_memory_layout: Annotated[Annotated[int, ctypes.c_ubyte], 358]
+  ref_memory_layout: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 359]
+  reserved3: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 361]
   displayPara: Annotated[nvdec_display_param_s, 364]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 392]
 nvdec_vc1_pic_s = struct__nvdec_vc1_pic_s
@@ -826,48 +826,48 @@ nvdec_vc1_pic_s = struct__nvdec_vc1_pic_s
 class struct__nvdec_mpeg2_pic_s:
   SIZE = 344
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
-  explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 68]
-  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[3]], 69]
-  stream_len: Annotated[ctypes.c_uint32, 72]
-  slice_count: Annotated[ctypes.c_uint32, 76]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 80]
-  FrameWidth: Annotated[ctypes.c_int16, 84]
-  FrameHeight: Annotated[ctypes.c_int16, 86]
-  picture_structure: Annotated[ctypes.c_ubyte, 88]
-  picture_coding_type: Annotated[ctypes.c_ubyte, 89]
-  intra_dc_precision: Annotated[ctypes.c_ubyte, 90]
-  frame_pred_frame_dct: Annotated[ctypes.c_char, 91]
-  concealment_motion_vectors: Annotated[ctypes.c_char, 92]
-  intra_vlc_format: Annotated[ctypes.c_char, 93]
-  tileFormat: Annotated[ctypes.c_ubyte, 94, 2, 0]
-  gob_height: Annotated[ctypes.c_ubyte, 94, 3, 2]
-  reserverd_surface_format: Annotated[ctypes.c_ubyte, 94, 3, 5]
-  reserved1: Annotated[ctypes.c_char, 95]
-  f_code: Annotated[Array[ctypes.c_char, Literal[4]], 96]
-  PicWidthInMbs: Annotated[ctypes.c_uint16, 100]
-  FrameHeightInMbs: Annotated[ctypes.c_uint16, 102]
-  pitch_luma: Annotated[ctypes.c_uint32, 104]
-  pitch_chroma: Annotated[ctypes.c_uint32, 108]
-  luma_top_offset: Annotated[ctypes.c_uint32, 112]
-  luma_bot_offset: Annotated[ctypes.c_uint32, 116]
-  luma_frame_offset: Annotated[ctypes.c_uint32, 120]
-  chroma_top_offset: Annotated[ctypes.c_uint32, 124]
-  chroma_bot_offset: Annotated[ctypes.c_uint32, 128]
-  chroma_frame_offset: Annotated[ctypes.c_uint32, 132]
-  HistBufferSize: Annotated[ctypes.c_uint32, 136]
-  output_memory_layout: Annotated[ctypes.c_uint16, 140]
-  alternate_scan: Annotated[ctypes.c_uint16, 142]
-  secondfield: Annotated[ctypes.c_uint16, 144]
-  rounding_type: Annotated[ctypes.c_uint16, 146]
-  MbInfoSizeInBytes: Annotated[ctypes.c_uint32, 148]
-  q_scale_type: Annotated[ctypes.c_uint32, 152]
-  top_field_first: Annotated[ctypes.c_uint32, 156]
-  full_pel_fwd_vector: Annotated[ctypes.c_uint32, 160]
-  full_pel_bwd_vector: Annotated[ctypes.c_uint32, 164]
-  quant_mat_8x8intra: Annotated[Array[ctypes.c_ubyte, Literal[64]], 168]
-  quant_mat_8x8nonintra: Annotated[Array[ctypes.c_ubyte, Literal[64]], 232]
-  ref_memory_layout: Annotated[Array[ctypes.c_uint32, Literal[2]], 296]
+  eos: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 52]
+  explicitEOSPresentFlag: Annotated[Annotated[int, ctypes.c_ubyte], 68]
+  reserved0: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 69]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 72]
+  slice_count: Annotated[Annotated[int, ctypes.c_uint32], 76]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 80]
+  FrameWidth: Annotated[Annotated[int, ctypes.c_int16], 84]
+  FrameHeight: Annotated[Annotated[int, ctypes.c_int16], 86]
+  picture_structure: Annotated[Annotated[int, ctypes.c_ubyte], 88]
+  picture_coding_type: Annotated[Annotated[int, ctypes.c_ubyte], 89]
+  intra_dc_precision: Annotated[Annotated[int, ctypes.c_ubyte], 90]
+  frame_pred_frame_dct: Annotated[Annotated[bytes, ctypes.c_char], 91]
+  concealment_motion_vectors: Annotated[Annotated[bytes, ctypes.c_char], 92]
+  intra_vlc_format: Annotated[Annotated[bytes, ctypes.c_char], 93]
+  tileFormat: Annotated[Annotated[int, ctypes.c_ubyte], 94, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_ubyte], 94, 3, 2]
+  reserverd_surface_format: Annotated[Annotated[int, ctypes.c_ubyte], 94, 3, 5]
+  reserved1: Annotated[Annotated[bytes, ctypes.c_char], 95]
+  f_code: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[4]], 96]
+  PicWidthInMbs: Annotated[Annotated[int, ctypes.c_uint16], 100]
+  FrameHeightInMbs: Annotated[Annotated[int, ctypes.c_uint16], 102]
+  pitch_luma: Annotated[Annotated[int, ctypes.c_uint32], 104]
+  pitch_chroma: Annotated[Annotated[int, ctypes.c_uint32], 108]
+  luma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 112]
+  luma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 116]
+  luma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 120]
+  chroma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 124]
+  chroma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 128]
+  chroma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 132]
+  HistBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 136]
+  output_memory_layout: Annotated[Annotated[int, ctypes.c_uint16], 140]
+  alternate_scan: Annotated[Annotated[int, ctypes.c_uint16], 142]
+  secondfield: Annotated[Annotated[int, ctypes.c_uint16], 144]
+  rounding_type: Annotated[Annotated[int, ctypes.c_uint16], 146]
+  MbInfoSizeInBytes: Annotated[Annotated[int, ctypes.c_uint32], 148]
+  q_scale_type: Annotated[Annotated[int, ctypes.c_uint32], 152]
+  top_field_first: Annotated[Annotated[int, ctypes.c_uint32], 156]
+  full_pel_fwd_vector: Annotated[Annotated[int, ctypes.c_uint32], 160]
+  full_pel_bwd_vector: Annotated[Annotated[int, ctypes.c_uint32], 164]
+  quant_mat_8x8intra: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[64]], 168]
+  quant_mat_8x8nonintra: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[64]], 232]
+  ref_memory_layout: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[2]], 296]
   displayPara: Annotated[nvdec_display_param_s, 304]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 332]
 nvdec_mpeg2_pic_s = struct__nvdec_mpeg2_pic_s
@@ -875,57 +875,57 @@ nvdec_mpeg2_pic_s = struct__nvdec_mpeg2_pic_s
 class struct__nvdec_mpeg4_pic_s:
   SIZE = 368
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
-  explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 68]
-  reserved2: Annotated[Array[ctypes.c_ubyte, Literal[3]], 69]
-  stream_len: Annotated[ctypes.c_uint32, 72]
-  slice_count: Annotated[ctypes.c_uint32, 76]
-  scratch_pic_buffer_size: Annotated[ctypes.c_uint32, 80]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 84]
-  FrameWidth: Annotated[ctypes.c_int16, 88]
-  FrameHeight: Annotated[ctypes.c_int16, 90]
-  vop_time_increment_bitcount: Annotated[ctypes.c_char, 92]
-  resync_marker_disable: Annotated[ctypes.c_char, 93]
-  tileFormat: Annotated[ctypes.c_ubyte, 94, 2, 0]
-  gob_height: Annotated[ctypes.c_ubyte, 94, 3, 2]
-  reserverd_surface_format: Annotated[ctypes.c_ubyte, 94, 3, 5]
-  reserved3: Annotated[ctypes.c_char, 95]
-  width: Annotated[ctypes.c_int32, 96]
-  height: Annotated[ctypes.c_int32, 100]
-  FrameStride: Annotated[Array[ctypes.c_uint32, Literal[2]], 104]
-  luma_top_offset: Annotated[ctypes.c_uint32, 112]
-  luma_bot_offset: Annotated[ctypes.c_uint32, 116]
-  luma_frame_offset: Annotated[ctypes.c_uint32, 120]
-  chroma_top_offset: Annotated[ctypes.c_uint32, 124]
-  chroma_bot_offset: Annotated[ctypes.c_uint32, 128]
-  chroma_frame_offset: Annotated[ctypes.c_uint32, 132]
-  HistBufferSize: Annotated[ctypes.c_uint32, 136]
-  trd: Annotated[Array[ctypes.c_int32, Literal[2]], 140]
-  trb: Annotated[Array[ctypes.c_int32, Literal[2]], 148]
-  divx_flags: Annotated[ctypes.c_int32, 156]
-  vop_fcode_forward: Annotated[ctypes.c_int16, 160]
-  vop_fcode_backward: Annotated[ctypes.c_int16, 162]
-  interlaced: Annotated[ctypes.c_ubyte, 164]
-  quant_type: Annotated[ctypes.c_ubyte, 165]
-  quarter_sample: Annotated[ctypes.c_ubyte, 166]
-  short_video_header: Annotated[ctypes.c_ubyte, 167]
-  curr_output_memory_layout: Annotated[ctypes.c_ubyte, 168]
-  ptype: Annotated[ctypes.c_ubyte, 169]
-  rnd: Annotated[ctypes.c_ubyte, 170]
-  alternate_vertical_scan_flag: Annotated[ctypes.c_ubyte, 171]
-  top_field_flag: Annotated[ctypes.c_ubyte, 172]
-  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[3]], 173]
-  intra_quant_mat: Annotated[Array[ctypes.c_ubyte, Literal[64]], 176]
-  nonintra_quant_mat: Annotated[Array[ctypes.c_ubyte, Literal[64]], 240]
-  ref_memory_layout: Annotated[Array[ctypes.c_ubyte, Literal[2]], 304]
-  reserved1: Annotated[Array[ctypes.c_ubyte, Literal[34]], 306]
+  eos: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 52]
+  explicitEOSPresentFlag: Annotated[Annotated[int, ctypes.c_ubyte], 68]
+  reserved2: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 69]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 72]
+  slice_count: Annotated[Annotated[int, ctypes.c_uint32], 76]
+  scratch_pic_buffer_size: Annotated[Annotated[int, ctypes.c_uint32], 80]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 84]
+  FrameWidth: Annotated[Annotated[int, ctypes.c_int16], 88]
+  FrameHeight: Annotated[Annotated[int, ctypes.c_int16], 90]
+  vop_time_increment_bitcount: Annotated[Annotated[bytes, ctypes.c_char], 92]
+  resync_marker_disable: Annotated[Annotated[bytes, ctypes.c_char], 93]
+  tileFormat: Annotated[Annotated[int, ctypes.c_ubyte], 94, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_ubyte], 94, 3, 2]
+  reserverd_surface_format: Annotated[Annotated[int, ctypes.c_ubyte], 94, 3, 5]
+  reserved3: Annotated[Annotated[bytes, ctypes.c_char], 95]
+  width: Annotated[Annotated[int, ctypes.c_int32], 96]
+  height: Annotated[Annotated[int, ctypes.c_int32], 100]
+  FrameStride: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[2]], 104]
+  luma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 112]
+  luma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 116]
+  luma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 120]
+  chroma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 124]
+  chroma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 128]
+  chroma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 132]
+  HistBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 136]
+  trd: Annotated[Array[Annotated[int, ctypes.c_int32], Literal[2]], 140]
+  trb: Annotated[Array[Annotated[int, ctypes.c_int32], Literal[2]], 148]
+  divx_flags: Annotated[Annotated[int, ctypes.c_int32], 156]
+  vop_fcode_forward: Annotated[Annotated[int, ctypes.c_int16], 160]
+  vop_fcode_backward: Annotated[Annotated[int, ctypes.c_int16], 162]
+  interlaced: Annotated[Annotated[int, ctypes.c_ubyte], 164]
+  quant_type: Annotated[Annotated[int, ctypes.c_ubyte], 165]
+  quarter_sample: Annotated[Annotated[int, ctypes.c_ubyte], 166]
+  short_video_header: Annotated[Annotated[int, ctypes.c_ubyte], 167]
+  curr_output_memory_layout: Annotated[Annotated[int, ctypes.c_ubyte], 168]
+  ptype: Annotated[Annotated[int, ctypes.c_ubyte], 169]
+  rnd: Annotated[Annotated[int, ctypes.c_ubyte], 170]
+  alternate_vertical_scan_flag: Annotated[Annotated[int, ctypes.c_ubyte], 171]
+  top_field_flag: Annotated[Annotated[int, ctypes.c_ubyte], 172]
+  reserved0: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 173]
+  intra_quant_mat: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[64]], 176]
+  nonintra_quant_mat: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[64]], 240]
+  ref_memory_layout: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 304]
+  reserved1: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[34]], 306]
   displayPara: Annotated[nvdec_display_param_s, 340]
 nvdec_mpeg4_pic_s = struct__nvdec_mpeg4_pic_s
-enum_VP8_FRAME_TYPE = CEnum(ctypes.c_uint32)
+enum_VP8_FRAME_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 VP8_KEYFRAME = enum_VP8_FRAME_TYPE.define('VP8_KEYFRAME', 0)
 VP8_INTERFRAME = enum_VP8_FRAME_TYPE.define('VP8_INTERFRAME', 1)
 
-enum_VP8_FRAME_SFC_ID = CEnum(ctypes.c_uint32)
+enum_VP8_FRAME_SFC_ID = CEnum(Annotated[int, ctypes.c_uint32])
 VP8_GOLDEN_FRAME_SFC = enum_VP8_FRAME_SFC_ID.define('VP8_GOLDEN_FRAME_SFC', 0)
 VP8_ALTREF_FRAME_SFC = enum_VP8_FRAME_SFC_ID.define('VP8_ALTREF_FRAME_SFC', 1)
 VP8_LAST_FRAME_SFC = enum_VP8_FRAME_SFC_ID.define('VP8_LAST_FRAME_SFC', 2)
@@ -935,123 +935,123 @@ VP8_CURR_FRAME_SFC = enum_VP8_FRAME_SFC_ID.define('VP8_CURR_FRAME_SFC', 3)
 class struct__nvdec_vp8_pic_s:
   SIZE = 192
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 52]
-  FrameWidth: Annotated[ctypes.c_uint16, 56]
-  FrameHeight: Annotated[ctypes.c_uint16, 58]
-  keyFrame: Annotated[ctypes.c_ubyte, 60]
-  version: Annotated[ctypes.c_ubyte, 61]
-  tileFormat: Annotated[ctypes.c_ubyte, 62, 2, 0]
-  gob_height: Annotated[ctypes.c_ubyte, 62, 3, 2]
-  reserverd_surface_format: Annotated[ctypes.c_ubyte, 62, 3, 5]
-  errorConcealOn: Annotated[ctypes.c_ubyte, 63]
-  firstPartSize: Annotated[ctypes.c_uint32, 64]
-  HistBufferSize: Annotated[ctypes.c_uint32, 68]
-  VLDBufferSize: Annotated[ctypes.c_uint32, 72]
-  FrameStride: Annotated[Array[ctypes.c_uint32, Literal[2]], 76]
-  luma_top_offset: Annotated[ctypes.c_uint32, 84]
-  luma_bot_offset: Annotated[ctypes.c_uint32, 88]
-  luma_frame_offset: Annotated[ctypes.c_uint32, 92]
-  chroma_top_offset: Annotated[ctypes.c_uint32, 96]
-  chroma_bot_offset: Annotated[ctypes.c_uint32, 100]
-  chroma_frame_offset: Annotated[ctypes.c_uint32, 104]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 52]
+  FrameWidth: Annotated[Annotated[int, ctypes.c_uint16], 56]
+  FrameHeight: Annotated[Annotated[int, ctypes.c_uint16], 58]
+  keyFrame: Annotated[Annotated[int, ctypes.c_ubyte], 60]
+  version: Annotated[Annotated[int, ctypes.c_ubyte], 61]
+  tileFormat: Annotated[Annotated[int, ctypes.c_ubyte], 62, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_ubyte], 62, 3, 2]
+  reserverd_surface_format: Annotated[Annotated[int, ctypes.c_ubyte], 62, 3, 5]
+  errorConcealOn: Annotated[Annotated[int, ctypes.c_ubyte], 63]
+  firstPartSize: Annotated[Annotated[int, ctypes.c_uint32], 64]
+  HistBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 68]
+  VLDBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 72]
+  FrameStride: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[2]], 76]
+  luma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 84]
+  luma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 88]
+  luma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 92]
+  chroma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 96]
+  chroma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 100]
+  chroma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 104]
   displayPara: Annotated[nvdec_display_param_s, 108]
-  current_output_memory_layout: Annotated[ctypes.c_char, 136]
-  output_memory_layout: Annotated[Array[ctypes.c_char, Literal[3]], 137]
-  segmentation_feature_data_update: Annotated[ctypes.c_ubyte, 140]
-  reserved1: Annotated[Array[ctypes.c_ubyte, Literal[3]], 141]
-  resultValue: Annotated[ctypes.c_uint32, 144]
-  partition_offset: Annotated[Array[ctypes.c_uint32, Literal[8]], 148]
+  current_output_memory_layout: Annotated[Annotated[bytes, ctypes.c_char], 136]
+  output_memory_layout: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[3]], 137]
+  segmentation_feature_data_update: Annotated[Annotated[int, ctypes.c_ubyte], 140]
+  reserved1: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 141]
+  resultValue: Annotated[Annotated[int, ctypes.c_uint32], 144]
+  partition_offset: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[8]], 148]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 180]
 nvdec_vp8_pic_s = struct__nvdec_vp8_pic_s
 @record
 class struct__bytes_of_data_s:
   SIZE = 8
-  clear_bytes: Annotated[ctypes.c_uint32, 0]
-  encypted_bytes: Annotated[ctypes.c_uint32, 4]
+  clear_bytes: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  encypted_bytes: Annotated[Annotated[int, ctypes.c_uint32], 4]
 bytes_of_data_s = struct__bytes_of_data_s
 @record
 class struct__nvdec_pass1_input_data_s:
   SIZE = 836
   sample_size: Annotated[Array[bytes_of_data_s, Literal[32]], 0]
-  initialization_vector: Annotated[Array[Array[ctypes.c_uint32, Literal[4]], Literal[32]], 256]
-  IvValid: Annotated[Array[ctypes.c_ubyte, Literal[32]], 768]
-  stream_len: Annotated[ctypes.c_uint32, 800]
-  clearBufferSize: Annotated[ctypes.c_uint32, 804]
-  reencryptBufferSize: Annotated[ctypes.c_uint32, 808]
-  vp8coeffPartitonBufferSize: Annotated[ctypes.c_uint32, 812]
-  PrevWidth: Annotated[ctypes.c_uint32, 816]
-  num_nals: Annotated[ctypes.c_uint32, 820, 16, 0]
-  drm_mode: Annotated[ctypes.c_uint32, 822, 8, 0]
-  key_sel: Annotated[ctypes.c_uint32, 823, 4, 0]
-  codec: Annotated[ctypes.c_uint32, 823, 4, 4]
-  TotalSizeOfClearData: Annotated[ctypes.c_uint32, 824]
-  SliceHdrOffset: Annotated[ctypes.c_uint32, 828]
-  EncryptBlkCnt: Annotated[ctypes.c_uint32, 832, 16, 0]
-  SkipBlkCnt: Annotated[ctypes.c_uint32, 834, 16, 0]
+  initialization_vector: Annotated[Array[Array[Annotated[int, ctypes.c_uint32], Literal[4]], Literal[32]], 256]
+  IvValid: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[32]], 768]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 800]
+  clearBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 804]
+  reencryptBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 808]
+  vp8coeffPartitonBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 812]
+  PrevWidth: Annotated[Annotated[int, ctypes.c_uint32], 816]
+  num_nals: Annotated[Annotated[int, ctypes.c_uint32], 820, 16, 0]
+  drm_mode: Annotated[Annotated[int, ctypes.c_uint32], 822, 8, 0]
+  key_sel: Annotated[Annotated[int, ctypes.c_uint32], 823, 4, 0]
+  codec: Annotated[Annotated[int, ctypes.c_uint32], 823, 4, 4]
+  TotalSizeOfClearData: Annotated[Annotated[int, ctypes.c_uint32], 824]
+  SliceHdrOffset: Annotated[Annotated[int, ctypes.c_uint32], 828]
+  EncryptBlkCnt: Annotated[Annotated[int, ctypes.c_uint32], 832, 16, 0]
+  SkipBlkCnt: Annotated[Annotated[int, ctypes.c_uint32], 834, 16, 0]
 nvdec_pass1_input_data_s = struct__nvdec_pass1_input_data_s
 @record
 class struct__nvdec_pass1_output_data_s:
   SIZE = 128
-  clear_header_size: Annotated[ctypes.c_uint32, 0]
-  reencrypt_data_size: Annotated[ctypes.c_uint32, 4]
-  clear_token_data_size: Annotated[ctypes.c_uint32, 8]
-  key_increment: Annotated[ctypes.c_uint32, 12, 6, 0]
-  encryption_mode: Annotated[ctypes.c_uint32, 12, 4, 6]
-  bReEncrypted: Annotated[ctypes.c_uint32, 13, 1, 2]
-  bvp9SuperFrame: Annotated[ctypes.c_uint32, 13, 1, 3]
-  vp9NumFramesMinus1: Annotated[ctypes.c_uint32, 13, 3, 4]
-  reserved1: Annotated[ctypes.c_uint32, 13, 17, 7]
-  wrapped_session_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 16]
-  wrapped_content_key: Annotated[Array[ctypes.c_uint32, Literal[4]], 32]
-  initialization_vector: Annotated[Array[ctypes.c_uint32, Literal[4]], 48]
-  partition_size: Annotated[Array[ctypes.c_uint32, Literal[8]], 64]
-  vp9_frame_sizes: Annotated[Array[ctypes.c_uint32, Literal[8]], 64]
-  vp9_clear_hdr_size: Annotated[Array[ctypes.c_uint32, Literal[8]], 96]
+  clear_header_size: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  reencrypt_data_size: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  clear_token_data_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  key_increment: Annotated[Annotated[int, ctypes.c_uint32], 12, 6, 0]
+  encryption_mode: Annotated[Annotated[int, ctypes.c_uint32], 12, 4, 6]
+  bReEncrypted: Annotated[Annotated[int, ctypes.c_uint32], 13, 1, 2]
+  bvp9SuperFrame: Annotated[Annotated[int, ctypes.c_uint32], 13, 1, 3]
+  vp9NumFramesMinus1: Annotated[Annotated[int, ctypes.c_uint32], 13, 3, 4]
+  reserved1: Annotated[Annotated[int, ctypes.c_uint32], 13, 17, 7]
+  wrapped_session_key: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 16]
+  wrapped_content_key: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 32]
+  initialization_vector: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 48]
+  partition_size: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[8]], 64]
+  vp9_frame_sizes: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[8]], 64]
+  vp9_clear_hdr_size: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[8]], 96]
 nvdec_pass1_output_data_s = struct__nvdec_pass1_output_data_s
 @record
 class struct__scale_factors_reference_s:
   SIZE = 4
-  x_scale_fp: Annotated[ctypes.c_int16, 0]
-  y_scale_fp: Annotated[ctypes.c_int16, 2]
+  x_scale_fp: Annotated[Annotated[int, ctypes.c_int16], 0]
+  y_scale_fp: Annotated[Annotated[int, ctypes.c_int16], 2]
 scale_factors_reference_s = struct__scale_factors_reference_s
 @record
 class struct__frame_info_t:
   SIZE = 12
-  width: Annotated[ctypes.c_uint16, 0]
-  height: Annotated[ctypes.c_uint16, 2]
-  stride: Annotated[Array[ctypes.c_uint16, Literal[2]], 4]
-  frame_buffer_idx: Annotated[ctypes.c_uint32, 8]
+  width: Annotated[Annotated[int, ctypes.c_uint16], 0]
+  height: Annotated[Annotated[int, ctypes.c_uint16], 2]
+  stride: Annotated[Array[Annotated[int, ctypes.c_uint16], Literal[2]], 4]
+  frame_buffer_idx: Annotated[Annotated[int, ctypes.c_uint32], 8]
 frame_info_t = struct__frame_info_t
 @record
 class struct__ref_frame_struct_s:
   SIZE = 24
   info: Annotated[frame_info_t, 0]
   sf: Annotated[scale_factors_reference_s, 12]
-  sign_bias: Annotated[ctypes.c_ubyte, 16, 1, 0]
-  wmtype: Annotated[ctypes.c_ubyte, 16, 2, 1]
-  reserved_rf: Annotated[ctypes.c_ubyte, 16, 5, 3]
-  frame_off: Annotated[ctypes.c_int16, 18]
-  roffset: Annotated[ctypes.c_int16, 20]
+  sign_bias: Annotated[Annotated[int, ctypes.c_ubyte], 16, 1, 0]
+  wmtype: Annotated[Annotated[int, ctypes.c_ubyte], 16, 2, 1]
+  reserved_rf: Annotated[Annotated[int, ctypes.c_ubyte], 16, 5, 3]
+  frame_off: Annotated[Annotated[int, ctypes.c_int16], 18]
+  roffset: Annotated[Annotated[int, ctypes.c_int16], 20]
 ref_frame_struct_s = struct__ref_frame_struct_s
 @record
 class struct__av1_fgs_cfg_t:
   SIZE = 12
-  apply_grain: Annotated[ctypes.c_uint16, 0, 1, 0]
-  overlap_flag: Annotated[ctypes.c_uint16, 0, 1, 1]
-  clip_to_restricted_range: Annotated[ctypes.c_uint16, 0, 1, 2]
-  chroma_scaling_from_luma: Annotated[ctypes.c_uint16, 0, 1, 3]
-  num_y_points_b: Annotated[ctypes.c_uint16, 0, 1, 4]
-  num_cb_points_b: Annotated[ctypes.c_uint16, 0, 1, 5]
-  num_cr_points_b: Annotated[ctypes.c_uint16, 0, 1, 6]
-  scaling_shift: Annotated[ctypes.c_uint16, 0, 4, 7]
-  reserved_fgs: Annotated[ctypes.c_uint16, 1, 5, 3]
-  sw_random_seed: Annotated[ctypes.c_uint16, 2]
-  cb_offset: Annotated[ctypes.c_int16, 4]
-  cr_offset: Annotated[ctypes.c_int16, 6]
-  cb_mult: Annotated[ctypes.c_char, 8]
-  cb_luma_mult: Annotated[ctypes.c_char, 9]
-  cr_mult: Annotated[ctypes.c_char, 10]
-  cr_luma_mult: Annotated[ctypes.c_char, 11]
+  apply_grain: Annotated[Annotated[int, ctypes.c_uint16], 0, 1, 0]
+  overlap_flag: Annotated[Annotated[int, ctypes.c_uint16], 0, 1, 1]
+  clip_to_restricted_range: Annotated[Annotated[int, ctypes.c_uint16], 0, 1, 2]
+  chroma_scaling_from_luma: Annotated[Annotated[int, ctypes.c_uint16], 0, 1, 3]
+  num_y_points_b: Annotated[Annotated[int, ctypes.c_uint16], 0, 1, 4]
+  num_cb_points_b: Annotated[Annotated[int, ctypes.c_uint16], 0, 1, 5]
+  num_cr_points_b: Annotated[Annotated[int, ctypes.c_uint16], 0, 1, 6]
+  scaling_shift: Annotated[Annotated[int, ctypes.c_uint16], 0, 4, 7]
+  reserved_fgs: Annotated[Annotated[int, ctypes.c_uint16], 1, 5, 3]
+  sw_random_seed: Annotated[Annotated[int, ctypes.c_uint16], 2]
+  cb_offset: Annotated[Annotated[int, ctypes.c_int16], 4]
+  cr_offset: Annotated[Annotated[int, ctypes.c_int16], 6]
+  cb_mult: Annotated[Annotated[bytes, ctypes.c_char], 8]
+  cb_luma_mult: Annotated[Annotated[bytes, ctypes.c_char], 9]
+  cr_mult: Annotated[Annotated[bytes, ctypes.c_char], 10]
+  cr_luma_mult: Annotated[Annotated[bytes, ctypes.c_char], 11]
 av1_fgs_cfg_t = struct__av1_fgs_cfg_t
 @record
 class struct__nvdec_av1_pic_s:
@@ -1059,270 +1059,270 @@ class struct__nvdec_av1_pic_s:
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 52]
   fgs_cfg: Annotated[av1_fgs_cfg_t, 64]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 76]
-  stream_len: Annotated[ctypes.c_uint32, 80]
-  reserved12: Annotated[ctypes.c_uint32, 84]
-  use_128x128_superblock: Annotated[ctypes.c_uint32, 88, 1, 0]
-  chroma_format: Annotated[ctypes.c_uint32, 88, 2, 1]
-  bit_depth: Annotated[ctypes.c_uint32, 88, 4, 3]
-  enable_filter_intra: Annotated[ctypes.c_uint32, 88, 1, 7]
-  enable_intra_edge_filter: Annotated[ctypes.c_uint32, 89, 1, 0]
-  enable_interintra_compound: Annotated[ctypes.c_uint32, 89, 1, 1]
-  enable_masked_compound: Annotated[ctypes.c_uint32, 89, 1, 2]
-  enable_dual_filter: Annotated[ctypes.c_uint32, 89, 1, 3]
-  reserved10: Annotated[ctypes.c_uint32, 89, 1, 4]
-  reserved0: Annotated[ctypes.c_uint32, 89, 3, 5]
-  enable_jnt_comp: Annotated[ctypes.c_uint32, 90, 1, 0]
-  reserved1: Annotated[ctypes.c_uint32, 90, 1, 1]
-  enable_cdef: Annotated[ctypes.c_uint32, 90, 1, 2]
-  reserved11: Annotated[ctypes.c_uint32, 90, 1, 3]
-  enable_fgs: Annotated[ctypes.c_uint32, 90, 1, 4]
-  enable_substream_decoding: Annotated[ctypes.c_uint32, 90, 1, 5]
-  reserved2: Annotated[ctypes.c_uint32, 90, 10, 6]
-  frame_type: Annotated[ctypes.c_uint32, 92, 2, 0]
-  show_frame: Annotated[ctypes.c_uint32, 92, 1, 2]
-  reserved13: Annotated[ctypes.c_uint32, 92, 1, 3]
-  disable_cdf_update: Annotated[ctypes.c_uint32, 92, 1, 4]
-  allow_screen_content_tools: Annotated[ctypes.c_uint32, 92, 1, 5]
-  cur_frame_force_integer_mv: Annotated[ctypes.c_uint32, 92, 1, 6]
-  scale_denom_minus9: Annotated[ctypes.c_uint32, 92, 3, 7]
-  allow_intrabc: Annotated[ctypes.c_uint32, 93, 1, 2]
-  allow_high_precision_mv: Annotated[ctypes.c_uint32, 93, 1, 3]
-  interp_filter: Annotated[ctypes.c_uint32, 93, 3, 4]
-  switchable_motion_mode: Annotated[ctypes.c_uint32, 93, 1, 7]
-  use_ref_frame_mvs: Annotated[ctypes.c_uint32, 94, 1, 0]
-  refresh_frame_context: Annotated[ctypes.c_uint32, 94, 1, 1]
-  delta_q_present_flag: Annotated[ctypes.c_uint32, 94, 1, 2]
-  delta_q_res: Annotated[ctypes.c_uint32, 94, 2, 3]
-  delta_lf_present_flag: Annotated[ctypes.c_uint32, 94, 1, 5]
-  delta_lf_res: Annotated[ctypes.c_uint32, 94, 2, 6]
-  delta_lf_multi: Annotated[ctypes.c_uint32, 95, 1, 0]
-  reserved3: Annotated[ctypes.c_uint32, 95, 1, 1]
-  coded_lossless: Annotated[ctypes.c_uint32, 95, 1, 2]
-  tile_enabled: Annotated[ctypes.c_uint32, 95, 1, 3]
-  reserved4: Annotated[ctypes.c_uint32, 95, 2, 4]
-  superres_is_scaled: Annotated[ctypes.c_uint32, 95, 1, 6]
-  reserved_fh: Annotated[ctypes.c_uint32, 95, 1, 7]
-  tile_cols: Annotated[ctypes.c_uint32, 96, 8, 0]
-  tile_rows: Annotated[ctypes.c_uint32, 97, 8, 0]
-  context_update_tile_id: Annotated[ctypes.c_uint32, 98, 16, 0]
-  cdef_damping_minus_3: Annotated[ctypes.c_uint32, 100, 2, 0]
-  cdef_bits: Annotated[ctypes.c_uint32, 100, 2, 2]
-  frame_tx_mode: Annotated[ctypes.c_uint32, 100, 3, 4]
-  frame_reference_mode: Annotated[ctypes.c_uint32, 100, 2, 7]
-  skip_mode_flag: Annotated[ctypes.c_uint32, 101, 1, 1]
-  skip_ref0: Annotated[ctypes.c_uint32, 101, 4, 2]
-  skip_ref1: Annotated[ctypes.c_uint32, 101, 4, 6]
-  allow_warp: Annotated[ctypes.c_uint32, 102, 1, 2]
-  reduced_tx_set_used: Annotated[ctypes.c_uint32, 102, 1, 3]
-  ref_scaling_enable: Annotated[ctypes.c_uint32, 102, 1, 4]
-  reserved5: Annotated[ctypes.c_uint32, 102, 1, 5]
-  reserved6: Annotated[ctypes.c_uint32, 102, 10, 6]
-  superres_upscaled_width: Annotated[ctypes.c_uint16, 104]
-  superres_luma_step: Annotated[ctypes.c_uint16, 106]
-  superres_chroma_step: Annotated[ctypes.c_uint16, 108]
-  superres_init_luma_subpel_x: Annotated[ctypes.c_uint16, 110]
-  superres_init_chroma_subpel_x: Annotated[ctypes.c_uint16, 112]
-  base_qindex: Annotated[ctypes.c_ubyte, 114]
-  y_dc_delta_q: Annotated[ctypes.c_char, 115]
-  u_dc_delta_q: Annotated[ctypes.c_char, 116]
-  v_dc_delta_q: Annotated[ctypes.c_char, 117]
-  u_ac_delta_q: Annotated[ctypes.c_char, 118]
-  v_ac_delta_q: Annotated[ctypes.c_char, 119]
-  qm_y: Annotated[ctypes.c_ubyte, 120]
-  qm_u: Annotated[ctypes.c_ubyte, 121]
-  qm_v: Annotated[ctypes.c_ubyte, 122]
-  cdef_y_pri_strength: Annotated[ctypes.c_uint32, 124]
-  cdef_uv_pri_strength: Annotated[ctypes.c_uint32, 128]
-  cdef_y_sec_strength: Annotated[ctypes.c_uint32, 132, 16, 0]
-  cdef_uv_sec_strength: Annotated[ctypes.c_uint32, 134, 16, 0]
-  segment_enabled: Annotated[ctypes.c_ubyte, 136]
-  segment_update_map: Annotated[ctypes.c_ubyte, 137]
-  reserved7: Annotated[ctypes.c_ubyte, 138]
-  segment_temporal_update: Annotated[ctypes.c_ubyte, 139]
-  segment_feature_data: Annotated[Array[Array[ctypes.c_int16, Literal[8]], Literal[8]], 140]
-  last_active_segid: Annotated[ctypes.c_ubyte, 268]
-  segid_preskip: Annotated[ctypes.c_ubyte, 269]
-  prevsegid_flag: Annotated[ctypes.c_ubyte, 270]
-  segment_quant_sign: Annotated[ctypes.c_ubyte, 271, 8, 0]
-  filter_level: Annotated[Array[ctypes.c_ubyte, Literal[2]], 272]
-  filter_level_u: Annotated[ctypes.c_ubyte, 274]
-  filter_level_v: Annotated[ctypes.c_ubyte, 275]
-  lf_sharpness_level: Annotated[ctypes.c_ubyte, 276]
-  lf_ref_deltas: Annotated[Array[ctypes.c_char, Literal[8]], 277]
-  lf_mode_deltas: Annotated[Array[ctypes.c_char, Literal[2]], 285]
-  lr_type: Annotated[ctypes.c_ubyte, 287]
-  lr_unit_size: Annotated[ctypes.c_ubyte, 288]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 76]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 80]
+  reserved12: Annotated[Annotated[int, ctypes.c_uint32], 84]
+  use_128x128_superblock: Annotated[Annotated[int, ctypes.c_uint32], 88, 1, 0]
+  chroma_format: Annotated[Annotated[int, ctypes.c_uint32], 88, 2, 1]
+  bit_depth: Annotated[Annotated[int, ctypes.c_uint32], 88, 4, 3]
+  enable_filter_intra: Annotated[Annotated[int, ctypes.c_uint32], 88, 1, 7]
+  enable_intra_edge_filter: Annotated[Annotated[int, ctypes.c_uint32], 89, 1, 0]
+  enable_interintra_compound: Annotated[Annotated[int, ctypes.c_uint32], 89, 1, 1]
+  enable_masked_compound: Annotated[Annotated[int, ctypes.c_uint32], 89, 1, 2]
+  enable_dual_filter: Annotated[Annotated[int, ctypes.c_uint32], 89, 1, 3]
+  reserved10: Annotated[Annotated[int, ctypes.c_uint32], 89, 1, 4]
+  reserved0: Annotated[Annotated[int, ctypes.c_uint32], 89, 3, 5]
+  enable_jnt_comp: Annotated[Annotated[int, ctypes.c_uint32], 90, 1, 0]
+  reserved1: Annotated[Annotated[int, ctypes.c_uint32], 90, 1, 1]
+  enable_cdef: Annotated[Annotated[int, ctypes.c_uint32], 90, 1, 2]
+  reserved11: Annotated[Annotated[int, ctypes.c_uint32], 90, 1, 3]
+  enable_fgs: Annotated[Annotated[int, ctypes.c_uint32], 90, 1, 4]
+  enable_substream_decoding: Annotated[Annotated[int, ctypes.c_uint32], 90, 1, 5]
+  reserved2: Annotated[Annotated[int, ctypes.c_uint32], 90, 10, 6]
+  frame_type: Annotated[Annotated[int, ctypes.c_uint32], 92, 2, 0]
+  show_frame: Annotated[Annotated[int, ctypes.c_uint32], 92, 1, 2]
+  reserved13: Annotated[Annotated[int, ctypes.c_uint32], 92, 1, 3]
+  disable_cdf_update: Annotated[Annotated[int, ctypes.c_uint32], 92, 1, 4]
+  allow_screen_content_tools: Annotated[Annotated[int, ctypes.c_uint32], 92, 1, 5]
+  cur_frame_force_integer_mv: Annotated[Annotated[int, ctypes.c_uint32], 92, 1, 6]
+  scale_denom_minus9: Annotated[Annotated[int, ctypes.c_uint32], 92, 3, 7]
+  allow_intrabc: Annotated[Annotated[int, ctypes.c_uint32], 93, 1, 2]
+  allow_high_precision_mv: Annotated[Annotated[int, ctypes.c_uint32], 93, 1, 3]
+  interp_filter: Annotated[Annotated[int, ctypes.c_uint32], 93, 3, 4]
+  switchable_motion_mode: Annotated[Annotated[int, ctypes.c_uint32], 93, 1, 7]
+  use_ref_frame_mvs: Annotated[Annotated[int, ctypes.c_uint32], 94, 1, 0]
+  refresh_frame_context: Annotated[Annotated[int, ctypes.c_uint32], 94, 1, 1]
+  delta_q_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 94, 1, 2]
+  delta_q_res: Annotated[Annotated[int, ctypes.c_uint32], 94, 2, 3]
+  delta_lf_present_flag: Annotated[Annotated[int, ctypes.c_uint32], 94, 1, 5]
+  delta_lf_res: Annotated[Annotated[int, ctypes.c_uint32], 94, 2, 6]
+  delta_lf_multi: Annotated[Annotated[int, ctypes.c_uint32], 95, 1, 0]
+  reserved3: Annotated[Annotated[int, ctypes.c_uint32], 95, 1, 1]
+  coded_lossless: Annotated[Annotated[int, ctypes.c_uint32], 95, 1, 2]
+  tile_enabled: Annotated[Annotated[int, ctypes.c_uint32], 95, 1, 3]
+  reserved4: Annotated[Annotated[int, ctypes.c_uint32], 95, 2, 4]
+  superres_is_scaled: Annotated[Annotated[int, ctypes.c_uint32], 95, 1, 6]
+  reserved_fh: Annotated[Annotated[int, ctypes.c_uint32], 95, 1, 7]
+  tile_cols: Annotated[Annotated[int, ctypes.c_uint32], 96, 8, 0]
+  tile_rows: Annotated[Annotated[int, ctypes.c_uint32], 97, 8, 0]
+  context_update_tile_id: Annotated[Annotated[int, ctypes.c_uint32], 98, 16, 0]
+  cdef_damping_minus_3: Annotated[Annotated[int, ctypes.c_uint32], 100, 2, 0]
+  cdef_bits: Annotated[Annotated[int, ctypes.c_uint32], 100, 2, 2]
+  frame_tx_mode: Annotated[Annotated[int, ctypes.c_uint32], 100, 3, 4]
+  frame_reference_mode: Annotated[Annotated[int, ctypes.c_uint32], 100, 2, 7]
+  skip_mode_flag: Annotated[Annotated[int, ctypes.c_uint32], 101, 1, 1]
+  skip_ref0: Annotated[Annotated[int, ctypes.c_uint32], 101, 4, 2]
+  skip_ref1: Annotated[Annotated[int, ctypes.c_uint32], 101, 4, 6]
+  allow_warp: Annotated[Annotated[int, ctypes.c_uint32], 102, 1, 2]
+  reduced_tx_set_used: Annotated[Annotated[int, ctypes.c_uint32], 102, 1, 3]
+  ref_scaling_enable: Annotated[Annotated[int, ctypes.c_uint32], 102, 1, 4]
+  reserved5: Annotated[Annotated[int, ctypes.c_uint32], 102, 1, 5]
+  reserved6: Annotated[Annotated[int, ctypes.c_uint32], 102, 10, 6]
+  superres_upscaled_width: Annotated[Annotated[int, ctypes.c_uint16], 104]
+  superres_luma_step: Annotated[Annotated[int, ctypes.c_uint16], 106]
+  superres_chroma_step: Annotated[Annotated[int, ctypes.c_uint16], 108]
+  superres_init_luma_subpel_x: Annotated[Annotated[int, ctypes.c_uint16], 110]
+  superres_init_chroma_subpel_x: Annotated[Annotated[int, ctypes.c_uint16], 112]
+  base_qindex: Annotated[Annotated[int, ctypes.c_ubyte], 114]
+  y_dc_delta_q: Annotated[Annotated[bytes, ctypes.c_char], 115]
+  u_dc_delta_q: Annotated[Annotated[bytes, ctypes.c_char], 116]
+  v_dc_delta_q: Annotated[Annotated[bytes, ctypes.c_char], 117]
+  u_ac_delta_q: Annotated[Annotated[bytes, ctypes.c_char], 118]
+  v_ac_delta_q: Annotated[Annotated[bytes, ctypes.c_char], 119]
+  qm_y: Annotated[Annotated[int, ctypes.c_ubyte], 120]
+  qm_u: Annotated[Annotated[int, ctypes.c_ubyte], 121]
+  qm_v: Annotated[Annotated[int, ctypes.c_ubyte], 122]
+  cdef_y_pri_strength: Annotated[Annotated[int, ctypes.c_uint32], 124]
+  cdef_uv_pri_strength: Annotated[Annotated[int, ctypes.c_uint32], 128]
+  cdef_y_sec_strength: Annotated[Annotated[int, ctypes.c_uint32], 132, 16, 0]
+  cdef_uv_sec_strength: Annotated[Annotated[int, ctypes.c_uint32], 134, 16, 0]
+  segment_enabled: Annotated[Annotated[int, ctypes.c_ubyte], 136]
+  segment_update_map: Annotated[Annotated[int, ctypes.c_ubyte], 137]
+  reserved7: Annotated[Annotated[int, ctypes.c_ubyte], 138]
+  segment_temporal_update: Annotated[Annotated[int, ctypes.c_ubyte], 139]
+  segment_feature_data: Annotated[Array[Array[Annotated[int, ctypes.c_int16], Literal[8]], Literal[8]], 140]
+  last_active_segid: Annotated[Annotated[int, ctypes.c_ubyte], 268]
+  segid_preskip: Annotated[Annotated[int, ctypes.c_ubyte], 269]
+  prevsegid_flag: Annotated[Annotated[int, ctypes.c_ubyte], 270]
+  segment_quant_sign: Annotated[Annotated[int, ctypes.c_ubyte], 271, 8, 0]
+  filter_level: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 272]
+  filter_level_u: Annotated[Annotated[int, ctypes.c_ubyte], 274]
+  filter_level_v: Annotated[Annotated[int, ctypes.c_ubyte], 275]
+  lf_sharpness_level: Annotated[Annotated[int, ctypes.c_ubyte], 276]
+  lf_ref_deltas: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[8]], 277]
+  lf_mode_deltas: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[2]], 285]
+  lr_type: Annotated[Annotated[int, ctypes.c_ubyte], 287]
+  lr_unit_size: Annotated[Annotated[int, ctypes.c_ubyte], 288]
   current_frame: Annotated[frame_info_t, 292]
   ref_frame: Annotated[Array[ref_frame_struct_s, Literal[7]], 304]
-  use_temporal0_mvs: Annotated[ctypes.c_uint32, 472, 1, 0]
-  use_temporal1_mvs: Annotated[ctypes.c_uint32, 472, 1, 1]
-  use_temporal2_mvs: Annotated[ctypes.c_uint32, 472, 1, 2]
-  mf1_type: Annotated[ctypes.c_uint32, 472, 3, 3]
-  mf2_type: Annotated[ctypes.c_uint32, 472, 3, 6]
-  mf3_type: Annotated[ctypes.c_uint32, 473, 3, 1]
-  reserved_mfmv: Annotated[ctypes.c_uint32, 473, 20, 4]
-  mfmv_offset: Annotated[Array[Array[ctypes.c_int16, Literal[7]], Literal[3]], 476]
-  mfmv_side: Annotated[Array[Array[ctypes.c_char, Literal[7]], Literal[3]], 518]
-  tileformat: Annotated[ctypes.c_ubyte, 539, 2, 0]
-  gob_height: Annotated[ctypes.c_ubyte, 539, 3, 2]
-  errorConcealOn: Annotated[ctypes.c_ubyte, 539, 1, 5]
-  reserver8: Annotated[ctypes.c_ubyte, 539, 2, 6]
-  stream_error_detection: Annotated[ctypes.c_ubyte, 540, 1, 0]
-  mv_error_detection: Annotated[ctypes.c_ubyte, 540, 1, 1]
-  coeff_error_detection: Annotated[ctypes.c_ubyte, 540, 1, 2]
-  reserved_eh: Annotated[ctypes.c_ubyte, 540, 5, 3]
-  Av1FltTopOffset: Annotated[ctypes.c_uint32, 544]
-  Av1FltVertOffset: Annotated[ctypes.c_uint32, 548]
-  Av1CdefVertOffset: Annotated[ctypes.c_uint32, 552]
-  Av1LrVertOffset: Annotated[ctypes.c_uint32, 556]
-  Av1HusVertOffset: Annotated[ctypes.c_uint32, 560]
-  Av1FgsVertOffset: Annotated[ctypes.c_uint32, 564]
-  enable_histogram: Annotated[ctypes.c_uint32, 568, 1, 0]
-  sw_skip_start_length: Annotated[ctypes.c_uint32, 568, 14, 1]
-  reserved_stat: Annotated[ctypes.c_uint32, 569, 17, 7]
+  use_temporal0_mvs: Annotated[Annotated[int, ctypes.c_uint32], 472, 1, 0]
+  use_temporal1_mvs: Annotated[Annotated[int, ctypes.c_uint32], 472, 1, 1]
+  use_temporal2_mvs: Annotated[Annotated[int, ctypes.c_uint32], 472, 1, 2]
+  mf1_type: Annotated[Annotated[int, ctypes.c_uint32], 472, 3, 3]
+  mf2_type: Annotated[Annotated[int, ctypes.c_uint32], 472, 3, 6]
+  mf3_type: Annotated[Annotated[int, ctypes.c_uint32], 473, 3, 1]
+  reserved_mfmv: Annotated[Annotated[int, ctypes.c_uint32], 473, 20, 4]
+  mfmv_offset: Annotated[Array[Array[Annotated[int, ctypes.c_int16], Literal[7]], Literal[3]], 476]
+  mfmv_side: Annotated[Array[Array[Annotated[bytes, ctypes.c_char], Literal[7]], Literal[3]], 518]
+  tileformat: Annotated[Annotated[int, ctypes.c_ubyte], 539, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_ubyte], 539, 3, 2]
+  errorConcealOn: Annotated[Annotated[int, ctypes.c_ubyte], 539, 1, 5]
+  reserver8: Annotated[Annotated[int, ctypes.c_ubyte], 539, 2, 6]
+  stream_error_detection: Annotated[Annotated[int, ctypes.c_ubyte], 540, 1, 0]
+  mv_error_detection: Annotated[Annotated[int, ctypes.c_ubyte], 540, 1, 1]
+  coeff_error_detection: Annotated[Annotated[int, ctypes.c_ubyte], 540, 1, 2]
+  reserved_eh: Annotated[Annotated[int, ctypes.c_ubyte], 540, 5, 3]
+  Av1FltTopOffset: Annotated[Annotated[int, ctypes.c_uint32], 544]
+  Av1FltVertOffset: Annotated[Annotated[int, ctypes.c_uint32], 548]
+  Av1CdefVertOffset: Annotated[Annotated[int, ctypes.c_uint32], 552]
+  Av1LrVertOffset: Annotated[Annotated[int, ctypes.c_uint32], 556]
+  Av1HusVertOffset: Annotated[Annotated[int, ctypes.c_uint32], 560]
+  Av1FgsVertOffset: Annotated[Annotated[int, ctypes.c_uint32], 564]
+  enable_histogram: Annotated[Annotated[int, ctypes.c_uint32], 568, 1, 0]
+  sw_skip_start_length: Annotated[Annotated[int, ctypes.c_uint32], 568, 14, 1]
+  reserved_stat: Annotated[Annotated[int, ctypes.c_uint32], 569, 17, 7]
 nvdec_av1_pic_s = struct__nvdec_av1_pic_s
 @record
 class struct__AV1FilmGrainMemory:
   SIZE = 13056
-  scaling_lut_y: Annotated[Array[ctypes.c_ubyte, Literal[256]], 0]
-  scaling_lut_cb: Annotated[Array[ctypes.c_ubyte, Literal[256]], 256]
-  scaling_lut_cr: Annotated[Array[ctypes.c_ubyte, Literal[256]], 512]
-  cropped_luma_grain_block: Annotated[Array[ctypes.c_int16, Literal[4096]], 768]
-  cropped_cb_grain_block: Annotated[Array[ctypes.c_int16, Literal[1024]], 8960]
-  cropped_cr_grain_block: Annotated[Array[ctypes.c_int16, Literal[1024]], 11008]
+  scaling_lut_y: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[256]], 0]
+  scaling_lut_cb: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[256]], 256]
+  scaling_lut_cr: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[256]], 512]
+  cropped_luma_grain_block: Annotated[Array[Annotated[int, ctypes.c_int16], Literal[4096]], 768]
+  cropped_cb_grain_block: Annotated[Array[Annotated[int, ctypes.c_int16], Literal[1024]], 8960]
+  cropped_cr_grain_block: Annotated[Array[Annotated[int, ctypes.c_int16], Literal[1024]], 11008]
 AV1FilmGrainMemory = struct__AV1FilmGrainMemory
 @record
 class struct__AV1TileInfo_OLD:
   SIZE = 16
-  width_in_sb: Annotated[ctypes.c_ubyte, 0]
-  height_in_sb: Annotated[ctypes.c_ubyte, 1]
-  tile_start_b0: Annotated[ctypes.c_ubyte, 2]
-  tile_start_b1: Annotated[ctypes.c_ubyte, 3]
-  tile_start_b2: Annotated[ctypes.c_ubyte, 4]
-  tile_start_b3: Annotated[ctypes.c_ubyte, 5]
-  tile_end_b0: Annotated[ctypes.c_ubyte, 6]
-  tile_end_b1: Annotated[ctypes.c_ubyte, 7]
-  tile_end_b2: Annotated[ctypes.c_ubyte, 8]
-  tile_end_b3: Annotated[ctypes.c_ubyte, 9]
-  padding: Annotated[Array[ctypes.c_ubyte, Literal[6]], 10]
+  width_in_sb: Annotated[Annotated[int, ctypes.c_ubyte], 0]
+  height_in_sb: Annotated[Annotated[int, ctypes.c_ubyte], 1]
+  tile_start_b0: Annotated[Annotated[int, ctypes.c_ubyte], 2]
+  tile_start_b1: Annotated[Annotated[int, ctypes.c_ubyte], 3]
+  tile_start_b2: Annotated[Annotated[int, ctypes.c_ubyte], 4]
+  tile_start_b3: Annotated[Annotated[int, ctypes.c_ubyte], 5]
+  tile_end_b0: Annotated[Annotated[int, ctypes.c_ubyte], 6]
+  tile_end_b1: Annotated[Annotated[int, ctypes.c_ubyte], 7]
+  tile_end_b2: Annotated[Annotated[int, ctypes.c_ubyte], 8]
+  tile_end_b3: Annotated[Annotated[int, ctypes.c_ubyte], 9]
+  padding: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[6]], 10]
 AV1TileInfo_OLD = struct__AV1TileInfo_OLD
 @record
 class struct__AV1TileInfo:
   SIZE = 4
-  width_in_sb: Annotated[ctypes.c_ubyte, 0]
-  padding_w: Annotated[ctypes.c_ubyte, 1]
-  height_in_sb: Annotated[ctypes.c_ubyte, 2]
-  padding_h: Annotated[ctypes.c_ubyte, 3]
+  width_in_sb: Annotated[Annotated[int, ctypes.c_ubyte], 0]
+  padding_w: Annotated[Annotated[int, ctypes.c_ubyte], 1]
+  height_in_sb: Annotated[Annotated[int, ctypes.c_ubyte], 2]
+  padding_h: Annotated[Annotated[int, ctypes.c_ubyte], 3]
 AV1TileInfo = struct__AV1TileInfo
 @record
 class struct__AV1TileStreamInfo:
   SIZE = 16
-  tile_start: Annotated[ctypes.c_uint32, 0]
-  tile_end: Annotated[ctypes.c_uint32, 4]
-  padding: Annotated[Array[ctypes.c_ubyte, Literal[8]], 8]
+  tile_start: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  tile_end: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  padding: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[8]], 8]
 AV1TileStreamInfo = struct__AV1TileStreamInfo
 @record
 class struct__nvdec_new_h264_pic_s:
   SIZE = 764
   encryption_params: Annotated[nvdec_pass2_otf_s, 0]
-  eos: Annotated[Array[ctypes.c_ubyte, Literal[16]], 52]
-  explicitEOSPresentFlag: Annotated[ctypes.c_ubyte, 68]
-  hint_dump_en: Annotated[ctypes.c_ubyte, 69]
-  reserved0: Annotated[Array[ctypes.c_ubyte, Literal[2]], 70]
-  stream_len: Annotated[ctypes.c_uint32, 72]
-  slice_count: Annotated[ctypes.c_uint32, 76]
-  mbhist_buffer_size: Annotated[ctypes.c_uint32, 80]
-  gptimer_timeout_value: Annotated[ctypes.c_uint32, 84]
-  log2_max_pic_order_cnt_lsb_minus4: Annotated[ctypes.c_int32, 88]
-  delta_pic_order_always_zero_flag: Annotated[ctypes.c_int32, 92]
-  frame_mbs_only_flag: Annotated[ctypes.c_int32, 96]
-  PicWidthInMbs: Annotated[ctypes.c_int32, 100]
-  FrameHeightInMbs: Annotated[ctypes.c_int32, 104]
-  tileFormat: Annotated[ctypes.c_uint32, 108, 2, 0]
-  gob_height: Annotated[ctypes.c_uint32, 108, 3, 2]
-  reserverd_surface_format: Annotated[ctypes.c_uint32, 108, 27, 5]
-  entropy_coding_mode_flag: Annotated[ctypes.c_int32, 112]
-  pic_order_present_flag: Annotated[ctypes.c_int32, 116]
-  num_ref_idx_l0_active_minus1: Annotated[ctypes.c_int32, 120]
-  num_ref_idx_l1_active_minus1: Annotated[ctypes.c_int32, 124]
-  deblocking_filter_control_present_flag: Annotated[ctypes.c_int32, 128]
-  redundant_pic_cnt_present_flag: Annotated[ctypes.c_int32, 132]
-  transform_8x8_mode_flag: Annotated[ctypes.c_int32, 136]
-  pitch_luma: Annotated[ctypes.c_uint32, 140]
-  pitch_chroma: Annotated[ctypes.c_uint32, 144]
-  luma_top_offset: Annotated[ctypes.c_uint32, 148]
-  luma_bot_offset: Annotated[ctypes.c_uint32, 152]
-  luma_frame_offset: Annotated[ctypes.c_uint32, 156]
-  chroma_top_offset: Annotated[ctypes.c_uint32, 160]
-  chroma_bot_offset: Annotated[ctypes.c_uint32, 164]
-  chroma_frame_offset: Annotated[ctypes.c_uint32, 168]
-  HistBufferSize: Annotated[ctypes.c_uint32, 172]
-  MbaffFrameFlag: Annotated[ctypes.c_uint32, 176, 1, 0]
-  direct_8x8_inference_flag: Annotated[ctypes.c_uint32, 176, 1, 1]
-  weighted_pred_flag: Annotated[ctypes.c_uint32, 176, 1, 2]
-  constrained_intra_pred_flag: Annotated[ctypes.c_uint32, 176, 1, 3]
-  ref_pic_flag: Annotated[ctypes.c_uint32, 176, 1, 4]
-  field_pic_flag: Annotated[ctypes.c_uint32, 176, 1, 5]
-  bottom_field_flag: Annotated[ctypes.c_uint32, 176, 1, 6]
-  second_field: Annotated[ctypes.c_uint32, 176, 1, 7]
-  log2_max_frame_num_minus4: Annotated[ctypes.c_uint32, 177, 4, 0]
-  chroma_format_idc: Annotated[ctypes.c_uint32, 177, 2, 4]
-  pic_order_cnt_type: Annotated[ctypes.c_uint32, 177, 2, 6]
-  pic_init_qp_minus26: Annotated[ctypes.c_int32, 178, 6, 0]
-  chroma_qp_index_offset: Annotated[ctypes.c_int32, 178, 5, 6]
-  second_chroma_qp_index_offset: Annotated[ctypes.c_int32, 179, 5, 3]
-  weighted_bipred_idc: Annotated[ctypes.c_uint32, 180, 2, 0]
-  CurrPicIdx: Annotated[ctypes.c_uint32, 180, 7, 2]
-  CurrColIdx: Annotated[ctypes.c_uint32, 181, 5, 1]
-  frame_num: Annotated[ctypes.c_uint32, 181, 16, 6]
-  frame_surfaces: Annotated[ctypes.c_uint32, 183, 1, 6]
-  output_memory_layout: Annotated[ctypes.c_uint32, 183, 1, 7]
-  CurrFieldOrderCnt: Annotated[Array[ctypes.c_int32, Literal[2]], 184]
+  eos: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 52]
+  explicitEOSPresentFlag: Annotated[Annotated[int, ctypes.c_ubyte], 68]
+  hint_dump_en: Annotated[Annotated[int, ctypes.c_ubyte], 69]
+  reserved0: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 70]
+  stream_len: Annotated[Annotated[int, ctypes.c_uint32], 72]
+  slice_count: Annotated[Annotated[int, ctypes.c_uint32], 76]
+  mbhist_buffer_size: Annotated[Annotated[int, ctypes.c_uint32], 80]
+  gptimer_timeout_value: Annotated[Annotated[int, ctypes.c_uint32], 84]
+  log2_max_pic_order_cnt_lsb_minus4: Annotated[Annotated[int, ctypes.c_int32], 88]
+  delta_pic_order_always_zero_flag: Annotated[Annotated[int, ctypes.c_int32], 92]
+  frame_mbs_only_flag: Annotated[Annotated[int, ctypes.c_int32], 96]
+  PicWidthInMbs: Annotated[Annotated[int, ctypes.c_int32], 100]
+  FrameHeightInMbs: Annotated[Annotated[int, ctypes.c_int32], 104]
+  tileFormat: Annotated[Annotated[int, ctypes.c_uint32], 108, 2, 0]
+  gob_height: Annotated[Annotated[int, ctypes.c_uint32], 108, 3, 2]
+  reserverd_surface_format: Annotated[Annotated[int, ctypes.c_uint32], 108, 27, 5]
+  entropy_coding_mode_flag: Annotated[Annotated[int, ctypes.c_int32], 112]
+  pic_order_present_flag: Annotated[Annotated[int, ctypes.c_int32], 116]
+  num_ref_idx_l0_active_minus1: Annotated[Annotated[int, ctypes.c_int32], 120]
+  num_ref_idx_l1_active_minus1: Annotated[Annotated[int, ctypes.c_int32], 124]
+  deblocking_filter_control_present_flag: Annotated[Annotated[int, ctypes.c_int32], 128]
+  redundant_pic_cnt_present_flag: Annotated[Annotated[int, ctypes.c_int32], 132]
+  transform_8x8_mode_flag: Annotated[Annotated[int, ctypes.c_int32], 136]
+  pitch_luma: Annotated[Annotated[int, ctypes.c_uint32], 140]
+  pitch_chroma: Annotated[Annotated[int, ctypes.c_uint32], 144]
+  luma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 148]
+  luma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 152]
+  luma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 156]
+  chroma_top_offset: Annotated[Annotated[int, ctypes.c_uint32], 160]
+  chroma_bot_offset: Annotated[Annotated[int, ctypes.c_uint32], 164]
+  chroma_frame_offset: Annotated[Annotated[int, ctypes.c_uint32], 168]
+  HistBufferSize: Annotated[Annotated[int, ctypes.c_uint32], 172]
+  MbaffFrameFlag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 0]
+  direct_8x8_inference_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 1]
+  weighted_pred_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 2]
+  constrained_intra_pred_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 3]
+  ref_pic_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 4]
+  field_pic_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 5]
+  bottom_field_flag: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 6]
+  second_field: Annotated[Annotated[int, ctypes.c_uint32], 176, 1, 7]
+  log2_max_frame_num_minus4: Annotated[Annotated[int, ctypes.c_uint32], 177, 4, 0]
+  chroma_format_idc: Annotated[Annotated[int, ctypes.c_uint32], 177, 2, 4]
+  pic_order_cnt_type: Annotated[Annotated[int, ctypes.c_uint32], 177, 2, 6]
+  pic_init_qp_minus26: Annotated[Annotated[int, ctypes.c_int32], 178, 6, 0]
+  chroma_qp_index_offset: Annotated[Annotated[int, ctypes.c_int32], 178, 5, 6]
+  second_chroma_qp_index_offset: Annotated[Annotated[int, ctypes.c_int32], 179, 5, 3]
+  weighted_bipred_idc: Annotated[Annotated[int, ctypes.c_uint32], 180, 2, 0]
+  CurrPicIdx: Annotated[Annotated[int, ctypes.c_uint32], 180, 7, 2]
+  CurrColIdx: Annotated[Annotated[int, ctypes.c_uint32], 181, 5, 1]
+  frame_num: Annotated[Annotated[int, ctypes.c_uint32], 181, 16, 6]
+  frame_surfaces: Annotated[Annotated[int, ctypes.c_uint32], 183, 1, 6]
+  output_memory_layout: Annotated[Annotated[int, ctypes.c_uint32], 183, 1, 7]
+  CurrFieldOrderCnt: Annotated[Array[Annotated[int, ctypes.c_int32], Literal[2]], 184]
   dpb: Annotated[Array[nvdec_dpb_entry_s, Literal[16]], 192]
-  WeightScale: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[4]], Literal[4]], Literal[6]], 448]
-  WeightScale8x8: Annotated[Array[Array[Array[ctypes.c_ubyte, Literal[8]], Literal[8]], Literal[2]], 544]
-  num_inter_view_refs_lX: Annotated[Array[ctypes.c_ubyte, Literal[2]], 672]
-  reserved1: Annotated[Array[ctypes.c_char, Literal[14]], 674]
-  inter_view_refidx_lX: Annotated[Array[Array[ctypes.c_byte, Literal[16]], Literal[2]], 688]
-  lossless_ipred8x8_filter_enable: Annotated[ctypes.c_uint32, 720, 1, 0]
-  qpprime_y_zero_transform_bypass_flag: Annotated[ctypes.c_uint32, 720, 1, 1]
-  reserved2: Annotated[ctypes.c_uint32, 720, 30, 2]
+  WeightScale: Annotated[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[4]], Literal[4]], Literal[6]], 448]
+  WeightScale8x8: Annotated[Array[Array[Array[Annotated[int, ctypes.c_ubyte], Literal[8]], Literal[8]], Literal[2]], 544]
+  num_inter_view_refs_lX: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 672]
+  reserved1: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[14]], 674]
+  inter_view_refidx_lX: Annotated[Array[Array[Annotated[int, ctypes.c_byte], Literal[16]], Literal[2]], 688]
+  lossless_ipred8x8_filter_enable: Annotated[Annotated[int, ctypes.c_uint32], 720, 1, 0]
+  qpprime_y_zero_transform_bypass_flag: Annotated[Annotated[int, ctypes.c_uint32], 720, 1, 1]
+  reserved2: Annotated[Annotated[int, ctypes.c_uint32], 720, 30, 2]
   displayPara: Annotated[nvdec_display_param_s, 724]
   ssm: Annotated[nvdec_pass2_otf_ext_s, 752]
 nvdec_new_h264_pic_s = struct__nvdec_new_h264_pic_s
 @record
 class nvdec_crc_s:
   SIZE = 128
-  dbg_crc_enable_partb: Annotated[ctypes.c_uint32, 0, 1, 0]
-  dbg_crc_enable_partc: Annotated[ctypes.c_uint32, 0, 1, 1]
-  dbg_crc_enable_partd: Annotated[ctypes.c_uint32, 0, 1, 2]
-  dbg_crc_enable_parte: Annotated[ctypes.c_uint32, 0, 1, 3]
-  dbg_crc_intf_partb: Annotated[ctypes.c_uint32, 0, 6, 4]
-  dbg_crc_intf_partc: Annotated[ctypes.c_uint32, 1, 6, 2]
-  dbg_crc_intf_partd: Annotated[ctypes.c_uint32, 2, 6, 0]
-  dbg_crc_intf_parte: Annotated[ctypes.c_uint32, 2, 6, 6]
-  reserved0: Annotated[ctypes.c_uint32, 3, 4, 4]
-  dbg_crc_partb_golden: Annotated[Array[ctypes.c_uint32, Literal[4]], 4]
-  dbg_crc_partc_golden: Annotated[Array[ctypes.c_uint32, Literal[4]], 20]
-  dbg_crc_partd_golden: Annotated[Array[ctypes.c_uint32, Literal[4]], 36]
-  dbg_crc_parte_golden: Annotated[Array[ctypes.c_uint32, Literal[4]], 52]
-  dbg_crc_comp_partb: Annotated[ctypes.c_uint32, 68, 4, 0]
-  dbg_crc_comp_partc: Annotated[ctypes.c_uint32, 68, 4, 4]
-  dbg_crc_comp_partd: Annotated[ctypes.c_uint32, 69, 4, 0]
-  dbg_crc_comp_parte: Annotated[ctypes.c_uint32, 69, 4, 4]
-  reserved1: Annotated[ctypes.c_uint32, 70, 16, 0]
-  reserved2: Annotated[Array[ctypes.c_ubyte, Literal[56]], 72]
+  dbg_crc_enable_partb: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
+  dbg_crc_enable_partc: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 1]
+  dbg_crc_enable_partd: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 2]
+  dbg_crc_enable_parte: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 3]
+  dbg_crc_intf_partb: Annotated[Annotated[int, ctypes.c_uint32], 0, 6, 4]
+  dbg_crc_intf_partc: Annotated[Annotated[int, ctypes.c_uint32], 1, 6, 2]
+  dbg_crc_intf_partd: Annotated[Annotated[int, ctypes.c_uint32], 2, 6, 0]
+  dbg_crc_intf_parte: Annotated[Annotated[int, ctypes.c_uint32], 2, 6, 6]
+  reserved0: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
+  dbg_crc_partb_golden: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 4]
+  dbg_crc_partc_golden: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 20]
+  dbg_crc_partd_golden: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 36]
+  dbg_crc_parte_golden: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 52]
+  dbg_crc_comp_partb: Annotated[Annotated[int, ctypes.c_uint32], 68, 4, 0]
+  dbg_crc_comp_partc: Annotated[Annotated[int, ctypes.c_uint32], 68, 4, 4]
+  dbg_crc_comp_partd: Annotated[Annotated[int, ctypes.c_uint32], 69, 4, 0]
+  dbg_crc_comp_parte: Annotated[Annotated[int, ctypes.c_uint32], 69, 4, 4]
+  reserved1: Annotated[Annotated[int, ctypes.c_uint32], 70, 16, 0]
+  reserved2: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[56]], 72]
 @record
 class struct_NV0000_ALLOC_PARAMETERS:
   SIZE = 120
   hClient: Annotated[NvHandle, 0]
   processID: Annotated[NvU32, 4]
-  processName: Annotated[Array[ctypes.c_char, Literal[100]], 8]
+  processName: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[100]], 8]
   pOsPidInfo: Annotated[NvP64, 112]
-NvHandle = ctypes.c_uint32
-NvU32 = ctypes.c_uint32
-NvP64 = ctypes.POINTER(None)
+NvHandle = Annotated[int, ctypes.c_uint32]
+NvU32 = Annotated[int, ctypes.c_uint32]
+NvP64 = POINTER(None)
 NV0000_ALLOC_PARAMETERS = struct_NV0000_ALLOC_PARAMETERS
 @record
 class struct_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS:
@@ -1330,7 +1330,7 @@ class struct_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS:
   offset: Annotated[NvU64, 0]
   limit: Annotated[NvU64, 8]
   hVASpace: Annotated[NvHandle, 16]
-NvU64 = ctypes.c_uint64
+NvU64 = Annotated[int, ctypes.c_uint64]
 NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS = struct_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS
 @record
 class struct_NV0080_ALLOC_PARAMETERS:
@@ -1344,7 +1344,7 @@ class struct_NV0080_ALLOC_PARAMETERS:
   vaStartInternal: Annotated[NvU64, 32]
   vaLimitInternal: Annotated[NvU64, 40]
   vaMode: Annotated[NvV32, 48]
-NvV32 = ctypes.c_uint32
+NvV32 = Annotated[int, ctypes.c_uint32]
 NV0080_ALLOC_PARAMETERS = struct_NV0080_ALLOC_PARAMETERS
 @record
 class struct_NV2080_ALLOC_PARAMETERS:
@@ -1395,7 +1395,7 @@ class struct_Nv2080WorkloadModulationChangeNotificationRec:
 class _anonstruct14:
   SIZE = 8
   nanoseconds: Annotated[Array[NvU32, Literal[2]], 0]
-NvBool = ctypes.c_ubyte
+NvBool = Annotated[int, ctypes.c_ubyte]
 Nv2080WorkloadModulationChangeNotification = struct_Nv2080WorkloadModulationChangeNotificationRec
 @record
 class Nv2080HotplugNotification:
@@ -1472,7 +1472,7 @@ class struct__NV2080_PLATFORM_POWER_MODE_CHANGE_STATUS:
   platformPowerModeIndex: Annotated[NvU8, 0]
   platformPowerModeMask: Annotated[NvU8, 1]
   eventReason: Annotated[NvU8, 2]
-NvU8 = ctypes.c_ubyte
+NvU8 = Annotated[int, ctypes.c_ubyte]
 NV2080_PLATFORM_POWER_MODE_CHANGE_STATUS = struct__NV2080_PLATFORM_POWER_MODE_CHANGE_STATUS
 @record
 class struct__NV2080_NOTIFIERS_USE_GC6_REDUCED_THRESHOLD_UPDATE:
@@ -1603,7 +1603,7 @@ class UVM_RESERVE_VA_PARAMS:
   requestedBase: Annotated[NvU64, 0]
   length: Annotated[NvU64, 8]
   rmStatus: Annotated[NV_STATUS, 16]
-NV_STATUS = ctypes.c_uint32
+NV_STATUS = Annotated[int, ctypes.c_uint32]
 @record
 class UVM_RELEASE_VA_PARAMS:
   SIZE = 24
@@ -1618,7 +1618,7 @@ class UVM_REGION_COMMIT_PARAMS:
   streamId: Annotated[UvmStream, 16]
   gpuUuid: Annotated[NvProcessorUuid, 24]
   rmStatus: Annotated[NV_STATUS, 40]
-UvmStream = ctypes.c_uint64
+UvmStream = Annotated[int, ctypes.c_uint64]
 @record
 class struct_nv_uuid:
   SIZE = 16
@@ -1668,7 +1668,7 @@ class UVM_ADD_SESSION_PARAMS:
   countersBaseAddress: Annotated[NvP64, 8]
   sessionIndex: Annotated[NvS32, 16]
   rmStatus: Annotated[NV_STATUS, 20]
-NvS32 = ctypes.c_int32
+NvS32 = Annotated[int, ctypes.c_int32]
 @record
 class UVM_REMOVE_SESSION_PARAMS:
   SIZE = 8
@@ -2108,7 +2108,7 @@ class nv_pci_info_t:
   function: Annotated[NvU8, 6]
   vendor_id: Annotated[NvU16, 8]
   device_id: Annotated[NvU16, 10]
-NvU16 = ctypes.c_uint16
+NvU16 = Annotated[int, ctypes.c_uint16]
 @record
 class struct_nv_ioctl_xfer:
   SIZE = 16
@@ -2159,7 +2159,7 @@ class struct_nv_ioctl_rm_api_version:
   SIZE = 72
   cmd: Annotated[NvU32, 0]
   reply: Annotated[NvU32, 4]
-  versionString: Annotated[Array[ctypes.c_char, Literal[64]], 8]
+  versionString: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[64]], 8]
 nv_ioctl_rm_api_version_t = struct_nv_ioctl_rm_api_version
 @record
 class struct_nv_ioctl_query_device_intr:
@@ -2175,12 +2175,12 @@ nv_ioctl_sys_params_t = struct_nv_ioctl_sys_params
 @record
 class struct_nv_ioctl_register_fd:
   SIZE = 4
-  ctl_fd: Annotated[ctypes.c_int32, 0]
+  ctl_fd: Annotated[Annotated[int, ctypes.c_int32], 0]
 nv_ioctl_register_fd_t = struct_nv_ioctl_register_fd
 @record
 class struct_nv_ioctl_export_to_dma_buf_fd:
   SIZE = 2608
-  fd: Annotated[ctypes.c_int32, 0]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   hClient: Annotated[NvHandle, 4]
   totalObjects: Annotated[NvU32, 8]
   numObjects: Annotated[NvU32, 12]
@@ -2196,7 +2196,7 @@ nv_ioctl_export_to_dma_buf_fd_t = struct_nv_ioctl_export_to_dma_buf_fd
 @record
 class struct_nv_ioctl_wait_open_complete:
   SIZE = 8
-  rc: Annotated[ctypes.c_int32, 0]
+  rc: Annotated[Annotated[int, ctypes.c_int32], 0]
   adapterStatus: Annotated[NvU32, 4]
 nv_ioctl_wait_open_complete_t = struct_nv_ioctl_wait_open_complete
 @record
@@ -2204,8 +2204,8 @@ class struct_offline_addresses:
   SIZE = 520
   addresses: Annotated[Array[uint64_t, Literal[64]], 0]
   numEntries: Annotated[uint32_t, 512]
-uint64_t = ctypes.c_uint64
-uint32_t = ctypes.c_uint32
+uint64_t = Annotated[int, ctypes.c_uint64]
+uint32_t = Annotated[int, ctypes.c_uint32]
 nv_offline_addresses_t = struct_offline_addresses
 @record
 class struct_nv_ioctl_numa_info:
@@ -2217,8 +2217,8 @@ class struct_nv_ioctl_numa_info:
   numa_mem_size: Annotated[uint64_t, 24]
   use_auto_online: Annotated[uint8_t, 32]
   offline_addresses: Annotated[nv_offline_addresses_t, 40]
-int32_t = ctypes.c_int32
-uint8_t = ctypes.c_ubyte
+int32_t = Annotated[int, ctypes.c_int32]
+uint8_t = Annotated[int, ctypes.c_ubyte]
 nv_ioctl_numa_info_t = struct_nv_ioctl_numa_info
 @record
 class struct_nv_ioctl_set_numa_status:
@@ -2229,7 +2229,7 @@ nv_ioctl_set_numa_status_t = struct_nv_ioctl_set_numa_status
 class nv_ioctl_nvos02_parameters_with_fd:
   SIZE = 56
   params: Annotated[NVOS02_PARAMETERS, 0]
-  fd: Annotated[ctypes.c_int32, 48]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 48]
 @record
 class NVOS02_PARAMETERS:
   SIZE = 48
@@ -2245,7 +2245,7 @@ class NVOS02_PARAMETERS:
 class nv_ioctl_nvos33_parameters_with_fd:
   SIZE = 56
   params: Annotated[NVOS33_PARAMETERS, 0]
-  fd: Annotated[ctypes.c_int32, 48]
+  fd: Annotated[Annotated[int, ctypes.c_int32], 48]
 @record
 class NVOS33_PARAMETERS:
   SIZE = 48
@@ -2312,18 +2312,18 @@ class NVOS05_PARAMETERS:
   hObjectNew: Annotated[NvHandle, 8]
   hClass: Annotated[NvV32, 12]
   status: Annotated[NvV32, 16]
-Callback1ArgVoidReturn = ctypes.CFUNCTYPE(None, ctypes.POINTER(None))
-Callback5ArgVoidReturn = ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.POINTER(None), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32)
+Callback1ArgVoidReturn = CFUNCTYPE(None, POINTER(None))
+Callback5ArgVoidReturn = CFUNCTYPE(None, POINTER(None), POINTER(None), Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32])
 @record
 class NVOS10_EVENT_KERNEL_CALLBACK:
   SIZE = 16
   func: Annotated[Callback1ArgVoidReturn, 0]
-  arg: Annotated[ctypes.POINTER(None), 8]
+  arg: Annotated[POINTER(None), 8]
 @record
 class NVOS10_EVENT_KERNEL_CALLBACK_EX:
   SIZE = 16
   func: Annotated[Callback5ArgVoidReturn, 0]
-  arg: Annotated[ctypes.POINTER(None), 8]
+  arg: Annotated[POINTER(None), 8]
 @record
 class NVOS_I2C_ACCESS_PARAMS:
   SIZE = 32
@@ -2387,7 +2387,7 @@ class NVOS30_PARAMETERS:
   flags: Annotated[NvV32, 40]
   timeout: Annotated[NvV32, 44]
   status: Annotated[NvV32, 48]
-BindResultFunc = ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32)
+BindResultFunc = CFUNCTYPE(None, POINTER(None), Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32])
 @record
 class NVOS32_DESCRIPTOR_TYPE_OS_SGT_PTR_PARAMETERS:
   SIZE = 16
@@ -2405,7 +2405,7 @@ class NVOS32_PARAMETERS:
   total: Annotated[NvU64, 24]
   free: Annotated[NvU64, 32]
   data: Annotated[_anonunion16, 40]
-NvS16 = ctypes.c_int16
+NvS16 = Annotated[int, ctypes.c_int16]
 @record
 class _anonunion16:
   SIZE = 144
@@ -2816,8 +2816,8 @@ class struct_RS_ACCESS_MASK:
   SIZE = 4
   limbs: Annotated[Array[RsAccessLimb, Literal[1]], 0]
 RS_ACCESS_MASK = struct_RS_ACCESS_MASK
-RsAccessLimb = ctypes.c_uint32
-NVPOWERSTATE_STAGE = ctypes.c_uint32
+RsAccessLimb = Annotated[int, ctypes.c_uint32]
+NVPOWERSTATE_STAGE = Annotated[int, ctypes.c_uint32]
 @record
 class NVPOWERSTATE_FAILURE_ENGINE_TRANSITION:
   SIZE = 24
@@ -3029,7 +3029,7 @@ class NVPOWERSTATE_PARAMETERS:
   bGC8Transition: Annotated[NvU8, 24]
   bGC8InputRailCutOff: Annotated[NvU8, 25]
   failure: Annotated[NVPOWERSTATE_FAILURE, 32]
-PNVPOWERSTATE_PARAMETERS = ctypes.POINTER(NVPOWERSTATE_PARAMETERS)
+PNVPOWERSTATE_PARAMETERS = POINTER(NVPOWERSTATE_PARAMETERS)
 @record
 class NV_GR_ALLOCATION_PARAMETERS:
   SIZE = 16
@@ -3037,7 +3037,7 @@ class NV_GR_ALLOCATION_PARAMETERS:
   flags: Annotated[NvU32, 4]
   size: Annotated[NvU32, 8]
   caps: Annotated[NvU32, 12]
-ChannelPBSize = CEnum(ctypes.c_uint32)
+ChannelPBSize = CEnum(Annotated[int, ctypes.c_uint32])
 PB_SIZE_4KB = ChannelPBSize.define('PB_SIZE_4KB', 0)
 PB_SIZE_8KB = ChannelPBSize.define('PB_SIZE_8KB', 1)
 PB_SIZE_16KB = ChannelPBSize.define('PB_SIZE_16KB', 2)
@@ -3138,11 +3138,11 @@ class NVOS61_PARAMETERS:
   hVblank: Annotated[NvHandle, 8]
   pProc: Annotated[OSVBLANKCALLBACKPROC, 16]
   LogicalHead: Annotated[NvV32, 24]
-  pParm1: Annotated[ctypes.POINTER(None), 32]
-  pParm2: Annotated[ctypes.POINTER(None), 40]
+  pParm1: Annotated[POINTER(None), 32]
+  pParm2: Annotated[POINTER(None), 40]
   bAdd: Annotated[NvU32, 48]
   status: Annotated[NvV32, 52]
-OSVBLANKCALLBACKPROC = ctypes.CFUNCTYPE(None, ctypes.POINTER(None), ctypes.POINTER(None))
+OSVBLANKCALLBACKPROC = CFUNCTYPE(None, POINTER(None), POINTER(None))
 @record
 class NV_VASPACE_ALLOCATION_PARAMETERS:
   SIZE = 56
@@ -3166,7 +3166,7 @@ class NV_TIMEOUT_CONTROL_PARAMETERS:
   cmd: Annotated[NvU32, 0]
   timeoutInMs: Annotated[NvU32, 4]
   deviceInstance: Annotated[NvU32, 8]
-NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE = CEnum(ctypes.c_uint32)
+NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE = CEnum(Annotated[int, ctypes.c_uint32])
 NV_VIDMEM_ACCESS_BIT_BUFFER_ADDR_SPACE_DEFAULT = NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE.define('NV_VIDMEM_ACCESS_BIT_BUFFER_ADDR_SPACE_DEFAULT', 0)
 NV_VIDMEM_ACCESS_BIT_BUFFER_ADDR_SPACE_COH = NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE.define('NV_VIDMEM_ACCESS_BIT_BUFFER_ADDR_SPACE_COH', 1)
 NV_VIDMEM_ACCESS_BIT_BUFFER_ADDR_SPACE_NCOH = NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS_ADDR_SPACE.define('NV_VIDMEM_ACCESS_BIT_BUFFER_ADDR_SPACE_NCOH', 2)
@@ -3313,7 +3313,7 @@ class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS:
 NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS = struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS
 NVA06C_CTRL_SET_INTERLEAVE_LEVEL_PARAMS = struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS
 NVA06C_CTRL_GET_INTERLEAVE_LEVEL_PARAMS = struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS
-enum_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE = CEnum(ctypes.c_uint32)
+enum_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE = CEnum(Annotated[int, ctypes.c_uint32])
 NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE_NONE = enum_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE.define('NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE_NONE', 0)
 NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE_64B = enum_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE.define('NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE_64B', 1)
 NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE_128B = enum_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE.define('NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE_128B', 2)
@@ -3363,7 +3363,7 @@ NV90F1_CTRL_VASPACE_GET_GMMU_FORMAT_PARAMS = struct_NV90F1_CTRL_VASPACE_GET_GMMU
 @record
 class struct_NV_CTRL_VASPACE_PAGE_LEVEL:
   SIZE = 112
-  pFmt: Annotated[ctypes.POINTER(struct_MMU_FMT_LEVEL), 0]
+  pFmt: Annotated[POINTER(struct_MMU_FMT_LEVEL), 0]
   levelFmt: Annotated[MMU_FMT_LEVEL, 8]
   sublevelFmt: Annotated[Array[MMU_FMT_LEVEL, Literal[2]], 32]
   physAddress: Annotated[NvU64, 80]
@@ -3379,7 +3379,7 @@ class struct_MMU_FMT_LEVEL:
   bPageTable: Annotated[NvBool, 3]
   numSubLevels: Annotated[NvU8, 4]
   pageLevelIdTag: Annotated[NvU32, 8]
-  subLevels: Annotated[ctypes.POINTER(struct_MMU_FMT_LEVEL), 16]
+  subLevels: Annotated[POINTER(struct_MMU_FMT_LEVEL), 16]
 MMU_FMT_LEVEL = struct_MMU_FMT_LEVEL
 NV_CTRL_VASPACE_PAGE_LEVEL = struct_NV_CTRL_VASPACE_PAGE_LEVEL
 @record
@@ -3986,7 +3986,7 @@ NV0000_CTRL_NVD_GET_DPC_ISR_TS_PARAMS = struct_NV0000_CTRL_NVD_GET_DPC_ISR_TS_PA
 class struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS:
   SIZE = 104
   subProcessID: Annotated[NvU32, 0]
-  subProcessName: Annotated[Array[ctypes.c_char, Literal[100]], 4]
+  subProcessName: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[100]], 4]
 NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS = struct_NV0000_CTRL_SET_SUB_PROCESS_ID_PARAMS
 @record
 class struct_NV0000_CTRL_DISABLE_SUB_PROCESS_USERD_ISOLATION_PARAMS:
@@ -4037,7 +4037,7 @@ class struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_PARAMS:
   changelistNumber: Annotated[NvU32, 32]
   officialChangelistNumber: Annotated[NvU32, 36]
 NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_PARAMS
-enum_NV0000_CTRL_SYSTEM_SH_SOC_TYPE = CEnum(ctypes.c_uint32)
+enum_NV0000_CTRL_SYSTEM_SH_SOC_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NA = enum_NV0000_CTRL_SYSTEM_SH_SOC_TYPE.define('NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NA', 0)
 NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NV_GRACE = enum_NV0000_CTRL_SYSTEM_SH_SOC_TYPE.define('NV0000_CTRL_SYSTEM_SH_SOC_TYPE_NV_GRACE', 1)
 
@@ -4175,7 +4175,7 @@ class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_V2_PARAMS:
   busPeerIds: Annotated[Array[NvU32, Literal[1024]], 156]
   busEgmPeerIds: Annotated[Array[NvU32, Literal[1024]], 4252]
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_V2_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_V2_PARAMS
-NV0000_CTRL_P2P_CAPS_MATRIX_ROW = Array[ctypes.c_uint32, Literal[8]]
+NV0000_CTRL_P2P_CAPS_MATRIX_ROW = Array[Annotated[int, ctypes.c_uint32], Literal[8]]
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS:
   SIZE = 1352
@@ -4254,11 +4254,11 @@ NV0000_CTRL_SYSTEM_GPS_SET_FRM_DATA_PARAMS = struct_NV0000_CTRL_SYSTEM_GPS_SET_F
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS:
   SIZE = 1288
-  szHostDriverVersionBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 0]
-  szHostVersionBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 256]
-  szHostTitleBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 512]
-  szPluginTitleBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 768]
-  szHostUnameBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 1024]
+  szHostDriverVersionBuffer: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
+  szHostVersionBuffer: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 256]
+  szHostTitleBuffer: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 512]
+  szPluginTitleBuffer: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 768]
+  szHostUnameBuffer: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 1024]
   iHostChangelistNumber: Annotated[NvU32, 1280]
   iPluginChangelistNumber: Annotated[NvU32, 1284]
 NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_VGX_SYSTEM_INFO_PARAMS
@@ -4274,7 +4274,7 @@ class struct_NV0000_CTRL_SYSTEM_GET_PRIVILEGED_STATUS_PARAMS:
   SIZE = 1
   privStatusFlags: Annotated[NvU8, 0]
 NV0000_CTRL_SYSTEM_GET_PRIVILEGED_STATUS_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_PRIVILEGED_STATUS_PARAMS
-enum_NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS = CEnum(ctypes.c_uint32)
+enum_NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS = CEnum(Annotated[int, ctypes.c_uint32])
 NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS_SKIP = enum_NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS.define('NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS_SKIP', 1)
 NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS_UNINITIALIZED = enum_NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS.define('NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS_UNINITIALIZED', 2)
 NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS_IN_PROGRESS = enum_NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS.define('NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS_IN_PROGRESS', 3)
@@ -4315,7 +4315,7 @@ class struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT:
   maxCpuTdpmW: Annotated[NvU32, 16]
   shortTimescaleBatteryCurrentLimitmA: Annotated[NvU32, 20]
 NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT = struct_NV0000_CTRL_CMD_SYSTEM_GET_SYSTEM_POWER_LIMIT
-enum_QBOOST_CPU_TDP_CONTROL_TYPE = CEnum(ctypes.c_uint32)
+enum_QBOOST_CPU_TDP_CONTROL_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 QBOOST_CPU_TDP_CONTROL_TYPE_DC_ONLY = enum_QBOOST_CPU_TDP_CONTROL_TYPE.define('QBOOST_CPU_TDP_CONTROL_TYPE_DC_ONLY', 0)
 QBOOST_CPU_TDP_CONTROL_TYPE_DC_AC = enum_QBOOST_CPU_TDP_CONTROL_TYPE.define('QBOOST_CPU_TDP_CONTROL_TYPE_DC_AC', 1)
 
@@ -4380,10 +4380,10 @@ NV0000_CTRL_SYSTEM_GET_CLIENT_DATABASE_INFO_PARAMS = struct_NV0000_CTRL_SYSTEM_G
 @record
 class struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS:
   SIZE = 1032
-  driverVersionBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 0]
-  versionBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 256]
-  driverBranch: Annotated[Array[ctypes.c_char, Literal[256]], 512]
-  titleBuffer: Annotated[Array[ctypes.c_char, Literal[256]], 768]
+  driverVersionBuffer: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
+  versionBuffer: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 256]
+  driverBranch: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 512]
+  titleBuffer: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 768]
   changelistNumber: Annotated[NvU32, 1024]
   officialChangelistNumber: Annotated[NvU32, 1028]
 NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS = struct_NV0000_CTRL_SYSTEM_GET_BUILD_VERSION_V2_PARAMS
@@ -4475,7 +4475,7 @@ class struct_NV0000_CTRL_OS_UNIX_GET_CONTROL_FILE_DESCRIPTOR_PARAMS:
   SIZE = 4
   fd: Annotated[NvS32, 0]
 NV0000_CTRL_OS_UNIX_GET_CONTROL_FILE_DESCRIPTOR_PARAMS = struct_NV0000_CTRL_OS_UNIX_GET_CONTROL_FILE_DESCRIPTOR_PARAMS
-enum_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE = CEnum(ctypes.c_uint32)
+enum_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE_NONE = enum_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE.define('NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE_NONE', 0)
 NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE_RM = enum_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE.define('NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE_RM', 1)
 
@@ -4833,7 +4833,7 @@ class struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS:
   SIZE = 4
   value: Annotated[NvU32, 0]
 NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS = struct_NV0080_CTRL_FB_SET_DEFAULT_VIDMEM_PHYSICALITY_PARAMS
-enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY = CEnum(ctypes.c_uint32)
+enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY = CEnum(Annotated[int, ctypes.c_uint32])
 NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_DEFAULT = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_DEFAULT', 0)
 NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_NONCONTIGUOUS = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_NONCONTIGUOUS', 1)
 NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_CONTIGUOUS = enum_NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY.define('NV0080_CTRL_FB_DEFAULT_VIDMEM_PHYSICALITY_CONTIGUOUS', 2)
@@ -5043,7 +5043,7 @@ class struct_NV0080_CTRL_GR_GET_INFO_PARAMS:
   grInfoListSize: Annotated[NvU32, 0]
   grInfoList: Annotated[NvP64, 8]
 NV0080_CTRL_GR_GET_INFO_PARAMS = struct_NV0080_CTRL_GR_GET_INFO_PARAMS
-enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(ctypes.c_uint32)
+enum_NV0080_CTRL_GR_TPC_PARTITION_MODE = CEnum(Annotated[int, ctypes.c_uint32])
 NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_NONE', 0)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC', 1)
 NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC', 2)
@@ -5218,13 +5218,13 @@ NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARAMS = struct_NV2080_CTRL_BIOS_GET_NBSI_OBJ_PARA
 class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS:
   SIZE = 48
   BoardID: Annotated[NvU32, 0]
-  chipSKU: Annotated[Array[ctypes.c_char, Literal[9]], 4]
-  chipSKUMod: Annotated[Array[ctypes.c_char, Literal[5]], 13]
+  chipSKU: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[9]], 4]
+  chipSKUMod: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 13]
   skuConfigVersion: Annotated[NvU32, 20]
-  project: Annotated[Array[ctypes.c_char, Literal[5]], 24]
-  projectSKU: Annotated[Array[ctypes.c_char, Literal[5]], 29]
-  CDP: Annotated[Array[ctypes.c_char, Literal[6]], 34]
-  projectSKUMod: Annotated[Array[ctypes.c_char, Literal[2]], 40]
+  project: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 24]
+  projectSKU: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 29]
+  CDP: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[6]], 34]
+  projectSKUMod: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[2]], 40]
   businessCycle: Annotated[NvU32, 44]
 NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
 @record
@@ -5238,49 +5238,49 @@ class struct_NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS:
   version: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
 NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS = struct_NV2080_CTRL_BIOS_GET_UEFI_SUPPORT_PARAMS
-NvBoardObjIdx = ctypes.c_uint16
-NvBoardObjMaskIdx = ctypes.c_uint16
-NV2080_CTRL_BOARDOBJGRP_MASK_PRIMITIVE = ctypes.c_uint32
+NvBoardObjIdx = Annotated[int, ctypes.c_uint16]
+NvBoardObjMaskIdx = Annotated[int, ctypes.c_uint16]
+NV2080_CTRL_BOARDOBJGRP_MASK_PRIMITIVE = Annotated[int, ctypes.c_uint32]
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK:
   SIZE = 4
   pData: Annotated[Array[NvU32, Literal[1]], 0]
 NV2080_CTRL_BOARDOBJGRP_MASK = struct_NV2080_CTRL_BOARDOBJGRP_MASK
-PNV2080_CTRL_BOARDOBJGRP_MASK = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK)
+PNV2080_CTRL_BOARDOBJGRP_MASK = POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK)
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E32:
   SIZE = 4
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
 NV2080_CTRL_BOARDOBJGRP_MASK_E32 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E32
-PNV2080_CTRL_BOARDOBJGRP_MASK_E32 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E32)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E32 = POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E32)
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255:
   SIZE = 32
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
   pDataE255: Annotated[Array[NvU32, Literal[7]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E255 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255
-PNV2080_CTRL_BOARDOBJGRP_MASK_E255 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E255 = POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255)
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512:
   SIZE = 64
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
   pDataE512: Annotated[Array[NvU32, Literal[15]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E512 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512
-PNV2080_CTRL_BOARDOBJGRP_MASK_E512 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E512 = POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512)
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024:
   SIZE = 128
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
   pDataE1024: Annotated[Array[NvU32, Literal[31]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E1024 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024
-PNV2080_CTRL_BOARDOBJGRP_MASK_E1024 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E1024 = POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024)
 @record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048:
   SIZE = 256
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
   pDataE2048: Annotated[Array[NvU32, Literal[63]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E2048 = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048
-PNV2080_CTRL_BOARDOBJGRP_MASK_E2048 = ctypes.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E2048 = POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048)
 @record
 class struct_NV2080_CTRL_BOARDOBJ_BOARDOBJ_CLIENT_INFO:
   SIZE = 1
@@ -5993,7 +5993,7 @@ class struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS:
   fbhubPceMask: Annotated[NvU32, 128]
   shimInstance: Annotated[NvU32, 132]
 NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS = struct_NV2080_CTRL_CE_GET_HUB_PCE_MASK_V2_PARAMS
-enum_NV2080_CTRL_CE_LCE_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CE_LCE_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CE_LCE_TYPE_PCIE = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_PCIE', 1)
 NV2080_CTRL_CE_LCE_TYPE_DECOMP = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_DECOMP', 2)
 NV2080_CTRL_CE_LCE_TYPE_SCRUB = enum_NV2080_CTRL_CE_LCE_TYPE.define('NV2080_CTRL_CE_LCE_TYPE_SCRUB', 3)
@@ -6140,7 +6140,7 @@ class struct_NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS:
   info32: Annotated[NvU32, 12]
   info16: Annotated[NvU16, 16]
 NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS = struct_NV2080_CTRL_EVENT_SET_NOTIFICATION_PARAMS
-enum_NV2080_EVENT_HDACODEC_DSTATE = CEnum(ctypes.c_uint32)
+enum_NV2080_EVENT_HDACODEC_DSTATE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D0 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D0', 0)
 NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D1 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D1', 1)
 NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D2 = enum_NV2080_EVENT_HDACODEC_DSTATE.define('NV2080_EVENT_HDACODEC_DEVICE_DSTATE_D2', 2)
@@ -6181,7 +6181,7 @@ class struct_NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS:
   SIZE = 4
   hEvent: Annotated[NvHandle, 0]
 NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS = struct_NV2080_CTRL_EVENT_SET_TRIGGER_FIFO_PARAMS
-enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_FULL = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_FULL', 0)
 NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_SIMPLE = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_SIMPLE', 1)
 NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_CUSTOM = enum_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD.define('NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD_CUSTOM', 2)
@@ -6262,7 +6262,7 @@ class struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS:
   bypassMode: Annotated[NvU32, 8]
   rcmState: Annotated[NvU32, 12]
 NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS = struct_NV2080_CTRL_FB_GET_GPU_CACHE_INFO_PARAMS
-NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = Array[ctypes.c_ubyte, Literal[18]]
+NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = Array[Annotated[int, ctypes.c_ubyte], Literal[18]]
 @record
 class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO:
   SIZE = 56
@@ -6307,13 +6307,13 @@ class struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS:
   bRetirementPending: Annotated[NvBool, 2052]
   retirementPending: Annotated[NvU8, 2053]
 NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS = struct_NV2080_CTRL_FB_GET_OFFLINED_PAGES_PARAMS
-enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CMD_FB_ACR_QUERY_GET_CLIENT_REGION_STATUS = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_CLIENT_REGION_STATUS', 0)
 NV2080_CTRL_CMD_FB_ACR_QUERY_GET_REGION_PROPERTY = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_REGION_PROPERTY', 1)
 NV2080_CTRL_CMD_FB_ACR_QUERY_GET_FALCON_STATUS = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_GET_FALCON_STATUS', 2)
 
 NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE
-enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_NONE = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_NONE', 0)
 NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_INVALID_CLIENT_REQUEST = enum_NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE.define('NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_INVALID_CLIENT_REQUEST', 1)
 
@@ -6394,11 +6394,11 @@ class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS:
   SIZE = 72
   CBCBaseAddress: Annotated[NvU32, 0]
   backingStorePA: Annotated[NvU64, 8]
-  backingStoreVA: Annotated[ctypes.POINTER(NvU8), 16]
+  backingStoreVA: Annotated[POINTER(NvU8), 16]
   backingStoreChunkPA: Annotated[NvU64, 24]
-  backingStoreChunkVA: Annotated[ctypes.POINTER(NvU8), 32]
+  backingStoreChunkVA: Annotated[POINTER(NvU8), 32]
   backingStoreChunkSize: Annotated[NvU32, 40]
-  cacheWriteBitMap: Annotated[ctypes.POINTER(NvU8), 48]
+  cacheWriteBitMap: Annotated[POINTER(NvU8), 48]
   backingStoreChunkOverfetch: Annotated[NvBool, 56]
   PageSizeSrc: Annotated[NvU32, 60]
   PageSizeDest: Annotated[NvU32, 64]
@@ -6406,8 +6406,8 @@ NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS = struct_NV2080_CTRL_CMD_FB_CO
 @record
 class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS:
   SIZE = 40
-  fcbits: Annotated[ctypes.POINTER(NvU32), 0]
-  compbits: Annotated[ctypes.POINTER(NvU32), 8]
+  fcbits: Annotated[POINTER(NvU32), 0]
+  compbits: Annotated[POINTER(NvU32), 8]
   dataPhysicalStart: Annotated[NvU64, 16]
   surfaceOffset: Annotated[NvU64, 24]
   comptagLine: Annotated[NvU32, 32]
@@ -6430,7 +6430,7 @@ class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS:
   SrcDataPhysicalStart: Annotated[NvU64, 0]
   SrcComptagLine: Annotated[NvU32, 8]
   page64KB: Annotated[NvU32, 12]
-  compbitBuffer: Annotated[ctypes.POINTER(NvU32), 16]
+  compbitBuffer: Annotated[POINTER(NvU32), 16]
   upper64KBCompbitSel: Annotated[NvBool, 24]
 NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS
 @record
@@ -6439,7 +6439,7 @@ class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS:
   DstDataPhysicalStart: Annotated[NvU64, 0]
   DstComptagLine: Annotated[NvU32, 8]
   page64KB: Annotated[NvU32, 12]
-  compbitBuffer: Annotated[ctypes.POINTER(NvU32), 16]
+  compbitBuffer: Annotated[POINTER(NvU32), 16]
   upper64KBCompbitSel: Annotated[NvBool, 24]
 NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS
 @record
@@ -6453,7 +6453,7 @@ class struct_NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS:
   pAmapConfParams: Annotated[NvP64, 0]
   pCbcSwizzleParams: Annotated[NvP64, 8]
 NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_AMAP_CONF_PARAMS
-enum_CTRL_CMD_FB_CBC_OP = CEnum(ctypes.c_uint32)
+enum_CTRL_CMD_FB_CBC_OP = CEnum(Annotated[int, ctypes.c_uint32])
 CTRL_CMD_FB_CBC_OP_CLEAN = enum_CTRL_CMD_FB_CBC_OP.define('CTRL_CMD_FB_CBC_OP_CLEAN', 0)
 CTRL_CMD_FB_CBC_OP_INVALIDATE = enum_CTRL_CMD_FB_CBC_OP.define('CTRL_CMD_FB_CBC_OP_INVALIDATE', 1)
 
@@ -6485,11 +6485,11 @@ class struct_NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS:
   SIZE = 4
   hwResId: Annotated[NvU32, 0]
 NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS = struct_NV2080_CTRL_CMD_FB_FREE_TILE_PARAMS
-enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CMD_FB_SET_VPR = enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE.define('NV2080_CTRL_CMD_FB_SET_VPR', 0)
 
 NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE = enum_NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE
-enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CMD_FB_VPR_ERROR_GENERIC = enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE.define('NV2080_CTRL_CMD_FB_VPR_ERROR_GENERIC', 0)
 NV2080_CTRL_CMD_FB_VPR_ERROR_INVALID_CLIENT_REQUEST = enum_NV2080_CTRL_CMD_FB_VPR_ERROR_CODE.define('NV2080_CTRL_CMD_FB_VPR_ERROR_INVALID_CLIENT_REQUEST', 1)
 
@@ -6512,7 +6512,7 @@ class struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS:
   requestParams: Annotated[VPR_REQUEST_PARAMS, 4]
   statusParams: Annotated[VPR_STATUS_PARAMS, 12]
 NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS = struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS
-PNV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS)
+PNV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS = POINTER(struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS)
 @record
 class struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS:
   SIZE = 264
@@ -6787,7 +6787,7 @@ class struct_NV2080_CTRL_CMD_FB_CLIENT_INFO:
   handle: Annotated[NvHandle, 0]
   pid: Annotated[NvU32, 4]
   subProcessID: Annotated[NvU32, 8]
-  subProcessName: Annotated[Array[ctypes.c_char, Literal[100]], 12]
+  subProcessName: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[100]], 12]
 NV2080_CTRL_CMD_FB_CLIENT_INFO = struct_NV2080_CTRL_CMD_FB_CLIENT_INFO
 @record
 class struct_NV2080_CTRL_CMD_FB_GET_CLIENT_ALLOCATION_INFO_PARAMS:
@@ -6887,7 +6887,7 @@ class struct_NV2080_CTRL_FB_GET_MEMORY_BOOT_TRAINING_FLAGS_PARAMS:
   flagRdTrHybridNonVrefEn: Annotated[NvBool, 4]
   skipBootTraining: Annotated[NvBool, 5]
 NV2080_CTRL_FB_GET_MEMORY_BOOT_TRAINING_FLAGS_PARAMS = struct_NV2080_CTRL_FB_GET_MEMORY_BOOT_TRAINING_FLAGS_PARAMS
-enum_NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE_DISPLAY_FRM = enum_NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE.define('NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE_DISPLAY_FRM', 0)
 NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE_DISPLAY_FRM_RESERVED = enum_NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE.define('NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE_DISPLAY_FRM_RESERVED', 1)
 NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE_UEFI = enum_NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE.define('NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE_UEFI', 2)
@@ -6998,7 +6998,7 @@ class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRY:
   cumulativePreemptionTime: Annotated[NvU64, 32]
   cumulativeIdleTime: Annotated[NvU64, 40]
   counters: Annotated[Array[NvU64, Literal[8]], 48]
-NvS64 = ctypes.c_int64
+NvS64 = Annotated[int, ctypes.c_int64]
 NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRY = struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_ENTRY
 @record
 class struct_NV2080_CTRL_FIFO_OBJSCHED_SW_GET_LOG_PARAMS:
@@ -7024,7 +7024,7 @@ class struct_NV2080_CTRL_FIFO_DEVICE_ENTRY:
   pbdmaIds: Annotated[Array[NvU32, Literal[2]], 64]
   pbdmaFaultIds: Annotated[Array[NvU32, Literal[2]], 72]
   numPbdmas: Annotated[NvU32, 80]
-  engineName: Annotated[Array[ctypes.c_char, Literal[16]], 84]
+  engineName: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[16]], 84]
 NV2080_CTRL_FIFO_DEVICE_ENTRY = struct_NV2080_CTRL_FIFO_DEVICE_ENTRY
 @record
 class struct_NV2080_CTRL_FIFO_GET_DEVICE_INFO_TABLE_PARAMS:
@@ -7150,12 +7150,12 @@ class struct_NV2080_CTRL_FLA_RANGE_PARAMS:
   mode: Annotated[NvU32, 16]
   hVASpace: Annotated[NvHandle, 20]
 NV2080_CTRL_FLA_RANGE_PARAMS = struct_NV2080_CTRL_FLA_RANGE_PARAMS
-enum_NV2080_CTRL_FLA_ADDRSPACE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_FLA_ADDRSPACE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_FLA_ADDRSPACE_SYSMEM = enum_NV2080_CTRL_FLA_ADDRSPACE.define('NV2080_CTRL_FLA_ADDRSPACE_SYSMEM', 0)
 NV2080_CTRL_FLA_ADDRSPACE_FBMEM = enum_NV2080_CTRL_FLA_ADDRSPACE.define('NV2080_CTRL_FLA_ADDRSPACE_FBMEM', 1)
 
 NV2080_CTRL_FLA_ADDRSPACE = enum_NV2080_CTRL_FLA_ADDRSPACE
-enum_NV2080_CTRL_FLA_ACTION = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_FLA_ACTION = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_FLA_ACTION_BIND = enum_NV2080_CTRL_FLA_ACTION.define('NV2080_CTRL_FLA_ACTION_BIND', 0)
 NV2080_CTRL_FLA_ACTION_UNBIND = enum_NV2080_CTRL_FLA_ACTION.define('NV2080_CTRL_FLA_ACTION_UNBIND', 1)
 
@@ -7205,7 +7205,7 @@ class struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS:
   offset: Annotated[NvUPtr, 8]
   size: Annotated[NvU32, 16]
   queueFeatureId: Annotated[NvU8, 20]
-NvUPtr = ctypes.c_uint64
+NvUPtr = Annotated[int, ctypes.c_uint64]
 NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS = struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_FLCN_USTREAMER_CONTROL_PARAMS:
@@ -7397,7 +7397,7 @@ class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS:
   entryCount: Annotated[NvU32, 40]
   promoteEntry: Annotated[Array[NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY, Literal[16]], 48]
 NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS = struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS
-PNV2080_CTRL_GPU_PROMOTE_CTX_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS)
+PNV2080_CTRL_GPU_PROMOTE_CTX_PARAMS = POINTER(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS)
 @record
 class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS:
   SIZE = 20
@@ -7407,7 +7407,7 @@ class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS:
   hChanClient: Annotated[NvHandle, 12]
   hObject: Annotated[NvHandle, 16]
 NV2080_CTRL_GPU_EVICT_CTX_PARAMS = struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS
-PNV2080_CTRL_GPU_EVICT_CTX_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS)
+PNV2080_CTRL_GPU_EVICT_CTX_PARAMS = POINTER(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS)
 @record
 class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS:
   SIZE = 56
@@ -7423,7 +7423,7 @@ class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS:
   index: Annotated[NvU32, 40]
   size: Annotated[NvU64, 48]
 NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS = struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS
-PNV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS)
+PNV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS = POINTER(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS)
 @record
 class struct_NV2080_CTRL_GPU_QUERY_ECC_INTR_PARAMS:
   SIZE = 4
@@ -7549,7 +7549,7 @@ NV2080_CTRL_GPU_GET_GID_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_GET_INFOROM_OBJECT_VERSION_PARAMS:
   SIZE = 5
-  objectType: Annotated[Array[ctypes.c_char, Literal[3]], 0]
+  objectType: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[3]], 0]
   version: Annotated[NvU8, 3]
   subversion: Annotated[NvU8, 4]
 NV2080_CTRL_GPU_GET_INFOROM_OBJECT_VERSION_PARAMS = struct_NV2080_CTRL_GPU_GET_INFOROM_OBJECT_VERSION_PARAMS
@@ -7645,7 +7645,7 @@ class struct_NV2080_CTRL_GPU_GET_OEM_INFO_PARAMS:
   SIZE = 504
   oemInfo: Annotated[Array[NvU8, Literal[504]], 0]
 NV2080_CTRL_GPU_GET_OEM_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_OEM_INFO_PARAMS
-enum_NV2080_CTRL_VPR_INFO_QUERY_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_VPR_INFO_QUERY_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_GPU_GET_VPR_INFO_QUERY_VPR_CAPS = enum_NV2080_CTRL_VPR_INFO_QUERY_TYPE.define('NV2080_CTRL_GPU_GET_VPR_INFO_QUERY_VPR_CAPS', 0)
 NV2080_CTRL_GPU_GET_VPR_INFO_QUERY_CUR_VPR_RANGE = enum_NV2080_CTRL_VPR_INFO_QUERY_TYPE.define('NV2080_CTRL_GPU_GET_VPR_INFO_QUERY_CUR_VPR_RANGE', 1)
 
@@ -7658,7 +7658,7 @@ class struct_NV2080_CTRL_GPU_GET_VPR_INFO_PARAMS:
   vprStartAddressInBytes: Annotated[NvU64, 8]
   vprEndAddressInBytes: Annotated[NvU64, 16]
 NV2080_CTRL_GPU_GET_VPR_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_VPR_INFO_PARAMS
-enum_NV2080_CTRL_ENCODER_CAPACITY_QUERY_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_ENCODER_CAPACITY_QUERY_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_H264 = enum_NV2080_CTRL_ENCODER_CAPACITY_QUERY_TYPE.define('NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_H264', 0)
 NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_HEVC = enum_NV2080_CTRL_ENCODER_CAPACITY_QUERY_TYPE.define('NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_HEVC', 1)
 NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_AV1 = enum_NV2080_CTRL_ENCODER_CAPACITY_QUERY_TYPE.define('NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_AV1', 2)
@@ -7954,7 +7954,7 @@ class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS:
   SIZE = 4
   faultType: Annotated[NvU32, 0]
 NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS = struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS
-enum_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_DEFAULT = enum_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE.define('NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_DEFAULT', 0)
 NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_SHORT = enum_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE.define('NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_SHORT', 1)
 NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_MEDIUM = enum_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE.define('NV2080_CTRL_CMD_GPU_COMPUTE_TIMESLICE_MEDIUM', 2)
@@ -8020,7 +8020,7 @@ class struct_NV2080_CTRL_GPU_GET_ID_NAME_MAPPING_PARAMS:
   SIZE = 20804
   engineCount: Annotated[NvU32, 0]
   engineID: Annotated[Array[NvU32, Literal[200]], 4]
-  engineName: Annotated[Array[Array[ctypes.c_char, Literal[100]], Literal[200]], 804]
+  engineName: Annotated[Array[Array[Annotated[bytes, ctypes.c_char], Literal[100]], Literal[200]], 804]
 NV2080_CTRL_GPU_GET_ID_NAME_MAPPING_PARAMS = struct_NV2080_CTRL_GPU_GET_ID_NAME_MAPPING_PARAMS
 @record
 class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_NOPTRS_PARAMS:
@@ -8166,7 +8166,7 @@ class struct_NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS:
   gfid: Annotated[NvU32, 0]
   vfMsixCap: Annotated[NV2080_VF_MSIX_CAPS, 4]
 NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS = struct_NV2080_CTRL_GPU_GET_VF_CAPS_PARAMS
-enum_NV2080_CTRL_GPU_RECOVERY_ACTION = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_GPU_RECOVERY_ACTION = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_GPU_RECOVERY_ACTION_NONE = enum_NV2080_CTRL_GPU_RECOVERY_ACTION.define('NV2080_CTRL_GPU_RECOVERY_ACTION_NONE', 0)
 NV2080_CTRL_GPU_RECOVERY_ACTION_GPU_RESET = enum_NV2080_CTRL_GPU_RECOVERY_ACTION.define('NV2080_CTRL_GPU_RECOVERY_ACTION_GPU_RESET', 1)
 NV2080_CTRL_GPU_RECOVERY_ACTION_NODE_REBOOT = enum_NV2080_CTRL_GPU_RECOVERY_ACTION.define('NV2080_CTRL_GPU_RECOVERY_ACTION_NODE_REBOOT', 2)
@@ -8184,7 +8184,7 @@ class struct_NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS:
   SIZE = 1
   bFipsEnabled: Annotated[NvBool, 0]
 NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS = struct_NV2080_CTRL_GPU_GET_FIPS_STATUS_PARAMS
-enum_NV2080_RAFTS_FLOORSWEEP_UNIT_MASK_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_RAFTS_FLOORSWEEP_UNIT_MASK_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_RAFTS_FLOORSWEEP_UNIT_TYPE_INVALID = enum_NV2080_RAFTS_FLOORSWEEP_UNIT_MASK_TYPE.define('NV2080_RAFTS_FLOORSWEEP_UNIT_TYPE_INVALID', 0)
 NV2080_RAFTS_FLOORSWEEP_UNIT_TYPE_TPC = enum_NV2080_RAFTS_FLOORSWEEP_UNIT_MASK_TYPE.define('NV2080_RAFTS_FLOORSWEEP_UNIT_TYPE_TPC', 1)
 NV2080_RAFTS_FLOORSWEEP_UNIT_TYPE_GPC = enum_NV2080_RAFTS_FLOORSWEEP_UNIT_MASK_TYPE.define('NV2080_RAFTS_FLOORSWEEP_UNIT_TYPE_GPC', 2)
@@ -8360,7 +8360,7 @@ class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS:
   cilpPreemptMode: Annotated[NvU32, 12]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO, 16]
 NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS = struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS
-enum_NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_MAIN = enum_NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS.define('NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_MAIN', 0)
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_SPILL = enum_NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS.define('NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_SPILL', 1)
 NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_PAGEPOOL = enum_NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS.define('NV2080_CTRL_CMD_GR_CTXSW_PREEMPTION_BIND_BUFFERS_PAGEPOOL', 2)
@@ -8434,7 +8434,7 @@ class struct_NV2080_CTRL_GR_CTX_BUFFER_INFO:
   bDeviceDescendant: Annotated[NvBool, 59]
   uuid: Annotated[Array[NvU8, Literal[16]], 60]
 NV2080_CTRL_GR_CTX_BUFFER_INFO = struct_NV2080_CTRL_GR_CTX_BUFFER_INFO
-PNV2080_CTRL_GR_CTX_BUFFER_INFO = ctypes.POINTER(struct_NV2080_CTRL_GR_CTX_BUFFER_INFO)
+PNV2080_CTRL_GR_CTX_BUFFER_INFO = POINTER(struct_NV2080_CTRL_GR_CTX_BUFFER_INFO)
 @record
 class struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS:
   SIZE = 5136
@@ -8494,7 +8494,7 @@ class struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS:
   maxGpcCount: Annotated[NvU32, 3200]
   maxTpcPerGpcCount: Annotated[NvU32, 3204]
 NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS = struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS
-PNV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS = ctypes.POINTER(struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS)
+PNV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS = POINTER(struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS)
 @record
 class struct_NV2080_CTRL_GR_GET_ATTRIBUTE_BUFFER_SIZE_PARAMS:
   SIZE = 4
@@ -8590,7 +8590,7 @@ class struct_NV2080_CTRL_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS:
   smIssueThrottleCtrlListSize: Annotated[NvU32, 0]
   smIssueThrottleCtrlList: Annotated[Array[NV2080_CTRL_GR_SM_ISSUE_THROTTLE_CTRL, Literal[255]], 4]
 NV2080_CTRL_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS = struct_NV2080_CTRL_GR_GET_SM_ISSUE_THROTTLE_CTRL_PARAMS
-enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD_FULL = enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD.define('NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD_FULL', 0)
 NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD_SIMPLE = enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD.define('NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD_SIMPLE', 1)
 NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD_COMPAT = enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD.define('NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD_COMPAT', 2)
@@ -8642,7 +8642,7 @@ class struct_NV2080_CTRL_GR_GET_ZCULL_MASK_PARAMS:
   gpcId: Annotated[NvU32, 0]
   zcullMask: Annotated[NvU32, 4]
 NV2080_CTRL_GR_GET_ZCULL_MASK_PARAMS = struct_NV2080_CTRL_GR_GET_ZCULL_MASK_PARAMS
-enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_REASON_CODE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_REASON_CODE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_GR_FECS_BIND_REASON_CODE_NONE = enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_REASON_CODE.define('NV2080_CTRL_GR_FECS_BIND_REASON_CODE_NONE', 0)
 NV2080_CTRL_GR_FECS_BIND_REASON_CODE_GPU_TOO_OLD = enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_REASON_CODE.define('NV2080_CTRL_GR_FECS_BIND_REASON_CODE_GPU_TOO_OLD', 1)
 NV2080_CTRL_GR_FECS_BIND_REASON_CODE_NOT_ENABLED_GPU = enum_NV2080_CTRL_GR_FECS_BIND_EVTBUF_REASON_CODE.define('NV2080_CTRL_GR_FECS_BIND_REASON_CODE_NOT_ENABLED_GPU', 2)
@@ -10056,7 +10056,7 @@ class struct_NV2080_CTRL_INTERNAL_FIFO_GET_LOGICAL_UPROC_ID_PARAMS:
   SIZE = 1
   logicalUprocId: Annotated[NvU8, 0]
 NV2080_CTRL_INTERNAL_FIFO_GET_LOGICAL_UPROC_ID_PARAMS = struct_NV2080_CTRL_INTERNAL_FIFO_GET_LOGICAL_UPROC_ID_PARAMS
-enum_NV2080_CTRL_MEMMGR_MEMORY_OP = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_MEMMGR_MEMORY_OP = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_MEMMGR_MEMORY_OP_MEMCPY = enum_NV2080_CTRL_MEMMGR_MEMORY_OP.define('NV2080_CTRL_MEMMGR_MEMORY_OP_MEMCPY', 0)
 NV2080_CTRL_MEMMGR_MEMORY_OP_MEMSET = enum_NV2080_CTRL_MEMMGR_MEMORY_OP.define('NV2080_CTRL_MEMMGR_MEMORY_OP_MEMSET', 1)
 
@@ -10658,7 +10658,7 @@ class struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS:
   numEntries: Annotated[NvU32, 0]
   entries: Annotated[Array[NV2080_CTRL_MC_STATIC_INTR_ENTRY, Literal[32]], 4]
 NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS = struct_NV2080_CTRL_MC_GET_STATIC_INTR_TABLE_PARAMS
-enum_NV2080_INTR_CATEGORY = CEnum(ctypes.c_uint32)
+enum_NV2080_INTR_CATEGORY = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_INTR_CATEGORY_DEFAULT = enum_NV2080_INTR_CATEGORY.define('NV2080_INTR_CATEGORY_DEFAULT', 0)
 NV2080_INTR_CATEGORY_ESCHED_DRIVEN_ENGINE = enum_NV2080_INTR_CATEGORY.define('NV2080_INTR_CATEGORY_ESCHED_DRIVEN_ENGINE', 1)
 NV2080_INTR_CATEGORY_ESCHED_DRIVEN_ENGINE_NOTIFICATION = enum_NV2080_INTR_CATEGORY.define('NV2080_INTR_CATEGORY_ESCHED_DRIVEN_ENGINE_NOTIFICATION', 2)
@@ -10814,10 +10814,10 @@ class struct_NV2080CtrlNocatJournalInsertRecord:
   timestamp: Annotated[NvU64, 8]
   recType: Annotated[NvU8, 16]
   bugcheck: Annotated[NvU32, 20]
-  source: Annotated[Array[ctypes.c_char, Literal[65]], 24]
+  source: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[65]], 24]
   subsystem: Annotated[NvU32, 92]
   errorCode: Annotated[NvU64, 96]
-  faultingEngine: Annotated[Array[ctypes.c_char, Literal[65]], 104]
+  faultingEngine: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[65]], 104]
   tdrReason: Annotated[NvU32, 172]
   diagBufferLen: Annotated[NvU32, 176]
   diagBuffer: Annotated[Array[NvU8, Literal[1024]], 180]
@@ -10888,7 +10888,7 @@ class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO:
   remoteDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO, 96]
   localDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO, 152]
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO
-enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US = enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT.define('NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_100US', 0)
 NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US = enum_NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT.define('NV2080_CTRL_NVLINK_STATUS_L1_THRESHOLD_UNIT_50US', 1)
 
@@ -11002,7 +11002,7 @@ class struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS:
   links: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
   bFatalError: Annotated[NvBool, 24]
 NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS = struct_NV2080_CTRL_NVLINK_INJECT_ERROR_PARAMS
-enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_TX_ERR', 1)
 NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_PKT_ERR', 2)
 NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR = enum_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE.define('NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE_AUTH_TAG_ERR', 3)
@@ -11098,18 +11098,18 @@ class struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS:
   linkId: Annotated[NvU32, 0]
   powerState: Annotated[NvU32, 4]
 NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS = struct_NV2080_CTRL_NVLINK_GET_POWER_STATE_PARAMS
-enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE = CEnum(Annotated[int, ctypes.c_uint32])
 TLC_RX_LNK = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE.define('TLC_RX_LNK', 0)
 TLC_TX_SYS = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE.define('TLC_TX_SYS', 1)
 
 NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE = enum_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE
-enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 TX_SYS_TX_RSP_STATUS_HW_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_HW_ERR', 0)
 TX_SYS_TX_RSP_STATUS_UR_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_UR_ERR', 1)
 TX_SYS_TX_RSP_STATUS_PRIV_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE.define('TX_SYS_TX_RSP_STATUS_PRIV_ERR', 2)
 
 NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE = enum_NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE
-enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 RX_LNK_RX_RSP_STATUS_HW_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_HW_ERR', 0)
 RX_LNK_RX_RSP_STATUS_UR_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_UR_ERR', 1)
 RX_LNK_RX_RSP_STATUS_PRIV_ERR = enum_NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE.define('RX_LNK_RX_RSP_STATUS_PRIV_ERR', 2)
@@ -11255,7 +11255,7 @@ class struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS:
   initDisabledLinks: Annotated[NV2080_CTRL_NVLINK_LINK_MASK, 8]
   bSkipHwNvlinkDisable: Annotated[NvBool, 24]
 NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS = struct_NV2080_CTRL_NVLINK_PROCESS_INIT_DISABLED_LINKS_PARAMS
-enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND = CEnum(Annotated[int, ctypes.c_uint32])
 NVLINK_EOM_CONTROL_START_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_START_EOM', 0)
 NVLINK_EOM_CONTROL_END_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_END_EOM', 1)
 NVLINK_EOM_CONTROL_CONFIG_EOM = enum_NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND.define('NVLINK_EOM_CONTROL_CONFIG_EOM', 2)
@@ -11878,7 +11878,7 @@ class struct_NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS:
   SIZE = 56
   localDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO, 0]
 NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS = struct_NV2080_CTRL_NVLINK_GET_LOCAL_DEVICE_INFO_PARAMS
-enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_NONFATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_NONFATAL', 0)
 NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_APP_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_APP_FATAL', 1)
 NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_FATAL = enum_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY.define('NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY_FATAL', 2)
@@ -11926,7 +11926,7 @@ class struct_NV2080_CTRL_NVLINK_GET_NVLE_LIDS_PARAMS:
   clid: Annotated[NvU32, 4]
   alid: Annotated[NvU32, 8]
 NV2080_CTRL_NVLINK_GET_NVLE_LIDS_PARAMS = struct_NV2080_CTRL_NVLINK_GET_NVLE_LIDS_PARAMS
-enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DISABLED = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_DISABLED', 0)
 NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_TRIGGER_ONCE = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_TRIGGER_ONCE', 1)
 NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_EXITED = enum_NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE.define('NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE_FORCE_EXITED', 2)
@@ -12094,7 +12094,7 @@ class struct_NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS:
   SIZE = 4
   powerState: Annotated[NvU32, 0]
 NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS = struct_NV2080_CTRL_PERF_SET_AUX_POWER_STATE_PARAMS
-enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM', 0)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342 = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342', 1)
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL', 2)
@@ -12103,7 +12103,7 @@ NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE = enum_NV2080_CTRL_PERF_RATED_TDP_CLIE
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS', 5)
 
 NV2080_CTRL_PERF_RATED_TDP_CLIENT = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT
-enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT', 0)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED', 1)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LIMIT', 2)
@@ -12111,7 +12111,7 @@ NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK = enum_NV2080_CTRL_PERF_RATED_TDP_A
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR', 4)
 
 NV2080_CTRL_PERF_RATED_TDP_ACTION = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION
-enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_PERF_VPSTATE_RATED_TDP = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_RATED_TDP', 0)
 NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_TURBO_BOOST', 1)
 NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES = enum_NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE.define('NV2080_CTRL_PERF_VPSTATE_NUM_VPSTATES', 2)
@@ -12153,7 +12153,7 @@ class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE:
   vgpuScale: Annotated[NvU32, 4]
   procId: Annotated[NvU32, 8]
   subProcessID: Annotated[NvU32, 12]
-  subProcessName: Annotated[Array[ctypes.c_char, Literal[100]], 16]
+  subProcessName: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[100]], 16]
   pOsPidInfo: Annotated[NvU64, 120]
 NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE = struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE
 @record
@@ -12217,7 +12217,7 @@ class struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS:
   perfGetClkInfoList: Annotated[Array[NV2080_CTRL_PERF_GET_CLK_INFO, Literal[32]], 8]
   perfGetClkInfoListSize: Annotated[NvU32, 776]
 NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS = struct_NV2080_CTRL_PERF_GET_LEVEL_INFO_V2_PARAMS
-enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_CMD_PERF_VID_ENG = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_CMD_PERF_VID_ENG_NVENC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVENC', 1)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVDEC', 2)
 NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG', 3)
@@ -12241,13 +12241,13 @@ class struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS:
   SIZE = 4
   videoEvent: Annotated[NvU32, 0]
 NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS = struct_NV2080_CTRL_PERF_NOTIFY_VIDEOEVENT_PARAMS
-NV2080_CTRL_PERF_PSTATES_ID = ctypes.c_uint32
+NV2080_CTRL_PERF_PSTATES_ID = Annotated[int, ctypes.c_uint32]
 @record
 class struct_NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS:
   SIZE = 4
   currPstate: Annotated[NvU32, 0]
 NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS = struct_NV2080_CTRL_PERF_GET_CURRENT_PSTATE_PARAMS
-NV2080_CTRL_CLK_DOMAIN_TEGRA = ctypes.c_uint32
+NV2080_CTRL_CLK_DOMAIN_TEGRA = Annotated[int, ctypes.c_uint32]
 @record
 class struct_NV2080_CTRL_PERF_GET_TEGRA_PERFMON_SAMPLE_PARAMS:
   SIZE = 8
@@ -12260,7 +12260,7 @@ class struct_NV2080_CTRL_PMGR_MODULE_INFO_PARAMS:
   moduleId: Annotated[NvU32, 0]
   nvswitchSupport: Annotated[NvU8, 4]
 NV2080_CTRL_PMGR_MODULE_INFO_PARAMS = struct_NV2080_CTRL_PMGR_MODULE_INFO_PARAMS
-enum_NV2080_CTRL_GC6_FLAVOR_ID = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_GC6_FLAVOR_ID = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_GC6_FLAVOR_ID_MSHYBRID = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_MSHYBRID', 0)
 NV2080_CTRL_GC6_FLAVOR_ID_OPTIMUS = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_OPTIMUS', 1)
 NV2080_CTRL_GC6_FLAVOR_ID_MAX = enum_NV2080_CTRL_GC6_FLAVOR_ID.define('NV2080_CTRL_GC6_FLAVOR_ID_MAX', 4)
@@ -12291,7 +12291,7 @@ class _anonstruct57:
   bIsRTD3Transition: Annotated[NvBool, 1]
   bIsRTD3HotTransition: Annotated[NvBool, 2]
 NV2080_CTRL_GC6_EXIT_PARAMS = struct_NV2080_CTRL_GC6_EXIT_PARAMS
-enum_NV2080_CTRL_GC6_STEP_ID = CEnum(ctypes.c_uint32)
+enum_NV2080_CTRL_GC6_STEP_ID = CEnum(Annotated[int, ctypes.c_uint32])
 NV2080_CTRL_GC6_STEP_ID_SR_ENTRY = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_SR_ENTRY', 0)
 NV2080_CTRL_GC6_STEP_ID_GPU_OFF = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_GPU_OFF', 1)
 NV2080_CTRL_GC6_STEP_ID_MAX = enum_NV2080_CTRL_GC6_STEP_ID.define('NV2080_CTRL_GC6_STEP_ID_MAX', 2)
@@ -12354,41 +12354,41 @@ class struct_RM_GSP_SPDM_CMD_CC_INIT:
   SIZE = 1
   cmdType: Annotated[NvU8, 0]
 RM_GSP_SPDM_CMD_CC_INIT = struct_RM_GSP_SPDM_CMD_CC_INIT
-PRM_GSP_SPDM_CMD_CC_INIT = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT)
+PRM_GSP_SPDM_CMD_CC_INIT = POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT)
 @record
 class struct_RM_GSP_SPDM_CMD_CC_DEINIT:
   SIZE = 1
   cmdType: Annotated[NvU8, 0]
 RM_GSP_SPDM_CMD_CC_DEINIT = struct_RM_GSP_SPDM_CMD_CC_DEINIT
-PRM_GSP_SPDM_CMD_CC_DEINIT = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_DEINIT)
+PRM_GSP_SPDM_CMD_CC_DEINIT = POINTER(struct_RM_GSP_SPDM_CMD_CC_DEINIT)
 @record
 class struct_RM_GSP_SPDM_CMD_CC_CTRL:
   SIZE = 1
   cmdType: Annotated[NvU8, 0]
 RM_GSP_SPDM_CMD_CC_CTRL = struct_RM_GSP_SPDM_CMD_CC_CTRL
-PRM_GSP_SPDM_CMD_CC_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_CTRL)
+PRM_GSP_SPDM_CMD_CC_CTRL = POINTER(struct_RM_GSP_SPDM_CMD_CC_CTRL)
 @record
 class struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA:
   SIZE = 68
   cmdType: Annotated[NvU8, 0]
   rsvd0: Annotated[Array[NvU32, Literal[2]], 4]
   rsvd1: Annotated[NvU32, 12]
-  rsvd2: Annotated[Array[ctypes.c_char, Literal[9]], 16]
-  rsvd3: Annotated[Array[ctypes.c_char, Literal[5]], 25]
-  rsvd4: Annotated[Array[ctypes.c_char, Literal[5]], 30]
-  rsvd5: Annotated[Array[ctypes.c_char, Literal[5]], 35]
-  rsvd6: Annotated[Array[ctypes.c_char, Literal[2]], 40]
-  rsvd7: Annotated[Array[ctypes.c_char, Literal[16]], 42]
+  rsvd2: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[9]], 16]
+  rsvd3: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 25]
+  rsvd4: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 30]
+  rsvd5: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 35]
+  rsvd6: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[2]], 40]
+  rsvd7: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[16]], 42]
   rsvd8: Annotated[Array[NvU32, Literal[2]], 60]
 RM_GSP_SPDM_CMD_CC_INIT_RM_DATA = struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA
-PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA)
+PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA = POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA)
 @record
 class struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL:
   SIZE = 2
   cmdType: Annotated[NvU8, 0]
   bEnable: Annotated[NvBool, 1]
 RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL
-PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL)
+PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL = POINTER(struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL)
 @record
 class struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST:
   SIZE = 160
@@ -12419,7 +12419,7 @@ class struct_CC_HMAC_CRYPTOBUNDLE:
   key: Annotated[Array[NvU32, Literal[8]], 32]
 CC_HMAC_CRYPTOBUNDLE = struct_CC_HMAC_CRYPTOBUNDLE
 RM_GSP_SPDM_CMD_FIPS_SELFTEST = struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST
-PRM_GSP_SPDM_CMD_FIPS_SELFTEST = ctypes.POINTER(struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST)
+PRM_GSP_SPDM_CMD_FIPS_SELFTEST = POINTER(struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST)
 @record
 class union_RM_GSP_SPDM_CMD:
   SIZE = 160
@@ -12431,7 +12431,7 @@ class union_RM_GSP_SPDM_CMD:
   ccHeartbeatCtrl: Annotated[RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL, 0]
   ccFipsTest: Annotated[RM_GSP_SPDM_CMD_FIPS_SELFTEST, 0]
 RM_GSP_SPDM_CMD = union_RM_GSP_SPDM_CMD
-PRM_GSP_SPDM_CMD = ctypes.POINTER(union_RM_GSP_SPDM_CMD)
+PRM_GSP_SPDM_CMD = POINTER(union_RM_GSP_SPDM_CMD)
 @record
 class struct_RM_GSP_SPDM_MSG:
   SIZE = 28
@@ -12443,7 +12443,7 @@ class struct_RM_GSP_SPDM_MSG:
   rsvd4: Annotated[NvU32, 20]
   rsvd5: Annotated[NvU32, 24]
 RM_GSP_SPDM_MSG = struct_RM_GSP_SPDM_MSG
-PRM_GSP_SPDM_MSG = ctypes.POINTER(struct_RM_GSP_SPDM_MSG)
+PRM_GSP_SPDM_MSG = POINTER(struct_RM_GSP_SPDM_MSG)
 @record
 class struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS:
   SIZE = 192
@@ -12708,7 +12708,7 @@ class struct_NV2080_GUEST_VM_INFO:
   guestDriverVersion: Annotated[Array[NvU8, Literal[64]], 33]
   guestDriverBranch: Annotated[Array[NvU8, Literal[64]], 97]
   guestVmInfoState: Annotated[GUEST_VM_INFO_STATE, 164]
-enum_GUEST_VM_INFO_STATE = CEnum(ctypes.c_uint32)
+enum_GUEST_VM_INFO_STATE = CEnum(Annotated[int, ctypes.c_uint32])
 GUEST_VM_INFO_STATE_UNINITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_UNINITIALIZED', 0)
 GUEST_VM_INFO_STATE_INITIALIZED = enum_GUEST_VM_INFO_STATE.define('GUEST_VM_INFO_STATE_INITIALIZED', 1)
 
@@ -13040,7 +13040,7 @@ class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS:
   SIZE = 4
   value: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS
-nv_status_codes = CEnum(ctypes.c_uint32)
+nv_status_codes = CEnum(Annotated[int, ctypes.c_uint32])
 NV_OK = nv_status_codes.define('NV_OK', 0)
 NV_ERR_GENERIC = nv_status_codes.define('NV_ERR_GENERIC', 65535)
 NV_ERR_BROKEN_FB = nv_status_codes.define('NV_ERR_BROKEN_FB', 1)

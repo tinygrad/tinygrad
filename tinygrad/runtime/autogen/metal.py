@@ -1,14 +1,14 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 from tinygrad.runtime.support import objc
 dll = DLL('metal', 'Metal')
 @record
 class MTLDispatchThreadgroupsIndirectArguments:
   SIZE = 12
   threadgroupsPerGrid: Annotated[Array[uint32_t, Literal[3]], 0]
-uint32_t = ctypes.c_uint32
+uint32_t = Annotated[int, ctypes.c_uint32]
 @record
 class MTLStageInRegionIndirectArguments:
   SIZE = 24
@@ -17,7 +17,7 @@ class MTLStageInRegionIndirectArguments:
 class MTLComputeCommandEncoder(objc.Spec): pass
 class MTLCommandEncoder(objc.Spec): pass
 class MTLComputePipelineState(objc.Spec): pass
-NSUInteger = ctypes.c_uint64
+NSUInteger = Annotated[int, ctypes.c_uint64]
 class MTLBuffer(objc.Spec): pass
 class MTLResource(objc.Spec): pass
 @record
@@ -224,8 +224,8 @@ MTLTextureUsagePixelFormatView = enum_MTLTextureUsage.define('MTLTextureUsagePix
 MTLTextureUsageShaderAtomic = enum_MTLTextureUsage.define('MTLTextureUsageShaderAtomic', 32)
 
 MTLTextureUsage = enum_MTLTextureUsage
-BOOL = ctypes.c_int32
-NSInteger = ctypes.c_int64
+BOOL = Annotated[int, ctypes.c_int32]
+NSInteger = Annotated[int, ctypes.c_int64]
 enum_MTLTextureCompressionType = CEnum(NSInteger)
 MTLTextureCompressionTypeLossless = enum_MTLTextureCompressionType.define('MTLTextureCompressionTypeLossless', 0)
 MTLTextureCompressionTypeLossy = enum_MTLTextureCompressionType.define('MTLTextureCompressionTypeLossy', 1)
@@ -238,7 +238,7 @@ class MTLTextureSwizzleChannels:
   green: Annotated[MTLTextureSwizzle, 1]
   blue: Annotated[MTLTextureSwizzle, 2]
   alpha: Annotated[MTLTextureSwizzle, 3]
-uint8_t = ctypes.c_ubyte
+uint8_t = Annotated[int, ctypes.c_ubyte]
 enum_MTLTextureSwizzle = CEnum(uint8_t)
 MTLTextureSwizzleZero = enum_MTLTextureSwizzle.define('MTLTextureSwizzleZero', 0)
 MTLTextureSwizzleOne = enum_MTLTextureSwizzle.define('MTLTextureSwizzleOne', 1)
@@ -249,28 +249,28 @@ MTLTextureSwizzleAlpha = enum_MTLTextureSwizzle.define('MTLTextureSwizzleAlpha',
 
 MTLTextureSwizzle = enum_MTLTextureSwizzle
 class NSObject(objc.Spec): pass
-IMP = ctypes.CFUNCTYPE(None, )
+IMP = CFUNCTYPE(None, )
 class NSInvocation(objc.Spec): pass
 class NSMethodSignature(objc.Spec): pass
 NSMethodSignature._bases_ = [NSObject]
 NSMethodSignature._methods_ = [
-  ('getArgumentTypeAtIndex:', ctypes.POINTER(ctypes.c_char), [NSUInteger]),
+  ('getArgumentTypeAtIndex:', POINTER(Annotated[bytes, ctypes.c_char]), [NSUInteger]),
   ('isOneway', BOOL, []),
   ('numberOfArguments', NSUInteger, []),
   ('frameLength', NSUInteger, []),
-  ('methodReturnType', ctypes.POINTER(ctypes.c_char), []),
+  ('methodReturnType', POINTER(Annotated[bytes, ctypes.c_char]), []),
   ('methodReturnLength', NSUInteger, []),
 ]
 NSMethodSignature._classmethods_ = [
-  ('signatureWithObjCTypes:', NSMethodSignature, [ctypes.POINTER(ctypes.c_char)]),
+  ('signatureWithObjCTypes:', NSMethodSignature, [POINTER(Annotated[bytes, ctypes.c_char])]),
 ]
 NSInvocation._bases_ = [NSObject]
 NSInvocation._methods_ = [
   ('retainArguments', None, []),
-  ('getReturnValue:', None, [ctypes.POINTER(None)]),
-  ('setReturnValue:', None, [ctypes.POINTER(None)]),
-  ('getArgument:atIndex:', None, [ctypes.POINTER(None), NSInteger]),
-  ('setArgument:atIndex:', None, [ctypes.POINTER(None), NSInteger]),
+  ('getReturnValue:', None, [POINTER(None)]),
+  ('setReturnValue:', None, [POINTER(None)]),
+  ('getArgument:atIndex:', None, [POINTER(None), NSInteger]),
+  ('setArgument:atIndex:', None, [POINTER(None), NSInteger]),
   ('invoke', None, []),
   ('invokeWithTarget:', None, [objc.id_]),
   ('invokeUsingIMP:', None, [IMP]),
@@ -287,20 +287,20 @@ NSInvocation._classmethods_ = [
 class struct__NSZone(ctypes.Structure): pass
 class Protocol(objc.Spec): pass
 class NSString(objc.Spec): pass
-unichar = ctypes.c_uint16
+unichar = Annotated[int, ctypes.c_uint16]
 class NSCoder(objc.Spec): pass
 class NSData(objc.Spec): pass
 NSData._bases_ = [NSObject]
 NSData._methods_ = [
   ('length', NSUInteger, []),
-  ('bytes', ctypes.POINTER(None), []),
+  ('bytes', POINTER(None), []),
 ]
 NSCoder._bases_ = [NSObject]
 NSCoder._methods_ = [
-  ('encodeValueOfObjCType:at:', None, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(None)]),
+  ('encodeValueOfObjCType:at:', None, [POINTER(Annotated[bytes, ctypes.c_char]), POINTER(None)]),
   ('encodeDataObject:', None, [NSData]),
   ('decodeDataObject', NSData, []),
-  ('decodeValueOfObjCType:at:size:', None, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(None), NSUInteger]),
+  ('decodeValueOfObjCType:at:size:', None, [POINTER(Annotated[bytes, ctypes.c_char]), POINTER(None), NSUInteger]),
   ('versionForClassName:', NSInteger, [NSString]),
 ]
 NSString._bases_ = [NSObject]
@@ -328,10 +328,10 @@ NSObject._classmethods_ = [
   ('load', None, []),
   ('initialize', None, []),
   ('new', 'instancetype', [], True),
-  ('allocWithZone:', 'instancetype', [ctypes.POINTER(struct__NSZone)], True),
+  ('allocWithZone:', 'instancetype', [POINTER(struct__NSZone)], True),
   ('alloc', 'instancetype', [], True),
-  ('copyWithZone:', objc.id_, [ctypes.POINTER(struct__NSZone)], True),
-  ('mutableCopyWithZone:', objc.id_, [ctypes.POINTER(struct__NSZone)], True),
+  ('copyWithZone:', objc.id_, [POINTER(struct__NSZone)], True),
+  ('mutableCopyWithZone:', objc.id_, [POINTER(struct__NSZone)], True),
   ('instancesRespondToSelector:', BOOL, [objc.id_]),
   ('conformsToProtocol:', BOOL, [Protocol]),
   ('instanceMethodForSelector:', IMP, [objc.id_]),
@@ -383,10 +383,10 @@ MTLTextureDescriptor._classmethods_ = [
   ('textureBufferDescriptorWithPixelFormat:width:resourceOptions:usage:', MTLTextureDescriptor, [MTLPixelFormat, NSUInteger, MTLResourceOptions, MTLTextureUsage]),
 ]
 class MTLDevice(objc.Spec): pass
-uint64_t = ctypes.c_uint64
+uint64_t = Annotated[int, ctypes.c_uint64]
 MTLBuffer._bases_ = [MTLResource]
 MTLBuffer._methods_ = [
-  ('contents', ctypes.POINTER(None), []),
+  ('contents', POINTER(None), []),
   ('didModifyRange:', None, [NSRange]),
   ('newTextureWithDescriptor:offset:bytesPerRow:', MTLTexture, [MTLTextureDescriptor, NSUInteger, NSUInteger], True),
   ('addDebugMarker:range:', None, [NSString, NSRange]),
@@ -431,8 +431,8 @@ MTLPurgeableStateVolatile = enum_MTLPurgeableState.define('MTLPurgeableStateVola
 MTLPurgeableStateEmpty = enum_MTLPurgeableState.define('MTLPurgeableStateEmpty', 4)
 
 MTLPurgeableState = enum_MTLPurgeableState
-kern_return_t = ctypes.c_int32
-task_id_token_t = ctypes.c_uint32
+kern_return_t = Annotated[int, ctypes.c_int32]
+task_id_token_t = Annotated[int, ctypes.c_uint32]
 class MTLHeap(objc.Spec): pass
 MTLResource._bases_ = [NSObject]
 MTLResource._methods_ = [
@@ -480,25 +480,25 @@ MTLDispatchType = enum_MTLDispatchType
 MTLComputeCommandEncoder._bases_ = [MTLCommandEncoder]
 MTLComputeCommandEncoder._methods_ = [
   ('setComputePipelineState:', None, [MTLComputePipelineState]),
-  ('setBytes:length:atIndex:', None, [ctypes.POINTER(None), NSUInteger, NSUInteger]),
+  ('setBytes:length:atIndex:', None, [POINTER(None), NSUInteger, NSUInteger]),
   ('setBuffer:offset:atIndex:', None, [MTLBuffer, NSUInteger, NSUInteger]),
   ('setBufferOffset:atIndex:', None, [NSUInteger, NSUInteger]),
-  ('setBuffers:offsets:withRange:', None, [ctypes.POINTER(MTLBuffer), ctypes.POINTER(NSUInteger), NSRange]),
+  ('setBuffers:offsets:withRange:', None, [POINTER(MTLBuffer), POINTER(NSUInteger), NSRange]),
   ('setBuffer:offset:attributeStride:atIndex:', None, [MTLBuffer, NSUInteger, NSUInteger, NSUInteger]),
-  ('setBuffers:offsets:attributeStrides:withRange:', None, [ctypes.POINTER(MTLBuffer), ctypes.POINTER(NSUInteger), ctypes.POINTER(NSUInteger), NSRange]),
+  ('setBuffers:offsets:attributeStrides:withRange:', None, [POINTER(MTLBuffer), POINTER(NSUInteger), POINTER(NSUInteger), NSRange]),
   ('setBufferOffset:attributeStride:atIndex:', None, [NSUInteger, NSUInteger, NSUInteger]),
-  ('setBytes:length:attributeStride:atIndex:', None, [ctypes.POINTER(None), NSUInteger, NSUInteger, NSUInteger]),
+  ('setBytes:length:attributeStride:atIndex:', None, [POINTER(None), NSUInteger, NSUInteger, NSUInteger]),
   ('setVisibleFunctionTable:atBufferIndex:', None, [MTLVisibleFunctionTable, NSUInteger]),
-  ('setVisibleFunctionTables:withBufferRange:', None, [ctypes.POINTER(MTLVisibleFunctionTable), NSRange]),
+  ('setVisibleFunctionTables:withBufferRange:', None, [POINTER(MTLVisibleFunctionTable), NSRange]),
   ('setIntersectionFunctionTable:atBufferIndex:', None, [MTLIntersectionFunctionTable, NSUInteger]),
-  ('setIntersectionFunctionTables:withBufferRange:', None, [ctypes.POINTER(MTLIntersectionFunctionTable), NSRange]),
+  ('setIntersectionFunctionTables:withBufferRange:', None, [POINTER(MTLIntersectionFunctionTable), NSRange]),
   ('setAccelerationStructure:atBufferIndex:', None, [MTLAccelerationStructure, NSUInteger]),
   ('setTexture:atIndex:', None, [MTLTexture, NSUInteger]),
-  ('setTextures:withRange:', None, [ctypes.POINTER(MTLTexture), NSRange]),
+  ('setTextures:withRange:', None, [POINTER(MTLTexture), NSRange]),
   ('setSamplerState:atIndex:', None, [MTLSamplerState, NSUInteger]),
-  ('setSamplerStates:withRange:', None, [ctypes.POINTER(MTLSamplerState), NSRange]),
-  ('setSamplerState:lodMinClamp:lodMaxClamp:atIndex:', None, [MTLSamplerState, ctypes.c_float, ctypes.c_float, NSUInteger]),
-  ('setSamplerStates:lodMinClamps:lodMaxClamps:withRange:', None, [ctypes.POINTER(MTLSamplerState), ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float), NSRange]),
+  ('setSamplerStates:withRange:', None, [POINTER(MTLSamplerState), NSRange]),
+  ('setSamplerState:lodMinClamp:lodMaxClamp:atIndex:', None, [MTLSamplerState, Annotated[float, ctypes.c_float], Annotated[float, ctypes.c_float], NSUInteger]),
+  ('setSamplerStates:lodMinClamps:lodMaxClamps:withRange:', None, [POINTER(MTLSamplerState), POINTER(Annotated[float, ctypes.c_float]), POINTER(Annotated[float, ctypes.c_float]), NSRange]),
   ('setThreadgroupMemoryLength:atIndex:', None, [NSUInteger, NSUInteger]),
   ('setImageblockWidth:height:', None, [NSUInteger, NSUInteger]),
   ('setStageInRegion:', None, [MTLRegion]),
@@ -509,13 +509,13 @@ MTLComputeCommandEncoder._methods_ = [
   ('updateFence:', None, [MTLFence]),
   ('waitForFence:', None, [MTLFence]),
   ('useResource:usage:', None, [MTLResource, MTLResourceUsage]),
-  ('useResources:count:usage:', None, [ctypes.POINTER(MTLResource), NSUInteger, MTLResourceUsage]),
+  ('useResources:count:usage:', None, [POINTER(MTLResource), NSUInteger, MTLResourceUsage]),
   ('useHeap:', None, [MTLHeap]),
-  ('useHeaps:count:', None, [ctypes.POINTER(MTLHeap), NSUInteger]),
+  ('useHeaps:count:', None, [POINTER(MTLHeap), NSUInteger]),
   ('executeCommandsInBuffer:withRange:', None, [MTLIndirectCommandBuffer, NSRange]),
   ('executeCommandsInBuffer:indirectBuffer:indirectBufferOffset:', None, [MTLIndirectCommandBuffer, MTLBuffer, NSUInteger]),
   ('memoryBarrierWithScope:', None, [MTLBarrierScope]),
-  ('memoryBarrierWithResources:count:', None, [ctypes.POINTER(MTLResource), NSUInteger]),
+  ('memoryBarrierWithResources:count:', None, [POINTER(MTLResource), NSUInteger]),
   ('sampleCountersInBuffer:atSampleIndex:withBarrier:', None, [MTLCounterSampleBuffer, NSUInteger, BOOL]),
   ('dispatchType', MTLDispatchType, []),
 ]
@@ -742,7 +742,7 @@ MTLFunctionOptions = enum_MTLFunctionOptions
 MTLFunction._bases_ = [NSObject]
 MTLFunction._methods_ = [
   ('newArgumentEncoderWithBufferIndex:', MTLArgumentEncoder, [NSUInteger], True),
-  ('newArgumentEncoderWithBufferIndex:reflection:', MTLArgumentEncoder, [NSUInteger, ctypes.POINTER(MTLArgument)], True),
+  ('newArgumentEncoderWithBufferIndex:reflection:', MTLArgumentEncoder, [NSUInteger, POINTER(MTLArgument)], True),
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
   ('device', MTLDevice, []),
@@ -943,7 +943,7 @@ MTLComputePipelineState._methods_ = [
 class MTLCommandQueue(objc.Spec): pass
 class MTLCommandBuffer(objc.Spec): pass
 class MTLDrawable(objc.Spec): pass
-CFTimeInterval = ctypes.c_double
+CFTimeInterval = Annotated[float, ctypes.c_double]
 class MTLBlitCommandEncoder(objc.Spec): pass
 enum_MTLBlitOption = CEnum(NSUInteger)
 MTLBlitOptionNone = enum_MTLBlitOption.define('MTLBlitOptionNone', 0)
@@ -985,17 +985,17 @@ class MTLRenderPassDescriptor(objc.Spec): pass
 @record
 class MTLSamplePosition:
   SIZE = 8
-  x: Annotated[ctypes.c_float, 0]
-  y: Annotated[ctypes.c_float, 4]
+  x: Annotated[Annotated[float, ctypes.c_float], 0]
+  y: Annotated[Annotated[float, ctypes.c_float], 4]
 class MTLRenderPassColorAttachmentDescriptorArray(objc.Spec): pass
 class MTLRenderPassColorAttachmentDescriptor(objc.Spec): pass
 @record
 class MTLClearColor:
   SIZE = 32
-  red: Annotated[ctypes.c_double, 0]
-  green: Annotated[ctypes.c_double, 8]
-  blue: Annotated[ctypes.c_double, 16]
-  alpha: Annotated[ctypes.c_double, 24]
+  red: Annotated[Annotated[float, ctypes.c_double], 0]
+  green: Annotated[Annotated[float, ctypes.c_double], 8]
+  blue: Annotated[Annotated[float, ctypes.c_double], 16]
+  alpha: Annotated[Annotated[float, ctypes.c_double], 24]
 class MTLRenderPassAttachmentDescriptor(objc.Spec): pass
 enum_MTLLoadAction = CEnum(NSUInteger)
 MTLLoadActionDontCare = enum_MTLLoadAction.define('MTLLoadActionDontCare', 0)
@@ -1061,8 +1061,8 @@ MTLMultisampleDepthResolveFilterMax = enum_MTLMultisampleDepthResolveFilter.defi
 MTLMultisampleDepthResolveFilter = enum_MTLMultisampleDepthResolveFilter
 MTLRenderPassDepthAttachmentDescriptor._bases_ = [MTLRenderPassAttachmentDescriptor]
 MTLRenderPassDepthAttachmentDescriptor._methods_ = [
-  ('clearDepth', ctypes.c_double, []),
-  ('setClearDepth:', None, [ctypes.c_double]),
+  ('clearDepth', Annotated[float, ctypes.c_double], []),
+  ('setClearDepth:', None, [Annotated[float, ctypes.c_double]]),
   ('depthResolveFilter', MTLMultisampleDepthResolveFilter, []),
   ('setDepthResolveFilter:', None, [MTLMultisampleDepthResolveFilter]),
 ]
@@ -1102,8 +1102,8 @@ MTLRenderPassSampleBufferAttachmentDescriptorArray._methods_ = [
 ]
 MTLRenderPassDescriptor._bases_ = [NSObject]
 MTLRenderPassDescriptor._methods_ = [
-  ('setSamplePositions:count:', None, [ctypes.POINTER(MTLSamplePosition), NSUInteger]),
-  ('getSamplePositions:count:', NSUInteger, [ctypes.POINTER(MTLSamplePosition), NSUInteger]),
+  ('setSamplePositions:count:', None, [POINTER(MTLSamplePosition), NSUInteger]),
+  ('getSamplePositions:count:', NSUInteger, [POINTER(MTLSamplePosition), NSUInteger]),
   ('colorAttachments', MTLRenderPassColorAttachmentDescriptorArray, []),
   ('depthAttachment', MTLRenderPassDepthAttachmentDescriptor, []),
   ('setDepthAttachment:', None, [MTLRenderPassDepthAttachmentDescriptor]),
@@ -1194,7 +1194,7 @@ MTLSparseTextureMappingModeUnmap = enum_MTLSparseTextureMappingMode.define('MTLS
 MTLSparseTextureMappingMode = enum_MTLSparseTextureMappingMode
 MTLResourceStateCommandEncoder._bases_ = [MTLCommandEncoder]
 MTLResourceStateCommandEncoder._methods_ = [
-  ('updateTextureMappings:mode:regions:mipLevels:slices:numRegions:', None, [MTLTexture, MTLSparseTextureMappingMode, ctypes.POINTER(MTLRegion), ctypes.POINTER(NSUInteger), ctypes.POINTER(NSUInteger), NSUInteger]),
+  ('updateTextureMappings:mode:regions:mipLevels:slices:numRegions:', None, [MTLTexture, MTLSparseTextureMappingMode, POINTER(MTLRegion), POINTER(NSUInteger), POINTER(NSUInteger), NSUInteger]),
   ('updateTextureMapping:mode:region:mipLevel:slice:', None, [MTLTexture, MTLSparseTextureMappingMode, MTLRegion, NSUInteger, NSUInteger]),
   ('updateTextureMapping:mode:indirectBuffer:indirectBufferOffset:', None, [MTLTexture, MTLSparseTextureMappingMode, MTLBuffer, NSUInteger]),
   ('updateFence:', None, [MTLFence]),
@@ -1493,7 +1493,7 @@ class MTLHeapDescriptor(objc.Spec): pass
 class MTLDepthStencilState(objc.Spec): pass
 class MTLDepthStencilDescriptor(objc.Spec): pass
 class struct___IOSurface(ctypes.Structure): pass
-IOSurfaceRef = ctypes.POINTER(struct___IOSurface)
+IOSurfaceRef = POINTER(struct___IOSurface)
 class MTLSharedTextureHandle(objc.Spec): pass
 MTLSharedTextureHandle._bases_ = [NSObject]
 MTLSharedTextureHandle._methods_ = [
@@ -1505,9 +1505,9 @@ class MTLLibrary(objc.Spec): pass
 class MTLFunctionConstantValues(objc.Spec): pass
 MTLFunctionConstantValues._bases_ = [NSObject]
 MTLFunctionConstantValues._methods_ = [
-  ('setConstantValue:type:atIndex:', None, [ctypes.POINTER(None), MTLDataType, NSUInteger]),
-  ('setConstantValues:type:withRange:', None, [ctypes.POINTER(None), MTLDataType, NSRange]),
-  ('setConstantValue:type:withName:', None, [ctypes.POINTER(None), MTLDataType, NSString]),
+  ('setConstantValue:type:atIndex:', None, [POINTER(None), MTLDataType, NSUInteger]),
+  ('setConstantValues:type:withRange:', None, [POINTER(None), MTLDataType, NSRange]),
+  ('setConstantValue:type:withName:', None, [POINTER(None), MTLDataType, NSString]),
   ('reset', None, []),
 ]
 class MTLFunctionDescriptor(objc.Spec): pass
@@ -1534,9 +1534,9 @@ MTLLibraryType = enum_MTLLibraryType
 MTLLibrary._bases_ = [NSObject]
 MTLLibrary._methods_ = [
   ('newFunctionWithName:', MTLFunction, [NSString], True),
-  ('newFunctionWithName:constantValues:error:', MTLFunction, [NSString, MTLFunctionConstantValues, ctypes.POINTER(NSError)], True),
-  ('newFunctionWithDescriptor:error:', MTLFunction, [MTLFunctionDescriptor, ctypes.POINTER(NSError)], True),
-  ('newIntersectionFunctionWithDescriptor:error:', MTLFunction, [MTLIntersectionFunctionDescriptor, ctypes.POINTER(NSError)], True),
+  ('newFunctionWithName:constantValues:error:', MTLFunction, [NSString, MTLFunctionConstantValues, POINTER(NSError)], True),
+  ('newFunctionWithDescriptor:error:', MTLFunction, [MTLFunctionDescriptor, POINTER(NSError)], True),
+  ('newIntersectionFunctionWithDescriptor:error:', MTLFunction, [MTLIntersectionFunctionDescriptor, POINTER(NSError)], True),
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
   ('device', MTLDevice, []),
@@ -1572,50 +1572,50 @@ NSComparisonResult = enum_NSComparisonResult
 class NSValue(objc.Spec): pass
 NSValue._bases_ = [NSObject]
 NSValue._methods_ = [
-  ('getValue:size:', None, [ctypes.POINTER(None), NSUInteger]),
-  ('initWithBytes:objCType:', 'instancetype', [ctypes.POINTER(None), ctypes.POINTER(ctypes.c_char)]),
+  ('getValue:size:', None, [POINTER(None), NSUInteger]),
+  ('initWithBytes:objCType:', 'instancetype', [POINTER(None), POINTER(Annotated[bytes, ctypes.c_char])]),
   ('initWithCoder:', 'instancetype', [NSCoder]),
-  ('objCType', ctypes.POINTER(ctypes.c_char), []),
+  ('objCType', POINTER(Annotated[bytes, ctypes.c_char]), []),
 ]
 NSNumber._bases_ = [NSValue]
 NSNumber._methods_ = [
   ('initWithCoder:', 'instancetype', [NSCoder]),
-  ('initWithChar:', NSNumber, [ctypes.c_char]),
-  ('initWithUnsignedChar:', NSNumber, [ctypes.c_ubyte]),
-  ('initWithShort:', NSNumber, [ctypes.c_int16]),
-  ('initWithUnsignedShort:', NSNumber, [ctypes.c_uint16]),
-  ('initWithInt:', NSNumber, [ctypes.c_int32]),
-  ('initWithUnsignedInt:', NSNumber, [ctypes.c_uint32]),
-  ('initWithLong:', NSNumber, [ctypes.c_int64]),
-  ('initWithUnsignedLong:', NSNumber, [ctypes.c_uint64]),
-  ('initWithLongLong:', NSNumber, [ctypes.c_int64]),
-  ('initWithUnsignedLongLong:', NSNumber, [ctypes.c_uint64]),
-  ('initWithFloat:', NSNumber, [ctypes.c_float]),
-  ('initWithDouble:', NSNumber, [ctypes.c_double]),
+  ('initWithChar:', NSNumber, [Annotated[bytes, ctypes.c_char]]),
+  ('initWithUnsignedChar:', NSNumber, [Annotated[int, ctypes.c_ubyte]]),
+  ('initWithShort:', NSNumber, [Annotated[int, ctypes.c_int16]]),
+  ('initWithUnsignedShort:', NSNumber, [Annotated[int, ctypes.c_uint16]]),
+  ('initWithInt:', NSNumber, [Annotated[int, ctypes.c_int32]]),
+  ('initWithUnsignedInt:', NSNumber, [Annotated[int, ctypes.c_uint32]]),
+  ('initWithLong:', NSNumber, [Annotated[int, ctypes.c_int64]]),
+  ('initWithUnsignedLong:', NSNumber, [Annotated[int, ctypes.c_uint64]]),
+  ('initWithLongLong:', NSNumber, [Annotated[int, ctypes.c_int64]]),
+  ('initWithUnsignedLongLong:', NSNumber, [Annotated[int, ctypes.c_uint64]]),
+  ('initWithFloat:', NSNumber, [Annotated[float, ctypes.c_float]]),
+  ('initWithDouble:', NSNumber, [Annotated[float, ctypes.c_double]]),
   ('initWithBool:', NSNumber, [BOOL]),
   ('initWithInteger:', NSNumber, [NSInteger]),
   ('initWithUnsignedInteger:', NSNumber, [NSUInteger]),
   ('compare:', NSComparisonResult, [NSNumber]),
   ('isEqualToNumber:', BOOL, [NSNumber]),
   ('descriptionWithLocale:', NSString, [objc.id_]),
-  ('charValue', ctypes.c_char, []),
-  ('unsignedCharValue', ctypes.c_ubyte, []),
-  ('shortValue', ctypes.c_int16, []),
-  ('unsignedShortValue', ctypes.c_uint16, []),
-  ('intValue', ctypes.c_int32, []),
-  ('unsignedIntValue', ctypes.c_uint32, []),
-  ('longValue', ctypes.c_int64, []),
-  ('unsignedLongValue', ctypes.c_uint64, []),
-  ('longLongValue', ctypes.c_int64, []),
-  ('unsignedLongLongValue', ctypes.c_uint64, []),
-  ('floatValue', ctypes.c_float, []),
-  ('doubleValue', ctypes.c_double, []),
+  ('charValue', Annotated[bytes, ctypes.c_char], []),
+  ('unsignedCharValue', Annotated[int, ctypes.c_ubyte], []),
+  ('shortValue', Annotated[int, ctypes.c_int16], []),
+  ('unsignedShortValue', Annotated[int, ctypes.c_uint16], []),
+  ('intValue', Annotated[int, ctypes.c_int32], []),
+  ('unsignedIntValue', Annotated[int, ctypes.c_uint32], []),
+  ('longValue', Annotated[int, ctypes.c_int64], []),
+  ('unsignedLongValue', Annotated[int, ctypes.c_uint64], []),
+  ('longLongValue', Annotated[int, ctypes.c_int64], []),
+  ('unsignedLongLongValue', Annotated[int, ctypes.c_uint64], []),
+  ('floatValue', Annotated[float, ctypes.c_float], []),
+  ('doubleValue', Annotated[float, ctypes.c_double], []),
   ('boolValue', BOOL, []),
   ('integerValue', NSInteger, []),
   ('unsignedIntegerValue', NSUInteger, []),
   ('stringValue', NSString, []),
 ]
-NSURLBookmarkFileCreationOptions = ctypes.c_uint64
+NSURLBookmarkFileCreationOptions = Annotated[int, ctypes.c_uint64]
 NSURL._bases_ = [NSObject]
 NSURL._methods_ = [
   ('initWithScheme:host:path:', 'instancetype', [NSString, NSString, NSString]),
@@ -1623,21 +1623,21 @@ NSURL._methods_ = [
   ('initFileURLWithPath:relativeToURL:', 'instancetype', [NSString, NSURL]),
   ('initFileURLWithPath:isDirectory:', 'instancetype', [NSString, BOOL]),
   ('initFileURLWithPath:', 'instancetype', [NSString]),
-  ('initFileURLWithFileSystemRepresentation:isDirectory:relativeToURL:', 'instancetype', [ctypes.POINTER(ctypes.c_char), BOOL, NSURL]),
+  ('initFileURLWithFileSystemRepresentation:isDirectory:relativeToURL:', 'instancetype', [POINTER(Annotated[bytes, ctypes.c_char]), BOOL, NSURL]),
   ('initWithString:', 'instancetype', [NSString]),
   ('initWithString:relativeToURL:', 'instancetype', [NSString, NSURL]),
   ('initWithString:encodingInvalidCharacters:', 'instancetype', [NSString, BOOL]),
   ('initWithDataRepresentation:relativeToURL:', 'instancetype', [NSData, NSURL]),
   ('initAbsoluteURLWithDataRepresentation:relativeToURL:', 'instancetype', [NSData, NSURL]),
-  ('getFileSystemRepresentation:maxLength:', BOOL, [ctypes.POINTER(ctypes.c_char), NSUInteger]),
+  ('getFileSystemRepresentation:maxLength:', BOOL, [POINTER(Annotated[bytes, ctypes.c_char]), NSUInteger]),
   ('isFileReferenceURL', BOOL, []),
   ('fileReferenceURL', NSURL, []),
-  ('getResourceValue:forKey:error:', BOOL, [ctypes.POINTER(objc.id_), NSURLResourceKey, ctypes.POINTER(NSError)]),
-  ('setResourceValue:forKey:error:', BOOL, [objc.id_, NSURLResourceKey, ctypes.POINTER(NSError)]),
+  ('getResourceValue:forKey:error:', BOOL, [POINTER(objc.id_), NSURLResourceKey, POINTER(NSError)]),
+  ('setResourceValue:forKey:error:', BOOL, [objc.id_, NSURLResourceKey, POINTER(NSError)]),
   ('removeCachedResourceValueForKey:', None, [NSURLResourceKey]),
   ('removeAllCachedResourceValues', None, []),
   ('setTemporaryResourceValue:forKey:', None, [objc.id_, NSURLResourceKey]),
-  ('initByResolvingBookmarkData:options:relativeToURL:bookmarkDataIsStale:error:', 'instancetype', [NSData, NSURLBookmarkResolutionOptions, NSURL, ctypes.POINTER(BOOL), ctypes.POINTER(NSError)]),
+  ('initByResolvingBookmarkData:options:relativeToURL:bookmarkDataIsStale:error:', 'instancetype', [NSData, NSURLBookmarkResolutionOptions, NSURL, POINTER(BOOL), POINTER(NSError)]),
   ('startAccessingSecurityScopedResource', BOOL, []),
   ('stopAccessingSecurityScopedResource', None, []),
   ('dataRepresentation', NSData, []),
@@ -1657,7 +1657,7 @@ NSURL._methods_ = [
   ('query', NSString, []),
   ('relativePath', NSString, []),
   ('hasDirectoryPath', BOOL, []),
-  ('fileSystemRepresentation', ctypes.POINTER(ctypes.c_char), []),
+  ('fileSystemRepresentation', POINTER(Annotated[bytes, ctypes.c_char]), []),
   ('isFileURL', BOOL, []),
   ('standardizedURL', NSURL, []),
   ('filePathURL', NSURL, []),
@@ -1667,16 +1667,16 @@ NSURL._classmethods_ = [
   ('fileURLWithPath:relativeToURL:', NSURL, [NSString, NSURL]),
   ('fileURLWithPath:isDirectory:', NSURL, [NSString, BOOL]),
   ('fileURLWithPath:', NSURL, [NSString]),
-  ('fileURLWithFileSystemRepresentation:isDirectory:relativeToURL:', NSURL, [ctypes.POINTER(ctypes.c_char), BOOL, NSURL]),
+  ('fileURLWithFileSystemRepresentation:isDirectory:relativeToURL:', NSURL, [POINTER(Annotated[bytes, ctypes.c_char]), BOOL, NSURL]),
   ('URLWithString:', 'instancetype', [NSString]),
   ('URLWithString:relativeToURL:', 'instancetype', [NSString, NSURL]),
   ('URLWithString:encodingInvalidCharacters:', 'instancetype', [NSString, BOOL]),
   ('URLWithDataRepresentation:relativeToURL:', NSURL, [NSData, NSURL]),
   ('absoluteURLWithDataRepresentation:relativeToURL:', NSURL, [NSData, NSURL]),
-  ('URLByResolvingBookmarkData:options:relativeToURL:bookmarkDataIsStale:error:', 'instancetype', [NSData, NSURLBookmarkResolutionOptions, NSURL, ctypes.POINTER(BOOL), ctypes.POINTER(NSError)]),
-  ('writeBookmarkData:toURL:options:error:', BOOL, [NSData, NSURL, NSURLBookmarkFileCreationOptions, ctypes.POINTER(NSError)]),
-  ('bookmarkDataWithContentsOfURL:error:', NSData, [NSURL, ctypes.POINTER(NSError)]),
-  ('URLByResolvingAliasFileAtURL:options:error:', 'instancetype', [NSURL, NSURLBookmarkResolutionOptions, ctypes.POINTER(NSError)]),
+  ('URLByResolvingBookmarkData:options:relativeToURL:bookmarkDataIsStale:error:', 'instancetype', [NSData, NSURLBookmarkResolutionOptions, NSURL, POINTER(BOOL), POINTER(NSError)]),
+  ('writeBookmarkData:toURL:options:error:', BOOL, [NSData, NSURL, NSURLBookmarkFileCreationOptions, POINTER(NSError)]),
+  ('bookmarkDataWithContentsOfURL:error:', NSData, [NSURL, POINTER(NSError)]),
+  ('URLByResolvingAliasFileAtURL:options:error:', 'instancetype', [NSURL, NSURLBookmarkResolutionOptions, POINTER(NSError)]),
 ]
 class NSAttributedString(objc.Spec): pass
 NSAttributedString._bases_ = [NSObject]
@@ -1689,8 +1689,8 @@ NSBundle._methods_ = [
   ('initWithURL:', 'instancetype', [NSURL]),
   ('load', BOOL, []),
   ('unload', BOOL, []),
-  ('preflightAndReturnError:', BOOL, [ctypes.POINTER(NSError)]),
-  ('loadAndReturnError:', BOOL, [ctypes.POINTER(NSError)]),
+  ('preflightAndReturnError:', BOOL, [POINTER(NSError)]),
+  ('loadAndReturnError:', BOOL, [POINTER(NSError)]),
   ('URLForAuxiliaryExecutable:', NSURL, [NSString]),
   ('pathForAuxiliaryExecutable:', NSString, [NSString]),
   ('URLForResource:withExtension:', NSURL, [NSString, NSString]),
@@ -1803,7 +1803,7 @@ MTLCounterSampleBufferDescriptor._methods_ = [
   ('sampleCount', NSUInteger, []),
   ('setSampleCount:', None, [NSUInteger]),
 ]
-MTLTimestamp = ctypes.c_uint64
+MTLTimestamp = Annotated[int, ctypes.c_uint64]
 class MTLBufferBinding(objc.Spec): pass
 class MTLBinding(objc.Spec): pass
 MTLBufferBinding._bases_ = [MTLBinding]
@@ -1826,7 +1826,7 @@ MTLDevice._methods_ = [
   ('heapBufferSizeAndAlignWithLength:options:', MTLSizeAndAlign, [NSUInteger, MTLResourceOptions]),
   ('newHeapWithDescriptor:', MTLHeap, [MTLHeapDescriptor], True),
   ('newBufferWithLength:options:', MTLBuffer, [NSUInteger, MTLResourceOptions], True),
-  ('newBufferWithBytes:length:options:', MTLBuffer, [ctypes.POINTER(None), NSUInteger, MTLResourceOptions], True),
+  ('newBufferWithBytes:length:options:', MTLBuffer, [POINTER(None), NSUInteger, MTLResourceOptions], True),
   ('newDepthStencilStateWithDescriptor:', MTLDepthStencilState, [MTLDepthStencilDescriptor], True),
   ('newTextureWithDescriptor:', MTLTexture, [MTLTextureDescriptor], True),
   ('newTextureWithDescriptor:iosurface:plane:', MTLTexture, [MTLTextureDescriptor, IOSurfaceRef, NSUInteger], True),
@@ -1834,50 +1834,50 @@ MTLDevice._methods_ = [
   ('newSharedTextureWithHandle:', MTLTexture, [MTLSharedTextureHandle], True),
   ('newSamplerStateWithDescriptor:', MTLSamplerState, [MTLSamplerDescriptor], True),
   ('newDefaultLibrary', MTLLibrary, [], True),
-  ('newDefaultLibraryWithBundle:error:', MTLLibrary, [NSBundle, ctypes.POINTER(NSError)], True),
-  ('newLibraryWithFile:error:', MTLLibrary, [NSString, ctypes.POINTER(NSError)], True),
-  ('newLibraryWithURL:error:', MTLLibrary, [NSURL, ctypes.POINTER(NSError)], True),
-  ('newLibraryWithData:error:', MTLLibrary, [objc.id_, ctypes.POINTER(NSError)], True),
-  ('newLibraryWithSource:options:error:', MTLLibrary, [NSString, MTLCompileOptions, ctypes.POINTER(NSError)], True),
-  ('newLibraryWithStitchedDescriptor:error:', MTLLibrary, [MTLStitchedLibraryDescriptor, ctypes.POINTER(NSError)], True),
-  ('newRenderPipelineStateWithDescriptor:error:', MTLRenderPipelineState, [MTLRenderPipelineDescriptor, ctypes.POINTER(NSError)], True),
-  ('newRenderPipelineStateWithDescriptor:options:reflection:error:', MTLRenderPipelineState, [MTLRenderPipelineDescriptor, MTLPipelineOption, ctypes.POINTER(MTLRenderPipelineReflection), ctypes.POINTER(NSError)], True),
-  ('newComputePipelineStateWithFunction:error:', MTLComputePipelineState, [MTLFunction, ctypes.POINTER(NSError)], True),
-  ('newComputePipelineStateWithFunction:options:reflection:error:', MTLComputePipelineState, [MTLFunction, MTLPipelineOption, ctypes.POINTER(MTLComputePipelineReflection), ctypes.POINTER(NSError)], True),
-  ('newComputePipelineStateWithDescriptor:options:reflection:error:', MTLComputePipelineState, [MTLComputePipelineDescriptor, MTLPipelineOption, ctypes.POINTER(MTLComputePipelineReflection), ctypes.POINTER(NSError)], True),
+  ('newDefaultLibraryWithBundle:error:', MTLLibrary, [NSBundle, POINTER(NSError)], True),
+  ('newLibraryWithFile:error:', MTLLibrary, [NSString, POINTER(NSError)], True),
+  ('newLibraryWithURL:error:', MTLLibrary, [NSURL, POINTER(NSError)], True),
+  ('newLibraryWithData:error:', MTLLibrary, [objc.id_, POINTER(NSError)], True),
+  ('newLibraryWithSource:options:error:', MTLLibrary, [NSString, MTLCompileOptions, POINTER(NSError)], True),
+  ('newLibraryWithStitchedDescriptor:error:', MTLLibrary, [MTLStitchedLibraryDescriptor, POINTER(NSError)], True),
+  ('newRenderPipelineStateWithDescriptor:error:', MTLRenderPipelineState, [MTLRenderPipelineDescriptor, POINTER(NSError)], True),
+  ('newRenderPipelineStateWithDescriptor:options:reflection:error:', MTLRenderPipelineState, [MTLRenderPipelineDescriptor, MTLPipelineOption, POINTER(MTLRenderPipelineReflection), POINTER(NSError)], True),
+  ('newComputePipelineStateWithFunction:error:', MTLComputePipelineState, [MTLFunction, POINTER(NSError)], True),
+  ('newComputePipelineStateWithFunction:options:reflection:error:', MTLComputePipelineState, [MTLFunction, MTLPipelineOption, POINTER(MTLComputePipelineReflection), POINTER(NSError)], True),
+  ('newComputePipelineStateWithDescriptor:options:reflection:error:', MTLComputePipelineState, [MTLComputePipelineDescriptor, MTLPipelineOption, POINTER(MTLComputePipelineReflection), POINTER(NSError)], True),
   ('newFence', MTLFence, [], True),
   ('supportsFeatureSet:', BOOL, [MTLFeatureSet]),
   ('supportsFamily:', BOOL, [MTLGPUFamily]),
   ('supportsTextureSampleCount:', BOOL, [NSUInteger]),
   ('minimumLinearTextureAlignmentForPixelFormat:', NSUInteger, [MTLPixelFormat]),
   ('minimumTextureBufferAlignmentForPixelFormat:', NSUInteger, [MTLPixelFormat]),
-  ('newRenderPipelineStateWithTileDescriptor:options:reflection:error:', MTLRenderPipelineState, [MTLTileRenderPipelineDescriptor, MTLPipelineOption, ctypes.POINTER(MTLRenderPipelineReflection), ctypes.POINTER(NSError)], True),
-  ('newRenderPipelineStateWithMeshDescriptor:options:reflection:error:', MTLRenderPipelineState, [MTLMeshRenderPipelineDescriptor, MTLPipelineOption, ctypes.POINTER(MTLRenderPipelineReflection), ctypes.POINTER(NSError)], True),
-  ('getDefaultSamplePositions:count:', None, [ctypes.POINTER(MTLSamplePosition), NSUInteger]),
+  ('newRenderPipelineStateWithTileDescriptor:options:reflection:error:', MTLRenderPipelineState, [MTLTileRenderPipelineDescriptor, MTLPipelineOption, POINTER(MTLRenderPipelineReflection), POINTER(NSError)], True),
+  ('newRenderPipelineStateWithMeshDescriptor:options:reflection:error:', MTLRenderPipelineState, [MTLMeshRenderPipelineDescriptor, MTLPipelineOption, POINTER(MTLRenderPipelineReflection), POINTER(NSError)], True),
+  ('getDefaultSamplePositions:count:', None, [POINTER(MTLSamplePosition), NSUInteger]),
   ('supportsRasterizationRateMapWithLayerCount:', BOOL, [NSUInteger]),
   ('newRasterizationRateMapWithDescriptor:', MTLRasterizationRateMap, [MTLRasterizationRateMapDescriptor], True),
   ('newIndirectCommandBufferWithDescriptor:maxCommandCount:options:', MTLIndirectCommandBuffer, [MTLIndirectCommandBufferDescriptor, NSUInteger, MTLResourceOptions], True),
   ('newEvent', MTLEvent, [], True),
   ('newSharedEvent', MTLSharedEvent, [], True),
   ('newSharedEventWithHandle:', MTLSharedEvent, [MTLSharedEventHandle], True),
-  ('newIOHandleWithURL:error:', MTLIOFileHandle, [NSURL, ctypes.POINTER(NSError)], True),
-  ('newIOCommandQueueWithDescriptor:error:', MTLIOCommandQueue, [MTLIOCommandQueueDescriptor, ctypes.POINTER(NSError)], True),
-  ('newIOHandleWithURL:compressionMethod:error:', MTLIOFileHandle, [NSURL, MTLIOCompressionMethod, ctypes.POINTER(NSError)], True),
-  ('newIOFileHandleWithURL:error:', MTLIOFileHandle, [NSURL, ctypes.POINTER(NSError)], True),
-  ('newIOFileHandleWithURL:compressionMethod:error:', MTLIOFileHandle, [NSURL, MTLIOCompressionMethod, ctypes.POINTER(NSError)], True),
+  ('newIOHandleWithURL:error:', MTLIOFileHandle, [NSURL, POINTER(NSError)], True),
+  ('newIOCommandQueueWithDescriptor:error:', MTLIOCommandQueue, [MTLIOCommandQueueDescriptor, POINTER(NSError)], True),
+  ('newIOHandleWithURL:compressionMethod:error:', MTLIOFileHandle, [NSURL, MTLIOCompressionMethod, POINTER(NSError)], True),
+  ('newIOFileHandleWithURL:error:', MTLIOFileHandle, [NSURL, POINTER(NSError)], True),
+  ('newIOFileHandleWithURL:compressionMethod:error:', MTLIOFileHandle, [NSURL, MTLIOCompressionMethod, POINTER(NSError)], True),
   ('sparseTileSizeWithTextureType:pixelFormat:sampleCount:', MTLSize, [MTLTextureType, MTLPixelFormat, NSUInteger]),
-  ('convertSparsePixelRegions:toTileRegions:withTileSize:alignmentMode:numRegions:', None, [ctypes.POINTER(MTLRegion), ctypes.POINTER(MTLRegion), MTLSize, MTLSparseTextureRegionAlignmentMode, NSUInteger]),
-  ('convertSparseTileRegions:toPixelRegions:withTileSize:numRegions:', None, [ctypes.POINTER(MTLRegion), ctypes.POINTER(MTLRegion), MTLSize, NSUInteger]),
+  ('convertSparsePixelRegions:toTileRegions:withTileSize:alignmentMode:numRegions:', None, [POINTER(MTLRegion), POINTER(MTLRegion), MTLSize, MTLSparseTextureRegionAlignmentMode, NSUInteger]),
+  ('convertSparseTileRegions:toPixelRegions:withTileSize:numRegions:', None, [POINTER(MTLRegion), POINTER(MTLRegion), MTLSize, NSUInteger]),
   ('sparseTileSizeInBytesForSparsePageSize:', NSUInteger, [MTLSparsePageSize]),
   ('sparseTileSizeWithTextureType:pixelFormat:sampleCount:sparsePageSize:', MTLSize, [MTLTextureType, MTLPixelFormat, NSUInteger, MTLSparsePageSize]),
-  ('newCounterSampleBufferWithDescriptor:error:', MTLCounterSampleBuffer, [MTLCounterSampleBufferDescriptor, ctypes.POINTER(NSError)], True),
-  ('sampleTimestamps:gpuTimestamp:', None, [ctypes.POINTER(MTLTimestamp), ctypes.POINTER(MTLTimestamp)]),
+  ('newCounterSampleBufferWithDescriptor:error:', MTLCounterSampleBuffer, [MTLCounterSampleBufferDescriptor, POINTER(NSError)], True),
+  ('sampleTimestamps:gpuTimestamp:', None, [POINTER(MTLTimestamp), POINTER(MTLTimestamp)]),
   ('newArgumentEncoderWithBufferBinding:', MTLArgumentEncoder, [MTLBufferBinding], True),
   ('supportsCounterSampling:', BOOL, [MTLCounterSamplingPoint]),
   ('supportsVertexAmplificationCount:', BOOL, [NSUInteger]),
-  ('newDynamicLibrary:error:', MTLDynamicLibrary, [MTLLibrary, ctypes.POINTER(NSError)], True),
-  ('newDynamicLibraryWithURL:error:', MTLDynamicLibrary, [NSURL, ctypes.POINTER(NSError)], True),
-  ('newBinaryArchiveWithDescriptor:error:', MTLBinaryArchive, [MTLBinaryArchiveDescriptor, ctypes.POINTER(NSError)], True),
+  ('newDynamicLibrary:error:', MTLDynamicLibrary, [MTLLibrary, POINTER(NSError)], True),
+  ('newDynamicLibraryWithURL:error:', MTLDynamicLibrary, [NSURL, POINTER(NSError)], True),
+  ('newBinaryArchiveWithDescriptor:error:', MTLBinaryArchive, [MTLBinaryArchiveDescriptor, POINTER(NSError)], True),
   ('accelerationStructureSizesWithDescriptor:', MTLAccelerationStructureSizes, [MTLAccelerationStructureDescriptor]),
   ('newAccelerationStructureWithSize:', MTLAccelerationStructure, [NSUInteger], True),
   ('newAccelerationStructureWithDescriptor:', MTLAccelerationStructure, [MTLAccelerationStructureDescriptor], True),

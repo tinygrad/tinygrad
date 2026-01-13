@@ -1,9 +1,9 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal
-from tinygrad.runtime.support.c import DLL, record, Array, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 class union_PM4_MES_TYPE_3_HEADER(ctypes.Union): pass
-enum_mes_set_resources_queue_type_enum = CEnum(ctypes.c_uint32)
+enum_mes_set_resources_queue_type_enum = CEnum(Annotated[int, ctypes.c_uint32])
 queue_type__mes_set_resources__kernel_interface_queue_kiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__kernel_interface_queue_kiq', 0)
 queue_type__mes_set_resources__hsa_interface_queue_hiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__hsa_interface_queue_hiq', 1)
 queue_type__mes_set_resources__hsa_debug_interface_queue = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__hsa_debug_interface_queue', 4)
@@ -12,85 +12,85 @@ class struct_pm4_mes_set_resources(ctypes.Structure): pass
 class struct_pm4_mes_runlist(ctypes.Structure): pass
 class struct_pm4_mes_map_process(ctypes.Structure): pass
 class struct_PM4_MES_MAP_PROCESS_VM(ctypes.Structure): pass
-enum_mes_map_queues_queue_sel_enum = CEnum(ctypes.c_uint32)
+enum_mes_map_queues_queue_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 queue_sel__mes_map_queues__map_to_specified_queue_slots_vi = enum_mes_map_queues_queue_sel_enum.define('queue_sel__mes_map_queues__map_to_specified_queue_slots_vi', 0)
 queue_sel__mes_map_queues__map_to_hws_determined_queue_slots_vi = enum_mes_map_queues_queue_sel_enum.define('queue_sel__mes_map_queues__map_to_hws_determined_queue_slots_vi', 1)
 
-enum_mes_map_queues_queue_type_enum = CEnum(ctypes.c_uint32)
+enum_mes_map_queues_queue_type_enum = CEnum(Annotated[int, ctypes.c_uint32])
 queue_type__mes_map_queues__normal_compute_vi = enum_mes_map_queues_queue_type_enum.define('queue_type__mes_map_queues__normal_compute_vi', 0)
 queue_type__mes_map_queues__debug_interface_queue_vi = enum_mes_map_queues_queue_type_enum.define('queue_type__mes_map_queues__debug_interface_queue_vi', 1)
 queue_type__mes_map_queues__normal_latency_static_queue_vi = enum_mes_map_queues_queue_type_enum.define('queue_type__mes_map_queues__normal_latency_static_queue_vi', 2)
 queue_type__mes_map_queues__low_latency_static_queue_vi = enum_mes_map_queues_queue_type_enum.define('queue_type__mes_map_queues__low_latency_static_queue_vi', 3)
 
-enum_mes_map_queues_engine_sel_enum = CEnum(ctypes.c_uint32)
+enum_mes_map_queues_engine_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 engine_sel__mes_map_queues__compute_vi = enum_mes_map_queues_engine_sel_enum.define('engine_sel__mes_map_queues__compute_vi', 0)
 engine_sel__mes_map_queues__sdma0_vi = enum_mes_map_queues_engine_sel_enum.define('engine_sel__mes_map_queues__sdma0_vi', 2)
 engine_sel__mes_map_queues__sdma1_vi = enum_mes_map_queues_engine_sel_enum.define('engine_sel__mes_map_queues__sdma1_vi', 3)
 
-enum_mes_map_queues_extended_engine_sel_enum = CEnum(ctypes.c_uint32)
+enum_mes_map_queues_extended_engine_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 extended_engine_sel__mes_map_queues__legacy_engine_sel = enum_mes_map_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_map_queues__legacy_engine_sel', 0)
 extended_engine_sel__mes_map_queues__sdma0_to_7_sel = enum_mes_map_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_map_queues__sdma0_to_7_sel', 1)
 extended_engine_sel__mes_map_queues__sdma8_to_15_sel = enum_mes_map_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_map_queues__sdma8_to_15_sel', 2)
 
 class struct_pm4_mes_map_queues(ctypes.Structure): pass
-enum_mes_query_status_interrupt_sel_enum = CEnum(ctypes.c_uint32)
+enum_mes_query_status_interrupt_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 interrupt_sel__mes_query_status__completion_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__completion_status', 0)
 interrupt_sel__mes_query_status__process_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__process_status', 1)
 interrupt_sel__mes_query_status__queue_status = enum_mes_query_status_interrupt_sel_enum.define('interrupt_sel__mes_query_status__queue_status', 2)
 
-enum_mes_query_status_command_enum = CEnum(ctypes.c_uint32)
+enum_mes_query_status_command_enum = CEnum(Annotated[int, ctypes.c_uint32])
 command__mes_query_status__interrupt_only = enum_mes_query_status_command_enum.define('command__mes_query_status__interrupt_only', 0)
 command__mes_query_status__fence_only_immediate = enum_mes_query_status_command_enum.define('command__mes_query_status__fence_only_immediate', 1)
 command__mes_query_status__fence_only_after_write_ack = enum_mes_query_status_command_enum.define('command__mes_query_status__fence_only_after_write_ack', 2)
 command__mes_query_status__fence_wait_for_write_ack_send_interrupt = enum_mes_query_status_command_enum.define('command__mes_query_status__fence_wait_for_write_ack_send_interrupt', 3)
 
-enum_mes_query_status_engine_sel_enum = CEnum(ctypes.c_uint32)
+enum_mes_query_status_engine_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 engine_sel__mes_query_status__compute = enum_mes_query_status_engine_sel_enum.define('engine_sel__mes_query_status__compute', 0)
 engine_sel__mes_query_status__sdma0_queue = enum_mes_query_status_engine_sel_enum.define('engine_sel__mes_query_status__sdma0_queue', 2)
 engine_sel__mes_query_status__sdma1_queue = enum_mes_query_status_engine_sel_enum.define('engine_sel__mes_query_status__sdma1_queue', 3)
 
 class struct_pm4_mes_query_status(ctypes.Structure): pass
-enum_mes_unmap_queues_action_enum = CEnum(ctypes.c_uint32)
+enum_mes_unmap_queues_action_enum = CEnum(Annotated[int, ctypes.c_uint32])
 action__mes_unmap_queues__preempt_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__preempt_queues', 0)
 action__mes_unmap_queues__reset_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__reset_queues', 1)
 action__mes_unmap_queues__disable_process_queues = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__disable_process_queues', 2)
 action__mes_unmap_queues__reserved = enum_mes_unmap_queues_action_enum.define('action__mes_unmap_queues__reserved', 3)
 
-enum_mes_unmap_queues_queue_sel_enum = CEnum(ctypes.c_uint32)
+enum_mes_unmap_queues_queue_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 queue_sel__mes_unmap_queues__perform_request_on_specified_queues = enum_mes_unmap_queues_queue_sel_enum.define('queue_sel__mes_unmap_queues__perform_request_on_specified_queues', 0)
 queue_sel__mes_unmap_queues__perform_request_on_pasid_queues = enum_mes_unmap_queues_queue_sel_enum.define('queue_sel__mes_unmap_queues__perform_request_on_pasid_queues', 1)
 queue_sel__mes_unmap_queues__unmap_all_queues = enum_mes_unmap_queues_queue_sel_enum.define('queue_sel__mes_unmap_queues__unmap_all_queues', 2)
 queue_sel__mes_unmap_queues__unmap_all_non_static_queues = enum_mes_unmap_queues_queue_sel_enum.define('queue_sel__mes_unmap_queues__unmap_all_non_static_queues', 3)
 
-enum_mes_unmap_queues_engine_sel_enum = CEnum(ctypes.c_uint32)
+enum_mes_unmap_queues_engine_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 engine_sel__mes_unmap_queues__compute = enum_mes_unmap_queues_engine_sel_enum.define('engine_sel__mes_unmap_queues__compute', 0)
 engine_sel__mes_unmap_queues__sdma0 = enum_mes_unmap_queues_engine_sel_enum.define('engine_sel__mes_unmap_queues__sdma0', 2)
 engine_sel__mes_unmap_queues__sdmal = enum_mes_unmap_queues_engine_sel_enum.define('engine_sel__mes_unmap_queues__sdmal', 3)
 
-enum_mes_unmap_queues_extended_engine_sel_enum = CEnum(ctypes.c_uint32)
+enum_mes_unmap_queues_extended_engine_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 extended_engine_sel__mes_unmap_queues__legacy_engine_sel = enum_mes_unmap_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_unmap_queues__legacy_engine_sel', 0)
 extended_engine_sel__mes_unmap_queues__sdma0_to_7_sel = enum_mes_unmap_queues_extended_engine_sel_enum.define('extended_engine_sel__mes_unmap_queues__sdma0_to_7_sel', 1)
 
 class struct_pm4_mes_unmap_queues(ctypes.Structure): pass
-enum_mec_release_mem_event_index_enum = CEnum(ctypes.c_uint32)
+enum_mec_release_mem_event_index_enum = CEnum(Annotated[int, ctypes.c_uint32])
 event_index__mec_release_mem__end_of_pipe = enum_mec_release_mem_event_index_enum.define('event_index__mec_release_mem__end_of_pipe', 5)
 event_index__mec_release_mem__shader_done = enum_mec_release_mem_event_index_enum.define('event_index__mec_release_mem__shader_done', 6)
 
-enum_mec_release_mem_cache_policy_enum = CEnum(ctypes.c_uint32)
+enum_mec_release_mem_cache_policy_enum = CEnum(Annotated[int, ctypes.c_uint32])
 cache_policy__mec_release_mem__lru = enum_mec_release_mem_cache_policy_enum.define('cache_policy__mec_release_mem__lru', 0)
 cache_policy__mec_release_mem__stream = enum_mec_release_mem_cache_policy_enum.define('cache_policy__mec_release_mem__stream', 1)
 
-enum_mec_release_mem_pq_exe_status_enum = CEnum(ctypes.c_uint32)
+enum_mec_release_mem_pq_exe_status_enum = CEnum(Annotated[int, ctypes.c_uint32])
 pq_exe_status__mec_release_mem__default = enum_mec_release_mem_pq_exe_status_enum.define('pq_exe_status__mec_release_mem__default', 0)
 pq_exe_status__mec_release_mem__phase_update = enum_mec_release_mem_pq_exe_status_enum.define('pq_exe_status__mec_release_mem__phase_update', 1)
 
-enum_mec_release_mem_dst_sel_enum = CEnum(ctypes.c_uint32)
+enum_mec_release_mem_dst_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 dst_sel__mec_release_mem__memory_controller = enum_mec_release_mem_dst_sel_enum.define('dst_sel__mec_release_mem__memory_controller', 0)
 dst_sel__mec_release_mem__tc_l2 = enum_mec_release_mem_dst_sel_enum.define('dst_sel__mec_release_mem__tc_l2', 1)
 dst_sel__mec_release_mem__queue_write_pointer_register = enum_mec_release_mem_dst_sel_enum.define('dst_sel__mec_release_mem__queue_write_pointer_register', 2)
 dst_sel__mec_release_mem__queue_write_pointer_poll_mask_bit = enum_mec_release_mem_dst_sel_enum.define('dst_sel__mec_release_mem__queue_write_pointer_poll_mask_bit', 3)
 
-enum_mec_release_mem_int_sel_enum = CEnum(ctypes.c_uint32)
+enum_mec_release_mem_int_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 int_sel__mec_release_mem__none = enum_mec_release_mem_int_sel_enum.define('int_sel__mec_release_mem__none', 0)
 int_sel__mec_release_mem__send_interrupt_only = enum_mec_release_mem_int_sel_enum.define('int_sel__mec_release_mem__send_interrupt_only', 1)
 int_sel__mec_release_mem__send_interrupt_after_write_confirm = enum_mec_release_mem_int_sel_enum.define('int_sel__mec_release_mem__send_interrupt_after_write_confirm', 2)
@@ -99,7 +99,7 @@ int_sel__mec_release_mem__unconditionally_send_int_ctxid = enum_mec_release_mem_
 int_sel__mec_release_mem__conditionally_send_int_ctxid_based_on_32_bit_compare = enum_mec_release_mem_int_sel_enum.define('int_sel__mec_release_mem__conditionally_send_int_ctxid_based_on_32_bit_compare', 5)
 int_sel__mec_release_mem__conditionally_send_int_ctxid_based_on_64_bit_compare = enum_mec_release_mem_int_sel_enum.define('int_sel__mec_release_mem__conditionally_send_int_ctxid_based_on_64_bit_compare', 6)
 
-enum_mec_release_mem_data_sel_enum = CEnum(ctypes.c_uint32)
+enum_mec_release_mem_data_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 data_sel__mec_release_mem__none = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__none', 0)
 data_sel__mec_release_mem__send_32_bit_low = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__send_32_bit_low', 1)
 data_sel__mec_release_mem__send_64_bit_data = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__send_64_bit_data', 2)
@@ -108,27 +108,27 @@ data_sel__mec_release_mem__send_cp_perfcounter_hi_lo = enum_mec_release_mem_data
 data_sel__mec_release_mem__store_gds_data_to_memory = enum_mec_release_mem_data_sel_enum.define('data_sel__mec_release_mem__store_gds_data_to_memory', 5)
 
 class struct_pm4_mec_release_mem(ctypes.Structure): pass
-enum_WRITE_DATA_dst_sel_enum = CEnum(ctypes.c_uint32)
+enum_WRITE_DATA_dst_sel_enum = CEnum(Annotated[int, ctypes.c_uint32])
 dst_sel___write_data__mem_mapped_register = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__mem_mapped_register', 0)
 dst_sel___write_data__tc_l2 = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__tc_l2', 2)
 dst_sel___write_data__gds = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__gds', 3)
 dst_sel___write_data__memory = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__memory', 5)
 dst_sel___write_data__memory_mapped_adc_persistent_state = enum_WRITE_DATA_dst_sel_enum.define('dst_sel___write_data__memory_mapped_adc_persistent_state', 6)
 
-enum_WRITE_DATA_addr_incr_enum = CEnum(ctypes.c_uint32)
+enum_WRITE_DATA_addr_incr_enum = CEnum(Annotated[int, ctypes.c_uint32])
 addr_incr___write_data__increment_address = enum_WRITE_DATA_addr_incr_enum.define('addr_incr___write_data__increment_address', 0)
 addr_incr___write_data__do_not_increment_address = enum_WRITE_DATA_addr_incr_enum.define('addr_incr___write_data__do_not_increment_address', 1)
 
-enum_WRITE_DATA_wr_confirm_enum = CEnum(ctypes.c_uint32)
+enum_WRITE_DATA_wr_confirm_enum = CEnum(Annotated[int, ctypes.c_uint32])
 wr_confirm___write_data__do_not_wait_for_write_confirmation = enum_WRITE_DATA_wr_confirm_enum.define('wr_confirm___write_data__do_not_wait_for_write_confirmation', 0)
 wr_confirm___write_data__wait_for_write_confirmation = enum_WRITE_DATA_wr_confirm_enum.define('wr_confirm___write_data__wait_for_write_confirmation', 1)
 
-enum_WRITE_DATA_cache_policy_enum = CEnum(ctypes.c_uint32)
+enum_WRITE_DATA_cache_policy_enum = CEnum(Annotated[int, ctypes.c_uint32])
 cache_policy___write_data__lru = enum_WRITE_DATA_cache_policy_enum.define('cache_policy___write_data__lru', 0)
 cache_policy___write_data__stream = enum_WRITE_DATA_cache_policy_enum.define('cache_policy___write_data__stream', 1)
 
 class struct_pm4_mec_write_data_mmio(ctypes.Structure): pass
-_anonenum0 = CEnum(ctypes.c_uint32)
+_anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
 CACHE_FLUSH_AND_INV_TS_EVENT = _anonenum0.define('CACHE_FLUSH_AND_INV_TS_EVENT', 20)
 
 init_records()
