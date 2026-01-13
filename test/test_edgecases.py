@@ -274,6 +274,11 @@ class TestEdgeCases(unittest.TestCase):
     _, i = Tensor(arr).topk(2)
     np.testing.assert_equal(i.numpy(), ti.numpy().astype(np.int32))
 
+  # initial commit to check CI to see what fails and what to skip
+  # @unittest.skipUnless(Device.DEFAULT == "CUDA" and CUDA_PTX, "only fails on CUDA PTX")
+  @unittest.expectedFailure
+  def test_negative_zero_equality(self):
+    np.testing.assert_equal((Tensor([-0.0]) == 0.0).numpy(), [True])
 
 if __name__ == "__main__":
   unittest.main()
