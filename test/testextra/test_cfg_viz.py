@@ -8,6 +8,7 @@ from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv
 from tinygrad.device import Compiler
+from tinygrad.viz.serve import amdgpu_cfg
 
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
@@ -91,7 +92,7 @@ class TestCfg(unittest.TestCase):
     ])
 
   def test_diamond(self):
-    run_asm("diamond", [
+    run_asm("diamond", insts:=[
       "entry:",
         s_cmp_eq_i32(s[0], 0),
         "s_cbranch_scc1 if",
@@ -104,6 +105,8 @@ class TestCfg(unittest.TestCase):
       "end:",
         s_endpgm(),
     ])
+    _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
+    _ = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])
 
   def test_loop(self):
     run_asm("simple_loop", [
