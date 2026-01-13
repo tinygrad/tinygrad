@@ -35,7 +35,7 @@ def _run(async_fun, cb_info_type, cb_type, status_enum, res_idx:int|None, msg_id
     result[:] = params
     if msg_idx: result[msg_idx] = from_wgpu_str(result[msg_idx])
 
-  cb_info = cb_info_type(nextInChain=None, mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb_type(cb))
+  cb_info = cb_info_type(mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb_type(cb))
   _wait(async_fun(*params, cb_info))
 
   if result[0] != 1: raise RuntimeError(f"[{status_enum.get(result[0]) if status_enum else 'ERROR'}]{result[msg_idx] if msg_idx else ''}")
