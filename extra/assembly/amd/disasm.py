@@ -55,11 +55,11 @@ def _lit(inst, v, neg=0) -> str:
   return f"-{s}" if neg else s
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# INSTRUCTION METADATA - use inst.operands for sizes, fallback to name parsing
+# INSTRUCTION METADATA - fallback functions when inst.num_srcs()/inst.operands unavailable
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _num_srcs(inst) -> int:
-  """Get number of source operands."""
+  """Fallback: get number of source operands from instruction name."""
   name = getattr(inst, 'op_name', '') or ''
   n = name.upper()
   # FMAC/MAC ops are 2-source (dst is implicit accumulator), but FMA/MAD ops are 3-source
@@ -69,30 +69,6 @@ def _num_srcs(inst) -> int:
   if 'PERMLANE' in n and '_VAR' not in n: return 3
   if any(x in n for x in ('_ADD3', '_LSHL_ADD', '_ADD_LSHL', '_LSHL_OR', '_AND_OR', 'OR3_B32', 'AND_OR_B32', 'ALIGNBIT', 'ALIGNBYTE', 'V_PERM_', 'XOR3', 'XAD', 'MULLIT', 'MINMAX', 'MAXMIN', 'MINIMUMMAXIMUM', 'MAXIMUMMINIMUM', 'MINIMUM3', 'MAXIMUM3', 'MIN3', 'MAX3', 'DOT2', 'CVT_PK_U8_F32', 'DOT4', 'DOT8', 'WMMA', 'SWMMAC')): return 3
   return 2
-
-def _is_16bit(inst) -> bool:
-  """Check if instruction operates on 16-bit values (not packed ops)."""
-  name = getattr(inst, 'op_name', '') or ''
-  if '_PK_' in name.upper(): return False
-  return any(x in name.upper() for x in ('_F16', '_I16', '_U16', '_B16'))
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# REGISTER COUNT OVERRIDES - for instructions where pcode is missing or incomplete
-# These are needed for memory instructions (pcode doesn't use D0.type notation)
-# and a few special VOP3 instructions with complex source/dest register patterns
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _name_to_regs(name: str) -> int:
-  """Infer register count from instruction name suffix. Used when pcode is unavailable."""
-  n = name.upper()
-  if 'B512' in n or 'D512' in n: return 16
-  if 'B256' in n or 'D256' in n: return 8
-  if 'B128' in n or 'D128' in n or 'DWORDX4' in n: return 4
-  if 'B96' in n or 'D96' in n or 'DWORDX3' in n: return 3
-  if 'B64' in n or 'D64' in n or 'DWORDX2' in n or '_U64' in n or '_I64' in n or '_F64' in n or '_X2' in n: return 2
-  if 'DWORDX8' in n: return 8
-  if 'DWORDX16' in n: return 16
-  return 1
 
 # SWMMAC register counts: (dst, src0, src1, src2)
 def _swmmac_regs(name: str) -> tuple[int, int, int, int]:
@@ -346,8 +322,8 @@ def _disasm_smem(inst: SMEM) -> str:
     soff_s = decode_src(inst.soffset, cdna) if inst.soffset != 124 else "null"
     if 'pc_rel' in name: return f"{name} {off_s}, {soff_s}, {_unwrap(inst.sdata)}"
     return f"{name} {sbase_str}, {off_s}, {soff_s}, {_unwrap(inst.sdata)}"
-  # Use name-based register count, fallback to inst.dst_regs()
-  dst_n = _name_to_regs(name) if _name_to_regs(name) > 1 else inst.dst_regs()
+  # Use operand info for register count
+  dst_n = inst.dst_regs()
   th, scope = getattr(inst, 'th', 0), getattr(inst, 'scope', 0)
   if is_rdna4:  # RDNA4 uses th/scope instead of glc/dlc
     th_names = ['TH_LOAD_RT', 'TH_LOAD_NT', 'TH_LOAD_HT', 'TH_LOAD_LU']
@@ -368,9 +344,8 @@ def _disasm_flat(inst: FLAT) -> str:
   seg = ['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'
   instr = f"{seg}_{name.split('_', 1)[1] if '_' in name else name}"
   off_val = inst.offset if seg == 'flat' else (inst.offset if inst.offset < 4096 else inst.offset - 8192)
-  # Memory ops have no pcode types, use name-based register count
-  base_w = _name_to_regs(name)
-  w = base_w * (2 if '_x2' in name else 1) * (2 if 'cmpswap' in name else 1)
+  # Use operand info: data_regs for stores/atomics, dst_regs for loads
+  w = inst.data_regs() if 'store' in name or 'atomic' in name else inst.dst_regs()
   off_s = f" offset:{off_val}" if off_val else ""
   if cdna: mods = f"{off_s}{' glc' if inst.sc0 else ''}{' slc' if inst.nt else ''}"
   else: mods = f"{off_s}{' glc' if inst.glc else ''}{' slc' if inst.slc else ''}{' dlc' if inst.dlc else ''}"
@@ -398,8 +373,8 @@ def _disasm_ds(inst: DS) -> str:
   gds = " gds" if getattr(inst, 'gds', 0) else ""
   off = f" offset:{inst.offset0 | (inst.offset1 << 8)}" if inst.offset0 or inst.offset1 else ""
   off2 = (" offset0:" + str(inst.offset0) if inst.offset0 else "") + (" offset1:" + str(inst.offset1) if inst.offset1 else "")
-  # Memory ops have no pcode types, use name-based register count
-  w = _name_to_regs(name)
+  # Use operand info: data_regs for stores/writes/atomics, dst_regs for loads
+  w = inst.data_regs() if 'store' in name or 'write' in name or ('load' not in name and 'read' not in name) else inst.dst_regs()
   d0, d1, dst, addr = reg_fn(inst.data0, w), reg_fn(inst.data1, w), reg_fn(inst.vdst, w), _vreg(inst.addr)
 
   if name == 'ds_nop': return name
@@ -414,11 +389,11 @@ def _disasm_ds(inst: DS) -> str:
   if name in ('ds_consume', 'ds_append'): return f"{name} {reg_fn(inst.vdst)}{off}{gds}"
   if 'gs_reg' in name: return f"{name} {reg_fn(inst.vdst, 2)}, {reg_fn(inst.data0)}{off}{gds}"
   if '2addr' in name:
-    if 'load' in name: return f"{name} {reg_fn(inst.vdst, w*2)}, {addr}{off2}{gds}"
+    if 'load' in name: return f"{name} {reg_fn(inst.vdst, inst.dst_regs())}, {addr}{off2}{gds}"
     if 'store' in name and 'xchg' not in name: return f"{name} {addr}, {d0}, {d1}{off2}{gds}"
-    return f"{name} {reg_fn(inst.vdst, w*2)}, {addr}, {d0}, {d1}{off2}{gds}"
+    return f"{name} {reg_fn(inst.vdst, inst.dst_regs())}, {addr}, {d0}, {d1}{off2}{gds}"
   if 'write2' in name: return f"{name} {addr}, {d0}, {d1}{off2}{gds}"
-  if 'read2' in name: return f"{name} {reg_fn(inst.vdst, w*2)}, {addr}{off2}{gds}"
+  if 'read2' in name: return f"{name} {reg_fn(inst.vdst, inst.dst_regs())}, {addr}{off2}{gds}"
   if 'load' in name: return f"{name} {reg_fn(inst.vdst)}{off}{gds}" if 'addtid' in name else f"{name} {dst}, {addr}{off}{gds}"
   if 'store' in name and not _has(name, 'cmp', 'xchg'):
     return f"{name} {reg_fn(inst.data0)}{off}{gds}" if 'addtid' in name else f"{name} {addr}, {d0}{off}{gds}"
@@ -470,7 +445,7 @@ def _disasm_vop3(inst: VOP3) -> str:
     vdst_raw = _unwrap(inst.vdst) - 256 if _unwrap(inst.vdst) >= 256 else _unwrap(inst.vdst)
     return f"{name}{e64} {s0}, {s1}{cl}" if name.startswith('v_cmpx') else f"{name}{e64} {_fmt_sdst(vdst_raw, 1)}, {s0}, {s1}{cl}"
   if op_val < 384:  # VOP2
-    n = _num_srcs(inst)
+    n = inst.num_srcs() or 2
     os = _opsel_str(inst.opsel, n, need_opsel, is16_d)
     return f"{name}{e64} {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if n == 3 else f"{name}{e64} {dst}, {s0}, {s1}{os}{cl}{om}"
   if op_val < 512:  # VOP1
@@ -481,7 +456,7 @@ def _disasm_vop3(inst: VOP3) -> str:
     if 'v_nop' in name or 'v_pipeflush' in name: return f"{name}{e64}"
     return f"{name}{e64} {dst}, {s0}{os}{cl}{om}"
   # Native VOP3
-  n = _num_srcs(inst)
+  n = inst.num_srcs() or 2
   os = f" byte_sel:{inst.opsel >> 2}" if 'cvt_sr' in name and inst.opsel else _opsel_str(inst.opsel, n, need_opsel, is16_d)
   return f"{name} {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if n == 3 else f"{name} {dst}, {s0}, {s1}{os}{cl}{om}"
 
@@ -516,7 +491,7 @@ def _disasm_vopd(inst: VOPD) -> str:
 
 def _disasm_vop3p(inst: VOP3P) -> str:
   name = inst.op_name.lower()
-  is_wmma, is_swmmac, n, is_fma_mix = 'wmma' in name, 'swmmac' in name, _num_srcs(inst), 'fma_mix' in name
+  is_wmma, is_swmmac, n, is_fma_mix = 'wmma' in name, 'swmmac' in name, inst.num_srcs() or 2, 'fma_mix' in name
   def get_src(v, sc):
     uv = _unwrap(v)
     return _lit(inst, uv) if uv == 255 else _fmt_src(uv, sc)
@@ -737,8 +712,7 @@ try:
     op_val = inst._values.get('op', 0)
     if hasattr(op_val, 'value'): op_val = op_val.value
     name = inst.op_name.lower() or f'vop3a_op_{op_val}'
-    from extra.assembly.amd.dsl import spec_num_srcs, spec_regs
-    n = spec_num_srcs(name) if name else _num_srcs(inst)
+    n = inst.num_srcs() or _num_srcs(inst)
     cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
     orig_name = name
     name = _CDNA_VOP3_ALIASES.get(name, name)
@@ -747,7 +721,7 @@ try:
       s2 = ""
       dst = _vreg(inst.vdst)
     else:
-      dregs, r0, r1, r2 = spec_regs(name) if name else (inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2))
+      dregs, r0, r1, r2 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
       s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, r0), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, r1), _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, r2)
       dst = _vreg(inst.vdst, dregs) if dregs > 1 else _vreg(inst.vdst)
     if op_val >= 512:
@@ -770,9 +744,8 @@ try:
     op_val = inst._values.get('op', 0)
     if hasattr(op_val, 'value'): op_val = op_val.value
     name = inst.op_name.lower() or f'vop3b_op_{op_val}'
-    from extra.assembly.amd.dsl import spec_num_srcs, spec_regs
-    n = spec_num_srcs(name) if name else _num_srcs(inst)
-    dregs, r0, r1, r2 = spec_regs(name) if name else (inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2))
+    n = inst.num_srcs() or _num_srcs(inst)
+    dregs, r0, r1, r2 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
     s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, n=r0), _cdna_src(inst, inst.src1, inst.neg&2, n=r1), _cdna_src(inst, inst.src2, inst.neg&4, n=r2)
     dst = _vreg(inst.vdst, dregs) if dregs > 1 else _vreg(inst.vdst)
     sdst = _fmt_sdst(inst.sdst, 2, cdna=True)
@@ -784,7 +757,7 @@ try:
     return f"{name}{suf} {dst}, {sdst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {sdst}, {s0}, {s1}{cl}{om}"
 
   def _disasm_cdna_vop3p(inst) -> str:
-    name, n, is_mfma = inst.op_name.lower(), _num_srcs(inst), 'mfma' in inst.op_name.lower() or 'smfmac' in inst.op_name.lower()
+    name, n, is_mfma = inst.op_name.lower(), inst.num_srcs() or 2, 'mfma' in inst.op_name.lower() or 'smfmac' in inst.op_name.lower()
     get_src = lambda v, sc: _lit(inst, v) if v == 255 else _fmt_src(v, sc, cdna=True)
     if is_mfma: sc = 2 if 'iu4' in name else 4 if 'iu8' in name or 'i4' in name else 8 if 'f16' in name or 'bf16' in name else 4; src0, src1, src2, dst = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, 16), _vreg(inst.vdst, 16)
     else: src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), _vreg(inst.vdst)

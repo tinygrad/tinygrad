@@ -15,6 +15,13 @@ class Reg:
   def __init__(self, offset: int = 0, sz: int = 512, *, neg: bool = False, abs_: bool = False, hi: bool = False):
     self.offset, self.sz = offset, sz
     self.neg, self.abs_, self.hi = neg, abs_, hi
+
+  # TODO: legacy aliases, remove
+  @property
+  def count(self): return self.sz
+  @property
+  def idx(self): return self.offset
+
   def __hash__(self): return hash((self.offset, self.sz, self.neg, self.abs_, self.hi))
   def __getitem__(self, key):
     if isinstance(key, slice):
@@ -308,10 +315,22 @@ class Inst:
     for name in ['vdst', 'sdst', 'sdata']:
       if name in self.operands: return max(1, self.operands[name][1] // 32)
     return 1
+  def data_regs(self) -> int:
+    """Get data register count for memory ops (stores use 'data' field, loads use 'vdst')."""
+    for name in ['data', 'vdata', 'data0']:
+      if name in self.operands: return max(1, self.operands[name][1] // 32)
+    return self.dst_regs()  # fallback to vdst for loads
   def src_regs(self, n: int) -> int:
     for name in (['src0', 'vsrc0', 'ssrc0'] if n == 0 else ['src1', 'vsrc1', 'ssrc1'] if n == 1 else ['src2']):
       if name in self._field_sizes: return self._field_sizes[name]
     return 1
+  def num_srcs(self) -> int:
+    """Get number of source operands from operand info."""
+    ops = self.operands
+    if 'src2' in ops: return 3
+    if 'src1' in ops or 'vsrc1' in ops or 'ssrc1' in ops: return 2
+    if 'src0' in ops or 'vsrc0' in ops or 'ssrc0' in ops: return 1
+    return 0
   @classmethod
   def _size(cls) -> int: return cls._base_size
   def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)
