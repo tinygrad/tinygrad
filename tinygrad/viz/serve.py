@@ -399,7 +399,7 @@ def amdgpu_tokenize(st:str) -> list[str]:
     from extra.assembly.amd.asm import _op2dsl
     dsl = eval(_op2dsl(st), {'s':s, 'v':v, 'VCC_LO':VCC_LO, 'VCC_HI':VCC_HI, 'VCC':VCC, 'EXEC_LO':EXEC_LO, 'EXEC_HI':EXEC_HI, 'EXEC':EXEC,
                              'SCC':SCC, 'M0':M0, 'NULL':NULL, 'OFF':OFF})
-    return [f"{type(dsl).__name__[0].lower()}{dsl.idx + i}" for i in range(dsl.count)] if isinstance(dsl, Reg) else [st]
+    return [f"{type(dsl).__name__[0].lower()}{dsl.offset + i}" for i in range(dsl.sz)] if isinstance(dsl, Reg) else [st]
   except (ImportError, NameError, SyntaxError, TypeError): return []
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)

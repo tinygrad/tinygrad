@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests for SQTT packet decoding using real captured examples."""
-import pickle, unittest, ctypes
+import pickle, unittest, ctypes, threading
 from pathlib import Path
 from tinygrad.helpers import DEBUG, colored
 from tinygrad.runtime.autogen import rocprof
@@ -93,7 +93,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
       mem_size_ptr[0] = 0
       return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
     try:
-      inst = decode_inst(data := image[offset:])
+      inst = decode_inst(image[offset:])
       mem_size_ptr[0] = inst._size()
     except (ValueError, AssertionError):
       mem_size_ptr[0] = 0
@@ -105,7 +105,15 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
     size_ptr[0] = min(5, max_sz - 1)
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
-  rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
+  exc = None
+  def worker():
+    nonlocal exc
+    try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
+    except Exception as e: exc = e
+  (t:=threading.Thread(target=worker, daemon=True)).start()
+  t.join(timeout=1)
+  if exc is not None: raise exc
+  if t.is_alive(): raise RuntimeError("rocprof decoder timeout")
   return occupancy_records, wave_insts
 
 class TestSQTTExamples(unittest.TestCase):

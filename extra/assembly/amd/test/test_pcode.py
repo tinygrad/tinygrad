@@ -5,12 +5,12 @@ from extra.assembly.amd.pcode import (Reg, TypedView, TypedView, MASK32, MASK64,
                                        _f32, _i32, _f16, _i16, f32_to_f16, isNAN, _bf16, _ibf16, bf16_to_f32, f32_to_bf16,
                                        BYTE_PERMUTE, v_sad_u8, v_msad_u8, _compile_pseudocode, _expr, compile_pseudocode)
 from extra.assembly.amd.test.helpers import ExecContext
-from extra.assembly.amd.autogen.rdna3.str_pcode import VOP3SDOp_PCODE, VOPCOp_PCODE
+from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.enum import VOP3SDOp, VOPCOp
 
 # Compile pseudocode functions on demand for regression tests
-_VOP3SDOp_V_DIV_SCALE_F32 = compile_pseudocode('VOP3SDOp', 'V_DIV_SCALE_F32', VOP3SDOp_PCODE[VOP3SDOp.V_DIV_SCALE_F32])
-_VOPCOp_V_CMP_CLASS_F32 = compile_pseudocode('VOPCOp', 'V_CMP_CLASS_F32', VOPCOp_PCODE[VOPCOp.V_CMP_CLASS_F32])
+_VOP3SDOp_V_DIV_SCALE_F32 = compile_pseudocode('VOP3SDOp', 'V_DIV_SCALE_F32', PCODE[VOP3SDOp.V_DIV_SCALE_F32])
+_VOPCOp_V_CMP_CLASS_F32 = compile_pseudocode('VOPCOp', 'V_CMP_CLASS_F32', PCODE[VOPCOp.V_CMP_CLASS_F32_E32])
 
 class TestReg(unittest.TestCase):
   def test_u32_read(self):
