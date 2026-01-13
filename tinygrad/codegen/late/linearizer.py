@@ -35,6 +35,8 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.STORE: priority = 1    # place stores late
       case Ops.RANGE: priority = 5    # placing RANGE is good
       case Ops.END: priority = -5     # placing END is bad
+      case Ops.KERNEL: priority, extra = 2, id(u)
+      case Ops.AFTER: priority, extra = 2, id(u)
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority, extra)
 

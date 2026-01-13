@@ -1,63 +1,31 @@
 import time
 from typing import cast
-from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, Context
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
 
 def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
-  with cpu_profile(TracingKey("toposort sched_sink")):
-    # construct the KERNEL children graph based on assigns
-    children: dict[UOp, list[UOp]] = {}
-    in_degree: dict[UOp, int] = {}
-    for u in sched_sink.toposort():
-      if u.op is Ops.RANGE:
-        in_degree.setdefault(u, 0)
-        continue
-      if u.op is not Ops.AFTER or u.src[1].op is Ops.RANGE: continue
-      k = u.src[1]
-      in_degree.setdefault(k, 0)
-      for s in k.src[0].src if k.op is Ops.END else k.src:
-        if s.op is Ops.AFTER:
-          children.setdefault(s.src[1], []).append(k)
-          in_degree[k] += 1
-        elif s.op in {Ops.MSELECT, Ops.MSTACK}:
-          for ss in s.src:
-            if ss.op is Ops.MSELECT: ss = ss.src[0]
-            if ss.op is not Ops.BUFFER:
-              assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
-              children.setdefault(ss.src[1], []).append(k)
-              in_degree[k] += 1
-        elif s.op in {Ops.BUFFER, Ops.BIND}:
-          pass  # a BUFFER is already realized, BINDs are handled in complete_create_schedule_with_vars
-        else:
-          raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
+  from tinygrad.codegen.late.linearizer import linearize
 
   with cpu_profile(TracingKey("linearize schedule")):
-    queue: deque[UOp] = deque()
-    for k,v in in_degree.items():
-      if v == 0: queue.append(k)
-
+    with Context(TUPLE_ORDER=0):
+      ordered = linearize(sched_sink)
     schedule: list[tuple|UOp] = []
-    while len(queue):
-      k = rk = queue.popleft()
-      if k.op is Ops.END: k = k.src[0]
-      if k.op is Ops.RANGE: schedule.append(k)
-      elif k.op is Ops.KERNEL:
-        ast = k.arg.ast
-        buf_uops = tuple(s.buf_uop for s in k.src if s.op is not Ops.BIND)
-        bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
-        schedule.append((ast, buf_uops, k.arg.metadata, {}, bound_ranges))
-        if rk.op is Ops.END: schedule.append(rk)
-      else:
-        raise RuntimeError(f"can't schedule {k.op}")
-      for x in children.get(rk, []):
-        in_degree[x] -= 1
-        if in_degree[x] == 0: queue.append(x)
+    for u in ordered:
+      if u.op is Ops.RANGE: schedule.append(u)
+      elif u.op is Ops.AFTER and u.src[1].op is not Ops.RANGE:
+        rk = k = u.src[1]
+        if k.op is Ops.END: k = k.src[0]
+        if k.op is Ops.KERNEL:
+          ast = k.arg.ast
+          buf_uops = tuple(s.buf_uop for s in k.src if s.op is not Ops.BIND)
+          bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
+          schedule.append((ast, buf_uops, k.arg.metadata, {}, bound_ranges))
+          if rk.op is Ops.END: schedule.append(rk)
 
   with cpu_profile(TracingKey("expand ranges")):
     pre_schedule: list[ExecItem] = []
