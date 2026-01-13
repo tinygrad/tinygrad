@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
-from _ctypes import _SimpleCData
-from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, TypeVar, Generic
+from _ctypes import _SimpleCData, _Pointer
+from typing import get_type_hints, get_args, get_origin, overload, Annotated, Any, TypeVar, Generic
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -18,7 +18,6 @@ def _IOR(base, nr, typ): return functools.partial(_do_ioctl, 2, ord(base) if isi
 def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, typ)
 
 def del_an(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
-def POINTER(p): return ctypes.POINTER(del_an(p))
 def CFUNCTYPE(*args): return ctypes.CFUNCTYPE(*(del_an(a) for a in args))
 
 def CEnum(typ):
@@ -48,13 +47,20 @@ T = TypeVar("T")
 U = TypeVar("U")
 V = TypeVar("V")
 class Array(Generic[T, U]):
-  if TYPE_CHECKING:
-    @overload
-    def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
-    @overload
-    def __getitem__(self: Array[T, Any], key: int) -> T: ...
-    def __getitem__(self, key: int) -> Any: ...
+  @overload
+  def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
+  @overload
+  def __getitem__(self: Array[T, Any], key: int) -> T: ...
+  def __getitem__(self, key: int) -> Any: ...
+  @overload
+  def __setitem__(self: Array[_SimpleCData[V], Any], key: int, val: V): ...
+  @overload
+  def __setitem__(self: Array[T, Any], key: int, val: T): ...
+  def __setitem__(self, key: int, val: Any): ...
   def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
+
+class POINTER(_Pointer[T]):
+  def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key[0]))
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
