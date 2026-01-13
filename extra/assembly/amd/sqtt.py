@@ -325,27 +325,16 @@ def decode(data: bytes) -> Iterator[PacketType]:
   n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
   state_to_opcode, decode_info = STATE_TO_OPCODE, _DECODE_INFO
 
-  while pos < n:
-    need = nib_count
+  while pos + ((nib_count + nib_off + 1) >> 1) <= n:
+    need = nib_count - nib_off
     # 1. if unaligned, read high nibble to align
-    if nib_off and need:
-      reg = (reg >> 4) | ((data[pos] >> 4) << 60)
-      pos += 1
-      nib_off = 0
-      need -= 1
+    if nib_off: reg, pos = (reg >> 4) | ((data[pos] >> 4) << 60), pos + 1
     # 2. read all full bytes at once
-    byte_count = need >> 1
-    if byte_count:
-      if pos + byte_count > n: break
+    if (byte_count := need >> 1):
       chunk = int.from_bytes(data[pos:pos + byte_count], 'little')
-      reg = (reg >> (byte_count * 8)) | (chunk << (64 - byte_count * 8))
-      pos += byte_count
-      need &= 1
-    # 3. if 1 more nibble needed, read low nibble
-    if need:
-      if pos >= n: break
-      reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
-      nib_off = 1
+      reg, pos = (reg >> (byte_count * 8)) | (chunk << (64 - byte_count * 8)), pos + byte_count
+    # 3. if odd, read low nibble
+    if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
     opcode = state_to_opcode[reg & 0xFF]
     pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
