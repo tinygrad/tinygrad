@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
 from _ctypes import _SimpleCData
-from typing import TYPE_CHECKING, get_type_hints, get_args, overload, Any, TypeVar, Generic
+from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, TypeVar, Generic
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -124,7 +124,8 @@ class DLL(ctypes.CDLL):
     return fn
 
   def bind(self, fn):
-    restype, argtypes = None if (rt:=(hints:=get_type_hints(fn)).pop('return', None)) is type(None) else rt, tuple(hints.values())
+    def strip(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
+    restype, argtypes = strip((hints:=get_type_hints(fn, include_extras=True)).pop('return', None)), tuple(strip(h) for h in hints.values())
     return lambda *args: self._get_func(fn.__name__, argtypes, restype)(*args)
 
   def __getattr__(self, nm):
