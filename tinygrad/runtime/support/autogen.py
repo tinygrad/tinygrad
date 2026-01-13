@@ -109,7 +109,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     if ((f:=t).kind in fps) or (t.kind == clang.CXType_Pointer and (f:=clang.clang_getPointeeType(t)).kind in fps):
       return (f"c.CFUNCTYPE[{tname(clang.clang_getResultType(f))}, [" + ', '.join(map(tname, arguments(f))) + "]]")
     match t.kind:
-      case clang.CXType_Pointer: return f"c.POINTER[{tname(clang.clang_getPointeeType(t))}]"
+      case clang.CXType_Pointer: return an("None|int","void_p") if (p:=clang.clang_getPointeeType(t))==clang.CXType_Void else f"c.POINTER[{tname(p)}]"
       case clang.CXType_ObjCObjectPointer: return tname(clang.clang_getPointeeType(t)) # TODO: this seems wrong
       case clang.CXType_Elaborated: return tname(clang.clang_Type_getNamedType(t), suggested_name)
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
