@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 dll = DLL('ib', 'ibverbs', use_errno=True)
 @record
@@ -8,13 +8,13 @@ class union_ibv_gid:
   SIZE = 16
   raw: Annotated[Array[uint8_t, Literal[16]], 0]
   _global: Annotated[_anonstruct0, 0]
-uint8_t = Annotated[int, ctypes.c_ubyte]
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
 @record
 class _anonstruct0:
   SIZE = 16
   subnet_prefix: Annotated[Annotated[int, ctypes.c_uint64], 0]
   interface_id: Annotated[Annotated[int, ctypes.c_uint64], 8]
-__be64 = Annotated[int, ctypes.c_uint64]
+__be64: TypeAlias = Annotated[int, ctypes.c_uint64]
 enum_ibv_gid_type = CEnum(Annotated[int, ctypes.c_uint32])
 IBV_GID_TYPE_IB = enum_ibv_gid_type.define('IBV_GID_TYPE_IB', 0)
 IBV_GID_TYPE_ROCE_V1 = enum_ibv_gid_type.define('IBV_GID_TYPE_ROCE_V1', 1)
@@ -28,7 +28,7 @@ class struct_ibv_gid_entry:
   port_num: Annotated[uint32_t, 20]
   gid_type: Annotated[uint32_t, 24]
   ndev_ifindex: Annotated[uint32_t, 28]
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 enum_ibv_node_type = CEnum(Annotated[int, ctypes.c_int32])
 IBV_NODE_UNKNOWN = enum_ibv_node_type.define('IBV_NODE_UNKNOWN', -1)
 IBV_NODE_CA = enum_ibv_node_type.define('IBV_NODE_CA', 1)
@@ -89,7 +89,7 @@ class struct_ibv_alloc_dm_attr:
   length: Annotated[size_t, 0]
   log_align_req: Annotated[uint32_t, 8]
   comp_mask: Annotated[uint32_t, 12]
-size_t = Annotated[int, ctypes.c_uint64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 enum_ibv_dm_mask = CEnum(Annotated[int, ctypes.c_uint32])
 IBV_DM_MASK_HANDLE = enum_ibv_dm_mask.define('IBV_DM_MASK_HANDLE', 1)
 
@@ -204,8 +204,8 @@ class struct_ibv_device_attr:
   max_pkeys: Annotated[uint16_t, 224]
   local_ca_ack_delay: Annotated[uint8_t, 226]
   phys_port_cnt: Annotated[uint8_t, 227]
-uint64_t = Annotated[int, ctypes.c_uint64]
-uint16_t = Annotated[int, ctypes.c_uint16]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 class struct__compat_ibv_port_attr(ctypes.Structure): pass
 @record
 class struct_ibv_mw:
@@ -280,7 +280,7 @@ class struct___pthread_internal_list:
   SIZE = 16
   __prev: Annotated[POINTER(struct___pthread_internal_list), 0]
   __next: Annotated[POINTER(struct___pthread_internal_list), 8]
-__pthread_list_t = struct___pthread_internal_list
+__pthread_list_t: TypeAlias = struct___pthread_internal_list
 @record
 class pthread_cond_t:
   SIZE = 48
@@ -424,7 +424,7 @@ IBV_WC_DRIVER1 = enum_ibv_wc_opcode.define('IBV_WC_DRIVER1', 135)
 IBV_WC_DRIVER2 = enum_ibv_wc_opcode.define('IBV_WC_DRIVER2', 136)
 IBV_WC_DRIVER3 = enum_ibv_wc_opcode.define('IBV_WC_DRIVER3', 137)
 
-__be32 = Annotated[int, ctypes.c_uint32]
+__be32: TypeAlias = Annotated[int, ctypes.c_uint32]
 @record
 class struct_ibv_recv_wr:
   SIZE = 32
@@ -868,7 +868,7 @@ class struct_ibv_grh:
   hop_limit: Annotated[uint8_t, 7]
   sgid: Annotated[union_ibv_gid, 8]
   dgid: Annotated[union_ibv_gid, 24]
-__be16 = Annotated[int, ctypes.c_uint16]
+__be16: TypeAlias = Annotated[int, ctypes.c_uint16]
 enum_ibv_rate = CEnum(Annotated[int, ctypes.c_uint32])
 IBV_RATE_MAX = enum_ibv_rate.define('IBV_RATE_MAX', 0)
 IBV_RATE_2_5_GBPS = enum_ibv_rate.define('IBV_RATE_2_5_GBPS', 2)
@@ -1554,8 +1554,8 @@ class struct_ib_uverbs_flow_action_esp:
   tfc_pad: Annotated[Annotated[int, ctypes.c_uint32], 8]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 12]
   hard_limit_pkts: Annotated[Annotated[int, ctypes.c_uint64], 16]
-__u32 = Annotated[int, ctypes.c_uint32]
-__u64 = Annotated[int, ctypes.c_uint64]
+__u32: TypeAlias = Annotated[int, ctypes.c_uint32]
+__u64: TypeAlias = Annotated[int, ctypes.c_uint64]
 enum_ib_uverbs_flow_action_esp_keymat = CEnum(Annotated[int, ctypes.c_uint32])
 IB_UVERBS_FLOW_ACTION_ESP_KEYMAT_AES_GCM = enum_ib_uverbs_flow_action_esp_keymat.define('IB_UVERBS_FLOW_ACTION_ESP_KEYMAT_AES_GCM', 0)
 
@@ -1572,7 +1572,7 @@ class struct_ib_uverbs_flow_action_esp_encap:
   next_ptr_data_u64: Annotated[Annotated[int, ctypes.c_uint64], 8]
   len: Annotated[Annotated[int, ctypes.c_uint16], 16]
   type: Annotated[Annotated[int, ctypes.c_uint16], 18]
-__u16 = Annotated[int, ctypes.c_uint16]
+__u16: TypeAlias = Annotated[int, ctypes.c_uint16]
 _anonenum19 = CEnum(Annotated[int, ctypes.c_uint32])
 IBV_SYSFS_NAME_MAX = _anonenum19.define('IBV_SYSFS_NAME_MAX', 64)
 IBV_SYSFS_PATH_MAX = _anonenum19.define('IBV_SYSFS_PATH_MAX', 256)
@@ -1640,8 +1640,8 @@ class struct_timespec:
   SIZE = 16
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_nsec: Annotated[Annotated[int, ctypes.c_int64], 8]
-__time_t = Annotated[int, ctypes.c_int64]
-__syscall_slong_t = Annotated[int, ctypes.c_int64]
+__time_t: TypeAlias = Annotated[int, ctypes.c_int64]
+__syscall_slong_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @record
 class struct_verbs_context:
   SIZE = 648
@@ -1732,7 +1732,7 @@ def ibv_query_port(context:POINTER(struct_ibv_context), port_num:uint8_t, port_a
 def ibv_query_gid(context:POINTER(struct_ibv_context), port_num:uint8_t, index:Annotated[int, ctypes.c_int32], gid:POINTER(union_ibv_gid)) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def _ibv_query_gid_ex(context:POINTER(struct_ibv_context), port_num:uint32_t, gid_index:uint32_t, entry:POINTER(struct_ibv_gid_entry), flags:uint32_t, entry_size:size_t) -> Annotated[int, ctypes.c_int32]: ...
-ssize_t = Annotated[int, ctypes.c_int64]
+ssize_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def _ibv_query_gid_table(context:POINTER(struct_ibv_context), entries:POINTER(struct_ibv_gid_entry), max_entries:size_t, flags:uint32_t, entry_size:size_t) -> ssize_t: ...
 @dll.bind
@@ -1966,7 +1966,7 @@ class struct_ib_uverbs_query_port_resp:
   link_layer: Annotated[Annotated[int, ctypes.c_ubyte], 37]
   flags: Annotated[Annotated[int, ctypes.c_ubyte], 38]
   reserved: Annotated[Annotated[int, ctypes.c_ubyte], 39]
-__u8 = Annotated[int, ctypes.c_ubyte]
+__u8: TypeAlias = Annotated[int, ctypes.c_ubyte]
 @record
 class struct_ib_uverbs_qp_cap:
   SIZE = 20
@@ -2329,7 +2329,7 @@ class struct_ib_uverbs_create_cq:
   comp_channel: Annotated[Annotated[int, ctypes.c_int32], 24]
   reserved: Annotated[Annotated[int, ctypes.c_uint32], 28]
   driver_data: Annotated[Array[Annotated[int, ctypes.c_uint64], Literal[0]], 32]
-__s32 = Annotated[int, ctypes.c_int32]
+__s32: TypeAlias = Annotated[int, ctypes.c_int32]
 enum_ib_uverbs_ex_create_cq_flags = CEnum(Annotated[int, ctypes.c_uint32])
 IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION = enum_ib_uverbs_ex_create_cq_flags.define('IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION', 1)
 IB_UVERBS_CQ_FLAGS_IGNORE_OVERRUN = enum_ib_uverbs_ex_create_cq_flags.define('IB_UVERBS_CQ_FLAGS_IGNORE_OVERRUN', 2)

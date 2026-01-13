@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_io_uring_sq:
@@ -64,13 +64,13 @@ class struct_io_uring_sqe:
   addr3: Annotated[Annotated[int, ctypes.c_uint64], 0]
   __pad2: Annotated[Array[Annotated[int, ctypes.c_uint64], Literal[1]], 8]
   cmd: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 48]
-__u8 = Annotated[int, ctypes.c_ubyte]
-__u16 = Annotated[int, ctypes.c_uint16]
-__s32 = Annotated[int, ctypes.c_int32]
-__u64 = Annotated[int, ctypes.c_uint64]
-__u32 = Annotated[int, ctypes.c_uint32]
-__kernel_rwf_t = Annotated[int, ctypes.c_int32]
-size_t = Annotated[int, ctypes.c_uint64]
+__u8: TypeAlias = Annotated[int, ctypes.c_ubyte]
+__u16: TypeAlias = Annotated[int, ctypes.c_uint16]
+__s32: TypeAlias = Annotated[int, ctypes.c_int32]
+__u64: TypeAlias = Annotated[int, ctypes.c_uint64]
+__u32: TypeAlias = Annotated[int, ctypes.c_uint32]
+__kernel_rwf_t: TypeAlias = Annotated[int, ctypes.c_int32]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @record
 class struct_io_uring_cq:
   SIZE = 88
@@ -138,7 +138,7 @@ class struct_statx_timestamp:
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_nsec: Annotated[Annotated[int, ctypes.c_uint32], 8]
   __reserved: Annotated[Annotated[int, ctypes.c_int32], 12]
-__s64 = Annotated[int, ctypes.c_int64]
+__s64: TypeAlias = Annotated[int, ctypes.c_int64]
 class struct_epoll_event(ctypes.Structure): pass
 _anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
 IOSQE_FIXED_FILE_BIT = _anonenum0.define('IOSQE_FIXED_FILE_BIT', 0)
@@ -402,7 +402,7 @@ class struct___kernel_timespec:
   SIZE = 16
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_nsec: Annotated[Annotated[int, ctypes.c_int64], 8]
-__kernel_time64_t = Annotated[int, ctypes.c_int64]
+__kernel_time64_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @record
 class struct_io_uring_file_index_range:
   SIZE = 16

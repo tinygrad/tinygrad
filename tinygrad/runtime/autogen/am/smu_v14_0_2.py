@@ -1,13 +1,13 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_SMU14_Firmware_Footer:
   SIZE = 4
   Signature: Annotated[uint32_t, 0]
-uint32_t = Annotated[int, ctypes.c_uint32]
-SMU14_Firmware_Footer = struct_SMU14_Firmware_Footer
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+SMU14_Firmware_Footer: TypeAlias = struct_SMU14_Firmware_Footer
 @record
 class SMU_Firmware_Header:
   SIZE = 256
@@ -169,7 +169,7 @@ class I2cControllerConfig_t:
   ThermalThrotter: Annotated[uint8_t, 5]
   I2cProtocol: Annotated[uint8_t, 6]
   PaddingConfig: Annotated[uint8_t, 7]
-uint8_t = Annotated[int, ctypes.c_ubyte]
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
 I2cPort_e = CEnum(Annotated[int, ctypes.c_uint32])
 I2C_PORT_SVD_SCL = I2cPort_e.define('I2C_PORT_SVD_SCL', 0)
 I2C_PORT_GPIO = I2cPort_e.define('I2C_PORT_GPIO', 1)
@@ -215,8 +215,8 @@ class EccInfo_t:
   ce_count_lo_chip: Annotated[uint16_t, 16]
   ce_count_hi_chip: Annotated[uint16_t, 18]
   eccPadding: Annotated[uint32_t, 20]
-uint64_t = Annotated[int, ctypes.c_uint64]
-uint16_t = Annotated[int, ctypes.c_uint16]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 @record
 class EccInfoTable_t:
   SIZE = 576
@@ -477,7 +477,7 @@ class SviTelemetryScale_t:
   Offset: Annotated[int8_t, 0]
   Padding: Annotated[uint8_t, 1]
   MaxCurrent: Annotated[uint16_t, 2]
-int8_t = Annotated[int, ctypes.c_byte]
+int8_t: TypeAlias = Annotated[int, ctypes.c_byte]
 PP_OD_POWER_FEATURE_e = CEnum(Annotated[int, ctypes.c_uint32])
 PP_OD_POWER_FEATURE_ALWAYS_ENABLED = PP_OD_POWER_FEATURE_e.define('PP_OD_POWER_FEATURE_ALWAYS_ENABLED', 0)
 PP_OD_POWER_FEATURE_DISABLED_WHILE_GAMING = PP_OD_POWER_FEATURE_e.define('PP_OD_POWER_FEATURE_DISABLED_WHILE_GAMING', 1)
@@ -560,7 +560,7 @@ class OverDriveTable_t:
   Padding4: Annotated[Array[uint8_t, Literal[1]], 87]
   Spare: Annotated[Array[uint32_t, Literal[9]], 88]
   MmHubPadding: Annotated[Array[uint32_t, Literal[8]], 124]
-int16_t = Annotated[int, ctypes.c_int16]
+int16_t: TypeAlias = Annotated[int, ctypes.c_int16]
 @record
 class OverDriveTableExternal_t:
   SIZE = 156
@@ -988,7 +988,7 @@ class SkuTable_t:
   SocXvminEdcFddDsm: Annotated[Array[uint16_t, Literal[6]], 3504]
   Spare: Annotated[uint32_t, 3516]
   MmHubPadding: Annotated[Array[uint32_t, Literal[8]], 3520]
-int32_t = Annotated[int, ctypes.c_int32]
+int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
 @record
 class Svi3RegulatorSettings_t:
   SIZE = 28

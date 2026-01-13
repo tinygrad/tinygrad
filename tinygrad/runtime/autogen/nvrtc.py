@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 import sysconfig
 dll = DLL('nvrtc', 'nvrtc', f'/usr/local/cuda/targets/{sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0]}/lib')
@@ -27,14 +27,14 @@ def nvrtcGetNumSupportedArchs(numArchs:POINTER(Annotated[int, ctypes.c_int32])) 
 @dll.bind
 def nvrtcGetSupportedArchs(supportedArchs:POINTER(Annotated[int, ctypes.c_int32])) -> nvrtcResult: ...
 class struct__nvrtcProgram(ctypes.Structure): pass
-nvrtcProgram = POINTER(struct__nvrtcProgram)
+nvrtcProgram: TypeAlias = POINTER(struct__nvrtcProgram)
 @dll.bind
 def nvrtcCreateProgram(prog:POINTER(nvrtcProgram), src:POINTER(Annotated[bytes, ctypes.c_char]), name:POINTER(Annotated[bytes, ctypes.c_char]), numHeaders:Annotated[int, ctypes.c_int32], headers:POINTER(POINTER(Annotated[bytes, ctypes.c_char])), includeNames:POINTER(POINTER(Annotated[bytes, ctypes.c_char]))) -> nvrtcResult: ...
 @dll.bind
 def nvrtcDestroyProgram(prog:POINTER(nvrtcProgram)) -> nvrtcResult: ...
 @dll.bind
 def nvrtcCompileProgram(prog:nvrtcProgram, numOptions:Annotated[int, ctypes.c_int32], options:POINTER(POINTER(Annotated[bytes, ctypes.c_char]))) -> nvrtcResult: ...
-size_t = Annotated[int, ctypes.c_uint64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def nvrtcGetPTXSize(prog:nvrtcProgram, ptxSizeRet:POINTER(size_t)) -> nvrtcResult: ...
 @dll.bind

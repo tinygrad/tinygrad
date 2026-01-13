@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_sqtt_data_info:
@@ -9,7 +9,7 @@ class struct_sqtt_data_info:
   trace_status: Annotated[uint32_t, 4]
   gfx9_write_counter: Annotated[uint32_t, 8]
   gfx10_dropped_cntr: Annotated[uint32_t, 8]
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @record
 class struct_sqtt_data_se:
   SIZE = 32
@@ -47,7 +47,7 @@ class struct_sqtt_file_chunk_id:
   type: Annotated[int32_t, 0, 8, 0]
   index: Annotated[int32_t, 1, 8, 0]
   reserved: Annotated[int32_t, 2, 16, 0]
-int32_t = Annotated[int, ctypes.c_int32]
+int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
 @record
 class struct_sqtt_file_chunk_header:
   SIZE = 16
@@ -56,7 +56,7 @@ class struct_sqtt_file_chunk_header:
   major_version: Annotated[uint16_t, 6]
   size_in_bytes: Annotated[int32_t, 8]
   padding: Annotated[int32_t, 12]
-uint16_t = Annotated[int, ctypes.c_uint16]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 @record
 class struct_sqtt_file_header_flags:
   SIZE = 4
@@ -93,7 +93,7 @@ class struct_sqtt_file_chunk_cpu_info:
   num_logical_cores: Annotated[uint32_t, 100]
   num_physical_cores: Annotated[uint32_t, 104]
   system_ram_size: Annotated[uint32_t, 108]
-uint64_t = Annotated[int, ctypes.c_uint64]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 enum_sqtt_file_chunk_asic_info_flags = CEnum(Annotated[int, ctypes.c_uint32])
 SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING = enum_sqtt_file_chunk_asic_info_flags.define('SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING', 1)
 SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED = enum_sqtt_file_chunk_asic_info_flags.define('SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED', 2)
@@ -188,7 +188,7 @@ class struct_sqtt_file_chunk_asic_info:
   scalar_cache_size: Annotated[uint32_t, 756]
   mall_cache_size: Annotated[uint32_t, 760]
   padding: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[4]], 764]
-int64_t = Annotated[int, ctypes.c_int64]
+int64_t: TypeAlias = Annotated[int, ctypes.c_int64]
 enum_sqtt_api_type = CEnum(Annotated[int, ctypes.c_uint32])
 SQTT_API_TYPE_DIRECTX_12 = enum_sqtt_api_type.define('SQTT_API_TYPE_DIRECTX_12', 0)
 SQTT_API_TYPE_VULKAN = enum_sqtt_api_type.define('SQTT_API_TYPE_VULKAN', 1)
@@ -315,7 +315,7 @@ class _anonstruct6:
   instrumentation_spec_version: Annotated[int16_t, 0]
   instrumentation_api_version: Annotated[int16_t, 2]
   compute_unit_index: Annotated[int32_t, 4]
-int16_t = Annotated[int, ctypes.c_int16]
+int16_t: TypeAlias = Annotated[int, ctypes.c_int16]
 @record
 class struct_sqtt_file_chunk_sqtt_data:
   SIZE = 24

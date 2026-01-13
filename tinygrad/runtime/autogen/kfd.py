@@ -1,13 +1,13 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_kfd_ioctl_get_version_args:
   SIZE = 8
   major_version: Annotated[Annotated[int, ctypes.c_uint32], 0]
   minor_version: Annotated[Annotated[int, ctypes.c_uint32], 4]
-__u32 = Annotated[int, ctypes.c_uint32]
+__u32: TypeAlias = Annotated[int, ctypes.c_uint32]
 @record
 class struct_kfd_ioctl_create_queue_args:
   SIZE = 96
@@ -28,7 +28,7 @@ class struct_kfd_ioctl_create_queue_args:
   ctl_stack_size: Annotated[Annotated[int, ctypes.c_uint32], 84]
   sdma_engine_id: Annotated[Annotated[int, ctypes.c_uint32], 88]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 92]
-__u64 = Annotated[int, ctypes.c_uint64]
+__u64: TypeAlias = Annotated[int, ctypes.c_uint64]
 @record
 class struct_kfd_ioctl_destroy_queue_args:
   SIZE = 8
@@ -470,7 +470,7 @@ class struct_kfd_ioctl_svm_args:
 class struct_kfd_ioctl_set_xnack_mode_args:
   SIZE = 4
   xnack_enabled: Annotated[Annotated[int, ctypes.c_int32], 0]
-__s32 = Annotated[int, ctypes.c_int32]
+__s32: TypeAlias = Annotated[int, ctypes.c_int32]
 enum_kfd_dbg_trap_override_mode = CEnum(Annotated[int, ctypes.c_uint32])
 KFD_DBG_TRAP_OVERRIDE_OR = enum_kfd_dbg_trap_override_mode.define('KFD_DBG_TRAP_OVERRIDE_OR', 0)
 KFD_DBG_TRAP_OVERRIDE_REPLACE = enum_kfd_dbg_trap_override_mode.define('KFD_DBG_TRAP_OVERRIDE_REPLACE', 1)

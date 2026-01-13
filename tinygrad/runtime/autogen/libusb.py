@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 dll = DLL('libusb', 'usb-1.0')
 enum_libusb_class_code = CEnum(Annotated[int, ctypes.c_uint32])
@@ -125,8 +125,8 @@ class struct_libusb_device_descriptor:
   iProduct: Annotated[uint8_t, 15]
   iSerialNumber: Annotated[uint8_t, 16]
   bNumConfigurations: Annotated[uint8_t, 17]
-uint8_t = Annotated[int, ctypes.c_ubyte]
-uint16_t = Annotated[int, ctypes.c_uint16]
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 @record
 class struct_libusb_endpoint_descriptor:
   SIZE = 32
@@ -220,7 +220,7 @@ class struct_libusb_usb_2_0_extension_descriptor:
   bDescriptorType: Annotated[uint8_t, 1]
   bDevCapabilityType: Annotated[uint8_t, 2]
   bmAttributes: Annotated[uint32_t, 4]
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @record
 class struct_libusb_ss_usb_device_capability_descriptor:
   SIZE = 10
@@ -269,9 +269,9 @@ class struct_libusb_version:
   nano: Annotated[uint16_t, 6]
   rc: Annotated[POINTER(Annotated[bytes, ctypes.c_char]), 8]
   describe: Annotated[POINTER(Annotated[bytes, ctypes.c_char]), 16]
-libusb_context = struct_libusb_context
-libusb_device = struct_libusb_device
-libusb_device_handle = struct_libusb_device_handle
+libusb_context: TypeAlias = struct_libusb_context
+libusb_device: TypeAlias = struct_libusb_device
+libusb_device_handle: TypeAlias = struct_libusb_device_handle
 enum_libusb_speed = CEnum(Annotated[int, ctypes.c_uint32])
 LIBUSB_SPEED_UNKNOWN = enum_libusb_speed.define('LIBUSB_SPEED_UNKNOWN', 0)
 LIBUSB_SPEED_LOW = enum_libusb_speed.define('LIBUSB_SPEED_LOW', 1)
@@ -340,7 +340,7 @@ class struct_libusb_transfer:
   buffer: Annotated[POINTER(Annotated[int, ctypes.c_ubyte]), 48]
   num_iso_packets: Annotated[Annotated[int, ctypes.c_int32], 56]
   iso_packet_desc: Annotated[Array[struct_libusb_iso_packet_descriptor, Literal[0]], 60]
-libusb_transfer_cb_fn = CFUNCTYPE(None, POINTER(struct_libusb_transfer))
+libusb_transfer_cb_fn: TypeAlias = CFUNCTYPE(None, POINTER(struct_libusb_transfer))
 enum_libusb_capability = CEnum(Annotated[int, ctypes.c_uint32])
 LIBUSB_CAP_HAS_CAPABILITY = enum_libusb_capability.define('LIBUSB_CAP_HAS_CAPABILITY', 0)
 LIBUSB_CAP_HAS_HOTPLUG = enum_libusb_capability.define('LIBUSB_CAP_HAS_HOTPLUG', 1)
@@ -365,7 +365,7 @@ LIBUSB_OPTION_NO_DEVICE_DISCOVERY = enum_libusb_option.define('LIBUSB_OPTION_NO_
 LIBUSB_OPTION_LOG_CB = enum_libusb_option.define('LIBUSB_OPTION_LOG_CB', 3)
 LIBUSB_OPTION_MAX = enum_libusb_option.define('LIBUSB_OPTION_MAX', 4)
 
-libusb_log_cb = CFUNCTYPE(None, POINTER(struct_libusb_context), enum_libusb_log_level, POINTER(Annotated[bytes, ctypes.c_char]))
+libusb_log_cb: TypeAlias = CFUNCTYPE(None, POINTER(struct_libusb_context), enum_libusb_log_level, POINTER(Annotated[bytes, ctypes.c_char]))
 @record
 class struct_libusb_init_option:
   SIZE = 16
@@ -396,7 +396,7 @@ def libusb_error_name(errcode:Annotated[int, ctypes.c_int32]) -> POINTER(Annotat
 def libusb_setlocale(locale:POINTER(Annotated[bytes, ctypes.c_char])) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def libusb_strerror(errcode:Annotated[int, ctypes.c_int32]) -> POINTER(Annotated[bytes, ctypes.c_char]): ...
-ssize_t = Annotated[int, ctypes.c_int64]
+ssize_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def libusb_get_device_list(ctx:POINTER(libusb_context), list:POINTER(POINTER(POINTER(libusb_device)))) -> ssize_t: ...
 @dll.bind
@@ -467,7 +467,7 @@ def libusb_get_interface_association_descriptors(dev:POINTER(libusb_device), con
 def libusb_get_active_interface_association_descriptors(dev:POINTER(libusb_device), iad_array:POINTER(POINTER(struct_libusb_interface_association_descriptor_array))) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def libusb_free_interface_association_descriptors(iad_array:POINTER(struct_libusb_interface_association_descriptor_array)) -> None: ...
-intptr_t = Annotated[int, ctypes.c_int64]
+intptr_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def libusb_wrap_sys_device(ctx:POINTER(libusb_context), sys_dev:intptr_t, dev_handle:POINTER(POINTER(libusb_device_handle))) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -494,7 +494,7 @@ def libusb_reset_device(dev_handle:POINTER(libusb_device_handle)) -> Annotated[i
 def libusb_alloc_streams(dev_handle:POINTER(libusb_device_handle), num_streams:uint32_t, endpoints:POINTER(Annotated[int, ctypes.c_ubyte]), num_endpoints:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def libusb_free_streams(dev_handle:POINTER(libusb_device_handle), endpoints:POINTER(Annotated[int, ctypes.c_ubyte]), num_endpoints:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-size_t = Annotated[int, ctypes.c_uint64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def libusb_dev_mem_alloc(dev_handle:POINTER(libusb_device_handle), length:size_t) -> POINTER(Annotated[int, ctypes.c_ubyte]): ...
 @dll.bind
@@ -548,8 +548,8 @@ class struct_timeval:
   SIZE = 16
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_usec: Annotated[Annotated[int, ctypes.c_int64], 8]
-__time_t = Annotated[int, ctypes.c_int64]
-__suseconds_t = Annotated[int, ctypes.c_int64]
+__time_t: TypeAlias = Annotated[int, ctypes.c_int64]
+__suseconds_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def libusb_wait_for_event(ctx:POINTER(libusb_context), tv:POINTER(struct_timeval)) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -571,15 +571,15 @@ class struct_libusb_pollfd:
   SIZE = 8
   fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   events: Annotated[Annotated[int, ctypes.c_int16], 4]
-libusb_pollfd_added_cb = CFUNCTYPE(None, Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int16], POINTER(None))
-libusb_pollfd_removed_cb = CFUNCTYPE(None, Annotated[int, ctypes.c_int32], POINTER(None))
+libusb_pollfd_added_cb: TypeAlias = CFUNCTYPE(None, Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int16], POINTER(None))
+libusb_pollfd_removed_cb: TypeAlias = CFUNCTYPE(None, Annotated[int, ctypes.c_int32], POINTER(None))
 @dll.bind
 def libusb_get_pollfds(ctx:POINTER(libusb_context)) -> POINTER(POINTER(struct_libusb_pollfd)): ...
 @dll.bind
 def libusb_free_pollfds(pollfds:POINTER(POINTER(struct_libusb_pollfd))) -> None: ...
 @dll.bind
 def libusb_set_pollfd_notifiers(ctx:POINTER(libusb_context), added_cb:libusb_pollfd_added_cb, removed_cb:libusb_pollfd_removed_cb, user_data:POINTER(None)) -> None: ...
-libusb_hotplug_callback_handle = Annotated[int, ctypes.c_int32]
+libusb_hotplug_callback_handle: TypeAlias = Annotated[int, ctypes.c_int32]
 libusb_hotplug_event = CEnum(Annotated[int, ctypes.c_uint32])
 LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED = libusb_hotplug_event.define('LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED', 1)
 LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT = libusb_hotplug_event.define('LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT', 2)
@@ -587,7 +587,7 @@ LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT = libusb_hotplug_event.define('LIBUSB_HOTPLUG_E
 libusb_hotplug_flag = CEnum(Annotated[int, ctypes.c_uint32])
 LIBUSB_HOTPLUG_ENUMERATE = libusb_hotplug_flag.define('LIBUSB_HOTPLUG_ENUMERATE', 1)
 
-libusb_hotplug_callback_fn = CFUNCTYPE(Annotated[int, ctypes.c_int32], POINTER(struct_libusb_context), POINTER(struct_libusb_device), libusb_hotplug_event, POINTER(None))
+libusb_hotplug_callback_fn: TypeAlias = CFUNCTYPE(Annotated[int, ctypes.c_int32], POINTER(struct_libusb_context), POINTER(struct_libusb_device), libusb_hotplug_event, POINTER(None))
 @dll.bind
 def libusb_hotplug_register_callback(ctx:POINTER(libusb_context), events:Annotated[int, ctypes.c_int32], flags:Annotated[int, ctypes.c_int32], vendor_id:Annotated[int, ctypes.c_int32], product_id:Annotated[int, ctypes.c_int32], dev_class:Annotated[int, ctypes.c_int32], cb_fn:libusb_hotplug_callback_fn, user_data:POINTER(None), callback_handle:POINTER(libusb_hotplug_callback_handle)) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind

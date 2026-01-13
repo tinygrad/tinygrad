@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 import os
 dll = DLL('comgr', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so', 'amd_comgr'])
@@ -10,7 +10,7 @@ AMD_COMGR_STATUS_ERROR = amd_comgr_status_s.define('AMD_COMGR_STATUS_ERROR', 1)
 AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT = amd_comgr_status_s.define('AMD_COMGR_STATUS_ERROR_INVALID_ARGUMENT', 2)
 AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES = amd_comgr_status_s.define('AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES', 3)
 
-amd_comgr_status_t = amd_comgr_status_s
+amd_comgr_status_t: TypeAlias = amd_comgr_status_s
 amd_comgr_language_s = CEnum(Annotated[int, ctypes.c_uint32])
 AMD_COMGR_LANGUAGE_NONE = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_NONE', 0)
 AMD_COMGR_LANGUAGE_OPENCL_1_2 = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_OPENCL_1_2', 1)
@@ -20,10 +20,10 @@ AMD_COMGR_LANGUAGE_HIP = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_HIP', 4
 AMD_COMGR_LANGUAGE_LLVM_IR = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_LLVM_IR', 5)
 AMD_COMGR_LANGUAGE_LAST = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_LAST', 5)
 
-amd_comgr_language_t = amd_comgr_language_s
+amd_comgr_language_t: TypeAlias = amd_comgr_language_s
 @dll.bind
 def amd_comgr_status_string(status:amd_comgr_status_t, status_string:POINTER(POINTER(Annotated[bytes, ctypes.c_char]))) -> amd_comgr_status_t: ...
-size_t = Annotated[int, ctypes.c_uint64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def amd_comgr_get_version(major:POINTER(size_t), minor:POINTER(size_t)) -> None: ...
 amd_comgr_data_kind_s = CEnum(Annotated[int, ctypes.c_uint32])
@@ -44,43 +44,43 @@ AMD_COMGR_DATA_KIND_AR_BUNDLE = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIN
 AMD_COMGR_DATA_KIND_OBJ_BUNDLE = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_OBJ_BUNDLE', 20)
 AMD_COMGR_DATA_KIND_LAST = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_LAST', 20)
 
-amd_comgr_data_kind_t = amd_comgr_data_kind_s
+amd_comgr_data_kind_t: TypeAlias = amd_comgr_data_kind_s
 @record
 class amd_comgr_data_s:
   SIZE = 8
   handle: Annotated[uint64_t, 0]
-uint64_t = Annotated[int, ctypes.c_uint64]
-amd_comgr_data_t = amd_comgr_data_s
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+amd_comgr_data_t: TypeAlias = amd_comgr_data_s
 @record
 class amd_comgr_data_set_s:
   SIZE = 8
   handle: Annotated[uint64_t, 0]
-amd_comgr_data_set_t = amd_comgr_data_set_s
+amd_comgr_data_set_t: TypeAlias = amd_comgr_data_set_s
 @record
 class amd_comgr_action_info_s:
   SIZE = 8
   handle: Annotated[uint64_t, 0]
-amd_comgr_action_info_t = amd_comgr_action_info_s
+amd_comgr_action_info_t: TypeAlias = amd_comgr_action_info_s
 @record
 class amd_comgr_metadata_node_s:
   SIZE = 8
   handle: Annotated[uint64_t, 0]
-amd_comgr_metadata_node_t = amd_comgr_metadata_node_s
+amd_comgr_metadata_node_t: TypeAlias = amd_comgr_metadata_node_s
 @record
 class amd_comgr_symbol_s:
   SIZE = 8
   handle: Annotated[uint64_t, 0]
-amd_comgr_symbol_t = amd_comgr_symbol_s
+amd_comgr_symbol_t: TypeAlias = amd_comgr_symbol_s
 @record
 class amd_comgr_disassembly_info_s:
   SIZE = 8
   handle: Annotated[uint64_t, 0]
-amd_comgr_disassembly_info_t = amd_comgr_disassembly_info_s
+amd_comgr_disassembly_info_t: TypeAlias = amd_comgr_disassembly_info_s
 @record
 class amd_comgr_symbolizer_info_s:
   SIZE = 8
   handle: Annotated[uint64_t, 0]
-amd_comgr_symbolizer_info_t = amd_comgr_symbolizer_info_s
+amd_comgr_symbolizer_info_t: TypeAlias = amd_comgr_symbolizer_info_s
 @dll.bind
 def amd_comgr_get_isa_count(count:POINTER(size_t)) -> amd_comgr_status_t: ...
 @dll.bind
@@ -185,7 +185,7 @@ AMD_COMGR_ACTION_COMPILE_SOURCE_TO_EXECUTABLE = amd_comgr_action_kind_s.define('
 AMD_COMGR_ACTION_UNBUNDLE = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_UNBUNDLE', 18)
 AMD_COMGR_ACTION_LAST = amd_comgr_action_kind_s.define('AMD_COMGR_ACTION_LAST', 18)
 
-amd_comgr_action_kind_t = amd_comgr_action_kind_s
+amd_comgr_action_kind_t: TypeAlias = amd_comgr_action_kind_s
 @dll.bind
 def amd_comgr_do_action(kind:amd_comgr_action_kind_t, info:amd_comgr_action_info_t, input:amd_comgr_data_set_t, result:amd_comgr_data_set_t) -> amd_comgr_status_t: ...
 amd_comgr_metadata_kind_s = CEnum(Annotated[int, ctypes.c_uint32])
@@ -195,7 +195,7 @@ AMD_COMGR_METADATA_KIND_MAP = amd_comgr_metadata_kind_s.define('AMD_COMGR_METADA
 AMD_COMGR_METADATA_KIND_LIST = amd_comgr_metadata_kind_s.define('AMD_COMGR_METADATA_KIND_LIST', 3)
 AMD_COMGR_METADATA_KIND_LAST = amd_comgr_metadata_kind_s.define('AMD_COMGR_METADATA_KIND_LAST', 3)
 
-amd_comgr_metadata_kind_t = amd_comgr_metadata_kind_s
+amd_comgr_metadata_kind_t: TypeAlias = amd_comgr_metadata_kind_s
 @dll.bind
 def amd_comgr_get_metadata_kind(metadata:amd_comgr_metadata_node_t, kind:POINTER(amd_comgr_metadata_kind_t)) -> amd_comgr_status_t: ...
 @dll.bind
@@ -224,7 +224,7 @@ AMD_COMGR_SYMBOL_TYPE_FILE = amd_comgr_symbol_type_s.define('AMD_COMGR_SYMBOL_TY
 AMD_COMGR_SYMBOL_TYPE_COMMON = amd_comgr_symbol_type_s.define('AMD_COMGR_SYMBOL_TYPE_COMMON', 5)
 AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL = amd_comgr_symbol_type_s.define('AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL', 10)
 
-amd_comgr_symbol_type_t = amd_comgr_symbol_type_s
+amd_comgr_symbol_type_t: TypeAlias = amd_comgr_symbol_type_s
 amd_comgr_symbol_info_s = CEnum(Annotated[int, ctypes.c_uint32])
 AMD_COMGR_SYMBOL_INFO_NAME_LENGTH = amd_comgr_symbol_info_s.define('AMD_COMGR_SYMBOL_INFO_NAME_LENGTH', 0)
 AMD_COMGR_SYMBOL_INFO_NAME = amd_comgr_symbol_info_s.define('AMD_COMGR_SYMBOL_INFO_NAME', 1)
@@ -234,7 +234,7 @@ AMD_COMGR_SYMBOL_INFO_IS_UNDEFINED = amd_comgr_symbol_info_s.define('AMD_COMGR_S
 AMD_COMGR_SYMBOL_INFO_VALUE = amd_comgr_symbol_info_s.define('AMD_COMGR_SYMBOL_INFO_VALUE', 5)
 AMD_COMGR_SYMBOL_INFO_LAST = amd_comgr_symbol_info_s.define('AMD_COMGR_SYMBOL_INFO_LAST', 5)
 
-amd_comgr_symbol_info_t = amd_comgr_symbol_info_s
+amd_comgr_symbol_info_t: TypeAlias = amd_comgr_symbol_info_s
 @dll.bind
 def amd_comgr_symbol_get_info(symbol:amd_comgr_symbol_t, attribute:amd_comgr_symbol_info_t, value:POINTER(None)) -> amd_comgr_status_t: ...
 @dll.bind
@@ -259,7 +259,7 @@ class code_object_info_s:
   isa: Annotated[POINTER(Annotated[bytes, ctypes.c_char]), 0]
   size: Annotated[size_t, 8]
   offset: Annotated[uint64_t, 16]
-amd_comgr_code_object_info_t = code_object_info_s
+amd_comgr_code_object_info_t: TypeAlias = code_object_info_s
 @dll.bind
 def amd_comgr_lookup_code_object(data:amd_comgr_data_t, info_list:POINTER(amd_comgr_code_object_info_t), info_list_size:size_t) -> amd_comgr_status_t: ...
 @dll.bind

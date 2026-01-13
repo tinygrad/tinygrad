@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-ion_user_handle_t = Annotated[int, ctypes.c_int32]
+ion_user_handle_t: TypeAlias = Annotated[int, ctypes.c_int32]
 enum_ion_heap_type = CEnum(Annotated[int, ctypes.c_uint32])
 ION_HEAP_TYPE_SYSTEM = enum_ion_heap_type.define('ION_HEAP_TYPE_SYSTEM', 0)
 ION_HEAP_TYPE_SYSTEM_CONTIG = enum_ion_heap_type.define('ION_HEAP_TYPE_SYSTEM_CONTIG', 1)
@@ -20,7 +20,7 @@ class struct_ion_allocation_data:
   heap_id_mask: Annotated[Annotated[int, ctypes.c_uint32], 16]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 20]
   handle: Annotated[ion_user_handle_t, 24]
-size_t = Annotated[int, ctypes.c_uint64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @record
 class struct_ion_fd_data:
   SIZE = 8
@@ -101,14 +101,14 @@ class struct_remote_buf64:
   SIZE = 16
   pv: Annotated[uint64_t, 0]
   len: Annotated[uint64_t, 8]
-uint64_t = Annotated[int, ctypes.c_uint64]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @record
 class struct_remote_dma_handle64:
   SIZE = 12
   fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   offset: Annotated[uint32_t, 4]
   len: Annotated[uint32_t, 8]
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @record
 class union_remote_arg64:
   SIZE = 16
@@ -165,8 +165,8 @@ class struct_fastrpc_ioctl_init:
   mem: Annotated[uintptr_t, 24]
   memlen: Annotated[uint32_t, 32]
   memfd: Annotated[int32_t, 36]
-uintptr_t = Annotated[int, ctypes.c_uint64]
-int32_t = Annotated[int, ctypes.c_int32]
+uintptr_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
 @record
 class struct_fastrpc_ioctl_init_attrs:
   SIZE = 48
@@ -206,7 +206,7 @@ class struct_fastrpc_ioctl_munmap_fd:
   flags: Annotated[uint32_t, 4]
   va: Annotated[uintptr_t, 8]
   len: Annotated[ssize_t, 16]
-ssize_t = Annotated[int, ctypes.c_int64]
+ssize_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @record
 class struct_fastrpc_ioctl_perf:
   SIZE = 24
@@ -265,9 +265,9 @@ class struct_smq_invoke_rsp:
   SIZE = 16
   ctx: Annotated[uint64_t, 0]
   retval: Annotated[Annotated[int, ctypes.c_int32], 8]
-remote_handle = Annotated[int, ctypes.c_uint32]
-remote_handle64 = Annotated[int, ctypes.c_uint64]
-fastrpc_async_jobid = Annotated[int, ctypes.c_uint64]
+remote_handle: TypeAlias = Annotated[int, ctypes.c_uint32]
+remote_handle64: TypeAlias = Annotated[int, ctypes.c_uint64]
+fastrpc_async_jobid: TypeAlias = Annotated[int, ctypes.c_uint64]
 @record
 class remote_buf:
   SIZE = 16
@@ -296,14 +296,14 @@ class struct_fastrpc_async_callback:
   SIZE = 16
   fn: Annotated[CFUNCTYPE(None, fastrpc_async_jobid, POINTER(None), Annotated[int, ctypes.c_int32]), 0]
   context: Annotated[POINTER(None), 8]
-fastrpc_async_callback_t = struct_fastrpc_async_callback
+fastrpc_async_callback_t: TypeAlias = struct_fastrpc_async_callback
 @record
 class struct_fastrpc_async_descriptor:
   SIZE = 32
   type: Annotated[enum_fastrpc_async_notify_type, 0]
   jobid: Annotated[fastrpc_async_jobid, 8]
   cb: Annotated[fastrpc_async_callback_t, 16]
-fastrpc_async_descriptor_t = struct_fastrpc_async_descriptor
+fastrpc_async_descriptor_t: TypeAlias = struct_fastrpc_async_descriptor
 enum_fastrpc_process_type = CEnum(Annotated[int, ctypes.c_uint32])
 PROCESS_TYPE_SIGNED = enum_fastrpc_process_type.define('PROCESS_TYPE_SIGNED', 0)
 PROCESS_TYPE_UNSIGNED = enum_fastrpc_process_type.define('PROCESS_TYPE_UNSIGNED', 1)
@@ -320,7 +320,7 @@ RPC_PM_QOS = enum_remote_rpc_latency_flags.define('RPC_PM_QOS', 1)
 RPC_ADAPTIVE_QOS = enum_remote_rpc_latency_flags.define('RPC_ADAPTIVE_QOS', 2)
 RPC_POLL_QOS = enum_remote_rpc_latency_flags.define('RPC_POLL_QOS', 3)
 
-remote_rpc_control_latency_t = enum_remote_rpc_latency_flags
+remote_rpc_control_latency_t: TypeAlias = enum_remote_rpc_latency_flags
 @record
 class struct_remote_rpc_control_latency:
   SIZE = 8
@@ -346,7 +346,7 @@ class struct_remote_dsp_capability:
   domain: Annotated[uint32_t, 0]
   attribute_ID: Annotated[uint32_t, 4]
   capability: Annotated[uint32_t, 8]
-fastrpc_capability = struct_remote_dsp_capability
+fastrpc_capability: TypeAlias = struct_remote_dsp_capability
 @record
 class struct_remote_rpc_control_wakelock:
   SIZE = 4
@@ -355,7 +355,7 @@ class struct_remote_rpc_control_wakelock:
 class struct_remote_rpc_get_domain:
   SIZE = 4
   domain: Annotated[Annotated[int, ctypes.c_int32], 0]
-remote_rpc_get_domain_t = struct_remote_rpc_get_domain
+remote_rpc_get_domain_t: TypeAlias = struct_remote_rpc_get_domain
 enum_session_control_req_id = CEnum(Annotated[int, ctypes.c_uint32])
 FASTRPC_THREAD_PARAMS = enum_session_control_req_id.define('FASTRPC_THREAD_PARAMS', 1)
 DSPRPC_CONTROL_UNSIGNED_MODULE = enum_session_control_req_id.define('DSPRPC_CONTROL_UNSIGNED_MODULE', 2)
@@ -401,7 +401,7 @@ class struct_remote_process_type:
   SIZE = 8
   domain: Annotated[Annotated[int, ctypes.c_int32], 0]
   process_type: Annotated[Annotated[int, ctypes.c_int32], 4]
-remote_rpc_process_exception = struct_remote_rpc_process_clean_params
+remote_rpc_process_exception: TypeAlias = struct_remote_rpc_process_clean_params
 enum_remote_rpc_status_flags = CEnum(Annotated[int, ctypes.c_uint32])
 FASTRPC_USER_PD_UP = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_UP', 0)
 FASTRPC_USER_PD_EXIT = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_EXIT', 1)
@@ -409,15 +409,15 @@ FASTRPC_USER_PD_FORCE_KILL = enum_remote_rpc_status_flags.define('FASTRPC_USER_P
 FASTRPC_USER_PD_EXCEPTION = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD_EXCEPTION', 3)
 FASTRPC_DSP_SSR = enum_remote_rpc_status_flags.define('FASTRPC_DSP_SSR', 4)
 
-remote_rpc_status_flags_t = enum_remote_rpc_status_flags
-fastrpc_notif_fn_t = CFUNCTYPE(Annotated[int, ctypes.c_int32], POINTER(None), Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], enum_remote_rpc_status_flags)
+remote_rpc_status_flags_t: TypeAlias = enum_remote_rpc_status_flags
+fastrpc_notif_fn_t: TypeAlias = CFUNCTYPE(Annotated[int, ctypes.c_int32], POINTER(None), Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], enum_remote_rpc_status_flags)
 @record
 class struct_remote_rpc_notif_register:
   SIZE = 24
   context: Annotated[POINTER(None), 0]
   domain: Annotated[Annotated[int, ctypes.c_int32], 8]
   notifier_fn: Annotated[fastrpc_notif_fn_t, 16]
-remote_rpc_notif_register_t = struct_remote_rpc_notif_register
+remote_rpc_notif_register_t: TypeAlias = struct_remote_rpc_notif_register
 enum_remote_mem_map_flags = CEnum(Annotated[int, ctypes.c_uint32])
 REMOTE_MAP_MEM_STATIC = enum_remote_mem_map_flags.define('REMOTE_MAP_MEM_STATIC', 0)
 REMOTE_MAP_MAX_FLAG = enum_remote_mem_map_flags.define('REMOTE_MAP_MAX_FLAG', 1)
@@ -443,27 +443,27 @@ class struct__cstring1_s:
   SIZE = 16
   data: Annotated[POINTER(Annotated[bytes, ctypes.c_char]), 0]
   dataLen: Annotated[Annotated[int, ctypes.c_int32], 8]
-_cstring1_t = struct__cstring1_s
-apps_std_FILE = Annotated[int, ctypes.c_int32]
+_cstring1_t: TypeAlias = struct__cstring1_s
+apps_std_FILE: TypeAlias = Annotated[int, ctypes.c_int32]
 enum_apps_std_SEEK = CEnum(Annotated[int, ctypes.c_uint32])
 APPS_STD_SEEK_SET = enum_apps_std_SEEK.define('APPS_STD_SEEK_SET', 0)
 APPS_STD_SEEK_CUR = enum_apps_std_SEEK.define('APPS_STD_SEEK_CUR', 1)
 APPS_STD_SEEK_END = enum_apps_std_SEEK.define('APPS_STD_SEEK_END', 2)
 _32BIT_PLACEHOLDER_apps_std_SEEK = enum_apps_std_SEEK.define('_32BIT_PLACEHOLDER_apps_std_SEEK', 2147483647)
 
-apps_std_SEEK = enum_apps_std_SEEK
+apps_std_SEEK: TypeAlias = enum_apps_std_SEEK
 @record
 class struct_apps_std_DIR:
   SIZE = 8
   handle: Annotated[uint64, 0]
-uint64 = Annotated[int, ctypes.c_uint64]
-apps_std_DIR = struct_apps_std_DIR
+uint64: TypeAlias = Annotated[int, ctypes.c_uint64]
+apps_std_DIR: TypeAlias = struct_apps_std_DIR
 @record
 class struct_apps_std_DIRENT:
   SIZE = 260
   ino: Annotated[Annotated[int, ctypes.c_int32], 0]
   name: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[255]], 4]
-apps_std_DIRENT = struct_apps_std_DIRENT
+apps_std_DIRENT: TypeAlias = struct_apps_std_DIRENT
 @record
 class struct_apps_std_STAT:
   SIZE = 96
@@ -480,9 +480,9 @@ class struct_apps_std_STAT:
   mtimensec: Annotated[int64, 72]
   ctime: Annotated[int64, 80]
   ctimensec: Annotated[int64, 88]
-uint32 = Annotated[int, ctypes.c_uint32]
-int64 = Annotated[int, ctypes.c_int64]
-apps_std_STAT = struct_apps_std_STAT
+uint32: TypeAlias = Annotated[int, ctypes.c_uint32]
+int64: TypeAlias = Annotated[int, ctypes.c_int64]
+apps_std_STAT: TypeAlias = struct_apps_std_STAT
 init_records()
 ION_HEAP_SYSTEM_MASK = ((1 << ION_HEAP_TYPE_SYSTEM))
 ION_HEAP_SYSTEM_CONTIG_MASK = ((1 << ION_HEAP_TYPE_SYSTEM_CONTIG))

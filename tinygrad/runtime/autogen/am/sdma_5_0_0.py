@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG:
@@ -54,7 +54,7 @@ class _anonunion6:
   SIZE = 4
   dst_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_6_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_COPY_LINEAR = rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG
+rocr_AMD_SDMA_PKT_COPY_LINEAR: TypeAlias = rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG
 @record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG:
   SIZE = 52
@@ -159,7 +159,7 @@ class _anonunion19:
   src_swap: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 0]
   reserved_3: Annotated[Annotated[int, ctypes.c_uint32], 3, 6, 2]
   DW_12_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT = rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG
+rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT: TypeAlias = rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG
 @record
 class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG:
   SIZE = 20
@@ -198,7 +198,7 @@ class _anonunion24:
   count: Annotated[Annotated[int, ctypes.c_uint32], 0, 22, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 10, 6]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_CONSTANT_FILL = rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG
+rocr_AMD_SDMA_PKT_CONSTANT_FILL: TypeAlias = rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG
 @record
 class rocr_AMD_SDMA_PKT_FENCE_TAG:
   SIZE = 16
@@ -235,7 +235,7 @@ class _anonunion28:
   SIZE = 4
   data: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_FENCE = rocr_AMD_SDMA_PKT_FENCE_TAG
+rocr_AMD_SDMA_PKT_FENCE: TypeAlias = rocr_AMD_SDMA_PKT_FENCE_TAG
 @record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG:
   SIZE = 24
@@ -283,7 +283,7 @@ class _anonunion34:
   retry_count: Annotated[Annotated[int, ctypes.c_uint32], 2, 12, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
   DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_POLL_REGMEM = rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG
+rocr_AMD_SDMA_PKT_POLL_REGMEM: TypeAlias = rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG
 @record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG:
   SIZE = 32
@@ -340,7 +340,7 @@ class _anonunion42:
   loop_interval: Annotated[Annotated[int, ctypes.c_uint32], 0, 13, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 1, 19, 5]
   DW_7_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_ATOMIC = rocr_AMD_SDMA_PKT_ATOMIC_TAG
+rocr_AMD_SDMA_PKT_ATOMIC: TypeAlias = rocr_AMD_SDMA_PKT_ATOMIC_TAG
 @record
 class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG:
   SIZE = 12
@@ -364,7 +364,7 @@ class _anonunion45:
   SIZE = 4
   addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_TIMESTAMP = rocr_AMD_SDMA_PKT_TIMESTAMP_TAG
+rocr_AMD_SDMA_PKT_TIMESTAMP: TypeAlias = rocr_AMD_SDMA_PKT_TIMESTAMP_TAG
 @record
 class rocr_AMD_SDMA_PKT_TRAP_TAG:
   SIZE = 8
@@ -383,7 +383,7 @@ class _anonunion47:
   int_ctx: Annotated[Annotated[int, ctypes.c_uint32], 0, 28, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_TRAP = rocr_AMD_SDMA_PKT_TRAP_TAG
+rocr_AMD_SDMA_PKT_TRAP: TypeAlias = rocr_AMD_SDMA_PKT_TRAP_TAG
 @record
 class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG:
   SIZE = 24
@@ -393,7 +393,7 @@ class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG:
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 12]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 16]
   DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 20]
-rocr_AMD_SDMA_PKT_HDP_FLUSH = rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG
+rocr_AMD_SDMA_PKT_HDP_FLUSH: TypeAlias = rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG
 @record
 class rocr_AMD_SDMA_PKT_GCR_TAG:
   SIZE = 20
@@ -444,7 +444,7 @@ class _anonunion52:
   LimitVA_HI: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
   VMID: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 0]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-rocr_AMD_SDMA_PKT_GCR = rocr_AMD_SDMA_PKT_GCR_TAG
+rocr_AMD_SDMA_PKT_GCR: TypeAlias = rocr_AMD_SDMA_PKT_GCR_TAG
 init_records()
 SDMA_OP_COPY = 1
 SDMA_OP_FENCE = 5

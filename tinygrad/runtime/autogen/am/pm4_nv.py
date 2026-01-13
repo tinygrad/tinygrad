@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 class union_PM4_MES_TYPE_3_HEADER(ctypes.Union): pass
 enum_mes_set_resources_queue_type_enum = CEnum(Annotated[int, ctypes.c_uint32])

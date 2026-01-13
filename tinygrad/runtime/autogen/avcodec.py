@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 enum_HEVCNALUnitType = CEnum(Annotated[int, ctypes.c_uint32])
 HEVC_NAL_TRAIL_N = enum_HEVCNALUnitType.define('HEVC_NAL_TRAIL_N', 0)
@@ -115,8 +115,8 @@ class struct_H265RawNALUnitHeader:
   nal_unit_type: Annotated[uint8_t, 0]
   nuh_layer_id: Annotated[uint8_t, 1]
   nuh_temporal_id_plus1: Annotated[uint8_t, 2]
-uint8_t = Annotated[int, ctypes.c_ubyte]
-H265RawNALUnitHeader = struct_H265RawNALUnitHeader
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+H265RawNALUnitHeader: TypeAlias = struct_H265RawNALUnitHeader
 @record
 class struct_H265RawProfileTierLevel:
   SIZE = 422
@@ -162,7 +162,7 @@ class struct_H265RawProfileTierLevel:
   sub_layer_max_14bit_constraint_flag: Annotated[Array[uint8_t, Literal[7]], 401]
   sub_layer_inbld_flag: Annotated[Array[uint8_t, Literal[7]], 408]
   sub_layer_level_idc: Annotated[Array[uint8_t, Literal[7]], 415]
-H265RawProfileTierLevel = struct_H265RawProfileTierLevel
+H265RawProfileTierLevel: TypeAlias = struct_H265RawProfileTierLevel
 @record
 class struct_H265RawSubLayerHRDParameters:
   SIZE = 544
@@ -171,8 +171,8 @@ class struct_H265RawSubLayerHRDParameters:
   cpb_size_du_value_minus1: Annotated[Array[uint32_t, Literal[32]], 256]
   bit_rate_du_value_minus1: Annotated[Array[uint32_t, Literal[32]], 384]
   cbr_flag: Annotated[Array[uint8_t, Literal[32]], 512]
-uint32_t = Annotated[int, ctypes.c_uint32]
-H265RawSubLayerHRDParameters = struct_H265RawSubLayerHRDParameters
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+H265RawSubLayerHRDParameters: TypeAlias = struct_H265RawSubLayerHRDParameters
 @record
 class struct_H265RawHRDParameters:
   SIZE = 7672
@@ -196,8 +196,8 @@ class struct_H265RawHRDParameters:
   cpb_cnt_minus1: Annotated[Array[uint8_t, Literal[7]], 49]
   nal_sub_layer_hrd_parameters: Annotated[Array[H265RawSubLayerHRDParameters, Literal[7]], 56]
   vcl_sub_layer_hrd_parameters: Annotated[Array[H265RawSubLayerHRDParameters, Literal[7]], 3864]
-uint16_t = Annotated[int, ctypes.c_uint16]
-H265RawHRDParameters = struct_H265RawHRDParameters
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
+H265RawHRDParameters: TypeAlias = struct_H265RawHRDParameters
 @record
 class struct_H265RawVUI:
   SIZE = 7736
@@ -241,11 +241,11 @@ class struct_H265RawVUI:
   max_bits_per_min_cu_denom: Annotated[uint8_t, 7731]
   log2_max_mv_length_horizontal: Annotated[uint8_t, 7732]
   log2_max_mv_length_vertical: Annotated[uint8_t, 7733]
-H265RawVUI = struct_H265RawVUI
+H265RawVUI: TypeAlias = struct_H265RawVUI
 class struct_H265RawExtensionData(ctypes.Structure): pass
-H265RawExtensionData = struct_H265RawExtensionData
+H265RawExtensionData: TypeAlias = struct_H265RawExtensionData
 class struct_H265RawVPS(ctypes.Structure): pass
-H265RawVPS = struct_H265RawVPS
+H265RawVPS: TypeAlias = struct_H265RawVPS
 @record
 class struct_H265RawSTRefPicSet:
   SIZE = 136
@@ -261,7 +261,7 @@ class struct_H265RawSTRefPicSet:
   used_by_curr_pic_s0_flag: Annotated[Array[uint8_t, Literal[16]], 72]
   delta_poc_s1_minus1: Annotated[Array[uint16_t, Literal[16]], 88]
   used_by_curr_pic_s1_flag: Annotated[Array[uint8_t, Literal[16]], 120]
-H265RawSTRefPicSet = struct_H265RawSTRefPicSet
+H265RawSTRefPicSet: TypeAlias = struct_H265RawSTRefPicSet
 @record
 class struct_H265RawScalingList:
   SIZE = 1632
@@ -269,19 +269,19 @@ class struct_H265RawScalingList:
   scaling_list_pred_matrix_id_delta: Annotated[Array[Array[uint8_t, Literal[6]], Literal[4]], 24]
   scaling_list_dc_coef_minus8: Annotated[Array[Array[int16_t, Literal[6]], Literal[4]], 48]
   scaling_list_delta_coeff: Annotated[Array[Array[Array[int8_t, Literal[64]], Literal[6]], Literal[4]], 96]
-int16_t = Annotated[int, ctypes.c_int16]
-int8_t = Annotated[int, ctypes.c_byte]
-H265RawScalingList = struct_H265RawScalingList
+int16_t: TypeAlias = Annotated[int, ctypes.c_int16]
+int8_t: TypeAlias = Annotated[int, ctypes.c_byte]
+H265RawScalingList: TypeAlias = struct_H265RawScalingList
 class struct_H265RawSPS(ctypes.Structure): pass
-H265RawSPS = struct_H265RawSPS
+H265RawSPS: TypeAlias = struct_H265RawSPS
 class struct_H265RawPPS(ctypes.Structure): pass
-H265RawPPS = struct_H265RawPPS
+H265RawPPS: TypeAlias = struct_H265RawPPS
 @record
 class struct_H265RawAUD:
   SIZE = 4
   nal_unit_header: Annotated[H265RawNALUnitHeader, 0]
   pic_type: Annotated[uint8_t, 3]
-H265RawAUD = struct_H265RawAUD
+H265RawAUD: TypeAlias = struct_H265RawAUD
 @record
 class struct_H265RawSliceHeader:
   SIZE = 11772
@@ -353,9 +353,9 @@ class struct_H265RawSliceHeader:
   entry_point_offset_minus1: Annotated[Array[uint32_t, Literal[2700]], 712]
   slice_segment_header_extension_length: Annotated[uint16_t, 11512]
   slice_segment_header_extension_data_byte: Annotated[Array[uint8_t, Literal[256]], 11514]
-H265RawSliceHeader = struct_H265RawSliceHeader
+H265RawSliceHeader: TypeAlias = struct_H265RawSliceHeader
 class struct_H265RawSlice(ctypes.Structure): pass
-H265RawSlice = struct_H265RawSlice
+H265RawSlice: TypeAlias = struct_H265RawSlice
 @record
 class struct_H265RawSEIBufferingPeriod:
   SIZE = 1048
@@ -374,7 +374,7 @@ class struct_H265RawSEIBufferingPeriod:
   vcl_initial_alt_cpb_removal_delay: Annotated[Array[uint32_t, Literal[32]], 788]
   vcl_initial_alt_cpb_removal_offset: Annotated[Array[uint32_t, Literal[32]], 916]
   use_alt_cpb_params_flag: Annotated[uint8_t, 1044]
-H265RawSEIBufferingPeriod = struct_H265RawSEIBufferingPeriod
+H265RawSEIBufferingPeriod: TypeAlias = struct_H265RawSEIBufferingPeriod
 @record
 class struct_H265RawSEIPicTiming:
   SIZE = 3624
@@ -389,7 +389,7 @@ class struct_H265RawSEIPicTiming:
   du_common_cpb_removal_delay_increment_minus1: Annotated[uint32_t, 20]
   num_nalus_in_du_minus1: Annotated[Array[uint16_t, Literal[600]], 24]
   du_cpb_removal_delay_increment_minus1: Annotated[Array[uint32_t, Literal[600]], 1224]
-H265RawSEIPicTiming = struct_H265RawSEIPicTiming
+H265RawSEIPicTiming: TypeAlias = struct_H265RawSEIPicTiming
 @record
 class struct_H265RawSEIPanScanRect:
   SIZE = 60
@@ -401,15 +401,15 @@ class struct_H265RawSEIPanScanRect:
   pan_scan_rect_top_offset: Annotated[Array[int32_t, Literal[3]], 32]
   pan_scan_rect_bottom_offset: Annotated[Array[int32_t, Literal[3]], 44]
   pan_scan_rect_persistence_flag: Annotated[uint16_t, 56]
-int32_t = Annotated[int, ctypes.c_int32]
-H265RawSEIPanScanRect = struct_H265RawSEIPanScanRect
+int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
+H265RawSEIPanScanRect: TypeAlias = struct_H265RawSEIPanScanRect
 @record
 class struct_H265RawSEIRecoveryPoint:
   SIZE = 4
   recovery_poc_cnt: Annotated[int16_t, 0]
   exact_match_flag: Annotated[uint8_t, 2]
   broken_link_flag: Annotated[uint8_t, 3]
-H265RawSEIRecoveryPoint = struct_H265RawSEIRecoveryPoint
+H265RawSEIRecoveryPoint: TypeAlias = struct_H265RawSEIRecoveryPoint
 @record
 class struct_H265RawFilmGrainCharacteristics:
   SIZE = 10774
@@ -431,7 +431,7 @@ class struct_H265RawFilmGrainCharacteristics:
   intensity_interval_upper_bound: Annotated[Array[Array[uint8_t, Literal[256]], Literal[3]], 788]
   comp_model_value: Annotated[Array[Array[Array[int16_t, Literal[6]], Literal[256]], Literal[3]], 1556]
   film_grain_characteristics_persistence_flag: Annotated[uint8_t, 10772]
-H265RawFilmGrainCharacteristics = struct_H265RawFilmGrainCharacteristics
+H265RawFilmGrainCharacteristics: TypeAlias = struct_H265RawFilmGrainCharacteristics
 @record
 class struct_H265RawSEIDisplayOrientation:
   SIZE = 10
@@ -441,7 +441,7 @@ class struct_H265RawSEIDisplayOrientation:
   anticlockwise_rotation: Annotated[uint16_t, 4]
   display_orientation_repetition_period: Annotated[uint16_t, 6]
   display_orientation_persistence_flag: Annotated[uint8_t, 8]
-H265RawSEIDisplayOrientation = struct_H265RawSEIDisplayOrientation
+H265RawSEIDisplayOrientation: TypeAlias = struct_H265RawSEIDisplayOrientation
 @record
 class struct_H265RawSEIActiveParameterSets:
   SIZE = 83
@@ -451,7 +451,7 @@ class struct_H265RawSEIActiveParameterSets:
   num_sps_ids_minus1: Annotated[uint8_t, 3]
   active_seq_parameter_set_id: Annotated[Array[uint8_t, Literal[16]], 4]
   layer_sps_idx: Annotated[Array[uint8_t, Literal[63]], 20]
-H265RawSEIActiveParameterSets = struct_H265RawSEIActiveParameterSets
+H265RawSEIActiveParameterSets: TypeAlias = struct_H265RawSEIActiveParameterSets
 @record
 class struct_H265RawSEIDecodedPictureHash:
   SIZE = 68
@@ -459,7 +459,7 @@ class struct_H265RawSEIDecodedPictureHash:
   picture_md5: Annotated[Array[Array[uint8_t, Literal[16]], Literal[3]], 1]
   picture_crc: Annotated[Array[uint16_t, Literal[3]], 50]
   picture_checksum: Annotated[Array[uint32_t, Literal[3]], 56]
-H265RawSEIDecodedPictureHash = struct_H265RawSEIDecodedPictureHash
+H265RawSEIDecodedPictureHash: TypeAlias = struct_H265RawSEIDecodedPictureHash
 @record
 class struct_H265RawSEITimeCode:
   SIZE = 60
@@ -479,7 +479,7 @@ class struct_H265RawSEITimeCode:
   hours_flag: Annotated[Array[uint8_t, Literal[3]], 41]
   time_offset_length: Annotated[Array[uint8_t, Literal[3]], 44]
   time_offset_value: Annotated[Array[int32_t, Literal[3]], 48]
-H265RawSEITimeCode = struct_H265RawSEITimeCode
+H265RawSEITimeCode: TypeAlias = struct_H265RawSEITimeCode
 @record
 class struct_H265RawSEIAlphaChannelInfo:
   SIZE = 12
@@ -491,7 +491,7 @@ class struct_H265RawSEIAlphaChannelInfo:
   alpha_channel_incr_flag: Annotated[uint8_t, 8]
   alpha_channel_clip_flag: Annotated[uint8_t, 9]
   alpha_channel_clip_type_flag: Annotated[uint8_t, 10]
-H265RawSEIAlphaChannelInfo = struct_H265RawSEIAlphaChannelInfo
+H265RawSEIAlphaChannelInfo: TypeAlias = struct_H265RawSEIAlphaChannelInfo
 @record
 class struct_H265RawSEI3DReferenceDisplaysInfo:
   SIZE = 358
@@ -508,7 +508,7 @@ class struct_H265RawSEI3DReferenceDisplaysInfo:
   additional_shift_present_flag: Annotated[Array[uint8_t, Literal[32]], 260]
   num_sample_shift_plus512: Annotated[Array[uint16_t, Literal[32]], 292]
   three_dimensional_reference_displays_extension_flag: Annotated[uint8_t, 356]
-H265RawSEI3DReferenceDisplaysInfo = struct_H265RawSEI3DReferenceDisplaysInfo
+H265RawSEI3DReferenceDisplaysInfo: TypeAlias = struct_H265RawSEI3DReferenceDisplaysInfo
 @record
 class struct_H265RawSEI:
   SIZE = 24
@@ -520,7 +520,7 @@ class struct_SEIRawMessageList:
   messages: Annotated[POINTER(SEIRawMessage), 0]
   nb_messages: Annotated[Annotated[int, ctypes.c_int32], 8]
   nb_messages_allocated: Annotated[Annotated[int, ctypes.c_int32], 12]
-SEIRawMessageList = struct_SEIRawMessageList
+SEIRawMessageList: TypeAlias = struct_SEIRawMessageList
 @record
 class struct_SEIRawMessage:
   SIZE = 40
@@ -530,15 +530,15 @@ class struct_SEIRawMessage:
   payload_ref: Annotated[POINTER(None), 16]
   extension_data: Annotated[POINTER(uint8_t), 24]
   extension_bit_length: Annotated[size_t, 32]
-SEIRawMessage = struct_SEIRawMessage
-size_t = Annotated[int, ctypes.c_uint64]
-H265RawSEI = struct_H265RawSEI
+SEIRawMessage: TypeAlias = struct_SEIRawMessage
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+H265RawSEI: TypeAlias = struct_H265RawSEI
 @record
 class struct_H265RawFiller:
   SIZE = 8
   nal_unit_header: Annotated[H265RawNALUnitHeader, 0]
   filler_size: Annotated[uint32_t, 4]
-H265RawFiller = struct_H265RawFiller
+H265RawFiller: TypeAlias = struct_H265RawFiller
 class struct_CodedBitstreamH265Context(ctypes.Structure): pass
-CodedBitstreamH265Context = struct_CodedBitstreamH265Context
+CodedBitstreamH265Context: TypeAlias = struct_CodedBitstreamH265Context
 init_records()

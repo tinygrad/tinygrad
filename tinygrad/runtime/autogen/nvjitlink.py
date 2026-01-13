@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 import sysconfig
 dll = DLL('nvjitlink', 'nvJitLink', f'/usr/local/cuda/targets/{sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0]}/lib')
@@ -23,13 +23,13 @@ NVJITLINK_INPUT_OBJECT = nvJitLinkInputType.define('NVJITLINK_INPUT_OBJECT', 5)
 NVJITLINK_INPUT_LIBRARY = nvJitLinkInputType.define('NVJITLINK_INPUT_LIBRARY', 6)
 
 class struct_nvJitLink(ctypes.Structure): pass
-nvJitLinkHandle = POINTER(struct_nvJitLink)
-uint32_t = Annotated[int, ctypes.c_uint32]
+nvJitLinkHandle: TypeAlias = POINTER(struct_nvJitLink)
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @dll.bind
 def nvJitLinkCreate(handle:POINTER(nvJitLinkHandle), numOptions:uint32_t, options:POINTER(POINTER(Annotated[bytes, ctypes.c_char]))) -> nvJitLinkResult: ...
 @dll.bind
 def nvJitLinkDestroy(handle:POINTER(nvJitLinkHandle)) -> nvJitLinkResult: ...
-size_t = Annotated[int, ctypes.c_uint64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def nvJitLinkAddData(handle:nvJitLinkHandle, inputType:nvJitLinkInputType, data:POINTER(None), size:size_t, name:POINTER(Annotated[bytes, ctypes.c_char])) -> nvJitLinkResult: ...
 @dll.bind

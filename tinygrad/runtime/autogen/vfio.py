@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_vfio_info_cap_header:
@@ -8,8 +8,8 @@ class struct_vfio_info_cap_header:
   id: Annotated[Annotated[int, ctypes.c_uint16], 0]
   version: Annotated[Annotated[int, ctypes.c_uint16], 2]
   next: Annotated[Annotated[int, ctypes.c_uint32], 4]
-__u16 = Annotated[int, ctypes.c_uint16]
-__u32 = Annotated[int, ctypes.c_uint32]
+__u16: TypeAlias = Annotated[int, ctypes.c_uint16]
+__u32: TypeAlias = Annotated[int, ctypes.c_uint32]
 @record
 class struct_vfio_group_status:
   SIZE = 8
@@ -39,7 +39,7 @@ class struct_vfio_region_info:
   cap_offset: Annotated[Annotated[int, ctypes.c_uint32], 12]
   size: Annotated[Annotated[int, ctypes.c_uint64], 16]
   offset: Annotated[Annotated[int, ctypes.c_uint64], 24]
-__u64 = Annotated[int, ctypes.c_uint64]
+__u64: TypeAlias = Annotated[int, ctypes.c_uint64]
 @record
 class struct_vfio_region_sparse_mmap_area:
   SIZE = 16
@@ -102,7 +102,7 @@ class struct_vfio_irq_set:
   start: Annotated[Annotated[int, ctypes.c_uint32], 12]
   count: Annotated[Annotated[int, ctypes.c_uint32], 16]
   data: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 20]
-__u8 = Annotated[int, ctypes.c_ubyte]
+__u8: TypeAlias = Annotated[int, ctypes.c_ubyte]
 _anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
 VFIO_PCI_BAR0_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR0_REGION_INDEX', 0)
 VFIO_PCI_BAR1_REGION_INDEX = _anonenum0.define('VFIO_PCI_BAR1_REGION_INDEX', 1)
@@ -159,7 +159,7 @@ class struct_vfio_pci_hot_reset:
   flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
   count: Annotated[Annotated[int, ctypes.c_uint32], 8]
   group_fds: Annotated[Array[Annotated[int, ctypes.c_int32], Literal[0]], 12]
-__s32 = Annotated[int, ctypes.c_int32]
+__s32: TypeAlias = Annotated[int, ctypes.c_int32]
 @record
 class struct_vfio_device_gfx_plane_info:
   SIZE = 64

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
 @record
 class struct_v11_gfx_mqd:
@@ -1678,7 +1678,7 @@ class struct_v12_gfx_mqd:
   reserved_509: Annotated[uint32_t, 2036]
   reserved_510: Annotated[uint32_t, 2040]
   reserved_511: Annotated[uint32_t, 2044]
-uint32_t = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @record
 class struct_v12_sdma_mqd:
   SIZE = 512
@@ -2347,8 +2347,8 @@ class struct_table_info:
   checksum: Annotated[uint16_t, 2]
   size: Annotated[uint16_t, 4]
   padding: Annotated[uint16_t, 6]
-uint16_t = Annotated[int, ctypes.c_uint16]
-table_info = struct_table_info
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
+table_info: TypeAlias = struct_table_info
 @record
 class struct_binary_header:
   SIZE = 60
@@ -2358,13 +2358,13 @@ class struct_binary_header:
   binary_checksum: Annotated[uint16_t, 8]
   binary_size: Annotated[uint16_t, 10]
   table_list: Annotated[Array[table_info, Literal[6]], 12]
-binary_header = struct_binary_header
+binary_header: TypeAlias = struct_binary_header
 @record
 class struct_die_info:
   SIZE = 4
   die_id: Annotated[uint16_t, 0]
   die_offset: Annotated[uint16_t, 2]
-die_info = struct_die_info
+die_info: TypeAlias = struct_die_info
 @record
 class struct_ip_discovery_header:
   SIZE = 80
@@ -2378,8 +2378,8 @@ class struct_ip_discovery_header:
   base_addr_64_bit: Annotated[uint8_t, 0, 1, 0]
   reserved: Annotated[uint8_t, 0, 7, 1]
   reserved2: Annotated[uint8_t, 1]
-uint8_t = Annotated[int, ctypes.c_ubyte]
-ip_discovery_header = struct_ip_discovery_header
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+ip_discovery_header: TypeAlias = struct_ip_discovery_header
 @record
 class struct_ip:
   SIZE = 8
@@ -2392,7 +2392,7 @@ class struct_ip:
   harvest: Annotated[uint8_t, 7, 4, 0]
   reserved: Annotated[uint8_t, 7, 4, 4]
   base_address: Annotated[Array[uint32_t, Literal[0]], 8]
-ip = struct_ip
+ip: TypeAlias = struct_ip
 @record
 class struct_ip_v3:
   SIZE = 8
@@ -2405,7 +2405,7 @@ class struct_ip_v3:
   sub_revision: Annotated[uint8_t, 7, 4, 0]
   variant: Annotated[uint8_t, 7, 4, 4]
   base_address: Annotated[Array[uint32_t, Literal[0]], 8]
-ip_v3 = struct_ip_v3
+ip_v3: TypeAlias = struct_ip_v3
 @record
 class struct_ip_v4:
   SIZE = 7
@@ -2415,13 +2415,13 @@ class struct_ip_v4:
   major: Annotated[uint8_t, 4]
   minor: Annotated[uint8_t, 5]
   revision: Annotated[uint8_t, 6]
-ip_v4 = struct_ip_v4
+ip_v4: TypeAlias = struct_ip_v4
 @record
 class struct_die_header:
   SIZE = 4
   die_id: Annotated[uint16_t, 0]
   num_ips: Annotated[uint16_t, 2]
-die_header = struct_die_header
+die_header: TypeAlias = struct_die_header
 @record
 class struct_ip_structure:
   SIZE = 24
@@ -2434,7 +2434,7 @@ class struct_die:
   ip_list: Annotated[POINTER(ip), 8]
   ip_v3_list: Annotated[POINTER(ip_v3), 8]
   ip_v4_list: Annotated[POINTER(ip_v4), 8]
-ip_structure = struct_ip_structure
+ip_structure: TypeAlias = struct_ip_structure
 @record
 class struct_gpu_info_header:
   SIZE = 12
@@ -2621,20 +2621,20 @@ class struct_harvest_info_header:
   SIZE = 8
   signature: Annotated[uint32_t, 0]
   version: Annotated[uint32_t, 4]
-harvest_info_header = struct_harvest_info_header
+harvest_info_header: TypeAlias = struct_harvest_info_header
 @record
 class struct_harvest_info:
   SIZE = 4
   hw_id: Annotated[uint16_t, 0]
   number_instance: Annotated[uint8_t, 2]
   reserved: Annotated[uint8_t, 3]
-harvest_info = struct_harvest_info
+harvest_info: TypeAlias = struct_harvest_info
 @record
 class struct_harvest_table:
   SIZE = 136
   header: Annotated[harvest_info_header, 0]
   list: Annotated[Array[harvest_info, Literal[32]], 8]
-harvest_table = struct_harvest_table
+harvest_table: TypeAlias = struct_harvest_table
 @record
 class struct_mall_info_header:
   SIZE = 12
@@ -2702,7 +2702,7 @@ class struct_nps_instance_info_v1_0:
   SIZE = 16
   base_address: Annotated[uint64_t, 0]
   limit_address: Annotated[uint64_t, 8]
-uint64_t = Annotated[int, ctypes.c_uint64]
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @record
 class struct_nps_info_v1_0:
   SIZE = 212
