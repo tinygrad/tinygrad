@@ -1,6 +1,41 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
 import struct, math, re, functools
-from extra.assembly.amd.dsl import MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
+
+MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
+
+# Float/int bit conversion functions
+_struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
+_struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
+_struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")
+def _f32(i):
+  i = i & MASK32
+  # RDNA3 default mode: flush f32 denormals to zero (FTZ)
+  # Denormal: exponent=0 (bits 23-30) and mantissa!=0 (bits 0-22)
+  if (i & 0x7f800000) == 0 and (i & 0x007fffff) != 0: return 0.0
+  return _struct_f.unpack(_struct_I.pack(i))[0]
+def _i32(f):
+  if isinstance(f, int): f = float(f)
+  if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
+  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
+  try:
+    bits = _struct_I.unpack(_struct_f.pack(f))[0]
+    # RDNA3 default mode: flush f32 denormals to zero (FTZ)
+    if (bits & 0x7f800000) == 0 and (bits & 0x007fffff) != 0: return 0x80000000 if bits & 0x80000000 else 0
+    return bits
+  except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
+def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
+def _f16(i): return _struct_e.unpack(_struct_H.pack(i & 0xffff))[0]
+def _i16(f):
+  if math.isnan(f): return 0x7e00
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
+  try: return _struct_H.unpack(_struct_e.pack(f))[0]
+  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
+def _f64(i): return _struct_d.unpack(_struct_Q.pack(i & MASK64))[0]
+def _i64(f):
+  if math.isnan(f): return 0x7ff8000000000000
+  if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+  try: return _struct_Q.unpack(_struct_d.pack(f))[0]
+  except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INTERNAL HELPERS

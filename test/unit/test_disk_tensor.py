@@ -1,11 +1,11 @@
 import os, pathlib, tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
+from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, fetch, temp, OSX
 from test.helpers import slow
-from tinygrad.device import is_dtype_supported
 
 def compare_weights_both(url):
   import torch
@@ -166,7 +166,7 @@ class TestSafetensors(unittest.TestCase):
   def test_save_all_dtypes(self):
     for dtype in dtypes.fields().values():
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
-      if dtype in [dtypes.double, *dtypes.fp8s] and Device.DEFAULT == "METAL": continue # not supported on METAL
+      if not is_dtype_supported(dtype): continue
       path = temp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
@@ -276,6 +276,29 @@ class TestDiskTensor(unittest.TestCase):
     dt[1] = [3]
     self.assertEqual(dt.tolist(), [[1], [3]])
 
+  def test_assign_const_to_disk(self):
+    # assign from CONST (Tensor.full) to disk - source has no buffer, needs contiguous first
+    pathlib.Path(temp(fn:="dt_assign_const")).unlink(missing_ok=True)
+    dt = Tensor.empty(4, device=f"disk:{temp(fn)}", dtype=dtypes.int32)
+    dt.assign(Tensor.full((4,), 42, dtype=dtypes.int32)).realize()
+    np.testing.assert_array_equal(dt.numpy(), [42, 42, 42, 42])
+
+  def test_assign_slice_from_const(self):
+    # slice assign from CONST to disk - tests size calculation when no RANGE ops
+    pathlib.Path(temp(fn:="dt_slice_const")).unlink(missing_ok=True)
+    dt = Tensor([0, 1, 2, 3], dtype=dtypes.int32).to(f"disk:{temp(fn)}")
+    dt[1:3].assign(Tensor.full((2,), 99, dtype=dtypes.int32)).realize()
+    np.testing.assert_array_equal(dt.numpy(), [0, 99, 99, 3])
+
+  def test_disk_to_disk_copy(self):
+    # disk-to-disk copy needs to go through CPU
+    pathlib.Path(temp(fn1:="dt_d2d_src")).unlink(missing_ok=True)
+    pathlib.Path(temp(fn2:="dt_d2d_dst")).unlink(missing_ok=True)
+    src = Tensor([1, 2, 3, 4], dtype=dtypes.int32).to(f"disk:{temp(fn1)}")
+    dst = Tensor.empty(4, device=f"disk:{temp(fn2)}", dtype=dtypes.int32)
+    dst.assign(src.to("CPU")).realize()
+    np.testing.assert_array_equal(dst.numpy(), [1, 2, 3, 4])
+
   def test_assign_slice(self):
     def assign(x,s,y): x[s] = y
     helper_test_disk_tensor("dt_assign_slice_1", [0,1,2,3], lambda x: assign(x, slice(0,2), [13, 12]))
@@ -295,6 +318,24 @@ class TestDiskTensor(unittest.TestCase):
       t[idx:idx+2].assign(data)
 
     np.testing.assert_array_equal(t.numpy(), np.array([3] * 10))
+
+  def test_assign_with_bitcast(self):
+    # bitcast assign is used in safe_save for writing header length
+    # this tests the synchronous disk assign hack handles bitcast correctly
+    pathlib.Path(temp(fn:="dt_assign_bitcast")).unlink(missing_ok=True)
+    t = Tensor.empty(16, device=f"disk:{temp(fn)}", dtype=dtypes.uint8)
+    t[0:8].bitcast(dtypes.int64).assign([12345])
+    # verify the data was written correctly
+    val = int.from_bytes(t[0:8].data(), 'little')
+    self.assertEqual(val, 12345)
+
+  def test_assign_cross_device(self):
+    # disk assign allows cross-device (source on GPU/CPU, target on disk)
+    pathlib.Path(temp(fn:="dt_assign_cross")).unlink(missing_ok=True)
+    t = Tensor.empty(4, device=f"disk:{temp(fn)}", dtype=dtypes.float32)
+    src = Tensor([1.0, 2.0, 3.0, 4.0])  # on default device
+    t.assign(src)
+    np.testing.assert_array_equal(t.numpy(), [1.0, 2.0, 3.0, 4.0])
 
   def test_bitcast(self):
     with open(temp('dt_bitcast'), "wb") as f: f.write(bytes(range(10,20)))

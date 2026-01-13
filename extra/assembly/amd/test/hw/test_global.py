@@ -35,7 +35,7 @@ class TestGlobalAtomic(unittest.TestCase):
       s_mov_b32(s[0], 50),
       v_mov_b32_e32(v[3], s[0]),
     ]
-    atomic = FLAT(GLOBALOp.GLOBAL_ATOMIC_ADD_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1, seg=2)
+    atomic = GLOBAL(GLOBALOp.GLOBAL_ATOMIC_ADD_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
     def check(st):
       self.assertEqual(st.vgpr[0][4], 100)
     self._make_test(setup, atomic, check, TEST_OFFSET)
@@ -55,7 +55,7 @@ class TestGlobalAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0x00000000),
       v_mov_b32_e32(v[5], s[0]),
     ]
-    atomic = FLAT(GLOBALOp.GLOBAL_ATOMIC_ADD_U64, addr=v[0], data=v[4], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1, seg=2)
+    atomic = GLOBAL(GLOBALOp.GLOBAL_ATOMIC_ADD_U64, addr=v[0], data=v[4], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
     def check(st):
       self.assertEqual(st.vgpr[0][6], 0xFFFFFFFF)
       self.assertEqual(st.vgpr[0][7], 0x00000000)
@@ -81,7 +81,7 @@ class TestGlobalLoad(unittest.TestCase):
       v_mov_b32_e32(v[4], s[0]),
       global_store_b96(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
-      FLAT(GLOBALOp.GLOBAL_LOAD_B96, addr=v[0], vdst=v[5], saddr=SrcEnum.NULL, offset=TEST_OFFSET, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B96, addr=v[0], vdst=v[5], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
@@ -111,7 +111,7 @@ class TestGlobalLoad(unittest.TestCase):
       v_mov_b32_e32(v[5], s[0]),
       global_store_b128(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
-      FLAT(GLOBALOp.GLOBAL_LOAD_B128, addr=v[0], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B128, addr=v[0], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
@@ -141,7 +141,7 @@ class TestGlobalStore(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       global_store_b64(addr=v[0], data=v[2], saddr=s[2], offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
-      FLAT(GLOBALOp.GLOBAL_LOAD_B64, addr=v[0], vdst=v[4], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B64, addr=v[0], vdst=v[4], data=v[4], saddr=s[2], offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], v[4]),
       v_mov_b32_e32(v[1], v[5]),
@@ -170,7 +170,7 @@ class TestD16HiLoads(unittest.TestCase):
       s_waitcnt(vmcnt=0),
       s_mov_b32(s[4], 0x0000BEEF),
       v_mov_b32_e32(v[3], s[4]),
-      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[0], vdst=v[3], data=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[0], vdst=v[3], data=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], v[3]),
       v_mov_b32_e32(v[1], 0),
@@ -195,7 +195,7 @@ class TestD16HiLoads(unittest.TestCase):
       s_mov_b32(s[4], 0x0000DEAD),
       v_mov_b32_e32(v[0], s[4]),  # data field - should NOT affect result
       v_mov_b32_e32(v[1], 0),     # vdst - low bits should be preserved
-      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2], offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], v[1]),
       s_mov_b32(s[2], 0),
@@ -221,7 +221,7 @@ class TestD16HiLoads(unittest.TestCase):
       s_mov_b32(s[4], 0x0000BEEF),
       v_mov_b32_e32(v[5], s[4]),  # vdst
       v_mov_b32_e32(v[3], 0),
-      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_U8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_U8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2], offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], v[5]),
       s_mov_b32(s[2], 0),
@@ -243,7 +243,7 @@ class TestD16HiLoads(unittest.TestCase):
       global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[1], 0),
-      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2], offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], v[1]),
       s_mov_b32(s[2], 0),
@@ -271,7 +271,7 @@ class TestD16HiLoads(unittest.TestCase):
       # Set v[1] to 0
       v_mov_b32_e32(v[1], 0),
       # Load using v[1] as addr AND vdst, but v[0] as data
-      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2], offset=TEST_OFFSET+6, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2], offset=TEST_OFFSET+6),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], v[1]),
       s_mov_b32(s[2], 0),
@@ -298,7 +298,7 @@ class TestD16HiLoads(unittest.TestCase):
       s_mov_b32(s[4], 0x0000BEEF),
       v_mov_b32_e32(v[5], s[4]),  # vdst
       v_mov_b32_e32(v[3], 0),
-      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_I8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_I8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2], offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], v[5]),
       s_mov_b32(s[2], 0),
@@ -327,10 +327,10 @@ class TestD16HiLoads(unittest.TestCase):
 
       v_mov_b32_e32(v[2], 0),
       v_mov_b32_e32(v[1], 0),
-      FLAT(GLOBALOp.GLOBAL_LOAD_U16, addr=v[2], vdst=v[0], data=v[0], saddr=s[2], offset=TEST_OFFSET+3, seg=2),
-      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2], offset=TEST_OFFSET+6, seg=2),
-      FLAT(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[3], data=v[3], saddr=s[2], offset=TEST_OFFSET, seg=2),
-      FLAT(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[4], data=v[4], saddr=s[2], offset=TEST_OFFSET+8, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_U16, addr=v[2], vdst=v[0], data=v[0], saddr=s[2], offset=TEST_OFFSET+3),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2], offset=TEST_OFFSET+6),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[3], data=v[3], saddr=s[2], offset=TEST_OFFSET),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[4], data=v[4], saddr=s[2], offset=TEST_OFFSET+8),
       s_waitcnt(vmcnt=0),
 
       v_and_b32_e32(v[5], 0xffff, v[0]),
@@ -342,7 +342,7 @@ class TestD16HiLoads(unittest.TestCase):
       global_store_b64(addr=v[2], data=v[0], saddr=s[2], offset=TEST_OFFSET+16),
       s_waitcnt(vmcnt=0),
 
-      FLAT(GLOBALOp.GLOBAL_LOAD_B64, addr=v[2], vdst=v[6], data=v[6], saddr=s[2], offset=TEST_OFFSET+16, seg=2),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B64, addr=v[2], vdst=v[6], data=v[6], saddr=s[2], offset=TEST_OFFSET+16),
       s_waitcnt(vmcnt=0),
       v_mov_b32_e32(v[0], v[6]),
       v_mov_b32_e32(v[1], v[7]),

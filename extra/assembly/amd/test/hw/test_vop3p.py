@@ -23,14 +23,12 @@ class TestPackInstructions(unittest.TestCase):
 
   def test_v_pack_b32_f16_opsel_hi_hi(self):
     """V_PACK_B32_F16 with opsel to read high halves."""
-    inst = v_pack_b32_f16(v[2], v[0], v[1])
-    inst._values['opsel'] = 0b0011
     instructions = [
       s_mov_b32(s[0], 0x40003c00),  # hi=2.0, lo=1.0
       s_mov_b32(s[1], 0x44004200),  # hi=4.0, lo=3.0
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      inst,
+      v_pack_b32_f16(v[2], v[0], v[1], opsel=0b0011),
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
@@ -83,14 +81,12 @@ class TestPackMore(unittest.TestCase):
 
   def test_v_pack_b32_f16_opsel_lo_hi(self):
     """V_PACK_B32_F16 with opsel=0b0010 to read lo from src0, hi from src1."""
-    inst = v_pack_b32_f16(v[2], v[0], v[1])
-    inst._values['opsel'] = 0b0010
     instructions = [
       s_mov_b32(s[0], 0x40003c00),
       s_mov_b32(s[1], 0x44004200),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      inst,
+      v_pack_b32_f16(v[2], v[0], v[1], opsel=0b0010),
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
@@ -98,14 +94,12 @@ class TestPackMore(unittest.TestCase):
 
   def test_v_pack_b32_f16_opsel_hi_lo(self):
     """V_PACK_B32_F16 with opsel=0b0001 to read hi from src0, lo from src1."""
-    inst = v_pack_b32_f16(v[2], v[0], v[1])
-    inst._values['opsel'] = 0b0001
     instructions = [
       s_mov_b32(s[0], 0x40003c00),
       s_mov_b32(s[1], 0x44004200),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      inst,
+      v_pack_b32_f16(v[2], v[0], v[1], opsel=0b0001),
     ]
     st = run_program(instructions, n_lanes=1)
     result = st.vgpr[0][2]
