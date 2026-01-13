@@ -215,5 +215,18 @@ class TestCfg(unittest.TestCase):
     asm += ["end:", s_endpgm()]
     run_asm("test_colored_blocks", asm)
 
+  def test_jump_back_to_end(self):
+    run_asm("jump_back_to_end", [
+      "entry:",
+        s_mov_b32(s[1], 2),
+        "s_cbranch_execz loop",
+      "end:",
+        s_endpgm(),
+      "loop:",
+        s_add_u32(s[1], s[1], -1),
+        s_cmp_eq_i32(s[1], 0),
+        "s_branch end",
+    ])
+
 if __name__ == "__main__":
   unittest.main()
