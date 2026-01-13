@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
-from _ctypes import _CData, _SimpleCData, _Pointer
+from _ctypes import _SimpleCData, _Pointer
 from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, TypeVar, Generic
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
@@ -60,6 +60,7 @@ class Array(Generic[T, U]):
   def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
 
 if TYPE_CHECKING:
+  from _ctypes import _CData
   CT = TypeVar("CT", bound=_CData)
   class POINTER(_Pointer[CT]): ...
 else:
