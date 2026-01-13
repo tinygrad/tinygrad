@@ -323,7 +323,6 @@ for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances."""
   n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
-  state_to_opcode, decode_info = STATE_TO_OPCODE, _DECODE_INFO
 
   while pos + ((nib_count + nib_off + 1) >> 1) <= n:
     need = nib_count - nib_off
@@ -336,8 +335,8 @@ def decode(data: bytes) -> Iterator[PacketType]:
     # 3. if odd, read low nibble
     if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
-    opcode = state_to_opcode[reg & 0xFF]
-    pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
+    opcode = STATE_TO_OPCODE[reg & 0xFF]
+    pkt_cls, nib_count, delta_lo, delta_mask, special = _DECODE_INFO[opcode]
     delta = (reg >> delta_lo) & delta_mask
     if special == 1 and (reg >> 9) & 1 and not (reg >> 8) & 1: delta = 0  # TS_DELTA_OR_MARK marker
     elif special == 2: delta += 8  # TS_DELTA_SHORT
