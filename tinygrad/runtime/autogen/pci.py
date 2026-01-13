@@ -1,8 +1,9 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-init_records()
+from tinygrad.runtime.support import c
+from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+c.init_records()
 PCI_CFG_SPACE_SIZE = 256
 PCI_CFG_SPACE_EXP_SIZE = 4096
 PCI_STD_HEADER_SIZEOF = 64

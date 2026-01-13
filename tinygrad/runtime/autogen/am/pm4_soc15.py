@@ -1,7 +1,8 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from tinygrad.runtime.support import c
+from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
 class union_PM4_MES_TYPE_3_HEADER(ctypes.Union): pass
 enum_mes_set_resources_queue_type_enum = CEnum(Annotated[int, ctypes.c_uint32])
 queue_type__mes_set_resources__kernel_interface_queue_kiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__kernel_interface_queue_kiq', 0)
@@ -131,7 +132,7 @@ class struct_pm4_mec_write_data_mmio(ctypes.Structure): pass
 _anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
 CACHE_FLUSH_AND_INV_TS_EVENT = _anonenum0.define('CACHE_FLUSH_AND_INV_TS_EVENT', 20)
 
-init_records()
+c.init_records()
 GFX9_NUM_GFX_RINGS = 1
 GFX9_NUM_COMPUTE_RINGS = 8
 PACKET_TYPE0 = 0

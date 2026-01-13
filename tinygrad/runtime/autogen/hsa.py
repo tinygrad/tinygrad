@@ -1,9 +1,10 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
+from tinygrad.runtime.support import c
+from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
 import os
-dll = DLL('hsa', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so', 'hsa-runtime64'])
+dll = c.DLL('hsa', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so', 'hsa-runtime64'])
 enum_SQ_RSRC_BUF_TYPE = CEnum(Annotated[int, ctypes.c_uint32])
 SQ_RSRC_BUF = enum_SQ_RSRC_BUF_TYPE.define('SQ_RSRC_BUF', 0)
 SQ_RSRC_BUF_RSVD_1 = enum_SQ_RSRC_BUF_TYPE.define('SQ_RSRC_BUF_RSVD_1', 1)
@@ -57,108 +58,108 @@ SQ_SEL_Z = enum_SQ_SEL_XYZW01.define('SQ_SEL_Z', 6)
 SQ_SEL_W = enum_SQ_SEL_XYZW01.define('SQ_SEL_W', 7)
 
 SQ_SEL_XYZW01: TypeAlias = enum_SQ_SEL_XYZW01
-@record
-class union_COMPUTE_TMPRING_SIZE:
+@c.record
+class union_COMPUTE_TMPRING_SIZE(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct0, 0]
   bits: Annotated[_anonstruct0, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct0:
+@c.record
+class _anonstruct0(c.Struct):
   SIZE = 4
   WAVES: Annotated[Annotated[int, ctypes.c_uint32], 0, 12, 0]
   WAVESIZE: Annotated[Annotated[int, ctypes.c_uint32], 1, 13, 4]
-@record
-class union_COMPUTE_TMPRING_SIZE_GFX11:
+@c.record
+class union_COMPUTE_TMPRING_SIZE_GFX11(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct1, 0]
   bits: Annotated[_anonstruct1, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct1:
+@c.record
+class _anonstruct1(c.Struct):
   SIZE = 4
   WAVES: Annotated[Annotated[int, ctypes.c_uint32], 0, 12, 0]
   WAVESIZE: Annotated[Annotated[int, ctypes.c_uint32], 1, 15, 4]
-@record
-class union_COMPUTE_TMPRING_SIZE_GFX12:
+@c.record
+class union_COMPUTE_TMPRING_SIZE_GFX12(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct2, 0]
   bits: Annotated[_anonstruct2, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct2:
+@c.record
+class _anonstruct2(c.Struct):
   SIZE = 4
   WAVES: Annotated[Annotated[int, ctypes.c_uint32], 0, 12, 0]
   WAVESIZE: Annotated[Annotated[int, ctypes.c_uint32], 1, 18, 4]
-@record
-class union_SQ_BUF_RSRC_WORD0:
+@c.record
+class union_SQ_BUF_RSRC_WORD0(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct3, 0]
   bits: Annotated[_anonstruct3, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct3:
+@c.record
+class _anonstruct3(c.Struct):
   SIZE = 4
   BASE_ADDRESS: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
-@record
-class union_SQ_BUF_RSRC_WORD1:
+@c.record
+class union_SQ_BUF_RSRC_WORD1(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct4, 0]
   bits: Annotated[_anonstruct4, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct4:
+@c.record
+class _anonstruct4(c.Struct):
   SIZE = 4
   BASE_ADDRESS_HI: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
   STRIDE: Annotated[Annotated[int, ctypes.c_uint32], 2, 14, 0]
   CACHE_SWIZZLE: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 6]
   SWIZZLE_ENABLE: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 7]
-@record
-class union_SQ_BUF_RSRC_WORD1_GFX11:
+@c.record
+class union_SQ_BUF_RSRC_WORD1_GFX11(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct5, 0]
   bits: Annotated[_anonstruct5, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct5:
+@c.record
+class _anonstruct5(c.Struct):
   SIZE = 4
   BASE_ADDRESS_HI: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
   STRIDE: Annotated[Annotated[int, ctypes.c_uint32], 2, 14, 0]
   SWIZZLE_ENABLE: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
-@record
-class union_SQ_BUF_RSRC_WORD2:
+@c.record
+class union_SQ_BUF_RSRC_WORD2(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct6, 0]
   bits: Annotated[_anonstruct6, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct6:
+@c.record
+class _anonstruct6(c.Struct):
   SIZE = 4
   NUM_RECORDS: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
-@record
-class union_SQ_BUF_RSRC_WORD3:
+@c.record
+class union_SQ_BUF_RSRC_WORD3(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct7, 0]
   bits: Annotated[_anonstruct7, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct7:
+@c.record
+class _anonstruct7(c.Struct):
   SIZE = 4
   DST_SEL_X: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 0]
   DST_SEL_Y: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 3]
@@ -174,16 +175,16 @@ class _anonstruct7:
   HEAP: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 2]
   MTYPE__CI__VI: Annotated[Annotated[int, ctypes.c_uint32], 3, 3, 3]
   TYPE: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
-@record
-class union_SQ_BUF_RSRC_WORD3_GFX10:
+@c.record
+class union_SQ_BUF_RSRC_WORD3_GFX10(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct8, 0]
   bits: Annotated[_anonstruct8, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct8:
+@c.record
+class _anonstruct8(c.Struct):
   SIZE = 4
   DST_SEL_X: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 0]
   DST_SEL_Y: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 3]
@@ -197,16 +198,16 @@ class _anonstruct8:
   RESERVED2: Annotated[Annotated[int, ctypes.c_uint32], 3, 3, 1]
   OOB_SELECT: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 4]
   TYPE: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
-@record
-class union_SQ_BUF_RSRC_WORD3_GFX11:
+@c.record
+class union_SQ_BUF_RSRC_WORD3_GFX11(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct9, 0]
   bits: Annotated[_anonstruct9, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct9:
+@c.record
+class _anonstruct9(c.Struct):
   SIZE = 4
   DST_SEL_X: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 0]
   DST_SEL_Y: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 3]
@@ -219,16 +220,16 @@ class _anonstruct9:
   RESERVED2: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 0]
   OOB_SELECT: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 4]
   TYPE: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
-@record
-class union_SQ_BUF_RSRC_WORD3_GFX12:
+@c.record
+class union_SQ_BUF_RSRC_WORD3_GFX12(c.Struct):
   SIZE = 4
   bitfields: Annotated[_anonstruct10, 0]
   bits: Annotated[_anonstruct10, 0]
   u32All: Annotated[Annotated[int, ctypes.c_uint32], 0]
   i32All: Annotated[Annotated[int, ctypes.c_int32], 0]
   f32All: Annotated[Annotated[float, ctypes.c_float], 0]
-@record
-class _anonstruct10:
+@c.record
+class _anonstruct10(c.Struct):
   SIZE = 4
   DST_SEL_X: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 0]
   DST_SEL_Y: Annotated[Annotated[int, ctypes.c_uint32], 0, 3, 3]
@@ -281,9 +282,9 @@ HSA_STATUS_ERROR_INVALID_RUNTIME_STATE = hsa_status_t.define('HSA_STATUS_ERROR_I
 HSA_STATUS_ERROR_FATAL = hsa_status_t.define('HSA_STATUS_ERROR_FATAL', 4134)
 
 @dll.bind
-def hsa_status_string(status:hsa_status_t, status_string:POINTER(POINTER(Annotated[bytes, ctypes.c_char]))) -> hsa_status_t: ...
-@record
-class struct_hsa_dim3_s:
+def hsa_status_string(status:hsa_status_t, status_string:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char]))) -> hsa_status_t: ...
+@c.record
+class struct_hsa_dim3_s(c.Struct):
   SIZE = 12
   x: Annotated[uint32_t, 0]
   y: Annotated[uint32_t, 4]
@@ -333,7 +334,7 @@ HSA_AMD_SYSTEM_INFO_EXT_VERSION_MAJOR = hsa_system_info_t.define('HSA_AMD_SYSTEM
 HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR = hsa_system_info_t.define('HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR', 520)
 
 @dll.bind
-def hsa_system_get_info(attribute:hsa_system_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_system_get_info(attribute:hsa_system_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 hsa_extension_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_EXTENSION_FINALIZER = hsa_extension_t.define('HSA_EXTENSION_FINALIZER', 0)
 HSA_EXTENSION_IMAGES = hsa_extension_t.define('HSA_EXTENSION_IMAGES', 1)
@@ -349,18 +350,18 @@ HSA_AMD_LAST_EXTENSION = hsa_extension_t.define('HSA_AMD_LAST_EXTENSION', 515)
 
 uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 @dll.bind
-def hsa_extension_get_name(extension:uint16_t, name:POINTER(POINTER(Annotated[bytes, ctypes.c_char]))) -> hsa_status_t: ...
+def hsa_extension_get_name(extension:uint16_t, name:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char]))) -> hsa_status_t: ...
 @dll.bind
-def hsa_system_extension_supported(extension:uint16_t, version_major:uint16_t, version_minor:uint16_t, result:POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
+def hsa_system_extension_supported(extension:uint16_t, version_major:uint16_t, version_minor:uint16_t, result:c.POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
 @dll.bind
-def hsa_system_major_extension_supported(extension:uint16_t, version_major:uint16_t, version_minor:POINTER(uint16_t), result:POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
+def hsa_system_major_extension_supported(extension:uint16_t, version_major:uint16_t, version_minor:c.POINTER(uint16_t), result:c.POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
 @dll.bind
-def hsa_system_get_extension_table(extension:uint16_t, version_major:uint16_t, version_minor:uint16_t, table:POINTER(None)) -> hsa_status_t: ...
+def hsa_system_get_extension_table(extension:uint16_t, version_major:uint16_t, version_minor:uint16_t, table:c.POINTER(None)) -> hsa_status_t: ...
 size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
-def hsa_system_get_major_extension_table(extension:uint16_t, version_major:uint16_t, table_length:size_t, table:POINTER(None)) -> hsa_status_t: ...
-@record
-class struct_hsa_agent_s:
+def hsa_system_get_major_extension_table(extension:uint16_t, version_major:uint16_t, table_length:size_t, table:c.POINTER(None)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_agent_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
@@ -409,17 +410,17 @@ HSA_AGENT_INFO_VERSION_MINOR = hsa_agent_info_t.define('HSA_AGENT_INFO_VERSION_M
 HSA_AGENT_INFO_LAST = hsa_agent_info_t.define('HSA_AGENT_INFO_LAST', 2147483647)
 
 @dll.bind
-def hsa_agent_get_info(agent:hsa_agent_t, attribute:hsa_agent_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_agent_get_info(agent:hsa_agent_t, attribute:hsa_agent_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_iterate_agents(callback:CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_iterate_agents(callback:c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 hsa_exception_policy_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_EXCEPTION_POLICY_BREAK = hsa_exception_policy_t.define('HSA_EXCEPTION_POLICY_BREAK', 1)
 HSA_EXCEPTION_POLICY_DETECT = hsa_exception_policy_t.define('HSA_EXCEPTION_POLICY_DETECT', 2)
 
 @dll.bind
-def hsa_agent_get_exception_policies(agent:hsa_agent_t, profile:hsa_profile_t, mask:POINTER(uint16_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_cache_s:
+def hsa_agent_get_exception_policies(agent:hsa_agent_t, profile:hsa_profile_t, mask:c.POINTER(uint16_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_cache_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_cache_t: TypeAlias = struct_hsa_cache_s
@@ -430,21 +431,21 @@ HSA_CACHE_INFO_LEVEL = hsa_cache_info_t.define('HSA_CACHE_INFO_LEVEL', 2)
 HSA_CACHE_INFO_SIZE = hsa_cache_info_t.define('HSA_CACHE_INFO_SIZE', 3)
 
 @dll.bind
-def hsa_cache_get_info(cache:hsa_cache_t, attribute:hsa_cache_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_cache_get_info(cache:hsa_cache_t, attribute:hsa_cache_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_agent_iterate_caches(agent:hsa_agent_t, callback:CFUNCTYPE(hsa_status_t, hsa_cache_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_agent_iterate_caches(agent:hsa_agent_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_cache_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_agent_extension_supported(extension:uint16_t, agent:hsa_agent_t, version_major:uint16_t, version_minor:uint16_t, result:POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
+def hsa_agent_extension_supported(extension:uint16_t, agent:hsa_agent_t, version_major:uint16_t, version_minor:uint16_t, result:c.POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
 @dll.bind
-def hsa_agent_major_extension_supported(extension:uint16_t, agent:hsa_agent_t, version_major:uint16_t, version_minor:POINTER(uint16_t), result:POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
-@record
-class struct_hsa_signal_s:
+def hsa_agent_major_extension_supported(extension:uint16_t, agent:hsa_agent_t, version_major:uint16_t, version_minor:c.POINTER(uint16_t), result:c.POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
+@c.record
+class struct_hsa_signal_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_signal_t: TypeAlias = struct_hsa_signal_s
 hsa_signal_value_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
-def hsa_signal_create(initial_value:hsa_signal_value_t, num_consumers:uint32_t, consumers:POINTER(hsa_agent_t), signal:POINTER(hsa_signal_t)) -> hsa_status_t: ...
+def hsa_signal_create(initial_value:hsa_signal_value_t, num_consumers:uint32_t, consumers:c.POINTER(hsa_agent_t), signal:c.POINTER(hsa_signal_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_signal_destroy(signal:hsa_signal_t) -> hsa_status_t: ...
 @dll.bind
@@ -577,21 +578,21 @@ def hsa_signal_wait_scacquire(signal:hsa_signal_t, condition:hsa_signal_conditio
 def hsa_signal_wait_relaxed(signal:hsa_signal_t, condition:hsa_signal_condition_t, compare_value:hsa_signal_value_t, timeout_hint:uint64_t, wait_state_hint:hsa_wait_state_t) -> hsa_signal_value_t: ...
 @dll.bind
 def hsa_signal_wait_acquire(signal:hsa_signal_t, condition:hsa_signal_condition_t, compare_value:hsa_signal_value_t, timeout_hint:uint64_t, wait_state_hint:hsa_wait_state_t) -> hsa_signal_value_t: ...
-@record
-class struct_hsa_signal_group_s:
+@c.record
+class struct_hsa_signal_group_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_signal_group_t: TypeAlias = struct_hsa_signal_group_s
 @dll.bind
-def hsa_signal_group_create(num_signals:uint32_t, signals:POINTER(hsa_signal_t), num_consumers:uint32_t, consumers:POINTER(hsa_agent_t), signal_group:POINTER(hsa_signal_group_t)) -> hsa_status_t: ...
+def hsa_signal_group_create(num_signals:uint32_t, signals:c.POINTER(hsa_signal_t), num_consumers:uint32_t, consumers:c.POINTER(hsa_agent_t), signal_group:c.POINTER(hsa_signal_group_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_signal_group_destroy(signal_group:hsa_signal_group_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_signal_group_wait_any_scacquire(signal_group:hsa_signal_group_t, conditions:POINTER(hsa_signal_condition_t), compare_values:POINTER(hsa_signal_value_t), wait_state_hint:hsa_wait_state_t, signal:POINTER(hsa_signal_t), value:POINTER(hsa_signal_value_t)) -> hsa_status_t: ...
+def hsa_signal_group_wait_any_scacquire(signal_group:hsa_signal_group_t, conditions:c.POINTER(hsa_signal_condition_t), compare_values:c.POINTER(hsa_signal_value_t), wait_state_hint:hsa_wait_state_t, signal:c.POINTER(hsa_signal_t), value:c.POINTER(hsa_signal_value_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_signal_group_wait_any_relaxed(signal_group:hsa_signal_group_t, conditions:POINTER(hsa_signal_condition_t), compare_values:POINTER(hsa_signal_value_t), wait_state_hint:hsa_wait_state_t, signal:POINTER(hsa_signal_t), value:POINTER(hsa_signal_value_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_region_s:
+def hsa_signal_group_wait_any_relaxed(signal_group:hsa_signal_group_t, conditions:c.POINTER(hsa_signal_condition_t), compare_values:c.POINTER(hsa_signal_value_t), wait_state_hint:hsa_wait_state_t, signal:c.POINTER(hsa_signal_t), value:c.POINTER(hsa_signal_value_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_region_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_region_t: TypeAlias = struct_hsa_region_s
@@ -605,77 +606,77 @@ hsa_queue_feature_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_QUEUE_FEATURE_KERNEL_DISPATCH = hsa_queue_feature_t.define('HSA_QUEUE_FEATURE_KERNEL_DISPATCH', 1)
 HSA_QUEUE_FEATURE_AGENT_DISPATCH = hsa_queue_feature_t.define('HSA_QUEUE_FEATURE_AGENT_DISPATCH', 2)
 
-@record
-class struct_hsa_queue_s:
+@c.record
+class struct_hsa_queue_s(c.Struct):
   SIZE = 40
   type: Annotated[hsa_queue_type32_t, 0]
   features: Annotated[uint32_t, 4]
-  base_address: Annotated[POINTER(None), 8]
+  base_address: Annotated[c.POINTER(None), 8]
   doorbell_signal: Annotated[hsa_signal_t, 16]
   size: Annotated[uint32_t, 24]
   reserved1: Annotated[uint32_t, 28]
   id: Annotated[uint64_t, 32]
 hsa_queue_t: TypeAlias = struct_hsa_queue_s
 @dll.bind
-def hsa_queue_create(agent:hsa_agent_t, size:uint32_t, type:hsa_queue_type32_t, callback:CFUNCTYPE(None, hsa_status_t, POINTER(hsa_queue_t), POINTER(None)), data:POINTER(None), private_segment_size:uint32_t, group_segment_size:uint32_t, queue:POINTER(POINTER(hsa_queue_t))) -> hsa_status_t: ...
+def hsa_queue_create(agent:hsa_agent_t, size:uint32_t, type:hsa_queue_type32_t, callback:c.CFUNCTYPE(None, hsa_status_t, c.POINTER(hsa_queue_t), c.POINTER(None)), data:c.POINTER(None), private_segment_size:uint32_t, group_segment_size:uint32_t, queue:c.POINTER(c.POINTER(hsa_queue_t))) -> hsa_status_t: ...
 @dll.bind
-def hsa_soft_queue_create(region:hsa_region_t, size:uint32_t, type:hsa_queue_type32_t, features:uint32_t, doorbell_signal:hsa_signal_t, queue:POINTER(POINTER(hsa_queue_t))) -> hsa_status_t: ...
+def hsa_soft_queue_create(region:hsa_region_t, size:uint32_t, type:hsa_queue_type32_t, features:uint32_t, doorbell_signal:hsa_signal_t, queue:c.POINTER(c.POINTER(hsa_queue_t))) -> hsa_status_t: ...
 @dll.bind
-def hsa_queue_destroy(queue:POINTER(hsa_queue_t)) -> hsa_status_t: ...
+def hsa_queue_destroy(queue:c.POINTER(hsa_queue_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_queue_inactivate(queue:POINTER(hsa_queue_t)) -> hsa_status_t: ...
+def hsa_queue_inactivate(queue:c.POINTER(hsa_queue_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_queue_load_read_index_acquire(queue:POINTER(hsa_queue_t)) -> uint64_t: ...
+def hsa_queue_load_read_index_acquire(queue:c.POINTER(hsa_queue_t)) -> uint64_t: ...
 @dll.bind
-def hsa_queue_load_read_index_scacquire(queue:POINTER(hsa_queue_t)) -> uint64_t: ...
+def hsa_queue_load_read_index_scacquire(queue:c.POINTER(hsa_queue_t)) -> uint64_t: ...
 @dll.bind
-def hsa_queue_load_read_index_relaxed(queue:POINTER(hsa_queue_t)) -> uint64_t: ...
+def hsa_queue_load_read_index_relaxed(queue:c.POINTER(hsa_queue_t)) -> uint64_t: ...
 @dll.bind
-def hsa_queue_load_write_index_acquire(queue:POINTER(hsa_queue_t)) -> uint64_t: ...
+def hsa_queue_load_write_index_acquire(queue:c.POINTER(hsa_queue_t)) -> uint64_t: ...
 @dll.bind
-def hsa_queue_load_write_index_scacquire(queue:POINTER(hsa_queue_t)) -> uint64_t: ...
+def hsa_queue_load_write_index_scacquire(queue:c.POINTER(hsa_queue_t)) -> uint64_t: ...
 @dll.bind
-def hsa_queue_load_write_index_relaxed(queue:POINTER(hsa_queue_t)) -> uint64_t: ...
+def hsa_queue_load_write_index_relaxed(queue:c.POINTER(hsa_queue_t)) -> uint64_t: ...
 @dll.bind
-def hsa_queue_store_write_index_relaxed(queue:POINTER(hsa_queue_t), value:uint64_t) -> None: ...
+def hsa_queue_store_write_index_relaxed(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> None: ...
 @dll.bind
-def hsa_queue_store_write_index_release(queue:POINTER(hsa_queue_t), value:uint64_t) -> None: ...
+def hsa_queue_store_write_index_release(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> None: ...
 @dll.bind
-def hsa_queue_store_write_index_screlease(queue:POINTER(hsa_queue_t), value:uint64_t) -> None: ...
+def hsa_queue_store_write_index_screlease(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> None: ...
 @dll.bind
-def hsa_queue_cas_write_index_acq_rel(queue:POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
+def hsa_queue_cas_write_index_acq_rel(queue:c.POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_cas_write_index_scacq_screl(queue:POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
+def hsa_queue_cas_write_index_scacq_screl(queue:c.POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_cas_write_index_acquire(queue:POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
+def hsa_queue_cas_write_index_acquire(queue:c.POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_cas_write_index_scacquire(queue:POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
+def hsa_queue_cas_write_index_scacquire(queue:c.POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_cas_write_index_relaxed(queue:POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
+def hsa_queue_cas_write_index_relaxed(queue:c.POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_cas_write_index_release(queue:POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
+def hsa_queue_cas_write_index_release(queue:c.POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_cas_write_index_screlease(queue:POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
+def hsa_queue_cas_write_index_screlease(queue:c.POINTER(hsa_queue_t), expected:uint64_t, value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_add_write_index_acq_rel(queue:POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
+def hsa_queue_add_write_index_acq_rel(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_add_write_index_scacq_screl(queue:POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
+def hsa_queue_add_write_index_scacq_screl(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_add_write_index_acquire(queue:POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
+def hsa_queue_add_write_index_acquire(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_add_write_index_scacquire(queue:POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
+def hsa_queue_add_write_index_scacquire(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_add_write_index_relaxed(queue:POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
+def hsa_queue_add_write_index_relaxed(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_add_write_index_release(queue:POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
+def hsa_queue_add_write_index_release(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_add_write_index_screlease(queue:POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
+def hsa_queue_add_write_index_screlease(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> uint64_t: ...
 @dll.bind
-def hsa_queue_store_read_index_relaxed(queue:POINTER(hsa_queue_t), value:uint64_t) -> None: ...
+def hsa_queue_store_read_index_relaxed(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> None: ...
 @dll.bind
-def hsa_queue_store_read_index_release(queue:POINTER(hsa_queue_t), value:uint64_t) -> None: ...
+def hsa_queue_store_read_index_release(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> None: ...
 @dll.bind
-def hsa_queue_store_read_index_screlease(queue:POINTER(hsa_queue_t), value:uint64_t) -> None: ...
+def hsa_queue_store_read_index_screlease(queue:c.POINTER(hsa_queue_t), value:uint64_t) -> None: ...
 hsa_packet_type_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_PACKET_TYPE_VENDOR_SPECIFIC = hsa_packet_type_t.define('HSA_PACKET_TYPE_VENDOR_SPECIFIC', 0)
 HSA_PACKET_TYPE_INVALID = hsa_packet_type_t.define('HSA_PACKET_TYPE_INVALID', 1)
@@ -711,8 +712,8 @@ HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS = hsa_kernel_dispatch_packet_setup_t
 hsa_kernel_dispatch_packet_setup_width_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_KERNEL_DISPATCH_PACKET_SETUP_WIDTH_DIMENSIONS = hsa_kernel_dispatch_packet_setup_width_t.define('HSA_KERNEL_DISPATCH_PACKET_SETUP_WIDTH_DIMENSIONS', 2)
 
-@record
-class struct_hsa_kernel_dispatch_packet_s:
+@c.record
+class struct_hsa_kernel_dispatch_packet_s(c.Struct):
   SIZE = 64
   header: Annotated[uint16_t, 0]
   setup: Annotated[uint16_t, 2]
@@ -727,38 +728,38 @@ class struct_hsa_kernel_dispatch_packet_s:
   private_segment_size: Annotated[uint32_t, 24]
   group_segment_size: Annotated[uint32_t, 28]
   kernel_object: Annotated[uint64_t, 32]
-  kernarg_address: Annotated[POINTER(None), 40]
+  kernarg_address: Annotated[c.POINTER(None), 40]
   reserved2: Annotated[uint64_t, 48]
   completion_signal: Annotated[hsa_signal_t, 56]
 hsa_kernel_dispatch_packet_t: TypeAlias = struct_hsa_kernel_dispatch_packet_s
-@record
-class struct_hsa_agent_dispatch_packet_s:
+@c.record
+class struct_hsa_agent_dispatch_packet_s(c.Struct):
   SIZE = 64
   header: Annotated[uint16_t, 0]
   type: Annotated[uint16_t, 2]
   reserved0: Annotated[uint32_t, 4]
-  return_address: Annotated[POINTER(None), 8]
-  arg: Annotated[Array[uint64_t, Literal[4]], 16]
+  return_address: Annotated[c.POINTER(None), 8]
+  arg: Annotated[c.Array[uint64_t, Literal[4]], 16]
   reserved2: Annotated[uint64_t, 48]
   completion_signal: Annotated[hsa_signal_t, 56]
 hsa_agent_dispatch_packet_t: TypeAlias = struct_hsa_agent_dispatch_packet_s
-@record
-class struct_hsa_barrier_and_packet_s:
+@c.record
+class struct_hsa_barrier_and_packet_s(c.Struct):
   SIZE = 64
   header: Annotated[uint16_t, 0]
   reserved0: Annotated[uint16_t, 2]
   reserved1: Annotated[uint32_t, 4]
-  dep_signal: Annotated[Array[hsa_signal_t, Literal[5]], 8]
+  dep_signal: Annotated[c.Array[hsa_signal_t, Literal[5]], 8]
   reserved2: Annotated[uint64_t, 48]
   completion_signal: Annotated[hsa_signal_t, 56]
 hsa_barrier_and_packet_t: TypeAlias = struct_hsa_barrier_and_packet_s
-@record
-class struct_hsa_barrier_or_packet_s:
+@c.record
+class struct_hsa_barrier_or_packet_s(c.Struct):
   SIZE = 64
   header: Annotated[uint16_t, 0]
   reserved0: Annotated[uint16_t, 2]
   reserved1: Annotated[uint32_t, 4]
-  dep_signal: Annotated[Array[hsa_signal_t, Literal[5]], 8]
+  dep_signal: Annotated[c.Array[hsa_signal_t, Literal[5]], 8]
   reserved2: Annotated[uint64_t, 48]
   completion_signal: Annotated[hsa_signal_t, 56]
 hsa_barrier_or_packet_t: TypeAlias = struct_hsa_barrier_or_packet_s
@@ -786,30 +787,30 @@ HSA_REGION_INFO_RUNTIME_ALLOC_GRANULE = hsa_region_info_t.define('HSA_REGION_INF
 HSA_REGION_INFO_RUNTIME_ALLOC_ALIGNMENT = hsa_region_info_t.define('HSA_REGION_INFO_RUNTIME_ALLOC_ALIGNMENT', 7)
 
 @dll.bind
-def hsa_region_get_info(region:hsa_region_t, attribute:hsa_region_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_region_get_info(region:hsa_region_t, attribute:hsa_region_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_agent_iterate_regions(agent:hsa_agent_t, callback:CFUNCTYPE(hsa_status_t, hsa_region_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_agent_iterate_regions(agent:hsa_agent_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_region_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_memory_allocate(region:hsa_region_t, size:size_t, ptr:POINTER(POINTER(None))) -> hsa_status_t: ...
+def hsa_memory_allocate(region:hsa_region_t, size:size_t, ptr:c.POINTER(c.POINTER(None))) -> hsa_status_t: ...
 @dll.bind
-def hsa_memory_free(ptr:POINTER(None)) -> hsa_status_t: ...
+def hsa_memory_free(ptr:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_memory_copy(dst:POINTER(None), src:POINTER(None), size:size_t) -> hsa_status_t: ...
+def hsa_memory_copy(dst:c.POINTER(None), src:c.POINTER(None), size:size_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_memory_assign_agent(ptr:POINTER(None), agent:hsa_agent_t, access:hsa_access_permission_t) -> hsa_status_t: ...
+def hsa_memory_assign_agent(ptr:c.POINTER(None), agent:hsa_agent_t, access:hsa_access_permission_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_memory_register(ptr:POINTER(None), size:size_t) -> hsa_status_t: ...
+def hsa_memory_register(ptr:c.POINTER(None), size:size_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_memory_deregister(ptr:POINTER(None), size:size_t) -> hsa_status_t: ...
-@record
-class struct_hsa_isa_s:
+def hsa_memory_deregister(ptr:c.POINTER(None), size:size_t) -> hsa_status_t: ...
+@c.record
+class struct_hsa_isa_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_isa_t: TypeAlias = struct_hsa_isa_s
 @dll.bind
-def hsa_isa_from_name(name:POINTER(Annotated[bytes, ctypes.c_char]), isa:POINTER(hsa_isa_t)) -> hsa_status_t: ...
+def hsa_isa_from_name(name:c.POINTER(Annotated[bytes, ctypes.c_char]), isa:c.POINTER(hsa_isa_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_agent_iterate_isas(agent:hsa_agent_t, callback:CFUNCTYPE(hsa_status_t, hsa_isa_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_agent_iterate_isas(agent:hsa_agent_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_isa_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 hsa_isa_info_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_ISA_INFO_NAME_LENGTH = hsa_isa_info_t.define('HSA_ISA_INFO_NAME_LENGTH', 0)
 HSA_ISA_INFO_NAME = hsa_isa_info_t.define('HSA_ISA_INFO_NAME', 1)
@@ -828,11 +829,11 @@ HSA_ISA_INFO_GRID_MAX_SIZE = hsa_isa_info_t.define('HSA_ISA_INFO_GRID_MAX_SIZE',
 HSA_ISA_INFO_FBARRIER_MAX_SIZE = hsa_isa_info_t.define('HSA_ISA_INFO_FBARRIER_MAX_SIZE', 17)
 
 @dll.bind
-def hsa_isa_get_info(isa:hsa_isa_t, attribute:hsa_isa_info_t, index:uint32_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_isa_get_info(isa:hsa_isa_t, attribute:hsa_isa_info_t, index:uint32_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_isa_get_info_alt(isa:hsa_isa_t, attribute:hsa_isa_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_isa_get_info_alt(isa:hsa_isa_t, attribute:hsa_isa_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_isa_get_exception_policies(isa:hsa_isa_t, profile:hsa_profile_t, mask:POINTER(uint16_t)) -> hsa_status_t: ...
+def hsa_isa_get_exception_policies(isa:hsa_isa_t, profile:hsa_profile_t, mask:c.POINTER(uint16_t)) -> hsa_status_t: ...
 hsa_fp_type_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_FP_TYPE_16 = hsa_fp_type_t.define('HSA_FP_TYPE_16', 1)
 HSA_FP_TYPE_32 = hsa_fp_type_t.define('HSA_FP_TYPE_32', 2)
@@ -847,9 +848,9 @@ HSA_ROUND_METHOD_SINGLE = hsa_round_method_t.define('HSA_ROUND_METHOD_SINGLE', 1
 HSA_ROUND_METHOD_DOUBLE = hsa_round_method_t.define('HSA_ROUND_METHOD_DOUBLE', 2)
 
 @dll.bind
-def hsa_isa_get_round_method(isa:hsa_isa_t, fp_type:hsa_fp_type_t, flush_mode:hsa_flush_mode_t, round_method:POINTER(hsa_round_method_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_wavefront_s:
+def hsa_isa_get_round_method(isa:hsa_isa_t, fp_type:hsa_fp_type_t, flush_mode:hsa_flush_mode_t, round_method:c.POINTER(hsa_round_method_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_wavefront_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_wavefront_t: TypeAlias = struct_hsa_wavefront_s
@@ -857,24 +858,24 @@ hsa_wavefront_info_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_WAVEFRONT_INFO_SIZE = hsa_wavefront_info_t.define('HSA_WAVEFRONT_INFO_SIZE', 0)
 
 @dll.bind
-def hsa_wavefront_get_info(wavefront:hsa_wavefront_t, attribute:hsa_wavefront_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_wavefront_get_info(wavefront:hsa_wavefront_t, attribute:hsa_wavefront_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_isa_iterate_wavefronts(isa:hsa_isa_t, callback:CFUNCTYPE(hsa_status_t, hsa_wavefront_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_isa_iterate_wavefronts(isa:hsa_isa_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_wavefront_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_isa_compatible(code_object_isa:hsa_isa_t, agent_isa:hsa_isa_t, result:POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
-@record
-class struct_hsa_code_object_reader_s:
+def hsa_isa_compatible(code_object_isa:hsa_isa_t, agent_isa:hsa_isa_t, result:c.POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
+@c.record
+class struct_hsa_code_object_reader_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_code_object_reader_t: TypeAlias = struct_hsa_code_object_reader_s
 @dll.bind
-def hsa_code_object_reader_create_from_file(file:hsa_file_t, code_object_reader:POINTER(hsa_code_object_reader_t)) -> hsa_status_t: ...
+def hsa_code_object_reader_create_from_file(file:hsa_file_t, code_object_reader:c.POINTER(hsa_code_object_reader_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_code_object_reader_create_from_memory(code_object:POINTER(None), size:size_t, code_object_reader:POINTER(hsa_code_object_reader_t)) -> hsa_status_t: ...
+def hsa_code_object_reader_create_from_memory(code_object:c.POINTER(None), size:size_t, code_object_reader:c.POINTER(hsa_code_object_reader_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_code_object_reader_destroy(code_object_reader:hsa_code_object_reader_t) -> hsa_status_t: ...
-@record
-class struct_hsa_executable_s:
+@c.record
+class struct_hsa_executable_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_executable_t: TypeAlias = struct_hsa_executable_s
@@ -883,49 +884,49 @@ HSA_EXECUTABLE_STATE_UNFROZEN = hsa_executable_state_t.define('HSA_EXECUTABLE_ST
 HSA_EXECUTABLE_STATE_FROZEN = hsa_executable_state_t.define('HSA_EXECUTABLE_STATE_FROZEN', 1)
 
 @dll.bind
-def hsa_executable_create(profile:hsa_profile_t, executable_state:hsa_executable_state_t, options:POINTER(Annotated[bytes, ctypes.c_char]), executable:POINTER(hsa_executable_t)) -> hsa_status_t: ...
+def hsa_executable_create(profile:hsa_profile_t, executable_state:hsa_executable_state_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), executable:c.POINTER(hsa_executable_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_create_alt(profile:hsa_profile_t, default_float_rounding_mode:hsa_default_float_rounding_mode_t, options:POINTER(Annotated[bytes, ctypes.c_char]), executable:POINTER(hsa_executable_t)) -> hsa_status_t: ...
+def hsa_executable_create_alt(profile:hsa_profile_t, default_float_rounding_mode:hsa_default_float_rounding_mode_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), executable:c.POINTER(hsa_executable_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_executable_destroy(executable:hsa_executable_t) -> hsa_status_t: ...
-@record
-class struct_hsa_loaded_code_object_s:
+@c.record
+class struct_hsa_loaded_code_object_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_loaded_code_object_t: TypeAlias = struct_hsa_loaded_code_object_s
 @dll.bind
-def hsa_executable_load_program_code_object(executable:hsa_executable_t, code_object_reader:hsa_code_object_reader_t, options:POINTER(Annotated[bytes, ctypes.c_char]), loaded_code_object:POINTER(hsa_loaded_code_object_t)) -> hsa_status_t: ...
+def hsa_executable_load_program_code_object(executable:hsa_executable_t, code_object_reader:hsa_code_object_reader_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), loaded_code_object:c.POINTER(hsa_loaded_code_object_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_load_agent_code_object(executable:hsa_executable_t, agent:hsa_agent_t, code_object_reader:hsa_code_object_reader_t, options:POINTER(Annotated[bytes, ctypes.c_char]), loaded_code_object:POINTER(hsa_loaded_code_object_t)) -> hsa_status_t: ...
+def hsa_executable_load_agent_code_object(executable:hsa_executable_t, agent:hsa_agent_t, code_object_reader:hsa_code_object_reader_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), loaded_code_object:c.POINTER(hsa_loaded_code_object_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_freeze(executable:hsa_executable_t, options:POINTER(Annotated[bytes, ctypes.c_char])) -> hsa_status_t: ...
+def hsa_executable_freeze(executable:hsa_executable_t, options:c.POINTER(Annotated[bytes, ctypes.c_char])) -> hsa_status_t: ...
 hsa_executable_info_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_EXECUTABLE_INFO_PROFILE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_PROFILE', 1)
 HSA_EXECUTABLE_INFO_STATE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_STATE', 2)
 HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE', 3)
 
 @dll.bind
-def hsa_executable_get_info(executable:hsa_executable_t, attribute:hsa_executable_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_executable_get_info(executable:hsa_executable_t, attribute:hsa_executable_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_global_variable_define(executable:hsa_executable_t, variable_name:POINTER(Annotated[bytes, ctypes.c_char]), address:POINTER(None)) -> hsa_status_t: ...
+def hsa_executable_global_variable_define(executable:hsa_executable_t, variable_name:c.POINTER(Annotated[bytes, ctypes.c_char]), address:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_agent_global_variable_define(executable:hsa_executable_t, agent:hsa_agent_t, variable_name:POINTER(Annotated[bytes, ctypes.c_char]), address:POINTER(None)) -> hsa_status_t: ...
+def hsa_executable_agent_global_variable_define(executable:hsa_executable_t, agent:hsa_agent_t, variable_name:c.POINTER(Annotated[bytes, ctypes.c_char]), address:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_readonly_variable_define(executable:hsa_executable_t, agent:hsa_agent_t, variable_name:POINTER(Annotated[bytes, ctypes.c_char]), address:POINTER(None)) -> hsa_status_t: ...
+def hsa_executable_readonly_variable_define(executable:hsa_executable_t, agent:hsa_agent_t, variable_name:c.POINTER(Annotated[bytes, ctypes.c_char]), address:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_validate(executable:hsa_executable_t, result:POINTER(uint32_t)) -> hsa_status_t: ...
+def hsa_executable_validate(executable:hsa_executable_t, result:c.POINTER(uint32_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_validate_alt(executable:hsa_executable_t, options:POINTER(Annotated[bytes, ctypes.c_char]), result:POINTER(uint32_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_executable_symbol_s:
+def hsa_executable_validate_alt(executable:hsa_executable_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), result:c.POINTER(uint32_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_executable_symbol_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_executable_symbol_t: TypeAlias = struct_hsa_executable_symbol_s
 int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
 @dll.bind
-def hsa_executable_get_symbol(executable:hsa_executable_t, module_name:POINTER(Annotated[bytes, ctypes.c_char]), symbol_name:POINTER(Annotated[bytes, ctypes.c_char]), agent:hsa_agent_t, call_convention:int32_t, symbol:POINTER(hsa_executable_symbol_t)) -> hsa_status_t: ...
+def hsa_executable_get_symbol(executable:hsa_executable_t, module_name:c.POINTER(Annotated[bytes, ctypes.c_char]), symbol_name:c.POINTER(Annotated[bytes, ctypes.c_char]), agent:hsa_agent_t, call_convention:int32_t, symbol:c.POINTER(hsa_executable_symbol_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_get_symbol_by_name(executable:hsa_executable_t, symbol_name:POINTER(Annotated[bytes, ctypes.c_char]), agent:POINTER(hsa_agent_t), symbol:POINTER(hsa_executable_symbol_t)) -> hsa_status_t: ...
+def hsa_executable_get_symbol_by_name(executable:hsa_executable_t, symbol_name:c.POINTER(Annotated[bytes, ctypes.c_char]), agent:c.POINTER(hsa_agent_t), symbol:c.POINTER(hsa_executable_symbol_t)) -> hsa_status_t: ...
 hsa_symbol_kind_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_SYMBOL_KIND_VARIABLE = hsa_symbol_kind_t.define('HSA_SYMBOL_KIND_VARIABLE', 0)
 HSA_SYMBOL_KIND_KERNEL = hsa_symbol_kind_t.define('HSA_SYMBOL_KIND_KERNEL', 1)
@@ -969,27 +970,27 @@ HSA_EXECUTABLE_SYMBOL_INFO_INDIRECT_FUNCTION_OBJECT = hsa_executable_symbol_info
 HSA_EXECUTABLE_SYMBOL_INFO_INDIRECT_FUNCTION_CALL_CONVENTION = hsa_executable_symbol_info_t.define('HSA_EXECUTABLE_SYMBOL_INFO_INDIRECT_FUNCTION_CALL_CONVENTION', 16)
 
 @dll.bind
-def hsa_executable_symbol_get_info(executable_symbol:hsa_executable_symbol_t, attribute:hsa_executable_symbol_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_executable_symbol_get_info(executable_symbol:hsa_executable_symbol_t, attribute:hsa_executable_symbol_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_iterate_symbols(executable:hsa_executable_t, callback:CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_executable_symbol_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_executable_iterate_symbols(executable:hsa_executable_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_executable_symbol_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_iterate_agent_symbols(executable:hsa_executable_t, agent:hsa_agent_t, callback:CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_executable_iterate_agent_symbols(executable:hsa_executable_t, agent:hsa_agent_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_iterate_program_symbols(executable:hsa_executable_t, callback:CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_executable_symbol_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
-@record
-class struct_hsa_code_object_s:
+def hsa_executable_iterate_program_symbols(executable:hsa_executable_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_executable_symbol_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_code_object_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_code_object_t: TypeAlias = struct_hsa_code_object_s
-@record
-class struct_hsa_callback_data_s:
+@c.record
+class struct_hsa_callback_data_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_callback_data_t: TypeAlias = struct_hsa_callback_data_s
 @dll.bind
-def hsa_code_object_serialize(code_object:hsa_code_object_t, alloc_callback:CFUNCTYPE(hsa_status_t, size_t, hsa_callback_data_t, POINTER(POINTER(None))), callback_data:hsa_callback_data_t, options:POINTER(Annotated[bytes, ctypes.c_char]), serialized_code_object:POINTER(POINTER(None)), serialized_code_object_size:POINTER(size_t)) -> hsa_status_t: ...
+def hsa_code_object_serialize(code_object:hsa_code_object_t, alloc_callback:c.CFUNCTYPE(hsa_status_t, size_t, hsa_callback_data_t, c.POINTER(c.POINTER(None))), callback_data:hsa_callback_data_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), serialized_code_object:c.POINTER(c.POINTER(None)), serialized_code_object_size:c.POINTER(size_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_code_object_deserialize(serialized_code_object:POINTER(None), serialized_code_object_size:size_t, options:POINTER(Annotated[bytes, ctypes.c_char]), code_object:POINTER(hsa_code_object_t)) -> hsa_status_t: ...
+def hsa_code_object_deserialize(serialized_code_object:c.POINTER(None), serialized_code_object_size:size_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), code_object:c.POINTER(hsa_code_object_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_code_object_destroy(code_object:hsa_code_object_t) -> hsa_status_t: ...
 hsa_code_object_type_t = CEnum(Annotated[int, ctypes.c_uint32])
@@ -1004,18 +1005,18 @@ HSA_CODE_OBJECT_INFO_PROFILE = hsa_code_object_info_t.define('HSA_CODE_OBJECT_IN
 HSA_CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_code_object_info_t.define('HSA_CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE', 5)
 
 @dll.bind
-def hsa_code_object_get_info(code_object:hsa_code_object_t, attribute:hsa_code_object_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_code_object_get_info(code_object:hsa_code_object_t, attribute:hsa_code_object_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_executable_load_code_object(executable:hsa_executable_t, agent:hsa_agent_t, code_object:hsa_code_object_t, options:POINTER(Annotated[bytes, ctypes.c_char])) -> hsa_status_t: ...
-@record
-class struct_hsa_code_symbol_s:
+def hsa_executable_load_code_object(executable:hsa_executable_t, agent:hsa_agent_t, code_object:hsa_code_object_t, options:c.POINTER(Annotated[bytes, ctypes.c_char])) -> hsa_status_t: ...
+@c.record
+class struct_hsa_code_symbol_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_code_symbol_t: TypeAlias = struct_hsa_code_symbol_s
 @dll.bind
-def hsa_code_object_get_symbol(code_object:hsa_code_object_t, symbol_name:POINTER(Annotated[bytes, ctypes.c_char]), symbol:POINTER(hsa_code_symbol_t)) -> hsa_status_t: ...
+def hsa_code_object_get_symbol(code_object:hsa_code_object_t, symbol_name:c.POINTER(Annotated[bytes, ctypes.c_char]), symbol:c.POINTER(hsa_code_symbol_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_code_object_get_symbol_from_name(code_object:hsa_code_object_t, module_name:POINTER(Annotated[bytes, ctypes.c_char]), symbol_name:POINTER(Annotated[bytes, ctypes.c_char]), symbol:POINTER(hsa_code_symbol_t)) -> hsa_status_t: ...
+def hsa_code_object_get_symbol_from_name(code_object:hsa_code_object_t, module_name:c.POINTER(Annotated[bytes, ctypes.c_char]), symbol_name:c.POINTER(Annotated[bytes, ctypes.c_char]), symbol:c.POINTER(hsa_code_symbol_t)) -> hsa_status_t: ...
 hsa_code_symbol_info_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_CODE_SYMBOL_INFO_TYPE = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_TYPE', 0)
 HSA_CODE_SYMBOL_INFO_NAME_LENGTH = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_NAME_LENGTH', 1)
@@ -1039,25 +1040,25 @@ HSA_CODE_SYMBOL_INFO_INDIRECT_FUNCTION_CALL_CONVENTION = hsa_code_symbol_info_t.
 HSA_CODE_SYMBOL_INFO_KERNEL_WAVEFRONT_SIZE = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_KERNEL_WAVEFRONT_SIZE', 19)
 
 @dll.bind
-def hsa_code_symbol_get_info(code_symbol:hsa_code_symbol_t, attribute:hsa_code_symbol_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_code_symbol_get_info(code_symbol:hsa_code_symbol_t, attribute:hsa_code_symbol_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_code_object_iterate_symbols(code_object:hsa_code_object_t, callback:CFUNCTYPE(hsa_status_t, hsa_code_object_t, hsa_code_symbol_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_code_object_iterate_symbols(code_object:hsa_code_object_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_code_object_t, hsa_code_symbol_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 hsa_signal_condition32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 hsa_amd_packet_type_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_PACKET_TYPE_BARRIER_VALUE = hsa_amd_packet_type_t.define('HSA_AMD_PACKET_TYPE_BARRIER_VALUE', 2)
 HSA_AMD_PACKET_TYPE_AIE_ERT = hsa_amd_packet_type_t.define('HSA_AMD_PACKET_TYPE_AIE_ERT', 3)
 
 hsa_amd_packet_type8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
-@record
-class struct_hsa_amd_packet_header_s:
+@c.record
+class struct_hsa_amd_packet_header_s(c.Struct):
   SIZE = 4
   header: Annotated[uint16_t, 0]
   AmdFormat: Annotated[hsa_amd_packet_type8_t, 2]
   reserved: Annotated[uint8_t, 3]
 uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
 hsa_amd_vendor_packet_header_t: TypeAlias = struct_hsa_amd_packet_header_s
-@record
-class struct_hsa_amd_barrier_value_packet_s:
+@c.record
+class struct_hsa_amd_barrier_value_packet_s(c.Struct):
   SIZE = 64
   header: Annotated[hsa_amd_vendor_packet_header_t, 0]
   reserved0: Annotated[uint32_t, 4]
@@ -1108,14 +1109,14 @@ HSA_AMD_AIE_ERT_CMD_CHAIN = hsa_amd_aie_ert_cmd_opcode_t.define('HSA_AMD_AIE_ERT
 HSA_AMD_AIE_ERT_START_NPU = hsa_amd_aie_ert_cmd_opcode_t.define('HSA_AMD_AIE_ERT_START_NPU', 20)
 HSA_AMD_AIE_ERT_START_NPU_PREEMPT = hsa_amd_aie_ert_cmd_opcode_t.define('HSA_AMD_AIE_ERT_START_NPU_PREEMPT', 21)
 
-@record
-class struct_hsa_amd_aie_ert_start_kernel_data_s:
+@c.record
+class struct_hsa_amd_aie_ert_start_kernel_data_s(c.Struct):
   SIZE = 8
-  pdi_addr: Annotated[POINTER(None), 0]
-  data: Annotated[Array[uint32_t, Literal[0]], 8]
+  pdi_addr: Annotated[c.POINTER(None), 0]
+  data: Annotated[c.Array[uint32_t, Literal[0]], 8]
 hsa_amd_aie_ert_start_kernel_data_t: TypeAlias = struct_hsa_amd_aie_ert_start_kernel_data_s
-@record
-class struct_hsa_amd_aie_ert_packet_s:
+@c.record
+class struct_hsa_amd_aie_ert_packet_s(c.Struct):
   SIZE = 64
   header: Annotated[hsa_amd_vendor_packet_header_t, 0]
   state: Annotated[uint32_t, 4, 4, 0]
@@ -1145,8 +1146,8 @@ hsa_amd_iommu_version_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_IOMMU_SUPPORT_NONE = hsa_amd_iommu_version_t.define('HSA_IOMMU_SUPPORT_NONE', 0)
 HSA_IOMMU_SUPPORT_V2 = hsa_amd_iommu_version_t.define('HSA_IOMMU_SUPPORT_V2', 1)
 
-@record
-class struct_hsa_amd_clock_counters_s:
+@c.record
+class struct_hsa_amd_clock_counters_s(c.Struct):
   SIZE = 32
   gpu_clock_counter: Annotated[uint64_t, 0]
   cpu_clock_counter: Annotated[uint64_t, 8]
@@ -1216,11 +1217,11 @@ HSA_AMD_SDMA_ENGINE_14 = enum_hsa_amd_sdma_engine_id.define('HSA_AMD_SDMA_ENGINE
 HSA_AMD_SDMA_ENGINE_15 = enum_hsa_amd_sdma_engine_id.define('HSA_AMD_SDMA_ENGINE_15', 32768)
 
 hsa_amd_sdma_engine_id_t: TypeAlias = enum_hsa_amd_sdma_engine_id
-@record
-class struct_hsa_amd_hdp_flush_s:
+@c.record
+class struct_hsa_amd_hdp_flush_s(c.Struct):
   SIZE = 16
-  HDP_MEM_FLUSH_CNTL: Annotated[POINTER(uint32_t), 0]
-  HDP_REG_FLUSH_CNTL: Annotated[POINTER(uint32_t), 8]
+  HDP_MEM_FLUSH_CNTL: Annotated[c.POINTER(uint32_t), 0]
+  HDP_REG_FLUSH_CNTL: Annotated[c.POINTER(uint32_t), 8]
 hsa_amd_hdp_flush_t: TypeAlias = struct_hsa_amd_hdp_flush_s
 enum_hsa_amd_region_info_s = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_REGION_INFO_HOST_ACCESSIBLE = enum_hsa_amd_region_info_s.define('HSA_AMD_REGION_INFO_HOST_ACCESSIBLE', 40960)
@@ -1240,57 +1241,57 @@ HSA_AMD_DMABUF_MAPPING_TYPE_PCIE = enum_hsa_amd_dma_buf_mapping_type_s.define('H
 
 hsa_amd_dma_buf_mapping_type_t: TypeAlias = enum_hsa_amd_dma_buf_mapping_type_s
 @dll.bind
-def hsa_amd_coherency_get_type(agent:hsa_agent_t, type:POINTER(hsa_amd_coherency_type_t)) -> hsa_status_t: ...
+def hsa_amd_coherency_get_type(agent:hsa_agent_t, type:c.POINTER(hsa_amd_coherency_type_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_amd_coherency_set_type(agent:hsa_agent_t, type:hsa_amd_coherency_type_t) -> hsa_status_t: ...
-@record
-class struct_hsa_amd_profiling_dispatch_time_s:
+@c.record
+class struct_hsa_amd_profiling_dispatch_time_s(c.Struct):
   SIZE = 16
   start: Annotated[uint64_t, 0]
   end: Annotated[uint64_t, 8]
 hsa_amd_profiling_dispatch_time_t: TypeAlias = struct_hsa_amd_profiling_dispatch_time_s
-@record
-class struct_hsa_amd_profiling_async_copy_time_s:
+@c.record
+class struct_hsa_amd_profiling_async_copy_time_s(c.Struct):
   SIZE = 16
   start: Annotated[uint64_t, 0]
   end: Annotated[uint64_t, 8]
 hsa_amd_profiling_async_copy_time_t: TypeAlias = struct_hsa_amd_profiling_async_copy_time_s
 @dll.bind
-def hsa_amd_profiling_set_profiler_enabled(queue:POINTER(hsa_queue_t), enable:Annotated[int, ctypes.c_int32]) -> hsa_status_t: ...
+def hsa_amd_profiling_set_profiler_enabled(queue:c.POINTER(hsa_queue_t), enable:Annotated[int, ctypes.c_int32]) -> hsa_status_t: ...
 @dll.bind
 def hsa_amd_profiling_async_copy_enable(enable:Annotated[bool, ctypes.c_bool]) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_profiling_get_dispatch_time(agent:hsa_agent_t, signal:hsa_signal_t, time:POINTER(hsa_amd_profiling_dispatch_time_t)) -> hsa_status_t: ...
+def hsa_amd_profiling_get_dispatch_time(agent:hsa_agent_t, signal:hsa_signal_t, time:c.POINTER(hsa_amd_profiling_dispatch_time_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_profiling_get_async_copy_time(signal:hsa_signal_t, time:POINTER(hsa_amd_profiling_async_copy_time_t)) -> hsa_status_t: ...
+def hsa_amd_profiling_get_async_copy_time(signal:hsa_signal_t, time:c.POINTER(hsa_amd_profiling_async_copy_time_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_profiling_convert_tick_to_system_domain(agent:hsa_agent_t, agent_tick:uint64_t, system_tick:POINTER(uint64_t)) -> hsa_status_t: ...
+def hsa_amd_profiling_convert_tick_to_system_domain(agent:hsa_agent_t, agent_tick:uint64_t, system_tick:c.POINTER(uint64_t)) -> hsa_status_t: ...
 hsa_amd_signal_attribute_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_SIGNAL_AMD_GPU_ONLY = hsa_amd_signal_attribute_t.define('HSA_AMD_SIGNAL_AMD_GPU_ONLY', 1)
 HSA_AMD_SIGNAL_IPC = hsa_amd_signal_attribute_t.define('HSA_AMD_SIGNAL_IPC', 2)
 
 @dll.bind
-def hsa_amd_signal_create(initial_value:hsa_signal_value_t, num_consumers:uint32_t, consumers:POINTER(hsa_agent_t), attributes:uint64_t, signal:POINTER(hsa_signal_t)) -> hsa_status_t: ...
+def hsa_amd_signal_create(initial_value:hsa_signal_value_t, num_consumers:uint32_t, consumers:c.POINTER(hsa_agent_t), attributes:uint64_t, signal:c.POINTER(hsa_signal_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_signal_value_pointer(signal:hsa_signal_t, value_ptr:POINTER(POINTER(hsa_signal_value_t))) -> hsa_status_t: ...
-hsa_amd_signal_handler: TypeAlias = CFUNCTYPE(Annotated[bool, ctypes.c_bool], Annotated[int, ctypes.c_int64], POINTER(None))
+def hsa_amd_signal_value_pointer(signal:hsa_signal_t, value_ptr:c.POINTER(c.POINTER(hsa_signal_value_t))) -> hsa_status_t: ...
+hsa_amd_signal_handler: TypeAlias = c.CFUNCTYPE(Annotated[bool, ctypes.c_bool], Annotated[int, ctypes.c_int64], c.POINTER(None))
 @dll.bind
-def hsa_amd_signal_async_handler(signal:hsa_signal_t, cond:hsa_signal_condition_t, value:hsa_signal_value_t, handler:hsa_amd_signal_handler, arg:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_signal_async_handler(signal:hsa_signal_t, cond:hsa_signal_condition_t, value:hsa_signal_value_t, handler:hsa_amd_signal_handler, arg:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_signal_wait_all(signal_count:uint32_t, signals:POINTER(hsa_signal_t), conds:POINTER(hsa_signal_condition_t), values:POINTER(hsa_signal_value_t), timeout_hint:uint64_t, wait_hint:hsa_wait_state_t, satisfying_values:POINTER(hsa_signal_value_t)) -> uint32_t: ...
+def hsa_amd_signal_wait_all(signal_count:uint32_t, signals:c.POINTER(hsa_signal_t), conds:c.POINTER(hsa_signal_condition_t), values:c.POINTER(hsa_signal_value_t), timeout_hint:uint64_t, wait_hint:hsa_wait_state_t, satisfying_values:c.POINTER(hsa_signal_value_t)) -> uint32_t: ...
 @dll.bind
-def hsa_amd_signal_wait_any(signal_count:uint32_t, signals:POINTER(hsa_signal_t), conds:POINTER(hsa_signal_condition_t), values:POINTER(hsa_signal_value_t), timeout_hint:uint64_t, wait_hint:hsa_wait_state_t, satisfying_value:POINTER(hsa_signal_value_t)) -> uint32_t: ...
+def hsa_amd_signal_wait_any(signal_count:uint32_t, signals:c.POINTER(hsa_signal_t), conds:c.POINTER(hsa_signal_condition_t), values:c.POINTER(hsa_signal_value_t), timeout_hint:uint64_t, wait_hint:hsa_wait_state_t, satisfying_value:c.POINTER(hsa_signal_value_t)) -> uint32_t: ...
 @dll.bind
-def hsa_amd_async_function(callback:CFUNCTYPE(None, POINTER(None)), arg:POINTER(None)) -> hsa_status_t: ...
-@record
-class struct_hsa_amd_image_descriptor_s:
+def hsa_amd_async_function(callback:c.CFUNCTYPE(None, c.POINTER(None)), arg:c.POINTER(None)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_amd_image_descriptor_s(c.Struct):
   SIZE = 12
   version: Annotated[uint32_t, 0]
   deviceID: Annotated[uint32_t, 4]
-  data: Annotated[Array[uint32_t, Literal[1]], 8]
+  data: Annotated[c.Array[uint32_t, Literal[1]], 8]
 hsa_amd_image_descriptor_t: TypeAlias = struct_hsa_amd_image_descriptor_s
-@record
-class struct_hsa_ext_image_descriptor_s:
+@c.record
+class struct_hsa_ext_image_descriptor_s(c.Struct):
   SIZE = 48
   geometry: Annotated[hsa_ext_image_geometry_t, 0]
   width: Annotated[size_t, 8]
@@ -1309,35 +1310,35 @@ HSA_EXT_IMAGE_GEOMETRY_1DB = hsa_ext_image_geometry_t.define('HSA_EXT_IMAGE_GEOM
 HSA_EXT_IMAGE_GEOMETRY_2DDEPTH = hsa_ext_image_geometry_t.define('HSA_EXT_IMAGE_GEOMETRY_2DDEPTH', 6)
 HSA_EXT_IMAGE_GEOMETRY_2DADEPTH = hsa_ext_image_geometry_t.define('HSA_EXT_IMAGE_GEOMETRY_2DADEPTH', 7)
 
-@record
-class struct_hsa_ext_image_format_s:
+@c.record
+class struct_hsa_ext_image_format_s(c.Struct):
   SIZE = 8
   channel_type: Annotated[hsa_ext_image_channel_type32_t, 0]
   channel_order: Annotated[hsa_ext_image_channel_order32_t, 4]
 hsa_ext_image_format_t: TypeAlias = struct_hsa_ext_image_format_s
 hsa_ext_image_channel_type32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 hsa_ext_image_channel_order32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-@record
-class struct_hsa_ext_image_s:
+@c.record
+class struct_hsa_ext_image_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_ext_image_t: TypeAlias = struct_hsa_ext_image_s
 @dll.bind
-def hsa_amd_image_create(agent:hsa_agent_t, image_descriptor:POINTER(hsa_ext_image_descriptor_t), image_layout:POINTER(hsa_amd_image_descriptor_t), image_data:POINTER(None), access_permission:hsa_access_permission_t, image:POINTER(hsa_ext_image_t)) -> hsa_status_t: ...
+def hsa_amd_image_create(agent:hsa_agent_t, image_descriptor:c.POINTER(hsa_ext_image_descriptor_t), image_layout:c.POINTER(hsa_amd_image_descriptor_t), image_data:c.POINTER(None), access_permission:hsa_access_permission_t, image:c.POINTER(hsa_ext_image_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_image_get_info_max_dim(agent:hsa_agent_t, attribute:hsa_agent_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_image_get_info_max_dim(agent:hsa_agent_t, attribute:hsa_agent_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_queue_cu_set_mask(queue:POINTER(hsa_queue_t), num_cu_mask_count:uint32_t, cu_mask:POINTER(uint32_t)) -> hsa_status_t: ...
+def hsa_amd_queue_cu_set_mask(queue:c.POINTER(hsa_queue_t), num_cu_mask_count:uint32_t, cu_mask:c.POINTER(uint32_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_queue_cu_get_mask(queue:POINTER(hsa_queue_t), num_cu_mask_count:uint32_t, cu_mask:POINTER(uint32_t)) -> hsa_status_t: ...
+def hsa_amd_queue_cu_get_mask(queue:c.POINTER(hsa_queue_t), num_cu_mask_count:uint32_t, cu_mask:c.POINTER(uint32_t)) -> hsa_status_t: ...
 hsa_amd_segment_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_SEGMENT_GLOBAL = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_GLOBAL', 0)
 HSA_AMD_SEGMENT_READONLY = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_READONLY', 1)
 HSA_AMD_SEGMENT_PRIVATE = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_PRIVATE', 2)
 HSA_AMD_SEGMENT_GROUP = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_GROUP', 3)
 
-@record
-class struct_hsa_amd_memory_pool_s:
+@c.record
+class struct_hsa_amd_memory_pool_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_amd_memory_pool_t: TypeAlias = struct_hsa_amd_memory_pool_s
@@ -1374,25 +1375,25 @@ HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = enum_hsa_amd_memory_pool_flag_s.define('HSA_
 
 hsa_amd_memory_pool_flag_t: TypeAlias = enum_hsa_amd_memory_pool_flag_s
 @dll.bind
-def hsa_amd_memory_pool_get_info(memory_pool:hsa_amd_memory_pool_t, attribute:hsa_amd_memory_pool_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_memory_pool_get_info(memory_pool:hsa_amd_memory_pool_t, attribute:hsa_amd_memory_pool_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_agent_iterate_memory_pools(agent:hsa_agent_t, callback:CFUNCTYPE(hsa_status_t, hsa_amd_memory_pool_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_agent_iterate_memory_pools(agent:hsa_agent_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_amd_memory_pool_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_pool_allocate(memory_pool:hsa_amd_memory_pool_t, size:size_t, flags:uint32_t, ptr:POINTER(POINTER(None))) -> hsa_status_t: ...
+def hsa_amd_memory_pool_allocate(memory_pool:hsa_amd_memory_pool_t, size:size_t, flags:uint32_t, ptr:c.POINTER(c.POINTER(None))) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_pool_free(ptr:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_memory_pool_free(ptr:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_async_copy(dst:POINTER(None), dst_agent:hsa_agent_t, src:POINTER(None), src_agent:hsa_agent_t, size:size_t, num_dep_signals:uint32_t, dep_signals:POINTER(hsa_signal_t), completion_signal:hsa_signal_t) -> hsa_status_t: ...
+def hsa_amd_memory_async_copy(dst:c.POINTER(None), dst_agent:hsa_agent_t, src:c.POINTER(None), src_agent:hsa_agent_t, size:size_t, num_dep_signals:uint32_t, dep_signals:c.POINTER(hsa_signal_t), completion_signal:hsa_signal_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_async_copy_on_engine(dst:POINTER(None), dst_agent:hsa_agent_t, src:POINTER(None), src_agent:hsa_agent_t, size:size_t, num_dep_signals:uint32_t, dep_signals:POINTER(hsa_signal_t), completion_signal:hsa_signal_t, engine_id:hsa_amd_sdma_engine_id_t, force_copy_on_sdma:Annotated[bool, ctypes.c_bool]) -> hsa_status_t: ...
+def hsa_amd_memory_async_copy_on_engine(dst:c.POINTER(None), dst_agent:hsa_agent_t, src:c.POINTER(None), src_agent:hsa_agent_t, size:size_t, num_dep_signals:uint32_t, dep_signals:c.POINTER(hsa_signal_t), completion_signal:hsa_signal_t, engine_id:hsa_amd_sdma_engine_id_t, force_copy_on_sdma:Annotated[bool, ctypes.c_bool]) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_copy_engine_status(dst_agent:hsa_agent_t, src_agent:hsa_agent_t, engine_ids_mask:POINTER(uint32_t)) -> hsa_status_t: ...
+def hsa_amd_memory_copy_engine_status(dst_agent:hsa_agent_t, src_agent:hsa_agent_t, engine_ids_mask:c.POINTER(uint32_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_get_preferred_copy_engine(dst_agent:hsa_agent_t, src_agent:hsa_agent_t, recommended_ids_mask:POINTER(uint32_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_pitched_ptr_s:
+def hsa_amd_memory_get_preferred_copy_engine(dst_agent:hsa_agent_t, src_agent:hsa_agent_t, recommended_ids_mask:c.POINTER(uint32_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_pitched_ptr_s(c.Struct):
   SIZE = 24
-  base: Annotated[POINTER(None), 0]
+  base: Annotated[c.POINTER(None), 0]
   pitch: Annotated[size_t, 8]
   slice: Annotated[size_t, 16]
 hsa_pitched_ptr_t: TypeAlias = struct_hsa_pitched_ptr_s
@@ -1403,7 +1404,7 @@ hsaDeviceToHost = hsa_amd_copy_direction_t.define('hsaDeviceToHost', 2)
 hsaDeviceToDevice = hsa_amd_copy_direction_t.define('hsaDeviceToDevice', 3)
 
 @dll.bind
-def hsa_amd_memory_async_copy_rect(dst:POINTER(hsa_pitched_ptr_t), dst_offset:POINTER(hsa_dim3_t), src:POINTER(hsa_pitched_ptr_t), src_offset:POINTER(hsa_dim3_t), range:POINTER(hsa_dim3_t), copy_agent:hsa_agent_t, dir:hsa_amd_copy_direction_t, num_dep_signals:uint32_t, dep_signals:POINTER(hsa_signal_t), completion_signal:hsa_signal_t) -> hsa_status_t: ...
+def hsa_amd_memory_async_copy_rect(dst:c.POINTER(hsa_pitched_ptr_t), dst_offset:c.POINTER(hsa_dim3_t), src:c.POINTER(hsa_pitched_ptr_t), src_offset:c.POINTER(hsa_dim3_t), range:c.POINTER(hsa_dim3_t), copy_agent:hsa_agent_t, dir:hsa_amd_copy_direction_t, num_dep_signals:uint32_t, dep_signals:c.POINTER(hsa_signal_t), completion_signal:hsa_signal_t) -> hsa_status_t: ...
 hsa_amd_memory_pool_access_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED = hsa_amd_memory_pool_access_t.define('HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED', 0)
 HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT = hsa_amd_memory_pool_access_t.define('HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT', 1)
@@ -1416,8 +1417,8 @@ HSA_AMD_LINK_INFO_TYPE_PCIE = hsa_amd_link_info_type_t.define('HSA_AMD_LINK_INFO
 HSA_AMD_LINK_INFO_TYPE_INFINBAND = hsa_amd_link_info_type_t.define('HSA_AMD_LINK_INFO_TYPE_INFINBAND', 3)
 HSA_AMD_LINK_INFO_TYPE_XGMI = hsa_amd_link_info_type_t.define('HSA_AMD_LINK_INFO_TYPE_XGMI', 4)
 
-@record
-class struct_hsa_amd_memory_pool_link_info_s:
+@c.record
+class struct_hsa_amd_memory_pool_link_info_s(c.Struct):
   SIZE = 28
   min_latency: Annotated[uint32_t, 0]
   max_latency: Annotated[uint32_t, 4]
@@ -1435,25 +1436,25 @@ HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS = hsa_amd_agent_memory_pool_info_t.
 HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO = hsa_amd_agent_memory_pool_info_t.define('HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO', 2)
 
 @dll.bind
-def hsa_amd_agent_memory_pool_get_info(agent:hsa_agent_t, memory_pool:hsa_amd_memory_pool_t, attribute:hsa_amd_agent_memory_pool_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_agent_memory_pool_get_info(agent:hsa_agent_t, memory_pool:hsa_amd_memory_pool_t, attribute:hsa_amd_agent_memory_pool_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_agents_allow_access(num_agents:uint32_t, agents:POINTER(hsa_agent_t), flags:POINTER(uint32_t), ptr:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_agents_allow_access(num_agents:uint32_t, agents:c.POINTER(hsa_agent_t), flags:c.POINTER(uint32_t), ptr:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_pool_can_migrate(src_memory_pool:hsa_amd_memory_pool_t, dst_memory_pool:hsa_amd_memory_pool_t, result:POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
+def hsa_amd_memory_pool_can_migrate(src_memory_pool:hsa_amd_memory_pool_t, dst_memory_pool:hsa_amd_memory_pool_t, result:c.POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_migrate(ptr:POINTER(None), memory_pool:hsa_amd_memory_pool_t, flags:uint32_t) -> hsa_status_t: ...
+def hsa_amd_memory_migrate(ptr:c.POINTER(None), memory_pool:hsa_amd_memory_pool_t, flags:uint32_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_lock(host_ptr:POINTER(None), size:size_t, agents:POINTER(hsa_agent_t), num_agent:Annotated[int, ctypes.c_int32], agent_ptr:POINTER(POINTER(None))) -> hsa_status_t: ...
+def hsa_amd_memory_lock(host_ptr:c.POINTER(None), size:size_t, agents:c.POINTER(hsa_agent_t), num_agent:Annotated[int, ctypes.c_int32], agent_ptr:c.POINTER(c.POINTER(None))) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_lock_to_pool(host_ptr:POINTER(None), size:size_t, agents:POINTER(hsa_agent_t), num_agent:Annotated[int, ctypes.c_int32], pool:hsa_amd_memory_pool_t, flags:uint32_t, agent_ptr:POINTER(POINTER(None))) -> hsa_status_t: ...
+def hsa_amd_memory_lock_to_pool(host_ptr:c.POINTER(None), size:size_t, agents:c.POINTER(hsa_agent_t), num_agent:Annotated[int, ctypes.c_int32], pool:hsa_amd_memory_pool_t, flags:uint32_t, agent_ptr:c.POINTER(c.POINTER(None))) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_unlock(host_ptr:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_memory_unlock(host_ptr:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_memory_fill(ptr:POINTER(None), value:uint32_t, count:size_t) -> hsa_status_t: ...
+def hsa_amd_memory_fill(ptr:c.POINTER(None), value:uint32_t, count:size_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_interop_map_buffer(num_agents:uint32_t, agents:POINTER(hsa_agent_t), interop_handle:Annotated[int, ctypes.c_int32], flags:uint32_t, size:POINTER(size_t), ptr:POINTER(POINTER(None)), metadata_size:POINTER(size_t), metadata:POINTER(POINTER(None))) -> hsa_status_t: ...
+def hsa_amd_interop_map_buffer(num_agents:uint32_t, agents:c.POINTER(hsa_agent_t), interop_handle:Annotated[int, ctypes.c_int32], flags:uint32_t, size:c.POINTER(size_t), ptr:c.POINTER(c.POINTER(None)), metadata_size:c.POINTER(size_t), metadata:c.POINTER(c.POINTER(None))) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_interop_unmap_buffer(ptr:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_interop_unmap_buffer(ptr:c.POINTER(None)) -> hsa_status_t: ...
 hsa_amd_pointer_type_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_EXT_POINTER_TYPE_UNKNOWN = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_UNKNOWN', 0)
 HSA_EXT_POINTER_TYPE_HSA = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_HSA', 1)
@@ -1463,39 +1464,39 @@ HSA_EXT_POINTER_TYPE_IPC = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_I
 HSA_EXT_POINTER_TYPE_RESERVED_ADDR = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_RESERVED_ADDR', 5)
 HSA_EXT_POINTER_TYPE_HSA_VMEM = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_HSA_VMEM', 6)
 
-@record
-class struct_hsa_amd_pointer_info_s:
+@c.record
+class struct_hsa_amd_pointer_info_s(c.Struct):
   SIZE = 56
   size: Annotated[uint32_t, 0]
   type: Annotated[hsa_amd_pointer_type_t, 4]
-  agentBaseAddress: Annotated[POINTER(None), 8]
-  hostBaseAddress: Annotated[POINTER(None), 16]
+  agentBaseAddress: Annotated[c.POINTER(None), 8]
+  hostBaseAddress: Annotated[c.POINTER(None), 16]
   sizeInBytes: Annotated[size_t, 24]
-  userData: Annotated[POINTER(None), 32]
+  userData: Annotated[c.POINTER(None), 32]
   agentOwner: Annotated[hsa_agent_t, 40]
   global_flags: Annotated[uint32_t, 48]
   registered: Annotated[Annotated[bool, ctypes.c_bool], 52]
 hsa_amd_pointer_info_t: TypeAlias = struct_hsa_amd_pointer_info_s
 @dll.bind
-def hsa_amd_pointer_info(ptr:POINTER(None), info:POINTER(hsa_amd_pointer_info_t), alloc:CFUNCTYPE(POINTER(None), size_t), num_agents_accessible:POINTER(uint32_t), accessible:POINTER(POINTER(hsa_agent_t))) -> hsa_status_t: ...
+def hsa_amd_pointer_info(ptr:c.POINTER(None), info:c.POINTER(hsa_amd_pointer_info_t), alloc:c.CFUNCTYPE(c.POINTER(None), size_t), num_agents_accessible:c.POINTER(uint32_t), accessible:c.POINTER(c.POINTER(hsa_agent_t))) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_pointer_info_set_userdata(ptr:POINTER(None), userdata:POINTER(None)) -> hsa_status_t: ...
-@record
-class struct_hsa_amd_ipc_memory_s:
+def hsa_amd_pointer_info_set_userdata(ptr:c.POINTER(None), userdata:c.POINTER(None)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_amd_ipc_memory_s(c.Struct):
   SIZE = 32
-  handle: Annotated[Array[uint32_t, Literal[8]], 0]
+  handle: Annotated[c.Array[uint32_t, Literal[8]], 0]
 hsa_amd_ipc_memory_t: TypeAlias = struct_hsa_amd_ipc_memory_s
 @dll.bind
-def hsa_amd_ipc_memory_create(ptr:POINTER(None), len:size_t, handle:POINTER(hsa_amd_ipc_memory_t)) -> hsa_status_t: ...
+def hsa_amd_ipc_memory_create(ptr:c.POINTER(None), len:size_t, handle:c.POINTER(hsa_amd_ipc_memory_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_ipc_memory_attach(handle:POINTER(hsa_amd_ipc_memory_t), len:size_t, num_agents:uint32_t, mapping_agents:POINTER(hsa_agent_t), mapped_ptr:POINTER(POINTER(None))) -> hsa_status_t: ...
+def hsa_amd_ipc_memory_attach(handle:c.POINTER(hsa_amd_ipc_memory_t), len:size_t, num_agents:uint32_t, mapping_agents:c.POINTER(hsa_agent_t), mapped_ptr:c.POINTER(c.POINTER(None))) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_ipc_memory_detach(mapped_ptr:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_ipc_memory_detach(mapped_ptr:c.POINTER(None)) -> hsa_status_t: ...
 hsa_amd_ipc_signal_t: TypeAlias = struct_hsa_amd_ipc_memory_s
 @dll.bind
-def hsa_amd_ipc_signal_create(signal:hsa_signal_t, handle:POINTER(hsa_amd_ipc_signal_t)) -> hsa_status_t: ...
+def hsa_amd_ipc_signal_create(signal:hsa_signal_t, handle:c.POINTER(hsa_amd_ipc_signal_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_ipc_signal_attach(handle:POINTER(hsa_amd_ipc_signal_t), signal:POINTER(hsa_signal_t)) -> hsa_status_t: ...
+def hsa_amd_ipc_signal_attach(handle:c.POINTER(hsa_amd_ipc_signal_t), signal:c.POINTER(hsa_signal_t)) -> hsa_status_t: ...
 enum_hsa_amd_event_type_s = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_GPU_MEMORY_FAULT_EVENT = enum_hsa_amd_event_type_s.define('HSA_AMD_GPU_MEMORY_FAULT_EVENT', 0)
 HSA_AMD_GPU_HW_EXCEPTION_EVENT = enum_hsa_amd_event_type_s.define('HSA_AMD_GPU_HW_EXCEPTION_EVENT', 1)
@@ -1512,8 +1513,8 @@ HSA_AMD_MEMORY_FAULT_IMPRECISE = hsa_amd_memory_fault_reason_t.define('HSA_AMD_M
 HSA_AMD_MEMORY_FAULT_SRAMECC = hsa_amd_memory_fault_reason_t.define('HSA_AMD_MEMORY_FAULT_SRAMECC', 64)
 HSA_AMD_MEMORY_FAULT_HANG = hsa_amd_memory_fault_reason_t.define('HSA_AMD_MEMORY_FAULT_HANG', 2147483648)
 
-@record
-class struct_hsa_amd_gpu_memory_fault_info_s:
+@c.record
+class struct_hsa_amd_gpu_memory_fault_info_s(c.Struct):
   SIZE = 24
   agent: Annotated[hsa_agent_t, 0]
   virtual_address: Annotated[uint64_t, 8]
@@ -1522,8 +1523,8 @@ hsa_amd_gpu_memory_fault_info_t: TypeAlias = struct_hsa_amd_gpu_memory_fault_inf
 hsa_amd_memory_error_reason_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_MEMORY_ERROR_MEMORY_IN_USE = hsa_amd_memory_error_reason_t.define('HSA_AMD_MEMORY_ERROR_MEMORY_IN_USE', 1)
 
-@record
-class struct_hsa_amd_gpu_memory_error_info_s:
+@c.record
+class struct_hsa_amd_gpu_memory_error_info_s(c.Struct):
   SIZE = 24
   agent: Annotated[hsa_agent_t, 0]
   virtual_address: Annotated[uint64_t, 8]
@@ -1536,24 +1537,24 @@ hsa_amd_hw_exception_reset_cause_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_HW_EXCEPTION_CAUSE_GPU_HANG = hsa_amd_hw_exception_reset_cause_t.define('HSA_AMD_HW_EXCEPTION_CAUSE_GPU_HANG', 1)
 HSA_AMD_HW_EXCEPTION_CAUSE_ECC = hsa_amd_hw_exception_reset_cause_t.define('HSA_AMD_HW_EXCEPTION_CAUSE_ECC', 2)
 
-@record
-class struct_hsa_amd_gpu_hw_exception_info_s:
+@c.record
+class struct_hsa_amd_gpu_hw_exception_info_s(c.Struct):
   SIZE = 16
   agent: Annotated[hsa_agent_t, 0]
   reset_type: Annotated[hsa_amd_hw_exception_reset_type_t, 8]
   reset_cause: Annotated[hsa_amd_hw_exception_reset_cause_t, 12]
 hsa_amd_gpu_hw_exception_info_t: TypeAlias = struct_hsa_amd_gpu_hw_exception_info_s
-@record
-class struct_hsa_amd_event_s:
+@c.record
+class struct_hsa_amd_event_s(c.Struct):
   SIZE = 32
   event_type: Annotated[hsa_amd_event_type_t, 0]
   memory_fault: Annotated[hsa_amd_gpu_memory_fault_info_t, 8]
   hw_exception: Annotated[hsa_amd_gpu_hw_exception_info_t, 8]
   memory_error: Annotated[hsa_amd_gpu_memory_error_info_t, 8]
 hsa_amd_event_t: TypeAlias = struct_hsa_amd_event_s
-hsa_amd_system_event_callback_t: TypeAlias = CFUNCTYPE(hsa_status_t, POINTER(struct_hsa_amd_event_s), POINTER(None))
+hsa_amd_system_event_callback_t: TypeAlias = c.CFUNCTYPE(hsa_status_t, c.POINTER(struct_hsa_amd_event_s), c.POINTER(None))
 @dll.bind
-def hsa_amd_register_system_event_handler(callback:hsa_amd_system_event_callback_t, data:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_register_system_event_handler(callback:hsa_amd_system_event_callback_t, data:c.POINTER(None)) -> hsa_status_t: ...
 enum_hsa_amd_queue_priority_s = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_QUEUE_PRIORITY_LOW = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEUE_PRIORITY_LOW', 0)
 HSA_AMD_QUEUE_PRIORITY_NORMAL = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEUE_PRIORITY_NORMAL', 1)
@@ -1561,17 +1562,17 @@ HSA_AMD_QUEUE_PRIORITY_HIGH = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEU
 
 hsa_amd_queue_priority_t: TypeAlias = enum_hsa_amd_queue_priority_s
 @dll.bind
-def hsa_amd_queue_set_priority(queue:POINTER(hsa_queue_t), priority:hsa_amd_queue_priority_t) -> hsa_status_t: ...
+def hsa_amd_queue_set_priority(queue:c.POINTER(hsa_queue_t), priority:hsa_amd_queue_priority_t) -> hsa_status_t: ...
 hsa_amd_queue_create_flag_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_QUEUE_CREATE_SYSTEM_MEM = hsa_amd_queue_create_flag_t.define('HSA_AMD_QUEUE_CREATE_SYSTEM_MEM', 0)
 HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF = hsa_amd_queue_create_flag_t.define('HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF', 1)
 HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR = hsa_amd_queue_create_flag_t.define('HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR', 2)
 
-hsa_amd_deallocation_callback_t: TypeAlias = CFUNCTYPE(None, POINTER(None), POINTER(None))
+hsa_amd_deallocation_callback_t: TypeAlias = c.CFUNCTYPE(None, c.POINTER(None), c.POINTER(None))
 @dll.bind
-def hsa_amd_register_deallocation_callback(ptr:POINTER(None), callback:hsa_amd_deallocation_callback_t, user_data:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_register_deallocation_callback(ptr:c.POINTER(None), callback:hsa_amd_deallocation_callback_t, user_data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_deregister_deallocation_callback(ptr:POINTER(None), callback:hsa_amd_deallocation_callback_t) -> hsa_status_t: ...
+def hsa_amd_deregister_deallocation_callback(ptr:c.POINTER(None), callback:hsa_amd_deallocation_callback_t) -> hsa_status_t: ...
 enum_hsa_amd_svm_model_s = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED = enum_hsa_amd_svm_model_s.define('HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED', 0)
 HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED = enum_hsa_amd_svm_model_s.define('HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED', 1)
@@ -1593,28 +1594,28 @@ HSA_AMD_SVM_ATTRIB_AGENT_NO_ACCESS = enum_hsa_amd_svm_attribute_s.define('HSA_AM
 HSA_AMD_SVM_ATTRIB_ACCESS_QUERY = enum_hsa_amd_svm_attribute_s.define('HSA_AMD_SVM_ATTRIB_ACCESS_QUERY', 515)
 
 hsa_amd_svm_attribute_t: TypeAlias = enum_hsa_amd_svm_attribute_s
-@record
-class struct_hsa_amd_svm_attribute_pair_s:
+@c.record
+class struct_hsa_amd_svm_attribute_pair_s(c.Struct):
   SIZE = 16
   attribute: Annotated[uint64_t, 0]
   value: Annotated[uint64_t, 8]
 hsa_amd_svm_attribute_pair_t: TypeAlias = struct_hsa_amd_svm_attribute_pair_s
 @dll.bind
-def hsa_amd_svm_attributes_set(ptr:POINTER(None), size:size_t, attribute_list:POINTER(hsa_amd_svm_attribute_pair_t), attribute_count:size_t) -> hsa_status_t: ...
+def hsa_amd_svm_attributes_set(ptr:c.POINTER(None), size:size_t, attribute_list:c.POINTER(hsa_amd_svm_attribute_pair_t), attribute_count:size_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_svm_attributes_get(ptr:POINTER(None), size:size_t, attribute_list:POINTER(hsa_amd_svm_attribute_pair_t), attribute_count:size_t) -> hsa_status_t: ...
+def hsa_amd_svm_attributes_get(ptr:c.POINTER(None), size:size_t, attribute_list:c.POINTER(hsa_amd_svm_attribute_pair_t), attribute_count:size_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_svm_prefetch_async(ptr:POINTER(None), size:size_t, agent:hsa_agent_t, num_dep_signals:uint32_t, dep_signals:POINTER(hsa_signal_t), completion_signal:hsa_signal_t) -> hsa_status_t: ...
+def hsa_amd_svm_prefetch_async(ptr:c.POINTER(None), size:size_t, agent:hsa_agent_t, num_dep_signals:uint32_t, dep_signals:c.POINTER(hsa_signal_t), completion_signal:hsa_signal_t) -> hsa_status_t: ...
 @dll.bind
 def hsa_amd_spm_acquire(preferred_agent:hsa_agent_t) -> hsa_status_t: ...
 @dll.bind
 def hsa_amd_spm_release(preferred_agent:hsa_agent_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_spm_set_dest_buffer(preferred_agent:hsa_agent_t, size_in_bytes:size_t, timeout:POINTER(uint32_t), size_copied:POINTER(uint32_t), dest:POINTER(None), is_data_loss:POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
+def hsa_amd_spm_set_dest_buffer(preferred_agent:hsa_agent_t, size_in_bytes:size_t, timeout:c.POINTER(uint32_t), size_copied:c.POINTER(uint32_t), dest:c.POINTER(None), is_data_loss:c.POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_portable_export_dmabuf(ptr:POINTER(None), size:size_t, dmabuf:POINTER(Annotated[int, ctypes.c_int32]), offset:POINTER(uint64_t)) -> hsa_status_t: ...
+def hsa_amd_portable_export_dmabuf(ptr:c.POINTER(None), size:size_t, dmabuf:c.POINTER(Annotated[int, ctypes.c_int32]), offset:c.POINTER(uint64_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_portable_export_dmabuf_v2(ptr:POINTER(None), size:size_t, dmabuf:POINTER(Annotated[int, ctypes.c_int32]), offset:POINTER(uint64_t), flags:uint64_t) -> hsa_status_t: ...
+def hsa_amd_portable_export_dmabuf_v2(ptr:c.POINTER(None), size:size_t, dmabuf:c.POINTER(Annotated[int, ctypes.c_int32]), offset:c.POINTER(uint64_t), flags:uint64_t) -> hsa_status_t: ...
 @dll.bind
 def hsa_amd_portable_close_dmabuf(dmabuf:Annotated[int, ctypes.c_int32]) -> hsa_status_t: ...
 enum_hsa_amd_vmem_address_reserve_flag_s = CEnum(Annotated[int, ctypes.c_uint32])
@@ -1622,13 +1623,13 @@ HSA_AMD_VMEM_ADDRESS_NO_REGISTER = enum_hsa_amd_vmem_address_reserve_flag_s.defi
 
 hsa_amd_vmem_address_reserve_flag_t: TypeAlias = enum_hsa_amd_vmem_address_reserve_flag_s
 @dll.bind
-def hsa_amd_vmem_address_reserve(va:POINTER(POINTER(None)), size:size_t, address:uint64_t, flags:uint64_t) -> hsa_status_t: ...
+def hsa_amd_vmem_address_reserve(va:c.POINTER(c.POINTER(None)), size:size_t, address:uint64_t, flags:uint64_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_address_reserve_align(va:POINTER(POINTER(None)), size:size_t, address:uint64_t, alignment:uint64_t, flags:uint64_t) -> hsa_status_t: ...
+def hsa_amd_vmem_address_reserve_align(va:c.POINTER(c.POINTER(None)), size:size_t, address:uint64_t, alignment:uint64_t, flags:uint64_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_address_free(va:POINTER(None), size:size_t) -> hsa_status_t: ...
-@record
-class struct_hsa_amd_vmem_alloc_handle_s:
+def hsa_amd_vmem_address_free(va:c.POINTER(None), size:size_t) -> hsa_status_t: ...
+@c.record
+class struct_hsa_amd_vmem_alloc_handle_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_amd_vmem_alloc_handle_t: TypeAlias = struct_hsa_amd_vmem_alloc_handle_s
@@ -1637,31 +1638,31 @@ MEMORY_TYPE_NONE = hsa_amd_memory_type_t.define('MEMORY_TYPE_NONE', 0)
 MEMORY_TYPE_PINNED = hsa_amd_memory_type_t.define('MEMORY_TYPE_PINNED', 1)
 
 @dll.bind
-def hsa_amd_vmem_handle_create(pool:hsa_amd_memory_pool_t, size:size_t, type:hsa_amd_memory_type_t, flags:uint64_t, memory_handle:POINTER(hsa_amd_vmem_alloc_handle_t)) -> hsa_status_t: ...
+def hsa_amd_vmem_handle_create(pool:hsa_amd_memory_pool_t, size:size_t, type:hsa_amd_memory_type_t, flags:uint64_t, memory_handle:c.POINTER(hsa_amd_vmem_alloc_handle_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_amd_vmem_handle_release(memory_handle:hsa_amd_vmem_alloc_handle_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_map(va:POINTER(None), size:size_t, in_offset:size_t, memory_handle:hsa_amd_vmem_alloc_handle_t, flags:uint64_t) -> hsa_status_t: ...
+def hsa_amd_vmem_map(va:c.POINTER(None), size:size_t, in_offset:size_t, memory_handle:hsa_amd_vmem_alloc_handle_t, flags:uint64_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_unmap(va:POINTER(None), size:size_t) -> hsa_status_t: ...
-@record
-class struct_hsa_amd_memory_access_desc_s:
+def hsa_amd_vmem_unmap(va:c.POINTER(None), size:size_t) -> hsa_status_t: ...
+@c.record
+class struct_hsa_amd_memory_access_desc_s(c.Struct):
   SIZE = 16
   permissions: Annotated[hsa_access_permission_t, 0]
   agent_handle: Annotated[hsa_agent_t, 8]
 hsa_amd_memory_access_desc_t: TypeAlias = struct_hsa_amd_memory_access_desc_s
 @dll.bind
-def hsa_amd_vmem_set_access(va:POINTER(None), size:size_t, desc:POINTER(hsa_amd_memory_access_desc_t), desc_cnt:size_t) -> hsa_status_t: ...
+def hsa_amd_vmem_set_access(va:c.POINTER(None), size:size_t, desc:c.POINTER(hsa_amd_memory_access_desc_t), desc_cnt:size_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_get_access(va:POINTER(None), perms:POINTER(hsa_access_permission_t), agent_handle:hsa_agent_t) -> hsa_status_t: ...
+def hsa_amd_vmem_get_access(va:c.POINTER(None), perms:c.POINTER(hsa_access_permission_t), agent_handle:hsa_agent_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_export_shareable_handle(dmabuf_fd:POINTER(Annotated[int, ctypes.c_int32]), handle:hsa_amd_vmem_alloc_handle_t, flags:uint64_t) -> hsa_status_t: ...
+def hsa_amd_vmem_export_shareable_handle(dmabuf_fd:c.POINTER(Annotated[int, ctypes.c_int32]), handle:hsa_amd_vmem_alloc_handle_t, flags:uint64_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_import_shareable_handle(dmabuf_fd:Annotated[int, ctypes.c_int32], handle:POINTER(hsa_amd_vmem_alloc_handle_t)) -> hsa_status_t: ...
+def hsa_amd_vmem_import_shareable_handle(dmabuf_fd:Annotated[int, ctypes.c_int32], handle:c.POINTER(hsa_amd_vmem_alloc_handle_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_retain_alloc_handle(memory_handle:POINTER(hsa_amd_vmem_alloc_handle_t), addr:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_vmem_retain_alloc_handle(memory_handle:c.POINTER(hsa_amd_vmem_alloc_handle_t), addr:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_vmem_get_alloc_properties_from_handle(memory_handle:hsa_amd_vmem_alloc_handle_t, pool:POINTER(hsa_amd_memory_pool_t), type:POINTER(hsa_amd_memory_type_t)) -> hsa_status_t: ...
+def hsa_amd_vmem_get_alloc_properties_from_handle(memory_handle:hsa_amd_vmem_alloc_handle_t, pool:c.POINTER(hsa_amd_memory_pool_t), type:c.POINTER(hsa_amd_memory_type_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_amd_agent_set_async_scratch_limit(agent:hsa_agent_t, threshold:size_t) -> hsa_status_t: ...
 hsa_queue_info_attribute_t = CEnum(Annotated[int, ctypes.c_uint32])
@@ -1669,19 +1670,19 @@ HSA_AMD_QUEUE_INFO_AGENT = hsa_queue_info_attribute_t.define('HSA_AMD_QUEUE_INFO
 HSA_AMD_QUEUE_INFO_DOORBELL_ID = hsa_queue_info_attribute_t.define('HSA_AMD_QUEUE_INFO_DOORBELL_ID', 1)
 
 @dll.bind
-def hsa_amd_queue_get_info(queue:POINTER(hsa_queue_t), attribute:hsa_queue_info_attribute_t, value:POINTER(None)) -> hsa_status_t: ...
-@record
-class struct_hsa_amd_ais_file_handle_s:
+def hsa_amd_queue_get_info(queue:c.POINTER(hsa_queue_t), attribute:hsa_queue_info_attribute_t, value:c.POINTER(None)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_amd_ais_file_handle_s(c.Struct):
   SIZE = 8
-  handle: Annotated[POINTER(None), 0]
+  handle: Annotated[c.POINTER(None), 0]
   fd: Annotated[Annotated[int, ctypes.c_int32], 0]
-  pad: Annotated[Array[uint8_t, Literal[8]], 0]
+  pad: Annotated[c.Array[uint8_t, Literal[8]], 0]
 hsa_amd_ais_file_handle_t: TypeAlias = struct_hsa_amd_ais_file_handle_s
 int64_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
-def hsa_amd_ais_file_write(handle:hsa_amd_ais_file_handle_t, devicePtr:POINTER(None), size:uint64_t, file_offset:int64_t, size_copied:POINTER(uint64_t), status:POINTER(int32_t)) -> hsa_status_t: ...
+def hsa_amd_ais_file_write(handle:hsa_amd_ais_file_handle_t, devicePtr:c.POINTER(None), size:uint64_t, file_offset:int64_t, size_copied:c.POINTER(uint64_t), status:c.POINTER(int32_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_amd_ais_file_read(handle:hsa_amd_ais_file_handle_t, devicePtr:POINTER(None), size:uint64_t, file_offset:int64_t, size_copied:POINTER(uint64_t), status:POINTER(int32_t)) -> hsa_status_t: ...
+def hsa_amd_ais_file_read(handle:hsa_amd_ais_file_handle_t, devicePtr:c.POINTER(None), size:uint64_t, file_offset:int64_t, size_copied:c.POINTER(uint64_t), status:c.POINTER(int32_t)) -> hsa_status_t: ...
 enum_hsa_amd_log_flag_s = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS = enum_hsa_amd_log_flag_s.define('HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS', 0)
 HSA_AMD_LOG_FLAG_AQL = enum_hsa_amd_log_flag_s.define('HSA_AMD_LOG_FLAG_AQL', 0)
@@ -1690,7 +1691,7 @@ HSA_AMD_LOG_FLAG_INFO = enum_hsa_amd_log_flag_s.define('HSA_AMD_LOG_FLAG_INFO', 
 
 hsa_amd_log_flag_t: TypeAlias = enum_hsa_amd_log_flag_s
 @dll.bind
-def hsa_amd_enable_logging(flags:POINTER(uint8_t), file:POINTER(None)) -> hsa_status_t: ...
+def hsa_amd_enable_logging(flags:c.POINTER(uint8_t), file:c.POINTER(None)) -> hsa_status_t: ...
 amd_signal_kind64_t: TypeAlias = Annotated[int, ctypes.c_int64]
 enum_amd_signal_kind_t = CEnum(Annotated[int, ctypes.c_int32])
 AMD_SIGNAL_KIND_INVALID = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_INVALID', 0)
@@ -1698,26 +1699,26 @@ AMD_SIGNAL_KIND_USER = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_USER', 1)
 AMD_SIGNAL_KIND_DOORBELL = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_DOORBELL', -1)
 AMD_SIGNAL_KIND_LEGACY_DOORBELL = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_LEGACY_DOORBELL', -2)
 
-@record
-class struct_amd_signal_s:
+@c.record
+class struct_amd_signal_s(c.Struct):
   SIZE = 64
   kind: Annotated[amd_signal_kind64_t, 0]
   value: Annotated[int64_t, 8]
-  hardware_doorbell_ptr: Annotated[POINTER(uint64_t), 8]
+  hardware_doorbell_ptr: Annotated[c.POINTER(uint64_t), 8]
   event_mailbox_ptr: Annotated[uint64_t, 16]
   event_id: Annotated[uint32_t, 24]
   reserved1: Annotated[uint32_t, 28]
   start_ts: Annotated[uint64_t, 32]
   end_ts: Annotated[uint64_t, 40]
-  queue_ptr: Annotated[POINTER(amd_queue_v2_t), 48]
+  queue_ptr: Annotated[c.POINTER(amd_queue_v2_t), 48]
   reserved2: Annotated[uint64_t, 48]
-  reserved3: Annotated[Array[uint32_t, Literal[2]], 56]
-@record
-class struct_amd_queue_v2_s:
+  reserved3: Annotated[c.Array[uint32_t, Literal[2]], 56]
+@c.record
+class struct_amd_queue_v2_s(c.Struct):
   SIZE = 2304
   hsa_queue: Annotated[hsa_queue_t, 0]
   caps: Annotated[uint32_t, 40]
-  reserved1: Annotated[Array[uint32_t, Literal[3]], 44]
+  reserved1: Annotated[c.Array[uint32_t, Literal[3]], 44]
   write_dispatch_id: Annotated[uint64_t, 56]
   group_segment_aperture_base_hi: Annotated[uint32_t, 64]
   private_segment_aperture_base_hi: Annotated[uint32_t, 68]
@@ -1725,11 +1726,11 @@ class struct_amd_queue_v2_s:
   max_wave_id: Annotated[uint32_t, 76]
   max_legacy_doorbell_dispatch_id_plus_1: Annotated[uint64_t, 80]
   legacy_doorbell_lock: Annotated[uint32_t, 88]
-  reserved2: Annotated[Array[uint32_t, Literal[9]], 92]
+  reserved2: Annotated[c.Array[uint32_t, Literal[9]], 92]
   read_dispatch_id: Annotated[uint64_t, 128]
   read_dispatch_id_field_base_byte_offset: Annotated[uint32_t, 136]
   compute_tmpring_size: Annotated[uint32_t, 140]
-  scratch_resource_descriptor: Annotated[Array[uint32_t, Literal[4]], 144]
+  scratch_resource_descriptor: Annotated[c.Array[uint32_t, Literal[4]], 144]
   scratch_backing_memory_location: Annotated[uint64_t, 160]
   scratch_backing_memory_byte_size: Annotated[uint64_t, 168]
   scratch_wave64_lane_byte_size: Annotated[uint32_t, 176]
@@ -1737,7 +1738,7 @@ class struct_amd_queue_v2_s:
   scratch_max_use_index: Annotated[uint64_t, 184]
   queue_inactive_signal: Annotated[hsa_signal_t, 192]
   alt_scratch_max_use_index: Annotated[uint64_t, 200]
-  alt_scratch_resource_descriptor: Annotated[Array[uint32_t, Literal[4]], 208]
+  alt_scratch_resource_descriptor: Annotated[c.Array[uint32_t, Literal[4]], 208]
   alt_scratch_backing_memory_location: Annotated[uint64_t, 224]
   alt_scratch_dispatch_limit_x: Annotated[uint32_t, 232]
   alt_scratch_dispatch_limit_y: Annotated[uint32_t, 236]
@@ -1745,11 +1746,11 @@ class struct_amd_queue_v2_s:
   alt_scratch_wave64_lane_byte_size: Annotated[uint32_t, 244]
   alt_compute_tmpring_size: Annotated[uint32_t, 248]
   reserved5: Annotated[uint32_t, 252]
-  scratch_last_used_index: Annotated[Array[scratch_last_used_index_xcc_t, Literal[128]], 256]
+  scratch_last_used_index: Annotated[c.Array[scratch_last_used_index_xcc_t, Literal[128]], 256]
 amd_queue_v2_t: TypeAlias = struct_amd_queue_v2_s
 amd_queue_properties32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-@record
-class struct_scratch_last_used_index_xcc_s:
+@c.record
+class struct_scratch_last_used_index_xcc_s(c.Struct):
   SIZE = 16
   main: Annotated[uint64_t, 0]
   alt: Annotated[uint64_t, 8]
@@ -1784,12 +1785,12 @@ AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_SHIFT = enum_amd_queue_capabilities_t.define('AM
 AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_WIDTH = enum_amd_queue_capabilities_t.define('AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM_WIDTH', 1)
 AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM = enum_amd_queue_capabilities_t.define('AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM', 2)
 
-@record
-class struct_amd_queue_s:
+@c.record
+class struct_amd_queue_s(c.Struct):
   SIZE = 256
   hsa_queue: Annotated[hsa_queue_t, 0]
   caps: Annotated[uint32_t, 40]
-  reserved1: Annotated[Array[uint32_t, Literal[3]], 44]
+  reserved1: Annotated[c.Array[uint32_t, Literal[3]], 44]
   write_dispatch_id: Annotated[uint64_t, 56]
   group_segment_aperture_base_hi: Annotated[uint32_t, 64]
   private_segment_aperture_base_hi: Annotated[uint32_t, 68]
@@ -1797,18 +1798,18 @@ class struct_amd_queue_s:
   max_wave_id: Annotated[uint32_t, 76]
   max_legacy_doorbell_dispatch_id_plus_1: Annotated[uint64_t, 80]
   legacy_doorbell_lock: Annotated[uint32_t, 88]
-  reserved2: Annotated[Array[uint32_t, Literal[9]], 92]
+  reserved2: Annotated[c.Array[uint32_t, Literal[9]], 92]
   read_dispatch_id: Annotated[uint64_t, 128]
   read_dispatch_id_field_base_byte_offset: Annotated[uint32_t, 136]
   compute_tmpring_size: Annotated[uint32_t, 140]
-  scratch_resource_descriptor: Annotated[Array[uint32_t, Literal[4]], 144]
+  scratch_resource_descriptor: Annotated[c.Array[uint32_t, Literal[4]], 144]
   scratch_backing_memory_location: Annotated[uint64_t, 160]
-  reserved3: Annotated[Array[uint32_t, Literal[2]], 168]
+  reserved3: Annotated[c.Array[uint32_t, Literal[2]], 168]
   scratch_wave64_lane_byte_size: Annotated[uint32_t, 176]
   queue_properties: Annotated[amd_queue_properties32_t, 180]
-  reserved4: Annotated[Array[uint32_t, Literal[2]], 184]
+  reserved4: Annotated[c.Array[uint32_t, Literal[2]], 184]
   queue_inactive_signal: Annotated[hsa_signal_t, 192]
-  reserved5: Annotated[Array[uint32_t, Literal[14]], 200]
+  reserved5: Annotated[c.Array[uint32_t, Literal[14]], 200]
 amd_queue_t: TypeAlias = struct_amd_queue_s
 amd_kernel_code_version32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 enum_amd_kernel_code_version_t = CEnum(Annotated[int, ctypes.c_uint32])
@@ -2042,8 +2043,8 @@ AMD_EXCEPTION_KIND_OVERFLOW = enum_amd_exception_kind_t.define('AMD_EXCEPTION_KI
 AMD_EXCEPTION_KIND_UNDERFLOW = enum_amd_exception_kind_t.define('AMD_EXCEPTION_KIND_UNDERFLOW', 8)
 AMD_EXCEPTION_KIND_INEXACT = enum_amd_exception_kind_t.define('AMD_EXCEPTION_KIND_INEXACT', 16)
 
-@record
-class struct_amd_control_directives_s:
+@c.record
+class struct_amd_control_directives_s(c.Struct):
   SIZE = 128
   enabled_control_directives: Annotated[amd_enabled_control_directive64_t, 0]
   enable_break_exceptions: Annotated[uint16_t, 8]
@@ -2052,13 +2053,13 @@ class struct_amd_control_directives_s:
   max_flat_grid_size: Annotated[uint64_t, 16]
   max_flat_workgroup_size: Annotated[uint32_t, 24]
   required_dim: Annotated[uint8_t, 28]
-  reserved1: Annotated[Array[uint8_t, Literal[3]], 29]
-  required_grid_size: Annotated[Array[uint64_t, Literal[3]], 32]
-  required_workgroup_size: Annotated[Array[uint32_t, Literal[3]], 56]
-  reserved2: Annotated[Array[uint8_t, Literal[60]], 68]
+  reserved1: Annotated[c.Array[uint8_t, Literal[3]], 29]
+  required_grid_size: Annotated[c.Array[uint64_t, Literal[3]], 32]
+  required_workgroup_size: Annotated[c.Array[uint32_t, Literal[3]], 56]
+  reserved2: Annotated[c.Array[uint8_t, Literal[60]], 68]
 amd_control_directives_t: TypeAlias = struct_amd_control_directives_s
-@record
-class struct_amd_kernel_code_s:
+@c.record
+class struct_amd_kernel_code_s(c.Struct):
   SIZE = 256
   amd_kernel_code_version_major: Annotated[amd_kernel_code_version32_t, 0]
   amd_kernel_code_version_minor: Annotated[amd_kernel_code_version32_t, 4]
@@ -2091,20 +2092,20 @@ class struct_amd_kernel_code_s:
   private_segment_alignment: Annotated[amd_powertwo8_t, 102]
   wavefront_size: Annotated[amd_powertwo8_t, 103]
   call_convention: Annotated[int32_t, 104]
-  reserved1: Annotated[Array[uint8_t, Literal[12]], 108]
+  reserved1: Annotated[c.Array[uint8_t, Literal[12]], 108]
   runtime_loader_kernel_symbol: Annotated[uint64_t, 120]
   control_directives: Annotated[amd_control_directives_t, 128]
 amd_kernel_code_t: TypeAlias = struct_amd_kernel_code_s
-@record
-class struct_amd_runtime_loader_debug_info_s:
+@c.record
+class struct_amd_runtime_loader_debug_info_s(c.Struct):
   SIZE = 32
-  elf_raw: Annotated[POINTER(None), 0]
+  elf_raw: Annotated[c.POINTER(None), 0]
   elf_size: Annotated[size_t, 8]
-  kernel_name: Annotated[POINTER(Annotated[bytes, ctypes.c_char]), 16]
-  owning_segment: Annotated[POINTER(None), 24]
+  kernel_name: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 16]
+  owning_segment: Annotated[c.POINTER(None), 24]
 amd_runtime_loader_debug_info_t: TypeAlias = struct_amd_runtime_loader_debug_info_s
 class struct_BrigModuleHeader(ctypes.Structure): pass
-BrigModule_t: TypeAlias = POINTER(struct_BrigModuleHeader)
+BrigModule_t: TypeAlias = c.POINTER(struct_BrigModuleHeader)
 _anonenum12 = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_EXT_STATUS_ERROR_INVALID_PROGRAM = _anonenum12.define('HSA_EXT_STATUS_ERROR_INVALID_PROGRAM', 8192)
 HSA_EXT_STATUS_ERROR_INVALID_MODULE = _anonenum12.define('HSA_EXT_STATUS_ERROR_INVALID_MODULE', 8193)
@@ -2114,32 +2115,32 @@ HSA_EXT_STATUS_ERROR_SYMBOL_MISMATCH = _anonenum12.define('HSA_EXT_STATUS_ERROR_
 HSA_EXT_STATUS_ERROR_FINALIZATION_FAILED = _anonenum12.define('HSA_EXT_STATUS_ERROR_FINALIZATION_FAILED', 8197)
 HSA_EXT_STATUS_ERROR_DIRECTIVE_MISMATCH = _anonenum12.define('HSA_EXT_STATUS_ERROR_DIRECTIVE_MISMATCH', 8198)
 
-hsa_ext_module_t: TypeAlias = POINTER(struct_BrigModuleHeader)
-@record
-class struct_hsa_ext_program_s:
+hsa_ext_module_t: TypeAlias = c.POINTER(struct_BrigModuleHeader)
+@c.record
+class struct_hsa_ext_program_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_ext_program_t: TypeAlias = struct_hsa_ext_program_s
 @dll.bind
-def hsa_ext_program_create(machine_model:hsa_machine_model_t, profile:hsa_profile_t, default_float_rounding_mode:hsa_default_float_rounding_mode_t, options:POINTER(Annotated[bytes, ctypes.c_char]), program:POINTER(hsa_ext_program_t)) -> hsa_status_t: ...
+def hsa_ext_program_create(machine_model:hsa_machine_model_t, profile:hsa_profile_t, default_float_rounding_mode:hsa_default_float_rounding_mode_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), program:c.POINTER(hsa_ext_program_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_ext_program_destroy(program:hsa_ext_program_t) -> hsa_status_t: ...
 @dll.bind
 def hsa_ext_program_add_module(program:hsa_ext_program_t, module:hsa_ext_module_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_program_iterate_modules(program:hsa_ext_program_t, callback:CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t, POINTER(None)), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_ext_program_iterate_modules(program:hsa_ext_program_t, callback:c.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t, c.POINTER(None)), data:c.POINTER(None)) -> hsa_status_t: ...
 hsa_ext_program_info_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_EXT_PROGRAM_INFO_MACHINE_MODEL = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_MACHINE_MODEL', 0)
 HSA_EXT_PROGRAM_INFO_PROFILE = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_PROFILE', 1)
 HSA_EXT_PROGRAM_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_DEFAULT_FLOAT_ROUNDING_MODE', 2)
 
 @dll.bind
-def hsa_ext_program_get_info(program:hsa_ext_program_t, attribute:hsa_ext_program_info_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_ext_program_get_info(program:hsa_ext_program_t, attribute:hsa_ext_program_info_t, value:c.POINTER(None)) -> hsa_status_t: ...
 hsa_ext_finalizer_call_convention_t = CEnum(Annotated[int, ctypes.c_int32])
 HSA_EXT_FINALIZER_CALL_CONVENTION_AUTO = hsa_ext_finalizer_call_convention_t.define('HSA_EXT_FINALIZER_CALL_CONVENTION_AUTO', -1)
 
-@record
-class struct_hsa_ext_control_directives_s:
+@c.record
+class struct_hsa_ext_control_directives_s(c.Struct):
   SIZE = 144
   control_directives_mask: Annotated[uint64_t, 0]
   break_exceptions_mask: Annotated[uint16_t, 8]
@@ -2148,22 +2149,22 @@ class struct_hsa_ext_control_directives_s:
   max_flat_grid_size: Annotated[uint64_t, 16]
   max_flat_workgroup_size: Annotated[uint32_t, 24]
   reserved1: Annotated[uint32_t, 28]
-  required_grid_size: Annotated[Array[uint64_t, Literal[3]], 32]
+  required_grid_size: Annotated[c.Array[uint64_t, Literal[3]], 32]
   required_workgroup_size: Annotated[hsa_dim3_t, 56]
   required_dim: Annotated[uint8_t, 68]
-  reserved2: Annotated[Array[uint8_t, Literal[75]], 69]
+  reserved2: Annotated[c.Array[uint8_t, Literal[75]], 69]
 hsa_ext_control_directives_t: TypeAlias = struct_hsa_ext_control_directives_s
 @dll.bind
-def hsa_ext_program_finalize(program:hsa_ext_program_t, isa:hsa_isa_t, call_convention:int32_t, control_directives:hsa_ext_control_directives_t, options:POINTER(Annotated[bytes, ctypes.c_char]), code_object_type:hsa_code_object_type_t, code_object:POINTER(hsa_code_object_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_ext_finalizer_1_00_pfn_s:
+def hsa_ext_program_finalize(program:hsa_ext_program_t, isa:hsa_isa_t, call_convention:int32_t, control_directives:hsa_ext_control_directives_t, options:c.POINTER(Annotated[bytes, ctypes.c_char]), code_object_type:hsa_code_object_type_t, code_object:c.POINTER(hsa_code_object_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_ext_finalizer_1_00_pfn_s(c.Struct):
   SIZE = 48
-  hsa_ext_program_create: Annotated[CFUNCTYPE(hsa_status_t, hsa_machine_model_t, hsa_profile_t, hsa_default_float_rounding_mode_t, POINTER(Annotated[bytes, ctypes.c_char]), POINTER(hsa_ext_program_t)), 0]
-  hsa_ext_program_destroy: Annotated[CFUNCTYPE(hsa_status_t, hsa_ext_program_t), 8]
-  hsa_ext_program_add_module: Annotated[CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t), 16]
-  hsa_ext_program_iterate_modules: Annotated[CFUNCTYPE(hsa_status_t, hsa_ext_program_t, CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t, POINTER(None)), POINTER(None)), 24]
-  hsa_ext_program_get_info: Annotated[CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_program_info_t, POINTER(None)), 32]
-  hsa_ext_program_finalize: Annotated[CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_isa_t, int32_t, hsa_ext_control_directives_t, POINTER(Annotated[bytes, ctypes.c_char]), hsa_code_object_type_t, POINTER(hsa_code_object_t)), 40]
+  hsa_ext_program_create: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_machine_model_t, hsa_profile_t, hsa_default_float_rounding_mode_t, c.POINTER(Annotated[bytes, ctypes.c_char]), c.POINTER(hsa_ext_program_t)), 0]
+  hsa_ext_program_destroy: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_ext_program_t), 8]
+  hsa_ext_program_add_module: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t), 16]
+  hsa_ext_program_iterate_modules: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, c.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t, c.POINTER(None)), c.POINTER(None)), 24]
+  hsa_ext_program_get_info: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_program_info_t, c.POINTER(None)), 32]
+  hsa_ext_program_finalize: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_isa_t, int32_t, hsa_ext_control_directives_t, c.POINTER(Annotated[bytes, ctypes.c_char]), hsa_code_object_type_t, c.POINTER(hsa_code_object_t)), 40]
 hsa_ext_finalizer_1_00_pfn_t: TypeAlias = struct_hsa_ext_finalizer_1_00_pfn_s
 _anonenum13 = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED = _anonenum13.define('HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED', 12288)
@@ -2239,41 +2240,41 @@ HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE = hsa_ext_image_data_layout_t.define('HSA_EXT_I
 HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR = hsa_ext_image_data_layout_t.define('HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR', 1)
 
 @dll.bind
-def hsa_ext_image_get_capability(agent:hsa_agent_t, geometry:hsa_ext_image_geometry_t, image_format:POINTER(hsa_ext_image_format_t), capability_mask:POINTER(uint32_t)) -> hsa_status_t: ...
+def hsa_ext_image_get_capability(agent:hsa_agent_t, geometry:hsa_ext_image_geometry_t, image_format:c.POINTER(hsa_ext_image_format_t), capability_mask:c.POINTER(uint32_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_image_get_capability_with_layout(agent:hsa_agent_t, geometry:hsa_ext_image_geometry_t, image_format:POINTER(hsa_ext_image_format_t), image_data_layout:hsa_ext_image_data_layout_t, capability_mask:POINTER(uint32_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_ext_image_data_info_s:
+def hsa_ext_image_get_capability_with_layout(agent:hsa_agent_t, geometry:hsa_ext_image_geometry_t, image_format:c.POINTER(hsa_ext_image_format_t), image_data_layout:hsa_ext_image_data_layout_t, capability_mask:c.POINTER(uint32_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_ext_image_data_info_s(c.Struct):
   SIZE = 16
   size: Annotated[size_t, 0]
   alignment: Annotated[size_t, 8]
 hsa_ext_image_data_info_t: TypeAlias = struct_hsa_ext_image_data_info_s
 @dll.bind
-def hsa_ext_image_data_get_info(agent:hsa_agent_t, image_descriptor:POINTER(hsa_ext_image_descriptor_t), access_permission:hsa_access_permission_t, image_data_info:POINTER(hsa_ext_image_data_info_t)) -> hsa_status_t: ...
+def hsa_ext_image_data_get_info(agent:hsa_agent_t, image_descriptor:c.POINTER(hsa_ext_image_descriptor_t), access_permission:hsa_access_permission_t, image_data_info:c.POINTER(hsa_ext_image_data_info_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_image_data_get_info_with_layout(agent:hsa_agent_t, image_descriptor:POINTER(hsa_ext_image_descriptor_t), access_permission:hsa_access_permission_t, image_data_layout:hsa_ext_image_data_layout_t, image_data_row_pitch:size_t, image_data_slice_pitch:size_t, image_data_info:POINTER(hsa_ext_image_data_info_t)) -> hsa_status_t: ...
+def hsa_ext_image_data_get_info_with_layout(agent:hsa_agent_t, image_descriptor:c.POINTER(hsa_ext_image_descriptor_t), access_permission:hsa_access_permission_t, image_data_layout:hsa_ext_image_data_layout_t, image_data_row_pitch:size_t, image_data_slice_pitch:size_t, image_data_info:c.POINTER(hsa_ext_image_data_info_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_image_create(agent:hsa_agent_t, image_descriptor:POINTER(hsa_ext_image_descriptor_t), image_data:POINTER(None), access_permission:hsa_access_permission_t, image:POINTER(hsa_ext_image_t)) -> hsa_status_t: ...
+def hsa_ext_image_create(agent:hsa_agent_t, image_descriptor:c.POINTER(hsa_ext_image_descriptor_t), image_data:c.POINTER(None), access_permission:hsa_access_permission_t, image:c.POINTER(hsa_ext_image_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_image_create_with_layout(agent:hsa_agent_t, image_descriptor:POINTER(hsa_ext_image_descriptor_t), image_data:POINTER(None), access_permission:hsa_access_permission_t, image_data_layout:hsa_ext_image_data_layout_t, image_data_row_pitch:size_t, image_data_slice_pitch:size_t, image:POINTER(hsa_ext_image_t)) -> hsa_status_t: ...
+def hsa_ext_image_create_with_layout(agent:hsa_agent_t, image_descriptor:c.POINTER(hsa_ext_image_descriptor_t), image_data:c.POINTER(None), access_permission:hsa_access_permission_t, image_data_layout:hsa_ext_image_data_layout_t, image_data_row_pitch:size_t, image_data_slice_pitch:size_t, image:c.POINTER(hsa_ext_image_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_ext_image_destroy(agent:hsa_agent_t, image:hsa_ext_image_t) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_image_copy(agent:hsa_agent_t, src_image:hsa_ext_image_t, src_offset:POINTER(hsa_dim3_t), dst_image:hsa_ext_image_t, dst_offset:POINTER(hsa_dim3_t), range:POINTER(hsa_dim3_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_ext_image_region_s:
+def hsa_ext_image_copy(agent:hsa_agent_t, src_image:hsa_ext_image_t, src_offset:c.POINTER(hsa_dim3_t), dst_image:hsa_ext_image_t, dst_offset:c.POINTER(hsa_dim3_t), range:c.POINTER(hsa_dim3_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_ext_image_region_s(c.Struct):
   SIZE = 24
   offset: Annotated[hsa_dim3_t, 0]
   range: Annotated[hsa_dim3_t, 12]
 hsa_ext_image_region_t: TypeAlias = struct_hsa_ext_image_region_s
 @dll.bind
-def hsa_ext_image_import(agent:hsa_agent_t, src_memory:POINTER(None), src_row_pitch:size_t, src_slice_pitch:size_t, dst_image:hsa_ext_image_t, image_region:POINTER(hsa_ext_image_region_t)) -> hsa_status_t: ...
+def hsa_ext_image_import(agent:hsa_agent_t, src_memory:c.POINTER(None), src_row_pitch:size_t, src_slice_pitch:size_t, dst_image:hsa_ext_image_t, image_region:c.POINTER(hsa_ext_image_region_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_image_export(agent:hsa_agent_t, src_image:hsa_ext_image_t, dst_memory:POINTER(None), dst_row_pitch:size_t, dst_slice_pitch:size_t, image_region:POINTER(hsa_ext_image_region_t)) -> hsa_status_t: ...
+def hsa_ext_image_export(agent:hsa_agent_t, src_image:hsa_ext_image_t, dst_memory:c.POINTER(None), dst_row_pitch:size_t, dst_slice_pitch:size_t, image_region:c.POINTER(hsa_ext_image_region_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_image_clear(agent:hsa_agent_t, image:hsa_ext_image_t, data:POINTER(None), image_region:POINTER(hsa_ext_image_region_t)) -> hsa_status_t: ...
-@record
-class struct_hsa_ext_sampler_s:
+def hsa_ext_image_clear(agent:hsa_agent_t, image:hsa_ext_image_t, data:c.POINTER(None), image_region:c.POINTER(hsa_ext_image_region_t)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_ext_sampler_s(c.Struct):
   SIZE = 8
   handle: Annotated[uint64_t, 0]
 hsa_ext_sampler_t: TypeAlias = struct_hsa_ext_sampler_s
@@ -2295,57 +2296,57 @@ HSA_EXT_SAMPLER_FILTER_MODE_NEAREST = hsa_ext_sampler_filter_mode_t.define('HSA_
 HSA_EXT_SAMPLER_FILTER_MODE_LINEAR = hsa_ext_sampler_filter_mode_t.define('HSA_EXT_SAMPLER_FILTER_MODE_LINEAR', 1)
 
 hsa_ext_sampler_filter_mode32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-@record
-class struct_hsa_ext_sampler_descriptor_s:
+@c.record
+class struct_hsa_ext_sampler_descriptor_s(c.Struct):
   SIZE = 12
   coordinate_mode: Annotated[hsa_ext_sampler_coordinate_mode32_t, 0]
   filter_mode: Annotated[hsa_ext_sampler_filter_mode32_t, 4]
   address_mode: Annotated[hsa_ext_sampler_addressing_mode32_t, 8]
 hsa_ext_sampler_descriptor_t: TypeAlias = struct_hsa_ext_sampler_descriptor_s
-@record
-class struct_hsa_ext_sampler_descriptor_v2_s:
+@c.record
+class struct_hsa_ext_sampler_descriptor_v2_s(c.Struct):
   SIZE = 20
   coordinate_mode: Annotated[hsa_ext_sampler_coordinate_mode32_t, 0]
   filter_mode: Annotated[hsa_ext_sampler_filter_mode32_t, 4]
-  address_modes: Annotated[Array[hsa_ext_sampler_addressing_mode32_t, Literal[3]], 8]
+  address_modes: Annotated[c.Array[hsa_ext_sampler_addressing_mode32_t, Literal[3]], 8]
 hsa_ext_sampler_descriptor_v2_t: TypeAlias = struct_hsa_ext_sampler_descriptor_v2_s
 @dll.bind
-def hsa_ext_sampler_create(agent:hsa_agent_t, sampler_descriptor:POINTER(hsa_ext_sampler_descriptor_t), sampler:POINTER(hsa_ext_sampler_t)) -> hsa_status_t: ...
+def hsa_ext_sampler_create(agent:hsa_agent_t, sampler_descriptor:c.POINTER(hsa_ext_sampler_descriptor_t), sampler:c.POINTER(hsa_ext_sampler_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ext_sampler_create_v2(agent:hsa_agent_t, sampler_descriptor:POINTER(hsa_ext_sampler_descriptor_v2_t), sampler:POINTER(hsa_ext_sampler_t)) -> hsa_status_t: ...
+def hsa_ext_sampler_create_v2(agent:hsa_agent_t, sampler_descriptor:c.POINTER(hsa_ext_sampler_descriptor_v2_t), sampler:c.POINTER(hsa_ext_sampler_t)) -> hsa_status_t: ...
 @dll.bind
 def hsa_ext_sampler_destroy(agent:hsa_agent_t, sampler:hsa_ext_sampler_t) -> hsa_status_t: ...
-@record
-class struct_hsa_ext_images_1_00_pfn_s:
+@c.record
+class struct_hsa_ext_images_1_00_pfn_s(c.Struct):
   SIZE = 80
-  hsa_ext_image_get_capability: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_geometry_t, POINTER(hsa_ext_image_format_t), POINTER(uint32_t)), 0]
-  hsa_ext_image_data_get_info: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_image_descriptor_t), hsa_access_permission_t, POINTER(hsa_ext_image_data_info_t)), 8]
-  hsa_ext_image_create: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_image_descriptor_t), POINTER(None), hsa_access_permission_t, POINTER(hsa_ext_image_t)), 16]
-  hsa_ext_image_destroy: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t), 24]
-  hsa_ext_image_copy: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, POINTER(hsa_dim3_t), hsa_ext_image_t, POINTER(hsa_dim3_t), POINTER(hsa_dim3_t)), 32]
-  hsa_ext_image_import: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(None), size_t, size_t, hsa_ext_image_t, POINTER(hsa_ext_image_region_t)), 40]
-  hsa_ext_image_export: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, POINTER(None), size_t, size_t, POINTER(hsa_ext_image_region_t)), 48]
-  hsa_ext_image_clear: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, POINTER(None), POINTER(hsa_ext_image_region_t)), 56]
-  hsa_ext_sampler_create: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_sampler_descriptor_t), POINTER(hsa_ext_sampler_t)), 64]
-  hsa_ext_sampler_destroy: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_sampler_t), 72]
+  hsa_ext_image_get_capability: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_geometry_t, c.POINTER(hsa_ext_image_format_t), c.POINTER(uint32_t)), 0]
+  hsa_ext_image_data_get_info: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_image_descriptor_t), hsa_access_permission_t, c.POINTER(hsa_ext_image_data_info_t)), 8]
+  hsa_ext_image_create: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_image_descriptor_t), c.POINTER(None), hsa_access_permission_t, c.POINTER(hsa_ext_image_t)), 16]
+  hsa_ext_image_destroy: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t), 24]
+  hsa_ext_image_copy: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, c.POINTER(hsa_dim3_t), hsa_ext_image_t, c.POINTER(hsa_dim3_t), c.POINTER(hsa_dim3_t)), 32]
+  hsa_ext_image_import: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(None), size_t, size_t, hsa_ext_image_t, c.POINTER(hsa_ext_image_region_t)), 40]
+  hsa_ext_image_export: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, c.POINTER(None), size_t, size_t, c.POINTER(hsa_ext_image_region_t)), 48]
+  hsa_ext_image_clear: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, c.POINTER(None), c.POINTER(hsa_ext_image_region_t)), 56]
+  hsa_ext_sampler_create: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_sampler_descriptor_t), c.POINTER(hsa_ext_sampler_t)), 64]
+  hsa_ext_sampler_destroy: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_sampler_t), 72]
 hsa_ext_images_1_00_pfn_t: TypeAlias = struct_hsa_ext_images_1_00_pfn_s
-@record
-class struct_hsa_ext_images_1_pfn_s:
+@c.record
+class struct_hsa_ext_images_1_pfn_s(c.Struct):
   SIZE = 112
-  hsa_ext_image_get_capability: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_geometry_t, POINTER(hsa_ext_image_format_t), POINTER(uint32_t)), 0]
-  hsa_ext_image_data_get_info: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_image_descriptor_t), hsa_access_permission_t, POINTER(hsa_ext_image_data_info_t)), 8]
-  hsa_ext_image_create: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_image_descriptor_t), POINTER(None), hsa_access_permission_t, POINTER(hsa_ext_image_t)), 16]
-  hsa_ext_image_destroy: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t), 24]
-  hsa_ext_image_copy: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, POINTER(hsa_dim3_t), hsa_ext_image_t, POINTER(hsa_dim3_t), POINTER(hsa_dim3_t)), 32]
-  hsa_ext_image_import: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(None), size_t, size_t, hsa_ext_image_t, POINTER(hsa_ext_image_region_t)), 40]
-  hsa_ext_image_export: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, POINTER(None), size_t, size_t, POINTER(hsa_ext_image_region_t)), 48]
-  hsa_ext_image_clear: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, POINTER(None), POINTER(hsa_ext_image_region_t)), 56]
-  hsa_ext_sampler_create: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_sampler_descriptor_t), POINTER(hsa_ext_sampler_t)), 64]
-  hsa_ext_sampler_destroy: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_sampler_t), 72]
-  hsa_ext_image_get_capability_with_layout: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_geometry_t, POINTER(hsa_ext_image_format_t), hsa_ext_image_data_layout_t, POINTER(uint32_t)), 80]
-  hsa_ext_image_data_get_info_with_layout: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_image_descriptor_t), hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, POINTER(hsa_ext_image_data_info_t)), 88]
-  hsa_ext_image_create_with_layout: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_image_descriptor_t), POINTER(None), hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, POINTER(hsa_ext_image_t)), 96]
-  hsa_ext_sampler_create_v2: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ext_sampler_descriptor_v2_t), POINTER(hsa_ext_sampler_t)), 104]
+  hsa_ext_image_get_capability: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_geometry_t, c.POINTER(hsa_ext_image_format_t), c.POINTER(uint32_t)), 0]
+  hsa_ext_image_data_get_info: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_image_descriptor_t), hsa_access_permission_t, c.POINTER(hsa_ext_image_data_info_t)), 8]
+  hsa_ext_image_create: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_image_descriptor_t), c.POINTER(None), hsa_access_permission_t, c.POINTER(hsa_ext_image_t)), 16]
+  hsa_ext_image_destroy: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t), 24]
+  hsa_ext_image_copy: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, c.POINTER(hsa_dim3_t), hsa_ext_image_t, c.POINTER(hsa_dim3_t), c.POINTER(hsa_dim3_t)), 32]
+  hsa_ext_image_import: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(None), size_t, size_t, hsa_ext_image_t, c.POINTER(hsa_ext_image_region_t)), 40]
+  hsa_ext_image_export: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, c.POINTER(None), size_t, size_t, c.POINTER(hsa_ext_image_region_t)), 48]
+  hsa_ext_image_clear: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_t, c.POINTER(None), c.POINTER(hsa_ext_image_region_t)), 56]
+  hsa_ext_sampler_create: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_sampler_descriptor_t), c.POINTER(hsa_ext_sampler_t)), 64]
+  hsa_ext_sampler_destroy: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_sampler_t), 72]
+  hsa_ext_image_get_capability_with_layout: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ext_image_geometry_t, c.POINTER(hsa_ext_image_format_t), hsa_ext_image_data_layout_t, c.POINTER(uint32_t)), 80]
+  hsa_ext_image_data_get_info_with_layout: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_image_descriptor_t), hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, c.POINTER(hsa_ext_image_data_info_t)), 88]
+  hsa_ext_image_create_with_layout: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_image_descriptor_t), c.POINTER(None), hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, c.POINTER(hsa_ext_image_t)), 96]
+  hsa_ext_sampler_create_v2: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ext_sampler_descriptor_v2_t), c.POINTER(hsa_ext_sampler_t)), 104]
 hsa_ext_images_1_pfn_t: TypeAlias = struct_hsa_ext_images_1_pfn_s
 @dll.bind
 def hsa_ven_amd_aqlprofile_version_major() -> uint32_t: ...
@@ -2392,14 +2393,14 @@ HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC = hsa_ven_amd_aqlprofile_block_name_t.defi
 HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MMEA = hsa_ven_amd_aqlprofile_block_name_t.define('HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MMEA', 33)
 HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER = hsa_ven_amd_aqlprofile_block_name_t.define('HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER', 34)
 
-@record
-class hsa_ven_amd_aqlprofile_event_t:
+@c.record
+class hsa_ven_amd_aqlprofile_event_t(c.Struct):
   SIZE = 12
   block_name: Annotated[hsa_ven_amd_aqlprofile_block_name_t, 0]
   block_index: Annotated[uint32_t, 4]
   counter_id: Annotated[uint32_t, 8]
 @dll.bind
-def hsa_ven_amd_aqlprofile_validate_event(agent:hsa_agent_t, event:POINTER(hsa_ven_amd_aqlprofile_event_t), result:POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
+def hsa_ven_amd_aqlprofile_validate_event(agent:hsa_agent_t, event:c.POINTER(hsa_ven_amd_aqlprofile_event_t), result:c.POINTER(Annotated[bool, ctypes.c_bool])) -> hsa_status_t: ...
 hsa_ven_amd_aqlprofile_parameter_name_t = CEnum(Annotated[int, ctypes.c_uint32])
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET', 0)
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK', 1)
@@ -2416,8 +2417,8 @@ HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_MASK = hsa_ven_amd_aqlprofile_
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_CTRL = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_CTRL', 241)
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_NAME = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_NAME', 242)
 
-@record
-class hsa_ven_amd_aqlprofile_parameter_t:
+@c.record
+class hsa_ven_amd_aqlprofile_parameter_t(c.Struct):
   SIZE = 8
   parameter_name: Annotated[hsa_ven_amd_aqlprofile_parameter_name_t, 0]
   value: Annotated[uint32_t, 4]
@@ -2427,55 +2428,55 @@ HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_1 = hsa_ven_amd_aqlprofile_att_marker_channel
 HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2 = hsa_ven_amd_aqlprofile_att_marker_channel_t.define('HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2', 2)
 HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_3 = hsa_ven_amd_aqlprofile_att_marker_channel_t.define('HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_3', 3)
 
-@record
-class hsa_ven_amd_aqlprofile_descriptor_t:
+@c.record
+class hsa_ven_amd_aqlprofile_descriptor_t(c.Struct):
   SIZE = 16
-  ptr: Annotated[POINTER(None), 0]
+  ptr: Annotated[c.POINTER(None), 0]
   size: Annotated[uint32_t, 8]
-@record
-class hsa_ven_amd_aqlprofile_profile_t:
+@c.record
+class hsa_ven_amd_aqlprofile_profile_t(c.Struct):
   SIZE = 80
   agent: Annotated[hsa_agent_t, 0]
   type: Annotated[hsa_ven_amd_aqlprofile_event_type_t, 8]
-  events: Annotated[POINTER(hsa_ven_amd_aqlprofile_event_t), 16]
+  events: Annotated[c.POINTER(hsa_ven_amd_aqlprofile_event_t), 16]
   event_count: Annotated[uint32_t, 24]
-  parameters: Annotated[POINTER(hsa_ven_amd_aqlprofile_parameter_t), 32]
+  parameters: Annotated[c.POINTER(hsa_ven_amd_aqlprofile_parameter_t), 32]
   parameter_count: Annotated[uint32_t, 40]
   output_buffer: Annotated[hsa_ven_amd_aqlprofile_descriptor_t, 48]
   command_buffer: Annotated[hsa_ven_amd_aqlprofile_descriptor_t, 64]
-@record
-class hsa_ext_amd_aql_pm4_packet_t:
+@c.record
+class hsa_ext_amd_aql_pm4_packet_t(c.Struct):
   SIZE = 64
   header: Annotated[uint16_t, 0]
-  pm4_command: Annotated[Array[uint16_t, Literal[27]], 2]
+  pm4_command: Annotated[c.Array[uint16_t, Literal[27]], 2]
   completion_signal: Annotated[hsa_signal_t, 56]
 @dll.bind
-def hsa_ven_amd_aqlprofile_start(profile:POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_start_packet:POINTER(hsa_ext_amd_aql_pm4_packet_t)) -> hsa_status_t: ...
+def hsa_ven_amd_aqlprofile_start(profile:c.POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_start_packet:c.POINTER(hsa_ext_amd_aql_pm4_packet_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ven_amd_aqlprofile_stop(profile:POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_stop_packet:POINTER(hsa_ext_amd_aql_pm4_packet_t)) -> hsa_status_t: ...
+def hsa_ven_amd_aqlprofile_stop(profile:c.POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_stop_packet:c.POINTER(hsa_ext_amd_aql_pm4_packet_t)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ven_amd_aqlprofile_read(profile:POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_read_packet:POINTER(hsa_ext_amd_aql_pm4_packet_t)) -> hsa_status_t: ...
+def hsa_ven_amd_aqlprofile_read(profile:c.POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_read_packet:c.POINTER(hsa_ext_amd_aql_pm4_packet_t)) -> hsa_status_t: ...
 try: HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE = Annotated[int, ctypes.c_uint32].in_dll(dll, 'HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE')
 except (ValueError,AttributeError): pass
 @dll.bind
-def hsa_ven_amd_aqlprofile_legacy_get_pm4(aql_packet:POINTER(hsa_ext_amd_aql_pm4_packet_t), data:POINTER(None)) -> hsa_status_t: ...
+def hsa_ven_amd_aqlprofile_legacy_get_pm4(aql_packet:c.POINTER(hsa_ext_amd_aql_pm4_packet_t), data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ven_amd_aqlprofile_att_marker(profile:POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_marker_packet:POINTER(hsa_ext_amd_aql_pm4_packet_t), data:uint32_t, channel:hsa_ven_amd_aqlprofile_att_marker_channel_t) -> hsa_status_t: ...
-@record
-class hsa_ven_amd_aqlprofile_info_data_t:
+def hsa_ven_amd_aqlprofile_att_marker(profile:c.POINTER(hsa_ven_amd_aqlprofile_profile_t), aql_marker_packet:c.POINTER(hsa_ext_amd_aql_pm4_packet_t), data:uint32_t, channel:hsa_ven_amd_aqlprofile_att_marker_channel_t) -> hsa_status_t: ...
+@c.record
+class hsa_ven_amd_aqlprofile_info_data_t(c.Struct):
   SIZE = 32
   sample_id: Annotated[uint32_t, 0]
   pmc_data: Annotated[_anonstruct15, 8]
   trace_data: Annotated[hsa_ven_amd_aqlprofile_descriptor_t, 8]
-@record
-class _anonstruct15:
+@c.record
+class _anonstruct15(c.Struct):
   SIZE = 24
   event: Annotated[hsa_ven_amd_aqlprofile_event_t, 0]
   result: Annotated[uint64_t, 16]
-@record
-class hsa_ven_amd_aqlprofile_id_query_t:
+@c.record
+class hsa_ven_amd_aqlprofile_id_query_t(c.Struct):
   SIZE = 16
-  name: Annotated[POINTER(Annotated[bytes, ctypes.c_char]), 0]
+  name: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 0]
   id: Annotated[uint32_t, 8]
   instance_count: Annotated[uint32_t, 12]
 hsa_ven_amd_aqlprofile_info_type_t = CEnum(Annotated[int, ctypes.c_uint32])
@@ -2488,38 +2489,38 @@ HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID = hsa_ven_amd_aqlprofile_info_type_t.define
 HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD = hsa_ven_amd_aqlprofile_info_type_t.define('HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD', 6)
 HSA_VEN_AMD_AQLPROFILE_INFO_DISABLE_CMD = hsa_ven_amd_aqlprofile_info_type_t.define('HSA_VEN_AMD_AQLPROFILE_INFO_DISABLE_CMD', 7)
 
-hsa_ven_amd_aqlprofile_data_callback_t: TypeAlias = CFUNCTYPE(hsa_status_t, hsa_ven_amd_aqlprofile_info_type_t, POINTER(hsa_ven_amd_aqlprofile_info_data_t), POINTER(None))
+hsa_ven_amd_aqlprofile_data_callback_t: TypeAlias = c.CFUNCTYPE(hsa_status_t, hsa_ven_amd_aqlprofile_info_type_t, c.POINTER(hsa_ven_amd_aqlprofile_info_data_t), c.POINTER(None))
 @dll.bind
-def hsa_ven_amd_aqlprofile_get_info(profile:POINTER(hsa_ven_amd_aqlprofile_profile_t), attribute:hsa_ven_amd_aqlprofile_info_type_t, value:POINTER(None)) -> hsa_status_t: ...
+def hsa_ven_amd_aqlprofile_get_info(profile:c.POINTER(hsa_ven_amd_aqlprofile_profile_t), attribute:hsa_ven_amd_aqlprofile_info_type_t, value:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ven_amd_aqlprofile_iterate_data(profile:POINTER(hsa_ven_amd_aqlprofile_profile_t), callback:hsa_ven_amd_aqlprofile_data_callback_t, data:POINTER(None)) -> hsa_status_t: ...
+def hsa_ven_amd_aqlprofile_iterate_data(profile:c.POINTER(hsa_ven_amd_aqlprofile_profile_t), callback:hsa_ven_amd_aqlprofile_data_callback_t, data:c.POINTER(None)) -> hsa_status_t: ...
 @dll.bind
-def hsa_ven_amd_aqlprofile_error_string(str:POINTER(POINTER(Annotated[bytes, ctypes.c_char]))) -> hsa_status_t: ...
-hsa_ven_amd_aqlprofile_eventname_callback_t: TypeAlias = CFUNCTYPE(hsa_status_t, Annotated[int, ctypes.c_int32], POINTER(Annotated[bytes, ctypes.c_char]))
+def hsa_ven_amd_aqlprofile_error_string(str:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char]))) -> hsa_status_t: ...
+hsa_ven_amd_aqlprofile_eventname_callback_t: TypeAlias = c.CFUNCTYPE(hsa_status_t, Annotated[int, ctypes.c_int32], c.POINTER(Annotated[bytes, ctypes.c_char]))
 @dll.bind
 def hsa_ven_amd_aqlprofile_iterate_event_ids(_0:hsa_ven_amd_aqlprofile_eventname_callback_t) -> hsa_status_t: ...
-hsa_ven_amd_aqlprofile_coordinate_callback_t: TypeAlias = CFUNCTYPE(hsa_status_t, Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], POINTER(Annotated[bytes, ctypes.c_char]), POINTER(None))
+hsa_ven_amd_aqlprofile_coordinate_callback_t: TypeAlias = c.CFUNCTYPE(hsa_status_t, Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], c.POINTER(Annotated[bytes, ctypes.c_char]), c.POINTER(None))
 @dll.bind
-def hsa_ven_amd_aqlprofile_iterate_event_coord(agent:hsa_agent_t, event:hsa_ven_amd_aqlprofile_event_t, sample_id:uint32_t, callback:hsa_ven_amd_aqlprofile_coordinate_callback_t, userdata:POINTER(None)) -> hsa_status_t: ...
-@record
-class struct_hsa_ven_amd_aqlprofile_1_00_pfn_s:
+def hsa_ven_amd_aqlprofile_iterate_event_coord(agent:hsa_agent_t, event:hsa_ven_amd_aqlprofile_event_t, sample_id:uint32_t, callback:hsa_ven_amd_aqlprofile_coordinate_callback_t, userdata:c.POINTER(None)) -> hsa_status_t: ...
+@c.record
+class struct_hsa_ven_amd_aqlprofile_1_00_pfn_s(c.Struct):
   SIZE = 104
-  hsa_ven_amd_aqlprofile_version_major: Annotated[CFUNCTYPE(uint32_t), 0]
-  hsa_ven_amd_aqlprofile_version_minor: Annotated[CFUNCTYPE(uint32_t), 8]
-  hsa_ven_amd_aqlprofile_error_string: Annotated[CFUNCTYPE(hsa_status_t, POINTER(POINTER(Annotated[bytes, ctypes.c_char]))), 16]
-  hsa_ven_amd_aqlprofile_validate_event: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, POINTER(hsa_ven_amd_aqlprofile_event_t), POINTER(Annotated[bool, ctypes.c_bool])), 24]
-  hsa_ven_amd_aqlprofile_start: Annotated[CFUNCTYPE(hsa_status_t, POINTER(hsa_ven_amd_aqlprofile_profile_t), POINTER(hsa_ext_amd_aql_pm4_packet_t)), 32]
-  hsa_ven_amd_aqlprofile_stop: Annotated[CFUNCTYPE(hsa_status_t, POINTER(hsa_ven_amd_aqlprofile_profile_t), POINTER(hsa_ext_amd_aql_pm4_packet_t)), 40]
-  hsa_ven_amd_aqlprofile_read: Annotated[CFUNCTYPE(hsa_status_t, POINTER(hsa_ven_amd_aqlprofile_profile_t), POINTER(hsa_ext_amd_aql_pm4_packet_t)), 48]
-  hsa_ven_amd_aqlprofile_legacy_get_pm4: Annotated[CFUNCTYPE(hsa_status_t, POINTER(hsa_ext_amd_aql_pm4_packet_t), POINTER(None)), 56]
-  hsa_ven_amd_aqlprofile_get_info: Annotated[CFUNCTYPE(hsa_status_t, POINTER(hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_info_type_t, POINTER(None)), 64]
-  hsa_ven_amd_aqlprofile_iterate_data: Annotated[CFUNCTYPE(hsa_status_t, POINTER(hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_data_callback_t, POINTER(None)), 72]
-  hsa_ven_amd_aqlprofile_iterate_event_ids: Annotated[CFUNCTYPE(hsa_status_t, hsa_ven_amd_aqlprofile_eventname_callback_t), 80]
-  hsa_ven_amd_aqlprofile_iterate_event_coord: Annotated[CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ven_amd_aqlprofile_event_t, uint32_t, hsa_ven_amd_aqlprofile_coordinate_callback_t, POINTER(None)), 88]
-  hsa_ven_amd_aqlprofile_att_marker: Annotated[CFUNCTYPE(hsa_status_t, POINTER(hsa_ven_amd_aqlprofile_profile_t), POINTER(hsa_ext_amd_aql_pm4_packet_t), uint32_t, hsa_ven_amd_aqlprofile_att_marker_channel_t), 96]
+  hsa_ven_amd_aqlprofile_version_major: Annotated[c.CFUNCTYPE(uint32_t), 0]
+  hsa_ven_amd_aqlprofile_version_minor: Annotated[c.CFUNCTYPE(uint32_t), 8]
+  hsa_ven_amd_aqlprofile_error_string: Annotated[c.CFUNCTYPE(hsa_status_t, c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char]))), 16]
+  hsa_ven_amd_aqlprofile_validate_event: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, c.POINTER(hsa_ven_amd_aqlprofile_event_t), c.POINTER(Annotated[bool, ctypes.c_bool])), 24]
+  hsa_ven_amd_aqlprofile_start: Annotated[c.CFUNCTYPE(hsa_status_t, c.POINTER(hsa_ven_amd_aqlprofile_profile_t), c.POINTER(hsa_ext_amd_aql_pm4_packet_t)), 32]
+  hsa_ven_amd_aqlprofile_stop: Annotated[c.CFUNCTYPE(hsa_status_t, c.POINTER(hsa_ven_amd_aqlprofile_profile_t), c.POINTER(hsa_ext_amd_aql_pm4_packet_t)), 40]
+  hsa_ven_amd_aqlprofile_read: Annotated[c.CFUNCTYPE(hsa_status_t, c.POINTER(hsa_ven_amd_aqlprofile_profile_t), c.POINTER(hsa_ext_amd_aql_pm4_packet_t)), 48]
+  hsa_ven_amd_aqlprofile_legacy_get_pm4: Annotated[c.CFUNCTYPE(hsa_status_t, c.POINTER(hsa_ext_amd_aql_pm4_packet_t), c.POINTER(None)), 56]
+  hsa_ven_amd_aqlprofile_get_info: Annotated[c.CFUNCTYPE(hsa_status_t, c.POINTER(hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_info_type_t, c.POINTER(None)), 64]
+  hsa_ven_amd_aqlprofile_iterate_data: Annotated[c.CFUNCTYPE(hsa_status_t, c.POINTER(hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_data_callback_t, c.POINTER(None)), 72]
+  hsa_ven_amd_aqlprofile_iterate_event_ids: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_ven_amd_aqlprofile_eventname_callback_t), 80]
+  hsa_ven_amd_aqlprofile_iterate_event_coord: Annotated[c.CFUNCTYPE(hsa_status_t, hsa_agent_t, hsa_ven_amd_aqlprofile_event_t, uint32_t, hsa_ven_amd_aqlprofile_coordinate_callback_t, c.POINTER(None)), 88]
+  hsa_ven_amd_aqlprofile_att_marker: Annotated[c.CFUNCTYPE(hsa_status_t, c.POINTER(hsa_ven_amd_aqlprofile_profile_t), c.POINTER(hsa_ext_amd_aql_pm4_packet_t), uint32_t, hsa_ven_amd_aqlprofile_att_marker_channel_t), 96]
 hsa_ven_amd_aqlprofile_1_00_pfn_t: TypeAlias = struct_hsa_ven_amd_aqlprofile_1_00_pfn_s
 hsa_ven_amd_aqlprofile_pfn_t: TypeAlias = struct_hsa_ven_amd_aqlprofile_1_00_pfn_s
-init_records()
+c.init_records()
 HSA_VERSION_1_0 = 1
 HSA_AMD_INTERFACE_VERSION_MAJOR = 1
 HSA_AMD_INTERFACE_VERSION_MINOR = 14

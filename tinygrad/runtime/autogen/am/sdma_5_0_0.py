@@ -1,9 +1,10 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-@record
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG:
+from tinygrad.runtime.support import c
+from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+@c.record
+class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG(c.Struct):
   SIZE = 28
   HEADER_UNION: Annotated[_anonunion0, 0]
   COUNT_UNION: Annotated[_anonunion1, 4]
@@ -12,21 +13,21 @@ class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG:
   SRC_ADDR_HI_UNION: Annotated[_anonunion4, 16]
   DST_ADDR_LO_UNION: Annotated[_anonunion5, 20]
   DST_ADDR_HI_UNION: Annotated[_anonunion6, 24]
-@record
-class _anonunion0:
+@c.record
+class _anonunion0(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
   extra_info: Annotated[Annotated[int, ctypes.c_uint32], 2, 16, 0]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion1:
+@c.record
+class _anonunion1(c.Struct):
   SIZE = 4
   count: Annotated[Annotated[int, ctypes.c_uint32], 0, 22, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 10, 6]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion2:
+@c.record
+class _anonunion2(c.Struct):
   SIZE = 4
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
   dst_swap: Annotated[Annotated[int, ctypes.c_uint32], 2, 2, 0]
@@ -34,29 +35,29 @@ class _anonunion2:
   src_swap: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 0]
   reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 3, 6, 2]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion3:
+@c.record
+class _anonunion3(c.Struct):
   SIZE = 4
   src_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion4:
+@c.record
+class _anonunion4(c.Struct):
   SIZE = 4
   src_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion5:
+@c.record
+class _anonunion5(c.Struct):
   SIZE = 4
   dst_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion6:
+@c.record
+class _anonunion6(c.Struct):
   SIZE = 4
   dst_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_6_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_COPY_LINEAR: TypeAlias = rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG
-@record
-class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG(c.Struct):
   SIZE = 52
   HEADER_UNION: Annotated[_anonunion7, 0]
   SRC_ADDR_LO_UNION: Annotated[_anonunion8, 4]
@@ -71,86 +72,86 @@ class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG:
   DST_PARAMETER_3_UNION: Annotated[_anonunion17, 40]
   RECT_PARAMETER_1_UNION: Annotated[_anonunion18, 44]
   RECT_PARAMETER_2_UNION: Annotated[_anonunion19, 48]
-@record
-class _anonunion7:
+@c.record
+class _anonunion7(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
   reserved: Annotated[Annotated[int, ctypes.c_uint32], 2, 13, 0]
   element: Annotated[Annotated[int, ctypes.c_uint32], 3, 3, 5]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion8:
+@c.record
+class _anonunion8(c.Struct):
   SIZE = 4
   src_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion9:
+@c.record
+class _anonunion9(c.Struct):
   SIZE = 4
   src_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion10:
+@c.record
+class _anonunion10(c.Struct):
   SIZE = 4
   src_offset_x: Annotated[Annotated[int, ctypes.c_uint32], 0, 14, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 6]
   src_offset_y: Annotated[Annotated[int, ctypes.c_uint32], 2, 14, 0]
   reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion11:
+@c.record
+class _anonunion11(c.Struct):
   SIZE = 4
   src_offset_z: Annotated[Annotated[int, ctypes.c_uint32], 0, 11, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 3]
   src_pitch: Annotated[Annotated[int, ctypes.c_uint32], 1, 19, 5]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion12:
+@c.record
+class _anonunion12(c.Struct):
   SIZE = 4
   src_slice_pitch: Annotated[Annotated[int, ctypes.c_uint32], 0, 28, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
   DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion13:
+@c.record
+class _anonunion13(c.Struct):
   SIZE = 4
   dst_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_6_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion14:
+@c.record
+class _anonunion14(c.Struct):
   SIZE = 4
   dst_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_7_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion15:
+@c.record
+class _anonunion15(c.Struct):
   SIZE = 4
   dst_offset_x: Annotated[Annotated[int, ctypes.c_uint32], 0, 14, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 6]
   dst_offset_y: Annotated[Annotated[int, ctypes.c_uint32], 2, 14, 0]
   reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
   DW_8_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion16:
+@c.record
+class _anonunion16(c.Struct):
   SIZE = 4
   dst_offset_z: Annotated[Annotated[int, ctypes.c_uint32], 0, 11, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 3]
   dst_pitch: Annotated[Annotated[int, ctypes.c_uint32], 1, 19, 5]
   DW_9_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion17:
+@c.record
+class _anonunion17(c.Struct):
   SIZE = 4
   dst_slice_pitch: Annotated[Annotated[int, ctypes.c_uint32], 0, 28, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
   DW_10_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion18:
+@c.record
+class _anonunion18(c.Struct):
   SIZE = 4
   rect_x: Annotated[Annotated[int, ctypes.c_uint32], 0, 14, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 2, 6]
   rect_y: Annotated[Annotated[int, ctypes.c_uint32], 2, 14, 0]
   reserved_2: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
   DW_11_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion19:
+@c.record
+class _anonunion19(c.Struct):
   SIZE = 4
   rect_z: Annotated[Annotated[int, ctypes.c_uint32], 0, 11, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 1, 5, 3]
@@ -160,16 +161,16 @@ class _anonunion19:
   reserved_3: Annotated[Annotated[int, ctypes.c_uint32], 3, 6, 2]
   DW_12_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT: TypeAlias = rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG
-@record
-class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG(c.Struct):
   SIZE = 20
   HEADER_UNION: Annotated[_anonunion20, 0]
   DST_ADDR_LO_UNION: Annotated[_anonunion21, 4]
   DST_ADDR_HI_UNION: Annotated[_anonunion22, 8]
   DATA_UNION: Annotated[_anonunion23, 12]
   COUNT_UNION: Annotated[_anonunion24, 16]
-@record
-class _anonunion20:
+@c.record
+class _anonunion20(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
@@ -177,37 +178,37 @@ class _anonunion20:
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 12, 2]
   fillsize: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 6]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion21:
+@c.record
+class _anonunion21(c.Struct):
   SIZE = 4
   dst_addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion22:
+@c.record
+class _anonunion22(c.Struct):
   SIZE = 4
   dst_addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion23:
+@c.record
+class _anonunion23(c.Struct):
   SIZE = 4
   src_data_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion24:
+@c.record
+class _anonunion24(c.Struct):
   SIZE = 4
   count: Annotated[Annotated[int, ctypes.c_uint32], 0, 22, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 10, 6]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_CONSTANT_FILL: TypeAlias = rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG
-@record
-class rocr_AMD_SDMA_PKT_FENCE_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_FENCE_TAG(c.Struct):
   SIZE = 16
   HEADER_UNION: Annotated[_anonunion25, 0]
   ADDR_LO_UNION: Annotated[_anonunion26, 4]
   ADDR_HI_UNION: Annotated[_anonunion27, 8]
   DATA_UNION: Annotated[_anonunion28, 12]
-@record
-class _anonunion25:
+@c.record
+class _anonunion25(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
@@ -220,24 +221,24 @@ class _anonunion25:
   l2_policy: Annotated[Annotated[int, ctypes.c_uint32], 3, 2, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 3, 6, 2]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion26:
+@c.record
+class _anonunion26(c.Struct):
   SIZE = 4
   addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion27:
+@c.record
+class _anonunion27(c.Struct):
   SIZE = 4
   addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion28:
+@c.record
+class _anonunion28(c.Struct):
   SIZE = 4
   data: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_FENCE: TypeAlias = rocr_AMD_SDMA_PKT_FENCE_TAG
-@record
-class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG(c.Struct):
   SIZE = 24
   HEADER_UNION: Annotated[_anonunion29, 0]
   ADDR_LO_UNION: Annotated[_anonunion30, 4]
@@ -245,8 +246,8 @@ class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG:
   VALUE_UNION: Annotated[_anonunion32, 12]
   MASK_UNION: Annotated[_anonunion33, 16]
   DW5_UNION: Annotated[_anonunion34, 20]
-@record
-class _anonunion29:
+@c.record
+class _anonunion29(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
@@ -256,36 +257,36 @@ class _anonunion29:
   func: Annotated[Annotated[int, ctypes.c_uint32], 3, 3, 4]
   mem_poll: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 7]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion30:
+@c.record
+class _anonunion30(c.Struct):
   SIZE = 4
   addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion31:
+@c.record
+class _anonunion31(c.Struct):
   SIZE = 4
   addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion32:
+@c.record
+class _anonunion32(c.Struct):
   SIZE = 4
   value: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion33:
+@c.record
+class _anonunion33(c.Struct):
   SIZE = 4
   mask: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion34:
+@c.record
+class _anonunion34(c.Struct):
   SIZE = 4
   interval: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
   retry_count: Annotated[Annotated[int, ctypes.c_uint32], 2, 12, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
   DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_POLL_REGMEM: TypeAlias = rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG
-@record
-class rocr_AMD_SDMA_PKT_ATOMIC_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_ATOMIC_TAG(c.Struct):
   SIZE = 32
   HEADER_UNION: Annotated[_anonunion35, 0]
   ADDR_LO_UNION: Annotated[_anonunion36, 4]
@@ -295,8 +296,8 @@ class rocr_AMD_SDMA_PKT_ATOMIC_TAG:
   CMP_DATA_LO_UNION: Annotated[_anonunion40, 20]
   CMP_DATA_HI_UNION: Annotated[_anonunion41, 24]
   LOOP_UNION: Annotated[_anonunion42, 28]
-@record
-class _anonunion35:
+@c.record
+class _anonunion35(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
@@ -304,88 +305,88 @@ class _anonunion35:
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 8, 1]
   operation: Annotated[Annotated[int, ctypes.c_uint32], 3, 7, 1]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion36:
+@c.record
+class _anonunion36(c.Struct):
   SIZE = 4
   addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion37:
+@c.record
+class _anonunion37(c.Struct):
   SIZE = 4
   addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion38:
+@c.record
+class _anonunion38(c.Struct):
   SIZE = 4
   src_data_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion39:
+@c.record
+class _anonunion39(c.Struct):
   SIZE = 4
   src_data_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion40:
+@c.record
+class _anonunion40(c.Struct):
   SIZE = 4
   cmp_data_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion41:
+@c.record
+class _anonunion41(c.Struct):
   SIZE = 4
   cmp_data_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_6_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion42:
+@c.record
+class _anonunion42(c.Struct):
   SIZE = 4
   loop_interval: Annotated[Annotated[int, ctypes.c_uint32], 0, 13, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 1, 19, 5]
   DW_7_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_ATOMIC: TypeAlias = rocr_AMD_SDMA_PKT_ATOMIC_TAG
-@record
-class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG(c.Struct):
   SIZE = 12
   HEADER_UNION: Annotated[_anonunion43, 0]
   ADDR_LO_UNION: Annotated[_anonunion44, 4]
   ADDR_HI_UNION: Annotated[_anonunion45, 8]
-@record
-class _anonunion43:
+@c.record
+class _anonunion43(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 16, 0]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion44:
+@c.record
+class _anonunion44(c.Struct):
   SIZE = 4
   addr_31_0: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion45:
+@c.record
+class _anonunion45(c.Struct):
   SIZE = 4
   addr_63_32: Annotated[Annotated[int, ctypes.c_uint32], 0, 32, 0]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_TIMESTAMP: TypeAlias = rocr_AMD_SDMA_PKT_TIMESTAMP_TAG
-@record
-class rocr_AMD_SDMA_PKT_TRAP_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_TRAP_TAG(c.Struct):
   SIZE = 8
   HEADER_UNION: Annotated[_anonunion46, 0]
   INT_CONTEXT_UNION: Annotated[_anonunion47, 4]
-@record
-class _anonunion46:
+@c.record
+class _anonunion46(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
   reserved_0: Annotated[Annotated[int, ctypes.c_uint32], 2, 16, 0]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion47:
+@c.record
+class _anonunion47(c.Struct):
   SIZE = 4
   int_ctx: Annotated[Annotated[int, ctypes.c_uint32], 0, 28, 0]
   reserved_1: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 4]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_TRAP: TypeAlias = rocr_AMD_SDMA_PKT_TRAP_TAG
-@record
-class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG(c.Struct):
   SIZE = 24
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -394,27 +395,27 @@ class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG:
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 16]
   DW_5_DATA: Annotated[Annotated[int, ctypes.c_uint32], 20]
 rocr_AMD_SDMA_PKT_HDP_FLUSH: TypeAlias = rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG
-@record
-class rocr_AMD_SDMA_PKT_GCR_TAG:
+@c.record
+class rocr_AMD_SDMA_PKT_GCR_TAG(c.Struct):
   SIZE = 20
   HEADER_UNION: Annotated[_anonunion48, 0]
   WORD1_UNION: Annotated[_anonunion49, 4]
   WORD2_UNION: Annotated[_anonunion50, 8]
   WORD3_UNION: Annotated[_anonunion51, 12]
   WORD4_UNION: Annotated[_anonunion52, 16]
-@record
-class _anonunion48:
+@c.record
+class _anonunion48(c.Struct):
   SIZE = 4
   op: Annotated[Annotated[int, ctypes.c_uint32], 0, 8, 0]
   sub_op: Annotated[Annotated[int, ctypes.c_uint32], 1, 8, 0]
   DW_0_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion49:
+@c.record
+class _anonunion49(c.Struct):
   SIZE = 4
   BaseVA_LO: Annotated[Annotated[int, ctypes.c_uint32], 0, 25, 7]
   DW_1_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion50:
+@c.record
+class _anonunion50(c.Struct):
   SIZE = 4
   BaseVA_HI: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
   GCR_CONTROL_GLI_INV: Annotated[Annotated[int, ctypes.c_uint32], 2, 2, 0]
@@ -431,21 +432,21 @@ class _anonunion50:
   GCR_CONTROL_GL2_INV: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 6]
   GCR_CONTROL_GL2_WB: Annotated[Annotated[int, ctypes.c_uint32], 3, 1, 7]
   DW_2_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion51:
+@c.record
+class _anonunion51(c.Struct):
   SIZE = 4
   GCR_CONTROL_RANGE_IS_PA: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
   GCR_CONTROL_SEQ: Annotated[Annotated[int, ctypes.c_uint32], 0, 2, 1]
   LimitVA_LO: Annotated[Annotated[int, ctypes.c_uint32], 0, 25, 7]
   DW_3_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class _anonunion52:
+@c.record
+class _anonunion52(c.Struct):
   SIZE = 4
   LimitVA_HI: Annotated[Annotated[int, ctypes.c_uint32], 0, 16, 0]
   VMID: Annotated[Annotated[int, ctypes.c_uint32], 3, 4, 0]
   DW_4_DATA: Annotated[Annotated[int, ctypes.c_uint32], 0]
 rocr_AMD_SDMA_PKT_GCR: TypeAlias = rocr_AMD_SDMA_PKT_GCR_TAG
-init_records()
+c.init_records()
 SDMA_OP_COPY = 1
 SDMA_OP_FENCE = 5
 SDMA_OP_TRAP = 6

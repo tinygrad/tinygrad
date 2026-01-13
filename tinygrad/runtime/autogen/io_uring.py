@@ -1,27 +1,28 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-@record
-class struct_io_uring_sq:
+from tinygrad.runtime.support import c
+from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+@c.record
+class struct_io_uring_sq(c.Struct):
   SIZE = 104
-  khead: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 0]
-  ktail: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 8]
-  kring_mask: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 16]
-  kring_entries: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 24]
-  kflags: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 32]
-  kdropped: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 40]
-  array: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 48]
-  sqes: Annotated[POINTER(struct_io_uring_sqe), 56]
+  khead: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 0]
+  ktail: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 8]
+  kring_mask: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 16]
+  kring_entries: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 24]
+  kflags: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 32]
+  kdropped: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 40]
+  array: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 48]
+  sqes: Annotated[c.POINTER(struct_io_uring_sqe), 56]
   sqe_head: Annotated[Annotated[int, ctypes.c_uint32], 64]
   sqe_tail: Annotated[Annotated[int, ctypes.c_uint32], 68]
   ring_sz: Annotated[size_t, 72]
-  ring_ptr: Annotated[POINTER(None), 80]
+  ring_ptr: Annotated[c.POINTER(None), 80]
   ring_mask: Annotated[Annotated[int, ctypes.c_uint32], 88]
   ring_entries: Annotated[Annotated[int, ctypes.c_uint32], 92]
-  pad: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[2]], 96]
-@record
-class struct_io_uring_sqe:
+  pad: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[2]], 96]
+@c.record
+class struct_io_uring_sqe(c.Struct):
   SIZE = 64
   opcode: Annotated[Annotated[int, ctypes.c_ubyte], 0]
   flags: Annotated[Annotated[int, ctypes.c_ubyte], 1]
@@ -60,10 +61,10 @@ class struct_io_uring_sqe:
   splice_fd_in: Annotated[Annotated[int, ctypes.c_int32], 44]
   file_index: Annotated[Annotated[int, ctypes.c_uint32], 44]
   addr_len: Annotated[Annotated[int, ctypes.c_uint16], 0]
-  __pad3: Annotated[Array[Annotated[int, ctypes.c_uint16], Literal[1]], 2]
+  __pad3: Annotated[c.Array[Annotated[int, ctypes.c_uint16], Literal[1]], 2]
   addr3: Annotated[Annotated[int, ctypes.c_uint64], 0]
-  __pad2: Annotated[Array[Annotated[int, ctypes.c_uint64], Literal[1]], 8]
-  cmd: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 48]
+  __pad2: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[1]], 8]
+  cmd: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[0]], 48]
 __u8: TypeAlias = Annotated[int, ctypes.c_ubyte]
 __u16: TypeAlias = Annotated[int, ctypes.c_uint16]
 __s32: TypeAlias = Annotated[int, ctypes.c_int32]
@@ -71,30 +72,30 @@ __u64: TypeAlias = Annotated[int, ctypes.c_uint64]
 __u32: TypeAlias = Annotated[int, ctypes.c_uint32]
 __kernel_rwf_t: TypeAlias = Annotated[int, ctypes.c_int32]
 size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
-@record
-class struct_io_uring_cq:
+@c.record
+class struct_io_uring_cq(c.Struct):
   SIZE = 88
-  khead: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 0]
-  ktail: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 8]
-  kring_mask: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 16]
-  kring_entries: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 24]
-  kflags: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 32]
-  koverflow: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 40]
-  cqes: Annotated[POINTER(struct_io_uring_cqe), 48]
+  khead: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 0]
+  ktail: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 8]
+  kring_mask: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 16]
+  kring_entries: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 24]
+  kflags: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 32]
+  koverflow: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 40]
+  cqes: Annotated[c.POINTER(struct_io_uring_cqe), 48]
   ring_sz: Annotated[size_t, 56]
-  ring_ptr: Annotated[POINTER(None), 64]
+  ring_ptr: Annotated[c.POINTER(None), 64]
   ring_mask: Annotated[Annotated[int, ctypes.c_uint32], 72]
   ring_entries: Annotated[Annotated[int, ctypes.c_uint32], 76]
-  pad: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[2]], 80]
-@record
-class struct_io_uring_cqe:
+  pad: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[2]], 80]
+@c.record
+class struct_io_uring_cqe(c.Struct):
   SIZE = 16
   user_data: Annotated[Annotated[int, ctypes.c_uint64], 0]
   res: Annotated[Annotated[int, ctypes.c_int32], 8]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 12]
-  big_cqe: Annotated[Array[Annotated[int, ctypes.c_uint64], Literal[0]], 16]
-@record
-class struct_io_uring:
+  big_cqe: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[0]], 16]
+@c.record
+class struct_io_uring(c.Struct):
   SIZE = 216
   sq: Annotated[struct_io_uring_sq, 0]
   cq: Annotated[struct_io_uring_cq, 104]
@@ -103,10 +104,10 @@ class struct_io_uring:
   features: Annotated[Annotated[int, ctypes.c_uint32], 200]
   enter_ring_fd: Annotated[Annotated[int, ctypes.c_int32], 204]
   int_flags: Annotated[Annotated[int, ctypes.c_ubyte], 208]
-  pad: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 209]
+  pad: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[3]], 209]
   pad2: Annotated[Annotated[int, ctypes.c_uint32], 212]
-@record
-class struct_statx:
+@c.record
+class struct_statx(c.Struct):
   SIZE = 256
   stx_mask: Annotated[Annotated[int, ctypes.c_uint32], 0]
   stx_blksize: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -115,7 +116,7 @@ class struct_statx:
   stx_uid: Annotated[Annotated[int, ctypes.c_uint32], 20]
   stx_gid: Annotated[Annotated[int, ctypes.c_uint32], 24]
   stx_mode: Annotated[Annotated[int, ctypes.c_uint16], 28]
-  __spare0: Annotated[Array[Annotated[int, ctypes.c_uint16], Literal[1]], 30]
+  __spare0: Annotated[c.Array[Annotated[int, ctypes.c_uint16], Literal[1]], 30]
   stx_ino: Annotated[Annotated[int, ctypes.c_uint64], 32]
   stx_size: Annotated[Annotated[int, ctypes.c_uint64], 40]
   stx_blocks: Annotated[Annotated[int, ctypes.c_uint64], 48]
@@ -131,9 +132,9 @@ class struct_statx:
   stx_mnt_id: Annotated[Annotated[int, ctypes.c_uint64], 144]
   stx_dio_mem_align: Annotated[Annotated[int, ctypes.c_uint32], 152]
   stx_dio_offset_align: Annotated[Annotated[int, ctypes.c_uint32], 156]
-  __spare3: Annotated[Array[Annotated[int, ctypes.c_uint64], Literal[12]], 160]
-@record
-class struct_statx_timestamp:
+  __spare3: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[12]], 160]
+@c.record
+class struct_statx_timestamp(c.Struct):
   SIZE = 16
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_nsec: Annotated[Annotated[int, ctypes.c_uint32], 8]
@@ -214,8 +215,8 @@ IORING_MSG_SEND_FD = _anonenum1.define('IORING_MSG_SEND_FD', 1)
 _anonenum2 = CEnum(Annotated[int, ctypes.c_uint32])
 IORING_CQE_BUFFER_SHIFT = _anonenum2.define('IORING_CQE_BUFFER_SHIFT', 16)
 
-@record
-class struct_io_sqring_offsets:
+@c.record
+class struct_io_sqring_offsets(c.Struct):
   SIZE = 40
   head: Annotated[Annotated[int, ctypes.c_uint32], 0]
   tail: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -226,8 +227,8 @@ class struct_io_sqring_offsets:
   array: Annotated[Annotated[int, ctypes.c_uint32], 24]
   resv1: Annotated[Annotated[int, ctypes.c_uint32], 28]
   user_addr: Annotated[Annotated[int, ctypes.c_uint64], 32]
-@record
-class struct_io_cqring_offsets:
+@c.record
+class struct_io_cqring_offsets(c.Struct):
   SIZE = 40
   head: Annotated[Annotated[int, ctypes.c_uint32], 0]
   tail: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -238,8 +239,8 @@ class struct_io_cqring_offsets:
   flags: Annotated[Annotated[int, ctypes.c_uint32], 24]
   resv1: Annotated[Annotated[int, ctypes.c_uint32], 28]
   user_addr: Annotated[Annotated[int, ctypes.c_uint64], 32]
-@record
-class struct_io_uring_params:
+@c.record
+class struct_io_uring_params(c.Struct):
   SIZE = 120
   sq_entries: Annotated[Annotated[int, ctypes.c_uint32], 0]
   cq_entries: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -248,7 +249,7 @@ class struct_io_uring_params:
   sq_thread_idle: Annotated[Annotated[int, ctypes.c_uint32], 16]
   features: Annotated[Annotated[int, ctypes.c_uint32], 20]
   wq_fd: Annotated[Annotated[int, ctypes.c_uint32], 24]
-  resv: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[3]], 28]
+  resv: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[3]], 28]
   sq_off: Annotated[struct_io_sqring_offsets, 40]
   cq_off: Annotated[struct_io_cqring_offsets, 80]
 _anonenum3 = CEnum(Annotated[int, ctypes.c_uint32])
@@ -286,28 +287,28 @@ _anonenum4 = CEnum(Annotated[int, ctypes.c_uint32])
 IO_WQ_BOUND = _anonenum4.define('IO_WQ_BOUND', 0)
 IO_WQ_UNBOUND = _anonenum4.define('IO_WQ_UNBOUND', 1)
 
-@record
-class struct_io_uring_files_update:
+@c.record
+class struct_io_uring_files_update(c.Struct):
   SIZE = 16
   offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
   resv: Annotated[Annotated[int, ctypes.c_uint32], 4]
   fds: Annotated[Annotated[int, ctypes.c_uint64], 8]
-@record
-class struct_io_uring_rsrc_register:
+@c.record
+class struct_io_uring_rsrc_register(c.Struct):
   SIZE = 32
   nr: Annotated[Annotated[int, ctypes.c_uint32], 0]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
   resv2: Annotated[Annotated[int, ctypes.c_uint64], 8]
   data: Annotated[Annotated[int, ctypes.c_uint64], 16]
   tags: Annotated[Annotated[int, ctypes.c_uint64], 24]
-@record
-class struct_io_uring_rsrc_update:
+@c.record
+class struct_io_uring_rsrc_update(c.Struct):
   SIZE = 16
   offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
   resv: Annotated[Annotated[int, ctypes.c_uint32], 4]
   data: Annotated[Annotated[int, ctypes.c_uint64], 8]
-@record
-class struct_io_uring_rsrc_update2:
+@c.record
+class struct_io_uring_rsrc_update2(c.Struct):
   SIZE = 32
   offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
   resv: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -315,64 +316,64 @@ class struct_io_uring_rsrc_update2:
   tags: Annotated[Annotated[int, ctypes.c_uint64], 16]
   nr: Annotated[Annotated[int, ctypes.c_uint32], 24]
   resv2: Annotated[Annotated[int, ctypes.c_uint32], 28]
-@record
-class struct_io_uring_probe_op:
+@c.record
+class struct_io_uring_probe_op(c.Struct):
   SIZE = 8
   op: Annotated[Annotated[int, ctypes.c_ubyte], 0]
   resv: Annotated[Annotated[int, ctypes.c_ubyte], 1]
   flags: Annotated[Annotated[int, ctypes.c_uint16], 2]
   resv2: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_io_uring_probe:
+@c.record
+class struct_io_uring_probe(c.Struct):
   SIZE = 16
   last_op: Annotated[Annotated[int, ctypes.c_ubyte], 0]
   ops_len: Annotated[Annotated[int, ctypes.c_ubyte], 1]
   resv: Annotated[Annotated[int, ctypes.c_uint16], 2]
-  resv2: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[3]], 4]
-  ops: Annotated[Array[struct_io_uring_probe_op, Literal[0]], 16]
-@record
-class struct_io_uring_restriction:
+  resv2: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[3]], 4]
+  ops: Annotated[c.Array[struct_io_uring_probe_op, Literal[0]], 16]
+@c.record
+class struct_io_uring_restriction(c.Struct):
   SIZE = 16
   opcode: Annotated[Annotated[int, ctypes.c_uint16], 0]
   register_op: Annotated[Annotated[int, ctypes.c_ubyte], 2]
   sqe_op: Annotated[Annotated[int, ctypes.c_ubyte], 2]
   sqe_flags: Annotated[Annotated[int, ctypes.c_ubyte], 2]
   resv: Annotated[Annotated[int, ctypes.c_ubyte], 3]
-  resv2: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[3]], 4]
-@record
-class struct_io_uring_buf:
+  resv2: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[3]], 4]
+@c.record
+class struct_io_uring_buf(c.Struct):
   SIZE = 16
   addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   len: Annotated[Annotated[int, ctypes.c_uint32], 8]
   bid: Annotated[Annotated[int, ctypes.c_uint16], 12]
   resv: Annotated[Annotated[int, ctypes.c_uint16], 14]
-@record
-class struct_io_uring_buf_ring:
+@c.record
+class struct_io_uring_buf_ring(c.Struct):
   SIZE = 16
   resv1: Annotated[Annotated[int, ctypes.c_uint64], 0]
   resv2: Annotated[Annotated[int, ctypes.c_uint32], 8]
   resv3: Annotated[Annotated[int, ctypes.c_uint16], 12]
   tail: Annotated[Annotated[int, ctypes.c_uint16], 14]
   __empty_bufs: Annotated[_anonstruct5, 0]
-  bufs: Annotated[Array[struct_io_uring_buf, Literal[0]], 0]
+  bufs: Annotated[c.Array[struct_io_uring_buf, Literal[0]], 0]
 class _anonstruct5(ctypes.Structure): pass
 _anonenum6 = CEnum(Annotated[int, ctypes.c_uint32])
 IOU_PBUF_RING_MMAP = _anonenum6.define('IOU_PBUF_RING_MMAP', 1)
 
-@record
-class struct_io_uring_buf_reg:
+@c.record
+class struct_io_uring_buf_reg(c.Struct):
   SIZE = 40
   ring_addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   ring_entries: Annotated[Annotated[int, ctypes.c_uint32], 8]
   bgid: Annotated[Annotated[int, ctypes.c_uint16], 12]
   flags: Annotated[Annotated[int, ctypes.c_uint16], 14]
-  resv: Annotated[Array[Annotated[int, ctypes.c_uint64], Literal[3]], 16]
-@record
-class struct_io_uring_buf_status:
+  resv: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[3]], 16]
+@c.record
+class struct_io_uring_buf_status(c.Struct):
   SIZE = 40
   buf_group: Annotated[Annotated[int, ctypes.c_uint32], 0]
   head: Annotated[Annotated[int, ctypes.c_uint32], 4]
-  resv: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[8]], 8]
+  resv: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[8]], 8]
 _anonenum7 = CEnum(Annotated[int, ctypes.c_uint32])
 IORING_RESTRICTION_REGISTER_OP = _anonenum7.define('IORING_RESTRICTION_REGISTER_OP', 0)
 IORING_RESTRICTION_SQE_OP = _anonenum7.define('IORING_RESTRICTION_SQE_OP', 1)
@@ -380,37 +381,37 @@ IORING_RESTRICTION_SQE_FLAGS_ALLOWED = _anonenum7.define('IORING_RESTRICTION_SQE
 IORING_RESTRICTION_SQE_FLAGS_REQUIRED = _anonenum7.define('IORING_RESTRICTION_SQE_FLAGS_REQUIRED', 3)
 IORING_RESTRICTION_LAST = _anonenum7.define('IORING_RESTRICTION_LAST', 4)
 
-@record
-class struct_io_uring_getevents_arg:
+@c.record
+class struct_io_uring_getevents_arg(c.Struct):
   SIZE = 24
   sigmask: Annotated[Annotated[int, ctypes.c_uint64], 0]
   sigmask_sz: Annotated[Annotated[int, ctypes.c_uint32], 8]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
   ts: Annotated[Annotated[int, ctypes.c_uint64], 16]
-@record
-class struct_io_uring_sync_cancel_reg:
+@c.record
+class struct_io_uring_sync_cancel_reg(c.Struct):
   SIZE = 64
   addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   fd: Annotated[Annotated[int, ctypes.c_int32], 8]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 12]
   timeout: Annotated[struct___kernel_timespec, 16]
   opcode: Annotated[Annotated[int, ctypes.c_ubyte], 32]
-  pad: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[7]], 33]
-  pad2: Annotated[Array[Annotated[int, ctypes.c_uint64], Literal[3]], 40]
-@record
-class struct___kernel_timespec:
+  pad: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[7]], 33]
+  pad2: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[3]], 40]
+@c.record
+class struct___kernel_timespec(c.Struct):
   SIZE = 16
   tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
   tv_nsec: Annotated[Annotated[int, ctypes.c_int64], 8]
 __kernel_time64_t: TypeAlias = Annotated[int, ctypes.c_int64]
-@record
-class struct_io_uring_file_index_range:
+@c.record
+class struct_io_uring_file_index_range(c.Struct):
   SIZE = 16
   off: Annotated[Annotated[int, ctypes.c_uint32], 0]
   len: Annotated[Annotated[int, ctypes.c_uint32], 4]
   resv: Annotated[Annotated[int, ctypes.c_uint64], 8]
-@record
-class struct_io_uring_recvmsg_out:
+@c.record
+class struct_io_uring_recvmsg_out(c.Struct):
   SIZE = 16
   namelen: Annotated[Annotated[int, ctypes.c_uint32], 0]
   controllen: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -422,7 +423,7 @@ SOCKET_URING_OP_SIOCOUTQ = _anonenum8.define('SOCKET_URING_OP_SIOCOUTQ', 1)
 SOCKET_URING_OP_GETSOCKOPT = _anonenum8.define('SOCKET_URING_OP_GETSOCKOPT', 2)
 SOCKET_URING_OP_SETSOCKOPT = _anonenum8.define('SOCKET_URING_OP_SETSOCKOPT', 3)
 
-init_records()
+c.init_records()
 _XOPEN_SOURCE = 500
 uring_unlikely = lambda cond: __builtin_expect( not  not (cond), 0)
 uring_likely = lambda cond: __builtin_expect( not  not (cond), 1)

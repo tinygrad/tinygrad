@@ -1,9 +1,10 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-@record
-class struct_v11_gfx_mqd:
+from tinygrad.runtime.support import c
+from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+@c.record
+class struct_v11_gfx_mqd(c.Struct):
   SIZE = 2048
   shadow_base_lo: Annotated[Annotated[int, ctypes.c_uint32], 0]
   shadow_base_hi: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -517,8 +518,8 @@ class struct_v11_gfx_mqd:
   reserved_509: Annotated[Annotated[int, ctypes.c_uint32], 2036]
   reserved_510: Annotated[Annotated[int, ctypes.c_uint32], 2040]
   reserved_511: Annotated[Annotated[int, ctypes.c_uint32], 2044]
-@record
-class struct_v11_sdma_mqd:
+@c.record
+class struct_v11_sdma_mqd(c.Struct):
   SIZE = 512
   sdmax_rlcx_rb_cntl: Annotated[Annotated[int, ctypes.c_uint32], 0]
   sdmax_rlcx_rb_base: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -648,8 +649,8 @@ class struct_v11_sdma_mqd:
   reserved_125: Annotated[Annotated[int, ctypes.c_uint32], 500]
   sdma_engine_id: Annotated[Annotated[int, ctypes.c_uint32], 504]
   sdma_queue_id: Annotated[Annotated[int, ctypes.c_uint32], 508]
-@record
-class struct_v11_compute_mqd:
+@c.record
+class struct_v11_compute_mqd(c.Struct):
   SIZE = 2048
   header: Annotated[Annotated[int, ctypes.c_uint32], 0]
   compute_dispatch_initiator: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -1163,8 +1164,8 @@ class struct_v11_compute_mqd:
   gws_61_val: Annotated[Annotated[int, ctypes.c_uint32], 2036]
   gws_62_val: Annotated[Annotated[int, ctypes.c_uint32], 2040]
   gws_63_val: Annotated[Annotated[int, ctypes.c_uint32], 2044]
-@record
-class struct_v12_gfx_mqd:
+@c.record
+class struct_v12_gfx_mqd(c.Struct):
   SIZE = 2048
   shadow_base_lo: Annotated[uint32_t, 0]
   shadow_base_hi: Annotated[uint32_t, 4]
@@ -1679,8 +1680,8 @@ class struct_v12_gfx_mqd:
   reserved_510: Annotated[uint32_t, 2040]
   reserved_511: Annotated[uint32_t, 2044]
 uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-@record
-class struct_v12_sdma_mqd:
+@c.record
+class struct_v12_sdma_mqd(c.Struct):
   SIZE = 512
   sdmax_rlcx_rb_cntl: Annotated[uint32_t, 0]
   sdmax_rlcx_rb_base: Annotated[uint32_t, 4]
@@ -1810,8 +1811,8 @@ class struct_v12_sdma_mqd:
   reserved_125: Annotated[uint32_t, 500]
   sdma_engine_id: Annotated[uint32_t, 504]
   sdma_queue_id: Annotated[uint32_t, 508]
-@record
-class struct_v12_compute_mqd:
+@c.record
+class struct_v12_compute_mqd(c.Struct):
   SIZE = 2048
   header: Annotated[uint32_t, 0]
   compute_dispatch_initiator: Annotated[uint32_t, 4]
@@ -2340,8 +2341,8 @@ MALL_INFO = table.define('MALL_INFO', 4)
 NPS_INFO = table.define('NPS_INFO', 5)
 TOTAL_TABLES = table.define('TOTAL_TABLES', 6)
 
-@record
-class struct_table_info:
+@c.record
+class struct_table_info(c.Struct):
   SIZE = 8
   offset: Annotated[uint16_t, 0]
   checksum: Annotated[uint16_t, 2]
@@ -2349,39 +2350,39 @@ class struct_table_info:
   padding: Annotated[uint16_t, 6]
 uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
 table_info: TypeAlias = struct_table_info
-@record
-class struct_binary_header:
+@c.record
+class struct_binary_header(c.Struct):
   SIZE = 60
   binary_signature: Annotated[uint32_t, 0]
   version_major: Annotated[uint16_t, 4]
   version_minor: Annotated[uint16_t, 6]
   binary_checksum: Annotated[uint16_t, 8]
   binary_size: Annotated[uint16_t, 10]
-  table_list: Annotated[Array[table_info, Literal[6]], 12]
+  table_list: Annotated[c.Array[table_info, Literal[6]], 12]
 binary_header: TypeAlias = struct_binary_header
-@record
-class struct_die_info:
+@c.record
+class struct_die_info(c.Struct):
   SIZE = 4
   die_id: Annotated[uint16_t, 0]
   die_offset: Annotated[uint16_t, 2]
 die_info: TypeAlias = struct_die_info
-@record
-class struct_ip_discovery_header:
+@c.record
+class struct_ip_discovery_header(c.Struct):
   SIZE = 80
   signature: Annotated[uint32_t, 0]
   version: Annotated[uint16_t, 4]
   size: Annotated[uint16_t, 6]
   id: Annotated[uint32_t, 8]
   num_dies: Annotated[uint16_t, 12]
-  die_info: Annotated[Array[die_info, Literal[16]], 14]
-  padding: Annotated[Array[uint16_t, Literal[1]], 78]
+  die_info: Annotated[c.Array[die_info, Literal[16]], 14]
+  padding: Annotated[c.Array[uint16_t, Literal[1]], 78]
   base_addr_64_bit: Annotated[uint8_t, 0, 1, 0]
   reserved: Annotated[uint8_t, 0, 7, 1]
   reserved2: Annotated[uint8_t, 1]
 uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
 ip_discovery_header: TypeAlias = struct_ip_discovery_header
-@record
-class struct_ip:
+@c.record
+class struct_ip(c.Struct):
   SIZE = 8
   hw_id: Annotated[uint16_t, 0]
   number_instance: Annotated[uint8_t, 2]
@@ -2391,10 +2392,10 @@ class struct_ip:
   revision: Annotated[uint8_t, 6]
   harvest: Annotated[uint8_t, 7, 4, 0]
   reserved: Annotated[uint8_t, 7, 4, 4]
-  base_address: Annotated[Array[uint32_t, Literal[0]], 8]
+  base_address: Annotated[c.Array[uint32_t, Literal[0]], 8]
 ip: TypeAlias = struct_ip
-@record
-class struct_ip_v3:
+@c.record
+class struct_ip_v3(c.Struct):
   SIZE = 8
   hw_id: Annotated[uint16_t, 0]
   instance_number: Annotated[uint8_t, 2]
@@ -2404,10 +2405,10 @@ class struct_ip_v3:
   revision: Annotated[uint8_t, 6]
   sub_revision: Annotated[uint8_t, 7, 4, 0]
   variant: Annotated[uint8_t, 7, 4, 4]
-  base_address: Annotated[Array[uint32_t, Literal[0]], 8]
+  base_address: Annotated[c.Array[uint32_t, Literal[0]], 8]
 ip_v3: TypeAlias = struct_ip_v3
-@record
-class struct_ip_v4:
+@c.record
+class struct_ip_v4(c.Struct):
   SIZE = 7
   hw_id: Annotated[uint16_t, 0]
   instance_number: Annotated[uint8_t, 2]
@@ -2416,34 +2417,34 @@ class struct_ip_v4:
   minor: Annotated[uint8_t, 5]
   revision: Annotated[uint8_t, 6]
 ip_v4: TypeAlias = struct_ip_v4
-@record
-class struct_die_header:
+@c.record
+class struct_die_header(c.Struct):
   SIZE = 4
   die_id: Annotated[uint16_t, 0]
   num_ips: Annotated[uint16_t, 2]
 die_header: TypeAlias = struct_die_header
-@record
-class struct_ip_structure:
+@c.record
+class struct_ip_structure(c.Struct):
   SIZE = 24
-  header: Annotated[POINTER(ip_discovery_header), 0]
+  header: Annotated[c.POINTER(ip_discovery_header), 0]
   die: Annotated[struct_die, 8]
-@record
-class struct_die:
+@c.record
+class struct_die(c.Struct):
   SIZE = 16
-  die_header: Annotated[POINTER(die_header), 0]
-  ip_list: Annotated[POINTER(ip), 8]
-  ip_v3_list: Annotated[POINTER(ip_v3), 8]
-  ip_v4_list: Annotated[POINTER(ip_v4), 8]
+  die_header: Annotated[c.POINTER(die_header), 0]
+  ip_list: Annotated[c.POINTER(ip), 8]
+  ip_v3_list: Annotated[c.POINTER(ip_v3), 8]
+  ip_v4_list: Annotated[c.POINTER(ip_v4), 8]
 ip_structure: TypeAlias = struct_ip_structure
-@record
-class struct_gpu_info_header:
+@c.record
+class struct_gpu_info_header(c.Struct):
   SIZE = 12
   table_id: Annotated[uint32_t, 0]
   version_major: Annotated[uint16_t, 4]
   version_minor: Annotated[uint16_t, 6]
   size: Annotated[uint32_t, 8]
-@record
-class struct_gc_info_v1_0:
+@c.record
+class struct_gc_info_v1_0(c.Struct):
   SIZE = 88
   header: Annotated[struct_gpu_info_header, 0]
   gc_num_se: Annotated[uint32_t, 12]
@@ -2465,8 +2466,8 @@ class struct_gc_info_v1_0:
   gc_num_sa_per_se: Annotated[uint32_t, 76]
   gc_num_packer_per_sc: Annotated[uint32_t, 80]
   gc_num_gl2a: Annotated[uint32_t, 84]
-@record
-class struct_gc_info_v1_1:
+@c.record
+class struct_gc_info_v1_1(c.Struct):
   SIZE = 100
   header: Annotated[struct_gpu_info_header, 0]
   gc_num_se: Annotated[uint32_t, 12]
@@ -2491,8 +2492,8 @@ class struct_gc_info_v1_1:
   gc_num_tcp_per_sa: Annotated[uint32_t, 88]
   gc_num_sdp_interface: Annotated[uint32_t, 92]
   gc_num_tcps: Annotated[uint32_t, 96]
-@record
-class struct_gc_info_v1_2:
+@c.record
+class struct_gc_info_v1_2(c.Struct):
   SIZE = 132
   header: Annotated[struct_gpu_info_header, 0]
   gc_num_se: Annotated[uint32_t, 12]
@@ -2525,8 +2526,8 @@ class struct_gc_info_v1_2:
   gc_gl1c_per_sa: Annotated[uint32_t, 120]
   gc_gl1c_size_per_instance: Annotated[uint32_t, 124]
   gc_gl2c_per_gpu: Annotated[uint32_t, 128]
-@record
-class struct_gc_info_v1_3:
+@c.record
+class struct_gc_info_v1_3(c.Struct):
   SIZE = 164
   header: Annotated[struct_gpu_info_header, 0]
   gc_num_se: Annotated[uint32_t, 12]
@@ -2567,8 +2568,8 @@ class struct_gc_info_v1_3:
   gc_scalar_data_cache_line_size: Annotated[uint32_t, 152]
   gc_tcc_size: Annotated[uint32_t, 156]
   gc_tcc_cache_line_size: Annotated[uint32_t, 160]
-@record
-class struct_gc_info_v2_0:
+@c.record
+class struct_gc_info_v2_0(c.Struct):
   SIZE = 80
   header: Annotated[struct_gpu_info_header, 0]
   gc_num_se: Annotated[uint32_t, 12]
@@ -2588,8 +2589,8 @@ class struct_gc_info_v2_0:
   gc_lds_size: Annotated[uint32_t, 68]
   gc_num_sc_per_se: Annotated[uint32_t, 72]
   gc_num_packer_per_sc: Annotated[uint32_t, 76]
-@record
-class struct_gc_info_v2_1:
+@c.record
+class struct_gc_info_v2_1(c.Struct):
   SIZE = 108
   header: Annotated[struct_gpu_info_header, 0]
   gc_num_se: Annotated[uint32_t, 12]
@@ -2616,100 +2617,100 @@ class struct_gc_info_v2_1:
   gc_instruction_cache_size_per_sqc: Annotated[uint32_t, 96]
   gc_scalar_data_cache_size_per_sqc: Annotated[uint32_t, 100]
   gc_tcc_size: Annotated[uint32_t, 104]
-@record
-class struct_harvest_info_header:
+@c.record
+class struct_harvest_info_header(c.Struct):
   SIZE = 8
   signature: Annotated[uint32_t, 0]
   version: Annotated[uint32_t, 4]
 harvest_info_header: TypeAlias = struct_harvest_info_header
-@record
-class struct_harvest_info:
+@c.record
+class struct_harvest_info(c.Struct):
   SIZE = 4
   hw_id: Annotated[uint16_t, 0]
   number_instance: Annotated[uint8_t, 2]
   reserved: Annotated[uint8_t, 3]
 harvest_info: TypeAlias = struct_harvest_info
-@record
-class struct_harvest_table:
+@c.record
+class struct_harvest_table(c.Struct):
   SIZE = 136
   header: Annotated[harvest_info_header, 0]
-  list: Annotated[Array[harvest_info, Literal[32]], 8]
+  list: Annotated[c.Array[harvest_info, Literal[32]], 8]
 harvest_table: TypeAlias = struct_harvest_table
-@record
-class struct_mall_info_header:
+@c.record
+class struct_mall_info_header(c.Struct):
   SIZE = 12
   table_id: Annotated[uint32_t, 0]
   version_major: Annotated[uint16_t, 4]
   version_minor: Annotated[uint16_t, 6]
   size_bytes: Annotated[uint32_t, 8]
-@record
-class struct_mall_info_v1_0:
+@c.record
+class struct_mall_info_v1_0(c.Struct):
   SIZE = 48
   header: Annotated[struct_mall_info_header, 0]
   mall_size_per_m: Annotated[uint32_t, 12]
   m_s_present: Annotated[uint32_t, 16]
   m_half_use: Annotated[uint32_t, 20]
   m_mall_config: Annotated[uint32_t, 24]
-  reserved: Annotated[Array[uint32_t, Literal[5]], 28]
-@record
-class struct_mall_info_v2_0:
+  reserved: Annotated[c.Array[uint32_t, Literal[5]], 28]
+@c.record
+class struct_mall_info_v2_0(c.Struct):
   SIZE = 48
   header: Annotated[struct_mall_info_header, 0]
   mall_size_per_umc: Annotated[uint32_t, 12]
-  reserved: Annotated[Array[uint32_t, Literal[8]], 16]
-@record
-class struct_vcn_info_header:
+  reserved: Annotated[c.Array[uint32_t, Literal[8]], 16]
+@c.record
+class struct_vcn_info_header(c.Struct):
   SIZE = 12
   table_id: Annotated[uint32_t, 0]
   version_major: Annotated[uint16_t, 4]
   version_minor: Annotated[uint16_t, 6]
   size_bytes: Annotated[uint32_t, 8]
-@record
-class struct_vcn_instance_info_v1_0:
+@c.record
+class struct_vcn_instance_info_v1_0(c.Struct):
   SIZE = 16
   instance_num: Annotated[uint32_t, 0]
   fuse_data: Annotated[union__fuse_data, 4]
-  reserved: Annotated[Array[uint32_t, Literal[2]], 8]
-@record
-class union__fuse_data:
+  reserved: Annotated[c.Array[uint32_t, Literal[2]], 8]
+@c.record
+class union__fuse_data(c.Struct):
   SIZE = 4
   bits: Annotated[_anonstruct0, 0]
   all_bits: Annotated[uint32_t, 0]
-@record
-class _anonstruct0:
+@c.record
+class _anonstruct0(c.Struct):
   SIZE = 4
   av1_disabled: Annotated[uint32_t, 0, 1, 0]
   vp9_disabled: Annotated[uint32_t, 0, 1, 1]
   hevc_disabled: Annotated[uint32_t, 0, 1, 2]
   h264_disabled: Annotated[uint32_t, 0, 1, 3]
   reserved: Annotated[uint32_t, 0, 28, 4]
-@record
-class struct_vcn_info_v1_0:
+@c.record
+class struct_vcn_info_v1_0(c.Struct):
   SIZE = 96
   header: Annotated[struct_vcn_info_header, 0]
   num_of_instances: Annotated[uint32_t, 12]
-  instance_info: Annotated[Array[struct_vcn_instance_info_v1_0, Literal[4]], 16]
-  reserved: Annotated[Array[uint32_t, Literal[4]], 80]
-@record
-class struct_nps_info_header:
+  instance_info: Annotated[c.Array[struct_vcn_instance_info_v1_0, Literal[4]], 16]
+  reserved: Annotated[c.Array[uint32_t, Literal[4]], 80]
+@c.record
+class struct_nps_info_header(c.Struct):
   SIZE = 12
   table_id: Annotated[uint32_t, 0]
   version_major: Annotated[uint16_t, 4]
   version_minor: Annotated[uint16_t, 6]
   size_bytes: Annotated[uint32_t, 8]
-@record
-class struct_nps_instance_info_v1_0:
+@c.record
+class struct_nps_instance_info_v1_0(c.Struct):
   SIZE = 16
   base_address: Annotated[uint64_t, 0]
   limit_address: Annotated[uint64_t, 8]
 uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
-@record
-class struct_nps_info_v1_0:
+@c.record
+class struct_nps_info_v1_0(c.Struct):
   SIZE = 212
   header: Annotated[struct_nps_info_header, 0]
   nps_type: Annotated[uint32_t, 12]
   count: Annotated[uint32_t, 16]
-  instance_info: Annotated[Array[struct_nps_instance_info_v1_0, Literal[12]], 20]
+  instance_info: Annotated[c.Array[struct_nps_instance_info_v1_0, Literal[12]], 20]
 enum_amd_hw_ip_block_type = CEnum(Annotated[int, ctypes.c_uint32])
 GC_HWIP = enum_amd_hw_ip_block_type.define('GC_HWIP', 1)
 HDP_HWIP = enum_amd_hw_ip_block_type.define('HDP_HWIP', 2)
@@ -2749,8 +2750,8 @@ PCIE_HWIP = enum_amd_hw_ip_block_type.define('PCIE_HWIP', 33)
 ISP_HWIP = enum_amd_hw_ip_block_type.define('ISP_HWIP', 34)
 MAX_HWIP = enum_amd_hw_ip_block_type.define('MAX_HWIP', 35)
 
-@record
-class struct_common_firmware_header:
+@c.record
+class struct_common_firmware_header(c.Struct):
   SIZE = 32
   size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 0]
   header_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -2762,68 +2763,68 @@ class struct_common_firmware_header:
   ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 20]
   ucode_array_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 24]
   crc32: Annotated[Annotated[int, ctypes.c_uint32], 28]
-@record
-class struct_mc_firmware_header_v1_0:
+@c.record
+class struct_mc_firmware_header_v1_0(c.Struct):
   SIZE = 40
   header: Annotated[struct_common_firmware_header, 0]
   io_debug_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 32]
   io_debug_array_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class struct_smc_firmware_header_v1_0:
+@c.record
+class struct_smc_firmware_header_v1_0(c.Struct):
   SIZE = 36
   header: Annotated[struct_common_firmware_header, 0]
   ucode_start_addr: Annotated[Annotated[int, ctypes.c_uint32], 32]
-@record
-class struct_smc_firmware_header_v2_0:
+@c.record
+class struct_smc_firmware_header_v2_0(c.Struct):
   SIZE = 44
   v1_0: Annotated[struct_smc_firmware_header_v1_0, 0]
   ppt_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 36]
   ppt_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 40]
-@record
-class struct_smc_soft_pptable_entry:
+@c.record
+class struct_smc_soft_pptable_entry(c.Struct):
   SIZE = 12
   id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   ppt_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 4]
   ppt_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 8]
-@record
-class struct_smc_firmware_header_v2_1:
+@c.record
+class struct_smc_firmware_header_v2_1(c.Struct):
   SIZE = 44
   v1_0: Annotated[struct_smc_firmware_header_v1_0, 0]
   pptable_count: Annotated[Annotated[int, ctypes.c_uint32], 36]
   pptable_entry_offset: Annotated[Annotated[int, ctypes.c_uint32], 40]
-@record
-class struct_psp_fw_legacy_bin_desc:
+@c.record
+class struct_psp_fw_legacy_bin_desc(c.Struct):
   SIZE = 12
   fw_version: Annotated[Annotated[int, ctypes.c_uint32], 0]
   offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 4]
   size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 8]
-@record
-class struct_psp_firmware_header_v1_0:
+@c.record
+class struct_psp_firmware_header_v1_0(c.Struct):
   SIZE = 44
   header: Annotated[struct_common_firmware_header, 0]
   sos: Annotated[struct_psp_fw_legacy_bin_desc, 32]
-@record
-class struct_psp_firmware_header_v1_1:
+@c.record
+class struct_psp_firmware_header_v1_1(c.Struct):
   SIZE = 68
   v1_0: Annotated[struct_psp_firmware_header_v1_0, 0]
   toc: Annotated[struct_psp_fw_legacy_bin_desc, 44]
   kdb: Annotated[struct_psp_fw_legacy_bin_desc, 56]
-@record
-class struct_psp_firmware_header_v1_2:
+@c.record
+class struct_psp_firmware_header_v1_2(c.Struct):
   SIZE = 68
   v1_0: Annotated[struct_psp_firmware_header_v1_0, 0]
   res: Annotated[struct_psp_fw_legacy_bin_desc, 44]
   kdb: Annotated[struct_psp_fw_legacy_bin_desc, 56]
-@record
-class struct_psp_firmware_header_v1_3:
+@c.record
+class struct_psp_firmware_header_v1_3(c.Struct):
   SIZE = 116
   v1_1: Annotated[struct_psp_firmware_header_v1_1, 0]
   spl: Annotated[struct_psp_fw_legacy_bin_desc, 68]
   rl: Annotated[struct_psp_fw_legacy_bin_desc, 80]
   sys_drv_aux: Annotated[struct_psp_fw_legacy_bin_desc, 92]
   sos_aux: Annotated[struct_psp_fw_legacy_bin_desc, 104]
-@record
-class struct_psp_fw_bin_desc:
+@c.record
+class struct_psp_fw_bin_desc(c.Struct):
   SIZE = 16
   fw_type: Annotated[Annotated[int, ctypes.c_uint32], 0]
   fw_version: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -2844,21 +2845,21 @@ PSP_FW_TYPE_PSP_RAS_DRV = enum_psp_fw_type.define('PSP_FW_TYPE_PSP_RAS_DRV', 10)
 PSP_FW_TYPE_PSP_IPKEYMGR_DRV = enum_psp_fw_type.define('PSP_FW_TYPE_PSP_IPKEYMGR_DRV', 11)
 PSP_FW_TYPE_MAX_INDEX = enum_psp_fw_type.define('PSP_FW_TYPE_MAX_INDEX', 12)
 
-@record
-class struct_psp_firmware_header_v2_0:
+@c.record
+class struct_psp_firmware_header_v2_0(c.Struct):
   SIZE = 52
   header: Annotated[struct_common_firmware_header, 0]
   psp_fw_bin_count: Annotated[Annotated[int, ctypes.c_uint32], 32]
-  psp_fw_bin: Annotated[Array[struct_psp_fw_bin_desc, Literal[1]], 36]
-@record
-class struct_psp_firmware_header_v2_1:
+  psp_fw_bin: Annotated[c.Array[struct_psp_fw_bin_desc, Literal[1]], 36]
+@c.record
+class struct_psp_firmware_header_v2_1(c.Struct):
   SIZE = 56
   header: Annotated[struct_common_firmware_header, 0]
   psp_fw_bin_count: Annotated[Annotated[int, ctypes.c_uint32], 32]
   psp_aux_fw_bin_index: Annotated[Annotated[int, ctypes.c_uint32], 36]
-  psp_fw_bin: Annotated[Array[struct_psp_fw_bin_desc, Literal[1]], 40]
-@record
-class struct_ta_firmware_header_v1_0:
+  psp_fw_bin: Annotated[c.Array[struct_psp_fw_bin_desc, Literal[1]], 40]
+@c.record
+class struct_ta_firmware_header_v1_0(c.Struct):
   SIZE = 92
   header: Annotated[struct_common_firmware_header, 0]
   xgmi: Annotated[struct_psp_fw_legacy_bin_desc, 32]
@@ -2877,21 +2878,21 @@ TA_FW_TYPE_PSP_RAP = enum_ta_fw_type.define('TA_FW_TYPE_PSP_RAP', 6)
 TA_FW_TYPE_PSP_SECUREDISPLAY = enum_ta_fw_type.define('TA_FW_TYPE_PSP_SECUREDISPLAY', 7)
 TA_FW_TYPE_MAX_INDEX = enum_ta_fw_type.define('TA_FW_TYPE_MAX_INDEX', 8)
 
-@record
-class struct_ta_firmware_header_v2_0:
+@c.record
+class struct_ta_firmware_header_v2_0(c.Struct):
   SIZE = 52
   header: Annotated[struct_common_firmware_header, 0]
   ta_fw_bin_count: Annotated[Annotated[int, ctypes.c_uint32], 32]
-  ta_fw_bin: Annotated[Array[struct_psp_fw_bin_desc, Literal[1]], 36]
-@record
-class struct_gfx_firmware_header_v1_0:
+  ta_fw_bin: Annotated[c.Array[struct_psp_fw_bin_desc, Literal[1]], 36]
+@c.record
+class struct_gfx_firmware_header_v1_0(c.Struct):
   SIZE = 44
   header: Annotated[struct_common_firmware_header, 0]
   ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
   jt_offset: Annotated[Annotated[int, ctypes.c_uint32], 36]
   jt_size: Annotated[Annotated[int, ctypes.c_uint32], 40]
-@record
-class struct_gfx_firmware_header_v2_0:
+@c.record
+class struct_gfx_firmware_header_v2_0(c.Struct):
   SIZE = 60
   header: Annotated[struct_common_firmware_header, 0]
   ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
@@ -2901,8 +2902,8 @@ class struct_gfx_firmware_header_v2_0:
   data_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 48]
   ucode_start_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 52]
   ucode_start_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 56]
-@record
-class struct_mes_firmware_header_v1_0:
+@c.record
+class struct_mes_firmware_header_v1_0(c.Struct):
   SIZE = 72
   header: Annotated[struct_common_firmware_header, 0]
   mes_ucode_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
@@ -2915,8 +2916,8 @@ class struct_mes_firmware_header_v1_0:
   mes_uc_start_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 60]
   mes_data_start_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 64]
   mes_data_start_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 68]
-@record
-class struct_rlc_firmware_header_v1_0:
+@c.record
+class struct_rlc_firmware_header_v1_0(c.Struct):
   SIZE = 52
   header: Annotated[struct_common_firmware_header, 0]
   ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
@@ -2924,8 +2925,8 @@ class struct_rlc_firmware_header_v1_0:
   clear_state_descriptor_offset: Annotated[Annotated[int, ctypes.c_uint32], 40]
   avail_scratch_ram_locations: Annotated[Annotated[int, ctypes.c_uint32], 44]
   master_pkt_description_offset: Annotated[Annotated[int, ctypes.c_uint32], 48]
-@record
-class struct_rlc_firmware_header_v2_0:
+@c.record
+class struct_rlc_firmware_header_v2_0(c.Struct):
   SIZE = 104
   header: Annotated[struct_common_firmware_header, 0]
   ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
@@ -2946,8 +2947,8 @@ class struct_rlc_firmware_header_v2_0:
   reg_list_format_separate_array_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 92]
   reg_list_separate_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 96]
   reg_list_separate_array_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 100]
-@record
-class struct_rlc_firmware_header_v2_1:
+@c.record
+class struct_rlc_firmware_header_v2_1(c.Struct):
   SIZE = 156
   v2_0: Annotated[struct_rlc_firmware_header_v2_0, 0]
   reg_list_format_direct_reg_list_length: Annotated[Annotated[int, ctypes.c_uint32], 104]
@@ -2963,16 +2964,16 @@ class struct_rlc_firmware_header_v2_1:
   save_restore_list_srm_feature_ver: Annotated[Annotated[int, ctypes.c_uint32], 144]
   save_restore_list_srm_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 148]
   save_restore_list_srm_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 152]
-@record
-class struct_rlc_firmware_header_v2_2:
+@c.record
+class struct_rlc_firmware_header_v2_2(c.Struct):
   SIZE = 172
   v2_1: Annotated[struct_rlc_firmware_header_v2_1, 0]
   rlc_iram_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 156]
   rlc_iram_ucode_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 160]
   rlc_dram_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 164]
   rlc_dram_ucode_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 168]
-@record
-class struct_rlc_firmware_header_v2_3:
+@c.record
+class struct_rlc_firmware_header_v2_3(c.Struct):
   SIZE = 204
   v2_2: Annotated[struct_rlc_firmware_header_v2_2, 0]
   rlcp_ucode_version: Annotated[Annotated[int, ctypes.c_uint32], 172]
@@ -2983,8 +2984,8 @@ class struct_rlc_firmware_header_v2_3:
   rlcv_ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 192]
   rlcv_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 196]
   rlcv_ucode_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 200]
-@record
-class struct_rlc_firmware_header_v2_4:
+@c.record
+class struct_rlc_firmware_header_v2_4(c.Struct):
   SIZE = 244
   v2_3: Annotated[struct_rlc_firmware_header_v2_3, 0]
   global_tap_delays_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 204]
@@ -2997,21 +2998,21 @@ class struct_rlc_firmware_header_v2_4:
   se2_tap_delays_ucode_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 232]
   se3_tap_delays_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 236]
   se3_tap_delays_ucode_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 240]
-@record
-class struct_sdma_firmware_header_v1_0:
+@c.record
+class struct_sdma_firmware_header_v1_0(c.Struct):
   SIZE = 48
   header: Annotated[struct_common_firmware_header, 0]
   ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
   ucode_change_version: Annotated[Annotated[int, ctypes.c_uint32], 36]
   jt_offset: Annotated[Annotated[int, ctypes.c_uint32], 40]
   jt_size: Annotated[Annotated[int, ctypes.c_uint32], 44]
-@record
-class struct_sdma_firmware_header_v1_1:
+@c.record
+class struct_sdma_firmware_header_v1_1(c.Struct):
   SIZE = 52
   v1_0: Annotated[struct_sdma_firmware_header_v1_0, 0]
   digest_size: Annotated[Annotated[int, ctypes.c_uint32], 48]
-@record
-class struct_sdma_firmware_header_v2_0:
+@c.record
+class struct_sdma_firmware_header_v2_0(c.Struct):
   SIZE = 64
   header: Annotated[struct_common_firmware_header, 0]
   ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
@@ -3022,8 +3023,8 @@ class struct_sdma_firmware_header_v2_0:
   ctl_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 52]
   ctl_jt_offset: Annotated[Annotated[int, ctypes.c_uint32], 56]
   ctl_jt_size: Annotated[Annotated[int, ctypes.c_uint32], 60]
-@record
-class struct_vpe_firmware_header_v1_0:
+@c.record
+class struct_vpe_firmware_header_v1_0(c.Struct):
   SIZE = 64
   header: Annotated[struct_common_firmware_header, 0]
   ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
@@ -3034,8 +3035,8 @@ class struct_vpe_firmware_header_v1_0:
   ctl_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 52]
   ctl_jt_offset: Annotated[Annotated[int, ctypes.c_uint32], 56]
   ctl_jt_size: Annotated[Annotated[int, ctypes.c_uint32], 60]
-@record
-class struct_umsch_mm_firmware_header_v1_0:
+@c.record
+class struct_umsch_mm_firmware_header_v1_0(c.Struct):
   SIZE = 80
   header: Annotated[struct_common_firmware_header, 0]
   umsch_mm_ucode_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
@@ -3050,15 +3051,15 @@ class struct_umsch_mm_firmware_header_v1_0:
   umsch_mm_uc_start_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 68]
   umsch_mm_data_start_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 72]
   umsch_mm_data_start_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 76]
-@record
-class struct_sdma_firmware_header_v3_0:
+@c.record
+class struct_sdma_firmware_header_v3_0(c.Struct):
   SIZE = 44
   header: Annotated[struct_common_firmware_header, 0]
   ucode_feature_version: Annotated[Annotated[int, ctypes.c_uint32], 32]
   ucode_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 36]
   ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 40]
-@record
-class struct_gpu_info_firmware_v1_0:
+@c.record
+class struct_gpu_info_firmware_v1_0(c.Struct):
   SIZE = 60
   gc_num_se: Annotated[Annotated[int, ctypes.c_uint32], 0]
   gc_num_cu_per_sh: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -3075,40 +3076,40 @@ class struct_gpu_info_firmware_v1_0:
   gc_max_waves_per_simd: Annotated[Annotated[int, ctypes.c_uint32], 48]
   gc_max_scratch_slots_per_cu: Annotated[Annotated[int, ctypes.c_uint32], 52]
   gc_lds_size: Annotated[Annotated[int, ctypes.c_uint32], 56]
-@record
-class struct_gpu_info_firmware_v1_1:
+@c.record
+class struct_gpu_info_firmware_v1_1(c.Struct):
   SIZE = 68
   v1_0: Annotated[struct_gpu_info_firmware_v1_0, 0]
   num_sc_per_sh: Annotated[Annotated[int, ctypes.c_uint32], 60]
   num_packer_per_sc: Annotated[Annotated[int, ctypes.c_uint32], 64]
-@record
-class struct_gpu_info_firmware_header_v1_0:
+@c.record
+class struct_gpu_info_firmware_header_v1_0(c.Struct):
   SIZE = 36
   header: Annotated[struct_common_firmware_header, 0]
   version_major: Annotated[Annotated[int, ctypes.c_uint16], 32]
   version_minor: Annotated[Annotated[int, ctypes.c_uint16], 34]
-@record
-class struct_dmcu_firmware_header_v1_0:
+@c.record
+class struct_dmcu_firmware_header_v1_0(c.Struct):
   SIZE = 40
   header: Annotated[struct_common_firmware_header, 0]
   intv_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 32]
   intv_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class struct_dmcub_firmware_header_v1_0:
+@c.record
+class struct_dmcub_firmware_header_v1_0(c.Struct):
   SIZE = 40
   header: Annotated[struct_common_firmware_header, 0]
   inst_const_bytes: Annotated[Annotated[int, ctypes.c_uint32], 32]
   bss_data_bytes: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class struct_imu_firmware_header_v1_0:
+@c.record
+class struct_imu_firmware_header_v1_0(c.Struct):
   SIZE = 48
   header: Annotated[struct_common_firmware_header, 0]
   imu_iram_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 32]
   imu_iram_ucode_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 36]
   imu_dram_ucode_size_bytes: Annotated[Annotated[int, ctypes.c_uint32], 40]
   imu_dram_ucode_offset_bytes: Annotated[Annotated[int, ctypes.c_uint32], 44]
-@record
-class union_amdgpu_firmware_header:
+@c.record
+class union_amdgpu_firmware_header(c.Struct):
   SIZE = 256
   common: Annotated[struct_common_firmware_header, 0]
   mc: Annotated[struct_mc_firmware_header_v1_0, 0]
@@ -3137,7 +3138,7 @@ class union_amdgpu_firmware_header:
   dmcu: Annotated[struct_dmcu_firmware_header_v1_0, 0]
   dmcub: Annotated[struct_dmcub_firmware_header_v1_0, 0]
   imu: Annotated[struct_imu_firmware_header_v1_0, 0]
-  raw: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[256]], 0]
+  raw: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[256]], 0]
 enum_AMDGPU_UCODE_ID = CEnum(Annotated[int, ctypes.c_uint32])
 AMDGPU_UCODE_ID_CAP = enum_AMDGPU_UCODE_ID.define('AMDGPU_UCODE_ID_CAP', 0)
 AMDGPU_UCODE_ID_SDMA0 = enum_AMDGPU_UCODE_ID.define('AMDGPU_UCODE_ID_SDMA0', 1)
@@ -3223,13 +3224,13 @@ AMDGPU_FW_LOAD_PSP = enum_amdgpu_firmware_load_type.define('AMDGPU_FW_LOAD_PSP',
 AMDGPU_FW_LOAD_SMU = enum_amdgpu_firmware_load_type.define('AMDGPU_FW_LOAD_SMU', 2)
 AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO = enum_amdgpu_firmware_load_type.define('AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO', 3)
 
-@record
-class struct_amdgpu_firmware_info:
+@c.record
+class struct_amdgpu_firmware_info(c.Struct):
   SIZE = 48
   ucode_id: Annotated[enum_AMDGPU_UCODE_ID, 0]
-  fw: Annotated[POINTER(struct_firmware), 8]
+  fw: Annotated[c.POINTER(struct_firmware), 8]
   mc_addr: Annotated[Annotated[int, ctypes.c_uint64], 16]
-  kaddr: Annotated[POINTER(None), 24]
+  kaddr: Annotated[c.POINTER(None), 24]
   ucode_size: Annotated[Annotated[int, ctypes.c_uint32], 32]
   tmr_mc_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 36]
   tmr_mc_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 40]
@@ -3247,8 +3248,8 @@ GFX_CTRL_CMD_ID_CONSUME_CMD = enum_psp_gfx_crtl_cmd_id.define('GFX_CTRL_CMD_ID_C
 GFX_CTRL_CMD_ID_DESTROY_GPCOM_RING = enum_psp_gfx_crtl_cmd_id.define('GFX_CTRL_CMD_ID_DESTROY_GPCOM_RING', 786432)
 GFX_CTRL_CMD_ID_MAX = enum_psp_gfx_crtl_cmd_id.define('GFX_CTRL_CMD_ID_MAX', 983040)
 
-@record
-class struct_psp_gfx_ctrl:
+@c.record
+class struct_psp_gfx_ctrl(c.Struct):
   SIZE = 32
   cmd_resp: Annotated[Annotated[int, ctypes.c_uint32], 0]
   rbi_wptr: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -3284,8 +3285,8 @@ BOOTCFG_CMD_INVALIDATE = enum_psp_gfx_boot_config_cmd.define('BOOTCFG_CMD_INVALI
 enum_psp_gfx_boot_config = CEnum(Annotated[int, ctypes.c_uint32])
 BOOT_CONFIG_GECC = enum_psp_gfx_boot_config.define('BOOT_CONFIG_GECC', 1)
 
-@record
-class struct_psp_gfx_cmd_load_ta:
+@c.record
+class struct_psp_gfx_cmd_load_ta(c.Struct):
   SIZE = 24
   app_phy_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 0]
   app_phy_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -3293,30 +3294,30 @@ class struct_psp_gfx_cmd_load_ta:
   cmd_buf_phy_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 12]
   cmd_buf_phy_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 16]
   cmd_buf_len: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_psp_gfx_cmd_unload_ta:
+@c.record
+class struct_psp_gfx_cmd_unload_ta(c.Struct):
   SIZE = 4
   session_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class struct_psp_gfx_buf_desc:
+@c.record
+class struct_psp_gfx_buf_desc(c.Struct):
   SIZE = 12
   buf_phy_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 0]
   buf_phy_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 4]
   buf_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
-@record
-class struct_psp_gfx_buf_list:
+@c.record
+class struct_psp_gfx_buf_list(c.Struct):
   SIZE = 776
   num_desc: Annotated[Annotated[int, ctypes.c_uint32], 0]
   total_size: Annotated[Annotated[int, ctypes.c_uint32], 4]
-  buf_desc: Annotated[Array[struct_psp_gfx_buf_desc, Literal[64]], 8]
-@record
-class struct_psp_gfx_cmd_invoke_cmd:
+  buf_desc: Annotated[c.Array[struct_psp_gfx_buf_desc, Literal[64]], 8]
+@c.record
+class struct_psp_gfx_cmd_invoke_cmd(c.Struct):
   SIZE = 784
   session_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   ta_cmd_id: Annotated[Annotated[int, ctypes.c_uint32], 4]
   buf: Annotated[struct_psp_gfx_buf_list, 8]
-@record
-class struct_psp_gfx_cmd_setup_tmr:
+@c.record
+class struct_psp_gfx_cmd_setup_tmr(c.Struct):
   SIZE = 24
   buf_phy_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 0]
   buf_phy_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -3325,8 +3326,8 @@ class struct_psp_gfx_cmd_setup_tmr:
   tmr_flags: Annotated[Annotated[int, ctypes.c_uint32], 12]
   system_phy_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 16]
   system_phy_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class _anonstruct1:
+@c.record
+class _anonstruct1(c.Struct):
   SIZE = 4
   sriov_enabled: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 0]
   virt_phy_addr: Annotated[Annotated[int, ctypes.c_uint32], 0, 1, 1]
@@ -3432,48 +3433,48 @@ GFX_FW_TYPE_JPEG_RAM = enum_psp_gfx_fw_type.define('GFX_FW_TYPE_JPEG_RAM', 128)
 GFX_FW_TYPE_P2S_TABLE = enum_psp_gfx_fw_type.define('GFX_FW_TYPE_P2S_TABLE', 129)
 GFX_FW_TYPE_MAX = enum_psp_gfx_fw_type.define('GFX_FW_TYPE_MAX', 130)
 
-@record
-class struct_psp_gfx_cmd_load_ip_fw:
+@c.record
+class struct_psp_gfx_cmd_load_ip_fw(c.Struct):
   SIZE = 16
   fw_phy_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 0]
   fw_phy_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 4]
   fw_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
   fw_type: Annotated[enum_psp_gfx_fw_type, 12]
-@record
-class struct_psp_gfx_cmd_save_restore_ip_fw:
+@c.record
+class struct_psp_gfx_cmd_save_restore_ip_fw(c.Struct):
   SIZE = 20
   save_fw: Annotated[Annotated[int, ctypes.c_uint32], 0]
   save_restore_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 4]
   save_restore_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 8]
   buf_size: Annotated[Annotated[int, ctypes.c_uint32], 12]
   fw_type: Annotated[enum_psp_gfx_fw_type, 16]
-@record
-class struct_psp_gfx_cmd_reg_prog:
+@c.record
+class struct_psp_gfx_cmd_reg_prog(c.Struct):
   SIZE = 8
   reg_value: Annotated[Annotated[int, ctypes.c_uint32], 0]
   reg_id: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_psp_gfx_cmd_load_toc:
+@c.record
+class struct_psp_gfx_cmd_load_toc(c.Struct):
   SIZE = 12
   toc_phy_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 0]
   toc_phy_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 4]
   toc_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
-@record
-class struct_psp_gfx_cmd_boot_cfg:
+@c.record
+class struct_psp_gfx_cmd_boot_cfg(c.Struct):
   SIZE = 16
   timestamp: Annotated[Annotated[int, ctypes.c_uint32], 0]
   sub_cmd: Annotated[enum_psp_gfx_boot_config_cmd, 4]
   boot_config: Annotated[Annotated[int, ctypes.c_uint32], 8]
   boot_config_valid: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_psp_gfx_cmd_sriov_spatial_part:
+@c.record
+class struct_psp_gfx_cmd_sriov_spatial_part(c.Struct):
   SIZE = 16
   mode: Annotated[Annotated[int, ctypes.c_uint32], 0]
   override_ips: Annotated[Annotated[int, ctypes.c_uint32], 4]
   override_xcds_avail: Annotated[Annotated[int, ctypes.c_uint32], 8]
   override_this_aid: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class union_psp_gfx_commands:
+@c.record
+class union_psp_gfx_commands(c.Struct):
   SIZE = 784
   cmd_load_ta: Annotated[struct_psp_gfx_cmd_load_ta, 0]
   cmd_unload_ta: Annotated[struct_psp_gfx_cmd_unload_ta, 0]
@@ -3486,37 +3487,37 @@ class union_psp_gfx_commands:
   cmd_load_toc: Annotated[struct_psp_gfx_cmd_load_toc, 0]
   boot_cfg: Annotated[struct_psp_gfx_cmd_boot_cfg, 0]
   cmd_spatial_part: Annotated[struct_psp_gfx_cmd_sriov_spatial_part, 0]
-@record
-class struct_psp_gfx_uresp_reserved:
+@c.record
+class struct_psp_gfx_uresp_reserved(c.Struct):
   SIZE = 32
-  reserved: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[8]], 0]
-@record
-class struct_psp_gfx_uresp_fwar_db_info:
+  reserved: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[8]], 0]
+@c.record
+class struct_psp_gfx_uresp_fwar_db_info(c.Struct):
   SIZE = 8
   fwar_db_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 0]
   fwar_db_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_psp_gfx_uresp_bootcfg:
+@c.record
+class struct_psp_gfx_uresp_bootcfg(c.Struct):
   SIZE = 4
   boot_cfg: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class union_psp_gfx_uresp:
+@c.record
+class union_psp_gfx_uresp(c.Struct):
   SIZE = 32
   reserved: Annotated[struct_psp_gfx_uresp_reserved, 0]
   boot_cfg: Annotated[struct_psp_gfx_uresp_bootcfg, 0]
   fwar_db_info: Annotated[struct_psp_gfx_uresp_fwar_db_info, 0]
-@record
-class struct_psp_gfx_resp:
+@c.record
+class struct_psp_gfx_resp(c.Struct):
   SIZE = 96
   status: Annotated[Annotated[int, ctypes.c_uint32], 0]
   session_id: Annotated[Annotated[int, ctypes.c_uint32], 4]
   fw_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 8]
   fw_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 12]
   tmr_size: Annotated[Annotated[int, ctypes.c_uint32], 16]
-  reserved: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[11]], 20]
+  reserved: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[11]], 20]
   uresp: Annotated[union_psp_gfx_uresp, 64]
-@record
-class struct_psp_gfx_cmd_resp:
+@c.record
+class struct_psp_gfx_cmd_resp(c.Struct):
   SIZE = 1024
   buf_size: Annotated[Annotated[int, ctypes.c_uint32], 0]
   buf_version: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -3526,11 +3527,11 @@ class struct_psp_gfx_cmd_resp:
   resp_offset: Annotated[Annotated[int, ctypes.c_uint32], 20]
   resp_buf_size: Annotated[Annotated[int, ctypes.c_uint32], 24]
   cmd: Annotated[union_psp_gfx_commands, 28]
-  reserved_1: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[52]], 812]
+  reserved_1: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[52]], 812]
   resp: Annotated[struct_psp_gfx_resp, 864]
-  reserved_2: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[64]], 960]
-@record
-class struct_psp_gfx_rb_frame:
+  reserved_2: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[64]], 960]
+@c.record
+class struct_psp_gfx_rb_frame(c.Struct):
   SIZE = 64
   cmd_buf_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 0]
   cmd_buf_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -3542,8 +3543,8 @@ class struct_psp_gfx_rb_frame:
   sid_hi: Annotated[Annotated[int, ctypes.c_uint32], 28]
   vmid: Annotated[Annotated[int, ctypes.c_ubyte], 32]
   frame_type: Annotated[Annotated[int, ctypes.c_ubyte], 33]
-  reserved1: Annotated[Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 34]
-  reserved2: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[7]], 36]
+  reserved1: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[2]], 34]
+  reserved2: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[7]], 36]
 enum_tee_error_code = CEnum(Annotated[int, ctypes.c_uint32])
 TEE_SUCCESS = enum_tee_error_code.define('TEE_SUCCESS', 0)
 TEE_ERROR_NOT_SUPPORTED = enum_tee_error_code.define('TEE_ERROR_NOT_SUPPORTED', 4294901770)
@@ -3633,8 +3634,8 @@ enum_amdgpu_interrupt_state = CEnum(Annotated[int, ctypes.c_uint32])
 AMDGPU_IRQ_STATE_DISABLE = enum_amdgpu_interrupt_state.define('AMDGPU_IRQ_STATE_DISABLE', 0)
 AMDGPU_IRQ_STATE_ENABLE = enum_amdgpu_interrupt_state.define('AMDGPU_IRQ_STATE_ENABLE', 1)
 
-@record
-class struct_amdgpu_iv_entry:
+@c.record
+class struct_amdgpu_iv_entry(c.Struct):
   SIZE = 72
   client_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   src_id: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -3645,8 +3646,8 @@ class struct_amdgpu_iv_entry:
   timestamp_src: Annotated[Annotated[int, ctypes.c_uint32], 32]
   pasid: Annotated[Annotated[int, ctypes.c_uint32], 36]
   node_id: Annotated[Annotated[int, ctypes.c_uint32], 40]
-  src_data: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 44]
-  iv_entry: Annotated[POINTER(Annotated[int, ctypes.c_uint32]), 64]
+  src_data: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[4]], 44]
+  iv_entry: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 64]
 enum_interrupt_node_id_per_aid = CEnum(Annotated[int, ctypes.c_uint32])
 AID0_NODEID = enum_interrupt_node_id_per_aid.define('AID0_NODEID', 0)
 XCD0_NODEID = enum_interrupt_node_id_per_aid.define('XCD0_NODEID', 1)
@@ -3826,8 +3827,8 @@ AMDGPU_DOORBELL_LAYOUT1_LAST_NON_CP = enum_AMDGPU_DOORBELL_ASSIGNMENT_LAYOUT1.de
 AMDGPU_DOORBELL_LAYOUT1_MAX_ASSIGNMENT = enum_AMDGPU_DOORBELL_ASSIGNMENT_LAYOUT1.define('AMDGPU_DOORBELL_LAYOUT1_MAX_ASSIGNMENT', 488)
 AMDGPU_DOORBELL_LAYOUT1_INVALID = enum_AMDGPU_DOORBELL_ASSIGNMENT_LAYOUT1.define('AMDGPU_DOORBELL_LAYOUT1_INVALID', 65535)
 
-@record
-class struct_v9_sdma_mqd:
+@c.record
+class struct_v9_sdma_mqd(c.Struct):
   SIZE = 512
   sdmax_rlcx_rb_cntl: Annotated[uint32_t, 0]
   sdmax_rlcx_rb_base: Annotated[uint32_t, 4]
@@ -3957,8 +3958,8 @@ class struct_v9_sdma_mqd:
   reserved_125: Annotated[uint32_t, 500]
   sdma_engine_id: Annotated[uint32_t, 504]
   sdma_queue_id: Annotated[uint32_t, 508]
-@record
-class struct_v9_mqd:
+@c.record
+class struct_v9_mqd(c.Struct):
   SIZE = 2048
   header: Annotated[uint32_t, 0]
   compute_dispatch_initiator: Annotated[uint32_t, 4]
@@ -4478,16 +4479,16 @@ class struct_v9_mqd:
   reserved_509: Annotated[uint32_t, 2036]
   reserved_510: Annotated[uint32_t, 2040]
   reserved_511: Annotated[uint32_t, 2044]
-@record
-class struct_v9_mqd_allocation:
+@c.record
+class struct_v9_mqd_allocation(c.Struct):
   SIZE = 2064
   mqd: Annotated[struct_v9_mqd, 0]
   wptr_poll_mem: Annotated[uint32_t, 2048]
   rptr_report_mem: Annotated[uint32_t, 2052]
   dynamic_cu_mask: Annotated[uint32_t, 2056]
   dynamic_rb_mask: Annotated[uint32_t, 2060]
-@record
-class struct_v9_ce_ib_state:
+@c.record
+class struct_v9_ce_ib_state(c.Struct):
   SIZE = 40
   ce_ib_completion_status: Annotated[uint32_t, 0]
   ce_constegnine_count: Annotated[uint32_t, 4]
@@ -4499,8 +4500,8 @@ class struct_v9_ce_ib_state:
   ce_chainib_addrhi_ib2: Annotated[uint32_t, 28]
   ce_chainib_size_ib1: Annotated[uint32_t, 32]
   ce_chainib_size_ib2: Annotated[uint32_t, 36]
-@record
-class struct_v9_de_ib_state:
+@c.record
+class struct_v9_de_ib_state(c.Struct):
   SIZE = 108
   ib_completion_status: Annotated[uint32_t, 0]
   de_constEngine_count: Annotated[uint32_t, 4]
@@ -4529,15 +4530,15 @@ class struct_v9_de_ib_state:
   index_base_addrlo: Annotated[uint32_t, 96]
   index_base_addrhi: Annotated[uint32_t, 100]
   sample_cntl: Annotated[uint32_t, 104]
-@record
-class struct_v9_gfx_meta_data:
+@c.record
+class struct_v9_gfx_meta_data(c.Struct):
   SIZE = 4096
   ce_payload: Annotated[struct_v9_ce_ib_state, 0]
-  reserved1: Annotated[Array[uint32_t, Literal[54]], 40]
+  reserved1: Annotated[c.Array[uint32_t, Literal[54]], 40]
   de_payload: Annotated[struct_v9_de_ib_state, 256]
   DeIbBaseAddrLo: Annotated[uint32_t, 364]
   DeIbBaseAddrHi: Annotated[uint32_t, 368]
-  reserved2: Annotated[Array[uint32_t, Literal[931]], 372]
+  reserved2: Annotated[c.Array[uint32_t, Literal[931]], 372]
 enum_soc15_ih_clientid = CEnum(Annotated[int, ctypes.c_uint32])
 SOC15_IH_CLIENTID_IH = enum_soc15_ih_clientid.define('SOC15_IH_CLIENTID_IH', 0)
 SOC15_IH_CLIENTID_ACP = enum_soc15_ih_clientid.define('SOC15_IH_CLIENTID_ACP', 1)
@@ -4608,7 +4609,7 @@ SOC21_IH_CLIENTID_MP0 = enum_soc21_ih_clientid.define('SOC21_IH_CLIENTID_MP0', 3
 SOC21_IH_CLIENTID_MP1 = enum_soc21_ih_clientid.define('SOC21_IH_CLIENTID_MP1', 31)
 SOC21_IH_CLIENTID_MAX = enum_soc21_ih_clientid.define('SOC21_IH_CLIENTID_MAX', 32)
 
-init_records()
+c.init_records()
 AMDGPU_VM_MAX_UPDATE_SIZE = 0x3FFFF
 AMDGPU_PTE_VALID = (1 << 0)
 AMDGPU_PTE_SYSTEM = (1 << 1)

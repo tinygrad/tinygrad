@@ -1,9 +1,10 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-@record
-class MCTP_HEADER:
+from tinygrad.runtime.support import c
+from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+@c.record
+class MCTP_HEADER(c.Struct):
   SIZE = 7
   constBlob: Annotated[NvU32, 0]
   msgType: Annotated[NvU8, 4]
@@ -11,8 +12,8 @@ class MCTP_HEADER:
 NvU32: TypeAlias = Annotated[int, ctypes.c_uint32]
 NvU8: TypeAlias = Annotated[int, ctypes.c_ubyte]
 NvU16: TypeAlias = Annotated[int, ctypes.c_uint16]
-@record
-class NVDM_PAYLOAD_COT:
+@c.record
+class NVDM_PAYLOAD_COT(c.Struct):
   SIZE = 860
   version: Annotated[NvU16, 0]
   size: Annotated[NvU16, 2]
@@ -21,36 +22,36 @@ class NVDM_PAYLOAD_COT:
   frtsSysmemSize: Annotated[NvU32, 20]
   frtsVidmemOffset: Annotated[NvU64, 24]
   frtsVidmemSize: Annotated[NvU32, 32]
-  hash384: Annotated[Array[NvU32, Literal[12]], 36]
-  publicKey: Annotated[Array[NvU32, Literal[96]], 84]
-  signature: Annotated[Array[NvU32, Literal[96]], 468]
+  hash384: Annotated[c.Array[NvU32, Literal[12]], 36]
+  publicKey: Annotated[c.Array[NvU32, Literal[96]], 84]
+  signature: Annotated[c.Array[NvU32, Literal[96]], 468]
   gspBootArgsSysmemOffset: Annotated[NvU64, 852]
 NvU64: TypeAlias = Annotated[int, ctypes.c_uint64]
-@record
-class MESSAGE_QUEUE_INIT_ARGUMENTS:
+@c.record
+class MESSAGE_QUEUE_INIT_ARGUMENTS(c.Struct):
   SIZE = 32
   sharedMemPhysAddr: Annotated[NvU64, 0]
   pageTableEntryCount: Annotated[NvU32, 8]
   cmdQueueOffset: Annotated[NvLength, 16]
   statQueueOffset: Annotated[NvLength, 24]
 NvLength: TypeAlias = Annotated[int, ctypes.c_uint64]
-@record
-class GSP_SR_INIT_ARGUMENTS:
+@c.record
+class GSP_SR_INIT_ARGUMENTS(c.Struct):
   SIZE = 12
   oldLevel: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
   bInPMTransition: Annotated[NvBool, 8]
 NvBool: TypeAlias = Annotated[int, ctypes.c_ubyte]
-@record
-class GSP_ARGUMENTS_CACHED:
+@c.record
+class GSP_ARGUMENTS_CACHED(c.Struct):
   SIZE = 72
   messageQueueInitArguments: Annotated[MESSAGE_QUEUE_INIT_ARGUMENTS, 0]
   srInitArguments: Annotated[GSP_SR_INIT_ARGUMENTS, 32]
   gpuInstance: Annotated[NvU32, 44]
   bDmemStack: Annotated[NvBool, 48]
   profilerArgs: Annotated[_anonstruct0, 56]
-@record
-class _anonstruct0:
+@c.record
+class _anonstruct0(c.Struct):
   SIZE = 16
   pa: Annotated[NvU64, 0]
   size: Annotated[NvU64, 8]
@@ -60,13 +61,13 @@ GSP_DMA_TARGET_COHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COHERENT_
 GSP_DMA_TARGET_NONCOHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_NONCOHERENT_SYSTEM', 2)
 GSP_DMA_TARGET_COUNT = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COUNT', 3)
 
-@record
-class struct_GSP_FMC_INIT_PARAMS:
+@c.record
+class struct_GSP_FMC_INIT_PARAMS(c.Struct):
   SIZE = 4
   regkeys: Annotated[NvU32, 0]
 GSP_FMC_INIT_PARAMS: TypeAlias = struct_GSP_FMC_INIT_PARAMS
-@record
-class struct_GSP_ACR_BOOT_GSP_RM_PARAMS:
+@c.record
+class struct_GSP_ACR_BOOT_GSP_RM_PARAMS(c.Struct):
   SIZE = 32
   target: Annotated[GSP_DMA_TARGET, 0]
   gspRmDescSize: Annotated[NvU32, 4]
@@ -75,29 +76,29 @@ class struct_GSP_ACR_BOOT_GSP_RM_PARAMS:
   wprCarveoutSize: Annotated[NvU32, 24]
   bIsGspRmBoot: Annotated[NvBool, 28]
 GSP_ACR_BOOT_GSP_RM_PARAMS: TypeAlias = struct_GSP_ACR_BOOT_GSP_RM_PARAMS
-@record
-class struct_GSP_RM_PARAMS:
+@c.record
+class struct_GSP_RM_PARAMS(c.Struct):
   SIZE = 16
   target: Annotated[GSP_DMA_TARGET, 0]
   bootArgsOffset: Annotated[NvU64, 8]
 GSP_RM_PARAMS: TypeAlias = struct_GSP_RM_PARAMS
-@record
-class struct_GSP_SPDM_PARAMS:
+@c.record
+class struct_GSP_SPDM_PARAMS(c.Struct):
   SIZE = 24
   target: Annotated[GSP_DMA_TARGET, 0]
   payloadBufferOffset: Annotated[NvU64, 8]
   payloadBufferSize: Annotated[NvU32, 16]
 GSP_SPDM_PARAMS: TypeAlias = struct_GSP_SPDM_PARAMS
-@record
-class struct_GSP_FMC_BOOT_PARAMS:
+@c.record
+class struct_GSP_FMC_BOOT_PARAMS(c.Struct):
   SIZE = 80
   initParams: Annotated[GSP_FMC_INIT_PARAMS, 0]
   bootGspRmParams: Annotated[GSP_ACR_BOOT_GSP_RM_PARAMS, 8]
   gspRmParams: Annotated[GSP_RM_PARAMS, 40]
   gspSpdmParams: Annotated[GSP_SPDM_PARAMS, 56]
 GSP_FMC_BOOT_PARAMS: TypeAlias = struct_GSP_FMC_BOOT_PARAMS
-@record
-class GspFwWprMeta:
+@c.record
+class GspFwWprMeta(c.Struct):
   SIZE = 256
   magic: Annotated[NvU64, 0]
   revision: Annotated[NvU64, 8]
@@ -136,39 +137,39 @@ class GspFwWprMeta:
   elfCodeSize: Annotated[NvU32, 20]
   elfDataSize: Annotated[NvU32, 24]
   lsUcodeVersion: Annotated[NvU32, 28]
-  partitionRpcPadding: Annotated[Array[NvU32, Literal[4]], 0]
+  partitionRpcPadding: Annotated[c.Array[NvU32, Literal[4]], 0]
   sysmemAddrOfCrashReportQueue: Annotated[NvU64, 16]
   sizeOfCrashReportQueue: Annotated[NvU32, 24]
-  lsUcodeVersionPadding: Annotated[Array[NvU32, Literal[1]], 28]
+  lsUcodeVersionPadding: Annotated[c.Array[NvU32, Literal[1]], 28]
   gspFwHeapVfPartitionCount: Annotated[NvU8, 240]
   flags: Annotated[NvU8, 241]
-  padding: Annotated[Array[NvU8, Literal[2]], 242]
+  padding: Annotated[c.Array[NvU8, Literal[2]], 242]
   pmuReservedSize: Annotated[NvU32, 244]
   verified: Annotated[NvU64, 248]
-@record
-class GspFwHeapFreeRegion:
+@c.record
+class GspFwHeapFreeRegion(c.Struct):
   SIZE = 8
   offs: Annotated[NvU32, 0]
   length: Annotated[NvU32, 4]
-@record
-class GspFwHeapFreeList:
+@c.record
+class GspFwHeapFreeList(c.Struct):
   SIZE = 1040
   magic: Annotated[NvU64, 0]
   nregions: Annotated[NvU32, 8]
-  regions: Annotated[Array[GspFwHeapFreeRegion, Literal[128]], 12]
-@record
-class GspFwSRMeta:
+  regions: Annotated[c.Array[GspFwHeapFreeRegion, Literal[128]], 12]
+@c.record
+class GspFwSRMeta(c.Struct):
   SIZE = 256
   magic: Annotated[NvU64, 0]
   revision: Annotated[NvU64, 8]
   sysmemAddrOfSuspendResumeData: Annotated[NvU64, 16]
   sizeOfSuspendResumeData: Annotated[NvU64, 24]
-  internal: Annotated[Array[NvU32, Literal[32]], 32]
+  internal: Annotated[c.Array[NvU32, Literal[32]], 32]
   flags: Annotated[NvU32, 160]
   subrevision: Annotated[NvU32, 164]
-  padding: Annotated[Array[NvU32, Literal[22]], 168]
-@record
-class RM_RISCV_UCODE_DESC:
+  padding: Annotated[c.Array[NvU32, Literal[22]], 168]
+@c.record
+class RM_RISCV_UCODE_DESC(c.Struct):
   SIZE = 84
   version: Annotated[NvU32, 0]
   bootloaderOffset: Annotated[NvU32, 4]
@@ -218,15 +219,15 @@ NV_RPC_UPDATE_PDE_BAR_1 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_B
 NV_RPC_UPDATE_PDE_BAR_2 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_2', 1)
 NV_RPC_UPDATE_PDE_BAR_INVALID = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_INVALID', 2)
 
-@record
-class struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS:
+@c.record
+class struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS(c.Struct):
   SIZE = 12
   headIndex: Annotated[NvU32, 0]
   maxHResolution: Annotated[NvU32, 4]
   maxVResolution: Annotated[NvU32, 8]
 VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS: TypeAlias = struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS
-@record
-class struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS:
+@c.record
+class struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS(c.Struct):
   SIZE = 8
   numHeads: Annotated[NvU32, 0]
   maxNumHeads: Annotated[NvU32, 4]
@@ -511,16 +512,16 @@ LIBOS_MEMORY_REGION_LOC_NONE = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_
 LIBOS_MEMORY_REGION_LOC_SYSMEM = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_SYSMEM', 1)
 LIBOS_MEMORY_REGION_LOC_FB = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_FB', 2)
 
-@record
-class LibosMemoryRegionInitArgument:
+@c.record
+class LibosMemoryRegionInitArgument(c.Struct):
   SIZE = 32
   id8: Annotated[LibosAddress, 0]
   pa: Annotated[LibosAddress, 8]
   size: Annotated[LibosAddress, 16]
   kind: Annotated[NvU8, 24]
   loc: Annotated[NvU8, 25]
-@record
-class msgqTxHeader:
+@c.record
+class msgqTxHeader(c.Struct):
   SIZE = 32
   version: Annotated[NvU32, 0]
   size: Annotated[NvU32, 4]
@@ -530,23 +531,23 @@ class msgqTxHeader:
   flags: Annotated[NvU32, 20]
   rxHdrOff: Annotated[NvU32, 24]
   entryOff: Annotated[NvU32, 28]
-@record
-class msgqRxHeader:
+@c.record
+class msgqRxHeader(c.Struct):
   SIZE = 4
   readPtr: Annotated[NvU32, 0]
-@record
-class msgqMetadata:
+@c.record
+class msgqMetadata(c.Struct):
   SIZE = 232
-  pOurTxHdr: Annotated[POINTER(msgqTxHeader), 0]
-  pTheirTxHdr: Annotated[POINTER(msgqTxHeader), 8]
-  pOurRxHdr: Annotated[POINTER(msgqRxHeader), 16]
-  pTheirRxHdr: Annotated[POINTER(msgqRxHeader), 24]
-  pOurEntries: Annotated[POINTER(NvU8), 32]
-  pTheirEntries: Annotated[POINTER(NvU8), 40]
-  pReadIncoming: Annotated[POINTER(NvU32), 48]
-  pWriteIncoming: Annotated[POINTER(NvU32), 56]
-  pReadOutgoing: Annotated[POINTER(NvU32), 64]
-  pWriteOutgoing: Annotated[POINTER(NvU32), 72]
+  pOurTxHdr: Annotated[c.POINTER(msgqTxHeader), 0]
+  pTheirTxHdr: Annotated[c.POINTER(msgqTxHeader), 8]
+  pOurRxHdr: Annotated[c.POINTER(msgqRxHeader), 16]
+  pTheirRxHdr: Annotated[c.POINTER(msgqRxHeader), 24]
+  pOurEntries: Annotated[c.POINTER(NvU8), 32]
+  pTheirEntries: Annotated[c.POINTER(NvU8), 40]
+  pReadIncoming: Annotated[c.POINTER(NvU32), 48]
+  pWriteIncoming: Annotated[c.POINTER(NvU32), 56]
+  pReadOutgoing: Annotated[c.POINTER(NvU32), 64]
+  pWriteOutgoing: Annotated[c.POINTER(NvU32), 72]
   tx: Annotated[msgqTxHeader, 80]
   txReadPtr: Annotated[NvU32, 112]
   txFree: Annotated[NvU32, 116]
@@ -557,19 +558,19 @@ class msgqMetadata:
   rxLinked: Annotated[NvBool, 164]
   rxSwapped: Annotated[NvBool, 165]
   fcnNotify: Annotated[msgqFcnNotifyRemote, 168]
-  fcnNotifyArg: Annotated[POINTER(None), 176]
+  fcnNotifyArg: Annotated[c.POINTER(None), 176]
   fcnBackendRw: Annotated[msgqFcnBackendRw, 184]
-  fcnBackendRwArg: Annotated[POINTER(None), 192]
+  fcnBackendRwArg: Annotated[c.POINTER(None), 192]
   fcnInvalidate: Annotated[msgqFcnCacheOp, 200]
   fcnFlush: Annotated[msgqFcnCacheOp, 208]
   fcnZero: Annotated[msgqFcnCacheOp, 216]
   fcnBarrier: Annotated[msgqFcnBarrier, 224]
-msgqFcnNotifyRemote: TypeAlias = CFUNCTYPE(Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], POINTER(None))
-msgqFcnBackendRw: TypeAlias = CFUNCTYPE(Annotated[int, ctypes.c_int32], POINTER(None), POINTER(None), Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], POINTER(None))
-msgqFcnCacheOp: TypeAlias = CFUNCTYPE(None, POINTER(None), Annotated[int, ctypes.c_uint32])
-msgqFcnBarrier: TypeAlias = CFUNCTYPE(None, )
-@record
-class struct_rpc_set_guest_system_info_v03_00:
+msgqFcnNotifyRemote: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], c.POINTER(None))
+msgqFcnBackendRw: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER(None), c.POINTER(None), Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER(None))
+msgqFcnCacheOp: TypeAlias = c.CFUNCTYPE(None, c.POINTER(None), Annotated[int, ctypes.c_uint32])
+msgqFcnBarrier: TypeAlias = c.CFUNCTYPE(None, )
+@c.record
+class struct_rpc_set_guest_system_info_v03_00(c.Struct):
   SIZE = 792
   vgxVersionMajorNum: Annotated[NvU32, 0]
   vgxVersionMinorNum: Annotated[NvU32, 4]
@@ -577,40 +578,40 @@ class struct_rpc_set_guest_system_info_v03_00:
   guestVersionBufferLength: Annotated[NvU32, 12]
   guestTitleBufferLength: Annotated[NvU32, 16]
   guestClNum: Annotated[NvU32, 20]
-  guestDriverVersion: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 24]
-  guestVersion: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 280]
-  guestTitle: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 536]
+  guestDriverVersion: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[256]], 24]
+  guestVersion: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[256]], 280]
+  guestTitle: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[256]], 536]
 rpc_set_guest_system_info_v03_00: TypeAlias = struct_rpc_set_guest_system_info_v03_00
 rpc_set_guest_system_info_v: TypeAlias = struct_rpc_set_guest_system_info_v03_00
-@record
-class struct_rpc_set_guest_system_info_ext_v15_02:
+@c.record
+class struct_rpc_set_guest_system_info_ext_v15_02(c.Struct):
   SIZE = 264
-  guestDriverBranch: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
+  guestDriverBranch: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
   domain: Annotated[NvU32, 256]
   bus: Annotated[NvU16, 260]
   device: Annotated[NvU16, 262]
 rpc_set_guest_system_info_ext_v15_02: TypeAlias = struct_rpc_set_guest_system_info_ext_v15_02
-@record
-class struct_rpc_set_guest_system_info_ext_v25_1B:
+@c.record
+class struct_rpc_set_guest_system_info_ext_v25_1B(c.Struct):
   SIZE = 268
-  guestDriverBranch: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
+  guestDriverBranch: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
   domain: Annotated[NvU32, 256]
   bus: Annotated[NvU16, 260]
   device: Annotated[NvU16, 262]
   gridBuildCsp: Annotated[NvU32, 264]
 rpc_set_guest_system_info_ext_v25_1B: TypeAlias = struct_rpc_set_guest_system_info_ext_v25_1B
 rpc_set_guest_system_info_ext_v: TypeAlias = struct_rpc_set_guest_system_info_ext_v25_1B
-@record
-class struct_rpc_alloc_root_v07_00:
+@c.record
+class struct_rpc_alloc_root_v07_00(c.Struct):
   SIZE = 108
   hClient: Annotated[NvHandle, 0]
   processID: Annotated[NvU32, 4]
-  processName: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[100]], 8]
+  processName: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[100]], 8]
 NvHandle: TypeAlias = Annotated[int, ctypes.c_uint32]
 rpc_alloc_root_v07_00: TypeAlias = struct_rpc_alloc_root_v07_00
 rpc_alloc_root_v: TypeAlias = struct_rpc_alloc_root_v07_00
-@record
-class struct_rpc_alloc_memory_v13_01:
+@c.record
+class struct_rpc_alloc_memory_v13_01(c.Struct):
   SIZE = 56
   hClient: Annotated[NvHandle, 0]
   hDevice: Annotated[NvHandle, 4]
@@ -622,22 +623,22 @@ class struct_rpc_alloc_memory_v13_01:
   length: Annotated[NvU64, 32]
   pageCount: Annotated[NvU32, 40]
   pteDesc: Annotated[struct_pte_desc, 48]
-@record
-class struct_pte_desc:
+@c.record
+class struct_pte_desc(c.Struct):
   SIZE = 8
   idr: Annotated[NvU32, 0, 2, 0]
   reserved1: Annotated[NvU32, 0, 14, 2]
   length: Annotated[NvU32, 2, 16, 0]
-  pte_pde: Annotated[Array[_anonunion1, Literal[0]], 8]
-@record
-class _anonunion1:
+  pte_pde: Annotated[c.Array[_anonunion1, Literal[0]], 8]
+@c.record
+class _anonunion1(c.Struct):
   SIZE = 8
   pte: Annotated[NvU64, 0]
   pde: Annotated[NvU64, 0]
 rpc_alloc_memory_v13_01: TypeAlias = struct_rpc_alloc_memory_v13_01
 rpc_alloc_memory_v: TypeAlias = struct_rpc_alloc_memory_v13_01
-@record
-class struct_rpc_alloc_channel_dma_v1F_04:
+@c.record
+class struct_rpc_alloc_channel_dma_v1F_04(c.Struct):
   SIZE = 248
   hClient: Annotated[NvHandle, 0]
   hDevice: Annotated[NvHandle, 4]
@@ -646,8 +647,8 @@ class struct_rpc_alloc_channel_dma_v1F_04:
   flags: Annotated[NvU32, 16]
   params: Annotated[NV_CHANNEL_ALLOC_PARAMS_v1F_04, 24]
   chid: Annotated[NvU32, 240]
-@record
-class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04:
+@c.record
+class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04(c.Struct):
   SIZE = 216
   hObjectError: Annotated[NvHandle, 0]
   hObjectBuffer: Annotated[NvHandle, 4]
@@ -656,8 +657,8 @@ class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04:
   flags: Annotated[NvU32, 20]
   hContextShare: Annotated[NvHandle, 24]
   hVASpace: Annotated[NvHandle, 28]
-  hUserdMemory: Annotated[Array[NvHandle, Literal[1]], 32]
-  userdOffset: Annotated[Array[NvU64, Literal[1]], 40]
+  hUserdMemory: Annotated[c.Array[NvHandle, Literal[1]], 32]
+  userdOffset: Annotated[c.Array[NvU64, Literal[1]], 40]
   engineType: Annotated[NvU32, 48]
   hObjectEccError: Annotated[NvHandle, 52]
   instanceMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 56]
@@ -670,8 +671,8 @@ class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04:
   errorNotifierMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 168]
   eccErrorNotifierMem: Annotated[NV_MEMORY_DESC_PARAMS_v18_01, 192]
 NV_CHANNEL_ALLOC_PARAMS_v1F_04: TypeAlias = struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04
-@record
-class struct_NV_MEMORY_DESC_PARAMS_v18_01:
+@c.record
+class struct_NV_MEMORY_DESC_PARAMS_v18_01(c.Struct):
   SIZE = 24
   base: Annotated[NvU64, 0]
   size: Annotated[NvU64, 8]
@@ -680,8 +681,8 @@ class struct_NV_MEMORY_DESC_PARAMS_v18_01:
 NV_MEMORY_DESC_PARAMS_v18_01: TypeAlias = struct_NV_MEMORY_DESC_PARAMS_v18_01
 rpc_alloc_channel_dma_v1F_04: TypeAlias = struct_rpc_alloc_channel_dma_v1F_04
 rpc_alloc_channel_dma_v: TypeAlias = struct_rpc_alloc_channel_dma_v1F_04
-@record
-class struct_rpc_alloc_object_v25_08:
+@c.record
+class struct_rpc_alloc_object_v25_08(c.Struct):
   SIZE = 64
   hClient: Annotated[NvHandle, 0]
   hParent: Annotated[NvHandle, 4]
@@ -689,8 +690,8 @@ class struct_rpc_alloc_object_v25_08:
   hClass: Annotated[NvU32, 12]
   param_len: Annotated[NvU32, 16]
   params: Annotated[alloc_object_params_v25_08, 24]
-@record
-class union_alloc_object_params_v25_08:
+@c.record
+class union_alloc_object_params_v25_08(c.Struct):
   SIZE = 40
   param_NV50_TESLA: Annotated[alloc_object_NV50_TESLA_v03_00, 0]
   param_GT212_DMA_COPY: Annotated[alloc_object_GT212_DMA_COPY_v03_00, 0]
@@ -719,22 +720,22 @@ class union_alloc_object_params_v25_08:
   param_NVC9FA_VIDEO_OFA: Annotated[alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 0]
   param_NV2081_ALLOC_PARAMETERS: Annotated[alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 0]
 alloc_object_params_v25_08: TypeAlias = union_alloc_object_params_v25_08
-@record
-class struct_alloc_object_NV50_TESLA_v03_00:
+@c.record
+class struct_alloc_object_NV50_TESLA_v03_00(c.Struct):
   SIZE = 16
   version: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
   size: Annotated[NvU32, 8]
   caps: Annotated[NvU32, 12]
 alloc_object_NV50_TESLA_v03_00: TypeAlias = struct_alloc_object_NV50_TESLA_v03_00
-@record
-class struct_alloc_object_GT212_DMA_COPY_v03_00:
+@c.record
+class struct_alloc_object_GT212_DMA_COPY_v03_00(c.Struct):
   SIZE = 8
   version: Annotated[NvU32, 0]
   engineInstance: Annotated[NvU32, 4]
 alloc_object_GT212_DMA_COPY_v03_00: TypeAlias = struct_alloc_object_GT212_DMA_COPY_v03_00
-@record
-class struct_alloc_object_GF100_DISP_SW_v03_00:
+@c.record
+class struct_alloc_object_GF100_DISP_SW_v03_00(c.Struct):
   SIZE = 32
   _reserved1: Annotated[NvU32, 0]
   _reserved2: Annotated[NvU64, 8]
@@ -742,29 +743,29 @@ class struct_alloc_object_GF100_DISP_SW_v03_00:
   displayMask: Annotated[NvU32, 20]
   caps: Annotated[NvU32, 24]
 alloc_object_GF100_DISP_SW_v03_00: TypeAlias = struct_alloc_object_GF100_DISP_SW_v03_00
-@record
-class struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08:
+@c.record
+class struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08(c.Struct):
   SIZE = 12
   hObjectError: Annotated[NvU32, 0]
   hVASpace: Annotated[NvU32, 4]
   engineType: Annotated[NvU32, 8]
 alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08: TypeAlias = struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08
-@record
-class struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00:
+@c.record
+class struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00(c.Struct):
   SIZE = 12
   hVASpace: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
   subctxId: Annotated[NvU32, 8]
 alloc_object_FERMI_CONTEXT_SHARE_A_v04_00: TypeAlias = struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00
-@record
-class struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00:
+@c.record
+class struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00(c.Struct):
   SIZE = 12
   size: Annotated[NvU32, 0]
   prohibitMultipleInstances: Annotated[NvU32, 4]
   engineInstance: Annotated[NvU32, 8]
 alloc_object_NVD0B7_VIDEO_ENCODER_v03_00: TypeAlias = struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00
-@record
-class struct_alloc_object_FERMI_VASPACE_A_v03_00:
+@c.record
+class struct_alloc_object_FERMI_VASPACE_A_v03_00(c.Struct):
   SIZE = 32
   index: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
@@ -772,35 +773,35 @@ class struct_alloc_object_FERMI_VASPACE_A_v03_00:
   bigPageSize: Annotated[NvU32, 16]
   vaBase: Annotated[NvU64, 24]
 alloc_object_FERMI_VASPACE_A_v03_00: TypeAlias = struct_alloc_object_FERMI_VASPACE_A_v03_00
-@record
-class struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00:
+@c.record
+class struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00(c.Struct):
   SIZE = 8
   size: Annotated[NvU32, 0]
   prohibitMultipleInstances: Annotated[NvU32, 4]
 alloc_object_NVB0B0_VIDEO_DECODER_v03_00: TypeAlias = struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00
-@record
-class struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00:
+@c.record
+class struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00(c.Struct):
   SIZE = 12
   hDebuggerClient: Annotated[NvHandle, 0]
   hAppClient: Annotated[NvHandle, 4]
   hClass3dObject: Annotated[NvHandle, 8]
 alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00: TypeAlias = struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00
-@record
-class struct_alloc_object_NVENC_SW_SESSION_v06_01:
+@c.record
+class struct_alloc_object_NVENC_SW_SESSION_v06_01(c.Struct):
   SIZE = 12
   codecType: Annotated[NvU32, 0]
   hResolution: Annotated[NvU32, 4]
   vResolution: Annotated[NvU32, 8]
 alloc_object_NVENC_SW_SESSION_v06_01: TypeAlias = struct_alloc_object_NVENC_SW_SESSION_v06_01
-@record
-class struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02:
+@c.record
+class struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02(c.Struct):
   SIZE = 12
   size: Annotated[NvU32, 0]
   prohibitMultipleInstances: Annotated[NvU32, 4]
   engineInstance: Annotated[NvU32, 8]
 alloc_object_NVC4B0_VIDEO_DECODER_v12_02: TypeAlias = struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02
-@record
-class struct_alloc_object_NVFBC_SW_SESSION_v12_04:
+@c.record
+class struct_alloc_object_NVFBC_SW_SESSION_v12_04(c.Struct):
   SIZE = 20
   displayOrdinal: Annotated[NvU32, 0]
   sessionType: Annotated[NvU32, 4]
@@ -808,15 +809,15 @@ class struct_alloc_object_NVFBC_SW_SESSION_v12_04:
   hMaxResolution: Annotated[NvU32, 12]
   vMaxResolution: Annotated[NvU32, 16]
 alloc_object_NVFBC_SW_SESSION_v12_04: TypeAlias = struct_alloc_object_NVFBC_SW_SESSION_v12_04
-@record
-class struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02:
+@c.record
+class struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02(c.Struct):
   SIZE = 12
   size: Annotated[NvU32, 0]
   prohibitMultipleInstances: Annotated[NvU32, 4]
   engineInstance: Annotated[NvU32, 8]
 alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02: TypeAlias = struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02
-@record
-class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02:
+@c.record
+class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02(c.Struct):
   SIZE = 32
   hSubDevice: Annotated[NvHandle, 0]
   hPeerSubDevice: Annotated[NvHandle, 4]
@@ -826,63 +827,63 @@ class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02:
   mailboxTotalSize: Annotated[NvU32, 24]
   flags: Annotated[NvU32, 28]
 alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02: TypeAlias = struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02
-@record
-class struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00:
+@c.record
+class struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00(c.Struct):
   SIZE = 4
   swizzId: Annotated[NvU32, 0]
 alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00: TypeAlias = struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00
-@record
-class struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03:
+@c.record
+class struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03(c.Struct):
   SIZE = 24
   offset: Annotated[NvU64, 0]
   limit: Annotated[NvU64, 8]
   hVASpace: Annotated[NvHandle, 16]
 alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03: TypeAlias = struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03
-@record
-class struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06:
+@c.record
+class struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06(c.Struct):
   SIZE = 4
   execPartitionId: Annotated[NvU32, 0]
 alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06: TypeAlias = struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06
-@record
-class struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15:
+@c.record
+class struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15(c.Struct):
   SIZE = 16
   flags: Annotated[NvU32, 0]
   p2pToken: Annotated[NvU64, 8]
 alloc_object_NV503C_ALLOC_PARAMETERS_v18_15: TypeAlias = struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15
-@record
-class struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01:
+@c.record
+class struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01(c.Struct):
   SIZE = 12
   numHeads: Annotated[NvU32, 0]
   numSors: Annotated[NvU32, 4]
   numDsis: Annotated[NvU32, 8]
 alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01: TypeAlias = struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01
-@record
-class struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03:
+@c.record
+class struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03(c.Struct):
   SIZE = 4
   hSubDevice: Annotated[NvHandle, 0]
 alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03: TypeAlias = struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03
-@record
-class struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03:
+@c.record
+class struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03(c.Struct):
   SIZE = 8
   hClientTarget: Annotated[NvHandle, 0]
   hContextTarget: Annotated[NvHandle, 4]
 alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03: TypeAlias = struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03
-@record
-class struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17:
+@c.record
+class struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17(c.Struct):
   SIZE = 16
   version: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
   size: Annotated[NvU32, 8]
   caps: Annotated[NvU32, 12]
 NV_GR_ALLOCATION_PARAMETERS_v1A_17: TypeAlias = struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17
-@record
-class struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B:
+@c.record
+class struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B(c.Struct):
   SIZE = 8
   hClient: Annotated[NvHandle, 0]
   hChannel: Annotated[NvHandle, 4]
 alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B: TypeAlias = struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B
-@record
-class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C:
+@c.record
+class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C(c.Struct):
   SIZE = 40
   alignment: Annotated[NvU64, 0]
   allocSize: Annotated[NvU64, 8]
@@ -890,27 +891,27 @@ class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C:
   allocFlags: Annotated[NvU32, 20]
   map: Annotated[NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C, 24]
 alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C: TypeAlias = struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C
-@record
-class struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C:
+@c.record
+class struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C(c.Struct):
   SIZE = 16
   offset: Annotated[NvU64, 0]
   hVidMem: Annotated[NvHandle, 8]
   flags: Annotated[NvU32, 12]
 NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C: TypeAlias = struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C
-@record
-class struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00:
+@c.record
+class struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00(c.Struct):
   SIZE = 8
   size: Annotated[NvU32, 0]
   prohibitMultipleInstances: Annotated[NvU32, 4]
 alloc_object_NVC9FA_VIDEO_OFA_v1F_00: TypeAlias = struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00
-@record
-class struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08:
+@c.record
+class struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08(c.Struct):
   SIZE = 4
   reserved: Annotated[NvU32, 0]
 alloc_object_NV2081_ALLOC_PARAMETERS_v25_08: TypeAlias = struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08
 rpc_alloc_object_v25_08: TypeAlias = struct_rpc_alloc_object_v25_08
-@record
-class struct_rpc_alloc_object_v26_00:
+@c.record
+class struct_rpc_alloc_object_v26_00(c.Struct):
   SIZE = 80
   hClient: Annotated[NvHandle, 0]
   hParent: Annotated[NvHandle, 4]
@@ -918,8 +919,8 @@ class struct_rpc_alloc_object_v26_00:
   hClass: Annotated[NvU32, 12]
   param_len: Annotated[NvU32, 16]
   params: Annotated[alloc_object_params_v26_00, 24]
-@record
-class union_alloc_object_params_v26_00:
+@c.record
+class union_alloc_object_params_v26_00(c.Struct):
   SIZE = 56
   param_NV50_TESLA: Annotated[alloc_object_NV50_TESLA_v03_00, 0]
   param_GT212_DMA_COPY: Annotated[alloc_object_GT212_DMA_COPY_v03_00, 0]
@@ -947,11 +948,11 @@ class union_alloc_object_params_v26_00:
   param_NV00F8_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 0]
   param_NVC9FA_VIDEO_OFA: Annotated[alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 0]
   param_NV2081_ALLOC_PARAMETERS: Annotated[alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 0]
-  param_padding: Annotated[Array[NvU8, Literal[56]], 0]
+  param_padding: Annotated[c.Array[NvU8, Literal[56]], 0]
 alloc_object_params_v26_00: TypeAlias = union_alloc_object_params_v26_00
 rpc_alloc_object_v26_00: TypeAlias = struct_rpc_alloc_object_v26_00
-@record
-class struct_rpc_alloc_object_v27_00:
+@c.record
+class struct_rpc_alloc_object_v27_00(c.Struct):
   SIZE = 80
   hClient: Annotated[NvHandle, 0]
   hParent: Annotated[NvHandle, 4]
@@ -959,8 +960,8 @@ class struct_rpc_alloc_object_v27_00:
   hClass: Annotated[NvU32, 12]
   param_len: Annotated[NvU32, 16]
   params: Annotated[alloc_object_params_v27_00, 24]
-@record
-class union_alloc_object_params_v27_00:
+@c.record
+class union_alloc_object_params_v27_00(c.Struct):
   SIZE = 56
   param_NV50_TESLA: Annotated[alloc_object_NV50_TESLA_v03_00, 0]
   param_GT212_DMA_COPY: Annotated[alloc_object_GT212_DMA_COPY_v03_00, 0]
@@ -988,11 +989,11 @@ class union_alloc_object_params_v27_00:
   param_NV00F8_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 0]
   param_NVC9FA_VIDEO_OFA: Annotated[alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 0]
   param_NV2081_ALLOC_PARAMETERS: Annotated[alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 0]
-  param_padding: Annotated[Array[NvU8, Literal[56]], 0]
+  param_padding: Annotated[c.Array[NvU8, Literal[56]], 0]
 alloc_object_params_v27_00: TypeAlias = union_alloc_object_params_v27_00
 rpc_alloc_object_v27_00: TypeAlias = struct_rpc_alloc_object_v27_00
-@record
-class struct_rpc_alloc_object_v29_06:
+@c.record
+class struct_rpc_alloc_object_v29_06(c.Struct):
   SIZE = 80
   hClient: Annotated[NvHandle, 0]
   hParent: Annotated[NvHandle, 4]
@@ -1000,8 +1001,8 @@ class struct_rpc_alloc_object_v29_06:
   hClass: Annotated[NvU32, 12]
   param_len: Annotated[NvU32, 16]
   params: Annotated[alloc_object_params_v29_06, 24]
-@record
-class union_alloc_object_params_v29_06:
+@c.record
+class union_alloc_object_params_v29_06(c.Struct):
   SIZE = 56
   param_NV50_TESLA: Annotated[alloc_object_NV50_TESLA_v03_00, 0]
   param_GT212_DMA_COPY: Annotated[alloc_object_GT212_DMA_COPY_v03_00, 0]
@@ -1029,10 +1030,10 @@ class union_alloc_object_params_v29_06:
   param_NV00F8_ALLOCATION_PARAMETERS: Annotated[alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 0]
   param_NVC9FA_VIDEO_OFA: Annotated[alloc_object_NVC9FA_VIDEO_OFA_v29_06, 0]
   param_NV2081_ALLOC_PARAMETERS: Annotated[alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 0]
-  param_padding: Annotated[Array[NvU8, Literal[56]], 0]
+  param_padding: Annotated[c.Array[NvU8, Literal[56]], 0]
 alloc_object_params_v29_06: TypeAlias = union_alloc_object_params_v29_06
-@record
-class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06:
+@c.record
+class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06(c.Struct):
   SIZE = 12
   size: Annotated[NvU32, 0]
   prohibitMultipleInstances: Annotated[NvU32, 4]
@@ -1040,12 +1041,12 @@ class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06:
 alloc_object_NVC9FA_VIDEO_OFA_v29_06: TypeAlias = struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06
 rpc_alloc_object_v29_06: TypeAlias = struct_rpc_alloc_object_v29_06
 rpc_alloc_object_v: TypeAlias = struct_rpc_alloc_object_v29_06
-@record
-class struct_rpc_free_v03_00:
+@c.record
+class struct_rpc_free_v03_00(c.Struct):
   SIZE = 16
   params: Annotated[NVOS00_PARAMETERS_v03_00, 0]
-@record
-class struct_NVOS00_PARAMETERS_v03_00:
+@c.record
+class struct_NVOS00_PARAMETERS_v03_00(c.Struct):
   SIZE = 16
   hRoot: Annotated[NvHandle, 0]
   hObjectParent: Annotated[NvHandle, 4]
@@ -1055,20 +1056,20 @@ NVOS00_PARAMETERS_v03_00: TypeAlias = struct_NVOS00_PARAMETERS_v03_00
 NvV32: TypeAlias = Annotated[int, ctypes.c_uint32]
 rpc_free_v03_00: TypeAlias = struct_rpc_free_v03_00
 rpc_free_v: TypeAlias = struct_rpc_free_v03_00
-@record
-class struct_rpc_log_v03_00:
+@c.record
+class struct_rpc_log_v03_00(c.Struct):
   SIZE = 8
   level: Annotated[NvU32, 0]
   log_len: Annotated[NvU32, 4]
-  log_msg: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[0]], 8]
+  log_msg: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[0]], 8]
 rpc_log_v03_00: TypeAlias = struct_rpc_log_v03_00
 rpc_log_v: TypeAlias = struct_rpc_log_v03_00
-@record
-class struct_rpc_map_memory_dma_v03_00:
+@c.record
+class struct_rpc_map_memory_dma_v03_00(c.Struct):
   SIZE = 56
   params: Annotated[NVOS46_PARAMETERS_v03_00, 0]
-@record
-class struct_NVOS46_PARAMETERS_v03_00:
+@c.record
+class struct_NVOS46_PARAMETERS_v03_00(c.Struct):
   SIZE = 56
   hClient: Annotated[NvHandle, 0]
   hDevice: Annotated[NvHandle, 4]
@@ -1082,12 +1083,12 @@ class struct_NVOS46_PARAMETERS_v03_00:
 NVOS46_PARAMETERS_v03_00: TypeAlias = struct_NVOS46_PARAMETERS_v03_00
 rpc_map_memory_dma_v03_00: TypeAlias = struct_rpc_map_memory_dma_v03_00
 rpc_map_memory_dma_v: TypeAlias = struct_rpc_map_memory_dma_v03_00
-@record
-class struct_rpc_unmap_memory_dma_v03_00:
+@c.record
+class struct_rpc_unmap_memory_dma_v03_00(c.Struct):
   SIZE = 40
   params: Annotated[NVOS47_PARAMETERS_v03_00, 0]
-@record
-class struct_NVOS47_PARAMETERS_v03_00:
+@c.record
+class struct_NVOS47_PARAMETERS_v03_00(c.Struct):
   SIZE = 40
   hClient: Annotated[NvHandle, 0]
   hDevice: Annotated[NvHandle, 4]
@@ -1099,13 +1100,13 @@ class struct_NVOS47_PARAMETERS_v03_00:
 NVOS47_PARAMETERS_v03_00: TypeAlias = struct_NVOS47_PARAMETERS_v03_00
 rpc_unmap_memory_dma_v03_00: TypeAlias = struct_rpc_unmap_memory_dma_v03_00
 rpc_unmap_memory_dma_v: TypeAlias = struct_rpc_unmap_memory_dma_v03_00
-@record
-class struct_rpc_alloc_subdevice_v08_01:
+@c.record
+class struct_rpc_alloc_subdevice_v08_01(c.Struct):
   SIZE = 40
   subDeviceInst: Annotated[NvU32, 0]
   params: Annotated[NVOS21_PARAMETERS_v03_00, 8]
-@record
-class struct_NVOS21_PARAMETERS_v03_00:
+@c.record
+class struct_NVOS21_PARAMETERS_v03_00(c.Struct):
   SIZE = 32
   hRoot: Annotated[NvHandle, 0]
   hObjectParent: Annotated[NvHandle, 4]
@@ -1114,15 +1115,15 @@ class struct_NVOS21_PARAMETERS_v03_00:
   pAllocParms: Annotated[NvP64, 16]
   status: Annotated[NvV32, 24]
 NVOS21_PARAMETERS_v03_00: TypeAlias = struct_NVOS21_PARAMETERS_v03_00
-NvP64: TypeAlias = POINTER(None)
+NvP64: TypeAlias = c.POINTER(None)
 rpc_alloc_subdevice_v08_01: TypeAlias = struct_rpc_alloc_subdevice_v08_01
 rpc_alloc_subdevice_v: TypeAlias = struct_rpc_alloc_subdevice_v08_01
-@record
-class struct_rpc_dup_object_v03_00:
+@c.record
+class struct_rpc_dup_object_v03_00(c.Struct):
   SIZE = 28
   params: Annotated[NVOS55_PARAMETERS_v03_00, 0]
-@record
-class struct_NVOS55_PARAMETERS_v03_00:
+@c.record
+class struct_NVOS55_PARAMETERS_v03_00(c.Struct):
   SIZE = 28
   hClient: Annotated[NvHandle, 0]
   hParent: Annotated[NvHandle, 4]
@@ -1134,15 +1135,15 @@ class struct_NVOS55_PARAMETERS_v03_00:
 NVOS55_PARAMETERS_v03_00: TypeAlias = struct_NVOS55_PARAMETERS_v03_00
 rpc_dup_object_v03_00: TypeAlias = struct_rpc_dup_object_v03_00
 rpc_dup_object_v: TypeAlias = struct_rpc_dup_object_v03_00
-@record
-class struct_rpc_idle_channels_v03_00:
+@c.record
+class struct_rpc_idle_channels_v03_00(c.Struct):
   SIZE = 12
   flags: Annotated[NvU32, 0]
   timeout: Annotated[NvU32, 4]
   nchannels: Annotated[NvU32, 8]
-  channel_list: Annotated[Array[idle_channel_list_v03_00, Literal[0]], 12]
-@record
-class struct_idle_channel_list_v03_00:
+  channel_list: Annotated[c.Array[idle_channel_list_v03_00, Literal[0]], 12]
+@c.record
+class struct_idle_channel_list_v03_00(c.Struct):
   SIZE = 12
   phClient: Annotated[NvU32, 0]
   phDevice: Annotated[NvU32, 4]
@@ -1150,8 +1151,8 @@ class struct_idle_channel_list_v03_00:
 idle_channel_list_v03_00: TypeAlias = struct_idle_channel_list_v03_00
 rpc_idle_channels_v03_00: TypeAlias = struct_rpc_idle_channels_v03_00
 rpc_idle_channels_v: TypeAlias = struct_rpc_idle_channels_v03_00
-@record
-class struct_rpc_alloc_event_v03_00:
+@c.record
+class struct_rpc_alloc_event_v03_00(c.Struct):
   SIZE = 28
   hClient: Annotated[NvHandle, 0]
   hParentClient: Annotated[NvHandle, 4]
@@ -1162,13 +1163,13 @@ class struct_rpc_alloc_event_v03_00:
   notifyIndex: Annotated[NvU32, 24]
 rpc_alloc_event_v03_00: TypeAlias = struct_rpc_alloc_event_v03_00
 rpc_alloc_event_v: TypeAlias = struct_rpc_alloc_event_v03_00
-@record
-class struct_rpc_rm_api_control_v25_0D:
+@c.record
+class struct_rpc_rm_api_control_v25_0D(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
-@record
-class struct_NVOS54_PARAMETERS_v03_00:
+@c.record
+class struct_NVOS54_PARAMETERS_v03_00(c.Struct):
   SIZE = 32
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
@@ -1179,88 +1180,88 @@ class struct_NVOS54_PARAMETERS_v03_00:
 NVOS54_PARAMETERS_v03_00: TypeAlias = struct_NVOS54_PARAMETERS_v03_00
 NvRmctrlCmd: TypeAlias = Annotated[int, ctypes.c_uint32]
 rpc_rm_api_control_v25_0D: TypeAlias = struct_rpc_rm_api_control_v25_0D
-@record
-class struct_rpc_rm_api_control_v25_0F:
+@c.record
+class struct_rpc_rm_api_control_v25_0F(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_0F: TypeAlias = struct_rpc_rm_api_control_v25_0F
-@record
-class struct_rpc_rm_api_control_v25_10:
+@c.record
+class struct_rpc_rm_api_control_v25_10(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_10: TypeAlias = struct_rpc_rm_api_control_v25_10
-@record
-class struct_rpc_rm_api_control_v25_14:
+@c.record
+class struct_rpc_rm_api_control_v25_14(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_14: TypeAlias = struct_rpc_rm_api_control_v25_14
-@record
-class struct_rpc_rm_api_control_v25_15:
+@c.record
+class struct_rpc_rm_api_control_v25_15(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_15: TypeAlias = struct_rpc_rm_api_control_v25_15
-@record
-class struct_rpc_rm_api_control_v25_16:
+@c.record
+class struct_rpc_rm_api_control_v25_16(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_16: TypeAlias = struct_rpc_rm_api_control_v25_16
-@record
-class struct_rpc_rm_api_control_v25_17:
+@c.record
+class struct_rpc_rm_api_control_v25_17(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_17: TypeAlias = struct_rpc_rm_api_control_v25_17
-@record
-class struct_rpc_rm_api_control_v25_18:
+@c.record
+class struct_rpc_rm_api_control_v25_18(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_18: TypeAlias = struct_rpc_rm_api_control_v25_18
-@record
-class struct_rpc_rm_api_control_v25_19:
+@c.record
+class struct_rpc_rm_api_control_v25_19(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_19: TypeAlias = struct_rpc_rm_api_control_v25_19
-@record
-class struct_rpc_rm_api_control_v25_1A:
+@c.record
+class struct_rpc_rm_api_control_v25_1A(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v25_1A: TypeAlias = struct_rpc_rm_api_control_v25_1A
-@record
-class struct_rpc_rm_api_control_v27_03:
+@c.record
+class struct_rpc_rm_api_control_v27_03(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v27_03: TypeAlias = struct_rpc_rm_api_control_v27_03
-@record
-class struct_rpc_rm_api_control_v29_04:
+@c.record
+class struct_rpc_rm_api_control_v29_04(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v29_04: TypeAlias = struct_rpc_rm_api_control_v29_04
-@record
-class struct_rpc_rm_api_control_v29_09:
+@c.record
+class struct_rpc_rm_api_control_v29_09(c.Struct):
   SIZE = 40
   params: Annotated[NVOS54_PARAMETERS_v03_00, 0]
   rm_api_params: Annotated[NvP64, 32]
 rpc_rm_api_control_v29_09: TypeAlias = struct_rpc_rm_api_control_v29_09
 rpc_rm_api_control_v: TypeAlias = struct_rpc_rm_api_control_v29_09
-@record
-class struct_rpc_alloc_share_device_v03_00:
+@c.record
+class struct_rpc_alloc_share_device_v03_00(c.Struct):
   SIZE = 64
   hClient: Annotated[NvHandle, 0]
   hDevice: Annotated[NvHandle, 4]
   hClass: Annotated[NvU32, 8]
   params: Annotated[NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 16]
-@record
-class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00:
+@c.record
+class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00(c.Struct):
   SIZE = 48
   szName: Annotated[NvP64, 0]
   hClientShare: Annotated[NvHandle, 8]
@@ -1273,15 +1274,15 @@ class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00:
 NV_DEVICE_ALLOCATION_PARAMETERS_v03_00: TypeAlias = struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00
 rpc_alloc_share_device_v03_00: TypeAlias = struct_rpc_alloc_share_device_v03_00
 rpc_alloc_share_device_v: TypeAlias = struct_rpc_alloc_share_device_v03_00
-@record
-class struct_rpc_get_engine_utilization_v1F_0E:
+@c.record
+class struct_rpc_get_engine_utilization_v1F_0E(c.Struct):
   SIZE = 4048
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   cmd: Annotated[NvU32, 8]
   params: Annotated[vgpuGetEngineUtilization_data_v1F_0E, 16]
-@record
-class union_vgpuGetEngineUtilization_data_v1F_0E:
+@c.record
+class union_vgpuGetEngineUtilization_data_v1F_0E(c.Struct):
   SIZE = 4032
   vidPerfmonSample: Annotated[NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00, 0]
   getAccountingState: Annotated[NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C, 0]
@@ -1289,10 +1290,10 @@ class union_vgpuGetEngineUtilization_data_v1F_0E:
   getAccountingPidList: Annotated[NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 0]
   procAccountingInfo: Annotated[NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 0]
   clearAccountingInfo: Annotated[NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C, 0]
-  gpumonPerfmonsampleV2: Annotated[Array[NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, Literal[72]], 0]
+  gpumonPerfmonsampleV2: Annotated[c.Array[NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, Literal[72]], 0]
 vgpuGetEngineUtilization_data_v1F_0E: TypeAlias = union_vgpuGetEngineUtilization_data_v1F_0E
-@record
-class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00:
+@c.record
+class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00(c.Struct):
   SIZE = 12
   engineType: Annotated[NV2080_CTRL_CMD_PERF_VID_ENG, 0]
   clkPercentBusy: Annotated[NvU32, 4]
@@ -1305,31 +1306,31 @@ NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('N
 NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA', 4)
 
 NV2080_CTRL_CMD_PERF_VID_ENG: TypeAlias = enum_NV2080_CTRL_CMD_PERF_VID_ENG
-@record
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C:
+@c.record
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C(c.Struct):
   SIZE = 12
   gpuId: Annotated[NvU32, 0]
   vmPid: Annotated[NvU32, 4]
   state: Annotated[NvU32, 8]
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C: TypeAlias = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C
-@record
-class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C:
+@c.record
+class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C(c.Struct):
   SIZE = 12
   gpuId: Annotated[NvU32, 0]
   vmPid: Annotated[NvU32, 4]
   newState: Annotated[NvU32, 8]
 NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C: TypeAlias = struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C
-@record
-class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C:
+@c.record
+class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C(c.Struct):
   SIZE = 4016
   gpuId: Annotated[NvU32, 0]
   vmPid: Annotated[NvU32, 4]
   passIndex: Annotated[NvU32, 8]
   pidCount: Annotated[NvU32, 12]
-  pidTable: Annotated[Array[NvU32, Literal[1000]], 16]
+  pidTable: Annotated[c.Array[NvU32, Literal[1000]], 16]
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C: TypeAlias = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C
-@record
-class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C:
+@c.record
+class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C(c.Struct):
   SIZE = 48
   gpuId: Annotated[NvU32, 0]
   pid: Annotated[NvU32, 4]
@@ -1340,14 +1341,14 @@ class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C:
   startTime: Annotated[NvU64, 32]
   endTime: Annotated[NvU64, 40]
 NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C: TypeAlias = struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C
-@record
-class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C:
+@c.record
+class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C(c.Struct):
   SIZE = 8
   gpuId: Annotated[NvU32, 0]
   vmPid: Annotated[NvU32, 4]
 NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C: TypeAlias = struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C
-@record
-class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E:
+@c.record
+class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E(c.Struct):
   SIZE = 56
   timeStamp: Annotated[NvU64, 0]
   fb: Annotated[NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 8]
@@ -1355,8 +1356,8 @@ class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E:
   nvenc: Annotated[NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 32]
   nvdec: Annotated[NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 44]
 NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E: TypeAlias = struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E
-@record
-class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00:
+@c.record
+class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00(c.Struct):
   SIZE = 12
   util: Annotated[NvU32, 0]
   procId: Annotated[NvU32, 4]
@@ -1364,8 +1365,8 @@ class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00:
 NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00: TypeAlias = struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00
 rpc_get_engine_utilization_v1F_0E: TypeAlias = struct_rpc_get_engine_utilization_v1F_0E
 rpc_get_engine_utilization_v: TypeAlias = struct_rpc_get_engine_utilization_v1F_0E
-@record
-class struct_rpc_perf_get_level_info_v03_00:
+@c.record
+class struct_rpc_perf_get_level_info_v03_00(c.Struct):
   SIZE = 24
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
@@ -1373,16 +1374,16 @@ class struct_rpc_perf_get_level_info_v03_00:
   flags: Annotated[NvU32, 12]
   perfGetClkInfoListSize: Annotated[NvU32, 16]
   param_size: Annotated[NvU32, 20]
-  params: Annotated[Array[NvU32, Literal[0]], 24]
+  params: Annotated[c.Array[NvU32, Literal[0]], 24]
 rpc_perf_get_level_info_v03_00: TypeAlias = struct_rpc_perf_get_level_info_v03_00
 rpc_perf_get_level_info_v: TypeAlias = struct_rpc_perf_get_level_info_v03_00
-@record
-class struct_rpc_set_surface_properties_v07_07:
+@c.record
+class struct_rpc_set_surface_properties_v07_07(c.Struct):
   SIZE = 76
   hClient: Annotated[NvHandle, 0]
   params: Annotated[NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 4]
-@record
-class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07:
+@c.record
+class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07(c.Struct):
   SIZE = 72
   headIndex: Annotated[NvU32, 0]
   isPrimary: Annotated[NvU32, 4]
@@ -1405,56 +1406,56 @@ class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07:
 NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07: TypeAlias = struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07
 rpc_set_surface_properties_v07_07: TypeAlias = struct_rpc_set_surface_properties_v07_07
 rpc_set_surface_properties_v: TypeAlias = struct_rpc_set_surface_properties_v07_07
-@record
-class struct_rpc_cleanup_surface_v03_00:
+@c.record
+class struct_rpc_cleanup_surface_v03_00(c.Struct):
   SIZE = 8
   params: Annotated[NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00, 0]
-@record
-class struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00:
+@c.record
+class struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00(c.Struct):
   SIZE = 8
   headIndex: Annotated[NvU32, 0]
   blankingEnabled: Annotated[NvU32, 4]
 NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00: TypeAlias = struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00
 rpc_cleanup_surface_v03_00: TypeAlias = struct_rpc_cleanup_surface_v03_00
 rpc_cleanup_surface_v: TypeAlias = struct_rpc_cleanup_surface_v03_00
-@record
-class struct_rpc_unloading_guest_driver_v1F_07:
+@c.record
+class struct_rpc_unloading_guest_driver_v1F_07(c.Struct):
   SIZE = 8
   bInPMTransition: Annotated[NvBool, 0]
   bGc6Entering: Annotated[NvBool, 1]
   newLevel: Annotated[NvU32, 4]
 rpc_unloading_guest_driver_v1F_07: TypeAlias = struct_rpc_unloading_guest_driver_v1F_07
 rpc_unloading_guest_driver_v: TypeAlias = struct_rpc_unloading_guest_driver_v1F_07
-@record
-class struct_rpc_gpu_exec_reg_ops_v12_01:
+@c.record
+class struct_rpc_gpu_exec_reg_ops_v12_01(c.Struct):
   SIZE = 56
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[gpu_exec_reg_ops_v12_01, 8]
-@record
-class struct_gpu_exec_reg_ops_v12_01:
+@c.record
+class struct_gpu_exec_reg_ops_v12_01(c.Struct):
   SIZE = 48
   reg_op_params: Annotated[NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 0]
-  operations: Annotated[Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[0]], 48]
+  operations: Annotated[c.Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[0]], 48]
 gpu_exec_reg_ops_v12_01: TypeAlias = struct_gpu_exec_reg_ops_v12_01
-@record
-class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01:
+@c.record
+class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01(c.Struct):
   SIZE = 48
   hClientTarget: Annotated[NvHandle, 0]
   hChannelTarget: Annotated[NvHandle, 4]
-  reserved00: Annotated[Array[NvU32, Literal[3]], 8]
+  reserved00: Annotated[c.Array[NvU32, Literal[3]], 8]
   regOpCount: Annotated[NvU32, 20]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 24]
   regOps: Annotated[NvP64, 40]
 NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01: TypeAlias = struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01
-@record
-class struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01:
+@c.record
+class struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01(c.Struct):
   SIZE = 16
   flags: Annotated[NvU32, 0]
   route: Annotated[NvU64, 8]
 NV2080_CTRL_GR_ROUTE_INFO_v12_01: TypeAlias = struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01
-@record
-class struct_NV2080_CTRL_GPU_REG_OP_v03_00:
+@c.record
+class struct_NV2080_CTRL_GPU_REG_OP_v03_00(c.Struct):
   SIZE = 32
   regOp: Annotated[NvU8, 0]
   regType: Annotated[NvU8, 1]
@@ -1470,38 +1471,38 @@ class struct_NV2080_CTRL_GPU_REG_OP_v03_00:
 NV2080_CTRL_GPU_REG_OP_v03_00: TypeAlias = struct_NV2080_CTRL_GPU_REG_OP_v03_00
 rpc_gpu_exec_reg_ops_v12_01: TypeAlias = struct_rpc_gpu_exec_reg_ops_v12_01
 rpc_gpu_exec_reg_ops_v: TypeAlias = struct_rpc_gpu_exec_reg_ops_v12_01
-@record
-class struct_rpc_get_static_data_v25_0E:
+@c.record
+class struct_rpc_get_static_data_v25_0E(c.Struct):
   SIZE = 8
   offset: Annotated[NvU32, 0]
   size: Annotated[NvU32, 4]
-  payload: Annotated[Array[NvU8, Literal[0]], 8]
+  payload: Annotated[c.Array[NvU8, Literal[0]], 8]
 rpc_get_static_data_v25_0E: TypeAlias = struct_rpc_get_static_data_v25_0E
-@record
-class struct_rpc_get_static_data_v27_01:
+@c.record
+class struct_rpc_get_static_data_v27_01(c.Struct):
   SIZE = 8
   offset: Annotated[NvU32, 0]
   size: Annotated[NvU32, 4]
-  payload: Annotated[Array[NvU8, Literal[0]], 8]
+  payload: Annotated[c.Array[NvU8, Literal[0]], 8]
 rpc_get_static_data_v27_01: TypeAlias = struct_rpc_get_static_data_v27_01
 rpc_get_static_data_v: TypeAlias = struct_rpc_get_static_data_v27_01
-@record
-class struct_rpc_get_consolidated_gr_static_info_v1B_04:
+@c.record
+class struct_rpc_get_consolidated_gr_static_info_v1B_04(c.Struct):
   SIZE = 8
   offset: Annotated[NvU32, 0]
   size: Annotated[NvU32, 4]
-  payload: Annotated[Array[NvU8, Literal[0]], 8]
+  payload: Annotated[c.Array[NvU8, Literal[0]], 8]
 rpc_get_consolidated_gr_static_info_v1B_04: TypeAlias = struct_rpc_get_consolidated_gr_static_info_v1B_04
 rpc_get_consolidated_gr_static_info_v: TypeAlias = struct_rpc_get_consolidated_gr_static_info_v1B_04
-@record
-class struct_rpc_set_page_directory_v1E_05:
+@c.record
+class struct_rpc_set_page_directory_v1E_05(c.Struct):
   SIZE = 48
   hClient: Annotated[NvHandle, 0]
   hDevice: Annotated[NvHandle, 4]
   pasid: Annotated[NvU32, 8]
   params: Annotated[NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 16]
-@record
-class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05:
+@c.record
+class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(c.Struct):
   SIZE = 32
   physAddress: Annotated[NvU64, 0]
   numEntries: Annotated[NvU32, 8]
@@ -1513,32 +1514,32 @@ class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05:
 NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05: TypeAlias = struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05
 rpc_set_page_directory_v1E_05: TypeAlias = struct_rpc_set_page_directory_v1E_05
 rpc_set_page_directory_v: TypeAlias = struct_rpc_set_page_directory_v1E_05
-@record
-class struct_rpc_unset_page_directory_v1E_05:
+@c.record
+class struct_rpc_unset_page_directory_v1E_05(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hDevice: Annotated[NvHandle, 4]
   params: Annotated[NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05, 8]
-@record
-class struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05:
+@c.record
+class struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05(c.Struct):
   SIZE = 8
   hVASpace: Annotated[NvHandle, 0]
   subDeviceId: Annotated[NvU32, 4]
 NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05: TypeAlias = struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05
 rpc_unset_page_directory_v1E_05: TypeAlias = struct_rpc_unset_page_directory_v1E_05
 rpc_unset_page_directory_v: TypeAlias = struct_rpc_unset_page_directory_v1E_05
-@record
-class struct_rpc_get_gsp_static_info_v14_00:
+@c.record
+class struct_rpc_get_gsp_static_info_v14_00(c.Struct):
   SIZE = 4
   data: Annotated[NvU32, 0]
 rpc_get_gsp_static_info_v14_00: TypeAlias = struct_rpc_get_gsp_static_info_v14_00
 rpc_get_gsp_static_info_v: TypeAlias = struct_rpc_get_gsp_static_info_v14_00
-@record
-class struct_rpc_update_bar_pde_v15_00:
+@c.record
+class struct_rpc_update_bar_pde_v15_00(c.Struct):
   SIZE = 24
   info: Annotated[UpdateBarPde_v15_00, 0]
-@record
-class struct_UpdateBarPde_v15_00:
+@c.record
+class struct_UpdateBarPde_v15_00(c.Struct):
   SIZE = 24
   barType: Annotated[NV_RPC_UPDATE_PDE_BAR_TYPE, 0]
   entryValue: Annotated[NvU64, 8]
@@ -1546,41 +1547,41 @@ class struct_UpdateBarPde_v15_00:
 UpdateBarPde_v15_00: TypeAlias = struct_UpdateBarPde_v15_00
 rpc_update_bar_pde_v15_00: TypeAlias = struct_rpc_update_bar_pde_v15_00
 rpc_update_bar_pde_v: TypeAlias = struct_rpc_update_bar_pde_v15_00
-@record
-class struct_rpc_get_encoder_capacity_v07_00:
+@c.record
+class struct_rpc_get_encoder_capacity_v07_00(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   encoderCapacity: Annotated[NvU32, 8]
 rpc_get_encoder_capacity_v07_00: TypeAlias = struct_rpc_get_encoder_capacity_v07_00
 rpc_get_encoder_capacity_v: TypeAlias = struct_rpc_get_encoder_capacity_v07_00
-@record
-class struct_rpc_vgpu_pf_reg_read32_v15_00:
+@c.record
+class struct_rpc_vgpu_pf_reg_read32_v15_00(c.Struct):
   SIZE = 16
   address: Annotated[NvU64, 0]
   value: Annotated[NvU32, 8]
   grEngId: Annotated[NvU32, 12]
 rpc_vgpu_pf_reg_read32_v15_00: TypeAlias = struct_rpc_vgpu_pf_reg_read32_v15_00
 rpc_vgpu_pf_reg_read32_v: TypeAlias = struct_rpc_vgpu_pf_reg_read32_v15_00
-@record
-class struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08:
+@c.record
+class struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08(c.Struct):
   SIZE = 8
   setFbUsage: Annotated[NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02, 0]
-@record
-class struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02:
+@c.record
+class struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02(c.Struct):
   SIZE = 8
   fbUsed: Annotated[NvU64, 0]
 NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02: TypeAlias = struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02
 rpc_ctrl_set_vgpu_fb_usage_v1A_08: TypeAlias = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
 rpc_ctrl_set_vgpu_fb_usage_v: TypeAlias = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
-@record
-class struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09:
+@c.record
+class struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09(c.Struct):
   SIZE = 40
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   nvencSessionUpdate: Annotated[NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 8]
-@record
-class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01:
+@c.record
+class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01(c.Struct):
   SIZE = 32
   hResolution: Annotated[NvU32, 0]
   vResolution: Annotated[NvU32, 4]
@@ -1591,14 +1592,14 @@ class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01:
 NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01: TypeAlias = struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01
 rpc_ctrl_nvenc_sw_session_update_info_v1A_09: TypeAlias = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
 rpc_ctrl_nvenc_sw_session_update_info_v: TypeAlias = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
-@record
-class struct_rpc_ctrl_reset_channel_v1A_09:
+@c.record
+class struct_rpc_ctrl_reset_channel_v1A_09(c.Struct):
   SIZE = 20
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   resetChannel: Annotated[NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01, 8]
-@record
-class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01:
+@c.record
+class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01(c.Struct):
   SIZE = 12
   engineID: Annotated[NvU32, 0]
   subdeviceInstance: Annotated[NvU32, 4]
@@ -1606,55 +1607,55 @@ class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01:
 NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01: TypeAlias = struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01
 rpc_ctrl_reset_channel_v1A_09: TypeAlias = struct_rpc_ctrl_reset_channel_v1A_09
 rpc_ctrl_reset_channel_v: TypeAlias = struct_rpc_ctrl_reset_channel_v1A_09
-@record
-class struct_rpc_ctrl_reset_isolated_channel_v1A_09:
+@c.record
+class struct_rpc_ctrl_reset_isolated_channel_v1A_09(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   resetIsolatedChannel: Annotated[NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00, 8]
-@record
-class struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00:
+@c.record
+class struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00(c.Struct):
   SIZE = 8
   exceptType: Annotated[NvU32, 0]
   engineID: Annotated[NvU32, 4]
 NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00: TypeAlias = struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00
 rpc_ctrl_reset_isolated_channel_v1A_09: TypeAlias = struct_rpc_ctrl_reset_isolated_channel_v1A_09
 rpc_ctrl_reset_isolated_channel_v: TypeAlias = struct_rpc_ctrl_reset_isolated_channel_v1A_09
-@record
-class struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09:
+@c.record
+class struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   handleVfPriFault: Annotated[NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09, 8]
-@record
-class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09:
+@c.record
+class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09(c.Struct):
   SIZE = 4
   faultType: Annotated[NvU32, 0]
 NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09: TypeAlias = struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09
 rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09: TypeAlias = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
 rpc_ctrl_gpu_handle_vf_pri_fault_v: TypeAlias = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
-@record
-class struct_rpc_ctrl_perf_boost_v1A_09:
+@c.record
+class struct_rpc_ctrl_perf_boost_v1A_09(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   perfBoost: Annotated[NV2080_CTRL_PERF_BOOST_PARAMS_v03_00, 8]
-@record
-class struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00:
+@c.record
+class struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00(c.Struct):
   SIZE = 8
   flags: Annotated[NvU32, 0]
   duration: Annotated[NvU32, 4]
 NV2080_CTRL_PERF_BOOST_PARAMS_v03_00: TypeAlias = struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00
 rpc_ctrl_perf_boost_v1A_09: TypeAlias = struct_rpc_ctrl_perf_boost_v1A_09
 rpc_ctrl_perf_boost_v: TypeAlias = struct_rpc_ctrl_perf_boost_v1A_09
-@record
-class struct_rpc_ctrl_get_zbc_clear_table_v1A_09:
+@c.record
+class struct_rpc_ctrl_get_zbc_clear_table_v1A_09(c.Struct):
   SIZE = 64
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   getZbcClearTable: Annotated[NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 8]
-@record
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00:
+@c.record
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00(c.Struct):
   SIZE = 56
   value: Annotated[NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 0]
   indexSize: Annotated[NvU32, 40]
@@ -1662,53 +1663,53 @@ class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00:
   format: Annotated[NvU32, 48]
   valType: Annotated[NvU32, 52]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00: TypeAlias = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00
-@record
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00:
+@c.record
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00(c.Struct):
   SIZE = 40
-  colorFB: Annotated[Array[NvU32, Literal[4]], 0]
-  colorDS: Annotated[Array[NvU32, Literal[4]], 16]
+  colorFB: Annotated[c.Array[NvU32, Literal[4]], 0]
+  colorDS: Annotated[c.Array[NvU32, Literal[4]], 16]
   depth: Annotated[NvU32, 32]
   stencil: Annotated[NvU32, 36]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00: TypeAlias = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00
 rpc_ctrl_get_zbc_clear_table_v1A_09: TypeAlias = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
 rpc_ctrl_get_zbc_clear_table_v: TypeAlias = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
-@record
-class struct_rpc_ctrl_set_zbc_color_clear_v1A_09:
+@c.record
+class struct_rpc_ctrl_set_zbc_color_clear_v1A_09(c.Struct):
   SIZE = 44
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   setZbcColorClr: Annotated[NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00, 8]
-@record
-class struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00:
+@c.record
+class struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00(c.Struct):
   SIZE = 36
-  colorFB: Annotated[Array[NvU32, Literal[4]], 0]
-  colorDS: Annotated[Array[NvU32, Literal[4]], 16]
+  colorFB: Annotated[c.Array[NvU32, Literal[4]], 0]
+  colorDS: Annotated[c.Array[NvU32, Literal[4]], 16]
   format: Annotated[NvU32, 32]
 NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00: TypeAlias = struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00
 rpc_ctrl_set_zbc_color_clear_v1A_09: TypeAlias = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
 rpc_ctrl_set_zbc_color_clear_v: TypeAlias = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
-@record
-class struct_rpc_ctrl_set_zbc_depth_clear_v1A_09:
+@c.record
+class struct_rpc_ctrl_set_zbc_depth_clear_v1A_09(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   setZbcDepthClr: Annotated[NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00, 8]
-@record
-class struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00:
+@c.record
+class struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00(c.Struct):
   SIZE = 8
   depth: Annotated[NvU32, 0]
   format: Annotated[NvU32, 4]
 NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00: TypeAlias = struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00
 rpc_ctrl_set_zbc_depth_clear_v1A_09: TypeAlias = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
 rpc_ctrl_set_zbc_depth_clear_v: TypeAlias = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
-@record
-class struct_rpc_ctrl_set_zbc_stencil_clear_v27_06:
+@c.record
+class struct_rpc_ctrl_set_zbc_stencil_clear_v27_06(c.Struct):
   SIZE = 20
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   setZbcStencilClr: Annotated[NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06, 8]
-@record
-class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06:
+@c.record
+class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06(c.Struct):
   SIZE = 12
   stencil: Annotated[NvU32, 0]
   format: Annotated[NvU32, 4]
@@ -1716,60 +1717,60 @@ class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06:
 NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06: TypeAlias = struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06
 rpc_ctrl_set_zbc_stencil_clear_v27_06: TypeAlias = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
 rpc_ctrl_set_zbc_stencil_clear_v: TypeAlias = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
-@record
-class struct_rpc_ctrl_gpfifo_schedule_v1A_0A:
+@c.record
+class struct_rpc_ctrl_gpfifo_schedule_v1A_0A(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   cmd: Annotated[NvU32, 8]
   gpfifoSchedule: Annotated[NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00, 12]
-@record
-class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00:
+@c.record
+class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00(c.Struct):
   SIZE = 1
   bEnable: Annotated[NvBool, 0]
 NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00: TypeAlias = struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00
 rpc_ctrl_gpfifo_schedule_v1A_0A: TypeAlias = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
 rpc_ctrl_gpfifo_schedule_v: TypeAlias = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
-@record
-class struct_rpc_ctrl_set_timeslice_v1A_0A:
+@c.record
+class struct_rpc_ctrl_set_timeslice_v1A_0A(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   setTimeSlice: Annotated[NVA06C_CTRL_TIMESLICE_PARAMS_v06_00, 8]
-@record
-class struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00:
+@c.record
+class struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00(c.Struct):
   SIZE = 8
   timesliceUs: Annotated[NvU64, 0]
 NVA06C_CTRL_TIMESLICE_PARAMS_v06_00: TypeAlias = struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00
 rpc_ctrl_set_timeslice_v1A_0A: TypeAlias = struct_rpc_ctrl_set_timeslice_v1A_0A
 rpc_ctrl_set_timeslice_v: TypeAlias = struct_rpc_ctrl_set_timeslice_v1A_0A
-@record
-class struct_rpc_ctrl_fifo_disable_channels_v1A_0A:
+@c.record
+class struct_rpc_ctrl_fifo_disable_channels_v1A_0A(c.Struct):
   SIZE = 544
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   fifoDisableChannels: Annotated[NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 8]
-@record
-class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00:
+@c.record
+class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00(c.Struct):
   SIZE = 536
   bDisable: Annotated[NvBool, 0]
   numChannels: Annotated[NvU32, 4]
   bOnlyDisableScheduling: Annotated[NvBool, 8]
   bRewindGpPut: Annotated[NvBool, 9]
   pRunlistPreemptEvent: Annotated[NvP64, 16]
-  hClientList: Annotated[Array[NvHandle, Literal[64]], 24]
-  hChannelList: Annotated[Array[NvHandle, Literal[64]], 280]
+  hClientList: Annotated[c.Array[NvHandle, Literal[64]], 24]
+  hChannelList: Annotated[c.Array[NvHandle, Literal[64]], 280]
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00: TypeAlias = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00
 rpc_ctrl_fifo_disable_channels_v1A_0A: TypeAlias = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
 rpc_ctrl_fifo_disable_channels_v: TypeAlias = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
-@record
-class struct_rpc_ctrl_preempt_v1A_0A:
+@c.record
+class struct_rpc_ctrl_preempt_v1A_0A(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   cmdPreempt: Annotated[NVA06C_CTRL_PREEMPT_PARAMS_v09_0A, 8]
-@record
-class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A:
+@c.record
+class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A(c.Struct):
   SIZE = 8
   bWait: Annotated[NvBool, 0]
   bManualTimeout: Annotated[NvBool, 1]
@@ -1777,77 +1778,77 @@ class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A:
 NVA06C_CTRL_PREEMPT_PARAMS_v09_0A: TypeAlias = struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A
 rpc_ctrl_preempt_v1A_0A: TypeAlias = struct_rpc_ctrl_preempt_v1A_0A
 rpc_ctrl_preempt_v: TypeAlias = struct_rpc_ctrl_preempt_v1A_0A
-@record
-class struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A:
+@c.record
+class struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   interleaveLevelTSG: Annotated[NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02, 8]
-@record
-class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02:
+@c.record
+class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(c.Struct):
   SIZE = 4
   tsgInterleaveLevel: Annotated[NvU32, 0]
 NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02: TypeAlias = struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02
 rpc_ctrl_set_tsg_interleave_level_v1A_0A: TypeAlias = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
 rpc_ctrl_set_tsg_interleave_level_v: TypeAlias = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
-@record
-class struct_rpc_ctrl_set_channel_interleave_level_v1A_0A:
+@c.record
+class struct_rpc_ctrl_set_channel_interleave_level_v1A_0A(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   interleaveLevelChannel: Annotated[NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02, 8]
-@record
-class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02:
+@c.record
+class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(c.Struct):
   SIZE = 4
   channelInterleaveLevel: Annotated[NvU32, 0]
 NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02: TypeAlias = struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02
 rpc_ctrl_set_channel_interleave_level_v1A_0A: TypeAlias = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
 rpc_ctrl_set_channel_interleave_level_v: TypeAlias = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
-@record
-class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E:
+@c.record
+class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E(c.Struct):
   SIZE = 112
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 8]
-@record
-class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01:
+@c.record
+class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01(c.Struct):
   SIZE = 104
   flags: Annotated[NvU32, 0]
   hClient: Annotated[NvHandle, 4]
   hChannel: Annotated[NvHandle, 8]
-  vMemPtrs: Annotated[Array[NvU64, Literal[8]], 16]
+  vMemPtrs: Annotated[c.Array[NvU64, Literal[8]], 16]
   gfxpPreemptMode: Annotated[NvU32, 80]
   cilpPreemptMode: Annotated[NvU32, 84]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 88]
 NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01: TypeAlias = struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01
 rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E: TypeAlias = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E
-@record
-class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07:
+@c.record
+class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07(c.Struct):
   SIZE = 120
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 8]
-@record
-class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07:
+@c.record
+class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07(c.Struct):
   SIZE = 112
   flags: Annotated[NvU32, 0]
   hClient: Annotated[NvHandle, 4]
   hChannel: Annotated[NvHandle, 8]
-  vMemPtrs: Annotated[Array[NvU64, Literal[9]], 16]
+  vMemPtrs: Annotated[c.Array[NvU64, Literal[9]], 16]
   gfxpPreemptMode: Annotated[NvU32, 88]
   cilpPreemptMode: Annotated[NvU32, 92]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 96]
 NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07: TypeAlias = struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07
 rpc_ctrl_gr_ctxsw_preemption_bind_v28_07: TypeAlias = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
 rpc_ctrl_gr_ctxsw_preemption_bind_v: TypeAlias = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
-@record
-class struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E:
+@c.record
+class struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E(c.Struct):
   SIZE = 40
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 8]
-@record
-class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01:
+@c.record
+class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01(c.Struct):
   SIZE = 32
   flags: Annotated[NvU32, 0]
   hChannel: Annotated[NvHandle, 4]
@@ -1857,14 +1858,14 @@ class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01:
 NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01: TypeAlias = struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01
 rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E: TypeAlias = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
 rpc_ctrl_gr_set_ctxsw_preemption_mode_v: TypeAlias = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
-@record
-class struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E:
+@c.record
+class struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E(c.Struct):
   SIZE = 32
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 8]
-@record
-class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00:
+@c.record
+class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00(c.Struct):
   SIZE = 24
   hClient: Annotated[NvHandle, 0]
   hChannel: Annotated[NvHandle, 4]
@@ -1873,14 +1874,14 @@ class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00:
 NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00: TypeAlias = struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00
 rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E: TypeAlias = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
 rpc_ctrl_gr_ctxsw_zcull_bind_v: TypeAlias = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
-@record
-class struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E:
+@c.record
+class struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E(c.Struct):
   SIZE = 64
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 8]
-@record
-class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00:
+@c.record
+class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00(c.Struct):
   SIZE = 56
   engineType: Annotated[NvU32, 0]
   hClient: Annotated[NvHandle, 4]
@@ -1896,14 +1897,14 @@ class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00:
 NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00: TypeAlias = struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00
 rpc_ctrl_gpu_initialize_ctx_v1A_0E: TypeAlias = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
 rpc_ctrl_gpu_initialize_ctx_v: TypeAlias = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
-@record
-class struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04:
+@c.record
+class struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04(c.Struct):
   SIZE = 192
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 8]
-@record
-class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04:
+@c.record
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04(c.Struct):
   SIZE = 184
   hSubDevice: Annotated[NvHandle, 0]
   subDeviceId: Annotated[NvU32, 4]
@@ -1911,10 +1912,10 @@ class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04:
   virtAddrLo: Annotated[NvU64, 16]
   virtAddrHi: Annotated[NvU64, 24]
   numLevelsToCopy: Annotated[NvU32, 32]
-  levels: Annotated[Array[NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, Literal[6]], 40]
+  levels: Annotated[c.Array[NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, Literal[6]], 40]
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04: TypeAlias = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04
-@record
-class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04:
+@c.record
+class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04(c.Struct):
   SIZE = 24
   physAddress: Annotated[NvU64, 0]
   size: Annotated[NvU64, 8]
@@ -1923,65 +1924,65 @@ class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04:
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04: TypeAlias = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04
 rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04: TypeAlias = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
 rpc_ctrl_vaspace_copy_server_reserved_pdes_v: TypeAlias = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
-@record
-class struct_rpc_ctrl_mc_service_interrupts_v1A_0E:
+@c.record
+class struct_rpc_ctrl_mc_service_interrupts_v1A_0E(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01, 8]
-@record
-class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01:
+@c.record
+class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01(c.Struct):
   SIZE = 4
   engines: Annotated[NvU32, 0]
 NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01: TypeAlias = struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01
 rpc_ctrl_mc_service_interrupts_v1A_0E: TypeAlias = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
 rpc_ctrl_mc_service_interrupts_v: TypeAlias = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
-@record
-class struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D:
+@c.record
+class struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D(c.Struct):
   SIZE = 2208
   iter: Annotated[NvU8, 0]
-  gpuIds: Annotated[Array[NvU32, Literal[32]], 4]
+  gpuIds: Annotated[c.Array[NvU32, Literal[32]], 4]
   gpuCount: Annotated[NvU32, 132]
   p2pCaps: Annotated[NvU32, 136]
   p2pOptimalReadCEs: Annotated[NvU32, 140]
   p2pOptimalWriteCEs: Annotated[NvU32, 144]
-  p2pCapsStatus: Annotated[Array[NvU8, Literal[9]], 148]
-  busPeerIds: Annotated[Array[NvU32, Literal[512]], 160]
+  p2pCapsStatus: Annotated[c.Array[NvU8, Literal[9]], 148]
+  busPeerIds: Annotated[c.Array[NvU32, Literal[512]], 160]
 rpc_ctrl_get_p2p_caps_v2_v1F_0D: TypeAlias = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
 rpc_ctrl_get_p2p_caps_v2_v: TypeAlias = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
-@record
-class struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02:
+@c.record
+class struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02(c.Struct):
   SIZE = 1544
   ctrlParams: Annotated[NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 0]
-@record
-class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02:
+@c.record
+class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02(c.Struct):
   SIZE = 1544
   bAllCaps: Annotated[NvBool, 0]
   bUseUuid: Annotated[NvBool, 1]
   peerGpuCount: Annotated[NvU32, 4]
-  peerGpuCaps: Annotated[Array[NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, Literal[32]], 8]
+  peerGpuCaps: Annotated[c.Array[NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, Literal[32]], 8]
 NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02: TypeAlias = struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02
-@record
-class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02:
+@c.record
+class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02(c.Struct):
   SIZE = 48
   gpuId: Annotated[NvU32, 0]
-  gpuUuid: Annotated[Array[NvU8, Literal[16]], 4]
+  gpuUuid: Annotated[c.Array[NvU8, Literal[16]], 4]
   p2pCaps: Annotated[NvU32, 20]
   p2pOptimalReadCEs: Annotated[NvU32, 24]
   p2pOptimalWriteCEs: Annotated[NvU32, 28]
-  p2pCapsStatus: Annotated[Array[NvU8, Literal[9]], 32]
+  p2pCapsStatus: Annotated[c.Array[NvU8, Literal[9]], 32]
   busPeerId: Annotated[NvU32, 44]
 NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02: TypeAlias = struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02
 rpc_ctrl_subdevice_get_p2p_caps_v21_02: TypeAlias = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
 rpc_ctrl_subdevice_get_p2p_caps_v: TypeAlias = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
-@record
-class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03:
+@c.record
+class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03(c.Struct):
   SIZE = 40
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 8]
-@record
-class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03:
+@c.record
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03(c.Struct):
   SIZE = 32
   allocatedSize: Annotated[NvU64, 0]
   peakAllocatedSize: Annotated[NvU64, 8]
@@ -1990,14 +1991,14 @@ class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03:
   peakAllocationCount: Annotated[NvU32, 28]
 NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03: TypeAlias = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03: TypeAlias = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03
-@record
-class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06:
+@c.record
+class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06(c.Struct):
   SIZE = 48
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 8]
-@record
-class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06:
+@c.record
+class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06(c.Struct):
   SIZE = 40
   allocatedSize: Annotated[NvU64, 0]
   peakAllocatedSize: Annotated[NvU64, 8]
@@ -2008,38 +2009,38 @@ class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06:
 NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06: TypeAlias = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06: TypeAlias = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v: TypeAlias = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
-@record
-class struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C:
+@c.record
+class struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00(c.Struct):
   SIZE = 8
   hTargetChannel: Annotated[NvHandle, 0]
   numSMsToClear: Annotated[NvU32, 4]
 NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00: TypeAlias = struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00
 rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C: TypeAlias = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
 rpc_ctrl_dbg_clear_all_sm_error_states_v: TypeAlias = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
-@record
-class struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06:
+@c.record
+class struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06(c.Struct):
   SIZE = 3872
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06(c.Struct):
   SIZE = 3864
   hTargetChannel: Annotated[NvHandle, 0]
   numSMsToRead: Annotated[NvU32, 4]
-  smErrorStateArray: Annotated[Array[NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, Literal[80]], 8]
+  smErrorStateArray: Annotated[c.Array[NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, Literal[80]], 8]
   mmuFaultInfo: Annotated[NvU32, 3848]
   mmuFault: Annotated[NV83DE_MMU_FAULT_INFO_v16_03, 3852]
   startingSM: Annotated[NvU32, 3860]
 NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06: TypeAlias = struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06
-@record
-class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06:
+@c.record
+class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06(c.Struct):
   SIZE = 48
   hwwGlobalEsr: Annotated[NvU32, 0]
   hwwWarpEsr: Annotated[NvU32, 4]
@@ -2051,35 +2052,35 @@ class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06:
   hwwCgaEsr: Annotated[NvU32, 40]
   hwwCgaEsrReportMask: Annotated[NvU32, 44]
 NV83DE_SM_ERROR_STATE_REGISTERS_v21_06: TypeAlias = struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06
-@record
-class struct_NV83DE_MMU_FAULT_INFO_v16_03:
+@c.record
+class struct_NV83DE_MMU_FAULT_INFO_v16_03(c.Struct):
   SIZE = 8
   valid: Annotated[NvBool, 0]
   faultInfo: Annotated[NvU32, 4]
 NV83DE_MMU_FAULT_INFO_v16_03: TypeAlias = struct_NV83DE_MMU_FAULT_INFO_v16_03
 rpc_ctrl_dbg_read_all_sm_error_states_v21_06: TypeAlias = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
 rpc_ctrl_dbg_read_all_sm_error_states_v: TypeAlias = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
-@record
-class struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C:
+@c.record
+class struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00(c.Struct):
   SIZE = 4
   exceptionMask: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00: TypeAlias = struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00
 rpc_ctrl_dbg_set_exception_mask_v1A_0C: TypeAlias = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
 rpc_ctrl_dbg_set_exception_mask_v: TypeAlias = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
-@record
-class struct_rpc_ctrl_gpu_promote_ctx_v1A_20:
+@c.record
+class struct_rpc_ctrl_gpu_promote_ctx_v1A_20(c.Struct):
   SIZE = 568
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   promoteCtx: Annotated[NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 8]
-@record
-class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20:
+@c.record
+class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20(c.Struct):
   SIZE = 560
   engineType: Annotated[NvU32, 0]
   hClient: Annotated[NvHandle, 4]
@@ -2090,10 +2091,10 @@ class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20:
   virtAddress: Annotated[NvU64, 24]
   size: Annotated[NvU64, 32]
   entryCount: Annotated[NvU32, 40]
-  promoteEntry: Annotated[Array[NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, Literal[16]], 48]
+  promoteEntry: Annotated[c.Array[NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, Literal[16]], 48]
 NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20: TypeAlias = struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20
-@record
-class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20:
+@c.record
+class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20(c.Struct):
   SIZE = 32
   gpuPhysAddr: Annotated[NvU64, 0]
   gpuVirtAddr: Annotated[NvU64, 8]
@@ -2105,76 +2106,76 @@ class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20:
 NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20: TypeAlias = struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20
 rpc_ctrl_gpu_promote_ctx_v1A_20: TypeAlias = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
 rpc_ctrl_gpu_promote_ctx_v: TypeAlias = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
-@record
-class struct_rpc_ctrl_dbg_suspend_context_v1A_10:
+@c.record
+class struct_rpc_ctrl_dbg_suspend_context_v1A_10(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06, 8]
-@record
-class struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06:
+@c.record
+class struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06(c.Struct):
   SIZE = 8
   waitForEvent: Annotated[NvU32, 0]
   hResidentChannel: Annotated[NvHandle, 4]
 NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06: TypeAlias = struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06
 rpc_ctrl_dbg_suspend_context_v1A_10: TypeAlias = struct_rpc_ctrl_dbg_suspend_context_v1A_10
 rpc_ctrl_dbg_suspend_context_v: TypeAlias = struct_rpc_ctrl_dbg_suspend_context_v1A_10
-@record
-class struct_rpc_ctrl_dbg_resume_context_v1A_10:
+@c.record
+class struct_rpc_ctrl_dbg_resume_context_v1A_10(c.Struct):
   SIZE = 8
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
 rpc_ctrl_dbg_resume_context_v1A_10: TypeAlias = struct_rpc_ctrl_dbg_resume_context_v1A_10
 rpc_ctrl_dbg_resume_context_v: TypeAlias = struct_rpc_ctrl_dbg_resume_context_v1A_10
-@record
-class struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10:
+@c.record
+class struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10(c.Struct):
   SIZE = 3216
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06(c.Struct):
   SIZE = 3208
   bNonTransactional: Annotated[NvBool, 0]
   regOpCount: Annotated[NvU32, 4]
-  regOps: Annotated[Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[100]], 8]
+  regOps: Annotated[c.Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[100]], 8]
 NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06: TypeAlias = struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06
 rpc_ctrl_dbg_exec_reg_ops_v1A_10: TypeAlias = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
 rpc_ctrl_dbg_exec_reg_ops_v: TypeAlias = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
-@record
-class struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10:
+@c.record
+class struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06(c.Struct):
   SIZE = 4
   action: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06: TypeAlias = struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06
 rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10: TypeAlias = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
 rpc_ctrl_dbg_set_mode_mmu_debug_v: TypeAlias = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
-@record
-class struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07:
+@c.record
+class struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(c.Struct):
   SIZE = 4
   action: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07: TypeAlias = struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07
 rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07: TypeAlias = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
 rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v: TypeAlias = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
-@record
-class struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06:
+@c.record
+class struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06(c.Struct):
   SIZE = 64
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06(c.Struct):
   SIZE = 56
   hTargetChannel: Annotated[NvHandle, 0]
   smID: Annotated[NvU32, 4]
@@ -2182,81 +2183,81 @@ class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06:
 NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06: TypeAlias = struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06
 rpc_ctrl_dbg_read_single_sm_error_state_v21_06: TypeAlias = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
 rpc_ctrl_dbg_read_single_sm_error_state_v: TypeAlias = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
-@record
-class struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10:
+@c.record
+class struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06(c.Struct):
   SIZE = 8
   hTargetChannel: Annotated[NvHandle, 0]
   smID: Annotated[NvU32, 4]
 NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06: TypeAlias = struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06
 rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10: TypeAlias = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
 rpc_ctrl_dbg_clear_single_sm_error_state_v: TypeAlias = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
-@record
-class struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10:
+@c.record
+class struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06(c.Struct):
   SIZE = 4
   action: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06: TypeAlias = struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06
 rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10: TypeAlias = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
 rpc_ctrl_dbg_set_mode_errbar_debug_v: TypeAlias = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
-@record
-class struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10:
+@c.record
+class struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06(c.Struct):
   SIZE = 4
   stopTriggerType: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06: TypeAlias = struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06
 rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10: TypeAlias = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
 rpc_ctrl_dbg_set_next_stop_trigger_type_v: TypeAlias = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
-@record
-class struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E:
+@c.record
+class struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00, 8]
-@record
-class struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00:
+@c.record
+class struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00(c.Struct):
   SIZE = 4
   hVASpace: Annotated[NvHandle, 0]
 NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00: TypeAlias = struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00
 rpc_ctrl_dma_set_default_vaspace_v1A_0E: TypeAlias = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
 rpc_ctrl_dma_set_default_vaspace_v: TypeAlias = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
-@record
-class struct_rpc_ctrl_get_ce_pce_mask_v1A_0E:
+@c.record
+class struct_rpc_ctrl_get_ce_pce_mask_v1A_0E(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07, 8]
-@record
-class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07:
+@c.record
+class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07(c.Struct):
   SIZE = 8
   ceEngineType: Annotated[NvU32, 0]
   pceMask: Annotated[NvU32, 4]
 NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07: TypeAlias = struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07
 rpc_ctrl_get_ce_pce_mask_v1A_0E: TypeAlias = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
 rpc_ctrl_get_ce_pce_mask_v: TypeAlias = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
-@record
-class struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E:
+@c.record
+class struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E(c.Struct):
   SIZE = 64
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 8]
-@record
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07:
+@c.record
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07(c.Struct):
   SIZE = 56
   value: Annotated[NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 0]
   format: Annotated[NvU32, 40]
@@ -2264,11 +2265,11 @@ class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07:
   bIndexValid: Annotated[NvBool, 48]
   tableType: Annotated[NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE, 52]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07: TypeAlias = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07
-@record
-class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07:
+@c.record
+class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07(c.Struct):
   SIZE = 40
-  colorFB: Annotated[Array[NvU32, Literal[4]], 0]
-  colorDS: Annotated[Array[NvU32, Literal[4]], 16]
+  colorFB: Annotated[c.Array[NvU32, Literal[4]], 0]
+  colorDS: Annotated[c.Array[NvU32, Literal[4]], 16]
   depth: Annotated[NvU32, 32]
   stencil: Annotated[NvU32, 36]
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07: TypeAlias = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07
@@ -2282,20 +2283,20 @@ NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COUNT = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.d
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE: TypeAlias = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE
 rpc_ctrl_get_zbc_clear_table_entry_v1A_0E: TypeAlias = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
 rpc_ctrl_get_zbc_clear_table_entry_v: TypeAlias = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
-@record
-class struct_rpc_ctrl_get_nvlink_status_v23_04:
+@c.record
+class struct_rpc_ctrl_get_nvlink_status_v23_04(c.Struct):
   SIZE = 3088
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04, 8]
-@record
-class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04:
+@c.record
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04(c.Struct):
   SIZE = 3080
   enabledLinkMask: Annotated[NvU32, 0]
-  linkInfo: Annotated[Array[NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, Literal[24]], 8]
+  linkInfo: Annotated[c.Array[NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, Literal[24]], 8]
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04: TypeAlias = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04
-@record
-class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D:
+@c.record
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D(c.Struct):
   SIZE = 128
   capsTbl: Annotated[NvU32, 0]
   phyType: Annotated[NvU8, 4]
@@ -2314,8 +2315,8 @@ class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D:
   remoteDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 32]
   localDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 80]
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D: TypeAlias = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D
-@record
-class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02:
+@c.record
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02(c.Struct):
   SIZE = 48
   deviceIdFlags: Annotated[NvU32, 0]
   domain: Annotated[NvU32, 4]
@@ -2324,23 +2325,23 @@ class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02:
   function: Annotated[NvU16, 12]
   pciDeviceId: Annotated[NvU32, 16]
   deviceType: Annotated[NvU64, 24]
-  deviceUUID: Annotated[Array[NvU8, Literal[16]], 32]
+  deviceUUID: Annotated[c.Array[NvU8, Literal[16]], 32]
 NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02: TypeAlias = struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02
 rpc_ctrl_get_nvlink_status_v23_04: TypeAlias = struct_rpc_ctrl_get_nvlink_status_v23_04
-@record
-class struct_rpc_ctrl_get_nvlink_status_v28_09:
+@c.record
+class struct_rpc_ctrl_get_nvlink_status_v28_09(c.Struct):
   SIZE = 3472
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09, 8]
-@record
-class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09:
+@c.record
+class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09(c.Struct):
   SIZE = 3464
   enabledLinkMask: Annotated[NvU32, 0]
-  linkInfo: Annotated[Array[NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, Literal[24]], 8]
+  linkInfo: Annotated[c.Array[NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, Literal[24]], 8]
 NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09: TypeAlias = struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09
-@record
-class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09:
+@c.record
+class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09(c.Struct):
   SIZE = 144
   capsTbl: Annotated[NvU32, 0]
   phyType: Annotated[NvU8, 4]
@@ -2359,8 +2360,8 @@ class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09:
   remoteDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 32]
   localDeviceInfo: Annotated[NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 88]
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09: TypeAlias = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09
-@record
-class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09:
+@c.record
+class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09(c.Struct):
   SIZE = 56
   deviceIdFlags: Annotated[NvU32, 0]
   domain: Annotated[NvU32, 4]
@@ -2369,95 +2370,95 @@ class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09:
   function: Annotated[NvU16, 12]
   pciDeviceId: Annotated[NvU32, 16]
   deviceType: Annotated[NvU64, 24]
-  deviceUUID: Annotated[Array[NvU8, Literal[16]], 32]
+  deviceUUID: Annotated[c.Array[NvU8, Literal[16]], 32]
   fabricRecoveryStatusMask: Annotated[NvU32, 48]
 NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09: TypeAlias = struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09
 rpc_ctrl_get_nvlink_status_v28_09: TypeAlias = struct_rpc_ctrl_get_nvlink_status_v28_09
 rpc_ctrl_get_nvlink_status_v: TypeAlias = struct_rpc_ctrl_get_nvlink_status_v28_09
-@record
-class struct_rpc_ctrl_get_p2p_caps_v1F_0D:
+@c.record
+class struct_rpc_ctrl_get_p2p_caps_v1F_0D(c.Struct):
   SIZE = 164
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 8]
-@record
-class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D:
+@c.record
+class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D(c.Struct):
   SIZE = 156
-  gpuIds: Annotated[Array[NvU32, Literal[32]], 0]
+  gpuIds: Annotated[c.Array[NvU32, Literal[32]], 0]
   gpuCount: Annotated[NvU32, 128]
   p2pCaps: Annotated[NvU32, 132]
   p2pOptimalReadCEs: Annotated[NvU32, 136]
   p2pOptimalWriteCEs: Annotated[NvU32, 140]
-  p2pCapsStatus: Annotated[Array[NvU8, Literal[9]], 144]
+  p2pCapsStatus: Annotated[c.Array[NvU8, Literal[9]], 144]
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D: TypeAlias = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D
 rpc_ctrl_get_p2p_caps_v1F_0D: TypeAlias = struct_rpc_ctrl_get_p2p_caps_v1F_0D
 rpc_ctrl_get_p2p_caps_v: TypeAlias = struct_rpc_ctrl_get_p2p_caps_v1F_0D
-@record
-class struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E:
+@c.record
+class struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E(c.Struct):
   SIZE = 1360
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 8]
-@record
-class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A:
+@c.record
+class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A(c.Struct):
   SIZE = 1352
   grpACount: Annotated[NvU32, 0]
   grpBCount: Annotated[NvU32, 4]
-  gpuIdGrpA: Annotated[Array[NvU32, Literal[8]], 8]
-  gpuIdGrpB: Annotated[Array[NvU32, Literal[8]], 40]
-  p2pCaps: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 72]
-  a2bOptimalReadCes: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 328]
-  a2bOptimalWriteCes: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 584]
-  b2aOptimalReadCes: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 840]
-  b2aOptimalWriteCes: Annotated[Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 1096]
+  gpuIdGrpA: Annotated[c.Array[NvU32, Literal[8]], 8]
+  gpuIdGrpB: Annotated[c.Array[NvU32, Literal[8]], 40]
+  p2pCaps: Annotated[c.Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 72]
+  a2bOptimalReadCes: Annotated[c.Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 328]
+  a2bOptimalWriteCes: Annotated[c.Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 584]
+  b2aOptimalReadCes: Annotated[c.Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 840]
+  b2aOptimalWriteCes: Annotated[c.Array[NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, Literal[8]], 1096]
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A: TypeAlias = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A
-@record
-class struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A:
+@c.record
+class struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A(c.Struct):
   SIZE = 32
-  array: Annotated[Array[NvU32, Literal[8]], 0]
+  array: Annotated[c.Array[NvU32, Literal[8]], 0]
 NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A: TypeAlias = struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A
 rpc_ctrl_get_p2p_caps_matrix_v1A_0E: TypeAlias = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
 rpc_ctrl_get_p2p_caps_matrix_v: TypeAlias = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
-@record
-class struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F:
+@c.record
+class struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F, 8]
-@record
-class struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F:
+@c.record
+class struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F(c.Struct):
   SIZE = 1
   ctxsw: Annotated[NvBool, 0]
 NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F: TypeAlias = struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F
 rpc_ctrl_reserve_pm_area_smpc_v1A_0F: TypeAlias = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
 rpc_ctrl_reserve_pm_area_smpc_v: TypeAlias = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
-@record
-class struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F:
+@c.record
+class struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F, 8]
-@record
-class struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F:
+@c.record
+class struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F(c.Struct):
   SIZE = 1
   ctxsw: Annotated[NvBool, 0]
 NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F: TypeAlias = struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F
 rpc_ctrl_reserve_hwpm_legacy_v1A_0F: TypeAlias = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
 rpc_ctrl_reserve_hwpm_legacy_v: TypeAlias = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
-@record
-class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F:
+@c.record
+class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F(c.Struct):
   SIZE = 3988
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 8]
-@record
-class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F:
+@c.record
+class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F(c.Struct):
   SIZE = 3980
   regOpCount: Annotated[NvU32, 0]
   mode: Annotated[NVB0CC_REGOPS_MODE, 4]
   bPassed: Annotated[NvBool, 8]
   bDirect: Annotated[NvBool, 9]
-  regOps: Annotated[Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[124]], 12]
+  regOps: Annotated[c.Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[124]], 12]
 NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F: TypeAlias = struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F
 enum_NVB0CC_REGOPS_MODE = CEnum(Annotated[int, ctypes.c_uint32])
 NVB0CC_REGOPS_MODE_ALL_OR_NONE = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_ALL_OR_NONE', 0)
@@ -2466,21 +2467,21 @@ NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_RE
 NVB0CC_REGOPS_MODE: TypeAlias = enum_NVB0CC_REGOPS_MODE
 rpc_ctrl_b0cc_exec_reg_ops_v1A_0F: TypeAlias = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
 rpc_ctrl_b0cc_exec_reg_ops_v: TypeAlias = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
-@record
-class struct_rpc_ctrl_bind_pm_resources_v1A_0F:
+@c.record
+class struct_rpc_ctrl_bind_pm_resources_v1A_0F(c.Struct):
   SIZE = 8
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
 rpc_ctrl_bind_pm_resources_v1A_0F: TypeAlias = struct_rpc_ctrl_bind_pm_resources_v1A_0F
 rpc_ctrl_bind_pm_resources_v: TypeAlias = struct_rpc_ctrl_bind_pm_resources_v1A_0F
-@record
-class struct_rpc_ctrl_alloc_pma_stream_v1A_14:
+@c.record
+class struct_rpc_ctrl_alloc_pma_stream_v1A_14(c.Struct):
   SIZE = 64
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 8]
-@record
-class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14:
+@c.record
+class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14(c.Struct):
   SIZE = 56
   hMemPmaBuffer: Annotated[NvHandle, 0]
   pmaBufferOffset: Annotated[NvU64, 8]
@@ -2493,14 +2494,14 @@ class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14:
 NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14: TypeAlias = struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14
 rpc_ctrl_alloc_pma_stream_v1A_14: TypeAlias = struct_rpc_ctrl_alloc_pma_stream_v1A_14
 rpc_ctrl_alloc_pma_stream_v: TypeAlias = struct_rpc_ctrl_alloc_pma_stream_v1A_14
-@record
-class struct_rpc_ctrl_pma_stream_update_get_put_v1A_14:
+@c.record
+class struct_rpc_ctrl_pma_stream_update_get_put_v1A_14(c.Struct):
   SIZE = 56
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 8]
-@record
-class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14:
+@c.record
+class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14(c.Struct):
   SIZE = 48
   bytesConsumed: Annotated[NvU64, 0]
   bUpdateAvailableBytes: Annotated[NvBool, 8]
@@ -2512,47 +2513,47 @@ class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14:
 NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14: TypeAlias = struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14
 rpc_ctrl_pma_stream_update_get_put_v1A_14: TypeAlias = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
 rpc_ctrl_pma_stream_update_get_put_v: TypeAlias = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
-@record
-class struct_rpc_ctrl_fb_get_info_v2_v25_0A:
+@c.record
+class struct_rpc_ctrl_fb_get_info_v2_v25_0A(c.Struct):
   SIZE = 452
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A, 8]
-@record
-class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A:
+@c.record
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A(c.Struct):
   SIZE = 444
   fbInfoListSize: Annotated[NvU32, 0]
-  fbInfoList: Annotated[Array[NV2080_CTRL_FB_INFO_v1A_15, Literal[55]], 4]
+  fbInfoList: Annotated[c.Array[NV2080_CTRL_FB_INFO_v1A_15, Literal[55]], 4]
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A: TypeAlias = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A
-@record
-class struct_NV2080_CTRL_FB_INFO_v1A_15:
+@c.record
+class struct_NV2080_CTRL_FB_INFO_v1A_15(c.Struct):
   SIZE = 8
   index: Annotated[NvU32, 0]
   data: Annotated[NvU32, 4]
 NV2080_CTRL_FB_INFO_v1A_15: TypeAlias = struct_NV2080_CTRL_FB_INFO_v1A_15
 rpc_ctrl_fb_get_info_v2_v25_0A: TypeAlias = struct_rpc_ctrl_fb_get_info_v2_v25_0A
-@record
-class struct_rpc_ctrl_fb_get_info_v2_v27_00:
+@c.record
+class struct_rpc_ctrl_fb_get_info_v2_v27_00(c.Struct):
   SIZE = 468
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00, 8]
-@record
-class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00:
+@c.record
+class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00(c.Struct):
   SIZE = 460
   fbInfoListSize: Annotated[NvU32, 0]
-  fbInfoList: Annotated[Array[NV2080_CTRL_FB_INFO_v1A_15, Literal[57]], 4]
+  fbInfoList: Annotated[c.Array[NV2080_CTRL_FB_INFO_v1A_15, Literal[57]], 4]
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00: TypeAlias = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00
 rpc_ctrl_fb_get_info_v2_v27_00: TypeAlias = struct_rpc_ctrl_fb_get_info_v2_v27_00
 rpc_ctrl_fb_get_info_v2_v: TypeAlias = struct_rpc_ctrl_fb_get_info_v2_v27_00
-@record
-class struct_rpc_ctrl_fifo_set_channel_properties_v1A_16:
+@c.record
+class struct_rpc_ctrl_fifo_set_channel_properties_v1A_16(c.Struct):
   SIZE = 24
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00, 8]
-@record
-class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00:
+@c.record
+class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00(c.Struct):
   SIZE = 16
   hChannel: Annotated[NvHandle, 0]
   property: Annotated[NvU32, 4]
@@ -2560,14 +2561,14 @@ class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00:
 NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00: TypeAlias = struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00
 rpc_ctrl_fifo_set_channel_properties_v1A_16: TypeAlias = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
 rpc_ctrl_fifo_set_channel_properties_v: TypeAlias = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
-@record
-class struct_rpc_ctrl_gpu_evict_ctx_v1A_1C:
+@c.record
+class struct_rpc_ctrl_gpu_evict_ctx_v1A_1C(c.Struct):
   SIZE = 28
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 8]
-@record
-class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00:
+@c.record
+class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00(c.Struct):
   SIZE = 20
   engineType: Annotated[NvU32, 0]
   hClient: Annotated[NvHandle, 4]
@@ -2577,29 +2578,29 @@ class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00:
 NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00: TypeAlias = struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00
 rpc_ctrl_gpu_evict_ctx_v1A_1C: TypeAlias = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
 rpc_ctrl_gpu_evict_ctx_v: TypeAlias = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
-@record
-class struct_rpc_ctrl_fb_get_fs_info_v24_00:
+@c.record
+class struct_rpc_ctrl_fb_get_fs_info_v24_00(c.Struct):
   SIZE = 3856
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00, 8]
-@record
-class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00:
+@c.record
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00(c.Struct):
   SIZE = 3848
   numQueries: Annotated[NvU16, 0]
-  reserved: Annotated[Array[NvU8, Literal[6]], 2]
-  queries: Annotated[Array[NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, Literal[120]], 8]
+  reserved: Annotated[c.Array[NvU8, Literal[6]], 2]
+  queries: Annotated[c.Array[NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, Literal[120]], 8]
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00: TypeAlias = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D(c.Struct):
   SIZE = 32
   queryType: Annotated[NvU16, 0]
-  reserved: Annotated[Array[NvU8, Literal[2]], 2]
+  reserved: Annotated[c.Array[NvU8, Literal[2]], 2]
   status: Annotated[NvU32, 4]
   queryParams: Annotated[NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 8]
 NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D
-@record
-class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D:
+@c.record
+class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D(c.Struct):
   SIZE = 24
   inv: Annotated[NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D, 0]
   fbp: Annotated[NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D, 0]
@@ -2615,112 +2616,112 @@ class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D:
   fbpaSubp: Annotated[NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D, 0]
   fbpLogicalMap: Annotated[NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D, 0]
 NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D: TypeAlias = union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D(c.Struct):
   SIZE = 24
-  data: Annotated[Array[NvU8, Literal[24]], 0]
+  data: Annotated[c.Array[NvU8, Literal[24]], 0]
 NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 16
   swizzId: Annotated[NvU32, 0]
   fbpEnMask: Annotated[NvU64, 8]
 NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   fbpIndex: Annotated[NvU32, 0]
   ltcEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   fbpIndex: Annotated[NvU32, 0]
   ltsEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   fbpIndex: Annotated[NvU32, 0]
   fbpaEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   fbpIndex: Annotated[NvU32, 0]
   ropEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 12
   fbpIndex: Annotated[NvU32, 0]
   swizzId: Annotated[NvU32, 4]
   ltcEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 12
   fbpIndex: Annotated[NvU32, 0]
   swizzId: Annotated[NvU32, 4]
   ltsEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 12
   fbpIndex: Annotated[NvU32, 0]
   swizzId: Annotated[NvU32, 4]
   fbpaEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 12
   fbpIndex: Annotated[NvU32, 0]
   swizzId: Annotated[NvU32, 4]
   ropEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 16
   fbpIndex: Annotated[NvU32, 0]
   swizzId: Annotated[NvU32, 4]
   fbpaSubpEnMask: Annotated[NvU64, 8]
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   fbpIndex: Annotated[NvU32, 0]
   fbpaSubpEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   fbpIndex: Annotated[NvU32, 0]
   fbpLogicalIndex: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D
 rpc_ctrl_fb_get_fs_info_v24_00: TypeAlias = struct_rpc_ctrl_fb_get_fs_info_v24_00
-@record
-class struct_rpc_ctrl_fb_get_fs_info_v26_04:
+@c.record
+class struct_rpc_ctrl_fb_get_fs_info_v26_04(c.Struct):
   SIZE = 3856
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04, 8]
-@record
-class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04:
+@c.record
+class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04(c.Struct):
   SIZE = 3848
   numQueries: Annotated[NvU16, 0]
-  reserved: Annotated[Array[NvU8, Literal[6]], 2]
-  queries: Annotated[Array[NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, Literal[120]], 8]
+  reserved: Annotated[c.Array[NvU8, Literal[6]], 2]
+  queries: Annotated[c.Array[NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, Literal[120]], 8]
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04: TypeAlias = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04(c.Struct):
   SIZE = 32
   queryType: Annotated[NvU16, 0]
-  reserved: Annotated[Array[NvU8, Literal[2]], 2]
+  reserved: Annotated[c.Array[NvU8, Literal[2]], 2]
   status: Annotated[NvU32, 4]
   queryParams: Annotated[NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 8]
 NV2080_CTRL_FB_FS_INFO_QUERY_v26_04: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04
-@record
-class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04:
+@c.record
+class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04(c.Struct):
   SIZE = 24
   inv: Annotated[NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D, 0]
   fbp: Annotated[NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D, 0]
@@ -2740,26 +2741,26 @@ class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04:
   logicalLtc: Annotated[NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04, 0]
   dmLogicalLtc: Annotated[NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04, 0]
 NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04: TypeAlias = union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04
-@record
-class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04:
+@c.record
+class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04(c.Struct):
   SIZE = 8
   sysIdx: Annotated[NvU32, 0]
   sysl2LtcEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04: TypeAlias = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04(c.Struct):
   SIZE = 8
   fbpIndex: Annotated[NvU32, 0]
   pacEnMask: Annotated[NvU32, 4]
 NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04(c.Struct):
   SIZE = 16
   fbpIndex: Annotated[NvU32, 0]
   logicalLtcEnMask: Annotated[NvU64, 8]
 NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04
-@record
-class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04:
+@c.record
+class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04(c.Struct):
   SIZE = 16
   fbpIndex: Annotated[NvU32, 0]
   swizzId: Annotated[NvU32, 4]
@@ -2767,29 +2768,29 @@ class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04:
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04: TypeAlias = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04
 rpc_ctrl_fb_get_fs_info_v26_04: TypeAlias = struct_rpc_ctrl_fb_get_fs_info_v26_04
 rpc_ctrl_fb_get_fs_info_v: TypeAlias = struct_rpc_ctrl_fb_get_fs_info_v26_04
-@record
-class struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D:
+@c.record
+class struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D(c.Struct):
   SIZE = 1936
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D, 8]
-@record
-class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D(c.Struct):
   SIZE = 1928
   numQueries: Annotated[NvU16, 0]
-  reserved: Annotated[Array[NvU8, Literal[6]], 2]
-  queries: Annotated[Array[NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, Literal[96]], 8]
+  reserved: Annotated[c.Array[NvU8, Literal[6]], 2]
+  queries: Annotated[c.Array[NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, Literal[96]], 8]
 NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D(c.Struct):
   SIZE = 20
   queryType: Annotated[NvU16, 0]
-  reserved: Annotated[Array[NvU8, Literal[2]], 2]
+  reserved: Annotated[c.Array[NvU8, Literal[2]], 2]
   status: Annotated[NvU32, 4]
   queryData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 8]
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D
-@record
-class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D:
+@c.record
+class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D(c.Struct):
   SIZE = 12
   gpcCountData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D, 0]
   chipletGpcMapData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 0]
@@ -2802,89 +2803,89 @@ class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D:
   partitionSyspipeIdData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D, 0]
   ropMaskData: Annotated[NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 0]
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D: TypeAlias = union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D(c.Struct):
   SIZE = 4
   gpcCount: Annotated[NvU32, 0]
 NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   gpcId: Annotated[NvU32, 0]
   chipletGpcMap: Annotated[NvU32, 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   gpcId: Annotated[NvU32, 0]
   tpcMask: Annotated[NvU32, 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   gpcId: Annotated[NvU32, 0]
   ppcMask: Annotated[NvU32, 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D(c.Struct):
   SIZE = 12
   swizzId: Annotated[NvU32, 0]
   gpcId: Annotated[NvU32, 4]
   chipletGpcMap: Annotated[NvU32, 8]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 4
   chipletSyspipeMask: Annotated[NvU32, 0]
 NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D(c.Struct):
   SIZE = 12
   swizzId: Annotated[NvU16, 0]
   physSyspipeIdCount: Annotated[NvU16, 2]
-  physSyspipeId: Annotated[Array[NvU8, Literal[8]], 4]
+  physSyspipeId: Annotated[c.Array[NvU8, Literal[8]], 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 12
   swizzId: Annotated[NvU32, 0]
   grIdx: Annotated[NvU32, 4]
   gpcEnMask: Annotated[NvU32, 8]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D(c.Struct):
   SIZE = 4
   syspipeId: Annotated[NvU32, 0]
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D
-@record
-class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D:
+@c.record
+class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D(c.Struct):
   SIZE = 8
   gpcId: Annotated[NvU32, 0]
   ropMask: Annotated[NvU32, 4]
 NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D: TypeAlias = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D
 rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D: TypeAlias = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
 rpc_ctrl_grmgr_get_gr_fs_info_v: TypeAlias = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
-@record
-class struct_rpc_ctrl_stop_channel_v1A_1E:
+@c.record
+class struct_rpc_ctrl_stop_channel_v1A_1E(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E, 8]
-@record
-class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E:
+@c.record
+class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E(c.Struct):
   SIZE = 1
   bImmediate: Annotated[NvBool, 0]
 NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E: TypeAlias = struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E
 rpc_ctrl_stop_channel_v1A_1E: TypeAlias = struct_rpc_ctrl_stop_channel_v1A_1E
 rpc_ctrl_stop_channel_v: TypeAlias = struct_rpc_ctrl_stop_channel_v1A_1E
-@record
-class struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F:
+@c.record
+class struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F(c.Struct):
   SIZE = 32
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F, 8]
-@record
-class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F:
+@c.record
+class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F(c.Struct):
   SIZE = 24
   hChannel: Annotated[NvHandle, 0]
   samplingMode: Annotated[NvU32, 4]
@@ -2892,21 +2893,21 @@ class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F:
 NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F: TypeAlias = struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F
 rpc_ctrl_gr_pc_sampling_mode_v1A_1F: TypeAlias = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
 rpc_ctrl_gr_pc_sampling_mode_v: TypeAlias = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
-@record
-class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F:
+@c.record
+class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F(c.Struct):
   SIZE = 40
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F, 8]
-@record
-class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F:
+@c.record
+class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F(c.Struct):
   SIZE = 32
   rm: Annotated[PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F, 0]
   output: Annotated[NV2080_CTRL_PERF_RATED_TDP_ACTION, 8]
-  inputs: Annotated[Array[NV2080_CTRL_PERF_RATED_TDP_ACTION, Literal[5]], 12]
+  inputs: Annotated[c.Array[NV2080_CTRL_PERF_RATED_TDP_ACTION, Literal[5]], 12]
 NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F: TypeAlias = struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F
-@record
-class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F:
+@c.record
+class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F(c.Struct):
   SIZE = 8
   clientActiveMask: Annotated[NvU32, 0]
   bRegkeyLimitRatedTdp: Annotated[NvU8, 4]
@@ -2921,14 +2922,14 @@ NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR = enum_NV2080_CTRL_PERF_RATED_TDP_
 NV2080_CTRL_PERF_RATED_TDP_ACTION: TypeAlias = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION
 rpc_ctrl_perf_rated_tdp_get_status_v1A_1F: TypeAlias = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
 rpc_ctrl_perf_rated_tdp_get_status_v: TypeAlias = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
-@record
-class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F:
+@c.record
+class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F, 8]
-@record
-class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F:
+@c.record
+class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F(c.Struct):
   SIZE = 8
   client: Annotated[NV2080_CTRL_PERF_RATED_TDP_CLIENT, 0]
   input: Annotated[NV2080_CTRL_PERF_RATED_TDP_ACTION, 4]
@@ -2944,40 +2945,40 @@ NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS = enum_NV2080_CTRL_PERF_RATED_TDP_
 NV2080_CTRL_PERF_RATED_TDP_CLIENT: TypeAlias = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT
 rpc_ctrl_perf_rated_tdp_set_control_v1A_1F: TypeAlias = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
 rpc_ctrl_perf_rated_tdp_set_control_v: TypeAlias = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
-@record
-class struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F:
+@c.record
+class struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F, 8]
-@record
-class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F:
+@c.record
+class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F(c.Struct):
   SIZE = 1
   bSetMaxFreq: Annotated[NvBool, 0]
 NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F: TypeAlias = struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F
 rpc_ctrl_timer_set_gr_tick_freq_v1A_1F: TypeAlias = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
 rpc_ctrl_timer_set_gr_tick_freq_v: TypeAlias = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
-@record
-class struct_rpc_ctrl_free_pma_stream_v1A_1F:
+@c.record
+class struct_rpc_ctrl_free_pma_stream_v1A_1F(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F, 8]
-@record
-class struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F:
+@c.record
+class struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F(c.Struct):
   SIZE = 4
   pmaChannelIdx: Annotated[NvU32, 0]
 NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F: TypeAlias = struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F
 rpc_ctrl_free_pma_stream_v1A_1F: TypeAlias = struct_rpc_ctrl_free_pma_stream_v1A_1F
 rpc_ctrl_free_pma_stream_v: TypeAlias = struct_rpc_ctrl_free_pma_stream_v1A_1F
-@record
-class struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23:
+@c.record
+class struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23(c.Struct):
   SIZE = 32
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 8]
-@record
-class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23:
+@c.record
+class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23(c.Struct):
   SIZE = 24
   base: Annotated[NvU64, 0]
   size: Annotated[NvU64, 8]
@@ -2986,28 +2987,28 @@ class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23:
 NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23: TypeAlias = struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23
 rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23: TypeAlias = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
 rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v: TypeAlias = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
-@record
-class struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02:
+@c.record
+class struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02(c.Struct):
   SIZE = 8
   smID: Annotated[NvU32, 0]
   bSingleStep: Annotated[NvBool, 4]
 NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02: TypeAlias = struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02
 rpc_ctrl_dbg_set_single_sm_single_step_v1C_02: TypeAlias = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
 rpc_ctrl_dbg_set_single_sm_single_step_v: TypeAlias = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
-@record
-class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04:
+@c.record
+class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04(c.Struct):
   SIZE = 40
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 8]
-@record
-class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04:
+@c.record
+class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04(c.Struct):
   SIZE = 32
   hChannelGroup: Annotated[NvHandle, 0]
   mode: Annotated[NV0080_CTRL_GR_TPC_PARTITION_MODE, 4]
@@ -3022,29 +3023,29 @@ NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MO
 NV0080_CTRL_GR_TPC_PARTITION_MODE: TypeAlias = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE
 rpc_ctrl_gr_get_tpc_partition_mode_v1C_04: TypeAlias = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
 rpc_ctrl_gr_get_tpc_partition_mode_v: TypeAlias = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
-@record
-class struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04:
+@c.record
+class struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04(c.Struct):
   SIZE = 40
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 8]
 rpc_ctrl_gr_set_tpc_partition_mode_v1C_04: TypeAlias = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
 rpc_ctrl_gr_set_tpc_partition_mode_v: TypeAlias = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
-@record
-class struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07:
+@c.record
+class struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07(c.Struct):
   SIZE = 96
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07, 8]
-@record
-class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07:
+@c.record
+class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07(c.Struct):
   SIZE = 88
-  methodBufferMemdesc: Annotated[Array[NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, Literal[2]], 0]
-  bar2Addr: Annotated[Array[NvU64, Literal[2]], 64]
+  methodBufferMemdesc: Annotated[c.Array[NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, Literal[2]], 0]
+  bar2Addr: Annotated[c.Array[NvU64, Literal[2]], 64]
   numValidEntries: Annotated[NvU32, 80]
 NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07: TypeAlias = struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07
-@record
-class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07:
+@c.record
+class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07(c.Struct):
   SIZE = 32
   base: Annotated[NvU64, 0]
   size: Annotated[NvU64, 8]
@@ -3054,74 +3055,74 @@ class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07:
 NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07: TypeAlias = struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07
 rpc_ctrl_internal_promote_fault_method_buffers_v1E_07: TypeAlias = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
 rpc_ctrl_internal_promote_fault_method_buffers_v: TypeAlias = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
-@record
-class struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05:
+@c.record
+class struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05, 8]
-@record
-class struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05:
+@c.record
+class struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05(c.Struct):
   SIZE = 1
   bZbcSurfacesExist: Annotated[NvBool, 0]
 NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05: TypeAlias = struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05
 rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05: TypeAlias = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
 rpc_ctrl_internal_memsys_set_zbc_referenced_v: TypeAlias = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
-@record
-class struct_rpc_ctrl_fabric_memory_describe_v1E_0C:
+@c.record
+class struct_rpc_ctrl_fabric_memory_describe_v1E_0C(c.Struct):
   SIZE = 2080
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 8]
-@record
-class struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C:
+@c.record
+class struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C(c.Struct):
   SIZE = 2072
   offset: Annotated[NvU64, 0]
   totalPfns: Annotated[NvU64, 8]
-  pfnArray: Annotated[Array[NvU32, Literal[512]], 16]
+  pfnArray: Annotated[c.Array[NvU32, Literal[512]], 16]
   numPfns: Annotated[NvU32, 2064]
 NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C: TypeAlias = struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C
 rpc_ctrl_fabric_memory_describe_v1E_0C: TypeAlias = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
 rpc_ctrl_fabric_memory_describe_v: TypeAlias = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
-@record
-class struct_rpc_ctrl_fabric_mem_stats_v1E_0C:
+@c.record
+class struct_rpc_ctrl_fabric_mem_stats_v1E_0C(c.Struct):
   SIZE = 24
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C, 8]
-@record
-class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C:
+@c.record
+class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C(c.Struct):
   SIZE = 16
   totalSize: Annotated[NvU64, 0]
   freeSize: Annotated[NvU64, 8]
 NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C: TypeAlias = struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C
 rpc_ctrl_fabric_mem_stats_v1E_0C: TypeAlias = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
 rpc_ctrl_fabric_mem_stats_v: TypeAlias = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
-@record
-class struct_rpc_ctrl_bus_set_p2p_mapping_v21_03:
+@c.record
+class struct_rpc_ctrl_bus_set_p2p_mapping_v21_03(c.Struct):
   SIZE = 44
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 8]
-@record
-class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03:
+@c.record
+class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03(c.Struct):
   SIZE = 36
   connectionType: Annotated[NvU32, 0]
   peerId: Annotated[NvU32, 4]
   bSpaAccessOnly: Annotated[NvU32, 8]
   bUseUuid: Annotated[NvBool, 12]
   remoteGpuId: Annotated[NvU32, 16]
-  remoteGpuUuid: Annotated[Array[NvU8, Literal[16]], 20]
+  remoteGpuUuid: Annotated[c.Array[NvU8, Literal[16]], 20]
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03: TypeAlias = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03
 rpc_ctrl_bus_set_p2p_mapping_v21_03: TypeAlias = struct_rpc_ctrl_bus_set_p2p_mapping_v21_03
-@record
-class struct_rpc_ctrl_bus_set_p2p_mapping_v29_08:
+@c.record
+class struct_rpc_ctrl_bus_set_p2p_mapping_v29_08(c.Struct):
   SIZE = 48
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 8]
-@record
-class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08:
+@c.record
+class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08(c.Struct):
   SIZE = 40
   connectionType: Annotated[NvU32, 0]
   peerId: Annotated[NvU32, 4]
@@ -3129,49 +3130,49 @@ class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08:
   bSpaAccessOnly: Annotated[NvU32, 12]
   bUseUuid: Annotated[NvBool, 16]
   remoteGpuId: Annotated[NvU32, 20]
-  remoteGpuUuid: Annotated[Array[NvU8, Literal[16]], 24]
+  remoteGpuUuid: Annotated[c.Array[NvU8, Literal[16]], 24]
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08: TypeAlias = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08
 rpc_ctrl_bus_set_p2p_mapping_v29_08: TypeAlias = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
 rpc_ctrl_bus_set_p2p_mapping_v: TypeAlias = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
-@record
-class struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03:
+@c.record
+class struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03(c.Struct):
   SIZE = 40
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 8]
-@record
-class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03:
+@c.record
+class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03(c.Struct):
   SIZE = 32
   connectionType: Annotated[NvU32, 0]
   peerId: Annotated[NvU32, 4]
   bUseUuid: Annotated[NvBool, 8]
   remoteGpuId: Annotated[NvU32, 12]
-  remoteGpuUuid: Annotated[Array[NvU8, Literal[16]], 16]
+  remoteGpuUuid: Annotated[c.Array[NvU8, Literal[16]], 16]
 NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03: TypeAlias = struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03
 rpc_ctrl_bus_unset_p2p_mapping_v21_03: TypeAlias = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
 rpc_ctrl_bus_unset_p2p_mapping_v: TypeAlias = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
-@record
-class struct_rpc_ctrl_gpu_get_info_v2_v25_11:
+@c.record
+class struct_rpc_ctrl_gpu_get_info_v2_v25_11(c.Struct):
   SIZE = 532
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11, 8]
-@record
-class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11:
+@c.record
+class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11(c.Struct):
   SIZE = 524
   gpuInfoListSize: Annotated[NvU32, 0]
-  gpuInfoList: Annotated[Array[NV2080_CTRL_GPU_INFO_v25_11, Literal[65]], 4]
+  gpuInfoList: Annotated[c.Array[NV2080_CTRL_GPU_INFO_v25_11, Literal[65]], 4]
 NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11: TypeAlias = struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11
-@record
-class struct_NV2080_CTRL_GPU_INFO_v25_11:
+@c.record
+class struct_NV2080_CTRL_GPU_INFO_v25_11(c.Struct):
   SIZE = 8
   index: Annotated[NvU32, 0]
   data: Annotated[NvU32, 4]
 NV2080_CTRL_GPU_INFO_v25_11: TypeAlias = struct_NV2080_CTRL_GPU_INFO_v25_11
 rpc_ctrl_gpu_get_info_v2_v25_11: TypeAlias = struct_rpc_ctrl_gpu_get_info_v2_v25_11
 rpc_ctrl_gpu_get_info_v2_v: TypeAlias = struct_rpc_ctrl_gpu_get_info_v2_v25_11
-@record
-class struct_rpc_update_gpm_guest_buffer_info_v27_01:
+@c.record
+class struct_rpc_update_gpm_guest_buffer_info_v27_01(c.Struct):
   SIZE = 24
   gpfn: Annotated[NvU64, 0]
   swizzId: Annotated[NvU32, 8]
@@ -3180,28 +3181,28 @@ class struct_rpc_update_gpm_guest_buffer_info_v27_01:
   bMap: Annotated[NvBool, 20]
 rpc_update_gpm_guest_buffer_info_v27_01: TypeAlias = struct_rpc_update_gpm_guest_buffer_info_v27_01
 rpc_update_gpm_guest_buffer_info_v: TypeAlias = struct_rpc_update_gpm_guest_buffer_info_v27_01
-@record
-class struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08:
+@c.record
+class struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08, 8]
-@record
-class struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08:
+@c.record
+class struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08(c.Struct):
   SIZE = 8
   pmaChannelIdx: Annotated[NvU32, 0]
   bMembytesPollingRequired: Annotated[NvBool, 4]
 NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08: TypeAlias = struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08
 rpc_ctrl_internal_quiesce_pma_channel_v1C_08: TypeAlias = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
 rpc_ctrl_internal_quiesce_pma_channel_v: TypeAlias = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
-@record
-class struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C:
+@c.record
+class struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C(c.Struct):
   SIZE = 56
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 8]
-@record
-class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C:
+@c.record
+class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C(c.Struct):
   SIZE = 48
   pmaChannelIdx: Annotated[NvU32, 0]
   pmaBufferVA: Annotated[NvU64, 8]
@@ -3212,23 +3213,23 @@ class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C:
 NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C: TypeAlias = struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C
 rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C: TypeAlias = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
 rpc_ctrl_internal_sriov_promote_pma_stream_v: TypeAlias = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
-@record
-class struct_rpc_ctrl_exec_partitions_create_v24_05:
+@c.record
+class struct_rpc_ctrl_exec_partitions_create_v24_05(c.Struct):
   SIZE = 436
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   status: Annotated[NvU32, 8]
   execPartitionsCreate: Annotated[NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 12]
-@record
-class struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05:
+@c.record
+class struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05(c.Struct):
   SIZE = 424
   bQuery: Annotated[NvBool, 0]
   execPartCount: Annotated[NvU32, 4]
-  execPartInfo: Annotated[Array[NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, Literal[8]], 8]
-  execPartId: Annotated[Array[NvU32, Literal[8]], 392]
+  execPartInfo: Annotated[c.Array[NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, Literal[8]], 8]
+  execPartId: Annotated[c.Array[NvU32, Literal[8]], 392]
 NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05: TypeAlias = struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05
-@record
-class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05:
+@c.record
+class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05(c.Struct):
   SIZE = 48
   gpcCount: Annotated[NvU32, 0]
   gfxGpcCount: Annotated[NvU32, 4]
@@ -3245,14 +3246,14 @@ class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05:
 NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05: TypeAlias = struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05
 rpc_ctrl_exec_partitions_create_v24_05: TypeAlias = struct_rpc_ctrl_exec_partitions_create_v24_05
 rpc_ctrl_exec_partitions_create_v: TypeAlias = struct_rpc_ctrl_exec_partitions_create_v24_05
-@record
-class struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05:
+@c.record
+class struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05(c.Struct):
   SIZE = 24
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04, 8]
-@record
-class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04:
+@c.record
+class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04(c.Struct):
   SIZE = 16
   imbPhysAddr: Annotated[NvU64, 0]
   addrSpace: Annotated[NvU32, 8]
@@ -3260,41 +3261,41 @@ class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04:
 NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04: TypeAlias = struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04
 rpc_ctrl_fla_setup_instance_mem_block_v21_05: TypeAlias = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
 rpc_ctrl_fla_setup_instance_mem_block_v: TypeAlias = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
-@record
-class struct_rpc_ctrl_get_total_hs_credits_v21_08:
+@c.record
+class struct_rpc_ctrl_get_total_hs_credits_v21_08(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08, 8]
-@record
-class struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08:
+@c.record
+class struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08(c.Struct):
   SIZE = 4
   numCredits: Annotated[NvU32, 0]
 NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08: TypeAlias = struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08
 rpc_ctrl_get_total_hs_credits_v21_08: TypeAlias = struct_rpc_ctrl_get_total_hs_credits_v21_08
 rpc_ctrl_get_total_hs_credits_v: TypeAlias = struct_rpc_ctrl_get_total_hs_credits_v21_08
-@record
-class struct_rpc_ctrl_get_hs_credits_v21_08:
+@c.record
+class struct_rpc_ctrl_get_hs_credits_v21_08(c.Struct):
   SIZE = 264
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 8]
-@record
-class struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08:
+@c.record
+class struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08(c.Struct):
   SIZE = 256
   pmaChannelIdx: Annotated[NvU8, 0]
   numEntries: Annotated[NvU8, 1]
   statusInfo: Annotated[NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08, 2]
-  creditInfo: Annotated[Array[NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, Literal[63]], 4]
+  creditInfo: Annotated[c.Array[NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, Literal[63]], 4]
 NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08: TypeAlias = struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08
-@record
-class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08:
+@c.record
+class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08(c.Struct):
   SIZE = 2
   status: Annotated[NvU8, 0]
   entryIndex: Annotated[NvU8, 1]
 NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08: TypeAlias = struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08
-@record
-class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08:
+@c.record
+class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08(c.Struct):
   SIZE = 4
   chipletType: Annotated[NvU8, 0]
   chipletIndex: Annotated[NvU8, 1]
@@ -3302,214 +3303,214 @@ class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08:
 NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08: TypeAlias = struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08
 rpc_ctrl_get_hs_credits_v21_08: TypeAlias = struct_rpc_ctrl_get_hs_credits_v21_08
 rpc_ctrl_get_hs_credits_v: TypeAlias = struct_rpc_ctrl_get_hs_credits_v21_08
-@record
-class struct_rpc_ctrl_reserve_hes_v29_07:
+@c.record
+class struct_rpc_ctrl_reserve_hes_v29_07(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07, 8]
-@record
-class struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07:
+@c.record
+class struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07(c.Struct):
   SIZE = 8
   type: Annotated[NvU32, 0]
   reserveParams: Annotated[NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07, 4]
 NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07: TypeAlias = struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07
-@record
-class struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07:
+@c.record
+class struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07(c.Struct):
   SIZE = 1
   cwd: Annotated[NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07, 0]
 NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07: TypeAlias = struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07
-@record
-class struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07:
+@c.record
+class struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07(c.Struct):
   SIZE = 1
   ctxsw: Annotated[NvBool, 0]
 NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07: TypeAlias = struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07
 rpc_ctrl_reserve_hes_v29_07: TypeAlias = struct_rpc_ctrl_reserve_hes_v29_07
 rpc_ctrl_reserve_hes_v: TypeAlias = struct_rpc_ctrl_reserve_hes_v29_07
-@record
-class struct_rpc_ctrl_release_hes_v29_07:
+@c.record
+class struct_rpc_ctrl_release_hes_v29_07(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07, 8]
-@record
-class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07:
+@c.record
+class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07(c.Struct):
   SIZE = 4
   type: Annotated[NvU32, 0]
 NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07: TypeAlias = struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07
 rpc_ctrl_release_hes_v29_07: TypeAlias = struct_rpc_ctrl_release_hes_v29_07
 rpc_ctrl_release_hes_v: TypeAlias = struct_rpc_ctrl_release_hes_v29_07
-@record
-class struct_rpc_ctrl_reserve_ccu_prof_v29_07:
+@c.record
+class struct_rpc_ctrl_reserve_ccu_prof_v29_07(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07, 8]
-@record
-class struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07:
+@c.record
+class struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07(c.Struct):
   SIZE = 1
   ctxsw: Annotated[NvBool, 0]
 NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07: TypeAlias = struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07
 rpc_ctrl_reserve_ccu_prof_v29_07: TypeAlias = struct_rpc_ctrl_reserve_ccu_prof_v29_07
 rpc_ctrl_reserve_ccu_prof_v: TypeAlias = struct_rpc_ctrl_reserve_ccu_prof_v29_07
-@record
-class struct_rpc_ctrl_release_ccu_prof_v29_07:
+@c.record
+class struct_rpc_ctrl_release_ccu_prof_v29_07(c.Struct):
   SIZE = 8
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
 rpc_ctrl_release_ccu_prof_v29_07: TypeAlias = struct_rpc_ctrl_release_ccu_prof_v29_07
 rpc_ctrl_release_ccu_prof_v: TypeAlias = struct_rpc_ctrl_release_ccu_prof_v29_07
-@record
-class struct_rpc_ctrl_set_hs_credits_v21_08:
+@c.record
+class struct_rpc_ctrl_set_hs_credits_v21_08(c.Struct):
   SIZE = 264
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 8]
-@record
-class struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08:
+@c.record
+class struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08(c.Struct):
   SIZE = 256
   pmaChannelIdx: Annotated[NvU8, 0]
   numEntries: Annotated[NvU8, 1]
   statusInfo: Annotated[NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08, 2]
-  creditInfo: Annotated[Array[NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, Literal[63]], 4]
+  creditInfo: Annotated[c.Array[NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, Literal[63]], 4]
 NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08: TypeAlias = struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08
 rpc_ctrl_set_hs_credits_v21_08: TypeAlias = struct_rpc_ctrl_set_hs_credits_v21_08
 rpc_ctrl_set_hs_credits_v: TypeAlias = struct_rpc_ctrl_set_hs_credits_v21_08
-@record
-class struct_rpc_ctrl_pm_area_pc_sampler_v21_0B:
+@c.record
+class struct_rpc_ctrl_pm_area_pc_sampler_v21_0B(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   cmd: Annotated[NvU32, 8]
 rpc_ctrl_pm_area_pc_sampler_v21_0B: TypeAlias = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
 rpc_ctrl_pm_area_pc_sampler_v: TypeAlias = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
-@record
-class struct_rpc_ctrl_exec_partitions_delete_v1F_0A:
+@c.record
+class struct_rpc_ctrl_exec_partitions_delete_v1F_0A(c.Struct):
   SIZE = 44
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   execPartitionsDelete: Annotated[NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05, 8]
-@record
-class struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05:
+@c.record
+class struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05(c.Struct):
   SIZE = 36
   execPartCount: Annotated[NvU32, 0]
-  execPartId: Annotated[Array[NvU32, Literal[8]], 4]
+  execPartId: Annotated[c.Array[NvU32, Literal[8]], 4]
 NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05: TypeAlias = struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05
 rpc_ctrl_exec_partitions_delete_v1F_0A: TypeAlias = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
 rpc_ctrl_exec_partitions_delete_v: TypeAlias = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
-@record
-class struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A:
+@c.record
+class struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   workSubmitToken: Annotated[NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00, 8]
-@record
-class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00:
+@c.record
+class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00(c.Struct):
   SIZE = 4
   workSubmitToken: Annotated[NvU32, 0]
 NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00: TypeAlias = struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00
 rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A: TypeAlias = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
 rpc_ctrl_gpfifo_get_work_submit_token_v: TypeAlias = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
-@record
-class struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A:
+@c.record
+class struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   setWorkSubmitTokenIndex: Annotated[NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04, 8]
-@record
-class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04:
+@c.record
+class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04(c.Struct):
   SIZE = 4
   index: Annotated[NvU32, 0]
 NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04: TypeAlias = struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04
 rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A: TypeAlias = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
 rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v: TypeAlias = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
-@record
-class struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D:
+@c.record
+class struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D(c.Struct):
   SIZE = 16
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   vfErrContIntrMask: Annotated[NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B, 8]
-@record
-class struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B:
+@c.record
+class struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B(c.Struct):
   SIZE = 8
   eccMask: Annotated[NvU32, 0]
   nvlinkMask: Annotated[NvU32, 4]
 NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B: TypeAlias = struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B
 rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D: TypeAlias = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
 rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v: TypeAlias = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
-@record
-class struct_rpc_save_hibernation_data_v1E_0E:
+@c.record
+class struct_rpc_save_hibernation_data_v1E_0E(c.Struct):
   SIZE = 4
   remainedBytes: Annotated[NvU32, 0]
-  payload: Annotated[Array[NvU8, Literal[0]], 4]
+  payload: Annotated[c.Array[NvU8, Literal[0]], 4]
 rpc_save_hibernation_data_v1E_0E: TypeAlias = struct_rpc_save_hibernation_data_v1E_0E
 rpc_save_hibernation_data_v: TypeAlias = struct_rpc_save_hibernation_data_v1E_0E
-@record
-class struct_rpc_restore_hibernation_data_v1E_0E:
+@c.record
+class struct_rpc_restore_hibernation_data_v1E_0E(c.Struct):
   SIZE = 4
   remainedBytes: Annotated[NvU32, 0]
-  payload: Annotated[Array[NvU8, Literal[0]], 4]
+  payload: Annotated[c.Array[NvU8, Literal[0]], 4]
 rpc_restore_hibernation_data_v1E_0E: TypeAlias = struct_rpc_restore_hibernation_data_v1E_0E
 rpc_restore_hibernation_data_v: TypeAlias = struct_rpc_restore_hibernation_data_v1E_0E
-@record
-class struct_rpc_ctrl_get_mmu_debug_mode_v1E_06:
+@c.record
+class struct_rpc_ctrl_get_mmu_debug_mode_v1E_06(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06, 8]
-@record
-class struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06:
+@c.record
+class struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06(c.Struct):
   SIZE = 1
   bMode: Annotated[NvBool, 0]
 NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06: TypeAlias = struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06
 rpc_ctrl_get_mmu_debug_mode_v1E_06: TypeAlias = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
 rpc_ctrl_get_mmu_debug_mode_v: TypeAlias = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
-@record
-class struct_rpc_disable_channels_v1E_0B:
+@c.record
+class struct_rpc_disable_channels_v1E_0B(c.Struct):
   SIZE = 4
   bDisable: Annotated[NvU32, 0]
 rpc_disable_channels_v1E_0B: TypeAlias = struct_rpc_disable_channels_v1E_0B
 rpc_disable_channels_v: TypeAlias = struct_rpc_disable_channels_v1E_0B
-@record
-class struct_rpc_ctrl_gpu_migratable_ops_v21_07:
+@c.record
+class struct_rpc_ctrl_gpu_migratable_ops_v21_07(c.Struct):
   SIZE = 1840
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 8]
-@record
-class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07:
+@c.record
+class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07(c.Struct):
   SIZE = 1832
   hClientTarget: Annotated[NvHandle, 0]
   hChannelTarget: Annotated[NvHandle, 4]
   bNonTransactional: Annotated[NvU32, 8]
   regOpCount: Annotated[NvU32, 12]
-  smIds: Annotated[Array[NvU32, Literal[50]], 16]
-  regOps: Annotated[Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[50]], 216]
+  smIds: Annotated[c.Array[NvU32, Literal[50]], 16]
+  regOps: Annotated[c.Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[50]], 216]
   grRouteInfo: Annotated[NV2080_CTRL_GR_ROUTE_INFO_v12_01, 1816]
 NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07: TypeAlias = struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07
 rpc_ctrl_gpu_migratable_ops_v21_07: TypeAlias = struct_rpc_ctrl_gpu_migratable_ops_v21_07
 rpc_ctrl_gpu_migratable_ops_v: TypeAlias = struct_rpc_ctrl_gpu_migratable_ops_v21_07
-@record
-class struct_rpc_invalidate_tlb_v23_03:
+@c.record
+class struct_rpc_invalidate_tlb_v23_03(c.Struct):
   SIZE = 16
   pdbAddress: Annotated[NvU64, 0]
   regVal: Annotated[NvU32, 8]
 rpc_invalidate_tlb_v23_03: TypeAlias = struct_rpc_invalidate_tlb_v23_03
 rpc_invalidate_tlb_v: TypeAlias = struct_rpc_invalidate_tlb_v23_03
-@record
-class struct_rpc_get_brand_caps_v25_12:
+@c.record
+class struct_rpc_get_brand_caps_v25_12(c.Struct):
   SIZE = 4
   brands: Annotated[NvU32, 0]
 rpc_get_brand_caps_v25_12: TypeAlias = struct_rpc_get_brand_caps_v25_12
 rpc_get_brand_caps_v: TypeAlias = struct_rpc_get_brand_caps_v25_12
-@record
-class struct_rpc_gsp_set_system_info_v17_00:
+@c.record
+class struct_rpc_gsp_set_system_info_v17_00(c.Struct):
   SIZE = 4
   data: Annotated[NvU32, 0]
 rpc_gsp_set_system_info_v17_00: TypeAlias = struct_rpc_gsp_set_system_info_v17_00
 rpc_gsp_set_system_info_v: TypeAlias = struct_rpc_gsp_set_system_info_v17_00
-@record
-class struct_rpc_gsp_rm_alloc_v03_00:
+@c.record
+class struct_rpc_gsp_rm_alloc_v03_00(c.Struct):
   SIZE = 32
   hClient: Annotated[NvHandle, 0]
   hParent: Annotated[NvHandle, 4]
@@ -3518,12 +3519,12 @@ class struct_rpc_gsp_rm_alloc_v03_00:
   status: Annotated[NvU32, 16]
   paramsSize: Annotated[NvU32, 20]
   flags: Annotated[NvU32, 24]
-  reserved: Annotated[Array[NvU8, Literal[4]], 28]
-  params: Annotated[Array[NvU8, Literal[0]], 32]
+  reserved: Annotated[c.Array[NvU8, Literal[4]], 28]
+  params: Annotated[c.Array[NvU8, Literal[0]], 32]
 rpc_gsp_rm_alloc_v03_00: TypeAlias = struct_rpc_gsp_rm_alloc_v03_00
 rpc_gsp_rm_alloc_v: TypeAlias = struct_rpc_gsp_rm_alloc_v03_00
-@record
-class struct_rpc_gsp_rm_control_v03_00:
+@c.record
+class struct_rpc_gsp_rm_control_v03_00(c.Struct):
   SIZE = 24
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
@@ -3531,11 +3532,11 @@ class struct_rpc_gsp_rm_control_v03_00:
   status: Annotated[NvU32, 12]
   paramsSize: Annotated[NvU32, 16]
   flags: Annotated[NvU32, 20]
-  params: Annotated[Array[NvU8, Literal[0]], 24]
+  params: Annotated[c.Array[NvU8, Literal[0]], 24]
 rpc_gsp_rm_control_v03_00: TypeAlias = struct_rpc_gsp_rm_control_v03_00
 rpc_gsp_rm_control_v: TypeAlias = struct_rpc_gsp_rm_control_v03_00
-@record
-class struct_rpc_dump_protobuf_component_v18_12:
+@c.record
+class struct_rpc_dump_protobuf_component_v18_12(c.Struct):
   SIZE = 16
   component: Annotated[NvU16, 0]
   nvDumpType: Annotated[NvU8, 2]
@@ -3543,20 +3544,20 @@ class struct_rpc_dump_protobuf_component_v18_12:
   bugCheckCode: Annotated[NvU32, 4]
   internalCode: Annotated[NvU32, 8]
   bufferSize: Annotated[NvU32, 12]
-  blob: Annotated[Array[NvU8, Literal[0]], 16]
+  blob: Annotated[c.Array[NvU8, Literal[0]], 16]
 rpc_dump_protobuf_component_v18_12: TypeAlias = struct_rpc_dump_protobuf_component_v18_12
 rpc_dump_protobuf_component_v: TypeAlias = struct_rpc_dump_protobuf_component_v18_12
-@record
-class struct_rpc_run_cpu_sequencer_v17_00:
+@c.record
+class struct_rpc_run_cpu_sequencer_v17_00(c.Struct):
   SIZE = 40
   bufferSizeDWord: Annotated[NvU32, 0]
   cmdIndex: Annotated[NvU32, 4]
-  regSaveArea: Annotated[Array[NvU32, Literal[8]], 8]
-  commandBuffer: Annotated[Array[NvU32, Literal[0]], 40]
+  regSaveArea: Annotated[c.Array[NvU32, Literal[8]], 8]
+  commandBuffer: Annotated[c.Array[NvU32, Literal[0]], 40]
 rpc_run_cpu_sequencer_v17_00: TypeAlias = struct_rpc_run_cpu_sequencer_v17_00
 rpc_run_cpu_sequencer_v: TypeAlias = struct_rpc_run_cpu_sequencer_v17_00
-@record
-class struct_rpc_post_event_v17_00:
+@c.record
+class struct_rpc_post_event_v17_00(c.Struct):
   SIZE = 32
   hClient: Annotated[NvHandle, 0]
   hEvent: Annotated[NvHandle, 4]
@@ -3566,11 +3567,11 @@ class struct_rpc_post_event_v17_00:
   status: Annotated[NvU32, 20]
   eventDataSize: Annotated[NvU32, 24]
   bNotifyList: Annotated[NvBool, 28]
-  eventData: Annotated[Array[NvU8, Literal[0]], 29]
+  eventData: Annotated[c.Array[NvU8, Literal[0]], 29]
 rpc_post_event_v17_00: TypeAlias = struct_rpc_post_event_v17_00
 rpc_post_event_v: TypeAlias = struct_rpc_post_event_v17_00
-@record
-class struct_rpc_rc_triggered_v17_02:
+@c.record
+class struct_rpc_rc_triggered_v17_02(c.Struct):
   SIZE = 48
   nv2080EngineType: Annotated[NvU32, 0]
   chid: Annotated[NvU32, 4]
@@ -3584,101 +3585,101 @@ class struct_rpc_rc_triggered_v17_02:
   mmuFaultType: Annotated[NvU32, 36]
   bCallbackNeeded: Annotated[NvBool, 40]
   rcJournalBufferSize: Annotated[NvU32, 44]
-  rcJournalBuffer: Annotated[Array[NvU8, Literal[0]], 48]
+  rcJournalBuffer: Annotated[c.Array[NvU8, Literal[0]], 48]
 rpc_rc_triggered_v17_02: TypeAlias = struct_rpc_rc_triggered_v17_02
 rpc_rc_triggered_v: TypeAlias = struct_rpc_rc_triggered_v17_02
-@record
-class struct_rpc_os_error_log_v17_00:
+@c.record
+class struct_rpc_os_error_log_v17_00(c.Struct):
   SIZE = 268
   exceptType: Annotated[NvU32, 0]
   runlistId: Annotated[NvU32, 4]
   chid: Annotated[NvU32, 8]
-  errString: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 12]
+  errString: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[256]], 12]
 rpc_os_error_log_v17_00: TypeAlias = struct_rpc_os_error_log_v17_00
 rpc_os_error_log_v: TypeAlias = struct_rpc_os_error_log_v17_00
-@record
-class struct_rpc_rg_line_intr_v17_00:
+@c.record
+class struct_rpc_rg_line_intr_v17_00(c.Struct):
   SIZE = 8
   head: Annotated[NvU32, 0]
   rgIntr: Annotated[NvU32, 4]
 rpc_rg_line_intr_v17_00: TypeAlias = struct_rpc_rg_line_intr_v17_00
 rpc_rg_line_intr_v: TypeAlias = struct_rpc_rg_line_intr_v17_00
-@record
-class struct_rpc_display_modeset_v01_00:
+@c.record
+class struct_rpc_display_modeset_v01_00(c.Struct):
   SIZE = 12
   bModesetStart: Annotated[NvBool, 0]
   minRequiredIsoBandwidthKBPS: Annotated[NvU32, 4]
   minRequiredFloorBandwidthKBPS: Annotated[NvU32, 8]
 rpc_display_modeset_v01_00: TypeAlias = struct_rpc_display_modeset_v01_00
 rpc_display_modeset_v: TypeAlias = struct_rpc_display_modeset_v01_00
-@record
-class struct_rpc_gpuacct_perfmon_util_samples_v1F_0E:
+@c.record
+class struct_rpc_gpuacct_perfmon_util_samples_v1F_0E(c.Struct):
   SIZE = 4048
   params: Annotated[NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 0]
-@record
-class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E:
+@c.record
+class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E(c.Struct):
   SIZE = 4048
   type: Annotated[NvU8, 0]
   bufSize: Annotated[NvU32, 4]
   count: Annotated[NvU32, 8]
   tracker: Annotated[NvU32, 12]
-  samples: Annotated[Array[NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, Literal[72]], 16]
+  samples: Annotated[c.Array[NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, Literal[72]], 16]
 NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E: TypeAlias = struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E
 rpc_gpuacct_perfmon_util_samples_v1F_0E: TypeAlias = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
 rpc_gpuacct_perfmon_util_samples_v: TypeAlias = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
-@record
-class struct_rpc_vgpu_gsp_plugin_triggered_v17_00:
+@c.record
+class struct_rpc_vgpu_gsp_plugin_triggered_v17_00(c.Struct):
   SIZE = 8
   gfid: Annotated[NvU32, 0]
   notifyIndex: Annotated[NvU32, 4]
 rpc_vgpu_gsp_plugin_triggered_v17_00: TypeAlias = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
 rpc_vgpu_gsp_plugin_triggered_v: TypeAlias = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
-@record
-class struct_rpc_vgpu_config_event_v17_00:
+@c.record
+class struct_rpc_vgpu_config_event_v17_00(c.Struct):
   SIZE = 4
   notifyIndex: Annotated[NvU32, 0]
 rpc_vgpu_config_event_v17_00: TypeAlias = struct_rpc_vgpu_config_event_v17_00
 rpc_vgpu_config_event_v: TypeAlias = struct_rpc_vgpu_config_event_v17_00
-@record
-class struct_rpc_dce_rm_init_v01_00:
+@c.record
+class struct_rpc_dce_rm_init_v01_00(c.Struct):
   SIZE = 8
   bInit: Annotated[NvBool, 0]
   hInternalClient: Annotated[NvU32, 4]
 rpc_dce_rm_init_v01_00: TypeAlias = struct_rpc_dce_rm_init_v01_00
 rpc_dce_rm_init_v: TypeAlias = struct_rpc_dce_rm_init_v01_00
-@record
-class struct_rpc_sim_read_v1E_01:
+@c.record
+class struct_rpc_sim_read_v1E_01(c.Struct):
   SIZE = 264
-  path: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
+  path: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
   index: Annotated[NvU32, 256]
   count: Annotated[NvU32, 260]
 rpc_sim_read_v1E_01: TypeAlias = struct_rpc_sim_read_v1E_01
 rpc_sim_read_v: TypeAlias = struct_rpc_sim_read_v1E_01
-@record
-class struct_rpc_sim_write_v1E_01:
+@c.record
+class struct_rpc_sim_write_v1E_01(c.Struct):
   SIZE = 268
-  path: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
+  path: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[256]], 0]
   index: Annotated[NvU32, 256]
   count: Annotated[NvU32, 260]
   data: Annotated[NvU32, 264]
 rpc_sim_write_v1E_01: TypeAlias = struct_rpc_sim_write_v1E_01
 rpc_sim_write_v: TypeAlias = struct_rpc_sim_write_v1E_01
-@record
-class struct_rpc_ucode_libos_print_v1E_08:
+@c.record
+class struct_rpc_ucode_libos_print_v1E_08(c.Struct):
   SIZE = 8
   ucodeEngDesc: Annotated[NvU32, 0]
   libosPrintBufSize: Annotated[NvU32, 4]
-  libosPrintBuf: Annotated[Array[NvU8, Literal[0]], 8]
+  libosPrintBuf: Annotated[c.Array[NvU8, Literal[0]], 8]
 rpc_ucode_libos_print_v1E_08: TypeAlias = struct_rpc_ucode_libos_print_v1E_08
 rpc_ucode_libos_print_v: TypeAlias = struct_rpc_ucode_libos_print_v1E_08
-@record
-class struct_rpc_init_done_v17_00:
+@c.record
+class struct_rpc_init_done_v17_00(c.Struct):
   SIZE = 4
   not_used: Annotated[NvU32, 0]
 rpc_init_done_v17_00: TypeAlias = struct_rpc_init_done_v17_00
 rpc_init_done_v: TypeAlias = struct_rpc_init_done_v17_00
-@record
-class struct_rpc_semaphore_schedule_callback_v17_00:
+@c.record
+class struct_rpc_semaphore_schedule_callback_v17_00(c.Struct):
   SIZE = 32
   GPUVA: Annotated[NvU64, 0]
   hVASpace: Annotated[NvU32, 8]
@@ -3689,8 +3690,8 @@ class struct_rpc_semaphore_schedule_callback_v17_00:
   hEvent: Annotated[NvHandle, 28]
 rpc_semaphore_schedule_callback_v17_00: TypeAlias = struct_rpc_semaphore_schedule_callback_v17_00
 rpc_semaphore_schedule_callback_v: TypeAlias = struct_rpc_semaphore_schedule_callback_v17_00
-@record
-class struct_rpc_timed_semaphore_release_v01_00:
+@c.record
+class struct_rpc_timed_semaphore_release_v01_00(c.Struct):
   SIZE = 40
   semaphoreVA: Annotated[NvU64, 0]
   notifierVA: Annotated[NvU64, 8]
@@ -3701,130 +3702,130 @@ class struct_rpc_timed_semaphore_release_v01_00:
   hDevice: Annotated[NvHandle, 32]
 rpc_timed_semaphore_release_v01_00: TypeAlias = struct_rpc_timed_semaphore_release_v01_00
 rpc_timed_semaphore_release_v: TypeAlias = struct_rpc_timed_semaphore_release_v01_00
-@record
-class struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00:
+@c.record
+class struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00(c.Struct):
   SIZE = 16
   params: Annotated[NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00, 0]
-@record
-class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00:
+@c.record
+class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00(c.Struct):
   SIZE = 16
   flags: Annotated[NvU32, 0]
   bBridgeless: Annotated[NvBool, 4]
-  currLimits: Annotated[Array[NvU32, Literal[2]], 8]
+  currLimits: Annotated[c.Array[NvU32, Literal[2]], 8]
 NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00: TypeAlias = struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00
 rpc_perf_gpu_boost_sync_limits_callback_v17_00: TypeAlias = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
 rpc_perf_gpu_boost_sync_limits_callback_v: TypeAlias = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
-@record
-class struct_rpc_perf_bridgeless_info_update_v17_00:
+@c.record
+class struct_rpc_perf_bridgeless_info_update_v17_00(c.Struct):
   SIZE = 8
   bBridgeless: Annotated[NvU64, 0]
 rpc_perf_bridgeless_info_update_v17_00: TypeAlias = struct_rpc_perf_bridgeless_info_update_v17_00
 rpc_perf_bridgeless_info_update_v: TypeAlias = struct_rpc_perf_bridgeless_info_update_v17_00
-@record
-class struct_rpc_nvlink_fault_up_v17_00:
+@c.record
+class struct_rpc_nvlink_fault_up_v17_00(c.Struct):
   SIZE = 4
   linkId: Annotated[NvU32, 0]
 rpc_nvlink_fault_up_v17_00: TypeAlias = struct_rpc_nvlink_fault_up_v17_00
 rpc_nvlink_fault_up_v: TypeAlias = struct_rpc_nvlink_fault_up_v17_00
-@record
-class struct_rpc_nvlink_inband_received_data_256_v17_00:
+@c.record
+class struct_rpc_nvlink_inband_received_data_256_v17_00(c.Struct):
   SIZE = 260
   params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00, 0]
-@record
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00:
+@c.record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00(c.Struct):
   SIZE = 260
   dataSize: Annotated[NvU32, 0]
-  data: Annotated[Array[NvU8, Literal[256]], 4]
+  data: Annotated[c.Array[NvU8, Literal[256]], 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00: TypeAlias = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00
 rpc_nvlink_inband_received_data_256_v17_00: TypeAlias = struct_rpc_nvlink_inband_received_data_256_v17_00
 rpc_nvlink_inband_received_data_256_v: TypeAlias = struct_rpc_nvlink_inband_received_data_256_v17_00
-@record
-class struct_rpc_nvlink_inband_received_data_512_v17_00:
+@c.record
+class struct_rpc_nvlink_inband_received_data_512_v17_00(c.Struct):
   SIZE = 516
   params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00, 0]
-@record
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00:
+@c.record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00(c.Struct):
   SIZE = 516
   dataSize: Annotated[NvU32, 0]
-  data: Annotated[Array[NvU8, Literal[512]], 4]
+  data: Annotated[c.Array[NvU8, Literal[512]], 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00: TypeAlias = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00
 rpc_nvlink_inband_received_data_512_v17_00: TypeAlias = struct_rpc_nvlink_inband_received_data_512_v17_00
 rpc_nvlink_inband_received_data_512_v: TypeAlias = struct_rpc_nvlink_inband_received_data_512_v17_00
-@record
-class struct_rpc_nvlink_inband_received_data_1024_v17_00:
+@c.record
+class struct_rpc_nvlink_inband_received_data_1024_v17_00(c.Struct):
   SIZE = 1028
   params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00, 0]
-@record
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00:
+@c.record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00(c.Struct):
   SIZE = 1028
   dataSize: Annotated[NvU32, 0]
-  data: Annotated[Array[NvU8, Literal[1024]], 4]
+  data: Annotated[c.Array[NvU8, Literal[1024]], 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00: TypeAlias = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00
 rpc_nvlink_inband_received_data_1024_v17_00: TypeAlias = struct_rpc_nvlink_inband_received_data_1024_v17_00
 rpc_nvlink_inband_received_data_1024_v: TypeAlias = struct_rpc_nvlink_inband_received_data_1024_v17_00
-@record
-class struct_rpc_nvlink_inband_received_data_2048_v17_00:
+@c.record
+class struct_rpc_nvlink_inband_received_data_2048_v17_00(c.Struct):
   SIZE = 2052
   params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00, 0]
-@record
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00:
+@c.record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00(c.Struct):
   SIZE = 2052
   dataSize: Annotated[NvU32, 0]
-  data: Annotated[Array[NvU8, Literal[2048]], 4]
+  data: Annotated[c.Array[NvU8, Literal[2048]], 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00: TypeAlias = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00
 rpc_nvlink_inband_received_data_2048_v17_00: TypeAlias = struct_rpc_nvlink_inband_received_data_2048_v17_00
 rpc_nvlink_inband_received_data_2048_v: TypeAlias = struct_rpc_nvlink_inband_received_data_2048_v17_00
-@record
-class struct_rpc_nvlink_inband_received_data_4096_v17_00:
+@c.record
+class struct_rpc_nvlink_inband_received_data_4096_v17_00(c.Struct):
   SIZE = 4100
   params: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00, 0]
-@record
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00:
+@c.record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00(c.Struct):
   SIZE = 4100
   dataSize: Annotated[NvU32, 0]
-  data: Annotated[Array[NvU8, Literal[4096]], 4]
+  data: Annotated[c.Array[NvU8, Literal[4096]], 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00: TypeAlias = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00
 rpc_nvlink_inband_received_data_4096_v17_00: TypeAlias = struct_rpc_nvlink_inband_received_data_4096_v17_00
 rpc_nvlink_inband_received_data_4096_v: TypeAlias = struct_rpc_nvlink_inband_received_data_4096_v17_00
-@record
-class struct_rpc_nvlink_is_gpu_degraded_v17_00:
+@c.record
+class struct_rpc_nvlink_is_gpu_degraded_v17_00(c.Struct):
   SIZE = 8
   params: Annotated[NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00, 0]
-@record
-class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00:
+@c.record
+class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00(c.Struct):
   SIZE = 8
   linkId: Annotated[NvU32, 0]
   bIsGpuDegraded: Annotated[NvBool, 4]
 NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00: TypeAlias = struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00
 rpc_nvlink_is_gpu_degraded_v17_00: TypeAlias = struct_rpc_nvlink_is_gpu_degraded_v17_00
 rpc_nvlink_is_gpu_degraded_v: TypeAlias = struct_rpc_nvlink_is_gpu_degraded_v17_00
-@record
-class struct_rpc_nvlink_fatal_error_recovery_v17_00:
+@c.record
+class struct_rpc_nvlink_fatal_error_recovery_v17_00(c.Struct):
   SIZE = 2
   params: Annotated[NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00, 0]
-@record
-class struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00:
+@c.record
+class struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00(c.Struct):
   SIZE = 2
   bRecoverable: Annotated[NvBool, 0]
   bLazy: Annotated[NvBool, 1]
 NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00: TypeAlias = struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00
 rpc_nvlink_fatal_error_recovery_v17_00: TypeAlias = struct_rpc_nvlink_fatal_error_recovery_v17_00
 rpc_nvlink_fatal_error_recovery_v: TypeAlias = struct_rpc_nvlink_fatal_error_recovery_v17_00
-@record
-class struct_rpc_update_gsp_trace_v01_00:
+@c.record
+class struct_rpc_update_gsp_trace_v01_00(c.Struct):
   SIZE = 8
   records: Annotated[NvU32, 0]
   data: Annotated[NvU32, 4]
 rpc_update_gsp_trace_v01_00: TypeAlias = struct_rpc_update_gsp_trace_v01_00
 rpc_update_gsp_trace_v: TypeAlias = struct_rpc_update_gsp_trace_v01_00
-@record
-class struct_rpc_gsp_post_nocat_record_v01_00:
+@c.record
+class struct_rpc_gsp_post_nocat_record_v01_00(c.Struct):
   SIZE = 4
   data: Annotated[NvU32, 0]
 rpc_gsp_post_nocat_record_v01_00: TypeAlias = struct_rpc_gsp_post_nocat_record_v01_00
 rpc_gsp_post_nocat_record_v: TypeAlias = struct_rpc_gsp_post_nocat_record_v01_00
-@record
-class struct_rpc_extdev_intr_service_v17_00:
+@c.record
+class struct_rpc_extdev_intr_service_v17_00(c.Struct):
   SIZE = 4
   lossRegStatus: Annotated[NvU8, 0]
   gainRegStatus: Annotated[NvU8, 1]
@@ -3832,65 +3833,65 @@ class struct_rpc_extdev_intr_service_v17_00:
   rmStatus: Annotated[NvBool, 3]
 rpc_extdev_intr_service_v17_00: TypeAlias = struct_rpc_extdev_intr_service_v17_00
 rpc_extdev_intr_service_v: TypeAlias = struct_rpc_extdev_intr_service_v17_00
-@record
-class struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04:
+@c.record
+class struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04(c.Struct):
   SIZE = 16
   params: Annotated[NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04, 0]
-@record
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04:
+@c.record
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04(c.Struct):
   SIZE = 16
   flags: Annotated[NvU8, 0]
   syncData: Annotated[NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04, 4]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04: TypeAlias = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04
-@record
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04:
+@c.record
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04(c.Struct):
   SIZE = 12
   type: Annotated[NvU8, 0]
   data: Annotated[NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04, 4]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04: TypeAlias = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04
-@record
-class union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04:
+@c.record
+class union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04(c.Struct):
   SIZE = 8
   smbpbi: Annotated[NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04, 0]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04: TypeAlias = union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04
-@record
-class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04:
+@c.record
+class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04(c.Struct):
   SIZE = 8
   sensorId: Annotated[NvU32, 0]
   limit: Annotated[NvU32, 4]
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04: TypeAlias = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04
 rpc_pfm_req_hndlr_state_sync_callback_v21_04: TypeAlias = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
 rpc_pfm_req_hndlr_state_sync_callback_v: TypeAlias = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
-@record
-class struct_rpc_vgpu_gsp_mig_ci_config_v21_03:
+@c.record
+class struct_rpc_vgpu_gsp_mig_ci_config_v21_03(c.Struct):
   SIZE = 44
   execPartCount: Annotated[NvU32, 0]
-  execPartId: Annotated[Array[NvU32, Literal[8]], 4]
+  execPartId: Annotated[c.Array[NvU32, Literal[8]], 4]
   gfid: Annotated[NvU32, 36]
   bDelete: Annotated[NvBool, 40]
 rpc_vgpu_gsp_mig_ci_config_v21_03: TypeAlias = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
 rpc_vgpu_gsp_mig_ci_config_v: TypeAlias = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
-@record
-class struct_rpc_gsp_lockdown_notice_v17_00:
+@c.record
+class struct_rpc_gsp_lockdown_notice_v17_00(c.Struct):
   SIZE = 1
   bLockdownEngaging: Annotated[NvBool, 0]
 rpc_gsp_lockdown_notice_v17_00: TypeAlias = struct_rpc_gsp_lockdown_notice_v17_00
 rpc_gsp_lockdown_notice_v: TypeAlias = struct_rpc_gsp_lockdown_notice_v17_00
-@record
-class struct_rpc_ctrl_gpu_query_ecc_status_v24_06:
+@c.record
+class struct_rpc_ctrl_gpu_query_ecc_status_v24_06(c.Struct):
   SIZE = 1016
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06, 8]
-@record
-class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06:
+@c.record
+class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06(c.Struct):
   SIZE = 1008
-  units: Annotated[Array[NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, Literal[25]], 0]
+  units: Annotated[c.Array[NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, Literal[25]], 0]
   bFatalPoisonError: Annotated[NvBool, 1000]
   flags: Annotated[NvU32, 1004]
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06: TypeAlias = struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06
-@record
-class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01:
+@c.record
+class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01(c.Struct):
   SIZE = 40
   enabled: Annotated[NvBool, 0]
   scrubComplete: Annotated[NvBool, 1]
@@ -3900,89 +3901,89 @@ class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01:
   sbe: Annotated[NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01, 24]
   sbeNonResettable: Annotated[NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01, 32]
 NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01: TypeAlias = struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01
-@record
-class struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01:
+@c.record
+class struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01(c.Struct):
   SIZE = 8
   count: Annotated[NvU64, 0]
 NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01: TypeAlias = struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01
 rpc_ctrl_gpu_query_ecc_status_v24_06: TypeAlias = struct_rpc_ctrl_gpu_query_ecc_status_v24_06
-@record
-class struct_rpc_ctrl_gpu_query_ecc_status_v26_02:
+@c.record
+class struct_rpc_ctrl_gpu_query_ecc_status_v26_02(c.Struct):
   SIZE = 1216
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   params: Annotated[NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02, 8]
-@record
-class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02:
+@c.record
+class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02(c.Struct):
   SIZE = 1208
-  units: Annotated[Array[NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, Literal[30]], 0]
+  units: Annotated[c.Array[NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, Literal[30]], 0]
   bFatalPoisonError: Annotated[NvBool, 1200]
   flags: Annotated[NvU32, 1204]
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02: TypeAlias = struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02
 rpc_ctrl_gpu_query_ecc_status_v26_02: TypeAlias = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
 rpc_ctrl_gpu_query_ecc_status_v: TypeAlias = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
-@record
-class struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04:
+@c.record
+class struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04(c.Struct):
   SIZE = 4
   value: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04: TypeAlias = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04
 rpc_ctrl_dbg_get_mode_mmu_debug_v25_04: TypeAlias = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
 rpc_ctrl_dbg_get_mode_mmu_debug_v: TypeAlias = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
-@record
-class struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07:
+@c.record
+class struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07(c.Struct):
   SIZE = 12
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07, 8]
-@record
-class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07:
+@c.record
+class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(c.Struct):
   SIZE = 4
   value: Annotated[NvU32, 0]
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07: TypeAlias = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07
 rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07: TypeAlias = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
 rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v: TypeAlias = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
-@record
-class struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09:
+@c.record
+class struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09(c.Struct):
   SIZE = 1
   bwMode: Annotated[NvU8, 0]
 rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09: TypeAlias = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
 rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v: TypeAlias = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
-@record
-class struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C:
+@c.record
+class struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C(c.Struct):
   SIZE = 520
   message_type: Annotated[NvU16, 0]
   more: Annotated[NvBool, 2]
   payload: Annotated[NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C, 4]
-@record
-class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C:
+@c.record
+class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C(c.Struct):
   SIZE = 516
   dataSize: Annotated[NvU32, 0]
-  data: Annotated[Array[NvU8, Literal[512]], 4]
+  data: Annotated[c.Array[NvU8, Literal[512]], 4]
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C: TypeAlias = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C
 rpc_ctrl_nvlink_get_inband_received_data_v25_0C: TypeAlias = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
 rpc_ctrl_nvlink_get_inband_received_data_v: TypeAlias = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
-@record
-class struct_rpc_fecs_error_v26_02:
+@c.record
+class struct_rpc_fecs_error_v26_02(c.Struct):
   SIZE = 8
   grIdx: Annotated[NvU32, 0]
   error_type: Annotated[NvU8, 4]
 rpc_fecs_error_v26_02: TypeAlias = struct_rpc_fecs_error_v26_02
 rpc_fecs_error_v: TypeAlias = struct_rpc_fecs_error_v26_02
-@record
-class struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05:
+@c.record
+class struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05(c.Struct):
   SIZE = 1028
-  buffer: Annotated[Array[NvU8, Literal[1024]], 0]
+  buffer: Annotated[c.Array[NvU8, Literal[1024]], 0]
   dataSize: Annotated[NvU32, 1024]
 rpc_ctrl_cmd_nvlink_inband_send_data_v26_05: TypeAlias = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
 rpc_ctrl_cmd_nvlink_inband_send_data_v: TypeAlias = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
-@record
-class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00:
+@c.record
+class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00(c.Struct):
   SIZE = 32
   bufferSize: Annotated[NvU32, 0]
   tracepointMask: Annotated[NvU32, 4]
@@ -3991,28 +3992,28 @@ class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00:
   flag: Annotated[NvU8, 24]
 rpc_ctrl_cmd_internal_control_gsp_trace_v28_00: TypeAlias = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
 rpc_ctrl_cmd_internal_control_gsp_trace_v: TypeAlias = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
-@record
-class struct_rpc_recovery_action_v28_01:
+@c.record
+class struct_rpc_recovery_action_v28_01(c.Struct):
   SIZE = 8
   type: Annotated[NvU32, 0]
   value: Annotated[NvBool, 4]
 rpc_recovery_action_v28_01: TypeAlias = struct_rpc_recovery_action_v28_01
 rpc_recovery_action_v: TypeAlias = struct_rpc_recovery_action_v28_01
-@record
-class struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02:
+@c.record
+class struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02(c.Struct):
   SIZE = 1048
   hClient: Annotated[NvHandle, 0]
   hObject: Annotated[NvHandle, 4]
   ctrlParams: Annotated[NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02, 8]
-@record
-class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02:
+@c.record
+class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02(c.Struct):
   SIZE = 1040
-  poolStats: Annotated[Array[NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, Literal[64]], 0]
+  poolStats: Annotated[c.Array[NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, Literal[64]], 0]
   totalHeapSize: Annotated[NvU64, 1024]
   poolCount: Annotated[NvU8, 1032]
 NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02: TypeAlias = struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02
-@record
-class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02:
+@c.record
+class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02(c.Struct):
   SIZE = 16
   allocations: Annotated[NvU32, 0]
   peakAllocations: Annotated[NvU32, 4]
@@ -4020,25 +4021,25 @@ class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02:
 NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02: TypeAlias = struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02
 rpc_ctrl_subdevice_get_libos_heap_stats_v29_02: TypeAlias = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
 rpc_ctrl_subdevice_get_libos_heap_stats_v: TypeAlias = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
-@record
-class struct_GSP_MSG_QUEUE_ELEMENT:
+@c.record
+class struct_GSP_MSG_QUEUE_ELEMENT(c.Struct):
   SIZE = 48
-  authTagBuffer: Annotated[Array[NvU8, Literal[16]], 0]
-  aadBuffer: Annotated[Array[NvU8, Literal[16]], 16]
+  authTagBuffer: Annotated[c.Array[NvU8, Literal[16]], 0]
+  aadBuffer: Annotated[c.Array[NvU8, Literal[16]], 16]
   checkSum: Annotated[NvU32, 32]
   seqNum: Annotated[NvU32, 36]
   elemCount: Annotated[NvU32, 40]
   padding: Annotated[NvU32, 44]
 GSP_MSG_QUEUE_ELEMENT: TypeAlias = struct_GSP_MSG_QUEUE_ELEMENT
-@record
-class union_rpc_message_rpc_union_field_v03_00:
+@c.record
+class union_rpc_message_rpc_union_field_v03_00(c.Struct):
   SIZE = 4
   spare: Annotated[NvU32, 0]
   cpuRmGfid: Annotated[NvU32, 0]
 rpc_message_rpc_union_field_v03_00: TypeAlias = union_rpc_message_rpc_union_field_v03_00
 rpc_message_rpc_union_field_v: TypeAlias = union_rpc_message_rpc_union_field_v03_00
-@record
-class struct_rpc_message_header_v03_00:
+@c.record
+class struct_rpc_message_header_v03_00(c.Struct):
   SIZE = 32
   header_version: Annotated[NvU32, 0]
   signature: Annotated[NvU32, 4]
@@ -4050,16 +4051,16 @@ class struct_rpc_message_header_v03_00:
   u: Annotated[rpc_message_rpc_union_field_v, 28]
 rpc_message_header_v03_00: TypeAlias = struct_rpc_message_header_v03_00
 rpc_message_header_v: TypeAlias = struct_rpc_message_header_v03_00
-@record
-class struct_PACKED_REGISTRY_ENTRY:
+@c.record
+class struct_PACKED_REGISTRY_ENTRY(c.Struct):
   SIZE = 16
   nameOffset: Annotated[NvU32, 0]
   type: Annotated[NvU8, 4]
   data: Annotated[NvU32, 8]
   length: Annotated[NvU32, 12]
 PACKED_REGISTRY_ENTRY: TypeAlias = struct_PACKED_REGISTRY_ENTRY
-@record
-class struct_PACKED_REGISTRY_TABLE:
+@c.record
+class struct_PACKED_REGISTRY_TABLE(c.Struct):
   SIZE = 8
   size: Annotated[NvU32, 0]
   numEntries: Annotated[NvU32, 4]
@@ -4069,27 +4070,27 @@ dispMuxState_None = DISPMUXSTATE.define('dispMuxState_None', 0)
 dispMuxState_IntegratedGPU = DISPMUXSTATE.define('dispMuxState_IntegratedGPU', 1)
 dispMuxState_DiscreteGPU = DISPMUXSTATE.define('dispMuxState_DiscreteGPU', 2)
 
-@record
-class ACPI_DSM_CACHE:
+@c.record
+class ACPI_DSM_CACHE(c.Struct):
   SIZE = 28
   suppFuncStatus: Annotated[NvU32, 0]
-  suppFuncs: Annotated[Array[NvU8, Literal[8]], 4]
+  suppFuncs: Annotated[c.Array[NvU8, Literal[8]], 4]
   suppFuncsLen: Annotated[NvU32, 12]
   bArg3isInteger: Annotated[NvBool, 16]
   callbackStatus: Annotated[NvU32, 20]
   callback: Annotated[NvU32, 24]
-@record
-class ACPI_DATA:
+@c.record
+class ACPI_DATA(c.Struct):
   SIZE = 472
-  dsm: Annotated[Array[ACPI_DSM_CACHE, Literal[12]], 0]
+  dsm: Annotated[c.Array[ACPI_DSM_CACHE, Literal[12]], 0]
   dispStatusHotplugFunc: Annotated[ACPI_DSM_FUNCTION, 336]
   dispStatusConfigFunc: Annotated[ACPI_DSM_FUNCTION, 340]
   perfPostPowerStateFunc: Annotated[ACPI_DSM_FUNCTION, 344]
   stereo3dStateActiveFunc: Annotated[ACPI_DSM_FUNCTION, 348]
-  dsmPlatCapsCache: Annotated[Array[NvU32, Literal[12]], 352]
+  dsmPlatCapsCache: Annotated[c.Array[NvU32, Literal[12]], 352]
   MDTLFeatureSupport: Annotated[NvU32, 400]
-  dsmCurrentFunc: Annotated[Array[ACPI_DSM_FUNCTION, Literal[8]], 404]
-  dsmCurrentSubFunc: Annotated[Array[NvU32, Literal[8]], 436]
+  dsmCurrentFunc: Annotated[c.Array[ACPI_DSM_FUNCTION, Literal[8]], 404]
+  dsmCurrentSubFunc: Annotated[c.Array[NvU32, Literal[8]], 436]
   dsmCurrentFuncSupport: Annotated[NvU32, 468]
 enum__ACPI_DSM_FUNCTION = CEnum(Annotated[int, ctypes.c_uint32])
 ACPI_DSM_FUNCTION_NBSI = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NBSI', 0)
@@ -4109,45 +4110,45 @@ ACPI_DSM_FUNCTION_CURRENT = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_CU
 ACPI_DSM_FUNCTION_INVALID = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_INVALID', 255)
 
 ACPI_DSM_FUNCTION: TypeAlias = enum__ACPI_DSM_FUNCTION
-@record
-class struct_DOD_METHOD_DATA:
+@c.record
+class struct_DOD_METHOD_DATA(c.Struct):
   SIZE = 72
   status: Annotated[NV_STATUS, 0]
   acpiIdListLen: Annotated[NvU32, 4]
-  acpiIdList: Annotated[Array[NvU32, Literal[16]], 8]
+  acpiIdList: Annotated[c.Array[NvU32, Literal[16]], 8]
 NV_STATUS: TypeAlias = Annotated[int, ctypes.c_uint32]
 DOD_METHOD_DATA: TypeAlias = struct_DOD_METHOD_DATA
-@record
-class struct_JT_METHOD_DATA:
+@c.record
+class struct_JT_METHOD_DATA(c.Struct):
   SIZE = 12
   status: Annotated[NV_STATUS, 0]
   jtCaps: Annotated[NvU32, 4]
   jtRevId: Annotated[NvU16, 8]
   bSBIOSCaps: Annotated[NvBool, 10]
 JT_METHOD_DATA: TypeAlias = struct_JT_METHOD_DATA
-@record
-class struct_MUX_METHOD_DATA_ELEMENT:
+@c.record
+class struct_MUX_METHOD_DATA_ELEMENT(c.Struct):
   SIZE = 12
   acpiId: Annotated[NvU32, 0]
   mode: Annotated[NvU32, 4]
   status: Annotated[NV_STATUS, 8]
 MUX_METHOD_DATA_ELEMENT: TypeAlias = struct_MUX_METHOD_DATA_ELEMENT
-@record
-class struct_MUX_METHOD_DATA:
+@c.record
+class struct_MUX_METHOD_DATA(c.Struct):
   SIZE = 580
   tableLen: Annotated[NvU32, 0]
-  acpiIdMuxModeTable: Annotated[Array[MUX_METHOD_DATA_ELEMENT, Literal[16]], 4]
-  acpiIdMuxPartTable: Annotated[Array[MUX_METHOD_DATA_ELEMENT, Literal[16]], 196]
-  acpiIdMuxStateTable: Annotated[Array[MUX_METHOD_DATA_ELEMENT, Literal[16]], 388]
+  acpiIdMuxModeTable: Annotated[c.Array[MUX_METHOD_DATA_ELEMENT, Literal[16]], 4]
+  acpiIdMuxPartTable: Annotated[c.Array[MUX_METHOD_DATA_ELEMENT, Literal[16]], 196]
+  acpiIdMuxStateTable: Annotated[c.Array[MUX_METHOD_DATA_ELEMENT, Literal[16]], 388]
 MUX_METHOD_DATA: TypeAlias = struct_MUX_METHOD_DATA
-@record
-class struct_CAPS_METHOD_DATA:
+@c.record
+class struct_CAPS_METHOD_DATA(c.Struct):
   SIZE = 8
   status: Annotated[NV_STATUS, 0]
   optimusCaps: Annotated[NvU32, 4]
 CAPS_METHOD_DATA: TypeAlias = struct_CAPS_METHOD_DATA
-@record
-class struct_ACPI_METHOD_DATA:
+@c.record
+class struct_ACPI_METHOD_DATA(c.Struct):
   SIZE = 676
   bValid: Annotated[NvBool, 0]
   dodMethodData: Annotated[DOD_METHOD_DATA, 4]
@@ -4242,16 +4243,16 @@ RM_ENGINE_TYPE_RESERVED52 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_RESERVED52', 8
 RM_ENGINE_TYPE_RESERVED53 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_RESERVED53', 83)
 RM_ENGINE_TYPE_LAST = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_LAST', 84)
 
-@record
-class BUSINFO:
+@c.record
+class BUSINFO(c.Struct):
   SIZE = 10
   deviceID: Annotated[NvU16, 0]
   vendorID: Annotated[NvU16, 2]
   subdeviceID: Annotated[NvU16, 4]
   subvendorID: Annotated[NvU16, 6]
   revisionID: Annotated[NvU8, 8]
-@record
-class struct_GSP_VF_INFO:
+@c.record
+class struct_GSP_VF_INFO(c.Struct):
   SIZE = 40
   totalVFs: Annotated[NvU32, 0]
   firstVFOffset: Annotated[NvU32, 4]
@@ -4262,31 +4263,31 @@ class struct_GSP_VF_INFO:
   b64bitBar1: Annotated[NvBool, 33]
   b64bitBar2: Annotated[NvBool, 34]
 GSP_VF_INFO: TypeAlias = struct_GSP_VF_INFO
-@record
-class GSP_PCIE_CONFIG_REG:
+@c.record
+class GSP_PCIE_CONFIG_REG(c.Struct):
   SIZE = 4
   linkCap: Annotated[NvU32, 0]
-@record
-class EcidManufacturingInfo:
+@c.record
+class EcidManufacturingInfo(c.Struct):
   SIZE = 12
   ecidLow: Annotated[NvU32, 0]
   ecidHigh: Annotated[NvU32, 4]
   ecidExtended: Annotated[NvU32, 8]
-@record
-class FW_WPR_LAYOUT_OFFSET:
+@c.record
+class FW_WPR_LAYOUT_OFFSET(c.Struct):
   SIZE = 16
   nonWprHeapOffset: Annotated[NvU64, 0]
   frtsOffset: Annotated[NvU64, 8]
-@record
-class struct_GspStaticConfigInfo_t:
+@c.record
+class struct_GspStaticConfigInfo_t(c.Struct):
   SIZE = 1656
-  grCapsBits: Annotated[Array[NvU8, Literal[23]], 0]
+  grCapsBits: Annotated[c.Array[NvU8, Literal[23]], 0]
   gidInfo: Annotated[NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 24]
   SKUInfo: Annotated[NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 292]
   fbRegionInfoParams: Annotated[NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS, 344]
   sriovCaps: Annotated[NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 1120]
   sriovMaxGfid: Annotated[NvU32, 1200]
-  engineCaps: Annotated[Array[NvU32, Literal[3]], 1204]
+  engineCaps: Annotated[c.Array[NvU32, Literal[3]], 1204]
   poisonFuseEnabled: Annotated[NvBool, 1216]
   fb_length: Annotated[NvU64, 1224]
   fbio_mask: Annotated[NvU64, 1232]
@@ -4294,9 +4295,9 @@ class struct_GspStaticConfigInfo_t:
   fb_ram_type: Annotated[NvU32, 1244]
   fbp_mask: Annotated[NvU64, 1248]
   l2_cache_size: Annotated[NvU32, 1256]
-  gpuNameString: Annotated[Array[NvU8, Literal[64]], 1260]
-  gpuShortNameString: Annotated[Array[NvU8, Literal[64]], 1324]
-  gpuNameString_Unicode: Annotated[Array[NvU16, Literal[64]], 1388]
+  gpuNameString: Annotated[c.Array[NvU8, Literal[64]], 1260]
+  gpuShortNameString: Annotated[c.Array[NvU8, Literal[64]], 1324]
+  gpuNameString_Unicode: Annotated[c.Array[NvU16, Literal[64]], 1388]
   bGpuInternalSku: Annotated[NvBool, 1516]
   bIsQuadroGeneric: Annotated[NvBool, 1517]
   bIsQuadroAd: Annotated[NvBool, 1518]
@@ -4331,37 +4332,37 @@ class struct_GspStaticConfigInfo_t:
   bAtsSupported: Annotated[NvBool, 1613]
   bIsGpuUefi: Annotated[NvBool, 1614]
   bIsEfiInit: Annotated[NvBool, 1615]
-  ecidInfo: Annotated[Array[EcidManufacturingInfo, Literal[2]], 1616]
+  ecidInfo: Annotated[c.Array[EcidManufacturingInfo, Literal[2]], 1616]
   fwWprLayoutOffset: Annotated[FW_WPR_LAYOUT_OFFSET, 1640]
-@record
-class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS:
+@c.record
+class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS(c.Struct):
   SIZE = 268
   index: Annotated[NvU32, 0]
   flags: Annotated[NvU32, 4]
   length: Annotated[NvU32, 8]
-  data: Annotated[Array[NvU8, Literal[256]], 12]
+  data: Annotated[c.Array[NvU8, Literal[256]], 12]
 NV2080_CTRL_GPU_GET_GID_INFO_PARAMS: TypeAlias = struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS
-@record
-class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS:
+@c.record
+class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS(c.Struct):
   SIZE = 48
   BoardID: Annotated[NvU32, 0]
-  chipSKU: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[9]], 4]
-  chipSKUMod: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 13]
+  chipSKU: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[9]], 4]
+  chipSKUMod: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[5]], 13]
   skuConfigVersion: Annotated[NvU32, 20]
-  project: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 24]
-  projectSKU: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[5]], 29]
-  CDP: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[6]], 34]
-  projectSKUMod: Annotated[Array[Annotated[bytes, ctypes.c_char], Literal[2]], 40]
+  project: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[5]], 24]
+  projectSKU: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[5]], 29]
+  CDP: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[6]], 34]
+  projectSKUMod: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[2]], 40]
   businessCycle: Annotated[NvU32, 44]
 NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS: TypeAlias = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
-@record
-class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS:
+@c.record
+class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS(c.Struct):
   SIZE = 776
   numFBRegions: Annotated[NvU32, 0]
-  fbRegion: Annotated[Array[NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, Literal[16]], 8]
+  fbRegion: Annotated[c.Array[NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, Literal[16]], 8]
 NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS: TypeAlias = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS
-@record
-class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO:
+@c.record
+class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO(c.Struct):
   SIZE = 48
   base: Annotated[NvU64, 0]
   limit: Annotated[NvU64, 8]
@@ -4372,9 +4373,9 @@ class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO:
   bProtected: Annotated[NvBool, 30]
   blackList: Annotated[NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG, 31]
 NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO: TypeAlias = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO
-NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG: TypeAlias = Array[Annotated[int, ctypes.c_ubyte], Literal[17]]
-@record
-class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS:
+NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG: TypeAlias = c.Array[Annotated[int, ctypes.c_ubyte], Literal[17]]
+@c.record
+class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS(c.Struct):
   SIZE = 80
   totalVFs: Annotated[NvU32, 0]
   firstVfOffset: Annotated[NvU32, 4]
@@ -4396,8 +4397,8 @@ class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS:
   bVfResizableBAR1Supported: Annotated[NvBool, 72]
 NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS: TypeAlias = struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS
 GspStaticConfigInfo: TypeAlias = struct_GspStaticConfigInfo_t
-@record
-class struct_GspSystemInfo:
+@c.record
+class struct_GspSystemInfo(c.Struct):
   SIZE = 928
   gpuPhysAddr: Annotated[NvU64, 0]
   gpuPhysFbAddr: Annotated[NvU64, 8]
@@ -4448,20 +4449,20 @@ class struct_GspSystemInfo:
   bRouteDispIntrsToCPU: Annotated[NvBool, 913]
   hostPageSize: Annotated[NvU64, 920]
 GspSystemInfo: TypeAlias = struct_GspSystemInfo
-@record
-class FALCON_APPLICATION_INTERFACE_HEADER_V1:
+@c.record
+class FALCON_APPLICATION_INTERFACE_HEADER_V1(c.Struct):
   SIZE = 4
   version: Annotated[NvU8, 0]
   headerSize: Annotated[NvU8, 1]
   entrySize: Annotated[NvU8, 2]
   entryCount: Annotated[NvU8, 3]
-@record
-class FALCON_APPLICATION_INTERFACE_ENTRY_V1:
+@c.record
+class FALCON_APPLICATION_INTERFACE_ENTRY_V1(c.Struct):
   SIZE = 8
   id: Annotated[NvU32, 0]
   dmemOffset: Annotated[NvU32, 4]
-@record
-class FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3:
+@c.record
+class FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3(c.Struct):
   SIZE = 64
   signature: Annotated[NvU32, 0]
   version: Annotated[NvU16, 4]
@@ -4480,8 +4481,8 @@ class FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3:
   ucode_cmd_mask0: Annotated[NvU32, 52]
   ucode_cmd_mask1: Annotated[NvU32, 56]
   multiTgtTbl: Annotated[NvU32, 60]
-@record
-class struct_BIT_HEADER_V1_00:
+@c.record
+class struct_BIT_HEADER_V1_00(c.Struct):
   SIZE = 12
   Id: Annotated[Annotated[int, ctypes.c_uint16], 0]
   Signature: Annotated[Annotated[int, ctypes.c_uint32], 2]
@@ -4491,25 +4492,25 @@ class struct_BIT_HEADER_V1_00:
   TokenEntries: Annotated[Annotated[int, ctypes.c_ubyte], 10]
   HeaderChksum: Annotated[Annotated[int, ctypes.c_ubyte], 11]
 BIT_HEADER_V1_00: TypeAlias = struct_BIT_HEADER_V1_00
-@record
-class struct_BIT_TOKEN_V1_00:
+@c.record
+class struct_BIT_TOKEN_V1_00(c.Struct):
   SIZE = 8
   TokenId: Annotated[Annotated[int, ctypes.c_ubyte], 0]
   DataVersion: Annotated[Annotated[int, ctypes.c_ubyte], 1]
   DataSize: Annotated[Annotated[int, ctypes.c_uint16], 2]
   DataPtr: Annotated[Annotated[int, ctypes.c_uint32], 4]
 BIT_TOKEN_V1_00: TypeAlias = struct_BIT_TOKEN_V1_00
-@record
-class BIT_DATA_BIOSDATA_BINVER:
+@c.record
+class BIT_DATA_BIOSDATA_BINVER(c.Struct):
   SIZE = 5
   Version: Annotated[Annotated[int, ctypes.c_uint32], 0]
   OemVersion: Annotated[Annotated[int, ctypes.c_ubyte], 4]
-@record
-class BIT_DATA_FALCON_DATA_V2:
+@c.record
+class BIT_DATA_FALCON_DATA_V2(c.Struct):
   SIZE = 4
   FalconUcodeTablePtr: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class FALCON_UCODE_TABLE_HDR_V1:
+@c.record
+class FALCON_UCODE_TABLE_HDR_V1(c.Struct):
   SIZE = 6
   Version: Annotated[Annotated[int, ctypes.c_ubyte], 0]
   HeaderSize: Annotated[Annotated[int, ctypes.c_ubyte], 1]
@@ -4517,18 +4518,18 @@ class FALCON_UCODE_TABLE_HDR_V1:
   EntryCount: Annotated[Annotated[int, ctypes.c_ubyte], 3]
   DescVersion: Annotated[Annotated[int, ctypes.c_ubyte], 4]
   DescSize: Annotated[Annotated[int, ctypes.c_ubyte], 5]
-@record
-class FALCON_UCODE_TABLE_ENTRY_V1:
+@c.record
+class FALCON_UCODE_TABLE_ENTRY_V1(c.Struct):
   SIZE = 6
   ApplicationID: Annotated[Annotated[int, ctypes.c_ubyte], 0]
   TargetID: Annotated[Annotated[int, ctypes.c_ubyte], 1]
   DescPtr: Annotated[Annotated[int, ctypes.c_uint32], 2]
-@record
-class FALCON_UCODE_DESC_HEADER:
+@c.record
+class FALCON_UCODE_DESC_HEADER(c.Struct):
   SIZE = 4
   vDesc: Annotated[Annotated[int, ctypes.c_uint32], 0]
-@record
-class FALCON_UCODE_DESC_V3:
+@c.record
+class FALCON_UCODE_DESC_V3(c.Struct):
   SIZE = 44
   Hdr: Annotated[FALCON_UCODE_DESC_HEADER, 0]
   StoredSize: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -4544,55 +4545,55 @@ class FALCON_UCODE_DESC_V3:
   SignatureCount: Annotated[Annotated[int, ctypes.c_ubyte], 39]
   SignatureVersions: Annotated[Annotated[int, ctypes.c_uint16], 40]
   Reserved: Annotated[Annotated[int, ctypes.c_uint16], 42]
-@record
-class FWSECLIC_READ_VBIOS_DESC:
+@c.record
+class FWSECLIC_READ_VBIOS_DESC(c.Struct):
   SIZE = 24
   version: Annotated[NvU32, 0]
   size: Annotated[NvU32, 4]
   gfwImageOffset: Annotated[NvU64, 8]
   gfwImageSize: Annotated[NvU32, 16]
   flags: Annotated[NvU32, 20]
-@record
-class FWSECLIC_FRTS_REGION_DESC:
+@c.record
+class FWSECLIC_FRTS_REGION_DESC(c.Struct):
   SIZE = 20
   version: Annotated[NvU32, 0]
   size: Annotated[NvU32, 4]
   frtsRegionOffset4K: Annotated[NvU32, 8]
   frtsRegionSize: Annotated[NvU32, 12]
   frtsRegionMediaType: Annotated[NvU32, 16]
-@record
-class FWSECLIC_FRTS_CMD:
+@c.record
+class FWSECLIC_FRTS_CMD(c.Struct):
   SIZE = 44
   readVbiosDesc: Annotated[FWSECLIC_READ_VBIOS_DESC, 0]
   frtsRegionDesc: Annotated[FWSECLIC_FRTS_REGION_DESC, 24]
-@record
-class struct__PCI_EXP_ROM_STANDARD:
+@c.record
+class struct__PCI_EXP_ROM_STANDARD(c.Struct):
   SIZE = 30
   sig: Annotated[NvU16, 0]
-  reserved: Annotated[Array[NvU8, Literal[22]], 2]
+  reserved: Annotated[c.Array[NvU8, Literal[22]], 2]
   pciDataStrucPtr: Annotated[NvU16, 24]
   sizeOfBlock: Annotated[NvU32, 26]
 PCI_EXP_ROM_STANDARD: TypeAlias = struct__PCI_EXP_ROM_STANDARD
-PPCI_EXP_ROM_STANDARD: TypeAlias = POINTER(struct__PCI_EXP_ROM_STANDARD)
-@record
-class struct__PCI_EXP_ROM_NBSI:
+PPCI_EXP_ROM_STANDARD: TypeAlias = c.POINTER(struct__PCI_EXP_ROM_STANDARD)
+@c.record
+class struct__PCI_EXP_ROM_NBSI(c.Struct):
   SIZE = 30
   sig: Annotated[NvU16, 0]
-  reserved: Annotated[Array[NvU8, Literal[20]], 2]
+  reserved: Annotated[c.Array[NvU8, Literal[20]], 2]
   nbsiDataOffset: Annotated[NvU16, 22]
   pciDataStrucPtr: Annotated[NvU16, 24]
   sizeOfBlock: Annotated[NvU32, 26]
 PCI_EXP_ROM_NBSI: TypeAlias = struct__PCI_EXP_ROM_NBSI
-PPCI_EXP_ROM_NBSI: TypeAlias = POINTER(struct__PCI_EXP_ROM_NBSI)
-@record
-class union__PCI_EXP_ROM:
+PPCI_EXP_ROM_NBSI: TypeAlias = c.POINTER(struct__PCI_EXP_ROM_NBSI)
+@c.record
+class union__PCI_EXP_ROM(c.Struct):
   SIZE = 30
   standard: Annotated[PCI_EXP_ROM_STANDARD, 0]
   nbsi: Annotated[PCI_EXP_ROM_NBSI, 0]
 PCI_EXP_ROM: TypeAlias = union__PCI_EXP_ROM
-PPCI_EXP_ROM: TypeAlias = POINTER(union__PCI_EXP_ROM)
-@record
-class struct__PCI_DATA_STRUCT:
+PPCI_EXP_ROM: TypeAlias = c.POINTER(union__PCI_EXP_ROM)
+@c.record
+class struct__PCI_DATA_STRUCT(c.Struct):
   SIZE = 24
   sig: Annotated[NvU32, 0]
   vendorID: Annotated[NvU16, 4]
@@ -4600,16 +4601,16 @@ class struct__PCI_DATA_STRUCT:
   deviceListPtr: Annotated[NvU16, 8]
   pciDataStructLen: Annotated[NvU16, 10]
   pciDataStructRev: Annotated[NvU8, 12]
-  classCode: Annotated[Array[NvU8, Literal[3]], 13]
+  classCode: Annotated[c.Array[NvU8, Literal[3]], 13]
   imageLen: Annotated[NvU16, 16]
   vendorRomRev: Annotated[NvU16, 18]
   codeType: Annotated[NvU8, 20]
   lastImage: Annotated[NvU8, 21]
   maxRunTimeImageLen: Annotated[NvU16, 22]
 PCI_DATA_STRUCT: TypeAlias = struct__PCI_DATA_STRUCT
-PPCI_DATA_STRUCT: TypeAlias = POINTER(struct__PCI_DATA_STRUCT)
-@record
-class struct__NV_PCI_DATA_EXT_STRUCT:
+PPCI_DATA_STRUCT: TypeAlias = c.POINTER(struct__PCI_DATA_STRUCT)
+@c.record
+class struct__NV_PCI_DATA_EXT_STRUCT(c.Struct):
   SIZE = 12
   signature: Annotated[NvU32, 0]
   nvPciDataExtRev: Annotated[NvU16, 4]
@@ -4618,8 +4619,8 @@ class struct__NV_PCI_DATA_EXT_STRUCT:
   privLastImage: Annotated[NvU8, 10]
   flags: Annotated[NvU8, 11]
 NV_PCI_DATA_EXT_STRUCT: TypeAlias = struct__NV_PCI_DATA_EXT_STRUCT
-PNV_PCI_DATA_EXT_STRUCT: TypeAlias = POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
-init_records()
+PNV_PCI_DATA_EXT_STRUCT: TypeAlias = c.POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
+c.init_records()
 GSP_FW_WPR_META_VERIFIED = 0xa0a0a0a0a0a0a0a0
 GSP_FW_WPR_META_REVISION = 1
 GSP_FW_WPR_META_MAGIC = 0xdc3aae21371a60b3

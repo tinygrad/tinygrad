@@ -1,15 +1,16 @@
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records
-@record
-class struct_kfd_ioctl_get_version_args:
+from tinygrad.runtime.support import c
+from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+@c.record
+class struct_kfd_ioctl_get_version_args(c.Struct):
   SIZE = 8
   major_version: Annotated[Annotated[int, ctypes.c_uint32], 0]
   minor_version: Annotated[Annotated[int, ctypes.c_uint32], 4]
 __u32: TypeAlias = Annotated[int, ctypes.c_uint32]
-@record
-class struct_kfd_ioctl_create_queue_args:
+@c.record
+class struct_kfd_ioctl_create_queue_args(c.Struct):
   SIZE = 96
   ring_base_address: Annotated[Annotated[int, ctypes.c_uint64], 0]
   write_pointer_address: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -29,41 +30,41 @@ class struct_kfd_ioctl_create_queue_args:
   sdma_engine_id: Annotated[Annotated[int, ctypes.c_uint32], 88]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 92]
 __u64: TypeAlias = Annotated[int, ctypes.c_uint64]
-@record
-class struct_kfd_ioctl_destroy_queue_args:
+@c.record
+class struct_kfd_ioctl_destroy_queue_args(c.Struct):
   SIZE = 8
   queue_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_update_queue_args:
+@c.record
+class struct_kfd_ioctl_update_queue_args(c.Struct):
   SIZE = 24
   ring_base_address: Annotated[Annotated[int, ctypes.c_uint64], 0]
   queue_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
   ring_size: Annotated[Annotated[int, ctypes.c_uint32], 12]
   queue_percentage: Annotated[Annotated[int, ctypes.c_uint32], 16]
   queue_priority: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_set_cu_mask_args:
+@c.record
+class struct_kfd_ioctl_set_cu_mask_args(c.Struct):
   SIZE = 16
   queue_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   num_cu_mask: Annotated[Annotated[int, ctypes.c_uint32], 4]
   cu_mask_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
-@record
-class struct_kfd_ioctl_get_queue_wave_state_args:
+@c.record
+class struct_kfd_ioctl_get_queue_wave_state_args(c.Struct):
   SIZE = 24
   ctl_stack_address: Annotated[Annotated[int, ctypes.c_uint64], 0]
   ctl_stack_used_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
   save_area_used_size: Annotated[Annotated[int, ctypes.c_uint32], 12]
   queue_id: Annotated[Annotated[int, ctypes.c_uint32], 16]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_get_available_memory_args:
+@c.record
+class struct_kfd_ioctl_get_available_memory_args(c.Struct):
   SIZE = 16
   available: Annotated[Annotated[int, ctypes.c_uint64], 0]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_dbg_device_info_entry:
+@c.record
+class struct_kfd_dbg_device_info_entry(c.Struct):
   SIZE = 120
   exception_status: Annotated[Annotated[int, ctypes.c_uint64], 0]
   lds_base: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -88,8 +89,8 @@ class struct_kfd_dbg_device_info_entry:
   num_xcc: Annotated[Annotated[int, ctypes.c_uint32], 108]
   capability: Annotated[Annotated[int, ctypes.c_uint32], 112]
   debug_prop: Annotated[Annotated[int, ctypes.c_uint32], 116]
-@record
-class struct_kfd_ioctl_set_memory_policy_args:
+@c.record
+class struct_kfd_ioctl_set_memory_policy_args(c.Struct):
   SIZE = 32
   alternate_aperture_base: Annotated[Annotated[int, ctypes.c_uint64], 0]
   alternate_aperture_size: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -97,8 +98,8 @@ class struct_kfd_ioctl_set_memory_policy_args:
   default_policy: Annotated[Annotated[int, ctypes.c_uint32], 20]
   alternate_policy: Annotated[Annotated[int, ctypes.c_uint32], 24]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 28]
-@record
-class struct_kfd_ioctl_get_clock_counters_args:
+@c.record
+class struct_kfd_ioctl_get_clock_counters_args(c.Struct):
   SIZE = 40
   gpu_clock_counter: Annotated[Annotated[int, ctypes.c_uint64], 0]
   cpu_clock_counter: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -106,8 +107,8 @@ class struct_kfd_ioctl_get_clock_counters_args:
   system_clock_freq: Annotated[Annotated[int, ctypes.c_uint64], 24]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 32]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class struct_kfd_process_device_apertures:
+@c.record
+class struct_kfd_process_device_apertures(c.Struct):
   SIZE = 56
   lds_base: Annotated[Annotated[int, ctypes.c_uint64], 0]
   lds_limit: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -117,42 +118,42 @@ class struct_kfd_process_device_apertures:
   gpuvm_limit: Annotated[Annotated[int, ctypes.c_uint64], 40]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 48]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 52]
-@record
-class struct_kfd_ioctl_get_process_apertures_args:
+@c.record
+class struct_kfd_ioctl_get_process_apertures_args(c.Struct):
   SIZE = 400
-  process_apertures: Annotated[Array[struct_kfd_process_device_apertures, Literal[7]], 0]
+  process_apertures: Annotated[c.Array[struct_kfd_process_device_apertures, Literal[7]], 0]
   num_of_nodes: Annotated[Annotated[int, ctypes.c_uint32], 392]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 396]
-@record
-class struct_kfd_ioctl_get_process_apertures_new_args:
+@c.record
+class struct_kfd_ioctl_get_process_apertures_new_args(c.Struct):
   SIZE = 16
   kfd_process_device_apertures_ptr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   num_of_nodes: Annotated[Annotated[int, ctypes.c_uint32], 8]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_dbg_register_args:
+@c.record
+class struct_kfd_ioctl_dbg_register_args(c.Struct):
   SIZE = 8
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_dbg_unregister_args:
+@c.record
+class struct_kfd_ioctl_dbg_unregister_args(c.Struct):
   SIZE = 8
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_dbg_address_watch_args:
+@c.record
+class struct_kfd_ioctl_dbg_address_watch_args(c.Struct):
   SIZE = 16
   content_ptr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
   buf_size_in_bytes: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_dbg_wave_control_args:
+@c.record
+class struct_kfd_ioctl_dbg_wave_control_args(c.Struct):
   SIZE = 16
   content_ptr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
   buf_size_in_bytes: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_dbg_trap_args_deprecated:
+@c.record
+class struct_kfd_ioctl_dbg_trap_args_deprecated(c.Struct):
   SIZE = 40
   exception_mask: Annotated[Annotated[int, ctypes.c_uint64], 0]
   ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -162,8 +163,8 @@ class struct_kfd_ioctl_dbg_trap_args_deprecated:
   data2: Annotated[Annotated[int, ctypes.c_uint32], 28]
   data3: Annotated[Annotated[int, ctypes.c_uint32], 32]
   data4: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class struct_kfd_ioctl_create_event_args:
+@c.record
+class struct_kfd_ioctl_create_event_args(c.Struct):
   SIZE = 32
   event_page_offset: Annotated[Annotated[int, ctypes.c_uint64], 0]
   event_trigger_data: Annotated[Annotated[int, ctypes.c_uint32], 8]
@@ -172,48 +173,48 @@ class struct_kfd_ioctl_create_event_args:
   node_id: Annotated[Annotated[int, ctypes.c_uint32], 20]
   event_id: Annotated[Annotated[int, ctypes.c_uint32], 24]
   event_slot_index: Annotated[Annotated[int, ctypes.c_uint32], 28]
-@record
-class struct_kfd_ioctl_destroy_event_args:
+@c.record
+class struct_kfd_ioctl_destroy_event_args(c.Struct):
   SIZE = 8
   event_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_set_event_args:
+@c.record
+class struct_kfd_ioctl_set_event_args(c.Struct):
   SIZE = 8
   event_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_reset_event_args:
+@c.record
+class struct_kfd_ioctl_reset_event_args(c.Struct):
   SIZE = 8
   event_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_memory_exception_failure:
+@c.record
+class struct_kfd_memory_exception_failure(c.Struct):
   SIZE = 16
   NotPresent: Annotated[Annotated[int, ctypes.c_uint32], 0]
   ReadOnly: Annotated[Annotated[int, ctypes.c_uint32], 4]
   NoExecute: Annotated[Annotated[int, ctypes.c_uint32], 8]
   imprecise: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_hsa_memory_exception_data:
+@c.record
+class struct_kfd_hsa_memory_exception_data(c.Struct):
   SIZE = 32
   failure: Annotated[struct_kfd_memory_exception_failure, 0]
   va: Annotated[Annotated[int, ctypes.c_uint64], 16]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 24]
   ErrorType: Annotated[Annotated[int, ctypes.c_uint32], 28]
-@record
-class struct_kfd_hsa_hw_exception_data:
+@c.record
+class struct_kfd_hsa_hw_exception_data(c.Struct):
   SIZE = 16
   reset_type: Annotated[Annotated[int, ctypes.c_uint32], 0]
   reset_cause: Annotated[Annotated[int, ctypes.c_uint32], 4]
   memory_lost: Annotated[Annotated[int, ctypes.c_uint32], 8]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_hsa_signal_event_data:
+@c.record
+class struct_kfd_hsa_signal_event_data(c.Struct):
   SIZE = 8
   last_event_age: Annotated[Annotated[int, ctypes.c_uint64], 0]
-@record
-class struct_kfd_event_data:
+@c.record
+class struct_kfd_event_data(c.Struct):
   SIZE = 48
   memory_exception_data: Annotated[struct_kfd_hsa_memory_exception_data, 0]
   hw_exception_data: Annotated[struct_kfd_hsa_hw_exception_data, 0]
@@ -221,22 +222,22 @@ class struct_kfd_event_data:
   kfd_event_data_ext: Annotated[Annotated[int, ctypes.c_uint64], 32]
   event_id: Annotated[Annotated[int, ctypes.c_uint32], 40]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 44]
-@record
-class struct_kfd_ioctl_wait_events_args:
+@c.record
+class struct_kfd_ioctl_wait_events_args(c.Struct):
   SIZE = 24
   events_ptr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   num_events: Annotated[Annotated[int, ctypes.c_uint32], 8]
   wait_for_all: Annotated[Annotated[int, ctypes.c_uint32], 12]
   timeout: Annotated[Annotated[int, ctypes.c_uint32], 16]
   wait_result: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_set_scratch_backing_va_args:
+@c.record
+class struct_kfd_ioctl_set_scratch_backing_va_args(c.Struct):
   SIZE = 16
   va_addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_get_tile_config_args:
+@c.record
+class struct_kfd_ioctl_get_tile_config_args(c.Struct):
   SIZE = 40
   tile_config_ptr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   macro_tile_config_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -246,20 +247,20 @@ class struct_kfd_ioctl_get_tile_config_args:
   gb_addr_config: Annotated[Annotated[int, ctypes.c_uint32], 28]
   num_banks: Annotated[Annotated[int, ctypes.c_uint32], 32]
   num_ranks: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class struct_kfd_ioctl_set_trap_handler_args:
+@c.record
+class struct_kfd_ioctl_set_trap_handler_args(c.Struct):
   SIZE = 24
   tba_addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   tma_addr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 16]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_acquire_vm_args:
+@c.record
+class struct_kfd_ioctl_acquire_vm_args(c.Struct):
   SIZE = 8
   drm_fd: Annotated[Annotated[int, ctypes.c_uint32], 0]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_alloc_memory_of_gpu_args:
+@c.record
+class struct_kfd_ioctl_alloc_memory_of_gpu_args(c.Struct):
   SIZE = 40
   va_addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   size: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -267,33 +268,33 @@ class struct_kfd_ioctl_alloc_memory_of_gpu_args:
   mmap_offset: Annotated[Annotated[int, ctypes.c_uint64], 24]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 32]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class struct_kfd_ioctl_free_memory_of_gpu_args:
+@c.record
+class struct_kfd_ioctl_free_memory_of_gpu_args(c.Struct):
   SIZE = 8
   handle: Annotated[Annotated[int, ctypes.c_uint64], 0]
-@record
-class struct_kfd_ioctl_map_memory_to_gpu_args:
+@c.record
+class struct_kfd_ioctl_map_memory_to_gpu_args(c.Struct):
   SIZE = 24
   handle: Annotated[Annotated[int, ctypes.c_uint64], 0]
   device_ids_array_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   n_devices: Annotated[Annotated[int, ctypes.c_uint32], 16]
   n_success: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_unmap_memory_from_gpu_args:
+@c.record
+class struct_kfd_ioctl_unmap_memory_from_gpu_args(c.Struct):
   SIZE = 24
   handle: Annotated[Annotated[int, ctypes.c_uint64], 0]
   device_ids_array_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   n_devices: Annotated[Annotated[int, ctypes.c_uint32], 16]
   n_success: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_alloc_queue_gws_args:
+@c.record
+class struct_kfd_ioctl_alloc_queue_gws_args(c.Struct):
   SIZE = 16
   queue_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   num_gws: Annotated[Annotated[int, ctypes.c_uint32], 4]
   first_gws: Annotated[Annotated[int, ctypes.c_uint32], 8]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_get_dmabuf_info_args:
+@c.record
+class struct_kfd_ioctl_get_dmabuf_info_args(c.Struct):
   SIZE = 32
   size: Annotated[Annotated[int, ctypes.c_uint64], 0]
   metadata_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -301,15 +302,15 @@ class struct_kfd_ioctl_get_dmabuf_info_args:
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 20]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 24]
   dmabuf_fd: Annotated[Annotated[int, ctypes.c_uint32], 28]
-@record
-class struct_kfd_ioctl_import_dmabuf_args:
+@c.record
+class struct_kfd_ioctl_import_dmabuf_args(c.Struct):
   SIZE = 24
   va_addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   handle: Annotated[Annotated[int, ctypes.c_uint64], 8]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 16]
   dmabuf_fd: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_export_dmabuf_args:
+@c.record
+class struct_kfd_ioctl_export_dmabuf_args(c.Struct):
   SIZE = 16
   handle: Annotated[Annotated[int, ctypes.c_uint64], 0]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
@@ -348,8 +349,8 @@ KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_U
 KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE', 1)
 KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU', 2)
 
-@record
-class struct_kfd_ioctl_smi_events_args:
+@c.record
+class struct_kfd_ioctl_smi_events_args(c.Struct):
   SIZE = 8
   gpuid: Annotated[Annotated[int, ctypes.c_uint32], 0]
   anon_fd: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -358,8 +359,8 @@ KFD_IOCTL_SPM_OP_ACQUIRE = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_ACQUIR
 KFD_IOCTL_SPM_OP_RELEASE = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_RELEASE', 1)
 KFD_IOCTL_SPM_OP_SET_DEST_BUF = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_SET_DEST_BUF', 2)
 
-@record
-class struct_kfd_ioctl_spm_args:
+@c.record
+class struct_kfd_ioctl_spm_args(c.Struct):
   SIZE = 32
   dest_buf: Annotated[Annotated[int, ctypes.c_uint64], 0]
   buf_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
@@ -375,8 +376,8 @@ KFD_CRIU_OP_UNPAUSE = enum_kfd_criu_op.define('KFD_CRIU_OP_UNPAUSE', 2)
 KFD_CRIU_OP_RESTORE = enum_kfd_criu_op.define('KFD_CRIU_OP_RESTORE', 3)
 KFD_CRIU_OP_RESUME = enum_kfd_criu_op.define('KFD_CRIU_OP_RESUME', 4)
 
-@record
-class struct_kfd_ioctl_criu_args:
+@c.record
+class struct_kfd_ioctl_criu_args(c.Struct):
   SIZE = 56
   devices: Annotated[Annotated[int, ctypes.c_uint64], 0]
   bos: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -387,15 +388,15 @@ class struct_kfd_ioctl_criu_args:
   num_objects: Annotated[Annotated[int, ctypes.c_uint32], 40]
   pid: Annotated[Annotated[int, ctypes.c_uint32], 44]
   op: Annotated[Annotated[int, ctypes.c_uint32], 48]
-@record
-class struct_kfd_criu_device_bucket:
+@c.record
+class struct_kfd_criu_device_bucket(c.Struct):
   SIZE = 16
   user_gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   actual_gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 4]
   drm_fd: Annotated[Annotated[int, ctypes.c_uint32], 8]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_criu_bo_bucket:
+@c.record
+class struct_kfd_criu_bo_bucket(c.Struct):
   SIZE = 48
   addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   size: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -409,24 +410,24 @@ enum_kfd_mmio_remap = CEnum(Annotated[int, ctypes.c_uint32])
 KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL', 0)
 KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL', 4)
 
-@record
-class struct_kfd_ioctl_ipc_export_handle_args:
+@c.record
+class struct_kfd_ioctl_ipc_export_handle_args(c.Struct):
   SIZE = 32
   handle: Annotated[Annotated[int, ctypes.c_uint64], 0]
-  share_handle: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 8]
+  share_handle: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[4]], 8]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 24]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 28]
-@record
-class struct_kfd_ioctl_ipc_import_handle_args:
+@c.record
+class struct_kfd_ioctl_ipc_import_handle_args(c.Struct):
   SIZE = 48
   handle: Annotated[Annotated[int, ctypes.c_uint64], 0]
   va_addr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   mmap_offset: Annotated[Annotated[int, ctypes.c_uint64], 16]
-  share_handle: Annotated[Array[Annotated[int, ctypes.c_uint32], Literal[4]], 24]
+  share_handle: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[4]], 24]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 40]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 44]
-@record
-class struct_kfd_ioctl_cross_memory_copy_deprecated_args:
+@c.record
+class struct_kfd_ioctl_cross_memory_copy_deprecated_args(c.Struct):
   SIZE = 48
   pid: Annotated[Annotated[int, ctypes.c_uint32], 0]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -453,21 +454,21 @@ KFD_IOCTL_SVM_ATTR_SET_FLAGS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SV
 KFD_IOCTL_SVM_ATTR_CLR_FLAGS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_CLR_FLAGS', 6)
 KFD_IOCTL_SVM_ATTR_GRANULARITY = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_GRANULARITY', 7)
 
-@record
-class struct_kfd_ioctl_svm_attribute:
+@c.record
+class struct_kfd_ioctl_svm_attribute(c.Struct):
   SIZE = 8
   type: Annotated[Annotated[int, ctypes.c_uint32], 0]
   value: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_svm_args:
+@c.record
+class struct_kfd_ioctl_svm_args(c.Struct):
   SIZE = 24
   start_addr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   size: Annotated[Annotated[int, ctypes.c_uint64], 8]
   op: Annotated[Annotated[int, ctypes.c_uint32], 16]
   nattr: Annotated[Annotated[int, ctypes.c_uint32], 20]
-  attrs: Annotated[Array[struct_kfd_ioctl_svm_attribute, Literal[0]], 24]
-@record
-class struct_kfd_ioctl_set_xnack_mode_args:
+  attrs: Annotated[c.Array[struct_kfd_ioctl_svm_attribute, Literal[0]], 24]
+@c.record
+class struct_kfd_ioctl_set_xnack_mode_args(c.Struct):
   SIZE = 4
   xnack_enabled: Annotated[Annotated[int, ctypes.c_int32], 0]
 __s32: TypeAlias = Annotated[int, ctypes.c_int32]
@@ -536,20 +537,20 @@ DEBUG_RUNTIME_STATE_ENABLED = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_S
 DEBUG_RUNTIME_STATE_ENABLED_BUSY = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED_BUSY', 2)
 DEBUG_RUNTIME_STATE_ENABLED_ERROR = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED_ERROR', 3)
 
-@record
-class struct_kfd_runtime_info:
+@c.record
+class struct_kfd_runtime_info(c.Struct):
   SIZE = 16
   r_debug: Annotated[Annotated[int, ctypes.c_uint64], 0]
   runtime_state: Annotated[Annotated[int, ctypes.c_uint32], 8]
   ttmp_setup: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_runtime_enable_args:
+@c.record
+class struct_kfd_ioctl_runtime_enable_args(c.Struct):
   SIZE = 16
   r_debug: Annotated[Annotated[int, ctypes.c_uint64], 0]
   mode_mask: Annotated[Annotated[int, ctypes.c_uint32], 8]
   capabilities_mask: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_queue_snapshot_entry:
+@c.record
+class struct_kfd_queue_snapshot_entry(c.Struct):
   SIZE = 64
   exception_status: Annotated[Annotated[int, ctypes.c_uint64], 0]
   ring_base_address: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -562,8 +563,8 @@ class struct_kfd_queue_snapshot_entry:
   queue_type: Annotated[Annotated[int, ctypes.c_uint32], 52]
   ctx_save_restore_area_size: Annotated[Annotated[int, ctypes.c_uint32], 56]
   reserved: Annotated[Annotated[int, ctypes.c_uint32], 60]
-@record
-class struct_kfd_context_save_area_header:
+@c.record
+class struct_kfd_context_save_area_header(c.Struct):
   SIZE = 40
   wave_state: Annotated[_anonstruct0, 0]
   debug_offset: Annotated[Annotated[int, ctypes.c_uint32], 16]
@@ -571,8 +572,8 @@ class struct_kfd_context_save_area_header:
   err_payload_addr: Annotated[Annotated[int, ctypes.c_uint64], 24]
   err_event_id: Annotated[Annotated[int, ctypes.c_uint32], 32]
   reserved1: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class _anonstruct0:
+@c.record
+class _anonstruct0(c.Struct):
   SIZE = 16
   control_stack_offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
   control_stack_size: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -595,96 +596,96 @@ KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO = enum_kfd_dbg_trap_operations.define('KFD
 KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT', 13)
 KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT', 14)
 
-@record
-class struct_kfd_ioctl_dbg_trap_enable_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_enable_args(c.Struct):
   SIZE = 24
   exception_mask: Annotated[Annotated[int, ctypes.c_uint64], 0]
   rinfo_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   rinfo_size: Annotated[Annotated[int, ctypes.c_uint32], 16]
   dbg_fd: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_dbg_trap_send_runtime_event_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_send_runtime_event_args(c.Struct):
   SIZE = 16
   exception_mask: Annotated[Annotated[int, ctypes.c_uint64], 0]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
   queue_id: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args(c.Struct):
   SIZE = 8
   exception_mask: Annotated[Annotated[int, ctypes.c_uint64], 0]
-@record
-class struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args(c.Struct):
   SIZE = 16
   override_mode: Annotated[Annotated[int, ctypes.c_uint32], 0]
   enable_mask: Annotated[Annotated[int, ctypes.c_uint32], 4]
   support_request_mask: Annotated[Annotated[int, ctypes.c_uint32], 8]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args(c.Struct):
   SIZE = 8
   launch_mode: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_dbg_trap_suspend_queues_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_suspend_queues_args(c.Struct):
   SIZE = 24
   exception_mask: Annotated[Annotated[int, ctypes.c_uint64], 0]
   queue_array_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   num_queues: Annotated[Annotated[int, ctypes.c_uint32], 16]
   grace_period: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_dbg_trap_resume_queues_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_resume_queues_args(c.Struct):
   SIZE = 16
   queue_array_ptr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   num_queues: Annotated[Annotated[int, ctypes.c_uint32], 8]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_dbg_trap_set_node_address_watch_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_set_node_address_watch_args(c.Struct):
   SIZE = 24
   address: Annotated[Annotated[int, ctypes.c_uint64], 0]
   mode: Annotated[Annotated[int, ctypes.c_uint32], 8]
   mask: Annotated[Annotated[int, ctypes.c_uint32], 12]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 16]
   id: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args(c.Struct):
   SIZE = 8
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   id: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_dbg_trap_set_flags_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_set_flags_args(c.Struct):
   SIZE = 8
   flags: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 4]
-@record
-class struct_kfd_ioctl_dbg_trap_query_debug_event_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_query_debug_event_args(c.Struct):
   SIZE = 16
   exception_mask: Annotated[Annotated[int, ctypes.c_uint64], 0]
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
   queue_id: Annotated[Annotated[int, ctypes.c_uint32], 12]
-@record
-class struct_kfd_ioctl_dbg_trap_query_exception_info_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_query_exception_info_args(c.Struct):
   SIZE = 24
   info_ptr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   info_size: Annotated[Annotated[int, ctypes.c_uint32], 8]
   source_id: Annotated[Annotated[int, ctypes.c_uint32], 12]
   exception_code: Annotated[Annotated[int, ctypes.c_uint32], 16]
   clear_exception: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_dbg_trap_queue_snapshot_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_queue_snapshot_args(c.Struct):
   SIZE = 24
   exception_mask: Annotated[Annotated[int, ctypes.c_uint64], 0]
   snapshot_buf_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   num_queues: Annotated[Annotated[int, ctypes.c_uint32], 16]
   entry_size: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_dbg_trap_device_snapshot_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_device_snapshot_args(c.Struct):
   SIZE = 24
   exception_mask: Annotated[Annotated[int, ctypes.c_uint64], 0]
   snapshot_buf_ptr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   num_devices: Annotated[Annotated[int, ctypes.c_uint32], 16]
   entry_size: Annotated[Annotated[int, ctypes.c_uint32], 20]
-@record
-class struct_kfd_ioctl_dbg_trap_args:
+@c.record
+class struct_kfd_ioctl_dbg_trap_args(c.Struct):
   SIZE = 32
   pid: Annotated[Annotated[int, ctypes.c_uint32], 0]
   op: Annotated[Annotated[int, ctypes.c_uint32], 4]
@@ -718,8 +719,8 @@ KFD_IOCTL_PCS_TYPE_TIME_US = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS
 KFD_IOCTL_PCS_TYPE_CLOCK_CYCLES = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_CLOCK_CYCLES', 1)
 KFD_IOCTL_PCS_TYPE_INSTRUCTIONS = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_INSTRUCTIONS', 2)
 
-@record
-class struct_kfd_pc_sample_info:
+@c.record
+class struct_kfd_pc_sample_info(c.Struct):
   SIZE = 40
   interval: Annotated[Annotated[int, ctypes.c_uint64], 0]
   interval_min: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -727,8 +728,8 @@ class struct_kfd_pc_sample_info:
   flags: Annotated[Annotated[int, ctypes.c_uint64], 24]
   method: Annotated[Annotated[int, ctypes.c_uint32], 32]
   type: Annotated[Annotated[int, ctypes.c_uint32], 36]
-@record
-class struct_kfd_ioctl_pc_sample_args:
+@c.record
+class struct_kfd_ioctl_pc_sample_args(c.Struct):
   SIZE = 32
   sample_info_ptr: Annotated[Annotated[int, ctypes.c_uint64], 0]
   num_sample_info: Annotated[Annotated[int, ctypes.c_uint32], 8]
@@ -742,20 +743,20 @@ KFD_IOC_PROFILER_PMC = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_PMC', 0)
 KFD_IOC_PROFILER_PC_SAMPLE = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_PC_SAMPLE', 1)
 KFD_IOC_PROFILER_VERSION = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_VERSION', 2)
 
-@record
-class struct_kfd_ioctl_pmc_settings:
+@c.record
+class struct_kfd_ioctl_pmc_settings(c.Struct):
   SIZE = 12
   gpu_id: Annotated[Annotated[int, ctypes.c_uint32], 0]
   lock: Annotated[Annotated[int, ctypes.c_uint32], 4]
   perfcount_enable: Annotated[Annotated[int, ctypes.c_uint32], 8]
-@record
-class struct_kfd_ioctl_profiler_args:
+@c.record
+class struct_kfd_ioctl_profiler_args(c.Struct):
   SIZE = 40
   op: Annotated[Annotated[int, ctypes.c_uint32], 0]
   pc_sample: Annotated[struct_kfd_ioctl_pc_sample_args, 8]
   pmc: Annotated[struct_kfd_ioctl_pmc_settings, 8]
   version: Annotated[Annotated[int, ctypes.c_uint32], 8]
-init_records()
+c.init_records()
 KFD_IOCTL_MAJOR_VERSION = 1
 KFD_IOCTL_MINOR_VERSION = 17
 KFD_IOC_QUEUE_TYPE_COMPUTE = 0x0
