@@ -459,4 +459,17 @@ typedef struct ip_discovery_header
     result = mask_end(params.mask)
     self.assertEqual(result, 43)  # 42 + 1
 
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_anonymous_children(self):
+    namespace = self.run_gen("""
+      struct foo {
+        struct {
+          int a,b;
+        } bar;
+      };
+    """)
+
+    self.assertIn('struct_foo', namespace)
+    self.assertIn('struct_foo_bar', namespace)
+
 if __name__ == "__main__": unittest.main()
