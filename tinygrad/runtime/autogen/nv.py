@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 @c.record
 class MCTP_HEADER(c.Struct):
   SIZE = 7
@@ -538,16 +539,16 @@ class msgqRxHeader(c.Struct):
 @c.record
 class msgqMetadata(c.Struct):
   SIZE = 232
-  pOurTxHdr: Annotated[c.POINTER(msgqTxHeader), 0]
-  pTheirTxHdr: Annotated[c.POINTER(msgqTxHeader), 8]
-  pOurRxHdr: Annotated[c.POINTER(msgqRxHeader), 16]
-  pTheirRxHdr: Annotated[c.POINTER(msgqRxHeader), 24]
-  pOurEntries: Annotated[c.POINTER(NvU8), 32]
-  pTheirEntries: Annotated[c.POINTER(NvU8), 40]
-  pReadIncoming: Annotated[c.POINTER(NvU32), 48]
-  pWriteIncoming: Annotated[c.POINTER(NvU32), 56]
-  pReadOutgoing: Annotated[c.POINTER(NvU32), 64]
-  pWriteOutgoing: Annotated[c.POINTER(NvU32), 72]
+  pOurTxHdr: Annotated[c.POINTER[msgqTxHeader], 0]
+  pTheirTxHdr: Annotated[c.POINTER[msgqTxHeader], 8]
+  pOurRxHdr: Annotated[c.POINTER[msgqRxHeader], 16]
+  pTheirRxHdr: Annotated[c.POINTER[msgqRxHeader], 24]
+  pOurEntries: Annotated[c.POINTER[NvU8], 32]
+  pTheirEntries: Annotated[c.POINTER[NvU8], 40]
+  pReadIncoming: Annotated[c.POINTER[NvU32], 48]
+  pWriteIncoming: Annotated[c.POINTER[NvU32], 56]
+  pReadOutgoing: Annotated[c.POINTER[NvU32], 64]
+  pWriteOutgoing: Annotated[c.POINTER[NvU32], 72]
   tx: Annotated[msgqTxHeader, 80]
   txReadPtr: Annotated[NvU32, 112]
   txFree: Annotated[NvU32, 116]
@@ -558,16 +559,16 @@ class msgqMetadata(c.Struct):
   rxLinked: Annotated[NvBool, 164]
   rxSwapped: Annotated[NvBool, 165]
   fcnNotify: Annotated[msgqFcnNotifyRemote, 168]
-  fcnNotifyArg: Annotated[c.POINTER(None), 176]
+  fcnNotifyArg: Annotated[c.POINTER[None], 176]
   fcnBackendRw: Annotated[msgqFcnBackendRw, 184]
-  fcnBackendRwArg: Annotated[c.POINTER(None), 192]
+  fcnBackendRwArg: Annotated[c.POINTER[None], 192]
   fcnInvalidate: Annotated[msgqFcnCacheOp, 200]
   fcnFlush: Annotated[msgqFcnCacheOp, 208]
   fcnZero: Annotated[msgqFcnCacheOp, 216]
   fcnBarrier: Annotated[msgqFcnBarrier, 224]
-msgqFcnNotifyRemote: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], c.POINTER(None))
-msgqFcnBackendRw: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER(None), c.POINTER(None), Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER(None))
-msgqFcnCacheOp: TypeAlias = c.CFUNCTYPE(None, c.POINTER(None), Annotated[int, ctypes.c_uint32])
+msgqFcnNotifyRemote: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], c.POINTER[None])
+msgqFcnBackendRw: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_int32], c.POINTER[None], c.POINTER[None], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[None])
+msgqFcnCacheOp: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], Annotated[int, ctypes.c_uint32])
 msgqFcnBarrier: TypeAlias = c.CFUNCTYPE(None, )
 @c.record
 class struct_rpc_set_guest_system_info_v03_00(c.Struct):
@@ -1115,7 +1116,7 @@ class struct_NVOS21_PARAMETERS_v03_00(c.Struct):
   pAllocParms: Annotated[NvP64, 16]
   status: Annotated[NvV32, 24]
 NVOS21_PARAMETERS_v03_00: TypeAlias = struct_NVOS21_PARAMETERS_v03_00
-NvP64: TypeAlias = c.POINTER(None)
+NvP64: TypeAlias = c.POINTER[None]
 rpc_alloc_subdevice_v08_01: TypeAlias = struct_rpc_alloc_subdevice_v08_01
 rpc_alloc_subdevice_v: TypeAlias = struct_rpc_alloc_subdevice_v08_01
 @c.record
@@ -4574,7 +4575,7 @@ class struct__PCI_EXP_ROM_STANDARD(c.Struct):
   pciDataStrucPtr: Annotated[NvU16, 24]
   sizeOfBlock: Annotated[NvU32, 26]
 PCI_EXP_ROM_STANDARD: TypeAlias = struct__PCI_EXP_ROM_STANDARD
-PPCI_EXP_ROM_STANDARD: TypeAlias = c.POINTER(struct__PCI_EXP_ROM_STANDARD)
+PPCI_EXP_ROM_STANDARD: TypeAlias = c.POINTER[struct__PCI_EXP_ROM_STANDARD]
 @c.record
 class struct__PCI_EXP_ROM_NBSI(c.Struct):
   SIZE = 30
@@ -4584,14 +4585,14 @@ class struct__PCI_EXP_ROM_NBSI(c.Struct):
   pciDataStrucPtr: Annotated[NvU16, 24]
   sizeOfBlock: Annotated[NvU32, 26]
 PCI_EXP_ROM_NBSI: TypeAlias = struct__PCI_EXP_ROM_NBSI
-PPCI_EXP_ROM_NBSI: TypeAlias = c.POINTER(struct__PCI_EXP_ROM_NBSI)
+PPCI_EXP_ROM_NBSI: TypeAlias = c.POINTER[struct__PCI_EXP_ROM_NBSI]
 @c.record
 class union__PCI_EXP_ROM(c.Struct):
   SIZE = 30
   standard: Annotated[PCI_EXP_ROM_STANDARD, 0]
   nbsi: Annotated[PCI_EXP_ROM_NBSI, 0]
 PCI_EXP_ROM: TypeAlias = union__PCI_EXP_ROM
-PPCI_EXP_ROM: TypeAlias = c.POINTER(union__PCI_EXP_ROM)
+PPCI_EXP_ROM: TypeAlias = c.POINTER[union__PCI_EXP_ROM]
 @c.record
 class struct__PCI_DATA_STRUCT(c.Struct):
   SIZE = 24
@@ -4608,7 +4609,7 @@ class struct__PCI_DATA_STRUCT(c.Struct):
   lastImage: Annotated[NvU8, 21]
   maxRunTimeImageLen: Annotated[NvU16, 22]
 PCI_DATA_STRUCT: TypeAlias = struct__PCI_DATA_STRUCT
-PPCI_DATA_STRUCT: TypeAlias = c.POINTER(struct__PCI_DATA_STRUCT)
+PPCI_DATA_STRUCT: TypeAlias = c.POINTER[struct__PCI_DATA_STRUCT]
 @c.record
 class struct__NV_PCI_DATA_EXT_STRUCT(c.Struct):
   SIZE = 12
@@ -4619,7 +4620,7 @@ class struct__NV_PCI_DATA_EXT_STRUCT(c.Struct):
   privLastImage: Annotated[NvU8, 10]
   flags: Annotated[NvU8, 11]
 NV_PCI_DATA_EXT_STRUCT: TypeAlias = struct__NV_PCI_DATA_EXT_STRUCT
-PNV_PCI_DATA_EXT_STRUCT: TypeAlias = c.POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
+PNV_PCI_DATA_EXT_STRUCT: TypeAlias = c.POINTER[struct__NV_PCI_DATA_EXT_STRUCT]
 c.init_records()
 GSP_FW_WPR_META_VERIFIED = 0xa0a0a0a0a0a0a0a0
 GSP_FW_WPR_META_REVISION = 1

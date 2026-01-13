@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 @c.record
 class struct_v11_gfx_mqd(c.Struct):
   SIZE = 2048
@@ -2426,15 +2427,15 @@ die_header: TypeAlias = struct_die_header
 @c.record
 class struct_ip_structure(c.Struct):
   SIZE = 24
-  header: Annotated[c.POINTER(ip_discovery_header), 0]
+  header: Annotated[c.POINTER[ip_discovery_header], 0]
   die: Annotated[struct_die, 8]
 @c.record
 class struct_die(c.Struct):
   SIZE = 16
-  die_header: Annotated[c.POINTER(die_header), 0]
-  ip_list: Annotated[c.POINTER(ip), 8]
-  ip_v3_list: Annotated[c.POINTER(ip_v3), 8]
-  ip_v4_list: Annotated[c.POINTER(ip_v4), 8]
+  die_header: Annotated[c.POINTER[die_header], 0]
+  ip_list: Annotated[c.POINTER[ip], 8]
+  ip_v3_list: Annotated[c.POINTER[ip_v3], 8]
+  ip_v4_list: Annotated[c.POINTER[ip_v4], 8]
 ip_structure: TypeAlias = struct_ip_structure
 @c.record
 class struct_gpu_info_header(c.Struct):
@@ -3228,9 +3229,9 @@ AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO = enum_amdgpu_firmware_load_type.define('AMDGPU
 class struct_amdgpu_firmware_info(c.Struct):
   SIZE = 48
   ucode_id: Annotated[enum_AMDGPU_UCODE_ID, 0]
-  fw: Annotated[c.POINTER(struct_firmware), 8]
+  fw: Annotated[c.POINTER[struct_firmware], 8]
   mc_addr: Annotated[Annotated[int, ctypes.c_uint64], 16]
-  kaddr: Annotated[c.POINTER(None), 24]
+  kaddr: Annotated[c.POINTER[None], 24]
   ucode_size: Annotated[Annotated[int, ctypes.c_uint32], 32]
   tmr_mc_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 36]
   tmr_mc_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 40]
@@ -3647,7 +3648,7 @@ class struct_amdgpu_iv_entry(c.Struct):
   pasid: Annotated[Annotated[int, ctypes.c_uint32], 36]
   node_id: Annotated[Annotated[int, ctypes.c_uint32], 40]
   src_data: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[4]], 44]
-  iv_entry: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 64]
+  iv_entry: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 64]
 enum_interrupt_node_id_per_aid = CEnum(Annotated[int, ctypes.c_uint32])
 AID0_NODEID = enum_interrupt_node_id_per_aid.define('AID0_NODEID', 0)
 XCD0_NODEID = enum_interrupt_node_id_per_aid.define('XCD0_NODEID', 1)

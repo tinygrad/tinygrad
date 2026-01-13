@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 @c.record
 class struct_vfio_info_cap_header(c.Struct):
   SIZE = 8
@@ -317,7 +318,7 @@ class struct_vfio_bitmap(c.Struct):
   SIZE = 24
   pgsize: Annotated[Annotated[int, ctypes.c_uint64], 0]
   size: Annotated[Annotated[int, ctypes.c_uint64], 8]
-  data: Annotated[c.POINTER(Annotated[int, ctypes.c_uint64]), 16]
+  data: Annotated[c.POINTER[Annotated[int, ctypes.c_uint64]], 16]
 @c.record
 class struct_vfio_iommu_type1_dma_unmap(c.Struct):
   SIZE = 24

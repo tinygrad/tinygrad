@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 _anonenum0 = CEnum(Annotated[int, ctypes.c_uint32])
 AES128_NONE = _anonenum0.define('AES128_NONE', 0)
 AES128_CTR = _anonenum0.define('AES128_CTR', 1)
@@ -1323,7 +1324,7 @@ class struct_NV0000_ALLOC_PARAMETERS(c.Struct):
   pOsPidInfo: Annotated[NvP64, 112]
 NvHandle: TypeAlias = Annotated[int, ctypes.c_uint32]
 NvU32: TypeAlias = Annotated[int, ctypes.c_uint32]
-NvP64: TypeAlias = c.POINTER(None)
+NvP64: TypeAlias = c.POINTER[None]
 NV0000_ALLOC_PARAMETERS: TypeAlias = struct_NV0000_ALLOC_PARAMETERS
 @c.record
 class struct_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS(c.Struct):
@@ -2313,18 +2314,18 @@ class NVOS05_PARAMETERS(c.Struct):
   hObjectNew: Annotated[NvHandle, 8]
   hClass: Annotated[NvV32, 12]
   status: Annotated[NvV32, 16]
-Callback1ArgVoidReturn: TypeAlias = c.CFUNCTYPE(None, c.POINTER(None))
-Callback5ArgVoidReturn: TypeAlias = c.CFUNCTYPE(None, c.POINTER(None), c.POINTER(None), Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32])
+Callback1ArgVoidReturn: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None])
+Callback5ArgVoidReturn: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[None], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32])
 @c.record
 class NVOS10_EVENT_KERNEL_CALLBACK(c.Struct):
   SIZE = 16
   func: Annotated[Callback1ArgVoidReturn, 0]
-  arg: Annotated[c.POINTER(None), 8]
+  arg: Annotated[c.POINTER[None], 8]
 @c.record
 class NVOS10_EVENT_KERNEL_CALLBACK_EX(c.Struct):
   SIZE = 16
   func: Annotated[Callback5ArgVoidReturn, 0]
-  arg: Annotated[c.POINTER(None), 8]
+  arg: Annotated[c.POINTER[None], 8]
 @c.record
 class NVOS_I2C_ACCESS_PARAMS(c.Struct):
   SIZE = 32
@@ -2388,7 +2389,7 @@ class NVOS30_PARAMETERS(c.Struct):
   flags: Annotated[NvV32, 40]
   timeout: Annotated[NvV32, 44]
   status: Annotated[NvV32, 48]
-BindResultFunc: TypeAlias = c.CFUNCTYPE(None, c.POINTER(None), Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32])
+BindResultFunc: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32])
 @c.record
 class NVOS32_DESCRIPTOR_TYPE_OS_SGT_PTR_PARAMETERS(c.Struct):
   SIZE = 16
@@ -3030,7 +3031,7 @@ class NVPOWERSTATE_PARAMETERS(c.Struct):
   bGC8Transition: Annotated[NvU8, 24]
   bGC8InputRailCutOff: Annotated[NvU8, 25]
   failure: Annotated[NVPOWERSTATE_FAILURE, 32]
-PNVPOWERSTATE_PARAMETERS: TypeAlias = c.POINTER(NVPOWERSTATE_PARAMETERS)
+PNVPOWERSTATE_PARAMETERS: TypeAlias = c.POINTER[NVPOWERSTATE_PARAMETERS]
 @c.record
 class NV_GR_ALLOCATION_PARAMETERS(c.Struct):
   SIZE = 16
@@ -3139,11 +3140,11 @@ class NVOS61_PARAMETERS(c.Struct):
   hVblank: Annotated[NvHandle, 8]
   pProc: Annotated[OSVBLANKCALLBACKPROC, 16]
   LogicalHead: Annotated[NvV32, 24]
-  pParm1: Annotated[c.POINTER(None), 32]
-  pParm2: Annotated[c.POINTER(None), 40]
+  pParm1: Annotated[c.POINTER[None], 32]
+  pParm2: Annotated[c.POINTER[None], 40]
   bAdd: Annotated[NvU32, 48]
   status: Annotated[NvV32, 52]
-OSVBLANKCALLBACKPROC: TypeAlias = c.CFUNCTYPE(None, c.POINTER(None), c.POINTER(None))
+OSVBLANKCALLBACKPROC: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[None])
 @c.record
 class NV_VASPACE_ALLOCATION_PARAMETERS(c.Struct):
   SIZE = 56
@@ -3364,7 +3365,7 @@ NV90F1_CTRL_VASPACE_GET_GMMU_FORMAT_PARAMS: TypeAlias = struct_NV90F1_CTRL_VASPA
 @c.record
 class struct_NV_CTRL_VASPACE_PAGE_LEVEL(c.Struct):
   SIZE = 112
-  pFmt: Annotated[c.POINTER(struct_MMU_FMT_LEVEL), 0]
+  pFmt: Annotated[c.POINTER[struct_MMU_FMT_LEVEL], 0]
   levelFmt: Annotated[MMU_FMT_LEVEL, 8]
   sublevelFmt: Annotated[c.Array[MMU_FMT_LEVEL, Literal[2]], 32]
   physAddress: Annotated[NvU64, 80]
@@ -3380,7 +3381,7 @@ class struct_MMU_FMT_LEVEL(c.Struct):
   bPageTable: Annotated[NvBool, 3]
   numSubLevels: Annotated[NvU8, 4]
   pageLevelIdTag: Annotated[NvU32, 8]
-  subLevels: Annotated[c.POINTER(struct_MMU_FMT_LEVEL), 16]
+  subLevels: Annotated[c.POINTER[struct_MMU_FMT_LEVEL], 16]
 MMU_FMT_LEVEL: TypeAlias = struct_MMU_FMT_LEVEL
 NV_CTRL_VASPACE_PAGE_LEVEL: TypeAlias = struct_NV_CTRL_VASPACE_PAGE_LEVEL
 @c.record
@@ -5247,41 +5248,41 @@ class struct_NV2080_CTRL_BOARDOBJGRP_MASK(c.Struct):
   SIZE = 4
   pData: Annotated[c.Array[NvU32, Literal[1]], 0]
 NV2080_CTRL_BOARDOBJGRP_MASK: TypeAlias = struct_NV2080_CTRL_BOARDOBJGRP_MASK
-PNV2080_CTRL_BOARDOBJGRP_MASK: TypeAlias = c.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK)
+PNV2080_CTRL_BOARDOBJGRP_MASK: TypeAlias = c.POINTER[struct_NV2080_CTRL_BOARDOBJGRP_MASK]
 @c.record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E32(c.Struct):
   SIZE = 4
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
 NV2080_CTRL_BOARDOBJGRP_MASK_E32: TypeAlias = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E32
-PNV2080_CTRL_BOARDOBJGRP_MASK_E32: TypeAlias = c.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E32)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E32: TypeAlias = c.POINTER[struct_NV2080_CTRL_BOARDOBJGRP_MASK_E32]
 @c.record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255(c.Struct):
   SIZE = 32
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
   pDataE255: Annotated[c.Array[NvU32, Literal[7]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E255: TypeAlias = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255
-PNV2080_CTRL_BOARDOBJGRP_MASK_E255: TypeAlias = c.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E255: TypeAlias = c.POINTER[struct_NV2080_CTRL_BOARDOBJGRP_MASK_E255]
 @c.record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512(c.Struct):
   SIZE = 64
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
   pDataE512: Annotated[c.Array[NvU32, Literal[15]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E512: TypeAlias = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512
-PNV2080_CTRL_BOARDOBJGRP_MASK_E512: TypeAlias = c.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E512: TypeAlias = c.POINTER[struct_NV2080_CTRL_BOARDOBJGRP_MASK_E512]
 @c.record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024(c.Struct):
   SIZE = 128
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
   pDataE1024: Annotated[c.Array[NvU32, Literal[31]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E1024: TypeAlias = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024
-PNV2080_CTRL_BOARDOBJGRP_MASK_E1024: TypeAlias = c.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E1024: TypeAlias = c.POINTER[struct_NV2080_CTRL_BOARDOBJGRP_MASK_E1024]
 @c.record
 class struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048(c.Struct):
   SIZE = 256
   super: Annotated[NV2080_CTRL_BOARDOBJGRP_MASK, 0]
   pDataE2048: Annotated[c.Array[NvU32, Literal[63]], 4]
 NV2080_CTRL_BOARDOBJGRP_MASK_E2048: TypeAlias = struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048
-PNV2080_CTRL_BOARDOBJGRP_MASK_E2048: TypeAlias = c.POINTER(struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048)
+PNV2080_CTRL_BOARDOBJGRP_MASK_E2048: TypeAlias = c.POINTER[struct_NV2080_CTRL_BOARDOBJGRP_MASK_E2048]
 @c.record
 class struct_NV2080_CTRL_BOARDOBJ_BOARDOBJ_CLIENT_INFO(c.Struct):
   SIZE = 1
@@ -6395,11 +6396,11 @@ class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS(c.Struct):
   SIZE = 72
   CBCBaseAddress: Annotated[NvU32, 0]
   backingStorePA: Annotated[NvU64, 8]
-  backingStoreVA: Annotated[c.POINTER(NvU8), 16]
+  backingStoreVA: Annotated[c.POINTER[NvU8], 16]
   backingStoreChunkPA: Annotated[NvU64, 24]
-  backingStoreChunkVA: Annotated[c.POINTER(NvU8), 32]
+  backingStoreChunkVA: Annotated[c.POINTER[NvU8], 32]
   backingStoreChunkSize: Annotated[NvU32, 40]
-  cacheWriteBitMap: Annotated[c.POINTER(NvU8), 48]
+  cacheWriteBitMap: Annotated[c.POINTER[NvU8], 48]
   backingStoreChunkOverfetch: Annotated[NvBool, 56]
   PageSizeSrc: Annotated[NvU32, 60]
   PageSizeDest: Annotated[NvU32, 64]
@@ -6407,8 +6408,8 @@ NV2080_CTRL_CMD_FB_COMPBITCOPY_SET_CONTEXT_PARAMS: TypeAlias = struct_NV2080_CTR
 @c.record
 class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_GET_COMPBITS_PARAMS(c.Struct):
   SIZE = 40
-  fcbits: Annotated[c.POINTER(NvU32), 0]
-  compbits: Annotated[c.POINTER(NvU32), 8]
+  fcbits: Annotated[c.POINTER[NvU32], 0]
+  compbits: Annotated[c.POINTER[NvU32], 8]
   dataPhysicalStart: Annotated[NvU64, 16]
   surfaceOffset: Annotated[NvU64, 24]
   comptagLine: Annotated[NvU32, 32]
@@ -6431,7 +6432,7 @@ class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS(c.Struct):
   SrcDataPhysicalStart: Annotated[NvU64, 0]
   SrcComptagLine: Annotated[NvU32, 8]
   page64KB: Annotated[NvU32, 12]
-  compbitBuffer: Annotated[c.POINTER(NvU32), 16]
+  compbitBuffer: Annotated[c.POINTER[NvU32], 16]
   upper64KBCompbitSel: Annotated[NvBool, 24]
 NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS: TypeAlias = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_READ_COMPBITS64KB_PARAMS
 @c.record
@@ -6440,7 +6441,7 @@ class struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS(c.Struct):
   DstDataPhysicalStart: Annotated[NvU64, 0]
   DstComptagLine: Annotated[NvU32, 8]
   page64KB: Annotated[NvU32, 12]
-  compbitBuffer: Annotated[c.POINTER(NvU32), 16]
+  compbitBuffer: Annotated[c.POINTER[NvU32], 16]
   upper64KBCompbitSel: Annotated[NvBool, 24]
 NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS: TypeAlias = struct_NV2080_CTRL_CMD_FB_COMPBITCOPY_WRITE_COMPBITS64KB_PARAMS
 @c.record
@@ -6513,7 +6514,7 @@ class struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS(c.Struct):
   requestParams: Annotated[VPR_REQUEST_PARAMS, 4]
   statusParams: Annotated[VPR_STATUS_PARAMS, 12]
 NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS: TypeAlias = struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS
-PNV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS: TypeAlias = c.POINTER(struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS)
+PNV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS: TypeAlias = c.POINTER[struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS]
 @c.record
 class struct_NV2080_CTRL_FB_GET_CLI_MANAGED_OFFLINED_PAGES_PARAMS(c.Struct):
   SIZE = 264
@@ -7398,7 +7399,7 @@ class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS(c.Struct):
   entryCount: Annotated[NvU32, 40]
   promoteEntry: Annotated[c.Array[NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY, Literal[16]], 48]
 NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS: TypeAlias = struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS
-PNV2080_CTRL_GPU_PROMOTE_CTX_PARAMS: TypeAlias = c.POINTER(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS)
+PNV2080_CTRL_GPU_PROMOTE_CTX_PARAMS: TypeAlias = c.POINTER[struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS]
 @c.record
 class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS(c.Struct):
   SIZE = 20
@@ -7408,7 +7409,7 @@ class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS(c.Struct):
   hChanClient: Annotated[NvHandle, 12]
   hObject: Annotated[NvHandle, 16]
 NV2080_CTRL_GPU_EVICT_CTX_PARAMS: TypeAlias = struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS
-PNV2080_CTRL_GPU_EVICT_CTX_PARAMS: TypeAlias = c.POINTER(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS)
+PNV2080_CTRL_GPU_EVICT_CTX_PARAMS: TypeAlias = c.POINTER[struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS]
 @c.record
 class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS(c.Struct):
   SIZE = 56
@@ -7424,7 +7425,7 @@ class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS(c.Struct):
   index: Annotated[NvU32, 40]
   size: Annotated[NvU64, 48]
 NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS: TypeAlias = struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS
-PNV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS: TypeAlias = c.POINTER(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS)
+PNV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS: TypeAlias = c.POINTER[struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS]
 @c.record
 class struct_NV2080_CTRL_GPU_QUERY_ECC_INTR_PARAMS(c.Struct):
   SIZE = 4
@@ -8435,7 +8436,7 @@ class struct_NV2080_CTRL_GR_CTX_BUFFER_INFO(c.Struct):
   bDeviceDescendant: Annotated[NvBool, 59]
   uuid: Annotated[c.Array[NvU8, Literal[16]], 60]
 NV2080_CTRL_GR_CTX_BUFFER_INFO: TypeAlias = struct_NV2080_CTRL_GR_CTX_BUFFER_INFO
-PNV2080_CTRL_GR_CTX_BUFFER_INFO: TypeAlias = c.POINTER(struct_NV2080_CTRL_GR_CTX_BUFFER_INFO)
+PNV2080_CTRL_GR_CTX_BUFFER_INFO: TypeAlias = c.POINTER[struct_NV2080_CTRL_GR_CTX_BUFFER_INFO]
 @c.record
 class struct_NV2080_CTRL_GR_GET_CTX_BUFFER_INFO_PARAMS(c.Struct):
   SIZE = 5136
@@ -8495,7 +8496,7 @@ class struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS(c.Struct):
   maxGpcCount: Annotated[NvU32, 3200]
   maxTpcPerGpcCount: Annotated[NvU32, 3204]
 NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS: TypeAlias = struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS
-PNV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS: TypeAlias = c.POINTER(struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS)
+PNV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS: TypeAlias = c.POINTER[struct_NV2080_CTRL_GR_GET_VAT_ALARM_DATA_PARAMS]
 @c.record
 class struct_NV2080_CTRL_GR_GET_ATTRIBUTE_BUFFER_SIZE_PARAMS(c.Struct):
   SIZE = 4
@@ -12355,19 +12356,19 @@ class struct_RM_GSP_SPDM_CMD_CC_INIT(c.Struct):
   SIZE = 1
   cmdType: Annotated[NvU8, 0]
 RM_GSP_SPDM_CMD_CC_INIT: TypeAlias = struct_RM_GSP_SPDM_CMD_CC_INIT
-PRM_GSP_SPDM_CMD_CC_INIT: TypeAlias = c.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT)
+PRM_GSP_SPDM_CMD_CC_INIT: TypeAlias = c.POINTER[struct_RM_GSP_SPDM_CMD_CC_INIT]
 @c.record
 class struct_RM_GSP_SPDM_CMD_CC_DEINIT(c.Struct):
   SIZE = 1
   cmdType: Annotated[NvU8, 0]
 RM_GSP_SPDM_CMD_CC_DEINIT: TypeAlias = struct_RM_GSP_SPDM_CMD_CC_DEINIT
-PRM_GSP_SPDM_CMD_CC_DEINIT: TypeAlias = c.POINTER(struct_RM_GSP_SPDM_CMD_CC_DEINIT)
+PRM_GSP_SPDM_CMD_CC_DEINIT: TypeAlias = c.POINTER[struct_RM_GSP_SPDM_CMD_CC_DEINIT]
 @c.record
 class struct_RM_GSP_SPDM_CMD_CC_CTRL(c.Struct):
   SIZE = 1
   cmdType: Annotated[NvU8, 0]
 RM_GSP_SPDM_CMD_CC_CTRL: TypeAlias = struct_RM_GSP_SPDM_CMD_CC_CTRL
-PRM_GSP_SPDM_CMD_CC_CTRL: TypeAlias = c.POINTER(struct_RM_GSP_SPDM_CMD_CC_CTRL)
+PRM_GSP_SPDM_CMD_CC_CTRL: TypeAlias = c.POINTER[struct_RM_GSP_SPDM_CMD_CC_CTRL]
 @c.record
 class struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA(c.Struct):
   SIZE = 68
@@ -12382,14 +12383,14 @@ class struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA(c.Struct):
   rsvd7: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[16]], 42]
   rsvd8: Annotated[c.Array[NvU32, Literal[2]], 60]
 RM_GSP_SPDM_CMD_CC_INIT_RM_DATA: TypeAlias = struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA
-PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA: TypeAlias = c.POINTER(struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA)
+PRM_GSP_SPDM_CMD_CC_INIT_RM_DATA: TypeAlias = c.POINTER[struct_RM_GSP_SPDM_CMD_CC_INIT_RM_DATA]
 @c.record
 class struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL(c.Struct):
   SIZE = 2
   cmdType: Annotated[NvU8, 0]
   bEnable: Annotated[NvBool, 1]
 RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL: TypeAlias = struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL
-PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL: TypeAlias = c.POINTER(struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL)
+PRM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL: TypeAlias = c.POINTER[struct_RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL]
 @c.record
 class struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST(c.Struct):
   SIZE = 160
@@ -12420,7 +12421,7 @@ class struct_CC_HMAC_CRYPTOBUNDLE(c.Struct):
   key: Annotated[c.Array[NvU32, Literal[8]], 32]
 CC_HMAC_CRYPTOBUNDLE: TypeAlias = struct_CC_HMAC_CRYPTOBUNDLE
 RM_GSP_SPDM_CMD_FIPS_SELFTEST: TypeAlias = struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST
-PRM_GSP_SPDM_CMD_FIPS_SELFTEST: TypeAlias = c.POINTER(struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST)
+PRM_GSP_SPDM_CMD_FIPS_SELFTEST: TypeAlias = c.POINTER[struct_RM_GSP_SPDM_CMD_FIPS_SELFTEST]
 @c.record
 class union_RM_GSP_SPDM_CMD(c.Struct):
   SIZE = 160
@@ -12432,7 +12433,7 @@ class union_RM_GSP_SPDM_CMD(c.Struct):
   ccHeartbeatCtrl: Annotated[RM_GSP_SPDM_CMD_CC_HEARTBEAT_CTRL, 0]
   ccFipsTest: Annotated[RM_GSP_SPDM_CMD_FIPS_SELFTEST, 0]
 RM_GSP_SPDM_CMD: TypeAlias = union_RM_GSP_SPDM_CMD
-PRM_GSP_SPDM_CMD: TypeAlias = c.POINTER(union_RM_GSP_SPDM_CMD)
+PRM_GSP_SPDM_CMD: TypeAlias = c.POINTER[union_RM_GSP_SPDM_CMD]
 @c.record
 class struct_RM_GSP_SPDM_MSG(c.Struct):
   SIZE = 28
@@ -12444,7 +12445,7 @@ class struct_RM_GSP_SPDM_MSG(c.Struct):
   rsvd4: Annotated[NvU32, 20]
   rsvd5: Annotated[NvU32, 24]
 RM_GSP_SPDM_MSG: TypeAlias = struct_RM_GSP_SPDM_MSG
-PRM_GSP_SPDM_MSG: TypeAlias = c.POINTER(struct_RM_GSP_SPDM_MSG)
+PRM_GSP_SPDM_MSG: TypeAlias = c.POINTER[struct_RM_GSP_SPDM_MSG]
 @c.record
 class struct_NV2080_CTRL_INTERNAL_SPDM_PARTITION_PARAMS(c.Struct):
   SIZE = 192

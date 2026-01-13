@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 FEATURE_PWR_DOMAIN_e = CEnum(Annotated[int, ctypes.c_uint32])
 FEATURE_PWR_ALL = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_ALL', 0)
 FEATURE_PWR_S5 = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_S5', 1)
@@ -1183,8 +1184,8 @@ class struct_smu_table(c.Struct):
   align: Annotated[Annotated[int, ctypes.c_uint32], 8]
   domain: Annotated[Annotated[int, ctypes.c_ubyte], 12]
   mc_address: Annotated[Annotated[int, ctypes.c_uint64], 16]
-  cpu_addr: Annotated[c.POINTER(None), 24]
-  bo: Annotated[c.POINTER(struct_amdgpu_bo), 32]
+  cpu_addr: Annotated[c.POINTER[None], 24]
+  bo: Annotated[c.POINTER[struct_amdgpu_bo], 32]
   version: Annotated[Annotated[int, ctypes.c_uint32], 40]
 class struct_amdgpu_bo(ctypes.Structure): pass
 enum_smu_perf_level_designation = CEnum(Annotated[int, ctypes.c_uint32])

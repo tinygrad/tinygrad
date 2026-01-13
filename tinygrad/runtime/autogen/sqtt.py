@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 @c.record
 class struct_sqtt_data_info(c.Struct):
   SIZE = 12
@@ -15,7 +16,7 @@ uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 class struct_sqtt_data_se(c.Struct):
   SIZE = 32
   info: Annotated[struct_sqtt_data_info, 0]
-  data_ptr: Annotated[c.POINTER(None), 16]
+  data_ptr: Annotated[c.POINTER[None], 16]
   shader_engine: Annotated[uint32_t, 24]
   compute_unit: Annotated[uint32_t, 28]
 enum_sqtt_version = CEnum(Annotated[int, ctypes.c_uint32])

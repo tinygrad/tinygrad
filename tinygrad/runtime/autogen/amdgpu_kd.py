@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
 _anonenum0 = CEnum(uint8_t)
 FLOAT_ROUND_MODE_NEAR_EVEN = _anonenum0.define('FLOAT_ROUND_MODE_NEAR_EVEN', 0)

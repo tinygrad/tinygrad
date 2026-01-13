@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 dll = c.DLL('rocprof', ['rocprof-trace-decoder', p:='/usr/local/lib/rocprof-trace-decoder.so', p.replace('so','dylib')])
 rocprofiler_thread_trace_decoder_status_t = CEnum(Annotated[int, ctypes.c_uint32])
 ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS = rocprofiler_thread_trace_decoder_status_t.define('ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS', 0)
@@ -24,17 +25,17 @@ ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME = enum_rocprofiler_thread_trace
 ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY = enum_rocprofiler_thread_trace_decoder_record_type_t.define('ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY', 8)
 ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST = enum_rocprofiler_thread_trace_decoder_record_type_t.define('ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST', 9)
 
-rocprof_trace_decoder_trace_callback_t: TypeAlias = c.CFUNCTYPE(rocprofiler_thread_trace_decoder_status_t, enum_rocprofiler_thread_trace_decoder_record_type_t, c.POINTER(None), Annotated[int, ctypes.c_uint64], c.POINTER(None))
+rocprof_trace_decoder_trace_callback_t: TypeAlias = c.CFUNCTYPE(rocprofiler_thread_trace_decoder_status_t, enum_rocprofiler_thread_trace_decoder_record_type_t, c.POINTER[None], Annotated[int, ctypes.c_uint64], c.POINTER[None])
 @c.record
 class struct_rocprofiler_thread_trace_decoder_pc_t(c.Struct):
   SIZE = 16
   address: Annotated[uint64_t, 0]
   code_object_id: Annotated[uint64_t, 8]
 uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
-rocprof_trace_decoder_isa_callback_t: TypeAlias = c.CFUNCTYPE(rocprofiler_thread_trace_decoder_status_t, c.POINTER(Annotated[bytes, ctypes.c_char]), c.POINTER(Annotated[int, ctypes.c_uint64]), c.POINTER(Annotated[int, ctypes.c_uint64]), struct_rocprofiler_thread_trace_decoder_pc_t, c.POINTER(None))
-rocprof_trace_decoder_se_data_callback_t: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_uint64], c.POINTER(c.POINTER(Annotated[int, ctypes.c_ubyte])), c.POINTER(Annotated[int, ctypes.c_uint64]), c.POINTER(None))
+rocprof_trace_decoder_isa_callback_t: TypeAlias = c.CFUNCTYPE(rocprofiler_thread_trace_decoder_status_t, c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[Annotated[int, ctypes.c_uint64]], c.POINTER[Annotated[int, ctypes.c_uint64]], struct_rocprofiler_thread_trace_decoder_pc_t, c.POINTER[None])
+rocprof_trace_decoder_se_data_callback_t: TypeAlias = c.CFUNCTYPE(Annotated[int, ctypes.c_uint64], c.POINTER[c.POINTER[Annotated[int, ctypes.c_ubyte]]], c.POINTER[Annotated[int, ctypes.c_uint64]], c.POINTER[None])
 @dll.bind
-def rocprof_trace_decoder_parse_data(se_data_callback:rocprof_trace_decoder_se_data_callback_t, trace_callback:rocprof_trace_decoder_trace_callback_t, isa_callback:rocprof_trace_decoder_isa_callback_t, userdata:c.POINTER(None)) -> rocprofiler_thread_trace_decoder_status_t: ...
+def rocprof_trace_decoder_parse_data(se_data_callback:rocprof_trace_decoder_se_data_callback_t, trace_callback:rocprof_trace_decoder_trace_callback_t, isa_callback:rocprof_trace_decoder_isa_callback_t, userdata:c.POINTER[None]) -> rocprofiler_thread_trace_decoder_status_t: ...
 enum_rocprofiler_thread_trace_decoder_info_t = CEnum(Annotated[int, ctypes.c_uint32])
 ROCPROFILER_THREAD_TRACE_DECODER_INFO_NONE = enum_rocprofiler_thread_trace_decoder_info_t.define('ROCPROFILER_THREAD_TRACE_DECODER_INFO_NONE', 0)
 ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST = enum_rocprofiler_thread_trace_decoder_info_t.define('ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST', 1)
@@ -44,12 +45,12 @@ ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST = enum_rocprofiler_thread_trace_decod
 
 rocprofiler_thread_trace_decoder_info_t: TypeAlias = enum_rocprofiler_thread_trace_decoder_info_t
 @dll.bind
-def rocprof_trace_decoder_get_info_string(info:rocprofiler_thread_trace_decoder_info_t) -> c.POINTER(Annotated[bytes, ctypes.c_char]): ...
+def rocprof_trace_decoder_get_info_string(info:rocprofiler_thread_trace_decoder_info_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
-def rocprof_trace_decoder_get_status_string(status:rocprofiler_thread_trace_decoder_status_t) -> c.POINTER(Annotated[bytes, ctypes.c_char]): ...
-rocprofiler_thread_trace_decoder_debug_callback_t: TypeAlias = c.CFUNCTYPE(None, Annotated[int, ctypes.c_int64], c.POINTER(Annotated[bytes, ctypes.c_char]), c.POINTER(Annotated[bytes, ctypes.c_char]), c.POINTER(None))
+def rocprof_trace_decoder_get_status_string(status:rocprofiler_thread_trace_decoder_status_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+rocprofiler_thread_trace_decoder_debug_callback_t: TypeAlias = c.CFUNCTYPE(None, Annotated[int, ctypes.c_int64], c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None])
 @dll.bind
-def rocprof_trace_decoder_dump_data(data:c.POINTER(Annotated[bytes, ctypes.c_char]), data_size:uint64_t, cb:rocprofiler_thread_trace_decoder_debug_callback_t, userdata:c.POINTER(None)) -> rocprofiler_thread_trace_decoder_status_t: ...
+def rocprof_trace_decoder_dump_data(data:c.POINTER[Annotated[bytes, ctypes.c_char]], data_size:uint64_t, cb:rocprofiler_thread_trace_decoder_debug_callback_t, userdata:c.POINTER[None]) -> rocprofiler_thread_trace_decoder_status_t: ...
 @c.record
 class union_rocprof_trace_decoder_gfx9_header_t(c.Struct):
   SIZE = 8
@@ -194,8 +195,8 @@ class struct_rocprofiler_thread_trace_decoder_wave_t(c.Struct):
   end_time: Annotated[int64_t, 24]
   timeline_size: Annotated[uint64_t, 32]
   instructions_size: Annotated[uint64_t, 40]
-  timeline_array: Annotated[c.POINTER(rocprofiler_thread_trace_decoder_wave_state_t), 48]
-  instructions_array: Annotated[c.POINTER(rocprofiler_thread_trace_decoder_inst_t), 56]
+  timeline_array: Annotated[c.POINTER[rocprofiler_thread_trace_decoder_wave_state_t], 48]
+  instructions_array: Annotated[c.POINTER[rocprofiler_thread_trace_decoder_inst_t], 56]
 rocprofiler_thread_trace_decoder_wave_t: TypeAlias = struct_rocprofiler_thread_trace_decoder_wave_t
 @c.record
 class struct_rocprofiler_thread_trace_decoder_realtime_t(c.Struct):

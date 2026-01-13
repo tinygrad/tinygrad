@@ -1,8 +1,9 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 enum_HEVCNALUnitType = CEnum(Annotated[int, ctypes.c_uint32])
 HEVC_NAL_TRAIL_N = enum_HEVCNALUnitType.define('HEVC_NAL_TRAIL_N', 0)
 HEVC_NAL_TRAIL_R = enum_HEVCNALUnitType.define('HEVC_NAL_TRAIL_R', 1)
@@ -518,7 +519,7 @@ class struct_H265RawSEI(c.Struct):
 @c.record
 class struct_SEIRawMessageList(c.Struct):
   SIZE = 16
-  messages: Annotated[c.POINTER(SEIRawMessage), 0]
+  messages: Annotated[c.POINTER[SEIRawMessage], 0]
   nb_messages: Annotated[Annotated[int, ctypes.c_int32], 8]
   nb_messages_allocated: Annotated[Annotated[int, ctypes.c_int32], 12]
 SEIRawMessageList: TypeAlias = struct_SEIRawMessageList
@@ -527,9 +528,9 @@ class struct_SEIRawMessage(c.Struct):
   SIZE = 40
   payload_type: Annotated[uint32_t, 0]
   payload_size: Annotated[uint32_t, 4]
-  payload: Annotated[c.POINTER(None), 8]
-  payload_ref: Annotated[c.POINTER(None), 16]
-  extension_data: Annotated[c.POINTER(uint8_t), 24]
+  payload: Annotated[c.POINTER[None], 8]
+  payload_ref: Annotated[c.POINTER[None], 16]
+  extension_data: Annotated[c.POINTER[uint8_t], 24]
   extension_bit_length: Annotated[size_t, 32]
 SEIRawMessage: TypeAlias = struct_SEIRawMessage
 size_t: TypeAlias = Annotated[int, ctypes.c_uint64]

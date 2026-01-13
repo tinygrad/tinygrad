@@ -1,23 +1,24 @@
+# mypy: disable-error-code='empty-body'
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
-from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
 @c.record
 class struct_io_uring_sq(c.Struct):
   SIZE = 104
-  khead: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 0]
-  ktail: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 8]
-  kring_mask: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 16]
-  kring_entries: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 24]
-  kflags: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 32]
-  kdropped: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 40]
-  array: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 48]
-  sqes: Annotated[c.POINTER(struct_io_uring_sqe), 56]
+  khead: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 0]
+  ktail: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 8]
+  kring_mask: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 16]
+  kring_entries: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 24]
+  kflags: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 32]
+  kdropped: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 40]
+  array: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 48]
+  sqes: Annotated[c.POINTER[struct_io_uring_sqe], 56]
   sqe_head: Annotated[Annotated[int, ctypes.c_uint32], 64]
   sqe_tail: Annotated[Annotated[int, ctypes.c_uint32], 68]
   ring_sz: Annotated[size_t, 72]
-  ring_ptr: Annotated[c.POINTER(None), 80]
+  ring_ptr: Annotated[c.POINTER[None], 80]
   ring_mask: Annotated[Annotated[int, ctypes.c_uint32], 88]
   ring_entries: Annotated[Annotated[int, ctypes.c_uint32], 92]
   pad: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[2]], 96]
@@ -75,15 +76,15 @@ size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class struct_io_uring_cq(c.Struct):
   SIZE = 88
-  khead: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 0]
-  ktail: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 8]
-  kring_mask: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 16]
-  kring_entries: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 24]
-  kflags: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 32]
-  koverflow: Annotated[c.POINTER(Annotated[int, ctypes.c_uint32]), 40]
-  cqes: Annotated[c.POINTER(struct_io_uring_cqe), 48]
+  khead: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 0]
+  ktail: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 8]
+  kring_mask: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 16]
+  kring_entries: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 24]
+  kflags: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 32]
+  koverflow: Annotated[c.POINTER[Annotated[int, ctypes.c_uint32]], 40]
+  cqes: Annotated[c.POINTER[struct_io_uring_cqe], 48]
   ring_sz: Annotated[size_t, 56]
-  ring_ptr: Annotated[c.POINTER(None), 64]
+  ring_ptr: Annotated[c.POINTER[None], 64]
   ring_mask: Annotated[Annotated[int, ctypes.c_uint32], 72]
   ring_entries: Annotated[Annotated[int, ctypes.c_uint32], 76]
   pad: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[2]], 80]
