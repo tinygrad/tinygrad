@@ -118,7 +118,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         defined, cnm = nm(canon:=clang.clang_getCanonicalType(t)) in types, tname(canon, typedef=nm(t).replace('::', '_'))
         types[nm(t)] = cnm if nm(t).startswith("__") else nm(t).replace('::', '_'), True
         # RECORDs need to handle typedefs specially to allow for self-reference
-        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')} = {cnm}")
+        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')}: TypeAlias = {cnm}")
         return types[nm(t)][0]
       case clang.CXType_Record:
         # TODO: packed unions
@@ -131,7 +131,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
                      if clang.clang_Cursor_isAnonymous(decl) else _nm)
           types[_nm] = (tnm:=real_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
           lines.append(f"class {tnm}(ctypes.{'Structure' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
-          if typedef: lines.append(f"{typedef} = {tnm}")
+          if typedef: lines.append(f"{typedef}: TypeAlias = {tnm}")
         ff=[(f, tname(clang.clang_getCursorType(f)), offset) + ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
                                                                     *clang.clang_Cursor_isBitField(f)) for f,offset in all_fields(t)]
         if ff: lines[ln] = '\n'.join(["@record", f"class {tnm}:", f"  SIZE = {clang.clang_Type_getSizeOf(t)}",
@@ -251,7 +251,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = '\n'.join(["from __future__ import annotations", "import ctypes", "from typing import Annotated, Literal",
+  main = '\n'.join(["from __future__ import annotations", "import ctypes", "from typing import Annotated, Literal, TypeAlias",
                     "from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records",
                     *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines,
