@@ -7,6 +7,7 @@
 ::: tinygrad.Tensor.any
 ::: tinygrad.Tensor.all
 ::: tinygrad.Tensor.isclose
+::: tinygrad.Tensor.allclose
 ::: tinygrad.Tensor.mean
 ::: tinygrad.Tensor.var
 ::: tinygrad.Tensor.var_mean
@@ -30,6 +31,7 @@
 ::: tinygrad.Tensor.matmul
 ::: tinygrad.Tensor.einsum
 ::: tinygrad.Tensor.cumsum
+::: tinygrad.Tensor.cumprod
 ::: tinygrad.Tensor.cummax
 ::: tinygrad.Tensor.cummin
 ::: tinygrad.Tensor.triu
@@ -41,6 +43,7 @@
 ::: tinygrad.Tensor.masked_fill
 ::: tinygrad.Tensor.nonzero
 ::: tinygrad.Tensor.sort
+::: tinygrad.Tensor.argsort
 ::: tinygrad.Tensor.topk
 ::: tinygrad.Tensor.multinomial
 
@@ -58,3 +61,8 @@
 ::: tinygrad.Tensor.sparse_categorical_crossentropy
 ::: tinygrad.Tensor.cross_entropy
 ::: tinygrad.Tensor.nll_loss
+
+## Linear Algebra
+
+::: tinygrad.Tensor.qr
+::: tinygrad.Tensor.svd
