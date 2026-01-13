@@ -54,7 +54,7 @@ class Array(Generic[T, U]):
     @overload
     def __getitem__(self: Array[T, Any], key: int) -> T: ...
     def __getitem__(self, key: int) -> Any: ...
-  def __class_getitem__(cls, key): return key[0] * get_args(key[1])[0]
+  def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
