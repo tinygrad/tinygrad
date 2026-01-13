@@ -296,4 +296,133 @@ class APLPCIIfaceBase(LNXPCIIfaceBase):
     assert (read_vendor:=self.pci_dev.read_config(0x00, 2)) == vendor, f"Vendor ID mismatch: expected {vendor:#x}, got {read_vendor:#x}"
   def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
-PCIIfaceBase:type = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
+class RemotePCIDevice(PCIDevice):
+  _CMD_MAP_BAR, _CMD_MAP_SYSMEM, _CMD_CFG_READ, _CMD_CFG_WRITE, _CMD_RESET = 1, 2, 3, 4, 5
+  _CMD_BULK_READ, _CMD_BULK_WRITE, _CMD_SYSMEM_READ, _CMD_SYSMEM_WRITE = 8, 9, 10, 11
+
+  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    import socket, subprocess, time
+    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
+    self.pcibus, self.sock = pcibus, self._connect()
+    self.bar_info = {b: PCIBarInfo(0, self._rpc(self._CMD_MAP_BAR, b)[0]) for b in bars}
+
+  def _connect(self):
+    import socket, subprocess, time
+    sock_path = "/tmp/tinygpu_shim.sock"
+    # Try connect, start shim if needed
+    try:
+      sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      sock.connect(sock_path)
+    except (ConnectionRefusedError, FileNotFoundError):
+      # Start shim
+      shim_path = os.path.join(os.path.dirname(__file__), "../../../extra/usbgpu/tbgpu/shim")
+      subprocess.Popen([shim_path, sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+      for _ in range(50):
+        if os.path.exists(sock_path):
+          time.sleep(0.05)
+          sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          sock.connect(sock_path)
+          break
+        time.sleep(0.02)
+      else: raise RuntimeError("Failed to start shim")
+    # Set socket buffer sizes
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 16 * 1024 * 1024)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
+    return sock
+
+  def _recvall(self, n:int) -> bytes:
+    data = b''
+    while len(data) < n:
+      chunk = self.sock.recv(n - len(data))
+      if not chunk: raise RuntimeError("Connection closed")
+      data += chunk
+    return data
+
+  def _rpc(self, cmd:int, *args:int):
+    import struct
+    req = struct.pack('<BBQQQ', cmd, args[0] if len(args) > 0 else 0, args[1] if len(args) > 1 else 0,
+                      args[2] if len(args) > 2 else 0, args[3] if len(args) > 3 else 0)
+    self.sock.sendall(req)
+    resp = struct.unpack('<BQQ', self._recvall(17))
+    if resp[0] != 0: raise RuntimeError(f"RPC failed: cmd={cmd}, args={args}")
+    return resp[1], resp[2]
+
+  def _bulk_io(self, cmd:int, idx:int, offset:int, data_or_size:bytes|int):
+    import struct
+    if isinstance(data_or_size, int):  # Read
+      req = struct.pack('<BBQQQ', cmd, idx, offset, data_or_size, 0)
+      self.sock.sendall(req)
+      resp = struct.unpack('<BQQ', self._recvall(17))
+      if resp[0] != 0: raise RuntimeError(f"Bulk read failed: idx={idx}, offset={offset}")
+      return self._recvall(data_or_size)
+    else:  # Write (fire-and-forget)
+      req = struct.pack('<BBQQQ', cmd, idx, offset, len(data_or_size), 0)
+      self.sock.sendall(req + data_or_size)
+
+  def read_config(self, offset:int, size:int): return self._rpc(self._CMD_CFG_READ, 0, offset, size)[0]
+  def write_config(self, offset:int, value:int, size:int): self._rpc(self._CMD_CFG_WRITE, 0, offset, size, value)
+  def reset(self): self._rpc(self._CMD_RESET, 0, 0, 0)
+  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
+    return RemoteMMIOInterface(self, bar, size or self.bar_info[bar].size, fmt, False).view(off, size, fmt)
+
+class RemoteMMIOInterface(MMIOInterface):
+  def __init__(self, dev:RemotePCIDevice, bar_or_idx:int, nbytes:int, fmt='B', is_sysmem=False, base_offset=0):
+    import struct
+    self.dev, self.bar_or_idx, self.addr, self.nbytes, self.fmt, self.is_sysmem, self.base_offset = dev, bar_or_idx, 0, nbytes, fmt, is_sysmem, base_offset
+    self.el_sz = struct.calcsize(fmt)
+
+  def __len__(self): return self.nbytes // self.el_sz
+
+  def __getitem__(self, index):
+    import struct
+    if isinstance(index, slice):
+      start, stop = (index.start or 0) * self.el_sz, (index.stop or len(self)) * self.el_sz
+      data = self.dev._bulk_io(self.dev._CMD_SYSMEM_READ if self.is_sysmem else self.dev._CMD_BULK_READ, self.bar_or_idx, self.base_offset + start, stop - start)
+      return list(struct.unpack(f'<{(stop - start) // self.el_sz}{self.fmt}', data)) if self.fmt != 'B' else data
+    val = self.dev._bulk_io(self.dev._CMD_SYSMEM_READ if self.is_sysmem else self.dev._CMD_BULK_READ, self.bar_or_idx, self.base_offset + index * self.el_sz, self.el_sz)
+    return struct.unpack(f'<{self.fmt}', val)[0]
+
+  def __setitem__(self, index, val):
+    import struct
+    if isinstance(index, slice):
+      start = (index.start or 0) * self.el_sz
+      data = val if self.fmt == 'B' else struct.pack(f'<{len(val)}{self.fmt}', *val)
+      self.dev._bulk_io(self.dev._CMD_SYSMEM_WRITE if self.is_sysmem else self.dev._CMD_BULK_WRITE, self.bar_or_idx, self.base_offset + start, data)
+    else:
+      data = struct.pack(f'<{self.fmt}', val)
+      self.dev._bulk_io(self.dev._CMD_SYSMEM_WRITE if self.is_sysmem else self.dev._CMD_BULK_WRITE, self.bar_or_idx, self.base_offset + index * self.el_sz, data)
+
+  def view(self, offset:int=0, size:int|None=None, fmt=None) -> 'RemoteMMIOInterface':
+    return RemoteMMIOInterface(self.dev, self.bar_or_idx, size or (self.nbytes - offset), fmt or self.fmt, self.is_sysmem, self.base_offset + offset)
+
+class RemoteIfaceBase(LNXPCIIfaceBase):
+  def __init__(self, dev, dev_id:int, vendor:int, devices:list[tuple[int, list[int]]], bars:list[int], vram_bar:int, va_start:int, va_size:int, base_class:int|None=None):
+    self.pci_dev = RemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
+    self.dev, self.vram_bar = dev, vram_bar
+    assert self.pci_dev.read_config(0x00, 2) == vendor, f"Vendor ID mismatch"
+
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
+    # NOTE: logic on macos is different, since bar is small
+    should_use_sysmem = host or ((cpu_access if OSX else (uncached and cpu_access)) and not force_devmem)
+    if should_use_sysmem:
+      vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
+      mapped_size, idx = self.pci_dev._rpc(self.pci_dev._CMD_MAP_SYSMEM, 0, 0, size)
+      memview = RemoteMMIOInterface(self.pci_dev, idx, mapped_size, fmt='B', is_sysmem=True)
+      # Extract paddrs from remote sysmem - kernel returns large contiguous chunks, split into 4KB pages
+      paddrs_raw = list(itertools.takewhile(lambda p: p[1] != 0, zip(memview.view(fmt='Q')[0::2], memview.view(fmt='Q')[1::2])))
+      paddrs = [paddr + off for paddr, sz in paddrs_raw for off in range(0, sz, 0x1000)]
+      mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], aspace=AddrSpace.SYS, snooped=True, uncached=True)
+      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), view=memview, owner=self.dev)
+
+    mapping = self.dev_impl.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access)
+    barview = self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
+    return HCQBuffer(mapping.va_addr, size, view=barview, meta=PCIAllocationMeta(mapping, cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
+
+  def free(self, b:HCQBuffer):
+    for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
+    # Shim handles actual sysmem cleanup on disconnect
+
+  def map(self, b:HCQBuffer): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
+
+# PCIIfaceBase:type = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
+PCIIfaceBase:type = RemoteIfaceBase if OSX else LNXPCIIfaceBase
