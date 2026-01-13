@@ -257,7 +257,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
                     "from tinygrad.runtime.support import c", *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines,
                     "c.init_records()"]) + '\n'
-  macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
+  macros = [f"{r} # type: ignore" for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:
       exec(main + '\n'.join(macros), {})
