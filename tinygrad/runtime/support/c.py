@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
-from _ctypes import _SimpleCData, _Pointer
-from typing import get_type_hints, get_args, get_origin, overload, Annotated, Any, TypeVar, Generic
+from _ctypes import _CData, _SimpleCData, _Pointer
+from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, TypeVar, Generic
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -59,8 +59,12 @@ class Array(Generic[T, U]):
   def __setitem__(self, key: int, val: Any): ...
   def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
 
-class POINTER(_Pointer[T]):
-  def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key[0]))
+if TYPE_CHECKING:
+  CT = TypeVar("CT", bound=_CData)
+  class POINTER(_Pointer[CT]): ...
+else:
+  class POINTER:
+    def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key[0]))
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
@@ -79,20 +83,22 @@ def record(cls) -> type[Struct]:
 def init_records():
   for cls, struct, ns in _pending_records:
     for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
-      if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, field(*t.__metadata__))
-      else: setattr(struct, nm, field(t.__origin__, *t.__metadata__))
+      if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, Field(*t.__metadata__))
+      else: setattr(struct, nm, Field(t.__origin__, *t.__metadata__))
   _pending_records.clear()
 
-def field(typ, off:int, bit_width=None, bit_off=0):
-  if bit_width is not None:
-    sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width+bit_off, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
-    # FIXME: signedness
-    return property(lambda self: (b2i(mv(self)[sl]) >> bit_off) & mask,
-                    lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
-
-  sl = slice(off, off + ctypes.sizeof(typ))
-  return property(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v,
-                  lambda self, v: mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v))))
+class Field(property):
+  def __init__(self, typ, off:int, bit_width=None, bit_off=0):
+    if bit_width is not None:
+      sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width+bit_off, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
+      # FIXME: signedness
+      super().__init__(lambda self: (b2i(mv(self)[sl]) >> bit_off) & mask,
+                       lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
+    else:
+      sl = slice(off, off + ctypes.sizeof(typ))
+      super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v,
+                       lambda self, v: mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v))))
+    self.offset = off
 
 class DLL(ctypes.CDLL):
   @staticmethod
