@@ -591,7 +591,6 @@ def test_matmul():
     print(f"Loaded stock kernel from {stock_path}")
   else:
     asm = build_kernel(dev.arch)
-  if getenv("PRINT_ASM", 0): print(asm)
 
   binary = dev.compiler.compile(asm)
   print(f"Compiled! Binary size: {len(binary)} bytes")
