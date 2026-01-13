@@ -376,9 +376,9 @@ def format_packet(p) -> str:
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
   elif isinstance(p, (WAVESTART, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
-  elif hasattr(p, '_values'):
-    fields = " ".join(f"{k}=0x{v:x}" if k in {'snap', 'val32'} else f"{k}={v}"
-                      for k, v in p._values.items() if not k.startswith('_') and k != 'delta')
+  elif hasattr(p, '_fields'):
+    fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
+                      for k in p._fields if not k.startswith('_') and k not in {'delta', 'encoding'})
   else: fields = ""
   return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name, 'white'))} {fields}"
 
