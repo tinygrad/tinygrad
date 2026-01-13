@@ -91,16 +91,17 @@ fps, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
 def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
+def an(py, dt): return f"Annotated[{py}, ctypes.{dt}]"
 
 def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
   macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
     nonlocal lines, types, anoncnt, objc
-    tmap = {clang.CXType_Void:"None", clang.CXType_Char_U:"ctypes.c_ubyte", clang.CXType_UChar:"ctypes.c_ubyte", clang.CXType_Char_S:"ctypes.c_char",
-            clang.CXType_SChar:"ctypes.c_byte",
-            **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{k.lower()}" for k in ["Bool", "WChar", "Float", "Double", "LongDouble"]},
-            **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
+    tmap = {clang.CXType_Void:"None",clang.CXType_Char_U:an("int","ubyte"),clang.CXType_UChar:an("int","ubyte"),clang.CXType_WChar:an("str","wchar"),
+            clang.CXType_Char_S:an("bytes","char"),clang.CXType_SChar:an("int","byte"),clang.CXType_Bool:an("bool","bool"),
+            **{getattr(clang, f'CXType_{k}'):an("float", k.lower()) for k in ["Float", "Double", "LongDouble"]},
+            **{getattr(clang, f'CXType_{k}'):an("int", f"{'u' if 'U' in k else ''}int{sz}") for sz,k in
                [(16, "UShort"), (16, "Short"), (32, "UInt"), (32, "Int"), (64, "ULong"), (64, "Long"), (64, "ULongLong"), (64, "LongLong")]}}
 
     if t.kind in tmap: return tmap[t.kind]

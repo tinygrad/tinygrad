@@ -67,7 +67,9 @@ def record(cls):
 
 def init_records():
   for cls, struct, ns in _pending_records:
-    for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items(): setattr(struct, nm, field(t.__origin__, *t.__metadata__))
+    for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
+      if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, field(*t.__metadata__))
+      else: setattr(struct, nm, field(t.__origin__, *t.__metadata__))
   _pending_records.clear()
 
 def field(typ, off:int, bit_width=None, bit_off=0):
