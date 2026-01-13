@@ -94,7 +94,9 @@ class TestCfg(unittest.TestCase):
   def test_diamond(self):
     run_asm("diamond", insts:=[
       "entry:",
-        s_cmp_eq_i32(s[0], 0),
+        s_mov_b32(s[0], 0),
+        s_mov_b32(s[1], 0),
+        s_cmp_eq_u64(s[0:1], 0),
         "s_cbranch_scc1 if",
         "s_branch else",
       "if:",
@@ -106,7 +108,15 @@ class TestCfg(unittest.TestCase):
         s_endpgm(),
     ])
     _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
-    cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])
+    cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
+    self.assertEqual(len(cfg["blocks"]), 5)
+    references:dict[str, list[str]] = {}
+    for pc, tokens in cfg["pc_tokens"].items():
+      for t in tokens:
+        for key in t["keys"]: references.setdefault(key, []).append(pc)
+    self.assertEqual(len(references["r0"]), 2)
+    insts = [cfg["pc_tokens"][pc][0]["st"] for pc in references["r0"]]
+    self.assertEqual(insts, ['s_mov_b32', 's_cmp_eq_u64'])
 
   def test_loop(self):
     run_asm("simple_loop", [
