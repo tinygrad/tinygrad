@@ -198,8 +198,8 @@ class Kernel:
 
   def global_load(self, vdst, addr, saddr=None):
     """Global load b32"""
-    self.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1],
-              saddr=s[saddr:saddr+2] if saddr else NULL))
+    self.emit(global_load_b32(vdst=v[vdst], addr=v[addr] if saddr else v[addr:addr+1],
+              saddr=s[saddr:saddr+1] if saddr else NULL))
 
   def waitcnt(self, lgkm=None, vm=None):
     """Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain."""

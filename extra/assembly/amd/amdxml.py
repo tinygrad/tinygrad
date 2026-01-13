@@ -1,13 +1,9 @@
 # AMD machine-readable ISA XML parser - generates enum.py and ins.py
 # XML: https://gpuopen.com/download/machine-readable-isa/latest/
-import xml.etree.ElementTree as ET, zipfile, io, urllib.request
+import xml.etree.ElementTree as ET, zipfile
+from tinygrad.helpers import fetch
 
 XML_URL = "https://gpuopen.com/download/machine-readable-isa/latest/"
-_xml_cache = None
-def get_xml_zip():
-  global _xml_cache
-  if _xml_cache is None: _xml_cache = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(XML_URL).read()))
-  return _xml_cache
 ARCH_MAP = {"amdgpu_isa_rdna3_5.xml": "rdna3", "amdgpu_isa_rdna4.xml": "rdna4", "amdgpu_isa_cdna4.xml": "cdna"}
 # Map XML encoding names to pdf.py enum names (arch-specific overrides in ARCH_NAME_MAP)
 NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOPDXY": "VOPD", "VDS": "DS", "VDSDIR": "VDSDIR", "VEXPORT": "VEXPORT",
@@ -35,7 +31,7 @@ BUF_FMT = {1: "8_UNORM", 2: "8_SNORM", 3: "8_USCALED", 4: "8_SSCALED", 5: "8_UIN
            60: "32_32_32_FLOAT", 61: "32_32_32_32_UINT", 62: "32_32_32_32_SINT", 63: "32_32_32_32_FLOAT"}
 
 def parse_xml(filename: str, arch: str):
-  root = ET.fromstring(get_xml_zip().read(filename))
+  root = ET.fromstring(zipfile.ZipFile(fetch(XML_URL)).read(filename))
   name_map = {**NAME_MAP, **ARCH_NAME_MAP.get(arch, {})}
   encodings, enums, types, fmts, op_types_set = {}, {}, {}, {}, set()
   # Extract DataFormats with BitCount
