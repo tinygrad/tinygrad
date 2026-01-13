@@ -118,7 +118,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         defined, cnm = nm(canon:=clang.clang_getCanonicalType(t)) in types, tname(canon, typedef=nm(t).replace('::', '_'))
         types[nm(t)] = cnm if nm(t).startswith("__") else nm(t).replace('::', '_'), True
         # RECORDs need to handle typedefs specially to allow for self-reference
-        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')}{': TypeAlias' if 'enum' in cnm else ''} = {cnm}")
+        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')}{'' if 'enum' in cnm else ': TypeAlias'} = {cnm}")
         return types[nm(t)][0]
       case clang.CXType_Record:
         # TODO: packed unions
