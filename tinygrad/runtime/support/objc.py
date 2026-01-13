@@ -39,6 +39,7 @@ if TYPE_CHECKING:
   class MetaSpec(_ctypes._PyCSimpleType):
     _objc_class_: id_
     def __getattr__(cls, nm:str) -> Any: ...
+    def __setattr__(cls, nm:str, v:Any): ...
 else:
   class MetaSpec(type(id_)):
     def __new__(mcs, name, bases, dct):
