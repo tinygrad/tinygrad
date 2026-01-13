@@ -191,6 +191,19 @@ class TestTorchBackend(unittest.TestCase):
     assert torch.equal(tensor_a, tensor_b)
     assert not torch.equal(tensor_a, tensor_c)
 
+  def test_linalg_svd(self):
+    A = torch.randn(5, 5, device=device)
+    U, S, Vh = torch.linalg.svd(A)
+    np.testing.assert_equal(U.shape, (5,5))
+    np.testing.assert_equal(Vh.shape, (5,5))
+    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
+
+    A = torch.randn(5, 3, device=device)
+    U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+    np.testing.assert_equal(U.shape, (5,3))
+    np.testing.assert_equal(Vh.shape, (3,3))
+    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
+
   def test_linalg_eigh(self):
     a = torch.tensor([[1, 2], [2, 1]], dtype=torch.float32, device=device)
     w, v = torch.linalg.eigh(a)

@@ -5,8 +5,9 @@ The format is nibble-based with variable-width packets determined by a state mac
 Uses BitField infrastructure from dsl.py, similar to GPU instruction encoding.
 """
 from __future__ import annotations
+from typing import Iterator
 from enum import Enum
-from extra.assembly.amd.dsl import BitField, EnumBitField, FixedBitField, bits
+from extra.assembly.amd.dsl import BitField, FixedBitField, bits
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIELD ENUMS
@@ -302,8 +303,6 @@ STATE_TO_OPCODE, OPCODE_TO_CLASS = _build_state_table()
 # Precompute special case opcodes
 _TS_DELTA_OR_MARK_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_OR_MARK)
 _TS_DELTA_SHORT_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_SHORT)
-_TS_DELTA_OR_MARK_BIT8 = (TS_DELTA_OR_MARK.bit8.lo, TS_DELTA_OR_MARK.bit8.mask())
-_TS_DELTA_OR_MARK_BIT9 = (TS_DELTA_OR_MARK.bit9.lo, TS_DELTA_OR_MARK.bit9.mask())
 
 # Combined lookup: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
 # special_case: 0=none, 1=TS_DELTA_OR_MARK, 2=TS_DELTA_SHORT
@@ -319,41 +318,69 @@ for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
 # DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def decode(data: bytes) -> list[PacketType]:
-  """Decode raw SQTT blob into list of packet instances."""
-  packets: list[PacketType] = []
-  packets_append = packets.append
-  n = len(data)
-  reg = 0
-  offset = 0
-  nib_count = 16
-  time = 0
-  state_to_opcode = STATE_TO_OPCODE
-  decode_info = _DECODE_INFO
-  mask64 = (1 << 64) - 1
+def decode(data: bytes) -> Iterator[PacketType]:
+  """Decode raw SQTT blob, yielding packet instances."""
+  n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
 
-  while (offset >> 3) < n:
-    target = offset + nib_count * 4
-    while offset < target and (offset >> 3) < n:
-      byte = data[offset >> 3]
-      nib = (byte >> (offset & 4)) & 0xF
-      reg = ((reg >> 4) | (nib << 60)) & mask64
-      offset += 4
-    if offset < target: break
+  while pos + ((nib_count + nib_off + 1) >> 1) <= n:
+    need = nib_count - nib_off
+    # 1. if unaligned, read high nibble to align
+    if nib_off: reg, pos = (reg >> 4) | ((data[pos] >> 4) << 60), pos + 1
+    # 2. read all full bytes at once
+    if (byte_count := need >> 1):
+      chunk = int.from_bytes(data[pos:pos + byte_count], 'little')
+      reg, pos = (reg >> (byte_count * 8)) | (chunk << (64 - byte_count * 8)), pos + byte_count
+    # 3. if odd, read low nibble
+    if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
-    opcode = state_to_opcode[reg & 0xFF]
-    pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
-
+    opcode = STATE_TO_OPCODE[reg & 0xFF]
+    pkt_cls, nib_count, delta_lo, delta_mask, special = _DECODE_INFO[opcode]
     delta = (reg >> delta_lo) & delta_mask
-
-    if special == 1:  # TS_DELTA_OR_MARK
-      bit8 = (reg >> _TS_DELTA_OR_MARK_BIT8[0]) & _TS_DELTA_OR_MARK_BIT8[1]
-      bit9 = (reg >> _TS_DELTA_OR_MARK_BIT9[0]) & _TS_DELTA_OR_MARK_BIT9[1]
-      if bit9 and not bit8: delta = 0
-    elif special == 2:  # TS_DELTA_SHORT
-      delta = delta + 8
-
+    if special == 1 and (reg >> 9) & 1 and not (reg >> 8) & 1: delta = 0  # TS_DELTA_OR_MARK marker
+    elif special == 2: delta += 8  # TS_DELTA_SHORT
     time += delta
-    packets_append(pkt_cls.from_raw(reg, time))
+    yield pkt_cls.from_raw(reg, time)
 
-  return packets
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRINTER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PACKET_COLORS = {
+  "INST": "WHITE", "VALUINST": "BLACK", "VMEMEXEC": "yellow", "ALUEXEC": "yellow",
+  "IMMEDIATE": "YELLOW", "IMMEDIATE_MASK": "YELLOW", "WAVERDY": "cyan", "WAVEALLOC": "cyan",
+  "WAVEEND": "blue", "WAVESTART": "blue", "PERF": "magenta", "EVENT": "red", "EVENT_BIG": "red",
+  "REG": "green", "LAYOUT_HEADER": "white", "SNAPSHOT": "white", "UTILCTR": "green",
+}
+
+def format_packet(p) -> str:
+  from tinygrad.helpers import colored
+  name = type(p).__name__
+  if isinstance(p, INST):
+    op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+  elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
+  elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
+  elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
+  elif isinstance(p, (WAVESTART, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
+  elif hasattr(p, '_fields'):
+    fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
+                      for k in p._fields if not k.startswith('_') and k not in {'delta', 'encoding'})
+  else: fields = ""
+  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name, 'white'))} {fields}"
+
+def print_packets(packets) -> None:
+  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"}
+  for p in packets:
+    if type(p).__name__ not in skip: print(format_packet(p))
+
+if __name__ == "__main__":
+  import sys, pickle
+  if len(sys.argv) < 2:
+    print("Usage: python sqtt.py <pkl_file>")
+    sys.exit(1)
+  with open(sys.argv[1], "rb") as f:
+    data = pickle.load(f)
+  sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+  for i, event in enumerate(sqtt_events):
+    print(f"\n=== event {i} ===")
+    print_packets(decode(event.blob))

@@ -1074,26 +1074,72 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2, 3, 0)],lambda x: torch.cumprod(x, dim=2),lambda x: Tensor.cumprod(x, axis=2))
 
   def test_small_cummax(self):
-    helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(10)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
   @slow_test
   def test_simple_cummax(self):
-    helper_test_op([(512)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    helper_test_op([(1022)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
+    helper_test_op([(512)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(512)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    helper_test_op([(1022)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(1022)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
   @slow_test
   def test_cummax(self):
-    helper_test_op([()], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    self.helper_test_exception([()], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
-    helper_test_op([(20,)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    self.helper_test_exception([(20,)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
-    self.helper_test_exception([(20,)], lambda x: torch.cummax(x, dim=-2).values, lambda x: Tensor.cummax(x, axis=-2), expected=IndexError)
-    helper_test_op([(20,30)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    helper_test_op([(20,30)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1))
-    helper_test_op([(20,30,40)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2))
-    helper_test_op([(20,30,40)], lambda x: torch.cummax(x, dim=-1).values, lambda x: Tensor.cummax(x, axis=-1))
+    helper_test_op([()], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([()], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    self.helper_test_exception([()], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1)[0], expected=IndexError)
+    helper_test_op([(5,)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(5,)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    self.helper_test_exception([(5,)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1)[0], expected=IndexError)
+    self.helper_test_exception([(5,)], lambda x: torch.cummax(x, dim=-2).values, lambda x: Tensor.cummax(x, axis=-2)[0], expected=IndexError)
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1)[0])
+    helper_test_op([(5,6)], lambda x: torch.cummax(x, dim=1).indices.int(), lambda x: Tensor.cummax(x, axis=1)[1], forward_only=True)
+    helper_test_op([(5,6,7)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2)[0])
+    helper_test_op([(5,6,7)], lambda x: torch.cummax(x, dim=2).indices.int(), lambda x: Tensor.cummax(x, axis=2)[1], forward_only=True)
+    helper_test_op([(5,6,7)], lambda x: torch.cummax(x, dim=-1).values, lambda x: Tensor.cummax(x, axis=-1)[0])
+    helper_test_op([(5,6,7)], lambda x: torch.cummax(x, dim=-1).indices.int(), lambda x: Tensor.cummax(x, axis=-1)[1], forward_only=True)
   def test_cummax_zero_axis(self):
-    helper_test_op([(2,0,4)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1))
-    helper_test_op([(0,3)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    helper_test_op([(2,3,0)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2))
+    helper_test_op([(2,0,4)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1)[0])
+    helper_test_op([(2,0,4)], lambda x: torch.cummax(x, dim=1).indices.int(), lambda x: Tensor.cummax(x, axis=1)[1], forward_only=True)
+    helper_test_op([(0,3)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0)[0])
+    helper_test_op([(0,3)], lambda x: torch.cummax(x, dim=0).indices.int(), lambda x: Tensor.cummax(x, axis=0)[1], forward_only=True)
+    helper_test_op([(2,3,0)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2)[0])
+    helper_test_op([(2,3,0)], lambda x: torch.cummax(x, dim=2).indices.int(), lambda x: Tensor.cummax(x, axis=2)[1], forward_only=True)
+
+  def test_small_cummin(self):
+    helper_test_op([(10)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(10)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+  @slow_test
+  def test_simple_cummin(self):
+    helper_test_op([(512)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(512)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    helper_test_op([(1022)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(1022)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+  @slow_test
+  def test_cummin(self):
+    helper_test_op([()], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([()], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    self.helper_test_exception([()], lambda x: torch.cummin(x, dim=1).values, lambda x: Tensor.cummin(x, axis=1)[0], expected=IndexError)
+    helper_test_op([(5,)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(5,)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    self.helper_test_exception([(5,)], lambda x: torch.cummin(x, dim=1).values, lambda x: Tensor.cummin(x, axis=1)[0], expected=IndexError)
+    self.helper_test_exception([(5,)], lambda x: torch.cummin(x, dim=-2).values, lambda x: Tensor.cummin(x, axis=-2)[0], expected=IndexError)
+    helper_test_op([(5,6)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(5,6)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    helper_test_op([(5,6)], lambda x: torch.cummin(x, dim=1).values, lambda x: Tensor.cummin(x, axis=1)[0])
+    helper_test_op([(5,6)], lambda x: torch.cummin(x, dim=1).indices.int(), lambda x: Tensor.cummin(x, axis=1)[1], forward_only=True)
+    helper_test_op([(5,6,7)], lambda x: torch.cummin(x, dim=2).values, lambda x: Tensor.cummin(x, axis=2)[0])
+    helper_test_op([(5,6,7)], lambda x: torch.cummin(x, dim=2).indices.int(), lambda x: Tensor.cummin(x, axis=2)[1], forward_only=True)
+    helper_test_op([(5,6,7)], lambda x: torch.cummin(x, dim=-1).values, lambda x: Tensor.cummin(x, axis=-1)[0])
+    helper_test_op([(5,6,7)], lambda x: torch.cummin(x, dim=-1).indices.int(), lambda x: Tensor.cummin(x, axis=-1)[1], forward_only=True)
+  def test_cummin_zero_axis(self):
+    helper_test_op([(2,0,4)], lambda x: torch.cummin(x, dim=1).values, lambda x: Tensor.cummin(x, axis=1)[0])
+    helper_test_op([(2,0,4)], lambda x: torch.cummin(x, dim=1).indices.int(), lambda x: Tensor.cummin(x, axis=1)[1], forward_only=True)
+    helper_test_op([(0,3)], lambda x: torch.cummin(x, dim=0).values, lambda x: Tensor.cummin(x, axis=0)[0])
+    helper_test_op([(0,3)], lambda x: torch.cummin(x, dim=0).indices.int(), lambda x: Tensor.cummin(x, axis=0)[1], forward_only=True)
+    helper_test_op([(2,3,0)], lambda x: torch.cummin(x, dim=2).values, lambda x: Tensor.cummin(x, axis=2)[0])
+    helper_test_op([(2,3,0)], lambda x: torch.cummin(x, dim=2).indices.int(), lambda x: Tensor.cummin(x, axis=2)[1], forward_only=True)
 
   def test_argmax(self):
     # check if it returns the first index for multiple occurrences
@@ -2012,6 +2058,15 @@ class TestOps(unittest.TestCase):
 
   def test_diagonal(self):
     helper_test_op([(5,5)], lambda x: x.diagonal())
+    helper_test_op([(3,4)], lambda x: x.diagonal())  # rectangular
+    helper_test_op([(4,3)], lambda x: x.diagonal())  # rectangular (other way)
+    helper_test_op([(3,3,3)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # batched
+    helper_test_op([(4,5,6)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # batched rectangular
+    helper_test_op([(2,3,4,5)], lambda x: x.diagonal(dim1=-2, dim2=-1))  # 4D batched
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=1))  # positive offset
+    helper_test_op([(5,5)], lambda x: x.diagonal(offset=-1))  # negative offset
+    helper_test_op([(3,5)], lambda x: x.diagonal(offset=2))  # offset on rectangular
+    self.helper_test_exception([(3,3)], lambda x: x.diagonal(dim1=0, dim2=0), expected=RuntimeError)
 
   def test_roll(self):
     helper_test_op([(2, 4)], lambda x: x.roll(1))
@@ -3207,6 +3262,11 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
 
+  def test_nonzero(self):
+    helper_test_op([(32, 10)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
+    helper_test_op([(20,)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
+    helper_test_op([(10, 5, 3)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
+
   @unittest.skipIf(Device.DEFAULT == "QCOM", "OpenCL fails to compile this (both on GPU(qcom)/QCOM backends)")
   def test_cast(self):
     helper_test_op([(3, 3)], lambda x: x.float())
@@ -3217,21 +3277,6 @@ class TestOps(unittest.TestCase):
 
   def test_bitcast(self):
     helper_test_op([(3, 3)], lambda x: x.view(torch.int32), lambda x: x.bitcast(dtypes.int32), forward_only=True)
-
-  @unittest.skip("we have test_linalg, no need to test here. TODO: should be in torch backend tests")
-  def test_svd(self):
-    # test for tiny backend. real svd tests are in test_linalg
-    A = torch.randn(5, 5)
-    U, S, Vh = torch.linalg.svd(A)
-    np.testing.assert_equal(U.shape, (5,5))
-    np.testing.assert_equal(Vh.shape, (5,5))
-    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
-
-    A = torch.randn(5, 3)
-    U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    np.testing.assert_equal(U.shape, (5,3))
-    np.testing.assert_equal(Vh.shape, (3,3))
-    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):

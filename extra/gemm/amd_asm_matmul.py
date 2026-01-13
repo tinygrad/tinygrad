@@ -13,7 +13,7 @@ from pathlib import Path
 from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.helpers import getenv, colored
 from tinygrad.engine.realize import Runner, Estimates, ExecItem
-from extra.assembly.amd.dsl import s, v, VCC_LO, EXEC_LO, NULL
+from extra.assembly.amd.dsl import s, v, VCC_LO, NULL
 from extra.assembly.amd.autogen.rdna3.ins import *
 
 # =============================================================================
@@ -408,8 +408,6 @@ def build_kernel(arch='gfx1100'):
   for i, idx in enumerate([6,7,8,9,10,13,14,15]):
     offset = i * 64
     k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[INIT_TILE_LOADS[idx][0]], offset0=offset & 0xFF, offset1=offset >> 8))
-  k.waitcnt(lgkm=0)
-  k.barrier()
 
   # ===========================================================================
   # INIT: Compute LDS base addresses, then zero accumulators
@@ -450,15 +448,20 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_cselect_b32(s[S_PREFETCH_FLAG], -1, 0))  # s_cselect doesn't modify SCC
   k.emit(s_cbranch_scc0(simm16=0)); k.branch_to('SKIP_PREFETCH')  # branch if loop_ctr >= loop_bound
 
-  # Advance prefetch pointers
-  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
-  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
-
   if not NO_GLOBAL:
+    # Advance prefetch pointers
+    k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
+    k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
+
     for vdst, saddr_lo in INIT_PREFETCH:
       k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
 
   k.label('SKIP_PREFETCH')
+
+  # wait for local stores to finish (either initial or loop)
+  # then sync the warp so it's safe to load local
+  k.waitcnt(lgkm=0)
+  k.barrier()
 
   # 8 inner loop iterations
   for iter in range(8):
@@ -476,7 +479,7 @@ def build_kernel(arch='gfx1100'):
       k.waitcnt(lgkm=0)
 
     # 64 dual FMACs
-    k.emit(s_clause(simm16=63))
+    k.emit(s_clause(simm16=len(FMAC_PATTERN)-1))
     for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
       k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
                   vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
@@ -487,10 +490,10 @@ def build_kernel(arch='gfx1100'):
       k.global_load(vdst1, addr, slo1)
       k.global_load(vdst2, addr, slo2)
 
-  k.emit(s_and_not1_b32(VCC_LO, EXEC_LO, s[S_PREFETCH_FLAG]))
+  # wait for all global stores to finish
+  # then sync the warp so it's safe to store local
   k.waitcnt(vm=0)
   k.barrier()
-  k.emit(s_cbranch_vccnz(simm16=0)); k.branch_to('LOOP_INC')
 
   # Store prefetched data to LDS
   # NOTE: Register naming reflects LDS tile organization, not source matrix:
@@ -503,8 +506,6 @@ def build_kernel(arch='gfx1100'):
     offset = i * 64
     k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
 
-  k.waitcnt(lgkm=0)
-  k.barrier()
   k.emit(s_branch(simm16=0)); k.branch_to('LOOP_INC')
 
   # ===========================================================================
@@ -565,7 +566,7 @@ def build_kernel(arch='gfx1100'):
 
     k.emit(global_store_b128(addr=v[0:1], data=v[tmp:tmp+3], saddr=NULL))
 
-  k.emit(s_sendmsg(simm16=3))
+  k.emit(s_sendmsg(simm16=3))  # DEALLOC_VGPRS
   k.emit(s_endpgm())
 
   return k.to_asm()

@@ -16,7 +16,7 @@ class Reg:
     self.offset, self.sz = offset, sz
     self.neg, self.abs_, self.hi = neg, abs_, hi
 
-  # TODO: legacy aliases, remove
+  # TODO: remove these legacy aliases
   @property
   def count(self): return self.sz
   @property
