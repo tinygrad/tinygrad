@@ -264,8 +264,8 @@ class Inst:
   @property
   def _field_sizes(self) -> dict[str, int]:
     """Map field names to expected register sizes based on operand info."""
-    # Exclude addr/saddr - memory instructions have variable address sizes depending on addressing mode
-    return {k: (v[1] + 31) // 32 for k, v in self.operands.items() if k not in ('addr', 'saddr')}
+    # Exclude addr/saddr (variable address sizes) and vdst for VOPC (wave size dependent)
+    return {k: (v[1] + 31) // 32 for k, v in self.operands.items() if k not in ('addr', 'saddr', 'vdst')}
   def _field_bits(self, name: str) -> int:
     """Get size in bits for a field from operand info."""
     return self.operands.get(name, (None, 0, None))[1]

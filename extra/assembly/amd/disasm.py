@@ -270,14 +270,9 @@ def _disasm_vop2(inst: VOP2) -> str:
 
 def _disasm_vopc(inst: VOPC) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
-  # Use operand info for register sizes
+  # Use operand info for register sizes and 16-bit detection
   r0, r1 = inst.src_regs(0), inst.src_regs(1)
-  n_up = name.upper()
-  # Fallback for 64-bit ops with incomplete operand info (e.g., V_CMP_T_F64)
-  if r0 == 1 and not inst.operands and ('_F64' in n_up or '_I64' in n_up or '_U64' in n_up):
-    r0, r1 = 2, 2
-  # 16-bit detection: use operand info, with name-based fallback for ops with missing info (e.g., V_CMP_T_F16)
-  is16 = inst.is_src_16(0) or (not inst.operands and _is_16bit(inst))
+  is16 = inst.is_src_16(0)
   if cdna:
     s0 = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else _fmt_src(inst.src0, r0, cdna)
     s1 = _vreg(inst.vsrc1, r1) if r1 > 1 else _vreg(inst.vsrc1)
@@ -447,29 +442,10 @@ def _disasm_vop3(inst: VOP3) -> str:
     vdst_raw = _unwrap(inst.vdst)
     return f"{name} s{vdst_raw - 256 if vdst_raw >= 256 else vdst_raw}, {src}" + (" clamp" if clamp else "") + _omod(inst.omod)
 
-  # Use pcode types for register sizes
-  dst_type, src0_type, src1_type, src2_type = inst.types
+  # Use operand info for register sizes and 16-bit detection
   r0, r1, r2 = inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
   dn = inst.dst_regs()
-
-  # 16-bit detection: use pcode types when available
-  # For ops like V_LSHLREV_B16 where pcode has None for some operands, fall back to name-based detection
-  # But NOT for: CVT ops (name has both types), SAD/MSAD ops, MAD_*32_*16, PACK, PK, DOT2
-  skip_name_fallback = 'CVT_' in n_up or 'SAD_' in n_up or 'MSAD_' in n_up or 'PACK_B32' in n_up or '_PK_' in n_up or 'DOT2' in n_up or re.match(r'V_MAD_[IU]32_[IU]16', n_up)
-  is_16bit_name = _is_16bit(inst) and not skip_name_fallback
-  is16_d = dst_type in ('f16', 'u16', 'i16', 'b16') or (is_16bit_name and dst_type is None)
-  is16_s = src0_type in ('f16', 'u16', 'i16', 'b16') or (is_16bit_name and src0_type is None)
-  is16_s2 = src2_type in ('f16', 'u16', 'i16', 'b16') or (is_16bit_name and src2_type is None)
-
-  # Overrides for instructions with incomplete pcode
-  # QSAD/MQSAD: pcode has dst type but not src types
-  if 'QSAD_PK' in n_up: r0, r1, r2 = 2, 1, 2
-  elif 'MQSAD_U32' in n_up: r0, r1, r2 = 2, 1, 4
-  # V_CMP_T_F64 and similar have no pcode types, infer from name
-  elif src0_type is None and ('_F64' in n_up or '_I64' in n_up or '_U64' in n_up) and 'CMP' in n_up:
-    r0, r1 = 2, 2
-  # v_cvt_pk_f32_fp8/bf8: pcode has None dst type but outputs 2 VGPRs
-  if 'CVT_PK_F32_FP8' in n_up or 'CVT_PK_F32_BF8' in n_up: dn = 2
+  is16_d, is16_s, is16_s2 = inst.is_dst_16(), inst.is_src_16(0), inst.is_src_16(2)
 
   s0 = _vop3_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.opsel&1, r0, is16_s)
   s1 = _vop3_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.opsel&2, r1, is16_s)
@@ -641,12 +617,8 @@ def _disasm_mimg(inst: MIMG) -> str:
 
 def _disasm_sop1(inst: SOP1) -> str:
   op, name, cdna = inst.op, inst.op_name.lower(), _is_cdna(inst)
-  n = name.upper()
-  # Use pcode types, with name-based fallback only when pcode returns 1 (missing type info)
-  # Name suffix _B64/_F64/_U64/_I64 means both dst and src are 64-bit, unless overridden by pcode
-  is_64 = n.endswith('_B64') or n.endswith('_F64') or n.endswith('_U64') or n.endswith('_I64')
-  dst_regs = inst.dst_regs() if inst.types[0] else (2 if is_64 else 1)
-  src_regs = inst.src_regs(0) if inst.types[1] else (2 if is_64 else 1)
+  # Use operand info for register sizes
+  dst_regs, src_regs = inst.dst_regs(), inst.src_regs(0)
   src = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, src_regs, cdna)
   if not cdna:
     if 'getpc_b64' in name: return f"{name} {_fmt_sdst(inst.sdst, 2)}"
@@ -663,18 +635,8 @@ def _disasm_sop1(inst: SOP1) -> str:
 def _disasm_sop2(inst: SOP2) -> str:
   cdna, name = _is_cdna(inst), inst.op_name.lower()
   lit = getattr(inst, '_literal', None)
-  # Use pcode types for register sizes
+  # Use operand info for register sizes
   dn, s0n, s1n = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1)
-  # Fallback for ops with incomplete pcode (src1 is often None for shift/bfe/bfm ops)
-  n_up = inst.op_name
-  if s0n == 1 and inst.types[1] is None and (n_up.endswith('_B64') or n_up.endswith('_U64') or n_up.endswith('_I64')):
-    # BFM: both sources are 32-bit (width, offset)
-    if 'BFM' in n_up: s0n, s1n = 1, 1
-    else: s0n = 2  # Most 64-bit ops have 64-bit src0
-  if s1n == 1 and inst.types[2] is None and (n_up.endswith('_B64') or n_up.endswith('_U64') or n_up.endswith('_I64')):
-    # LSHL/LSHR/ASHR/BFE: src1 is 32-bit shift amount or offset/width
-    if not ('LSHL' in n_up or 'LSHR' in n_up or 'ASHR' in n_up or 'BFE' in n_up or 'BFM' in n_up):
-      s1n = 2  # Other 64-bit ops have 64-bit src1
   s0 = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, s0n, cdna)
   s1 = _lit(inst, inst.ssrc1) if _unwrap(inst.ssrc1) == 255 else _fmt_src(inst.ssrc1, s1n, cdna)
   dst = _fmt_sdst(inst.sdst, dn, cdna)
