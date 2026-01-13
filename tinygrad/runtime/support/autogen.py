@@ -144,7 +144,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         else: types[nm(t)] = nm(t).replace(' ', '_').replace('::', '_'), True
         ety = clang.clang_getEnumDeclIntegerType(decl)
         def value(e): return (clang.clang_getEnumConstantDeclUnsignedValue if ety.kind in uints else clang.clang_getEnumConstantDeclValue)(e)
-        lines.append(f"class {types[nm(t)][0]}({tname(ety)}, Enum): pass\n" +
+        lines.append(f"class {types[nm(t)][0]}({tname(ety)}, c.Enum): pass\n" +
                      "\n".join(f"{nm(e)} = {types[nm(t)][0]}.define('{nm(e)}', {value(e)})" for e in children(decl)
                      if e.kind == clang.CXCursor_EnumConstantDecl) + "\n")
         return types[nm(t)][0]
