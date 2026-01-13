@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, errno, itertools
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
 from tinygrad.runtime.autogen import libc, vfio, pci
