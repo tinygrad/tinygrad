@@ -74,6 +74,7 @@ def mv(st) -> memoryview: return memoryview(st).cast('B')
 class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
+    self._objects_ = {}
     for f,v in [*zip(self._real_fields_, args), *kwargs.items()]: setattr(self, f, v)
 
 def record(cls) -> type[Struct]:
@@ -97,8 +98,10 @@ class Field(property):
                        lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
     else:
       sl = slice(off, off + ctypes.sizeof(typ))
-      super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v,
-                       lambda self, v: mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v))))
+      def setter(self, v):
+        mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v)))
+        if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = v._objects
+      super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, setter)
     self.offset = off
 
 class DLL(ctypes.CDLL):

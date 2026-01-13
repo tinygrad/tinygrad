@@ -389,4 +389,74 @@ typedef struct ip_discovery_header
     self.assertTrue(hasattr(b, 'c_ptr'))
     self.assertTrue(hasattr(c, 'a_ptr'))
 
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_pointer_field_roundtrip(self):
+    # This tests storing a pointer in a record struct field and passing it to C
+    # Mimics how mesa.struct_lp_build_tgsi_params.mask is used
+    from tinygrad.runtime.support.c import POINTER
+    @record
+    class Inner:
+      SIZE = 8
+      value: Annotated[ctypes.c_int, 0]
+      flag: Annotated[ctypes.c_int, 4]
+    @record
+    class Outer:
+      SIZE = 16
+      x: Annotated[ctypes.c_int, 0]
+      inner_ptr: Annotated[POINTER[Inner], 8]
+    init_records()
+
+    src = """
+      struct inner { int value; int flag; };
+      struct outer { int x; struct inner *inner_ptr; };
+      int test(struct inner *p) {
+        return p->value + p->flag;
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind
+    def test(p:POINTER[Inner]) -> ctypes.c_int: ...
+
+    inner = Inner(value=42, flag=10)
+    outer = Outer(x=1, inner_ptr=ctypes.pointer(inner))
+    # Retrieve pointer from struct field and pass to C
+    self.assertEqual(test(outer.inner_ptr), 52)
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_pointer_field_loses_reference(self):
+    # BUG: When a pointer is stored in a record struct field, only the address bytes are saved.
+    # The pointer's _objects dict (which prevents GC of the pointed-to object) is lost.
+    # This causes the pointed-to object to be garbage collected, leading to use-after-free.
+    from tinygrad.runtime.support.c import POINTER
+    @record
+    class MaskContext:
+      SIZE = 16
+      value: Annotated[ctypes.c_int, 0]
+      initialized: Annotated[ctypes.c_int, 4]
+      ptr: Annotated[ctypes.c_void_p, 8]
+    @record
+    class Params:
+      SIZE = 16
+      x: Annotated[ctypes.c_int, 0]
+      mask: Annotated[POINTER[MaskContext], 8]
+    init_records()
+
+    src = """
+      struct mask_ctx { int value; int initialized; void *ptr; };
+      void mask_begin(struct mask_ctx *m, int val) { m->value = val; m->initialized = 1; }
+      int mask_end(struct mask_ctx *m) { return m->value + m->initialized; }
+    """
+    dll = self.compile(src)
+    @dll.bind
+    def mask_begin(m:POINTER[MaskContext], val:ctypes.c_int) -> None: ...
+    @dll.bind
+    def mask_end(m:POINTER[MaskContext]) -> ctypes.c_int: ...
+
+    # When MaskContext() is created inline, it gets garbage collected after the pointer
+    # is stored because only the address bytes are saved, not the _objects reference.
+    params = Params(x=1, mask=ctypes.pointer(MaskContext()))
+    mask_begin(params.mask, 42)
+    result = mask_end(params.mask)
+    self.assertEqual(result, 43)  # 42 + 1
+
 if __name__ == "__main__": unittest.main()
