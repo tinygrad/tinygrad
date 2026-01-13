@@ -1,4 +1,4 @@
-# mypy: disable-error-code='empty-body'
+# mypy: disable-error-code="empty-body"
 from __future__ import annotations
 import ctypes
 from typing import Annotated, Literal, TypeAlias
