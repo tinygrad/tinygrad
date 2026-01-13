@@ -141,6 +141,20 @@ class TestSQTTExamples(unittest.TestCase):
         all_packets = [p for e in events for p in decode(e.blob)]
         self.assertGreater(len([p for p in all_packets if isinstance(p, INST)]), 0, f"no INST packets in {name}")
 
+  def test_packet_counts(self):
+    expected = {
+      "profile_empty_run_0": [559, 600],
+      "profile_empty_run_1": [517, 570],
+      "profile_gemm_run_0": [1489, 604, 1789, 466, 17570, 407],
+      "profile_gemm_run_1": [1453, 604, 1871, 493, 17827, 460],
+      "profile_plus_run_0": [695, 668],
+      "profile_plus_run_1": [663, 593],
+    }
+    for name, (events, *_) in self.examples.items():
+      with self.subTest(example=name):
+        counts = [len(list(decode(e.blob))) for e in events]
+        self.assertEqual(counts, expected[name], f"packet count mismatch in {name}")
+
   def test_rocprof_wave_times_match(self):
     """Wave start/end times must match rocprof exactly."""
     for name, (events, lib, base) in self.examples.items():
