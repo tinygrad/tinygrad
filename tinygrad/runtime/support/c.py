@@ -17,7 +17,9 @@ def _IOW(base, nr, typ): return functools.partial(_do_ioctl, 1, ord(base) if isi
 def _IOR(base, nr, typ): return functools.partial(_do_ioctl, 2, ord(base) if isinstance(base, str) else base, nr, typ)
 def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, typ)
 
-def del_an(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
+def del_an(ty):
+  if isinstance(ty, type) and issubclass(ty, Enum): return del_an(ty.__orig_bases__[0])
+  return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
 def CFUNCTYPE(*args): return ctypes.CFUNCTYPE(*(del_an(a) for a in args))
 
 _pending_records = []
