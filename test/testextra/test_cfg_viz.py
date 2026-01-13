@@ -7,6 +7,7 @@ import textwrap, functools
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv
+from tinygrad.device import Compiler
 
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
@@ -55,16 +56,22 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
 
-def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, n_threads:int=1, n_workgroups:int=1) -> UOp:
+def assemble(name:str, insts:list[str|Inst], compiler:Compiler) -> tuple[str, bytes]:
+  asm = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
+  src = template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(asm))
+  return (src, compiler.compile(src))
+
+def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, compiler:Compiler, n_threads:int=1, n_workgroups:int=1) -> UOp:
   lidx = UOp.special(n_threads, "lidx0")
   gidx = UOp.special(n_workgroups, "gidx0")
   sink = UOp.sink(out, lidx, gidx, arg=KernelInfo(name=name))
-  asm = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
-  src = template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(asm))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)), arg=())
+  # NOTE: shouldn't need compiler once we can output ELF
+  src, lib = assemble(name, insts, compiler)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=())
 
 def run_asm(name:str, insts:list) -> None:
-  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT)
+  fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=Device[Device.DEFAULT].compiler)
   out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
   out.realize()
 
