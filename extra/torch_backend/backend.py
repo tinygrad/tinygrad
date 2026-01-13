@@ -168,9 +168,13 @@ def cummax(self, dim):
   values, indices = unwrap(self).cummax(dim)
   return (wrap(values), wrap(indices.cast(dtypes.int64)))
 
+@torch.library.impl("aten::cummin", "privateuseone")
+def cummin(self, dim):
+  values, indices = unwrap(self).cummin(dim)
+  return (wrap(values), wrap(indices.cast(dtypes.int64)))
+
 @torch.library.impl("aten::nonzero", "privateuseone")
-# TODO: move to tinygrad
-def nonzero(self): return aten.nonzero(self.cpu()).tiny()
+def nonzero(self): return wrap(unwrap(self).nonzero())
 
 @torch.library.impl("aten::_linalg_eigh", "privateuseone")
 # TODO: move to tinygrad
