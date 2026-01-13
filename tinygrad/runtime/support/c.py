@@ -60,12 +60,13 @@ def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
 def mv(st) -> memoryview: return memoryview(st).cast('B')
 
-def record(cls):
+class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
     for f,v in [*zip(self._real_fields_, args), *kwargs.items()]: setattr(self, f, v)
-  struct = type(cls.__name__, (ctypes.Structure,), {'__init__':__init__, '_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)],
-                                                    '_real_fields_':tuple(cls.__annotations__.keys())})
+
+def record(cls) -> type[Struct]:
+  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)], '_real_fields_':tuple(cls.__annotations__.keys())})
   _pending_records.append((cls, struct, sys._getframe().f_back.f_globals))
   return struct
 

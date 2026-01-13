@@ -107,10 +107,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     if t.kind in tmap: return tmap[t.kind]
     if nm(t) in types and types[nm(t)][1]: return types[nm(t)][0]
     if ((f:=t).kind in fps) or (t.kind == clang.CXType_Pointer and (f:=clang.clang_getPointeeType(t)).kind in fps):
-      return (f"CFUNCTYPE({tname(clang.clang_getResultType(f))}" +
+      return (f"c.CFUNCTYPE({tname(clang.clang_getResultType(f))}" +
               ((', '+', '.join(map(tname, arguments(f)))) if f.kind==clang.CXType_FunctionProto else '') + ")")
     match t.kind:
-      case clang.CXType_Pointer: return f"POINTER({tname(clang.clang_getPointeeType(t))})"
+      case clang.CXType_Pointer: return f"c.POINTER({tname(clang.clang_getPointeeType(t))})"
       case clang.CXType_ObjCObjectPointer: return tname(clang.clang_getPointeeType(t)) # TODO: this seems wrong
       case clang.CXType_Elaborated: return tname(clang.clang_Type_getNamedType(t), suggested_name)
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
@@ -134,7 +134,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           if typedef: lines.append(f"{typedef}: TypeAlias = {tnm}")
         ff=[(f, tname(clang.clang_getCursorType(f)), offset) + ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
                                                                     *clang.clang_Cursor_isBitField(f)) for f,offset in all_fields(t)]
-        if ff: lines[ln] = '\n'.join(["@record", f"class {tnm}:", f"  SIZE = {clang.clang_Type_getSizeOf(t)}",
+        if ff: lines[ln] = '\n'.join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}",
                                       *[f"  {normalize(f)}: Annotated[{', '.join(str(a) for a in args)}]" for f,*args in ff]])
         return tnm
       case clang.CXType_Enum:
@@ -147,10 +147,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
                      "\n".join(f"{nm(e)} = {types[nm(t)][0]}.define('{nm(e)}', {value(e)})" for e in children(decl)
                      if e.kind == clang.CXCursor_EnumConstantDecl) + "\n")
         return types[nm(t)][0]
-      case clang.CXType_ConstantArray: return ("Array[" + tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))
+      case clang.CXType_ConstantArray: return ("c.Array[" + tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))
                                                + f", Literal[{clang.clang_getArraySize(t)}]]")
       case clang.CXType_IncompleteArray:
-        return f"Array[{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))}, Literal[0]]"
+        return f"c.Array[{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))}, Literal[0]]"
       case clang.CXType_ObjCInterface:
         is_defn = bool([f.kind for f in children(decl) if f.kind in (clang.CXCursor_ObjCInstanceMethodDecl, clang.CXCursor_ObjCClassMethodDecl)])
         if (tnm:=nm(t)) not in types: lines.append(f"class {tnm}(objc.Spec): pass")
@@ -252,10 +252,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
   main = '\n'.join(["from __future__ import annotations", "import ctypes", "from typing import Annotated, Literal, TypeAlias",
-                    "from tinygrad.runtime.support.c import DLL, record, Array, POINTER, CFUNCTYPE, CEnum, _IO, _IOW, _IOR, _IOWR, init_records",
+                    "from tinygrad.runtime.support import c", "from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR",
                     *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
-                    *([f"dll = DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines,
-                    "init_records()"]) + '\n'
+                    *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines,
+                    "c.init_records()"]) + '\n'
   macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:
