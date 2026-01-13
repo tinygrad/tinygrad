@@ -1124,7 +1124,7 @@ def profile_matches(fxn:Callable):
 
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None):
-    if len(pats:=self.pdict.get(uop.op, [])):
+    if pats:=self.pdict.get(uop.op):
       ret = None
       ler = {u.op for u in uop.src}
       for p,match,early_reject in pats:
