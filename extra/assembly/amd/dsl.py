@@ -196,9 +196,9 @@ class VDSTYField(BitField):
 # Operand info from XML
 # ══════════════════════════════════════════════════════════════
 
-from extra.assembly.amd.autogen.rdna3.info import OPERANDS as OPERANDS_RDNA3
-from extra.assembly.amd.autogen.rdna4.info import OPERANDS as OPERANDS_RDNA4
-from extra.assembly.amd.autogen.cdna.info import OPERANDS as OPERANDS_CDNA
+from extra.assembly.amd.autogen.rdna3.operands import OPERANDS as OPERANDS_RDNA3
+from extra.assembly.amd.autogen.rdna4.operands import OPERANDS as OPERANDS_RDNA4
+from extra.assembly.amd.autogen.cdna.operands import OPERANDS as OPERANDS_CDNA
 OPERANDS = {**OPERANDS_CDNA, **OPERANDS_RDNA3, **OPERANDS_RDNA4}
 
 # ══════════════════════════════════════════════════════════════
