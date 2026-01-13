@@ -21,7 +21,7 @@ def del_an(ty): return ty.__metadata__[0] if get_origin(ty) is Annotated else (N
 def POINTER(p): return ctypes.POINTER(del_an(p))
 def CFUNCTYPE(*args): return ctypes.CFUNCTYPE(*(del_an(a) for a in args))
 
-def CEnum(typ: type[ctypes._SimpleCData]):
+def CEnum(typ):
   class _CEnum(del_an(typ)): # type: ignore
     _val_to_name_: dict[int,str] = {}
 
