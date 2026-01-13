@@ -162,9 +162,8 @@ def randperm_generator(n, generator=None, out=None):
 
 @torch.library.impl("aten::cummax", "privateuseone")
 def cummax(self, dim):
-  # TODO: support cummax with indices to match torch
-  cummax, indices = aten.cummax(self.cpu(), dim)
-  return (cummax.tiny(), indices.tiny())
+  values, indices = unwrap(self).cummax(dim)
+  return (wrap(values), wrap(indices.cast(dtypes.int64)))
 
 @torch.library.impl("aten::nonzero", "privateuseone")
 # TODO: move to tinygrad

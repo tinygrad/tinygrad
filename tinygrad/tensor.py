@@ -1997,7 +1997,7 @@ class Tensor(OpMixin):
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
     x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
-    x_cummax = x.cummax(-1)
+    x_cummax, _ = x.cummax(-1)
     mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), dtypes.min(self.dtype)).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
@@ -2443,19 +2443,23 @@ class Tensor(OpMixin):
     """
     return self._split_cumalu(axis, Ops.MUL)
 
-  def cummax(self, axis:int=0) -> Tensor:
+  def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
     """
-    Computes the cumulative max of the tensor along the specified `axis`.
+    Computes the cumulative max of the tensor along `axis`, returning (values, indices).
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([0, 1, -1, 2, -2, 3, -3])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cummax(0).numpy())
+    values, indices = t.cummax(0)
+    print(values.numpy())
+    print(indices.numpy())
     ```
     """
-    return self._split_cumalu(axis, Ops.MAX)
+    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), Tensor.zeros(self.shape, dtype=dtypes.int32, device=self.device)
+    values, n = self._split_cumalu(axis, Ops.MAX), self.shape[axis]
+    x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
+    match = (x.unsqueeze(-1) == values_t.unsqueeze(-2)) * Tensor.ones(n, n, requires_grad=False, device=self.device).triu()
+    idx = (-(match * Tensor.arange(n, 0, -1, requires_grad=False, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
+    return values, idx.transpose(-1, axis)
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, device=None, requires_grad:bool|None=None) -> Tensor:
