@@ -65,7 +65,7 @@ if TYPE_CHECKING:
   class POINTER(_Pointer[CT]): ...
 else:
   class POINTER:
-    def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key[0]))
+    def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key))
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
