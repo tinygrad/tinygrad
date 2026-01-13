@@ -26,6 +26,24 @@ T = TypeVar("T")
 U = TypeVar("U")
 V = TypeVar("V")
 
+class Enum:
+  _val_to_name_: dict[int,str] = {}
+
+  @classmethod
+  def from_param(cls, val): return val if isinstance(val, cls) else cls(val)
+  @classmethod
+  def get(cls, val, default="unknown"): return cls._val_to_name_.get(val.value if isinstance(val, cls) else val, default)
+  @classmethod
+  def items(cls): return cls._val_to_name_.items()
+  @classmethod
+  def define(cls, name, val):
+    cls._val_to_name_[val] = name
+    return val
+
+  def __eq__(self, other): return self.value == other
+  def __repr__(self): return self.get(self) if self.value in self.__class__._val_to_name_ else str(self.value)
+  def __hash__(self): return hash(self.value)
+
 def CEnum(typ: type[T]) -> type[T]:
   class _CEnum(del_an(typ)): # type: ignore
     _val_to_name_: dict[int,str] = {}

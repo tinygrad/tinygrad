@@ -118,7 +118,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         defined, cnm = nm(canon:=clang.clang_getCanonicalType(t)) in types, tname(canon, typedef=nm(t).replace('::', '_'))
         types[nm(t)] = cnm if nm(t).startswith("__") else nm(t).replace('::', '_'), True
         # RECORDs need to handle typedefs specially to allow for self-reference
-        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')}{'' if 'enum' in cnm else ': TypeAlias'} = {cnm}")
+        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')}: TypeAlias = {cnm}")
         return types[nm(t)][0]
       case clang.CXType_Record:
         # TODO: packed unions
@@ -144,8 +144,8 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         else: types[nm(t)] = nm(t).replace(' ', '_').replace('::', '_'), True
         ety = clang.clang_getEnumDeclIntegerType(decl)
         def value(e): return (clang.clang_getEnumConstantDeclUnsignedValue if ety.kind in uints else clang.clang_getEnumConstantDeclValue)(e)
-        lines.append(f"{types[nm(t)][0]} = CEnum({tname(ety)})\n" +
-                     "\n".join(f"{nm(e)} = {types[nm(t)][0]}.define('{nm(e)}', {value(e)}) # type: ignore" for e in children(decl)
+        lines.append(f"class {types[nm(t)][0]}({tname(ety)}, Enum): pass\n" +
+                     "\n".join(f"{nm(e)} = {types[nm(t)][0]}.define('{nm(e)}', {value(e)})" for e in children(decl)
                      if e.kind == clang.CXCursor_EnumConstantDecl) + "\n")
         return types[nm(t)][0]
       case clang.CXType_ConstantArray: return ("c.Array[" + tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))
@@ -253,7 +253,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
   main = '\n'.join(['# mypy: disable-error-code="empty-body"', "from __future__ import annotations", "import ctypes",
-                    "from typing import Annotated, Literal, TypeAlias", "from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR",
+                    "from typing import Annotated, Literal, TypeAlias", "from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR",
                     "from tinygrad.runtime.support import c", *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines,
                     "c.init_records()"]) + '\n'
