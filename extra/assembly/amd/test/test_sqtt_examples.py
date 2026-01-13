@@ -2,14 +2,14 @@
 """Tests for SQTT packet decoding using real captured examples."""
 import pickle, unittest, ctypes, threading
 from pathlib import Path
-from tinygrad.helpers import DEBUG, colored
+from tinygrad.helpers import DEBUG
 from tinygrad.runtime.autogen import rocprof
 from tinygrad.runtime.support.elf import elf_loader
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
-                                     ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, AluSrc, MemSrc)
+                                     ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, print_packets)
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
 # INST ops for non-traced SIMDs (excluded from instruction count)
@@ -18,34 +18,6 @@ OTHER_SIMD_OPS = {InstOp.OTHER_LDS_LOAD, InstOp.OTHER_LDS_STORE, InstOp.OTHER_LD
                   InstOp.OTHER_FLAT_STORE_128, InstOp.OTHER_GLOBAL_LOAD, InstOp.OTHER_GLOBAL_LOAD_VADDR,
                   InstOp.OTHER_GLOBAL_STORE_64, InstOp.OTHER_GLOBAL_STORE_96, InstOp.OTHER_GLOBAL_STORE_128,
                   InstOp.OTHER_GLOBAL_STORE_VADDR_128}
-
-PACKET_COLORS = {
-  "INST": "WHITE", "VALUINST": "BLACK", "VMEMEXEC": "yellow", "ALUEXEC": "yellow",
-  "IMMEDIATE": "YELLOW", "IMMEDIATE_MASK": "YELLOW", "WAVERDY": "cyan", "WAVEALLOC": "cyan",
-  "WAVEEND": "blue", "WAVESTART": "blue", "PERF": "magenta", "EVENT": "red", "EVENT_BIG": "red",
-  "REG": "green", "LAYOUT_HEADER": "white", "SNAPSHOT": "white", "UTILCTR": "green",
-}
-
-def format_packet(p, time_offset: int = 0) -> str:
-  name, cycle = type(p).__name__, p._time - time_offset
-  if isinstance(p, INST):
-    op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
-    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
-  elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
-  elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
-  elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
-  elif isinstance(p, (WAVESTART, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
-  elif hasattr(p, '_values'):
-    fields = " ".join(f"{k}=0x{v:x}" if k in {'snap', 'val32'} else f"{k}={v}"
-                      for k, v in p._values.items() if not k.startswith('_') and k != 'delta')
-  else: fields = ""
-  return f"{cycle:8}: {colored(f'{name:18}', PACKET_COLORS.get(name, 'white'))} {fields}"
-
-def print_packets(packets: list) -> None:
-  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"}
-  time_offset = packets[0]._time if packets else 0
-  for p in packets:
-    if type(p).__name__ not in skip: print(format_packet(p, time_offset))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROCPROF DECODER
@@ -135,7 +107,7 @@ class TestSQTTExamples(unittest.TestCase):
     for name, (events, *_) in self.examples.items():
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
-          packets = decode(event.blob)
+          packets = list(decode(event.blob))
           if DEBUG >= 2: print(f"\n=== {name} event {i} ==="); print_packets(packets)
           self.assertGreater(len(packets), 0, f"no packets decoded from {name} event {i}")
           self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
@@ -169,6 +141,20 @@ class TestSQTTExamples(unittest.TestCase):
         all_packets = [p for e in events for p in decode(e.blob)]
         self.assertGreater(len([p for p in all_packets if isinstance(p, INST)]), 0, f"no INST packets in {name}")
 
+  def test_packet_counts(self):
+    expected = {
+      "profile_empty_run_0": [559, 600],
+      "profile_empty_run_1": [517, 570],
+      "profile_gemm_run_0": [1489, 604, 1789, 466, 17570, 407],
+      "profile_gemm_run_1": [1453, 604, 1871, 493, 17827, 460],
+      "profile_plus_run_0": [695, 668],
+      "profile_plus_run_1": [663, 593],
+    }
+    for name, (events, *_) in self.examples.items():
+      with self.subTest(example=name):
+        counts = [len(list(decode(e.blob))) for e in events]
+        self.assertEqual(counts, expected[name], f"packet count mismatch in {name}")
+
   def test_rocprof_wave_times_match(self):
     """Wave start/end times must match rocprof exactly."""
     for name, (events, lib, base) in self.examples.items():
@@ -184,9 +170,8 @@ class TestSQTTExamples(unittest.TestCase):
         # extract from our decoder
         our_waves: list[tuple[int, int]] = []
         for event in events:
-          packets = decode(event.blob)
           wave_starts: dict[tuple[int, int, int], int] = {}
-          for p in packets:
+          for p in decode(event.blob):
             if isinstance(p, WAVESTART): wave_starts[(p.wave, p.simd, p.cu)] = p._time
             elif isinstance(p, WAVEEND) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
               our_waves.append((wave_starts[key], p._time))
