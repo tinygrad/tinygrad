@@ -4,17 +4,17 @@ from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support import c
 from tinygrad.runtime.support.c import CEnum, _IO, _IOW, _IOR, _IOWR
 dll = c.DLL('libclang', ['clang-20', 'clang'])
-CXIndex: TypeAlias = c.POINTER[None]
+CXIndex: TypeAlias = c.POINTER(None)
 class struct_CXTargetInfoImpl(ctypes.Structure): pass
-CXTargetInfo: TypeAlias = c.POINTER[struct_CXTargetInfoImpl]
+CXTargetInfo: TypeAlias = c.POINTER(struct_CXTargetInfoImpl)
 class struct_CXTranslationUnitImpl(ctypes.Structure): pass
-CXTranslationUnit: TypeAlias = c.POINTER[struct_CXTranslationUnitImpl]
-CXClientData: TypeAlias = c.POINTER[None]
+CXTranslationUnit: TypeAlias = c.POINTER(struct_CXTranslationUnitImpl)
+CXClientData: TypeAlias = c.POINTER(None)
 @c.record
 class struct_CXUnsavedFile(c.Struct):
   SIZE = 24
-  Filename: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 0]
-  Contents: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 8]
+  Filename: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 0]
+  Contents: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 8]
   Length: Annotated[Annotated[int, ctypes.c_uint64], 16]
 enum_CXAvailabilityKind = CEnum(Annotated[int, ctypes.c_uint32])
 CXAvailability_Available = enum_CXAvailabilityKind.define('CXAvailability_Available', 0)
@@ -65,29 +65,29 @@ class struct_CXIndexOptions(c.Struct):
   ExcludeDeclarationsFromPCH: Annotated[Annotated[int, ctypes.c_uint32], 6, 1, 0]
   DisplayDiagnostics: Annotated[Annotated[int, ctypes.c_uint32], 6, 1, 1]
   StorePreamblesInMemory: Annotated[Annotated[int, ctypes.c_uint32], 6, 1, 2]
-  PreambleStoragePath: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 8]
-  InvocationEmissionPath: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 16]
+  PreambleStoragePath: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 8]
+  InvocationEmissionPath: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 16]
 CXIndexOptions: TypeAlias = struct_CXIndexOptions
 @dll.bind
-def clang_createIndexWithOptions(options:c.POINTER[CXIndexOptions]) -> CXIndex: ...
+def clang_createIndexWithOptions(options:c.POINTER(CXIndexOptions)) -> CXIndex: ...
 @dll.bind
 def clang_CXIndex_setGlobalOptions(_0:CXIndex, options:Annotated[int, ctypes.c_uint32]) -> None: ...
 @dll.bind
 def clang_CXIndex_getGlobalOptions(_0:CXIndex) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_CXIndex_setInvocationEmissionPathOption(_0:CXIndex, Path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
-CXFile: TypeAlias = c.POINTER[None]
+def clang_CXIndex_setInvocationEmissionPathOption(_0:CXIndex, Path:c.POINTER(Annotated[bytes, ctypes.c_char])) -> None: ...
+CXFile: TypeAlias = c.POINTER(None)
 @dll.bind
 def clang_isFileMultipleIncludeGuarded(tu:CXTranslationUnit, file:CXFile) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_getFile(tu:CXTranslationUnit, file_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CXFile: ...
+def clang_getFile(tu:CXTranslationUnit, file_name:c.POINTER(Annotated[bytes, ctypes.c_char])) -> CXFile: ...
 size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
-def clang_getFileContents(tu:CXTranslationUnit, file:CXFile, size:c.POINTER[size_t]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def clang_getFileContents(tu:CXTranslationUnit, file:CXFile, size:c.POINTER(size_t)) -> c.POINTER(Annotated[bytes, ctypes.c_char]): ...
 @c.record
 class CXSourceLocation(c.Struct):
   SIZE = 24
-  ptr_data: Annotated[c.Array[c.POINTER[None], Literal[2]], 0]
+  ptr_data: Annotated[c.Array[c.POINTER(None), Literal[2]], 0]
   int_data: Annotated[Annotated[int, ctypes.c_uint32], 16]
 @dll.bind
 def clang_getLocation(tu:CXTranslationUnit, file:CXFile, line:Annotated[int, ctypes.c_uint32], column:Annotated[int, ctypes.c_uint32]) -> CXSourceLocation: ...
@@ -97,36 +97,36 @@ def clang_getLocationForOffset(tu:CXTranslationUnit, file:CXFile, offset:Annotat
 class CXSourceRangeList(c.Struct):
   SIZE = 16
   count: Annotated[Annotated[int, ctypes.c_uint32], 0]
-  ranges: Annotated[c.POINTER[CXSourceRange], 8]
+  ranges: Annotated[c.POINTER(CXSourceRange), 8]
 @c.record
 class CXSourceRange(c.Struct):
   SIZE = 24
-  ptr_data: Annotated[c.Array[c.POINTER[None], Literal[2]], 0]
+  ptr_data: Annotated[c.Array[c.POINTER(None), Literal[2]], 0]
   begin_int_data: Annotated[Annotated[int, ctypes.c_uint32], 16]
   end_int_data: Annotated[Annotated[int, ctypes.c_uint32], 20]
 @dll.bind
-def clang_getSkippedRanges(tu:CXTranslationUnit, file:CXFile) -> c.POINTER[CXSourceRangeList]: ...
+def clang_getSkippedRanges(tu:CXTranslationUnit, file:CXFile) -> c.POINTER(CXSourceRangeList): ...
 @dll.bind
-def clang_getAllSkippedRanges(tu:CXTranslationUnit) -> c.POINTER[CXSourceRangeList]: ...
+def clang_getAllSkippedRanges(tu:CXTranslationUnit) -> c.POINTER(CXSourceRangeList): ...
 @dll.bind
 def clang_getNumDiagnostics(Unit:CXTranslationUnit) -> Annotated[int, ctypes.c_uint32]: ...
-CXDiagnostic: TypeAlias = c.POINTER[None]
+CXDiagnostic: TypeAlias = c.POINTER(None)
 @dll.bind
 def clang_getDiagnostic(Unit:CXTranslationUnit, Index:Annotated[int, ctypes.c_uint32]) -> CXDiagnostic: ...
-CXDiagnosticSet: TypeAlias = c.POINTER[None]
+CXDiagnosticSet: TypeAlias = c.POINTER(None)
 @dll.bind
 def clang_getDiagnosticSetFromTU(Unit:CXTranslationUnit) -> CXDiagnosticSet: ...
 @c.record
 class CXString(c.Struct):
   SIZE = 16
-  data: Annotated[c.POINTER[None], 0]
+  data: Annotated[c.POINTER(None), 0]
   private_flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
 @dll.bind
 def clang_getTranslationUnitSpelling(CTUnit:CXTranslationUnit) -> CXString: ...
 @dll.bind
-def clang_createTranslationUnitFromSourceFile(CIdx:CXIndex, source_filename:c.POINTER[Annotated[bytes, ctypes.c_char]], num_clang_command_line_args:Annotated[int, ctypes.c_int32], clang_command_line_args:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), num_unsaved_files:Annotated[int, ctypes.c_uint32], unsaved_files:c.POINTER[struct_CXUnsavedFile]) -> CXTranslationUnit: ...
+def clang_createTranslationUnitFromSourceFile(CIdx:CXIndex, source_filename:c.POINTER(Annotated[bytes, ctypes.c_char]), num_clang_command_line_args:Annotated[int, ctypes.c_int32], clang_command_line_args:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), num_unsaved_files:Annotated[int, ctypes.c_uint32], unsaved_files:c.POINTER(struct_CXUnsavedFile)) -> CXTranslationUnit: ...
 @dll.bind
-def clang_createTranslationUnit(CIdx:CXIndex, ast_filename:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CXTranslationUnit: ...
+def clang_createTranslationUnit(CIdx:CXIndex, ast_filename:c.POINTER(Annotated[bytes, ctypes.c_char])) -> CXTranslationUnit: ...
 enum_CXErrorCode = CEnum(Annotated[int, ctypes.c_uint32])
 CXError_Success = enum_CXErrorCode.define('CXError_Success', 0)
 CXError_Failure = enum_CXErrorCode.define('CXError_Failure', 1)
@@ -135,7 +135,7 @@ CXError_InvalidArguments = enum_CXErrorCode.define('CXError_InvalidArguments', 3
 CXError_ASTReadError = enum_CXErrorCode.define('CXError_ASTReadError', 4)
 
 @dll.bind
-def clang_createTranslationUnit2(CIdx:CXIndex, ast_filename:c.POINTER[Annotated[bytes, ctypes.c_char]], out_TU:c.POINTER[CXTranslationUnit]) -> enum_CXErrorCode: ...
+def clang_createTranslationUnit2(CIdx:CXIndex, ast_filename:c.POINTER(Annotated[bytes, ctypes.c_char]), out_TU:c.POINTER(CXTranslationUnit)) -> enum_CXErrorCode: ...
 enum_CXTranslationUnit_Flags = CEnum(Annotated[int, ctypes.c_uint32])
 CXTranslationUnit_None = enum_CXTranslationUnit_Flags.define('CXTranslationUnit_None', 0)
 CXTranslationUnit_DetailedPreprocessingRecord = enum_CXTranslationUnit_Flags.define('CXTranslationUnit_DetailedPreprocessingRecord', 1)
@@ -158,11 +158,11 @@ CXTranslationUnit_RetainExcludedConditionalBlocks = enum_CXTranslationUnit_Flags
 @dll.bind
 def clang_defaultEditingTranslationUnitOptions() -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_parseTranslationUnit(CIdx:CXIndex, source_filename:c.POINTER[Annotated[bytes, ctypes.c_char]], command_line_args:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32]) -> CXTranslationUnit: ...
+def clang_parseTranslationUnit(CIdx:CXIndex, source_filename:c.POINTER(Annotated[bytes, ctypes.c_char]), command_line_args:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER(struct_CXUnsavedFile), num_unsaved_files:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32]) -> CXTranslationUnit: ...
 @dll.bind
-def clang_parseTranslationUnit2(CIdx:CXIndex, source_filename:c.POINTER[Annotated[bytes, ctypes.c_char]], command_line_args:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32], out_TU:c.POINTER[CXTranslationUnit]) -> enum_CXErrorCode: ...
+def clang_parseTranslationUnit2(CIdx:CXIndex, source_filename:c.POINTER(Annotated[bytes, ctypes.c_char]), command_line_args:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER(struct_CXUnsavedFile), num_unsaved_files:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32], out_TU:c.POINTER(CXTranslationUnit)) -> enum_CXErrorCode: ...
 @dll.bind
-def clang_parseTranslationUnit2FullArgv(CIdx:CXIndex, source_filename:c.POINTER[Annotated[bytes, ctypes.c_char]], command_line_args:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32], out_TU:c.POINTER[CXTranslationUnit]) -> enum_CXErrorCode: ...
+def clang_parseTranslationUnit2FullArgv(CIdx:CXIndex, source_filename:c.POINTER(Annotated[bytes, ctypes.c_char]), command_line_args:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER(struct_CXUnsavedFile), num_unsaved_files:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32], out_TU:c.POINTER(CXTranslationUnit)) -> enum_CXErrorCode: ...
 enum_CXSaveTranslationUnit_Flags = CEnum(Annotated[int, ctypes.c_uint32])
 CXSaveTranslationUnit_None = enum_CXSaveTranslationUnit_Flags.define('CXSaveTranslationUnit_None', 0)
 
@@ -175,7 +175,7 @@ CXSaveError_TranslationErrors = enum_CXSaveError.define('CXSaveError_Translation
 CXSaveError_InvalidTU = enum_CXSaveError.define('CXSaveError_InvalidTU', 3)
 
 @dll.bind
-def clang_saveTranslationUnit(TU:CXTranslationUnit, FileName:c.POINTER[Annotated[bytes, ctypes.c_char]], options:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
+def clang_saveTranslationUnit(TU:CXTranslationUnit, FileName:c.POINTER(Annotated[bytes, ctypes.c_char]), options:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def clang_suspendTranslationUnit(_0:CXTranslationUnit) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
@@ -186,7 +186,7 @@ CXReparse_None = enum_CXReparse_Flags.define('CXReparse_None', 0)
 @dll.bind
 def clang_defaultReparseOptions(TU:CXTranslationUnit) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_reparseTranslationUnit(TU:CXTranslationUnit, num_unsaved_files:Annotated[int, ctypes.c_uint32], unsaved_files:c.POINTER[struct_CXUnsavedFile], options:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
+def clang_reparseTranslationUnit(TU:CXTranslationUnit, num_unsaved_files:Annotated[int, ctypes.c_uint32], unsaved_files:c.POINTER(struct_CXUnsavedFile), options:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
 enum_CXTUResourceUsageKind = CEnum(Annotated[int, ctypes.c_uint32])
 CXTUResourceUsage_AST = enum_CXTUResourceUsageKind.define('CXTUResourceUsage_AST', 1)
 CXTUResourceUsage_Identifiers = enum_CXTUResourceUsageKind.define('CXTUResourceUsage_Identifiers', 2)
@@ -208,7 +208,7 @@ CXTUResourceUsage_First = enum_CXTUResourceUsageKind.define('CXTUResourceUsage_F
 CXTUResourceUsage_Last = enum_CXTUResourceUsageKind.define('CXTUResourceUsage_Last', 14)
 
 @dll.bind
-def clang_getTUResourceUsageName(kind:enum_CXTUResourceUsageKind) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def clang_getTUResourceUsageName(kind:enum_CXTUResourceUsageKind) -> c.POINTER(Annotated[bytes, ctypes.c_char]): ...
 @c.record
 class struct_CXTUResourceUsageEntry(c.Struct):
   SIZE = 16
@@ -218,9 +218,9 @@ CXTUResourceUsageEntry: TypeAlias = struct_CXTUResourceUsageEntry
 @c.record
 class struct_CXTUResourceUsage(c.Struct):
   SIZE = 24
-  data: Annotated[c.POINTER[None], 0]
+  data: Annotated[c.POINTER(None), 0]
   numEntries: Annotated[Annotated[int, ctypes.c_uint32], 8]
-  entries: Annotated[c.POINTER[CXTUResourceUsageEntry], 16]
+  entries: Annotated[c.POINTER(CXTUResourceUsageEntry), 16]
 CXTUResourceUsage: TypeAlias = struct_CXTUResourceUsage
 @dll.bind
 def clang_getCXTUResourceUsage(TU:CXTranslationUnit) -> CXTUResourceUsage: ...
@@ -545,7 +545,7 @@ class CXCursor(c.Struct):
   SIZE = 32
   kind: Annotated[enum_CXCursorKind, 0]
   xdata: Annotated[Annotated[int, ctypes.c_int32], 4]
-  data: Annotated[c.Array[c.POINTER[None], Literal[3]], 8]
+  data: Annotated[c.Array[c.POINTER(None), Literal[3]], 8]
 @dll.bind
 def clang_getNullCursor() -> CXCursor: ...
 @dll.bind
@@ -610,9 +610,9 @@ class struct_CXPlatformAvailability(c.Struct):
   Message: Annotated[CXString, 56]
 CXPlatformAvailability: TypeAlias = struct_CXPlatformAvailability
 @dll.bind
-def clang_getCursorPlatformAvailability(cursor:CXCursor, always_deprecated:c.POINTER[Annotated[int, ctypes.c_int32]], deprecated_message:c.POINTER[CXString], always_unavailable:c.POINTER[Annotated[int, ctypes.c_int32]], unavailable_message:c.POINTER[CXString], availability:c.POINTER[CXPlatformAvailability], availability_size:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
+def clang_getCursorPlatformAvailability(cursor:CXCursor, always_deprecated:c.POINTER(Annotated[int, ctypes.c_int32]), deprecated_message:c.POINTER(CXString), always_unavailable:c.POINTER(Annotated[int, ctypes.c_int32]), unavailable_message:c.POINTER(CXString), availability:c.POINTER(CXPlatformAvailability), availability_size:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def clang_disposeCXPlatformAvailability(availability:c.POINTER[CXPlatformAvailability]) -> None: ...
+def clang_disposeCXPlatformAvailability(availability:c.POINTER(CXPlatformAvailability)) -> None: ...
 @dll.bind
 def clang_Cursor_getVarDeclInitializer(cursor:CXCursor) -> CXCursor: ...
 @dll.bind
@@ -637,7 +637,7 @@ def clang_getCursorTLSKind(cursor:CXCursor) -> enum_CXTLSKind: ...
 @dll.bind
 def clang_Cursor_getTranslationUnit(_0:CXCursor) -> CXTranslationUnit: ...
 class struct_CXCursorSetImpl(ctypes.Structure): pass
-CXCursorSet: TypeAlias = c.POINTER[struct_CXCursorSetImpl]
+CXCursorSet: TypeAlias = c.POINTER(struct_CXCursorSetImpl)
 @dll.bind
 def clang_createCXCursorSet() -> CXCursorSet: ...
 @dll.bind
@@ -651,9 +651,9 @@ def clang_getCursorSemanticParent(cursor:CXCursor) -> CXCursor: ...
 @dll.bind
 def clang_getCursorLexicalParent(cursor:CXCursor) -> CXCursor: ...
 @dll.bind
-def clang_getOverriddenCursors(cursor:CXCursor, overridden:c.POINTER[c.POINTER(CXCursor]), num_overridden:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_getOverriddenCursors(cursor:CXCursor, overridden:c.POINTER(c.POINTER(CXCursor)), num_overridden:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
-def clang_disposeOverriddenCursors(overridden:c.POINTER[CXCursor]) -> None: ...
+def clang_disposeOverriddenCursors(overridden:c.POINTER(CXCursor)) -> None: ...
 @dll.bind
 def clang_getIncludedFile(cursor:CXCursor) -> CXFile: ...
 @dll.bind
@@ -823,7 +823,7 @@ CXCallingConv_Unexposed = enum_CXCallingConv.define('CXCallingConv_Unexposed', 2
 class CXType(c.Struct):
   SIZE = 24
   kind: Annotated[enum_CXTypeKind, 0]
-  data: Annotated[c.Array[c.POINTER[None], Literal[2]], 8]
+  data: Annotated[c.Array[c.POINTER(None), Literal[2]], 8]
 @dll.bind
 def clang_getCursorType(C:CXCursor) -> CXType: ...
 @dll.bind
@@ -964,7 +964,7 @@ def clang_Type_getClassType(T:CXType) -> CXType: ...
 @dll.bind
 def clang_Type_getSizeOf(T:CXType) -> Annotated[int, ctypes.c_int64]: ...
 @dll.bind
-def clang_Type_getOffsetOf(T:CXType, S:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int64]: ...
+def clang_Type_getOffsetOf(T:CXType, S:c.POINTER(Annotated[bytes, ctypes.c_char])) -> Annotated[int, ctypes.c_int64]: ...
 @dll.bind
 def clang_Type_getModifiedType(T:CXType) -> CXType: ...
 @dll.bind
@@ -1064,32 +1064,32 @@ CXChildVisit_Break = enum_CXChildVisitResult.define('CXChildVisit_Break', 0)
 CXChildVisit_Continue = enum_CXChildVisitResult.define('CXChildVisit_Continue', 1)
 CXChildVisit_Recurse = enum_CXChildVisitResult.define('CXChildVisit_Recurse', 2)
 
-CXCursorVisitor: TypeAlias = c.CFUNCTYPE(enum_CXChildVisitResult, CXCursor, CXCursor, c.POINTER[None])
+CXCursorVisitor: TypeAlias = c.CFUNCTYPE(enum_CXChildVisitResult, CXCursor, CXCursor, c.POINTER(None))
 @dll.bind
 def clang_visitChildren(parent:CXCursor, visitor:CXCursorVisitor, client_data:CXClientData) -> Annotated[int, ctypes.c_uint32]: ...
 class struct__CXChildVisitResult(ctypes.Structure): pass
-CXCursorVisitorBlock: TypeAlias = c.POINTER[struct__CXChildVisitResult]
+CXCursorVisitorBlock: TypeAlias = c.POINTER(struct__CXChildVisitResult)
 @dll.bind
 def clang_visitChildrenWithBlock(parent:CXCursor, block:CXCursorVisitorBlock) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
 def clang_getCursorUSR(_0:CXCursor) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCClass(class_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CXString: ...
+def clang_constructUSR_ObjCClass(class_name:c.POINTER(Annotated[bytes, ctypes.c_char])) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCCategory(class_name:c.POINTER[Annotated[bytes, ctypes.c_char]], category_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CXString: ...
+def clang_constructUSR_ObjCCategory(class_name:c.POINTER(Annotated[bytes, ctypes.c_char]), category_name:c.POINTER(Annotated[bytes, ctypes.c_char])) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCProtocol(protocol_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CXString: ...
+def clang_constructUSR_ObjCProtocol(protocol_name:c.POINTER(Annotated[bytes, ctypes.c_char])) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCIvar(name:c.POINTER[Annotated[bytes, ctypes.c_char]], classUSR:CXString) -> CXString: ...
+def clang_constructUSR_ObjCIvar(name:c.POINTER(Annotated[bytes, ctypes.c_char]), classUSR:CXString) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCMethod(name:c.POINTER[Annotated[bytes, ctypes.c_char]], isInstanceMethod:Annotated[int, ctypes.c_uint32], classUSR:CXString) -> CXString: ...
+def clang_constructUSR_ObjCMethod(name:c.POINTER(Annotated[bytes, ctypes.c_char]), isInstanceMethod:Annotated[int, ctypes.c_uint32], classUSR:CXString) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCProperty(property:c.POINTER[Annotated[bytes, ctypes.c_char]], classUSR:CXString) -> CXString: ...
+def clang_constructUSR_ObjCProperty(property:c.POINTER(Annotated[bytes, ctypes.c_char]), classUSR:CXString) -> CXString: ...
 @dll.bind
 def clang_getCursorSpelling(_0:CXCursor) -> CXString: ...
 @dll.bind
 def clang_Cursor_getSpellingNameRange(_0:CXCursor, pieceIndex:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32]) -> CXSourceRange: ...
-CXPrintingPolicy: TypeAlias = c.POINTER[None]
+CXPrintingPolicy: TypeAlias = c.POINTER(None)
 enum_CXPrintingPolicyProperty = CEnum(Annotated[int, ctypes.c_uint32])
 CXPrintingPolicy_Indentation = enum_CXPrintingPolicyProperty.define('CXPrintingPolicy_Indentation', 0)
 CXPrintingPolicy_SuppressSpecifiers = enum_CXPrintingPolicyProperty.define('CXPrintingPolicy_SuppressSpecifiers', 1)
@@ -1185,7 +1185,7 @@ def clang_Cursor_isObjCOptional(C:CXCursor) -> Annotated[int, ctypes.c_uint32]: 
 @dll.bind
 def clang_Cursor_isVariadic(C:CXCursor) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_Cursor_isExternalSymbol(C:CXCursor, language:c.POINTER[CXString], definedIn:c.POINTER[CXString], isGenerated:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> Annotated[int, ctypes.c_uint32]: ...
+def clang_Cursor_isExternalSymbol(C:CXCursor, language:c.POINTER(CXString), definedIn:c.POINTER(CXString), isGenerated:c.POINTER(Annotated[int, ctypes.c_uint32])) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
 def clang_Cursor_getCommentRange(C:CXCursor) -> CXSourceRange: ...
 @dll.bind
@@ -1197,13 +1197,13 @@ def clang_Cursor_getMangling(_0:CXCursor) -> CXString: ...
 @c.record
 class CXStringSet(c.Struct):
   SIZE = 16
-  Strings: Annotated[c.POINTER[CXString], 0]
+  Strings: Annotated[c.POINTER(CXString), 0]
   Count: Annotated[Annotated[int, ctypes.c_uint32], 8]
 @dll.bind
-def clang_Cursor_getCXXManglings(_0:CXCursor) -> c.POINTER[CXStringSet]: ...
+def clang_Cursor_getCXXManglings(_0:CXCursor) -> c.POINTER(CXStringSet): ...
 @dll.bind
-def clang_Cursor_getObjCManglings(_0:CXCursor) -> c.POINTER[CXStringSet]: ...
-CXModule: TypeAlias = c.POINTER[None]
+def clang_Cursor_getObjCManglings(_0:CXCursor) -> c.POINTER(CXStringSet): ...
+CXModule: TypeAlias = c.POINTER(None)
 @dll.bind
 def clang_Cursor_getModule(C:CXCursor) -> CXModule: ...
 @dll.bind
@@ -1277,9 +1277,9 @@ CXTokenKind: TypeAlias = enum_CXTokenKind
 class CXToken(c.Struct):
   SIZE = 24
   int_data: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[4]], 0]
-  ptr_data: Annotated[c.POINTER[None], 16]
+  ptr_data: Annotated[c.POINTER(None), 16]
 @dll.bind
-def clang_getToken(TU:CXTranslationUnit, Location:CXSourceLocation) -> c.POINTER[CXToken]: ...
+def clang_getToken(TU:CXTranslationUnit, Location:CXSourceLocation) -> c.POINTER(CXToken): ...
 @dll.bind
 def clang_getTokenKind(_0:CXToken) -> CXTokenKind: ...
 @dll.bind
@@ -1289,20 +1289,20 @@ def clang_getTokenLocation(_0:CXTranslationUnit, _1:CXToken) -> CXSourceLocation
 @dll.bind
 def clang_getTokenExtent(_0:CXTranslationUnit, _1:CXToken) -> CXSourceRange: ...
 @dll.bind
-def clang_tokenize(TU:CXTranslationUnit, Range:CXSourceRange, Tokens:c.POINTER[c.POINTER(CXToken]), NumTokens:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_tokenize(TU:CXTranslationUnit, Range:CXSourceRange, Tokens:c.POINTER(c.POINTER(CXToken)), NumTokens:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
-def clang_annotateTokens(TU:CXTranslationUnit, Tokens:c.POINTER[CXToken], NumTokens:Annotated[int, ctypes.c_uint32], Cursors:c.POINTER[CXCursor]) -> None: ...
+def clang_annotateTokens(TU:CXTranslationUnit, Tokens:c.POINTER(CXToken), NumTokens:Annotated[int, ctypes.c_uint32], Cursors:c.POINTER(CXCursor)) -> None: ...
 @dll.bind
-def clang_disposeTokens(TU:CXTranslationUnit, Tokens:c.POINTER[CXToken], NumTokens:Annotated[int, ctypes.c_uint32]) -> None: ...
+def clang_disposeTokens(TU:CXTranslationUnit, Tokens:c.POINTER(CXToken), NumTokens:Annotated[int, ctypes.c_uint32]) -> None: ...
 @dll.bind
 def clang_getCursorKindSpelling(Kind:enum_CXCursorKind) -> CXString: ...
 @dll.bind
-def clang_getDefinitionSpellingAndExtent(_0:CXCursor, startBuf:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), endBuf:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), startLine:c.POINTER[Annotated[int, ctypes.c_uint32]], startColumn:c.POINTER[Annotated[int, ctypes.c_uint32]], endLine:c.POINTER[Annotated[int, ctypes.c_uint32]], endColumn:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_getDefinitionSpellingAndExtent(_0:CXCursor, startBuf:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), endBuf:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), startLine:c.POINTER(Annotated[int, ctypes.c_uint32]), startColumn:c.POINTER(Annotated[int, ctypes.c_uint32]), endLine:c.POINTER(Annotated[int, ctypes.c_uint32]), endColumn:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
 def clang_enableStackTraces() -> None: ...
 @dll.bind
-def clang_executeOnThread(fn:c.CFUNCTYPE(None, c.POINTER[None]), user_data:c.POINTER[None], stack_size:Annotated[int, ctypes.c_uint32]) -> None: ...
-CXCompletionString: TypeAlias = c.POINTER[None]
+def clang_executeOnThread(fn:c.CFUNCTYPE(None, c.POINTER(None)), user_data:c.POINTER(None), stack_size:Annotated[int, ctypes.c_uint32]) -> None: ...
+CXCompletionString: TypeAlias = c.POINTER(None)
 @c.record
 class CXCompletionResult(c.Struct):
   SIZE = 16
@@ -1348,7 +1348,7 @@ def clang_getCompletionNumAnnotations(completion_string:CXCompletionString) -> A
 @dll.bind
 def clang_getCompletionAnnotation(completion_string:CXCompletionString, annotation_number:Annotated[int, ctypes.c_uint32]) -> CXString: ...
 @dll.bind
-def clang_getCompletionParent(completion_string:CXCompletionString, kind:c.POINTER[enum_CXCursorKind]) -> CXString: ...
+def clang_getCompletionParent(completion_string:CXCompletionString, kind:c.POINTER(enum_CXCursorKind)) -> CXString: ...
 @dll.bind
 def clang_getCompletionBriefComment(completion_string:CXCompletionString) -> CXString: ...
 @dll.bind
@@ -1356,12 +1356,12 @@ def clang_getCursorCompletionString(cursor:CXCursor) -> CXCompletionString: ...
 @c.record
 class CXCodeCompleteResults(c.Struct):
   SIZE = 16
-  Results: Annotated[c.POINTER[CXCompletionResult], 0]
+  Results: Annotated[c.POINTER(CXCompletionResult), 0]
   NumResults: Annotated[Annotated[int, ctypes.c_uint32], 8]
 @dll.bind
-def clang_getCompletionNumFixIts(results:c.POINTER[CXCodeCompleteResults], completion_index:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
+def clang_getCompletionNumFixIts(results:c.POINTER(CXCodeCompleteResults), completion_index:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_getCompletionFixIt(results:c.POINTER[CXCodeCompleteResults], completion_index:Annotated[int, ctypes.c_uint32], fixit_index:Annotated[int, ctypes.c_uint32], replacement_range:c.POINTER[CXSourceRange]) -> CXString: ...
+def clang_getCompletionFixIt(results:c.POINTER(CXCodeCompleteResults), completion_index:Annotated[int, ctypes.c_uint32], fixit_index:Annotated[int, ctypes.c_uint32], replacement_range:c.POINTER(CXSourceRange)) -> CXString: ...
 enum_CXCodeComplete_Flags = CEnum(Annotated[int, ctypes.c_uint32])
 CXCodeComplete_IncludeMacros = enum_CXCodeComplete_Flags.define('CXCodeComplete_IncludeMacros', 1)
 CXCodeComplete_IncludeCodePatterns = enum_CXCodeComplete_Flags.define('CXCodeComplete_IncludeCodePatterns', 2)
@@ -1399,28 +1399,28 @@ CXCompletionContext_Unknown = enum_CXCompletionContext.define('CXCompletionConte
 @dll.bind
 def clang_defaultCodeCompleteOptions() -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_codeCompleteAt(TU:CXTranslationUnit, complete_filename:c.POINTER[Annotated[bytes, ctypes.c_char]], complete_line:Annotated[int, ctypes.c_uint32], complete_column:Annotated[int, ctypes.c_uint32], unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32]) -> c.POINTER[CXCodeCompleteResults]: ...
+def clang_codeCompleteAt(TU:CXTranslationUnit, complete_filename:c.POINTER(Annotated[bytes, ctypes.c_char]), complete_line:Annotated[int, ctypes.c_uint32], complete_column:Annotated[int, ctypes.c_uint32], unsaved_files:c.POINTER(struct_CXUnsavedFile), num_unsaved_files:Annotated[int, ctypes.c_uint32], options:Annotated[int, ctypes.c_uint32]) -> c.POINTER(CXCodeCompleteResults): ...
 @dll.bind
-def clang_sortCodeCompletionResults(Results:c.POINTER[CXCompletionResult], NumResults:Annotated[int, ctypes.c_uint32]) -> None: ...
+def clang_sortCodeCompletionResults(Results:c.POINTER(CXCompletionResult), NumResults:Annotated[int, ctypes.c_uint32]) -> None: ...
 @dll.bind
-def clang_disposeCodeCompleteResults(Results:c.POINTER[CXCodeCompleteResults]) -> None: ...
+def clang_disposeCodeCompleteResults(Results:c.POINTER(CXCodeCompleteResults)) -> None: ...
 @dll.bind
-def clang_codeCompleteGetNumDiagnostics(Results:c.POINTER[CXCodeCompleteResults]) -> Annotated[int, ctypes.c_uint32]: ...
+def clang_codeCompleteGetNumDiagnostics(Results:c.POINTER(CXCodeCompleteResults)) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_codeCompleteGetDiagnostic(Results:c.POINTER[CXCodeCompleteResults], Index:Annotated[int, ctypes.c_uint32]) -> CXDiagnostic: ...
+def clang_codeCompleteGetDiagnostic(Results:c.POINTER(CXCodeCompleteResults), Index:Annotated[int, ctypes.c_uint32]) -> CXDiagnostic: ...
 @dll.bind
-def clang_codeCompleteGetContexts(Results:c.POINTER[CXCodeCompleteResults]) -> Annotated[int, ctypes.c_uint64]: ...
+def clang_codeCompleteGetContexts(Results:c.POINTER(CXCodeCompleteResults)) -> Annotated[int, ctypes.c_uint64]: ...
 @dll.bind
-def clang_codeCompleteGetContainerKind(Results:c.POINTER[CXCodeCompleteResults], IsIncomplete:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> enum_CXCursorKind: ...
+def clang_codeCompleteGetContainerKind(Results:c.POINTER(CXCodeCompleteResults), IsIncomplete:c.POINTER(Annotated[int, ctypes.c_uint32])) -> enum_CXCursorKind: ...
 @dll.bind
-def clang_codeCompleteGetContainerUSR(Results:c.POINTER[CXCodeCompleteResults]) -> CXString: ...
+def clang_codeCompleteGetContainerUSR(Results:c.POINTER(CXCodeCompleteResults)) -> CXString: ...
 @dll.bind
-def clang_codeCompleteGetObjCSelector(Results:c.POINTER[CXCodeCompleteResults]) -> CXString: ...
+def clang_codeCompleteGetObjCSelector(Results:c.POINTER(CXCodeCompleteResults)) -> CXString: ...
 @dll.bind
 def clang_getClangVersion() -> CXString: ...
 @dll.bind
 def clang_toggleCrashRecovery(isEnabled:Annotated[int, ctypes.c_uint32]) -> None: ...
-CXInclusionVisitor: TypeAlias = c.CFUNCTYPE(None, c.POINTER[None], c.POINTER[CXSourceLocation], Annotated[int, ctypes.c_uint32], c.POINTER[None])
+CXInclusionVisitor: TypeAlias = c.CFUNCTYPE(None, c.POINTER(None), c.POINTER(CXSourceLocation), Annotated[int, ctypes.c_uint32], c.POINTER(None))
 @dll.bind
 def clang_getInclusions(tu:CXTranslationUnit, visitor:CXInclusionVisitor, client_data:CXClientData) -> None: ...
 CXEvalResultKind = CEnum(Annotated[int, ctypes.c_uint32])
@@ -1432,7 +1432,7 @@ CXEval_CFStr = CXEvalResultKind.define('CXEval_CFStr', 5)
 CXEval_Other = CXEvalResultKind.define('CXEval_Other', 6)
 CXEval_UnExposed = CXEvalResultKind.define('CXEval_UnExposed', 0)
 
-CXEvalResult: TypeAlias = c.POINTER[None]
+CXEvalResult: TypeAlias = c.POINTER(None)
 @dll.bind
 def clang_Cursor_Evaluate(C:CXCursor) -> CXEvalResult: ...
 @dll.bind
@@ -1448,18 +1448,18 @@ def clang_EvalResult_getAsUnsigned(E:CXEvalResult) -> Annotated[int, ctypes.c_ui
 @dll.bind
 def clang_EvalResult_getAsDouble(E:CXEvalResult) -> Annotated[float, ctypes.c_double]: ...
 @dll.bind
-def clang_EvalResult_getAsStr(E:CXEvalResult) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def clang_EvalResult_getAsStr(E:CXEvalResult) -> c.POINTER(Annotated[bytes, ctypes.c_char]): ...
 @dll.bind
 def clang_EvalResult_dispose(E:CXEvalResult) -> None: ...
-CXRemapping: TypeAlias = c.POINTER[None]
+CXRemapping: TypeAlias = c.POINTER(None)
 @dll.bind
-def clang_getRemappings(path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CXRemapping: ...
+def clang_getRemappings(path:c.POINTER(Annotated[bytes, ctypes.c_char])) -> CXRemapping: ...
 @dll.bind
-def clang_getRemappingsFromFileList(filePaths:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), numFiles:Annotated[int, ctypes.c_uint32]) -> CXRemapping: ...
+def clang_getRemappingsFromFileList(filePaths:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), numFiles:Annotated[int, ctypes.c_uint32]) -> CXRemapping: ...
 @dll.bind
 def clang_remap_getNumFiles(_0:CXRemapping) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
-def clang_remap_getFilenames(_0:CXRemapping, index:Annotated[int, ctypes.c_uint32], original:c.POINTER[CXString], transformed:c.POINTER[CXString]) -> None: ...
+def clang_remap_getFilenames(_0:CXRemapping, index:Annotated[int, ctypes.c_uint32], original:c.POINTER(CXString), transformed:c.POINTER(CXString)) -> None: ...
 @dll.bind
 def clang_remap_dispose(_0:CXRemapping) -> None: ...
 enum_CXVisitorResult = CEnum(Annotated[int, ctypes.c_uint32])
@@ -1469,8 +1469,8 @@ CXVisit_Continue = enum_CXVisitorResult.define('CXVisit_Continue', 1)
 @c.record
 class struct_CXCursorAndRangeVisitor(c.Struct):
   SIZE = 16
-  context: Annotated[c.POINTER[None], 0]
-  visit: Annotated[c.CFUNCTYPE(enum_CXVisitorResult, c.POINTER[None], CXCursor, CXSourceRange), 8]
+  context: Annotated[c.POINTER(None), 0]
+  visit: Annotated[c.CFUNCTYPE(enum_CXVisitorResult, c.POINTER(None), CXCursor, CXSourceRange), 8]
 CXCursorAndRangeVisitor: TypeAlias = struct_CXCursorAndRangeVisitor
 CXResult = CEnum(Annotated[int, ctypes.c_uint32])
 CXResult_Success = CXResult.define('CXResult_Success', 0)
@@ -1482,25 +1482,25 @@ def clang_findReferencesInFile(cursor:CXCursor, file:CXFile, visitor:CXCursorAnd
 @dll.bind
 def clang_findIncludesInFile(TU:CXTranslationUnit, file:CXFile, visitor:CXCursorAndRangeVisitor) -> CXResult: ...
 class struct__CXCursorAndRangeVisitorBlock(ctypes.Structure): pass
-CXCursorAndRangeVisitorBlock: TypeAlias = c.POINTER[struct__CXCursorAndRangeVisitorBlock]
+CXCursorAndRangeVisitorBlock: TypeAlias = c.POINTER(struct__CXCursorAndRangeVisitorBlock)
 @dll.bind
 def clang_findReferencesInFileWithBlock(_0:CXCursor, _1:CXFile, _2:CXCursorAndRangeVisitorBlock) -> CXResult: ...
 @dll.bind
 def clang_findIncludesInFileWithBlock(_0:CXTranslationUnit, _1:CXFile, _2:CXCursorAndRangeVisitorBlock) -> CXResult: ...
-CXIdxClientFile: TypeAlias = c.POINTER[None]
-CXIdxClientEntity: TypeAlias = c.POINTER[None]
-CXIdxClientContainer: TypeAlias = c.POINTER[None]
-CXIdxClientASTFile: TypeAlias = c.POINTER[None]
+CXIdxClientFile: TypeAlias = c.POINTER(None)
+CXIdxClientEntity: TypeAlias = c.POINTER(None)
+CXIdxClientContainer: TypeAlias = c.POINTER(None)
+CXIdxClientASTFile: TypeAlias = c.POINTER(None)
 @c.record
 class CXIdxLoc(c.Struct):
   SIZE = 24
-  ptr_data: Annotated[c.Array[c.POINTER[None], Literal[2]], 0]
+  ptr_data: Annotated[c.Array[c.POINTER(None), Literal[2]], 0]
   int_data: Annotated[Annotated[int, ctypes.c_uint32], 16]
 @c.record
 class CXIdxIncludedFileInfo(c.Struct):
   SIZE = 56
   hashLoc: Annotated[CXIdxLoc, 0]
-  filename: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 24]
+  filename: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 24]
   file: Annotated[CXFile, 32]
   isImport: Annotated[Annotated[int, ctypes.c_int32], 40]
   isAngled: Annotated[Annotated[int, ctypes.c_int32], 44]
@@ -1573,10 +1573,10 @@ class CXIdxEntityInfo(c.Struct):
   kind: Annotated[CXIdxEntityKind, 0]
   templateKind: Annotated[CXIdxEntityCXXTemplateKind, 4]
   lang: Annotated[CXIdxEntityLanguage, 8]
-  name: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 16]
-  USR: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 24]
+  name: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 16]
+  USR: Annotated[c.POINTER(Annotated[bytes, ctypes.c_char]), 24]
   cursor: Annotated[CXCursor, 32]
-  attributes: Annotated[c.POINTER[c.POINTER(CXIdxAttrInfo]), 64]
+  attributes: Annotated[c.POINTER(c.POINTER(CXIdxAttrInfo)), 64]
   numAttributes: Annotated[Annotated[int, ctypes.c_uint32], 72]
 @c.record
 class CXIdxContainerInfo(c.Struct):
@@ -1585,8 +1585,8 @@ class CXIdxContainerInfo(c.Struct):
 @c.record
 class CXIdxIBOutletCollectionAttrInfo(c.Struct):
   SIZE = 72
-  attrInfo: Annotated[c.POINTER[CXIdxAttrInfo], 0]
-  objcClass: Annotated[c.POINTER[CXIdxEntityInfo], 8]
+  attrInfo: Annotated[c.POINTER(CXIdxAttrInfo), 0]
+  objcClass: Annotated[c.POINTER(CXIdxEntityInfo), 8]
   classCursor: Annotated[CXCursor, 16]
   classLoc: Annotated[CXIdxLoc, 48]
 CXIdxDeclInfoFlags = CEnum(Annotated[int, ctypes.c_uint32])
@@ -1595,17 +1595,17 @@ CXIdxDeclFlag_Skipped = CXIdxDeclInfoFlags.define('CXIdxDeclFlag_Skipped', 1)
 @c.record
 class CXIdxDeclInfo(c.Struct):
   SIZE = 128
-  entityInfo: Annotated[c.POINTER[CXIdxEntityInfo], 0]
+  entityInfo: Annotated[c.POINTER(CXIdxEntityInfo), 0]
   cursor: Annotated[CXCursor, 8]
   loc: Annotated[CXIdxLoc, 40]
-  semanticContainer: Annotated[c.POINTER[CXIdxContainerInfo], 64]
-  lexicalContainer: Annotated[c.POINTER[CXIdxContainerInfo], 72]
+  semanticContainer: Annotated[c.POINTER(CXIdxContainerInfo), 64]
+  lexicalContainer: Annotated[c.POINTER(CXIdxContainerInfo), 72]
   isRedeclaration: Annotated[Annotated[int, ctypes.c_int32], 80]
   isDefinition: Annotated[Annotated[int, ctypes.c_int32], 84]
   isContainer: Annotated[Annotated[int, ctypes.c_int32], 88]
-  declAsContainer: Annotated[c.POINTER[CXIdxContainerInfo], 96]
+  declAsContainer: Annotated[c.POINTER(CXIdxContainerInfo), 96]
   isImplicit: Annotated[Annotated[int, ctypes.c_int32], 104]
-  attributes: Annotated[c.POINTER[c.POINTER(CXIdxAttrInfo]), 112]
+  attributes: Annotated[c.POINTER(c.POINTER(CXIdxAttrInfo)), 112]
   numAttributes: Annotated[Annotated[int, ctypes.c_uint32], 120]
   flags: Annotated[Annotated[int, ctypes.c_uint32], 124]
 CXIdxObjCContainerKind = CEnum(Annotated[int, ctypes.c_uint32])
@@ -1616,50 +1616,50 @@ CXIdxObjCContainer_Implementation = CXIdxObjCContainerKind.define('CXIdxObjCCont
 @c.record
 class CXIdxObjCContainerDeclInfo(c.Struct):
   SIZE = 16
-  declInfo: Annotated[c.POINTER[CXIdxDeclInfo], 0]
+  declInfo: Annotated[c.POINTER(CXIdxDeclInfo), 0]
   kind: Annotated[CXIdxObjCContainerKind, 8]
 @c.record
 class CXIdxBaseClassInfo(c.Struct):
   SIZE = 64
-  base: Annotated[c.POINTER[CXIdxEntityInfo], 0]
+  base: Annotated[c.POINTER(CXIdxEntityInfo), 0]
   cursor: Annotated[CXCursor, 8]
   loc: Annotated[CXIdxLoc, 40]
 @c.record
 class CXIdxObjCProtocolRefInfo(c.Struct):
   SIZE = 64
-  protocol: Annotated[c.POINTER[CXIdxEntityInfo], 0]
+  protocol: Annotated[c.POINTER(CXIdxEntityInfo), 0]
   cursor: Annotated[CXCursor, 8]
   loc: Annotated[CXIdxLoc, 40]
 @c.record
 class CXIdxObjCProtocolRefListInfo(c.Struct):
   SIZE = 16
-  protocols: Annotated[c.POINTER[c.POINTER(CXIdxObjCProtocolRefInfo]), 0]
+  protocols: Annotated[c.POINTER(c.POINTER(CXIdxObjCProtocolRefInfo)), 0]
   numProtocols: Annotated[Annotated[int, ctypes.c_uint32], 8]
 @c.record
 class CXIdxObjCInterfaceDeclInfo(c.Struct):
   SIZE = 24
-  containerInfo: Annotated[c.POINTER[CXIdxObjCContainerDeclInfo], 0]
-  superInfo: Annotated[c.POINTER[CXIdxBaseClassInfo], 8]
-  protocols: Annotated[c.POINTER[CXIdxObjCProtocolRefListInfo], 16]
+  containerInfo: Annotated[c.POINTER(CXIdxObjCContainerDeclInfo), 0]
+  superInfo: Annotated[c.POINTER(CXIdxBaseClassInfo), 8]
+  protocols: Annotated[c.POINTER(CXIdxObjCProtocolRefListInfo), 16]
 @c.record
 class CXIdxObjCCategoryDeclInfo(c.Struct):
   SIZE = 80
-  containerInfo: Annotated[c.POINTER[CXIdxObjCContainerDeclInfo], 0]
-  objcClass: Annotated[c.POINTER[CXIdxEntityInfo], 8]
+  containerInfo: Annotated[c.POINTER(CXIdxObjCContainerDeclInfo), 0]
+  objcClass: Annotated[c.POINTER(CXIdxEntityInfo), 8]
   classCursor: Annotated[CXCursor, 16]
   classLoc: Annotated[CXIdxLoc, 48]
-  protocols: Annotated[c.POINTER[CXIdxObjCProtocolRefListInfo], 72]
+  protocols: Annotated[c.POINTER(CXIdxObjCProtocolRefListInfo), 72]
 @c.record
 class CXIdxObjCPropertyDeclInfo(c.Struct):
   SIZE = 24
-  declInfo: Annotated[c.POINTER[CXIdxDeclInfo], 0]
-  getter: Annotated[c.POINTER[CXIdxEntityInfo], 8]
-  setter: Annotated[c.POINTER[CXIdxEntityInfo], 16]
+  declInfo: Annotated[c.POINTER(CXIdxDeclInfo), 0]
+  getter: Annotated[c.POINTER(CXIdxEntityInfo), 8]
+  setter: Annotated[c.POINTER(CXIdxEntityInfo), 16]
 @c.record
 class CXIdxCXXClassDeclInfo(c.Struct):
   SIZE = 24
-  declInfo: Annotated[c.POINTER[CXIdxDeclInfo], 0]
-  bases: Annotated[c.POINTER[c.POINTER(CXIdxBaseClassInfo]), 8]
+  declInfo: Annotated[c.POINTER(CXIdxDeclInfo), 0]
+  bases: Annotated[c.POINTER(c.POINTER(CXIdxBaseClassInfo)), 8]
   numBases: Annotated[Annotated[int, ctypes.c_uint32], 16]
 CXIdxEntityRefKind = CEnum(Annotated[int, ctypes.c_uint32])
 CXIdxEntityRef_Direct = CXIdxEntityRefKind.define('CXIdxEntityRef_Direct', 1)
@@ -1683,46 +1683,46 @@ class CXIdxEntityRefInfo(c.Struct):
   kind: Annotated[CXIdxEntityRefKind, 0]
   cursor: Annotated[CXCursor, 8]
   loc: Annotated[CXIdxLoc, 40]
-  referencedEntity: Annotated[c.POINTER[CXIdxEntityInfo], 64]
-  parentEntity: Annotated[c.POINTER[CXIdxEntityInfo], 72]
-  container: Annotated[c.POINTER[CXIdxContainerInfo], 80]
+  referencedEntity: Annotated[c.POINTER(CXIdxEntityInfo), 64]
+  parentEntity: Annotated[c.POINTER(CXIdxEntityInfo), 72]
+  container: Annotated[c.POINTER(CXIdxContainerInfo), 80]
   role: Annotated[CXSymbolRole, 88]
 @c.record
 class IndexerCallbacks(c.Struct):
   SIZE = 64
-  abortQuery: Annotated[c.CFUNCTYPE(Annotated[int, ctypes.c_int32], CXClientData, c.POINTER[None]), 0]
-  diagnostic: Annotated[c.CFUNCTYPE(None, CXClientData, CXDiagnosticSet, c.POINTER[None]), 8]
-  enteredMainFile: Annotated[c.CFUNCTYPE(CXIdxClientFile, CXClientData, CXFile, c.POINTER[None]), 16]
-  ppIncludedFile: Annotated[c.CFUNCTYPE(CXIdxClientFile, CXClientData, c.POINTER[CXIdxIncludedFileInfo]), 24]
-  importedASTFile: Annotated[c.CFUNCTYPE(CXIdxClientASTFile, CXClientData, c.POINTER[CXIdxImportedASTFileInfo]), 32]
-  startedTranslationUnit: Annotated[c.CFUNCTYPE(CXIdxClientContainer, CXClientData, c.POINTER[None]), 40]
-  indexDeclaration: Annotated[c.CFUNCTYPE(None, CXClientData, c.POINTER[CXIdxDeclInfo]), 48]
-  indexEntityReference: Annotated[c.CFUNCTYPE(None, CXClientData, c.POINTER[CXIdxEntityRefInfo]), 56]
+  abortQuery: Annotated[c.CFUNCTYPE(Annotated[int, ctypes.c_int32], CXClientData, c.POINTER(None)), 0]
+  diagnostic: Annotated[c.CFUNCTYPE(None, CXClientData, CXDiagnosticSet, c.POINTER(None)), 8]
+  enteredMainFile: Annotated[c.CFUNCTYPE(CXIdxClientFile, CXClientData, CXFile, c.POINTER(None)), 16]
+  ppIncludedFile: Annotated[c.CFUNCTYPE(CXIdxClientFile, CXClientData, c.POINTER(CXIdxIncludedFileInfo)), 24]
+  importedASTFile: Annotated[c.CFUNCTYPE(CXIdxClientASTFile, CXClientData, c.POINTER(CXIdxImportedASTFileInfo)), 32]
+  startedTranslationUnit: Annotated[c.CFUNCTYPE(CXIdxClientContainer, CXClientData, c.POINTER(None)), 40]
+  indexDeclaration: Annotated[c.CFUNCTYPE(None, CXClientData, c.POINTER(CXIdxDeclInfo)), 48]
+  indexEntityReference: Annotated[c.CFUNCTYPE(None, CXClientData, c.POINTER(CXIdxEntityRefInfo)), 56]
 @dll.bind
 def clang_index_isEntityObjCContainerKind(_0:CXIdxEntityKind) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def clang_index_getObjCContainerDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCContainerDeclInfo]: ...
+def clang_index_getObjCContainerDeclInfo(_0:c.POINTER(CXIdxDeclInfo)) -> c.POINTER(CXIdxObjCContainerDeclInfo): ...
 @dll.bind
-def clang_index_getObjCInterfaceDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCInterfaceDeclInfo]: ...
+def clang_index_getObjCInterfaceDeclInfo(_0:c.POINTER(CXIdxDeclInfo)) -> c.POINTER(CXIdxObjCInterfaceDeclInfo): ...
 @dll.bind
-def clang_index_getObjCCategoryDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCCategoryDeclInfo]: ...
+def clang_index_getObjCCategoryDeclInfo(_0:c.POINTER(CXIdxDeclInfo)) -> c.POINTER(CXIdxObjCCategoryDeclInfo): ...
 @dll.bind
-def clang_index_getObjCProtocolRefListInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCProtocolRefListInfo]: ...
+def clang_index_getObjCProtocolRefListInfo(_0:c.POINTER(CXIdxDeclInfo)) -> c.POINTER(CXIdxObjCProtocolRefListInfo): ...
 @dll.bind
-def clang_index_getObjCPropertyDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCPropertyDeclInfo]: ...
+def clang_index_getObjCPropertyDeclInfo(_0:c.POINTER(CXIdxDeclInfo)) -> c.POINTER(CXIdxObjCPropertyDeclInfo): ...
 @dll.bind
-def clang_index_getIBOutletCollectionAttrInfo(_0:c.POINTER[CXIdxAttrInfo]) -> c.POINTER[CXIdxIBOutletCollectionAttrInfo]: ...
+def clang_index_getIBOutletCollectionAttrInfo(_0:c.POINTER(CXIdxAttrInfo)) -> c.POINTER(CXIdxIBOutletCollectionAttrInfo): ...
 @dll.bind
-def clang_index_getCXXClassDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxCXXClassDeclInfo]: ...
+def clang_index_getCXXClassDeclInfo(_0:c.POINTER(CXIdxDeclInfo)) -> c.POINTER(CXIdxCXXClassDeclInfo): ...
 @dll.bind
-def clang_index_getClientContainer(_0:c.POINTER[CXIdxContainerInfo]) -> CXIdxClientContainer: ...
+def clang_index_getClientContainer(_0:c.POINTER(CXIdxContainerInfo)) -> CXIdxClientContainer: ...
 @dll.bind
-def clang_index_setClientContainer(_0:c.POINTER[CXIdxContainerInfo], _1:CXIdxClientContainer) -> None: ...
+def clang_index_setClientContainer(_0:c.POINTER(CXIdxContainerInfo), _1:CXIdxClientContainer) -> None: ...
 @dll.bind
-def clang_index_getClientEntity(_0:c.POINTER[CXIdxEntityInfo]) -> CXIdxClientEntity: ...
+def clang_index_getClientEntity(_0:c.POINTER(CXIdxEntityInfo)) -> CXIdxClientEntity: ...
 @dll.bind
-def clang_index_setClientEntity(_0:c.POINTER[CXIdxEntityInfo], _1:CXIdxClientEntity) -> None: ...
-CXIndexAction: TypeAlias = c.POINTER[None]
+def clang_index_setClientEntity(_0:c.POINTER(CXIdxEntityInfo), _1:CXIdxClientEntity) -> None: ...
+CXIndexAction: TypeAlias = c.POINTER(None)
 @dll.bind
 def clang_IndexAction_create(CIdx:CXIndex) -> CXIndexAction: ...
 @dll.bind
@@ -1736,16 +1736,16 @@ CXIndexOpt_SuppressWarnings = CXIndexOptFlags.define('CXIndexOpt_SuppressWarning
 CXIndexOpt_SkipParsedBodiesInSession = CXIndexOptFlags.define('CXIndexOpt_SkipParsedBodiesInSession', 16)
 
 @dll.bind
-def clang_indexSourceFile(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER[IndexerCallbacks], index_callbacks_size:Annotated[int, ctypes.c_uint32], index_options:Annotated[int, ctypes.c_uint32], source_filename:c.POINTER[Annotated[bytes, ctypes.c_char]], command_line_args:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:Annotated[int, ctypes.c_uint32], out_TU:c.POINTER[CXTranslationUnit], TU_options:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
+def clang_indexSourceFile(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER(IndexerCallbacks), index_callbacks_size:Annotated[int, ctypes.c_uint32], index_options:Annotated[int, ctypes.c_uint32], source_filename:c.POINTER(Annotated[bytes, ctypes.c_char]), command_line_args:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER(struct_CXUnsavedFile), num_unsaved_files:Annotated[int, ctypes.c_uint32], out_TU:c.POINTER(CXTranslationUnit), TU_options:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def clang_indexSourceFileFullArgv(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER[IndexerCallbacks], index_callbacks_size:Annotated[int, ctypes.c_uint32], index_options:Annotated[int, ctypes.c_uint32], source_filename:c.POINTER[Annotated[bytes, ctypes.c_char]], command_line_args:c.POINTER[c.POINTER(Annotated[bytes, ctypes.c_char]]), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:Annotated[int, ctypes.c_uint32], out_TU:c.POINTER[CXTranslationUnit], TU_options:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
+def clang_indexSourceFileFullArgv(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER(IndexerCallbacks), index_callbacks_size:Annotated[int, ctypes.c_uint32], index_options:Annotated[int, ctypes.c_uint32], source_filename:c.POINTER(Annotated[bytes, ctypes.c_char]), command_line_args:c.POINTER(c.POINTER(Annotated[bytes, ctypes.c_char])), num_command_line_args:Annotated[int, ctypes.c_int32], unsaved_files:c.POINTER(struct_CXUnsavedFile), num_unsaved_files:Annotated[int, ctypes.c_uint32], out_TU:c.POINTER(CXTranslationUnit), TU_options:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def clang_indexTranslationUnit(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER[IndexerCallbacks], index_callbacks_size:Annotated[int, ctypes.c_uint32], index_options:Annotated[int, ctypes.c_uint32], _5:CXTranslationUnit) -> Annotated[int, ctypes.c_int32]: ...
+def clang_indexTranslationUnit(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER(IndexerCallbacks), index_callbacks_size:Annotated[int, ctypes.c_uint32], index_options:Annotated[int, ctypes.c_uint32], _5:CXTranslationUnit) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def clang_indexLoc_getFileLocation(loc:CXIdxLoc, indexFile:c.POINTER[CXIdxClientFile], file:c.POINTER[CXFile], line:c.POINTER[Annotated[int, ctypes.c_uint32]], column:c.POINTER[Annotated[int, ctypes.c_uint32]], offset:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_indexLoc_getFileLocation(loc:CXIdxLoc, indexFile:c.POINTER(CXIdxClientFile), file:c.POINTER(CXFile), line:c.POINTER(Annotated[int, ctypes.c_uint32]), column:c.POINTER(Annotated[int, ctypes.c_uint32]), offset:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
 def clang_indexLoc_getCXSourceLocation(loc:CXIdxLoc) -> CXSourceLocation: ...
-CXFieldVisitor: TypeAlias = c.CFUNCTYPE(enum_CXVisitorResult, CXCursor, c.POINTER[None])
+CXFieldVisitor: TypeAlias = c.CFUNCTYPE(enum_CXVisitorResult, CXCursor, c.POINTER(None))
 @dll.bind
 def clang_Type_visitFields(T:CXType, visitor:CXFieldVisitor, client_data:CXClientData) -> Annotated[int, ctypes.c_uint32]: ...
 @dll.bind
@@ -1812,11 +1812,11 @@ def clang_getUnaryOperatorKindSpelling(kind:enum_CXUnaryOperatorKind) -> CXStrin
 @dll.bind
 def clang_getCursorUnaryOperatorKind(cursor:CXCursor) -> enum_CXUnaryOperatorKind: ...
 @dll.bind
-def clang_getCString(string:CXString) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def clang_getCString(string:CXString) -> c.POINTER(Annotated[bytes, ctypes.c_char]): ...
 @dll.bind
 def clang_disposeString(string:CXString) -> None: ...
 @dll.bind
-def clang_disposeStringSet(set:c.POINTER[CXStringSet]) -> None: ...
+def clang_disposeStringSet(set:c.POINTER(CXStringSet)) -> None: ...
 @dll.bind
 def clang_getNullLocation() -> CXSourceLocation: ...
 @dll.bind
@@ -1836,21 +1836,21 @@ def clang_equalRanges(range1:CXSourceRange, range2:CXSourceRange) -> Annotated[i
 @dll.bind
 def clang_Range_isNull(range:CXSourceRange) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def clang_getExpansionLocation(location:CXSourceLocation, file:c.POINTER[CXFile], line:c.POINTER[Annotated[int, ctypes.c_uint32]], column:c.POINTER[Annotated[int, ctypes.c_uint32]], offset:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_getExpansionLocation(location:CXSourceLocation, file:c.POINTER(CXFile), line:c.POINTER(Annotated[int, ctypes.c_uint32]), column:c.POINTER(Annotated[int, ctypes.c_uint32]), offset:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
-def clang_getPresumedLocation(location:CXSourceLocation, filename:c.POINTER[CXString], line:c.POINTER[Annotated[int, ctypes.c_uint32]], column:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_getPresumedLocation(location:CXSourceLocation, filename:c.POINTER(CXString), line:c.POINTER(Annotated[int, ctypes.c_uint32]), column:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
-def clang_getInstantiationLocation(location:CXSourceLocation, file:c.POINTER[CXFile], line:c.POINTER[Annotated[int, ctypes.c_uint32]], column:c.POINTER[Annotated[int, ctypes.c_uint32]], offset:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_getInstantiationLocation(location:CXSourceLocation, file:c.POINTER(CXFile), line:c.POINTER(Annotated[int, ctypes.c_uint32]), column:c.POINTER(Annotated[int, ctypes.c_uint32]), offset:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
-def clang_getSpellingLocation(location:CXSourceLocation, file:c.POINTER[CXFile], line:c.POINTER[Annotated[int, ctypes.c_uint32]], column:c.POINTER[Annotated[int, ctypes.c_uint32]], offset:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_getSpellingLocation(location:CXSourceLocation, file:c.POINTER(CXFile), line:c.POINTER(Annotated[int, ctypes.c_uint32]), column:c.POINTER(Annotated[int, ctypes.c_uint32]), offset:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
-def clang_getFileLocation(location:CXSourceLocation, file:c.POINTER[CXFile], line:c.POINTER[Annotated[int, ctypes.c_uint32]], column:c.POINTER[Annotated[int, ctypes.c_uint32]], offset:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> None: ...
+def clang_getFileLocation(location:CXSourceLocation, file:c.POINTER(CXFile), line:c.POINTER(Annotated[int, ctypes.c_uint32]), column:c.POINTER(Annotated[int, ctypes.c_uint32]), offset:c.POINTER(Annotated[int, ctypes.c_uint32])) -> None: ...
 @dll.bind
 def clang_getRangeStart(range:CXSourceRange) -> CXSourceLocation: ...
 @dll.bind
 def clang_getRangeEnd(range:CXSourceRange) -> CXSourceLocation: ...
 @dll.bind
-def clang_disposeSourceRangeList(ranges:c.POINTER[CXSourceRangeList]) -> None: ...
+def clang_disposeSourceRangeList(ranges:c.POINTER(CXSourceRangeList)) -> None: ...
 @dll.bind
 def clang_getFileName(SFile:CXFile) -> CXString: ...
 time_t: TypeAlias = Annotated[int, ctypes.c_int64]
@@ -1861,7 +1861,7 @@ class CXFileUniqueID(c.Struct):
   SIZE = 24
   data: Annotated[c.Array[Annotated[int, ctypes.c_uint64], Literal[3]], 0]
 @dll.bind
-def clang_getFileUniqueID(file:CXFile, outID:c.POINTER[CXFileUniqueID]) -> Annotated[int, ctypes.c_int32]: ...
+def clang_getFileUniqueID(file:CXFile, outID:c.POINTER(CXFileUniqueID)) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def clang_File_isEqual(file1:CXFile, file2:CXFile) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
