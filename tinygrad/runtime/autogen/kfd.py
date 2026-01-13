@@ -9,7 +9,7 @@ class struct_kfd_ioctl_get_version_args(c.Struct):
   SIZE = 8
   major_version: Annotated[Annotated[int, ctypes.c_uint32], 0]
   minor_version: Annotated[Annotated[int, ctypes.c_uint32], 4]
-__u32: TypeAlias = Annotated[int, ctypes.c_uint32]
+__u32 = Annotated[int, ctypes.c_uint32]
 @c.record
 class struct_kfd_ioctl_create_queue_args(c.Struct):
   SIZE = 96
@@ -30,7 +30,7 @@ class struct_kfd_ioctl_create_queue_args(c.Struct):
   ctl_stack_size: Annotated[Annotated[int, ctypes.c_uint32], 84]
   sdma_engine_id: Annotated[Annotated[int, ctypes.c_uint32], 88]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 92]
-__u64: TypeAlias = Annotated[int, ctypes.c_uint64]
+__u64 = Annotated[int, ctypes.c_uint64]
 @c.record
 class struct_kfd_ioctl_destroy_queue_args(c.Struct):
   SIZE = 8
@@ -317,38 +317,38 @@ class struct_kfd_ioctl_export_dmabuf_args(c.Struct):
   flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
   dmabuf_fd: Annotated[Annotated[int, ctypes.c_uint32], 12]
 enum_kfd_smi_event = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_SMI_EVENT_NONE = enum_kfd_smi_event.define('KFD_SMI_EVENT_NONE', 0)
-KFD_SMI_EVENT_VMFAULT = enum_kfd_smi_event.define('KFD_SMI_EVENT_VMFAULT', 1)
-KFD_SMI_EVENT_THERMAL_THROTTLE = enum_kfd_smi_event.define('KFD_SMI_EVENT_THERMAL_THROTTLE', 2)
-KFD_SMI_EVENT_GPU_PRE_RESET = enum_kfd_smi_event.define('KFD_SMI_EVENT_GPU_PRE_RESET', 3)
-KFD_SMI_EVENT_GPU_POST_RESET = enum_kfd_smi_event.define('KFD_SMI_EVENT_GPU_POST_RESET', 4)
-KFD_SMI_EVENT_MIGRATE_START = enum_kfd_smi_event.define('KFD_SMI_EVENT_MIGRATE_START', 5)
-KFD_SMI_EVENT_MIGRATE_END = enum_kfd_smi_event.define('KFD_SMI_EVENT_MIGRATE_END', 6)
-KFD_SMI_EVENT_PAGE_FAULT_START = enum_kfd_smi_event.define('KFD_SMI_EVENT_PAGE_FAULT_START', 7)
-KFD_SMI_EVENT_PAGE_FAULT_END = enum_kfd_smi_event.define('KFD_SMI_EVENT_PAGE_FAULT_END', 8)
-KFD_SMI_EVENT_QUEUE_EVICTION = enum_kfd_smi_event.define('KFD_SMI_EVENT_QUEUE_EVICTION', 9)
-KFD_SMI_EVENT_QUEUE_RESTORE = enum_kfd_smi_event.define('KFD_SMI_EVENT_QUEUE_RESTORE', 10)
-KFD_SMI_EVENT_UNMAP_FROM_GPU = enum_kfd_smi_event.define('KFD_SMI_EVENT_UNMAP_FROM_GPU', 11)
-KFD_SMI_EVENT_ALL_PROCESS = enum_kfd_smi_event.define('KFD_SMI_EVENT_ALL_PROCESS', 64)
+KFD_SMI_EVENT_NONE = enum_kfd_smi_event.define('KFD_SMI_EVENT_NONE', 0) # type: ignore
+KFD_SMI_EVENT_VMFAULT = enum_kfd_smi_event.define('KFD_SMI_EVENT_VMFAULT', 1) # type: ignore
+KFD_SMI_EVENT_THERMAL_THROTTLE = enum_kfd_smi_event.define('KFD_SMI_EVENT_THERMAL_THROTTLE', 2) # type: ignore
+KFD_SMI_EVENT_GPU_PRE_RESET = enum_kfd_smi_event.define('KFD_SMI_EVENT_GPU_PRE_RESET', 3) # type: ignore
+KFD_SMI_EVENT_GPU_POST_RESET = enum_kfd_smi_event.define('KFD_SMI_EVENT_GPU_POST_RESET', 4) # type: ignore
+KFD_SMI_EVENT_MIGRATE_START = enum_kfd_smi_event.define('KFD_SMI_EVENT_MIGRATE_START', 5) # type: ignore
+KFD_SMI_EVENT_MIGRATE_END = enum_kfd_smi_event.define('KFD_SMI_EVENT_MIGRATE_END', 6) # type: ignore
+KFD_SMI_EVENT_PAGE_FAULT_START = enum_kfd_smi_event.define('KFD_SMI_EVENT_PAGE_FAULT_START', 7) # type: ignore
+KFD_SMI_EVENT_PAGE_FAULT_END = enum_kfd_smi_event.define('KFD_SMI_EVENT_PAGE_FAULT_END', 8) # type: ignore
+KFD_SMI_EVENT_QUEUE_EVICTION = enum_kfd_smi_event.define('KFD_SMI_EVENT_QUEUE_EVICTION', 9) # type: ignore
+KFD_SMI_EVENT_QUEUE_RESTORE = enum_kfd_smi_event.define('KFD_SMI_EVENT_QUEUE_RESTORE', 10) # type: ignore
+KFD_SMI_EVENT_UNMAP_FROM_GPU = enum_kfd_smi_event.define('KFD_SMI_EVENT_UNMAP_FROM_GPU', 11) # type: ignore
+KFD_SMI_EVENT_ALL_PROCESS = enum_kfd_smi_event.define('KFD_SMI_EVENT_ALL_PROCESS', 64) # type: ignore
 
 enum_KFD_MIGRATE_TRIGGERS = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_MIGRATE_TRIGGER_PREFETCH = enum_KFD_MIGRATE_TRIGGERS.define('KFD_MIGRATE_TRIGGER_PREFETCH', 0)
-KFD_MIGRATE_TRIGGER_PAGEFAULT_GPU = enum_KFD_MIGRATE_TRIGGERS.define('KFD_MIGRATE_TRIGGER_PAGEFAULT_GPU', 1)
-KFD_MIGRATE_TRIGGER_PAGEFAULT_CPU = enum_KFD_MIGRATE_TRIGGERS.define('KFD_MIGRATE_TRIGGER_PAGEFAULT_CPU', 2)
-KFD_MIGRATE_TRIGGER_TTM_EVICTION = enum_KFD_MIGRATE_TRIGGERS.define('KFD_MIGRATE_TRIGGER_TTM_EVICTION', 3)
+KFD_MIGRATE_TRIGGER_PREFETCH = enum_KFD_MIGRATE_TRIGGERS.define('KFD_MIGRATE_TRIGGER_PREFETCH', 0) # type: ignore
+KFD_MIGRATE_TRIGGER_PAGEFAULT_GPU = enum_KFD_MIGRATE_TRIGGERS.define('KFD_MIGRATE_TRIGGER_PAGEFAULT_GPU', 1) # type: ignore
+KFD_MIGRATE_TRIGGER_PAGEFAULT_CPU = enum_KFD_MIGRATE_TRIGGERS.define('KFD_MIGRATE_TRIGGER_PAGEFAULT_CPU', 2) # type: ignore
+KFD_MIGRATE_TRIGGER_TTM_EVICTION = enum_KFD_MIGRATE_TRIGGERS.define('KFD_MIGRATE_TRIGGER_TTM_EVICTION', 3) # type: ignore
 
 enum_KFD_QUEUE_EVICTION_TRIGGERS = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_QUEUE_EVICTION_TRIGGER_SVM = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_TRIGGER_SVM', 0)
-KFD_QUEUE_EVICTION_TRIGGER_USERPTR = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_TRIGGER_USERPTR', 1)
-KFD_QUEUE_EVICTION_TRIGGER_TTM = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_TRIGGER_TTM', 2)
-KFD_QUEUE_EVICTION_TRIGGER_SUSPEND = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_TRIGGER_SUSPEND', 3)
-KFD_QUEUE_EVICTION_CRIU_CHECKPOINT = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_CRIU_CHECKPOINT', 4)
-KFD_QUEUE_EVICTION_CRIU_RESTORE = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_CRIU_RESTORE', 5)
+KFD_QUEUE_EVICTION_TRIGGER_SVM = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_TRIGGER_SVM', 0) # type: ignore
+KFD_QUEUE_EVICTION_TRIGGER_USERPTR = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_TRIGGER_USERPTR', 1) # type: ignore
+KFD_QUEUE_EVICTION_TRIGGER_TTM = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_TRIGGER_TTM', 2) # type: ignore
+KFD_QUEUE_EVICTION_TRIGGER_SUSPEND = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_TRIGGER_SUSPEND', 3) # type: ignore
+KFD_QUEUE_EVICTION_CRIU_CHECKPOINT = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_CRIU_CHECKPOINT', 4) # type: ignore
+KFD_QUEUE_EVICTION_CRIU_RESTORE = enum_KFD_QUEUE_EVICTION_TRIGGERS.define('KFD_QUEUE_EVICTION_CRIU_RESTORE', 5) # type: ignore
 
 enum_KFD_SVM_UNMAP_TRIGGERS = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY', 0)
-KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE', 1)
-KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU', 2)
+KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY', 0) # type: ignore
+KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE', 1) # type: ignore
+KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU', 2) # type: ignore
 
 @c.record
 class struct_kfd_ioctl_smi_events_args(c.Struct):
@@ -356,9 +356,9 @@ class struct_kfd_ioctl_smi_events_args(c.Struct):
   gpuid: Annotated[Annotated[int, ctypes.c_uint32], 0]
   anon_fd: Annotated[Annotated[int, ctypes.c_uint32], 4]
 enum_kfd_ioctl_spm_op = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOCTL_SPM_OP_ACQUIRE = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_ACQUIRE', 0)
-KFD_IOCTL_SPM_OP_RELEASE = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_RELEASE', 1)
-KFD_IOCTL_SPM_OP_SET_DEST_BUF = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_SET_DEST_BUF', 2)
+KFD_IOCTL_SPM_OP_ACQUIRE = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_ACQUIRE', 0) # type: ignore
+KFD_IOCTL_SPM_OP_RELEASE = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_RELEASE', 1) # type: ignore
+KFD_IOCTL_SPM_OP_SET_DEST_BUF = enum_kfd_ioctl_spm_op.define('KFD_IOCTL_SPM_OP_SET_DEST_BUF', 2) # type: ignore
 
 @c.record
 class struct_kfd_ioctl_spm_args(c.Struct):
@@ -371,11 +371,11 @@ class struct_kfd_ioctl_spm_args(c.Struct):
   bytes_copied: Annotated[Annotated[int, ctypes.c_uint32], 24]
   has_data_loss: Annotated[Annotated[int, ctypes.c_uint32], 28]
 enum_kfd_criu_op = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_CRIU_OP_PROCESS_INFO = enum_kfd_criu_op.define('KFD_CRIU_OP_PROCESS_INFO', 0)
-KFD_CRIU_OP_CHECKPOINT = enum_kfd_criu_op.define('KFD_CRIU_OP_CHECKPOINT', 1)
-KFD_CRIU_OP_UNPAUSE = enum_kfd_criu_op.define('KFD_CRIU_OP_UNPAUSE', 2)
-KFD_CRIU_OP_RESTORE = enum_kfd_criu_op.define('KFD_CRIU_OP_RESTORE', 3)
-KFD_CRIU_OP_RESUME = enum_kfd_criu_op.define('KFD_CRIU_OP_RESUME', 4)
+KFD_CRIU_OP_PROCESS_INFO = enum_kfd_criu_op.define('KFD_CRIU_OP_PROCESS_INFO', 0) # type: ignore
+KFD_CRIU_OP_CHECKPOINT = enum_kfd_criu_op.define('KFD_CRIU_OP_CHECKPOINT', 1) # type: ignore
+KFD_CRIU_OP_UNPAUSE = enum_kfd_criu_op.define('KFD_CRIU_OP_UNPAUSE', 2) # type: ignore
+KFD_CRIU_OP_RESTORE = enum_kfd_criu_op.define('KFD_CRIU_OP_RESTORE', 3) # type: ignore
+KFD_CRIU_OP_RESUME = enum_kfd_criu_op.define('KFD_CRIU_OP_RESUME', 4) # type: ignore
 
 @c.record
 class struct_kfd_ioctl_criu_args(c.Struct):
@@ -408,8 +408,8 @@ class struct_kfd_criu_bo_bucket(c.Struct):
   dmabuf_fd: Annotated[Annotated[int, ctypes.c_uint32], 40]
   pad: Annotated[Annotated[int, ctypes.c_uint32], 44]
 enum_kfd_mmio_remap = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL', 0)
-KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL', 4)
+KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL', 0) # type: ignore
+KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL', 4) # type: ignore
 
 @c.record
 class struct_kfd_ioctl_ipc_export_handle_args(c.Struct):
@@ -438,22 +438,22 @@ class struct_kfd_ioctl_cross_memory_copy_deprecated_args(c.Struct):
   dst_mem_array_size: Annotated[Annotated[int, ctypes.c_uint64], 32]
   bytes_copied: Annotated[Annotated[int, ctypes.c_uint64], 40]
 enum_kfd_ioctl_svm_op = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOCTL_SVM_OP_SET_ATTR = enum_kfd_ioctl_svm_op.define('KFD_IOCTL_SVM_OP_SET_ATTR', 0)
-KFD_IOCTL_SVM_OP_GET_ATTR = enum_kfd_ioctl_svm_op.define('KFD_IOCTL_SVM_OP_GET_ATTR', 1)
+KFD_IOCTL_SVM_OP_SET_ATTR = enum_kfd_ioctl_svm_op.define('KFD_IOCTL_SVM_OP_SET_ATTR', 0) # type: ignore
+KFD_IOCTL_SVM_OP_GET_ATTR = enum_kfd_ioctl_svm_op.define('KFD_IOCTL_SVM_OP_GET_ATTR', 1) # type: ignore
 
 enum_kfd_ioctl_svm_location = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOCTL_SVM_LOCATION_SYSMEM = enum_kfd_ioctl_svm_location.define('KFD_IOCTL_SVM_LOCATION_SYSMEM', 0)
-KFD_IOCTL_SVM_LOCATION_UNDEFINED = enum_kfd_ioctl_svm_location.define('KFD_IOCTL_SVM_LOCATION_UNDEFINED', 4294967295)
+KFD_IOCTL_SVM_LOCATION_SYSMEM = enum_kfd_ioctl_svm_location.define('KFD_IOCTL_SVM_LOCATION_SYSMEM', 0) # type: ignore
+KFD_IOCTL_SVM_LOCATION_UNDEFINED = enum_kfd_ioctl_svm_location.define('KFD_IOCTL_SVM_LOCATION_UNDEFINED', 4294967295) # type: ignore
 
 enum_kfd_ioctl_svm_attr_type = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOCTL_SVM_ATTR_PREFERRED_LOC = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_PREFERRED_LOC', 0)
-KFD_IOCTL_SVM_ATTR_PREFETCH_LOC = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_PREFETCH_LOC', 1)
-KFD_IOCTL_SVM_ATTR_ACCESS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_ACCESS', 2)
-KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE', 3)
-KFD_IOCTL_SVM_ATTR_NO_ACCESS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_NO_ACCESS', 4)
-KFD_IOCTL_SVM_ATTR_SET_FLAGS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_SET_FLAGS', 5)
-KFD_IOCTL_SVM_ATTR_CLR_FLAGS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_CLR_FLAGS', 6)
-KFD_IOCTL_SVM_ATTR_GRANULARITY = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_GRANULARITY', 7)
+KFD_IOCTL_SVM_ATTR_PREFERRED_LOC = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_PREFERRED_LOC', 0) # type: ignore
+KFD_IOCTL_SVM_ATTR_PREFETCH_LOC = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_PREFETCH_LOC', 1) # type: ignore
+KFD_IOCTL_SVM_ATTR_ACCESS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_ACCESS', 2) # type: ignore
+KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE', 3) # type: ignore
+KFD_IOCTL_SVM_ATTR_NO_ACCESS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_NO_ACCESS', 4) # type: ignore
+KFD_IOCTL_SVM_ATTR_SET_FLAGS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_SET_FLAGS', 5) # type: ignore
+KFD_IOCTL_SVM_ATTR_CLR_FLAGS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_CLR_FLAGS', 6) # type: ignore
+KFD_IOCTL_SVM_ATTR_GRANULARITY = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_GRANULARITY', 7) # type: ignore
 
 @c.record
 class struct_kfd_ioctl_svm_attribute(c.Struct):
@@ -472,71 +472,71 @@ class struct_kfd_ioctl_svm_args(c.Struct):
 class struct_kfd_ioctl_set_xnack_mode_args(c.Struct):
   SIZE = 4
   xnack_enabled: Annotated[Annotated[int, ctypes.c_int32], 0]
-__s32: TypeAlias = Annotated[int, ctypes.c_int32]
+__s32 = Annotated[int, ctypes.c_int32]
 enum_kfd_dbg_trap_override_mode = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_DBG_TRAP_OVERRIDE_OR = enum_kfd_dbg_trap_override_mode.define('KFD_DBG_TRAP_OVERRIDE_OR', 0)
-KFD_DBG_TRAP_OVERRIDE_REPLACE = enum_kfd_dbg_trap_override_mode.define('KFD_DBG_TRAP_OVERRIDE_REPLACE', 1)
+KFD_DBG_TRAP_OVERRIDE_OR = enum_kfd_dbg_trap_override_mode.define('KFD_DBG_TRAP_OVERRIDE_OR', 0) # type: ignore
+KFD_DBG_TRAP_OVERRIDE_REPLACE = enum_kfd_dbg_trap_override_mode.define('KFD_DBG_TRAP_OVERRIDE_REPLACE', 1) # type: ignore
 
 enum_kfd_dbg_trap_mask = CEnum(Annotated[int, ctypes.c_int32])
-KFD_DBG_TRAP_MASK_FP_INVALID = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_INVALID', 1)
-KFD_DBG_TRAP_MASK_FP_INPUT_DENORMAL = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_INPUT_DENORMAL', 2)
-KFD_DBG_TRAP_MASK_FP_DIVIDE_BY_ZERO = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_DIVIDE_BY_ZERO', 4)
-KFD_DBG_TRAP_MASK_FP_OVERFLOW = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_OVERFLOW', 8)
-KFD_DBG_TRAP_MASK_FP_UNDERFLOW = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_UNDERFLOW', 16)
-KFD_DBG_TRAP_MASK_FP_INEXACT = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_INEXACT', 32)
-KFD_DBG_TRAP_MASK_INT_DIVIDE_BY_ZERO = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_INT_DIVIDE_BY_ZERO', 64)
-KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH', 128)
-KFD_DBG_TRAP_MASK_DBG_MEMORY_VIOLATION = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_DBG_MEMORY_VIOLATION', 256)
-KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_START = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_START', 1073741824)
-KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END', -2147483648)
+KFD_DBG_TRAP_MASK_FP_INVALID = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_INVALID', 1) # type: ignore
+KFD_DBG_TRAP_MASK_FP_INPUT_DENORMAL = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_INPUT_DENORMAL', 2) # type: ignore
+KFD_DBG_TRAP_MASK_FP_DIVIDE_BY_ZERO = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_DIVIDE_BY_ZERO', 4) # type: ignore
+KFD_DBG_TRAP_MASK_FP_OVERFLOW = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_OVERFLOW', 8) # type: ignore
+KFD_DBG_TRAP_MASK_FP_UNDERFLOW = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_UNDERFLOW', 16) # type: ignore
+KFD_DBG_TRAP_MASK_FP_INEXACT = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_FP_INEXACT', 32) # type: ignore
+KFD_DBG_TRAP_MASK_INT_DIVIDE_BY_ZERO = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_INT_DIVIDE_BY_ZERO', 64) # type: ignore
+KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_DBG_ADDRESS_WATCH', 128) # type: ignore
+KFD_DBG_TRAP_MASK_DBG_MEMORY_VIOLATION = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_DBG_MEMORY_VIOLATION', 256) # type: ignore
+KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_START = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_START', 1073741824) # type: ignore
+KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END = enum_kfd_dbg_trap_mask.define('KFD_DBG_TRAP_MASK_TRAP_ON_WAVE_END', -2147483648) # type: ignore
 
 enum_kfd_dbg_trap_wave_launch_mode = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_DBG_TRAP_WAVE_LAUNCH_MODE_NORMAL = enum_kfd_dbg_trap_wave_launch_mode.define('KFD_DBG_TRAP_WAVE_LAUNCH_MODE_NORMAL', 0)
-KFD_DBG_TRAP_WAVE_LAUNCH_MODE_HALT = enum_kfd_dbg_trap_wave_launch_mode.define('KFD_DBG_TRAP_WAVE_LAUNCH_MODE_HALT', 1)
-KFD_DBG_TRAP_WAVE_LAUNCH_MODE_DEBUG = enum_kfd_dbg_trap_wave_launch_mode.define('KFD_DBG_TRAP_WAVE_LAUNCH_MODE_DEBUG', 3)
+KFD_DBG_TRAP_WAVE_LAUNCH_MODE_NORMAL = enum_kfd_dbg_trap_wave_launch_mode.define('KFD_DBG_TRAP_WAVE_LAUNCH_MODE_NORMAL', 0) # type: ignore
+KFD_DBG_TRAP_WAVE_LAUNCH_MODE_HALT = enum_kfd_dbg_trap_wave_launch_mode.define('KFD_DBG_TRAP_WAVE_LAUNCH_MODE_HALT', 1) # type: ignore
+KFD_DBG_TRAP_WAVE_LAUNCH_MODE_DEBUG = enum_kfd_dbg_trap_wave_launch_mode.define('KFD_DBG_TRAP_WAVE_LAUNCH_MODE_DEBUG', 3) # type: ignore
 
 enum_kfd_dbg_trap_address_watch_mode = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ = enum_kfd_dbg_trap_address_watch_mode.define('KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ', 0)
-KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD = enum_kfd_dbg_trap_address_watch_mode.define('KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD', 1)
-KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC = enum_kfd_dbg_trap_address_watch_mode.define('KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC', 2)
-KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL = enum_kfd_dbg_trap_address_watch_mode.define('KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL', 3)
+KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ = enum_kfd_dbg_trap_address_watch_mode.define('KFD_DBG_TRAP_ADDRESS_WATCH_MODE_READ', 0) # type: ignore
+KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD = enum_kfd_dbg_trap_address_watch_mode.define('KFD_DBG_TRAP_ADDRESS_WATCH_MODE_NONREAD', 1) # type: ignore
+KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC = enum_kfd_dbg_trap_address_watch_mode.define('KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ATOMIC', 2) # type: ignore
+KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL = enum_kfd_dbg_trap_address_watch_mode.define('KFD_DBG_TRAP_ADDRESS_WATCH_MODE_ALL', 3) # type: ignore
 
 enum_kfd_dbg_trap_flags = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP = enum_kfd_dbg_trap_flags.define('KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP', 1)
-KFD_DBG_TRAP_FLAG_SINGLE_ALU_OP = enum_kfd_dbg_trap_flags.define('KFD_DBG_TRAP_FLAG_SINGLE_ALU_OP', 2)
+KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP = enum_kfd_dbg_trap_flags.define('KFD_DBG_TRAP_FLAG_SINGLE_MEM_OP', 1) # type: ignore
+KFD_DBG_TRAP_FLAG_SINGLE_ALU_OP = enum_kfd_dbg_trap_flags.define('KFD_DBG_TRAP_FLAG_SINGLE_ALU_OP', 2) # type: ignore
 
 enum_kfd_dbg_trap_exception_code = CEnum(Annotated[int, ctypes.c_uint32])
-EC_NONE = enum_kfd_dbg_trap_exception_code.define('EC_NONE', 0)
-EC_QUEUE_WAVE_ABORT = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_ABORT', 1)
-EC_QUEUE_WAVE_TRAP = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_TRAP', 2)
-EC_QUEUE_WAVE_MATH_ERROR = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_MATH_ERROR', 3)
-EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION', 4)
-EC_QUEUE_WAVE_MEMORY_VIOLATION = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_MEMORY_VIOLATION', 5)
-EC_QUEUE_WAVE_APERTURE_VIOLATION = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_APERTURE_VIOLATION', 6)
-EC_QUEUE_PACKET_DISPATCH_DIM_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_DIM_INVALID', 16)
-EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID', 17)
-EC_QUEUE_PACKET_DISPATCH_CODE_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_CODE_INVALID', 18)
-EC_QUEUE_PACKET_RESERVED = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_RESERVED', 19)
-EC_QUEUE_PACKET_UNSUPPORTED = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_UNSUPPORTED', 20)
-EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID', 21)
-EC_QUEUE_PACKET_DISPATCH_REGISTER_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_REGISTER_INVALID', 22)
-EC_QUEUE_PACKET_VENDOR_UNSUPPORTED = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_VENDOR_UNSUPPORTED', 23)
-EC_QUEUE_PREEMPTION_ERROR = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PREEMPTION_ERROR', 30)
-EC_QUEUE_NEW = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_NEW', 31)
-EC_DEVICE_QUEUE_DELETE = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_QUEUE_DELETE', 32)
-EC_DEVICE_MEMORY_VIOLATION = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_MEMORY_VIOLATION', 33)
-EC_DEVICE_RAS_ERROR = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_RAS_ERROR', 34)
-EC_DEVICE_FATAL_HALT = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_FATAL_HALT', 35)
-EC_DEVICE_NEW = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_NEW', 36)
-EC_PROCESS_RUNTIME = enum_kfd_dbg_trap_exception_code.define('EC_PROCESS_RUNTIME', 48)
-EC_PROCESS_DEVICE_REMOVE = enum_kfd_dbg_trap_exception_code.define('EC_PROCESS_DEVICE_REMOVE', 49)
-EC_MAX = enum_kfd_dbg_trap_exception_code.define('EC_MAX', 50)
+EC_NONE = enum_kfd_dbg_trap_exception_code.define('EC_NONE', 0) # type: ignore
+EC_QUEUE_WAVE_ABORT = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_ABORT', 1) # type: ignore
+EC_QUEUE_WAVE_TRAP = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_TRAP', 2) # type: ignore
+EC_QUEUE_WAVE_MATH_ERROR = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_MATH_ERROR', 3) # type: ignore
+EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION', 4) # type: ignore
+EC_QUEUE_WAVE_MEMORY_VIOLATION = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_MEMORY_VIOLATION', 5) # type: ignore
+EC_QUEUE_WAVE_APERTURE_VIOLATION = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_WAVE_APERTURE_VIOLATION', 6) # type: ignore
+EC_QUEUE_PACKET_DISPATCH_DIM_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_DIM_INVALID', 16) # type: ignore
+EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID', 17) # type: ignore
+EC_QUEUE_PACKET_DISPATCH_CODE_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_CODE_INVALID', 18) # type: ignore
+EC_QUEUE_PACKET_RESERVED = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_RESERVED', 19) # type: ignore
+EC_QUEUE_PACKET_UNSUPPORTED = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_UNSUPPORTED', 20) # type: ignore
+EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID', 21) # type: ignore
+EC_QUEUE_PACKET_DISPATCH_REGISTER_INVALID = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_DISPATCH_REGISTER_INVALID', 22) # type: ignore
+EC_QUEUE_PACKET_VENDOR_UNSUPPORTED = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PACKET_VENDOR_UNSUPPORTED', 23) # type: ignore
+EC_QUEUE_PREEMPTION_ERROR = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_PREEMPTION_ERROR', 30) # type: ignore
+EC_QUEUE_NEW = enum_kfd_dbg_trap_exception_code.define('EC_QUEUE_NEW', 31) # type: ignore
+EC_DEVICE_QUEUE_DELETE = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_QUEUE_DELETE', 32) # type: ignore
+EC_DEVICE_MEMORY_VIOLATION = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_MEMORY_VIOLATION', 33) # type: ignore
+EC_DEVICE_RAS_ERROR = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_RAS_ERROR', 34) # type: ignore
+EC_DEVICE_FATAL_HALT = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_FATAL_HALT', 35) # type: ignore
+EC_DEVICE_NEW = enum_kfd_dbg_trap_exception_code.define('EC_DEVICE_NEW', 36) # type: ignore
+EC_PROCESS_RUNTIME = enum_kfd_dbg_trap_exception_code.define('EC_PROCESS_RUNTIME', 48) # type: ignore
+EC_PROCESS_DEVICE_REMOVE = enum_kfd_dbg_trap_exception_code.define('EC_PROCESS_DEVICE_REMOVE', 49) # type: ignore
+EC_MAX = enum_kfd_dbg_trap_exception_code.define('EC_MAX', 50) # type: ignore
 
 enum_kfd_dbg_runtime_state = CEnum(Annotated[int, ctypes.c_uint32])
-DEBUG_RUNTIME_STATE_DISABLED = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_DISABLED', 0)
-DEBUG_RUNTIME_STATE_ENABLED = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED', 1)
-DEBUG_RUNTIME_STATE_ENABLED_BUSY = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED_BUSY', 2)
-DEBUG_RUNTIME_STATE_ENABLED_ERROR = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED_ERROR', 3)
+DEBUG_RUNTIME_STATE_DISABLED = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_DISABLED', 0) # type: ignore
+DEBUG_RUNTIME_STATE_ENABLED = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED', 1) # type: ignore
+DEBUG_RUNTIME_STATE_ENABLED_BUSY = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED_BUSY', 2) # type: ignore
+DEBUG_RUNTIME_STATE_ENABLED_ERROR = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED_ERROR', 3) # type: ignore
 
 @c.record
 class struct_kfd_runtime_info(c.Struct):
@@ -567,35 +567,35 @@ class struct_kfd_queue_snapshot_entry(c.Struct):
 @c.record
 class struct_kfd_context_save_area_header(c.Struct):
   SIZE = 40
-  wave_state: Annotated[_anonstruct0, 0]
+  wave_state: Annotated[struct_kfd_context_save_area_header_wave_state, 0]
   debug_offset: Annotated[Annotated[int, ctypes.c_uint32], 16]
   debug_size: Annotated[Annotated[int, ctypes.c_uint32], 20]
   err_payload_addr: Annotated[Annotated[int, ctypes.c_uint64], 24]
   err_event_id: Annotated[Annotated[int, ctypes.c_uint32], 32]
   reserved1: Annotated[Annotated[int, ctypes.c_uint32], 36]
 @c.record
-class _anonstruct0(c.Struct):
+class struct_kfd_context_save_area_header_wave_state(c.Struct):
   SIZE = 16
   control_stack_offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
   control_stack_size: Annotated[Annotated[int, ctypes.c_uint32], 4]
   wave_state_offset: Annotated[Annotated[int, ctypes.c_uint32], 8]
   wave_state_size: Annotated[Annotated[int, ctypes.c_uint32], 12]
 enum_kfd_dbg_trap_operations = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOC_DBG_TRAP_ENABLE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_ENABLE', 0)
-KFD_IOC_DBG_TRAP_DISABLE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_DISABLE', 1)
-KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT', 2)
-KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED', 3)
-KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE', 4)
-KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE', 5)
-KFD_IOC_DBG_TRAP_SUSPEND_QUEUES = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SUSPEND_QUEUES', 6)
-KFD_IOC_DBG_TRAP_RESUME_QUEUES = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_RESUME_QUEUES', 7)
-KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH', 8)
-KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH', 9)
-KFD_IOC_DBG_TRAP_SET_FLAGS = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_FLAGS', 10)
-KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT', 11)
-KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO', 12)
-KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT', 13)
-KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT', 14)
+KFD_IOC_DBG_TRAP_ENABLE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_ENABLE', 0) # type: ignore
+KFD_IOC_DBG_TRAP_DISABLE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_DISABLE', 1) # type: ignore
+KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SEND_RUNTIME_EVENT', 2) # type: ignore
+KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_EXCEPTIONS_ENABLED', 3) # type: ignore
+KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_OVERRIDE', 4) # type: ignore
+KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_WAVE_LAUNCH_MODE', 5) # type: ignore
+KFD_IOC_DBG_TRAP_SUSPEND_QUEUES = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SUSPEND_QUEUES', 6) # type: ignore
+KFD_IOC_DBG_TRAP_RESUME_QUEUES = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_RESUME_QUEUES', 7) # type: ignore
+KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_NODE_ADDRESS_WATCH', 8) # type: ignore
+KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_CLEAR_NODE_ADDRESS_WATCH', 9) # type: ignore
+KFD_IOC_DBG_TRAP_SET_FLAGS = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_SET_FLAGS', 10) # type: ignore
+KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT', 11) # type: ignore
+KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO', 12) # type: ignore
+KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT', 13) # type: ignore
+KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT', 14) # type: ignore
 
 @c.record
 class struct_kfd_ioctl_dbg_trap_enable_args(c.Struct):
@@ -705,20 +705,20 @@ class struct_kfd_ioctl_dbg_trap_args(c.Struct):
   queue_snapshot: Annotated[struct_kfd_ioctl_dbg_trap_queue_snapshot_args, 8]
   device_snapshot: Annotated[struct_kfd_ioctl_dbg_trap_device_snapshot_args, 8]
 enum_kfd_ioctl_pc_sample_op = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES', 0)
-KFD_IOCTL_PCS_OP_CREATE = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_CREATE', 1)
-KFD_IOCTL_PCS_OP_DESTROY = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_DESTROY', 2)
-KFD_IOCTL_PCS_OP_START = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_START', 3)
-KFD_IOCTL_PCS_OP_STOP = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_STOP', 4)
+KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES', 0) # type: ignore
+KFD_IOCTL_PCS_OP_CREATE = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_CREATE', 1) # type: ignore
+KFD_IOCTL_PCS_OP_DESTROY = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_DESTROY', 2) # type: ignore
+KFD_IOCTL_PCS_OP_START = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_START', 3) # type: ignore
+KFD_IOCTL_PCS_OP_STOP = enum_kfd_ioctl_pc_sample_op.define('KFD_IOCTL_PCS_OP_STOP', 4) # type: ignore
 
 enum_kfd_ioctl_pc_sample_method = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOCTL_PCS_METHOD_HOSTTRAP = enum_kfd_ioctl_pc_sample_method.define('KFD_IOCTL_PCS_METHOD_HOSTTRAP', 1)
-KFD_IOCTL_PCS_METHOD_STOCHASTIC = enum_kfd_ioctl_pc_sample_method.define('KFD_IOCTL_PCS_METHOD_STOCHASTIC', 2)
+KFD_IOCTL_PCS_METHOD_HOSTTRAP = enum_kfd_ioctl_pc_sample_method.define('KFD_IOCTL_PCS_METHOD_HOSTTRAP', 1) # type: ignore
+KFD_IOCTL_PCS_METHOD_STOCHASTIC = enum_kfd_ioctl_pc_sample_method.define('KFD_IOCTL_PCS_METHOD_STOCHASTIC', 2) # type: ignore
 
 enum_kfd_ioctl_pc_sample_type = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOCTL_PCS_TYPE_TIME_US = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_TIME_US', 0)
-KFD_IOCTL_PCS_TYPE_CLOCK_CYCLES = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_CLOCK_CYCLES', 1)
-KFD_IOCTL_PCS_TYPE_INSTRUCTIONS = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_INSTRUCTIONS', 2)
+KFD_IOCTL_PCS_TYPE_TIME_US = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_TIME_US', 0) # type: ignore
+KFD_IOCTL_PCS_TYPE_CLOCK_CYCLES = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_CLOCK_CYCLES', 1) # type: ignore
+KFD_IOCTL_PCS_TYPE_INSTRUCTIONS = enum_kfd_ioctl_pc_sample_type.define('KFD_IOCTL_PCS_TYPE_INSTRUCTIONS', 2) # type: ignore
 
 @c.record
 class struct_kfd_pc_sample_info(c.Struct):
@@ -740,9 +740,9 @@ class struct_kfd_ioctl_pc_sample_args(c.Struct):
   flags: Annotated[Annotated[int, ctypes.c_uint32], 24]
   version: Annotated[Annotated[int, ctypes.c_uint32], 28]
 enum_kfd_profiler_ops = CEnum(Annotated[int, ctypes.c_uint32])
-KFD_IOC_PROFILER_PMC = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_PMC', 0)
-KFD_IOC_PROFILER_PC_SAMPLE = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_PC_SAMPLE', 1)
-KFD_IOC_PROFILER_VERSION = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_VERSION', 2)
+KFD_IOC_PROFILER_PMC = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_PMC', 0) # type: ignore
+KFD_IOC_PROFILER_PC_SAMPLE = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_PC_SAMPLE', 1) # type: ignore
+KFD_IOC_PROFILER_VERSION = enum_kfd_profiler_ops.define('KFD_IOC_PROFILER_VERSION', 2) # type: ignore
 
 @c.record
 class struct_kfd_ioctl_pmc_settings(c.Struct):
@@ -758,137 +758,137 @@ class struct_kfd_ioctl_profiler_args(c.Struct):
   pmc: Annotated[struct_kfd_ioctl_pmc_settings, 8]
   version: Annotated[Annotated[int, ctypes.c_uint32], 8]
 c.init_records()
-KFD_IOCTL_MAJOR_VERSION = 1
-KFD_IOCTL_MINOR_VERSION = 17
-KFD_IOC_QUEUE_TYPE_COMPUTE = 0x0
-KFD_IOC_QUEUE_TYPE_SDMA = 0x1
-KFD_IOC_QUEUE_TYPE_COMPUTE_AQL = 0x2
-KFD_IOC_QUEUE_TYPE_SDMA_XGMI = 0x3
-KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID = 0x4
-KFD_MAX_QUEUE_PERCENTAGE = 100
-KFD_MAX_QUEUE_PRIORITY = 15
-KFD_IOC_CACHE_POLICY_COHERENT = 0
-KFD_IOC_CACHE_POLICY_NONCOHERENT = 1
-NUM_OF_SUPPORTED_GPUS = 7
-MAX_ALLOWED_NUM_POINTS = 100
-MAX_ALLOWED_AW_BUFF_SIZE = 4096
-MAX_ALLOWED_WAC_BUFF_SIZE = 128
-KFD_INVALID_FD = 0xffffffff
-KFD_IOC_EVENT_SIGNAL = 0
-KFD_IOC_EVENT_NODECHANGE = 1
-KFD_IOC_EVENT_DEVICESTATECHANGE = 2
-KFD_IOC_EVENT_HW_EXCEPTION = 3
-KFD_IOC_EVENT_SYSTEM_EVENT = 4
-KFD_IOC_EVENT_DEBUG_EVENT = 5
-KFD_IOC_EVENT_PROFILE_EVENT = 6
-KFD_IOC_EVENT_QUEUE_EVENT = 7
-KFD_IOC_EVENT_MEMORY = 8
-KFD_IOC_WAIT_RESULT_COMPLETE = 0
-KFD_IOC_WAIT_RESULT_TIMEOUT = 1
-KFD_IOC_WAIT_RESULT_FAIL = 2
-KFD_SIGNAL_EVENT_LIMIT = 4096
-KFD_HW_EXCEPTION_WHOLE_GPU_RESET = 0
-KFD_HW_EXCEPTION_PER_ENGINE_RESET = 1
-KFD_HW_EXCEPTION_GPU_HANG = 0
-KFD_HW_EXCEPTION_ECC = 1
-KFD_MEM_ERR_NO_RAS = 0
-KFD_MEM_ERR_SRAM_ECC = 1
-KFD_MEM_ERR_POISON_CONSUMED = 2
-KFD_MEM_ERR_GPU_HANG = 3
-KFD_IOC_ALLOC_MEM_FLAGS_VRAM = (1 << 0)
-KFD_IOC_ALLOC_MEM_FLAGS_GTT = (1 << 1)
-KFD_IOC_ALLOC_MEM_FLAGS_USERPTR = (1 << 2)
-KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL = (1 << 3)
-KFD_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP = (1 << 4)
-KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE = (1 << 31)
-KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE = (1 << 30)
-KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC = (1 << 29)
-KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE = (1 << 28)
-KFD_IOC_ALLOC_MEM_FLAGS_AQL_QUEUE_MEM = (1 << 27)
-KFD_IOC_ALLOC_MEM_FLAGS_COHERENT = (1 << 26)
-KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED = (1 << 25)
-KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT = (1 << 24)
-KFD_IOC_ALLOC_MEM_FLAGS_CONTIGUOUS = (1 << 23)
-KFD_SMI_EVENT_MASK_FROM_INDEX = lambda i: (1 << ((i) - 1))
-KFD_SMI_EVENT_MSG_SIZE = 96
-KFD_IOCTL_SVM_FLAG_HOST_ACCESS = 0x00000001
-KFD_IOCTL_SVM_FLAG_COHERENT = 0x00000002
-KFD_IOCTL_SVM_FLAG_HIVE_LOCAL = 0x00000004
-KFD_IOCTL_SVM_FLAG_GPU_RO = 0x00000008
-KFD_IOCTL_SVM_FLAG_GPU_EXEC = 0x00000010
-KFD_IOCTL_SVM_FLAG_GPU_READ_MOSTLY = 0x00000020
-KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED = 0x00000040
-KFD_IOCTL_SVM_FLAG_EXT_COHERENT = 0x00000080
-KFD_EC_MASK = lambda ecode: (1 << (ecode - 1))
-KFD_EC_MASK_QUEUE = (KFD_EC_MASK(EC_QUEUE_WAVE_ABORT) | KFD_EC_MASK(EC_QUEUE_WAVE_TRAP) | KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR) | KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION) | KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION) | KFD_EC_MASK(EC_QUEUE_WAVE_APERTURE_VIOLATION) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_DIM_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_CODE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_RESERVED) | KFD_EC_MASK(EC_QUEUE_PACKET_UNSUPPORTED) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_REGISTER_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_VENDOR_UNSUPPORTED)	| KFD_EC_MASK(EC_QUEUE_PREEMPTION_ERROR)	| KFD_EC_MASK(EC_QUEUE_NEW))
-KFD_EC_MASK_DEVICE = (KFD_EC_MASK(EC_DEVICE_QUEUE_DELETE) | KFD_EC_MASK(EC_DEVICE_RAS_ERROR) | KFD_EC_MASK(EC_DEVICE_FATAL_HALT) | KFD_EC_MASK(EC_DEVICE_MEMORY_VIOLATION) | KFD_EC_MASK(EC_DEVICE_NEW))
-KFD_EC_MASK_PROCESS = (KFD_EC_MASK(EC_PROCESS_RUNTIME) | KFD_EC_MASK(EC_PROCESS_DEVICE_REMOVE))
-KFD_EC_MASK_PACKET = (KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_DIM_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_CODE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_RESERVED) | KFD_EC_MASK(EC_QUEUE_PACKET_UNSUPPORTED) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_REGISTER_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_VENDOR_UNSUPPORTED))
-KFD_DBG_EC_IS_VALID = lambda ecode: (ecode > EC_NONE and ecode < EC_MAX)
-KFD_DBG_EC_TYPE_IS_QUEUE = lambda ecode: (KFD_DBG_EC_IS_VALID(ecode) and not  not (KFD_EC_MASK(ecode) & KFD_EC_MASK_QUEUE))
-KFD_DBG_EC_TYPE_IS_DEVICE = lambda ecode: (KFD_DBG_EC_IS_VALID(ecode) and not  not (KFD_EC_MASK(ecode) & KFD_EC_MASK_DEVICE))
-KFD_DBG_EC_TYPE_IS_PROCESS = lambda ecode: (KFD_DBG_EC_IS_VALID(ecode) and not  not (KFD_EC_MASK(ecode) & KFD_EC_MASK_PROCESS))
-KFD_DBG_EC_TYPE_IS_PACKET = lambda ecode: (KFD_DBG_EC_IS_VALID(ecode) and not  not (KFD_EC_MASK(ecode) & KFD_EC_MASK_PACKET))
-KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK = 1
-KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK = 2
-KFD_DBG_QUEUE_ERROR_BIT = 30
-KFD_DBG_QUEUE_INVALID_BIT = 31
-KFD_DBG_QUEUE_ERROR_MASK = (1 << KFD_DBG_QUEUE_ERROR_BIT)
-KFD_DBG_QUEUE_INVALID_MASK = (1 << KFD_DBG_QUEUE_INVALID_BIT)
-KFD_IOCTL_PCS_FLAG_POWER_OF_2 = 0x00000001
-KFD_IOCTL_PCS_QUERY_TYPE_FULL = (1 << 0)
-KFD_IOC_PROFILER_VERSION_NUM = 1
-AMDKFD_IOCTL_BASE = 'K'
-AMDKFD_IO = lambda nr: _IO(AMDKFD_IOCTL_BASE, nr)
-AMDKFD_IOR = lambda nr,type: _IOR(AMDKFD_IOCTL_BASE, nr, type)
-AMDKFD_IOW = lambda nr,type: _IOW(AMDKFD_IOCTL_BASE, nr, type)
-AMDKFD_IOWR = lambda nr,type: _IOWR(AMDKFD_IOCTL_BASE, nr, type)
-AMDKFD_IOC_GET_VERSION = AMDKFD_IOR(0x01, struct_kfd_ioctl_get_version_args)
-AMDKFD_IOC_CREATE_QUEUE = AMDKFD_IOWR(0x02, struct_kfd_ioctl_create_queue_args)
-AMDKFD_IOC_DESTROY_QUEUE = AMDKFD_IOWR(0x03, struct_kfd_ioctl_destroy_queue_args)
-AMDKFD_IOC_SET_MEMORY_POLICY = AMDKFD_IOW(0x04, struct_kfd_ioctl_set_memory_policy_args)
-AMDKFD_IOC_GET_CLOCK_COUNTERS = AMDKFD_IOWR(0x05, struct_kfd_ioctl_get_clock_counters_args)
-AMDKFD_IOC_GET_PROCESS_APERTURES = AMDKFD_IOR(0x06, struct_kfd_ioctl_get_process_apertures_args)
-AMDKFD_IOC_UPDATE_QUEUE = AMDKFD_IOW(0x07, struct_kfd_ioctl_update_queue_args)
-AMDKFD_IOC_CREATE_EVENT = AMDKFD_IOWR(0x08, struct_kfd_ioctl_create_event_args)
-AMDKFD_IOC_DESTROY_EVENT = AMDKFD_IOW(0x09, struct_kfd_ioctl_destroy_event_args)
-AMDKFD_IOC_SET_EVENT = AMDKFD_IOW(0x0A, struct_kfd_ioctl_set_event_args)
-AMDKFD_IOC_RESET_EVENT = AMDKFD_IOW(0x0B, struct_kfd_ioctl_reset_event_args)
-AMDKFD_IOC_WAIT_EVENTS = AMDKFD_IOWR(0x0C, struct_kfd_ioctl_wait_events_args)
-AMDKFD_IOC_DBG_REGISTER_DEPRECATED = AMDKFD_IOW(0x0D, struct_kfd_ioctl_dbg_register_args)
-AMDKFD_IOC_DBG_UNREGISTER_DEPRECATED = AMDKFD_IOW(0x0E, struct_kfd_ioctl_dbg_unregister_args)
-AMDKFD_IOC_DBG_ADDRESS_WATCH_DEPRECATED = AMDKFD_IOW(0x0F, struct_kfd_ioctl_dbg_address_watch_args)
-AMDKFD_IOC_DBG_WAVE_CONTROL_DEPRECATED = AMDKFD_IOW(0x10, struct_kfd_ioctl_dbg_wave_control_args)
-AMDKFD_IOC_SET_SCRATCH_BACKING_VA = AMDKFD_IOWR(0x11, struct_kfd_ioctl_set_scratch_backing_va_args)
-AMDKFD_IOC_GET_TILE_CONFIG = AMDKFD_IOWR(0x12, struct_kfd_ioctl_get_tile_config_args)
-AMDKFD_IOC_SET_TRAP_HANDLER = AMDKFD_IOW(0x13, struct_kfd_ioctl_set_trap_handler_args)
-AMDKFD_IOC_GET_PROCESS_APERTURES_NEW = AMDKFD_IOWR(0x14, struct_kfd_ioctl_get_process_apertures_new_args)
-AMDKFD_IOC_ACQUIRE_VM = AMDKFD_IOW(0x15, struct_kfd_ioctl_acquire_vm_args)
-AMDKFD_IOC_ALLOC_MEMORY_OF_GPU = AMDKFD_IOWR(0x16, struct_kfd_ioctl_alloc_memory_of_gpu_args)
-AMDKFD_IOC_FREE_MEMORY_OF_GPU = AMDKFD_IOW(0x17, struct_kfd_ioctl_free_memory_of_gpu_args)
-AMDKFD_IOC_MAP_MEMORY_TO_GPU = AMDKFD_IOWR(0x18, struct_kfd_ioctl_map_memory_to_gpu_args)
-AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU = AMDKFD_IOWR(0x19, struct_kfd_ioctl_unmap_memory_from_gpu_args)
-AMDKFD_IOC_SET_CU_MASK = AMDKFD_IOW(0x1A, struct_kfd_ioctl_set_cu_mask_args)
-AMDKFD_IOC_GET_QUEUE_WAVE_STATE = AMDKFD_IOWR(0x1B, struct_kfd_ioctl_get_queue_wave_state_args)
-AMDKFD_IOC_GET_DMABUF_INFO = AMDKFD_IOWR(0x1C, struct_kfd_ioctl_get_dmabuf_info_args)
-AMDKFD_IOC_IMPORT_DMABUF = AMDKFD_IOWR(0x1D, struct_kfd_ioctl_import_dmabuf_args)
-AMDKFD_IOC_ALLOC_QUEUE_GWS = AMDKFD_IOWR(0x1E, struct_kfd_ioctl_alloc_queue_gws_args)
-AMDKFD_IOC_SMI_EVENTS = AMDKFD_IOWR(0x1F, struct_kfd_ioctl_smi_events_args)
-AMDKFD_IOC_SVM = AMDKFD_IOWR(0x20, struct_kfd_ioctl_svm_args)
-AMDKFD_IOC_SET_XNACK_MODE = AMDKFD_IOWR(0x21, struct_kfd_ioctl_set_xnack_mode_args)
-AMDKFD_IOC_CRIU_OP = AMDKFD_IOWR(0x22, struct_kfd_ioctl_criu_args)
-AMDKFD_IOC_AVAILABLE_MEMORY = AMDKFD_IOWR(0x23, struct_kfd_ioctl_get_available_memory_args)
-AMDKFD_IOC_EXPORT_DMABUF = AMDKFD_IOWR(0x24, struct_kfd_ioctl_export_dmabuf_args)
-AMDKFD_IOC_RUNTIME_ENABLE = AMDKFD_IOWR(0x25, struct_kfd_ioctl_runtime_enable_args)
-AMDKFD_IOC_DBG_TRAP = AMDKFD_IOWR(0x26, struct_kfd_ioctl_dbg_trap_args)
-AMDKFD_COMMAND_START = 0x01
-AMDKFD_COMMAND_END = 0x27
-AMDKFD_IOC_IPC_IMPORT_HANDLE = AMDKFD_IOWR(0x80, struct_kfd_ioctl_ipc_import_handle_args)
-AMDKFD_IOC_IPC_EXPORT_HANDLE = AMDKFD_IOWR(0x81, struct_kfd_ioctl_ipc_export_handle_args)
-AMDKFD_IOC_DBG_TRAP_DEPRECATED = AMDKFD_IOWR(0x82, struct_kfd_ioctl_dbg_trap_args_deprecated)
-AMDKFD_IOC_CROSS_MEMORY_COPY_DEPRECATED = AMDKFD_IOWR(0x83, struct_kfd_ioctl_cross_memory_copy_deprecated_args)
-AMDKFD_IOC_RLC_SPM = AMDKFD_IOWR(0x84, struct_kfd_ioctl_spm_args)
-AMDKFD_IOC_PC_SAMPLE = AMDKFD_IOWR(0x85, struct_kfd_ioctl_pc_sample_args)
-AMDKFD_IOC_PROFILER = AMDKFD_IOWR(0x86, struct_kfd_ioctl_profiler_args)
-AMDKFD_COMMAND_START_2 = 0x80
-AMDKFD_COMMAND_END_2 = 0x87
+KFD_IOCTL_MAJOR_VERSION = 1 # type: ignore
+KFD_IOCTL_MINOR_VERSION = 17 # type: ignore
+KFD_IOC_QUEUE_TYPE_COMPUTE = 0x0 # type: ignore
+KFD_IOC_QUEUE_TYPE_SDMA = 0x1 # type: ignore
+KFD_IOC_QUEUE_TYPE_COMPUTE_AQL = 0x2 # type: ignore
+KFD_IOC_QUEUE_TYPE_SDMA_XGMI = 0x3 # type: ignore
+KFD_IOC_QUEUE_TYPE_SDMA_BY_ENG_ID = 0x4 # type: ignore
+KFD_MAX_QUEUE_PERCENTAGE = 100 # type: ignore
+KFD_MAX_QUEUE_PRIORITY = 15 # type: ignore
+KFD_IOC_CACHE_POLICY_COHERENT = 0 # type: ignore
+KFD_IOC_CACHE_POLICY_NONCOHERENT = 1 # type: ignore
+NUM_OF_SUPPORTED_GPUS = 7 # type: ignore
+MAX_ALLOWED_NUM_POINTS = 100 # type: ignore
+MAX_ALLOWED_AW_BUFF_SIZE = 4096 # type: ignore
+MAX_ALLOWED_WAC_BUFF_SIZE = 128 # type: ignore
+KFD_INVALID_FD = 0xffffffff # type: ignore
+KFD_IOC_EVENT_SIGNAL = 0 # type: ignore
+KFD_IOC_EVENT_NODECHANGE = 1 # type: ignore
+KFD_IOC_EVENT_DEVICESTATECHANGE = 2 # type: ignore
+KFD_IOC_EVENT_HW_EXCEPTION = 3 # type: ignore
+KFD_IOC_EVENT_SYSTEM_EVENT = 4 # type: ignore
+KFD_IOC_EVENT_DEBUG_EVENT = 5 # type: ignore
+KFD_IOC_EVENT_PROFILE_EVENT = 6 # type: ignore
+KFD_IOC_EVENT_QUEUE_EVENT = 7 # type: ignore
+KFD_IOC_EVENT_MEMORY = 8 # type: ignore
+KFD_IOC_WAIT_RESULT_COMPLETE = 0 # type: ignore
+KFD_IOC_WAIT_RESULT_TIMEOUT = 1 # type: ignore
+KFD_IOC_WAIT_RESULT_FAIL = 2 # type: ignore
+KFD_SIGNAL_EVENT_LIMIT = 4096 # type: ignore
+KFD_HW_EXCEPTION_WHOLE_GPU_RESET = 0 # type: ignore
+KFD_HW_EXCEPTION_PER_ENGINE_RESET = 1 # type: ignore
+KFD_HW_EXCEPTION_GPU_HANG = 0 # type: ignore
+KFD_HW_EXCEPTION_ECC = 1 # type: ignore
+KFD_MEM_ERR_NO_RAS = 0 # type: ignore
+KFD_MEM_ERR_SRAM_ECC = 1 # type: ignore
+KFD_MEM_ERR_POISON_CONSUMED = 2 # type: ignore
+KFD_MEM_ERR_GPU_HANG = 3 # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_VRAM = (1 << 0) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_GTT = (1 << 1) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_USERPTR = (1 << 2) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL = (1 << 3) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_MMIO_REMAP = (1 << 4) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE = (1 << 31) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_EXECUTABLE = (1 << 30) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC = (1 << 29) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE = (1 << 28) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_AQL_QUEUE_MEM = (1 << 27) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_COHERENT = (1 << 26) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED = (1 << 25) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_EXT_COHERENT = (1 << 24) # type: ignore
+KFD_IOC_ALLOC_MEM_FLAGS_CONTIGUOUS = (1 << 23) # type: ignore
+KFD_SMI_EVENT_MASK_FROM_INDEX = lambda i: (1 << ((i) - 1)) # type: ignore
+KFD_SMI_EVENT_MSG_SIZE = 96 # type: ignore
+KFD_IOCTL_SVM_FLAG_HOST_ACCESS = 0x00000001 # type: ignore
+KFD_IOCTL_SVM_FLAG_COHERENT = 0x00000002 # type: ignore
+KFD_IOCTL_SVM_FLAG_HIVE_LOCAL = 0x00000004 # type: ignore
+KFD_IOCTL_SVM_FLAG_GPU_RO = 0x00000008 # type: ignore
+KFD_IOCTL_SVM_FLAG_GPU_EXEC = 0x00000010 # type: ignore
+KFD_IOCTL_SVM_FLAG_GPU_READ_MOSTLY = 0x00000020 # type: ignore
+KFD_IOCTL_SVM_FLAG_GPU_ALWAYS_MAPPED = 0x00000040 # type: ignore
+KFD_IOCTL_SVM_FLAG_EXT_COHERENT = 0x00000080 # type: ignore
+KFD_EC_MASK = lambda ecode: (1 << (ecode - 1)) # type: ignore
+KFD_EC_MASK_QUEUE = (KFD_EC_MASK(EC_QUEUE_WAVE_ABORT) | KFD_EC_MASK(EC_QUEUE_WAVE_TRAP) | KFD_EC_MASK(EC_QUEUE_WAVE_MATH_ERROR) | KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION) | KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION) | KFD_EC_MASK(EC_QUEUE_WAVE_APERTURE_VIOLATION) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_DIM_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_CODE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_RESERVED) | KFD_EC_MASK(EC_QUEUE_PACKET_UNSUPPORTED) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_REGISTER_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_VENDOR_UNSUPPORTED)	| KFD_EC_MASK(EC_QUEUE_PREEMPTION_ERROR)	| KFD_EC_MASK(EC_QUEUE_NEW)) # type: ignore
+KFD_EC_MASK_DEVICE = (KFD_EC_MASK(EC_DEVICE_QUEUE_DELETE) | KFD_EC_MASK(EC_DEVICE_RAS_ERROR) | KFD_EC_MASK(EC_DEVICE_FATAL_HALT) | KFD_EC_MASK(EC_DEVICE_MEMORY_VIOLATION) | KFD_EC_MASK(EC_DEVICE_NEW)) # type: ignore
+KFD_EC_MASK_PROCESS = (KFD_EC_MASK(EC_PROCESS_RUNTIME) | KFD_EC_MASK(EC_PROCESS_DEVICE_REMOVE)) # type: ignore
+KFD_EC_MASK_PACKET = (KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_DIM_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_GROUP_SEGMENT_SIZE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_CODE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_RESERVED) | KFD_EC_MASK(EC_QUEUE_PACKET_UNSUPPORTED) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_WORK_GROUP_SIZE_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_DISPATCH_REGISTER_INVALID) | KFD_EC_MASK(EC_QUEUE_PACKET_VENDOR_UNSUPPORTED)) # type: ignore
+KFD_DBG_EC_IS_VALID = lambda ecode: (ecode > EC_NONE and ecode < EC_MAX) # type: ignore
+KFD_DBG_EC_TYPE_IS_QUEUE = lambda ecode: (KFD_DBG_EC_IS_VALID(ecode) and not  not (KFD_EC_MASK(ecode) & KFD_EC_MASK_QUEUE)) # type: ignore
+KFD_DBG_EC_TYPE_IS_DEVICE = lambda ecode: (KFD_DBG_EC_IS_VALID(ecode) and not  not (KFD_EC_MASK(ecode) & KFD_EC_MASK_DEVICE)) # type: ignore
+KFD_DBG_EC_TYPE_IS_PROCESS = lambda ecode: (KFD_DBG_EC_IS_VALID(ecode) and not  not (KFD_EC_MASK(ecode) & KFD_EC_MASK_PROCESS)) # type: ignore
+KFD_DBG_EC_TYPE_IS_PACKET = lambda ecode: (KFD_DBG_EC_IS_VALID(ecode) and not  not (KFD_EC_MASK(ecode) & KFD_EC_MASK_PACKET)) # type: ignore
+KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK = 1 # type: ignore
+KFD_RUNTIME_ENABLE_MODE_TTMP_SAVE_MASK = 2 # type: ignore
+KFD_DBG_QUEUE_ERROR_BIT = 30 # type: ignore
+KFD_DBG_QUEUE_INVALID_BIT = 31 # type: ignore
+KFD_DBG_QUEUE_ERROR_MASK = (1 << KFD_DBG_QUEUE_ERROR_BIT) # type: ignore
+KFD_DBG_QUEUE_INVALID_MASK = (1 << KFD_DBG_QUEUE_INVALID_BIT) # type: ignore
+KFD_IOCTL_PCS_FLAG_POWER_OF_2 = 0x00000001 # type: ignore
+KFD_IOCTL_PCS_QUERY_TYPE_FULL = (1 << 0) # type: ignore
+KFD_IOC_PROFILER_VERSION_NUM = 1 # type: ignore
+AMDKFD_IOCTL_BASE = 'K' # type: ignore
+AMDKFD_IO = lambda nr: _IO(AMDKFD_IOCTL_BASE, nr) # type: ignore
+AMDKFD_IOR = lambda nr,type: _IOR(AMDKFD_IOCTL_BASE, nr, type) # type: ignore
+AMDKFD_IOW = lambda nr,type: _IOW(AMDKFD_IOCTL_BASE, nr, type) # type: ignore
+AMDKFD_IOWR = lambda nr,type: _IOWR(AMDKFD_IOCTL_BASE, nr, type) # type: ignore
+AMDKFD_IOC_GET_VERSION = AMDKFD_IOR(0x01, struct_kfd_ioctl_get_version_args) # type: ignore
+AMDKFD_IOC_CREATE_QUEUE = AMDKFD_IOWR(0x02, struct_kfd_ioctl_create_queue_args) # type: ignore
+AMDKFD_IOC_DESTROY_QUEUE = AMDKFD_IOWR(0x03, struct_kfd_ioctl_destroy_queue_args) # type: ignore
+AMDKFD_IOC_SET_MEMORY_POLICY = AMDKFD_IOW(0x04, struct_kfd_ioctl_set_memory_policy_args) # type: ignore
+AMDKFD_IOC_GET_CLOCK_COUNTERS = AMDKFD_IOWR(0x05, struct_kfd_ioctl_get_clock_counters_args) # type: ignore
+AMDKFD_IOC_GET_PROCESS_APERTURES = AMDKFD_IOR(0x06, struct_kfd_ioctl_get_process_apertures_args) # type: ignore
+AMDKFD_IOC_UPDATE_QUEUE = AMDKFD_IOW(0x07, struct_kfd_ioctl_update_queue_args) # type: ignore
+AMDKFD_IOC_CREATE_EVENT = AMDKFD_IOWR(0x08, struct_kfd_ioctl_create_event_args) # type: ignore
+AMDKFD_IOC_DESTROY_EVENT = AMDKFD_IOW(0x09, struct_kfd_ioctl_destroy_event_args) # type: ignore
+AMDKFD_IOC_SET_EVENT = AMDKFD_IOW(0x0A, struct_kfd_ioctl_set_event_args) # type: ignore
+AMDKFD_IOC_RESET_EVENT = AMDKFD_IOW(0x0B, struct_kfd_ioctl_reset_event_args) # type: ignore
+AMDKFD_IOC_WAIT_EVENTS = AMDKFD_IOWR(0x0C, struct_kfd_ioctl_wait_events_args) # type: ignore
+AMDKFD_IOC_DBG_REGISTER_DEPRECATED = AMDKFD_IOW(0x0D, struct_kfd_ioctl_dbg_register_args) # type: ignore
+AMDKFD_IOC_DBG_UNREGISTER_DEPRECATED = AMDKFD_IOW(0x0E, struct_kfd_ioctl_dbg_unregister_args) # type: ignore
+AMDKFD_IOC_DBG_ADDRESS_WATCH_DEPRECATED = AMDKFD_IOW(0x0F, struct_kfd_ioctl_dbg_address_watch_args) # type: ignore
+AMDKFD_IOC_DBG_WAVE_CONTROL_DEPRECATED = AMDKFD_IOW(0x10, struct_kfd_ioctl_dbg_wave_control_args) # type: ignore
+AMDKFD_IOC_SET_SCRATCH_BACKING_VA = AMDKFD_IOWR(0x11, struct_kfd_ioctl_set_scratch_backing_va_args) # type: ignore
+AMDKFD_IOC_GET_TILE_CONFIG = AMDKFD_IOWR(0x12, struct_kfd_ioctl_get_tile_config_args) # type: ignore
+AMDKFD_IOC_SET_TRAP_HANDLER = AMDKFD_IOW(0x13, struct_kfd_ioctl_set_trap_handler_args) # type: ignore
+AMDKFD_IOC_GET_PROCESS_APERTURES_NEW = AMDKFD_IOWR(0x14, struct_kfd_ioctl_get_process_apertures_new_args) # type: ignore
+AMDKFD_IOC_ACQUIRE_VM = AMDKFD_IOW(0x15, struct_kfd_ioctl_acquire_vm_args) # type: ignore
+AMDKFD_IOC_ALLOC_MEMORY_OF_GPU = AMDKFD_IOWR(0x16, struct_kfd_ioctl_alloc_memory_of_gpu_args) # type: ignore
+AMDKFD_IOC_FREE_MEMORY_OF_GPU = AMDKFD_IOW(0x17, struct_kfd_ioctl_free_memory_of_gpu_args) # type: ignore
+AMDKFD_IOC_MAP_MEMORY_TO_GPU = AMDKFD_IOWR(0x18, struct_kfd_ioctl_map_memory_to_gpu_args) # type: ignore
+AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU = AMDKFD_IOWR(0x19, struct_kfd_ioctl_unmap_memory_from_gpu_args) # type: ignore
+AMDKFD_IOC_SET_CU_MASK = AMDKFD_IOW(0x1A, struct_kfd_ioctl_set_cu_mask_args) # type: ignore
+AMDKFD_IOC_GET_QUEUE_WAVE_STATE = AMDKFD_IOWR(0x1B, struct_kfd_ioctl_get_queue_wave_state_args) # type: ignore
+AMDKFD_IOC_GET_DMABUF_INFO = AMDKFD_IOWR(0x1C, struct_kfd_ioctl_get_dmabuf_info_args) # type: ignore
+AMDKFD_IOC_IMPORT_DMABUF = AMDKFD_IOWR(0x1D, struct_kfd_ioctl_import_dmabuf_args) # type: ignore
+AMDKFD_IOC_ALLOC_QUEUE_GWS = AMDKFD_IOWR(0x1E, struct_kfd_ioctl_alloc_queue_gws_args) # type: ignore
+AMDKFD_IOC_SMI_EVENTS = AMDKFD_IOWR(0x1F, struct_kfd_ioctl_smi_events_args) # type: ignore
+AMDKFD_IOC_SVM = AMDKFD_IOWR(0x20, struct_kfd_ioctl_svm_args) # type: ignore
+AMDKFD_IOC_SET_XNACK_MODE = AMDKFD_IOWR(0x21, struct_kfd_ioctl_set_xnack_mode_args) # type: ignore
+AMDKFD_IOC_CRIU_OP = AMDKFD_IOWR(0x22, struct_kfd_ioctl_criu_args) # type: ignore
+AMDKFD_IOC_AVAILABLE_MEMORY = AMDKFD_IOWR(0x23, struct_kfd_ioctl_get_available_memory_args) # type: ignore
+AMDKFD_IOC_EXPORT_DMABUF = AMDKFD_IOWR(0x24, struct_kfd_ioctl_export_dmabuf_args) # type: ignore
+AMDKFD_IOC_RUNTIME_ENABLE = AMDKFD_IOWR(0x25, struct_kfd_ioctl_runtime_enable_args) # type: ignore
+AMDKFD_IOC_DBG_TRAP = AMDKFD_IOWR(0x26, struct_kfd_ioctl_dbg_trap_args) # type: ignore
+AMDKFD_COMMAND_START = 0x01 # type: ignore
+AMDKFD_COMMAND_END = 0x27 # type: ignore
+AMDKFD_IOC_IPC_IMPORT_HANDLE = AMDKFD_IOWR(0x80, struct_kfd_ioctl_ipc_import_handle_args) # type: ignore
+AMDKFD_IOC_IPC_EXPORT_HANDLE = AMDKFD_IOWR(0x81, struct_kfd_ioctl_ipc_export_handle_args) # type: ignore
+AMDKFD_IOC_DBG_TRAP_DEPRECATED = AMDKFD_IOWR(0x82, struct_kfd_ioctl_dbg_trap_args_deprecated) # type: ignore
+AMDKFD_IOC_CROSS_MEMORY_COPY_DEPRECATED = AMDKFD_IOWR(0x83, struct_kfd_ioctl_cross_memory_copy_deprecated_args) # type: ignore
+AMDKFD_IOC_RLC_SPM = AMDKFD_IOWR(0x84, struct_kfd_ioctl_spm_args) # type: ignore
+AMDKFD_IOC_PC_SAMPLE = AMDKFD_IOWR(0x85, struct_kfd_ioctl_pc_sample_args) # type: ignore
+AMDKFD_IOC_PROFILER = AMDKFD_IOWR(0x86, struct_kfd_ioctl_profiler_args) # type: ignore
+AMDKFD_COMMAND_START_2 = 0x80 # type: ignore
+AMDKFD_COMMAND_END_2 = 0x87 # type: ignore
