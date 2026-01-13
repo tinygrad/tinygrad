@@ -105,7 +105,7 @@ def init_records():
   for cls, struct, ns in _pending_records:
     for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
       if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, Field(*t.__metadata__))
-      else: setattr(struct, nm, Field(t.__origin__, *t.__metadata__))
+      else: setattr(struct, nm, Field(del_an(t.__origin__), *t.__metadata__))
   _pending_records.clear()
 
 class Field(property):
