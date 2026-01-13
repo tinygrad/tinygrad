@@ -193,26 +193,13 @@ class VDSTYField(BitField):
   def decode(self, raw): return raw  # raw value, actual vdsty = (raw << 1) | ((vdstx & 1) ^ 1)
 
 # ══════════════════════════════════════════════════════════════
-# Pcode type extraction
+# Operand info from XML
 # ══════════════════════════════════════════════════════════════
 
-import re, functools
-from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE as PCODE_RDNA3
-from extra.assembly.amd.autogen.rdna4.str_pcode import PCODE as PCODE_RDNA4
-from extra.assembly.amd.autogen.cdna.str_pcode import PCODE as PCODE_CDNA
-PCODE = {**PCODE_CDNA, **PCODE_RDNA3, **PCODE_RDNA4}
-
-@functools.cache
-def _get_types(op) -> tuple[str|None, str|None, str|None, str|None]:
-  """Get (d0_dtype, s0_dtype, s1_dtype, s2_dtype) from pcode for an opcode. Use inst.types instead."""
-  pcode = PCODE.get(op)
-  if pcode is None: return (None, None, None, None)
-  def get_dtype(name: str) -> str | None:
-    # Lane mask destinations (e.g., D0.u64[laneId]) are wave-size dependent, skip validation
-    if re.search(rf'{name}\.u64\[laneId\]', pcode): return None
-    if m := re.search(rf'{name}\.([a-z]\d+)', pcode): return m.group(1)
-    return None
-  return (get_dtype('D0'), get_dtype('S0'), get_dtype('S1'), get_dtype('S2'))
+from extra.assembly.amd.autogen.rdna3.info import OPERANDS as OPERANDS_RDNA3
+from extra.assembly.amd.autogen.rdna4.info import OPERANDS as OPERANDS_RDNA4
+from extra.assembly.amd.autogen.cdna.info import OPERANDS as OPERANDS_CDNA
+OPERANDS = {**OPERANDS_CDNA, **OPERANDS_RDNA3, **OPERANDS_RDNA4}
 
 # ══════════════════════════════════════════════════════════════
 # Inst base class
@@ -264,7 +251,7 @@ class Inst:
       # Capture literal for SrcFields that encoded to 255
       if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
         self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
-    # Validate register sizes against types (skip special registers like NULL, VCC, EXEC)
+    # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC)
     for name, expected in self._field_sizes.items():
       if (val := vals.get(name)) is None: continue
       if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or val.offset == 253):
@@ -273,22 +260,36 @@ class Inst:
   @property
   def op_name(self) -> str: return self.op.name
   @property
-  def types(self) -> tuple[str|None, str|None, str|None, str|None]:
-    if not hasattr(self, 'op'): return (None, None, None, None)
-    return _get_types(self.op)
+  def operands(self) -> dict: return OPERANDS.get(self.op, {}) if hasattr(self, 'op') else {}
   @property
   def _field_sizes(self) -> dict[str, int]:
-    """Map field names to expected register sizes based on instruction types."""
-    types, fields = self.types, dict(self._fields)
-    # for destinations, only validate first field that exists (vdst before sdst before sdata)
-    dst = next((n for n in ['vdst', 'sdst', 'sdata'] if n in fields), None)
-    return {n: _reg_size(types[i]) for names, i in [([dst], 0), (['ssrc0', 'src0'], 1), (['ssrc1', 'src1'], 2), (['src2'], 3)]
-            if types[i] is not None for n in names if n and n in fields}
-  def is_src_64(self, n: int) -> bool: return _reg_size(self.types[n + 1]) == 2
-  def is_src_16(self, n: int) -> bool: return self.types[n + 1] in ('f16', 'u16', 'i16', 'b16')
-  def is_dst_16(self) -> bool: return self.types[0] in ('f16', 'u16', 'i16', 'b16')
-  def dst_regs(self) -> int: return _reg_size(self.types[0])
-  def src_regs(self, n: int) -> int: return _reg_size(self.types[n + 1])
+    """Map field names to expected register sizes based on operand info."""
+    # Exclude addr/saddr - memory instructions have variable address sizes depending on addressing mode
+    return {k: (v[1] + 31) // 32 for k, v in self.operands.items() if k not in ('addr', 'saddr')}
+  def _field_bits(self, name: str) -> int:
+    """Get size in bits for a field from operand info."""
+    return self.operands.get(name, (None, 0, None))[1]
+  def is_src_64(self, n: int) -> bool:
+    src = ['src0', 'vsrc0', 'ssrc0'][0] if n == 0 else ['src1', 'vsrc1', 'ssrc1'][0] if n == 1 else 'src2'
+    for name in ([src] if isinstance(src, str) else src):
+      if name in self.operands: return self.operands[name][1] == 64
+    return False
+  def is_src_16(self, n: int) -> bool:
+    for name in (['src0', 'vsrc0', 'ssrc0'] if n == 0 else ['src1', 'vsrc1', 'ssrc1'] if n == 1 else ['src2']):
+      if name in self.operands: return self.operands[name][1] == 16
+    return False
+  def is_dst_16(self) -> bool:
+    for name in ['vdst', 'sdst', 'sdata']:
+      if name in self.operands: return self.operands[name][1] == 16
+    return False
+  def dst_regs(self) -> int:
+    for name in ['vdst', 'sdst', 'sdata']:
+      if name in self.operands: return max(1, self.operands[name][1] // 32)
+    return 1
+  def src_regs(self, n: int) -> int:
+    for name in (['src0', 'vsrc0', 'ssrc0'] if n == 0 else ['src1', 'vsrc1', 'ssrc1'] if n == 1 else ['src2']):
+      if name in self.operands: return max(1, self.operands[name][1] // 32)
+    return 1
   @classmethod
   def _size(cls) -> int: return cls._base_size
   def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)

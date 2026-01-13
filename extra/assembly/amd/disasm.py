@@ -55,7 +55,7 @@ def _lit(inst, v, neg=0) -> str:
   return f"-{s}" if neg else s
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# INSTRUCTION METADATA - use inst.types when available, fallback to name parsing
+# INSTRUCTION METADATA - use inst.operands for sizes, fallback to name parsing
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _num_srcs(inst) -> int:
@@ -211,11 +211,10 @@ def _disasm_vop1(inst: VOP1) -> str:
     src = _vreg(inst.src0) if _unwrap(inst.src0) >= 256 else decode_src(_unwrap(inst.src0), cdna)
     vdst_raw = _unwrap(inst.vdst)
     return f"{name} {_fmt_sdst(vdst_raw - 256 if vdst_raw >= 256 else vdst_raw, 1, cdna)}, {src}"
-  # Use pcode types for register sizes and 16-bit detection
-  dst_type, src_type = inst.types[0], inst.types[1]
+  # Use operand info for register sizes and 16-bit detection
   dregs, sregs = inst.dst_regs(), inst.src_regs(0)
-  is16_dst = not cdna and dst_type in ('f16', 'u16', 'i16', 'b16')
-  is16_src = not cdna and src_type in ('f16', 'u16', 'i16', 'b16')
+  is16_dst = not cdna and inst.is_dst_16()
+  is16_src = not cdna and inst.is_src_16(0)
   # v_cvt_pk_f32_fp8/bf8: pcode has None dst type but outputs 2 VGPRs
   if 'cvt_pk_f32_fp8' in name or 'cvt_pk_f32_bf8' in name: dregs, is16_src = 2, True
   # Format dst
@@ -242,9 +241,8 @@ def _disasm_vop2(inst: VOP2) -> str:
   if cdna: name = _CDNA_DISASM_ALIASES.get(name, name)  # apply CDNA aliases
   suf = "" if cdna or name.endswith('_e32') or (not cdna and inst.op == VOP2Op.V_DOT2ACC_F32_F16_E32) else "_e32"
   lit = getattr(inst, '_literal', None)
-  # Use pcode types for 16-bit and register size detection
-  dst_type, src0_type, src1_type = inst.types[0], inst.types[1], inst.types[2]
-  is16 = not cdna and dst_type in ('f16', 'u16', 'i16', 'b16')
+  # Use operand info for 16-bit detection
+  is16 = not cdna and inst.is_dst_16()
   # fmaak/madak: dst = src0 * vsrc1 + K, fmamk/madmk: dst = src0 * K + vsrc1
   if 'fmaak' in name or 'madak' in name or (not cdna and inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAAK_F16_E32)):
     if lit is None: return f"op_{inst.op.value if hasattr(inst.op, 'value') else inst.op}"
@@ -272,15 +270,14 @@ def _disasm_vop2(inst: VOP2) -> str:
 
 def _disasm_vopc(inst: VOPC) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
-  # Use pcode types for register sizes
-  src0_type, src1_type = inst.types[1], inst.types[2]
+  # Use operand info for register sizes
   r0, r1 = inst.src_regs(0), inst.src_regs(1)
   n_up = name.upper()
-  # Fallback for 64-bit ops with incomplete pcode (e.g., V_CMP_T_F64 has all None types)
-  if r0 == 1 and src0_type is None and ('_F64' in n_up or '_I64' in n_up or '_U64' in n_up):
+  # Fallback for 64-bit ops with incomplete operand info (e.g., V_CMP_T_F64)
+  if r0 == 1 and not inst.operands and ('_F64' in n_up or '_I64' in n_up or '_U64' in n_up):
     r0, r1 = 2, 2
-  # 16-bit detection: use pcode type, with name-based fallback for ops with None types (e.g., V_CMP_T_F16)
-  is16 = src0_type in ('f16', 'u16', 'i16', 'b16') or (src0_type is None and _is_16bit(inst))
+  # 16-bit detection: use operand info, with name-based fallback for ops with missing info (e.g., V_CMP_T_F16)
+  is16 = inst.is_src_16(0) or (not inst.operands and _is_16bit(inst))
   if cdna:
     s0 = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else _fmt_src(inst.src0, r0, cdna)
     s1 = _vreg(inst.vsrc1, r1) if r1 > 1 else _vreg(inst.vsrc1)

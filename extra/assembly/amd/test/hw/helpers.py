@@ -63,7 +63,7 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
   epilogue = [
     s_mov_b32(s[90], VCC_LO),
     s_cselect_b32(s[91], 1, 0),
-    s_load_b64(s[92:93], s[80], 0, soffset=NULL),
+    s_load_b64(s[92:93], s[80:81], 0, soffset=NULL),
     s_waitcnt(0),  # simm16=0 waits for all
     v_lshlrev_b32_e32(v[240], 2, v[255]),
   ]

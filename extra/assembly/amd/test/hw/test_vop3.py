@@ -988,7 +988,7 @@ class TestF64Ops(unittest.TestCase):
       s_mov_b32(s[3], one_f64 >> 32),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=s[10], src0=v[0:1], src1=v[0:1], src2=v[2:3]),
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=s[10:11], src0=v[0:1], src1=v[0:1], src2=v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
@@ -1281,7 +1281,7 @@ class TestWMMAMore(unittest.TestCase):
       instructions.append(v_mov_b32_e32(v[i], s[0]))
     for i in range(8):
       instructions.append(v_mov_b32_e32(v[i], 0))
-    instructions.append(v_wmma_f32_16x16x16_f16(v[0], v[16], v[24], v[0]))
+    instructions.append(v_wmma_f32_16x16x16_f16(v[0:7], v[16:23], v[24:31], v[0:7]))
     st = run_program(instructions, n_lanes=32)
     any_nonzero = any(st.vgpr[lane][0] != 0 for lane in range(32))
     self.assertTrue(any_nonzero, "WMMA should produce non-zero output")
