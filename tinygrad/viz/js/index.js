@@ -55,11 +55,8 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const colorScale = d3.scaleSequential(t => t > 0 ? d3.interpolateLab(colorScheme.ACTIVE[1], colorScheme.ACTIVE[2])(t) : colorScheme.ACTIVE[0]).clamp(true);
-
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
-  if (data.value.colorDomain != null) colorScale.domain(data.value.colorDomain);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
@@ -93,8 +90,8 @@ const drawGraph = (data) => {
     }
     return [ret];
   }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
-    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 && d.st !== "," ? textSpace: 0).text(d => d.st).attr("xml:space", "preserve")
-    .classed("token", true).attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color));
+    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 && d.st !== "," ? textSpace: 0).text(d => d.st).attr("fill", d.color)
+    .attr("xml:space", "preserve").classed("token", true);
   const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => {
     const ret = [];
     d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").each((d, i, nodes) => {
