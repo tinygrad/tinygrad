@@ -8,8 +8,8 @@ from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError, CompilerPair, CompilerSet
 from tinygrad.dtype import ImageDType
 
-CC_CB = c.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(None), cl.size_t, ctypes.POINTER(None))
-BP_CB = c.CFUNCTYPE(None, cl.cl_program, ctypes.POINTER(None))
+CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
+BP_CB = c.CFUNCTYPE[None, [cl.cl_program, c.POINTER[None]]]
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
