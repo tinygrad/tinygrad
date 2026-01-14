@@ -608,7 +608,8 @@ def test_matmul():
   def asm_kernel(A:UOp, B:UOp, C:UOp) -> UOp:
     gidxs = [UOp.special(n, f"gidx{i}") for i,n in enumerate(grid)]
     lidxs = [UOp.special(n, f"lidx{i}") for i,n in enumerate(local)]
-    sink = UOp.sink(A.base, B.base, C.base, *gidxs, *lidxs, arg=KernelInfo(name=colored("kernel", "cyan")))
+    sink = UOp.sink(A.base, B.base, C.base, *gidxs, *lidxs, arg=KernelInfo(name=colored("kernel", "cyan"),
+                                                                           estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=asm),
                                  UOp(Ops.BINARY, arg=binary)), arg=())
   c = Tensor.custom_kernel(a, b, c, fxn=asm_kernel)[2]
