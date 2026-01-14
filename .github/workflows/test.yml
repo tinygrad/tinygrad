@@ -671,6 +671,7 @@ jobs:
       - name: Verify AMD autogen is up to date
         run: |
           python -m extra.assembly.amd.pdf
+          python -m extra.assembly.amd.amdxml
           git diff --exit-code extra/assembly/amd/autogen/
       - name: Install LLVM 21
         run: |

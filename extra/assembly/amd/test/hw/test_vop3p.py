@@ -360,7 +360,7 @@ class TestWMMA(unittest.TestCase):
       instructions.append(v_mov_b32_e32(v[i], s[0]))
     for i in range(8):
       instructions.append(v_mov_b32_e32(v[i], 0))
-    instructions.append(v_wmma_f32_16x16x16_f16(v[0], v[16], v[24], v[0]))
+    instructions.append(v_wmma_f32_16x16x16_f16(v[0:7], v[16:23], v[24:31], v[0:7]))
     st = run_program(instructions, n_lanes=32)
     expected = f2i(16.0)
     for lane in range(32):
@@ -377,7 +377,7 @@ class TestWMMA(unittest.TestCase):
       instructions.append(v_mov_b32_e32(v[i], s[0]))
     for i in range(8):
       instructions.append(v_mov_b32_e32(v[i], s[1]))
-    instructions.append(v_wmma_f32_16x16x16_f16(v[0], v[16], v[24], v[0]))
+    instructions.append(v_wmma_f32_16x16x16_f16(v[0:7], v[16:23], v[24:31], v[0:7]))
     st = run_program(instructions, n_lanes=32)
     expected = f2i(21.0)  # 16 + 5
     for lane in range(32):
