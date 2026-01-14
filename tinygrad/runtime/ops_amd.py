@@ -139,7 +139,6 @@ class AMDComputeQueue(HWQueue):
               enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
 
   def sample_wgp_config(self, buf:HCQBuffer):
-    """Sample CC_GC_SHADER_ARRAY_CONFIG and GC_USER_SHADER_ARRAY_CONFIG for each SE/SH to find active WGPs."""
     ses_per_xcc = self.dev.se_cnt // self.dev.xccs
     sa_per_se = self.dev.iface.props['simd_arrays_per_engine']
     offset = 0
@@ -149,11 +148,7 @@ class AMDComputeQueue(HWQueue):
         for se in range(ses_per_xcc):
           for sh in range(sa_per_se):
             self.set_grbm(se=se, sh=sh)
-            self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regCC_GC_SHADER_ARRAY_CONFIG.addr[0], 0,
-                      *data64_le(buf.va_addr + offset))
-            offset += 4
-            self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regGC_USER_SHADER_ARRAY_CONFIG.addr[0], 0,
-                      *data64_le(buf.va_addr + offset))
+            self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regCC_GC_SHADER_ARRAY_CONFIG.addr[0], 0, *data64_le(buf.va_addr + offset))
             offset += 4
 
     self.set_grbm()
@@ -171,13 +166,12 @@ class AMDComputeQueue(HWQueue):
       for se in range(ses_per_xcc):
         for sh in range(sa_per_se):
           cc_config = data[idx]
-          user_config = data[idx + 1]
           # inactive_wgps is in bits 16:31 (mask 0xFFFF0000, shift 16)
-          inactive_wgps = ((cc_config | user_config) >> 16) & 0xFFFF
+          inactive_wgps = ((cc_config) >> 16) & 0xFFFF
           active_wgps = (~inactive_wgps) & 0xFFFF
-          print(f"XCC{xcc} SE{se} SH{sh}: CC_CONFIG=0x{cc_config:08x} USER_CONFIG=0x{user_config:08x} "
+          print(f"XCC{xcc} SE{se} SH{sh}: CC_CONFIG=0x{cc_config:08x} "
                 f"inactive_wgps=0x{inactive_wgps:04x} active_wgps=0x{active_wgps:04x} ({bin(active_wgps).count('1')} WGPs)")
-          idx += 2
+          idx += 1
 
   ### PMC ###
 
@@ -1019,9 +1013,10 @@ class AMDDevice(HCQCompiled):
       # Sample and print WGP config
       wgp_buf_size = self.xccs * (self.se_cnt // self.xccs) * self.iface.props['simd_arrays_per_engine'] * 2 * 4
       wgp_buf = self.allocator.alloc(wgp_buf_size, BufferSpec(cpu_access=True, nolru=True))
-      cast(AMDComputeQueue, self.hw_compute_queue_t()).sample_wgp_config(wgp_buf).memory_barrier() \
-          .signal(self.timeline_signal, self.next_timeline()).submit(self)
-      self.timeline_signal.wait(self.timeline_value - 1)
+
+      cast(AMDComputeQueue, self.hw_compute_queue_t()).sample_wgp_config(wgp_buf).signal(self.timeline_signal, self.next_timeline()).submit(self)
+      self.synchronize()
+
       AMDComputeQueue.print_wgp_config(wgp_buf, self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
