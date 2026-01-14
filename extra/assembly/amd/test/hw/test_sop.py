@@ -329,5 +329,53 @@ class TestSignedArithmetic(unittest.TestCase):
     self.assertEqual(st.sgpr[7], ((dividend * 2) + 1) & 0xFFFFFFFF)
 
 
+class Test64BitCompare(unittest.TestCase):
+  """Tests for 64-bit scalar compare instructions."""
+
+  def test_s_cmp_eq_u64_equal(self):
+    """S_CMP_EQ_U64: comparing equal 64-bit values sets SCC=1."""
+    val = 0x123456789ABCDEF0
+    instructions = [
+      s_mov_b32(s[0], val & 0xFFFFFFFF),
+      s_mov_b32(s[1], val >> 32),
+      s_mov_b32(s[2], val & 0xFFFFFFFF),
+      s_mov_b32(s[3], val >> 32),
+      s_cmp_eq_u64(s[0:1], s[2:3]),
+      s_cselect_b32(s[4], 1, 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.scc, 1)
+    self.assertEqual(st.sgpr[4], 1)
+
+  def test_s_cmp_eq_u64_different_upper_bits(self):
+    """S_CMP_EQ_U64: values differing only in upper 32 bits are not equal."""
+    # This is the bug case - if only lower 32 bits are compared, these would be equal
+    instructions = [
+      s_mov_b32(s[0], 0),  # lower 32 bits of value 0
+      s_mov_b32(s[1], 0),  # upper 32 bits of value 0
+      s_mov_b32(s[2], 0),  # lower 32 bits of 0x100000000
+      s_mov_b32(s[3], 1),  # upper 32 bits of 0x100000000
+      s_cmp_eq_u64(s[0:1], s[2:3]),
+      s_cselect_b32(s[4], 1, 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.scc, 0, "0 != 0x100000000, SCC should be 0")
+    self.assertEqual(st.sgpr[4], 0)
+
+  def test_s_cmp_lg_u64_different(self):
+    """S_CMP_LG_U64: different 64-bit values sets SCC=1."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 0),  # s[0:1] = 0
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 1),  # s[2:3] = 0x100000000
+      s_cmp_lg_u64(s[0:1], s[2:3]),
+      s_cselect_b32(s[4], 1, 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.scc, 1, "0 != 0x100000000, SCC should be 1")
+    self.assertEqual(st.sgpr[4], 1)
+
+
 if __name__ == '__main__':
   unittest.main()
