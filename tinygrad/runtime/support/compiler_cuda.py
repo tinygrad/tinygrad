@@ -1,14 +1,15 @@
 import subprocess, hashlib, tempfile, ctypes, re, pathlib
 from typing import Callable
-from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv, system
+from tinygrad.helpers import to_char_p_p, colored, getenv, system
+from tinygrad.runtime.support import init_c_var
 from tinygrad.runtime.autogen import nvrtc, nvjitlink as jitlink
 from tinygrad.device import Compiler, CompileError
 
 CUDA_PATH = getenv("CUDA_PATH", "")
 
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
-  sz = init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x))))
-  return ctypes.string_at(init_c_var(ctypes.create_string_buffer(sz.value), lambda x: check(get_str(arg, x))), size=sz.value)
+  x = ctypes.create_string_buffer(init_c_var(ctypes.c_size_t, lambda x: check(get_sz(arg, ctypes.byref(x)))).value)
+  return ctypes.string_at(check(get_str(arg, x)), size=len(x))
 
 def nvrtc_check(status, ctx=None):
   if status != 0:

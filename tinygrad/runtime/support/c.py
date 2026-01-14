@@ -126,6 +126,7 @@ def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
   CStruct = type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)]})
   for nm,*args in fields: setattr(CStruct, nm, Field(*args))
   return CStruct
+def init_c_var(ty, creat_cb): return (creat_cb(v:=del_an(ty)()), v)[1]
 
 class DLL(ctypes.CDLL):
   @staticmethod
