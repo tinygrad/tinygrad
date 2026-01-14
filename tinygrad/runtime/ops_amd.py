@@ -230,8 +230,8 @@ class AMDComputeQueue(HWQueue):
              | (__SQTT_USERDATA:=1<<12) | (__SQTT_REG_CS:=1<<5) | (__SQTT_REG_CS_PRIV:=1<<15)
         if (SQTT_ITRACE_SE_MASK.value >> se) & 0b1: mask |= (__SQTTINST:=1<<10) | (__SQTT_INST_PC:=1<<11) | (__SQTT_ISSUE:=1<<13)
 
-        with self.pred_exec(xcc_mask=1<<(se // (ses_per_xcc:=(self.dev.se_cnt // self.dev.xccs)))):
-          self.set_grbm(se=se % ses_per_xcc, sh=0)
+        with self.pred_exec(xcc_mask=1<<(se // self.dev.se_cnt)):
+          self.set_grbm(se=se % self.dev.se_cnt, sh=0)
           self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_mask=0xf, token_mask=mask)
           self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK2, inst_mask=0xffffffff)
           self.wreg(self.gc.regSQ_THREAD_TRACE_BASE, addr=lo32(buf0s[se].va_addr >> 12))
@@ -294,9 +294,9 @@ class AMDComputeQueue(HWQueue):
       self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_FINISH) | self.pm4.EVENT_INDEX(0))
 
     # For each SE wait for finish to complete and copy regSQ_THREAD_TRACE_WPTR to know where in the buffer trace data ends
-    for se in range(self.dev.se_cnt):
-      with self.pred_exec(xcc_mask=1<<(se // (ses_per_xcc:=(self.dev.se_cnt // self.dev.xccs)))):
-        self.set_grbm(se=se % ses_per_xcc, sh=0)
+    for se in range(self.dev.se_cnt * self.dev.xccs):
+      with self.pred_exec(xcc_mask=1<<(se // self.dev.se_cnt)):
+        self.set_grbm(se=se % self.dev.se_cnt, sh=0)
 
         regstatus = self.gc.regSQ_THREAD_TRACE_STATUS.addr[0] - (self.pm4.PACKET3_SET_UCONFIG_REG_START if self.dev.target[0] == 9 else 0)
         if self.dev.target >= (10,0,0):
@@ -904,23 +904,22 @@ class AMDDevice(HCQCompiled):
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.xccs = self.iface.props.get('num_xcc', 1)
-    self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine']
+    self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine'] // self.xccs
     self.cu_cnt = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.xccs
-    self.wave_cnt = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu']) if self.target >= (10,1,0) else \
-                     min(self.cu_cnt * 40, self.se_cnt * 512)
+    self.waves_per_cu = self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu']
+    self.wave_cnt = (self.cu_cnt * self.waves_per_cu) if self.target >= (10,1,0) else min(self.cu_cnt * 40, self.se_cnt * self.xccs * 512)
     # this is what llvm refers to as "architected flat scratch"
     self.has_scratch_base_registers = self.target >= (11,0,0) or self.target in {(9,4,2), (9,5,0)}
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
     if self.target[:2] == (9,5): lds_size_per_cu = self.iface.props["lds_size_in_kb"] << 10
-    vgpr_size_per_cu = 0x60000 if self.target in {(11,0,0), (11,0,1), (12,0,0), (12,0,1)} else \
+    vgpr_size_per_cu = 0x60000 if self.target in {(11,0,0), (11,0,1), (11,5,1), (12,0,0), (12,0,1)} else \
                        0x80000 if (self.target[:2]) in {(9,4), (9,5)} or self.target in {(9,0,8), (9,0,10)} else 0x40000
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * self.cu_cnt, mmap.PAGESIZE)
-    ctl_stack_size = round_up(12 * self.cu_cnt * self.wave_cnt + 8 + 40, mmap.PAGESIZE) if self.target >= (10,1,0) else \
-                     round_up(self.wave_cnt * 8 + 8 + 40, mmap.PAGESIZE)
-    debug_memory_size = round_up((self.cu_cnt if self.target >= (10,1,0) else 1) * self.wave_cnt * 32, 64)
+    ctl_stack_size = round_up((12 if self.target >= (10,1,0) else 8) * self.wave_cnt + 8 + 40, mmap.PAGESIZE)
     if self.target[0] == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
+    debug_memory_size = round_up(self.wave_cnt * 32, 64)
 
     self.ip_off = import_ip_offsets(self.target)
     self.soc = import_soc(self.target)
@@ -982,8 +981,8 @@ class AMDDevice(HCQCompiled):
       self.iface.require_profile_mode()
 
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
-      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]
-      self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))
+      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt * self.xccs)]
+      self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * self.xccs * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))
       self.sqtt_next_cmd_id = itertools.count(0)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
@@ -993,7 +992,7 @@ class AMDDevice(HCQCompiled):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
       aql_desc = hsa.amd_queue_t(queue_properties=hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
         read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
-        max_cu_id=self.cu_cnt - 1, max_wave_id=self.wave_cnt - 1)
+        max_cu_id=self.cu_cnt - 1, max_wave_id=self.waves_per_cu - 1)
       gart.cpu_view().view(fmt='B')[:ctypes.sizeof(aql_desc)] = bytes(aql_desc)
       self.aql_desc = hsa.amd_queue_t.from_address(gart.cpu_view().addr)
 
