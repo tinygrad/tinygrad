@@ -41,7 +41,7 @@ def create_sdma_packets():
     for pkt_fields in pkt._real_fields_:
       if not pkt_fields[0].endswith("_UNION"): fields.append(pkt_fields)
       else:
-        for union_fields in pkt_fields[1]._real_fields_:
+        for union_fields in pkt_fields[1]._real_fields_[:-1]:
           fname = union_fields[0]
           if fname in names: fname = pkt_fields[0]+fname
           names.add(fname)
