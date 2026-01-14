@@ -222,18 +222,30 @@ def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for
 
 # *** Performance counters
 
+metrics:dict[str, Callable[[dict[str, tuple[int, int, int]]], str]] = {
+  "VALU utilization": lambda s: f"{100 * (s['SQ_INSTS_VALU'][0] / s['SQ_INSTS_VALU'][2]) / (s['GRBM_GUI_ACTIVE'][1] * 4):.1f}%",
+  "SALU utilization": lambda s: f"{100 * (s['SQ_INSTS_SALU'][0] / s['SQ_INSTS_SALU'][2]) / (s['GRBM_GUI_ACTIVE'][1] * 4):.1f}%",
+}
+
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
   sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
   rows:list[list] = []
+  stats:dict[str, tuple[int, int, int]] = {}  # name -> (sum, max, count)
   view, ptr = memoryview(e.blob).cast('Q'), 0
   for s in e.sched:
     row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+    max_val, cnt = 0, 0
     for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
       row[1] += (val:=int(view[ptr]))
+      max_val, cnt = max(max_val, val), cnt + 1
       row[2]["rows"].append(sample+(val,))
       ptr += 1
+    stats[s.name] = (row[1], max_val, cnt)
     rows.append(row)
+  for name, fn in metrics.items():
+    try: rows.append([name, fn(stats)])
+    except KeyError: pass
   return {"rows":rows, "cols":agg_cols}
 
 # ** on startup, list all the performance counter traces
