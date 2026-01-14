@@ -1881,7 +1881,6 @@ class Tensor(OpMixin):
         p = state.reshape(bs, 5, 5).transpose(2, 1)
         t1 = (p[:,:,0] ^ p[:,:,1] ^ p[:,:,2] ^ p[:,:,3] ^ p[:,:,4]).roll(-1, 1) # xor reduce
         state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand(bs, 5, 5).transpose(2, 1).flatten(1))
-        state = state.contiguous()  # required for correct indexing in π step # TODO: why is it needed?
         # ρ and π steps
         state = state[:, reorder_indexes]
         state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape(bs, 5, 5)
