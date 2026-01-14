@@ -4,21 +4,6 @@ from extra.assembly.amd.dsl import *
 from extra.assembly.amd.autogen.cdna.enum import *
 import functools
 
-class DPP(Inst):
-  encoding = FixedBitField(8, 0, 0b11111010)
-  vdst = VGPRField(24, 17)
-  src0 = BitField(39, 32)
-  vop_op = BitField(16, 9)
-  vop2_op = BitField(31, 25)
-  dpp_ctrl = BitField(48, 40)
-  bc = BitField(51, 51)
-  src0_neg = BitField(52, 52)
-  src0_abs = BitField(53, 53)
-  src1_neg = BitField(54, 54)
-  src1_abs = BitField(55, 55)
-  bank_mask = BitField(59, 56)
-  row_mask = BitField(63, 60)
-
 class DS(Inst):
   encoding = FixedBitField(31, 26, 0b110110)
   op = EnumBitField(24, 17, DSOp)
@@ -108,24 +93,6 @@ class MUBUF(Inst):
   lds = BitField(16, 16)
   nt = BitField(17, 17)
   acc = BitField(55, 55)
-
-class SDWA(Inst):
-  encoding = FixedBitField(8, 0, 0b11111001)
-  vdst = VGPRField(24, 17)
-  src0 = BitField(39, 32)
-  vop_op = BitField(16, 9)
-  vop2_op = BitField(31, 25)
-  dst_sel = BitField(42, 40)
-  dst_u = BitField(43, 43)
-  clmp = BitField(45, 45)
-  src0_sel = BitField(50, 48)
-  src0_sext = BitField(51, 51)
-  src0_neg = BitField(52, 52)
-  src0_abs = BitField(53, 53)
-  src1_sel = BitField(58, 56)
-  src1_sext = BitField(59, 59)
-  src1_neg = BitField(60, 60)
-  src1_abs = BitField(61, 61)
 
 class SMEM(Inst):
   encoding = FixedBitField(31, 26, 0b110000)

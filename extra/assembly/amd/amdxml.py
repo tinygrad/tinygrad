@@ -6,8 +6,7 @@ from tinygrad.helpers import fetch
 XML_URL = "https://gpuopen.com/download/machine-readable-isa/latest/"
 ARCH_MAP = {"amdgpu_isa_rdna3_5.xml": "rdna3", "amdgpu_isa_rdna4.xml": "rdna4", "amdgpu_isa_cdna4.xml": "cdna"}
 # Map XML encoding names to pdf.py enum names (arch-specific overrides in ARCH_NAME_MAP)
-NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOPDXY": "VOPD", "VDS": "DS", "VDSDIR": "VDSDIR", "VEXPORT": "VEXPORT",
-            "VOP1_VOP_DPP": "DPP", "VOP1_VOP_SDWA": "SDWA"}
+NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOPDXY": "VOPD", "VDS": "DS", "VDSDIR": "VDSDIR", "VEXPORT": "VEXPORT"}
 ARCH_NAME_MAP = {"cdna": {"VOP3": "VOP3A", "VOP3_SDST_ENC": "VOP3B"}}
 # Instructions missing from XML but present in PDF (copied from pdf.py fixes)
 FIXES = {"rdna3": {"SOPP": {8: "S_WAITCNT_DEPCTR", 58: "S_TTRACEDATA", 59: "S_TTRACEDATA_IMM"},
@@ -66,8 +65,8 @@ def parse_xml(filename: str, arch: str):
       if op_info: types[(name, enc_name)] = op_info
   for enc in root.findall("ISA/Encodings/Encoding"):
     name = enc.findtext("EncodingName")
-    # Include ENC_ prefixed encodings plus special cases (VOP3_SDST_ENC, VOPDXY, CDNA SDWA/DPP)
-    if not name.startswith("ENC_") and name not in ("VOP3_SDST_ENC", "VOPDXY", "VOP1_VOP_DPP", "VOP1_VOP_SDWA"): continue
+    # Include ENC_ prefixed encodings plus special cases (VOP3_SDST_ENC, VOPDXY)
+    if not name.startswith("ENC_") and name not in ("VOP3_SDST_ENC", "VOPDXY"): continue
     if any(s in name for s in ("LITERAL", "NSA", "DPP16", "DPP8")): continue
     # Normalize field names to match expected names
     FIELD_RENAMES = {"opsel_hi_2": "opsel_hi2", "op_sel_hi_2": "opsel_hi2", "op_sel": "opsel", "bound_ctrl": "bc", "tgt": "target", "row_en": "row", "unorm": "unrm", "clamp": "clmp", "wait_exp": "waitexp"}
@@ -179,22 +178,7 @@ def write_ins(encodings, enums, arch, path):
           elif fn == "op": lines.append(f"  op = EnumBitField({hi}, {lo}, {op_enum})")
           else: lines.append(f"  {fn} = {field_def(fn, hi, lo, cls, enc_bits)}")
         lines.append("")
-    elif enc_name == "DPP" and arch == "cdna":
-      # CDNA DPP: special encoding with VOP overlay (from pdf.py)
-      lines += ["class DPP(Inst):", "  encoding = FixedBitField(8, 0, 0b11111010)", "  vdst = VGPRField(24, 17)",
-                "  src0 = BitField(39, 32)", "  vop_op = BitField(16, 9)", "  vop2_op = BitField(31, 25)",
-                "  dpp_ctrl = BitField(48, 40)", "  bc = BitField(51, 51)", "  src0_neg = BitField(52, 52)",
-                "  src0_abs = BitField(53, 53)", "  src1_neg = BitField(54, 54)", "  src1_abs = BitField(55, 55)",
-                "  bank_mask = BitField(59, 56)", "  row_mask = BitField(63, 60)", ""]
-    elif enc_name == "SDWA" and arch == "cdna":
-      # CDNA SDWA: special encoding with VOP overlay (from pdf.py)
-      lines += ["class SDWA(Inst):", "  encoding = FixedBitField(8, 0, 0b11111001)", "  vdst = VGPRField(24, 17)",
-                "  src0 = BitField(39, 32)", "  vop_op = BitField(16, 9)", "  vop2_op = BitField(31, 25)",
-                "  dst_sel = BitField(42, 40)", "  dst_u = BitField(43, 43)", "  clmp = BitField(45, 45)",
-                "  src0_sel = BitField(50, 48)", "  src0_sext = BitField(51, 51)", "  src0_neg = BitField(52, 52)",
-                "  src0_abs = BitField(53, 53)", "  src1_sel = BitField(58, 56)", "  src1_sext = BitField(59, 59)",
-                "  src1_neg = BitField(60, 60)", "  src1_abs = BitField(61, 61)", ""]
-    elif enc_name not in ("FLAT_GLOBAL", "FLAT_SCRATCH", "FLAT_GLBL", "VGLOBAL", "VSCRATCH"):
+    elif enc_name not in ("FLAT_GLOBAL", "FLAT_SCRATCH", "FLAT_GLBL", "VGLOBAL", "VSCRATCH", "DPP", "SDWA"):
       out_name = name_map.get(enc_name, enc_name)
       lines.append(f"class {out_name}(Inst):")
       for fn, hi, lo in sort_fields(fields):
