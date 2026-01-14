@@ -83,18 +83,20 @@ class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
     self._objects_ = {}
-    for f,v in [*zip(self._real_fields_, args), *kwargs.items()]: setattr(self, f, v)
+    for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
 
 def record(cls) -> type[Struct]:
-  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)], '_real_fields_':tuple(cls.__annotations__.keys())})
+  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
   _pending_records.append((cls, struct, unwrap(sys._getframe().f_back).f_globals))
   return struct
 
 def init_records() -> None:
   for cls, struct, ns in _pending_records:
+    setattr(struct, '_real_fields_', [])
     for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
-      if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, Field(*t.__metadata__))
-      else: setattr(struct, nm, Field(del_an(t.__origin__), *t.__metadata__))
+      if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, Field(*(f:=t.__metadata__)))
+      else: setattr(struct, nm, Field(*(f:=(del_an(t.__origin__), *t.__metadata__))))
+      struct._real_fields_.append((nm,) + f) # type: ignore
   _pending_records.clear()
 
 class Field(property):
@@ -111,6 +113,12 @@ class Field(property):
         if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = v._objects
       super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, setter)
     self.offset = off
+
+@functools.cache
+def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
+  CStruct = type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)]})
+  for nm,*args in fields: setattr(CStruct, nm, Field(*args))
+  return CStruct
 
 class DLL(ctypes.CDLL):
   @staticmethod

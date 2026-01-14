@@ -1,11 +1,12 @@
 from __future__ import annotations
 import ctypes, functools
-from tinygrad.helpers import DEBUG, getenv, mv_address, init_c_var, init_c_struct_t, suppress_finalizing, CUDA_CC, CUDA_PTX
+from tinygrad.helpers import DEBUG, getenv, mv_address, init_c_var, suppress_finalizing, CUDA_CC, CUDA_PTX
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerPair, CompilerSet
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler, NVCCCompiler
+from tinygrad.runtime.support.c import init_c_struct_t
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
 
@@ -15,8 +16,8 @@ def check(status):
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
 def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
-  c_args = init_c_struct_t(tuple([(f'f{i}', cuda.CUdeviceptr_v2) for i in range(len(args))] +
-                                 [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
+  c_args = init_c_struct_t(len(args) * 8 + len(vals) * 4, tuple([(f'f{i}', cuda.CUdeviceptr_v2, i*8) for i in range(len(args))] +
+                                                                [(f'v{i}', ctypes.c_int, len(args)*8 + i*4) for i in range(len(vals))]))(*args, *vals)
   vargs = (ctypes.c_void_p * 5)(ctypes.c_void_p(1), ctypes.cast(ctypes.byref(c_args), ctypes.c_void_p), ctypes.c_void_p(2),
                                 ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(c_args))), ctypes.c_void_p), ctypes.c_void_p(0))
   return c_args, vargs

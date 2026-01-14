@@ -1,8 +1,9 @@
 import ctypes, functools
-from tinygrad.helpers import init_c_var, mv_address, init_c_struct_t, getenv
+from tinygrad.helpers import init_c_var, mv_address, getenv
 from tinygrad.device import Compiled, LRUAllocator, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
+from tinygrad.runtime.support.c import init_c_struct_t
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 def check(status):
@@ -33,8 +34,8 @@ class HIPProgram:
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
-      self.c_args = init_c_struct_t(tuple([(f'f{i}', hip.hipDeviceptr_t) for i in range(len(args))] +
-                                          [(f'v{i}', ctypes.c_int) for i in range(len(vals))]))(*args, *vals)
+      fields = [(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] + [(f'v{i}', ctypes.c_int, len(args)*8+i*4) for i in range(len(vals))]
+      self.c_args = init_c_struct_t(len(args)*8+len(vals)*4, tuple(fields))(*args, *vals)
       self.vargs = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(self.c_args), ctypes.c_void_p), 2,
                                          ctypes.cast(ctypes.pointer(ctypes.c_size_t(ctypes.sizeof(self.c_args))), ctypes.c_void_p), 3)
 
