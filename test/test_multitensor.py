@@ -2,7 +2,7 @@ import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import getenv, prod, Context
+from tinygrad.helpers import getenv, prod, Context, OSX
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import BufferCopy, CompiledRunner, run_schedule
 import numpy as np
@@ -881,7 +881,7 @@ class TestMultiTensor(unittest.TestCase):
     t.shard_(devices, axis=0).realize()
     assert all([lb is lb.base and lb.realized.base.size == 4 * 16 for lb in t.uop.src])
 
-  @unittest.skip("this is unreliable on OSX")
+  @unittest.skipIf(OSX, "this is unreliable on OSX")
   def test_clone(self):
     t = Tensor.rand(16, 16).shard(devices_2, axis=None)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
