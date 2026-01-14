@@ -156,7 +156,7 @@ class AMDComputeQueue(HWQueue):
     for name,block,idx in counters:
       # sq block on gfx11+ goes down to wgps
       inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1), "TCC": (16, 1, 1, 1),
-        "SQ": (1, self.dev.se_cnt // self.dev.xccs) + ((1, 1) if gfx9 else (2, self.dev.iface.props['cu_per_simd_array'] // 2))}[block]
+        "SQ": (1, self.dev.se_cnt // self.dev.xccs) + ((1, 1) if gfx9 else (2, self.dev.cu_per_sa // 2))}[block]
       end_off += (rec_size:=prod((self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
 
       # gfx11+ and later require even-numbered SQ *_SELECT registers
@@ -205,7 +205,7 @@ class AMDComputeQueue(HWQueue):
           for i in range(8 if prg.dev.target >= (11,0,0) else 4):
             if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
             else:
-              sa_mask = (1 << (self.dev.iface.props['cu_per_simd_array'] // 2)) - 1
+              sa_mask = (1 << (self.dev.cu_per_sa // 2)) - 1
               cu_mask = (1 << (cu_per_se + (1 if i == 0 else 0))) - 1
               mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
             self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
@@ -828,7 +828,7 @@ class PCIIface(PCIIfaceBase):
       max_sh_per_se = self.dev_impl.gc_info.gc_num_sa_per_se
 
     array_count = max_sh_per_se * self.dev_impl.gc_info.gc_num_se * self.dev_impl.gfx.xccs
-    self.props = {'cu_per_simd_array': cu_per_sa, 'simd_count': 2 * cu_per_sa * array_count, 'simd_per_cu': 2, 'array_count': array_count,
+    self.props = {'simd_count': 2 * cu_per_sa * array_count, 'simd_per_cu': 2, 'array_count': array_count,
       'max_slots_scratch_cu': self.dev_impl.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.dev_impl.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': max_sh_per_se, 'lds_size_in_kb': self.dev_impl.gc_info.gc_lds_size, 'num_xcc': self.dev_impl.gfx.xccs,
       'gfx_target_version': {90403: 90402}.get(gfxver, gfxver)}
@@ -908,6 +908,7 @@ class AMDDevice(HCQCompiled):
     self.cu_cnt = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.xccs
     self.wave_cnt = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu']) if self.target >= (10,1,0) else \
                      min(self.cu_cnt * 40, self.se_cnt * 512)
+    self.cu_per_sa = self.cu_cnt // (self.iface.props['array_count'] // self.xccs)
     # this is what llvm refers to as "architected flat scratch"
     self.has_scratch_base_registers = self.target >= (11,0,0) or self.target in {(9,4,2), (9,5,0)}
 
