@@ -2,6 +2,7 @@ import ctypes, struct, subprocess, tempfile, unittest
 from typing import Annotated
 from tinygrad.helpers import OSX, WIN
 from tinygrad.runtime.support.c import DLL, record, init_records
+from tinygrad.runtime.support import c
 from tinygrad.runtime.support.autogen import gen
 
 class TestAutogen(unittest.TestCase):
@@ -171,6 +172,24 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(r.data[0], 30)
     self.assertEqual(r.data[1], 20)
     self.assertEqual(r.data[2], 10)
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_soa_ptr_interop(self):
+    @record
+    class Row:
+      SIZE = 8
+      data: Annotated[c.POINTER[ctypes.c_int], 0]
+    init_records()
+    src = """
+      struct row { int *data; };
+      int test(struct row x) {
+        return x.data[2] + x.data[1] + x.data[0];
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind
+    def test(x:Row) -> ctypes.c_int: ...
+    assert test(Row((ctypes.c_int * 3)(10, 20, 30))) == 60
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_nested_struct_interop(self):

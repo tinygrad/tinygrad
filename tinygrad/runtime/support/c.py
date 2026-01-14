@@ -112,7 +112,7 @@ class Field(property):
       sl = slice(off, off + ctypes.sizeof(typ))
       def setter(self, v):
         mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v)))
-        if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = v._objects
+        if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
       super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, setter)
     self.offset = off
 
