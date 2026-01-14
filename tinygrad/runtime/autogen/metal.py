@@ -1347,11 +1347,11 @@ MTLIOCompressionMethod: TypeAlias = enum_MTLIOCompressionMethod
 def MTLCreateSystemDefaultDevice() -> MTLDevice: ...
 MTLCreateSystemDefaultDevice = objc.returns_retained(MTLCreateSystemDefaultDevice)
 MTLDeviceNotificationName: TypeAlias = NSString
-try: MTLDeviceWasAddedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasAddedNotification')
+try: MTLDeviceWasAddedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasAddedNotification') # type: ignore
 except (ValueError,AttributeError): pass
-try: MTLDeviceRemovalRequestedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceRemovalRequestedNotification')
+try: MTLDeviceRemovalRequestedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceRemovalRequestedNotification') # type: ignore
 except (ValueError,AttributeError): pass
-try: MTLDeviceWasRemovedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasRemovedNotification')
+try: MTLDeviceWasRemovedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasRemovedNotification') # type: ignore
 except (ValueError,AttributeError): pass
 @dll.bind
 def MTLRemoveDeviceObserver(observer:NSObject) -> None: ...
