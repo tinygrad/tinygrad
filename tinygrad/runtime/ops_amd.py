@@ -198,7 +198,7 @@ class AMDComputeQueue(HWQueue):
 
     if SQTT_LIMIT_SE:
       # Calculate number of CUs per SE to enable based on blocks count. 4 is maximum simd per CU, but on rdna we can trace only 1.
-      cu_per_se = prod([x if isinstance(x, int) else 1 for x in global_size]) // (((self.dev.max_cu_id + 1) // self.dev.se_cnt) * 4)
+      cu_per_se = prod([x if isinstance(x, int) else 1 for x in global_size]) // ((self.dev.cu_cnt // self.dev.se_cnt) * 4)
       for xcc in range(self.dev.xccs):
         with self.pred_exec(xcc_mask=1 << xcc):
           for i in range(8 if prg.dev.target >= (11,0,0) else 4):
@@ -903,9 +903,9 @@ class AMDDevice(HCQCompiled):
 
     self.xccs = self.iface.props.get('num_xcc', 1)
     self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine']
-    self.max_cu_id = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.xccs - 1
-    self.max_wave_id = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu'] - 1) if self.target >= (10,1,0) else \
-                       (min((self.max_cu_id+1)*40, self.se_cnt * 512) - 1)
+    self.cu_cnt = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.xccs
+    self.wave_cnt = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu']) if self.target >= (10,1,0) else \
+                     min(self.cu_cnt * 40, self.se_cnt * 512)
     # this is what llvm refers to as "architected flat scratch"
     self.has_scratch_base_registers = self.target >= (11,0,0) or self.target in {(9,4,2), (9,5,0)}
 
@@ -914,10 +914,10 @@ class AMDDevice(HCQCompiled):
     if self.target[:2] == (9,5): lds_size_per_cu = self.iface.props["lds_size_in_kb"] << 10
     vgpr_size_per_cu = 0x60000 if self.target in {(11,0,0), (11,0,1), (12,0,0), (12,0,1)} else \
                        0x80000 if (self.target[:2]) in {(9,4), (9,5)} or self.target in {(9,0,8), (9,0,10)} else 0x40000
-    wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * (self.max_cu_id + 1), mmap.PAGESIZE)
-    ctl_stack_size = round_up(12 * (self.max_cu_id + 1) * (self.max_wave_id + 1) + 8 + 40, mmap.PAGESIZE) if self.target >= (10,1,0) else \
-                     round_up((self.max_wave_id + 1) * 8 + 8 + 40, mmap.PAGESIZE)
-    debug_memory_size = round_up((self.max_cu_id + 1 if self.target >= (10,1,0) else 1) * (self.max_wave_id + 1) * 32, 64)
+    wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * self.cu_cnt, mmap.PAGESIZE)
+    ctl_stack_size = round_up(12 * self.cu_cnt * self.wave_cnt + 8 + 40, mmap.PAGESIZE) if self.target >= (10,1,0) else \
+                     round_up(self.wave_cnt * 8 + 8 + 40, mmap.PAGESIZE)
+    debug_memory_size = round_up((self.cu_cnt if self.target >= (10,1,0) else 1) * self.wave_cnt * 32, 64)
     if self.target[0] == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
 
     self.ip_off = import_ip_offsets(self.target)
@@ -991,7 +991,7 @@ class AMDDevice(HCQCompiled):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
       aql_desc = hsa.amd_queue_t(queue_properties=hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
         read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
-        max_cu_id=self.max_cu_id, max_wave_id=self.max_wave_id)
+        max_cu_id=self.cu_cnt - 1, max_wave_id=self.wave_cnt - 1)
       gart.cpu_view().view(fmt='B')[:ctypes.sizeof(aql_desc)] = bytes(aql_desc)
       self.aql_desc = hsa.amd_queue_t.from_address(gart.cpu_view().addr)
 
@@ -1014,11 +1014,11 @@ class AMDDevice(HCQCompiled):
     lanes_per_wave = 64 # wave64
     mem_alignment_size = 256 if self.target >= (11,0,0) else 1024
     size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
-    size_per_xcc = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * (self.max_cu_id + 1)
+    size_per_xcc = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * self.cu_cnt
     self.scratch, ok = self._realloc(getattr(self, 'scratch', None), size_per_xcc * self.xccs)
     if ok:
       # NOTE: xcc logic is correct only for GFX9.
-      max_scratch_waves = (self.max_cu_id + 1) * self.iface.props['max_slots_scratch_cu'] * self.xccs
+      max_scratch_waves = self.cu_cnt * self.iface.props['max_slots_scratch_cu'] * self.xccs
       wave_scratch = ceildiv(lanes_per_wave * size_per_thread, mem_alignment_size)
       num_waves = (size_per_xcc // (wave_scratch * mem_alignment_size)) // (self.se_cnt if self.target >= (11,0,0) else 1)
 
