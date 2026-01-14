@@ -302,7 +302,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
 # identifies a unique wave unit in hardware hierarchy
 @dataclass(frozen=True)
 class WaveUnit:
-  se:int; cu:int; simd:int; wave_id:int;
+  se:int; cu:int; simd:int; wave_id:int # noqa: E702
   @classmethod
   def from_packet(cls, e, p): return cls(e.se, p.cu, p.simd, p.wave)
   @property
@@ -313,7 +313,7 @@ class WaveUnit:
   def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
 
 def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str]]:
-  from extra.assembly.amd.sqtt import decode, print_packets, WAVESTART, WAVEEND, INST
+  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, INST
   cu_events:dict[str, list[ProfileEvent]] = {}
   wave_starts:dict[WaveUnit, int] = {} # unit -> start_time
   inst_traces:dict[WaveUnit, int] = {} # unit -> number of inst traces
@@ -327,7 +327,7 @@ def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str]]:
         if (wu:=WaveUnit.from_packet(e, p)) not in units: units[wu] = itertools.count(0)
         if (events:=cu_events.get(wu.cu_loc)) is None: cu_events[wu.cu_loc] = events = []
         wave_type = "INST" if inst_traces.get(wu) else "OCC"
-        events.append(ProfileRangeEvent(wu.simd_loc, f"{wave_type} WAVE:{p.wave} N:{next(units[wu])}", wave_starts.pop(wu), Decimal(p._time)))
+        events.append(ProfileRangeEvent(wu.simd_loc, f"{wave_type} WAVE:{p.wave} N:{next(units[wu])}", Decimal(wave_starts.pop(wu)),Decimal(p._time)))
       elif isinstance(p, INST):
         # TODO: cu and simd numbers are not correct, what is the right way to get CU/SIMD of the INST packet?
         wu = WaveUnit(e.se, 0, 0, p.wave)
