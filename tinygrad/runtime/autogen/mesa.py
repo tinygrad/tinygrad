@@ -826,13 +826,11 @@ nir_cf_node_if = nir_cf_node_type.define('nir_cf_node_if', 1)
 nir_cf_node_loop = nir_cf_node_type.define('nir_cf_node_loop', 2)
 nir_cf_node_function = nir_cf_node_type.define('nir_cf_node_function', 3)
 
-nir_cf_node: TypeAlias = struct_nir_cf_node
 @c.record
 class struct_exec_list(c.Struct):
   SIZE = 32
   head_sentinel: Annotated[struct_exec_node, 0]
   tail_sentinel: Annotated[struct_exec_node, 16]
-nir_block: TypeAlias = struct_nir_block
 @c.record
 class struct_set(c.Struct):
   SIZE = 72
@@ -2164,7 +2162,6 @@ class struct_nir_function_impl(c.Struct):
   loop_analysis_indirect_mask: Annotated[nir_variable_mode, 136]
   loop_analysis_force_unroll_sampler_indirect: Annotated[Annotated[bool, ctypes.c_bool], 140]
 nir_function_impl: TypeAlias = struct_nir_function_impl
-nir_function: TypeAlias = struct_nir_function
 class nir_metadata(Annotated[int, ctypes.c_int32], c.Enum): pass
 nir_metadata_none = nir_metadata.define('nir_metadata_none', 0)
 nir_metadata_block_index = nir_metadata.define('nir_metadata_block_index', 1)
