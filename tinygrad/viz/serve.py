@@ -222,6 +222,9 @@ def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for
 
 # *** Performance counters
 
+metrics:dict[str, Callable] = {
+  "ALU utilization": lambda r:r["SQ_INSTS_VALU"]/(r["SQ_BUSY_CYCLES"]*4),
+}
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
   sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
@@ -234,6 +237,11 @@ def unpack_pmc(e) -> dict:
       row[2]["rows"].append(sample+(val,))
       ptr += 1
     rows.append(row)
+  counter_sums = {r[0]:r[1] for r in rows}
+  for k,fn in metrics.items():
+    try: rows.append([k, fn(counter_sums)])
+    # skip if counter wasn't captured
+    except KeyError: pass
   return {"rows":rows, "cols":agg_cols}
 
 # ** on startup, list all the performance counter traces
