@@ -11,7 +11,7 @@ kd = {"kernarg_size":8, "user_sgpr_kernarg_segment_ptr":1, "next_free_vgpr":8, "
 
 def assemble_insts(insts:list[Inst], name:str, arch:str) -> tuple[UOp, UOp]:
   disasm = "\n".join([inst.disasm() for inst in insts])
-  hsasrc = f".text\n.globl {name}\n.p2align 8\n.type fn_name,@function\n{name}:\n{disasm}\n"
+  hsasrc = f".text\n.globl {name}\n.p2align 8\n.type fn_name,@function\n{name}:\n{disasm}\ns_code_end\n"
   hsasrc += f".rodata\n.p2align 6\n.amdhsa_kernel {name}\n"+"\n".join([f".amdhsa_{k} {v}" for k,v in kd.items()])+"\n.end_amdhsa_kernel"
   binary = HIPCompiler(arch).compile(hsasrc)
   return UOp(Ops.SOURCE, arg=disasm), UOp(Ops.BINARY, arg=binary)
