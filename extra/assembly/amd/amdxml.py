@@ -5,10 +5,10 @@ from tinygrad.helpers import fetch
 
 XML_URL = "https://gpuopen.com/download/machine-readable-isa/latest/"
 ARCH_MAP = {"amdgpu_isa_rdna3_5.xml": "rdna3", "amdgpu_isa_rdna4.xml": "rdna4", "amdgpu_isa_cdna4.xml": "cdna"}
-# Map XML encoding names to pdf.py enum names (arch-specific overrides in ARCH_NAME_MAP)
-NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOPDXY": "VOPD", "VDS": "DS", "VDSDIR": "VDSDIR", "VEXPORT": "VEXPORT"}
+# Map XML encoding names to codebase names (arch-specific overrides in ARCH_NAME_MAP)
+NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOPDXY": "VOPD", "VDS": "DS"}
 ARCH_NAME_MAP = {"cdna": {"VOP3": "VOP3A", "VOP3_SDST_ENC": "VOP3B"}}
-# Instructions missing from XML but present in PDF (copied from pdf.py fixes)
+# Instructions missing from XML but present in PDF
 FIXES = {"rdna3": {"SOPP": {8: "S_WAITCNT_DEPCTR", 58: "S_TTRACEDATA", 59: "S_TTRACEDATA_IMM"},
                    "SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"},
                    "SMEM": {34: "S_ATC_PROBE", 35: "S_ATC_PROBE_BUFFER"},
@@ -16,6 +16,28 @@ FIXES = {"rdna3": {"SOPP": {8: "S_WAITCNT_DEPCTR", 58: "S_TTRACEDATA", 59: "S_TT
          "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"},
                    "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE", 58: "S_TTRACEDATA", 59: "S_TTRACEDATA_IMM"},
                    "SMEM": {34: "S_ATC_PROBE", 35: "S_ATC_PROBE_BUFFER"}}}
+# Encoding suffixes to strip (variants we don't generate separate classes for)
+_ENC_SUFFIXES = ("_INST_LITERAL", "_VOP_DPP16", "_VOP_DPP8", "_VOP_DPP", "_VOP_SDWA", "_NSA1", "_MFMA")
+# Field name normalization
+_FIELD_RENAMES = {"opsel_hi_2": "opsel_hi2", "op_sel_hi_2": "opsel_hi2", "op_sel": "opsel", "bound_ctrl": "bc",
+                  "tgt": "target", "row_en": "row", "unorm": "unrm", "clamp": "clmp", "wait_exp": "waitexp"}
+
+def _strip_enc(name: str) -> str:
+  """Strip ENC_ prefix and encoding variant suffixes."""
+  name = name.removeprefix("ENC_")
+  for sfx in _ENC_SUFFIXES: name = name.replace(sfx, "")
+  return name
+
+def _map_flat(enc_name: str, instr_name: str) -> str:
+  """Map FLAT/GLOBAL/SCRATCH encoding to correct enum based on instruction prefix."""
+  if enc_name in ("FLAT_GLBL", "FLAT_GLOBAL"): return "GLOBAL"
+  if enc_name == "FLAT_SCRATCH": return "SCRATCH"
+  if enc_name in ("FLAT", "VFLAT", "VGLOBAL", "VSCRATCH"):
+    v = "V" if enc_name.startswith("V") else ""
+    if instr_name.startswith("GLOBAL_"): return f"{v}GLOBAL"
+    if instr_name.startswith("SCRATCH_"): return f"{v}SCRATCH"
+    return f"{v}FLAT"
+  return enc_name
 
 def parse_xml(filename: str, arch: str):
   root = ET.fromstring(zipfile.ZipFile(fetch(XML_URL)).read(filename))
@@ -25,23 +47,13 @@ def parse_xml(filename: str, arch: str):
   for df in root.findall("ISA/DataFormats/DataFormat"):
     name, bits = df.findtext("DataFormatName"), df.findtext("BitCount")
     if name and bits: fmts[name] = int(bits)
-  # Helper to map encoding name to enum format name
-  def map_enc(enc_name, instr_name):
-    for sfx in ("_INST_LITERAL", "_VOP_DPP16", "_VOP_DPP8", "_VOP_DPP", "_VOP_SDWA", "_NSA1", "_MFMA"): enc_name = enc_name.replace(sfx, "")
-    if enc_name in ("FLAT_GLBL", "FLAT_GLOBAL"): return "GLOBAL"
-    if enc_name == "FLAT_SCRATCH": return "SCRATCH"
-    if enc_name in ("FLAT", "VFLAT", "VGLOBAL", "VSCRATCH"):
-      if instr_name.startswith("GLOBAL_"): return "VGLOBAL" if enc_name.startswith("V") else "GLOBAL"
-      if instr_name.startswith("SCRATCH_"): return "VSCRATCH" if enc_name.startswith("V") else "SCRATCH"
-      return "VFLAT" if enc_name.startswith("V") else "FLAT"
-    return name_map.get(enc_name, enc_name)
-  # Extract instruction operand info: format, size, type
-  # Key by (instruction_name, encoding_base) since same instruction has different operands per encoding
+  # Extract instruction operand info keyed by (instruction_name, encoding_name)
   for instr in root.findall("ISA/Instructions/Instruction"):
     name = instr.findtext("InstructionName")
     for enc in instr.findall("InstructionEncodings/InstructionEncoding"):
       if enc.findtext("EncodingCondition") != "default": continue
-      enc_name = map_enc(enc.findtext("EncodingName").replace("ENC_", ""), name)
+      base = _map_flat(_strip_enc(enc.findtext("EncodingName")), name)
+      enc_name = name_map.get(base, base)
       op_info = {}
       for op in enc.findall("Operands/Operand"):
         field = op.findtext("FieldName")
@@ -51,45 +63,32 @@ def parse_xml(filename: str, arch: str):
         if otype: op_types_set.add(otype)
         op_info[field.lower()] = (fmt, int(size) if size else 0, otype)
       if op_info: types[(name, enc_name)] = op_info
+  # Extract encoding definitions
+  def norm_field(n):
+    for old, new in _FIELD_RENAMES.items(): n = n.replace(old, new)
+    return n
   for enc in root.findall("ISA/Encodings/Encoding"):
     name = enc.findtext("EncodingName")
-    # Include ENC_ prefixed encodings plus special cases (VOP3_SDST_ENC, VOPDXY)
     if not name.startswith("ENC_") and name not in ("VOP3_SDST_ENC", "VOPDXY"): continue
     if any(s in name for s in ("LITERAL", "NSA", "DPP16", "DPP8")): continue
-    # Normalize field names to match expected names
-    FIELD_RENAMES = {"opsel_hi_2": "opsel_hi2", "op_sel_hi_2": "opsel_hi2", "op_sel": "opsel", "bound_ctrl": "bc", "tgt": "target", "row_en": "row", "unorm": "unrm", "clamp": "clmp", "wait_exp": "waitexp"}
-    def norm_field(n):
-      for old, new in FIELD_RENAMES.items(): n = n.replace(old, new)
-      return n
     fields = [(norm_field(f.findtext("FieldName").lower()), int(f.find("BitLayout/Range").findtext("BitOffset") or 0) + int(f.find("BitLayout/Range").findtext("BitCount") or 0) - 1,
                int(f.find("BitLayout/Range").findtext("BitOffset") or 0))
               for f in enc.findall(".//MicrocodeFormat/BitMap/Field") if f.find("BitLayout/Range") is not None]
     ident = (enc.findall("EncodingIdentifiers/EncodingIdentifier") or [None])[0]
     enc_field = next((f for f in fields if f[0] == "encoding"), None)
     enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1], enc_field[2]-1, -1)) if ident is not None and enc_field else None
-    base_name = name[4:] if name.startswith("ENC_") else name
+    base_name = _strip_enc(name)
     encodings[name_map.get(base_name, base_name)] = (fields, enc_bits)
+  # Extract instruction opcodes into enums
   for instr in root.findall("ISA/Instructions/Instruction"):
     name = instr.findtext("InstructionName")
     for enc in instr.findall("InstructionEncodings/InstructionEncoding"):
       if enc.findtext("EncodingCondition") != "default": continue
-      base = enc.findtext("EncodingName").replace("ENC_", "")
-      for sfx in ("_INST_LITERAL", "_VOP_DPP16", "_VOP_DPP8", "_VOP_DPP", "_VOP_SDWA", "_NSA1", "_MFMA"): base = base.replace(sfx, "")
-      # FLAT/GLOBAL/SCRATCH: CDNA=FLAT_GLBL/FLAT_SCRATCH, RDNA3=FLAT_GLOBAL/FLAT_SCRATCH, RDNA4=VFLAT/VGLOBAL (split by prefix)
-      if base in ("FLAT_GLBL", "FLAT_GLOBAL"):
-        base = "GLOBAL"
-        if "ADDTID" in name: enums.setdefault("FLAT", {})[int(enc.findtext("Opcode") or 0)] = name  # ADDTID goes in FLAT too
-      elif base == "FLAT_SCRATCH": base = "SCRATCH"
-      elif base in ("FLAT", "VFLAT", "VGLOBAL", "VSCRATCH"):
-        is_global, is_scratch = name.startswith("GLOBAL_"), name.startswith("SCRATCH_")
-        flat_base = "VFLAT" if base.startswith("V") else "FLAT"
-        if is_global:
-          base = "VGLOBAL" if base.startswith("V") else "GLOBAL"
-          if "ADDTID" in name: enums.setdefault(flat_base, {})[int(enc.findtext("Opcode") or 0)] = name
-        elif is_scratch: base = "VSCRATCH" if base.startswith("V") else "SCRATCH"
-        else: base = flat_base
-      base = name_map.get(base, base)
-      enums.setdefault(base, {})[int(enc.findtext("Opcode") or 0)] = name
+      base = _map_flat(_strip_enc(enc.findtext("EncodingName")), name)
+      # ADDTID instructions go in both FLAT and GLOBAL enums
+      if base == "GLOBAL" and "ADDTID" in name: enums.setdefault("FLAT", {})[int(enc.findtext("Opcode") or 0)] = name
+      if base == "VGLOBAL" and "ADDTID" in name: enums.setdefault("VFLAT", {})[int(enc.findtext("Opcode") or 0)] = name
+      enums.setdefault(name_map.get(base, base), {})[int(enc.findtext("Opcode") or 0)] = name
   return encodings, enums, types, fmts, op_types_set
 
 def write_common(all_fmts, all_op_types, path):
@@ -124,7 +123,6 @@ def write_enum(enums, path):
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_ins(encodings, enums, arch, path):
-  name_map = {**NAME_MAP, **ARCH_NAME_MAP.get(arch, {})}
   def field_def(name, hi, lo, fmt, enc_bits=None):
     bits = hi - lo + 1
     if name == "encoding" and enc_bits: return f"FixedBitField({hi}, {lo}, 0b{enc_bits})"
@@ -163,10 +161,9 @@ def write_ins(encodings, enums, arch, path):
           else: lines.append(f"  {fn} = {field_def(fn, hi, lo, cls, enc_bits)}")
         lines.append("")
     elif enc_name not in ("FLAT_GLOBAL", "FLAT_SCRATCH", "FLAT_GLBL", "VGLOBAL", "VSCRATCH", "DPP", "SDWA"):
-      out_name = name_map.get(enc_name, enc_name)
-      lines.append(f"class {out_name}(Inst):")
+      lines.append(f"class {enc_name}(Inst):")
       for fn, hi, lo in sort_fields(fields):
-        lines.append(f"  {fn} = {field_def(fn, hi, lo, out_name, enc_bits if fn == 'encoding' else None)}")
+        lines.append(f"  {fn} = {field_def(fn, hi, lo, enc_name, enc_bits if fn == 'encoding' else None)}")
       lines.append("")
   # SDST variants
   for base, field in [("VOP1", "vdst = SSrcField(24, 17)"), ("VOP3", "vdst = SSrcField(7, 0)")]:
