@@ -329,10 +329,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Remove amdgpu
-      run: sudo rmmod amdgpu || true
-    - name: Cleanup running AM processes
-      run: python extra/amdpci/am_smi.py --pids --kill
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
+    - name: Remove amd modules
+      run: ./extra/hcq/hcq_smi.py amd rmmod
+    - name: Kill stale pids
+      run: ./extra/hcq/hcq_smi.py amd kill_pids
     #- name: Insert amdgpu
     #  run: sudo modprobe amdgpu
     - name: Symlink models and datasets
@@ -439,10 +441,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Remove amdgpu
-      run: sudo rmmod amdgpu || true
-    - name: Cleanup running AM processes
-      run: python extra/amdpci/am_smi.py --pids --kill
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
+    - name: Remove amd modules
+      run: ./extra/hcq/hcq_smi.py amd rmmod
+    - name: Kill stale pids
+      run: ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -489,10 +493,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Remove amdgpu
-      run: sudo rmmod amdgpu || true
-    - name: Cleanup running AM processes
-      run: python extra/amdpci/am_smi.py --pids --kill
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
+    - name: Remove amd modules
+      run: ./extra/hcq/hcq_smi.py amd rmmod
+    - name: Kill stale pids
+      run: ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -578,6 +584,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
       run: ./extra/hcq/hcq_smi.py amd rmmod
     - name: Kill stale pids
@@ -640,6 +648,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove nv modules
       run: ./extra/hcq/hcq_smi.py nv rmmod
     - name: Kill stale pids
