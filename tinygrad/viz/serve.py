@@ -226,6 +226,7 @@ def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
   sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
   rows:list[list] = []
+  counters:dict[str, int] = {}
   view, ptr = memoryview(e.blob).cast('Q'), 0
   for s in e.sched:
     row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
@@ -233,7 +234,13 @@ def unpack_pmc(e) -> dict:
       row[1] += (val:=int(view[ptr]))
       row[2]["rows"].append(sample+(val,))
       ptr += 1
+    counters[s.name] = row[1]
     rows.append(row)
+  # derived metrics: utilization = 100 * sum(SQ_INSTS_*) / (SQ_BUSY_CYCLES * 4)
+  if "SQ_BUSY_CYCLES" in counters and counters["SQ_BUSY_CYCLES"] > 0:
+    for name in ["VALU", "SALU"]:
+      if (key:=f"SQ_INSTS_{name}") in counters:
+        rows.append([f"{name} utilization", f"{100 * counters[key] / (counters['SQ_BUSY_CYCLES'] * 4):.1f}%"])
   return {"rows":rows, "cols":agg_cols}
 
 # ** on startup, list all the performance counter traces
