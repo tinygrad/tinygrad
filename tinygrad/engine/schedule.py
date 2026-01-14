@@ -1,7 +1,7 @@
 import time
 from typing import cast
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
+from tinygrad.uop.ops import UOp, Ops, GroupOp, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
@@ -29,7 +29,8 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
           in_degree[k] += 1
         elif s.op in {Ops.MSELECT, Ops.MSTACK}:
           for ss in s.src:
-            if ss.op is Ops.MSELECT: ss = ss.src[0]
+            # descend through MSELECT and movement ops (SHRINK can wrap AFTER in multi-device)
+            while ss.op in {Ops.MSELECT, *GroupOp.Movement}: ss = ss.src[0]
             if ss.op is not Ops.BUFFER:
               assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
               children.setdefault(ss.src[1], []).append(k)
@@ -130,7 +131,7 @@ pm_post_sched_cache = PatternMatcher([
 ])
 
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
+@track_rewrites(lambda *_,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp, inj_bufs:set[UOp]|None=None) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
