@@ -115,7 +115,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
       case clang.CXType_Elaborated: return tname(clang.clang_Type_getNamedType(t), suggested_name)
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
       case clang.CXType_Typedef:
-        defined, cnm = nm(canon:=clang.clang_getCanonicalType(t)) in types, tname(canon, typedef=nm(t).replace('::', '_'))
+        defined, cnm = nm(canon:=clang.clang_getCanonicalType(t)) in types, tname(canon, typedef=nm(t))
         types[nm(t)] = cnm if nm(t).startswith("__") else nm(t).replace('::', '_'), True
         # RECORDs need to handle typedefs specially to allow for self-reference
         if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')}: TypeAlias = {cnm}")
@@ -131,7 +131,9 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
                      if clang.clang_Cursor_isAnonymous(decl) else _nm)
           types[_nm] = (tnm:=real_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
           lines.append(f"class {tnm}(ctypes.{'Structure' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
-          if typedef: lines.append(f"{typedef}: TypeAlias = {tnm}")
+          if typedef:
+            lines.append(f"{typedef.replace('::', '_')}: TypeAlias = {tnm}")
+            types[typedef] = typedef.replace('::', '_'), True
         ff=[(f, tname(clang.clang_getCursorType(f), f"{tnm}_{nm(f)}"), offset) +
             ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8) *clang.clang_Cursor_isBitField(f))
             for f,offset in all_fields(t)]
