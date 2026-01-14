@@ -156,7 +156,7 @@ class AMDComputeQueue(HWQueue):
     for name,block,idx in counters:
       # sq block on gfx11+ goes down to wgps
       inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1), "TCC": (16, 1, 1, 1),
-        "SQ": (1, self.dev.se_cnt // self.dev.xccs) + ((1, 1) if gfx9 else (2, self.dev.iface.props['cu_per_simd_array'] // 2))}[block]
+        "SQ": (1, self.dev.se_cnt) + ((1, 1) if gfx9 else (2, self.dev.iface.props['cu_per_simd_array'] // 2))}[block]
       end_off += (rec_size:=prod((self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
 
       # gfx11+ and later require even-numbered SQ *_SELECT registers
@@ -981,7 +981,7 @@ class AMDDevice(HCQCompiled):
       self.iface.require_profile_mode()
 
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
-      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt * self.xccs)]
+      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE<<20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt * self.xccs)]
       self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * self.xccs * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))
       self.sqtt_next_cmd_id = itertools.count(0)
 
