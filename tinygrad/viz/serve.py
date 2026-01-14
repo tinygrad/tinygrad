@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
 import ctypes, pathlib, traceback, itertools
+from dataclasses import dataclass
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
@@ -298,6 +299,40 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
       events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
   return cu_events, list(units), wave_insts
 
+# identifies a unique wave unit in hardware hierarchy
+@dataclass(frozen=True)
+class WaveUnit:
+  se:int; cu:int; simd:int; wave_id:int;
+  @classmethod
+  def from_packet(cls, e, p): return cls(e.se, p.cu, p.simd, p.wave)
+  @property
+  def cu_loc(self) -> str: return f"SE:{self.se} CU:{self.cu}"
+  @property
+  def simd_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd}"
+  @property
+  def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
+
+def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str]]:
+  from extra.assembly.amd.sqtt import decode, print_packets, WAVESTART, WAVEEND, INST
+  cu_events:dict[str, list[ProfileEvent]] = {}
+  wave_starts:dict[WaveUnit, int] = {} # unit -> start_time
+  inst_traces:dict[WaveUnit, int] = {} # unit -> number of inst traces
+  units:dict[WaveUnit, itertools.count] = {} # unit -> number of waves that landed on it
+  for e in data:
+    if e.se != 1: continue
+    for p in decode(e.blob):
+      if any(len(v) > 10_000 for v in cu_events.values()): break
+      if isinstance(p, WAVESTART): wave_starts[WaveUnit.from_packet(e, p)] = p._time
+      elif isinstance(p, WAVEEND):
+        if (wu:=WaveUnit.from_packet(e, p)) not in units: units[wu] = itertools.count(0)
+        if (events:=cu_events.get(wu.cu_loc)) is None: cu_events[wu.cu_loc] = events = []
+        wave_type = "INST" if inst_traces.get(wu) else "OCC"
+        events.append(ProfileRangeEvent(wu.simd_loc, f"{wave_type} WAVE:{p.wave} N:{next(units[wu])}", wave_starts.pop(wu), Decimal(p._time)))
+      elif isinstance(p, INST):
+        wu = WaveUnit(e.se, 0, 0, p.wave)
+        inst_traces[wu] = inst_traces.get(wu, 0) + 1
+  return cu_events, [k.wave_loc for k in units]
+
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
   dname = k.split()[0]
@@ -466,7 +501,13 @@ def get_render(query:str) -> dict:
   if fmt == "prg-sqtt":
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
+      # unpack using our decoder
+      cu_events, units = unpack_sqtt2(data[1])
+      for cu in sorted(cu_events, key=row_tuple):
+        steps.append(create_step(f"RAW {cu} {len(cu_events[cu])}", ("/cu-sqtt-raw", i, len(steps)), depth=1,
+                                 data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
       with soft_err(lambda err: ret.update(err)):
+        # unpack using roc decoder
         cu_events, units, wave_insts = unpack_sqtt(*data)
         for cu in sorted(cu_events, key=row_tuple):
           steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
@@ -474,6 +515,7 @@ def get_render(query:str) -> dict:
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
             steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
+  if fmt == "cu-sqtt-raw": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
