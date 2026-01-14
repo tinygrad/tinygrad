@@ -379,10 +379,10 @@ def llvm_disasm(target:int, lib:bytes) -> dict[int, tuple[str, int]]:
   llvm.LLVMInitializeAMDGPUTargetMC()
   llvm.LLVMInitializeAMDGPUAsmParser()
   llvm.LLVMInitializeAMDGPUDisassembler()
-  # pass NULL to callbacks
-  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
   arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
-  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
+  # pass NULL to callbacks
+  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, ctypes.cast(0, llvm.LLVMOpInfoCallback),
+                                         ctypes.cast(0, llvm.LLVMSymbolLookupCallback))
   image, sections, _ = elf_loader(lib)
   text = next((sh.header for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"
