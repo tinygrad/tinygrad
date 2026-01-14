@@ -21,11 +21,18 @@ _ENC_SUFFIXES = ("_INST_LITERAL", "_VOP_DPP16", "_VOP_DPP8", "_VOP_DPP", "_VOP_S
 # Field name normalization
 _FIELD_RENAMES = {"opsel_hi_2": "opsel_hi2", "op_sel_hi_2": "opsel_hi2", "op_sel": "opsel", "bound_ctrl": "bc",
                   "tgt": "target", "row_en": "row", "unorm": "unrm", "clamp": "clmp", "wait_exp": "waitexp"}
+# Encoding variants to skip entirely
+_SKIP_ENCODINGS = ("LITERAL", "NSA", "DPP", "SDWA", "MFMA")
 
 def _strip_enc(name: str) -> str:
   """Strip ENC_ prefix and encoding variant suffixes."""
   name = name.removeprefix("ENC_")
   for sfx in _ENC_SUFFIXES: name = name.replace(sfx, "")
+  return name
+
+def _norm_field(name: str) -> str:
+  """Normalize field name to match expected names."""
+  for old, new in _FIELD_RENAMES.items(): name = name.replace(old, new)
   return name
 
 def _map_flat(enc_name: str, instr_name: str) -> str:
@@ -47,31 +54,12 @@ def parse_xml(filename: str, arch: str):
   for df in root.findall("ISA/DataFormats/DataFormat"):
     name, bits = df.findtext("DataFormatName"), df.findtext("BitCount")
     if name and bits: fmts[name] = int(bits)
-  # Extract instruction operand info keyed by (instruction_name, encoding_name)
-  for instr in root.findall("ISA/Instructions/Instruction"):
-    name = instr.findtext("InstructionName")
-    for enc in instr.findall("InstructionEncodings/InstructionEncoding"):
-      if enc.findtext("EncodingCondition") != "default": continue
-      base = _map_flat(_strip_enc(enc.findtext("EncodingName")), name)
-      enc_name = name_map.get(base, base)
-      op_info = {}
-      for op in enc.findall("Operands/Operand"):
-        field = op.findtext("FieldName")
-        if not field: continue
-        fmt, size, otype = op.findtext("DataFormatName"), op.findtext("OperandSize"), op.findtext("OperandType")
-        if fmt and fmt not in fmts: fmts[fmt] = 0
-        if otype: op_types_set.add(otype)
-        op_info[field.lower()] = (fmt, int(size) if size else 0, otype)
-      if op_info: types[(name, enc_name)] = op_info
   # Extract encoding definitions
-  def norm_field(n):
-    for old, new in _FIELD_RENAMES.items(): n = n.replace(old, new)
-    return n
   for enc in root.findall("ISA/Encodings/Encoding"):
     name = enc.findtext("EncodingName")
     if not name.startswith("ENC_") and name not in ("VOP3_SDST_ENC", "VOPDXY"): continue
-    if any(s in name for s in ("LITERAL", "NSA", "DPP16", "DPP8")): continue
-    fields = [(norm_field(f.findtext("FieldName").lower()), int(f.find("BitLayout/Range").findtext("BitOffset") or 0) + int(f.find("BitLayout/Range").findtext("BitCount") or 0) - 1,
+    if any(s in name for s in _SKIP_ENCODINGS): continue
+    fields = [(_norm_field(f.findtext("FieldName").lower()), int(f.find("BitLayout/Range").findtext("BitOffset") or 0) + int(f.find("BitLayout/Range").findtext("BitCount") or 0) - 1,
                int(f.find("BitLayout/Range").findtext("BitOffset") or 0))
               for f in enc.findall(".//MicrocodeFormat/BitMap/Field") if f.find("BitLayout/Range") is not None]
     ident = (enc.findall("EncodingIdentifiers/EncodingIdentifier") or [None])[0]
@@ -79,16 +67,25 @@ def parse_xml(filename: str, arch: str):
     enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1], enc_field[2]-1, -1)) if ident is not None and enc_field else None
     base_name = _strip_enc(name)
     encodings[name_map.get(base_name, base_name)] = (fields, enc_bits)
-  # Extract instruction opcodes into enums
+  # Extract instruction opcodes and operand info
   for instr in root.findall("ISA/Instructions/Instruction"):
     name = instr.findtext("InstructionName")
     for enc in instr.findall("InstructionEncodings/InstructionEncoding"):
       if enc.findtext("EncodingCondition") != "default": continue
-      base = _map_flat(_strip_enc(enc.findtext("EncodingName")), name)
+      base, opcode = _map_flat(_strip_enc(enc.findtext("EncodingName")), name), int(enc.findtext("Opcode") or 0)
+      enc_name = name_map.get(base, base)
       # ADDTID instructions go in both FLAT and GLOBAL enums
-      if base == "GLOBAL" and "ADDTID" in name: enums.setdefault("FLAT", {})[int(enc.findtext("Opcode") or 0)] = name
-      if base == "VGLOBAL" and "ADDTID" in name: enums.setdefault("VFLAT", {})[int(enc.findtext("Opcode") or 0)] = name
-      enums.setdefault(name_map.get(base, base), {})[int(enc.findtext("Opcode") or 0)] = name
+      if "ADDTID" in name:
+        if base == "GLOBAL": enums.setdefault("FLAT", {})[opcode] = name
+        elif base == "VGLOBAL": enums.setdefault("VFLAT", {})[opcode] = name
+      enums.setdefault(enc_name, {})[opcode] = name
+      # Extract operand info
+      op_info = {op.findtext("FieldName").lower(): (op.findtext("DataFormatName"), int(op.findtext("OperandSize") or 0), op.findtext("OperandType"))
+                 for op in enc.findall("Operands/Operand") if op.findtext("FieldName")}
+      for fmt, _, otype in op_info.values():
+        if fmt and fmt not in fmts: fmts[fmt] = 0
+        if otype: op_types_set.add(otype)
+      if op_info: types[(name, enc_name)] = op_info
   return encodings, enums, types, fmts, op_types_set
 
 def write_common(all_fmts, all_op_types, path):
