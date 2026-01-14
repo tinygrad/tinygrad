@@ -144,7 +144,7 @@ class WebGPUProgram:
     webgpu.WGPUCreateComputePipelineAsyncCallback2, webgpu.WGPUCreatePipelineAsyncStatus, 1, None, self.dev, compute_desc)
 
     command_encoder = webgpu.wgpuDeviceCreateCommandEncoder(self.dev, webgpu.WGPUCommandEncoderDescriptor())
-    comp_pass_desc = webgpu.WGPUComputePassDescriptor(nextInChain=None)
+    comp_pass_desc = webgpu.WGPUComputePassDescriptor()
 
     if wait:
       query_set = webgpu.wgpuDeviceCreateQuerySet(self.dev, webgpu.WGPUQuerySetDescriptor(type=webgpu.WGPUQueryType_Timestamp, count=2))
