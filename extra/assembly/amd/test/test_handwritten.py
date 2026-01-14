@@ -22,16 +22,14 @@ class TestIntegration(unittest.TestCase):
     print(desc)
 
   def test_wmma(self):
-    self.inst = v_wmma_f32_16x16x16_f16(v[0:7], v[189:192], v[140:143], v[0:7])
+    self.inst = v_wmma_f32_16x16x16_f16(v[0:7], v[184:191], v[136:143], v[0:7])
 
   def test_load_b128(self):
     self.inst = s_load_b128(s[4:7], s[0:1], NULL, 0)
 
-  @unittest.expectedFailure
   def test_load_b128_wrong_size(self):
     # this should have to be 4 regs on the loaded to
-    # TODO: SMEM instructions don't have type info in pcode, need to parse from opcode name
-    with self.assertRaises(Exception):
+    with self.assertRaises(TypeError):
       self.inst = s_load_b128(s[4:6], s[0:1], NULL, 0)
 
   def test_mov_b32(self):
