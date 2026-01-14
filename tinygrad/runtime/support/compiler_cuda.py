@@ -1,7 +1,7 @@
 import subprocess, hashlib, tempfile, ctypes, re, pathlib
 from typing import Callable
 from tinygrad.helpers import to_char_p_p, colored, getenv, system
-from tinygrad.runtime.support import init_c_var
+from tinygrad.runtime.support.c import init_c_var
 from tinygrad.runtime.autogen import nvrtc, nvjitlink as jitlink
 from tinygrad.device import Compiler, CompileError
 
