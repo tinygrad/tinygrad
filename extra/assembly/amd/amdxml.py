@@ -9,13 +9,10 @@ ARCH_MAP = {"amdgpu_isa_rdna3_5.xml": "rdna3", "amdgpu_isa_rdna4.xml": "rdna4", 
 NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOPDXY": "VOPD", "VDS": "DS"}
 ARCH_NAME_MAP = {"cdna": {"VOP3": "VOP3A", "VOP3_SDST_ENC": "VOP3B"}}
 # Instructions missing from XML but present in PDF
-FIXES = {"rdna3": {"SOPP": {8: "S_WAITCNT_DEPCTR", 58: "S_TTRACEDATA", 59: "S_TTRACEDATA_IMM"},
-                   "SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"},
-                   "SMEM": {34: "S_ATC_PROBE", 35: "S_ATC_PROBE_BUFFER"},
-                   "FLAT": {40: "GLOBAL_LOAD_ADDTID_B32", 41: "GLOBAL_STORE_ADDTID_B32", 55: "FLAT_ATOMIC_CSUB_U32"}},
+FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"},
+                   "FLAT": {55: "FLAT_ATOMIC_CSUB_U32"}},
          "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"},
-                   "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE", 58: "S_TTRACEDATA", 59: "S_TTRACEDATA_IMM"},
-                   "SMEM": {34: "S_ATC_PROBE", 35: "S_ATC_PROBE_BUFFER"}}}
+                   "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
 _ENC_SUFFIXES = ("_INST_LITERAL", "_VOP_DPP16", "_VOP_DPP8", "_VOP_DPP", "_VOP_SDWA", "_NSA1", "_MFMA")
 # Field name normalization
@@ -74,7 +71,7 @@ def parse_xml(filename: str, arch: str):
       if enc.findtext("EncodingCondition") != "default": continue
       base, opcode = _map_flat(_strip_enc(enc.findtext("EncodingName")), name), int(enc.findtext("Opcode") or 0)
       enc_name = name_map.get(base, base)
-      # ADDTID instructions go in both FLAT and GLOBAL enums
+      # ADDTID instructions go in both FLAT and GLOBAL enums (pcode uses FLATOp for these)
       if "ADDTID" in name:
         if base == "GLOBAL": enums.setdefault("FLAT", {})[opcode] = name
         elif base == "VGLOBAL": enums.setdefault("VFLAT", {})[opcode] = name
