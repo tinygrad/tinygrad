@@ -329,7 +329,8 @@ class AMDComputeQueue(HWQueue):
 
       self.bind_sints(*local_size, mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='workgroup_size_x', fmt='H')
       self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='grid_size_x', fmt='I')
-      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.buf.va_addr
+      dp.group_segment_size, dp.private_segment_size  = prg.group_segment_size, prg.private_segment_size
+      dp.kernarg_address = cast(ctypes.c_void_p, args_state.buf.va_addr)
       user_regs += [*data64_le(disp_buf.va_addr)]
 
     user_regs += [*data64_le(args_state.buf.va_addr)]
@@ -1033,7 +1034,7 @@ class AMDDevice(HCQCompiled):
         rsrc1_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD1{"_GFX11" if self.target[0] >= 11 else ""}_bitfields')
         rsrc3_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD3{"_GFX"+str(self.target[0]) if self.target[0] >= 10 else ""}_bitfields')
 
-        self.aql_desc.scratch_backing_memory_location = self.scratch.va_addr
+        self.aql_desc.scratch_backing_memory_location = cast(int, self.scratch.va_addr)
         self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.aql_desc.max_wave_id + 1) // 64
         self.aql_desc.scratch_resource_descriptor[:] = [lo32(self.scratch.va_addr),
           int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(self.scratch.va_addr), SWIZZLE_ENABLE=1), 'little'),

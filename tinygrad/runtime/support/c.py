@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
-from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
-from _ctypes import _SimpleCData, _Pointer
-from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, ParamSpec, TypeVar
+from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
+from _ctypes import _CData, _SimpleCData, _Pointer
+from typing import TYPE_CHECKING, cast, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -18,7 +18,7 @@ def _IOR(base, nr, typ): return functools.partial(_do_ioctl, 2, ord(base) if isi
 def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, typ)
 
 def del_an(ty):
-  if isinstance(ty, type) and issubclass(ty, Enum): return del_an(ty.__orig_bases__[0])
+  if isinstance(ty, type) and issubclass(ty, Enum): return del_an(ty.__orig_bases__[0]) # type: ignore
   return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
 
 _pending_records = []
@@ -26,47 +26,54 @@ _pending_records = []
 T = TypeVar("T")
 U = TypeVar("U")
 V = TypeVar("V")
+CT = TypeVar("CT", bound=_CData)
 P = ParamSpec("P")
 
-class CFUNCTYPE(Generic[T, P]):
-  def __class_getitem__(cls, key): return ctypes.CFUNCTYPE(del_an(key[0]), *(del_an(a) for a in key[1]))
-
-class Enum:
-  _val_to_name_: dict[int,str] = {}
-
-  @classmethod
-  def from_param(cls, val): return val if isinstance(val, cls) else cls(val)
-  @classmethod
-  def get(cls, val, default="unknown"): return cls._val_to_name_.get(val.value if isinstance(val, cls) else val, default)
-  @classmethod
-  def items(cls): return cls._val_to_name_.items()
-  @classmethod
-  def define(cls, name, val):
-    cls._val_to_name_[val] = name
-    return val
-
-  def __eq__(self, other): return self.value == other
-  def __repr__(self): return self.get(self) if self.value in self.__class__._val_to_name_ else str(self.value)
-  def __hash__(self): return hash(self.value)
-
-class Array(Generic[T, U]):
-  @overload
-  def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
-  @overload
-  def __getitem__(self: Array[T, Any], key: int) -> T: ...
-  def __getitem__(self, key: int) -> Any: ...
-  @overload
-  def __setitem__(self: Array[_SimpleCData[V], Any], key: int, val: V): ...
-  @overload
-  def __setitem__(self: Array[T, Any], key: int, val: T): ...
-  def __setitem__(self, key: int, val: Any): ...
-  def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
 
 if TYPE_CHECKING:
-  class POINTER(_Pointer[T]): ...
+  from ctypes import _CFunctionType
+  class Array(Generic[T, U], _CData):
+    @overload
+    def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
+    @overload
+    def __getitem__(self: Array[T, Any], key: int) -> T: ...
+    def __getitem__(self, key) -> Any: ...
+    @overload
+    def __setitem__(self: Array[_SimpleCData[V], Any], key: int, val: V): ...
+    @overload
+    def __setitem__(self: Array[T, Any], key: int, val: T): ...
+    @overload
+    def __setitem__(self: Array[T, Any], key: slice, val: Iterable[T]): ...
+    def __setitem__(self, key, val): ...
+  class POINTER(Generic[T], _Pointer): ...
+  class CFUNCTYPE(Generic[T, P], _CFunctionType): ...
+  class Enum(_SimpleCData):
+    @classmethod
+    def get(cls, val:int, default="unknown") -> str: ...
+    @classmethod
+    def items(cls) -> Iterable[tuple[int,str]]: ...
+    @classmethod
+    def define(cls, name:str, val:int) -> int: ...
 else:
+  class Array:
+    def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
   class POINTER:
     def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key))
+  class CFUNCTYPE:
+    def __class_getitem__(cls, key): return ctypes.CFUNCTYPE(del_an(key[0]), *(del_an(a) for a in key[1]))
+  class Enum:
+    _val_to_name_: dict[int,str] = {}
+
+    @classmethod
+    def get(cls, val, default="unknown"): return cls._val_to_name_.get(val, default)
+    @classmethod
+    def items(cls): return cls._val_to_name_.items()
+    @classmethod
+    def define(cls, name:str, val:int) -> int:
+      cls._val_to_name_[val] = name
+      return val
+
+def pointer(obj: CT) -> POINTER[CT]: return cast(POINTER, ctypes.pointer(obj))
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
@@ -80,10 +87,10 @@ class Struct(ctypes.Structure):
 
 def record(cls) -> type[Struct]:
   struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)], '_real_fields_':tuple(cls.__annotations__.keys())})
-  _pending_records.append((cls, struct, sys._getframe().f_back.f_globals))
+  _pending_records.append((cls, struct, unwrap(sys._getframe().f_back).f_globals))
   return struct
 
-def init_records():
+def init_records() -> None:
   for cls, struct, ns in _pending_records:
     for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
       if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, Field(*t.__metadata__))
