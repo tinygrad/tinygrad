@@ -223,7 +223,7 @@ def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for
 # *** Performance counters
 
 metrics:dict[str, Callable] = {
-  "ALU utilization": lambda r:r["SQ_INSTS_VALU"]/(r["SQ_BUSY_CYCLES"]*4),
+  "ALU utilization %": lambda r:(r["SQ_INSTS_VALU"]/(r["SQ_BUSY_CYCLES"]*4))*100,
 }
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
