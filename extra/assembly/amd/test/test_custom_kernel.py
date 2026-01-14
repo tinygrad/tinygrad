@@ -2,6 +2,7 @@ import unittest
 import functools
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
 from extra.assembly.amd.autogen.rdna3.ins import *
@@ -31,14 +32,18 @@ def custom_add_one(A:UOp, arch:str) -> UOp:
     global_store_b32(v[0], data=v[1], saddr=s[0:1]),
     s_endpgm(),
   ]
-  sink = UOp.sink(A.base, threads, arg=KernelInfo(name:="custom_add_one"))
+  # custom estimates: 1 op per element, 2 memory accesses (load + store) per element * 4 bytes
+  sink = UOp.sink(A.base, threads, arg=KernelInfo(name:=f"custom_add_one_{A.size}", estimates=Estimates(ops=A.size, mem=A.size*4*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="amd"), UOp(Ops.LINEAR, src=(*sink.src, sink)), *assemble_insts(insts, name, arch)), arg=())
 
 class TestCustomKernel(unittest.TestCase):
-  def test_simple_add_one(self):
+  def test_simple(self):
     a = Tensor.full((16, 16), 1.).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=functools.partial(custom_add_one, arch=Device[Device.DEFAULT].arch))[0]
-    a.realize()
+    ei = a.schedule()[-1].lower()
+    self.assertEqual(ei.prg.estimates.ops, a.numel())
+    self.assertEqual(ei.prg.estimates.mem, a.nbytes()*2)
+    ei.run()
     self.assertTrue((a.numpy() == 2.).all())
 
 if __name__ == "__main__":
