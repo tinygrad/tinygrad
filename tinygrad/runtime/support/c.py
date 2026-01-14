@@ -115,7 +115,9 @@ class Field(property):
           if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
           mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else f(v)))
         return wrapper
-      if issubclass(typ, _CArray): super().__init__(lambda self: typ.from_buffer(mv(self)[sl]), set_with_objs(lambda v: typ(*v)))
+      if issubclass(typ, _CArray):
+        super().__init__(lambda self:typ.from_buffer(mv(self)[sl]).value if typ._type_==ctypes.c_char else lambda self:typ.from_buffer(mv(self)[sl]),
+                         set_with_objs(lambda v: typ(*v)))
       else: super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, set_with_objs(typ))
     self.offset = off
 
