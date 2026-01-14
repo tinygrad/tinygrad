@@ -24,15 +24,14 @@ def custom_add_one(A:UOp, arch:str) -> UOp:
   insts = [
     s_load_b64(s[0:1], s[0:1], soffset=NULL),
     s_waitcnt(lgkmcnt=0),
-    v_lshlrev_b32_e32(v[0], 2, v[0]), # thread idx = element offset
+    v_lshlrev_b32_e32(v[0], 2, v[0]), # element offset
     global_load_b32(v[1], v[0], saddr=s[0:1]),
     s_waitcnt(vmcnt=0),
     v_mov_b32_e32(v[2], 1.0),
     v_add_f32_e32(v[1], v[1], v[2]),
-    global_store_b32(v[0], data=v[1], saddr=s[0:1]),
+    global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
     s_endpgm(),
   ]
-  # custom estimates: 1 op per element, 2 memory accesses (load + store) per element * 4 bytes
   sink = UOp.sink(A.base, threads, arg=KernelInfo(name:=f"custom_add_one_{A.size}", estimates=Estimates(ops=A.size, mem=A.size*4*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="amd"), UOp(Ops.LINEAR, src=(*sink.src, sink)), *assemble_insts(insts, name, arch)), arg=())
 
