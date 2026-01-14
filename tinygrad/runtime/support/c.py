@@ -123,8 +123,10 @@ class Field(property):
 
 @functools.cache
 def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
-  CStruct = type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)]})
-  for nm,ty,*args in fields: setattr(CStruct, nm, Field(del_an(ty), *args))
+  CStruct = type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)], '_real_fields_': []})
+  for nm,ty,*args in fields:
+    setattr(CStruct, nm, Field(*(f:=(del_an(ty), *args))))
+    CStruct._real_fields_.append((nm,) + f) # type: ignore
   return CStruct
 def init_c_var(ty, creat_cb): return (creat_cb(v:=del_an(ty)()), v)[1]
 
