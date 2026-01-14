@@ -22,6 +22,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       k = u.src[1]
       in_degree.setdefault(k, 0)
       for s in k.src[0].src if k.op is Ops.END else k.src:
+        while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
         if s.op is Ops.AFTER:
           children.setdefault(s.src[1], []).append(k)
           in_degree[k] += 1
