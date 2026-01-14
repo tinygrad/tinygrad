@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
-from _ctypes import _SimpleCData, _Pointer
+from _ctypes import Array as _CArray, _SimpleCData, _Pointer
 from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
@@ -110,10 +110,13 @@ class Field(property):
                        lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
     else:
       sl = slice(off, off + ctypes.sizeof(typ))
-      def setter(self, v):
-        mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v)))
-        if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
-      super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, setter)
+      def set_with_objs(f):
+        def wrapper(self, v):
+          if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
+          mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else f(v)))
+        return wrapper
+      if issubclass(typ, _CArray): super().__init__(lambda self: typ.from_buffer(mv(self)[sl]), set_with_objs(lambda v: typ(*v)))
+      else: super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, set_with_objs(typ))
     self.offset = off
 
 @functools.cache
