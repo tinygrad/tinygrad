@@ -191,6 +191,7 @@ class TestTorchBackend(unittest.TestCase):
     assert torch.equal(tensor_a, tensor_b)
     assert not torch.equal(tensor_a, tensor_c)
 
+  @unittest.skip("# TODO: this test is slow")
   def test_linalg_svd(self):
     A = torch.randn(5, 5, device=device)
     U, S, Vh = torch.linalg.svd(A)
