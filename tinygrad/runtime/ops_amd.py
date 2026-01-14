@@ -138,6 +138,47 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regSPI_CONFIG_CNTL, ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
               enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
 
+  def sample_wgp_config(self, buf:HCQBuffer):
+    """Sample CC_GC_SHADER_ARRAY_CONFIG and GC_USER_SHADER_ARRAY_CONFIG for each SE/SH to find active WGPs."""
+    ses_per_xcc = self.dev.se_cnt // self.dev.xccs
+    sa_per_se = self.dev.iface.props['simd_arrays_per_engine']
+    offset = 0
+
+    for xcc in range(self.dev.xccs):
+      with self.pred_exec(xcc_mask=1 << xcc):
+        for se in range(ses_per_xcc):
+          for sh in range(sa_per_se):
+            self.set_grbm(se=se, sh=sh)
+            self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regCC_GC_SHADER_ARRAY_CONFIG.addr[0], 0,
+                      *data64_le(buf.va_addr + offset))
+            offset += 4
+            self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regGC_USER_SHADER_ARRAY_CONFIG.addr[0], 0,
+                      *data64_le(buf.va_addr + offset))
+            offset += 4
+
+    self.set_grbm()
+    return self
+
+  @staticmethod
+  def print_wgp_config(buf:HCQBuffer, dev):
+    """Print active WGPs per SE/SH from sampled config registers."""
+    ses_per_xcc = dev.se_cnt // dev.xccs
+    sa_per_se = dev.iface.props['simd_arrays_per_engine']
+    data = (ctypes.c_uint32 * (dev.xccs * ses_per_xcc * sa_per_se * 2)).from_address(buf.va_addr)
+    idx = 0
+
+    for xcc in range(dev.xccs):
+      for se in range(ses_per_xcc):
+        for sh in range(sa_per_se):
+          cc_config = data[idx]
+          user_config = data[idx + 1]
+          # inactive_wgps is in bits 16:31 (mask 0xFFFF0000, shift 16)
+          inactive_wgps = ((cc_config | user_config) >> 16) & 0xFFFF
+          active_wgps = (~inactive_wgps) & 0xFFFF
+          print(f"XCC{xcc} SE{se} SH{sh}: CC_CONFIG=0x{cc_config:08x} USER_CONFIG=0x{user_config:08x} "
+                f"inactive_wgps=0x{inactive_wgps:04x} active_wgps=0x{active_wgps:04x} ({bin(active_wgps).count('1')} WGPs)")
+          idx += 2
+
   ### PMC ###
 
   def pmc_reset_counters(self, en=True):
@@ -974,6 +1015,14 @@ class AMDDevice(HCQCompiled):
       cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
       self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True))
       self.allocator._copyin(self.pmc_buffer, memoryview(bytearray(self.pmc_buffer.size))) # zero pmc buffers, some counters have only lo part.
+
+      # Sample and print WGP config
+      wgp_buf_size = self.xccs * (self.se_cnt // self.xccs) * self.iface.props['simd_arrays_per_engine'] * 2 * 4
+      wgp_buf = self.allocator.alloc(wgp_buf_size, BufferSpec(cpu_access=True, nolru=True))
+      cast(AMDComputeQueue, self.hw_compute_queue_t()).sample_wgp_config(wgp_buf).memory_barrier() \
+          .signal(self.timeline_signal, self.next_timeline()).submit(self)
+      self.timeline_signal.wait(self.timeline_value - 1)
+      AMDComputeQueue.print_wgp_config(wgp_buf, self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled:bool = PROFILE > 0 and SQTT > 0
