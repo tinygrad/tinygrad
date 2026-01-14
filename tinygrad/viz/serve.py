@@ -299,40 +299,30 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
       events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
   return cu_events, list(units), wave_insts
 
-# identifies a unique wave unit in hardware hierarchy
-@dataclass(frozen=True)
-class WaveUnit:
-  se:int; cu:int; simd:int; wave_id:int # noqa: E702
-  @classmethod
-  def from_packet(cls, e, p): return cls(e.se, p.cu, p.simd, p.wave)
-  @property
-  def cu_loc(self) -> str: return f"SE:{self.se} CU:{self.cu}"
-  @property
-  def simd_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd}"
-  @property
-  def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
-
 def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str]]:
-  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, INST
+  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, INST, LAYOUT_HEADER, INST
+  wave_starts:dict[tuple[int, int, int, int], int] = {} # [se, cu, simd, wave] -> time
+  #cu_events:dict[str, list[ProfileEvent]] = {}
+  #wave_starts:dict[WaveUnit, int] = {} # unit -> start_time
+  #inst_traces:dict[WaveUnit, int] = {} # unit -> number of inst traces
+  #units:dict[WaveUnit, itertools.count] = {} # unit -> number of waves that landed on it
   cu_events:dict[str, list[ProfileEvent]] = {}
-  wave_starts:dict[WaveUnit, int] = {} # unit -> start_time
-  inst_traces:dict[WaveUnit, int] = {} # unit -> number of inst traces
-  units:dict[WaveUnit, itertools.count] = {} # unit -> number of waves that landed on it
+  units:dict[str, itertools.count] = {} # unit -> number of events
+  insts:list = []
+  simd_sel = 0
   for e in data:
-    if e.se != 1: continue
     for p in decode(e.blob):
-      if any(len(v) > 10_000 for v in cu_events.values()): break
-      if isinstance(p, WAVESTART): wave_starts[WaveUnit.from_packet(e, p)] = p._time
-      elif isinstance(p, WAVEEND):
-        if (wu:=WaveUnit.from_packet(e, p)) not in units: units[wu] = itertools.count(0)
-        if (events:=cu_events.get(wu.cu_loc)) is None: cu_events[wu.cu_loc] = events = []
-        wave_type = "INST" if inst_traces.get(wu) else "OCC"
-        events.append(ProfileRangeEvent(wu.simd_loc, f"{wave_type} WAVE:{p.wave} N:{next(units[wu])}", Decimal(wave_starts.pop(wu)),Decimal(p._time)))
-      elif isinstance(p, INST):
-        # TODO: cu and simd numbers are not correct, what is the right way to get CU/SIMD of the INST packet?
-        wu = WaveUnit(e.se, 0, 0, p.wave)
-        inst_traces[wu] = inst_traces.get(wu, 0) + 1
-  return cu_events, [k.wave_loc for k in units]
+      if isinstance(p, INST): insts.append(p)
+      if isinstance(p, LAYOUT_HEADER): simd_selct = p.simd
+      if isinstance(p, WAVESTART): wave_starts[(e.se, p.cu, p.simd, p.wave)] = p._time
+      if isinstance(p, WAVEEND):
+        st = wave_starts.pop(key:=(e.se, p.cu, p.simd, p.wave))
+        if (counter:=units.get(str(key))) is None: units[str(key)] = counter = itertools.count(0)
+        # the first CU in the selected SIMD has the INST trace
+        name = "INST" if (p.simd, p.cu) == (simd_sel, 0) and len(insts) > 0 else "OCC"
+        cu_events.setdefault(k:=f"SE:{e.se} CU:{p.cu}", []).append(ProfileRangeEvent(f"SIMD:{p.simd}", f"{name} WAVE:{p.wave} N:{next(counter)}",
+                                                                                     Decimal(st), Decimal(p._time)))
+  return cu_events, []
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
