@@ -41,7 +41,7 @@ def _get_comgr_data(data_set, data_type):
 def set_options(action_info, options:bytes):
   # TODO: this type should be correct in the autogen stub
   @comgr.dll.bind
-  def amd_comgr_action_info_set_option_list(ai:comgr.amd_comgr_action_info_t, o:c.POINTER[c.POINTER[ctypes.c_char]],
+  def amd_comgr_action_info_set_option_list(ai:comgr.amd_comgr_action_info_t, o:c.POINTER[c.POINTER[ctypes.c_char]], # type: ignore
                                             c:comgr.size_t) -> comgr.amd_comgr_status_t: pass
   return amd_comgr_action_info_set_option_list(action_info, to_char_p_p(options_list:=options.split(b' ')), len(options_list))
 

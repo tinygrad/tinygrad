@@ -205,7 +205,7 @@ class WebGpuDevice(Compiled):
     supported = [supported_features.features[i] for i in range(supported_features.featureCount)]
     features = [feat for feat in [webgpu.WGPUFeatureName_TimestampQuery, webgpu.WGPUFeatureName_ShaderF16] if feat in supported]
     dev_desc = webgpu.WGPUDeviceDescriptor(requiredFeatureCount=len(features),
-                                           requiredFeatures=c.Array(webgpu.WGPUFeatureName, len(features))(*features))
+                                           requiredFeatures=c.Array(webgpu.WGPUFeatureName, len(features))(*features)) # type: ignore
 
     # Limits
     supported_limits = webgpu.WGPUSupportedLimits()
