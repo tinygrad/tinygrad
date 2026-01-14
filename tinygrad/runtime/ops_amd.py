@@ -11,7 +11,7 @@ from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, Profil
 from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
-from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd
+from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd, amdgpu_drm
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
@@ -138,41 +138,6 @@ class AMDComputeQueue(HWQueue):
     self.wreg(self.gc.regSPI_CONFIG_CNTL, ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
               enable_sqg_bop_events=int(tracing), enable_sqg_top_events=int(tracing))
 
-  def sample_wgp_config(self, buf:HCQBuffer):
-    ses_per_xcc = self.dev.se_cnt // self.dev.xccs
-    sa_per_se = self.dev.iface.props['simd_arrays_per_engine']
-    offset = 0
-
-    for xcc in range(self.dev.xccs):
-      with self.pred_exec(xcc_mask=1 << xcc):
-        for se in range(ses_per_xcc):
-          for sh in range(sa_per_se):
-            self.set_grbm(se=se, sh=sh)
-            self.pkt3(self.pm4.PACKET3_COPY_DATA, 1 << 20 | 2 << 8 | 4, self.gc.regCC_GC_SHADER_ARRAY_CONFIG.addr[0], 0, *data64_le(buf.va_addr + offset))
-            offset += 4
-
-    self.set_grbm()
-    return self
-
-  @staticmethod
-  def print_wgp_config(buf:HCQBuffer, dev):
-    """Print active WGPs per SE/SH from sampled config registers."""
-    ses_per_xcc = dev.se_cnt // dev.xccs
-    sa_per_se = dev.iface.props['simd_arrays_per_engine']
-    data = (ctypes.c_uint32 * (dev.xccs * ses_per_xcc * sa_per_se * 2)).from_address(buf.va_addr)
-    idx = 0
-
-    for xcc in range(dev.xccs):
-      for se in range(ses_per_xcc):
-        for sh in range(sa_per_se):
-          cc_config = data[idx]
-          # inactive_wgps is in bits 16:31 (mask 0xFFFF0000, shift 16)
-          inactive_wgps = ((cc_config) >> 16) & 0xFFFF
-          active_wgps = (~inactive_wgps) & 0xFFFF
-          print(f"XCC{xcc} SE{se} SH{sh}: CC_CONFIG=0x{cc_config:08x} "
-                f"inactive_wgps=0x{inactive_wgps:04x} active_wgps=0x{active_wgps:04x} ({bin(active_wgps).count('1')} WGPs)")
-          idx += 1
-
   ### PMC ###
 
   def pmc_reset_counters(self, en=True):
@@ -216,6 +181,7 @@ class AMDComputeQueue(HWQueue):
       for xcc in range(s.xcc):
         with self.pred_exec(xcc_mask=1 << xcc):
           for inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
+            if s.wgp > 1 and not self.dev.is_wgp_active(xcc, se_idx, sa_idx, wgp_idx): continue
             self.set_grbm(**({'instance':inst} if s.inst > 1 else ({'se':se_idx}|({'sh':sa_idx, 'wgp':wgp_idx} if self.dev.target[0] != 9 else {}))))
 
             # Copy counter to memory (src_sel = perf, dst_sel = tc_l2)
@@ -839,6 +805,13 @@ class KFDIface:
       else:
         raise RuntimeError("PMC/SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
 
+  @functools.cached_property
+  def drm_dev_info(self) -> amdgpu_drm.struct_drm_amdgpu_info_device:
+    amdgpu_drm.DRM_IOCTL_AMDGPU_INFO(self.drm_fd, query=amdgpu_drm.AMDGPU_INFO_DEV_INFO,
+      return_pointer=ctypes.addressof(inf:=amdgpu_drm.struct_drm_amdgpu_info_device()), return_size=ctypes.sizeof(inf))
+    return inf
+  def is_wgp_active(self, xcc, se, sa, wgp) -> bool: return self.drm_dev_info.cu_bitmap[se % 4][sa + (se // 4) * 2] >> (2 * wgp) & 0x3
+
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
 
@@ -849,6 +822,7 @@ class PCIIface(PCIIfaceBase):
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
   def require_profile_mode(self): return True
+  def is_wgp_active(self, xcc, se, sa, wgp) -> bool: return True # FIXME
 
   def _setup_adev(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.dev_impl:AMDev = AMDev(pci_dev, dma_regions)
@@ -1009,15 +983,6 @@ class AMDDevice(HCQCompiled):
       cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
       self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True))
       self.allocator._copyin(self.pmc_buffer, memoryview(bytearray(self.pmc_buffer.size))) # zero pmc buffers, some counters have only lo part.
-
-      # Sample and print WGP config
-      wgp_buf_size = self.xccs * (self.se_cnt // self.xccs) * self.iface.props['simd_arrays_per_engine'] * 2 * 4
-      wgp_buf = self.allocator.alloc(wgp_buf_size, BufferSpec(cpu_access=True, nolru=True))
-
-      cast(AMDComputeQueue, self.hw_compute_queue_t()).sample_wgp_config(wgp_buf).signal(self.timeline_signal, self.next_timeline()).submit(self)
-      self.synchronize()
-
-      AMDComputeQueue.print_wgp_config(wgp_buf, self)
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
     self.sqtt_enabled:bool = PROFILE > 0 and SQTT > 0
