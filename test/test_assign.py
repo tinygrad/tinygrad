@@ -424,5 +424,21 @@ class TestAssign(unittest.TestCase):
     a = Tensor.empty(5, device=f"disk:{temp('disk_assignment')}").assign(Tensor.ones(5)).numpy()
     np.testing.assert_equal(a, np.ones(5))
 
+  def test_assign_slice_then_read(self):
+    """Assign to slice then read from buffer - read should see the assigned values.
+    This is the KV cache pattern from llm.py.
+    """
+    v_pos = Variable("pos", 0, 3).bind(0)
+
+    # without .realize() after assign, the read doesn't see the assigned values
+    cache = Tensor.zeros(4, 4).contiguous().realize()
+    cache[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4))
+    self.assertEqual(cache.sum().item(), 0.0)  # should be 4.0!
+
+    # TODO: remove .realize() workaround once assign-read dependency is fixed
+    cache2 = Tensor.zeros(4, 4).contiguous().realize()
+    cache2[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4)).realize()
+    self.assertEqual(cache2.sum().item(), 4.0)
+
 if __name__ == "__main__":
   unittest.main()
