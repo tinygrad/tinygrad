@@ -21,7 +21,8 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       if u.op is not Ops.AFTER or u.src[1].op is Ops.RANGE: continue
       k = u.src[1]
       in_degree.setdefault(k, 0)
-      for s in k.src[0].src if k.op is Ops.END else k.src:
+      # process kernel sources and any additional AFTER dependencies added by RAW detection in rangeify
+      for s in (k.src[0].src if k.op is Ops.END else k.src) + u.src[2:]:
         while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
         if s.op is Ops.AFTER:
           children.setdefault(s.src[1], []).append(k)
@@ -130,7 +131,7 @@ pm_post_sched_cache = PatternMatcher([
 
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
+def complete_create_schedule_with_vars(big_sink:UOp, inj_bufs:set[UOp]|None=None) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
@@ -155,7 +156,9 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       big_sink_cache = big_sink_cache.substitute(tensor_map, name="Apply Multi Map")
       big_sink_cache = UOp.sink(*flatten([x.src if x.op is Ops.MULTI else [x] for x in big_sink_cache.src]))
 
-    tensor_map |= get_rangeify_map(big_sink_cache)
+    # map injected buffers (for RAW detection) from UNIQUE to LUNIQUE
+    inj_bufs_lunique = {input_buffers.get(b, b) for b in (inj_bufs or set())}
+    tensor_map |= get_rangeify_map(big_sink_cache, inj_bufs_lunique)
     big_sink = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
 
     pre_schedule, buf_uops_sink = create_schedule(big_sink)

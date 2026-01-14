@@ -544,7 +544,7 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
+def get_rangeify_map(sink:UOp, injected_bufs:set[UOp]|None=None) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
@@ -570,18 +570,45 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
-  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
+  # fix assign: track buffer writes and readers, add WAR and RAW dependencies
+  # WAR (Write After Read): writer waits for previous readers (existing logic)
+  # RAW (Read After Write): reader waits for writer (only for injected/orphaned assigns like KV cache)
   kernel_assign: dict[UOp, UOp] = {}
+  buffer_readers: dict[UOp, list[UOp]] = {}
   assign_rep: dict[UOp, UOp] = {}
+  _injected_bufs = injected_bufs or set()
+
   for u in tsink.toposort():
     if u.op is not Ops.AFTER: continue
-    kernel_assign[u.buf_uop] = u
+    buf = u.buf_uop
+
+    # track readers: kernels that read from a buffer (excluding their own output buffer)
+    for s in u.src[1].src:
+      if s.op is Ops.BUFFER and s is not buf:
+        buffer_readers.setdefault(s, []).append(u)
+
+    kernel_assign[buf] = u
+
+    # WAR: if kernel reads from previously written buffer, make previous writer depend on current kernel
     for s in u.src[1].src:
       # TODO: this is probably broken for MSELECT/MSTACK
-      if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
+      if s.op is not Ops.BUFFER or s is buf or (a:=kernel_assign.get(s)) is None: continue
       if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
-        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
-      assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
+        raise RuntimeError(f"cycle detected in graph, kernel for {buf} must either depend on AFTER or BUFFER")
+      actual_a = assign_rep.get(a, a)
+      assign_rep[a] = kernel_assign[s] = actual_a.replace(src=actual_a.src+(u,))
+
+  # RAW: for injected assigns (KV cache pattern), readers should wait for writer
+  for buf, readers in buffer_readers.items():
+    if buf not in _injected_bufs: continue
+    if (writer:=kernel_assign.get(buf)) is None: continue
+    for reader in readers:
+      if reader is writer: continue
+      actual_reader = assign_rep.get(reader, reader)
+      actual_writer = assign_rep.get(writer, writer)
+      if actual_writer not in actual_reader.toposort():
+        assign_rep[reader] = actual_reader.replace(src=actual_reader.src+(actual_writer,))
+
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
   # TODO: we can probably get this earlier

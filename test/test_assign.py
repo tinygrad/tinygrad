@@ -427,18 +427,130 @@ class TestAssign(unittest.TestCase):
   def test_assign_slice_then_read(self):
     """Assign to slice then read from buffer - read should see the assigned values.
     This is the KV cache pattern from llm.py.
+
+    Goal: tinygrad should produce the same results as eager execution while remaining lazy.
+    Eager execution is the ground truth - dependencies are tracked automatically via RAW detection.
+
+    PyTorch: eager execution - operations execute immediately in order, so `cache[slice] = value`
+    completes before `cache.sum()` runs. No lazy graph means no dependency issues.
+
+    JAX: purely functional - no mutation. Must use `x.at[idx].set(y)` which returns a NEW array.
+    The returned array must be used for subsequent reads, making data flow explicit.
+    Inside JIT with dynamic indices, use `lax.dynamic_update_slice` (also returns new array).
+
+    tinygrad: lazy evaluation with mutation via `.assign()`. Assigns are tracked and RAW (Read After
+    Write) dependencies are automatically injected in rangeify.py, so readers wait for writers.
+    No explicit `.realize()` needed after assign - the dependency tracking handles execution order.
     """
     v_pos = Variable("pos", 0, 3).bind(0)
 
-    # without .realize() after assign, the read doesn't see the assigned values
+    # assign to slice then read full buffer
     cache = Tensor.zeros(4, 4).contiguous().realize()
     cache[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4))
-    self.assertEqual(cache.sum().item(), 0.0)  # should be 4.0!
+    self.assertEqual(cache.sum().item(), 4.0)
 
-    # TODO: remove .realize() workaround once assign-read dependency is fixed
-    cache2 = Tensor.zeros(4, 4).contiguous().realize()
-    cache2[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4)).realize()
-    self.assertEqual(cache2.sum().item(), 4.0)
+  def test_assign_slice_then_read_slice(self):
+    """Assign to slice then read overlapping slice - the KV cache read pattern."""
+    v_pos = Variable("pos", 0, 15)
+
+    # write to current position, read from 0 to current (growing read)
+    cache = Tensor.zeros(4, 16).contiguous().realize()
+    cache[:, v_pos.bind(0):v_pos.bind(0)+1].assign(Tensor.ones(4, 1))
+    result = cache[:, 0:v_pos.bind(0)+1]
+    self.assertEqual(result.sum().item(), 4.0)
+
+  def test_assign_slice_incremental(self):
+    """Multiple incremental assigns and reads - simulates KV cache building over tokens."""
+    v_pos = Variable("pos", 0, 15)
+    cache = Tensor.zeros(4, 16).contiguous().realize()
+
+    # Token 0: write to pos 0, read 0:1
+    cache[:, v_pos.bind(0):v_pos.bind(0)+1].assign(Tensor.ones(4, 1))
+    self.assertEqual(cache[:, 0:v_pos.bind(0)+1].sum().item(), 4.0)
+
+    # Token 1: write to pos 1, read 0:2
+    cache[:, v_pos.bind(1):v_pos.bind(1)+1].assign(Tensor.ones(4, 1) * 2)
+    self.assertEqual(cache[:, 0:v_pos.bind(1)+1].sum().item(), 12.0)  # 4 + 8
+
+    # Token 2: write to pos 2, read 0:3
+    cache[:, v_pos.bind(2):v_pos.bind(2)+1].assign(Tensor.ones(4, 1) * 3)
+    self.assertEqual(cache[:, 0:v_pos.bind(2)+1].sum().item(), 24.0)  # 4 + 8 + 12
+
+  def test_assign_stack_then_read(self):
+    """Assign stacked tensors then read - the exact KV cache pattern with stack."""
+    v_pos = Variable("pos", 0, 15)
+    cache = Tensor.zeros(2, 4, 16).contiguous().realize()  # (2, n_heads, max_ctx) for k,v
+
+    k = Tensor.ones(4, 1)
+    v = Tensor.ones(4, 1) * 2
+    kv = Tensor.stack(k, v)  # (2, n_heads, 1)
+    cache[:, :, v_pos.bind(0):v_pos.bind(0)+1].assign(kv)
+
+    k_out = cache[0, :, 0:v_pos.bind(0)+1]
+    v_out = cache[1, :, 0:v_pos.bind(0)+1]
+    self.assertEqual(k_out.sum().item(), 4.0)
+    self.assertEqual(v_out.sum().item(), 8.0)
+
+  def test_assign_slice_jit_incremental(self):
+    """JIT-wrapped incremental assigns - tests if JIT breaks the dependency tracking."""
+    v_pos = Variable("pos", 0, 15)
+    cache = Tensor.zeros(4, 16).contiguous().realize()
+
+    @TinyJit
+    def step(pos):
+      cache[:, pos:pos+1].assign(Tensor.ones(4, 1))
+      return cache[:, 0:pos+1].sum().realize()
+
+    # Each call should see all previous writes plus the new one
+    self.assertEqual(step(v_pos.bind(0)).item(), 4.0)   # write pos 0, read 0:1
+    self.assertEqual(step(v_pos.bind(1)).item(), 8.0)   # write pos 1, read 0:2
+    self.assertEqual(step(v_pos.bind(2)).item(), 12.0)  # write pos 2, read 0:3 (JIT replay)
+    self.assertEqual(step(v_pos.bind(3)).item(), 16.0)  # write pos 3, read 0:4 (JIT replay)
+
+  def test_assign_stack_jit_kv_cache(self):
+    """JIT-wrapped KV cache pattern - the exact pattern from llm.py."""
+    v_pos = Variable("pos", 0, 15)
+    cache = Tensor.zeros(2, 4, 16, 8).contiguous().realize()  # (2, n_heads, max_ctx, head_dim)
+
+    @TinyJit
+    def step(k, v, pos):
+      kv = Tensor.stack(k, v)
+      cache[:, :, pos:pos+1, :].assign(kv)
+      k_out = cache[0, :, 0:pos+1, :]
+      v_out = cache[1, :, 0:pos+1, :]
+      return (k_out.sum() + v_out.sum()).realize()
+
+    for i in range(4):
+      k = Tensor.ones(4, 1, 8).contiguous().realize()
+      v = (Tensor.ones(4, 1, 8) * 2).contiguous().realize()
+      result = step(k, v, v_pos.bind(i))
+      # k: (i+1)*4*8 = (i+1)*32, v: (i+1)*4*8*2 = (i+1)*64
+      expected = (i+1) * 32 + (i+1) * 64
+      self.assertEqual(result.item(), expected, f"pos={i}: got {result.item()}, expected {expected}")
+
+  def test_assign_jit_multi_cache(self):
+    """Multiple caches being updated in JIT - like multiple transformer layers."""
+    v_pos = Variable("pos", 0, 15)
+    caches = [Tensor.zeros(2, 4, 16, 8).contiguous().realize() for _ in range(4)]
+
+    @TinyJit
+    def step(k, v, pos):
+      total = Tensor([0.0])
+      for cache in caches:
+        kv = Tensor.stack(k, v)
+        cache[:, :, pos:pos+1, :].assign(kv)
+        k_out = cache[0, :, 0:pos+1, :]
+        v_out = cache[1, :, 0:pos+1, :]
+        total = total + k_out.sum() + v_out.sum()
+      return total.realize()
+
+    for i in range(4):
+      k = Tensor.ones(4, 1, 8).contiguous().realize()
+      v = (Tensor.ones(4, 1, 8) * 2).contiguous().realize()
+      result = step(k, v, v_pos.bind(i))
+      # 4 caches * (k: (i+1)*32 + v: (i+1)*64) = 4 * (i+1) * 96
+      expected = 4 * (i+1) * 96
+      self.assertEqual(result.item(), expected, f"pos={i}: got {result.item()}, expected {expected}")
 
 if __name__ == "__main__":
   unittest.main()

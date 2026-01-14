@@ -7,7 +7,6 @@ Comments marked "should be X!" indicate the intuitively expected value.
 
 SILENT MISMATCHES (highest priority - wrong results, no error):
   class_method_shared_across_instances EASY could check if first arg is self and warn
-  slice_assign_requires_realize      MED    assign graph not connected to read during JIT replay
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
   python_constants_frozen            HARD   inherent to tracing JITs
   conditional_branches_frozen        HARD   inherent to tracing JITs
@@ -50,30 +49,20 @@ class TestJitFootguns(unittest.TestCase):
 
     self.assertEqual([r1.item(), r2.item(), r3.item()], [2, 4, 6])
 
-  def test_slice_assign_requires_realize(self):
-    """Slice assign then read from same buffer - assign isn't connected to read without explicit realize()."""
+  def test_slice_assign_then_read(self):
+    """Slice assign then read from same buffer - assign IS connected to read automatically."""
     from tinygrad import Variable
     v_pos = Variable("pos", 0, 3)
 
-    # without .realize() after assign, the read doesn't see the assigned values
+    # slice assign followed by read works correctly - no .realize() needed after assign
     cache = Tensor.zeros(4, 4).contiguous().realize()
     @TinyJit
-    def f_broken(pos):
+    def f(pos):
       cache[pos:pos+1, :].assign(Tensor.ones(1, 4))
       return cache.sum().realize()
     for i in range(4):
       cache.assign(Tensor.zeros(4, 4)).realize()
-      self.assertEqual(f_broken(v_pos.bind(i)).item(), 0.0)  # should be 4.0!
-
-    # workaround: add .realize() after assign
-    cache2 = Tensor.zeros(4, 4).contiguous().realize()
-    @TinyJit
-    def f_fixed(pos):
-      cache2[pos:pos+1, :].assign(Tensor.ones(1, 4)).realize()
-      return cache2.sum().realize()
-    for i in range(4):
-      cache2.assign(Tensor.zeros(4, 4)).realize()
-      self.assertEqual(f_fixed(v_pos.bind(i)).item(), 4.0)
+      self.assertEqual(f(v_pos.bind(i)).item(), 4.0)  # correctly sees the assigned values
 
   def test_non_tensor_outputs_error(self):
     @TinyJit

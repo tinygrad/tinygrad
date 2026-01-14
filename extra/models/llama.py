@@ -71,14 +71,14 @@ class Attention:
     # create kv cache
     if self.max_context:
       if not hasattr(self, "cache_kv"):
-        self.cache_kv = Tensor.zeros(2, bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous().realize()
+        self.cache_kv = Tensor.zeros(2, bsz, self.max_context, self.n_kv_heads, self.head_dim, dtype=x.dtype).contiguous()
         if isinstance(x.device, tuple):
           # TODO: instead of specifying how to shard, it can follow how xk and xv are being sharded
-          self.cache_kv.shard_((x.device), axis=3 if getenv("SHARD_KVCACHE") else None).realize()
+          self.cache_kv.shard_((x.device), axis=3 if getenv("SHARD_KVCACHE") else None)
 
       # update the cache
       assert xk.dtype == xv.dtype == self.cache_kv.dtype, f"{xk.dtype=}, {xv.dtype=}, {self.cache_kv.dtype=}"
-      self.cache_kv[:, :, start_pos:start_pos+seqlen, :, :].assign(Tensor.stack(xk, xv)).realize()
+      self.cache_kv[:, :, start_pos:start_pos+seqlen, :, :].assign(Tensor.stack(xk, xv))
 
       keys = self.cache_kv[0, :, 0:start_pos+seqlen, :, :]
       values = self.cache_kv[1, :, 0:start_pos+seqlen, :, :]

@@ -24,6 +24,10 @@ def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
 all_tensors: dict[weakref.ref[Tensor], None] = {}
+
+# *** track pending assigns for RAW dependency injection ***
+# Maps buffer UOp -> list of ASSIGN UOps that write to that buffer
+_pending_assigns: dict[UOp, list[UOp]] = {}
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
     # get tensors in scope
@@ -248,8 +252,22 @@ class Tensor(OpMixin):
     """
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
-    # this is where the schedule cache should go
-    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
+    # inject pending assigns for buffers that are read (RAW dependency)
+    # Only inject assigns NOT already in big_sink (orphaned assigns like KV cache)
+    inj_bufs: set[UOp] = set()
+    if _pending_assigns:
+      read_buffers = {u for u in big_sink.toposort() if u.op is Ops.BUFFER}
+      existing_assigns = {u for u in big_sink.toposort() if u.op is Ops.ASSIGN}
+      pending_uops = [assign for buf in read_buffers if buf in _pending_assigns
+                      for assign in _pending_assigns[buf] if assign not in existing_assigns]
+      if pending_uops:
+        inj_bufs = {buf for buf in read_buffers if buf in _pending_assigns
+                    and any(a not in existing_assigns for a in _pending_assigns[buf])}
+        big_sink = UOp.sink(*big_sink.src, *pending_uops)
+      for buf in list(_pending_assigns.keys()):
+        if buf in read_buffers: del _pending_assigns[buf]
+
+    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink, inj_bufs)
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
@@ -290,7 +308,11 @@ class Tensor(OpMixin):
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not isinstance(self.device, tuple) or self.uop.axis == x.uop.axis, f"multi assign axis mismatch {self.uop.axis} != {x.uop.axis}"
-    return self.replace(self._apply_uop(UOp.assign, x))
+    assign_tensor = self._apply_uop(UOp.assign, x)
+    # track pending assigns for RAW dependency injection
+    if (target_buf:=self.uop.base).op is Ops.BUFFER:
+      _pending_assigns.setdefault(target_buf, []).append(assign_tensor.uop)
+    return self.replace(assign_tensor)
 
   def detach(self) -> Tensor:
     """
