@@ -9,6 +9,10 @@ from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
 
+def _unwrap_src(s: UOp) -> UOp:
+  while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
+  return s
+
 def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
@@ -22,7 +26,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       k = u.src[1]
       in_degree.setdefault(k, 0)
       for s in k.src[0].src if k.op is Ops.END else k.src:
-        while len(s.src) and s.op not in {Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.BIND}: s = s.src[0]
+        s = _unwrap_src(s)
         if s.op is Ops.AFTER:
           children.setdefault(s.src[1], []).append(k)
           in_degree[k] += 1
@@ -50,7 +54,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
       if k.op is Ops.RANGE: schedule.append(k)
       elif k.op is Ops.KERNEL:
         ast = k.arg.ast
-        buf_uops = tuple(s.buf_uop for s in k.src if s.op is not Ops.BIND)
+        buf_uops = tuple(_unwrap_src(s).buf_uop for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
         schedule.append((ast, buf_uops, k.arg.metadata, {}, bound_ranges))
         if rk.op is Ops.END: schedule.append(rk)
