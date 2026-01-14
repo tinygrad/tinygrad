@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
-from _ctypes import _CData, _SimpleCData, _Pointer
-from typing import TYPE_CHECKING, cast, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
+from _ctypes import _SimpleCData, _Pointer
+from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -26,12 +26,11 @@ _pending_records = []
 T = TypeVar("T")
 U = TypeVar("U")
 V = TypeVar("V")
-CT = TypeVar("CT", bound=_CData)
 P = ParamSpec("P")
-
 
 if TYPE_CHECKING:
   from ctypes import _CFunctionType
+  from _ctypes import _CData
   class Array(Generic[T, U], _CData):
     @overload
     def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
@@ -54,6 +53,8 @@ if TYPE_CHECKING:
     def items(cls) -> Iterable[tuple[int,str]]: ...
     @classmethod
     def define(cls, name:str, val:int) -> int: ...
+  CT = TypeVar("CT", bound=_CData)
+  def pointer(obj: CT) -> POINTER[CT]: ...
 else:
   class Array:
     def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
@@ -72,8 +73,7 @@ else:
     def define(cls, name:str, val:int) -> int:
       cls._val_to_name_[val] = name
       return val
-
-def pointer(obj: CT) -> POINTER[CT]: return cast(POINTER, ctypes.pointer(obj))
+  def pointer(obj): return ctypes.pointer(obj)
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
