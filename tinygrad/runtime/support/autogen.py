@@ -172,7 +172,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
       case clang.CXType_ObjCId: return (objc:=True, "objc.id_")[1]
       case clang.CXType_ObjCObject:
         if basetype(t).kind != clang.CXType_ObjCId: raise NotImplementedError(f"generics unsupported: {nm(t)}")
-        if len(ps:=[proto(p) for p in protocols(t)]) == 0:
+        if len(ps:=[proto(name, p) for p in protocols(t)]) == 0:
           types[nm(t)] = "objc.id_", True
           return "objc.id_"
         if len(ps) == 1:
@@ -200,7 +200,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     return ms
 
   # libclang doesn't have a "type" for @protocol, so we have to do this here...
-  def proto(decl):
+  def proto(name, decl):
     nonlocal lines, types
     if (dnm:=nm(decl)) in types and types[dnm][1]: return types[dnm][0]
     # check if this is a forward declaration
@@ -208,7 +208,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     if dnm not in types: lines.append(f"class {dnm}(objc.Spec): pass")
     types[dnm] = dnm, is_defn
     if is_defn:
-      bases = [proto(b) for b in children(decl) if b.kind==clang.CXCursor_ObjCProtocolRef and nm(b) != nm(decl)]
+      bases = [proto(name, b) for b in children(decl) if b.kind==clang.CXCursor_ObjCProtocolRef and nm(b) != nm(decl)]
       ims, cms = parse_objc_spec(decl, dnm, clang.CXCursor_ObjCInstanceMethodDecl), parse_objc_spec(decl, dnm, clang.CXCursor_ObjCClassMethodDecl)
       lines.extend([*([f"{dnm}._bases_ = [{', '.join(bases)}]"] if bases else []),
                     *([f"{dnm}._methods_ = [", *ims, "]"] if ims else []), *([f"{dnm}._classmethods_ = [", *cms, "]"] if cms else [])])
@@ -238,7 +238,11 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
               _args = [nm(t) for t in itertools.takewhile(lambda t:nm(t)!=')', it) if clang.clang_getTokenKind(t) == clang.CXToken_Identifier]
               if len(body:=list(it)) == 0: continue
               macros += [f"{nm(c)} = lambda{' ' * bool(_args)}{','.join(_args)}: {readext(f,loc(body[0]),clang.clang_getRangeEnd(extent(toks[-1])))}"]
-            else: macros += [f"{nm(c)} = {readext(f, loc(toks[1]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
+            else:
+              if name == "vfio" and nm(toks[1]) == "_IO":
+                macros += [f"{nm(c)} = _IO_NOSZ{readext(f, loc(toks[2]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
+              else:
+                macros += [f"{nm(c)} = {readext(f, loc(toks[1]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_Internal:
             ty = clang.clang_getCursorType(c)
             if (ty.kind == clang.CXType_ConstantArray and clang.clang_getCanonicalType(clang.clang_getArrayElementType(ty)).kind in ints and
@@ -250,14 +254,15 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
             else: macros += [f"{nm(c)} = {tname(ty)}({readext(f, extent(children(c)[-1]))})"]
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
             lines.append(f"try: {nm(c)} = {tname(clang.clang_getCursorType(c))}.in_dll(dll, '{nm(c)}')\nexcept (ValueError,AttributeError): pass")
-          case clang.CXCursor_ObjCProtocolDecl: proto(c)
+          case clang.CXCursor_ObjCProtocolDecl: proto(name, c)
           case clang.CXCursor_Namespace | clang.CXCursor_LinkageSpec: q.extend(list(children(c))[::-1])
       except NotImplementedError as e:
         print(f"skipping {nm(c)}: {e}")
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = '\n'.join(["# mypy: ignore-errors", "import ctypes", "from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR",
+  main = '\n'.join(["# mypy: ignore-errors", "import ctypes",
+                    "from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR, _IO_NOSZ",
                     *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
   macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]

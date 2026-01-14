@@ -39,7 +39,6 @@ class _System:
     try:
       if not FileIOInterface.exists("/sys/module/vfio"): os.system("sudo modprobe vfio-pci disable_idle_d3=1")
 
-      FileIOInterface("/sys/module/vfio/parameters/enable_unsafe_noiommu_mode", os.O_RDWR).write("1")
       vfio_fd = FileIOInterface("/dev/vfio/vfio", os.O_RDWR)
       vfio.VFIO_CHECK_EXTENSION(vfio_fd, vfio.VFIO_NOIOMMU_IOMMU)
 
@@ -76,6 +75,8 @@ class _System:
     if libc.mlock(ctypes.c_void_p(addr), size): raise RuntimeError(f"Failed to lock memory at {addr:#x} with size {size:#x}")
 
   def system_paddrs(self, vaddr:int, size:int) -> list[int]:
+    try: open
+    except NameError: return []
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
@@ -89,9 +90,28 @@ class _System:
       flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
       va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
       sysmem_view, paddrs = MMIOInterface(va, size), [(x, mmap.PAGESIZE) for x in self.system_paddrs(va, size)]
+      if getenv("VFIO", 0) and (vfio_fd:=System.vfio) is not None:
+        accsiz = 0
+        for pa in paddrs:
+          dma_map = vfio.struct_vfio_iommu_type1_dma_map(vaddr=va+accsiz, iova=pa[0], size=pa[1],
+            flags=vfio.VFIO_DMA_MAP_FLAG_READ|vfio.VFIO_DMA_MAP_FLAG_WRITE, argsz=ctypes.sizeof(vfio.struct_vfio_iommu_type1_dma_map))
+          vfio.VFIO_IOMMU_MAP_DMA(vfio_fd, dma_map)
+          accsiz += pa[1]
 
     if data is not None: sysmem_view[:len(data)] = data
     return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
+
+  def free_sysmem(self, size:int, vaddr:int=0):
+    if not OSX:
+      if getenv("VFIO", 0) and (vfio_fd:=System.vfio) is not None:
+        paddrs = [(x, mmap.PAGESIZE) for x in self.system_paddrs(vaddr, size)]
+        accsiz = 0
+        for pa in paddrs:
+          dma_unmap = vfio.struct_vfio_iommu_type1_dma_unmap(vaddr=vaddr + accsiz, iova=pa[0], size=pa[1],
+            flags=0, argsz=ctypes.sizeof(vfio.struct_vfio_iommu_type1_dma_unmap))
+          vfio.VFIO_IOMMU_UNMAP_DMA(vfio_fd, dma_unmap)
+          accsiz += pa[1]
+      FileIOInterface.munmap(vaddr, size)
 
   def pci_scan_bus(self, target_vendor:int, target_devices:list[tuple[int, list[int]]], base_class:int|None=None) -> list[str]:
     result = []
@@ -185,36 +205,78 @@ class PCIDevice:
         except OSError as e: raise RuntimeError(f"Cannot resize BAR {i}: {e}. Ensure the resizable BAR option is enabled.") from e
 
     if getenv("VFIO", 0) and (vfio_fd:=System.vfio) is not None:
+      iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
+      for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
+        group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{pcibus}/iommu_group").split('/')[-1]
+        unbind_path = f"/sys/bus/pci/devices/{pcibus}/driver/unbind"
+        if iommu_group == group and os.path.exists(unbind_path):
+          FileIOInterface(unbind_path, os.O_WRONLY).write(pcibus)
+
       FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/driver_override", os.O_WRONLY).write("vfio-pci")
       FileIOInterface("/sys/bus/pci/drivers_probe", os.O_WRONLY).write(self.pcibus)
-      iommu_group = FileIOInterface.readlink(f"/sys/bus/pci/devices/{self.pcibus}/iommu_group").split('/')[-1]
 
-      self.vfio_group = FileIOInterface(f"/dev/vfio/noiommu-{iommu_group}", os.O_RDWR)
+      self.vfio_group = FileIOInterface(f"/dev/vfio/{iommu_group}", os.O_RDWR)
       vfio.VFIO_GROUP_SET_CONTAINER(self.vfio_group, ctypes.c_int(vfio_fd.fd))
 
-      with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_NOIOMMU_IOMMU) # set iommu works only once for the fd.
+      with contextlib.suppress(OSError): vfio.VFIO_SET_IOMMU(vfio_fd, vfio.VFIO_TYPE1_IOMMU) # set iommu works only once for the fd.
       self.vfio_dev = FileIOInterface(fd=vfio.VFIO_GROUP_GET_DEVICE_FD(self.vfio_group, ctypes.create_string_buffer(self.pcibus.encode())))
 
       self.irq_fd = FileIOInterface.eventfd(0, 0)
       self.irq_poller = select.poll()
       self.irq_poller.register(self.irq_fd.fd, select.POLLIN)
 
-      irqs = vfio.struct_vfio_irq_set(index=vfio.VFIO_PCI_MSI_IRQ_INDEX, flags=vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER,
-        argsz=ctypes.sizeof(vfio.struct_vfio_irq_set), count=1, data=(ctypes.c_int * 1)(self.irq_fd.fd))
+      irqs_sz = ctypes.sizeof(vfio.struct_vfio_irq_set) + ctypes.sizeof(ctypes.c_int)
+      irqs = (ctypes.c_uint8 * irqs_sz)()
+      irqs_h = vfio.struct_vfio_irq_set.from_buffer(irqs)
+      irqs_h.index = vfio.VFIO_PCI_MSI_IRQ_INDEX
+      irqs_h.flags = vfio.VFIO_IRQ_SET_DATA_EVENTFD|vfio.VFIO_IRQ_SET_ACTION_TRIGGER
+      irqs_h.argsz = irqs_sz
+      irqs_h.count = 1
+      ctypes.memmove(ctypes.addressof(irqs) + irqs_sz - ctypes.sizeof(ctypes.c_int),
+        self.irq_fd.fd.to_bytes(), ctypes.sizeof(ctypes.c_int))
       vfio.VFIO_DEVICE_SET_IRQS(self.vfio_dev, irqs)
-    else: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
 
-    self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
-    self.bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{b}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for b in bars}
+      self.cfg_fd = self.vfio_dev
+      region = vfio.struct_vfio_region_info(index=vfio.VFIO_PCI_CONFIG_REGION_INDEX,
+        argsz=ctypes.sizeof(vfio.struct_vfio_region_info))
+      vfio.VFIO_DEVICE_GET_REGION_INFO(self.cfg_fd, region)
+      self.cfg_fd_reg = region
+
+      self.bar_fds = {}
+      self.bar_fds_reg = {}
+      for b in bars:
+        self.bar_fds[b] = self.vfio_dev
+        region = vfio.struct_vfio_region_info(index=b,
+          argsz=ctypes.sizeof(vfio.struct_vfio_region_info))
+        vfio.VFIO_DEVICE_GET_REGION_INFO(self.bar_fds[b], region)
+        self.bar_fds_reg[b] = region
+    else:
+      FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/enable", os.O_RDWR).write("1")
+
+      self.cfg_fd = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/config", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC)
+      self.bar_fds = {b: FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource{b}", os.O_RDWR | os.O_SYNC | os.O_CLOEXEC) for b in bars}
 
     res = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:PCIBarInfo(int(s,16), int(e,16)-int(s,16)+1) for j,(s,e,_) in enumerate(l.split() for l in res)}
 
-  def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
-  def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
+  def read_config(self, offset:int, size:int):
+    if getenv("VFIO", 0) and System.vfio is not None:
+      return int.from_bytes(self.cfg_fd.pread(size, binary=True, offset=self.cfg_fd_reg.offset + offset), byteorder='little')
+    else:
+      return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
+  def write_config(self, offset:int, value:int, size:int):
+    if getenv("VFIO", 0) and System.vfio is not None:
+      self.cfg_fd.pwrite(value.to_bytes(size, byteorder='little'), binary=True, offset=self.cfg_fd_reg.offset + offset)
+    else:
+      self.cfg_fd.pwrite(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     fd, sz = self.bar_fds[bar], size or (self.bar_info[bar].size - off)
-    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
+    if getenv("VFIO", 0) and System.vfio is not None:
+      offset = self.bar_fds_reg[bar].offset + off
+    else:
+      offset = off
+    libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), offset),
+      sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
   def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
 
@@ -272,7 +334,8 @@ class LNXPCIIfaceBase:
   def free(self, b:HCQBuffer):
     for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
     if b.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(b.meta.mapping)
-    if b.owner == self.dev and b.meta.has_cpu_mapping and not OSX: FileIOInterface.munmap(b.va_addr, b.size)
+    if b.owner == self.dev and b.meta.has_cpu_mapping:
+      System.free_sysmem(b.size, cast(int, b.va_addr))
 
   def map(self, b:HCQBuffer):
     if b.owner is not None and b.owner._is_cpu():
