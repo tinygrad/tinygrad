@@ -836,10 +836,10 @@ nir_block: TypeAlias = struct_nir_block
 @c.record
 class struct_set(c.Struct):
   SIZE = 72
-  mem_ctx: Annotated[c.POINTER[None], 0]
+  mem_ctx: Annotated[ctypes.c_void_p, 0]
   table: Annotated[c.POINTER[struct_set_entry], 8]
-  key_hash_function: Annotated[c.CFUNCTYPE[uint32_t, [c.POINTER[None]]], 16]
-  key_equals_function: Annotated[c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[None], c.POINTER[None]]], 24]
+  key_hash_function: Annotated[c.CFUNCTYPE[uint32_t, [ctypes.c_void_p]], 16]
+  key_equals_function: Annotated[c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [ctypes.c_void_p, ctypes.c_void_p]], 24]
   size: Annotated[uint32_t, 32]
   rehash: Annotated[uint32_t, 36]
   size_magic: Annotated[uint64_t, 40]
@@ -852,7 +852,7 @@ class struct_set(c.Struct):
 class struct_set_entry(c.Struct):
   SIZE = 16
   hash: Annotated[uint32_t, 0]
-  key: Annotated[c.POINTER[None], 8]
+  key: Annotated[ctypes.c_void_p, 8]
 nir_instr: TypeAlias = struct_nir_instr
 @c.record
 class struct_nir_def(c.Struct):
@@ -1608,7 +1608,7 @@ class struct_nir_shader(c.Struct):
   num_outputs: Annotated[Annotated[int, ctypes.c_uint32], 456]
   global_mem_size: Annotated[Annotated[int, ctypes.c_uint32], 460]
   scratch_size: Annotated[Annotated[int, ctypes.c_uint32], 464]
-  constant_data: Annotated[c.POINTER[None], 472]
+  constant_data: Annotated[ctypes.c_void_p, 472]
   constant_data_size: Annotated[Annotated[int, ctypes.c_uint32], 480]
   xfb_info: Annotated[c.POINTER[nir_xfb_info], 488]
   printf_info_count: Annotated[Annotated[int, ctypes.c_uint32], 496]
@@ -1795,7 +1795,7 @@ class struct_nir_shader_compiler_options(c.Struct):
   varying_estimate_instr_cost: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_uint32], [c.POINTER[struct_nir_instr]]], 232]
   max_varying_expression_cost: Annotated[Annotated[int, ctypes.c_uint32], 240]
 nir_shader_compiler_options: TypeAlias = struct_nir_shader_compiler_options
-nir_instr_filter_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_instr], c.POINTER[None]]]
+nir_instr_filter_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
 class nir_lower_int64_options(Annotated[int, ctypes.c_uint32], c.Enum): pass
 nir_lower_imul64 = nir_lower_int64_options.define('nir_lower_imul64', 1)
 nir_lower_isign64 = nir_lower_int64_options.define('nir_lower_isign64', 2)
@@ -3274,9 +3274,9 @@ class struct_nir_loop_info(c.Struct):
 class struct_hash_table(c.Struct):
   SIZE = 72
   table: Annotated[c.POINTER[struct_hash_entry], 0]
-  key_hash_function: Annotated[c.CFUNCTYPE[uint32_t, [c.POINTER[None]]], 8]
-  key_equals_function: Annotated[c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[None], c.POINTER[None]]], 16]
-  deleted_key: Annotated[c.POINTER[None], 24]
+  key_hash_function: Annotated[c.CFUNCTYPE[uint32_t, [ctypes.c_void_p]], 8]
+  key_equals_function: Annotated[c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [ctypes.c_void_p, ctypes.c_void_p]], 16]
+  deleted_key: Annotated[ctypes.c_void_p, 24]
   size: Annotated[uint32_t, 32]
   rehash: Annotated[uint32_t, 36]
   size_magic: Annotated[uint64_t, 40]
@@ -3289,8 +3289,8 @@ class struct_hash_table(c.Struct):
 class struct_hash_entry(c.Struct):
   SIZE = 24
   hash: Annotated[uint32_t, 0]
-  key: Annotated[c.POINTER[None], 8]
-  data: Annotated[c.POINTER[None], 16]
+  key: Annotated[ctypes.c_void_p, 8]
+  data: Annotated[ctypes.c_void_p, 16]
 nir_loop_info: TypeAlias = struct_nir_loop_info
 class nir_loop_control(Annotated[int, ctypes.c_uint32], c.Enum): pass
 nir_loop_control_none = nir_loop_control.define('nir_loop_control_none', 0)
@@ -3309,8 +3309,8 @@ class struct_nir_loop(c.Struct):
   divergent_continue: Annotated[Annotated[bool, ctypes.c_bool], 109]
   divergent_break: Annotated[Annotated[bool, ctypes.c_bool], 110]
 nir_loop: TypeAlias = struct_nir_loop
-nir_intrin_filter_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None]]]
-nir_vectorize_cb: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_ubyte], [c.POINTER[struct_nir_instr], c.POINTER[None]]]
+nir_intrin_filter_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
+nir_vectorize_cb: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_ubyte], [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
 @dll.bind
 def nir_remove_non_entrypoints(shader:c.POINTER[nir_shader]) -> None: ...
 @dll.bind
@@ -3321,7 +3321,7 @@ def nir_remove_entrypoints(shader:c.POINTER[nir_shader]) -> None: ...
 def nir_fixup_is_exported(shader:c.POINTER[nir_shader]) -> None: ...
 shader_info: TypeAlias = struct_shader_info
 @dll.bind
-def nir_shader_create(mem_ctx:c.POINTER[None], stage:gl_shader_stage, options:c.POINTER[nir_shader_compiler_options], si:c.POINTER[shader_info]) -> c.POINTER[nir_shader]: ...
+def nir_shader_create(mem_ctx:ctypes.c_void_p, stage:gl_shader_stage, options:c.POINTER[nir_shader_compiler_options], si:c.POINTER[shader_info]) -> c.POINTER[nir_shader]: ...
 @dll.bind
 def nir_shader_add_variable(shader:c.POINTER[nir_shader], var:c.POINTER[nir_variable]) -> None: ...
 @dll.bind
@@ -3419,10 +3419,10 @@ def nir_instr_free_list(list:c.POINTER[struct_exec_list]) -> None: ...
 def nir_instr_free_and_dce(instr:c.POINTER[nir_instr]) -> nir_cursor: ...
 @dll.bind
 def nir_instr_def(instr:c.POINTER[nir_instr]) -> c.POINTER[nir_def]: ...
-nir_foreach_def_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_def], c.POINTER[None]]]
-nir_foreach_src_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_src], c.POINTER[None]]]
+nir_foreach_def_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_def], ctypes.c_void_p]]
+nir_foreach_src_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_src], ctypes.c_void_p]]
 @dll.bind
-def nir_foreach_phi_src_leaving_block(instr:c.POINTER[nir_block], cb:nir_foreach_src_cb, state:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_foreach_phi_src_leaving_block(instr:c.POINTER[nir_block], cb:nir_foreach_src_cb, state:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_src_as_const_value(src:nir_src) -> c.POINTER[nir_const_value]: ...
 @dll.bind
@@ -3482,7 +3482,7 @@ def nir_block_get_following_if(block:c.POINTER[nir_block]) -> c.POINTER[nir_if]:
 @dll.bind
 def nir_block_get_following_loop(block:c.POINTER[nir_block]) -> c.POINTER[nir_loop]: ...
 @dll.bind
-def nir_block_get_predecessors_sorted(block:c.POINTER[nir_block], mem_ctx:c.POINTER[None]) -> c.POINTER[c.POINTER[nir_block]]: ...
+def nir_block_get_predecessors_sorted(block:c.POINTER[nir_block], mem_ctx:ctypes.c_void_p) -> c.POINTER[c.POINTER[nir_block]]: ...
 @dll.bind
 def nir_index_ssa_defs(impl:c.POINTER[nir_function_impl]) -> None: ...
 @dll.bind
@@ -3523,7 +3523,7 @@ class struct__IO_FILE(c.Struct):
   _codecvt: Annotated[c.POINTER[struct__IO_codecvt], 152]
   _wide_data: Annotated[c.POINTER[struct__IO_wide_data], 160]
   _freeres_list: Annotated[c.POINTER[struct__IO_FILE], 168]
-  _freeres_buf: Annotated[c.POINTER[None], 176]
+  _freeres_buf: Annotated[ctypes.c_void_p, 176]
   __pad5: Annotated[size_t, 184]
   _mode: Annotated[Annotated[int, ctypes.c_int32], 192]
   _unused2: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[20]], 196]
@@ -3554,11 +3554,11 @@ MESA_LOG_DEBUG = enum_mesa_log_level.define('MESA_LOG_DEBUG', 3)
 @dll.bind
 def nir_log_shader_annotated_tagged(level:enum_mesa_log_level, tag:c.POINTER[Annotated[bytes, ctypes.c_char]], shader:c.POINTER[nir_shader], annotations:c.POINTER[struct_hash_table]) -> None: ...
 @dll.bind
-def nir_shader_as_str(nir:c.POINTER[nir_shader], mem_ctx:c.POINTER[None]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def nir_shader_as_str(nir:c.POINTER[nir_shader], mem_ctx:ctypes.c_void_p) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
-def nir_shader_as_str_annotated(nir:c.POINTER[nir_shader], annotations:c.POINTER[struct_hash_table], mem_ctx:c.POINTER[None]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def nir_shader_as_str_annotated(nir:c.POINTER[nir_shader], annotations:c.POINTER[struct_hash_table], mem_ctx:ctypes.c_void_p) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
-def nir_instr_as_str(instr:c.POINTER[nir_instr], mem_ctx:c.POINTER[None]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def nir_instr_as_str(instr:c.POINTER[nir_instr], mem_ctx:ctypes.c_void_p) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
 def nir_shader_gather_debug_info(shader:c.POINTER[nir_shader], filename:c.POINTER[Annotated[bytes, ctypes.c_char]], first_line:uint32_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
@@ -3568,7 +3568,7 @@ def nir_instr_clone_deep(s:c.POINTER[nir_shader], orig:c.POINTER[nir_instr], rem
 @dll.bind
 def nir_alu_instr_clone(s:c.POINTER[nir_shader], orig:c.POINTER[nir_alu_instr]) -> c.POINTER[nir_alu_instr]: ...
 @dll.bind
-def nir_shader_clone(mem_ctx:c.POINTER[None], s:c.POINTER[nir_shader]) -> c.POINTER[nir_shader]: ...
+def nir_shader_clone(mem_ctx:ctypes.c_void_p, s:c.POINTER[nir_shader]) -> c.POINTER[nir_shader]: ...
 @dll.bind
 def nir_function_clone(ns:c.POINTER[nir_shader], fxn:c.POINTER[nir_function]) -> c.POINTER[nir_function]: ...
 @dll.bind
@@ -3593,7 +3593,7 @@ def nir_metadata_set_validation_flag(shader:c.POINTER[nir_shader]) -> None: ...
 def nir_metadata_check_validation_flag(shader:c.POINTER[nir_shader]) -> None: ...
 @dll.bind
 def nir_metadata_require_all(shader:c.POINTER[nir_shader]) -> None: ...
-nir_instr_writemask_filter_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_instr], Annotated[int, ctypes.c_uint32], c.POINTER[None]]]
+nir_instr_writemask_filter_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_instr], Annotated[int, ctypes.c_uint32], ctypes.c_void_p]]
 @c.record
 class struct_nir_builder(c.Struct):
   SIZE = 40
@@ -3602,11 +3602,11 @@ class struct_nir_builder(c.Struct):
   fp_fast_math: Annotated[uint32_t, 20]
   shader: Annotated[c.POINTER[nir_shader], 24]
   impl: Annotated[c.POINTER[nir_function_impl], 32]
-nir_lower_instr_cb: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_nir_def], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], c.POINTER[None]]]
+nir_lower_instr_cb: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_nir_def], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], ctypes.c_void_p]]
 @dll.bind
-def nir_function_impl_lower_instructions(impl:c.POINTER[nir_function_impl], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_function_impl_lower_instructions(impl:c.POINTER[nir_function_impl], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_shader_lower_instructions(shader:c.POINTER[nir_shader], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_shader_lower_instructions(shader:c.POINTER[nir_shader], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_calc_dominance_impl(impl:c.POINTER[nir_function_impl]) -> None: ...
 @dll.bind
@@ -3898,7 +3898,7 @@ def nir_lower_io_indirect_loads(nir:c.POINTER[nir_shader], modes:nir_variable_mo
 @dll.bind
 def nir_lower_vars_to_explicit_types(shader:c.POINTER[nir_shader], modes:nir_variable_mode, type_info:glsl_type_size_align_func) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_gather_explicit_io_initializers(shader:c.POINTER[nir_shader], dst:c.POINTER[None], dst_size:size_t, mode:nir_variable_mode) -> None: ...
+def nir_gather_explicit_io_initializers(shader:c.POINTER[nir_shader], dst:ctypes.c_void_p, dst_size:size_t, mode:nir_variable_mode) -> None: ...
 @dll.bind
 def nir_lower_vec3_to_vec4(shader:c.POINTER[nir_shader], modes:nir_variable_mode) -> Annotated[bool, ctypes.c_bool]: ...
 class nir_address_format(Annotated[int, ctypes.c_uint32], c.Enum): pass
@@ -3969,34 +3969,34 @@ ACCESS_IN_BOUNDS = enum_gl_access_qualifier.define('ACCESS_IN_BOUNDS', 16384)
 ACCESS_KEEP_SCALAR = enum_gl_access_qualifier.define('ACCESS_KEEP_SCALAR', 32768)
 ACCESS_SMEM_AMD = enum_gl_access_qualifier.define('ACCESS_SMEM_AMD', 65536)
 
-nir_lower_mem_access_bit_sizes_cb: TypeAlias = c.CFUNCTYPE[struct_nir_mem_access_size_align, [nir_intrinsic_op, Annotated[int, ctypes.c_ubyte], Annotated[int, ctypes.c_ubyte], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[bool, ctypes.c_bool], enum_gl_access_qualifier, c.POINTER[None]]]
+nir_lower_mem_access_bit_sizes_cb: TypeAlias = c.CFUNCTYPE[struct_nir_mem_access_size_align, [nir_intrinsic_op, Annotated[int, ctypes.c_ubyte], Annotated[int, ctypes.c_ubyte], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[bool, ctypes.c_bool], enum_gl_access_qualifier, ctypes.c_void_p]]
 @c.record
 class struct_nir_lower_mem_access_bit_sizes_options(c.Struct):
   SIZE = 24
   callback: Annotated[nir_lower_mem_access_bit_sizes_cb, 0]
   modes: Annotated[nir_variable_mode, 8]
   may_lower_unaligned_stores_to_atomics: Annotated[Annotated[bool, ctypes.c_bool], 12]
-  cb_data: Annotated[c.POINTER[None], 16]
+  cb_data: Annotated[ctypes.c_void_p, 16]
 nir_lower_mem_access_bit_sizes_options: TypeAlias = struct_nir_lower_mem_access_bit_sizes_options
 @dll.bind
 def nir_lower_mem_access_bit_sizes(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_mem_access_bit_sizes_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_lower_robust_access(s:c.POINTER[nir_shader], filter:nir_intrin_filter_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_should_vectorize_mem_func: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_int64], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None]]]
+def nir_lower_robust_access(s:c.POINTER[nir_shader], filter:nir_intrin_filter_cb, data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
+nir_should_vectorize_mem_func: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_int64], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
 @c.record
 class struct_nir_load_store_vectorize_options(c.Struct):
   SIZE = 32
   callback: Annotated[nir_should_vectorize_mem_func, 0]
   modes: Annotated[nir_variable_mode, 8]
   robust_modes: Annotated[nir_variable_mode, 12]
-  cb_data: Annotated[c.POINTER[None], 16]
+  cb_data: Annotated[ctypes.c_void_p, 16]
   has_shared2_amd: Annotated[Annotated[bool, ctypes.c_bool], 24]
 nir_load_store_vectorize_options: TypeAlias = struct_nir_load_store_vectorize_options
 @dll.bind
 def nir_opt_load_store_vectorize(shader:c.POINTER[nir_shader], options:c.POINTER[nir_load_store_vectorize_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_opt_load_store_update_alignments(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_shader_calls_should_remat_func: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_instr], c.POINTER[None]]]
+nir_lower_shader_calls_should_remat_func: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
 @c.record
 class struct_nir_lower_shader_calls_options(c.Struct):
   SIZE = 48
@@ -4004,12 +4004,12 @@ class struct_nir_lower_shader_calls_options(c.Struct):
   stack_alignment: Annotated[Annotated[int, ctypes.c_uint32], 4]
   localized_loads: Annotated[Annotated[bool, ctypes.c_bool], 8]
   vectorizer_callback: Annotated[nir_should_vectorize_mem_func, 16]
-  vectorizer_data: Annotated[c.POINTER[None], 24]
+  vectorizer_data: Annotated[ctypes.c_void_p, 24]
   should_remat_callback: Annotated[nir_lower_shader_calls_should_remat_func, 32]
-  should_remat_data: Annotated[c.POINTER[None], 40]
+  should_remat_data: Annotated[ctypes.c_void_p, 40]
 nir_lower_shader_calls_options: TypeAlias = struct_nir_lower_shader_calls_options
 @dll.bind
-def nir_lower_shader_calls(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_shader_calls_options], resume_shaders_out:c.POINTER[c.POINTER[c.POINTER[nir_shader]]], num_resume_shaders_out:c.POINTER[uint32_t], mem_ctx:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_shader_calls(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_shader_calls_options], resume_shaders_out:c.POINTER[c.POINTER[c.POINTER[nir_shader]]], num_resume_shaders_out:c.POINTER[uint32_t], mem_ctx:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_get_io_offset_src_number(instr:c.POINTER[nir_intrinsic_instr]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -4041,8 +4041,8 @@ def nir_remove_dead_derefs_impl(impl:c.POINTER[nir_function_impl]) -> Annotated[
 @c.record
 class struct_nir_remove_dead_variables_options(c.Struct):
   SIZE = 16
-  can_remove_var: Annotated[c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[nir_variable], c.POINTER[None]]], 0]
-  can_remove_var_data: Annotated[c.POINTER[None], 8]
+  can_remove_var: Annotated[c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[nir_variable], ctypes.c_void_p]], 0]
+  can_remove_var_data: Annotated[ctypes.c_void_p, 8]
 nir_remove_dead_variables_options: TypeAlias = struct_nir_remove_dead_variables_options
 @dll.bind
 def nir_remove_dead_variables(shader:c.POINTER[nir_shader], modes:nir_variable_mode, options:c.POINTER[nir_remove_dead_variables_options]) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4064,7 +4064,7 @@ def nir_move_vec_src_uses_to_dest(shader:c.POINTER[nir_shader], skip_const_srcs:
 @dll.bind
 def nir_move_output_stores_to_end(nir:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_lower_vec_to_regs(shader:c.POINTER[nir_shader], cb:nir_instr_writemask_filter_cb, _data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_vec_to_regs(shader:c.POINTER[nir_shader], cb:nir_instr_writemask_filter_cb, _data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 class enum_compare_func(Annotated[int, ctypes.c_uint32], c.Enum): pass
 COMPARE_FUNC_NEVER = enum_compare_func.define('COMPARE_FUNC_NEVER', 0)
 COMPARE_FUNC_LESS = enum_compare_func.define('COMPARE_FUNC_LESS', 1)
@@ -4088,9 +4088,9 @@ def nir_lower_flrp(shader:c.POINTER[nir_shader], lowering_mask:Annotated[int, ct
 @dll.bind
 def nir_scale_fdiv(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_lower_alu_to_scalar(shader:c.POINTER[nir_shader], cb:nir_instr_filter_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_alu_to_scalar(shader:c.POINTER[nir_shader], cb:nir_instr_filter_cb, data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_lower_alu_width(shader:c.POINTER[nir_shader], cb:nir_vectorize_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_alu_width(shader:c.POINTER[nir_shader], cb:nir_vectorize_cb, data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_alu_vec8_16_srcs(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4116,7 +4116,7 @@ def nir_lower_load_const_to_scalar(shader:c.POINTER[nir_shader]) -> Annotated[bo
 @dll.bind
 def nir_lower_read_invocation_to_scalar(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_lower_phis_to_scalar(shader:c.POINTER[nir_shader], cb:nir_vectorize_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_phis_to_scalar(shader:c.POINTER[nir_shader], cb:nir_vectorize_cb, data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_all_phis_to_scalar(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4124,7 +4124,7 @@ def nir_lower_io_array_vars_to_elements(producer:c.POINTER[nir_shader], consumer
 @dll.bind
 def nir_lower_io_array_vars_to_elements_no_indirects(shader:c.POINTER[nir_shader], outputs_only:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_lower_io_to_scalar(shader:c.POINTER[nir_shader], mask:nir_variable_mode, filter:nir_instr_filter_cb, filter_data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_io_to_scalar(shader:c.POINTER[nir_shader], mask:nir_variable_mode, filter:nir_instr_filter_cb, filter_data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_io_vars_to_scalar(shader:c.POINTER[nir_shader], mask:nir_variable_mode) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4159,7 +4159,7 @@ def nir_lower_atomics(shader:c.POINTER[nir_shader], filter:nir_instr_filter_cb) 
 class struct_nir_lower_subgroups_options(c.Struct):
   SIZE = 24
   filter: Annotated[nir_instr_filter_cb, 0]
-  filter_data: Annotated[c.POINTER[None], 8]
+  filter_data: Annotated[ctypes.c_void_p, 8]
   subgroup_size: Annotated[uint8_t, 16]
   ballot_bit_size: Annotated[uint8_t, 17]
   ballot_components: Annotated[uint8_t, 18]
@@ -4277,13 +4277,13 @@ class struct_nir_lower_tex_options(c.Struct):
   lower_tg4_broadcom_swizzle: Annotated[Annotated[bool, ctypes.c_bool], 381]
   lower_tg4_offsets: Annotated[Annotated[bool, ctypes.c_bool], 382]
   lower_to_fragment_fetch_amd: Annotated[Annotated[bool, ctypes.c_bool], 383]
-  lower_tex_packing_cb: Annotated[c.CFUNCTYPE[enum_nir_lower_tex_packing, [c.POINTER[nir_tex_instr], c.POINTER[None]]], 384]
-  lower_tex_packing_data: Annotated[c.POINTER[None], 392]
+  lower_tex_packing_cb: Annotated[c.CFUNCTYPE[enum_nir_lower_tex_packing, [c.POINTER[nir_tex_instr], ctypes.c_void_p]], 384]
+  lower_tex_packing_data: Annotated[ctypes.c_void_p, 392]
   lower_lod_zero_width: Annotated[Annotated[bool, ctypes.c_bool], 400]
   lower_sampler_lod_bias: Annotated[Annotated[bool, ctypes.c_bool], 401]
   lower_invalid_implicit_lod: Annotated[Annotated[bool, ctypes.c_bool], 402]
   lower_index_to_offset: Annotated[Annotated[bool, ctypes.c_bool], 403]
-  callback_data: Annotated[c.POINTER[None], 408]
+  callback_data: Annotated[ctypes.c_void_p, 408]
 nir_lower_tex_options: TypeAlias = struct_nir_lower_tex_options
 @dll.bind
 def nir_lower_tex(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_tex_options]) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4307,7 +4307,7 @@ nir_lower_image_options: TypeAlias = struct_nir_lower_image_options
 @dll.bind
 def nir_lower_image(nir:c.POINTER[nir_shader], options:c.POINTER[nir_lower_image_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_lower_image_atomics_to_global(s:c.POINTER[nir_shader], filter:nir_intrin_filter_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_image_atomics_to_global(s:c.POINTER[nir_shader], filter:nir_intrin_filter_cb, data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_readonly_images_to_tex(shader:c.POINTER[nir_shader], per_variable:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
 class enum_nir_lower_non_uniform_access_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
@@ -4319,15 +4319,15 @@ nir_lower_non_uniform_get_ssbo_size = enum_nir_lower_non_uniform_access_type.def
 nir_lower_non_uniform_texture_offset_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_offset_access', 32)
 nir_lower_non_uniform_access_type_count = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_access_type_count', 6)
 
-nir_lower_non_uniform_src_access_callback: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_tex_instr], Annotated[int, ctypes.c_uint32], c.POINTER[None]]]
-nir_lower_non_uniform_access_callback: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_uint16], [c.POINTER[struct_nir_src], c.POINTER[None]]]
+nir_lower_non_uniform_src_access_callback: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_tex_instr], Annotated[int, ctypes.c_uint32], ctypes.c_void_p]]
+nir_lower_non_uniform_access_callback: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_uint16], [c.POINTER[struct_nir_src], ctypes.c_void_p]]
 @c.record
 class struct_nir_lower_non_uniform_access_options(c.Struct):
   SIZE = 32
   types: Annotated[enum_nir_lower_non_uniform_access_type, 0]
   tex_src_callback: Annotated[nir_lower_non_uniform_src_access_callback, 8]
   callback: Annotated[nir_lower_non_uniform_access_callback, 16]
-  callback_data: Annotated[c.POINTER[None], 24]
+  callback_data: Annotated[ctypes.c_void_p, 24]
 nir_lower_non_uniform_access_options: TypeAlias = struct_nir_lower_non_uniform_access_options
 @dll.bind
 def nir_has_non_uniform_access(shader:c.POINTER[nir_shader], types:enum_nir_lower_non_uniform_access_type) -> Annotated[bool, ctypes.c_bool]: ...
@@ -4396,7 +4396,7 @@ def nir_lower_wpos_center(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctype
 @dll.bind
 def nir_lower_pntc_ytransform(shader:c.POINTER[nir_shader], clipplane_state_tokens:c.Array[c.Array[gl_state_index16, Literal[4]], Literal[0]]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_lower_wrmasks(shader:c.POINTER[nir_shader], cb:nir_instr_filter_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_wrmasks(shader:c.POINTER[nir_shader], cb:nir_instr_filter_cb, data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_fb_read(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
@@ -4443,16 +4443,16 @@ class struct_nir_lower_task_shader_options(c.Struct):
 nir_lower_task_shader_options: TypeAlias = struct_nir_lower_task_shader_options
 @dll.bind
 def nir_lower_task_shader(shader:c.POINTER[nir_shader], options:nir_lower_task_shader_options) -> Annotated[bool, ctypes.c_bool]: ...
-nir_lower_bit_size_callback: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_uint32], [c.POINTER[struct_nir_instr], c.POINTER[None]]]
+nir_lower_bit_size_callback: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_uint32], [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
 @dll.bind
-def nir_lower_bit_size(shader:c.POINTER[nir_shader], callback:nir_lower_bit_size_callback, callback_data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_lower_bit_size(shader:c.POINTER[nir_shader], callback:nir_lower_bit_size_callback, callback_data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_lower_64bit_phis(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @c.record
 class struct_nir_split_conversions_options(c.Struct):
   SIZE = 24
   callback: Annotated[nir_lower_bit_size_callback, 0]
-  callback_data: Annotated[c.POINTER[None], 8]
+  callback_data: Annotated[ctypes.c_void_p, 8]
   has_convert_alu_types: Annotated[Annotated[bool, ctypes.c_bool], 16]
 nir_split_conversions_options: TypeAlias = struct_nir_split_conversions_options
 @dll.bind
@@ -4574,7 +4574,7 @@ def nir_shader_supports_implicit_lod(shader:c.POINTER[nir_shader]) -> Annotated[
 @dll.bind
 def nir_live_defs_impl(impl:c.POINTER[nir_function_impl]) -> None: ...
 @dll.bind
-def nir_get_live_defs(cursor:nir_cursor, mem_ctx:c.POINTER[None]) -> c.POINTER[Annotated[int, ctypes.c_uint32]]: ...
+def nir_get_live_defs(cursor:nir_cursor, mem_ctx:ctypes.c_void_p) -> c.POINTER[Annotated[int, ctypes.c_uint32]]: ...
 @dll.bind
 def nir_loop_analyze_impl(impl:c.POINTER[nir_function_impl], indirect_mask:nir_variable_mode, force_unroll_sampler_indirect:Annotated[bool, ctypes.c_bool]) -> None: ...
 @dll.bind
@@ -4661,9 +4661,9 @@ def nir_opt_algebraic_integer_promotion(shader:c.POINTER[nir_shader]) -> Annotat
 def nir_opt_reassociate_matrix_mul(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_opt_constant_folding(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
-nir_combine_barrier_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None]]]
+nir_combine_barrier_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
 @dll.bind
-def nir_opt_combine_barriers(shader:c.POINTER[nir_shader], combine_cb:nir_combine_barrier_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_opt_combine_barriers(shader:c.POINTER[nir_shader], combine_cb:nir_combine_barrier_cb, data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 class mesa_scope(Annotated[int, ctypes.c_uint32], c.Enum): pass
 SCOPE_NONE = mesa_scope.define('SCOPE_NONE', 0)
 SCOPE_INVOCATION = mesa_scope.define('SCOPE_INVOCATION', 1)
@@ -4754,8 +4754,8 @@ class struct_nir_opt_offsets_options(c.Struct):
   shared_max: Annotated[uint32_t, 8]
   shared_atomic_max: Annotated[uint32_t, 12]
   buffer_max: Annotated[uint32_t, 16]
-  max_offset_cb: Annotated[c.CFUNCTYPE[uint32_t, [c.POINTER[nir_intrinsic_instr], c.POINTER[None]]], 24]
-  max_offset_data: Annotated[c.POINTER[None], 32]
+  max_offset_cb: Annotated[c.CFUNCTYPE[uint32_t, [c.POINTER[nir_intrinsic_instr], ctypes.c_void_p]], 24]
+  max_offset_data: Annotated[ctypes.c_void_p, 32]
   allow_offset_wrap: Annotated[Annotated[bool, ctypes.c_bool], 40]
 nir_opt_offsets_options: TypeAlias = struct_nir_opt_offsets_options
 @dll.bind
@@ -4795,7 +4795,7 @@ def nir_opt_uniform_atomics(shader:c.POINTER[nir_shader], fs_atomics_predicated:
 @dll.bind
 def nir_opt_uniform_subgroup(shader:c.POINTER[nir_shader], _1:c.POINTER[nir_lower_subgroups_options]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def nir_opt_vectorize(shader:c.POINTER[nir_shader], filter:nir_vectorize_cb, data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def nir_opt_vectorize(shader:c.POINTER[nir_shader], filter:nir_vectorize_cb, data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_opt_vectorize_io(shader:c.POINTER[nir_shader], modes:nir_variable_mode, allow_holes:Annotated[bool, ctypes.c_bool]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -4936,10 +4936,10 @@ class struct_nir_opt_preamble_options(c.Struct):
   load_workgroup_size_allowed: Annotated[Annotated[bool, ctypes.c_bool], 2]
   def_size: Annotated[c.CFUNCTYPE[None, [c.POINTER[nir_def], c.POINTER[Annotated[int, ctypes.c_uint32]], c.POINTER[Annotated[int, ctypes.c_uint32]], c.POINTER[nir_preamble_class]]], 8]
   preamble_storage_size: Annotated[c.Array[Annotated[int, ctypes.c_uint32], Literal[2]], 16]
-  instr_cost_cb: Annotated[c.CFUNCTYPE[Annotated[float, ctypes.c_float], [c.POINTER[nir_instr], c.POINTER[None]]], 24]
-  rewrite_cost_cb: Annotated[c.CFUNCTYPE[Annotated[float, ctypes.c_float], [c.POINTER[nir_def], c.POINTER[None]]], 32]
+  instr_cost_cb: Annotated[c.CFUNCTYPE[Annotated[float, ctypes.c_float], [c.POINTER[nir_instr], ctypes.c_void_p]], 24]
+  rewrite_cost_cb: Annotated[c.CFUNCTYPE[Annotated[float, ctypes.c_float], [c.POINTER[nir_def], ctypes.c_void_p]], 32]
   avoid_instr_cb: Annotated[nir_instr_filter_cb, 40]
-  cb_data: Annotated[c.POINTER[None], 48]
+  cb_data: Annotated[ctypes.c_void_p, 48]
 nir_opt_preamble_options: TypeAlias = struct_nir_opt_preamble_options
 @dll.bind
 def nir_opt_preamble(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_preamble_options], size:c.POINTER[Annotated[int, ctypes.c_uint32]]) -> Annotated[bool, ctypes.c_bool]: ...
@@ -5007,11 +5007,11 @@ class nir_output_clipper_var_groups(c.Struct):
 def nir_gather_output_clipper_var_groups(nir:c.POINTER[nir_shader], groups:c.POINTER[nir_output_clipper_var_groups]) -> None: ...
 @dll.bind
 def nir_builder_init_simple_shader(stage:gl_shader_stage, options:c.POINTER[nir_shader_compiler_options], name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> nir_builder: ...
-nir_instr_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], c.POINTER[None]]]
-nir_intrinsic_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_intrinsic_instr], c.POINTER[None]]]
-nir_alu_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_alu_instr], c.POINTER[None]]]
-nir_tex_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_tex_instr], c.POINTER[None]]]
-nir_phi_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_phi_instr], c.POINTER[None]]]
+nir_instr_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+nir_intrinsic_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
+nir_alu_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_alu_instr], ctypes.c_void_p]]
+nir_tex_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_tex_instr], ctypes.c_void_p]]
+nir_phi_pass_cb: TypeAlias = c.CFUNCTYPE[Annotated[bool, ctypes.c_bool], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_phi_instr], ctypes.c_void_p]]
 @dll.bind
 def nir_builder_instr_insert(build:c.POINTER[nir_builder], instr:c.POINTER[nir_instr]) -> None: ...
 @dll.bind
@@ -5099,11 +5099,11 @@ class struct_blob_reader(c.Struct):
   current: Annotated[c.POINTER[uint8_t], 16]
   overrun: Annotated[Annotated[bool, ctypes.c_bool], 24]
 @dll.bind
-def nir_deserialize(mem_ctx:c.POINTER[None], options:c.POINTER[struct_nir_shader_compiler_options], blob:c.POINTER[struct_blob_reader]) -> c.POINTER[nir_shader]: ...
+def nir_deserialize(mem_ctx:ctypes.c_void_p, options:c.POINTER[struct_nir_shader_compiler_options], blob:c.POINTER[struct_blob_reader]) -> c.POINTER[nir_shader]: ...
 @dll.bind
 def nir_serialize_function(blob:c.POINTER[struct_blob], fxn:c.POINTER[nir_function]) -> None: ...
 @dll.bind
-def nir_deserialize_function(mem_ctx:c.POINTER[None], options:c.POINTER[struct_nir_shader_compiler_options], blob:c.POINTER[struct_blob_reader]) -> c.POINTER[nir_function]: ...
+def nir_deserialize_function(mem_ctx:ctypes.c_void_p, options:c.POINTER[struct_nir_shader_compiler_options], blob:c.POINTER[struct_blob_reader]) -> c.POINTER[nir_function]: ...
 class nir_intrinsic_index_flag(Annotated[int, ctypes.c_uint32], c.Enum): pass
 NIR_INTRINSIC_BASE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BASE', 0)
 NIR_INTRINSIC_WRITE_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_WRITE_MASK', 1)
@@ -5334,7 +5334,7 @@ class struct_nak_shader_bin(c.Struct):
   SIZE = 752
   info: Annotated[struct_nak_shader_info, 0]
   code_size: Annotated[uint32_t, 728]
-  code: Annotated[c.POINTER[None], 736]
+  code: Annotated[ctypes.c_void_p, 736]
   asm_str: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 744]
 @dll.bind
 def nak_shader_bin_destroy(bin:c.POINTER[struct_nak_shader_bin]) -> None: ...
@@ -5358,7 +5358,7 @@ class struct_nak_qmd_info(c.Struct):
 @dll.bind
 def nak_qmd_size_B(dev:c.POINTER[struct_nv_device_info]) -> uint32_t: ...
 @dll.bind
-def nak_fill_qmd(dev:c.POINTER[struct_nv_device_info], info:c.POINTER[struct_nak_shader_info], qmd_info:c.POINTER[struct_nak_qmd_info], qmd_out:c.POINTER[None], qmd_size:size_t) -> None: ...
+def nak_fill_qmd(dev:c.POINTER[struct_nv_device_info], info:c.POINTER[struct_nak_shader_info], qmd_info:c.POINTER[struct_nak_qmd_info], qmd_out:ctypes.c_void_p, qmd_size:size_t) -> None: ...
 @c.record
 class struct_nak_qmd_dispatch_size_layout(c.Struct):
   SIZE = 12
@@ -5402,10 +5402,10 @@ def lp_passmgr_dispose(mgr:c.POINTER[struct_lp_passmgr]) -> None: ...
 @c.record
 class struct_lp_cached_code(c.Struct):
   SIZE = 32
-  data: Annotated[c.POINTER[None], 0]
+  data: Annotated[ctypes.c_void_p, 0]
   data_size: Annotated[size_t, 8]
   dont_cache: Annotated[Annotated[bool, ctypes.c_bool], 16]
-  jit_obj_cache: Annotated[c.POINTER[None], 24]
+  jit_obj_cache: Annotated[ctypes.c_void_p, 24]
 class struct_lp_generated_code(ctypes.Structure): pass
 class struct_LLVMOpaqueTargetLibraryInfotData(ctypes.Structure): pass
 LLVMTargetLibraryInfoRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetLibraryInfotData]
@@ -5436,7 +5436,7 @@ def lp_get_called_value(call:LLVMValueRef) -> LLVMValueRef: ...
 @dll.bind
 def lp_is_function(v:LLVMValueRef) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def lp_free_objcache(objcache:c.POINTER[None]) -> None: ...
+def lp_free_objcache(objcache:ctypes.c_void_p) -> None: ...
 @dll.bind
 def lp_set_module_stack_alignment_override(M:LLVMModuleRef, align:Annotated[int, ctypes.c_uint32]) -> None: ...
 try: lp_native_vector_width = Annotated[int, ctypes.c_uint32].in_dll(dll, 'lp_native_vector_width')
@@ -5550,13 +5550,13 @@ def lp_build_count_ir_module(module:LLVMModuleRef) -> Annotated[int, ctypes.c_ui
 @c.record
 class struct_lp_jit_texture(c.Struct):
   SIZE = 216
-  base: Annotated[c.POINTER[None], 0]
+  base: Annotated[ctypes.c_void_p, 0]
   width: Annotated[uint32_t, 8]
   height: Annotated[uint16_t, 12]
   depth: Annotated[uint16_t, 14]
   row_stride: Annotated[c.Array[uint32_t, Literal[16]], 0]
   img_stride: Annotated[c.Array[uint32_t, Literal[16]], 64]
-  residency: Annotated[c.POINTER[None], 16]
+  residency: Annotated[ctypes.c_void_p, 16]
   first_level: Annotated[uint8_t, 144]
   last_level: Annotated[uint8_t, 145]
   mip_offsets: Annotated[c.Array[uint32_t, Literal[16]], 148]
@@ -5582,7 +5582,7 @@ def gallivm_free_ir(gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
 @dll.bind
 def gallivm_verify_function(gallivm:c.POINTER[struct_gallivm_state], func:LLVMValueRef) -> None: ...
 @dll.bind
-def gallivm_add_global_mapping(gallivm:c.POINTER[struct_gallivm_state], sym:LLVMValueRef, addr:c.POINTER[None]) -> None: ...
+def gallivm_add_global_mapping(gallivm:c.POINTER[struct_gallivm_state], sym:LLVMValueRef, addr:ctypes.c_void_p) -> None: ...
 @dll.bind
 def gallivm_compile_module(gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
 func_pointer: TypeAlias = c.CFUNCTYPE[None, []]
@@ -6042,7 +6042,7 @@ LP_JIT_SAMPLER_NUM_FIELDS = _anonenum2.define('LP_JIT_SAMPLER_NUM_FIELDS', 4)
 @c.record
 class struct_lp_jit_image(c.Struct):
   SIZE = 48
-  base: Annotated[c.POINTER[None], 0]
+  base: Annotated[ctypes.c_void_p, 0]
   width: Annotated[uint32_t, 8]
   height: Annotated[uint16_t, 12]
   depth: Annotated[uint16_t, 14]
@@ -6050,7 +6050,7 @@ class struct_lp_jit_image(c.Struct):
   sample_stride: Annotated[uint32_t, 20]
   row_stride: Annotated[uint32_t, 24]
   img_stride: Annotated[uint32_t, 28]
-  residency: Annotated[c.POINTER[None], 32]
+  residency: Annotated[ctypes.c_void_p, 32]
   base_offset: Annotated[uint32_t, 40]
 class _anonenum3(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LP_JIT_IMAGE_BASE = _anonenum3.define('LP_JIT_IMAGE_BASE', 0)
@@ -6137,26 +6137,26 @@ PIPE_MAX_TEXTURE_TYPES = enum_pipe_texture_target.define('PIPE_MAX_TEXTURE_TYPES
 @c.record
 class struct_lp_texture_functions(c.Struct):
   SIZE = 296
-  sample_functions: Annotated[c.POINTER[c.POINTER[c.POINTER[None]]], 0]
+  sample_functions: Annotated[c.POINTER[c.POINTER[ctypes.c_void_p]], 0]
   sampler_count: Annotated[uint32_t, 8]
-  fetch_functions: Annotated[c.POINTER[c.POINTER[None]], 16]
-  size_function: Annotated[c.POINTER[None], 24]
-  samples_function: Annotated[c.POINTER[None], 32]
-  image_functions: Annotated[c.POINTER[c.POINTER[None]], 40]
+  fetch_functions: Annotated[c.POINTER[ctypes.c_void_p], 16]
+  size_function: Annotated[ctypes.c_void_p, 24]
+  samples_function: Annotated[ctypes.c_void_p, 32]
+  image_functions: Annotated[c.POINTER[ctypes.c_void_p], 40]
   state: Annotated[struct_lp_texture_handle_state, 48]
   sampled: Annotated[Annotated[bool, ctypes.c_bool], 280]
   storage: Annotated[Annotated[bool, ctypes.c_bool], 281]
-  matrix: Annotated[c.POINTER[None], 288]
+  matrix: Annotated[ctypes.c_void_p, 288]
 @c.record
 class struct_lp_texture_handle(c.Struct):
   SIZE = 16
-  functions: Annotated[c.POINTER[None], 0]
+  functions: Annotated[ctypes.c_void_p, 0]
   sampler_index: Annotated[uint32_t, 8]
 @c.record
 class struct_lp_jit_bindless_texture(c.Struct):
   SIZE = 24
-  base: Annotated[c.POINTER[None], 0]
-  residency: Annotated[c.POINTER[None], 8]
+  base: Annotated[ctypes.c_void_p, 0]
+  residency: Annotated[ctypes.c_void_p, 8]
   sampler_index: Annotated[uint32_t, 16]
 @c.record
 class struct_lp_descriptor(c.Struct):
@@ -6166,7 +6166,7 @@ class struct_lp_descriptor(c.Struct):
   image: Annotated[struct_lp_jit_image, 0]
   buffer: Annotated[struct_lp_jit_buffer, 0]
   accel_struct: Annotated[uint64_t, 0]
-  functions: Annotated[c.POINTER[None], 56]
+  functions: Annotated[ctypes.c_void_p, 56]
 @dll.bind
 def lp_build_flow_skip_begin(ctx:c.POINTER[struct_lp_build_skip_context], gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
 @dll.bind
@@ -6294,9 +6294,9 @@ def lp_build_const_mask_aos_swizzled(gallivm:c.POINTER[struct_gallivm_state], ty
 @dll.bind
 def lp_build_const_string(gallivm:c.POINTER[struct_gallivm_state], str:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
 @dll.bind
-def lp_build_const_func_pointer(gallivm:c.POINTER[struct_gallivm_state], ptr:c.POINTER[None], ret_type:LLVMTypeRef, arg_types:c.POINTER[LLVMTypeRef], num_args:Annotated[int, ctypes.c_uint32], name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+def lp_build_const_func_pointer(gallivm:c.POINTER[struct_gallivm_state], ptr:ctypes.c_void_p, ret_type:LLVMTypeRef, arg_types:c.POINTER[LLVMTypeRef], num_args:Annotated[int, ctypes.c_uint32], name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
 @dll.bind
-def lp_build_const_func_pointer_from_type(gallivm:c.POINTER[struct_gallivm_state], ptr:c.POINTER[None], function_type:LLVMTypeRef, name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
+def lp_build_const_func_pointer_from_type(gallivm:c.POINTER[struct_gallivm_state], ptr:ctypes.c_void_p, function_type:LLVMTypeRef, name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMValueRef: ...
 @c.record
 class struct_fd_dev_info(c.Struct):
   SIZE = 764
@@ -6593,7 +6593,7 @@ class struct_ir3_shader_variant(c.Struct):
   type: Annotated[gl_shader_stage, 136]
   compiler: Annotated[c.POINTER[struct_ir3_compiler], 144]
   name: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 152]
-  constant_data: Annotated[c.POINTER[None], 160]
+  constant_data: Annotated[ctypes.c_void_p, 160]
   disasm_info: Annotated[struct_ir3_disasm_info, 168]
   bin: Annotated[c.POINTER[uint32_t], 192]
   const_state: Annotated[c.POINTER[struct_ir3_const_state], 200]
@@ -6672,7 +6672,7 @@ class struct_ir3_shader_variant(c.Struct):
   vtxid_base: Annotated[uint32_t, 1500]
   stream_output: Annotated[struct_ir3_stream_output_info, 1504]
 @dll.bind
-def ir3_retrieve_variant(blob:c.POINTER[struct_blob_reader], compiler:c.POINTER[struct_ir3_compiler], mem_ctx:c.POINTER[None]) -> c.POINTER[struct_ir3_shader_variant]: ...
+def ir3_retrieve_variant(blob:c.POINTER[struct_blob_reader], compiler:c.POINTER[struct_ir3_compiler], mem_ctx:ctypes.c_void_p) -> c.POINTER[struct_ir3_shader_variant]: ...
 @dll.bind
 def ir3_store_variant(blob:c.POINTER[struct_blob], v:c.POINTER[struct_ir3_shader_variant]) -> None: ...
 @dll.bind
@@ -7294,7 +7294,7 @@ class struct_ir3_instruction(c.Struct):
   push_consts: Annotated[struct_ir3_instruction_push_consts, 48]
   raw: Annotated[struct_ir3_instruction_raw, 48]
   ip: Annotated[uint32_t, 80]
-  data: Annotated[c.POINTER[None], 88]
+  data: Annotated[ctypes.c_void_p, 88]
   uses: Annotated[c.POINTER[struct_set], 96]
   use_count: Annotated[Annotated[int, ctypes.c_int32], 104]
   address: Annotated[c.POINTER[struct_ir3_register], 112]
@@ -7332,7 +7332,7 @@ class struct_ir3_block(c.Struct):
   keeps_count: Annotated[Annotated[int, ctypes.c_uint32], 128]
   keeps_sz: Annotated[Annotated[int, ctypes.c_uint32], 132]
   keeps: Annotated[c.POINTER[c.POINTER[struct_ir3_instruction]], 136]
-  data: Annotated[c.POINTER[None], 144]
+  data: Annotated[ctypes.c_void_p, 144]
   index: Annotated[uint32_t, 152]
   imm_dom: Annotated[c.POINTER[struct_ir3_block], 160]
   dom_children_count: Annotated[Annotated[int, ctypes.c_uint32], 168]
@@ -7542,7 +7542,7 @@ class struct_ir3_instruction_end(c.Struct):
 @c.record
 class struct_ir3_instruction_phi(c.Struct):
   SIZE = 16
-  nphi: Annotated[c.POINTER[None], 0]
+  nphi: Annotated[ctypes.c_void_p, 0]
   comp: Annotated[Annotated[int, ctypes.c_uint32], 8]
 @c.record
 class struct_ir3_instruction_prefetch(c.Struct):
@@ -7716,7 +7716,7 @@ def ir3_const_find_imm(v:c.POINTER[struct_ir3_shader_variant], imm:uint32_t) -> 
 @dll.bind
 def ir3_const_add_imm(v:c.POINTER[struct_ir3_shader_variant], imm:uint32_t) -> uint16_t: ...
 @dll.bind
-def ir3_shader_assemble(v:c.POINTER[struct_ir3_shader_variant]) -> c.POINTER[None]: ...
+def ir3_shader_assemble(v:c.POINTER[struct_ir3_shader_variant]) -> ctypes.c_void_p: ...
 @dll.bind
 def ir3_shader_create_variant(shader:c.POINTER[struct_ir3_shader], key:c.POINTER[struct_ir3_shader_key], keep_ir:Annotated[bool, ctypes.c_bool]) -> c.POINTER[struct_ir3_shader_variant]: ...
 @dll.bind
@@ -7798,7 +7798,7 @@ def ir3_nir_lower_gs(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_b
 @dll.bind
 def ir3_supports_vectorized_nir_op(op:nir_op) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def ir3_nir_vectorize_filter(instr:c.POINTER[nir_instr], data:c.POINTER[None]) -> uint8_t: ...
+def ir3_nir_vectorize_filter(instr:c.POINTER[nir_instr], data:ctypes.c_void_p) -> uint8_t: ...
 @dll.bind
 def ir3_nir_lower_64b_intrinsics(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -7808,7 +7808,7 @@ def ir3_nir_lower_64b_global(shader:c.POINTER[nir_shader]) -> Annotated[bool, ct
 @dll.bind
 def ir3_nir_lower_64b_regs(shader:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def ir3_mem_access_size_align(intrin:nir_intrinsic_op, bytes:uint8_t, bit_size:uint8_t, align:uint32_t, align_offset:uint32_t, offset_is_const:Annotated[bool, ctypes.c_bool], access:enum_gl_access_qualifier, cb_data:c.POINTER[None]) -> nir_mem_access_size_align: ...
+def ir3_mem_access_size_align(intrin:nir_intrinsic_op, bytes:uint8_t, bit_size:uint8_t, align:uint32_t, align_offset:uint32_t, offset_is_const:Annotated[bool, ctypes.c_bool], access:enum_gl_access_qualifier, cb_data:ctypes.c_void_p) -> nir_mem_access_size_align: ...
 @dll.bind
 def ir3_nir_opt_branch_and_or_not(nir:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -7858,7 +7858,7 @@ def ir3_nir_lower_preamble(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_sha
 @dll.bind
 def ir3_nir_try_propagate_bit_shift(b:c.POINTER[nir_builder], offset:c.POINTER[nir_def], shift:int32_t) -> c.POINTER[nir_def]: ...
 @dll.bind
-def ir3_nir_lower_subgroups_filter(instr:c.POINTER[nir_instr], data:c.POINTER[None]) -> Annotated[bool, ctypes.c_bool]: ...
+def ir3_nir_lower_subgroups_filter(instr:c.POINTER[nir_instr], data:ctypes.c_void_p) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def ir3_nir_lower_shuffle(nir:c.POINTER[nir_shader], shader:c.POINTER[struct_ir3_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -7889,7 +7889,7 @@ class struct_driver_param_info(c.Struct):
 @dll.bind
 def ir3_get_driver_param_info(shader:c.POINTER[nir_shader], intr:c.POINTER[nir_intrinsic_instr], param_info:c.POINTER[struct_driver_param_info]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def ir3_nir_max_imm_offset(intrin:c.POINTER[nir_intrinsic_instr], data:c.POINTER[None]) -> uint32_t: ...
+def ir3_nir_max_imm_offset(intrin:c.POINTER[nir_intrinsic_instr], data:ctypes.c_void_p) -> uint32_t: ...
 @dll.bind
 def ir3_nir_intrinsic_barycentric_sysval(intr:c.POINTER[nir_intrinsic_instr]) -> gl_system_value: ...
 @dll.bind
@@ -8130,13 +8130,13 @@ def glsl_get_vec4_size_align_bytes(type:c.POINTER[glsl_type], size:c.POINTER[Ann
 @dll.bind
 def blob_init(blob:c.POINTER[struct_blob]) -> None: ...
 @dll.bind
-def blob_init_fixed(blob:c.POINTER[struct_blob], data:c.POINTER[None], size:size_t) -> None: ...
+def blob_init_fixed(blob:c.POINTER[struct_blob], data:ctypes.c_void_p, size:size_t) -> None: ...
 @dll.bind
-def blob_finish_get_buffer(blob:c.POINTER[struct_blob], buffer:c.POINTER[c.POINTER[None]], size:c.POINTER[size_t]) -> None: ...
+def blob_finish_get_buffer(blob:c.POINTER[struct_blob], buffer:c.POINTER[ctypes.c_void_p], size:c.POINTER[size_t]) -> None: ...
 @dll.bind
 def blob_align(blob:c.POINTER[struct_blob], alignment:size_t) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def blob_write_bytes(blob:c.POINTER[struct_blob], bytes:c.POINTER[None], to_write:size_t) -> Annotated[bool, ctypes.c_bool]: ...
+def blob_write_bytes(blob:c.POINTER[struct_blob], bytes:ctypes.c_void_p, to_write:size_t) -> Annotated[bool, ctypes.c_bool]: ...
 intptr_t: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
 def blob_reserve_bytes(blob:c.POINTER[struct_blob], to_write:size_t) -> intptr_t: ...
@@ -8145,7 +8145,7 @@ def blob_reserve_uint32(blob:c.POINTER[struct_blob]) -> intptr_t: ...
 @dll.bind
 def blob_reserve_intptr(blob:c.POINTER[struct_blob]) -> intptr_t: ...
 @dll.bind
-def blob_overwrite_bytes(blob:c.POINTER[struct_blob], offset:size_t, bytes:c.POINTER[None], to_write:size_t) -> Annotated[bool, ctypes.c_bool]: ...
+def blob_overwrite_bytes(blob:c.POINTER[struct_blob], offset:size_t, bytes:ctypes.c_void_p, to_write:size_t) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def blob_write_uint8(blob:c.POINTER[struct_blob], value:uint8_t) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -8165,13 +8165,13 @@ def blob_overwrite_intptr(blob:c.POINTER[struct_blob], offset:size_t, value:intp
 @dll.bind
 def blob_write_string(blob:c.POINTER[struct_blob], str:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def blob_reader_init(blob:c.POINTER[struct_blob_reader], data:c.POINTER[None], size:size_t) -> None: ...
+def blob_reader_init(blob:c.POINTER[struct_blob_reader], data:ctypes.c_void_p, size:size_t) -> None: ...
 @dll.bind
 def blob_reader_align(blob:c.POINTER[struct_blob_reader], alignment:size_t) -> None: ...
 @dll.bind
-def blob_read_bytes(blob:c.POINTER[struct_blob_reader], size:size_t) -> c.POINTER[None]: ...
+def blob_read_bytes(blob:c.POINTER[struct_blob_reader], size:size_t) -> ctypes.c_void_p: ...
 @dll.bind
-def blob_copy_bytes(blob:c.POINTER[struct_blob_reader], dest:c.POINTER[None], size:size_t) -> None: ...
+def blob_copy_bytes(blob:c.POINTER[struct_blob_reader], dest:ctypes.c_void_p, size:size_t) -> None: ...
 @dll.bind
 def blob_skip_bytes(blob:c.POINTER[struct_blob_reader], size:size_t) -> None: ...
 @dll.bind
@@ -8187,39 +8187,39 @@ def blob_read_intptr(blob:c.POINTER[struct_blob_reader]) -> intptr_t: ...
 @dll.bind
 def blob_read_string(blob:c.POINTER[struct_blob_reader]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
-def ralloc_context(ctx:c.POINTER[None]) -> c.POINTER[None]: ...
+def ralloc_context(ctx:ctypes.c_void_p) -> ctypes.c_void_p: ...
 @dll.bind
-def ralloc_size(ctx:c.POINTER[None], size:size_t) -> c.POINTER[None]: ...
+def ralloc_size(ctx:ctypes.c_void_p, size:size_t) -> ctypes.c_void_p: ...
 @dll.bind
-def rzalloc_size(ctx:c.POINTER[None], size:size_t) -> c.POINTER[None]: ...
+def rzalloc_size(ctx:ctypes.c_void_p, size:size_t) -> ctypes.c_void_p: ...
 @dll.bind
-def reralloc_size(ctx:c.POINTER[None], ptr:c.POINTER[None], size:size_t) -> c.POINTER[None]: ...
+def reralloc_size(ctx:ctypes.c_void_p, ptr:ctypes.c_void_p, size:size_t) -> ctypes.c_void_p: ...
 @dll.bind
-def rerzalloc_size(ctx:c.POINTER[None], ptr:c.POINTER[None], old_size:size_t, new_size:size_t) -> c.POINTER[None]: ...
+def rerzalloc_size(ctx:ctypes.c_void_p, ptr:ctypes.c_void_p, old_size:size_t, new_size:size_t) -> ctypes.c_void_p: ...
 @dll.bind
-def ralloc_array_size(ctx:c.POINTER[None], size:size_t, count:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
+def ralloc_array_size(ctx:ctypes.c_void_p, size:size_t, count:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
 @dll.bind
-def rzalloc_array_size(ctx:c.POINTER[None], size:size_t, count:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
+def rzalloc_array_size(ctx:ctypes.c_void_p, size:size_t, count:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
 @dll.bind
-def reralloc_array_size(ctx:c.POINTER[None], ptr:c.POINTER[None], size:size_t, count:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
+def reralloc_array_size(ctx:ctypes.c_void_p, ptr:ctypes.c_void_p, size:size_t, count:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
 @dll.bind
-def rerzalloc_array_size(ctx:c.POINTER[None], ptr:c.POINTER[None], size:size_t, old_count:Annotated[int, ctypes.c_uint32], new_count:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
+def rerzalloc_array_size(ctx:ctypes.c_void_p, ptr:ctypes.c_void_p, size:size_t, old_count:Annotated[int, ctypes.c_uint32], new_count:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
 @dll.bind
-def ralloc_free(ptr:c.POINTER[None]) -> None: ...
+def ralloc_free(ptr:ctypes.c_void_p) -> None: ...
 @dll.bind
-def ralloc_steal(new_ctx:c.POINTER[None], ptr:c.POINTER[None]) -> None: ...
+def ralloc_steal(new_ctx:ctypes.c_void_p, ptr:ctypes.c_void_p) -> None: ...
 @dll.bind
-def ralloc_adopt(new_ctx:c.POINTER[None], old_ctx:c.POINTER[None]) -> None: ...
+def ralloc_adopt(new_ctx:ctypes.c_void_p, old_ctx:ctypes.c_void_p) -> None: ...
 @dll.bind
-def ralloc_parent(ptr:c.POINTER[None]) -> c.POINTER[None]: ...
+def ralloc_parent(ptr:ctypes.c_void_p) -> ctypes.c_void_p: ...
 @dll.bind
-def ralloc_set_destructor(ptr:c.POINTER[None], destructor:c.CFUNCTYPE[None, [c.POINTER[None]]]) -> None: ...
+def ralloc_set_destructor(ptr:ctypes.c_void_p, destructor:c.CFUNCTYPE[None, [ctypes.c_void_p]]) -> None: ...
 @dll.bind
-def ralloc_memdup(ctx:c.POINTER[None], mem:c.POINTER[None], n:size_t) -> c.POINTER[None]: ...
+def ralloc_memdup(ctx:ctypes.c_void_p, mem:ctypes.c_void_p, n:size_t) -> ctypes.c_void_p: ...
 @dll.bind
-def ralloc_strdup(ctx:c.POINTER[None], str:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def ralloc_strdup(ctx:ctypes.c_void_p, str:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
-def ralloc_strndup(ctx:c.POINTER[None], str:c.POINTER[Annotated[bytes, ctypes.c_char]], n:size_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def ralloc_strndup(ctx:ctypes.c_void_p, str:c.POINTER[Annotated[bytes, ctypes.c_char]], n:size_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
 def ralloc_strcat(dest:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], str:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -8227,17 +8227,17 @@ def ralloc_strncat(dest:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], s
 @dll.bind
 def ralloc_str_append(dest:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], str:c.POINTER[Annotated[bytes, ctypes.c_char]], existing_length:size_t, str_size:size_t) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def ralloc_asprintf(ctx:c.POINTER[None], fmt:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def ralloc_asprintf(ctx:ctypes.c_void_p, fmt:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @c.record
 class struct___va_list_tag(c.Struct):
   SIZE = 24
   gp_offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
   fp_offset: Annotated[Annotated[int, ctypes.c_uint32], 4]
-  overflow_arg_area: Annotated[c.POINTER[None], 8]
-  reg_save_area: Annotated[c.POINTER[None], 16]
+  overflow_arg_area: Annotated[ctypes.c_void_p, 8]
+  reg_save_area: Annotated[ctypes.c_void_p, 16]
 va_list: TypeAlias = c.Array[struct___va_list_tag, Literal[1]]
 @dll.bind
-def ralloc_vasprintf(ctx:c.POINTER[None], fmt:c.POINTER[Annotated[bytes, ctypes.c_char]], args:va_list) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
+def ralloc_vasprintf(ctx:ctypes.c_void_p, fmt:c.POINTER[Annotated[bytes, ctypes.c_char]], args:va_list) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
 def ralloc_asprintf_rewrite_tail(str:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], start:c.POINTER[size_t], fmt:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
@@ -8247,47 +8247,47 @@ def ralloc_asprintf_append(str:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_cha
 @dll.bind
 def ralloc_vasprintf_append(str:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], fmt:c.POINTER[Annotated[bytes, ctypes.c_char]], args:va_list) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
-def ralloc_total_size(ptr:c.POINTER[None]) -> size_t: ...
+def ralloc_total_size(ptr:ctypes.c_void_p) -> size_t: ...
 @dll.bind
-def gc_context(parent:c.POINTER[None]) -> c.POINTER[gc_ctx]: ...
+def gc_context(parent:ctypes.c_void_p) -> c.POINTER[gc_ctx]: ...
 @dll.bind
-def gc_alloc_size(ctx:c.POINTER[gc_ctx], size:size_t, alignment:size_t) -> c.POINTER[None]: ...
+def gc_alloc_size(ctx:c.POINTER[gc_ctx], size:size_t, alignment:size_t) -> ctypes.c_void_p: ...
 @dll.bind
-def gc_zalloc_size(ctx:c.POINTER[gc_ctx], size:size_t, alignment:size_t) -> c.POINTER[None]: ...
+def gc_zalloc_size(ctx:c.POINTER[gc_ctx], size:size_t, alignment:size_t) -> ctypes.c_void_p: ...
 @dll.bind
-def gc_free(ptr:c.POINTER[None]) -> None: ...
+def gc_free(ptr:ctypes.c_void_p) -> None: ...
 @dll.bind
-def gc_get_context(ptr:c.POINTER[None]) -> c.POINTER[gc_ctx]: ...
+def gc_get_context(ptr:ctypes.c_void_p) -> c.POINTER[gc_ctx]: ...
 @dll.bind
 def gc_sweep_start(ctx:c.POINTER[gc_ctx]) -> None: ...
 @dll.bind
-def gc_mark_live(ctx:c.POINTER[gc_ctx], mem:c.POINTER[None]) -> None: ...
+def gc_mark_live(ctx:c.POINTER[gc_ctx], mem:ctypes.c_void_p) -> None: ...
 @dll.bind
 def gc_sweep_end(ctx:c.POINTER[gc_ctx]) -> None: ...
 class struct_linear_ctx(ctypes.Structure): pass
 linear_ctx: TypeAlias = struct_linear_ctx
 @dll.bind
-def linear_alloc_child(ctx:c.POINTER[linear_ctx], size:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
+def linear_alloc_child(ctx:c.POINTER[linear_ctx], size:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
 @c.record
 class linear_opts(c.Struct):
   SIZE = 4
   min_buffer_size: Annotated[Annotated[int, ctypes.c_uint32], 0]
 @dll.bind
-def linear_context(ralloc_ctx:c.POINTER[None]) -> c.POINTER[linear_ctx]: ...
+def linear_context(ralloc_ctx:ctypes.c_void_p) -> c.POINTER[linear_ctx]: ...
 @dll.bind
-def linear_context_with_opts(ralloc_ctx:c.POINTER[None], opts:c.POINTER[linear_opts]) -> c.POINTER[linear_ctx]: ...
+def linear_context_with_opts(ralloc_ctx:ctypes.c_void_p, opts:c.POINTER[linear_opts]) -> c.POINTER[linear_ctx]: ...
 @dll.bind
-def linear_zalloc_child(ctx:c.POINTER[linear_ctx], size:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
+def linear_zalloc_child(ctx:c.POINTER[linear_ctx], size:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
 @dll.bind
 def linear_free_context(ctx:c.POINTER[linear_ctx]) -> None: ...
 @dll.bind
-def ralloc_steal_linear_context(new_ralloc_ctx:c.POINTER[None], ctx:c.POINTER[linear_ctx]) -> None: ...
+def ralloc_steal_linear_context(new_ralloc_ctx:ctypes.c_void_p, ctx:c.POINTER[linear_ctx]) -> None: ...
 @dll.bind
-def ralloc_parent_of_linear_context(ctx:c.POINTER[linear_ctx]) -> c.POINTER[None]: ...
+def ralloc_parent_of_linear_context(ctx:c.POINTER[linear_ctx]) -> ctypes.c_void_p: ...
 @dll.bind
-def linear_alloc_child_array(ctx:c.POINTER[linear_ctx], size:size_t, count:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
+def linear_alloc_child_array(ctx:c.POINTER[linear_ctx], size:size_t, count:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
 @dll.bind
-def linear_zalloc_child_array(ctx:c.POINTER[linear_ctx], size:size_t, count:Annotated[int, ctypes.c_uint32]) -> c.POINTER[None]: ...
+def linear_zalloc_child_array(ctx:c.POINTER[linear_ctx], size:size_t, count:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
 @dll.bind
 def linear_strdup(ctx:c.POINTER[linear_ctx], str:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
@@ -8308,7 +8308,7 @@ class _anonenum7(Annotated[int, ctypes.c_uint32], c.Enum): pass
 RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum7.define('RALLOC_PRINT_INFO_SUMMARY_ONLY', 1)
 
 @dll.bind
-def ralloc_print_info(f:c.POINTER[FILE], p:c.POINTER[None], flags:Annotated[int, ctypes.c_uint32]) -> None: ...
+def ralloc_print_info(f:c.POINTER[FILE], p:ctypes.c_void_p, flags:Annotated[int, ctypes.c_uint32]) -> None: ...
 @c.record
 class struct_isa_decode_options(c.Struct):
   SIZE = 80
@@ -8317,11 +8317,11 @@ class struct_isa_decode_options(c.Struct):
   max_errors: Annotated[Annotated[int, ctypes.c_uint32], 8]
   branch_labels: Annotated[Annotated[bool, ctypes.c_bool], 12]
   stop: Annotated[Annotated[bool, ctypes.c_bool], 13]
-  cbdata: Annotated[c.POINTER[None], 16]
-  field_cb: Annotated[c.CFUNCTYPE[None, [c.POINTER[None], c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[struct_isa_decode_value]]], 24]
+  cbdata: Annotated[ctypes.c_void_p, 16]
+  field_cb: Annotated[c.CFUNCTYPE[None, [ctypes.c_void_p, c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[struct_isa_decode_value]]], 24]
   field_print_cb: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_isa_print_state], c.POINTER[Annotated[bytes, ctypes.c_char]], uint64_t]], 32]
-  pre_instr_cb: Annotated[c.CFUNCTYPE[None, [c.POINTER[None], Annotated[int, ctypes.c_uint32], c.POINTER[None]]], 40]
-  post_instr_cb: Annotated[c.CFUNCTYPE[None, [c.POINTER[None], Annotated[int, ctypes.c_uint32], c.POINTER[None]]], 48]
+  pre_instr_cb: Annotated[c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_uint32], ctypes.c_void_p]], 40]
+  post_instr_cb: Annotated[c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_uint32], ctypes.c_void_p]], 48]
   no_match_cb: Annotated[c.CFUNCTYPE[None, [c.POINTER[FILE], c.POINTER[Annotated[int, ctypes.c_uint32]], size_t]], 56]
   entrypoint_count: Annotated[Annotated[int, ctypes.c_uint32], 64]
   entrypoints: Annotated[c.POINTER[struct_isa_entrypoint], 72]
@@ -8341,9 +8341,9 @@ class struct_isa_entrypoint(c.Struct):
   name: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 0]
   offset: Annotated[uint32_t, 8]
 @dll.bind
-def ir3_isa_disasm(bin:c.POINTER[None], sz:Annotated[int, ctypes.c_int32], out:c.POINTER[FILE], options:c.POINTER[struct_isa_decode_options]) -> None: ...
+def ir3_isa_disasm(bin:ctypes.c_void_p, sz:Annotated[int, ctypes.c_int32], out:c.POINTER[FILE], options:c.POINTER[struct_isa_decode_options]) -> None: ...
 @dll.bind
-def ir3_isa_decode(out:c.POINTER[None], bin:c.POINTER[None], options:c.POINTER[struct_isa_decode_options]) -> Annotated[bool, ctypes.c_bool]: ...
+def ir3_isa_decode(out:ctypes.c_void_p, bin:ctypes.c_void_p, options:c.POINTER[struct_isa_decode_options]) -> Annotated[bool, ctypes.c_bool]: ...
 class struct_decode_scope(ctypes.Structure): pass
 @dll.bind
 def ir3_isa_get_gpu_id(scope:c.POINTER[struct_decode_scope]) -> uint32_t: ...

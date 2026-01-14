@@ -16,7 +16,7 @@ uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 class struct_sqtt_data_se(c.Struct):
   SIZE = 32
   info: Annotated[struct_sqtt_data_info, 0]
-  data_ptr: Annotated[c.POINTER[None], 16]
+  data_ptr: Annotated[ctypes.c_void_p, 16]
   shader_engine: Annotated[uint32_t, 24]
   compute_unit: Annotated[uint32_t, 28]
 class enum_sqtt_version(Annotated[int, ctypes.c_uint32], c.Enum): pass

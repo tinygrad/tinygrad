@@ -559,16 +559,16 @@ class msgqMetadata(c.Struct):
   rxLinked: Annotated[NvBool, 164]
   rxSwapped: Annotated[NvBool, 165]
   fcnNotify: Annotated[msgqFcnNotifyRemote, 168]
-  fcnNotifyArg: Annotated[c.POINTER[None], 176]
+  fcnNotifyArg: Annotated[ctypes.c_void_p, 176]
   fcnBackendRw: Annotated[msgqFcnBackendRw, 184]
-  fcnBackendRwArg: Annotated[c.POINTER[None], 192]
+  fcnBackendRwArg: Annotated[ctypes.c_void_p, 192]
   fcnInvalidate: Annotated[msgqFcnCacheOp, 200]
   fcnFlush: Annotated[msgqFcnCacheOp, 208]
   fcnZero: Annotated[msgqFcnCacheOp, 216]
   fcnBarrier: Annotated[msgqFcnBarrier, 224]
-msgqFcnNotifyRemote: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [Annotated[int, ctypes.c_int32], c.POINTER[None]]]
-msgqFcnBackendRw: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[None], c.POINTER[None], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], c.POINTER[None]]]
-msgqFcnCacheOp: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], Annotated[int, ctypes.c_uint32]]]
+msgqFcnNotifyRemote: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [Annotated[int, ctypes.c_int32], ctypes.c_void_p]]
+msgqFcnBackendRw: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [ctypes.c_void_p, ctypes.c_void_p, Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], ctypes.c_void_p]]
+msgqFcnCacheOp: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_uint32]]]
 msgqFcnBarrier: TypeAlias = c.CFUNCTYPE[None, []]
 @c.record
 class struct_rpc_set_guest_system_info_v03_00(c.Struct):
@@ -1116,7 +1116,7 @@ class struct_NVOS21_PARAMETERS_v03_00(c.Struct):
   pAllocParms: Annotated[NvP64, 16]
   status: Annotated[NvV32, 24]
 NVOS21_PARAMETERS_v03_00: TypeAlias = struct_NVOS21_PARAMETERS_v03_00
-NvP64: TypeAlias = c.POINTER[None]
+NvP64: TypeAlias = ctypes.c_void_p
 rpc_alloc_subdevice_v08_01: TypeAlias = struct_rpc_alloc_subdevice_v08_01
 rpc_alloc_subdevice_v: TypeAlias = struct_rpc_alloc_subdevice_v08_01
 @c.record

@@ -97,7 +97,7 @@ class struct_kgsl_cmdbatch_profiling_buffer(c.Struct):
 class struct_kgsl_device_getproperty(c.Struct):
   SIZE = 24
   type: Annotated[Annotated[int, ctypes.c_uint32], 0]
-  value: Annotated[c.POINTER[None], 8]
+  value: Annotated[ctypes.c_void_p, 8]
   sizebytes: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @c.record
 class struct_kgsl_device_waittimestamp(c.Struct):
@@ -193,7 +193,7 @@ class struct_kgsl_gmem_desc(c.Struct):
 @c.record
 class struct_kgsl_buffer_desc(c.Struct):
   SIZE = 32
-  hostptr: Annotated[c.POINTER[None], 0]
+  hostptr: Annotated[ctypes.c_void_p, 0]
   gpuaddr: Annotated[Annotated[int, ctypes.c_uint64], 8]
   size: Annotated[Annotated[int, ctypes.c_int32], 16]
   format: Annotated[Annotated[int, ctypes.c_uint32], 20]
@@ -251,7 +251,7 @@ class struct_kgsl_timestamp_event(c.Struct):
   type: Annotated[Annotated[int, ctypes.c_int32], 0]
   timestamp: Annotated[Annotated[int, ctypes.c_uint32], 4]
   context_id: Annotated[Annotated[int, ctypes.c_uint32], 8]
-  priv: Annotated[c.POINTER[None], 16]
+  priv: Annotated[ctypes.c_void_p, 16]
   len: Annotated[Annotated[int, ctypes.c_uint64], 24]
 @c.record
 class struct_kgsl_timestamp_event_genlock(c.Struct):
@@ -347,7 +347,7 @@ class struct_kgsl_cmd_syncpoint_fence(c.Struct):
 class struct_kgsl_cmd_syncpoint(c.Struct):
   SIZE = 24
   type: Annotated[Annotated[int, ctypes.c_int32], 0]
-  priv: Annotated[c.POINTER[None], 8]
+  priv: Annotated[ctypes.c_void_p, 8]
   size: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @c.record
 class struct_kgsl_submit_commands(c.Struct):
@@ -365,7 +365,7 @@ class struct_kgsl_device_constraint(c.Struct):
   SIZE = 24
   type: Annotated[Annotated[int, ctypes.c_uint32], 0]
   context_id: Annotated[Annotated[int, ctypes.c_uint32], 4]
-  data: Annotated[c.POINTER[None], 8]
+  data: Annotated[ctypes.c_void_p, 8]
   size: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @c.record
 class struct_kgsl_device_constraint_pwrlevel(c.Struct):

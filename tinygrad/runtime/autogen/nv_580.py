@@ -1324,7 +1324,7 @@ class struct_NV0000_ALLOC_PARAMETERS(c.Struct):
   pOsPidInfo: Annotated[NvP64, 112]
 NvHandle: TypeAlias = Annotated[int, ctypes.c_uint32]
 NvU32: TypeAlias = Annotated[int, ctypes.c_uint32]
-NvP64: TypeAlias = c.POINTER[None]
+NvP64: TypeAlias = ctypes.c_void_p
 NV0000_ALLOC_PARAMETERS: TypeAlias = struct_NV0000_ALLOC_PARAMETERS
 @c.record
 class struct_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS(c.Struct):
@@ -2314,18 +2314,18 @@ class NVOS05_PARAMETERS(c.Struct):
   hObjectNew: Annotated[NvHandle, 8]
   hClass: Annotated[NvV32, 12]
   status: Annotated[NvV32, 16]
-Callback1ArgVoidReturn: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None]]]
-Callback5ArgVoidReturn: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], c.POINTER[None], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32]]]
+Callback1ArgVoidReturn: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p]]
+Callback5ArgVoidReturn: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_void_p, Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32]]]
 @c.record
 class NVOS10_EVENT_KERNEL_CALLBACK(c.Struct):
   SIZE = 16
   func: Annotated[Callback1ArgVoidReturn, 0]
-  arg: Annotated[c.POINTER[None], 8]
+  arg: Annotated[ctypes.c_void_p, 8]
 @c.record
 class NVOS10_EVENT_KERNEL_CALLBACK_EX(c.Struct):
   SIZE = 16
   func: Annotated[Callback5ArgVoidReturn, 0]
-  arg: Annotated[c.POINTER[None], 8]
+  arg: Annotated[ctypes.c_void_p, 8]
 @c.record
 class NVOS_I2C_ACCESS_PARAMS(c.Struct):
   SIZE = 32
@@ -2389,7 +2389,7 @@ class NVOS30_PARAMETERS(c.Struct):
   flags: Annotated[NvV32, 40]
   timeout: Annotated[NvV32, 44]
   status: Annotated[NvV32, 48]
-BindResultFunc: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32]]]
+BindResultFunc: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32]]]
 @c.record
 class NVOS32_DESCRIPTOR_TYPE_OS_SGT_PTR_PARAMETERS(c.Struct):
   SIZE = 16
@@ -3140,11 +3140,11 @@ class NVOS61_PARAMETERS(c.Struct):
   hVblank: Annotated[NvHandle, 8]
   pProc: Annotated[OSVBLANKCALLBACKPROC, 16]
   LogicalHead: Annotated[NvV32, 24]
-  pParm1: Annotated[c.POINTER[None], 32]
-  pParm2: Annotated[c.POINTER[None], 40]
+  pParm1: Annotated[ctypes.c_void_p, 32]
+  pParm2: Annotated[ctypes.c_void_p, 40]
   bAdd: Annotated[NvU32, 48]
   status: Annotated[NvV32, 52]
-OSVBLANKCALLBACKPROC: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[None], c.POINTER[None]]]
+OSVBLANKCALLBACKPROC: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_void_p]]
 @c.record
 class NV_VASPACE_ALLOCATION_PARAMETERS(c.Struct):
   SIZE = 56

@@ -3231,7 +3231,7 @@ class struct_amdgpu_firmware_info(c.Struct):
   ucode_id: Annotated[enum_AMDGPU_UCODE_ID, 0]
   fw: Annotated[c.POINTER[struct_firmware], 8]
   mc_addr: Annotated[Annotated[int, ctypes.c_uint64], 16]
-  kaddr: Annotated[c.POINTER[None], 24]
+  kaddr: Annotated[ctypes.c_void_p, 24]
   ucode_size: Annotated[Annotated[int, ctypes.c_uint32], 32]
   tmr_mc_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 36]
   tmr_mc_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 40]

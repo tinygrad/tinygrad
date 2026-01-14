@@ -269,10 +269,10 @@ NSMethodSignature._classmethods_ = [
 NSInvocation._bases_ = [NSObject]
 NSInvocation._methods_ = [
   ('retainArguments', None, []),
-  ('getReturnValue:', None, [c.POINTER[None]]),
-  ('setReturnValue:', None, [c.POINTER[None]]),
-  ('getArgument:atIndex:', None, [c.POINTER[None], NSInteger]),
-  ('setArgument:atIndex:', None, [c.POINTER[None], NSInteger]),
+  ('getReturnValue:', None, [ctypes.c_void_p]),
+  ('setReturnValue:', None, [ctypes.c_void_p]),
+  ('getArgument:atIndex:', None, [ctypes.c_void_p, NSInteger]),
+  ('setArgument:atIndex:', None, [ctypes.c_void_p, NSInteger]),
   ('invoke', None, []),
   ('invokeWithTarget:', None, [objc.id_]),
   ('invokeUsingIMP:', None, [IMP]),
@@ -295,14 +295,14 @@ class NSData(objc.Spec): pass
 NSData._bases_ = [NSObject]
 NSData._methods_ = [
   ('length', NSUInteger, []),
-  ('bytes', c.POINTER[None], []),
+  ('bytes', ctypes.c_void_p, []),
 ]
 NSCoder._bases_ = [NSObject]
 NSCoder._methods_ = [
-  ('encodeValueOfObjCType:at:', None, [c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None]]),
+  ('encodeValueOfObjCType:at:', None, [c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p]),
   ('encodeDataObject:', None, [NSData]),
   ('decodeDataObject', NSData, []),
-  ('decodeValueOfObjCType:at:size:', None, [c.POINTER[Annotated[bytes, ctypes.c_char]], c.POINTER[None], NSUInteger]),
+  ('decodeValueOfObjCType:at:size:', None, [c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p, NSUInteger]),
   ('versionForClassName:', NSInteger, [NSString]),
 ]
 NSString._bases_ = [NSObject]
@@ -388,7 +388,7 @@ class MTLDevice(objc.Spec): pass
 uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 MTLBuffer._bases_ = [MTLResource]
 MTLBuffer._methods_ = [
-  ('contents', c.POINTER[None], []),
+  ('contents', ctypes.c_void_p, []),
   ('didModifyRange:', None, [NSRange]),
   ('newTextureWithDescriptor:offset:bytesPerRow:', MTLTexture, [MTLTextureDescriptor, NSUInteger, NSUInteger], True),
   ('addDebugMarker:range:', None, [NSString, NSRange]),
@@ -482,14 +482,14 @@ MTLDispatchType: TypeAlias = enum_MTLDispatchType
 MTLComputeCommandEncoder._bases_ = [MTLCommandEncoder]
 MTLComputeCommandEncoder._methods_ = [
   ('setComputePipelineState:', None, [MTLComputePipelineState]),
-  ('setBytes:length:atIndex:', None, [c.POINTER[None], NSUInteger, NSUInteger]),
+  ('setBytes:length:atIndex:', None, [ctypes.c_void_p, NSUInteger, NSUInteger]),
   ('setBuffer:offset:atIndex:', None, [MTLBuffer, NSUInteger, NSUInteger]),
   ('setBufferOffset:atIndex:', None, [NSUInteger, NSUInteger]),
   ('setBuffers:offsets:withRange:', None, [c.POINTER[MTLBuffer], c.POINTER[NSUInteger], NSRange]),
   ('setBuffer:offset:attributeStride:atIndex:', None, [MTLBuffer, NSUInteger, NSUInteger, NSUInteger]),
   ('setBuffers:offsets:attributeStrides:withRange:', None, [c.POINTER[MTLBuffer], c.POINTER[NSUInteger], c.POINTER[NSUInteger], NSRange]),
   ('setBufferOffset:attributeStride:atIndex:', None, [NSUInteger, NSUInteger, NSUInteger]),
-  ('setBytes:length:attributeStride:atIndex:', None, [c.POINTER[None], NSUInteger, NSUInteger, NSUInteger]),
+  ('setBytes:length:attributeStride:atIndex:', None, [ctypes.c_void_p, NSUInteger, NSUInteger, NSUInteger]),
   ('setVisibleFunctionTable:atBufferIndex:', None, [MTLVisibleFunctionTable, NSUInteger]),
   ('setVisibleFunctionTables:withBufferRange:', None, [c.POINTER[MTLVisibleFunctionTable], NSRange]),
   ('setIntersectionFunctionTable:atBufferIndex:', None, [MTLIntersectionFunctionTable, NSUInteger]),
@@ -1507,9 +1507,9 @@ class MTLLibrary(objc.Spec): pass
 class MTLFunctionConstantValues(objc.Spec): pass
 MTLFunctionConstantValues._bases_ = [NSObject]
 MTLFunctionConstantValues._methods_ = [
-  ('setConstantValue:type:atIndex:', None, [c.POINTER[None], MTLDataType, NSUInteger]),
-  ('setConstantValues:type:withRange:', None, [c.POINTER[None], MTLDataType, NSRange]),
-  ('setConstantValue:type:withName:', None, [c.POINTER[None], MTLDataType, NSString]),
+  ('setConstantValue:type:atIndex:', None, [ctypes.c_void_p, MTLDataType, NSUInteger]),
+  ('setConstantValues:type:withRange:', None, [ctypes.c_void_p, MTLDataType, NSRange]),
+  ('setConstantValue:type:withName:', None, [ctypes.c_void_p, MTLDataType, NSString]),
   ('reset', None, []),
 ]
 class MTLFunctionDescriptor(objc.Spec): pass
@@ -1574,8 +1574,8 @@ NSComparisonResult: TypeAlias = enum_NSComparisonResult
 class NSValue(objc.Spec): pass
 NSValue._bases_ = [NSObject]
 NSValue._methods_ = [
-  ('getValue:size:', None, [c.POINTER[None], NSUInteger]),
-  ('initWithBytes:objCType:', 'instancetype', [c.POINTER[None], c.POINTER[Annotated[bytes, ctypes.c_char]]]),
+  ('getValue:size:', None, [ctypes.c_void_p, NSUInteger]),
+  ('initWithBytes:objCType:', 'instancetype', [ctypes.c_void_p, c.POINTER[Annotated[bytes, ctypes.c_char]]]),
   ('initWithCoder:', 'instancetype', [NSCoder]),
   ('objCType', c.POINTER[Annotated[bytes, ctypes.c_char]], []),
 ]
@@ -1828,7 +1828,7 @@ MTLDevice._methods_ = [
   ('heapBufferSizeAndAlignWithLength:options:', MTLSizeAndAlign, [NSUInteger, MTLResourceOptions]),
   ('newHeapWithDescriptor:', MTLHeap, [MTLHeapDescriptor], True),
   ('newBufferWithLength:options:', MTLBuffer, [NSUInteger, MTLResourceOptions], True),
-  ('newBufferWithBytes:length:options:', MTLBuffer, [c.POINTER[None], NSUInteger, MTLResourceOptions], True),
+  ('newBufferWithBytes:length:options:', MTLBuffer, [ctypes.c_void_p, NSUInteger, MTLResourceOptions], True),
   ('newDepthStencilStateWithDescriptor:', MTLDepthStencilState, [MTLDepthStencilDescriptor], True),
   ('newTextureWithDescriptor:', MTLTexture, [MTLTextureDescriptor], True),
   ('newTextureWithDescriptor:iosurface:plane:', MTLTexture, [MTLTextureDescriptor, IOSurfaceRef, NSUInteger], True),

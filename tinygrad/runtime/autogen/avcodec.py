@@ -528,8 +528,8 @@ class struct_SEIRawMessage(c.Struct):
   SIZE = 40
   payload_type: Annotated[uint32_t, 0]
   payload_size: Annotated[uint32_t, 4]
-  payload: Annotated[c.POINTER[None], 8]
-  payload_ref: Annotated[c.POINTER[None], 16]
+  payload: Annotated[ctypes.c_void_p, 8]
+  payload_ref: Annotated[ctypes.c_void_p, 16]
   extension_data: Annotated[c.POINTER[uint8_t], 24]
   extension_bit_length: Annotated[size_t, 32]
 SEIRawMessage: TypeAlias = struct_SEIRawMessage

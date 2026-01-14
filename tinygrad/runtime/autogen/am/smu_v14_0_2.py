@@ -1473,7 +1473,7 @@ class struct_smu_table(c.Struct):
   align: Annotated[Annotated[int, ctypes.c_uint32], 8]
   domain: Annotated[Annotated[int, ctypes.c_ubyte], 12]
   mc_address: Annotated[Annotated[int, ctypes.c_uint64], 16]
-  cpu_addr: Annotated[c.POINTER[None], 24]
+  cpu_addr: Annotated[ctypes.c_void_p, 24]
   bo: Annotated[c.POINTER[struct_amdgpu_bo], 32]
   version: Annotated[Annotated[int, ctypes.c_uint32], 40]
 class struct_amdgpu_bo(ctypes.Structure): pass

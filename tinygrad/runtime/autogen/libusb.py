@@ -338,7 +338,7 @@ class struct_libusb_transfer(c.Struct):
   length: Annotated[Annotated[int, ctypes.c_int32], 20]
   actual_length: Annotated[Annotated[int, ctypes.c_int32], 24]
   callback: Annotated[libusb_transfer_cb_fn, 32]
-  user_data: Annotated[c.POINTER[None], 40]
+  user_data: Annotated[ctypes.c_void_p, 40]
   buffer: Annotated[c.POINTER[Annotated[int, ctypes.c_ubyte]], 48]
   num_iso_packets: Annotated[Annotated[int, ctypes.c_int32], 56]
   iso_packet_desc: Annotated[c.Array[struct_libusb_iso_packet_descriptor, Literal[0]], 60]
@@ -573,14 +573,14 @@ class struct_libusb_pollfd(c.Struct):
   SIZE = 8
   fd: Annotated[Annotated[int, ctypes.c_int32], 0]
   events: Annotated[Annotated[int, ctypes.c_int16], 4]
-libusb_pollfd_added_cb: TypeAlias = c.CFUNCTYPE[None, [Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int16], c.POINTER[None]]]
-libusb_pollfd_removed_cb: TypeAlias = c.CFUNCTYPE[None, [Annotated[int, ctypes.c_int32], c.POINTER[None]]]
+libusb_pollfd_added_cb: TypeAlias = c.CFUNCTYPE[None, [Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int16], ctypes.c_void_p]]
+libusb_pollfd_removed_cb: TypeAlias = c.CFUNCTYPE[None, [Annotated[int, ctypes.c_int32], ctypes.c_void_p]]
 @dll.bind
 def libusb_get_pollfds(ctx:c.POINTER[libusb_context]) -> c.POINTER[c.POINTER[struct_libusb_pollfd]]: ...
 @dll.bind
 def libusb_free_pollfds(pollfds:c.POINTER[c.POINTER[struct_libusb_pollfd]]) -> None: ...
 @dll.bind
-def libusb_set_pollfd_notifiers(ctx:c.POINTER[libusb_context], added_cb:libusb_pollfd_added_cb, removed_cb:libusb_pollfd_removed_cb, user_data:c.POINTER[None]) -> None: ...
+def libusb_set_pollfd_notifiers(ctx:c.POINTER[libusb_context], added_cb:libusb_pollfd_added_cb, removed_cb:libusb_pollfd_removed_cb, user_data:ctypes.c_void_p) -> None: ...
 libusb_hotplug_callback_handle: TypeAlias = Annotated[int, ctypes.c_int32]
 class libusb_hotplug_event(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED = libusb_hotplug_event.define('LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED', 1)
@@ -589,13 +589,13 @@ LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT = libusb_hotplug_event.define('LIBUSB_HOTPLUG_E
 class libusb_hotplug_flag(Annotated[int, ctypes.c_uint32], c.Enum): pass
 LIBUSB_HOTPLUG_ENUMERATE = libusb_hotplug_flag.define('LIBUSB_HOTPLUG_ENUMERATE', 1)
 
-libusb_hotplug_callback_fn: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_libusb_context], c.POINTER[struct_libusb_device], libusb_hotplug_event, c.POINTER[None]]]
+libusb_hotplug_callback_fn: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_libusb_context], c.POINTER[struct_libusb_device], libusb_hotplug_event, ctypes.c_void_p]]
 @dll.bind
-def libusb_hotplug_register_callback(ctx:c.POINTER[libusb_context], events:Annotated[int, ctypes.c_int32], flags:Annotated[int, ctypes.c_int32], vendor_id:Annotated[int, ctypes.c_int32], product_id:Annotated[int, ctypes.c_int32], dev_class:Annotated[int, ctypes.c_int32], cb_fn:libusb_hotplug_callback_fn, user_data:c.POINTER[None], callback_handle:c.POINTER[libusb_hotplug_callback_handle]) -> Annotated[int, ctypes.c_int32]: ...
+def libusb_hotplug_register_callback(ctx:c.POINTER[libusb_context], events:Annotated[int, ctypes.c_int32], flags:Annotated[int, ctypes.c_int32], vendor_id:Annotated[int, ctypes.c_int32], product_id:Annotated[int, ctypes.c_int32], dev_class:Annotated[int, ctypes.c_int32], cb_fn:libusb_hotplug_callback_fn, user_data:ctypes.c_void_p, callback_handle:c.POINTER[libusb_hotplug_callback_handle]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def libusb_hotplug_deregister_callback(ctx:c.POINTER[libusb_context], callback_handle:libusb_hotplug_callback_handle) -> None: ...
 @dll.bind
-def libusb_hotplug_get_user_data(ctx:c.POINTER[libusb_context], callback_handle:libusb_hotplug_callback_handle) -> c.POINTER[None]: ...
+def libusb_hotplug_get_user_data(ctx:c.POINTER[libusb_context], callback_handle:libusb_hotplug_callback_handle) -> ctypes.c_void_p: ...
 @dll.bind
 def libusb_set_option(ctx:c.POINTER[libusb_context], option:enum_libusb_option) -> Annotated[int, ctypes.c_int32]: ...
 c.init_records()

@@ -82,7 +82,7 @@ class struct_ion_flush_data(c.Struct):
   SIZE = 24
   handle: Annotated[ion_user_handle_t, 0]
   fd: Annotated[Annotated[int, ctypes.c_int32], 4]
-  vaddr: Annotated[c.POINTER[None], 8]
+  vaddr: Annotated[ctypes.c_void_p, 8]
   offset: Annotated[Annotated[int, ctypes.c_uint32], 16]
   length: Annotated[Annotated[int, ctypes.c_uint32], 20]
 @c.record
@@ -120,7 +120,7 @@ class union_remote_arg64(c.Struct):
 @c.record
 class struct_remote_buf(c.Struct):
   SIZE = 16
-  pv: Annotated[c.POINTER[None], 0]
+  pv: Annotated[ctypes.c_void_p, 0]
   len: Annotated[size_t, 8]
 @c.record
 class struct_remote_dma_handle(c.Struct):
@@ -273,7 +273,7 @@ fastrpc_async_jobid: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class remote_buf(c.Struct):
   SIZE = 16
-  pv: Annotated[c.POINTER[None], 0]
+  pv: Annotated[ctypes.c_void_p, 0]
   nLen: Annotated[size_t, 8]
 @c.record
 class remote_dma_handle(c.Struct):
@@ -296,8 +296,8 @@ FASTRPC_ASYNC_TYPE_MAX = enum_fastrpc_async_notify_type.define('FASTRPC_ASYNC_TY
 @c.record
 class struct_fastrpc_async_callback(c.Struct):
   SIZE = 16
-  fn: Annotated[c.CFUNCTYPE[None, [fastrpc_async_jobid, c.POINTER[None], Annotated[int, ctypes.c_int32]]], 0]
-  context: Annotated[c.POINTER[None], 8]
+  fn: Annotated[c.CFUNCTYPE[None, [fastrpc_async_jobid, ctypes.c_void_p, Annotated[int, ctypes.c_int32]]], 0]
+  context: Annotated[ctypes.c_void_p, 8]
 fastrpc_async_callback_t: TypeAlias = struct_fastrpc_async_callback
 @c.record
 class struct_fastrpc_async_descriptor(c.Struct):
@@ -412,11 +412,11 @@ FASTRPC_USER_PD_EXCEPTION = enum_remote_rpc_status_flags.define('FASTRPC_USER_PD
 FASTRPC_DSP_SSR = enum_remote_rpc_status_flags.define('FASTRPC_DSP_SSR', 4)
 
 remote_rpc_status_flags_t: TypeAlias = enum_remote_rpc_status_flags
-fastrpc_notif_fn_t: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[None], Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], enum_remote_rpc_status_flags]]
+fastrpc_notif_fn_t: TypeAlias = c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [ctypes.c_void_p, Annotated[int, ctypes.c_int32], Annotated[int, ctypes.c_int32], enum_remote_rpc_status_flags]]
 @c.record
 class struct_remote_rpc_notif_register(c.Struct):
   SIZE = 24
-  context: Annotated[c.POINTER[None], 0]
+  context: Annotated[ctypes.c_void_p, 0]
   domain: Annotated[Annotated[int, ctypes.c_int32], 8]
   notifier_fn: Annotated[fastrpc_notif_fn_t, 16]
 remote_rpc_notif_register_t: TypeAlias = struct_remote_rpc_notif_register

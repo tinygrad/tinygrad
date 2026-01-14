@@ -99,8 +99,8 @@ IBV_DM_MASK_HANDLE = enum_ibv_dm_mask.define('IBV_DM_MASK_HANDLE', 1)
 class struct_ibv_dm(c.Struct):
   SIZE = 32
   context: Annotated[c.POINTER[struct_ibv_context], 0]
-  memcpy_to_dm: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_dm], uint64_t, c.POINTER[None], size_t]], 8]
-  memcpy_from_dm: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[None], c.POINTER[struct_ibv_dm], uint64_t, size_t]], 16]
+  memcpy_to_dm: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_dm], uint64_t, ctypes.c_void_p, size_t]], 8]
+  memcpy_from_dm: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [ctypes.c_void_p, c.POINTER[struct_ibv_dm], uint64_t, size_t]], 16]
   comp_mask: Annotated[uint32_t, 24]
   handle: Annotated[uint32_t, 28]
 @c.record
@@ -112,7 +112,7 @@ class struct_ibv_context(c.Struct):
   async_fd: Annotated[Annotated[int, ctypes.c_int32], 268]
   num_comp_vectors: Annotated[Annotated[int, ctypes.c_int32], 272]
   mutex: Annotated[pthread_mutex_t, 280]
-  abi_compat: Annotated[c.POINTER[None], 320]
+  abi_compat: Annotated[ctypes.c_void_p, 320]
 @c.record
 class struct_ibv_device(c.Struct):
   SIZE = 664
@@ -133,36 +133,36 @@ class struct_ibv_context_ops(c.Struct):
   SIZE = 256
   _compat_query_device: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_device_attr]]], 0]
   _compat_query_port: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_context], uint8_t, c.POINTER[struct__compat_ibv_port_attr]]], 8]
-  _compat_alloc_pd: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 16]
-  _compat_dealloc_pd: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 24]
-  _compat_reg_mr: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 32]
-  _compat_rereg_mr: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 40]
-  _compat_dereg_mr: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 48]
+  _compat_alloc_pd: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 16]
+  _compat_dealloc_pd: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 24]
+  _compat_reg_mr: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 32]
+  _compat_rereg_mr: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 40]
+  _compat_dereg_mr: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 48]
   alloc_mw: Annotated[c.CFUNCTYPE[c.POINTER[struct_ibv_mw], [c.POINTER[struct_ibv_pd], enum_ibv_mw_type]], 56]
   bind_mw: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_mw], c.POINTER[struct_ibv_mw_bind]]], 64]
   dealloc_mw: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_mw]]], 72]
-  _compat_create_cq: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 80]
+  _compat_create_cq: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 80]
   poll_cq: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_cq], Annotated[int, ctypes.c_int32], c.POINTER[struct_ibv_wc]]], 88]
   req_notify_cq: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_cq], Annotated[int, ctypes.c_int32]]], 96]
-  _compat_cq_event: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 104]
-  _compat_resize_cq: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 112]
-  _compat_destroy_cq: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 120]
-  _compat_create_srq: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 128]
-  _compat_modify_srq: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 136]
-  _compat_query_srq: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 144]
-  _compat_destroy_srq: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 152]
+  _compat_cq_event: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 104]
+  _compat_resize_cq: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 112]
+  _compat_destroy_cq: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 120]
+  _compat_create_srq: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 128]
+  _compat_modify_srq: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 136]
+  _compat_query_srq: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 144]
+  _compat_destroy_srq: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 152]
   post_srq_recv: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_srq], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]], 160]
-  _compat_create_qp: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 168]
-  _compat_query_qp: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 176]
-  _compat_modify_qp: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 184]
-  _compat_destroy_qp: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 192]
+  _compat_create_qp: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 168]
+  _compat_query_qp: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 176]
+  _compat_modify_qp: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 184]
+  _compat_destroy_qp: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 192]
   post_send: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_send_wr], c.POINTER[c.POINTER[struct_ibv_send_wr]]]], 200]
   post_recv: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]], 208]
-  _compat_create_ah: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 216]
-  _compat_destroy_ah: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 224]
-  _compat_attach_mcast: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 232]
-  _compat_detach_mcast: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 240]
-  _compat_async_event: Annotated[c.CFUNCTYPE[c.POINTER[None], []], 248]
+  _compat_create_ah: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 216]
+  _compat_destroy_ah: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 224]
+  _compat_attach_mcast: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 232]
+  _compat_detach_mcast: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 240]
+  _compat_async_event: Annotated[c.CFUNCTYPE[ctypes.c_void_p, []], 248]
 @c.record
 class struct_ibv_device_attr(c.Struct):
   SIZE = 232
@@ -230,7 +230,7 @@ IBV_MW_TYPE_2 = enum_ibv_mw_type.define('IBV_MW_TYPE_2', 2)
 class struct_ibv_qp(c.Struct):
   SIZE = 160
   context: Annotated[c.POINTER[struct_ibv_context], 0]
-  qp_context: Annotated[c.POINTER[None], 8]
+  qp_context: Annotated[ctypes.c_void_p, 8]
   pd: Annotated[c.POINTER[struct_ibv_pd], 16]
   send_cq: Annotated[c.POINTER[struct_ibv_cq], 24]
   recv_cq: Annotated[c.POINTER[struct_ibv_cq], 32]
@@ -247,7 +247,7 @@ class struct_ibv_cq(c.Struct):
   SIZE = 128
   context: Annotated[c.POINTER[struct_ibv_context], 0]
   channel: Annotated[c.POINTER[struct_ibv_comp_channel], 8]
-  cq_context: Annotated[c.POINTER[None], 16]
+  cq_context: Annotated[ctypes.c_void_p, 16]
   handle: Annotated[uint32_t, 24]
   cqe: Annotated[Annotated[int, ctypes.c_int32], 28]
   mutex: Annotated[pthread_mutex_t, 32]
@@ -313,7 +313,7 @@ class __atomic_wide_counter___value32(c.Struct):
 class struct_ibv_srq(c.Struct):
   SIZE = 128
   context: Annotated[c.POINTER[struct_ibv_context], 0]
-  srq_context: Annotated[c.POINTER[None], 8]
+  srq_context: Annotated[ctypes.c_void_p, 8]
   pd: Annotated[c.POINTER[struct_ibv_pd], 16]
   handle: Annotated[uint32_t, 24]
   mutex: Annotated[pthread_mutex_t, 32]
@@ -356,7 +356,7 @@ class struct_ibv_mr(c.Struct):
   SIZE = 48
   context: Annotated[c.POINTER[struct_ibv_context], 0]
   pd: Annotated[c.POINTER[struct_ibv_pd], 8]
-  addr: Annotated[c.POINTER[None], 16]
+  addr: Annotated[ctypes.c_void_p, 16]
   length: Annotated[size_t, 24]
   handle: Annotated[uint32_t, 32]
   lkey: Annotated[uint32_t, 36]
@@ -518,7 +518,7 @@ class struct_ibv_send_wr_bind_mw(c.Struct):
 @c.record
 class struct_ibv_send_wr_tso(c.Struct):
   SIZE = 16
-  hdr: Annotated[c.POINTER[None], 0]
+  hdr: Annotated[ctypes.c_void_p, 0]
   hdr_sz: Annotated[uint16_t, 8]
   mss: Annotated[uint16_t, 10]
 @c.record
@@ -756,7 +756,7 @@ class struct_ibv_async_event_element(c.Struct):
 class struct_ibv_wq(c.Struct):
   SIZE = 152
   context: Annotated[c.POINTER[struct_ibv_context], 0]
-  wq_context: Annotated[c.POINTER[None], 8]
+  wq_context: Annotated[ctypes.c_void_p, 8]
   pd: Annotated[c.POINTER[struct_ibv_pd], 16]
   cq: Annotated[c.POINTER[struct_ibv_cq], 24]
   wq_num: Annotated[uint32_t, 32]
@@ -928,7 +928,7 @@ class struct_ibv_srq_attr(c.Struct):
 @c.record
 class struct_ibv_srq_init_attr(c.Struct):
   SIZE = 24
-  srq_context: Annotated[c.POINTER[None], 0]
+  srq_context: Annotated[ctypes.c_void_p, 0]
   attr: Annotated[struct_ibv_srq_attr, 8]
 class enum_ibv_srq_type(Annotated[int, ctypes.c_uint32], c.Enum): pass
 IBV_SRQT_BASIC = enum_ibv_srq_type.define('IBV_SRQT_BASIC', 0)
@@ -951,7 +951,7 @@ class struct_ibv_tm_cap(c.Struct):
 @c.record
 class struct_ibv_srq_init_attr_ex(c.Struct):
   SIZE = 64
-  srq_context: Annotated[c.POINTER[None], 0]
+  srq_context: Annotated[ctypes.c_void_p, 0]
   attr: Annotated[struct_ibv_srq_attr, 8]
   comp_mask: Annotated[uint32_t, 20]
   srq_type: Annotated[enum_ibv_srq_type, 24]
@@ -973,7 +973,7 @@ IBV_WQ_FLAGS_RESERVED = enum_ibv_wq_flags.define('IBV_WQ_FLAGS_RESERVED', 16)
 @c.record
 class struct_ibv_wq_init_attr(c.Struct):
   SIZE = 48
-  wq_context: Annotated[c.POINTER[None], 0]
+  wq_context: Annotated[ctypes.c_void_p, 0]
   wq_type: Annotated[enum_ibv_wq_type, 8]
   max_wr: Annotated[uint32_t, 12]
   max_sge: Annotated[uint32_t, 16]
@@ -1022,7 +1022,7 @@ class struct_ibv_qp_cap(c.Struct):
 @c.record
 class struct_ibv_qp_init_attr(c.Struct):
   SIZE = 64
-  qp_context: Annotated[c.POINTER[None], 0]
+  qp_context: Annotated[ctypes.c_void_p, 0]
   send_cq: Annotated[c.POINTER[struct_ibv_cq], 8]
   recv_cq: Annotated[c.POINTER[struct_ibv_cq], 16]
   srq: Annotated[c.POINTER[struct_ibv_srq], 24]
@@ -1070,7 +1070,7 @@ class struct_ibv_rx_hash_conf(c.Struct):
 @c.record
 class struct_ibv_qp_init_attr_ex(c.Struct):
   SIZE = 136
-  qp_context: Annotated[c.POINTER[None], 0]
+  qp_context: Annotated[ctypes.c_void_p, 0]
   send_cq: Annotated[c.POINTER[struct_ibv_cq], 8]
   recv_cq: Annotated[c.POINTER[struct_ibv_cq], 16]
   srq: Annotated[c.POINTER[struct_ibv_srq], 24]
@@ -1099,7 +1099,7 @@ class struct_ibv_qp_open_attr(c.Struct):
   comp_mask: Annotated[uint32_t, 0]
   qp_num: Annotated[uint32_t, 4]
   xrcd: Annotated[c.POINTER[struct_ibv_xrcd], 8]
-  qp_context: Annotated[c.POINTER[None], 16]
+  qp_context: Annotated[ctypes.c_void_p, 16]
   qp_type: Annotated[enum_ibv_qp_type, 24]
 class enum_ibv_qp_attr_mask(Annotated[int, ctypes.c_uint32], c.Enum): pass
 IBV_QP_STATE = enum_ibv_qp_attr_mask.define('IBV_QP_STATE', 1)
@@ -1193,7 +1193,7 @@ IBV_FLUSH_MR = enum_ibv_selectivity_level.define('IBV_FLUSH_MR', 1)
 @c.record
 class struct_ibv_data_buf(c.Struct):
   SIZE = 16
-  addr: Annotated[c.POINTER[None], 0]
+  addr: Annotated[ctypes.c_void_p, 0]
   length: Annotated[size_t, 8]
 class enum_ibv_ops_wr_opcode(Annotated[int, ctypes.c_uint32], c.Enum): pass
 IBV_WR_TAG_ADD = enum_ibv_ops_wr_opcode.define('IBV_WR_TAG_ADD', 0)
@@ -1243,17 +1243,17 @@ class struct_ibv_qp_ex(c.Struct):
   wr_send: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]], 240]
   wr_send_imm: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], Annotated[int, ctypes.c_uint32]]], 248]
   wr_send_inv: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t]], 256]
-  wr_send_tso: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], c.POINTER[None], uint16_t, uint16_t]], 264]
+  wr_send_tso: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_void_p, uint16_t, uint16_t]], 264]
   wr_set_ud_addr: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], c.POINTER[struct_ibv_ah], uint32_t, uint32_t]], 272]
   wr_set_xrc_srqn: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t]], 280]
-  wr_set_inline_data: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], c.POINTER[None], size_t]], 288]
+  wr_set_inline_data: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_void_p, size_t]], 288]
   wr_set_inline_data_list: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], size_t, c.POINTER[struct_ibv_data_buf]]], 296]
   wr_set_sge: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, uint32_t]], 304]
   wr_set_sge_list: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], size_t, c.POINTER[struct_ibv_sge]]], 312]
   wr_start: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]], 320]
   wr_complete: Annotated[c.CFUNCTYPE[Annotated[int, ctypes.c_int32], [c.POINTER[struct_ibv_qp_ex]]], 328]
   wr_abort: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]], 336]
-  wr_atomic_write: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, c.POINTER[None]]], 344]
+  wr_atomic_write: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, ctypes.c_void_p]], 344]
   wr_flush: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, size_t, uint8_t, uint8_t]], 352]
 @dll.bind
 def ibv_qp_to_qp_ex(qp:c.POINTER[struct_ibv_qp]) -> c.POINTER[struct_ibv_qp_ex]: ...
@@ -1277,7 +1277,7 @@ class struct_ibv_cq_ex(c.Struct):
   SIZE = 288
   context: Annotated[c.POINTER[struct_ibv_context], 0]
   channel: Annotated[c.POINTER[struct_ibv_comp_channel], 8]
-  cq_context: Annotated[c.POINTER[None], 16]
+  cq_context: Annotated[ctypes.c_void_p, 16]
   handle: Annotated[uint32_t, 24]
   cqe: Annotated[Annotated[int, ctypes.c_int32], 28]
   mutex: Annotated[pthread_mutex_t, 32]
@@ -1541,10 +1541,10 @@ class struct_ibv_flow_action_esp_attr(c.Struct):
   esp_attr: Annotated[c.POINTER[struct_ib_uverbs_flow_action_esp], 0]
   keymat_proto: Annotated[enum_ib_uverbs_flow_action_esp_keymat, 8]
   keymat_len: Annotated[uint16_t, 12]
-  keymat_ptr: Annotated[c.POINTER[None], 16]
+  keymat_ptr: Annotated[ctypes.c_void_p, 16]
   replay_proto: Annotated[enum_ib_uverbs_flow_action_esp_replay, 24]
   replay_len: Annotated[uint16_t, 28]
-  replay_ptr: Annotated[c.POINTER[None], 32]
+  replay_ptr: Annotated[ctypes.c_void_p, 32]
   esp_encap: Annotated[c.POINTER[struct_ib_uverbs_flow_action_esp_encap], 40]
   comp_mask: Annotated[uint32_t, 48]
   esn: Annotated[uint32_t, 52]
@@ -1568,7 +1568,7 @@ IB_UVERBS_FLOW_ACTION_ESP_REPLAY_BMP = enum_ib_uverbs_flow_action_esp_replay.def
 @c.record
 class struct_ib_uverbs_flow_action_esp_encap(c.Struct):
   SIZE = 24
-  val_ptr: Annotated[c.POINTER[None], 0]
+  val_ptr: Annotated[ctypes.c_void_p, 0]
   val_ptr_data_u64: Annotated[Annotated[int, ctypes.c_uint64], 0]
   next_ptr: Annotated[c.POINTER[struct_ib_uverbs_flow_action_esp_encap], 8]
   next_ptr_data_u64: Annotated[Annotated[int, ctypes.c_uint64], 8]
@@ -1591,7 +1591,7 @@ IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN = enum_ibv_create_cq_attr_flags.define('IBV_CR
 class struct_ibv_cq_init_attr_ex(c.Struct):
   SIZE = 56
   cqe: Annotated[uint32_t, 0]
-  cq_context: Annotated[c.POINTER[None], 8]
+  cq_context: Annotated[ctypes.c_void_p, 8]
   channel: Annotated[c.POINTER[struct_ibv_comp_channel], 16]
   comp_vector: Annotated[uint32_t, 24]
   wc_flags: Annotated[uint64_t, 32]
@@ -1608,9 +1608,9 @@ class struct_ibv_parent_domain_init_attr(c.Struct):
   pd: Annotated[c.POINTER[struct_ibv_pd], 0]
   td: Annotated[c.POINTER[struct_ibv_td], 8]
   comp_mask: Annotated[uint32_t, 16]
-  alloc: Annotated[c.CFUNCTYPE[c.POINTER[None], [c.POINTER[struct_ibv_pd], c.POINTER[None], size_t, size_t, uint64_t]], 24]
-  free: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_pd], c.POINTER[None], c.POINTER[None], uint64_t]], 32]
-  pd_context: Annotated[c.POINTER[None], 40]
+  alloc: Annotated[c.CFUNCTYPE[ctypes.c_void_p, [c.POINTER[struct_ibv_pd], ctypes.c_void_p, size_t, size_t, uint64_t]], 24]
+  free: Annotated[c.CFUNCTYPE[None, [c.POINTER[struct_ibv_pd], ctypes.c_void_p, ctypes.c_void_p, uint64_t]], 32]
+  pd_context: Annotated[ctypes.c_void_p, 40]
 @c.record
 class struct_ibv_counters_init_attr(c.Struct):
   SIZE = 4
@@ -1746,11 +1746,11 @@ def ibv_alloc_pd(context:c.POINTER[struct_ibv_context]) -> c.POINTER[struct_ibv_
 @dll.bind
 def ibv_dealloc_pd(pd:c.POINTER[struct_ibv_pd]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def ibv_reg_mr_iova2(pd:c.POINTER[struct_ibv_pd], addr:c.POINTER[None], length:size_t, iova:uint64_t, access:Annotated[int, ctypes.c_uint32]) -> c.POINTER[struct_ibv_mr]: ...
+def ibv_reg_mr_iova2(pd:c.POINTER[struct_ibv_pd], addr:ctypes.c_void_p, length:size_t, iova:uint64_t, access:Annotated[int, ctypes.c_uint32]) -> c.POINTER[struct_ibv_mr]: ...
 @dll.bind
-def ibv_reg_mr(pd:c.POINTER[struct_ibv_pd], addr:c.POINTER[None], length:size_t, access:Annotated[int, ctypes.c_int32]) -> c.POINTER[struct_ibv_mr]: ...
+def ibv_reg_mr(pd:c.POINTER[struct_ibv_pd], addr:ctypes.c_void_p, length:size_t, access:Annotated[int, ctypes.c_int32]) -> c.POINTER[struct_ibv_mr]: ...
 @dll.bind
-def ibv_reg_mr_iova(pd:c.POINTER[struct_ibv_pd], addr:c.POINTER[None], length:size_t, iova:uint64_t, access:Annotated[int, ctypes.c_int32]) -> c.POINTER[struct_ibv_mr]: ...
+def ibv_reg_mr_iova(pd:c.POINTER[struct_ibv_pd], addr:ctypes.c_void_p, length:size_t, iova:uint64_t, access:Annotated[int, ctypes.c_int32]) -> c.POINTER[struct_ibv_mr]: ...
 @dll.bind
 def ibv_reg_dmabuf_mr(pd:c.POINTER[struct_ibv_pd], offset:uint64_t, length:size_t, iova:uint64_t, fd:Annotated[int, ctypes.c_int32], access:Annotated[int, ctypes.c_int32]) -> c.POINTER[struct_ibv_mr]: ...
 class enum_ibv_rereg_mr_err_code(Annotated[int, ctypes.c_int32], c.Enum): pass
@@ -1761,7 +1761,7 @@ IBV_REREG_MR_ERR_CMD = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_CMD',
 IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW', -5)
 
 @dll.bind
-def ibv_rereg_mr(mr:c.POINTER[struct_ibv_mr], flags:Annotated[int, ctypes.c_int32], pd:c.POINTER[struct_ibv_pd], addr:c.POINTER[None], length:size_t, access:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
+def ibv_rereg_mr(mr:c.POINTER[struct_ibv_mr], flags:Annotated[int, ctypes.c_int32], pd:c.POINTER[struct_ibv_pd], addr:ctypes.c_void_p, length:size_t, access:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def ibv_dereg_mr(mr:c.POINTER[struct_ibv_mr]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
@@ -1769,13 +1769,13 @@ def ibv_create_comp_channel(context:c.POINTER[struct_ibv_context]) -> c.POINTER[
 @dll.bind
 def ibv_destroy_comp_channel(channel:c.POINTER[struct_ibv_comp_channel]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def ibv_create_cq(context:c.POINTER[struct_ibv_context], cqe:Annotated[int, ctypes.c_int32], cq_context:c.POINTER[None], channel:c.POINTER[struct_ibv_comp_channel], comp_vector:Annotated[int, ctypes.c_int32]) -> c.POINTER[struct_ibv_cq]: ...
+def ibv_create_cq(context:c.POINTER[struct_ibv_context], cqe:Annotated[int, ctypes.c_int32], cq_context:ctypes.c_void_p, channel:c.POINTER[struct_ibv_comp_channel], comp_vector:Annotated[int, ctypes.c_int32]) -> c.POINTER[struct_ibv_cq]: ...
 @dll.bind
 def ibv_resize_cq(cq:c.POINTER[struct_ibv_cq], cqe:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def ibv_destroy_cq(cq:c.POINTER[struct_ibv_cq]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
-def ibv_get_cq_event(channel:c.POINTER[struct_ibv_comp_channel], cq:c.POINTER[c.POINTER[struct_ibv_cq]], cq_context:c.POINTER[c.POINTER[None]]) -> Annotated[int, ctypes.c_int32]: ...
+def ibv_get_cq_event(channel:c.POINTER[struct_ibv_comp_channel], cq:c.POINTER[c.POINTER[struct_ibv_cq]], cq_context:c.POINTER[ctypes.c_void_p]) -> Annotated[int, ctypes.c_int32]: ...
 @dll.bind
 def ibv_ack_cq_events(cq:c.POINTER[struct_ibv_cq], nevents:Annotated[int, ctypes.c_uint32]) -> None: ...
 @dll.bind
