@@ -134,12 +134,6 @@ def print_data(data:dict) -> None:
   elif "cols" in data:
     print(tabulate([r[:len(data["cols"])] for r in data["rows"]], headers=data["cols"], tablefmt="github"))
 
-def print_pmc(pmc_events:list) -> None:
-  from tinygrad.viz.serve import unpack_pmc
-  for e in pmc_events:
-    print(f"--- {e.kern} ---")
-    print_data(unpack_pmc(e))
-
 def main() -> None:
   import tinygrad.viz.serve as viz
   viz.ctxs = []
