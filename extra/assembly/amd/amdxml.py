@@ -120,21 +120,23 @@ def write_enum(enums, path):
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_ins(encodings, enums, arch, path):
+  # 8-bit VGPR fields (from XML: OPR_VGPR with 8 bits)
+  _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr"}
   def field_def(name, hi, lo, fmt, enc_bits=None):
     bits = hi - lo + 1
     if name == "encoding" and enc_bits: return f"FixedBitField({hi}, {lo}, 0b{enc_bits})"
     if name == "op" and fmt not in ("DPP", "SDWA"): return f"EnumBitField({hi}, {lo}, {fmt}Op)"
     if name in ("opx", "opy"): return f"EnumBitField({hi}, {lo}, VOPDOp)"
-    if name == "vdsty": return f"VDSTYField({hi}, {lo})"
-    if name in ("vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr") and bits == 8: return f"VGPRField({hi}, {lo})"
-    if name == "sbase" and bits == 6: return f"SBaseField({hi}, {lo})"
-    if name in ("srsrc", "ssamp") and bits == 5: return f"SRsrcField({hi}, {lo})"
+    if name == "vdsty": return f"VDSTYField({hi}, {lo})"  # special 7-bit VGPR encoding
+    if name in _VGPR_FIELDS and bits == 8: return f"VGPRField({hi}, {lo})"
+    if name == "sbase" and bits == 6: return f"SBaseField({hi}, {lo})"  # 6-bit SGPR pair base
+    if name in ("srsrc", "ssamp") and bits == 5: return f"SRsrcField({hi}, {lo})"  # 5-bit SGPR quad base
     if name in ("sdst", "sdata") and bits == 7: return f"SGPRField({hi}, {lo})"
     if name in ("soffset", "saddr") and bits == 7: return f"SGPRField({hi}, {lo}, default=NULL)"
-    if name.startswith("ssrc") and bits == 8: return f"SSrcField({hi}, {lo})"
+    if name.startswith("ssrc") and bits == 8: return f"SSrcField({hi}, {lo})"  # 8-bit scalar src
     if name in ("saddr", "soffset") and bits == 8: return f"SSrcField({hi}, {lo}, default=NULL)"
-    if name.startswith("src") and bits == 9: return f"SrcField({hi}, {lo})"
-    if fmt == "VOP3P" and name == "opsel_hi": return f"BitField({hi}, {lo}, default=3)"
+    if name.startswith("src") and bits == 9: return f"SrcField({hi}, {lo})"  # 9-bit src (SGPR/VGPR/inline)
+    if fmt == "VOP3P" and name == "opsel_hi": return f"BitField({hi}, {lo}, default=3)"  # default: all high
     if fmt == "VOP3P" and name == "opsel_hi2": return f"BitField({hi}, {lo}, default=1)"
     return f"BitField({hi}, {lo})"
   ORDER = ['encoding', 'op', 'opx', 'opy', 'vdst', 'vdstx', 'vdsty', 'sdst', 'vdata', 'sdata', 'addr', 'vaddr', 'data', 'data0', 'data1',
