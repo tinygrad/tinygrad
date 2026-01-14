@@ -329,6 +329,7 @@ def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str]]:
         wave_type = "INST" if inst_traces.get(wu) else "OCC"
         events.append(ProfileRangeEvent(wu.simd_loc, f"{wave_type} WAVE:{p.wave} N:{next(units[wu])}", wave_starts.pop(wu), Decimal(p._time)))
       elif isinstance(p, INST):
+        # TODO: cu and simd numbers are not correct, what is the right way to get CU/SIMD of the INST packet?
         wu = WaveUnit(e.se, 0, 0, p.wave)
         inst_traces[wu] = inst_traces.get(wu, 0) + 1
   return cu_events, [k.wave_loc for k in units]
