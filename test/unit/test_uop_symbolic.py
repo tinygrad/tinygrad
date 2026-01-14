@@ -7,6 +7,7 @@ from tinygrad.helpers import Context
 from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid
+from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -1095,6 +1096,20 @@ class TestFuzzFailure(unittest.TestCase):
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     assert num==rn, f"{num} != {rn}"
+
+class TestModToAndDecomposition(unittest.TestCase):
+  def test_mod_to_and_positive(self):
+    # x % 4 -> x & 3 is valid when x >= 0
+    x = UOp(Ops.DEFINE_VAR, dtypes.int, arg=("x", 0, 100))
+    pm = get_late_rewrite_patterns((Ops.AND,), force_transcendental=False)
+    self.assertEqual(graph_rewrite(x % 4, pm).render(), "(x&3)")
+
+  def test_mod_to_and_negative(self):
+    # x % 4 -> x & 3 is INVALID when x can be negative (C semantics differs from AND)
+    x = UOp(Ops.DEFINE_VAR, dtypes.int, arg=("x", -100, 100))
+    pm = get_late_rewrite_patterns((Ops.AND,), force_transcendental=False)
+    # MOD is not decomposed to AND, instead rewritten to floored division form
+    self.assertEqual(graph_rewrite(x % 4, pm).render(), "(x%4)")
 
 if __name__ == '__main__':
   unittest.main()
