@@ -56,8 +56,10 @@ if TYPE_CHECKING:
   CT = TypeVar("CT", bound=_CData)
   def pointer(obj: CT) -> POINTER[CT]: ...
 else:
-  class Array:
-    def __class_getitem__(cls, key): return del_an(key[0]) * get_args(key[1])[0]
+  class _Array:
+    def __getitem__(self, key): return del_an(key[0]) * get_args(key[1])[0]
+    def __call__(self, ty, l): return del_an(ty) * l
+  Array = _Array()
   class POINTER:
     def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key))
   class CFUNCTYPE:
