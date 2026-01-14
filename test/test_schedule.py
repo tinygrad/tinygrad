@@ -182,7 +182,7 @@ class TestSchedule(unittest.TestCase):
     assert not a.uop.is_realized
 
   def test_simplify_padded_const(self):
-    a = Tensor.empty(1022).cummax(axis=0)
+    a, _ = Tensor.empty(1022).cummax(axis=0)
     check_schedule(a, 3)
 
   def test_basic_binop_fusion(self):

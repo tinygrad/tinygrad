@@ -222,18 +222,30 @@ def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for
 
 # *** Performance counters
 
+metrics:dict[str, Callable[[dict[str, tuple[int, int, int]]], str]] = {
+  "VALU utilization": lambda s: f"{100 * (s['SQ_INSTS_VALU'][0] / s['SQ_INSTS_VALU'][2]) / (s['GRBM_GUI_ACTIVE'][1] * 4):.1f}%",
+  "SALU utilization": lambda s: f"{100 * (s['SQ_INSTS_SALU'][0] / s['SQ_INSTS_SALU'][2]) / (s['GRBM_GUI_ACTIVE'][1] * 4):.1f}%",
+}
+
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
   sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
   rows:list[list] = []
+  stats:dict[str, tuple[int, int, int]] = {}  # name -> (sum, max, count)
   view, ptr = memoryview(e.blob).cast('Q'), 0
   for s in e.sched:
     row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+    max_val, cnt = 0, 0
     for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
       row[1] += (val:=int(view[ptr]))
+      max_val, cnt = max(max_val, val), cnt + 1
       row[2]["rows"].append(sample+(val,))
       ptr += 1
+    stats[s.name] = (row[1], max_val, cnt)
     rows.append(row)
+  for name, fn in metrics.items():
+    try: rows.append([name, fn(stats)])
+    except KeyError: pass
   return {"rows":rows, "cols":agg_cols}
 
 # ** on startup, list all the performance counter traces
@@ -284,7 +296,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
     n = next(inst_units[u])
     if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
-    events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+    events.append(ProfileRangeEvent(f"SIMD:{w.simd}", loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
     wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "prg":p, "run_number":n, "loc":loc}
   # * OCC waves
   units:dict[str, itertools.count] = {}
@@ -295,7 +307,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     if occ.start: wave_start[u] = occ.time
     else:
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
-      events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+      events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
   return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -399,11 +411,10 @@ def amdgpu_tokenize(st:str) -> list[str]:
     from extra.assembly.amd.asm import _op2dsl
     dsl = eval(_op2dsl(st), {'s':s, 'v':v, 'VCC_LO':VCC_LO, 'VCC_HI':VCC_HI, 'VCC':VCC, 'EXEC_LO':EXEC_LO, 'EXEC_HI':EXEC_HI, 'EXEC':EXEC,
                              'SCC':SCC, 'M0':M0, 'NULL':NULL, 'OFF':OFF})
-    return [f"{type(dsl).__name__[0].lower()}{dsl.idx + i}" for i in range(dsl.count)] if isinstance(dsl, Reg) else [st]
+    return [f"{type(dsl).__name__[0].lower()}{dsl.offset + i}" for i in range(dsl.sz)] if isinstance(dsl, Reg) else [st]
   except (ImportError, NameError, SyntaxError, TypeError): return []
 
 COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
-cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, target:int) -> dict:
   # disassemble
   pc_table = llvm_disasm(target, lib)
@@ -418,14 +429,14 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   lines:list[str] = []
   asm_width = max(len(asm) for asm, _ in pc_table.values())
   for pc, (asm, sz) in pc_table.items():
+    # skip instructions only used for padding
+    if asm == "s_code_end": continue
     lines.append(f"  {asm:<{asm_width}}  // {pc:012X}")
     if pc in leaders:
       paths[curr:=pc] = {}
       blocks[pc] = []
     else: assert curr is not None, f"no basic block found for {pc}"
     blocks[curr].append(pc)
-    # control flow ends in endpgm
-    if asm == "s_endpgm": break
     # otherwise a basic block can have exactly one or two paths
     nx = pc+sz
     if (offset:=parse_branch(asm)) is not None:
@@ -435,7 +446,7 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
   pc_tokens:dict[int, list[dict]] = {}
   for pc, (text, _) in pc_table.items():
     pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s) if i>0 else [s], "kind":int(i>0)} for i,s in enumerate(text.replace(",", " , ").split(" "))]
-  return {"data":{"blocks":blocks, "paths":paths, "colors":cfg_colors, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
+  return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -502,9 +513,7 @@ def get_render(query:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    cfg = amdgpu_cfg((p:=data["prg"]).lib, device_props[p.device]["gfx_target_version"])["data"]
-    cfg["counters"] = {pc-p.base:v for pc,v in rows.items()}
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "data":cfg}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "ref":ref_map.get(data["prg"].name)}
   return data
 
 # ** HTTP server

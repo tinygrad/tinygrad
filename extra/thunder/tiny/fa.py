@@ -11,6 +11,15 @@ NUM_WORKERS = 1
 Q_BLOCK_SIZE = 16
 KV_BLOCK_SIZE = 16
 
+def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None) -> Tensor:
+  if not isinstance(ref.device, tuple): return Tensor.empty(*shape, device=ref.device)
+  shape = tuple(s // len(ref.device) if i == ref.uop.axis else s for i, s in enumerate(shape))
+  axis = ref.uop.axis if axis is None else axis
+  return Tensor(Tensor.empty(*shape, device=ref.device).uop.multi(axis), device=ref.device)
+
+def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
+  return _sharded_empty(ref.shape, ref, axis)
+
 def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False):
   if len(xq.shape) == 3: xq, xk, xv = xq.unsqueeze(0), xk.unsqueeze(0), xv.unsqueeze(0)
 
@@ -395,32 +404,35 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
       return ker.finish()
 
+  single_device = xq.device[0] if isinstance(xq.device, tuple) else xq.device
+
   if is_causal:
     if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-    attn_mask = Tensor.ones((B, 1, N, N), requires_grad=False, device=xq.device, dtype=dtypes.bool).tril()
+    attn_mask = Tensor.ones((B, 1, N, N), requires_grad=False, device=single_device, dtype=dtypes.bool).tril()
   if attn_mask is not None:
     if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
   else:
-    attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=xq.device, dtype=dtypes.float32)
+    attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=single_device, dtype=dtypes.float32)
+  if isinstance(xq.device, tuple):
+    attn_mask = attn_mask.shard(xq.device, axis=0)
 
-  attn = Tensor.empty_like(xq)
-  l_vec = Tensor.empty(B, H, 1, N, requires_grad=False, device=xq.device, dtype=dtypes.float32).detach()
+  attn = _sharded_empty_like(xq, axis=0)
+  l_vec = _sharded_empty((B, H, 1, N), xq, axis=0)
 
-  def grad(gradu:UOp, kernel:UOp) -> tuple[None, None, UOp, UOp, UOp, None]:
-    grad = Tensor(gradu)
-    grad_q = Tensor.empty_like(q := Tensor(kernel.src[2]))
-    grad_k = Tensor.empty_like(k := Tensor(kernel.src[3]))
-    grad_v = Tensor.empty_like(v := Tensor(kernel.src[4]))
-    mask = Tensor(kernel.src[5])
+  def grad(gradu:UOp, _) -> tuple[None, None, UOp, UOp, UOp, None]:
+    grad = Tensor(gradu, device=gradu.device)
+    grad_q = _sharded_empty_like(xq, axis=0)
+    grad_k = _sharded_empty_like(xk, axis=0)
+    grad_v = _sharded_empty_like(xv, axis=0)
 
     delta_vec = (grad * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
 
-    grad_q = Tensor.custom_kernel(grad_q, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
-    grad_k = Tensor.custom_kernel(grad_k, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_k)[0]
-    grad_v = Tensor.custom_kernel(grad_v, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_v)[0]
+    grad_q = Tensor.custom_kernel(grad_q, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
+    grad_k = Tensor.custom_kernel(grad_k, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_k)[0]
+    grad_v = Tensor.custom_kernel(grad_v, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_v)[0]
     return (None, None, grad_q.uop, grad_k.uop, grad_v.uop, None)
 
   attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, attn_mask, fxn=custom_forward, grad_fxn=grad)[:2]
-  attn = attn[:, :N_, :, :D_]
+  attn_ = attn[:, :N_, :, :D_]
 
-  return attn.transpose(1, 2).cast(odtype)
+  return attn_.transpose(1, 2).cast(odtype)

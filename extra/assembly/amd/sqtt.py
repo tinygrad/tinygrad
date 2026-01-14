@@ -5,27 +5,27 @@ The format is nibble-based with variable-width packets determined by a state mac
 Uses BitField infrastructure from dsl.py, similar to GPU instruction encoding.
 """
 from __future__ import annotations
-from enum import IntEnum
-from typing import get_type_hints
-from extra.assembly.amd.dsl import BitField, bits
+from typing import Iterator
+from enum import Enum
+from extra.assembly.amd.dsl import BitField, FixedBitField, bits
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIELD ENUMS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class MemSrc(IntEnum):
+class MemSrc(Enum):
   LDS = 0
   LDS_ALT = 1
   VMEM = 2
   VMEM_ALT = 3
 
-class AluSrc(IntEnum):
+class AluSrc(Enum):
   NONE = 0
   SALU = 1
   VALU = 2
   VALU_ALT = 3
 
-class InstOp(IntEnum):
+class InstOp(Enum):
   """SQTT instruction operation types.
 
   Memory ops appear in two ranges depending on which SIMD executes them:
@@ -101,42 +101,23 @@ class InstOp(IntEnum):
 
 class PacketType:
   """Base class for SQTT packet types."""
-  _encoding: tuple[BitField, int] | None = None
-  _field_types: dict[str, type] = {}
-  _values: dict[str, int]
+  encoding: FixedBitField
   _raw: int
   _time: int
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
-    if 'encoding' in cls.__dict__ and isinstance(cls.__dict__['encoding'], tuple):
-      cls._encoding = cls.__dict__['encoding']
-    # Cache field type annotations for enum conversion
-    try: cls._field_types = {k: v for k, v in get_type_hints(cls).items() if isinstance(v, type) and issubclass(v, IntEnum)}
-    except Exception: cls._field_types = {}
-    # Cache fields and precompute extraction info: (name, lo, mask, enum_type)
-    cls._fields = {k: v for k, v in cls.__dict__.items() if isinstance(v, BitField) and k != 'encoding'}
-    cls._extract_info = [(name, bf.lo, bf.mask(), cls._field_types.get(name)) for name, bf in cls._fields.items()]
+    cls._fields = {k: v for k, v in cls.__dict__.items() if isinstance(v, BitField)}
     cls._size_nibbles = ((max((f.hi for f in cls._fields.values()), default=0) + 4) // 4)
 
   @classmethod
   def from_raw(cls, raw: int, time: int = 0):
     inst = object.__new__(cls)
-    inst._raw, inst._time, inst._values = raw, time, {}
-    for name, lo, mask, enum_type in cls._extract_info:
-      val = (raw >> lo) & mask
-      if enum_type is not None:
-        try: val = enum_type(val)
-        except ValueError: pass
-      inst._values[name] = val
+    inst._raw, inst._time = raw, time
     return inst
 
-  def __getattr__(self, name: str):
-    if name.startswith('_'): raise AttributeError(name)
-    return self._values.get(name, 0)
-
   def __repr__(self) -> str:
-    fields_str = ", ".join(f"{k}={v}" for k, v in self._values.items() if not k.startswith('_'))
+    fields_str = ", ".join(f"{k}={getattr(self, k)}" for k in self._fields if not k.startswith('_'))
     return f"{self.__class__.__name__}({fields_str})"
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -152,12 +133,12 @@ class VALUINST(PacketType):  # exclude: 1 << 2
 class VMEMEXEC(PacketType):  # exclude: 1 << 0
   encoding = bits[3:0] == 0b1111
   delta = bits[5:4]
-  src: MemSrc = bits[7:6]
+  src = bits[7:6].enum(MemSrc)
 
 class ALUEXEC(PacketType):  # exclude: 1 << 1
   encoding = bits[3:0] == 0b1110
   delta = bits[5:4]
-  src: AluSrc = bits[7:6]
+  src = bits[7:6].enum(AluSrc)
 
 class IMMEDIATE(PacketType):  # exclude: 1 << 5
   encoding = bits[3:0] == 0b1101
@@ -288,7 +269,7 @@ class INST(PacketType):
   flag1 = bits[3:3]
   flag2 = bits[7:7]
   wave = bits[12:8]
-  op: InstOp = bits[19:13]
+  op = bits[19:13].enum(InstOp)
 
 class UTILCTR(PacketType):
   encoding = bits[6:0] == 0b0110001
@@ -311,9 +292,7 @@ def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
 
   for byte_val in range(256):
     for opcode, pkt_cls in enumerate(PACKET_TYPES):
-      if pkt_cls._encoding is None: continue
-      mask_bf, pattern = pkt_cls._encoding
-      if (byte_val & mask_bf.mask()) == pattern:
+      if (byte_val & pkt_cls.encoding.mask()) == pkt_cls.encoding.default:
         table[byte_val] = opcode
         break
 
@@ -324,8 +303,6 @@ STATE_TO_OPCODE, OPCODE_TO_CLASS = _build_state_table()
 # Precompute special case opcodes
 _TS_DELTA_OR_MARK_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_OR_MARK)
 _TS_DELTA_SHORT_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_SHORT)
-_TS_DELTA_OR_MARK_BIT8 = (TS_DELTA_OR_MARK.bit8.lo, TS_DELTA_OR_MARK.bit8.mask())
-_TS_DELTA_OR_MARK_BIT9 = (TS_DELTA_OR_MARK.bit9.lo, TS_DELTA_OR_MARK.bit9.mask())
 
 # Combined lookup: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
 # special_case: 0=none, 1=TS_DELTA_OR_MARK, 2=TS_DELTA_SHORT
@@ -341,41 +318,69 @@ for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
 # DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def decode(data: bytes) -> list[PacketType]:
-  """Decode raw SQTT blob into list of packet instances."""
-  packets: list[PacketType] = []
-  packets_append = packets.append
-  n = len(data)
-  reg = 0
-  offset = 0
-  nib_count = 16
-  time = 0
-  state_to_opcode = STATE_TO_OPCODE
-  decode_info = _DECODE_INFO
-  mask64 = (1 << 64) - 1
+def decode(data: bytes) -> Iterator[PacketType]:
+  """Decode raw SQTT blob, yielding packet instances."""
+  n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
 
-  while (offset >> 3) < n:
-    target = offset + nib_count * 4
-    while offset < target and (offset >> 3) < n:
-      byte = data[offset >> 3]
-      nib = (byte >> (offset & 4)) & 0xF
-      reg = ((reg >> 4) | (nib << 60)) & mask64
-      offset += 4
-    if offset < target: break
+  while pos + ((nib_count + nib_off + 1) >> 1) <= n:
+    need = nib_count - nib_off
+    # 1. if unaligned, read high nibble to align
+    if nib_off: reg, pos = (reg >> 4) | ((data[pos] >> 4) << 60), pos + 1
+    # 2. read all full bytes at once
+    if (byte_count := need >> 1):
+      chunk = int.from_bytes(data[pos:pos + byte_count], 'little')
+      reg, pos = (reg >> (byte_count * 8)) | (chunk << (64 - byte_count * 8)), pos + byte_count
+    # 3. if odd, read low nibble
+    if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
-    opcode = state_to_opcode[reg & 0xFF]
-    pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
-
+    opcode = STATE_TO_OPCODE[reg & 0xFF]
+    pkt_cls, nib_count, delta_lo, delta_mask, special = _DECODE_INFO[opcode]
     delta = (reg >> delta_lo) & delta_mask
-
-    if special == 1:  # TS_DELTA_OR_MARK
-      bit8 = (reg >> _TS_DELTA_OR_MARK_BIT8[0]) & _TS_DELTA_OR_MARK_BIT8[1]
-      bit9 = (reg >> _TS_DELTA_OR_MARK_BIT9[0]) & _TS_DELTA_OR_MARK_BIT9[1]
-      if bit9 and not bit8: delta = 0
-    elif special == 2:  # TS_DELTA_SHORT
-      delta = delta + 8
-
+    if special == 1 and (reg >> 9) & 1 and not (reg >> 8) & 1: delta = 0  # TS_DELTA_OR_MARK marker
+    elif special == 2: delta += 8  # TS_DELTA_SHORT
     time += delta
-    packets_append(pkt_cls.from_raw(reg, time))
+    yield pkt_cls.from_raw(reg, time)
 
-  return packets
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRINTER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+PACKET_COLORS = {
+  "INST": "WHITE", "VALUINST": "BLACK", "VMEMEXEC": "yellow", "ALUEXEC": "yellow",
+  "IMMEDIATE": "YELLOW", "IMMEDIATE_MASK": "YELLOW", "WAVERDY": "cyan", "WAVEALLOC": "cyan",
+  "WAVEEND": "blue", "WAVESTART": "blue", "PERF": "magenta", "EVENT": "red", "EVENT_BIG": "red",
+  "REG": "green", "LAYOUT_HEADER": "white", "SNAPSHOT": "white", "UTILCTR": "green",
+}
+
+def format_packet(p) -> str:
+  from tinygrad.helpers import colored
+  name = type(p).__name__
+  if isinstance(p, INST):
+    op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+    fields = f"wave={p.wave} op={op_name}" + (" flag1" if p.flag1 else "") + (" flag2" if p.flag2 else "")
+  elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
+  elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
+  elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
+  elif isinstance(p, (WAVESTART, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
+  elif hasattr(p, '_fields'):
+    fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
+                      for k in p._fields if not k.startswith('_') and k not in {'delta', 'encoding'})
+  else: fields = ""
+  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name, 'white'))} {fields}"
+
+def print_packets(packets) -> None:
+  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"}
+  for p in packets:
+    if type(p).__name__ not in skip: print(format_packet(p))
+
+if __name__ == "__main__":
+  import sys, pickle
+  if len(sys.argv) < 2:
+    print("Usage: python sqtt.py <pkl_file>")
+    sys.exit(1)
+  with open(sys.argv[1], "rb") as f:
+    data = pickle.load(f)
+  sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+  for i, event in enumerate(sqtt_events):
+    print(f"\n=== event {i} ===")
+    print_packets(decode(event.blob))
