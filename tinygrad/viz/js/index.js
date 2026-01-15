@@ -172,8 +172,8 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
-  WAVE:new Map([["INST", "#e76f51"], ["VALUINST", "#415a77"], ["IMMEDIATE", "#f3b44a"]]), SHARED:new Map([["VMEMEXEC", "#f4978e"],
-    ["ALUEXEC", "#f72585"]]),}
+  WAVE:new Map([["INST", "#e76f51"], ["VALUINST", "#415a77"], ["IMMEDIATE", "#f3b44a"], ["BARRIER", "#d00000"]]),
+  SHARED:new Map([["VMEMEXEC", "#f4978e"], ["ALUEXEC", "#f72585"]]),}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {

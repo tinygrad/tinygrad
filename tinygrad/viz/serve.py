@@ -279,16 +279,17 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
-  def add(name:str, p:PacketType, op:str="OP", idx:int=0) -> None:
+  def add(name:str, p:PacketType, op="OP", idx=0, width=10) -> None:
     rows.setdefault(r:=(f"WAVE:{p.wave} {name}:1" if hasattr(p, "wave") else f"SHARED:0 {name}:0"))
-    ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+10)))
+    ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+width)))
   op_idx:dict = {}
   for p in decode(e.blob):
     if len(ret) > 100_000: break
     if isinstance(p, INST):
       if p.op not in op_idx: op_idx[p.op] = len(op_idx)
       op_name, idx = (p.op.name, op_idx[p.op]) if isinstance(p.op, InstOp) else (f"0x{p.op:02x}", len(op_idx))
-      add(p.__class__.__name__, p, op_name, idx)
+      if "BARRIER" in op_name: add("BARRIER", p, op_name, width=100)
+      else: add(p.__class__.__name__, p, op_name, idx)
     if isinstance(p, (VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC)): add(p.__class__.__name__, p)
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
