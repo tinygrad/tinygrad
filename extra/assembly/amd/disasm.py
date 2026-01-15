@@ -1,58 +1,31 @@
 # RDNA3/RDNA4/CDNA disassembler
 from __future__ import annotations
 import re, struct
-from extra.assembly.amd.dsl import Inst, Reg
+from extra.assembly.amd.dsl import Inst, Reg, src
 
-# Special register mappings for disassembly
-SPECIAL_GPRS = {106: 'vcc_lo', 107: 'vcc_hi', 124: 'null', 125: 'm0', 126: 'exec_lo', 127: 'exec_hi',
-                128: '0', 240: '0.5', 241: '-0.5', 242: '1.0', 243: '-1.0', 244: '2.0', 245: '-2.0', 246: '4.0', 247: '-4.0', 248: '0x3e22f983', 253: 'scc'}
-SPECIAL_GPRS_CDNA = {106: 'vcc_lo', 107: 'vcc_hi', 124: 'null', 125: 'm0', 126: 'exec_lo', 127: 'exec_hi',
-                     128: '0', 240: '0.5', 241: '-0.5', 242: '1.0', 243: '-1.0', 244: '2.0', 245: '-2.0', 246: '4.0', 247: '-4.0', 248: '0x3e22f983', 253: 'scc',
-                     102: 'flat_scratch_lo', 103: 'flat_scratch_hi', 104: 'xnack_mask_lo', 105: 'xnack_mask_hi'}
-SPECIAL_PAIRS = {106: 'vcc', 126: 'exec'}
-SPECIAL_PAIRS_CDNA = {106: 'vcc', 126: 'exec', 102: 'flat_scratch', 104: 'xnack_mask'}
+# CDNA-specific special registers (not in Reg._NAMES)
+_CDNA_GPRS = {102: 'flat_scratch_lo', 103: 'flat_scratch_hi', 104: 'xnack_mask_lo', 105: 'xnack_mask_hi'}
+_CDNA_PAIRS = {102: 'flat_scratch', 104: 'xnack_mask'}
 
-def decode_src(v, cdna: bool = False) -> str:
-  """Decode a source operand encoding to its string representation."""
-  v = _unwrap(v)
-  gprs = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
-  if v in gprs: return gprs[v]
-  if v < 106: return f's{v}'
-  if 108 <= v < 124: return f'ttmp{v - 108}'
-  if 129 <= v <= 192: return str(v - 128)  # positive integers 1-64
-  if 193 <= v <= 208: return str(-(v - 192))  # negative integers -1 to -16
-  if v >= 256: return f'v{v - 256}'
-  return f's{v}'
+def _d(r: Reg, cdna: bool = False) -> str:
+  """Format register for disasm output. Handles CDNA-specific registers."""
+  if cdna and r.sz == 1 and r.offset in _CDNA_GPRS: return _CDNA_GPRS[r.offset]
+  if cdna and r.sz == 2 and r.offset in _CDNA_PAIRS: return _CDNA_PAIRS[r.offset]
+  return r.disasm
 
-def _unwrap(v) -> int:
-  """Unwrap Reg to int offset, or return int as-is."""
-  return v.offset if isinstance(v, Reg) else v
-
-def _vi(v) -> int:
-  """Get VGPR index from Reg or int (for v[N] fields that encode as 256+N)."""
-  off = _unwrap(v)
-  return off - 256 if off >= 256 else off
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# LITERAL FORMATTING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_FLOAT_DEC = {240: 0.5, 241: -0.5, 242: 1.0, 243: -1.0, 244: 2.0, 245: -2.0, 246: 4.0, 247: -4.0}
+def _off(v) -> int: return v.offset if isinstance(v, Reg) else v
+def _vi(v) -> int: off = _off(v); return off - 256 if off >= 256 else off
 
 def _lit(inst, v, neg=0) -> str:
   """Format literal/inline constant value."""
-  v = _unwrap(v)
-  if v == 255:
-    lit = inst._literal
-    if lit is None: return "0"
-    s = f"0x{lit:x}"
-  elif v in _FLOAT_DEC: s = str(_FLOAT_DEC[v])
-  elif 128 <= v <= 192: s = str(v - 128)
-  elif 193 <= v <= 208: s = str(-(v - 192))
-  elif v < 128: s = decode_src(v)
-  elif v >= 256: s = f"v{v - 256}"
-  else: s = decode_src(v)
+  off = _off(v)
+  if off == 255: return f"-0x{inst._literal:x}" if neg else (f"0x{inst._literal:x}" if inst._literal else "0")
+  s = src[off].disasm
   return f"-{s}" if neg else s
+
+# Backwards compatibility aliases
+def decode_src(v, cdna: bool = False) -> str: return _d(src[_off(v)], cdna)
+def _unwrap(v) -> int: return _off(v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION METADATA - fallback functions when inst.num_srcs()/inst.operands unavailable
@@ -118,50 +91,34 @@ _CDNA_DISASM_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v
 # HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _reg(p: str, b: int, n: int = 1) -> str: return f"{p}{_unwrap(b)}" if n == 1 else f"{p}[{_unwrap(b)}:{_unwrap(b)+n-1}]"
-def _sreg(b: int, n: int = 1) -> str: return _reg("s", _unwrap(b), n)
-def _vreg(b: int, n: int = 1) -> str: b = _unwrap(b); return _reg("v", b - 256 if b >= 256 else b, n)
-def _areg(b: int, n: int = 1) -> str: b = _unwrap(b); return _reg("a", b - 256 if b >= 256 else b, n)  # accumulator registers for GFX90a
-def _ttmp(b, n: int = 1) -> str: b = _unwrap(b); return _reg("ttmp", b - 108, n) if 108 <= b <= 123 else None
+def _sreg(b, n: int = 1) -> str: off = _off(b); return src[off:off+n-1].disasm if n > 1 else f"s{off}"
+def _vreg(b, n: int = 1) -> str: off = _off(b); idx = off - 256 if off >= 256 else off; return f"v{idx}" if n == 1 else f"v[{idx}:{idx+n-1}]"
+def _areg(b, n: int = 1) -> str: off = _off(b); idx = off - 256 if off >= 256 else off; return f"a{idx}" if n == 1 else f"a[{idx}:{idx+n-1}]"
+def _ttmp(b, n: int = 1) -> str: off = _off(b); return (f"ttmp{off-108}" if n == 1 else f"ttmp[{off-108}:{off-108+n-1}]") if 108 <= off <= 123 else None
 def _sreg_or_ttmp(b, n: int = 1) -> str: return _ttmp(b, n) or _sreg(b, n)
-
-def _fmt_sdst(v, n: int = 1, cdna: bool = False) -> str:
-  v = _unwrap(v)
-  if t := _ttmp(v, n): return t
-  pairs = SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS
-  gprs = SPECIAL_GPRS_CDNA if cdna else SPECIAL_GPRS
-  if n > 1: return pairs.get(v) or gprs.get(v) or _sreg(v, n)  # also check gprs for null/m0
-  return gprs.get(v, f"s{v}")
-
+def _fmt_sdst(v, n: int = 1, cdna: bool = False) -> str: return _d(src[_off(v):_off(v)+n-1] if n > 1 else src[_off(v)], cdna)
 def _fmt_src(v, n: int = 1, cdna: bool = False) -> str:
-  v = _unwrap(v)
-  if v == 253: return "src_scc"  # SCC as source operand
-  if n == 1: return decode_src(v, cdna)
-  if v >= 256: return _vreg(v, n)
-  if v <= 101: return _sreg(v, n)  # s0-s101 can be pairs, but 102+ are special on CDNA
-  pairs = SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS
-  if n == 2 and v in pairs: return pairs[v]
-  if v <= 105: return _sreg(v, n)  # s102-s105 regular pairs for RDNA
-  if t := _ttmp(v, n): return t
-  return decode_src(v, cdna)
+  off = _off(v)
+  if off == 253: return "src_scc"
+  return _d(src[off:off+n-1] if n > 1 else src[off], cdna)
 
 def _fmt_v16(v, base: int = 256, hi_thresh: int = 384) -> str:
-  v = _unwrap(v)
-  return f"v{(v - base) & 0x7f}.{'h' if v >= hi_thresh else 'l'}"
+  off = _off(v)
+  return f"v{(off - base) & 0x7f}.{'h' if off >= hi_thresh else 'l'}"
 
 def _has(op: str, *subs) -> bool: return any(s in op for s in subs)
 def _omod(v: int) -> str: return {1: " mul:2", 2: " mul:4", 3: " div:2"}.get(v, "")
-def _src16(inst, v: int) -> str: v = _unwrap(v); return _fmt_v16(v) if v >= 256 else _lit(inst, v)  # format 16-bit src: vgpr.h/l or literal
+def _src16(inst, v) -> str: off = _off(v); return _fmt_v16(off) if off >= 256 else _lit(inst, v)
 def _mods(*pairs) -> str: return " ".join(m for c, m in pairs if c)
 def _fmt_bits(label: str, val: int, count: int) -> str: return f"{label}:[{','.join(str((val >> i) & 1) for i in range(count))}]"
 
-def _vop3_src(inst, v: int, neg: int, abs_: int, hi: int, n: int, f16: bool) -> str:
+def _vop3_src(inst, v, neg: int, abs_: int, hi: int, n: int, f16: bool) -> str:
   """Format VOP3 source operand with modifiers."""
-  v = _unwrap(v)
-  if v == 255: s = _lit(inst, v)  # literal constant takes priority
+  off = _off(v)
+  if off == 255: s = _lit(inst, v)
   elif n > 1: s = _fmt_src(v, n)
-  elif f16 and v >= 256: s = f"v{v - 256}.h" if hi else f"v{v - 256}.l"
-  elif v == 253: s = "src_scc"  # VOP3 sources use src_scc not scc
+  elif f16 and off >= 256: s = f"v{off - 256}.{'h' if hi else 'l'}"
+  elif off == 253: s = "src_scc"
   else: s = _lit(inst, v)
   if abs_: s = f"|{s}|"
   return f"-{s}" if neg else s
@@ -355,9 +312,8 @@ def _disasm_flat(inst: FLAT) -> str:
   if seg == 'flat' or _unwrap(inst.saddr) == 0x7F: saddr_s = ""
   elif _unwrap(inst.saddr) == 124: saddr_s = ", off"
   elif seg == 'scratch': saddr_s = f", {decode_src(inst.saddr, cdna)}"
-  elif _unwrap(inst.saddr) in (SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS): saddr_s = f", {(SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS)[_unwrap(inst.saddr)]}"
   elif t := _ttmp(inst.saddr, 2): saddr_s = f", {t}"
-  else: saddr_s = f", {_sreg(inst.saddr, 2) if _unwrap(inst.saddr) < 106 else decode_src(_unwrap(inst.saddr), cdna)}"
+  else: saddr_s = f", {_d(src[_off(inst.saddr):_off(inst.saddr)+1], cdna)}"
   if 'addtid' in name: return f"{instr} {reg_fn(inst.data if 'store' in name else inst.vdst)}{saddr_s}{mods}"
   if cdna: addr_w = 1 if seg == 'scratch' else 2
   else: addr_w = 1 if seg == 'scratch' or (_unwrap(inst.saddr) not in (0x7F, 124)) else 2

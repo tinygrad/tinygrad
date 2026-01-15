@@ -44,24 +44,23 @@ class Reg:
   def h(self) -> 'Reg': return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=True)
   @property
   def l(self) -> 'Reg': return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=False)
-  def __repr__(self):
-    o, sz = self.offset, self.sz
-    if 256 <= o < 512:
-      idx = o - 256
-      base = f"v[{idx}]" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
-    elif o < 106: base = f"s[{o}]" if sz == 1 else f"s[{o}:{o + sz - 1}]"
-    elif sz == 2 and o in self._PAIRS: base = self._PAIRS[o]
-    elif sz == 1 and o in self._NAMES: base = self._NAMES[o]
-    elif 108 <= o < 124:
-      idx = o - 108
-      base = f"ttmp[{idx}]" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
-    elif sz == 1 and 128 <= o <= 192: base = str(o - 128)
-    elif sz == 1 and 193 <= o <= 208: base = str(-(o - 192))
+  def _fmt(self, parens=True, upper=True) -> str:
+    o, sz, l, r = self.offset, self.sz, "[" if parens else "", "]" if parens else ""
+    if 256 <= o < 512: idx = o - 256; base = f"v{l}{idx}{r}" if sz == 1 else f"v{l}{idx}:{idx + sz - 1}{r}"
+    elif o < 106: base = f"s{l}{o}{r}" if sz == 1 else f"s{l}{o}:{o + sz - 1}{r}"
+    elif sz == 2 and o in self._PAIRS: base = self._PAIRS[o] if upper else self._PAIRS[o].lower()
+    elif o in self._NAMES: base = self._NAMES[o] if upper else self._NAMES[o].lower()  # special regs (any sz)
+    elif 108 <= o < 124: idx = o - 108; base = f"ttmp{l}{idx}{r}" if sz == 1 else f"ttmp{l}{idx}:{idx + sz - 1}{r}"
+    elif 128 <= o <= 192: base = str(o - 128)  # inline int constants (0-64)
+    elif 193 <= o <= 208: base = str(-(o - 192))  # inline negative int constants (-1 to -16)
     else: raise RuntimeError(f"unknown register: offset={o}, sz={sz}")
     if self.hi: base += ".h"
-    if self.abs_: base = f"abs({base})"
+    if self.abs_: base = f"abs({base})" if upper else f"|{base}|"
     if self.neg: base = f"-{base}"
     return base
+  @property
+  def disasm(self) -> str: return self._fmt(parens=True, upper=False)
+  def __repr__(self): return self._fmt(parens=True, upper=True)
 
 # Full src encoding space
 src = Reg(0, 512)
