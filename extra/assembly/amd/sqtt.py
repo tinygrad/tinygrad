@@ -318,9 +318,11 @@ for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
 # DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def decode(data: bytes) -> Iterator[PacketType]:
+def decode(data: bytes, pkt_filter:set|None=None, cls_filter:set|None=None) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances."""
   n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
+  if pkt_filter is None: pkt_filter = set([v[0] for v in _DECODE_INFO.values()])
+  if cls_filter is None: cls_filter = set()
 
   while pos + ((nib_count + nib_off + 1) >> 1) <= n:
     need = nib_count - nib_off
@@ -339,6 +341,8 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if special == 1 and (reg >> 9) & 1 and not (reg >> 8) & 1: delta = 0  # TS_DELTA_OR_MARK marker
     elif special == 2: delta += 8  # TS_DELTA_SHORT
     time += delta
+    if pkt_cls in cls_filter: yield pkt_cls
+    if pkt_cls not in pkt_filter: continue
     yield pkt_cls.from_raw(reg, time)
 
 # ═══════════════════════════════════════════════════════════════════════════════

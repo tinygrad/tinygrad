@@ -313,22 +313,20 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
 def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
   rows:dict[str, list[ProfileEvent]] = {}
   wave_insts:dict[str, dict[str, dict]] = {}
-  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER
-  from extra.assembly.amd.sqtt import INST, VALUINST, VMEMEXEC, ALUEXEC, IMMEDIATE, IMMEDIATE_MASK
+  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER, INST
   wave_starts:dict[tuple[int, int, int, int], int] = {} # [se, cu, simd, wave] -> time
   units:dict[str, itertools.count] = {} # unit -> number of events
-  insts:list = []
-  simd_sel = 0
+  insts, inst_simd_sel = 0, 0
   for e in data:
-    for p in decode(e.blob):
-      if isinstance(p, (INST, VALUINST, VMEMEXEC, ALUEXEC, IMMEDIATE, IMMEDIATE_MASK)): insts.append(p)
-      if isinstance(p, LAYOUT_HEADER): simd_sel = p.simd
+    for p in decode(e.blob, pkt_filter={WAVESTART, WAVEEND, LAYOUT_HEADER}, cls_filter={INST}):
+      if p is INST: insts |= 1
+      if isinstance(p, LAYOUT_HEADER): inst_simd_sel = p.simd
       if isinstance(p, WAVESTART): wave_starts[(e.se, p.cu, p.simd, p.wave)] = p._time
       if isinstance(p, WAVEEND):
         st = wave_starts.pop(key:=(e.se, p.cu, p.simd, p.wave))
         if (counter:=units.get(str(key))) is None: units[str(key)] = counter = itertools.count(0)
         # the first CU in the selected SIMD has the INST trace
-        name = f"{'INST' if (p.simd, p.cu) == (simd_sel, 0) and len(insts) > 0 else 'OCC'} WAVE:{p.wave} N:{next(counter)}"
+        name = f"{'INST' if (p.simd, p.cu) == (inst_simd_sel, 0) and insts > 0 else 'OCC'} WAVE:{p.wave} N:{next(counter)}"
         rows.setdefault(f"SE:{e.se} CU:{p.cu}", []).append(ProfileRangeEvent(f"SIMD:{p.simd}", name, Decimal(st), Decimal(p._time)))
   return rows, list(units), wave_insts
 
