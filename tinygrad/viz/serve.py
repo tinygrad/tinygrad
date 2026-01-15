@@ -500,14 +500,14 @@ def get_render(query:str) -> dict:
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
       # unpack using our decoder
-      with Timing("** unpack using our decoder"):
+      with Timing(f"{'** unpack using our decoder':<{32}}"):
         cu_events, units = unpack_sqtt2(data[1])
       for cu in sorted(cu_events, key=row_tuple):
         steps.append(create_step(f"RAW {cu} {len(cu_events[cu])}", ("/cu-sqtt-raw", i, len(steps)), depth=1,
                                  data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
       with soft_err(lambda err: ret.update(err)):
         # unpack using roc decoder
-        with Timing("** unpack using our rocprof"):
+        with Timing(f"{'** unpack using rocprof':<{32}}"):
           cu_events, units, wave_insts = unpack_sqtt(*data)
         for cu in sorted(cu_events, key=row_tuple):
           steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
