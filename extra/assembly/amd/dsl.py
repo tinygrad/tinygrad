@@ -96,13 +96,12 @@ bits = _Bits()
 
 class BitField:
   def __init__(self, hi: int, lo: int, default: int = 0):
-    self.hi, self.lo, self.default, self.name = hi, lo, default, None
+    self.hi, self.lo, self.default, self.name, self.mask = hi, lo, default, None, (1 << (hi - lo + 1)) - 1
   def __set_name__(self, owner, name): self.name = name
   def __eq__(self, other) -> 'FixedBitField':
     if isinstance(other, int): return FixedBitField(self.hi, self.lo, other)
     return NotImplemented
   def enum(self, enum_cls) -> 'EnumBitField': return EnumBitField(self.hi, self.lo, enum_cls)
-  def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
   def encode(self, val) -> int:
     assert isinstance(val, int), f"BitField.encode expects int, got {type(val).__name__}"
     return val
@@ -110,11 +109,11 @@ class BitField:
   def set(self, raw: int, val) -> int:
     if val is None: val = self.default
     encoded = self.encode(val)
-    if encoded < 0 or encoded > self.mask(): raise RuntimeError(f"field '{self.name}': value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
-    return (raw & ~(self.mask() << self.lo)) | (encoded << self.lo)
+    if encoded < 0 or encoded > self.mask: raise RuntimeError(f"field '{self.name}': value {encoded} doesn't fit in {self.hi - self.lo + 1} bits")
+    return (raw & ~(self.mask << self.lo)) | (encoded << self.lo)
   def __get__(self, obj, objtype=None):
     if obj is None: return self
-    return self.decode((obj._raw >> self.lo) & self.mask())
+    return self.decode((obj._raw >> self.lo) & self.mask)
 
 class FixedBitField(BitField):
   def set(self, raw: int, val=None) -> int:
