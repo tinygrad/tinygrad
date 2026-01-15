@@ -6,29 +6,29 @@
         {
           "fill-specializations" : [
             {
-              "value" : "none"
+              "value" : "automatic"
             },
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "display-p3:0.96611,0.94032,0.93319,1.00000"
+                "solid" : "display-p3:0.94011,0.96611,0.94301,1.00000"
               }
             },
             {
               "appearance" : "tinted",
               "value" : {
-                "solid" : "display-p3:0.97843,0.97382,1.00000,1.00000"
+                "solid" : "display-p3:0.79528,0.79528,0.79528,1.00000"
               }
             }
           ],
-          "glass" : true,
-          "image-name" : "tinyl.png",
-          "name" : "tinyl",
+          "hidden" : false,
+          "image-name" : "tiny.svg",
+          "name" : "tiny_svg",
           "position" : {
-            "scale" : 1,
+            "scale" : 5,
             "translation-in-points" : [
-              -6,
-              -26.7890625
+              0,
+              19
             ]
           }
         }
