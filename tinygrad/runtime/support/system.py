@@ -250,7 +250,7 @@ class LNXPCIIfaceBase:
 
 class RemoteCmd(enum.IntEnum):
   MAP_BAR, MAP_SYSMEM, CFG_READ, CFG_WRITE, RESET = 1, 2, 3, 4, 5
-  BULK_READ, BULK_WRITE, SYSMEM_READ, SYSMEM_WRITE = 6, 7, 8, 9
+  MMIO_READ, MMIO_WRITE, SYSMEM_READ, SYSMEM_WRITE = 6, 7, 8, 9
 
 class RemotePCIDevice(PCIDevice):
   def __init__(self, devpref:str, pcibus:str, bars:list[int], sock):
@@ -293,7 +293,7 @@ class RemoteMMIOInterface(MMIOInterface):
   def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', is_sysmem=False, addr=0):
     self.dev, self.residx, self.nbytes, self.fmt, self.is_sysmem, self.addr = dev, residx, nbytes, fmt, is_sysmem, addr
     self.el_sz = struct.calcsize(fmt)
-    self.rcmd, self.wcmd = (RemoteCmd.SYSMEM_READ, RemoteCmd.SYSMEM_WRITE) if is_sysmem else (RemoteCmd.BULK_READ, RemoteCmd.BULK_WRITE)
+    self.rcmd, self.wcmd = (RemoteCmd.SYSMEM_READ, RemoteCmd.SYSMEM_WRITE) if is_sysmem else (RemoteCmd.MMIO_READ, RemoteCmd.MMIO_WRITE)
 
   def __getitem__(self, index):
     if isinstance(index, slice):
