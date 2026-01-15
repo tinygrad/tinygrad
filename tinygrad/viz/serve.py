@@ -313,20 +313,20 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
 def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
   rows:dict[str, list[ProfileEvent]] = {}
   wave_insts:dict[str, dict[str, dict]] = {}
-  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER, INST
+  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER
   wave_starts:dict[tuple[int, int, int, int], int] = {} # [se, cu, simd, wave] -> time
   units:dict[str, itertools.count] = {} # unit -> number of events
-  insts, inst_simd_sel = 0, 0
+  cnt, inst_simd_sel = itertools.count(0), 0
   for e in data:
-    for p in decode(e.blob, pkt_filter={WAVESTART, WAVEEND, LAYOUT_HEADER}, cls_filter={INST}):
-      if p is INST: insts |= 1
+    for p in decode(e.blob, pkt_filter={WAVESTART, WAVEEND, LAYOUT_HEADER}):
+      if next(cnt) > 10_000: break
       if isinstance(p, LAYOUT_HEADER): inst_simd_sel = p.simd
       if isinstance(p, WAVESTART): wave_starts[(e.se, p.cu, p.simd, p.wave)] = p._time
       if isinstance(p, WAVEEND):
         st = wave_starts.pop(key:=(e.se, p.cu, p.simd, p.wave))
         if (counter:=units.get(str(key))) is None: units[str(key)] = counter = itertools.count(0)
         # the first CU in the selected SIMD has the INST trace
-        name = f"{'INST' if (p.simd, p.cu) == (inst_simd_sel, 0) and insts > 0 else 'OCC'} WAVE:{p.wave} N:{next(counter)}"
+        name = f"{'INST' if (p.simd, p.cu) == (inst_simd_sel, 0) else 'OCC'} WAVE:{p.wave} N:{next(counter)}"
         rows.setdefault(f"SE:{e.se} CU:{p.cu}", []).append(ProfileRangeEvent(f"SIMD:{p.simd}", name, Decimal(st), Decimal(p._time)))
   return rows, list(units), wave_insts
 
@@ -511,7 +511,7 @@ def get_render(query:str) -> dict:
                                    data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
             data = wave_insts[cu][k]
-            steps.append(create_step(k.replace(cu, ""), (f"/sqtt-insts{url_suffix}", i, len(steps)), loc=data["loc"], depth=2, data=data))
+            #steps.append(create_step(k.replace(cu, ""), (f"/sqtt-insts{url_suffix}", i, len(steps)), loc=data["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
   if fmt.startswith("cu-sqtt"): return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
