@@ -278,10 +278,12 @@ def load_counters(profile:list[ProfileEvent]) -> None:
 def sqtt_timeline(e) -> list[ProfileEvent]:
   ret:list[ProfileEvent] = []
   from extra.assembly.amd.sqtt import decode, INST, InstOp
-  op_idx = {o:i for i,o in enumerate(InstOp)}
+  #op_idx = {o:i for i,o in enumerate(InstOp)}
+  op_idx:dict = {}
   rows:dict[str, None] = {}
   for p in decode(e.blob):
     if isinstance(p, INST):
+      if p.op not in op_idx: op_idx[p.op] = len(op_idx)
       op_name = f"{p.op.name}:{op_idx[p.op]}" if isinstance(p.op, InstOp) else f"0x{p.op:02x}:{len(op_idx)}"
       rows[r:=f"WAVE:{p.wave} INST:1"] = None
       ret.append(ProfileRangeEvent(r, f"SINST {op_name}", Decimal(p._time), Decimal(p._time+10)))
