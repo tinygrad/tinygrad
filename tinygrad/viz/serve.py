@@ -6,7 +6,7 @@ from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, TCPServerWithReuse, HTTPRequestHandler
+from tinygrad.helpers import printable, TCPServerWithReuse, HTTPRequestHandler, Timing
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
@@ -500,13 +500,15 @@ def get_render(query:str) -> dict:
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
       # unpack using our decoder
-      cu_events, units = unpack_sqtt2(data[1])
+      with Timing("** unpack using our decoder"):
+        cu_events, units = unpack_sqtt2(data[1])
       for cu in sorted(cu_events, key=row_tuple):
         steps.append(create_step(f"RAW {cu} {len(cu_events[cu])}", ("/cu-sqtt-raw", i, len(steps)), depth=1,
                                  data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
       with soft_err(lambda err: ret.update(err)):
         # unpack using roc decoder
-        cu_events, units, wave_insts = unpack_sqtt(*data)
+        with Timing("** unpack using our rocprof"):
+          cu_events, units, wave_insts = unpack_sqtt(*data)
         for cu in sorted(cu_events, key=row_tuple):
           steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
                                    data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
