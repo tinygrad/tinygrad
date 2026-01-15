@@ -16,7 +16,7 @@ def _matches_encoding(word: int, cls: type[Inst]) -> bool:
   enc = next(((n, f) for n, f in cls._fields if isinstance(f, FixedBitField) and n == 'encoding'), None)
   if enc is None: return False
   bf = enc[1]
-  return ((word >> bf.lo) & bf.mask()) == bf.default
+  return ((word >> bf.lo) & bf.mask) == bf.default
 
 # Order matters: more specific encodings first, VOP2 last (it's a catch-all for bit31=0)
 _RDNA_FORMATS_64 = [VOPD, VOP3P, VINTERP, VOP3, DS, FLAT, MUBUF, MTBUF, MIMG, SMEM, EXP]
