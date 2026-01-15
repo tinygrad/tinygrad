@@ -24,7 +24,7 @@ def asm_kernel() -> UOp:
   src = template.replace("INSTRUCTIONS", (pathlib.Path(__file__).parent/"gemm.s").read_text())
 
   sink = UOp.sink(a, b, c, lidx, gidx, arg=KernelInfo(name="gemm"))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)), arg=())
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
 
 if __name__ == "__main__":
   test_matmul(asm_kernel(), dtype=dtypes.half, N=N)
