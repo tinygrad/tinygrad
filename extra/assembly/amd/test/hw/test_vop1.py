@@ -255,7 +255,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_small(self):
     """V_CVT_F16_F32 converts small f32 value."""
-    from extra.assembly.amd.dsl import f32_to_f16
+    from extra.assembly.amd.pcode import f32_to_f16
     instructions = [
       v_mov_b32_e32(v[0], 0.5),
       v_cvt_f16_f32_e32(v[1], v[0]),
@@ -293,7 +293,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_reads_full_32bit_source(self):
     """V_CVT_F16_F32 must read full 32-bit f32 source."""
-    from extra.assembly.amd.dsl import _f16
+    from extra.assembly.amd.pcode import _f16
     instructions = [
       s_mov_b32(s[0], 0x3fc00000),  # f32 1.5
       v_mov_b32_e32(v[0], s[0]),
@@ -560,7 +560,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_abs_negative(self):
     """V_CVT_F32_F16 with |abs| on negative value."""
-    from extra.assembly.amd.dsl import f32_to_f16
+    from extra.assembly.amd.pcode import f32_to_f16
     f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
     instructions = [
       s_mov_b32(s[0], f16_neg1),
@@ -573,7 +573,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_abs_positive(self):
     """V_CVT_F32_F16 with |abs| on positive value (should stay positive)."""
-    from extra.assembly.amd.dsl import f32_to_f16
+    from extra.assembly.amd.pcode import f32_to_f16
     f16_2 = f32_to_f16(2.0)  # 0x4000
     instructions = [
       s_mov_b32(s[0], f16_2),
@@ -586,7 +586,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_neg_positive(self):
     """V_CVT_F32_F16 with neg on positive value."""
-    from extra.assembly.amd.dsl import f32_to_f16
+    from extra.assembly.amd.pcode import f32_to_f16
     f16_2 = f32_to_f16(2.0)  # 0x4000
     instructions = [
       s_mov_b32(s[0], f16_2),
@@ -599,7 +599,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f32_f16_neg_negative(self):
     """V_CVT_F32_F16 with neg on negative value (double negative)."""
-    from extra.assembly.amd.dsl import f32_to_f16
+    from extra.assembly.amd.pcode import f32_to_f16
     f16_neg2 = f32_to_f16(-2.0)  # 0xc000
     instructions = [
       s_mov_b32(s[0], f16_neg2),
@@ -612,7 +612,7 @@ class TestCvtF16Modifiers(unittest.TestCase):
 
   def test_v_cvt_f16_f32_then_pack_for_wmma(self):
     """CVT F32->F16 followed by pack (common WMMA pattern)."""
-    from extra.assembly.amd.dsl import _f16
+    from extra.assembly.amd.pcode import _f16
     f32_val = 3.5
     instructions = [
       s_mov_b32(s[0], f2i(f32_val)),
@@ -668,7 +668,7 @@ class TestConversionRounding(unittest.TestCase):
 
   def test_f16_to_f32_precision(self):
     """F16 to F32 conversion precision."""
-    from extra.assembly.amd.dsl import f32_to_f16
+    from extra.assembly.amd.pcode import f32_to_f16
     f16_val = f32_to_f16(1.5)
     instructions = [
       s_mov_b32(s[0], f16_val),
@@ -680,7 +680,7 @@ class TestConversionRounding(unittest.TestCase):
 
   def test_f16_denormal_to_f32(self):
     """F16 denormal converts to small positive f32."""
-    from extra.assembly.amd.dsl import _f16
+    from extra.assembly.amd.pcode import _f16
     f16_denorm = 0x0001  # Smallest positive f16 denormal
     instructions = [
       v_mov_b32_e32(v[0], f16_denorm),

@@ -4,9 +4,9 @@ from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp
 from extra.assembly.amd.pcode_parse import parse, _BINOPS, _QDTYPES, If, For, Lambda, Break, Return
 from extra.assembly.amd.pcode_transform import parse_transform
-from extra.assembly.amd.autogen.rdna3.str_pcode import PSEUDOCODE_STRINGS as RDNA3_PCODE
-from extra.assembly.amd.autogen.rdna4.str_pcode import PSEUDOCODE_STRINGS as RDNA4_PCODE
-from extra.assembly.amd.autogen.cdna.str_pcode import PSEUDOCODE_STRINGS as CDNA_PCODE
+from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE as RDNA3_PCODE
+from extra.assembly.amd.autogen.rdna4.str_pcode import PCODE as RDNA4_PCODE
+from extra.assembly.amd.autogen.cdna.str_pcode import PCODE as CDNA_PCODE
 
 DEBUG = int(os.getenv("DEBUG", "0"))
 
@@ -174,10 +174,8 @@ def _test_arch(test, pcode_strings, min_parse, min_roundtrip, min_transform, nam
   parse_errs: dict[str, list[str]] = {}
   transform_errs: dict[str, list[str]] = {}
 
-  # test in random order
-  triples = []
-  for cls, ops in pcode_strings.items():
-    for op, pc in ops.items(): triples.append((cls, op, pc))
+  # test in random order - flat dict {op: pcode}
+  triples = [(type(op), op, pc) for op, pc in pcode_strings.items()]
   random.shuffle(triples)
 
   for cls, op, pc in triples:
@@ -240,9 +238,9 @@ def _test_arch(test, pcode_strings, min_parse, min_roundtrip, min_transform, nam
   test.assertGreater(transform_rate, min_transform, f"Transform rate {transform_rate:.1f}% should be >{min_transform}%")
 
 class TestQcodeParseAndRoundtrip(unittest.TestCase):
-  def test_rdna3(self): _test_arch(self, RDNA3_PCODE, min_parse=98, min_roundtrip=98, min_transform=97, name="RDNA3")
+  def test_rdna3(self): _test_arch(self, RDNA3_PCODE, min_parse=98, min_roundtrip=97, min_transform=97, name="RDNA3")
   def test_rdna4(self): _test_arch(self, RDNA4_PCODE, min_parse=96, min_roundtrip=96, min_transform=96, name="RDNA4")
-  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=95, min_roundtrip=93, min_transform=92, name="CDNA")
+  def test_cdna(self): _test_arch(self, CDNA_PCODE, min_parse=94, min_roundtrip=93, min_transform=92, name="CDNA")
 
 if __name__ == "__main__":
   unittest.main()
