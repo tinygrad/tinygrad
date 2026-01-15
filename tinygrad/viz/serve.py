@@ -318,7 +318,7 @@ def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str], d
   units:dict[str, itertools.count] = {} # unit -> number of events
   cnt, inst_simd_sel = itertools.count(0), 0
   for e in data:
-    for p in decode(e.blob, pkt_filter={WAVESTART, WAVEEND, LAYOUT_HEADER}):
+    for p in decode(e.blob):
       if next(cnt) > 10_000: break
       if isinstance(p, LAYOUT_HEADER): inst_simd_sel = p.simd
       if isinstance(p, WAVESTART): wave_starts[(e.se, p.cu, p.simd, p.wave)] = p._time
