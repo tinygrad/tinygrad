@@ -110,33 +110,33 @@ class TestMIMG(unittest.TestCase):
   """Test MIMG (image) instructions."""
 
   def test_image_load_2d(self):
-    # image_load v[0:3], v[4:5], s[0:7] dmask:0xf dim:SQ_RSRC_IMG_2D
+    # image_load v[0:3], v[4:7], s[0:7] dmask:0xf dim:SQ_RSRC_IMG_2D
     # GFX11: encoding: [0x04,0x0f,0x00,0xf0,0x04,0x00,0x00,0x00]
-    inst = image_load(vdata=v[0:3], vaddr=v[4:5], srsrc=s[0:7], dmask=0xf, dim=1)  # dim=1 is SQ_RSRC_IMG_2D
+    inst = image_load(vdata=v[0:3], vaddr=v[4:7], srsrc=s[0:7], dmask=0xf, dim=1)  # dim=1 is SQ_RSRC_IMG_2D
     self.assertEqual(inst.to_bytes(), bytes([0x04,0x0f,0x00,0xf0,0x04,0x00,0x00,0x00]))
 
   def test_image_store_2d(self):
-    # image_store v[0:3], v[4:5], s[0:7] dmask:0xf dim:SQ_RSRC_IMG_2D
+    # image_store v[0:3], v[4:7], s[0:7] dmask:0xf dim:SQ_RSRC_IMG_2D
     # GFX11: encoding: [0x04,0x0f,0x18,0xf0,0x04,0x00,0x00,0x00]
-    inst = image_store(vdata=v[0:3], vaddr=v[4:5], srsrc=s[0:7], dmask=0xf, dim=1)
+    inst = image_store(vdata=v[0:3], vaddr=v[4:7], srsrc=s[0:7], dmask=0xf, dim=1)
     self.assertEqual(inst.to_bytes(), bytes([0x04,0x0f,0x18,0xf0,0x04,0x00,0x00,0x00]))
 
   def test_image_load_1d(self):
-    # image_load v[0:3], v4, s[0:7] dmask:0xf dim:SQ_RSRC_IMG_1D
+    # image_load v[0:3], v[4:7], s[0:7] dmask:0xf dim:SQ_RSRC_IMG_1D
     # GFX11: encoding: [0x00,0x0f,0x00,0xf0,0x04,0x00,0x00,0x00]
-    inst = image_load(vdata=v[0:3], vaddr=v[4], srsrc=s[0:7], dmask=0xf, dim=0)  # dim=0 is SQ_RSRC_IMG_1D
+    inst = image_load(vdata=v[0:3], vaddr=v[4:7], srsrc=s[0:7], dmask=0xf, dim=0)  # dim=0 is SQ_RSRC_IMG_1D
     self.assertEqual(inst.to_bytes(), bytes([0x00,0x0f,0x00,0xf0,0x04,0x00,0x00,0x00]))
 
   def test_image_sample(self):
-    # image_sample v[0:3], v[4:5], s[0:7], s[8:11] dmask:0xf dim:SQ_RSRC_IMG_2D
+    # image_sample v[0:3], v[4:6], s[0:7], s[8:11] dmask:0xf dim:SQ_RSRC_IMG_2D
     # GFX11: encoding: [0x04,0x0f,0x6c,0xf0,0x04,0x00,0x00,0x08]
-    inst = image_sample(vdata=v[0:3], vaddr=v[4:5], srsrc=s[0:7], ssamp=s[8:11], dmask=0xf, dim=1)
+    inst = image_sample(vdata=v[0:3], vaddr=v[4:6], srsrc=s[0:7], ssamp=s[8:11], dmask=0xf, dim=1)
     self.assertEqual(inst.to_bytes(), bytes([0x04,0x0f,0x6c,0xf0,0x04,0x00,0x00,0x08]))
 
   def test_image_load_d16(self):
-    # image_load v[0:1], v[4:5], s[0:7] dmask:0xf dim:SQ_RSRC_IMG_2D d16
+    # image_load v[0:3], v[4:7], s[0:7] dmask:0xf dim:SQ_RSRC_IMG_2D d16
     # GFX11: encoding: [0x04,0x0f,0x02,0xf0,0x04,0x00,0x00,0x00]
-    inst = image_load(vdata=v[0:1], vaddr=v[4:5], srsrc=s[0:7], dmask=0xf, dim=1, d16=1)
+    inst = image_load(vdata=v[0:3], vaddr=v[4:7], srsrc=s[0:7], dmask=0xf, dim=1, d16=1)
     self.assertEqual(inst.to_bytes(), bytes([0x04,0x0f,0x02,0xf0,0x04,0x00,0x00,0x00]))
 
 
@@ -387,7 +387,7 @@ class TestDetectFormat(unittest.TestCase):
     self.assertEqual(detect_format(tbuffer_load_format_x(v[0], v[1], s[0:3], s[5], format=22).to_bytes()), MTBUF)
 
   def test_detect_mimg(self):
-    self.assertEqual(detect_format(image_load(v[0:3], v[4:5], s[0:7], dmask=0xf, dim=1).to_bytes()), MIMG)
+    self.assertEqual(detect_format(image_load(v[0:3], v[4:7], s[0:7], dmask=0xf, dim=1).to_bytes()), MIMG)
 
   def test_detect_exp(self):
     self.assertEqual(detect_format(EXP(en=0xf, target=0, vsrc0=v[0], vsrc1=v[1], vsrc2=v[2], vsrc3=v[3]).to_bytes()), EXP)
