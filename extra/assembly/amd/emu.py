@@ -44,6 +44,12 @@ def _i64(f):
   if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
   try: return _struct_Q.unpack(_struct_d.pack(f))[0]
   except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+def f32_to_f16(f):
+  f = float(f)
+  if math.isnan(f): return 0x7e00
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
+  try: return _struct_H.unpack(_struct_e.pack(f))[0]
+  except OverflowError: return 0x7c00 if f > 0 else 0xfc00
 def unwrap(v): return v.offset if hasattr(v, 'offset') else v
 
 class SGPRArray:
