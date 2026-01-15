@@ -839,7 +839,6 @@ class CustomKernel:
   grad_fxn: Callable|None = None
   # sadly CustomKernel can't be pickled or reconstructed as a str
   def __reduce__(self): return (CustomKernel, (panic,))
-  # custom kernels must have a unique cache key
   def __repr__(self): return f"CustomKernel({id(self.fxn)})"
 
 @dataclass(frozen=True)

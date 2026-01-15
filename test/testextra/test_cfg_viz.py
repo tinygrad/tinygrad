@@ -70,7 +70,7 @@ def asm_kernel(out:UOp, insts:list[str|Inst], name:str, device:str, compiler:Com
   sink = UOp.sink(out, lidx, gidx, arg=KernelInfo(name=name))
   src, lib = assemble(name, insts, compiler)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)), arg=())
+                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def run_asm(name:str, insts:list) -> None:
   fxn = functools.partial(asm_kernel, insts=insts, name=name, device=Device.DEFAULT, compiler=Device[Device.DEFAULT].compiler)
