@@ -276,13 +276,14 @@ class Inst:
     """Get bit widths for each operand field, with WAVE32 and addr/saddr adjustments."""
     if not hasattr(self, 'op'): return {k: v[1] for k, v in self.operands.items()}
     bits = {k: v[1] for k, v in self.operands.items()}
-    # RDNA (WAVE32): condition masks and carry flags are 32-bit
+    # RDNA (WAVE32): condition masks, carry flags, and compare results are 32-bit
     if not self._is_cdna():
       name = self.op_name.lower()
       if 'cndmask' in name and 'src2' in bits: bits['src2'] = 32
       if '_co_ci_' in name:
         if 'src2' in bits: bits['src2'] = 32
         if 'sdst' in bits: bits['sdst'] = 32
+      if 'cmp' in name and 'vdst' in bits: bits['vdst'] = 32
     # GLOBAL/FLAT: addr is 32-bit if saddr is valid SGPR, 64-bit if saddr is NULL
     if 'addr' in bits and hasattr(self, 'saddr'):
       saddr_val = self.saddr.offset if isinstance(self.saddr, Reg) else self.saddr
@@ -295,8 +296,6 @@ class Inst:
     # MUBUF/MTBUF: vaddr is variable, vdata depends on format
     regs.pop('vaddr', None)
     regs.pop('vdata', None)
-    # VOPC/VOP3 vdst for compares is wave-size dependent
-    if 'vdst' in regs and hasattr(self, 'op') and 'cmp' in self.op_name.lower(): regs.pop('vdst')
     return regs
 
   @functools.cached_property
