@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
 import ctypes, pathlib, traceback, itertools
-from dataclasses import dataclass
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
@@ -312,29 +311,25 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   return cu_events, list(units), wave_insts
 
 def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str]]:
-  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, INST, LAYOUT_HEADER, INST
+  rows:dict[str, list[ProfileEvent]] = {}
+  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER
+  from extra.assembly.amd.sqtt import INST, VALUINST, VMEMEXEC, ALUEXEC, IMMEDIATE, IMMEDIATE_MASK
   wave_starts:dict[tuple[int, int, int, int], int] = {} # [se, cu, simd, wave] -> time
-  #cu_events:dict[str, list[ProfileEvent]] = {}
-  #wave_starts:dict[WaveUnit, int] = {} # unit -> start_time
-  #inst_traces:dict[WaveUnit, int] = {} # unit -> number of inst traces
-  #units:dict[WaveUnit, itertools.count] = {} # unit -> number of waves that landed on it
-  cu_events:dict[str, list[ProfileEvent]] = {}
   units:dict[str, itertools.count] = {} # unit -> number of events
   insts:list = []
   simd_sel = 0
   for e in data:
     for p in decode(e.blob):
-      if isinstance(p, INST): insts.append(p)
-      if isinstance(p, LAYOUT_HEADER): simd_selct = p.simd
+      if isinstance(p, (INST, VALUINST, VMEMEXEC, ALUEXEC, IMMEDIATE, IMMEDIATE_MASK)): insts.append(p)
+      if isinstance(p, LAYOUT_HEADER): simd_sel = p.simd
       if isinstance(p, WAVESTART): wave_starts[(e.se, p.cu, p.simd, p.wave)] = p._time
       if isinstance(p, WAVEEND):
         st = wave_starts.pop(key:=(e.se, p.cu, p.simd, p.wave))
         if (counter:=units.get(str(key))) is None: units[str(key)] = counter = itertools.count(0)
         # the first CU in the selected SIMD has the INST trace
-        name = "INST" if (p.simd, p.cu) == (simd_sel, 0) and len(insts) > 0 else "OCC"
-        cu_events.setdefault(k:=f"SE:{e.se} CU:{p.cu}", []).append(ProfileRangeEvent(f"SIMD:{p.simd}", f"{name} WAVE:{p.wave} N:{next(counter)}",
-                                                                                     Decimal(st), Decimal(p._time)))
-  return cu_events, []
+        name = f"{'INST' if (p.simd, p.cu) == (simd_sel, 0) and len(insts) > 0 else 'OCC'} WAVE:{p.wave} N:{next(counter)}"
+        rows.setdefault(f"SE:{e.se} CU:{p.cu}", []).append(ProfileRangeEvent(f"SIMD:{p.simd}", name, Decimal(st), Decimal(p._time)))
+  return rows, list(units)
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
