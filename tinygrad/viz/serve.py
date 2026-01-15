@@ -312,7 +312,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
 
 def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
   rows:dict[str, list[ProfileEvent]] = {}
-  wave_insts:dict[str, list[str, dict]] = {}
+  wave_insts:dict[str, dict[str, dict]] = {}
   from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER
   from extra.assembly.amd.sqtt import INST, VALUINST, VMEMEXEC, ALUEXEC, IMMEDIATE, IMMEDIATE_MASK
   wave_starts:dict[tuple[int, int, int, int], int] = {} # [se, cu, simd, wave] -> time
@@ -515,8 +515,7 @@ def get_render(query:str) -> dict:
             data = wave_insts[cu][k]
             steps.append(create_step(k.replace(cu, ""), (f"/sqtt-insts{url_suffix}", i, len(steps)), loc=data["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
-  if fmt == "cu-sqtt-raw": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
-  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
+  if fmt.startswith("cu-sqtt"): return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
