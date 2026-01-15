@@ -262,18 +262,15 @@ class RemotePCIDevice(PCIDevice):
 
   def _recvall(self, n:int) -> bytes:
     data = b''
-    while len(data) < n and (chunk := self.sock.recv(n - len(data))): data += chunk
+    while len(data) < n and (chunk:=self.sock.recv(n - len(data))): data += chunk
     if len(data) < n: raise RuntimeError("Connection closed")
     return data
 
-  def _get_resp(self, cmd, args) -> tuple[int, int]:
-    resp = struct.unpack('<BQQ', self._recvall(17))
-    if resp[0] != 0: raise RuntimeError(f"RPC failed: cmd={cmd} ({RemoteCmd(cmd).name}), args={args}, status={resp[0]}, resp=({resp[1]}, {resp[2]})")
-    return resp[1], resp[2]
-
   def _rpc(self, cmd:int, *args:int, readout_size:int=0) -> tuple[int, int, bytes|None]:
     self.sock.sendall(struct.pack('<BBQQQ', cmd, *(*args, 0, 0, 0, 0)[:4]))
-    return self._get_resp(cmd, args) + ((self._recvall(readout_size) if readout_size > 0 else None),)
+    if (resp:=struct.unpack('<BQQ', self._recvall(17)))[0] != 0:
+      raise RuntimeError(f"RPC failed: cmd={cmd} ({RemoteCmd(cmd).name}), args={args}, status={resp[0]}, resp=({resp[1]}, {resp[2]})")
+    return (resp[1], resp[2]) + ((self._recvall(readout_size) if readout_size > 0 else None),)
 
   def _bulk_read(self, cmd:int, idx:int, offset:int, size:int) -> bytes: return unwrap(self._rpc(cmd, idx, offset, size, readout_size=size)[2])
   def _bulk_write(self, cmd:int, idx:int, offset:int, data:bytes): self.sock.sendall(struct.pack('<BBQQQ', cmd, idx, offset, len(data), 0) + data)
