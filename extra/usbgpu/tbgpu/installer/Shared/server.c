@@ -13,7 +13,7 @@
 enum {
   CMD_MAP_BAR = 1, CMD_MAP_SYSMEM = 2, CMD_CFG_READ = 3, CMD_CFG_WRITE = 4,
   CMD_RESET = 5, CMD_MMIO_BULK_READ = 6, CMD_MMIO_BULK_WRITE = 7,
-  CMD_SYSMEM_BULK_READ = 8, CMD_SYSMEM_BULK_WRITE = 9, CMD_QUIT = 255,
+  CMD_SYSMEM_BULK_READ = 8, CMD_SYSMEM_BULK_WRITE = 9,
   RESP_OK = 0, RESP_ERR = 1,
 };
 
@@ -22,6 +22,10 @@ enum {
 #define RESP_ERR_BREAK() { resp.status = RESP_ERR; break; }
 #define RESP_SEND_DATA(sz, data) { resp.status = RESP_OK; resp.value = (sz); send_response(fd, &resp, -1); send(fd, data, sz, 0); send_resp = 0; break; }
 #define NO_RESP() { send_resp = 0; break; }
+
+#define BULK_BUF_SIZE (16 * 1024 * 1024)
+#define MAX_BARS 6
+#define MAX_SYSMEM 64
 
 typedef struct {
   uint8_t cmd, bar;
@@ -32,10 +36,6 @@ typedef struct {
   uint8_t status;
   uint64_t value, addr;
 } __attribute__((packed)) response_t;
-
-#define BULK_BUF_SIZE (16 * 1024 * 1024)
-#define MAX_BARS 6
-#define MAX_SYSMEM 64
 
 static uint8_t g_bulk_buf[BULK_BUF_SIZE];
 static io_connect_t g_conn = IO_OBJECT_NULL;
@@ -129,6 +129,17 @@ static int send_response(int fd, response_t *resp, int send_fd) {
   return sendmsg(fd, &msg, 0) > 0 ? 0 : -1;
 }
 
+static void cleanup(void) {
+  for (int i = 0; i < MAX_BARS; i++) {
+	if (g_bars[i].mapped) { IOConnectUnmapMemory64(g_conn, i, mach_task_self(), g_bars[i].addr); g_bars[i].mapped = 0; }
+  }
+  for (int i = 0; i < g_sysmem_count; i++) {
+	if (g_sysmem[i].mapped) { IOConnectUnmapMemory64(g_conn, g_sysmem[i].mem_type, mach_task_self(), g_sysmem[i].addr); g_sysmem[i].mapped = 0; }
+  }
+  g_sysmem_count = 0;
+  if (g_conn != IO_OBJECT_NULL) { IOServiceClose(g_conn); g_conn = IO_OBJECT_NULL; }
+}
+
 static void handle_client(int fd) {
   request_t req;
   response_t resp;
@@ -176,11 +187,6 @@ static void handle_client(int fd) {
         if (validate_sysmem(req.bar, req.offset, req.size)) { drain(fd, req.size); NO_RESP(); }
         recvall(fd, (void*)(g_sysmem[req.bar].addr + req.offset), req.size);
         NO_RESP();
-      case CMD_QUIT:
-        printf("quit requested\n");
-        resp.status = RESP_OK;
-        send_response(fd, &resp, -1);
-        return;
       default:
         RESP_ERR_BREAK();
     }
@@ -188,23 +194,7 @@ static void handle_client(int fd) {
   }
 
   printf("client disconnected\n");
-  int cleaned = g_sysmem_count;
-  for (int i = 0; i < g_sysmem_count; i++) {
-    if (g_sysmem[i].mapped) { IOConnectUnmapMemory64(g_conn, g_sysmem[i].mem_type, mach_task_self(), g_sysmem[i].addr); g_sysmem[i].mapped = 0; }
-  }
-  g_sysmem_count = 0;
-  printf("cleaned %d sysmem allocations\n", cleaned);
-}
-
-static void cleanup(void) {
-  for (int i = 0; i < MAX_BARS; i++) {
-    if (g_bars[i].mapped) { IOConnectUnmapMemory64(g_conn, i, mach_task_self(), g_bars[i].addr); g_bars[i].mapped = 0; }
-  }
-  for (int i = 0; i < g_sysmem_count; i++) {
-    if (g_sysmem[i].mapped) { IOConnectUnmapMemory64(g_conn, g_sysmem[i].mem_type, mach_task_self(), g_sysmem[i].addr); g_sysmem[i].mapped = 0; }
-  }
-  g_sysmem_count = 0;
-  if (g_conn != IO_OBJECT_NULL) { IOServiceClose(g_conn); g_conn = IO_OBJECT_NULL; }
+  cleanup();
 }
 
 int run_server(const char *sock_path) {
