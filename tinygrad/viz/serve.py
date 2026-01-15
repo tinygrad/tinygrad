@@ -6,7 +6,7 @@ from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, TCPServerWithReuse, HTTPRequestHandler, Timing
+from tinygrad.helpers import printable, TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
@@ -218,7 +218,7 @@ def soft_err(fn:Callable):
   try: yield
   except Exception: fn({"src":traceback.format_exc()})
 
-def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
+def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(ss[1]) if len(ss:=x.split(":"))>1 else 999 for x in row.split())
 
 # *** Performance counters
 
@@ -274,11 +274,19 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     if (sqtt:=v.get(ProfileSQTTEvent)):
       # to decode a SQTT trace, we need the raw stream, program binary and device properties
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
-      if getenv("SQTT_PARSE"):
-        # run our decoder on startup, we don't use this since it only works on gfx11
-        from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-        for e in sqtt: parse_sqtt_print_packets(e.blob)
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
+
+def sqtt_timeline(e) -> list[ProfileEvent]:
+  ret:list[ProfileEvent] = []
+  from extra.assembly.amd.sqtt import decode, INST, InstOp
+  op_idx = {o:i for i,o in enumerate(InstOp)}
+  rows:dict[str, None] = {}
+  for p in decode(e.blob):
+    if isinstance(p, INST):
+      op_name = f"{p.op.name}:{op_idx[p.op]}" if isinstance(p.op, InstOp) else f"0x{p.op:02x}:{len(op_idx)}"
+      rows[row:=f"WAVE:{p.wave} INST:1"] = None
+      ret.append(ProfileRangeEvent(row, f"SINST {op_name}", Decimal(p._time), Decimal(p._time+10)))
+  return [ProfilePointEvent(row, "start", row, ts=Decimal(0)) for row in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -308,33 +316,10 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     else:
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
       events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
-  return cu_events, list(units), wave_insts
-
-def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
-  rows:dict[str, list[ProfileEvent]] = {}
-  wave_insts:dict[str, dict[str, dict]] = {}
-  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER, INST, InstOp
-  wave_starts:dict[tuple[int, int, int, int], int] = {} # [se, cu, simd, wave] -> time
-  units:dict[str, itertools.count] = {} # unit -> number of events
-  all_ops:dict[str, int] = {}
-  cnt, inst_simd_sel = itertools.count(0), 0
+  # * INST timeline
   for e in data:
-    for p in decode(e.blob):
-      if next(cnt) > 10_000: break
-      if isinstance(p, LAYOUT_HEADER): inst_simd_sel = p.simd
-      if isinstance(p, WAVESTART): wave_starts[(e.se, p.cu, p.simd, p.wave)] = p._time
-      if isinstance(p, INST):
-        op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
-        op_idx = all_ops.setdefault(op_name, len(all_ops)) # TODO: stable order
-        name = f"SINST {op_name}:{op_idx}"
-        rows.setdefault(f"SE:{e.se}", []).append(ProfileRangeEvent(f"WAVE:{p.wave} ", name, Decimal(p._time), Decimal(p._time+1)))
-      if isinstance(p, WAVEEND):
-        st = wave_starts.pop(key:=(e.se, p.cu, p.simd, p.wave))
-        if (counter:=units.get(str(key))) is None: units[str(key)] = counter = itertools.count(0)
-        # the first CU in the selected SIMD has the INST trace
-        name = f"{'INST' if (p.simd, p.cu) == (inst_simd_sel, 0) else 'OCC'} WAVE:{p.wave} N:{next(counter)}"
-        rows.setdefault(f"SE:{e.se} CU:{p.cu}", []).append(ProfileRangeEvent(f"SIMD:{p.simd}", name, Decimal(st), Decimal(p._time)))
-  return rows, list(units), wave_insts
+    if (timeline:=sqtt_timeline(e)): cu_events[f"SE:{e.se} Packets"] = timeline
+  return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
@@ -504,22 +489,15 @@ def get_render(query:str) -> dict:
   if fmt == "prg-sqtt":
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
-      # unpack using our decoder
-      with Timing(f"{'** unpack using our decoder':<{32}}"):
-        raw_sqtt = unpack_sqtt2(data[1])
-      # unpack using rocprof decoder
-      with Timing(f"{'** unpack using rocprof':<{32}}"):
-        roc_sqtt = unpack_sqtt(*data)
-      # generic list constructor
-      for ((cu_events, units, wave_insts), name_suffix, url_suffix) in ((roc_sqtt, "", ""), (raw_sqtt, "PACKETS ", "-pkts")):
+      with soft_err(lambda err: ret.update(err)):
+        cu_events, units, wave_insts = unpack_sqtt(*data)
         for cu in sorted(cu_events, key=row_tuple):
-          steps.append(create_step(f"{name_suffix}{cu} {len(cu_events[cu])}", (f"/cu-sqtt{url_suffix}", i, len(steps)), depth=1,
+          steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
                                    data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
-            data = wave_insts[cu][k]
-            #steps.append(create_step(k.replace(cu, ""), (f"/sqtt-insts{url_suffix}", i, len(steps)), loc=data["loc"], depth=2, data=data))
+            steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
-  if fmt.startswith("cu-sqtt"): return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
+  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
