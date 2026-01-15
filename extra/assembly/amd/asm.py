@@ -33,30 +33,6 @@ from extra.assembly.amd.disasm import disasm, HWREG, HWREG_RDNA4
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# RDNA unified buffer format (not in XML, hardcoded from AMD documentation)
-BUF_FMT = {'BUF_FMT_8_UNORM': 1, 'BUF_FMT_8_SNORM': 2, 'BUF_FMT_8_USCALED': 3, 'BUF_FMT_8_SSCALED': 4,
-  'BUF_FMT_8_UINT': 5, 'BUF_FMT_8_SINT': 6, 'BUF_FMT_16_UNORM': 7, 'BUF_FMT_16_SNORM': 8,
-  'BUF_FMT_16_USCALED': 9, 'BUF_FMT_16_SSCALED': 10, 'BUF_FMT_16_UINT': 11, 'BUF_FMT_16_SINT': 12,
-  'BUF_FMT_16_FLOAT': 13, 'BUF_FMT_8_8_UNORM': 14, 'BUF_FMT_8_8_SNORM': 15, 'BUF_FMT_8_8_USCALED': 16,
-  'BUF_FMT_8_8_SSCALED': 17, 'BUF_FMT_8_8_UINT': 18, 'BUF_FMT_8_8_SINT': 19, 'BUF_FMT_32_UINT': 20,
-  'BUF_FMT_32_SINT': 21, 'BUF_FMT_32_FLOAT': 22, 'BUF_FMT_16_16_UNORM': 23, 'BUF_FMT_16_16_SNORM': 24,
-  'BUF_FMT_16_16_USCALED': 25, 'BUF_FMT_16_16_SSCALED': 26, 'BUF_FMT_16_16_UINT': 27, 'BUF_FMT_16_16_SINT': 28,
-  'BUF_FMT_16_16_FLOAT': 29, 'BUF_FMT_10_11_11_FLOAT': 30, 'BUF_FMT_11_11_10_FLOAT': 31,
-  'BUF_FMT_10_10_10_2_UNORM': 32, 'BUF_FMT_10_10_10_2_SNORM': 33, 'BUF_FMT_10_10_10_2_UINT': 34,
-  'BUF_FMT_10_10_10_2_SINT': 35, 'BUF_FMT_2_10_10_10_UNORM': 36, 'BUF_FMT_2_10_10_10_SNORM': 37,
-  'BUF_FMT_2_10_10_10_USCALED': 38, 'BUF_FMT_2_10_10_10_SSCALED': 39, 'BUF_FMT_2_10_10_10_UINT': 40,
-  'BUF_FMT_2_10_10_10_SINT': 41, 'BUF_FMT_8_8_8_8_UNORM': 42, 'BUF_FMT_8_8_8_8_SNORM': 43,
-  'BUF_FMT_8_8_8_8_USCALED': 44, 'BUF_FMT_8_8_8_8_SSCALED': 45, 'BUF_FMT_8_8_8_8_UINT': 46,
-  'BUF_FMT_8_8_8_8_SINT': 47, 'BUF_FMT_32_32_UINT': 48, 'BUF_FMT_32_32_SINT': 49, 'BUF_FMT_32_32_FLOAT': 50,
-  'BUF_FMT_16_16_16_16_UNORM': 51, 'BUF_FMT_16_16_16_16_SNORM': 52, 'BUF_FMT_16_16_16_16_USCALED': 53,
-  'BUF_FMT_16_16_16_16_SSCALED': 54, 'BUF_FMT_16_16_16_16_UINT': 55, 'BUF_FMT_16_16_16_16_SINT': 56,
-  'BUF_FMT_16_16_16_16_FLOAT': 57, 'BUF_FMT_32_32_32_UINT': 58, 'BUF_FMT_32_32_32_SINT': 59,
-  'BUF_FMT_32_32_32_FLOAT': 60, 'BUF_FMT_32_32_32_32_UINT': 61, 'BUF_FMT_32_32_32_32_SINT': 62,
-  'BUF_FMT_32_32_32_32_FLOAT': 63, 'BUF_FMT_8_FLOAT': 108}
-def _parse_buf_fmt_combo(s: str) -> int:
-  parts = [p.strip().replace('BUF_DATA_FORMAT_', '').replace('BUF_NUM_FORMAT_', '') for p in s.split(',')]
-  return BUF_FMT.get(f'BUF_FMT_{parts[0]}_{parts[1]}') if len(parts) == 2 else None
-
 def waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
   return (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
 
@@ -274,57 +250,6 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
       return f"{mn}(sdata={smem_args[0]}, sbase={smem_args[1]}, {off_field}={smem_ops[2].strip()}, soffset=RawImm(124){gs}{ds}{th_s}{scope_s})"
     if off_val and len(smem_ops) >= 3: return f"{mn}(sdata={smem_args[0]}, sbase={smem_args[1]}, {off_field}={off_val}, soffset={smem_args[2]}{gs}{ds}{th_s}{scope_s})"
     if len(smem_ops) >= 3: return f"{mn}(sdata={smem_args[0]}, sbase={smem_args[1]}, soffset={smem_args[2]}{gs}{ds}{th_s}{scope_s})"
-
-  # Buffer (MUBUF/MTBUF/VBUFFER) instructions
-  if mn.startswith(('buffer_', 'tbuffer_')):
-    is_tbuf = mn.startswith('tbuffer_')
-    fmt_num = None
-    if fmt_val is not None:
-      if fmt_val.isdigit(): fmt_num = int(fmt_val)
-      else: fmt_num = BUF_FMT.get(fmt_val.replace(' ', '')) or _parse_buf_fmt_combo(fmt_val)
-    if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}()"
-    if arch == "rdna4":
-      m, buf_text = _extract(op_str, r'\s+th:TH_(\w+)')
-      th_val = {'LOAD_RT': 0, 'LOAD_NT': 1, 'LOAD_HT': 2, 'LOAD_BYPASS': 3, 'LOAD_LU': 4, 'LOAD_RT_NT': 5, 'LOAD_NT_HT': 6, 'LOAD_RT_WB': 7,
-                'STORE_RT': 0, 'STORE_NT': 1, 'STORE_HT': 2, 'STORE_BYPASS': 3, 'STORE_LU': 4, 'STORE_RT_NT': 5, 'STORE_NT_HT': 6,
-                'ATOMIC_RT': 0, 'ATOMIC_NT': 1, 'ATOMIC_RETURN': 1, 'ATOMIC_RT_RETURN': 1, 'ATOMIC_NT_RETURN': 3, 'ATOMIC_CASCADE_RT': 6, 'ATOMIC_CASCADE_NT': 6}.get(m.group(1), 0) if m else 0
-      m, buf_text = _extract(buf_text, r'\s+scope:SCOPE_(\w+)')
-      scope_val = {'CU': 0, 'SE': 1, 'DEV': 2, 'SYS': 3}.get(m.group(1), 0) if m else 0
-      buf_ops = _parse_ops(buf_text)
-      buf_args = [_op2dsl(o) for o in buf_ops]
-      vbuf_mods = "".join([f", ioffset={off_val}" if off_val else "", ", offen=1" if offen else "", ", idxen=1" if idxen else "",
-                          f", th={th_val}" if th_val else "", f", scope={scope_val}" if scope_val else "",
-                          ", tfe=1" if tfe else ""])
-      if is_tbuf and fmt_num is not None: vbuf_mods = f", format={fmt_num}" + vbuf_mods
-      elif is_tbuf: vbuf_mods = ", format=1" + vbuf_mods
-      else: vbuf_mods = ", format=1" + vbuf_mods
-      vaddr_idx = 1
-      if len(buf_ops) > vaddr_idx and buf_ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
-      else: vaddr_val = buf_args[vaddr_idx] if len(buf_args) > vaddr_idx else "v[0]"
-      rsrc_idx, soff_idx = (2, 3) if len(buf_ops) > 1 else (1, 2)
-      rsrc_raw = buf_ops[rsrc_idx].strip() if len(buf_ops) > rsrc_idx else "s[0:3]"
-      if m := re.match(r's\[(\d+):\d+\]', rsrc_raw.lower()): rsrc_val = m.group(1)
-      elif m := re.match(r's(\d+)', rsrc_raw.lower()): rsrc_val = m.group(1)
-      elif m := re.match(r'ttmp\[(\d+):\d+\]', rsrc_raw.lower()): rsrc_val = str(108 + int(m.group(1)))
-      elif m := re.match(r'ttmp(\d+)', rsrc_raw.lower()): rsrc_val = str(108 + int(m.group(1)))
-      else: rsrc_val = "0"
-      soff_raw = buf_ops[soff_idx].strip() if len(buf_ops) > soff_idx else "0"
-      soff_lower = soff_raw.lower()
-      if soff_lower == 'm0': soff_val = "RawImm(125)"
-      elif soff_lower in ('null', 'off'): soff_val = "RawImm(124)"
-      elif m := re.match(r's(\d+)', soff_lower): soff_val = f"RawImm({m.group(1)})"
-      else: soff_val = f"RawImm({soff_raw})"
-      return f"{mn}(vdata={buf_args[0]}, vaddr={vaddr_val}, rsrc={rsrc_val}, soffset={soff_val}{vbuf_mods})"
-    buf_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", dlc=1" if dlc else "",
-                        ", slc=1" if slc else "", ", tfe=1" if tfe else "", ", offen=1" if offen else "", ", idxen=1" if idxen else ""])
-    if is_tbuf and fmt_num is not None: buf_mods = f", format={fmt_num}" + buf_mods
-    vaddr_idx = 1
-    if len(ops) > vaddr_idx and ops[vaddr_idx].strip().lower() == 'off': vaddr_val = "v[0]"
-    else: vaddr_val = args[vaddr_idx] if len(args) > vaddr_idx else "v[0]"
-    srsrc_idx, soff_idx = (2, 3) if len(ops) > 1 else (1, 2)
-    srsrc_val = args[srsrc_idx] if len(args) > srsrc_idx else "s[0:3]"
-    soff_val = args[soff_idx] if len(args) > soff_idx else "0"
-    return f"{mn}(vdata={args[0]}, vaddr={vaddr_val}, srsrc={srsrc_val}, soffset={soff_val}{buf_mods})"
 
   # FLAT/GLOBAL/SCRATCH load/store/atomic
   def _saddr(a): return 'RawImm(124)' if a in ('OFF', 'NULL') else a
