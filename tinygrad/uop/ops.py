@@ -10,6 +10,7 @@ from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_funct
 from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
+  from tinygrad.renderer import Estimates
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
@@ -828,6 +829,7 @@ class KernelInfo:
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
+  estimates: Estimates|None = None
   @property
   def function_name(self): return to_function_name(self.name)
 
@@ -837,7 +839,7 @@ class CustomKernel:
   grad_fxn: Callable|None = None
   # sadly CustomKernel can't be pickled or reconstructed as a str
   def __reduce__(self): return (CustomKernel, (panic,))
-  def __repr__(self): return "CustomKernel(panic)"
+  def __repr__(self): return f"CustomKernel({id(self.fxn)})"
 
 @dataclass(frozen=True)
 class Kernel:

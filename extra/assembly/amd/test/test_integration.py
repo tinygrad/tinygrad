@@ -90,9 +90,9 @@ class TestIntegration(unittest.TestCase):
   def test_memory_ops(self):
     """Test memory instructions."""
     instructions = [
-      s_load_b32(s[0], s[0:2], NULL),
+      s_load_b32(s[0], s[0:1], NULL),
       s_waitcnt(simm16=waitcnt(lgkmcnt=0)),
-      global_store_b32(addr=v[0:2], data=v[2], saddr=OFF),
+      global_store_b32(addr=v[0:1], data=v[2], saddr=OFF),
       s_endpgm(),
     ]
     disasm = assemble_and_disassemble(instructions)
@@ -108,12 +108,12 @@ class TestIntegration(unittest.TestCase):
       v_mov_b32_e32(v[0], s[0]),  # base addr low
       v_mov_b32_e32(v[1], s[1]),  # base addr high
       # Load value
-      global_load_b32(vdst=v[2], addr=v[0:2], saddr=OFF),
+      global_load_b32(vdst=v[2], addr=v[0:1], saddr=OFF),
       s_waitcnt(simm16=waitcnt(vmcnt=0)),
       # Add 1.0
       v_add_f32_e32(v[2], 1.0, v[2]),
       # Store result
-      global_store_b32(addr=v[0:2], data=v[2], saddr=OFF),
+      global_store_b32(addr=v[0:1], data=v[2], saddr=OFF),
       s_endpgm(),
     ]
     disasm = assemble_and_disassemble(instructions)

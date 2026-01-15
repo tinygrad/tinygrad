@@ -1,6 +1,6 @@
 import ctypes, mmap, collections, functools, os
 from tinygrad.runtime.autogen import nv_570 as nv_gpu
-from typing import Any
+from typing import cast, Any
 from tinygrad.helpers import to_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
 from test.mockgpu.nv.nvgpu import NVGPU
@@ -92,7 +92,7 @@ class NVDriver(VirtDriver):
 
   def rm_alloc(self, argp):
     struct = nv_gpu.NVOS21_PARAMETERS.from_address(argp)
-    params_ptr = struct.pAllocParms
+    params_ptr = cast(int, struct.pAllocParms)
     if struct.hClass == nv_gpu.NV01_ROOT_CLIENT: self.root_handle = struct.hObjectNew = self._alloc_handle()
     elif struct.hClass == nv_gpu.NV01_DEVICE_0:
       params:Any = nv_gpu.NV0080_ALLOC_PARAMETERS.from_address(params_ptr)
@@ -145,7 +145,7 @@ class NVDriver(VirtDriver):
 
   def rm_control(self, argp):
     struct = nv_gpu.NVOS54_PARAMETERS.from_address(argp)
-    params_ptr = struct.params
+    params_ptr = cast(int, struct.params)
     if struct.cmd == nv_gpu.NV0000_CTRL_CMD_GPU_GET_ID_INFO_V2:
       params:Any = nv_gpu.NV0000_CTRL_GPU_GET_ID_INFO_V2_PARAMS.from_address(params_ptr)
       params.deviceInstance = params.gpuId # emulate them to be the same

@@ -1,12 +1,29 @@
 # RDNA3/RDNA4/CDNA assembler
 from __future__ import annotations
 import re
-from extra.assembly.amd.dsl import RawImm, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory
-from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
-from extra.assembly.amd.dsl import FLOAT_ENC
+from extra.assembly.amd.dsl import Reg, s, v, ttmp
+from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL
+
+# Assembler-specific types (not part of clean DSL)
+class RawImm(Reg):
+  """Raw immediate value - bypasses normal encoding, used for special register encodings."""
+  def __init__(self, val: int): super().__init__(val, 1)
+
+class SrcMod(Reg):
+  """Source with modifiers - wraps a value with neg/abs flags."""
+  def __init__(self, val: int, neg: bool = False, abs_: bool = False):
+    super().__init__(255 if not (-16 <= val <= 64) else (128 + val if val >= 0 else 192 - val), 1)
+    self.val, self.neg, self.abs_ = val, neg, abs_
+
+# Type aliases for register factories
+_RegFactory = type(s)
+SGPR, VGPR, TTMP = s, v, ttmp
+OFF = NULL  # OFF is alias for NULL (encoding 124)
+
+# Float encoding constants
+FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import VOP2Op, VOPDOp, SOPKOp
-from extra.assembly.amd.autogen.rdna3.enum import BufFmt
 from extra.assembly.amd.autogen.rdna4 import ins as rdna4_ins
 
 # Re-export disasm for backwards compatibility
@@ -16,10 +33,26 @@ from extra.assembly.amd.disasm import disasm, HWREG, HWREG_RDNA4
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# RDNA unified buffer format
-BUF_FMT = {e.name: e.value for e in BufFmt}
-_BUF_FMT_EXT = {'BUF_FMT_32_32_32_32_SINT': 62, 'BUF_FMT_32_32_32_32_FLOAT': 63, 'BUF_FMT_8_FLOAT': 108}
-BUF_FMT.update(_BUF_FMT_EXT)
+# RDNA unified buffer format (not in XML, hardcoded from AMD documentation)
+BUF_FMT = {'BUF_FMT_8_UNORM': 1, 'BUF_FMT_8_SNORM': 2, 'BUF_FMT_8_USCALED': 3, 'BUF_FMT_8_SSCALED': 4,
+  'BUF_FMT_8_UINT': 5, 'BUF_FMT_8_SINT': 6, 'BUF_FMT_16_UNORM': 7, 'BUF_FMT_16_SNORM': 8,
+  'BUF_FMT_16_USCALED': 9, 'BUF_FMT_16_SSCALED': 10, 'BUF_FMT_16_UINT': 11, 'BUF_FMT_16_SINT': 12,
+  'BUF_FMT_16_FLOAT': 13, 'BUF_FMT_8_8_UNORM': 14, 'BUF_FMT_8_8_SNORM': 15, 'BUF_FMT_8_8_USCALED': 16,
+  'BUF_FMT_8_8_SSCALED': 17, 'BUF_FMT_8_8_UINT': 18, 'BUF_FMT_8_8_SINT': 19, 'BUF_FMT_32_UINT': 20,
+  'BUF_FMT_32_SINT': 21, 'BUF_FMT_32_FLOAT': 22, 'BUF_FMT_16_16_UNORM': 23, 'BUF_FMT_16_16_SNORM': 24,
+  'BUF_FMT_16_16_USCALED': 25, 'BUF_FMT_16_16_SSCALED': 26, 'BUF_FMT_16_16_UINT': 27, 'BUF_FMT_16_16_SINT': 28,
+  'BUF_FMT_16_16_FLOAT': 29, 'BUF_FMT_10_11_11_FLOAT': 30, 'BUF_FMT_11_11_10_FLOAT': 31,
+  'BUF_FMT_10_10_10_2_UNORM': 32, 'BUF_FMT_10_10_10_2_SNORM': 33, 'BUF_FMT_10_10_10_2_UINT': 34,
+  'BUF_FMT_10_10_10_2_SINT': 35, 'BUF_FMT_2_10_10_10_UNORM': 36, 'BUF_FMT_2_10_10_10_SNORM': 37,
+  'BUF_FMT_2_10_10_10_USCALED': 38, 'BUF_FMT_2_10_10_10_SSCALED': 39, 'BUF_FMT_2_10_10_10_UINT': 40,
+  'BUF_FMT_2_10_10_10_SINT': 41, 'BUF_FMT_8_8_8_8_UNORM': 42, 'BUF_FMT_8_8_8_8_SNORM': 43,
+  'BUF_FMT_8_8_8_8_USCALED': 44, 'BUF_FMT_8_8_8_8_SSCALED': 45, 'BUF_FMT_8_8_8_8_UINT': 46,
+  'BUF_FMT_8_8_8_8_SINT': 47, 'BUF_FMT_32_32_UINT': 48, 'BUF_FMT_32_32_SINT': 49, 'BUF_FMT_32_32_FLOAT': 50,
+  'BUF_FMT_16_16_16_16_UNORM': 51, 'BUF_FMT_16_16_16_16_SNORM': 52, 'BUF_FMT_16_16_16_16_USCALED': 53,
+  'BUF_FMT_16_16_16_16_SSCALED': 54, 'BUF_FMT_16_16_16_16_UINT': 55, 'BUF_FMT_16_16_16_16_SINT': 56,
+  'BUF_FMT_16_16_16_16_FLOAT': 57, 'BUF_FMT_32_32_32_UINT': 58, 'BUF_FMT_32_32_32_SINT': 59,
+  'BUF_FMT_32_32_32_FLOAT': 60, 'BUF_FMT_32_32_32_32_UINT': 61, 'BUF_FMT_32_32_32_32_SINT': 62,
+  'BUF_FMT_32_32_32_32_FLOAT': 63, 'BUF_FMT_8_FLOAT': 108}
 def _parse_buf_fmt_combo(s: str) -> int:
   parts = [p.strip().replace('BUF_DATA_FORMAT_', '').replace('BUF_NUM_FORMAT_', '') for p in s.split(',')]
   return BUF_FMT.get(f'BUF_FMT_{parts[0]}_{parts[1]}') if len(parts) == 2 else None
@@ -337,10 +370,11 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
 
   # v_fmaak/v_fmamk literal extraction
   lit_s = ""
-  if mn in ('v_fmaak_f32', 'v_fmaak_f16') and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
-  elif mn in ('v_fmamk_f32', 'v_fmamk_f16') and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
-  elif mn in ('s_fmaak_f32',) and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
-  elif mn in ('s_fmamk_f32',) and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
+  mn_base = mn.replace('_e32', '').replace('_e64', '')
+  if mn_base in ('v_fmaak_f32', 'v_fmaak_f16') and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
+  elif mn_base in ('v_fmamk_f32', 'v_fmamk_f16') and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
+  elif mn_base in ('s_fmaak_f32',) and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
+  elif mn_base in ('s_fmamk_f32',) and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
   elif mn in ('v_cndmask_b32', 'v_cndmask_b32_e32') and len(args) == 4 and ops[3].strip().lower() in ('vcc_lo', 'vcc'):
     mn, args = 'v_cndmask_b32_e32', args[:3]
 
