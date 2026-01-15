@@ -12,7 +12,7 @@ def make_qmd_struct_type():
   bits += [(name+f"_{i}",dt(i)) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith("NVC6C0_QMDV03_00") and callable(dt)]
   bits = sorted(bits, key=lambda x: x[1][1])
   for i,(name, data) in enumerate(bits):
-    fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]//8, data[0]-data[1]+1, data[0]%8))
+    fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[1]//8, data[0]-data[1]+1, data[1]%8))
   return init_c_struct_t(0x40 * 4, tuple(fields))
 qmd_struct_t = make_qmd_struct_type()
 
