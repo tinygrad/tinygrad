@@ -782,7 +782,7 @@ class KFDIface:
     return False
 
   def on_device_hang(self):
-    def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._fields_)
+    def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._real_fields_)
 
     report = []
     for evnt in [self.mem_fault_event, self.hw_fault_event]:

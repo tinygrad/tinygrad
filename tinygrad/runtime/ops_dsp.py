@@ -249,7 +249,7 @@ class RPCListener(threading.Thread):
       elif sc == 0x1f020100: # stat
         stat = os.stat(in_args[1].tobytes()[:-1].decode())
         out_stat = qcom_dsp.struct_apps_std_STAT.from_address(mv_address(out_args[0]))
-        for f in out_stat._fields_: out_stat.__setattr__(f[0], int(getattr(stat, f"st_{f[0]}", 0)))
+        for f in out_stat._real_fields_: out_stat.__setattr__(f[0], int(getattr(stat, f"st_{f[0]}", 0)))
       elif sc == 0x2010100: # mmap
         st = qcom_dsp.FASTRPC_IOCTL_MMAP(self.device.rpc_fd, fd=-1, flags=in_args[0].cast('I')[2], vaddrin=0, size=in_args[0].cast('Q')[3])
         out_args[0].cast('Q')[0:2] = array.array('Q', [0, st.vaddrout])
