@@ -1,8 +1,8 @@
 import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.device import is_dtype_supported
+from tinygrad.device import is_dtype_supported, Buffer
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import getenv, prod, Context, OSX
+from tinygrad.helpers import getenv, prod, Context, OSX, ProfilePointEvent
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import BufferCopy, CompiledRunner, run_schedule
 import numpy as np
@@ -888,6 +888,17 @@ class TestMultiTensor(unittest.TestCase):
 
     t = Tensor.rand(16, 16).shard(devices_2, axis=0)
     np.testing.assert_allclose(t.numpy(), t.clone().numpy())
+
+  def test_sharded_clone_mem_usage(self):
+    t = Tensor.empty(numel:=16).shard(devices_2, axis=0).realize()
+    Buffer.profile_events.clear()
+    with Context(PROFILE=1):
+      t.clone().realize()
+    alloc_pes = [pe for pe in Buffer.profile_events if isinstance(pe, ProfilePointEvent) and pe.name == 'alloc']
+    expected_mem_usage = (numel // len(t.device)) * t.dtype.itemsize
+    for device in t.device:
+      mem_used = sum([pe.arg['sz']*pe.arg['dtype'].itemsize for pe in alloc_pes if pe.device==device])
+      self.assertEqual(mem_used, expected_mem_usage)
 
   @unittest.skip("RANGEIFY doesn't support multi const folding")
   def test_multi_const_folding(self):
