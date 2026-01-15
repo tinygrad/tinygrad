@@ -284,7 +284,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
     ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+width)))
   op_idx:dict = {}
   for p in decode(e.blob):
-    if len(ret) > 100_000: break
+    if len(ret) > 50_000: break
     if isinstance(p, INST):
       if p.op not in op_idx: op_idx[p.op] = len(op_idx)
       op_name, idx = (p.op.name, op_idx[p.op]) if isinstance(p.op, InstOp) else (f"0x{p.op:02x}", len(op_idx))
