@@ -269,7 +269,7 @@ class RemotePCIDevice(PCIDevice):
   def _rpc(self, cmd:int, *args:int, readout_size:int=0) -> tuple[int, int, bytes|None]:
     self.sock.sendall(struct.pack('<BBQQQ', cmd, *(*args, 0, 0, 0, 0)[:4]))
     if (resp:=struct.unpack('<BQQ', self._recvall(17)))[0] != 0:
-      raise RuntimeError(f"RPC failed: cmd={cmd} ({RemoteCmd(cmd).name}), args={args}, status={resp[0]}, resp=({resp[1]}, {resp[2]})")
+      raise RuntimeError(f"RPC failed: {self._recvall(resp[1]).decode('utf-8') if resp[1] > 0 else 'unknown error'}")
     return (resp[1], resp[2]) + ((self._recvall(readout_size) if readout_size > 0 else None),)
 
   def _bulk_read(self, cmd:int, idx:int, offset:int, size:int) -> bytes: return unwrap(self._rpc(cmd, idx, offset, size, readout_size=size)[2])

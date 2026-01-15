@@ -20,6 +20,7 @@ enum {
 #define RESP(call) { resp.status = (call) ? RESP_ERR : RESP_OK; break; }
 #define RESP_VAL(call, v) { int _r = (call); resp.status = _r ? RESP_ERR : RESP_OK; if (!_r) resp.value = (v); break; }
 #define RESP_ERR_BREAK() { resp.status = RESP_ERR; break; }
+#define RESP_ERR_MSG(msg) { resp.status = RESP_ERR; resp.value = strlen(msg); send_response(fd, &resp, -1); send(fd, msg, strlen(msg), 0); send_resp = 0; break; }
 #define RESP_SEND_DATA(sz, data) { resp.status = RESP_OK; resp.value = (sz); send_response(fd, &resp, -1); send(fd, data, sz, 0); send_resp = 0; break; }
 #define NO_RESP() { send_resp = 0; break; }
 
@@ -141,15 +142,25 @@ static void cleanup(void) {
 }
 
 static void handle_client(int fd) {
-  g_conn = open_tinygpu();
-  if (g_conn == IO_OBJECT_NULL) { fprintf(stderr, "failed to connect to tinygpu driver\n"); return; }
-
   request_t req;
   response_t resp;
   int bufsize = BULK_BUF_SIZE;
   setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufsize, sizeof(bufsize));
   setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &bufsize, sizeof(bufsize));
   printf("client connected\n");
+
+  g_conn = open_tinygpu();
+  if (g_conn == IO_OBJECT_NULL) {
+    fprintf(stderr, "failed to connect to tinygpu driver\n");
+    recv(fd, &req, sizeof(req), 0);
+    memset(&resp, 0, sizeof(resp));
+    const char *errmsg = "Driver not available. Check: System Report > PCI for GPU, System Settings > Privacy & Security for extension approval.";
+    resp.status = RESP_ERR;
+    resp.value = strlen(errmsg);
+    send_response(fd, &resp, -1);
+    send(fd, errmsg, strlen(errmsg), 0);
+    return;
+  }
 
   while (1) {
     if (recv(fd, &req, sizeof(req), 0) != sizeof(req)) break;

@@ -28,7 +28,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     else { print(msg, terminator: "") }
   }
 
-  private static func queryDextState(bundleID: String) -> DextState {
+  static func queryDextState(bundleID: String) -> DextState {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/usr/bin/systemextensionsctl")
     p.arguments = ["list"]
