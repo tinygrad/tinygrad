@@ -110,56 +110,6 @@ def _extract(text: str, pat: str, flags=re.I):
   if m := re.search(pat, text, flags): return m, text[:m.start()] + ' ' + text[m.end():]
   return None, text
 
-# Instruction aliases: LLVM uses different names for some instructions
-_ALIASES = {
-  'v_cmp_tru_f16': 'v_cmp_t_f16', 'v_cmp_tru_f32': 'v_cmp_t_f32', 'v_cmp_tru_f64': 'v_cmp_t_f64',
-  'v_cmpx_tru_f16': 'v_cmpx_t_f16', 'v_cmpx_tru_f32': 'v_cmpx_t_f32', 'v_cmpx_tru_f64': 'v_cmpx_t_f64',
-  'v_cvt_flr_i32_f32': 'v_cvt_floor_i32_f32', 'v_cvt_rpi_i32_f32': 'v_cvt_nearest_i32_f32',
-  'v_ffbh_i32': 'v_cls_i32', 'v_ffbh_u32': 'v_clz_i32_u32', 'v_ffbl_b32': 'v_ctz_i32_b32',
-  'v_cvt_pkrtz_f16_f32': 'v_cvt_pk_rtz_f16_f32', 'v_fmac_legacy_f32': 'v_fmac_dx9_zero_f32', 'v_mul_legacy_f32': 'v_mul_dx9_zero_f32',
-  's_load_dword': 's_load_b32', 's_load_dwordx2': 's_load_b64', 's_load_dwordx4': 's_load_b128',
-  's_load_dwordx8': 's_load_b256', 's_load_dwordx16': 's_load_b512',
-  's_buffer_load_dword': 's_buffer_load_b32', 's_buffer_load_dwordx2': 's_buffer_load_b64',
-  's_buffer_load_dwordx4': 's_buffer_load_b128', 's_buffer_load_dwordx8': 's_buffer_load_b256',
-  's_buffer_load_dwordx16': 's_buffer_load_b512',
-  'v_cvt_pknorm_i16_f16': 'v_cvt_pk_norm_i16_f16', 'v_cvt_pknorm_u16_f16': 'v_cvt_pk_norm_u16_f16',
-  'v_add3_nc_u32': 'v_add3_u32', 'v_xor_add_u32': 'v_xad_u32',
-  'v_interp_p2_new_f32': 'v_interp_p2_f32',
-  's_ff1_i32_b32': 's_ctz_i32_b32', 's_ff1_i32_b64': 's_ctz_i32_b64',
-  's_flbit_i32_b32': 's_clz_i32_u32', 's_flbit_i32_b64': 's_clz_i32_u64', 's_flbit_i32': 's_cls_i32', 's_flbit_i32_i64': 's_cls_i32_i64',
-  's_andn1_saveexec_b32': 's_and_not0_saveexec_b32', 's_andn1_saveexec_b64': 's_and_not0_saveexec_b64',
-  's_andn1_wrexec_b32': 's_and_not0_wrexec_b32', 's_andn1_wrexec_b64': 's_and_not0_wrexec_b64',
-  's_andn2_saveexec_b32': 's_and_not1_saveexec_b32', 's_andn2_saveexec_b64': 's_and_not1_saveexec_b64',
-  's_andn2_wrexec_b32': 's_and_not1_wrexec_b32', 's_andn2_wrexec_b64': 's_and_not1_wrexec_b64',
-  's_orn1_saveexec_b32': 's_or_not0_saveexec_b32', 's_orn1_saveexec_b64': 's_or_not0_saveexec_b64',
-  's_orn2_saveexec_b32': 's_or_not1_saveexec_b32', 's_orn2_saveexec_b64': 's_or_not1_saveexec_b64',
-  's_andn2_b32': 's_and_not1_b32', 's_andn2_b64': 's_and_not1_b64',
-  's_orn2_b32': 's_or_not1_b32', 's_orn2_b64': 's_or_not1_b64',
-  'v_dot2c_f32_f16': 'v_dot2acc_f32_f16',
-  'v_fma_legacy_f32': 'v_fma_dx9_zero_f32',
-  'ds_read_b32': 'ds_load_b32', 'ds_read_b64': 'ds_load_b64', 'ds_read_b96': 'ds_load_b96', 'ds_read_b128': 'ds_load_b128',
-  'ds_read_i8': 'ds_load_i8', 'ds_read_u8': 'ds_load_u8', 'ds_read_i16': 'ds_load_i16', 'ds_read_u16': 'ds_load_u16',
-  'ds_read_i8_d16': 'ds_load_i8_d16', 'ds_read_u8_d16': 'ds_load_u8_d16', 'ds_read_i8_d16_hi': 'ds_load_i8_d16_hi', 'ds_read_u8_d16_hi': 'ds_load_u8_d16_hi',
-  'ds_read_u16_d16': 'ds_load_u16_d16', 'ds_read_u16_d16_hi': 'ds_load_u16_d16_hi',
-  'ds_read2_b32': 'ds_load_2addr_b32', 'ds_read2_b64': 'ds_load_2addr_b64',
-  'ds_read2st64_b32': 'ds_load_2addr_stride64_b32', 'ds_read2st64_b64': 'ds_load_2addr_stride64_b64',
-  'ds_read_addtid_b32': 'ds_load_addtid_b32', 'ds_write_addtid_b32': 'ds_store_addtid_b32',
-  'ds_write_b32': 'ds_store_b32', 'ds_write_b64': 'ds_store_b64', 'ds_write_b96': 'ds_store_b96', 'ds_write_b128': 'ds_store_b128',
-  'ds_write_b8': 'ds_store_b8', 'ds_write_b16': 'ds_store_b16',
-  'ds_write_b8_d16_hi': 'ds_store_b8_d16_hi', 'ds_write_b16_d16_hi': 'ds_store_b16_d16_hi',
-  'ds_write2_b32': 'ds_store_2addr_b32', 'ds_write2_b64': 'ds_store_2addr_b64',
-  'ds_write2st64_b32': 'ds_store_2addr_stride64_b32', 'ds_write2st64_b64': 'ds_store_2addr_stride64_b64',
-  'ds_wrxchg_rtn_b32': 'ds_storexchg_rtn_b32', 'ds_wrxchg_rtn_b64': 'ds_storexchg_rtn_b64',
-  'ds_wrxchg2_rtn_b32': 'ds_storexchg_2addr_rtn_b32', 'ds_wrxchg2_rtn_b64': 'ds_storexchg_2addr_rtn_b64',
-  'ds_wrxchg2st64_rtn_b32': 'ds_storexchg_2addr_stride64_rtn_b32', 'ds_wrxchg2st64_rtn_b64': 'ds_storexchg_2addr_stride64_rtn_b64',
-}
-
-def _apply_alias(text: str) -> str:
-  mn = text.split()[0].lower() if ' ' in text else text.lower().rstrip('_')
-  for m in (mn, mn.removesuffix('_e32'), mn.removesuffix('_e64')):
-    if m in _ALIASES: return _ALIASES[m] + text[len(m):]
-  return text
-
 def _has(op: str, *subs) -> bool: return any(s in op for s in subs)
 
 def get_dsl(text: str, arch: str = "rdna3") -> str:
@@ -178,6 +128,34 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
   opsel_hi_val, m, text = None, *_extract(text, r'\s+op_sel_hi:\[([^\]]+)\]')
   if m: opsel_hi_val = [int(x.strip()) for x in m.group(1).split(',')]
   m, text = _extract(text, r'\s+wait_exp:(\d+)'); waitexp = m.group(1) if m else None
+  # Swizzle patterns: offset:swizzle(MODE, args...)
+  swizzle_off = None
+  if m := re.search(r'\s+offset:swizzle\(([^)]+)\)', text, re.I):
+    text = text[:m.start()] + ' ' + text[m.end():]
+    parts_sw = [p.strip().strip('"') for p in m.group(1).split(',')]
+    mode = parts_sw[0].upper()
+    if mode == 'QUAD_PERM' and len(parts_sw) >= 5:
+      swizzle_off = 0x8000 | (int(parts_sw[4]) << 6) | (int(parts_sw[3]) << 4) | (int(parts_sw[2]) << 2) | int(parts_sw[1])
+    elif mode == 'SWAP' and len(parts_sw) >= 2:
+      n = int(parts_sw[1])  # Swap lanes n positions apart: xor_mask=n, and_mask=0x1f
+      swizzle_off = (n << 10) | 0x1f
+    elif mode == 'REVERSE' and len(parts_sw) >= 2:
+      n = int(parts_sw[1])  # Reverse in groups of n: xor_mask=n-1, and_mask=0x1f
+      swizzle_off = ((n - 1) << 10) | 0x1f
+    elif mode == 'BROADCAST' and len(parts_sw) >= 3:
+      n, lane = int(parts_sw[1]), int(parts_sw[2])  # Broadcast lane within groups of n: and_mask=~(n-1)&0x1f, or_mask=lane
+      swizzle_off = (lane << 5) | ((~(n - 1)) & 0x1f)
+    elif mode == 'BITMASK_PERM' and len(parts_sw) >= 2:
+      pat = parts_sw[1]  # and_mask[4:0], or_mask[9:5], xor_mask[14:10] based on pattern chars
+      and_mask, or_mask, xor_mask = 0, 0, 0
+      for i, c in enumerate(pat):
+        bit = 4 - i  # position 0 is at bit 4 (MSB first)
+        if c == '1': or_mask |= (1 << bit)
+        elif c == 'p': and_mask |= (1 << bit)
+        elif c == 'i': and_mask |= (1 << bit); xor_mask |= (1 << bit)
+      swizzle_off = (xor_mask << 10) | (or_mask << 5) | and_mask
+    else:
+      swizzle_off = 0  # Unknown mode, default to 0
   m, text = _extract(text, r'\s+offset:(0x[0-9a-fA-F]+|-?\d+)'); off_val = m.group(1) if m else None
   m, text = _extract(text, r'\s+dlc(?:\s|$)'); dlc = 1 if m else None
   m, text = _extract(text, r'\s+glc(?:\s|$)'); glc = 1 if m else None
@@ -193,6 +171,7 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
   m, text = _extract(text, r'\s+offset0:(\d+)'); ds_off0 = int(m.group(1)) if m else None
   m, text = _extract(text, r'\s+offset1:(\d+)'); ds_off1 = int(m.group(1)) if m else None
   m, text = _extract(text, r'\s+index_key:(\d+)'); index_key = int(m.group(1)) if m else None
+  m, text = _extract(text, r'\s+gds(?:\s|$)'); gds = 1 if m else None
   if waitexp: kw.append(f'waitexp={waitexp}')
   if byte_sel is not None:
     if opsel is None: opsel = 0
@@ -216,6 +195,42 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
       elif re.match(r'^0x[0-9a-f]+$|^\d+$', p): return f"s_waitcnt(simm16={int(p, 0)})"
     return f"s_waitcnt(simm16={waitcnt(vm, exp, lgkm)})"
 
+  # s_delay_alu - encodes dependency delays: instid0[3:0], instskip[6:4], instid1[11:7]
+  if mn == 's_delay_alu':
+    _DELAY_INSTID = {'VALU_DEP_1': 1, 'VALU_DEP_2': 2, 'VALU_DEP_3': 3, 'VALU_DEP_4': 4, 'TRANS32_DEP_1': 5, 'TRANS32_DEP_2': 6, 'TRANS32_DEP_3': 7,
+                     'FMA_ACCUM_CYCLE_1': 5, 'SALU_CYCLE_1': 9, 'SALU_CYCLE_2': 10, 'SALU_CYCLE_3': 11}
+    _DELAY_SKIP = {'SAME': 0, 'NEXT': 1, 'SKIP_1': 2, 'SKIP_2': 3, 'SKIP_3': 4, 'SKIP_4': 5}
+    if re.match(r'^0x[0-9a-f]+$|^\d+$', op_str.strip()): return f"s_delay_alu(simm16={int(op_str.strip(), 0)})"
+    instid0, instskip, instid1 = 0, 0, 0
+    for p in op_str.replace('|', ' ').replace(',', ' ').split():
+      p = p.strip()
+      if m := re.match(r'instid0\((\w+)\)', p): instid0 = _DELAY_INSTID.get(m.group(1), 0)
+      elif m := re.match(r'instskip\((\w+)\)', p): instskip = _DELAY_SKIP.get(m.group(1), 0)
+      elif m := re.match(r'instid1\((\w+)\)', p): instid1 = _DELAY_INSTID.get(m.group(1), 0)
+    simm16 = instid0 | (instskip << 4) | (instid1 << 7)
+    return f"s_delay_alu(simm16={simm16})"
+
+  # s_waitcnt_depctr - dependency counter: sa_sdst[0], va_vcc[1], vm_vsrc[4:2], hold_cnt[7], va_ssrc[8], va_sdst[11:9], va_vdst[15:12]
+  if mn == 's_waitcnt_depctr':
+    if re.match(r'^0x[0-9a-f]+$|^\d+$', op_str.strip()): return f"s_waitcnt_depctr(simm16={int(op_str.strip(), 0)})"
+    # Default: all bits set to max (no wait)
+    sa_sdst, va_vcc, vm_vsrc, hold_cnt, va_ssrc, va_sdst, va_vdst = 1, 1, 7, 1, 1, 7, 15
+    for p in op_str.replace('&', ' ').replace(',', ' ').split():
+      p = p.strip()
+      if m := re.match(r'depctr_sa_sdst\((\d+)\)', p): sa_sdst = int(m.group(1))
+      elif m := re.match(r'depctr_va_vcc\((\d+)\)', p): va_vcc = int(m.group(1))
+      elif m := re.match(r'depctr_vm_vsrc\((\d+)\)', p): vm_vsrc = int(m.group(1))
+      elif m := re.match(r'depctr_hold_cnt\((\d+)\)', p): hold_cnt = int(m.group(1))
+      elif m := re.match(r'depctr_va_ssrc\((\d+)\)', p): va_ssrc = int(m.group(1))
+      elif m := re.match(r'depctr_va_sdst\((\d+)\)', p): va_sdst = int(m.group(1))
+      elif m := re.match(r'depctr_va_vdst\((\d+)\)', p): va_vdst = int(m.group(1))
+    simm16 = sa_sdst | (va_vcc << 1) | (vm_vsrc << 2) | (hold_cnt << 7) | (va_ssrc << 8) | (va_sdst << 9) | (va_vdst << 12)
+    return f"s_waitcnt_depctr(simm16={simm16})"
+
+  # s_inst_prefetch (alias for s_set_inst_prefetch_distance) - just pass through simm16
+  if mn == 's_inst_prefetch':
+    return f"s_set_inst_prefetch_distance(simm16={int(op_str.strip(), 0)})"
+
   # VOPD
   if '::' in text:
     xp, yp = text.split('::')
@@ -223,13 +238,19 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
     xo, yo = [_op2dsl(p) for p in xps[1:]], [_op2dsl(p) for p in yps[1:]]
     vdx, sx0, vsx1 = xo[0], xo[1] if len(xo) > 1 else '0', xo[2] if len(xo) > 2 else 'v[0]'
     vdy, sy0, vsy1 = yo[0], yo[1] if len(yo) > 1 else '0', yo[2] if len(yo) > 2 else 'v[0]'
-    lit = xo[3] if 'fmaak' in xps[0].lower() and len(xo) > 3 else yo[3] if 'fmaak' in yps[0].lower() and len(yo) > 3 else None
+    lit = None
+    # fmaak: vdst, src0, src1, literal -> lit is operand[3]
+    if 'fmaak' in xps[0].lower() and len(xo) > 3: lit = xo[3]
+    elif 'fmaak' in yps[0].lower() and len(yo) > 3: lit = yo[3]
+    # fmamk: vdst, src0, literal, src1 -> lit is operand[2], vsrc1 is operand[3]
     if 'fmamk' in xps[0].lower() and len(xo) > 3: lit, vsx1 = xo[2], xo[3]
-    elif 'fmamk' in yps[0].lower() and len(yo) > 3: lit, vsy1 = yo[2], yo[3]
+    if 'fmamk' in yps[0].lower() and len(yo) > 3: lit, vsy1 = yo[2], yo[3]
     return f"VOPD(VOPDOp.{xps[0].upper()}, VOPDOp.{yps[0].upper()}, vdstx={vdx}, vdsty={vdy}, srcx0={sx0}, vsrcx1={vsx1}, srcy0={sy0}, vsrcy1={vsy1}{f', literal={lit}' if lit else ''})"
 
   # Special instructions
-  if mn == 's_setreg_imm32_b32': raise ValueError(f"unsupported: {mn}")
+  # s_setreg_imm32_b32 hwreg, imm32 - SOPK with 32-bit literal
+  if mn == 's_setreg_imm32_b32':
+    return f"s_setreg_imm32_b32(simm16={args[0]}, literal={args[1]})"
   sop1_no_dest = ('s_alloc_vgpr', 's_barrier_init', 's_barrier_join', 's_barrier_signal', 's_barrier_signal_isfirst', 's_sleep_var')
   if mn in sop1_no_dest:
     return f"{mn}(sdst=RawImm(128), ssrc0={args[0]})"
@@ -252,6 +273,20 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
       if o == 'off': vsrcs.append('v[0]')
       else: vsrcs.append(_op2dsl(o)); en |= (1 << i)
     return f"VEXPORT(target={target}, en={en}, vsrc0={vsrcs[0]}, vsrc1={vsrcs[1]}, vsrc2={vsrcs[2]}, vsrc3={vsrcs[3]}, done={done_val})"
+
+  # SMEM cache operations - no operands, soffset should be 0
+  if mn in ('s_dcache_inv', 's_gl1_inv', 's_dcache_wb', 's_dcache_wb_vol'):
+    return f"{mn}(soffset=RawImm(0))"
+
+  # s_atc_probe: first operand is data mask (0-7), not SGPR - encode directly as raw value
+  if mn in ('s_atc_probe', 's_atc_probe_buffer'):
+    gs, ds = ", glc=1" if glc else "", ", dlc=1" if dlc else ""
+    off_s = f", offset={off_val}" if off_val else ""
+    # sdata field gets the raw data mask value directly (not an SGPR reference)
+    # Check if third operand is an immediate (goes to offset field) or SGPR (goes to soffset field)
+    if len(args) > 2 and re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
+      return f"{mn}(sdata=RawImm({int(args[0])}), sbase={args[1]}, offset={ops[2].strip()}, soffset=RawImm(124){gs}{ds})"
+    return f"{mn}(sdata=RawImm({int(args[0])}), sbase={args[1]}, soffset={args[2] if len(args) > 2 else 'RawImm(124)'}{off_s}{gs}{ds})"
 
   # SMEM
   if mn in SMEM_OPS:
@@ -282,7 +317,7 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
     if fmt_val is not None:
       if fmt_val.isdigit(): fmt_num = int(fmt_val)
       else: fmt_num = BUF_FMT.get(fmt_val.replace(' ', '')) or _parse_buf_fmt_combo(fmt_val)
-    if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}()"
+    if mn in ('buffer_gl0_inv', 'buffer_gl1_inv', 'buffer_wbl2', 'buffer_inv'): return f"{mn}(soffset=RawImm(0))"
     if arch == "rdna4":
       m, buf_text = _extract(op_str, r'\s+th:TH_(\w+)')
       th_val = {'LOAD_RT': 0, 'LOAD_NT': 1, 'LOAD_HT': 2, 'LOAD_BYPASS': 3, 'LOAD_LU': 4, 'LOAD_RT_NT': 5, 'LOAD_NT_HT': 6, 'LOAD_RT_WB': 7,
@@ -328,12 +363,41 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
 
   # FLAT/GLOBAL/SCRATCH load/store/atomic
   def _saddr(a): return 'RawImm(124)' if a in ('OFF', 'NULL') else a
+  def _vaddr(a, saddr_off=False):
+    if a in ('OFF', 'NULL'): return 'v[0]'
+    # When saddr is off/null and addr is a single vgpr, expand to 64-bit for FLAT/GLOBAL (SCRATCH is special - SVE controls this)
+    if saddr_off and (m := re.match(r'^v\[(\d+)\]$', a)):
+      idx = int(m.group(1))
+      if idx < 255: return f'v[{idx}:{idx+1}]'  # Only expand if within range
+    return a
   flat_mods = f"{f', offset={off_val}' if off_val else ''}{', glc=1' if glc else ''}{', slc=1' if slc else ''}{', dlc=1' if dlc else ''}"
+  # Special: global/flat _addtid_ instructions have no addr field, just vdst/data and saddr
+  if '_addtid_' in mn and mn.startswith(('global_', 'flat_')):
+    if 'load' in mn: return f"{mn}(vdst={args[0]}, saddr={_saddr(args[1]) if len(args) > 1 else 'RawImm(124)'}{flat_mods})"
+    if 'store' in mn: return f"{mn}(data={args[0]}, saddr={_saddr(args[1]) if len(args) > 1 else 'RawImm(124)'}{flat_mods})"
   for pre, flds in [('flat_load','vdst,addr,saddr'), ('global_load','vdst,addr,saddr'), ('scratch_load','vdst,addr,saddr'),
                     ('flat_store','addr,data,saddr'), ('global_store','addr,data,saddr'), ('scratch_store','addr,data,saddr')]:
     if mn.startswith(pre) and len(args) >= 2:
       f0, f1, f2 = flds.split(',')
-      return f"{mn}({f0}={args[0]}, {f1}={args[1]}{f', {f2}={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
+      saddr_is_off = len(args) < 3 or args[2] in ('OFF', 'NULL')
+      # SCRATCH: when addr is off, sve=0; when addr is valid, sve=1 and we need to set it
+      if pre.startswith('scratch'):
+        is_load = flds.startswith('vdst')
+        addr_arg_idx = 1 if is_load else 0  # For load: vdst,addr,saddr; for store: addr,data,saddr
+        addr_is_off = args[addr_arg_idx] in ('OFF', 'NULL')
+        sve_val = 0 if addr_is_off else 1
+        addr_val = 'v[0]' if addr_is_off else args[addr_arg_idx]
+        # For SCRATCH with sve=1 and saddr=off, addr is 64-bit
+        if sve_val == 1 and saddr_is_off and (m := re.match(r'^v\[(\d+)\]$', addr_val)):
+          idx = int(m.group(1))
+          if idx < 255: addr_val = f'v[{idx}:{idx+1}]'  # Only expand if within range
+        # Build the instruction - field order depends on load vs store
+        if is_load:
+          return f"{mn}(vdst={args[0]}, addr={addr_val}{f', saddr={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods}, sve={sve_val})"
+        else:
+          return f"{mn}(addr={addr_val}, data={args[1]}{f', saddr={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods}, sve={sve_val})"
+      addr_val = _vaddr(args[1], saddr_is_off)
+      return f"{mn}({f0}={args[0]}, {f1}={addr_val}{f', {f2}={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
   for pre in ('flat_atomic', 'global_atomic', 'scratch_atomic'):
     if mn.startswith(pre):
       if glc and len(args) >= 3: return f"{mn}(vdst={args[0]}, addr={args[1]}, data={args[2]}{f', saddr={_saddr(args[3])}' if len(args) >= 4 else ', saddr=RawImm(124)'}{flat_mods})"
@@ -343,11 +407,13 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
   if mn.startswith('ds_'):
     if ds_off0 is not None or ds_off1 is not None:
       off0, off1 = str(ds_off0 or 0), str(ds_off1 or 0)
+    elif swizzle_off is not None:
+      off0, off1 = str(swizzle_off & 0xff), str((swizzle_off >> 8) & 0xff)
     elif off_val:
       off0, off1 = str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)
     else:
       off0, off1 = "0", "0"
-    gds_s = ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
+    gds_s = ", gds=1" if gds else ""
     off_kw = f", offset0={off0}, offset1={off1}{gds_s}"
     if mn == 'ds_nop' or mn in ('ds_gws_sema_v', 'ds_gws_sema_p', 'ds_gws_sema_release_all'): return f"{mn}({off_kw.lstrip(', ')})"
     if 'gws_' in mn: return f"{mn}(addr={args[0]}{off_kw})"
@@ -433,7 +499,10 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
     opsel_hi_enc = opsel_hi_val[0] | (opsel_hi_val[1] << 1) if len(opsel_hi_val) >= 2 else opsel_hi_val[0]
     opsel_hi2_enc = opsel_hi_val[2] if len(opsel_hi_val) >= 3 else (0 if is_fma_mix else 1)
     all_kw.extend([f'opsel_hi={opsel_hi_enc}', f'opsel_hi2={opsel_hi2_enc}'])
-  elif is_vop3p and not is_fma_mix:
+  elif is_fma_mix:
+    # fma_mix uses opsel_hi=0 and opsel_hi2=0 by default (not the VOP3P defaults of 3/1)
+    all_kw.extend(['opsel_hi=0', 'opsel_hi2=0'])
+  elif is_vop3p:
     all_kw.extend(['opsel_hi=3', 'opsel_hi2=1'])
   if clamp_found:
     if arch == 'rdna4': all_kw.append('cm=1')
@@ -445,6 +514,11 @@ def get_dsl(text: str, arch: str = "rdna3") -> str:
 def _hwreg(id_, offset=0, size=32): return id_ | (offset << 6) | ((size - 1) << 11)
 def _sendmsg(id_, op=0, stream=0): return id_ | (op << 4) | (stream << 8)
 
+# RDNA3 hwreg names - from disasm.py HWREG dict (value -> name, we need name -> value)
+_HWREG_NAMES_RDNA3 = {v: k for k, v in HWREG.items()}
+# RDNA4 hwreg names - from disasm.py HWREG_RDNA4 dict
+_HWREG_NAMES_RDNA4 = {v: k for k, v in HWREG_RDNA4.items()}
+# Legacy/generic hwreg names (for CDNA and other archs)
 _HWREG_NAMES = {'HW_REG_MODE': 1, 'HW_REG_STATUS': 2, 'HW_REG_TRAPSTS': 3, 'HW_REG_HW_ID': 4, 'HW_REG_GPR_ALLOC': 5,
   'HW_REG_LDS_ALLOC': 6, 'HW_REG_IB_STS': 7, 'HW_REG_PC_LO': 8, 'HW_REG_PC_HI': 9, 'HW_REG_INST_DW0': 10, 'HW_REG_INST_DW1': 11,
   'HW_REG_IB_DBG0': 12, 'HW_REG_IB_DBG1': 13, 'HW_REG_FLUSH_IB': 14, 'HW_REG_SH_MEM_BASES': 15, 'HW_REG_SQ_SHADER_TBA_LO': 16,
@@ -452,26 +526,33 @@ _HWREG_NAMES = {'HW_REG_MODE': 1, 'HW_REG_STATUS': 2, 'HW_REG_TRAPSTS': 3, 'HW_R
   'HW_REG_FLAT_SCR_HI': 21, 'HW_REG_XNACK_MASK': 22, 'HW_REG_HW_ID1': 23, 'HW_REG_HW_ID2': 24, 'HW_REG_POPS_PACKER': 25,
   'HW_REG_PERF_SNAPSHOT_DATA': 26, 'HW_REG_PERF_SNAPSHOT_PC_LO': 27, 'HW_REG_PERF_SNAPSHOT_PC_HI': 28, 'HW_REG_SHADER_CYCLES': 29,
   'HW_REG_SHADER_CYCLES_HI': 30, 'HW_REG_WAVE_MODE': 31, 'HW_REG_WAVE_SCRATCH_BASE': 32}
-_HWREG_NAMES_RDNA4 = {v: k for k, v in HWREG_RDNA4.items()}
 _SENDMSG_NAMES = {'MSG_INTERRUPT': 1, 'MSG_GS': 2, 'MSG_GS_DONE': 3, 'MSG_SAVEWAVE': 4, 'MSG_STALL_WAVE_GEN': 5,
   'MSG_HALT_WAVES': 6, 'MSG_ORDERED_PS_DONE': 7, 'MSG_EARLY_PRIM_DEALLOC': 8, 'MSG_GS_ALLOC_REQ': 9, 'MSG_GET_DOORBELL': 10,
   'MSG_GET_DDID': 11, 'MSG_HS_TESSFACTOR': 2, 'MSG_DEALLOC_VGPRS': 10, 'MSG_RTN_GET_DOORBELL': 128, 'MSG_RTN_GET_DDID': 129,
   'MSG_RTN_GET_TMA': 130, 'MSG_RTN_GET_REALTIME': 131, 'MSG_RTN_SAVE_WAVE': 132, 'MSG_RTN_GET_TBA': 133,
   'MSG_RTN_GET_TBA_TO_PC': 134, 'MSG_RTN_GET_SE_AID_ID': 135}
+# GFX11 (RDNA3) uses different sendmsg values
+_SENDMSG_NAMES_RDNA3 = {**_SENDMSG_NAMES, 'MSG_DEALLOC_VGPRS': 3}
 
 def asm(text: str, arch: str = "rdna3") -> Inst:
   dsl = get_dsl(text, arch)
   if arch == "rdna4":
     ns = {n: getattr(rdna4_ins, n) for n in dir(rdna4_ins) if not n.startswith('_')}
     hwreg_names = _HWREG_NAMES_RDNA4
+    sendmsg_names = _SENDMSG_NAMES
+  elif arch == "rdna3":
+    ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
+    hwreg_names = _HWREG_NAMES_RDNA3
+    sendmsg_names = _SENDMSG_NAMES_RDNA3
   else:
     ns = {n: getattr(ins, n) for n in dir(ins) if not n.startswith('_')}
     hwreg_names = _HWREG_NAMES
+    sendmsg_names = _SENDMSG_NAMES
   def hwreg(id_, offset=0, size=32): return _hwreg(hwreg_names.get(id_, id_) if isinstance(id_, str) else id_, offset, size)
-  def sendmsg(id_, op=0, stream=0): return _sendmsg(_SENDMSG_NAMES.get(id_, id_) if isinstance(id_, str) else id_, op, stream)
+  def sendmsg(id_, op=0, stream=0): return _sendmsg(sendmsg_names.get(id_, id_) if isinstance(id_, str) else id_, op, stream)
   ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
              'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF,
-             'hwreg': hwreg, 'sendmsg': sendmsg, **{k: k for k in hwreg_names}, **{k: k for k in _SENDMSG_NAMES}})
+             'hwreg': hwreg, 'sendmsg': sendmsg, **{k: k for k in hwreg_names}, **{k: k for k in sendmsg_names}})
   try: return eval(dsl, ns)
   except NameError:
     if m := re.match(r'^(v_\w+)(\(.*\))$', dsl): return eval(f"{m.group(1)}_e32{m.group(2)}", ns)

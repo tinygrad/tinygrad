@@ -102,6 +102,12 @@ class BitField:
   def enum(self, enum_cls) -> 'EnumBitField': return EnumBitField(self.hi, self.lo, enum_cls)
   def encode(self, val) -> int:
     assert isinstance(val, int), f"BitField.encode expects int, got {type(val).__name__}"
+    # Handle negative values with two's complement
+    if val < 0:
+      bits = self.hi - self.lo + 1
+      min_val = -(1 << (bits - 1))
+      if val < min_val: raise RuntimeError(f"field '{self.name}': value {val} doesn't fit in {bits} signed bits")
+      return val + (1 << bits)
     return val
   def decode(self, val): return val
   def set(self, raw: int, val) -> int:
@@ -147,7 +153,15 @@ class SrcField(BitField):
 
   def encode(self, val) -> int:
     """Encode value. Returns 255 (literal marker) for out-of-range values."""
-    if isinstance(val, Reg): offset = val.offset
+    hi_bit = 0
+    if isinstance(val, Reg):
+      offset = val.offset
+      # RawImm bypasses validation - return raw value directly (used for special register encodings)
+      if type(val).__name__ == 'RawImm': return offset
+      # For 9-bit src fields in VOP1/VOP2/VOPC, .h adds 128 to VGPR encoding (true16 mode)
+      # Only apply if the result fits - VOP3 uses opsel instead and doesn't need this
+      if val.hi and 256 <= offset < 384 and (self.hi - self.lo + 1) == 9:  # v[0-127].h only
+        hi_bit = 128
     elif isinstance(val, float): offset = self._FLOAT_ENC.get(val, 255)
     elif isinstance(val, int) and 0 <= val <= 64: offset = 128 + val
     elif isinstance(val, int) and -16 <= val < 0: offset = 192 - val
@@ -155,7 +169,7 @@ class SrcField(BitField):
     else: raise TypeError(f"invalid src value {val}")
     if not (self._valid_range[0] <= offset <= self._valid_range[1]):
       raise TypeError(f"{self.__class__.__name__}: {val} (offset {offset}) out of range {self._valid_range}")
-    return offset - self._valid_range[0]
+    return offset - self._valid_range[0] + hi_bit
 
   def decode(self, raw): return src[raw + self._valid_range[0]]
 
@@ -240,7 +254,8 @@ class Inst:
 
   def __init__(self, *args, **kwargs):
     self._raw = 0
-    self._literal: int | None = kwargs.pop('literal', None)
+    lit = kwargs.pop('literal', None)
+    self._literal: int | None = _f32(lit) if isinstance(lit, float) else lit
     # Map positional args to field names (skip FixedBitFields)
     args_iter = iter(args)
     vals = {}
@@ -251,15 +266,21 @@ class Inst:
     remaining = list(args_iter)
     assert not remaining, f"too many positional args: {remaining}"
     # Extract modifiers from Reg objects and merge into neg/abs/opsel
+    # For instructions with opsel field, .h is handled by opsel, not by SrcField encoding
+    has_opsel = any(n == 'opsel' for n, _ in self._fields)
     neg_bits, abs_bits, opsel_bits = 0, 0, 0
     for name, bit in [('src0', 0), ('src1', 1), ('src2', 2)]:
       if name in vals and isinstance(vals[name], Reg):
         reg = vals[name]
         if reg.neg: neg_bits |= (1 << bit)
         if reg.abs_: abs_bits |= (1 << bit)
-        if reg.hi: opsel_bits |= (1 << bit)
+        if reg.hi:
+          opsel_bits |= (1 << bit)
+          # Clear .hi so SrcField.encode won't add hi_bit (opsel handles it instead)
+          if has_opsel: vals[name] = Reg(reg.offset, reg.sz, neg=reg.neg, abs_=reg.abs_, hi=False)
     if 'vdst' in vals and isinstance(vals['vdst'], Reg) and vals['vdst'].hi:
       opsel_bits |= (1 << 3)
+      if has_opsel: vals['vdst'] = Reg(vals['vdst'].offset, vals['vdst'].sz, neg=vals['vdst'].neg, abs_=vals['vdst'].abs_, hi=False)
     if neg_bits: vals['neg'] = (vals.get('neg') or 0) | neg_bits
     if abs_bits: vals['abs'] = (vals.get('abs') or 0) | abs_bits
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
@@ -267,13 +288,18 @@ class Inst:
     for name, field in self._fields:
       val = vals[name]
       self._raw = field.set(self._raw, val)
-      # Capture literal for SrcFields that encoded to 255
-      if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
-        self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
+      # Capture literal for SrcFields that encoded to 255 (skip RawImm - those are raw encodings, not literals)
+      if isinstance(field, SrcField) and val is not None and type(val).__name__ != 'RawImm' and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
+        lit_val = getattr(val, 'val', val)  # Extract value from SrcMod if present
+        self._literal = _f32(lit_val) if isinstance(lit_val, float) else lit_val & 0xFFFFFFFF
     # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC)
     for name, expected in self.op_regs.items():
       if (val := vals.get(name)) is None: continue
-      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or val.offset == 253):
+      # Skip size validation for addr when it's v255 (can't expand to 64-bit, hardware handles implicitly)
+      if name == 'addr' and isinstance(val, Reg) and val.offset == 511: continue  # v255 = offset 256+255 = 511
+      # Allow larger register ranges (e.g. s[12:13] for 32-bit sdst) - just use the base
+      if isinstance(val, Reg) and val.sz > expected and not (106 <= val.offset <= 127 or val.offset == 253): continue
+      if isinstance(val, Reg) and val.sz < expected and not (106 <= val.offset <= 127 or val.offset == 253):
         raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
 
   @property
@@ -294,11 +320,29 @@ class Inst:
       if '_co_ci_' in name:
         if 'src2' in bits: bits['src2'] = 32
         if 'sdst' in bits: bits['sdst'] = 32
+      elif '_co_' in name and 'sdst' in bits: bits['sdst'] = 32  # v_add_co_u32, v_sub_co_u32
+      # v_mad_i64_i32 and v_mad_u64_u32 have sdst for carry out (32-bit in WAVE32)
+      if ('mad_i64' in name or 'mad_u64' in name) and 'sdst' in bits: bits['sdst'] = 32
       if 'cmp' in name and 'vdst' in bits: bits['vdst'] = 32
-    # GLOBAL/FLAT: addr is 32-bit if saddr is valid SGPR, 64-bit if saddr is NULL
+      # WMMA in WAVE32: src2/vdst are half size (accumulator is per-lane, not per-wavefront)
+      if 'wmma' in name:
+        if 'src2' in bits: bits['src2'] = bits['src2'] // 2
+        if 'vdst' in bits: bits['vdst'] = bits['vdst'] // 2
+    # GLOBAL/FLAT/SCRATCH: addr sizing depends on saddr and SVE
+    # - SCRATCH (seg=1): SVE controls whether addr is valid (sve=1) or ignored (sve=0)
+    # - GLOBAL/FLAT (seg=0,2): addr is 64-bit if saddr=NULL, 32-bit if saddr is valid SGPR
     if 'addr' in bits and (saddr_field := getattr(type(self), 'saddr', None)):
       saddr_val = (self._raw >> saddr_field.lo) & saddr_field.mask  # access _raw directly to avoid recursion
-      bits['addr'] = 64 if saddr_val in (124, 125) else 32  # 124=NULL, 125=M0
+      seg_val = getattr(type(self), 'seg', None)
+      seg_val = seg_val.default if seg_val else None
+      if seg_val == 1:  # SCRATCH
+        sve_field = getattr(type(self), 'sve', None)
+        sve_val = (self._raw >> sve_field.lo) & sve_field.mask if sve_field else 0
+        if sve_val == 0: pass  # addr unused, keep default 32-bit
+        elif saddr_val in (124, 125): bits['addr'] = 64  # sve=1, saddr=NULL/M0: 64-bit addr
+        # else: sve=1, saddr=valid SGPR: 32-bit addr (default)
+      else:  # GLOBAL/FLAT
+        bits['addr'] = 64 if saddr_val in (124, 125) else 32  # 124=NULL, 125=M0
     # MUBUF/MTBUF: vaddr size depends on offen/idxen (1 or 2 regs)
     if 'vaddr' in bits and hasattr(self, 'offen') and hasattr(self, 'idxen'):
       bits['vaddr'] = max(1, self.offen + self.idxen) * 32

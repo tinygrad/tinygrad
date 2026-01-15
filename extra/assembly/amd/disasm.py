@@ -84,7 +84,7 @@ def _swmmac_regs(name: str) -> tuple[int, int, int, int]:
 # IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, GLOBAL, SCRATCH, MUBUF, MTBUF, MIMG, EXP,
+from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, GLOBAL, SCRATCH, MUBUF, MTBUF, EXP,
   VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp)
 from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
   VOPC as R4_VOPC, VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
@@ -100,7 +100,7 @@ def _is_cdna(inst: Inst) -> bool: return 'cdna' in inst.__class__.__module__
 HWREG = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_HW_ID', 5: 'HW_REG_GPR_ALLOC',
          6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS', 15: 'HW_REG_SH_MEM_BASES', 18: 'HW_REG_PERF_SNAPSHOT_PC_LO',
          19: 'HW_REG_PERF_SNAPSHOT_PC_HI', 20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI', 22: 'HW_REG_XNACK_MASK',
-         23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER', 28: 'HW_REG_IB_STS2'}
+         23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER', 27: 'HW_REG_PERF_SNAPSHOT_DATA', 28: 'HW_REG_IB_STS2'}
 HWREG_RDNA4 = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 4: 'HW_REG_STATE_PRIV', 5: 'HW_REG_GPR_ALLOC',
                6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS', 10: 'HW_REG_PERF_SNAPSHOT_DATA', 11: 'HW_REG_PERF_SNAPSHOT_PC_LO',
                12: 'HW_REG_PERF_SNAPSHOT_PC_HI', 15: 'HW_REG_PERF_SNAPSHOT_DATA1', 16: 'HW_REG_PERF_SNAPSHOT_DATA2',
@@ -522,41 +522,6 @@ def _disasm_buf(inst: MUBUF | MTBUF) -> str:
   if cdna and not acc and is_mtbuf: return f"{name} {reg_fn(inst.vdata, w)}, {vaddr}, {srsrc}, {soffset_s}{fmt_s}{' ' + ' '.join(mods) if mods else ''}"
   return f"{name} {reg_fn(inst.vdata, w)}, {vaddr}, {srsrc},{fmt_s} {soffset_s}{' ' + ' '.join(mods) if mods else ''}"
 
-def _mimg_vaddr_width(name: str, dim: int, a16: bool) -> int:
-  base =              [1, 2, 3, 3,   2,     3,     3,      4][dim]
-  grad =              [1, 2, 3, 2,   1,     2,     2,      2][dim]
-  if 'get_resinfo' in name: return 1
-  packed, unpacked = 0, 0
-  if '_mip' in name: packed += 1
-  elif 'sample' in name or 'gather' in name:
-    if '_o' in name: unpacked += 1
-    if re.search(r'_c(_|$)', name): unpacked += 1
-    if '_d' in name: unpacked += (grad + 1) & ~1 if '_g16' in name else grad*2
-    if '_b' in name: unpacked += 1
-    if '_l' in name and '_cl' not in name and '_lz' not in name: packed += 1
-    if '_cl' in name: packed += 1
-  return (base + packed + 1) // 2 + unpacked if a16 else base + packed + unpacked
-
-def _disasm_mimg(inst: MIMG) -> str:
-  name = inst.op_name.lower()
-  srsrc_str = inst.srsrc.fmt()
-  if 'bvh' in name:
-    vaddr = (9 if '64' in name else 8) if inst.a16 else (12 if '64' in name else 11)
-    return f"{name} {inst.vdata.fmt(sz=4)}, {inst.vaddr.fmt(sz=vaddr)}, {inst.srsrc.fmt(sz=4)}{' a16' if inst.a16 else ''}"
-  vdata = 4 if 'gather4' in name or 'msaa_load' in name else (bin(inst.dmask).count('1') or 1)
-  if inst.d16: vdata = (vdata + 1) // 2
-  if inst.tfe: vdata += 1
-  dim_names = ['1d', '2d', '3d', 'cube', '1d_array', '2d_array', '2d_msaa', '2d_msaa_array']
-  dim = dim_names[inst.dim] if inst.dim < len(dim_names) else f"dim_{inst.dim}"
-  vaddr = _mimg_vaddr_width(name, inst.dim, inst.a16)
-  mods = [f"dmask:0x{inst.dmask:x}"] if inst.dmask and (inst.dmask != 15 or 'atomic' in name) else []
-  mods.append(f"dim:SQ_RSRC_IMG_{dim.upper()}")
-  for flag, mod in [(inst.unrm,"unorm"),(inst.glc,"glc"),(inst.slc,"slc"),(inst.dlc,"dlc"),(inst.r128,"r128"),
-                    (inst.a16,"a16"),(inst.tfe,"tfe"),(inst.lwe,"lwe"),(inst.d16,"d16")]:
-    if flag: mods.append(mod)
-  ssamp_str = f", {inst.ssamp.fmt()}" if 'sample' in name or 'gather' in name or 'get_lod' in name else ""
-  return f"{name} {inst.vdata.fmt(sz=vdata)}, {inst.vaddr.fmt(sz=vaddr)}, {srsrc_str}{ssamp_str} {' '.join(mods)}"
-
 def _disasm_sop1(inst: SOP1) -> str:
   op, name, cdna = inst.op, inst.op_name.lower(), _is_cdna(inst)
   # Use get_field_bits for register sizes
@@ -652,7 +617,7 @@ def _disasm_vbuffer(inst) -> str:
 DISASM_HANDLERS: dict[type, callable] = {
   VOP1: _disasm_vop1, VOP1_SDST: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, VOP3: _disasm_vop3, VOP3_SDST: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOPD: _disasm_vopd, VOP3P: _disasm_vop3p,
   VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, GLOBAL: _disasm_flat, SCRATCH: _disasm_flat,
-  MUBUF: _disasm_buf, MTBUF: _disasm_buf, MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk,
+  MUBUF: _disasm_buf, MTBUF: _disasm_buf, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk,
   # RDNA4
   R4_VOP1: _disasm_vop1, R4_VOP1_SDST: _disasm_vop1, R4_VOP2: _disasm_vop2, R4_VOPC: _disasm_vopc, R4_VOP3: _disasm_vop3, R4_VOP3_SDST: _disasm_vop3, R4_VOP3SD: _disasm_vop3sd,
   R4_VOPD: _disasm_vopd, R4_VOP3P: _disasm_vop3p, R4_VINTERP: _disasm_vinterp, R4_SOPP: _disasm_sopp, R4_SMEM: _disasm_smem,
