@@ -38,7 +38,7 @@ def cuda_disassemble(lib:bytes, arch:str, ptx=False):
   try:
     fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
     with open(fn, "wb") as f: f.write(lib.rstrip(b'\x00') if ptx else lib)
-    if ptx: subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn], check=False, stderr=subprocess.DEVNULL) # optional ptx -> sass step for CUDA=1
+    if ptx: system(f"ptxas -arch={arch} -o {fn} {fn}")
     print(system(f'nvdisasm {fn}'))
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
