@@ -313,15 +313,21 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
 def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
   rows:dict[str, list[ProfileEvent]] = {}
   wave_insts:dict[str, dict[str, dict]] = {}
-  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER
+  from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER, INST, InstOp
   wave_starts:dict[tuple[int, int, int, int], int] = {} # [se, cu, simd, wave] -> time
   units:dict[str, itertools.count] = {} # unit -> number of events
+  all_ops:dict[str, int] = {}
   cnt, inst_simd_sel = itertools.count(0), 0
   for e in data:
     for p in decode(e.blob):
       if next(cnt) > 10_000: break
       if isinstance(p, LAYOUT_HEADER): inst_simd_sel = p.simd
       if isinstance(p, WAVESTART): wave_starts[(e.se, p.cu, p.simd, p.wave)] = p._time
+      if isinstance(p, INST):
+        op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+        op_idx = all_ops.setdefault(op_name, len(all_ops)) # TODO: stable order
+        name = f"SINST {op_name}:{op_idx}"
+        rows.setdefault(f"SE:{e.se}", []).append(ProfileRangeEvent(f"WAVE:{p.wave} ", name, Decimal(p._time), Decimal(p._time+1)))
       if isinstance(p, WAVEEND):
         st = wave_starts.pop(key:=(e.se, p.cu, p.simd, p.wave))
         if (counter:=units.get(str(key))) is None: units[str(key)] = counter = itertools.count(0)
@@ -505,7 +511,7 @@ def get_render(query:str) -> dict:
       with Timing(f"{'** unpack using rocprof':<{32}}"):
         roc_sqtt = unpack_sqtt(*data)
       # generic list constructor
-      for ((cu_events, units, wave_insts), name_suffix, url_suffix) in ((roc_sqtt, "", ""), (raw_sqtt, "RAW ", "-raw")):
+      for ((cu_events, units, wave_insts), name_suffix, url_suffix) in ((roc_sqtt, "", ""), (raw_sqtt, "PACKETS ", "-pkts")):
         for cu in sorted(cu_events, key=row_tuple):
           steps.append(create_step(f"{name_suffix}{cu} {len(cu_events[cu])}", (f"/cu-sqtt{url_suffix}", i, len(steps)), depth=1,
                                    data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
