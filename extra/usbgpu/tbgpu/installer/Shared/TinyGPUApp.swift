@@ -1,19 +1,20 @@
 import AppKit
-import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
-	func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-		true
-	}
-}
+private let dextIdentifier = "org.tinygrad.tinygpu.edriver"
+
+private var runner: TinyGPUCLIRunner!
 
 @main
-struct TinyGPUApp: App {
-	@NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+struct TinyGPUApp {
+  static func main() {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.prohibited)
 
-    var body: some Scene {
-        WindowGroup {
-			TinyGPUView()
-        }
+    runner = TinyGPUCLIRunner(dextIdentifier: dextIdentifier)
+    runner.run(args: CommandLine.arguments) { exitCode in
+      exit(exitCode.rawValue)
     }
+
+    app.run()
+  }
 }
