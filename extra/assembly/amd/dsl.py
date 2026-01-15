@@ -58,8 +58,6 @@ class Reg:
     if self.abs_: base = f"abs({base})" if upper else f"|{base}|"
     if self.neg: base = f"-{base}"
     return base
-  @property
-  def disasm(self) -> str: return self._fmt(parens=True, upper=False)
   def __repr__(self): return self._fmt(parens=True, upper=True)
 
 # Full src encoding space
