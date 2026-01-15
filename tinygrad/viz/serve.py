@@ -279,7 +279,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
-  def add(name:str, p:PacketType, op="OP", idx=0, width=10) -> None:
+  def add(name:str, p:PacketType, op="OP", idx=0, width=5) -> None:
     rows.setdefault(r:=(f"WAVE:{p.wave} {name}:1" if hasattr(p, "wave") else f"SHARED:0 {name}:0"))
     ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+width)))
   op_idx:dict = {}
