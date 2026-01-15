@@ -276,7 +276,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(e) -> list[ProfileEvent]:
-  from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, WAVESTART, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
+  from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   def add(name:str, p:PacketType, op:str="OP", idx:int=0) -> None:
@@ -284,6 +284,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
     ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+10)))
   op_idx:dict = {}
   for p in decode(e.blob):
+    if len(ret) > 10_000: break
     if isinstance(p, INST):
       if p.op not in op_idx: op_idx[p.op] = len(op_idx)
       op_name, idx = (p.op.name, op_idx[p.op]) if isinstance(p.op, InstOp) else (f"0x{p.op:02x}", len(op_idx))
