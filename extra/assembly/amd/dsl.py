@@ -44,24 +44,22 @@ class Reg:
   def h(self) -> 'Reg': return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=True)
   @property
   def l(self) -> 'Reg': return Reg(self.offset, self.sz, neg=self.neg, abs_=self.abs_, hi=False)
-  def __repr__(self):
-    o, sz = self.offset, self.sz
-    if 256 <= o < 512:
-      idx = o - 256
-      base = f"v[{idx}]" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
-    elif o < 106: base = f"s[{o}]" if sz == 1 else f"s[{o}:{o + sz - 1}]"
-    elif sz == 2 and o in self._PAIRS: base = self._PAIRS[o]
-    elif sz == 1 and o in self._NAMES: base = self._NAMES[o]
-    elif 108 <= o < 124:
-      idx = o - 108
-      base = f"ttmp[{idx}]" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
-    elif sz == 1 and 128 <= o <= 192: base = str(o - 128)
-    elif sz == 1 and 193 <= o <= 208: base = str(-(o - 192))
+  def fmt(self, sz=None, parens=False, upper=False) -> str:
+    o, sz = self.offset, sz or self.sz
+    l, r = ("[", "]") if parens or sz > 1 else ("", "")  # brackets for multi-reg or when parens=True
+    if 256 <= o < 512: idx = o - 256; base = f"v{l}{idx}{r}" if sz == 1 else f"v[{idx}:{idx + sz - 1}]"
+    elif o < 106: base = f"s{l}{o}{r}" if sz == 1 else f"s[{o}:{o + sz - 1}]"
+    elif sz == 2 and o in self._PAIRS: base = self._PAIRS[o] if upper else self._PAIRS[o].lower()
+    elif o in self._NAMES: base = self._NAMES[o] if upper else self._NAMES[o].lower()  # special regs (any sz)
+    elif 108 <= o < 124: idx = o - 108; base = f"ttmp{l}{idx}{r}" if sz == 1 else f"ttmp[{idx}:{idx + sz - 1}]"
+    elif 128 <= o <= 192: base = str(o - 128)  # inline int constants (0-64)
+    elif 193 <= o <= 208: base = str(-(o - 192))  # inline negative int constants (-1 to -16)
     else: raise RuntimeError(f"unknown register: offset={o}, sz={sz}")
     if self.hi: base += ".h"
-    if self.abs_: base = f"abs({base})"
+    if self.abs_: base = f"abs({base})" if upper else f"|{base}|"
     if self.neg: base = f"-{base}"
     return base
+  def __repr__(self): return self.fmt(parens=True, upper=True)
 
 # Full src encoding space
 src = Reg(0, 512)
@@ -161,6 +159,15 @@ class SrcField(BitField):
 
   def decode(self, raw): return src[raw + self._valid_range[0]]
 
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    reg = self.decode((obj._raw >> self.lo) & self.mask)
+    # Resize register based on operand info (skip non-resizable special registers)
+    # VCC/EXEC pairs (106, 126), NULL (124), M0 (125), float constants (240-255)
+    if reg.offset not in (124, 125) and not 240 <= reg.offset <= 255:
+      if sz := obj.op_regs.get(self.name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+    return reg
+
 class VGPRField(SrcField):
   _valid_range = (256, 511)
   def __init__(self, hi: int, lo: int, default=v[0]): super().__init__(hi, lo, default)
@@ -186,6 +193,11 @@ class AlignedSGPRField(BitField):
     if val.offset & (self._align - 1): raise ValueError(f"{self.__class__.__name__} requires {self._align}-aligned SGPR, got s[{val.offset}]")
     return val.offset >> (self._align.bit_length() - 1)
   def decode(self, raw): return src[raw << (self._align.bit_length() - 1)]
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    reg = self.decode((obj._raw >> self.lo) & self.mask)
+    if sz := obj.op_regs.get(self.name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+    return reg
 
 class SBaseField(AlignedSGPRField): _align = 2
 class SRsrcField(AlignedSGPRField): _align = 4
@@ -284,9 +296,9 @@ class Inst:
         if 'sdst' in bits: bits['sdst'] = 32
       if 'cmp' in name and 'vdst' in bits: bits['vdst'] = 32
     # GLOBAL/FLAT: addr is 32-bit if saddr is valid SGPR, 64-bit if saddr is NULL
-    if 'addr' in bits and hasattr(self, 'saddr'):
-      saddr_val = self.saddr.offset if isinstance(self.saddr, Reg) else self.saddr
-      bits['addr'] = 64 if saddr_val in (None, 124, 125) else 32  # 124=NULL, 125=M0
+    if 'addr' in bits and (saddr_field := getattr(type(self), 'saddr', None)):
+      saddr_val = (self._raw >> saddr_field.lo) & saddr_field.mask  # access _raw directly to avoid recursion
+      bits['addr'] = 64 if saddr_val in (124, 125) else 32  # 124=NULL, 125=M0
     # MUBUF/MTBUF: vaddr size depends on offen/idxen (1 or 2 regs)
     if 'vaddr' in bits and hasattr(self, 'offen') and hasattr(self, 'idxen'):
       bits['vaddr'] = max(1, self.offen + self.idxen) * 32
@@ -352,19 +364,10 @@ class Inst:
 
   def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw and self._literal == other._literal
   def __hash__(self): return hash((type(self), self._raw, self._literal))
-  @property
-  def _field_sizes(self) -> dict[str, int]:
-    """Get field sizes for repr - uses op_regs."""
-    return self.op_regs
 
   def __repr__(self):
     # collect (repr, is_default) pairs, strip trailing defaults so repr roundtrips with eval
-    name, sizes = self.op.name.lower() if hasattr(self, 'op') else type(self).__name__, self._field_sizes
-    def fmt(n, val):
-      # resize regular registers to match type, but skip special registers (NULL, VCC, EXEC, etc)
-      if isinstance(val, Reg) and (sz := sizes.get(n, 1)) > 1 and not (106 <= val.offset <= 127 or val.offset == 253):
-        return repr(Reg(val.offset, sz, neg=val.neg, abs_=val.abs_, hi=val.hi))
-      return repr(val)
-    parts = [(fmt(n, v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
+    name = self.op.name.lower() if hasattr(self, 'op') else type(self).__name__
+    parts = [(repr(v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
     while parts and parts[-1][1]: parts.pop()
     return f"{name}({', '.join(p[0] for p in parts)})"
