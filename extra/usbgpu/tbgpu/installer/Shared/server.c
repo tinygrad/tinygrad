@@ -141,6 +141,9 @@ static void cleanup(void) {
 }
 
 static void handle_client(int fd) {
+  g_conn = open_tinygpu();
+  if (g_conn == IO_OBJECT_NULL) { fprintf(stderr, "failed to connect to tinygpu driver\n"); return; }
+
   request_t req;
   response_t resp;
   int bufsize = BULK_BUF_SIZE;
@@ -198,19 +201,15 @@ static void handle_client(int fd) {
 }
 
 int run_server(const char *sock_path) {
-  g_conn = open_tinygpu();
-  if (g_conn == IO_OBJECT_NULL) { fprintf(stderr, "failed to connect to tinygpu driver\n"); return 1; }
-  printf("connected to tinygpu driver\n");
-
   int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (server_fd < 0) { perror("socket"); cleanup(); return 1; }
+  if (server_fd < 0) { perror("socket"); return 1; }
 
   struct sockaddr_un addr = {.sun_family = AF_UNIX};
   strncpy(addr.sun_path, sock_path, sizeof(addr.sun_path) - 1);
   unlink(sock_path);
 
-  if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); close(server_fd); cleanup(); return 1; }
-  if (listen(server_fd, 1) < 0) { perror("listen"); close(server_fd); cleanup(); return 1; }
+  if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) { perror("bind"); close(server_fd); return 1; }
+  if (listen(server_fd, 1) < 0) { perror("listen"); close(server_fd); return 1; }
 
   printf("listening on %s\n", sock_path);
 

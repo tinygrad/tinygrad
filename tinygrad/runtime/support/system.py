@@ -268,7 +268,7 @@ class RemotePCIDevice(PCIDevice):
 
   def _get_resp(self, cmd, args) -> tuple[int, int]:
     resp = struct.unpack('<BQQ', self._recvall(17))
-    if resp[0] != 0: raise RuntimeError(f"RPC failed: cmd={cmd}, args={args}")
+    if resp[0] != 0: raise RuntimeError(f"RPC failed: cmd={cmd} ({RemoteCmd(cmd).name}), args={args}, status={resp[0]}, resp=({resp[1]}, {resp[2]})")
     return resp[1], resp[2]
 
   def _rpc(self, cmd:int, *args:int, readout_size:int=0) -> tuple[int, int, bytes|None]:
@@ -316,26 +316,24 @@ class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
 
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
-    sock_path = "/tmp/tinygpu.sock"
-
-    def try_connect():
+    def try_connect(path):
       try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.connect(sock_path)
-        return sock
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(path)
+        return s
       except (ConnectionRefusedError, FileNotFoundError): return None
 
-    if not (sock := try_connect()):
+    if not (sock := try_connect(sock_path:=temp("tinygpu.sock"))):
       if not os.path.exists(self.APP_PATH): raise RuntimeError(f"TinyGPU app not found at {self.APP_PATH}")
       subprocess.Popen([self.APP_PATH, "server", sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
       for _ in range(100):
+        if sock:=try_connect(sock_path): break
         time.sleep(0.02)
-        if sock := try_connect(): break
-      else: raise RuntimeError("Failed to start TinyGPU server")
+      else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}. Open /Applications/TinyGPU.app for troubleshooting.")
     super().__init__(devpref, pcibus, bars, sock)
 
 class APLRemoteIfaceBase(LNXPCIIfaceBase):
-  def __init__(self, dev, dev_id:int, vendor:int, devices:list[tuple[int, list[int]]], bars:list[int], vram_bar:int, va_start:int, va_size:int, base_class:int|None=None):
+  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
     self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
     self.dev, self.vram_bar = dev, vram_bar
     assert self.pci_dev.read_config(0x00, 2) == vendor, f"Vendor ID mismatch"

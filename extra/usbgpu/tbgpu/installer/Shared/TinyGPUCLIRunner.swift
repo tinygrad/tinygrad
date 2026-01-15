@@ -16,9 +16,16 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
   private let dextIdentifier: String
   private var done: ((TinyGPUCLIExit) -> Void)?
   private var pendingAction: String = ""
+  private var logHandler: ((String) -> Void)?
 
-  init(dextIdentifier: String) {
+  init(dextIdentifier: String, logHandler: ((String) -> Void)? = nil) {
     self.dextIdentifier = dextIdentifier
+    self.logHandler = logHandler
+  }
+
+  private func log(_ msg: String) {
+    if let logHandler = logHandler { logHandler(msg) }
+    else { print(msg, terminator: "") }
   }
 
   private static func queryDextState(bundleID: String) -> DextState {
@@ -44,7 +51,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
   }
 
   private func printUsage() {
-    print("""
+    log("""
     TinyGPU Driver Extension Manager
 
     Usage: TinyGPU <command> [options]
@@ -60,6 +67,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
       TinyGPU status                    # Check if driver is installed
       TinyGPU install                   # Install the driver extension
       TinyGPU server /tmp/tinygpu.sock  # Start server
+
     """)
   }
 
@@ -89,7 +97,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
 
     case "server":
       guard args.count > 2 else {
-        fputs("Error: server command requires socket path\n", stderr)
+        log("Error: server command requires socket path\n")
         printUsage()
         done(.usage)
         return
@@ -103,7 +111,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
       done(.ok)
 
     default:
-      fputs("Unknown command: \(cmd)\n", stderr)
+      log("Unknown command: \(cmd)\n")
       printUsage()
       done(.usage)
     }
@@ -112,18 +120,18 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
   private func printStatus(_ state: DextState) {
     switch state {
     case .unloaded:
-      print("Status: Not installed")
-      print("Run 'TinyGPU install' to install the driver extension.")
+      log("Status: Not installed\n")
+      log("Run 'TinyGPU install' to install the driver extension.\n")
     case .activating:
-      print("Status: Activating...")
+      log("Status: Activating...\n")
     case .needsApproval:
-      print("Status: Waiting for user approval")
-      print("Please approve the extension in System Settings > Privacy & Security.")
+      log("Status: Waiting for user approval\n")
+      log("Please approve the extension in System Settings > Privacy & Security.\n")
     case .activated:
-      print("Status: Installed and active")
+      log("Status: Installed and active\n")
     case .activationError:
-      print("Status: Activation failed")
-      print("Check system logs for details.")
+      log("Status: Activation failed\n")
+      log("Check system logs for details.\n")
     }
   }
 
@@ -131,14 +139,13 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     let state = Self.queryDextState(bundleID: dextIdentifier)
 
     if state == .activated {
-      print("Driver extension is already installed and active.")
+      log("Driver extension is already installed and active.\n")
       done?(.ok)
       return
     }
 
-    print("Installing TinyGPU driver extension...")
-    print("You may be prompted to approve the extension in System Settings.")
-    print("")
+    log("Installing TinyGPU driver extension...\n")
+    log("You may be prompted to approve the extension in System Settings.\n\n")
 
     pendingAction = "install"
     let req = OSSystemExtensionRequest.activationRequest(
@@ -153,12 +160,12 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     let state = Self.queryDextState(bundleID: dextIdentifier)
 
     if state == .unloaded {
-      print("Driver extension is not installed.")
+      log("Driver extension is not installed.\n")
       done?(.ok)
       return
     }
 
-    print("Uninstalling TinyGPU driver extension...")
+    log("Uninstalling TinyGPU driver extension...\n")
 
     pendingAction = "uninstall"
     let req = OSSystemExtensionRequest.deactivationRequest(
@@ -172,16 +179,13 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
   // MARK: OSSystemExtensionRequestDelegate
 
   func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-    print("")
-    print("User approval required!")
-    print("Please go to System Settings > Privacy & Security and allow the extension.")
-    print("")
-    print("If the extension was previously disabled, you need to:")
-    print("  1. Open System Settings > General > Login Items & Extensions")
-    print("  2. Find 'TinyGPU' under 'Driver Extensions'")
-    print("  3. Toggle it ON")
-    print("")
-    print("After approval, run 'TinyGPU status' to verify installation.")
+    log("\nUser approval required!\n")
+    log("Please go to System Settings > Privacy & Security and allow the extension.\n\n")
+    log("If the extension was previously disabled, you need to:\n")
+    log("  1. Open System Settings > General > Login Items & Extensions\n")
+    log("  2. Find 'TinyGPU' under 'Driver Extensions'\n")
+    log("  3. Toggle it ON\n\n")
+    log("After approval, connect the gpu and use it with tinygrad.\n")
     done?(.needsApproval)
   }
 
@@ -190,44 +194,42 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     switch result {
     case .completed:
       if pendingAction == "install" {
-        print("Driver extension installed successfully!")
+        log("Driver extension installed successfully!\n")
       } else if pendingAction == "uninstall" {
-        print("Driver extension uninstalled successfully!")
+        log("Driver extension uninstalled successfully!\n")
       }
       done?(.ok)
     case .willCompleteAfterReboot:
-      print("Extension will be activated after system reboot.")
+      log("Extension will be activated after system reboot.\n")
       done?(.ok)
     @unknown default:
-      print("Completed with result: \(result)")
+      log("Completed with result: \(result)\n")
       done?(.ok)
     }
   }
 
   func request(_ request: OSSystemExtensionRequest,
                didFailWithError error: Error) {
-    print("")
-    fputs("Error: \(error.localizedDescription)\n", stderr)
+    log("\nError: \(error.localizedDescription)\n")
 
     // Provide helpful guidance based on common errors
     let nsError = error as NSError
     if nsError.domain == OSSystemExtensionErrorDomain {
       switch nsError.code {
       case 1: // OSSystemExtensionErrorUnknown
-        print("Unknown error occurred.")
+        log("Unknown error occurred.\n")
       case 4: // OSSystemExtensionErrorMissingEntitlement
-        print("The app is missing required entitlements. Please rebuild with proper signing.")
+        log("The app is missing required entitlements. Please rebuild with proper signing.\n")
       case 8: // OSSystemExtensionErrorExtensionNotFound
-        print("Extension not found in app bundle.")
+        log("Extension not found in app bundle.\n")
       case 9: // OSSystemExtensionErrorExtensionRequired (user disabled)
-        print("")
-        print("The extension is disabled by the user.")
-        print("To enable it:")
-        print("  1. Open System Settings > General > Login Items & Extensions")
-        print("  2. Find 'TinyGPU' under 'Driver Extensions'")
-        print("  3. Toggle it ON")
+        log("\nThe extension is disabled by the user.\n")
+        log("To enable it:\n")
+        log("  1. Open System Settings > General > Login Items & Extensions\n")
+        log("  2. Find 'TinyGPU' under 'Driver Extensions'\n")
+        log("  3. Toggle it ON\n")
       default:
-        print("Error code: \(nsError.code)")
+        log("Error code: \(nsError.code)\n")
       }
     }
     done?(.failed)
@@ -237,7 +239,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
                actionForReplacingExtension existing: OSSystemExtensionProperties,
                withExtension ext: OSSystemExtensionProperties)
   -> OSSystemExtensionRequest.ReplacementAction {
-    print("Updating existing extension (v\(existing.bundleShortVersion) -> v\(ext.bundleShortVersion))...")
+    log("Updating existing extension (v\(existing.bundleShortVersion) -> v\(ext.bundleShortVersion))...\n")
     return .replace
   }
 }
