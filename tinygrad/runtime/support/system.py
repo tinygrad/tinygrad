@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
 from typing import cast, ClassVar
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
 from tinygrad.runtime.autogen import libc, vfio, pci
@@ -248,16 +248,17 @@ class LNXPCIIfaceBase:
 
     self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
 
-class RemotePCIDevice(PCIDevice):
-  _CMD_MAP_BAR, _CMD_MAP_SYSMEM, _CMD_CFG_READ, _CMD_CFG_WRITE, _CMD_RESET = 1, 2, 3, 4, 5
-  _CMD_BULK_READ, _CMD_BULK_WRITE, _CMD_SYSMEM_READ, _CMD_SYSMEM_WRITE = 6, 7, 8, 9
+class RemoteCmd(enum.IntEnum):
+  MAP_BAR, MAP_SYSMEM, CFG_READ, CFG_WRITE, RESET = 1, 2, 3, 4, 5
+  BULK_READ, BULK_WRITE, SYSMEM_READ, SYSMEM_WRITE = 6, 7, 8, 9
 
+class RemotePCIDevice(PCIDevice):
   def __init__(self, devpref:str, pcibus:str, bars:list[int], sock):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.sock = pcibus, sock
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 16 * 1024 * 1024)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
-    self.bar_info = {b: PCIBarInfo(0, self._rpc(self._CMD_MAP_BAR, b)[0]) for b in bars}
+    self.bar_info = {b: PCIBarInfo(0, self._rpc(RemoteCmd.MAP_BAR, b)[0]) for b in bars}
 
   def _recvall(self, n:int) -> bytes:
     data = b''
@@ -278,13 +279,13 @@ class RemotePCIDevice(PCIDevice):
   def _bulk_write(self, cmd:int, idx:int, offset:int, data:bytes): self.sock.sendall(struct.pack('<BBQQQ', cmd, idx, offset, len(data), 0) + data)
 
   def map_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
-    mapped_size, idx, _ = self._rpc(self._CMD_MAP_SYSMEM, 0, 0, size)
+    mapped_size, idx, _ = self._rpc(RemoteCmd.MAP_SYSMEM, 0, 0, size)
     memview = RemoteMMIOInterface(self, idx, mapped_size, fmt='B', is_sysmem=True)
     paddrs_raw = list(itertools.takewhile(lambda p: p[1] != 0, zip(memview.view(fmt='Q')[0::2], memview.view(fmt='Q')[1::2])))
     return memview, [p + i for p, sz in paddrs_raw for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
-  def read_config(self, offset:int, size:int): return self._rpc(self._CMD_CFG_READ, 0, offset, size)[0]
-  def write_config(self, offset:int, value:int, size:int): self._rpc(self._CMD_CFG_WRITE, 0, offset, size, value)
-  def reset(self): self._rpc(self._CMD_RESET, 0, 0, 0)
+  def read_config(self, offset:int, size:int): return self._rpc(RemoteCmd.CFG_READ, 0, offset, size)[0]
+  def write_config(self, offset:int, value:int, size:int): self._rpc(RemoteCmd.CFG_WRITE, 0, offset, size, value)
+  def reset(self): self._rpc(RemoteCmd.RESET, 0, 0, 0)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     return RemoteMMIOInterface(self, bar, size or self.bar_info[bar].size, fmt).view(off, size, fmt)
 
@@ -292,7 +293,7 @@ class RemoteMMIOInterface(MMIOInterface):
   def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', is_sysmem=False, addr=0):
     self.dev, self.residx, self.nbytes, self.fmt, self.is_sysmem, self.addr = dev, residx, nbytes, fmt, is_sysmem, addr
     self.el_sz = struct.calcsize(fmt)
-    self.rcmd, self.wcmd = (dev._CMD_SYSMEM_READ, dev._CMD_SYSMEM_WRITE) if is_sysmem else (dev._CMD_BULK_READ, dev._CMD_BULK_WRITE)
+    self.rcmd, self.wcmd = (RemoteCmd.SYSMEM_READ, RemoteCmd.SYSMEM_WRITE) if is_sysmem else (RemoteCmd.BULK_READ, RemoteCmd.BULK_WRITE)
 
   def __getitem__(self, index):
     if isinstance(index, slice):
