@@ -70,7 +70,7 @@ def cuMemFree_v2(dptr) -> int:
   return orig_cuda.CUDA_ERROR_INVALID_VALUE
 
 def cuMemcpyHtoDAsync_v2(dst, src: ctypes.c_void_p, bytesize: int, stream: Any) -> int:
-  ctypes.memmove(dst if isinstance(src, int) else dst.value, src, bytesize)
+  ctypes.memmove(dst if isinstance(dst, int) else dst.value, src, bytesize)
   return orig_cuda.CUDA_SUCCESS
 
 def cuMemcpyDtoH_v2(dst: ctypes.c_void_p, src, bytesize: int) -> int:
