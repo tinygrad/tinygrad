@@ -322,8 +322,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
       events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
   # * INST timeline
-  for e in data:
-    if (timeline:=sqtt_timeline(e)): cu_events[f"SE:{e.se} Packets"] = timeline
+  with soft_err(lambda _:None): cu_events |= {f"SE:{e.se} Packets": timeline for e in data if (timeline := sqtt_timeline(e))}
   return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
