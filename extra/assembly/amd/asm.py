@@ -24,7 +24,6 @@ OFF = NULL  # OFF is alias for NULL (encoding 124)
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 from extra.assembly.amd.autogen.rdna3 import ins
 from extra.assembly.amd.autogen.rdna3.ins import VOP2Op, VOPDOp, SOPKOp
-from extra.assembly.amd.autogen.rdna3.enum import BufFmt
 from extra.assembly.amd.autogen.rdna4 import ins as rdna4_ins
 
 # Re-export disasm for backwards compatibility
@@ -34,10 +33,26 @@ from extra.assembly.amd.disasm import disasm, HWREG, HWREG_RDNA4
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# RDNA unified buffer format
-BUF_FMT = {e.name: e.value for e in BufFmt}
-_BUF_FMT_EXT = {'BUF_FMT_32_32_32_32_SINT': 62, 'BUF_FMT_32_32_32_32_FLOAT': 63, 'BUF_FMT_8_FLOAT': 108}
-BUF_FMT.update(_BUF_FMT_EXT)
+# RDNA unified buffer format (not in XML, hardcoded from AMD documentation)
+BUF_FMT = {'BUF_FMT_8_UNORM': 1, 'BUF_FMT_8_SNORM': 2, 'BUF_FMT_8_USCALED': 3, 'BUF_FMT_8_SSCALED': 4,
+  'BUF_FMT_8_UINT': 5, 'BUF_FMT_8_SINT': 6, 'BUF_FMT_16_UNORM': 7, 'BUF_FMT_16_SNORM': 8,
+  'BUF_FMT_16_USCALED': 9, 'BUF_FMT_16_SSCALED': 10, 'BUF_FMT_16_UINT': 11, 'BUF_FMT_16_SINT': 12,
+  'BUF_FMT_16_FLOAT': 13, 'BUF_FMT_8_8_UNORM': 14, 'BUF_FMT_8_8_SNORM': 15, 'BUF_FMT_8_8_USCALED': 16,
+  'BUF_FMT_8_8_SSCALED': 17, 'BUF_FMT_8_8_UINT': 18, 'BUF_FMT_8_8_SINT': 19, 'BUF_FMT_32_UINT': 20,
+  'BUF_FMT_32_SINT': 21, 'BUF_FMT_32_FLOAT': 22, 'BUF_FMT_16_16_UNORM': 23, 'BUF_FMT_16_16_SNORM': 24,
+  'BUF_FMT_16_16_USCALED': 25, 'BUF_FMT_16_16_SSCALED': 26, 'BUF_FMT_16_16_UINT': 27, 'BUF_FMT_16_16_SINT': 28,
+  'BUF_FMT_16_16_FLOAT': 29, 'BUF_FMT_10_11_11_FLOAT': 30, 'BUF_FMT_11_11_10_FLOAT': 31,
+  'BUF_FMT_10_10_10_2_UNORM': 32, 'BUF_FMT_10_10_10_2_SNORM': 33, 'BUF_FMT_10_10_10_2_UINT': 34,
+  'BUF_FMT_10_10_10_2_SINT': 35, 'BUF_FMT_2_10_10_10_UNORM': 36, 'BUF_FMT_2_10_10_10_SNORM': 37,
+  'BUF_FMT_2_10_10_10_USCALED': 38, 'BUF_FMT_2_10_10_10_SSCALED': 39, 'BUF_FMT_2_10_10_10_UINT': 40,
+  'BUF_FMT_2_10_10_10_SINT': 41, 'BUF_FMT_8_8_8_8_UNORM': 42, 'BUF_FMT_8_8_8_8_SNORM': 43,
+  'BUF_FMT_8_8_8_8_USCALED': 44, 'BUF_FMT_8_8_8_8_SSCALED': 45, 'BUF_FMT_8_8_8_8_UINT': 46,
+  'BUF_FMT_8_8_8_8_SINT': 47, 'BUF_FMT_32_32_UINT': 48, 'BUF_FMT_32_32_SINT': 49, 'BUF_FMT_32_32_FLOAT': 50,
+  'BUF_FMT_16_16_16_16_UNORM': 51, 'BUF_FMT_16_16_16_16_SNORM': 52, 'BUF_FMT_16_16_16_16_USCALED': 53,
+  'BUF_FMT_16_16_16_16_SSCALED': 54, 'BUF_FMT_16_16_16_16_UINT': 55, 'BUF_FMT_16_16_16_16_SINT': 56,
+  'BUF_FMT_16_16_16_16_FLOAT': 57, 'BUF_FMT_32_32_32_UINT': 58, 'BUF_FMT_32_32_32_SINT': 59,
+  'BUF_FMT_32_32_32_FLOAT': 60, 'BUF_FMT_32_32_32_32_UINT': 61, 'BUF_FMT_32_32_32_32_SINT': 62,
+  'BUF_FMT_32_32_32_32_FLOAT': 63, 'BUF_FMT_8_FLOAT': 108}
 def _parse_buf_fmt_combo(s: str) -> int:
   parts = [p.strip().replace('BUF_DATA_FORMAT_', '').replace('BUF_NUM_FORMAT_', '') for p in s.split(',')]
   return BUF_FMT.get(f'BUF_FMT_{parts[0]}_{parts[1]}') if len(parts) == 2 else None
