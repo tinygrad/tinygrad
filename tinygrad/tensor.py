@@ -369,7 +369,7 @@ class Tensor(OpMixin):
     Creates a clone of this tensor allocating a separate buffer for the data.
     """
     if isinstance(self.device, tuple) and self.uop.axis is not None:
-      ret = Tensor.empty(self.shape, device=self.device[0], dtype=self.dtype).shard(self.device, self.uop.axis)
+      ret = self._multi_like(Tensor.empty)
     else:
       ret = Tensor.empty(self.shape, device=self.device, dtype=self.dtype)
     if self.grad is not None: ret.grad = self.grad.clone()
