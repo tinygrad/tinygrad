@@ -413,7 +413,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
   else:
     attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=single_device, dtype=dtypes.float32)
-  if isinstance(xq.device, tuple):
+  if isinstance(xq.device, tuple) and not isinstance(attn_mask.device, tuple):
     attn_mask = attn_mask.shard(xq.device, axis=0)
 
   attn = _sharded_empty_like(xq, axis=0)
