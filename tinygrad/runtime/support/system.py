@@ -21,13 +21,7 @@ class _System:
   def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
 
   @functools.cached_property
-  def iokit(self): return ctypes.CDLL(ctypes.util.find_library("IOKit"))
-
-  @functools.cached_property
   def libsys(self): return ctypes.CDLL(ctypes.util.find_library("System"))
-
-  @functools.cached_property
-  def mach_task_self(self): return ctypes.cast(self.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
 
   @functools.cached_property
   def pagemap(self) -> FileIOInterface:
@@ -46,28 +40,6 @@ class _System:
       return vfio_fd
     except OSError: return None
 
-  @functools.cached_property
-  def macos_tinygpu_conn(self):
-    self.iokit.IOServiceNameMatching.restype = ctypes.c_void_p # CFMutableDictionaryRef
-    if not (mdict:=self.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
-    if not (service:=self.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), ctypes.c_void_p(mdict))):
-      raise RuntimeError('Service "tinygpu" is not running')
-    if self.iokit.IOServiceOpen(service, self.mach_task_self, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
-      raise RuntimeError("IOServiceOpen failed")
-    return conn
-
-  def iokit_pci_memmap(self, typ:int):
-    if self.iokit.IOConnectMapMemory64(self.macos_tinygpu_conn, ctypes.c_uint32(typ), System.mach_task_self,
-      ctypes.byref(addr:=ctypes.c_uint64(0)), ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({typ=}) failed")
-    return MMIOInterface(addr.value, size.value)
-
-  def iokit_pci_rpc(self, sel:int, *args:int):
-    in_scalars = (ctypes.c_uint64 * len(args))(*args) if args else ctypes.POINTER(ctypes.c_uint64)()
-    if (self.iokit.IOConnectCallMethod(self.macos_tinygpu_conn, sel, in_scalars, len(args), None, ctypes.c_size_t(0),
-        out_scalars:=(ctypes.c_uint64*16)(), ctypes.byref(outcnt:=ctypes.c_uint32(16)), None, ctypes.byref(ctypes.c_size_t(0)))):
-      raise RuntimeError(f"IOConnectCallMethod({sel=}, {args=}) failed")
-    return out_scalars[:outcnt.value]
-
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
 
   def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.libsys if OSX else self.atomic_lib) is not None else None
@@ -80,15 +52,10 @@ class _System:
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[MMIOInterface, list[int]]:
-    if OSX:
-      sysmem_view = System.iokit_pci_memmap(round_up(size, mmap.PAGESIZE))
-      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem_view.view(fmt='Q')[0::2], sysmem_view.view(fmt='Q')[1::2])))
-      assert not contiguous or len(paddrs) == 1, "not contiguous, but required"
-    else:
-      assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
-      flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
-      va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
-      sysmem_view, paddrs = MMIOInterface(va, size), [(x, mmap.PAGESIZE) for x in self.system_paddrs(va, size)]
+    assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
+    flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
+    va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
+    sysmem_view, paddrs = MMIOInterface(va, size), [(x, mmap.PAGESIZE) for x in self.system_paddrs(va, size)]
 
     if data is not None: sysmem_view[:len(data)] = data
     return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
@@ -220,16 +187,6 @@ class PCIDevice:
     return MMIOInterface(loc, sz, fmt=fmt)
   def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
 
-class APLPCIDevice(PCIDevice):
-  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
-    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    self.pcibus, self.bars = pcibus, {b: System.iokit_pci_memmap(b) for b in bars}
-    self.bar_info = {b:PCIBarInfo(0, self.bars[b].nbytes-1 if b in self.bars else 0) for b in range(6)} # NOTE: fake bar info for nv.
-  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(off, size, fmt)
-  def read_config(self, offset:int, size:int): return System.iokit_pci_rpc(__TinyGPURPCReadCfg:=0, offset, size)[0]
-  def write_config(self, offset:int, value:int, size:int): System.iokit_pci_rpc(__TinyGPURPCWriteCfg:=1, offset, size, value)
-  def reset(self): System.iokit_pci_rpc(__TinyGPURPCReset:=2)
-
 class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
@@ -290,12 +247,6 @@ class LNXPCIIfaceBase:
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
     self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
-
-class APLPCIIfaceBase(LNXPCIIfaceBase):
-  def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size, base_class:int|None=None):
-    self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(dev.__class__.__name__[:2], pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
-    assert (read_vendor:=self.pci_dev.read_config(pci.PCI_VENDOR_ID, 2)) == vendor, f"Vendor ID mismatch: expected {vendor:#x}, got {read_vendor:#x}"
-  def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
 class RemotePCIDevice(PCIDevice):
   _CMD_MAP_BAR, _CMD_MAP_SYSMEM, _CMD_CFG_READ, _CMD_CFG_WRITE, _CMD_RESET = 1, 2, 3, 4, 5
