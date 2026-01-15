@@ -1,51 +1,25 @@
 #!/usr/bin/env python3
-"""Test pdf.py PDF parser and enum generation."""
-import unittest, tempfile, importlib.util
-from extra.assembly.amd.pdf import extract, extract_tables, extract_enums, extract_pcode, write_enums, PDF_URLS
+"""Test pdf.py pseudocode extraction."""
+import unittest
+from extra.assembly.amd.pdf import extract_pdf_text, extract_pcode, load_enums, PDF_URLS
 
-EXPECTED = {
-  "rdna3": {"pages": 655, "tables": 115, "sop2_ops": 67, "sop2_first": "S_ADD_U32"},
-  "rdna4": {"pages": 711, "tables": 125, "sop2_ops": 74, "sop2_first": "S_ADD_CO_U32"},
-  "cdna":  {"pages": 610, "tables": 104, "sop2_ops": 52, "sop2_first": "S_ADD_U32"},
-}
+EXPECTED_PAGES = {"rdna3": 655, "rdna4": 711, "cdna": 610}
 
-class TestPDF2(unittest.TestCase):
+class TestPcodePDF(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.data = {name: extract(url) for name, url in PDF_URLS.items()}
-    cls.tables = {name: extract_tables(pages) for name, pages in cls.data.items()}
-    cls.enums = {name: extract_enums(cls.tables[name]) for name in PDF_URLS}
-    cls.pcode = {name: extract_pcode(cls.data[name], cls.enums[name]) for name in PDF_URLS}
+    cls.pages = {name: extract_pdf_text(url) for name, url in PDF_URLS.items()}
+    cls.enums = {name: load_enums(name) for name in PDF_URLS}
+    cls.pcode = {name: extract_pcode(cls.pages[name], {n: op for ops in cls.enums[name].values() for op, n in ops.items()}) for name in PDF_URLS}
 
   def test_page_counts(self):
-    for name, exp in EXPECTED.items():
-      self.assertEqual(len(self.data[name]), exp["pages"], f"{name} page count")
+    for name, exp in EXPECTED_PAGES.items():
+      self.assertEqual(len(self.pages[name]), exp, f"{name} page count")
 
-  def test_table_counts(self):
-    for name, exp in EXPECTED.items():
-      self.assertEqual(len(self.tables[name]), exp["tables"], f"{name} table count")
-
-  def test_tables_sequential(self):
+  def test_pcode_extracted(self):
+    """Check we extracted a reasonable number of pcode entries."""
     for name in PDF_URLS:
-      nums = sorted(self.tables[name].keys())
-      missing = set(range(1, max(nums) + 1)) - set(nums)
-      self.assertEqual(missing, set(), f"{name} missing tables: {missing}")
-
-  def test_generate_enums(self):
-    for name, exp in EXPECTED.items():
-      with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-        write_enums(self.enums[name], name, f.name)
-        spec = importlib.util.spec_from_file_location("enum", f.name)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        # Check SOP2Op
-        self.assertTrue(hasattr(mod, 'SOP2Op'), f"{name} missing SOP2Op")
-        self.assertEqual(len(mod.SOP2Op), exp["sop2_ops"], f"{name} SOP2Op count")
-        self.assertEqual(mod.SOP2Op(0).name, exp["sop2_first"], f"{name} SOP2Op first")
-        # Check all enums have at least 2 ops
-        for attr in dir(mod):
-          if attr.endswith('Op'):
-            self.assertGreaterEqual(len(getattr(mod, attr)), 2, f"{name} {attr} has too few ops")
+      self.assertGreater(len(self.pcode[name]), 500, f"{name} pcode count too low")
 
   def test_pcode_rdna3_tricky(self):
     """Test specific pseudocode patterns that are tricky to extract correctly."""
@@ -64,7 +38,6 @@ class TestPDF2(unittest.TestCase):
     """Pseudocode should not contain example lines with '=>'."""
     for name in PDF_URLS:
       for (op_name, opcode), code in self.pcode[name].items():
-        # No example lines (test vectors like "S_CTZ_I32_B32(0xaaaaaaaa) => 1")
         self.assertNotIn('=>', code, f"{name} {op_name} contains example line with '=>'")
 
 if __name__ == "__main__":
