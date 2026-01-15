@@ -162,8 +162,9 @@ class SrcField(BitField):
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     reg = self.decode((obj._raw >> self.lo) & self.mask)
-    # Resize register based on operand info (skip special registers 106-127, 240-255)
-    if not (106 <= reg.offset <= 127 or 240 <= reg.offset <= 255):
+    # Resize register based on operand info (skip non-resizable special registers)
+    # VCC/EXEC pairs (106, 126), NULL (124), M0 (125), float constants (240-255)
+    if reg.offset not in (124, 125) and not 240 <= reg.offset <= 255:
       if sz := obj.op_regs.get(self.name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     return reg
 
@@ -192,6 +193,11 @@ class AlignedSGPRField(BitField):
     if val.offset & (self._align - 1): raise ValueError(f"{self.__class__.__name__} requires {self._align}-aligned SGPR, got s[{val.offset}]")
     return val.offset >> (self._align.bit_length() - 1)
   def decode(self, raw): return src[raw << (self._align.bit_length() - 1)]
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    reg = self.decode((obj._raw >> self.lo) & self.mask)
+    if sz := obj.op_regs.get(self.name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+    return reg
 
 class SBaseField(AlignedSGPRField): _align = 2
 class SRsrcField(AlignedSGPRField): _align = 4
