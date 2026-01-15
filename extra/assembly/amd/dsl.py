@@ -288,15 +288,14 @@ class Inst:
     if 'addr' in bits and hasattr(self, 'saddr'):
       saddr_val = self.saddr.offset if isinstance(self.saddr, Reg) else self.saddr
       bits['addr'] = 64 if saddr_val in (None, 124, 125) else 32  # 124=NULL, 125=M0
+    # MUBUF/MTBUF: vaddr size depends on offen/idxen (1 or 2 regs)
+    if 'vaddr' in bits and hasattr(self, 'offen') and hasattr(self, 'idxen'):
+      bits['vaddr'] = max(1, self.offen + self.idxen) * 32
     return bits
   @property
   def op_regs(self) -> dict[str, int]:
-    """Get register counts for each operand field, excluding variable-size fields."""
-    regs = {k: max(1, v // 32) for k, v in self.op_bits.items()}
-    # MUBUF/MTBUF: vaddr is variable, vdata depends on format
-    regs.pop('vaddr', None)
-    regs.pop('vdata', None)
-    return regs
+    """Get register counts for each operand field."""
+    return {k: max(1, v // 32) for k, v in self.op_bits.items()}
 
   @functools.cached_property
   def canonical_op_bits(self) -> dict[str, int]:
