@@ -127,7 +127,7 @@ def cuModuleUnload(hmod) -> int:
 
 def cuLaunchKernel(f, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, sharedMemBytes: int,
                    hStream: Any, kernelParams: Any, extra: Any) -> int:
-  cargs = [ctypes.cast(getattr(extra, field[0]), ctypes.c_void_p) for field in extra._fields_]
+  cargs = [ctypes.cast(getattr(extra, field[0]), ctypes.c_void_p) for field in extra._real_fields_]
   try: gpuocelot_lib.ptx_run(ctypes.cast(f.value, ctypes.c_char_p), len(cargs), (ctypes.c_void_p*len(cargs))(*cargs), lx, ly, lz, gx, gy, gz, 0)
   except Exception as e:
     print("Error in cuLaunchKernel:", e)
