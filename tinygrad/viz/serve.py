@@ -271,9 +271,8 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     if (pmc:=v.get(ProfilePMCEvent)):
       steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
       all_counters[(name, run_number[k], k)] = pmc[0]
-    if (sqtt:=v.get(ProfileSQTTEvent)):
-      # to decode a SQTT trace, we need the raw stream, program binary and device properties
-      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
+    # to decode a SQTT trace, we need the raw stream, program binary and device properties
+    if (sqtt:=v.get(ProfileSQTTEvent)): steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(e) -> list[ProfileEvent]:
@@ -284,9 +283,9 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   for p in decode(e.blob):
     if isinstance(p, INST):
       op_name = f"{p.op.name}:{op_idx[p.op]}" if isinstance(p.op, InstOp) else f"0x{p.op:02x}:{len(op_idx)}"
-      rows[row:=f"WAVE:{p.wave} INST:1"] = None
-      ret.append(ProfileRangeEvent(row, f"SINST {op_name}", Decimal(p._time), Decimal(p._time+10)))
-  return [ProfilePointEvent(row, "start", row, ts=Decimal(0)) for row in rows]+ret
+      rows[r:=f"WAVE:{p.wave} INST:1"] = None
+      ret.append(ProfileRangeEvent(r, f"SINST {op_name}", Decimal(p._time), Decimal(p._time+10)))
+  return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -390,10 +389,10 @@ def llvm_disasm(target:int, lib:bytes) -> dict[int, tuple[str, int]]:
   llvm.LLVMInitializeAMDGPUTargetMC()
   llvm.LLVMInitializeAMDGPUAsmParser()
   llvm.LLVMInitializeAMDGPUDisassembler()
-  # pass NULL to callbacks
-  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
   arch = "gfx%d%x%x" % (target // 10000, (target // 100) % 100, target % 100)
-  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
+  # pass NULL to callbacks
+  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, ctypes.cast(0, llvm.LLVMOpInfoCallback),
+                                         ctypes.cast(0, llvm.LLVMSymbolLookupCallback))
   image, sections, _ = elf_loader(lib)
   text = next((sh.header for sh in sections if sh.name == ".text"), None)
   assert text is not None, "no .text section found in ELF"

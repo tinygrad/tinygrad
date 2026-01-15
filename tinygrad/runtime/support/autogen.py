@@ -1,6 +1,6 @@
-import ctypes, itertools, re, functools, os
+import ctypes, itertools, re, functools, os, keyword
 from tinygrad.helpers import unwrap
-from tinygrad.runtime.autogen import libclang as clang # use REGEN=1 to regenerate libclang bindings
+import tinygrad.runtime.autogen.libclang as clang # use REGEN=1 to regenerate libclang bindings
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
   assert c != clang.clang_getNullCursor()
@@ -26,13 +26,12 @@ def fields(t: clang.CXType) -> list[clang.CXCursor]:
   clang.clang_Type_visitFields(t, visitor, None)
   return ret
 
-# flattens anonymous fields
-def all_fields(t, kind):
+# flattens anonymous structs/unions
+def all_fields(t, off=0):
   for f in fields(t):
-    if (clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f))) and
-        clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)).kind == kind):
-      yield from all_fields(clang.clang_getCursorType(f), kind)
-    else: yield f
+    if clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f))):
+      yield from all_fields(clang.clang_getCursorType(f), off + clang.clang_Cursor_getOffsetOfField(f) // 8)
+    elif nm(f): yield f, off+clang.clang_Cursor_getOffsetOfField(f) // 8 # ignores unnamed fields
 
 def arguments(c: clang.CXCursor|clang.CXType):
   yield from ((clang.clang_Cursor_getArgument if isinstance(c, clang.CXCursor) else clang.clang_getArgType)(c, i)
@@ -75,7 +74,7 @@ def readext(f, fst, snd=None):
   with open(f, "r") as f: # reopening this every time is dumb...
     f.seek(start:=loc_off(clang.clang_getRangeStart(fst) if isinstance(fst, clang.CXSourceRange) else fst))
     return f.read(loc_off(clang.clang_getRangeEnd(fst) if isinstance(fst, clang.CXSourceRange) else snd)-start)
-def attrs(c): return list(filter(lambda k: (v:=k.value) >= 400 and v < 500, map(lambda c: c.kind, children(c))))
+def attrs(c): return list(filter(lambda k: k >= 400 and k < 500, map(lambda c: c.kind, children(c))))
 
 def protocols(t): yield from (clang.clang_Type_getObjCProtocolDecl(t, i) for i in range(clang.clang_Type_getNumObjCProtocolRefs(t)))
 def basetype(t): return clang.clang_Type_getObjCObjectBaseType(t)
@@ -87,62 +86,59 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?
 
 uints = (clang.CXType_Char_U, clang.CXType_UChar, clang.CXType_UShort, clang.CXType_UInt, clang.CXType_ULong, clang.CXType_ULongLong)
 ints = uints + (clang.CXType_Char_S, clang.CXType_Short, clang.CXType_Int, clang.CXType_ULong, clang.CXType_LongLong)
-fns, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.CXCursor_ObjCSuperClassRef,) # this could include protocols
+fps, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.CXCursor_ObjCSuperClassRef,) # this could include protocols
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
+def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
+def an(py, dt): return f"Annotated[{py}, ctypes.c_{dt}]"
+
 def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
-  macros, lines, anoncnt, types, objc = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False
+  macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
     nonlocal lines, types, anoncnt, objc
-    tmap = {clang.CXType_Void:"None", clang.CXType_Char_U:"ctypes.c_ubyte", clang.CXType_UChar:"ctypes.c_ubyte", clang.CXType_Char_S:"ctypes.c_char",
-            clang.CXType_SChar:"ctypes.c_byte",
-            **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{k.lower()}" for k in ["Bool", "WChar", "Float", "Double", "LongDouble"]},
-            **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
+    tmap = {clang.CXType_Void:"None",clang.CXType_Char_U:an("int","ubyte"),clang.CXType_UChar:an("int","ubyte"),clang.CXType_WChar:an("str","wchar"),
+            clang.CXType_Char_S:an("bytes","char"),clang.CXType_SChar:an("int","byte"),clang.CXType_Bool:an("bool","bool"),
+            **{getattr(clang, f'CXType_{k}'):an("float", k.lower()) for k in ["Float", "Double", "LongDouble"]},
+            **{getattr(clang, f'CXType_{k}'):an("int", f"{'u' if 'U' in k else ''}int{sz}") for sz,k in
                [(16, "UShort"), (16, "Short"), (32, "UInt"), (32, "Int"), (64, "ULong"), (64, "Long"), (64, "ULongLong"), (64, "LongLong")]}}
 
     if t.kind in tmap: return tmap[t.kind]
     if nm(t) in types and types[nm(t)][1]: return types[nm(t)][0]
-    if ((f:=t).kind in fns) or (t.kind == clang.CXType_Pointer and (f:=clang.clang_getPointeeType(t)).kind in fns):
-      return (f"ctypes.CFUNCTYPE({tname(clang.clang_getResultType(f))}" +
-              ((', '+', '.join(map(tname, arguments(f)))) if f.kind==clang.CXType_FunctionProto else '') + ")")
+    if ((f:=t).kind in fps) or (t.kind == clang.CXType_Pointer and (f:=clang.clang_getPointeeType(t)).kind in fps):
+      return (f"c.CFUNCTYPE[{tname(clang.clang_getResultType(f))}, [" + ', '.join(map(tname, arguments(f))) + "]]")
     match t.kind:
       case clang.CXType_Pointer:
-        return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(t)).kind==clang.CXType_Void else f"ctypes.POINTER({tname(p)})"
+        return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(t)).kind==clang.CXType_Void else f"c.POINTER[{tname(p)}]"
       case clang.CXType_ObjCObjectPointer: return tname(clang.clang_getPointeeType(t)) # TODO: this seems wrong
       case clang.CXType_Elaborated: return tname(clang.clang_Type_getNamedType(t), suggested_name)
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
       case clang.CXType_Typedef:
-        defined, cnm = nm(canon:=clang.clang_getCanonicalType(t)) in types, tname(canon, typedef=nm(t).replace('::', '_'))
+        defined, cnm = nm(canon:=clang.clang_getCanonicalType(t)) in types, tname(canon, typedef=nm(t))
         types[nm(t)] = cnm if nm(t).startswith("__") else nm(t).replace('::', '_'), True
         # RECORDs need to handle typedefs specially to allow for self-reference
-        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')} = {cnm}")
+        if canon.kind != clang.CXType_Record or defined: lines.append(f"{nm(t).replace('::', '_')}: TypeAlias = {cnm}")
         return types[nm(t)][0]
       case clang.CXType_Record:
         # TODO: packed unions
         # libclang does not use CXType_Elaborated for function parameters with type qualifiers (eg. void (*)(const struct foo))
         if (_nm:=re.sub(r"^const ", "", nm(t))) in types and types[_nm][1]: return types[_nm][0]
         # check for forward declaration
-        if _nm in types: types[_nm] = (tnm:=types[_nm][0]), len(fields(t)) != 0
+        if _nm in types: types[_nm] = (tnm:=types[_nm][0]), len(fields(t)) != 0, (ln:=types[_nm][2])
         else:
-          if clang.clang_Cursor_isAnonymous(decl):
-            types[_nm] = (tnm:=(suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}")), True)
-          else: types[_nm] = (tnm:=_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0
-          lines.append(f"class {tnm}({'Struct' if decl.kind==clang.CXCursor_StructDecl else 'ctypes.Union'}): pass")
-          if typedef: lines.append(f"{typedef} = {tnm}")
-        if ((is_packed:=(clang.CXCursor_PackedAttr in attrs(decl)) or
-            ((N:=clang.clang_Type_getAlignOf(t)) != max([clang.clang_Type_getAlignOf(clang.clang_getCursorType(f)) for f in fields(t)], default=N)))):
-          if clang.clang_Type_getAlignOf(t) != 1:
-            print(f"WARNING: ignoring alignment={clang.clang_Type_getAlignOf(t)} on {_nm}")
-            is_packed = False
-        acnt = itertools.count().__next__
-        def is_anon(f): return clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)))
-        ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(clang.clang_getCursorType(f), tnm+fn[1:-1])}" if is_anon(f) else f"'{nm(f)}', "+
-            tname(clang.clang_getCursorType(f), f'{tnm}_{nm(f)}'))+(f',{clang.clang_getFieldDeclBitWidth(f)}' * clang.clang_Cursor_isBitField(f))+"),"
-            for f in all_fields(t, decl.kind)]
-        lines.extend(([f"{tnm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
-                     ([f"{tnm}._packed_ = True"] * is_packed)+([f"{tnm}._fields_ = [",*ll,"]"] if ll else []))
+          real_nm = ((suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}"))
+                     if clang.clang_Cursor_isAnonymous(decl) else _nm)
+          types[_nm] = (tnm:=real_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
+          lines.append(f"class {tnm}(ctypes.{'Structure' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
+          if typedef:
+            lines.append(f"{typedef.replace('::', '_')}: TypeAlias = {tnm}")
+            types[typedef] = typedef.replace('::', '_'), True
+        ff=[(f, tname(clang.clang_getCursorType(f), f"{tnm}_{nm(f)}"), offset) +
+            ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8) *clang.clang_Cursor_isBitField(f))
+            for f,offset in all_fields(t)]
+        if ff: lines[ln] = '\n'.join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}",
+                                      *[f"  {normalize(f)}: Annotated[{', '.join(str(a) for a in args)}]" for f,*args in ff]])
         return tnm
       case clang.CXType_Enum:
         # TODO: C++ and GNU C have forward declared enums
@@ -150,14 +146,14 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         else: types[nm(t)] = nm(t).replace(' ', '_').replace('::', '_'), True
         ety = clang.clang_getEnumDeclIntegerType(decl)
         def value(e): return (clang.clang_getEnumConstantDeclUnsignedValue if ety.kind in uints else clang.clang_getEnumConstantDeclValue)(e)
-        lines.append(f"{types[nm(t)][0]} = CEnum({tname(ety)})\n" +
+        lines.append(f"class {types[nm(t)][0]}({tname(ety)}, c.Enum): pass\n" +
                      "\n".join(f"{nm(e)} = {types[nm(t)][0]}.define('{nm(e)}', {value(e)})" for e in children(decl)
                      if e.kind == clang.CXCursor_EnumConstantDecl) + "\n")
         return types[nm(t)][0]
-      case clang.CXType_ConstantArray:
-        return f"({tname(clang.clang_getArrayElementType(t),suggested_name.rstrip('s') if suggested_name else None)} * {clang.clang_getArraySize(t)})"
+      case clang.CXType_ConstantArray: return ("c.Array[" + tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))
+                                               + f", Literal[{clang.clang_getArraySize(t)}]]")
       case clang.CXType_IncompleteArray:
-        return f"({tname(clang.clang_getArrayElementType(t), suggested_name.rstrip('s') if suggested_name else None)} * 0)"
+        return f"c.Array[{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))}, Literal[0]]"
       case clang.CXType_ObjCInterface:
         is_defn = bool([f.kind for f in children(decl) if f.kind in (clang.CXCursor_ObjCInstanceMethodDecl, clang.CXCursor_ObjCClassMethodDecl)])
         if (tnm:=nm(t)) not in types: lines.append(f"class {tnm}(objc.Spec): pass")
@@ -225,14 +221,15 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
       rollback = lines, types
       try:
         match c.kind:
-          case clang.CXCursor_FunctionDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
+          case clang.CXCursor_FunctionDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll and nm(c) not in fns:
             # TODO: we could support name-mangling
-            lines.append(f"try: ({nm(c)}:=dll.{nm(c)}).restype, {nm(c)}.argtypes = {tname(clang.clang_getCursorResultType(c))}, "
-                         f"[{', '.join(tname(clang.clang_getCursorType(arg)) for arg in arguments(c))}]\nexcept AttributeError: pass\n")
+            fns.add(nm(c))
+            argus = [f"{normalize(arg) or '_' + str(i)}:{tname(clang.clang_getCursorType(arg))}" for i, arg in enumerate(arguments(c))]
+            lines.extend(["@dll.bind", f"def {nm(c)}({', '.join(argus)}) -> {tname(clang.clang_getCursorResultType(c))}: ..."])
             if clang.CXCursor_NSReturnsRetained in attrs(c): lines.append(f"{nm(c)} = objc.returns_retained({nm(c)})")
           case (clang.CXCursor_StructDecl | clang.CXCursor_UnionDecl | clang.CXCursor_TypedefDecl | clang.CXCursor_EnumDecl
                 | clang.CXCursor_ObjCInterfaceDecl): tname(clang.clang_getCursorType(c))
-          case clang.CXCursor_MacroDefinition if parse_macros and len(toks:=Tokens(c)) > 1:
+          case clang.CXCursor_MacroDefinition if parse_macros and nm(c) and len(toks:=Tokens(c)) > 1:
             if nm(toks[1])=='(' and clang.clang_equalLocations(clang.clang_getRangeEnd(extent(toks[0])), clang.clang_getRangeStart(extent(toks[1]))):
               it = iter(toks[1:])
               _args = [nm(t) for t in itertools.takewhile(lambda t:nm(t)!=')', it) if clang.clang_getTokenKind(t) == clang.CXToken_Identifier]
@@ -249,7 +246,8 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
             elif clang.clang_getCanonicalType(ty).kind in ints: macros += [f"{nm(c)} = {readext(f, extent(children(c)[-1]))}"]
             else: macros += [f"{nm(c)} = {tname(ty)}({readext(f, extent(children(c)[-1]))})"]
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
-            lines.append(f"try: {nm(c)} = {tname(clang.clang_getCursorType(c))}.in_dll(dll, '{nm(c)}')\nexcept (ValueError,AttributeError): pass")
+            lines.append(f"try: {nm(c)} = {tname(clang.clang_getCursorType(c))}.in_dll(dll, '{nm(c)}') # type: ignore\n" +
+                         "except (ValueError,AttributeError): pass")
           case clang.CXCursor_ObjCProtocolDecl: proto(c)
           case clang.CXCursor_Namespace | clang.CXCursor_LinkageSpec: q.extend(list(children(c))[::-1])
       except NotImplementedError as e:
@@ -257,10 +255,12 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = '\n'.join(["# mypy: ignore-errors", "import ctypes", "from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR",
-                    *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
-                    *([f"dll = DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
-  macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
+  main = '\n'.join(['# mypy: disable-error-code="empty-body"', "from __future__ import annotations", "import ctypes",
+                    "from typing import Annotated, Literal, TypeAlias", "from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR",
+                    "from tinygrad.runtime.support import c", *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
+                    *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines,
+                    "c.init_records()"]) + '\n'
+  macros = [f"{r} # type: ignore" for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:
       exec(main + '\n'.join(macros), {})

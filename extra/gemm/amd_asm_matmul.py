@@ -611,7 +611,7 @@ def test_matmul():
     sink = UOp.sink(A.base, B.base, C.base, *gidxs, *lidxs, arg=KernelInfo(name=colored("kernel", "cyan"),
                                                                            estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=asm),
-                                 UOp(Ops.BINARY, arg=binary)), arg=())
+                                 UOp(Ops.BINARY, arg=binary)))
   c = Tensor.custom_kernel(a, b, c, fxn=asm_kernel)[2]
   ei = c.schedule()[0].lower()
 

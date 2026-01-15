@@ -1,5 +1,5 @@
 import ctypes, time, contextlib, functools
-from typing import Literal
+from typing import cast, Literal
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
@@ -590,7 +590,7 @@ class AM_PSP(AM_IP):
       cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_IP_FW)
       cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.msg1_addr)
       cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
-      cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
+      cmd.cmd.cmd_load_ip_fw.fw_type = cast(am.enum_psp_gfx_fw_type, fw_type)
       self._ring_submit(cmd)
 
   def _tmr_load_cmd(self) -> am.struct_psp_gfx_cmd_resp:
