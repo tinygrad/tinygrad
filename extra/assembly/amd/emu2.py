@@ -71,6 +71,16 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     return idx.store(active.where(val.cast(dtypes.uint32), idx))
 
   # Helper: read source operand
+  # Float inline constants (as uint32 bit patterns)
+  FLOAT_CONSTS = {240: 0x3f000000,  # 0.5
+                  241: 0xbf000000,  # -0.5
+                  242: 0x3f800000,  # 1.0
+                  243: 0xbf800000,  # -1.0
+                  244: 0x40000000,  # 2.0
+                  245: 0xc0000000,  # -2.0
+                  246: 0x40800000,  # 4.0
+                  247: 0xc0800000,  # -4.0
+                  248: 0x3e22f983}  # 1/(2*pi)
   def rsrc(off: int, lane: UOp) -> UOp:
     if off < 128: return rsgpr(off)
     if off == 253: return rsgpr(SCC_IDX)
@@ -78,6 +88,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     if off < 255:  # inline constants
       if off < 193: return UOp.const(dtypes.uint32, off - 128)  # 0-64
       if off < 209: return UOp.const(dtypes.uint32, (-(off - 192)) & MASK32)  # -1 to -16
+      if off in FLOAT_CONSTS: return UOp.const(dtypes.uint32, FLOAT_CONSTS[off])
       return UOp.const(dtypes.uint32, 0)  # other inline
     return rvgpr(off - 256, lane)
 
@@ -129,7 +140,18 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       s0_hi = rsrc(inst.ssrc0.offset + 1, UOp.const(dtypes.index, 0))
       return name, UOp.sink(wsgpr(dst_reg, s0), wsgpr(dst_reg + 1, s0_hi), inc_pc(), arg=KernelInfo(name=name))
 
-    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
+    # SAVEEXEC ops: save EXEC to dst, then modify EXEC
+    if 'OR_SAVEEXEC_B32' in op_name:
+      exec_lo = rsgpr(EXEC_LO.offset)
+      new_exec = exec_lo | s0
+      return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'AND_SAVEEXEC_B32' in op_name:
+      exec_lo = rsgpr(EXEC_LO.offset)
+      new_exec = exec_lo & s0
+      return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), inc_pc(), arg=KernelInfo(name=name))
+
+    assert False, f"unimplemented SOP1: {op_name}"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # SOP2: scalar ALU (s_add_i32, s_lshl_b64, etc.)
@@ -182,7 +204,35 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       result = s0.cast(dtypes.int) >> shift.cast(dtypes.int)
       return name, UOp.sink(wsgpr(dst_reg, result.cast(dtypes.uint32)), inc_pc(), arg=KernelInfo(name=name))
 
-    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
+    if 'ASHR_I64' in op_name:
+      # 64-bit arithmetic shift right
+      s0_hi = rsrc(inst.ssrc0.offset + 1, UOp.const(dtypes.index, 0))
+      s0_64 = s0.cast(dtypes.uint64) | (s0_hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+      shift = s1 & UOp.const(dtypes.uint32, 63)
+      result = s0_64.bitcast(dtypes.int64) >> shift.cast(dtypes.int64)
+      result_lo = result.bitcast(dtypes.uint64).cast(dtypes.uint32)
+      result_hi = (result.bitcast(dtypes.uint64) >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
+      return name, UOp.sink(wsgpr(dst_reg, result_lo), wsgpr(dst_reg + 1, result_hi), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'XOR_B32' in op_name:
+      result = s0 ^ s1
+      return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'AND_B32' in op_name:
+      result = s0 & s1
+      return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'OR_B32' in op_name:
+      result = s0 | s1
+      return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'CSELECT_B32' in op_name:
+      # D0 = SCC ? S0 : S1
+      scc = rsgpr(SCC_IDX)
+      result = scc.ne(UOp.const(dtypes.uint32, 0)).where(s0, s1)
+      return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
+
+    assert False, f"unimplemented SOP2: {op_name}"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # VOP1: v_mov_b32, etc.
@@ -197,7 +247,79 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       store = wvgpr(vdst_reg, lane, src0, exec_mask)
       return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
 
-    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
+    if 'EXP_F32' in inst.op.name:
+      # D0.f32 = pow(2.0, S0.f32) = exp2(S0)
+      result = UOp(Ops.EXP2, dtypes.float32, (src0.bitcast(dtypes.float32),)).bitcast(dtypes.uint32)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    assert False, f"unimplemented VOP1: {inst.op.name}"
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VOPC: vector compare, writes to VCC (or EXEC for CMPX)
+  # ═══════════════════════════════════════════════════════════════════════════
+  if isinstance(inst, VOPC):
+    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    exec_mask = rsgpr(EXEC_LO.offset)
+    src0 = rsrc(inst.src0.offset, lane)
+    src1 = rsrc(inst.vsrc1.offset, lane)
+    op_name = inst.op.name
+    is_cmpx = 'CMPX' in op_name
+
+    # Compute comparison result per lane based on op type
+    cmp_result = None
+    # Float compares
+    if 'CMP_GT_F32' in op_name or 'CMPX_GT_F32' in op_name:
+      cmp_result = src0.bitcast(dtypes.float32) > src1.bitcast(dtypes.float32)
+    elif 'CMP_LT_F32' in op_name or 'CMPX_LT_F32' in op_name:
+      cmp_result = src0.bitcast(dtypes.float32) < src1.bitcast(dtypes.float32)
+    elif 'CMP_GE_F32' in op_name or 'CMPX_GE_F32' in op_name:
+      cmp_result = src0.bitcast(dtypes.float32) >= src1.bitcast(dtypes.float32)
+    elif 'CMP_LE_F32' in op_name or 'CMPX_LE_F32' in op_name:
+      cmp_result = src0.bitcast(dtypes.float32) <= src1.bitcast(dtypes.float32)
+    elif 'CMP_EQ_F32' in op_name or 'CMPX_EQ_F32' in op_name:
+      cmp_result = src0.bitcast(dtypes.float32).eq(src1.bitcast(dtypes.float32))
+    elif 'CMP_NE_F32' in op_name or 'CMP_NEQ_F32' in op_name or 'CMPX_NE_F32' in op_name or 'CMPX_NEQ_F32' in op_name:
+      cmp_result = src0.bitcast(dtypes.float32).ne(src1.bitcast(dtypes.float32))
+    # Unsigned int compares
+    elif 'CMP_LT_U32' in op_name or 'CMPX_LT_U32' in op_name:
+      cmp_result = src0 < src1
+    elif 'CMP_GT_U32' in op_name or 'CMPX_GT_U32' in op_name:
+      cmp_result = src0 > src1
+    elif 'CMP_LE_U32' in op_name or 'CMPX_LE_U32' in op_name:
+      cmp_result = src0 <= src1
+    elif 'CMP_GE_U32' in op_name or 'CMPX_GE_U32' in op_name:
+      cmp_result = src0 >= src1
+    elif 'CMP_EQ_U32' in op_name or 'CMPX_EQ_U32' in op_name:
+      cmp_result = src0.eq(src1)
+    elif 'CMP_NE_U32' in op_name or 'CMPX_NE_U32' in op_name:
+      cmp_result = src0.ne(src1)
+    # Signed int compares
+    elif 'CMP_LT_I32' in op_name or 'CMPX_LT_I32' in op_name:
+      cmp_result = src0.bitcast(dtypes.int) < src1.bitcast(dtypes.int)
+    elif 'CMP_GT_I32' in op_name or 'CMPX_GT_I32' in op_name:
+      cmp_result = src0.bitcast(dtypes.int) > src1.bitcast(dtypes.int)
+    elif 'CMP_LE_I32' in op_name or 'CMPX_LE_I32' in op_name:
+      cmp_result = src0.bitcast(dtypes.int) <= src1.bitcast(dtypes.int)
+    elif 'CMP_GE_I32' in op_name or 'CMPX_GE_I32' in op_name:
+      cmp_result = src0.bitcast(dtypes.int) >= src1.bitcast(dtypes.int)
+    elif 'CMP_EQ_I32' in op_name or 'CMPX_EQ_I32' in op_name:
+      cmp_result = src0.bitcast(dtypes.int).eq(src1.bitcast(dtypes.int))
+    elif 'CMP_NE_I32' in op_name or 'CMPX_NE_I32' in op_name:
+      cmp_result = src0.bitcast(dtypes.int).ne(src1.bitcast(dtypes.int))
+    else:
+      assert False, f"unimplemented VOPC: {op_name}"
+
+    # Determine destination register (EXEC for CMPX, VCC otherwise)
+    dst_reg = EXEC_LO.offset if is_cmpx else VCC_LO.offset
+    dst = rsgpr(dst_reg)
+    dst_mask = UOp.const(dtypes.uint32, 1) << lane.cast(dtypes.uint32)
+    exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+    cmp_bit = cmp_result.cast(dtypes.uint32) << lane.cast(dtypes.uint32)
+    dst_cleared = dst & (dst_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+    dst_new = exec_bit.ne(UOp.const(dtypes.uint32, 0)).where(dst_cleared | cmp_bit, dst)
+    dst_store = wsgpr(dst_reg, dst_new)
+    return name, UOp.sink(dst_store.end(lane), inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
   # VOP2: v_add_f32, v_lshlrev_b32, etc.
@@ -212,6 +334,16 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
     if 'ADD_F32' in op_name:
       result = (src0.bitcast(dtypes.float32) + src1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'SUB_F32' in op_name:
+      result = (src0.bitcast(dtypes.float32) - src1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'MUL_F32' in op_name:
+      result = (src0.bitcast(dtypes.float32) * src1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
       store = wvgpr(vdst_reg, lane, result, exec_mask)
       return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
 
@@ -230,7 +362,23 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       store = wvgpr(vdst_reg, lane, src0, exec_mask)
       return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
 
-    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
+    if 'ADD_CO_CI_U32' in op_name:
+      # Add with carry-in from VCC and carry-out to VCC
+      # tmp = src0 + src1 + VCC[lane]; VCC[lane] = tmp >= 0x100000000; D0 = tmp.u32
+      vcc = rsgpr(VCC_LO.offset)
+      carry_in = (vcc >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      sum64 = src0.cast(dtypes.uint64) + src1.cast(dtypes.uint64) + carry_in.cast(dtypes.uint64)
+      result = sum64.cast(dtypes.uint32)
+      carry_out = (sum64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32) & UOp.const(dtypes.uint32, 1)
+      # Update VCC bit for this lane: clear bit then set if carry
+      vcc_mask = UOp.const(dtypes.uint32, 1) << lane.cast(dtypes.uint32)
+      vcc_cleared = vcc & (vcc_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+      vcc_new = vcc_cleared | (carry_out << lane.cast(dtypes.uint32))
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      vcc_store = wsgpr(VCC_LO.offset, vcc_new)
+      return name, UOp.sink(store.end(lane), vcc_store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    assert False, f"unimplemented VOP2: {op_name}"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # VOP3: 3-operand vector ALU (v_add_f32_e64, v_fma_f32, etc.)
@@ -263,7 +411,67 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       store = wvgpr(vdst_reg, lane, src0, exec_mask)
       return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
 
-    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
+    if 'LSHLREV_B64' in op_name:
+      # 64-bit shift: dst = src1 << src0
+      src1_hi = rsrc(inst.src1.offset + 1, lane) if inst.src1.offset < 256 else rvgpr(inst.src1.offset - 256 + 1, lane)
+      src1_64 = src1.cast(dtypes.uint64) | (src1_hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+      shift = src0 & UOp.const(dtypes.uint32, 63)
+      result = src1_64 << shift.cast(dtypes.uint64)
+      result_lo = result.cast(dtypes.uint32)
+      result_hi = (result >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
+      # Need two separate loops for the two stores
+      store_lo = wvgpr(vdst_reg, lane, result_lo, exec_mask)
+      lane2 = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      src1_2 = rsrc(inst.src1.offset, lane2)
+      src1_hi_2 = rsrc(inst.src1.offset + 1, lane2) if inst.src1.offset < 256 else rvgpr(inst.src1.offset - 256 + 1, lane2)
+      src1_64_2 = src1_2.cast(dtypes.uint64) | (src1_hi_2.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+      src0_2 = rsrc(inst.src0.offset, lane2)
+      shift_2 = src0_2 & UOp.const(dtypes.uint32, 63)
+      result_2 = src1_64_2 << shift_2.cast(dtypes.uint64)
+      result_hi_2 = (result_2 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
+      store_hi = wvgpr(vdst_reg + 1, lane2, result_hi_2, exec_mask)
+      return name, UOp.sink(store_lo.end(lane), store_hi.end(lane2), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'CNDMASK_B32' in op_name and src2 is not None:
+      # D0 = mask[lane] ? S1 : S0  (src2 is the mask register, typically VCC)
+      mask_bit = (src2 >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      result = mask_bit.ne(UOp.const(dtypes.uint32, 0)).where(src1, src0)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    # VOP3 compares - write to scalar register (VCC_LO for VOP3_SDST)
+    if 'CMP_' in op_name and '_F32' in op_name:
+      s0f = src0.bitcast(dtypes.float32)
+      s1f = src1.bitcast(dtypes.float32)
+      if 'CMP_GT_F32' in op_name: cmp_result = s0f > s1f
+      elif 'CMP_LT_F32' in op_name: cmp_result = s0f < s1f
+      elif 'CMP_GE_F32' in op_name: cmp_result = s0f >= s1f
+      elif 'CMP_LE_F32' in op_name: cmp_result = s0f <= s1f
+      elif 'CMP_EQ_F32' in op_name: cmp_result = s0f.eq(s1f)
+      elif 'CMP_NE_F32' in op_name or 'CMP_NEQ_F32' in op_name or 'CMP_LG_F32' in op_name: cmp_result = s0f.ne(s1f)
+      else: assert False, f"unimplemented VOP3 compare: {op_name}"
+      # Write to sdst (vdst in VOP3_SDST is the SGPR destination)
+      sdst_reg = inst.vdst.offset  # For VOP3_SDST, vdst is an SGPR offset
+      sdst = rsgpr(sdst_reg)
+      sdst_mask = UOp.const(dtypes.uint32, 1) << lane.cast(dtypes.uint32)
+      exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      cmp_bit = cmp_result.cast(dtypes.uint32) << lane.cast(dtypes.uint32)
+      sdst_cleared = sdst & (sdst_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+      sdst_new = exec_bit.ne(UOp.const(dtypes.uint32, 0)).where(sdst_cleared | cmp_bit, sdst)
+      sdst_store = wsgpr(sdst_reg, sdst_new)
+      return name, UOp.sink(sdst_store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'LDEXP_F32' in op_name:
+      # D0.f32 = S0.f32 * 2^S1.i32
+      s0f = src0.bitcast(dtypes.float32)
+      s1i = src1.bitcast(dtypes.int)
+      # ldexp(x, n) = x * 2^n
+      two_pow_n = UOp(Ops.EXP2, dtypes.float32, (s1i.cast(dtypes.float32),))
+      result = (s0f * two_pow_n).bitcast(dtypes.uint32)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    assert False, f"unimplemented VOP3: {op_name}"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # VOPD: dual-issue v_dual_mov_b32, etc.
@@ -286,8 +494,20 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     elif 'ADD_F32' in opx_name:
       result = (srcx0.bitcast(dtypes.float32) + vsrcx1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
       ended.append(wvgpr(vdstx_reg, lane_x, result, exec_mask).end(lane_x))
+    elif 'SUB_F32' in opx_name:
+      result = (srcx0.bitcast(dtypes.float32) - vsrcx1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      ended.append(wvgpr(vdstx_reg, lane_x, result, exec_mask).end(lane_x))
+    elif 'MUL_F32' in opx_name:
+      result = (srcx0.bitcast(dtypes.float32) * vsrcx1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      ended.append(wvgpr(vdstx_reg, lane_x, result, exec_mask).end(lane_x))
+    elif 'MAX_F32' in opx_name:
+      result = UOp(Ops.MAX, dtypes.float32, (srcx0.bitcast(dtypes.float32), vsrcx1.bitcast(dtypes.float32))).bitcast(dtypes.uint32)
+      ended.append(wvgpr(vdstx_reg, lane_x, result, exec_mask).end(lane_x))
     elif 'ADD_NC_U32' in opx_name:
       ended.append(wvgpr(vdstx_reg, lane_x, srcx0 + vsrcx1, exec_mask).end(lane_x))
+    elif 'LSHLREV_B32' in opx_name:
+      shift = srcx0 & UOp.const(dtypes.uint32, 31)
+      ended.append(wvgpr(vdstx_reg, lane_x, vsrcx1 << shift, exec_mask).end(lane_x))
 
     # Y operation - separate loop
     lane_y = UOp.range(32, _next_axis_id(), AxisType.LOOP)
@@ -298,12 +518,23 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     elif 'ADD_F32' in opy_name:
       result = (srcy0.bitcast(dtypes.float32) + vsrcy1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
       ended.append(wvgpr(vdsty_reg, lane_y, result, exec_mask).end(lane_y))
+    elif 'SUB_F32' in opy_name:
+      result = (srcy0.bitcast(dtypes.float32) - vsrcy1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      ended.append(wvgpr(vdsty_reg, lane_y, result, exec_mask).end(lane_y))
+    elif 'MUL_F32' in opy_name:
+      result = (srcy0.bitcast(dtypes.float32) * vsrcy1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      ended.append(wvgpr(vdsty_reg, lane_y, result, exec_mask).end(lane_y))
+    elif 'MAX_F32' in opy_name:
+      result = UOp(Ops.MAX, dtypes.float32, (srcy0.bitcast(dtypes.float32), vsrcy1.bitcast(dtypes.float32))).bitcast(dtypes.uint32)
+      ended.append(wvgpr(vdsty_reg, lane_y, result, exec_mask).end(lane_y))
     elif 'ADD_NC_U32' in opy_name:
       ended.append(wvgpr(vdsty_reg, lane_y, srcy0 + vsrcy1, exec_mask).end(lane_y))
+    elif 'LSHLREV_B32' in opy_name:
+      shift = srcy0 & UOp.const(dtypes.uint32, 31)
+      ended.append(wvgpr(vdsty_reg, lane_y, vsrcy1 << shift, exec_mask).end(lane_y))
 
-    if ended:
-      return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
-    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
+    assert len(ended) == 2, f"unimplemented VOPD: X={opx_name} Y={opy_name}"
+    return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
   # FLAT/GLOBAL: memory loads/stores
