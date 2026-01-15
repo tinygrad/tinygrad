@@ -1,6 +1,6 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
 from typing import cast, ClassVar
-from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap
 from tinygrad.runtime.autogen import libc, vfio, pci
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace
@@ -275,7 +275,7 @@ class RemotePCIDevice(PCIDevice):
     self.sock.sendall(struct.pack('<BBQQQ', cmd, *(*args, 0, 0, 0, 0)[:4]))
     return self._get_resp(cmd, args) + ((self._recvall(readout_size) if readout_size > 0 else None),)
 
-  def _bulk_read(self, cmd:int, idx:int, offset:int, size:int) -> bytes: return self._rpc(cmd, idx, offset, size, readout_size=size)[2]
+  def _bulk_read(self, cmd:int, idx:int, offset:int, size:int) -> bytes: return unwrap(self._rpc(cmd, idx, offset, size, readout_size=size)[2])
   def _bulk_write(self, cmd:int, idx:int, offset:int, data:bytes): self.sock.sendall(struct.pack('<BBQQQ', cmd, idx, offset, len(data), 0) + data)
 
   def map_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
