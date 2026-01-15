@@ -9,7 +9,8 @@ CUDA_PATH = getenv("CUDA_PATH", "")
 
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   x = ctypes.create_string_buffer(init_c_var(ctypes.c_size_t, lambda x: check(get_sz(arg, ctypes.byref(x)))).value)
-  return ctypes.string_at(check(get_str(arg, x)), size=len(x))
+  check(get_str(arg, x))
+  return ctypes.string_at(x, size=len(x))
 
 def nvrtc_check(status, ctx=None):
   if status != 0:
