@@ -288,7 +288,6 @@ class Inst:
       saddr_val = self.saddr.offset if isinstance(self.saddr, Reg) else self.saddr
       bits['addr'] = 64 if saddr_val in (None, 124, 125) else 32  # 124=NULL, 125=M0
     return bits
-
   @property
   def op_regs(self) -> dict[str, int]:
     """Get register counts for each operand field, excluding variable-size fields."""
@@ -298,13 +297,9 @@ class Inst:
     regs.pop('vdata', None)
     # VOPC/VOP3 vdst for compares is wave-size dependent
     if 'vdst' in regs and hasattr(self, 'op') and 'cmp' in self.op_name.lower(): regs.pop('vdst')
-    # saddr validation: skip if NULL (special single reg)
-    if 'saddr' in regs and hasattr(self, 'saddr'):
-      saddr_val = self.saddr.offset if isinstance(self.saddr, Reg) else self.saddr
-      if saddr_val in (None, 124, 125): regs.pop('saddr')
     return regs
 
-  @property
+  @functools.cached_property
   def canonical_op_bits(self) -> dict[str, int]:
     """Get bit widths with canonical names: {'s0', 's1', 's2', 'd', 'data'}."""
     bits = {'d': 32, 's0': 32, 's1': 32, 's2': 32, 'data': 32}
@@ -315,11 +310,11 @@ class Inst:
       elif name in ('vdst', 'sdst', 'sdata'): bits['d'] = val
       elif name in ('data', 'vdata', 'data0'): bits['data'] = val
     return bits
-
   @property
   def canonical_op_regs(self) -> dict[str, int]:
     """Get register counts with canonical names: {'s0', 's1', 's2', 'd', 'data'}."""
     return {k: max(1, v // 32) for k, v in self.canonical_op_bits.items()}
+
   def num_srcs(self) -> int:
     """Get number of source operands from operand info."""
     ops = self.operands
