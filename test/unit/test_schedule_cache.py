@@ -38,6 +38,24 @@ class TestScheduleCache(unittest.TestCase):
       a.realize()
       self.assertEqual(a.item(), i)
 
+  def test_same_custom_function_reuses_cache(self):
+    schedule_cache.clear()
+    fxn = functools.partial(custom_set0_kernel, num=10)
+
+    # first run
+    a = Tensor.empty(1)
+    a = Tensor.custom_kernel(a, fxn=fxn)[0]
+    a.realize()
+    self.assertEqual(a.item(), 10)
+    cache_size_after_first = len(schedule_cache)
+
+    # second run with same function should reuse cache
+    b = Tensor.empty(1)
+    b = Tensor.custom_kernel(b, fxn=fxn)[0]
+    b.realize()
+    self.assertEqual(b.item(), 10)
+    self.assertEqual(len(schedule_cache), cache_size_after_first)
+
   def test_simple(self):
     a = Tensor.ones(10).contiguous()
     b = Tensor.ones(10).contiguous()
