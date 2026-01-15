@@ -140,13 +140,9 @@ backend_test.exclude('test_affine_grid_3d_expanded_cpu')
 backend_test.exclude('test_range_int32_type_negative_delta_expanded_cpu')
 
 # unsupported (strange) ops
-backend_test.exclude('test_blackmanwindow_*')
 backend_test.exclude('test_bernoulli_*')
 backend_test.exclude('test_det_*')
 backend_test.exclude('test_col2im_*')
-backend_test.exclude('test_hammingwindow_*')
-backend_test.exclude('test_hannwindow_*')
-backend_test.exclude('test_hardmax_*')
 backend_test.exclude('test_gridsample_*')
 backend_test.exclude('test_dft_*')
 backend_test.exclude('test_unique_*')
@@ -166,10 +162,6 @@ backend_test.exclude('test_scan_*')
 backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*') # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/aionnxml/op_tree_ensemble.py#L121
 
-# TODO: not yet implemented
-backend_test.exclude('test_l1normalization_*')
-backend_test.exclude('test_l2normalization_*')
-backend_test.exclude('test_lpnormalization_*')
 backend_test.exclude('test_attention_4d_diff_heads_mask4d_padded_kv_cpu')  # needs nonpad_kv_seqlen handling
 backend_test.exclude('test_attention_4d_fp16_cpu')  # fp16 numerical issues
 backend_test.exclude('test_attention_4d_fp16_expanded_cpu')  # fp16 numerical issues

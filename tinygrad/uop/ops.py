@@ -10,6 +10,7 @@ from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_funct
 from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
+  from tinygrad.renderer import Estimates
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
@@ -839,6 +840,7 @@ class KernelInfo:
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
+  estimates: Estimates|None = None
   @property
   def function_name(self): return to_function_name(self.name)
 
@@ -1393,10 +1395,11 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.RESHAPE, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.forced_reshape({render_marg(ctx,x)})" if x.src[0].shape == x.shape else None),
   (UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__
-  (UPat(set(syms.keys())-{Ops.SUB, Ops.CMPNE}, src=(UPat(Ops.CONST, name="y"), UPat(name="z")), name="x"),
+  # NOTE: only match CONSTs without UNIQUE (len(src)==1), unique_const needs explicit rendering
+  (UPat(set(syms.keys())-{Ops.SUB, Ops.CMPNE}, src=(UPat(Ops.CONST, src=(UPat(Ops.DEVICE),), name="y"), UPat(name="z")), name="x"),
    lambda ctx,x,y,z: strip_binary_parens(x, str(y.arg), ctx[z], lambda a,b: f"({a}{syms[x.op]}{b})")),
   # NOTE: sub doesn't work cause it's written as add/mul
-  (UPat(set(syms.keys())-{Ops.SUB}, src=(UPat(name="y"), UPat(Ops.CONST, name="z")), name="x"), lambda ctx,x,y,z:
+  (UPat(set(syms.keys())-{Ops.SUB}, src=(UPat(name="y"), UPat(Ops.CONST, src=(UPat(Ops.DEVICE),), name="z")), name="x"), lambda ctx,x,y,z:
     strip_binary_parens(x, ctx[y], str(z.arg), lambda a,b: f"({a}{syms[x.op]}{b})")),
   (UPat(set(syms.keys())-{Ops.SUB}, name="x"), lambda ctx,x:
     strip_binary_parens(x, ctx[x.src[0]], ctx[x.src[1]], lambda a,b: f"({a}{syms[x.op]}{b})")),

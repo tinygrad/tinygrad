@@ -137,9 +137,9 @@ class Tensor(OpMixin):
         const = UOp.const(var.dtype, val, _device, ())
         data = data.replace(src=(var.replace(src=const.src), const))  # type: ignore
     elif data is None:
-      data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or dtypes.default_float, 0, _device)
+      data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
     elif isinstance(data, get_args(ConstType)):
-      data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
+      data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if _dtype is None else _dtype)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -151,7 +151,7 @@ class Tensor(OpMixin):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
       if data.shape == ():
-        data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or _from_np_dtype(data.dtype), data.item(), _device)
+        data = Tensor(data.item(), device=_device, dtype=_dtype or _from_np_dtype(data.dtype), requires_grad=requires_grad).uop
       else:
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
@@ -197,6 +197,8 @@ class Tensor(OpMixin):
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
+    # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
+    if requires_grad and self.uop.op is Ops.CONST: self.replace(Tensor(self.uop.arg, device=self.device, dtype=self.dtype, requires_grad=True))
     self.requires_grad = requires_grad
     return self
 
@@ -1438,9 +1440,10 @@ class Tensor(OpMixin):
     if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
     return self.unsqueeze(-1).pad((None,(0,n:=self.shape[0]))).flatten().shrink(((0,n*n),)).reshape(n,n)
 
-  def diagonal(self) -> Tensor:
+  def diagonal(self, offset:int=0, dim1:int=0, dim2:int=1) -> Tensor:
     """
-    Returns a view of input tensor with its main diagonal elements.
+    Returns a view of the diagonal elements with respect to `dim1` and `dim2`.
+    `offset` controls which diagonal: 0 is main, positive is above, negative is below.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.arange(9).reshape(3, 3)
@@ -1449,9 +1452,15 @@ class Tensor(OpMixin):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.diagonal().numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.diagonal(offset=1).numpy())
+    ```
     """
-    if self.ndim != 2 or (n:=self.shape[0]) != self.shape[1]: raise ValueError(f"only 2-D square tensor is supported, getting {self.shape=}")
-    return self.flatten().pad(((0, n))).reshape(n, n+1)[:, 0]
+    if (dim1:=self._resolve_dim(dim1)) == (dim2:=self._resolve_dim(dim2)): raise RuntimeError("dim1 and dim2 cannot be the same dimension")
+    x = self.permute(*[i for i in range(self.ndim) if i != dim1 and i != dim2], dim1, dim2)
+    x = x[..., :, offset:] if offset >= 0 else x[..., -offset:, :]
+    if (d := min(int(x.shape[-2]), int(x.shape[-1]))) <= 0: return x.reshape(*x.shape[:-2], 0)
+    return x[..., :d, :d].flatten(-2).pad(tuple((0,0) for _ in x.shape[:-2])+((0,d),)).reshape(*x.shape[:-2], d, d+1)[..., 0]
 
   def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Tensor:
     """
@@ -1492,6 +1501,32 @@ class Tensor(OpMixin):
     counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
+
+  def nonzero(self) -> Tensor:
+    """
+    Returns the indices of the elements that are non-zero.
+
+    Returns a 2D tensor where each row is the index of a non-zero element.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 0, 2, 0, 3])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.nonzero().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 0], [0, 2]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.nonzero().numpy())
+    ```
+    """
+    mask = (self != 0).flatten()
+    indices = Tensor.stack(*[Tensor.arange(s, device=self.device).reshape(*[1]*i, s, *[1]*(self.ndim-i-1)).expand(self.shape).flatten()
+                             for i, s in enumerate(self.shape)], dim=-1)
+    return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim)).reshape(-1, self.ndim)
 
   def masked_fill(self:Tensor, mask:Tensor, value:Tensor|ConstType) -> Tensor:
     """
@@ -1846,7 +1881,6 @@ class Tensor(OpMixin):
         p = state.reshape(bs, 5, 5).transpose(2, 1)
         t1 = (p[:,:,0] ^ p[:,:,1] ^ p[:,:,2] ^ p[:,:,3] ^ p[:,:,4]).roll(-1, 1) # xor reduce
         state = state ^ (t1.roll(2, 1).bitwise_xor((t1 << 1) ^ (t1 >> 63)).unsqueeze(2).expand(bs, 5, 5).transpose(2, 1).flatten(1))
-        state = state.contiguous()  # required for correct indexing in π step # TODO: why is it needed?
         # ρ and π steps
         state = state[:, reorder_indexes]
         state = (state * rot_offsets_v0).bitwise_or(state // rot_offsets_v1).reshape(bs, 5, 5)
@@ -1995,7 +2029,7 @@ class Tensor(OpMixin):
     x = self.transpose(axis, -1)
     last_dim_size = x.shape[-1]
     x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
-    x_cummax = x.cummax(-1)
+    x_cummax, _ = x.cummax(-1)
     mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), dtypes.min(self.dtype)).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
@@ -2441,19 +2475,37 @@ class Tensor(OpMixin):
     """
     return self._split_cumalu(axis, Ops.MUL)
 
-  def cummax(self, axis:int=0) -> Tensor:
+  def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
     """
-    Computes the cumulative max of the tensor along the specified `axis`.
+    Computes the cumulative max of the tensor along `axis`, returning (values, indices).
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([0, 1, -1, 2, -2, 3, -3])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cummax(0).numpy())
+    values, indices = t.cummax(0)
+    print(values.numpy())
+    print(indices.numpy())
     ```
     """
-    return self._split_cumalu(axis, Ops.MAX)
+    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), Tensor.zeros(self.shape, dtype=dtypes.int32, device=self.device)
+    values, n = self._split_cumalu(axis, Ops.MAX), self.shape[axis]
+    x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
+    match = (x.unsqueeze(-1) == values_t.unsqueeze(-2)) * Tensor.ones(n, n, requires_grad=False, device=self.device).triu()
+    idx = (-(match * Tensor.arange(n, 0, -1, requires_grad=False, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
+    return values, idx.transpose(-1, axis)
+
+  def cummin(self, axis:int=0) -> tuple[Tensor, Tensor]:
+    """
+    Computes the cumulative min of the tensor along `axis`, returning (values, indices).
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, -1, 2, -2, 3, -3])
+    values, indices = t.cummin(0)
+    print(values.numpy())
+    print(indices.numpy())
+    ```
+    """
+    values, indices = self._inverse().cummax(axis)
+    return values._inverse(), indices
 
   @staticmethod
   def _tri(r:sint, c:sint, diagonal:int=0, device=None, requires_grad:bool|None=None) -> Tensor:
@@ -2757,6 +2809,18 @@ class Tensor(OpMixin):
     ```
     """
     return self.log2()*math.log(2)
+
+  def log10(self) -> Tensor:
+    """
+    Computes the base-10 logarithm element-wise.
+
+    See: https://en.wikipedia.org/wiki/Logarithm
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 4., 8.]).log10().numpy())
+    ```
+    """
+    return self.log2()*math.log10(2)
 
   def log2(self) -> Tensor:
     """

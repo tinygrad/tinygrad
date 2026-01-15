@@ -55,11 +55,8 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const colorScale = d3.scaleSequential(t => t > 0 ? d3.interpolateLab(colorScheme.ACTIVE[1], colorScheme.ACTIVE[2])(t) : colorScheme.ACTIVE[0]).clamp(true);
-
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
-  if (data.value.colorDomain != null) colorScale.domain(data.value.colorDomain);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
@@ -70,17 +67,19 @@ const drawGraph = (data) => {
       if (parents == null && children == null) return;
       const src = [...parents, ...children, d.id];
       nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
+      if (!e.target.classList.contains("token")) labels.selectAll("rect.bg").classed("highlight", false);
       const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
       d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
       d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
       e.stopPropagation();
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
-    .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
-  const STROKE_WIDTH = 1.4;
+    .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
+  const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
-  labels.selectAll("text").data(d => {
+  const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
+  const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
     if (Array.isArray(d.label)) return [d.label];
     const ret = [[]];
     for (const s of parseColors(d.label, defaultColor="initial")) {
@@ -91,8 +90,19 @@ const drawGraph = (data) => {
     }
     return [ret];
   }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
-    .selectAll("tspan").data(d => d).join("tspan").attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color))
-    .text(d => d.st).attr("xml:space", "preserve");
+    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 && d.st !== "," ? textSpace: 0).text(d => d.st).classed("token", true)
+    .attr("xml:space", "preserve").attr("fill", d => d.color);
+  const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => {
+    const ret = [];
+    d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").each((d, i, nodes) => {
+      if (!d.keys?.length) return;
+      const b = nodes[i].getBBox(); ret.push({ keys:d.keys, x:b.x, y:b.y, width:b.width, height:b.height });
+    });
+    return ret;
+  }).join("rect").attr("class", "bg").attr("x", d => d.x).attr("y", d => d.y).attr("width", d => d.width).attr("height", d => d.height);
+  tokens.on("click", (e, { keys }) => {
+    tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
+  });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
@@ -149,17 +159,19 @@ function renderDag(layoutSpec, { recenter }) {
 
 // ** profiler graph
 
-function formatMicroseconds(ts, dur=ts) {
-  if (dur<=1e3) return `${ts.toFixed(2)}us`;
-  if (dur<=1e6) return `${(ts*1e-3).toFixed(2)}ms`;
-  return `${(ts*1e-6).toFixed(2)}s`;
+function formatMicroseconds(ts, showUs=true) {
+  const s = Math.floor(ts / 1e6), ms = Math.floor((ts % 1e6) / 1e3), us = Math.round(ts % 1e3);
+  const parts = [];
+  if (s) parts.push(`${s}s`);
+  if (ms || (!showUs && !s)) parts.push(`${ms}ms`);
+  if (showUs && (us || (!ms && !s))) parts.push(`${us}us`);
+  return parts.join(' ');
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
-  ACTIVE:["#565f89", "#c8d3f5", "#7aa2f7"]}
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
@@ -480,13 +492,17 @@ async function renderProfiler(path, unit, opts) {
     // draw axes
     ctx.translate(0, baseOffset);
     drawLine(ctx, xscale.range(), [0, 0]);
+    let lastLabelEnd = -Infinity;
     for (const tick of xscale.ticks()) {
-      // tick line
       const x = xscale(tick);
-      drawLine(ctx, [x, x], [0, tickSize])
-      // tick label
+      drawLine(ctx, [x, x], [0, tickSize]);
+      const labelX = x+ctx.lineWidth+2;
+      if (labelX <= lastLabelEnd) continue;
+
+      const label = formatTime(tick, et-st <= 1e3 ? true : false);
       ctx.textBaseline = "top";
-      ctx.fillText(formatTime(tick, dur), x+ctx.lineWidth+2, tickSize);
+      ctx.fillText(label, labelX, tickSize);
+      lastLabelEnd = labelX + ctx.measureText(label).width + 4;
     }
     if (data.axes.y != null) {
       drawLine(ctx, [0, 0], data.axes.y.range);
@@ -816,7 +832,10 @@ async function main() {
       }
       return table;
     }
-    if (ret.data != null) renderDag(ret, { recenter:true });
+    if (ret.ref != null) {
+      const disasmIdx = ctxs[ret.ref+1].steps.findIndex(s => s.name === "View Disassembly")
+      metadata.appendChild(d3.create("a").text("View Program Graph").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
+    }
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     return document.querySelector("#custom").replaceChildren(root.node());

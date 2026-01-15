@@ -1015,7 +1015,6 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     np.testing.assert_equal((a+a).numpy(), na+na)
     np.testing.assert_equal((b+b).numpy(), nb+nb)
 
-  # @unittest.skip("why didn't this work?")
   def test_add_two_partitions(self):
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)

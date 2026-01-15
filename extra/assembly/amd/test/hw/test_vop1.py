@@ -526,16 +526,16 @@ class TestExp(unittest.TestCase):
 class TestReadFirstLane(unittest.TestCase):
   """Tests for V_READFIRSTLANE_B32."""
 
-  def _readfirstlane(self, sdst_idx, vsrc):
+  def _readfirstlane(self, sdst, vsrc):
     """Helper to create V_READFIRSTLANE_B32 with SGPR destination."""
-    return VOP1(VOP1Op.V_READFIRSTLANE_B32, vdst=RawImm(sdst_idx), src0=vsrc)
+    return v_readfirstlane_b32_e32(sdst, vsrc)
 
   def test_v_readfirstlane_b32_basic(self):
     """V_READFIRSTLANE_B32 reads from the first active lane."""
     instructions = [
       v_lshlrev_b32_e32(v[0], 2, v[255]),
       v_add_nc_u32_e32(v[0], 1000, v[0]),
-      self._readfirstlane(0, v[0]),
+      self._readfirstlane(s[0], v[0]),
       v_mov_b32_e32(v[1], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -547,7 +547,7 @@ class TestReadFirstLane(unittest.TestCase):
     instructions = [
       v_lshlrev_b32_e32(v[7], 5, v[255]),
       v_add_nc_u32_e32(v[7], 200, v[7]),
-      self._readfirstlane(0, v[7]),
+      self._readfirstlane(s[0], v[7]),
       v_mov_b32_e32(v[8], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)

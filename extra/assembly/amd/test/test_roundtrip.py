@@ -2,7 +2,8 @@
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re, subprocess, os
 from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd.asm import asm, detect_format
+from extra.assembly.amd.asm import asm
+from extra.assembly.amd.decode import decode_inst, detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump
 
 # arch: (mcpu, mattr)

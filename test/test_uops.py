@@ -20,10 +20,9 @@ from dataclasses import replace
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   sink = UOp.group(*u)
   for r in sink.ranges: sink = sink.end(r)
-  # we strip the SINK here for legacy reasons
   ret = get_uops(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
   assert ret[-1].op is Ops.SINK
-  return ret[:-1]
+  return ret
 
 def _uops_to_prg(uops_list):
   prg = get_program(UOp.sink(*uops_list), Device[Device.DEFAULT].renderer)
