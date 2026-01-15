@@ -186,10 +186,10 @@ def _disasm_vop1(inst: VOP1) -> str:
     src = _vreg(inst.src0) if _unwrap(inst.src0) >= 256 else decode_src(_unwrap(inst.src0), cdna)
     vdst_raw = _unwrap(inst.vdst)
     return f"{name} {_fmt_sdst(vdst_raw - 256 if vdst_raw >= 256 else vdst_raw, 1, cdna)}, {src}"
-  # Use operand info for register sizes and 16-bit detection
-  dregs, sregs = inst.dst_regs(), inst.src_regs(0)
-  is16_dst = not cdna and inst.is_dst_16()
-  is16_src = not cdna and inst.is_src_16(0)
+  # Use get_field_bits for register sizes and 16-bit detection
+  bits = inst.canonical_op_bits
+  dregs, sregs = max(1, bits['d'] // 32), max(1, bits['s0'] // 32)
+  is16_dst, is16_src = not cdna and bits['d'] == 16, not cdna and bits['s0'] == 16
   # v_cvt_pk_f32_fp8/bf8: pcode has None dst type but outputs 2 VGPRs
   if 'cvt_pk_f32_fp8' in name or 'cvt_pk_f32_bf8' in name: dregs, is16_src = 2, True
   # Format dst
@@ -216,8 +216,9 @@ def _disasm_vop2(inst: VOP2) -> str:
   if cdna: name = _CDNA_DISASM_ALIASES.get(name, name)  # apply CDNA aliases
   suf = "" if cdna or name.endswith('_e32') or (not cdna and inst.op == VOP2Op.V_DOT2ACC_F32_F16_E32) else "_e32"
   lit = getattr(inst, '_literal', None)
-  # Use operand info for 16-bit detection
-  is16 = not cdna and inst.is_dst_16()
+  # Use get_field_bits for 16-bit detection
+  bits = inst.canonical_op_bits
+  is16 = not cdna and bits['d'] == 16
   # fmaak/madak: dst = src0 * vsrc1 + K, fmamk/madmk: dst = src0 * K + vsrc1
   if 'fmaak' in name or 'madak' in name or (not cdna and inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAAK_F16_E32)):
     if lit is None: return f"op_{inst.op.value if hasattr(inst.op, 'value') else inst.op}"
@@ -234,8 +235,9 @@ def _disasm_vop2(inst: VOP2) -> str:
   if cdna and name in _VOP2_CARRY_INOUT: return f"{name}{suf} {_vreg(inst.vdst)}, {vcc}, {_lit(inst, inst.src0)}, {_vreg(inst.vsrc1)}, {vcc}"
   # RDNA carry-in/out ops: v_add_co_ci_u32, etc.
   if not cdna and name in _VOP2_CARRY_INOUT_RDNA: return f"{name}{suf} {_vreg(inst.vdst)}, {vcc}, {_lit(inst, inst.src0)}, {_vreg(inst.vsrc1)}, {vcc}"
-  # Use pcode types for register sizes - pcode is complete for all VOP2 ops
-  dn, sn0, sn1 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1)
+  # Use get_field_bits for register sizes
+  regs = inst.canonical_op_regs
+  dn, sn0, sn1 = regs.get('d', 1), regs.get('s0', 1), regs.get('s1', 1)
   if dn > 1 or sn0 > 1 or sn1 > 1:
     dst = _vreg(inst.vdst, dn)
     src0 = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else _fmt_src(inst.src0, sn0, cdna)
@@ -245,9 +247,10 @@ def _disasm_vop2(inst: VOP2) -> str:
 
 def _disasm_vopc(inst: VOPC) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
-  # Use operand info for register sizes and 16-bit detection
-  r0, r1 = inst.src_regs(0), inst.src_regs(1)
-  is16 = inst.is_src_16(0)
+  # Use get_field_bits for register sizes and 16-bit detection
+  bits = inst.canonical_op_bits
+  r0, r1 = max(1, bits['s0'] // 32), max(1, bits['s1'] // 32)
+  is16 = bits['s0'] == 16
   if cdna:
     s0 = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else _fmt_src(inst.src0, r0, cdna)
     s1 = _vreg(inst.vsrc1, r1) if r1 > 1 else _vreg(inst.vsrc1)
@@ -321,8 +324,8 @@ def _disasm_smem(inst: SMEM) -> str:
     soff_s = decode_src(inst.soffset, cdna) if inst.soffset != 124 else "null"
     if 'pc_rel' in name: return f"{name} {off_s}, {soff_s}, {_unwrap(inst.sdata)}"
     return f"{name} {sbase_str}, {off_s}, {soff_s}, {_unwrap(inst.sdata)}"
-  # Use operand info for register count
-  dst_n = inst.dst_regs()
+  # Use get_field_bits for register count
+  dst_n = inst.canonical_op_regs.get('d', 1)
   th, scope = getattr(inst, 'th', 0), getattr(inst, 'scope', 0)
   if is_rdna4:  # RDNA4 uses th/scope instead of glc/dlc
     th_names = ['TH_LOAD_RT', 'TH_LOAD_NT', 'TH_LOAD_HT', 'TH_LOAD_LU']
@@ -343,8 +346,9 @@ def _disasm_flat(inst: FLAT) -> str:
   seg = ['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'
   instr = f"{seg}_{name.split('_', 1)[1] if '_' in name else name}"
   off_val = inst.offset if seg == 'flat' else (inst.offset if inst.offset < 4096 else inst.offset - 8192)
-  # Use operand info: data_regs for stores/atomics, dst_regs for loads
-  w = inst.data_regs() if 'store' in name or 'atomic' in name else inst.dst_regs()
+  # Use get_field_bits: data for stores/atomics, d for loads
+  regs = inst.canonical_op_regs
+  w = regs.get('data', regs.get('d', 1)) if 'store' in name or 'atomic' in name else regs.get('d', 1)
   off_s = f" offset:{off_val}" if off_val else ""
   if cdna: mods = f"{off_s}{' glc' if inst.sc0 else ''}{' slc' if inst.nt else ''}"
   else: mods = f"{off_s}{' glc' if inst.glc else ''}{' slc' if inst.slc else ''}{' dlc' if inst.dlc else ''}"
@@ -372,8 +376,9 @@ def _disasm_ds(inst: DS) -> str:
   gds = " gds" if getattr(inst, 'gds', 0) else ""
   off = f" offset:{inst.offset0 | (inst.offset1 << 8)}" if inst.offset0 or inst.offset1 else ""
   off2 = (" offset0:" + str(inst.offset0) if inst.offset0 else "") + (" offset1:" + str(inst.offset1) if inst.offset1 else "")
-  # Use operand info: data_regs for stores/writes/atomics, dst_regs for loads
-  w = inst.data_regs() if 'store' in name or 'write' in name or ('load' not in name and 'read' not in name) else inst.dst_regs()
+  # Use get_field_bits: data for stores/writes/atomics, d for loads
+  regs = inst.canonical_op_regs
+  w = regs.get('data', regs.get('d', 1)) if 'store' in name or 'write' in name or ('load' not in name and 'read' not in name) else regs.get('d', 1)
   d0, d1, dst, addr = reg_fn(inst.data0, w), reg_fn(inst.data1, w), reg_fn(inst.vdst, w), _vreg(inst.addr)
 
   if name == 'ds_nop': return name
@@ -388,11 +393,11 @@ def _disasm_ds(inst: DS) -> str:
   if name in ('ds_consume', 'ds_append'): return f"{name} {reg_fn(inst.vdst)}{off}{gds}"
   if 'gs_reg' in name: return f"{name} {reg_fn(inst.vdst, 2)}, {reg_fn(inst.data0)}{off}{gds}"
   if '2addr' in name:
-    if 'load' in name: return f"{name} {reg_fn(inst.vdst, inst.dst_regs())}, {addr}{off2}{gds}"
+    if 'load' in name: return f"{name} {reg_fn(inst.vdst, regs.get('d', 1))}, {addr}{off2}{gds}"
     if 'store' in name and 'xchg' not in name: return f"{name} {addr}, {d0}, {d1}{off2}{gds}"
-    return f"{name} {reg_fn(inst.vdst, inst.dst_regs())}, {addr}, {d0}, {d1}{off2}{gds}"
+    return f"{name} {reg_fn(inst.vdst, regs.get('d', 1))}, {addr}, {d0}, {d1}{off2}{gds}"
   if 'write2' in name: return f"{name} {addr}, {d0}, {d1}{off2}{gds}"
-  if 'read2' in name: return f"{name} {reg_fn(inst.vdst, inst.dst_regs())}, {addr}{off2}{gds}"
+  if 'read2' in name: return f"{name} {reg_fn(inst.vdst, regs.get('d', 1))}, {addr}{off2}{gds}"
   if 'load' in name: return f"{name} {reg_fn(inst.vdst)}{off}{gds}" if 'addtid' in name else f"{name} {dst}, {addr}{off}{gds}"
   if 'store' in name and not _has(name, 'cmp', 'xchg'):
     return f"{name} {reg_fn(inst.data0)}{off}{gds}" if 'addtid' in name else f"{name} {addr}, {d0}{off}{gds}"
@@ -406,20 +411,21 @@ def _disasm_ds(inst: DS) -> str:
 def _disasm_vop3(inst: VOP3) -> str:
   op, name = inst.op, inst.op_name.lower()
   n_up = name.upper()
+  bits = inst.canonical_op_bits
 
   # RDNA4 v_s_* scalar VOP3 instructions - vdst is SGPR (VGPRField adds 256)
   if name.startswith('v_s_'):
-    src = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else ("src_scc" if _unwrap(inst.src0) == 253 else _fmt_src(inst.src0, inst.src_regs(0)))
+    src = _lit(inst, inst.src0) if _unwrap(inst.src0) == 255 else ("src_scc" if _unwrap(inst.src0) == 253 else _fmt_src(inst.src0, max(1, bits['s0'] // 32)))
     if inst.neg & 1: src = f"-{src}"
     if inst.abs & 1: src = f"|{src}|"
     clamp = getattr(inst, 'cm', None) or getattr(inst, 'clmp', 0)
     vdst_raw = _unwrap(inst.vdst)
     return f"{name} s{vdst_raw - 256 if vdst_raw >= 256 else vdst_raw}, {src}" + (" clamp" if clamp else "") + _omod(inst.omod)
 
-  # Use operand info for register sizes and 16-bit detection
-  r0, r1, r2 = inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
-  dn = inst.dst_regs()
-  is16_d, is16_s, is16_s2 = inst.is_dst_16(), inst.is_src_16(0), inst.is_src_16(2)
+  # Use get_field_bits for register sizes and 16-bit detection
+  r0, r1, r2 = max(1, bits['s0'] // 32), max(1, bits['s1'] // 32), max(1, bits['s2'] // 32)
+  dn = max(1, bits['d'] // 32)
+  is16_d, is16_s, is16_s2 = bits['d'] == 16, bits['s0'] == 16, bits['s2'] == 16
 
   s0 = _vop3_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.opsel&1, r0, is16_s)
   s1 = _vop3_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.opsel&2, r1, is16_s)
@@ -460,20 +466,18 @@ def _disasm_vop3(inst: VOP3) -> str:
   return f"{name} {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if n == 3 else f"{name} {dst}, {s0}, {s1}{os}{cl}{om}"
 
 def _disasm_vop3sd(inst: VOP3SD) -> str:
-  name = inst.op_name.lower()
-  # Use pcode types for register sizes
-  dn, sr0, sr1, sr2 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
+  name, regs = inst.op_name.lower(), inst.canonical_op_regs
+  dn, sr0, sr1, sr2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
   def src(v, neg, n):
     v = _unwrap(v)
     s = _lit(inst, v) if v == 255 else ("src_scc" if v == 253 else (_fmt_src(v, n) if n > 1 else _lit(inst, v)))
     return f"neg({s})" if neg and v == 255 else (f"-{s}" if neg else s)
   s0, s1, s2 = src(inst.src0, inst.neg & 1, sr0), src(inst.src1, inst.neg & 2, sr1), src(inst.src2, inst.neg & 4, sr2)
-  dst = _vreg(inst.vdst, dn)
   # VOP3SD: _co_ ops (add/sub) without _ci_ have only 2 sources, all others (mad, div_scale, _co_ci_) have 3 sources
   has_only_two_srcs = '_co_' in name and '_ci_' not in name and 'mad' not in name
   srcs = f"{s0}, {s1}" if has_only_two_srcs else f"{s0}, {s1}, {s2}"
   clamp = getattr(inst, 'cm', None) or getattr(inst, 'clmp', 0)
-  return f"{name} {dst}, {_fmt_sdst(inst.sdst, 1)}, {srcs}{' clamp' if clamp else ''}{_omod(inst.omod)}"
+  return f"{name} {_vreg(inst.vdst, dn)}, {_fmt_sdst(inst.sdst, 1)}, {srcs}{' clamp' if clamp else ''}{_omod(inst.omod)}"
 
 def _disasm_vopd(inst: VOPD) -> str:
   lit = inst._literal or getattr(inst, 'literal', None)
@@ -494,9 +498,9 @@ def _disasm_vop3p(inst: VOP3P) -> str:
   def get_src(v, sc):
     uv = _unwrap(v)
     return _lit(inst, uv) if uv == 255 else _fmt_src(uv, sc)
-  # Use operand info for register sizes
-  dn, s0n, s1n, s2n = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
-  src0, src1, src2, dst = get_src(inst.src0, s0n), get_src(inst.src1, s1n), get_src(inst.src2, s2n), _vreg(inst.vdst, dn)
+  # Use get_field_bits for register sizes
+  regs = inst.canonical_op_regs
+  src0, src1, src2, dst = get_src(inst.src0, regs['s0']), get_src(inst.src1, regs['s1']), get_src(inst.src2, regs['s2']), _vreg(inst.vdst, regs['d'])
   opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
   clamp = getattr(inst, 'cm', None) or getattr(inst, 'clmp', 0)
   if is_fma_mix:
@@ -584,8 +588,9 @@ def _disasm_mimg(inst: MIMG) -> str:
 
 def _disasm_sop1(inst: SOP1) -> str:
   op, name, cdna = inst.op, inst.op_name.lower(), _is_cdna(inst)
-  # Use operand info for register sizes
-  dst_regs, src_regs = inst.dst_regs(), inst.src_regs(0)
+  # Use get_field_bits for register sizes
+  regs = inst.canonical_op_regs
+  dst_regs, src_regs = regs.get('d', 1), regs.get('s0', 1)
   src = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, src_regs, cdna)
   if not cdna:
     if 'getpc_b64' in name: return f"{name} {_fmt_sdst(inst.sdst, 2)}"
@@ -602,8 +607,9 @@ def _disasm_sop1(inst: SOP1) -> str:
 def _disasm_sop2(inst: SOP2) -> str:
   cdna, name = _is_cdna(inst), inst.op_name.lower()
   lit = getattr(inst, '_literal', None)
-  # Use operand info for register sizes
-  dn, s0n, s1n = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1)
+  # Use get_field_bits for register sizes
+  regs = inst.canonical_op_regs
+  dn, s0n, s1n = regs['d'], regs['s0'], regs['s1']
   s0 = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, s0n, cdna)
   s1 = _lit(inst, inst.ssrc1) if _unwrap(inst.ssrc1) == 255 else _fmt_src(inst.ssrc1, s1n, cdna)
   dst = _fmt_sdst(inst.sdst, dn, cdna)
@@ -612,10 +618,9 @@ def _disasm_sop2(inst: SOP2) -> str:
   return f"{name} {dst}, {s0}, {s1}"
 
 def _disasm_sopc(inst: SOPC) -> str:
-  cdna = _is_cdna(inst)
-  s0_regs, s1_regs = inst.src_regs(0), inst.src_regs(1)  # pcode types are complete for all SOPC ops
-  s0 = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, s0_regs, cdna)
-  s1 = _lit(inst, inst.ssrc1) if _unwrap(inst.ssrc1) == 255 else _fmt_src(inst.ssrc1, s1_regs, cdna)
+  cdna, regs = _is_cdna(inst), inst.canonical_op_regs
+  s0 = _lit(inst, inst.ssrc0) if _unwrap(inst.ssrc0) == 255 else _fmt_src(inst.ssrc0, regs['s0'], cdna)
+  s1 = _lit(inst, inst.ssrc1) if _unwrap(inst.ssrc1) == 255 else _fmt_src(inst.ssrc1, regs['s1'], cdna)
   return f"{inst.op_name.lower()} {s0}, {s1}"
 
 def _disasm_sopk(inst: SOPK) -> str:
@@ -636,7 +641,7 @@ def _disasm_sopk(inst: SOPK) -> str:
     return f"{name} {hs}, {_fmt_sdst(inst.sdst, 1, cdna)}" if 'setreg' in name else f"{name} {_fmt_sdst(inst.sdst, 1, cdna)}, {hs}"
   if name in ('s_subvector_loop_begin', 's_subvector_loop_end'):
     return f"{name} {_fmt_sdst(inst.sdst, 1)}, 0x{inst.simm16:x}"
-  return f"{name} {_fmt_sdst(inst.sdst, inst.dst_regs(), cdna)}, 0x{inst.simm16:x}"  # pcode types are complete for SOPK
+  return f"{name} {_fmt_sdst(inst.sdst, inst.canonical_op_regs['d'], cdna)}, 0x{inst.simm16:x}"
 
 def _disasm_vinterp(inst: VINTERP) -> str:
   mods = _mods((inst.waitexp, f"wait_exp:{inst.waitexp}"), (inst.clmp, "clamp"))
@@ -655,7 +660,7 @@ def _disasm_vbuffer(inst) -> str:
   name = inst.op_name.lower().replace('buffer_', 'buffer_').replace('tbuffer_', 'tbuffer_')
   w = (2 if _has(name, 'xyz', 'xyzw') else 1) if 'd16' in name else \
       ((2 if _has(name, 'b64', 'u64', 'i64') else 1) * (2 if 'cmpswap' in name else 1)) if 'atomic' in name else \
-      {'b32':1,'b64':2,'b96':3,'b128':4,'b16':1,'x':1,'xy':2,'xyz':3,'xyzw':4}.get(name.split('_')[-1], inst.dst_regs())
+      {'b32':1,'b64':2,'b96':3,'b128':4,'b16':1,'x':1,'xy':2,'xyz':3,'xyzw':4}.get(name.split('_')[-1], inst.canonical_op_regs['d'])
   if getattr(inst, 'tfe', 0): w += 1
   vdata = _vreg(inst.vdata, w) if w else _vreg(inst.vdata)
   vaddr = _vreg(inst.vaddr, 2) if inst.offen and inst.idxen else (_vreg(inst.vaddr) if inst.offen or inst.idxen else 'off')
@@ -714,7 +719,8 @@ try:
       s2 = ""
       dst = _vreg(inst.vdst)
     else:
-      dregs, r0, r1, r2 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
+      regs = inst.canonical_op_regs
+      dregs, r0, r1, r2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
       s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, r0), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, r1), _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, r2)
       dst = _vreg(inst.vdst, dregs) if dregs > 1 else _vreg(inst.vdst)
     if op_val >= 512:
@@ -738,7 +744,8 @@ try:
     if hasattr(op_val, 'value'): op_val = op_val.value
     name = inst.op_name.lower() or f'vop3b_op_{op_val}'
     n = inst.num_srcs() or _num_srcs(inst)
-    dregs, r0, r1, r2 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1), inst.src_regs(2)
+    regs = inst.canonical_op_regs
+    dregs, r0, r1, r2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
     s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, n=r0), _cdna_src(inst, inst.src1, inst.neg&2, n=r1), _cdna_src(inst, inst.src2, inst.neg&4, n=r2)
     dst = _vreg(inst.vdst, dregs) if dregs > 1 else _vreg(inst.vdst)
     sdst = _fmt_sdst(inst.sdst, 2, cdna=True)

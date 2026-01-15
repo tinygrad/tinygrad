@@ -77,8 +77,9 @@ def _mod_src(val: int, idx: int, neg: int, abs_: int, is64: bool = False) -> int
 def _read_src(st, inst, src, idx: int, lane: int, neg: int, abs_: int, opsel: int) -> int:
   if src is None: return 0
   src_off = src.offset if hasattr(src, 'offset') else src
-  literal, regs, is_src_16 = inst._literal, inst.src_regs(idx), inst.is_src_16(idx)
-  if regs == 2: return _mod_src(st.rsrc64(src, lane, literal), idx, neg, abs_, is64=True)
+  src_bits = inst.canonical_op_bits[f's{idx}']
+  literal, is_src_64, is_src_16 = inst._literal, src_bits == 64, src_bits == 16
+  if is_src_64: return _mod_src(st.rsrc64(src, lane, literal), idx, neg, abs_, is64=True)
   if isinstance(inst, VOP3P):
     opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
     if 'FMA_MIX' in inst.op_name:
@@ -255,11 +256,11 @@ def exec_scalar(st: WaveState, inst: Inst):
     st.pc += inst._words
     return 0
 
-  # Build context - use inst methods to determine operand sizes
+  # Build context - use canonical_op_bits to determine operand sizes
   literal = inst._literal
-  s0 = st.rsrc64(ssrc0, 0, literal) if inst.is_src_64(0) else (st.rsrc(ssrc0, 0, literal) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))
-  s1 = st.rsrc64(inst.ssrc1, 0, literal) if inst.is_src_64(1) else (st.rsrc(inst.ssrc1, 0, literal) if isinstance(inst, (SOP2, SOPC)) else inst.simm16 if isinstance(inst, SOPK) else 0)
-  d0 = st.rsgpr64(sdst) if inst.dst_regs() == 2 and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
+  s0 = st.rsrc64(ssrc0, 0, literal) if inst.canonical_op_bits['s0'] == 64 else (st.rsrc(ssrc0, 0, literal) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))
+  s1 = st.rsrc64(inst.ssrc1, 0, literal) if inst.canonical_op_bits['s1'] == 64 else (st.rsrc(inst.ssrc1, 0, literal) if isinstance(inst, (SOP2, SOPC)) else inst.simm16 if isinstance(inst, SOPK) else 0)
+  d0 = st.rsgpr64(sdst) if inst.canonical_op_bits['d'] == 64 and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
   literal = inst.simm16 if isinstance(inst, (SOPK, SOPP)) else inst._literal
 
   # Call compiled function with int parameters
@@ -267,7 +268,7 @@ def exec_scalar(st: WaveState, inst: Inst):
 
   # Apply results (already int values)
   if sdst is not None and 'D0' in result:
-    (st.wsgpr64 if inst.dst_regs() == 2 else st.wsgpr)(sdst, result['D0'])
+    (st.wsgpr64 if inst.canonical_op_bits['d'] == 64 else st.wsgpr)(sdst, result['D0'])
   if 'SCC' in result: st.scc = result['SCC'] & 1
   if 'EXEC' in result: st.exec_mask = result['EXEC']
   if 'PC' in result:
@@ -311,17 +312,18 @@ def exec_ds(st: WaveState, inst, V: VGPRLane, lane: int) -> None:
 
 def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
   """VOP1/VOP2/VOP3/VOP3SD/VOP3P/VOPC: standard ALU ops."""
+  is_dst_16 = inst.canonical_op_bits['d'] == 16
   if isinstance(inst, VOP3P):
     src0, src1, src2, vdst, dst_hi = inst.src0, inst.src1, inst.src2, inst.vdst, False
     neg, abs_, opsel = inst.neg, 0, inst.opsel
   elif isinstance(inst, VOP1):
     src0, src1, src2, vdst = inst.src0, None, None, inst.vdst
-    neg, abs_, opsel, dst_hi = 0, 0, 0, (inst.vdst.offset & 0x80) != 0 and inst.is_dst_16()
-    if inst.is_dst_16(): vdst = inst.vdst.offset & 0x7f
+    neg, abs_, opsel, dst_hi = 0, 0, 0, (inst.vdst.offset & 0x80) != 0 and is_dst_16
+    if is_dst_16: vdst = inst.vdst.offset & 0x7f
   elif isinstance(inst, VOP2):
     src0, src1, src2, vdst = inst.src0, inst.vsrc1, None, inst.vdst
-    neg, abs_, opsel, dst_hi = 0, 0, 0, (inst.vdst.offset & 0x80) != 0 and inst.is_dst_16()
-    if inst.is_dst_16(): vdst = inst.vdst.offset & 0x7f
+    neg, abs_, opsel, dst_hi = 0, 0, 0, (inst.vdst.offset & 0x80) != 0 and is_dst_16
+    if is_dst_16: vdst = inst.vdst.offset & 0x7f
   elif isinstance(inst, (VOP3, VOP3SD)):
     src0, src1, src2, vdst = inst.src0, inst.src1, (None if isinstance(inst, VOP3) and inst.op.value < 256 else inst.src2), inst.vdst
     neg, abs_, opsel, dst_hi = (inst.neg, inst.abs, inst.opsel, False) if isinstance(inst, VOP3) else (0, 0, 0, False)
@@ -333,8 +335,8 @@ def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
   s0 = _read_src(st, inst, src0, 0, lane, neg, abs_, opsel)
   s1 = _read_src(st, inst, src1, 1, lane, neg, abs_, opsel)
   s2 = _read_src(st, inst, src2, 2, lane, neg, abs_, opsel)
-  if isinstance(inst, VOP2) and inst.is_dst_16(): d0 = _src16(V[vdst], dst_hi)
-  elif inst.dst_regs() == 2: d0 = V[vdst] | (V[vdst + 1] << 32)
+  if isinstance(inst, VOP2) and is_dst_16: d0 = _src16(V[vdst], dst_hi)
+  elif inst.canonical_op_bits['d'] == 64: d0 = V[vdst] | (V[vdst + 1] << 32)
   else: d0 = V[vdst]
 
   if isinstance(inst, VOP3SD) and 'CO_CI' in inst.op_name: vcc_for_fn = st.rsgpr64(inst.src2)
@@ -359,8 +361,8 @@ def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
     st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)
   if not is_vopc:
     d0_val = result['D0']
-    if inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
-    elif not isinstance(inst, VOP3P) and inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
+    if inst.canonical_op_bits['d'] == 64: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
+    elif not isinstance(inst, VOP3P) and is_dst_16: V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
     else: V[vdst] = d0_val & MASK32
 
 # ═══════════════════════════════════════════════════════════════════════════════
