@@ -30,7 +30,7 @@ def fields(t: clang.CXType) -> list[clang.CXCursor]:
 def all_fields(t, off=0):
   for f in fields(t):
     if clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f))):
-      yield from all_fields(clang.clang_getCursorType(f), clang.clang_Cursor_getOffsetOfField(f) // 8)
+      yield from all_fields(clang.clang_getCursorType(f), off + clang.clang_Cursor_getOffsetOfField(f) // 8)
     elif nm(f): yield f, off+clang.clang_Cursor_getOffsetOfField(f) // 8 # ignores unnamed fields
 
 def arguments(c: clang.CXCursor|clang.CXType):
