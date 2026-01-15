@@ -86,7 +86,6 @@ def _swmmac_regs(name: str) -> tuple[int, int, int, int]:
 
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, GLOBAL, SCRATCH, MUBUF, MTBUF, MIMG, EXP,
   VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, MUBUFOp)
-from extra.assembly.amd.autogen.rdna3.enum import BufFmt
 from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
   VOPC as R4_VOPC, VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
   SMEM as R4_SMEM, DS as R4_DS, VBUFFER as R4_VBUFFER, VEXPORT as R4_VEXPORT, VOPDOp as R4_VOPDOp)
@@ -663,7 +662,8 @@ def _disasm_vbuffer(inst) -> str:
   srsrc = f'ttmp[{inst.rsrc - 108}:{inst.rsrc - 108 + 3}]' if inst.rsrc >= 108 else f's[{inst.rsrc}:{inst.rsrc + 3}]'
   soff = decode_src(inst.soffset) if _unwrap(inst.soffset) >= 106 else f's{_unwrap(inst.soffset)}'
   fmt = getattr(inst, 'format', 0)
-  fmt_names = {e.value: e.name for e in BufFmt}
+  from extra.assembly.amd.asm import BUF_FMT
+  fmt_names = {v: k for k, v in BUF_FMT.items()}
   fmt_s = f" format:[{fmt_names[fmt]}]" if fmt > 1 and fmt in fmt_names else (f" format:{fmt}" if fmt > 1 else "")
   if 'atomic' in name: th_names = {1: 'TH_ATOMIC_RETURN', 6: 'TH_ATOMIC_CASCADE_NT'}
   elif 'store' in name: th_names = {3: 'TH_STORE_BYPASS', 6: 'TH_STORE_NT_HT'}
@@ -692,7 +692,7 @@ def disasm(inst: Inst) -> str: return DISASM_HANDLERS[type(inst)](inst)
 try:
   from extra.assembly.amd.autogen.cdna.ins import (VOP1 as CDNA_VOP1, VOP2 as CDNA_VOP2, VOPC as CDNA_VOPC, VOP3A, VOP3B, VOP3P as CDNA_VOP3P,
     SOP1 as CDNA_SOP1, SOP2 as CDNA_SOP2, SOPC as CDNA_SOPC, SOPK as CDNA_SOPK, SOPP as CDNA_SOPP, SMEM as CDNA_SMEM, DS as CDNA_DS,
-    FLAT as CDNA_FLAT, MUBUF as CDNA_MUBUF, MTBUF as CDNA_MTBUF, SDWA, DPP, VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op, VOPCOp as CDNA_VOPCOp)
+    FLAT as CDNA_FLAT, MUBUF as CDNA_MUBUF, MTBUF as CDNA_MTBUF, VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op, VOPCOp as CDNA_VOPCOp)
 
   def _cdna_src(inst, v, neg, abs_=0, n=1):
     s = _lit(inst, v) if v == 255 else _fmt_src(v, n, cdna=True)
@@ -759,92 +759,9 @@ try:
            ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
     return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}" if n == 3 else f"{name} {dst}, {src0}, {src1}{' ' + ' '.join(mods) if mods else ''}"
 
-  _SEL = {0: 'BYTE_0', 1: 'BYTE_1', 2: 'BYTE_2', 3: 'BYTE_3', 4: 'WORD_0', 5: 'WORD_1', 6: 'DWORD'}
-  _UNUSED = {0: 'UNUSED_PAD', 1: 'UNUSED_SEXT', 2: 'UNUSED_PRESERVE'}
-  _DPP = {0x130: "wave_shl:1", 0x134: "wave_rol:1", 0x138: "wave_shr:1", 0x13c: "wave_ror:1", 0x140: "row_mirror", 0x141: "row_half_mirror", 0x142: "row_bcast:15", 0x143: "row_bcast:31"}
-
-  def _sdwa_src0(v, is_sgpr, sext=0, neg=0, abs_=0):
-    s = decode_src(v, cdna=True) if is_sgpr else f"v{v}"
-    if sext: s = f"sext({s})"
-    if abs_: s = f"|{s}|"
-    return f"-{s}" if neg else s
-
-  def _sdwa_vsrc1(v, sext=0, neg=0, abs_=0):
-    s = f"v{v}"
-    if sext: s = f"sext({s})"
-    if abs_: s = f"|{s}|"
-    return f"-{s}" if neg else s
-
-  _OMOD_SDWA = {0: "", 1: " mul:2", 2: " mul:4", 3: " div:2"}
-
-  def _disasm_sdwa(inst) -> str:
-    vop2_op = inst.vop2_op
-    src0 = _sdwa_src0(inst.src0, inst.s0, inst.src0_sext, inst.src0_neg, inst.src0_abs)
-    clamp = " clamp" if inst.clmp else ""
-    omod = _OMOD_SDWA.get(inst.omod, "")
-    if vop2_op == 63:
-      try: name = CDNA_VOP1Op(inst.vop_op).name.lower()
-      except ValueError: name = f"vop1_op_{inst.vop_op}"
-      dst = _vreg(inst.vdst)
-      mods = [f"dst_sel:{_SEL[inst.dst_sel]}", f"dst_unused:{_UNUSED[inst.dst_u]}", f"src0_sel:{_SEL[inst.src0_sel]}"]
-      return f"{name}_sdwa {dst}, {src0}{clamp}{omod} " + " ".join(mods)
-    elif vop2_op == 62:
-      try: name = CDNA_VOPCOp(inst.vdst).name.lower()
-      except ValueError: name = f"vopc_op_{inst.vdst}"
-      src1 = _sdwa_vsrc1(inst.vop_op, inst.src1_sext, inst.src1_neg, inst.src1_abs)
-      sdst_enc = inst.dst_sel | (inst.dst_u << 3) | (inst.clmp << 5) | (inst.omod << 6)
-      if sdst_enc == 0: sdst = "vcc"
-      else:
-        sdst_val = sdst_enc - 128 if sdst_enc >= 128 else sdst_enc
-        sdst = _fmt_sdst(sdst_val, 2, cdna=True)
-      mods = [f"src0_sel:{_SEL[inst.src0_sel]}", f"src1_sel:{_SEL[inst.src1_sel]}"]
-      return f"{name}_sdwa {sdst}, {src0}, {src1} " + " ".join(mods)
-    else:
-      try: name = CDNA_VOP2Op(vop2_op).name.lower()
-      except ValueError: name = f"vop2_op_{vop2_op}"
-      name = _CDNA_DISASM_ALIASES.get(name, name)
-      dst = _vreg(inst.vdst)
-      src1 = _sdwa_vsrc1(inst.vop_op, inst.src1_sext, inst.src1_neg, inst.src1_abs)
-      mods = [f"dst_sel:{_SEL[inst.dst_sel]}", f"dst_unused:{_UNUSED[inst.dst_u]}", f"src0_sel:{_SEL[inst.src0_sel]}", f"src1_sel:{_SEL[inst.src1_sel]}"]
-      if name == 'v_cndmask_b32':
-        return f"{name}_sdwa {dst}, {src0}, {src1}, vcc{clamp}{omod} " + " ".join(mods)
-      if name in ('v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32'):
-        return f"{name}_sdwa {dst}, vcc, {src0}, {src1}, vcc{clamp}{omod} " + " ".join(mods)
-      if '_co_' in name:
-        return f"{name}_sdwa {dst}, vcc, {src0}, {src1}{clamp}{omod} " + " ".join(mods)
-      return f"{name}_sdwa {dst}, {src0}, {src1}{clamp}{omod} " + " ".join(mods)
-
-  def _dpp_src(v, neg=0, abs_=0):
-    s = f"v{v}" if v < 256 else f"v{v - 256}"
-    if abs_: s = f"|{s}|"
-    return f"-{s}" if neg else s
-
-  def _disasm_dpp(inst) -> str:
-    vop2_op = inst.vop2_op
-    ctrl = inst.dpp_ctrl
-    dpp = f"quad_perm:[{ctrl&3},{(ctrl>>2)&3},{(ctrl>>4)&3},{(ctrl>>6)&3}]" if ctrl < 0x100 else f"row_shl:{ctrl&0xf}" if ctrl < 0x110 else f"row_shr:{ctrl&0xf}" if ctrl < 0x120 else f"row_ror:{ctrl&0xf}" if ctrl < 0x130 else _DPP.get(ctrl, f"dpp_ctrl:0x{ctrl:x}")
-    src0 = _dpp_src(inst.src0, inst.src0_neg, inst.src0_abs)
-    mods = [dpp, f"row_mask:0x{inst.row_mask:x}", f"bank_mask:0x{inst.bank_mask:x}"] + (["bound_ctrl:0"] if inst.bound_ctrl else [])
-    if vop2_op == 63:
-      try: name = CDNA_VOP1Op(inst.vop_op).name.lower()
-      except ValueError: name = f"vop1_op_{inst.vop_op}"
-      return f"{name}_dpp {_vreg(inst.vdst)}, {src0} " + " ".join(mods)
-    else:
-      try: name = CDNA_VOP2Op(vop2_op).name.lower()
-      except ValueError: name = f"vop2_op_{vop2_op}"
-      name = _CDNA_DISASM_ALIASES.get(name, name)
-      src1 = _dpp_src(inst.vop_op, inst.src1_neg, inst.src1_abs)
-      if name == 'v_cndmask_b32':
-        return f"{name}_dpp {_vreg(inst.vdst)}, {src0}, {src1}, vcc " + " ".join(mods)
-      if name in ('v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32'):
-        return f"{name}_dpp {_vreg(inst.vdst)}, vcc, {src0}, {src1}, vcc " + " ".join(mods)
-      if '_co_' in name:
-        return f"{name}_dpp {_vreg(inst.vdst)}, vcc, {src0}, {src1} " + " ".join(mods)
-      return f"{name}_dpp {_vreg(inst.vdst)}, {src0}, {src1} " + " ".join(mods)
-
   DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP2: _disasm_vop2, CDNA_VOPC: _disasm_vopc,
     CDNA_SOP1: _disasm_sop1, CDNA_SOP2: _disasm_sop2, CDNA_SOPC: _disasm_sopc, CDNA_SOPK: _disasm_sopk, CDNA_SOPP: _disasm_sopp,
     CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat, CDNA_MUBUF: _disasm_buf, CDNA_MTBUF: _disasm_buf,
-    VOP3A: _disasm_vop3a, VOP3B: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p, SDWA: _disasm_sdwa, DPP: _disasm_dpp})
+    VOP3A: _disasm_vop3a, VOP3B: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p})
 except ImportError:
   pass
