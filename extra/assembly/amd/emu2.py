@@ -12,6 +12,7 @@ from tinygrad.codegen import get_program
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
+from tinygrad.helpers import Context, DEBUG, colored
 
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
@@ -24,13 +25,20 @@ WAVE_SIZE = 32
 PC_LO_IDX, PC_HI_IDX, SCC_IDX = 128, 129, 130
 SGPR_COUNT, VGPR_SIZE = 131, 256 * 32
 
-# Buffers: vmem at 0 (INDEX offsets to host addr), lds, vgpr, sgpr
+# Counter for unique axis IDs to avoid UOp caching issues
+_axis_id_counter = 0
+def _next_axis_id() -> int:
+  global _axis_id_counter
+  _axis_id_counter += 1
+  return _axis_id_counter
+
+# Buffers: sgpr=0, vgpr=1, vmem=2, lds=3
 def _define_bufs():
-  vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=0)
-  lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=1)
-  vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=2)
-  sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=3)
-  return vmem, lds, vgpr, sgpr
+  sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
+  vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
+  vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=2)
+  lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
+  return sgpr, vgpr, vmem, lds
 
 def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
 
@@ -43,7 +51,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   """Compile instruction bytes to (name, SINK UOp)."""
   inst = decode_inst(inst_bytes)
   name = f"emu2_{inst_bytes[:inst.size()].hex()}"
-  vmem, lds, vgpr, sgpr = _define_bufs()
+  sgpr, vgpr, vmem, lds = _define_bufs()
   inst_words = inst.size() // 4
   literal = int.from_bytes(inst_bytes[4:8], 'little') if len(inst_bytes) >= 8 else 0
 
@@ -107,12 +115,30 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     return name, UOp.sink(*stores, inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # SOP2: scalar ALU (s_add_i32, etc.)
+  # SOP1: scalar unary ops (s_mov_b32, etc.)
+  # ═══════════════════════════════════════════════════════════════════════════
+  if isinstance(inst, SOP1):
+    s0 = rsrc(inst.ssrc0.offset, UOp.const(dtypes.index, 0))
+    dst_reg = inst.sdst.offset
+    op_name = inst.op.name
+
+    if 'MOV_B32' in op_name:
+      return name, UOp.sink(wsgpr(dst_reg, s0), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'MOV_B64' in op_name:
+      s0_hi = rsrc(inst.ssrc0.offset + 1, UOp.const(dtypes.index, 0))
+      return name, UOp.sink(wsgpr(dst_reg, s0), wsgpr(dst_reg + 1, s0_hi), inc_pc(), arg=KernelInfo(name=name))
+
+    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # SOP2: scalar ALU (s_add_i32, s_lshl_b64, etc.)
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, SOP2):
     s0 = rsrc(inst.ssrc0.offset, UOp.const(dtypes.index, 0))
     s1 = rsrc(inst.ssrc1.offset, UOp.const(dtypes.index, 0))
     dst_reg = inst.sdst.offset
+    op_name = inst.op.name
 
     if inst.op == SOP2Op.S_ADD_I32:
       result = s0.cast(dtypes.int) + s1.cast(dtypes.int)
@@ -125,7 +151,36 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
     if inst.op == SOP2Op.S_ADD_U32:
       result = s0 + s1
+      # SCC = carry out (result < s0 means overflow)
+      scc = UOp(Ops.CMPLT, dtypes.bool, (result, s0))
+      return name, UOp.sink(wsgpr(dst_reg, result), wsgpr(SCC_IDX, scc.cast(dtypes.uint32)), inc_pc(), arg=KernelInfo(name=name))
+
+    if inst.op == SOP2Op.S_ADDC_U32:
+      scc_in = rsgpr(SCC_IDX)
+      result = s0 + s1 + scc_in
+      # SCC = carry out
+      scc = UOp(Ops.CMPLT, dtypes.bool, (result, s0)) | (result.eq(s0) & scc_in.ne(UOp.const(dtypes.uint32, 0)))
+      return name, UOp.sink(wsgpr(dst_reg, result), wsgpr(SCC_IDX, scc.cast(dtypes.uint32)), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'LSHL_B32' in op_name:
+      shift = s1 & UOp.const(dtypes.uint32, 31)
+      result = s0 << shift
       return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'LSHL_B64' in op_name:
+      # 64-bit shift left
+      s0_hi = rsrc(inst.ssrc0.offset + 1, UOp.const(dtypes.index, 0))
+      s0_64 = s0.cast(dtypes.uint64) | (s0_hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+      shift = s1 & UOp.const(dtypes.uint32, 63)
+      result = s0_64 << shift.cast(dtypes.uint64)
+      result_lo = result.cast(dtypes.uint32)
+      result_hi = (result >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
+      return name, UOp.sink(wsgpr(dst_reg, result_lo), wsgpr(dst_reg + 1, result_hi), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'ASHR_I32' in op_name:
+      shift = s1 & UOp.const(dtypes.uint32, 31)
+      result = s0.cast(dtypes.int) >> shift.cast(dtypes.int)
+      return name, UOp.sink(wsgpr(dst_reg, result.cast(dtypes.uint32)), inc_pc(), arg=KernelInfo(name=name))
 
     return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
 
@@ -133,7 +188,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   # VOP1: v_mov_b32, etc.
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, VOP1):
-    lane = UOp.range(32, 0, AxisType.LOOP)
+    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
     exec_mask = rsgpr(EXEC_LO.offset)
     src0 = rsrc(inst.src0.offset, lane)
     vdst_reg = inst.vdst.offset - 256
@@ -148,7 +203,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   # VOP2: v_add_f32, v_lshlrev_b32, etc.
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, VOP2):
-    lane = UOp.range(32, 0, AxisType.LOOP)
+    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
     exec_mask = rsgpr(EXEC_LO.offset)
     src0 = rsrc(inst.src0.offset, lane)
     src1 = rsrc(inst.vsrc1.offset, lane)
@@ -178,44 +233,75 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # VOP3: 3-operand vector ALU (v_add_f32_e64, v_fma_f32, etc.)
+  # ═══════════════════════════════════════════════════════════════════════════
+  if isinstance(inst, VOP3):
+    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    exec_mask = rsgpr(EXEC_LO.offset)
+    src0 = rsrc(inst.src0.offset, lane)
+    src1 = rsrc(inst.src1.offset, lane)
+    src2 = rsrc(inst.src2.offset, lane) if inst.src2 is not None else None
+    vdst_reg = inst.vdst.offset - 256
+    op_name = inst.op.name
+
+    if 'ADD_F32' in op_name:
+      result = (src0.bitcast(dtypes.float32) + src1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'MUL_F32' in op_name:
+      result = (src0.bitcast(dtypes.float32) * src1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'FMA_F32' in op_name and src2 is not None:
+      result = (src0.bitcast(dtypes.float32) * src1.bitcast(dtypes.float32) + src2.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'MOV_B32' in op_name:
+      store = wvgpr(vdst_reg, lane, src0, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # VOPD: dual-issue v_dual_mov_b32, etc.
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, VOPD):
-    lane = UOp.range(32, 0, AxisType.LOOP)
     exec_mask = rsgpr(EXEC_LO.offset)
-
-    srcx0 = rsrc(inst.srcx0.offset, lane)
-    vsrcx1 = rvgpr(inst.vsrcx1.offset - 256, lane)
     vdstx_reg = inst.vdstx.offset - 256
-
-    srcy0 = rsrc(inst.srcy0.offset, lane)
-    vsrcy1 = rvgpr(inst.vsrcy1.offset - 256, lane)
     vdsty_reg = (inst.vdsty << 1) | ((inst.vdstx.offset & 1) ^ 1)
-
-    stores = []
     opx_name = inst.opx.name if hasattr(inst.opx, 'name') else str(inst.opx)
     opy_name = inst.opy.name if hasattr(inst.opy, 'name') else str(inst.opy)
 
-    # X operation
+    ended = []
+
+    # X operation - separate loop
+    lane_x = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    srcx0 = rsrc(inst.srcx0.offset, lane_x)
+    vsrcx1 = rvgpr(inst.vsrcx1.offset - 256, lane_x)
     if 'MOV_B32' in opx_name:
-      stores.append(wvgpr(vdstx_reg, lane, srcx0, exec_mask))
+      ended.append(wvgpr(vdstx_reg, lane_x, srcx0, exec_mask).end(lane_x))
     elif 'ADD_F32' in opx_name:
       result = (srcx0.bitcast(dtypes.float32) + vsrcx1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
-      stores.append(wvgpr(vdstx_reg, lane, result, exec_mask))
+      ended.append(wvgpr(vdstx_reg, lane_x, result, exec_mask).end(lane_x))
     elif 'ADD_NC_U32' in opx_name:
-      stores.append(wvgpr(vdstx_reg, lane, srcx0 + vsrcx1, exec_mask))
+      ended.append(wvgpr(vdstx_reg, lane_x, srcx0 + vsrcx1, exec_mask).end(lane_x))
 
-    # Y operation
+    # Y operation - separate loop
+    lane_y = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    srcy0 = rsrc(inst.srcy0.offset, lane_y)
+    vsrcy1 = rvgpr(inst.vsrcy1.offset - 256, lane_y)
     if 'MOV_B32' in opy_name:
-      stores.append(wvgpr(vdsty_reg, lane, srcy0, exec_mask))
+      ended.append(wvgpr(vdsty_reg, lane_y, srcy0, exec_mask).end(lane_y))
     elif 'ADD_F32' in opy_name:
       result = (srcy0.bitcast(dtypes.float32) + vsrcy1.bitcast(dtypes.float32)).bitcast(dtypes.uint32)
-      stores.append(wvgpr(vdsty_reg, lane, result, exec_mask))
+      ended.append(wvgpr(vdsty_reg, lane_y, result, exec_mask).end(lane_y))
     elif 'ADD_NC_U32' in opy_name:
-      stores.append(wvgpr(vdsty_reg, lane, srcy0 + vsrcy1, exec_mask))
+      ended.append(wvgpr(vdsty_reg, lane_y, srcy0 + vsrcy1, exec_mask).end(lane_y))
 
-    if stores:
-      ended = [s.end(lane) for s in stores]
+    if ended:
       return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
     return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
 
@@ -223,47 +309,50 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   # FLAT/GLOBAL: memory loads/stores
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, (FLAT, GLOBAL)):
-    lane = UOp.range(32, 0, AxisType.LOOP)
     exec_mask = rsgpr(EXEC_LO.offset)
-
     addr_reg = inst.addr.offset - 256
-    addr_lo = rvgpr(addr_reg, lane)
-    addr_hi = rvgpr(addr_reg + 1, lane)
-    addr = addr_lo.cast(dtypes.uint64) | (addr_hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-
-    # Add saddr if present
-    if hasattr(inst, 'saddr') and inst.saddr != NULL and inst.saddr.offset < 128:
-      saddr = rsgpr64(inst.saddr.offset)
-      addr = addr + saddr
-
-    # Add signed offset
+    has_saddr = hasattr(inst, 'saddr') and inst.saddr != NULL and inst.saddr.offset < 128
     offset = _sext(getattr(inst, 'offset', 0), 13)
-    addr = addr + UOp.const(dtypes.uint64, offset)
-
     op_name = inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
     ndwords = 4 if '_B128' in op_name else 3 if '_B96' in op_name else 2 if '_B64' in op_name else 1
 
+    # Helper to compute address for a lane
+    def make_addr(lane: UOp) -> UOp:
+      if has_saddr:
+        vgpr_offset = rvgpr(addr_reg, lane).cast(dtypes.uint64)
+        saddr = rsgpr64(inst.saddr.offset)
+        return saddr + vgpr_offset + UOp.const(dtypes.uint64, offset)
+      else:
+        addr_lo = rvgpr(addr_reg, lane)
+        addr_hi = rvgpr(addr_reg + 1, lane)
+        return (addr_lo.cast(dtypes.uint64) | (addr_hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))) + UOp.const(dtypes.uint64, offset)
+
     if 'LOAD' in op_name:
       vdst_reg = inst.vdst.offset - 256
-      stores = []
+      ended = []
+      # Each dword gets its own loop to avoid CFG issues
       for i in range(ndwords):
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        addr = make_addr(lane)
         byte_addr = addr + UOp.const(dtypes.uint64, i * 4)
         val = vmem.index((byte_addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
-        stores.append(wvgpr(vdst_reg + i, lane, val, exec_mask))
-      ended = [s.end(lane) for s in stores]
+        store = wvgpr(vdst_reg + i, lane, val, exec_mask)
+        ended.append(store.end(lane))
       return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
 
     if 'STORE' in op_name:
       vdata_reg = inst.data.offset - 256
-      stores = []
+      ended = []
+      # Each dword gets its own loop to avoid CFG issues
       for i in range(ndwords):
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        addr = make_addr(lane)
         byte_addr = addr + UOp.const(dtypes.uint64, i * 4)
         val = rvgpr(vdata_reg + i, lane)
         idx = vmem.index((byte_addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
         exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
         active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
-        stores.append(idx.store(active.where(val, idx)))
-      ended = [s.end(lane) for s in stores]
+        ended.append(idx.store(active.where(val, idx)).end(lane))
       return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
 
     return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
@@ -290,11 +379,16 @@ def decode_program(data: bytes) -> dict[int, tuple[str, CompiledRunner|None, lis
 
     name, sink = compile_inst(bytes(data[i:i + inst.size() + 4]))
     try:
-      prg = get_program(sink, renderer)
+      with Context(NOOPT=1):
+        prg = get_program(sink, renderer)
       runner = CompiledRunner(prg)
       globals_list = prg.globals
+      if DEBUG >= 2: print(f"[emu2] PC={i//4}: {repr(inst)}\n{colored(prg.src, 'BLACK')}")
     except Exception as e:
-      print(f"Failed to compile {name}: {e}")
+      if DEBUG >= 1: print(f"[emu2] Failed to compile PC={i//4} {repr(inst)}: {type(e).__name__}: {e}")
+      if DEBUG >= 3:
+        import traceback
+        traceback.print_exc()
       runner, globals_list = None, None
 
     result[i // 4] = (name, runner, globals_list)
@@ -331,6 +425,14 @@ class WaveState:
 # EXECUTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Global vmem buffer: external_ptr=0 means INDEX offsets directly to host memory addresses
+_vmem_buf: Buffer | None = None
+def _get_vmem_buf() -> Buffer:
+  global _vmem_buf
+  if _vmem_buf is None:
+    _vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
+  return _vmem_buf
+
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c) -> int:
   """Execute AMD assembly program."""
   data = bytes((ctypes.c_char * lib_sz).from_address(lib).raw)
@@ -339,8 +441,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
-  # vmem_buf at address 0: INDEX directly offsets to host memory
-  vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
+  vmem_buf = _get_vmem_buf()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
 
   for gidz in range(gz):
@@ -366,15 +467,15 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             z, y, x = tid // (lx * ly), (tid // lx) % ly, tid % lx
             st._write_vgpr(0, lane, (z << 20) | (y << 10) | x)
 
-          # Execute wave
-          all_bufs = {0: vmem_buf, 1: lds_buf, 2: st.vgpr_buf, 3: st.sgpr_buf}
+          # Execute wave: sgpr=0, vgpr=1, vmem=2, lds=3
+          all_bufs = {0: st.sgpr_buf, 1: st.vgpr_buf, 2: vmem_buf, 3: lds_buf}
           while True:
             pc = st.pc
             if pc == 0xFFFFFFFF or pc not in program: break
 
             name, runner, globals_list = program[pc]
             if runner is None:
-              print(f"No runner for {name} at PC={pc}")
+              if DEBUG >= 1: print(f"[emu2] No runner for {name} at PC={pc}")
               break
 
             bufs = [all_bufs[g] for g in globals_list]
