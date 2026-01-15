@@ -1441,6 +1441,7 @@ class TestSchedule(unittest.TestCase):
     y = x.pad((-1,2,2,-1), mode="replicate")
     dx = y.sum().gradient(x)[0]
     sched = check_schedule(dx, 1)
+    self.assertEqual(sched[0].ast.op_in_backward_slice_with_self(Ops.REDUCE), False)
     run_schedule(sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
 
