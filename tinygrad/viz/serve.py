@@ -276,17 +276,19 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(e) -> list[ProfileEvent]:
+  from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, WAVESTART, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
-  from extra.assembly.amd.sqtt import decode, INST, InstOp
-  #op_idx = {o:i for i,o in enumerate(InstOp)}
-  op_idx:dict = {}
   rows:dict[str, None] = {}
+  def add(name:str, p:PacketType, op:str="OP", idx:int=0) -> None:
+    rows.setdefault(r:=(f"WAVE:{p.wave} {name}:1" if hasattr(p, "wave") else f"SHARED:0 {name}:0"))
+    ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+10)))
+  op_idx:dict = {}
   for p in decode(e.blob):
     if isinstance(p, INST):
       if p.op not in op_idx: op_idx[p.op] = len(op_idx)
-      op_name = f"{p.op.name}:{op_idx[p.op]}" if isinstance(p.op, InstOp) else f"0x{p.op:02x}:{len(op_idx)}"
-      rows[r:=f"WAVE:{p.wave} INST:1"] = None
-      ret.append(ProfileRangeEvent(r, f"SINST {op_name}", Decimal(p._time), Decimal(p._time+10)))
+      op_name, idx = (p.op.name, op_idx[p.op]) if isinstance(p.op, InstOp) else (f"0x{p.op:02x}", len(op_idx))
+      add(p.__class__.__name__, p, op_name, idx)
+    if isinstance(p, (VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC)): add(p.__class__.__name__, p)
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
