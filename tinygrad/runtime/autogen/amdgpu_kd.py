@@ -1,27 +1,30 @@
-# mypy: ignore-errors
+# mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-uint8_t = ctypes.c_ubyte
-_anonenum0 = CEnum(uint8_t)
+from typing import Annotated, Literal, TypeAlias
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+class _anonenum0(uint8_t, c.Enum): pass
 FLOAT_ROUND_MODE_NEAR_EVEN = _anonenum0.define('FLOAT_ROUND_MODE_NEAR_EVEN', 0)
 FLOAT_ROUND_MODE_PLUS_INFINITY = _anonenum0.define('FLOAT_ROUND_MODE_PLUS_INFINITY', 1)
 FLOAT_ROUND_MODE_MINUS_INFINITY = _anonenum0.define('FLOAT_ROUND_MODE_MINUS_INFINITY', 2)
 FLOAT_ROUND_MODE_ZERO = _anonenum0.define('FLOAT_ROUND_MODE_ZERO', 3)
 
-_anonenum1 = CEnum(uint8_t)
+class _anonenum1(uint8_t, c.Enum): pass
 FLOAT_DENORM_MODE_FLUSH_SRC_DST = _anonenum1.define('FLOAT_DENORM_MODE_FLUSH_SRC_DST', 0)
 FLOAT_DENORM_MODE_FLUSH_DST = _anonenum1.define('FLOAT_DENORM_MODE_FLUSH_DST', 1)
 FLOAT_DENORM_MODE_FLUSH_SRC = _anonenum1.define('FLOAT_DENORM_MODE_FLUSH_SRC', 2)
 FLOAT_DENORM_MODE_FLUSH_NONE = _anonenum1.define('FLOAT_DENORM_MODE_FLUSH_NONE', 3)
 
-_anonenum2 = CEnum(uint8_t)
+class _anonenum2(uint8_t, c.Enum): pass
 SYSTEM_VGPR_WORKITEM_ID_X = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_X', 0)
 SYSTEM_VGPR_WORKITEM_ID_X_Y = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_X_Y', 1)
 SYSTEM_VGPR_WORKITEM_ID_X_Y_Z = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_X_Y_Z', 2)
 SYSTEM_VGPR_WORKITEM_ID_UNDEFINED = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_UNDEFINED', 3)
 
-int32_t = ctypes.c_int32
-_anonenum3 = CEnum(int32_t)
+int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
+class _anonenum3(int32_t, c.Enum): pass
 COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT = _anonenum3.define('COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT', 0)
 COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_WIDTH = _anonenum3.define('COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_WIDTH', 6)
 COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT = _anonenum3.define('COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT', 63)
@@ -89,7 +92,7 @@ COMPUTE_PGM_RSRC1_GFX10_PLUS_FWD_PROGRESS_SHIFT = _anonenum3.define('COMPUTE_PGM
 COMPUTE_PGM_RSRC1_GFX10_PLUS_FWD_PROGRESS_WIDTH = _anonenum3.define('COMPUTE_PGM_RSRC1_GFX10_PLUS_FWD_PROGRESS_WIDTH', 1)
 COMPUTE_PGM_RSRC1_GFX10_PLUS_FWD_PROGRESS = _anonenum3.define('COMPUTE_PGM_RSRC1_GFX10_PLUS_FWD_PROGRESS', -2147483648)
 
-_anonenum4 = CEnum(int32_t)
+class _anonenum4(int32_t, c.Enum): pass
 COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_SHIFT = _anonenum4.define('COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_SHIFT', 0)
 COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_WIDTH = _anonenum4.define('COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT_WIDTH', 1)
 COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT = _anonenum4.define('COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT', 1)
@@ -151,7 +154,7 @@ COMPUTE_PGM_RSRC2_RESERVED0_SHIFT = _anonenum4.define('COMPUTE_PGM_RSRC2_RESERVE
 COMPUTE_PGM_RSRC2_RESERVED0_WIDTH = _anonenum4.define('COMPUTE_PGM_RSRC2_RESERVED0_WIDTH', 1)
 COMPUTE_PGM_RSRC2_RESERVED0 = _anonenum4.define('COMPUTE_PGM_RSRC2_RESERVED0', -2147483648)
 
-_anonenum5 = CEnum(int32_t)
+class _anonenum5(int32_t, c.Enum): pass
 COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_SHIFT = _anonenum5.define('COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_SHIFT', 0)
 COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_WIDTH = _anonenum5.define('COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_WIDTH', 6)
 COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET = _anonenum5.define('COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET', 63)
@@ -165,7 +168,7 @@ COMPUTE_PGM_RSRC3_GFX90A_RESERVED1_SHIFT = _anonenum5.define('COMPUTE_PGM_RSRC3_
 COMPUTE_PGM_RSRC3_GFX90A_RESERVED1_WIDTH = _anonenum5.define('COMPUTE_PGM_RSRC3_GFX90A_RESERVED1_WIDTH', 15)
 COMPUTE_PGM_RSRC3_GFX90A_RESERVED1 = _anonenum5.define('COMPUTE_PGM_RSRC3_GFX90A_RESERVED1', -131072)
 
-_anonenum6 = CEnum(int32_t)
+class _anonenum6(int32_t, c.Enum): pass
 COMPUTE_PGM_RSRC3_GFX10_GFX11_SHARED_VGPR_COUNT_SHIFT = _anonenum6.define('COMPUTE_PGM_RSRC3_GFX10_GFX11_SHARED_VGPR_COUNT_SHIFT', 0)
 COMPUTE_PGM_RSRC3_GFX10_GFX11_SHARED_VGPR_COUNT_WIDTH = _anonenum6.define('COMPUTE_PGM_RSRC3_GFX10_GFX11_SHARED_VGPR_COUNT_WIDTH', 4)
 COMPUTE_PGM_RSRC3_GFX10_GFX11_SHARED_VGPR_COUNT = _anonenum6.define('COMPUTE_PGM_RSRC3_GFX10_GFX11_SHARED_VGPR_COUNT', 15)
@@ -206,7 +209,7 @@ COMPUTE_PGM_RSRC3_GFX11_PLUS_IMAGE_OP_SHIFT = _anonenum6.define('COMPUTE_PGM_RSR
 COMPUTE_PGM_RSRC3_GFX11_PLUS_IMAGE_OP_WIDTH = _anonenum6.define('COMPUTE_PGM_RSRC3_GFX11_PLUS_IMAGE_OP_WIDTH', 1)
 COMPUTE_PGM_RSRC3_GFX11_PLUS_IMAGE_OP = _anonenum6.define('COMPUTE_PGM_RSRC3_GFX11_PLUS_IMAGE_OP', -2147483648)
 
-_anonenum7 = CEnum(int32_t)
+class _anonenum7(int32_t, c.Enum): pass
 KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER_SHIFT = _anonenum7.define('KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER_SHIFT', 0)
 KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER_WIDTH = _anonenum7.define('KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER_WIDTH', 1)
 KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER = _anonenum7.define('KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER', 1)
@@ -241,7 +244,7 @@ KERNEL_CODE_PROPERTY_RESERVED1_SHIFT = _anonenum7.define('KERNEL_CODE_PROPERTY_R
 KERNEL_CODE_PROPERTY_RESERVED1_WIDTH = _anonenum7.define('KERNEL_CODE_PROPERTY_RESERVED1_WIDTH', 4)
 KERNEL_CODE_PROPERTY_RESERVED1 = _anonenum7.define('KERNEL_CODE_PROPERTY_RESERVED1', 61440)
 
-_anonenum8 = CEnum(int32_t)
+class _anonenum8(int32_t, c.Enum): pass
 KERNARG_PRELOAD_SPEC_LENGTH_SHIFT = _anonenum8.define('KERNARG_PRELOAD_SPEC_LENGTH_SHIFT', 0)
 KERNARG_PRELOAD_SPEC_LENGTH_WIDTH = _anonenum8.define('KERNARG_PRELOAD_SPEC_LENGTH_WIDTH', 7)
 KERNARG_PRELOAD_SPEC_LENGTH = _anonenum8.define('KERNARG_PRELOAD_SPEC_LENGTH', 127)
@@ -249,25 +252,25 @@ KERNARG_PRELOAD_SPEC_OFFSET_SHIFT = _anonenum8.define('KERNARG_PRELOAD_SPEC_OFFS
 KERNARG_PRELOAD_SPEC_OFFSET_WIDTH = _anonenum8.define('KERNARG_PRELOAD_SPEC_OFFSET_WIDTH', 9)
 KERNARG_PRELOAD_SPEC_OFFSET = _anonenum8.define('KERNARG_PRELOAD_SPEC_OFFSET', 65408)
 
-class llvm_amdhsa_kernel_descriptor_t(Struct): pass
-uint32_t = ctypes.c_uint32
-int64_t = ctypes.c_int64
-uint16_t = ctypes.c_uint16
-llvm_amdhsa_kernel_descriptor_t._fields_ = [
-  ('group_segment_fixed_size', uint32_t),
-  ('private_segment_fixed_size', uint32_t),
-  ('kernarg_size', uint32_t),
-  ('reserved0', (uint8_t * 4)),
-  ('kernel_code_entry_byte_offset', int64_t),
-  ('reserved1', (uint8_t * 20)),
-  ('compute_pgm_rsrc3', uint32_t),
-  ('compute_pgm_rsrc1', uint32_t),
-  ('compute_pgm_rsrc2', uint32_t),
-  ('kernel_code_properties', uint16_t),
-  ('kernarg_preload', uint16_t),
-  ('reserved3', (uint8_t * 4)),
-]
-_anonenum9 = CEnum(uint32_t)
+@c.record
+class llvm_amdhsa_kernel_descriptor_t(c.Struct):
+  SIZE = 64
+  group_segment_fixed_size: Annotated[uint32_t, 0]
+  private_segment_fixed_size: Annotated[uint32_t, 4]
+  kernarg_size: Annotated[uint32_t, 8]
+  reserved0: Annotated[c.Array[uint8_t, Literal[4]], 12]
+  kernel_code_entry_byte_offset: Annotated[int64_t, 16]
+  reserved1: Annotated[c.Array[uint8_t, Literal[20]], 24]
+  compute_pgm_rsrc3: Annotated[uint32_t, 44]
+  compute_pgm_rsrc1: Annotated[uint32_t, 48]
+  compute_pgm_rsrc2: Annotated[uint32_t, 52]
+  kernel_code_properties: Annotated[uint16_t, 56]
+  kernarg_preload: Annotated[uint16_t, 58]
+  reserved3: Annotated[c.Array[uint8_t, Literal[4]], 60]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+int64_t: TypeAlias = Annotated[int, ctypes.c_int64]
+uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
+class _anonenum9(uint32_t, c.Enum): pass
 GROUP_SEGMENT_FIXED_SIZE_OFFSET = _anonenum9.define('GROUP_SEGMENT_FIXED_SIZE_OFFSET', 0)
 PRIVATE_SEGMENT_FIXED_SIZE_OFFSET = _anonenum9.define('PRIVATE_SEGMENT_FIXED_SIZE_OFFSET', 4)
 KERNARG_SIZE_OFFSET = _anonenum9.define('KERNARG_SIZE_OFFSET', 8)
@@ -281,3 +284,4 @@ KERNEL_CODE_PROPERTIES_OFFSET = _anonenum9.define('KERNEL_CODE_PROPERTIES_OFFSET
 KERNARG_PRELOAD_OFFSET = _anonenum9.define('KERNARG_PRELOAD_OFFSET', 58)
 RESERVED3_OFFSET = _anonenum9.define('RESERVED3_OFFSET', 60)
 
+c.init_records()

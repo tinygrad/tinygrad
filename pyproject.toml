@@ -244,7 +244,7 @@ select = [
   "F541",
   "F841",
 ]
-"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006"]
+"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006", "A002", "F811"]
 
 [tool.ruff.format]
 exclude = ["*"]
