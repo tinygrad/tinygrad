@@ -336,7 +336,7 @@ class APLRemoteIfaceBase(LNXPCIIfaceBase):
   def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
     self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
     self.dev, self.vram_bar = dev, vram_bar
-    assert self.pci_dev.read_config(0x00, 2) == vendor, f"Vendor ID mismatch"
+    assert (read:=self.pci_dev.read_config(0x00, 2)) == vendor, f"Vendor ID mismatch {read:#06x} != {vendor:#06x}"
 
   def free(self, b:HCQBuffer):
     for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
