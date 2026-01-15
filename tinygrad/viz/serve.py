@@ -310,8 +310,9 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
       events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
   return cu_events, list(units), wave_insts
 
-def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str]]:
+def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
   rows:dict[str, list[ProfileEvent]] = {}
+  wave_insts:dict[str, list[str, dict]] = {}
   from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, LAYOUT_HEADER
   from extra.assembly.amd.sqtt import INST, VALUINST, VMEMEXEC, ALUEXEC, IMMEDIATE, IMMEDIATE_MASK
   wave_starts:dict[tuple[int, int, int, int], int] = {} # [se, cu, simd, wave] -> time
@@ -329,7 +330,7 @@ def unpack_sqtt2(data:list) -> tuple[dict[str, list[ProfileEvent]], list[str]]:
         # the first CU in the selected SIMD has the INST trace
         name = f"{'INST' if (p.simd, p.cu) == (simd_sel, 0) and len(insts) > 0 else 'OCC'} WAVE:{p.wave} N:{next(counter)}"
         rows.setdefault(f"SE:{e.se} CU:{p.cu}", []).append(ProfileRangeEvent(f"SIMD:{p.simd}", name, Decimal(st), Decimal(p._time)))
-  return rows, list(units)
+  return rows, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
@@ -501,19 +502,18 @@ def get_render(query:str) -> dict:
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
       # unpack using our decoder
       with Timing(f"{'** unpack using our decoder':<{32}}"):
-        cu_events, units = unpack_sqtt2(data[1])
-      for cu in sorted(cu_events, key=row_tuple):
-        steps.append(create_step(f"RAW {cu} {len(cu_events[cu])}", ("/cu-sqtt-raw", i, len(steps)), depth=1,
-                                 data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
-      with soft_err(lambda err: ret.update(err)):
-        # unpack using roc decoder
-        with Timing(f"{'** unpack using rocprof':<{32}}"):
-          cu_events, units, wave_insts = unpack_sqtt(*data)
+        raw_sqtt = unpack_sqtt2(data[1])
+      # unpack using rocprof decoder
+      with Timing(f"{'** unpack using rocprof':<{32}}"):
+        roc_sqtt = unpack_sqtt(*data)
+      # generic list constructor
+      for ((cu_events, units, wave_insts), name_suffix, url_suffix) in ((roc_sqtt, "", ""), (raw_sqtt, "RAW ", "-raw")):
         for cu in sorted(cu_events, key=row_tuple):
-          steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
+          steps.append(create_step(f"{name_suffix}{cu} {len(cu_events[cu])}", (f"/cu-sqtt{url_suffix}", i, len(steps)), depth=1,
                                    data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
-            steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
+            data = wave_insts[cu][k]
+            steps.append(create_step(k.replace(cu, ""), (f"/sqtt-insts{url_suffix}", i, len(steps)), loc=data["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
   if fmt == "cu-sqtt-raw": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
