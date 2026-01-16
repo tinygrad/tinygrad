@@ -175,7 +175,6 @@ class TestZeroFolding(unittest.TestCase):
 class TestAssignIssues(unittest.TestCase):
   # these are good failures. i'm not sure we need more, but we need to fix these.
 
-  @unittest.expectedFailure
   def test_assign_permuted_view_constant(self):
     # assigning to a permuted view should modify the underlying tensor
     arr = np.arange(6).reshape(2, 3).astype(np.float32)
@@ -185,7 +184,6 @@ class TestAssignIssues(unittest.TestCase):
     t.permute(1, 0).assign(Tensor([[5.0, 6.0], [7.0, 8.0], [9.0, 10.0]]))
     np.testing.assert_allclose(t.numpy(), torch_tensor.numpy())
 
-  @unittest.expectedFailure
   def test_assign_shrink_view_constant(self):
     # assigning to a shrunk view should update the base tensor
     arr = np.arange(9).reshape(3, 3).astype(np.float32)
