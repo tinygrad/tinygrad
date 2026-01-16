@@ -290,7 +290,9 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
     if len(ret) > 50_000: break
     if isinstance(p, INST):
       op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
-      name, width = (op_name, 10) if "BARRIER" in op_name else (f"INST {op_name}", 1)
+      name, width = (op_name, 10 if "BARRIER" in op_name else 1)
+      # Wave SALU op, not to be confused with the global SALU
+      if op_name == "SALU": name = "WAVE_SALU"
       add(name, p, width=width)
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
     if isinstance(p, (VMEMEXEC, ALUEXEC)): add(str(p.src).split('.')[1], p)
