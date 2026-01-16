@@ -169,13 +169,12 @@ function formatMicroseconds(ts, showUs=true) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const WAVE_BASES = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc"};
-const WAVE_SPECIAL = {IMMEDIATE:"#f3b44a", BARRIER:"#ff8080"};
+const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#ff8080", JUMP:"#ffb703",
+  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4"};
 const waveColor = (op) => {
-  if (op in WAVE_SPECIAL) return WAVE_SPECIAL[op];
   const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
-            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : null;
-  return cat ? WAVE_BASES[cat] : "#5f6678";
+            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
+  return WAVE_COLORS[cat] ?? "#ffffff";
 };
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
