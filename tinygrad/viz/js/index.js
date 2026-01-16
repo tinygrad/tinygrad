@@ -181,7 +181,7 @@ const ALL_WAVE_OPS = ["INST", "VALUINST", "IMMEDIATE", "BARRIER", "WAVE_SALU", "
   "OTHER_FLAT_STORE", "OTHER_FLAT_STORE_64", "OTHER_FLAT_STORE_96", "OTHER_FLAT_STORE_128", "OTHER_GLOBAL_STORE_64", "OTHER_GLOBAL_STORE_96",
   "OTHER_GLOBAL_STORE_128", "OTHER_GLOBAL_STORE_VADDR_128"];
 const WAVE_BASES = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc"};
-const WAVE_SPECIAL = {IMMEDIATE:"#f3b44a", BARRIER:"#d00000"};
+const WAVE_SPECIAL = {IMMEDIATE:"#f3b44a", BARRIER:"#ff8080"};
 for (const op of ALL_WAVE_OPS) {
   if (op in WAVE_SPECIAL) { colorScheme.WAVE.set(op, WAVE_SPECIAL[op]); continue; }
   const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
