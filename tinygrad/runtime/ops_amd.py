@@ -202,14 +202,14 @@ class AMDComputeQueue(HWQueue):
       cu_per_se = prod([x if isinstance(x, int) else 1 for x in global_size]) // ((self.dev.cu_cnt // self.dev.se_cnt) * 4)
       for xcc in range(self.dev.xccs):
         with self.pred_exec(xcc_mask=1 << xcc):
-          for i in range(8 if prg.dev.target >= (11,0,0) else 4):
-            if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
+          for se in range(8 if prg.dev.target >= (11,0,0) else 4):
+            if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << se) else 0 # only run unmasked shader engines
             else:
               # observed that the schedule starts from se1. therefore, round it up to ensure it gets at least some workload
-              cu_mask = (1 << (cu_per_se + (1 if i == 1 else 0))) - 1
+              cu_mask = (1 << (cu_per_se + (1 if se == 1 else 0))) - 1
               sa_mask = (1 << (self.dev.iface.props['cu_per_simd_array'] // 2)) - 1
               mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
-            self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
+            self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{se}'), mask)
 
   def sqtt_userdata(self, data, *extra_dwords):
     data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
