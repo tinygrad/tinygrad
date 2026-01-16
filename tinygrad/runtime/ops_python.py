@@ -231,6 +231,9 @@ class PythonRenderer(Renderer):
       case "": pass
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
 
+  # supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype != dtypes.half or sys.version_info >= (3, 12)
+
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
