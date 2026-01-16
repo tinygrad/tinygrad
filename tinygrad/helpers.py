@@ -148,18 +148,18 @@ def stderr_log(msg:str): print(msg, end='', file=sys.stderr, flush=True)
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    self.old_context:dict[str, int] = {}
+    self.old_context:dict[str, Any] = {}
     for k,v in self.kwargs.items():
       self.old_context[k] = ContextVar._cache[k].value
       ContextVar._cache[k].value = v
   def __exit__(self, *args):
     for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
-class ContextVar:
+class ContextVar(Generic[T]):
   _cache: ClassVar[dict[str, ContextVar]] = {}
-  value: int
+  value: T
   key: str
-  def __init__(self, key, default_value):
+  def __init__(self, key: str, default_value: T):
     if key in ContextVar._cache: raise RuntimeError(f"attempt to recreate ContextVar {key}")
     ContextVar._cache[key] = self
     self.value, self.key = getenv(key, default_value), key
