@@ -119,8 +119,9 @@ class Field(property):
                        lambda self,v: self.mv.__setitem__(sl, i2b((b2i(self.mv[sl]) & set_mask) | (v << bit_off), sz)))
     elif (fmt:=_MV_FMT.get(typ)):
       idx = off // (sz:=ctypes.sizeof(typ))
-      if fmt.isupper(): super().__init__(lambda self: self.mv.cast(fmt)[idx], lambda self,v: self.mv.cast(fmt).__setitem__(idx, i2u(sz*8,v)))
-      else: super().__init__(lambda self: self.mv.cast(fmt)[idx], lambda self,v: self.mv.cast(fmt).__setitem__(idx, v))
+      def c(v): return v if isinstance(v, int) else v.value
+      if fmt.isupper(): super().__init__(lambda self: self.mv.cast(fmt)[idx], lambda self,v: self.mv.cast(fmt).__setitem__(idx, i2u(sz*8, c(v))))
+      else: super().__init__(lambda self: self.mv.cast(fmt)[idx], lambda self,v: self.mv.cast(fmt).__setitem__(idx, c(v)))
     else:
       sl = slice(off, off + ctypes.sizeof(typ))
       def set_with_objs(f):
