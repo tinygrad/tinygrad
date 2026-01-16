@@ -335,7 +335,7 @@ class Inst:
   def _size(cls) -> int: return cls._base_size
   def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)
   def disasm(self) -> str:
-    from extra.assembly.amd.asm import disasm
+    from extra.assembly.amd.disasm import disasm
     return disasm(self)
 
   def to_bytes(self) -> bytes:
