@@ -170,9 +170,9 @@ function formatMicroseconds(ts, showUs=true) {
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
-  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4"};
+  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4", VMEM:"#b2b7c9"};
 const waveColor = (op) => {
-  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
+  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU" : op.includes("VMEM") ? "VMEM"
             : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
   ret = WAVE_COLORS[cat] ?? "#ffffff";
   if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
