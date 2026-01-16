@@ -248,9 +248,7 @@ class LNXPCIIfaceBase:
 
     self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
 
-class RemoteCmd(enum.IntEnum):
-  MAP_BAR, MAP_SYSMEM, CFG_READ, CFG_WRITE, RESET = 1, 2, 3, 4, 5
-  MMIO_READ, MMIO_WRITE, SYSMEM_READ, SYSMEM_WRITE = 6, 7, 8, 9
+class RemoteCmd(enum.IntEnum): MAP_BAR, MAP_SYSMEM_FD, CFG_READ, CFG_WRITE, RESET, MMIO_READ, MMIO_WRITE = 1, 2, 3, 4, 5, 6, 7
 
 class RemotePCIDevice(PCIDevice):
   def __init__(self, devpref:str, pcibus:str, bars:list[int], sock):
@@ -266,18 +264,25 @@ class RemotePCIDevice(PCIDevice):
     if len(data) < n: raise RuntimeError("Connection closed")
     return data
 
-  def _rpc(self, cmd:int, *args:int, readout_size:int=0) -> tuple[int, int, bytes|None]:
+  def _recv_with_fd(self) -> tuple[bytes, int|None]:
+    msg, anc, _, _ = self.sock.recvmsg(17, socket.CMSG_LEN(4))
+    return msg, struct.unpack('<i', anc[0][2][:4])[0]
+
+  def _rpc(self, cmd:int, *args:int, readout_size:int=0, has_fd=False) -> tuple[int, int, bytes|None, int|None]:
     self.sock.sendall(struct.pack('<BBQQQ', cmd, *(*args, 0, 0, 0, 0)[:4]))
-    if (resp:=struct.unpack('<BQQ', self._recvall(17)))[0] != 0:
+    msg, fd = self._recv_with_fd() if has_fd else (self._recvall(17), None)
+    if (resp:=struct.unpack('<BQQ', msg))[0] != 0:
       raise RuntimeError(f"RPC failed: {self._recvall(resp[1]).decode('utf-8') if resp[1] > 0 else 'unknown error'}")
-    return (resp[1], resp[2]) + ((self._recvall(readout_size) if readout_size > 0 else None),)
+    return (resp[1], resp[2]) + ((self._recvall(readout_size) if readout_size > 0 else None),) + (fd,)
 
   def _bulk_read(self, cmd:int, idx:int, offset:int, size:int) -> bytes: return unwrap(self._rpc(cmd, idx, offset, size, readout_size=size)[2])
   def _bulk_write(self, cmd:int, idx:int, offset:int, data:bytes): self.sock.sendall(struct.pack('<BBQQQ', cmd, idx, offset, len(data), 0) + data)
 
   def map_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
-    mapped_size, idx, _ = self._rpc(RemoteCmd.MAP_SYSMEM, 0, 0, size)
-    memview = RemoteMMIOInterface(self, idx, mapped_size, fmt='B', is_sysmem=True)
+    mapped_size, _, _, fd = self._rpc(RemoteCmd.MAP_SYSMEM_FD, 0, 0, size, has_fd=True)
+    memview = MMIOInterface(FileIOInterface(fd=fd).mmap(0, mapped_size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, 0), mapped_size, fmt='B')
+
+    # paddrs are returned as (paddr, size) pairs until a (paddr=0, size=0) terminator in the beginning of the mapping.
     paddrs_raw = list(itertools.takewhile(lambda p: p[1] != 0, zip(memview.view(fmt='Q')[0::2], memview.view(fmt='Q')[1::2])))
     return memview, [p + i for p, sz in paddrs_raw for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
   def read_config(self, offset:int, size:int): return self._rpc(RemoteCmd.CFG_READ, 0, offset, size)[0]
@@ -287,27 +292,23 @@ class RemotePCIDevice(PCIDevice):
     return RemoteMMIOInterface(self, bar, size or self.bar_info[bar].size, fmt).view(off, size, fmt)
 
 class RemoteMMIOInterface(MMIOInterface):
-  def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', is_sysmem=False, addr=0):
-    self.dev, self.residx, self.nbytes, self.fmt, self.is_sysmem, self.addr = dev, residx, nbytes, fmt, is_sysmem, addr
-    self.el_sz = struct.calcsize(fmt)
-    self.rcmd, self.wcmd = (RemoteCmd.SYSMEM_READ, RemoteCmd.SYSMEM_WRITE) if is_sysmem else (RemoteCmd.MMIO_READ, RemoteCmd.MMIO_WRITE)
+  def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', addr=0):
+    self.dev, self.residx, self.nbytes, self.fmt, self.addr, self.el_sz = dev, residx, nbytes, fmt, addr, struct.calcsize(fmt)
 
   def __getitem__(self, index):
     if isinstance(index, slice):
       start, stop = (index.start or 0) * self.el_sz, (index.stop or len(self)) * self.el_sz
-      data = self.dev._bulk_read(self.rcmd, self.residx, self.addr + start, stop - start)
+      data = self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.addr + start, stop - start)
       return list(struct.unpack(f'<{(stop - start) // self.el_sz}{self.fmt}', data)) if self.fmt != 'B' else data
-
-    # int index
-    return struct.unpack(f'<{self.fmt}', self.dev._bulk_read(self.rcmd, self.residx, self.addr + index * self.el_sz, self.el_sz))[0]
+    return struct.unpack(f'<{self.fmt}', self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.addr + index * self.el_sz, self.el_sz))[0]
 
   def __setitem__(self, index, val):
     start = (index.start or 0) * self.el_sz if isinstance(index, slice) else index * self.el_sz
     data = (val if self.fmt == 'B' else struct.pack(f'<{len(val)}{self.fmt}', *val)) if isinstance(index, slice) else struct.pack(f'<{self.fmt}', val)
-    self.dev._bulk_write(self.wcmd, self.residx, self.addr + start, data)
+    self.dev._bulk_write(RemoteCmd.MMIO_WRITE, self.residx, self.addr + start, data)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
-    return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.is_sysmem, self.addr + offset)
+    return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.addr + offset)
 
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
