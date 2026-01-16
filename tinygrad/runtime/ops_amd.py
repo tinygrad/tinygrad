@@ -22,7 +22,7 @@ if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint
 
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
 SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE = \
-  ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0), ContextVar("SQTT_SIMD_SEL", 0), ContextVar("SQTT_TOKEN_EXCLUDE", 0)
+  ContextVar("SQTT_ITRACE_SE_MASK", 0b10), ContextVar("SQTT_LIMIT_SE", 0), ContextVar("SQTT_SIMD_SEL", 0), ContextVar("SQTT_TOKEN_EXCLUDE", 0)
 PMC = ContextVar("PMC", abs(VIZ.value)>=2)
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
@@ -205,8 +205,9 @@ class AMDComputeQueue(HWQueue):
           for i in range(8 if prg.dev.target >= (11,0,0) else 4):
             if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
             else:
+              # observed that the schedule starts from se1. therefore, round it up to ensure it gets at least some workload
+              cu_mask = (1 << (cu_per_se + (1 if i == 1 else 0))) - 1
               sa_mask = (1 << (self.dev.iface.props['cu_per_simd_array'] // 2)) - 1
-              cu_mask = (1 << (cu_per_se + (1 if i == 0 else 0))) - 1
               mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
             self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
 
