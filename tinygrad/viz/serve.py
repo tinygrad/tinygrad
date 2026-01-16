@@ -218,7 +218,7 @@ def soft_err(fn:Callable):
   try: yield
   except Exception: fn({"src":traceback.format_exc()})
 
-def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(ss[1]) if len(ss:=x.split(":"))>1 else 999 for x in row.split())
+def row_tuple(row:str) -> tuple[int, ...]: return tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
 
 # *** Performance counters
 
@@ -280,7 +280,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   def add(name:str, p:PacketType, op="OP", idx=0, width=5) -> None:
-    rows.setdefault(r:=(f"WAVE:{p.wave} {name}:1" if hasattr(p, "wave") else f"SHARED:0 {name}:0"))
+    rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"SHARED:0 {name}"))
     ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+width)))
   op_idx:dict = {}
   for p in decode(e.blob):
