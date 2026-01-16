@@ -218,7 +218,8 @@ def soft_err(fn:Callable):
   try: yield
   except Exception: fn({"src":traceback.format_exc()})
 
-def row_tuple(row:str) -> tuple[int, ...]: return tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
+def row_tuple(row:str) -> tuple[tuple[int, int], ...]:
+  return tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
 
 # *** Performance counters
 
