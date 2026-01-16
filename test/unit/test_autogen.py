@@ -491,4 +491,24 @@ typedef struct ip_discovery_header
     self.assertIn('struct_foo', namespace)
     self.assertIn('struct_foo_bar', namespace)
 
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_enums(self):
+    namespace = self.run_gen("""
+      enum Foo { A, B, C };
+      enum Bar { X, Y, Z };
+    """)
+
+    assert namespace["A"] == 0
+    assert namespace["B"] == 1
+    assert namespace["C"] == 2
+    assert namespace["X"] == 0
+    assert namespace["Y"] == 1
+    assert namespace["Z"] == 2
+    assert namespace["enum_Foo"].get(0) == "A"
+    assert namespace["enum_Foo"].get(1) == "B"
+    assert namespace["enum_Foo"].get(2) == "C"
+    assert namespace["enum_Bar"].get(0) == "X"
+    assert namespace["enum_Bar"].get(1) == "Y"
+    assert namespace["enum_Bar"].get(2) == "Z"
+
 if __name__ == "__main__": unittest.main()
