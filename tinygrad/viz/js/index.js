@@ -169,7 +169,7 @@ function formatMicroseconds(ts, showUs=true) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#ff8080", JUMP:"#ffb703",
+const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
   JUMP_NO:"#fb8500", MESSAGE:"#90dbf4"};
 const waveColor = (op) => {
   const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
