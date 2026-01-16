@@ -1,5 +1,6 @@
 import Foundation
 import SystemExtensions
+import IOKit
 
 enum TinyGPUCLIExit: Int32 {
   case ok = 0
@@ -50,10 +51,30 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     return .activating
   }
 
+  static func getPCIDevices() -> String {
+    guard let matching = IOServiceMatching("IOPCIDevice") else { return "Connected PCI Devices: (read error)\n\n" }
+    var iterator: io_iterator_t = 0
+    guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else { return "Connected PCI Devices:\n\n" }
+    defer { IOObjectRelease(iterator) }
+
+    var devices: [String] = []
+    while case let service = IOIteratorNext(iterator), service != 0 {
+      defer { IOObjectRelease(service) }
+      if let name = IORegistryEntryCreateCFProperty(service, "IOName" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String {
+        devices.append(name)
+      }
+    }
+
+    return devices.isEmpty ? "PCI Devices: none\n\n" : "PCI Devices:\n" + devices.map { "  • \($0)\n" }.joined() + "\n"
+  }
+
+  func install(completion: @escaping (TinyGPUCLIExit) -> Void) {
+    self.done = completion
+    installExtension()
+  }
+
   private func printUsage() {
     log("""
-    TinyGPU Driver Extension Manager
-
     Usage: TinyGPU <command> [options]
 
     Commands:
@@ -61,20 +82,10 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
       install       Install/activate the driver extension (requires approval)
       uninstall     Deactivate and remove the driver extension
       server <path> Start server on Unix socket at <path>
-      help          Show this help message
-
-    Examples:
-      TinyGPU status                    # Check if driver is installed
-      TinyGPU install                   # Install the driver extension
-      TinyGPU server /tmp/tinygpu.sock  # Start server
-
     """)
   }
 
   func run(args: [String], done: @escaping (TinyGPUCLIExit) -> Void) {
-    self.done = done
-
-    // args[0] is executable path
     guard args.count > 1 else {
       printUsage()
       done(.usage)
@@ -85,14 +96,15 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
 
     switch cmd {
     case "status":
-      let state = Self.queryDextState(bundleID: dextIdentifier)
-      printStatus(state)
+      printStatus(Self.queryDextState(bundleID: dextIdentifier))
       done(.ok)
 
     case "install":
+      self.done = done
       installExtension()
 
     case "uninstall":
+      self.done = done
       uninstallExtension()
 
     case "server":
@@ -117,22 +129,36 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     }
   }
 
-  private func printStatus(_ state: DextState) {
+  static func getApprovalInstructions() -> String {
+    """
+    Please go to System Settings > Privacy & Security and allow the extension.
+
+    If the extension was previously disabled, you need to:
+      1. Open System Settings > General > Login Items & Extensions
+      2. Find 'TinyGPU' under 'Driver Extensions'
+      3. Toggle it ON
+
+    """
+  }
+
+  static func getStatusText(_ state: DextState) -> String {
     switch state {
     case .unloaded:
-      log("Status: Not installed\n")
-      log("Run 'TinyGPU install' to install the driver extension.\n")
+      return "Driver extension not installed.\n\n"
     case .activating:
-      log("Status: Activating...\n")
+      return "Extension is activating...\n\n"
     case .needsApproval:
-      log("Status: Waiting for user approval\n")
-      log("Please approve the extension in System Settings > Privacy & Security.\n")
+      return "Extension is awaiting approval.\n\n" + getApprovalInstructions()
     case .activated:
-      log("Status: Installed and active\n")
+      return "Ready! Run tinygrad to use your eGPU.\n\n"
     case .activationError:
-      log("Status: Activation failed\n")
-      log("Check system logs for details.\n")
+      return "Extension activation failed.\nCheck system logs for details.\n\n"
     }
+  }
+
+  private func printStatus(_ state: DextState) {
+    log(Self.getStatusText(state))
+    log(Self.getPCIDevices())
   }
 
   private func installExtension() {
@@ -179,12 +205,8 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
   // MARK: OSSystemExtensionRequestDelegate
 
   func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-    log("\nUser approval required!\n")
-    log("Please go to System Settings > Privacy & Security and allow the extension.\n\n")
-    log("If the extension was previously disabled, you need to:\n")
-    log("  1. Open System Settings > General > Login Items & Extensions\n")
-    log("  2. Find 'TinyGPU' under 'Driver Extensions'\n")
-    log("  3. Toggle it ON\n\n")
+    log("\nUser approval required!\n\n")
+    log(Self.getApprovalInstructions())
     log("After approval, connect the gpu and use it with tinygrad.\n")
     done?(.needsApproval)
   }
@@ -223,11 +245,8 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
       case 8: // OSSystemExtensionErrorExtensionNotFound
         log("Extension not found in app bundle.\n")
       case 9: // OSSystemExtensionErrorExtensionRequired (user disabled)
-        log("\nThe extension is disabled by the user.\n")
-        log("To enable it:\n")
-        log("  1. Open System Settings > General > Login Items & Extensions\n")
-        log("  2. Find 'TinyGPU' under 'Driver Extensions'\n")
-        log("  3. Toggle it ON\n")
+        log("\nThe extension is disabled by the user.\n\n")
+        log(Self.getApprovalInstructions())
       default:
         log("Error code: \(nsError.code)\n")
       }

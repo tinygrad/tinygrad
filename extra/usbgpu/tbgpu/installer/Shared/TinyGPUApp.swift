@@ -4,7 +4,9 @@ class AppState: ObservableObject {
   @Published var text = ""
   @Published var buttonText: String?
   @Published var buttonAction: (() -> Void)?
+  @Published var pciDevices = ""
   private var statusTimer: Timer?
+  private var pciTimer: Timer?
   var onInstallComplete: (() -> Void)?
 
   func append(_ s: String) { DispatchQueue.main.async { self.text += s } }
@@ -13,22 +15,35 @@ class AppState: ObservableObject {
   }
 
   func startMonitoringInstallation(dextIdentifier: String) {
-    var attempts = 0
     statusTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
-      attempts += 1
       let state = TinyGPUCLIRunner.queryDextState(bundleID: dextIdentifier)
       if state == .activated {
         timer.invalidate()
         self?.onInstallComplete?()
-      } else if attempts > 15 {
+      } else {
         timer.invalidate()
       }
+    }
+  }
+
+  func startPCIMonitoring() {
+    updatePCIDevices()
+    pciTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+      self?.updatePCIDevices()
+    }
+  }
+
+  func updatePCIDevices() {
+    DispatchQueue.main.async {
+      self.pciDevices = TinyGPUCLIRunner.getPCIDevices()
     }
   }
 
   func stopMonitoring() {
     statusTimer?.invalidate()
     statusTimer = nil
+    pciTimer?.invalidate()
+    pciTimer = nil
   }
 }
 
@@ -38,10 +53,15 @@ struct ContentView: View {
   var body: some View {
     VStack(spacing: 12) {
       ScrollView {
-        Text(state.text)
-          .font(.custom("Menlo", size: 11))
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(8)
+        VStack(alignment: .leading, spacing: 0) {
+          Text(state.text)
+          if !state.pciDevices.isEmpty {
+            Text(state.pciDevices)
+          }
+        }
+        .font(.custom("Menlo", size: 11))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
       }
       if let label = state.buttonText {
         Button(label) { state.buttonAction?() }
@@ -61,10 +81,13 @@ struct TinyGPUApp: App {
 
   init() {
     if CommandLine.arguments.count > 1 {
-      NSApplication.shared.setActivationPolicy(.prohibited)
       let runner = TinyGPUCLIRunner(dextIdentifier: "org.tinygrad.tinygpu.edriver")
-      runner.run(args: CommandLine.arguments) { exit($0.rawValue) }
-      NSApplication.shared.run()
+      runner.run(args: CommandLine.arguments) { exitCode in
+        exit(exitCode.rawValue)
+      }
+
+      // Keep process alive for async operations, but exit cleanly when done
+      dispatchMain()
     }
   }
 
@@ -81,6 +104,7 @@ struct TinyGPUApp: App {
     let bundlePath = Bundle.main.bundlePath
     let inApps = bundlePath.hasPrefix("/Applications/")
 
+    // require /Applications
     if !inApps {
       state.append("TinyGPU needs to be in /Applications/\n\n")
       state.setButton("Move to /Applications") {
@@ -101,15 +125,16 @@ struct TinyGPUApp: App {
     state.append("TinyGPU - Remote PCI Device Server\n\n")
 
     let dextState = TinyGPUCLIRunner.queryDextState(bundleID: dextIdentifier)
+    state.append(TinyGPUCLIRunner.getStatusText(dextState))
 
+    // Add buttons based on state
     if dextState == .unloaded || dextState == .activationError {
-      state.append("Driver extension not installed.\n\n")
       state.setButton("Install Extension") {
         self.state.text = "Installing extension...\n\nYou may be prompted for approval in System Settings.\n"
         self.state.setButton(nil, action: nil)
 
         let runner = TinyGPUCLIRunner(dextIdentifier: dextIdentifier)
-        runner.run(args: [bundlePath + "/Contents/MacOS/TinyGPU", "install"]) { _ in }
+        runner.install { _ in }
 
         self.state.onInstallComplete = {
           DispatchQueue.main.async {
@@ -120,10 +145,7 @@ struct TinyGPUApp: App {
         self.state.startMonitoringInstallation(dextIdentifier: dextIdentifier)
       }
     } else if dextState == .needsApproval || dextState == .activating {
-      state.append("Extension is awaiting approval.\n\n")
-      state.append("Please go to System Settings > Privacy & Security and approve the extension.\n\n")
       state.setButton(nil, action: nil)
-
       state.onInstallComplete = {
         DispatchQueue.main.async {
           self.state.text = ""
@@ -132,12 +154,10 @@ struct TinyGPUApp: App {
       }
       state.startMonitoringInstallation(dextIdentifier: dextIdentifier)
     } else {
-      state.append("Ready! Run tinygrad to use your eGPU.\n\n")
-      state.append("Troubleshooting:\n")
-      state.append("  • Check GPU: System Report > PCI\n")
-      state.append("  • Approve extension: System Settings > Privacy & Security\n")
       state.setButton(nil, action: nil)
     }
+
+    state.startPCIMonitoring()
   }
 }
 
