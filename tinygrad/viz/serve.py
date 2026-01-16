@@ -509,7 +509,9 @@ def get_render(query:str) -> dict:
   if fmt == "prg-pmc": return unpack_pmc(data[0])
   if fmt.startswith("prg-pkts"):
     ret = {}
-    with soft_err(lambda err:ret.update(err)): ret = {"value":get_profile(sqtt_timeline(data)), "content_type":"application/octet-stream"}
+    with soft_err(lambda err:ret.update(err)):
+      if (events:=get_profile(sqtt_timeline(data), sort_fn=row_tuple)): ret = {"value":events, "content_type":"application/octet-stream"}
+      else: ret = {"src":"No SQTT trace on this SE."}
     return ret
   if fmt == "prg-sqtt":
     ret = {}
