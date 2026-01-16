@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, sys, sysconfig
-from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
+from tinygrad.helpers import ceildiv, i2u, getenv, unwrap, DEBUG, OSX, WIN
 from _ctypes import Array as _CArray, _SimpleCData, _Pointer
 from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
 
@@ -93,6 +93,9 @@ class Struct(ctypes.Structure):
   @functools.cached_property
   def mv(self): return memoryview(self).cast('B')
 
+  def __reduce__(self): return (self.__class__, (), {'_mem_': bytes(self)})
+  def __setstate__(self, state): ctypes.memmove(ctypes.addressof(self), state['_mem_'], len(state['_mem_']))
+
 def record(cls) -> type[Struct]:
   struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
   _pending_records.append((cls, struct, unwrap(sys._getframe().f_back).f_globals))
@@ -115,8 +118,9 @@ class Field(property):
       super().__init__(lambda self: (b2i(self.mv[sl]) >> bit_off) & mask,
                        lambda self,v: self.mv.__setitem__(sl, i2b((b2i(self.mv[sl]) & set_mask) | (v << bit_off), sz)))
     elif (fmt:=_MV_FMT.get(typ)):
-      idx = off // ctypes.sizeof(typ)
-      super().__init__(lambda self: self.mv.cast(fmt)[idx], lambda self,v: self.mv.cast(fmt).__setitem__(idx, v))
+      idx = off // (sz:=ctypes.sizeof(typ))
+      if fmt.isupper(): super().__init__(lambda self: self.mv.cast(fmt)[idx], lambda self,v: self.mv.cast(fmt).__setitem__(idx, i2u(sz*8,v)))
+      else: super().__init__(lambda self: self.mv.cast(fmt)[idx], lambda self,v: self.mv.cast(fmt).__setitem__(idx, v))
     else:
       sl = slice(off, off + ctypes.sizeof(typ))
       def set_with_objs(f):
