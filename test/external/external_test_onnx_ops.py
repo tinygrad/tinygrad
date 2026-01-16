@@ -89,10 +89,9 @@ class TestMainOnnxOps(TestOnnxOps):
     # without JIT: correct
     self.assertEqual([Gather(x, Tensor(idx)).tolist() for idx in indices_list], expected)
 
-    # TODO: Gather should not assume indices is const, result should be [[10, 20], [30, 40], [50, 10]]
     @TinyJit
     def gather_jit(x, indices): return Gather(x, indices)
-    self.assertEqual([gather_jit(x, Tensor(idx)).tolist() for idx in indices_list], [[10, 20], [30, 40], [30, 40]])
+    self.assertEqual([gather_jit(x, Tensor(idx)).tolist() for idx in indices_list], expected)
 
   # NOTE: resize OP is sensitive to numerical errors
   def _test_resize_scales(self, scale_values, **kwargs):
