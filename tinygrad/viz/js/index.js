@@ -169,25 +169,18 @@ function formatMicroseconds(ts, showUs=true) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
+const WAVE_BASES = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc"};
+const WAVE_SPECIAL = {IMMEDIATE:"#f3b44a", BARRIER:"#ff8080"};
+const waveColor = (op) => {
+  if (op in WAVE_SPECIAL) return WAVE_SPECIAL[op];
+  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
+            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : null;
+  return cat ? WAVE_BASES[cat] : "#5f6678";
+};
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
-  WAVE: new Map(), VMEMEXEC:["#f4978e"], ALUEXEC:["#f72585"]}
-const ALL_WAVE_OPS = ["INST", "VALUINST", "IMMEDIATE", "BARRIER", "WAVE_SALU", "SMEM", "JUMP", "JUMP_NO", "MESSAGE",
-  "VALU_TRANS", "VALU_64_SHIFT", "VALU_MAD64", "VALU_64", "VINTERP", "VALU_CMPX", "SALU_SAVEEXEC",
-  "FLAT_LOAD", "GLOBAL_LOAD", "GLOBAL_LOAD_VADDR", "LDS_LOAD", "OTHER_LDS_LOAD", "OTHER_FLAT_LOAD", "OTHER_GLOBAL_LOAD", "OTHER_GLOBAL_LOAD_VADDR",
-  "FLAT_STORE", "FLAT_STORE_64", "FLAT_STORE_96", "FLAT_STORE_128", "GLOBAL_STORE", "GLOBAL_STORE_64", "GLOBAL_STORE_96", "GLOBAL_STORE_128",
-  "GLOBAL_STORE_VADDR_128", "LDS_STORE", "LDS_STORE_64", "LDS_STORE_128", "OTHER_LDS_STORE", "OTHER_LDS_STORE_64", "OTHER_LDS_STORE_128",
-  "OTHER_FLAT_STORE", "OTHER_FLAT_STORE_64", "OTHER_FLAT_STORE_96", "OTHER_FLAT_STORE_128", "OTHER_GLOBAL_STORE_64", "OTHER_GLOBAL_STORE_96",
-  "OTHER_GLOBAL_STORE_128", "OTHER_GLOBAL_STORE_VADDR_128"];
-const WAVE_BASES = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc"};
-const WAVE_SPECIAL = {IMMEDIATE:"#f3b44a", BARRIER:"#ff8080"};
-for (const op of ALL_WAVE_OPS) {
-  if (op in WAVE_SPECIAL) { colorScheme.WAVE.set(op, WAVE_SPECIAL[op]); continue; }
-  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
-            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : null;
-  colorScheme.WAVE.set(op, cat ? WAVE_BASES[cat] : "#5f6678");
-}
+  WAVE:waveColor, VMEMEXEC:["#f4978e"], ALUEXEC:["#f72585"]}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
@@ -339,7 +332,8 @@ async function renderProfiler(path, unit, opts) {
         }
         if (depth === 0 || !opts.stepColors) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
-          const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
+          const color = typeof colors === "function" ? colors(colorKey)
+                      : colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
         }
         const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
