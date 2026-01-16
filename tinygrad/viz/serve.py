@@ -283,21 +283,17 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
-  def add(name:str, p:PacketType, idx=0, width=1) -> None:
+  def add(name:str, p:PacketType, idx=0, width=1, op_name=None) -> None:
     rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"{p.__class__.__name__}:0 {name}"))
-    ret.append(ProfileRangeEvent(r, f"{name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
+    ret.append(ProfileRangeEvent(r, f"{op_name if op_name is not None else name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
   for p in decode(e.blob):
     if len(ret) > 50_000: break
     if isinstance(p, INST):
       op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
-      # skip OTHER_* packets
-      if "OTHER" in op_name: continue
       name, width = (op_name, 10 if "BARRIER" in op_name else 1)
-      # Wave SALU op, not to be confused with the global SALU
-      if op_name == "SALU": name = "WAVE_SALU"
-      add(name, p, width=width)
+      add(name, p, width=width, idx=int("OTHER" in name))
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
-    if isinstance(p, (VMEMEXEC, ALUEXEC)): add(str(p.src).split('.')[1], p)
+    if isinstance(p, (VMEMEXEC, ALUEXEC)): add((name:=str(p.src).split('.')[1]).replace("_ALT", ""), p, idx=int("ALT" in name), op_name=name)
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
