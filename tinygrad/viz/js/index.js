@@ -175,13 +175,13 @@ const waveColor = (op) => {
   const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
             : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
   ret = WAVE_COLORS[cat] ?? "#ffffff";
-  if (op.includes("OTHER_")) { ret = darkenHex(ret, 75) }
+  if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
   return ret
 };
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
-  WAVE:waveColor, VMEMEXEC:["#f4978e"], ALUEXEC:["#f72585"]}
+  WAVE:waveColor, VMEMEXEC:waveColor, ALUEXEC:waveColor}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
@@ -799,7 +799,7 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1]), stepColors:!step.name.includes("Packets")};
+      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1]), stepColors:!step.name.includes("PKTS")};
       return renderProfiler(ckey, "clk", opts);
     }
     metadata.innerHTML = "";
