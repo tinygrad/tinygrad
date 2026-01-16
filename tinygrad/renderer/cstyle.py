@@ -1,9 +1,9 @@
 from typing import Literal, Callable, cast
-import os, math, sys, struct
+import os, math, platform, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CI, CPU_COUNT, OSX
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
@@ -284,9 +284,15 @@ class ClangJITRenderer(ClangRenderer):
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     self.compiler = ClangJITCompiler()
 
+  def is_dtype_supported(self, dtype:DType) -> bool:
+    return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} if dtype == dtypes.bfloat16 else dtype not in dtypes.fp8s
+
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
   has_aux = True
+
+  # CI and OSX, cl_khr_fp16 is not supported
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in ((dtypes.half,) * (OSX or CI)) + ((dtypes.float64,) * OSX) + dtypes.fp8s
 
   # language options
   kernel_typedef = "__kernel void"
@@ -342,6 +348,7 @@ class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
   def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+  def is_dtype_supported(self, dtype:DType) -> bool: return not CI if dtype == dtypes.bfloat16 else dtype not in (dtypes.float64,) + dtypes.fp8s
 
   # language options
   kernel_typedef = "kernel void"
@@ -392,6 +399,9 @@ class CUDARenderer(CStyleLanguage):
     self.arch, arch_ver = arch, int(arch[3:])
     self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch,)
+
+  # CI CUDA is sm_35, so no fp16 ALUs
+  def is_dtype_supported(self, dtype:DType) -> bool: return not CI or dtype not in (dtypes.bfloat16, dtypes.half) + dtypes.fp8s
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -461,6 +471,8 @@ class AMDHIPRenderer(CStyleLanguage):
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
+
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in dtypes.fp8s or self.arch in {"gfx942", "gfx950"}
 
   @staticmethod
   def get_tensor_cores(arch):
@@ -556,4 +568,8 @@ class AMDHIPCCRenderer(AMDHIPRenderer):
     super().__init__(arch)
     self.compiler = HIPCCCompiler(arch)
 
-class QCOMRenderer(OpenCLRenderer): device = "QCOM"
+class QCOMRenderer(OpenCLRenderer):
+  device = "QCOM"
+
+  # QCOM compiler is flaky with half
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in (dtypes.bfloat16, dtypes.half, dtypes.float64) + dtypes.fp8s
