@@ -184,9 +184,6 @@ ROW_REGS = list(range(137, 145))  # v137-v144 (8 regs)
 # Kernel class
 # =============================================================================
 
-def encode_waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
-  return (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
-
 class Kernel:
   def __init__(self, arch='gfx1100'):
     self.instructions, self.labels, self.branch_targets, self.arch = [], {}, {}, arch
@@ -207,14 +204,9 @@ class Kernel:
 
   def waitcnt(self, lgkm=None, vm=None):
     """Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain."""
-    if lgkm == 0 and vm is None: self.emit(s_waitcnt(simm16=WAIT_LGKM))
-    elif vm == 0 and lgkm is None: self.emit(s_waitcnt(simm16=WAIT_VMEM))
-    elif lgkm == 0 and vm == 0: self.emit(s_waitcnt(simm16=WAIT_ALL))
-    elif vm is not None and lgkm is None:
-      self.emit(s_waitcnt(simm16=encode_waitcnt(vmcnt=vm, expcnt=7, lgkmcnt=63)))
-    elif lgkm is not None and vm is None:
-      self.emit(s_waitcnt(simm16=encode_waitcnt(vmcnt=63, expcnt=7, lgkmcnt=lgkm)))
-    else: raise ValueError(f"unsupported waitcnt: lgkm={lgkm}, vm={vm}")
+    vmcnt, lgkmcnt, expcnt = vm if vm is not None else 63, lgkm if lgkm is not None else 63, 7
+    waitcnt = (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
+    self.emit(s_waitcnt(simm16=waitcnt))
 
   def barrier(self): self.emit(s_barrier())
 
@@ -473,7 +465,7 @@ def build_kernel(arch='gfx1100'):
   for iter in range(8):
     # Load A tile (4 pairs) and B tile (8 pairs) from LDS
     if not NO_DS:
-      k.emit(s_clause(simm16=11))  # 12 loads total: 4 A + 8 B
+      k.emit(s_clause(simm16=len(V_A_TILE_REGS) + len(V_B_TILE_REGS) - 1))  # 12 loads total: 4 A + 8 B
       # A tile: 4 ds_load_b64
       for i, vdst in enumerate(V_A_TILE_REGS):
         a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
@@ -482,19 +474,19 @@ def build_kernel(arch='gfx1100'):
       for i, vdst in enumerate(V_B_TILE_REGS):
         b_off = (i & 1) * 8 + (i & 2) * 64 + (i >> 2) * 256 + iter * LDS_B_STRIDE
         k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_BASE], offset0=b_off & 0xFF, offset1=b_off >> 8))
-      k.waitcnt(lgkm=0)
 
-    # 64 dual FMACs
-    k.emit(s_clause(simm16=len(FMAC_PATTERN)-1))
-    for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
-      k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
-                  vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
-
-    # Issue global prefetch AFTER FMACs (first 6 iterations only)
+    # Issue global prefetch (first 6 iterations only)
     if iter < 6 and not NO_GLOBAL:
       vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
       k.global_load(vdst1, addr, slo1)
       k.global_load(vdst2, addr, slo2)
+
+    # 64 dual FMACs
+    k.waitcnt(lgkm=0)
+    k.emit(s_clause(simm16=len(FMAC_PATTERN)-1))
+    for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
+      k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
+                  vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
 
   # wait for all global stores to finish
   # then sync the warp so it's safe to store local

@@ -175,6 +175,7 @@ const waveColor = (op) => {
   const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
             : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
   ret = WAVE_COLORS[cat] ?? "#ffffff";
+  // TODO: OTHER packets need to go on the second row
   if (op.includes("OTHER_")) { ret = darkenHex(ret, 75) }
   return ret
 };
