@@ -490,7 +490,10 @@ def get_render(query:str) -> dict:
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
-  if fmt.startswith("prg-pkts"): return {"value":get_profile(sqtt_timeline(data)), "content_type":"application/octet-stream"}
+  if fmt.startswith("prg-pkts"):
+    ret = {}
+    with soft_err(lambda err:ret.update(err)): ret = {"value":get_profile(sqtt_timeline(data)), "content_type":"application/octet-stream"}
+    return ret
   if fmt == "prg-sqtt":
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
