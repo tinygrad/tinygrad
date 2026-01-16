@@ -79,13 +79,19 @@ else:
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
-def mv(st) -> memoryview: return memoryview(st).cast('B')
+
+_MV_FMT = {ctypes.c_int: 'i', ctypes.c_uint: 'I', ctypes.c_int32: 'i', ctypes.c_uint32: 'I', ctypes.c_longlong: 'q', ctypes.c_ulonglong: 'Q',
+           ctypes.c_int64: 'q', ctypes.c_uint64: 'Q', ctypes.c_float: 'f', ctypes.c_double: 'd', ctypes.c_short: 'h', ctypes.c_ushort: 'H',
+           ctypes.c_int16: 'h', ctypes.c_uint16: 'H', ctypes.c_byte: 'b', ctypes.c_ubyte: 'B', ctypes.c_int8: 'b', ctypes.c_uint8: 'B'}
 
 class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
     self._objects_ = {}
     for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
+
+  @functools.cached_property
+  def mv(self): return memoryview(self).cast('B')
 
 def record(cls) -> type[Struct]:
   struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
@@ -106,19 +112,22 @@ class Field(property):
     if bit_width is not None:
       sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width+bit_off, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
       # FIXME: signedness
-      super().__init__(lambda self: (b2i(mv(self)[sl]) >> bit_off) & mask,
-                       lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
+      super().__init__(lambda self: (b2i(self.mv[sl]) >> bit_off) & mask,
+                       lambda self,v: self.mv.__setitem__(sl, i2b((b2i(self.mv[sl]) & set_mask) | (v << bit_off), sz)))
+    elif (fmt:=_MV_FMT.get(typ)):
+      idx = off // ctypes.sizeof(typ)
+      super().__init__(lambda self: self.mv.cast(fmt)[idx], lambda self,v: self.mv.cast(fmt).__setitem__(idx, v))
     else:
       sl = slice(off, off + ctypes.sizeof(typ))
       def set_with_objs(f):
         def wrapper(self, v):
           if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
-          mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else f(v)))
+          self.mv.__setitem__(sl, bytes(v if isinstance(v, typ) else f(v)))
         return wrapper
       if issubclass(typ, _CArray):
-        getter = (lambda self: typ.from_buffer(mv(self)[sl]).value) if typ._type_ is ctypes.c_char else (lambda self: typ.from_buffer(mv(self)[sl]))
+        getter = (lambda self: typ.from_buffer(self.mv[sl]).value) if typ._type_ is ctypes.c_char else (lambda self: typ.from_buffer(self.mv[sl]))
         super().__init__(getter, set_with_objs(lambda v: typ(*v)))
-      else: super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, set_with_objs(typ))
+      else: super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(self.mv[sl]), _SimpleCData) else v, set_with_objs(typ))
     self.offset = off
 
 @functools.cache
