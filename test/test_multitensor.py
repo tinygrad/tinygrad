@@ -251,10 +251,26 @@ class TestMultiTensor(unittest.TestCase):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
 
+  def test_allreduce_naive_to(self):
+    # NOTE: this was never not working, added to contrast test_allreduce_ring_to_device
+    t = Tensor.empty(32).shard(devices_4, 0).to(Device.DEFAULT)
+    pre_realize = t.device
+    with Context(RING=0, SCACHE=0): t.realize()
+    self.assertEqual(pre_realize, Device.DEFAULT)
+    self.assertEqual(t.device, Device.DEFAULT)
+
   def test_allreduce_ring(self):
     with Context(RING=2):
       a,b = _test_allreduce(Tensor.rand(256, 256))
       np.testing.assert_almost_equal(a.numpy(), b.numpy(), decimal=5)
+
+  @unittest.skip("TODO: use_ring in handle_allreduce ignores ALLREDUCE.src[1]")
+  def test_allreduce_ring_to(self):
+    t = Tensor.empty(32).shard(devices_4, 0).to(Device.DEFAULT)
+    pre_realize = t.device
+    with Context(RING=2, SCACHE=0): t.realize()
+    self.assertEqual(pre_realize, Device.DEFAULT, 'this is already working')
+    self.assertEqual(t.device, Device.DEFAULT, 'not working')
 
   def test_allreduce_all2all(self):
     with Context(ALL2ALL=2):
