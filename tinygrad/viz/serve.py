@@ -284,8 +284,13 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   def add(name:str, p:PacketType, idx=0, width=1) -> None:
-    rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"{p.__class__.__name__}:0 {name}"))
-    ret.append(ProfileRangeEvent(r, f"{name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
+    if hasattr(p, "wave"):
+      for w in [p.wave, p.wave+10]:
+        rows.setdefault(r:=(f"WAVE:{w}" if hasattr(p, "wave") else f"{p.__class__.__name__}:0 {name}"))
+        ret.append(ProfileRangeEvent(r, f"{name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
+    else:
+      rows.setdefault(r:=(f"WAVE:{w}" if hasattr(p, "wave") else f"{p.__class__.__name__}:0 {name}"))
+      ret.append(ProfileRangeEvent(r, f"{name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
   for p in decode(e.blob):
     if len(ret) > 50_000: break
     if isinstance(p, INST):
