@@ -169,11 +169,17 @@ function formatMicroseconds(ts, showUs=true) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
+const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
+  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4"};
+const waveColor = (op) => {
+  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU"
+            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
+  return WAVE_COLORS[cat] ?? "#ffffff";
+};
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
-  WAVE:new Map([["INST", "#e76f51"], ["VALUINST", "#415a77"], ["IMMEDIATE", "#f3b44a"], ["BARRIER", "#d00000"]]),
-  VMEMEXEC:["#f4978e"], ALUEXEC:["#f72585"]}
+  WAVE:waveColor, VMEMEXEC:["#f4978e"], ALUEXEC:["#f72585"]}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
@@ -325,7 +331,8 @@ async function renderProfiler(path, unit, opts) {
         }
         if (depth === 0 || !opts.stepColors) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
-          const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
+          const color = typeof colors === "function" ? colors(colorKey)
+                      : colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
         }
         const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();

@@ -273,7 +273,10 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
       all_counters[(name, run_number[k], k)] = pmc[0]
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
-    if (sqtt:=v.get(ProfileSQTTEvent)): steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
+    if (sqtt:=v.get(ProfileSQTTEvent)):
+      for e in sqtt:
+        if e.itrace: steps.append(create_step(f"PKTS SE:{e.se}", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)), data=e))
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(e) -> list[ProfileEvent]:
@@ -287,7 +290,11 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
     if len(ret) > 50_000: break
     if isinstance(p, INST):
       op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
-      name, width = (op_name, 10) if "BARRIER" in op_name else (f"INST {op_name}", 1)
+      # skip OTHER_* packets
+      if "OTHER" in op_name: continue
+      name, width = (op_name, 10 if "BARRIER" in op_name else 1)
+      # Wave SALU op, not to be confused with the global SALU
+      if op_name == "SALU": name = "WAVE_SALU"
       add(name, p, width=width)
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
     if isinstance(p, (VMEMEXEC, ALUEXEC)): add(str(p.src).split('.')[1], p)
@@ -321,8 +328,6 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     else:
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
       events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
-  # * INST timeline
-  with soft_err(lambda _:None): cu_events |= {f"SE:{e.se} Packets": timeline for e in data if (timeline := sqtt_timeline(e))}
   return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -490,6 +495,10 @@ def get_render(query:str) -> dict:
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt.startswith("prg-pkts"):
+    ret = {}
+    with soft_err(lambda err:ret.update(err)): ret = {"value":get_profile(sqtt_timeline(data)), "content_type":"application/octet-stream"}
+    return ret
   if fmt == "prg-sqtt":
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
