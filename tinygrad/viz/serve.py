@@ -281,7 +281,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   def add(name:str, p:PacketType, idx=0, width=1) -> None:
-    rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"SHARED:0 {name}"))
+    rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"{p.__class__.__name__}:0 {name}"))
     ret.append(ProfileRangeEvent(r, f"{name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
   for p in decode(e.blob):
     if len(ret) > 50_000: break
@@ -289,7 +289,8 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
       op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
       name, width = (op_name, 1) if "BARRIER" in op_name else (f"INST {op_name}", 1)
       add(name, p, width=width)
-    if isinstance(p, (VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC)): add(p.__class__.__name__, p)
+    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
+    if isinstance(p, (VMEMEXEC, ALUEXEC)): add(str(p.src).split('.')[1], p)
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
