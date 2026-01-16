@@ -173,7 +173,7 @@ const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e6
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
   WAVE:new Map([["INST", "#e76f51"], ["VALUINST", "#415a77"], ["IMMEDIATE", "#f3b44a"], ["BARRIER", "#d00000"],
-    ["SALU", "#8ecae6"], ["SMEM", "#219ebc"], ["JUMP", "#ffb703"], ["JUMP_NO", "#fb8500"], ["MESSAGE", "#90dbf4"],
+    ["WAVE_SALU", "#8ecae6"], ["SMEM", "#219ebc"], ["JUMP", "#ffb703"], ["JUMP_NO", "#fb8500"], ["MESSAGE", "#90dbf4"],
     ["VALU_TRANS", "#577590"], ["VALU_64_SHIFT", "#43aa8b"], ["VALU_MAD64", "#4d908e"], ["VALU_64", "#277da1"],
     ["VINTERP", "#9b5de5"], ["FLAT_LOAD", "#e9c46a"], ["FLAT_STORE", "#f4a261"], ["FLAT_STORE_64", "#ee9b00"],
     ["FLAT_STORE_96", "#ca6702"], ["FLAT_STORE_128", "#bb3e03"], ["GLOBAL_LOAD", "#52b788"], ["GLOBAL_LOAD_VADDR", "#40916c"],
