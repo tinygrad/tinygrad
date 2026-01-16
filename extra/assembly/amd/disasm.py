@@ -580,8 +580,7 @@ try:
   _CDNA_VOP3_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32'}
 
   def _disasm_vop3a(inst) -> str:
-    op_val = inst._values.get('op', 0)
-    if hasattr(op_val, 'value'): op_val = op_val.value
+    op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
     name = inst.op_name.lower() or f'vop3a_op_{op_val}'
     n = inst.num_srcs() or _num_srcs(inst)
     cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
@@ -613,8 +612,7 @@ try:
     return f"{name}{suf} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {s0}, {s1}{cl}{om}"
 
   def _disasm_vop3b(inst) -> str:
-    op_val = inst._values.get('op', 0)
-    if hasattr(op_val, 'value'): op_val = op_val.value
+    op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
     name = inst.op_name.lower() or f'vop3b_op_{op_val}'
     n = inst.num_srcs() or _num_srcs(inst)
     regs = inst.canonical_op_regs
@@ -630,12 +628,38 @@ try:
     return f"{name}{suf} {dst}, {sdst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {sdst}, {s0}, {s1}{cl}{om}"
 
   def _disasm_cdna_vop3p(inst) -> str:
-    name, n, is_mfma = inst.op_name.lower(), inst.num_srcs() or 2, 'mfma' in inst.op_name.lower() or 'smfmac' in inst.op_name.lower()
+    name, n = inst.op_name.lower(), inst.num_srcs() or 2
+    is_mfma = 'mfma' in name or 'smfmac' in name
+    is_accvgpr = 'accvgpr' in name
     get_src = lambda v, sc: _lit(inst, v) if v == 255 else _fmt_src(v, sc, cdna=True)
-    if is_mfma: sc = 2 if 'iu4' in name else 4 if 'iu8' in name or 'i4' in name else 8 if 'f16' in name or 'bf16' in name else 4; src0, src1, src2, dst = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, 16), _vreg(inst.vdst, 16)
-    else: src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), _vreg(inst.vdst)
-    opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
-    mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != (7 if n == 3 else 3) else []) + \
+
+    # Handle accvgpr read/write (accumulator register operations)
+    if is_accvgpr:
+      src0_off = _unwrap(inst.src0)
+      vdst_off = _vi(inst.vdst)
+      if 'read' in name:
+        # v_accvgpr_read_b32 vN, aM - reads from accumulator to VGPR
+        return f"{name}_b32 v{vdst_off}, a{src0_off - 256 if src0_off >= 256 else src0_off}"
+      if 'write' in name:
+        # v_accvgpr_write_b32 aM, src - writes to accumulator from source
+        src = _lit(inst, inst.src0) if src0_off == 255 else (f"v{src0_off - 256}" if src0_off >= 256 else decode_src(src0_off, cdna=True))
+        return f"{name}_b32 a{vdst_off}, {src}"
+
+    # Handle MFMA instructions with accumulator destinations
+    if is_mfma:
+      sc = 2 if 'iu4' in name else 4 if 'iu8' in name or 'i4' in name else 8 if 'f16' in name or 'bf16' in name else 4
+      src0, src1, src2 = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, 16)
+      dst = _areg(inst.vdst, 16)  # MFMA uses accumulator registers
+      opsel_hi = inst.opsel_hi
+      mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != 3 else []) + \
+             ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
+      return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}"
+
+    # Standard VOP3P instructions
+    src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), _vreg(inst.vdst)
+    opsel_hi = inst.opsel_hi  # CDNA VOP3P only has 2 bits for opsel_hi (no opsel_hi2)
+    opsel_hi_default = 3  # CDNA default is 0b11 (2 bits), not 0b111 like RDNA
+    mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != opsel_hi_default else []) + \
            ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
     return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}" if n == 3 else f"{name} {dst}, {src0}, {src1}{' ' + ' '.join(mods) if mods else ''}"
 
