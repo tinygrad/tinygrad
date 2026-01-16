@@ -27,6 +27,11 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
+def find_underlying_buffer(uop: UOp) -> UOp:
+  """Walk through ASSIGNs to find the underlying BUFFER (for view-of-assign like buf.assign(x); buf[0:2].assign(y))."""
+  while uop.op is Ops.ASSIGN and uop.src: uop = uop.src[0].base
+  return uop
+
 def find_permutes(a:UOp, b:UOp, assign:UOp):
   if not (permutes:=[s for s in b.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS)
                      if s.op in GroupOp.Movement and s.op not in {Ops.RESHAPE, Ops.EXPAND, Ops.PAD, Ops.SHRINK}]): return
@@ -112,9 +117,11 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** assign rules **
 
   # assign only to buffer, otherwise make it a CONTIGUOUS
+  # Exception: if target is a movement/slice of an ASSIGN, keep the ASSIGN (for slice assign pattern like buf.assign(x); buf[0:2].assign(y))
   (UPat(Ops.ASSIGN, src=(UPat(GroupOp.All-{Ops.BUFFER}, name="target"), UPat(name="x")), name="assign"),
    lambda x,target,assign: x.f(Ops.CONTIGUOUS, tag=assign.tag) if ((t:=target.base).op is not Ops.BUFFER and \
-       not (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src))) else None),
+       not (t.op is Ops.MSTACK and all(s.op is Ops.BUFFER for s in t.src)) and \
+       not (t.op is Ops.ASSIGN and target.op in GroupOp.Movement)) else None),
 
    # realize before assign if input permutes the target buffer
    (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), find_permutes),
@@ -544,7 +551,7 @@ replace_contiguous = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
-def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
+def get_rangeify_map(sink:UOp, need_war:bool=False, need_raw:bool=False) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
@@ -570,18 +577,66 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True, name="bufferize to store")
   tsink = graph_rewrite(tsink, split_kernels, ctx=uop_list, name="split kernels")
 
-  # if a kernel depends on a buffer, and that buffer is later assigned to, make the assign depend on the kernel's assign
-  kernel_assign: dict[UOp, UOp] = {}
+  # handle WAR (writer waits for reader) and RAW (reader waits for writer) dependencies between kernels
+  kernel_assign: dict[UOp, UOp] = {}  # buffer -> AFTER that writes to it (last writer for inline WAR)
+  buffer_writers: dict[UOp, list[UOp]] = {}  # buffer -> list of AFTERs that write to it
+  buffer_readers: dict[UOp, list[UOp]] = {}  # buffer -> list of AFTERs that read from it
   assign_rep: dict[UOp, UOp] = {}
   for u in tsink.toposort():
     if u.op is not Ops.AFTER: continue
     kernel_assign[u.buf_uop] = u
+    if need_war or need_raw: buffer_writers.setdefault(u.buf_uop, []).append(u)
     for s in u.src[1].src:
-      # TODO: this is probably broken for MSELECT/MSTACK
-      if s.op is not Ops.BUFFER or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
-      if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
-        raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
-      assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
+      # get the underlying buffer (either directly or through AFTER chain)
+      read_buf = s if s.op is Ops.BUFFER else (s.buf_uop if s.op is Ops.AFTER else None)
+      if read_buf is None or read_buf is u.buf_uop: continue  # TODO: probably broken for MSELECT/MSTACK
+      if need_war or need_raw: buffer_readers.setdefault(read_buf, []).append(u)
+      # WAR: if a previous kernel wrote to s, make writer wait for this reader
+      if (a:=kernel_assign.get(s)) is not None and a is not u:
+        if any(x.op is Ops.AFTER and x.buf_uop is s for x in u.toposort()):
+          raise RuntimeError(f"cycle detected in graph, kernel for {u.buf_uop} must either depend on AFTER or BUFFER")
+        cur = assign_rep.get(a, a)
+        assign_rep[a] = kernel_assign[s] = cur.replace(src=cur.src+(u,))
+    # also track in-place reads: if kernel reads from its output buffer (same DEFINE_GLOBAL used for read and write)
+    if need_war or need_raw:
+      # check if the kernel AST reads from arg=0 (the output buffer)
+      ast = u.src[1].arg.ast if u.src[1].op is Ops.KERNEL else None
+      if ast is not None:
+        def_globals = [x for x in ast.toposort() if x.op is Ops.DEFINE_GLOBAL]
+        output_dg = next((x for x in def_globals if x.arg == 0), None)
+        if output_dg is not None:
+          # check if output_dg is used in an INDEX that's read (not just written)
+          for idx in ast.toposort():
+            if idx.op is Ops.INDEX and len(idx.src) >= 2 and idx.src[0] is output_dg:
+              # check if this INDEX is used as a read (not just as a STORE target)
+              for user in ast.toposort():
+                if user.op is not Ops.STORE and idx in user.src:
+                  # kernel reads from output buffer
+                  buffer_readers.setdefault(u.buf_uop, []).append(u)
+                  break
+              else:
+                continue
+              break
+  # RAW: make readers wait for writers (read sees written values)
+  if need_raw:
+    for buf, readers in buffer_readers.items():
+      for writer in buffer_writers.get(buf, []):
+        for reader in readers:
+          if reader is writer or writer in reader.toposort(): continue
+          # skip if adding this dependency would create a cycle (writer already depends on reader)
+          if reader in writer.toposort(): continue
+          cur = assign_rep.get(reader, reader)
+          assign_rep[reader] = cur.replace(src=cur.src+(writer,))
+  # WAR: make writers wait for readers (read completes before write)
+  if need_war:
+    for buf, readers in buffer_readers.items():
+      for writer in buffer_writers.get(buf, []):
+        for reader in readers:
+          if reader is writer or reader in writer.toposort(): continue
+          # skip if adding this dependency would create a cycle (reader already depends on writer)
+          if writer in reader.toposort(): continue
+          cur = assign_rep.get(writer, writer)
+          assign_rep[writer] = cur.replace(src=cur.src+(reader,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
   # TODO: we can probably get this earlier

@@ -35,10 +35,18 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
     sink = UOp.sink(*[t.uop for t in scope_tensors])
     new_sink = sink.substitute(applied_map, name=f"substitute {name}")
 
-    # set the relevant uop to the realized UOps
+    # set the relevant uop to the realized UOps, and mark tensors whose computation is done
+    contiguous_srcs: set[UOp] = set()
     for t,s,ns in zip(scope_tensors, sink.src, new_sink.src):
       if s is ns: continue
       t.uop = ns
+      # track which uops were wrapped by CONTIGUOUS that got realized
+      if s.op is Ops.CONTIGUOUS and len(s.src): contiguous_srcs.add(s.src[0])
+
+    # mark tensors whose uop was wrapped by a realized CONTIGUOUS as "computation done"
+    for tref in list(all_tensors):
+      if (t:=tref()) is not None and t.uop in contiguous_srcs:
+        t._computation_done = True  # type: ignore[attr-defined]
 
 # **** Tensor helper functions ****
 
@@ -246,7 +254,65 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    # collect pending slice assigns from tensors in the computation graph
+    to_sched = [x.uop for x in (self,)+lst]
+    seen_uops: set[UOp] = set().union(*[uop.toposort() for uop in to_sched])
+    pending_assign_uops: list[UOp] = []
+    reads_before_writes: list[UOp] = []
+    need_war, need_raw = False, False
+    processed_assigns: set[UOp] = set()
+    for tref in list(all_tensors):
+      if (t:=tref()) is not None and hasattr(t, '_pending_assigns'):
+        if t.uop in seen_uops:
+          # tensor is being scheduled and has pending assigns
+          new_pending = [pa.uop for pa in t._pending_assigns if pa.uop not in seen_uops]
+          pending_assign_uops.extend(new_pending)
+          processed_assigns.update(pa.uop for pa in t._pending_assigns)
+          for pa in t._pending_assigns:
+            # find the underlying buffer that the pending assign writes to
+            target_buf = pa.uop.src[0].base if pa.uop.op is Ops.ASSIGN else None
+            while target_buf is not None and target_buf.op is Ops.ASSIGN and target_buf.src:
+              target_buf = target_buf.src[0].base
+            if target_buf is not None and target_buf.op is Ops.BUFFER:
+              assign_depends_on_target = any(u is target_buf for u in pa.uop.src[1].toposort()) if len(pa.uop.src) > 1 else False
+              if assign_depends_on_target:
+                need_war = True
+              else:
+                # find the underlying buffer in t.uop (may be under ASSIGNs)
+                t_buf = t.uop.base
+                while t_buf.op is Ops.ASSIGN and t_buf.src:
+                  t_buf = t_buf.src[0].base
+                if t_buf.op is Ops.BUFFER and t_buf is target_buf:
+                  need_raw = True
+                else:
+                  need_war = True
+          del t._pending_assigns
+        elif any(pa.uop in seen_uops for pa in t._pending_assigns):
+          reads_before_writes.append(t.uop)
+          need_war = True
+          processed_assigns.update(pa.uop for pa in t._pending_assigns)
+          del t._pending_assigns
+    if processed_assigns:
+      for tref in list(all_tensors):
+        if (t:=tref()) is not None and hasattr(t, '_pending_assigns'):
+          matching = [pa for pa in t._pending_assigns if pa.uop in processed_assigns]
+          if matching:
+            for pa in matching:
+              target_buf = pa.uop.src[0].base if pa.uop.op is Ops.ASSIGN else None
+              if target_buf is not None:
+                # find the underlying buffer in t.uop (may be under ASSIGNs)
+                t_buf = t.uop.base
+                while t_buf.op is Ops.ASSIGN and t_buf.src:
+                  t_buf = t_buf.src[0].base
+                if not (t_buf.op is Ops.BUFFER and t_buf is target_buf):
+                  if t.uop not in seen_uops:
+                    reads_before_writes.append(t.uop)
+                    need_war = True
+            t._pending_assigns = [pa for pa in t._pending_assigns if pa.uop not in processed_assigns]
+            if not t._pending_assigns: del t._pending_assigns
+    if need_war: need_raw = False
+    extra_uops = [uop for uop in reads_before_writes if not uop.is_contiguous()] + pending_assign_uops
+    big_sink = UOp.sink(*to_sched, *extra_uops, arg=(need_war, need_raw) if (need_war or need_raw) else None)
 
     # this is where the schedule cache should go
     becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
@@ -262,8 +328,12 @@ class Tensor(OpMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    if len(to_realize:=[x for x in (self,)+lst if not x.uop.is_contiguous()]):
-      run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
+    to_realize = [x for x in (self,)+lst if not x.uop.is_contiguous()]
+    # also check if any tensor has pending assigns that need to be scheduled
+    has_pending_assigns = any(hasattr(t, '_pending_assigns') for tref in all_tensors if (t:=tref()) is not None)
+    if to_realize or has_pending_assigns:
+      if (sched:=Tensor.schedule_with_vars(*(to_realize or [self])))[0]:
+        run_schedule(*sched, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor, allow_shape_mismatch=False) -> Tensor:
@@ -290,7 +360,30 @@ class Tensor(OpMixin):
     assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
     assert not isinstance(self.device, tuple) or self.uop.axis == x.uop.axis, f"multi assign axis mismatch {self.uop.axis} != {x.uop.axis}"
-    return self.replace(self._apply_uop(UOp.assign, x))
+    # for SLICE assigns (not full buffer), track pending assigns on tensors that share this buffer so reads see the write
+    # find actual underlying buffer (may be under ASSIGNs for view-of-assign like buf.assign(x); buf[0:2].assign(y))
+    underlying_buf = self.uop.base
+    while underlying_buf.op is Ops.ASSIGN and underlying_buf.src:
+      underlying_buf = underlying_buf.src[0].base
+    has_idx_change = any(u.op in {Ops.PERMUTE, Ops.SHRINK, Ops.PAD} for u in self.uop.toposort() if u.base is self.uop.base)
+    is_view_assign = (underlying_buf.op is Ops.BUFFER and self.uop is not underlying_buf and all_int(self.shape) and
+                      (prod(self.shape) != underlying_buf.arg or has_idx_change))
+    base_buf = underlying_buf if is_view_assign else None
+    ret = self.replace(self._apply_uop(UOp.assign, x))
+    if base_buf is not None:
+      for tref in list(all_tensors):
+        if (t:=tref()) is not None and t is not self:
+          # track on tensors that depend on this buffer (views or derived computations)
+          if t.uop.base is base_buf or base_buf in t.uop.toposort():
+            # skip contiguous tensors that are different from the base buffer (already realized)
+            if t.uop.is_contiguous() and t.uop.base is not base_buf: continue
+            # skip tensors whose computation has already been scheduled (contains AFTER)
+            if any(u.op is Ops.AFTER for u in t.uop.toposort()): continue
+            # skip tensors whose computation has been done (via contiguous wrapper)
+            if getattr(t, '_computation_done', False): continue
+            if not hasattr(t, '_pending_assigns'): t._pending_assigns = []  # type: ignore[attr-defined]
+            t._pending_assigns.append(ret)  # type: ignore[attr-defined]
+    return ret
 
   def detach(self) -> Tensor:
     """

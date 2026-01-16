@@ -41,6 +41,11 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
           pass  # a BUFFER is already realized, BINDs are handled in complete_create_schedule_with_vars
         else:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
+      # WAR/RAW dependencies from AFTER.src[2:] (added by rangeify for slice assigns)
+      for dep in u.src[2:]:
+        if dep.op is Ops.AFTER and dep.src[1] is not k:  # skip self-dependencies from multi-output kernels
+          children.setdefault(dep.src[1], []).append(k)
+          in_degree[k] += 1
 
   with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque()
@@ -154,12 +159,15 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     # tensor map is what we return
     tensor_map: dict[UOp, UOp] = {}
 
+    # extract need_war/need_raw (for WAR/RAW deps) before any transformations that might lose the arg
+    need_war, need_raw = big_sink_cache.arg or (False, False)
+
     if any(isinstance(x._device, tuple) for x in big_sink_cache.toposort()):
       tensor_map |= get_multi_map(big_sink_cache)
       big_sink_cache = big_sink_cache.substitute(tensor_map, name="Apply Multi Map")
       big_sink_cache = UOp.sink(*flatten([x.src if x.op is Ops.MULTI else [x] for x in big_sink_cache.src]))
 
-    tensor_map |= get_rangeify_map(big_sink_cache)
+    tensor_map |= get_rangeify_map(big_sink_cache, need_war, need_raw)
     big_sink = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
 
     pre_schedule, buf_uops_sink = create_schedule(big_sink)
