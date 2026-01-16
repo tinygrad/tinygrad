@@ -279,18 +279,17 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
-  def add(name:str, p:PacketType, op="OP", idx=0, width=5) -> None:
+  def add(p:PacketType, name:str, idx=0, width=1) -> None:
     rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"SHARED:0 {name}"))
-    ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+width)))
-  op_idx:dict = {}
+    ret.append(ProfileRangeEvent(r, f"{name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
+  op_idx = {INST:0, VALUINST:1, IMMEDIATE:2, VMEMEXEC:0, ALUEXEC:0}
   for p in decode(e.blob):
     if len(ret) > 50_000: break
     if isinstance(p, INST):
-      if p.op not in op_idx: op_idx[p.op] = len(op_idx)
-      op_name, idx = (p.op.name, op_idx[p.op]) if isinstance(p.op, InstOp) else (f"0x{p.op:02x}", len(op_idx))
-      if "BARRIER" in op_name: add("BARRIER", p, op_name, width=100)
-      else: add(p.__class__.__name__, p, op_name, idx)
-    if isinstance(p, (VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC)): add(p.__class__.__name__, p)
+      op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+      name, width = (op_name, 100) if "BARRIER" in op_name else (f"INST {op_name}", 1)
+      add(p, name, idx=op_idx[INST], width=width)
+    if isinstance(p, (VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC)): add(p, p.__class__.__name__, op_idx[p.__class__])
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
@@ -322,7 +321,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
       events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
   # * INST timeline
-  with soft_err(lambda _:None): cu_events |= {f"SE:{e.se} Packets": timeline for e in data if (timeline := sqtt_timeline(e))}
+  cu_events |= {f"SE:{e.se} Packets": timeline for e in data if (timeline := sqtt_timeline(e))}
   return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:

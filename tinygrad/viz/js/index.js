@@ -323,7 +323,7 @@ async function renderProfiler(path, unit, opts) {
             levels.push(et);
           } else levels[depth] = et;
         }
-        if (depth === 0) colorKey = e.name.split(" ")[0];
+        if (depth === 0 || !opts.stepColors) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
@@ -790,7 +790,7 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
+      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1]), stepColors:!step.name.includes("Packets")};
       return renderProfiler(ckey, "clk", opts);
     }
     metadata.innerHTML = "";
