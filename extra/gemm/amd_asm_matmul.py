@@ -184,6 +184,9 @@ ROW_REGS = list(range(137, 145))  # v137-v144 (8 regs)
 # Kernel class
 # =============================================================================
 
+def encode_waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
+  return (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
+
 class Kernel:
   def __init__(self, arch='gfx1100'):
     self.instructions, self.labels, self.branch_targets, self.arch = [], {}, {}, arch
@@ -204,7 +207,6 @@ class Kernel:
 
   def waitcnt(self, lgkm=None, vm=None):
     """Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain."""
-    from extra.assembly.amd.asm import waitcnt as encode_waitcnt
     if lgkm == 0 and vm is None: self.emit(s_waitcnt(simm16=WAIT_LGKM))
     elif vm == 0 and lgkm is None: self.emit(s_waitcnt(simm16=WAIT_VMEM))
     elif lgkm == 0 and vm == 0: self.emit(s_waitcnt(simm16=WAIT_ALL))
