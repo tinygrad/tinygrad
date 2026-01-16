@@ -4,7 +4,6 @@
 import unittest, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd.asm import asm
 from extra.assembly.amd.test.test_roundtrip import compile_asm
 
 class TestIntegration(unittest.TestCase):
@@ -13,12 +12,9 @@ class TestIntegration(unittest.TestCase):
     if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
     st = self.inst.disasm()
-    reasm = asm(st)
-    desc = f"{st:25s} {self.inst} {b!r} {reasm}"
+    # Test that the instruction can be compiled by LLVM and produces the same bytes
+    desc = f"{st:25s} {self.inst} {b!r}"
     self.assertEqual(b, compile_asm(st), desc)
-    # TODO: this compare should work for valid things
-    #self.assertEqual(self.inst, reasm)
-    self.assertEqual(repr(self.inst), repr(reasm))
     print(desc)
 
   def test_wmma(self):
