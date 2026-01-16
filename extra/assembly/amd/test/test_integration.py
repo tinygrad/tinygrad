@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Integration test: round-trip RDNA3 assembly through AMD toolchain."""
-import unittest, re, io, sys, subprocess
+import unittest, io, sys
 from extra.assembly.amd.autogen.rdna3.ins import *
-from extra.assembly.amd.asm import waitcnt, asm
-from extra.assembly.amd.test.helpers import get_llvm_mc
+
+def waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
+  return (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
 
 def disassemble(lib: bytes, arch: str = "gfx1100") -> str:
   """Disassemble ELF binary using tinygrad's compiler, return raw output."""
@@ -40,7 +41,7 @@ def assemble_and_disassemble(instructions: list, arch: str = "gfx1100") -> list[
   return parse_disassembly(disassemble(lib, arch))
 
 class TestIntegration(unittest.TestCase):
-  """Test our assembler output matches LLVM disassembly."""
+  """Test our DSL output matches LLVM disassembly."""
 
   def test_simple_sop1(self):
     """Test SOP1 instructions round-trip."""
@@ -147,79 +148,6 @@ class TestIntegration(unittest.TestCase):
         self.assertEqual(our_bytes, amd_bytes, f"Bytes mismatch: ours={our_bytes.hex()} AMD={amd_bytes.hex()}")
         return
     self.fail("Could not find s_mov_b32 in disassembly")
-
-class TestAsm(unittest.TestCase):
-  """Test asm() string parsing."""
-
-  def test_asm_basic(self):
-    """Test basic instruction parsing."""
-    inst = asm('s_mov_b32 s0, s1')
-    self.assertEqual(inst.to_bytes(), s_mov_b32(s[0], s[1]).to_bytes())
-
-  def test_asm_with_immediates(self):
-    """Test parsing with immediate values."""
-    inst = asm('s_add_u32 s0, s1, 10')
-    self.assertEqual(inst.to_bytes(), s_add_u32(s[0], s[1], 10).to_bytes())
-
-  def test_asm_float_const(self):
-    """Test parsing float constants."""
-    inst = asm('v_mul_f32_e32 v0, 1.0, v1')
-    self.assertEqual(inst.to_bytes(), v_mul_f32_e32(v[0], 1.0, v[1]).to_bytes())
-
-  def test_asm_hex_immediate(self):
-    """Test parsing hex immediates."""
-    inst = asm('s_waitcnt 0xfc07')
-    self.assertEqual(inst.to_bytes(), s_waitcnt(simm16=0xfc07).to_bytes())
-
-  def test_asm_special_regs(self):
-    """Test parsing special registers."""
-    inst = asm('s_mov_b32 s0, vcc_lo')
-    self.assertEqual(inst.to_bytes(), s_mov_b32(s[0], VCC_LO).to_bytes())
-
-  def test_asm_register_range(self):
-    """Test parsing register ranges."""
-    inst = asm('s_load_b128 s[4:7], s[0:1], null')
-    self.assertEqual(inst.to_bytes(), s_load_b128(s[4:7], s[0:1], NULL).to_bytes())
-
-  def test_asm_matches_llvm(self):
-    """Test asm() output matches LLVM assembler."""
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    compiler = HIPCompiler('gfx1100')
-
-    def get_llvm_bytes(instr: str) -> bytes:
-      src = f'.text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n{instr}\n'
-      lib = compiler.compile(src)
-      raw = disassemble(lib)
-      for line in raw.splitlines():
-        if instr.split()[0] in line and '//' in line:
-          hex_str = line.split('//')[1].strip().split(':')[1].strip()
-          return bytes.fromhex(hex_str)[::-1]
-      return b''
-
-    tests = ['s_mov_b32 s0, s1', 's_endpgm', 'v_add_f32_e32 v0, v1, v2']
-    for t in tests:
-      self.assertEqual(asm(t).to_bytes(), get_llvm_bytes(t), f"mismatch for: {t}")
-
-  def test_asm_vop3_modifiers(self):
-    """Test asm() with VOP3 modifiers (neg, abs, clamp)."""
-    def get_llvm_encoding(instr: str) -> str:
-      result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-show-encoding'],
-                              input=instr, capture_output=True, text=True)
-      if m := re.search(r'encoding:\s*\[(.*?)\]', result.stdout):
-        return m.group(1).replace('0x','').replace(',','').replace(' ','')
-      return ''
-
-    tests = [
-      'v_fma_f32 v0, -v1, v2, v3',       # neg on src0
-      'v_fma_f32 v0, v1, |v2|, v3',      # abs on src1
-      'v_fma_f32 v0, v1, v2, v3 clamp',  # clamp
-      'v_fma_f32 v0, -v1, |v2|, v3 clamp',  # all modifiers
-      'v_fma_f32 v0, -|v1|, v2, v3',     # neg+abs on same operand
-    ]
-    for t in tests:
-      our_hex = asm(t).to_bytes().hex()
-      llvm_hex = get_llvm_encoding(t)
-      self.assertEqual(our_hex, llvm_hex, f"mismatch for: {t}")
 
 class TestTinygradIntegration(unittest.TestCase):
   """Test that we can parse disassembled tinygrad kernels."""
