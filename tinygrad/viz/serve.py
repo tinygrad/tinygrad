@@ -218,7 +218,8 @@ def soft_err(fn:Callable):
   try: yield
   except Exception: fn({"src":traceback.format_exc()})
 
-def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
+def row_tuple(row:str) -> tuple[tuple[int, int], ...]:
+  return tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
 
 # *** Performance counters
 
@@ -271,14 +272,33 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     if (pmc:=v.get(ProfilePMCEvent)):
       steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
       all_counters[(name, run_number[k], k)] = pmc[0]
+    # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
-      # to decode a SQTT trace, we need the raw stream, program binary and device properties
+      for e in sqtt:
+        if e.itrace: steps.append(create_step(f"PKTS SE:{e.se}", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)), data=e))
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
-      if getenv("SQTT_PARSE"):
-        # run our decoder on startup, we don't use this since it only works on gfx11
-        from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-        for e in sqtt: parse_sqtt_print_packets(e.blob)
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
+
+def sqtt_timeline(e) -> list[ProfileEvent]:
+  from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
+  ret:list[ProfileEvent] = []
+  rows:dict[str, None] = {}
+  def add(name:str, p:PacketType, idx=0, width=1) -> None:
+    rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"{p.__class__.__name__}:0 {name}"))
+    ret.append(ProfileRangeEvent(r, f"{name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
+  for p in decode(e.blob):
+    if len(ret) > 50_000: break
+    if isinstance(p, INST):
+      op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+      # skip OTHER_* packets
+      if "OTHER" in op_name: continue
+      name, width = (op_name, 10 if "BARRIER" in op_name else 1)
+      # Wave SALU op, not to be confused with the global SALU
+      if op_name == "SALU": name = "WAVE_SALU"
+      add(name, p, width=width)
+    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
+    if isinstance(p, (VMEMEXEC, ALUEXEC)): add(str(p.src).split('.')[1], p)
+  return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -487,6 +507,10 @@ def get_render(query:str) -> dict:
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt.startswith("prg-pkts"):
+    ret = {}
+    with soft_err(lambda err:ret.update(err)): ret = {"value":get_profile(sqtt_timeline(data)), "content_type":"application/octet-stream"}
+    return ret
   if fmt == "prg-sqtt":
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
