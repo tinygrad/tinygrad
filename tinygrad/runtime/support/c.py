@@ -65,7 +65,7 @@ else:
   class CFUNCTYPE:
     def __class_getitem__(cls, key): return ctypes.CFUNCTYPE(del_an(key[0]), *(del_an(a) for a in key[1]))
   class Enum:
-    _val_to_name_: dict[int,str] = {}
+    def __init_subclass__(cls): cls._val_to_name_ = {}
 
     @classmethod
     def get(cls, val, default="unknown"): return cls._val_to_name_.get(val, default)
