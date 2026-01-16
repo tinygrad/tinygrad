@@ -228,9 +228,12 @@ class Kernel:
         asm = re.sub(r'(s_cbranch_\w+|s_branch)\s+\S+', rf'\1 .{self.branch_targets[i]}', asm)
       body.append('\t' + asm)
 
+    # limit wave occupancy by using more LDS
+    lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536))
+
     # HSA kernel descriptor attributes (zeros included for compatibility)
     hsa = [
-      ('group_segment_fixed_size', LDS_SIZE), ('private_segment_fixed_size', 0), ('kernarg_size', 36),
+      ('group_segment_fixed_size', lds_size), ('private_segment_fixed_size', 0), ('kernarg_size', 36),
       ('user_sgpr_count', 14), ('user_sgpr_dispatch_ptr', 0), ('user_sgpr_queue_ptr', 0),
       ('user_sgpr_kernarg_segment_ptr', 1), ('user_sgpr_dispatch_id', 0), ('user_sgpr_private_segment_size', 0),
       ('wavefront_size32', 1), ('uses_dynamic_stack', 0), ('enable_private_segment', 0),
@@ -250,7 +253,7 @@ class Kernel:
       '\t.end_amdhsa_kernel', '\t.text', '.Lfunc_end0:', '\t.size\tkernel, .Lfunc_end0-kernel',
       '\t.amdgpu_metadata', '---', 'amdhsa.kernels:', '  - .args:',
       *[f'      - .address_space: global\n        .offset: {i*8}\n        .size: 8\n        .value_kind: global_buffer' for i in range(3)],
-      f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8',
+      f'    .group_segment_fixed_size: {lds_size}', '    .kernarg_segment_align: 8',
       '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
       '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
       '    .vgpr_count: 214', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
@@ -501,11 +504,12 @@ def build_kernel(arch='gfx1100'):
   #   V_LDS_A_DATA (v155-162) holds data that goes to LDS A-tile region
   #   V_LDS_B_DATA (v163-170) holds data that goes to LDS B-tile region
   # The data sources are swapped: A-tile receives B matrix rows, B-tile receives A matrix columns
-  for i in range(4):  # A tile: 8 values via 4 stride64 stores
-    k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
-  for i in range(8):  # B tile: 8 values via 8 scalar stores with 64-byte spacing
-    offset = i * 64
-    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
+  if not NO_DS:
+    for i in range(4):  # A tile: 8 values via 4 stride64 stores
+      k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
+    for i in range(8):  # B tile: 8 values via 8 scalar stores with 64-byte spacing
+      offset = i * 64
+      k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
 
   k.emit(s_branch(simm16=0)); k.branch_to('LOOP_INC')
 
@@ -625,7 +629,7 @@ def test_matmul():
     with Context(DEBUG=2): tc = (a @ b).realize()
     with Context(DEBUG=0): err = (c - tc).square().mean().item()
     print(f"mean squared error {err}")
-    if err > 1e-06: raise RuntimeError("matmul is wrong!")
+    if err != err or err > 1e-06: raise RuntimeError("matmul is wrong!")
 
 def run_sqtt():
   """Run with SQTT profiling and write trace files."""
