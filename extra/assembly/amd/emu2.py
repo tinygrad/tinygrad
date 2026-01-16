@@ -67,6 +67,20 @@ def compile_sop_pcode(op, srcs: dict[str, UOp], wsgpr_fn, rsgpr_fn, sdst_reg: in
         stores.append(wsgpr_fn(sdst_reg, val))
     elif dest.startswith('SCC'):
       stores.append(wsgpr_fn(SCC_IDX, val.cast(dtypes.uint32)))
+    elif dest.startswith('EXEC'):
+      # EXEC update - write to EXEC_LO (and EXEC_HI for 64-bit)
+      if val.dtype in (dtypes.uint64, dtypes.int64):
+        stores.append(wsgpr_fn(EXEC_LO.offset, val.cast(dtypes.uint32)))
+        stores.append(wsgpr_fn(EXEC_HI.offset, (val >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)))
+      else:
+        stores.append(wsgpr_fn(EXEC_LO.offset, val.cast(dtypes.uint32)))
+    elif dest.startswith('VCC'):
+      # VCC update
+      if val.dtype in (dtypes.uint64, dtypes.int64):
+        stores.append(wsgpr_fn(VCC_LO.offset, val.cast(dtypes.uint32)))
+        stores.append(wsgpr_fn(VCC_HI.offset, (val >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)))
+      else:
+        stores.append(wsgpr_fn(VCC_LO.offset, val.cast(dtypes.uint32)))
 
   if not stores: return None
   return name, UOp.sink(*stores, inc_pc_fn(), arg=KernelInfo(name=name))
@@ -90,7 +104,9 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
   srcs['SCC'] = rsgpr_fn(SCC_IDX)
   _, assigns = parse_pcode(pcode, srcs, lane)
 
-  stores = []
+  # First pass: collect all stores without ending the loop yet
+  raw_stores = []
+  has_vgpr_write = False
   for dest, val in assigns:
     if 'D0' in dest and '[laneId]' in dest:
       # D0.u64[laneId] means VCC bit write (for VOPC instructions)
@@ -100,16 +116,29 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
       vcc_bit = val.cast(dtypes.uint32) << lane.cast(dtypes.uint32)
       vcc_cleared = vcc & (vcc_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
       vcc_new = exec_bit.ne(UOp.const(dtypes.uint32, 0)).where(vcc_cleared | vcc_bit, vcc)
-      stores.append(wsgpr_fn(VCC_LO.offset, vcc_new).end(lane))
+      raw_stores.append(('vcc', wsgpr_fn(VCC_LO.offset, vcc_new)))
     elif dest.startswith('D0'):
       # Vector destination - write to vdst (bitcast floats to preserve bit pattern)
-      if val.dtype in (dtypes.float32, dtypes.float64):
+      has_vgpr_write = True
+      if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
+        # 64-bit destination: write both low and high 32-bit parts
+        val64 = val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
+        lo = val64.cast(dtypes.uint32)
+        hi = (val64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
+        raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, lo, exec_mask)))
+        raw_stores.append(('vgpr', wvgpr_fn(vdst_reg + 1, lane, hi, exec_mask)))
+      elif val.dtype in (dtypes.float32,):
         result = val.bitcast(dtypes.uint32)
+        raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, result, exec_mask)))
+      elif val.dtype == dtypes.half:
+        # f16: bitcast to uint16, then zero-extend to uint32
+        result = val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+        raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, result, exec_mask)))
       elif val.dtype != dtypes.uint32:
         result = val.cast(dtypes.uint32)
+        raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, result, exec_mask)))
       else:
-        result = val
-      stores.append(wvgpr_fn(vdst_reg, lane, result, exec_mask).end(lane))
+        raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, val, exec_mask)))
     elif dest.startswith('VCC'):
       # VCC update - need to set bit for this lane
       vcc = rsgpr_fn(VCC_LO.offset)
@@ -118,7 +147,7 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
       vcc_bit = val.cast(dtypes.uint32) << lane.cast(dtypes.uint32)
       vcc_cleared = vcc & (vcc_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
       vcc_new = exec_bit.ne(UOp.const(dtypes.uint32, 0)).where(vcc_cleared | vcc_bit, vcc)
-      stores.append(wsgpr_fn(VCC_LO.offset, vcc_new).end(lane))
+      raw_stores.append(('vcc', wsgpr_fn(VCC_LO.offset, vcc_new)))
     elif dest.startswith('EXEC'):
       # EXEC update (for CMPX)
       exec_val = rsgpr_fn(EXEC_LO.offset)
@@ -127,9 +156,19 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
       exec_new_bit = val.cast(dtypes.uint32) << lane.cast(dtypes.uint32)
       exec_cleared = exec_val & (exec_mask_bit ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
       exec_new = exec_bit.ne(UOp.const(dtypes.uint32, 0)).where(exec_cleared | exec_new_bit, exec_val)
-      stores.append(wsgpr_fn(EXEC_LO.offset, exec_new).end(lane))
+      raw_stores.append(('exec', wsgpr_fn(EXEC_LO.offset, exec_new)))
     elif dest.startswith('SCC'):
-      stores.append(wsgpr_fn(SCC_IDX, val.cast(dtypes.uint32)))
+      raw_stores.append(('scc', wsgpr_fn(SCC_IDX, val.cast(dtypes.uint32))))
+
+  # Second pass: combine all lane-dependent stores into a single END
+  stores = []
+  lane_stores = [s for t, s in raw_stores if t in ('vgpr', 'vcc', 'exec')]
+  scalar_stores = [s for t, s in raw_stores if t == 'scc']
+  if lane_stores:
+    # Combine all lane-dependent stores and end with single END
+    combined = UOp.sink(*lane_stores)
+    stores.append(combined.end(lane))
+  stores.extend(scalar_stores)
 
   return stores if stores else None
 
@@ -205,11 +244,50 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     return wsgpr(PC_LO_IDX, pc + UOp.const(dtypes.uint32, inst_words))
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # SOPP: s_endpgm, s_waitcnt, s_clause, etc.
+  # SOPP: s_endpgm, s_waitcnt, s_clause, branches
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, SOPP):
     if inst.op == SOPPOp.S_ENDPGM:
       return name, UOp.sink(wsgpr(PC_LO_IDX, UOp.const(dtypes.uint32, 0xFFFFFFFF)), arg=KernelInfo(name=name))
+
+    # Branch instructions - simm16 is signed offset in dwords from PC+4
+    simm16 = _sext(inst.simm16, 16)
+    branch_target = rsgpr(PC_LO_IDX) + UOp.const(dtypes.uint32, simm16 + inst_words)  # PC + offset + inst_size
+    fall_through = rsgpr(PC_LO_IDX) + UOp.const(dtypes.uint32, inst_words)
+
+    if inst.op == SOPPOp.S_BRANCH:
+      return name, UOp.sink(wsgpr(PC_LO_IDX, branch_target), arg=KernelInfo(name=name))
+
+    if inst.op == SOPPOp.S_CBRANCH_SCC0:
+      scc = rsgpr(SCC_IDX)
+      cond = scc.eq(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(PC_LO_IDX, cond.where(branch_target, fall_through)), arg=KernelInfo(name=name))
+
+    if inst.op == SOPPOp.S_CBRANCH_SCC1:
+      scc = rsgpr(SCC_IDX)
+      cond = scc.ne(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(PC_LO_IDX, cond.where(branch_target, fall_through)), arg=KernelInfo(name=name))
+
+    if inst.op == SOPPOp.S_CBRANCH_VCCZ:
+      vcc = rsgpr(VCC_LO.offset)
+      cond = vcc.eq(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(PC_LO_IDX, cond.where(branch_target, fall_through)), arg=KernelInfo(name=name))
+
+    if inst.op == SOPPOp.S_CBRANCH_VCCNZ:
+      vcc = rsgpr(VCC_LO.offset)
+      cond = vcc.ne(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(PC_LO_IDX, cond.where(branch_target, fall_through)), arg=KernelInfo(name=name))
+
+    if inst.op == SOPPOp.S_CBRANCH_EXECZ:
+      exec_lo = rsgpr(EXEC_LO.offset)
+      cond = exec_lo.eq(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(PC_LO_IDX, cond.where(branch_target, fall_through)), arg=KernelInfo(name=name))
+
+    if inst.op == SOPPOp.S_CBRANCH_EXECNZ:
+      exec_lo = rsgpr(EXEC_LO.offset)
+      cond = exec_lo.ne(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(PC_LO_IDX, cond.where(branch_target, fall_through)), arg=KernelInfo(name=name))
+
     return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -236,18 +314,21 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   # SOP1: scalar unary ops (s_mov_b32, etc.)
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, SOP1):
-    s0 = rsrc(inst.ssrc0.offset, UOp.const(dtypes.index, 0))
+    src_off = inst.ssrc0.offset
+    s0 = rsrc(src_off, UOp.const(dtypes.index, 0))
     dst_reg = inst.sdst.offset
     op_name = inst.op.name
+    sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
+    dst_size = sizes.get('sdst', 1)
 
-    if 'MOV_B32' in op_name:
-      return name, UOp.sink(wsgpr(dst_reg, s0), inc_pc(), arg=KernelInfo(name=name))
+    # Handle 64-bit source for B64 ops
+    if sizes.get('ssrc0', 1) == 2:
+      if src_off >= 128:  # inline constant - zero-extend to 64-bit
+        s0 = s0.cast(dtypes.uint64)
+      else:  # sgpr pair
+        s0 = rsgpr64(src_off)
 
-    if 'MOV_B64' in op_name:
-      s0_hi = rsrc(inst.ssrc0.offset + 1, UOp.const(dtypes.index, 0))
-      return name, UOp.sink(wsgpr(dst_reg, s0), wsgpr(dst_reg + 1, s0_hi), inc_pc(), arg=KernelInfo(name=name))
-
-    # SAVEEXEC ops: save EXEC to dst, then modify EXEC
+    # SAVEEXEC ops: save EXEC to dst, then modify EXEC (complex pcode with temp var)
     if 'OR_SAVEEXEC_B32' in op_name:
       exec_lo = rsgpr(EXEC_LO.offset)
       new_exec = exec_lo | s0
@@ -258,7 +339,41 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       new_exec = exec_lo & s0
       return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), inc_pc(), arg=KernelInfo(name=name))
 
-    assert False, f"unimplemented SOP1: {op_name}"
+    # S_BREV_B32: bit reverse (pcode uses reversed slice which parser can't handle)
+    if op_name == 'S_BREV_B32':
+      # Bit reverse using parallel swap approach
+      v = s0
+      v = ((v >> UOp.const(dtypes.uint32, 1)) & UOp.const(dtypes.uint32, 0x55555555)) | ((v & UOp.const(dtypes.uint32, 0x55555555)) << UOp.const(dtypes.uint32, 1))
+      v = ((v >> UOp.const(dtypes.uint32, 2)) & UOp.const(dtypes.uint32, 0x33333333)) | ((v & UOp.const(dtypes.uint32, 0x33333333)) << UOp.const(dtypes.uint32, 2))
+      v = ((v >> UOp.const(dtypes.uint32, 4)) & UOp.const(dtypes.uint32, 0x0F0F0F0F)) | ((v & UOp.const(dtypes.uint32, 0x0F0F0F0F)) << UOp.const(dtypes.uint32, 4))
+      v = ((v >> UOp.const(dtypes.uint32, 8)) & UOp.const(dtypes.uint32, 0x00FF00FF)) | ((v & UOp.const(dtypes.uint32, 0x00FF00FF)) << UOp.const(dtypes.uint32, 8))
+      v = (v >> UOp.const(dtypes.uint32, 16)) | (v << UOp.const(dtypes.uint32, 16))
+      return name, UOp.sink(wsgpr(dst_reg, v), inc_pc(), arg=KernelInfo(name=name))
+
+    # S_QUADMASK_B32: for each of 8 quads, if any bit in quad is set, set result bit (pcode uses for loop)
+    if op_name == 'S_QUADMASK_B32':
+      result = UOp.const(dtypes.uint32, 0)
+      for i in range(8):
+        quad = (s0 >> UOp.const(dtypes.uint32, i * 4)) & UOp.const(dtypes.uint32, 0xF)
+        bit = quad.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
+        result = result | (bit << UOp.const(dtypes.uint32, i))
+      scc = result.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(dst_reg, result), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
+
+    # S_WQM_B32: Whole Quad Mode - if any lane in quad active, set all lanes in that quad (pcode uses for loop)
+    if op_name == 'S_WQM_B32':
+      result = UOp.const(dtypes.uint32, 0)
+      for i in range(8):
+        quad = (s0 >> UOp.const(dtypes.uint32, i * 4)) & UOp.const(dtypes.uint32, 0xF)
+        active = quad.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 0xF), UOp.const(dtypes.uint32, 0))
+        result = result | (active << UOp.const(dtypes.uint32, i * 4))
+      scc = result.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(dst_reg, result), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
+
+    # Try pcode for other SOP1 ops
+    pcode_result = compile_sop_pcode(inst.op, {'S0': s0}, wsgpr, rsgpr, dst_reg, dst_size, inc_pc, name)
+    assert pcode_result is not None, f"unimplemented SOP1: {op_name}"
+    return pcode_result
 
   # ═══════════════════════════════════════════════════════════════════════════
   # SOP2: scalar ALU (s_add_i32, s_lshl_b64, etc.)
@@ -271,6 +386,18 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     dst_size = sizes.get('sdst', 1)
     pcode_result = compile_sop_pcode(inst.op, {'S0': s0, 'S1': s1}, wsgpr, rsgpr, dst_reg, dst_size, inc_pc, name)
     assert pcode_result is not None, f"no pcode for SOP2: {inst.op.name}"
+    return pcode_result
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # SOPC: scalar compare (s_cmp_eq_u32, etc.) - only writes SCC
+  # ═══════════════════════════════════════════════════════════════════════════
+  if isinstance(inst, SOPC):
+    sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
+    s0 = rsgpr64(inst.ssrc0.offset) if sizes.get('ssrc0', 1) == 2 else rsrc(inst.ssrc0.offset, UOp.const(dtypes.index, 0))
+    s1 = rsgpr64(inst.ssrc1.offset) if sizes.get('ssrc1', 1) == 2 else rsrc(inst.ssrc1.offset, UOp.const(dtypes.index, 0))
+    # SOPC has no sdst, but compile_sop_pcode needs one - use dummy reg 0, it will only write SCC
+    pcode_result = compile_sop_pcode(inst.op, {'S0': s0, 'S1': s1}, wsgpr, rsgpr, 0, 0, inc_pc, name)
+    assert pcode_result is not None, f"no pcode for SOPC: {inst.op.name}"
     return pcode_result
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -307,7 +434,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     src0 = rsrc(inst.src0.offset, lane)
     src1 = rsrc(inst.vsrc1.offset, lane)
     vdst_reg = inst.vdst.offset - 256
-    pcode_result = compile_vop_pcode(inst.op, {'S0': src0, 'S1': src1}, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name)
+    # For FMAC/accumulator instructions, D0 is also a source (read from vdst)
+    srcs = {'S0': src0, 'S1': src1, 'D0': rvgpr(vdst_reg, lane)}
+    # FMAAK/FMAMK use inline literal constant (SIMM32)
+    op_name = inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
+    if 'FMAAK' in op_name or 'FMAMK' in op_name:
+      srcs['SIMM32'] = UOp.const(dtypes.uint32, literal)
+    pcode_result = compile_vop_pcode(inst.op, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name)
     assert pcode_result is not None, f"no pcode for VOP2: {inst.op.name}"
     return pcode_result
 
@@ -317,14 +450,46 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   if isinstance(inst, VOP3):
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
     exec_mask = rsgpr(EXEC_LO.offset)
-    src0 = rsrc(inst.src0.offset, lane)
-    src1 = rsrc(inst.src1.offset, lane)
-    src2 = rsrc(inst.src2.offset, lane) if inst.src2 is not None else None
+    sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
+
+    # Helper for 64-bit source reads
+    def rsrc64(off: int, lane: UOp) -> UOp:
+      lo = rsrc(off, lane)
+      hi = rsrc(off + 1, lane)
+      return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+
+    src0 = rsrc64(inst.src0.offset, lane) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
+    src1 = rsrc64(inst.src1.offset, lane) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane)
+    src2 = (rsrc64(inst.src2.offset, lane) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane)) if inst.src2 is not None else None
     vdst_reg = inst.vdst.offset - 256
     srcs = {'S0': src0, 'S1': src1}
     if src2 is not None: srcs['S2'] = src2
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name)
     assert pcode_result is not None, f"no pcode for VOP3: {inst.op.name}"
+    return pcode_result
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VOP3SD: VOP3 with scalar destination (v_add_co_u32, etc.)
+  # ═══════════════════════════════════════════════════════════════════════════
+  if isinstance(inst, VOP3SD):
+    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    exec_mask = rsgpr(EXEC_LO.offset)
+    sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
+
+    # Helper for 64-bit source reads
+    def rsrc64(off: int, lane: UOp) -> UOp:
+      lo = rsrc(off, lane)
+      hi = rsrc(off + 1, lane)
+      return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+
+    src0 = rsrc64(inst.src0.offset, lane) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
+    src1 = rsrc64(inst.src1.offset, lane) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane)
+    src2 = (rsrc64(inst.src2.offset, lane) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane)) if inst.src2 is not None else None
+    vdst_reg = inst.vdst.offset - 256
+    srcs = {'S0': src0, 'S1': src1}
+    if src2 is not None: srcs['S2'] = src2
+    pcode_result = compile_vop_pcode(inst.op, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name)
+    assert pcode_result is not None, f"no pcode for VOP3SD: {inst.op.name}"
     return pcode_result
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -360,6 +525,318 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     ended.extend(stores_y)
 
     return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # DS: Local Data Share (LDS) operations
+  # ═══════════════════════════════════════════════════════════════════════════
+  if isinstance(inst, DS):
+    exec_mask = rsgpr(EXEC_LO.offset)
+    op_name = inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
+    addr_reg = inst.addr.offset - 256 if inst.addr.offset >= 256 else inst.addr.offset
+
+    # LDS helper - reads/writes to lds buffer (uint32 indexed)
+    def rlds(addr: UOp) -> UOp: return lds.index((addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index))
+    def wlds(addr: UOp, val: UOp, active: UOp) -> UOp:
+      idx = lds.index((addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index))
+      return idx.store(active.where(val, idx))
+
+    # 2ADDR B64 variants: DS_STORE_2ADDR_B64, DS_LOAD_2ADDR_B64
+    if '2ADDR' in op_name and 'B64' in op_name:
+      offset0 = getattr(inst, 'offset0', 0)
+      offset1 = getattr(inst, 'offset1', 0)
+      mult = 256 if 'STRIDE64' in op_name else 8  # STRIDE64 uses *256, normal uses *8 for B64
+
+      if 'STORE' in op_name:
+        data0_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+        data1_reg = inst.data1.offset - 256 if inst.data1.offset >= 256 else inst.data1.offset
+        ended = []
+        for off, data_reg in [(offset0, data0_reg), (offset1, data1_reg)]:
+          for j in range(2):  # 2 dwords per 64-bit value
+            lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+            base_addr = rvgpr(addr_reg, lane)
+            addr = base_addr + UOp.const(dtypes.uint32, off * mult + j * 4)
+            val = rvgpr(data_reg + j, lane)
+            exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+            active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+            ended.append(wlds(addr, val, active).end(lane))
+        return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+      if 'LOAD' in op_name:
+        vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+        ended = []
+        dst_idx = 0
+        for off in [offset0, offset1]:
+          for j in range(2):  # 2 dwords per 64-bit value
+            lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+            base_addr = rvgpr(addr_reg, lane)
+            addr = base_addr + UOp.const(dtypes.uint32, off * mult + j * 4)
+            val = rlds(addr)
+            store = wvgpr(vdst_reg + dst_idx, lane, val, exec_mask)
+            ended.append(store.end(lane))
+            dst_idx += 1
+        return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+    # 2ADDR variants: DS_STORE_2ADDR_B32, DS_LOAD_2ADDR_B32
+    if '2ADDR' in op_name and 'B32' in op_name:
+      offset0 = getattr(inst, 'offset0', 0)
+      offset1 = getattr(inst, 'offset1', 0)
+      mult = 256 if 'STRIDE64' in op_name else 4  # STRIDE64 uses *256, normal uses *4
+
+      if 'STORE' in op_name:
+        data0_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+        data1_reg = inst.data1.offset - 256 if inst.data1.offset >= 256 else inst.data1.offset
+        ended = []
+        for i, (off, data_reg) in enumerate([(offset0, data0_reg), (offset1, data1_reg)]):
+          lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+          base_addr = rvgpr(addr_reg, lane)
+          addr = base_addr + UOp.const(dtypes.uint32, off * mult)
+          val = rvgpr(data_reg, lane)
+          exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+          active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+          ended.append(wlds(addr, val, active).end(lane))
+        return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+      if 'LOAD' in op_name:
+        vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+        ended = []
+        for i, off in enumerate([offset0, offset1]):
+          lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+          base_addr = rvgpr(addr_reg, lane)
+          addr = base_addr + UOp.const(dtypes.uint32, off * mult)
+          val = rlds(addr)
+          store = wvgpr(vdst_reg + i, lane, val, exec_mask)
+          ended.append(store.end(lane))
+        return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+    # Simple B64 variants: DS_STORE_B64, DS_LOAD_B64 (not STOREXCHG)
+    if 'STORE' in op_name and 'B64' in op_name and '2ADDR' not in op_name and 'XCHG' not in op_name:
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      data_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      ended = []
+      for j in range(2):  # 2 dwords
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        base_addr = rvgpr(addr_reg, lane)
+        addr = base_addr + UOp.const(dtypes.uint32, offset + j * 4)
+        val = rvgpr(data_reg + j, lane)
+        exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+        active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+        ended.append(wlds(addr, val, active).end(lane))
+      return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+    if 'LOAD' in op_name and 'B64' in op_name and '2ADDR' not in op_name:
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+      ended = []
+      for j in range(2):  # 2 dwords
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        base_addr = rvgpr(addr_reg, lane)
+        addr = base_addr + UOp.const(dtypes.uint32, offset + j * 4)
+        val = rlds(addr)
+        store = wvgpr(vdst_reg + j, lane, val, exec_mask)
+        ended.append(store.end(lane))
+      return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+    # Simple B32 variants: DS_STORE_B32, DS_LOAD_B32 (not STOREXCHG)
+    if 'STORE' in op_name and 'B32' in op_name and '2ADDR' not in op_name and 'XCHG' not in op_name and 'CMP' not in op_name:
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      data_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      base_addr = rvgpr(addr_reg, lane)
+      addr = base_addr + UOp.const(dtypes.uint32, offset)
+      val = rvgpr(data_reg, lane)
+      exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wlds(addr, val, active).end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    if 'LOAD' in op_name and 'B32' in op_name and '2ADDR' not in op_name:
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      base_addr = rvgpr(addr_reg, lane)
+      addr = base_addr + UOp.const(dtypes.uint32, offset)
+      val = rlds(addr)
+      store = wvgpr(vdst_reg, lane, val, exec_mask)
+      return name, UOp.sink(store.end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    # DS_STOREXCHG_RTN_B32: exchange, return old value
+    if op_name == 'DS_STOREXCHG_RTN_B32':
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      data_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+      # Use separate lane loops for read and write
+      lane1 = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      addr1 = rvgpr(addr_reg, lane1) + UOp.const(dtypes.uint32, offset)
+      old_val = rlds(addr1)
+      vgpr_store = wvgpr(vdst_reg, lane1, old_val, exec_mask)
+      lane2 = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      addr2 = rvgpr(addr_reg, lane2) + UOp.const(dtypes.uint32, offset)
+      new_val = rvgpr(data_reg, lane2)
+      exec_bit = (exec_mask >> lane2.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+      lds_store = wlds(addr2, new_val, active)
+      return name, UOp.sink(vgpr_store.end(lane1), lds_store.end(lane2), inc_pc(), arg=KernelInfo(name=name))
+
+    # DS_STOREXCHG_RTN_B64: exchange 64-bit, return old value
+    if op_name == 'DS_STOREXCHG_RTN_B64':
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      data_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+      ended = []
+      for j in range(2):
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        base_addr = rvgpr(addr_reg, lane)
+        addr = base_addr + UOp.const(dtypes.uint32, offset + j * 4)
+        old_val = rlds(addr)
+        new_val = rvgpr(data_reg + j, lane)
+        exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+        active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+        lds_store = wlds(addr, new_val, active)
+        vgpr_store = wvgpr(vdst_reg + j, lane, old_val, exec_mask)
+        ended.append(UOp.sink(lds_store, vgpr_store).end(lane))
+      return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+    # DS atomic operations with RTN (return old value)
+    atomic_ops = {
+      'DS_ADD_RTN_U32': lambda old, data: old + data,
+      'DS_SUB_RTN_U32': lambda old, data: old - data,
+      'DS_AND_RTN_B32': lambda old, data: old & data,
+      'DS_OR_RTN_B32': lambda old, data: old | data,
+      'DS_XOR_RTN_B32': lambda old, data: old ^ data,
+      'DS_MIN_RTN_U32': lambda old, data: (old < data).where(old, data),
+      'DS_MAX_RTN_U32': lambda old, data: (old > data).where(old, data),
+      'DS_INC_RTN_U32': lambda old, data: (old >= data).where(UOp.const(dtypes.uint32, 0), old + UOp.const(dtypes.uint32, 1)),
+      'DS_DEC_RTN_U32': lambda old, data: (old.eq(UOp.const(dtypes.uint32, 0)) | (old > data)).where(data, old - UOp.const(dtypes.uint32, 1)),
+    }
+    if op_name in atomic_ops:
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      data_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      base_addr = rvgpr(addr_reg, lane)
+      addr = base_addr + UOp.const(dtypes.uint32, offset)
+      old_val = rlds(addr)
+      data_val = rvgpr(data_reg, lane)
+      new_val = atomic_ops[op_name](old_val, data_val)
+      exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+      lds_store = wlds(addr, new_val, active)
+      vgpr_store = wvgpr(vdst_reg, lane, old_val, exec_mask)
+      return name, UOp.sink(UOp.sink(lds_store, vgpr_store).end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    # DS atomic operations without RTN (no return value)
+    atomic_ops_no_rtn = {
+      'DS_ADD_U32': lambda old, data: old + data,
+      'DS_SUB_U32': lambda old, data: old - data,
+      'DS_AND_B32': lambda old, data: old & data,
+      'DS_OR_B32': lambda old, data: old | data,
+      'DS_XOR_B32': lambda old, data: old ^ data,
+      'DS_MIN_U32': lambda old, data: (old < data).where(old, data),
+      'DS_MAX_U32': lambda old, data: (old > data).where(old, data),
+      'DS_INC_U32': lambda old, data: (old >= data).where(UOp.const(dtypes.uint32, 0), old + UOp.const(dtypes.uint32, 1)),
+      'DS_DEC_U32': lambda old, data: (old.eq(UOp.const(dtypes.uint32, 0)) | (old > data)).where(data, old - UOp.const(dtypes.uint32, 1)),
+    }
+    if op_name in atomic_ops_no_rtn:
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      data_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      base_addr = rvgpr(addr_reg, lane)
+      addr = base_addr + UOp.const(dtypes.uint32, offset)
+      old_val = rlds(addr)
+      data_val = rvgpr(data_reg, lane)
+      new_val = atomic_ops_no_rtn[op_name](old_val, data_val)
+      exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wlds(addr, new_val, active).end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    # DS_CMPSTORE_B32: compare and swap
+    if op_name == 'DS_CMPSTORE_B32':
+      offset = getattr(inst, 'offset0', 0) or getattr(inst, 'offset', 0)
+      data_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      data2_reg = inst.data1.offset - 256 if inst.data1.offset >= 256 else inst.data1.offset
+      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      base_addr = rvgpr(addr_reg, lane)
+      addr = base_addr + UOp.const(dtypes.uint32, offset)
+      old_val = rlds(addr)
+      src_val = rvgpr(data_reg, lane)
+      cmp_val = rvgpr(data2_reg, lane)
+      # Only store src_val if old_val == cmp_val, otherwise store old_val (no change)
+      matches = old_val.eq(cmp_val)
+      new_val = matches.where(src_val, old_val)
+      exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wlds(addr, new_val, active).end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    # DS_STOREXCHG_2ADDR_RTN_B32
+    if op_name == 'DS_STOREXCHG_2ADDR_RTN_B32':
+      offset0 = getattr(inst, 'offset0', 0)
+      offset1 = getattr(inst, 'offset1', 0)
+      mult = 4
+      data0_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      data1_reg = inst.data1.offset - 256 if inst.data1.offset >= 256 else inst.data1.offset
+      vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+      ended = []
+      # Combined read-write: read old val, write new val, store old to vgpr
+      for i, (off, data_reg) in enumerate([(offset0, data0_reg), (offset1, data1_reg)]):
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        addr = rvgpr(addr_reg, lane) + UOp.const(dtypes.uint32, off * mult)
+        old_val = rlds(addr).load()  # Explicitly load the value
+        new_val = rvgpr(data_reg, lane)
+        exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+        active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+        lds_store = wlds(addr, new_val, active)
+        vgpr_store = wvgpr(vdst_reg + i, lane, old_val, exec_mask)
+        ended.append(UOp.sink(lds_store, vgpr_store).end(lane))
+      return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+    # DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32
+    if op_name == 'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32':
+      offset0 = getattr(inst, 'offset0', 0)
+      offset1 = getattr(inst, 'offset1', 0)
+      mult = 256
+      data0_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      data1_reg = inst.data1.offset - 256 if inst.data1.offset >= 256 else inst.data1.offset
+      vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+      ended = []
+      # Combined read-write: read old val, write new val, store old to vgpr
+      for i, (off, data_reg) in enumerate([(offset0, data0_reg), (offset1, data1_reg)]):
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        addr = rvgpr(addr_reg, lane) + UOp.const(dtypes.uint32, off * mult)
+        old_val = rlds(addr).load()  # Explicitly load the value
+        new_val = rvgpr(data_reg, lane)
+        exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+        active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+        lds_store = wlds(addr, new_val, active)
+        vgpr_store = wvgpr(vdst_reg + i, lane, old_val, exec_mask)
+        ended.append(UOp.sink(lds_store, vgpr_store).end(lane))
+      return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+    # DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64
+    if op_name == 'DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64':
+      offset0 = getattr(inst, 'offset0', 0)
+      offset1 = getattr(inst, 'offset1', 0)
+      mult = 256
+      data0_reg = inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset
+      data1_reg = inst.data1.offset - 256 if inst.data1.offset >= 256 else inst.data1.offset
+      vdst_reg = inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset
+      ended = []
+      # Combined read-write for each dword
+      dst_idx = 0
+      for off, data_reg in [(offset0, data0_reg), (offset1, data1_reg)]:
+        for j in range(2):  # 2 dwords per 64-bit
+          lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+          addr = rvgpr(addr_reg, lane) + UOp.const(dtypes.uint32, off * mult + j * 4)
+          old_val = rlds(addr).load()  # Explicitly load the value
+          new_val = rvgpr(data_reg + j, lane)
+          exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+          active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+          lds_store = wlds(addr, new_val, active)
+          vgpr_store = wvgpr(vdst_reg + dst_idx, lane, old_val, exec_mask)
+          ended.append(UOp.sink(lds_store, vgpr_store).end(lane))
+          dst_idx += 1
+      return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+    # Default: just increment PC (for unhandled DS ops)
+    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
   # FLAT/GLOBAL: memory loads/stores
@@ -439,9 +916,18 @@ def decode_program(data: bytes) -> dict[int, tuple[str, CompiledRunner|None, lis
         prg = get_program(sink, renderer)
       runner = CompiledRunner(prg)
       globals_list = prg.globals
-      if DEBUG >= 2: print(f"[emu2] PC={i//4}: {repr(inst)}\n{colored(prg.src, 'BLACK')}")
+      if DEBUG >= 2:
+        try:
+          inst_str = repr(inst)
+        except Exception:
+          inst_str = f"<{type(inst).__name__} at PC={i//4}>"
+        print(f"[emu2] PC={i//4}: {inst_str}\n{colored(prg.src, 'BLACK')}")
     except Exception as e:
-      if DEBUG >= 1: print(f"[emu2] Failed to compile PC={i//4} {repr(inst)}: {type(e).__name__}: {e}")
+      try:
+        inst_str = repr(inst)
+      except Exception:
+        inst_str = f"<{type(inst).__name__}>"
+      if DEBUG >= 1: print(f"[emu2] Failed to compile PC={i//4} {inst_str}: {type(e).__name__}: {e}")
       if DEBUG >= 3:
         import traceback
         traceback.print_exc()

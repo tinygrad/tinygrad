@@ -1,14 +1,16 @@
 """Test infrastructure for hardware-validated RDNA3 emulator tests.
 
 Uses run_asm() with memory output, so tests can run on both emulator and real hardware.
-Set USE_HW=1 to run on both emulator and real hardware, comparing results.
+Set USE_HW=1 to run on both emulator and hardware, comparing results.
 """
 import ctypes, os, struct
 from extra.assembly.amd.autogen.rdna3.ins import *
 
-from extra.assembly.amd.emu import WaveState, run_asm, set_valid_mem_ranges
+from extra.assembly.amd.emu2 import run_asm
 from extra.assembly.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, M0
-from extra.assembly.amd.emu import _i32, _f32
+
+def _i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
+def _f32(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xFFFFFFFF))[0]
 
 # For backwards compatibility with tests using SrcEnum.NULL etc.
 class SrcEnum:
@@ -46,6 +48,14 @@ def i642f(i: int) -> float: return struct.unpack('<d', struct.pack('<Q', i))[0]
 
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
+
+# Simple WaveState class for test output parsing (mirrors emu.py interface for tests)
+class WaveState:
+  def __init__(self):
+    self.vgpr = [[0] * 256 for _ in range(32)]  # vgpr[lane][reg]
+    self.sgpr = [0] * 128
+    self.vcc = 0
+    self.scc = 0
 
 def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
   """Generate prologue and epilogue instructions for state capture."""
@@ -110,7 +120,6 @@ def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
   kernel_buf = (ctypes.c_char * len(code)).from_buffer_copy(code)
   lib_ptr = ctypes.addressof(kernel_buf)
 
-  set_valid_mem_ranges({(out_addr, OUT_BYTES), (args_ptr, 8)})
   # rsrc2: USER_SGPR_COUNT=2, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z=1, LDS_SIZE=128 (64KB)
   rsrc2 = 0x19c | (128 << 15)
   result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr, rsrc2)

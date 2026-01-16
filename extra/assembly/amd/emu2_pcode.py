@@ -8,9 +8,9 @@ DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32':
           'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16}
 
 def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None = None) -> tuple[dict[str, UOp], list[tuple[str, UOp]]]:
-  """Parse pcode into UOps. srcs can provide actual UOps for S0, S1, S2, D0, VCC, EXEC, SCC."""
+  """Parse pcode into UOps. srcs can provide actual UOps for S0, S1, S2, D0, VCC, EXEC, SCC, SIMM32."""
   vars: dict[str, UOp] = {n: UOp(Ops.DEFINE_VAR, dtypes.uint32, (), (n, UOp.const(dtypes.uint32, 0), UOp.const(dtypes.uint32, 0xFFFFFFFF)))
-                          for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC']}
+                          for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
   if srcs: vars.update(srcs)
   vars['laneId'] = lane if lane is not None else UOp.const(dtypes.uint32, 0)
   assigns: list[tuple[str, UOp]] = []
@@ -92,30 +92,62 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
           ('F',32): dtypes.float32, ('F',64): dtypes.float64}.get((m.group(2), int(m.group(1))), dtypes.uint32)
     return parse_expr(m.group(3), vars).cast(dt)
 
-  # Lane-indexed: VCC.u64[laneId] - must check BEFORE var.type
-  if (m := re.match(r'([a-zA-Z_]\w*)\.u64\[laneId\]', expr)):
+  # Lane-indexed: VCC.u64[laneId] or VCC.u64[laneId].u64 - must check BEFORE var.type
+  if (m := re.match(r'([a-zA-Z_]\w*)\.u64\[laneId\](?:\.(\w+))?$', expr)):
     v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
     lane = vars['laneId'].cast(dtypes.uint32) if vars['laneId'].dtype != dtypes.uint32 else vars['laneId']
-    return (v >> lane) & UOp.const(dtypes.uint32, 1)
+    result = (v >> lane) & UOp.const(dtypes.uint32, 1)
+    # If there's a type suffix like .u64, cast to that type
+    if m.group(2):
+      dt = DTYPES.get(m.group(2), dtypes.uint32)
+      result = result.cast(dt)
+    return result
 
   # Variable with type: S0.u32 (variable must start with a letter)
   if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)$', expr)):  # Added $ to require full match
     v, dt = vars.get(m.group(1), UOp.const(dtypes.uint32, 0)), DTYPES.get(m.group(2), dtypes.uint32)
     if dt == v.dtype: return v
+    # Special handling for 16-bit types from 32-bit sources (truncate then bitcast)
+    if dt.itemsize == 2 and v.dtype.itemsize == 4:
+      v16 = (v & UOp.const(v.dtype, 0xFFFF)).cast(dtypes.uint16)
+      return v16 if dt == dtypes.uint16 else v16.bitcast(dt)
     # Use cast for size changes, bitcast for same-size type reinterpret
     if dt.itemsize != v.dtype.itemsize: return v.cast(dt)
     return v.bitcast(dt)
 
   # Bit slice: S0[4:0] or S0[4 : 0].u32 (variable must start with a letter)
-  if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):  # Added $
+  if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     hi, lo = int(m.group(2)), int(m.group(3))
     return (vars.get(m.group(1), UOp.const(dtypes.uint32, 0)) >> UOp.const(dtypes.uint32, lo)) & UOp.const(dtypes.uint32, (1<<(hi-lo+1))-1)
+
+  # Bit slice with type prefix: S1.u32[4:0].u32 (common in pcode)
+  if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
+    hi, lo = int(m.group(3)), int(m.group(4))
+    v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
+    return (v >> UOp.const(dtypes.uint32, lo)) & UOp.const(dtypes.uint32, (1<<(hi-lo+1))-1)
+
+  # Single bit access with type prefix: tmp.u32[31] (common in pcode for sign bit checks)
+  if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)\[(\d+)\]$', expr)):
+    bit = int(m.group(3))
+    v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
+    dt = DTYPES.get(m.group(2), dtypes.uint32)
+    if v.dtype != dt:
+      if dt.itemsize != v.dtype.itemsize: v = v.cast(dt)
+      else: v = v.bitcast(dt)
+    # Cast to uint32 for bit manipulation
+    if v.dtype != dtypes.uint32: v = v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
+    return (v >> UOp.const(dtypes.uint32, bit)) & UOp.const(dtypes.uint32, 1)
 
   # Literals
   if (m := re.match(r'0x([0-9a-fA-F]+)', expr)): return UOp.const(dtypes.uint64, int(m.group(1), 16))
   if (m := re.match(r"(\d+)'(\d+)U", expr)): return UOp.const(dtypes.uint32, int(m.group(2)))  # 1'1U -> 1
   if (m := re.match(r'(\d+\.?\d*)F?$', expr)): return UOp.const(dtypes.float32, float(m.group(1)))  # 2.0F or 2.0
   if (m := re.match(r'(\d+)[UL]*$', expr)): return UOp.const(dtypes.uint32, int(m.group(1)))
+
+  # Unary NOT: ~S0.u32
+  if expr.startswith('~'):
+    inner = parse_expr(expr[1:], vars)
+    return inner ^ UOp.const(inner.dtype, (1 << (inner.dtype.itemsize * 8)) - 1)
 
   # Variable
   if expr in vars: return vars[expr]
