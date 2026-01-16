@@ -83,7 +83,7 @@ class TestMainOnnxOps(TestOnnxOps):
     Gather = onnx_ops["Gather"]
 
     x = Tensor([10, 20, 30, 40, 50])
-    indices_list = [np.array([0, 1], dtype=np.int64), np.array([2, 3], dtype=np.int64), np.array([4, 0], dtype=np.int64)]
+    indices_list = [[0, 1], [2, 3], [4, 0]]
     expected = [[10, 20], [30, 40], [50, 10]]
 
     # without JIT: correct
