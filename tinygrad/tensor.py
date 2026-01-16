@@ -131,11 +131,11 @@ class Tensor(OpMixin):
       assert _dtype is None or _dtype==data.dtype or data.dtype==dtypes.index, f"dtype mismatch: {_dtype} vs {data.dtype}"
       # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
       if data.dtype==dtypes.index: data = _index_to_concrete_int(data)
-      if data.op is Ops.BIND:  # type: ignore  # mypy type narrowing is bugged here
-        var, val = data.unbind()  # type: ignore
+      if data.op is Ops.BIND:
+        var, val = data.unbind()
         # give the bound constant a device
         const = UOp.const(var.dtype, val, _device, ())
-        data = data.replace(src=(var.replace(src=const.src), const))  # type: ignore
+        data = data.replace(src=(var.replace(src=const.src), const))
     elif data is None:
       data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
     elif isinstance(data, get_args(ConstType)):
