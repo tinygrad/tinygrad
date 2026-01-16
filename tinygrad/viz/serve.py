@@ -295,7 +295,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
       if op_name == "SALU": name = "WAVE_SALU"
       add(name, p, width=width, idx=int("OTHER" in name))
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
-    if isinstance(p, (VMEMEXEC, ALUEXEC)): add((name:=str(p.src).split('.')[1]), p, idx=int("ALT" in name))
+    if isinstance(p, (VMEMEXEC, ALUEXEC)): add((name:=str(p.src).split('.')[1]).replace("_ALT", ""), p, idx=int("ALT" in name))
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
