@@ -289,7 +289,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
     ret.append(ProfileRangeEvent(r, f"{op_name if op_name is not None else name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
   for p in decode(e.blob):
-    if len(ret) > 50_000: break
+    if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     if isinstance(p, INST):
       op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
       name, width = (op_name, 10 if "BARRIER" in op_name else 1)
