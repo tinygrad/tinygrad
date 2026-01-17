@@ -94,8 +94,7 @@ def _make_test(f: str, arch: str, test_type: str):
           passed += 1
         except ValueError: skipped += 1  # skip invalid opcodes not in enum
       print(f"{name}: {passed} passed, {skipped} skipped")
-      if arch in ("rdna3", "rdna4"):
-        self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
+      self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
     elif test_type == "disasm":
       to_test = []
       for _, data in tests:
@@ -106,9 +105,8 @@ def _make_test(f: str, arch: str, test_type: str):
         except: pass
       skipped = len(tests) - len(to_test)
       print(f"{name}: {len(to_test)} passed, {skipped} skipped")
-      if arch in ("rdna3", "rdna4"):
-        self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
-        for (data, _), llvm in zip(to_test, _compile_asm_batch([t[1] for t in to_test], arch)): self.assertEqual(llvm, data)
+      self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
+      for (data, _), llvm in zip(to_test, _compile_asm_batch([t[1] for t in to_test], arch)): self.assertEqual(llvm, data)
   return test
 
 class TestLLVM(unittest.TestCase): pass
