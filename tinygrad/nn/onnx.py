@@ -374,10 +374,12 @@ def _cached_to_python_const(t:Tensor):
   return t.tolist()
 
 # Tensor -> python value cache for parameters
-def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
+def to_python_const(t:Any, op:str, idx:int, name:str="", cache:dict|None=None) -> list[ConstType]|ConstType|bytes:
   if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
+  if cache is not None and name in cache: return cache[name]
   global cache_misses
   ret = _cached_to_python_const(t)
+  if cache is not None: cache[name] = ret
   if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
     print(f"Cache miss for {t}")
     cache_misses = info.misses
@@ -406,6 +408,8 @@ class OnnxRunner:
     self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
     # track names from initializers and Constant nodes for fast path optimizations
     self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
+    # cache python const values by output name (for Shape outputs used by Reshape, etc.)
+    self._python_const_cache: dict[str, Any] = {}
 
     self.old_training = Tensor.training
     Tensor.training = self.is_training
@@ -462,15 +466,16 @@ class OnnxRunner:
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
     for num, node in enumerate(self.graph_nodes):
-      inps = [to_python_const(self.graph_values[name], node.op, i) for i,name in enumerate(node.inputs)]
+      inps = [to_python_const(self.graph_values[name], node.op, i, name, self._python_const_cache) for i,name in enumerate(node.inputs)]
       opts = node.opts
 
       # provide additional opts
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
       if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
       # for Gather, convert indices to python const if from Constant/initializer for shrink fast path
-      if node.op == "Gather" and len(node.inputs) > 1 and node.inputs[1] in self.const_names:
-        inps[1] = _cached_to_python_const(self.graph_values[node.inputs[1]])
+      if node.op == "Gather" and len(node.inputs) > 1 and (n := node.inputs[1]) in self.const_names:
+        if n not in self._python_const_cache: self._python_const_cache[n] = _cached_to_python_const(self.graph_values[n])
+        inps[1] = self._python_const_cache[n]
 
       if debug >= 1: print((f"[{self.graph_name}] " if self.graph_name else "") + f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
