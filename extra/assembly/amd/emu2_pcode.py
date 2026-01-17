@@ -28,10 +28,10 @@ def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
       'D0.f64 = (exponent(S2.f64) > 1023) ? (2.0 ** 128 * fma(S0.f64, S1.f64, S2.f64)) : (2.0 ** -128 * fma(S0.f64, S1.f64, S2.f64))')
   if op_name == 'V_DIV_FIXUP_F32':
     pcode = pcode.replace('D0.f32 = sign_out ? -abs(S0.f32) : abs(S0.f32)',
-      'D0.f32 = isNAN(S0.f32) ? (sign_out ? -OVERFLOW_F32 : OVERFLOW_F32) : (sign_out ? -abs(S0.f32) : abs(S0.f32))')
+      'D0.f32 = isNAN(S0.f32) ? (sign_out ? -INF.f32 : +INF.f32) : (sign_out ? -abs(S0.f32) : abs(S0.f32))')
   if op_name == 'V_DIV_FIXUP_F64':
     pcode = pcode.replace('D0.f64 = sign_out ? -abs(S0.f64) : abs(S0.f64)',
-      'D0.f64 = isNAN(S0.f64) ? (sign_out ? -OVERFLOW_F64 : OVERFLOW_F64) : (sign_out ? -abs(S0.f64) : abs(S0.f64))')
+      'D0.f64 = isNAN(S0.f64) ? (sign_out ? -INF : +INF) : (sign_out ? -abs(S0.f64) : abs(S0.f64))')
   if 'V_DIV_SCALE' in op_name:
     dt = 'f32' if 'F32' in op_name else 'f64'
     exp_lim, ldexp_val = ('23', '64') if dt == 'f32' else ('52', '128')
@@ -63,6 +63,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
                           for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
   if srcs: vars.update(srcs)
   vars['laneId'] = lane if lane is not None else UOp.const(dtypes.uint32, 0)
+  vars['WAVE_MODE'] = {'IEEE': UOp.const(dtypes.uint32, 1)}  # IEEE mode is the default
   assigns: list[tuple[str, UOp]] = []
 
   def parse_block(lines: list[str], start: int = 0) -> tuple[int, dict[str, UOp]]:
@@ -73,7 +74,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
       line = lines[i]
       # End of block markers
       if re.match(r'(elsif|else|endif|endfor)\b', line, re.IGNORECASE): break
-      # For loop: unroll into nested WHERE
+      # For loop: unroll and execute body for each iteration
       if (m := re.match(r'for\s+(\w+)\s+in\s+(\d+)\s*:\s*(\d+)\s+do', line, re.IGNORECASE)):
         loop_var, start_val, end_val = m.group(1), int(m.group(2)), int(m.group(3))
         i += 1
@@ -84,25 +85,20 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           elif re.match(r'endfor\b', lines[i], re.IGNORECASE): depth -= 1
           if depth > 0: body_lines.append(lines[i])
           i += 1
-        # Find condition and assignment in body (handles CLZ/CTZ pattern)
-        cond_expr, assign_var, assign_expr = None, None, None
-        for bl in body_lines:
-          if (m2 := re.match(r'if\s+(.+?)\s+then', bl, re.IGNORECASE)): cond_expr = m2.group(1)
-          elif (m2 := re.match(r'(\w+)(?:\.\w+)?\s*=\s*(.+)', bl)) and 'break' not in bl.lower():
-            assign_var, assign_expr = m2.group(1), m2.group(2).rstrip(';').strip()
-        if cond_expr and assign_var and assign_expr:
-          # Unroll loop backwards to build nested WHERE
-          result = block_assigns.get(assign_var, vars.get(assign_var, UOp.const(dtypes.int, -1)))
-          for loop_i in range(end_val, start_val - 1, -1):
-            loop_vars = vars.copy(); loop_vars.update(block_assigns)
-            loop_vars[loop_var] = UOp.const(dtypes.uint32, loop_i)
-            cond = parse_expr(cond_expr, loop_vars)
-            if cond.dtype != dtypes.bool: cond = cond.ne(UOp.const(cond.dtype, 0))
-            assign_val = parse_expr(assign_expr, loop_vars)
-            if assign_val.dtype != result.dtype: assign_val = assign_val.cast(result.dtype)
-            result = cond.where(assign_val, result)
-          block_assigns[assign_var] = result
-          vars[assign_var] = result
+        # Unroll: execute body for each iteration value
+        for loop_i in range(start_val, end_val + 1):
+          # Substitute loop variable in body lines
+          subst_lines = []
+          for bl in body_lines:
+            # Replace .type[loop_var] patterns FIRST: OPSEL.u3[i] -> OPSEL.u3[2]
+            subst = re.sub(rf'\.(\w+)\[{loop_var}\]', rf'.\g<1>[{loop_i}]', bl)
+            # Replace array indexing patterns: VAR[loop_var] -> VAR{loop_i} (but not .type[i])
+            subst = re.sub(rf'(?<!\.)\b(\w+)\[{loop_var}\]', rf'\g<1>{{{loop_i}}}', subst)
+            subst_lines.append(subst)
+          # Parse substituted body as a nested block
+          _, iter_assigns = parse_block(subst_lines, 0)
+          block_assigns.update(iter_assigns)
+          vars.update(iter_assigns)
         continue
       # If/elsif/else block: build nested WHERE
       if (m := re.match(r'if\s+(.+?)\s+then$', line, re.IGNORECASE)):
@@ -143,12 +139,59 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         ctx = {**vars, **block_assigns}
         addr = parse_expr(m.group(1), ctx)
         rhs = parse_expr(m.group(4), ctx)
+        dt = DTYPES.get(m.group(2), dtypes.uint32)
         if m.group(3) == '+':  # compound assignment: read old value, add rhs (pm_add_loads will add the load)
-          lds = vars.get('_lds')
-          idx = (addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index)
-          rhs = lds.index(idx) + rhs if lds is not None else rhs
+          mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')  # Use vmem for FLAT/GLOBAL, lds for DS
+          if mem is not None:
+            shift_amt = UOp.const(dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, 2)
+            idx = (addr >> shift_amt).cast(dtypes.index)
+            old_val = mem.index(idx)
+            # For 64-bit types, read both dwords and combine
+            if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+              four = UOp.const(dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, 4)
+              hi_idx = ((addr + four) >> shift_amt).cast(dtypes.index)
+              old_val = old_val.cast(dtypes.uint64) | (mem.index(hi_idx).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+            rhs = old_val + rhs
         assigns.append((f'MEM[{m.group(1)}].{m.group(2)}', (addr, rhs)))
         i += 1; continue
+      # Lambda definition: NAME = lambda(args) (body) - must check FIRST
+      if (m := re.match(r'(\w+)\s*=\s*lambda\(([^)]*)\)\s*\(', line)):
+        lambda_name, lambda_args = m.group(1), [a.strip() for a in m.group(2).split(',')]
+        # Collect multi-line lambda body until matching close paren
+        body_start = line[m.end():]  # Start after opening paren (skip it)
+        depth = 1
+        # Count parens in body_start to handle single-line lambdas
+        close_pos = -1
+        for j, ch in enumerate(body_start):
+          if ch == '(': depth += 1
+          elif ch == ')':
+            depth -= 1
+            if depth == 0: close_pos = j; break
+        if close_pos >= 0:
+          # Lambda body is complete on this line - take content up to closing paren
+          body = body_start[:close_pos].strip()
+          i += 1  # Move past this line
+        else:
+          body_lines = [body_start] if body_start.strip() else []
+          i += 1
+          while i < len(lines) and depth > 0:
+            # Find position where depth becomes 0
+            close_pos = -1
+            for j, ch in enumerate(lines[i]):
+              if ch == '(': depth += 1
+              elif ch == ')':
+                depth -= 1
+                if depth == 0: close_pos = j; break
+            if close_pos >= 0:
+              # Take content up to the closing paren
+              body_lines.append(lines[i][:close_pos])
+            else:
+              body_lines.append(lines[i])
+            i += 1
+          body = ' '.join(body_lines).strip()
+          # Don't increment i here - while loop already moved it past the lambda body
+        vars[lambda_name] = ('lambda', lambda_args, body)
+        continue
       # VAR[high:low] = value or VAR[high:low].type = value
       if (m := re.match(r'(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?\s*=\s*(.+)', line)):
         var_name, high_bit, low_bit, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
@@ -157,8 +200,17 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         # Also update vars to accumulate the bit slice (needed for later references like D0 = tmp)
         if var_name not in vars: vars[var_name] = UOp.const(dtypes.uint64 if high_bit >= 32 else dtypes.uint32, 0)
         old_val = block_assigns.get(var_name, vars.get(var_name))
-        # Convert val to uint bits if it's a float type
-        val_bits = val.bitcast(dtypes.uint16).cast(dtypes.uint32) if val.dtype == dtypes.half else val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+        # Convert val to uint bits - use bitcast for floats to preserve bit pattern
+        if val.dtype == dtypes.half:
+          val_bits = val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+        elif val.dtype == dtypes.float32:
+          val_bits = val.bitcast(dtypes.uint32)
+        elif val.dtype == dtypes.float64:
+          val_bits = val.bitcast(dtypes.uint64)
+        elif val.dtype != dtypes.uint32:
+          val_bits = val.cast(dtypes.uint32)
+        else:
+          val_bits = val
         mask = UOp.const(dtypes.uint32, ((1 << (high_bit - low_bit + 1)) - 1) << low_bit)
         new_val = (old_val & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, low_bit))
         block_assigns[var_name] = new_val
@@ -168,12 +220,28 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
       if (m := re.match(r'(\w+(?:\.\w+)?)\s*\+=\s*(.+)', line)):
         var_name = m.group(1).split('.')[0]
         old_val = block_assigns.get(var_name, vars.get(var_name, UOp.const(dtypes.uint32, 0)))
-        block_assigns[var_name] = old_val + parse_expr(m.group(2), {**vars, **block_assigns})
+        rhs = parse_expr(m.group(2), {**vars, **block_assigns})
+        if rhs.dtype != old_val.dtype: rhs = rhs.cast(old_val.dtype)
+        new_val = old_val + rhs
+        block_assigns[var_name] = new_val
+        vars[var_name] = new_val
         i += 1; continue
       if (m := re.match(r'(\w+(?:\.\w+)?)\s*-=\s*(.+)', line)):
         var_name = m.group(1).split('.')[0]
         old_val = block_assigns.get(var_name, vars.get(var_name, UOp.const(dtypes.uint32, 0)))
-        block_assigns[var_name] = old_val - parse_expr(m.group(2), {**vars, **block_assigns})
+        rhs = parse_expr(m.group(2), {**vars, **block_assigns})
+        if rhs.dtype != old_val.dtype: rhs = rhs.cast(old_val.dtype)
+        new_val = old_val - rhs
+        block_assigns[var_name] = new_val
+        vars[var_name] = new_val
+        i += 1; continue
+      # Array-indexed assignment: VAR{idx} = value (from loop unrolling)
+      if (m := re.match(r'(\w+)\{(\d+)\}\s*=\s*(.+)', line)):
+        var_name, idx = m.group(1), int(m.group(2))
+        val = parse_expr(m.group(3), {**vars, **block_assigns})
+        actual_var = f'{var_name}{idx}'
+        block_assigns[actual_var] = val
+        vars[actual_var] = val
         i += 1; continue
       # Regular assignment: VAR = value
       if (m := re.match(r'(\w+(?:\.\w+)?(?:\[\w+\])?)\s*=\s*(.+)', line)) and not re.search(r'[<>=!]=', line[:line.find('=')]):
@@ -186,25 +254,6 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
       if (m := re.match(r'declare\s+(\w+)', line)):
         vars[m.group(1)] = UOp.const(dtypes.uint32, 0)
         i += 1; continue
-      # Lambda definition: NAME = lambda(args) (body) - store as special marker
-      if (m := re.match(r'(\w+)\s*=\s*lambda\(([^)]*)\)\s*\(', line)):
-        lambda_name, lambda_args = m.group(1), [a.strip() for a in m.group(2).split(',')]
-        # Collect multi-line lambda body until matching close paren
-        body_start = line[m.end()-1:]  # Start after opening paren
-        body_lines = [body_start]
-        depth = 1
-        i += 1
-        while i < len(lines) and depth > 0:
-          for ch in lines[i]:
-            if ch == '(': depth += 1
-            elif ch == ')': depth -= 1
-          body_lines.append(lines[i])
-          i += 1
-        # Remove trailing close paren and join
-        body = ' '.join(body_lines).strip()
-        if body.endswith(')'): body = body[:-1]
-        vars[lambda_name] = ('lambda', lambda_args, body.strip())
-        continue
       i += 1
     return i, block_assigns
 
@@ -272,18 +321,30 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
         lhs, rhs = expr[:i].strip(), expr[i+len(op):].strip()
         if lhs and rhs:
           l, r = parse_expr(lhs, vars), parse_expr(rhs, vars)
-          if op_type in ('>>', '<<', '>=', '<=', '==', '!=', '>', '<') and l.dtype != r.dtype: r = r.cast(l.dtype)
+          if op_type in ('>>', '<<', '>=', '<=', '==', '!=', '>', '<') and l.dtype != r.dtype:
+            # For comparisons with negative numbers, use signed comparison
+            if r.dtype == dtypes.int and r.op == Ops.CONST and r.arg < 0:
+              l = l.cast(dtypes.int)  # Convert left to signed for proper signed comparison
+            else:
+              r = r.cast(l.dtype)
           if op_type in ('|', '^', '&') and l.dtype != r.dtype:
             if l.dtype.itemsize == r.dtype.itemsize:
               target = dtypes.uint32 if l.dtype.itemsize == 4 else dtypes.uint64 if l.dtype.itemsize == 8 else l.dtype
               l, r = l.bitcast(target), r.bitcast(target)
             else: r = r.cast(l.dtype)
           return _BINOPS[op_type](l, r)
-  # Type cast: 64'U(...)
+  # Type cast: 64'U(...) or 32'F(...) etc. - for F types, use bitcast to preserve bit patterns
   if (m := re.match(r"(\d+)'([UIFB])\((.+)\)", expr)):
     dt = {('U',32): dtypes.uint32, ('U',64): dtypes.uint64, ('I',32): dtypes.int, ('I',64): dtypes.int64,
           ('F',32): dtypes.float32, ('F',64): dtypes.float64}.get((m.group(2), int(m.group(1))), dtypes.uint32)
-    return parse_expr(m.group(3), vars).cast(dt)
+    inner = parse_expr(m.group(3), vars)
+    # For float types with integer source (like 32'F(0xffc00000)), use bitcast to preserve bit patterns
+    if m.group(2) == 'F' and inner.dtype in (dtypes.uint32, dtypes.uint64, dtypes.ulong, dtypes.int, dtypes.int64):
+      # Ensure size matches before bitcast
+      if inner.dtype.itemsize != dt.itemsize:
+        inner = inner.cast(dtypes.uint32 if dt.itemsize == 4 else dtypes.uint64)
+      return inner.bitcast(dt)
+    return inner.cast(dt)
   # Lane-indexed: VCC.u64[laneId]
   if (m := re.match(r'([a-zA-Z_]\w*)\.u64\[laneId\](?:\.(\w+))?$', expr)):
     v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
@@ -291,9 +352,13 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     result = (v >> lane) & UOp.const(dtypes.uint32, 1)
     if m.group(2): result = result.cast(DTYPES.get(m.group(2), dtypes.uint32))
     return result
-  # Variable with type: S0.u32
-  if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)$', expr)):
-    v, dt = vars.get(m.group(1), UOp.const(dtypes.uint32, 0)), DTYPES.get(m.group(2), dtypes.uint32)
+  # Variable with type: S0.u32 or dict access: WAVE_MODE.IEEE
+  # (Skip special constants like INF.f32 which are handled later)
+  if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)$', expr)) and m.group(1) not in ('INF', 'UNDERFLOW', 'OVERFLOW'):
+    v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
+    # Handle dict access (e.g., WAVE_MODE.IEEE)
+    if isinstance(v, dict): return v.get(m.group(2), UOp.const(dtypes.uint32, 0))
+    dt = DTYPES.get(m.group(2), dtypes.uint32)
     if dt == v.dtype: return v
     if dt.itemsize == 2 and v.dtype.itemsize == 4:
       v16 = (v & UOp.const(v.dtype, 0xFFFF)).cast(dtypes.uint16)
@@ -307,6 +372,21 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
     result = shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
     # If type suffix specified, convert bits to that type
+    if type_suffix:
+      dt = DTYPES.get(type_suffix, dtypes.uint32)
+      if dt == dtypes.half:
+        result = result.cast(dtypes.uint16).bitcast(dtypes.half)
+      elif dt != result.dtype:
+        result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
+    return result
+  # Array-indexed bit slice: S{2}[15:0] or S{2}[15:0].f16 (from loop unrolling)
+  if (m := re.match(r'([a-zA-Z_]\w*)\{(\d+)\}\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
+    var_name, idx, hi, lo, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4)), m.group(5)
+    actual_var = f'{var_name}{idx}'
+    val = vars.get(actual_var, UOp.const(dtypes.uint32, 0))
+    shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+    shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
+    result = shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
     if type_suffix:
       dt = DTYPES.get(type_suffix, dtypes.uint32)
       if dt == dtypes.half:
@@ -337,21 +417,56 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     dt = {1: dtypes.uint32, 8: dtypes.uint8, 16: dtypes.int16 if 'U' not in expr else dtypes.uint16,
           32: dtypes.int if 'U' not in expr else dtypes.uint32, 64: dtypes.int64 if 'U' not in expr else dtypes.uint64}.get(bits, dtypes.uint32)
     return UOp.const(dt, val)
-  if (m := re.match(r'(-?\d+)[UL]*$', expr)):
+  if (m := re.match(r'(-?\d+)(ULL|LL|UL|L|U)?$', expr)):
     val = int(m.group(1))
-    return UOp.const(dtypes.int if val < 0 else dtypes.uint32, val)
+    suffix = m.group(2) or ''
+    if 'LL' in suffix: dt = dtypes.uint64 if 'U' in suffix else dtypes.int64
+    elif 'L' in suffix: dt = dtypes.uint64 if 'U' in suffix else dtypes.int64  # Treat L as 64-bit too
+    elif 'U' in suffix: dt = dtypes.uint32
+    else: dt = dtypes.int if val < 0 else dtypes.uint32
+    return UOp.const(dt, val)
   if (m := re.match(r'-?(\d+\.\d+)F?$', expr)): return UOp.const(dtypes.float32, float(expr.rstrip('F')))
   if (m := re.match(r'-?(\d+)F$', expr)): return UOp.const(dtypes.float32, float(expr.rstrip('F')))
-  # Unary NOT
+  # Unary bitwise NOT
   if expr.startswith('~'):
     inner = parse_expr(expr[1:], vars)
     return inner ^ UOp.const(inner.dtype, (1 << (inner.dtype.itemsize * 8)) - 1)
+  # Unary logical NOT: !x means x == 0
+  if expr.startswith('!'):
+    inner = parse_expr(expr[1:], vars)
+    return inner.eq(UOp.const(inner.dtype, 0))
   # Unary minus
   if expr.startswith('-') and len(expr) > 1 and expr[1] not in '0123456789':
     return parse_expr(expr[1:], vars).neg()
   # Variable
   if expr in vars: return vars[expr]
   if expr == 'PI': return UOp.const(dtypes.float32, 3.141592653589793)
+  # IEEE 754 special constants (handle both +INF and INF forms since unary minus is handled separately)
+  if expr in ('+INF', 'INF'): return UOp.const(dtypes.float64, float('inf'))
+  if expr == '-INF': return UOp.const(dtypes.float64, float('-inf'))
+  if expr in ('+INF.f32', 'INF.f32'): return UOp.const(dtypes.float32, float('inf'))
+  if expr == '-INF.f32': return UOp.const(dtypes.float32, float('-inf'))
+  if expr in ('+INF.f16', 'INF.f16'): return UOp.const(dtypes.half, float('inf'))
+  if expr == '-INF.f16': return UOp.const(dtypes.half, float('-inf'))
+  # Overflow/underflow: smallest denormal (underflow) and largest finite (overflow)
+  if expr == 'UNDERFLOW_F32': return UOp.const(dtypes.uint32, 0x00000001).bitcast(dtypes.float32)  # ~1.4e-45
+  if expr == 'OVERFLOW_F32': return UOp.const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)  # ~3.4e38
+  if expr == 'UNDERFLOW_F64': return UOp.const(dtypes.uint64, 0x0000000000000001).bitcast(dtypes.float64)
+  if expr == 'OVERFLOW_F64': return UOp.const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
+  # Array-indexed variable with type: S{0}.f32, in{1}.f32 (curly braces from loop unrolling)
+  if (m := re.match(r'([a-zA-Z_]\w*)\{(\d+)\}\.(\w+)$', expr)):
+    var_name, idx, type_suffix = m.group(1), int(m.group(2)), m.group(3)
+    # Map array index to actual variable: S{0} -> S0, in{0} -> in0
+    actual_var = f'{var_name}{idx}'
+    v = vars.get(actual_var, UOp.const(dtypes.uint32, 0))
+    dt = DTYPES.get(type_suffix, dtypes.uint32)
+    if dt == v.dtype: return v
+    return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
+  # Array-indexed variable: S{0}, in{1} (curly braces from loop unrolling)
+  if (m := re.match(r'([a-zA-Z_]\w*)\{(\d+)\}$', expr)):
+    var_name, idx = m.group(1), int(m.group(2))
+    actual_var = f'{var_name}{idx}'
+    return vars.get(actual_var, UOp.const(dtypes.uint32, 0))
   # Brace concatenation: { hi, lo }
   if (m := re.match(r'\{\s*(.+?)\s*,\s*(.+?)\s*\}', expr)):
     high = parse_expr(m.group(1), vars).cast(dtypes.uint64)
@@ -360,16 +475,24 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
   # MEM[addr].type
   if (m := re.match(r'MEM\[(.+)\]\.(\w+)', expr)):
     addr = parse_expr(m.group(1), vars)
-    if addr.dtype != dtypes.uint32: addr = addr.cast(dtypes.uint32)
     dt = DTYPES.get(m.group(2), dtypes.uint32)
-    lds = vars.get('_lds')
-    if lds is None: return UOp.const(dt, 0)
-    idx = (addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index)
-    val = lds.index(idx)  # Don't call .load() - pm_add_loads will add it
-    if dt in (dtypes.uint64, dtypes.int64):
-      hi_idx = ((addr + UOp.const(dtypes.uint32, 4)) >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index)
-      val = val.cast(dtypes.uint64) | (lds.index(hi_idx).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+    mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')  # Use vmem for FLAT/GLOBAL, lds for DS
+    if mem is None: return UOp.const(dt, 0)
+    # Use appropriate shift based on address dtype (64-bit for vmem, 32-bit for lds)
+    shift_amt = UOp.const(dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, 2)
+    idx = (addr >> shift_amt).cast(dtypes.index)
+    val = mem.index(idx)  # Don't call .load() - pm_add_loads will add it
+    if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+      four = UOp.const(dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, 4)
+      hi_idx = ((addr + four) >> shift_amt).cast(dtypes.index)
+      val = val.cast(dtypes.uint64) | (mem.index(hi_idx).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
     return val
+  # Array element access: VAR[index] where index is a constant - maps to VAR{index} variable
+  if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\]$', expr)):
+    var_name, idx = m.group(1), int(m.group(2))
+    actual_var = f'{var_name}{idx}'
+    if actual_var in vars: return vars[actual_var]
+    # Fall through to bit slice handling if not found as array element
   # VAR[high:low]
   if (m := re.match(r'(\w+)\[(\d+)\s*:\s*(\d+)\]', expr)):
     var_name, high_bit, low_bit = m.group(1), int(m.group(2)), int(m.group(3))
@@ -414,7 +537,11 @@ def _floor(x: UOp) -> UOp:
 def _f16_extract(v: UOp) -> UOp:
   return (v & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
-def _isnan_f32(v: UOp) -> UOp:
+def _isnan(v: UOp) -> UOp:
+  if v.dtype == dtypes.float64:
+    v64 = v.bitcast(dtypes.uint64)
+    exp_mask, mant_mask = UOp.const(dtypes.uint64, 0x7FF0000000000000), UOp.const(dtypes.uint64, 0x000FFFFFFFFFFFFF)
+    return (v64 & exp_mask).eq(exp_mask) & (v64 & mant_mask).ne(UOp.const(dtypes.uint64, 0))
   v32 = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v
   return (v32 & UOp.const(dtypes.uint32, 0x7F800000)).eq(UOp.const(dtypes.uint32, 0x7F800000)) & \
          (v32 & UOp.const(dtypes.uint32, 0x007FFFFF)).ne(UOp.const(dtypes.uint32, 0))
@@ -472,16 +599,27 @@ def _register_funcs():
   # Type conversions
   for src, dst in [('i32', dtypes.float32), ('u32', dtypes.float32)]:
     _FUNC_TABLE.append((rf'{src}_to_f32\((.+)\)', 1, lambda a, v, m, d=dst: a[0].cast(dtypes.int if 'i32' in m.group(0) else dtypes.uint32).cast(d)))
-  for src, dst in [('f32', dtypes.int), ('f32', dtypes.uint32)]:
-    _FUNC_TABLE.append((rf'f32_to_{dst.name.replace("dtypes.", "")}\((.+)\)', 1, lambda a, v, m, d=dst: UOp(Ops.TRUNC, a[0].dtype, (a[0],)).cast(d)))
+  _FUNC_TABLE.append((r'f32_to_i32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float32).dtype, (a[0].bitcast(dtypes.float32),)).cast(dtypes.int)))
+  _FUNC_TABLE.append((r'f32_to_u32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float32).dtype, (a[0].bitcast(dtypes.float32),)).cast(dtypes.uint32)))
   _FUNC_TABLE.append((r'f16_to_f32\((.+)\)', 1, lambda a, v, m: _f16_extract(a[0]).cast(dtypes.float32)))
   _FUNC_TABLE.append((r'f32_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.half)))
   _FUNC_TABLE.append((r'f16_to_i16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, _f16_extract(a[0]).dtype, (_f16_extract(a[0]),)).cast(dtypes.int16)))
   _FUNC_TABLE.append((r'f16_to_u16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, _f16_extract(a[0]).dtype, (_f16_extract(a[0]),)).cast(dtypes.uint16)))
   # Float classification
-  _FUNC_TABLE.append((r'isNAN\((.+)\)', 1, lambda a, v, m: _isnan_f32(a[0])))
+  _FUNC_TABLE.append((r'isNAN\((.+)\)', 1, lambda a, v, m: _isnan(a[0])))
   _FUNC_TABLE.append((r'isSignalNAN\((.+)\)', 0, lambda a, v, m: _check_nan(m.group(1), v, quiet=False)))
   _FUNC_TABLE.append((r'isQuietNAN\((.+)\)', 0, lambda a, v, m: _check_nan(m.group(1), v, quiet=True)))
+  # cvtToQuietNAN: convert signaling NaN to quiet NaN by setting the quiet bit
+  def _cvt_to_quiet_nan(a, v, m):
+    val = a[0]
+    if val.dtype == dtypes.float64:
+      return (val.bitcast(dtypes.uint64) | UOp.const(dtypes.uint64, 0x0008000000000000)).bitcast(dtypes.float64)  # Set bit 51
+    elif val.dtype == dtypes.half:
+      return (val.bitcast(dtypes.uint16) | UOp.const(dtypes.uint16, 0x0200)).bitcast(dtypes.half)  # Set bit 9
+    else:  # f32
+      v32 = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
+      return (v32 | UOp.const(dtypes.uint32, 0x00400000)).bitcast(dtypes.float32)  # Set bit 22
+  _FUNC_TABLE.append((r'cvtToQuietNAN\((.+)\)', 1, _cvt_to_quiet_nan))
   _FUNC_TABLE.append((r'exponent\((.+)\)', 1, lambda a, v, m: ((a[0].bitcast(dtypes.uint16) if a[0].dtype == dtypes.half else (a[0] & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 10)) & UOp.const(dtypes.uint32, 0x1F) if '.f16' in m.group(1) or a[0].dtype == dtypes.half else
                                                               ((a[0].bitcast(dtypes.uint32) if a[0].dtype == dtypes.float32 else a[0]) >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)))
   _FUNC_TABLE.append((r'sign\((.+)\)', 1, lambda a, v, m: ((a[0].bitcast(dtypes.uint16) if a[0].dtype == dtypes.half else (a[0] & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 15)) & UOp.const(dtypes.uint32, 1) if '.f16' in m.group(1) or a[0].dtype == dtypes.half else
