@@ -6,6 +6,7 @@ from tinygrad.uop.ops import Ops, UOp
 DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32': dtypes.uint32,
           'u64': dtypes.uint64, 'i64': dtypes.int64, 'f64': dtypes.float64, 'b64': dtypes.uint64,
           'u16': dtypes.uint16, 'i16': dtypes.short, 'f16': dtypes.half, 'b16': dtypes.uint16,
+          'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8,
           'u1': dtypes.uint32}  # 1-bit treated as uint32 for comparisons
 
 # Binary operators: op_type -> lambda (l, r) -> result
@@ -13,7 +14,8 @@ _BINOPS = {
   '|': lambda l, r: l | r, '^': lambda l, r: l ^ r, '&': lambda l, r: l & r,
   '>=': lambda l, r: l >= r, '<=': lambda l, r: l <= r, '==': lambda l, r: l.eq(r), '!=': lambda l, r: l.ne(r),
   '>>': lambda l, r: l >> r, '<<': lambda l, r: l << r, '>': lambda l, r: l > r, '<': lambda l, r: l < r,
-  '+': lambda l, r: l + r, '*': lambda l, r: l * (r.cast(l.dtype) if l.dtype != r.dtype and l.dtype in (dtypes.float32, dtypes.float64) else r),
+  '+': lambda l, r: l + (r.cast(l.dtype) if l.dtype.itemsize > r.dtype.itemsize else r),
+  '*': lambda l, r: l * (r.cast(l.dtype) if l.dtype != r.dtype and l.dtype in (dtypes.float32, dtypes.float64) else r),
   '/': lambda l, r: l / r,
   '-': lambda l, r: UOp.const(l.dtype, l.arg - r.arg) if l.op == Ops.CONST and r.op == Ops.CONST else l - r,
   '**': lambda l, r: UOp(Ops.EXP2, l.dtype, (r.cast(l.dtype),)) if l.op == Ops.CONST and l.arg == 2.0 else l,
@@ -273,7 +275,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
   # Check which vars already have bit slice assigns
   vars_with_slices = set(dest.split('[')[0] for dest, _ in assigns if '[' in dest)
   for var, val in final_assigns.items():
-    if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA']:
+    if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA']:
       # Skip if this var was updated via bit slices only (not a direct assignment)
       if var in vars_with_slices:
         # Check if there's also a direct assignment like "D0.b32 = tmp"
@@ -377,8 +379,17 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
   # Bit slice: S0[4:0] or S0[4:0].u32 or S0[15:0].f16
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
-    hi, lo, type_suffix = int(m.group(2)), int(m.group(3)), m.group(4)
-    val = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
+    var_name, hi, lo, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
+    val = vars.get(var_name, UOp.const(dtypes.uint32, 0))
+    # If extracting bits beyond value's bit width, look for indexed dword variable (e.g., VDATA2 for bits 95:64)
+    val_bits = val.dtype.itemsize * 8
+    if lo >= val_bits:
+      dword_idx = lo // 32
+      indexed_var = f'{var_name}{dword_idx}'
+      if indexed_var in vars:
+        val = vars[indexed_var]
+        lo = lo % 32
+        hi = (hi % 32) + lo  # Adjust hi relative to the dword
     shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
     shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
     result = shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
@@ -492,13 +503,22 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')  # Use vmem for FLAT/GLOBAL, lds for DS
     if mem is None: return UOp.const(dt, 0)
     # Use appropriate shift based on address dtype (64-bit for vmem, 32-bit for lds)
-    shift_amt = UOp.const(dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, 2)
+    addr_dt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
+    shift_amt = UOp.const(addr_dt, 2)
     idx = (addr >> shift_amt).cast(dtypes.index)
     val = mem.index(idx)  # Don't call .load() - pm_add_loads will add it
     if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-      four = UOp.const(dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, 4)
+      four = UOp.const(addr_dt, 4)
       hi_idx = ((addr + four) >> shift_amt).cast(dtypes.index)
       val = val.cast(dtypes.uint64) | (mem.index(hi_idx).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+    elif dt in (dtypes.uint8, dtypes.int8):
+      # Extract byte: shift by (addr & 3) * 8, mask to 8 bits
+      byte_offset = (addr & UOp.const(addr_dt, 3)).cast(dtypes.uint32)
+      val = (val >> (byte_offset * UOp.const(dtypes.uint32, 8))) & UOp.const(dtypes.uint32, 0xFF)
+    elif dt in (dtypes.uint16, dtypes.int16):
+      # Extract halfword: shift by ((addr >> 1) & 1) * 16, mask to 16 bits
+      half_offset = ((addr >> UOp.const(addr_dt, 1)) & UOp.const(addr_dt, 1)).cast(dtypes.uint32)
+      val = (val >> (half_offset * UOp.const(dtypes.uint32, 16))) & UOp.const(dtypes.uint32, 0xFFFF)
     return val
   # Array element access: VAR[index] where index is a constant - maps to VAR{index} variable
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\]$', expr)):
@@ -506,17 +526,7 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     actual_var = f'{var_name}{idx}'
     if actual_var in vars: return vars[actual_var]
     # Fall through to bit slice handling if not found as array element
-  # VAR[high:low]
-  if (m := re.match(r'(\w+)\[(\d+)\s*:\s*(\d+)\]', expr)):
-    var_name, high_bit, low_bit = m.group(1), int(m.group(2)), int(m.group(3))
-    if var_name in vars:
-      val = vars[var_name]
-      width = high_bit - low_bit + 1
-      # Cast shift amount to match value dtype to preserve result dtype
-      shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-      shifted = val >> UOp.const(shift_dt, low_bit) if low_bit > 0 else val
-      return shifted & UOp.const(shifted.dtype, (1 << width) - 1)
-    return UOp.const(dtypes.uint32, 0)
+  # VAR[high:low] - handled above in "Bit slice" pattern
   # Lambda call: NAME(arg1, arg2, ...)
   if (m := re.match(r'(\w+)\((.+)\)$', expr)):
     func_name, args_str = m.group(1), m.group(2)
@@ -592,9 +602,22 @@ def _register_funcs():
   _FUNC_TABLE.append((r'fract\((.+)\)', 1, lambda a, v, m: a[0] - _floor(a[0])))
   def _signext(a, v, m):
     val = a[0]
-    # Sign extend to 64-bit for PC calculations
-    if val.dtype in (dtypes.int16, dtypes.short):
-      return val.cast(dtypes.int64)
+    # Detect if value is an 8-bit or 16-bit masked value (from MEM[ADDR].i8 or MEM[ADDR].i16)
+    # Look for AND with 0xFF or 0xFFFF mask
+    is_8bit = val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == 0xFF
+    is_16bit = val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == 0xFFFF
+    if is_8bit or val.dtype in (dtypes.int8, dtypes.uint8):
+      # Sign extend 8-bit to 32-bit: if bit 7 is set, OR with 0xFFFFFF00
+      v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+      sign_bit = (v32 >> UOp.const(dtypes.uint32, 7)) & UOp.const(dtypes.uint32, 1)
+      return sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(
+        v32 | UOp.const(dtypes.uint32, 0xFFFFFF00), v32).cast(dtypes.int)
+    if is_16bit or val.dtype in (dtypes.int16, dtypes.short, dtypes.uint16):
+      # Sign extend 16-bit to 32-bit: if bit 15 is set, OR with 0xFFFF0000
+      v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+      sign_bit = (v32 >> UOp.const(dtypes.uint32, 15)) & UOp.const(dtypes.uint32, 1)
+      return sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(
+        v32 | UOp.const(dtypes.uint32, 0xFFFF0000), v32).cast(dtypes.int)
     if val.dtype in (dtypes.int, dtypes.int32):
       return val.cast(dtypes.int64)
     return val
