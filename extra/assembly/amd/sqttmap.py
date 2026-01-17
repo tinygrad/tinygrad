@@ -58,16 +58,15 @@ def map_insts(data:bytes, lib:bytes):
 
 if __name__ == "__main__":
   import sys, pickle
-  if len(sys.argv) < 2:
-    print("Usage: python sqttmap.py <pkl_file>")
-    sys.exit(1)
-  with open(sys.argv[1], "rb") as f:
+  from tinygrad.helpers import temp
+  fp = temp("profile.pkl", append_user=True) if len(sys.argv) < 2 else sys.argv[1]
+  with open(fp, "rb") as f:
     data = pickle.load(f)
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   kern_events = {e.name:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
   target = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device.startswith("AMD"))).props["gfx_target_version"]
   for e in sqtt_events:
-    if not e.itrace: continue
+    if not e.itrace or e.se != 1: continue
     print("------", e.kern)
     prg = kern_events[e.kern]
     map_insts(e.blob, prg.lib)
