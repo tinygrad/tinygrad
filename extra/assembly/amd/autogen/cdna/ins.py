@@ -112,6 +112,13 @@ class SOP1(Inst):
   sdst = SGPRField(22, 16)
   ssrc0 = SSrcField(7, 0)
 
+class SOP1_LIT(Inst):
+  encoding = FixedBitField(31, 23, 0b101111101)
+  op = EnumBitField(15, 8, SOP1Op)
+  sdst = SGPRField(22, 16)
+  ssrc0 = SSrcField(7, 0)
+  literal = BitField(63, 32)
+
 class SOP2(Inst):
   encoding = FixedBitField(31, 30, 0b10)
   op = EnumBitField(29, 23, SOP2Op)
@@ -119,17 +126,39 @@ class SOP2(Inst):
   ssrc0 = SSrcField(7, 0)
   ssrc1 = SSrcField(15, 8)
 
+class SOP2_LIT(Inst):
+  encoding = FixedBitField(31, 30, 0b10)
+  op = EnumBitField(29, 23, SOP2Op)
+  sdst = SGPRField(22, 16)
+  ssrc0 = SSrcField(7, 0)
+  ssrc1 = SSrcField(15, 8)
+  literal = BitField(63, 32)
+
 class SOPC(Inst):
   encoding = FixedBitField(31, 23, 0b101111110)
   op = EnumBitField(22, 16, SOPCOp)
   ssrc0 = SSrcField(7, 0)
   ssrc1 = SSrcField(15, 8)
 
+class SOPC_LIT(Inst):
+  encoding = FixedBitField(31, 23, 0b101111110)
+  op = EnumBitField(22, 16, SOPCOp)
+  ssrc0 = SSrcField(7, 0)
+  ssrc1 = SSrcField(15, 8)
+  literal = BitField(63, 32)
+
 class SOPK(Inst):
   encoding = FixedBitField(31, 28, 0b1011)
   op = EnumBitField(27, 23, SOPKOp)
   sdst = SGPRField(22, 16)
   simm16 = BitField(15, 0)
+
+class SOPK_LIT(Inst):
+  encoding = FixedBitField(31, 28, 0b1011)
+  op = EnumBitField(27, 23, SOPKOp)
+  sdst = SGPRField(22, 16)
+  simm16 = BitField(15, 0)
+  literal = BitField(63, 32)
 
 class SOPP(Inst):
   encoding = FixedBitField(31, 23, 0b101111111)
@@ -142,12 +171,121 @@ class VOP1(Inst):
   vdst = VGPRField(24, 17)
   src0 = SrcField(8, 0)
 
+class VOP1_DPP16(Inst):
+  encoding = FixedBitField(31, 25, 0b0111111)
+  op = EnumBitField(16, 9, VOP1Op)
+  vdst = VGPRField(24, 17)
+  src0 = SrcField(8, 0)
+  vsrc0 = VGPRField(39, 32)
+  dpp = BitField(48, 40)
+  bc = BitField(51, 51)
+  row_mask = BitField(63, 60)
+  bank_mask = BitField(59, 56)
+  src0_neg = BitField(52, 52)
+  src0_abs = BitField(53, 53)
+  src1_neg = BitField(54, 54)
+  src1_abs = BitField(55, 55)
+
+class VOP1_LIT(Inst):
+  encoding = FixedBitField(31, 25, 0b0111111)
+  op = EnumBitField(16, 9, VOP1Op)
+  vdst = VGPRField(24, 17)
+  src0 = SrcField(8, 0)
+  literal = BitField(63, 32)
+
+class VOP1_SDWA(Inst):
+  encoding = FixedBitField(31, 25, 0b0111111)
+  op = EnumBitField(16, 9, VOP1Op)
+  vdst = VGPRField(24, 17)
+  src0 = SrcField(8, 0)
+  vsrc0 = VGPRField(39, 32)
+  omod = BitField(47, 46)
+  clmp = BitField(45, 45)
+  src0_neg = BitField(52, 52)
+  src0_abs = BitField(53, 53)
+  src1_neg = BitField(60, 60)
+  src1_abs = BitField(61, 61)
+  dst_sel = BitField(42, 40)
+  dst_unused = BitField(44, 43)
+  src0_sel = BitField(50, 48)
+  src0_sext = BitField(51, 51)
+  s0 = BitField(55, 55)
+  src1_sel = BitField(58, 56)
+  src1_sext = BitField(59, 59)
+  s1 = BitField(63, 63)
+
 class VOP2(Inst):
   encoding = FixedBitField(31, 31, 0b0)
   op = EnumBitField(30, 25, VOP2Op)
   vdst = VGPRField(24, 17)
   src0 = SrcField(8, 0)
   vsrc1 = VGPRField(16, 9)
+
+class VOP2_DPP16(Inst):
+  encoding = FixedBitField(31, 31, 0b0)
+  op = EnumBitField(30, 25, VOP2Op)
+  vdst = VGPRField(24, 17)
+  src0 = SrcField(8, 0)
+  vsrc0 = VGPRField(39, 32)
+  vsrc1 = VGPRField(16, 9)
+  dpp = BitField(48, 40)
+  bc = BitField(51, 51)
+  row_mask = BitField(63, 60)
+  bank_mask = BitField(59, 56)
+  src0_neg = BitField(52, 52)
+  src0_abs = BitField(53, 53)
+  src1_neg = BitField(54, 54)
+  src1_abs = BitField(55, 55)
+
+class VOP2_LIT(Inst):
+  encoding = FixedBitField(31, 31, 0b0)
+  op = EnumBitField(30, 25, VOP2Op)
+  vdst = VGPRField(24, 17)
+  src0 = SrcField(8, 0)
+  vsrc1 = VGPRField(16, 9)
+  literal = BitField(63, 32)
+
+class VOP2_SDWA(Inst):
+  encoding = FixedBitField(31, 31, 0b0)
+  op = EnumBitField(30, 25, VOP2Op)
+  vdst = VGPRField(24, 17)
+  src0 = SrcField(8, 0)
+  vsrc0 = VGPRField(39, 32)
+  vsrc1 = VGPRField(16, 9)
+  omod = BitField(47, 46)
+  clmp = BitField(45, 45)
+  src0_neg = BitField(52, 52)
+  src0_abs = BitField(53, 53)
+  src1_neg = BitField(60, 60)
+  src1_abs = BitField(61, 61)
+  dst_sel = BitField(42, 40)
+  dst_unused = BitField(44, 43)
+  src0_sel = BitField(50, 48)
+  src0_sext = BitField(51, 51)
+  s0 = BitField(55, 55)
+  src1_sel = BitField(58, 56)
+  src1_sext = BitField(59, 59)
+  s1 = BitField(63, 63)
+
+class VOP2_SDWA_SDST(Inst):
+  encoding = FixedBitField(31, 31, 0b0)
+  op = EnumBitField(30, 25, VOP2Op)
+  vdst = VGPRField(24, 17)
+  sdst = SGPRField(46, 40)
+  src0 = SrcField(8, 0)
+  vsrc0 = VGPRField(39, 32)
+  vsrc1 = VGPRField(16, 9)
+  src0_neg = BitField(52, 52)
+  src0_abs = BitField(53, 53)
+  src1_neg = BitField(60, 60)
+  src1_abs = BitField(61, 61)
+  sd = BitField(47, 47)
+  src0_sel = BitField(50, 48)
+  src0_sext = BitField(51, 51)
+  s0 = BitField(55, 55)
+  src1_sel = BitField(58, 56)
+  src1_sext = BitField(59, 59)
+  s1 = BitField(63, 63)
 
 class VOP3A(Inst):
   encoding = FixedBitField(31, 26, 0b110100)
@@ -207,11 +345,50 @@ class VOP3PX2(Inst):
   acc = BitField(124, 123)
   blgp = BitField(127, 125)
 
+class VOP3P_MFMA(Inst):
+  encoding = FixedBitField(31, 23, 0b110100111)
+  op = EnumBitField(22, 16, VOP3POp)
+  vdst = VGPRField(7, 0)
+  src0 = SrcField(40, 32)
+  src1 = SrcField(49, 41)
+  src2 = SrcField(58, 50)
+  cbsz = BitField(10, 8)
+  abid = BitField(14, 11)
+  acc_cd = BitField(15, 15)
+  acc = BitField(60, 59)
+  blgp = BitField(63, 61)
+
 class VOPC(Inst):
   encoding = FixedBitField(31, 25, 0b0111110)
   op = EnumBitField(24, 17, VOPCOp)
   src0 = SrcField(8, 0)
   vsrc1 = VGPRField(16, 9)
+
+class VOPC_LIT(Inst):
+  encoding = FixedBitField(31, 25, 0b0111110)
+  op = EnumBitField(24, 17, VOPCOp)
+  src0 = SrcField(8, 0)
+  vsrc1 = VGPRField(16, 9)
+  literal = BitField(63, 32)
+
+class VOPC_SDWA_SDST(Inst):
+  encoding = FixedBitField(31, 25, 0b0111110)
+  op = EnumBitField(24, 17, VOPCOp)
+  sdst = SGPRField(46, 40)
+  src0 = SrcField(8, 0)
+  vsrc0 = VGPRField(39, 32)
+  vsrc1 = VGPRField(16, 9)
+  src0_neg = BitField(52, 52)
+  src0_abs = BitField(53, 53)
+  src1_neg = BitField(60, 60)
+  src1_abs = BitField(61, 61)
+  sd = BitField(47, 47)
+  src0_sel = BitField(50, 48)
+  src0_sext = BitField(51, 51)
+  s0 = BitField(55, 55)
+  src1_sel = BitField(58, 56)
+  src1_sext = BitField(59, 59)
+  s1 = BitField(63, 63)
 
 class VOP1_SDST(VOP1):
   vdst = SSrcField(24, 17)

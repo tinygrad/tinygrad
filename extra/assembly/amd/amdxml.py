@@ -15,27 +15,35 @@ ARCHS = {
 }
 XML_URL = "https://gpuopen.com/download/machine-readable-isa/latest/"
 # Map XML encoding names to codebase names (arch-specific overrides in ARCH_NAME_MAP)
-NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOPDXY": "VOPD", "VDS": "DS"}
+NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOP3_SDST_ENC_LIT": "VOP3SD_LIT", "VOP3_SDST_ENC_DPP16": "VOP3SD_DPP16",
+            "VOP3_SDST_ENC_DPP8": "VOP3SD_DPP8", "VOPDXY": "VOPD", "VOPDXY_LIT": "VOPD_LIT", "VDS": "DS"}
 ARCH_NAME_MAP = {"cdna": {"VOP3": "VOP3A", "VOP3_SDST_ENC": "VOP3B"}}
 # Instructions missing from XML but present in PDF
 FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"}, "FLAT": {55: "FLAT_ATOMIC_CSUB_U32"}},
          "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
-_ENC_SUFFIXES = ("_INST_LITERAL", "_VOP_DPP16", "_VOP_DPP8", "_VOP_DPP", "_VOP_SDWA", "_NSA1", "_MFMA")
+_ENC_SUFFIXES = ("_NSA1",)
+# Encoding suffix to class suffix mapping (for variants we DO generate)
+_ENC_SUFFIX_MAP = {"_INST_LITERAL": "_LIT", "_VOP_DPP16": "_DPP16", "_VOP_DPP": "_DPP16", "_VOP_DPP8": "_DPP8",
+                   "_VOP_SDWA": "_SDWA", "_VOP_SDWA_SDST_ENC": "_SDWA_SDST", "_MFMA": "_MFMA"}
 # Field name normalization
 _FIELD_RENAMES = {"opsel_hi_2": "opsel_hi2", "op_sel_hi_2": "opsel_hi2", "op_sel": "opsel", "bound_ctrl": "bc",
-                  "tgt": "target", "row_en": "row", "unorm": "unrm", "clamp": "clmp", "wait_exp": "waitexp"}
-# Encoding variants to skip entirely
-_SKIP_ENCODINGS = ("LITERAL", "NSA", "DPP", "SDWA", "MFMA")
+                  "tgt": "target", "row_en": "row", "unorm": "unrm", "clamp": "clmp", "wait_exp": "waitexp",
+                  "simm32": "literal", "dpp_ctrl": "dpp", "acc_cd": "acc_cd", "acc": "acc",
+                  "dst_sel": "dst_sel", "dst_unused": "dst_unused", "src0_sel": "src0_sel", "src1_sel": "src1_sel"}
+# Encoding variants to skip entirely (NSA is for MIMG graphics instructions)
+_SKIP_ENCODINGS = ("NSA",)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # XML parsing helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _strip_enc(name: str) -> str:
-  """Strip ENC_ prefix and encoding variant suffixes."""
+  """Strip ENC_ prefix and normalize encoding suffixes."""
   name = name.removeprefix("ENC_")
   for sfx in _ENC_SUFFIXES: name = name.replace(sfx, "")
+  # Process longer suffixes first to avoid partial matches (e.g., _VOP_DPP8 before _VOP_DPP)
+  for old, new in sorted(_ENC_SUFFIX_MAP.items(), key=lambda x: -len(x[0])): name = name.replace(old, new)
   return name
 
 def _norm_field(name: str) -> str:
@@ -76,7 +84,9 @@ def parse_xml(filename: str, arch: str):
   # Extract encoding definitions
   for enc in root.findall("ISA/Encodings/Encoding"):
     name = enc.findtext("EncodingName")
-    if not name.startswith("ENC_") and name not in ("VOP3_SDST_ENC", "VOPDXY"): continue
+    is_base = name.startswith("ENC_") or name in ("VOP3_SDST_ENC", "VOPDXY")
+    is_variant = any(sfx in name for sfx in _ENC_SUFFIX_MAP)
+    if not is_base and not is_variant: continue
     if any(s in name for s in _SKIP_ENCODINGS): continue
     fields = [(_norm_field(f.findtext("FieldName").lower()), int(f.find("BitLayout/Range").findtext("BitOffset") or 0) + int(f.find("BitLayout/Range").findtext("BitCount") or 0) - 1,
                int(f.find("BitLayout/Range").findtext("BitOffset") or 0))
@@ -93,18 +103,22 @@ def parse_xml(filename: str, arch: str):
       if enc.findtext("EncodingCondition") != "default": continue
       base, opcode = _map_flat(_strip_enc(enc.findtext("EncodingName")), name), int(enc.findtext("Opcode") or 0)
       enc_name = name_map.get(base, base)
+      # Encoding variants use the same Op enum as the base format
+      base_enum = enc_name
+      for sfx in ("_SDWA_SDST", "_DPP16", "_DPP8", "_SDWA", "_LIT", "_MFMA"):
+        base_enum = base_enum.replace(sfx, "")
       # ADDTID instructions go in both FLAT and GLOBAL enums (pcode uses FLATOp for these)
       if "ADDTID" in name:
         if base == "GLOBAL": enums.setdefault("FLAT", {})[opcode] = name
         elif base == "VGLOBAL": enums.setdefault("VFLAT", {})[opcode] = name
-      enums.setdefault(enc_name, {})[opcode] = name
+      enums.setdefault(base_enum, {})[opcode] = name
       # Extract operand info
       op_info = {op.findtext("FieldName").lower(): (op.findtext("DataFormatName"), int(op.findtext("OperandSize") or 0), op.findtext("OperandType"))
                  for op in enc.findall("Operands/Operand") if op.findtext("FieldName")}
       for fmt, _, otype in op_info.values():
         if fmt and fmt not in fmts: fmts[fmt] = 0
         if otype: op_types_set.add(otype)
-      if op_info: types[(name, enc_name)] = op_info
+      if op_info: types[(name, base_enum)] = op_info
   return encodings, enums, types, fmts, op_types_set
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -225,8 +239,12 @@ def write_ins(encodings, enums, arch, path):
   _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr"}
   def field_def(name, hi, lo, fmt, enc_bits=None):
     bits = hi - lo + 1
+    # strip suffix for Op enum lookup - longer suffixes first to avoid partial matches
+    base_fmt = fmt
+    for sfx in ("_SDWA_SDST", "_DPP16", "_DPP8", "_SDWA", "_MFMA", "_LIT"):
+      base_fmt = base_fmt.replace(sfx, "")
     if name == "encoding" and enc_bits: return f"FixedBitField({hi}, {lo}, 0b{enc_bits})"
-    if name == "op" and fmt not in ("DPP", "SDWA"): return f"EnumBitField({hi}, {lo}, {fmt}Op)"
+    if name == "op" and fmt not in ("DPP", "SDWA"): return f"EnumBitField({hi}, {lo}, {base_fmt}Op)"
     if name in ("opx", "opy"): return f"EnumBitField({hi}, {lo}, VOPDOp)"
     if name == "vdsty": return f"VDSTYField({hi}, {lo})"
     if name in _VGPR_FIELDS and bits == 8: return f"VGPRField({hi}, {lo})"
@@ -237,14 +255,15 @@ def write_ins(encodings, enums, arch, path):
     if name.startswith("ssrc") and bits == 8: return f"SSrcField({hi}, {lo})"
     if name in ("saddr", "soffset") and bits == 8: return f"SSrcField({hi}, {lo}, default=NULL)"
     if name.startswith("src") and bits == 9: return f"SrcField({hi}, {lo})"
-    if fmt == "VOP3P" and name == "opsel_hi": return f"BitField({hi}, {lo}, default=3)"
-    if fmt == "VOP3P" and name == "opsel_hi2": return f"BitField({hi}, {lo}, default=1)"
+    if base_fmt == "VOP3P" and name == "opsel_hi": return f"BitField({hi}, {lo}, default=3)"
+    if base_fmt == "VOP3P" and name == "opsel_hi2": return f"BitField({hi}, {lo}, default=1)"
     return f"BitField({hi}, {lo})"
   ORDER = ['encoding', 'op', 'opx', 'opy', 'vdst', 'vdstx', 'vdsty', 'sdst', 'vdata', 'sdata', 'addr', 'vaddr', 'data', 'data0', 'data1',
            'src0', 'srcx0', 'srcy0', 'vsrc0', 'ssrc0', 'src1', 'vsrc1', 'vsrcx1', 'vsrcy1', 'ssrc1', 'src2', 'vsrc2', 'src3', 'vsrc3',
-           'saddr', 'sbase', 'srsrc', 'ssamp', 'soffset', 'offset', 'simm16', 'en', 'target', 'attr', 'attr_chan',
+           'saddr', 'sbase', 'srsrc', 'ssamp', 'soffset', 'offset', 'simm16', 'literal', 'en', 'target', 'attr', 'attr_chan',
            'omod', 'neg', 'neg_hi', 'abs', 'clmp', 'opsel', 'opsel_hi', 'waitexp', 'wait_va',
-           'dmask', 'dim', 'seg', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe', 'unrm', 'done', 'row']
+           'dmask', 'dim', 'seg', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe', 'unrm', 'done', 'row',
+           'dpp', 'fi', 'bc', 'row_mask', 'bank_mask', 'src0_neg', 'src0_abs', 'src1_neg', 'src1_abs']
   sort_fields = lambda fields: sorted(fields, key=lambda f: (ORDER.index(f[0]) if f[0] in ORDER else 999, f[2]))
 
   lines = ["# autogenerated from AMD ISA XML - do not edit", "# ruff: noqa: F401,F403",
