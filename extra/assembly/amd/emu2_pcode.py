@@ -143,7 +143,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         ctx = {**vars, **block_assigns}
         addr = parse_expr(m.group(1), ctx)
         rhs = parse_expr(m.group(4), ctx)
-        if m.group(3) == '+':  # compound assignment
+        if m.group(3) == '+':  # compound assignment: read old value, add rhs (pm_add_loads will add the load)
           lds = vars.get('_lds')
           idx = (addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index)
           rhs = lds.index(idx) + rhs if lds is not None else rhs
@@ -181,7 +181,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
       i += 1
     return i, block_assigns
 
-  lines = [l.strip() for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
+  lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
   _, final_assigns = parse_block(lines)
 
   # Build assigns from final values

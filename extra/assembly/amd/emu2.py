@@ -782,11 +782,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane, op_name=op_name)
 
     # Count distinct MEM addresses to determine if we need separate RANGEs
-    # For 2ADDR ops, each MEM operation uses a different address -> need separate RANGEs
+    # For 2ADDR ops, each MEM/RETURN_DATA uses a different address -> need separate RANGEs
     # For atomic ops, all operations share the same address -> use single RANGE
+    # EXCEPTION: STOREXCHG ops need single RANGE to preserve read-before-write ordering
     mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]
     mem_addrs = set(re.match(r'MEM\[([^\]]+)\]', d).group(1) if re.match(r'MEM\[([^\]]+)\]', d) else d for d in mem_assigns)
-    use_separate_ranges = len(mem_addrs) > 1 or (len(mem_assigns) > 1 and '2ADDR' in op_name)
+    is_storexchg = 'STOREXCHG' in op_name
+    use_separate_ranges = (len(mem_addrs) > 1 or '2ADDR' in op_name) and not is_storexchg
 
     if use_separate_ranges:
       # Each memory operation needs its own RANGE for CFG builder
@@ -800,15 +802,39 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
         if dest.startswith('MEM['):
           addr, write_val = val
-          ended.append(wlds(addr, write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val, active).end(lane))
-        elif dest.startswith('RETURN_DATA'):
+          if dest.endswith('.b64') or dest.endswith('.u64') or dest.endswith('.i64'):
+            # 64-bit write: write low dword to addr, high dword to addr+4
+            lo = write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val
+            hi = (write_val >> UOp.const(write_val.dtype, 32)).cast(dtypes.uint32) if write_val.dtype in (dtypes.uint64, dtypes.int64) else UOp.const(dtypes.uint32, 0)
+            ended.append(wlds(addr, lo, active).end(lane))
+            ended.append(wlds(addr + UOp.const(dtypes.uint32, 4), hi, active).end(lane))
+          else:
+            ended.append(wlds(addr, write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val, active).end(lane))
+        elif dest.startswith('RETURN_DATA'):  # 2ADDR path always writes RETURN_DATA (LOAD or RTN ops)
           if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
-            dword_idx = int(m.group(2)) // 32
-            ended.append(wvgpr(vdst_reg + dword_idx, lane, val.cast(dtypes.uint32), exec_mask).end(lane))
+            hi_bit, lo_bit = int(m.group(1)), int(m.group(2))
+            bit_width = hi_bit - lo_bit + 1
+            dword_idx = lo_bit // 32
+            if bit_width == 64:
+              # 64-bit slice: write low dword to vdst+dword_idx, high dword to vdst+dword_idx+1
+              lo = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+              hi = (val >> UOp.const(val.dtype, 32)).cast(dtypes.uint32) if val.dtype in (dtypes.uint64, dtypes.int64) else UOp.const(dtypes.uint32, 0)
+              ended.append(wvgpr(vdst_reg + dword_idx, lane, lo, exec_mask).end(lane))
+              ended.append(wvgpr(vdst_reg + dword_idx + 1, lane, hi, exec_mask).end(lane))
+            else:
+              ended.append(wvgpr(vdst_reg + dword_idx, lane, val.cast(dtypes.uint32), exec_mask).end(lane))
+          elif dest.endswith('.b64') or dest.endswith('.u64') or dest.endswith('.i64'):
+            # 64-bit value: write low dword to vdst, high dword to vdst+1
+            lo = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+            hi = (val >> UOp.const(val.dtype, 32)).cast(dtypes.uint32) if val.dtype in (dtypes.uint64, dtypes.int64) else UOp.const(dtypes.uint32, 0)
+            ended.append(wvgpr(vdst_reg, lane, lo, exec_mask).end(lane))
+            ended.append(wvgpr(vdst_reg + 1, lane, hi, exec_mask).end(lane))
           else:
             ended.append(wvgpr(vdst_reg, lane, val.cast(dtypes.uint32), exec_mask).end(lane))
     else:
       # Atomic ops: all operations share the same RANGE
+      # Only write RETURN_DATA if this is a RTN instruction
+      writes_return_data = '_RTN' in op_name or op_name.startswith('DS_LOAD')
       lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
       exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
       active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
@@ -818,11 +844,33 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       for dest, val in lane_assigns:
         if dest.startswith('MEM['):
           addr, write_val = val
-          stores.append(wlds(addr, write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val, active))
-        elif dest.startswith('RETURN_DATA'):
+          if dest.endswith('.b64') or dest.endswith('.u64') or dest.endswith('.i64'):
+            # 64-bit write: write low dword to addr, high dword to addr+4
+            lo = write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val
+            hi = (write_val >> UOp.const(write_val.dtype, 32)).cast(dtypes.uint32) if write_val.dtype in (dtypes.uint64, dtypes.int64) else UOp.const(dtypes.uint32, 0)
+            stores.append(wlds(addr, lo, active))
+            stores.append(wlds(addr + UOp.const(dtypes.uint32, 4), hi, active))
+          else:
+            stores.append(wlds(addr, write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val, active))
+        elif dest.startswith('RETURN_DATA') and writes_return_data:
           if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
-            dword_idx = int(m.group(2)) // 32
-            stores.append(wvgpr(vdst_reg + dword_idx, lane, val.cast(dtypes.uint32), exec_mask))
+            hi_bit, lo_bit = int(m.group(1)), int(m.group(2))
+            bit_width = hi_bit - lo_bit + 1
+            dword_idx = lo_bit // 32
+            if bit_width == 64:
+              # 64-bit slice: write low dword to vdst+dword_idx, high dword to vdst+dword_idx+1
+              lo = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+              hi = (val >> UOp.const(val.dtype, 32)).cast(dtypes.uint32) if val.dtype in (dtypes.uint64, dtypes.int64) else UOp.const(dtypes.uint32, 0)
+              stores.append(wvgpr(vdst_reg + dword_idx, lane, lo, exec_mask))
+              stores.append(wvgpr(vdst_reg + dword_idx + 1, lane, hi, exec_mask))
+            else:
+              stores.append(wvgpr(vdst_reg + dword_idx, lane, val.cast(dtypes.uint32), exec_mask))
+          elif dest.endswith('.b64') or dest.endswith('.u64') or dest.endswith('.i64'):
+            # 64-bit value: write low dword to vdst, high dword to vdst+1
+            lo = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+            hi = (val >> UOp.const(val.dtype, 32)).cast(dtypes.uint32) if val.dtype in (dtypes.uint64, dtypes.int64) else UOp.const(dtypes.uint32, 0)
+            stores.append(wvgpr(vdst_reg, lane, lo, exec_mask))
+            stores.append(wvgpr(vdst_reg + 1, lane, hi, exec_mask))
           else:
             stores.append(wvgpr(vdst_reg, lane, val.cast(dtypes.uint32), exec_mask))
       # End all stores with the same lane
