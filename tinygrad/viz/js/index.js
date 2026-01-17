@@ -167,6 +167,16 @@ function formatMicroseconds(ts, showUs=true) {
   if (showUs && (us || (!ms && !s))) parts.push(`${us}us`);
   return parts.join(' ');
 }
+
+function formatCycles(cycles) {
+  const M = Math.floor(cycles / 1e6), K = Math.floor((cycles % 1e6) / 1e3), s = Math.round(cycles % 1e3);
+  const parts = [];
+  if (M) parts.push(`${M}M`);
+  if (K || (!M && s)) parts.push(`${K}K`);
+  if (s || (!M && !K)) parts.push(`${s}`);
+  return parts.join(" ");
+}
+
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
@@ -274,7 +284,7 @@ const EventTypes = { EXEC:0, BUF:1 };
 async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
-  formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
+  formatTime = unit === "realtime" ? formatMicroseconds : formatCycles;
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
   metadata.replaceChildren(getMetadata(focusedShape));
   // layout once!
