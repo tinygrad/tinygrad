@@ -58,14 +58,11 @@ S_TILE_X = 2              # workgroup_x << 7
 S_TILE_Y = 3              # workgroup_y << 7
 S_DIM_N = 4               # matrix dimension N
 S_LOOP_BOUND = 7          # K-8 (loop termination bound)
-S_A_PTR = (8, 9)          # A matrix base pointer
-S_B_PTR = (10, 11)        # B matrix base pointer
 S_LOOP_CTR = 12           # loop counter (increments by 8)
 S_PREFETCH_FLAG = 13      # prefetch condition flag / row stride in epilogue
 S_WORKGROUP_X = 14        # workgroup_id_x
 S_WORKGROUP_Y = 15        # workgroup_id_y
-# Kernarg load destinations (before copy to working regs)
-S_KERNARG_OUT = (16, 17)  # output pointer from kernarg
+# Kernarg load destinations
 S_KERNARG_A = (20, 21)    # A pointer from kernarg
 S_KERNARG_B = (22, 23)    # B pointer from kernarg
 # Prefetch base pointers (8 pairs each, 16KB/256KB apart)
@@ -243,7 +240,7 @@ def build_kernel(arch='gfx1100'):
   # PROLOGUE: Load kernel arguments, compute tile coordinates and addresses
   # ===========================================================================
   k.emit(s_load_b128(sdata=s[S_KERNARG_A[0]:S_KERNARG_B[1]], sbase=s[0:1], offset=0x0, soffset=NULL))
-  k.emit(s_load_b64(sdata=s[S_KERNARG_OUT[0]:S_KERNARG_OUT[1]], sbase=s[0:1], offset=0x10, soffset=NULL))
+  k.emit(s_load_b64(sdata=s[S_OUT_PTR[0]:S_OUT_PTR[1]], sbase=s[0:1], offset=0x10, soffset=NULL))
   k.emit(s_mov_b32(s[S_DIM_N], MATRIX_DIM))
   k.emit(s_mov_b32(s[S_LOOP_CTR], 0))  # used by LDS swizzle, always 0 for valid workgroups
   k.emit(s_lshl_b32(s[S_TILE_X], s[S_WORKGROUP_X], 7))
@@ -258,11 +255,6 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_mov_b32_e32(v[2], 0))  # v[1] always positive, sign extension is 0
   k.emit(v_lshlrev_b64(v[5:6], 2, v[1:2]))
   k.waitcnt(lgkm=0)
-
-  # Copy pointers to working registers
-  k.emit(s_mov_b64(s[S_OUT_PTR[0]:S_OUT_PTR[1]], s[S_KERNARG_OUT[0]:S_KERNARG_OUT[1]]))
-  k.emit(s_mov_b64(s[S_A_PTR[0]:S_A_PTR[1]], s[S_KERNARG_A[0]:S_KERNARG_A[1]]))
-  k.emit(s_mov_b64(s[S_B_PTR[0]:S_B_PTR[1]], s[S_KERNARG_B[0]:S_KERNARG_B[1]]))
 
   # Compute 8 A and B matrix tile base pointers for prefetch
   k.emit(s_mov_b64(s[S_PREFETCH_B:S_PREFETCH_B+1], s[S_KERNARG_B[0]:S_KERNARG_B[1]]))  # B[0]: no offset
@@ -282,6 +274,14 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], s[19], v[V_GLOBAL_A_ADDR]))
   k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_A_ADDR], 2, v[V_GLOBAL_A_ADDR]))
 
+  # Do initial loads
+  for vdst, saddr_lo in INIT_PREFETCH:
+    k.emit(global_load_b32(vdst=v[vdst], addr=v[V_GLOBAL_B_ADDR], saddr=s[saddr_lo:saddr_lo+1]))
+  for iter in range(6):
+    vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
+    k.emit(global_load_b32(vdst=v[vdst1], addr=v[addr], saddr=s[slo1:slo1+1]))
+    k.emit(global_load_b32(vdst=v[vdst2], addr=v[addr], saddr=s[slo2:slo2+1]))
+
   # ===========================================================================
   # LDS store address computation (bank-conflict-avoiding swizzle)
   # ===========================================================================
@@ -295,79 +295,37 @@ def build_kernel(arch='gfx1100'):
   # Formula: swizzled_addr = base + (lane_id & 7) * LDS_A_STRIDE + swizzle_offset
   # where swizzle_offset depends on (lane_id >> 3) to distribute across banks.
 
-  # v[22] = tile_y | (lane_id >> 3) from prologue, used as base for row offsets
-  # Compute 7 row offsets for B-tile rows 1-7 (row 0 computed separately in v[9])
-  k.emit(v_add_nc_u32_e32(v[9], s[S_LOOP_CTR], v[22]))  # row 0 base (S_LOOP_CTR=0)
-  for i in range(7): k.emit(v_or_b32_e32(v[10 + i if i < 2 else 12 + i], 16 * (i + 1), v[22]))  # rows 1-7
-
-  # Extract sign bit of workgroup_x (always 0 for valid workgroups, used for masking)
-  k.emit(s_bfe_i32(s[S_LOOP_BOUND], s[S_WORKGROUP_X], 0x10018))
+  # Compute LDS B-tile store address with bank-conflict-avoiding swizzle
+  k.emit(v_add_nc_u32_e32(v[9], s[S_LOOP_CTR], v[22]))  # row 0 base
   k.emit(v_and_b32_e32(v[9], ADDR_MASK, v[9]))
-  k.emit(s_lshr_b32(s[S_LOOP_BOUND], s[S_LOOP_BOUND], 25))
-
-  # Compute masked row offsets for bank conflict avoidance pattern
-  # Pattern: v[row] = row_val - (row_val & ADDR_MASK) extracts lower bits
-  k.emit(v_add_nc_u32_e32(v[19], s[S_LOOP_CTR], v[10]))
-  k.emit(v_add_nc_u32_e32(v[8], s[S_LOOP_BOUND], v[1]))  # A-tile base computation
-  for d, r in zip([20, 21, 32, 33, 34, 35], [11, 14, 15, 16, 17, 18]):
-    k.emit(v_add_nc_u32_e32(v[d], s[S_LOOP_CTR], v[r]))
-  k.emit(v_and_b32_e32(v[8], ADDR_MASK, v[8]))
   k.emit(v_sub_nc_u32_e32(v[9], v[22], v[9]))  # row 0 swizzle offset
-  for d, s_ in zip([19, 20, 21, 22, 32, 33, 34], [20, 21, 22, 32, 33, 34, 35]):
-    k.emit(v_and_b32_e32(v[d], ADDR_MASK, v[s_]))
-  k.emit(v_sub_nc_u32_e32(v[8], v[1], v[8]))  # A-tile swizzle
-
-  # Apply swizzle offsets and scale to byte offsets
-  k.emit(v_lshlrev_b32_e32(v[9], 2, v[9]))  # row 0 offset * 4
-  for r, t in zip([10, 11, 14, 15, 16, 17, 18], [19, 20, 21, 22, 32, 33, 34]):
-    k.emit(v_sub_nc_u32_e32(v[r], v[r], v[t]))  # rows 1-7 swizzle
-  k.emit(v_bfe_u32(v[2], v[0], 3, 2))  # v[2] = (lane_id >> 3) & 3
-  k.emit(v_lshlrev_b32_e32(v[8], 2, v[8]))  # A-tile base * 4
-
-  # Compute B-tile base address: LDS_A_STRIDE * (lane_id % 8) + row0_offset
+  k.emit(v_lshlrev_b32_e32(v[9], 2, v[9]))  # * 4
   k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[9]))
-  # Scale row offsets 1-7 to byte offsets (row 0 already in v[9])
-  for d, r in zip([9, 10, 11, 14, 15, 16, 17], [10, 11, 14, 15, 16, 17, 18]):
-    k.emit(v_lshlrev_b32_e32(v[d], 2, v[r]))
-  k.emit(v_lshlrev_b32_e32(v[V_LANE_DIV8_X4], 2, v[2]))
-  k.emit(v_add_nc_u32_e32(v[8], 0x80, v[8]))  # A-tile initial store base + 128
 
-  # ===========================================================================
-  # INIT: Compute LDS base addresses, zero accumulators, and initial loads and stores
-  # ===========================================================================
-  # v[3] = v[1] & 0x7F (lower 7 bits) since S_LOOP_BOUND=0 for valid workgroups
+  # For V_LDS_A_BASE and epilogue
+  k.emit(v_bfe_u32(v[2], v[0], 3, 2))  # v[2] = (lane_id >> 3) & 3
+  k.emit(v_lshlrev_b32_e32(v[V_LANE_DIV8_X4], 2, v[2]))
+
+  # Compute LDS load/store base addresses for inner loop
   k.emit(v_lshlrev_b32_e32(v[2], 4, v[2]))
-  k.emit(v_add_nc_u32_e32(v[3], s[S_LOOP_BOUND], v[1]))
-  k.emit(v_and_b32_e32(v[3], ADDR_MASK, v[3]))
-  k.emit(v_sub_nc_u32_e32(v[3], v[1], v[3]))
+  k.emit(v_and_b32_e32(v[3], 0x7F, v[1]))  # simplified from 3 lines
   k.emit(v_lshl_or_b32(v[V_LDS_B_BASE], v[V_LANE_ID_MOD8], 4, LDS_BASE_OFFSET))
   k.emit(v_lshl_add_u32(v[V_LDS_A_ADDR], v[3], 2, LDS_BASE_OFFSET))
   k.emit(v_lshlrev_b32_e32(v[3], 2, v[0]))
   k.emit(v_and_or_b32(v[V_LDS_A_BASE], 0x180, v[3], v[2]))
 
-  # Zero all 128 accumulators using VOPD dual moves (64 instructions instead of 128)
-  for i in range(0, len(OUT_REGS), 2):
-    k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[OUT_REGS[i]], vdsty=v[OUT_REGS[i+1]], srcx0=0, srcy0=0))
-
-  k.emit(s_add_i32(s[S_LOOP_BOUND], s[S_DIM_N], -8))
-  k.emit(s_add_u32(s[S_A_PTR[0]], s[S_A_PTR[0]], 32))
-  k.emit(s_addc_u32(s[S_A_PTR[1]], s[S_A_PTR[1]], 0))
-
-  # Do initial loads
-  for vdst, saddr_lo in INIT_PREFETCH:
-    k.emit(global_load_b32(vdst=v[vdst], addr=v[V_GLOBAL_B_ADDR], saddr=s[saddr_lo:saddr_lo+1]))
-  for iter in range(6):
-    vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
-    k.emit(global_load_b32(vdst=v[vdst1], addr=v[addr], saddr=s[slo1:slo1+1]))
-    k.emit(global_load_b32(vdst=v[vdst2], addr=v[addr], saddr=s[slo2:slo2+1]))
-  k.waitcnt(vm=0)
-
   # Do initial stores
+  k.waitcnt(vm=0)
   for i in range(4):  # A tile: 8 values via 4 stride64 stores
     k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
   for i in range(8):  # B tile: 8 values via 8 scalar stores with 64-byte spacing
     offset = i * 64
     k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
+
+  # Zero all 128 accumulators using VOPD dual moves (64 instructions instead of 128)
+  for i in range(0, len(OUT_REGS), 2):
+    k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[OUT_REGS[i]], vdsty=v[OUT_REGS[i+1]], srcx0=0, srcy0=0))
+  k.emit(s_add_i32(s[S_LOOP_BOUND], s[S_DIM_N], -8))
 
   # S_LOOP_CTR is already 0 from prologue initialization
   k.emit(s_branch(simm16=0)); k.branch_to('LOOP_ENTRY')
