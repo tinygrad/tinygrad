@@ -65,7 +65,7 @@ else:
   class CFUNCTYPE:
     def __class_getitem__(cls, key): return ctypes.CFUNCTYPE(del_an(key[0]), *(del_an(a) for a in key[1]))
   class Enum:
-    _val_to_name_: dict[int,str] = {}
+    def __init_subclass__(cls): cls._val_to_name_ = {}
 
     @classmethod
     def get(cls, val, default="unknown"): return cls._val_to_name_.get(val, default)
@@ -165,14 +165,14 @@ class DLL(ctypes.CDLL):
         if DEBUG >= 3: print(f"loading {nm} failed: {e}")
     elif DEBUG >= 3: print(f"loading {nm} failed: not found on system")
 
-  @functools.cache
-  def _get_func(self, name:str, args:tuple, res):
-    (fn:=getattr(self, name)).argtypes, fn.restype = args, res
-    return fn
-
   def bind(self, fn):
     restype, argtypes = del_an((hints:=get_type_hints(fn, include_extras=True)).pop('return', None)), tuple(del_an(h) for h in hints.values())
-    return lambda *args: self._get_func(fn.__name__, argtypes, restype)(*args)
+    cfunc = None
+    def wrapper(*args):
+      nonlocal cfunc
+      if cfunc is None: (cfunc:=getattr(self, fn.__name__)).argtypes, cfunc.restype = argtypes, restype
+      return cfunc(*args)
+    return wrapper
 
   def __getattr__(self, nm):
     if not self.loaded: raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))

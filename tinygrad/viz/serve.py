@@ -218,7 +218,8 @@ def soft_err(fn:Callable):
   try: yield
   except Exception: fn({"src":traceback.format_exc()})
 
-def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(ss[1]) if len(ss:=x.split(":"))>1 else 999 for x in row.split())
+def row_tuple(row:str) -> tuple[tuple[int, int], ...]:
+  return tuple((ord(ss[0][0]), int(ss[1])) if len(ss:=x.split(":"))>1 else (999,999) for x in row.split())
 
 # *** Performance counters
 
@@ -272,25 +273,27 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
       all_counters[(name, run_number[k], k)] = pmc[0]
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
-    if (sqtt:=v.get(ProfileSQTTEvent)): steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
+    if (sqtt:=v.get(ProfileSQTTEvent)):
+      for e in sqtt:
+        if e.itrace: steps.append(create_step(f"PKTS SE:{e.se}", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)), data=e))
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k])))
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(e) -> list[ProfileEvent]:
   from extra.assembly.amd.sqtt import decode, PacketType, INST, InstOp, VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
-  def add(name:str, p:PacketType, op="OP", idx=0, width=5) -> None:
-    rows.setdefault(r:=(f"WAVE:{p.wave} {name}:1" if hasattr(p, "wave") else f"SHARED:0 {name}:0"))
-    ret.append(ProfileRangeEvent(r, f"{name} {op}:{idx}", Decimal(p._time), Decimal(p._time+width)))
-  op_idx:dict = {}
+  def add(name:str, p:PacketType, idx=0, width=1, op_name=None) -> None:
+    rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"{p.__class__.__name__}:0 {name}"))
+    ret.append(ProfileRangeEvent(r, f"{op_name if op_name is not None else name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
   for p in decode(e.blob):
     if len(ret) > 50_000: break
     if isinstance(p, INST):
-      if p.op not in op_idx: op_idx[p.op] = len(op_idx)
-      op_name, idx = (p.op.name, op_idx[p.op]) if isinstance(p.op, InstOp) else (f"0x{p.op:02x}", len(op_idx))
-      if "BARRIER" in op_name: add("BARRIER", p, op_name, width=100)
-      else: add(p.__class__.__name__, p, op_name, idx)
-    if isinstance(p, (VALUINST, IMMEDIATE, VMEMEXEC, ALUEXEC)): add(p.__class__.__name__, p)
+      op_name = p.op.name if isinstance(p.op, InstOp) else f"0x{p.op:02x}"
+      name, width = (op_name, 10 if "BARRIER" in op_name else 1)
+      add(name, p, width=width, idx=int("OTHER" in name))
+    if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
+    if isinstance(p, (VMEMEXEC, ALUEXEC)): add((name:=str(p.src).split('.')[1]).replace("_ALT", ""), p, idx=int("ALT" in name), op_name=name)
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
@@ -321,8 +324,6 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     else:
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
       events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
-  # * INST timeline
-  with soft_err(lambda _:None): cu_events |= {f"SE:{e.se} Packets": timeline for e in data if (timeline := sqtt_timeline(e))}
   return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -420,10 +421,22 @@ def parse_branch(asm:str) -> int|None:
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
 
+def _op2dsl(op: str) -> str:
+  """Convert LLVM asm operand (s0, s[0:1], v0) to DSL format (s[0], s[0:1], v[0])."""
+  import re
+  op = op.strip()
+  lo = op.lower()
+  SPEC_DSL = {'vcc_lo': 'VCC_LO', 'vcc_hi': 'VCC_HI', 'vcc': 'VCC', 'exec_lo': 'EXEC_LO', 'exec_hi': 'EXEC_HI', 'exec': 'EXEC',
+              'scc': 'SCC', 'm0': 'M0', 'null': 'NULL', 'off': 'OFF'}
+  if lo in SPEC_DSL: return SPEC_DSL[lo]
+  rp = {'s': 's', 'v': 'v', 't': 'ttmp', 'ttmp': 'ttmp'}
+  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return f"{rp[m.group(1)]}[{m.group(2)}:{m.group(3)}]"
+  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', lo): return f"{rp[m.group(1)]}[{m.group(2)}]"
+  return op
+
 def amdgpu_tokenize(st:str) -> list[str]:
   try:
     from extra.assembly.amd.dsl import s, v, Reg, VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
-    from extra.assembly.amd.asm import _op2dsl
     dsl = eval(_op2dsl(st), {'s':s, 'v':v, 'VCC_LO':VCC_LO, 'VCC_HI':VCC_HI, 'VCC':VCC, 'EXEC_LO':EXEC_LO, 'EXEC_HI':EXEC_HI, 'EXEC':EXEC,
                              'SCC':SCC, 'M0':M0, 'NULL':NULL, 'OFF':OFF})
     return [f"{type(dsl).__name__[0].lower()}{dsl.offset + i}" for i in range(dsl.sz)] if isinstance(dsl, Reg) else [st]
@@ -490,6 +503,12 @@ def get_render(query:str) -> dict:
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt.startswith("prg-pkts"):
+    ret = {}
+    with soft_err(lambda err:ret.update(err)):
+      if (events:=get_profile(sqtt_timeline(data), sort_fn=row_tuple)): ret = {"value":events, "content_type":"application/octet-stream"}
+      else: ret = {"src":"No SQTT trace on this SE."}
+    return ret
   if fmt == "prg-sqtt":
     ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
