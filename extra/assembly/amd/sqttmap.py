@@ -1,5 +1,5 @@
 # maps trace packets to instructions.
-from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND
+from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.decode import decode_inst
 from tinygrad.runtime.support.elf import elf_loader
@@ -35,11 +35,17 @@ def map_insts(data:bytes, lib:bytes):
       rwaves_iter[p.wave] = rwaves[p.wave].unpack_insts()
       rwaves_base[p.wave] = next(rwaves[p.wave].unpack_insts()).pc
     if isinstance(p, (INST, VALUINST, IMMEDIATE)) and "OTHER_" not in type(p).__name__:
-      inst = pc_map[wave_pc[p.wave]]
+      inst = pc_map[pc:=wave_pc[p.wave]]
+      if isinstance(p, INST) and p.op == InstOp.JUMP:
+        x = inst.simm16 & 0xffff
+        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+      else:
+        wave_pc[p.wave] += inst.size()
+
+      print(f"{pc:012X} {inst.disasm()}")
       if (ref:=next(rwaves_iter[p.wave], None)) is None and inst.disasm() in {"s_endpgm", "s_code_end"}: break
-      assert ref.pc-rwaves_base[p.wave] == wave_pc[p.wave]
-      #print(inst.disasm(), rpc_table[ref.pc])
-      wave_pc[p.wave] += inst.size()
+      rpc = ref.pc-rwaves_base[p.wave]
+      assert rpc == pc, f"{rpc}:{rpc_table[ref.pc]} != {pc}:{inst.disasm()}"
 
 if __name__ == "__main__":
   import sys, pickle
