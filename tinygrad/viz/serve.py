@@ -293,7 +293,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
       name, width = (op_name, 10 if "BARRIER" in op_name else 1)
       add(name, p, width=width, idx=int("OTHER" in name))
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
-    if isinstance(p, (VMEMEXEC, ALUEXEC)): add((name:=str(p.src).split('.')[1]).replace("_ALT", ""), p, idx=int("ALT" in name), op_name=name)
+    if isinstance(p, (VMEMEXEC, ALUEXEC)): add((name:=str(p.src).split('.')[1]).replace("_ALT", ""), p, op_name=name)
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
