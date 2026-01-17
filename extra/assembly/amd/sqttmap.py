@@ -66,6 +66,8 @@ if __name__ == "__main__":
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   kern_events = {e.name:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
   target = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device.startswith("AMD"))).props["gfx_target_version"]
-  e = sqtt_events[1]
-  prg = kern_events[e.kern]
-  map_insts(e.blob, prg.lib)
+  for e in sqtt_events:
+    if not e.itrace: continue
+    print("------", e.kern)
+    prg = kern_events[e.kern]
+    map_insts(e.blob, prg.lib)
