@@ -23,20 +23,26 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
   wave_pc:dict[int, int] = {}
   simd_sel = (0, 0)
   for p in decode(data):
-    if isinstance(p, WAVESTART) and (p.cu, p.simd) == simd_sel:
+    if isinstance(p, WAVESTART):
+      if (p.cu, p.simd) != simd_sel: continue
       assert p.wave not in wave_pc
       wave_pc[p.wave] = 0
-    if isinstance(p, WAVEEND) and (p.cu, p.simd) == simd_sel:
+    if isinstance(p, WAVEEND):
+      if (p.cu, p.simd) != simd_sel: continue
       pc = wave_pc.pop(p.wave)
-      yield (p, pc+4, s_endpgm())
-
-    if isinstance(p, INST) and ("OTHER_" not in p.op.name):
+      yield (p, pc, s_endpgm())
+    if not hasattr(p, "wave"): continue
+    if isinstance(p, (INST, VALUINST)):
+      if isinstance(p, INST) and "OTHER_" in p.op.name: continue
+      if p.wave == 0:
+        print_packets([p])
       inst = pc_map[pc:=wave_pc[p.wave]]
-      # s_delay_alu doesn't get a packet
-      if isinstance(inst, SOPP) and inst.op is SOPPOp.S_DELAY_ALU: continue
-      if isinstance(inst, SOPP) and (inst.op is SOPPOp.S_BRANCH or (inst.op.name.startswith("S_CBRANCH") and p.op is InstOp.JUMP)):
-        x = inst.simm16 & 0xffff
-        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+      if isinstance(inst, SOPP) and inst.op is SOPPOp.S_DELAY_ALU:
+        wave_pc[p.wave] += inst.size()
+        inst = pc_map[pc:=wave_pc[p.wave]]
+      if isinstance(p, INST) and (isinstance(inst, SOPP) and (inst.op is SOPPOp.S_BRANCH or (inst.op.name.startswith("S_CBRANCH") and p.op is InstOp.JUMP))):
+          x = inst.simm16 & 0xffff
+          wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
       else:
         wave_pc[p.wave] += inst.size()
 
@@ -51,16 +57,27 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
   rwaves_iter:dict[int, list[Iterator[InstExec]]] = {}
   for w in rwaves: rwaves_iter.setdefault(w.wave_id, []).append(w.unpack_insts())
   rwaves_base = next(iter(disasm))
+  wave_n:dict[int, int] = {}
 
   total_waves = sum(len(v) for v in rwaves_iter.values())
   insts = 0
 
   for pkt, pc, inst in map_insts(sqtt.blob, prg.lib):
-    rocprof_pc = next(rwaves_iter[pkt.wave][0]).pc
-    ref_pc = rocprof_pc-rwaves_base
-    assert ref_pc == pc, f"pc mismatch {ref_pc}:{disasm[rocprof_pc][0]} != {pc}:{inst.disasm()}"
-    if inst.disasm() == "s_endpgm": rwaves_iter[pkt.wave].pop(0)
-    insts += 1
+    rocprof_inst = next(rwaves_iter[pkt.wave][0])
+    ref_pc = rocprof_inst.pc-rwaves_base
+    if pkt.wave == 0: print(inst.disasm())
+    if inst.disasm() == "s_endpgm":
+      wave_n[pkt.wave] = wave_n.get(pkt.wave, 0)+1
+      last = list(rwaves_iter[pkt.wave].pop(0))
+      try:
+        assert len(last) == 1 and disasm[last[0].pc][0] == "s_endpgm"
+      except AssertionError as e:
+        print("-- not in pkt")
+        for l in last: print(l)
+        raise e
+    else:
+      assert ref_pc == pc, f"pc mismatch {ref_pc}:{disasm[rocprof_inst.pc][0]} != {pc}:{inst.disasm()} {pkt._time} {rocprof_inst.time+rocprof_inst.stall}"
+      insts += 1
 
   print(f"passed for {insts} instructions across {total_waves} waves scheduled on {len(rwaves_iter)} wave units")
 
