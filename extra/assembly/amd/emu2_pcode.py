@@ -138,20 +138,16 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           block_assigns[var] = result
           vars[var] = result
         continue
-      # MEM[addr].type = value
-      if (m := re.match(r'MEM\[(.+)\]\.(\w+)\s*=\s*(.+)', line)):
-        addr = parse_expr(m.group(1), {**vars, **block_assigns})
-        val = parse_expr(m.group(3), {**vars, **block_assigns})
-        assigns.append((f'MEM[{m.group(1)}].{m.group(2)}', (addr, val)))
-        i += 1; continue
-      # MEM[addr].type += value
-      if (m := re.match(r'MEM\[(.+)\]\.(\w+)\s*\+=\s*(.+)', line)):
-        addr = parse_expr(m.group(1), {**vars, **block_assigns})
-        lds = vars.get('_lds')
-        if lds is not None:
+      # MEM[addr].type = value or MEM[addr].type += value
+      if (m := re.match(r'MEM\[(.+)\]\.(\w+)\s*(\+)?=\s*(.+)', line)):
+        ctx = {**vars, **block_assigns}
+        addr = parse_expr(m.group(1), ctx)
+        rhs = parse_expr(m.group(4), ctx)
+        if m.group(3) == '+':  # compound assignment
+          lds = vars.get('_lds')
           idx = (addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index)
-          new_val = lds.index(idx) + parse_expr(m.group(3), {**vars, **block_assigns})
-          assigns.append((f'MEM[{m.group(1)}].{m.group(2)}', (addr, new_val)))
+          rhs = lds.index(idx) + rhs if lds is not None else rhs
+        assigns.append((f'MEM[{m.group(1)}].{m.group(2)}', (addr, rhs)))
         i += 1; continue
       # VAR[high:low] = value
       if (m := re.match(r'(\w+)\[(\d+)\s*:\s*(\d+)\]\s*=\s*(.+)', line)):
@@ -190,7 +186,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
 
   # Build assigns from final values
   for var, val in final_assigns.items():
-    if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC']:
+    if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA']:
       # Find the type suffix if any from the original pcode
       for line in lines:
         if (m := re.match(rf'{var}\.(\w+)', line)):
@@ -271,11 +267,17 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
   # Bit slice: S0[4:0] or S0[4:0].u32
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     hi, lo = int(m.group(2)), int(m.group(3))
-    return (vars.get(m.group(1), UOp.const(dtypes.uint32, 0)) >> UOp.const(dtypes.uint32, lo)) & UOp.const(dtypes.uint32, (1<<(hi-lo+1))-1)
+    val = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
+    shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+    shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
+    return shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
   # Bit slice with type prefix: S1.u32[4:0].u32
   if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     hi, lo = int(m.group(3)), int(m.group(4))
-    return (vars.get(m.group(1), UOp.const(dtypes.uint32, 0)) >> UOp.const(dtypes.uint32, lo)) & UOp.const(dtypes.uint32, (1<<(hi-lo+1))-1)
+    val = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
+    shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+    shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
+    return shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
   # Single bit access: tmp.u32[31]
   if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)\[(.+)\]$', expr)):
     v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
