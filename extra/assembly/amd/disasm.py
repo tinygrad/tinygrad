@@ -70,22 +70,12 @@ def _num_srcs(inst) -> int:
   if any(x in n for x in ('_ADD3', '_LSHL_ADD', '_ADD_LSHL', '_LSHL_OR', '_AND_OR', 'OR3_B32', 'AND_OR_B32', 'ALIGNBIT', 'ALIGNBYTE', 'V_PERM_', 'XOR3', 'XAD', 'MULLIT', 'MINMAX', 'MAXMIN', 'MINIMUMMAXIMUM', 'MAXIMUMMINIMUM', 'MINIMUM3', 'MAXIMUM3', 'MIN3', 'MAX3', 'DOT2', 'CVT_PK_U8_F32', 'DOT4', 'DOT8', 'WMMA', 'SWMMAC')): return 3
   return 2
 
-# SWMMAC register counts: (dst, src0, src1, src2)
-def _swmmac_regs(name: str) -> tuple[int, int, int, int]:
-  """Return (dst, src0, src1, src2) register counts for SWMMAC instructions."""
-  if 'f16_16x16x32' in name or 'bf16_16x16x32' in name: return (4, 4, 8, 1)
-  if 'f32_16x16x32_f16' in name or 'f32_16x16x32_bf16' in name: return (8, 4, 8, 1)
-  if 'i32_16x16x32_iu4' in name: return (8, 1, 2, 1)
-  if 'i32_16x16x64_iu4' in name: return (8, 2, 4, 1)
-  if 'i32_16x16x32_iu8' in name or 'f32_16x16x32_fp8' in name or 'f32_16x16x32_bf8' in name: return (8, 2, 4, 1)
-  return (8, 8, 8, 8)
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # IMPORTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, GLOBAL, SCRATCH,
-  VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, HWREG, MSG)
+  VOP2Op, VOPDOp, SOPPOp, HWREG, MSG)
 from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
   VOPC as R4_VOPC, VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
   SMEM as R4_SMEM, DS as R4_DS, VOPDOp as R4_VOPDOp, HWREG as HWREG_RDNA4)
@@ -105,7 +95,6 @@ def _sreg(b: int, n: int = 1) -> str: return _reg("s", _unwrap(b), n)
 def _vreg(b: int, n: int = 1) -> str: b = _unwrap(b); return _reg("v", b - 256 if b >= 256 else b, n)
 def _areg(b: int, n: int = 1) -> str: b = _unwrap(b); return _reg("a", b - 256 if b >= 256 else b, n)  # accumulator registers for GFX90a
 def _ttmp(b, n: int = 1) -> str: b = _unwrap(b); return _reg("ttmp", b - 108, n) if 108 <= b <= 123 else None
-def _sreg_or_ttmp(b, n: int = 1) -> str: return _ttmp(b, n) or _sreg(b, n)
 
 def _fmt_sdst(v, n: int = 1, cdna: bool = False) -> str:
   v = _unwrap(v)
@@ -227,8 +216,6 @@ def _disasm_vopc(inst: VOPC) -> str:
 
 NO_ARG_SOPP = {SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV,
                SOPPOp.S_WAIT_IDLE, SOPPOp.S_ENDPGM_SAVED, SOPPOp.S_CODE_END, SOPPOp.S_ENDPGM_ORDERED_PS_DONE, SOPPOp.S_TTRACEDATA}
-_CDNA_NO_ARG_SOPP = {'s_endpgm', 's_barrier', 's_wakeup', 's_icache_inv', 's_ttracedata', 's_nop', 's_sethalt', 's_sleep',
-                     's_setprio', 's_trap', 's_incperflevel', 's_decperflevel', 's_sendmsg', 's_sendmsghalt'}
 
 def _disasm_sopp(inst: SOPP) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
@@ -553,105 +540,102 @@ def disasm(inst: Inst) -> str: return DISASM_HANDLERS[type(inst)](inst)
 # CDNA DISASSEMBLER SUPPORT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-try:
-  from extra.assembly.amd.autogen.cdna.ins import (VOP1 as CDNA_VOP1, VOP2 as CDNA_VOP2, VOPC as CDNA_VOPC, VOP3A, VOP3B, VOP3P as CDNA_VOP3P,
-    SOP1 as CDNA_SOP1, SOP2 as CDNA_SOP2, SOPC as CDNA_SOPC, SOPK as CDNA_SOPK, SOPP as CDNA_SOPP, SMEM as CDNA_SMEM, DS as CDNA_DS,
-    FLAT as CDNA_FLAT, VOP1Op as CDNA_VOP1Op, VOP2Op as CDNA_VOP2Op, VOPCOp as CDNA_VOPCOp)
+from extra.assembly.amd.autogen.cdna.ins import (VOP1 as CDNA_VOP1, VOP2 as CDNA_VOP2, VOPC as CDNA_VOPC, VOP3A, VOP3B, VOP3P as CDNA_VOP3P,
+  SOP1 as CDNA_SOP1, SOP2 as CDNA_SOP2, SOPC as CDNA_SOPC, SOPK as CDNA_SOPK, SOPP as CDNA_SOPP, SMEM as CDNA_SMEM, DS as CDNA_DS,
+  FLAT as CDNA_FLAT)
 
-  def _cdna_src(inst, v, neg, abs_=0, n=1):
-    s = _lit(inst, v) if v == 255 else _fmt_src(v, n, cdna=True)
-    if abs_: s = f"|{s}|"
-    return f"neg({s})" if neg and v == 255 else (f"-{s}" if neg else s)
+def _cdna_src(inst, v, neg, abs_=0, n=1):
+  s = _lit(inst, v) if v == 255 else _fmt_src(v, n, cdna=True)
+  if abs_: s = f"|{s}|"
+  return f"neg({s})" if neg and v == 255 else (f"-{s}" if neg else s)
 
-  _CDNA_VOP3_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32'}
+_CDNA_VOP3_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32'}
 
-  def _disasm_vop3a(inst) -> str:
-    op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
-    name = inst.op_name.lower() or f'vop3a_op_{op_val}'
-    n = inst.num_srcs() or _num_srcs(inst)
-    cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
-    orig_name = name
-    name = _CDNA_VOP3_ALIASES.get(name, name)
-    if name != orig_name:
-      s0, s1 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, 1), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, 1)
-      s2 = ""
-      dst = _vreg(inst.vdst)
-    else:
-      regs = inst.canonical_op_regs
-      dregs, r0, r1, r2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
-      s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, r0), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, r1), _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, r2)
-      dst = _vreg(inst.vdst, dregs) if dregs > 1 else _vreg(inst.vdst)
-    if op_val >= 512:
-      return f"{name} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name} {dst}, {s0}, {s1}{cl}{om}"
-    if op_val < 256:
-      sdst = _fmt_sdst(inst.vdst, 2, cdna=True)
-      return f"{name}_e64 {sdst}, {s0}, {s1}{cl}"
-    if 320 <= op_val < 512:
-      if name in ('v_nop', 'v_clrexcp'): return f"{name}_e64"
-      return f"{name}_e64 {dst}, {s0}{cl}{om}"
-    if name == 'v_cndmask_b32':
-      s2 = _fmt_src(inst.src2, 2, cdna=True)
-      return f"{name}_e64 {dst}, {s0}, {s1}, {s2}{cl}{om}"
-    if name in ('v_mul_legacy_f32', 'v_mac_f32'):
-      return f"{name}_e64 {dst}, {s0}, {s1}{cl}{om}"
-    suf = "_e64" if op_val < 512 else ""
-    return f"{name}{suf} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {s0}, {s1}{cl}{om}"
-
-  def _disasm_vop3b(inst) -> str:
-    op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
-    name = inst.op_name.lower() or f'vop3b_op_{op_val}'
-    n = inst.num_srcs() or _num_srcs(inst)
+def _disasm_vop3a(inst) -> str:
+  op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
+  name = inst.op_name.lower() or f'vop3a_op_{op_val}'
+  n = inst.num_srcs() or _num_srcs(inst)
+  cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
+  orig_name = name
+  name = _CDNA_VOP3_ALIASES.get(name, name)
+  if name != orig_name:
+    s0, s1 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, 1), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, 1)
+    s2 = ""
+    dst = _vreg(inst.vdst)
+  else:
     regs = inst.canonical_op_regs
     dregs, r0, r1, r2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
-    s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, n=r0), _cdna_src(inst, inst.src1, inst.neg&2, n=r1), _cdna_src(inst, inst.src2, inst.neg&4, n=r2)
+    s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, inst.abs&1, r0), _cdna_src(inst, inst.src1, inst.neg&2, inst.abs&2, r1), _cdna_src(inst, inst.src2, inst.neg&4, inst.abs&4, r2)
     dst = _vreg(inst.vdst, dregs) if dregs > 1 else _vreg(inst.vdst)
-    sdst = _fmt_sdst(inst.sdst, 2, cdna=True)
-    cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
-    if name in ('v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32'):
-      s2 = _fmt_src(inst.src2, 2, cdna=True)
-      return f"{name}_e64 {dst}, {sdst}, {s0}, {s1}, {s2}{cl}{om}"
-    suf = "_e64" if 'co_' in name else ""
-    return f"{name}{suf} {dst}, {sdst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {sdst}, {s0}, {s1}{cl}{om}"
+  if op_val >= 512:
+    return f"{name} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name} {dst}, {s0}, {s1}{cl}{om}"
+  if op_val < 256:
+    sdst = _fmt_sdst(inst.vdst, 2, cdna=True)
+    return f"{name}_e64 {sdst}, {s0}, {s1}{cl}"
+  if 320 <= op_val < 512:
+    if name in ('v_nop', 'v_clrexcp'): return f"{name}_e64"
+    return f"{name}_e64 {dst}, {s0}{cl}{om}"
+  if name == 'v_cndmask_b32':
+    s2 = _fmt_src(inst.src2, 2, cdna=True)
+    return f"{name}_e64 {dst}, {s0}, {s1}, {s2}{cl}{om}"
+  if name in ('v_mul_legacy_f32', 'v_mac_f32'):
+    return f"{name}_e64 {dst}, {s0}, {s1}{cl}{om}"
+  suf = "_e64" if op_val < 512 else ""
+  return f"{name}{suf} {dst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {s0}, {s1}{cl}{om}"
 
-  def _disasm_cdna_vop3p(inst) -> str:
-    name, n = inst.op_name.lower(), inst.num_srcs() or 2
-    is_mfma = 'mfma' in name or 'smfmac' in name
-    is_accvgpr = 'accvgpr' in name
-    get_src = lambda v, sc: _lit(inst, v) if v == 255 else _fmt_src(v, sc, cdna=True)
+def _disasm_vop3b(inst) -> str:
+  op_val = inst.op.value if hasattr(inst.op, 'value') else inst.op
+  name = inst.op_name.lower() or f'vop3b_op_{op_val}'
+  n = inst.num_srcs() or _num_srcs(inst)
+  regs = inst.canonical_op_regs
+  dregs, r0, r1, r2 = regs['d'], regs['s0'], regs['s1'], regs['s2']
+  s0, s1, s2 = _cdna_src(inst, inst.src0, inst.neg&1, n=r0), _cdna_src(inst, inst.src1, inst.neg&2, n=r1), _cdna_src(inst, inst.src2, inst.neg&4, n=r2)
+  dst = _vreg(inst.vdst, dregs) if dregs > 1 else _vreg(inst.vdst)
+  sdst = _fmt_sdst(inst.sdst, 2, cdna=True)
+  cl, om = " clamp" if inst.clmp else "", _omod(inst.omod)
+  if name in ('v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32'):
+    s2 = _fmt_src(inst.src2, 2, cdna=True)
+    return f"{name}_e64 {dst}, {sdst}, {s0}, {s1}, {s2}{cl}{om}"
+  suf = "_e64" if 'co_' in name else ""
+  return f"{name}{suf} {dst}, {sdst}, {s0}, {s1}, {s2}{cl}{om}" if n == 3 else f"{name}{suf} {dst}, {sdst}, {s0}, {s1}{cl}{om}"
 
-    # Handle accvgpr read/write (accumulator register operations)
-    if is_accvgpr:
-      src0_off = _unwrap(inst.src0)
-      vdst_off = _vi(inst.vdst)
-      if 'read' in name:
-        # v_accvgpr_read_b32 vN, aM - reads from accumulator to VGPR
-        return f"{name}_b32 v{vdst_off}, a{src0_off - 256 if src0_off >= 256 else src0_off}"
-      if 'write' in name:
-        # v_accvgpr_write_b32 aM, src - writes to accumulator from source
-        src = _lit(inst, inst.src0) if src0_off == 255 else (f"v{src0_off - 256}" if src0_off >= 256 else decode_src(src0_off, cdna=True))
-        return f"{name}_b32 a{vdst_off}, {src}"
+def _disasm_cdna_vop3p(inst) -> str:
+  name, n = inst.op_name.lower(), inst.num_srcs() or 2
+  is_mfma = 'mfma' in name or 'smfmac' in name
+  is_accvgpr = 'accvgpr' in name
+  get_src = lambda v, sc: _lit(inst, v) if v == 255 else _fmt_src(v, sc, cdna=True)
 
-    # Handle MFMA instructions with accumulator destinations
-    if is_mfma:
-      sc = 2 if 'iu4' in name else 4 if 'iu8' in name or 'i4' in name else 8 if 'f16' in name or 'bf16' in name else 4
-      src0, src1, src2 = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, 16)
-      dst = _areg(inst.vdst, 16)  # MFMA uses accumulator registers
-      opsel_hi = inst.opsel_hi
-      mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != 3 else []) + \
-             ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
-      return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}"
+  # Handle accvgpr read/write (accumulator register operations)
+  if is_accvgpr:
+    src0_off = _unwrap(inst.src0)
+    vdst_off = _vi(inst.vdst)
+    if 'read' in name:
+      # v_accvgpr_read_b32 vN, aM - reads from accumulator to VGPR
+      return f"{name}_b32 v{vdst_off}, a{src0_off - 256 if src0_off >= 256 else src0_off}"
+    if 'write' in name:
+      # v_accvgpr_write_b32 aM, src - writes to accumulator from source
+      src = _lit(inst, inst.src0) if src0_off == 255 else (f"v{src0_off - 256}" if src0_off >= 256 else decode_src(src0_off, cdna=True))
+      return f"{name}_b32 a{vdst_off}, {src}"
 
-    # Standard VOP3P instructions
-    src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), _vreg(inst.vdst)
-    opsel_hi = inst.opsel_hi  # CDNA VOP3P only has 2 bits for opsel_hi (no opsel_hi2)
-    opsel_hi_default = 3  # CDNA default is 0b11 (2 bits), not 0b111 like RDNA
-    mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != opsel_hi_default else []) + \
-           ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
-    return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}" if n == 3 else f"{name} {dst}, {src0}, {src1}{' ' + ' '.join(mods) if mods else ''}"
+  # Handle MFMA instructions with accumulator destinations
+  if is_mfma:
+    sc = 2 if 'iu4' in name else 4 if 'iu8' in name or 'i4' in name else 8 if 'f16' in name or 'bf16' in name else 4
+    src0, src1, src2 = get_src(inst.src0, sc), get_src(inst.src1, sc), get_src(inst.src2, 16)
+    dst = _areg(inst.vdst, 16)  # MFMA uses accumulator registers
+    opsel_hi = inst.opsel_hi
+    mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != 3 else []) + \
+            ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
+    return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}"
 
-  DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP2: _disasm_vop2, CDNA_VOPC: _disasm_vopc,
-    CDNA_SOP1: _disasm_sop1, CDNA_SOP2: _disasm_sop2, CDNA_SOPC: _disasm_sopc, CDNA_SOPK: _disasm_sopk, CDNA_SOPP: _disasm_sopp,
-    CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat,
-    VOP3A: _disasm_vop3a, VOP3B: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p})
-except ImportError:
-  pass
+  # Standard VOP3P instructions
+  src0, src1, src2, dst = get_src(inst.src0, 1), get_src(inst.src1, 1), get_src(inst.src2, 1), _vreg(inst.vdst)
+  opsel_hi = inst.opsel_hi  # CDNA VOP3P only has 2 bits for opsel_hi (no opsel_hi2)
+  opsel_hi_default = 3  # CDNA default is 0b11 (2 bits), not 0b111 like RDNA
+  mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != opsel_hi_default else []) + \
+          ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
+  return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}" if n == 3 else f"{name} {dst}, {src0}, {src1}{' ' + ' '.join(mods) if mods else ''}"
+
+DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP2: _disasm_vop2, CDNA_VOPC: _disasm_vopc,
+  CDNA_SOP1: _disasm_sop1, CDNA_SOP2: _disasm_sop2, CDNA_SOPC: _disasm_sopc, CDNA_SOPK: _disasm_sopk, CDNA_SOPP: _disasm_sopp,
+  CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat,
+  VOP3A: _disasm_vop3a, VOP3B: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p})
