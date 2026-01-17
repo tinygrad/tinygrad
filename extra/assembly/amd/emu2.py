@@ -781,27 +781,52 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     dummy_lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
     _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane, op_name=op_name)
 
-    # Process each assignment with its own RANGE (required by CFG builder)
-    ended = []
-    for i, (dest, _) in enumerate(assigns):
+    # Count distinct MEM addresses to determine if we need separate RANGEs
+    # For 2ADDR ops, each MEM operation uses a different address -> need separate RANGEs
+    # For atomic ops, all operations share the same address -> use single RANGE
+    mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]
+    mem_addrs = set(re.match(r'MEM\[([^\]]+)\]', d).group(1) if re.match(r'MEM\[([^\]]+)\]', d) else d for d in mem_assigns)
+    use_separate_ranges = len(mem_addrs) > 1 or (len(mem_assigns) > 1 and '2ADDR' in op_name)
+
+    if use_separate_ranges:
+      # Each memory operation needs its own RANGE for CFG builder
+      ended = []
+      for i, (dest, _) in enumerate(assigns):
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+        active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+        _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
+        _, val = lane_assigns[i]
+
+        if dest.startswith('MEM['):
+          addr, write_val = val
+          ended.append(wlds(addr, write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val, active).end(lane))
+        elif dest.startswith('RETURN_DATA'):
+          if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
+            dword_idx = int(m.group(2)) // 32
+            ended.append(wvgpr(vdst_reg + dword_idx, lane, val.cast(dtypes.uint32), exec_mask).end(lane))
+          else:
+            ended.append(wvgpr(vdst_reg, lane, val.cast(dtypes.uint32), exec_mask).end(lane))
+    else:
+      # Atomic ops: all operations share the same RANGE
       lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
       exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
       active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
-
-      # Re-parse with this lane to get correct UOps
       _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
-      _, val = lane_assigns[i]
 
-      # MEM[addr].type = value -> LDS write
-      if dest.startswith('MEM['):
-        addr, write_val = val
-        ended.append(wlds(addr, write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val, active).end(lane))
-      # RETURN_DATA[high:low] = value -> VGPR write
-      elif dest.startswith('RETURN_DATA'):
-        if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
-          high, low = int(m.group(1)), int(m.group(2))
-          dword_idx = low // 32
-          ended.append(wvgpr(vdst_reg + dword_idx, lane, val.cast(dtypes.uint32), exec_mask).end(lane))
+      stores = []
+      for dest, val in lane_assigns:
+        if dest.startswith('MEM['):
+          addr, write_val = val
+          stores.append(wlds(addr, write_val.cast(dtypes.uint32) if write_val.dtype != dtypes.uint32 else write_val, active))
+        elif dest.startswith('RETURN_DATA'):
+          if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
+            dword_idx = int(m.group(2)) // 32
+            stores.append(wvgpr(vdst_reg + dword_idx, lane, val.cast(dtypes.uint32), exec_mask))
+          else:
+            stores.append(wvgpr(vdst_reg, lane, val.cast(dtypes.uint32), exec_mask))
+      # End all stores with the same lane
+      ended = [UOp.sink(*stores).end(lane)] if stores else []
 
     return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name)) if ended else (name, UOp.sink(inc_pc(), arg=KernelInfo(name=name)))
 
