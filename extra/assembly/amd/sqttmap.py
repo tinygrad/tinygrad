@@ -29,7 +29,12 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
     if isinstance(p, WAVESTART):
       assert p.wave not in wave_pc
       wave_pc[p.wave] = 0
+      continue
     if isinstance(p, WAVEEND): break
+    pc = wave_pc[p.wave]
+    inst = pc_map[pc]
+    wave_pc[p.wave] += inst.size()
+    yield (p, pc, inst)
 
 def test_rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import llvm_disasm
@@ -48,7 +53,6 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
   for pkt, pc, inst in map_insts(sqtt.blob, prg.lib):
     rocprof_inst = next(rwaves_iter[pkt.wave][0])
     ref_pc = rocprof_inst.pc-rwaves_base
-    if pkt.wave == 0: print(inst.disasm())
     if inst.disasm() == "s_endpgm":
       wave_n[pkt.wave] = wave_n.get(pkt.wave, 0)+1
       last = list(rwaves_iter[pkt.wave].pop(0))
@@ -59,6 +63,7 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
         for l in last: print(l)
         raise e
     else:
+      assert pkt._time == rocprof_inst.time+rocprof_inst.stall
       assert ref_pc == pc, f"pc mismatch {ref_pc}:{disasm[rocprof_inst.pc][0]} != {pc}:{inst.disasm()} {pkt._time} {rocprof_inst.time+rocprof_inst.stall}"
       insts += 1
 
