@@ -574,14 +574,22 @@ def _isnan(v: UOp) -> UOp:
          (v32 & UOp.const(dtypes.uint32, 0x007FFFFF)).ne(UOp.const(dtypes.uint32, 0))
 
 def _check_nan(inner: str, vars: dict, quiet: bool) -> UOp:
-  if (m := re.match(r"64'F\((.+)\)", inner)): inner = m.group(1)
+  # For NaN classification, check the ORIGINAL type's bits, not converted bits
+  # Converting signaling NaN to f64 quiets it, so we must check original f32/f16 bits
+  if (m := re.match(r"64'F\((.+)\)", inner)): inner = m.group(1)  # Strip 64'F wrapper
   v = parse_expr(inner, vars)
   is_f16 = '.f16' in inner or v.dtype == dtypes.half
+  is_f64 = '.f64' in inner or v.dtype == dtypes.float64
   if is_f16:
     v16 = (v & UOp.const(dtypes.uint32, 0xFFFF)) if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint16).cast(dtypes.uint32)
     exp_mask, mant_mask, quiet_bit = UOp.const(dtypes.uint32, 0x7C00), UOp.const(dtypes.uint32, 0x03FF), UOp.const(dtypes.uint32, 0x0200)
     is_nan_exp, has_mant, is_quiet = (v16 & exp_mask).eq(exp_mask), (v16 & mant_mask).ne(UOp.const(dtypes.uint32, 0)), (v16 & quiet_bit).ne(UOp.const(dtypes.uint32, 0))
+  elif is_f64:
+    v64 = v.bitcast(dtypes.uint64) if v.dtype == dtypes.float64 else v.cast(dtypes.uint64)
+    exp_mask, mant_mask, quiet_bit = UOp.const(dtypes.uint64, 0x7FF0000000000000), UOp.const(dtypes.uint64, 0x000FFFFFFFFFFFFF), UOp.const(dtypes.uint64, 0x0008000000000000)
+    is_nan_exp, has_mant, is_quiet = (v64 & exp_mask).eq(exp_mask), (v64 & mant_mask).ne(UOp.const(dtypes.uint64, 0)), (v64 & quiet_bit).ne(UOp.const(dtypes.uint64, 0))
   else:
+    # f32: check original f32 bits for NaN type
     v32 = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v
     exp_mask, mant_mask, quiet_bit = UOp.const(dtypes.uint32, 0x7F800000), UOp.const(dtypes.uint32, 0x007FFFFF), UOp.const(dtypes.uint32, 0x00400000)
     is_nan_exp, has_mant, is_quiet = (v32 & exp_mask).eq(exp_mask), (v32 & mant_mask).ne(UOp.const(dtypes.uint32, 0)), (v32 & quiet_bit).ne(UOp.const(dtypes.uint32, 0))
@@ -684,17 +692,44 @@ def _register_funcs():
       v32 = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
       return (v32 | UOp.const(dtypes.uint32, 0x00400000)).bitcast(dtypes.float32)  # Set bit 22
   _FUNC_TABLE.append((r'cvtToQuietNAN\((.+)\)', 1, _cvt_to_quiet_nan))
-  def _exponent(a, v, m):
+  # isDENORM: check if value is denormalized (exponent=0, mantissa!=0)
+  def _is_denorm(a, v, m):
     val = a[0]
-    if '.f16' in m.group(1) or val.dtype == dtypes.half:
+    if val.dtype == dtypes.float64 or '.f64' in m.group(1):
+      bits = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val.cast(dtypes.uint64)
+      exp_mask = UOp.const(dtypes.uint64, 0x7FF0000000000000)
+      mant_mask = UOp.const(dtypes.uint64, 0x000FFFFFFFFFFFFF)
+      exp_zero = (bits & exp_mask).eq(UOp.const(dtypes.uint64, 0))
+      mant_nonzero = (bits & mant_mask).ne(UOp.const(dtypes.uint64, 0))
+      return exp_zero & mant_nonzero
+    elif val.dtype == dtypes.half or '.f16' in m.group(1):
       bits = val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)
-      return (bits.cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 10)) & UOp.const(dtypes.uint32, 0x1F)
-    elif '.f64' in m.group(1) or val.dtype == dtypes.float64:
-      bits = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val
-      return ((bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)).cast(dtypes.uint32)
+      bits32 = bits.cast(dtypes.uint32)
+      exp_mask = UOp.const(dtypes.uint32, 0x7C00)
+      mant_mask = UOp.const(dtypes.uint32, 0x03FF)
+      exp_zero = (bits32 & exp_mask).eq(UOp.const(dtypes.uint32, 0))
+      mant_nonzero = (bits32 & mant_mask).ne(UOp.const(dtypes.uint32, 0))
+      return exp_zero & mant_nonzero
     else:  # f32
       bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
-      return (bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)
+      exp_mask = UOp.const(dtypes.uint32, 0x7F800000)
+      mant_mask = UOp.const(dtypes.uint32, 0x007FFFFF)
+      exp_zero = (bits & exp_mask).eq(UOp.const(dtypes.uint32, 0))
+      mant_nonzero = (bits & mant_mask).ne(UOp.const(dtypes.uint32, 0))
+      return exp_zero & mant_nonzero
+  _FUNC_TABLE.append((r'isDENORM\((.+)\)', 1, _is_denorm))
+  def _exponent(a, v, m):
+    val = a[0]
+    # Return signed int so subtraction works correctly (e.g., exponent(S2) - exponent(S1) >= 96)
+    if '.f16' in m.group(1) or val.dtype == dtypes.half:
+      bits = val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)
+      return ((bits.cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 10)) & UOp.const(dtypes.uint32, 0x1F)).cast(dtypes.int)
+    elif '.f64' in m.group(1) or val.dtype == dtypes.float64:
+      bits = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val
+      return ((bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
+    else:  # f32
+      bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
+      return ((bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.int)
   _FUNC_TABLE.append((r'exponent\((.+)\)', 1, _exponent))
   _FUNC_TABLE.append((r'sign\((.+)\)', 1, lambda a, v, m: ((a[0].bitcast(dtypes.uint16) if a[0].dtype == dtypes.half else (a[0] & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 15)) & UOp.const(dtypes.uint32, 1) if '.f16' in m.group(1) or a[0].dtype == dtypes.half else
                                                           ((a[0].bitcast(dtypes.uint32) if a[0].dtype == dtypes.float32 else a[0]) >> UOp.const(dtypes.uint32, 31)) & UOp.const(dtypes.uint32, 1)))
