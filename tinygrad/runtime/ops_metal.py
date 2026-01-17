@@ -66,7 +66,7 @@ class MetalCompiler(Compiler):
   # library is loaded first then RTLD_LOCAL library will just use it's symbols. On linux there is RTLD_DEEPBIND to prevent that, but on macos there
   # doesn't seem to be anything we can do.
   with contextlib.suppress(FileNotFoundError, ModuleNotFoundError):
-    import tinygrad.runtime.autogen.llvm # noqa: F401
+    from tinygrad.runtime.autogen import llvm, libclang # noqa: F401
   support = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
   support.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
 
