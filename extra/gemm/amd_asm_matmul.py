@@ -6,7 +6,7 @@
 # Workgroup: 128 threads (arranged as 32x4 for coalesced memory access)
 # Inner loop: 8 iterations per K-block, processing 8 columns of A and 8 rows of B
 #
-# Accumulators: 128 vgprs (v[2-117], v[120-124], v[126-129], v[131-133])
+# Accumulators: 128 vgprs (v[2-129])
 
 import numpy as np
 from pathlib import Path
@@ -31,13 +31,16 @@ ADDR_MASK = 0x3fffff80    # Address alignment mask
 # Named register assignments (VGPRs)
 # =============================================================================
 V_LANE_ID = 0             # lane_id set on startup
-V_LANE_ID_MOD8 = 182      # lane_id & 7
-V_LANE_MOD8_X4 = 174      # (lane_id & 7) << 2
-V_LANE_DIV8_X4 = 175      # ((lane_id >> 3) & 3) << 2
-V_LDS_A_BASE = 186        # LDS A-tile base address for inner loop
-V_LDS_B_BASE = 170        # LDS B-tile base address for inner loop
-V_GLOBAL_A_ADDR = 171     # global memory A prefetch address
-V_GLOBAL_B_ADDR = 178     # global memory B prefetch address
+# Use tile gaps (v146-159) for named regs to minimize max VGPR
+V_LANE_ID_MOD8 = 146      # lane_id & 7
+V_LANE_MOD8_X4 = 147      # (lane_id & 7) << 2
+V_LANE_DIV8_X4 = 150      # ((lane_id >> 3) & 3) << 2
+V_LDS_B_BASE = 151        # LDS B-tile base address for inner loop
+V_LDS_A_BASE = 154        # LDS A-tile base address for inner loop
+V_GLOBAL_A_ADDR = 155     # global memory A prefetch address
+V_GLOBAL_B_ADDR = 158     # global memory B prefetch address
+V_LDS_A_ADDR = 159        # single base register for A stores
+V_LDS_B_ADDR = 162        # single base register for B stores
 
 # LDS tile register destinations - SEPARATE from DATA to avoid overlap
 # A on banks 2-3, B on banks 0-1 to avoid bank conflicts in VOPD
@@ -144,15 +147,13 @@ OUT_REGS = [r for i in range(32) for r in range(126 - i*4, 130 - i*4)]
 PERMUTE_SWAPS = derive_permute_swaps(ACC_GRID, OUT_REGS)
 
 # =============================================================================
-# LDS tile staging registers - COMPACT LAYOUT
+# LDS tile staging registers
 # =============================================================================
 # DATA regs receive contiguous global prefetch, then write to LDS
 # TILE regs receive scattered LDS loads (ds_load_b64 pairs), then feed FMACs
-# These are SEPARATE - DATA lives during prefetch/store, TILE lives during inner loop
-V_LDS_A_ADDR = 189                            # single base register for A stores (use +512 offsets)
-V_LDS_A_DATA = [155, 172, 173, 154, 159, 176, 177, 158]  # 8 data registers for A prefetch (mod 4: 3,0,1,2,3,0,1,2)
-V_LDS_B_ADDR = 190                            # single base register for B stores (use 16-bit offsets)
-V_LDS_B_DATA = [163, 180, 181, 162, 167, 184, 185, 166]  # 8 data registers for B prefetch (mod 4: 3,0,1,2,3,0,1,2)
+# Contiguous layout with mod4=[3,0,1,2,3,0,1,2] for bank conflict avoidance
+V_LDS_A_DATA = [163, 164, 165, 166, 167, 168, 169, 170]
+V_LDS_B_DATA = [171, 172, 173, 174, 175, 176, 177, 178]
 
 # Initial tile prefetch: (vdst, saddr_lo) - load into A data regs using B prefetch pointers (s[24:31])
 INIT_PREFETCH = [(V_LDS_A_DATA[i], S_PREFETCH_B+2*i) for i in range(4)]
@@ -202,7 +203,7 @@ class Kernel:
       ('user_sgpr_kernarg_segment_ptr', 1), ('user_sgpr_dispatch_id', 0), ('user_sgpr_private_segment_size', 0),
       ('wavefront_size32', 1), ('uses_dynamic_stack', 0), ('enable_private_segment', 0),
       ('system_sgpr_workgroup_id_x', 1), ('system_sgpr_workgroup_id_y', 1), ('system_sgpr_workgroup_id_z', 0),
-      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 192),
+      ('system_sgpr_workgroup_info', 0), ('system_vgpr_workitem_id', 0), ('next_free_vgpr', 179),
       ('next_free_sgpr', 16), ('float_round_mode_32', 0), ('float_round_mode_16_64', 0),
       ('float_denorm_mode_32', 3), ('float_denorm_mode_16_64', 3), ('dx10_clamp', 1), ('ieee_mode', 1),
       ('fp16_overflow', 0), ('workgroup_processor_mode', 0), ('memory_ordered', 1), ('forward_progress', 0),
@@ -220,7 +221,7 @@ class Kernel:
       f'    .group_segment_fixed_size: {lds_size}', '    .kernarg_segment_align: 8',
       '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
       '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
-      '    .vgpr_count: 192', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
+      '    .vgpr_count: 179', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
       'amdhsa.version:', '  - 1', '  - 2', '...', '\t.end_amdgpu_metadata'])
 
 
