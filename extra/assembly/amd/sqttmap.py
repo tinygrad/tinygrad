@@ -3,7 +3,7 @@ from typing import Iterator
 from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp, PacketType
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.decode import decode_inst
-from extra.assembly.amd.autogen.rdna3.ins import SOPP
+from extra.assembly.amd.autogen.rdna3.ins import SOPP, s_endpgm
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from tinygrad.runtime.support.elf import elf_loader
 
@@ -27,7 +27,9 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
       assert p.wave not in wave_pc
       wave_pc[p.wave] = 0
     if isinstance(p, WAVEEND) and (p.cu, p.simd) == simd_sel:
-      wave_pc.pop(p.wave)
+      pc = wave_pc.pop(p.wave)
+      yield (p, pc+4, s_endpgm())
+
     if isinstance(p, INST) and ("OTHER_" not in p.op.name):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu doesn't get a packet
@@ -42,17 +44,25 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
 
 def test_rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import llvm_disasm
-  from extra.sqtt.roc import decode as roc_decode
+  from extra.sqtt.roc import decode as roc_decode, InstExec
   disasm = {addr+prg.base:inst_disasm for addr, inst_disasm in llvm_disasm(target, prg.lib).items()}
   rctx = roc_decode([sqtt], {prg.name:disasm})
   rwaves = rctx.inst_execs[(sqtt.kern, sqtt.exec_tag)]
-  rwaves_iter = {w.wave_id:w.unpack_insts() for w in rwaves}
-  rwaves_base = {w.wave_id:next(w.unpack_insts()).pc for w in rwaves}
+  rwaves_iter:dict[int, list[Iterator[InstExec]]] = {}
+  for w in rwaves: rwaves_iter.setdefault(w.wave_id, []).append(w.unpack_insts())
+  rwaves_base = next(iter(disasm))
+
+  total_waves = sum(len(v) for v in rwaves_iter.values())
+  insts = 0
 
   for pkt, pc, inst in map_insts(sqtt.blob, prg.lib):
-    rocprof_pc = next(rwaves_iter[pkt.wave]).pc
-    ref_pc = rocprof_pc-rwaves_base[pkt.wave]
+    rocprof_pc = next(rwaves_iter[pkt.wave][0]).pc
+    ref_pc = rocprof_pc-rwaves_base
     assert ref_pc == pc, f"pc mismatch {ref_pc}:{disasm[rocprof_pc][0]} != {pc}:{inst.disasm()}"
+    if inst.disasm() == "s_endpgm": rwaves_iter[pkt.wave].pop(0)
+    insts += 1
+
+  print(f"passed for {insts} instructions across {total_waves} waves scheduled on {len(rwaves_iter)} wave units")
 
 if __name__ == "__main__":
   import sys, pickle
@@ -65,5 +75,5 @@ if __name__ == "__main__":
   target = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device.startswith("AMD"))).props["gfx_target_version"]
   for e in sqtt_events:
     if not e.itrace or e.se != 1: continue
-    print("------", e.kern)
+    print(f"** {e.kern}")
     test_rocprof_inst_traces_match(e, kern_events[e.kern], target)
