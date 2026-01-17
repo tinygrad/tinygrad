@@ -132,7 +132,8 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
       # Full 32-bit write (either D0, D0.type, or D0[31:0].type)
       if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         # 64-bit destination: write both low and high 32-bit parts
-        val64 = val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
+        # Use bitcast for float64 to preserve bit pattern, cast for integers
+        val64 = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else (val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val)
         lo = val64.cast(dtypes.uint32)
         hi = (val64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
         raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, lo, exec_mask)))
@@ -293,7 +294,10 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   name = f"emu2_{inst_bytes[:inst.size()].hex()}"
   sgpr, vgpr, vmem, lds = _define_bufs()
   inst_words = inst.size() // 4
-  literal = int.from_bytes(inst_bytes[4:8], 'little') if len(inst_bytes) >= 8 else 0
+  # Literal position depends on instruction type: 4-byte base (VOP1/VOP2/VOPC/SOP*) vs 8-byte base (VOP3/VOP3P/etc)
+  is_8byte_base = isinstance(inst, (VOP3, VOP3SD, VOP3P, SMEM, DS, FLAT, GLOBAL, VOPD))
+  lit_off = 8 if is_8byte_base else 4
+  literal = int.from_bytes(inst_bytes[lit_off:lit_off+4], 'little') if len(inst_bytes) >= lit_off + 4 else 0
 
   # Helper: read SGPR
   def rsgpr(reg: int) -> UOp: return sgpr.index(UOp.const(dtypes.index, reg))
@@ -345,13 +349,15 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       return name, UOp.sink(wsgpr(PC_LO_IDX, UOp.const(dtypes.uint32, 0xFFFFFFFF)), arg=KernelInfo(name=name))
 
     # Branch instructions - use pcode parsing
+    # NOTE: pcode uses byte offsets, but our PC is in 4-byte words, so we convert
     pcode = PCODE.get(inst.op)
     if pcode is not None:
-      pc = rsgpr(PC_LO_IDX).cast(dtypes.uint64)
+      pc_words = rsgpr(PC_LO_IDX)
+      pc_bytes = pc_words.cast(dtypes.int64) * UOp.const(dtypes.int64, 4)  # Convert to bytes for pcode
       vcc = rsgpr(VCC_LO.offset)
       exec_lo = rsgpr(EXEC_LO.offset)
       srcs = {
-        'PC': pc,
+        'PC': pc_bytes,
         'SIMM16': UOp.const(dtypes.int16, _sext(inst.simm16, 16)),
         'SCC': rsgpr(SCC_IDX),
         'VCC': vcc,
@@ -361,7 +367,9 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       _, assigns = parse_pcode(pcode, srcs, op_name=inst.op.name)
       for dest, val in assigns:
         if dest == 'PC' or dest.startswith('PC.'):
-          return name, UOp.sink(wsgpr(PC_LO_IDX, val.cast(dtypes.uint32)), arg=KernelInfo(name=name))
+          # Convert back from bytes to words using integer right shift
+          pc_new = val >> UOp.const(dtypes.int64, 2)
+          return name, UOp.sink(wsgpr(PC_LO_IDX, pc_new.cast(dtypes.uint32)), arg=KernelInfo(name=name))
 
     return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
 
@@ -499,7 +507,17 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       return name, UOp.sink(wsgpr(inst.vdst.offset, val), inc_pc(), arg=KernelInfo(name=name))
 
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-    src0 = rsrc(inst.src0.offset, lane)
+
+    # Check operand sizes - F64 ops need 64-bit sources
+    sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
+
+    # Helper for 64-bit source reads
+    def rsrc64(off: int, lane: UOp) -> UOp:
+      lo = rsrc(off, lane)
+      hi = rsrc(off + 1, lane)
+      return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+
+    src0 = rsrc64(inst.src0.offset, lane) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
     vdst_reg = inst.vdst.offset - 256
 
     # 16-bit ops: vdst_reg >= 128 means write to high half of vgpr[vdst_reg-128]
@@ -705,8 +723,29 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     # Regular VOP3 handling
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
 
+    # F64 inline float constants (as uint64 bit patterns)
+    F64_INLINE = {240: 0x3fe0000000000000,  # 0.5
+                  241: 0xbfe0000000000000,  # -0.5
+                  242: 0x3ff0000000000000,  # 1.0
+                  243: 0xbff0000000000000,  # -1.0
+                  244: 0x4000000000000000,  # 2.0
+                  245: 0xc000000000000000,  # -2.0
+                  246: 0x4010000000000000,  # 4.0
+                  247: 0xc010000000000000,  # -4.0
+                  248: 0x3fc45f306dc9c883}  # 1/(2*pi)
+
     # Helper for 64-bit source reads
     def rsrc64(off: int, lane: UOp) -> UOp:
+      # Check for F64 inline constants
+      if off in F64_INLINE:
+        return UOp.const(dtypes.uint64, F64_INLINE[off])
+      # Check for integer inline constants (sign-extended to 64-bit)
+      if off < 256 and off >= 128:
+        if off < 193: return UOp.const(dtypes.uint64, off - 128)  # 0-64
+        if off < 209: return UOp.const(dtypes.int64, -(off - 192)).cast(dtypes.uint64)  # -1 to -16 (sign extended)
+      # For literal (255), the 32-bit literal is the HIGH 32 bits, low 32 bits are 0
+      if off == 255:
+        return UOp.const(dtypes.uint64, literal) << UOp.const(dtypes.uint64, 32)
       lo = rsrc(off, lane)
       hi = rsrc(off + 1, lane)
       return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
@@ -1148,7 +1187,67 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     if 'LOAD' in op_name:
       vdst_reg = inst.vdst.offset - 256
       ended = []
-      # Each dword gets its own loop to avoid CFG issues
+
+      # Handle D16 loads specially - they read 8 or 16 bits and write to high or low half
+      if 'D16_HI' in op_name or 'D16_LO' in op_name:
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        addr = make_addr(lane)
+        # Load the dword containing our data
+        dword_val = vmem.index((addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
+        # Get current destination value (to preserve the other half)
+        old_vdst = rvgpr(vdst_reg, lane)
+        # Extract the loaded value based on instruction type
+        if '_U8' in op_name:
+          # Byte offset within dword
+          byte_offset = (addr & UOp.const(dtypes.uint64, 3)).cast(dtypes.uint32)
+          loaded = (dword_val >> (byte_offset * UOp.const(dtypes.uint32, 8))) & UOp.const(dtypes.uint32, 0xFF)
+        elif '_I8' in op_name:
+          byte_offset = (addr & UOp.const(dtypes.uint64, 3)).cast(dtypes.uint32)
+          loaded = (dword_val >> (byte_offset * UOp.const(dtypes.uint32, 8))) & UOp.const(dtypes.uint32, 0xFF)
+          # Sign extend 8-bit to 16-bit
+          sign_bit = (loaded >> UOp.const(dtypes.uint32, 7)) & UOp.const(dtypes.uint32, 1)
+          loaded = sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(loaded | UOp.const(dtypes.uint32, 0xFF00), loaded)
+        else:  # B16
+          # Half offset within dword (0 or 1)
+          half_offset = ((addr >> UOp.const(dtypes.uint64, 1)) & UOp.const(dtypes.uint64, 1)).cast(dtypes.uint32)
+          loaded = (dword_val >> (half_offset * UOp.const(dtypes.uint32, 16))) & UOp.const(dtypes.uint32, 0xFFFF)
+        # Write to high or low half of destination
+        if 'D16_HI' in op_name:
+          new_val = (old_vdst & UOp.const(dtypes.uint32, 0x0000FFFF)) | (loaded << UOp.const(dtypes.uint32, 16))
+        else:  # D16_LO - preserve high bits
+          new_val = (old_vdst & UOp.const(dtypes.uint32, 0xFFFF0000)) | loaded
+        store = wvgpr(vdst_reg, lane, new_val, exec_mask)
+        ended.append(store.end(lane))
+        return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+      # Handle sub-dword loads: U8, I8, U16, I16 (zero/sign extend to 32 bits)
+      if op_name.endswith('_U8') or op_name.endswith('_I8') or op_name.endswith('_U16') or op_name.endswith('_I16'):
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        addr = make_addr(lane)
+        dword_val = vmem.index((addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
+        if '_U8' in op_name:
+          byte_offset = (addr & UOp.const(dtypes.uint64, 3)).cast(dtypes.uint32)
+          val = (dword_val >> (byte_offset * UOp.const(dtypes.uint32, 8))) & UOp.const(dtypes.uint32, 0xFF)
+        elif '_I8' in op_name:
+          byte_offset = (addr & UOp.const(dtypes.uint64, 3)).cast(dtypes.uint32)
+          val = (dword_val >> (byte_offset * UOp.const(dtypes.uint32, 8))) & UOp.const(dtypes.uint32, 0xFF)
+          # Sign extend 8-bit to 32-bit
+          sign_bit = (val >> UOp.const(dtypes.uint32, 7)) & UOp.const(dtypes.uint32, 1)
+          val = sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(val | UOp.const(dtypes.uint32, 0xFFFFFF00), val)
+        elif '_U16' in op_name:
+          half_offset = ((addr >> UOp.const(dtypes.uint64, 1)) & UOp.const(dtypes.uint64, 1)).cast(dtypes.uint32)
+          val = (dword_val >> (half_offset * UOp.const(dtypes.uint32, 16))) & UOp.const(dtypes.uint32, 0xFFFF)
+        else:  # _I16
+          half_offset = ((addr >> UOp.const(dtypes.uint64, 1)) & UOp.const(dtypes.uint64, 1)).cast(dtypes.uint32)
+          val = (dword_val >> (half_offset * UOp.const(dtypes.uint32, 16))) & UOp.const(dtypes.uint32, 0xFFFF)
+          # Sign extend 16-bit to 32-bit
+          sign_bit = (val >> UOp.const(dtypes.uint32, 15)) & UOp.const(dtypes.uint32, 1)
+          val = sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(val | UOp.const(dtypes.uint32, 0xFFFF0000), val)
+        store = wvgpr(vdst_reg, lane, val, exec_mask)
+        ended.append(store.end(lane))
+        return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+
+      # Regular loads - each dword gets its own loop to avoid CFG issues
       for i in range(ndwords):
         lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
         addr = make_addr(lane)
@@ -1355,6 +1454,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
           # Execute wave: sgpr=0, vgpr=1, vmem=2, lds=3
           all_bufs = {0: st.sgpr_buf, 1: st.vgpr_buf, 2: vmem_buf, 3: lds_buf}
+          max_instructions = 100000
+          inst_count = 0
           while True:
             pc = st.pc
             if pc == 0xFFFFFFFF or pc not in program: break
@@ -1366,5 +1467,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
             bufs = [all_bufs[g] for g in globals_list]
             runner(bufs, {}, wait=True)
+
+            inst_count += 1
+            assert inst_count < max_instructions, f"exceeded {max_instructions} instructions, likely infinite loop"
 
   return 0
