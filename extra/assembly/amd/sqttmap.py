@@ -1,23 +1,13 @@
 # maps trace packets to instructions.
-from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp
+from typing import Iterator
+from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp, PacketType
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from tinygrad.runtime.support.elf import elf_loader
 
-def get_rocprof_output(sqtt, prg, target):
-  from tinygrad.viz.serve import llvm_disasm
-  from extra.sqtt.roc import decode as roc_decode
-  disasm = {addr+prg.base:inst_disasm for addr, inst_disasm in llvm_disasm(target, prg.lib).items()}
-  rctx = roc_decode([sqtt], {prg.name:disasm})
-  return rctx.inst_execs[(sqtt.kern, sqtt.exec_tag)], {k:v[0] for k,v in disasm.items()}
-
-def map_insts(data:bytes, lib:bytes):
-  # rocprof to compare
-  rwaves, rpc_table = get_rocprof_output(e, prg, target)
-  rwaves = {w.wave_id:w for w in rwaves}
-
+def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
   # map pcs to insts
   pc_map:dict[int, Inst] = {}
   image, sections, _ = elf_loader(lib)
@@ -30,15 +20,12 @@ def map_insts(data:bytes, lib:bytes):
     pc_map[offset-text_off] = inst
     offset += inst.size()
 
-  rwaves_iter, rwaves_base = {}, {}
   wave_pc:dict[int, int] = {}
   simd_sel = (0, 0)
   for p in decode(data):
     if isinstance(p, WAVESTART) and (p.cu, p.simd) == simd_sel:
       assert p.wave not in wave_pc
       wave_pc[p.wave] = 0
-      rwaves_iter[p.wave] = rwaves[p.wave].unpack_insts()
-      rwaves_base[p.wave] = next(rwaves[p.wave].unpack_insts()).pc
     if isinstance(p, WAVEEND) and (p.cu, p.simd) == simd_sel:
       wave_pc.pop(p.wave)
     if isinstance(p, INST) and ("OTHER_" not in p.op.name):
@@ -51,10 +38,21 @@ def map_insts(data:bytes, lib:bytes):
       else:
         wave_pc[p.wave] += inst.size()
 
-      print(f"{pc:012X} {inst.disasm()} wave={p.wave}")
-      if (ref:=next(rwaves_iter[p.wave], None)) is None and inst.disasm() in {"s_endpgm", "s_code_end"}: break
-      rpc = ref.pc-rwaves_base[p.wave]
-      assert rpc == pc, f"{rpc}:{rpc_table[ref.pc]} != {pc}:{inst.disasm()}"
+      yield (p, pc, inst)
+
+def test_rocprof_inst_traces_match(sqtt, prg, target):
+  from tinygrad.viz.serve import llvm_disasm
+  from extra.sqtt.roc import decode as roc_decode
+  disasm = {addr+prg.base:inst_disasm for addr, inst_disasm in llvm_disasm(target, prg.lib).items()}
+  rctx = roc_decode([sqtt], {prg.name:disasm})
+  rwaves = rctx.inst_execs[(sqtt.kern, sqtt.exec_tag)]
+  rwaves_iter = {w.wave_id:w.unpack_insts() for w in rwaves}
+  rwaves_base = {w.wave_id:next(w.unpack_insts()).pc for w in rwaves}
+
+  for pkt, pc, inst in map_insts(sqtt.blob, prg.lib):
+    rocprof_pc = next(rwaves_iter[pkt.wave]).pc
+    ref_pc = rocprof_pc-rwaves_base[pkt.wave]
+    assert ref_pc == pc, f"pc mismatch {ref_pc}:{disasm[rocprof_pc][0]} != {pc}:{inst.disasm()}"
 
 if __name__ == "__main__":
   import sys, pickle
@@ -68,5 +66,4 @@ if __name__ == "__main__":
   for e in sqtt_events:
     if not e.itrace or e.se != 1: continue
     print("------", e.kern)
-    prg = kern_events[e.kern]
-    map_insts(e.blob, prg.lib)
+    test_rocprof_inst_traces_match(e, kern_events[e.kern], target)
