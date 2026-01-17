@@ -62,6 +62,13 @@ def parse_xml(filename: str, arch: str):
   root = ET.fromstring(zipfile.ZipFile(fetch(XML_URL)).read(filename))
   name_map = {**NAME_MAP, **ARCH_NAME_MAP.get(arch, {})}
   encodings, enums, types, fmts, op_types_set = {}, {}, {}, {}, set()
+  # Extract HWREG and MSG enums from OperandTypes
+  op_enum_map = {("OPR_HWREG", "ID"): "HWREG", ("OPR_SENDMSG_RTN", "MSG"): "MSG"}
+  for ot in root.findall(".//OperandTypes/OperandType"):
+    ot_name = ot.findtext("OperandTypeName")
+    for field in ot.findall(".//Field"):
+      if (enum_name := op_enum_map.get((ot_name, field.findtext("FieldName")))):
+        enums[enum_name] = {int(pv.findtext("Value")): pv.findtext("Name").upper() for pv in field.findall(".//PredefinedValue")}
   # Extract DataFormats with BitCount
   for df in root.findall("ISA/DataFormats/DataFormat"):
     name, bits = df.findtext("DataFormatName"), df.findtext("BitCount")
@@ -204,7 +211,7 @@ def write_enum(enums, path):
   for name, ops in sorted(enums.items()):
     if not ops: continue
     suffix = "_E32" if name in ("VOP1", "VOP2", "VOPC") else "_E64" if name == "VOP3" else ""
-    lines.append(f"class {name}Op(Enum):")
+    lines.append(f"class {name}(Enum):" if name in ("HWREG", "MSG") else f"class {name}Op(Enum):")
     aliases = []
     for op, mem in sorted(ops.items()):
       msuf = suffix if name != "VOP3" or op < 512 else ""

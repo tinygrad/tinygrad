@@ -85,32 +85,14 @@ def _swmmac_regs(name: str) -> tuple[int, int, int, int]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 from extra.assembly.amd.autogen.rdna3.ins import (VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, GLOBAL, SCRATCH,
-  VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp)
+  VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPDOp, SOP1Op, SOPKOp, SOPPOp, SMEMOp, DSOp, HWREG, MSG)
 from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
   VOPC as R4_VOPC, VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
-  SMEM as R4_SMEM, DS as R4_DS, VOPDOp as R4_VOPDOp)
+  SMEM as R4_SMEM, DS as R4_DS, VOPDOp as R4_VOPDOp, HWREG as HWREG_RDNA4)
 from extra.assembly.amd.autogen.cdna.ins import FLAT as C_FLAT
 
 def _is_cdna(inst: Inst) -> bool: return 'cdna' in inst.__class__.__module__
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CONSTANTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-HWREG = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_HW_ID', 5: 'HW_REG_GPR_ALLOC',
-         6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS', 15: 'HW_REG_SH_MEM_BASES', 18: 'HW_REG_PERF_SNAPSHOT_PC_LO',
-         19: 'HW_REG_PERF_SNAPSHOT_PC_HI', 20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI', 22: 'HW_REG_XNACK_MASK',
-         23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER', 28: 'HW_REG_IB_STS2'}
-HWREG_RDNA4 = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 4: 'HW_REG_STATE_PRIV', 5: 'HW_REG_GPR_ALLOC',
-               6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS', 10: 'HW_REG_PERF_SNAPSHOT_DATA', 11: 'HW_REG_PERF_SNAPSHOT_PC_LO',
-               12: 'HW_REG_PERF_SNAPSHOT_PC_HI', 15: 'HW_REG_PERF_SNAPSHOT_DATA1', 16: 'HW_REG_PERF_SNAPSHOT_DATA2',
-               17: 'HW_REG_EXCP_FLAG_PRIV', 18: 'HW_REG_EXCP_FLAG_USER', 19: 'HW_REG_TRAP_CTRL',
-               20: 'HW_REG_SCRATCH_BASE_LO', 21: 'HW_REG_SCRATCH_BASE_HI', 23: 'HW_REG_HW_ID1',
-               24: 'HW_REG_HW_ID2', 26: 'HW_REG_SCHED_MODE', 29: 'HW_REG_SHADER_CYCLES_LO',
-               30: 'HW_REG_SHADER_CYCLES_HI', 31: 'HW_REG_DVGPR_ALLOC_LO', 32: 'HW_REG_DVGPR_ALLOC_HI'}
-MSG = {128: 'MSG_RTN_GET_DOORBELL', 129: 'MSG_RTN_GET_DDID', 130: 'MSG_RTN_GET_TMA',
-       131: 'MSG_RTN_GET_REALTIME', 132: 'MSG_RTN_SAVE_WAVE', 133: 'MSG_RTN_GET_TBA',
-       134: 'MSG_RTN_GET_TBA_TO_PC', 135: 'MSG_RTN_GET_SE_AID_ID'}
 # CDNA opcode name aliases for disasm (new name -> old name expected by tests)
 _CDNA_DISASM_ALIASES = {'v_fmac_f64': 'v_mul_legacy_f32', 'v_dot2c_f32_bf16': 'v_mac_f32', 'v_fmamk_f32': 'v_madmk_f32', 'v_fmaak_f32': 'v_madak_f32'}
 
@@ -503,7 +485,8 @@ def _disasm_sop1(inst: SOP1) -> str:
     if 'swappc_b64' in name: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {src}"
     if 'sendmsg_rtn' in name:
       v = _unwrap(inst.ssrc0)
-      msg_str = MSG.get(v)
+      try: msg_str = MSG(v).name if v != 255 else None  # MSG_RTN_ILLEGAL_MSG (255) not supported by LLVM
+      except ValueError: msg_str = None
       return f"{name} {_fmt_sdst(inst.sdst, dst_regs)}, sendmsg({msg_str})" if msg_str else f"{name} {_fmt_sdst(inst.sdst, dst_regs)}, 0x{v:x}"
   sop1_src_only = ('S_ALLOC_VGPR', 'S_SLEEP_VAR', 'S_BARRIER_SIGNAL', 'S_BARRIER_SIGNAL_ISFIRST', 'S_BARRIER_INIT', 'S_BARRIER_JOIN')
   if inst.op_name in sop1_src_only: return f"{name} {src}"
@@ -528,13 +511,16 @@ def _disasm_sopc(inst: SOPC) -> str:
   s1 = _lit(inst, inst.ssrc1) if _unwrap(inst.ssrc1) == 255 else _fmt_src(inst.ssrc1, regs['s1'], cdna)
   return f"{inst.op_name.lower()} {s0}, {s1}"
 
+_HWREG_BLACKLIST = {'HW_REG_PC_LO', 'HW_REG_PC_HI', 'HW_REG_IB_DBG1', 'HW_REG_FLUSH_IB', 'HW_REG_SHADER_TBA_LO', 'HW_REG_SHADER_TBA_HI',
+                    'HW_REG_SHADER_FLAT_SCRATCH_LO', 'HW_REG_SHADER_FLAT_SCRATCH_HI', 'HW_REG_SHADER_CYCLES'}
 def _disasm_sopk(inst: SOPK) -> str:
   op, name, cdna = inst.op, inst.op_name.lower(), _is_cdna(inst)
   is_rdna4 = 'rdna4' in inst.__class__.__module__
   hw = HWREG_RDNA4 if is_rdna4 else HWREG
   def fmt_hwreg(hid, hoff, hsz):
-    if hid not in hw: return f"0x{inst.simm16:x}"
-    hr_name = hw[hid]
+    try: hr_name = hw(hid).name.replace("HW_REG_WAVE_", "HW_REG_")
+    except ValueError: return f"0x{inst.simm16:x}"
+    if hr_name in _HWREG_BLACKLIST: return f"0x{inst.simm16:x}"
     return f"hwreg({hr_name})" if hoff == 0 and hsz == 32 else f"hwreg({hr_name}, {hoff}, {hsz})"
   if name == 's_setreg_imm32_b32':
     hid, hoff, hsz = inst.simm16 & 0x3f, (inst.simm16 >> 6) & 0x1f, ((inst.simm16 >> 11) & 0x1f) + 1
