@@ -213,8 +213,8 @@ class TestDetectFormat(unittest.TestCase):
     self.assertEqual(detect_format(ds_store_b32(v[0], v[1]).to_bytes()), DS)
 
   def test_detect_flat(self):
-    self.assertEqual(detect_format(global_load_b32(vdst=v[0], addr=v[1:2], saddr=NULL).to_bytes()), FLAT)
-    self.assertEqual(detect_format(global_store_b32(addr=v[0:1], data=v[2], saddr=NULL).to_bytes()), FLAT)
+    self.assertEqual(detect_format(global_load_b32(vdst=v[0], addr=v[1:2], saddr=NULL).to_bytes()), GLOBAL)
+    self.assertEqual(detect_format(global_store_b32(addr=v[0:1], data=v[2], saddr=NULL).to_bytes()), GLOBAL)
 
   def test_detect_vopd(self):
     inst = VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[0], vdsty=v[1], srcx0=0, srcy0=0)
