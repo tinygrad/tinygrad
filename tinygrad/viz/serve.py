@@ -295,8 +295,8 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
       add(name, p, width=width, idx=int("OTHER" in name))
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
     if isinstance(p, IMMEDIATE_MASK):
-      wave_idxs = [i for i in range(p.mask.bit_length()) if p.mask & (1 << i)]
-      for widx in wave_idxs: add(IMMEDIATE_MASK.__name__, p, wave_idx=widx)
+      for widx in range(p.mask.bit_length()):
+        if p.mask & (1 << widx): add(IMMEDIATE_MASK.__name__, p, wave_idx=widx)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       add((name:=str(p.src).split('.')[1]).replace("_ALT", ""), p, op_name=name)
       if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
