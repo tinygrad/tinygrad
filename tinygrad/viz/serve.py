@@ -304,7 +304,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
         add("VALU", p)
         add("SALU", p)
       else:
-        add(name, p)
+        add(name.replace("_ALT", ""), p, op_name=name)
       if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
       trace[name].add(p._time)
   return [ProfilePointEvent(r, "start", r, ts=Decimal(0)) for r in rows]+ret
