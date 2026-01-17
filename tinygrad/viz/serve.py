@@ -284,7 +284,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
-  def add(name:str, p:PacketType, idx=0, width=1, wave_idx:int=None, op_name=None) -> None:
+  def add(name:str, p:PacketType, idx=0, width=1, wave_idx=None, op_name=None) -> None:
     rows.setdefault(r:=(f"WAVE:{w}" if (w:=getattr(p, "wave", wave_idx)) is not None else f"{p.__class__.__name__}:0 {name}"))
     ret.append(ProfileRangeEvent(r, f"{op_name if op_name is not None else name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
   for p in decode(e.blob):
@@ -296,7 +296,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
     if isinstance(p, IMMEDIATE_MASK):
       wave_idxs = [i for i in range(p.mask.bit_length()) if p.mask & (1 << i)]
-      for widx in wave_idxs: add(IMMEDIATE.__name__, p, wave_idx=widx)
+      for widx in wave_idxs: add(IMMEDIATE_MASK.__name__, p, wave_idx=widx)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       add((name:=str(p.src).split('.')[1]).replace("_ALT", ""), p, op_name=name)
       if p._time in trace.setdefault(name, set()): raise AssertionError(f"packets overlap in shared resource! {name}")
