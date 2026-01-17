@@ -447,9 +447,14 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_cbranch_scc0(simm16=0)); k.branch_to('SKIP_PREFETCH')  # branch if loop_ctr >= loop_bound
 
   if not NO_GLOBAL:
-    # Advance prefetch pointers (SGPRs)
-    for i in range(8): k.emit(s_add_u32(s[S_PREFETCH_B+i*2], s[S_PREFETCH_B+i*2], 0x20000))
-    for i in range(8): k.emit(s_add_u32(s[S_PREFETCH_A+i*2], s[S_PREFETCH_A+i*2], 0x20))
+    # Advance prefetch pointers (SGPRs, 64-bit adds)
+    k.emit(s_clause(simm16=31))
+    for i in range(8):
+      k.emit(s_add_u32(s[S_PREFETCH_B+i*2], s[S_PREFETCH_B+i*2], 0x20000))
+      k.emit(s_addc_u32(s[S_PREFETCH_B+i*2+1], s[S_PREFETCH_B+i*2+1], 0))
+    for i in range(8):
+      k.emit(s_add_u32(s[S_PREFETCH_A+i*2], s[S_PREFETCH_A+i*2], 0x20))
+      k.emit(s_addc_u32(s[S_PREFETCH_A+i*2+1], s[S_PREFETCH_A+i*2+1], 0))
 
     for vdst, saddr_lo in INIT_PREFETCH:
       k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
