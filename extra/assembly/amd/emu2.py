@@ -31,6 +31,7 @@ VOPD_TO_VOP2 = {
   VOPDOp.V_DUAL_MIN_F32: VOP2Op.V_MIN_F32_E32, VOPDOp.V_DUAL_ADD_NC_U32: VOP2Op.V_ADD_NC_U32_E32,
   VOPDOp.V_DUAL_LSHLREV_B32: VOP2Op.V_LSHLREV_B32_E32, VOPDOp.V_DUAL_AND_B32: VOP2Op.V_AND_B32_E32,
   VOPDOp.V_DUAL_MOV_B32: VOP1Op.V_MOV_B32_E32, VOPDOp.V_DUAL_CNDMASK_B32: VOP2Op.V_CNDMASK_B32_E32,
+  VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
 }
 WAVE_SIZE = 32
 PC_LO_IDX, PC_HI_IDX, SCC_IDX = 128, 129, 130
@@ -484,6 +485,20 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     return pcode_result
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # SOPK: s_movk_i32, s_cmpk_*, s_addk_i32, etc. - 16-bit immediate
+  # ═══════════════════════════════════════════════════════════════════════════
+  if isinstance(inst, SOPK):
+    sdst_reg = inst.sdst.offset
+    simm16 = inst.simm16
+    # Sign-extend SIMM16 to 32-bit for signed operations
+    simm16_sext = simm16 if simm16 < 0x8000 else simm16 - 0x10000
+    s0 = rsgpr(sdst_reg)
+    srcs = {'S0': s0, 'SIMM16': UOp.const(dtypes.int32, simm16_sext), 'D0': s0}
+    pcode_result = compile_sop_pcode(inst.op, srcs, wsgpr, rsgpr, sdst_reg, 1, inc_pc, name)
+    assert pcode_result is not None, f"no pcode for SOPK: {inst.op.name}"
+    return pcode_result
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # VOP1: v_mov_b32, etc.
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, VOP1):
@@ -583,9 +598,9 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       pcode = PCODE.get(inst.op)
       if pcode is None: return UOp.const(dtypes.uint32, 0)
       _, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=UOp.const(dtypes.uint32, lane_idx))
-      # Find the D0.u64[laneId] assignment (the comparison result)
+      # Find the comparison result assignment (D0 for CMP, EXEC for CMPX)
       for dest, val in assigns:
-        if 'D0' in dest and '[laneId]' in dest:
+        if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest):
           return val.cast(dtypes.uint32)
       return UOp.const(dtypes.uint32, 0)
 
@@ -601,7 +616,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
     # Store to VCC (or EXEC for CMPX)
     if is_cmpx:
-      stores = [wsgpr(EXEC_LO.offset, new_vcc), wsgpr(VCC_LO.offset, new_vcc)]
+      stores = [wsgpr(EXEC_LO.offset, new_vcc)]  # CMPX E32 only writes EXEC, not VCC
     else:
       stores = [wsgpr(VCC_LO.offset, new_vcc)]
 
@@ -816,6 +831,14 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     srcs = {'S0': src0, 'S1': src1}
     if src2 is not None: srcs['S2'] = src2
 
+    # V_CNDMASK_B32_E64: condition comes from src2 (SGPR), not VCC
+    # D0.u32 = S2[laneId] ? S1.u32 : S0.u32
+    if op_name == 'V_CNDMASK_B32_E64':
+      cond_bit = (src2 >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
+      result = cond_bit.ne(UOp.const(dtypes.uint32, 0)).where(src1, src0)
+      store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(UOp.sink(store).end(lane), inc_pc(), arg=KernelInfo(name=name))
+
     # V_PERM_B32: byte permutation - complex pcode with lambda, implement directly
     if op_name == 'V_PERM_B32':
       # Concatenate {S0, S1} as 64-bit: S1 is low 32 bits, S0 is high 32 bits
@@ -884,6 +907,42 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       hi = (result >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
       stores = [wvgpr(vdst_reg, lane, lo, exec_mask), wvgpr(vdst_reg + 1, lane, hi, exec_mask)]
       return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc(), arg=KernelInfo(name=name))
+
+    # V_ADD_CO_U32/V_SUB_CO_U32: carry-out goes to sdst (not VCC)
+    # Uses unrolled computation like VOPC because sdst needs all lane results at once
+    if op_name in ('V_ADD_CO_U32', 'V_SUB_CO_U32'):
+      sdst_reg = inst.sdst.offset
+      old_sdst = rsgpr(sdst_reg)
+      is_sub = 'SUB' in op_name
+
+      # Unroll to compute carry bits for all lanes
+      def get_lane_carry(lane_idx: int) -> UOp:
+        lane_c = UOp.const(dtypes.index, lane_idx)
+        s0 = rsrc(inst.src0.offset, lane_c).cast(dtypes.uint64)
+        s1 = rsrc(inst.src1.offset, lane_c).cast(dtypes.uint64)
+        if is_sub:
+          tmp = s0 - s1
+          carry = (tmp >> UOp.const(dtypes.uint64, 32)).ne(UOp.const(dtypes.uint64, 0))
+        else:
+          tmp = s0 + s1
+          carry = (tmp >= UOp.const(dtypes.uint64, 0x100000000))
+        return carry.where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
+
+      new_carry_bits = UOp.const(dtypes.uint32, 0)
+      for i in range(32):
+        bit = get_lane_carry(i) << UOp.const(dtypes.uint32, i)
+        new_carry_bits = new_carry_bits | bit
+
+      # Apply EXEC mask: new_sdst = (old_sdst & ~exec) | (new_carry & exec)
+      new_sdst = (old_sdst & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (new_carry_bits & exec_mask)
+
+      # Now compute result for the vectorized loop
+      s0_64 = src0.cast(dtypes.uint64) if src0.dtype != dtypes.uint64 else src0
+      s1_64 = src1.cast(dtypes.uint64) if src1.dtype != dtypes.uint64 else src1
+      result = (s0_64 - s1_64 if is_sub else s0_64 + s1_64).cast(dtypes.uint32)
+
+      vgpr_store = wvgpr(vdst_reg, lane, result, exec_mask)
+      return name, UOp.sink(UOp.sink(vgpr_store).end(lane), wsgpr(sdst_reg, new_sdst), inc_pc(), arg=KernelInfo(name=name))
 
     srcs = {'S0': src0, 'S1': src1}
     if src2 is not None: srcs['S2'] = src2
@@ -1393,6 +1452,9 @@ class WaveState:
     self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
     self._vgpr_mv = self.vgpr_buf.as_buffer(force_zero_copy=True).cast('I')
     self._sgpr_mv = self.sgpr_buf.as_buffer(force_zero_copy=True).cast('I')
+    # Explicitly zero out all registers to ensure clean state
+    for i in range(SGPR_COUNT): self._sgpr_mv[i] = 0
+    for i in range(VGPR_SIZE): self._vgpr_mv[i] = 0
     self._write_sgpr(EXEC_LO.offset, (1 << n_lanes) - 1)
     self._write_sgpr(PC_LO_IDX, 0)
 
