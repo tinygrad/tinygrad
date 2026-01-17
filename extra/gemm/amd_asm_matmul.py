@@ -27,14 +27,10 @@ LDS_B_STRIDE = 0x200  # LDS stride for B tile (512 bytes)
 LDS_BASE_OFFSET = 0x1080  # Base LDS offset for tiles
 ADDR_MASK = 0x3fffff80    # Address alignment mask
 
-# s_waitcnt encodings: wait for memory operations to complete
-WAIT_LGKM = 64519    # wait for LDS/GDS/KMEM (lgkm_cnt=0)
-WAIT_ALL = 0         # wait for everything
-WAIT_VMEM = 1015     # wait for VMEM only (vm_cnt=0, lgkm_cnt=63)
-
 # =============================================================================
 # Named register assignments (VGPRs) - COMPACT LAYOUT
 # =============================================================================
+V_LANE_ID = 0             # lane_id set on startup
 V_LANE_ID_MOD8 = 182      # lane_id & 7 (column within 8-wide tile chunk)
 V_OUTPUT_ROW = 171        # output row coordinate
 V_LANE_MOD8_X4 = 174      # V_LANE_ID_MOD8 << 2 (byte offset)
@@ -247,13 +243,11 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_lshl_b32(s[S_TILE_Y], s[S_WORKGROUP_Y], 7))
 
   # Lane-derived values
-  k.emit(v_and_b32_e32(v[V_LANE_ID_MOD8], 7, v[0]))
-  k.emit(v_lshrrev_b32_e32(v[4], 3, v[0]))
-  k.emit(v_or_b32_e32(v[1], s[S_TILE_X], v[0]))
+  k.emit(v_and_b32_e32(v[V_LANE_ID_MOD8], 7, v[V_LANE_ID]))
+  k.emit(v_lshrrev_b32_e32(v[4], 3, v[V_LANE_ID]))
+  k.emit(v_or_b32_e32(v[1], s[S_TILE_X], v[V_LANE_ID]))
   k.emit(v_or_b32_e32(v[22], s[S_TILE_Y], v[4]))
   k.emit(v_lshlrev_b32_e32(v[V_LANE_MOD8_X4], 2, v[V_LANE_ID_MOD8]))
-  k.emit(v_mov_b32_e32(v[2], 0))  # v[1] always positive, sign extension is 0
-  k.emit(v_lshlrev_b64(v[5:6], 2, v[1:2]))
   k.waitcnt(lgkm=0)
 
   # Compute 8 A and B matrix tile base pointers for prefetch
@@ -267,7 +261,7 @@ def build_kernel(arch='gfx1100'):
     k.emit(s_addc_u32(s[S_PREFETCH_A+i*2+1], s[S_KERNARG_A[1]], 0))
 
   # Global prefetch addresses: B = (tile_x + lane_id) * 4, A = ((tile_y << 12) + (lane_id/8)*4K + lane_id%8) * 4
-  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], s[S_TILE_X], v[0]))
+  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], s[S_TILE_X], v[V_LANE_ID]))
   k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_B_ADDR], 2, v[V_GLOBAL_B_ADDR]))
   k.emit(s_lshl_b32(s[19], s[S_TILE_Y], 12))
   k.emit(v_lshl_add_u32(v[V_GLOBAL_A_ADDR], v[4], 12, v[V_LANE_ID_MOD8]))  # (lane_id/8)*4K + lane_id%8
@@ -287,7 +281,6 @@ def build_kernel(arch='gfx1100'):
   # ===========================================================================
   # This section computes LDS store addresses with a swizzle pattern to avoid bank conflicts.
   # Key outputs:
-  #   v[8]: A-tile initial store base (used only for initial stores with stride64)
   #   V_LDS_B_ADDR (v145): B-tile store base (used for both initial and main loop)
   #   V_LANE_DIV8_X4 (v135): (lane_id >> 3) << 2 for epilogue
   #
@@ -303,7 +296,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_mad_u32_u24(v[V_LDS_B_ADDR], LDS_A_STRIDE, v[V_LANE_ID_MOD8], v[9]))
 
   # For V_LDS_A_BASE and epilogue
-  k.emit(v_bfe_u32(v[2], v[0], 3, 2))  # v[2] = (lane_id >> 3) & 3
+  k.emit(v_bfe_u32(v[2], v[V_LANE_ID], 3, 2))  # v[2] = (lane_id >> 3) & 3
   k.emit(v_lshlrev_b32_e32(v[V_LANE_DIV8_X4], 2, v[2]))
 
   # Compute LDS load/store base addresses for inner loop
@@ -311,7 +304,7 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_and_b32_e32(v[3], 0x7F, v[1]))  # simplified from 3 lines
   k.emit(v_lshl_or_b32(v[V_LDS_B_BASE], v[V_LANE_ID_MOD8], 4, LDS_BASE_OFFSET))
   k.emit(v_lshl_add_u32(v[V_LDS_A_ADDR], v[3], 2, LDS_BASE_OFFSET))
-  k.emit(v_lshlrev_b32_e32(v[3], 2, v[0]))
+  k.emit(v_lshlrev_b32_e32(v[3], 2, v[V_LANE_ID]))
   k.emit(v_and_or_b32(v[V_LDS_A_BASE], 0x180, v[3], v[2]))
 
   # Do initial stores
@@ -428,11 +421,13 @@ def build_kernel(arch='gfx1100'):
 
   # Compute output coordinates: v[V_LANE_ID_MOD8] = col, v[V_OUTPUT_ROW] = row
   k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32,
-              vdstx=v[149], vdsty=v[150], srcx0=v[V_LANE_MOD8_X4], vsrcx1=v[0], srcy0=v[V_LANE_DIV8_X4], vsrcy1=v[0]))
-  k.emit(v_and_b32_e32(v[0], 0x60, v[0]))
+              vdstx=v[149], vdsty=v[150],
+              srcx0=v[V_LANE_MOD8_X4], vsrcx1=v[V_LANE_ID],
+              srcy0=v[V_LANE_DIV8_X4], vsrcy1=v[V_LANE_ID]))
+  k.emit(v_and_b32_e32(v[V_LANE_ID], 0x60, v[V_LANE_ID]))
   k.emit(v_or_b32_e32(v[V_LANE_ID_MOD8], s[S_TILE_X], v[149]))
-  k.emit(v_add_nc_u32_e32(v[0], s[S_TILE_Y], v[0]))
-  k.emit(v_or_b32_e32(v[V_OUTPUT_ROW], v[0], v[150]))
+  k.emit(v_add_nc_u32_e32(v[V_LANE_ID], s[S_TILE_Y], v[V_LANE_ID]))
+  k.emit(v_or_b32_e32(v[V_OUTPUT_ROW], v[V_LANE_ID], v[150]))
 
   # Precompute row offsets: v[144-147] for rows 0-3, v[148-151] for rows 16-19
   for base, row_off in [(144, 0), (148, 16)]:
@@ -462,15 +457,15 @@ def build_kernel(arch='gfx1100'):
 
     # Compute output address
     if row_in_group == 0:  # first row: compute base address for this column group
-      if col_off == 0: k.emit(v_mov_b32_e32(v[0], v[V_LANE_ID_MOD8]))
-      else: k.emit(v_add_nc_u32_e32(v[0], col_off, v[V_LANE_ID_MOD8]))
+      if col_off == 0: k.emit(v_mov_b32_e32(v[V_LANE_ID], v[V_LANE_ID_MOD8]))
+      else: k.emit(v_add_nc_u32_e32(v[V_LANE_ID], col_off, v[V_LANE_ID_MOD8]))
       row_base = 144 + row if row < 4 else 148 + row - 16
-      k.emit(v_add_nc_u32_e32(v[0], v[row_base], v[0]))
-      k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
-      k.emit(v_add_co_u32(v[0], VCC_LO, s[S_OUT_PTR[0]], v[0]))
+      k.emit(v_add_nc_u32_e32(v[V_LANE_ID], v[row_base], v[V_LANE_ID]))
+      k.emit(v_lshlrev_b32_e32(v[V_LANE_ID], 2, v[V_LANE_ID]))
+      k.emit(v_add_co_u32(v[V_LANE_ID], VCC_LO, s[S_OUT_PTR[0]], v[V_LANE_ID]))
       k.emit(v_add_co_ci_u32_e32(v[1], s[S_OUT_PTR[1]], v[V_ADDR_HI_ZERO]))
     else:  # subsequent rows: just add stride
-      k.emit(v_add_co_u32(v[0], VCC_LO, s[S_PREFETCH_FLAG], v[0]))
+      k.emit(v_add_co_u32(v[V_LANE_ID], VCC_LO, s[S_PREFETCH_FLAG], v[V_LANE_ID]))
       k.emit(v_add_co_ci_u32_e32(v[1], v[1], v[V_ADDR_HI_ZERO]))
 
     k.emit(global_store_b128(addr=v[0:1], data=v[tmp:tmp+3], saddr=NULL))
