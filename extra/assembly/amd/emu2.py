@@ -724,15 +724,15 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         return UOp.const(dtypes.uint32, 0)
 
       # Compute all 32 bits by unrolling - VOP3 VOPC writes comparison bits for ALL lanes,
-      # EXEC mask affects which lanes participate in the comparison (inactive lanes get 0)
+      # EXEC mask affects which lanes participate in the comparison (inactive lanes preserve old VCC)
       exec_mask = rsgpr(EXEC_LO.offset)
       new_sdst = UOp.const(dtypes.uint32, 0)
       for i in range(32):
         cmp_result = get_cmp_result_vop3(i)
         bit = cmp_result << UOp.const(dtypes.uint32, i)
         new_sdst = new_sdst | bit
-      # Mask by EXEC - inactive lanes produce 0 in output
-      new_sdst = new_sdst & exec_mask
+      # Merge by EXEC - active lanes use new result, inactive lanes preserve old VCC
+      new_sdst = (new_sdst & exec_mask) | (old_sdst & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF)))
 
       # Store to scalar destination (and EXEC for CMPX)
       if is_cmpx:
@@ -810,7 +810,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     neg_bits = getattr(inst, 'neg', 0) or 0
 
     # Helper to apply abs/neg to a source value based on its operation type
-    def apply_modifiers(val: UOp, mod_bit: int, is_16bit: bool = False) -> UOp:
+    def apply_modifiers(val: UOp, mod_bit: int, is_16bit: bool = False, is_64bit: bool = False) -> UOp:
       if not (abs_bits & (1 << mod_bit)) and not (neg_bits & (1 << mod_bit)): return val
       if is_16bit:
         # For 16-bit ops, apply modifiers to f16 value
@@ -820,6 +820,14 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         if neg_bits & (1 << mod_bit):
           f16_val = f16_val.neg()
         return f16_val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+      if is_64bit:
+        # For 64-bit float ops
+        if val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
+        if abs_bits & (1 << mod_bit):
+          val = (val.bitcast(dtypes.uint64) & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64)
+        if neg_bits & (1 << mod_bit):
+          val = val.neg()
+        return val.bitcast(dtypes.uint64)
       # For 32-bit float ops
       if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
       if abs_bits & (1 << mod_bit):
@@ -829,10 +837,11 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       return val.bitcast(dtypes.uint32)
 
     is_16bit_op = 'F16' in op_name or 'B16' in op_name or 'I16' in op_name or 'U16' in op_name
+    is_64bit_op = 'F64' in op_name or sizes.get('src0', 1) == 2 or sizes.get('src1', 1) == 2 or sizes.get('src2', 1) == 2
     if abs_bits or neg_bits:
-      src0 = apply_modifiers(src0, 0, is_16bit_op)
-      if src1 is not None: src1 = apply_modifiers(src1, 1, is_16bit_op)
-      if src2 is not None: src2 = apply_modifiers(src2, 2, is_16bit_op)
+      src0 = apply_modifiers(src0, 0, is_16bit_op, sizes.get('src0', 1) == 2)
+      if src1 is not None: src1 = apply_modifiers(src1, 1, is_16bit_op, sizes.get('src1', 1) == 2)
+      if src2 is not None: src2 = apply_modifiers(src2, 2, is_16bit_op, sizes.get('src2', 1) == 2)
 
     vdst_reg = inst.vdst.offset - 256
     srcs = {'S0': src0, 'S1': src1}
@@ -930,25 +939,25 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     _, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
 
     # Check if VCC is per-lane (needs unrolling) or scalar
-    has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC'))
+    # D0.u64[laneId] is also per-lane VCC for comparison ops where D0 == sdst (VCC_LO)
+    has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
 
     if has_per_lane_vcc:
-      # Per-lane VCC (e.g., V_ADD_CO_U32): need unrolled carry computation
-      # Extract D0 (vdst) assignments for loop
-      vgpr_stores = []
-      for dest, val in assigns:
-        if dest.startswith('D0'):
-          if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
-            val64 = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val.cast(dtypes.uint64)
-            lo = val64.cast(dtypes.uint32)
-            hi = (val64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
-            vgpr_stores.append(wvgpr(vdst_reg, lane, lo, exec_mask))
-            vgpr_stores.append(wvgpr(vdst_reg + 1, lane, hi, exec_mask))
-          else:
-            vgpr_stores.append(wvgpr(vdst_reg, lane, val.cast(dtypes.uint32), exec_mask))
+      # Per-lane VCC (e.g., V_ADD_CO_U32, V_CMP_CLASS_F32)
+      # TODO: There's a known issue with carry ops (V_ADD_CO_U32, etc.) where src==dst.
+      # The VCC computation uses unrolled loads which tinygrad may schedule AFTER the vgpr writes,
+      # causing VCC to be computed from the UPDATED values instead of original values.
+      # This needs proper support for read-before-write ordering in tinygrad's scheduler.
 
-      # Compute carry bits by unrolling (to avoid loop-carried dependency)
-      def get_carry_for_lane(lane_idx: int) -> UOp:
+      # Extract D0 expression from assigns (for vgpr loop)
+      d0_val = None
+      for dest, val in assigns:
+        if dest.startswith('D0') and '[laneId]' not in dest:
+          d0_val = val
+          break
+
+      # Compute all 32 VCC bits by unrolling (each uses independent source loads)
+      def get_vcc_bit_for_lane(lane_idx: int) -> UOp:
         lane_const = UOp.const(dtypes.index, lane_idx)
         s0 = rsrc64_lane(inst.src0.offset, lane_const) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane_const)
         s1 = rsrc64_lane(inst.src1.offset, lane_const) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane_const)
@@ -957,22 +966,39 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         if s2 is not None: lane_srcs['S2'] = s2
         _, lane_assigns = parse_pcode(pcode, lane_srcs, UOp.const(dtypes.uint32, lane_idx), op_name=op_name)
         for dest, val in lane_assigns:
-          if dest.startswith('VCC'):
+          if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest):
             return val.cast(dtypes.uint32)
         return UOp.const(dtypes.uint32, 0)
 
-      # Accumulate all 32 carry bits
-      new_sdst = UOp.const(dtypes.uint32, 0)
+      # Compute and combine all 32 bits
+      new_vcc = UOp.const(dtypes.uint32, 0)
       for i in range(32):
-        carry_bit = get_carry_for_lane(i) << UOp.const(dtypes.uint32, i)
-        new_sdst = new_sdst | carry_bit
+        bit_val = get_vcc_bit_for_lane(i) << UOp.const(dtypes.uint32, i)
+        new_vcc = new_vcc | bit_val
 
-      # Write stores: vgpr in loop, sdst after loop
+      # Apply EXEC mask: new_vcc = (computed & EXEC) | (old_vcc & ~EXEC)
+      old_vcc = rsgpr(sdst_reg)
+      final_vcc = (new_vcc & exec_mask) | (old_vcc & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF)))
+
+      # Build vgpr stores (using loop variable from initial parse)
+      vgpr_stores = []
+      if d0_val is not None:
+        if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
+          val64 = d0_val.bitcast(dtypes.uint64) if d0_val.dtype == dtypes.float64 else d0_val.cast(dtypes.uint64)
+          lo = val64.cast(dtypes.uint32)
+          hi = (val64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
+          vgpr_stores.append(wvgpr(vdst_reg, lane, lo, exec_mask))
+          vgpr_stores.append(wvgpr(vdst_reg + 1, lane, hi, exec_mask))
+        else:
+          vgpr_stores.append(wvgpr(vdst_reg, lane, d0_val.cast(dtypes.uint32), exec_mask))
+
+      # Write VCC and vgpr
+      vcc_write = wsgpr(sdst_reg, final_vcc)
       if vgpr_stores:
         vgpr_end = UOp.sink(*vgpr_stores).end(lane)
-        return name, UOp.sink(vgpr_end, wsgpr(sdst_reg, new_sdst), inc_pc(), arg=KernelInfo(name=name))
+        return name, UOp.sink(vgpr_end, vcc_write, inc_pc(), arg=KernelInfo(name=name))
       else:
-        return name, UOp.sink(wsgpr(sdst_reg, new_sdst), inc_pc(), arg=KernelInfo(name=name))
+        return name, UOp.sink(vcc_write, inc_pc(), arg=KernelInfo(name=name))
     else:
       # Scalar VCC (e.g., V_DIV_SCALE_F32): use normal pcode handling with sdst redirection
       pcode_result = compile_vop_pcode(inst.op, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name, sdst_reg=sdst_reg)
@@ -1103,6 +1129,10 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       vop = VOPD_TO_VOP2.get(op)
       assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
       srcs = {'S0': rsrc(src0_off, lane), 'S1': rvgpr(vsrc1_off - 256, lane), 'D0': rvgpr(vdst_reg, lane)}
+      # FMAAK/FMAMK use inline literal constant (SIMM32)
+      vop_name = vop.name if hasattr(vop, 'name') else str(vop)
+      if 'FMAAK' in vop_name or 'FMAMK' in vop_name:
+        srcs['SIMM32'] = UOp.const(dtypes.uint32, literal)
       stores = compile_vop_pcode_stores(vop, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask)
       assert stores is not None, f"no pcode for VOPD {label}: {vop}"
       ended.extend(stores)
