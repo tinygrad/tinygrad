@@ -28,17 +28,15 @@ LDS_BASE_OFFSET = 0x1080  # Base LDS offset for tiles
 ADDR_MASK = 0x3fffff80    # Address alignment mask
 
 # =============================================================================
-# Named register assignments (VGPRs) - COMPACT LAYOUT
+# Named register assignments (VGPRs)
 # =============================================================================
 V_LANE_ID = 0             # lane_id set on startup
-V_LANE_ID_MOD8 = 182      # lane_id & 7 (column within 8-wide tile chunk)
-V_OUTPUT_ROW = 171        # output row coordinate
-V_LANE_MOD8_X4 = 174      # V_LANE_ID_MOD8 << 2 (byte offset)
-V_LANE_DIV8_X4 = 175      # (lane_id >> 3) << 2
-V_ADDR_HI_ZERO = 188      # always 0 (for 64-bit address high bits)
+V_LANE_ID_MOD8 = 182      # lane_id & 7
+V_LANE_MOD8_X4 = 174      # (lane_id & 7) << 2
+V_LANE_DIV8_X4 = 175      # ((lane_id >> 3) & 3) << 2
 V_LDS_A_BASE = 186        # LDS A-tile base address for inner loop
 V_LDS_B_BASE = 170        # LDS B-tile base address for inner loop
-V_GLOBAL_A_ADDR = 171     # global memory A prefetch address (reuses V_OUTPUT_ROW slot during main loop)
+V_GLOBAL_A_ADDR = 171     # global memory A prefetch address
 V_GLOBAL_B_ADDR = 178     # global memory B prefetch address
 
 # LDS tile register destinations - SEPARATE from DATA to avoid overlap
@@ -141,11 +139,8 @@ def derive_permute_swaps(acc_grid, out_regs):
   return swaps
 
 # Derived: swap sequence to arrange accumulators for output
-# OUT_REGS arranged so each group of 4 is ascending for direct global_store_b128
-OUT_REGS = []
-for i in range(32):  # 32 groups of 4 registers
-  base = 129 - i * 4
-  OUT_REGS.extend([base - 3, base - 2, base - 1, base])  # ascending within group
+# Each group of 4 registers is ascending for direct global_store_b128
+OUT_REGS = [r for i in range(32) for r in range(126 - i*4, 130 - i*4)]
 PERMUTE_SWAPS = derive_permute_swaps(ACC_GRID, OUT_REGS)
 
 # =============================================================================
@@ -284,15 +279,9 @@ def build_kernel(arch='gfx1100'):
   # LDS store address computation (bank-conflict-avoiding swizzle)
   # ===========================================================================
   # This section computes LDS store addresses with a swizzle pattern to avoid bank conflicts.
-  # Key outputs:
-  #   V_LDS_B_ADDR (v145): B-tile store base (used for both initial and main loop)
-  #   V_LANE_DIV8_X4 (v135): (lane_id >> 3) << 2 for epilogue
-  #
   # The swizzle ensures that threads in the same wavefront write to different LDS banks.
   # Formula: swizzled_addr = base + (lane_id & 7) * LDS_A_STRIDE + swizzle_offset
   # where swizzle_offset depends on (lane_id >> 3) to distribute across banks.
-
-  # Compute LDS B-tile store address with bank-conflict-avoiding swizzle
   k.emit(v_add_nc_u32_e32(v[9], s[S_LOOP_CTR], v[22]))  # row 0 base
   k.emit(v_and_b32_e32(v[9], ADDR_MASK, v[9]))
   k.emit(v_sub_nc_u32_e32(v[9], v[22], v[9]))  # row 0 swizzle offset
@@ -348,7 +337,7 @@ def build_kernel(arch='gfx1100'):
     #k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
     #k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
 
-    # Advance prefetch pointers (SGPRs, 64-bit adds)
+    # Advance prefetch pointers (64-bit adds)
     k.emit(s_clause(simm16=31))
     for i in range(8):
       k.emit(s_add_u32(s[S_PREFETCH_B+i*2], s[S_PREFETCH_B+i*2], 0x20000))
@@ -395,7 +384,7 @@ def build_kernel(arch='gfx1100'):
       k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
                   vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
 
-  # wait for all global stores to finish
+  # wait for all global loads to finish
   # then sync the warp so it's safe to store local
   k.waitcnt(vm=0)
   k.emit(s_barrier())
