@@ -396,12 +396,15 @@ class Inst:
     if any(name == 'literal' for name, _ in self._fields): return self.literal
     return None
 
-  def _dpp_suffix(self) -> str | None:
-    """Check if instruction has DPP encoding suffix. Returns '_DPP8' or '_DPP16' or None."""
+  def _variant_suffix(self) -> str | None:
+    """Check if instruction has DPP/SDWA encoding suffix. Returns suffix or None."""
+    # Don't check for variants if we're already a variant class
+    cls_name = type(self).__name__
+    if any(s in cls_name for s in ('_DPP8', '_DPP16', '_SDWA')): return None
     for name, field in self._fields:
       if isinstance(field, SrcField):
         off = getattr(self, name).offset
-        if off == 249: return '_DPP8'
+        if off == 249: return '_DPP8'  # or _SDWA on older archs
         if off == 250: return '_DPP16'
     return None
 
@@ -412,10 +415,12 @@ class Inst:
     # Upgrade to _LIT variant if needed
     if inst.has_literal() and (lit_cls := _get_variant(cls, '_LIT')) is not None:
       return lit_cls.from_bytes(data)
-    # Upgrade to DPP variant if needed (error if DPP detected but no variant exists)
-    if (dpp_suf := inst._dpp_suffix()):
-      if (dpp_cls := _get_variant(cls, dpp_suf)) is not None: return dpp_cls.from_bytes(data)
-      raise ValueError(f"unsupported {dpp_suf} encoding for {cls.__name__}")
+    # Upgrade to DPP/SDWA variant if needed
+    if (suffix := inst._variant_suffix()):
+      # Try DPP8 first, then SDWA (src0=249 means DPP8 on RDNA, SDWA on CDNA)
+      for try_suffix in ([suffix, '_SDWA'] if suffix == '_DPP8' else [suffix]):
+        if (var_cls := _get_variant(cls, try_suffix)) is not None: return var_cls.from_bytes(data)
+      raise ValueError(f"unsupported {suffix} encoding for {cls.__name__}")
     return inst
 
   def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw
