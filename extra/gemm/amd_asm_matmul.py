@@ -100,8 +100,6 @@ FMAC_PAIR_ORDER = [
 
 def derive_fmac_pattern(acc_grid, a_tile_regs=None, b_tile_regs=None):
   """Generate 64 dual FMAC ops from accumulator grid with optimized iteration order."""
-  if a_tile_regs is None: a_tile_regs = V_A_TILE_REGS
-  if b_tile_regs is None: b_tile_regs = V_B_TILE_REGS
   pattern = []
   for idx, (a_pair, b_pair) in enumerate(FMAC_PAIR_ORDER):
     a_even, a_odd = a_pair * 2, a_pair * 2 + 1
@@ -120,7 +118,7 @@ def derive_fmac_pattern(acc_grid, a_tile_regs=None, b_tile_regs=None):
   return pattern
 
 # Derived: 64 dual FMAC operations
-FMAC_PATTERN = derive_fmac_pattern(ACC_GRID)
+FMAC_PATTERN = derive_fmac_pattern(ACC_GRID, V_A_TILE_REGS, V_B_TILE_REGS)
 
 def derive_permute_swaps(acc_grid, out_regs):
   """Derive swap sequence to permute accumulators from FMAC layout to output order.
@@ -164,19 +162,13 @@ V_LDS_A_DATA = [155, 172, 173, 154, 159, 176, 177, 158]  # 8 data registers for 
 V_LDS_B_ADDR = 190                            # single base register for B stores (use 16-bit offsets)
 V_LDS_B_DATA = [163, 180, 181, 162, 167, 184, 185, 166]  # 8 data registers for B prefetch (mod 4: 3,0,1,2,3,0,1,2)
 
+# Initial tile prefetch: (vdst, saddr_lo) - load into A data regs using B prefetch pointers (s[24:31])
+INIT_PREFETCH = [(V_LDS_A_DATA[i], S_PREFETCH_B+2*i) for i in range(4)]
+
 # Global memory prefetch schedule: (vdst1, vdst2, addr_vreg, saddr_lo1, saddr_lo2)
 # First 2 pairs from B prefetch pointers (s[32:39]), next 4 pairs from A prefetch pointers (s[40:55])
 PREFETCH_LOADS = [(V_LDS_A_DATA[4+2*i], V_LDS_A_DATA[4+2*i+1], V_GLOBAL_B_ADDR, S_PREFETCH_B+8+4*i, S_PREFETCH_B+10+4*i) for i in range(2)] + \
                  [(V_LDS_B_DATA[2*(i-2)], V_LDS_B_DATA[2*(i-2)+1], V_GLOBAL_A_ADDR, S_PREFETCH_A+4*(i-2), S_PREFETCH_A+2+4*(i-2)) for i in range(2, 6)]
-
-# Initial tile prefetch: (vdst, saddr_lo) - load into A data regs using B prefetch pointers (s[24:31])
-INIT_PREFETCH = [(V_LDS_A_DATA[i], S_PREFETCH_B+2*i) for i in range(4)]
-
-# Initial tile loads: (vdst, addr_lo) pairs - use temp regs in accumulator gaps
-INIT_TILE_LOADS = [(23,5),(24,9),(25,7),(26,2),(27,11),(28,13),(29,6),(30,8),(31,10),(12,12),(13,14),(3,2),(4,4),(5,8),(6,6),(7,10)]
-
-# A matrix row offset registers (scattered to avoid accumulator conflicts)
-ROW_REGS = [165, 146, 147, 164, 169, 150, 151, 168]  # mod 4: 1,2,3,0,1,2,3,0
 
 # =============================================================================
 # Kernel class
@@ -291,56 +283,6 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_lshlrev_b32_e32(v[V_GLOBAL_A_ADDR], 2, v[V_GLOBAL_A_ADDR]))
 
   # ===========================================================================
-  # Tile address computation for initial A/B matrix loads
-  # ===========================================================================
-  k.emit(s_lshl_b32(s[S_LOOP_BOUND], s[S_DIM_N], 4))  # row stride = 16*N
-  k.emit(v_mul_lo_u32(v[ROW_REGS[0]], v[22], s[S_DIM_N]))  # A matrix row offsets
-  for i in range(1, 8): k.emit(v_add_nc_u32_e32(v[ROW_REGS[i]], s[S_LOOP_BOUND], v[ROW_REGS[i-1]]))
-
-  def addr64(dst, base_s):  # 64-bit address: v[dst:dst+1] = s[base_s:base_s+1] + v[dst]*4
-    k.emit(v_mov_b32_e32(v[dst+1], 0))  # offset always positive, sign ext = 0
-    k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[dst:dst+1]))
-    k.emit(v_add_co_u32(v[dst], VCC_LO, s[base_s], v[dst]))
-    k.emit(v_add_co_ci_u32_e32(v[dst+1], s[base_s+1], v[dst+1]))
-
-  def b_addr(dst, mult, tmp=None):  # B address for col + mult*N
-    tmp = tmp if tmp is not None else dst
-    k.emit(v_mad_u32_u24(v[tmp], s[S_DIM_N], mult, v[1]))
-    if tmp != dst:
-      k.emit(v_mov_b32_e32(v[tmp+1], 0))  # offset always positive
-      k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[tmp:tmp+1]))
-      k.emit(v_add_co_u32(v[dst], VCC_LO, s[S_B_PTR[0]], v[dst]))
-      k.emit(v_add_co_ci_u32_e32(v[dst+1], s[S_B_PTR[1]], v[dst+1]))
-    else: addr64(dst, S_B_PTR[0])
-
-  def a_addr(dst, row_reg, tmp):  # A address for row_reg + lane_id_mod8
-    k.emit(v_add_nc_u32_e32(v[tmp], v[row_reg], v[V_LANE_ID_MOD8]))
-    k.emit(v_mov_b32_e32(v[tmp+1], 0))  # offset always positive
-    k.emit(v_lshlrev_b64(v[dst:dst+1], 2, v[tmp:tmp+1]))
-    k.emit(v_add_co_u32(v[dst], VCC_LO, s[S_A_PTR[0]], v[dst]))
-    k.emit(v_add_co_ci_u32_e32(v[dst+1], s[S_A_PTR[1]], v[dst+1]))
-
-  # Batch 1: B addresses (cols 0-5) and loads
-  k.emit(v_add_co_u32(v[5], VCC_LO, s[S_B_PTR[0]], v[5]))
-  k.emit(v_add_co_ci_u32_e32(v[6], s[S_B_PTR[1]], v[6]))
-  for dst, mult in [(9,1), (7,2), (2,3), (11,4), (13,5)]: b_addr(dst, mult)
-  k.emit(s_clause(simm16=5))  # 6 consecutive global loads
-  for vdst, addr in INIT_TILE_LOADS[:6]: k.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1], saddr=NULL))
-
-  # Batch 2: A addresses (rows 0-4) and loads
-  for dst, ri in [(6,0), (8,1), (10,2), (12,3), (14,4)]:
-    k.emit(v_add_nc_u32_e32(v[dst], v[ROW_REGS[ri]], v[V_LANE_ID_MOD8]))
-    addr64(dst, S_A_PTR[0])
-  k.emit(s_clause(simm16=4))  # 5 consecutive global loads
-  for vdst, addr in INIT_TILE_LOADS[6:11]: k.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1], saddr=NULL))
-
-  # Batch 3: B cols 6-7, A rows 5-7, and loads
-  for dst, mult, tmp in [(2,6,15), (4,7,4)]: b_addr(dst, mult, tmp)
-  for dst, ri, tmp in [(8,5,16), (6,6,18), (10,7,20)]: a_addr(dst, ROW_REGS[ri], tmp)
-  k.emit(s_clause(simm16=4))  # 5 consecutive global loads
-  for vdst, addr in INIT_TILE_LOADS[11:]: k.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1], saddr=NULL))
-
-  # ===========================================================================
   # LDS store address computation (bank-conflict-avoiding swizzle)
   # ===========================================================================
   # This section computes LDS store addresses with a swizzle pattern to avoid bank conflicts.
@@ -390,17 +332,8 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_lshlrev_b32_e32(v[V_LANE_DIV8_X4], 2, v[2]))
   k.emit(v_add_nc_u32_e32(v[8], 0x80, v[8]))  # A-tile initial store base + 128
 
-  # Store initial tile data to LDS
-  k.waitcnt(vm=0)
-  for i, (d0, d1) in enumerate([(0,1), (2,3), (4,5), (11,12)]):
-    k.emit(ds_store_2addr_stride64_b32(addr=v[8], data0=v[INIT_TILE_LOADS[d0][0]], data1=v[INIT_TILE_LOADS[d1][0]], offset0=16+i*4, offset1=18+i*4))
-  # B stores: single base with offsets 0,64,128,192,256,320,384,448
-  for i, idx in enumerate([6,7,8,9,10,13,14,15]):
-    offset = i * 64
-    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[INIT_TILE_LOADS[idx][0]], offset0=offset & 0xFF, offset1=offset >> 8))
-
   # ===========================================================================
-  # INIT: Compute LDS base addresses, then zero accumulators
+  # INIT: Compute LDS base addresses, zero accumulators, and initial loads and stores
   # ===========================================================================
   # v[3] = v[1] & 0x7F (lower 7 bits) since S_LOOP_BOUND=0 for valid workgroups
   k.emit(v_lshlrev_b32_e32(v[2], 4, v[2]))
@@ -419,6 +352,23 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_add_i32(s[S_LOOP_BOUND], s[S_DIM_N], -8))
   k.emit(s_add_u32(s[S_A_PTR[0]], s[S_A_PTR[0]], 32))
   k.emit(s_addc_u32(s[S_A_PTR[1]], s[S_A_PTR[1]], 0))
+
+  # Do initial loads
+  for vdst, saddr_lo in INIT_PREFETCH:
+    k.emit(global_load_b32(vdst=v[vdst], addr=v[V_GLOBAL_B_ADDR], saddr=s[saddr_lo:saddr_lo+1]))
+  for iter in range(6):
+    vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
+    k.emit(global_load_b32(vdst=v[vdst1], addr=v[addr], saddr=s[slo1:slo1+1]))
+    k.emit(global_load_b32(vdst=v[vdst2], addr=v[addr], saddr=s[slo2:slo2+1]))
+  k.waitcnt(vm=0)
+
+  # Do initial stores
+  for i in range(4):  # A tile: 8 values via 4 stride64 stores
+    k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
+  for i in range(8):  # B tile: 8 values via 8 scalar stores with 64-byte spacing
+    offset = i * 64
+    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
+
   # S_LOOP_CTR is already 0 from prologue initialization
   k.emit(s_branch(simm16=0)); k.branch_to('LOOP_ENTRY')
 
