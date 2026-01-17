@@ -22,31 +22,14 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
 
   wave_pc:dict[int, int] = {}
   simd_sel = (0, 0)
+  def wave_focus(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0 and getattr(p, "wave", None) == 0
   for p in decode(data):
+    if not wave_focus(p): continue
+    print_packets([p])
     if isinstance(p, WAVESTART):
-      if (p.cu, p.simd) != simd_sel: continue
       assert p.wave not in wave_pc
       wave_pc[p.wave] = 0
-    if isinstance(p, WAVEEND):
-      if (p.cu, p.simd) != simd_sel: continue
-      pc = wave_pc.pop(p.wave)
-      yield (p, pc, s_endpgm())
-    if not hasattr(p, "wave"): continue
-    if isinstance(p, (INST, VALUINST)):
-      if isinstance(p, INST) and "OTHER_" in p.op.name: continue
-      if p.wave == 0:
-        print_packets([p])
-      inst = pc_map[pc:=wave_pc[p.wave]]
-      if isinstance(inst, SOPP) and inst.op is SOPPOp.S_DELAY_ALU:
-        wave_pc[p.wave] += inst.size()
-        inst = pc_map[pc:=wave_pc[p.wave]]
-      if isinstance(p, INST) and (isinstance(inst, SOPP) and (inst.op is SOPPOp.S_BRANCH or (inst.op.name.startswith("S_CBRANCH") and p.op is InstOp.JUMP))):
-          x = inst.simm16 & 0xffff
-          wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
-      else:
-        wave_pc[p.wave] += inst.size()
-
-      yield (p, pc, inst)
+    if isinstance(p, WAVEEND): break
 
 def test_rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import llvm_disasm
@@ -90,7 +73,6 @@ if __name__ == "__main__":
   sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
   kern_events = {e.name:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
   target = next((e for e in data if type(e).__name__ == "ProfileDeviceEvent" and e.device.startswith("AMD"))).props["gfx_target_version"]
-  for e in sqtt_events:
-    if not e.itrace or e.se != 1: continue
-    print(f"** {e.kern}")
-    test_rocprof_inst_traces_match(e, kern_events[e.kern], target)
+  e =sqtt_events[1]
+  kern_events[e.kern]
+  test_rocprof_inst_traces_match(e, kern_events[e.kern], target)
