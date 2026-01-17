@@ -1064,6 +1064,69 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     s1_new = build_remapped_src(src1, opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2)
     s2_new = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4) if src2 is not None else None
 
+    op_name = inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
+
+    # WMMA: Wave Matrix Multiply-Accumulate - 16x16x16 matrix multiply across the wave
+    # This is a wave-level operation: all 32 lanes work together to compute D = A × B + C
+    if 'WMMA' in op_name and 'F32_16X16X16_F16' in op_name:
+      src0_base = inst.src0.offset - 256 if inst.src0.offset >= 256 else inst.src0.offset
+      src1_base = inst.src1.offset - 256 if inst.src1.offset >= 256 else inst.src1.offset
+      src2_base = inst.src2.offset - 256 if inst.src2.offset >= 256 else inst.src2.offset
+
+      # Helper to convert f16 bits to f32
+      def f16_to_f32(bits: UOp) -> UOp:
+        return bits.cast(dtypes.uint16).bitcast(dtypes.half).cast(dtypes.float32)
+
+      # Read matrix A (16x16 f16) from lanes 0-15, VGPRs src0 to src0+7 (2 f16 per VGPR)
+      # mat_a[row][col] where row=lane (0-15), col=reg*2+{lo,hi} (0-15)
+      mat_a = [[None]*16 for _ in range(16)]
+      for lane_idx in range(16):
+        for reg in range(8):
+          v = rvgpr(src0_base + reg, UOp.const(dtypes.index, lane_idx))
+          mat_a[lane_idx][reg*2] = f16_to_f32(v & UOp.const(dtypes.uint32, 0xFFFF))
+          mat_a[lane_idx][reg*2+1] = f16_to_f32((v >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF))
+
+      # Read matrix B (16x16 f16) from lanes 0-15, VGPRs src1 to src1+7
+      mat_b = [[None]*16 for _ in range(16)]
+      for lane_idx in range(16):
+        for reg in range(8):
+          v = rvgpr(src1_base + reg, UOp.const(dtypes.index, lane_idx))
+          mat_b[lane_idx][reg*2] = f16_to_f32(v & UOp.const(dtypes.uint32, 0xFFFF))
+          mat_b[lane_idx][reg*2+1] = f16_to_f32((v >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF))
+
+      # Read matrix C (16x16 f32) from lanes 0-31, VGPRs src2 to src2+7
+      # Layout: mat_c[row][col] where linear_idx = row*16+col, lane = linear_idx % 32, reg = linear_idx // 32
+      mat_c = [[None]*16 for _ in range(16)]
+      for row in range(16):
+        for col in range(16):
+          linear_idx = row * 16 + col
+          lane_idx = linear_idx % 32
+          reg = linear_idx // 32
+          mat_c[row][col] = rvgpr(src2_base + reg, UOp.const(dtypes.index, lane_idx)).bitcast(dtypes.float32)
+
+      # Compute D = A × B + C (16x16 matrix multiply)
+      mat_d = [[None]*16 for _ in range(16)]
+      for row in range(16):
+        for col in range(16):
+          # D[row][col] = sum(A[row][k] * B[col][k] for k in 0..15) + C[row][col]
+          # Note: B is transposed in the hardware layout (columns are stored in lanes)
+          acc = mat_c[row][col]
+          for k in range(16):
+            acc = acc + mat_a[row][k] * mat_b[col][k]
+          mat_d[row][col] = acc
+
+      # Write result (16x16 f32) to lanes 0-31, VGPRs vdst to vdst+7
+      stores = []
+      for row in range(16):
+        for col in range(16):
+          linear_idx = row * 16 + col
+          lane_idx = linear_idx % 32
+          reg = linear_idx // 32
+          result = mat_d[row][col].bitcast(dtypes.uint32)
+          stores.append(wvgpr(vdst_reg + reg, UOp.const(dtypes.index, lane_idx), result, exec_mask))
+
+      return name, UOp.sink(*stores, inc_pc(), arg=KernelInfo(name=name))
+
     pcode = PCODE.get(inst.op)
     if pcode is not None:
       op_name = inst.op.name if hasattr(inst.op, 'name') else str(inst.op)

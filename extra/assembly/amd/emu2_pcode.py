@@ -9,15 +9,31 @@ DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32':
           'u8': dtypes.uint8, 'i8': dtypes.int8, 'b8': dtypes.uint8,
           'u1': dtypes.uint32}  # 1-bit treated as uint32 for comparisons
 
+def _ftz_f32(v: UOp) -> UOp:
+  """Flush denormal f32 to zero (RDNA3 FTZ mode). Denormals have exponent=0 and mantissa!=0."""
+  if v.dtype != dtypes.float32: return v
+  bits = v.bitcast(dtypes.uint32)
+  exp = (bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)
+  mantissa = bits & UOp.const(dtypes.uint32, 0x7FFFFF)
+  is_denorm = exp.eq(UOp.const(dtypes.uint32, 0)) & mantissa.ne(UOp.const(dtypes.uint32, 0))
+  # Preserve sign bit when flushing to zero
+  sign = bits & UOp.const(dtypes.uint32, 0x80000000)
+  return is_denorm.where(sign.bitcast(dtypes.float32), v)
+
 # Binary operators: op_type -> lambda (l, r) -> result
+def _sub(l, r):
+  if l.op == Ops.CONST and r.op == Ops.CONST: return UOp.const(l.dtype, l.arg - r.arg)
+  # Cast r to l's type if dtypes differ but sizes match (e.g., int vs uint32)
+  if l.dtype != r.dtype and l.dtype.itemsize == r.dtype.itemsize: r = r.cast(l.dtype)
+  return l - r
 _BINOPS = {
   '|': lambda l, r: l | r, '^': lambda l, r: l ^ r, '&': lambda l, r: l & r,
   '>=': lambda l, r: l >= r, '<=': lambda l, r: l <= r, '==': lambda l, r: l.eq(r), '!=': lambda l, r: l.ne(r),
   '>>': lambda l, r: l >> r, '<<': lambda l, r: l << r, '>': lambda l, r: l > r, '<': lambda l, r: l < r,
-  '+': lambda l, r: l + (r.cast(l.dtype) if l.dtype.itemsize > r.dtype.itemsize else r),
+  '+': lambda l, r: l + (r.cast(l.dtype) if l.dtype.itemsize > r.dtype.itemsize else (r.cast(l.dtype) if l.dtype != r.dtype and l.dtype.itemsize == r.dtype.itemsize else r)),
   '*': lambda l, r: l * (r.cast(l.dtype) if l.dtype != r.dtype and l.dtype in (dtypes.float32, dtypes.float64) else r),
   '/': lambda l, r: l / r,
-  '-': lambda l, r: UOp.const(l.dtype, l.arg - r.arg) if l.op == Ops.CONST and r.op == Ops.CONST else l - r,
+  '-': _sub,
   '**': lambda l, r: UOp(Ops.EXP2, l.dtype, (r.cast(l.dtype),)) if l.op == Ops.CONST and l.arg == 2.0 else l,
 }
 
@@ -141,7 +157,12 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         for var in all_vars:
           result = else_assigns.get(var, block_assigns.get(var, vars.get(var, UOp.const(dtypes.uint32, 0))))
           for cond, ba in reversed(conditions):
-            if var in ba: result = cond.where(ba[var], result)
+            if var in ba:
+              true_val = ba[var]
+              # Unify types for where: cast to matching types if sizes match (e.g., int vs uint32)
+              if true_val.dtype != result.dtype and true_val.dtype.itemsize == result.dtype.itemsize:
+                result = result.cast(true_val.dtype)
+              result = cond.where(true_val, result)
           block_assigns[var] = result
           vars[var] = result
         continue
@@ -356,7 +377,8 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       # Ensure size matches before bitcast
       if inner.dtype.itemsize != dt.itemsize:
         inner = inner.cast(dtypes.uint32 if dt.itemsize == 4 else dtypes.uint64)
-      return inner.bitcast(dt)
+      result = inner.bitcast(dt)
+      return _ftz_f32(result) if dt == dtypes.float32 else result
     return inner.cast(dt)
   # Lane-indexed: VCC.u64[laneId]
   if (m := re.match(r'([a-zA-Z_]\w*)\.u64\[laneId\](?:\.(\w+))?$', expr)):
@@ -372,11 +394,12 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     # Handle dict access (e.g., WAVE_MODE.IEEE)
     if isinstance(v, dict): return v.get(m.group(2), UOp.const(dtypes.uint32, 0))
     dt = DTYPES.get(m.group(2), dtypes.uint32)
-    if dt == v.dtype: return v
+    if dt == v.dtype: return _ftz_f32(v) if dt == dtypes.float32 else v
     if dt.itemsize == 2 and v.dtype.itemsize == 4:
       v16 = (v & UOp.const(v.dtype, 0xFFFF)).cast(dtypes.uint16)
       return v16 if dt == dtypes.uint16 else v16.bitcast(dt)
-    return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
+    result = v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
+    return _ftz_f32(result) if dt == dtypes.float32 else result
   # Bit slice: S0[4:0] or S0[4:0].u32 or S0[15:0].f16
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     var_name, hi, lo, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
@@ -616,10 +639,50 @@ _FUNC_TABLE: list[tuple[str, int, callable]] = []
 
 def _register_funcs():
   global _FUNC_TABLE
-  # Unary math functions
-  for name, op in [('sqrt', Ops.SQRT), ('trunc', Ops.TRUNC), ('log2', Ops.LOG2), ('sin', Ops.SIN)]:
+  # Unary math functions - sin/cos need range reduction for large inputs
+  # AMD V_SIN_F32/V_COS_F32 take input in "turns" (1.0 = 2π) and reduce to [-0.5, 0.5] before computing
+  def _find_two_pi_mul(x: UOp) -> tuple[UOp, float] | None:
+    """Find if x contains a multiplication by 2π (or π*2). Returns (turns, two_pi_val) or None."""
+    if x.op != Ops.MUL or len(x.src) != 2: return None
+    for i, src in enumerate(x.src):
+      # Direct 2π constant
+      if src.op == Ops.CONST and abs(src.arg - 6.283185307179586) < 1e-5:
+        return (x.src[1 - i], 6.283185307179586)
+      # π * 2.0 pattern (MUL of PI and 2.0)
+      if src.op == Ops.MUL and len(src.src) == 2:
+        vals = []
+        for s in src.src:
+          if s.op == Ops.CONST: vals.append(s.arg)
+          elif s.op == Ops.CAST and s.src[0].op == Ops.CONST: vals.append(s.src[0].arg)
+        if len(vals) == 2:
+          prod = vals[0] * vals[1]
+          if abs(prod - 6.283185307179586) < 1e-5:
+            return (x.src[1 - i], prod)
+    return None
+  def _sin_with_range_reduction(a, v, m):
+    x = a[0]
+    # Check if x is of the form "turns * 2π" (common AMD trig pattern)
+    # If so, reduce turns to [-0.5, 0.5] BEFORE multiplying by 2π for better precision
+    match = _find_two_pi_mul(x)
+    if match is not None:
+      turns, two_pi_val = match
+      # Reduce turns to [-0.5, 0.5]: turns_reduced = turns - round(turns)
+      # round(x) = floor(x + 0.5)
+      n = _floor(turns + UOp.const(turns.dtype, 0.5))
+      turns_reduced = turns - n
+      # Now compute sin(turns_reduced * 2π)
+      two_pi = UOp.const(turns.dtype, two_pi_val)
+      return UOp(Ops.SIN, turns.dtype, (turns_reduced * two_pi,))
+    # Fallback: standard range reduction to [-π, π]
+    two_pi = UOp.const(x.dtype, 6.283185307179586)
+    inv_two_pi = UOp.const(x.dtype, 0.15915494309189535)  # 1/(2π)
+    n = _floor(x * inv_two_pi + UOp.const(x.dtype, 0.5))  # round(x / 2π)
+    x_reduced = x - n * two_pi
+    return UOp(Ops.SIN, x.dtype, (x_reduced,))
+  for name, op in [('sqrt', Ops.SQRT), ('trunc', Ops.TRUNC), ('log2', Ops.LOG2)]:
     _FUNC_TABLE.append((rf'{name}\((.+)\)', 1, lambda a, v, m, op=op: UOp(op, a[0].dtype, (a[0],))))
-  _FUNC_TABLE.append((r'cos\((.+)\)', 1, lambda a, v, m: UOp(Ops.SIN, a[0].dtype, (a[0] + UOp.const(a[0].dtype, 1.5707963267948966),))))
+  _FUNC_TABLE.append((r'sin\((.+)\)', 1, _sin_with_range_reduction))
+  _FUNC_TABLE.append((r'cos\((.+)\)', 1, lambda a, v, m: _sin_with_range_reduction([a[0] + UOp.const(a[0].dtype, 1.5707963267948966)], v, m)))
   _FUNC_TABLE.append((r'floor\((.+)\)', 1, lambda a, v, m: _floor(a[0])))
   _FUNC_TABLE.append((r'fract\((.+)\)', 1, lambda a, v, m: a[0] - _floor(a[0])))
   def _signext(a, v, m):
@@ -677,6 +740,15 @@ def _register_funcs():
   _FUNC_TABLE.append((r'f32_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.half)))
   _FUNC_TABLE.append((r'f16_to_i16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, _f16_extract(a[0]).dtype, (_f16_extract(a[0]),)).cast(dtypes.int16)))
   _FUNC_TABLE.append((r'f16_to_u16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, _f16_extract(a[0]).dtype, (_f16_extract(a[0]),)).cast(dtypes.uint16)))
+  # bf16_to_f32: BF16 is f32 with bottom 16 bits zeroed (easy conversion)
+  def _bf16_to_f32(a, v, m):
+    # BF16 uses 8 exponent bits + 7 mantissa bits, same as f32's top 16 bits
+    # Converting: shift left by 16 to get f32 bit pattern
+    bits = a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]
+    # Mask to 16 bits in case it's already a 32-bit value
+    bits = bits & UOp.const(dtypes.uint32, 0xFFFF)
+    return (bits << UOp.const(dtypes.uint32, 16)).bitcast(dtypes.float32)
+  _FUNC_TABLE.append((r'bf16_to_f32\((.+)\)', 1, _bf16_to_f32))
   # Float classification
   _FUNC_TABLE.append((r'isNAN\((.+)\)', 1, lambda a, v, m: _isnan(a[0])))
   _FUNC_TABLE.append((r'isSignalNAN\((.+)\)', 0, lambda a, v, m: _check_nan(m.group(1), v, quiet=False)))

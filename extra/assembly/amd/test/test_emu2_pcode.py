@@ -131,12 +131,15 @@ class TestForLoopParsing(unittest.TestCase):
     pcode = PCODE[VOP1Op.V_CLZ_I32_U32_E32]
     S0 = UOp.const(dtypes.uint32, 0)
     vars, assigns = parse_pcode(pcode, {'S0': S0})
-    
-    # Check that the innermost value (default) is -1
+
+    # Check that the innermost value (default) is -1 (may be wrapped in CAST)
     val = assigns[0][1]
     # Traverse to innermost WHERE
     while val.op == Ops.WHERE:
       val = val.src[2]  # false branch
+    # Unwrap CAST if present
+    while val.op == Ops.CAST:
+      val = val.src[0]
     self.assertEqual(val.arg, -1)
 
   def test_ctz_parsing(self):
