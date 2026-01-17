@@ -366,8 +366,8 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     if m.group(2): result = result.cast(DTYPES.get(m.group(2), dtypes.uint32))
     return result
   # Variable with type: S0.u32 or dict access: WAVE_MODE.IEEE
-  # (Skip special constants like INF.f32 which are handled later)
-  if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)$', expr)) and m.group(1) not in ('INF', 'UNDERFLOW', 'OVERFLOW'):
+  # (Skip special constants like INF.f32, NAN.f32 which are handled later)
+  if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)$', expr)) and m.group(1) not in ('INF', 'UNDERFLOW', 'OVERFLOW', 'NAN'):
     v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
     # Handle dict access (e.g., WAVE_MODE.IEEE)
     if isinstance(v, dict): return v.get(m.group(2), UOp.const(dtypes.uint32, 0))
@@ -472,6 +472,10 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
   if expr == '-INF.f32': return UOp.const(dtypes.float32, float('-inf'))
   if expr in ('+INF.f16', 'INF.f16'): return UOp.const(dtypes.half, float('inf'))
   if expr == '-INF.f16': return UOp.const(dtypes.half, float('-inf'))
+  # NaN constants
+  if expr in ('NAN.f32', 'NAN'): return UOp.const(dtypes.uint32, 0x7FC00000).bitcast(dtypes.float32)  # Quiet NaN
+  if expr == 'NAN.f64': return UOp.const(dtypes.uint64, 0x7FF8000000000000).bitcast(dtypes.float64)
+  if expr == 'NAN.f16': return UOp.const(dtypes.uint16, 0x7E00).bitcast(dtypes.half)
   # Overflow/underflow: smallest denormal (underflow) and largest finite (overflow)
   if expr == 'UNDERFLOW_F32': return UOp.const(dtypes.uint32, 0x00000001).bitcast(dtypes.float32)  # ~1.4e-45
   if expr == 'OVERFLOW_F32': return UOp.const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)  # ~3.4e38
@@ -586,7 +590,17 @@ def _check_nan(inner: str, vars: dict, quiet: bool) -> UOp:
 def _minmax_reduce(is_max: bool, dt: DType, args: list[UOp]) -> UOp:
   def cast(v): return v.bitcast(dt) if dt == dtypes.float32 and v.dtype == dtypes.uint32 else v.cast(dt)
   result = cast(args[0])
-  for a in args[1:]: result = result.maximum(cast(a)) if is_max else result.minimum(cast(a))
+  for a in args[1:]:
+    b = cast(a)
+    if dt == dtypes.float32:
+      # AMD NaN handling: v_min_f32(nan, x) = x, v_max_f32(nan, x) = x
+      a_nan = _isnan(result)
+      b_nan = _isnan(b)
+      cmp = result.maximum(b) if is_max else result.minimum(b)
+      # If a is NaN, return b; if b is NaN, return a; otherwise return cmp result
+      result = a_nan.where(b, b_nan.where(result, cmp))
+    else:
+      result = result.maximum(b) if is_max else result.minimum(b)
   return result
 
 # Table of function parsers: (regex_pattern, num_args, handler)
@@ -636,9 +650,21 @@ def _register_funcs():
   for src, dst in [('i32', dtypes.float32), ('u32', dtypes.float32)]:
     _FUNC_TABLE.append((rf'{src}_to_f32\((.+)\)', 1, lambda a, v, m, d=dst: a[0].cast(dtypes.int if 'i32' in m.group(0) else dtypes.uint32).cast(d)))
   _FUNC_TABLE.append((r'f32_to_i32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float32).dtype, (a[0].bitcast(dtypes.float32),)).cast(dtypes.int)))
-  _FUNC_TABLE.append((r'f32_to_u32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float32).dtype, (a[0].bitcast(dtypes.float32),)).cast(dtypes.uint32)))
+  # f32_to_u32: clamp negative to 0 before converting (GPU behavior)
+  def _f32_to_u32(a, v, m):
+    f = a[0].bitcast(dtypes.float32)
+    is_neg = f < UOp.const(dtypes.float32, 0.0)
+    clamped = is_neg.where(UOp.const(dtypes.float32, 0.0), f)
+    return UOp(Ops.TRUNC, clamped.dtype, (clamped,)).cast(dtypes.uint32)
+  _FUNC_TABLE.append((r'f32_to_u32\((.+)\)', 1, _f32_to_u32))
   _FUNC_TABLE.append((r'f64_to_i32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float64).dtype, (a[0].bitcast(dtypes.float64),)).cast(dtypes.int)))
-  _FUNC_TABLE.append((r'f64_to_u32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float64).dtype, (a[0].bitcast(dtypes.float64),)).cast(dtypes.uint32)))
+  # f64_to_u32: clamp negative to 0 before converting (GPU behavior)
+  def _f64_to_u32(a, v, m):
+    f = a[0].bitcast(dtypes.float64)
+    is_neg = f < UOp.const(dtypes.float64, 0.0)
+    clamped = is_neg.where(UOp.const(dtypes.float64, 0.0), f)
+    return UOp(Ops.TRUNC, clamped.dtype, (clamped,)).cast(dtypes.uint32)
+  _FUNC_TABLE.append((r'f64_to_u32\((.+)\)', 1, _f64_to_u32))
   _FUNC_TABLE.append((r'f16_to_f32\((.+)\)', 1, lambda a, v, m: _f16_extract(a[0]).cast(dtypes.float32)))
   _FUNC_TABLE.append((r'f32_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.half)))
   _FUNC_TABLE.append((r'f16_to_i16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, _f16_extract(a[0]).dtype, (_f16_extract(a[0]),)).cast(dtypes.int16)))
