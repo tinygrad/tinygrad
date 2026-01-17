@@ -284,8 +284,9 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
-  def add(name:str, p:PacketType, idx=0, width=1, op_name=None) -> None:
-    rows.setdefault(r:=(f"WAVE:{p.wave}" if hasattr(p, "wave") else f"{p.__class__.__name__}:0 {name}"))
+  def add(name:str, p:PacketType, idx=0, width=1, op_name=None, wave=None) -> None:
+    if hasattr(p, "wave"): wave = p.wave
+    rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
     ret.append(ProfileRangeEvent(r, f"{op_name if op_name is not None else name} OP:{idx}", Decimal(p._time), Decimal(p._time+width)))
   for p in decode(e.blob):
     if len(ret) > 50_000: break
@@ -296,7 +297,7 @@ def sqtt_timeline(e) -> list[ProfileEvent]:
     if isinstance(p, (VALUINST, IMMEDIATE)): add(p.__class__.__name__, p)
     if isinstance(p, IMMEDIATE_MASK):
       for wave in range(16):
-        if p.mask & (1 << wave): add("IMMEDIATE", p)
+        if p.mask & (1 << wave): add("IMMEDIATE", p, wave=wave)
     if isinstance(p, (VMEMEXEC, ALUEXEC)):
       name = str(p.src).split('.')[1]
       if name == "VALU_SALU":
