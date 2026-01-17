@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Benchmark comparing Python vs UOps vs Rust RDNA3 emulators on real tinygrad kernels."""
+"""Benchmark comparing Python vs Rust RDNA3 emulators on real tinygrad kernels."""
 import ctypes, time, os
 from pathlib import Path
 
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
 
-from extra.assembly.amd.emu import run_asm as python_run_asm, set_valid_mem_ranges, decode_program
-from extra.assembly.amd.emu2 import run_asm as uops_run_asm
+from extra.assembly.amd.emu2 import run_asm as python_run_asm
+
+# only used for count_instructions
+from extra.assembly.amd.emu import decode_program
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
 if not REMU_PATH.exists():
@@ -131,9 +133,10 @@ def main():
   rust_remu = get_rust_remu()
   if rust_remu is None:
     print("Rust libremu not found. Build with: cargo build --release --manifest-path extra/remu/Cargo.toml")
+    print("Running Python-only benchmarks...\n")
 
   print("=" * 90)
-  print("RDNA3 Emulator Benchmark: Python vs UOps vs Rust")
+  print("RDNA3 Emulator Benchmark: Python vs Rust")
   print("=" * 90)
 
   results = []
@@ -157,39 +160,36 @@ def main():
     print(f"{n_insts} insts × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
 
     buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
-    set_valid_mem_ranges(ranges)
+    #set_valid_mem_ranges(ranges)
 
     py_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
-    uops_time = benchmark_emulator("UOps", uops_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
     rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations) if rust_remu else None
 
     if py_time:
       py_rate = total_work / py_time / 1e6
       print(f"  Python: {py_time*1000:8.3f} ms  ({py_rate:7.2f} M ops/s)")
-    if uops_time:
-      uops_rate = total_work / uops_time / 1e6
-      uops_speedup = py_time / uops_time if py_time else 0
-      print(f"  UOps:   {uops_time*1000:8.3f} ms  ({uops_rate:7.2f} M ops/s)  [{uops_speedup:.2f}x vs Python]")
     if rust_time:
       rust_rate = total_work / rust_time / 1e6
       speedup = py_time / rust_time if py_time else 0
-      print(f"  Rust:   {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x vs Python]")
+      print(f"  Rust:   {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
 
-    results.append((op_name, n_insts, n_workgroups, py_time, uops_time, rust_time))
+    results.append((op_name, n_insts, n_workgroups, py_time, rust_time))
 
   # Summary table
-  print("\n" + "=" * 100)
+  print("\n" + "=" * 90)
   print("SUMMARY")
-  print("=" * 100)
-  print(f"{'Name':<20} {'Insts':<6} {'WGs':<5} {'Python (ms)':<12} {'UOps (ms)':<12} {'Rust (ms)':<12} {'UOps/Py':<10}")
-  print("-" * 100)
+  print("=" * 90)
+  print(f"{'Name':<25} {'Insts':<8} {'WGs':<6} {'Python (ms)':<14} {'Rust (ms)':<14} {'Speedup':<10}")
+  print("-" * 90)
 
-  for name, n_insts, n_wgs, py_time, uops_time, rust_time in results:
+  for name, n_insts, n_wgs, py_time, rust_time in results:
     py_ms = f"{py_time*1000:.3f}" if py_time else "error"
-    uops_ms = f"{uops_time*1000:.3f}" if uops_time else "error"
-    uops_ratio = f"{py_time/uops_time:.2f}x" if py_time and uops_time else "N/A"
-    rust_ms = f"{rust_time*1000:.3f}" if rust_time else "N/A"
-    print(f"{name:<20} {n_insts:<6} {n_wgs:<5} {py_ms:<12} {uops_ms:<12} {rust_ms:<12} {uops_ratio:<10}")
+    if rust_time:
+      rust_ms = f"{rust_time*1000:.3f}"
+      speedup = f"{py_time/rust_time:.1f}x" if py_time else "N/A"
+    else:
+      rust_ms, speedup = "N/A", "N/A"
+    print(f"{name:<25} {n_insts:<8} {n_wgs:<6} {py_ms:<14} {rust_ms:<14} {speedup:<10}")
 
 if __name__ == "__main__":
   main()

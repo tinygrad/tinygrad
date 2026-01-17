@@ -172,10 +172,81 @@ class TestDSPcodePatterns(unittest.TestCase):
     lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
     addr = UOp.const(dtypes.uint32, 0)
     vars = {'_lds': lds, 'ADDR': addr, 'OFFSET': UOp.const(dtypes.uint32, 0)}
-    
+
     result = parse_expr('MEM[ADDR + OFFSET].b32', vars)
     # Should be an INDEX operation into LDS
     self.assertIsNotNone(result)
+
+  def test_ds_store_2addr_b32_parsing(self):
+    """Test DS_STORE_2ADDR_B32 pcode parsing produces MEM writes."""
+    pcode = PCODE.get(DSOp.DS_STORE_2ADDR_B32)
+    self.assertIsNotNone(pcode)
+    srcs = {
+      'ADDR': UOp.const(dtypes.uint32, 0),
+      'OFFSET0': UOp.const(dtypes.uint32, 0),
+      'OFFSET1': UOp.const(dtypes.uint32, 1),
+      'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
+      'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
+    }
+    _, assigns = parse_pcode(pcode, srcs, lane=UOp.const(dtypes.uint32, 0))
+    # Should have 2 MEM write assignments
+    self.assertEqual(len(assigns), 2)
+    for dest, val in assigns:
+      self.assertTrue(dest.startswith('MEM['))
+      # val should be (addr, write_val) tuple
+      self.assertIsInstance(val, tuple)
+      self.assertEqual(len(val), 2)
+
+  def test_ds_load_2addr_b32_parsing(self):
+    """Test DS_LOAD_2ADDR_B32 pcode parsing produces RETURN_DATA assignments."""
+    pcode = PCODE.get(DSOp.DS_LOAD_2ADDR_B32)
+    self.assertIsNotNone(pcode)
+    lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
+    srcs = {
+      'ADDR': UOp.const(dtypes.uint32, 0),
+      'OFFSET0': UOp.const(dtypes.uint32, 0),
+      'OFFSET1': UOp.const(dtypes.uint32, 1),
+      '_lds': lds,
+    }
+    _, assigns = parse_pcode(pcode, srcs, lane=UOp.const(dtypes.uint32, 0))
+    # Should have 2 RETURN_DATA assignments
+    self.assertEqual(len(assigns), 2)
+    self.assertEqual(assigns[0][0], 'RETURN_DATA[31:0]')
+    self.assertEqual(assigns[1][0], 'RETURN_DATA[63:32]')
+
+  def test_ds_store_address_calculation(self):
+    """Test DS_STORE_2ADDR_B32 calculates correct addresses (offset * 4)."""
+    pcode = PCODE.get(DSOp.DS_STORE_2ADDR_B32)
+    srcs = {
+      'ADDR': UOp.const(dtypes.uint32, 100),
+      'OFFSET0': UOp.const(dtypes.uint32, 2),
+      'OFFSET1': UOp.const(dtypes.uint32, 5),
+      'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
+      'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
+    }
+    _, assigns = parse_pcode(pcode, srcs, lane=UOp.const(dtypes.uint32, 0))
+    # Check addresses: 100 + 2*4 = 108, 100 + 5*4 = 120
+    addr0, _ = assigns[0][1]
+    addr1, _ = assigns[1][1]
+    self.assertEqual(addr0.simplify().arg, 108)
+    self.assertEqual(addr1.simplify().arg, 120)
+
+  def test_ds_store_data_values(self):
+    """Test DS_STORE_2ADDR_B32 uses correct data values."""
+    pcode = PCODE.get(DSOp.DS_STORE_2ADDR_B32)
+    srcs = {
+      'ADDR': UOp.const(dtypes.uint32, 0),
+      'OFFSET0': UOp.const(dtypes.uint32, 0),
+      'OFFSET1': UOp.const(dtypes.uint32, 1),
+      'DATA': UOp.const(dtypes.uint32, 0xAAAAAAAA),
+      'DATA2': UOp.const(dtypes.uint32, 0xBBBBBBBB),
+    }
+    _, assigns = parse_pcode(pcode, srcs, lane=UOp.const(dtypes.uint32, 0))
+    _, val0 = assigns[0][1]
+    _, val1 = assigns[1][1]
+    # DATA[31:0] should preserve the value
+    self.assertEqual(val0.simplify().arg, 0xAAAAAAAA)
+    self.assertEqual(val1.simplify().arg, 0xBBBBBBBB)
 
 class TestConditionalParsing(unittest.TestCase):
   """Test conditional (if/elsif/else) pcode parsing."""
