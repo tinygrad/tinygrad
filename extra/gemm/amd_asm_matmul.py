@@ -192,23 +192,11 @@ class Kernel:
   def label(self, name): self.labels[name] = len(self.instructions)
   def branch_to(self, label): self.branch_targets[len(self.instructions) - 1] = label
 
-  def add64(self, dst_lo, dst_hi, src_lo, src_hi, off):
-    """s[dst_lo:dst_hi] = s[src_lo:src_hi] + off"""
-    if off: self.emit(s_add_u32(s[dst_lo], s[src_lo], off)); self.emit(s_addc_u32(s[dst_hi], s[src_hi], 0))
-    elif dst_lo != src_lo: self.emit(s_mov_b64(s[dst_lo:dst_hi], s[src_lo:src_hi]))
-
-  def global_load(self, vdst, addr, saddr=None):
-    """Global load b32"""
-    self.emit(global_load_b32(vdst=v[vdst], addr=v[addr] if saddr else v[addr:addr+1],
-              saddr=s[saddr:saddr+1] if saddr else NULL))
-
   def waitcnt(self, lgkm=None, vm=None):
     """Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain."""
     vmcnt, lgkmcnt, expcnt = vm if vm is not None else 63, lgkm if lgkm is not None else 63, 7
     waitcnt = (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
     self.emit(s_waitcnt(simm16=waitcnt))
-
-  def barrier(self): self.emit(s_barrier())
 
   def to_asm(self):
     import re
@@ -287,8 +275,14 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_mov_b64(s[S_B_PTR[0]:S_B_PTR[1]], s[S_KERNARG_B[0]:S_KERNARG_B[1]]))
 
   # Compute 8 A and B matrix tile base pointers for prefetch
-  for i in range(8): k.add64(S_PREFETCH_B + i*2, S_PREFETCH_B + i*2 + 1, S_KERNARG_B[0], S_KERNARG_B[1], i * 0x4000)   # B: 16KB apart
-  for i in range(8): k.add64(S_PREFETCH_A + i*2, S_PREFETCH_A + i*2 + 1, S_KERNARG_A[0], S_KERNARG_A[1], i * 0x40000)  # A: 256KB apart
+  k.emit(s_mov_b64(s[S_PREFETCH_B:S_PREFETCH_B+1], s[S_KERNARG_B[0]:S_KERNARG_B[1]]))  # B[0]: no offset
+  for i in range(1, 8):  # B: 16KB apart
+    k.emit(s_add_u32(s[S_PREFETCH_B+i*2], s[S_KERNARG_B[0]], i * 0x4000))
+    k.emit(s_addc_u32(s[S_PREFETCH_B+i*2+1], s[S_KERNARG_B[1]], 0))
+  k.emit(s_mov_b64(s[S_PREFETCH_A:S_PREFETCH_A+1], s[S_KERNARG_A[0]:S_KERNARG_A[1]]))  # A[0]: no offset
+  for i in range(1, 8):  # A: 256KB apart
+    k.emit(s_add_u32(s[S_PREFETCH_A+i*2], s[S_KERNARG_A[0]], i * 0x40000))
+    k.emit(s_addc_u32(s[S_PREFETCH_A+i*2+1], s[S_KERNARG_A[1]], 0))
 
   # Global prefetch addresses: B = (tile_x + lane_id) * 4, A = ((tile_y << 12) + (lane_id/8)*4K + lane_id%8) * 4
   k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], s[S_TILE_X], v[0]))
@@ -333,20 +327,20 @@ def build_kernel(arch='gfx1100'):
   k.emit(v_add_co_ci_u32_e32(v[6], s[S_B_PTR[1]], v[6]))
   for dst, mult in [(9,1), (7,2), (2,3), (11,4), (13,5)]: b_addr(dst, mult)
   k.emit(s_clause(simm16=5))  # 6 consecutive global loads
-  for vdst, addr in INIT_TILE_LOADS[:6]: k.global_load(vdst, addr)
+  for vdst, addr in INIT_TILE_LOADS[:6]: k.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1], saddr=NULL))
 
   # Batch 2: A addresses (rows 0-4) and loads
   for dst, ri in [(6,0), (8,1), (10,2), (12,3), (14,4)]:
     k.emit(v_add_nc_u32_e32(v[dst], v[ROW_REGS[ri]], v[V_LANE_ID_MOD8]))
     addr64(dst, S_A_PTR[0])
   k.emit(s_clause(simm16=4))  # 5 consecutive global loads
-  for vdst, addr in INIT_TILE_LOADS[6:11]: k.global_load(vdst, addr)
+  for vdst, addr in INIT_TILE_LOADS[6:11]: k.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1], saddr=NULL))
 
   # Batch 3: B cols 6-7, A rows 5-7, and loads
   for dst, mult, tmp in [(2,6,15), (4,7,4)]: b_addr(dst, mult, tmp)
   for dst, ri, tmp in [(8,5,16), (6,6,18), (10,7,20)]: a_addr(dst, ROW_REGS[ri], tmp)
   k.emit(s_clause(simm16=4))  # 5 consecutive global loads
-  for vdst, addr in INIT_TILE_LOADS[11:]: k.global_load(vdst, addr)
+  for vdst, addr in INIT_TILE_LOADS[11:]: k.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1], saddr=NULL))
 
   # ===========================================================================
   # LDS store address computation (bank-conflict-avoiding swizzle)
@@ -447,6 +441,10 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_cbranch_scc0(simm16=0)); k.branch_to('SKIP_PREFETCH')  # branch if loop_ctr >= loop_bound
 
   if not NO_GLOBAL:
+    # Advance prefetch pointers (VGPR)
+    #k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
+    #k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
+
     # Advance prefetch pointers (SGPRs, 64-bit adds)
     k.emit(s_clause(simm16=31))
     for i in range(8):
@@ -456,15 +454,16 @@ def build_kernel(arch='gfx1100'):
       k.emit(s_add_u32(s[S_PREFETCH_A+i*2], s[S_PREFETCH_A+i*2], 0x20))
       k.emit(s_addc_u32(s[S_PREFETCH_A+i*2+1], s[S_PREFETCH_A+i*2+1], 0))
 
+    # do the fetch
     for vdst, saddr_lo in INIT_PREFETCH:
-      k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
+      k.emit(global_load_b32(vdst=v[vdst], addr=v[V_GLOBAL_B_ADDR], saddr=s[saddr_lo:saddr_lo+1]))
 
   k.label('SKIP_PREFETCH')
 
   # wait for local stores to finish (either initial or loop)
   # then sync the warp so it's safe to load local
   k.waitcnt(lgkm=0)
-  k.barrier()
+  k.emit(s_barrier())
 
   # 8 inner loop iterations
   for iter in range(8):
@@ -483,8 +482,8 @@ def build_kernel(arch='gfx1100'):
     # Issue global prefetch (first 6 iterations only)
     if iter < 6 and not NO_GLOBAL:
       vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
-      k.global_load(vdst1, addr, slo1)
-      k.global_load(vdst2, addr, slo2)
+      k.emit(global_load_b32(vdst=v[vdst1], addr=v[addr], saddr=s[slo1:slo1+1]))
+      k.emit(global_load_b32(vdst=v[vdst2], addr=v[addr], saddr=s[slo2:slo2+1]))
 
     # 64 dual FMACs
     k.waitcnt(lgkm=0)
@@ -496,7 +495,7 @@ def build_kernel(arch='gfx1100'):
   # wait for all global stores to finish
   # then sync the warp so it's safe to store local
   k.waitcnt(vm=0)
-  k.barrier()
+  k.emit(s_barrier())
 
   # Store prefetched data to LDS
   # NOTE: Register naming reflects LDS tile organization, not source matrix:
