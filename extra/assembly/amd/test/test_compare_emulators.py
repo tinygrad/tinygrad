@@ -106,14 +106,16 @@ class PythonEmulator:
     self.lds_buf = Buffer('CPU', 65536 // 4, dtypes.uint32).ensure_allocated()
 
   def step(self) -> int:
+    import ctypes
     assert self.program is not None and self.state is not None
     pc = self.state.pc
     if pc == 0xFFFFFFFF or pc not in self.program: return -1
-    name, runner, globals_list = self.program[pc]
-    if runner is None: return 1  # unsupported instruction
-    all_bufs = {0: self.state.sgpr_buf, 1: self.state.vgpr_buf, 2: self.vmem_buf, 3: self.lds_buf}
-    bufs = [all_bufs[g] for g in globals_list]
-    runner(bufs, {}, wait=True)
+    name, fxn, globals_list, _runner = self.program[pc]
+    if fxn is None: return 1  # unsupported instruction
+    buf_addrs = {0: self.state.sgpr_buf._buf.va_addr, 1: self.state.vgpr_buf._buf.va_addr,
+                 2: self.vmem_buf._buf.va_addr, 3: self.lds_buf._buf.va_addr}
+    # Direct ctypes call - bypasses HCQ overhead
+    fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
     return -1 if self.state.pc == 0xFFFFFFFF else 0
 
   def set_sgpr(self, idx: int, val: int):
@@ -421,6 +423,7 @@ class TestTinygradKernels(unittest.TestCase):
     from tinygrad import dtypes
     self._test_kernel(lambda T: T.empty(4, 4)[T.arange(4).cast(dtypes.int64), :])
   def test_gelu(self): self._test_kernel(lambda T: T.empty(32, 32).gelu())
+  def test_exp(self): self._test_kernel(lambda T: T.empty(1024).exp())
   def test_cross_entropy(self):
     import numpy as np
     np.random.seed(0)

@@ -313,8 +313,9 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
   # Helper: read VGPR
   def rvgpr(reg: int, lane: UOp) -> UOp: return vgpr.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index))
-  def wvgpr(reg: int, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
-    idx = vgpr.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index))
+  def wvgpr(reg: int, lane: UOp, val: UOp, exec_mask: UOp, after: UOp|None = None) -> UOp:
+    buf = vgpr.after(after) if after is not None else vgpr
+    idx = buf.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index))
     exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
     active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
     return idx.store(active.where(val.cast(dtypes.uint32), idx.load()))
@@ -944,20 +945,11 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
     if has_per_lane_vcc:
       # Per-lane VCC (e.g., V_ADD_CO_U32, V_CMP_CLASS_F32)
-      # TODO: There's a known issue with carry ops (V_ADD_CO_U32, etc.) where src==dst.
-      # The VCC computation uses unrolled loads which tinygrad may schedule AFTER the vgpr writes,
-      # causing VCC to be computed from the UPDATED values instead of original values.
-      # This needs proper support for read-before-write ordering in tinygrad's scheduler.
+      # IMPORTANT: When src==dst, we must ensure VCC is computed from ORIGINAL source values, not updated values.
+      # We fully unroll both VCC and D0 computation to avoid loop reordering issues.
 
-      # Extract D0 expression from assigns (for vgpr loop)
-      d0_val = None
-      for dest, val in assigns:
-        if dest.startswith('D0') and '[laneId]' not in dest:
-          d0_val = val
-          break
-
-      # Compute all 32 VCC bits by unrolling (each uses independent source loads)
-      def get_vcc_bit_for_lane(lane_idx: int) -> UOp:
+      # Compute VCC bit and D0 value for each lane (unrolled)
+      def get_lane_results(lane_idx: int) -> tuple[UOp, UOp|None]:
         lane_const = UOp.const(dtypes.index, lane_idx)
         s0 = rsrc64_lane(inst.src0.offset, lane_const) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane_const)
         s1 = rsrc64_lane(inst.src1.offset, lane_const) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane_const)
@@ -965,38 +957,50 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         lane_srcs = {'S0': s0, 'S1': s1, 'VCC': rsgpr(sdst_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
         if s2 is not None: lane_srcs['S2'] = s2
         _, lane_assigns = parse_pcode(pcode, lane_srcs, UOp.const(dtypes.uint32, lane_idx), op_name=op_name)
+        vcc_bit = UOp.const(dtypes.uint32, 0)
+        d0_val = None
         for dest, val in lane_assigns:
           if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest):
-            return val.cast(dtypes.uint32)
-        return UOp.const(dtypes.uint32, 0)
+            vcc_bit = val.cast(dtypes.uint32)
+          elif dest.startswith('D0') and '[laneId]' not in dest:
+            d0_val = val
+        return vcc_bit, d0_val
 
-      # Compute and combine all 32 bits
+      # Compute all 32 lanes (this ensures reads happen before any writes through data dependencies)
+      lane_results = [get_lane_results(i) for i in range(32)]
+
+      # Combine VCC bits
       new_vcc = UOp.const(dtypes.uint32, 0)
-      for i in range(32):
-        bit_val = get_vcc_bit_for_lane(i) << UOp.const(dtypes.uint32, i)
-        new_vcc = new_vcc | bit_val
+      for i, (vcc_bit, _) in enumerate(lane_results):
+        new_vcc = new_vcc | (vcc_bit << UOp.const(dtypes.uint32, i))
 
       # Apply EXEC mask: new_vcc = (computed & EXEC) | (old_vcc & ~EXEC)
       old_vcc = rsgpr(sdst_reg)
       final_vcc = (new_vcc & exec_mask) | (old_vcc & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF)))
 
-      # Build vgpr stores (using loop variable from initial parse)
+      # Build vgpr stores (unrolled) - each store depends on final_vcc which depends on all source reads
       vgpr_stores = []
-      if d0_val is not None:
+      for i, (_, d0_val) in enumerate(lane_results):
+        if d0_val is None: continue
+        lane_const = UOp.const(dtypes.index, i)
+        exec_bit = (exec_mask >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
+        active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
         if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
           val64 = d0_val.bitcast(dtypes.uint64) if d0_val.dtype == dtypes.float64 else d0_val.cast(dtypes.uint64)
           lo = val64.cast(dtypes.uint32)
           hi = (val64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
-          vgpr_stores.append(wvgpr(vdst_reg, lane, lo, exec_mask))
-          vgpr_stores.append(wvgpr(vdst_reg + 1, lane, hi, exec_mask))
+          idx_lo = vgpr.after(final_vcc).index(UOp.const(dtypes.index, vdst_reg * 32 + i))
+          idx_hi = vgpr.after(final_vcc).index(UOp.const(dtypes.index, (vdst_reg + 1) * 32 + i))
+          vgpr_stores.append(idx_lo.store(active.where(lo, idx_lo.load())))
+          vgpr_stores.append(idx_hi.store(active.where(hi, idx_hi.load())))
         else:
-          vgpr_stores.append(wvgpr(vdst_reg, lane, d0_val.cast(dtypes.uint32), exec_mask))
+          idx = vgpr.after(final_vcc).index(UOp.const(dtypes.index, vdst_reg * 32 + i))
+          vgpr_stores.append(idx.store(active.where(d0_val.cast(dtypes.uint32), idx.load())))
 
       # Write VCC and vgpr
       vcc_write = wsgpr(sdst_reg, final_vcc)
       if vgpr_stores:
-        vgpr_end = UOp.sink(*vgpr_stores).end(lane)
-        return name, UOp.sink(vgpr_end, vcc_write, inc_pc(), arg=KernelInfo(name=name))
+        return name, UOp.sink(*vgpr_stores, vcc_write, inc_pc(), arg=KernelInfo(name=name))
       else:
         return name, UOp.sink(vcc_write, inc_pc(), arg=KernelInfo(name=name))
     else:
@@ -1437,8 +1441,8 @@ def compile_inst(data: bytes) -> tuple[str, UOp]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @functools.cache
-def decode_program(data: bytes) -> dict[int, tuple[str, CompiledRunner|None, list[int]|None]]:
-  """Decode program to {pc: (name, runner, globals)}."""
+def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, list[int]|None, CompiledRunner|None]]:
+  """Decode program to {pc: (name, fxn, globals, runner)}. Runner is kept alive to prevent fxn memory from being freed."""
   result = {}
   renderer = Device['CPU'].renderer
   i = 0
@@ -1451,6 +1455,7 @@ def decode_program(data: bytes) -> dict[int, tuple[str, CompiledRunner|None, lis
       with Context(NOOPT=1):
         prg = get_program(sink, renderer)
       runner = CompiledRunner(prg)
+      fxn = runner._prg.fxn  # Extract raw ctypes function for direct calls (bypasses HCQ overhead)
       globals_list = prg.globals
       if DEBUG >= 2:
         try:
@@ -1467,9 +1472,9 @@ def decode_program(data: bytes) -> dict[int, tuple[str, CompiledRunner|None, lis
       if DEBUG >= 3:
         import traceback
         traceback.print_exc()
-      runner, globals_list = None, None
+      fxn, globals_list, runner = None, None, None
 
-    result[i // 4] = (name, runner, globals_list)
+    result[i // 4] = (name, fxn, globals_list, runner)
     i += inst.size()
   return result
 
@@ -1486,9 +1491,9 @@ class WaveState:
     self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
     self._vgpr_mv = self.vgpr_buf.as_buffer(force_zero_copy=True).cast('I')
     self._sgpr_mv = self.sgpr_buf.as_buffer(force_zero_copy=True).cast('I')
-    # Explicitly zero out all registers to ensure clean state
-    for i in range(SGPR_COUNT): self._sgpr_mv[i] = 0
-    for i in range(VGPR_SIZE): self._vgpr_mv[i] = 0
+    # Zero out all registers using ctypes memset (much faster than Python loop)
+    ctypes.memset(ctypes.addressof(ctypes.c_uint32.from_buffer(self._sgpr_mv)), 0, SGPR_COUNT * 4)
+    ctypes.memset(ctypes.addressof(ctypes.c_uint32.from_buffer(self._vgpr_mv)), 0, VGPR_SIZE * 4)
     self._write_sgpr(EXEC_LO.offset, (1 << n_lanes) - 1)
     self._write_sgpr(PC_LO_IDX, 0)
 
@@ -1549,20 +1554,21 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             st._write_vgpr(0, lane, (z << 20) | (y << 10) | x)
 
           # Execute wave: sgpr=0, vgpr=1, vmem=2, lds=3
-          all_bufs = {0: st.sgpr_buf, 1: st.vgpr_buf, 2: vmem_buf, 3: lds_buf}
+          # Pre-compute buffer addresses for direct ctypes calls (avoids per-instruction Buffer overhead)
+          buf_addrs = {0: st.sgpr_buf._buf.va_addr, 1: st.vgpr_buf._buf.va_addr, 2: vmem_buf._buf.va_addr, 3: lds_buf._buf.va_addr}
           max_instructions = 100000
           inst_count = 0
           while True:
             pc = st.pc
             if pc == 0xFFFFFFFF or pc not in program: break
 
-            name, runner, globals_list = program[pc]
-            if runner is None:
-              if DEBUG >= 1: print(f"[emu2] No runner for {name} at PC={pc}")
+            name, fxn, globals_list, _runner = program[pc]
+            if fxn is None:
+              if DEBUG >= 1: print(f"[emu2] No fxn for {name} at PC={pc}")
               break
 
-            bufs = [all_bufs[g] for g in globals_list]
-            runner(bufs, {}, wait=True)
+            # Direct ctypes call - bypasses HCQ queue/synchronization overhead (~75x faster)
+            fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
 
             inst_count += 1
             assert inst_count < max_instructions, f"exceeded {max_instructions} instructions, likely infinite loop"
