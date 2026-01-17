@@ -10,6 +10,7 @@ os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
 from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, _get_vmem_buf, MASK32, PC_LO_IDX, SCC_IDX, VCC_LO, EXEC_LO
+from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.test.helpers import KernelInfo
 from extra.assembly.amd.test.bench_emu import REMU_PATH
 
@@ -171,7 +172,16 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             python_before = python.get_snapshot()
 
             inst_info = program.get(python_before.pc)
-            inst_str = inst_info[0] if inst_info else f"unknown at PC={python_before.pc}"
+            inst_hex_name = inst_info[0] if inst_info else f"unknown at PC={python_before.pc}"
+            # Decode the instruction to get mnemonic for sync_after checks
+            try:
+              inst_bytes_hex = inst_hex_name.split('_')[1] if '_' in inst_hex_name else ""
+              inst_bytes = bytes.fromhex(inst_bytes_hex) if inst_bytes_hex else b''
+              decoded = decode_inst(inst_bytes) if inst_bytes else None
+              inst_mnemonic = repr(decoded).split('(')[0] if decoded else ""
+            except:
+              inst_mnemonic = ""
+            inst_str = inst_hex_name
             trace.append((step, python_before.pc, inst_str, rust_before, python_before))
             if len(trace) > trace_len: trace.pop(0)
 
@@ -181,8 +191,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             # v_div_scale/v_div_fixup: Rust has different VCC handling
             # v_cvt_f16_f32: Rust clears high 16 bits, but hardware (and Python) preserves them
             # s_add_i32/s_sub_i32: Rust has incorrect SCC overflow detection
-            sync_after = any(x in inst_str for x in ('v_div_scale_f32', 'v_div_scale_f64', 'v_div_fixup_f32', 'v_div_fixup_f64',
-                                                      'v_cvt_f16_f32', 's_add_i32', 's_sub_i32'))
+            sync_after = any(x in inst_mnemonic.lower() for x in ('v_div_scale', 'v_div_fixup', 'v_cvt_f16_f32', 's_add_i32', 's_sub_i32'))
             diffs = rust_before.diff(python_before, n_lanes)
             if diffs:
               trace_lines = []

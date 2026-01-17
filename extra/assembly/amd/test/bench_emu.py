@@ -6,7 +6,7 @@ from pathlib import Path
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
 
-from extra.assembly.amd.emu2 import run_asm as python_run_asm
+from extra.assembly.amd.emu2 import run_asm as python_run_asm, decode_program as emu2_decode_program
 
 # only used for count_instructions
 from extra.assembly.amd.emu import decode_program
@@ -66,6 +66,16 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
     times.append(end - start)
 
   return sum(times) / len(times)
+
+def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
+  """Benchmark Python emulator with compile and execution times separated."""
+  # Measure compile time (decode_program includes UOp compilation to C and JIT)
+  compile_start = time.perf_counter()
+  emu2_decode_program(kernel)
+  compile_time = time.perf_counter() - compile_start
+
+  # Execution time (program is cached in decode_program via @functools.cache)
+  return compile_time, benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, iterations)
 
 def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], dict[int, bytes], int] | None:
   """Get a real tinygrad kernel by operation name. Returns (code, global_size, local_size, buf_sizes, buf_data, rsrc2)."""
@@ -162,34 +172,36 @@ def main():
     buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
     #set_valid_mem_ranges(ranges)
 
-    py_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
+    py_compile, py_exec = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
     rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations) if rust_remu else None
 
-    if py_time:
-      py_rate = total_work / py_time / 1e6
-      print(f"  Python: {py_time*1000:8.3f} ms  ({py_rate:7.2f} M ops/s)")
+    if py_compile is not None:
+      py_exec_rate = total_work / py_exec / 1e6
+      print(f"  Python compile: {py_compile*1000:8.3f} ms")
+      print(f"  Python exec:    {py_exec*1000:8.3f} ms  ({py_exec_rate:7.2f} M ops/s)")
     if rust_time:
       rust_rate = total_work / rust_time / 1e6
-      speedup = py_time / rust_time if py_time else 0
-      print(f"  Rust:   {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
+      speedup = py_exec / rust_time if py_exec else 0
+      print(f"  Rust:           {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
 
-    results.append((op_name, n_insts, n_workgroups, py_time, rust_time))
+    results.append((op_name, n_insts, n_workgroups, py_compile, py_exec, rust_time))
 
   # Summary table
-  print("\n" + "=" * 90)
+  print("\n" + "=" * 110)
   print("SUMMARY")
-  print("=" * 90)
-  print(f"{'Name':<25} {'Insts':<8} {'WGs':<6} {'Python (ms)':<14} {'Rust (ms)':<14} {'Speedup':<10}")
-  print("-" * 90)
+  print("=" * 110)
+  print(f"{'Name':<20} {'Insts':<6} {'WGs':<5} {'Compile (ms)':<14} {'Exec (ms)':<14} {'Rust (ms)':<14} {'Exec Speedup':<12}")
+  print("-" * 110)
 
-  for name, n_insts, n_wgs, py_time, rust_time in results:
-    py_ms = f"{py_time*1000:.3f}" if py_time else "error"
+  for name, n_insts, n_wgs, py_compile, py_exec, rust_time in results:
+    compile_ms = f"{py_compile*1000:.3f}" if py_compile else "error"
+    exec_ms = f"{py_exec*1000:.3f}" if py_exec else "error"
     if rust_time:
       rust_ms = f"{rust_time*1000:.3f}"
-      speedup = f"{py_time/rust_time:.1f}x" if py_time else "N/A"
+      speedup = f"{py_exec/rust_time:.1f}x" if py_exec else "N/A"
     else:
       rust_ms, speedup = "N/A", "N/A"
-    print(f"{name:<25} {n_insts:<8} {n_wgs:<6} {py_ms:<14} {rust_ms:<14} {speedup:<10}")
+    print(f"{name:<20} {n_insts:<6} {n_wgs:<5} {compile_ms:<14} {exec_ms:<14} {rust_ms:<14} {speedup:<12}")
 
 if __name__ == "__main__":
   main()

@@ -416,12 +416,14 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     if 'OR_SAVEEXEC_B32' in op_name:
       exec_lo = rsgpr(EXEC_LO.offset)
       new_exec = exec_lo | s0
-      return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), inc_pc(), arg=KernelInfo(name=name))
+      scc = new_exec.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
 
     if 'AND_SAVEEXEC_B32' in op_name:
       exec_lo = rsgpr(EXEC_LO.offset)
       new_exec = exec_lo & s0
-      return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), inc_pc(), arg=KernelInfo(name=name))
+      scc = new_exec.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
+      return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
 
     # S_BREV_B32: bit reverse (pcode uses reversed slice which parser can't handle)
     if op_name == 'S_BREV_B32':
@@ -717,15 +719,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
             return val.cast(dtypes.uint32)
         return UOp.const(dtypes.uint32, 0)
 
-      # Compute all 32 bits by unrolling
-      new_bits = UOp.const(dtypes.uint32, 0)
+      # Compute all 32 bits by unrolling - VOP3 VOPC writes comparison bits for ALL lanes,
+      # not affected by EXEC mask (EXEC only affects whether VGPRs are written, not comparison result)
+      new_sdst = UOp.const(dtypes.uint32, 0)
       for i in range(32):
         cmp_result = get_cmp_result_vop3(i)
         bit = cmp_result << UOp.const(dtypes.uint32, i)
-        new_bits = new_bits | bit
-
-      # Apply EXEC mask
-      new_sdst = (old_sdst & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (new_bits & exec_mask)
+        new_sdst = new_sdst | bit
 
       # Store to scalar destination (and EXEC for CMPX)
       if is_cmpx:
@@ -909,40 +909,56 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc(), arg=KernelInfo(name=name))
 
     # V_ADD_CO_U32/V_SUB_CO_U32: carry-out goes to sdst (not VCC)
-    # Uses unrolled computation like VOPC because sdst needs all lane results at once
+    # Use fully unrolled computation to ensure sources are read before destinations are written
+    # This is necessary because vdst may overlap with src1
     if op_name in ('V_ADD_CO_U32', 'V_SUB_CO_U32'):
       sdst_reg = inst.sdst.offset
       old_sdst = rsgpr(sdst_reg)
       is_sub = 'SUB' in op_name
 
-      # Unroll to compute carry bits for all lanes
-      def get_lane_carry(lane_idx: int) -> UOp:
-        lane_c = UOp.const(dtypes.index, lane_idx)
-        s0 = rsrc(inst.src0.offset, lane_c).cast(dtypes.uint64)
-        s1 = rsrc(inst.src1.offset, lane_c).cast(dtypes.uint64)
+      # Fully unroll: read all sources, compute all results and carries, then write all destinations
+      # This ensures no clobbering when vdst overlaps src1
+      def get_result_and_carry(lane_idx: int):
+        lane_const = UOp.const(dtypes.index, lane_idx)
+        s0 = rsrc(inst.src0.offset, lane_const)
+        s1 = rsrc(inst.src1.offset, lane_const)
+        s0_64 = s0.cast(dtypes.uint64)
+        s1_64 = s1.cast(dtypes.uint64)
         if is_sub:
-          tmp = s0 - s1
+          tmp = s0_64 - s1_64
           carry = (tmp >> UOp.const(dtypes.uint64, 32)).ne(UOp.const(dtypes.uint64, 0))
         else:
-          tmp = s0 + s1
-          carry = (tmp >= UOp.const(dtypes.uint64, 0x100000000))
-        return carry.where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
+          tmp = s0_64 + s1_64
+          carry = tmp >= UOp.const(dtypes.uint64, 0x100000000)
+        result = tmp.cast(dtypes.uint32)
+        return result, carry
 
-      new_carry_bits = UOp.const(dtypes.uint32, 0)
+      # Compute all results and carries first (reads happen before any writes)
+      results = []
+      carries = []
       for i in range(32):
-        bit = get_lane_carry(i) << UOp.const(dtypes.uint32, i)
-        new_carry_bits = new_carry_bits | bit
+        r, c = get_result_and_carry(i)
+        results.append(r)
+        carries.append(c)
 
-      # Apply EXEC mask: new_sdst = (old_sdst & ~exec) | (new_carry & exec)
-      new_sdst = (old_sdst & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (new_carry_bits & exec_mask)
+      # Compute carry bits - V_ADD_CO_U32 writes carry bits for ALL lanes, not affected by EXEC mask
+      # (EXEC mask only affects whether vdst is written)
+      new_sdst = UOp.const(dtypes.uint32, 0)
+      for i in range(32):
+        c_bit = carries[i].where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0)) << UOp.const(dtypes.uint32, i)
+        new_sdst = new_sdst | c_bit
 
-      # Now compute result for the vectorized loop
-      s0_64 = src0.cast(dtypes.uint64) if src0.dtype != dtypes.uint64 else src0
-      s1_64 = src1.cast(dtypes.uint64) if src1.dtype != dtypes.uint64 else src1
-      result = (s0_64 - s1_64 if is_sub else s0_64 + s1_64).cast(dtypes.uint32)
+      # Write all destinations (unrolled, no loop)
+      exec_bits = [(exec_mask >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1) for i in range(32)]
+      vgpr_stores = []
+      for i in range(32):
+        lane_const = UOp.const(dtypes.index, i)
+        idx = vgpr.index(UOp.const(dtypes.index, vdst_reg * 32) + lane_const)
+        active = exec_bits[i].ne(UOp.const(dtypes.uint32, 0))
+        vgpr_stores.append(idx.store(active.where(results[i], idx.load())))
 
-      vgpr_store = wvgpr(vdst_reg, lane, result, exec_mask)
-      return name, UOp.sink(UOp.sink(vgpr_store).end(lane), wsgpr(sdst_reg, new_sdst), inc_pc(), arg=KernelInfo(name=name))
+      sdst_store = wsgpr(sdst_reg, new_sdst)
+      return name, UOp.sink(*vgpr_stores, sdst_store, inc_pc(), arg=KernelInfo(name=name))
 
     srcs = {'S0': src0, 'S1': src1}
     if src2 is not None: srcs['S2'] = src2
@@ -1306,15 +1322,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         ended.append(store.end(lane))
         return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
 
-      # Regular loads - each dword gets its own loop to avoid CFG issues
-      for i in range(ndwords):
-        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-        addr = make_addr(lane)
-        byte_addr = addr + UOp.const(dtypes.uint64, i * 4)
-        val = vmem.index((byte_addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
-        store = wvgpr(vdst_reg + i, lane, val, exec_mask)
-        ended.append(store.end(lane))
-      return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+      # Regular loads - use single loop to avoid address register clobbering when vdst overlaps addr
+      # Load all dwords before writing any, in case vdst overlaps with addr registers
+      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      addr = make_addr(lane)
+      vals = [vmem.index(((addr + UOp.const(dtypes.uint64, i * 4)) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)) for i in range(ndwords)]
+      stores = [wvgpr(vdst_reg + i, lane, vals[i], exec_mask) for i in range(ndwords)]
+      return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc(), arg=KernelInfo(name=name))
 
     if 'STORE' in op_name:
       vdata_reg = inst.data.offset - 256
@@ -1403,6 +1417,7 @@ def compile_inst(data: bytes) -> tuple[str, UOp]:
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@functools.cache
 def decode_program(data: bytes) -> dict[int, tuple[str, CompiledRunner|None, list[int]|None]]:
   """Decode program to {pc: (name, runner, globals)}."""
   result = {}
