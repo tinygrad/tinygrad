@@ -13,9 +13,10 @@ _BINOPS = {
   '|': lambda l, r: l | r, '^': lambda l, r: l ^ r, '&': lambda l, r: l & r,
   '>=': lambda l, r: l >= r, '<=': lambda l, r: l <= r, '==': lambda l, r: l.eq(r), '!=': lambda l, r: l.ne(r),
   '>>': lambda l, r: l >> r, '<<': lambda l, r: l << r, '>': lambda l, r: l > r, '<': lambda l, r: l < r,
-  '+': lambda l, r: l + r, '*': lambda l, r: l * r, '/': lambda l, r: l / r,
+  '+': lambda l, r: l + r, '*': lambda l, r: l * (r.cast(l.dtype) if l.dtype != r.dtype and l.dtype in (dtypes.float32, dtypes.float64) else r),
+  '/': lambda l, r: l / r,
   '-': lambda l, r: UOp.const(l.dtype, l.arg - r.arg) if l.op == Ops.CONST and r.op == Ops.CONST else l - r,
-  '**': lambda l, r: UOp(Ops.EXP2, dtypes.float32, (r.cast(dtypes.float32),)) if l.op == Ops.CONST and l.arg == 2.0 else l,
+  '**': lambda l, r: UOp(Ops.EXP2, l.dtype, (r.cast(l.dtype),)) if l.op == Ops.CONST and l.arg == 2.0 else l,
 }
 
 def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
@@ -107,8 +108,12 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         cond = parse_expr(m.group(1), {**vars, **block_assigns})
         if cond.dtype != dtypes.bool: cond = cond.ne(UOp.const(cond.dtype, 0))
         i += 1
+        # Snapshot vars before parsing branches - branches shouldn't see each other's assignments
+        vars_snapshot = dict(vars)
         i, branch_assigns = parse_block(lines, i)
         conditions.append((cond, branch_assigns))
+        # Restore vars for next branch
+        vars.clear(); vars.update(vars_snapshot)
         # Handle elsif/else chains
         while i < len(lines):
           if (m := re.match(r'elsif\s+(.+?)\s+then$', lines[i], re.IGNORECASE)):
@@ -117,9 +122,13 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
             i += 1
             i, branch_assigns = parse_block(lines, i)
             conditions.append((cond, branch_assigns))
+            # Restore vars for next branch
+            vars.clear(); vars.update(vars_snapshot)
           elif re.match(r'else$', lines[i], re.IGNORECASE):
             i += 1
             i, else_assigns = parse_block(lines, i)
+            # Restore vars after else branch
+            vars.clear(); vars.update(vars_snapshot)
           elif re.match(r'endif\b', lines[i], re.IGNORECASE):
             i += 1; break
           else: break
@@ -319,6 +328,8 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
         if len(op) == 1 and i+1 < len(expr) and expr[i+1] in '=<>&|*': continue
         if len(op) == 1 and i > 0 and expr[i-1] in '=<>&|*': continue
         lhs, rhs = expr[:i].strip(), expr[i+len(op):].strip()
+        # For - and +, skip if lhs ends with an operator (unary case)
+        if op in ('-', '+') and lhs and lhs[-1] in '*/^|&<>=!': continue
         if lhs and rhs:
           l, r = parse_expr(lhs, vars), parse_expr(rhs, vars)
           if op_type in ('>>', '<<', '>=', '<=', '==', '!=', '>', '<') and l.dtype != r.dtype:
@@ -425,8 +436,10 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     elif 'U' in suffix: dt = dtypes.uint32
     else: dt = dtypes.int if val < 0 else dtypes.uint32
     return UOp.const(dt, val)
-  if (m := re.match(r'-?(\d+\.\d+)F?$', expr)): return UOp.const(dtypes.float32, float(expr.rstrip('F')))
-  if (m := re.match(r'-?(\d+)F$', expr)): return UOp.const(dtypes.float32, float(expr.rstrip('F')))
+  # Float literals: 2.0F or 2.0f -> float32, 2.0 (no suffix) -> float64
+  if (m := re.match(r'-?(\d+\.\d+)[Ff]$', expr)): return UOp.const(dtypes.float32, float(expr.rstrip('Ff')))
+  if (m := re.match(r'-?(\d+)[Ff]$', expr)): return UOp.const(dtypes.float32, float(expr.rstrip('Ff')))
+  if (m := re.match(r'-?(\d+\.\d+)$', expr)): return UOp.const(dtypes.float64, float(expr))
   # Unary bitwise NOT
   if expr.startswith('~'):
     inner = parse_expr(expr[1:], vars)
@@ -601,6 +614,8 @@ def _register_funcs():
     _FUNC_TABLE.append((rf'{src}_to_f32\((.+)\)', 1, lambda a, v, m, d=dst: a[0].cast(dtypes.int if 'i32' in m.group(0) else dtypes.uint32).cast(d)))
   _FUNC_TABLE.append((r'f32_to_i32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float32).dtype, (a[0].bitcast(dtypes.float32),)).cast(dtypes.int)))
   _FUNC_TABLE.append((r'f32_to_u32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float32).dtype, (a[0].bitcast(dtypes.float32),)).cast(dtypes.uint32)))
+  _FUNC_TABLE.append((r'f64_to_i32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float64).dtype, (a[0].bitcast(dtypes.float64),)).cast(dtypes.int)))
+  _FUNC_TABLE.append((r'f64_to_u32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float64).dtype, (a[0].bitcast(dtypes.float64),)).cast(dtypes.uint32)))
   _FUNC_TABLE.append((r'f16_to_f32\((.+)\)', 1, lambda a, v, m: _f16_extract(a[0]).cast(dtypes.float32)))
   _FUNC_TABLE.append((r'f32_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.half)))
   _FUNC_TABLE.append((r'f16_to_i16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, _f16_extract(a[0]).dtype, (_f16_extract(a[0]),)).cast(dtypes.int16)))
@@ -620,8 +635,18 @@ def _register_funcs():
       v32 = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
       return (v32 | UOp.const(dtypes.uint32, 0x00400000)).bitcast(dtypes.float32)  # Set bit 22
   _FUNC_TABLE.append((r'cvtToQuietNAN\((.+)\)', 1, _cvt_to_quiet_nan))
-  _FUNC_TABLE.append((r'exponent\((.+)\)', 1, lambda a, v, m: ((a[0].bitcast(dtypes.uint16) if a[0].dtype == dtypes.half else (a[0] & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 10)) & UOp.const(dtypes.uint32, 0x1F) if '.f16' in m.group(1) or a[0].dtype == dtypes.half else
-                                                              ((a[0].bitcast(dtypes.uint32) if a[0].dtype == dtypes.float32 else a[0]) >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)))
+  def _exponent(a, v, m):
+    val = a[0]
+    if '.f16' in m.group(1) or val.dtype == dtypes.half:
+      bits = val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)
+      return (bits.cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 10)) & UOp.const(dtypes.uint32, 0x1F)
+    elif '.f64' in m.group(1) or val.dtype == dtypes.float64:
+      bits = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val
+      return ((bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)).cast(dtypes.uint32)
+    else:  # f32
+      bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
+      return (bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)
+  _FUNC_TABLE.append((r'exponent\((.+)\)', 1, _exponent))
   _FUNC_TABLE.append((r'sign\((.+)\)', 1, lambda a, v, m: ((a[0].bitcast(dtypes.uint16) if a[0].dtype == dtypes.half else (a[0] & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 15)) & UOp.const(dtypes.uint32, 1) if '.f16' in m.group(1) or a[0].dtype == dtypes.half else
                                                           ((a[0].bitcast(dtypes.uint32) if a[0].dtype == dtypes.float32 else a[0]) >> UOp.const(dtypes.uint32, 31)) & UOp.const(dtypes.uint32, 1)))
   # signext_from_bit
@@ -636,6 +661,62 @@ def _register_funcs():
     for dt, suffix in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32')]:
       _FUNC_TABLE.append((rf'v_{name}_{suffix}\((.+),\s*(.+)\)', 2, lambda a, v, m, is_max=is_max, dt=dt: _minmax_reduce(is_max, dt, a)))
       _FUNC_TABLE.append((rf'v_{name}3_{suffix}\((.+),\s*(.+),\s*(.+)\)', 3, lambda a, v, m, is_max=is_max, dt=dt: _minmax_reduce(is_max, dt, a)))
+
+  # ldexp: multiply float by 2^exp (scale by power of 2)
+  def _ldexp(a, v, m):
+    val, exp = a[0], a[1]
+    # Convert val to float if it's uint bits
+    if val.dtype == dtypes.uint32:
+      val = val.bitcast(dtypes.float32)
+    elif val.dtype == dtypes.uint64:
+      val = val.bitcast(dtypes.float64)
+    # exp should be a signed integer
+    if exp.dtype in (dtypes.uint32, dtypes.uint64):
+      exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
+    # ldexp(x, n) = x * 2^n
+    # Use EXP2 to compute 2^n, then multiply
+    two_pow_exp = UOp(Ops.EXP2, val.dtype, (exp.cast(val.dtype),))
+    return val * two_pow_exp
+  _FUNC_TABLE.append((r'ldexp\((.+),\s*(.+)\)', 2, _ldexp))
+
+  # frexp_mant: extract mantissa (normalized to [0.5, 1.0))
+  def _frexp_mant(a, v, m):
+    val = a[0]
+    if val.dtype == dtypes.uint32:
+      val = val.bitcast(dtypes.float32)
+    elif val.dtype == dtypes.uint64:
+      val = val.bitcast(dtypes.float64)
+    # For f32: extract bits, set exponent to 126 (bias-1), keep mantissa
+    # frexp returns mantissa in [0.5, 1.0)
+    if val.dtype == dtypes.float32:
+      bits = val.bitcast(dtypes.uint32)
+      # Clear exponent, set to 0x3f000000 (exponent = 126, mantissa unchanged -> [0.5, 1.0))
+      mantissa_bits = (bits & UOp.const(dtypes.uint32, 0x807FFFFF)) | UOp.const(dtypes.uint32, 0x3f000000)
+      return mantissa_bits.bitcast(dtypes.float32)
+    else:  # f64
+      bits = val.bitcast(dtypes.uint64)
+      # Clear exponent, set to 0x3fe (exponent = 1022)
+      mantissa_bits = (bits & UOp.const(dtypes.uint64, 0x800FFFFFFFFFFFFF)) | UOp.const(dtypes.uint64, 0x3fe0000000000000)
+      return mantissa_bits.bitcast(dtypes.float64)
+  _FUNC_TABLE.append((r'frexp_mant\((.+)\)', 1, _frexp_mant))
+  _FUNC_TABLE.append((r'mantissa\((.+)\)', 1, _frexp_mant))  # Alias for pcode
+
+  # frexp_exp: extract exponent (unbiased)
+  def _frexp_exp(a, v, m):
+    val = a[0]
+    if val.dtype == dtypes.uint32:
+      val = val.bitcast(dtypes.float32)
+    elif val.dtype == dtypes.uint64:
+      val = val.bitcast(dtypes.float64)
+    if val.dtype == dtypes.float32:
+      bits = val.bitcast(dtypes.uint32)
+      exp = ((bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.int)
+      return exp - UOp.const(dtypes.int, 126)  # Unbias and adjust for frexp convention
+    else:  # f64
+      bits = val.bitcast(dtypes.uint64)
+      exp = ((bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
+      return exp - UOp.const(dtypes.int, 1022)  # Unbias and adjust
+  _FUNC_TABLE.append((r'frexp_exp\((.+)\)', 1, _frexp_exp))
 
 _register_funcs()
 
