@@ -149,12 +149,20 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           rhs = lds.index(idx) + rhs if lds is not None else rhs
         assigns.append((f'MEM[{m.group(1)}].{m.group(2)}', (addr, rhs)))
         i += 1; continue
-      # VAR[high:low] = value
-      if (m := re.match(r'(\w+)\[(\d+)\s*:\s*(\d+)\]\s*=\s*(.+)', line)):
-        var_name, high_bit, low_bit = m.group(1), int(m.group(2)), int(m.group(3))
-        val = parse_expr(m.group(4), {**vars, **block_assigns})
-        assigns.append((f'{var_name}[{high_bit}:{low_bit}]', val))
+      # VAR[high:low] = value or VAR[high:low].type = value
+      if (m := re.match(r'(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?\s*=\s*(.+)', line)):
+        var_name, high_bit, low_bit, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
+        val = parse_expr(m.group(5), {**vars, **block_assigns})
+        assigns.append((f'{var_name}[{high_bit}:{low_bit}]' + (f'.{type_suffix}' if type_suffix else ''), val))
+        # Also update vars to accumulate the bit slice (needed for later references like D0 = tmp)
         if var_name not in vars: vars[var_name] = UOp.const(dtypes.uint64 if high_bit >= 32 else dtypes.uint32, 0)
+        old_val = block_assigns.get(var_name, vars.get(var_name))
+        # Convert val to uint bits if it's a float type
+        val_bits = val.bitcast(dtypes.uint16).cast(dtypes.uint32) if val.dtype == dtypes.half else val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+        mask = UOp.const(dtypes.uint32, ((1 << (high_bit - low_bit + 1)) - 1) << low_bit)
+        new_val = (old_val & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, low_bit))
+        block_assigns[var_name] = new_val
+        vars[var_name] = new_val
         i += 1; continue
       # Compound assignment: VAR += value, VAR -= value
       if (m := re.match(r'(\w+(?:\.\w+)?)\s*\+=\s*(.+)', line)):
@@ -178,6 +186,25 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
       if (m := re.match(r'declare\s+(\w+)', line)):
         vars[m.group(1)] = UOp.const(dtypes.uint32, 0)
         i += 1; continue
+      # Lambda definition: NAME = lambda(args) (body) - store as special marker
+      if (m := re.match(r'(\w+)\s*=\s*lambda\(([^)]*)\)\s*\(', line)):
+        lambda_name, lambda_args = m.group(1), [a.strip() for a in m.group(2).split(',')]
+        # Collect multi-line lambda body until matching close paren
+        body_start = line[m.end()-1:]  # Start after opening paren
+        body_lines = [body_start]
+        depth = 1
+        i += 1
+        while i < len(lines) and depth > 0:
+          for ch in lines[i]:
+            if ch == '(': depth += 1
+            elif ch == ')': depth -= 1
+          body_lines.append(lines[i])
+          i += 1
+        # Remove trailing close paren and join
+        body = ' '.join(body_lines).strip()
+        if body.endswith(')'): body = body[:-1]
+        vars[lambda_name] = ('lambda', lambda_args, body.strip())
+        continue
       i += 1
     return i, block_assigns
 
@@ -185,11 +212,19 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
   _, final_assigns = parse_block(lines)
 
   # Build assigns from final values
+  # Check which vars already have bit slice assigns
+  vars_with_slices = set(dest.split('[')[0] for dest, _ in assigns if '[' in dest)
   for var, val in final_assigns.items():
     if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA']:
-      # Find the type suffix if any from the original pcode
+      # Skip if this var was updated via bit slices only (not a direct assignment)
+      if var in vars_with_slices:
+        # Check if there's also a direct assignment like "D0.b32 = tmp"
+        has_direct_assign = any(re.match(rf'{var}\.\w+\s*=', line) for line in lines)
+        if not has_direct_assign:
+          continue  # Skip - bit slices already handle this
+      # Find the full destination including type suffix and indexing from the original pcode
       for line in lines:
-        if (m := re.match(rf'{var}\.(\w+)', line)):
+        if (m := re.match(rf'{var}\.(\w+(?:\[\w+\])?)', line)):
           assigns.append((f'{var}.{m.group(1)}', val)); break
       else:
         assigns.append((var, val))
@@ -264,13 +299,21 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       v16 = (v & UOp.const(v.dtype, 0xFFFF)).cast(dtypes.uint16)
       return v16 if dt == dtypes.uint16 else v16.bitcast(dt)
     return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
-  # Bit slice: S0[4:0] or S0[4:0].u32
+  # Bit slice: S0[4:0] or S0[4:0].u32 or S0[15:0].f16
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
-    hi, lo = int(m.group(2)), int(m.group(3))
+    hi, lo, type_suffix = int(m.group(2)), int(m.group(3)), m.group(4)
     val = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
     shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
     shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
-    return shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
+    result = shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
+    # If type suffix specified, convert bits to that type
+    if type_suffix:
+      dt = DTYPES.get(type_suffix, dtypes.uint32)
+      if dt == dtypes.half:
+        result = result.cast(dtypes.uint16).bitcast(dtypes.half)
+      elif dt != result.dtype:
+        result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
+    return result
   # Bit slice with type prefix: S1.u32[4:0].u32
   if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     hi, lo = int(m.group(3)), int(m.group(4))
@@ -338,6 +381,26 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       shifted = val >> UOp.const(shift_dt, low_bit) if low_bit > 0 else val
       return shifted & UOp.const(shifted.dtype, (1 << width) - 1)
     return UOp.const(dtypes.uint32, 0)
+  # Lambda call: NAME(arg1, arg2, ...)
+  if (m := re.match(r'(\w+)\((.+)\)$', expr)):
+    func_name, args_str = m.group(1), m.group(2)
+    if func_name in vars and isinstance(vars[func_name], tuple) and vars[func_name][0] == 'lambda':
+      _, param_names, body = vars[func_name]
+      # Parse arguments (handling nested parens)
+      args = []
+      depth, start = 0, 0
+      for i, ch in enumerate(args_str):
+        if ch == '(': depth += 1
+        elif ch == ')': depth -= 1
+        elif ch == ',' and depth == 0:
+          args.append(args_str[start:i].strip())
+          start = i + 1
+      args.append(args_str[start:].strip())
+      # Build new vars with lambda parameters bound to arguments
+      lambda_vars = vars.copy()
+      for param, arg in zip(param_names, args):
+        lambda_vars[param] = parse_expr(arg, vars)
+      return parse_expr(body, lambda_vars)
   # Function call
   if (result := _parse_func(expr, vars)) is not None: return result
   return UOp.const(dtypes.uint32, 0)

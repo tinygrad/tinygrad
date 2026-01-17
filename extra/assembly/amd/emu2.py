@@ -115,7 +115,19 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
     elif dest.startswith('D0'):
       # Vector destination - write to vdst (bitcast floats to preserve bit pattern)
       has_vgpr_write = True
-      if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
+      # Check for bit slice assignment: D0[31:16].f16 or D0[15:0].f16
+      if (slice_match := re.match(r'D0\[(\d+)\s*:\s*(\d+)\]', dest)):
+        hi_bit, lo_bit = int(slice_match.group(1)), int(slice_match.group(2))
+        # Convert value to uint16 bits
+        if val.dtype == dtypes.half:
+          val_bits = val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+        elif val.dtype in (dtypes.uint16, dtypes.int16):
+          val_bits = val.cast(dtypes.uint32)
+        else:
+          val_bits = val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 0xFFFF)
+        # Store with bit position (accumulated later)
+        raw_stores.append(('vgpr_slice', (lo_bit, val_bits)))
+      elif val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         # 64-bit destination: write both low and high 32-bit parts
         val64 = val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
         lo = val64.cast(dtypes.uint32)
@@ -167,6 +179,14 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
   stores = []
   lane_stores = [s for t, s in raw_stores if t in ('vgpr', 'vcc', 'exec')]
   scalar_stores = [s for t, s in raw_stores if t == 'scc']
+  # Handle bit slice stores: combine them into a single 32-bit write
+  slice_stores = [s for t, s in raw_stores if t == 'vgpr_slice']
+  if slice_stores:
+    # Combine all slices into one value
+    result = UOp.const(dtypes.uint32, 0)
+    for lo_bit, val_bits in slice_stores:
+      result = result | (val_bits << UOp.const(dtypes.uint32, lo_bit))
+    lane_stores.append(wvgpr_fn(vdst_reg, lane, result, exec_mask))
   if lane_stores:
     # Combine all lane-dependent stores and end with single END
     combined = UOp.sink(*lane_stores)
@@ -713,6 +733,58 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name)
     assert pcode_result is not None, f"no pcode for VOP3SD: {inst.op.name}"
     return pcode_result
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # VOP3P: packed 16-bit operations (v_pk_add_f16, v_pk_mul_f16, etc.)
+  # Pcode uses S0[31:16], S0[15:0] etc. We remap halves based on opsel bits.
+  # ═══════════════════════════════════════════════════════════════════════════
+  if isinstance(inst, VOP3P):
+    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    exec_mask = rsgpr(EXEC_LO.offset)
+    vdst_reg = inst.vdst.offset - 256
+
+    # Read source operands (as uint32 with packed f16)
+    src0 = rsrc(inst.src0.offset, lane)
+    src1 = rsrc(inst.src1.offset, lane)
+    src2 = rsrc(inst.src2.offset, lane) if hasattr(inst, 'src2') and inst.src2 is not None else None
+
+    # Get opsel bits for source selection
+    opsel = getattr(inst, 'opsel', 0) or 0
+    opsel_hi = getattr(inst, 'opsel_hi', 3) if getattr(inst, 'opsel_hi', 3) is not None else 3
+    opsel_hi2 = getattr(inst, 'opsel_hi2', 1) if getattr(inst, 'opsel_hi2', 1) is not None else 1
+    neg = getattr(inst, 'neg', 0) or 0
+    neg_hi = getattr(inst, 'neg_hi', 0) or 0
+
+    # Helper to extract 16-bit half as uint16 bits, then optionally negate as f16
+    def get_half_bits(val: UOp, use_hi: bool, apply_neg: bool = False) -> UOp:
+      bits = ((val >> UOp.const(dtypes.uint32, 16)) if use_hi else val) & UOp.const(dtypes.uint32, 0xFFFF)
+      if apply_neg:
+        f16_val = bits.cast(dtypes.uint16).bitcast(dtypes.half).neg()
+        bits = f16_val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+      return bits
+
+    # Build remapped sources: pcode expects [15:0] for lo, [31:16] for hi
+    # opsel controls which actual half to put in each position
+    # After remapping: S0_new[15:0] = selected lo half, S0_new[31:16] = selected hi half
+    def build_remapped_src(src: UOp, opsel_lo_bit: int, opsel_hi_bit: int, neg_lo_bit: int, neg_hi_bit: int) -> UOp:
+      lo_bits = get_half_bits(src, bool(opsel_lo_bit), bool(neg_lo_bit))
+      hi_bits = get_half_bits(src, bool(opsel_hi_bit), bool(neg_hi_bit))
+      return lo_bits | (hi_bits << UOp.const(dtypes.uint32, 16))
+
+    s0_new = build_remapped_src(src0, opsel & 1, opsel_hi & 1, neg & 1, neg_hi & 1)
+    s1_new = build_remapped_src(src1, opsel & 2, opsel_hi & 2, neg & 2, neg_hi & 2)
+    s2_new = build_remapped_src(src2, opsel & 4, 1 if opsel_hi2 else 0, neg & 4, neg_hi & 4) if src2 is not None else None
+
+    pcode = PCODE.get(inst.op)
+    if pcode is not None:
+      srcs = {'S0': s0_new, 'S1': s1_new}
+      if s2_new is not None: srcs['S2'] = s2_new
+      stores = compile_vop_pcode_stores(inst.op, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, rvgpr_fn=rvgpr)
+      if stores is not None:
+        return name, UOp.sink(*stores, inc_pc(), arg=KernelInfo(name=name))
+
+    # No pcode or couldn't parse, skip
+    return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
   # VOPD: dual-issue v_dual_mov_b32, etc.
