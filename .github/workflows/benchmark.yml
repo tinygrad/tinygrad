@@ -291,7 +291,7 @@ jobs:
     # - name: Fuzz Padded Tensor Core GEMM (PTX)
     #   run: NV=1 NV_PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: HEVC Decode Benchmark
-      run: VALIDATE=1 MAX_FRAMES=100 NV=1 PYTHONPATH=. python3 extra/hevc/decode.py
+      run: VALIDATE=1 MAX_FRAMES=100 JITBEAM=1 NV=1 PYTHONPATH=. python3 extra/hevc/decode.py
     - name: Train MNIST
       run: time PYTHONPATH=. NV=1 TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
@@ -329,10 +329,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Remove amdgpu
-      run: sudo rmmod amdgpu || true
-    - name: Cleanup running AM processes
-      run: python extra/amdpci/am_smi.py --pids --kill
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
+    - name: Remove amd modules
+      run: ./extra/hcq/hcq_smi.py amd rmmod
+    - name: Kill stale pids
+      run: ./extra/hcq/hcq_smi.py amd kill_pids
     #- name: Insert amdgpu
     #  run: sudo modprobe amdgpu
     - name: Symlink models and datasets
@@ -439,10 +441,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Remove amdgpu
-      run: sudo rmmod amdgpu || true
-    - name: Cleanup running AM processes
-      run: python extra/amdpci/am_smi.py --pids --kill
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
+    - name: Remove amd modules
+      run: ./extra/hcq/hcq_smi.py amd rmmod
+    - name: Kill stale pids
+      run: ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -489,10 +493,12 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Remove amdgpu
-      run: sudo rmmod amdgpu || true
-    - name: Cleanup running AM processes
-      run: python extra/amdpci/am_smi.py --pids --kill
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
+    - name: Remove amd modules
+      run: ./extra/hcq/hcq_smi.py amd rmmod
+    - name: Kill stale pids
+      run: ./extra/hcq/hcq_smi.py amd kill_pids
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
@@ -541,7 +547,7 @@ jobs:
     - name: reset process replay
       run: test/external/process_replay/reset.py
     - name: openpilot compile3 0.10.0 driving_policy
-      run: BENCHMARK_LOG=openpilot_0_10_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=4 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.10.0/selfdrive/modeld/models/driving_policy.onnx
+      run: BENCHMARK_LOG=openpilot_0_10_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.10.0/selfdrive/modeld/models/driving_policy.onnx
     - name: openpilot compile3 0.10.0 dmonitoring
       run: BENCHMARK_LOG=openpilot_0_10_0_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=11 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.10.0/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: DEBUG=2 openpilot compile3 0.10.1 driving_vision
@@ -553,7 +559,7 @@ jobs:
     - name: openpilot compile3 0.10.1 driving_vision
       run: BENCHMARK_LOG=openpilot_0_10_1_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot compile3 0.10.1 driving_policy
-      run: BENCHMARK_LOG=openpilot_0_10_1_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=4 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_policy.onnx
+      run: BENCHMARK_LOG=openpilot_0_10_1_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_policy.onnx
     - name: openpilot compile3 0.10.1 dmonitoring
       run: BENCHMARK_LOG=openpilot_0_10_1_dmonitoring PYTHONPATH="." ASSERT_MIN_STEP_TIME=10 DEV=QCOM FLOAT16=1 IMAGE=2 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/dmonitoring_model.onnx
     - name: benchmark MobileNetV2 on DSP
@@ -578,6 +584,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove amd modules
       run: ./extra/hcq/hcq_smi.py amd rmmod
     - name: Kill stale pids
@@ -640,6 +648,8 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
+    - name: Setcap to python
+      run: ./extra/amdpci/setup_python_cap.sh
     - name: Remove nv modules
       run: ./extra/hcq/hcq_smi.py nv rmmod
     - name: Kill stale pids

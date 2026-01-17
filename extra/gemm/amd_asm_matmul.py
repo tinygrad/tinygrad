@@ -11,9 +11,10 @@
 import numpy as np
 from pathlib import Path
 from tinygrad import Tensor, Device, Context, GlobalCounters
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
-from tinygrad.engine.realize import Runner, Estimates, ExecItem
-from extra.assembly.amd.dsl import s, v, VCC_LO, RawImm, EXEC_LO
+from tinygrad.engine.realize import Estimates
+from extra.assembly.amd.dsl import s, v, VCC_LO, NULL
 from extra.assembly.amd.autogen.rdna3.ins import *
 
 # =============================================================================
@@ -198,20 +199,14 @@ class Kernel:
 
   def global_load(self, vdst, addr, saddr=None):
     """Global load b32"""
-    self.emit(global_load_b32(vdst=v[vdst], addr=v[addr:addr+1],
-              saddr=s[saddr:saddr+2] if saddr else RawImm(124)))
+    self.emit(global_load_b32(vdst=v[vdst], addr=v[addr] if saddr else v[addr:addr+1],
+              saddr=s[saddr:saddr+1] if saddr else NULL))
 
   def waitcnt(self, lgkm=None, vm=None):
     """Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain."""
-    from extra.assembly.amd.asm import waitcnt as encode_waitcnt
-    if lgkm == 0 and vm is None: self.emit(s_waitcnt(simm16=WAIT_LGKM))
-    elif vm == 0 and lgkm is None: self.emit(s_waitcnt(simm16=WAIT_VMEM))
-    elif lgkm == 0 and vm == 0: self.emit(s_waitcnt(simm16=WAIT_ALL))
-    elif vm is not None and lgkm is None:
-      self.emit(s_waitcnt(simm16=encode_waitcnt(vmcnt=vm, expcnt=7, lgkmcnt=63)))
-    elif lgkm is not None and vm is None:
-      self.emit(s_waitcnt(simm16=encode_waitcnt(vmcnt=63, expcnt=7, lgkmcnt=lgkm)))
-    else: raise ValueError(f"unsupported waitcnt: lgkm={lgkm}, vm={vm}")
+    vmcnt, lgkmcnt, expcnt = vm if vm is not None else 63, lgkm if lgkm is not None else 63, 7
+    waitcnt = (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
+    self.emit(s_waitcnt(simm16=waitcnt))
 
   def barrier(self): self.emit(s_barrier())
 
@@ -227,9 +222,12 @@ class Kernel:
         asm = re.sub(r'(s_cbranch_\w+|s_branch)\s+\S+', rf'\1 .{self.branch_targets[i]}', asm)
       body.append('\t' + asm)
 
+    # limit wave occupancy by using more LDS
+    lds_size = max(LDS_SIZE, 65536//getenv("LIMIT_OCC", 65536))
+
     # HSA kernel descriptor attributes (zeros included for compatibility)
     hsa = [
-      ('group_segment_fixed_size', LDS_SIZE), ('private_segment_fixed_size', 0), ('kernarg_size', 36),
+      ('group_segment_fixed_size', lds_size), ('private_segment_fixed_size', 0), ('kernarg_size', 36),
       ('user_sgpr_count', 14), ('user_sgpr_dispatch_ptr', 0), ('user_sgpr_queue_ptr', 0),
       ('user_sgpr_kernarg_segment_ptr', 1), ('user_sgpr_dispatch_id', 0), ('user_sgpr_private_segment_size', 0),
       ('wavefront_size32', 1), ('uses_dynamic_stack', 0), ('enable_private_segment', 0),
@@ -249,7 +247,7 @@ class Kernel:
       '\t.end_amdhsa_kernel', '\t.text', '.Lfunc_end0:', '\t.size\tkernel, .Lfunc_end0-kernel',
       '\t.amdgpu_metadata', '---', 'amdhsa.kernels:', '  - .args:',
       *[f'      - .address_space: global\n        .offset: {i*8}\n        .size: 8\n        .value_kind: global_buffer' for i in range(3)],
-      f'    .group_segment_fixed_size: {LDS_SIZE}', '    .kernarg_segment_align: 8',
+      f'    .group_segment_fixed_size: {lds_size}', '    .kernarg_segment_align: 8',
       '    .kernarg_segment_size: 24', '    .max_flat_workgroup_size: 128', '    .name: kernel',
       '    .private_segment_fixed_size: 0', '    .sgpr_count: 60', '    .symbol: kernel.kd',
       '    .vgpr_count: 214', '    .wavefront_size: 32', f'amdhsa.target: amdgcn-amd-amdhsa--{self.arch}',
@@ -266,8 +264,8 @@ def build_kernel(arch='gfx1100'):
   # ===========================================================================
   # PROLOGUE: Load kernel arguments, compute tile coordinates and addresses
   # ===========================================================================
-  k.emit(s_load_b128(sdata=s[S_KERNARG_A[0]:S_KERNARG_B[1]], sbase=s[0:1], offset=0x0, soffset=RawImm(124)))
-  k.emit(s_load_b64(sdata=s[S_KERNARG_OUT[0]:S_KERNARG_OUT[1]], sbase=s[0:1], offset=0x10, soffset=RawImm(124)))
+  k.emit(s_load_b128(sdata=s[S_KERNARG_A[0]:S_KERNARG_B[1]], sbase=s[0:1], offset=0x0, soffset=NULL))
+  k.emit(s_load_b64(sdata=s[S_KERNARG_OUT[0]:S_KERNARG_OUT[1]], sbase=s[0:1], offset=0x10, soffset=NULL))
   k.emit(s_mov_b32(s[S_DIM_N], MATRIX_DIM))
   k.emit(s_mov_b32(s[S_LOOP_CTR], 0))  # used by LDS swizzle, always 0 for valid workgroups
   k.emit(s_lshl_b32(s[S_TILE_X], s[S_WORKGROUP_X], 7))
@@ -408,8 +406,6 @@ def build_kernel(arch='gfx1100'):
   for i, idx in enumerate([6,7,8,9,10,13,14,15]):
     offset = i * 64
     k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[INIT_TILE_LOADS[idx][0]], offset0=offset & 0xFF, offset1=offset >> 8))
-  k.waitcnt(lgkm=0)
-  k.barrier()
 
   # ===========================================================================
   # INIT: Compute LDS base addresses, then zero accumulators
@@ -450,21 +446,26 @@ def build_kernel(arch='gfx1100'):
   k.emit(s_cselect_b32(s[S_PREFETCH_FLAG], -1, 0))  # s_cselect doesn't modify SCC
   k.emit(s_cbranch_scc0(simm16=0)); k.branch_to('SKIP_PREFETCH')  # branch if loop_ctr >= loop_bound
 
-  # Advance prefetch pointers
-  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
-  k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
-
   if not NO_GLOBAL:
+    # Advance prefetch pointers
+    k.emit(v_add_nc_u32_e32(v[V_GLOBAL_B_ADDR], 0x20000, v[V_GLOBAL_B_ADDR]))
+    k.emit(v_add_nc_u32_e32(v[V_GLOBAL_A_ADDR], 0x20, v[V_GLOBAL_A_ADDR]))
+
     for vdst, saddr_lo in INIT_PREFETCH:
       k.global_load(vdst, V_GLOBAL_B_ADDR, saddr_lo)
 
   k.label('SKIP_PREFETCH')
 
+  # wait for local stores to finish (either initial or loop)
+  # then sync the warp so it's safe to load local
+  k.waitcnt(lgkm=0)
+  k.barrier()
+
   # 8 inner loop iterations
   for iter in range(8):
     # Load A tile (4 pairs) and B tile (8 pairs) from LDS
     if not NO_DS:
-      k.emit(s_clause(simm16=11))  # 12 loads total: 4 A + 8 B
+      k.emit(s_clause(simm16=len(V_A_TILE_REGS) + len(V_B_TILE_REGS) - 1))  # 12 loads total: 4 A + 8 B
       # A tile: 4 ds_load_b64
       for i, vdst in enumerate(V_A_TILE_REGS):
         a_off = (i & 1) * 8 + (i >> 1) * 64 + iter * LDS_A_STRIDE
@@ -473,38 +474,37 @@ def build_kernel(arch='gfx1100'):
       for i, vdst in enumerate(V_B_TILE_REGS):
         b_off = (i & 1) * 8 + (i & 2) * 64 + (i >> 2) * 256 + iter * LDS_B_STRIDE
         k.emit(ds_load_b64(vdst=v[vdst:vdst+1], addr=v[V_LDS_B_BASE], offset0=b_off & 0xFF, offset1=b_off >> 8))
-      k.waitcnt(lgkm=0)
 
-    # 64 dual FMACs
-    k.emit(s_clause(simm16=63))
-    for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
-      k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
-                  vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
-
-    # Issue global prefetch AFTER FMACs (first 6 iterations only)
+    # Issue global prefetch (first 6 iterations only)
     if iter < 6 and not NO_GLOBAL:
       vdst1, vdst2, addr, slo1, slo2 = PREFETCH_LOADS[iter]
       k.global_load(vdst1, addr, slo1)
       k.global_load(vdst2, addr, slo2)
 
-  k.emit(s_and_not1_b32(VCC_LO, EXEC_LO, s[S_PREFETCH_FLAG]))
+    # 64 dual FMACs
+    k.waitcnt(lgkm=0)
+    k.emit(s_clause(simm16=len(FMAC_PATTERN)-1))
+    for i, (vdst_x, vdst_y, ax, bx, ay, by) in enumerate(FMAC_PATTERN):
+      k.emit(VOPD(VOPDOp.V_DUAL_FMAC_F32, VOPDOp.V_DUAL_FMAC_F32,
+                  vdstx=v[vdst_x], vdsty=v[vdst_y], srcx0=v[ax], vsrcx1=v[bx], srcy0=v[ay], vsrcy1=v[by]))
+
+  # wait for all global stores to finish
+  # then sync the warp so it's safe to store local
   k.waitcnt(vm=0)
   k.barrier()
-  k.emit(s_cbranch_vccnz(simm16=0)); k.branch_to('LOOP_INC')
 
   # Store prefetched data to LDS
   # NOTE: Register naming reflects LDS tile organization, not source matrix:
   #   V_LDS_A_DATA (v155-162) holds data that goes to LDS A-tile region
   #   V_LDS_B_DATA (v163-170) holds data that goes to LDS B-tile region
   # The data sources are swapped: A-tile receives B matrix rows, B-tile receives A matrix columns
-  for i in range(4):  # A tile: 8 values via 4 stride64 stores
-    k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
-  for i in range(8):  # B tile: 8 values via 8 scalar stores with 64-byte spacing
-    offset = i * 64
-    k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
+  if not NO_DS:
+    for i in range(4):  # A tile: 8 values via 4 stride64 stores
+      k.emit(ds_store_2addr_stride64_b32(addr=v[V_LDS_A_ADDR], data0=v[V_LDS_A_DATA[i*2]], data1=v[V_LDS_A_DATA[i*2+1]], offset0=i*4, offset1=i*4+2))
+    for i in range(8):  # B tile: 8 values via 8 scalar stores with 64-byte spacing
+      offset = i * 64
+      k.emit(ds_store_b32(addr=v[V_LDS_B_ADDR], data0=v[V_LDS_B_DATA[i]], offset0=offset & 0xFF, offset1=offset >> 8))
 
-  k.waitcnt(lgkm=0)
-  k.barrier()
   k.emit(s_branch(simm16=0)); k.branch_to('LOOP_INC')
 
   # ===========================================================================
@@ -563,9 +563,9 @@ def build_kernel(arch='gfx1100'):
       k.emit(v_add_co_u32(v[0], VCC_LO, s[S_PREFETCH_FLAG], v[0]))
       k.emit(v_add_co_ci_u32_e32(v[1], v[1], v[V_ADDR_HI_ZERO]))
 
-    k.emit(global_store_b128(addr=v[0:1], data=v[tmp:tmp+3], saddr=RawImm(124)))
+    k.emit(global_store_b128(addr=v[0:1], data=v[tmp:tmp+3], saddr=NULL))
 
-  k.emit(s_sendmsg(simm16=3))
+  k.emit(s_sendmsg(simm16=3))  # DEALLOC_VGPRS
   k.emit(s_endpgm())
 
   return k.to_asm()
@@ -589,7 +589,6 @@ def test_matmul():
     print(f"Loaded stock kernel from {stock_path}")
   else:
     asm = build_kernel(dev.arch)
-  if getenv("PRINT_ASM", 0): print(asm)
 
   binary = dev.compiler.compile(asm)
   print(f"Compiled! Binary size: {len(binary)} bytes")
@@ -603,15 +602,16 @@ def test_matmul():
   grid, local = (N // BLOCK_N, N // BLOCK_M, 1), (THREADS, 1, 1)
   print(f"Grid: {grid}, Local: {local}")
 
-  _prg = dev.runtime("kernel", binary)
-  class AsmRunner(Runner):
-    def __init__(self):
-      super().__init__(colored("kernel", "cyan"), Device.DEFAULT, Estimates(ops=N*N*N*2, mem=N*N*4*3))
-    def __call__(self, rawbufs, var_vals, wait=False):
-      c_buf, a_buf, b_buf = [x.ensure_allocated()._buf for x in rawbufs]
-      return _prg(a_buf, b_buf, c_buf, global_size=grid, local_size=local, wait=wait)
-
-  ei = ExecItem(None, [c.uop.buffer, a.uop.buffer, b.uop.buffer], prg=AsmRunner())
+  dname:str = Device.DEFAULT
+  def asm_kernel(A:UOp, B:UOp, C:UOp) -> UOp:
+    gidxs = [UOp.special(n, f"gidx{i}") for i,n in enumerate(grid)]
+    lidxs = [UOp.special(n, f"lidx{i}") for i,n in enumerate(local)]
+    sink = UOp.sink(A.base, B.base, C.base, *gidxs, *lidxs, arg=KernelInfo(name=colored("kernel", "cyan"),
+                                                                           estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=asm),
+                                 UOp(Ops.BINARY, arg=binary)))
+  c = Tensor.custom_kernel(a, b, c, fxn=asm_kernel)[2]
+  ei = c.schedule()[0].lower()
 
   ets = []
   with Context(DEBUG=2):
@@ -623,7 +623,7 @@ def test_matmul():
     with Context(DEBUG=2): tc = (a @ b).realize()
     with Context(DEBUG=0): err = (c - tc).square().mean().item()
     print(f"mean squared error {err}")
-    if err > 1e-06: raise RuntimeError("matmul is wrong!")
+    if err != err or err > 1e-06: raise RuntimeError("matmul is wrong!")
 
 def run_sqtt():
   """Run with SQTT profiling and write trace files."""

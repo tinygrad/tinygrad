@@ -75,6 +75,25 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
+  def test_gather_jit_different_indices(self):
+    # Gather should not assume indices is const when it can change at runtime
+    from tinygrad import TinyJit
+    from tinygrad.nn.onnx import onnx_ops, _cached_to_python_const
+    _cached_to_python_const.cache_clear()
+    Gather = onnx_ops["Gather"]
+
+    x = Tensor([10, 20, 30, 40, 50])
+    indices_list = [[0, 1], [2, 3], [4, 0]]
+    expected = [[10, 20], [30, 40], [50, 10]]
+
+    # without JIT: correct
+    self.assertEqual([Gather(x, Tensor(idx)).tolist() for idx in indices_list], expected)
+
+    # TODO: Gather should not assume indices is const, result should be [[10, 20], [30, 40], [50, 10]]
+    @TinyJit
+    def gather_jit(x, indices): return Gather(x, indices)
+    self.assertEqual([gather_jit(x, Tensor(idx)).tolist() for idx in indices_list], [[10, 20], [30, 40], [30, 40]])
+
   # NOTE: resize OP is sensitive to numerical errors
   def _test_resize_scales(self, scale_values, **kwargs):
     for sc in scale_values:
@@ -477,18 +496,21 @@ class TestContribOnnxOps(TestOnnxOps):
 
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
-      with self.subTest(dtype=dtype, zero_point=zero_point):
-        dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
-        inputs = {
-          "X": np.random.randint(dtype_min, dtype_max + 1, [1, 3, 32, 32], dtype=dtype),
-          "x_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
-          "x_zero_point": np.array(zero_point, dtype=dtype),
-          "y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
-          "y_zero_point": np.array(zero_point, dtype=dtype)
-        }
-        attributes = {"channels_last": 0}
-        outputs = ["C"]
-        self.helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs)
+      for channels_last in [0, 1]:
+        with self.subTest(dtype=dtype, zero_point=zero_point, channels_last=channels_last):
+          dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
+          # NCHW for channels_last=0, NHWC for channels_last=1
+          shape = [1, 3, 32, 32] if channels_last == 0 else [1, 32, 32, 3]
+          inputs = {
+            "X": np.random.randint(dtype_min, dtype_max + 1, shape, dtype=dtype),
+            "x_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+            "x_zero_point": np.array(zero_point, dtype=dtype),
+            "y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+            "y_zero_point": np.array(zero_point, dtype=dtype)
+          }
+          attributes = {"channels_last": channels_last}
+          outputs = ["C"]
+          self.helper_test_single_op("QLinearGlobalAveragePool", inputs, attributes, outputs)
 
 if __name__ == "__main__":
   unittest.main()

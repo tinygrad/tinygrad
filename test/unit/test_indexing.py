@@ -699,6 +699,7 @@ class TestIndexing(unittest.TestCase):
     i, j = indices
     numpy_testing_assert_equal_helper(x[i:j], x[0:1])
 
+  @unittest.skipUnless(is_dtype_supported(dtypes.int64), "tensor indexing uses int64 internally")
   def test_ellipsis_tensor(self):
     x = Tensor.arange(0, 9).reshape(3, 3)
     idx = Tensor([0, 2])
