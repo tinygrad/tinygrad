@@ -8,8 +8,10 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <dispatch/dispatch.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
+#include <IOKit/IOMessage.h>
 #include <mach/mach.h>
 
 // Protocol
@@ -90,9 +92,26 @@ static void send_error_msg(int fd, const char *msg) {
 
 // Driver interface
 
+static void device_removed(void *refcon, io_service_t svc, uint32_t msg, void *arg) {
+  if (msg == kIOMessageServiceIsTerminated) { printf("GPU disconnected, exiting\n"); _exit(0); }
+}
+
+static void ensure_disconnect_notification(io_service_t svc) {
+  static int registered = 0;
+  if (registered) return;
+  registered = 1;
+
+  IONotificationPortRef notify_port = IONotificationPortCreate(kIOMainPortDefault);
+  IONotificationPortSetDispatchQueue(notify_port, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
+  io_object_t notification;
+  IOServiceAddInterestNotification(notify_port, svc, kIOGeneralInterest, device_removed, NULL, &notification);
+  printf("registered disconnect notification\n");
+}
+
 static io_connect_t open_tinygpu(void) {
   io_service_t svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("tinygpu"));
   if (!svc) return IO_OBJECT_NULL;
+  ensure_disconnect_notification(svc);
   io_connect_t conn;
   kern_return_t kr = IOServiceOpen(svc, mach_task_self(), 0, &conn);
   IOObjectRelease(svc);
