@@ -70,6 +70,8 @@ def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]:
     tests = _parse_llvm_tests(text, r'(?:GFX90A|GFX942)')
   else:
     tests = _parse_llvm_tests(text, r'(?:VI9|GFX9|CHECK)')
+  # Exclude v_interp_* (graphics-only, not on CDNA)
+  if arch == "cdna": tests = [(asm, data) for asm, data in tests if not asm.startswith('v_interp_')]
   return tests
 
 def _compile_asm_batch(instrs: list[str], arch: str = "rdna3") -> list[bytes]:

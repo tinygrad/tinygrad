@@ -306,8 +306,8 @@ def _disasm_flat(inst: FLAT) -> str:
   off_s = f" offset:{off_val}" if off_val else ""
   if cdna: mods = f"{off_s}{' glc' if inst.sc0 else ''}{' slc' if inst.nt else ''}"
   else: mods = f"{off_s}{' glc' if inst.glc else ''}{' slc' if inst.slc else ''}{' dlc' if inst.dlc else ''}"
-  if seg == 'flat' or _unwrap(inst.saddr) == 0x7F: saddr_s = ""
-  elif _unwrap(inst.saddr) == 124: saddr_s = ", off"
+  if seg == 'flat': saddr_s = ""
+  elif _unwrap(inst.saddr) in (0x7F, 124): saddr_s = ", off"
   elif seg == 'scratch': saddr_s = f", {decode_src(inst.saddr, cdna)}"
   elif _unwrap(inst.saddr) in (SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS): saddr_s = f", {(SPECIAL_PAIRS_CDNA if cdna else SPECIAL_PAIRS)[_unwrap(inst.saddr)]}"
   elif t := _ttmp(inst.saddr, 2): saddr_s = f", {t}"
@@ -552,9 +552,10 @@ def disasm(inst: Inst) -> str: return DISASM_HANDLERS[type(inst)](inst)
 # CDNA DISASSEMBLER SUPPORT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from extra.assembly.amd.autogen.cdna.ins import (VOP1 as CDNA_VOP1, VOP2 as CDNA_VOP2, VOPC as CDNA_VOPC, VOP3A, VOP3B, VOP3P as CDNA_VOP3P,
+from extra.assembly.amd.autogen.cdna.ins import (VOP1 as CDNA_VOP1, VOP2 as CDNA_VOP2, VOPC as CDNA_VOPC,
+  VOP3 as CDNA_VOP3, VOP3_SDST as CDNA_VOP3_SDST, VOP3SD as CDNA_VOP3SD, VOP3P as CDNA_VOP3P,
   SOP1 as CDNA_SOP1, SOP2 as CDNA_SOP2, SOPC as CDNA_SOPC, SOPK as CDNA_SOPK, SOPP as CDNA_SOPP, SMEM as CDNA_SMEM, DS as CDNA_DS,
-  FLAT as CDNA_FLAT)
+  FLAT as CDNA_FLAT, GLOBAL as CDNA_GLOBAL, SCRATCH as CDNA_SCRATCH)
 
 def _cdna_src(inst, v, neg, abs_=0, n=1):
   s = _lit(inst, v) if v == 255 else _fmt_src(v, n, cdna=True)
@@ -649,5 +650,5 @@ def _disasm_cdna_vop3p(inst) -> str:
 
 DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP2: _disasm_vop2, CDNA_VOPC: _disasm_vopc,
   CDNA_SOP1: _disasm_sop1, CDNA_SOP2: _disasm_sop2, CDNA_SOPC: _disasm_sopc, CDNA_SOPK: _disasm_sopk, CDNA_SOPP: _disasm_sopp,
-  CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat,
-  VOP3A: _disasm_vop3a, VOP3B: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p})
+  CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat, CDNA_GLOBAL: _disasm_flat, CDNA_SCRATCH: _disasm_flat,
+  CDNA_VOP3: _disasm_vop3a, CDNA_VOP3_SDST: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p})

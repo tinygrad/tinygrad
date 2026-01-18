@@ -17,10 +17,19 @@ XML_URL = "https://gpuopen.com/download/machine-readable-isa/latest/"
 # Map XML encoding names to codebase names (arch-specific overrides in ARCH_NAME_MAP)
 NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOP3_SDST_ENC_LIT": "VOP3SD_LIT", "VOP3_SDST_ENC_DPP16": "VOP3SD_DPP16",
             "VOP3_SDST_ENC_DPP8": "VOP3SD_DPP8", "VOPDXY": "VOPD", "VOPDXY_LIT": "VOPD_LIT", "VDS": "DS"}
-ARCH_NAME_MAP = {"cdna": {"VOP3": "VOP3A", "VOP3_SDST_ENC": "VOP3B"}}
+ARCH_NAME_MAP = {}
 # Instructions missing from XML but present in PDF
 FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"}, "FLAT": {55: "FLAT_ATOMIC_CSUB_U32"}},
-         "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}}}
+         "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}},
+         "cdna": {"DS": {128: "DS_ADD_SRC2_U32", 129: "DS_SUB_SRC2_U32", 130: "DS_RSUB_SRC2_U32", 131: "DS_INC_SRC2_U32", 132: "DS_DEC_SRC2_U32",
+                        133: "DS_MIN_SRC2_I32", 134: "DS_MAX_SRC2_I32", 135: "DS_MIN_SRC2_U32", 136: "DS_MAX_SRC2_U32", 137: "DS_AND_SRC2_B32",
+                        138: "DS_OR_SRC2_B32", 139: "DS_XOR_SRC2_B32", 141: "DS_WRITE_SRC2_B32", 146: "DS_MIN_SRC2_F32", 147: "DS_MAX_SRC2_F32",
+                        149: "DS_ADD_SRC2_F32", 152: "DS_GWS_SEMA_RELEASE_ALL", 153: "DS_GWS_INIT", 154: "DS_GWS_SEMA_V", 155: "DS_GWS_SEMA_BR",
+                        156: "DS_GWS_SEMA_P", 157: "DS_GWS_BARRIER", 191: "DS_ORDERED_COUNT", 192: "DS_ADD_SRC2_U64", 193: "DS_SUB_SRC2_U64",
+                        194: "DS_RSUB_SRC2_U64", 195: "DS_INC_SRC2_U64", 196: "DS_DEC_SRC2_U64", 197: "DS_MIN_SRC2_I64", 198: "DS_MAX_SRC2_I64",
+                        199: "DS_MIN_SRC2_U64", 200: "DS_MAX_SRC2_U64", 201: "DS_AND_SRC2_B64", 202: "DS_OR_SRC2_B64", 203: "DS_XOR_SRC2_B64",
+                        205: "DS_WRITE_SRC2_B64", 210: "DS_MIN_SRC2_F64", 211: "DS_MAX_SRC2_F64"},
+                  "VOP3P": {62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
 _ENC_SUFFIXES = ("_NSA1",)
 # Encoding suffix to class suffix mapping (for variants we DO generate)
@@ -247,7 +256,7 @@ def write_enum(enums, path):
 
 def write_ins(encodings, enums, lit_only_ops, types, arch, path):
   _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr"}
-  _VARIANT_SUFFIXES = ("_LIT", "_DPP16", "_DPP8", "_SDWA", "_SDWA_SDST", "_MFMA")
+  _VARIANT_SUFFIXES = ("_LIT", "_DPP16", "_DPP8", "_SDWA_SDST", "_SDWA", "_MFMA")
   def get_base_fmt(fmt):
     for sfx in _VARIANT_SUFFIXES: fmt = fmt.replace(sfx, "")
     return fmt
@@ -307,7 +316,7 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
     # Get lit-only ops for this format (these can't be used in base class)
     base_lit_ops = lit_only_ops.get(enc_name, set())
     all_ops = set(enums.get(enc_name, {}).keys())
-    # Exclude SDST ops from base class (they need VOP1_SDST/VOP3_SDST)
+    # Exclude SDST ops from base class (they need VOP1_SDST/VOP3_SDST/VOP3B)
     base_allowed = all_ops - base_lit_ops - sdst_opcodes.get(enc_name, set())
     if enc_name in ("FLAT", "VFLAT"):
       prefix = "V" if enc_name == "VFLAT" else ""
