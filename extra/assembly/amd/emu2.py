@@ -23,6 +23,40 @@ from extra.assembly.amd.emu2_pcode import parse_pcode
 
 MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
 
+# Inline float constants (as bit patterns) for GPU instructions
+F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
+              244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
+F64_INLINE = {240: 0x3fe0000000000000, 241: 0xbfe0000000000000, 242: 0x3ff0000000000000, 243: 0xbff0000000000000,
+              244: 0x4000000000000000, 245: 0xc000000000000000, 246: 0x4010000000000000, 247: 0xc010000000000000, 248: 0x3fc45f306dc9c883}
+F16_INLINE = {240: 0x3800, 241: 0xb800, 242: 0x3c00, 243: 0xbc00, 244: 0x4000, 245: 0xc000, 246: 0x4400, 247: 0xc400, 248: 0x3118}
+
+def _u64(lo: UOp, hi: UOp) -> UOp:
+  """Combine two 32-bit UOps into a 64-bit UOp."""
+  return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+
+def _split64(val: UOp) -> tuple[UOp, UOp]:
+  """Split a 64-bit value into (lo, hi) 32-bit values."""
+  v64 = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
+  return v64.cast(dtypes.uint32), (v64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
+
+def _apply_src_mods(val: UOp, mod_bit: int, abs_bits: int, neg_bits: int, is_16bit: bool = False, is_64bit: bool = False) -> UOp:
+  """Apply abs/neg modifiers to source value based on operation type."""
+  if not (abs_bits & (1 << mod_bit)) and not (neg_bits & (1 << mod_bit)): return val
+  if is_16bit:
+    f16_val = val.cast(dtypes.uint16).bitcast(dtypes.half)
+    if abs_bits & (1 << mod_bit): f16_val = (f16_val.bitcast(dtypes.uint16) & UOp.const(dtypes.uint16, 0x7FFF)).bitcast(dtypes.half)
+    if neg_bits & (1 << mod_bit): f16_val = f16_val.neg()
+    return f16_val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+  if is_64bit:
+    if val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
+    if abs_bits & (1 << mod_bit): val = (val.bitcast(dtypes.uint64) & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64)
+    if neg_bits & (1 << mod_bit): val = val.neg()
+    return val.bitcast(dtypes.uint64)
+  if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
+  if abs_bits & (1 << mod_bit): val = (val.bitcast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x7FFFFFFF)).bitcast(dtypes.float32)
+  if neg_bits & (1 << mod_bit): val = val.neg()
+  return val.bitcast(dtypes.uint32)
+
 # Map VOPD ops to VOP2 ops for pcode lookup
 VOPD_TO_VOP2 = {
   VOPDOp.V_DUAL_FMAC_F32: VOP2Op.V_FMAC_F32_E32, VOPDOp.V_DUAL_MUL_F32: VOP2Op.V_MUL_F32_E32,
@@ -135,11 +169,7 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
           continue
       # Full 32-bit write (either D0, D0.type, or D0[31:0].type)
       if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
-        # 64-bit destination: write both low and high 32-bit parts
-        # Use bitcast for float64 to preserve bit pattern, cast for integers
-        val64 = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else (val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val)
-        lo = val64.cast(dtypes.uint32)
-        hi = (val64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
+        lo, hi = _split64(val)
         raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, lo, exec_mask)))
         raw_stores.append(('vgpr', wvgpr_fn(vdst_reg + 1, lane, hi, exec_mask)))
       elif val.dtype in (dtypes.float32,):
@@ -230,12 +260,8 @@ def compile_ds_pcode(op, inst, lane: UOp, rvgpr_fn, wvgpr_fn, lds: UOp, exec_mas
   base_addr = rvgpr_fn(addr_reg, lane)
   # OFFSET/OFFSET0/OFFSET1 are immediate values from instruction
   # DATA is 64-bit from data0 vgpr pair, DATA2 from data1 vgpr pair
-  data_lo = rvgpr_fn(data0_reg, lane)
-  data_hi = rvgpr_fn(data0_reg + 1, lane) if data0_reg else UOp.const(dtypes.uint32, 0)
-  data = data_lo.cast(dtypes.uint64) | (data_hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-  data2_lo = rvgpr_fn(data1_reg, lane) if data1_reg else UOp.const(dtypes.uint32, 0)
-  data2_hi = rvgpr_fn(data1_reg + 1, lane) if data1_reg else UOp.const(dtypes.uint32, 0)
-  data2 = data2_lo.cast(dtypes.uint64) | (data2_hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+  data = _u64(rvgpr_fn(data0_reg, lane), rvgpr_fn(data0_reg + 1, lane) if data0_reg else UOp.const(dtypes.uint32, 0))
+  data2 = _u64(rvgpr_fn(data1_reg, lane) if data1_reg else UOp.const(dtypes.uint32, 0), rvgpr_fn(data1_reg + 1, lane) if data1_reg else UOp.const(dtypes.uint32, 0))
 
   srcs = {
     'ADDR': base_addr, 'ADDR_BASE': base_addr,
@@ -313,8 +339,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       if off < 209: return UOp.const(dtypes.int64, -(off - 192)).cast(dtypes.uint64)  # -1 to -16
       if off == 255: return UOp.const(dtypes.uint64, literal)  # literal constant
       return UOp.const(dtypes.uint64, 0)  # other inline constants
-    lo, hi = rsgpr(off), rsgpr(off + 1)
-    return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+    return _u64(rsgpr(off), rsgpr(off + 1))
   def wsgpr(reg: int, val: UOp) -> UOp: return sgpr.index(UOp.const(dtypes.index, reg)).store(val.cast(dtypes.uint32))
 
   # Helper: read VGPR
@@ -326,25 +351,24 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
     return idx.store(active.where(val.cast(dtypes.uint32), idx.load()))
 
-  # Helper: read source operand
-  # Float inline constants (as uint32 bit patterns)
-  FLOAT_CONSTS = {240: 0x3f000000,  # 0.5
-                  241: 0xbf000000,  # -0.5
-                  242: 0x3f800000,  # 1.0
-                  243: 0xbf800000,  # -1.0
-                  244: 0x40000000,  # 2.0
-                  245: 0xc0000000,  # -2.0
-                  246: 0x40800000,  # 4.0
-                  247: 0xc0800000,  # -4.0
-                  248: 0x3e22f983}  # 1/(2*pi)
-  def rsrc(off: int, lane: UOp) -> UOp:
+  # Helper: read source operand (32-bit, 64-bit with F64 inline, or 16-bit with F16 inline)
+  def rsrc(off: int, lane: UOp, bits: int = 32) -> UOp:
+    if bits == 64:
+      if off in F64_INLINE: return UOp.const(dtypes.uint64, F64_INLINE[off])
+      if 128 <= off < 256:
+        if off < 193: return UOp.const(dtypes.uint64, off - 128)
+        if off < 209: return UOp.const(dtypes.int64, -(off - 192)).cast(dtypes.uint64)
+        if off == 255: return UOp.const(dtypes.uint64, literal) << UOp.const(dtypes.uint64, 32)  # literal is high 32 bits
+      if off < 128: return _u64(rsgpr(off), rsgpr(off + 1))
+      return _u64(rvgpr(off - 256, lane), rvgpr(off - 255, lane))
+    if bits == 16 and off in F16_INLINE: return UOp.const(dtypes.uint32, F16_INLINE[off])
     if off < 128: return rsgpr(off)
     if off == 253: return rsgpr(SCC_IDX)
     if off == 255: return UOp.const(dtypes.uint32, literal)
     if off < 255:  # inline constants
       if off < 193: return UOp.const(dtypes.uint32, off - 128)  # 0-64
       if off < 209: return UOp.const(dtypes.uint32, (-(off - 192)) & MASK32)  # -1 to -16
-      if off in FLOAT_CONSTS: return UOp.const(dtypes.uint32, FLOAT_CONSTS[off])
+      if off in F32_INLINE: return UOp.const(dtypes.uint32, F32_INLINE[off])
       return UOp.const(dtypes.uint32, 0)  # other inline
     return rvgpr(off - 256, lane)
 
@@ -492,13 +516,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     # Check operand sizes - F64 ops need 64-bit sources
     sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
 
-    # Helper for 64-bit source reads
-    def rsrc64(off: int, lane: UOp) -> UOp:
-      lo = rsrc(off, lane)
-      hi = rsrc(off + 1, lane)
-      return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-
-    src0 = rsrc64(inst.src0.offset, lane) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
+    src0 = rsrc(inst.src0.offset, lane, 64) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
     vdst_reg = inst.vdst.offset - 256
 
     # 16-bit ops: vdst_reg >= 128 means write to high half of vgpr[vdst_reg-128]
@@ -653,60 +671,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
           return (val >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF)
         return val
 
-      # Helper to apply abs/neg modifiers for VOPC
-      def apply_modifiers_vopc(val: UOp, mod_bit: int) -> UOp:
-        if not (abs_bits & (1 << mod_bit)) and not (neg_bits & (1 << mod_bit)): return val
-        if is_16bit_op:
-          f16_val = val.cast(dtypes.uint16).bitcast(dtypes.half)
-          if abs_bits & (1 << mod_bit):
-            f16_val = (f16_val.bitcast(dtypes.uint16) & UOp.const(dtypes.uint16, 0x7FFF)).bitcast(dtypes.half)
-          if neg_bits & (1 << mod_bit):
-            f16_val = f16_val.neg()
-          return f16_val.bitcast(dtypes.uint16).cast(dtypes.uint32)
-        if is_64bit_op:
-          if val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
-          if abs_bits & (1 << mod_bit):
-            val = (val.bitcast(dtypes.uint64) & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64)
-          if neg_bits & (1 << mod_bit):
-            val = val.neg()
-          return val.bitcast(dtypes.uint64)
-        # For 32-bit float ops
-        if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
-        if abs_bits & (1 << mod_bit):
-          val = (val.bitcast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x7FFFFFFF)).bitcast(dtypes.float32)
-        if neg_bits & (1 << mod_bit):
-          val = val.neg()
-        return val.bitcast(dtypes.uint32)
-
-      # F64 inline float constants (as uint64 bit patterns)
-      F64_INLINE_VOPC = {240: 0x3fe0000000000000,  # 0.5
-                         241: 0xbfe0000000000000,  # -0.5
-                         242: 0x3ff0000000000000,  # 1.0
-                         243: 0xbff0000000000000,  # -1.0
-                         244: 0x4000000000000000,  # 2.0
-                         245: 0xc000000000000000,  # -2.0
-                         246: 0x4010000000000000,  # 4.0
-                         247: 0xc010000000000000,  # -4.0
-                         248: 0x3fc45f306dc9c883}  # 1/(2*pi)
-
-      # Helper for 64-bit source reads in VOPC
-      def rsrc64_vopc(off: int, lane: UOp) -> UOp:
-        if off in F64_INLINE_VOPC:
-          return UOp.const(dtypes.uint64, F64_INLINE_VOPC[off])
-        if off < 256 and off >= 128:
-          if off < 193: return UOp.const(dtypes.uint64, off - 128)  # 0-64
-          if off < 209: return UOp.const(dtypes.int64, -(off - 192)).cast(dtypes.uint64)  # -1 to -16
-        lo = rsrc(off, lane)
-        hi = rsrc(off + 1, lane)
-        return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-
       # Helper to get comparison result for a lane
       def get_cmp_result_vop3(lane_idx: int) -> UOp:
         lane_const = UOp.const(dtypes.index, lane_idx)
         # For F64, read 64-bit sources
         if is_64bit_op:
-          s0 = rsrc64_vopc(inst.src0.offset, lane_const)
-          s1 = rsrc64_vopc(inst.src1.offset, lane_const)
+          s0 = rsrc(inst.src0.offset, lane_const, 64)
+          s1 = rsrc(inst.src1.offset, lane_const, 64)
         else:
           s0 = rsrc(inst.src0.offset, lane_const)
           s1 = rsrc(inst.src1.offset, lane_const)
@@ -716,8 +687,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
           s1 = apply_opsel_scalar(s1, 1)
         # Apply abs/neg modifiers for float comparisons
         if is_float_op:
-          s0 = apply_modifiers_vopc(s0, 0)
-          s1 = apply_modifiers_vopc(s1, 1)
+          s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, is_64bit_op)
+          s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, is_64bit_op)
         pcode = PCODE.get(inst.op)
         if pcode is None: return UOp.const(dtypes.uint32, 0)
         _, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=UOp.const(dtypes.uint32, lane_idx))
@@ -748,59 +719,16 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     # Regular VOP3 handling
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
 
-    # F64 inline float constants (as uint64 bit patterns)
-    F64_INLINE = {240: 0x3fe0000000000000,  # 0.5
-                  241: 0xbfe0000000000000,  # -0.5
-                  242: 0x3ff0000000000000,  # 1.0
-                  243: 0xbff0000000000000,  # -1.0
-                  244: 0x4000000000000000,  # 2.0
-                  245: 0xc000000000000000,  # -2.0
-                  246: 0x4010000000000000,  # 4.0
-                  247: 0xc010000000000000,  # -4.0
-                  248: 0x3fc45f306dc9c883}  # 1/(2*pi)
-
-    # Helper for 64-bit source reads
-    def rsrc64(off: int, lane: UOp) -> UOp:
-      # Check for F64 inline constants
-      if off in F64_INLINE:
-        return UOp.const(dtypes.uint64, F64_INLINE[off])
-      # Check for integer inline constants (sign-extended to 64-bit)
-      if off < 256 and off >= 128:
-        if off < 193: return UOp.const(dtypes.uint64, off - 128)  # 0-64
-        if off < 209: return UOp.const(dtypes.int64, -(off - 192)).cast(dtypes.uint64)  # -1 to -16 (sign extended)
-      # For literal (255), the 32-bit literal is the HIGH 32 bits, low 32 bits are 0
-      if off == 255:
-        return UOp.const(dtypes.uint64, literal) << UOp.const(dtypes.uint64, 32)
-      lo = rsrc(off, lane)
-      hi = rsrc(off + 1, lane)
-      return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-
     # Helper for opsel: extract high or low 16 bits
     def apply_opsel(val: UOp, sel_bit: int) -> UOp:
       if opsel & (1 << sel_bit):
         return (val >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF)
       return val
 
-    # F16 inline float constants (as uint32 with f16 value in low 16 bits)
-    F16_INLINE = {240: 0x3800,  # 0.5
-                  241: 0xb800,  # -0.5
-                  242: 0x3c00,  # 1.0
-                  243: 0xbc00,  # -1.0
-                  244: 0x4000,  # 2.0
-                  245: 0xc000,  # -2.0
-                  246: 0x4400,  # 4.0
-                  247: 0xc400,  # -4.0
-                  248: 0x3118}  # 1/(2*pi) as f16
-
-    # Helper for F16 source: use f16 inline constants for float constant codes
-    def rsrc_f16(off: int, lane: UOp) -> UOp:
-      if off in F16_INLINE: return UOp.const(dtypes.uint32, F16_INLINE[off])
-      return rsrc(off, lane)
-
     is_f16_op = 'F16' in op_name
-    src0 = rsrc64(inst.src0.offset, lane) if sizes.get('src0', 1) == 2 else (rsrc_f16(inst.src0.offset, lane) if is_f16_op else rsrc(inst.src0.offset, lane))
-    src1 = rsrc64(inst.src1.offset, lane) if sizes.get('src1', 1) == 2 else (rsrc_f16(inst.src1.offset, lane) if is_f16_op else rsrc(inst.src1.offset, lane))
-    src2 = (rsrc64(inst.src2.offset, lane) if sizes.get('src2', 1) == 2 else (rsrc_f16(inst.src2.offset, lane) if is_f16_op else rsrc(inst.src2.offset, lane))) if inst.src2 is not None else None
+    src0 = rsrc(inst.src0.offset, lane, 64) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane, 16 if is_f16_op else 32)
+    src1 = rsrc(inst.src1.offset, lane, 64) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane, 16 if is_f16_op else 32)
+    src2 = (rsrc(inst.src2.offset, lane, 64) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane, 16 if is_f16_op else 32)) if inst.src2 is not None else None
 
     # Apply opsel to 16-bit operations (F16, etc.)
     if 'F16' in op_name or 'B16' in op_name or 'I16' in op_name or 'U16' in op_name:
@@ -812,39 +740,11 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     abs_bits = getattr(inst, 'abs', 0) or 0
     neg_bits = getattr(inst, 'neg', 0) or 0
 
-    # Helper to apply abs/neg to a source value based on its operation type
-    def apply_modifiers(val: UOp, mod_bit: int, is_16bit: bool = False, is_64bit: bool = False) -> UOp:
-      if not (abs_bits & (1 << mod_bit)) and not (neg_bits & (1 << mod_bit)): return val
-      if is_16bit:
-        # For 16-bit ops, apply modifiers to f16 value
-        f16_val = val.cast(dtypes.uint16).bitcast(dtypes.half)
-        if abs_bits & (1 << mod_bit):
-          f16_val = (f16_val.bitcast(dtypes.uint16) & UOp.const(dtypes.uint16, 0x7FFF)).bitcast(dtypes.half)
-        if neg_bits & (1 << mod_bit):
-          f16_val = f16_val.neg()
-        return f16_val.bitcast(dtypes.uint16).cast(dtypes.uint32)
-      if is_64bit:
-        # For 64-bit float ops
-        if val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
-        if abs_bits & (1 << mod_bit):
-          val = (val.bitcast(dtypes.uint64) & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64)
-        if neg_bits & (1 << mod_bit):
-          val = val.neg()
-        return val.bitcast(dtypes.uint64)
-      # For 32-bit float ops
-      if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
-      if abs_bits & (1 << mod_bit):
-        val = (val.bitcast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x7FFFFFFF)).bitcast(dtypes.float32)
-      if neg_bits & (1 << mod_bit):
-        val = val.neg()
-      return val.bitcast(dtypes.uint32)
-
     is_16bit_op = 'F16' in op_name or 'B16' in op_name or 'I16' in op_name or 'U16' in op_name
-    is_64bit_op = 'F64' in op_name or sizes.get('src0', 1) == 2 or sizes.get('src1', 1) == 2 or sizes.get('src2', 1) == 2
     if abs_bits or neg_bits:
-      src0 = apply_modifiers(src0, 0, is_16bit_op, sizes.get('src0', 1) == 2)
-      if src1 is not None: src1 = apply_modifiers(src1, 1, is_16bit_op, sizes.get('src1', 1) == 2)
-      if src2 is not None: src2 = apply_modifiers(src2, 2, is_16bit_op, sizes.get('src2', 1) == 2)
+      src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, is_16bit_op, sizes.get('src0', 1) == 2)
+      if src1 is not None: src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, is_16bit_op, sizes.get('src1', 1) == 2)
+      if src2 is not None: src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, is_16bit_op, sizes.get('src2', 1) == 2)
 
     vdst_reg = inst.vdst.offset - 256
     srcs = {'S0': src0, 'S1': src1}
@@ -873,21 +773,15 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     op_name = inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
     vdst_reg = inst.vdst.offset - 256
 
-    # Helper for 64-bit source reads (with specific lane)
-    def rsrc64_lane(off: int, lane: UOp) -> UOp:
-      lo = rsrc(off, lane)
-      hi = rsrc(off + 1, lane)
-      return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-
     # Parse pcode to check if VCC is per-lane (VCC[laneId]) or scalar (VCC)
     pcode = PCODE.get(inst.op)
     assert pcode is not None, f"no pcode for VOP3SD: {op_name}"
 
     # Check if any VCC assignment is per-lane by looking for [laneId] in destination
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-    src0 = rsrc64_lane(inst.src0.offset, lane) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
-    src1 = rsrc64_lane(inst.src1.offset, lane) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane)
-    src2 = (rsrc64_lane(inst.src2.offset, lane) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane)) if inst.src2 is not None else None
+    src0 = rsrc(inst.src0.offset, lane, 64) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
+    src1 = rsrc(inst.src1.offset, lane, 64) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane)
+    src2 = (rsrc(inst.src2.offset, lane, 64) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane)) if inst.src2 is not None else None
     srcs = {'S0': src0, 'S1': src1, 'VCC': rsgpr(sdst_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
     if src2 is not None: srcs['S2'] = src2
     _, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
@@ -904,9 +798,9 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       # Compute VCC bit and D0 value for each lane (unrolled)
       def get_lane_results(lane_idx: int) -> tuple[UOp, UOp|None]:
         lane_const = UOp.const(dtypes.index, lane_idx)
-        s0 = rsrc64_lane(inst.src0.offset, lane_const) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane_const)
-        s1 = rsrc64_lane(inst.src1.offset, lane_const) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane_const)
-        s2 = (rsrc64_lane(inst.src2.offset, lane_const) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane_const)) if inst.src2 is not None else None
+        s0 = rsrc(inst.src0.offset, lane_const, 64) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane_const)
+        s1 = rsrc(inst.src1.offset, lane_const, 64) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane_const)
+        s2 = (rsrc(inst.src2.offset, lane_const, 64) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane_const)) if inst.src2 is not None else None
         lane_srcs = {'S0': s0, 'S1': s1, 'VCC': rsgpr(sdst_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
         if s2 is not None: lane_srcs['S2'] = s2
         _, lane_assigns = parse_pcode(pcode, lane_srcs, UOp.const(dtypes.uint32, lane_idx), op_name=op_name)
@@ -939,13 +833,9 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         exec_bit = (exec_mask >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
         active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
         if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
-          val64 = d0_val.bitcast(dtypes.uint64) if d0_val.dtype == dtypes.float64 else d0_val.cast(dtypes.uint64)
-          lo = val64.cast(dtypes.uint32)
-          hi = (val64 >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
-          idx_lo = vgpr.after(final_vcc).index(UOp.const(dtypes.index, vdst_reg * 32 + i))
-          idx_hi = vgpr.after(final_vcc).index(UOp.const(dtypes.index, (vdst_reg + 1) * 32 + i))
-          vgpr_stores.append(idx_lo.store(active.where(lo, idx_lo.load())))
-          vgpr_stores.append(idx_hi.store(active.where(hi, idx_hi.load())))
+          lo, hi = _split64(d0_val)
+          idx_lo, idx_hi = vgpr.after(final_vcc).index(UOp.const(dtypes.index, vdst_reg * 32 + i)), vgpr.after(final_vcc).index(UOp.const(dtypes.index, (vdst_reg + 1) * 32 + i))
+          vgpr_stores.extend([idx_lo.store(active.where(lo, idx_lo.load())), idx_hi.store(active.where(hi, idx_hi.load()))])
         else:
           idx = vgpr.after(final_vcc).index(UOp.const(dtypes.index, vdst_reg * 32 + i))
           vgpr_stores.append(idx.store(active.where(d0_val.cast(dtypes.uint32), idx.load())))
@@ -971,24 +861,10 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     exec_mask = rsgpr(EXEC_LO.offset)
     vdst_reg = inst.vdst.offset - 256
 
-    # VOP3P inline float constants are f16 values in low 16 bits, high 16 bits are 0
-    F16_CONSTS = {240: 0x3800,  # 0.5
-                  241: 0xb800,  # -0.5
-                  242: 0x3c00,  # 1.0
-                  243: 0xbc00,  # -1.0
-                  244: 0x4000,  # 2.0
-                  245: 0xc000,  # -2.0
-                  246: 0x4400,  # 4.0
-                  247: 0xc400,  # -4.0
-                  248: 0x3118}  # 1/(2*pi)
-    def rsrc_vop3p(off: int, lane: UOp) -> UOp:
-      if off in F16_CONSTS: return UOp.const(dtypes.uint32, F16_CONSTS[off])  # f16 in low bits, 0 in high
-      return rsrc(off, lane)
-
     # Read source operands (as uint32 with packed f16)
-    src0 = rsrc_vop3p(inst.src0.offset, lane)
-    src1 = rsrc_vop3p(inst.src1.offset, lane)
-    src2 = rsrc_vop3p(inst.src2.offset, lane) if hasattr(inst, 'src2') and inst.src2 is not None else None
+    src0 = rsrc(inst.src0.offset, lane, 16)
+    src1 = rsrc(inst.src1.offset, lane, 16)
+    src2 = rsrc(inst.src2.offset, lane, 16) if hasattr(inst, 'src2') and inst.src2 is not None else None
 
     # Get opsel bits for source selection
     opsel = getattr(inst, 'opsel', 0) or 0
@@ -1194,8 +1070,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         'OFFSET': UOp.const(dtypes.uint32, offset),
         'OFFSET0': UOp.const(dtypes.uint32, offset0),
         'OFFSET1': UOp.const(dtypes.uint32, offset1),
-        'DATA': rvgpr(data0_reg, lane) if 'B32' in op_name else (rvgpr(data0_reg, lane).cast(dtypes.uint64) | (rvgpr(data0_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))),
-        'DATA2': rvgpr(data1_reg, lane) if 'B32' in op_name else (rvgpr(data1_reg, lane).cast(dtypes.uint64) | (rvgpr(data1_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))),
+        'DATA': rvgpr(data0_reg, lane) if 'B32' in op_name else _u64(rvgpr(data0_reg, lane), rvgpr(data0_reg + 1, lane)),
+        'DATA2': rvgpr(data1_reg, lane) if 'B32' in op_name else _u64(rvgpr(data1_reg, lane), rvgpr(data1_reg + 1, lane)),
         '_lds': lds,
       }
 
@@ -1318,9 +1194,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         saddr = rsgpr64(inst.saddr.offset)
         return saddr + vgpr_offset + UOp.const(dtypes.uint64, offset)
       else:
-        addr_lo = rvgpr(addr_reg, lane)
-        addr_hi = rvgpr(addr_reg + 1, lane)
-        return (addr_lo.cast(dtypes.uint64) | (addr_hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))) + UOp.const(dtypes.uint64, offset)
+        return _u64(rvgpr(addr_reg, lane), rvgpr(addr_reg + 1, lane)) + UOp.const(dtypes.uint64, offset)
 
     if 'LOAD' in op_name or 'STORE' in op_name:
       pcode = PCODE.get(inst.op)
@@ -1403,10 +1277,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         # Build source variables for pcode parsing
         def make_srcs(lane: UOp) -> dict:
           addr = make_addr(lane)
-          if is_64bit:
-            data_val = rvgpr(vdata_reg, lane).cast(dtypes.uint64) | (rvgpr(vdata_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-          else:
-            data_val = rvgpr(vdata_reg, lane)
+          data_val = _u64(rvgpr(vdata_reg, lane), rvgpr(vdata_reg + 1, lane)) if is_64bit else rvgpr(vdata_reg, lane)
           return {
             'ADDR': addr,
             'DATA': data_val,
