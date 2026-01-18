@@ -73,8 +73,10 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
   epilogue = [
     s_mov_b32(s[90], VCC_LO),
     s_cselect_b32(s[91], 1, 0),
-    # Save EXEC early (before s_and_saveexec modifies it)
+    # Save EXEC early (before we modify it for VGPR stores)
     s_mov_b32(s[95], EXEC_LO),
+    # Restore EXEC to all active lanes for VGPR stores (test may have modified EXEC)
+    s_mov_b32(EXEC_LO, (1 << n_lanes) - 1),
     s_load_b64(s[92:93], s[80:81], 0, soffset=NULL),
     s_waitcnt(0),  # simm16=0 waits for all
     v_lshlrev_b32_e32(v[240], 2, v[255]),

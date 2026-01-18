@@ -72,7 +72,9 @@ PC_LO_IDX, PC_HI_IDX, SCC_IDX = 128, 129, 130
 SGPR_COUNT, VGPR_SIZE = 131, 256 * 32
 
 def _is_16bit_op(op_name: str) -> bool: return any(x in op_name for x in ('B16', 'F16', 'I16', 'U16'))
-def _op_name(inst) -> str: return inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
+def _op_name(inst) -> str:
+  if hasattr(inst, 'opx'): return f"{inst.opx.name}_{inst.opy.name}"  # VOPD has opx/opy not op
+  return inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
 def _is_64bit_dest(dest: str) -> bool: return any(dest.endswith(x) for x in ('.b64', '.u64', '.i64', '.f64'))
 def _to_u32(val: UOp) -> UOp: return val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
 def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)).ne(UOp.const(dtypes.uint32, 0))
