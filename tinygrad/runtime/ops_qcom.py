@@ -1,7 +1,7 @@
 from __future__ import annotations
 import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
 assert sys.platform != 'win32'
-from typing import Any, cast
+from typing import Any
 from tinygrad.device import BufferSpec, CompilerSet, CompilerPair
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
@@ -192,7 +192,7 @@ class QCOMComputeQueue(HWQueue):
 class QCOMArgsState(HCQArgsState):
   def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     super().__init__(buf, prg, bufs, vals=vals)
-    ctypes.memset(cast(int, self.buf.va_addr), 0, prg.kernargs_alloc_size)
+    ctypes.memset(int(self.buf.va_addr), 0, prg.kernargs_alloc_size)
 
     ubos = [b for i,b in enumerate(bufs) if not isinstance(prg.buf_dtypes[i], ImageDType)]
     uavs = [(i,b) for i,b in enumerate(bufs) if isinstance(prg.buf_dtypes[i], ImageDType)]
@@ -346,14 +346,14 @@ def flag(nm, val): return (val << getattr(kgsl, f"{nm}_SHIFT")) & getattr(kgsl, 
 class QCOMDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.fd = FileIOInterface('/dev/kgsl-3d0', os.O_RDWR)
-    self.dummy_addr = cast(int, self._gpu_alloc(0x1000).va_addr)
+    self.dummy_addr = int(self._gpu_alloc(0x1000).va_addr)
 
     flags = kgsl.KGSL_CONTEXT_PREAMBLE | kgsl.KGSL_CONTEXT_PWR_CONSTRAINT | kgsl.KGSL_CONTEXT_NO_FAULT_TOLERANCE | kgsl.KGSL_CONTEXT_NO_GMEM_ALLOC \
       | flag("KGSL_CONTEXT_PRIORITY", getenv("QCOM_PRIORITY", 8)) | flag("KGSL_CONTEXT_PREEMPT_STYLE", kgsl.KGSL_CONTEXT_PREEMPT_STYLE_FINEGRAIN)
     self.ctx = kgsl.IOCTL_KGSL_DRAWCTXT_CREATE(self.fd, flags=flags).drawctxt_id
 
     self.cmd_buf = self._gpu_alloc(16 << 20)
-    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, base=cast(int, self.cmd_buf.va_addr), wrap=True)
+    self.cmd_buf_allocator = BumpAllocator(size=self.cmd_buf.size, base=int(self.cmd_buf.va_addr), wrap=True)
 
     self.border_color_buf = self._gpu_alloc(0x1000, fill_zeroes=True)
 
