@@ -36,7 +36,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
                                v[vgprIndices[5]])
   insts = [s_mov_b32(S_LOOP_N, INTERNAL_LOOP)]
   loop_body = [instructions]*INSTRUCTIONS_PER_LOOP + [INST_LOOP_STEP, s_cmp_lg_i32(S_LOOP_N, 0)]
-  insts += loop_body + [s_cbranch_scc1(-(sum(i.size() for i in loop_body) + 4) // 4), s_endpgm()]
+  insts += loop_body + [s_cbranch_scc1((-(sum(i.size() for i in loop_body) + 4) // 4) & 0xff), s_endpgm()]
   lib = pack_hsaco(b"".join(i.to_bytes() for i in insts), KD)
   fxn = AMDProgram(DEV, "matmul", lib)
   elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
@@ -62,7 +62,7 @@ if __name__=="__main__":
     launchBenchmark(v_wmma_f32_16x16x16_f16, (7,8,15))
     launchBenchmark(v_wmma_i32_16x16x16_iu4, (7,8,9))
     launchBenchmark(v_wmma_i32_16x16x16_iu8, (7,8,11))
-  elif DEV.arch == 'gfx1201':
+  elif DEV.arch in {'gfx1200', 'gfx1201'}:
     from extra.assembly.amd.autogen.rdna4.ins import *
     INST_LOOP_STEP = s_addk_co_i32(S_LOOP_N, 0xffff)
     KD = {"next_free_vgpr":32, "next_free_sgpr":1, "wavefront_size32":1}
