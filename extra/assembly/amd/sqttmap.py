@@ -36,12 +36,23 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
     elif isinstance(p, INST) and p.op.name.startswith("OTHER_"): continue
     elif isinstance(p, (VALUINST, INST, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
-      wave_pc[p.wave] += inst.size()
-      if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
+      # s_delay_alu doesn't get a packet?
       if isinstance(inst, SOPP) and inst.op is SOPPOp.S_DELAY_ALU:
-        inst = pc_map[pc:=wave_pc[p.wave]]
         wave_pc[p.wave] += inst.size()
+        inst = pc_map[pc:=wave_pc[p.wave]]
         if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
+      # identify a branch instruction, only used for asserts
+      is_branch = isinstance(inst, SOPP) and "BRANCH" in inst.op_name
+      if is_branch: assert isinstance(p, INST) and p.op in {InstOp.JUMP_NO, InstOp.JUMP}, f"branch can only be folowed by jump packets, got {p}"
+      # JUMP handling
+      if isinstance(p, INST) and p.op is InstOp.JUMP:
+        assert is_branch, f"JUMP packet must map to a branch instruction, got {inst}"
+        x = inst.simm16 & 0xffff
+        wave_pc[p.wave] += inst.size() + (x - 0x10000 if x & 0x8000 else x)*4
+      else:
+        if is_branch: assert inst.op != SOPPOp.S_BRANCH, f"S_BRANCH must have a JUMP packet, got {p}"
+        wave_pc[p.wave] += inst.size()
+      if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
       yield (p, pc, inst)
 
 def test_rocprof_inst_traces_match(sqtt, prg, target):
