@@ -361,6 +361,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
   "Tile": (1,), "Range": (0,1,2), "Expand": (1,), "Reshape": (1,), "Squeeze": (1,), "Unsqueeze": (1,), "Trilu": (1,), "ConstantOfShape": (0,),
   "CumSum": (1,), "TopK": (1,), "Pad": (1,2,3), "MaxUnpool": (2,), "Dropout": (1,2), "CenterCropPad": (1,), "OneHot": (1,), "Compress": (1,),
   "ImageDecoder": (0,), "AffineGrid": (1,), "Resize": (1,2,3), "Upsample": (1,), "Split": (1,), "Slice": (1,2,3,4),
+  "HannWindow": (0,), "HammingWindow": (0,), "BlackmanWindow": (0,),
   **{"Reduce"+r: (1,) for r in ("Max", "Min", "Sum", "Mean", "SumSquare", "Prod", "L1", "L2", "LogSum", "LogSumExp")},
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
 }
@@ -403,6 +404,8 @@ class OnnxRunner:
     self.graph_inputs = {i["name"]: i["parsed_type"] for i in graph["input"] if i["name"] not in self.graph_values}
     self.graph_outputs = tuple(o["name"] for o in graph["output"])
     self.graph_nodes = tuple(n["parsed_node"] for n in graph["node"])
+    # track names from initializers and Constant nodes for fast path optimizations
+    self.const_names: set[str] = set(self.graph_values.keys()) | {o for n in self.graph_nodes if n.op == "Constant" for o in n.outputs}
 
     self.old_training = Tensor.training
     Tensor.training = self.is_training
@@ -465,6 +468,9 @@ class OnnxRunner:
       # provide additional opts
       if node.op == "Split" and 'num_outputs' not in opts: opts['num_outputs'] = len(node.outputs)
       if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
+      # for Gather, convert indices to python const if from Constant/initializer for shrink fast path
+      if node.op == "Gather" and len(node.inputs) > 1 and node.inputs[1] in self.const_names:
+        inps[1] = _cached_to_python_const(self.graph_values[node.inputs[1]])
 
       if debug >= 1: print((f"[{self.graph_name}] " if self.graph_name else "") + f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
@@ -619,6 +625,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def LeakyRelu(X:Tensor, alpha:float=0.01): return X.leaky_relu(alpha)
   def ThresholdedRelu(X:Tensor, alpha:float=1.0): return (X > alpha).where(X, 0)
   def LogSoftmax(x: Tensor, axis:int=-1): return x.log_softmax(axis)
+  def Hardmax(x:Tensor, axis:int=-1): return x.argmax(axis).unsqueeze(axis)._one_hot_along_dim(x.shape[axis], dim=axis).cast(x.dtype)
   def Binarizer(x:Tensor, threshold:float=0.0): return (x > threshold).float()
   def Swish(x:Tensor, alpha:float=1.0): return x * (x * alpha).sigmoid()
 
@@ -947,6 +954,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if axis is None: axis = [0,2,3]
     return (x - x.mean(axis, keepdim=True)) / (x.std(axis, keepdim=True, correction=0) + 1e-9)
 
+  def LpNormalization(x:Tensor, axis:int=-1, p:int=2):
+    return x / (x.abs().sum(axis, keepdim=True) if p == 1 else x.square().sum(axis, keepdim=True).sqrt())
+
   def OneHot(indices:Tensor, depth:float|int|list[int|float], values:Tensor, axis:int=-1):
     # Scalar or Rank 1 tensor containing exactly one element
     depth = int(_resolve_const(depth))
@@ -972,6 +982,15 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
   def dropout_6(data:Tensor, ratio:float=0.5, is_test=0): return dropout_7(data, ratio, training_mode=not is_test)
   Dropout = {OpSetId(Domain.ONNX, 6):dropout_6, OpSetId(Domain.ONNX, 7):dropout_7}
+
+  def _window(size, output_datatype, periodic, a):
+    size = int(_resolve_const(size))
+    N, n = (size if periodic else size - 1), Tensor.arange(size, requires_grad=False)
+    w = a[0] - a[1] * (n * (2 * math.pi / N)).cos() + a[2] * (n * (4 * math.pi / N)).cos()
+    return w.cast(dtype_fallback(OnnxDataType(output_datatype).to_dtype(), "window op"))
+  def HannWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (0.5, 0.5, 0))
+  def HammingWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (25/46, 21/46, 0))
+  def BlackmanWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (0.42, 0.5, 0.08))
 
   def LRN(x:Tensor, size:int, alpha:float=1e-4, beta:float=0.75, bias:float=1.0):
     pooled_x = (x**2).rearrange('b c h w -> b 1 c (h w)').pad((0,0,(size-1)//2, size//2)).avg_pool2d((size, 1), 1)
@@ -1128,15 +1147,16 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
 
-  def Gather(x:Tensor, indices:Tensor, axis:int=0):
-    if indices.numel() < 9: # NOTE lessor kernels for smaller indices but kernel number increases depending on size of indices
-      ret_shape = x.shape[:axis] + indices.shape + x.shape[axis+1:]
-      if indices.ndim > 1: indices = indices.flatten()
-      index_consts = [_cached_to_python_const(indices)] if indices.shape == () else _cached_to_python_const(indices)
-      index_consts = [x.shape[axis]+i if i<0 else i for i in index_consts]
-      args = [[(0,x) if j != axis else (i,i+1) for j, x in enumerate(x.shape)] for i in index_consts]
+  def Gather(x:Tensor, indices:Tensor|list[int]|int, axis:int=0):
+    axis = x._resolve_dim(axis)
+    # fast path for constant indices (passed as python list/int from to_python_const)
+    if not isinstance(indices, Tensor):
+      indices_list = [indices] if isinstance(indices, int) else list(indices)
+      indices_shape = () if isinstance(indices, int) else (len(indices_list),)
+      ret_shape = x.shape[:axis] + indices_shape + x.shape[axis+1:]
+      index_consts = [x.shape[axis]+i if i<0 else i for i in indices_list]
+      args = [[(0,s) if j != axis else (i,i+1) for j, s in enumerate(x.shape)] for i in index_consts]
       return x.shrink(arg=tuple(args[0])).cat(*[x.shrink(arg=tuple(arg)) for arg in args[1:]], dim=axis).reshape(ret_shape)
-    # NOTE faster gather, fixed number of kernels, but exceeds limited kernels for openpilot
     return x[tuple([slice(None) if i != axis else indices for i in range(x.ndim)])]
   def Scatter(*args, **kwargs): return ScatterElements(*args, **kwargs) # deprecated
 

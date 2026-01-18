@@ -148,10 +148,8 @@ def stderr_log(msg:str): print(msg, end='', file=sys.stderr, flush=True)
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    self.old_context:dict[str, int] = {}
-    for k,v in self.kwargs.items():
-      self.old_context[k] = ContextVar._cache[k].value
-      ContextVar._cache[k].value = v
+    self.old_context:dict[str, int] = {k: ContextVar._cache[k].value for k in self.kwargs}
+    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
   def __exit__(self, *args):
     for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
@@ -471,13 +469,6 @@ def to_mv(ptr:int, sz:int) -> memoryview: return memoryview((ctypes.c_uint8 * sz
 def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
-def charptr(s:str|bytes): return ctypes.cast(ctypes.c_char_p(s if isinstance(s, bytes) else s.encode()), ctypes.POINTER(ctypes.c_char))
-@functools.cache
-def init_c_struct_t(fields: tuple[tuple[str, type[ctypes._SimpleCData]], ...]):
-  class CStruct(ctypes.Structure):
-    _pack_, _fields_ = 1, fields
-  return CStruct
-def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[1]
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
 # *** tqdm

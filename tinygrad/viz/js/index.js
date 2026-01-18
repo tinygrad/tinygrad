@@ -55,11 +55,8 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const colorScale = d3.scaleSequential(t => t > 0 ? d3.interpolateLab(colorScheme.ACTIVE[1], colorScheme.ACTIVE[2])(t) : colorScheme.ACTIVE[0]).clamp(true);
-
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
-  if (data.value.colorDomain != null) colorScale.domain(data.value.colorDomain);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
@@ -93,8 +90,8 @@ const drawGraph = (data) => {
     }
     return [ret];
   }).join("text").style("font-family", g.graph().font).selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", g.graph().lh)
-    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 && d.st !== "," ? textSpace: 0).text(d => d.st).attr("xml:space", "preserve")
-    .classed("token", true).attr("fill", d => typeof d.color === "string" ? d.color : colorScale(d.color));
+    .selectAll("tspan").data(d => d).join("tspan").attr("dx", (d, i) => i > 0 && d.st !== "," ? textSpace: 0).text(d => d.st).classed("token", true)
+    .attr("xml:space", "preserve").attr("fill", d => d.color);
   const tokensBg = rectGroup.selectAll("rect.bg").data((d, i, nodes) => {
     const ret = [];
     d3.select(nodes[i].parentElement).select("g.text-group").selectAll("tspan.token").each((d, i, nodes) => {
@@ -170,12 +167,31 @@ function formatMicroseconds(ts, showUs=true) {
   if (showUs && (us || (!ms && !s))) parts.push(`${us}us`);
   return parts.join(' ');
 }
+
+function formatCycles(cycles) {
+  const M = Math.floor(cycles / 1e6), K = Math.floor((cycles % 1e6) / 1e3), s = Math.round(cycles % 1e3);
+  const parts = [];
+  if (M) parts.push(`${M}M`);
+  if (K || (!M && s)) parts.push(`${K}K`);
+  if (s || (!M && !K)) parts.push(`${s}`);
+  return parts.join(" ");
+}
+
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
+const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
+  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4", VMEM:"#b2b7c9", LDS:"#9fb4a6"};
+const waveColor = (op) => {
+  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU" : op.includes("VMEM") ? "VMEM"
+            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
+  ret = WAVE_COLORS[cat] ?? "#ffffff";
+  if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
+  return ret
+};
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
-  ACTIVE:["#565f89", "#c8d3f5", "#7aa2f7"]}
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
+  WAVE:waveColor, VMEMEXEC:waveColor, ALUEXEC:waveColor}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
@@ -268,7 +284,7 @@ const EventTypes = { EXEC:0, BUF:1 };
 async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
-  formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
+  formatTime = unit === "realtime" ? formatMicroseconds : formatCycles;
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
   metadata.replaceChildren(getMetadata(focusedShape));
   // layout once!
@@ -325,9 +341,10 @@ async function renderProfiler(path, unit, opts) {
             levels.push(et);
           } else levels[depth] = et;
         }
-        if (depth === 0) colorKey = e.name.split(" ")[0];
+        if (depth === 0 || opts.colorByName) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
-          const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
+          const color = typeof colors === "function" ? colors(colorKey)
+                      : colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
         }
         const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
@@ -792,7 +809,7 @@ async function main() {
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
+      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1]), colorByName:step.name.includes("PKTS")};
       return renderProfiler(ckey, "clk", opts);
     }
     metadata.innerHTML = "";
@@ -836,7 +853,10 @@ async function main() {
       }
       return table;
     }
-    if (ret.data != null) renderDag(ret, { recenter:true });
+    if (ret.ref != null) {
+      const disasmIdx = ctxs[ret.ref+1].steps.findIndex(s => s.name === "View Disassembly")
+      metadata.appendChild(d3.create("a").text("View Program Graph").on("click", () => switchCtx(ret.ref, disasmIdx)).node());
+    }
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     return document.querySelector("#custom").replaceChildren(root.node());

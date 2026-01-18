@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv, prod, round_up, next_power2
+from tinygrad.helpers import getenv, prod, round_up, next_power2, OSX
 from enum import Enum, auto
 
 class InvalidType:
@@ -105,6 +105,7 @@ class ImageDType(PtrDType):
   def pitch(self):
     if self._pitch != -1: return self._pitch
     imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
+    if OSX: return round_up(imgw, 256) * 4 * self.itemsize
     pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
     align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
 
