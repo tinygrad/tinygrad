@@ -242,7 +242,9 @@ def xlog2(d:UOp) -> UOp:
   else:
     t = polyN(x2, [0.4374550283e+0, 0.5764790177e+0, 0.9618012905120])
     # s_lo term (x*3.27e-08) only for float32 - underflows in float16
-    r = t * (x * x2) + e + x * 2.8853900432586669922 + (x * 3.2734474483568488616e-08 if d.dtype.scalar() == dtypes.float32 else 0)
+    # evaluation order matters for precision: group x terms first, then add polynomial and exponent
+    x_terms = x * 2.8853900432586669922 + (x * 3.2734474483568488616e-08 if d.dtype.scalar() == dtypes.float32 else 0)
+    r = (t * (x * x2) + x_terms) + e
 
   # log2(Inf) = Inf
   r = d.ne(math.inf).where(r, r.const_like(math.inf))
