@@ -308,11 +308,15 @@ def _disasm_flat(inst: FLAT) -> str:
   reg_fn = _areg if acc else _vreg
   seg = ['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'
   instr = f"{seg}_{name.split('_', 1)[1] if '_' in name else name}"
-  # CDNA global/scratch uses 13-bit signed offset; bit 12 is sign bit but not in offset field
-  if seg != 'flat' and cdna:
-    raw = int.from_bytes(inst.to_bytes(), 'little')
-    off_val = inst.offset | ((raw >> 12) & 1) << 12  # get bit 12
-    off_val = off_val if off_val < 4096 else off_val - 8192  # sign extend
+  # Global/scratch uses 13-bit signed offset
+  if seg != 'flat':
+    if cdna:
+      # CDNA: bit 12 is sign bit but not in offset field
+      raw = int.from_bytes(inst.to_bytes(), 'little')
+      off_val = inst.offset | ((raw >> 12) & 1) << 12  # get bit 12
+    else:
+      off_val = inst.offset
+    off_val = off_val if off_val < 4096 else off_val - 8192  # sign extend 13-bit
   else:
     off_val = inst.offset
   # Use get_field_bits: data for stores/atomics, d for loads
