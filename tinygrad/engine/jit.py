@@ -178,6 +178,10 @@ class CapturedJit(Generic[ReturnType]):
     self._jit_cache: list[ExecItem] = self.jit_cache
     self._input_replace: dict[tuple[int, int], int] = self.input_replace
     self._first_run = True
+    # precompute read-after-write hazard detection
+    self._output_to_writer = {b: j for j, ei in enumerate(self.jit_cache) for b in get_out_buffers_for_ei(ei)}
+    self._input_to_max_reader: dict[int, int] = {}
+    for (j, _), idx in self.input_replace.items(): self._input_to_max_reader[idx] = max(self._input_to_max_reader.get(idx, -1), j)
     self._clear_inputs()
 
   def _clear_inputs(self):
@@ -205,6 +209,12 @@ class CapturedJit(Generic[ReturnType]):
     # assign inputs
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
+
+    # copy aliased inputs to prevent read-after-write hazard
+    for i, ib in enumerate(input_buffers):
+      if (writer := self._output_to_writer.get(ib)) is not None and self._input_to_max_reader.get(i, -1) > writer:
+        input_buffers[i] = Buffer(ib.device, ib.size, ib.dtype).ensure_allocated().copyin(ib.as_buffer())
+
     for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
 
     # Condense the items into a graph executor.
