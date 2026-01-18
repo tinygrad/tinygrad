@@ -148,10 +148,8 @@ def stderr_log(msg:str): print(msg, end='', file=sys.stderr, flush=True)
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    self.old_context:dict[str, int] = {}
-    for k,v in self.kwargs.items():
-      self.old_context[k] = ContextVar._cache[k].value
-      ContextVar._cache[k].value = v
+    self.old_context:dict[str, int] = {k: ContextVar._cache[k].value for k in self.kwargs}
+    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
   def __exit__(self, *args):
     for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
