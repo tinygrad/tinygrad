@@ -461,6 +461,22 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       scc = result.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
       return name, UOp.sink(wsgpr(dst_reg, result), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
 
+    # S_BITSET1_B32: D0.u32[S0.u32[4:0]] = 1 (set bit at position given by low 5 bits of S0)
+    if op_name == 'S_BITSET1_B32':
+      old_val = rsgpr(dst_reg)
+      bit_pos = s0 & UOp.const(dtypes.uint32, 0x1F)  # Low 5 bits
+      bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
+      result = old_val | bit_mask
+      return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
+
+    # S_BITSET0_B32: D0.u32[S0.u32[4:0]] = 0 (clear bit at position given by low 5 bits of S0)
+    if op_name == 'S_BITSET0_B32':
+      old_val = rsgpr(dst_reg)
+      bit_pos = s0 & UOp.const(dtypes.uint32, 0x1F)  # Low 5 bits
+      bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
+      result = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+      return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
+
     # Try pcode for other SOP1 ops
     pcode_result = compile_sop_pcode(inst.op, {'S0': s0}, wsgpr, rsgpr, dst_reg, dst_size, inc_pc, name)
     assert pcode_result is not None, f"unimplemented SOP1: {op_name}"
@@ -701,11 +717,15 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       old_sdst = rsgpr(inst.vdst.offset)  # vdst is actually sdst for VOP3_SDST
       is_cmpx = 'CMPX' in op_name
 
-      # Get abs/neg modifiers
+      # Get abs/neg modifiers and operand sizes from instruction metadata
       abs_bits = getattr(inst, 'abs', 0) or 0
       neg_bits = getattr(inst, 'neg', 0) or 0
-      is_16bit_op = 'F16' in op_name or 'B16' in op_name or 'I16' in op_name or 'U16' in op_name
-      is_64bit_op = 'F64' in op_name
+      operands = inst.operands
+      src0_fmt, src0_bits, _ = operands.get('src0', (None, 32, None))
+      src1_fmt, src1_bits, _ = operands.get('src1', (None, 32, None))
+      is_16bit_op = src0_bits == 16 or src1_bits == 16
+      is_64bit_op = src0_bits == 64 or src1_bits == 64
+      is_float_op = src0_fmt is not None and any(x in src0_fmt.name for x in ('F32', 'F64', 'F16'))
 
       # Helper for opsel: extract high or low 16 bits
       def apply_opsel_scalar(val: UOp, sel_bit: int) -> UOp:
@@ -738,17 +758,44 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
           val = val.neg()
         return val.bitcast(dtypes.uint32)
 
+      # F64 inline float constants (as uint64 bit patterns)
+      F64_INLINE_VOPC = {240: 0x3fe0000000000000,  # 0.5
+                         241: 0xbfe0000000000000,  # -0.5
+                         242: 0x3ff0000000000000,  # 1.0
+                         243: 0xbff0000000000000,  # -1.0
+                         244: 0x4000000000000000,  # 2.0
+                         245: 0xc000000000000000,  # -2.0
+                         246: 0x4010000000000000,  # 4.0
+                         247: 0xc010000000000000,  # -4.0
+                         248: 0x3fc45f306dc9c883}  # 1/(2*pi)
+
+      # Helper for 64-bit source reads in VOPC
+      def rsrc64_vopc(off: int, lane: UOp) -> UOp:
+        if off in F64_INLINE_VOPC:
+          return UOp.const(dtypes.uint64, F64_INLINE_VOPC[off])
+        if off < 256 and off >= 128:
+          if off < 193: return UOp.const(dtypes.uint64, off - 128)  # 0-64
+          if off < 209: return UOp.const(dtypes.int64, -(off - 192)).cast(dtypes.uint64)  # -1 to -16
+        lo = rsrc(off, lane)
+        hi = rsrc(off + 1, lane)
+        return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+
       # Helper to get comparison result for a lane
       def get_cmp_result_vop3(lane_idx: int) -> UOp:
         lane_const = UOp.const(dtypes.index, lane_idx)
-        s0 = rsrc(inst.src0.offset, lane_const)
-        s1 = rsrc(inst.src1.offset, lane_const)
+        # For F64, read 64-bit sources
+        if is_64bit_op:
+          s0 = rsrc64_vopc(inst.src0.offset, lane_const)
+          s1 = rsrc64_vopc(inst.src1.offset, lane_const)
+        else:
+          s0 = rsrc(inst.src0.offset, lane_const)
+          s1 = rsrc(inst.src1.offset, lane_const)
         # Apply opsel for 16-bit operations
         if is_16bit_op:
           s0 = apply_opsel_scalar(s0, 0)
           s1 = apply_opsel_scalar(s1, 1)
         # Apply abs/neg modifiers for float comparisons
-        if 'F32' in op_name or 'F16' in op_name or 'F64' in op_name:
+        if is_float_op:
           s0 = apply_modifiers_vopc(s0, 0)
           s1 = apply_modifiers_vopc(s1, 1)
         pcode = PCODE.get(inst.op)

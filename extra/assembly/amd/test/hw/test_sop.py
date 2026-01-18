@@ -329,6 +329,70 @@ class TestSignedArithmetic(unittest.TestCase):
     self.assertEqual(st.sgpr[7], ((dividend * 2) + 1) & 0xFFFFFFFF)
 
 
+class TestBitSet(unittest.TestCase):
+  """Tests for S_BITSET0_B32 and S_BITSET1_B32 instructions."""
+
+  def test_s_bitset1_b32_set_bit0(self):
+    """S_BITSET1_B32: set bit 0 in destination."""
+    instructions = [
+      s_mov_b32(s[0], 0),     # start with 0
+      s_mov_b32(s[1], 0),     # bit position = 0
+      s_bitset1_b32(s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 1, "Bit 0 should be set")
+
+  def test_s_bitset1_b32_set_bit31(self):
+    """S_BITSET1_B32: set bit 31 in destination."""
+    instructions = [
+      s_mov_b32(s[0], 0),     # start with 0
+      s_mov_b32(s[1], 31),    # bit position = 31
+      s_bitset1_b32(s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0x80000000, "Bit 31 should be set")
+
+  def test_s_bitset1_b32_preserves_other_bits(self):
+    """S_BITSET1_B32: preserves bits not being set."""
+    instructions = [
+      s_mov_b32(s[0], 0xFF00FF00),  # existing pattern
+      s_mov_b32(s[1], 0),            # bit position = 0
+      s_bitset1_b32(s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0xFF00FF01, "Should set bit 0 while preserving others")
+
+  def test_s_bitset0_b32_clear_bit0(self):
+    """S_BITSET0_B32: clear bit 0 in destination."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # start with all bits set
+      s_mov_b32(s[1], 0),            # bit position = 0
+      s_bitset0_b32(s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0xFFFFFFFE, "Bit 0 should be cleared")
+
+  def test_s_bitset0_b32_clear_bit31(self):
+    """S_BITSET0_B32: clear bit 31 in destination."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # start with all bits set
+      s_mov_b32(s[1], 31),           # bit position = 31
+      s_bitset0_b32(s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0x7FFFFFFF, "Bit 31 should be cleared")
+
+  def test_s_bitset1_b32_uses_low5_bits(self):
+    """S_BITSET1_B32: only uses low 5 bits of position (mod 32)."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 32 + 5),   # position = 37, but mod 32 = 5
+      s_bitset1_b32(s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0x20, "Bit 5 should be set (37 mod 32 = 5)")
+
+
 class Test64BitCompare(unittest.TestCase):
   """Tests for 64-bit scalar compare instructions."""
 
