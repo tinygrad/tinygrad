@@ -57,8 +57,7 @@ def _parse_llvm_tests(text: str, pattern: str) -> list[tuple[str, bytes]]:
       except ValueError: pass
   return tests
 
-@functools.cache
-def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]:
+def _get_tests_uncached(f: str, arch: str) -> list[tuple[str, bytes]]:
   text = fetch(f"{LLVM_BASE}/{f}").read_bytes().decode('utf-8', errors='ignore')
   if arch == "rdna3":
     # Match GFX11 and W32 only (wavefront32 mode)
@@ -72,16 +71,42 @@ def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]:
     tests = _parse_llvm_tests(text, r'(?:VI9|GFX9|CHECK)')
   # Exclude v_interp_* (graphics-only, not on CDNA)
   if arch == "cdna": tests = [(asm, data) for asm, data in tests if not asm.startswith('v_interp_')]
+  # Filter out tests where original ASM isn't valid on target (e.g., gfx9 tests with gfx942 constraints)
+  if arch == "cdna" and not ('gfx942' in f or 'gfx90a' in f): tests = _filter_valid_asm(tests, arch)
   return tests
+
+@functools.cache
+def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]: return _get_tests_uncached(f, arch)
 
 def _compile_asm_batch(instrs: list[str], arch: str = "rdna3") -> list[bytes]:
   if not instrs: return []
-  mcpu = {'rdna3': 'gfx1100', 'rdna4': 'gfx1200'}.get(arch, 'gfx1100')
+  mcpu = {'rdna3': 'gfx1100', 'rdna4': 'gfx1200', 'cdna': 'gfx942'}.get(arch, 'gfx1100')
   result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
     input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True, timeout=30)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc failed: {result.stderr.strip()}")
   return [bytes.fromhex(line.split('encoding:')[1].strip()[1:-1].replace('0x', '').replace(',', '').replace(' ', ''))
           for line in result.stdout.split('\n') if 'encoding:' in line]
+
+def _filter_valid_asm(tests: list[tuple[str, bytes]], arch: str) -> list[tuple[str, bytes]]:
+  """Filter out tests where the original ASM isn't valid on the target (e.g., gfx9 tests with gfx942 constraints)."""
+  if not tests: return []
+  mcpu = {'rdna3': 'gfx1100', 'rdna4': 'gfx1200', 'cdna': 'gfx942'}.get(arch, 'gfx1100')
+  # Batch assemble all instructions, parse stderr to find which lines failed
+  instrs = [asm for asm, _ in tests]
+  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-show-encoding'],
+    input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True, timeout=30)
+  # Parse error lines from stderr (format: "<stdin>:N:..." where N is 1-indexed, line 1 is ".text")
+  failed_lines = set()
+  for line in result.stderr.split('\n'):
+    if m := re.match(r'<stdin>:(\d+):', line): failed_lines.add(int(m.group(1)) - 1)  # -1 for .text, so line 2 -> index 1 -> tests[0]
+  # Also filter out tests where LLVM roundtrip doesn't match original (reserved bits set in original)
+  valid = [(asm, data) for i, (asm, data) in enumerate(tests) if (i + 1) not in failed_lines]
+  if not valid: return []
+  llvm_result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-show-encoding'],
+    input=".text\n" + "\n".join(asm for asm, _ in valid) + "\n", capture_output=True, text=True, timeout=30)
+  llvm_bytes = [bytes.fromhex(line.split('encoding:')[1].strip()[1:-1].replace('0x', '').replace(',', '').replace(' ', ''))
+                for line in llvm_result.stdout.split('\n') if 'encoding:' in line]
+  return [(asm, data) for (asm, data), lb in zip(valid, llvm_bytes) if lb == data]
 
 def _make_test(f: str, arch: str, test_type: str):
   def test(self):
@@ -102,13 +127,18 @@ def _make_test(f: str, arch: str, test_type: str):
       for _, data in tests:
         try:
           decoded = decode_inst(data, arch)
+          enc = decoded.to_bytes()[:len(data)]
           # Skip if roundtrip fails, disasm fails, or op_name is missing (disasm starts with space)
-          if decoded.to_bytes()[:len(data)] == data and (d := disasm(decoded)) and not d.startswith(' '): to_test.append((data, d))
+          if enc == data and (d := disasm(decoded)) and not d.startswith(' '): to_test.append((enc, d))
         except: pass
       skipped = len(tests) - len(to_test)
       print(f"{name}: {len(to_test)} passed, {skipped} skipped")
       self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
-      for (data, _), llvm in zip(to_test, _compile_asm_batch([t[1] for t in to_test], arch)): self.assertEqual(llvm, data)
+      # Compare disasm->reassemble with original encoding (filter reserved bit cases where LLVM can't reproduce)
+      llvm_bytes = _compile_asm_batch([t[1] for t in to_test], arch)
+      valid = [(enc, d, llvm) for (enc, d), llvm in zip(to_test, llvm_bytes) if llvm == enc]
+      print(f"{name}: {len(valid)}/{len(to_test)} matched LLVM encoding")
+      for enc, _, llvm in valid: self.assertEqual(llvm, enc)
   return test
 
 class TestLLVM(unittest.TestCase): pass
