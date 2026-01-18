@@ -1,4 +1,5 @@
 # maps SQTT trace packets to instructions.
+from dataclasses import dataclass
 from typing import Iterator
 
 from tinygrad.runtime.support.elf import elf_loader
@@ -10,8 +11,14 @@ from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP, s_endpgm
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 
-def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst, int]]:
-  """maps SQTT packets to instructions, yields packet, PC, instruction and wave unit id"""
+@dataclass(frozen=True)
+class InstructionInfo:
+  pc: int
+  wave: int
+  inst: Inst
+
+def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, InstructionInfo|None]]:
+  """maps SQTT packets to instructions, yields (packet, instruction_info or None)"""
   # map pcs to insts
   pc_map:dict[int, Inst] = {}
   image, sections, _ = elf_loader(lib)
@@ -33,11 +40,13 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst, in
     if isinstance(p, WAVESTART):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = 0
-    elif isinstance(p, WAVEEND):
+      continue
+    if isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
-      yield (p, pc, s_endpgm(), p.wave)
+      yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
+      continue
     # skip OTHER_ instructions, they don't belong to this unit
-    elif isinstance(p, INST) and p.op.name.startswith("OTHER_"): continue
+    if isinstance(p, INST) and p.op.name.startswith("OTHER_"): continue
     if isinstance(p, IMMEDIATE_MASK):
       # immediate mask may yield multiple times per packet
       for wave in range(16):
@@ -46,13 +55,14 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst, in
           # can this assert be more strict?
           assert isinstance(inst, SOPP), f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
           wave_pc[wave] += inst.size()
-          yield (p, pc, inst, wave)
-    elif isinstance(p, (VALUINST, INST, IMMEDIATE)):
+          yield (p, InstructionInfo(pc, wave, inst))
+      continue
+    if isinstance(p, (VALUINST, INST, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu doesn't get a packet?
       if isinstance(inst, SOPP) and inst.op in {SOPPOp.S_DELAY_ALU}:
         wave_pc[p.wave] += inst.size()
-        if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'RED')}")
+        if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
         inst = pc_map[pc:=wave_pc[p.wave]]
       # identify a branch instruction, only used for asserts
       is_branch = isinstance(inst, SOPP) and "BRANCH" in inst.op_name
@@ -65,8 +75,11 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst, in
       else:
         if is_branch: assert inst.op != SOPPOp.S_BRANCH, f"S_BRANCH must have a JUMP packet, got {p}"
         wave_pc[p.wave] += inst.size()
-      if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
-      yield (p, pc, inst, p.wave)
+      if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'WHITE')}")
+      yield (p, InstructionInfo(pc, p.wave, inst))
+      continue
+    # for all other packets (VMEMEXEC, ALUEXEC, etc.), yield with None
+    yield (p, None)
 
 # test to compare every packet with the rocprof decoder
 
@@ -81,15 +94,16 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
   rwaves_base = next(iter(disasm)) # base program counter
 
   passed_insts = 0
-  for pkt, pc, inst, wave in map_insts(sqtt.blob, prg.lib):
-    rocprof_inst = next(rwaves_iter[wave][0])
+  for pkt, info in map_insts(sqtt.blob, prg.lib):
+    if info is None: continue
+    rocprof_inst = next(rwaves_iter[info.wave][0])
     ref_pc = rocprof_inst.pc-rwaves_base
     # always check pc matches
-    assert ref_pc == pc, f"pc mismatch {ref_pc}:{disasm[rocprof_inst.pc][0]} != {pc}:{inst.disasm()}"
+    assert ref_pc == info.pc, f"pc mismatch {ref_pc}:{disasm[rocprof_inst.pc][0]} != {info.pc}:{info.inst.disasm()}"
     # special handling for s_endpgm, it marks the wave completion.
-    if inst == s_endpgm():
-      completed_wave = list(rwaves_iter[wave].pop(0))
-      assert len(completed_wave) == 0, f"incomplete instructions in wave {wave}"
+    if info.inst == s_endpgm():
+      completed_wave = list(rwaves_iter[info.wave].pop(0))
+      assert len(completed_wave) == 0, f"incomplete instructions in wave {info.wave}"
     # otherwise the packet timestamp is time + "stall"
     else:
       assert pkt._time == rocprof_inst.time+rocprof_inst.stall
