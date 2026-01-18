@@ -1,6 +1,6 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
 from typing import ClassVar
-from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap
 from tinygrad.runtime.autogen import libc, vfio, pci
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace
@@ -21,13 +21,7 @@ class _System:
   def atomic_lib(self): return ctypes.CDLL(ctypes.util.find_library('atomic')) if sys.platform == "linux" else None
 
   @functools.cached_property
-  def iokit(self): return ctypes.CDLL(ctypes.util.find_library("IOKit"))
-
-  @functools.cached_property
   def libsys(self): return ctypes.CDLL(ctypes.util.find_library("System"))
-
-  @functools.cached_property
-  def mach_task_self(self): return ctypes.cast(self.libsys.mach_task_self_, ctypes.POINTER(ctypes.c_uint)).contents.value
 
   @functools.cached_property
   def pagemap(self) -> FileIOInterface:
@@ -46,28 +40,6 @@ class _System:
       return vfio_fd
     except OSError: return None
 
-  @functools.cached_property
-  def macos_tinygpu_conn(self):
-    self.iokit.IOServiceNameMatching.restype = ctypes.c_void_p # CFMutableDictionaryRef
-    if not (mdict:=self.iokit.IOServiceNameMatching("tinygpu".encode("utf-8"))): raise RuntimeError("IOServiceNameMatching returned NULL")
-    if not (service:=self.iokit.IOServiceGetMatchingService(ctypes.c_uint(0), ctypes.c_void_p(mdict))):
-      raise RuntimeError('Service "tinygpu" is not running')
-    if self.iokit.IOServiceOpen(service, self.mach_task_self, ctypes.c_uint32(0), ctypes.byref(conn:=ctypes.c_uint(0))):
-      raise RuntimeError("IOServiceOpen failed")
-    return conn
-
-  def iokit_pci_memmap(self, typ:int):
-    if self.iokit.IOConnectMapMemory64(self.macos_tinygpu_conn, ctypes.c_uint32(typ), System.mach_task_self,
-      ctypes.byref(addr:=ctypes.c_uint64(0)), ctypes.byref(size:=ctypes.c_uint64(0)), 0x1): raise RuntimeError(f"IOConnectMapMemory64({typ=}) failed")
-    return MMIOInterface(addr.value, size.value)
-
-  def iokit_pci_rpc(self, sel:int, *args:int):
-    in_scalars = (ctypes.c_uint64 * len(args))(*args) if args else ctypes.POINTER(ctypes.c_uint64)()
-    if (self.iokit.IOConnectCallMethod(self.macos_tinygpu_conn, sel, in_scalars, len(args), None, ctypes.c_size_t(0),
-        out_scalars:=(ctypes.c_uint64*16)(), ctypes.byref(outcnt:=ctypes.c_uint32(16)), None, ctypes.byref(ctypes.c_size_t(0)))):
-      raise RuntimeError(f"IOConnectCallMethod({sel=}, {args=}) failed")
-    return out_scalars[:outcnt.value]
-
   def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
 
   def memory_barrier(self): lib.atomic_thread_fence(__ATOMIC_SEQ_CST:=5) if (lib:=self.libsys if OSX else self.atomic_lib) is not None else None
@@ -80,15 +52,10 @@ class _System:
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[MMIOInterface, list[int]]:
-    if OSX:
-      sysmem_view = System.iokit_pci_memmap(round_up(size, mmap.PAGESIZE))
-      paddrs = list(itertools.takewhile(lambda p: p[1] != 0, zip(sysmem_view.view(fmt='Q')[0::2], sysmem_view.view(fmt='Q')[1::2])))
-      assert not contiguous or len(paddrs) == 1, "not contiguous, but required"
-    else:
-      assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
-      flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
-      va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
-      sysmem_view, paddrs = MMIOInterface(va, size), [(x, mmap.PAGESIZE) for x in self.system_paddrs(va, size)]
+    assert not contiguous or size <= (2 << 20), "Contiguous allocation is only supported for sizes up to 2MB"
+    flags = (libc.MAP_HUGETLB if contiguous and (size:=round_up(size, mmap.PAGESIZE)) > mmap.PAGESIZE else 0) | (MAP_FIXED if vaddr else 0)
+    va = FileIOInterface.anon_mmap(vaddr, size, mmap.PROT_READ|mmap.PROT_WRITE, mmap.MAP_SHARED|mmap.MAP_ANONYMOUS|MAP_POPULATE|MAP_LOCKED|flags, 0)
+    sysmem_view, paddrs = MMIOInterface(va, size), [(x, mmap.PAGESIZE) for x in self.system_paddrs(va, size)]
 
     if data is not None: sysmem_view[:len(data)] = data
     return sysmem_view, [p + i for p, sz in paddrs for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
@@ -210,6 +177,8 @@ class PCIDevice:
     res = FileIOInterface(f"/sys/bus/pci/devices/{self.pcibus}/resource", os.O_RDONLY).read().splitlines()
     self.bar_info = {j:PCIBarInfo(int(s,16), int(e,16)-int(s,16)+1) for j,(s,e,_) in enumerate(l.split() for l in res)}
 
+  def map_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
+    return System.alloc_sysmem(size, vaddr, contiguous)
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
   def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
@@ -217,16 +186,6 @@ class PCIDevice:
     libc.madvise(loc:=fd.mmap(addr, sz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED | (MAP_FIXED if addr else 0), off), sz, libc.MADV_DONTFORK)
     return MMIOInterface(loc, sz, fmt=fmt)
   def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
-
-class APLPCIDevice(PCIDevice):
-  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
-    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    self.pcibus, self.bars = pcibus, {b: System.iokit_pci_memmap(b) for b in bars}
-    self.bar_info = {b:PCIBarInfo(0, self.bars[b].nbytes-1 if b in self.bars else 0) for b in range(6)} # NOTE: fake bar info for nv.
-  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface: return self.bars[bar].view(off, size, fmt)
-  def read_config(self, offset:int, size:int): return System.iokit_pci_rpc(__TinyGPURPCReadCfg:=0, offset, size)[0]
-  def write_config(self, offset:int, value:int, size:int): System.iokit_pci_rpc(__TinyGPURPCWriteCfg:=1, offset, size, value)
-  def reset(self): System.iokit_pci_rpc(__TinyGPURPCReset:=2)
 
 class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
@@ -261,7 +220,7 @@ class LNXPCIIfaceBase:
     should_use_sysmem = host or ((cpu_access if OSX else (uncached and cpu_access)) and not force_devmem)
     if should_use_sysmem:
       vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
-      memview, paddrs = System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
+      memview, paddrs = self.pci_dev.map_sysmem(size, vaddr=vaddr, contiguous=contiguous)
       mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], aspace=AddrSpace.SYS, snooped=True, uncached=True)
       return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), view=memview, owner=self.dev)
 
@@ -289,10 +248,97 @@ class LNXPCIIfaceBase:
 
     self.dev_impl.mm.map_range(int(b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
 
-class APLPCIIfaceBase(LNXPCIIfaceBase):
-  def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size, base_class:int|None=None):
-    self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(dev.__class__.__name__[:2], pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
-    assert (read_vendor:=self.pci_dev.read_config(pci.PCI_VENDOR_ID, 2)) == vendor, f"Vendor ID mismatch: expected {vendor:#x}, got {read_vendor:#x}"
-  def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
+class RemoteCmd(enum.IntEnum): MAP_BAR, MAP_SYSMEM_FD, CFG_READ, CFG_WRITE, RESET, MMIO_READ, MMIO_WRITE = 1, 2, 3, 4, 5, 6, 7
 
-PCIIfaceBase:type = APLPCIIfaceBase if OSX else LNXPCIIfaceBase
+class RemotePCIDevice(PCIDevice):
+  def __init__(self, devpref:str, pcibus:str, bars:list[int], sock):
+    self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
+    self.pcibus, self.sock = pcibus, sock
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 16 * 1024 * 1024)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
+    self.bar_info = {b: PCIBarInfo(0, self._rpc(RemoteCmd.MAP_BAR, b)[0]) for b in bars}
+
+  def _recvall(self, n:int) -> bytes:
+    data = b''
+    while len(data) < n and (chunk:=self.sock.recv(n - len(data))): data += chunk
+    if len(data) < n: raise RuntimeError("Connection closed")
+    return data
+
+  def _recv_with_fd(self) -> tuple[bytes, int|None]:
+    msg, anc, _, _ = self.sock.recvmsg(17, socket.CMSG_LEN(4))
+    return msg, struct.unpack('<i', anc[0][2][:4])[0]
+
+  def _rpc(self, cmd:int, *args:int, readout_size:int=0, has_fd=False) -> tuple[int, int, bytes|None, int|None]:
+    self.sock.sendall(struct.pack('<BBQQQ', cmd, *(*args, 0, 0, 0, 0)[:4]))
+    msg, fd = self._recv_with_fd() if has_fd else (self._recvall(17), None)
+    if (resp:=struct.unpack('<BQQ', msg))[0] != 0:
+      raise RuntimeError(f"RPC failed: {self._recvall(resp[1]).decode('utf-8') if resp[1] > 0 else 'unknown error'}")
+    return (resp[1], resp[2]) + ((self._recvall(readout_size) if readout_size > 0 else None),) + (fd,)
+
+  def _bulk_read(self, cmd:int, idx:int, offset:int, size:int) -> bytes: return unwrap(self._rpc(cmd, idx, offset, size, readout_size=size)[2])
+  def _bulk_write(self, cmd:int, idx:int, offset:int, data:bytes): self.sock.sendall(struct.pack('<BBQQQ', cmd, idx, offset, len(data), 0) + data)
+
+  def map_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
+    mapped_size, _, _, fd = self._rpc(RemoteCmd.MAP_SYSMEM_FD, 0, 0, size, has_fd=True)
+    memview = MMIOInterface(FileIOInterface(fd=fd).mmap(0, mapped_size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, 0), mapped_size, fmt='B')
+
+    # paddrs are returned as (paddr, size) pairs until a (paddr=0, size=0) terminator in the beginning of the mapping.
+    paddrs_raw = list(itertools.takewhile(lambda p: p[1] != 0, zip(memview.view(fmt='Q')[0::2], memview.view(fmt='Q')[1::2])))
+    return memview, [p + i for p, sz in paddrs_raw for i in range(0, sz, 0x1000)][:ceildiv(size, 0x1000)]
+  def read_config(self, offset:int, size:int): return self._rpc(RemoteCmd.CFG_READ, 0, offset, size)[0]
+  def write_config(self, offset:int, value:int, size:int): self._rpc(RemoteCmd.CFG_WRITE, 0, offset, size, value)
+  def reset(self): self._rpc(RemoteCmd.RESET, 0, 0, 0)
+  def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
+    return RemoteMMIOInterface(self, bar, size or self.bar_info[bar].size, fmt).view(off, size, fmt)
+
+class RemoteMMIOInterface(MMIOInterface):
+  def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', addr=0):
+    self.dev, self.residx, self.nbytes, self.fmt, self.addr, self.el_sz = dev, residx, nbytes, fmt, addr, struct.calcsize(fmt)
+
+  def __getitem__(self, index):
+    if isinstance(index, slice):
+      start, stop = (index.start or 0) * self.el_sz, (index.stop or len(self)) * self.el_sz
+      data = self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.addr + start, stop - start)
+      return list(struct.unpack(f'<{(stop - start) // self.el_sz}{self.fmt}', data)) if self.fmt != 'B' else data
+    return struct.unpack(f'<{self.fmt}', self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.addr + index * self.el_sz, self.el_sz))[0]
+
+  def __setitem__(self, index, val):
+    start = (index.start or 0) * self.el_sz if isinstance(index, slice) else index * self.el_sz
+    data = (val if self.fmt == 'B' else struct.pack(f'<{len(val)}{self.fmt}', *val)) if isinstance(index, slice) else struct.pack(f'<{self.fmt}', val)
+    self.dev._bulk_write(RemoteCmd.MMIO_WRITE, self.residx, self.addr + start, data)
+
+  def view(self, offset:int=0, size:int|None=None, fmt=None):
+    return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.addr + offset)
+
+class APLRemotePCIDevice(RemotePCIDevice):
+  APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
+
+  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    def try_connect(path):
+      try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(path)
+        return s
+      except (ConnectionRefusedError, FileNotFoundError): return None
+
+    if not (sock := try_connect(sock_path:=temp("tinygpu.sock"))):
+      if not os.path.exists(self.APP_PATH): raise RuntimeError(f"TinyGPU app not found at {self.APP_PATH}")
+      subprocess.Popen([self.APP_PATH, "server", sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+      for _ in range(100):
+        if sock:=try_connect(sock_path): break
+        time.sleep(0.02)
+      else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}. Open /Applications/TinyGPU.app for troubleshooting.")
+    super().__init__(devpref, pcibus, bars, sock)
+
+class APLRemoteIfaceBase(LNXPCIIfaceBase):
+  def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
+    self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
+    self.dev, self.vram_bar = dev, vram_bar
+    assert (read:=self.pci_dev.read_config(0x00, 2)) == vendor, f"Vendor ID mismatch {read:#06x} != {vendor:#06x}"
+
+  def free(self, b:HCQBuffer):
+    for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
+
+  def map(self, b:HCQBuffer): raise RuntimeError(f"P2P mapping not supported for remote devices: {b.owner} -> {self.dev}")
+
+PCIIfaceBase:type = APLRemoteIfaceBase if OSX else LNXPCIIfaceBase
