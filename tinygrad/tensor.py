@@ -597,8 +597,7 @@ class Tensor(OpMixin):
 
     # threefry random bits
     bits_count = Tensor._device_rng_counters[device] - num
-    counts0 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+bits_count)
-    counts1 = counts0 + ceildiv(num, 2)
+    counts0 = counts1 = (Tensor.arange(ceildiv(num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)+bits_count)
     bits = Tensor._threefry_random_bits(Tensor._device_seeds[device], counts0, counts1)[:num]
 
     # bitcast to uint with same number of bits
