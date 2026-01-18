@@ -1,6 +1,7 @@
 import pathlib, re, ctypes, mmap, collections, functools, copy, os
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.am.am as am
+import tinygrad.runtime.autogen.amdgpu_drm as amdgpu_drm
 from tinygrad.helpers import from_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props
@@ -32,6 +33,16 @@ class DRMFileDesc(VirtFileDesc):
   def __init__(self, fd, driver, gpu):
     super().__init__(fd)
     self.driver, self.gpu = driver, gpu
+
+  def ioctl(self, fd, request, argp):
+    struct = amdgpu_drm.struct_drm_amdgpu_info.from_address(argp)
+    if struct.query == amdgpu_drm.AMDGPU_INFO_DEV_INFO:
+      dev_info = amdgpu_drm.struct_drm_amdgpu_info_device.from_address(struct.return_pointer)
+      # mock of gfx1100
+      for se in range(4):
+        for sa in range(4): dev_info.cu_bitmap[se][sa] = 0xff if (se * 4 + sa) < 12 else 0
+      return 0
+    raise NotImplementedError(f"unknown DRM ioctl query {struct.query}")
 
   def mmap(self, start, sz, prot, flags, fd, offset): return libc.mmap(start, sz, prot, flags|mmap.MAP_ANONYMOUS, -1, 0)
 

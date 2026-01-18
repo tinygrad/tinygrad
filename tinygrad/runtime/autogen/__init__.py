@@ -105,6 +105,7 @@ def __getattr__(nm):
     case "amd_gpu": return load("amd_gpu", None, [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers", "nvd", "gc_11_0_0_offset",
                                                                                                "sienna_cichlid_ip_offset"]],
                                 args=["-I/opt/rocm/include", "-x", "c++"])
+    case "amdgpu_drm": return load("amdgpu_drm", None, [ "/usr/include/drm/drm.h", *[root/f"extra/hip_gpu_driver/{s}.h" for s in ["amdgpu_drm"]]])
     case "kgsl": return load("kgsl", None, [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])
     case "qcom_dsp":
       return load("qcom_dsp", None, [root/f"extra/dsp/include/{s}.h" for s in ["ion", "msm_ion", "adsprpc_shared", "remote_default", "apps_std"]])
