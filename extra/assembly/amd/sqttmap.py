@@ -91,9 +91,9 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
 
   passed_insts = 0
   for pkt, info in map_insts(sqtt.blob, prg.lib):
-    if DEBUG >= 2: print_packets([p])
+    if DEBUG >= 2: print_packets([pkt])
     if info is None: continue
-    if DEBUG >= 2: print(f"{' '*29}{inst.disasm()}")
+    if DEBUG >= 2: print(f"{' '*29}{info.inst.disasm()}")
     rocprof_inst = next(rwaves_iter[info.wave][0])
     ref_pc = rocprof_inst.pc-rwaves_base
     # always check pc matches
