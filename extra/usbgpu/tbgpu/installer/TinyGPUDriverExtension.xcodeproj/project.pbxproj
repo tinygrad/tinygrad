@@ -65,6 +65,7 @@
 		0AD7C2D62F18D3DB00562D1A /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks/IOKit.framework; sourceTree = DEVELOPER_DIR; };
 		0AD7C2D82F18D3E300562D1A /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks/CoreFoundation.framework; sourceTree = DEVELOPER_DIR; };
 		0AD7C2E42F18DEB800562D1A /* TinyGPUCLIRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TinyGPUCLIRunner.swift; sourceTree = "<group>"; };
+		0AFA851D2F1CE486005FDAC2 /* TinyGPUDriver.Release.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TinyGPUDriver.Release.entitlements; sourceTree = "<group>"; };
 		54798268286A3512009785F6 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX13.0.sdk/System/Library/Frameworks/CoreAudio.framework; sourceTree = DEVELOPER_DIR; };
 		549EB130286A2B98009D38AB /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX13.0.sdk/System/Library/Frameworks/IOKit.framework; sourceTree = DEVELOPER_DIR; };
 		549EB132286A2B9D009D38AB /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS16.0.sdk/System/Library/Frameworks/IOKit.framework; sourceTree = DEVELOPER_DIR; };
@@ -186,6 +187,7 @@
 				C5D787AB261667FC006047E5 /* TinyGPUDriverUserClient.iig */,
 				C5B7D9C626128AC50089B4C3 /* Info.plist */,
 				C5B7D9CE26128B150089B4C3 /* TinyGPUDriver.entitlements */,
+				0AFA851D2F1CE486005FDAC2 /* TinyGPUDriver.Release.entitlements */,
 			);
 			path = TinyGPUDriverExtension;
 			sourceTree = "<group>";
@@ -340,7 +342,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = macOS/macOS.entitlements;
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -378,7 +380,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = macOS/macOS.entitlements;
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -501,6 +503,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DRIVERKIT_DEPLOYMENT_TARGET = 21.0;
@@ -532,6 +535,7 @@
 				DEVELOPMENT_TEAM = 9YG3G8543N;
 				DRIVERKIT_DEPLOYMENT_TARGET = 21.0;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				EXCLUDED_ARCHS = "";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SDKROOT)/System/DriverKit/System/Library/Frameworks",
@@ -539,6 +543,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TinyGPUDriverExtension/Info.plist;
 				INFOPLIST_KEY_OSBundleUsageDescription = "TinyGPU Driver";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.edriver;
 				PRODUCT_NAME = "$(inherited)";
@@ -546,6 +551,7 @@
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = driverkit;
 				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = driverkit;
 			};
 			name = Debug;
 		};
@@ -553,13 +559,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				AD_HOC_CODE_SIGNING_ALLOWED = YES;
-				CODE_SIGN_ENTITLEMENTS = TinyGPUDriverExtension/TinyGPUDriver.entitlements;
+				CODE_SIGN_ENTITLEMENTS = TinyGPUDriverExtension/TinyGPUDriver.Release.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_IDENTITY[sdk=driverkit*]" = "Apple Development";
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 9YG3G8543N;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=driverkit*]" = 9YG3G8543N;
 				DRIVERKIT_DEPLOYMENT_TARGET = 21.0;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				EXCLUDED_ARCHS = "";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SDKROOT)/System/DriverKit/System/Library/Frameworks",
@@ -567,13 +576,17 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TinyGPUDriverExtension/Info.plist;
 				INFOPLIST_KEY_OSBundleUsageDescription = "TinyGPU Driver";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				MARKETING_VERSION = 1.0;
+				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.edriver;
 				PRODUCT_NAME = "$(inherited)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=driverkit*]" = driverkit_provisioning_dev;
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = driverkit;
 				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = driverkit;
 			};
 			name = Release;
 		};
