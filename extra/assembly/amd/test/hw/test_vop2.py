@@ -447,5 +447,94 @@ class TestSpecialFloatValues(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 0x00000000)
 
 
+class TestCarryOps(unittest.TestCase):
+  """Tests for VOP2 carry instructions (v_add_co_ci_u32, v_sub_co_ci_u32, v_subrev_co_ci_u32)."""
+
+  def test_v_subrev_co_ci_u32_no_borrow(self):
+    """V_SUBREV_CO_CI_U32: D0 = S1 - S0 - VCC_IN, when VCC_IN=0."""
+    instructions = [
+      s_mov_b32(VCC_LO, 0),  # VCC = 0 (no borrow in)
+      v_mov_b32_e32(v[0], 5),  # S0 = 5
+      v_mov_b32_e32(v[1], 10),  # S1 = 10
+      v_subrev_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 10 - 5 - 0 = 5
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 5)
+    self.assertEqual(st.vcc, 0)  # No borrow out
+
+  def test_v_subrev_co_ci_u32_with_borrow(self):
+    """V_SUBREV_CO_CI_U32: D0 = S1 - S0 - VCC_IN, when VCC_IN=1."""
+    instructions = [
+      s_mov_b32(VCC_LO, 1),  # VCC = 1 (borrow in)
+      v_mov_b32_e32(v[0], 5),  # S0 = 5
+      v_mov_b32_e32(v[1], 10),  # S1 = 10
+      v_subrev_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 10 - 5 - 1 = 4
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 4)
+    self.assertEqual(st.vcc, 0)  # No borrow out
+
+  def test_v_subrev_co_ci_u32_generates_borrow(self):
+    """V_SUBREV_CO_CI_U32: generates borrow when S0 + VCC_IN > S1."""
+    instructions = [
+      s_mov_b32(VCC_LO, 0),  # VCC = 0
+      v_mov_b32_e32(v[0], 10),  # S0 = 10
+      v_mov_b32_e32(v[1], 5),  # S1 = 5
+      v_subrev_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 5 - 10 - 0 = -5 (underflow)
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFFB)  # -5 as unsigned
+    self.assertEqual(st.vcc, 1)  # Borrow out
+
+  def test_v_add_co_ci_u32_no_carry(self):
+    """V_ADD_CO_CI_U32: D0 = S0 + S1 + VCC_IN, when VCC_IN=0."""
+    instructions = [
+      s_mov_b32(VCC_LO, 0),  # VCC = 0 (no carry in)
+      v_mov_b32_e32(v[0], 5),  # S0 = 5
+      v_mov_b32_e32(v[1], 10),  # S1 = 10
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 5 + 10 + 0 = 15
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 15)
+    self.assertEqual(st.vcc, 0)  # No carry out
+
+  def test_v_add_co_ci_u32_with_carry(self):
+    """V_ADD_CO_CI_U32: D0 = S0 + S1 + VCC_IN, when VCC_IN=1."""
+    instructions = [
+      s_mov_b32(VCC_LO, 1),  # VCC = 1 (carry in)
+      v_mov_b32_e32(v[0], 5),  # S0 = 5
+      v_mov_b32_e32(v[1], 10),  # S1 = 10
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 5 + 10 + 1 = 16
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 16)
+    self.assertEqual(st.vcc, 0)  # No carry out
+
+  def test_v_add_co_ci_u32_generates_carry(self):
+    """V_ADD_CO_CI_U32: generates carry when overflow occurs."""
+    instructions = [
+      s_mov_b32(VCC_LO, 1),  # VCC = 1 (carry in)
+      s_mov_b32(s[0], 0xFFFFFFFF),  # max u32
+      v_mov_b32_e32(v[0], s[0]),  # S0 = 0xFFFFFFFF
+      v_mov_b32_e32(v[1], 0),  # S1 = 0
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 0xFFFFFFFF + 0 + 1 = 0 (overflow)
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0)  # Overflowed to 0
+    self.assertEqual(st.vcc, 1)  # Carry out
+
+  def test_v_sub_co_ci_u32_no_borrow(self):
+    """V_SUB_CO_CI_U32: D0 = S0 - S1 - VCC_IN, when VCC_IN=0."""
+    instructions = [
+      s_mov_b32(VCC_LO, 0),  # VCC = 0 (no borrow in)
+      v_mov_b32_e32(v[0], 10),  # S0 = 10
+      v_mov_b32_e32(v[1], 5),  # S1 = 5
+      v_sub_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 10 - 5 - 0 = 5
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 5)
+    self.assertEqual(st.vcc, 0)  # No borrow out
+
+
 if __name__ == '__main__':
   unittest.main()

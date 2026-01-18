@@ -141,7 +141,11 @@ class dtypes:
     if isinstance(val, InvalidType): return val
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan
-    return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
+    if dtypes.is_int(dtype): return int(val)
+    if dtypes.is_float(dtype): return float(val)
+    if dtype == dtypes.bool: return bool(val)
+    # For unknown types (e.g. wide integers u65, b65), preserve as int
+    return int(val) if isinstance(val, (int, float)) else val
   @staticmethod
   @functools.cache
   def min(dtype:DType):
@@ -171,6 +175,8 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 32, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 64, "long", 'q')
   uint64: Final[DType] = DType.new(8, 64, "unsigned long", 'Q')
+  uint128: Final[DType] = DType.new(8, 128, "uint128", None)
+  uint256: Final[DType] = DType.new(8, 256, "uint256", None)
   fp8e4m3: Final[DType] = DType.new(9, 8, "float8_e4m3", None)
   fp8e5m2: Final[DType] = DType.new(10, 8, "float8_e5m2", None)
   float16: Final[DType] = DType.new(11, 16, "half", 'e')

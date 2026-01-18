@@ -5,16 +5,51 @@ import ctypes, functools
 from enum import IntEnum
 from tinygrad.runtime.autogen import hsa
 from extra.assembly.amd.dsl import Inst, NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, v, s
-from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.decode import decode_inst
-from extra.assembly.amd.pcode import compile_pseudocode
+from extra.assembly.amd.ucode import compile_uop
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, GLOBAL, SCRATCH, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
-# Constants and helpers defined locally (not imported from dsl.py)
+# Constants and helpers
+import struct, math
 MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
+_struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
+_struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
+_struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")
+def _f32(i):
+  i = i & MASK32
+  if (i & 0x7f800000) == 0 and (i & 0x007fffff) != 0: return 0.0
+  return _struct_f.unpack(_struct_I.pack(i))[0]
+def _i32(f):
+  if isinstance(f, int): f = float(f)
+  if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
+  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
+  try:
+    bits = _struct_I.unpack(_struct_f.pack(f))[0]
+    if (bits & 0x7f800000) == 0 and (bits & 0x007fffff) != 0: return 0x80000000 if bits & 0x80000000 else 0
+    return bits
+  except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
+def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
+def _f16(i): return _struct_e.unpack(_struct_H.pack(i & 0xffff))[0]
+def _i16(f):
+  if math.isnan(f): return 0x7e00
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
+  try: return _struct_H.unpack(_struct_e.pack(f))[0]
+  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
+def _f64(i): return _struct_d.unpack(_struct_Q.pack(i & MASK64))[0]
+def _i64(f):
+  if math.isnan(f): return 0x7ff8000000000000
+  if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+  try: return _struct_Q.unpack(_struct_d.pack(f))[0]
+  except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+def f32_to_f16(f):
+  f = float(f)
+  if math.isnan(f): return 0x7e00
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
+  try: return _struct_H.unpack(_struct_e.pack(f))[0]
+  except OverflowError: return 0x7c00 if f > 0 else 0xfc00
 
 class SGPRArray:
   """SGPR array indexed by Reg or int."""
@@ -416,7 +451,7 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
     elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: inst._dispatch = dispatch_endpgm
     elif isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER: inst._dispatch = dispatch_barrier
-    elif isinstance(inst, SOPP) and inst.op in (SOPPOp.S_CLAUSE, SOPPOp.S_WAITCNT, SOPPOp.S_WAITCNT_DEPCTR, SOPPOp.S_SENDMSG, SOPPOp.S_SET_INST_PREFETCH_DISTANCE, SOPPOp.S_DELAY_ALU): inst._dispatch = dispatch_nop
+    elif isinstance(inst, SOPP) and inst.op in (SOPPOp.S_NOP, SOPPOp.S_CLAUSE, SOPPOp.S_WAITCNT, SOPPOp.S_WAITCNT_DEPCTR, SOPPOp.S_SENDMSG, SOPPOp.S_SET_INST_PREFETCH_DISTANCE, SOPPOp.S_DELAY_ALU): inst._dispatch = dispatch_nop
     elif isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)): inst._dispatch = exec_scalar
     elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP_E32: inst._dispatch = dispatch_nop
     elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name: inst._dispatch = dispatch_wmma
@@ -430,11 +465,11 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     # Compile pcode for instructions that use it (not VOPD which has _fnx/_fny, not special dispatches)
     # VOPD needs separate functions for X and Y ops
     if isinstance(inst, VOPD):
-      def _compile_vopd_op(op): return compile_pseudocode(type(op).__name__, op.name, PCODE[op])
+      def _compile_vopd_op(op): return compile_uop(op.name, PCODE[op])
       inst._fnx, inst._fny = _compile_vopd_op(_VOPD_TO_VOP[inst.opx]), _compile_vopd_op(_VOPD_TO_VOP[inst.opy])
     elif inst._dispatch not in (dispatch_endpgm, dispatch_barrier, dispatch_nop, dispatch_wmma, dispatch_writelane):
       assert type(inst.op) != int, f"inst op of {inst} is int"
-      inst._fn = compile_pseudocode(type(inst.op).__name__, inst.op.name, PCODE[inst.op])
+      inst._fn = compile_uop(inst.op.name, PCODE[inst.op])
     result[i // 4] = inst
     i += inst._words * 4
   return result

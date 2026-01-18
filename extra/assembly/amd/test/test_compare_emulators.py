@@ -9,9 +9,12 @@ os.environ["AMD"] = "1"
 os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
-from extra.assembly.amd.emu import WaveState, decode_program, WAVE_SIZE, set_valid_mem_ranges, LDSMem
+from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, _get_vmem_buf, MASK32, PC_LO_IDX, SCC_IDX, VCC_LO, EXEC_LO
+from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.test.helpers import KernelInfo
 from extra.assembly.amd.test.bench_emu import REMU_PATH
+
+def set_valid_mem_ranges(ranges): pass  # emu2 doesn't need this
 
 def _is_f32_nan(bits: int) -> bool:
   """Check if 32-bit value is a NaN (exponent all 1s, mantissa non-zero)."""
@@ -91,33 +94,50 @@ class PythonEmulator:
   def __init__(self):
     self.state: WaveState | None = None
     self.program: dict | None = None
+    self.vmem_buf = None
+    self.lds_buf = None
 
   def create(self, kernel: bytes, n_lanes: int):
+    from tinygrad.device import Buffer
+    from tinygrad.dtype import dtypes
     self.program = decode_program(kernel)
-    self.state = WaveState(LDSMem(bytearray(65536)), n_lanes)
-    self.state.exec_mask = (1 << n_lanes) - 1
+    self.state = WaveState(n_lanes)
+    self.vmem_buf = _get_vmem_buf()
+    self.lds_buf = Buffer('CPU', 65536 // 4, dtypes.uint32).ensure_allocated()
 
   def step(self) -> int:
+    import ctypes
     assert self.program is not None and self.state is not None
-    return self.program[self.state.pc]._dispatch(self.state, self.program[self.state.pc])
+    pc = self.state.pc
+    if pc == 0xFFFFFFFF or pc not in self.program: return -1
+    name, fxn, globals_list, _runner = self.program[pc]
+    if fxn is None: return 1  # unsupported instruction
+    buf_addrs = {0: self.state.sgpr_buf._buf.va_addr, 1: self.state.vgpr_buf._buf.va_addr,
+                 2: self.vmem_buf._buf.va_addr, 3: self.lds_buf._buf.va_addr}
+    # Direct ctypes call - bypasses HCQ overhead
+    fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
+    return -1 if self.state.pc == 0xFFFFFFFF else 0
+
   def set_sgpr(self, idx: int, val: int):
     assert self.state is not None
-    self.state.sgpr[idx] = val & 0xffffffff
+    self.state._write_sgpr(idx, val)
   def set_vgpr(self, lane: int, idx: int, val: int):
     assert self.state is not None
-    self.state.vgpr[lane][idx] = val & 0xffffffff
+    self.state._write_vgpr(idx, lane, val)
 
   def get_snapshot(self) -> StateSnapshot:
     assert self.state is not None
-    return StateSnapshot(pc=self.state.pc, scc=self.state.scc, vcc=self.state.vcc & 0xffffffff,
-                         exec_mask=self.state.exec_mask & 0xffffffff, sgpr=list(self.state.sgpr),
-                         vgpr=[list(self.state.vgpr[i]) for i in range(WAVE_SIZE)])
+    sgpr = [self.state._read_sgpr(i) for i in range(128)]
+    vgpr = [[self.state._read_vgpr(reg, lane) for reg in range(256)] for lane in range(WAVE_SIZE)]
+    return StateSnapshot(pc=self.state.pc, scc=self.state._read_sgpr(SCC_IDX), vcc=sgpr[VCC_LO.offset],
+                         exec_mask=sgpr[EXEC_LO.offset], sgpr=sgpr, vgpr=vgpr)
 
 def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: tuple[int, int, int],
-                      program, max_steps: int, debug: bool, trace_len: int, kernel_idx: int = 0,
-                      max_workgroups: int = 8) -> tuple[bool, str, int]:
+                      local_size: tuple[int, int, int], program, max_steps: int, debug: bool, trace_len: int,
+                      kernel_idx: int = 0, max_workgroups: int = 8) -> tuple[bool, str, int]:
   """Run a single kernel through both emulators. Returns (success, message, total_steps)."""
   gx, gy, gz = global_size
+  lx, ly, lz = local_size
   total_steps = 0
   wg_count = 0
 
@@ -140,6 +160,11 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
           emu.set_sgpr(13, gidx)
           emu.set_sgpr(14, gidy)
           emu.set_sgpr(15, gidz)
+          # Initialize v[0] with packed workitem IDs for each lane
+          for lane in range(n_lanes):
+            tid = lane
+            z, y, x = tid // (lx * ly), (tid // lx) % ly, tid % lx
+            emu.set_vgpr(lane, 0, (z << 20) | (y << 10) | x)
 
         step = 0
         trace: list[tuple[int, int, str, StateSnapshot, StateSnapshot]] = []
@@ -148,8 +173,17 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             rust_before = rust.get_snapshot()
             python_before = python.get_snapshot()
 
-            inst = program.get(python_before.pc)
-            inst_str = inst.disasm() if inst else f"unknown at PC={python_before.pc}"
+            inst_info = program.get(python_before.pc)
+            inst_hex_name = inst_info[0] if inst_info else f"unknown at PC={python_before.pc}"
+            # Decode the instruction to get mnemonic for sync_after checks
+            try:
+              inst_bytes_hex = inst_hex_name.split('_')[1] if '_' in inst_hex_name else ""
+              inst_bytes = bytes.fromhex(inst_bytes_hex) if inst_bytes_hex else b''
+              decoded = decode_inst(inst_bytes) if inst_bytes else None
+              inst_mnemonic = repr(decoded).split('(')[0] if decoded else ""
+            except:
+              inst_mnemonic = ""
+            inst_str = inst_hex_name
             trace.append((step, python_before.pc, inst_str, rust_before, python_before))
             if len(trace) > trace_len: trace.pop(0)
 
@@ -159,8 +193,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             # v_div_scale/v_div_fixup: Rust has different VCC handling
             # v_cvt_f16_f32: Rust clears high 16 bits, but hardware (and Python) preserves them
             # s_add_i32/s_sub_i32: Rust has incorrect SCC overflow detection
-            sync_after = any(x in inst_str for x in ('v_div_scale_f32', 'v_div_scale_f64', 'v_div_fixup_f32', 'v_div_fixup_f64',
-                                                      'v_cvt_f16_f32', 's_add_i32', 's_sub_i32'))
+            sync_after = any(x in inst_mnemonic.lower() for x in ('v_div_scale', 'v_div_fixup', 'v_cvt_f16_f32', 's_add_i32', 's_sub_i32'))
             diffs = rust_before.diff(python_before, n_lanes)
             if diffs:
               trace_lines = []
@@ -200,7 +233,10 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
               for lane in range(n_lanes):
                 for i in range(256): python.set_vgpr(lane, i, rust_after.vgpr[lane][i])
               assert python.state is not None
-              python.state.pc, python.state.scc, python.state.vcc, python.state.exec_mask = rust_after.pc, rust_after.scc, rust_after.vcc, rust_after.exec_mask
+              python.state._write_sgpr(PC_LO_IDX, rust_after.pc)
+              python.state._write_sgpr(SCC_IDX, rust_after.scc)
+              python.state._write_sgpr(VCC_LO.offset, rust_after.vcc)
+              python.state._write_sgpr(EXEC_LO.offset, rust_after.exec_mask)
 
             if rust_result == -1:
               total_steps += step + 1
@@ -254,7 +290,7 @@ def compare_emulators_multi_kernel(kernels: list[KernelInfo], buf_pool: dict[int
 
     ok, msg, steps = run_single_kernel(
       kernel.code, min(n_lanes, 32), args_ptr, kernel.global_size,
-      program, max_steps, debug, trace_len, ki
+      kernel.local_size, program, max_steps, debug, trace_len, ki
     )
     total_steps += steps
     if not ok:
@@ -281,7 +317,8 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   set_valid_mem_ranges(ranges)
 
   program = decode_program(kernel)
-  ok, msg, _ = run_single_kernel(kernel, n_lanes, args_ptr, global_size, program, max_steps, debug, trace_len)
+  # Legacy wrapper assumes local_size = (n_lanes, 1, 1)
+  ok, msg, _ = run_single_kernel(kernel, n_lanes, args_ptr, global_size, (n_lanes, 1, 1), program, max_steps, debug, trace_len)
   return ok, msg
 
 def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
@@ -386,6 +423,7 @@ class TestTinygradKernels(unittest.TestCase):
     from tinygrad import dtypes
     self._test_kernel(lambda T: T.empty(4, 4)[T.arange(4).cast(dtypes.int64), :])
   def test_gelu(self): self._test_kernel(lambda T: T.empty(32, 32).gelu())
+  def test_exp(self): self._test_kernel(lambda T: T.empty(1024).exp())
   def test_cross_entropy(self):
     import numpy as np
     np.random.seed(0)

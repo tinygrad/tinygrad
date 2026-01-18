@@ -448,6 +448,114 @@ class TestCmpFloat(unittest.TestCase):
     self.assertEqual((st.vcc >> 1) & 1, 0, "Lane 1: expected vcc=0 (2.0 < 1.0)")
 
 
+class TestVOP3VOPCModifiers(unittest.TestCase):
+  """Tests for VOP3 VOPC with abs/neg modifiers."""
+
+  def test_v_cmp_ge_f32_abs_both(self):
+    """v_cmp_ge_f32 with abs on both sources: abs(0.0) >= abs(-1.0) = false.
+
+    Regression test: int16 mod operation uses v_cmp_ge_f32 with abs modifiers.
+    """
+    instructions = [
+      v_mov_b32_e32(v[0], 0.0),
+      v_mov_b32_e32(v[1], -1.0),
+      # abs=0b11 means abs(src0) and abs(src1)
+      v_cmp_ge_f32_e64(VCC_LO, v[0], v[1], abs=0b11),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 0, "abs(0.0) >= abs(-1.0) should be false")
+
+  def test_v_cmp_ge_f32_abs_negative_divisor(self):
+    """v_cmp_ge_f32 with abs: remainder check for negative divisor.
+
+    Tests the exact comparison used in int16 mod: abs(rem_f) >= abs(div_f).
+    For 1 % -1: rem_f = 0.0, div_f = -1.0, so abs(0.0) >= abs(-1.0) = false.
+    """
+    instructions = [
+      v_mov_b32_e32(v[0], 0.0),    # remainder as float
+      v_mov_b32_e32(v[1], -1.0),   # divisor as float
+      v_cmp_ge_f32_e64(VCC_LO, v[0], v[1], abs=0b11),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 0, "abs(0.0) >= abs(-1.0) should be false")
+
+  def test_v_cmp_ge_f32_abs_small_remainder(self):
+    """v_cmp_ge_f32 with abs: abs(-0.5) >= abs(-3.0) = false."""
+    instructions = [
+      v_mov_b32_e32(v[0], -0.5),
+      v_mov_b32_e32(v[1], -3.0),
+      v_cmp_ge_f32_e64(VCC_LO, v[0], v[1], abs=0b11),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 0, "abs(-0.5) >= abs(-3.0) should be false")
+
+  def test_v_cmp_ge_f32_abs_equal(self):
+    """v_cmp_ge_f32 with abs: abs(-1.0) >= abs(1.0) = true."""
+    instructions = [
+      v_mov_b32_e32(v[0], -1.0),
+      v_mov_b32_e32(v[1], 1.0),
+      v_cmp_ge_f32_e64(VCC_LO, v[0], v[1], abs=0b11),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "abs(-1.0) >= abs(1.0) should be true")
+
+
+class TestVOP3VOPC64Bit(unittest.TestCase):
+  """Tests for VOP3 VOPC with 64-bit operands."""
+
+  def test_v_cmp_lt_f64_basic(self):
+    """v_cmp_lt_f64: 0.0 < 1.0 = true."""
+    zero_f64 = f2i64(0.0)
+    one_f64 = f2i64(1.0)
+    instructions = [
+      s_mov_b32(s[0], zero_f64 & 0xffffffff),
+      s_mov_b32(s[1], zero_f64 >> 32),
+      s_mov_b32(s[2], one_f64 & 0xffffffff),
+      s_mov_b32(s[3], one_f64 >> 32),
+      v_cmp_lt_f64_e64(VCC_LO, s[0:1], s[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "0.0 < 1.0 should be true")
+
+  def test_v_cmp_lt_f64_negative(self):
+    """v_cmp_lt_f64: -1.0 < 0.0 = true."""
+    neg_one_f64 = f2i64(-1.0)
+    zero_f64 = f2i64(0.0)
+    instructions = [
+      s_mov_b32(s[0], neg_one_f64 & 0xffffffff),
+      s_mov_b32(s[1], neg_one_f64 >> 32),
+      s_mov_b32(s[2], zero_f64 & 0xffffffff),
+      s_mov_b32(s[3], zero_f64 >> 32),
+      v_cmp_lt_f64_e64(VCC_LO, s[0:1], s[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "-1.0 < 0.0 should be true")
+
+  def test_v_cmp_lt_i64_signed(self):
+    """v_cmp_lt_i64: 0 < -1 (signed) = false."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 0),              # s[0:1] = 0
+      s_mov_b32(s[2], 0xffffffff),
+      s_mov_b32(s[3], 0xffffffff),     # s[2:3] = -1
+      v_cmp_lt_i64_e64(VCC_LO, s[0:1], s[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 0, "0 < -1 (signed) should be false")
+
+  def test_v_cmp_lt_u64_unsigned(self):
+    """v_cmp_lt_u64: 0 < 0xFFFFFFFFFFFFFFFF (unsigned) = true."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 0),              # s[0:1] = 0
+      s_mov_b32(s[2], 0xffffffff),
+      s_mov_b32(s[3], 0xffffffff),     # s[2:3] = max uint64
+      v_cmp_lt_u64_e64(VCC_LO, s[0:1], s[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "0 < max_uint64 should be true")
+
+
 class TestVCCBehavior(unittest.TestCase):
   """Tests for VCC condition code behavior."""
 
