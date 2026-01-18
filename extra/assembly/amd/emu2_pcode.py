@@ -35,10 +35,78 @@ def _mul(l, r):
       # Same size but different signedness (e.g., int vs uint32)
       r = r.cast(l.dtype)
   return l * r
+
+def _isnan_f32(v: UOp) -> UOp:
+  """Check if f32 value is NaN (exponent all 1s, mantissa non-zero)."""
+  bits = v.bitcast(dtypes.uint32)
+  exp = (bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)
+  mantissa = bits & UOp.const(dtypes.uint32, 0x7FFFFF)
+  return exp.eq(UOp.const(dtypes.uint32, 0xFF)) & mantissa.ne(UOp.const(dtypes.uint32, 0))
+
+def _isnan_f64(v: UOp) -> UOp:
+  """Check if f64 value is NaN (exponent all 1s, mantissa non-zero)."""
+  bits = v.bitcast(dtypes.uint64)
+  exp = (bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)
+  mantissa = bits & UOp.const(dtypes.uint64, 0xFFFFFFFFFFFFF)
+  return exp.eq(UOp.const(dtypes.uint64, 0x7FF)) & mantissa.ne(UOp.const(dtypes.uint64, 0))
+
+def _cmp_ge(l: UOp, r: UOp) -> UOp:
+  """IEEE 754 compliant >= comparison (returns FALSE if either operand is NaN)."""
+  result = l >= r
+  # For floating-point types, NaN comparisons should return FALSE
+  if l.dtype in (dtypes.float32, dtypes.half):
+    l32 = l.cast(dtypes.float32) if l.dtype == dtypes.half else l
+    r32 = r.cast(dtypes.float32) if r.dtype == dtypes.half else r
+    not_nan = _isnan_f32(l32).ne(UOp.const(dtypes.bool, True)) & _isnan_f32(r32).ne(UOp.const(dtypes.bool, True))
+    return result & not_nan
+  if l.dtype == dtypes.float64:
+    not_nan = _isnan_f64(l).ne(UOp.const(dtypes.bool, True)) & _isnan_f64(r).ne(UOp.const(dtypes.bool, True))
+    return result & not_nan
+  return result
+
+def _cmp_le(l: UOp, r: UOp) -> UOp:
+  """IEEE 754 compliant <= comparison (returns FALSE if either operand is NaN)."""
+  result = l <= r
+  if l.dtype in (dtypes.float32, dtypes.half):
+    l32 = l.cast(dtypes.float32) if l.dtype == dtypes.half else l
+    r32 = r.cast(dtypes.float32) if r.dtype == dtypes.half else r
+    not_nan = _isnan_f32(l32).ne(UOp.const(dtypes.bool, True)) & _isnan_f32(r32).ne(UOp.const(dtypes.bool, True))
+    return result & not_nan
+  if l.dtype == dtypes.float64:
+    not_nan = _isnan_f64(l).ne(UOp.const(dtypes.bool, True)) & _isnan_f64(r).ne(UOp.const(dtypes.bool, True))
+    return result & not_nan
+  return result
+
+def _cmp_gt(l: UOp, r: UOp) -> UOp:
+  """IEEE 754 compliant > comparison (returns FALSE if either operand is NaN)."""
+  result = l > r
+  if l.dtype in (dtypes.float32, dtypes.half):
+    l32 = l.cast(dtypes.float32) if l.dtype == dtypes.half else l
+    r32 = r.cast(dtypes.float32) if r.dtype == dtypes.half else r
+    not_nan = _isnan_f32(l32).ne(UOp.const(dtypes.bool, True)) & _isnan_f32(r32).ne(UOp.const(dtypes.bool, True))
+    return result & not_nan
+  if l.dtype == dtypes.float64:
+    not_nan = _isnan_f64(l).ne(UOp.const(dtypes.bool, True)) & _isnan_f64(r).ne(UOp.const(dtypes.bool, True))
+    return result & not_nan
+  return result
+
+def _cmp_lt(l: UOp, r: UOp) -> UOp:
+  """IEEE 754 compliant < comparison (returns FALSE if either operand is NaN)."""
+  result = l < r
+  if l.dtype in (dtypes.float32, dtypes.half):
+    l32 = l.cast(dtypes.float32) if l.dtype == dtypes.half else l
+    r32 = r.cast(dtypes.float32) if r.dtype == dtypes.half else r
+    not_nan = _isnan_f32(l32).ne(UOp.const(dtypes.bool, True)) & _isnan_f32(r32).ne(UOp.const(dtypes.bool, True))
+    return result & not_nan
+  if l.dtype == dtypes.float64:
+    not_nan = _isnan_f64(l).ne(UOp.const(dtypes.bool, True)) & _isnan_f64(r).ne(UOp.const(dtypes.bool, True))
+    return result & not_nan
+  return result
+
 _BINOPS = {
   '|': lambda l, r: l | r, '^': lambda l, r: l ^ r, '&': lambda l, r: l & r,
-  '>=': lambda l, r: l >= r, '<=': lambda l, r: l <= r, '==': lambda l, r: l.eq(r), '!=': lambda l, r: l.ne(r),
-  '>>': lambda l, r: l >> r, '<<': lambda l, r: l << r, '>': lambda l, r: l > r, '<': lambda l, r: l < r,
+  '>=': _cmp_ge, '<=': _cmp_le, '==': lambda l, r: l.eq(r), '!=': lambda l, r: l.ne(r),
+  '>>': lambda l, r: l >> r, '<<': lambda l, r: l << r, '>': _cmp_gt, '<': _cmp_lt,
   '+': lambda l, r: l + (r.cast(l.dtype) if l.dtype.itemsize > r.dtype.itemsize else (r.cast(l.dtype) if l.dtype != r.dtype and l.dtype.itemsize == r.dtype.itemsize else r)),
   '*': _mul,
   '/': lambda l, r: l / r,
