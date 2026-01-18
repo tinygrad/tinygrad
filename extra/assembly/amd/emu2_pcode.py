@@ -10,107 +10,71 @@ DTYPES = {'u32': dtypes.uint32, 'i32': dtypes.int, 'f32': dtypes.float32, 'b32':
           'u1': dtypes.uint32}  # 1-bit treated as uint32 for comparisons
 
 def _ftz_f32(v: UOp) -> UOp:
-  """Flush denormal f32 to zero (RDNA3 FTZ mode). Denormals have exponent=0 and mantissa!=0."""
+  """Flush denormal f32 to zero (RDNA3 FTZ mode)."""
   if v.dtype != dtypes.float32: return v
   bits = v.bitcast(dtypes.uint32)
   exp = (bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)
   mantissa = bits & UOp.const(dtypes.uint32, 0x7FFFFF)
   is_denorm = exp.eq(UOp.const(dtypes.uint32, 0)) & mantissa.ne(UOp.const(dtypes.uint32, 0))
-  # Preserve sign bit when flushing to zero
   sign = bits & UOp.const(dtypes.uint32, 0x80000000)
   return is_denorm.where(sign.bitcast(dtypes.float32), v)
 
-# Binary operators: op_type -> lambda (l, r) -> result
-def _sub(l, r):
-  if l.op == Ops.CONST and r.op == Ops.CONST: return UOp.const(l.dtype, l.arg - r.arg)
-  # Cast r to l's type if dtypes differ but sizes match (e.g., int vs uint32)
-  if l.dtype != r.dtype and l.dtype.itemsize == r.dtype.itemsize: r = r.cast(l.dtype)
-  return l - r
-def _mul(l, r):
-  # Cast r to l's type if dtypes differ
-  if l.dtype != r.dtype:
-    if l.dtype in (dtypes.float32, dtypes.float64):
-      r = r.cast(l.dtype)
-    elif l.dtype.itemsize == r.dtype.itemsize:
-      # Same size but different signedness (e.g., int vs uint32)
-      r = r.cast(l.dtype)
-  return l * r
+def _isnan(v: UOp) -> UOp:
+  """Check if float value is NaN."""
+  if v.dtype == dtypes.float64:
+    bits = v.bitcast(dtypes.uint64)
+    return ((bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)).eq(UOp.const(dtypes.uint64, 0x7FF)) & \
+           (bits & UOp.const(dtypes.uint64, 0xFFFFFFFFFFFFF)).ne(UOp.const(dtypes.uint64, 0))
+  v32 = v.cast(dtypes.float32) if v.dtype == dtypes.half else v
+  bits = v32.bitcast(dtypes.uint32)
+  return ((bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)).eq(UOp.const(dtypes.uint32, 0xFF)) & \
+         (bits & UOp.const(dtypes.uint32, 0x7FFFFF)).ne(UOp.const(dtypes.uint32, 0))
 
-def _isnan_f32(v: UOp) -> UOp:
-  """Check if f32 value is NaN (exponent all 1s, mantissa non-zero)."""
-  bits = v.bitcast(dtypes.uint32)
-  exp = (bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)
-  mantissa = bits & UOp.const(dtypes.uint32, 0x7FFFFF)
-  return exp.eq(UOp.const(dtypes.uint32, 0xFF)) & mantissa.ne(UOp.const(dtypes.uint32, 0))
+def _cmp_with_nan(l: UOp, r: UOp, cmp_fn) -> UOp:
+  """IEEE 754 compliant comparison - returns FALSE if either operand is NaN."""
+  result = cmp_fn(l, r)
+  if l.dtype not in (dtypes.float32, dtypes.float64, dtypes.half): return result
+  return result & _isnan(l).logical_not() & _isnan(r).logical_not()
 
-def _isnan_f64(v: UOp) -> UOp:
-  """Check if f64 value is NaN (exponent all 1s, mantissa non-zero)."""
-  bits = v.bitcast(dtypes.uint64)
-  exp = (bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)
-  mantissa = bits & UOp.const(dtypes.uint64, 0xFFFFFFFFFFFFF)
-  return exp.eq(UOp.const(dtypes.uint64, 0x7FF)) & mantissa.ne(UOp.const(dtypes.uint64, 0))
+def _bitreverse(v: UOp, bits: int) -> UOp:
+  """Reverse bits of a value."""
+  dt = dtypes.uint64 if bits == 64 else dtypes.uint32
+  v = v.cast(dt) if v.dtype != dt else v
+  masks = [(0x5555555555555555, 1), (0x3333333333333333, 2), (0x0F0F0F0F0F0F0F0F, 4),
+           (0x00FF00FF00FF00FF, 8), (0x0000FFFF0000FFFF, 16)] if bits == 64 else \
+          [(0x55555555, 1), (0x33333333, 2), (0x0F0F0F0F, 4), (0x00FF00FF, 8)]
+  for mask, shift in masks:
+    m = UOp.const(dt, mask if bits == 64 else mask & 0xFFFFFFFF)
+    v = ((v >> UOp.const(dt, shift)) & m) | ((v & m) << UOp.const(dt, shift))
+  final_shift = 32 if bits == 64 else 16
+  return (v >> UOp.const(dt, final_shift)) | (v << UOp.const(dt, final_shift))
 
-def _cmp_ge(l: UOp, r: UOp) -> UOp:
-  """IEEE 754 compliant >= comparison (returns FALSE if either operand is NaN)."""
-  result = l >= r
-  # For floating-point types, NaN comparisons should return FALSE
-  if l.dtype in (dtypes.float32, dtypes.half):
-    l32 = l.cast(dtypes.float32) if l.dtype == dtypes.half else l
-    r32 = r.cast(dtypes.float32) if r.dtype == dtypes.half else r
-    not_nan = _isnan_f32(l32).ne(UOp.const(dtypes.bool, True)) & _isnan_f32(r32).ne(UOp.const(dtypes.bool, True))
-    return result & not_nan
-  if l.dtype == dtypes.float64:
-    not_nan = _isnan_f64(l).ne(UOp.const(dtypes.bool, True)) & _isnan_f64(r).ne(UOp.const(dtypes.bool, True))
-    return result & not_nan
-  return result
+def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
+  """Extract bits [hi:lo] from value."""
+  shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+  shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
+  return shifted & UOp.const(shifted.dtype, (1 << (hi - lo + 1)) - 1)
 
-def _cmp_le(l: UOp, r: UOp) -> UOp:
-  """IEEE 754 compliant <= comparison (returns FALSE if either operand is NaN)."""
-  result = l <= r
-  if l.dtype in (dtypes.float32, dtypes.half):
-    l32 = l.cast(dtypes.float32) if l.dtype == dtypes.half else l
-    r32 = r.cast(dtypes.float32) if r.dtype == dtypes.half else r
-    not_nan = _isnan_f32(l32).ne(UOp.const(dtypes.bool, True)) & _isnan_f32(r32).ne(UOp.const(dtypes.bool, True))
-    return result & not_nan
-  if l.dtype == dtypes.float64:
-    not_nan = _isnan_f64(l).ne(UOp.const(dtypes.bool, True)) & _isnan_f64(r).ne(UOp.const(dtypes.bool, True))
-    return result & not_nan
-  return result
+def _try_eval(expr: str) -> str:
+  """Try to evaluate a simple arithmetic expression."""
+  try:
+    if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()): return str(eval(expr))
+  except: pass
+  return expr
 
-def _cmp_gt(l: UOp, r: UOp) -> UOp:
-  """IEEE 754 compliant > comparison (returns FALSE if either operand is NaN)."""
-  result = l > r
-  if l.dtype in (dtypes.float32, dtypes.half):
-    l32 = l.cast(dtypes.float32) if l.dtype == dtypes.half else l
-    r32 = r.cast(dtypes.float32) if r.dtype == dtypes.half else r
-    not_nan = _isnan_f32(l32).ne(UOp.const(dtypes.bool, True)) & _isnan_f32(r32).ne(UOp.const(dtypes.bool, True))
-    return result & not_nan
-  if l.dtype == dtypes.float64:
-    not_nan = _isnan_f64(l).ne(UOp.const(dtypes.bool, True)) & _isnan_f64(r).ne(UOp.const(dtypes.bool, True))
-    return result & not_nan
-  return result
-
-def _cmp_lt(l: UOp, r: UOp) -> UOp:
-  """IEEE 754 compliant < comparison (returns FALSE if either operand is NaN)."""
-  result = l < r
-  if l.dtype in (dtypes.float32, dtypes.half):
-    l32 = l.cast(dtypes.float32) if l.dtype == dtypes.half else l
-    r32 = r.cast(dtypes.float32) if r.dtype == dtypes.half else r
-    not_nan = _isnan_f32(l32).ne(UOp.const(dtypes.bool, True)) & _isnan_f32(r32).ne(UOp.const(dtypes.bool, True))
-    return result & not_nan
-  if l.dtype == dtypes.float64:
-    not_nan = _isnan_f64(l).ne(UOp.const(dtypes.bool, True)) & _isnan_f64(r).ne(UOp.const(dtypes.bool, True))
-    return result & not_nan
-  return result
-
+# Binary operators
 _BINOPS = {
   '|': lambda l, r: l | r, '^': lambda l, r: l ^ r, '&': lambda l, r: l & r,
-  '>=': _cmp_ge, '<=': _cmp_le, '==': lambda l, r: l.eq(r), '!=': lambda l, r: l.ne(r),
-  '>>': lambda l, r: l >> r, '<<': lambda l, r: l << r, '>': _cmp_gt, '<': _cmp_lt,
-  '+': lambda l, r: l + (r.cast(l.dtype) if l.dtype.itemsize > r.dtype.itemsize else (r.cast(l.dtype) if l.dtype != r.dtype and l.dtype.itemsize == r.dtype.itemsize else r)),
-  '*': _mul,
+  '>=': lambda l, r: _cmp_with_nan(l, r, lambda a, b: a >= b),
+  '<=': lambda l, r: _cmp_with_nan(l, r, lambda a, b: a <= b),
+  '>': lambda l, r: _cmp_with_nan(l, r, lambda a, b: a > b),
+  '<': lambda l, r: _cmp_with_nan(l, r, lambda a, b: a < b),
+  '==': lambda l, r: l.eq(r), '!=': lambda l, r: l.ne(r),
+  '>>': lambda l, r: l >> r, '<<': lambda l, r: l << r,
+  '+': lambda l, r: l + (r.cast(l.dtype) if l.dtype != r.dtype else r),
+  '-': lambda l, r: l - (r.cast(l.dtype) if l.dtype != r.dtype and l.dtype.itemsize == r.dtype.itemsize else r) if not (l.op == Ops.CONST and r.op == Ops.CONST) else UOp.const(l.dtype, l.arg - r.arg),
+  '*': lambda l, r: l * (r.cast(l.dtype) if l.dtype != r.dtype else r),
   '/': lambda l, r: l / r,
-  '-': _sub,
   '**': lambda l, r: UOp(Ops.EXP2, l.dtype, (r.cast(l.dtype),)) if l.op == Ops.CONST and l.arg == 2.0 else l,
 }
 
@@ -131,17 +95,18 @@ def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
   if 'V_DIV_SCALE' in op_name:
     dt = 'f32' if 'F32' in op_name else 'f64'
     exp_lim, ldexp_val = ('23', '64') if dt == 'f32' else ('52', '128')
-    pcode = pcode.replace(f'S2.{dt} / S1.{dt} == DENORM.{dt}', f'isDENORM(S2.{dt} / S1.{dt})')
-    pcode = pcode.replace(f"1.0 / 64'F(S1.{dt}) == DENORM.f64", f"isDENORM(1.0 / 64'F(S1.{dt}))")
-    pcode = pcode.replace(f'1.0 / S1.{dt} == DENORM.{dt}', f'isDENORM(1.0 / S1.{dt})')
-    pcode = pcode.replace(f'S1.{dt} == DENORM.{dt}', f'isDENORM(S1.{dt})')
-    pcode = pcode.replace(f'D0.{dt} = NAN.{dt}', f'VCC = 0x1LL;\nD0.{dt} = NAN.{dt}')
-    pcode = pcode.replace(f'elsif isDENORM(S1.{dt}) then\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})', f'elsif 1 == 0 then\nD0.{dt} = S0.{dt}')
-    pcode = pcode.replace(f'elsif exponent(S2.{dt}) <= {exp_lim} then\n// Numerator is tiny\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})',
-                          f'elsif exponent(S2.{dt}) <= {exp_lim} then\nVCC = 0x1LL;\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})')
-    pcode = pcode.replace(f'elsif isDENORM(S2.{dt} / S1.{dt}) then\nVCC = 0x1LL;\nif S0.{dt} == S2.{dt} then\n// Only scale the numerator\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nendif',
-                          f'elsif isDENORM(S2.{dt} / S1.{dt}) then\nVCC = 0x1LL;\nD0.{dt} = S0.{dt}')
-    pcode = pcode.replace(f'D0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nendif\nelsif', f'D0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nelse\nD0.{dt} = S0.{dt}\nendif\nelsif')
+    for old, new in [(f'S2.{dt} / S1.{dt} == DENORM.{dt}', f'isDENORM(S2.{dt} / S1.{dt})'),
+                     (f"1.0 / 64'F(S1.{dt}) == DENORM.f64", f"isDENORM(1.0 / 64'F(S1.{dt}))"),
+                     (f'1.0 / S1.{dt} == DENORM.{dt}', f'isDENORM(1.0 / S1.{dt})'),
+                     (f'S1.{dt} == DENORM.{dt}', f'isDENORM(S1.{dt})'),
+                     (f'D0.{dt} = NAN.{dt}', f'VCC = 0x1LL;\nD0.{dt} = NAN.{dt}'),
+                     (f'elsif isDENORM(S1.{dt}) then\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})', f'elsif 1 == 0 then\nD0.{dt} = S0.{dt}'),
+                     (f'elsif exponent(S2.{dt}) <= {exp_lim} then\n// Numerator is tiny\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})',
+                      f'elsif exponent(S2.{dt}) <= {exp_lim} then\nVCC = 0x1LL;\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})'),
+                     (f'elsif isDENORM(S2.{dt} / S1.{dt}) then\nVCC = 0x1LL;\nif S0.{dt} == S2.{dt} then\n// Only scale the numerator\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nendif',
+                      f'elsif isDENORM(S2.{dt} / S1.{dt}) then\nVCC = 0x1LL;\nD0.{dt} = S0.{dt}'),
+                     (f'D0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nendif\nelsif', f'D0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nelse\nD0.{dt} = S0.{dt}\nendif\nelsif')]:
+      pcode = pcode.replace(old, new)
     lines = pcode.rstrip().split('\n')
     for i in range(len(lines) - 1, -1, -1):
       if lines[i].strip() == 'endif':
@@ -159,115 +124,77 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
                           for n in ['S0', 'S1', 'S2', 'D0', 'VCC', 'EXEC', 'SCC', 'SIMM32']}
   if srcs: vars.update(srcs)
   vars['laneId'] = lane if lane is not None else UOp.const(dtypes.uint32, 0)
-  vars['WAVE_MODE'] = {'IEEE': UOp.const(dtypes.uint32, 1)}  # IEEE mode is the default
-  # WAVE32/WAVE64 mode: we're always in wave32 mode in this emulator
-  vars['WAVE32'] = UOp.const(dtypes.bool, True)
-  vars['WAVE64'] = UOp.const(dtypes.bool, False)
+  vars['WAVE_MODE'] = {'IEEE': UOp.const(dtypes.uint32, 1)}
+  vars['WAVE32'], vars['WAVE64'] = UOp.const(dtypes.bool, True), UOp.const(dtypes.bool, False)
   assigns: list[tuple[str, UOp]] = []
 
   def parse_block(lines: list[str], start: int = 0) -> tuple[int, dict[str, UOp]]:
-    """Parse a block of statements, returns (next_line_idx, block_assigns)."""
+    """Parse a block of statements."""
     block_assigns: dict[str, UOp] = {}
     i = start
     while i < len(lines):
       line = lines[i]
-      # End of block markers
       if re.match(r'(elsif|else|endif|endfor)\b', line, re.IGNORECASE): break
-      # For loop: unroll and execute body for each iteration
-      # For loop: handles both simple "for i in 0 : 31 do" and typed "for i in 6'0U : 6'31U do"
+
+      # For loop
       if (m := re.match(r"for\s+(\w+)\s+in\s+(?:\d+')?(\d+)U?\s*:\s*(?:\d+')?(\d+)U?\s+do", line, re.IGNORECASE)):
         loop_var, start_val, end_val = m.group(1), int(m.group(2)), int(m.group(3))
         i += 1
-        # Collect loop body
         body_lines, depth = [], 1
         while i < len(lines) and depth > 0:
           if re.match(r'for\s+', lines[i], re.IGNORECASE): depth += 1
           elif re.match(r'endfor\b', lines[i], re.IGNORECASE): depth -= 1
           if depth > 0: body_lines.append(lines[i])
           i += 1
-        # Check if loop body contains break - need special handling for "find first" pattern
         has_break = any('break' in bl.lower() for bl in body_lines)
         if has_break:
-          # For loops with break: track "found" state, only update when not yet found
           found_var = f'_loop_found_{id(body_lines)}'
-          vars[found_var] = UOp.const(dtypes.bool, False)
-          block_assigns[found_var] = UOp.const(dtypes.bool, False)
-        # Unroll: execute body for each iteration value
-        def _try_eval(expr: str) -> str:
-          """Try to evaluate a simple arithmetic expression, return original if not possible."""
-          try:
-            if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()):
-              return str(eval(expr))
-          except: pass
-          return expr
+          vars[found_var] = block_assigns[found_var] = UOp.const(dtypes.bool, False)
         for loop_i in range(start_val, end_val + 1):
-          # Substitute loop variable in body lines
           subst_lines = []
           for bl in body_lines:
-            if re.match(r'break\b', bl.strip(), re.IGNORECASE): continue  # Skip break statements
-            # Replace .type[loop_var] patterns FIRST: OPSEL.u3[i] -> OPSEL.u3[2]
+            if re.match(r'break\b', bl.strip(), re.IGNORECASE): continue
             subst = re.sub(rf'\.(\w+)\[{loop_var}\]', rf'.\g<1>[{loop_i}]', bl)
-            # Replace array indexing patterns: VAR[loop_var] -> VAR{loop_i} (but not .type[i])
             subst = re.sub(rf'(?<!\.)\b(\w+)\[{loop_var}\]', rf'\g<1>{{{loop_i}}}', subst)
-            # Replace arithmetic expressions with loop_var: 31 - i -> 31 - 2
             subst = re.sub(rf'\b{loop_var}\b', str(loop_i), subst)
-            # Simplify arithmetic in bit slice bounds: data[0 * 8 + 7 : 0 * 8] -> data[7 : 0]
-            def _simplify_slice(m):
-              hi, lo = _try_eval(m.group(1)), _try_eval(m.group(2))
-              return f'[{hi} : {lo}]'
-            subst = re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', _simplify_slice, subst)
+            subst = re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', lambda m: f'[{_try_eval(m.group(1))} : {_try_eval(m.group(2))}]', subst)
             subst_lines.append(subst)
-          # Parse substituted body as a nested block
           _, iter_assigns = parse_block(subst_lines, 0)
           if has_break:
-            # For break loops: only apply iteration's assigns if not yet found
             found = block_assigns.get(found_var, vars.get(found_var))
             not_found = found.eq(UOp.const(dtypes.bool, False))
             for var, val in iter_assigns.items():
               if var == found_var: continue
               old_val = block_assigns.get(var, vars.get(var, UOp.const(dtypes.uint32, 0)))
-              # Type coercion for WHERE
-              if val.dtype != old_val.dtype and val.dtype.itemsize == old_val.dtype.itemsize:
-                old_val = old_val.cast(val.dtype)
-              block_assigns[var] = not_found.where(val, old_val)
-              vars[var] = block_assigns[var]
-            # Update found state: found if condition was true in this iteration
-            # Look for the if condition that leads to break
+              if val.dtype != old_val.dtype and val.dtype.itemsize == old_val.dtype.itemsize: old_val = old_val.cast(val.dtype)
+              block_assigns[var] = vars[var] = not_found.where(val, old_val)
             for j, bl in enumerate(body_lines):
               if (cm := re.match(r'if\s+(.+?)\s+then$', bl.strip(), re.IGNORECASE)):
-                # Check if break follows this if
                 for k in range(j+1, len(body_lines)):
                   if re.match(r'break\b', body_lines[k].strip(), re.IGNORECASE):
-                    cond_str = cm.group(1)
-                    # Substitute loop var in condition
-                    cond_str = re.sub(rf'\b{loop_var}\b', str(loop_i), cond_str)
+                    cond_str = re.sub(rf'\b{loop_var}\b', str(loop_i), cm.group(1))
                     cond = parse_expr(cond_str, {**vars, **block_assigns})
                     if cond.dtype != dtypes.bool: cond = cond.ne(UOp.const(cond.dtype, 0))
-                    new_found = not_found.where(cond, found)
-                    block_assigns[found_var] = new_found
-                    vars[found_var] = new_found
+                    block_assigns[found_var] = vars[found_var] = not_found.where(cond, found)
                     break
-                  elif re.match(r'(endif|else|elsif)\b', body_lines[k].strip(), re.IGNORECASE):
-                    break
+                  elif re.match(r'(endif|else|elsif)\b', body_lines[k].strip(), re.IGNORECASE): break
                 break
           else:
             block_assigns.update(iter_assigns)
             vars.update(iter_assigns)
         continue
-      # If/elsif/else block: build nested WHERE
+
+      # If/elsif/else block
       if (m := re.match(r'if\s+(.+?)\s+then$', line, re.IGNORECASE)):
-        conditions: list[tuple[UOp, dict[str, UOp]]] = []  # [(cond, {var: val}), ...]
+        conditions: list[tuple[UOp, dict[str, UOp]]] = []
         else_assigns: dict[str, UOp] = {}
         cond = parse_expr(m.group(1), {**vars, **block_assigns})
         if cond.dtype != dtypes.bool: cond = cond.ne(UOp.const(cond.dtype, 0))
         i += 1
-        # Snapshot vars before parsing branches - branches shouldn't see each other's assignments
         vars_snapshot = dict(vars)
         i, branch_assigns = parse_block(lines, i)
         conditions.append((cond, branch_assigns))
-        # Restore vars for next branch
         vars.clear(); vars.update(vars_snapshot)
-        # Handle elsif/else chains
         while i < len(lines):
           if (m := re.match(r'elsif\s+(.+?)\s+then$', lines[i], re.IGNORECASE)):
             cond = parse_expr(m.group(1), {**vars, **block_assigns})
@@ -275,17 +202,14 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
             i += 1
             i, branch_assigns = parse_block(lines, i)
             conditions.append((cond, branch_assigns))
-            # Restore vars for next branch
             vars.clear(); vars.update(vars_snapshot)
           elif re.match(r'else$', lines[i], re.IGNORECASE):
             i += 1
             i, else_assigns = parse_block(lines, i)
-            # Restore vars after else branch
             vars.clear(); vars.update(vars_snapshot)
           elif re.match(r'endif\b', lines[i], re.IGNORECASE):
             i += 1; break
           else: break
-        # Build nested WHERE for each variable
         all_vars = set()
         for _, ba in conditions: all_vars.update(ba.keys())
         all_vars.update(else_assigns.keys())
@@ -294,52 +218,41 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           for cond, ba in reversed(conditions):
             if var in ba:
               true_val = ba[var]
-              # Unify types for where: cast to matching types if sizes match (e.g., int vs uint32)
-              if true_val.dtype != result.dtype and true_val.dtype.itemsize == result.dtype.itemsize:
-                result = result.cast(true_val.dtype)
+              if true_val.dtype != result.dtype and true_val.dtype.itemsize == result.dtype.itemsize: result = result.cast(true_val.dtype)
               result = cond.where(true_val, result)
-          block_assigns[var] = result
-          vars[var] = result
+          block_assigns[var] = vars[var] = result
         continue
+
       # MEM[addr].type = value or MEM[addr].type += value
       if (m := re.match(r'MEM\[(.+)\]\.(\w+)\s*(\+)?=\s*(.+)', line)):
         ctx = {**vars, **block_assigns}
-        addr = parse_expr(m.group(1), ctx)
-        rhs = parse_expr(m.group(4), ctx)
-        dt = DTYPES.get(m.group(2), dtypes.uint32)
-        if m.group(3) == '+':  # compound assignment: read old value, add rhs (pm_add_loads will add the load)
-          mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')  # Use vmem for FLAT/GLOBAL, lds for DS
+        addr, rhs, dt = parse_expr(m.group(1), ctx), parse_expr(m.group(4), ctx), DTYPES.get(m.group(2), dtypes.uint32)
+        if m.group(3) == '+':
+          mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
           if mem is not None:
             shift_amt = UOp.const(dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, 2)
             idx = (addr >> shift_amt).cast(dtypes.index)
             old_val = mem.index(idx)
-            # For 64-bit types, read both dwords and combine
             if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-              four = UOp.const(dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, 4)
-              hi_idx = ((addr + four) >> shift_amt).cast(dtypes.index)
-              old_val = old_val.cast(dtypes.uint64) | (mem.index(hi_idx).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+              four = UOp.const(addr.dtype, 4)
+              old_val = old_val.cast(dtypes.uint64) | (mem.index(((addr + four) >> shift_amt).cast(dtypes.index)).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
             rhs = old_val + rhs
         assigns.append((f'MEM[{m.group(1)}].{m.group(2)}', (addr, rhs)))
         i += 1; continue
-      # VGPR[lane][reg] = value - write to vgpr buffer at specific lane and register
+
+      # VGPR[lane][reg] = value
       if (m := re.match(r'VGPR\[([^\]]+)\]\[([^\]]+)\]\s*=\s*(.+)', line)):
         ctx = {**vars, **block_assigns}
-        lane = parse_expr(m.group(1), ctx)
-        reg = parse_expr(m.group(2), ctx)
-        val = parse_expr(m.group(3), ctx)
+        lane, reg, val = parse_expr(m.group(1), ctx), parse_expr(m.group(2), ctx), parse_expr(m.group(3), ctx)
         if lane.dtype != dtypes.uint32: lane = lane.cast(dtypes.uint32)
         if reg.dtype != dtypes.uint32: reg = reg.cast(dtypes.uint32)
-        # vgpr layout: reg * 32 + lane (32 lanes per register)
-        idx = reg * UOp.const(dtypes.uint32, 32) + lane
-        assigns.append((f'VGPR[{m.group(1)}][{m.group(2)}]', (idx, val)))
+        assigns.append((f'VGPR[{m.group(1)}][{m.group(2)}]', (reg * UOp.const(dtypes.uint32, 32) + lane, val)))
         i += 1; continue
-      # Lambda definition: NAME = lambda(args) (body) - must check FIRST
+
+      # Lambda definition
       if (m := re.match(r'(\w+)\s*=\s*lambda\(([^)]*)\)\s*\(', line)):
         lambda_name, lambda_args = m.group(1), [a.strip() for a in m.group(2).split(',')]
-        # Collect multi-line lambda body until matching close paren
-        body_start = line[m.end():]  # Start after opening paren (skip it)
-        depth = 1
-        # Count parens in body_start to handle single-line lambdas
+        body_start, depth = line[m.end():], 1
         close_pos = -1
         for j, ch in enumerate(body_start):
           if ch == '(': depth += 1
@@ -347,197 +260,135 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
             depth -= 1
             if depth == 0: close_pos = j; break
         if close_pos >= 0:
-          # Lambda body is complete on this line - take content up to closing paren
           body = body_start[:close_pos].strip()
-          i += 1  # Move past this line
+          i += 1
         else:
           body_lines = [body_start] if body_start.strip() else []
           i += 1
           while i < len(lines) and depth > 0:
-            # Find position where depth becomes 0
             close_pos = -1
             for j, ch in enumerate(lines[i]):
               if ch == '(': depth += 1
               elif ch == ')':
                 depth -= 1
                 if depth == 0: close_pos = j; break
-            if close_pos >= 0:
-              # Take content up to the closing paren
-              body_lines.append(lines[i][:close_pos])
-            else:
-              body_lines.append(lines[i])
+            body_lines.append(lines[i][:close_pos] if close_pos >= 0 else lines[i])
             i += 1
-          body = '\n'.join(body_lines).strip()  # Use newlines to preserve structure
-          # Don't increment i here - while loop already moved it past the lambda body
+          body = '\n'.join(body_lines).strip()
         vars[lambda_name] = ('lambda', lambda_args, body)
         continue
+
       # VAR[high:low] = value or VAR[high:low].type = value or VAR.type[high:low] = value
       if (m := re.match(r'(\w+)(?:\.(\w+))?\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?\s*=\s*(.+)', line)):
         var_name, type_prefix, first_bit, second_bit, type_suffix = m.group(1), m.group(2), int(m.group(3)), int(m.group(4)), m.group(5)
         val = parse_expr(m.group(6), {**vars, **block_assigns})
-        # Determine high_bit and low_bit (handle both normal [31:0] and reversed [0:31])
         high_bit, low_bit = max(first_bit, second_bit), min(first_bit, second_bit)
         type_info = type_prefix or type_suffix
         assigns.append((f'{var_name}[{high_bit}:{low_bit}]' + (f'.{type_info}' if type_info else ''), val))
-        # Also update vars to accumulate the bit slice (needed for later references like D0 = tmp)
         if var_name not in vars: vars[var_name] = UOp.const(dtypes.uint64 if high_bit >= 32 else dtypes.uint32, 0)
         old_val = block_assigns.get(var_name, vars.get(var_name))
-        # Convert val to uint bits - use bitcast for floats to preserve bit pattern
-        if val.dtype == dtypes.half:
-          val_bits = val.bitcast(dtypes.uint16).cast(dtypes.uint32)
-        elif val.dtype == dtypes.float32:
-          val_bits = val.bitcast(dtypes.uint32)
-        elif val.dtype == dtypes.float64:
-          val_bits = val.bitcast(dtypes.uint64)
-        elif val.dtype != dtypes.uint32:
-          val_bits = val.cast(dtypes.uint32)
-        else:
-          val_bits = val
+        val_bits = val.bitcast(dtypes.uint16).cast(dtypes.uint32) if val.dtype == dtypes.half else \
+                   val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else \
+                   val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else \
+                   val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
         mask = UOp.const(dtypes.uint32, ((1 << (high_bit - low_bit + 1)) - 1) << low_bit)
         new_val = (old_val & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, low_bit))
-        block_assigns[var_name] = new_val
-        vars[var_name] = new_val
+        block_assigns[var_name] = vars[var_name] = new_val
         i += 1; continue
+
       # Compound assignment: VAR += value, VAR -= value
-      if (m := re.match(r'(\w+(?:\.\w+)?)\s*\+=\s*(.+)', line)):
+      if (m := re.match(r'(\w+(?:\.\w+)?)\s*([+-])=\s*(.+)', line)):
         var_name = m.group(1).split('.')[0]
         old_val = block_assigns.get(var_name, vars.get(var_name, UOp.const(dtypes.uint32, 0)))
-        rhs = parse_expr(m.group(2), {**vars, **block_assigns})
+        rhs = parse_expr(m.group(3), {**vars, **block_assigns})
         if rhs.dtype != old_val.dtype: rhs = rhs.cast(old_val.dtype)
-        new_val = old_val + rhs
-        block_assigns[var_name] = new_val
-        vars[var_name] = new_val
+        new_val = (old_val + rhs) if m.group(2) == '+' else (old_val - rhs)
+        block_assigns[var_name] = vars[var_name] = new_val
         i += 1; continue
-      if (m := re.match(r'(\w+(?:\.\w+)?)\s*-=\s*(.+)', line)):
-        var_name = m.group(1).split('.')[0]
-        old_val = block_assigns.get(var_name, vars.get(var_name, UOp.const(dtypes.uint32, 0)))
-        rhs = parse_expr(m.group(2), {**vars, **block_assigns})
-        if rhs.dtype != old_val.dtype: rhs = rhs.cast(old_val.dtype)
-        new_val = old_val - rhs
-        block_assigns[var_name] = new_val
-        vars[var_name] = new_val
-        i += 1; continue
+
       # Array-indexed assignment: VAR{idx} = value (from loop unrolling)
-      # If VAR exists as a scalar, treat as bit assignment; otherwise treat as array element
       if (m := re.match(r'(\w+)\{(\d+)\}\s*=\s*(.+)', line)):
         var_name, idx = m.group(1), int(m.group(2))
         val = parse_expr(m.group(3), {**vars, **block_assigns})
-        # Check if var_name exists as a scalar (was assigned like tmp = 0U)
         existing_var = block_assigns.get(var_name, vars.get(var_name))
         if existing_var is not None and isinstance(existing_var, UOp):
-          # Treat as bit assignment: set bit idx of var_name
-          old_val = existing_var
-          bit_pos = UOp.const(dtypes.uint32, idx)
+          old_val, bit_pos = existing_var, UOp.const(dtypes.uint32, idx)
           bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
           val_bit = val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 1)
-          cleared = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
-          new_val = cleared | (val_bit << bit_pos)
-          block_assigns[var_name] = new_val
-          vars[var_name] = new_val
+          new_val = (old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bit << bit_pos)
+          block_assigns[var_name] = vars[var_name] = new_val
         else:
-          # Treat as array element assignment
           actual_var = f'{var_name}{idx}'
-          block_assigns[actual_var] = val
-          vars[actual_var] = val
+          block_assigns[actual_var] = vars[actual_var] = val
         i += 1; continue
-      # Simple bit assignment: VAR[expr] = value (set bit at position expr to value)
-      # This handles patterns like tmp[i] = cond in for loops where tmp was initialized as 0U
-      # Only applies if VAR was assigned (not declared) and is a scalar UOp
+
+      # Simple bit assignment: VAR[expr] = value
       if (m := re.match(r'(\w+)\[([^\]]+)\]\s*=\s*(.+)', line)):
         var_name, bit_expr, val_expr = m.group(1), m.group(2), m.group(3)
-        # Skip if bit_expr contains colon (it's a slice, not a bit index)
         if ':' not in bit_expr:
-          # Only treat as bit assignment if var exists as a UOp (was assigned, not just declared)
-          # Check both block_assigns (current block) and vars (outer scope) for initialized scalars
           existing_var = block_assigns.get(var_name, vars.get(var_name))
-          # Skip if this looks like an array (we'll have var0, var1, etc. from loop unrolling)
           is_array = any(f'{var_name}{j}' in vars or f'{var_name}{j}' in block_assigns for j in range(8))
           if existing_var is not None and isinstance(existing_var, UOp) and not is_array:
             ctx = {**vars, **block_assigns}
-            bit_pos = parse_expr(bit_expr, ctx)
-            val = parse_expr(val_expr, ctx)
-            old_val = existing_var
+            bit_pos, val = parse_expr(bit_expr, ctx), parse_expr(val_expr, ctx)
             if bit_pos.dtype != dtypes.uint32: bit_pos = bit_pos.cast(dtypes.uint32)
             bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
-            # Set or clear bit based on value
             val_bit = val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 1)
-            cleared = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
-            new_val = cleared | (val_bit << bit_pos)
-            block_assigns[var_name] = new_val
-            vars[var_name] = new_val
+            new_val = (existing_var & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bit << bit_pos)
+            block_assigns[var_name] = vars[var_name] = new_val
             i += 1; continue
-      # Typed element assignment: D.u8[0] = value, D.u16[1] = value (byte/halfword access)
+
+      # Typed element assignment: D.u8[0] = value
       if (m := re.match(r'(\w+)\.(\w+)\[(\d+)\]\s*=\s*(.+)', line)):
         var_name, type_str, idx, val_expr = m.group(1), m.group(2), int(m.group(3)), m.group(4)
         dt = DTYPES.get(type_str, dtypes.uint32)
-        ctx = {**vars, **block_assigns}
-        val = parse_expr(val_expr, ctx)
+        val = parse_expr(val_expr, {**vars, **block_assigns})
         old_val = block_assigns.get(var_name, vars.get(var_name, UOp.const(dtypes.uint32, 0)))
-        # Calculate bit position and width based on type
-        bit_width = dt.itemsize * 8
-        low_bit = idx * bit_width
-        # Create mask for the element
+        bit_width, low_bit = dt.itemsize * 8, idx * dt.itemsize * 8
         mask = UOp.const(dtypes.uint32, ((1 << bit_width) - 1) << low_bit)
-        # Convert value to uint32 and shift to position
-        val_bits = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
-        val_bits = (val_bits & UOp.const(dtypes.uint32, (1 << bit_width) - 1)) << UOp.const(dtypes.uint32, low_bit)
-        # Clear old bits and set new
+        val_bits = ((val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val) & UOp.const(dtypes.uint32, (1 << bit_width) - 1)) << UOp.const(dtypes.uint32, low_bit)
         new_val = (old_val & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | val_bits
-        block_assigns[var_name] = new_val
-        vars[var_name] = new_val
+        block_assigns[var_name] = vars[var_name] = new_val
         assigns.append((f'{var_name}.{type_str}[{idx}]', val))
         i += 1; continue
-      # Dynamic single-bit assignment: D0.u32[S0.u32[4:0]] = 1'1U (set/clear bit at dynamic position)
-      # Only match if bit_expr contains a nested bracket (like S0.u32[4:0]), not just laneId
+
+      # Dynamic single-bit assignment: D0.u32[S0.u32[4:0]] = 1'1U
       if (m := re.match(r'(\w+)\.(\w+)\[(.*\[.*\].*)\]\s*=\s*(.+)', line)):
         var_name, type_suffix, bit_expr, val_expr = m.group(1), m.group(2), m.group(3), m.group(4)
         ctx = {**vars, **block_assigns}
-        bit_pos = parse_expr(bit_expr, ctx)
-        val = parse_expr(val_expr, ctx)
+        bit_pos, val = parse_expr(bit_expr, ctx), parse_expr(val_expr, ctx)
         old_val = block_assigns.get(var_name, vars.get(var_name, UOp.const(dtypes.uint32, 0)))
-        # Ensure bit_pos is uint32 for shifting
         if bit_pos.dtype != dtypes.uint32: bit_pos = bit_pos.cast(dtypes.uint32)
         bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
-        if val.op == Ops.CONST and val.arg == 1:  # Set bit
-          new_val = old_val | bit_mask
-        elif val.op == Ops.CONST and val.arg == 0:  # Clear bit
-          new_val = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
-        else:  # Dynamic value
+        if val.op == Ops.CONST and val.arg == 1: new_val = old_val | bit_mask
+        elif val.op == Ops.CONST and val.arg == 0: new_val = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+        else:
           val_bit = val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 1)
-          cleared = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
-          new_val = cleared | (val_bit << bit_pos)
-        block_assigns[var_name] = new_val
-        vars[var_name] = new_val
+          new_val = (old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bit << bit_pos)
+        block_assigns[var_name] = vars[var_name] = new_val
         i += 1; continue
-      # Compound destination assignment: { D1.u1, D0.u64 } = value (for 65-bit results like V_MAD_U64_U32)
+
+      # Compound destination: { D1.u1, D0.u64 } = value
       if (m := re.match(r'\{\s*(\w+)\.(\w+)\s*,\s*(\w+)\.(\w+)\s*\}\s*=\s*(.+)', line)):
         hi_var, hi_type, lo_var, lo_type, rhs = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
         val = parse_expr(rhs, {**vars, **block_assigns})
-        # For { D1.u1, D0.u64 } = 65-bit value: D0 = low 64 bits, D1 = bit 64
-        lo_dt = DTYPES.get(lo_type, dtypes.uint64)
-        hi_dt = DTYPES.get(hi_type, dtypes.uint32)
+        lo_dt, hi_dt = DTYPES.get(lo_type, dtypes.uint64), DTYPES.get(hi_type, dtypes.uint32)
         lo_bits = 64 if lo_dt in (dtypes.uint64, dtypes.int64) else 32
-        # Extract low bits for D0
-        if val.dtype.itemsize * 8 > lo_bits:
-          lo_val = val.cast(lo_dt) if lo_bits == 64 else (val & UOp.const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
-        else:
-          lo_val = val.cast(lo_dt)
-        block_assigns[lo_var] = lo_val
-        vars[lo_var] = lo_val
-        assigns.append((f'{lo_var}.{lo_type}', lo_val))
-        # Extract high bit(s) for D1 (overflow/carry)
+        lo_val = val.cast(lo_dt) if val.dtype.itemsize * 8 <= lo_bits else (val & UOp.const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
         hi_val = (val >> UOp.const(val.dtype, lo_bits)).cast(hi_dt)
-        block_assigns[hi_var] = hi_val
-        vars[hi_var] = hi_val
+        block_assigns[lo_var] = vars[lo_var] = lo_val
+        block_assigns[hi_var] = vars[hi_var] = hi_val
+        assigns.append((f'{lo_var}.{lo_type}', lo_val))
         assigns.append((f'{hi_var}.{hi_type}', hi_val))
         i += 1; continue
+
       # Regular assignment: VAR = value
       if (m := re.match(r'(\w+(?:\.\w+)?(?:\[\w+\])?)\s*=\s*(.+)', line)) and not re.search(r'[<>=!]=', line[:line.find('=')]):
         lhs, val = m.group(1), parse_expr(m.group(2), {**vars, **block_assigns})
         base = re.match(r'(\w+)', lhs).group(1)
-        block_assigns[base] = val
-        vars[base] = val
+        block_assigns[base] = vars[base] = val
         i += 1; continue
+
       # Declaration: declare VAR : TYPE
       if (m := re.match(r'declare\s+(\w+)', line)):
         vars[m.group(1)] = UOp.const(dtypes.uint32, 0)
@@ -548,18 +399,12 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
   lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
   _, final_assigns = parse_block(lines)
 
-  # Build assigns from final values
-  # Check which vars already have bit slice assigns
   vars_with_slices = set(dest.split('[')[0] for dest, _ in assigns if '[' in dest)
   for var, val in final_assigns.items():
     if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA']:
-      # Skip if this var was updated via bit slices only (not a direct assignment)
       if var in vars_with_slices:
-        # Check if there's also a direct assignment like "D0.b32 = tmp"
         has_direct_assign = any(re.match(rf'{var}\.\w+\s*=', line) for line in lines)
-        if not has_direct_assign:
-          continue  # Skip - bit slices already handle this
-      # Find the full destination including type suffix and indexing from the original pcode
+        if not has_direct_assign: continue
       for line in lines:
         if (m := re.match(rf'{var}\.(\w+(?:\[\w+\])?)', line)):
           assigns.append((f'{var}.{m.group(1)}', val)); break
@@ -570,6 +415,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
 def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
   """Parse an expression into a UOp."""
   expr = expr.strip()
+
   # Balanced parentheses
   if expr.startswith('(') and expr.endswith(')'):
     depth = 0
@@ -577,7 +423,8 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       depth += (c == '(') - (c == ')')
       if depth == 0 and i < len(expr) - 1: break
     else: return parse_expr(expr[1:-1], vars)
-  # Ternary - find ? and : at depth 0
+
+  # Ternary
   if '?' in expr:
     depth_paren, depth_bracket, q_pos, c_pos = 0, 0, -1, -1
     for i, ch in enumerate(expr):
@@ -591,7 +438,8 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       cond = parse_expr(expr[:q_pos].strip(), vars)
       if cond.dtype != dtypes.bool: cond = cond.ne(UOp.const(cond.dtype, 0))
       return cond.where(parse_expr(expr[q_pos+1:c_pos].strip(), vars), parse_expr(expr[c_pos+1:].strip(), vars))
-  # Binary ops (low to high precedence) - search right-to-left
+
+  # Binary ops (low to high precedence)
   ops = [('||', '|'), ('&&', '&'), ('|', '|'), ('^', '^'), ('&', '&'), ('>=', '>='), ('<=', '<='), ('==', '=='),
          ('!=', '!='), ('<>', '!='), ('>>', '>>'), ('<<', '<<'), ('>', '>'), ('<', '<'), ('+', '+'), ('-', '-'), ('*', '*'), ('/', '/'), ('**', '**')]
   for op, op_type in ops:
@@ -607,51 +455,41 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
         if len(op) == 1 and i+1 < len(expr) and expr[i+1] in '=<>&|*': continue
         if len(op) == 1 and i > 0 and expr[i-1] in '=<>&|*': continue
         lhs, rhs = expr[:i].strip(), expr[i+len(op):].strip()
-        # For - and +, skip if lhs ends with an operator (unary case)
         if op in ('-', '+') and lhs and lhs[-1] in '*/^|&<>=!': continue
         if lhs and rhs:
           l, r = parse_expr(lhs, vars), parse_expr(rhs, vars)
           if op_type in ('>>', '<<', '>=', '<=', '==', '!=', '>', '<') and l.dtype != r.dtype:
-            # For comparisons with negative numbers, use signed comparison
-            if r.dtype == dtypes.int and r.op == Ops.CONST and r.arg < 0:
-              l = l.cast(dtypes.int)  # Convert left to signed for proper signed comparison
-            else:
-              r = r.cast(l.dtype)
+            if r.dtype == dtypes.int and r.op == Ops.CONST and r.arg < 0: l = l.cast(dtypes.int)
+            else: r = r.cast(l.dtype)
           if op_type in ('|', '^', '&') and l.dtype != r.dtype:
             if l.dtype.itemsize == r.dtype.itemsize:
               target = dtypes.uint32 if l.dtype.itemsize == 4 else dtypes.uint64 if l.dtype.itemsize == 8 else l.dtype
               l, r = l.bitcast(target), r.bitcast(target)
             else: r = r.cast(l.dtype)
           return _BINOPS[op_type](l, r)
-  # Type cast: 64'U(...) or 32'F(...) etc. - for F types, use bitcast to preserve bit patterns
+
+  # Type cast: 64'U(...) or 32'F(...)
   if (m := re.match(r"(\d+)'([UIFB])\((.+)\)", expr)):
     bits = int(m.group(1))
-    # For widths > 64, use uint64 (best we have) - arithmetic will be done in 64-bit
-    # For widths > 32 but <= 64, use uint64
     dt = {('U',32): dtypes.uint32, ('U',64): dtypes.uint64, ('I',32): dtypes.int, ('I',64): dtypes.int64,
-          ('F',32): dtypes.float32, ('F',64): dtypes.float64}.get((m.group(2), bits),
-          dtypes.uint64 if bits > 32 else dtypes.uint32)
+          ('F',32): dtypes.float32, ('F',64): dtypes.float64}.get((m.group(2), bits), dtypes.uint64 if bits > 32 else dtypes.uint32)
     inner = parse_expr(m.group(3), vars)
-    # For float types with integer source (like 32'F(0xffc00000)), use bitcast to preserve bit patterns
     if m.group(2) == 'F' and inner.dtype in (dtypes.uint32, dtypes.uint64, dtypes.ulong, dtypes.int, dtypes.int64):
-      # Ensure size matches before bitcast
-      if inner.dtype.itemsize != dt.itemsize:
-        inner = inner.cast(dtypes.uint32 if dt.itemsize == 4 else dtypes.uint64)
+      if inner.dtype.itemsize != dt.itemsize: inner = inner.cast(dtypes.uint32 if dt.itemsize == 4 else dtypes.uint64)
       result = inner.bitcast(dt)
       return _ftz_f32(result) if dt == dtypes.float32 else result
     return inner.cast(dt)
+
   # Lane-indexed: VCC.u64[laneId]
   if (m := re.match(r'([a-zA-Z_]\w*)\.u64\[laneId\](?:\.(\w+))?$', expr)):
     v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
     lane = vars['laneId'].cast(dtypes.uint32) if vars['laneId'].dtype != dtypes.uint32 else vars['laneId']
     result = (v >> lane) & UOp.const(dtypes.uint32, 1)
-    if m.group(2): result = result.cast(DTYPES.get(m.group(2), dtypes.uint32))
-    return result
+    return result.cast(DTYPES.get(m.group(2), dtypes.uint32)) if m.group(2) else result
+
   # Variable with type: S0.u32 or dict access: WAVE_MODE.IEEE
-  # (Skip special constants like INF.f32, NAN.f32 which are handled later)
   if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)$', expr)) and m.group(1) not in ('INF', 'UNDERFLOW', 'OVERFLOW', 'NAN'):
     v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
-    # Handle dict access (e.g., WAVE_MODE.IEEE)
     if isinstance(v, dict): return v.get(m.group(2), UOp.const(dtypes.uint32, 0))
     dt = DTYPES.get(m.group(2), dtypes.uint32)
     if dt == v.dtype: return _ftz_f32(v) if dt == dtypes.float32 else v
@@ -660,113 +498,56 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       return v16 if dt == dtypes.uint16 else v16.bitcast(dt)
     result = v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
     return _ftz_f32(result) if dt == dtypes.float32 else result
-  # Bit slice: S0[4:0] or S0[4:0].u32 or S0[15:0].f16
-  # Also handles reversed slices like S0[0:31] (bit reverse)
+
+  # Bit slice: S0[4:0] or S0[4:0].u32 or S0[0:31] (reversed for bit reverse)
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     var_name, first, second, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
     val = vars.get(var_name, UOp.const(dtypes.uint32, 0))
-    # Check for reversed slice (bit reverse): S0[0:31] means reverse bits
-    if first < second:
-      # Bit reverse: S0[0:31] reverses all 32 bits
-      width = second - first + 1
-      if width == 32:
-        # 32-bit reverse using parallel swap approach
-        v = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
-        v = ((v >> UOp.const(dtypes.uint32, 1)) & UOp.const(dtypes.uint32, 0x55555555)) | ((v & UOp.const(dtypes.uint32, 0x55555555)) << UOp.const(dtypes.uint32, 1))
-        v = ((v >> UOp.const(dtypes.uint32, 2)) & UOp.const(dtypes.uint32, 0x33333333)) | ((v & UOp.const(dtypes.uint32, 0x33333333)) << UOp.const(dtypes.uint32, 2))
-        v = ((v >> UOp.const(dtypes.uint32, 4)) & UOp.const(dtypes.uint32, 0x0F0F0F0F)) | ((v & UOp.const(dtypes.uint32, 0x0F0F0F0F)) << UOp.const(dtypes.uint32, 4))
-        v = ((v >> UOp.const(dtypes.uint32, 8)) & UOp.const(dtypes.uint32, 0x00FF00FF)) | ((v & UOp.const(dtypes.uint32, 0x00FF00FF)) << UOp.const(dtypes.uint32, 8))
-        result = (v >> UOp.const(dtypes.uint32, 16)) | (v << UOp.const(dtypes.uint32, 16))
-      elif width == 64:
-        # 64-bit reverse
-        v = val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
-        v = ((v >> UOp.const(dtypes.uint64, 1)) & UOp.const(dtypes.uint64, 0x5555555555555555)) | ((v & UOp.const(dtypes.uint64, 0x5555555555555555)) << UOp.const(dtypes.uint64, 1))
-        v = ((v >> UOp.const(dtypes.uint64, 2)) & UOp.const(dtypes.uint64, 0x3333333333333333)) | ((v & UOp.const(dtypes.uint64, 0x3333333333333333)) << UOp.const(dtypes.uint64, 2))
-        v = ((v >> UOp.const(dtypes.uint64, 4)) & UOp.const(dtypes.uint64, 0x0F0F0F0F0F0F0F0F)) | ((v & UOp.const(dtypes.uint64, 0x0F0F0F0F0F0F0F0F)) << UOp.const(dtypes.uint64, 4))
-        v = ((v >> UOp.const(dtypes.uint64, 8)) & UOp.const(dtypes.uint64, 0x00FF00FF00FF00FF)) | ((v & UOp.const(dtypes.uint64, 0x00FF00FF00FF00FF)) << UOp.const(dtypes.uint64, 8))
-        v = ((v >> UOp.const(dtypes.uint64, 16)) & UOp.const(dtypes.uint64, 0x0000FFFF0000FFFF)) | ((v & UOp.const(dtypes.uint64, 0x0000FFFF0000FFFF)) << UOp.const(dtypes.uint64, 16))
-        result = (v >> UOp.const(dtypes.uint64, 32)) | (v << UOp.const(dtypes.uint64, 32))
-      else:
-        result = val  # Unsupported width, return as-is
+    if first < second:  # Bit reverse
+      result = _bitreverse(val, second - first + 1)
       if type_suffix:
         dt = DTYPES.get(type_suffix, dtypes.uint32)
-        if dt != result.dtype:
-          result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
+        if dt != result.dtype: result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
       return result
-    # Normal slice: hi >= lo
     hi, lo = first, second
-    # If extracting bits beyond value's bit width, look for indexed dword variable (e.g., VDATA2 for bits 95:64)
     val_bits = val.dtype.itemsize * 8
     if lo >= val_bits:
       dword_idx = lo // 32
       indexed_var = f'{var_name}{dword_idx}'
       if indexed_var in vars:
-        val = vars[indexed_var]
-        lo = lo % 32
-        hi = (hi % 32) + lo  # Adjust hi relative to the dword
-    shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-    shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
-    result = shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
-    # If type suffix specified, convert bits to that type
+        val, lo, hi = vars[indexed_var], lo % 32, (hi % 32) + (lo % 32)
+    result = _extract_bits(val, hi, lo)
     if type_suffix:
       dt = DTYPES.get(type_suffix, dtypes.uint32)
-      if dt == dtypes.half:
-        result = result.cast(dtypes.uint16).bitcast(dtypes.half)
-      elif dt != result.dtype:
-        result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
+      if dt == dtypes.half: result = result.cast(dtypes.uint16).bitcast(dtypes.half)
+      elif dt != result.dtype: result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
     return result
-  # Array-indexed bit slice: S{2}[15:0] or S{2}[15:0].f16 (from loop unrolling)
+
+  # Array-indexed bit slice: S{2}[15:0] or S{2}[15:0].f16
   if (m := re.match(r'([a-zA-Z_]\w*)\{(\d+)\}\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     var_name, idx, hi, lo, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4)), m.group(5)
-    actual_var = f'{var_name}{idx}'
-    val = vars.get(actual_var, UOp.const(dtypes.uint32, 0))
-    shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-    shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
-    result = shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
+    val = vars.get(f'{var_name}{idx}', UOp.const(dtypes.uint32, 0))
+    result = _extract_bits(val, hi, lo)
     if type_suffix:
       dt = DTYPES.get(type_suffix, dtypes.uint32)
-      if dt == dtypes.half:
-        result = result.cast(dtypes.uint16).bitcast(dtypes.half)
-      elif dt != result.dtype:
-        result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
+      if dt == dtypes.half: result = result.cast(dtypes.uint16).bitcast(dtypes.half)
+      elif dt != result.dtype: result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
     return result
-  # Verilog-style bit extraction with width: VAR.type[start +: width] (extract `width` bits starting at `start`)
+
+  # Verilog-style: VAR.type[start +: width]
   if (m := re.match(r"([a-zA-Z_]\w*)\.(\w+)\[(.+?)\s*\+:\s*(?:\d+')?(\d+)U?\]", expr)):
-    var_name, type_prefix, start_expr, width = m.group(1), m.group(2), m.group(3), int(m.group(4))
-    val = vars.get(var_name, UOp.const(dtypes.uint32, 0))
-    start = parse_expr(start_expr, vars)
+    val = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
+    start = parse_expr(m.group(3), vars)
     if start.dtype != dtypes.uint32: start = start.cast(dtypes.uint32)
-    # Shift by start and mask to width bits
-    shifted = val >> start
-    mask = UOp.const(shifted.dtype, (1 << width) - 1)
-    return shifted & mask
-  # Bit slice with type prefix: S1.u32[4:0].u32 or S0.u32[0:31] (reversed for bit reverse)
+    return (val >> start) & UOp.const(val.dtype, (1 << int(m.group(4))) - 1)
+
+  # Bit slice with type prefix: S1.u32[4:0] or S0.u32[0:31]
   if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     first, second = int(m.group(3)), int(m.group(4))
     val = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
-    # Check for reversed slice (bit reverse): S0.u32[0:31] means reverse bits
-    if first < second:
-      width = second - first + 1
-      if width == 32:
-        v = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
-        v = ((v >> UOp.const(dtypes.uint32, 1)) & UOp.const(dtypes.uint32, 0x55555555)) | ((v & UOp.const(dtypes.uint32, 0x55555555)) << UOp.const(dtypes.uint32, 1))
-        v = ((v >> UOp.const(dtypes.uint32, 2)) & UOp.const(dtypes.uint32, 0x33333333)) | ((v & UOp.const(dtypes.uint32, 0x33333333)) << UOp.const(dtypes.uint32, 2))
-        v = ((v >> UOp.const(dtypes.uint32, 4)) & UOp.const(dtypes.uint32, 0x0F0F0F0F)) | ((v & UOp.const(dtypes.uint32, 0x0F0F0F0F)) << UOp.const(dtypes.uint32, 4))
-        v = ((v >> UOp.const(dtypes.uint32, 8)) & UOp.const(dtypes.uint32, 0x00FF00FF)) | ((v & UOp.const(dtypes.uint32, 0x00FF00FF)) << UOp.const(dtypes.uint32, 8))
-        return (v >> UOp.const(dtypes.uint32, 16)) | (v << UOp.const(dtypes.uint32, 16))
-      elif width == 64:
-        v = val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
-        v = ((v >> UOp.const(dtypes.uint64, 1)) & UOp.const(dtypes.uint64, 0x5555555555555555)) | ((v & UOp.const(dtypes.uint64, 0x5555555555555555)) << UOp.const(dtypes.uint64, 1))
-        v = ((v >> UOp.const(dtypes.uint64, 2)) & UOp.const(dtypes.uint64, 0x3333333333333333)) | ((v & UOp.const(dtypes.uint64, 0x3333333333333333)) << UOp.const(dtypes.uint64, 2))
-        v = ((v >> UOp.const(dtypes.uint64, 4)) & UOp.const(dtypes.uint64, 0x0F0F0F0F0F0F0F0F)) | ((v & UOp.const(dtypes.uint64, 0x0F0F0F0F0F0F0F0F)) << UOp.const(dtypes.uint64, 4))
-        v = ((v >> UOp.const(dtypes.uint64, 8)) & UOp.const(dtypes.uint64, 0x00FF00FF00FF00FF)) | ((v & UOp.const(dtypes.uint64, 0x00FF00FF00FF00FF)) << UOp.const(dtypes.uint64, 8))
-        v = ((v >> UOp.const(dtypes.uint64, 16)) & UOp.const(dtypes.uint64, 0x0000FFFF0000FFFF)) | ((v & UOp.const(dtypes.uint64, 0x0000FFFF0000FFFF)) << UOp.const(dtypes.uint64, 16))
-        return (v >> UOp.const(dtypes.uint64, 32)) | (v << UOp.const(dtypes.uint64, 32))
-      return val  # Unsupported width
-    hi, lo = first, second
-    shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-    shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
-    return shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
+    if first < second: return _bitreverse(val, second - first + 1)
+    return _extract_bits(val, first, second)
+
   # Single bit access: tmp.u32[31]
   if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)\[(.+)\]$', expr)):
     v = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
@@ -775,163 +556,136 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     if v.dtype != dtypes.uint32: v = v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
     bit = UOp.const(dtypes.uint32, int(m.group(3))) if m.group(3).isdigit() else parse_expr(m.group(3), vars).cast(dtypes.uint32)
     return (v >> bit) & UOp.const(dtypes.uint32, 1)
+
   # Literals
   if (m := re.match(r'0x([0-9a-fA-F]+)', expr)): return UOp.const(dtypes.uint64, int(m.group(1), 16))
-  # Verilog-style literals: 8'd255 (decimal), 8'hFF (hex), 8'b11111111 (binary)
   if (m := re.match(r"(\d+)'[dD](\d+)", expr)):
-    bits, val = int(m.group(1)), int(m.group(2))
-    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(bits, dtypes.uint32)
-    return UOp.const(dt, val)
+    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(int(m.group(1)), dtypes.uint32)
+    return UOp.const(dt, int(m.group(2)))
   if (m := re.match(r"(\d+)'[hH]([0-9a-fA-F]+)", expr)):
-    bits, val = int(m.group(1)), int(m.group(2), 16)
-    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(bits, dtypes.uint32)
-    return UOp.const(dt, val)
+    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(int(m.group(1)), dtypes.uint32)
+    return UOp.const(dt, int(m.group(2), 16))
   if (m := re.match(r"(\d+)'[bB]([01]+)", expr)):
-    bits, val = int(m.group(1)), int(m.group(2), 2)
-    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(bits, dtypes.uint32)
-    return UOp.const(dt, val)
-  # Typed hex constants with 0x prefix: 8'0xff, 64'0x123
+    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(int(m.group(1)), dtypes.uint32)
+    return UOp.const(dt, int(m.group(2), 2))
   if (m := re.match(r"(\d+)'0x([0-9a-fA-F]+)", expr)):
-    bits, val = int(m.group(1)), int(m.group(2), 16)
-    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(bits, dtypes.uint32)
-    return UOp.const(dt, val)
-  # Typed constants: 16'4, 1'0U, 1'1U, 64'0x... etc
+    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(int(m.group(1)), dtypes.uint32)
+    return UOp.const(dt, int(m.group(2), 16))
   if (m := re.match(r"(\d+)'(\d+)U?", expr)):
     bits, val = int(m.group(1)), int(m.group(2))
     dt = {1: dtypes.uint32, 8: dtypes.uint8, 16: dtypes.int16 if 'U' not in expr else dtypes.uint16,
           32: dtypes.int if 'U' not in expr else dtypes.uint32, 64: dtypes.int64 if 'U' not in expr else dtypes.uint64}.get(bits, dtypes.uint32)
     return UOp.const(dt, val)
   if (m := re.match(r'(-?\d+)(ULL|LL|UL|L|U)?$', expr)):
-    val = int(m.group(1))
-    suffix = m.group(2) or ''
-    if 'LL' in suffix: dt = dtypes.uint64 if 'U' in suffix else dtypes.int64
-    elif 'L' in suffix: dt = dtypes.uint64 if 'U' in suffix else dtypes.int64  # Treat L as 64-bit too
-    elif 'U' in suffix: dt = dtypes.uint32
-    else: dt = dtypes.int if val < 0 else dtypes.uint32
+    val, suffix = int(m.group(1)), m.group(2) or ''
+    dt = dtypes.uint64 if 'LL' in suffix or 'L' in suffix else dtypes.uint32 if 'U' in suffix else dtypes.int if val < 0 else dtypes.uint32
+    if 'U' in suffix and ('LL' in suffix or 'L' in suffix): dt = dtypes.uint64
     return UOp.const(dt, val)
-  # Float literals: 2.0F or 2.0f -> float32, 2.0 (no suffix) -> float64
   if (m := re.match(r'-?(\d+\.\d+)[Ff]$', expr)): return UOp.const(dtypes.float32, float(expr.rstrip('Ff')))
   if (m := re.match(r'-?(\d+)[Ff]$', expr)): return UOp.const(dtypes.float32, float(expr.rstrip('Ff')))
   if (m := re.match(r'-?(\d+\.\d+)$', expr)): return UOp.const(dtypes.float64, float(expr))
-  # Unary bitwise NOT
+
+  # Unary operators
   if expr.startswith('~'):
     inner = parse_expr(expr[1:], vars)
     return inner ^ UOp.const(inner.dtype, (1 << (inner.dtype.itemsize * 8)) - 1)
-  # Unary logical NOT: !x means x == 0
   if expr.startswith('!'):
     inner = parse_expr(expr[1:], vars)
     return inner.eq(UOp.const(inner.dtype, 0))
-  # Unary minus
   if expr.startswith('-') and len(expr) > 1 and expr[1] not in '0123456789':
     return parse_expr(expr[1:], vars).neg()
+
   # Variable
   if expr in vars: return vars[expr]
   if expr == 'PI': return UOp.const(dtypes.float32, 3.141592653589793)
-  # IEEE 754 special constants (handle both +INF and INF forms since unary minus is handled separately)
-  if expr in ('+INF', 'INF'): return UOp.const(dtypes.float64, float('inf'))
-  if expr == '-INF': return UOp.const(dtypes.float64, float('-inf'))
-  if expr in ('+INF.f32', 'INF.f32'): return UOp.const(dtypes.float32, float('inf'))
-  if expr == '-INF.f32': return UOp.const(dtypes.float32, float('-inf'))
-  if expr in ('+INF.f16', 'INF.f16'): return UOp.const(dtypes.half, float('inf'))
-  if expr == '-INF.f16': return UOp.const(dtypes.half, float('-inf'))
-  # NaN constants
-  if expr in ('NAN.f32', 'NAN'): return UOp.const(dtypes.uint32, 0x7FC00000).bitcast(dtypes.float32)  # Quiet NaN
+
+  # IEEE 754 special constants
+  for pattern, val in [('+INF', float('inf')), ('INF', float('inf')), ('-INF', float('-inf'))]:
+    if expr == pattern: return UOp.const(dtypes.float64, val)
+    if expr == f'{pattern}.f32': return UOp.const(dtypes.float32, val)
+    if expr == f'{pattern}.f16': return UOp.const(dtypes.half, val)
+  if expr in ('NAN.f32', 'NAN'): return UOp.const(dtypes.uint32, 0x7FC00000).bitcast(dtypes.float32)
   if expr == 'NAN.f64': return UOp.const(dtypes.uint64, 0x7FF8000000000000).bitcast(dtypes.float64)
   if expr == 'NAN.f16': return UOp.const(dtypes.uint16, 0x7E00).bitcast(dtypes.half)
-  # Overflow/underflow: smallest denormal (underflow) and largest finite (overflow)
-  if expr == 'UNDERFLOW_F32': return UOp.const(dtypes.uint32, 0x00000001).bitcast(dtypes.float32)  # ~1.4e-45
-  if expr == 'OVERFLOW_F32': return UOp.const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)  # ~3.4e38
+  if expr == 'UNDERFLOW_F32': return UOp.const(dtypes.uint32, 0x00000001).bitcast(dtypes.float32)
+  if expr == 'OVERFLOW_F32': return UOp.const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)
   if expr == 'UNDERFLOW_F64': return UOp.const(dtypes.uint64, 0x0000000000000001).bitcast(dtypes.float64)
   if expr == 'OVERFLOW_F64': return UOp.const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
-  # Array-indexed variable with type: S{0}.f32, in{1}.f32 (curly braces from loop unrolling)
+
+  # Array-indexed variable with type: S{0}.f32
   if (m := re.match(r'([a-zA-Z_]\w*)\{(\d+)\}\.(\w+)$', expr)):
-    var_name, idx, type_suffix = m.group(1), int(m.group(2)), m.group(3)
-    # Map array index to actual variable: S{0} -> S0, in{0} -> in0
-    actual_var = f'{var_name}{idx}'
-    v = vars.get(actual_var, UOp.const(dtypes.uint32, 0))
-    dt = DTYPES.get(type_suffix, dtypes.uint32)
-    if dt == v.dtype: return v
-    return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
-  # Array-indexed variable: S{0}, in{1} (curly braces from loop unrolling)
+    v = vars.get(f'{m.group(1)}{m.group(2)}', UOp.const(dtypes.uint32, 0))
+    dt = DTYPES.get(m.group(3), dtypes.uint32)
+    return v if dt == v.dtype else v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
+
+  # Array-indexed variable: S{0}
   if (m := re.match(r'([a-zA-Z_]\w*)\{(\d+)\}$', expr)):
-    var_name, idx = m.group(1), int(m.group(2))
-    actual_var = f'{var_name}{idx}'
-    return vars.get(actual_var, UOp.const(dtypes.uint32, 0))
+    return vars.get(f'{m.group(1)}{m.group(2)}', UOp.const(dtypes.uint32, 0))
+
   # Brace concatenation: { hi, lo }
   if (m := re.match(r'\{\s*(.+?)\s*,\s*(.+?)\s*\}', expr)):
     high = parse_expr(m.group(1), vars).cast(dtypes.uint64)
     low = parse_expr(m.group(2), vars).cast(dtypes.uint64)
     return (high << UOp.const(dtypes.uint64, 32)) | low
-  # VGPR[lane][reg] - read from vgpr buffer at specific lane and register index
+
+  # VGPR[lane][reg]
   if (m := re.match(r'VGPR\[([^\]]+)\]\[([^\]]+)\]', expr)):
-    lane_expr, reg_expr = m.group(1), m.group(2)
-    lane = parse_expr(lane_expr, vars)
-    reg = parse_expr(reg_expr, vars)
+    lane, reg = parse_expr(m.group(1), vars), parse_expr(m.group(2), vars)
     if lane.dtype != dtypes.uint32: lane = lane.cast(dtypes.uint32)
     if reg.dtype != dtypes.uint32: reg = reg.cast(dtypes.uint32)
     vgpr = vars.get('_vgpr')
     if vgpr is None: return UOp.const(dtypes.uint32, 0)
-    # vgpr layout: reg * 32 + lane (32 lanes per register)
-    idx = reg * UOp.const(dtypes.uint32, 32) + lane
-    return vgpr.index(idx.cast(dtypes.index))
+    return vgpr.index((reg * UOp.const(dtypes.uint32, 32) + lane).cast(dtypes.index))
+
   # MEM[addr].type
   if (m := re.match(r'MEM\[(.+)\]\.(\w+)', expr)):
-    addr = parse_expr(m.group(1), vars)
-    dt = DTYPES.get(m.group(2), dtypes.uint32)
-    mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')  # Use vmem for FLAT/GLOBAL, lds for DS
+    addr, dt = parse_expr(m.group(1), vars), DTYPES.get(m.group(2), dtypes.uint32)
+    mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
     if mem is None: return UOp.const(dt, 0)
-    # Use appropriate shift based on address dtype (64-bit for vmem, 32-bit for lds)
     addr_dt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
     shift_amt = UOp.const(addr_dt, 2)
     idx = (addr >> shift_amt).cast(dtypes.index)
-    val = mem.index(idx)  # Don't call .load() - pm_add_loads will add it
+    val = mem.index(idx)
     if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-      four = UOp.const(addr_dt, 4)
-      hi_idx = ((addr + four) >> shift_amt).cast(dtypes.index)
-      val = val.cast(dtypes.uint64) | (mem.index(hi_idx).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+      val = val.cast(dtypes.uint64) | (mem.index(((addr + UOp.const(addr_dt, 4)) >> shift_amt).cast(dtypes.index)).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
     elif dt in (dtypes.uint8, dtypes.int8):
-      # Extract byte: shift by (addr & 3) * 8, mask to 8 bits
       byte_offset = (addr & UOp.const(addr_dt, 3)).cast(dtypes.uint32)
       val = (val >> (byte_offset * UOp.const(dtypes.uint32, 8))) & UOp.const(dtypes.uint32, 0xFF)
     elif dt in (dtypes.uint16, dtypes.int16):
-      # Extract halfword: shift by ((addr >> 1) & 1) * 16, mask to 16 bits
       half_offset = ((addr >> UOp.const(addr_dt, 1)) & UOp.const(addr_dt, 1)).cast(dtypes.uint32)
       val = (val >> (half_offset * UOp.const(dtypes.uint32, 16))) & UOp.const(dtypes.uint32, 0xFFFF)
     return val
-  # Array element access with type suffix: VAR[index].type (like in7[7].b8 for single bit cast to type)
+
+  # Array element access with type: VAR[index].type
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\]\.(\w+)$', expr)):
     var_name, idx, type_suffix = m.group(1), int(m.group(2)), m.group(3)
     dt = DTYPES.get(type_suffix, dtypes.uint32)
-    # First check if it's an array element (like in7 accessing in7)
     actual_var = f'{var_name}{idx}'
     if actual_var in vars:
       v = vars[actual_var]
       return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
-    # Otherwise treat as single bit access with type cast
     if var_name in vars:
       v = vars[var_name]
       if v.dtype != dtypes.uint32: v = v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
-      bit_val = (v >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)
-      return bit_val.cast(dt) if dt.itemsize != dtypes.uint32.itemsize else bit_val.bitcast(dt)
-  # Array element access: VAR[index] where index is a constant - maps to VAR{index} variable
+      return ((v >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)).cast(dt) if dt.itemsize != 4 else \
+             ((v >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)).bitcast(dt)
+
+  # Array element access: VAR[index]
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\]$', expr)):
     var_name, idx = m.group(1), int(m.group(2))
     actual_var = f'{var_name}{idx}'
     if actual_var in vars: return vars[actual_var]
-    # If not found as array element, try as single bit access on the variable
     if var_name in vars:
       v = vars[var_name]
       if v.dtype != dtypes.uint32: v = v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
       return (v >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)
-  # VAR[high:low] - handled above in "Bit slice" pattern
-  # Lambda call: NAME(arg1, arg2, ...)
+
+  # Lambda call
   if (m := re.match(r'(\w+)\((.+)\)$', expr)):
     func_name, args_str = m.group(1), m.group(2)
     if func_name in vars and isinstance(vars[func_name], tuple) and vars[func_name][0] == 'lambda':
       _, param_names, body = vars[func_name]
-      # Parse arguments (handling nested parens and braces)
-      args = []
-      depth, start = 0, 0
+      args, depth, start = [], 0, 0
       for i, ch in enumerate(args_str):
         if ch in '({': depth += 1
         elif ch in ')}': depth -= 1
@@ -939,58 +693,37 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
           args.append(args_str[start:i].strip())
           start = i + 1
       args.append(args_str[start:].strip())
-      # Build new vars with lambda parameters bound to arguments
       lambda_vars = vars.copy()
-      for param, arg in zip(param_names, args):
-        lambda_vars[param] = parse_expr(arg, vars)
-      # Check if body is multi-line (contains newlines or semicolons indicating statements)
+      for param, arg in zip(param_names, args): lambda_vars[param] = parse_expr(arg, vars)
       if ';' in body or '\n' in body or 'return' in body.lower():
-        # Multi-line body with return statements - parse as block and extract _return_val
         return _parse_lambda_body(body, lambda_vars)
       return parse_expr(body, lambda_vars)
-  # Array element access with dynamic index: VAR[expr] where expr is not a constant
+
+  # Dynamic array element access
   if (m := re.match(r'([a-zA-Z_]\w*)\[([^\]]+)\]$', expr)):
     var_name, idx_expr = m.group(1), m.group(2)
-    # Skip if this is a bit slice pattern (colon in brackets)
     if ':' not in idx_expr:
-      # Check if we have array elements var0, var1, etc.
-      # Build a cascading WHERE to select the right element
       idx = parse_expr(idx_expr, vars)
       if idx.dtype != dtypes.uint32: idx = idx.cast(dtypes.uint32)
-      # Find all array elements (var0, var1, var2, ...)
-      elements = []
-      for i in range(256):  # Reasonable max
-        elem_var = f'{var_name}{i}'
-        if elem_var in vars:
-          elements.append((i, vars[elem_var]))
-        elif i > 0 and len(elements) == 0:
-          break  # No elements found after checking a few
-        elif i > 0 and f'{var_name}{i+1}' not in vars:
-          break  # Reached end of array
+      elements = [(i, vars[f'{var_name}{i}']) for i in range(256) if f'{var_name}{i}' in vars]
       if elements:
-        # Build cascading WHERE: idx==0 ? var0 : (idx==1 ? var1 : (idx==2 ? var2 : ...))
-        result = elements[-1][1]  # Default to last element
+        result = elements[-1][1]
         for elem_idx, elem_val in reversed(elements[:-1]):
           cond = idx.eq(UOp.const(dtypes.uint32, elem_idx))
-          # Type coercion
           if elem_val.dtype != result.dtype:
-            if elem_val.dtype.itemsize == result.dtype.itemsize:
-              result = result.cast(elem_val.dtype)
-            else:
-              elem_val = elem_val.cast(result.dtype)
+            if elem_val.dtype.itemsize == result.dtype.itemsize: result = result.cast(elem_val.dtype)
+            else: elem_val = elem_val.cast(result.dtype)
           result = cond.where(elem_val, result)
         return result
-  # General suffix indexing: prefix[idx] where prefix is not a simple identifier
-  # This handles cases like in[7][7] where in[7] needs to be parsed first
+
+  # General suffix indexing
   if (m := re.match(r'(.+)\[(\d+)\]$', expr)):
     prefix, idx = m.group(1), int(m.group(2))
-    # Only handle if prefix is not a simple identifier (those are handled above)
     if not re.match(r'^[a-zA-Z_]\w*$', prefix):
       base = parse_expr(prefix, vars)
-      # Treat as bit access on the result
       if base.dtype != dtypes.uint32: base = base.bitcast(dtypes.uint32) if base.dtype.itemsize == 4 else base.cast(dtypes.uint32)
       return (base >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)
-  # General suffix indexing with type: prefix[idx].type
+
   if (m := re.match(r'(.+)\[(\d+)\]\.(\w+)$', expr)):
     prefix, idx, type_suffix = m.group(1), int(m.group(2)), m.group(3)
     dt = DTYPES.get(type_suffix, dtypes.uint32)
@@ -998,18 +731,16 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       base = parse_expr(prefix, vars)
       if base.dtype != dtypes.uint32: base = base.bitcast(dtypes.uint32) if base.dtype.itemsize == 4 else base.cast(dtypes.uint32)
       bit_val = (base >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)
-      return bit_val.cast(dt) if dt.itemsize != dtypes.uint32.itemsize else bit_val.bitcast(dt)
+      return bit_val.cast(dt) if dt.itemsize != 4 else bit_val.bitcast(dt)
+
   # Function call
   if (result := _parse_func(expr, vars)) is not None: return result
   return UOp.const(dtypes.uint32, 0)
 
 def _parse_lambda_body(body: str, lambda_vars: dict[str, UOp]) -> UOp:
-  """Parse a multi-line lambda body with return statements. Returns the computed value."""
-  # Split body into lines (handling both ; and newline separators)
+  """Parse a multi-line lambda body with return statements."""
   body = body.replace(';', '\n')
   lines = [l.strip() for l in body.split('\n') if l.strip() and not l.strip().startswith('//')]
-
-  # Parse the body as if/elsif/else blocks, collecting return values
   return _parse_lambda_block(lines, 0, lambda_vars)[1]
 
 def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp]) -> tuple[int, UOp]:
@@ -1017,13 +748,9 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp]) -> t
   i = start
   while i < len(lines):
     line = lines[i]
-    # End of block markers
-    if re.match(r'(elsif|else|endif|endfor)\b', line, re.IGNORECASE):
-      break
-    # Return statement
+    if re.match(r'(elsif|else|endif|endfor)\b', line, re.IGNORECASE): break
     if (m := re.match(r'return\s+(.+)$', line, re.IGNORECASE)):
       return i + 1, parse_expr(m.group(1), vars)
-    # For loop: unroll
     if (m := re.match(r'for\s+(\w+)\s+in\s+(\d+)\s*:\s*(\d+)\s+do', line, re.IGNORECASE)):
       loop_var, start_val, end_val = m.group(1), int(m.group(2)), int(m.group(3))
       i += 1
@@ -1033,29 +760,15 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp]) -> t
         elif re.match(r'endfor\b', lines[i], re.IGNORECASE): depth -= 1
         if depth > 0: body_lines.append(lines[i])
         i += 1
-      def _try_eval(expr: str) -> str:
-        try:
-          if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()):
-            return str(eval(expr))
-        except: pass
-        return expr
       for loop_i in range(start_val, end_val + 1):
         for bl in body_lines:
           subst = re.sub(rf'\b{loop_var}\b', str(loop_i), bl)
-          # Simplify arithmetic in bit slice bounds: data[0 * 8 + 7 : 0 * 8] -> data[7 : 0]
-          def _simplify_slice(m):
-            hi, lo = _try_eval(m.group(1)), _try_eval(m.group(2))
-            return f'[{hi} : {lo}]'
-          subst = re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', _simplify_slice, subst)
-          # Handle array-indexed assignments: in[i] = value -> in{i} = value
+          subst = re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', lambda m: f'[{_try_eval(m.group(1))} : {_try_eval(m.group(2))}]', subst)
           if (am := re.match(r'(\w+)\[(\d+)\]\s*=\s*(.+)', subst)):
-            actual_var = f'{am.group(1)}{am.group(2)}'
-            vars[actual_var] = parse_expr(am.group(3), vars)
+            vars[f'{am.group(1)}{am.group(2)}'] = parse_expr(am.group(3), vars)
       continue
-    # Declaration
     if re.match(r'declare\s+', line, re.IGNORECASE):
       i += 1; continue
-    # If block
     if (m := re.match(r'if\s+(.+?)\s+then$', line, re.IGNORECASE)):
       conditions: list[tuple[UOp, UOp | None]] = []
       cond = parse_expr(m.group(1), vars)
@@ -1073,12 +786,10 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp]) -> t
         elif re.match(r'else$', lines[i], re.IGNORECASE):
           i += 1
           i, else_ret = _parse_lambda_block(lines, i, vars)
-          # Build cascading WHERE from conditions
           result = else_ret
           for cond, ret_val in reversed(conditions):
             if ret_val is not None:
-              if ret_val.dtype != result.dtype and ret_val.dtype.itemsize == result.dtype.itemsize:
-                result = result.cast(ret_val.dtype)
+              if ret_val.dtype != result.dtype and ret_val.dtype.itemsize == result.dtype.itemsize: result = result.cast(ret_val.dtype)
               result = cond.where(ret_val, result)
           return i, result
         elif re.match(r'endif\b', lines[i], re.IGNORECASE):
@@ -1097,35 +808,22 @@ def _floor(x: UOp) -> UOp:
 def _f16_extract(v: UOp) -> UOp:
   return (v & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16).bitcast(dtypes.half) if v.dtype == dtypes.uint32 else v
 
-def _isnan(v: UOp) -> UOp:
-  if v.dtype == dtypes.float64:
-    v64 = v.bitcast(dtypes.uint64)
-    exp_mask, mant_mask = UOp.const(dtypes.uint64, 0x7FF0000000000000), UOp.const(dtypes.uint64, 0x000FFFFFFFFFFFFF)
-    return (v64 & exp_mask).eq(exp_mask) & (v64 & mant_mask).ne(UOp.const(dtypes.uint64, 0))
-  v32 = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v
-  return (v32 & UOp.const(dtypes.uint32, 0x7F800000)).eq(UOp.const(dtypes.uint32, 0x7F800000)) & \
-         (v32 & UOp.const(dtypes.uint32, 0x007FFFFF)).ne(UOp.const(dtypes.uint32, 0))
-
 def _check_nan(inner: str, vars: dict, quiet: bool) -> UOp:
-  # For NaN classification, check the ORIGINAL type's bits, not converted bits
-  # Converting signaling NaN to f64 quiets it, so we must check original f32/f16 bits
-  if (m := re.match(r"64'F\((.+)\)", inner)): inner = m.group(1)  # Strip 64'F wrapper
+  if (m := re.match(r"64'F\((.+)\)", inner)): inner = m.group(1)
   v = parse_expr(inner, vars)
-  is_f16 = '.f16' in inner or v.dtype == dtypes.half
-  is_f64 = '.f64' in inner or v.dtype == dtypes.float64
+  is_f16, is_f64 = '.f16' in inner or v.dtype == dtypes.half, '.f64' in inner or v.dtype == dtypes.float64
   if is_f16:
     v16 = (v & UOp.const(dtypes.uint32, 0xFFFF)) if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint16).cast(dtypes.uint32)
     exp_mask, mant_mask, quiet_bit = UOp.const(dtypes.uint32, 0x7C00), UOp.const(dtypes.uint32, 0x03FF), UOp.const(dtypes.uint32, 0x0200)
-    is_nan_exp, has_mant, is_quiet = (v16 & exp_mask).eq(exp_mask), (v16 & mant_mask).ne(UOp.const(dtypes.uint32, 0)), (v16 & quiet_bit).ne(UOp.const(dtypes.uint32, 0))
   elif is_f64:
-    v64 = v.bitcast(dtypes.uint64) if v.dtype == dtypes.float64 else v.cast(dtypes.uint64)
+    v16 = v.bitcast(dtypes.uint64) if v.dtype == dtypes.float64 else v.cast(dtypes.uint64)
     exp_mask, mant_mask, quiet_bit = UOp.const(dtypes.uint64, 0x7FF0000000000000), UOp.const(dtypes.uint64, 0x000FFFFFFFFFFFFF), UOp.const(dtypes.uint64, 0x0008000000000000)
-    is_nan_exp, has_mant, is_quiet = (v64 & exp_mask).eq(exp_mask), (v64 & mant_mask).ne(UOp.const(dtypes.uint64, 0)), (v64 & quiet_bit).ne(UOp.const(dtypes.uint64, 0))
   else:
-    # f32: check original f32 bits for NaN type
-    v32 = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v
+    v16 = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v
     exp_mask, mant_mask, quiet_bit = UOp.const(dtypes.uint32, 0x7F800000), UOp.const(dtypes.uint32, 0x007FFFFF), UOp.const(dtypes.uint32, 0x00400000)
-    is_nan_exp, has_mant, is_quiet = (v32 & exp_mask).eq(exp_mask), (v32 & mant_mask).ne(UOp.const(dtypes.uint32, 0)), (v32 & quiet_bit).ne(UOp.const(dtypes.uint32, 0))
+  is_nan_exp = (v16 & exp_mask).eq(exp_mask)
+  has_mant = (v16 & mant_mask).ne(UOp.const(v16.dtype, 0))
+  is_quiet = (v16 & quiet_bit).ne(UOp.const(v16.dtype, 0))
   return (is_nan_exp & is_quiet) if quiet else (is_nan_exp & has_mant & is_quiet.logical_not())
 
 def _minmax_reduce(is_max: bool, dt: DType, args: list[UOp]) -> UOp:
@@ -1134,321 +832,211 @@ def _minmax_reduce(is_max: bool, dt: DType, args: list[UOp]) -> UOp:
   for a in args[1:]:
     b = cast(a)
     if dt == dtypes.float32:
-      # AMD NaN handling: v_min_f32(nan, x) = x, v_max_f32(nan, x) = x
-      a_nan = _isnan(result)
-      b_nan = _isnan(b)
+      a_nan, b_nan = _isnan(result), _isnan(b)
       cmp = result.maximum(b) if is_max else result.minimum(b)
-      # If a is NaN, return b; if b is NaN, return a; otherwise return cmp result
       result = a_nan.where(b, b_nan.where(result, cmp))
     else:
       result = result.maximum(b) if is_max else result.minimum(b)
   return result
 
-# Table of function parsers: (regex_pattern, num_args, handler)
+# Function table
 _FUNC_TABLE: list[tuple[str, int, callable]] = []
 
 def _register_funcs():
   global _FUNC_TABLE
-  # Unary math functions - sin/cos need range reduction for large inputs
-  # AMD V_SIN_F32/V_COS_F32 take input in "turns" (1.0 = 2π) and reduce to [-0.5, 0.5] before computing
+
   def _find_two_pi_mul(x: UOp) -> tuple[UOp, float] | None:
-    """Find if x contains a multiplication by 2π (or π*2). Returns (turns, two_pi_val) or None."""
     if x.op != Ops.MUL or len(x.src) != 2: return None
     for i, src in enumerate(x.src):
-      # Direct 2π constant
       if src.op == Ops.CONST and abs(src.arg - 6.283185307179586) < 1e-5:
         return (x.src[1 - i], 6.283185307179586)
-      # π * 2.0 pattern (MUL of PI and 2.0)
       if src.op == Ops.MUL and len(src.src) == 2:
-        vals = []
-        for s in src.src:
-          if s.op == Ops.CONST: vals.append(s.arg)
-          elif s.op == Ops.CAST and s.src[0].op == Ops.CONST: vals.append(s.src[0].arg)
-        if len(vals) == 2:
-          prod = vals[0] * vals[1]
-          if abs(prod - 6.283185307179586) < 1e-5:
-            return (x.src[1 - i], prod)
+        vals = [s.arg for s in src.src if s.op == Ops.CONST] + [s.src[0].arg for s in src.src if s.op == Ops.CAST and s.src[0].op == Ops.CONST]
+        if len(vals) == 2 and abs(vals[0] * vals[1] - 6.283185307179586) < 1e-5:
+          return (x.src[1 - i], vals[0] * vals[1])
     return None
-  def _sin_with_range_reduction(a, v, m):
-    x = a[0]
-    # Check if x is of the form "turns * 2π" (common AMD trig pattern)
-    # If so, reduce turns to [-0.5, 0.5] BEFORE multiplying by 2π for better precision
+
+  def _trig_range_reduce(x: UOp, phase_offset: float = 0.0) -> UOp:
     match = _find_two_pi_mul(x)
     if match is not None:
       turns, two_pi_val = match
-      # Reduce turns to [-0.5, 0.5]: turns_reduced = turns - round(turns)
-      # round(x) = floor(x + 0.5)
+      if phase_offset != 0: turns = turns + UOp.const(turns.dtype, phase_offset)
       n = _floor(turns + UOp.const(turns.dtype, 0.5))
-      turns_reduced = turns - n
-      # Now compute sin(turns_reduced * 2π)
-      two_pi = UOp.const(turns.dtype, two_pi_val)
-      return UOp(Ops.SIN, turns.dtype, (turns_reduced * two_pi,))
-    # Fallback: standard range reduction to [-π, π]
-    two_pi = UOp.const(x.dtype, 6.283185307179586)
-    inv_two_pi = UOp.const(x.dtype, 0.15915494309189535)  # 1/(2π)
-    n = _floor(x * inv_two_pi + UOp.const(x.dtype, 0.5))  # round(x / 2π)
-    x_reduced = x - n * two_pi
-    return UOp(Ops.SIN, x.dtype, (x_reduced,))
-  def _cos_with_range_reduction(a, v, m):
-    x = a[0]
-    # Check if x is of the form "turns * 2π" (common AMD trig pattern)
-    # If so, cos(turns * 2π) = sin((turns + 0.25) * 2π)
-    match = _find_two_pi_mul(x)
-    if match is not None:
-      turns, two_pi_val = match
-      # cos(turns * 2π) = sin((turns + 0.25) * 2π) - add 0.25 turns (= π/2 radians)
-      turns_plus_quarter = turns + UOp.const(turns.dtype, 0.25)
-      # Reduce to [-0.5, 0.5]: turns_reduced = turns - round(turns)
-      n = _floor(turns_plus_quarter + UOp.const(turns.dtype, 0.5))
-      turns_reduced = turns_plus_quarter - n
-      two_pi = UOp.const(turns.dtype, two_pi_val)
-      return UOp(Ops.SIN, turns.dtype, (turns_reduced * two_pi,))
-    # Fallback: cos(x) = sin(x + π/2)
-    return _sin_with_range_reduction([x + UOp.const(x.dtype, 1.5707963267948966)], v, m)
+      return UOp(Ops.SIN, turns.dtype, ((turns - n) * UOp.const(turns.dtype, two_pi_val),))
+    if phase_offset != 0: x = x + UOp.const(x.dtype, phase_offset * 6.283185307179586)
+    two_pi, inv_two_pi = UOp.const(x.dtype, 6.283185307179586), UOp.const(x.dtype, 0.15915494309189535)
+    n = _floor(x * inv_two_pi + UOp.const(x.dtype, 0.5))
+    return UOp(Ops.SIN, x.dtype, (x - n * two_pi,))
+
+  # Unary math
   for name, op in [('sqrt', Ops.SQRT), ('trunc', Ops.TRUNC), ('log2', Ops.LOG2)]:
     _FUNC_TABLE.append((rf'{name}\((.+)\)', 1, lambda a, v, m, op=op: UOp(op, a[0].dtype, (a[0],))))
-  _FUNC_TABLE.append((r'sin\((.+)\)', 1, _sin_with_range_reduction))
-  _FUNC_TABLE.append((r'cos\((.+)\)', 1, _cos_with_range_reduction))
+  _FUNC_TABLE.append((r'sin\((.+)\)', 1, lambda a, v, m: _trig_range_reduce(a[0])))
+  _FUNC_TABLE.append((r'cos\((.+)\)', 1, lambda a, v, m: _trig_range_reduce(a[0], 0.25)))
   _FUNC_TABLE.append((r'floor\((.+)\)', 1, lambda a, v, m: _floor(a[0])))
   _FUNC_TABLE.append((r'fract\((.+)\)', 1, lambda a, v, m: a[0] - _floor(a[0])))
+
   def _signext(a, v, m):
     val = a[0]
-    # Detect if value is an 8-bit or 16-bit masked value (from MEM[ADDR].i8 or MEM[ADDR].i16)
-    # Look for AND with 0xFF or 0xFFFF mask
     is_8bit = val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == 0xFF
     is_16bit = val.op == Ops.AND and len(val.src) == 2 and val.src[1].op == Ops.CONST and val.src[1].arg == 0xFFFF
     if is_8bit or val.dtype in (dtypes.int8, dtypes.uint8):
-      # Sign extend 8-bit to 32-bit: if bit 7 is set, OR with 0xFFFFFF00
       v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
       sign_bit = (v32 >> UOp.const(dtypes.uint32, 7)) & UOp.const(dtypes.uint32, 1)
-      return sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(
-        v32 | UOp.const(dtypes.uint32, 0xFFFFFF00), v32).cast(dtypes.int)
+      return sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(v32 | UOp.const(dtypes.uint32, 0xFFFFFF00), v32).cast(dtypes.int)
     if is_16bit or val.dtype in (dtypes.int16, dtypes.short, dtypes.uint16):
-      # Sign extend 16-bit to 32-bit: if bit 15 is set, OR with 0xFFFF0000
       v32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
       sign_bit = (v32 >> UOp.const(dtypes.uint32, 15)) & UOp.const(dtypes.uint32, 1)
-      return sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(
-        v32 | UOp.const(dtypes.uint32, 0xFFFF0000), v32).cast(dtypes.int)
-    if val.dtype in (dtypes.int, dtypes.int32):
-      return val.cast(dtypes.int64)
-    return val
+      return sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(v32 | UOp.const(dtypes.uint32, 0xFFFF0000), v32).cast(dtypes.int)
+    return val.cast(dtypes.int64) if val.dtype in (dtypes.int, dtypes.int32) else val
   _FUNC_TABLE.append((r'signext\((.+)\)', 1, _signext))
+
   _FUNC_TABLE.append((r'isEven\((.+)\)', 1, lambda a, v, m: (UOp(Ops.TRUNC, a[0].dtype, (a[0],)).cast(dtypes.int) & UOp.const(dtypes.int, 1)).eq(UOp.const(dtypes.int, 0))))
-  _FUNC_TABLE.append((r'abs\((.+)\)', 1, lambda a, v, m: (a[0].bitcast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x7FFFFFFF)).bitcast(dtypes.float32) if a[0].dtype == dtypes.float32 else
-                                                         (a[0].cast(dtypes.uint64) & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64) if a[0].dtype == dtypes.float64 else
-                                                         (a[0].bitcast(dtypes.uint16) & UOp.const(dtypes.uint16, 0x7FFF)).bitcast(dtypes.half) if a[0].dtype == dtypes.half else a[0]))
-  # Binary math functions
+  _FUNC_TABLE.append((r'abs\((.+)\)', 1, lambda a, v, m:
+    (a[0].bitcast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x7FFFFFFF)).bitcast(dtypes.float32) if a[0].dtype == dtypes.float32 else
+    (a[0].cast(dtypes.uint64) & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64) if a[0].dtype == dtypes.float64 else
+    (a[0].bitcast(dtypes.uint16) & UOp.const(dtypes.uint16, 0x7FFF)).bitcast(dtypes.half) if a[0].dtype == dtypes.half else a[0]))
+
+  # Binary/ternary math
   _FUNC_TABLE.append((r'max\((.+),\s*(.+)\)', 2, lambda a, v, m: UOp(Ops.MAX, a[0].dtype, (a[0], a[1]))))
   _FUNC_TABLE.append((r'min\((.+),\s*(.+)\)', 2, lambda a, v, m: UOp(Ops.MAX, a[0].dtype, (a[0].neg(), a[1].neg())).neg()))
   _FUNC_TABLE.append((r'pow\((.+),\s*(.+)\)', 2, lambda a, v, m: UOp(Ops.EXP2, dtypes.float32, (a[1].bitcast(dtypes.float32),)) if '2.0' in m.group(1) else a[0]))
-  # Ternary math functions
   _FUNC_TABLE.append((r'fma\((.+),\s*(.+),\s*(.+)\)', 3, lambda a, v, m: a[0] * a[1] + a[2]))
+
   # Type conversions
   for src, dst in [('i32', dtypes.float32), ('u32', dtypes.float32)]:
     _FUNC_TABLE.append((rf'{src}_to_f32\((.+)\)', 1, lambda a, v, m, d=dst: a[0].cast(dtypes.int if 'i32' in m.group(0) else dtypes.uint32).cast(d)))
   _FUNC_TABLE.append((r'f32_to_i32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float32).dtype, (a[0].bitcast(dtypes.float32),)).cast(dtypes.int)))
-  # f32_to_u32: clamp negative to 0 before converting (GPU behavior)
-  def _f32_to_u32(a, v, m):
-    f = a[0].bitcast(dtypes.float32)
-    is_neg = f < UOp.const(dtypes.float32, 0.0)
-    clamped = is_neg.where(UOp.const(dtypes.float32, 0.0), f)
-    return UOp(Ops.TRUNC, clamped.dtype, (clamped,)).cast(dtypes.uint32)
-  _FUNC_TABLE.append((r'f32_to_u32\((.+)\)', 1, _f32_to_u32))
+
+  def _f_to_u(f, dt):
+    is_neg = f < UOp.const(f.dtype, 0.0)
+    return UOp(Ops.TRUNC, f.dtype, (is_neg.where(UOp.const(f.dtype, 0.0), f),)).cast(dt)
+  _FUNC_TABLE.append((r'f32_to_u32\((.+)\)', 1, lambda a, v, m: _f_to_u(a[0].bitcast(dtypes.float32), dtypes.uint32)))
   _FUNC_TABLE.append((r'f64_to_i32\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, a[0].bitcast(dtypes.float64).dtype, (a[0].bitcast(dtypes.float64),)).cast(dtypes.int)))
-  # f64_to_u32: clamp negative to 0 before converting (GPU behavior)
-  def _f64_to_u32(a, v, m):
-    f = a[0].bitcast(dtypes.float64)
-    is_neg = f < UOp.const(dtypes.float64, 0.0)
-    clamped = is_neg.where(UOp.const(dtypes.float64, 0.0), f)
-    return UOp(Ops.TRUNC, clamped.dtype, (clamped,)).cast(dtypes.uint32)
-  _FUNC_TABLE.append((r'f64_to_u32\((.+)\)', 1, _f64_to_u32))
+  _FUNC_TABLE.append((r'f64_to_u32\((.+)\)', 1, lambda a, v, m: _f_to_u(a[0].bitcast(dtypes.float64), dtypes.uint32)))
   _FUNC_TABLE.append((r'f16_to_f32\((.+)\)', 1, lambda a, v, m: _f16_extract(a[0]).cast(dtypes.float32)))
   _FUNC_TABLE.append((r'f32_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.half)))
   _FUNC_TABLE.append((r'f16_to_i16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, _f16_extract(a[0]).dtype, (_f16_extract(a[0]),)).cast(dtypes.int16)))
   _FUNC_TABLE.append((r'f16_to_u16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, _f16_extract(a[0]).dtype, (_f16_extract(a[0]),)).cast(dtypes.uint16)))
-  # bf16_to_f32: BF16 is f32 with bottom 16 bits zeroed (easy conversion)
+
   def _bf16_to_f32(a, v, m):
-    # BF16 uses 8 exponent bits + 7 mantissa bits, same as f32's top 16 bits
-    # Converting: shift left by 16 to get f32 bit pattern
-    bits = a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]
-    # Mask to 16 bits in case it's already a 32-bit value
-    bits = bits & UOp.const(dtypes.uint32, 0xFFFF)
+    bits = (a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]) & UOp.const(dtypes.uint32, 0xFFFF)
     return (bits << UOp.const(dtypes.uint32, 16)).bitcast(dtypes.float32)
   _FUNC_TABLE.append((r'bf16_to_f32\((.+)\)', 1, _bf16_to_f32))
+
   # Float classification
   _FUNC_TABLE.append((r'isNAN\((.+)\)', 1, lambda a, v, m: _isnan(a[0])))
   _FUNC_TABLE.append((r'isSignalNAN\((.+)\)', 0, lambda a, v, m: _check_nan(m.group(1), v, quiet=False)))
   _FUNC_TABLE.append((r'isQuietNAN\((.+)\)', 0, lambda a, v, m: _check_nan(m.group(1), v, quiet=True)))
-  # cvtToQuietNAN: convert signaling NaN to quiet NaN by setting the quiet bit
+
   def _cvt_to_quiet_nan(a, v, m):
     val = a[0]
-    if val.dtype == dtypes.float64:
-      return (val.bitcast(dtypes.uint64) | UOp.const(dtypes.uint64, 0x0008000000000000)).bitcast(dtypes.float64)  # Set bit 51
-    elif val.dtype == dtypes.half:
-      return (val.bitcast(dtypes.uint16) | UOp.const(dtypes.uint16, 0x0200)).bitcast(dtypes.half)  # Set bit 9
-    else:  # f32
-      v32 = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
-      return (v32 | UOp.const(dtypes.uint32, 0x00400000)).bitcast(dtypes.float32)  # Set bit 22
+    if val.dtype == dtypes.float64: return (val.bitcast(dtypes.uint64) | UOp.const(dtypes.uint64, 0x0008000000000000)).bitcast(dtypes.float64)
+    elif val.dtype == dtypes.half: return (val.bitcast(dtypes.uint16) | UOp.const(dtypes.uint16, 0x0200)).bitcast(dtypes.half)
+    return ((val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val) | UOp.const(dtypes.uint32, 0x00400000)).bitcast(dtypes.float32)
   _FUNC_TABLE.append((r'cvtToQuietNAN\((.+)\)', 1, _cvt_to_quiet_nan))
-  # isDENORM: check if value is denormalized (exponent=0, mantissa!=0)
+
   def _is_denorm(a, v, m):
     val = a[0]
     if val.dtype == dtypes.float64 or '.f64' in m.group(1):
       bits = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val.cast(dtypes.uint64)
-      exp_mask = UOp.const(dtypes.uint64, 0x7FF0000000000000)
-      mant_mask = UOp.const(dtypes.uint64, 0x000FFFFFFFFFFFFF)
-      exp_zero = (bits & exp_mask).eq(UOp.const(dtypes.uint64, 0))
-      mant_nonzero = (bits & mant_mask).ne(UOp.const(dtypes.uint64, 0))
-      return exp_zero & mant_nonzero
+      return (bits & UOp.const(dtypes.uint64, 0x7FF0000000000000)).eq(UOp.const(dtypes.uint64, 0)) & \
+             (bits & UOp.const(dtypes.uint64, 0x000FFFFFFFFFFFFF)).ne(UOp.const(dtypes.uint64, 0))
     elif val.dtype == dtypes.half or '.f16' in m.group(1):
-      bits = val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)
-      bits32 = bits.cast(dtypes.uint32)
-      exp_mask = UOp.const(dtypes.uint32, 0x7C00)
-      mant_mask = UOp.const(dtypes.uint32, 0x03FF)
-      exp_zero = (bits32 & exp_mask).eq(UOp.const(dtypes.uint32, 0))
-      mant_nonzero = (bits32 & mant_mask).ne(UOp.const(dtypes.uint32, 0))
-      return exp_zero & mant_nonzero
-    else:  # f32
-      bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
-      exp_mask = UOp.const(dtypes.uint32, 0x7F800000)
-      mant_mask = UOp.const(dtypes.uint32, 0x007FFFFF)
-      exp_zero = (bits & exp_mask).eq(UOp.const(dtypes.uint32, 0))
-      mant_nonzero = (bits & mant_mask).ne(UOp.const(dtypes.uint32, 0))
-      return exp_zero & mant_nonzero
+      bits = (val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32)
+      return (bits & UOp.const(dtypes.uint32, 0x7C00)).eq(UOp.const(dtypes.uint32, 0)) & \
+             (bits & UOp.const(dtypes.uint32, 0x03FF)).ne(UOp.const(dtypes.uint32, 0))
+    bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
+    return (bits & UOp.const(dtypes.uint32, 0x7F800000)).eq(UOp.const(dtypes.uint32, 0)) & \
+           (bits & UOp.const(dtypes.uint32, 0x007FFFFF)).ne(UOp.const(dtypes.uint32, 0))
   _FUNC_TABLE.append((r'isDENORM\((.+)\)', 1, _is_denorm))
+
   def _exponent(a, v, m):
     val = a[0]
-    # Return signed int so subtraction works correctly (e.g., exponent(S2) - exponent(S1) >= 96)
     if '.f16' in m.group(1) or val.dtype == dtypes.half:
       bits = val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)
       return ((bits.cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 10)) & UOp.const(dtypes.uint32, 0x1F)).cast(dtypes.int)
     elif '.f64' in m.group(1) or val.dtype == dtypes.float64:
       bits = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val
       return ((bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
-    else:  # f32
-      bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
-      return ((bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.int)
+    bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
+    return ((bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.int)
   _FUNC_TABLE.append((r'exponent\((.+)\)', 1, _exponent))
-  _FUNC_TABLE.append((r'sign\((.+)\)', 1, lambda a, v, m: ((a[0].bitcast(dtypes.uint16) if a[0].dtype == dtypes.half else (a[0] & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 15)) & UOp.const(dtypes.uint32, 1) if '.f16' in m.group(1) or a[0].dtype == dtypes.half else
-                                                          ((a[0].bitcast(dtypes.uint32) if a[0].dtype == dtypes.float32 else a[0]) >> UOp.const(dtypes.uint32, 31)) & UOp.const(dtypes.uint32, 1)))
-  # signext_from_bit
+
+  _FUNC_TABLE.append((r'sign\((.+)\)', 1, lambda a, v, m:
+    ((a[0].bitcast(dtypes.uint16) if a[0].dtype == dtypes.half else (a[0] & UOp.const(dtypes.uint32, 0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 15)) & UOp.const(dtypes.uint32, 1) if '.f16' in m.group(1) or a[0].dtype == dtypes.half else
+    ((a[0].bitcast(dtypes.uint32) if a[0].dtype == dtypes.float32 else a[0]) >> UOp.const(dtypes.uint32, 31)) & UOp.const(dtypes.uint32, 1)))
+
   def _signext_from_bit(a, v, m):
     val, width = a[0].cast(dtypes.uint32), a[1].cast(dtypes.uint32)
     sign_bit = (val >> (width - UOp.const(dtypes.uint32, 1))) & UOp.const(dtypes.uint32, 1)
     mask = (UOp.const(dtypes.uint32, 1) << width) - UOp.const(dtypes.uint32, 1)
     return sign_bit.ne(UOp.const(dtypes.uint32, 0)).where(val | (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF)), val)
   _FUNC_TABLE.append((r'signext_from_bit\((.+),\s*(.+)\)', 2, _signext_from_bit))
-  # AMD v_min/v_max functions
+
+  # AMD v_min/v_max
   for is_max, name in [(False, 'min'), (True, 'max')]:
     for dt, suffix in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32')]:
       _FUNC_TABLE.append((rf'v_{name}_{suffix}\((.+),\s*(.+)\)', 2, lambda a, v, m, is_max=is_max, dt=dt: _minmax_reduce(is_max, dt, a)))
       _FUNC_TABLE.append((rf'v_{name}3_{suffix}\((.+),\s*(.+),\s*(.+)\)', 3, lambda a, v, m, is_max=is_max, dt=dt: _minmax_reduce(is_max, dt, a)))
 
-  # ldexp: multiply float by 2^exp (scale by power of 2)
   def _ldexp(a, v, m):
     val, exp = a[0], a[1]
-    # Convert val to float if it's uint bits
-    if val.dtype == dtypes.uint32:
-      val = val.bitcast(dtypes.float32)
-    elif val.dtype == dtypes.uint64:
-      val = val.bitcast(dtypes.float64)
-    # exp should be a signed integer
-    if exp.dtype in (dtypes.uint32, dtypes.uint64):
-      exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
-    # ldexp(x, n) = x * 2^n
-    # Use EXP2 to compute 2^n, then multiply
-    two_pow_exp = UOp(Ops.EXP2, val.dtype, (exp.cast(val.dtype),))
-    return val * two_pow_exp
+    if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
+    elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
+    if exp.dtype in (dtypes.uint32, dtypes.uint64): exp = exp.cast(dtypes.int if exp.dtype == dtypes.uint32 else dtypes.int64)
+    return val * UOp(Ops.EXP2, val.dtype, (exp.cast(val.dtype),))
   _FUNC_TABLE.append((r'ldexp\((.+),\s*(.+)\)', 2, _ldexp))
 
-  # frexp_mant: extract mantissa (normalized to [0.5, 1.0))
   def _frexp_mant(a, v, m):
     val = a[0]
-    if val.dtype == dtypes.uint32:
-      val = val.bitcast(dtypes.float32)
-    elif val.dtype == dtypes.uint64:
-      val = val.bitcast(dtypes.float64)
-    # For f32: extract bits, set exponent to 126 (bias-1), keep mantissa
-    # frexp returns mantissa in [0.5, 1.0)
+    if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
+    elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
     if val.dtype == dtypes.float32:
       bits = val.bitcast(dtypes.uint32)
-      # Clear exponent, set to 0x3f000000 (exponent = 126, mantissa unchanged -> [0.5, 1.0))
-      mantissa_bits = (bits & UOp.const(dtypes.uint32, 0x807FFFFF)) | UOp.const(dtypes.uint32, 0x3f000000)
-      return mantissa_bits.bitcast(dtypes.float32)
-    else:  # f64
-      bits = val.bitcast(dtypes.uint64)
-      # Clear exponent, set to 0x3fe (exponent = 1022)
-      mantissa_bits = (bits & UOp.const(dtypes.uint64, 0x800FFFFFFFFFFFFF)) | UOp.const(dtypes.uint64, 0x3fe0000000000000)
-      return mantissa_bits.bitcast(dtypes.float64)
+      return ((bits & UOp.const(dtypes.uint32, 0x807FFFFF)) | UOp.const(dtypes.uint32, 0x3f000000)).bitcast(dtypes.float32)
+    bits = val.bitcast(dtypes.uint64)
+    return ((bits & UOp.const(dtypes.uint64, 0x800FFFFFFFFFFFFF)) | UOp.const(dtypes.uint64, 0x3fe0000000000000)).bitcast(dtypes.float64)
   _FUNC_TABLE.append((r'frexp_mant\((.+)\)', 1, _frexp_mant))
-  _FUNC_TABLE.append((r'mantissa\((.+)\)', 1, _frexp_mant))  # Alias for pcode
+  _FUNC_TABLE.append((r'mantissa\((.+)\)', 1, _frexp_mant))
 
-  # frexp_exp: extract exponent (unbiased)
   def _frexp_exp(a, v, m):
     val = a[0]
-    if val.dtype == dtypes.uint32:
-      val = val.bitcast(dtypes.float32)
-    elif val.dtype == dtypes.uint64:
-      val = val.bitcast(dtypes.float64)
+    if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
+    elif val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
     if val.dtype == dtypes.float32:
-      bits = val.bitcast(dtypes.uint32)
-      exp = ((bits >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.int)
-      return exp - UOp.const(dtypes.int, 126)  # Unbias and adjust for frexp convention
-    else:  # f64
-      bits = val.bitcast(dtypes.uint64)
-      exp = ((bits >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
-      return exp - UOp.const(dtypes.int, 1022)  # Unbias and adjust
+      exp = ((val.bitcast(dtypes.uint32) >> UOp.const(dtypes.uint32, 23)) & UOp.const(dtypes.uint32, 0xFF)).cast(dtypes.int)
+      return exp - UOp.const(dtypes.int, 126)
+    exp = ((val.bitcast(dtypes.uint64) >> UOp.const(dtypes.uint64, 52)) & UOp.const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
+    return exp - UOp.const(dtypes.int, 1022)
   _FUNC_TABLE.append((r'frexp_exp\((.+)\)', 1, _frexp_exp))
 
-  # trig_preop_result: extract 53-bit chunk from 1201-bit representation of 2/π
-  # TWO_OVER_PI_1201 is a 1201-bit integer representing 2/π in binary
+  # Trig preop
   TWO_OVER_PI_1201 = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6
-  # Precompute results for all possible shift values (0 to 1148 covers all cases)
-  # shift = index * 53 + max(0, exponent - 1077), where index is 0-31 and exponent up to 2046
-  # Max shift = 31 * 53 + (2046 - 1077) = 1643 + 969 = 2612, but capped at 1148 (1201-53) for valid results
-  _TRIG_PREOP_TABLE = {}
-  for shift_val in range(1149):  # 0 to 1148 (1201 - 53)
-    result_int = ((TWO_OVER_PI_1201 << shift_val) >> (1201 - 53)) & 0x1fffffffffffff
-    _TRIG_PREOP_TABLE[shift_val] = float(result_int)
+  _TRIG_PREOP_TABLE = {shift: float(((TWO_OVER_PI_1201 << shift) >> (1201 - 53)) & 0x1fffffffffffff) for shift in range(1149)}
   def _trig_preop_result(a, v, m):
     shift = a[0]
-    # For constant shift, compute at compile time
     if shift.op == Ops.CONST:
       shift_val = int(shift.arg)
-      if shift_val in _TRIG_PREOP_TABLE:
-        return UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[shift_val])
-      result_int = ((TWO_OVER_PI_1201 << shift_val) >> (1201 - 53)) & 0x1fffffffffffff
-      return UOp.const(dtypes.float64, float(result_int))
-    # For dynamic shift, build nested WHERE for all possible values
-    # This is expensive but necessary for correctness with dynamic exponent adjustment
-    result = UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[0])  # Default
+      return UOp.const(dtypes.float64, _TRIG_PREOP_TABLE.get(shift_val, float(((TWO_OVER_PI_1201 << shift_val) >> (1201 - 53)) & 0x1fffffffffffff)))
+    result = UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[0])
     for shift_val in range(1148, -1, -1):
-      cond = shift.eq(UOp.const(shift.dtype, shift_val))
-      result = cond.where(UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[shift_val]), result)
+      result = shift.eq(UOp.const(shift.dtype, shift_val)).where(UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[shift_val]), result)
     return result
   _FUNC_TABLE.append((r'trig_preop_result\((.+)\)', 1, _trig_preop_result))
 
-  # s_ff1_i32_b32: find first set bit (count trailing zeros) for 32-bit value
-  # Returns the position of the lowest set bit, or -1 if input is 0
-  def _s_ff1_i32_b32(a, v, m):
+  # Find first set bit
+  def _ff1_b32(a, v, m):
     val = a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]
-    # Build cascading WHERE to find lowest set bit position
-    result = UOp.const(dtypes.int, -1)  # Default: no bits set
-    for i in range(31, -1, -1):
-      bit_set = (val >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
-      result = bit_set.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.int, i), result)
-    # Find LOWEST set bit: iterate from bit 0 upward
     result = UOp.const(dtypes.int, -1)
     for i in range(32):
       bit_set = (val >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
-      # Only update if bit is set AND we haven't found one yet (result == -1)
       cond = bit_set.ne(UOp.const(dtypes.uint32, 0)) & result.eq(UOp.const(dtypes.int, -1))
       result = cond.where(UOp.const(dtypes.int, i), result)
     return result
-  _FUNC_TABLE.append((r's_ff1_i32_b32\((.+)\)', 1, _s_ff1_i32_b32))
+  _FUNC_TABLE.append((r's_ff1_i32_b32\((.+)\)', 1, _ff1_b32))
 
-  # s_ff1_i32_b64: find first set bit for 64-bit value
-  def _s_ff1_i32_b64(a, v, m):
+  def _ff1_b64(a, v, m):
     val = a[0].cast(dtypes.uint64) if a[0].dtype != dtypes.uint64 else a[0]
     result = UOp.const(dtypes.int, -1)
     for i in range(64):
@@ -1456,7 +1044,7 @@ def _register_funcs():
       cond = bit_set.ne(UOp.const(dtypes.uint64, 0)) & result.eq(UOp.const(dtypes.int, -1))
       result = cond.where(UOp.const(dtypes.int, i), result)
     return result
-  _FUNC_TABLE.append((r's_ff1_i32_b64\((.+)\)', 1, _s_ff1_i32_b64))
+  _FUNC_TABLE.append((r's_ff1_i32_b64\((.+)\)', 1, _ff1_b64))
 
 _register_funcs()
 
