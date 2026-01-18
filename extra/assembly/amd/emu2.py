@@ -773,9 +773,9 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       for i, (vcc_bit, _) in enumerate(lane_results):
         new_vcc = new_vcc | (vcc_bit << UOp.const(dtypes.uint32, i))
 
-      # Apply EXEC mask: new_vcc = (computed & EXEC) | (old_vcc & ~EXEC)
-      old_vcc = rsgpr(sdst_reg)
-      final_vcc = (new_vcc & exec_mask) | (old_vcc & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF)))
+      # VOP3SD carry-out (sdst) is NOT EXEC-masked - all 32 bits are written
+      # This matches hardware behavior where carry bits for inactive lanes are computed but zero
+      final_vcc = new_vcc
 
       # Build vgpr stores (unrolled) - each store depends on final_vcc which depends on all source reads
       vgpr_stores = []
