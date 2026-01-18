@@ -284,24 +284,27 @@ class TinyJit(Generic[ReturnType]):
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_buffers, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
-    if not JIT or self.cnt == 0:
-      # jit ignore
+    def run(fxn):
       assert self.fxn is not None
-      with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value):
-        ret = self.fxn(*args, **kwargs)
-        if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+      ret = fxn(*args, **kwargs)
+      if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+      return ret
+    if not JIT: ret = run(self.fxn)
+    elif self.cnt == 0:
+      # jit warmup
+      if capturing: raise JitError("having TinyJit inside another TinyJit is not supported")
+      capturing.append(self)
+      with Context(BEAM=0 if getenv("IGNORE_JIT_FIRST_BEAM") else BEAM.value, CAPTURING=0):
+        try: ret = run(self.fxn)
+        finally: capturing.clear()
     elif self.cnt == 1:
       # jit capture
-      assert self.fxn is not None
-      if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
       self._jit_cache: list[ExecItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
       # TODO: should we always disable the memory planner here? it must be off for prune
       with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
         capturing.append(self)
-        try:
-          ret = self.fxn(*args, **kwargs)
-          if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
+        try: ret = run(self.fxn)
         except Exception as e: raise e
         finally: capturing.clear()
       jit_cache = self._jit_cache
