@@ -2292,5 +2292,22 @@ class TestAddF32EdgeCases(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 0x80000000)  # -0
 
 
+class TestVOP3VOPC(unittest.TestCase):
+  """Tests for VOP3-encoded VOPC instructions (comparisons with scalar dest)."""
+
+  def test_v_cmp_ge_f32_e64_nan(self):
+    """V_CMP_GE_F32_E64: |NaN| >= |0.0| should be FALSE (NaN comparisons always false)."""
+    from extra.assembly.amd.autogen.rdna3.ins import VOP3_SDST
+    instructions = [
+      s_mov_b32(s[0], 0xffc00000),  # NaN
+      s_mov_b32(s[1], 0x00000000),  # 0.0
+      v_mov_b32_e32(v[5], s[0]),
+      v_mov_b32_e32(v[3], s[1]),
+      VOP3_SDST(VOP3Op.V_CMP_GE_F32, vdst=s[5], src0=v[5], src1=v[3], abs_=3),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[5], 0)  # NaN comparison is always FALSE
+
+
 if __name__ == '__main__':
   unittest.main()

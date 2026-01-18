@@ -701,11 +701,42 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       old_sdst = rsgpr(inst.vdst.offset)  # vdst is actually sdst for VOP3_SDST
       is_cmpx = 'CMPX' in op_name
 
+      # Get abs/neg modifiers
+      abs_bits = getattr(inst, 'abs', 0) or 0
+      neg_bits = getattr(inst, 'neg', 0) or 0
+      is_16bit_op = 'F16' in op_name or 'B16' in op_name or 'I16' in op_name or 'U16' in op_name
+      is_64bit_op = 'F64' in op_name
+
       # Helper for opsel: extract high or low 16 bits
       def apply_opsel_scalar(val: UOp, sel_bit: int) -> UOp:
         if opsel & (1 << sel_bit):
           return (val >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF)
         return val
+
+      # Helper to apply abs/neg modifiers for VOPC
+      def apply_modifiers_vopc(val: UOp, mod_bit: int) -> UOp:
+        if not (abs_bits & (1 << mod_bit)) and not (neg_bits & (1 << mod_bit)): return val
+        if is_16bit_op:
+          f16_val = val.cast(dtypes.uint16).bitcast(dtypes.half)
+          if abs_bits & (1 << mod_bit):
+            f16_val = (f16_val.bitcast(dtypes.uint16) & UOp.const(dtypes.uint16, 0x7FFF)).bitcast(dtypes.half)
+          if neg_bits & (1 << mod_bit):
+            f16_val = f16_val.neg()
+          return f16_val.bitcast(dtypes.uint16).cast(dtypes.uint32)
+        if is_64bit_op:
+          if val.dtype == dtypes.uint64: val = val.bitcast(dtypes.float64)
+          if abs_bits & (1 << mod_bit):
+            val = (val.bitcast(dtypes.uint64) & UOp.const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64)
+          if neg_bits & (1 << mod_bit):
+            val = val.neg()
+          return val.bitcast(dtypes.uint64)
+        # For 32-bit float ops
+        if val.dtype == dtypes.uint32: val = val.bitcast(dtypes.float32)
+        if abs_bits & (1 << mod_bit):
+          val = (val.bitcast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x7FFFFFFF)).bitcast(dtypes.float32)
+        if neg_bits & (1 << mod_bit):
+          val = val.neg()
+        return val.bitcast(dtypes.uint32)
 
       # Helper to get comparison result for a lane
       def get_cmp_result_vop3(lane_idx: int) -> UOp:
@@ -713,9 +744,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         s0 = rsrc(inst.src0.offset, lane_const)
         s1 = rsrc(inst.src1.offset, lane_const)
         # Apply opsel for 16-bit operations
-        if 'F16' in op_name or 'B16' in op_name or 'I16' in op_name or 'U16' in op_name:
+        if is_16bit_op:
           s0 = apply_opsel_scalar(s0, 0)
           s1 = apply_opsel_scalar(s1, 1)
+        # Apply abs/neg modifiers for float comparisons
+        if 'F32' in op_name or 'F16' in op_name or 'F64' in op_name:
+          s0 = apply_modifiers_vopc(s0, 0)
+          s1 = apply_modifiers_vopc(s1, 1)
         pcode = PCODE.get(inst.op)
         if pcode is None: return UOp.const(dtypes.uint32, 0)
         _, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=UOp.const(dtypes.uint32, lane_idx))
