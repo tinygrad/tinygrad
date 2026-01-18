@@ -148,29 +148,44 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           else: block_assigns.update(iter_assigns); vars.update(iter_assigns)
         continue
 
-      # If/elsif/else
+      # If/elsif/else - optimize away branches with constant conditions (e.g., WAVE32/WAVE64)
       if (m := re.match(r'if\s+(.+?)\s+then$', line, re.IGNORECASE)):
         conditions, else_assigns, vars_snap = [], {}, dict(vars)
         cond = _to_bool(parse_expr(m.group(1), ctx))
+        cond_const = cond.arg if cond.op == Ops.CONST else None  # Check if condition is constant
         i += 1
         i, branch = parse_block(lines, i)
-        conditions.append((cond, branch))
+        if cond_const is not False:  # Skip branch if statically False
+          conditions.append((cond, branch, cond_const))
         vars.clear(); vars.update(vars_snap)
         while i < len(lines):
           if (m := re.match(r'elsif\s+(.+?)\s+then$', lines[i], re.IGNORECASE)):
             cond = _to_bool(parse_expr(m.group(1), {**vars, **block_assigns}))
-            i += 1; i, branch = parse_block(lines, i); conditions.append((cond, branch)); vars.clear(); vars.update(vars_snap)
+            cond_const = cond.arg if cond.op == Ops.CONST else None
+            i += 1; i, branch = parse_block(lines, i)
+            if cond_const is not False: conditions.append((cond, branch, cond_const))
+            vars.clear(); vars.update(vars_snap)
           elif re.match(r'else$', lines[i], re.IGNORECASE): i += 1; i, else_assigns = parse_block(lines, i); vars.clear(); vars.update(vars_snap)
           elif re.match(r'endif\b', lines[i], re.IGNORECASE): i += 1; break
           else: break
-        all_vars = set().union(*[ba.keys() for _, ba in conditions], else_assigns.keys())
-        for var in all_vars:
-          result = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
-          for cond, ba in reversed(conditions):
-            if var in ba:
-              tv = ba[var]
-              result = cond.where(tv, result.cast(tv.dtype) if tv.dtype != result.dtype and tv.dtype.itemsize == result.dtype.itemsize else result)
-          block_assigns[var] = vars[var] = result
+        # Check if any condition is statically True - use that branch directly
+        static_true_idx = next((j for j, (_, _, cc) in enumerate(conditions) if cc is True), None)
+        if static_true_idx is not None:
+          _, branch, _ = conditions[static_true_idx]
+          block_assigns.update(branch); vars.update(branch)
+        elif not conditions:
+          # All conditions were statically False - use else branch
+          block_assigns.update(else_assigns); vars.update(else_assigns)
+        else:
+          # Dynamic conditions - merge with WHERE
+          all_vars = set().union(*[ba.keys() for _, ba, _ in conditions], else_assigns.keys())
+          for var in all_vars:
+            result = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
+            for cond, ba, _ in reversed(conditions):
+              if var in ba:
+                tv = ba[var]
+                result = cond.where(tv, result.cast(tv.dtype) if tv.dtype != result.dtype and tv.dtype.itemsize == result.dtype.itemsize else result)
+            block_assigns[var] = vars[var] = result
         continue
 
       # MEM assignment
@@ -445,7 +460,8 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
   # VGPR/MEM
   if (m := re.match(r'VGPR\[([^\]]+)\]\[([^\]]+)\]', expr)):
     vgpr = vars.get('_vgpr')
-    return vgpr.index((_to_u32(parse_expr(m.group(2), vars)) * _u32(32) + _to_u32(parse_expr(m.group(1), vars))).cast(dtypes.index)) if vgpr else _u32(0)
+    if vgpr is None: return _u32(0)
+    return vgpr.index((_to_u32(parse_expr(m.group(2), vars)) * _u32(32) + _to_u32(parse_expr(m.group(1), vars))).cast(dtypes.index))
   if (m := re.match(r'MEM\[(.+)\]\.(\w+)', expr)):
     addr, dt = parse_expr(m.group(1), vars), DTYPES.get(m.group(2), dtypes.uint32)
     mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
