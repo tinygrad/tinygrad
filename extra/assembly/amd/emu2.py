@@ -94,6 +94,36 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
 
+def _write_64bit(val: UOp, wfn, reg_or_addr, *args) -> list[UOp]:
+  """Write a 64-bit value as two 32-bit writes. args passed to wfn after reg/addr and lo/hi value."""
+  lo, hi = _split64(val)
+  incr = 4 if isinstance(reg_or_addr, UOp) else 1  # 4 bytes for memory addresses, 1 for register indices
+  return [wfn(reg_or_addr, lo, *args), wfn(reg_or_addr + (UOp.const(reg_or_addr.dtype, incr) if isinstance(reg_or_addr, UOp) else incr), hi, *args)]
+
+def _write_val(dest: str, val: UOp, wfn, reg_or_addr, *args) -> list[UOp]:
+  """Write value, splitting 64-bit if needed based on dest type suffix."""
+  return _write_64bit(val, wfn, reg_or_addr, *args) if _is_64bit_dest(dest) else [wfn(reg_or_addr, _to_u32(val), *args)]
+
+def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32) -> UOp:
+  """Conditional memory store: write val to mem[addr] if active, else keep old value."""
+  shift = UOp.const(dtypes.uint64 if addr_bits == 64 else dtypes.uint32, 2)
+  idx = mem.index((addr >> shift).cast(dtypes.index))
+  return idx.store(active.where(_to_u32(val), idx.load()))
+
+def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = None, op_name: str = "") -> dict[int, UOp]:
+  """Collect bit slices from assigns into {dword_idx: value} dict."""
+  slices = {}
+  for dest, val in assigns:
+    if dest.startswith(f'{data_prefix}['):
+      if (m := re.match(rf'{data_prefix}\[(\d+)\s*:\s*(\d+)\]', dest)):
+        low_bit, dword_idx = int(m.group(2)), int(m.group(2)) // 32
+        # D16 loads preserve bits - use final value from pcode_vars
+        if pcode_vars and 'D16' in op_name and dword_idx == 0 and low_bit > 0:
+          slices[0] = _to_u32(pcode_vars.get(data_prefix, val))
+        else: slices[dword_idx] = _to_u32(val)
+    elif dest.startswith(data_prefix): slices[0] = _to_u32(val)
+  return slices
+
 def _scalar_stores(assigns: list, wsgpr, sdst_reg: int, sdst_size: int = 1) -> list[UOp]:
   """Generate stores for scalar assigns (D0, SCC, EXEC, VCC)."""
   stores = []
@@ -287,33 +317,9 @@ def compile_ds_pcode(op, inst, lane: UOp, rvgpr_fn, wvgpr_fn, lds: UOp, exec_mas
 
   _, assigns = parse_pcode(pcode, srcs, lane)
 
-  # Process assigns - handle MEM writes and RETURN_DATA
-  stores = []
-  return_data = {}  # Collect bit slices for RETURN_DATA
-
-  for dest, val in assigns:
-    if dest.startswith('MEM['):
-      # LDS memory write: val is (addr, value) tuple
-      addr, write_val = val
-      if addr.dtype != dtypes.uint32: addr = addr.cast(dtypes.uint32)
-      if write_val.dtype != dtypes.uint32: write_val = write_val.cast(dtypes.uint32)
-      idx = lds.index((addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index))
-      exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
-      active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
-      stores.append(idx.store(active.where(write_val, idx.load())))
-    elif dest.startswith('RETURN_DATA['):
-      # Bit slice assignment: RETURN_DATA[63:32] = val means write to vdst+1
-      m = re.match(r'RETURN_DATA\[(\d+):(\d+)\]', dest)
-      if m:
-        high_bit, low_bit = int(m.group(1)), int(m.group(2))
-        dword_idx = low_bit // 32
-        return_data[dword_idx] = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
-    elif dest.startswith('RETURN_DATA'):
-      # Simple RETURN_DATA.type = val
-      return_data[0] = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
-
-  # Write RETURN_DATA to vgpr destination
-  for dword_idx, val in sorted(return_data.items()):
+  active = _lane_active(exec_mask, lane)
+  stores = [_mem_store(lds, val[0].cast(dtypes.uint32), val[1], active) for dest, val in assigns if dest.startswith('MEM[')]
+  for dword_idx, val in sorted(_collect_data_slices(assigns, 'RETURN_DATA').items()):
     stores.append(wvgpr_fn(vdst_reg + dword_idx, lane, val, exec_mask))
 
   if not stores: return None
@@ -362,9 +368,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   def wvgpr(reg: int, lane: UOp, val: UOp, exec_mask: UOp, after: UOp|None = None) -> UOp:
     buf = vgpr.after(after) if after is not None else vgpr
     idx = buf.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index))
-    exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
-    active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
-    return idx.store(active.where(val.cast(dtypes.uint32), idx.load()))
+    return idx.store(_lane_active(exec_mask, lane).where(val.cast(dtypes.uint32), idx.load()))
 
   # Helper: read source operand (32-bit, 64-bit with F64 inline, or 16-bit with F16 inline)
   def rsrc(off: int, lane: UOp, bits: int = 32) -> UOp:
@@ -386,6 +390,10 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       if off in F32_INLINE: return UOp.const(dtypes.uint32, F32_INLINE[off])
       return UOp.const(dtypes.uint32, 0)  # other inline
     return rvgpr(off - 256, lane)
+
+  def rsrc_sized(off: int, lane: UOp, sizes: dict, key: str, f16: bool = False) -> UOp:
+    """Read source with size from operand metadata."""
+    return rsrc(off, lane, 64) if sizes.get(key, 1) == 2 else rsrc(off, lane, 16 if f16 else 32)
 
   # Helper: increment PC
   def inc_pc() -> UOp:
@@ -517,11 +525,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       return pcode_result
 
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-
-    # Check operand sizes - F64 ops need 64-bit sources
     sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
-
-    src0 = rsrc(inst.src0.offset, lane, 64) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
+    src0 = rsrc_sized(inst.src0.offset, lane, sizes, 'src0')
     vdst_reg = inst.vdst.offset - 256
 
     # 16-bit ops: vdst_reg >= 128 means write to high half of vgpr[vdst_reg-128]
@@ -641,21 +646,12 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
       # Helper to get comparison result for a lane
       def get_cmp_result_vop3(lane_idx: int) -> UOp:
-        lane_const = UOp.const(dtypes.index, lane_idx)
-        # For F64, read 64-bit sources
-        if is_64bit_op:
-          s0 = rsrc(inst.src0.offset, lane_const, 64)
-          s1 = rsrc(inst.src1.offset, lane_const, 64)
-        else:
-          s0 = rsrc(inst.src0.offset, lane_const)
-          s1 = rsrc(inst.src1.offset, lane_const)
-        # Apply opsel for 16-bit operations
-        if is_16bit_op:
-          s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
-        # Apply abs/neg modifiers for float comparisons
+        lc = UOp.const(dtypes.index, lane_idx)
+        s0 = rsrc(inst.src0.offset, lc, 64 if is_64bit_op else 32)
+        s1 = rsrc(inst.src1.offset, lc, 64 if is_64bit_op else 32)
+        if is_16bit_op: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
         if is_float_op:
-          s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, is_64bit_op)
-          s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, is_64bit_op)
+          s0, s1 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, is_64bit_op), _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, is_64bit_op)
         pcode = PCODE.get(inst.op)
         if pcode is None: return UOp.const(dtypes.uint32, 0)
         _, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=UOp.const(dtypes.uint32, lane_idx))
@@ -685,11 +681,10 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
     # Regular VOP3 handling
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-
     is_f16_op = 'F16' in op_name
-    src0 = rsrc(inst.src0.offset, lane, 64) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane, 16 if is_f16_op else 32)
-    src1 = rsrc(inst.src1.offset, lane, 64) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane, 16 if is_f16_op else 32)
-    src2 = (rsrc(inst.src2.offset, lane, 64) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane, 16 if is_f16_op else 32)) if inst.src2 is not None else None
+    src0 = rsrc_sized(inst.src0.offset, lane, sizes, 'src0', is_f16_op)
+    src1 = rsrc_sized(inst.src1.offset, lane, sizes, 'src1', is_f16_op)
+    src2 = rsrc_sized(inst.src2.offset, lane, sizes, 'src2', is_f16_op) if inst.src2 is not None else None
 
     # Apply opsel to 16-bit operations (F16, etc.)
     if _is_16bit_op(op_name):
@@ -739,9 +734,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
     # Check if any VCC assignment is per-lane by looking for [laneId] in destination
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-    src0 = rsrc(inst.src0.offset, lane, 64) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
-    src1 = rsrc(inst.src1.offset, lane, 64) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane)
-    src2 = (rsrc(inst.src2.offset, lane, 64) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane)) if inst.src2 is not None else None
+    src0, src1 = rsrc_sized(inst.src0.offset, lane, sizes, 'src0'), rsrc_sized(inst.src1.offset, lane, sizes, 'src1')
+    src2 = rsrc_sized(inst.src2.offset, lane, sizes, 'src2') if inst.src2 is not None else None
     srcs = {'S0': src0, 'S1': src1, 'VCC': rsgpr(sdst_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
     if src2 is not None: srcs['S2'] = src2
     _, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
@@ -757,20 +751,16 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
       # Compute VCC bit and D0 value for each lane (unrolled)
       def get_lane_results(lane_idx: int) -> tuple[UOp, UOp|None]:
-        lane_const = UOp.const(dtypes.index, lane_idx)
-        s0 = rsrc(inst.src0.offset, lane_const, 64) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane_const)
-        s1 = rsrc(inst.src1.offset, lane_const, 64) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane_const)
-        s2 = (rsrc(inst.src2.offset, lane_const, 64) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane_const)) if inst.src2 is not None else None
+        lc = UOp.const(dtypes.index, lane_idx)
+        s0, s1 = rsrc_sized(inst.src0.offset, lc, sizes, 'src0'), rsrc_sized(inst.src1.offset, lc, sizes, 'src1')
+        s2 = rsrc_sized(inst.src2.offset, lc, sizes, 'src2') if inst.src2 is not None else None
         lane_srcs = {'S0': s0, 'S1': s1, 'VCC': rsgpr(sdst_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
         if s2 is not None: lane_srcs['S2'] = s2
         _, lane_assigns = parse_pcode(pcode, lane_srcs, UOp.const(dtypes.uint32, lane_idx), op_name=op_name)
-        vcc_bit = UOp.const(dtypes.uint32, 0)
-        d0_val = None
+        vcc_bit, d0_val = UOp.const(dtypes.uint32, 0), None
         for dest, val in lane_assigns:
-          if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest):
-            vcc_bit = val.cast(dtypes.uint32)
-          elif dest.startswith('D0') and '[laneId]' not in dest:
-            d0_val = val
+          if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
+          elif dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
         return vcc_bit, d0_val
 
       # Compute all 32 lanes (this ensures reads happen before any writes through data dependencies)
@@ -976,22 +966,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     def make_ds_stores(dest: str, val: UOp, lane: UOp, active: UOp, writes_return_data: bool = True) -> list[UOp]:
       """Generate store UOps for a DS assign (MEM or RETURN_DATA)."""
       if dest.startswith('MEM['):
-        addr, write_val = val
-        if _is_64bit_dest(dest):
-          lo, hi = _split64(write_val)
-          return [wlds(addr, lo, active), wlds(addr + UOp.const(dtypes.uint32, 4), hi, active)]
-        return [wlds(addr, _to_u32(write_val), active)]
+        return _write_val(dest, val[1], wlds, val[0], active)
       if dest.startswith('RETURN_DATA') and writes_return_data:
         if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
           bit_width, dword_idx = int(m.group(1)) - int(m.group(2)) + 1, int(m.group(2)) // 32
-          if bit_width == 64:
-            lo, hi = _split64(val)
-            return [wvgpr(vdst_reg + dword_idx, lane, lo, exec_mask), wvgpr(vdst_reg + dword_idx + 1, lane, hi, exec_mask)]
-          return [wvgpr(vdst_reg + dword_idx, lane, _to_u32(val), exec_mask)]
-        if _is_64bit_dest(dest):
-          lo, hi = _split64(val)
-          return [wvgpr(vdst_reg, lane, lo, exec_mask), wvgpr(vdst_reg + 1, lane, hi, exec_mask)]
-        return [wvgpr(vdst_reg, lane, _to_u32(val), exec_mask)]
+          is_64 = '.b64' if bit_width == 64 else ''
+          return _write_val(is_64, val, lambda r, v, l, e: wvgpr(r, l, v, e), vdst_reg + dword_idx, lane, exec_mask)
+        return _write_val(dest, val, lambda r, v, l, e: wvgpr(r, l, v, e), vdst_reg, lane, exec_mask)
       return []
 
     if use_separate_ranges:
@@ -1031,117 +1012,44 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       else:
         return _u64(rvgpr(addr_reg, lane), rvgpr(addr_reg + 1, lane)) + UOp.const(dtypes.uint64, offset)
 
-    if 'LOAD' in op_name or 'STORE' in op_name:
-      pcode = PCODE.get(inst.op)
-      if pcode is not None:
-        vdst_reg = inst.vdst.offset - 256 if hasattr(inst, 'vdst') and inst.vdst else 0
-        vdata_reg = inst.data.offset - 256 if hasattr(inst, 'data') and inst.data else vdst_reg
+    pcode = PCODE.get(inst.op)
+    if pcode is not None:
+      vdata_reg = inst.data.offset - 256 if hasattr(inst, 'data') and inst.data else 0
+      vdst_reg = inst.vdst.offset - 256 if hasattr(inst, 'vdst') and inst.vdst else vdata_reg
+      is_atomic, glc = 'ATOMIC' in op_name, getattr(inst, 'glc', 0)
+      is_64bit = '_B64' in op_name or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
 
-        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-        addr = make_addr(lane)
+      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+      addr, active = make_addr(lane), _lane_active(exec_mask, lane)
 
-        # Build VDATA: for stores read from vgprs, for D16 loads read old value to preserve bits
-        if 'STORE' in op_name:
-          # Build 64-bit VDATA from first two vgpr registers
-          vdata = rvgpr(vdata_reg, lane).cast(dtypes.uint64)
-          if ndwords >= 2: vdata = vdata | (rvgpr(vdata_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-        elif 'D16' in op_name:
-          # D16 loads need old VDATA to preserve bits
-          vdata = rvgpr(vdst_reg, lane)
-        else:
-          vdata = UOp.const(dtypes.uint32, 0)
-
-        # Provide indexed dword variables for multi-dword access (VDATA0, VDATA1, VDATA2, VDATA3)
+      # Build source operands
+      if is_atomic:
+        srcs = {'ADDR': addr, 'DATA': _u64(rvgpr(vdata_reg, lane), rvgpr(vdata_reg + 1, lane)) if is_64bit else rvgpr(vdata_reg, lane), '_vmem': vmem}
+      else:
+        vdata = rvgpr(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else rvgpr(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
+        if 'STORE' in op_name and ndwords >= 2: vdata = vdata | (rvgpr(vdata_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
         srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': vmem}
-        for i in range(ndwords):
-          srcs[f'VDATA{i}'] = rvgpr(vdata_reg + i, lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
-        pcode_vars, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
+        for i in range(ndwords): srcs[f'VDATA{i}'] = rvgpr(vdata_reg + i, lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
 
-        # Process assigns
-        stores = []
-        vdata_slices = {}  # Collect VDATA bit slices for loads
+      pcode_vars, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
 
-        for dest, val in assigns:
-          if dest.startswith('MEM['):
-            # Memory write: val is (addr, value) tuple
-            write_addr, write_val = val
-            # Cast to uint32 for memory write
-            if write_val.dtype != dtypes.uint32: write_val = write_val.cast(dtypes.uint32)
-            idx = vmem.index((write_addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
-            exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
-            active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
-            stores.append(idx.store(active.where(write_val, idx.load())))
-          elif dest.startswith('VDATA['):
-            # Bit slice assignment for loads: VDATA[31:0], VDATA[63:32], etc.
-            m = re.match(r'VDATA\[(\d+)\s*:\s*(\d+)\]', dest)
-            if m:
-              high_bit, low_bit = int(m.group(1)), int(m.group(2))
-              dword_idx = low_bit // 32
-              # For D16 loads (partial bit slice writes like [31:16]), use final VDATA from vars which includes preserved bits
-              if 'D16' in op_name and dword_idx == 0 and low_bit > 0:
-                vdata_slices[0] = pcode_vars.get('VDATA', val).cast(dtypes.uint32)
-              else:
-                vdata_slices[dword_idx] = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
-          elif dest.startswith('VDATA'):
-            # Simple VDATA.type = val (for U8/I8/U16/I16 loads)
-            vdata_slices[0] = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+      # For atomics, use separate load to prevent CSE issues
+      def wvmem(a: UOp, v: UOp, act: UOp) -> UOp:
+        idx = vmem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
+        return idx.store(act.where(v, vmem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).load()))
 
-        # Write VDATA slices to vgpr destination
-        for dword_idx, val in sorted(vdata_slices.items()):
+      stores = []
+      for dest, val in assigns:
+        if dest.startswith('MEM['):
+          stores.extend(_write_val(dest, val[1], wvmem, val[0], active) if is_atomic else [_mem_store(vmem, val[0], val[1], active, 64)])
+        elif dest.startswith('RETURN_DATA') and is_atomic and glc:
+          stores.extend(_write_val(dest, val, lambda r, v, l, e: wvgpr(r, l, v, e), vdst_reg, lane, exec_mask))
+      if not is_atomic:
+        for dword_idx, val in sorted(_collect_data_slices(assigns, 'VDATA', pcode_vars, op_name).items()):
           stores.append(wvgpr(vdst_reg + dword_idx, lane, val, exec_mask))
 
-        if stores:
-          return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc(), arg=KernelInfo(name=name))
-
-    if 'ATOMIC' in op_name:
-      pcode = PCODE.get(inst.op)
-      if pcode is not None:
-        vdata_reg = inst.data.offset - 256
-        vdst_reg = inst.vdst.offset - 256 if hasattr(inst, 'vdst') else vdata_reg
-        glc = getattr(inst, 'glc', 0)
-        is_64bit = '_B64' in op_name or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
-
-        # vmem helper for FLAT/GLOBAL memory - uses 64-bit addresses
-        # Note: We use .load() explicitly to avoid optimizer collapsing nested WHERE incorrectly
-        def wvmem(addr: UOp, val: UOp, active: UOp) -> UOp:
-          idx = vmem.index((addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
-          # Use explicit load with a separate index to prevent CSE from merging with inner loads
-          old_val = vmem.index((addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).load()
-          return idx.store(active.where(val, old_val))
-
-        # Build source variables for pcode parsing
-        def make_srcs(lane: UOp) -> dict:
-          addr = make_addr(lane)
-          data_val = _u64(rvgpr(vdata_reg, lane), rvgpr(vdata_reg + 1, lane)) if is_64bit else rvgpr(vdata_reg, lane)
-          return {
-            'ADDR': addr,
-            'DATA': data_val,
-            '_vmem': vmem,  # Use vmem for FLAT/GLOBAL memory access
-          }
-
-        # Atomic ops: all operations share the same RANGE
-        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-        exec_bit = (exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
-        active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
-        _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
-
-        stores = []
-        for dest, val in lane_assigns:
-          if dest.startswith('MEM['):
-            addr, write_val = val
-            if _is_64bit_dest(dest):
-              lo, hi = _split64(write_val)
-              stores.extend([wvmem(addr, lo, active), wvmem(addr + UOp.const(dtypes.uint64, 4), hi, active)])
-            else: stores.append(wvmem(addr, _to_u32(write_val), active))
-          elif dest.startswith('RETURN_DATA') and glc:
-            if _is_64bit_dest(dest):
-              lo, hi = _split64(val)
-              stores.extend([wvgpr(vdst_reg, lane, lo, exec_mask), wvgpr(vdst_reg + 1, lane, hi, exec_mask)])
-            else: stores.append(wvgpr(vdst_reg, lane, _to_u32(val), exec_mask))
-
-        if stores:
-          ended = UOp.sink(*stores).end(lane)
-          return name, UOp.sink(ended, inc_pc(), arg=KernelInfo(name=name))
+      if stores:
+        return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc(), arg=KernelInfo(name=name))
 
     return name, UOp.sink(inc_pc(), arg=KernelInfo(name=name))
 
