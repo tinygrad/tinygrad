@@ -759,7 +759,6 @@ jobs:
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/test_ops.py::TestOps::test_sin test/test_ops.py::TestOps::test_cos test/test_ops.py::TestOps::test_tan test/test_ops.py::TestOps::test_exp test/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
-        if: matrix.backend != 'lvp'
         uses: ./.github/actions/process-replay
 
 # ****** OSX Tests ******
@@ -889,7 +888,6 @@ jobs:
       - name: Run pytest (${{ matrix.backend }})
         run: python3 -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
       - name: Run process replay tests
-        if: matrix.backend != 'lvp'
         uses: ./.github/actions/process-replay
       - name: Run macOS-specific unit test
         if: matrix.backend == 'cpu'
