@@ -259,10 +259,6 @@ class Inst:
     if not any(cls.__name__.endswith(sfx) for sfx in ('_LIT', '_DPP16', '_DPP8', '_SDWA', '_SDWA_SDST', '_MFMA', '_SDST')):
       lit_cls = _get_variant(cls, '_LIT')
       if lit_cls is not None:
-        # Check if op requires _LIT encoding (via _lit_only_ops)
-        op_val = args[0] if args else kwargs.get('op')
-        if op_val is not None and hasattr(lit_cls, '_lit_only_ops') and op_val.value in lit_cls._lit_only_ops:
-          return lit_cls(*args, **kwargs)
         # Check if any src field needs a literal
         # Map positional args to field names to find src values
         args_iter = iter(args)
@@ -380,8 +376,7 @@ class Inst:
 
   def has_literal(self) -> bool:
     """Check if instruction has a 32-bit literal constant."""
-    # If class has literal field, it's a _LIT variant
-    if any(name == 'literal' for name, _ in self._fields): return True
+    if hasattr(self, 'literal'): return True  # _LIT variant has literal field
     # Check if any src field is 255 (literal marker)
     for name, field in self._fields:
       if isinstance(field, SrcField) and getattr(self, name).offset == 255: return True
@@ -393,8 +388,7 @@ class Inst:
   @property
   def _literal(self) -> int | None:
     """Get the literal value if this instruction has one."""
-    if any(name == 'literal' for name, _ in self._fields): return self.literal
-    return None
+    return getattr(self, 'literal', None)
 
   def _variant_suffix(self) -> str | None:
     """Check if instruction has DPP/SDWA encoding suffix. Returns suffix or None."""
