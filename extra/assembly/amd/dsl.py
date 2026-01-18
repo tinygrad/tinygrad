@@ -374,31 +374,24 @@ class Inst:
 
   def to_bytes(self) -> bytes: return self._raw.to_bytes(self._base_size, 'little')
 
-  def has_literal(self) -> bool:
-    """Check if instruction has a 32-bit literal constant."""
-    if hasattr(self, 'literal'): return True  # _LIT variant has literal field
-    # Check if any src field is 255 (literal marker)
-    for name, field in self._fields:
-      if isinstance(field, SrcField) and getattr(self, name).offset == 255: return True
-    # VOPD: FMAMK/FMAAK opcodes always require literal (check by name since enum may differ across archs)
-    for name in ('opx', 'opy'):
-      if hasattr(self, name) and any(x in getattr(self, name).name for x in ('FMAMK', 'FMAAK')): return True
-    return False
-
   @property
   def _literal(self) -> int | None:
     """Get the literal value if this instruction has one."""
     return getattr(self, 'literal', None)
 
   def _variant_suffix(self) -> str | None:
-    """Check if instruction has DPP/SDWA encoding suffix. Returns suffix or None."""
-    # Don't check for variants if we're already a variant class
+    """Check if instruction needs a variant class (_LIT, _DPP8, _DPP16, _SDWA). Returns suffix or None."""
     cls_name = type(self).__name__
-    if any(s in cls_name for s in ('_DPP8', '_DPP16', '_SDWA')): return None
+    # Don't check for variants if we're already a variant class
+    if any(s in cls_name for s in ('_LIT', '_DPP8', '_DPP16', '_SDWA')): return None
+    # VOPD: FMAMK/FMAAK opcodes always require literal (check by name since enum may differ across archs)
+    for name in ('opx', 'opy'):
+      if hasattr(self, name) and any(x in getattr(self, name).name for x in ('FMAMK', 'FMAAK')): return '_LIT'
     for name, field in self._fields:
       if isinstance(field, SrcField):
         off = getattr(self, name).offset
-        if off == 249: return '_DPP8'  # or _SDWA on older archs
+        if off == 255: return '_LIT'
+        if off == 249: return '_SDWA' if self._is_cdna() else '_DPP8'
         if off == 250: return '_DPP16'
     return None
 
@@ -406,15 +399,9 @@ class Inst:
   def from_bytes(cls, data: bytes):
     inst = object.__new__(cls)
     inst._raw = int.from_bytes(data[:cls._base_size], 'little')
-    # Upgrade to _LIT variant if needed
-    if inst.has_literal() and (lit_cls := _get_variant(cls, '_LIT')) is not None:
-      return lit_cls.from_bytes(data)
-    # Upgrade to DPP/SDWA variant if needed
-    if (suffix := inst._variant_suffix()):
-      # Try DPP8 first, then SDWA (src0=249 means DPP8 on RDNA, SDWA on CDNA)
-      for try_suffix in ([suffix, '_SDWA'] if suffix == '_DPP8' else [suffix]):
-        if (var_cls := _get_variant(cls, try_suffix)) is not None: return var_cls.from_bytes(data)
-      raise ValueError(f"unsupported {suffix} encoding for {cls.__name__}")
+    # Upgrade to variant class if needed (_LIT, _DPP8, _DPP16, _SDWA)
+    if (suffix := inst._variant_suffix()) and (var_cls := _get_variant(cls, suffix)) is not None:
+      return var_cls.from_bytes(data)
     return inst
 
   def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw

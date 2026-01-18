@@ -183,7 +183,7 @@ def _disasm_vop2(inst: VOP2) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
   if cdna: name = _CDNA_DISASM_ALIASES.get(name, name)  # apply CDNA aliases
   suf = "" if cdna or name.endswith('_e32') or (not cdna and inst.op == VOP2Op.V_DOT2ACC_F32_F16_E32) else "_e32"
-  lit = getattr(inst, '_literal', None)
+  lit = inst._literal
   is16 = not cdna and inst.canonical_op_bits['d'] == 16
   # fmaak/madak: dst = src0 * vsrc1 + K, fmamk/madmk: dst = src0 * K + vsrc1
   if 'fmaak' in name or 'madak' in name or (not cdna and inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAAK_F16_E32)):
@@ -457,7 +457,7 @@ def _disasm_vop3sd(inst: VOP3SD) -> str:
   return f"{name} {inst.vdst.fmt()}, {_fmt_sdst(inst.sdst, 1)}, {srcs}{' clamp' if clamp else ''}{_omod(inst.omod)}"
 
 def _disasm_vopd(inst: VOPD) -> str:
-  lit = inst._literal or getattr(inst, 'literal', None)
+  lit = inst._literal
   is_rdna4 = 'rdna4' in inst.__class__.__module__
   op_enum = R4_VOPDOp if is_rdna4 else VOPDOp
   vdst_y, nx, ny = (_unwrap(inst.vdsty) << 1) | ((_unwrap(inst.vdstx) & 1) ^ 1), op_enum(inst.opx).name.lower(), op_enum(inst.opy).name.lower()
@@ -516,7 +516,7 @@ def _disasm_sop1(inst: SOP1) -> str:
 
 def _disasm_sop2(inst: SOP2) -> str:
   cdna, name = _is_cdna(inst), inst.op_name.lower()
-  lit = getattr(inst, '_literal', None)
+  lit = inst._literal
   # Use get_field_bits for register sizes
   regs = inst.canonical_op_regs
   dn, s0n, s1n = regs['d'], regs['s0'], regs['s1']
