@@ -52,6 +52,7 @@ def compile_sop_pcode(op, srcs: dict[str, UOp], wsgpr_fn, rsgpr_fn, sdst_reg: in
   srcs['VCC'] = rsgpr_fn(VCC_LO.offset)
   srcs['EXEC'] = rsgpr_fn(EXEC_LO.offset)
   srcs['SCC'] = rsgpr_fn(SCC_IDX)
+  srcs['D0'] = rsgpr_fn(sdst_reg)  # Provide D0 for read-modify-write ops like S_BITSET
   _, assigns = parse_pcode(pcode, srcs, lane=None)
 
   stores = []
@@ -306,8 +307,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
   # Helper: read SGPR
   def rsgpr(reg: int) -> UOp: return sgpr.index(UOp.const(dtypes.index, reg))
-  def rsgpr64(reg: int) -> UOp:
-    lo, hi = rsgpr(reg), rsgpr(reg + 1)
+  def rsgpr64(off: int) -> UOp:
+    if off >= 128:  # inline constant
+      if off < 193: return UOp.const(dtypes.uint64, off - 128)  # 0-64
+      if off < 209: return UOp.const(dtypes.int64, -(off - 192)).cast(dtypes.uint64)  # -1 to -16
+      if off == 255: return UOp.const(dtypes.uint64, literal)  # literal constant
+      return UOp.const(dtypes.uint64, 0)  # other inline constants
+    lo, hi = rsgpr(off), rsgpr(off + 1)
     return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
   def wsgpr(reg: int, val: UOp) -> UOp: return sgpr.index(UOp.const(dtypes.index, reg)).store(val.cast(dtypes.uint32))
 
@@ -412,10 +418,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
 
     # Handle 64-bit source for B64 ops
     if sizes.get('ssrc0', 1) == 2:
-      if src_off >= 128:  # inline constant - zero-extend to 64-bit
-        s0 = s0.cast(dtypes.uint64)
-      else:  # sgpr pair
-        s0 = rsgpr64(src_off)
+      s0 = rsgpr64(src_off)
 
     # SAVEEXEC ops: save EXEC to dst, then modify EXEC (complex pcode with temp var)
     if 'OR_SAVEEXEC_B32' in op_name:
@@ -460,22 +463,6 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         result = result | (active << UOp.const(dtypes.uint32, i * 4))
       scc = result.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
       return name, UOp.sink(wsgpr(dst_reg, result), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
-
-    # S_BITSET1_B32: D0.u32[S0.u32[4:0]] = 1 (set bit at position given by low 5 bits of S0)
-    if op_name == 'S_BITSET1_B32':
-      old_val = rsgpr(dst_reg)
-      bit_pos = s0 & UOp.const(dtypes.uint32, 0x1F)  # Low 5 bits
-      bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
-      result = old_val | bit_mask
-      return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
-
-    # S_BITSET0_B32: D0.u32[S0.u32[4:0]] = 0 (clear bit at position given by low 5 bits of S0)
-    if op_name == 'S_BITSET0_B32':
-      old_val = rsgpr(dst_reg)
-      bit_pos = s0 & UOp.const(dtypes.uint32, 0x1F)  # Low 5 bits
-      bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
-      result = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
-      return name, UOp.sink(wsgpr(dst_reg, result), inc_pc(), arg=KernelInfo(name=name))
 
     # Try pcode for other SOP1 ops
     pcode_result = compile_sop_pcode(inst.op, {'S0': s0}, wsgpr, rsgpr, dst_reg, dst_size, inc_pc, name)
