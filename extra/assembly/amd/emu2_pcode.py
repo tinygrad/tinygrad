@@ -688,10 +688,26 @@ def _register_funcs():
     n = _floor(x * inv_two_pi + UOp.const(x.dtype, 0.5))  # round(x / 2π)
     x_reduced = x - n * two_pi
     return UOp(Ops.SIN, x.dtype, (x_reduced,))
+  def _cos_with_range_reduction(a, v, m):
+    x = a[0]
+    # Check if x is of the form "turns * 2π" (common AMD trig pattern)
+    # If so, cos(turns * 2π) = sin((turns + 0.25) * 2π)
+    match = _find_two_pi_mul(x)
+    if match is not None:
+      turns, two_pi_val = match
+      # cos(turns * 2π) = sin((turns + 0.25) * 2π) - add 0.25 turns (= π/2 radians)
+      turns_plus_quarter = turns + UOp.const(turns.dtype, 0.25)
+      # Reduce to [-0.5, 0.5]: turns_reduced = turns - round(turns)
+      n = _floor(turns_plus_quarter + UOp.const(turns.dtype, 0.5))
+      turns_reduced = turns_plus_quarter - n
+      two_pi = UOp.const(turns.dtype, two_pi_val)
+      return UOp(Ops.SIN, turns.dtype, (turns_reduced * two_pi,))
+    # Fallback: cos(x) = sin(x + π/2)
+    return _sin_with_range_reduction([x + UOp.const(x.dtype, 1.5707963267948966)], v, m)
   for name, op in [('sqrt', Ops.SQRT), ('trunc', Ops.TRUNC), ('log2', Ops.LOG2)]:
     _FUNC_TABLE.append((rf'{name}\((.+)\)', 1, lambda a, v, m, op=op: UOp(op, a[0].dtype, (a[0],))))
   _FUNC_TABLE.append((r'sin\((.+)\)', 1, _sin_with_range_reduction))
-  _FUNC_TABLE.append((r'cos\((.+)\)', 1, lambda a, v, m: _sin_with_range_reduction([a[0] + UOp.const(a[0].dtype, 1.5707963267948966)], v, m)))
+  _FUNC_TABLE.append((r'cos\((.+)\)', 1, _cos_with_range_reduction))
   _FUNC_TABLE.append((r'floor\((.+)\)', 1, lambda a, v, m: _floor(a[0])))
   _FUNC_TABLE.append((r'fract\((.+)\)', 1, lambda a, v, m: a[0] - _floor(a[0])))
   def _signext(a, v, m):
@@ -886,31 +902,28 @@ def _register_funcs():
   # trig_preop_result: extract 53-bit chunk from 1201-bit representation of 2/π
   # TWO_OVER_PI_1201 is a 1201-bit integer representing 2/π in binary
   TWO_OVER_PI_1201 = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6
+  # Precompute results for all possible shift values (0 to 1148 covers all cases)
+  # shift = index * 53 + max(0, exponent - 1077), where index is 0-31 and exponent up to 2046
+  # Max shift = 31 * 53 + (2046 - 1077) = 1643 + 969 = 2612, but capped at 1148 (1201-53) for valid results
+  _TRIG_PREOP_TABLE = {}
+  for shift_val in range(1149):  # 0 to 1148 (1201 - 53)
+    result_int = ((TWO_OVER_PI_1201 << shift_val) >> (1201 - 53)) & 0x1fffffffffffff
+    _TRIG_PREOP_TABLE[shift_val] = float(result_int)
   def _trig_preop_result(a, v, m):
     shift = a[0]
     # For constant shift, compute at compile time
     if shift.op == Ops.CONST:
       shift_val = int(shift.arg)
+      if shift_val in _TRIG_PREOP_TABLE:
+        return UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[shift_val])
       result_int = ((TWO_OVER_PI_1201 << shift_val) >> (1201 - 53)) & 0x1fffffffffffff
       return UOp.const(dtypes.float64, float(result_int))
-    # For dynamic shift, we need to unroll possible values or use a lookup
-    # Since shift = index * 53 + adjustment, and index is 0-4 (5 bits), we can unroll
-    # For now, handle the common cases with a nested WHERE
-    # Precompute results for shift values 0, 53, 106, 159, 212 (indices 0-4)
-    results = []
-    for idx in range(32):  # S1[4:0] can be 0-31
-      shift_val = idx * 53
-      result_int = ((TWO_OVER_PI_1201 << shift_val) >> (1201 - 53)) & 0x1fffffffffffff
-      results.append(UOp.const(dtypes.float64, float(result_int)))
-    # Build nested WHERE: if shift==0*53 then r0 else if shift==1*53 then r1 else ...
-    # Actually, shift includes exponent adjustment, so we need to handle it differently
-    # For simplicity, build a chain checking shift values
-    # This handles the base case where exponent <= 1077 (no adjustment)
-    base_shift = shift  # shift might have exponent adjustment added
-    result = results[0]  # Default
-    for idx in range(31, -1, -1):
-      cond = shift.eq(UOp.const(dtypes.int, idx * 53))
-      result = cond.where(results[idx], result)
+    # For dynamic shift, build nested WHERE for all possible values
+    # This is expensive but necessary for correctness with dynamic exponent adjustment
+    result = UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[0])  # Default
+    for shift_val in range(1148, -1, -1):
+      cond = shift.eq(UOp.const(shift.dtype, shift_val))
+      result = cond.where(UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[shift_val]), result)
     return result
   _FUNC_TABLE.append((r'trig_preop_result\((.+)\)', 1, _trig_preop_result))
 
