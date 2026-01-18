@@ -301,8 +301,12 @@ class RMSNorm:
   def _norm(self, x:Tensor) -> Tensor: return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
 
   def __call__(self, x:Tensor) -> Tensor:
-    x = self._norm(x.float()).cast(x.dtype)
-    return x if self.weight is None else x * self.weight
+    x = self._norm(x.float())
+    return x if self.weight is None else (x * self.weight).cast(x.dtype)
+
+  # def __call__(self, x:Tensor) -> Tensor:
+  #   x = self._norm(x.float()).cast(x.dtype)
+  #   return x if self.weight is None else x * self.weight
 
 class Embedding:
   """
