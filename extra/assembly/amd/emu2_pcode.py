@@ -249,9 +249,10 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
       if (m := re.match(r'(\w+)\{(\d+)\}\s*=\s*(.+)', line)):
         var, idx, val = m.group(1), int(m.group(2)), parse_expr(m.group(3), ctx)
         existing = block_assigns.get(var, vars.get(var))
-        if existing is not None and isinstance(existing, UOp):
+        if existing is not None and isinstance(existing, UOp):  # bit assignment to scalar
           block_assigns[var] = vars[var] = _set_bit(existing, _u32(idx), val)
-        else: block_assigns[f'{var}{idx}'] = vars[f'{var}{idx}'] = val
+        else:  # array element or new variable
+          block_assigns[f'{var}{idx}'] = vars[f'{var}{idx}'] = val
         i += 1; continue
 
       if (m := re.match(r'(\w+)\[([^\]]+)\]\s*=\s*(.+)', line)) and ':' not in m.group(2):
@@ -293,7 +294,11 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         base = re.match(r'(\w+)', m.group(1)).group(1)
         block_assigns[base] = vars[base] = parse_expr(m.group(2), ctx); i += 1; continue
 
-      if (m := re.match(r'declare\s+(\w+)', line)): vars[m.group(1)] = _u32(0); i += 1; continue
+      if (m := re.match(r'declare\s+(\w+)', line)):
+        # Arrays (like in[3]) need separate element storage, scalars get initialized to 0
+        if '[' in line: pass  # Don't create any variable - elements will be created on assignment
+        else: vars[m.group(1)] = _u32(0)
+        i += 1; continue
       i += 1
     return i, block_assigns
 
