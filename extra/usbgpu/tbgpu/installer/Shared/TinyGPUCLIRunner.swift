@@ -60,9 +60,20 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     var devices: [String] = []
     while case let service = IOIteratorNext(iterator), service != 0 {
       defer { IOObjectRelease(service) }
-      if let name = IORegistryEntryCreateCFProperty(service, "IOName" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? String {
-        devices.append(name)
+
+      var vendorID: UInt16 = 0, deviceID: UInt16 = 0, isGPU = false
+      if let data = IORegistryEntryCreateCFProperty(service, "vendor-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data, data.count >= 2 {
+        vendorID = data.withUnsafeBytes { $0.load(as: UInt16.self) }
       }
+      if let data = IORegistryEntryCreateCFProperty(service, "device-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data, data.count >= 2 {
+        deviceID = data.withUnsafeBytes { $0.load(as: UInt16.self) }
+      }
+      if let data = IORegistryEntryCreateCFProperty(service, "class-code" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data, data.count >= 3 {
+        isGPU = data[2] == 0x03
+      }
+
+      let name = String(format: "%04x:%04x", vendorID, deviceID)
+      devices.append(isGPU ? "\(name) (supported)" : name)
     }
 
     return devices.isEmpty ? "PCI Devices: none\n\n" : "PCI Devices:\n" + devices.map { "  • \($0)\n" }.joined() + "\n"
@@ -150,7 +161,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     case .needsApproval:
       return "Extension is awaiting approval.\n\n" + getApprovalInstructions()
     case .activated:
-      return "Ready! Run tinygrad to use your eGPU.\n\n"
+      return "Extension is ready! Run tinygrad to use your eGPU.\n\n"
     case .activationError:
       return "Extension activation failed.\nCheck system logs for details.\n\n"
     }

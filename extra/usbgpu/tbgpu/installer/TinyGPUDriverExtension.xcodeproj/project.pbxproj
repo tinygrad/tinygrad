@@ -60,7 +60,7 @@
 /* Begin PBXFileReference section */
 		0A52E8682F18FC6900A816CD /* tiny_icon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = tiny_icon.icon; sourceTree = "<group>"; };
 		0A5C11DC2F18E461006DBBCA /* server.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = server.c; sourceTree = "<group>"; };
-		0A5C11DE2F18E468006DBBCA /* TinyGPU Installer (macOS)-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "TinyGPU Installer (macOS)-Bridging-Header.h"; sourceTree = "<group>"; };
+		0A5C11DE2F18E468006DBBCA /* TinyGPU-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "TinyGPU-Bridging-Header.h"; sourceTree = "<group>"; };
 		0ACB55382E9CB880007029EF /* PCIDriverKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PCIDriverKit.framework; path = System/DriverKit/System/Library/Frameworks/PCIDriverKit.framework; sourceTree = SDKROOT; };
 		0AD7C2D62F18D3DB00562D1A /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks/IOKit.framework; sourceTree = DEVELOPER_DIR; };
 		0AD7C2D82F18D3E300562D1A /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks/CoreFoundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -121,7 +121,7 @@
 				54E42BB8286A1696000E1E9A /* TinyGPUApp.swift */,
 				54E42BBA286A1697000E1E9A /* Assets.xcassets */,
 				0A52E8682F18FC6900A816CD /* tiny_icon.icon */,
-				0A5C11DE2F18E468006DBBCA /* TinyGPU Installer (macOS)-Bridging-Header.h */,
+				0A5C11DE2F18E468006DBBCA /* TinyGPU-Bridging-Header.h */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -365,7 +365,7 @@
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "Shared/TinyGPU Installer (macOS)-Bridging-Header.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/TinyGPU-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 			};
@@ -403,7 +403,7 @@
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_OBJC_BRIDGING_HEADER = "Shared/TinyGPU Installer (macOS)-Bridging-Header.h";
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/TinyGPU-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 			};
