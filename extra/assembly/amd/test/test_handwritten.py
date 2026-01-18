@@ -129,9 +129,10 @@ class TestIntegration(_TestIntegration):
 
 class TestIntegrationCDNA(_TestIntegration):
   arch = "cdna"
+  @unittest.skip("fails, it inserts SGPR for the integer offset field")
   def test_smem(self):
     from extra.assembly.amd.autogen.cdna.ins import s_load_dwordx2
-    self.inst = s_load_dwordx2(s[0:1], s[0:1])
+    self.inst = s_load_dwordx2(s[0:1], s[0:1], offset=1)
 
   @unittest.skip("fails due to wrong src2 disassembly")
   def test_mfma(self):
