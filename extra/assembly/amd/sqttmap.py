@@ -1,6 +1,6 @@
 # maps trace packets to instructions.
 from typing import Iterator
-from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp, PacketType
+from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp, PacketType, IMMEDIATE_MASK
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP, s_endpgm
@@ -23,7 +23,7 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
 
   wave_pc:dict[int, int] = {}
   simd_sel = (0, 0)
-  def wave_focus(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0 and getattr(p, "wave", None) is not None
+  def wave_focus(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0 and getattr(p, "wave", None) == 0
   for p in decode(data):
     if not wave_focus(p): continue
     if DEBUG >= 2: print_packets([p])
@@ -34,6 +34,7 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
       pc = wave_pc.pop(p.wave)
       yield (p, pc, s_endpgm())
     elif isinstance(p, INST) and p.op.name.startswith("OTHER_"): continue
+    if isinstance(p, IMMEDIATE_MASK): raise Exception("todo!")
     elif isinstance(p, (VALUINST, INST, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu doesn't get a packet?
@@ -75,7 +76,8 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
     if inst == s_endpgm():
       completed_wave = list(rwaves_iter[pkt.wave].pop(0))
       assert len(completed_wave) == 0, f"incomplete instructions in wave {pkt.wave}"
-    else: assert pkt._time == rocprof_inst.time+rocprof_inst.stall
+    else:
+      assert pkt._time == rocprof_inst.time+rocprof_inst.stall
     passed_insts += 1
 
   for k,v in rwaves_iter.items():
