@@ -6,16 +6,19 @@ from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.test.test_roundtrip import compile_asm
 
-class TestIntegration(unittest.TestCase):
+class _TestIntegration(unittest.TestCase):
   inst: Inst
+  arch: str = "rdna3"
   def tearDown(self):
     if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
     st = self.inst.disasm()
     # Test that the instruction can be compiled by LLVM and produces the same bytes
     desc = f"{st:25s} {self.inst} {b!r}"
-    self.assertEqual(b, compile_asm(st), desc)
+    self.assertEqual(b, compile_asm(st, arch=self.arch), desc)
     print(desc)
+
+class TestIntegration(_TestIntegration):
 
   def test_wmma(self):
     self.inst = v_wmma_f32_16x16x16_f16(v[0:7], v[184:191], v[136:143], v[0:7])
@@ -123,6 +126,14 @@ class TestIntegration(unittest.TestCase):
     self.inst = s_mov_b32(s[0], 1337.0)
     int_inst = s_mov_b32(s[0], struct.unpack("I", struct.pack("f", 1337.0))[0])
     self.assertEqual(self.inst, int_inst)
+
+class TestIntegrationCDNA(_TestIntegration):
+  arch = "cdna"
+  @unittest.skip("fails due to wrong src2 disassembly")
+  def test_mfma(self):
+    from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x16_f16
+    # src2=1 should give the literal integer, it's currently giving a[242:245]
+    self.inst = v_mfma_f32_16x16x16_f16(v[0:3], v[0:1], v[0:1], 1.0, clmp=1, opsel_hi=0)
 
 class TestRegisterSliceSyntax(unittest.TestCase):
   """
