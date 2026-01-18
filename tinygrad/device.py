@@ -237,6 +237,7 @@ class Allocator(Generic[DeviceType]):
   # def _as_buffer(self, src) -> memoryview:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
+  # def _device_ptr(self, opaque) -> int:
   def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
 
 class LRUAllocator(Allocator, Generic[DeviceType]):
