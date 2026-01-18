@@ -132,8 +132,8 @@ class TestIntegrationCDNA(_TestIntegration):
   @unittest.skip("fails due to wrong src2 disassembly")
   def test_mfma(self):
     from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x16_f16
-    # src2=1 should give the literal integer, it's currently giving a[242:245]
-    self.inst = v_mfma_f32_16x16x16_f16(v[0:3], v[0:1], v[0:1], 1.0, clmp=1, opsel_hi=0)
+    # src2=0 should give the literal, it's currently giving a[128:131]
+    self.inst = v_mfma_f32_16x16x16_f16(v[0:3], v[0:1], v[0:1], 0, clmp=1, opsel_hi=0)
 
 class TestRegisterSliceSyntax(unittest.TestCase):
   """
