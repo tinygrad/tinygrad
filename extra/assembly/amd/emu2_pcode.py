@@ -160,6 +160,9 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
   if srcs: vars.update(srcs)
   vars['laneId'] = lane if lane is not None else UOp.const(dtypes.uint32, 0)
   vars['WAVE_MODE'] = {'IEEE': UOp.const(dtypes.uint32, 1)}  # IEEE mode is the default
+  # WAVE32/WAVE64 mode: we're always in wave32 mode in this emulator
+  vars['WAVE32'] = UOp.const(dtypes.bool, True)
+  vars['WAVE64'] = UOp.const(dtypes.bool, False)
   assigns: list[tuple[str, UOp]] = []
 
   def parse_block(lines: list[str], start: int = 0) -> tuple[int, dict[str, UOp]]:
@@ -190,6 +193,13 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           vars[found_var] = UOp.const(dtypes.bool, False)
           block_assigns[found_var] = UOp.const(dtypes.bool, False)
         # Unroll: execute body for each iteration value
+        def _try_eval(expr: str) -> str:
+          """Try to evaluate a simple arithmetic expression, return original if not possible."""
+          try:
+            if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()):
+              return str(eval(expr))
+          except: pass
+          return expr
         for loop_i in range(start_val, end_val + 1):
           # Substitute loop variable in body lines
           subst_lines = []
@@ -201,6 +211,11 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
             subst = re.sub(rf'(?<!\.)\b(\w+)\[{loop_var}\]', rf'\g<1>{{{loop_i}}}', subst)
             # Replace arithmetic expressions with loop_var: 31 - i -> 31 - 2
             subst = re.sub(rf'\b{loop_var}\b', str(loop_i), subst)
+            # Simplify arithmetic in bit slice bounds: data[0 * 8 + 7 : 0 * 8] -> data[7 : 0]
+            def _simplify_slice(m):
+              hi, lo = _try_eval(m.group(1)), _try_eval(m.group(2))
+              return f'[{hi} : {lo}]'
+            subst = re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', _simplify_slice, subst)
             subst_lines.append(subst)
           # Parse substituted body as a nested block
           _, iter_assigns = parse_block(subst_lines, 0)
@@ -306,6 +321,18 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
             rhs = old_val + rhs
         assigns.append((f'MEM[{m.group(1)}].{m.group(2)}', (addr, rhs)))
         i += 1; continue
+      # VGPR[lane][reg] = value - write to vgpr buffer at specific lane and register
+      if (m := re.match(r'VGPR\[([^\]]+)\]\[([^\]]+)\]\s*=\s*(.+)', line)):
+        ctx = {**vars, **block_assigns}
+        lane = parse_expr(m.group(1), ctx)
+        reg = parse_expr(m.group(2), ctx)
+        val = parse_expr(m.group(3), ctx)
+        if lane.dtype != dtypes.uint32: lane = lane.cast(dtypes.uint32)
+        if reg.dtype != dtypes.uint32: reg = reg.cast(dtypes.uint32)
+        # vgpr layout: reg * 32 + lane (32 lanes per register)
+        idx = reg * UOp.const(dtypes.uint32, 32) + lane
+        assigns.append((f'VGPR[{m.group(1)}][{m.group(2)}]', (idx, val)))
+        i += 1; continue
       # Lambda definition: NAME = lambda(args) (body) - must check FIRST
       if (m := re.match(r'(\w+)\s*=\s*lambda\(([^)]*)\)\s*\(', line)):
         lambda_name, lambda_args = m.group(1), [a.strip() for a in m.group(2).split(',')]
@@ -340,7 +367,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
             else:
               body_lines.append(lines[i])
             i += 1
-          body = ' '.join(body_lines).strip()
+          body = '\n'.join(body_lines).strip()  # Use newlines to preserve structure
           # Don't increment i here - while loop already moved it past the lambda body
         vars[lambda_name] = ('lambda', lambda_args, body)
         continue
@@ -391,12 +418,74 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         vars[var_name] = new_val
         i += 1; continue
       # Array-indexed assignment: VAR{idx} = value (from loop unrolling)
+      # If VAR exists as a scalar, treat as bit assignment; otherwise treat as array element
       if (m := re.match(r'(\w+)\{(\d+)\}\s*=\s*(.+)', line)):
         var_name, idx = m.group(1), int(m.group(2))
         val = parse_expr(m.group(3), {**vars, **block_assigns})
-        actual_var = f'{var_name}{idx}'
-        block_assigns[actual_var] = val
-        vars[actual_var] = val
+        # Check if var_name exists as a scalar (was assigned like tmp = 0U)
+        existing_var = block_assigns.get(var_name, vars.get(var_name))
+        if existing_var is not None and isinstance(existing_var, UOp):
+          # Treat as bit assignment: set bit idx of var_name
+          old_val = existing_var
+          bit_pos = UOp.const(dtypes.uint32, idx)
+          bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
+          val_bit = val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 1)
+          cleared = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+          new_val = cleared | (val_bit << bit_pos)
+          block_assigns[var_name] = new_val
+          vars[var_name] = new_val
+        else:
+          # Treat as array element assignment
+          actual_var = f'{var_name}{idx}'
+          block_assigns[actual_var] = val
+          vars[actual_var] = val
+        i += 1; continue
+      # Simple bit assignment: VAR[expr] = value (set bit at position expr to value)
+      # This handles patterns like tmp[i] = cond in for loops where tmp was initialized as 0U
+      # Only applies if VAR was assigned (not declared) and is a scalar UOp
+      if (m := re.match(r'(\w+)\[([^\]]+)\]\s*=\s*(.+)', line)):
+        var_name, bit_expr, val_expr = m.group(1), m.group(2), m.group(3)
+        # Skip if bit_expr contains colon (it's a slice, not a bit index)
+        if ':' not in bit_expr:
+          # Only treat as bit assignment if var exists as a UOp (was assigned, not just declared)
+          # Check both block_assigns (current block) and vars (outer scope) for initialized scalars
+          existing_var = block_assigns.get(var_name, vars.get(var_name))
+          # Skip if this looks like an array (we'll have var0, var1, etc. from loop unrolling)
+          is_array = any(f'{var_name}{j}' in vars or f'{var_name}{j}' in block_assigns for j in range(8))
+          if existing_var is not None and isinstance(existing_var, UOp) and not is_array:
+            ctx = {**vars, **block_assigns}
+            bit_pos = parse_expr(bit_expr, ctx)
+            val = parse_expr(val_expr, ctx)
+            old_val = existing_var
+            if bit_pos.dtype != dtypes.uint32: bit_pos = bit_pos.cast(dtypes.uint32)
+            bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
+            # Set or clear bit based on value
+            val_bit = val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 1)
+            cleared = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+            new_val = cleared | (val_bit << bit_pos)
+            block_assigns[var_name] = new_val
+            vars[var_name] = new_val
+            i += 1; continue
+      # Typed element assignment: D.u8[0] = value, D.u16[1] = value (byte/halfword access)
+      if (m := re.match(r'(\w+)\.(\w+)\[(\d+)\]\s*=\s*(.+)', line)):
+        var_name, type_str, idx, val_expr = m.group(1), m.group(2), int(m.group(3)), m.group(4)
+        dt = DTYPES.get(type_str, dtypes.uint32)
+        ctx = {**vars, **block_assigns}
+        val = parse_expr(val_expr, ctx)
+        old_val = block_assigns.get(var_name, vars.get(var_name, UOp.const(dtypes.uint32, 0)))
+        # Calculate bit position and width based on type
+        bit_width = dt.itemsize * 8
+        low_bit = idx * bit_width
+        # Create mask for the element
+        mask = UOp.const(dtypes.uint32, ((1 << bit_width) - 1) << low_bit)
+        # Convert value to uint32 and shift to position
+        val_bits = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+        val_bits = (val_bits & UOp.const(dtypes.uint32, (1 << bit_width) - 1)) << UOp.const(dtypes.uint32, low_bit)
+        # Clear old bits and set new
+        new_val = (old_val & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | val_bits
+        block_assigns[var_name] = new_val
+        vars[var_name] = new_val
+        assigns.append((f'{var_name}.{type_str}[{idx}]', val))
         i += 1; continue
       # Dynamic single-bit assignment: D0.u32[S0.u32[4:0]] = 1'1U (set/clear bit at dynamic position)
       # Only match if bit_expr contains a nested bracket (like S0.u32[4:0]), not just laneId
@@ -688,6 +777,24 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     return (v >> bit) & UOp.const(dtypes.uint32, 1)
   # Literals
   if (m := re.match(r'0x([0-9a-fA-F]+)', expr)): return UOp.const(dtypes.uint64, int(m.group(1), 16))
+  # Verilog-style literals: 8'd255 (decimal), 8'hFF (hex), 8'b11111111 (binary)
+  if (m := re.match(r"(\d+)'[dD](\d+)", expr)):
+    bits, val = int(m.group(1)), int(m.group(2))
+    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(bits, dtypes.uint32)
+    return UOp.const(dt, val)
+  if (m := re.match(r"(\d+)'[hH]([0-9a-fA-F]+)", expr)):
+    bits, val = int(m.group(1)), int(m.group(2), 16)
+    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(bits, dtypes.uint32)
+    return UOp.const(dt, val)
+  if (m := re.match(r"(\d+)'[bB]([01]+)", expr)):
+    bits, val = int(m.group(1)), int(m.group(2), 2)
+    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(bits, dtypes.uint32)
+    return UOp.const(dt, val)
+  # Typed hex constants with 0x prefix: 8'0xff, 64'0x123
+  if (m := re.match(r"(\d+)'0x([0-9a-fA-F]+)", expr)):
+    bits, val = int(m.group(1)), int(m.group(2), 16)
+    dt = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.uint64}.get(bits, dtypes.uint32)
+    return UOp.const(dt, val)
   # Typed constants: 16'4, 1'0U, 1'1U, 64'0x... etc
   if (m := re.match(r"(\d+)'(\d+)U?", expr)):
     bits, val = int(m.group(1)), int(m.group(2))
@@ -755,6 +862,18 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     high = parse_expr(m.group(1), vars).cast(dtypes.uint64)
     low = parse_expr(m.group(2), vars).cast(dtypes.uint64)
     return (high << UOp.const(dtypes.uint64, 32)) | low
+  # VGPR[lane][reg] - read from vgpr buffer at specific lane and register index
+  if (m := re.match(r'VGPR\[([^\]]+)\]\[([^\]]+)\]', expr)):
+    lane_expr, reg_expr = m.group(1), m.group(2)
+    lane = parse_expr(lane_expr, vars)
+    reg = parse_expr(reg_expr, vars)
+    if lane.dtype != dtypes.uint32: lane = lane.cast(dtypes.uint32)
+    if reg.dtype != dtypes.uint32: reg = reg.cast(dtypes.uint32)
+    vgpr = vars.get('_vgpr')
+    if vgpr is None: return UOp.const(dtypes.uint32, 0)
+    # vgpr layout: reg * 32 + lane (32 lanes per register)
+    idx = reg * UOp.const(dtypes.uint32, 32) + lane
+    return vgpr.index(idx.cast(dtypes.index))
   # MEM[addr].type
   if (m := re.match(r'MEM\[(.+)\]\.(\w+)', expr)):
     addr = parse_expr(m.group(1), vars)
@@ -779,24 +898,43 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       half_offset = ((addr >> UOp.const(addr_dt, 1)) & UOp.const(addr_dt, 1)).cast(dtypes.uint32)
       val = (val >> (half_offset * UOp.const(dtypes.uint32, 16))) & UOp.const(dtypes.uint32, 0xFFFF)
     return val
+  # Array element access with type suffix: VAR[index].type (like in7[7].b8 for single bit cast to type)
+  if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\]\.(\w+)$', expr)):
+    var_name, idx, type_suffix = m.group(1), int(m.group(2)), m.group(3)
+    dt = DTYPES.get(type_suffix, dtypes.uint32)
+    # First check if it's an array element (like in7 accessing in7)
+    actual_var = f'{var_name}{idx}'
+    if actual_var in vars:
+      v = vars[actual_var]
+      return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
+    # Otherwise treat as single bit access with type cast
+    if var_name in vars:
+      v = vars[var_name]
+      if v.dtype != dtypes.uint32: v = v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
+      bit_val = (v >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)
+      return bit_val.cast(dt) if dt.itemsize != dtypes.uint32.itemsize else bit_val.bitcast(dt)
   # Array element access: VAR[index] where index is a constant - maps to VAR{index} variable
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\]$', expr)):
     var_name, idx = m.group(1), int(m.group(2))
     actual_var = f'{var_name}{idx}'
     if actual_var in vars: return vars[actual_var]
-    # Fall through to bit slice handling if not found as array element
+    # If not found as array element, try as single bit access on the variable
+    if var_name in vars:
+      v = vars[var_name]
+      if v.dtype != dtypes.uint32: v = v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
+      return (v >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)
   # VAR[high:low] - handled above in "Bit slice" pattern
   # Lambda call: NAME(arg1, arg2, ...)
   if (m := re.match(r'(\w+)\((.+)\)$', expr)):
     func_name, args_str = m.group(1), m.group(2)
     if func_name in vars and isinstance(vars[func_name], tuple) and vars[func_name][0] == 'lambda':
       _, param_names, body = vars[func_name]
-      # Parse arguments (handling nested parens)
+      # Parse arguments (handling nested parens and braces)
       args = []
       depth, start = 0, 0
       for i, ch in enumerate(args_str):
-        if ch == '(': depth += 1
-        elif ch == ')': depth -= 1
+        if ch in '({': depth += 1
+        elif ch in ')}': depth -= 1
         elif ch == ',' and depth == 0:
           args.append(args_str[start:i].strip())
           start = i + 1
@@ -842,6 +980,25 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
               elem_val = elem_val.cast(result.dtype)
           result = cond.where(elem_val, result)
         return result
+  # General suffix indexing: prefix[idx] where prefix is not a simple identifier
+  # This handles cases like in[7][7] where in[7] needs to be parsed first
+  if (m := re.match(r'(.+)\[(\d+)\]$', expr)):
+    prefix, idx = m.group(1), int(m.group(2))
+    # Only handle if prefix is not a simple identifier (those are handled above)
+    if not re.match(r'^[a-zA-Z_]\w*$', prefix):
+      base = parse_expr(prefix, vars)
+      # Treat as bit access on the result
+      if base.dtype != dtypes.uint32: base = base.bitcast(dtypes.uint32) if base.dtype.itemsize == 4 else base.cast(dtypes.uint32)
+      return (base >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)
+  # General suffix indexing with type: prefix[idx].type
+  if (m := re.match(r'(.+)\[(\d+)\]\.(\w+)$', expr)):
+    prefix, idx, type_suffix = m.group(1), int(m.group(2)), m.group(3)
+    dt = DTYPES.get(type_suffix, dtypes.uint32)
+    if not re.match(r'^[a-zA-Z_]\w*$', prefix):
+      base = parse_expr(prefix, vars)
+      if base.dtype != dtypes.uint32: base = base.bitcast(dtypes.uint32) if base.dtype.itemsize == 4 else base.cast(dtypes.uint32)
+      bit_val = (base >> UOp.const(dtypes.uint32, idx)) & UOp.const(dtypes.uint32, 1)
+      return bit_val.cast(dt) if dt.itemsize != dtypes.uint32.itemsize else bit_val.bitcast(dt)
   # Function call
   if (result := _parse_func(expr, vars)) is not None: return result
   return UOp.const(dtypes.uint32, 0)
@@ -876,9 +1033,20 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp]) -> t
         elif re.match(r'endfor\b', lines[i], re.IGNORECASE): depth -= 1
         if depth > 0: body_lines.append(lines[i])
         i += 1
+      def _try_eval(expr: str) -> str:
+        try:
+          if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()):
+            return str(eval(expr))
+        except: pass
+        return expr
       for loop_i in range(start_val, end_val + 1):
         for bl in body_lines:
           subst = re.sub(rf'\b{loop_var}\b', str(loop_i), bl)
+          # Simplify arithmetic in bit slice bounds: data[0 * 8 + 7 : 0 * 8] -> data[7 : 0]
+          def _simplify_slice(m):
+            hi, lo = _try_eval(m.group(1)), _try_eval(m.group(2))
+            return f'[{hi} : {lo}]'
+          subst = re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', _simplify_slice, subst)
           # Handle array-indexed assignments: in[i] = value -> in{i} = value
           if (am := re.match(r'(\w+)\[(\d+)\]\s*=\s*(.+)', subst)):
             actual_var = f'{am.group(1)}{am.group(2)}'
@@ -1259,6 +1427,36 @@ def _register_funcs():
       result = cond.where(UOp.const(dtypes.float64, _TRIG_PREOP_TABLE[shift_val]), result)
     return result
   _FUNC_TABLE.append((r'trig_preop_result\((.+)\)', 1, _trig_preop_result))
+
+  # s_ff1_i32_b32: find first set bit (count trailing zeros) for 32-bit value
+  # Returns the position of the lowest set bit, or -1 if input is 0
+  def _s_ff1_i32_b32(a, v, m):
+    val = a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]
+    # Build cascading WHERE to find lowest set bit position
+    result = UOp.const(dtypes.int, -1)  # Default: no bits set
+    for i in range(31, -1, -1):
+      bit_set = (val >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
+      result = bit_set.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.int, i), result)
+    # Find LOWEST set bit: iterate from bit 0 upward
+    result = UOp.const(dtypes.int, -1)
+    for i in range(32):
+      bit_set = (val >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
+      # Only update if bit is set AND we haven't found one yet (result == -1)
+      cond = bit_set.ne(UOp.const(dtypes.uint32, 0)) & result.eq(UOp.const(dtypes.int, -1))
+      result = cond.where(UOp.const(dtypes.int, i), result)
+    return result
+  _FUNC_TABLE.append((r's_ff1_i32_b32\((.+)\)', 1, _s_ff1_i32_b32))
+
+  # s_ff1_i32_b64: find first set bit for 64-bit value
+  def _s_ff1_i32_b64(a, v, m):
+    val = a[0].cast(dtypes.uint64) if a[0].dtype != dtypes.uint64 else a[0]
+    result = UOp.const(dtypes.int, -1)
+    for i in range(64):
+      bit_set = (val >> UOp.const(dtypes.uint64, i)) & UOp.const(dtypes.uint64, 1)
+      cond = bit_set.ne(UOp.const(dtypes.uint64, 0)) & result.eq(UOp.const(dtypes.int, -1))
+      result = cond.where(UOp.const(dtypes.int, i), result)
+    return result
+  _FUNC_TABLE.append((r's_ff1_i32_b64\((.+)\)', 1, _s_ff1_i32_b64))
 
 _register_funcs()
 
