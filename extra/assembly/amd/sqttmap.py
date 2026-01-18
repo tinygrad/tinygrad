@@ -1,12 +1,14 @@
-# maps trace packets to instructions.
+# maps SQTT trace packets to instructions.
 from typing import Iterator
+
+from tinygrad.runtime.support.elf import elf_loader
+from tinygrad.helpers import DEBUG, colored
+
 from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp, PacketType, IMMEDIATE_MASK
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP, s_endpgm
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
-from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.helpers import DEBUG, colored
 
 def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst, int]]:
   """maps SQTT packets to instructions, yields packet, PC, instruction and wave unit id"""
@@ -23,22 +25,21 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst, in
     offset += inst.size()
 
   wave_pc:dict[int, int] = {}
-  simd_sel = (0, 0)
-  def wave_focus(p) -> bool:
-    if isinstance(p, IMMEDIATE_MASK): return True
-    return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0 and getattr(p, "wave", None) is not None
+  # only processing packets on one [CU, SIMD] unit
+  def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
-    if not wave_focus(p): continue
+    if not simd_select(p): continue
     if DEBUG >= 2: print_packets([p])
     if isinstance(p, WAVESTART):
-      assert p.wave not in wave_pc
+      assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = 0
     elif isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
       yield (p, pc, s_endpgm(), p.wave)
+    # skip OTHER_ instructions, they don't belong to this unit
     elif isinstance(p, INST) and p.op.name.startswith("OTHER_"): continue
     if isinstance(p, IMMEDIATE_MASK):
-      # immediate mask may yield 1-16 times per packet
+      # immediate mask may yield multiple times per packet
       for wave in range(16):
         if p.mask & (1 << wave):
           inst = pc_map[pc:=wave_pc[wave]]
@@ -67,6 +68,8 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst, in
       if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
       yield (p, pc, inst, p.wave)
 
+# test to compare every packet with the rocprof decoder
+
 def test_rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import llvm_disasm
   from extra.sqtt.roc import decode as roc_decode, InstExec
@@ -87,6 +90,7 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
     if inst == s_endpgm():
       completed_wave = list(rwaves_iter[wave].pop(0))
       assert len(completed_wave) == 0, f"incomplete instructions in wave {wave}"
+    # otherwise the packet timestamp is time + "stall"
     else:
       assert pkt._time == rocprof_inst.time+rocprof_inst.stall
     passed_insts += 1
@@ -112,7 +116,5 @@ if __name__ == "__main__":
   for e in sqtt_events:
     if args.kernel is not None and args.kernel != e.kern: continue
     if not e.itrace: continue
-    # for small kernels, se0 itrace is empty
-    if e.se != 1: continue
     print(f"==== {e.kern}")
     test_rocprof_inst_traces_match(e, kern_events[e.kern], target)
