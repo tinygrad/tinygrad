@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import Iterator
 
 from tinygrad.runtime.support.elf import elf_loader
-from tinygrad.helpers import DEBUG, colored
 
 from extra.assembly.amd.sqtt import decode, print_packets, INST, VALUINST, IMMEDIATE, WAVESTART, WAVEEND, InstOp, PacketType, IMMEDIATE_MASK
 from extra.assembly.amd.dsl import Inst
@@ -36,7 +35,6 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, InstructionIn
   def simd_select(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0
   for p in decode(data):
     if not simd_select(p): continue
-    if DEBUG >= 2: print_packets([p])
     if isinstance(p, WAVESTART):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = 0
@@ -62,7 +60,6 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, InstructionIn
       # s_delay_alu doesn't get a packet?
       if isinstance(inst, SOPP) and inst.op in {SOPPOp.S_DELAY_ALU}:
         wave_pc[p.wave] += inst.size()
-        if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
         inst = pc_map[pc:=wave_pc[p.wave]]
       # identify a branch instruction, only used for asserts
       is_branch = isinstance(inst, SOPP) and "BRANCH" in inst.op_name
@@ -75,7 +72,6 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, InstructionIn
       else:
         if is_branch: assert inst.op != SOPPOp.S_BRANCH, f"S_BRANCH must have a JUMP packet, got {p}"
         wave_pc[p.wave] += inst.size()
-      if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'WHITE')}")
       yield (p, InstructionInfo(pc, p.wave, inst))
       continue
     # for all other packets (VMEMEXEC, ALUEXEC, etc.), yield with None
@@ -95,7 +91,9 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
 
   passed_insts = 0
   for pkt, info in map_insts(sqtt.blob, prg.lib):
+    if DEBUG >= 2: print_packets([pkt])
     if info is None: continue
+    if DEBUG >= 2: print(f"{' '*29}{info.inst.disasm()}")
     rocprof_inst = next(rwaves_iter[info.wave][0])
     ref_pc = rocprof_inst.pc-rwaves_base
     # always check pc matches
@@ -116,7 +114,7 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
 
 if __name__ == "__main__":
   import argparse, pickle, pathlib
-  from tinygrad.helpers import temp
+  from tinygrad.helpers import temp, DEBUG
   parser = argparse.ArgumentParser()
   parser.add_argument('--profile', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
