@@ -175,6 +175,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
       ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
+      if isinstance(e.name.ret, str): fmt.append(e.name.ret)
     events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), st-start_ts, dur, enum_str("\n".join(fmt), scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
@@ -280,17 +281,17 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     ctxs.append({"name":f"Exec {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 def sqtt_timeline(data) -> list[ProfileEvent]:
-  from extra.assembly.amd.sqttmap import map_insts
+  from extra.assembly.amd.sqttmap import map_insts, InstructionInfo
   from extra.assembly.amd.sqtt import PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC, ALUEXEC
   e, prg = data
   ret:list[ProfileEvent] = []
   rows:dict[str, None] = {}
   trace:dict[str, set[int]] = {}
-  def add(name:str, p:PacketType, idx=0, width=1, op_name=None, wave=None, inst=None) -> None:
+  def add(name:str, p:PacketType, idx=0, width=1, op_name=None, wave=None, inst:InstructionInfo|None=None) -> None:
     if hasattr(p, "wave"): wave = p.wave
     rows.setdefault(r:=(f"WAVE:{wave}" if wave is not None else f"{p.__class__.__name__}:0 {name}"))
-    isa = f" {inst.disasm()}" if inst is not None else ""
-    ret.append(ProfileRangeEvent(r, f"{op_name if op_name is not None else name} OP:{idx}{isa}", Decimal(p._time), Decimal(p._time+width)))
+    key = TracingKey(f"{op_name if op_name is not None else name} OP:{idx}", ret=inst.disasm() if inst is not None else None)
+    ret.append(ProfileRangeEvent(r, key, Decimal(p._time), Decimal(p._time+width)))
   for p, info in map_insts(e.blob, prg.lib):
     if len(ret) > getenv("MAX_SQTT_PKTS", 50_000): break
     inst = info.inst if info is not None else None
