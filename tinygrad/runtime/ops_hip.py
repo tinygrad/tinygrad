@@ -1,5 +1,5 @@
 import ctypes, functools
-from tinygrad.helpers import mv_address, getenv
+from tinygrad.helpers import mv_address, getenv, suppress_finalizing
 from tinygrad.device import Compiled, LRUAllocator, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -28,6 +28,7 @@ class HIPProgram:
     self.module = init_c_var(hip.hipModule_t, lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
     self.prg = init_c_var(hip.hipFunction_t, lambda x: check(hip.hipModuleGetFunction(ctypes.byref(x), self.module, name.encode("utf-8"))))
 
+  @suppress_finalizing
   def __del__(self):
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
