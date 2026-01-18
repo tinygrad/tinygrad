@@ -8,7 +8,8 @@ from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.helpers import DEBUG, colored
 
-def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
+def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst, int]]:
+  """maps SQTT packets to instructions, yields packet, PC, instruction and wave unit id"""
   # map pcs to insts
   pc_map:dict[int, Inst] = {}
   image, sections, _ = elf_loader(lib)
@@ -23,7 +24,9 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
 
   wave_pc:dict[int, int] = {}
   simd_sel = (0, 0)
-  def wave_focus(p) -> bool: return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0 and getattr(p, "wave", None) == 0
+  def wave_focus(p) -> bool:
+    if isinstance(p, IMMEDIATE_MASK): return True
+    return getattr(p, "cu", 0) == 0 and getattr(p, "simd", 0) == 0 and getattr(p, "wave", None) is not None
   for p in decode(data):
     if not wave_focus(p): continue
     if DEBUG >= 2: print_packets([p])
@@ -32,16 +35,24 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
       wave_pc[p.wave] = 0
     elif isinstance(p, WAVEEND):
       pc = wave_pc.pop(p.wave)
-      yield (p, pc, s_endpgm())
+      yield (p, pc, s_endpgm(), p.wave)
     elif isinstance(p, INST) and p.op.name.startswith("OTHER_"): continue
-    if isinstance(p, IMMEDIATE_MASK): raise Exception("todo!")
+    if isinstance(p, IMMEDIATE_MASK):
+      # immediate mask may yield 1-16 times per packet
+      for wave in range(16):
+        if p.mask & (1 << wave):
+          inst = pc_map[pc:=wave_pc[wave]]
+          # can this assert be more strict?
+          assert isinstance(inst, SOPP), f"IMMEDIATE_MASK packet must map to SOPP, got {inst}"
+          wave_pc[wave] += inst.size()
+          yield (p, pc, inst, wave)
     elif isinstance(p, (VALUINST, INST, IMMEDIATE)):
       inst = pc_map[pc:=wave_pc[p.wave]]
       # s_delay_alu doesn't get a packet?
-      if isinstance(inst, SOPP) and inst.op is SOPPOp.S_DELAY_ALU:
+      if isinstance(inst, SOPP) and inst.op in {SOPPOp.S_DELAY_ALU}:
         wave_pc[p.wave] += inst.size()
+        if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'RED')}")
         inst = pc_map[pc:=wave_pc[p.wave]]
-        if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
       # identify a branch instruction, only used for asserts
       is_branch = isinstance(inst, SOPP) and "BRANCH" in inst.op_name
       if is_branch: assert isinstance(p, INST) and p.op in {InstOp.JUMP_NO, InstOp.JUMP}, f"branch can only be folowed by jump packets, got {p}"
@@ -54,7 +65,7 @@ def map_insts(data:bytes, lib:bytes) -> Iterator[tuple[PacketType, int, Inst]]:
         if is_branch: assert inst.op != SOPPOp.S_BRANCH, f"S_BRANCH must have a JUMP packet, got {p}"
         wave_pc[p.wave] += inst.size()
       if DEBUG >= 2: print(f"{' '*29}{colored(inst.disasm(), 'BLACK')}")
-      yield (p, pc, inst)
+      yield (p, pc, inst, p.wave)
 
 def test_rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import llvm_disasm
@@ -67,15 +78,15 @@ def test_rocprof_inst_traces_match(sqtt, prg, target):
   rwaves_base = next(iter(disasm)) # base program counter
 
   passed_insts = 0
-  for pkt, pc, inst in map_insts(sqtt.blob, prg.lib):
-    rocprof_inst = next(rwaves_iter[pkt.wave][0])
+  for pkt, pc, inst, wave in map_insts(sqtt.blob, prg.lib):
+    rocprof_inst = next(rwaves_iter[wave][0])
     ref_pc = rocprof_inst.pc-rwaves_base
     # always check pc matches
     assert ref_pc == pc, f"pc mismatch {ref_pc}:{disasm[rocprof_inst.pc][0]} != {pc}:{inst.disasm()}"
     # special handling for s_endpgm, it marks the wave completion.
     if inst == s_endpgm():
-      completed_wave = list(rwaves_iter[pkt.wave].pop(0))
-      assert len(completed_wave) == 0, f"incomplete instructions in wave {pkt.wave}"
+      completed_wave = list(rwaves_iter[wave].pop(0))
+      assert len(completed_wave) == 0, f"incomplete instructions in wave {wave}"
     else:
       assert pkt._time == rocprof_inst.time+rocprof_inst.stall
     passed_insts += 1
