@@ -171,7 +171,8 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
       # End of block markers
       if re.match(r'(elsif|else|endif|endfor)\b', line, re.IGNORECASE): break
       # For loop: unroll and execute body for each iteration
-      if (m := re.match(r'for\s+(\w+)\s+in\s+(\d+)\s*:\s*(\d+)\s+do', line, re.IGNORECASE)):
+      # For loop: handles both simple "for i in 0 : 31 do" and typed "for i in 6'0U : 6'31U do"
+      if (m := re.match(r"for\s+(\w+)\s+in\s+(?:\d+')?(\d+)U?\s*:\s*(?:\d+')?(\d+)U?\s+do", line, re.IGNORECASE)):
         loop_var, start_val, end_val = m.group(1), int(m.group(2)), int(m.group(3))
         i += 1
         # Collect loop body
@@ -181,20 +182,62 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           elif re.match(r'endfor\b', lines[i], re.IGNORECASE): depth -= 1
           if depth > 0: body_lines.append(lines[i])
           i += 1
+        # Check if loop body contains break - need special handling for "find first" pattern
+        has_break = any('break' in bl.lower() for bl in body_lines)
+        if has_break:
+          # For loops with break: track "found" state, only update when not yet found
+          found_var = f'_loop_found_{id(body_lines)}'
+          vars[found_var] = UOp.const(dtypes.bool, False)
+          block_assigns[found_var] = UOp.const(dtypes.bool, False)
         # Unroll: execute body for each iteration value
         for loop_i in range(start_val, end_val + 1):
           # Substitute loop variable in body lines
           subst_lines = []
           for bl in body_lines:
+            if re.match(r'break\b', bl.strip(), re.IGNORECASE): continue  # Skip break statements
             # Replace .type[loop_var] patterns FIRST: OPSEL.u3[i] -> OPSEL.u3[2]
             subst = re.sub(rf'\.(\w+)\[{loop_var}\]', rf'.\g<1>[{loop_i}]', bl)
             # Replace array indexing patterns: VAR[loop_var] -> VAR{loop_i} (but not .type[i])
             subst = re.sub(rf'(?<!\.)\b(\w+)\[{loop_var}\]', rf'\g<1>{{{loop_i}}}', subst)
+            # Replace arithmetic expressions with loop_var: 31 - i -> 31 - 2
+            subst = re.sub(rf'\b{loop_var}\b', str(loop_i), subst)
             subst_lines.append(subst)
           # Parse substituted body as a nested block
           _, iter_assigns = parse_block(subst_lines, 0)
-          block_assigns.update(iter_assigns)
-          vars.update(iter_assigns)
+          if has_break:
+            # For break loops: only apply iteration's assigns if not yet found
+            found = block_assigns.get(found_var, vars.get(found_var))
+            not_found = found.eq(UOp.const(dtypes.bool, False))
+            for var, val in iter_assigns.items():
+              if var == found_var: continue
+              old_val = block_assigns.get(var, vars.get(var, UOp.const(dtypes.uint32, 0)))
+              # Type coercion for WHERE
+              if val.dtype != old_val.dtype and val.dtype.itemsize == old_val.dtype.itemsize:
+                old_val = old_val.cast(val.dtype)
+              block_assigns[var] = not_found.where(val, old_val)
+              vars[var] = block_assigns[var]
+            # Update found state: found if condition was true in this iteration
+            # Look for the if condition that leads to break
+            for j, bl in enumerate(body_lines):
+              if (cm := re.match(r'if\s+(.+?)\s+then$', bl.strip(), re.IGNORECASE)):
+                # Check if break follows this if
+                for k in range(j+1, len(body_lines)):
+                  if re.match(r'break\b', body_lines[k].strip(), re.IGNORECASE):
+                    cond_str = cm.group(1)
+                    # Substitute loop var in condition
+                    cond_str = re.sub(rf'\b{loop_var}\b', str(loop_i), cond_str)
+                    cond = parse_expr(cond_str, {**vars, **block_assigns})
+                    if cond.dtype != dtypes.bool: cond = cond.ne(UOp.const(cond.dtype, 0))
+                    new_found = not_found.where(cond, found)
+                    block_assigns[found_var] = new_found
+                    vars[found_var] = new_found
+                    break
+                  elif re.match(r'(endif|else|elsif)\b', body_lines[k].strip(), re.IGNORECASE):
+                    break
+                break
+          else:
+            block_assigns.update(iter_assigns)
+            vars.update(iter_assigns)
         continue
       # If/elsif/else block: build nested WHERE
       if (m := re.match(r'if\s+(.+?)\s+then$', line, re.IGNORECASE)):
@@ -301,11 +344,14 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           # Don't increment i here - while loop already moved it past the lambda body
         vars[lambda_name] = ('lambda', lambda_args, body)
         continue
-      # VAR[high:low] = value or VAR[high:low].type = value
-      if (m := re.match(r'(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?\s*=\s*(.+)', line)):
-        var_name, high_bit, low_bit, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
-        val = parse_expr(m.group(5), {**vars, **block_assigns})
-        assigns.append((f'{var_name}[{high_bit}:{low_bit}]' + (f'.{type_suffix}' if type_suffix else ''), val))
+      # VAR[high:low] = value or VAR[high:low].type = value or VAR.type[high:low] = value
+      if (m := re.match(r'(\w+)(?:\.(\w+))?\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?\s*=\s*(.+)', line)):
+        var_name, type_prefix, first_bit, second_bit, type_suffix = m.group(1), m.group(2), int(m.group(3)), int(m.group(4)), m.group(5)
+        val = parse_expr(m.group(6), {**vars, **block_assigns})
+        # Determine high_bit and low_bit (handle both normal [31:0] and reversed [0:31])
+        high_bit, low_bit = max(first_bit, second_bit), min(first_bit, second_bit)
+        type_info = type_prefix or type_suffix
+        assigns.append((f'{var_name}[{high_bit}:{low_bit}]' + (f'.{type_info}' if type_info else ''), val))
         # Also update vars to accumulate the bit slice (needed for later references like D0 = tmp)
         if var_name not in vars: vars[var_name] = UOp.const(dtypes.uint64 if high_bit >= 32 else dtypes.uint32, 0)
         old_val = block_assigns.get(var_name, vars.get(var_name))
@@ -373,6 +419,28 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
           new_val = cleared | (val_bit << bit_pos)
         block_assigns[var_name] = new_val
         vars[var_name] = new_val
+        i += 1; continue
+      # Compound destination assignment: { D1.u1, D0.u64 } = value (for 65-bit results like V_MAD_U64_U32)
+      if (m := re.match(r'\{\s*(\w+)\.(\w+)\s*,\s*(\w+)\.(\w+)\s*\}\s*=\s*(.+)', line)):
+        hi_var, hi_type, lo_var, lo_type, rhs = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+        val = parse_expr(rhs, {**vars, **block_assigns})
+        # For { D1.u1, D0.u64 } = 65-bit value: D0 = low 64 bits, D1 = bit 64
+        lo_dt = DTYPES.get(lo_type, dtypes.uint64)
+        hi_dt = DTYPES.get(hi_type, dtypes.uint32)
+        lo_bits = 64 if lo_dt in (dtypes.uint64, dtypes.int64) else 32
+        # Extract low bits for D0
+        if val.dtype.itemsize * 8 > lo_bits:
+          lo_val = val.cast(lo_dt) if lo_bits == 64 else (val & UOp.const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
+        else:
+          lo_val = val.cast(lo_dt)
+        block_assigns[lo_var] = lo_val
+        vars[lo_var] = lo_val
+        assigns.append((f'{lo_var}.{lo_type}', lo_val))
+        # Extract high bit(s) for D1 (overflow/carry)
+        hi_val = (val >> UOp.const(val.dtype, lo_bits)).cast(hi_dt)
+        block_assigns[hi_var] = hi_val
+        vars[hi_var] = hi_val
+        assigns.append((f'{hi_var}.{hi_type}', hi_val))
         i += 1; continue
       # Regular assignment: VAR = value
       if (m := re.match(r'(\w+(?:\.\w+)?(?:\[\w+\])?)\s*=\s*(.+)', line)) and not re.search(r'[<>=!]=', line[:line.find('=')]):
@@ -468,8 +536,12 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
           return _BINOPS[op_type](l, r)
   # Type cast: 64'U(...) or 32'F(...) etc. - for F types, use bitcast to preserve bit patterns
   if (m := re.match(r"(\d+)'([UIFB])\((.+)\)", expr)):
+    bits = int(m.group(1))
+    # For widths > 64, use uint64 (best we have) - arithmetic will be done in 64-bit
+    # For widths > 32 but <= 64, use uint64
     dt = {('U',32): dtypes.uint32, ('U',64): dtypes.uint64, ('I',32): dtypes.int, ('I',64): dtypes.int64,
-          ('F',32): dtypes.float32, ('F',64): dtypes.float64}.get((m.group(2), int(m.group(1))), dtypes.uint32)
+          ('F',32): dtypes.float32, ('F',64): dtypes.float64}.get((m.group(2), bits),
+          dtypes.uint64 if bits > 32 else dtypes.uint32)
     inner = parse_expr(m.group(3), vars)
     # For float types with integer source (like 32'F(0xffc00000)), use bitcast to preserve bit patterns
     if m.group(2) == 'F' and inner.dtype in (dtypes.uint32, dtypes.uint64, dtypes.ulong, dtypes.int, dtypes.int64):
@@ -500,9 +572,40 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     result = v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
     return _ftz_f32(result) if dt == dtypes.float32 else result
   # Bit slice: S0[4:0] or S0[4:0].u32 or S0[15:0].f16
+  # Also handles reversed slices like S0[0:31] (bit reverse)
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
-    var_name, hi, lo, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
+    var_name, first, second, type_suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
     val = vars.get(var_name, UOp.const(dtypes.uint32, 0))
+    # Check for reversed slice (bit reverse): S0[0:31] means reverse bits
+    if first < second:
+      # Bit reverse: S0[0:31] reverses all 32 bits
+      width = second - first + 1
+      if width == 32:
+        # 32-bit reverse using parallel swap approach
+        v = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+        v = ((v >> UOp.const(dtypes.uint32, 1)) & UOp.const(dtypes.uint32, 0x55555555)) | ((v & UOp.const(dtypes.uint32, 0x55555555)) << UOp.const(dtypes.uint32, 1))
+        v = ((v >> UOp.const(dtypes.uint32, 2)) & UOp.const(dtypes.uint32, 0x33333333)) | ((v & UOp.const(dtypes.uint32, 0x33333333)) << UOp.const(dtypes.uint32, 2))
+        v = ((v >> UOp.const(dtypes.uint32, 4)) & UOp.const(dtypes.uint32, 0x0F0F0F0F)) | ((v & UOp.const(dtypes.uint32, 0x0F0F0F0F)) << UOp.const(dtypes.uint32, 4))
+        v = ((v >> UOp.const(dtypes.uint32, 8)) & UOp.const(dtypes.uint32, 0x00FF00FF)) | ((v & UOp.const(dtypes.uint32, 0x00FF00FF)) << UOp.const(dtypes.uint32, 8))
+        result = (v >> UOp.const(dtypes.uint32, 16)) | (v << UOp.const(dtypes.uint32, 16))
+      elif width == 64:
+        # 64-bit reverse
+        v = val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
+        v = ((v >> UOp.const(dtypes.uint64, 1)) & UOp.const(dtypes.uint64, 0x5555555555555555)) | ((v & UOp.const(dtypes.uint64, 0x5555555555555555)) << UOp.const(dtypes.uint64, 1))
+        v = ((v >> UOp.const(dtypes.uint64, 2)) & UOp.const(dtypes.uint64, 0x3333333333333333)) | ((v & UOp.const(dtypes.uint64, 0x3333333333333333)) << UOp.const(dtypes.uint64, 2))
+        v = ((v >> UOp.const(dtypes.uint64, 4)) & UOp.const(dtypes.uint64, 0x0F0F0F0F0F0F0F0F)) | ((v & UOp.const(dtypes.uint64, 0x0F0F0F0F0F0F0F0F)) << UOp.const(dtypes.uint64, 4))
+        v = ((v >> UOp.const(dtypes.uint64, 8)) & UOp.const(dtypes.uint64, 0x00FF00FF00FF00FF)) | ((v & UOp.const(dtypes.uint64, 0x00FF00FF00FF00FF)) << UOp.const(dtypes.uint64, 8))
+        v = ((v >> UOp.const(dtypes.uint64, 16)) & UOp.const(dtypes.uint64, 0x0000FFFF0000FFFF)) | ((v & UOp.const(dtypes.uint64, 0x0000FFFF0000FFFF)) << UOp.const(dtypes.uint64, 16))
+        result = (v >> UOp.const(dtypes.uint64, 32)) | (v << UOp.const(dtypes.uint64, 32))
+      else:
+        result = val  # Unsupported width, return as-is
+      if type_suffix:
+        dt = DTYPES.get(type_suffix, dtypes.uint32)
+        if dt != result.dtype:
+          result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
+      return result
+    # Normal slice: hi >= lo
+    hi, lo = first, second
     # If extracting bits beyond value's bit width, look for indexed dword variable (e.g., VDATA2 for bits 95:64)
     val_bits = val.dtype.itemsize * 8
     if lo >= val_bits:
@@ -538,10 +641,40 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       elif dt != result.dtype:
         result = result.cast(dt) if dt.itemsize != result.dtype.itemsize else result.bitcast(dt)
     return result
-  # Bit slice with type prefix: S1.u32[4:0].u32
+  # Verilog-style bit extraction with width: VAR.type[start +: width] (extract `width` bits starting at `start`)
+  if (m := re.match(r"([a-zA-Z_]\w*)\.(\w+)\[(.+?)\s*\+:\s*(?:\d+')?(\d+)U?\]", expr)):
+    var_name, type_prefix, start_expr, width = m.group(1), m.group(2), m.group(3), int(m.group(4))
+    val = vars.get(var_name, UOp.const(dtypes.uint32, 0))
+    start = parse_expr(start_expr, vars)
+    if start.dtype != dtypes.uint32: start = start.cast(dtypes.uint32)
+    # Shift by start and mask to width bits
+    shifted = val >> start
+    mask = UOp.const(shifted.dtype, (1 << width) - 1)
+    return shifted & mask
+  # Bit slice with type prefix: S1.u32[4:0].u32 or S0.u32[0:31] (reversed for bit reverse)
   if (m := re.match(r'([a-zA-Z_]\w*)\.(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
-    hi, lo = int(m.group(3)), int(m.group(4))
+    first, second = int(m.group(3)), int(m.group(4))
     val = vars.get(m.group(1), UOp.const(dtypes.uint32, 0))
+    # Check for reversed slice (bit reverse): S0.u32[0:31] means reverse bits
+    if first < second:
+      width = second - first + 1
+      if width == 32:
+        v = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+        v = ((v >> UOp.const(dtypes.uint32, 1)) & UOp.const(dtypes.uint32, 0x55555555)) | ((v & UOp.const(dtypes.uint32, 0x55555555)) << UOp.const(dtypes.uint32, 1))
+        v = ((v >> UOp.const(dtypes.uint32, 2)) & UOp.const(dtypes.uint32, 0x33333333)) | ((v & UOp.const(dtypes.uint32, 0x33333333)) << UOp.const(dtypes.uint32, 2))
+        v = ((v >> UOp.const(dtypes.uint32, 4)) & UOp.const(dtypes.uint32, 0x0F0F0F0F)) | ((v & UOp.const(dtypes.uint32, 0x0F0F0F0F)) << UOp.const(dtypes.uint32, 4))
+        v = ((v >> UOp.const(dtypes.uint32, 8)) & UOp.const(dtypes.uint32, 0x00FF00FF)) | ((v & UOp.const(dtypes.uint32, 0x00FF00FF)) << UOp.const(dtypes.uint32, 8))
+        return (v >> UOp.const(dtypes.uint32, 16)) | (v << UOp.const(dtypes.uint32, 16))
+      elif width == 64:
+        v = val.cast(dtypes.uint64) if val.dtype != dtypes.uint64 else val
+        v = ((v >> UOp.const(dtypes.uint64, 1)) & UOp.const(dtypes.uint64, 0x5555555555555555)) | ((v & UOp.const(dtypes.uint64, 0x5555555555555555)) << UOp.const(dtypes.uint64, 1))
+        v = ((v >> UOp.const(dtypes.uint64, 2)) & UOp.const(dtypes.uint64, 0x3333333333333333)) | ((v & UOp.const(dtypes.uint64, 0x3333333333333333)) << UOp.const(dtypes.uint64, 2))
+        v = ((v >> UOp.const(dtypes.uint64, 4)) & UOp.const(dtypes.uint64, 0x0F0F0F0F0F0F0F0F)) | ((v & UOp.const(dtypes.uint64, 0x0F0F0F0F0F0F0F0F)) << UOp.const(dtypes.uint64, 4))
+        v = ((v >> UOp.const(dtypes.uint64, 8)) & UOp.const(dtypes.uint64, 0x00FF00FF00FF00FF)) | ((v & UOp.const(dtypes.uint64, 0x00FF00FF00FF00FF)) << UOp.const(dtypes.uint64, 8))
+        v = ((v >> UOp.const(dtypes.uint64, 16)) & UOp.const(dtypes.uint64, 0x0000FFFF0000FFFF)) | ((v & UOp.const(dtypes.uint64, 0x0000FFFF0000FFFF)) << UOp.const(dtypes.uint64, 16))
+        return (v >> UOp.const(dtypes.uint64, 32)) | (v << UOp.const(dtypes.uint64, 32))
+      return val  # Unsupported width
+    hi, lo = first, second
     shift_dt = dtypes.uint64 if val.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
     shifted = val >> UOp.const(shift_dt, lo) if lo > 0 else val
     return shifted & UOp.const(shifted.dtype, (1<<(hi-lo+1))-1)
@@ -672,10 +805,120 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
       lambda_vars = vars.copy()
       for param, arg in zip(param_names, args):
         lambda_vars[param] = parse_expr(arg, vars)
+      # Check if body is multi-line (contains newlines or semicolons indicating statements)
+      if ';' in body or '\n' in body or 'return' in body.lower():
+        # Multi-line body with return statements - parse as block and extract _return_val
+        return _parse_lambda_body(body, lambda_vars)
       return parse_expr(body, lambda_vars)
+  # Array element access with dynamic index: VAR[expr] where expr is not a constant
+  if (m := re.match(r'([a-zA-Z_]\w*)\[([^\]]+)\]$', expr)):
+    var_name, idx_expr = m.group(1), m.group(2)
+    # Skip if this is a bit slice pattern (colon in brackets)
+    if ':' not in idx_expr:
+      # Check if we have array elements var0, var1, etc.
+      # Build a cascading WHERE to select the right element
+      idx = parse_expr(idx_expr, vars)
+      if idx.dtype != dtypes.uint32: idx = idx.cast(dtypes.uint32)
+      # Find all array elements (var0, var1, var2, ...)
+      elements = []
+      for i in range(256):  # Reasonable max
+        elem_var = f'{var_name}{i}'
+        if elem_var in vars:
+          elements.append((i, vars[elem_var]))
+        elif i > 0 and len(elements) == 0:
+          break  # No elements found after checking a few
+        elif i > 0 and f'{var_name}{i+1}' not in vars:
+          break  # Reached end of array
+      if elements:
+        # Build cascading WHERE: idx==0 ? var0 : (idx==1 ? var1 : (idx==2 ? var2 : ...))
+        result = elements[-1][1]  # Default to last element
+        for elem_idx, elem_val in reversed(elements[:-1]):
+          cond = idx.eq(UOp.const(dtypes.uint32, elem_idx))
+          # Type coercion
+          if elem_val.dtype != result.dtype:
+            if elem_val.dtype.itemsize == result.dtype.itemsize:
+              result = result.cast(elem_val.dtype)
+            else:
+              elem_val = elem_val.cast(result.dtype)
+          result = cond.where(elem_val, result)
+        return result
   # Function call
   if (result := _parse_func(expr, vars)) is not None: return result
   return UOp.const(dtypes.uint32, 0)
+
+def _parse_lambda_body(body: str, lambda_vars: dict[str, UOp]) -> UOp:
+  """Parse a multi-line lambda body with return statements. Returns the computed value."""
+  # Split body into lines (handling both ; and newline separators)
+  body = body.replace(';', '\n')
+  lines = [l.strip() for l in body.split('\n') if l.strip() and not l.strip().startswith('//')]
+
+  # Parse the body as if/elsif/else blocks, collecting return values
+  return _parse_lambda_block(lines, 0, lambda_vars)[1]
+
+def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp]) -> tuple[int, UOp]:
+  """Parse a block in a lambda, returns (next_line_idx, return_value)."""
+  i = start
+  while i < len(lines):
+    line = lines[i]
+    # End of block markers
+    if re.match(r'(elsif|else|endif|endfor)\b', line, re.IGNORECASE):
+      break
+    # Return statement
+    if (m := re.match(r'return\s+(.+)$', line, re.IGNORECASE)):
+      return i + 1, parse_expr(m.group(1), vars)
+    # For loop: unroll
+    if (m := re.match(r'for\s+(\w+)\s+in\s+(\d+)\s*:\s*(\d+)\s+do', line, re.IGNORECASE)):
+      loop_var, start_val, end_val = m.group(1), int(m.group(2)), int(m.group(3))
+      i += 1
+      body_lines, depth = [], 1
+      while i < len(lines) and depth > 0:
+        if re.match(r'for\s+', lines[i], re.IGNORECASE): depth += 1
+        elif re.match(r'endfor\b', lines[i], re.IGNORECASE): depth -= 1
+        if depth > 0: body_lines.append(lines[i])
+        i += 1
+      for loop_i in range(start_val, end_val + 1):
+        for bl in body_lines:
+          subst = re.sub(rf'\b{loop_var}\b', str(loop_i), bl)
+          # Handle array-indexed assignments: in[i] = value -> in{i} = value
+          if (am := re.match(r'(\w+)\[(\d+)\]\s*=\s*(.+)', subst)):
+            actual_var = f'{am.group(1)}{am.group(2)}'
+            vars[actual_var] = parse_expr(am.group(3), vars)
+      continue
+    # Declaration
+    if re.match(r'declare\s+', line, re.IGNORECASE):
+      i += 1; continue
+    # If block
+    if (m := re.match(r'if\s+(.+?)\s+then$', line, re.IGNORECASE)):
+      conditions: list[tuple[UOp, UOp | None]] = []
+      cond = parse_expr(m.group(1), vars)
+      if cond.dtype != dtypes.bool: cond = cond.ne(UOp.const(cond.dtype, 0))
+      i += 1
+      i, ret_val = _parse_lambda_block(lines, i, vars)
+      conditions.append((cond, ret_val))
+      while i < len(lines):
+        if (m := re.match(r'elsif\s+(.+?)\s+then$', lines[i], re.IGNORECASE)):
+          cond = parse_expr(m.group(1), vars)
+          if cond.dtype != dtypes.bool: cond = cond.ne(UOp.const(cond.dtype, 0))
+          i += 1
+          i, ret_val = _parse_lambda_block(lines, i, vars)
+          conditions.append((cond, ret_val))
+        elif re.match(r'else$', lines[i], re.IGNORECASE):
+          i += 1
+          i, else_ret = _parse_lambda_block(lines, i, vars)
+          # Build cascading WHERE from conditions
+          result = else_ret
+          for cond, ret_val in reversed(conditions):
+            if ret_val is not None:
+              if ret_val.dtype != result.dtype and ret_val.dtype.itemsize == result.dtype.itemsize:
+                result = result.cast(ret_val.dtype)
+              result = cond.where(ret_val, result)
+          return i, result
+        elif re.match(r'endif\b', lines[i], re.IGNORECASE):
+          i += 1; break
+        else: break
+      continue
+    i += 1
+  return i, UOp.const(dtypes.uint32, 0)
 
 # Function implementations
 def _floor(x: UOp) -> UOp:

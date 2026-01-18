@@ -420,51 +420,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     if sizes.get('ssrc0', 1) == 2:
       s0 = rsgpr64(src_off)
 
-    # SAVEEXEC ops: save EXEC to dst, then modify EXEC (complex pcode with temp var)
-    if 'OR_SAVEEXEC_B32' in op_name:
-      exec_lo = rsgpr(EXEC_LO.offset)
-      new_exec = exec_lo | s0
-      scc = new_exec.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
-      return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
-
-    if 'AND_SAVEEXEC_B32' in op_name:
-      exec_lo = rsgpr(EXEC_LO.offset)
-      new_exec = exec_lo & s0
-      scc = new_exec.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
-      return name, UOp.sink(wsgpr(dst_reg, exec_lo), wsgpr(EXEC_LO.offset, new_exec), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
-
-    # S_BREV_B32: bit reverse (pcode uses reversed slice which parser can't handle)
-    if op_name == 'S_BREV_B32':
-      # Bit reverse using parallel swap approach
-      v = s0
-      v = ((v >> UOp.const(dtypes.uint32, 1)) & UOp.const(dtypes.uint32, 0x55555555)) | ((v & UOp.const(dtypes.uint32, 0x55555555)) << UOp.const(dtypes.uint32, 1))
-      v = ((v >> UOp.const(dtypes.uint32, 2)) & UOp.const(dtypes.uint32, 0x33333333)) | ((v & UOp.const(dtypes.uint32, 0x33333333)) << UOp.const(dtypes.uint32, 2))
-      v = ((v >> UOp.const(dtypes.uint32, 4)) & UOp.const(dtypes.uint32, 0x0F0F0F0F)) | ((v & UOp.const(dtypes.uint32, 0x0F0F0F0F)) << UOp.const(dtypes.uint32, 4))
-      v = ((v >> UOp.const(dtypes.uint32, 8)) & UOp.const(dtypes.uint32, 0x00FF00FF)) | ((v & UOp.const(dtypes.uint32, 0x00FF00FF)) << UOp.const(dtypes.uint32, 8))
-      v = (v >> UOp.const(dtypes.uint32, 16)) | (v << UOp.const(dtypes.uint32, 16))
-      return name, UOp.sink(wsgpr(dst_reg, v), inc_pc(), arg=KernelInfo(name=name))
-
-    # S_QUADMASK_B32: for each of 8 quads, if any bit in quad is set, set result bit (pcode uses for loop)
-    if op_name == 'S_QUADMASK_B32':
-      result = UOp.const(dtypes.uint32, 0)
-      for i in range(8):
-        quad = (s0 >> UOp.const(dtypes.uint32, i * 4)) & UOp.const(dtypes.uint32, 0xF)
-        bit = quad.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
-        result = result | (bit << UOp.const(dtypes.uint32, i))
-      scc = result.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
-      return name, UOp.sink(wsgpr(dst_reg, result), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
-
-    # S_WQM_B32: Whole Quad Mode - if any lane in quad active, set all lanes in that quad (pcode uses for loop)
-    if op_name == 'S_WQM_B32':
-      result = UOp.const(dtypes.uint32, 0)
-      for i in range(8):
-        quad = (s0 >> UOp.const(dtypes.uint32, i * 4)) & UOp.const(dtypes.uint32, 0xF)
-        active = quad.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 0xF), UOp.const(dtypes.uint32, 0))
-        result = result | (active << UOp.const(dtypes.uint32, i * 4))
-      scc = result.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 1), UOp.const(dtypes.uint32, 0))
-      return name, UOp.sink(wsgpr(dst_reg, result), wsgpr(SCC_IDX, scc), inc_pc(), arg=KernelInfo(name=name))
-
-    # Try pcode for other SOP1 ops
+    # Try pcode for SOP1 ops
     pcode_result = compile_sop_pcode(inst.op, {'S0': s0}, wsgpr, rsgpr, dst_reg, dst_size, inc_pc, name)
     assert pcode_result is not None, f"unimplemented SOP1: {op_name}"
     return pcode_result
@@ -550,29 +506,6 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     write_hi_half = is_16bit_op and vdst_reg >= 128
     if write_hi_half:
       vdst_reg = vdst_reg - 128
-
-    # CLZ/CTZ: count leading/trailing zeros - pcode uses break which parser can't handle
-    if op_name in ('V_CLZ_I32_U32_E32', 'V_CLZ_I32_U32'):
-      # CLZ: find first set bit from MSB, return position (0-31), or -1 if all zeros
-      result = UOp.const(dtypes.uint32, 0xFFFFFFFF)  # -1 if no bits set
-      for i in range(32):  # Check from MSB to LSB
-        bit_set = (src0 >> UOp.const(dtypes.uint32, 31 - i)) & UOp.const(dtypes.uint32, 1)
-        result = bit_set.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, i), result)
-      # Use reverse iteration order to get first set bit from MSB
-      for i in range(31, -1, -1):
-        bit_set = (src0 >> UOp.const(dtypes.uint32, 31 - i)) & UOp.const(dtypes.uint32, 1)
-        result = bit_set.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, i), result)
-      store = wvgpr(vdst_reg, lane, result, exec_mask)
-      return name, UOp.sink(UOp.sink(store).end(lane), inc_pc(), arg=KernelInfo(name=name))
-
-    if op_name in ('V_CTZ_I32_B32_E32', 'V_CTZ_I32_B32'):
-      # CTZ: find first set bit from LSB, return position (0-31), or -1 if all zeros
-      result = UOp.const(dtypes.uint32, 0xFFFFFFFF)  # -1 if no bits set
-      for i in range(31, -1, -1):  # Check from LSB to MSB, later checks override earlier
-        bit_set = (src0 >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
-        result = bit_set.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, i), result)
-      store = wvgpr(vdst_reg, lane, result, exec_mask)
-      return name, UOp.sink(UOp.sink(store).end(lane), inc_pc(), arg=KernelInfo(name=name))
 
     pcode_result = compile_vop_pcode(inst.op, {'S0': src0}, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name,
                                      opsel_dst_hi=write_hi_half, rvgpr_fn=rvgpr)
@@ -917,40 +850,6 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     srcs = {'S0': src0, 'S1': src1}
     if src2 is not None: srcs['S2'] = src2
 
-    # V_CNDMASK_B32_E64: condition comes from src2 (SGPR), not VCC
-    # D0.u32 = S2[laneId] ? S1.u32 : S0.u32
-    if op_name == 'V_CNDMASK_B32_E64':
-      cond_bit = (src2 >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)
-      result = cond_bit.ne(UOp.const(dtypes.uint32, 0)).where(src1, src0)
-      store = wvgpr(vdst_reg, lane, result, exec_mask)
-      return name, UOp.sink(UOp.sink(store).end(lane), inc_pc(), arg=KernelInfo(name=name))
-
-    # V_PERM_B32: byte permutation - complex pcode with lambda, implement directly
-    if op_name == 'V_PERM_B32':
-      # Concatenate {S0, S1} as 64-bit: S1 is low 32 bits, S0 is high 32 bits
-      combined = src1.cast(dtypes.uint64) | (src0.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-      # Extract 4 selector bytes from src2
-      result = UOp.const(dtypes.uint32, 0)
-      for byte_pos in range(4):
-        sel = (src2 >> UOp.const(dtypes.uint32, byte_pos * 8)) & UOp.const(dtypes.uint32, 0xFF)
-        # Select byte: if sel < 8, extract byte from combined, else special values
-        byte_val = UOp.const(dtypes.uint32, 0)
-        for i in range(8):
-          extracted = (combined >> UOp.const(dtypes.uint64, i * 8)).cast(dtypes.uint32) & UOp.const(dtypes.uint32, 0xFF)
-          byte_val = sel.eq(UOp.const(dtypes.uint32, i)).where(extracted, byte_val)
-        # sel=8-11: sign extension based on byte at specific positions
-        # sel=8: sign extend in[1][7] (byte 1's MSB), sel=9: in[3][7], sel=10: in[5][7], sel=11: in[7][7]
-        for sel_val, byte_idx in [(8, 1), (9, 3), (10, 5), (11, 7)]:
-          sign_byte = (combined >> UOp.const(dtypes.uint64, byte_idx * 8)).cast(dtypes.uint32) & UOp.const(dtypes.uint32, 0x80)
-          sign_ext = sign_byte.ne(UOp.const(dtypes.uint32, 0)).where(UOp.const(dtypes.uint32, 0xFF), UOp.const(dtypes.uint32, 0))
-          byte_val = sel.eq(UOp.const(dtypes.uint32, sel_val)).where(sign_ext, byte_val)
-        # sel=12: zero, sel>=13: 0xFF
-        byte_val = sel.eq(UOp.const(dtypes.uint32, 12)).where(UOp.const(dtypes.uint32, 0), byte_val)
-        byte_val = (sel >= UOp.const(dtypes.uint32, 13)).where(UOp.const(dtypes.uint32, 0xFF), byte_val)
-        result = result | (byte_val << UOp.const(dtypes.uint32, byte_pos * 8))
-      store = wvgpr(vdst_reg, lane, result, exec_mask)
-      return name, UOp.sink(UOp.sink(store).end(lane), inc_pc(), arg=KernelInfo(name=name))
-
     # For 16-bit ops with opsel[3]=1, write to high half
     opsel_dst_hi = bool(opsel & 0b1000) and ('F16' in op_name or 'B16' in op_name or 'I16' in op_name or 'U16' in op_name)
     if opsel_dst_hi:
@@ -979,21 +878,6 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       lo = rsrc(off, lane)
       hi = rsrc(off + 1, lane)
       return lo.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-
-    # V_MAD_U64_U32: pcode uses { D1.u1, D0.u64 } syntax not supported by parser
-    if op_name == 'V_MAD_U64_U32':
-      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-      src0 = rsrc64_lane(inst.src0.offset, lane) if sizes.get('src0', 1) == 2 else rsrc(inst.src0.offset, lane)
-      src1 = rsrc64_lane(inst.src1.offset, lane) if sizes.get('src1', 1) == 2 else rsrc(inst.src1.offset, lane)
-      src2 = (rsrc64_lane(inst.src2.offset, lane) if sizes.get('src2', 1) == 2 else rsrc(inst.src2.offset, lane)) if inst.src2 is not None else None
-      s0_64 = src0.cast(dtypes.uint64) if src0.dtype != dtypes.uint64 else src0
-      s1_64 = src1.cast(dtypes.uint64) if src1.dtype != dtypes.uint64 else src1
-      s2_64 = src2 if src2 is not None and src2.dtype == dtypes.uint64 else (src2.cast(dtypes.uint64) if src2 is not None else UOp.const(dtypes.uint64, 0))
-      result = s0_64 * s1_64 + s2_64
-      lo = result.cast(dtypes.uint32)
-      hi = (result >> UOp.const(dtypes.uint64, 32)).cast(dtypes.uint32)
-      stores = [wvgpr(vdst_reg, lane, lo, exec_mask), wvgpr(vdst_reg + 1, lane, hi, exec_mask)]
-      return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc(), arg=KernelInfo(name=name))
 
     # Parse pcode to check if VCC is per-lane (VCC[laneId]) or scalar (VCC)
     pcode = PCODE.get(inst.op)
