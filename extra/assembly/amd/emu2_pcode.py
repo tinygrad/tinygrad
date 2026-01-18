@@ -352,6 +352,28 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         block_assigns[actual_var] = val
         vars[actual_var] = val
         i += 1; continue
+      # Dynamic single-bit assignment: D0.u32[S0.u32[4:0]] = 1'1U (set/clear bit at dynamic position)
+      # Only match if bit_expr contains a nested bracket (like S0.u32[4:0]), not just laneId
+      if (m := re.match(r'(\w+)\.(\w+)\[(.*\[.*\].*)\]\s*=\s*(.+)', line)):
+        var_name, type_suffix, bit_expr, val_expr = m.group(1), m.group(2), m.group(3), m.group(4)
+        ctx = {**vars, **block_assigns}
+        bit_pos = parse_expr(bit_expr, ctx)
+        val = parse_expr(val_expr, ctx)
+        old_val = block_assigns.get(var_name, vars.get(var_name, UOp.const(dtypes.uint32, 0)))
+        # Ensure bit_pos is uint32 for shifting
+        if bit_pos.dtype != dtypes.uint32: bit_pos = bit_pos.cast(dtypes.uint32)
+        bit_mask = UOp.const(dtypes.uint32, 1) << bit_pos
+        if val.op == Ops.CONST and val.arg == 1:  # Set bit
+          new_val = old_val | bit_mask
+        elif val.op == Ops.CONST and val.arg == 0:  # Clear bit
+          new_val = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+        else:  # Dynamic value
+          val_bit = val.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 1)
+          cleared = old_val & (bit_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+          new_val = cleared | (val_bit << bit_pos)
+        block_assigns[var_name] = new_val
+        vars[var_name] = new_val
+        i += 1; continue
       # Regular assignment: VAR = value
       if (m := re.match(r'(\w+(?:\.\w+)?(?:\[\w+\])?)\s*=\s*(.+)', line)) and not re.search(r'[<>=!]=', line[:line.find('=')]):
         lhs, val = m.group(1), parse_expr(m.group(2), {**vars, **block_assigns})
