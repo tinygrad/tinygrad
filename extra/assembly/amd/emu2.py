@@ -344,7 +344,7 @@ def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
 def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   """Compile instruction bytes to (name, SINK UOp)."""
   inst = decode_inst(inst_bytes)
-  name = f"emu2_{inst_bytes[:inst.size()].hex()}"
+  name = f"{_op_name(inst).lower()}_{inst_bytes[:inst.size()].hex()}"
   sgpr, vgpr, vmem, lds = _define_bufs()
   inst_words = inst.size() // 4
   # Literal position depends on instruction type: 4-byte base (VOP1/VOP2/VOPC/SOP*) vs 8-byte base (VOP3/VOP3P/etc)
@@ -656,7 +656,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         if pcode is None: return UOp.const(dtypes.uint32, 0)
         _, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=UOp.const(dtypes.uint32, lane_idx))
         for dest, val in assigns:
-          if 'D0' in dest and '[laneId]' in dest:
+          # CMPX writes to EXEC[laneId], regular CMP writes to D0[laneId]
+          if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest):
             return val.cast(dtypes.uint32)
         return UOp.const(dtypes.uint32, 0)
 

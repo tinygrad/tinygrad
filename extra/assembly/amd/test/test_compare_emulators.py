@@ -435,5 +435,16 @@ class TestTinygradKernels(unittest.TestCase):
     from tinygrad import dtypes
     self._test_kernel(lambda T: T([2.0], dtype=dtypes.float64).sin())
 
+  def test_sin_large_f32(self):
+    """Test sin with large values that trigger Payne-Hanek range reduction."""
+    # Values around 859240 trigger the Payne-Hanek algorithm
+    # This tests the integer multiply-high instructions used in range reduction
+    self._test_kernel(lambda T: T([859240.0, 1000000.0, 100594688.0]).sin())
+
+  def test_mod_int64(self):
+    """Test int64 modulo, especially edge cases like 1 % -1."""
+    from tinygrad import dtypes
+    self._test_kernel(lambda T: T([1, 10, -10, 7], dtype=dtypes.int64) % T([-1, 3, 3, -3], dtype=dtypes.int64))
+
 if __name__ == "__main__":
   unittest.main()

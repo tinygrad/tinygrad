@@ -556,6 +556,74 @@ class TestVOP3VOPC64Bit(unittest.TestCase):
     self.assertEqual(st.vcc & 1, 1, "0 < max_uint64 should be true")
 
 
+class TestCmpxExec(unittest.TestCase):
+  """Tests for V_CMPX instructions that modify EXEC mask."""
+
+  def test_v_cmpx_ngt_f32_e64_all_true(self):
+    """V_CMPX_NGT_F32_E64: all lanes pass (literal <= all values)."""
+    # 131072.0 = 0x48000000
+    # All values > 131072, so !(131072 > val) = true for all
+    instructions = [
+      s_mov_b32(EXEC_LO, 0x7),  # 3 lanes active
+      v_mov_b32_e32(v[0], f2i(200000.0)),  # lane 0
+      v_cmp_eq_u32_e32(1, v[255]),
+      v_cndmask_b32_e64(v[1], v[0], f2i(300000.0), VCC_LO),  # lane 1
+      v_cmp_eq_u32_e32(2, v[255]),
+      v_cndmask_b32_e64(v[1], v[1], f2i(400000.0), VCC_LO),  # lane 2
+      # Now v[1] has: lane0=200000, lane1=300000, lane2=400000
+      # Compare: !(131072.0 > v[1]) i.e., 131072.0 <= v[1]
+      v_cmpx_ngt_f32_e64(EXEC_LO, f2i(131072.0), v[1]),
+    ]
+    st = run_program(instructions, n_lanes=3)
+    # All values > 131072, so all lanes should remain active
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0x7, 0x7, "All 3 lanes should remain active")
+
+  def test_v_cmpx_ngt_f32_e64_some_false(self):
+    """V_CMPX_NGT_F32_E64: some lanes fail (literal > some values)."""
+    instructions = [
+      s_mov_b32(EXEC_LO, 0x7),  # 3 lanes active
+      v_mov_b32_e32(v[0], f2i(100000.0)),  # lane 0: 131072 > 100000 = true, so !(true) = false
+      v_cmp_eq_u32_e32(1, v[255]),
+      v_cndmask_b32_e64(v[1], v[0], f2i(200000.0), VCC_LO),  # lane 1: 131072 > 200000 = false, so !(false) = true
+      v_cmp_eq_u32_e32(2, v[255]),
+      v_cndmask_b32_e64(v[1], v[1], f2i(150000.0), VCC_LO),  # lane 2: 131072 > 150000 = false, so !(false) = true
+      v_cmpx_ngt_f32_e64(EXEC_LO, f2i(131072.0), v[1]),
+    ]
+    st = run_program(instructions, n_lanes=3)
+    # lane 0: fail (100000 < 131072), lanes 1,2: pass
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0x7, 0x6, "Lanes 1,2 should be active, lane 0 inactive")
+
+  def test_v_cmpx_ngt_f32_e64_all_false(self):
+    """V_CMPX_NGT_F32_E64: all lanes fail (literal > all values)."""
+    instructions = [
+      s_mov_b32(EXEC_LO, 0x7),  # 3 lanes active
+      v_mov_b32_e32(v[0], f2i(100.0)),  # all lanes have 100.0
+      # 131072 > 100 = true, so !(true) = false for all
+      v_cmpx_ngt_f32_e64(EXEC_LO, f2i(131072.0), v[0]),
+    ]
+    st = run_program(instructions, n_lanes=3)
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0x7, 0x0, "All lanes should be inactive")
+
+  def test_v_cmpx_ngt_f32_e64_large_values(self):
+    """V_CMPX_NGT_F32_E64: test with values that trigger Payne-Hanek in sin().
+
+    This is a regression test for the sin(859240.0) bug.
+    Values 859240, 1000000, 100594688 should all pass !(131072 > val).
+    """
+    instructions = [
+      s_mov_b32(EXEC_LO, 0x7),  # 3 lanes active
+      v_mov_b32_e32(v[0], f2i(859240.0)),   # lane 0
+      v_cmp_eq_u32_e32(1, v[255]),
+      v_cndmask_b32_e64(v[1], v[0], f2i(1000000.0), VCC_LO),   # lane 1
+      v_cmp_eq_u32_e32(2, v[255]),
+      v_cndmask_b32_e64(v[1], v[1], f2i(100594688.0), VCC_LO), # lane 2
+      v_cmpx_ngt_f32_e64(EXEC_LO, f2i(131072.0), v[1]),
+    ]
+    st = run_program(instructions, n_lanes=3)
+    # All values > 131072, so !(131072 > val) = true for all
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0x7, 0x7, "All 3 lanes should remain active")
+
+
 class TestVCCBehavior(unittest.TestCase):
   """Tests for VCC condition code behavior."""
 

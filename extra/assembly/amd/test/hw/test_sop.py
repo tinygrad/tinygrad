@@ -298,6 +298,56 @@ class TestSignedArithmetic(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[2], 2)
 
+  def test_s_mul_hi_u32_max(self):
+    """S_MUL_HI_U32: 0xFFFFFFFF * 0xFFFFFFFF."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 0xFFFFFFFF),
+      s_mul_hi_u32(s[2], s[0], s[1]),  # (0xFFFFFFFF * 0xFFFFFFFF) >> 32 = 0xFFFFFFFE
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xFFFFFFFE)
+
+  def test_s_mul_hi_i32_positive(self):
+    """S_MUL_HI_I32: positive * positive."""
+    instructions = [
+      s_mov_b32(s[0], 0x40000000),  # 2^30
+      s_mov_b32(s[1], 4),
+      s_mul_hi_i32(s[2], s[0], s[1]),  # (2^30 * 4) >> 32 = 1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 1)
+
+  def test_s_mul_hi_i32_neg_times_neg(self):
+    """S_MUL_HI_I32: (-1) * (-1) = 1, high bits = 0."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # -1
+      s_mov_b32(s[1], 0xFFFFFFFF),  # -1
+      s_mul_hi_i32(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0)
+
+  def test_s_mul_hi_i32_neg_times_pos(self):
+    """S_MUL_HI_I32: (-1) * 2 = -2, high bits = -1 (sign extension)."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # -1
+      s_mov_b32(s[1], 2),
+      s_mul_hi_i32(s[2], s[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xFFFFFFFF)  # -1 sign extends
+
+  def test_s_mul_hi_i32_min_int(self):
+    """S_MUL_HI_I32: MIN_INT * 2 = -2^32, high = -1."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -2^31 (MIN_INT)
+      s_mov_b32(s[1], 2),
+      s_mul_hi_i32(s[2], s[0], s[1]),  # (-2^31 * 2) >> 32 = -1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0xFFFFFFFF)
+
   def test_s_mul_i32(self):
     """S_MUL_I32: signed multiply low 32 bits."""
     instructions = [

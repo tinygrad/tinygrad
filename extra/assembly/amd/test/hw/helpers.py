@@ -34,11 +34,11 @@ VCC = VCC_LO  # For VOP3SD sdst field (VCC_LO is exported from dsl)
 USE_HW = os.environ.get("USE_HW", "0") == "1"
 FLOAT_TOLERANCE = 1e-5
 
-# Output buffer layout: vgpr[16][32], sgpr[16], vcc, scc
+# Output buffer layout: vgpr[16][32], sgpr[16], vcc, scc, exec
 N_VGPRS, N_SGPRS, WAVE_SIZE = 16, 16, 32
 VGPR_BYTES = N_VGPRS * WAVE_SIZE * 4  # 16 regs * 32 lanes * 4 bytes = 2048
 SGPR_BYTES = N_SGPRS * 4  # 16 regs * 4 bytes = 64
-OUT_BYTES = VGPR_BYTES + SGPR_BYTES + 8  # + vcc + scc
+OUT_BYTES = VGPR_BYTES + SGPR_BYTES + 12  # + vcc + scc + exec
 
 # Float conversion helpers
 def f2i(f: float) -> int: return _i32(f)
@@ -73,6 +73,8 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
   epilogue = [
     s_mov_b32(s[90], VCC_LO),
     s_cselect_b32(s[91], 1, 0),
+    # Save EXEC early (before s_and_saveexec modifies it)
+    s_mov_b32(s[95], EXEC_LO),
     s_load_b64(s[92:93], s[80:81], 0, soffset=NULL),
     s_waitcnt(0),  # simm16=0 waits for all
     v_lshlrev_b32_e32(v[240], 2, v[255]),
@@ -90,6 +92,9 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
   epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=VGPR_BYTES + SGPR_BYTES))
   epilogue.append(v_mov_b32_e32(v[243], s[91]))
   epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=VGPR_BYTES + SGPR_BYTES + 4))
+  # Store EXEC (saved earlier in s[95])
+  epilogue.append(v_mov_b32_e32(v[243], s[95]))
+  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92:93], offset=VGPR_BYTES + SGPR_BYTES + 8))
   epilogue.append(s_mov_b32(EXEC_LO, s[94]))
   epilogue.append(s_endpgm())
   return prologue, epilogue
@@ -105,6 +110,8 @@ def parse_output(out_buf: bytes, n_lanes: int) -> WaveState:
     st.sgpr[i] = struct.unpack_from('<I', out_buf, VGPR_BYTES + i * 4)[0]
   st.vcc = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES)[0]
   st.scc = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES + 4)[0]
+  # Store EXEC in its proper location (index 126)
+  st.sgpr[EXEC_LO.offset] = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES + 8)[0]
   return st
 
 def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
