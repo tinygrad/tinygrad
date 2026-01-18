@@ -680,8 +680,14 @@ def _register_funcs():
     return (((val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int)
   _FUNC_TABLE.append((r'exponent\((.+)\)', 1, _exponent))
 
-  _FUNC_TABLE.append((r'sign\((.+)\)', 1, lambda a, v, m: (((a[0].bitcast(dtypes.uint16) if a[0].dtype == dtypes.half else (a[0] & _u32(0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> _u32(15)) & _u32(1)) if '.f16' in m.group(1) or a[0].dtype == dtypes.half else
-    (((a[0].bitcast(dtypes.uint32) if a[0].dtype == dtypes.float32 else a[0]) >> _u32(31)) & _u32(1))))
+  def _sign(a, v, m):
+    val = a[0]
+    if '.f16' in m.group(1) or val.dtype == dtypes.half:
+      return ((val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & _u32(0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> _u32(15)) & _u32(1)
+    if val.dtype == dtypes.float64 or val.dtype == dtypes.uint64:
+      return ((val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val) >> UOp.const(dtypes.uint64, 63)).cast(dtypes.uint32) & _u32(1)
+    return ((val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val) >> _u32(31)) & _u32(1)
+  _FUNC_TABLE.append((r'sign\((.+)\)', 1, _sign))
 
   _FUNC_TABLE.append((r'signext_from_bit\((.+),\s*(.+)\)', 2, lambda a, v, m: (lambda val, w: ((val >> (w - _u32(1))) & _u32(1)).ne(_u32(0)).where(val | (((_u32(1) << w) - _u32(1)) ^ _u32(0xFFFFFFFF)), val))(_to_u32(a[0]), _to_u32(a[1]))))
 

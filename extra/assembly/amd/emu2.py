@@ -207,8 +207,8 @@ def compile_vop_pcode_stores(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgp
   # For VOP3SD, use sdst for VCC (carry in/out), otherwise use actual VCC
   vcc_reg = sdst_reg if sdst_reg is not None else VCC_LO.offset
 
-  # Parse pcode with source operands
-  srcs['VCC'] = rsgpr_fn(vcc_reg)
+  # Parse pcode with source operands (VCC may already be set by caller for CNDMASK)
+  if 'VCC' not in srcs: srcs['VCC'] = rsgpr_fn(vcc_reg)
   srcs['EXEC'] = exec_mask
   srcs['SCC'] = rsgpr_fn(SCC_IDX)
   _, assigns = parse_pcode(pcode, srcs, lane, op_name=op.name)
@@ -647,11 +647,11 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       # Helper to get comparison result for a lane
       def get_cmp_result_vop3(lane_idx: int) -> UOp:
         lc = UOp.const(dtypes.index, lane_idx)
-        s0 = rsrc(inst.src0.offset, lc, 64 if is_64bit_op else 32)
-        s1 = rsrc(inst.src1.offset, lc, 64 if is_64bit_op else 32)
+        s0 = rsrc(inst.src0.offset, lc, src0_bits)
+        s1 = rsrc(inst.src1.offset, lc, src1_bits)
         if is_16bit_op: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
         if is_float_op:
-          s0, s1 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, is_64bit_op), _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, is_64bit_op)
+          s0, s1 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, src0_bits == 64), _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, src1_bits == 64)
         pcode = PCODE.get(inst.op)
         if pcode is None: return UOp.const(dtypes.uint32, 0)
         _, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=UOp.const(dtypes.uint32, lane_idx))
@@ -660,16 +660,16 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
             return val.cast(dtypes.uint32)
         return UOp.const(dtypes.uint32, 0)
 
-      # Compute all 32 bits by unrolling - VOP3 VOPC writes comparison bits for ALL lanes,
-      # EXEC mask affects which lanes participate in the comparison (inactive lanes preserve old VCC)
+      # Compute all 32 bits by unrolling - VOP3 VOPC writes comparison bits for ALL lanes
+      # EXEC mask affects which lanes participate (inactive lanes are 0)
       exec_mask = rsgpr(EXEC_LO.offset)
       new_sdst = UOp.const(dtypes.uint32, 0)
       for i in range(32):
         cmp_result = get_cmp_result_vop3(i)
         bit = cmp_result << UOp.const(dtypes.uint32, i)
         new_sdst = new_sdst | bit
-      # Merge by EXEC - active lanes use new result, inactive lanes preserve old VCC
-      new_sdst = (new_sdst & exec_mask) | (old_sdst & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF)))
+      # Apply EXEC mask - inactive lanes are 0
+      new_sdst = new_sdst & exec_mask
 
       # Store to scalar destination (and EXEC for CMPX)
       if is_cmpx:
@@ -704,6 +704,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     vdst_reg = inst.vdst.offset - 256
     srcs = {'S0': src0, 'S1': src1}
     if src2 is not None: srcs['S2'] = src2
+    # For V_CNDMASK, src2 is the condition mask (used as VCC in pcode)
+    if 'CNDMASK' in op_name and src2 is not None: srcs['VCC'] = src2
 
     # For 16-bit ops with opsel[3]=1, write to high half
     opsel_dst_hi = bool(opsel & 0b1000) and _is_16bit_op(op_name)
@@ -900,10 +902,11 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       vop = VOPD_TO_VOP2.get(op)
       assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
       srcs = {'S0': rsrc(src0_off, lane), 'S1': rvgpr(vsrc1_off - 256, lane), 'D0': rvgpr(vdst_reg, lane)}
-      # FMAAK/FMAMK use inline literal constant (SIMM32)
       vop_name = vop.name if hasattr(vop, 'name') else str(vop)
-      if 'FMAAK' in vop_name or 'FMAMK' in vop_name:
-        srcs['SIMM32'] = UOp.const(dtypes.uint32, literal)
+      # FMAAK/FMAMK use inline literal constant (SIMM32)
+      if 'FMAAK' in vop_name or 'FMAMK' in vop_name: srcs['SIMM32'] = UOp.const(dtypes.uint32, literal)
+      # CNDMASK uses VCC as condition
+      if 'CNDMASK' in vop_name: srcs['VCC'] = rsgpr(VCC_LO.offset)
       stores = compile_vop_pcode_stores(vop, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask)
       assert stores is not None, f"no pcode for VOPD {label}: {vop}"
       ended.extend(stores)
