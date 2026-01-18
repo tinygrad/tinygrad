@@ -11,7 +11,7 @@ class TestPcodePDF(unittest.TestCase):
     cls.pages = {arch: extract_pdf_text(cfg["pdf"]) for arch, cfg in ARCHS.items()}
     cls.enums = {}
     for arch, cfg in ARCHS.items():
-      _, enums, _, _, _, _ = parse_xml(cfg["xml"], arch)
+      _, enums, _, _, _, _ = parse_xml(cfg["xml"])
       for fmt, ops in FIXES.get(arch, {}).items(): enums.setdefault(fmt, {}).update(ops)
       cls.enums[arch] = enums
     cls.pcode = {arch: extract_pcode(cls.pages[arch], {n: op for ops in cls.enums[arch].values() for op, n in ops.items()}) for arch in ARCHS}

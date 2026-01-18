@@ -14,21 +14,13 @@ ARCHS = {
   "cdna": {"xml": "amdgpu_isa_cdna4.xml", "pdf": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"},
 }
 XML_URL = "https://gpuopen.com/download/machine-readable-isa/latest/"
-# Map XML encoding names to codebase names (arch-specific overrides in ARCH_NAME_MAP)
+# Map XML encoding names to codebase names
 NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOP3_SDST_ENC_LIT": "VOP3SD_LIT", "VOP3_SDST_ENC_DPP16": "VOP3SD_DPP16",
             "VOP3_SDST_ENC_DPP8": "VOP3SD_DPP8", "VOPDXY": "VOPD", "VOPDXY_LIT": "VOPD_LIT", "VDS": "DS"}
-ARCH_NAME_MAP = {}
 # Instructions missing from XML but present in PDF
 FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"}, "FLAT": {55: "FLAT_ATOMIC_CSUB_U32"}},
          "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}},
-         "cdna": {"DS": {128: "DS_ADD_SRC2_U32", 129: "DS_SUB_SRC2_U32", 130: "DS_RSUB_SRC2_U32", 131: "DS_INC_SRC2_U32", 132: "DS_DEC_SRC2_U32",
-                        133: "DS_MIN_SRC2_I32", 134: "DS_MAX_SRC2_I32", 135: "DS_MIN_SRC2_U32", 136: "DS_MAX_SRC2_U32", 137: "DS_AND_SRC2_B32",
-                        138: "DS_OR_SRC2_B32", 139: "DS_XOR_SRC2_B32", 141: "DS_WRITE_SRC2_B32", 146: "DS_MIN_SRC2_F32", 147: "DS_MAX_SRC2_F32",
-                        149: "DS_ADD_SRC2_F32", 152: "DS_GWS_SEMA_RELEASE_ALL", 153: "DS_GWS_INIT", 154: "DS_GWS_SEMA_V", 155: "DS_GWS_SEMA_BR",
-                        156: "DS_GWS_SEMA_P", 157: "DS_GWS_BARRIER", 191: "DS_ORDERED_COUNT", 192: "DS_ADD_SRC2_U64", 193: "DS_SUB_SRC2_U64",
-                        194: "DS_RSUB_SRC2_U64", 195: "DS_INC_SRC2_U64", 196: "DS_DEC_SRC2_U64", 197: "DS_MIN_SRC2_I64", 198: "DS_MAX_SRC2_I64",
-                        199: "DS_MIN_SRC2_U64", 200: "DS_MAX_SRC2_U64", 201: "DS_AND_SRC2_B64", 202: "DS_OR_SRC2_B64", 203: "DS_XOR_SRC2_B64",
-                        205: "DS_WRITE_SRC2_B64", 210: "DS_MIN_SRC2_F64", 211: "DS_MAX_SRC2_F64"},
+         "cdna": {"DS": {152: "DS_GWS_SEMA_RELEASE_ALL", 154: "DS_GWS_SEMA_V", 156: "DS_GWS_SEMA_P"},
                   "VOP3P": {62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
 _ENC_SUFFIXES = ("_NSA1",)
@@ -75,9 +67,8 @@ def _map_flat(enc_name: str, instr_name: str) -> str:
 # XML parsing
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def parse_xml(filename: str, arch: str):
+def parse_xml(filename: str):
   root = ET.fromstring(zipfile.ZipFile(fetch(XML_URL)).read(filename))
-  name_map = {**NAME_MAP, **ARCH_NAME_MAP.get(arch, {})}
   encodings, enums, types, fmts, op_types_set = {}, {}, {}, {}, set()
   # Extract HWREG and MSG enums from OperandTypes
   op_enum_map = {("OPR_HWREG", "ID"): "HWREG", ("OPR_SENDMSG_RTN", "MSG"): "MSG"}
@@ -104,7 +95,7 @@ def parse_xml(filename: str, arch: str):
     enc_field = next((f for f in fields if f[0] == "encoding"), None)
     enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1], enc_field[2]-1, -1)) if ident is not None and enc_field else None
     base_name = _strip_enc(name)
-    encodings[name_map.get(base_name, base_name)] = (fields, enc_bits)
+    encodings[NAME_MAP.get(base_name, base_name)] = (fields, enc_bits)
   # Extract instruction opcodes and operand info
   # Track which encodings each opcode appears in (for detecting LIT-only ops)
   opcode_encs: dict[str, dict[int, set[str]]] = {}  # {base_fmt: {opcode: {enc_names}}}
@@ -113,7 +104,7 @@ def parse_xml(filename: str, arch: str):
     for enc in instr.findall("InstructionEncodings/InstructionEncoding"):
       if enc.findtext("EncodingCondition") != "default": continue
       base, opcode = _map_flat(_strip_enc(enc.findtext("EncodingName")), name), int(enc.findtext("Opcode") or 0)
-      enc_name = name_map.get(base, base)
+      enc_name = NAME_MAP.get(base, base)
       # Encoding variants use the same Op enum as the base format
       base_enum = enc_name
       for sfx in ("_SDWA_SDST", "_DPP16", "_DPP8", "_SDWA", "_LIT", "_MFMA"):
@@ -439,7 +430,7 @@ if __name__ == "__main__":
   # First pass: parse XML for all architectures
   for arch, cfg in ARCHS.items():
     print(f"Parsing XML: {cfg['xml']} -> {arch}")
-    encodings, enums, types, fmts, op_types_set, lit_only_ops = parse_xml(cfg["xml"], arch)
+    encodings, enums, types, fmts, op_types_set, lit_only_ops = parse_xml(cfg["xml"])
     for fmt, ops in FIXES.get(arch, {}).items(): enums.setdefault(fmt, {}).update(ops)
     arch_data[arch] = {"encodings": encodings, "enums": enums, "types": types, "lit_only_ops": lit_only_ops}
     for fmt, bits in fmts.items():
