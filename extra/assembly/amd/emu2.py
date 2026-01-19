@@ -365,8 +365,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   lit_off = 8 if is_8byte_base else 4
   literal = int.from_bytes(inst_bytes[lit_off:lit_off+4], 'little') if len(inst_bytes) >= lit_off + 4 else 0
 
-  # Helper: read SGPR
-  def rsgpr(reg: int) -> UOp: return sgpr.index(UOp.const(dtypes.index, reg))
+  # Helper: read SGPR (returns loaded value)
+  def rsgpr(reg: int) -> UOp: return sgpr.index(UOp.const(dtypes.index, reg), ptr=True).load()
   def rsgpr64(off: int) -> UOp:
     if off >= 128:  # inline constant
       if off < 193: return UOp.const(dtypes.uint64, off - 128)  # 0-64
@@ -376,8 +376,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     return _u64(rsgpr(off), rsgpr(off + 1))
   def wsgpr(reg: int, val: UOp) -> UOp: return sgpr.index(UOp.const(dtypes.index, reg)).store(val.cast(dtypes.uint32))
 
-  # Helper: read VGPR
-  def rvgpr(reg: int, lane: UOp) -> UOp: return vgpr.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index))
+  # Helper: read VGPR (returns loaded value)
+  def rvgpr(reg: int, lane: UOp) -> UOp: return vgpr.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index), ptr=True).load()
   def wvgpr(reg: int, lane: UOp, val: UOp, exec_mask: UOp, after: UOp|None = None) -> UOp:
     buf = vgpr.after(after) if after is not None else vgpr
     idx = buf.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index))
@@ -905,26 +905,40 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     exec_mask = rsgpr(EXEC_LO.offset)
     vdstx_reg = inst.vdstx.offset - 256
     vdsty_reg = (inst.vdsty << 1) | ((inst.vdstx.offset & 1) ^ 1)
-    ended = []
 
-    # Process X and Y operations
+    # VOPD dual-issue semantics: both X and Y read sources BEFORE either writes.
+    # Use single lane for both ops, read Y sources first, make stores depend on Y's reads.
+    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    srcy0 = rsrc(inst.srcy0.offset, lane)
+    srcy1 = rvgpr(inst.vsrcy1.offset - 256, lane)
+
+    # wvgpr that ensures stores happen after Y's sources are read
+    def wvgpr_after_y(reg: int, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
+      return wvgpr(reg, lane, val, exec_mask, after=srcy1)
+
+    # Collect raw stores (without END) for both X and Y, then group them into single END
+    all_stores = []
     for op, src0_off, vsrc1_off, vdst_reg, label in [
         (inst.opx, inst.srcx0.offset, inst.vsrcx1.offset, vdstx_reg, 'X'),
         (inst.opy, inst.srcy0.offset, inst.vsrcy1.offset, vdsty_reg, 'Y')]:
-      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
       vop = VOPD_TO_VOP2.get(op)
       assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
-      srcs = {'S0': rsrc(src0_off, lane), 'S1': rvgpr(vsrc1_off - 256, lane), 'D0': rvgpr(vdst_reg, lane)}
+      if label == 'Y':
+        srcs = {'S0': srcy0, 'S1': srcy1, 'D0': rvgpr(vdst_reg, lane)}
+      else:
+        srcs = {'S0': rsrc(src0_off, lane), 'S1': rvgpr(vsrc1_off - 256, lane), 'D0': rvgpr(vdst_reg, lane)}
       vop_name = vop.name if hasattr(vop, 'name') else str(vop)
-      # FMAAK/FMAMK use inline literal constant (SIMM32)
       if 'FMAAK' in vop_name or 'FMAMK' in vop_name: srcs['SIMM32'] = UOp.const(dtypes.uint32, literal)
-      # CNDMASK uses VCC as condition
       if 'CNDMASK' in vop_name: srcs['VCC'] = rsgpr(VCC_LO.offset)
-      stores = compile_vop_pcode_stores(vop, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask)
-      assert stores is not None, f"no pcode for VOPD {label}: {vop}"
-      ended.extend(stores)
+      pcode = PCODE.get(vop)
+      assert pcode is not None, f"no pcode for VOPD {label}: {vop}"
+      srcs.update({'VCC': rsgpr(VCC_LO.offset), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)})
+      _, assigns = parse_pcode(pcode, srcs, lane, op_name=vop.name)
+      for dest, val in assigns:
+        if dest.startswith('D0'):
+          all_stores.append(wvgpr_after_y(vdst_reg, lane, _val_to_u32(val), exec_mask))
 
-    return name, UOp.sink(*ended, inc_pc(), arg=KernelInfo(name=name))
+    return name, UOp.sink(UOp.group(*all_stores).end(lane), inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
   # DS: Local Data Share (LDS) operations

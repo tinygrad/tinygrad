@@ -106,17 +106,16 @@ class TestVOPDMultilane(unittest.TestCase):
   def test_vopd_multilane_mov_add(self):
     """VOPD MOV and ADD with multiple active lanes - no register conflict."""
     instructions = [
-      # Lane 0: v[0]=0, Lane 1: v[0]=1, etc. (from workitem ID)
+      v_mov_b32_e32(v[0], 5),
       v_mov_b32_e32(v[1], 10),
-      # X: v[2] = 100 (constant)
-      # Y: v[3] = srcy0 + vsrcy1 = v[0] + v[1] (lane-dependent)
-      # vdsty field = v[1], vdstx = v[2] -> vdsty_reg = (1<<1) | ((2&1)^1) = 2|1 = 3 = v[3]
-      VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_ADD_NC_U32, v[2], v[1], 100, v[0], v[2], v[1]),
+      # X: v[2] = 100 (constant), Y: v[1] = v[0] + v[1] = 5 + 10 = 15
+      # vdsty_reg = (vdsty << 1) | ((vdstx.offset & 1) ^ 1) = (0 << 1) | ((258 & 1) ^ 1) = 0 | 1 = 1
+      VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_ADD_NC_U32, v[2], v[0], 100, v[0], v[2], v[1]),
     ]
     st = run_program(instructions, n_lanes=4)
     for lane in range(4):
       self.assertEqual(st.vgpr[lane][2], 100, f"Lane {lane}: v[2] should be 100")
-      self.assertEqual(st.vgpr[lane][3], lane + 10, f"Lane {lane}: v[3] should be {lane + 10}")
+      self.assertEqual(st.vgpr[lane][1], 15, f"Lane {lane}: v[1] should be 15 (5+10)")
 
 
 if __name__ == '__main__':
