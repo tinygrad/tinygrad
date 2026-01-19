@@ -422,6 +422,7 @@ class AMDComputeAQLQueue(AMDComputeQueue):
       group_segment_size=prg.group_segment_size, kernel_object=prg.aql_prog_addr, kernarg_address=args_state.buf.va_addr))
     self.bind_sints_to_mem(*local_size, mem=(pkt_view:=MMIOInterface(addr=ctypes.addressof(pkt), nbytes=ctypes.sizeof(pkt))), fmt='H', offset=4)
     self.bind_sints_to_mem(*[l * g for l,g in zip(local_size, global_size)], mem=pkt_view, fmt='I', offset=12)
+    return self
 
   def bind(self, dev:AMDDevice): pass # not supported
   def _submit(self, dev:AMDDevice):
