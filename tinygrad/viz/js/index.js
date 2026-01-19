@@ -480,7 +480,7 @@ async function renderProfiler(path, unit, opts) {
     ctx.textBaseline = "middle";
     // draw shapes
     const paths = [];
-    for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor }] of data.tracks) {
+    for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor, height }] of data.tracks) {
       visible.length = 0;
       const addBorder = scolor != null ? (p,w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(p); } } : null;
       for (const e of shapes) {
@@ -512,6 +512,9 @@ async function renderProfiler(path, unit, opts) {
         }
         if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
       }
+      // draw row line
+      const y = offsetY+height+padding/2;
+      drawLine(ctx, [0, canvasWidth], [y, y], { color:"#2a2a2a" });
     }
     // draw axes
     ctx.translate(0, baseOffset);
