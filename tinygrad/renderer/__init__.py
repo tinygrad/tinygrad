@@ -4,7 +4,7 @@ import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops, KernelInfo
-from tinygrad.dtype import AddrSpace, PtrDType
+from tinygrad.dtype import AddrSpace, DType, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
 if TYPE_CHECKING: from tinygrad.device import Compiler
@@ -150,3 +150,5 @@ class Renderer:
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")
+
+  def is_dtype_supported(self, dtype:DType) -> bool: return True
