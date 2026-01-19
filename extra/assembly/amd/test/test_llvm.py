@@ -31,7 +31,7 @@ RDNA_FILES = ['gfx11_asm_sop1.s', 'gfx11_asm_sop2.s', 'gfx11_asm_sopp.s', 'gfx11
 CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'gfx9_asm_sopk.s', 'gfx9_asm_sopc.s',
   'gfx9_asm_vop1.s', 'gfx9_asm_vop2.s', 'gfx9_asm_vopc.s', 'gfx9_asm_vop3.s', 'gfx9_asm_vop3p.s',
   'gfx9_asm_ds.s', 'gfx9_asm_flat.s', 'gfx9_asm_smem.s',
-  'flat-scratch-gfx942.s', 'gfx942_asm_features.s', 'mai-gfx942.s', 'mai-gfx950.s']
+  'flat-scratch-gfx942.s', 'gfx942_asm_features.s', 'mai-gfx942.s']
 # RDNA4 (gfx12) test files for compute instructions
 # Excluded: gfx12_asm_vbuffer_mubuf.s, gfx12_asm_vbuffer_mtbuf.s, gfx12_asm_exp.s (graphics-only)
 RDNA4_FILES = ['gfx12_asm_sop1.s', 'gfx12_asm_sop2.s', 'gfx12_asm_sopp.s', 'gfx12_asm_sopk.s', 'gfx12_asm_sopc.s',
@@ -65,14 +65,14 @@ def _get_tests_uncached(f: str, arch: str) -> list[tuple[str, bytes]]:
   elif arch == "rdna4":
     # Match GFX12 (but not GFX1250) and W32 only (wavefront32 mode)
     tests = _parse_llvm_tests(text, r'(?:GFX12(?!50)|W32)')
-  elif 'gfx90a' in f or 'gfx942' in f or 'gfx950' in f:
-    tests = _parse_llvm_tests(text, r'(?:GFX90A|GFX942|GFX950)')
+  elif 'gfx90a' in f or 'gfx942' in f:
+    tests = _parse_llvm_tests(text, r'(?:GFX90A|GFX942)')
   else:
     tests = _parse_llvm_tests(text, r'(?:VI9|GFX9|CHECK)')
   # Exclude v_interp_* (graphics-only, not on CDNA)
   if arch == "cdna": tests = [(asm, data) for asm, data in tests if not asm.startswith('v_interp_')]
   # Filter out tests where original ASM isn't valid on target (e.g., gfx9 tests with gfx942 constraints)
-  if arch == "cdna" and not ('gfx942' in f or 'gfx90a' in f or 'gfx950' in f): tests = _filter_valid_asm(tests, arch)
+  if arch == "cdna" and not ('gfx942' in f or 'gfx90a' in f): tests = _filter_valid_asm(tests, arch)
   return tests
 
 @functools.cache

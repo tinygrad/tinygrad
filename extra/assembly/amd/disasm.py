@@ -713,13 +713,13 @@ def _disasm_cdna_vop3p(inst) -> str:
     # For SMFMAC, src2 is always a VGPR index (1 register), not accumulator
     src2 = _vreg(inst.src2) if is_smfmac else mfma_src(inst.src2, r2, acc_cd)
     dst = _areg(inst.vdst, dregs) if acc_cd else _vreg(inst.vdst, dregs)
-    # MFMA modifiers: neg for f64, cbsz/blgp for f8f6f4
+    # MFMA uses neg:[...] not neg_lo:[...], and doesn't support op_sel_hi or clamp
+    # Only f64 MFMA instructions support neg modifier
+    # f8f6f4 MFMA instructions support cbsz/blgp modifiers
     mods = []
     if 'f8f6f4' in name:
-      # For f8f6f4 instructions, neg_hi=cbsz and neg=blgp control data formats
-      cbsz, blgp = inst.neg_hi, inst.neg
-      if cbsz: mods.append(f"cbsz:{cbsz}")
-      if blgp: mods.append(f"blgp:{blgp}")
+      if inst.neg: mods.append(f"cbsz:{inst.neg}")
+      if inst.neg_hi: mods.append(f"blgp:{inst.neg_hi}")
     elif inst.neg and 'f64' in name:
       mods.append(_fmt_bits("neg", inst.neg, n))
     return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}"
