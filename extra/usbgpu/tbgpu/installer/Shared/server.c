@@ -38,7 +38,7 @@ typedef struct { uint8_t status; uint64_t value, addr; } __attribute__((packed))
 
 // Constants and state
 
-#define BULK_BUF_SIZE (16 << 20)
+#define BULK_BUF_SIZE (64 << 20)
 #define MAX_BARS 6
 #define MAX_SYSMEM 128
 
