@@ -654,6 +654,8 @@ def _register_funcs():
   _FUNC_TABLE.append((r'f32_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.half)))
   _FUNC_TABLE.append((r'f32_to_f64\((.+)\)', 1, lambda a, v, m: a[0].bitcast(dtypes.float32).cast(dtypes.float64)))
   _FUNC_TABLE.append((r'f64_to_f32\((.+)\)', 1, lambda a, v, m: a[0].bitcast(dtypes.float64).cast(dtypes.float32)))
+  _FUNC_TABLE.append((r'i32_to_f64\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.int).cast(dtypes.float64)))
+  _FUNC_TABLE.append((r'u32_to_f64\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.uint32).cast(dtypes.float64)))
   _FUNC_TABLE.append((r'f16_to_i16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.int16)))
   _FUNC_TABLE.append((r'f16_to_u16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.uint16)))
   _FUNC_TABLE.append((r'i16_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.int16).cast(dtypes.half)))
@@ -698,7 +700,7 @@ def _register_funcs():
   _FUNC_TABLE.append((r'signext_from_bit\((.+),\s*(.+)\)', 2, lambda a, v, m: (lambda val, w: ((val >> (w - _u32(1))) & _u32(1)).ne(_u32(0)).where(val | (((_u32(1) << w) - _u32(1)) ^ _u32(0xFFFFFFFF)), val))(_to_u32(a[0]), _to_u32(a[1]))))
 
   for is_max, name in [(False, 'min'), (True, 'max')]:
-    for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32')]:
+    for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
       _FUNC_TABLE.append((rf'v_{name}_{sfx}\((.+),\s*(.+)\)', 2, lambda a, v, m, im=is_max, d=dt: _minmax_reduce(im, d, a)))
       _FUNC_TABLE.append((rf'v_{name}3_{sfx}\((.+),\s*(.+),\s*(.+)\)', 3, lambda a, v, m, im=is_max, d=dt: _minmax_reduce(im, d, a)))
 
