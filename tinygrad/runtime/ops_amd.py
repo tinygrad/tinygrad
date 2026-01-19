@@ -1007,6 +1007,7 @@ class AMDDevice(HCQCompiled):
 
   @functools.lru_cache(None)
   def sdma_queue(self, idx:int):
+    if getenv("AMD_DISABLE_SDMA"): return None
     with contextlib.suppress(OSError): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
     return None
 
