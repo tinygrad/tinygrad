@@ -5,7 +5,18 @@
 #   arg=2: vgpr - vgpr[reg * 32 + lane]
 #   arg=3: sgpr - sgpr[reg], PC_LO=128, PC_HI=129, SCC=130
 from __future__ import annotations
-import ctypes, functools, re
+import ctypes, functools, re, platform, subprocess, tempfile
+
+# Set DAZ+FTZ (denormals-are-zero + flush-to-zero) in MXCSR to match RDNA3 default float mode
+def _set_daz_ftz():
+  if platform.machine() not in ('x86_64', 'AMD64'): return
+  try:
+    src = b'void set_daz_ftz(void){unsigned int m;__asm__ __volatile__("stmxcsr %0":"=m"(m));m|=0x8040;__asm__ __volatile__("ldmxcsr %0"::"m"(m));}'
+    with tempfile.NamedTemporaryFile(suffix='.so', delete=False) as f:
+      subprocess.check_output(['clang', '-shared', '-O2', '-x', 'c', '-', '-o', f.name], input=src)
+      ctypes.CDLL(f.name).set_daz_ftz()
+  except Exception: pass
+_set_daz_ftz()
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
 from tinygrad.codegen import get_program
@@ -771,13 +782,12 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       # Compute all 32 lanes (this ensures reads happen before any writes through data dependencies)
       lane_results = [get_lane_results(i) for i in range(32)]
 
-      # Combine VCC bits
+      # Combine VCC bits - only set for active lanes (inactive lanes have VCC bit = 0)
       new_vcc = UOp.const(dtypes.uint32, 0)
       for i, (vcc_bit, _) in enumerate(lane_results):
-        new_vcc = new_vcc | (vcc_bit << UOp.const(dtypes.uint32, i))
-
-      # VOP3SD carry-out (sdst) is NOT EXEC-masked - all 32 bits are written
-      # This matches hardware behavior where carry bits for inactive lanes are computed but zero
+        exec_bit = (exec_mask >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
+        lane_vcc = vcc_bit & exec_bit  # Only set VCC bit if lane is active
+        new_vcc = new_vcc | (lane_vcc << UOp.const(dtypes.uint32, i))
       final_vcc = new_vcc
 
       # Build vgpr stores (unrolled) - each store depends on final_vcc which depends on all source reads

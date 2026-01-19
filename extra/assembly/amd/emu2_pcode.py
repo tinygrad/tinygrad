@@ -17,12 +17,6 @@ def _try_eval(expr):
   try: return str(eval(expr)) if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()) else expr
   except: return expr
 
-def _ftz_f32(v: UOp) -> UOp:
-  if v.dtype != dtypes.float32: return v
-  bits = v.bitcast(dtypes.uint32)
-  is_denorm = ((bits >> _u32(23)) & _u32(0xFF)).eq(_u32(0)) & (bits & _u32(0x7FFFFF)).ne(_u32(0))
-  return is_denorm.where((bits & _u32(0x80000000)).bitcast(dtypes.float32), v)
-
 def _isnan(v: UOp) -> UOp:
   if v.dtype == dtypes.float64:
     bits = v.bitcast(dtypes.uint64)
@@ -362,7 +356,7 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     dt = {('U',32): dtypes.uint32, ('U',64): dtypes.uint64, ('I',32): dtypes.int, ('I',64): dtypes.int64, ('F',32): dtypes.float32, ('F',64): dtypes.float64}.get((m.group(2), bits), dtypes.uint64 if bits > 32 else dtypes.uint32)
     if m.group(2) == 'F' and inner.dtype in (dtypes.uint32, dtypes.uint64, dtypes.ulong, dtypes.int, dtypes.int64):
       if inner.dtype.itemsize != dt.itemsize: inner = inner.cast(dtypes.uint32 if dt.itemsize == 4 else dtypes.uint64)
-      return _ftz_f32(inner.bitcast(dt)) if dt == dtypes.float32 else inner.bitcast(dt)
+      return inner.bitcast(dt)
     return inner.cast(dt)
 
   # Lane-indexed
@@ -375,9 +369,9 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     v = vars.get(m.group(1), _u32(0))
     if isinstance(v, dict): return v.get(m.group(2), _u32(0))
     dt = DTYPES.get(m.group(2), dtypes.uint32)
-    if dt == v.dtype: return _ftz_f32(v) if dt == dtypes.float32 else v
+    if dt == v.dtype: return v
     if dt.itemsize == 2 and v.dtype.itemsize == 4: return (v & _const(v.dtype, 0xFFFF)).cast(dtypes.uint16) if dt == dtypes.uint16 else (v & _const(v.dtype, 0xFFFF)).cast(dtypes.uint16).bitcast(dt)
-    return _ftz_f32(_cast_to(v, dt)) if dt == dtypes.float32 else _cast_to(v, dt)
+    return _cast_to(v, dt)
 
   # Bit slice
   if (m := re.match(r'([a-zA-Z_]\w*)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
