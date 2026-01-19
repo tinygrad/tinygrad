@@ -323,10 +323,11 @@ async function renderProfiler(path, unit, opts) {
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
+    const [pcolor, scolor] = path.includes("pkts") ? ["#00c72f", "#858b9d"] : ["#9ea2ad", null];
     if (eventType === EventTypes.EXEC) {
       const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
       const levels = [];
-      data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
+      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -479,8 +480,9 @@ async function renderProfiler(path, unit, opts) {
     ctx.textBaseline = "middle";
     // draw shapes
     const paths = [];
-    for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
+    for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor }] of data.tracks) {
       visible.length = 0;
+      const addBorder = scolor != null ? (p,w) => { if (w > 20) { ctx.strokeStyle = scolor; ctx.stroke(p); } } : null;
       for (const e of shapes) {
         const p = new Path2D();
         if (eventType === EventTypes.BUF) { // generic polygon
@@ -504,6 +506,7 @@ async function renderProfiler(path, unit, opts) {
           p.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
+          addBorder?.(p, width);
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
