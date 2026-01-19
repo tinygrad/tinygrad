@@ -993,7 +993,7 @@ class AMDDevice(HCQCompiled):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
       aql_desc = hsa.amd_queue_t(queue_properties=hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
         read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
-        max_cu_id=self.cu_cnt - 1, max_wave_id=self.waves_per_cu - 1)
+        max_cu_id=self.cu_cnt - 1, max_wave_id=self.wave_cnt - 1)
       gart.cpu_view().view(fmt='B')[:ctypes.sizeof(aql_desc)] = bytes(aql_desc)
       self.aql_desc = hsa.amd_queue_t.from_address(gart.cpu_view().addr)
 
