@@ -23,7 +23,7 @@ class AluSrc(Enum):
   NONE = 0
   SALU = 1
   VALU = 2
-  VALU_ALT = 3
+  VALU_SALU = 3
 
 class InstOp(Enum):
   """SQTT instruction operation types.

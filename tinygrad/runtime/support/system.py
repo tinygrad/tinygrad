@@ -1,5 +1,5 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools
-from typing import cast, ClassVar
+from typing import ClassVar
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv
 from tinygrad.runtime.autogen import libc, vfio, pci
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
@@ -276,8 +276,8 @@ class LNXPCIIfaceBase:
 
   def map(self, b:HCQBuffer):
     if b.owner is not None and b.owner._is_cpu():
-      System.lock_memory(cast(int, b.va_addr), b.size)
-      paddrs, aspace = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], AddrSpace.SYS
+      System.lock_memory(int(b.va_addr), b.size)
+      paddrs, aspace = [(x, 0x1000) for x in System.system_paddrs(int(b.va_addr), round_up(b.size, 0x1000))], AddrSpace.SYS
       snooped, uncached = True, True
     elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, LNXPCIIfaceBase):
       snooped, uncached = True, b.meta.mapping.uncached
@@ -287,7 +287,7 @@ class LNXPCIIfaceBase:
       else: paddrs, aspace = [(p + ifa.p2p_base_addr, sz) for p, sz in b.meta.mapping.paddrs], AddrSpace.SYS
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
-    self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
+    self.dev_impl.mm.map_range(int(b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
 
 class APLPCIIfaceBase(LNXPCIIfaceBase):
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size, base_class:int|None=None):
