@@ -443,6 +443,112 @@ class TestBitSet(unittest.TestCase):
     self.assertEqual(st.sgpr[0], 0x20, "Bit 5 should be set (37 mod 32 = 5)")
 
 
+class TestBfeI64(unittest.TestCase):
+  """Tests for S_BFE_I64 - 64-bit bit field extract with sign extension.
+
+  Regression tests for sign extension bug where 32-bit masks were incorrectly
+  used for 64-bit operations, causing the high 32 bits to not be sign-extended.
+  """
+
+  def test_s_bfe_i64_positive_no_sign_extend(self):
+    """S_BFE_I64: positive value (1) in 16 bits should not sign extend."""
+    # S1 encodes: [22:16] = width, [5:0] = offset
+    # width=16, offset=0 -> S1 = (16 << 16) | 0 = 0x100000
+    instructions = [
+      s_mov_b32(s[0], 1),         # S0 lo = 1
+      s_mov_b32(s[1], 0),         # S0 hi = 0
+      s_mov_b32(s[2], 0x100000),  # width=16, offset=0
+      s_bfe_i64(s[4:5], s[0:1], s[2]),
+      v_mov_b32_e32(v[0], s[4]),
+      v_mov_b32_e32(v[1], s[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 1, "lo should be 1")
+    self.assertEqual(st.vgpr[0][1], 0, "hi should be 0 (no sign extend)")
+
+  def test_s_bfe_i64_negative_sign_extend(self):
+    """S_BFE_I64: 0xFFFF (-1 in 16 bits) should sign extend to 64 bits.
+
+    This is the main regression test - before the fix, hi was 0 instead of 0xFFFFFFFF.
+    """
+    instructions = [
+      s_mov_b32(s[0], 0xFFFF),    # S0 lo = -1 in 16 bits
+      s_mov_b32(s[1], 0),         # S0 hi = 0
+      s_mov_b32(s[2], 0x100000),  # width=16, offset=0
+      s_bfe_i64(s[4:5], s[0:1], s[2]),
+      v_mov_b32_e32(v[0], s[4]),
+      v_mov_b32_e32(v[1], s[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xFFFFFFFF, "lo should be 0xFFFFFFFF")
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF, "hi should be 0xFFFFFFFF (sign extended)")
+
+  def test_s_bfe_i64_8bit_negative_sign_extend(self):
+    """S_BFE_I64: 0xFF (-1 in 8 bits) should sign extend to 64 bits."""
+    # width=8, offset=0 -> S1 = (8 << 16) | 0 = 0x80000
+    instructions = [
+      s_mov_b32(s[0], 0xFF),      # S0 lo = -1 in 8 bits
+      s_mov_b32(s[1], 0),         # S0 hi = 0
+      s_mov_b32(s[2], 0x80000),   # width=8, offset=0
+      s_bfe_i64(s[4:5], s[0:1], s[2]),
+      v_mov_b32_e32(v[0], s[4]),
+      v_mov_b32_e32(v[1], s[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xFFFFFFFF, "lo should be 0xFFFFFFFF")
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF, "hi should be 0xFFFFFFFF (sign extended)")
+
+  def test_s_bfe_i64_8bit_positive(self):
+    """S_BFE_I64: 0x7F (127 in 8 bits) should not sign extend."""
+    # width=8, offset=0 -> S1 = (8 << 16) | 0 = 0x80000
+    instructions = [
+      s_mov_b32(s[0], 0x7F),      # S0 lo = 127 in 8 bits (MSB=0)
+      s_mov_b32(s[1], 0),         # S0 hi = 0
+      s_mov_b32(s[2], 0x80000),   # width=8, offset=0
+      s_bfe_i64(s[4:5], s[0:1], s[2]),
+      v_mov_b32_e32(v[0], s[4]),
+      v_mov_b32_e32(v[1], s[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0x7F, "lo should be 0x7F")
+    self.assertEqual(st.vgpr[0][1], 0, "hi should be 0 (no sign extend)")
+
+  def test_s_bfe_i64_with_offset(self):
+    """S_BFE_I64: extract from non-zero bit offset with sign extension."""
+    # Extract 16 bits starting at bit 8: value 0xFF00 >> 8 = 0xFF = -1 in 8 bits? No wait...
+    # Let's put 0x8000FF00: extract 16 bits at offset 8 = 0x00FF (positive)
+    # Put 0xFF00_0000: extract 16 bits at offset 16 = 0xFF00 = -256 in signed 16-bit
+    instructions = [
+      s_mov_b32(s[0], 0xFF000000),  # bits [31:24] = 0xFF, [23:16] = 0x00
+      s_mov_b32(s[1], 0),
+      # width=16, offset=16 -> S1 = (16 << 16) | 16 = 0x100010
+      s_mov_b32(s[2], 0x100010),
+      s_bfe_i64(s[4:5], s[0:1], s[2]),
+      v_mov_b32_e32(v[0], s[4]),
+      v_mov_b32_e32(v[1], s[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Extract bits [31:16] = 0xFF00, sign bit is bit 15 of extracted = bit 31 of original = 1
+    # So result should be sign-extended 0xFF00 -> 0xFFFFFF00 in lo, 0xFFFFFFFF in hi
+    self.assertEqual(st.vgpr[0][0], 0xFFFFFF00, "lo should be sign-extended 0xFF00")
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF, "hi should be 0xFFFFFFFF (sign extended)")
+
+  def test_s_bfe_i64_32bit_negative(self):
+    """S_BFE_I64: extract 32 bits with sign extension."""
+    # width=32, offset=0 -> S1 = (32 << 16) | 0 = 0x200000
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # MIN_INT32 = -2^31
+      s_mov_b32(s[1], 0),
+      s_mov_b32(s[2], 0x200000),    # width=32, offset=0
+      s_bfe_i64(s[4:5], s[0:1], s[2]),
+      v_mov_b32_e32(v[0], s[4]),
+      v_mov_b32_e32(v[1], s[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0x80000000, "lo should be 0x80000000")
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF, "hi should be 0xFFFFFFFF (sign extended)")
+
+
 class Test64BitCompare(unittest.TestCase):
   """Tests for 64-bit scalar compare instructions."""
 

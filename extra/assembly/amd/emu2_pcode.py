@@ -702,7 +702,21 @@ def _register_funcs():
     return ((bits >> _const(bits.dtype, sign_shift)) & _const(bits.dtype, 1)).cast(dtypes.uint32)
   _FUNC_TABLE.append((r'sign\((.+)\)', 1, _sign))
 
-  _FUNC_TABLE.append((r'signext_from_bit\((.+),\s*(.+)\)', 2, lambda a, v, m: (lambda val, w: ((val >> (w - _u32(1))) & _u32(1)).ne(_u32(0)).where(val | (((_u32(1) << w) - _u32(1)) ^ _u32(0xFFFFFFFF)), val))(_to_u32(a[0]), _to_u32(a[1]))))
+  def _signext_from_bit(a, v, m):
+    val, w = a[0], a[1]
+    # Determine if we need 64-bit or 32-bit operations
+    is_64bit = val.dtype in (dtypes.uint64, dtypes.int64)
+    dt = dtypes.uint64 if is_64bit else dtypes.uint32
+    mask_all = _const(dt, 0xFFFFFFFFFFFFFFFF if is_64bit else 0xFFFFFFFF)
+    one = _const(dt, 1)
+    # Convert val to unsigned for bit operations
+    val_u = val.cast(dt) if val.dtype != dt else val
+    w_val = w.cast(dt) if w.dtype != dt else w
+    sign_bit = (val_u >> (w_val - one)) & one
+    # Create mask: if width is w, mask = ~((1 << w) - 1) = all 1s above bit w-1
+    ext_mask = ((one << w_val) - one) ^ mask_all
+    return sign_bit.ne(_const(dt, 0)).where(val_u | ext_mask, val_u)
+  _FUNC_TABLE.append((r'signext_from_bit\((.+),\s*(.+)\)', 2, _signext_from_bit))
 
   for is_max, name in [(False, 'min'), (True, 'max')]:
     for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
