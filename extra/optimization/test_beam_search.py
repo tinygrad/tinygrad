@@ -95,7 +95,7 @@ class TestBeamSearch(unittest.TestCase):
   def test_max_up(self):
     a = Tensor.rand(16, 16)
     ast = a.schedule()[-1].ast
-    s = Scheduler(ast, Device[Device.DEFAULT].renderer)
+    s = Scheduler(ast, Device.DEFAULT, Device[Device.DEFAULT].renderer)
     for max_up in (2, 4):
       actions = get_kernel_actions(s, include_0=False, max_up=max_up)
       for up_opts in [s.applied_opts for s in actions.values() if any(opt.op in (OptOps.UPCAST, OptOps.UNROLL) for opt in s.applied_opts)]:
