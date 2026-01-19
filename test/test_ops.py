@@ -2,6 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
+from typeguard import TypeCheckError
 from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LLVM, EMULATE
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
@@ -266,7 +267,8 @@ class TestOps(unittest.TestCase):
       for tor_i, ten_i in zip(tor, ten):
         helper_test_op([], lambda: tor_i, lambda: ten_i)
 
-    self.helper_test_exception([], lambda: torch.meshgrid(x, indexing="bad"), lambda: xt.meshgrid(indexing="bad"), expected=RuntimeError)
+    self.helper_test_exception([], lambda: torch.meshgrid(x, indexing="bad"), lambda: xt.meshgrid(indexing="bad"),
+                               expected=(RuntimeError, TypeCheckError))
 
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10, dtype=torch.int32), lambda: Tensor.arange(10), forward_only=True)
