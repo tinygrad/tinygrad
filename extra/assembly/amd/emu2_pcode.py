@@ -78,14 +78,15 @@ def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
   if op_name in fixes: pcode = pcode.replace(fixes[op_name][0], fixes[op_name][1])
   if 'V_DIV_SCALE' in op_name:
     dt, exp_lim, ldexp_val = ('f32', '23', '64') if 'F32' in op_name else ('f64', '52', '128')
-    for old, new in [(f'S2.{dt} / S1.{dt} == DENORM.{dt}', f'isDENORM(S2.{dt} / S1.{dt})'), (f"1.0 / 64'F(S1.{dt}) == DENORM.f64", f"isDENORM(1.0 / 64'F(S1.{dt}))"),
-                     (f'1.0 / S1.{dt} == DENORM.{dt}', f'isDENORM(1.0 / S1.{dt})'), (f'S1.{dt} == DENORM.{dt}', f'isDENORM(S1.{dt})'),
+    # Use exponent-based denorm prediction to avoid FTZ issues: divWouldBeDenorm(a,b) checks if a/b would underflow
+    for old, new in [(f'S2.{dt} / S1.{dt} == DENORM.{dt}', f'divWouldBeDenorm(S2.{dt}, S1.{dt})'), (f"1.0 / 64'F(S1.{dt}) == DENORM.f64", '0'),
+                     (f'1.0 / S1.{dt} == DENORM.{dt}', '0'), (f'S1.{dt} == DENORM.{dt}', f'isDENORM(S1.{dt})'),
                      (f'D0.{dt} = NAN.{dt}', f'VCC = 0x1LL;\nD0.{dt} = NAN.{dt}'),
                      (f'elsif isDENORM(S1.{dt}) then\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})', f'elsif 1 == 0 then\nD0.{dt} = S0.{dt}'),
                      (f'elsif exponent(S2.{dt}) <= {exp_lim} then\n// Numerator is tiny\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})',
                       f'elsif exponent(S2.{dt}) <= {exp_lim} then\nVCC = 0x1LL;\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})'),
-                     (f'elsif isDENORM(S2.{dt} / S1.{dt}) then\nVCC = 0x1LL;\nif S0.{dt} == S2.{dt} then\n// Only scale the numerator\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nendif',
-                      f'elsif isDENORM(S2.{dt} / S1.{dt}) then\nVCC = 0x1LL;\nD0.{dt} = S0.{dt}'),
+                     (f'elsif divWouldBeDenorm(S2.{dt}, S1.{dt}) then\nVCC = 0x1LL;\nif S0.{dt} == S2.{dt} then\n// Only scale the numerator\nD0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nendif',
+                      f'elsif divWouldBeDenorm(S2.{dt}, S1.{dt}) then\nVCC = 0x1LL;\nD0.{dt} = S0.{dt}'),
                      (f'D0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nendif\nelsif', f'D0.{dt} = ldexp(S0.{dt}, {ldexp_val})\nelse\nD0.{dt} = S0.{dt}\nendif\nelsif')]:
       pcode = pcode.replace(old, new)
     lines = pcode.rstrip().split('\n')
@@ -673,6 +674,19 @@ def _register_funcs():
     if is_f64: return (((val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
     return (((val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int)
   _FUNC_TABLE.append((r'exponent\((.+)\)', 1, _exponent))
+
+  # Predict if a/b would be denormal based on exponents (avoids FTZ issues)
+  def _div_would_be_denorm(a, v, m):
+    numer, denom = a[0], a[1]
+    is_f64 = '.f64' in m.group(0) or numer.dtype == dtypes.float64
+    if is_f64:
+      exp_n = ((numer.bitcast(dtypes.uint64) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
+      exp_d = ((denom.bitcast(dtypes.uint64) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
+      return (exp_n - exp_d) < UOp.const(dtypes.int, -1022)
+    exp_n = ((numer.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int)
+    exp_d = ((denom.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int)
+    return (exp_n - exp_d) < UOp.const(dtypes.int, -126)
+  _FUNC_TABLE.append((r'divWouldBeDenorm\((.+),\s*(.+)\)', 2, _div_would_be_denorm))
 
   def _sign(a, v, m):
     val = a[0]

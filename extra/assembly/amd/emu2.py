@@ -1108,11 +1108,7 @@ def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, l
         inst_str = repr(inst)
       except Exception:
         inst_str = f"<{type(inst).__name__}>"
-      if DEBUG >= 1: print(f"[emu2] Failed to compile PC={i//4} {inst_str}: {type(e).__name__}: {e}")
-      if DEBUG >= 3:
-        import traceback
-        traceback.print_exc()
-      fxn, globals_list, runner = None, None, None
+      raise RuntimeError(f"[emu2] Failed to compile PC={i//4} {inst_str}: {type(e).__name__}: {e}") from e
 
     result[i // 4] = (name, fxn, globals_list, runner)
     i += inst.size()
