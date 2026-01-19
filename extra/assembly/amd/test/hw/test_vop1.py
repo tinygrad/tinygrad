@@ -440,6 +440,49 @@ class TestF64Conversions(unittest.TestCase):
     result = i2f(st.vgpr[0][2])
     self.assertAlmostEqual(result, 123456.789, places=0)
 
+  def test_v_cvt_f64_i32_positive(self):
+    """V_CVT_F64_I32 converts positive i32 to f64."""
+    instructions = [
+      s_mov_b32(s[0], 42),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_i32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, 42.0, places=10)
+
+  def test_v_cvt_f64_i32_negative(self):
+    """V_CVT_F64_I32 converts negative i32 to f64."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # -1 as i32
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_i32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, -1.0, places=10)
+
+  def test_v_cvt_f64_u32_large(self):
+    """V_CVT_F64_U32 converts large u32 to f64."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),  # max u32
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_u32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, 4294967295.0, places=0)
+
+  def test_v_cvt_f64_u32_zero(self):
+    """V_CVT_F64_U32 converts 0 to f64."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_cvt_f64_u32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertEqual(result, 0.0)
+
 
 class TestClz(unittest.TestCase):
   """Tests for V_CLZ_I32_U32 - count leading zeros."""
