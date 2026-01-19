@@ -177,5 +177,6 @@ class DLL(ctypes.CDLL):
     return wrapper
 
   def __getattr__(self, nm):
-    if self.nm not in self._loaded_: raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
+    if self.nm not in self._loaded_:
+      raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
     return super().__getattr__(nm)
