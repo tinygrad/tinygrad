@@ -461,7 +461,7 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
   if (m := re.match(r'VGPR\[([^\]]+)\]\[([^\]]+)\]', expr)):
     vgpr = vars.get('_vgpr')
     if vgpr is None: return _u32(0)
-    return vgpr.index((_to_u32(parse_expr(m.group(2), vars)) * _u32(32) + _to_u32(parse_expr(m.group(1), vars))).cast(dtypes.index))
+    return vgpr.index((_to_u32(parse_expr(m.group(2), vars)) * _u32(32) + _to_u32(parse_expr(m.group(1), vars))).cast(dtypes.index), ptr=True).load()
   if (m := re.match(r'MEM\[(.+)\]\.(\w+)', expr)):
     addr, dt = parse_expr(m.group(1), vars), DTYPES.get(m.group(2), dtypes.uint32)
     mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
