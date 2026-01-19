@@ -99,11 +99,10 @@ def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp:
   return (val >> U32_16) & _c(0xFFFF) if opsel & (1 << sel_bit) else val
 
 def _unroll_lanes(get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
-  """Unroll 32 lanes, combining per-lane bits into a 32-bit mask. Optionally apply EXEC mask."""
-  result = U32_0
-  for i in range(32):
-    bit = get_lane_bit(i).cast(dtypes.uint32) << _c(i)
-    result = result | bit
+  """Combine 32 lane bits into a 32-bit mask using RANGE+REDUCE. Optionally apply EXEC mask."""
+  lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+  bit = get_lane_bit(lane).cast(dtypes.uint32) << lane.cast(dtypes.uint32)
+  result = bit.reduce(lane, arg=Ops.ADD)
   return result & exec_mask if apply_exec else result
 
 def _set_lane_bit(old: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
@@ -469,8 +468,8 @@ def _compile_vopc(inst: VOPC, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   vsrc1_hi, vsrc1_offset = is_16bit and vsrc1_reg >= 128, 256 + (vsrc1_reg - 128 if is_16bit and vsrc1_reg >= 128 else vsrc1_reg)
   pcode = PCODE.get(inst.op)
   bits = 64 if is_64bit else 32
-  def get_cmp_bit(i: int) -> UOp:
-    lc = _c(i, dtypes.index)
+  def get_cmp_bit(lane) -> UOp:
+    lc = lane.cast(dtypes.index) if isinstance(lane, UOp) else _c(lane, dtypes.index)
     s0, s1 = ctx.rsrc(inst.src0.offset, lc, bits), ctx.rsrc(vsrc1_offset, lc, bits)
     if is_16bit and vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
     if pcode is None: return U32_0
@@ -501,8 +500,8 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     is_16bit_op = src0_bits == 16 or src1_bits == 16
     is_float_op = src0_fmt is not None and any(x in src0_fmt.name for x in ('F32', 'F64', 'F16'))
     pcode = PCODE.get(inst.op)
-    def get_cmp_bit(i: int) -> UOp:
-      lc = _c(i, dtypes.index)
+    def get_cmp_bit(lane) -> UOp:
+      lc = lane.cast(dtypes.index) if isinstance(lane, UOp) else _c(lane, dtypes.index)
       s0, s1 = ctx.rsrc(inst.src0.offset, lc, src0_bits), ctx.rsrc(inst.src1.offset, lc, src1_bits)
       if is_16bit_op: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
       if is_float_op: s0, s1 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, src0_bits == 64), _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, src1_bits == 64)
@@ -563,34 +562,38 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
   has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
   if has_per_lane_vcc:
-    def get_lane_results(i: int) -> tuple[UOp, UOp|None]:
-      lc = _c(i, dtypes.index)
-      s0, s1 = ctx.rsrc_sized(inst.src0.offset, lc, sizes, 'src0'), ctx.rsrc_sized(inst.src1.offset, lc, sizes, 'src1')
-      s2 = ctx.rsrc_sized(inst.src2.offset, lc, sizes, 'src2') if inst.src2 is not None else None
+    # VCC computation: use RANGE + REDUCE to combine 32 lane bits
+    def get_vcc_bit(lane_uop) -> UOp:
+      s0, s1 = ctx.rsrc_sized(inst.src0.offset, lane_uop, sizes, 'src0'), ctx.rsrc_sized(inst.src1.offset, lane_uop, sizes, 'src1')
+      s2 = ctx.rsrc_sized(inst.src2.offset, lane_uop, sizes, 'src2') if inst.src2 is not None else None
       lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr(vcc_in_reg), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)}
       if s2 is not None: lane_srcs['S2'] = s2
-      vcc_bit, d0_val = U32_0, None
-      for dest, val in parse_pcode(pcode, lane_srcs, lc, op_name=op_name)[1]:
+      vcc_bit = U32_0
+      for dest, val in parse_pcode(pcode, lane_srcs, lane_uop, op_name=op_name)[1]:
         if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
-        elif dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
-      return vcc_bit, d0_val
-    lane_results = [get_lane_results(i) for i in range(32)]
-    final_vcc = _unroll_lanes(lambda i: lane_results[i][0], exec_mask)
+      return vcc_bit
+    final_vcc = _unroll_lanes(get_vcc_bit, exec_mask)
+    # VGPR stores: separate RANGE loop for writing D0
+    lane3 = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    s0, s1 = ctx.rsrc_sized(inst.src0.offset, lane3, sizes, 'src0'), ctx.rsrc_sized(inst.src1.offset, lane3, sizes, 'src1')
+    s2 = ctx.rsrc_sized(inst.src2.offset, lane3, sizes, 'src2') if inst.src2 is not None else None
+    lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr(vcc_in_reg), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)}
+    if s2 is not None: lane_srcs['S2'] = s2
+    d0_val = None
+    for dest, val in parse_pcode(pcode, lane_srcs, lane3, op_name=op_name)[1]:
+      if dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
     vgpr_stores = []
-    for i, (_, d0_val) in enumerate(lane_results):
-      if d0_val is None: continue
-      active = ((exec_mask >> _c(i)) & U32_1).ne(U32_0)
+    if d0_val is not None:
       if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         lo, hi = _split64(d0_val)
-        idx_lo = ctx.vgpr.after(final_vcc).index(_c(vdst_reg * 32 + i, dtypes.index))
-        idx_hi = ctx.vgpr.after(final_vcc).index(_c((vdst_reg + 1) * 32 + i, dtypes.index))
-        vgpr_stores.extend([idx_lo.store(active.where(lo, idx_lo.load())), idx_hi.store(active.where(hi, idx_hi.load()))])
+        vgpr_stores.extend([ctx.wvgpr(vdst_reg, lane3, lo, exec_mask), ctx.wvgpr(vdst_reg + 1, lane3, hi, exec_mask)])
       else:
-        idx = ctx.vgpr.after(final_vcc).index(_c(vdst_reg * 32 + i, dtypes.index))
-        # Use bitcast for float->uint32 to preserve NaN/inf bit patterns
         d0_u32 = d0_val.bitcast(dtypes.uint32) if d0_val.dtype in (dtypes.float32, dtypes.half) else d0_val.cast(dtypes.uint32)
-        vgpr_stores.append(idx.store(active.where(d0_u32, idx.load())))
-    return name, UOp.sink(*(vgpr_stores + [ctx.wsgpr(sdst_reg, final_vcc), ctx.inc_pc()]), arg=KernelInfo(name=name))
+        vgpr_stores.append(ctx.wvgpr(vdst_reg, lane3, d0_u32, exec_mask))
+    vcc_write = ctx.wsgpr(sdst_reg, final_vcc)
+    if vgpr_stores:
+      return name, UOp.sink(UOp.sink(*vgpr_stores).end(lane3), vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
+    return name, UOp.sink(vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
   else:
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, sdst_reg=sdst_reg)
     assert pcode_result is not None, f"no pcode for VOP3SD: {op_name}"
