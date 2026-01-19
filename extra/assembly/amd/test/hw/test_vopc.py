@@ -324,6 +324,29 @@ class TestCmpInt(unittest.TestCase):
     st = run_program(instructions, n_lanes=4)
     self.assertEqual(st.vcc & 0xf, 0xf, "All lanes should match")
 
+  def test_v_cmp_ne_u32_with_zero(self):
+    """V_CMP_NE_U32: compare with zero, used for int->bool cast."""
+    instructions = [
+      v_mov_b32_e32(v[1], 0),
+      v_cmp_eq_u32_e32(1, v[255]),  # vcc = (lane == 1)
+      v_cndmask_b32_e64(v[1], v[1], 1, VCC_LO),  # v1[lane1] = 1
+      v_cmp_ne_u32_e32(0, v[1]),  # vcc = (0 != v1)
+      v_cndmask_b32_e64(v[0], 0, 1, VCC_LO),  # v0 = vcc ? 1 : 0
+    ]
+    st = run_program(instructions, n_lanes=2)
+    self.assertEqual(st.vgpr[0][0], 0, "lane 0: 0 != 0 should be false")
+    self.assertEqual(st.vgpr[1][0], 1, "lane 1: 0 != 1 should be true")
+    self.assertEqual(st.vcc & 0x3, 0x2, "VCC should be 0b10")
+
+  def test_v_cmp_ne_u32_all_nonzero(self):
+    """V_CMP_NE_U32: all lanes have nonzero values."""
+    instructions = [
+      v_mov_b32_e32(v[1], 5),
+      v_cmp_ne_u32_e32(0, v[1]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    self.assertEqual(st.vcc & 0xf, 0xf, "All lanes should be != 0")
+
   def test_cmp_eq_u16_opsel_lo_lo(self):
     """V_CMP_EQ_U16 comparing lo halves."""
     instructions = [

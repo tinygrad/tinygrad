@@ -131,11 +131,28 @@ def _write_val(dest: str, val: UOp, wfn, reg_or_addr, *args) -> list[UOp]:
   """Write value, splitting 64-bit if needed based on dest type suffix."""
   return _write_64bit(val, wfn, reg_or_addr, *args) if _is_64bit_dest(dest) else [wfn(reg_or_addr, _to_u32(val), *args)]
 
-def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32) -> UOp:
-  """Conditional memory store: write val to mem[addr] if active, else keep old value."""
-  shift = UOp.const(dtypes.uint64 if addr_bits == 64 else dtypes.uint32, 2)
-  idx = mem.index((addr >> shift).cast(dtypes.index))
-  return idx.store(active.where(_to_u32(val), idx.load()))
+def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, data_bits: int = 32) -> UOp:
+  """Conditional memory store: write val to mem[addr] if active, else keep old value. Handles sub-word stores."""
+  adt = dtypes.uint64 if addr_bits == 64 else dtypes.uint32
+  shift = UOp.const(adt, 2)
+  word_addr = addr >> shift
+  idx = mem.index(word_addr.cast(dtypes.index))
+  # NOTE: Don't call idx.load() - use idx directly as the value. pm_add_loads will add the load op later.
+  # Calling .load() here causes LOAD(LOAD) after pm_add_loads runs.
+  val_u32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+  if data_bits == 8:
+    byte_pos = (addr.cast(dtypes.uint32) & UOp.const(dtypes.uint32, 3))  # 0-3
+    byte_shift = byte_pos << UOp.const(dtypes.uint32, 3)  # *8
+    mask = UOp.const(dtypes.uint32, 0xFF) << byte_shift
+    new_word = (idx & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | ((val_u32 & UOp.const(dtypes.uint32, 0xFF)) << byte_shift)
+  elif data_bits == 16:
+    half_pos = (addr.cast(dtypes.uint32) >> UOp.const(dtypes.uint32, 1)) & UOp.const(dtypes.uint32, 1)  # 0 or 1
+    half_shift = half_pos << UOp.const(dtypes.uint32, 4)  # *16
+    mask = UOp.const(dtypes.uint32, 0xFFFF) << half_shift
+    new_word = (idx & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | ((val_u32 & UOp.const(dtypes.uint32, 0xFFFF)) << half_shift)
+  else:
+    new_word = _to_u32(val)
+  return idx.store(active.where(new_word, idx))
 
 def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = None, op_name: str = "") -> dict[int, UOp]:
   """Collect bit slices from assigns into {dword_idx: value} dict."""
@@ -290,7 +307,8 @@ def compile_ds_pcode(op, inst, lane: UOp, rvgpr_fn, wvgpr_fn, lds: UOp, exec_mas
   _, assigns = parse_pcode(pcode, srcs, lane)
 
   active = _lane_active(exec_mask, lane)
-  stores = [_mem_store(lds, val[0].cast(dtypes.uint32), val[1], active) for dest, val in assigns if dest.startswith('MEM[')]
+  def _data_bits(dest): return 8 if '.b8' in dest else 16 if '.b16' in dest else 64 if '.b64' in dest else 32
+  stores = [_mem_store(lds, val[0].cast(dtypes.uint32), val[1], active, data_bits=_data_bits(dest)) for dest, val in assigns if dest.startswith('MEM[')]
   for dword_idx, val in sorted(_collect_data_slices(assigns, 'RETURN_DATA').items()):
     stores.append(wvgpr_fn(vdst_reg + dword_idx, lane, val, exec_mask))
 
@@ -706,10 +724,11 @@ def _compile_flat_global(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     def wvmem(a: UOp, v: UOp, act: UOp) -> UOp:
       idx = ctx.vmem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
       return idx.store(act.where(v, ctx.vmem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).load()))
+    def data_bits(dest): return 8 if '.b8' in dest else 16 if '.b16' in dest else 64 if '.b64' in dest else 32
     stores = []
     for dest, val in assigns:
       if dest.startswith('MEM['):
-        stores.extend(_write_val(dest, val[1], wvmem, val[0], active) if is_atomic else [_mem_store(ctx.vmem, val[0], val[1], active, 64)])
+        stores.extend(_write_val(dest, val[1], wvmem, val[0], active) if is_atomic else [_mem_store(ctx.vmem, val[0], val[1], active, 64, data_bits(dest))])
       elif dest.startswith('RETURN_DATA') and is_atomic and glc:
         stores.extend(_write_val(dest, val, lambda r, v, l, e: ctx.wvgpr(r, l, v, e), vdst_reg, lane, exec_mask))
     if not is_atomic:
