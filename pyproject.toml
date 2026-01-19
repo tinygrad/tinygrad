@@ -92,6 +92,7 @@ testing = [
   "boto3",
   "pandas",
   "influxdb3-python",
+  "typeguard"
 ]
 docs = [
   "mkdocs",
