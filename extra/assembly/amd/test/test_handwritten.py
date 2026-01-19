@@ -140,6 +140,11 @@ class TestIntegrationCDNA(_TestIntegration):
     # src2=0 should give the literal, it's currently giving a[128:131]
     self.inst = v_mfma_f32_16x16x16_f16(v[0:3], v[0:1], v[0:1], 0, clmp=1, opsel_hi=0)
 
+  @unittest.skip("src0 _is_ 6 registers when cbsz:2, dsl doesn't accept it")
+  def test_mfma_fp8(self):
+    from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x128_f8f6f4
+    self.inst = v_mfma_f32_16x16x128_f8f6f4(v[0:3], v[0:5], v[0:5], 1, clmp=1, opsel_hi=0, neg_hi=2, neg=2)
+
 class TestRegisterSliceSyntax(unittest.TestCase):
   """
   Issue: Register slice syntax should use AMD assembly convention (inclusive end).
