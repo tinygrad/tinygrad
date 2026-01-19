@@ -13,7 +13,7 @@ def get_struct(argp, stype):
 
 def format_struct(s):
   sdats = []
-  for field_name, field_type in s._fields_:
+  for field_name, *_ in s._real_fields_:
     dat = getattr(s, field_name)
     if isinstance(dat, int): sdats.append(f"{field_name}:0x{dat:X}")
     else: sdats.append(f"{field_name}:{dat}")
@@ -53,13 +53,13 @@ def print_aql_queue(read_pointer_address):
   queue_base = read_pointer_address - rptr_offset
   queue = hsa.amd_queue_v2_t.from_address(queue_base)
   print(f"  AQL Queue @ 0x{queue_base:X}:")
-  for field_name, field_type in hsa.amd_queue_v2_t._fields_:
+  for field_name, *_ in hsa.amd_queue_v2_t._real_fields_:
     val = getattr(queue, field_name)
     if isinstance(val, int): print(f"    {field_name}: 0x{val:X}")
     elif hasattr(val, '_length_'):
-      arr_vals = [f"{format_struct(v)}" if hasattr(v, '_fields_') else f"{v:#X}" for v in val]
+      arr_vals = [f"{format_struct(v)}" if hasattr(v, '_real_fields_') else f"{v:#X}" for v in val]
       print(f"    {field_name}: [{', '.join(arr_vals)}]")
-    elif hasattr(val, '_fields_'): print(f"    {field_name}: {format_struct(val)}")
+    elif hasattr(val, '_real_fields_'): print(f"    {field_name}: {format_struct(val)}")
     else: print(f"    {field_name}: {val}")
 
 def ioctls_from_header():
