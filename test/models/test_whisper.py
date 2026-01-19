@@ -1,7 +1,7 @@
 import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
-from examples.webgpu.whisper.audio_helpers import mel
+from examples.webgpu.whisper.audio_helpers import hann_window, mel, stft_full
 import examples.mlperf.metrics as metrics
 from tinygrad.helpers import fetch
 from test.helpers import slow
@@ -132,6 +132,22 @@ class TestWhisper(unittest.TestCase):
     reference = TRANSCRIPTION_3
     self.assertWER(reference[:len(reference)//2], reference, 0.524)
 
+  def test_hann_window_periodic(self):
+    # torch.hann_window(16, True).numpy()
+    reference = Tensor([0., 0.03806025, 0.14644662, 0.3086583, 0.5,
+       0.69134176, 0.8535534, 0.9619398, 1., 0.96193975,
+       0.8535533, 0.6913416, 0.5, 0.30865818, 0.1464465,
+       0.03806022], dtype=dtypes.float32)
+    np.testing.assert_allclose(hann_window(16, periodic=True).numpy(), reference.numpy(), atol=1e-6)
+
+  def test_hann_window_non_periodic(self):
+    # torch.hann_window(16, False).numpy()
+    reference = Tensor([0., 0.04322729, 0.16543472, 0.34549153, 0.5522643,
+       0.75, 0.9045085, 0.9890738, 0.98907375, 0.9045085,
+       0.74999994, 0.55226415, 0.34549144, 0.16543463, 0.04322723,
+       0.        ], dtype=dtypes.float32)
+    np.testing.assert_allclose(hann_window(16, periodic=False).numpy(), reference.numpy(), atol=1e-6)
+
   def test_mel_filters(self):
     # reference = librosa.filters.mel(sr=16000, n_fft=16, n_mels=16)
     reference = Tensor([[-0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -151,6 +167,21 @@ class TestWhisper(unittest.TestCase):
                         [0.0, 0.0, 0.0, 0.0, 0.0, 0.00040073052514344454, 0.0005822855746373534, 0.0, 0.0],
                         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.00033081238507293165, 0.0006097797304391861, 0.0]])
     np.testing.assert_allclose(mel(sr=16000, n_fft=16, n_mels=16, dtype=dtypes.float32).numpy(), reference.numpy(), atol=1e-6)
+
+  def test_stft_tiny(self):
+    def osc(hz, sr):
+      return np.sin(np.linspace(0, np.pi*2, sr)*hz)
+
+    N = 32
+    syn = osc(4, N) + osc(3, N)
+
+    inp = syn.astype(np.float32)
+    hann_periodic = np.hanning(N+1)[:-1].astype(np.float32)
+    reference = np.absolute(np.fft.rfft(inp * hann_periodic))
+
+    actual = stft_full(Tensor(inp[None]), N, N, (0, 0), window="hann").numpy().squeeze()
+
+    np.testing.assert_allclose(actual, reference, atol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
