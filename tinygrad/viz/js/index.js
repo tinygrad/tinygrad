@@ -374,7 +374,8 @@ async function renderProfiler(path, unit, opts) {
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
         if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
-      div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
+      const height = levelHeight*levels.length; data.tracks.get(k).height = levelHeight*levels.length;
+      div.style("height", height+padding+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
       let x = 0, y = 0;
