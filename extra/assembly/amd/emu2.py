@@ -443,7 +443,8 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       s0 = ctx.rvgpr(src0_reg, lane)
       s0 = (s0 >> U32_16) & _c(0xFFFF)  # extract hi 16 bits
     else:
-      s0 = ctx.rsrc_sized(src0_off, lane, sizes, 'src0')
+      # For 16-bit ops, use f16=True to get F16 inline constants
+      s0 = ctx.rsrc_sized(src0_off, lane, sizes, 'src0', f16=is_16bit)
     srcs = {'S0': s0}
   else:
     vsrc1_reg = inst.vsrc1.offset - 256
@@ -461,7 +462,8 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       s0 = ctx.rvgpr(src0_reg, lane)
       s0 = (s0 >> U32_16) & _c(0xFFFF)  # extract hi 16 bits
     else:
-      s0 = ctx.rsrc(src0_off, lane)
+      # For 16-bit ops, use bits=16 to get F16 inline constants (e.g. 1.0 -> 0x3c00 not 0x3f800000)
+      s0 = ctx.rsrc(src0_off, lane, bits=16 if is_16bit else 32)
     srcs = {'S0': s0, 'S1': s1, 'D0': d0}
     if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
       srcs['SIMM32'] = UOp.const(dtypes.uint32, ctx.literal)

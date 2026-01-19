@@ -579,6 +579,55 @@ class TestVop2F16HiHalf(unittest.TestCase):
     self.assertEqual(result, 0x4700, f"Expected f16(7.0)=0x4700, got 0x{result:04x}")
 
 
+class TestF16InlineConstants(unittest.TestCase):
+  """Regression tests for VOP2 F16 inline float constants.
+
+  For 16-bit VOP2 operations (v_add_f16, v_mul_f16, etc.), inline float constants
+  like 1.0, 2.0 must use F16 encoding (0x3c00, 0x4000) not F32 encoding (0x3f800000).
+
+  The emulator's rsrc() function needs bits=16 to select F16_INLINE constants.
+
+  Regression test for: VOP2 16-bit inline constant using F32 instead of F16.
+  """
+
+  def test_v_add_f16_inline_constant_1_0(self):
+    """V_ADD_F16_E32 with inline constant 1.0 should use F16 encoding."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c00),  # f16 1.0
+      v_mov_b32_e32(v[0], s[0]),
+      # v_add_f16_e32 v[1], 1.0, v[0]  -- 1.0 must be F16 0x3c00, not F32 0x3f800000
+      v_add_f16_e32(v[1], 1.0, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xFFFF
+    # 1.0 + 1.0 = 2.0, f16 2.0 = 0x4000
+    self.assertEqual(result, 0x4000, f"Expected f16(2.0)=0x4000, got 0x{result:04x}")
+
+  def test_v_add_f16_inline_constant_2_0(self):
+    """V_ADD_F16_E32 with inline constant 2.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x4200),  # f16 3.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_add_f16_e32(v[1], 2.0, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xFFFF
+    # 2.0 + 3.0 = 5.0, f16 5.0 = 0x4500
+    self.assertEqual(result, 0x4500, f"Expected f16(5.0)=0x4500, got 0x{result:04x}")
+
+  def test_v_mul_f16_inline_constant(self):
+    """V_MUL_F16_E32 with inline constant 2.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x4200),  # f16 3.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mul_f16_e32(v[1], 2.0, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xFFFF
+    # 2.0 * 3.0 = 6.0, f16 6.0 = 0x4600
+    self.assertEqual(result, 0x4600, f"Expected f16(6.0)=0x4600, got 0x{result:04x}")
+
+
 class TestCndmask(unittest.TestCase):
   """Tests for V_CNDMASK_B32 and V_CNDMASK_B16."""
 
