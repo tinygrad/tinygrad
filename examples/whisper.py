@@ -157,14 +157,14 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
   if waveforms.shape[0] < batch_size:
     # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
     waveforms = np.pad(waveforms, pad_width=((0, batch_size - waveforms.shape[0]), (0, 0)))
+
   stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
   magnitudes = np.absolute(stft[..., :-1]) ** 2
-  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ Tensor(magnitudes)
+  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS).numpy() @ magnitudes
 
-  log_spec = mel_spec.clip(1e-10, None).log10()
-  log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
+  log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
+  log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
-  log_spec = log_spec.numpy()
 
   return log_spec
 
