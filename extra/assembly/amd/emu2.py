@@ -446,37 +446,19 @@ def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
             for i in range(ndwords)]
   return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
 
-def _compile_sop1(inst: SOP1, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  src_off, dst_reg = inst.ssrc0.offset, inst.sdst.offset
-  sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
-  s0 = ctx.rsgpr64(src_off) if sizes.get('ssrc0', 1) == 2 else ctx.rsrc(src_off, UOp.const(dtypes.index, 0))
-  pcode_result = compile_sop_pcode(inst.op, {'S0': s0}, ctx.wsgpr, ctx.rsgpr, dst_reg, sizes.get('sdst', 1), ctx.inc_pc, name)
-  assert pcode_result is not None, f"unimplemented SOP1: {inst.op.name}"
-  return pcode_result
-
-def _compile_sop2(inst: SOP2, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  sizes = inst.op_regs
-  s0 = ctx.rsgpr64(inst.ssrc0.offset) if sizes.get('ssrc0', 1) == 2 else ctx.rsrc(inst.ssrc0.offset, UOp.const(dtypes.index, 0))
-  s1 = ctx.rsgpr64(inst.ssrc1.offset) if sizes.get('ssrc1', 1) == 2 else ctx.rsrc(inst.ssrc1.offset, UOp.const(dtypes.index, 0))
-  pcode_result = compile_sop_pcode(inst.op, {'S0': s0, 'S1': s1}, ctx.wsgpr, ctx.rsgpr, inst.sdst.offset, sizes.get('sdst', 1), ctx.inc_pc, name)
-  assert pcode_result is not None, f"no pcode for SOP2: {inst.op.name}"
-  return pcode_result
-
-def _compile_sopc(inst: SOPC, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  sizes = inst.op_regs if hasattr(inst, 'op_regs') else {}
-  s0 = ctx.rsgpr64(inst.ssrc0.offset) if sizes.get('ssrc0', 1) == 2 else ctx.rsrc(inst.ssrc0.offset, UOp.const(dtypes.index, 0))
-  s1 = ctx.rsgpr64(inst.ssrc1.offset) if sizes.get('ssrc1', 1) == 2 else ctx.rsrc(inst.ssrc1.offset, UOp.const(dtypes.index, 0))
-  pcode_result = compile_sop_pcode(inst.op, {'S0': s0, 'S1': s1}, ctx.wsgpr, ctx.rsgpr, 0, 0, ctx.inc_pc, name)
-  assert pcode_result is not None, f"no pcode for SOPC: {inst.op.name}"
-  return pcode_result
-
-def _compile_sopk(inst: SOPK, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  sdst_reg, simm16 = inst.sdst.offset, inst.simm16
-  simm16_sext = simm16 if simm16 < 0x8000 else simm16 - 0x10000
-  s0 = ctx.rsgpr(sdst_reg)
-  pcode_result = compile_sop_pcode(inst.op, {'S0': s0, 'SIMM16': UOp.const(dtypes.int32, simm16_sext), 'D0': s0},
-                                   ctx.wsgpr, ctx.rsgpr, sdst_reg, 1, ctx.inc_pc, name)
-  assert pcode_result is not None, f"no pcode for SOPK: {inst.op.name}"
+def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+  sizes, lane0 = getattr(inst, 'op_regs', {}), UOp.const(dtypes.index, 0)
+  def rsrc_sz(off, key): return ctx.rsgpr64(off) if sizes.get(key, 1) == 2 else ctx.rsrc(off, lane0)
+  if isinstance(inst, SOPK):
+    simm16_sext = inst.simm16 if inst.simm16 < 0x8000 else inst.simm16 - 0x10000
+    srcs = {'S0': ctx.rsgpr(inst.sdst.offset), 'SIMM16': UOp.const(dtypes.int32, simm16_sext), 'D0': ctx.rsgpr(inst.sdst.offset)}
+    dst_reg, dst_size = inst.sdst.offset, 1
+  else:
+    srcs = {'S0': rsrc_sz(inst.ssrc0.offset, 'ssrc0')}
+    if hasattr(inst, 'ssrc1'): srcs['S1'] = rsrc_sz(inst.ssrc1.offset, 'ssrc1')
+    dst_reg, dst_size = (0, 0) if isinstance(inst, SOPC) else (inst.sdst.offset, sizes.get('sdst', 1))
+  pcode_result = compile_sop_pcode(inst.op, srcs, ctx.wsgpr, ctx.rsgpr, dst_reg, dst_size, ctx.inc_pc, name)
+  assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
   return pcode_result
 
 def _compile_vop1(inst: VOP1, ctx: _Ctx, name: str) -> tuple[str, UOp]:
@@ -806,7 +788,7 @@ def _compile_flat_global(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
 # Dispatch table: instruction type -> handler function
 _INST_HANDLERS: dict[type, callable] = {
-  SOPP: _compile_sopp, SMEM: _compile_smem, SOP1: _compile_sop1, SOP2: _compile_sop2, SOPC: _compile_sopc, SOPK: _compile_sopk,
+  SOPP: _compile_sopp, SMEM: _compile_smem, SOP1: _compile_sop, SOP2: _compile_sop, SOPC: _compile_sop, SOPK: _compile_sop,
   VOP1: _compile_vop1, VOP1_SDST: _compile_vop1, VOPC: _compile_vopc, VOP2: _compile_vop2, VOP3: _compile_vop3, VOP3_SDST: _compile_vop3,
   VOP3SD: _compile_vop3sd, VOP3P: _compile_vop3p, VOPD: _compile_vopd, DS: _compile_ds, FLAT: _compile_flat_global, GLOBAL: _compile_flat_global,
 }
