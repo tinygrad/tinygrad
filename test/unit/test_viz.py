@@ -266,7 +266,7 @@ class TestVizIntegration(BaseTestViz):
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
     ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
-    prg = get_program(ast, Device[Device.DEFAULT].renderer)
+    prg = get_program(ast, Device.DEFAULT)
     lst = get_viz_list()
     self.assertEqual(len(lst), 2)
     self.assertEqual(lst[0]["name"], "Schedule 1 Kernel n1")
