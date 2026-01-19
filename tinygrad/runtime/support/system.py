@@ -321,7 +321,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
         return s
       except (ConnectionRefusedError, FileNotFoundError): return None
 
-    if not (sock := try_connect(sock_path:=temp("tinygpu.sock"))):
+    if not (sock:=try_connect(sock_path:=getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")))):
       if not os.path.exists(self.APP_PATH): raise RuntimeError(f"TinyGPU app not found at {self.APP_PATH}")
       subprocess.Popen([self.APP_PATH, "server", sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
       for _ in range(100):

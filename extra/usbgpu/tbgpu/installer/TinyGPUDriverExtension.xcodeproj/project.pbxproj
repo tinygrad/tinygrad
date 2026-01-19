@@ -582,7 +582,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.edriver;
 				PRODUCT_NAME = "$(inherited)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=driverkit*]" = driverkit_provisioning_dev;
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = driverkit;
 				SKIP_INSTALL = YES;
