@@ -497,6 +497,40 @@ class TestVop2F16HiHalf(unittest.TestCase):
     # 3.0 + 1.0 * 2.0 = 5.0, f16 5.0 = 0x4500
     self.assertEqual(result, 0x4500, f"Expected f16(5.0)=0x4500, got 0x{result:04x}")
 
+  def test_v_fmac_f16_e32_vdst_hi_half(self):
+    """V_FMAC_F16_E32 writing to hi-half destination.
+
+    V_FMAC_F16: vdst.h = vdst.h + src0 * vsrc1
+
+    When vdst is v[128]+, the accumulator D0 must also read from the hi-half.
+    This tests the bug where D0 was read from lo-half instead of hi-half.
+
+    Regression test for: VOP2 FMAC hi-half D0 accumulator read bug.
+    """
+    instructions = [
+      # v[0] = 0x3800_DEAD: hi=f16(0.5), lo=marker (0xDEAD)
+      s_mov_b32(s[0], 0x3800DEAD),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = f16(2.0) = 0x4000
+      s_mov_b32(s[1], 0x4000),
+      v_mov_b32_e32(v[1], s[1]),
+      # v[2] = f16(3.0) = 0x4200
+      s_mov_b32(s[2], 0x4200),
+      v_mov_b32_e32(v[2], s[2]),
+      # v_fmac_f16_e32 v[128], v[1], v[2]
+      # vdst = v[128] means v[0].hi
+      # D0 = v[0].hi = 0.5
+      # result = D0 + src0 * vsrc1 = 0.5 + 2.0 * 3.0 = 6.5
+      # v[0].hi = 6.5, v[0].lo preserved = 0xDEAD
+      VOP2(VOP2Op.V_FMAC_F16, vdst=v[128], src0=v[1], vsrc1=v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    hi = (st.vgpr[0][0] >> 16) & 0xffff
+    lo = st.vgpr[0][0] & 0xffff
+    # hi = 6.5 = 0x4680, lo preserved = 0xDEAD
+    self.assertEqual(hi, 0x4680, f"Expected hi=f16(6.5)=0x4680, got 0x{hi:04x}")
+    self.assertEqual(lo, 0xDEAD, f"Expected lo preserved=0xDEAD, got 0x{lo:04x}")
+
 
 class TestCndmask(unittest.TestCase):
   """Tests for V_CNDMASK_B32 and V_CNDMASK_B16."""

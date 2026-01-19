@@ -533,12 +533,14 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   srcs = {'S0': src0, 'S1': src1}
   if src2 is not None: srcs['S2'] = src2
   if inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16) and src2 is not None: srcs['VCC'] = src2
+  # FMAC instructions need D0 (accumulator) from destination register
+  if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr(vdst_reg, lane)
   opsel_dst_hi = bool(opsel & 0b1000) and _is_16bit_op(op_name)
   if opsel_dst_hi:
     stores = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, opsel_dst_hi=True, rvgpr_fn=ctx.rvgpr)
     if stores is not None:
       return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
-  pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name)
+  pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, rvgpr_fn=ctx.rvgpr)
   assert pcode_result is not None, f"no pcode for VOP3: {inst.op.name}"
   return pcode_result
 

@@ -58,6 +58,95 @@ class TestFMA(unittest.TestCase):
     self.assertTrue(math.isinf(result) and result > 0)
 
 
+class TestFmacE64(unittest.TestCase):
+  """Regression tests for V_FMAC_F32 VOP3 encoding (e64).
+
+  V_FMAC_F32: D0 = D0 + S0 * S1 (fused multiply-add with accumulator)
+
+  The VOP3 encoding needs to read D0 from the destination register as the
+  accumulator input, not just write to it.
+
+  Regression test for: VOP3 FMAC missing D0 accumulator bug.
+  """
+
+  def test_v_fmac_f32_e64_basic(self):
+    """V_FMAC_F32_E64: basic accumulate test."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),  # S0 = 2.0
+      v_mov_b32_e32(v[1], 3.0),  # S1 = 3.0
+      v_mov_b32_e32(v[2], 1.0),  # D0 (accumulator) = 1.0
+      # v_fmac_f32_e64 v[2], v[0], v[1]
+      # D0 = D0 + S0 * S1 = 1.0 + 2.0 * 3.0 = 7.0
+      v_fmac_f32_e64(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 7.0, places=5)
+
+  def test_v_fmac_f32_e64_with_sgpr_sources(self):
+    """V_FMAC_F32_E64 with SGPR sources (common in AMD_LLVM output).
+
+    This tests the exact pattern that was failing: v_fmac_f32_e64(v[0], s[4], 0)
+    where src0 is SGPR and src1 is inline constant 0.
+
+    Regression test for: VOP3 FMAC missing D0 accumulator bug.
+    """
+    instructions = [
+      s_mov_b32(s[4], f2i(2.0)),  # S0 = 2.0 in SGPR
+      v_mov_b32_e32(v[0], 5.0),   # D0 (accumulator) = 5.0
+      # v_fmac_f32_e64 v[0], s[4], 0
+      # D0 = D0 + S0 * S1 = 5.0 + 2.0 * 0.0 = 5.0
+      v_fmac_f32_e64(v[0], s[4], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][0]), 5.0, places=5)
+
+  def test_v_fmac_f32_e64_with_two_sgprs(self):
+    """V_FMAC_F32_E64 with two SGPR sources.
+
+    Tests pattern: v_fmac_f32_e64(v[0], s[a], s[b])
+
+    Regression test for: VOP3 FMAC missing D0 accumulator bug.
+    """
+    instructions = [
+      s_mov_b32(s[10], f2i(3.0)),  # S0 = 3.0
+      s_mov_b32(s[12], f2i(4.0)),  # S1 = 4.0
+      v_mov_b32_e32(v[9], 2.0),    # D0 (accumulator) = 2.0
+      # v_fmac_f32_e64 v[9], s[10], s[12]
+      # D0 = D0 + S0 * S1 = 2.0 + 3.0 * 4.0 = 14.0
+      v_fmac_f32_e64(v[9], s[10], s[12]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][9]), 14.0, places=5)
+
+  def test_v_fmac_f32_e64_accumulates_correctly(self):
+    """V_FMAC_F32_E64 accumulates multiple times."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.0),   # D0 = 0.0
+      v_mov_b32_e32(v[1], 1.0),   # S0 = 1.0
+      v_mov_b32_e32(v[2], 2.0),   # S1 = 2.0
+      # First: D0 = 0.0 + 1.0 * 2.0 = 2.0
+      v_fmac_f32_e64(v[0], v[1], v[2]),
+      # Second: D0 = 2.0 + 1.0 * 2.0 = 4.0
+      v_fmac_f32_e64(v[0], v[1], v[2]),
+      # Third: D0 = 4.0 + 1.0 * 2.0 = 6.0
+      v_fmac_f32_e64(v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][0]), 6.0, places=5)
+
+  def test_v_fmac_f32_e64_negative_accumulator(self):
+    """V_FMAC_F32_E64 with negative accumulator."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),   # S0 = 2.0
+      v_mov_b32_e32(v[1], 3.0),   # S1 = 3.0
+      v_mov_b32_e32(v[2], -10.0), # D0 (accumulator) = -10.0
+      # D0 = -10.0 + 2.0 * 3.0 = -4.0
+      v_fmac_f32_e64(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), -4.0, places=5)
+
+
 class TestDivScale(unittest.TestCase):
   """Tests for V_DIV_SCALE_F32."""
 
