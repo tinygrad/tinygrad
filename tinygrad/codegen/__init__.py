@@ -27,7 +27,8 @@ pm_syntactic_sugar = PatternMatcher([
    lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
 ])
 
-def full_rewrite_to_sink(sink:UOp, device:str, optimize:bool=True) -> UOp:
+def full_rewrite_to_sink(sink:UOp, device:str="", optimize:bool=True) -> UOp:
+  if not device: device = Device.DEFAULT
   ren = Device[device].renderer
 
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Base AST")

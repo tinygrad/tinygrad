@@ -27,14 +27,14 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
   opts_to_apply = [Opt(OptOps.TC, axis, (tc_select, tc_opt, 1))]
 
   if ensure_triggered:
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts_to_apply)
+    program = get_program(realized_ast, Device.DEFAULT, opts=opts_to_apply)
     wmmas = len([uop for uop in program.uops if uop.op is Ops.WMMA])
     tcs = len([x for x in program.applied_opts if x.op is OptOps.TC])
     assert wmmas > 0, "tensor core not triggered"
     assert tcs == 1, "tensor core opt not included"
   else:
     try:
-      program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts_to_apply)
+      program = get_program(realized_ast, Device.DEFAULT, opts=opts_to_apply)
       assert False, "OptOps.TC triggered, expected KernelOptError"
     except KernelOptError: pass
 
@@ -45,7 +45,7 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
   opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
-  prg = CompiledRunner(replace(get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts), device=Device.DEFAULT))
+  prg = CompiledRunner(replace(get_program(realized_ast, Device.DEFAULT, opts=opts), device=Device.DEFAULT))
   if use_tensor_cores == 1: assert len([uop for uop in prg.p.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
   assert len([x for x in prg.p.uops[-1].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)
@@ -74,7 +74,7 @@ class TestTensorCores(unittest.TestCase):
       n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
-      prg = get_program(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))])
+      prg = get_program(r.schedule()[-1].ast, Device.DEFAULT, opts=[Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))])
       if Device.DEFAULT == "CPU" and CPU_LLVM:
         assert "0x201000" in prg.src
       elif Device.DEFAULT == "AMD" and AMD_LLVM:
@@ -140,7 +140,7 @@ class TestTensorCores(unittest.TestCase):
         c = a.conv2d(b, padding=1, dtype=tc.dtype_out)
         realized_ast, real_bufs = helper_realized_ast(c)
 
-        program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=[Opt(OptOps.TC, axis, (-1, 2, 1))])
+        program = get_program(realized_ast, Device.DEFAULT, opts=[Opt(OptOps.TC, axis, (-1, 2, 1))])
         assert len([uop for uop in program.uops if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
         assert len([x for x in program.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
@@ -164,7 +164,7 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out)
     opts = [Opt(OptOps.UNROLL, 0, 4)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in get_program(ast, Device[Device.DEFAULT].renderer, opts=opts).uops:
+    for u in get_program(ast, Device.DEFAULT, opts=opts).uops:
       if u.op is Ops.WMMA:
         assert u.src[-1].src[0].op != Ops.STORE
 
@@ -178,7 +178,7 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out)
     opts = [Opt(OptOps.UNROLL, 0, 4)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in get_program(ast, Device[Device.DEFAULT].renderer, opts=opts).uops:
+    for u in get_program(ast, Device.DEFAULT, opts=opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE
@@ -194,7 +194,7 @@ class TestTensorCores(unittest.TestCase):
     r = x.matmul(y, dtype=tc.dtype_out).relu()
     opts = [Opt(OptOps.UNROLL, 0, 4)]
     ast = helper_linearizer_opt(r, [opts], apply_tc=True, atol=3e-2, rtol=1e-3)
-    for u in get_program(ast, Device[Device.DEFAULT].renderer, opts=opts).uops:
+    for u in get_program(ast, Device.DEFAULT, opts=opts).uops:
       if u.op is Ops.WMMA:
         #assert u.src[-1].dtype == dtypes.float.vec(prod(tc.thread_local_sizes[2]))
         assert u.src[-1].src[0].op != Ops.STORE

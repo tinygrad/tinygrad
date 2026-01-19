@@ -14,7 +14,7 @@ class TestArange(unittest.TestCase):
     GlobalCounters.reset()
     sched = tensor.schedule()
     self.assertEqual(len(sched), 1)
-    p = get_program(sched[-1].ast, renderer=Device[Device.DEFAULT].renderer)
+    p = get_program(sched[-1].ast, device=Device.DEFAULT)
     ExecItem(sched[-1].ast, [tensor.uop.buffer], prg=CompiledRunner(p)).run()
     np.testing.assert_equal(tensor.numpy(), desired)
     return p.estimates.ops
@@ -37,7 +37,7 @@ class TestArange(unittest.TestCase):
     with Context(NOOPT=1):
       t = Tensor.ones(256, 256).contiguous().realize()
       sched = t.triu().schedule()
-      p = get_program(sched[-1].ast, renderer=Device[Device.DEFAULT].renderer)
+      p = get_program(sched[-1].ast, device=Device.DEFAULT)
       self.assertLessEqual(Estimates.from_uops(p.uops).ops, 4 * 256 * 256)
 
 DSET, DDIM = 2048, 32

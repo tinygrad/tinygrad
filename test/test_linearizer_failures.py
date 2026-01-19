@@ -19,7 +19,7 @@ class TestLinearizerFailures(unittest.TestCase):
     c9 = ((((c6+(c8*UOp.const(dtypes.float, -1.0)))*(c6+(c8*UOp.const(dtypes.float, -1.0)))).reduce(c5, arg=Ops.ADD)*UOp.const(dtypes.float, 0.000390625))+UOp.const(dtypes.float, 1e-05)).sqrt().reciprocal()
     c10 = c0.index(c3).store(c9).end(c1, c2)
     ast = c10.sink()
-    get_program(ast, renderer=Device[Device.DEFAULT].renderer)
+    get_program(ast, device=Device.DEFAULT)
 
 if __name__ == '__main__':
   unittest.main()
