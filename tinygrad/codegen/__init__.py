@@ -166,7 +166,7 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  if ast.arg is None: ast = ast.replace(arg=KernelInfo())
+  if ast.arg is None and ast.op is Ops.SINK: ast = ast.replace(arg=KernelInfo())
 
   # rewrite to prg
   if ast.op is Ops.PROGRAM: prg = ast

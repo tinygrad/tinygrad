@@ -1,7 +1,6 @@
 const NODE_PADDING = 10;
 const rectDims = (lw, lh) => ({ width:lw+NODE_PADDING*2, height:lh+NODE_PADDING*2, labelWidth:lw, labelHeight:lh });
 
-const LINE_HEIGHT = 14;
 const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 
@@ -13,38 +12,41 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = (g, { blocks, paths, pc_table, colors }) => {
-  g.setGraph({ rankdir:"TD", font:"monospace" });
-  ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
+const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
+  const lineHeight = 18;
+  g.setGraph({ rankdir:"TD", font:"monospace", lh:lineHeight, textSpace:"1ch" });
+  ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
+  const tokenColors = {0:"#7aa2f7", 1:"#9aa5ce"};
   for (const [lead, members] of Object.entries(blocks)) {
     let [width, height, label] = [0, 0, []];
     for (const m of members) {
-      const text = pc_table[m][0];
-      width = Math.max(width, ctx.measureText(text).width);
-      height += LINE_HEIGHT;
-      const [inst, ...operands] = text.split(" ");
-      label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]);
+      const tokens = pc_tokens[m];
+      label.push(tokens.map((t, i) => ({st:t.st, keys:t.keys, color:tokenColors[t.kind]})));
+      width = Math.max(width, ctx.measureText(tokens.map((t) => t.st).join("")).width);
+      height += lineHeight;
     }
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
   }
   // paths become edges between basic blocks
+  const pathColors = {0:"#3f7564", 1:"#7a4540", 2:"#3b5f7e"};
   for (const [lead, value] of Object.entries(paths)) {
-    for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, {label:{type:"port", text:""}, color:colors[color]});
+    for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, {label:{type:"port", text:""}, color:pathColors[color]});
   }
   dagre.layout(g);
 }
 
 const layoutUOp = (g, { graph, change }, opts) => {
-  g.setGraph({ rankdir: "LR", font:"sans-serif" });
-  ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
+  const lineHeight = 14;
+  g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
+  ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
   for (const [k, {label, src, ref, color, tag }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
       width = Math.max(width, ctx.measureText(line).width);
-      height += LINE_HEIGHT;
+      height += lineHeight;
     }
     g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag});
     // add edges

@@ -129,7 +129,7 @@ class LSTM:
       return self.do_step(x_, hc_)
 
     if hc is None:
-      hc = Tensor.zeros(self.layers, 2 * x.shape[1], self.hidden_size, requires_grad=False)
+      hc = Tensor.zeros(self.layers, 2 * x.shape[1], self.hidden_size, requires_grad=False).contiguous().realize()
 
     output = None
     for t in range(x.shape[0]):

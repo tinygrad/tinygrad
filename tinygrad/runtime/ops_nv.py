@@ -4,10 +4,10 @@ assert sys.platform != 'win32'
 from typing import cast, ClassVar
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
-from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices
+from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CompilerPair, CompilerSet
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, NV_CC, NV_PTX, NV_NAK
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, NV_CC, NV_PTX, NV_NAK, PROFILE
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
@@ -106,7 +106,7 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
       dev.cmdq[cmdq_wptr : cmdq_wptr + len(self._q)] = array.array('I', self._q)
 
     gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self._q) << 42) | (1 << 41)
-    gpfifo.controls.GPPut = (gpfifo.put_value + 1) % gpfifo.entries_count
+    gpfifo.gpput[0] = (gpfifo.put_value + 1) % gpfifo.entries_count
 
     System.memory_barrier()
     dev.gpu_mmio[0x90 // 4] = gpfifo.token
@@ -204,7 +204,7 @@ class NVVideoQueue(NVCommandQueue):
 
   def signal(self, signal:HCQSignal, value:sint=0):
     self.nvm(4, nv_gpu.NVC9B0_SEMAPHORE_A, *data64(signal.value_addr), value)
-    self.nvm(4, nv_gpu.NVC9B0_SEMAPHORE_D, 0)
+    self.nvm(4, nv_gpu.NVC9B0_SEMAPHORE_D, (1 << 24) | (1 << 0))
     return self
 
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.vid_gpfifo)
@@ -314,16 +314,18 @@ class NVAllocator(HCQAllocator['NVDevice']):
 
     h, w = ((2 * shape[0]) // 3 if shape[0] % 3 == 0 else (2 * shape[0] - 1) // 3), shape[1]
     self.dev._ensure_has_vid_hw(w, h)
-    NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                  .decode_hevc_chunk(desc_buf, bufin, bufout, frame_pos, hist, [(frame_pos-x) % (len(hist) + 1) for x in range(len(hist), 0, -1)],
-                                     round_up(w, 64)*round_up(h, 64), self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off,
-                                     self.dev.intra_unk_off, self.dev.vid_stat_buf) \
-                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+
+    q = NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1)
+    with hcq_profile(self.dev, queue=q, desc="NVDEC", enabled=PROFILE):
+      q.decode_hevc_chunk(desc_buf, bufin, bufout, frame_pos, hist, [(frame_pos-x) % (len(hist) + 1) for x in range(len(hist), 0, -1)],
+                          round_up(w, 64)*round_up(h, 64), self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off,
+                          self.dev.intra_unk_off, self.dev.vid_stat_buf)
+    q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
 @dataclass
 class GPFifo:
   ring: MMIOInterface
-  controls: nv_gpu.AmpereAControlGPFifo
+  gpput: MMIOInterface
   entries_count: int
   token: int
   put_value: int = 0
@@ -476,8 +478,8 @@ class NVKIface:
       nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
 
-    self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=cast(int, mem.va_addr), length=mem.size))
-    if mem.view is not None: FileIOInterface.munmap(cast(int, mem.va_addr), mem.size)
+    self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=int(mem.va_addr), length=mem.size))
+    if mem.view is not None: FileIOInterface.munmap(int(mem.va_addr), mem.size)
 
   def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False) -> HCQBuffer:
     if create_range:
@@ -576,7 +578,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.iface.rm_control(channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
 
     self.cmdq_page:HCQBuffer = self.iface.alloc(0x200000, cpu_access=True)
-    self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=cast(int, self.cmdq_page.va_addr), wrap=True)
+    self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=int(self.cmdq_page.va_addr), wrap=True)
     self.cmdq = self.cmdq_page.cpu_view().view(fmt='I')
 
     self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
@@ -617,7 +619,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     if ctxshare != 0: self.iface.setup_gpfifo_vm(gpfifo)
 
     return GPFifo(ring=gpfifo_area.cpu_view().view(offset, entries*8, fmt='Q'), entries_count=entries, token=ws_token_params.workSubmitToken,
-                  controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.cpu_view().addr + offset + entries * 8))
+                  gpput=gpfifo_area.cpu_view().view(offset + entries*8 + getattr(nv_gpu.AmpereAControlGPFifo, 'GPPut').offset, fmt='I'))
 
   def _query_gpu_info(self, *reqs):
     nvrs = [getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_'+r.upper(), getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_LITTER_'+r.upper(), None)) for r in reqs]

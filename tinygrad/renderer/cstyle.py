@@ -1,10 +1,10 @@
 from typing import Literal, Callable, cast
-import os, math, sys
+import os, math, platform, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
-from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CI, CPU_COUNT, OSX
+from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
@@ -206,8 +206,8 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.VECTORIZE, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} or u.dtype == dtypes.void: pass
-        else: l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
+        if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} and u.dtype != dtypes.void:
+          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1
@@ -224,7 +224,8 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  @property
+  def global_max(self): return (CPU_COUNT.value, 0, 0) # type: ignore
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
   code_for_workitem = {"g": lambda _: "core_id"}
@@ -284,9 +285,15 @@ class ClangJITRenderer(ClangRenderer):
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     self.compiler = ClangJITCompiler()
 
+  def is_dtype_supported(self, dtype:DType) -> bool:
+    return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} if dtype == dtypes.bfloat16 else dtype not in dtypes.fp8s
+
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
   has_aux = True
+
+  # CI and OSX, cl_khr_fp16 is not supported
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in ((dtypes.half,) * (OSX or CI)) + ((dtypes.float64,) * OSX) + dtypes.fp8s
 
   # language options
   kernel_typedef = "__kernel void"
@@ -298,9 +305,13 @@ class OpenCLRenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"get_group_id({x})", "l": lambda x: f"get_local_id({x})", "i": lambda x: f"get_global_id({x})"}
   type_map = { dtypes.int8: "char", dtypes.uint8: "uchar", dtypes.uint32: "uint", dtypes.uint16: "ushort", dtypes.uint64: "ulong",
               dtypes.bfloat16: "ushort" }
+  extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast + extra_pm
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
+    # bfloat16 constants need to be rendered as their bit pattern since bf16 is stored as ushort
+    (UPat(Ops.CONST, dtypes.bfloat16, name="x"),
+      lambda ctx,x: f"{(struct.unpack('I', struct.pack('f', float_to_bf16(x.arg)))[0] >> 16)}u"),
     # load/store image (OpenCL)
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("var"))),
       lambda ctx,buf,idx,var,gate: f"({ctx[gate]}?read_imagef({ctx[buf]}, smp, {ctx[idx]}):{ctx[var]})"),
@@ -338,6 +349,7 @@ class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
   def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+  def is_dtype_supported(self, dtype:DType) -> bool: return not CI if dtype == dtypes.bfloat16 else dtype not in (dtypes.float64,) + dtypes.fp8s
 
   # language options
   kernel_typedef = "kernel void"
@@ -388,6 +400,9 @@ class CUDARenderer(CStyleLanguage):
     self.arch, arch_ver = arch, int(arch[3:])
     self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch,)
+
+  # CI CUDA is sm_35, so no fp16 ALUs
+  def is_dtype_supported(self, dtype:DType) -> bool: return not CI or dtype not in (dtypes.bfloat16, dtypes.half) + dtypes.fp8s
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -450,12 +465,15 @@ class CUDARenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
 def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
+def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
 
 class AMDHIPRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
+
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in dtypes.fp8s or self.arch in {"gfx942", "gfx950"}
 
   @staticmethod
   def get_tensor_cores(arch):
@@ -483,12 +501,8 @@ class AMDHIPRenderer(CStyleLanguage):
   kernel_typedef = 'extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, {launch_bounds})))'
   code_for_workitem = {"g": lambda x: f"__ockl_get_group_id({x})", "l": lambda x: f"__ockl_get_local_id({x})",
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
-  code_for_op = { **CStyleLanguage.code_for_op,
-    Ops.TRUNC: lambda x,dtype: f"__ocml_trunc_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-    Ops.SIN: lambda x,dtype: f"__ocml_sin_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-    Ops.LOG2: lambda x,dtype: f"__ocml_log2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-    Ops.EXP2: lambda x,dtype: f"__ocml_exp2_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})",
-    Ops.SQRT: lambda x,dtype: f"__ocml_sqrt_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})" }
+  code_for_op = {**CStyleLanguage.code_for_op, Ops.TRUNC: _ocml("trunc"), Ops.SIN: _ocml("sin"),
+                 Ops.LOG2: _ocml("log2"), Ops.EXP2: _ocml("exp2"), Ops.SQRT: _ocml("sqrt")}
   smem_prefix = "__attribute__((shared, aligned(16)))"
   smem_prefix_for_cast: bool = False
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
@@ -555,4 +569,8 @@ class AMDHIPCCRenderer(AMDHIPRenderer):
     super().__init__(arch)
     self.compiler = HIPCCCompiler(arch)
 
-class QCOMRenderer(OpenCLRenderer): device = "QCOM"
+class QCOMRenderer(OpenCLRenderer):
+  device = "QCOM"
+
+  # QCOM compiler is flaky with half
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in (dtypes.bfloat16, dtypes.half, dtypes.float64) + dtypes.fp8s

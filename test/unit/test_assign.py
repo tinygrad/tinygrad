@@ -424,5 +424,239 @@ class TestAssign(unittest.TestCase):
     a = Tensor.empty(5, device=f"disk:{temp('disk_assignment')}").assign(Tensor.ones(5)).numpy()
     np.testing.assert_equal(a, np.ones(5))
 
+  def test_assign_slice_then_read(self):
+    """Assign to slice then read from buffer - read should see the assigned values.
+    This is the KV cache pattern from llm.py.
+    """
+    v_pos = Variable("pos", 0, 3).bind(0)
+
+    # without .realize() after assign, the read doesn't see the assigned values
+    cache = Tensor.zeros(4, 4).contiguous().realize()
+    cache[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4))
+    self.assertEqual(cache.sum().item(), 0.0)  # should be 4.0!
+
+    # TODO: remove .realize() workaround once assign-read dependency is fixed
+    cache2 = Tensor.zeros(4, 4).contiguous().realize()
+    cache2[v_pos:v_pos+1, :].assign(Tensor.ones(1, 4)).realize()
+    self.assertEqual(cache2.sum().item(), 4.0)
+
+class TestAssignOrdering(unittest.TestCase):
+  """Tests for complex assign orderings that could differ between lazy and eager execution.
+
+  The key principle: tinygrad's lazy execution with RAW/WAR dependency tracking should
+  produce the same results as eager (immediate) execution for valid programs.
+
+  These tests exercise edge cases where incorrect dependency tracking could cause:
+  - Stale reads (reading before write completes)
+  - Lost writes (write ordering reversed)
+  - Race conditions (concurrent access to same buffer)
+  """
+
+  def test_overlapping_slice_assigns(self):
+    """Overlapping slice assigns - later write should win for overlapping elements."""
+    # without .realize(): assigns not executed, buffer stays zeros
+    buf = Tensor.zeros(8).contiguous().realize()
+    buf[0:4].assign(Tensor.ones(4))
+    buf[2:6].assign(Tensor.ones(4) * 2)
+    np.testing.assert_equal(buf.numpy(), [0,0,0,0,0,0,0,0])  # TODO: wrong! should be [1,1,2,2,2,2,0,0]
+
+    # with .realize(): assigns execute in order
+    buf = Tensor.zeros(8).contiguous().realize()
+    buf[0:4].assign(Tensor.ones(4)).realize()
+    buf[2:6].assign(Tensor.ones(4) * 2).realize()
+    np.testing.assert_equal(buf.numpy(), [1,1,2,2,2,2,0,0])
+
+  def test_overlapping_slice_assigns_reverse(self):
+    """Overlapping slice assigns in reverse order."""
+    # without .realize(): assigns not executed
+    buf = Tensor.zeros(8).contiguous().realize()
+    buf[2:6].assign(Tensor.ones(4) * 2)
+    buf[0:4].assign(Tensor.ones(4))
+    np.testing.assert_equal(buf.numpy(), [0,0,0,0,0,0,0,0])  # TODO: wrong! should be [1,1,1,1,2,2,0,0]
+
+    # with .realize(): assigns execute in order
+    buf = Tensor.zeros(8).contiguous().realize()
+    buf[2:6].assign(Tensor.ones(4) * 2).realize()
+    buf[0:4].assign(Tensor.ones(4)).realize()
+    np.testing.assert_equal(buf.numpy(), [1,1,1,1,2,2,0,0])
+
+  def test_read_between_writes(self):
+    """Read should see first write before second write happens."""
+    buf = Tensor.zeros(4).contiguous().realize()
+    buf.assign(Tensor.ones(4))
+    r1 = buf.sum().realize()  # should see ones = 4
+    buf.assign(Tensor.ones(4) * 2)
+    r2 = buf.sum().realize()  # should see twos = 8
+    self.assertEqual(r1.item(), 4)
+    self.assertEqual(r2.item(), 8)
+
+  def test_write_read_write_chain(self):
+    """Write, read, write chain - middle read must complete before second write."""
+    buf = Tensor.zeros(4).contiguous().realize()
+    buf.assign(Tensor.ones(4) * 3)
+    mid_sum = buf.sum()  # lazy read, should be 12
+    buf.assign(Tensor.ones(4) * 5)
+    final_sum = buf.sum()  # lazy read, should be 20
+    # Realize in "wrong" order - final first
+    self.assertEqual(final_sum.realize().item(), 20)
+    self.assertEqual(mid_sum.realize().item(), 12)
+
+  def test_slice_read_then_full_write(self):
+    """Read from slice, then overwrite full buffer - WAR dependency works for full buffer assigns."""
+    buf = Tensor([1.,2.,3.,4.]).contiguous().realize()
+    partial = buf[0:2].sum()  # lazy read
+    buf.assign(Tensor.ones(4) * 10)  # overwrite everything
+    full = buf.sum()
+    # WAR dependency correctly tracked - partial sees original data
+    self.assertEqual(partial.realize().item(), 3)  # 1+2
+    self.assertEqual(full.realize().item(), 40)
+
+  def test_slice_write_then_full_read(self):
+    """Write to slice, then read full buffer."""
+    # without .realize(): orphan slice assign not triggered by .numpy()
+    buf = Tensor.zeros(4).contiguous().realize()
+    buf[1:3].assign(Tensor([5, 6]))
+    np.testing.assert_equal(buf.numpy(), [0, 0, 0, 0])  # TODO: wrong! should be [0, 5, 6, 0]
+
+    # with .realize(): assign executes
+    buf = Tensor.zeros(4).contiguous().realize()
+    buf[1:3].assign(Tensor([5, 6])).realize()
+    np.testing.assert_equal(buf.numpy(), [0, 5, 6, 0])
+
+  def test_chained_slice_copies(self):
+    """Copy from one slice to another within same buffer."""
+    # without .realize(): orphan slice assign not triggered
+    buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
+    buf[4:8].assign(buf[0:4].contiguous())
+    np.testing.assert_equal(buf.numpy(), [1, 2, 3, 4, 5, 6, 7, 8])  # TODO: wrong! should be [1,2,3,4,1,2,3,4]
+
+    # with .realize(): assign executes
+    buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
+    buf[4:8].assign(buf[0:4].contiguous()).realize()
+    np.testing.assert_equal(buf.numpy(), [1, 2, 3, 4, 1, 2, 3, 4])
+
+  def test_swap_slices(self):
+    """Swap two non-overlapping slices - requires reading both before writing."""
+    # without .realize() on temps: values not captured before overwriting
+    buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
+    left = buf[0:4].contiguous()  # lazy - not captured yet
+    right = buf[4:8].contiguous()  # lazy - not captured yet
+    buf[0:4].assign(right).realize()  # this works
+    buf[4:8].assign(left).realize()  # left now reads from modified buf!
+    np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 5, 6, 7, 8])  # TODO: wrong! should be [5,6,7,8,1,2,3,4]
+
+    # with .realize() on temps: values captured before writes
+    buf = Tensor([1, 2, 3, 4, 5, 6, 7, 8]).contiguous().realize()
+    left = buf[0:4].contiguous().realize()
+    right = buf[4:8].contiguous().realize()
+    buf[0:4].assign(right).realize()
+    buf[4:8].assign(left).realize()
+    np.testing.assert_equal(buf.numpy(), [5, 6, 7, 8, 1, 2, 3, 4])
+
+  def test_reduction_after_partial_assign(self):
+    """Reduction over buffer after partial assign - must see the assigned values."""
+    # without .realize(): orphan slice assign not triggered by reduction
+    buf = Tensor.zeros(4, 4).contiguous().realize()
+    buf[0:2, :].assign(Tensor.ones(2, 4))  # top half = 1
+    total = buf.sum()
+    self.assertEqual(total.item(), 0)  # TODO: wrong! should be 8 (2*4 ones)
+
+    # with .realize(): assign executes before reduction
+    buf = Tensor.zeros(4, 4).contiguous().realize()
+    buf[0:2, :].assign(Tensor.ones(2, 4)).realize()
+    total = buf.sum()
+    self.assertEqual(total.item(), 8)
+
+  def test_multiple_reductions_different_views(self):
+    """Multiple reductions over different views of same buffer after assign."""
+    buf = Tensor.zeros(4, 4).contiguous().realize()
+    buf.assign(Tensor.arange(16).reshape(4, 4).float())
+    row_sums = buf.sum(axis=1)  # [6, 22, 38, 54]
+    col_sums = buf.sum(axis=0)  # [24, 28, 32, 36]
+    total = buf.sum()  # 120
+    # All should see the assigned values
+    np.testing.assert_equal(row_sums.numpy(), [6, 22, 38, 54])
+    np.testing.assert_equal(col_sums.numpy(), [24, 28, 32, 36])
+    self.assertEqual(total.item(), 120)
+
+  def test_assign_from_self_transformed(self):
+    """Assign to buffer from transformed view of itself."""
+    buf = Tensor([1, 2, 3, 4]).contiguous().realize()
+    # Read and transform, then write back (requires reading before writing)
+    buf.assign((buf * 2).contiguous())
+    np.testing.assert_equal(buf.numpy(), [2, 4, 6, 8])
+
+  def test_two_buffers_cross_assign(self):
+    """Two buffers each reading from the other before writing."""
+    a = Tensor([1, 2, 3, 4]).contiguous().realize()
+    b = Tensor([10, 20, 30, 40]).contiguous().realize()
+    # Both read from each other's original values
+    a_new = (a + b).contiguous()
+    b_new = (a * b).contiguous()
+    a.assign(a_new)
+    b.assign(b_new)
+    Tensor.realize(a, b)
+    np.testing.assert_equal(a.numpy(), [11, 22, 33, 44])
+    np.testing.assert_equal(b.numpy(), [10, 40, 90, 160])
+
+  def test_three_buffer_chain(self):
+    """Chain: A depends on B, B depends on C - ordering matters."""
+    a = Tensor.zeros(4).contiguous().realize()
+    b = Tensor([1, 2, 3, 4]).contiguous().realize()
+    c = Tensor([10, 10, 10, 10]).contiguous().realize()
+    # b reads from c, a reads from b
+    b.assign((b + c).contiguous())  # b = [11, 12, 13, 14]
+    a.assign((a + b).contiguous())  # a should see new b = [11, 12, 13, 14]
+    Tensor.realize(a, b)
+    np.testing.assert_equal(b.numpy(), [11, 12, 13, 14])
+    np.testing.assert_equal(a.numpy(), [11, 12, 13, 14])
+
+  def test_interleaved_assign_read_patterns(self):
+    """Complex interleaved pattern: write A, read A into B, write B, read B."""
+    a = Tensor.zeros(4).contiguous().realize()
+    b = Tensor.zeros(4).contiguous().realize()
+
+    a.assign(Tensor([1, 2, 3, 4]))
+    b.assign(a.contiguous())       # b should get [1,2,3,4]
+    a.assign(Tensor([5, 6, 7, 8]))
+    result = b.sum()               # should be 10, not 26
+
+    self.assertEqual(result.item(), 10)
+    np.testing.assert_equal(a.numpy(), [5, 6, 7, 8])
+    np.testing.assert_equal(b.numpy(), [1, 2, 3, 4])
+
+  def test_variable_slice_ordering(self):
+    """Variable-indexed slices - tests symbolic dependency tracking."""
+    v_i = Variable("i", 0, 3)
+
+    # without .realize(): orphan slice assigns not triggered
+    buf = Tensor.zeros(4, 4).contiguous().realize()
+    buf[v_i.bind(0):v_i.bind(0)+1, :].assign(Tensor.ones(1, 4))
+    row0_sum = buf[0:1, :].sum()
+    self.assertEqual(row0_sum.item(), 0)  # TODO: wrong! should be 4
+
+    # with .realize(): assigns execute
+    buf = Tensor.zeros(4, 4).contiguous().realize()
+    buf[v_i.bind(0):v_i.bind(0)+1, :].assign(Tensor.ones(1, 4)).realize()
+    row0_sum = buf[0:1, :].sum()
+    buf[v_i.bind(1):v_i.bind(1)+1, :].assign(Tensor.ones(1, 4) * 2).realize()
+    row1_sum = buf[1:2, :].sum()
+    self.assertEqual(row0_sum.item(), 4)
+    self.assertEqual(row1_sum.item(), 8)
+
+  def test_multiple_slice_assigns_then_read(self):
+    """Multiple non-overlapping slice assigns then read - RAW dependencies must ensure all writes complete before read."""
+    buf = Tensor.zeros(4).contiguous().realize()
+    buf[0:1].assign(Tensor.ones(1))
+    buf[1:2].assign(Tensor.full((1,), 2.0))
+    buf[2:3].assign(Tensor.full((1,), 3.0))
+    self.assertEqual(buf.sum().realize().item(), 0.0)  # TODO: wrong! should be 1 + 2 + 3 + 0 = 6
+
+    buf = Tensor.zeros(4).contiguous().realize()
+    buf[0:1].assign(Tensor.ones(1)).realize()
+    buf[1:2].assign(Tensor.full((1,), 2.0)).realize()
+    buf[2:3].assign(Tensor.full((1,), 3.0)).realize()
+    self.assertEqual(buf.sum().realize().item(), 6.0)
+
 if __name__ == "__main__":
   unittest.main()

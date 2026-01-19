@@ -3,8 +3,8 @@ from typing import Callable, cast, TYPE_CHECKING
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops
-from tinygrad.dtype import AddrSpace, PtrDType
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops, KernelInfo
+from tinygrad.dtype import AddrSpace, DType, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
 if TYPE_CHECKING: from tinygrad.device import Compiler
@@ -38,6 +38,7 @@ class Estimates:
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:
+      if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) and u.arg.estimates is not None: return u.arg.estimates
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
         while len(buf.src): buf = buf.src[0]
@@ -149,3 +150,5 @@ class Renderer:
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")
+
+  def is_dtype_supported(self, dtype:DType) -> bool: return True

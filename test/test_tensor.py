@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.tensor import _METADATA
 from tinygrad.helpers import Context, getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
@@ -11,7 +11,7 @@ from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.engine.realize import get_program
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, DTYPES_DICT
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -151,7 +151,6 @@ class TestTinygrad(unittest.TestCase):
     for x,y in zip(test_tinygrad(), test_pytorch()):
       np.testing.assert_allclose(x, y, atol=1e-5, rtol=1e-6)
 
-  @unittest.expectedFailure
   def test_const_backward_pass(self):
     init = 3.5
 
@@ -165,6 +164,30 @@ class TestTinygrad(unittest.TestCase):
     def test_tinygrad():
       w1 = Tensor(init, requires_grad=True)
       w2 = Tensor(init, requires_grad=True)
+      out = w1.add(w2)
+      out.backward()
+      return w1.grad.numpy(), w2.grad.numpy()
+
+    for x, y in zip(test_tinygrad(), test_pytorch()):
+      np.testing.assert_allclose(x, y, atol=1e-5)
+
+  def test_const_backward_pass_optimizer(self):
+    init = 3.5
+
+    def test_pytorch():
+      w1 = torch.tensor(init, requires_grad=True)
+      w2 = torch.tensor(init, requires_grad=True)
+      out = w1.add(w2)
+      out.backward()
+      return w1.grad.numpy(), w2.grad.numpy()
+
+    def test_tinygrad():
+      w1 = Tensor(init)
+      w2 = Tensor(init)
+      assert w1.requires_grad is None and w2.requires_grad is None
+      # optimizer sets requires_grad=True for params with requires_grad=None
+      nn.optim.SGD([w1, w2], lr=0.01)
+      assert w1.requires_grad is True and w2.requires_grad is True
       out = w1.add(w2)
       out.backward()
       return w1.grad.numpy(), w2.grad.numpy()
@@ -330,7 +353,7 @@ class TestTinygrad(unittest.TestCase):
       assert Tensor(arr).tolist() == torch.tensor(arr).tolist() == arr
 
   def test_element_size(self):
-    for _, dtype in dtypes.fields().items():
+    for _, dtype in DTYPES_DICT.items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
   def test_deepwalk_ctx_check(self):

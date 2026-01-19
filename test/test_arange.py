@@ -94,10 +94,9 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
       sched = X.schedule()
-      # TODO: enable these asserts when the scheduler can handle this
-      #self.assertEqual(len(sched), 1)
+      self.assertEqual(len(sched), 1)
       run_schedule(sched)
-      #assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
+      assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
   def test_index_fused(self, noopt=1):

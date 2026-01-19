@@ -178,7 +178,7 @@ class TestDivFmas(unittest.TestCase):
   def test_div_fmas_f32_no_scale(self):
     """V_DIV_FMAS_F32: VCC=0 -> normal FMA."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),
+      s_mov_b32(VCC_LO, 0),
       v_mov_b32_e32(v[0], 2.0),
       v_mov_b32_e32(v[1], 3.0),
       v_mov_b32_e32(v[2], 1.0),
@@ -190,7 +190,7 @@ class TestDivFmas(unittest.TestCase):
   def test_div_fmas_f32_scale_up(self):
     """V_DIV_FMAS_F32: VCC=1 with S2 >= 2.0 -> scale by 2^+64."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),
+      s_mov_b32(VCC_LO, 1),
       v_mov_b32_e32(v[0], 1.0),
       v_mov_b32_e32(v[1], 1.0),
       v_mov_b32_e32(v[2], 2.0),
@@ -203,7 +203,7 @@ class TestDivFmas(unittest.TestCase):
   def test_div_fmas_f32_scale_down(self):
     """V_DIV_FMAS_F32: VCC=1 with S2 < 2.0 -> scale by 2^-64."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),
+      s_mov_b32(VCC_LO, 1),
       v_mov_b32_e32(v[0], 2.0),
       v_mov_b32_e32(v[1], 3.0),
       v_mov_b32_e32(v[2], 1.0),
@@ -216,7 +216,7 @@ class TestDivFmas(unittest.TestCase):
   def test_div_fmas_f32_per_lane_vcc(self):
     """V_DIV_FMAS_F32: different VCC per lane with S2 < 2.0."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0b0101),
+      s_mov_b32(VCC_LO, 0b0101),
       v_mov_b32_e32(v[0], 1.0),
       v_mov_b32_e32(v[1], 1.0),
       v_mov_b32_e32(v[2], 1.0),
@@ -493,7 +493,7 @@ class TestMad64(unittest.TestCase):
       s_mov_b32(s[1], 4),
       v_mov_b32_e32(v[2], 5),
       v_mov_b32_e32(v[3], 0),
-      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+      v_mad_u64_u32(v[4:5], SrcEnum.NULL, s[0], s[1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result_lo = st.vgpr[0][4]
@@ -508,7 +508,7 @@ class TestMad64(unittest.TestCase):
       s_mov_b32(s[1], 2),
       v_mov_b32_e32(v[2], 0),
       v_mov_b32_e32(v[3], 0),
-      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+      v_mad_u64_u32(v[4:5], SrcEnum.NULL, s[0], s[1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result_lo = st.vgpr[0][4]
@@ -520,8 +520,8 @@ class TestMad64(unittest.TestCase):
 class TestLaneOps(unittest.TestCase):
   """Tests for lane operations (readlane, writelane)."""
 
-  def _readlane(self, sdst_idx, vsrc, lane_idx):
-    return VOP3(VOP3Op.V_READLANE_B32, vdst=RawImm(sdst_idx), src0=vsrc, src1=lane_idx)
+  def _readlane(self, sdst, vsrc, lane_idx):
+    return v_readlane_b32(sdst, vsrc, lane_idx)
 
   def test_v_readlane_b32_basic(self):
     """V_READLANE_B32 reads a value from a specific lane's VGPR."""
@@ -529,7 +529,7 @@ class TestLaneOps(unittest.TestCase):
       v_lshlrev_b32_e32(v[0], 1, v[255]),
       v_lshlrev_b32_e32(v[1], 3, v[255]),
       v_add_nc_u32_e32(v[0], v[0], v[1]),
-      self._readlane(0, v[0], 2),
+      self._readlane(s[0], v[0], 2),
       v_mov_b32_e32(v[2], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -541,7 +541,7 @@ class TestLaneOps(unittest.TestCase):
     instructions = [
       v_lshlrev_b32_e32(v[0], 2, v[255]),  # v0 = lane_id * 4
       v_add_nc_u32_e32(v[0], 100, v[0]),   # v0 = 100 + lane_id * 4
-      self._readlane(0, v[0], 0),          # s0 = lane 0's v0 = 100
+      self._readlane(s[0], v[0], 0),       # s0 = lane 0's v0 = 100
       v_mov_b32_e32(v[1], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -553,7 +553,7 @@ class TestLaneOps(unittest.TestCase):
     instructions = [
       v_lshlrev_b32_e32(v[0], 2, v[255]),  # v0 = lane_id * 4
       v_add_nc_u32_e32(v[0], 100, v[0]),   # v0 = 100 + lane_id * 4
-      self._readlane(0, v[0], 3),          # s0 = lane 3's v0 = 112
+      self._readlane(s[0], v[0], 3),       # s0 = lane 3's v0 = 112
       v_mov_b32_e32(v[1], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -565,7 +565,7 @@ class TestLaneOps(unittest.TestCase):
     instructions = [
       v_lshlrev_b32_e32(v[5], 3, v[255]),  # v5 = lane_id * 8
       v_add_nc_u32_e32(v[5], 50, v[5]),    # v5 = 50 + lane_id * 8
-      self._readlane(0, v[5], 1),          # s0 = lane 1's v5 = 58
+      self._readlane(s[0], v[5], 1),       # s0 = lane 1's v5 = 58
       v_mov_b32_e32(v[6], s[0]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -592,7 +592,7 @@ class TestLaneOps(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[0], 0xdeadbeef),
       v_writelane_b32(v[0], s[0], 1),      # Write to lane 1
-      self._readlane(1, v[0], 1),          # Read back from lane 1 into s1
+      self._readlane(s[1], v[0], 1),       # Read back from lane 1 into s1
       v_mov_b32_e32(v[1], s[1]),
     ]
     st = run_program(instructions, n_lanes=4)
@@ -603,12 +603,12 @@ class TestLaneOps(unittest.TestCase):
     """Simulate a wave reduction using readlane - common WMMA/reduction pattern."""
     instructions = [
       v_add_nc_u32_e32(v[0], 1, v[255]),   # v0 = lane_id + 1 (1, 2, 3, 4)
-      self._readlane(0, v[0], 0),          # s0 = 1
-      self._readlane(1, v[0], 1),          # s1 = 2
+      self._readlane(s[0], v[0], 0),       # s0 = 1
+      self._readlane(s[1], v[0], 1),       # s1 = 2
       s_add_u32(s[0], s[0], s[1]),         # s0 = 3
-      self._readlane(1, v[0], 2),          # s1 = 3
+      self._readlane(s[1], v[0], 2),       # s1 = 3
       s_add_u32(s[0], s[0], s[1]),         # s0 = 6
-      self._readlane(1, v[0], 3),          # s1 = 4
+      self._readlane(s[1], v[0], 3),       # s1 = 4
       s_add_u32(s[0], s[0], s[1]),         # s0 = 10
       v_mov_b32_e32(v[1], s[0]),           # Broadcast sum to all lanes
     ]
@@ -711,7 +711,7 @@ class TestLaneOps(unittest.TestCase):
       v_mov_b32_e32(v[8], 0),              # Initialize v8 = 0
       s_mov_b32(s[0], 0xABCD1234),
       v_writelane_b32(v[8], s[0], 2),      # Write to lane 2's v8
-      self._readlane(1, v[8], 2),          # Read back from lane 2's v8 into s1
+      self._readlane(s[1], v[8], 2),       # Read back from lane 2's v8 into s1
       v_mov_b32_e32(v[1], s[1]),           # Broadcast to all lanes
     ]
     st = run_program(instructions, n_lanes=4)
@@ -741,12 +741,12 @@ class TestLaneOps(unittest.TestCase):
       s_mov_b32(s[0], 40),
       v_writelane_b32(v[6], s[0], 3),      # lane 3 gets 40
       # Now read them all back and sum
-      self._readlane(0, v[6], 0),          # s0 = 10
-      self._readlane(1, v[6], 1),          # s1 = 20
+      self._readlane(s[0], v[6], 0),       # s0 = 10
+      self._readlane(s[1], v[6], 1),       # s1 = 20
       s_add_u32(s[0], s[0], s[1]),         # s0 = 30
-      self._readlane(1, v[6], 2),          # s1 = 30
+      self._readlane(s[1], v[6], 2),       # s1 = 30
       s_add_u32(s[0], s[0], s[1]),         # s0 = 60
-      self._readlane(1, v[6], 3),          # s1 = 40
+      self._readlane(s[1], v[6], 3),       # s1 = 40
       s_add_u32(s[0], s[0], s[1]),         # s0 = 100
       v_mov_b32_e32(v[7], s[0]),           # Broadcast sum to all lanes
     ]
@@ -861,7 +861,7 @@ class TestF16Modifiers(unittest.TestCase):
       s_mov_b32(s[1], 0x38000000),  # v1 = {hi=0.5, lo=0.0}
       v_mov_b32_e32(v[1], s[1]),
       # v_fmac_f16 v0.h, literal(0.318...), v1.l: D.h = D.h + S0 * S1 = 0.5 + 0.318 * 0.0 = 0.5
-      VOP2(VOP2Op.V_FMAC_F16, vdst=RawImm(128), src0=RawImm(255), vsrc1=RawImm(1), literal=0x3518),
+      v_fmac_f16_e32(v[0].h, 0x3518, v[1]),
     ]
     st = run_program(instructions, n_lanes=1)
     v0 = st.vgpr[0][0]
@@ -901,7 +901,7 @@ class TestF64Ops(unittest.TestCase):
       s_mov_b32(s[1], one_f64 >> 32),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_add_f64(v[2:4], v[0:2], SrcEnum.POS_ONE),  # 1.0 + 1.0 = 2.0
+      v_add_f64(v[2:3], v[0:1], SrcEnum.POS_ONE),  # 1.0 + 1.0 = 2.0
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
@@ -920,7 +920,7 @@ class TestF64Ops(unittest.TestCase):
       v_mov_b32_e32(v[1], s[1]),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      v_mul_f64(v[4:6], v[0:2], v[2:4]),
+      v_mul_f64(v[4:5], v[0:1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
@@ -936,7 +936,7 @@ class TestF64Ops(unittest.TestCase):
       v_mov_b32_e32(v[1], s[1]),
       s_mov_b32(s[2], 0xDEADBEEF),
       v_mov_b32_e32(v[3], s[2]),     # Canary in v3
-      v_cvt_i32_f64_e32(v[2], v[0:2]),
+      v_cvt_i32_f64_e32(v[2], v[0:1]),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0xffffffff, "-1.0 converts to -1")
@@ -952,7 +952,7 @@ class TestF64Ops(unittest.TestCase):
       s_mov_b32(s[1], val_bits >> 32),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_ldexp_f64(v[2:4], v[0:2], 0xffffffe0),  # -32
+      v_ldexp_f64(v[2:3], v[0:1], 0xffffffe0),  # -32
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
@@ -964,8 +964,8 @@ class TestF64Ops(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], two_f64 & 0xffffffff),
       s_mov_b32(s[1], two_f64 >> 32),
-      v_frexp_mant_f64_e32(v[0:2], s[0:2]),
-      v_frexp_exp_i32_f64_e32(v[2], s[0:2]),
+      v_frexp_mant_f64_e32(v[0:1], s[0:1]),
+      v_frexp_exp_i32_f64_e32(v[2], s[0:1]),
     ]
     st = run_program(instructions, n_lanes=1)
     mant = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -988,7 +988,7 @@ class TestF64Ops(unittest.TestCase):
       s_mov_b32(s[3], one_f64 >> 32),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4], sdst=s[10], src0=v[0], src1=v[0], src2=v[2]),
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=s[10:11], src0=v[0:1], src1=v[0:1], src2=v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
@@ -1003,14 +1003,14 @@ class TestF64Ops(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], val & 0xffffffff),
       s_mov_b32(s[1], (val >> 32) & 0xffffffff),
-      v_trunc_f64_e32(v[0:2], s[0:2]),
-      v_ldexp_f64(v[2:4], v[0:2], 0xffffffe0),  # -32
-      v_floor_f64_e32(v[2:4], v[2:4]),
+      v_trunc_f64_e32(v[0:1], s[0:1]),
+      v_ldexp_f64(v[2:3], v[0:1], 0xffffffe0),  # -32
+      v_floor_f64_e32(v[2:3], v[2:3]),
       s_mov_b32(s[2], f2i64(-4294967296.0) & 0xffffffff),
       s_mov_b32(s[3], f2i64(-4294967296.0) >> 32),
-      v_fma_f64(v[0:2], s[2:4], v[2:4], v[0:2]),
-      v_cvt_u32_f64_e32(v[4], v[0:2]),
-      v_cvt_i32_f64_e32(v[5], v[2:4]),
+      v_fma_f64(v[0:1], s[2:3], v[2:3], v[0:1]),
+      v_cvt_u32_f64_e32(v[4], v[0:1]),
+      v_cvt_i32_f64_e32(v[5], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     lo = st.vgpr[0][4]
@@ -1025,7 +1025,7 @@ class TestF64Ops(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
       s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1038,9 +1038,9 @@ class TestF64Ops(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
       s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
-      v_trig_preop_f64(v[2], abs(s[0]), 1),
-      v_trig_preop_f64(v[4], abs(s[0]), 2),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
+      v_trig_preop_f64(v[2:3], abs(s[0:1]), 1),
+      v_trig_preop_f64(v[4:5], abs(s[0:1]), 2),
     ]
     st = run_program(instructions, n_lanes=1)
     p0 = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1075,7 +1075,7 @@ class TestF64Ops(unittest.TestCase):
       v_mov_b32_e32(v[3], s[3]),
       v_mov_b32_e32(v[4], s[4]),
       v_mov_b32_e32(v[5], s[5]),
-      v_fma_f64(v[6], v[0], v[2], v[4]),
+      v_fma_f64(v[6:7], v[0:1], v[2:3], v[4:5]),
     ]
     # run_program with USE_HW=1 will verify exact bit match with hardware
     st = run_program(instructions, n_lanes=1)
@@ -1093,7 +1093,7 @@ class TestMad64More(unittest.TestCase):
       s_mov_b32(s[1], 1000),
       v_mov_b32_e32(v[2], 0),  # S2 lo
       v_mov_b32_e32(v[3], 1),  # S2 hi = 0x100000000
-      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+      v_mad_u64_u32(v[4:5], SrcEnum.NULL, s[0], s[1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result_lo = st.vgpr[0][4]
@@ -1109,7 +1109,7 @@ class TestMad64More(unittest.TestCase):
       s_mov_b32(s[1], 0xFFFFFFFF),
       v_mov_b32_e32(v[2], 0),
       v_mov_b32_e32(v[3], 0),
-      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+      v_mad_u64_u32(v[4:5], SrcEnum.NULL, s[0], s[1], v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result_lo = st.vgpr[0][4]
@@ -1185,7 +1185,7 @@ class TestF64LiteralOps(unittest.TestCase):
       s_mov_b32(s[3], (val_m1 >> 32) & 0xffffffff),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      VOP3(VOP3Op.V_FMA_F64, vdst=v[4], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[4:5], src0=lit, src1=v[2:3], src2=v[0:1]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
@@ -1201,7 +1201,7 @@ class TestF64LiteralOps(unittest.TestCase):
       s_mov_b32(s[1], (val >> 32) & 0xffffffff),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),  # -32
+      v_ldexp_f64(v[2:3], v[0:1], 0xFFFFFFE0),  # -32
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
@@ -1220,12 +1220,12 @@ class TestF64ToI64Conversion(unittest.TestCase):
       s_mov_b32(s[1], (val >> 32) & 0xffffffff),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[1]),
-      v_trunc_f64_e32(v[0:2], v[0:2]),
-      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),
-      v_floor_f64_e32(v[2:4], v[2:4]),
-      VOP3(VOP3Op.V_FMA_F64, vdst=v[0], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
-      v_cvt_u32_f64_e32(v[4], v[0:2]),
-      v_cvt_i32_f64_e32(v[5], v[2:4]),
+      v_trunc_f64_e32(v[0:1], v[0:1]),
+      v_ldexp_f64(v[2:3], v[0:1], 0xFFFFFFE0),
+      v_floor_f64_e32(v[2:3], v[2:3]),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[0:1], src0=lit, src1=v[2:3], src2=v[0:1]),
+      v_cvt_u32_f64_e32(v[4], v[0:1]),
+      v_cvt_i32_f64_e32(v[5], v[2:3]),
     ]
     return instructions
 
@@ -1281,7 +1281,7 @@ class TestWMMAMore(unittest.TestCase):
       instructions.append(v_mov_b32_e32(v[i], s[0]))
     for i in range(8):
       instructions.append(v_mov_b32_e32(v[i], 0))
-    instructions.append(v_wmma_f32_16x16x16_f16(v[0], v[16], v[24], v[0]))
+    instructions.append(v_wmma_f32_16x16x16_f16(v[0:7], v[16:23], v[24:31], v[0:7]))
     st = run_program(instructions, n_lanes=32)
     any_nonzero = any(st.vgpr[lane][0] != 0 for lane in range(32))
     self.assertTrue(any_nonzero, "WMMA should produce non-zero output")
@@ -1385,7 +1385,7 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
       s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1396,7 +1396,7 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),
       s_mov_b32(s[1], 0x3ff00000),
-      v_trig_preop_f64(v[0], abs(s[0]), 1),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 1),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1408,7 +1408,7 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),
       s_mov_b32(s[1], 0x3ff00000),
-      v_trig_preop_f64(v[0], abs(s[0]), 2),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 2),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1421,9 +1421,9 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], 0x00000000),
       s_mov_b32(s[1], 0x3ff00000),
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
-      v_trig_preop_f64(v[2], abs(s[0]), 1),
-      v_trig_preop_f64(v[4], abs(s[0]), 2),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
+      v_trig_preop_f64(v[2:3], abs(s[0:1]), 1),
+      v_trig_preop_f64(v[4:5], abs(s[0:1]), 2),
     ]
     st = run_program(instructions, n_lanes=1)
     p0 = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1440,7 +1440,7 @@ class TestTrigPreop(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], large_bits & 0xffffffff),
       s_mov_b32(s[1], (large_bits >> 32) & 0xffffffff),
-      v_trig_preop_f64(v[0], abs(s[0]), 0),
+      v_trig_preop_f64(v[0:1], abs(s[0:1]), 0),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
@@ -1455,7 +1455,7 @@ class TestModifierInteractions(unittest.TestCase):
     """-|x| should negate the absolute value."""
     instructions = [
       v_mov_b32_e32(v[0], -5.0),
-      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], neg=0b10, abs_=0b10),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], neg=0b10, abs=0b10),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][1]), -5.0, places=5)
@@ -1466,8 +1466,8 @@ class TestModifierInteractions(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], neg_zero),
       v_mov_b32_e32(v[0], s[0]),
-      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], abs_=0b10),
-      VOP3(VOP3Op.V_MUL_F32, vdst=v[2], src0=1.0, src1=v[0], neg=0b10, abs_=0b10),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], abs=0b10),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[2], src0=1.0, src1=v[0], neg=0b10, abs=0b10),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][1], 0x00000000, "|(-0.0)| = +0.0")
@@ -1615,7 +1615,7 @@ class TestCarryBorrow(unittest.TestCase):
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
       v_add_co_u32(v[4], VCC, v[0], v[2]),
-      v_add_co_ci_u32_e32(v[5], VCC, v[1], v[3]),
+      v_add_co_ci_u32_e32(v[5], v[1], v[3]),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][4], 0x00000000, "lo result")
@@ -1636,15 +1636,12 @@ class TestReadlane(unittest.TestCase):
 
   def test_reduction_pattern(self):
     """Test reduction using readlane."""
-    def _readlane(sdst_idx, vsrc, lane_idx):
-      return VOP3(VOP3Op.V_READLANE_B32, vdst=RawImm(sdst_idx), src0=vsrc, src1=lane_idx)
-
     instructions = [
       v_mov_b32_e32(v[0], v[255]),
-      _readlane(0, v[0], 0),
-      _readlane(1, v[0], 1),
-      _readlane(2, v[0], 2),
-      _readlane(3, v[0], 3),
+      v_readlane_b32(s[0], v[0], 0),
+      v_readlane_b32(s[1], v[0], 1),
+      v_readlane_b32(s[2], v[0], 2),
+      v_readlane_b32(s[3], v[0], 3),
       s_add_u32(s[4], s[0], s[1]),
       s_add_u32(s[4], s[4], s[2]),
       s_add_u32(s[4], s[4], s[3]),

@@ -2,10 +2,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator
-import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
+import importlib, inspect, functools, pathlib, os, contextlib, sys, re, atexit, pickle, decimal
+from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -218,10 +218,10 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator(Generic[DeviceType]):
-  def __init__(self, dev:DeviceType):
+  def __init__(self, dev:DeviceType, supports_copy_from_disk:bool=True, supports_transfer:bool=True):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
-    self.supports_copy_from_disk: bool = True
+    self.supports_copy_from_disk, self.supports_transfer = supports_copy_from_disk, supports_transfer
   # overridden in LRUAllocator
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -244,9 +244,9 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self, dev:DeviceType):
+  def __init__(self, dev:DeviceType, **kwargs):
     self.cache: dict[tuple[int, BufferSpec|None], Any] = defaultdict(list)
-    super().__init__(dev)
+    super().__init__(dev, **kwargs)
   def alloc(self, size:int, options:BufferSpec|None=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -342,35 +342,8 @@ class Compiled:
     """
     # override this in your device implementation
 
-# TODO: move this to each Device
 def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
-  if dtype == dtypes.index: return False
-  if device is None: device = Device.DEFAULT
-  if dtype == dtypes.bfloat16:
-    if device == "METAL": return not CI
-    if device == "CUDA": return not CI and not CUDA_PTX
-    if device == "NV": return not CI and not NV_PTX and not NV_NAK
-    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not CPU_LVP
-    return device in {"AMD", "PYTHON", "NULL"}
-  if dtype in dtypes.fp8s:
-    if device == "CUDA": return not CI and not CUDA_PTX
-    if device == "NV": return not CI and not NV_PTX and not NV_NAK
-    if device == "AMD": return not CI and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
-    return device in {"PYTHON", "NULL"}
-  if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
-                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
-  # for CI GPU and OSX, cl_khr_fp16 isn't supported
-  # for CI LLVM, it segfaults because it can't link to the casting function
-  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  if dtype == dtypes.half:
-    if device == "CL": return not CI and not OSX
-    if device == "QCOM": return False # QCOM compiler is flaky with half
-    if device in ["CUDA", "NV"]: return not CI
-    if device == "CPU" and CPU_LLVM: return OSX
-    if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not getenv("NULL_IR3")
-  return True
+  return dtype != dtypes.index and Device[device or Device.DEFAULT].renderer.is_dtype_supported(dtype)
 
 if PROFILE:
   @atexit.register

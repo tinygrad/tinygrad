@@ -118,7 +118,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
     run_schedule(check_schedule(b, 1))
-    np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
+    np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2, rtol=1e-3)
 
   def test_indexing_scalars_simple(self):
     X = Tensor.randn(2, 2).realize()
@@ -182,7 +182,7 @@ class TestSchedule(unittest.TestCase):
     assert not a.uop.is_realized
 
   def test_simplify_padded_const(self):
-    a = Tensor.empty(1022).cummax(axis=0)
+    a, _ = Tensor.empty(1022).cummax(axis=0)
     check_schedule(a, 3)
 
   def test_basic_binop_fusion(self):

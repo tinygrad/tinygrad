@@ -9,8 +9,8 @@ from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, Buffer
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
-    super().__init__(jit_cache, input_rawbuffers, var_vals)
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
+    super().__init__(jit_cache, input_buffers, var_vals)
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # CPU Device is always last
@@ -189,10 +189,10 @@ class HCQGraph(MultiGraphRunner):
 
   def _dev_copy_queues(self, dev): return [q for (d, _), q in self.copy_queues.items() if d == dev]
 
-  def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
-    # Map input rawbuffers
+  def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
+    # Map input buffers
     for dev in self.devices:
-      for idx_to_map in self.input_replace_map[dev]: cast(HCQAllocator, dev.allocator).map(input_rawbuffers[idx_to_map]._buf)
+      for idx_to_map in self.input_replace_map[dev]: cast(HCQAllocator, dev.allocator).map(input_buffers[idx_to_map]._buf)
 
     # Wait and restore signals
     self.kickoff_value += 1
@@ -203,9 +203,9 @@ class HCQGraph(MultiGraphRunner):
                     **{var.expr: dev.timeline_value - 1 for dev, var in self.virt_timeline_vals.items()},
                     **{sig.base_buf.va_addr.expr: dev.timeline_signal.base_buf.va_addr for dev, sig in self.virt_timeline_signals.items()}}
 
-    # Update rawbuffers
+    # Update buffers
     for (j,i),input_idx in self.input_replace.items():
-      hcq_var_vals[self.input_replace_to_var[(j,i)].expr] = input_rawbuffers[input_idx]._buf.va_addr
+      hcq_var_vals[self.input_replace_to_var[(j,i)].expr] = input_buffers[input_idx]._buf.va_addr
 
     for dev in self.devices:
       self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.fixedvars.get(dev, {}))
