@@ -28,8 +28,8 @@ pm_syntactic_sugar = PatternMatcher([
 ])
 
 def full_rewrite_to_sink(sink:UOp, device:str="", optimize:bool=True) -> UOp:
-  if not device: device = Device.DEFAULT
-  ren = Device[device].renderer
+  if not device: device, ren = Device.DEFAULT, Renderer()
+  else: ren = Device[device].renderer
 
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(sink))

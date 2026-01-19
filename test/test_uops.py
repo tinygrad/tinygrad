@@ -449,7 +449,7 @@ class TestAssembly(unittest.TestCase):
     ast = c.schedule()[-1].ast
     opts_to_apply = [Opt(OptOps.UNROLL, 0, 4)]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-    program = get_program(ast, Device[Device.DEFAULT].renderer)
+    program = get_program(ast, Device.DEFAULT)
     uops = program.uops
     self.assertEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 

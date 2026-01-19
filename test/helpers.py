@@ -18,7 +18,7 @@ from tinygrad.runtime.ops_python import PythonProgram, PythonCompiler
 def get_uops(sink:UOp, dev:str="") -> list[UOp]:
   """Extract linearized UOps from a sink. Test helper that only does linearization (no render)."""
   if sink.arg is None: sink = sink.replace(arg=KernelInfo())
-  full_sink = full_rewrite_to_sink(sink, dev or Device.DEFAULT, optimize=sink.tag is None)
+  full_sink = full_rewrite_to_sink(sink, dev, optimize=sink.tag is None)
   return line_rewrite(linearize(full_sink), pm_linearize_cleanups)
 
 def derandomize_model(model):
