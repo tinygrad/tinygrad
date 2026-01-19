@@ -70,7 +70,7 @@ def hz_to_mel(freq: Tensor) -> Tensor:
   min_log_hz = 1000.0  # beginning of log region (Hz)
 
   mask = freq >= min_log_hz
-  return mask.where(((min_log_hz - f_min) / f_sp) + (freq / min_log_hz).log() / (Tensor(6.4).log() / 27.0), mels)
+  return mask.where(((min_log_hz - f_min) / f_sp) + (freq / min_log_hz).log() / (math.log(6.4) / 27.0), mels)
 
 
 def mel_to_hz(mels: Tensor) -> Tensor:
@@ -82,7 +82,7 @@ def mel_to_hz(mels: Tensor) -> Tensor:
   # nonlinear scale
   min_log_hz = 1000.0  # beginning of log region (Hz)
   min_log_mel = (min_log_hz - f_min) / f_sp  # same (Mels)
-  logstep = Tensor(6.4).log() / 27.0  # step size for log region
+  logstep = math.log(6.4) / 27.0  # step size for log region
 
   log_t = mels >= min_log_mel
   freqs = log_t.where(min_log_hz * ((logstep * (mels - min_log_mel)).exp()), freqs)
@@ -112,7 +112,6 @@ def mel(
     fmax = float(sr) / 2
 
   n_mels = int(n_mels)
-  weights = Tensor.zeros((n_mels, int(1 + n_fft // 2)), dtype=dtype).contiguous()
 
   fftfreqs = fft_frequencies(sr=sr, n_fft=n_fft)  # center freqs of each FFT bin
   mel_f = mel_frequencies(n_mels + 2, fmin=fmin, fmax=fmax)  # center freqs of mel bands
