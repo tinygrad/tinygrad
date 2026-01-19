@@ -9,7 +9,7 @@ from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
 from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv
-from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
+from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt, amdgpu_kd
 from tinygrad.runtime.autogen.am import am
@@ -945,9 +945,9 @@ class AMDDevice(HCQCompiled):
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
+    compilers = CompilerSet([CompilerPair(functools.partial(HIPRenderer, self.arch), None),
                              CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), None, AMD_LLVM),
-                             CompilerPair(functools.partial(AMDHIPCCRenderer, self.arch), None)], ctrl_var=AMD_CC)
+                             CompilerPair(functools.partial(HIPCCRenderer, self.arch), None)], ctrl_var=AMD_CC)
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),

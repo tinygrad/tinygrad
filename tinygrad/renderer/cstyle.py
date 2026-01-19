@@ -218,7 +218,6 @@ class CStyleLanguage(Renderer):
   def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self._render(uops), uops)
 
 class ClangRenderer(CStyleLanguage):
-  device = "CPU"
   float4 = "(float4)"
   float4_style = ('{', '}')
   gep_arr_threshold = 0
@@ -289,7 +288,6 @@ class ClangJITRenderer(ClangRenderer):
     return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} if dtype == dtypes.bfloat16 else dtype not in dtypes.fp8s
 
 class OpenCLRenderer(CStyleLanguage):
-  device = "CL"
   has_aux = True
 
   # CI and OSX, cl_khr_fp16 is not supported
@@ -329,7 +327,7 @@ class OpenCLRenderer(CStyleLanguage):
   def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL),)
 
 class IntelRenderer(OpenCLRenderer):
-  device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
+  suffix, kernel_typedef = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
   tensor_cores = tc.intel
 
   string_rewrite = PatternMatcher([
@@ -346,7 +344,6 @@ class IntelRenderer(OpenCLRenderer):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix or None)
 
 class MetalRenderer(CStyleLanguage):
-  device = "METAL"
   shared_max = 32768
   def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
   def is_dtype_supported(self, dtype:DType) -> bool: return not CI if dtype == dtypes.bfloat16 else dtype not in (dtypes.float64,) + dtypes.fp8s
@@ -391,7 +388,6 @@ class MetalRenderer(CStyleLanguage):
 _nms = list("xyzwabcdefghijkl") + [f'v{i}' for i in range(16, 32)]
 
 class CUDARenderer(CStyleLanguage):
-  device = "CUDA"
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 64)
   shared_max = 49152
@@ -467,8 +463,7 @@ class CUDARenderer(CStyleLanguage):
 def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
 def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
 
-class AMDHIPRenderer(CStyleLanguage):
-  device = "AMD"
+class HIPRenderer(CStyleLanguage):
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
@@ -561,16 +556,12 @@ class AMDHIPRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-class NVRenderer(CUDARenderer): device = "NV"
-class HIPRenderer(AMDHIPRenderer): device = "HIP"
-class AMDHIPCCRenderer(AMDHIPRenderer):
+class HIPCCRenderer(HIPRenderer):
   def __init__(self, arch:str):
     from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
     super().__init__(arch)
     self.compiler = HIPCCCompiler(arch)
 
 class QCOMRenderer(OpenCLRenderer):
-  device = "QCOM"
-
   # QCOM compiler is flaky with half
   def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in (dtypes.bfloat16, dtypes.half, dtypes.float64) + dtypes.fp8s

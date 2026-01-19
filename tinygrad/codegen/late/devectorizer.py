@@ -6,7 +6,7 @@ from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDTy
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
-from tinygrad.renderer import Renderer
+from tinygrad.device import Device
 
 # ***** image load valid simplification *****
 
@@ -133,7 +133,7 @@ load_store_folding = PatternMatcher([
 
 # *** correct load/store ***
 
-def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
+def split_load_store(ctx:str, ls:UOp, idx:UOp):
   # this splits loads and stores into multiple chunks
 
   # if there's only one element to load/store, no splitting needed
@@ -143,7 +143,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   # determine fold lengths
   lengths = []
   must_divide = True
-  if ctx is not None and ctx.device == "DSP":
+  if ctx == "DSP":
     lengths = [128,64,32,16,8,4]
     must_divide = False
   elif buf.dtype.base not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
@@ -152,7 +152,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
-  elif ctx is not None and ctx.supports_float4:
+  elif Device[ctx].renderer.supports_float4:
     # TODO: a better way to get this than ctx
     lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
   lengths.append(1)  # worst case, it's not folded

@@ -129,7 +129,6 @@ class ProgramSpec:
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
 
 class Renderer:
-  device: str = ""
   suffix: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
