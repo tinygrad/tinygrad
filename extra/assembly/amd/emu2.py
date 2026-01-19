@@ -30,6 +30,7 @@ from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, GLOBAL, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 from extra.assembly.amd.dsl import NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI
+from extra.assembly.amd.autogen.common import OpType
 from extra.assembly.amd.emu2_pcode import parse_pcode
 
 MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
@@ -380,8 +381,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   def rvgpr(reg: int, lane: UOp) -> UOp: return vgpr.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index), ptr=True).load()
   def wvgpr(reg: int, lane: UOp, val: UOp, exec_mask: UOp, after: UOp|None = None) -> UOp:
     buf = vgpr.after(after) if after is not None else vgpr
-    idx = buf.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index))
-    return idx.store(_lane_active(exec_mask, lane).where(val.cast(dtypes.uint32), idx.load()))
+    offset = (UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index)).valid(_lane_active(exec_mask, lane))
+    return buf.index(offset).store(val.cast(dtypes.uint32))
 
   # Helper: read source operand (32-bit, 64-bit with F64 inline, or 16-bit with F16 inline)
   def rsrc(off: int, lane: UOp, bits: int = 32) -> UOp:
@@ -618,8 +619,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     # For FMAC/accumulator instructions, D0 is also a source (read from vdst)
     srcs = {'S0': src0, 'S1': src1, 'D0': rvgpr(vdst_reg, lane)}
     # FMAAK/FMAMK use inline literal constant (SIMM32)
-    op_name = _op_name(inst)
-    if 'FMAAK' in op_name or 'FMAMK' in op_name:
+    if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
       srcs['SIMM32'] = UOp.const(dtypes.uint32, literal)
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name)
     assert pcode_result is not None, f"no pcode for VOP2: {inst.op.name}"
@@ -719,7 +719,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     srcs = {'S0': src0, 'S1': src1}
     if src2 is not None: srcs['S2'] = src2
     # For V_CNDMASK, src2 is the condition mask (used as VCC in pcode)
-    if 'CNDMASK' in op_name and src2 is not None: srcs['VCC'] = src2
+    if inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16) and src2 is not None: srcs['VCC'] = src2
 
     # For 16-bit ops with opsel[3]=1, write to high half
     opsel_dst_hi = bool(opsel & 0b1000) and _is_16bit_op(op_name)
@@ -748,9 +748,9 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     pcode = PCODE.get(inst.op)
     assert pcode is not None, f"no pcode for VOP3SD: {op_name}"
 
-    # For carry-in ops (V_ADD_CO_CI_U32, V_SUB_CO_CI_U32, V_SUBREV_CO_CI_U32), VCC reads come from src2
-    # For other ops, VCC reads come from sdst. VCC writes always go to sdst.
-    has_carry_in = '_CO_CI_' in op_name
+    # For carry-in ops, src2 is an SREG (carry-in register), not a general SRC operand.
+    # VCC reads come from src2 for carry-in ops, otherwise from sdst. VCC writes always go to sdst.
+    has_carry_in = 'src2' in inst.operands and inst.operands['src2'][2] == OpType.OPR_SREG
     vcc_in_reg = inst.src2.offset if has_carry_in and inst.src2 is not None else sdst_reg
 
     # Check if any VCC assignment is per-lane by looking for [laneId] in destination
@@ -932,9 +932,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         srcs = {'S0': srcy0, 'S1': srcy1, 'D0': rvgpr(vdst_reg, lane)}
       else:
         srcs = {'S0': rsrc(src0_off, lane), 'S1': rvgpr(vsrc1_off - 256, lane), 'D0': rvgpr(vdst_reg, lane)}
-      vop_name = vop.name if hasattr(vop, 'name') else str(vop)
-      if 'FMAAK' in vop_name or 'FMAMK' in vop_name: srcs['SIMM32'] = UOp.const(dtypes.uint32, literal)
-      if 'CNDMASK' in vop_name: srcs['VCC'] = rsgpr(VCC_LO.offset)
+      if vop in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32): srcs['SIMM32'] = UOp.const(dtypes.uint32, literal)
+      if vop == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = rsgpr(VCC_LO.offset)
       pcode = PCODE.get(vop)
       assert pcode is not None, f"no pcode for VOPD {label}: {vop}"
       srcs.update({'VCC': rsgpr(VCC_LO.offset), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)})
