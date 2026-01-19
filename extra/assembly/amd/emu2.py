@@ -567,7 +567,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
         vgpr_stores.extend([idx_lo.store(active.where(lo, idx_lo.load())), idx_hi.store(active.where(hi, idx_hi.load()))])
       else:
         idx = ctx.vgpr.after(final_vcc).index(_c(vdst_reg * 32 + i, dtypes.index))
-        vgpr_stores.append(idx.store(active.where(d0_val.cast(dtypes.uint32), idx.load())))
+        # Use bitcast for float->uint32 to preserve NaN/inf bit patterns
+        d0_u32 = d0_val.bitcast(dtypes.uint32) if d0_val.dtype in (dtypes.float32, dtypes.half) else d0_val.cast(dtypes.uint32)
+        vgpr_stores.append(idx.store(active.where(d0_u32, idx.load())))
     return name, UOp.sink(*(vgpr_stores + [ctx.wsgpr(sdst_reg, final_vcc), ctx.inc_pc()]), arg=KernelInfo(name=name))
   else:
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, sdst_reg=sdst_reg)
