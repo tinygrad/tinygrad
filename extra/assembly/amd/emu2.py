@@ -811,7 +811,6 @@ def compile_inst(data: bytes) -> tuple[str, UOp]:
 def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, list[int]|None, CompiledRunner|None]]:
   """Decode program to {pc: (name, fxn, globals, runner)}. Runner is kept alive to prevent fxn memory from being freed."""
   result = {}
-  renderer = Device['CPU'].renderer
   i = 0
   while i < len(data):
     inst = decode_inst(data[i:])
@@ -819,9 +818,9 @@ def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, l
 
     name, sink = compile_inst(bytes(data[i:i + inst.size() + 4]))
     try:
-      with Context(NOOPT=1):
-        prg = get_program(sink, renderer)
-      runner = CompiledRunner(prg)
+      with Context(NOOPT=1, CPU_LLVM=1):
+        prg = get_program(sink, Device['CPU'].renderer)
+        runner = CompiledRunner(prg)
       fxn = runner._prg.fxn  # Extract raw ctypes function for direct calls (bypasses HCQ overhead)
       globals_list = prg.globals
       if DEBUG >= 2:
