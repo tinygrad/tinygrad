@@ -35,6 +35,11 @@ from extra.assembly.amd.emu2_pcode import parse_pcode
 
 MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
 
+# Common UOp constants (avoid repeated allocation)
+def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
+U32_0, U32_1, U32_16, U32_32, U32_MASK = _c(0), _c(1), _c(16), _c(32), _c(MASK32)
+U64_32 = _c(32, dtypes.uint64)
+
 # Inline float constants (as bit patterns) for GPU instructions
 F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
               244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}  # 2.0, -2.0, 4.0, -4.0, 1/(2*pi)
@@ -89,15 +94,23 @@ def _op_name(inst) -> str:
   return inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
 def _is_64bit_dest(dest: str) -> bool: return any(dest.endswith(x) for x in ('.b64', '.u64', '.i64', '.f64'))
 def _to_u32(val: UOp) -> UOp: return val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
-def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & UOp.const(dtypes.uint32, 1)).ne(UOp.const(dtypes.uint32, 0))
+def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & U32_1).ne(U32_0)
 def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp:
-  return (val >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF) if opsel & (1 << sel_bit) else val
+  return (val >> U32_16) & _c(0xFFFF) if opsel & (1 << sel_bit) else val
+
+def _unroll_lanes(get_lane_bit, exec_mask: UOp, apply_exec: bool = True) -> UOp:
+  """Unroll 32 lanes, combining per-lane bits into a 32-bit mask. Optionally apply EXEC mask."""
+  result = U32_0
+  for i in range(32):
+    bit = get_lane_bit(i).cast(dtypes.uint32) << _c(i)
+    result = result | bit
+  return result & exec_mask if apply_exec else result
 
 def _set_lane_bit(old: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
   """Set/clear a single bit in a 32-bit mask based on lane index, respecting exec mask."""
-  mask = UOp.const(dtypes.uint32, 1) << lane.cast(dtypes.uint32)
+  mask = U32_1 << lane.cast(dtypes.uint32)
   new_bit = _to_u32(val) << lane.cast(dtypes.uint32)
-  cleared = old & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))
+  cleared = old & (mask ^ U32_MASK)
   return _lane_active(exec_mask, lane).where(cleared | new_bit, old)
 
 def _val_to_u32(val: UOp) -> UOp:
@@ -559,52 +572,26 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   # Uses unrolled computation to avoid loop-carried VCC dependency issues
   # ═══════════════════════════════════════════════════════════════════════════
   if isinstance(inst, VOPC):
-    exec_mask = rsgpr(EXEC_LO.offset)
-    old_vcc = rsgpr(VCC_LO.offset)
-    op_name = _op_name(inst)
-    is_cmpx = 'CMPX' in op_name
-    is_16bit = _is_16bit_op(op_name)
-
+    exec_mask, old_vcc, op_name = rsgpr(EXEC_LO.offset), rsgpr(VCC_LO.offset), _op_name(inst)
+    is_cmpx, is_16bit = 'CMPX' in op_name, _is_16bit_op(op_name)
     # For 16-bit VOPC, vsrc1 index 128-255 means read high 16 bits of v[vsrc1-128]
-    vsrc1_reg = inst.vsrc1.offset - 256  # Convert to vgpr index (0-255)
-    vsrc1_hi = is_16bit and vsrc1_reg >= 128  # High-half access only for 16-bit ops
-    vsrc1_actual_reg = vsrc1_reg - 128 if vsrc1_hi else vsrc1_reg
-    vsrc1_offset = 256 + vsrc1_actual_reg  # Convert back to rsrc offset
+    vsrc1_reg = inst.vsrc1.offset - 256
+    vsrc1_hi = is_16bit and vsrc1_reg >= 128
+    vsrc1_offset = 256 + (vsrc1_reg - 128 if vsrc1_hi else vsrc1_reg)
 
-    # Helper to get comparison result for a lane (returns 0 or 1)
-    def get_cmp_result(lane_idx: int) -> UOp:
-      lane_const = UOp.const(dtypes.index, lane_idx)
-      s0 = rsrc(inst.src0.offset, lane_const)
-      s1 = rsrc(vsrc1_offset, lane_const)
-      # For 16-bit ops with vsrc1 high-half access, extract high 16 bits
-      if is_16bit and vsrc1_hi:
-        s1 = (s1 >> UOp.const(dtypes.uint32, 16)) & UOp.const(dtypes.uint32, 0xFFFF)
-      # Get pcode and parse for this comparison
+    def get_cmp_bit(i: int) -> UOp:
+      lc = _c(i, dtypes.index)
+      s0, s1 = rsrc(inst.src0.offset, lc), rsrc(vsrc1_offset, lc)
+      if is_16bit and vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
       pcode = PCODE.get(inst.op)
-      if pcode is None: return UOp.const(dtypes.uint32, 0)
-      _, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=UOp.const(dtypes.uint32, lane_idx))
-      # Find the comparison result assignment (D0 for CMP, EXEC for CMPX)
-      for dest, val in assigns:
-        if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest):
-          return val.cast(dtypes.uint32)
-      return UOp.const(dtypes.uint32, 0)
+      if pcode is None: return U32_0
+      for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=_c(i))[1]:
+        if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
+      return U32_0
 
-    # Compute all 32 bits by unrolling
-    new_vcc_bits = UOp.const(dtypes.uint32, 0)
-    for i in range(32):
-      cmp_result = get_cmp_result(i)
-      bit = cmp_result << UOp.const(dtypes.uint32, i)
-      new_vcc_bits = new_vcc_bits | bit
-
-    # Apply EXEC mask: new_vcc = (old_vcc & ~exec) | (new_bits & exec)
-    new_vcc = (old_vcc & (exec_mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (new_vcc_bits & exec_mask)
-
-    # Store to VCC (or EXEC for CMPX)
-    if is_cmpx:
-      stores = [wsgpr(EXEC_LO.offset, new_vcc)]  # CMPX E32 only writes EXEC, not VCC
-    else:
-      stores = [wsgpr(VCC_LO.offset, new_vcc)]
-
+    new_bits = _unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False)
+    new_vcc = (old_vcc & (exec_mask ^ U32_MASK)) | (new_bits & exec_mask)  # Preserve inactive lanes
+    stores = [wsgpr(EXEC_LO.offset if is_cmpx else VCC_LO.offset, new_vcc)]
     return name, UOp.sink(*stores, inc_pc(), arg=KernelInfo(name=name))
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -648,49 +635,26 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
       is_cmpx = 'CMPX' in op_name
 
       # Get abs/neg modifiers and operand sizes from instruction metadata
-      abs_bits = getattr(inst, 'abs', 0) or 0
-      neg_bits = getattr(inst, 'neg', 0) or 0
-      operands = inst.operands
+      abs_bits, neg_bits, operands = getattr(inst, 'abs', 0) or 0, getattr(inst, 'neg', 0) or 0, inst.operands
       src0_fmt, src0_bits, _ = operands.get('src0', (None, 32, None))
       src1_fmt, src1_bits, _ = operands.get('src1', (None, 32, None))
-      is_16bit_op = src0_bits == 16 or src1_bits == 16
-      is_64bit_op = src0_bits == 64 or src1_bits == 64
+      is_16bit_op, is_64bit_op = src0_bits == 16 or src1_bits == 16, src0_bits == 64 or src1_bits == 64
       is_float_op = src0_fmt is not None and any(x in src0_fmt.name for x in ('F32', 'F64', 'F16'))
 
-      # Helper to get comparison result for a lane
-      def get_cmp_result_vop3(lane_idx: int) -> UOp:
-        lc = UOp.const(dtypes.index, lane_idx)
-        s0 = rsrc(inst.src0.offset, lc, src0_bits)
-        s1 = rsrc(inst.src1.offset, lc, src1_bits)
+      def get_cmp_bit(i: int) -> UOp:
+        lc = _c(i, dtypes.index)
+        s0, s1 = rsrc(inst.src0.offset, lc, src0_bits), rsrc(inst.src1.offset, lc, src1_bits)
         if is_16bit_op: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
-        if is_float_op:
-          s0, s1 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, src0_bits == 64), _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, src1_bits == 64)
+        if is_float_op: s0, s1 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, src0_bits == 64), _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, src1_bits == 64)
         pcode = PCODE.get(inst.op)
-        if pcode is None: return UOp.const(dtypes.uint32, 0)
-        _, assigns = parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=UOp.const(dtypes.uint32, lane_idx))
-        for dest, val in assigns:
-          # CMPX writes to EXEC[laneId], regular CMP writes to D0[laneId]
-          if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest):
-            return val.cast(dtypes.uint32)
-        return UOp.const(dtypes.uint32, 0)
+        if pcode is None: return U32_0
+        for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=_c(i))[1]:
+          if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
+        return U32_0
 
-      # Compute all 32 bits by unrolling - VOP3 VOPC writes comparison bits for ALL lanes
-      # EXEC mask affects which lanes participate (inactive lanes are 0)
       exec_mask = rsgpr(EXEC_LO.offset)
-      new_sdst = UOp.const(dtypes.uint32, 0)
-      for i in range(32):
-        cmp_result = get_cmp_result_vop3(i)
-        bit = cmp_result << UOp.const(dtypes.uint32, i)
-        new_sdst = new_sdst | bit
-      # Apply EXEC mask - inactive lanes are 0
-      new_sdst = new_sdst & exec_mask
-
-      # Store to scalar destination (and EXEC for CMPX)
-      if is_cmpx:
-        stores = [wsgpr(EXEC_LO.offset, new_sdst), wsgpr(inst.vdst.offset, new_sdst)]
-      else:
-        stores = [wsgpr(inst.vdst.offset, new_sdst)]
-
+      new_sdst = _unroll_lanes(get_cmp_bit, exec_mask)
+      stores = [wsgpr(EXEC_LO.offset, new_sdst), wsgpr(inst.vdst.offset, new_sdst)] if is_cmpx else [wsgpr(inst.vdst.offset, new_sdst)]
       return name, UOp.sink(*stores, inc_pc(), arg=KernelInfo(name=name))
 
     # Regular VOP3 handling
@@ -766,56 +730,37 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
 
     if has_per_lane_vcc:
-      # Per-lane VCC (e.g., V_ADD_CO_U32, V_CMP_CLASS_F32)
-      # IMPORTANT: When src==dst, we must ensure VCC is computed from ORIGINAL source values, not updated values.
-      # We fully unroll both VCC and D0 computation to avoid loop reordering issues.
-
-      # Compute VCC bit and D0 value for each lane (unrolled)
-      def get_lane_results(lane_idx: int) -> tuple[UOp, UOp|None]:
-        lc = UOp.const(dtypes.index, lane_idx)
+      # Per-lane VCC: unroll to ensure reads happen before writes (src==dst case)
+      def get_lane_results(i: int) -> tuple[UOp, UOp|None]:
+        lc = _c(i, dtypes.index)
         s0, s1 = rsrc_sized(inst.src0.offset, lc, sizes, 'src0'), rsrc_sized(inst.src1.offset, lc, sizes, 'src1')
         s2 = rsrc_sized(inst.src2.offset, lc, sizes, 'src2') if inst.src2 is not None else None
         lane_srcs = {'S0': s0, 'S1': s1, 'VCC': rsgpr(vcc_in_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
         if s2 is not None: lane_srcs['S2'] = s2
-        _, lane_assigns = parse_pcode(pcode, lane_srcs, UOp.const(dtypes.uint32, lane_idx), op_name=op_name)
-        vcc_bit, d0_val = UOp.const(dtypes.uint32, 0), None
-        for dest, val in lane_assigns:
+        vcc_bit, d0_val = U32_0, None
+        for dest, val in parse_pcode(pcode, lane_srcs, _c(i), op_name=op_name)[1]:
           if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
           elif dest.startswith('D0') and '[laneId]' not in dest: d0_val = val
         return vcc_bit, d0_val
 
-      # Compute all 32 lanes (this ensures reads happen before any writes through data dependencies)
       lane_results = [get_lane_results(i) for i in range(32)]
+      final_vcc = _unroll_lanes(lambda i: lane_results[i][0], exec_mask)
 
-      # Combine VCC bits - only set for active lanes (inactive lanes have VCC bit = 0)
-      new_vcc = UOp.const(dtypes.uint32, 0)
-      for i, (vcc_bit, _) in enumerate(lane_results):
-        exec_bit = (exec_mask >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
-        lane_vcc = vcc_bit & exec_bit  # Only set VCC bit if lane is active
-        new_vcc = new_vcc | (lane_vcc << UOp.const(dtypes.uint32, i))
-      final_vcc = new_vcc
-
-      # Build vgpr stores (unrolled) - each store depends on final_vcc which depends on all source reads
+      # Build vgpr stores - each store depends on final_vcc which depends on all source reads
       vgpr_stores = []
       for i, (_, d0_val) in enumerate(lane_results):
         if d0_val is None: continue
-        lane_const = UOp.const(dtypes.index, i)
-        exec_bit = (exec_mask >> UOp.const(dtypes.uint32, i)) & UOp.const(dtypes.uint32, 1)
-        active = exec_bit.ne(UOp.const(dtypes.uint32, 0))
+        active = ((exec_mask >> _c(i)) & U32_1).ne(U32_0)
         if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
           lo, hi = _split64(d0_val)
-          idx_lo, idx_hi = vgpr.after(final_vcc).index(UOp.const(dtypes.index, vdst_reg * 32 + i)), vgpr.after(final_vcc).index(UOp.const(dtypes.index, (vdst_reg + 1) * 32 + i))
+          idx_lo, idx_hi = vgpr.after(final_vcc).index(_c(vdst_reg * 32 + i, dtypes.index)), vgpr.after(final_vcc).index(_c((vdst_reg + 1) * 32 + i, dtypes.index))
           vgpr_stores.extend([idx_lo.store(active.where(lo, idx_lo.load())), idx_hi.store(active.where(hi, idx_hi.load()))])
         else:
-          idx = vgpr.after(final_vcc).index(UOp.const(dtypes.index, vdst_reg * 32 + i))
+          idx = vgpr.after(final_vcc).index(_c(vdst_reg * 32 + i, dtypes.index))
           vgpr_stores.append(idx.store(active.where(d0_val.cast(dtypes.uint32), idx.load())))
 
-      # Write VCC and vgpr
       vcc_write = wsgpr(sdst_reg, final_vcc)
-      if vgpr_stores:
-        return name, UOp.sink(*vgpr_stores, vcc_write, inc_pc(), arg=KernelInfo(name=name))
-      else:
-        return name, UOp.sink(vcc_write, inc_pc(), arg=KernelInfo(name=name))
+      return name, UOp.sink(*(vgpr_stores + [vcc_write, inc_pc()]), arg=KernelInfo(name=name))
     else:
       # Scalar VCC (e.g., V_DIV_SCALE_F32): use normal pcode handling with sdst redirection
       pcode_result = compile_vop_pcode(inst.op, srcs, lane, wvgpr, wsgpr, rsgpr, vdst_reg, exec_mask, inc_pc, name, sdst_reg=sdst_reg)
