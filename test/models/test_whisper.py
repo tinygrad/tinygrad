@@ -140,7 +140,7 @@ class TestWhisper(unittest.TestCase):
        0.03806022], dtype=dtypes.float32)
     np.testing.assert_allclose(hann_window(16, periodic=True).numpy(), reference.numpy(), atol=1e-6)
 
-  def test_hann_window_non_periodic(self):
+  def test_hann_window_symmetric(self):
     # torch.hann_window(16, False).numpy()
     reference = Tensor([0., 0.04322729, 0.16543472, 0.34549153, 0.5522643,
        0.75, 0.9045085, 0.9890738, 0.98907375, 0.9045085,
