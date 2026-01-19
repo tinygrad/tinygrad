@@ -102,13 +102,12 @@ class TestDType(unittest.TestCase):
     _test_to_np(Tensor(v, dtype=self.DTYPE)+2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))+2)
     _test_to_np(Tensor(v, dtype=self.DTYPE)*2, _to_np_dtype(self.DTYPE), np.array(v, dtype=_to_np_dtype(self.DTYPE))*2)
 
-  def test_dtypes_fields(self):
-    fields = dtypes.fields()
-    self.assertIn("float", fields)
-    self.assertIn("float32", fields)
-    self.assertEqual(len(fields), 26)
-    self.assertTrue(all(isinstance(value, DType) for value in fields.values()))
-    self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in fields.values() if _to_np_dtype(value) is not None))
+  def test_dtypes_DTYPES_DICT(self):
+    self.assertIn("float", DTYPES_DICT)
+    self.assertIn("float32", DTYPES_DICT)
+    self.assertEqual(len(DTYPES_DICT), 26)
+    self.assertTrue(all(isinstance(value, DType) for value in DTYPES_DICT.values()))
+    self.assertTrue(all(issubclass(_to_np_dtype(value), np.generic) for value in DTYPES_DICT.values() if _to_np_dtype(value) is not None))
 
   def test_resulting_and_init_dtypes_match(self):
     dtypes = list(map(np.dtype, ["bool", "uint8", "int8", "int16", "int32", "int64", "float32", "float64"]))

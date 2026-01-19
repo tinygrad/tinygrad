@@ -840,7 +840,6 @@ class TestTK(unittest.TestCase):
     np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
     np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
 
-  @unittest.expectedFailure
   def test_fast_fa_bwd_causal_jitted(self):
     from extra.thunder.tiny.fa import flash_attention
 
@@ -883,14 +882,14 @@ class TestTK(unittest.TestCase):
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True)
+    ref = flash_attention(q_ref_, k_ref_, v_ref_, is_causal=True)
     ref = ref.float().transpose(1, 2)
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
+    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
 
   def test_fast_fa_bwd_multidevice(self):
     from extra.thunder.tiny.fa import flash_attention

@@ -75,6 +75,24 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Gather", inputs, attributes, outputs)
 
+  def test_gather_jit_different_indices(self):
+    # Gather should not assume indices is const when it can change at runtime
+    from tinygrad import TinyJit
+    from tinygrad.nn.onnx import onnx_ops, _cached_to_python_const
+    _cached_to_python_const.cache_clear()
+    Gather = onnx_ops["Gather"]
+
+    x = Tensor([10, 20, 30, 40, 50])
+    indices_list = [[0, 1], [2, 3], [4, 0]]
+    expected = [[10, 20], [30, 40], [50, 10]]
+
+    # without JIT: correct
+    self.assertEqual([Gather(x, Tensor(idx)).tolist() for idx in indices_list], expected)
+
+    @TinyJit
+    def gather_jit(x, indices): return Gather(x, indices)
+    self.assertEqual([gather_jit(x, Tensor(idx)).tolist() for idx in indices_list], expected)
+
   # NOTE: resize OP is sensitive to numerical errors
   def _test_resize_scales(self, scale_values, **kwargs):
     for sc in scale_values:

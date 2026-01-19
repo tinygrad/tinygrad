@@ -14,28 +14,37 @@ ARCHS = {
   "cdna": {"xml": "amdgpu_isa_cdna4.xml", "pdf": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"},
 }
 XML_URL = "https://gpuopen.com/download/machine-readable-isa/latest/"
-# Map XML encoding names to codebase names (arch-specific overrides in ARCH_NAME_MAP)
-NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOPDXY": "VOPD", "VDS": "DS"}
-ARCH_NAME_MAP = {"cdna": {"VOP3": "VOP3A", "VOP3_SDST_ENC": "VOP3B"}}
+# Map XML encoding names to codebase names
+NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOP3_SDST_ENC_LIT": "VOP3SD_LIT", "VOP3_SDST_ENC_DPP16": "VOP3SD_DPP16",
+            "VOP3_SDST_ENC_DPP8": "VOP3SD_DPP8", "VOPDXY": "VOPD", "VOPDXY_LIT": "VOPD_LIT", "VDS": "DS"}
 # Instructions missing from XML but present in PDF
 FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"}, "FLAT": {55: "FLAT_ATOMIC_CSUB_U32"}},
-         "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}}}
+         "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}},
+         "cdna": {"DS": {152: "DS_GWS_SEMA_RELEASE_ALL", 154: "DS_GWS_SEMA_V", 156: "DS_GWS_SEMA_P"},
+                  "VOP3P": {62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
-_ENC_SUFFIXES = ("_INST_LITERAL", "_VOP_DPP16", "_VOP_DPP8", "_VOP_DPP", "_VOP_SDWA", "_NSA1", "_MFMA")
+_ENC_SUFFIXES = ("_NSA1",)
+# Encoding suffix to class suffix mapping (for variants we DO generate)
+_ENC_SUFFIX_MAP = {"_INST_LITERAL": "_LIT", "_VOP_DPP16": "_DPP16", "_VOP_DPP": "_DPP16", "_VOP_DPP8": "_DPP8",
+                   "_VOP_SDWA": "_SDWA", "_VOP_SDWA_SDST_ENC": "_SDWA_SDST", "_MFMA": "_MFMA"}
 # Field name normalization
 _FIELD_RENAMES = {"opsel_hi_2": "opsel_hi2", "op_sel_hi_2": "opsel_hi2", "op_sel": "opsel", "bound_ctrl": "bc",
-                  "tgt": "target", "row_en": "row", "unorm": "unrm", "clamp": "clmp", "wait_exp": "waitexp"}
-# Encoding variants to skip entirely
-_SKIP_ENCODINGS = ("LITERAL", "NSA", "DPP", "SDWA", "MFMA")
+                  "tgt": "target", "row_en": "row", "unorm": "unrm", "clamp": "clmp", "wait_exp": "waitexp",
+                  "simm32": "literal", "dpp_ctrl": "dpp", "acc_cd": "acc_cd", "acc": "acc",
+                  "dst_sel": "dst_sel", "dst_unused": "dst_unused", "src0_sel": "src0_sel", "src1_sel": "src1_sel"}
+# Encoding variants to skip entirely (NSA is for MIMG graphics instructions)
+_SKIP_ENCODINGS = ("NSA",)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # XML parsing helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _strip_enc(name: str) -> str:
-  """Strip ENC_ prefix and encoding variant suffixes."""
+  """Strip ENC_ prefix and normalize encoding suffixes."""
   name = name.removeprefix("ENC_")
   for sfx in _ENC_SUFFIXES: name = name.replace(sfx, "")
+  # Process longer suffixes first to avoid partial matches (e.g., _VOP_DPP8 before _VOP_DPP)
+  for old, new in sorted(_ENC_SUFFIX_MAP.items(), key=lambda x: -len(x[0])): name = name.replace(old, new)
   return name
 
 def _norm_field(name: str) -> str:
@@ -58,10 +67,16 @@ def _map_flat(enc_name: str, instr_name: str) -> str:
 # XML parsing
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def parse_xml(filename: str, arch: str):
+def parse_xml(filename: str):
   root = ET.fromstring(zipfile.ZipFile(fetch(XML_URL)).read(filename))
-  name_map = {**NAME_MAP, **ARCH_NAME_MAP.get(arch, {})}
   encodings, enums, types, fmts, op_types_set = {}, {}, {}, {}, set()
+  # Extract HWREG and MSG enums from OperandTypes
+  op_enum_map = {("OPR_HWREG", "ID"): "HWREG", ("OPR_SENDMSG_RTN", "MSG"): "MSG"}
+  for ot in root.findall(".//OperandTypes/OperandType"):
+    ot_name = ot.findtext("OperandTypeName")
+    for field in ot.findall(".//Field"):
+      if (enum_name := op_enum_map.get((ot_name, field.findtext("FieldName")))):
+        enums[enum_name] = {int(pv.findtext("Value")): pv.findtext("Name").upper() for pv in field.findall(".//PredefinedValue")}
   # Extract DataFormats with BitCount
   for df in root.findall("ISA/DataFormats/DataFormat"):
     name, bits = df.findtext("DataFormatName"), df.findtext("BitCount")
@@ -69,7 +84,9 @@ def parse_xml(filename: str, arch: str):
   # Extract encoding definitions
   for enc in root.findall("ISA/Encodings/Encoding"):
     name = enc.findtext("EncodingName")
-    if not name.startswith("ENC_") and name not in ("VOP3_SDST_ENC", "VOPDXY"): continue
+    is_base = name.startswith("ENC_") or name in ("VOP3_SDST_ENC", "VOPDXY")
+    is_variant = any(sfx in name for sfx in _ENC_SUFFIX_MAP)
+    if not is_base and not is_variant: continue
     if any(s in name for s in _SKIP_ENCODINGS): continue
     fields = [(_norm_field(f.findtext("FieldName").lower()), int(f.find("BitLayout/Range").findtext("BitOffset") or 0) + int(f.find("BitLayout/Range").findtext("BitCount") or 0) - 1,
                int(f.find("BitLayout/Range").findtext("BitOffset") or 0))
@@ -78,27 +95,41 @@ def parse_xml(filename: str, arch: str):
     enc_field = next((f for f in fields if f[0] == "encoding"), None)
     enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1], enc_field[2]-1, -1)) if ident is not None and enc_field else None
     base_name = _strip_enc(name)
-    encodings[name_map.get(base_name, base_name)] = (fields, enc_bits)
+    encodings[NAME_MAP.get(base_name, base_name)] = (fields, enc_bits)
   # Extract instruction opcodes and operand info
+  # Track which encodings each opcode appears in (for detecting LIT-only ops)
+  opcode_encs: dict[str, dict[int, set[str]]] = {}  # {base_fmt: {opcode: {enc_names}}}
   for instr in root.findall("ISA/Instructions/Instruction"):
     name = instr.findtext("InstructionName")
     for enc in instr.findall("InstructionEncodings/InstructionEncoding"):
       if enc.findtext("EncodingCondition") != "default": continue
       base, opcode = _map_flat(_strip_enc(enc.findtext("EncodingName")), name), int(enc.findtext("Opcode") or 0)
-      enc_name = name_map.get(base, base)
+      enc_name = NAME_MAP.get(base, base)
+      # Encoding variants use the same Op enum as the base format
+      base_enum = enc_name
+      for sfx in ("_SDWA_SDST", "_DPP16", "_DPP8", "_SDWA", "_LIT", "_MFMA"):
+        base_enum = base_enum.replace(sfx, "")
+      # Track which encodings this opcode appears in
+      opcode_encs.setdefault(base_enum, {}).setdefault(opcode, set()).add(enc_name)
       # ADDTID instructions go in both FLAT and GLOBAL enums (pcode uses FLATOp for these)
       if "ADDTID" in name:
         if base == "GLOBAL": enums.setdefault("FLAT", {})[opcode] = name
         elif base == "VGLOBAL": enums.setdefault("VFLAT", {})[opcode] = name
-      enums.setdefault(enc_name, {})[opcode] = name
+      enums.setdefault(base_enum, {})[opcode] = name
       # Extract operand info
       op_info = {op.findtext("FieldName").lower(): (op.findtext("DataFormatName"), int(op.findtext("OperandSize") or 0), op.findtext("OperandType"))
                  for op in enc.findall("Operands/Operand") if op.findtext("FieldName")}
       for fmt, _, otype in op_info.values():
         if fmt and fmt not in fmts: fmts[fmt] = 0
         if otype: op_types_set.add(otype)
-      if op_info: types[(name, enc_name)] = op_info
-  return encodings, enums, types, fmts, op_types_set
+      if op_info: types[(name, base_enum)] = op_info
+  # Find opcodes that only exist in _LIT encoding (no base format version)
+  lit_only_ops: dict[str, set[int]] = {}
+  for base_fmt, opcodes in opcode_encs.items():
+    for opcode, encs in opcodes.items():
+      if all("_LIT" in e for e in encs):
+        lit_only_ops.setdefault(base_fmt, set()).add(opcode)
+  return encodings, enums, types, fmts, op_types_set, lit_only_ops
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PDF parsing
@@ -204,7 +235,7 @@ def write_enum(enums, path):
   for name, ops in sorted(enums.items()):
     if not ops: continue
     suffix = "_E32" if name in ("VOP1", "VOP2", "VOPC") else "_E64" if name == "VOP3" else ""
-    lines.append(f"class {name}Op(Enum):")
+    lines.append(f"class {name}(Enum):" if name in ("HWREG", "MSG") else f"class {name}Op(Enum):")
     aliases = []
     for op, mem in sorted(ops.items()):
       msuf = suffix if name != "VOP3" or op < 512 else ""
@@ -214,12 +245,17 @@ def write_enum(enums, path):
     lines.append("")
   with open(path, "w") as f: f.write("\n".join(lines))
 
-def write_ins(encodings, enums, arch, path):
+def write_ins(encodings, enums, lit_only_ops, types, arch, path):
   _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr"}
+  _VARIANT_SUFFIXES = ("_LIT", "_DPP16", "_DPP8", "_SDWA_SDST", "_SDWA", "_MFMA")
+  def get_base_fmt(fmt):
+    for sfx in _VARIANT_SUFFIXES: fmt = fmt.replace(sfx, "")
+    return fmt
   def field_def(name, hi, lo, fmt, enc_bits=None):
     bits = hi - lo + 1
+    base_fmt = get_base_fmt(fmt)
     if name == "encoding" and enc_bits: return f"FixedBitField({hi}, {lo}, 0b{enc_bits})"
-    if name == "op" and fmt not in ("DPP", "SDWA"): return f"EnumBitField({hi}, {lo}, {fmt}Op)"
+    if name == "op" and fmt not in ("DPP", "SDWA"): return f"EnumBitField({hi}, {lo}, {base_fmt}Op)"
     if name in ("opx", "opy"): return f"EnumBitField({hi}, {lo}, VOPDOp)"
     if name == "vdsty": return f"VDSTYField({hi}, {lo})"
     if name in _VGPR_FIELDS and bits == 8: return f"VGPRField({hi}, {lo})"
@@ -230,45 +266,123 @@ def write_ins(encodings, enums, arch, path):
     if name.startswith("ssrc") and bits == 8: return f"SSrcField({hi}, {lo})"
     if name in ("saddr", "soffset") and bits == 8: return f"SSrcField({hi}, {lo}, default=NULL)"
     if name.startswith("src") and bits == 9: return f"SrcField({hi}, {lo})"
-    if fmt == "VOP3P" and name == "opsel_hi": return f"BitField({hi}, {lo}, default=3)"
-    if fmt == "VOP3P" and name == "opsel_hi2": return f"BitField({hi}, {lo}, default=1)"
+    if base_fmt == "VOP3P" and name == "opsel_hi": return f"BitField({hi}, {lo}, default=3)"
+    if base_fmt == "VOP3P" and name == "opsel_hi2": return f"BitField({hi}, {lo}, default=1)"
     return f"BitField({hi}, {lo})"
   ORDER = ['encoding', 'op', 'opx', 'opy', 'vdst', 'vdstx', 'vdsty', 'sdst', 'vdata', 'sdata', 'addr', 'vaddr', 'data', 'data0', 'data1',
            'src0', 'srcx0', 'srcy0', 'vsrc0', 'ssrc0', 'src1', 'vsrc1', 'vsrcx1', 'vsrcy1', 'ssrc1', 'src2', 'vsrc2', 'src3', 'vsrc3',
-           'saddr', 'sbase', 'srsrc', 'ssamp', 'soffset', 'offset', 'simm16', 'en', 'target', 'attr', 'attr_chan',
+           'saddr', 'sbase', 'srsrc', 'ssamp', 'soffset', 'offset', 'simm16', 'literal', 'en', 'target', 'attr', 'attr_chan',
            'omod', 'neg', 'neg_hi', 'abs', 'clmp', 'opsel', 'opsel_hi', 'waitexp', 'wait_va',
-           'dmask', 'dim', 'seg', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe', 'unrm', 'done', 'row']
+           'dmask', 'dim', 'seg', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe', 'unrm', 'done', 'row',
+           'dpp', 'fi', 'bc', 'row_mask', 'bank_mask', 'src0_neg', 'src0_abs', 'src1_neg', 'src1_abs',
+           'cbsz', 'abid', 'acc_cd', 'acc', 'blgp', 'lane_sel_0', 'lane_sel_1', 'lane_sel_2', 'lane_sel_3',
+           'lane_sel_4', 'lane_sel_5', 'lane_sel_6', 'lane_sel_7', 'dst_sel', 'dst_unused', 'src0_sel', 'src1_sel']
   sort_fields = lambda fields: sorted(fields, key=lambda f: (ORDER.index(f[0]) if f[0] in ORDER else 999, f[2]))
+
+  # Separate base encodings from variants
+  base_encodings, variant_encodings = {}, {}
+  for enc_name, data in encodings.items():
+    base = get_base_fmt(enc_name)
+    if base == enc_name: base_encodings[enc_name] = data
+    else: variant_encodings[enc_name] = data
+
+  # Build sets of ops by their vdst type from operand metadata
+  sdst_opcodes = {}  # ops where vdst is OPR_SREG (writes to SGPR)
+  for fmt, ops in enums.items():
+    for op, name in ops.items():
+      op_types = types.get((name, fmt), {})
+      vdst_type = op_types.get("vdst", (None, None, None))[2]
+      if vdst_type == "OPR_SREG": sdst_opcodes.setdefault(fmt, set()).add(op)
 
   lines = ["# autogenerated from AMD ISA XML - do not edit", "# ruff: noqa: F401,F403",
            "from extra.assembly.amd.dsl import *", f"from extra.assembly.amd.autogen.{arch}.enum import *", "import functools", ""]
-  for enc_name, (fields, enc_bits) in sorted(encodings.items()):
+
+  def fmt_allowed(op_enum: str, ops: set[int]) -> str:
+    """Format allowed ops as {EnumName.MEMBER, ...}."""
+    names = [f"{op_enum}.{enums[op_enum.removesuffix('Op')][op]}" for op in sorted(ops)]
+    return "{" + ", ".join(names) + "}"
+
+  # Generate base classes first
+  for enc_name, (fields, enc_bits) in sorted(base_encodings.items()):
+    # Get lit-only ops for this format (these can't be used in base class)
+    base_lit_ops = lit_only_ops.get(enc_name, set())
+    all_ops = set(enums.get(enc_name, {}).keys())
+    # Exclude SDST ops from base class (they need VOP1_SDST/VOP3_SDST/VOP3B)
+    base_allowed = all_ops - base_lit_ops - sdst_opcodes.get(enc_name, set())
     if enc_name in ("FLAT", "VFLAT"):
       prefix = "V" if enc_name == "VFLAT" else ""
       for cls, seg, op_enum in [(f"{prefix}FLAT", 0, f"{prefix}FLATOp"), (f"{prefix}GLOBAL", 2, f"{prefix}GLOBALOp"), (f"{prefix}SCRATCH", 1, f"{prefix}SCRATCHOp")]:
+        cls_ops = set(enums.get(cls, {}).keys())
         lines.append(f"class {cls}(Inst):")
         for fn, hi, lo in sort_fields(fields):
           if fn == "seg": lines.append(f"  seg = FixedBitField({hi}, {lo}, {seg})")
-          elif fn == "op": lines.append(f"  op = EnumBitField({hi}, {lo}, {op_enum})")
+          elif fn == "op": lines.append(f"  op = EnumBitField({hi}, {lo}, {op_enum}, {fmt_allowed(op_enum, cls_ops)})")
           else: lines.append(f"  {fn} = {field_def(fn, hi, lo, cls, enc_bits)}")
         lines.append("")
     elif enc_name not in ("FLAT_GLOBAL", "FLAT_SCRATCH", "FLAT_GLBL", "VGLOBAL", "VSCRATCH", "DPP", "SDWA"):
       lines.append(f"class {enc_name}(Inst):")
       for fn, hi, lo in sort_fields(fields):
-        lines.append(f"  {fn} = {field_def(fn, hi, lo, enc_name, enc_bits if fn == 'encoding' else None)}")
+        if fn == "op":
+          base_fmt = get_base_fmt(enc_name)
+          lines.append(f"  op = EnumBitField({hi}, {lo}, {base_fmt}Op, {fmt_allowed(f'{base_fmt}Op', base_allowed)})")
+        else:
+          lines.append(f"  {fn} = {field_def(fn, hi, lo, enc_name, enc_bits if fn == 'encoding' else None)}")
       lines.append("")
-  # SDST variants
-  for base, field in [("VOP1", "vdst = SSrcField(24, 17)"), ("VOP3", "vdst = SSrcField(7, 0)")]:
-    if base in encodings: lines += [f"class {base}_SDST({base}):", f"  {field}", ""]
+
+  # Generate variant classes that inherit from base (only add extra fields)
+  for enc_name, (fields, enc_bits) in sorted(variant_encodings.items()):
+    base = get_base_fmt(enc_name)
+    if base not in base_encodings: continue  # skip if no base class
+    base_fields = {f[0] for f in base_encodings[base][0]}
+    extra_fields = [(fn, hi, lo) for fn, hi, lo in fields if fn not in base_fields]
+    is_lit = enc_name.endswith("_LIT")
+    all_ops = set(enums.get(base, {}).keys())
+    if extra_fields or is_lit:
+      lines.append(f"class {enc_name}({base}):")
+      op_field = next((f for f in base_encodings[base][0] if f[0] == "op"), None)
+      # _LIT classes: override op to allow all opcodes (base excludes lit-only ops)
+      if op_field and is_lit:
+        _, hi, lo = op_field
+        lines.append(f"  op = EnumBitField({hi}, {lo}, {base}Op, {fmt_allowed(f'{base}Op', all_ops)})")
+      for fn, hi, lo in sort_fields(extra_fields):
+        lines.append(f"  {fn} = {field_def(fn, hi, lo, enc_name)}")
+      lines.append("")
+
+  # SDST variants (special case - redefine vdst field type, restrict to SDST ops)
+  for base, field_hi, field_lo in [("VOP1", 24, 17), ("VOP3", 7, 0)]:
+    if base not in base_encodings: continue
+    sdst_ops = sdst_opcodes.get(base, set())
+    if not sdst_ops: continue
+    op_field = next((f for f in base_encodings[base][0] if f[0] == "op"), None)
+    lines.append(f"class {base}_SDST({base}):")
+    if op_field:
+      _, hi, lo = op_field
+      lines.append(f"  op = EnumBitField({hi}, {lo}, {base}Op, {fmt_allowed(f'{base}Op', sdst_ops)})")
+    lines.append(f"  vdst = SSrcField({field_hi}, {field_lo})")
+    lines.append("")
+    # SDST_LIT class (for literals with SDST destination) - same ops, just adds literal field
+    lit_enc = variant_encodings.get(f"{base}_LIT")
+    if lit_enc:
+      lit_field = next((f for f in lit_enc[0] if f[0] == "literal"), None)
+      if lit_field:
+        lines.append(f"class {base}_SDST_LIT({base}_SDST):")
+        lines.append(f"  literal = BitField({lit_field[1]}, {lit_field[2]})")
+        lines.append("")
+
   # Instruction helpers
   lines.append("# instruction helpers")
-  SDST_OPS = {"V_READFIRSTLANE_B32", "V_READLANE_B32"}
   for fmt, ops in sorted(enums.items()):
-    if fmt not in encodings and fmt not in ("GLOBAL", "SCRATCH", "VGLOBAL", "VSCRATCH"): continue
+    if fmt not in base_encodings and fmt not in ("GLOBAL", "SCRATCH", "VGLOBAL", "VSCRATCH"): continue
     suffix = "_E32" if fmt in ("VOP1", "VOP2", "VOPC") else "_E64" if fmt == "VOP3" else ""
+    lit_ops = lit_only_ops.get(fmt, set())
+    fmt_sdst_ops = sdst_opcodes.get(fmt, set())
     for op, name in sorted(ops.items()):
       msuf = suffix if fmt != "VOP3" or op < 512 else ""
-      cls = "VOP1_SDST" if fmt == "VOP1" and name in SDST_OPS else "VOP3_SDST" if fmt == "VOP3" and (name in SDST_OPS or op < 256) else fmt
+      # Determine class: SDST variants, LIT-only instructions, or base
+      if fmt == "VOP1" and op in fmt_sdst_ops: cls = "VOP1_SDST"
+      elif fmt == "VOP3" and (op in fmt_sdst_ops or op < 256): cls = "VOP3_SDST"
+      elif op in lit_ops: cls = f"{fmt}_LIT"
+      else: cls = fmt
       lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
   with open(path, "w") as f: f.write("\n".join(lines))
 
@@ -316,9 +430,9 @@ if __name__ == "__main__":
   # First pass: parse XML for all architectures
   for arch, cfg in ARCHS.items():
     print(f"Parsing XML: {cfg['xml']} -> {arch}")
-    encodings, enums, types, fmts, op_types_set = parse_xml(cfg["xml"], arch)
+    encodings, enums, types, fmts, op_types_set, lit_only_ops = parse_xml(cfg["xml"])
     for fmt, ops in FIXES.get(arch, {}).items(): enums.setdefault(fmt, {}).update(ops)
-    arch_data[arch] = {"encodings": encodings, "enums": enums, "types": types}
+    arch_data[arch] = {"encodings": encodings, "enums": enums, "types": types, "lit_only_ops": lit_only_ops}
     for fmt, bits in fmts.items():
       assert fmt not in all_fmts or all_fmts[fmt] == bits, f"FMT_BITS mismatch for {fmt}: {all_fmts[fmt]} vs {bits}"
       all_fmts[fmt] = bits
@@ -331,7 +445,7 @@ if __name__ == "__main__":
   for arch, data in arch_data.items():
     base = pathlib.Path(__file__).parent / "autogen" / arch
     write_enum(data["enums"], base / "enum.py")
-    write_ins(data["encodings"], data["enums"], arch, base / "ins.py")
+    write_ins(data["encodings"], data["enums"], data["lit_only_ops"], data["types"], arch, base / "ins.py")
     write_operands(data["types"], data["enums"], arch, base / "operands.py")
     print(f"  {arch}: {len(data['encodings'])} encodings, {sum(len(v) for v in data['enums'].values())} instructions")
   # Second pass: parse PDFs and write pcode

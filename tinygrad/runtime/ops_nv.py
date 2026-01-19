@@ -578,7 +578,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.iface.rm_control(channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
 
     self.cmdq_page:HCQBuffer = self.iface.alloc(0x200000, cpu_access=True)
-    self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=cast(int, self.cmdq_page.va_addr), wrap=True)
+    self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=int(self.cmdq_page.va_addr), wrap=True)
     self.cmdq = self.cmdq_page.cpu_view().view(fmt='I')
 
     self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
