@@ -243,7 +243,7 @@ def _stmt(stmt, ctx: Ctx):
       # Bit slice: var[hi:lo] = value
       if hi is not None and lo is not None:
         if hi < lo: hi, lo = lo, hi
-        op_dt = dtypes.uint256 if hi >= 128 else dtypes.uint128 if hi >= 64 else dtypes.uint64 if hi >= 32 else dtypes.uint32
+        op_dt = dtypes._uint256 if hi >= 128 else dtypes._uint128 if hi >= 64 else dtypes.uint64 if hi >= 32 else dtypes.uint32
         base = _cast(ctx.vars.get(var, UOp.const(op_dt, 0)), op_dt)
         rhs_uop = _expr(rhs, ctx, dtype)
         rhs_bits = UOp(Ops.BITCAST, dtypes.uint16 if dtype == dtypes.float16 else dtypes.uint32 if dtype == dtypes.float32 else dtypes.uint64, (rhs_uop,)) if dtype in FLOATS else _cast(rhs_uop, op_dt)

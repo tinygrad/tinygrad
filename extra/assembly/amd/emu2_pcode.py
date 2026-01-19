@@ -130,7 +130,8 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         found_var = f'_found_{id(body_lines)}' if has_break else None
         if found_var: vars[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
         for loop_i in range(start_val, end_val + 1):
-          subst_lines = [re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', lambda m: f'[{_try_eval(m.group(1))} : {_try_eval(m.group(2))}]',
+          # Substitute loop variable, but avoid transforming Verilog +: or -: slice syntax
+          subst_lines = [re.sub(r'\[([^\]\[]+?)(?<![+-])\s*:\s*([^\]\[]+?)\]', lambda m: f'[{_try_eval(m.group(1))} : {_try_eval(m.group(2))}]',
                          re.sub(rf'\b{loop_var}\b', str(loop_i), re.sub(rf'(?<!\.)\b(\w+)\[{loop_var}\]', rf'\g<1>{{{loop_i}}}',
                          re.sub(rf'\.(\w+)\[{loop_var}\]', rf'.\g<1>[{loop_i}]', bl)))) for bl in body_lines if not re.match(r'break\b', bl.strip(), re.IGNORECASE)]
           _, iter_assigns = parse_block(subst_lines, 0)
@@ -524,7 +525,9 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     return _cast_to((_to_u32(parse_expr(m.group(1), vars)) >> _u32(int(m.group(2)))) & _u32(1), DTYPES.get(m.group(3), dtypes.uint32))
 
   if (result := _parse_func(expr, vars)) is not None: return result
-  return _u32(0)
+  # Check if this looks like a function call that we failed to handle
+  if re.match(r'\w+\s*\(.+\)', expr): raise RuntimeError(f"[pcode] unhandled function call: {expr}")
+  raise RuntimeError(f"[pcode] unhandled expression: {expr}")
 
 def _parse_lambda_body(body: str, vars: dict[str, UOp]) -> UOp:
   return _parse_lambda_block([l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')], 0, vars)[1]
@@ -649,8 +652,12 @@ def _register_funcs():
   _FUNC_TABLE.append((r'f64_to_u32\((.+)\)', 1, lambda a, v, m: _f_to_u(a[0].bitcast(dtypes.float64), dtypes.uint32)))
   _FUNC_TABLE.append((r'f16_to_f32\((.+)\)', 1, lambda a, v, m: _f16_extract(a[0]).cast(dtypes.float32)))
   _FUNC_TABLE.append((r'f32_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.half)))
+  _FUNC_TABLE.append((r'f32_to_f64\((.+)\)', 1, lambda a, v, m: a[0].bitcast(dtypes.float32).cast(dtypes.float64)))
+  _FUNC_TABLE.append((r'f64_to_f32\((.+)\)', 1, lambda a, v, m: a[0].bitcast(dtypes.float64).cast(dtypes.float32)))
   _FUNC_TABLE.append((r'f16_to_i16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.int16)))
   _FUNC_TABLE.append((r'f16_to_u16\((.+)\)', 1, lambda a, v, m: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.uint16)))
+  _FUNC_TABLE.append((r'i16_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.int16).cast(dtypes.half)))
+  _FUNC_TABLE.append((r'u16_to_f16\((.+)\)', 1, lambda a, v, m: a[0].cast(dtypes.uint16).cast(dtypes.half)))
   _FUNC_TABLE.append((r'bf16_to_f32\((.+)\)', 1, lambda a, v, m: (((a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32)))
 
   _FUNC_TABLE.append((r'isNAN\((.+)\)', 1, lambda a, v, m: _isnan(a[0])))
