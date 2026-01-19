@@ -257,9 +257,7 @@ class MemoryManager:
     assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"
     allocator = self.boot_allocator if boot else (self.ptable_allocator if self.reserve_ptable and ptable else self.pa_allocator)
     paddr = allocator.alloc(round_up(size, 0x1000), align)
-    if zero:
-      print("zeroing paddr", hex(paddr), "size", hex(size))
-      self.dev.vram[paddr:paddr+size] = bytes(size)
+    if zero: self.dev.vram[paddr:paddr+size] = bytes(size)
     return paddr
 
   def pfree(self, paddr:int, ptable=False): (self.ptable_allocator if self.reserve_ptable and ptable else self.pa_allocator).free(paddr)
