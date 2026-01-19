@@ -293,6 +293,13 @@ class Inst:
     if neg_bits: vals['neg'] = (vals.get('neg') or 0) | neg_bits
     if abs_bits: vals['abs'] = (vals.get('abs') or 0) | abs_bits
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
+    # CDNA SMEM: auto-set imm=1 when offset is an integer (not a register)
+    if 'imm' in vals and 'offset' in vals and vals.get('imm') is None:
+      if isinstance(vals.get('offset'), int) and vals['offset'] != 0:
+        vals['imm'] = 1
+        # Also set soffset to s[0] if not explicitly set (matches LLVM output)
+        if 'soffset' in vals and vals.get('soffset') is None:
+          vals['soffset'] = s[0]
     # For _LIT classes, capture literal value from SrcFields that encode to 255
     literal_val = None
     for name, field in self._fields:
@@ -336,6 +343,13 @@ class Inst:
     # MUBUF/MTBUF: vaddr size depends on offen/idxen (1 or 2 regs)
     if 'vaddr' in bits and hasattr(self, 'offen') and hasattr(self, 'idxen'):
       bits['vaddr'] = max(1, self.offen + self.idxen) * 32
+    # MFMA FP8/FP6/FP4: src0/src1 size depends on cbsz field (bits 10:8)
+    # cbsz=0: FP8 (1x), cbsz=1,2: FP6 (0.75x), cbsz=3: FP4 (0.5x)
+    if 'f8f6f4' in getattr(self, 'op_name', '').lower():
+      cbsz = (self._raw >> 8) & 0x7  # cbsz is bits[10:8]
+      ratio = {0: 1.0, 1: 0.75, 2: 0.75, 3: 0.5}.get(cbsz, 1.0)
+      if 'src0' in bits: bits['src0'] = int(bits['src0'] * ratio)
+      if 'src1' in bits: bits['src1'] = int(bits['src1'] * ratio)
     return bits
   @property
   def op_regs(self) -> dict[str, int]:

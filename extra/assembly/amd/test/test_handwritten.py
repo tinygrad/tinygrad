@@ -129,18 +129,15 @@ class TestIntegration(_TestIntegration):
 
 class TestIntegrationCDNA(_TestIntegration):
   arch = "cdna"
-  @unittest.skip("fails, it inserts SGPR for the integer offset field")
   def test_smem(self):
     from extra.assembly.amd.autogen.cdna.ins import s_load_dwordx2
     self.inst = s_load_dwordx2(s[0:1], s[0:1], offset=1)
 
-  @unittest.skip("fails due to wrong src2 disassembly")
   def test_mfma(self):
     from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x16_f16
     # src2=0 should give the literal, it's currently giving a[128:131]
     self.inst = v_mfma_f32_16x16x16_f16(v[0:3], v[0:1], v[0:1], 0, clmp=1, opsel_hi=0)
 
-  @unittest.skip("src0 _is_ 6 registers when cbsz:2, dsl doesn't accept it")
   def test_mfma_fp8(self):
     from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x128_f8f6f4
     self.inst = v_mfma_f32_16x16x128_f8f6f4(v[0:3], v[0:5], v[0:5], 1, clmp=1, opsel_hi=0, neg_hi=2, neg=2)
