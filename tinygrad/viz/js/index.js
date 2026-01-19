@@ -323,10 +323,14 @@ async function renderProfiler(path, unit, opts) {
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
+    const [pcolor, scolor] = path.includes("pkts") ? ["#00c72f", "#858b9d"] : ["#9ea2ad", null];
+    // last row doesn't get a border
+    const rowBorderColor = i<layoutsLen ? "#22232a" : null;
+    if (rowBorderColor != null) div.style("border-bottom", `1px solid ${rowBorderColor}`);
     if (eventType === EventTypes.EXEC) {
       const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
       const levels = [];
-      data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
+      data.tracks.set(k, { shapes, eventType, visible, offsetY, scolor, pcolor, rowBorderColor });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -373,7 +377,9 @@ async function renderProfiler(path, unit, opts) {
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
         if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
-      div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
+      const height = levelHeight*levels.length;
+      div.style("height", height+padding+"px").style("pointerEvents", "none");
+      data.tracks.get(k).height = Math.max(rect(div.node()).height-padding, levelHeight*levels.length);
     } else {
       const peak = u64();
       let x = 0, y = 0;
@@ -434,7 +440,7 @@ async function renderProfiler(path, unit, opts) {
       }
       if (timestamps.length > 0) data.first = data.first == null ? timestamps[0] : Math.min(data.first, timestamps[0]);
       data.tracks.set(k, { shapes:[sum], eventType, visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height,
-                           views:[[sum], shapes], valueMap });
+                           views:[[sum], shapes], valueMap, rowBorderColor });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -479,8 +485,9 @@ async function renderProfiler(path, unit, opts) {
     ctx.textBaseline = "middle";
     // draw shapes
     const paths = [];
-    for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
+    for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor, height, rowBorderColor }] of data.tracks) {
       visible.length = 0;
+      const addBorder = scolor != null ? (p,w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(p); } } : null;
       for (const e of shapes) {
         const p = new Path2D();
         if (eventType === EventTypes.BUF) { // generic polygon
@@ -504,10 +511,16 @@ async function renderProfiler(path, unit, opts) {
           p.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
+          addBorder?.(p, width);
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
         if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
+      }
+      // draw row line
+      if (rowBorderColor != null) {
+        const y = offsetY+height+padding/2 - 0.5;
+        drawLine(ctx, [0, canvasWidth], [y, y], { color:rowBorderColor });
       }
     }
     // draw axes

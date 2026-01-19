@@ -50,6 +50,21 @@ class TestJitFootguns(unittest.TestCase):
 
     self.assertEqual([r1.item(), r2.item(), r3.item()], [2, 4, 6])
 
+  def test_multiple_outputs_same_intermediate(self):
+    """Multiple outputs derived from the same intermediate - JIT copies aliased inputs to prevent hazard."""
+    @TinyJit
+    def f(buf, frame):
+      new_buf = buf[1:].cat(frame, dim=0)
+      return new_buf.contiguous(), new_buf[:1].contiguous()
+
+    buf = Tensor([[0], [1], [2]]).contiguous().realize()
+    for i in range(4):
+      frame = Tensor([[10+i]]).contiguous().realize()
+      expected_first = buf[1:2].numpy().item()
+      new_buf, first = f(buf, frame)
+      self.assertEqual(first.numpy().item(), expected_first)
+      buf = new_buf
+
   def test_slice_assign_requires_realize(self):
     """Slice assign then read from same buffer - assign isn't connected to read without explicit realize()."""
     from tinygrad import Variable
