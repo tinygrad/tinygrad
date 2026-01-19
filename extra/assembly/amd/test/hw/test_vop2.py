@@ -341,6 +341,163 @@ class TestHiHalfOps(unittest.TestCase):
       self.assertEqual(result, 0x4200, f"Lane {lane}: expected 0x4200, got 0x{result:04x}")
 
 
+class TestVop2F16HiHalf(unittest.TestCase):
+  """Regression tests for VOP2 f16 hi-half operand handling.
+
+  These test the bugs where:
+  1. VOP2 vsrc1 >= 384 (v[128]+) wasn't extracting hi 16 bits
+  2. VOP2 vdst >= 384 (v[128]+) wasn't preserving lo 16 bits
+  """
+
+  def test_v_add_f16_e32_vsrc1_hi_half(self):
+    """V_ADD_F16_E32 with vsrc1 from hi-half (v[128]+).
+
+    When vsrc1 >= 384 (representing v[128]+), the hardware reads from the hi 16 bits
+    of v[vsrc1-128]. The emulator must extract bits [31:16] from the actual VGPR.
+
+    Regression test for: VOP2 f16 vsrc1 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0x40003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # v_add_f16_e32 v[1], v[0], v[128]  (vsrc1=v[128] reads hi of v[0])
+      # In VOP2 encoding, vsrc1=384 means v[128], which maps to v[0].hi
+      # v[1] = v[0].lo + v[0].hi = 1.0 + 2.0 = 3.0
+      VOP2(VOP2Op.V_ADD_F16, vdst=v[1], src0=v[0], vsrc1=v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    # 1.0 + 2.0 = 3.0, f16 3.0 = 0x4200
+    self.assertEqual(result, 0x4200, f"Expected f16(3.0)=0x4200, got 0x{result:04x}")
+
+  def test_v_mul_f16_e32_vsrc1_hi_half(self):
+    """V_MUL_F16_E32 with vsrc1 from hi-half.
+
+    Regression test for: VOP2 f16 vsrc1 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4200_4000: hi=f16(3.0), lo=f16(2.0)
+      s_mov_b32(s[0], 0x42004000),
+      v_mov_b32_e32(v[0], s[0]),
+      # v_mul_f16_e32 v[1], v[0], v[128]  (vsrc1=v[128] reads hi of v[0])
+      # v[1] = v[0].lo * v[0].hi = 2.0 * 3.0 = 6.0
+      VOP2(VOP2Op.V_MUL_F16, vdst=v[1], src0=v[0], vsrc1=v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    # 2.0 * 3.0 = 6.0, f16 6.0 = 0x4600
+    self.assertEqual(result, 0x4600, f"Expected f16(6.0)=0x4600, got 0x{result:04x}")
+
+  def test_v_add_f16_e32_vdst_hi_half(self):
+    """V_ADD_F16_E32 writing to hi-half destination (v[128]+).
+
+    When vdst >= 384 (representing v[128]+), the hardware writes to bits [31:16]
+    of v[vdst-128] while preserving bits [15:0]. The emulator must merge the result.
+
+    Regression test for: VOP2 f16 vdst hi-half write bug.
+    """
+    instructions = [
+      # v[0] = 0x0000_BEEF: lo has marker value
+      s_mov_b32(s[0], 0x0000BEEF),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = f16(1.0), v[2] = f16(2.0)
+      s_mov_b32(s[1], 0x3c00),
+      s_mov_b32(s[2], 0x4000),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      # v_add_f16_e32 v[128], v[1], v[2]  (vdst=v[128] writes hi of v[0])
+      # v[0].hi = 1.0 + 2.0 = 3.0, v[0].lo preserved = 0xBEEF
+      VOP2(VOP2Op.V_ADD_F16, vdst=v[128], src0=v[1], vsrc1=v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    hi = (st.vgpr[0][0] >> 16) & 0xffff
+    lo = st.vgpr[0][0] & 0xffff
+    # hi = 3.0 = 0x4200, lo preserved = 0xBEEF
+    self.assertEqual(hi, 0x4200, f"Expected hi=f16(3.0)=0x4200, got 0x{hi:04x}")
+    self.assertEqual(lo, 0xBEEF, f"Expected lo preserved=0xBEEF, got 0x{lo:04x}")
+
+  def test_v_mul_f16_e32_vdst_hi_half(self):
+    """V_MUL_F16_E32 writing to hi-half destination.
+
+    Regression test for: VOP2 f16 vdst hi-half write bug.
+    """
+    instructions = [
+      # v[0] = 0x0000_DEAD: lo has marker value
+      s_mov_b32(s[0], 0x0000DEAD),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = f16(2.0), v[2] = f16(4.0)
+      s_mov_b32(s[1], 0x4000),
+      s_mov_b32(s[2], 0x4400),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      # v_mul_f16_e32 v[128], v[1], v[2]  (vdst=v[128] writes hi of v[0])
+      # v[0].hi = 2.0 * 4.0 = 8.0, v[0].lo preserved = 0xDEAD
+      VOP2(VOP2Op.V_MUL_F16, vdst=v[128], src0=v[1], vsrc1=v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    hi = (st.vgpr[0][0] >> 16) & 0xffff
+    lo = st.vgpr[0][0] & 0xffff
+    # hi = 8.0 = 0x4800, lo preserved = 0xDEAD
+    self.assertEqual(hi, 0x4800, f"Expected hi=f16(8.0)=0x4800, got 0x{hi:04x}")
+    self.assertEqual(lo, 0xDEAD, f"Expected lo preserved=0xDEAD, got 0x{lo:04x}")
+
+  def test_v_add_f16_e32_both_hi_half(self):
+    """V_ADD_F16_E32 with both vsrc1 and vdst as hi-half (different underlying regs).
+
+    Tests the combination of both fixes: reading vsrc1 from hi-half AND
+    writing result to hi-half destination, using different underlying VGPRs.
+
+    Regression test for: VOP2 f16 hi-half bugs (combined).
+    """
+    instructions = [
+      # v[0] = 0x4000_xxxx: hi=f16(2.0) for vsrc1
+      s_mov_b32(s[0], 0x40000000),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = 0x0000_3c00: lo=f16(1.0) for src0
+      s_mov_b32(s[1], 0x00003c00),
+      v_mov_b32_e32(v[1], s[1]),
+      # v[2] = 0x0000_CAFE: lo=marker for vdst preservation
+      s_mov_b32(s[2], 0x0000CAFE),
+      v_mov_b32_e32(v[2], s[2]),
+      # v_add_f16_e32 v[130], v[1], v[128]
+      # src0 = v[1].lo = 1.0
+      # vsrc1 = v[128] reads v[0].hi = 2.0
+      # result = 1.0 + 2.0 = 3.0
+      # vdst = v[130] writes to v[2].hi, preserving v[2].lo
+      VOP2(VOP2Op.V_ADD_F16, vdst=v[130], src0=v[1], vsrc1=v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    hi = (st.vgpr[0][2] >> 16) & 0xffff
+    lo = st.vgpr[0][2] & 0xffff
+    # hi = 3.0 = 0x4200, lo preserved = 0xCAFE
+    self.assertEqual(hi, 0x4200, f"Expected hi=f16(3.0)=0x4200, got 0x{hi:04x}")
+    self.assertEqual(lo, 0xCAFE, f"Expected lo preserved=0xCAFE, got 0x{lo:04x}")
+
+  def test_v_fmac_f16_e32_vsrc1_hi_half(self):
+    """V_FMAC_F16_E32 with vsrc1 from hi-half.
+
+    V_FMAC_F16: vdst = vdst + src0 * vsrc1
+
+    Regression test for: VOP2 f16 vsrc1 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0x40003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = f16(3.0) = 0x4200
+      s_mov_b32(s[1], 0x4200),
+      v_mov_b32_e32(v[1], s[1]),
+      # v_fmac_f16_e32 v[1], v[0], v[128]
+      # vdst = v[1] = 3.0 + v[0].lo * v[0].hi = 3.0 + 1.0 * 2.0 = 5.0
+      VOP2(VOP2Op.V_FMAC_F16, vdst=v[1], src0=v[0], vsrc1=v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    # 3.0 + 1.0 * 2.0 = 5.0, f16 5.0 = 0x4500
+    self.assertEqual(result, 0x4500, f"Expected f16(5.0)=0x4500, got 0x{result:04x}")
+
+
 class TestCndmask(unittest.TestCase):
   """Tests for V_CNDMASK_B32 and V_CNDMASK_B16."""
 

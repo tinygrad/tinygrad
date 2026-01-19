@@ -1374,6 +1374,96 @@ class TestFloorEdgeCases(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][1]), -1.0, places=5)
 
 
+class TestVop1F16HiHalf(unittest.TestCase):
+  """Regression tests for VOP1 f16 hi-half source operand handling.
+
+  For 16-bit VOP1 operations, when src0 is in the range v[128]+ (offset >= 384),
+  the hardware reads from the high 16 bits of v[src0-128]. The emulator must
+  extract bits [31:16] from the actual VGPR.
+  """
+
+  def test_v_cvt_f32_f16_src_hi_half(self):
+    """V_CVT_F32_F16 with source from hi-half (v[128]+).
+
+    When src0 >= v[128], it reads from the high 16 bits of v[src0-128].
+    This is critical for global_load_d16_hi_b16 + v_cvt_f32_f16 patterns.
+
+    Regression test for: VOP1 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0x40003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # v_cvt_f32_f16 v[1], v[128] (reads hi half of v[0])
+      # Should convert f16(2.0) to f32(2.0)
+      v_cvt_f32_f16_e32(v[1], v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertAlmostEqual(result, 2.0, places=5, msg=f"Expected f32(2.0), got {result}")
+
+  def test_v_cvt_f32_f16_src_lo_vs_hi(self):
+    """V_CVT_F32_F16 comparing lo and hi half reads.
+
+    v[0] has different values in lo and hi halves.
+    v_cvt_f32_f16 v[1], v[0] should read lo (1.0)
+    v_cvt_f32_f16 v[2], v[128] should read hi (2.0)
+
+    Regression test for: VOP1 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0x40003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # Read from lo half
+      v_cvt_f32_f16_e32(v[1], v[0]),
+      # Read from hi half
+      v_cvt_f32_f16_e32(v[2], v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_lo = i2f(st.vgpr[0][1])
+    result_hi = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result_lo, 1.0, places=5, msg=f"Expected f32(1.0) from lo, got {result_lo}")
+    self.assertAlmostEqual(result_hi, 2.0, places=5, msg=f"Expected f32(2.0) from hi, got {result_hi}")
+
+  def test_v_cvt_i16_f16_src_hi_half(self):
+    """V_CVT_I16_F16 with source from hi-half.
+
+    Regression test for: VOP1 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0xc000_3c00: hi=f16(-2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0xc0003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # v_cvt_i16_f16 v[1], v[128] (reads hi half of v[0])
+      # Should convert f16(-2.0) to i16(-2)
+      v_cvt_i16_f16_e32(v[1], v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    expected = (-2) & 0xffff
+    self.assertEqual(result, expected, f"Expected i16(-2)=0x{expected:04x}, got 0x{result:04x}")
+
+  def test_v_mov_b16_src_hi_half(self):
+    """V_MOV_B16 with source from hi-half.
+
+    Regression test for: VOP1 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0xBEEF_DEAD: hi=0xBEEF, lo=0xDEAD
+      s_mov_b32(s[0], 0xBEEFDEAD),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = 0x0000_0000 initially
+      v_mov_b32_e32(v[1], 0),
+      # v_mov_b16 v[1], v[128] (reads hi half of v[0])
+      # Should move 0xBEEF to v[1].lo
+      v_mov_b16_e32(v[1], v[128]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xffff
+    self.assertEqual(result, 0xBEEF, f"Expected 0xBEEF from hi half, got 0x{result:04x}")
+
+
 class TestReciprocalF16(unittest.TestCase):
   """Tests for V_RCP_F16 - reciprocal in half precision.
 

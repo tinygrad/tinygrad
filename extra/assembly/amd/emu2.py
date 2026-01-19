@@ -160,9 +160,10 @@ def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = Non
   for dest, val in assigns:
     if dest.startswith(f'{data_prefix}['):
       if (m := re.match(rf'{data_prefix}\[(\d+)\s*:\s*(\d+)\]', dest)):
-        low_bit, dword_idx = int(m.group(2)), int(m.group(2)) // 32
-        # D16 loads preserve bits - use final value from pcode_vars
-        if pcode_vars and 'D16' in op_name and dword_idx == 0 and low_bit > 0:
+        hi_bit, low_bit = int(m.group(1)), int(m.group(2))
+        dword_idx = low_bit // 32
+        # D16 loads preserve bits - use final value from pcode_vars which has hi bits preserved
+        if pcode_vars and 'D16' in op_name and dword_idx == 0 and hi_bit < 32:
           slices[0] = _to_u32(pcode_vars.get(data_prefix, val))
         else: slices[dword_idx] = _to_u32(val)
     elif dest.startswith(data_prefix): slices[0] = _to_u32(val)
@@ -430,13 +431,30 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     assert pcode_result is not None, f"no pcode for VOP1: {op_name}"
     return pcode_result
   lane, exec_mask, sizes = UOp.range(32, _next_axis_id(), AxisType.LOOP), ctx.rsgpr(EXEC_LO.offset), getattr(inst, 'op_regs', {})
+  is_16bit = _is_16bit_op(op_name)
   vdst_reg = inst.vdst.offset - 256
-  write_hi_half = isinstance(inst, VOP1) and _is_16bit_op(op_name) and vdst_reg >= 128
+  write_hi_half = is_16bit and vdst_reg >= 128
   if write_hi_half: vdst_reg -= 128
   if isinstance(inst, VOP1):
-    srcs = {'S0': ctx.rsrc_sized(inst.src0.offset, lane, sizes, 'src0')}
+    # Handle VOP1 hi-half source operand (src0 >= v[128] for 16-bit ops)
+    src0_off = inst.src0.offset
+    if is_16bit and src0_off >= 384:  # v[128]+ in src encoding
+      src0_reg = src0_off - 256 - 128  # actual VGPR index
+      s0 = ctx.rvgpr(src0_reg, lane)
+      s0 = (s0 >> U32_16) & _c(0xFFFF)  # extract hi 16 bits
+    else:
+      s0 = ctx.rsrc_sized(src0_off, lane, sizes, 'src0')
+    srcs = {'S0': s0}
   else:
-    srcs = {'S0': ctx.rsrc(inst.src0.offset, lane), 'S1': ctx.rsrc(inst.vsrc1.offset, lane), 'D0': ctx.rvgpr(vdst_reg, lane)}
+    vsrc1_reg = inst.vsrc1.offset - 256
+    vsrc1_hi = is_16bit and vsrc1_reg >= 128
+    vsrc1_actual = vsrc1_reg - 128 if vsrc1_hi else vsrc1_reg
+    s1 = ctx.rvgpr(vsrc1_actual, lane)
+    if vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)  # extract hi 16 bits
+    # For FMAC/FMAMK hi-half dest, D0 must also read from hi-half (accumulator is in same half as dest)
+    d0 = ctx.rvgpr(vdst_reg, lane)
+    if write_hi_half: d0 = (d0 >> U32_16) & _c(0xFFFF)  # extract hi 16 bits for accumulator
+    srcs = {'S0': ctx.rsrc(inst.src0.offset, lane), 'S1': s1, 'D0': d0}
     if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
       srcs['SIMM32'] = UOp.const(dtypes.uint32, ctx.literal)
   pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name,
