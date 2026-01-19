@@ -348,6 +348,99 @@ class TestF16Conversions(unittest.TestCase):
     self.assertEqual(result, 1, f"Expected 1 from high bits, got {result}")
 
 
+class TestF64Conversions(unittest.TestCase):
+  """Tests for f64 conversion instructions. Regression tests for f32_to_f64/f64_to_f32."""
+
+  def test_v_cvt_f64_f32_one(self):
+    """V_CVT_F64_F32 converts f32 1.0 to f64."""
+    instructions = [
+      s_mov_b32(s[0], f2i(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_f32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, 1.0, places=10)
+
+  def test_v_cvt_f64_f32_negative(self):
+    """V_CVT_F64_F32 converts f32 -2.5 to f64."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-2.5)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_f32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, -2.5, places=10)
+
+  def test_v_cvt_f64_f32_pi(self):
+    """V_CVT_F64_F32 converts f32 pi to f64."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], f2i(3.14159265)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f64_f32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertAlmostEqual(result, 3.14159265, places=5)
+
+  def test_v_cvt_f64_f32_zero(self):
+    """V_CVT_F64_F32 converts f32 0.0 to f64."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_cvt_f64_f32_e32(v[2:3], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f((st.vgpr[0][3] << 32) | st.vgpr[0][2])
+    self.assertEqual(result, 0.0)
+
+  def test_v_cvt_f32_f64_one(self):
+    """V_CVT_F32_F64 converts f64 1.0 to f32."""
+    f64_bits = f2i64(1.0)
+    lo, hi = f64_bits & 0xFFFFFFFF, (f64_bits >> 32) & 0xFFFFFFFF
+    instructions = [
+      s_mov_b32(s[0], lo),
+      s_mov_b32(s[1], hi),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_f32_f64_e32(v[2], v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result, 1.0, places=5)
+
+  def test_v_cvt_f32_f64_negative(self):
+    """V_CVT_F32_F64 converts f64 -3.5 to f32."""
+    f64_bits = f2i64(-3.5)
+    lo, hi = f64_bits & 0xFFFFFFFF, (f64_bits >> 32) & 0xFFFFFFFF
+    instructions = [
+      s_mov_b32(s[0], lo),
+      s_mov_b32(s[1], hi),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_f32_f64_e32(v[2], v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result, -3.5, places=5)
+
+  def test_v_cvt_f32_f64_large(self):
+    """V_CVT_F32_F64 converts large f64 to f32."""
+    f64_bits = f2i64(123456.789)
+    lo, hi = f64_bits & 0xFFFFFFFF, (f64_bits >> 32) & 0xFFFFFFFF
+    instructions = [
+      s_mov_b32(s[0], lo),
+      s_mov_b32(s[1], hi),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_f32_f64_e32(v[2], v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result, 123456.789, places=0)
+
+
 class TestClz(unittest.TestCase):
   """Tests for V_CLZ_I32_U32 - count leading zeros."""
 

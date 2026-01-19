@@ -174,8 +174,8 @@ class dtypes:
   uint32: Final[DType] = DType.new(6, 32, "unsigned int", 'I')
   int64: Final[DType] = DType.new(7, 64, "long", 'q')
   uint64: Final[DType] = DType.new(8, 64, "unsigned long", 'Q')
-  uint128: Final[DType] = DType.new(8, 128, "uint128", None)
-  uint256: Final[DType] = DType.new(8, 256, "uint256", None)
+  _uint128: Final[DType] = DType.new(8, 128, "uint128", None)  # internal: used by AMD emulator
+  _uint256: Final[DType] = DType.new(8, 256, "uint256", None)  # internal: used by AMD emulator
   fp8e4m3: Final[DType] = DType.new(9, 8, "float8_e4m3", None)
   fp8e5m2: Final[DType] = DType.new(10, 8, "float8_e5m2", None)
   float16: Final[DType] = DType.new(11, 16, "half", 'e')
@@ -230,7 +230,7 @@ def least_upper_dtype(*ds:DType) -> DType:
       if not (images:=[d for d in ds if isinstance(d, ImageDType)]) else images[0]
 def least_upper_float(dt:DType) -> DType: return dt if dtypes.is_float(dt) else least_upper_dtype(dt, dtypes.default_float)
 
-DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index"))}
+DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) and not k.startswith(("default", "void", "index", "_"))}
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "index":"index"}
 
 @functools.cache
