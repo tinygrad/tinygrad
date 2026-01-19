@@ -5,7 +5,7 @@ from io import BufferedReader
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
 from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
-from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype
+from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import is_dtype_supported, Device
 
 # ***** protobuf definitions ******
@@ -33,7 +33,7 @@ class OnnxDataType(enum.IntEnum):
   FLOAT = 1; UINT8 = 2; INT8 = 3; UINT16 = 4; INT16 = 5; INT32 = 6; INT64 = 7; BOOL = 9; FLOAT16 = 10; DOUBLE = 11; UINT32 = 12 # noqa: E702
   UINT64 = 13; BFLOAT16 = 16 # noqa: E702
 
-  def to_dtype(self) -> DType: return dtypes.fields()[self.name.lower()]
+  def to_dtype(self) -> DType: return DTYPES_DICT[self.name.lower()]
 
 def dtype_fallback(dtype: DType, fallback_context: str) -> DType:
   if is_dtype_supported(dtype): return dtype
