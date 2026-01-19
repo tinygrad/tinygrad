@@ -606,13 +606,22 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   if pcode is not None:
     if 'FMA_MIX' in op_name:
       combined_opsel_hi = (opsel_hi & 0x3) | ((opsel_hi2 & 0x1) << 2)
-      def apply_neg(v, bit, opsel_hi_bit, opsel_bit):
+      # For FMA_MIX: neg_hi is ABS (not neg!), neg is actual negation
+      def apply_abs(v, bit, opsel_hi_bit, opsel_bit):
         if not (neg_hi & bit): return v
-        if not (combined_opsel_hi & opsel_hi_bit): return v ^ UOp.const(dtypes.uint32, 0x80000000)
-        if opsel & opsel_bit: return v ^ UOp.const(dtypes.uint32, 0x80000000)
-        return v ^ UOp.const(dtypes.uint32, 0x00008000)
-      srcs = {'S0': apply_neg(src0, 1, 1, 1), 'S1': apply_neg(src1, 2, 2, 2),
-              'S2': apply_neg(src2, 4, 4, 4) if src2 is not None else UOp.const(dtypes.uint32, 0),
+        # Apply abs based on whether source is f32 or f16
+        if not (combined_opsel_hi & opsel_hi_bit): return v & UOp.const(dtypes.uint32, 0x7FFFFFFF)  # f32 abs
+        if opsel & opsel_bit: return v & UOp.const(dtypes.uint32, 0x7FFF0000)  # f16 hi abs (preserve lo)
+        return v & UOp.const(dtypes.uint32, 0xFFFF7FFF)  # f16 lo abs (preserve hi)
+      def apply_neg_mix(v, bit, opsel_hi_bit, opsel_bit):
+        if not (neg & bit): return v
+        if not (combined_opsel_hi & opsel_hi_bit): return v ^ UOp.const(dtypes.uint32, 0x80000000)  # f32 neg
+        if opsel & opsel_bit: return v ^ UOp.const(dtypes.uint32, 0x80000000)  # f16 hi neg
+        return v ^ UOp.const(dtypes.uint32, 0x00008000)  # f16 lo neg
+      s0_mod = apply_neg_mix(apply_abs(src0, 1, 1, 1), 1, 1, 1)
+      s1_mod = apply_neg_mix(apply_abs(src1, 2, 2, 2), 2, 2, 2)
+      s2_mod = apply_neg_mix(apply_abs(src2, 4, 4, 4), 4, 4, 4) if src2 is not None else UOp.const(dtypes.uint32, 0)
+      srcs = {'S0': s0_mod, 'S1': s1_mod, 'S2': s2_mod,
               'OPSEL_HI': UOp.const(dtypes.uint32, combined_opsel_hi), 'OPSEL': UOp.const(dtypes.uint32, opsel)}
     else:
       srcs = {'S0': s0_new, 'S1': s1_new}
@@ -757,8 +766,8 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   ctx = _Ctx(sgpr, vgpr, vmem, lds, literal, inst_words)
 
   handler = _INST_HANDLERS.get(type(inst))
-  if handler is not None: return handler(inst, ctx, name)
-  return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
+  if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
+  return handler(inst, ctx, name)
 
 def compile_inst(data: bytes) -> tuple[str, UOp]:
   inst = decode_inst(data)

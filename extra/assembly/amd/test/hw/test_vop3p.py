@@ -197,6 +197,61 @@ class TestFmaMix(unittest.TestCase):
     result = i2f(st.vgpr[0][3])
     self.assertAlmostEqual(result, 7.0, places=5)
 
+  def test_v_fma_mix_f32_with_abs_f16_src2_lo(self):
+    """V_FMA_MIX_F32 with abs modifier on f16 src2 (lo half). Regression test for sin(1.0) bug."""
+    from extra.assembly.amd.emu import f32_to_f16
+    f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
+    instructions = [
+      s_mov_b32(s[0], f2i(0.0)),  # src0 = 0.0 (f32)
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(1.0)),  # src1 = 1.0 (f32)
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f16_neg1),  # src2 = -1.0 (f16 in lo)
+      v_mov_b32_e32(v[2], s[2]),
+      # 0*1 + abs(-1.0) = 1.0; neg_hi=4 means abs on src2, opsel_hi2=1 means src2 is f16
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=1, neg_hi=4),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 1.0, places=5)
+
+  def test_v_fma_mix_f32_with_neg_f16_src2_lo(self):
+    """V_FMA_MIX_F32 with neg modifier on f16 src2 (lo half)."""
+    from extra.assembly.amd.emu import f32_to_f16
+    f16_1 = f32_to_f16(1.0)  # 0x3c00
+    instructions = [
+      s_mov_b32(s[0], f2i(0.0)),  # src0 = 0.0 (f32)
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(1.0)),  # src1 = 1.0 (f32)
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f16_1),  # src2 = 1.0 (f16 in lo)
+      v_mov_b32_e32(v[2], s[2]),
+      # 0*1 + neg(1.0) = -1.0; neg=4 means neg on src2, opsel_hi2=1 means src2 is f16
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=1, neg=4),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, -1.0, places=5)
+
+  def test_v_fma_mix_f32_with_abs_f16_src2_hi(self):
+    """V_FMA_MIX_F32 with abs modifier on f16 src2 (hi half)."""
+    from extra.assembly.amd.emu import f32_to_f16
+    f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
+    val = (f16_neg1 << 16) | 0  # -1.0 in hi, 0 in lo
+    instructions = [
+      s_mov_b32(s[0], f2i(0.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(1.0)),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], val),
+      v_mov_b32_e32(v[2], s[2]),
+      # opsel=4 selects hi half of src2; neg_hi=4 means abs on src2
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=4, opsel_hi=0, opsel_hi2=1, neg_hi=4),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 1.0, places=5)
+
   def test_v_fma_mixlo_f16(self):
     """V_FMA_MIXLO_F16 writes to low 16 bits of destination."""
     from extra.assembly.amd.emu import _f16
