@@ -579,6 +579,66 @@ class TestVOP3VOPC64Bit(unittest.TestCase):
     self.assertEqual(st.vcc & 1, 1, "0 < max_uint64 should be true")
 
 
+class TestVOPCF64(unittest.TestCase):
+  """Tests for VOPC (E32 encoding) with 64-bit float operands. Regression test for f64 compare bug."""
+
+  def test_v_cmp_lt_f64_e32_true(self):
+    """v_cmp_lt_f64_e32: 2.0 < 3.0 = true."""
+    lo0, hi0 = f2i64(2.0) & 0xffffffff, f2i64(2.0) >> 32
+    lo1, hi1 = f2i64(3.0) & 0xffffffff, f2i64(3.0) >> 32
+    instructions = [
+      s_mov_b32(s[0], lo0), s_mov_b32(s[1], hi0),
+      s_mov_b32(s[2], lo1), s_mov_b32(s[3], hi1),
+      v_mov_b32_e32(v[0], s[0]), v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]), v_mov_b32_e32(v[3], s[3]),
+      v_cmp_lt_f64_e32(v[0:1], v[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "2.0 < 3.0 should be true")
+
+  def test_v_cmp_lt_f64_e32_false(self):
+    """v_cmp_lt_f64_e32: 3.0 < 2.0 = false."""
+    lo0, hi0 = f2i64(3.0) & 0xffffffff, f2i64(3.0) >> 32
+    lo1, hi1 = f2i64(2.0) & 0xffffffff, f2i64(2.0) >> 32
+    instructions = [
+      s_mov_b32(s[0], lo0), s_mov_b32(s[1], hi0),
+      s_mov_b32(s[2], lo1), s_mov_b32(s[3], hi1),
+      v_mov_b32_e32(v[0], s[0]), v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]), v_mov_b32_e32(v[3], s[3]),
+      v_cmp_lt_f64_e32(v[0:1], v[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 0, "3.0 < 2.0 should be false")
+
+  def test_v_cmp_nlt_f64_e32_true(self):
+    """v_cmp_nlt_f64_e32: !(3.0 < 2.0) = true."""
+    lo0, hi0 = f2i64(3.0) & 0xffffffff, f2i64(3.0) >> 32
+    lo1, hi1 = f2i64(2.0) & 0xffffffff, f2i64(2.0) >> 32
+    instructions = [
+      s_mov_b32(s[0], lo0), s_mov_b32(s[1], hi0),
+      s_mov_b32(s[2], lo1), s_mov_b32(s[3], hi1),
+      v_mov_b32_e32(v[0], s[0]), v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]), v_mov_b32_e32(v[3], s[3]),
+      v_cmp_nlt_f64_e32(v[0:1], v[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "!(3.0 < 2.0) should be true")
+
+  def test_v_cmp_nlt_f64_e32_false(self):
+    """v_cmp_nlt_f64_e32: !(2.0 < 3.0) = false."""
+    lo0, hi0 = f2i64(2.0) & 0xffffffff, f2i64(2.0) >> 32
+    lo1, hi1 = f2i64(3.0) & 0xffffffff, f2i64(3.0) >> 32
+    instructions = [
+      s_mov_b32(s[0], lo0), s_mov_b32(s[1], hi0),
+      s_mov_b32(s[2], lo1), s_mov_b32(s[3], hi1),
+      v_mov_b32_e32(v[0], s[0]), v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]), v_mov_b32_e32(v[3], s[3]),
+      v_cmp_nlt_f64_e32(v[0:1], v[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 0, "!(2.0 < 3.0) should be false")
+
+
 class TestCmpxExec(unittest.TestCase):
   """Tests for V_CMPX instructions that modify EXEC mask."""
 

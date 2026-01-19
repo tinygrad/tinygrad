@@ -446,11 +446,14 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
 def _compile_vopc(inst: VOPC, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask, old_vcc, op_name = ctx.rsgpr(EXEC_LO.offset), ctx.rsgpr(VCC_LO.offset), _op_name(inst)
-  is_cmpx, is_16bit, vsrc1_reg = 'CMPX' in op_name, _is_16bit_op(op_name), inst.vsrc1.offset - 256
+  is_cmpx, is_16bit, is_64bit = 'CMPX' in op_name, _is_16bit_op(op_name), 'F64' in op_name
+  vsrc1_reg = inst.vsrc1.offset - 256
   vsrc1_hi, vsrc1_offset = is_16bit and vsrc1_reg >= 128, 256 + (vsrc1_reg - 128 if is_16bit and vsrc1_reg >= 128 else vsrc1_reg)
   pcode = PCODE.get(inst.op)
+  bits = 64 if is_64bit else 32
   def get_cmp_bit(i: int) -> UOp:
-    lc, s0, s1 = _c(i, dtypes.index), ctx.rsrc(inst.src0.offset, _c(i, dtypes.index)), ctx.rsrc(vsrc1_offset, _c(i, dtypes.index))
+    lc = _c(i, dtypes.index)
+    s0, s1 = ctx.rsrc(inst.src0.offset, lc, bits), ctx.rsrc(vsrc1_offset, lc, bits)
     if is_16bit and vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
     if pcode is None: return U32_0
     for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=lc)[1]:
