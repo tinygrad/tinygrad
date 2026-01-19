@@ -2740,5 +2740,76 @@ class TestVOP3VOPC(unittest.TestCase):
     self.assertEqual(st.sgpr[5], 0)  # NaN comparison is always FALSE
 
 
+class TestMin3Max3Unsigned(unittest.TestCase):
+  """Regression tests for V_MIN3/V_MAX3 with unsigned integer types.
+
+  The emulator's _minmax_reduce used UOp.minimum() which implements min(a,b) as
+  -max(-a,-b). This is broken for unsigned types because negation (mul by -1)
+  doesn't preserve ordering: for uint16, -0 = 0 but -5 = 65531, so
+  max(-0, -5) = max(0, 65531) = 65531, and -65531 = 5, giving min(0,5) = 5 (wrong!).
+
+  Fix: use comparison-based min/max for unsigned types: min(a,b) = (a<b)?a:b
+  """
+
+  def test_v_min3_u16_with_zero(self):
+    """V_MIN3_U16: min3(0, 3, 5) should return 0, not a wrong value."""
+    instructions = [
+      s_mov_b32(s[0], 0),   # 0
+      s_mov_b32(s[1], 3),   # 3
+      s_mov_b32(s[2], 5),   # 5
+      v_mov_b32_e32(v[0], s[0]),
+      v_min3_u16(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1] & 0xFFFF, 0)
+
+  def test_v_min3_u16_all_nonzero(self):
+    """V_MIN3_U16: min3(2, 5, 3) should return 2."""
+    instructions = [
+      s_mov_b32(s[0], 2),
+      s_mov_b32(s[1], 5),
+      s_mov_b32(s[2], 3),
+      v_mov_b32_e32(v[0], s[0]),
+      v_min3_u16(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1] & 0xFFFF, 2)
+
+  def test_v_min3_u32_with_zero(self):
+    """V_MIN3_U32: min3(0, 100, 50) should return 0."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 100),
+      s_mov_b32(s[2], 50),
+      v_mov_b32_e32(v[0], s[0]),
+      v_min3_u32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_v_max3_u16_basic(self):
+    """V_MAX3_U16: max3(0, 3, 5) should return 5."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 3),
+      s_mov_b32(s[2], 5),
+      v_mov_b32_e32(v[0], s[0]),
+      v_max3_u16(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1] & 0xFFFF, 5)
+
+  def test_v_min_u16_two_operand(self):
+    """V_MIN_U16 (two operand): min(0, 5) should return 0."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 5),
+      v_mov_b32_e32(v[0], s[0]),
+      v_min_u16(v[1], v[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1] & 0xFFFF, 0)
+
+
 if __name__ == '__main__':
   unittest.main()

@@ -454,7 +454,15 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     # For FMAC/FMAMK hi-half dest, D0 must also read from hi-half (accumulator is in same half as dest)
     d0 = ctx.rvgpr(vdst_reg, lane)
     if write_hi_half: d0 = (d0 >> U32_16) & _c(0xFFFF)  # extract hi 16 bits for accumulator
-    srcs = {'S0': ctx.rsrc(inst.src0.offset, lane), 'S1': s1, 'D0': d0}
+    # Handle VOP2 hi-half src0 operand (src0 >= v[128] for 16-bit ops)
+    src0_off = inst.src0.offset
+    if is_16bit and src0_off >= 384:  # v[128]+ in src encoding
+      src0_reg = src0_off - 256 - 128  # actual VGPR index
+      s0 = ctx.rvgpr(src0_reg, lane)
+      s0 = (s0 >> U32_16) & _c(0xFFFF)  # extract hi 16 bits
+    else:
+      s0 = ctx.rsrc(src0_off, lane)
+    srcs = {'S0': s0, 'S1': s1, 'D0': d0}
     if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
       srcs['SIMM32'] = UOp.const(dtypes.uint32, ctx.literal)
   pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name,
@@ -698,13 +706,25 @@ def _compile_ds(inst: DS, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   offset = getattr(inst, 'offset', offset0) or offset0
   def vreg(attr): return (getattr(inst, attr).offset - 256) if hasattr(inst, attr) and getattr(inst, attr).offset >= 256 else (getattr(inst, attr).offset if hasattr(inst, attr) else 0)
   data0_reg, data1_reg, vdst_reg = vreg('data0'), vreg('data1'), vreg('vdst')
+  has_data1 = hasattr(inst, 'data1') and inst.data1 is not None
   def make_srcs(lane: UOp) -> dict:
     base_addr = ctx.rvgpr(addr_reg, lane)
+    # Determine data width: B128 needs 4 VGPRs, B64 needs 2 VGPRs, B32 needs 1 VGPR
+    # For B128/B96: provide DATA as base 32-bit value and DATA1, DATA2, DATA3 for upper dwords
+    # The pcode parser uses DATA[63:32] which looks for DATA1 when lo >= 32
+    # Note: DATA2 (from data1 operand) is separate from DATA1 (second dword of data0)
+    if 'B128' in op_name or 'B96' in op_name:
+      data = {'DATA': ctx.rvgpr(data0_reg, lane), 'DATA1': ctx.rvgpr(data0_reg + 1, lane),
+              'DATA2': ctx.rvgpr(data0_reg + 2, lane), 'DATA3': ctx.rvgpr(data0_reg + 3, lane)}
+    elif 'B32' in op_name:
+      data = {'DATA': ctx.rvgpr(data0_reg, lane),
+              'DATA2': ctx.rvgpr(data1_reg, lane) if has_data1 else UOp.const(dtypes.uint32, 0)}
+    else:  # B64
+      data = {'DATA': _u64(ctx.rvgpr(data0_reg, lane), ctx.rvgpr(data0_reg + 1, lane)),
+              'DATA2': _u64(ctx.rvgpr(data1_reg, lane), ctx.rvgpr(data1_reg + 1, lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
     return {'ADDR': base_addr, 'ADDR_BASE': base_addr, 'OFFSET': UOp.const(dtypes.uint32, offset),
             'OFFSET0': UOp.const(dtypes.uint32, offset0), 'OFFSET1': UOp.const(dtypes.uint32, offset1),
-            'DATA': ctx.rvgpr(data0_reg, lane) if 'B32' in op_name else _u64(ctx.rvgpr(data0_reg, lane), ctx.rvgpr(data0_reg + 1, lane)),
-            'DATA2': ctx.rvgpr(data1_reg, lane) if 'B32' in op_name else _u64(ctx.rvgpr(data1_reg, lane), ctx.rvgpr(data1_reg + 1, lane)),
-            '_lds': ctx.lds}
+            '_lds': ctx.lds, **data}
   dummy_lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
   _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane, op_name=op_name)
   mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]

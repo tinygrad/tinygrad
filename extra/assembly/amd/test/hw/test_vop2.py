@@ -531,6 +531,53 @@ class TestVop2F16HiHalf(unittest.TestCase):
     self.assertEqual(hi, 0x4680, f"Expected hi=f16(6.5)=0x4680, got 0x{hi:04x}")
     self.assertEqual(lo, 0xDEAD, f"Expected lo preserved=0xDEAD, got 0x{lo:04x}")
 
+  def test_v_mul_f16_e32_src0_hi_half(self):
+    """V_MUL_F16_E32 with src0 from hi-half (src0 >= v[128]).
+
+    When src0 >= 384 (representing v[128]+), the hardware reads from the hi 16 bits
+    of v[src0-128]. The emulator must extract bits [31:16] from the actual VGPR.
+
+    Regression test for: VOP2 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0x40003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = f16(3.0) = 0x4200
+      s_mov_b32(s[1], 0x4200),
+      v_mov_b32_e32(v[1], s[1]),
+      # v_mul_f16_e32 v[2], v[128], v[1]
+      # src0 = v[128] reads from v[0].hi = 2.0
+      # result = 2.0 * 3.0 = 6.0
+      VOP2(VOP2Op.V_MUL_F16, vdst=v[2], src0=v[128], vsrc1=v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xffff
+    # 2.0 * 3.0 = 6.0, f16 6.0 = 0x4600
+    self.assertEqual(result, 0x4600, f"Expected f16(6.0)=0x4600, got 0x{result:04x}")
+
+  def test_v_add_f16_e32_src0_hi_half(self):
+    """V_ADD_F16_E32 with src0 from hi-half (src0 >= v[128]).
+
+    Regression test for: VOP2 f16 src0 hi-half extraction bug.
+    """
+    instructions = [
+      # v[0] = 0x4000_3c00: hi=f16(2.0), lo=f16(1.0)
+      s_mov_b32(s[0], 0x40003c00),
+      v_mov_b32_e32(v[0], s[0]),
+      # v[1] = f16(5.0) = 0x4500
+      s_mov_b32(s[1], 0x4500),
+      v_mov_b32_e32(v[1], s[1]),
+      # v_add_f16_e32 v[2], v[128], v[1]
+      # src0 = v[128] reads from v[0].hi = 2.0
+      # result = 2.0 + 5.0 = 7.0
+      VOP2(VOP2Op.V_ADD_F16, vdst=v[2], src0=v[128], vsrc1=v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xffff
+    # 2.0 + 5.0 = 7.0, f16 7.0 = 0x4700
+    self.assertEqual(result, 0x4700, f"Expected f16(7.0)=0x4700, got 0x{result:04x}")
+
 
 class TestCndmask(unittest.TestCase):
   """Tests for V_CNDMASK_B32 and V_CNDMASK_B16."""

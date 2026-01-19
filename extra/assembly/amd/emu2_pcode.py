@@ -588,11 +588,17 @@ def _check_nan(inner: str, vars: dict, quiet: bool) -> UOp:
 
 def _minmax_reduce(is_max, dt, args):
   def cast(v): return v.bitcast(dt) if dt == dtypes.float32 and v.dtype == dtypes.uint32 else v.cast(dt)
+  def minmax(a, b):
+    # For unsigned types, .minimum() uses -(-a).maximum(-b) which is broken (negation doesn't flip unsigned ordering)
+    # Use comparison-based min/max instead: max(a,b) = (a>b)?a:b, min(a,b) = (a<b)?a:b
+    if dt in (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.uint64):
+      return (a > b).where(a, b) if is_max else (a < b).where(a, b)
+    return a.maximum(b) if is_max else a.minimum(b)
   result = cast(args[0])
   for a in args[1:]:
     b = cast(a)
-    if dt == dtypes.float32: result = _isnan(result).where(b, _isnan(b).where(result, result.maximum(b) if is_max else result.minimum(b)))
-    else: result = result.maximum(b) if is_max else result.minimum(b)
+    if dt == dtypes.float32: result = _isnan(result).where(b, _isnan(b).where(result, minmax(result, b)))
+    else: result = minmax(result, b)
   return result
 
 _FUNC_TABLE: list[tuple[str, int, callable]] = []
