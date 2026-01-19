@@ -562,7 +562,8 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
   has_per_lane_vcc = any('[laneId]' in dest for dest, _ in assigns if dest.startswith('VCC') or dest.startswith('D0.u64'))
   if has_per_lane_vcc:
-    # VCC computation: use RANGE + REDUCE to combine 32 lane bits
+    # VCC computation: RANGE+REDUCE gets axis ID first (lower ID = runs first)
+    # This ensures VCC reads source values BEFORE VGPR stores modify them
     def get_vcc_bit(lane_uop) -> UOp:
       s0, s1 = ctx.rsrc_sized(inst.src0.offset, lane_uop, sizes, 'src0'), ctx.rsrc_sized(inst.src1.offset, lane_uop, sizes, 'src1')
       s2 = ctx.rsrc_sized(inst.src2.offset, lane_uop, sizes, 'src2') if inst.src2 is not None else None
@@ -573,7 +574,7 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
         if dest.startswith('VCC') or (dest.startswith('D0.u64') and '[laneId]' in dest): vcc_bit = val.cast(dtypes.uint32)
       return vcc_bit
     final_vcc = _unroll_lanes(get_vcc_bit, exec_mask)
-    # VGPR stores: separate RANGE loop for writing D0
+    # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
     lane3 = UOp.range(32, _next_axis_id(), AxisType.LOOP)
     s0, s1 = ctx.rsrc_sized(inst.src0.offset, lane3, sizes, 'src0'), ctx.rsrc_sized(inst.src1.offset, lane3, sizes, 'src1')
     s2 = ctx.rsrc_sized(inst.src2.offset, lane3, sizes, 'src2') if inst.src2 is not None else None
@@ -592,7 +593,8 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
         vgpr_stores.append(ctx.wvgpr(vdst_reg, lane3, d0_u32, exec_mask))
     vcc_write = ctx.wsgpr(sdst_reg, final_vcc)
     if vgpr_stores:
-      return name, UOp.sink(UOp.sink(*vgpr_stores).end(lane3), vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
+      # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
+      return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), ctx.inc_pc(), arg=KernelInfo(name=name))
     return name, UOp.sink(vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
   else:
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, sdst_reg=sdst_reg)

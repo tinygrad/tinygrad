@@ -1710,6 +1710,27 @@ class TestCarryBorrow(unittest.TestCase):
     self.assertEqual(st.vgpr[0][4], 0x00000000, "lo result")
     self.assertEqual(st.vgpr[0][5], 0x00000003, "hi result")
 
+  def test_add_co_u32_same_dst_src(self):
+    """V_ADD_CO_U32 where dst is same as src - VCC must use original src value."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_add_co_u32(v[0], VCC, v[0], 1),  # v[0] = v[0] + 1, VCC should be set from overflow
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0, "0xFFFFFFFF + 1 = 0")
+    self.assertEqual(st.vcc & 1, 1, "Should have carry from 0xFFFFFFFF + 1")
+
+  def test_add_co_u32_same_dst_src_no_carry(self):
+    """V_ADD_CO_U32 where dst is same as src - no carry case."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_add_co_u32(v[0], VCC, v[0], 1),  # v[0] = v[0] + 1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 101, "100 + 1 = 101")
+    self.assertEqual(st.vcc & 1, 0, "No carry from 100 + 1")
+
 
 class TestReadlane(unittest.TestCase):
   """Tests for V_READLANE_B32 and related cross-lane operations."""
