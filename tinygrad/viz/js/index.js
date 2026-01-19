@@ -518,7 +518,7 @@ async function renderProfiler(path, unit, opts) {
       }
       // draw row line
       if (rowLine != null) {
-        const y = offsetY+height+padding/2;
+        const y = offsetY+height+padding/2 - 0.5;
         drawLine(ctx, [0, canvasWidth], [y, y], { color:rowLine });
       }
     }
