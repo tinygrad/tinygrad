@@ -26,7 +26,7 @@ APP_PATH="./build/Debug/TinyGPU.app"
 DEXT_PATH="$APP_PATH/Contents/Library/SystemExtensions/org.tinygrad.tinygpu.edriver.dext"
 
 # Ad-hoc sign with dev entitlements (matches any GPU)
-codesign --sign - --entitlements ./TinyGPUDriverExtension/TinyGPUDriver.entitlements --force --timestamp --verbose "$DEXT_PATH"
+codesign --sign - --entitlements ./TinyGPUDriverExtension/TinyGPUDriver.NoSIP.entitlements --force --timestamp --verbose "$DEXT_PATH"
 codesign --sign - --entitlements ./macOS/macOS.entitlements --force --timestamp --verbose "$APP_PATH"
 
 echo "Build complete: $APP_PATH"
