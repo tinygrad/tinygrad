@@ -834,7 +834,8 @@ def compile_inst(data: bytes) -> tuple[str, UOp]:
 def _compile_single_inst(inst_bytes: bytes) -> tuple[str, ProgramSpec, CompiledRunner]:
   """Compile a single instruction to a ProgramSpec and CompiledRunner. Cached by instruction bytes."""
   name, sink = compile_inst(inst_bytes)
-  with Context(NOOPT=1, CPU_LLVM=1):
+  # NOTE: CPU_LLVM breaks test_v_rsq_f32_large and test_v_cos_f32_quarter
+  with Context(NOOPT=1): #, CPU_LLVM=1):
     prg = get_program(sink, Device['CPU'].renderer)
     runner = CompiledRunner(prg)
   return name, prg, runner
