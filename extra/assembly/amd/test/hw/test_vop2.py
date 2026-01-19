@@ -535,6 +535,44 @@ class TestCarryOps(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 5)
     self.assertEqual(st.vcc, 0)  # No borrow out
 
+  def test_v_sub_co_ci_u32_vop3sd_separate_carry_regs(self):
+    """VOP3SD V_SUB_CO_CI_U32: carry-in from src2, carry-out to sdst (separate registers).
+
+    This tests the VOP3SD encoding where src2 specifies the carry-in register
+    independently from sdst (carry-out). The bug was reading carry-in from sdst
+    instead of src2.
+
+    Computation: D0 = S0 - S1 - carry_in = 0 - 0 - 1 = -1 = 0xFFFFFFFF
+    """
+    instructions = [
+      s_mov_b32(s[6], 1),  # carry-in = 1 (in s[6])
+      s_mov_b32(s[10], 0),  # carry-out dest = 0 initially (in s[10])
+      # VOP3SD: v_sub_co_ci_u32(vdst, sdst, src0, src1, src2)
+      # src2 is carry-in (s[6]=1), sdst is carry-out (s[10])
+      v_sub_co_ci_u32(v[0], s[10], 0, 0, s[6]),  # D0 = 0 - 0 - 1 = -1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xFFFFFFFF)  # -1 as unsigned
+    self.assertEqual(st.sgpr[10], 1)  # Borrow out to s[10]
+
+  def test_v_add_co_ci_u32_vop3sd_separate_carry_regs(self):
+    """VOP3SD V_ADD_CO_CI_U32: carry-in from src2, carry-out to sdst (separate registers).
+
+    This tests the VOP3SD encoding where src2 specifies the carry-in register
+    independently from sdst (carry-out).
+
+    Computation: D0 = S0 + S1 + carry_in = 5 + 10 + 1 = 16
+    """
+    instructions = [
+      s_mov_b32(s[6], 1),  # carry-in = 1 (in s[6])
+      s_mov_b32(s[10], 0),  # carry-out dest = 0 initially (in s[10])
+      # VOP3SD: v_add_co_ci_u32(vdst, sdst, src0, src1, src2)
+      v_add_co_ci_u32(v[0], s[10], 5, 10, s[6]),  # D0 = 5 + 10 + 1 = 16
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 16)
+    self.assertEqual(st.sgpr[10], 0)  # No carry out
+
 
 if __name__ == '__main__':
   unittest.main()

@@ -748,11 +748,16 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
     pcode = PCODE.get(inst.op)
     assert pcode is not None, f"no pcode for VOP3SD: {op_name}"
 
+    # For carry-in ops (V_ADD_CO_CI_U32, V_SUB_CO_CI_U32, V_SUBREV_CO_CI_U32), VCC reads come from src2
+    # For other ops, VCC reads come from sdst. VCC writes always go to sdst.
+    has_carry_in = '_CO_CI_' in op_name
+    vcc_in_reg = inst.src2.offset if has_carry_in and inst.src2 is not None else sdst_reg
+
     # Check if any VCC assignment is per-lane by looking for [laneId] in destination
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
     src0, src1 = rsrc_sized(inst.src0.offset, lane, sizes, 'src0'), rsrc_sized(inst.src1.offset, lane, sizes, 'src1')
     src2 = rsrc_sized(inst.src2.offset, lane, sizes, 'src2') if inst.src2 is not None else None
-    srcs = {'S0': src0, 'S1': src1, 'VCC': rsgpr(sdst_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
+    srcs = {'S0': src0, 'S1': src1, 'VCC': rsgpr(vcc_in_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
     if src2 is not None: srcs['S2'] = src2
     _, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
 
@@ -770,7 +775,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         lc = UOp.const(dtypes.index, lane_idx)
         s0, s1 = rsrc_sized(inst.src0.offset, lc, sizes, 'src0'), rsrc_sized(inst.src1.offset, lc, sizes, 'src1')
         s2 = rsrc_sized(inst.src2.offset, lc, sizes, 'src2') if inst.src2 is not None else None
-        lane_srcs = {'S0': s0, 'S1': s1, 'VCC': rsgpr(sdst_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
+        lane_srcs = {'S0': s0, 'S1': s1, 'VCC': rsgpr(vcc_in_reg), 'EXEC': exec_mask, 'SCC': rsgpr(SCC_IDX)}
         if s2 is not None: lane_srcs['S2'] = s2
         _, lane_assigns = parse_pcode(pcode, lane_srcs, UOp.const(dtypes.uint32, lane_idx), op_name=op_name)
         vcc_bit, d0_val = UOp.const(dtypes.uint32, 0), None
