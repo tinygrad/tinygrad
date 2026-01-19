@@ -482,7 +482,7 @@ async function renderProfiler(path, unit, opts) {
     const paths = [];
     for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor }] of data.tracks) {
       visible.length = 0;
-      const addBorder = scolor != null ? (p,w) => { if (w > 20) { ctx.strokeStyle = scolor; ctx.stroke(p); } } : null;
+      const addBorder = scolor != null ? (p,w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(p); } } : null;
       for (const e of shapes) {
         const p = new Path2D();
         if (eventType === EventTypes.BUF) { // generic polygon
