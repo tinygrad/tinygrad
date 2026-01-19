@@ -17,13 +17,14 @@ def _set_daz_ftz():
       ctypes.CDLL(f.name).set_daz_ftz()
   except Exception: pass
 _set_daz_ftz()
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, graph_rewrite, PatternMatcher
 from tinygrad.dtype import dtypes
-from tinygrad.codegen import get_program
+from tinygrad.codegen import get_program, pm_to_program
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEBUG, colored
+from tinygrad.renderer import ProgramSpec
 
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
@@ -808,6 +809,15 @@ def compile_inst(data: bytes) -> tuple[str, UOp]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @functools.cache
+def _compile_single_inst(inst_bytes: bytes) -> tuple[str, ProgramSpec, CompiledRunner]:
+  """Compile a single instruction to a ProgramSpec and CompiledRunner. Cached by instruction bytes."""
+  name, sink = compile_inst(inst_bytes)
+  with Context(NOOPT=1, CPU_LLVM=1):
+    prg = get_program(sink, Device['CPU'].renderer)
+    runner = CompiledRunner(prg)
+  return name, prg, runner
+
+@functools.cache
 def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, list[int]|None, CompiledRunner|None]]:
   """Decode program to {pc: (name, fxn, globals, runner)}. Runner is kept alive to prevent fxn memory from being freed."""
   result = {}
@@ -816,11 +826,8 @@ def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, l
     inst = decode_inst(data[i:])
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
 
-    name, sink = compile_inst(bytes(data[i:i + inst.size() + 4]))
     try:
-      with Context(NOOPT=1, CPU_LLVM=1):
-        prg = get_program(sink, Device['CPU'].renderer)
-        runner = CompiledRunner(prg)
+      name, prg, runner = _compile_single_inst(bytes(data[i:i + inst.size() + 4]))
       fxn = runner._prg.fxn  # Extract raw ctypes function for direct calls (bypasses HCQ overhead)
       globals_list = prg.globals
       if DEBUG >= 2:
