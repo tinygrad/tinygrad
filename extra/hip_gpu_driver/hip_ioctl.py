@@ -13,7 +13,7 @@ def get_struct(argp, stype):
 
 def format_struct(s):
   sdats = []
-  for field_name, field_type in s._fields_:
+  for field_name, *_ in s._real_fields_:
     dat = getattr(s, field_name)
     if isinstance(dat, int): sdats.append(f"{field_name}:0x{dat:X}")
     else: sdats.append(f"{field_name}:{dat}")
@@ -46,6 +46,22 @@ def install_hook(c_function, python_function):
 # *** ioctl lib end ***
 
 import tinygrad.runtime.autogen.kfd as kfd_ioctl
+import tinygrad.runtime.autogen.hsa as hsa
+
+def print_aql_queue(read_pointer_address):
+  rptr_offset = getattr(hsa.amd_queue_v2_t, 'read_dispatch_id').offset
+  queue_base = read_pointer_address - rptr_offset
+  queue = hsa.amd_queue_v2_t.from_address(queue_base)
+  print(f"  AQL Queue @ 0x{queue_base:X}:")
+  for field_name, *_ in hsa.amd_queue_v2_t._real_fields_:
+    val = getattr(queue, field_name)
+    if isinstance(val, int): print(f"    {field_name}: 0x{val:X}")
+    elif hasattr(val, '_length_'):
+      arr_vals = [f"{format_struct(v)}" if hasattr(v, '_real_fields_') else f"{v:#X}" for v in val]
+      print(f"    {field_name}: [{', '.join(arr_vals)}]")
+    elif hasattr(val, '_real_fields_'): print(f"    {field_name}: {format_struct(val)}")
+    else: print(f"    {field_name}: {val}")
+
 def ioctls_from_header():
   hdr = (pathlib.Path(__file__).parent / "kfd_ioctl.h").read_text().replace("\\\n", "")
   pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_IOW?R?\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
@@ -67,6 +83,7 @@ def ioctl(fd, request, argp):
     if name == "AMDKFD_IOC_SVM":
       out = ctypes.cast(s.attrs, ctypes.POINTER(kfd_ioctl.struct_kfd_ioctl_svm_attribute))
       for i in range(s.nattr): print(f"{i}: {kfd_ioctl.enum_kfd_ioctl_svm_attr_type.get(out[i].type):40s}: {out[i].value:#x}")
+    if name == "AMDKFD_IOC_CREATE_QUEUE" and s.queue_type == kfd_ioctl.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL: print_aql_queue(s.read_pointer_address)
   else:
     print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : ioctl",
           f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")

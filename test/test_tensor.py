@@ -11,7 +11,7 @@ from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.engine.realize import get_program
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, DTYPES_DICT
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -353,7 +353,7 @@ class TestTinygrad(unittest.TestCase):
       assert Tensor(arr).tolist() == torch.tensor(arr).tolist() == arr
 
   def test_element_size(self):
-    for _, dtype in dtypes.fields().items():
+    for _, dtype in DTYPES_DICT.items():
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
   def test_deepwalk_ctx_check(self):

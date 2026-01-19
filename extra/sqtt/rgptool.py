@@ -275,7 +275,7 @@ class RGP:
           ),
           shader_engine_index=sqtt_event.se,
           sqtt_version={11: sqtt.SQTT_VERSION_3_2, 12: sqtt.SQTT_VERSION_3_3}.get(gfx_ver),
-          v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_0_v1(
+          v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_v1(
             instrumentation_spec_version=1,
             instrumentation_api_version=0,
             compute_unit_index=0,

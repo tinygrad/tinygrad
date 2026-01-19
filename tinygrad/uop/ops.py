@@ -10,6 +10,7 @@ from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_funct
 from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
+  from tinygrad.renderer import Estimates
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
@@ -344,6 +345,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if len(dvars) == 0: return self
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
+  # NOTE: this is not called by Tensor slice (Tensor handles UOps directly), but satisfies SupportsIndex for type checking
+  def __index__(self): return self.__int__()
 
   # *** uop tracing stuff ***
 
@@ -828,6 +831,7 @@ class KernelInfo:
   dont_use_locals: bool = False # don't use local indexing
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
+  estimates: Estimates|None = None
   @property
   def function_name(self): return to_function_name(self.name)
 
@@ -837,7 +841,7 @@ class CustomKernel:
   grad_fxn: Callable|None = None
   # sadly CustomKernel can't be pickled or reconstructed as a str
   def __reduce__(self): return (CustomKernel, (panic,))
-  def __repr__(self): return "CustomKernel(panic)"
+  def __repr__(self): return f"CustomKernel({id(self.fxn)})"
 
 @dataclass(frozen=True)
 class Kernel:
@@ -1292,7 +1296,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.index else s for s in n.src))),
 ])
-def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
+def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
