@@ -72,6 +72,9 @@ _BINOPS = {
 
 def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
   fixes = {
+    # V_DIV_FMAS: scale direction depends on S2's exponent (compensates for v_div_scale's scaling)
+    # For f32: exponent > 127 means S2 >= 2.0, scale UP; else scale DOWN
+    # For f64: exponent > 1023 means S2 >= 2.0, scale UP; else scale DOWN
     'V_DIV_FMAS_F32': ('D0.f32 = 2.0F ** 32 * fma(S0.f32, S1.f32, S2.f32)',
       'D0.f32 = (exponent(S2.f32) > 127) ? (2.0F ** 64 * fma(S0.f32, S1.f32, S2.f32)) : (2.0F ** -64 * fma(S0.f32, S1.f32, S2.f32))'),
     'V_DIV_FMAS_F64': ('D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)',
@@ -100,6 +103,8 @@ def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
     for i in range(len(lines) - 1, -1, -1):
       if lines[i].strip() == 'endif': lines.insert(i, f'else\nD0.{dt} = S0.{dt}'); break
     pcode = '\n'.join(lines) + f';\nif isDENORM(S1.{dt}) then\nD0.{dt} = NAN.{dt}\nendif'
+    # Convert whole-VCC assignments to per-lane assignments (VCC = 0x0LL -> VCC.u64[laneId] = 0)
+    pcode = pcode.replace('VCC = 0x0LL', 'VCC.u64[laneId] = 0').replace('VCC = 0x1LL', 'VCC.u64[laneId] = 1')
   return pcode
 
 def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None = None, op_name: str | None = None) -> tuple[dict[str, UOp], list[tuple[str, UOp]]]:
