@@ -1,48 +1,9 @@
-from typing import Optional, Sequence
+from typing import Optional
 
 from tinygrad import Tensor
 
 from tinygrad.dtype import DTypeLike, dtypes
-from tinygrad.uop.ops import sint
 import math
-
-
-def stft(
-  x: Tensor, weight: Tensor, n_fft: int, stride: int, pad: Sequence[sint] | Sequence[tuple[sint, sint] | None], pad_mode: str = "constant"
-) -> Tensor:
-  cutoff = int(n_fft // 2) + 1
-  x_padded = x.pad(pad, mode=pad_mode)
-  stft_raw = x_padded.unsqueeze(1).conv2d(weight, stride=stride)
-
-  # magnitudes only atm
-  magnitudes = (stft_raw[:, :cutoff, :] ** 2 + stft_raw[:, cutoff:, :] ** 2).sqrt()
-  return magnitudes
-
-
-def hann_window(N: int, periodic=True) -> Tensor:
-  M = N + (periodic * 1)
-  return ((1.0 - (Tensor.arange(M) * 2.0 * math.pi / (M - 1)).cos()) * 0.5)[:N]
-
-
-def make_stft_basis_buffers(n_fft: int, window: Tensor) -> Tensor:
-  return Tensor.cat(*make_basis_buffers(n_fft, Tensor.arange((n_fft // 2) + 1)[None].T, window)).reshape(n_fft + 2, 1, n_fft)
-
-
-def make_basis_buffers(N_FFT: int, k_freq_bin: int | Tensor, window: Tensor) -> tuple[Tensor, Tensor]:
-  n = Tensor.arange(N_FFT)
-  angle = 2 * math.pi * k_freq_bin * n / N_FFT
-
-  w = window
-  cos_basis = w * angle.cos()
-  sin_basis = w * -angle.sin()  # negate sin_basis to match torch
-  return cos_basis, sin_basis
-
-
-def stft_full(x: Tensor, n_fft: int, stride: int, pad: tuple[int, int], window="hann", pad_mode="constant") -> Tensor:
-  assert window == "hann", "other window types not implemented yet"
-  bb = make_stft_basis_buffers(n_fft, hann_window(n_fft))
-  res = stft(x, bb, n_fft, stride, pad, pad_mode)
-  return res
 
 
 # rewritten from numpy

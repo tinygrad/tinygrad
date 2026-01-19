@@ -7,7 +7,7 @@ from tinygrad import Tensor, TinyJit, Variable, nn, dtypes
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
 
-from examples.webgpu.whisper.audio_helpers import stft_full, mel
+from examples.webgpu.whisper.audio_helpers import mel
 import numpy as np
 import librosa
 
@@ -151,9 +151,9 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
   assert waveforms.shape[0] <= batch_size
   waveforms = waveforms.pad_to((batch_size, max_len))
   # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
-  stft = stft_full(waveforms, N_FFT, stride=HOP_LENGTH, pad=(200, 200), window="hann", pad_mode="reflect")
-  magnitudes = (stft[..., :-1] ** 2)
-  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  stft = librosa.stft(waveforms.numpy(), n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
+  magnitudes = np.absolute(stft[..., :-1]) ** 2
+  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ Tensor(magnitudes)
 
   log_spec = mel_spec.clip(1e-10, None).log10()
   log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
