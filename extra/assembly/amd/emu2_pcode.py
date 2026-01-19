@@ -10,6 +10,7 @@ _BITS_DT = {8: dtypes.uint8, 16: dtypes.uint16, 32: dtypes.uint32, 64: dtypes.ui
 
 def _const(dt, v): return UOp.const(dt, v)
 def _u32(v): return _const(dtypes.uint32, v)
+def _u64(v): return _const(dtypes.uint64, v)
 def _to_u32(v): return v if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
 def _to_bool(v): return v if v.dtype == dtypes.bool else v.ne(_const(v.dtype, 0))
 def _cast_to(v, dt): return v if v.dtype == dt else v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
@@ -17,13 +18,21 @@ def _try_eval(expr):
   try: return str(eval(expr)) if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()) else expr
   except: return expr
 
+# Float bit extraction - returns (bits, exp_mask, mant_mask, quiet_bit, exp_shift) based on float type
+def _float_info(v: UOp, hint: str = "") -> tuple[UOp, UOp, UOp, UOp, int]:
+  is_f64, is_f16 = v.dtype in (dtypes.float64, dtypes.uint64) or '.f64' in hint, v.dtype == dtypes.half or '.f16' in hint
+  if is_f64:
+    bits = v.bitcast(dtypes.uint64) if v.dtype == dtypes.float64 else v.cast(dtypes.uint64)
+    return bits, _u64(0x7FF0000000000000), _u64(0x000FFFFFFFFFFFFF), _u64(0x0008000000000000), 52
+  if is_f16:
+    bits = (v.bitcast(dtypes.uint16) if v.dtype == dtypes.half else (v & _u32(0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32)
+    return bits, _u32(0x7C00), _u32(0x03FF), _u32(0x0200), 10
+  bits = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v.cast(dtypes.uint32)
+  return bits, _u32(0x7F800000), _u32(0x007FFFFF), _u32(0x00400000), 23
+
 def _isnan(v: UOp) -> UOp:
-  if v.dtype == dtypes.float64:
-    bits = v.bitcast(dtypes.uint64)
-    return ((bits >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).eq(_const(dtypes.uint64, 0x7FF)) & \
-           (bits & _const(dtypes.uint64, 0xFFFFFFFFFFFFF)).ne(_const(dtypes.uint64, 0))
-  bits = (v.cast(dtypes.float32) if v.dtype == dtypes.half else v).bitcast(dtypes.uint32)
-  return ((bits >> _u32(23)) & _u32(0xFF)).eq(_u32(0xFF)) & (bits & _u32(0x7FFFFF)).ne(_u32(0))
+  bits, exp_m, mant_m, _, _ = _float_info(v.cast(dtypes.float32) if v.dtype == dtypes.half else v)
+  return (bits & exp_m).eq(exp_m) & (bits & mant_m).ne(_const(bits.dtype, 0))
 
 def _cmp_nan(l, r, fn):
   result = fn(l, r)
@@ -33,9 +42,7 @@ def _bitreverse(v: UOp, bits: int) -> UOp:
   dt, masks = (dtypes.uint64, [(0x5555555555555555,1),(0x3333333333333333,2),(0x0F0F0F0F0F0F0F0F,4),(0x00FF00FF00FF00FF,8),(0x0000FFFF0000FFFF,16)]) \
     if bits == 64 else (dtypes.uint32, [(0x55555555,1),(0x33333333,2),(0x0F0F0F0F,4),(0x00FF00FF,8)])
   v = v.cast(dt) if v.dtype != dt else v
-  for mask, shift in masks:
-    m = _const(dt, mask)
-    v = ((v >> _const(dt, shift)) & m) | ((v & m) << _const(dt, shift))
+  for m, s in masks: v = ((v >> _const(dt, s)) & _const(dt, m)) | ((v & _const(dt, m)) << _const(dt, s))
   return (v >> _const(dt, 32 if bits == 64 else 16)) | (v << _const(dt, 32 if bits == 64 else 16))
 
 def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
@@ -436,18 +443,17 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
   if expr in vars: return vars[expr]
   if expr == 'PI': return _const(dtypes.float32, 3.141592653589793)
 
-  # Special constants
-  for p, v in [('+INF', float('inf')), ('INF', float('inf')), ('-INF', float('-inf'))]:
+  # Special float constants (INF, NAN, UNDERFLOW, OVERFLOW)
+  _INF = {'+INF': float('inf'), 'INF': float('inf'), '-INF': float('-inf')}
+  for p, v in _INF.items():
     if expr == p: return _const(dtypes.float64, v)
     if expr == f'{p}.f32': return _const(dtypes.float32, v)
     if expr == f'{p}.f16': return _const(dtypes.half, v)
-  if expr in ('NAN.f32', 'NAN'): return _u32(0x7FC00000).bitcast(dtypes.float32)
-  if expr == 'NAN.f64': return _const(dtypes.uint64, 0x7FF8000000000000).bitcast(dtypes.float64)
-  if expr == 'NAN.f16': return _const(dtypes.uint16, 0x7E00).bitcast(dtypes.half)
-  if expr == 'UNDERFLOW_F32': return _u32(0x00000001).bitcast(dtypes.float32)
-  if expr == 'OVERFLOW_F32': return _u32(0x7F7FFFFF).bitcast(dtypes.float32)
-  if expr == 'UNDERFLOW_F64': return _const(dtypes.uint64, 0x0000000000000001).bitcast(dtypes.float64)
-  if expr == 'OVERFLOW_F64': return _const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
+  _SPECIAL = {'NAN': (0x7FC00000, dtypes.uint32, dtypes.float32), 'NAN.f32': (0x7FC00000, dtypes.uint32, dtypes.float32),
+    'NAN.f64': (0x7FF8000000000000, dtypes.uint64, dtypes.float64), 'NAN.f16': (0x7E00, dtypes.uint16, dtypes.half),
+    'UNDERFLOW_F32': (1, dtypes.uint32, dtypes.float32), 'OVERFLOW_F32': (0x7F7FFFFF, dtypes.uint32, dtypes.float32),
+    'UNDERFLOW_F64': (1, dtypes.uint64, dtypes.float64), 'OVERFLOW_F64': (0x7FEFFFFFFFFFFFFF, dtypes.uint64, dtypes.float64)}
+  if expr in _SPECIAL: bits, bt, ft = _SPECIAL[expr]; return _const(bt, bits).bitcast(ft)
 
   # Array variable
   if (m := re.match(r'([a-zA-Z_]\w*)\{(\d+)\}\.(\w+)$', expr)): return _cast_to(vars.get(f'{m.group(1)}{m.group(2)}', _u32(0)), DTYPES.get(m.group(3), dtypes.uint32))
@@ -564,17 +570,8 @@ def _f16_extract(v): return (v & _u32(0xFFFF)).cast(dtypes.uint16).bitcast(dtype
 
 def _check_nan(inner: str, vars: dict, quiet: bool) -> UOp:
   if (m := re.match(r"64'F\((.+)\)", inner)): inner = m.group(1)
-  v, is_f16, is_f64 = parse_expr(inner, vars), '.f16' in inner, '.f64' in inner
-  is_f16, is_f64 = is_f16 or v.dtype == dtypes.half, is_f64 or v.dtype == dtypes.float64
-  if is_f16:
-    bits = (v & _u32(0xFFFF)) if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint16).cast(dtypes.uint32)
-    exp_m, mant_m, qb = _u32(0x7C00), _u32(0x03FF), _u32(0x0200)
-  elif is_f64:
-    bits = v.bitcast(dtypes.uint64) if v.dtype == dtypes.float64 else v.cast(dtypes.uint64)
-    exp_m, mant_m, qb = _const(dtypes.uint64, 0x7FF0000000000000), _const(dtypes.uint64, 0x000FFFFFFFFFFFFF), _const(dtypes.uint64, 0x0008000000000000)
-  else:
-    bits = v.bitcast(dtypes.uint32) if v.dtype == dtypes.float32 else v
-    exp_m, mant_m, qb = _u32(0x7F800000), _u32(0x007FFFFF), _u32(0x00400000)
+  v = parse_expr(inner, vars)
+  bits, exp_m, mant_m, qb, _ = _float_info(v, inner)
   is_nan_exp, has_mant, is_q = (bits & exp_m).eq(exp_m), (bits & mant_m).ne(_const(bits.dtype, 0)), (bits & qb).ne(_const(bits.dtype, 0))
   return (is_nan_exp & is_q) if quiet else (is_nan_exp & has_mant & is_q.logical_not())
 
@@ -628,9 +625,13 @@ def _register_funcs():
     return val.cast(dtypes.int64) if val.dtype in (dtypes.int, dtypes.int32) else val
   _FUNC_TABLE.append((r'signext\((.+)\)', 1, _signext))
   _FUNC_TABLE.append((r'isEven\((.+)\)', 1, lambda a, v, m: (UOp(Ops.TRUNC, a[0].dtype, (a[0],)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0))))
-  _FUNC_TABLE.append((r'abs\((.+)\)', 1, lambda a, v, m: (a[0].bitcast(dtypes.uint32) & _u32(0x7FFFFFFF)).bitcast(dtypes.float32) if a[0].dtype == dtypes.float32 else
-    (a[0].cast(dtypes.uint64) & _const(dtypes.uint64, 0x7FFFFFFFFFFFFFFF)).bitcast(dtypes.float64) if a[0].dtype == dtypes.float64 else
-    (a[0].bitcast(dtypes.uint16) & _const(dtypes.uint16, 0x7FFF)).bitcast(dtypes.half) if a[0].dtype == dtypes.half else a[0]))
+  def _abs(a, v, m):
+    if a[0].dtype not in (dtypes.float32, dtypes.float64, dtypes.half): return a[0]
+    _, _, _, _, shift = _float_info(a[0])
+    sign_mask = {10: 0x7FFF, 23: 0x7FFFFFFF, 52: 0x7FFFFFFFFFFFFFFF}[shift]
+    bt, ft = {10: (dtypes.uint16, dtypes.half), 23: (dtypes.uint32, dtypes.float32), 52: (dtypes.uint64, dtypes.float64)}[shift]
+    return (a[0].bitcast(bt) & _const(bt, sign_mask)).bitcast(ft)
+  _FUNC_TABLE.append((r'abs\((.+)\)', 1, _abs))
 
   _FUNC_TABLE.append((r'max\((.+),\s*(.+)\)', 2, lambda a, v, m: UOp(Ops.MAX, a[0].dtype, (a[0], a[1]))))
   _FUNC_TABLE.append((r'min\((.+),\s*(.+)\)', 2, lambda a, v, m: UOp(Ops.MAX, a[0].dtype, (a[0].neg(), a[1].neg())).neg()))
@@ -652,49 +653,36 @@ def _register_funcs():
   _FUNC_TABLE.append((r'isNAN\((.+)\)', 1, lambda a, v, m: _isnan(a[0])))
   _FUNC_TABLE.append((r'isSignalNAN\((.+)\)', 0, lambda a, v, m: _check_nan(m.group(1), v, False)))
   _FUNC_TABLE.append((r'isQuietNAN\((.+)\)', 0, lambda a, v, m: _check_nan(m.group(1), v, True)))
-  _FUNC_TABLE.append((r'cvtToQuietNAN\((.+)\)', 1, lambda a, v, m: (a[0].bitcast(dtypes.uint64) | _const(dtypes.uint64, 0x0008000000000000)).bitcast(dtypes.float64) if a[0].dtype == dtypes.float64 else
-    (a[0].bitcast(dtypes.uint16) | _const(dtypes.uint16, 0x0200)).bitcast(dtypes.half) if a[0].dtype == dtypes.half else
-    ((a[0].bitcast(dtypes.uint32) if a[0].dtype == dtypes.float32 else a[0]) | _u32(0x00400000)).bitcast(dtypes.float32)))
+  def _cvt_quiet(a, v, m):
+    bits, _, _, qb, _ = _float_info(a[0])
+    bt, ft = (dtypes.uint64, dtypes.float64) if a[0].dtype == dtypes.float64 else (dtypes.uint16, dtypes.half) if a[0].dtype == dtypes.half else (dtypes.uint32, dtypes.float32)
+    return (a[0].bitcast(bt) | qb).bitcast(ft)
+  _FUNC_TABLE.append((r'cvtToQuietNAN\((.+)\)', 1, _cvt_quiet))
 
   def _is_denorm(a, v, m):
-    val, is_f64, is_f16 = a[0], '.f64' in m.group(1) or a[0].dtype == dtypes.float64, '.f16' in m.group(1) or a[0].dtype == dtypes.half
-    if is_f64:
-      bits = val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val.cast(dtypes.uint64)
-      return (bits & _const(dtypes.uint64, 0x7FF0000000000000)).eq(_const(dtypes.uint64, 0)) & (bits & _const(dtypes.uint64, 0x000FFFFFFFFFFFFF)).ne(_const(dtypes.uint64, 0))
-    if is_f16:
-      bits = (val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & _u32(0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32)
-      return (bits & _u32(0x7C00)).eq(_u32(0)) & (bits & _u32(0x03FF)).ne(_u32(0))
-    bits = val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val
-    return (bits & _u32(0x7F800000)).eq(_u32(0)) & (bits & _u32(0x007FFFFF)).ne(_u32(0))
+    bits, exp_m, mant_m, _, _ = _float_info(a[0], m.group(1))
+    return (bits & exp_m).eq(_const(bits.dtype, 0)) & (bits & mant_m).ne(_const(bits.dtype, 0))
   _FUNC_TABLE.append((r'isDENORM\((.+)\)', 1, _is_denorm))
 
   def _exponent(a, v, m):
-    val, is_f16, is_f64 = a[0], '.f16' in m.group(1) or a[0].dtype == dtypes.half, '.f64' in m.group(1) or a[0].dtype == dtypes.float64
-    if is_f16: return (((val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & _u32(0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> _u32(10)) & _u32(0x1F)).cast(dtypes.int)
-    if is_f64: return (((val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
-    return (((val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int)
+    bits, _, _, _, shift = _float_info(a[0], m.group(1))
+    exp_bits = {10: 0x1F, 23: 0xFF, 52: 0x7FF}[shift]
+    return ((bits >> _const(bits.dtype, shift)) & _const(bits.dtype, exp_bits)).cast(dtypes.int)
   _FUNC_TABLE.append((r'exponent\((.+)\)', 1, _exponent))
 
-  # Predict if a/b would be denormal based on exponents (avoids FTZ issues)
   def _div_would_be_denorm(a, v, m):
-    numer, denom = a[0], a[1]
-    is_f64 = '.f64' in m.group(0) or numer.dtype == dtypes.float64
-    if is_f64:
-      exp_n = ((numer.bitcast(dtypes.uint64) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
-      exp_d = ((denom.bitcast(dtypes.uint64) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int)
-      return (exp_n - exp_d) < UOp.const(dtypes.int, -1022)
-    exp_n = ((numer.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int)
-    exp_d = ((denom.bitcast(dtypes.uint32) >> _u32(23)) & _u32(0xFF)).cast(dtypes.int)
-    return (exp_n - exp_d) < UOp.const(dtypes.int, -126)
+    bits_n, _, _, _, shift = _float_info(a[0], m.group(0))
+    bits_d, _, _, _, _ = _float_info(a[1], m.group(0))
+    exp_bits, min_exp = {10: (0x1F, -14), 23: (0xFF, -126), 52: (0x7FF, -1022)}[shift]
+    exp_n = ((bits_n >> _const(bits_n.dtype, shift)) & _const(bits_n.dtype, exp_bits)).cast(dtypes.int)
+    exp_d = ((bits_d >> _const(bits_d.dtype, shift)) & _const(bits_d.dtype, exp_bits)).cast(dtypes.int)
+    return (exp_n - exp_d) < _const(dtypes.int, min_exp)
   _FUNC_TABLE.append((r'divWouldBeDenorm\((.+),\s*(.+)\)', 2, _div_would_be_denorm))
 
   def _sign(a, v, m):
-    val = a[0]
-    if '.f16' in m.group(1) or val.dtype == dtypes.half:
-      return ((val.bitcast(dtypes.uint16) if val.dtype == dtypes.half else (val & _u32(0xFFFF)).cast(dtypes.uint16)).cast(dtypes.uint32) >> _u32(15)) & _u32(1)
-    if val.dtype == dtypes.float64 or val.dtype == dtypes.uint64:
-      return ((val.bitcast(dtypes.uint64) if val.dtype == dtypes.float64 else val) >> UOp.const(dtypes.uint64, 63)).cast(dtypes.uint32) & _u32(1)
-    return ((val.bitcast(dtypes.uint32) if val.dtype == dtypes.float32 else val) >> _u32(31)) & _u32(1)
+    bits, _, _, _, shift = _float_info(a[0], m.group(1))
+    sign_shift = {10: 15, 23: 31, 52: 63}[shift]
+    return ((bits >> _const(bits.dtype, sign_shift)) & _const(bits.dtype, 1)).cast(dtypes.uint32)
   _FUNC_TABLE.append((r'sign\((.+)\)', 1, _sign))
 
   _FUNC_TABLE.append((r'signext_from_bit\((.+),\s*(.+)\)', 2, lambda a, v, m: (lambda val, w: ((val >> (w - _u32(1))) & _u32(1)).ne(_u32(0)).where(val | (((_u32(1) << w) - _u32(1)) ^ _u32(0xFFFFFFFF)), val))(_to_u32(a[0]), _to_u32(a[1]))))
