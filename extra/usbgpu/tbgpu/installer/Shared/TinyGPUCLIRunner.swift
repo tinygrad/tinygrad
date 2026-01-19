@@ -173,14 +173,6 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
   }
 
   private func installExtension() {
-    let state = Self.queryDextState(bundleID: dextIdentifier)
-
-    if state == .activated {
-      log("Driver extension is already installed and active.\n")
-      done?(.ok)
-      return
-    }
-
     log("Installing TinyGPU driver extension...\n")
     log("You may be prompted to approve the extension in System Settings.\n\n")
 

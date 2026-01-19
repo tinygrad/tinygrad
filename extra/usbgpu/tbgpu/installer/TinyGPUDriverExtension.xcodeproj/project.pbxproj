@@ -544,7 +544,7 @@
 				INFOPLIST_FILE = TinyGPUDriverExtension/Info.plist;
 				INFOPLIST_KEY_OSBundleUsageDescription = "TinyGPU Driver";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.edriver;
 				PRODUCT_NAME = "$(inherited)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -577,7 +577,7 @@
 				INFOPLIST_FILE = TinyGPUDriverExtension/Info.plist;
 				INFOPLIST_KEY_OSBundleUsageDescription = "TinyGPU Driver";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.edriver;
 				PRODUCT_NAME = "$(inherited)";

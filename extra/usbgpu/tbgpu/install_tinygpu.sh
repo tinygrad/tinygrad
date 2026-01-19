@@ -10,16 +10,8 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
-# Check if dext is running
-dext_status=$(systemextensionsctl list 2>/dev/null | grep "$DEXT_ID" || true)
-if echo "$dext_status" | grep -q "\[activated enabled\]"; then
-  echo "TinyGPU driver extension is already installed and active."
-  exit 0
-fi
-
 # Ask user to install
-echo "TinyGPU driver extension is not installed."
-read -n1 -p "Install now? [y/N] " answer
+read -n1 -p "Install TinyGPU driver extension now? [y/N] " answer
 echo
 
 if [[ "$answer" =~ ^[Yy]$ ]]; then
