@@ -636,8 +636,8 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
     if label == 'Y': srcs = {'S0': srcy0, 'S1': srcy1, 'D0': ctx.rvgpr(vdst_reg, lane)}
     else: srcs = {'S0': ctx.rsrc(src0_off, lane), 'S1': ctx.rvgpr(vsrc1_off - 256, lane), 'D0': ctx.rvgpr(vdst_reg, lane)}
-    if vop in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32): srcs['SIMM32'] = UOp.const(dtypes.uint32, ctx.literal)
-    if vop == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr(VCC_LO.offset)
+    if op in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32): srcs['SIMM32'] = UOp.const(dtypes.uint32, ctx.literal)
+    if op == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr(VCC_LO.offset)
     pcode = PCODE.get(vop)
     assert pcode is not None, f"no pcode for VOPD {label}: {vop}"
     srcs.update({'VCC': ctx.rsgpr(VCC_LO.offset), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)})

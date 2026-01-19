@@ -425,6 +425,9 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
   if (m := re.match(r"(\d+)'[hH]([0-9a-fA-F]+)", expr)): return _const(_BITS_DT.get(int(m.group(1)), dtypes.uint32), int(m.group(2), 16))
   if (m := re.match(r"(\d+)'[bB]([01]+)", expr)): return _const(_BITS_DT.get(int(m.group(1)), dtypes.uint32), int(m.group(2), 2))
   if (m := re.match(r"(\d+)'0x([0-9a-fA-F]+)", expr)): return _const(_BITS_DT.get(int(m.group(1)), dtypes.uint32), int(m.group(2), 16))
+  if (m := re.match(r"(\d+)'-?(\d+\.\d+)", expr)):  # sized float literal e.g. 16'1.0
+    bits = int(m.group(1))
+    return _const({16: dtypes.half, 32: dtypes.float32, 64: dtypes.float64}.get(bits, dtypes.float32), float(m.group(2)))
   if (m := re.match(r"(\d+)'(\d+)U?", expr)):
     bits = int(m.group(1))
     return _const({1: dtypes.uint32, 8: dtypes.uint8, 16: dtypes.int16 if 'U' not in expr else dtypes.uint16, 32: dtypes.int if 'U' not in expr else dtypes.uint32, 64: dtypes.int64 if 'U' not in expr else dtypes.uint64}.get(bits, dtypes.uint32), int(m.group(2)))

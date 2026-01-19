@@ -1238,5 +1238,53 @@ class TestFloorEdgeCases(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][1]), -1.0, places=5)
 
 
+class TestReciprocalF16(unittest.TestCase):
+  """Tests for V_RCP_F16 - reciprocal in half precision.
+
+  The pcode uses a 16-bit float literal: D0.f16 = 16'1.0 / S0.f16
+  This tests that the sized float literal (16'1.0) is correctly parsed.
+  """
+
+  def test_v_rcp_f16_one(self):
+    """V_RCP_F16: 1/1.0 = 1.0"""
+    import struct
+    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
+    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
+    instructions = [
+      # Load f16 1.0 into low 16 bits of v[0]
+      v_mov_b32_e32(v[0], f16_to_bits(1.0)),
+      v_rcp_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
+    self.assertAlmostEqual(result, 1.0, places=2, msg="1/1.0 should be 1.0")
+
+  def test_v_rcp_f16_two(self):
+    """V_RCP_F16: 1/2.0 = 0.5"""
+    import struct
+    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
+    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
+    instructions = [
+      v_mov_b32_e32(v[0], f16_to_bits(2.0)),
+      v_rcp_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
+    self.assertAlmostEqual(result, 0.5, places=2, msg="1/2.0 should be 0.5")
+
+  def test_v_rcp_f16_four(self):
+    """V_RCP_F16: 1/4.0 = 0.25"""
+    import struct
+    def f16_to_bits(f): return struct.unpack('<H', struct.pack('<e', f))[0]
+    def bits_to_f16(b): return struct.unpack('<e', struct.pack('<H', b))[0]
+    instructions = [
+      v_mov_b32_e32(v[0], f16_to_bits(4.0)),
+      v_rcp_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = bits_to_f16(st.vgpr[0][1] & 0xFFFF)
+    self.assertAlmostEqual(result, 0.25, places=2, msg="1/4.0 should be 0.25")
+
+
 if __name__ == '__main__':
   unittest.main()

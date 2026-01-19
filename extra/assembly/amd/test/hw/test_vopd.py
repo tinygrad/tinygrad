@@ -100,6 +100,45 @@ class TestVOPDReadBeforeWrite(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 200, "Y should read OLD v[2]=100 twice, compute 100+100=200")
 
 
+class TestVOPDLiterals(unittest.TestCase):
+  """Tests for VOPD instructions that use SIMM32 literals (FMAAK, FMAMK)."""
+
+  def test_vopd_fmaak_f32(self):
+    """VOPD V_DUAL_FMAAK_F32: D = S0 * S1 + SIMM32 (literal addend).
+
+    Tests that the 32-bit literal (SIMM32) is correctly passed to the instruction.
+    fma(2.0, 3.0, 10.0) = 2*3 + 10 = 16.0
+    """
+    from extra.assembly.amd.test.hw.helpers import f2i, i2f
+    instructions = [
+      v_mov_b32_e32(v[0], f2i(2.0)),  # v[0] = 2.0
+      v_mov_b32_e32(v[1], f2i(3.0)),  # v[1] = 3.0
+      # VOPD args: opx, opy, vdstx, vdsty, srcx0, srcy0, vsrcx1, vsrcy1
+      # X: v[2] = fma(srcx0, vsrcx1, SIMM32) = v[0]*v[1]+10.0 = 2*3+10 = 16
+      # Y: v[3] = srcy0 (MOV) = v[0] = 2.0
+      VOPD(VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_MOV_B32, v[2], v[3], v[0], v[0], v[1], v[0], literal=f2i(10.0)),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 16.0, places=5, msg="fma(2.0, 3.0, 10.0) should be 16.0")
+
+  def test_vopd_fmamk_f32(self):
+    """VOPD V_DUAL_FMAMK_F32: D = S0 * SIMM32 + S1 (literal multiplier).
+
+    Tests that the 32-bit literal (SIMM32) is correctly used as the multiplier.
+    fma(2.0, 5.0, 3.0) = 2*5 + 3 = 13.0
+    """
+    from extra.assembly.amd.test.hw.helpers import f2i, i2f
+    instructions = [
+      v_mov_b32_e32(v[0], f2i(2.0)),  # v[0] = 2.0
+      v_mov_b32_e32(v[1], f2i(3.0)),  # v[1] = 3.0
+      # X: v[2] = fma(srcx0, SIMM32, vsrcx1) = v[0]*5.0+v[1] = 2*5+3 = 13
+      # Y: v[3] = srcy0 (MOV) = v[0] = 2.0
+      VOPD(VOPDOp.V_DUAL_FMAMK_F32, VOPDOp.V_DUAL_MOV_B32, v[2], v[3], v[0], v[0], v[1], v[0], literal=f2i(5.0)),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 13.0, places=5, msg="fma(2.0, 5.0, 3.0) should be 13.0")
+
+
 class TestVOPDMultilane(unittest.TestCase):
   """Tests for VOPD with multiple lanes."""
 
