@@ -119,9 +119,6 @@ class NIRRenderer(Renderer):
   suffix = "NIR"
   nir_options: bytes
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
-
-  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in (dtypes.bfloat16,) + dtypes.fp8s
-
   code_for_op = {**{k:lambda:None for k in u_aop.keys()}, **{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
 
   extra_matcher = PatternMatcher([
@@ -265,9 +262,6 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
 
 class IR3Renderer(NIRRenderer):
   device = "QCOM"
-
-  # TODO: can IR3 support half?
-  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in (dtypes.bfloat16, dtypes.half, dtypes.float64) + dtypes.fp8s
 
   def nload_img(ctx,img,coord):
     ctx.texs.add(img)
