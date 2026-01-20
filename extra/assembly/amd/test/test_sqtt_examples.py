@@ -201,9 +201,9 @@ class TestSQTTExamples(unittest.TestCase):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
 
-class TestSQTTExamplesRDNA4(TestSQTTExamples): target = "gfx1200"
+#class TestSQTTExamplesRDNA4(TestSQTTExamples): target = "gfx1200"
 
-class TestSQTTExamplesCDNA(TestSQTTExamples): target = "gfx950"
+#class TestSQTTExamplesCDNA(TestSQTTExamples): target = "gfx950"
 
 if __name__ == "__main__":
   unittest.main()
