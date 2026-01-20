@@ -176,7 +176,7 @@ class VOP3P(Inst):
   opsel_hi = BitField(60, 59, default=3)
 
 class VOP3PX2(Inst):
-  encoding = FixedBitField(95, 87, 0b000000000)
+  encoding = FixedBitField(95, 87, 0b110100111)
   op = EnumBitField(86, 80, VOP3PX2Op, {VOP3PX2Op.V_MFMA_SCALE_F32_16X16X128_F8F6F4, VOP3PX2Op.V_MFMA_SCALE_F32_32X32X64_F8F6F4})
   vdst = VGPRField(71, 64)
   src0 = SrcField(104, 96)
