@@ -426,10 +426,10 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       et = time.perf_counter_ns()
       return (decimal.Decimal(et+st) / 2000) - d.timeline_signal.timestamp
 
-    gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
+    self.gpu2cpu_compute_time_diff = statistics.median([_sync(self, self.hw_compute_queue_t) for _ in range(40)])
     if self.hw_copy_queue_t is None: gpu2cpu_copy_time_diff = decimal.Decimal(0)
     else: gpu2cpu_copy_time_diff = statistics.median([_sync(self, self.hw_copy_queue_t) for _ in range(40)])
-    Compiled.profile_events += [ProfileDeviceEvent(self.device, gpu2cpu_compute_time_diff, gpu2cpu_copy_time_diff, props=self.device_props())]
+    Compiled.profile_events += [ProfileDeviceEvent(self.device, self.gpu2cpu_compute_time_diff, gpu2cpu_copy_time_diff, props=self.device_props())]
 
   def _wrap_timeline_signal(self):
     self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
