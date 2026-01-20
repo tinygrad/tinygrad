@@ -86,7 +86,7 @@ def full_rewrite_to_sink(sink:UOp, device:str="", ren:Renderer|None=None, optimi
   if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
   elif DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
   else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
-  sink = graph_rewrite(sink, pm_devectorize, ctx=device, name="devectorize")
+  sink = graph_rewrite(sink, pm_devectorize, ctx=(device, ren.supports_float4), name="devectorize")
 
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing, ctx=device, name="lower all index dtypes")
