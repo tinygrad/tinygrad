@@ -1011,19 +1011,25 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
+def upat_deferred_compile(p:UPat, fxn:Callable, entry:list) -> Callable:
+  def lazy_compile(uop, ctx):
+    from tinygrad.uop.upat import upat_compile
+    entry[1] = upat_compile(p, fxn) or upat_interpret(p, fxn)
+    return entry[1](uop, ctx)
+  return lazy_compile
+
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
-    if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
+    self.pdict: dict[Ops, list[list]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
-      else: match = upat_interpret(p, fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
+      entry: list = [p, None, p.early_reject]
+      entry[1] = upat_deferred_compile(p, fxn, entry) if compiled else upat_interpret(p, fxn)
+      for uop in p.op: self.pdict.setdefault(uop, []).append(entry)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 

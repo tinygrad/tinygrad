@@ -2,10 +2,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator
-import importlib, inspect, functools, pathlib, os, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
+import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -344,8 +344,35 @@ class Compiled:
     """
     # override this in your device implementation
 
+# TODO: move this to each Device
 def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
-  return dtype != dtypes.index and Device[device or Device.DEFAULT].renderer.is_dtype_supported(dtype)
+  if dtype == dtypes.index: return False
+  if device is None: device = Device.DEFAULT
+  if dtype == dtypes.bfloat16:
+    if device == "METAL": return not CI
+    if device == "CUDA": return not CI and not CUDA_PTX
+    if device == "NV": return not CI and not NV_PTX and not NV_NAK
+    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not CPU_LVP
+    return device in {"AMD", "CL", "PYTHON", "NULL"}
+  if dtype in dtypes.fp8s:
+    if device == "CUDA": return not CI and not CUDA_PTX
+    if device == "NV": return not CI and not NV_PTX and not NV_NAK
+    if device == "AMD": return not CI and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
+    return device in {"PYTHON", "NULL"}
+  if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
+                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
+  # for CI GPU and OSX, cl_khr_fp16 isn't supported
+  # for CI LLVM, it segfaults because it can't link to the casting function
+  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
+  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  if dtype == dtypes.half:
+    if device == "CL": return not CI and not OSX
+    if device == "QCOM": return False # QCOM compiler is flaky with half
+    if device in ["CUDA", "NV"]: return not CI
+    if device == "CPU" and CPU_LLVM: return OSX
+    if device == "PYTHON": return sys.version_info >= (3, 12)
+  if dtype == dtypes.float64: return device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not getenv("NULL_IR3")
+  return True
 
 if PROFILE:
   @atexit.register

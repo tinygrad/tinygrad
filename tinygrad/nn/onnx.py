@@ -368,10 +368,7 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
 
 cache_misses = 0
 @functools.cache
-def _cached_to_python_const(t:Tensor):
-  if t.dtype == dtypes.uint8: return t.data().tobytes()
-  if 0 in t.shape: return []
-  return t.tolist()
+def _cached_to_python_const(t:Tensor): return t.data().tobytes() if t.dtype == dtypes.uint8 else t.tolist()
 
 # Tensor -> python value cache for parameters
 def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:

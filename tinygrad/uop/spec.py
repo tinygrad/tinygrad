@@ -2,8 +2,25 @@ import math
 from typing import cast, Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel, CustomKernel
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic
-from tinygrad.uop.validate import validate_index
+from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, IGNORE_OOB
+
+def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
+  if idx.op is Ops.CONST and idx.arg is Invalid: return True
+  if gate is None: gate = UOp.const(dtypes.bool, True)
+  # TODO: check for overflow
+  if IGNORE_OOB or isinstance(buf.dtype, ImageDType) or (sz := buf.ptrdtype.size) == -1: return True
+
+  # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
+  if 0<=idx.vmin and idx.vmax<sz: return True
+
+  # TODO: validate these
+  # WEBGPU has a BITCAST in the index, PTX casts pointer to long
+  for x in idx.toposort() | gate.toposort():
+    if x.op is Ops.BITCAST or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
+
+  # if all is good and IGNORE_OOB=0, validate with z3
+  from tinygrad.uop.validate import validate_index_with_z3
+  return validate_index_with_z3(sz, idx, gate)
 
 # four specs:
 #   shared_spec  -- usable anywhere

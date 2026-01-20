@@ -243,7 +243,6 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(out.contents.b, 10)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
-  @unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
   def test_packed_structs(self):
     ns = self.run_gen("""
 typedef unsigned NvU32;
@@ -334,7 +333,6 @@ typedef struct ip_discovery_header
     assert ihdr.base_addr_64_bit == 1
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
-  @unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
   def test_gen_from_header(self):
     namespace = self.run_gen("""
     typedef struct {
@@ -381,7 +379,6 @@ typedef struct ip_discovery_header
     self.assertTrue(hasattr(rect, 'color'))
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
-  @unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
   def test_struct_ordering(self):
     namespace = self.run_gen("""
     struct A;
@@ -482,7 +479,6 @@ typedef struct ip_discovery_header
     self.assertEqual(result, 43)  # 42 + 1
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
-  @unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
   def test_anonymous_children(self):
     namespace = self.run_gen("""
       struct foo {
@@ -496,7 +492,6 @@ typedef struct ip_discovery_header
     self.assertIn('struct_foo_bar', namespace)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
-  @unittest.skipIf(OSX and ('MTLCompiler' in DLL._loaded_ or 'llvm' in DLL._loaded_), "libclang can't be loaded after MTLCompiler or llvm on OSX")
   def test_enums(self):
     namespace = self.run_gen("""
       enum Foo { A, B, C };
