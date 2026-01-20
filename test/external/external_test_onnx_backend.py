@@ -115,9 +115,6 @@ backend_test.exclude('test_dequantizelinear_float4e2m1_cpu')
 backend_test.exclude('test_pow_types_int32_int32_cpu')
 backend_test.exclude('test_pow_types_int64_int64_cpu')
 
-# no boolean ops (2d, 3d, 4d)
-backend_test.exclude('test_bitshift_*')
-
 # no string ops
 backend_test.exclude('string')
 backend_test.exclude('test_strnorm_*')

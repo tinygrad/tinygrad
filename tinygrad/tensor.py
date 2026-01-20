@@ -3276,8 +3276,11 @@ class Tensor(OpMixin):
     print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
     ```
     """
-    assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0 and not reverse, f"not supported {self.dtype=} {x=}"
-    return self.mul(2 ** x, reverse)
+    assert dtypes.is_unsigned(self.dtype), f"lshift not supported for {self.dtype=}"
+    if isinstance(x, int):
+      assert x >= 0 and not reverse, f"not supported {x=} {reverse=}"
+      return self.mul(2 ** x)
+    return self._binop(Ops.SHL, x, reverse)
 
   def rshift(self, x:Tensor|int, reverse=False) -> Tensor:
     """
@@ -3288,8 +3291,11 @@ class Tensor(OpMixin):
     print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
     ```
     """
-    assert dtypes.is_unsigned(self.dtype) and isinstance(x, int) and x >= 0 and not reverse, f"not supported {self.dtype=} {x=}"
-    return self.idiv(2 ** x, reverse)
+    assert dtypes.is_unsigned(self.dtype), f"rshift not supported for {self.dtype=}"
+    if isinstance(x, int):
+      assert x >= 0 and not reverse, f"not supported {x=} {reverse=}"
+      return self.idiv(2 ** x)
+    return self._binop(Ops.SHR, x, reverse)
 
   def pow(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """
