@@ -106,7 +106,7 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
       dev.cmdq[cmdq_wptr : cmdq_wptr + len(self._q)] = array.array('I', self._q)
 
     gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self._q) << 42) | (1 << 41)
-    gpfifo.controls.GPPut = (gpfifo.put_value + 1) % gpfifo.entries_count
+    gpfifo.gpput[0] = (gpfifo.put_value + 1) % gpfifo.entries_count
 
     System.memory_barrier()
     dev.gpu_mmio[0x90 // 4] = gpfifo.token
@@ -325,7 +325,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
 @dataclass
 class GPFifo:
   ring: MMIOInterface
-  controls: nv_gpu.AmpereAControlGPFifo
+  gpput: MMIOInterface
   entries_count: int
   token: int
   put_value: int = 0
@@ -478,8 +478,8 @@ class NVKIface:
       nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
 
-    self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=cast(int, mem.va_addr), length=mem.size))
-    if mem.view is not None: FileIOInterface.munmap(cast(int, mem.va_addr), mem.size)
+    self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=int(mem.va_addr), length=mem.size))
+    if mem.view is not None: FileIOInterface.munmap(int(mem.va_addr), mem.size)
 
   def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False) -> HCQBuffer:
     if create_range:
@@ -513,7 +513,7 @@ class PCIIface(PCIIfaceBase):
     # PCIIface's MAP_FIXED mmap will overwrite UVM allocations made by NVKIface, so don't try PCIIface if kernel driver was already used.
     if NVKIface.root is not None: raise RuntimeError("Cannot use PCIIface after NVKIface has been initialized (would corrupt UVM memory)")
     super().__init__(dev, dev_id, vendor=0x10de, devices=[(0xff00, [0x2200, 0x2400, 0x2500, 0x2600, 0x2700, 0x2800, 0x2b00, 0x2c00, 0x2d00, 0x2f00])],
-      base_class=0x03, bars=[0, 1], vram_bar=1, va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
+      base_class=0x03, bars=[0, 1, 3], vram_bar=1, va_start=NVMemoryManager.va_allocator.base, va_size=NVMemoryManager.va_allocator.size)
     if not OSX: System.reserve_hugepages(64)
 
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
@@ -578,7 +578,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.iface.rm_control(channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
 
     self.cmdq_page:HCQBuffer = self.iface.alloc(0x200000, cpu_access=True)
-    self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=cast(int, self.cmdq_page.va_addr), wrap=True)
+    self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=int(self.cmdq_page.va_addr), wrap=True)
     self.cmdq = self.cmdq_page.cpu_view().view(fmt='I')
 
     self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
@@ -619,7 +619,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     if ctxshare != 0: self.iface.setup_gpfifo_vm(gpfifo)
 
     return GPFifo(ring=gpfifo_area.cpu_view().view(offset, entries*8, fmt='Q'), entries_count=entries, token=ws_token_params.workSubmitToken,
-                  controls=nv_gpu.AmpereAControlGPFifo.from_address(gpfifo_area.cpu_view().addr + offset + entries * 8))
+                  gpput=gpfifo_area.cpu_view().view(offset + entries*8 + getattr(nv_gpu.AmpereAControlGPFifo, 'GPPut').offset, fmt='I'))
 
   def _query_gpu_info(self, *reqs):
     nvrs = [getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_'+r.upper(), getattr(nv_gpu,'NV2080_CTRL_GR_INFO_INDEX_LITTER_'+r.upper(), None)) for r in reqs]

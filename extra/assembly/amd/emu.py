@@ -4,43 +4,37 @@ from __future__ import annotations
 import ctypes, functools
 from enum import IntEnum
 from tinygrad.runtime.autogen import hsa
-from extra.assembly.amd.dsl import Inst, NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI
+from extra.assembly.amd.dsl import Inst, NULL, SCC, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, v, s
 from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.pcode import compile_pseudocode
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
-from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
+from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, GLOBAL, SCRATCH, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
 # Constants and helpers defined locally (not imported from dsl.py)
 MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
-def unwrap(v): return v.offset if hasattr(v, 'offset') else v
 
 class SGPRArray:
-  """SGPR array that accepts Reg or int index. Validates SGPR range (0-127)."""
+  """SGPR array indexed by Reg or int."""
   __slots__ = ('_data',)
   def __init__(self, size: int): self._data = [0] * size
-  def _idx(self, key) -> int:
-    i = key.offset if hasattr(key, 'offset') else key
-    assert 0 <= i < 128, f"SGPR index {i} out of range 0-127"
-    return i
-  def __getitem__(self, key): return self._data[self._idx(key)]
-  def __setitem__(self, key, val): self._data[self._idx(key)] = val
+  def __getitem__(self, key): return self._data[getattr(key, 'offset', key)]
+  def __setitem__(self, key, val): self._data[getattr(key, 'offset', key)] = val
   def __len__(self): return len(self._data)
   def __iter__(self): return iter(self._data)
 
 class VGPRLane:
-  """Single lane of VGPRs that accepts Reg or int index. Validates VGPR range (256-511)."""
+  """Single lane of VGPRs indexed by Reg (offset 256-511) or int (0-255)."""
   __slots__ = ('_data',)
   def __init__(self, size: int): self._data = [0] * size
-  def _idx(self, key) -> int:
-    i = key.offset if hasattr(key, 'offset') else key
-    if i >= 256: i -= 256  # convert from src encoding to VGPR index
-    assert 0 <= i < 256, f"VGPR index {i} out of range 0-255"
-    return i
-  def __getitem__(self, key): return self._data[self._idx(key)]
-  def __setitem__(self, key, val): self._data[self._idx(key)] = val
+  def __getitem__(self, key):
+    i = getattr(key, 'offset', key)
+    return self._data[i - 256 if i >= 256 else i]
+  def __setitem__(self, key, val):
+    i = getattr(key, 'offset', key)
+    self._data[i - 256 if i >= 256 else i] = val
   def __len__(self): return len(self._data)
   def __iter__(self): return iter(self._data)
 
@@ -59,12 +53,8 @@ _INLINE_CONSTS_F64 = _build_inline_consts(MASK64, _i64)
 # Helper: extract/write 16-bit half from/to 32-bit value
 def _src16(raw: int, is_hi: bool) -> int: return ((raw >> 16) & 0xffff) if is_hi else (raw & 0xffff)
 def _dst16(cur: int, val: int, is_hi: bool) -> int: return (cur & 0x0000ffff) | ((val & 0xffff) << 16) if is_hi else (cur & 0xffff0000) | (val & 0xffff)
-def _vgpr_hi(src) -> bool:
-  off = src.offset if hasattr(src, 'offset') else src
-  return off >= 256 and ((off - 256) & 0x80) != 0
-def _vgpr_masked(src) -> int:
-  off = src.offset if hasattr(src, 'offset') else src
-  return ((off - 256) & 0x7f) + 256 if off >= 256 else off
+def _vgpr_hi(src) -> bool: return src.offset >= 256 and ((src.offset - 256) & 0x80) != 0
+def _vgpr_masked(src): return v[(src.offset - 256) & 0x7f] if src.offset >= 256 else src
 
 # VOP3 source modifier: apply abs/neg to value
 def _mod_src(val: int, idx: int, neg: int, abs_: int, is64: bool = False) -> int:
@@ -76,9 +66,10 @@ def _mod_src(val: int, idx: int, neg: int, abs_: int, is64: bool = False) -> int
 # Read source operand with VOP3 modifiers
 def _read_src(st, inst, src, idx: int, lane: int, neg: int, abs_: int, opsel: int) -> int:
   if src is None: return 0
-  src_off = src.offset if hasattr(src, 'offset') else src
-  literal, regs, is_src_16 = inst._literal, inst.src_regs(idx), inst.is_src_16(idx)
-  if regs == 2: return _mod_src(st.rsrc64(src, lane, literal), idx, neg, abs_, is64=True)
+  src_off = src.offset
+  src_bits = inst.canonical_op_bits[f's{idx}']
+  literal, is_src_64, is_src_16 = inst._literal, src_bits == 64, src_bits == 16
+  if is_src_64: return _mod_src(st.rsrc64(src, lane, literal), idx, neg, abs_, is64=True)
   if isinstance(inst, VOP3P):
     opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
     if 'FMA_MIX' in inst.op_name:
@@ -111,13 +102,11 @@ def _op_ndwords(name: str) -> int:
 
 # Helper: build multi-dword int from consecutive VGPRs
 def _vgpr_read(V: VGPRLane, reg, ndwords: int) -> int:
-  base = reg.offset if hasattr(reg, 'offset') else reg
-  return sum(V[base + i] << (32 * i) for i in range(ndwords))
+  return sum(V[reg + i] << (32 * i) for i in range(ndwords))
 
 # Helper: write multi-dword value to consecutive VGPRs
 def _vgpr_write(V: VGPRLane, reg, val: int, ndwords: int):
-  base = reg.offset if hasattr(reg, 'offset') else reg
-  for i in range(ndwords): V[base + i] = (val >> (32 * i)) & MASK32
+  for i in range(ndwords): V[reg + i] = (val >> (32 * i)) & MASK32
 
 # Memory access
 _valid_mem_ranges: list[tuple[int, int]] = []
@@ -200,26 +189,26 @@ class WaveState:
   def wsgpr(self, reg, v: int):
     if reg != NULL: self.sgpr[reg] = v & MASK32
   def rsgpr64(self, reg) -> int:
-    off = reg.offset if hasattr(reg, 'offset') else reg
-    return self.rsgpr(off) | (self.rsgpr(off + 1) << 32)
+    off = reg.offset
+    return self.sgpr._data[off] | (self.sgpr._data[off + 1] << 32)
   def wsgpr64(self, reg, v: int):
-    off = reg.offset if hasattr(reg, 'offset') else reg
-    self.wsgpr(off, v & MASK32); self.wsgpr(off + 1, (v >> 32) & MASK32)
+    off = reg.offset
+    self.sgpr._data[off] = v & MASK32; self.sgpr._data[off + 1] = (v >> 32) & MASK32
 
   def _rsrc_base(self, reg, lane: int, consts, literal: int):
-    v = reg.offset if hasattr(reg, 'offset') else reg
-    if v < SGPR_COUNT: return self.sgpr[v]
-    if v == SCC.offset: return self.scc
-    if v < 255: return consts[v - 128]
-    if v == 255: return literal
-    return self.vgpr[lane][v] if v <= 511 else 0
+    off = reg.offset
+    if off < SGPR_COUNT: return self.sgpr._data[off]
+    if off == SCC.offset: return self.scc
+    if off < 255: return consts[off - 128]
+    if off == 255: return literal
+    return self.vgpr[lane]._data[off - 256] if off <= 511 else 0
   def rsrc(self, reg, lane: int, literal: int = 0) -> int: return self._rsrc_base(reg, lane, _INLINE_CONSTS, literal)
   def rsrc_f16(self, reg, lane: int, literal: int = 0) -> int: return self._rsrc_base(reg, lane, _INLINE_CONSTS_F16, literal)
   def rsrc64(self, reg, lane: int, literal: int = 0) -> int:
-    v = reg.offset if hasattr(reg, 'offset') else reg
-    if 128 <= v < 255: return _INLINE_CONSTS_F64[v - 128]
-    if v == 255: return literal << 32  # 32-bit literal forms upper 32 bits of 64-bit value
-    return self.rsrc(v, lane, literal) | ((self.rsrc(v+1, lane, literal) if v < VCC_LO.offset or 256 <= v <= 511 else 0) << 32)
+    off = reg.offset
+    if 128 <= off < 255: return _INLINE_CONSTS_F64[off - 128]
+    if off == 255: return literal << 32  # 32-bit literal forms upper 32 bits of 64-bit value
+    return self.rsrc(reg, lane, literal) | ((self.rsrc(reg + 1, lane, literal) if off < VCC_LO.offset or 256 <= off <= 511 else 0) << 32)
 
   def pend_sgpr_lane(self, reg, lane: int, val: int):
     if reg not in self._pend_sgpr: self._pend_sgpr[reg] = 0
@@ -251,15 +240,15 @@ def exec_scalar(st: WaveState, inst: Inst):
     result = inst._fn(GlobalMem, addr & MASK64)
     if 'SDATA' in result:
       sdata = result['SDATA']
-      for i in range(SMEM_DST_COUNT.get(inst.op, 1)): st.wsgpr(inst.sdata.offset + i, (sdata >> (i * 32)) & MASK32)
+      for i in range(SMEM_DST_COUNT.get(inst.op, 1)): st.wsgpr(inst.sdata + i, (sdata >> (i * 32)) & MASK32)
     st.pc += inst._words
     return 0
 
-  # Build context - use inst methods to determine operand sizes
+  # Build context - use canonical_op_bits to determine operand sizes
   literal = inst._literal
-  s0 = st.rsrc64(ssrc0, 0, literal) if inst.is_src_64(0) else (st.rsrc(ssrc0, 0, literal) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))
-  s1 = st.rsrc64(inst.ssrc1, 0, literal) if inst.is_src_64(1) else (st.rsrc(inst.ssrc1, 0, literal) if isinstance(inst, (SOP2, SOPC)) else inst.simm16 if isinstance(inst, SOPK) else 0)
-  d0 = st.rsgpr64(sdst) if inst.dst_regs() == 2 and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
+  s0 = st.rsrc64(ssrc0, 0, literal) if inst.canonical_op_bits['s0'] == 64 else (st.rsrc(ssrc0, 0, literal) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))
+  s1 = st.rsrc64(inst.ssrc1, 0, literal) if inst.canonical_op_bits['s1'] == 64 else (st.rsrc(inst.ssrc1, 0, literal) if isinstance(inst, (SOP2, SOPC)) else inst.simm16 if isinstance(inst, SOPK) else 0)
+  d0 = st.rsgpr64(sdst) if inst.canonical_op_bits['d'] == 64 and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
   literal = inst.simm16 if isinstance(inst, (SOPK, SOPP)) else inst._literal
 
   # Call compiled function with int parameters
@@ -267,7 +256,7 @@ def exec_scalar(st: WaveState, inst: Inst):
 
   # Apply results (already int values)
   if sdst is not None and 'D0' in result:
-    (st.wsgpr64 if inst.dst_regs() == 2 else st.wsgpr)(sdst, result['D0'])
+    (st.wsgpr64 if inst.canonical_op_bits['d'] == 64 else st.wsgpr)(sdst, result['D0'])
   if 'SCC' in result: st.scc = result['SCC'] & 1
   if 'EXEC' in result: st.exec_mask = result['EXEC']
   if 'PC' in result:
@@ -286,7 +275,7 @@ def exec_scalar(st: WaveState, inst: Inst):
 def exec_vopd(st: WaveState, inst, V: VGPRLane, lane: int) -> None:
   """VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)."""
   literal, vdstx = inst._literal, inst.vdstx
-  vdsty = (inst.vdsty << 1) | ((inst.vdstx.offset & 1) ^ 1)  # vdsty is raw int from VDSTYField.decode
+  vdsty = v[(inst.vdsty << 1) | ((inst.vdstx.offset & 1) ^ 1)]  # vdsty is raw int from VDSTYField.decode
   sx0, sx1, dx, sy0, sy1, dy = st.rsrc(inst.srcx0, lane, literal), V[inst.vsrcx1], V[vdstx], st.rsrc(inst.srcy0, lane, literal), V[inst.vsrcy1], V[vdsty]
   V[vdstx] = inst._fnx(sx0, sx1, 0, dx, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
   V[vdsty] = inst._fny(sy0, sy1, 0, dy, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
@@ -311,17 +300,18 @@ def exec_ds(st: WaveState, inst, V: VGPRLane, lane: int) -> None:
 
 def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
   """VOP1/VOP2/VOP3/VOP3SD/VOP3P/VOPC: standard ALU ops."""
+  is_dst_16 = inst.canonical_op_bits['d'] == 16
   if isinstance(inst, VOP3P):
     src0, src1, src2, vdst, dst_hi = inst.src0, inst.src1, inst.src2, inst.vdst, False
     neg, abs_, opsel = inst.neg, 0, inst.opsel
   elif isinstance(inst, VOP1):
     src0, src1, src2, vdst = inst.src0, None, None, inst.vdst
-    neg, abs_, opsel, dst_hi = 0, 0, 0, (inst.vdst.offset & 0x80) != 0 and inst.is_dst_16()
-    if inst.is_dst_16(): vdst = inst.vdst.offset & 0x7f
+    neg, abs_, opsel, dst_hi = 0, 0, 0, (inst.vdst.offset & 0x80) != 0 and is_dst_16
+    if is_dst_16: vdst = v[inst.vdst.offset & 0x7f]
   elif isinstance(inst, VOP2):
     src0, src1, src2, vdst = inst.src0, inst.vsrc1, None, inst.vdst
-    neg, abs_, opsel, dst_hi = 0, 0, 0, (inst.vdst.offset & 0x80) != 0 and inst.is_dst_16()
-    if inst.is_dst_16(): vdst = inst.vdst.offset & 0x7f
+    neg, abs_, opsel, dst_hi = 0, 0, 0, (inst.vdst.offset & 0x80) != 0 and is_dst_16
+    if is_dst_16: vdst = v[inst.vdst.offset & 0x7f]
   elif isinstance(inst, (VOP3, VOP3SD)):
     src0, src1, src2, vdst = inst.src0, inst.src1, (None if isinstance(inst, VOP3) and inst.op.value < 256 else inst.src2), inst.vdst
     neg, abs_, opsel, dst_hi = (inst.neg, inst.abs, inst.opsel, False) if isinstance(inst, VOP3) else (0, 0, 0, False)
@@ -333,8 +323,8 @@ def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
   s0 = _read_src(st, inst, src0, 0, lane, neg, abs_, opsel)
   s1 = _read_src(st, inst, src1, 1, lane, neg, abs_, opsel)
   s2 = _read_src(st, inst, src2, 2, lane, neg, abs_, opsel)
-  if isinstance(inst, VOP2) and inst.is_dst_16(): d0 = _src16(V[vdst], dst_hi)
-  elif inst.dst_regs() == 2: d0 = V[vdst] | (V[vdst + 1] << 32)
+  if isinstance(inst, VOP2) and is_dst_16: d0 = _src16(V[vdst], dst_hi)
+  elif inst.canonical_op_bits['d'] == 64: d0 = V[vdst] | (V[vdst + 1] << 32)
   else: d0 = V[vdst]
 
   if isinstance(inst, VOP3SD) and 'CO_CI' in inst.op_name: vcc_for_fn = st.rsgpr64(inst.src2)
@@ -342,7 +332,7 @@ def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
   else: vcc_for_fn = st.vcc
   src0_off = src0.offset if src0 is not None else 0
   src0_idx = (src0_off - 256) if src0_off >= 256 else src0_off
-  vdst_off = vdst.offset if hasattr(vdst, 'offset') else vdst
+  vdst_off = vdst.offset
   extra_kwargs = {'opsel': opsel, 'opsel_hi': inst.opsel_hi | (inst.opsel_hi2 << 2)} if isinstance(inst, VOP3P) and 'FMA_MIX' in inst.op_name else {}
   result = inst._fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, inst._literal, st.vgpr, src0_idx, vdst_off, **extra_kwargs)
 
@@ -359,8 +349,8 @@ def exec_vop(st: WaveState, inst: Inst, V: VGPRLane, lane: int) -> None:
     st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)
   if not is_vopc:
     d0_val = result['D0']
-    if inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
-    elif not isinstance(inst, VOP3P) and inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
+    if inst.canonical_op_bits['d'] == 64: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
+    elif not isinstance(inst, VOP3P) and is_dst_16: V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
     else: V[vdst] = d0_val & MASK32
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -433,7 +423,7 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32: inst._dispatch = dispatch_writelane
     elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32_E32, VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32): inst._dispatch = dispatch_readlane
     elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
-    elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
+    elif isinstance(inst, (FLAT, GLOBAL, SCRATCH)): inst._dispatch = dispatch_lane(exec_flat)
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)
     else: inst._dispatch = dispatch_lane(exec_vop)
 
@@ -468,7 +458,7 @@ def exec_workgroup(program: dict[int, Inst], workgroup_id: tuple[int, int, int],
     n_lanes = min(WAVE_SIZE, total_threads - wave_start)
     st = WaveState(lds, n_lanes)
     st.exec_mask = (1 << n_lanes) - 1
-    st.wsgpr64(0, args_ptr)  # s[0:1] = kernel arguments pointer
+    st.wsgpr64(s[0:1], args_ptr)  # s[0:1] = kernel arguments pointer
     # COMPUTE_PGM_RSRC2: USER_SGPR_COUNT is where workgroup IDs start, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z control which are passed
     sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
     if rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X: st.sgpr[sgpr_idx] = workgroup_id[0]; sgpr_idx += 1

@@ -156,7 +156,7 @@ class AMDComputeQueue(HWQueue):
     for name,block,idx in counters:
       # sq block on gfx11+ goes down to wgps
       inst_cnt, se_cnt, sa_cnt, wgp_cnt = {"GRBM": (1, 1, 1, 1), "GL2C": (32, 1, 1, 1), "TCC": (16, 1, 1, 1),
-        "SQ": (1, self.dev.se_cnt // self.dev.xccs) + ((1, 1) if gfx9 else (2, self.dev.iface.props['cu_per_simd_array'] // 2))}[block]
+        "SQ": (1, self.dev.se_cnt) + ((1, 1) if gfx9 else (2, self.dev.iface.props['cu_per_simd_array'] // 2))}[block]
       end_off += (rec_size:=prod((self.dev.xccs, inst_cnt, se_cnt, sa_cnt, wgp_cnt)) * 8)
 
       # gfx11+ and later require even-numbered SQ *_SELECT registers
@@ -232,8 +232,8 @@ class AMDComputeQueue(HWQueue):
              | (__SQTT_USERDATA:=1<<12) | (__SQTT_REG_CS:=1<<5) | (__SQTT_REG_CS_PRIV:=1<<15)
         if (SQTT_ITRACE_SE_MASK.value >> se) & 0b1: mask |= (__SQTTINST:=1<<10) | (__SQTT_INST_PC:=1<<11) | (__SQTT_ISSUE:=1<<13)
 
-        with self.pred_exec(xcc_mask=1<<(se // (ses_per_xcc:=(self.dev.se_cnt // self.dev.xccs)))):
-          self.set_grbm(se=se % ses_per_xcc, sh=0)
+        with self.pred_exec(xcc_mask=1<<(se // self.dev.se_cnt)):
+          self.set_grbm(se=se % self.dev.se_cnt, sh=0)
           self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK, reg_mask=0xf, token_mask=mask)
           self.wreg(self.gc.regSQ_THREAD_TRACE_TOKEN_MASK2, inst_mask=0xffffffff)
           self.wreg(self.gc.regSQ_THREAD_TRACE_BASE, addr=lo32(buf0s[se].va_addr >> 12))
@@ -296,9 +296,9 @@ class AMDComputeQueue(HWQueue):
       self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.THREAD_TRACE_FINISH) | self.pm4.EVENT_INDEX(0))
 
     # For each SE wait for finish to complete and copy regSQ_THREAD_TRACE_WPTR to know where in the buffer trace data ends
-    for se in range(self.dev.se_cnt):
-      with self.pred_exec(xcc_mask=1<<(se // (ses_per_xcc:=(self.dev.se_cnt // self.dev.xccs)))):
-        self.set_grbm(se=se % ses_per_xcc, sh=0)
+    for se in range(self.dev.se_cnt * self.dev.xccs):
+      with self.pred_exec(xcc_mask=1<<(se // self.dev.se_cnt)):
+        self.set_grbm(se=se % self.dev.se_cnt, sh=0)
 
         regstatus = self.gc.regSQ_THREAD_TRACE_STATUS.addr[0] - (self.pm4.PACKET3_SET_UCONFIG_REG_START if self.dev.target[0] == 9 else 0)
         if self.dev.target >= (10,0,0):
@@ -329,11 +329,12 @@ class AMDComputeQueue(HWQueue):
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
 
     if prg.enable_dispatch_ptr:
-      dp = (dp_t:=hsa.hsa_kernel_dispatch_packet_t).from_address(cast(int, (disp_buf:=args_state.buf.offset(prg.kernargs_segment_size)).va_addr))
+      dp = (dp_t:=hsa.hsa_kernel_dispatch_packet_t).from_address(int((disp_buf:=args_state.buf.offset(prg.kernargs_segment_size)).va_addr))
 
       self.bind_sints(*local_size, mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='workgroup_size_x', fmt='H')
       self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='grid_size_x', fmt='I')
-      dp.group_segment_size, dp.private_segment_size, dp.kernarg_address = prg.group_segment_size, prg.private_segment_size, args_state.buf.va_addr
+      dp.group_segment_size, dp.private_segment_size  = prg.group_segment_size, prg.private_segment_size
+      dp.kernarg_address = cast(ctypes.c_void_p, args_state.buf.va_addr)
       user_regs += [*data64_le(disp_buf.va_addr)]
 
     user_regs += [*data64_le(args_state.buf.va_addr)]
@@ -423,6 +424,7 @@ class AMDComputeAQLQueue(AMDComputeQueue):
       group_segment_size=prg.group_segment_size, kernel_object=prg.aql_prog_addr, kernarg_address=args_state.buf.va_addr))
     self.bind_sints_to_mem(*local_size, mem=(pkt_view:=MMIOInterface(addr=ctypes.addressof(pkt), nbytes=ctypes.sizeof(pkt))), fmt='H', offset=4)
     self.bind_sints_to_mem(*[l * g for l,g in zip(local_size, global_size)], mem=pkt_view, fmt='I', offset=12)
+    return self
 
   def bind(self, dev:AMDDevice): pass # not supported
   def _submit(self, dev:AMDDevice):
@@ -783,7 +785,7 @@ class KFDIface:
     return False
 
   def on_device_hang(self):
-    def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._fields_)
+    def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._real_fields_)
 
     report = []
     for evnt in [self.mem_fault_event, self.hw_fault_event]:
@@ -914,23 +916,22 @@ class AMDDevice(HCQCompiled):
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.xccs = self.iface.props.get('num_xcc', 1)
-    self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine']
+    self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine'] // self.xccs
     self.cu_cnt = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.xccs
-    self.wave_cnt = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu']) if self.target >= (10,1,0) else \
-                     min(self.cu_cnt * 40, self.se_cnt * 512)
+    self.waves_per_cu = self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu']
+    self.wave_cnt = (self.cu_cnt * self.waves_per_cu) if self.target >= (10,1,0) else min(self.cu_cnt * 40, self.se_cnt * self.xccs * 512)
     # this is what llvm refers to as "architected flat scratch"
     self.has_scratch_base_registers = self.target >= (11,0,0) or self.target in {(9,4,2), (9,5,0)}
 
     # https://gitlab.freedesktop.org/agd5f/linux/-/blob/a1fc9f584c4aaf8bc1ebfa459fc57a3f26a290d8/drivers/gpu/drm/amd/amdkfd/kfd_queue.c#L391
     sgrp_size_per_cu, lds_size_per_cu, hwreg_size_per_cu = 0x4000, 0x10000, 0x1000
     if self.target[:2] == (9,5): lds_size_per_cu = self.iface.props["lds_size_in_kb"] << 10
-    vgpr_size_per_cu = 0x60000 if self.target in {(11,0,0), (11,0,1), (12,0,0), (12,0,1)} else \
+    vgpr_size_per_cu = 0x60000 if self.target in {(11,0,0), (11,0,1), (11,5,1), (12,0,0), (12,0,1)} else \
                        0x80000 if (self.target[:2]) in {(9,4), (9,5)} or self.target in {(9,0,8), (9,0,10)} else 0x40000
     wg_data_size = round_up((vgpr_size_per_cu + sgrp_size_per_cu + lds_size_per_cu + hwreg_size_per_cu) * self.cu_cnt, mmap.PAGESIZE)
-    ctl_stack_size = round_up(12 * self.cu_cnt * self.wave_cnt + 8 + 40, mmap.PAGESIZE) if self.target >= (10,1,0) else \
-                     round_up(self.wave_cnt * 8 + 8 + 40, mmap.PAGESIZE)
-    debug_memory_size = round_up((self.cu_cnt if self.target >= (10,1,0) else 1) * self.wave_cnt * 32, 64)
+    ctl_stack_size = round_up((12 if self.target >= (10,1,0) else 8) * self.wave_cnt + 8 + 40, mmap.PAGESIZE)
     if self.target[0] == 10: ctl_stack_size = min(ctl_stack_size, 0x7000)
+    debug_memory_size = round_up(self.wave_cnt * 32, 64)
 
     self.ip_off = import_ip_offsets(self.target)
     self.soc = import_soc(self.target)
@@ -975,9 +976,9 @@ class AMDDevice(HCQCompiled):
       self.pmc_sched:list[PMCSample] = []
       self.pmc_counters = import_pmc(self.target)
 
-      # validate counters
-      pmc_default = "TCC_HIT,TCC_MISS,SQ_LDS_IDX_ACTIVE,SQ_LDS_BANK_CONFLICT" if self.target[0] == 9 \
-          else "GL2C_HIT,GL2C_MISS,SQC_LDS_IDX_ACTIVE,SQC_LDS_BANK_CONFLICT"
+      # validate counters: SQ for SIMD busy/instruction counts, LDS stats, GRBM for GPU cycles, L2 cache hits/misses
+      l2, lds = ("TCC", "SQ") if self.target[0] == 9 else ("GL2C", "SQC")
+      pmc_default = f"SQ_BUSY_CYCLES,SQ_INSTS_VALU,SQ_INSTS_SALU,{lds}_LDS_IDX_ACTIVE,{lds}_LDS_BANK_CONFLICT,GRBM_GUI_ACTIVE,{l2}_HIT,{l2}_MISS"
       for k in (PMC_COUNTERS:=getenv("PMC_COUNTERS", pmc_default).split(",")):
         if k not in self.pmc_counters: raise RuntimeError(f"PMC counter {k} is not supported. Available: {','.join(self.pmc_counters.keys())}")
 
@@ -992,8 +993,8 @@ class AMDDevice(HCQCompiled):
       self.iface.require_profile_mode()
 
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
-      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]
-      self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))
+      self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE<<20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt * self.xccs)]
+      self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * self.xccs * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))
       self.sqtt_next_cmd_id = itertools.count(0)
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
@@ -1003,7 +1004,7 @@ class AMDDevice(HCQCompiled):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL:
       aql_desc = hsa.amd_queue_t(queue_properties=hsa.AMD_QUEUE_PROPERTIES_IS_PTR64 | hsa.AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
         read_dispatch_id_field_base_byte_offset=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
-        max_cu_id=self.cu_cnt - 1, max_wave_id=self.wave_cnt - 1)
+        max_cu_id=(self.cu_cnt * self.xccs) - 1, max_wave_id=self.waves_per_cu - 1)
       gart.cpu_view().view(fmt='B')[:ctypes.sizeof(aql_desc)] = bytes(aql_desc)
       self.aql_desc = hsa.amd_queue_t.from_address(gart.cpu_view().addr)
 
@@ -1017,6 +1018,7 @@ class AMDDevice(HCQCompiled):
 
   @functools.lru_cache(None)
   def sdma_queue(self, idx:int):
+    if getenv("AMD_DISABLE_SDMA"): return None
     with contextlib.suppress(OSError): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
     return None
 
@@ -1045,8 +1047,8 @@ class AMDDevice(HCQCompiled):
         rsrc1_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD1{"_GFX11" if self.target[0] >= 11 else ""}_bitfields')
         rsrc3_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD3{"_GFX"+str(self.target[0]) if self.target[0] >= 10 else ""}_bitfields')
 
-        self.aql_desc.scratch_backing_memory_location = self.scratch.va_addr
-        self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.aql_desc.max_wave_id + 1) // 64
+        self.aql_desc.scratch_backing_memory_location = int(self.scratch.va_addr)
+        self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size * lanes_per_wave // 64
         self.aql_desc.scratch_resource_descriptor[:] = [lo32(self.scratch.va_addr),
           int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(self.scratch.va_addr), SWIZZLE_ENABLE=1), 'little'),
           lo32(size_per_xcc), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]

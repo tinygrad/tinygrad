@@ -110,7 +110,7 @@ jobs:
     - name: Test ResNet-18
       run: DEBUG=2 python3 extra/torch_backend/example.py
     - name: custom tests
-      run: python3 extra/torch_backend/test.py
+      run: python3 -m pytest -n auto extra/torch_backend/test.py --durations=20
     - name: Test one op in torch tests
       run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
     - name: Test Ops with TINY_BACKEND
@@ -670,7 +670,6 @@ jobs:
           python-version: '3.13'
       - name: Verify AMD autogen is up to date
         run: |
-          python -m extra.assembly.amd.pdf
           python -m extra.assembly.amd.amdxml
           git diff --exit-code extra/assembly/amd/autogen/
       - name: Install LLVM 21

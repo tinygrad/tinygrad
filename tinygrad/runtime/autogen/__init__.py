@@ -12,7 +12,7 @@ llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homeb
             repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))]))
 
 webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
-nv_lib_path = "f'/usr/local/cuda/targets/{sysconfig.get_config_vars().get(\"MULTIARCH\", \"\").rsplit(\"-\", 1)[0]}/lib'"
+nv_lib_path = "[f'/{pre}/cuda/targets/{sysconfig.get_config_vars().get(\"MULTIARCH\", \"\").rsplit(\"-\", 1)[0]}/lib' for pre in ['opt', 'usr/local']]"
 
 def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
@@ -142,4 +142,9 @@ def __getattr__(nm):
       return load("metal", "'Metal'", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
                   args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
+    case "iokit": return load("iokit", "'IOKit'", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"],
+                              args=["-isysroot", macossdk])
+    case "corefoundation": return load("corefoundation", "'CoreFoundation'",
+                                       [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
+                                       args=["-isysroot", macossdk])
     case _: raise AttributeError(f"no such autogen: {nm}")

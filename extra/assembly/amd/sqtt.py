@@ -23,7 +23,7 @@ class AluSrc(Enum):
   NONE = 0
   SALU = 1
   VALU = 2
-  VALU_ALT = 3
+  VALU_SALU = 3
 
 class InstOp(Enum):
   """SQTT instruction operation types.
@@ -292,7 +292,7 @@ def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
 
   for byte_val in range(256):
     for opcode, pkt_cls in enumerate(PACKET_TYPES):
-      if (byte_val & pkt_cls.encoding.mask()) == pkt_cls.encoding.default:
+      if (byte_val & pkt_cls.encoding.mask) == pkt_cls.encoding.default:
         table[byte_val] = opcode
         break
 
@@ -310,7 +310,7 @@ _DECODE_INFO: dict[int, tuple] = {}
 for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
   _delta_field = getattr(_pkt_cls, 'delta', None)
   _delta_lo = _delta_field.lo if _delta_field else 0
-  _delta_mask = _delta_field.mask() if _delta_field else 0
+  _delta_mask = _delta_field.mask if _delta_field else 0
   _special = 1 if _opcode == _TS_DELTA_OR_MARK_OPCODE else (2 if _opcode == _TS_DELTA_SHORT_OPCODE else 0)
   _DECODE_INFO[_opcode] = (_pkt_cls, _pkt_cls._size_nibbles, _delta_lo, _delta_mask, _special)
 

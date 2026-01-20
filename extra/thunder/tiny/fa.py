@@ -54,6 +54,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
       v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
 
+      q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
       q_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
       k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
@@ -77,7 +78,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       scale_vec = warp.ones(scale_vec)
 
       # load q tile
-      q_reg = warp.load(q_reg, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_fl = warp.load(q_reg_fl, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_fl *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+      q_reg = warp.copy(q_reg, q_reg_fl)
       q_reg_transposed = warp.transpose(q_reg_transposed, q_reg)
 
       for kv_idx in ker.range(N // KV_BLOCK_SIZE):
@@ -91,7 +94,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         att_block = warp.zero(att_block.after(kv_idx))
         k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
         att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
-        att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
 
         # apply attention mask
         mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_seq, kv_idx), axis=2)
@@ -151,6 +153,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
       v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
 
+      q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
       q_reg_t = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
       k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
@@ -175,7 +178,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       dq_reg = warp.zero(dq_reg)
 
       # load q tile
-      q_reg = warp.load(q_reg, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_fl = warp.load(q_reg_fl, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_fl *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+      q_reg = warp.copy(q_reg, q_reg_fl)
       q_reg_t = warp.transpose(q_reg_t, q_reg)
 
       # load do tile
@@ -205,7 +210,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
         att_block += mask_reg_transposed
 
-        att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
         att_block -= l_vec_reg
         att_block = att_block.exp2()
 
@@ -290,13 +294,13 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
           # mma qk^t
           att_block = warp.zero(att_block.after(g))
           att_block = warp.mma_AtB(att_block, k_reg_t, q_reg_t)
+          att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
 
           # apply attention mask
           mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_idx, kv_seq), axis=2)
           mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
           att_block += mask_reg_transposed
 
-          att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
           att_block -= l_vec_reg
           att_block = att_block.exp2()
 
@@ -318,12 +322,12 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
       return ker.finish()
 
-  def custom_backward_v(dvu:UOp, dou:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
+  def custom_backward_v(dvu:UOp, dou:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp) -> UOp:
     with Kernel("fa_custom_backward_v", (H_KV, N // (KV_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       dv, do, q, k, v, mask = GL(dvu, ker), GL(dou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker)
-      l_vec, delta_vec = GL(l_vecu, ker), GL(delta_vecu, ker)
+      l_vec = GL(l_vecu, ker)
 
       head_kv = ker.blockIdx_x
       batch = ker.blockIdx_z
@@ -335,7 +339,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
       q_reg_t = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
-      q_reg_col = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16, TileLayout.COL)
       k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
       k_reg_t = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
       v_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
@@ -352,7 +355,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       att_block_row = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.bfloat16)
 
       l_vec_reg = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
-      delta_vec_reg = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
 
       dv_reg = warp.zero(dv_reg)
 
@@ -371,25 +373,23 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
           q_reg = warp.load(q_reg, q_smem)
           q_reg_t = warp.transpose(q_reg_t, q_reg)
-          q_reg_col = warp.load(q_reg_col, q_smem)
           do_reg = warp.load(do_reg, do_smem)
           do_reg_col = warp.load(do_reg_col, do_smem)
 
-          # load l_vec and delta_vec
+          # load l_vec
           l_vec_reg = warp.load(l_vec_reg, l_vec, (), (batch, head_q, 0, q_idx), axis=2)
           l_vec_reg *= 1.0 / math.log(2)
-          delta_vec_reg = warp.load(delta_vec_reg, delta_vec, (), (batch, head_q, 0, q_idx), axis=2)
 
           # mma qk^t
           att_block = warp.zero(att_block.after(g))
           att_block = warp.mma_AtB(att_block, k_reg_t, q_reg_t)
+          att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
 
           # apply attention mask
           mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_idx, kv_seq), axis=2)
           mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
           att_block += mask_reg_transposed
 
-          att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
           att_block -= l_vec_reg
           att_block = att_block.exp2()
 
@@ -399,6 +399,8 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
           att_block_row = warp.load(att_block_row, att_smem)
           dv_reg = warp.mma_AB(dv_reg, att_block_row, do_reg_col)
       dv_reg = ker.endrange(2)
+
+      dv_reg = warp.map(dv_reg, lambda x, idx: x + v_reg[*idx].cast(dtypes.float32) * 1e-30)
 
       dv = warp.store(dv, dv_reg, (batch, kv_seq, head_kv, 0), axis=1)
 
@@ -413,7 +415,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
   else:
     attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=single_device, dtype=dtypes.float32)
-  if isinstance(xq.device, tuple):
+  if attn_mask.shape != (B, 1, N, N):
+    attn_mask = attn_mask.expand(B, 1, N, N)
+  if isinstance(xq.device, tuple) and not isinstance(attn_mask.device, tuple):
     attn_mask = attn_mask.shard(xq.device, axis=0)
 
   attn = _sharded_empty_like(xq, axis=0)
@@ -429,7 +433,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
     grad_q = Tensor.custom_kernel(grad_q, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
     grad_k = Tensor.custom_kernel(grad_k, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_k)[0]
-    grad_v = Tensor.custom_kernel(grad_v, grad, xq, xk, xv, attn_mask, l_vec, delta_vec, fxn=custom_backward_v)[0]
+    grad_v = Tensor.custom_kernel(grad_v, grad, xq, xk, xv, attn_mask, l_vec, fxn=custom_backward_v)[0]
     return (None, None, grad_q.uop, grad_k.uop, grad_v.uop, None)
 
   attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, attn_mask, fxn=custom_forward, grad_fxn=grad)[:2]

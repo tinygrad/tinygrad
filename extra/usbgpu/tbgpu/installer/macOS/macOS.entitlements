@@ -8,5 +8,9 @@
 	<true/>
 	<key>com.apple.developer.system-extension.install</key>
 	<true/>
+	<key>com.apple.developer.driverkit.userclient-access</key>
+	<array>
+		<string>org.tinygrad.tinygpu.edriver</string>
+	</array>
 </dict>
 </plist>

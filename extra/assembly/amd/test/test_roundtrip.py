@@ -2,16 +2,8 @@
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re, subprocess, os
 from extra.assembly.amd.dsl import Inst
-from extra.assembly.amd.asm import asm
 from extra.assembly.amd.decode import decode_inst, detect_format
-from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump
-
-# arch: (mcpu, mattr)
-ARCH_CONFIG = {
-  'rdna3': ('gfx1100', '+real-true16,+wavefrontsize32'),
-  'rdna4': ('gfx1200', '+real-true16,+wavefrontsize32'),
-  'cdna': ('gfx942', '+wavefrontsize64'),
-}
+from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump, get_target, get_mattr
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
   """Disassemble ELF binary and return list of (instruction_text, machine_code_bytes)."""
@@ -43,8 +35,7 @@ def compile_asm(instr: str, arch: str = 'rdna3') -> bytes:
 def compile_asm_batch(instrs: list[str], arch: str = 'rdna3') -> list[bytes]:
   """Compile multiple instructions with a single llvm-mc call."""
   if not instrs: return []
-  mcpu, mattr = ARCH_CONFIG[arch]
-  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', f'-mattr={mattr}', '-show-encoding'],
+  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={get_target(arch)}', f'-mattr={get_mattr(arch)}', '-show-encoding'],
                           input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
   encodings = []
@@ -60,7 +51,7 @@ def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str
   """Compile instructions with LLVM and get LLVM's disassembly."""
   import tempfile
   if not instrs: return []
-  mcpu, mattr = ARCH_CONFIG[arch]
+  mcpu, mattr = get_target(arch), get_mattr(arch)
   src = ".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n" + "\n".join(f"  {instr}" for instr in instrs) + "\n"
   with tempfile.NamedTemporaryFile(suffix='.o', delete=False) as f:
     obj_path = f.name
@@ -86,17 +77,16 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
   def _test_kernel_roundtrip(self, op_fn):
     """Generate kernel from op_fn, test:
     1. decode -> reencode matches original bytes
-    2. asm(disasm()) matches LLVM output
-    3. our disasm() matches LLVM's disassembly string exactly
+    2. disasm() -> LLVM asm -> bytes matches original (validates disasm correctness)
+    3. our disasm() matches LLVM's disassembly string (informational)
     """
     arch = self.arch
-    mcpu, mattr = ARCH_CONFIG[arch]
 
     from extra.assembly.amd.test.test_compare_emulators import get_kernels_from_tinygrad
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
     kernels, _, _ = get_kernels_from_tinygrad(op_fn)
-    compiler = HIPCompiler(mcpu)
+    compiler = HIPCompiler(get_target(arch))
 
     # First pass: decode all instructions and collect info
     decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
@@ -130,19 +120,19 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
         offset += size
 
     # Collect disasm strings for batched LLVM calls - skip unknown opcodes (op_X) that LLVM can't compile
-    asm_test_instrs: list[tuple[int, str]] = []  # (idx, our_disasm) for asm test
+    asm_test_instrs: list[tuple[int, str, bytes]] = []  # (idx, our_disasm, orig_bytes) for asm test
     disasm_test_instrs: list[tuple[int, str]] = []  # (idx, our_disasm) for disasm comparison test
 
     for idx, (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err) in enumerate(decoded_instrs):
       if our_disasm is None: continue
-      # Skip unknown opcodes and malformed instructions for both tests
+      # Skip unknown opcodes and malformed instructions
       if our_disasm.startswith('op_') or re.search(r', \d+, \d+, \d+,', our_disasm): continue
-      asm_test_instrs.append((idx, our_disasm))
+      asm_test_instrs.append((idx, our_disasm, orig_bytes))
       disasm_test_instrs.append((idx, our_disasm))
 
-    # Batch compile for asm test
-    asm_llvm_results = compile_asm_batch([d for _, d in asm_test_instrs], arch)
-    asm_llvm_map = {idx: result for (idx, _), result in zip(asm_test_instrs, asm_llvm_results)}
+    # Batch compile for asm test (our disasm -> LLVM asm -> bytes)
+    asm_llvm_results = compile_asm_batch([d for _, d, _ in asm_test_instrs], arch)
+    asm_llvm_map = {idx: (result, orig) for (idx, _, orig), result in zip(asm_test_instrs, asm_llvm_results)}
 
     # Batch compile+disasm for disasm comparison test
     disasm_llvm_results = compile_and_disasm_batch([d for _, d in disasm_test_instrs], arch)
@@ -166,20 +156,16 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
         decode_failed += 1
         decode_failures.append(f"K{ki}@{offset}: {our_disasm}: {decode_err}")
 
-      # Asm test
+      # Asm test: our disasm -> LLVM asm -> compare bytes with original
       if our_disasm is None:
         asm_skipped += 1
       elif idx in asm_llvm_map:
-        llvm_bytes = asm_llvm_map[idx]
-        try:
-          our_bytes = asm(our_disasm).to_bytes()
-          if our_bytes[:len(llvm_bytes)] == llvm_bytes:
-            asm_passed += 1
-          else:
-            asm_failed += 1
-            asm_failures.append(f"K{ki}@{offset}: '{our_disasm}': ours={our_bytes[:len(llvm_bytes)].hex()} llvm={llvm_bytes.hex()}")
-        except Exception:
-          asm_skipped += 1
+        llvm_bytes, orig = asm_llvm_map[idx]
+        if llvm_bytes == orig[:len(llvm_bytes)]:
+          asm_passed += 1
+        else:
+          asm_failed += 1
+          asm_failures.append(f"K{ki}@{offset}: '{our_disasm}': llvm={llvm_bytes.hex()} orig={orig[:len(llvm_bytes)].hex()}")
       else:
         asm_skipped += 1
 
@@ -197,7 +183,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
         disasm_skipped += 1
 
     print(f"[{arch}] decode roundtrip: {decode_passed} passed, {decode_failed} failed, {decode_skipped} skipped")
-    print(f"[{arch}] asm vs llvm: {asm_passed} passed, {asm_failed} failed, {asm_skipped} skipped")
+    print(f"[{arch}] asm via llvm: {asm_passed} passed, {asm_failed} failed, {asm_skipped} skipped")
     print(f"[{arch}] disasm vs llvm: {disasm_passed} passed, {disasm_failed} failed, {disasm_skipped} skipped")
     self.assertEqual(decode_failed, 0, f"Decode failures:\n" + "\n".join(decode_failures[:20]))
     self.assertEqual(asm_failed, 0, f"Asm failures:\n" + "\n".join(asm_failures[:20]))
@@ -248,10 +234,10 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
   # Fused ops
   def test_fma(self): self._test_kernel_roundtrip(lambda T: (T([1.0, 2.0]) * T([3.0, 4.0]) + T([5.0, 6.0])))
 
-@unittest.skip("no asm support for RDNA4")
+@unittest.skip("RDNA4 decode roundtrip not yet supported")
 class TestTinygradKernelRoundtripRDNA4(TestTinygradKernelRoundtrip): arch = 'rdna4'
 
-@unittest.skip("no asm support for CDNA")
+@unittest.skip("CDNA decode roundtrip not yet supported")
 class TestTinygradKernelRoundtripCDNA(TestTinygradKernelRoundtrip): arch = 'cdna'
 
 if __name__ == "__main__":

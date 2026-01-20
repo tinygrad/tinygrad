@@ -1,6 +1,6 @@
 from typing import cast
 import itertools
-from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, TracingKey
+from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, TracingKey, Context
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec
@@ -26,6 +26,7 @@ pm_syntactic_sugar = PatternMatcher([
    lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
 ])
 
+@Context(ALLOW_DEVICE_USAGE=0)
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
@@ -166,7 +167,7 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  if ast.arg is None: ast = ast.replace(arg=KernelInfo())
+  if ast.arg is None and ast.op is Ops.SINK: ast = ast.replace(arg=KernelInfo())
 
   # rewrite to prg
   if ast.op is Ops.PROGRAM: prg = ast

@@ -150,7 +150,7 @@ class NV_FLCN(NV_IP):
       patched_image[(cmd_off:=self.desc_v3.IMEMLoadSize+dmem.cmd_in_buffer_offset) : cmd_off+len(cmd)] = cmd
       patched_image[(sig_off:=self.desc_v3.IMEMLoadSize+self.desc_v3.PKCDataOffset) : sig_off+0x180] = signature[-0x180:]
 
-      return System.alloc_sysmem(len(patched_image), contiguous=True, data=patched_image)
+      return self.nvdev._alloc_sysmem(len(patched_image), contiguous=True, data=patched_image)
 
     _, self.frts_image_sysmem = __patch(0x15, bytes(frts_cmd))
 
@@ -163,7 +163,7 @@ class NV_FLCN(NV_IP):
 
     patched_image = bytearray(image)
     patched_image[patch_loc:patch_loc+sig_len] = sig[:sig_len]
-    _, self.booter_image_sysmem = System.alloc_sysmem(len(patched_image), contiguous=True, data=patched_image)
+    _, self.booter_image_sysmem = self.nvdev._alloc_sysmem(len(patched_image), contiguous=True, data=patched_image)
     _, _, self.booter_data_off, self.booter_data_sz, _, self.booter_code_off, self.booter_code_sz, _, _ = struct.unpack("9I", header)
 
   def init_hw(self):
@@ -287,7 +287,7 @@ class NV_FLCN_COT(NV_IP):
     self.fmc_booter_hash = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_hash_data")).cast('I')
     self.fmc_booter_sig = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_sig_data")).cast('I')
     self.fmc_booter_pkey = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_pkey_data") + b'\x00\x00\x00').cast('I')
-    _, self.fmc_booter_sysmem = System.alloc_sysmem(len(self.fmc_booter_image), contiguous=True, data=self.fmc_booter_image)
+    _, self.fmc_booter_sysmem = self.nvdev._alloc_sysmem(len(self.fmc_booter_image), contiguous=True, data=self.fmc_booter_image)
 
   def init_hw(self):
     self.falcon = 0x00110000
@@ -344,7 +344,7 @@ class NV_GSP(NV_IP):
     # Alloc queues
     pte_cnt = ((queue_pte_cnt:=(queue_size * 2) // 0x1000)) + round_up(queue_pte_cnt * 8, 0x1000) // 0x1000
     pt_size = round_up(pte_cnt * 8, 0x1000)
-    queues_view, queues_sysmem = System.alloc_sysmem(pt_size + queue_size * 2, contiguous=False)
+    queues_view, queues_sysmem = self.nvdev._alloc_sysmem(pt_size + queue_size * 2, contiguous=False)
 
     # Fill up ptes
     for i, sysmem in enumerate(queues_sysmem): queues_view.view(i * 0x8, 0x8, fmt='Q')[0] = sysmem
@@ -364,8 +364,8 @@ class NV_GSP(NV_IP):
     self.cmd_q = NVRpcQueue(self, self.cmd_q_va, None)
 
   def init_libos_args(self):
-    _, logbuf_sysmem = System.alloc_sysmem((2 << 20), contiguous=True)
-    libos_args_view, self.libos_args_sysmem = System.alloc_sysmem(0x1000, contiguous=True)
+    _, logbuf_sysmem = self.nvdev._alloc_sysmem((2 << 20), contiguous=True)
+    libos_args_view, self.libos_args_sysmem = self.nvdev._alloc_sysmem(0x1000, contiguous=True)
 
     libos_structs = (nv.LibosMemoryRegionInitArgument * 6).from_address(libos_args_view.addr)
     for i, name in enumerate(["INIT", "INTR", "RM", "MNOC", "KRNL"]):
@@ -387,7 +387,7 @@ class NV_GSP(NV_IP):
     for i in range(3, 0, -1): npages[i-1] = ((npages[i] - 1) >> (nv.LIBOS_MEMORY_REGION_RADIX_PAGE_LOG2 - 3)) + 1
 
     offsets = [sum(npages[:i]) * 0x1000 for i in range(4)]
-    radix_view, self.gsp_radix3_sysmem = System.alloc_sysmem(offsets[-1] + len(self.gsp_image), contiguous=False)
+    radix_view, self.gsp_radix3_sysmem = self.nvdev._alloc_sysmem(offsets[-1] + len(self.gsp_image), contiguous=False)
 
     # Copy image
     radix_view.view(offsets[-1], len(self.gsp_image))[:] = self.gsp_image
@@ -398,12 +398,12 @@ class NV_GSP(NV_IP):
       radix_view.view(offsets[i], npages[i+1] * 8, fmt='Q')[:] = array.array('Q', self.gsp_radix3_sysmem[cur_offset:cur_offset+npages[i+1]])
 
     # Copy signature
-    _, self.gsp_signature_sysmem = System.alloc_sysmem(len(signature), contiguous=True, data=signature)
+    _, self.gsp_signature_sysmem = self.nvdev._alloc_sysmem(len(signature), contiguous=True, data=signature)
 
   def init_boot_binary_image(self):
     self.booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_image_prod_data")
     self.booter_desc = nv.RM_RISCV_UCODE_DESC.from_buffer_copy(self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_desc_prod_data"))
-    _, self.booter_sysmem = System.alloc_sysmem(len(self.booter_image), contiguous=True, data=self.booter_image)
+    _, self.booter_sysmem = self.nvdev._alloc_sysmem(len(self.booter_image), contiguous=True, data=self.booter_image)
 
   def init_wpr_meta(self):
     self.init_gsp_image()
@@ -499,7 +499,7 @@ class NV_GSP(NV_IP):
       params.ramfcMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x200, addressSpace=2, cacheAttrib=0)
       params.instanceMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=ramfc_alloc.paddrs[0][0], size=0x1000, addressSpace=2, cacheAttrib=0)
 
-      _, method_sysmem = System.alloc_sysmem(0x5000, contiguous=True)
+      _, method_sysmem = self.nvdev._alloc_sysmem(0x5000, contiguous=True)
       params.mthdbufMem = nv_gpu.NV_MEMORY_DESC_PARAMS(base=method_sysmem[0], size=0x5000, addressSpace=1, cacheAttrib=0)
 
       if client is not None and client != self.priv_root and params.hObjectError != 0:
@@ -539,7 +539,7 @@ class NV_GSP(NV_IP):
     self.stat_q.wait_resp(nv.NV_VGPU_MSG_FUNCTION_SET_PAGE_DIRECTORY)
 
   def rpc_set_gsp_system_info(self):
-    def bdf_as_int(s): return 0x000 if s.startswith("usb") else (int(s[5:7],16)<<8) | (int(s[8:10],16)<<3) | int(s[-1],16)
+    def bdf_as_int(s): return 0x000 if s.startswith("usb") or s.startswith("remote") else (int(s[5:7],16)<<8) | (int(s[8:10],16)<<3) | int(s[-1],16)
 
     pcidev = self.nvdev.pci_dev
     data = nv.GspSystemInfo(gpuPhysAddr=pcidev.bar_info[0].addr, gpuPhysFbAddr=pcidev.bar_info[1].addr, gpuPhysInstAddr=pcidev.bar_info[3].addr,

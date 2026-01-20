@@ -131,11 +131,11 @@ class Tensor(OpMixin):
       assert _dtype is None or _dtype==data.dtype or data.dtype==dtypes.index, f"dtype mismatch: {_dtype} vs {data.dtype}"
       # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
       if data.dtype==dtypes.index: data = _index_to_concrete_int(data)
-      if data.op is Ops.BIND:  # type: ignore  # mypy type narrowing is bugged here
-        var, val = data.unbind()  # type: ignore
+      if data.op is Ops.BIND:
+        var, val = data.unbind()
         # give the bound constant a device
         const = UOp.const(var.dtype, val, _device, ())
-        data = data.replace(src=(var.replace(src=const.src), const))  # type: ignore
+        data = data.replace(src=(var.replace(src=const.src), const))
     elif data is None:
       data = Tensor(0, device=_device, dtype=_dtype or dtypes.default_float, requires_grad=requires_grad).uop
     elif isinstance(data, get_args(ConstType)):
@@ -175,15 +175,15 @@ class Tensor(OpMixin):
   @suppress_finalizing
   def __del__(self): all_tensors.pop(weakref.ref(self), None)
 
-  def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
-    new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
-    if (metadata:=_METADATA.get()) is not None and TRACEMETA >= 1: all_metadata[new_uop] = (metadata,)
-    needs_input_grad = [t.requires_grad for t in (self,)+x]
+  def _apply_uop(self, fxn:Callable[..., UOp], *x:Tensor, extra_args=(), **kwargs) -> Tensor:
+    srcs = (self,)+x
+    new_uop: UOp = fxn(*[t.uop for t in srcs], *extra_args, **kwargs)
+    if TRACEMETA >= 1 and (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
+    needs_input_grad = [t.requires_grad for t in srcs]
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
-    ret.uop = new_uop
+    ret.uop, ret.grad = new_uop, None
     ret.requires_grad = True if any(needs_input_grad) else None if None in needs_input_grad else False
-    ret.grad = None
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(ret)] = None
     return ret
@@ -1182,7 +1182,20 @@ class Tensor(OpMixin):
     if tops := [(d,i) for d,i in enumerate(i_ for i_ in indices_parsed if not isinstance(i_['index'], int)) if isinstance(i['index'], Tensor)]:
       # unload the tensor object into actual tensors
       dims, tensors, masks = [d for d,_ in tops], cast(list[Tensor], [i['index'] for _,i in tops]), []
-      pre_reduce_shape = x.shape[:dims[0]] + (big_shape := _broadcast_shape(*(t.shape for t in tensors))) + x.shape[dims[0]:]
+      big_shape = _broadcast_shape(*(t.shape for t in tensors))
+
+      # consecutive tensor indices with int shapes: use linear indexing instead of one-hot masks
+      consecutive = dims == list(range(dims[0], dims[0] + len(dims)))
+      if v is None and len(dims) > 1 and consecutive and all_int(ishp := tuple(x.shape[d] for d in dims)):
+        strides = tuple(prod(ishp[i+1:]) for i in range(len(dims)))
+        try: linear_idx = functools.reduce(Tensor.add, (t._broadcast_to(big_shape) * s for t, s in zip(tensors, strides)))
+        except ValueError as e: raise IndexError(f"cannot broadcast indices: {e}") from e
+        valid = functools.reduce(Tensor.__and__, ((t >= 0) & (t < s) for t, s in zip(tensors, ishp)))
+        pre, post = x.shape[:dims[0]], x.shape[dims[-1]+1:]
+        x = x.reshape(pre + (prod(ishp),) + post)[tuple([slice(None)] * len(pre)) + (valid.where(linear_idx, 0),)]
+        return valid.reshape((1,) * len(pre) + big_shape + (1,) * len(post)).where(x, 0)
+
+      pre_reduce_shape = x.shape[:dims[0]] + big_shape + x.shape[dims[0]:]
 
       # create index masks
       for dim, tensor in zip(dims, tensors):
