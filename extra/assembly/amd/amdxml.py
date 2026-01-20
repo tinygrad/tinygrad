@@ -22,6 +22,8 @@ FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_
          "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}},
          "cdna": {"DS": {152: "DS_GWS_SEMA_RELEASE_ALL", 154: "DS_GWS_SEMA_V", 156: "DS_GWS_SEMA_P"},
                   "VOP3P": {44: "V_MFMA_LD_SCALE_B32", 62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
+# Encoding bits fixes (XML identifier has pattern at wrong position for multi-dword formats)
+ENC_BITS_FIXES = {"VOP3PX2": "110100111"}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
 _ENC_SUFFIXES = ("_NSA1",)
 # Encoding suffix to class suffix mapping (for variants we DO generate)
@@ -254,7 +256,7 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
   def field_def(name, hi, lo, fmt, enc_bits=None):
     bits = hi - lo + 1
     base_fmt = get_base_fmt(fmt)
-    if name == "encoding" and enc_bits: return f"FixedBitField({hi}, {lo}, 0b{enc_bits})"
+    if name == "encoding" and (enc_bits := ENC_BITS_FIXES.get(fmt, enc_bits)): return f"FixedBitField({hi}, {lo}, 0b{enc_bits})"
     if name == "op" and fmt not in ("DPP", "SDWA"): return f"EnumBitField({hi}, {lo}, {base_fmt}Op)"
     if name in ("opx", "opy"): return f"EnumBitField({hi}, {lo}, VOPDOp)"
     if name == "vdsty": return f"VDSTYField({hi}, {lo})"
