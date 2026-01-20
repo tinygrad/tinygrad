@@ -54,7 +54,7 @@ def uops_to_z3(solver, *uops: UOp) -> list[z3.ExprRef]:
   assert all(u in z3map for u in uops), "UOp failed to rewrite to z3!"
   return [z3map[u] for u in uops]
 
-def validate_index_with_z3(sz:int, idx:UOp, gate:UOp|None=None) -> bool:
+def validate_index_with_z3(sz:int, idx:UOp, gate:UOp) -> bool:
   solver = z3.Solver(ctx=z3.Context())
   z3_idx, z3_mask = uops_to_z3(solver, idx, gate)
   solver.add(z3_mask)
