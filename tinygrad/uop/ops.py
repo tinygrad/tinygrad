@@ -1011,7 +1011,7 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
-def upat_deferred_compile(p:UPat, fxn:Callable, entry:list|None=None) -> Callable:
+def upat_deferred_compile(p:UPat, fxn:Callable, entry:list) -> Callable:
   def lazy_compile(uop, ctx):
     from tinygrad.uop.upat import upat_compile
     entry[1] = upat_compile(p, fxn) or upat_interpret(p, fxn)
