@@ -408,6 +408,7 @@ def _linalg_svd(self, full_matrices=False):
 # register some decompositions
 from torch._decomp import get_decompositions
 decomps = [
+  aten._native_batch_norm_legit_functional,
   aten.native_layer_norm_backward,
   aten.linalg_cross,
   aten.addmm,
@@ -757,3 +758,46 @@ def _pad_circular(self, padding): return _PadCircular.apply(self, padding)
 
 @torch.library.impl("aten::_pad_circular", "AutogradPrivateUse1")
 def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, padding)
+
+# *** torch.compile backend registration ***
+
+from torch._dynamo.backends.registry import register_backend
+from torch._functorch.aot_autograd import aot_module_simplified
+from functorch.compile import make_boxed_func
+from tinygrad import TinyJit
+
+def _fix_graph_devices(gm: torch.fx.GraphModule):
+  """Rewrite graph to use tiny device instead of CPU for tensor creation ops (e.g. scalar_tensor in backward graphs)."""
+  for node in gm.graph.nodes:
+    if node.op == "call_function" and "device" in node.kwargs and node.kwargs["device"] is not None:
+      if node.kwargs["device"].type == "cpu":
+        node.kwargs = {**node.kwargs, "device": torch.device("tiny")}
+  gm.recompile()
+
+def _make_tiny_compiler(gm: torch.fx.GraphModule, sample_inputs):
+  """Create a TinyJit-cached compiler that routes torch graph operations through tinygrad."""
+  _fix_graph_devices(gm)
+
+  @TinyJit
+  def jit_function(*tinygrad_inputs: Tensor) -> list[Tensor|None]:
+    torch_outputs = gm(*[wrap(x) for x in tinygrad_inputs])
+    tinygrad_outputs: list[Tensor|None] = []
+    for x in torch_outputs:
+      if x is None: tinygrad_outputs.append(None)
+      else:
+        t = unwrap(x)
+        t.realize()
+        tinygrad_outputs.append(t)
+    return tinygrad_outputs
+
+  def torch_function(*args) -> list[torch.Tensor|None]:
+    tinygrad_inputs = [unwrap(x.tiny()) for x in args if isinstance(x, torch.Tensor)]
+    input_on_cpu = len(args) > 0 and isinstance(args[0], torch.Tensor) and args[0].device.type == "cpu"
+    tinygrad_outputs = jit_function(*tinygrad_inputs)
+    return [(wrap(x).cpu() if input_on_cpu else wrap(x)) if x is not None else None for x in tinygrad_outputs]
+
+  return make_boxed_func(torch_function)
+
+@register_backend
+def tiny(gm: torch.fx.GraphModule, sample_inputs):
+  return aot_module_simplified(gm, sample_inputs, decompositions=get_decompositions(decomps), fw_compiler=_make_tiny_compiler)
