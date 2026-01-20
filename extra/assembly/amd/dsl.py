@@ -284,7 +284,8 @@ class Inst:
         if 'sdst' in bits: bits['sdst'] = 32
       if 'cmp' in name and 'vdst' in bits: bits['vdst'] = 32
     # GLOBAL/FLAT: addr is 32-bit if saddr is valid SGPR, 64-bit if saddr is NULL
-    if 'addr' in bits and hasattr(self, 'saddr'):
+    # SCRATCH: addr is always 32-bit (offset from scratch base, not absolute address)
+    if 'addr' in bits and hasattr(self, 'saddr') and type(self).__name__ != 'SCRATCH':
       saddr_val = self.saddr.offset if isinstance(self.saddr, Reg) else self.saddr
       bits['addr'] = 64 if saddr_val in (None, 124, 125) else 32  # 124=NULL, 125=M0
     # MUBUF/MTBUF: vaddr size depends on offen/idxen (1 or 2 regs)

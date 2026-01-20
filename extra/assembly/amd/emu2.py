@@ -28,7 +28,7 @@ from tinygrad.renderer import ProgramSpec
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC,
-  DS, FLAT, GLOBAL, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
+  DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
 from extra.assembly.amd.dsl import NULL, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI
 from extra.assembly.amd.autogen.common import OpType
 from extra.assembly.amd.emu2_pcode import parse_pcode
@@ -175,6 +175,16 @@ def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, 
   else:
     new_word = _to_u32(val)
     return [idx.store(active.where(new_word, idx))]
+
+def _mem_store_bytes(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> list[UOp]:
+  """Store to byte-addressable memory (scratch). addr is byte offset, mem is uint8 buffer."""
+  stores = []
+  val_u32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+  for i in range(data_bits // 8):
+    byte_val = (val_u32 >> UOp.const(dtypes.uint32, i * 8)) & UOp.const(dtypes.uint32, 0xFF)
+    idx = (addr + UOp.const(dtypes.uint64, i)).cast(dtypes.index).valid(active)
+    stores.append(mem.index(idx).store(byte_val.cast(dtypes.uint8)))
+  return stores
 
 def _collect_data_slices(assigns: list, data_prefix: str, pcode_vars: dict = None, op_name: str = "") -> dict[int, UOp]:
   """Collect bit slices from assigns into {dword_idx: value} dict."""
@@ -339,13 +349,17 @@ def compile_ds_pcode(op, inst, lane: UOp, rvgpr_fn, wvgpr_fn, lds: UOp, exec_mas
   # Combine all stores and end the lane loop
   return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc_fn(), arg=KernelInfo(name=name))
 
-# Buffers: sgpr=0, vgpr=1, vmem=2, lds=3
+# Buffers: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
+SCRATCH_PER_LANE = 0x10000  # 64KB per lane
+SCRATCH_SIZE = WAVE_SIZE * SCRATCH_PER_LANE  # Total scratch size
+
 def _define_bufs():
   sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
   vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
   vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=2)
   lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
-  return sgpr, vgpr, vmem, lds
+  scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(SCRATCH_SIZE), arg=4)
+  return sgpr, vgpr, vmem, lds, scratch
 
 def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
 
@@ -355,10 +369,10 @@ def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('sgpr', 'vgpr', 'vmem', 'lds', 'literal', 'inst_words')
+  __slots__ = ('sgpr', 'vgpr', 'vmem', 'lds', 'scratch', 'literal', 'inst_words')
 
-  def __init__(self, sgpr, vgpr, vmem, lds, literal, inst_words):
-    self.sgpr, self.vgpr, self.vmem, self.lds = sgpr, vgpr, vmem, lds
+  def __init__(self, sgpr, vgpr, vmem, lds, scratch, literal, inst_words):
+    self.sgpr, self.vgpr, self.vmem, self.lds, self.scratch = sgpr, vgpr, vmem, lds, scratch
     self.literal, self.inst_words = literal, inst_words
 
   def rsgpr(self, reg: int) -> UOp: return self.sgpr.index(UOp.const(dtypes.index, reg), ptr=True).load()
@@ -780,39 +794,53 @@ def _compile_ds(inst: DS, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     ended = [UOp.sink(*stores).end(lane)] if stores else []
   return (name, UOp.sink(*ended, ctx.inc_pc(), arg=KernelInfo(name=name))) if ended else (name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name)))
 
-def _compile_flat_global(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+def _compile_flat_global_scratch(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask = ctx.rsgpr(EXEC_LO.offset)
   addr_reg = inst.addr.offset - 256
   has_saddr = hasattr(inst, 'saddr') and inst.saddr != NULL and inst.saddr.offset < 128
   offset, op_name = _sext(getattr(inst, 'offset', 0), 13), _op_name(inst)
   ndwords = 4 if '_B128' in op_name else 3 if '_B96' in op_name else 2 if '_B64' in op_name else 1
+  is_scratch = isinstance(inst, SCRATCH)
+
   def make_addr(lane: UOp) -> UOp:
+    # SCRATCH: byte index into scratch buffer = lane * scratch_per_lane + vgpr[addr] + sgpr[saddr] + offset
+    if is_scratch:
+      base = lane.cast(dtypes.uint64) * UOp.const(dtypes.uint64, SCRATCH_PER_LANE)
+      addr_offset = ctx.rvgpr(addr_reg, lane).cast(dtypes.uint64)
+      if has_saddr: addr_offset = addr_offset + ctx.rsgpr(inst.saddr.offset).cast(dtypes.uint64)
+      return base + addr_offset + UOp.const(dtypes.uint64, offset)
+    # GLOBAL/FLAT: 64-bit absolute address
     if has_saddr: return ctx.rsgpr64(inst.saddr.offset) + ctx.rvgpr(addr_reg, lane).cast(dtypes.uint64) + UOp.const(dtypes.uint64, offset)
     return _u64(ctx.rvgpr(addr_reg, lane), ctx.rvgpr(addr_reg + 1, lane)) + UOp.const(dtypes.uint64, offset)
+
+  mem = ctx.scratch if is_scratch else ctx.vmem
+
   pcode = PCODE.get(inst.op)
   if pcode is not None:
     vdata_reg = inst.data.offset - 256 if hasattr(inst, 'data') and inst.data else 0
     vdst_reg = inst.vdst.offset - 256 if hasattr(inst, 'vdst') and inst.vdst else vdata_reg
     is_atomic, glc = 'ATOMIC' in op_name, getattr(inst, 'glc', 0)
     is_64bit = '_B64' in op_name or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
-    lane, addr, active = UOp.range(32, _next_axis_id(), AxisType.LOOP), None, None
+    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
     addr, active = make_addr(lane), _lane_active(exec_mask, lane)
     if is_atomic:
-      srcs = {'ADDR': addr, 'DATA': _u64(ctx.rvgpr(vdata_reg, lane), ctx.rvgpr(vdata_reg + 1, lane)) if is_64bit else ctx.rvgpr(vdata_reg, lane), '_vmem': ctx.vmem}
+      srcs = {'ADDR': addr, 'DATA': _u64(ctx.rvgpr(vdata_reg, lane), ctx.rvgpr(vdata_reg + 1, lane)) if is_64bit else ctx.rvgpr(vdata_reg, lane), '_vmem': mem}
     else:
       vdata = ctx.rvgpr(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else ctx.rvgpr(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
       if 'STORE' in op_name and ndwords >= 2: vdata = vdata | (ctx.rvgpr(vdata_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-      srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': ctx.vmem}
+      srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem}
       for i in range(ndwords): srcs[f'VDATA{i}'] = ctx.rvgpr(vdata_reg + i, lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
     pcode_vars, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
     def wvmem(a: UOp, v: UOp, act: UOp) -> UOp:
-      idx = ctx.vmem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
-      return idx.store(act.where(v, ctx.vmem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).load()))
+      idx = mem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
+      return idx.store(act.where(v, mem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).load()))
     def data_bits(dest): return 8 if '.b8' in dest else 16 if '.b16' in dest else 64 if '.b64' in dest else 32
     stores = []
     for dest, val in assigns:
       if dest.startswith('MEM['):
-        stores.extend(_write_val(dest, val[1], wvmem, val[0], active) if is_atomic else _mem_store(ctx.vmem, val[0], val[1], active, 64, data_bits(dest)))
+        if is_atomic: stores.extend(_write_val(dest, val[1], wvmem, val[0], active))
+        elif is_scratch: stores.extend(_mem_store_bytes(mem, val[0], val[1], active, data_bits(dest)))
+        else: stores.extend(_mem_store(mem, val[0], val[1], active, 64, data_bits(dest)))
       elif dest.startswith('RETURN_DATA') and is_atomic and glc:
         stores.extend(_write_val(dest, val, lambda r, v, l, e: ctx.wvgpr(r, l, v, e), vdst_reg, lane, exec_mask))
     if not is_atomic:
@@ -825,7 +853,8 @@ def _compile_flat_global(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 _INST_HANDLERS: dict[type, callable] = {
   SOPP: _compile_sopp, SMEM: _compile_smem, SOP1: _compile_sop, SOP2: _compile_sop, SOPC: _compile_sop, SOPK: _compile_sop,
   VOP1: _compile_vop12, VOP1_SDST: _compile_vop12, VOP2: _compile_vop12, VOPC: _compile_vopc, VOP3: _compile_vop3, VOP3_SDST: _compile_vop3,
-  VOP3SD: _compile_vop3sd, VOP3P: _compile_vop3p, VOPD: _compile_vopd, DS: _compile_ds, FLAT: _compile_flat_global, GLOBAL: _compile_flat_global,
+  VOP3SD: _compile_vop3sd, VOP3P: _compile_vop3p, VOPD: _compile_vopd, DS: _compile_ds,
+  FLAT: _compile_flat_global_scratch, GLOBAL: _compile_flat_global_scratch, SCRATCH: _compile_flat_global_scratch,
 }
 
 @functools.cache
@@ -833,12 +862,12 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   """Compile instruction bytes to (name, SINK UOp)."""
   inst = decode_inst(inst_bytes)
   name = f"{_op_name(inst).lower()}_{inst_bytes[:inst.size()].hex()}"
-  sgpr, vgpr, vmem, lds = _define_bufs()
+  sgpr, vgpr, vmem, lds, scratch = _define_bufs()
   inst_words = inst.size() // 4
-  is_8byte_base = isinstance(inst, (VOP3, VOP3SD, VOP3P, SMEM, DS, FLAT, GLOBAL, VOPD))
+  is_8byte_base = isinstance(inst, (VOP3, VOP3SD, VOP3P, SMEM, DS, FLAT, GLOBAL, VOPD, SCRATCH))
   lit_off = 8 if is_8byte_base else 4
   literal = int.from_bytes(inst_bytes[lit_off:lit_off+4], 'little') if len(inst_bytes) >= lit_off + 4 else 0
-  ctx = _Ctx(sgpr, vgpr, vmem, lds, literal, inst_words)
+  ctx = _Ctx(sgpr, vgpr, vmem, lds, scratch, literal, inst_words)
 
   handler = _INST_HANDLERS.get(type(inst))
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
@@ -962,6 +991,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
   vmem_buf = _get_vmem_buf()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
+  scratch_buf = Buffer('CPU', SCRATCH_SIZE, dtypes.uint8).ensure_allocated()
 
   for gidz in range(gz):
     for gidy in range(gy):
@@ -986,9 +1016,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             z, y, x = tid // (lx * ly), (tid // lx) % ly, tid % lx
             st._write_vgpr(0, lane, (z << 20) | (y << 10) | x)
 
-          # Execute wave: sgpr=0, vgpr=1, vmem=2, lds=3
+          # Execute wave: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
           # Pre-compute buffer addresses for direct ctypes calls (avoids per-instruction Buffer overhead)
-          buf_addrs = {0: st.sgpr_buf._buf.va_addr, 1: st.vgpr_buf._buf.va_addr, 2: vmem_buf._buf.va_addr, 3: lds_buf._buf.va_addr}
+          buf_addrs = {0: st.sgpr_buf._buf.va_addr, 1: st.vgpr_buf._buf.va_addr, 2: vmem_buf._buf.va_addr, 3: lds_buf._buf.va_addr, 4: scratch_buf._buf.va_addr}
           max_instructions = 1_000_000
           inst_count = 0
           while True:
