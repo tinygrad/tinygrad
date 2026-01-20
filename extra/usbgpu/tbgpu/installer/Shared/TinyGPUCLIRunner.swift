@@ -51,34 +51,6 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     return .activating
   }
 
-  static func getPCIDevices() -> String {
-    guard let matching = IOServiceMatching("IOPCIDevice") else { return "Connected PCI Devices: (read error)\n\n" }
-    var iterator: io_iterator_t = 0
-    guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else { return "Connected PCI Devices:\n\n" }
-    defer { IOObjectRelease(iterator) }
-
-    var devices: [String] = []
-    while case let service = IOIteratorNext(iterator), service != 0 {
-      defer { IOObjectRelease(service) }
-
-      var vendorID: UInt16 = 0, deviceID: UInt16 = 0, isGPU = false
-      if let data = IORegistryEntryCreateCFProperty(service, "vendor-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data, data.count >= 2 {
-        vendorID = data.withUnsafeBytes { $0.load(as: UInt16.self) }
-      }
-      if let data = IORegistryEntryCreateCFProperty(service, "device-id" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data, data.count >= 2 {
-        deviceID = data.withUnsafeBytes { $0.load(as: UInt16.self) }
-      }
-      if let data = IORegistryEntryCreateCFProperty(service, "class-code" as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? Data, data.count >= 3 {
-        isGPU = data[2] == 0x03
-      }
-
-      let name = String(format: "%04x:%04x", vendorID, deviceID)
-      devices.append(isGPU ? "\(name) (supported)" : name)
-    }
-
-    return devices.isEmpty ? "PCI Devices: none\n\n" : "PCI Devices:\n" + devices.map { "  • \($0)\n" }.joined() + "\n"
-  }
-
   func install(completion: @escaping (TinyGPUCLIExit) -> Void) {
     self.done = completion
     installExtension()
@@ -169,7 +141,6 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
 
   private func printStatus(_ state: DextState) {
     log(Self.getStatusText(state))
-    log(Self.getPCIDevices())
   }
 
   private func installExtension() {
