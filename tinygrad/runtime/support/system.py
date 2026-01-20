@@ -321,8 +321,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
   @staticmethod
   def install_tinygpu():
     print("Downloading TinyGPU.app...")
-    zip_path = fetch("https://github.com/nimlgen/tinygpu_releases/raw/5b6ff43c8dffc43f57b29677e85664f667633359/TinyGPU.zip")
-    system(f"ditto -xk {zip_path} /Applications/TinyGPU.app")
+    system(f"ditto -xk {fetch("https://github.com/nimlgen/tinygpu_releases/raw/5b6ff43c8dffc43f57b29677e85664f667633359/TinyGPU.zip")} /Applications")
     print(system(f"{APLRemotePCIDevice.APP_PATH} install"))
 
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
