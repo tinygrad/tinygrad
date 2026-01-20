@@ -1,7 +1,7 @@
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
 from typing import ClassVar
-from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap
-from tinygrad.runtime.autogen import libc, vfio, pci
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system
+from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import MemoryManager, VirtMapping, AddrSpace
 from tinygrad.runtime.support.usb import ASM24Controller, USBMMIOInterface
@@ -51,14 +51,24 @@ class _System:
     self.pagemap.seek(vaddr // mmap.PAGESIZE * 8)
     return [(x & ((1<<55) - 1)) * mmap.PAGESIZE for x in array.array('Q', self.pagemap.read(size//mmap.PAGESIZE*8, binary=True))]
 
-  def pci_scan_bus(self, target_vendor:int, target_devices:list[tuple[int, list[int]]], base_class:int|None=None) -> list[str]:
-    result = []
-    for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
-      vendor = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16)
-      device = int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16)
-      if base_class is not None and int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/class").read(), 16) >> 16 != base_class: continue
-      if vendor == target_vendor and any((device & mask) in devlist for mask, devlist in target_devices): result.append(pcibus)
-    return sorted(result)
+  def pci_scan_bus(self, vendor:int, devices:list[tuple[int, list[int]]], base_class:int|None=None) -> list[str]:
+    all_devs = []
+    if OSX:
+      def read_prop(svc, key) -> int:
+        cfkey = corefoundation.CFStringCreateWithCString(None, key.encode(), corefoundation.kCFStringEncodingUTF8)
+        cfdata = ctypes.cast(iokit.IORegistryEntryCreateCFProperty(svc, ctypes.cast(cfkey, iokit.CFStringRef), None, 0), corefoundation.CFDataRef)
+        corefoundation.CFDataGetBytes(cfdata, corefoundation.CFRange(0, corefoundation.CFDataGetLength(cfdata)), buf:=(ctypes.c_uint8*8)())
+        return int.from_bytes(bytes(buf), "little")
+
+      iokit.IOServiceGetMatchingServices(0, iokit.IOServiceMatching(b"IOPCIDevice"), ctypes.byref(iterator:=ctypes.c_uint()))
+      while svc:=iokit.IOIteratorNext(iterator): all_devs.append((v:=read_prop(svc, "vendor-id"), d:=read_prop(svc, "device-id"), f"{v:x}:{d:x}"))
+    else:
+      for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
+        if base_class is not None and int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/class").read(), 16) >> 16 != base_class: continue
+        all_devs.append((int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16),
+                         int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16), pcibus))
+
+    return sorted([val for vendor, device, val in all_devs if vendor == vendor and any((device & mask) in devlist for mask, devlist in devices)])
 
   def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, PCIBarInfo]:
     for bus in range(gpu_bus):
@@ -308,25 +318,36 @@ class RemoteMMIOInterface(MMIOInterface):
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
 
-  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
-    def try_connect(path):
-      try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(path)
-        return s
-      except (ConnectionRefusedError, FileNotFoundError): return None
+  @staticmethod
+  def install_tinygpu():
+    import zipfile, tempfile
+    print("Downloading TinyGPU.app...")
+    zip_path = fetch("https://github.com/nimlgen/tinygpu_releases/raw/64828e7efc2891431819027d324886997bdb55cd/TinyGPU.zip")
+    with tempfile.TemporaryDirectory() as tmpdir:
+      with zipfile.ZipFile(zip_path, 'r') as zf: zf.extractall(tmpdir)
+      system(f"mv {tmpdir}/TinyGPU.app /Applications/")
+    print("Installing TinyGPU driver extension...")
+    system(f"{APLRemotePCIDevice.APP_PATH} install")
 
-    if not (sock:=try_connect(sock_path:=getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")))):
-      if not os.path.exists(self.APP_PATH): raise RuntimeError(f"TinyGPU app not found at {self.APP_PATH}")
-      subprocess.Popen([self.APP_PATH, "server", sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-      for _ in range(100):
-        if sock:=try_connect(sock_path): break
-        time.sleep(0.02)
-      else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}. Open /Applications/TinyGPU.app for troubleshooting.")
+  def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
+    sock_path, sock = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    for i in range(100):
+      with contextlib.suppress(ConnectionRefusedError, FileNotFoundError):
+        sock.connect(sock_path)
+        break
+      if i == 0: subprocess.Popen([self.APP_PATH, "server", sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+      time.sleep(0.05)
+    else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}.")
     super().__init__(devpref, pcibus, bars, sock)
 
 class APLRemoteIfaceBase(LNXPCIIfaceBase):
+  gpus: ClassVar[list[tuple[int, int]]] = []
+
   def __init__(self, dev, dev_id, vendor, devices:list[tuple[int, list[int]]], bars, vram_bar, va_start, va_size, base_class:int|None=None):
+    if not (cls:=type(self)).gpus:
+      cls.gpus = System.pci_scan_bus(vendor, devices)
+      if not cls.gpus: raise RuntimeError("No supported GPUs found")
+      if not os.path.exists(APLRemotePCIDevice.APP_PATH): APLRemotePCIDevice.install_tinygpu()
     self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
     self.dev, self.vram_bar = dev, vram_bar
     assert (read:=self.pci_dev.read_config(0x00, 2)) == vendor, f"Vendor ID mismatch {read:#06x} != {vendor:#06x}"
