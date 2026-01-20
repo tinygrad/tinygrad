@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
 from typing import ClassVar
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system
