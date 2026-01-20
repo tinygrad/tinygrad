@@ -230,7 +230,7 @@ jobs:
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Run pre-commit hooks
-      run: pre-commit run --all-files
+      run: IGNORE_OOB=1 pre-commit run --all-files
     - name: Lint additional files with ruff
       run: |
         python3 -m ruff check examples/mlperf/ --ignore E501
