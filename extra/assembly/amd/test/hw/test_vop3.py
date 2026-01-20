@@ -58,6 +58,95 @@ class TestFMA(unittest.TestCase):
     self.assertTrue(math.isinf(result) and result > 0)
 
 
+class TestFmacE64(unittest.TestCase):
+  """Regression tests for V_FMAC_F32 VOP3 encoding (e64).
+
+  V_FMAC_F32: D0 = D0 + S0 * S1 (fused multiply-add with accumulator)
+
+  The VOP3 encoding needs to read D0 from the destination register as the
+  accumulator input, not just write to it.
+
+  Regression test for: VOP3 FMAC missing D0 accumulator bug.
+  """
+
+  def test_v_fmac_f32_e64_basic(self):
+    """V_FMAC_F32_E64: basic accumulate test."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),  # S0 = 2.0
+      v_mov_b32_e32(v[1], 3.0),  # S1 = 3.0
+      v_mov_b32_e32(v[2], 1.0),  # D0 (accumulator) = 1.0
+      # v_fmac_f32_e64 v[2], v[0], v[1]
+      # D0 = D0 + S0 * S1 = 1.0 + 2.0 * 3.0 = 7.0
+      v_fmac_f32_e64(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 7.0, places=5)
+
+  def test_v_fmac_f32_e64_with_sgpr_sources(self):
+    """V_FMAC_F32_E64 with SGPR sources (common in AMD_LLVM output).
+
+    This tests the exact pattern that was failing: v_fmac_f32_e64(v[0], s[4], 0)
+    where src0 is SGPR and src1 is inline constant 0.
+
+    Regression test for: VOP3 FMAC missing D0 accumulator bug.
+    """
+    instructions = [
+      s_mov_b32(s[4], f2i(2.0)),  # S0 = 2.0 in SGPR
+      v_mov_b32_e32(v[0], 5.0),   # D0 (accumulator) = 5.0
+      # v_fmac_f32_e64 v[0], s[4], 0
+      # D0 = D0 + S0 * S1 = 5.0 + 2.0 * 0.0 = 5.0
+      v_fmac_f32_e64(v[0], s[4], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][0]), 5.0, places=5)
+
+  def test_v_fmac_f32_e64_with_two_sgprs(self):
+    """V_FMAC_F32_E64 with two SGPR sources.
+
+    Tests pattern: v_fmac_f32_e64(v[0], s[a], s[b])
+
+    Regression test for: VOP3 FMAC missing D0 accumulator bug.
+    """
+    instructions = [
+      s_mov_b32(s[10], f2i(3.0)),  # S0 = 3.0
+      s_mov_b32(s[12], f2i(4.0)),  # S1 = 4.0
+      v_mov_b32_e32(v[9], 2.0),    # D0 (accumulator) = 2.0
+      # v_fmac_f32_e64 v[9], s[10], s[12]
+      # D0 = D0 + S0 * S1 = 2.0 + 3.0 * 4.0 = 14.0
+      v_fmac_f32_e64(v[9], s[10], s[12]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][9]), 14.0, places=5)
+
+  def test_v_fmac_f32_e64_accumulates_correctly(self):
+    """V_FMAC_F32_E64 accumulates multiple times."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.0),   # D0 = 0.0
+      v_mov_b32_e32(v[1], 1.0),   # S0 = 1.0
+      v_mov_b32_e32(v[2], 2.0),   # S1 = 2.0
+      # First: D0 = 0.0 + 1.0 * 2.0 = 2.0
+      v_fmac_f32_e64(v[0], v[1], v[2]),
+      # Second: D0 = 2.0 + 1.0 * 2.0 = 4.0
+      v_fmac_f32_e64(v[0], v[1], v[2]),
+      # Third: D0 = 4.0 + 1.0 * 2.0 = 6.0
+      v_fmac_f32_e64(v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][0]), 6.0, places=5)
+
+  def test_v_fmac_f32_e64_negative_accumulator(self):
+    """V_FMAC_F32_E64 with negative accumulator."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),   # S0 = 2.0
+      v_mov_b32_e32(v[1], 3.0),   # S1 = 3.0
+      v_mov_b32_e32(v[2], -10.0), # D0 (accumulator) = -10.0
+      # D0 = -10.0 + 2.0 * 3.0 = -4.0
+      v_fmac_f32_e64(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), -4.0, places=5)
+
+
 class TestDivScale(unittest.TestCase):
   """Tests for V_DIV_SCALE_F32."""
 
@@ -768,7 +857,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_fma_f16_inline_const_1_0(self):
     """V_FMA_F16: a*b + 1.0 should use f16 inline constant."""
-    from extra.assembly.amd.pcode import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(0.325928)  # ~0x3537
     f16_b = f32_to_f16(-0.486572)  # ~0xb7c9
     instructions = [
@@ -785,7 +874,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_fma_f16_inline_const_0_5(self):
     """V_FMA_F16: a*b + 0.5 should use f16 inline constant."""
-    from extra.assembly.amd.pcode import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(2.0)
     f16_b = f32_to_f16(3.0)
     instructions = [
@@ -802,7 +891,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_fma_f16_inline_const_neg_1_0(self):
     """V_FMA_F16: a*b + (-1.0) should use f16 inline constant."""
-    from extra.assembly.amd.pcode import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(2.0)
     f16_b = f32_to_f16(3.0)
     instructions = [
@@ -819,7 +908,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_add_f16_abs_both(self):
     """V_ADD_F16 with abs on both operands."""
-    from extra.assembly.amd.pcode import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_neg2 = f32_to_f16(-2.0)
     f16_neg3 = f32_to_f16(-3.0)
     instructions = [
@@ -835,7 +924,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_mul_f16_neg_abs(self):
     """V_MUL_F16 with neg on one operand and abs on another."""
-    from extra.assembly.amd.pcode import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_2 = f32_to_f16(2.0)
     f16_neg3 = f32_to_f16(-3.0)
     instructions = [
@@ -854,7 +943,7 @@ class TestF16Modifiers(unittest.TestCase):
 
     This tests the case from AMD_LLVM sin(0) where V_FMAC_F16 writes to v0.h.
     """
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x38003c00),  # v0 = {hi=0.5, lo=1.0}
       v_mov_b32_e32(v[0], s[0]),
@@ -1621,6 +1710,27 @@ class TestCarryBorrow(unittest.TestCase):
     self.assertEqual(st.vgpr[0][4], 0x00000000, "lo result")
     self.assertEqual(st.vgpr[0][5], 0x00000003, "hi result")
 
+  def test_add_co_u32_same_dst_src(self):
+    """V_ADD_CO_U32 where dst is same as src - VCC must use original src value."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_add_co_u32(v[0], VCC, v[0], 1),  # v[0] = v[0] + 1, VCC should be set from overflow
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0, "0xFFFFFFFF + 1 = 0")
+    self.assertEqual(st.vcc & 1, 1, "Should have carry from 0xFFFFFFFF + 1")
+
+  def test_add_co_u32_same_dst_src_no_carry(self):
+    """V_ADD_CO_U32 where dst is same as src - no carry case."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_add_co_u32(v[0], VCC, v[0], 1),  # v[0] = v[0] + 1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 101, "100 + 1 = 101")
+    self.assertEqual(st.vcc & 1, 0, "No carry from 100 + 1")
+
 
 class TestReadlane(unittest.TestCase):
   """Tests for V_READLANE_B32 and related cross-lane operations."""
@@ -2290,6 +2400,415 @@ class TestAddF32EdgeCases(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0x80000000)  # -0
+
+
+class TestDivScaleF64(unittest.TestCase):
+  """Tests for V_DIV_SCALE_F64 - critical for tan() and division.
+
+  These tests verify that VCC bits are set independently per lane,
+  which is essential for correct multi-lane f64 division operations.
+  """
+
+  def test_div_scale_f64_basic_no_scaling(self):
+    """V_DIV_SCALE_F64: normal values with no scaling needed."""
+    sqrt2 = f2i64(1.4142135623730951)
+    one = f2i64(1.0)
+    instructions = [
+      s_mov_b32(s[0], sqrt2 & 0xffffffff),
+      s_mov_b32(s[1], sqrt2 >> 32),
+      s_mov_b32(s[2], one & 0xffffffff),
+      s_mov_b32(s[3], one >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=VCC, src0=v[0:1], src1=v[0:1], src2=v[2:3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    self.assertAlmostEqual(result, 1.4142135623730951, places=10)
+    self.assertEqual(st.vcc & 1, 0, "VCC should be 0 when no scaling needed")
+
+  def test_div_scale_f64_vcc_per_lane_uniform_input(self):
+    """V_DIV_SCALE_F64: VCC bits should be set independently per lane (uniform input).
+
+    This is a regression test for the bug where VCC = 0x0LL was setting the whole
+    64-bit VCC register instead of just the current lane's bit. With uniform input
+    all lanes should get VCC=0.
+    """
+    val = f2i64(2.0)
+    instructions = [
+      s_mov_b32(s[0], val & 0xffffffff),
+      s_mov_b32(s[1], val >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[2:3], sdst=VCC, src0=v[0:1], src1=v[0:1], src2=v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # All lanes should have VCC=0 for normal values
+    self.assertEqual(st.vcc & 0xf, 0, "All lanes should have VCC=0 for normal values")
+    # All lanes should have same result
+    for lane in range(4):
+      result = i642f(st.vgpr[lane][2] | (st.vgpr[lane][3] << 32))
+      self.assertAlmostEqual(result, 2.0, places=10, msg=f"Lane {lane} result mismatch")
+
+  def test_div_scale_f64_vcc_per_lane_varying_input(self):
+    """V_DIV_SCALE_F64: VCC bits set per-lane with different inputs per lane.
+
+    This test uses different inputs per lane to verify that VCC is tracked
+    independently. This catches the bug where the emulator was setting VCC
+    for all lanes to the same value.
+    """
+    import math
+    # Use lane-varying input: lane 0 gets 2.0, lane 1 gets 3.0, etc.
+    # All normal values should result in VCC=0 for each lane
+    instructions = [
+      # Set up per-lane values using lane_id
+      v_cvt_f64_i32_e32(v[0:1], v[255]),  # v0:1 = f64(lane_id)
+      v_add_f64(v[0:1], v[0:1], SrcEnum.POS_TWO),  # v0:1 = lane_id + 2.0
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[2:3], sdst=VCC, src0=v[0:1], src1=v[0:1], src2=v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # All lanes should have VCC=0 (no scaling needed for 2.0, 3.0, 4.0, 5.0)
+    self.assertEqual(st.vcc & 0xf, 0, "All lanes should have VCC=0 for normal values")
+    # Verify each lane has correct result
+    for lane in range(4):
+      expected = float(lane) + 2.0
+      result = i642f(st.vgpr[lane][2] | (st.vgpr[lane][3] << 32))
+      self.assertAlmostEqual(result, expected, places=10, msg=f"Lane {lane}: expected {expected}, got {result}")
+
+  def test_div_scale_f64_zero_denom_sets_vcc(self):
+    """V_DIV_SCALE_F64: zero denominator -> NaN, VCC=1."""
+    import math
+    one = f2i64(1.0)
+    zero = f2i64(0.0)
+    instructions = [
+      s_mov_b32(s[0], one & 0xffffffff),
+      s_mov_b32(s[1], one >> 32),
+      s_mov_b32(s[2], zero & 0xffffffff),
+      s_mov_b32(s[3], zero >> 32),
+      v_mov_b32_e32(v[0], s[0]),  # numer = 1.0
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),  # denom = 0.0
+      v_mov_b32_e32(v[3], s[3]),
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=VCC, src0=v[0:1], src1=v[2:3], src2=v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    self.assertTrue(math.isnan(result), "Should be NaN for zero denom")
+    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 for zero denom")
+
+  def test_div_scale_f64_mixed_vcc_per_lane(self):
+    """V_DIV_SCALE_F64: some lanes need scaling, others don't.
+
+    This is the key test for the tan() bug - it verifies that VCC is set
+    correctly for each lane independently when some lanes need scaling and
+    others don't.
+    """
+    import math
+    # Lane 0: normal value (VCC=0), Lane 1: zero denom (VCC=1)
+    # Lane 2: normal value (VCC=0), Lane 3: zero denom (VCC=1)
+    normal = f2i64(2.0)
+    zero = f2i64(0.0)
+    instructions = [
+      # Set up numer = 2.0 for all lanes
+      s_mov_b32(s[0], normal & 0xffffffff),
+      s_mov_b32(s[1], normal >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      # Set up denom: lane 0,2 get 2.0, lane 1,3 get 0.0
+      s_mov_b32(s[2], zero & 0xffffffff),
+      s_mov_b32(s[3], zero >> 32),
+      v_mov_b32_e32(v[2], s[0]),  # default to 2.0
+      v_mov_b32_e32(v[3], s[1]),
+      # Override lanes 1 and 3 with 0.0 using writelane
+      v_writelane_b32(v[2], s[2], 1),
+      v_writelane_b32(v[3], s[3], 1),
+      v_writelane_b32(v[2], s[2], 3),
+      v_writelane_b32(v[3], s[3], 3),
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=VCC, src0=v[0:1], src1=v[2:3], src2=v[0:1]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # Lanes 0,2 should have VCC=0 (normal), lanes 1,3 should have VCC=1 (zero denom)
+    self.assertEqual(st.vcc & 0b0001, 0, "Lane 0 VCC should be 0")
+    self.assertEqual(st.vcc & 0b0010, 0b0010, "Lane 1 VCC should be 1")
+    self.assertEqual(st.vcc & 0b0100, 0, "Lane 2 VCC should be 0")
+    self.assertEqual(st.vcc & 0b1000, 0b1000, "Lane 3 VCC should be 1")
+
+    # Check results
+    for lane in [0, 2]:
+      result = i642f(st.vgpr[lane][4] | (st.vgpr[lane][5] << 32))
+      self.assertAlmostEqual(result, 2.0, places=10, msg=f"Lane {lane} should be 2.0")
+    for lane in [1, 3]:
+      result = i642f(st.vgpr[lane][4] | (st.vgpr[lane][5] << 32))
+      self.assertTrue(math.isnan(result), f"Lane {lane} should be NaN")
+
+
+class TestDivFmasF64(unittest.TestCase):
+  """Tests for V_DIV_FMAS_F64 - scaling FMA for f64 division.
+
+  These tests verify that V_DIV_FMAS applies the correct scaling
+  based on VCC per lane, which is essential for correct tan() results.
+  """
+
+  def test_div_fmas_f64_no_scale_vcc0(self):
+    """V_DIV_FMAS_F64: VCC=0 -> normal FMA, no scaling."""
+    a = f2i64(2.0)
+    b = f2i64(3.0)
+    c = f2i64(1.0)
+    instructions = [
+      s_mov_b32(VCC_LO, 0),
+      s_mov_b32(s[0], a & 0xffffffff),
+      s_mov_b32(s[1], a >> 32),
+      s_mov_b32(s[2], b & 0xffffffff),
+      s_mov_b32(s[3], b >> 32),
+      s_mov_b32(s[4], c & 0xffffffff),
+      s_mov_b32(s[5], c >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      v_mov_b32_e32(v[4], s[4]),
+      v_mov_b32_e32(v[5], s[5]),
+      v_div_fmas_f64(v[6:7], v[0:1], v[2:3], v[4:5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][6] | (st.vgpr[0][7] << 32))
+    expected = 2.0 * 3.0 + 1.0  # = 7.0
+    self.assertAlmostEqual(result, expected, places=10)
+
+  def test_div_fmas_f64_scale_up_vcc1_large_s2(self):
+    """V_DIV_FMAS_F64: VCC=1 with S2 exponent > 1023 -> scale by 2^+128."""
+    a = f2i64(1.0)
+    b = f2i64(1.0)
+    c = f2i64(2.0)  # exponent = 1024 > 1023, so scale UP
+    instructions = [
+      s_mov_b32(VCC_LO, 1),
+      s_mov_b32(s[0], a & 0xffffffff),
+      s_mov_b32(s[1], a >> 32),
+      s_mov_b32(s[2], b & 0xffffffff),
+      s_mov_b32(s[3], b >> 32),
+      s_mov_b32(s[4], c & 0xffffffff),
+      s_mov_b32(s[5], c >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      v_mov_b32_e32(v[4], s[4]),
+      v_mov_b32_e32(v[5], s[5]),
+      v_div_fmas_f64(v[6:7], v[0:1], v[2:3], v[4:5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][6] | (st.vgpr[0][7] << 32))
+    expected = (1.0 * 1.0 + 2.0) * (2.0 ** 128)  # = 3.0 * 2^128
+    self.assertAlmostEqual(result, expected, delta=abs(expected) * 1e-10)
+
+  def test_div_fmas_f64_scale_down_vcc1_small_s2(self):
+    """V_DIV_FMAS_F64: VCC=1 with S2 exponent <= 1023 -> scale by 2^-128."""
+    a = f2i64(2.0)
+    b = f2i64(3.0)
+    c = f2i64(1.0)  # exponent = 1023, so scale DOWN
+    instructions = [
+      s_mov_b32(VCC_LO, 1),
+      s_mov_b32(s[0], a & 0xffffffff),
+      s_mov_b32(s[1], a >> 32),
+      s_mov_b32(s[2], b & 0xffffffff),
+      s_mov_b32(s[3], b >> 32),
+      s_mov_b32(s[4], c & 0xffffffff),
+      s_mov_b32(s[5], c >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      v_mov_b32_e32(v[4], s[4]),
+      v_mov_b32_e32(v[5], s[5]),
+      v_div_fmas_f64(v[6:7], v[0:1], v[2:3], v[4:5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][6] | (st.vgpr[0][7] << 32))
+    expected = (2.0 * 3.0 + 1.0) * (2.0 ** -128)  # = 7.0 * 2^-128
+    self.assertAlmostEqual(result, expected, delta=abs(expected) * 1e-10)
+
+  def test_div_fmas_f64_per_lane_vcc_varying(self):
+    """V_DIV_FMAS_F64: different VCC per lane applies different scaling.
+
+    This is the key test for the tan() bug - verifies that scaling is
+    applied per-lane based on VCC bits, not uniformly.
+    """
+    a = f2i64(1.0)
+    b = f2i64(1.0)
+    c = f2i64(1.0)  # exponent = 1023, so when VCC=1 it scales DOWN
+    instructions = [
+      # VCC = 0b0101: lanes 0,2 scale, lanes 1,3 don't
+      s_mov_b32(VCC_LO, 0b0101),
+      s_mov_b32(s[0], a & 0xffffffff),
+      s_mov_b32(s[1], a >> 32),
+      s_mov_b32(s[2], b & 0xffffffff),
+      s_mov_b32(s[3], b >> 32),
+      s_mov_b32(s[4], c & 0xffffffff),
+      s_mov_b32(s[5], c >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      v_mov_b32_e32(v[4], s[4]),
+      v_mov_b32_e32(v[5], s[5]),
+      v_div_fmas_f64(v[6:7], v[0:1], v[2:3], v[4:5]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+
+    scaled = (1.0 * 1.0 + 1.0) * (2.0 ** -128)  # = 2.0 * 2^-128
+    unscaled = 1.0 * 1.0 + 1.0  # = 2.0
+
+    # Lane 0: VCC=1, scale
+    result0 = i642f(st.vgpr[0][6] | (st.vgpr[0][7] << 32))
+    self.assertAlmostEqual(result0, scaled, delta=abs(scaled) * 1e-10, msg="Lane 0 should be scaled")
+
+    # Lane 1: VCC=0, no scale
+    result1 = i642f(st.vgpr[1][6] | (st.vgpr[1][7] << 32))
+    self.assertAlmostEqual(result1, unscaled, places=10, msg="Lane 1 should be unscaled")
+
+    # Lane 2: VCC=1, scale
+    result2 = i642f(st.vgpr[2][6] | (st.vgpr[2][7] << 32))
+    self.assertAlmostEqual(result2, scaled, delta=abs(scaled) * 1e-10, msg="Lane 2 should be scaled")
+
+    # Lane 3: VCC=0, no scale
+    result3 = i642f(st.vgpr[3][6] | (st.vgpr[3][7] << 32))
+    self.assertAlmostEqual(result3, unscaled, places=10, msg="Lane 3 should be unscaled")
+
+
+class TestDivScaleFmasF64Integration(unittest.TestCase):
+  """Integration tests for V_DIV_SCALE_F64 + V_DIV_FMAS_F64.
+
+  These tests verify the full division sequence used by tan() works
+  correctly with multiple lanes having different values.
+  """
+
+  def test_div_scale_then_fmas_multi_lane_tan_pattern(self):
+    """Test the pattern used by tan(): DIV_SCALE sets VCC, DIV_FMAS uses it.
+
+    This is the exact bug scenario: tan([2.0, 3.0, 4.0]) was failing because
+    VCC from DIV_SCALE was being set incorrectly for all lanes.
+    """
+    import math
+    # Set up values like tan() would: different values per lane
+    instructions = [
+      # Create per-lane values: 2.0, 3.0, 4.0, 5.0
+      v_cvt_f64_i32_e32(v[0:1], v[255]),  # v0:1 = f64(lane_id)
+      v_add_f64(v[0:1], v[0:1], SrcEnum.POS_TWO),  # numer = lane_id + 2.0
+      # denom = 1.0 for all lanes (uniform)
+      v_mov_b32_e32(v[2], f2i64(1.0) & 0xffffffff),
+      v_mov_b32_e32(v[3], f2i64(1.0) >> 32),
+      # V_DIV_SCALE_F64: sets VCC per lane
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=VCC, src0=v[0:1], src1=v[2:3], src2=v[0:1]),
+      # Copy scaled numer for FMA
+      v_mov_b32_e32(v[6], v[4]),
+      v_mov_b32_e32(v[7], v[5]),
+      # V_DIV_FMAS_F64: uses VCC to apply scaling
+      v_div_fmas_f64(v[8:9], v[6:7], v[2:3], v[4:5]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+
+    # All lanes should have VCC=0 (no scaling needed for normal values)
+    self.assertEqual(st.vcc & 0xf, 0, "All lanes should have VCC=0 for normal values")
+
+    # Verify each lane has correct intermediate value
+    for lane in range(4):
+      expected_numer = float(lane) + 2.0
+      # With VCC=0, DIV_FMAS should just do FMA with no scaling
+      result = i642f(st.vgpr[lane][8] | (st.vgpr[lane][9] << 32))
+      # The FMA result should be: scaled_numer * denom + scaled_numer = 2*scaled_numer
+      expected = expected_numer * 1.0 + expected_numer  # Simple FMA for this test setup
+      self.assertAlmostEqual(result, expected, places=8,
+        msg=f"Lane {lane}: expected {expected}, got {result}")
+
+
+class TestVOP3VOPC(unittest.TestCase):
+  """Tests for VOP3-encoded VOPC instructions (comparisons with scalar dest)."""
+
+  def test_v_cmp_ge_f32_e64_nan(self):
+    """V_CMP_GE_F32_E64: |NaN| >= |0.0| should be FALSE (NaN comparisons always false)."""
+    from extra.assembly.amd.autogen.rdna3.ins import VOP3_SDST
+    instructions = [
+      s_mov_b32(s[0], 0xffc00000),  # NaN
+      s_mov_b32(s[1], 0x00000000),  # 0.0
+      v_mov_b32_e32(v[5], s[0]),
+      v_mov_b32_e32(v[3], s[1]),
+      VOP3_SDST(VOP3Op.V_CMP_GE_F32, vdst=s[5], src0=v[5], src1=v[3], abs_=3),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[5], 0)  # NaN comparison is always FALSE
+
+
+class TestMin3Max3Unsigned(unittest.TestCase):
+  """Regression tests for V_MIN3/V_MAX3 with unsigned integer types.
+
+  The emulator's _minmax_reduce used UOp.minimum() which implements min(a,b) as
+  -max(-a,-b). This is broken for unsigned types because negation (mul by -1)
+  doesn't preserve ordering: for uint16, -0 = 0 but -5 = 65531, so
+  max(-0, -5) = max(0, 65531) = 65531, and -65531 = 5, giving min(0,5) = 5 (wrong!).
+
+  Fix: use comparison-based min/max for unsigned types: min(a,b) = (a<b)?a:b
+  """
+
+  def test_v_min3_u16_with_zero(self):
+    """V_MIN3_U16: min3(0, 3, 5) should return 0, not a wrong value."""
+    instructions = [
+      s_mov_b32(s[0], 0),   # 0
+      s_mov_b32(s[1], 3),   # 3
+      s_mov_b32(s[2], 5),   # 5
+      v_mov_b32_e32(v[0], s[0]),
+      v_min3_u16(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1] & 0xFFFF, 0)
+
+  def test_v_min3_u16_all_nonzero(self):
+    """V_MIN3_U16: min3(2, 5, 3) should return 2."""
+    instructions = [
+      s_mov_b32(s[0], 2),
+      s_mov_b32(s[1], 5),
+      s_mov_b32(s[2], 3),
+      v_mov_b32_e32(v[0], s[0]),
+      v_min3_u16(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1] & 0xFFFF, 2)
+
+  def test_v_min3_u32_with_zero(self):
+    """V_MIN3_U32: min3(0, 100, 50) should return 0."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 100),
+      s_mov_b32(s[2], 50),
+      v_mov_b32_e32(v[0], s[0]),
+      v_min3_u32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_v_max3_u16_basic(self):
+    """V_MAX3_U16: max3(0, 3, 5) should return 5."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 3),
+      s_mov_b32(s[2], 5),
+      v_mov_b32_e32(v[0], s[0]),
+      v_max3_u16(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1] & 0xFFFF, 5)
+
+  def test_v_min_u16_two_operand(self):
+    """V_MIN_U16 (two operand): min(0, 5) should return 0."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 5),
+      v_mov_b32_e32(v[0], s[0]),
+      v_min_u16(v[1], v[0], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1] & 0xFFFF, 0)
 
 
 if __name__ == '__main__':

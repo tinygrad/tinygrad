@@ -149,7 +149,7 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mix_f32_src2_f16_lo(self):
     """V_FMA_MIX_F32 with src2 as f16 from lo bits."""
-    from extra.assembly.amd.pcode import f32_to_f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_2 = f32_to_f16(2.0)
     instructions = [
       s_mov_b32(s[0], f2i(1.0)),
@@ -166,7 +166,7 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mix_f32_src2_f16_hi(self):
     """V_FMA_MIX_F32 with src2 as f16 from hi bits."""
-    from extra.assembly.amd.pcode import f32_to_f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
     f16_2 = f32_to_f16(2.0)
     val = (f16_2 << 16) | 0
     instructions = [
@@ -197,9 +197,64 @@ class TestFmaMix(unittest.TestCase):
     result = i2f(st.vgpr[0][3])
     self.assertAlmostEqual(result, 7.0, places=5)
 
+  def test_v_fma_mix_f32_with_abs_f16_src2_lo(self):
+    """V_FMA_MIX_F32 with abs modifier on f16 src2 (lo half). Regression test for sin(1.0) bug."""
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
+    f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
+    instructions = [
+      s_mov_b32(s[0], f2i(0.0)),  # src0 = 0.0 (f32)
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(1.0)),  # src1 = 1.0 (f32)
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f16_neg1),  # src2 = -1.0 (f16 in lo)
+      v_mov_b32_e32(v[2], s[2]),
+      # 0*1 + abs(-1.0) = 1.0; neg_hi=4 means abs on src2, opsel_hi2=1 means src2 is f16
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=1, neg_hi=4),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 1.0, places=5)
+
+  def test_v_fma_mix_f32_with_neg_f16_src2_lo(self):
+    """V_FMA_MIX_F32 with neg modifier on f16 src2 (lo half)."""
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
+    f16_1 = f32_to_f16(1.0)  # 0x3c00
+    instructions = [
+      s_mov_b32(s[0], f2i(0.0)),  # src0 = 0.0 (f32)
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(1.0)),  # src1 = 1.0 (f32)
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f16_1),  # src2 = 1.0 (f16 in lo)
+      v_mov_b32_e32(v[2], s[2]),
+      # 0*1 + neg(1.0) = -1.0; neg=4 means neg on src2, opsel_hi2=1 means src2 is f16
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=1, neg=4),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, -1.0, places=5)
+
+  def test_v_fma_mix_f32_with_abs_f16_src2_hi(self):
+    """V_FMA_MIX_F32 with abs modifier on f16 src2 (hi half)."""
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16
+    f16_neg1 = f32_to_f16(-1.0)  # 0xbc00
+    val = (f16_neg1 << 16) | 0  # -1.0 in hi, 0 in lo
+    instructions = [
+      s_mov_b32(s[0], f2i(0.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(1.0)),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], val),
+      v_mov_b32_e32(v[2], s[2]),
+      # opsel=4 selects hi half of src2; neg_hi=4 means abs on src2
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=4, opsel_hi=0, opsel_hi2=1, neg_hi=4),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 1.0, places=5)
+
   def test_v_fma_mixlo_f16(self):
     """V_FMA_MIXLO_F16 writes to low 16 bits of destination."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], f2i(2.0)),
       v_mov_b32_e32(v[0], s[0]),
@@ -219,7 +274,7 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mixlo_f16_all_f32_sources(self):
     """V_FMA_MIXLO_F16 with all f32 sources."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], f2i(1.0)),
       v_mov_b32_e32(v[0], s[0]),
@@ -237,7 +292,7 @@ class TestFmaMix(unittest.TestCase):
 
   def test_v_fma_mixlo_f16_sin_case(self):
     """V_FMA_MIXLO_F16 case from sin kernel."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x3f800000),  # f32 1.0
       v_mov_b32_e32(v[3], s[0]),
@@ -259,7 +314,7 @@ class TestVOP3P(unittest.TestCase):
 
   def test_v_pk_add_f16_basic(self):
     """V_PK_ADD_F16 adds two packed f16 values."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x40003c00),  # hi=2.0, lo=1.0
       s_mov_b32(s[1], 0x44004200),  # hi=4.0, lo=3.0
@@ -276,7 +331,7 @@ class TestVOP3P(unittest.TestCase):
 
   def test_v_pk_mul_f16_basic(self):
     """V_PK_MUL_F16 multiplies two packed f16 values."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x42004000),  # hi=3.0, lo=2.0
       s_mov_b32(s[1], 0x45004400),  # hi=5.0, lo=4.0
@@ -293,7 +348,7 @@ class TestVOP3P(unittest.TestCase):
 
   def test_v_pk_fma_f16_basic(self):
     """V_PK_FMA_F16: D = A * B + C for packed f16."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x42004000),  # A: hi=3.0, lo=2.0
       s_mov_b32(s[1], 0x45004400),  # B: hi=5.0, lo=4.0
@@ -315,7 +370,7 @@ class TestVOP3P(unittest.TestCase):
     Inline constants for VOP3P are f16 values in the low 16 bits only.
     hi half of inline constant is 0, so hi result = v0.hi + 0 = 1.0.
     """
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x3c003c00),  # packed f16: hi=1.0, lo=1.0
       v_mov_b32_e32(v[0], s[0]),
@@ -333,7 +388,7 @@ class TestVOP3P(unittest.TestCase):
     """V_PK_MUL_F16 with inline constant POS_TWO (2.0).
     Inline constant has value only in low 16 bits, hi is 0.
     """
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     # v0 = packed (3.0, 4.0), multiply by POS_TWO
     # lo = 3.0 * 2.0 = 6.0, hi = 4.0 * 0.0 = 0.0 (inline const hi is 0)
     instructions = [
@@ -498,7 +553,7 @@ class TestPackedMixedSigns(unittest.TestCase):
 
   def test_pk_add_f16_mixed_signs(self):
     """V_PK_ADD_F16 with mixed positive/negative values."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0xc0003c00),  # packed: hi=-2.0, lo=1.0
       s_mov_b32(s[1], 0x3c003c00),  # packed: hi=1.0, lo=1.0
@@ -515,7 +570,7 @@ class TestPackedMixedSigns(unittest.TestCase):
 
   def test_pk_mul_f16_zero(self):
     """V_PK_MUL_F16 with zero."""
-    from extra.assembly.amd.pcode import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x40004000),  # packed: 2.0, 2.0
       s_mov_b32(s[1], 0x00000000),  # packed: 0.0, 0.0
