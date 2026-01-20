@@ -3,12 +3,13 @@ from tinygrad import dtypes
 from tinygrad.helpers import all_same, Context
 from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat
 from tinygrad.codegen import full_rewrite_to_sink
+from tinygrad.renderer import Renderer
 from hypothesis import given, strategies as strat
 
 # Helper function to apply the graph rewrite
 @Context(SPEC=0)
 def apply_rewrite(expr):
-  return full_rewrite_to_sink(expr.sink()).src[0]
+  return full_rewrite_to_sink(expr.sink(), ren=Renderer()).src[0]
 
 def evaluate_uop(uop, variables):
   if uop.op == Ops.CONST:

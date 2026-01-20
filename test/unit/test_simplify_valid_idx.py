@@ -5,6 +5,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.symbolic import simplify_valid
 from tinygrad.helpers import Context
+from tinygrad.renderer import Renderer
 from test.unit.test_uop_symbolic import check_uop_against_string
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
@@ -48,7 +49,7 @@ class TestHelpers(unittest.TestCase):
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid):
     with Context(NOOPT=1, SPEC=0):
-      load = full_rewrite_to_sink(load.sink()).src[0]
+      load = full_rewrite_to_sink(load.sink(), ren=Renderer()).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     check_uop_against_string(self, idx, sidx)
     check_uop_against_string(self, valid, svalid)
@@ -214,7 +215,7 @@ class TestValidIdxSimplification(unittest.TestCase):
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     with Context(NOOPT=1, SPEC=0):
-      load = full_rewrite_to_sink(load.sink()).src[0]
+      load = full_rewrite_to_sink(load.sink(), ren=Renderer()).src[0]
     idx = load.src[0].src[1]
     self.assertEqual(idx.op, Ops.VECTORIZE)
     self.assertEqual(len(idx.src), 2)
