@@ -322,7 +322,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
   def install_tinygpu():
     import zipfile, tempfile
     print("Downloading TinyGPU.app...")
-    zip_path = fetch("https://github.com/nimlgen/tinygpu_releases/raw/64828e7efc2891431819027d324886997bdb55cd/TinyGPU.zip")
+    zip_path = fetch("https://github.com/nimlgen/tinygpu_releases/raw/5b6ff43c8dffc43f57b29677e85664f667633359/TinyGPU.zip")
     with tempfile.TemporaryDirectory() as tmpdir:
       with zipfile.ZipFile(zip_path, 'r') as zf: zf.extractall(tmpdir)
       system(f"mv {tmpdir}/TinyGPU.app /Applications/")
