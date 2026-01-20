@@ -36,9 +36,6 @@ class DSPRenderer(ClangRenderer):
   device = "DSP"
   supports_float4 = True
   has_threads = False
-
-  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in (dtypes.bfloat16,) + dtypes.fp8s
-
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
   extra_args = []

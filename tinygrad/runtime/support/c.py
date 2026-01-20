@@ -131,15 +131,13 @@ def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
 def init_c_var(ty, creat_cb): return (creat_cb(v:=del_an(ty)()), v)[1]
 
 class DLL(ctypes.CDLL):
-  _loaded_: set[str] = set()
-
   @staticmethod
   def findlib(nm:str, paths:list[str], extra_paths=[]):
     if nm == 'libc' and OSX: return '/usr/lib/libc.dylib'
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
       libpaths = {"posix": ["/usr/lib64", "/usr/lib", "/usr/local/lib"], "nt": os.environ['PATH'].split(os.pathsep),
-                  "darwin": ["/opt/homebrew/lib", f"/System/Library/Frameworks/{p}.framework", f"/System/Library/PrivateFrameworks/{p}.framework"],
+                  "darwin": ["/opt/homebrew/lib", f"/System/Library/Frameworks/{p}.framework"],
                   'linux': ['/lib', '/lib64', f"/lib/{sysconfig.get_config_var('MULTIARCH')}", "/usr/lib/wsl/lib/"]}
       if (pth:=pathlib.Path(p)).is_absolute():
         if pth.is_file(): return p
@@ -156,12 +154,12 @@ class DLL(ctypes.CDLL):
               if f.read(4) == b'\x7FELF': return str(l)
 
   def __init__(self, nm:str, paths:str|list[str], extra_paths=[], emsg="", **kwargs):
-    self.nm, self.emsg = nm, emsg
+    self.nm, self.emsg, self.loaded = nm, emsg, False
     if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths], extra_paths if isinstance(extra_paths, list) else [extra_paths])):
       if DEBUG >= 3: print(f"loading {nm} from {path}")
       try:
         super().__init__(path, **kwargs)
-        self._loaded_.add(self.nm)
+        self.loaded = True
       except OSError as e:
         self.emsg = str(e)
         if DEBUG >= 3: print(f"loading {nm} failed: {e}")
@@ -177,6 +175,5 @@ class DLL(ctypes.CDLL):
     return wrapper
 
   def __getattr__(self, nm):
-    if self.nm not in self._loaded_:
-      raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
+    if not self.loaded: raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
     return super().__getattr__(nm)
