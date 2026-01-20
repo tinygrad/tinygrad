@@ -989,7 +989,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
           # Execute wave: sgpr=0, vgpr=1, vmem=2, lds=3
           # Pre-compute buffer addresses for direct ctypes calls (avoids per-instruction Buffer overhead)
           buf_addrs = {0: st.sgpr_buf._buf.va_addr, 1: st.vgpr_buf._buf.va_addr, 2: vmem_buf._buf.va_addr, 3: lds_buf._buf.va_addr}
-          max_instructions = 100000
+          max_instructions = 1_000_000
           inst_count = 0
           while True:
             pc = st.pc
