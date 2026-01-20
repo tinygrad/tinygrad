@@ -124,7 +124,7 @@ class USB3:
           results.append(None)
 
         # CSW
-        sig, rtag, residue, status = struct.unpack("<IIIB", self._bulk_in(self.ep_data_in, 13))
+        sig, rtag, residue, status = struct.unpack("<IIIB", self._bulk_in(self.ep_data_in, 13, timeout=2000))
         assert sig == 0x53425355, f"Bad CSW signature 0x{sig:08X}, expected 0x53425355"
         assert rtag == self._tag, f"CSW tag mismatch: got {rtag}, expected {self._tag}"
         assert status == 0, f"SCSI command failed, CSW status=0x{status:02X}, residue={residue}"
