@@ -93,9 +93,7 @@ def parse_xml(filename: str):
               for f in enc.findall(".//MicrocodeFormat/BitMap/Field") if f.find("BitLayout/Range") is not None]
     ident = (enc.findall("EncodingIdentifiers/EncodingIdentifier") or [None])[0]
     enc_field = next((f for f in fields if f[0] == "encoding"), None)
-    # VOP3PX2 is 128-bit but identifier pattern is at [31:23] (VOP3P encoding in dword0), not at ENCODING field [95:87]
-    enc_bits_pos = (31, 23) if "VOP3PX2" in name and enc_field and enc_field[1] > 63 else (enc_field[1], enc_field[2]) if enc_field else (0, 0)
-    enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_bits_pos[0], enc_bits_pos[1]-1, -1)) if ident is not None and enc_field else None
+    enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1], enc_field[2]-1, -1)) if ident is not None and enc_field else None
     base_name = _strip_enc(name)
     encodings[NAME_MAP.get(base_name, base_name)] = (fields, enc_bits)
   # Extract instruction opcodes and operand info
