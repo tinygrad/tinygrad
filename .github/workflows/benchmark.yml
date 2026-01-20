@@ -3,8 +3,6 @@ env:
   # TODO: this rescheduling makes gpt2, mixtral and llama unjitted slower
   # TODO: very slow for llama 70B and resnet training 6 GPU
   CAPTURE_PROCESS_REPLAY: "1"
-  # uncomment to run process replay in diff only mode
-  #ASSERT_PROCESS_REPLAY: "0"
   PYTHONPATH: .
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
