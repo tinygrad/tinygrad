@@ -17,7 +17,7 @@ def _set_daz_ftz():
       ctypes.CDLL(f.name).set_daz_ftz()
   except Exception: pass
 _set_daz_ftz()
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, graph_rewrite, PatternMatcher
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
 from tinygrad.codegen import get_program
 from tinygrad.device import Device, Buffer, BufferSpec
@@ -29,16 +29,16 @@ from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP1_SDST, VOP2, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC,
   DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
-from extra.assembly.amd.dsl import NULL, VCC_LO, VCC_HI, EXEC_LO, EXEC_HI
+from extra.assembly.amd.dsl import NULL, VCC_LO, EXEC_LO
 from extra.assembly.amd.autogen.common import OpType
 from extra.assembly.amd.emu2_pcode import parse_pcode
 
-MASK32, MASK64 = 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF
+MASK32 = 0xFFFFFFFF
 
 # Common UOp constants (avoid repeated allocation)
 def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
-U32_0, U32_1, U32_16, U32_32, U32_MASK = _c(0), _c(1), _c(16), _c(32), _c(MASK32)
-U64_32, IDX_0 = _c(32, dtypes.uint64), _c(0, dtypes.index)
+U32_0, U32_1, U32_16, U32_MASK = _c(0), _c(1), _c(16), _c(MASK32)
+IDX_0 = _c(0, dtypes.index)
 
 # Inline float constants (as bit patterns) for GPU instructions
 F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
@@ -85,7 +85,7 @@ VOPD_TO_VOP2 = {
   VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
 }
 WAVE_SIZE = 32
-PC_LO_IDX, PC_HI_IDX, SCC_IDX, SCRATCH_STRIDE_IDX = 128, 129, 130, 131
+PC_LO_IDX, SCC_IDX, SCRATCH_STRIDE_IDX = 128, 130, 131
 SGPR_COUNT, VGPR_SIZE = 132, 256 * 32
 
 def _is_16bit_op(op_name: str) -> bool: return any(x in op_name for x in ('B16', 'F16', 'I16', 'U16'))
@@ -311,46 +311,6 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
   stores.extend(scalar_stores)
   if not stores: return None
   return (name, UOp.sink(*stores, inc_pc_fn(), arg=KernelInfo(name=name))) if inc_pc_fn else stores
-
-def compile_ds_pcode(op, inst, lane: UOp, rvgpr_fn, wvgpr_fn, lds: UOp, exec_mask: UOp, inc_pc_fn, name: str):
-  """Compile a DS instruction using pcode parser. Returns (name, sink) or None."""
-  pcode = PCODE.get(op)
-  if pcode is None: return None
-
-  # Extract instruction fields
-  addr_reg = inst.addr.offset - 256 if inst.addr.offset >= 256 else inst.addr.offset
-  offset0 = getattr(inst, 'offset0', 0) or 0
-  offset1 = getattr(inst, 'offset1', 0) or 0
-  data0_reg = (inst.data0.offset - 256 if inst.data0.offset >= 256 else inst.data0.offset) if inst.data0 is not None else 0
-  data1_reg = (inst.data1.offset - 256 if inst.data1.offset >= 256 else inst.data1.offset) if inst.data1 is not None else 0
-  vdst_reg = (inst.vdst.offset - 256 if inst.vdst.offset >= 256 else inst.vdst.offset) if inst.vdst is not None else 0
-
-  # Build source operands for pcode
-  # ADDR/ADDR_BASE is base address from vgpr
-  base_addr = rvgpr_fn(addr_reg, lane)
-  # OFFSET/OFFSET0/OFFSET1 are immediate values from instruction
-  # DATA is 64-bit from data0 vgpr pair, DATA2 from data1 vgpr pair
-  data = _u64(rvgpr_fn(data0_reg, lane), rvgpr_fn(data0_reg + 1, lane) if data0_reg else UOp.const(dtypes.uint32, 0))
-  data2 = _u64(rvgpr_fn(data1_reg, lane) if data1_reg else UOp.const(dtypes.uint32, 0), rvgpr_fn(data1_reg + 1, lane) if data1_reg else UOp.const(dtypes.uint32, 0))
-
-  srcs = {
-    'ADDR': base_addr, 'ADDR_BASE': base_addr,
-    'OFFSET': UOp.const(dtypes.uint32, offset0), 'OFFSET0': UOp.const(dtypes.uint32, offset0), 'OFFSET1': UOp.const(dtypes.uint32, offset1),
-    'DATA': data, 'DATA2': data2,
-    '_lds': lds,
-  }
-
-  _, assigns = parse_pcode(pcode, srcs, lane)
-
-  active = _lane_active(exec_mask, lane)
-  def _data_bits(dest): return 8 if '.b8' in dest else 16 if '.b16' in dest else 64 if '.b64' in dest else 32
-  stores = [s for dest, val in assigns if dest.startswith('MEM[') for s in _mem_store(lds, val[0].cast(dtypes.uint32), val[1], active, data_bits=_data_bits(dest))]
-  for dword_idx, val in sorted(_collect_data_slices(assigns, 'RETURN_DATA').items()):
-    stores.append(wvgpr_fn(vdst_reg + dword_idx, lane, val, exec_mask))
-
-  if not stores: return None
-  # Combine all stores and end the lane loop
-  return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc_fn(), arg=KernelInfo(name=name))
 
 # Buffers: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
 
