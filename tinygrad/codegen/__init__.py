@@ -175,7 +175,7 @@ def get_program(ast:UOp, device:str, renderer:Renderer|None=None, opts:list[Opt]
   else:
     full_sink = full_rewrite_to_sink(ast, device, renderer, optimize=ast.tag is None)
     prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=device)))
-  prg = graph_rewrite(prg, pm_to_program, ctx=Device[device].renderer, name="linearize/render")
+  prg = graph_rewrite(prg, pm_to_program, ctx=renderer or Device[device].renderer, name="linearize/render")
 
   # create the ProgramSpec
   return ProgramSpec.from_uop(prg)
