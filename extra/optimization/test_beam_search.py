@@ -85,7 +85,7 @@ class TestBeamSearch(unittest.TestCase):
     size = max(tc.dims[0], tc.dims[1]) * 8
     a, b = Tensor.rand(size, size, dtype=tc.dtype_in), Tensor.rand(size, size, dtype=tc.dtype_in)
     ast = a.matmul(b, dtype=tc.dtype_out).schedule()[-1].ast
-    s = Scheduler(ast, Device[Device.DEFAULT].renderer)
+    s = Scheduler(ast, Device.DEFAULT, Device[Device.DEFAULT].renderer)
     s.apply_opt(Opt(OptOps.TC, 0, (-1, 0, 1)))
     up = prod([x for x, t in zip(s.full_shape, s.axis_types) if t in (AxisType.UPCAST, AxisType.UNROLL)])
     actions = get_kernel_actions(s, include_0=False, max_up=int(up))

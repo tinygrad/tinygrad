@@ -66,7 +66,7 @@ def _try_compile(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[
     signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   ret = None
   try:
-    p = get_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
+    p = get_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].dev)
     assert p.uops is not None, "uop list wasn't generated?"
     if len(p.uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")

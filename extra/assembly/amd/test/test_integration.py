@@ -172,7 +172,7 @@ class TestTinygradIntegration(unittest.TestCase):
 
     # Generate program
     renderer = HIPRenderer('gfx1100')
-    prg = get_program(sink_items[0].ast, renderer)
+    prg = get_program(sink_items[0].ast, "AMD", renderer)
     self.assertIsNotNone(prg.src)
 
     # Compile and disassemble
@@ -206,7 +206,7 @@ class TestTinygradIntegration(unittest.TestCase):
 
     # Generate and compile
     renderer = HIPRenderer('gfx1100')
-    prg = get_program(sink_items[0].ast, renderer)
+    prg = get_program(sink_items[0].ast, "AMD", renderer)
     compiler = HIPCompiler('gfx1100')
     lib = compiler.compile(prg.src)
     raw_disasm = disassemble(lib)
@@ -234,7 +234,7 @@ class TestTinygradIntegration(unittest.TestCase):
     if not sink_items: return  # skip if no kernel
 
     renderer = HIPRenderer('gfx1100')
-    prg = get_program(sink_items[0].ast, renderer)
+    prg = get_program(sink_items[0].ast, "AMD", renderer)
     compiler = HIPCompiler('gfx1100')
     lib = compiler.compile(prg.src)
     raw_disasm = disassemble(lib)
