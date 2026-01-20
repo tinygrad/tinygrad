@@ -45,6 +45,18 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[str]|None=N
 
   return memoryview(image), sections, relocs
 
+def elf_symbol_offsets(obj: bytes) -> dict[str, int]:
+  """Parse ELF object file and return {symbol_name: offset} for all defined symbols."""
+  def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
+  _, sections, _ = elf_loader(obj)
+  symtab_sec = next((s for s in sections if s.header.sh_type == libc.SHT_SYMTAB), None)
+  if symtab_sec is None: return {}
+  strtab_sec = sections[symtab_sec.header.sh_link] if symtab_sec.header.sh_link < len(sections) else None
+  if strtab_sec is None: return {}
+  symbols = (libc.Elf64_Sym * (symtab_sec.header.sh_size // symtab_sec.header.sh_entsize)).from_buffer_copy(symtab_sec.content)
+  return {name: sections[sym.st_shndx].header.sh_addr + sym.st_value
+          for sym in symbols if 0 < sym.st_shndx < len(sections) and (name := _strtab(strtab_sec.content, sym.st_name))}
+
 def jit_loader(obj: bytes, base:int=0, link_libs:list[str]|None=None) -> bytes:
   image_, _, relocs = elf_loader(obj, link_libs=link_libs)
   image = bytearray(image_)
