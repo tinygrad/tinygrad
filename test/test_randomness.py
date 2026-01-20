@@ -97,7 +97,8 @@ class TestRandomness(unittest.TestCase):
                     585929100, 37685650, 1493162330, 3176705340, 139929675, 3743710624])
 
     counts0 = counts1 = Tensor.arange(10, dtype=dtypes.uint32)
-    r = Tensor._threefry_random_bits(Tensor([0, 1337], dtype='uint32'), counts0, counts1).numpy()
+    key = Tensor((1337 << 32) | 0, device=counts0.device, dtype=dtypes.uint64, requires_grad=False)
+    r = Tensor._threefry_random_bits(key, counts0, counts1).numpy()
 
     np.testing.assert_allclose(jr, r)
 
