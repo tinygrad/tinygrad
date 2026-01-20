@@ -326,7 +326,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
       system(f"unzip -q {zip_path} -d {tmpdir}")
       system(f"ditto {tmpdir}/TinyGPU.app /Applications/TinyGPU.app")
     print("Installing TinyGPU driver extension...")
-    system(f"{APLRemotePCIDevice.APP_PATH} install")
+    print(system(f"{APLRemotePCIDevice.APP_PATH} install"))
 
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
     sock_path, sock = getenv("APL_REMOTE_SOCK", temp("tinygpu.sock")), socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
