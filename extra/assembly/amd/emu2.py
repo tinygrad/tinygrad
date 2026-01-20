@@ -736,46 +736,79 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       if dest.startswith('D0'): all_stores.append(wvgpr_after_y(vdst_reg, lane, _val_to_u32(val), exec_mask))
   return name, UOp.sink(UOp.group(*all_stores).end(lane), ctx.inc_pc(), arg=KernelInfo(name=name))
 
-def _compile_ds(inst: DS, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+  """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rsgpr(EXEC_LO.offset), _op_name(inst)
-  addr_reg = inst.addr.offset - 256 if inst.addr.offset >= 256 else inst.addr.offset
-  def rlds(addr: UOp) -> UOp: return ctx.lds.index((addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index))
-  def wlds(addr: UOp, val: UOp, active: UOp) -> UOp:
-    idx = ctx.lds.index((addr >> UOp.const(dtypes.uint32, 2)).cast(dtypes.index))
-    return idx.store(active.where(val, idx.load()))
   pcode = PCODE.get(inst.op)
   if pcode is None: return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
-  offset0, offset1 = getattr(inst, 'offset0', 0) or 0, getattr(inst, 'offset1', 0) or 0
-  offset = getattr(inst, 'offset', offset0) or offset0
+
+  is_lds = isinstance(inst, DS)
+  is_scratch = isinstance(inst, SCRATCH)
+  mem = ctx.lds if is_lds else ctx.scratch if is_scratch else ctx.vmem
+  addr_shift = UOp.const(dtypes.uint32 if is_lds else dtypes.uint64, 2)
+
+  # Extract register info
   def vreg(attr): return (getattr(inst, attr).offset - 256) if hasattr(inst, attr) and getattr(inst, attr).offset >= 256 else (getattr(inst, attr).offset if hasattr(inst, attr) else 0)
-  data0_reg, data1_reg, vdst_reg = vreg('data0'), vreg('data1'), vreg('vdst')
-  has_data1 = hasattr(inst, 'data1') and inst.data1 is not None
+  addr_reg = vreg('addr')
+  vdata_reg = vreg('data0') if is_lds else (inst.data.offset - 256 if hasattr(inst, 'data') and inst.data else 0)
+  vdst_reg = vreg('vdst') if is_lds else (inst.vdst.offset - 256 if hasattr(inst, 'vdst') and inst.vdst else vdata_reg)
+  has_saddr = not is_lds and hasattr(inst, 'saddr') and inst.saddr != NULL and inst.saddr.offset < 128
+
+  # Offset handling
+  offset0, offset1 = (getattr(inst, 'offset0', 0) or 0, getattr(inst, 'offset1', 0) or 0) if is_lds else (0, 0)
+  offset = (getattr(inst, 'offset', offset0) or offset0) if is_lds else _sext(getattr(inst, 'offset', 0), 13)
+
+  # Data width
+  ndwords = 4 if '_B128' in op_name or 'B128' in op_name else 3 if '_B96' in op_name or 'B96' in op_name else 2 if '_B64' in op_name or 'B64' in op_name else 1
+  is_64bit = ndwords >= 2 or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
+  is_atomic, glc = 'ATOMIC' in op_name, getattr(inst, 'glc', 0)
+  has_data1 = is_lds and hasattr(inst, 'data1') and inst.data1 is not None
+  data1_reg = vreg('data1') if is_lds else 0
+
+  def make_addr(lane: UOp) -> UOp:
+    if is_lds: return ctx.rvgpr(addr_reg, lane)
+    if is_scratch:
+      scratch_stride = ctx.rsgpr(SCRATCH_STRIDE_IDX).cast(dtypes.uint64)
+      base = lane.cast(dtypes.uint64) * scratch_stride
+      addr_offset = ctx.rvgpr(addr_reg, lane).cast(dtypes.uint64)
+      if has_saddr: addr_offset = addr_offset + ctx.rsgpr(inst.saddr.offset).cast(dtypes.uint64)
+      return base + addr_offset + UOp.const(dtypes.uint64, offset)
+    if has_saddr: return ctx.rsgpr64(inst.saddr.offset) + ctx.rvgpr(addr_reg, lane).cast(dtypes.uint64) + UOp.const(dtypes.uint64, offset)
+    return _u64(ctx.rvgpr(addr_reg, lane), ctx.rvgpr(addr_reg + 1, lane)) + UOp.const(dtypes.uint64, offset)
+
+  def wmem(addr: UOp, val: UOp, active: UOp) -> UOp:
+    idx = mem.index((addr >> addr_shift).cast(dtypes.index))
+    return idx.store(active.where(val, idx.load()))
+
   def make_srcs(lane: UOp) -> dict:
-    base_addr = ctx.rvgpr(addr_reg, lane)
-    # Determine data width: B128 needs 4 VGPRs, B64 needs 2 VGPRs, B32 needs 1 VGPR
-    # For B128/B96: provide DATA as base 32-bit value and DATA1, DATA2, DATA3 for upper dwords
-    # The pcode parser uses DATA[63:32] which looks for DATA1 when lo >= 32
-    # Note: DATA2 (from data1 operand) is separate from DATA1 (second dword of data0)
-    if 'B128' in op_name or 'B96' in op_name:
-      data = {'DATA': ctx.rvgpr(data0_reg, lane), 'DATA1': ctx.rvgpr(data0_reg + 1, lane),
-              'DATA2': ctx.rvgpr(data0_reg + 2, lane), 'DATA3': ctx.rvgpr(data0_reg + 3, lane)}
-    elif 'B32' in op_name:
-      data = {'DATA': ctx.rvgpr(data0_reg, lane),
-              'DATA2': ctx.rvgpr(data1_reg, lane) if has_data1 else UOp.const(dtypes.uint32, 0)}
-    else:  # B64
-      data = {'DATA': _u64(ctx.rvgpr(data0_reg, lane), ctx.rvgpr(data0_reg + 1, lane)),
-              'DATA2': _u64(ctx.rvgpr(data1_reg, lane), ctx.rvgpr(data1_reg + 1, lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
-    return {'ADDR': base_addr, 'ADDR_BASE': base_addr, 'OFFSET': UOp.const(dtypes.uint32, offset),
-            'OFFSET0': UOp.const(dtypes.uint32, offset0), 'OFFSET1': UOp.const(dtypes.uint32, offset1),
-            '_lds': ctx.lds, **data}
-  dummy_lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-  _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane, op_name=op_name)
-  mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]
-  mem_addrs = set(re.match(r'MEM\[([^\]]+)\]', d).group(1) if re.match(r'MEM\[([^\]]+)\]', d) else d for d in mem_assigns)
-  is_storexchg = 'STOREXCHG' in op_name
-  use_separate_ranges = (len(mem_addrs) > 1 or '2ADDR' in op_name) and not is_storexchg
-  def make_ds_stores(dest: str, val: UOp, lane: UOp, active: UOp, writes_return_data: bool = True) -> list[UOp]:
-    if dest.startswith('MEM['): return _write_val(dest, val[1], wlds, val[0], active)
+    addr = make_addr(lane)
+    if is_lds:
+      if 'B128' in op_name or 'B96' in op_name:
+        data = {'DATA': ctx.rvgpr(vdata_reg, lane), 'DATA1': ctx.rvgpr(vdata_reg + 1, lane),
+                'DATA2': ctx.rvgpr(vdata_reg + 2, lane), 'DATA3': ctx.rvgpr(vdata_reg + 3, lane)}
+      elif 'B32' in op_name:
+        data = {'DATA': ctx.rvgpr(vdata_reg, lane), 'DATA2': ctx.rvgpr(data1_reg, lane) if has_data1 else UOp.const(dtypes.uint32, 0)}
+      else:
+        data = {'DATA': _u64(ctx.rvgpr(vdata_reg, lane), ctx.rvgpr(vdata_reg + 1, lane)),
+                'DATA2': _u64(ctx.rvgpr(data1_reg, lane), ctx.rvgpr(data1_reg + 1, lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
+      return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': UOp.const(dtypes.uint32, offset),
+              'OFFSET0': UOp.const(dtypes.uint32, offset0), 'OFFSET1': UOp.const(dtypes.uint32, offset1), '_lds': mem, **data}
+    active = _lane_active(exec_mask, lane)
+    if is_atomic:
+      return {'ADDR': addr, 'DATA': _u64(ctx.rvgpr(vdata_reg, lane), ctx.rvgpr(vdata_reg + 1, lane)) if is_64bit else ctx.rvgpr(vdata_reg, lane),
+              '_vmem': mem, '_active': active}
+    vdata = ctx.rvgpr(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else ctx.rvgpr(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
+    if 'STORE' in op_name and ndwords >= 2: vdata = vdata | (ctx.rvgpr(vdata_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
+    srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active}
+    for i in range(ndwords): srcs[f'VDATA{i}'] = ctx.rvgpr(vdata_reg + i, lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
+    return srcs
+
+  def make_stores(dest: str, val: UOp, lane: UOp, active: UOp, writes_return_data: bool, pcode_vars: dict) -> list[UOp]:
+    if dest.startswith('MEM['):
+      if is_lds or is_atomic: return _write_val(dest, val[1], wmem, val[0], active)
+      data_bits = 8 if '.b8' in dest else 16 if '.b16' in dest else 64 if '.b64' in dest else 32
+      if is_scratch: return _mem_store_bytes(mem, val[0], val[1], active, data_bits)
+      return _mem_store(mem, val[0], val[1], active, 64, data_bits)
     if dest.startswith('RETURN_DATA') and writes_return_data:
       if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
         bit_width, dword_idx = int(m.group(1)) - int(m.group(2)) + 1, int(m.group(2)) // 32
@@ -783,84 +816,44 @@ def _compile_ds(inst: DS, ctx: _Ctx, name: str) -> tuple[str, UOp]:
         return _write_val(is_64, val, lambda r, v, l, e: ctx.wvgpr(r, l, v, e), vdst_reg + dword_idx, lane, exec_mask)
       return _write_val(dest, val, lambda r, v, l, e: ctx.wvgpr(r, l, v, e), vdst_reg, lane, exec_mask)
     return []
-  if use_separate_ranges:
-    ended = []
-    for i, (dest, _) in enumerate(assigns):
-      lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-      active = _lane_active(exec_mask, lane)
-      _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
-      ended.extend(s.end(lane) for s in make_ds_stores(dest, lane_assigns[i][1], lane, active))
-  else:
-    writes_return_data = '_RTN' in op_name or op_name.startswith('DS_LOAD')
-    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-    active = _lane_active(exec_mask, lane)
-    _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
-    stores = [s for dest, val in lane_assigns for s in make_ds_stores(dest, val, lane, active, writes_return_data)]
-    ended = [UOp.sink(*stores).end(lane)] if stores else []
-  return (name, UOp.sink(*ended, ctx.inc_pc(), arg=KernelInfo(name=name))) if ended else (name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name)))
 
-def _compile_flat_global_scratch(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  exec_mask = ctx.rsgpr(EXEC_LO.offset)
-  addr_reg = inst.addr.offset - 256
-  has_saddr = hasattr(inst, 'saddr') and inst.saddr != NULL and inst.saddr.offset < 128
-  offset, op_name = _sext(getattr(inst, 'offset', 0), 13), _op_name(inst)
-  ndwords = 4 if '_B128' in op_name else 3 if '_B96' in op_name else 2 if '_B64' in op_name else 1
-  is_scratch = isinstance(inst, SCRATCH)
+  # DS-specific: check for 2ADDR pattern needing separate ranges
+  if is_lds:
+    dummy_lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+    _, assigns = parse_pcode(pcode, make_srcs(dummy_lane), lane=dummy_lane, op_name=op_name)
+    mem_assigns = [d for d, _ in assigns if d.startswith('MEM[')]
+    mem_addrs = set(re.match(r'MEM\[([^\]]+)\]', d).group(1) if re.match(r'MEM\[([^\]]+)\]', d) else d for d in mem_assigns)
+    use_separate_ranges = (len(mem_addrs) > 1 or '2ADDR' in op_name) and 'STOREXCHG' not in op_name
+    if use_separate_ranges:
+      ended = []
+      for i, (dest, _) in enumerate(assigns):
+        lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+        active = _lane_active(exec_mask, lane)
+        _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
+        ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True, {}))
+      return (name, UOp.sink(*ended, ctx.inc_pc(), arg=KernelInfo(name=name))) if ended else (name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name)))
 
-  def make_addr(lane: UOp) -> UOp:
-    # SCRATCH: byte index into scratch buffer = lane * scratch_stride + vgpr[addr] + sgpr[saddr] + offset
-    if is_scratch:
-      scratch_stride = ctx.rsgpr(SCRATCH_STRIDE_IDX).cast(dtypes.uint64)
-      base = lane.cast(dtypes.uint64) * scratch_stride
-      addr_offset = ctx.rvgpr(addr_reg, lane).cast(dtypes.uint64)
-      if has_saddr: addr_offset = addr_offset + ctx.rsgpr(inst.saddr.offset).cast(dtypes.uint64)
-      return base + addr_offset + UOp.const(dtypes.uint64, offset)
-    # GLOBAL/FLAT: 64-bit absolute address
-    if has_saddr: return ctx.rsgpr64(inst.saddr.offset) + ctx.rvgpr(addr_reg, lane).cast(dtypes.uint64) + UOp.const(dtypes.uint64, offset)
-    return _u64(ctx.rvgpr(addr_reg, lane), ctx.rvgpr(addr_reg + 1, lane)) + UOp.const(dtypes.uint64, offset)
+  # Standard path: single lane range
+  writes_return_data = '_RTN' in op_name or (is_lds and op_name.startswith('DS_LOAD')) or (is_atomic and glc)
+  lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
+  active = _lane_active(exec_mask, lane)
+  pcode_vars, assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
+  stores = [s for dest, val in assigns for s in make_stores(dest, val, lane, active, writes_return_data, pcode_vars)]
 
-  mem = ctx.scratch if is_scratch else ctx.vmem
+  # FLAT/GLOBAL/SCRATCH: collect VDATA slices for loads
+  if not is_lds and not is_atomic:
+    for dword_idx, val in sorted(_collect_data_slices(assigns, 'VDATA', pcode_vars, op_name).items()):
+      stores.append(ctx.wvgpr(vdst_reg + dword_idx, lane, val, exec_mask))
 
-  pcode = PCODE.get(inst.op)
-  if pcode is not None:
-    vdata_reg = inst.data.offset - 256 if hasattr(inst, 'data') and inst.data else 0
-    vdst_reg = inst.vdst.offset - 256 if hasattr(inst, 'vdst') and inst.vdst else vdata_reg
-    is_atomic, glc = 'ATOMIC' in op_name, getattr(inst, 'glc', 0)
-    is_64bit = '_B64' in op_name or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
-    lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-    addr, active = make_addr(lane), _lane_active(exec_mask, lane)
-    if is_atomic:
-      srcs = {'ADDR': addr, 'DATA': _u64(ctx.rvgpr(vdata_reg, lane), ctx.rvgpr(vdata_reg + 1, lane)) if is_64bit else ctx.rvgpr(vdata_reg, lane), '_vmem': mem, '_active': active}
-    else:
-      vdata = ctx.rvgpr(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else ctx.rvgpr(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
-      if 'STORE' in op_name and ndwords >= 2: vdata = vdata | (ctx.rvgpr(vdata_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-      srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active}
-      for i in range(ndwords): srcs[f'VDATA{i}'] = ctx.rvgpr(vdata_reg + i, lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
-    pcode_vars, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
-    def wvmem(a: UOp, v: UOp, act: UOp) -> UOp:
-      idx = mem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index))
-      return idx.store(act.where(v, mem.index((a >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)).load()))
-    def data_bits(dest): return 8 if '.b8' in dest else 16 if '.b16' in dest else 64 if '.b64' in dest else 32
-    stores = []
-    for dest, val in assigns:
-      if dest.startswith('MEM['):
-        if is_atomic: stores.extend(_write_val(dest, val[1], wvmem, val[0], active))
-        elif is_scratch: stores.extend(_mem_store_bytes(mem, val[0], val[1], active, data_bits(dest)))
-        else: stores.extend(_mem_store(mem, val[0], val[1], active, 64, data_bits(dest)))
-      elif dest.startswith('RETURN_DATA') and is_atomic and glc:
-        stores.extend(_write_val(dest, val, lambda r, v, l, e: ctx.wvgpr(r, l, v, e), vdst_reg, lane, exec_mask))
-    if not is_atomic:
-      for dword_idx, val in sorted(_collect_data_slices(assigns, 'VDATA', pcode_vars, op_name).items()):
-        stores.append(ctx.wvgpr(vdst_reg + dword_idx, lane, val, exec_mask))
-    if stores: return name, UOp.sink(UOp.sink(*stores).end(lane), ctx.inc_pc(), arg=KernelInfo(name=name))
+  if stores: return name, UOp.sink(UOp.sink(*stores).end(lane), ctx.inc_pc(), arg=KernelInfo(name=name))
   return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
 
 # Dispatch table: instruction type -> handler function
 _INST_HANDLERS: dict[type, callable] = {
   SOPP: _compile_sopp, SMEM: _compile_smem, SOP1: _compile_sop, SOP2: _compile_sop, SOPC: _compile_sop, SOPK: _compile_sop,
   VOP1: _compile_vop12, VOP1_SDST: _compile_vop12, VOP2: _compile_vop12, VOPC: _compile_vopc, VOP3: _compile_vop3, VOP3_SDST: _compile_vop3,
-  VOP3SD: _compile_vop3sd, VOP3P: _compile_vop3p, VOPD: _compile_vopd, DS: _compile_ds,
-  FLAT: _compile_flat_global_scratch, GLOBAL: _compile_flat_global_scratch, SCRATCH: _compile_flat_global_scratch,
+  VOP3SD: _compile_vop3sd, VOP3P: _compile_vop3p, VOPD: _compile_vopd,
+  DS: _compile_mem_op, FLAT: _compile_mem_op, GLOBAL: _compile_mem_op, SCRATCH: _compile_mem_op,
 }
 
 @functools.cache
