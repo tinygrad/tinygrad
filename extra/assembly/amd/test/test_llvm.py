@@ -12,7 +12,7 @@ import unittest, re, subprocess, functools
 from tinygrad.helpers import fetch
 from extra.assembly.amd.disasm import disasm
 from extra.assembly.amd.decode import decode_inst, detect_format
-from extra.assembly.amd.test.helpers import get_llvm_mc, get_target
+from extra.assembly.amd.test.helpers import get_llvm_mc, get_target, get_mattr
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/test/MC/AMDGPU"
 
@@ -80,8 +80,8 @@ def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]: return _get_tests_
 
 def _compile_asm_batch(instrs: list[str], arch: str = "rdna3") -> list[bytes]:
   if not instrs: return []
-  mcpu = get_target(arch)
-  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-mattr=+real-true15,+wavefrontsize32', '-show-encoding'],
+  mcpu, mattr = get_target(arch), get_mattr(arch)
+  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', f'-mattr={mattr}', '-show-encoding'],
     input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True, timeout=30)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc failed: {result.stderr.strip()}")
   return [bytes.fromhex(line.split('encoding:')[1].strip()[1:-1].replace('0x', '').replace(',', '').replace(' ', ''))

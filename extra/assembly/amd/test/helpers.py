@@ -28,6 +28,7 @@ ARCH_TO_TARGET:dict[str, list[str]] = {
   "rdna4":["gfx1200"],
   "cdna":["gfx942", "gfx950"],
 }
+
 TARGET_TO_ARCH:dict[str, str] = {t:arch for arch,targets in ARCH_TO_TARGET.items() for t in targets}
 
 def get_target(arch:str) -> str: return ARCH_TO_TARGET[arch][0]

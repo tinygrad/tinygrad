@@ -3,14 +3,7 @@
 import unittest, io, sys, re, subprocess, os
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.decode import decode_inst, detect_format
-from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump
-
-# arch: (mcpu, mattr)
-ARCH_CONFIG = {
-  'rdna3': ('gfx1100', '+real-true16,+wavefrontsize32'),
-  'rdna4': ('gfx1200', '+real-true16,+wavefrontsize32'),
-  'cdna': ('gfx942', '+wavefrontsize64'),
-}
+from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump, get_target, get_mattr
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
   """Disassemble ELF binary and return list of (instruction_text, machine_code_bytes)."""
@@ -42,8 +35,7 @@ def compile_asm(instr: str, arch: str = 'rdna3') -> bytes:
 def compile_asm_batch(instrs: list[str], arch: str = 'rdna3') -> list[bytes]:
   """Compile multiple instructions with a single llvm-mc call."""
   if not instrs: return []
-  mcpu, mattr = ARCH_CONFIG[arch]
-  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', f'-mattr={mattr}', '-show-encoding'],
+  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={get_target(arch)}', f'-mattr={get_mattr(arch)}', '-show-encoding'],
                           input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
   encodings = []
@@ -59,7 +51,7 @@ def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str
   """Compile instructions with LLVM and get LLVM's disassembly."""
   import tempfile
   if not instrs: return []
-  mcpu, mattr = ARCH_CONFIG[arch]
+  mcpu, mattr = get_target(arch), get_mattr(arch)
   src = ".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n" + "\n".join(f"  {instr}" for instr in instrs) + "\n"
   with tempfile.NamedTemporaryFile(suffix='.o', delete=False) as f:
     obj_path = f.name
@@ -89,13 +81,12 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     3. our disasm() matches LLVM's disassembly string (informational)
     """
     arch = self.arch
-    mcpu, mattr = ARCH_CONFIG[arch]
 
     from extra.assembly.amd.test.test_compare_emulators import get_kernels_from_tinygrad
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
     kernels, _, _ = get_kernels_from_tinygrad(op_fn)
-    compiler = HIPCompiler(mcpu)
+    compiler = HIPCompiler(get_target(arch))
 
     # First pass: decode all instructions and collect info
     decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
