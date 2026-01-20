@@ -902,6 +902,7 @@ class TestMultiTensor(unittest.TestCase):
     og_bufs, new_bufs = set(t.uop.base.buffer.bufs), set(t_clone.uop.base.buffer.bufs)
 
     # all new buffers
+    self.assertEqual(len(og_bufs), len(new_bufs))
     self.assertTrue(og_bufs.isdisjoint(new_bufs), msg=f"{og_bufs=} - {new_bufs=}")
 
     # equal data
