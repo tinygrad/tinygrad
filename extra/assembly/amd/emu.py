@@ -9,7 +9,7 @@ from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.pcode import compile_pseudocode
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
-from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
+from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, GLOBAL, SCRATCH, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
 # Constants and helpers defined locally (not imported from dsl.py)
@@ -423,7 +423,7 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32: inst._dispatch = dispatch_writelane
     elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32_E32, VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32): inst._dispatch = dispatch_readlane
     elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
-    elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
+    elif isinstance(inst, (FLAT, GLOBAL, SCRATCH)): inst._dispatch = dispatch_lane(exec_flat)
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)
     else: inst._dispatch = dispatch_lane(exec_vop)
 

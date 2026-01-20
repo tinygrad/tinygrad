@@ -119,11 +119,14 @@ class FixedBitField(BitField):
     return super().set(raw, self.default)
 
 class EnumBitField(BitField):
-  def __init__(self, hi: int, lo: int, enum_cls):
+  def __init__(self, hi: int, lo: int, enum_cls, allowed: set | None = None):
     super().__init__(hi, lo)
     self._enum = enum_cls
+    self.allowed = allowed  # if set, only these enum values are valid for this encoding
   def encode(self, val) -> int:
     if not isinstance(val, self._enum): raise RuntimeError(f"expected {self._enum.__name__}, got {type(val).__name__}")
+    if self.allowed is not None and val not in self.allowed:
+      raise RuntimeError(f"opcode {val.name} not allowed in this encoding")
     return val.value
   def decode(self, raw): return self._enum(raw)
 
@@ -224,6 +227,19 @@ OPERANDS = {**OPERANDS_CDNA, **OPERANDS_RDNA3, **OPERANDS_RDNA4}
 # Inst base class
 # ══════════════════════════════════════════════════════════════
 
+def _needs_literal(val) -> bool:
+  """Check if a value needs a literal constant (can't be encoded inline)."""
+  if val is None or isinstance(val, Reg): return False
+  if isinstance(val, float): return val not in SrcField._FLOAT_ENC
+  if isinstance(val, int): return not (0 <= val <= 64 or -16 <= val < 0)
+  return False
+
+def _get_variant(cls, suffix: str):
+  """Get a variant class by suffix (e.g., '_LIT') via module lookup."""
+  import sys
+  module = sys.modules.get(cls.__module__)
+  return getattr(module, f"{cls.__name__}{suffix}", None) if module else None
+
 class Inst:
   _fields: list[tuple[str, BitField]]
   _base_size: int
@@ -238,9 +254,23 @@ class Inst:
     cls._fields = list(inherited.items())
     cls._base_size = (max(f.hi for _, f in cls._fields) + 8) // 8
 
+  def __new__(cls, *args, **kwargs):
+    # Auto-upgrade to _LIT variant if needed (only for base classes, not variants)
+    if not any(cls.__name__.endswith(sfx) for sfx in ('_LIT', '_DPP16', '_DPP8', '_SDWA', '_SDWA_SDST', '_MFMA', '_SDST')):
+      lit_cls = _get_variant(cls, '_LIT')
+      if lit_cls is not None:
+        # Check if any src field needs a literal
+        # Map positional args to field names to find src values
+        args_iter = iter(args)
+        for name, field in cls._fields:
+          if isinstance(field, FixedBitField): continue
+          val = kwargs.get(name) if name in kwargs else next(args_iter, None)
+          if isinstance(field, SrcField) and _needs_literal(val):
+            return lit_cls(*args, **kwargs)
+    return object.__new__(cls)
+
   def __init__(self, *args, **kwargs):
     self._raw = 0
-    self._literal: int | None = kwargs.pop('literal', None)
     # Map positional args to field names (skip FixedBitFields)
     args_iter = iter(args)
     vals = {}
@@ -263,13 +293,17 @@ class Inst:
     if neg_bits: vals['neg'] = (vals.get('neg') or 0) | neg_bits
     if abs_bits: vals['abs'] = (vals.get('abs') or 0) | abs_bits
     if opsel_bits: vals['opsel'] = (vals.get('opsel') or 0) | opsel_bits
-    # Set all field values
+    # For _LIT classes, capture literal value from SrcFields that encode to 255
+    literal_val = None
     for name, field in self._fields:
       val = vals[name]
-      self._raw = field.set(self._raw, val)
-      # Capture literal for SrcFields that encoded to 255
-      if isinstance(field, SrcField) and val is not None and field.encode(val) + field._valid_range[0] == 255 and self._literal is None:
-        self._literal = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
+      if isinstance(field, SrcField) and val is not None and _needs_literal(val):
+        literal_val = _f32(val) if isinstance(val, float) else val & 0xFFFFFFFF
+    if literal_val is not None and 'literal' in vals:
+      vals['literal'] = literal_val
+    # Set all field values
+    for name, field in self._fields:
+      self._raw = field.set(self._raw, vals[name])
     # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC)
     for name, expected in self.op_regs.items():
       if (val := vals.get(name)) is None: continue
@@ -333,37 +367,45 @@ class Inst:
     return 0
   @classmethod
   def _size(cls) -> int: return cls._base_size
-  def size(self) -> int: return self._base_size + (4 if self._literal is not None else 0)
+  def size(self) -> int: return self._base_size
   def disasm(self) -> str:
     from extra.assembly.amd.disasm import disasm
     return disasm(self)
 
-  def to_bytes(self) -> bytes:
-    result = self._raw.to_bytes(self._base_size, 'little')
-    if self._literal is not None:
-      result += (self._literal & 0xFFFFFFFF).to_bytes(4, 'little')
-    return result
+  def to_bytes(self) -> bytes: return self._raw.to_bytes(self._base_size, 'little')
 
-  def has_literal(self) -> bool:
-    """Check if instruction has a 32-bit literal constant."""
+  @property
+  def _literal(self) -> int | None:
+    """Get the literal value if this instruction has one."""
+    return getattr(self, 'literal', None)
+
+  def _variant_suffix(self) -> str | None:
+    """Check if instruction needs a variant class (_LIT, _DPP8, _DPP16, _SDWA). Returns suffix or None."""
+    cls_name = type(self).__name__
+    # Don't check for variants if we're already a variant class
+    if any(s in cls_name for s in ('_LIT', '_DPP8', '_DPP16', '_SDWA')): return None
+    # VOPD: FMAMK/FMAAK opcodes always require literal (check by name since enum may differ across archs)
+    for name in ('opx', 'opy'):
+      if hasattr(self, name) and any(x in getattr(self, name).name for x in ('FMAMK', 'FMAAK')): return '_LIT'
     for name, field in self._fields:
-      if isinstance(field, SrcField) and getattr(self, name).offset == 255:
-        return True
-    # Check op, opx, opy for instructions that always have literals
-    for attr in ('op', 'opx', 'opy'):
-      if hasattr(self, attr) and any(x in getattr(self, attr).name for x in ('FMAMK', 'FMAAK', 'MADMK', 'MADAK', 'SETREG_IMM32')):
-        return True
-    return False
+      if isinstance(field, SrcField):
+        off = getattr(self, name).offset
+        if off == 255: return '_LIT'
+        if off == 249: return '_SDWA' if self._is_cdna() else '_DPP8'
+        if off == 250: return '_DPP16'
+    return None
 
   @classmethod
   def from_bytes(cls, data: bytes):
     inst = object.__new__(cls)
     inst._raw = int.from_bytes(data[:cls._base_size], 'little')
-    inst._literal = int.from_bytes(data[cls._base_size:cls._base_size + 4], 'little') if inst.has_literal() else None
+    # Upgrade to variant class if needed (_LIT, _DPP8, _DPP16, _SDWA)
+    if (suffix := inst._variant_suffix()) and (var_cls := _get_variant(cls, suffix)) is not None:
+      return var_cls.from_bytes(data)
     return inst
 
-  def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw and self._literal == other._literal
-  def __hash__(self): return hash((type(self), self._raw, self._literal))
+  def __eq__(self, other): return type(self) is type(other) and self._raw == other._raw
+  def __hash__(self): return hash((type(self), self._raw))
 
   def __repr__(self):
     # collect (repr, is_default) pairs, strip trailing defaults so repr roundtrips with eval
