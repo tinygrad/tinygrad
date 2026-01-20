@@ -39,7 +39,7 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
 
 def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   si = out.schedule()[-1]
-  prg = get_program(si.ast, renderer=Device[Device.DEFAULT].renderer, opts=opts)
+  prg = get_program(si.ast, device=Device.DEFAULT, opts=opts)
   if replace_src is not None:
     old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
     prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1].replace(old_name, "fxn"))

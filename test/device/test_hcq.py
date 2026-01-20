@@ -165,7 +165,7 @@ class TestHCQ(unittest.TestCase):
     b = a + 1
     si = b.schedule()[-1]
 
-    runner = CompiledRunner(get_program(si.ast, TestHCQ.d0.renderer, opts=[Opt(op=OptOps.LOCAL, axis=0, arg=3) for _ in range(3)]))
+    runner = CompiledRunner(get_program(si.ast, TestHCQ.d0.device, opts=[Opt(op=OptOps.LOCAL, axis=0, arg=3) for _ in range(3)]))
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()

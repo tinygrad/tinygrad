@@ -116,7 +116,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer)
+    prg: ProgramSpec = get_program(ast, device)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 

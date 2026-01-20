@@ -18,7 +18,7 @@ class TestOptGemm(unittest.TestCase):
     t = self.a.T @ self.b.T
     # TODO: this should be a generic test helper
     si = get_single_element(t.schedule())
-    run = CompiledRunner(get_program(si.ast, renderer=Device[Device.DEFAULT].renderer, opts=opts))
+    run = CompiledRunner(get_program(si.ast, device=Device.DEFAULT, opts=opts))
     ExecItem(si.ast, list(si.bufs), prg=run).run()
     test = si.bufs[0].numpy().reshape(self.res.shape)
     np.testing.assert_allclose(self.res, test, atol=1e-4)

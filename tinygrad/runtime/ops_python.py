@@ -215,19 +215,18 @@ class PythonProgram:
     return time.perf_counter() - st
 
 class PythonRenderer(Renderer):
-  device = "PYTHON"
   code_for_op = python_alu
   def __init__(self):
     match EMULATE.value:
-      case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
-      case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
-      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4
-      case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
-      case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
-      case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
-      case "CUDA_SM89": self.device, self.tensor_cores = "CUDA", tc.cuda_sm89
-      case "INTEL": self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
-      case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
+      case "METAL": self.tc_dev, self.tensor_cores = "METAL", tc.metal
+      case "AMD": self.tc_dev, self.tensor_cores = "AMD", tc.amd_rdna3
+      case "AMD_MFMA": self.tc_dev, self.tensor_cores = "AMD", tc.amd_cdna4
+      case "AMD_RDNA4": self.tc_dev, self.tensor_cores = "AMD", tc.amd_rdna4
+      case "CUDA": self.tc_dev, self.tensor_cores = "CUDA", tc.cuda_sm80
+      case "CUDA_SM75": self.tc_dev, self.tensor_cores = "CUDA", tc.cuda_sm75
+      case "CUDA_SM89": self.tc_dev, self.tensor_cores = "CUDA", tc.cuda_sm89
+      case "INTEL": self.tc_dev, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
+      case "AMX": self.tc_dev, self.tensor_cores = "CPU", tc.amx
       case "": pass
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
 

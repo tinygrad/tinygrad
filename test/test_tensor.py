@@ -891,8 +891,7 @@ class TestIdxUpcast(unittest.TestCase):
     schedule, _ = a.schedule_with_vars()
     for s in schedule:
       if s.ast.op is Ops.SINK:
-        renderer = Device[s.bufs[0].device].renderer
-        prg = get_program(s.ast, renderer)
+        prg = get_program(s.ast, s.bufs[0].device)
         return prg.uops
 
   def _assert(self, dtype: DType, a: Tensor):
