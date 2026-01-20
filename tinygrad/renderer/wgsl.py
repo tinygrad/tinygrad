@@ -53,9 +53,6 @@ class WGSLRenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"i32(gindex.{'xyz'[int(x)]})", "l": lambda x: f"i32(lindex.{'xyz'[int(x)]})"}
   extra_matcher = wgsl_matcher
   supports_float4 = False
-
-  def is_dtype_supported(self, dtype:DType) -> bool: return dtype in self.type_map
-
   barrier = "workgroupBarrier();"
   code_for_op = {**CStyleLanguage.code_for_op, Ops.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
   nan = "nan()"
