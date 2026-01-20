@@ -30,12 +30,6 @@ enum {
 typedef struct { uint8_t cmd, bar; uint64_t offset, size, value; } __attribute__((packed)) request_t;
 typedef struct { uint8_t status; uint64_t value, addr; } __attribute__((packed)) response_t;
 
-#define RESP(call) { resp.status = (call) ? RESP_ERR : RESP_OK; break; }
-#define RESP_VAL(call, v) { int _r = (call); resp.status = _r ? RESP_ERR : RESP_OK; if (!_r) resp.value = (v); break; }
-#define RESP_ERR_BREAK() { resp.status = RESP_ERR; break; }
-#define RESP_SEND_DATA(sz, data) { resp.status = RESP_OK; resp.value = (sz); send_response(fd, &resp, -1); send(fd, data, sz, 0); send_resp = 0; break; }
-#define NO_RESP() { send_resp = 0; break; }
-
 // Constants and state
 
 #define BULK_BUF_SIZE (64 << 20)
@@ -46,7 +40,7 @@ static uint8_t g_bulk_buf[BULK_BUF_SIZE];
 static io_connect_t g_conn = IO_OBJECT_NULL;
 static int g_client_active = 0;
 
-static struct { mach_vm_address_t addr; mach_vm_size_t size; int mapped; } g_bars[MAX_BARS];
+static struct { mach_vm_address_t addr; mach_vm_size_t size; } g_bars[MAX_BARS];
 static struct { mach_vm_address_t addr; mach_vm_size_t size; int shm_fd; char shm_name[32]; } g_sysmem[MAX_SYSMEM];
 static int g_sysmem_count = 0;
 
@@ -61,19 +55,17 @@ static void recvall(int fd, void *buf, size_t len) {
 }
 
 // MMIO requires 32-bit aligned volatile accesses
-
 static void mmio_copy(void *dst, void *src, size_t len) {
   volatile uint32_t *d = dst, *s = src;
   for (size_t i = 0; i < len / 4; i++) d[i] = s[i];
-  volatile uint8_t *d1 = (volatile uint8_t*)(d + len / 4);
-  volatile uint8_t *s1 = (volatile uint8_t*)(s + len / 4);
-  for (size_t i = 0; i < len % 4; i++) d1[i] = s1[i];
+  for (size_t i = len & ~3; i < len; i++) ((volatile uint8_t*)dst)[i] = ((volatile uint8_t*)src)[i];
 }
 
 static int send_response(int fd, response_t *resp, int send_fd) {
-  struct iovec iov = {.iov_base = resp, .iov_len = sizeof(*resp)};
-  struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1};
   char cmsgbuf[CMSG_SPACE(sizeof(int))];
+  struct iovec iov = {resp, sizeof(*resp)};
+  struct msghdr msg = {.msg_iov = &iov, .msg_iovlen = 1};
+
   if (send_fd >= 0) {
     msg.msg_control = cmsgbuf;
     msg.msg_controllen = sizeof(cmsgbuf);
@@ -84,7 +76,7 @@ static int send_response(int fd, response_t *resp, int send_fd) {
   return sendmsg(fd, &msg, 0) > 0 ? 0 : -1;
 }
 
-static void send_error_msg(int fd, const char *msg) {
+static void send_error(int fd, const char *msg) {
   response_t resp = {.status = RESP_ERR, .value = strlen(msg)};
   send_response(fd, &resp, -1);
   send(fd, msg, strlen(msg), 0);
@@ -92,26 +84,21 @@ static void send_error_msg(int fd, const char *msg) {
 
 // Driver interface
 
-static void device_removed(void *refcon, io_service_t svc, uint32_t msg, void *arg) {
-  if (msg == kIOMessageServiceIsTerminated) { printf("GPU disconnected, exiting\n"); _exit(0); }
-}
-
-static void ensure_disconnect_notification(io_service_t svc) {
-  static int registered = 0;
-  if (registered) return;
-  registered = 1;
-
-  IONotificationPortRef notify_port = IONotificationPortCreate(kIOMainPortDefault);
-  IONotificationPortSetDispatchQueue(notify_port, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
-  io_object_t notification;
-  IOServiceAddInterestNotification(notify_port, svc, kIOGeneralInterest, device_removed, NULL, &notification);
-  printf("registered disconnect notification\n");
+static void on_disconnect(void *refcon, io_service_t svc, uint32_t msg, void *arg) {
+  if (msg == kIOMessageServiceIsTerminated) _exit(0);
 }
 
 static io_connect_t open_tinygpu(void) {
+  static io_object_t notif;
   io_service_t svc = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceNameMatching("tinygpu"));
   if (!svc) return IO_OBJECT_NULL;
-  ensure_disconnect_notification(svc);
+
+  if (!notif) {
+    IONotificationPortRef port = IONotificationPortCreate(kIOMainPortDefault);
+    IONotificationPortSetDispatchQueue(port, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
+    IOServiceAddInterestNotification(port, svc, kIOGeneralInterest, on_disconnect, NULL, &notif);
+  }
+
   io_connect_t conn;
   kern_return_t kr = IOServiceOpen(svc, mach_task_self(), 0, &conn);
   IOObjectRelease(svc);
@@ -128,58 +115,34 @@ static int dext_rpc(uint32_t sel, uint64_t *in, uint32_t in_cnt, uint64_t *out_v
 
 static int map_bar(uint32_t bar, response_t *resp) {
   if (bar >= MAX_BARS) return -1;
-  if (g_bars[bar].mapped) {
-    resp->addr = g_bars[bar].addr;
-    resp->value = g_bars[bar].size;
-    return 0;
-  }
-  mach_vm_address_t addr = 0;
-  mach_vm_size_t size = 0;
-  if (IOConnectMapMemory64(g_conn, bar, mach_task_self(), &addr, &size, kIOMapAnywhere) != KERN_SUCCESS) return -1;
-  g_bars[bar] = (typeof(g_bars[bar])){.addr = addr, .size = size, .mapped = 1};
-  resp->addr = addr;
-  resp->value = size;
-  printf("BAR%u mapped: 0x%llx size 0x%llx\n", bar, addr, size);
+  if (!g_bars[bar].addr && IOConnectMapMemory64(g_conn, bar, mach_task_self(), &g_bars[bar].addr, &g_bars[bar].size, kIOMapAnywhere)) return -1;
+  resp->addr = g_bars[bar].addr;
+  resp->value = g_bars[bar].size;
   return 0;
 }
 
 static int map_sysmem_fd(uint64_t size, response_t *resp, int *out_fd) {
   if (g_sysmem_count >= MAX_SYSMEM) return -1;
   int idx = g_sysmem_count;
-
-  // page-align, ensure >= 4097 for IOMemoryDescriptor in dext
-  size_t page_sz = getpagesize();
-  size_t alloc_sz = ((size + page_sz - 1) & ~(page_sz - 1));
-  if (alloc_sz < 4097) alloc_sz = 16 << 10;
-
-  // create POSIX shared memory
+  int fd = -1;
+  void *ptr = MAP_FAILED;
   char shm_name[32];
+
+  // page-align, min 16KB for IOMemoryDescriptor
+  size_t alloc_sz = (size + 0xfff) & ~0xfff;
+  if (alloc_sz < 0x4000) alloc_sz = 0x4000;
+
   snprintf(shm_name, sizeof(shm_name), "/tinygpu_%d", idx);
   shm_unlink(shm_name);
-  int fd = shm_open(shm_name, O_CREAT | O_RDWR, 0600);
-  if (fd < 0) { perror("shm_open"); return -1; }
-  if (ftruncate(fd, alloc_sz) < 0) { perror("ftruncate"); close(fd); shm_unlink(shm_name); return -1; }
+  if ((fd = shm_open(shm_name, O_CREAT | O_RDWR, 0600)) < 0) goto fail;
+  if (ftruncate(fd, alloc_sz) < 0) goto fail;
+  if ((ptr = mmap(NULL, alloc_sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) goto fail;
 
-  void *ptr = mmap(NULL, alloc_sz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-  if (ptr == MAP_FAILED) { perror("mmap"); close(fd); shm_unlink(shm_name); return -1; }
-
-  // call PrepareDMA (selector 3) - writes physical addresses to output buffer
-  size_t out_sz = 8192;
-  void *out_buf = mmap(NULL, out_sz, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-  if (out_buf == MAP_FAILED) { perror("mmap out"); munmap(ptr, alloc_sz); close(fd); shm_unlink(shm_name); return -1; }
-  memset(out_buf, 0, out_sz);
-
-  kern_return_t kr = IOConnectCallStructMethod(g_conn, 3, ptr, alloc_sz, out_buf, &out_sz);
-  if (kr != KERN_SUCCESS) {
-    printf("PrepareDMA failed: 0x%x\n", kr);
-    munmap(out_buf, 8192); munmap(ptr, alloc_sz); close(fd); shm_unlink(shm_name);
-    return -1;
-  }
-
-  // copy paddrs to start of shared buffer for client to read
-  memcpy(ptr, out_buf, out_sz);
-  munmap(out_buf, 8192);
-  printf("sysmem[%d]: %p size 0x%zx fd=%d phys=0x%llx\n", idx, ptr, alloc_sz, fd, ((uint64_t*)ptr)[0]);
+  // PrepareDMA writes physical addresses to output buffer, copy to shared mem
+  uint8_t paddr_buf[8192] = {0};
+  size_t out_sz = sizeof(paddr_buf);
+  if (IOConnectCallStructMethod(g_conn, 3, ptr, alloc_sz, paddr_buf, &out_sz) != KERN_SUCCESS) goto fail;
+  memcpy(ptr, paddr_buf, out_sz);
 
   g_sysmem[idx] = (typeof(g_sysmem[idx])){.addr = (mach_vm_address_t)ptr, .size = alloc_sz, .shm_fd = fd};
   strncpy(g_sysmem[idx].shm_name, shm_name, sizeof(g_sysmem[idx].shm_name));
@@ -188,20 +151,28 @@ static int map_sysmem_fd(uint64_t size, response_t *resp, int *out_fd) {
   *resp = (response_t){.addr = idx, .value = alloc_sz};
   *out_fd = fd;
   return 0;
+
+fail:
+  if (ptr != MAP_FAILED) munmap(ptr, alloc_sz);
+  if (fd >= 0) close(fd);
+  shm_unlink(shm_name);
+  return -1;
 }
 
 static int validate_bar(uint8_t bar, uint64_t off, uint64_t sz) {
-  return (bar < MAX_BARS && g_bars[bar].mapped && off + sz <= g_bars[bar].size && sz <= BULK_BUF_SIZE) ? 0 : -1;
+  return (bar < MAX_BARS && g_bars[bar].addr && off + sz <= g_bars[bar].size && sz <= BULK_BUF_SIZE) ? 0 : -1;
 }
 
 static void cleanup(void) {
   for (int i = 0; i < MAX_BARS; i++)
-    if (g_bars[i].mapped) { IOConnectUnmapMemory64(g_conn, i, mach_task_self(), g_bars[i].addr); g_bars[i].mapped = 0; }
+    if (g_bars[i].addr) { IOConnectUnmapMemory64(g_conn, i, mach_task_self(), g_bars[i].addr); g_bars[i].addr = 0; }
+
   for (int i = 0; i < g_sysmem_count; i++) {
     munmap((void*)g_sysmem[i].addr, g_sysmem[i].size);
     close(g_sysmem[i].shm_fd);
     shm_unlink(g_sysmem[i].shm_name);
   }
+
   g_sysmem_count = 0;
   if (g_conn != IO_OBJECT_NULL) { IOServiceClose(g_conn); g_conn = IO_OBJECT_NULL; }
 }
@@ -216,7 +187,7 @@ static void handle_client(int fd) {
   if (g_conn == IO_OBJECT_NULL) {
     fprintf(stderr, "failed to connect to tinygpu driver\n");
     request_t req; recv(fd, &req, sizeof(req), 0);
-    send_error_msg(fd, "Driver not available. Check: System Report > PCI for GPU, System Settings > Privacy & Security.");
+    send_error(fd, "Driver not available. Check: System Report > PCI for GPU, System Settings > Privacy & Security.");
     return;
   }
 
@@ -224,38 +195,53 @@ static void handle_client(int fd) {
   response_t resp;
   while (recv(fd, &req, sizeof(req), 0) == sizeof(req)) {
     resp = (response_t){0};
-    int send_resp = 1;
 
     switch (req.cmd) {
-      case CMD_MAP_BAR: RESP(map_bar(req.bar, &resp));
-      case CMD_MAP_SYSMEM_FD: {
-        int shm_fd = -1;
-        if (map_sysmem_fd(req.size, &resp, &shm_fd) == 0) send_response(fd, &resp, shm_fd);
-        else { resp.status = RESP_ERR; send_response(fd, &resp, -1); }
-        send_resp = 0;
-        break;
-      }
-      case CMD_CFG_READ: {
-        uint64_t in[2] = {req.offset, req.size}, out;
-        RESP_VAL(dext_rpc(0, in, 2, &out), (resp.value = out));
-      }
-      case CMD_CFG_WRITE: {
-        uint64_t in[3] = {req.offset, req.size, req.value};
-        RESP(dext_rpc(1, in, 3, NULL));
-      }
-      case CMD_RESET: RESP(dext_rpc(2, NULL, 0, NULL));
-      case CMD_MMIO_READ:
-        if (validate_bar(req.bar, req.offset, req.size)) RESP_ERR_BREAK();
-        mmio_copy(g_bulk_buf, (void*)(g_bars[req.bar].addr + req.offset), req.size);
-        RESP_SEND_DATA(req.size, g_bulk_buf);
-      case CMD_MMIO_WRITE:
-        recvall(fd, g_bulk_buf, req.size);
-        if (validate_bar(req.bar, req.offset, req.size)) NO_RESP();
-        mmio_copy((void*)(g_bars[req.bar].addr + req.offset), g_bulk_buf, req.size);
-        NO_RESP();
-      default: RESP_ERR_BREAK();
+    case CMD_MAP_BAR:
+      resp.status = map_bar(req.bar, &resp) ? 1 : 0;
+      break;
+
+    case CMD_MAP_SYSMEM_FD: {
+      int shm_fd = -1;
+      resp.status = map_sysmem_fd(req.size, &resp, &shm_fd) ? 1 : 0;
+      send_response(fd, &resp, shm_fd);
+      continue;
     }
-    if (send_resp) send_response(fd, &resp, -1);
+
+    case CMD_CFG_READ: {
+      uint64_t in[2] = {req.offset, req.size};
+      resp.status = dext_rpc(0, in, 2, &resp.value) ? 1 : 0;
+      break;
+    }
+
+    case CMD_CFG_WRITE: {
+      uint64_t in[3] = {req.offset, req.size, req.value};
+      resp.status = dext_rpc(1, in, 3, NULL) ? 1 : 0;
+      break;
+    }
+
+    case CMD_RESET:
+      resp.status = dext_rpc(2, NULL, 0, NULL) ? 1 : 0;
+      break;
+
+    case CMD_MMIO_READ:
+      if (validate_bar(req.bar, req.offset, req.size)) { resp.status = 1; break; }
+      mmio_copy(g_bulk_buf, (void*)(g_bars[req.bar].addr + req.offset), req.size);
+      resp.value = req.size;
+      send_response(fd, &resp, -1);
+      send(fd, g_bulk_buf, req.size, 0);
+      continue;
+
+    case CMD_MMIO_WRITE:
+      recvall(fd, g_bulk_buf, req.size);
+      if (!validate_bar(req.bar, req.offset, req.size))
+        mmio_copy((void*)(g_bars[req.bar].addr + req.offset), g_bulk_buf, req.size);
+      continue;
+
+    default:
+      resp.status = 1;
+    }
+    send_response(fd, &resp, -1);
   }
 
   printf("client disconnected\n");

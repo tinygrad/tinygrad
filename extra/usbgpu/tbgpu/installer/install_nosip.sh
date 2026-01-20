@@ -1,18 +1,20 @@
 #!/bin/bash
 set -e
 
-# Check SIP status
-SIP_STATUS=$(csrutil status 2>&1)
-if [[ "$SIP_STATUS" == *"enabled"* ]]; then
-  echo "ERROR: System Integrity Protection (SIP) is enabled."
-  echo "This dev build requires SIP to be disabled to load unsigned dexts."
-  echo ""
-  echo "To disable SIP:"
-  echo "  1. Restart and hold Power button (M1+) or Cmd+R (Intel)"
-  echo "  2. Open Terminal from Recovery menu"
-  echo "  3. Run: csrutil disable"
-  echo "  4. Restart"
-  exit 1
+# Check SIP status if not building only
+if [[ "$1" != "--build" ]]; then
+  SIP_STATUS=$(csrutil status 2>&1)
+  if [[ "$SIP_STATUS" == *"enabled"* ]]; then
+    echo "ERROR: System Integrity Protection (SIP) is enabled."
+    echo "This dev build requires SIP to be disabled to load unsigned dexts."
+    echo ""
+    echo "To disable SIP:"
+    echo "  1. Restart and hold Power button (M1+) or Cmd+R (Intel)"
+    echo "  2. Open Terminal from Recovery menu"
+    echo "  3. Run: csrutil disable"
+    echo "  4. Restart"
+    exit 1
+  fi
 fi
 
 echo "SIP is disabled, proceeding with dev build..."
