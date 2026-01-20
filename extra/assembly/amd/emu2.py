@@ -816,9 +816,21 @@ _INST_HANDLERS: dict[type, callable] = {
   DS: _compile_mem_op, FLAT: _compile_mem_op, GLOBAL: _compile_mem_op, SCRATCH: _compile_mem_op,
 }
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROGRAM DECODE AND COMPILATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.runtime.support.elf import jit_loader, elf_symbol_offsets
+from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+from tinygrad.runtime.ops_cpu import CPUProgram
+
+_emu_renderer = ClangRenderer()  # renderer without compiler - get_program stops after render
+_emu_compiler = ClangJITCompiler()  # compiler for batch compilation
+
 @functools.cache
-def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
-  """Compile instruction bytes to (name, SINK UOp)."""
+def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
+  """Compile instruction bytes to ProgramSpec. Cached by instruction bytes."""
   inst = decode_inst(inst_bytes)
   name = f"{_op_name(inst).lower()}_{inst_bytes[:inst.size()].hex()}"
   sgpr, vgpr, vmem, lds, scratch = _define_bufs()
@@ -836,28 +848,7 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
         handler = _INST_HANDLERS[base]
         break
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
-  return handler(inst, ctx, name)
-
-def compile_inst(data: bytes) -> tuple[str, UOp]:
-  inst = decode_inst(data)
-  return _compile_inst_inner(bytes(data[:inst.size() + 4]))
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# PROGRAM DECODE AND COMPILATION
-# ═══════════════════════════════════════════════════════════════════════════════
-
-from tinygrad.renderer.cstyle import ClangRenderer
-from tinygrad.runtime.support.elf import jit_loader, elf_symbol_offsets
-from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
-from tinygrad.runtime.ops_cpu import CPUProgram
-
-_emu_renderer = ClangRenderer()  # renderer without compiler - get_program stops after render
-_emu_compiler = ClangJITCompiler()  # compiler for batch compilation
-
-@functools.cache
-def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
-  """Get ProgramSpec for an instruction (source only, no binary). Cached by instruction bytes."""
-  name, sink = compile_inst(inst_bytes)
+  _, sink = handler(inst, ctx, name)
   with Context(NOOPT=1, IGNORE_OOB=1):
     return get_program(sink, _emu_renderer)
 
@@ -938,75 +929,47 @@ class WaveState:
 # EXECUTION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Global vmem buffer: external_ptr=0 means INDEX offsets directly to host memory addresses
-_vmem_buf: Buffer | None = None
-def _get_vmem_buf() -> Buffer:
-  global _vmem_buf
-  if _vmem_buf is None:
-    _vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
-  return _vmem_buf
-
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  data = bytes((ctypes.c_char * lib_sz).from_address(lib).raw)
-  program = decode_program(data)
-
+  program = decode_program(bytes((ctypes.c_char * lib_sz).from_address(lib).raw))
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
-  vmem_buf = _get_vmem_buf()
+  # vmem buffer: external_ptr=0 means INDEX offsets directly to host memory addresses
+  vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
   scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
-  for gidz in range(gz):
+  for gidx in range(gx):
     for gidy in range(gy):
-      for gidx in range(gx):
+      for gidz in range(gz):
         for wave_start in range(0, total_threads, WAVE_SIZE):
-          n_lanes = min(WAVE_SIZE, total_threads - wave_start)
-          st = WaveState(n_lanes)
-
-          # s[0:1] = kernel args pointer
+          n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
           st._write_sgpr(0, args_ptr & MASK32)
           st._write_sgpr(1, (args_ptr >> 32) & MASK32)
 
-          # Workgroup IDs
+          # Workgroup IDs in SGPRs after user SGPRs
           sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
-          if rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X: st._write_sgpr(sgpr_idx, gidx); sgpr_idx += 1
-          if rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y: st._write_sgpr(sgpr_idx, gidy); sgpr_idx += 1
-          if rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z: st._write_sgpr(sgpr_idx, gidz)
+          for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
+                               (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
+                               (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
+            if rsrc2 & enabled: st._write_sgpr(sgpr_idx, gid); sgpr_idx += 1
 
-          # v0 = packed workitem IDs
-          for tid in range(wave_start, wave_start + n_lanes):
-            lane = tid - wave_start
-            z, y, x = tid // (lx * ly), (tid // lx) % ly, tid % lx
-            st._write_vgpr(0, lane, (z << 20) | (y << 10) | x)
-
-          # scratch stride in secret SGPR (private_segment_fixed_size from kernel descriptor)
+          # v0 = packed workitem IDs, scratch stride in secret SGPR
+          for lane in range(n_lanes):
+            tid = wave_start + lane
+            st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
           st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
 
-          # Execute wave: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
-          # Pre-compute buffer addresses for direct ctypes calls (avoids per-instruction Buffer overhead)
-          buf_addrs = {0: st.sgpr_buf._buf.va_addr, 1: st.vgpr_buf._buf.va_addr, 2: vmem_buf._buf.va_addr, 3: lds_buf._buf.va_addr}
-          if scratch_buf: buf_addrs[4] = scratch_buf._buf.va_addr
-          max_instructions = 1_000_000
-          inst_count = 0
-          while True:
-            pc = st.pc
-            if pc == 0xFFFFFFFF or pc not in program: break
-
-            name, fxn, globals_list, _runner = program[pc]
-            if fxn is None:
-              if DEBUG >= 1: print(f"[emu2] No fxn for {name} at PC={pc}")
-              break
-
-            # Assert scratch buffer exists if instruction uses it
-            assert 4 not in globals_list or scratch_buf is not None, f"SCRATCH instruction {name} but scratch_size=0"
-
-            # Direct ctypes call - bypasses HCQ queue/synchronization overhead (~75x faster)
+          # Execute wave with pre-computed buffer addresses
+          buf_addrs = [st.sgpr_buf._buf.va_addr, st.vgpr_buf._buf.va_addr, vmem_buf._buf.va_addr, lds_buf._buf.va_addr,
+                       scratch_buf._buf.va_addr if scratch_buf else 0]
+          for inst_count in range(1_000_000):
+            if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
+            name, fxn, globals_list, _ = program[pc]
+            assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
+            assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
             fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
-
-            inst_count += 1
-            assert inst_count < max_instructions, f"exceeded {max_instructions} instructions, likely infinite loop"
-
+          else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0

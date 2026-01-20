@@ -9,7 +9,7 @@ os.environ["AMD"] = "1"
 os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
-from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, _get_vmem_buf, MASK32, PC_LO_IDX, SCC_IDX, VCC_LO, EXEC_LO
+from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, MASK32, PC_LO_IDX, SCC_IDX, VCC_LO, EXEC_LO
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.test.helpers import KernelInfo
 from extra.assembly.amd.test.bench_emu import REMU_PATH
@@ -98,11 +98,11 @@ class PythonEmulator:
     self.lds_buf = None
 
   def create(self, kernel: bytes, n_lanes: int):
-    from tinygrad.device import Buffer
+    from tinygrad.device import Buffer, BufferSpec
     from tinygrad.dtype import dtypes
     self.program = decode_program(kernel)
     self.state = WaveState(n_lanes)
-    self.vmem_buf = _get_vmem_buf()
+    self.vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
     self.lds_buf = Buffer('CPU', 65536 // 4, dtypes.uint32).ensure_allocated()
 
   def step(self) -> int:
