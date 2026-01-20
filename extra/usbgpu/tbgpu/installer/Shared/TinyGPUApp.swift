@@ -4,12 +4,14 @@ private let dextID = "org.tinygrad.tinygpu.edriver"
 
 @main
 struct TinyGPUApp: App {
+  private static var runner: TinyGPUCLIRunner?  // prevent dealloc before callback
   @State private var text = ""
   @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
   init() {
     guard CommandLine.arguments.count > 1 else { return }
-    TinyGPUCLIRunner(dextID).run(args: CommandLine.arguments) { exit($0.rawValue) }
+    Self.runner = TinyGPUCLIRunner(dextID)
+    Self.runner?.run(args: CommandLine.arguments) { exit($0.rawValue) }
     dispatchMain()
   }
 
@@ -34,7 +36,8 @@ struct TinyGPUApp: App {
     }
     let state = TinyGPUCLIRunner.queryDextState(dextID)
     if state == .unloaded || state == .activating {
-      TinyGPUCLIRunner(dextID).run(args: ["", "install"]) { _ in }
+      Self.runner = TinyGPUCLIRunner(dextID)
+      Self.runner?.run(args: ["", "install"]) { _ in }
     }
     text = "TinyGPU - Remote PCI Device Server\n\n" + TinyGPUCLIRunner.statusText(state)
   }

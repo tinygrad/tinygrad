@@ -53,6 +53,7 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
       print(Self.statusText(Self.queryDextState(dextID)))
       done(.ok)
     case "install":
+      if Self.queryDextState(dextID) == .needsApproval { print(Self.statusText(.needsApproval)); return done(.needsApproval) }
       print("Installing TinyGPU driver extension...\nYou may need to approve in System Settings.\n")
       submitRequest(activate: true)
     case "uninstall":
