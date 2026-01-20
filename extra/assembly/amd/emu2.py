@@ -858,7 +858,7 @@ _emu_compiler = ClangJITCompiler()  # compiler for batch compilation
 def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
   """Get ProgramSpec for an instruction (source only, no binary). Cached by instruction bytes."""
   name, sink = compile_inst(inst_bytes)
-  with Context(NOOPT=1):
+  with Context(NOOPT=1, IGNORE_OOB=1):
     return get_program(sink, _emu_renderer)
 
 @functools.cache
