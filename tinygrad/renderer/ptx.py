@@ -6,7 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import flatten, get_single_element, prod, unwrap, CI
+from tinygrad.helpers import flatten, get_single_element, prod, unwrap
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -148,9 +148,6 @@ class PTXRenderer(Renderer):
     self.device, self.arch, arch_ver = device, arch, int(arch[3:])
     self.tensor_cores = PTXRenderer.tc_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch, self.device)
-
-  # CI CUDA is sm_35, so no fp16 ALUs
-  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in ((dtypes.half,) if CI else ()) + (dtypes.bfloat16,) + dtypes.fp8s
 
   # language options
   kernel_prefix = """.version VERSION
