@@ -657,7 +657,11 @@ jobs:
   testamdasm:
     name: AMD ASM IDE
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    env:
+      AMD: 1
+      PYTHON_REMU: 1
+      MOCKGPU: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -683,13 +687,13 @@ jobs:
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_sqtt_decoder.py
       - name: Run RDNA3 emulator tests
-        run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
+        run: AMD_LLVM=0 python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Run RDNA3 emulator tests (AMD_LLVM=1)
         run: AMD_LLVM=1 python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Run RDNA3 dtype tests
-        run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+        run: AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
       - name: Run RDNA3 dtype tests (AMD_LLVM=1)
-        run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+        run: AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
       # TODO: run all once emulator is faster
       - name: Run RDNA3 ops tests
         run: SKIP_SLOW_TEST=1 AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril"

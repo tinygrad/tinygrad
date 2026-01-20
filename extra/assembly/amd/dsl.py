@@ -256,7 +256,7 @@ class Inst:
 
   def __new__(cls, *args, **kwargs):
     # Auto-upgrade to _LIT variant if needed (only for base classes, not variants)
-    if not any(cls.__name__.endswith(sfx) for sfx in ('_LIT', '_DPP16', '_DPP8', '_SDWA', '_SDWA_SDST', '_MFMA', '_SDST')):
+    if not any(cls.__name__.endswith(sfx) for sfx in ('_LIT', '_DPP16', '_DPP8', '_SDWA', '_SDWA_SDST', '_MFMA')):
       lit_cls = _get_variant(cls, '_LIT')
       if lit_cls is not None:
         # Check if any src field needs a literal
@@ -330,7 +330,8 @@ class Inst:
         if 'sdst' in bits: bits['sdst'] = 32
       if 'cmp' in name and 'vdst' in bits: bits['vdst'] = 32
     # GLOBAL/FLAT: addr is 32-bit if saddr is valid SGPR, 64-bit if saddr is NULL
-    if 'addr' in bits and (saddr_field := getattr(type(self), 'saddr', None)):
+    # SCRATCH: addr is always 32-bit (offset from scratch base, not absolute address)
+    if 'addr' in bits and (saddr_field := getattr(type(self), 'saddr', None)) and type(self).__name__ not in ('SCRATCH', 'VSCRATCH'):
       saddr_val = (self._raw >> saddr_field.lo) & saddr_field.mask  # access _raw directly to avoid recursion
       bits['addr'] = 64 if saddr_val in (124, 125) else 32  # 124=NULL, 125=M0
     # MUBUF/MTBUF: vaddr size depends on offen/idxen (1 or 2 regs)

@@ -114,7 +114,7 @@ class CPUProgram(HCQProgram):
 class CPUAllocator(HCQAllocator):
   def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    if options.external_ptr: addr, buf = options.external_ptr, None
+    if options.external_ptr is not None: addr, buf = options.external_ptr, None
     elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
