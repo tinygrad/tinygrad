@@ -229,14 +229,14 @@ jobs:
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
-    - name: Lint with ruff
+    - name: Run pre-commit hooks
+      run: pre-commit run --all-files
+    - name: Lint additional files with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff==0.14.10
-        pre-commit run ruff --all-files
         python3 -m ruff check examples/mlperf/ --ignore E501
         python3 -m ruff check extra/thunder/tiny/ --ignore E501 --ignore F841 --ignore E722
         python3 -m ruff check extra/torch_backend/backend.py
-    - name: Run mypy
+    - name: Run mypy with lineprecision report
       run: |
         python -m mypy --lineprecision-report .
         cat lineprecision.txt
