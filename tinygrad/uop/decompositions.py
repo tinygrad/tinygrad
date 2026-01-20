@@ -242,9 +242,7 @@ def xlog2(d:UOp) -> UOp:
   else:
     t = polyN(x2, [0.4374550283e+0, 0.5764790177e+0, 0.9618012905120])
     # s_lo term (x*3.27e-08) only for float32 - underflows in float16
-    # evaluation order matters for precision: group x terms first, then add polynomial and exponent
-    x_terms = x * 2.8853900432586669922 + (x * 3.2734474483568488616e-08 if d.dtype.scalar() == dtypes.float32 else 0)
-    r = (t * (x * x2) + x_terms) + e
+    r = t * (x * x2) + e + x * (2.8853900432586669922 + (3.2734474483568488616e-08 if d.dtype.scalar() == dtypes.float32 else 0))
 
   # log2(Inf) = Inf
   r = d.ne(math.inf).where(r, r.const_like(math.inf))
@@ -331,15 +329,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental):
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
   if Ops.MAX not in ops and Ops.CMPLT in ops: pat.append((UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])))
-  # rewrite SQRT to xpow 0.5, preserving sign for -0.0 (IEEE 754 requires sqrt(-0.0) = -0.0)
-  def xsqrt(d:UOp) -> UOp:
-    r = xpow(d, d.const_like(0.5))
-    # copysign(r, d): copy sign bit from d to r
-    int_dtype = {dtypes.float64: dtypes.uint64, dtypes.float32: dtypes.uint32, dtypes.float16: dtypes.uint16}[d.dtype.scalar()]
-    sign_mask = {dtypes.float64: 0x8000000000000000, dtypes.float32: 0x80000000, dtypes.float16: 0x8000}[d.dtype.scalar()]
-    val_mask = {dtypes.float64: 0x7FFFFFFFFFFFFFFF, dtypes.float32: 0x7FFFFFFF, dtypes.float16: 0x7FFF}[d.dtype.scalar()]
-    return ((r.bitcast(int_dtype) & UOp.const(int_dtype, val_mask)) | (d.bitcast(int_dtype) & UOp.const(int_dtype, sign_mask))).bitcast(d.dtype)
-  if Ops.SQRT not in ops: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), xsqrt))
+  # rewrite SQRT to xpow 0.5
+  if Ops.SQRT not in ops: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
