@@ -10,6 +10,7 @@ from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
                                      ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, print_packets)
+from extra.assembly.amd.test.helpers import TARGET_TO_ARCH
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
 # INST ops for non-traced SIMDs (excluded from instruction count)
@@ -23,7 +24,7 @@ OTHER_SIMD_OPS = {InstOp.OTHER_LDS_LOAD, InstOp.OTHER_LDS_STORE, InstOp.OTHER_LD
 # ROCPROF DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
+def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
   """Run rocprof decoder on SQTT blobs, returning raw occupancy and instruction records."""
   image, sections, _ = elf_loader(lib)
   text = next((sh for sh in sections if sh.name == ".text"), None)
@@ -58,6 +59,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
           wave_insts.append([(inst.time, inst.stall) for inst in insts])
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
+  arch = TARGET_TO_ARCH[target]
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, _):
     offset = pc.address - base
@@ -65,8 +67,9 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
       mem_size_ptr[0] = 0
       return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
     try:
-      inst = decode_inst(image[offset:])
+      inst = decode_inst(image[offset:], arch=arch)
       mem_size_ptr[0] = inst._size()
+    # this could be an error in our decode_inst
     except (ValueError, AssertionError):
       mem_size_ptr[0] = 0
       return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
@@ -89,12 +92,12 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
   return occupancy_records, wave_insts
 
 class TestSQTTExamples(unittest.TestCase):
-  arch = "gfx1100"
+  target = "gfx1100"
 
   @classmethod
   def setUpClass(cls):
     cls.examples = {}
-    for pkl_path in sorted((EXAMPLES_DIR/cls.arch).glob("*.pkl")):
+    for pkl_path in sorted((EXAMPLES_DIR/cls.target).glob("*.pkl")):
       with open(pkl_path, "rb") as f:
         data = pickle.load(f)
       sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
@@ -162,7 +165,7 @@ class TestSQTTExamples(unittest.TestCase):
     """Wave start/end times must match rocprof exactly."""
     for name, (events, lib, base) in self.examples.items():
       with self.subTest(example=name):
-        occupancy, _ = run_rocprof_decoder([e.blob for e in events], lib, base)
+        occupancy, _ = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
         # extract from rocprof occupancy records
         roc_starts: dict[tuple[int, int, int], int] = {}
         roc_waves: list[tuple[int, int]] = []
@@ -184,7 +187,7 @@ class TestSQTTExamples(unittest.TestCase):
     """Instruction times must match rocprof exactly (excluding s_endpgm)."""
     for name, (events, lib, base) in self.examples.items():
       with self.subTest(example=name):
-        _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base)
+        _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
         # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
         roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
         # extract from our decoder
@@ -198,9 +201,9 @@ class TestSQTTExamples(unittest.TestCase):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
 
-#class TestSQTTExamplesRDNA4(TestSQTTExamples): arch = "gfx1200"
+class TestSQTTExamplesRDNA4(TestSQTTExamples): target = "gfx1200"
 
-#class TestSQTTExamplesCDNA(TestSQTTExamples): arch = "gfx950"
+class TestSQTTExamplesCDNA(TestSQTTExamples): target = "gfx950"
 
 if __name__ == "__main__":
   unittest.main()

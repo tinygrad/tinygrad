@@ -12,7 +12,7 @@ import unittest, re, subprocess, functools
 from tinygrad.helpers import fetch
 from extra.assembly.amd.disasm import disasm
 from extra.assembly.amd.decode import decode_inst, detect_format
-from extra.assembly.amd.test.helpers import get_llvm_mc
+from extra.assembly.amd.test.helpers import get_llvm_mc, get_target
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-21.1.0/llvm/test/MC/AMDGPU"
 
@@ -80,8 +80,8 @@ def _get_tests(f: str, arch: str) -> list[tuple[str, bytes]]: return _get_tests_
 
 def _compile_asm_batch(instrs: list[str], arch: str = "rdna3") -> list[bytes]:
   if not instrs: return []
-  mcpu = {'rdna3': 'gfx1100', 'rdna4': 'gfx1200', 'cdna': 'gfx942'}.get(arch, 'gfx1100')
-  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+  mcpu = get_target(arch)
+  result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-mattr=+real-true15,+wavefrontsize32', '-show-encoding'],
     input=".text\n" + "\n".join(instrs) + "\n", capture_output=True, text=True, timeout=30)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc failed: {result.stderr.strip()}")
   return [bytes.fromhex(line.split('encoding:')[1].strip()[1:-1].replace('0x', '').replace(',', '').replace(' ', ''))
@@ -90,7 +90,7 @@ def _compile_asm_batch(instrs: list[str], arch: str = "rdna3") -> list[bytes]:
 def _filter_valid_asm(tests: list[tuple[str, bytes]], arch: str) -> list[tuple[str, bytes]]:
   """Filter out tests where the original ASM isn't valid on the target (e.g., gfx9 tests with gfx942 constraints)."""
   if not tests: return []
-  mcpu = {'rdna3': 'gfx1100', 'rdna4': 'gfx1200', 'cdna': 'gfx942'}.get(arch, 'gfx1100')
+  mcpu = get_target(arch)
   # Batch assemble all instructions, parse stderr to find which lines failed
   instrs = [asm for asm, _ in tests]
   result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', f'-mcpu={mcpu}', '-show-encoding'],
