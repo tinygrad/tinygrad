@@ -471,26 +471,45 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"
   return pcode_result
 
-def _compile_vopc(inst: VOPC, ctx: _Ctx, name: str) -> tuple[str, UOp]:
-  exec_mask, old_vcc, op_name = ctx.rsgpr(EXEC_LO.offset), ctx.rsgpr(VCC_LO.offset), _op_name(inst)
+def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0, neg_bits: int = 0) -> tuple[str, UOp]:
+  exec_mask, op_name = ctx.rsgpr(EXEC_LO.offset), _op_name(inst)
   is_cmpx, is_16bit, is_64bit = 'CMPX' in op_name, _is_16bit_op(op_name), 'F64' in op_name
-  vsrc1_reg = inst.vsrc1.offset - 256
-  vsrc1_hi, vsrc1_offset = is_16bit and vsrc1_reg >= 128, 256 + (vsrc1_reg - 128 if is_16bit and vsrc1_reg >= 128 else vsrc1_reg)
-  pcode = PCODE.get(inst.op)
-  bits = 64 if is_64bit else 32
+  is_vopc = hasattr(inst, 'vsrc1')  # VOPC (e32) vs VOP3 (e64) format
+
+  # Handle both VOPC (vsrc1) and VOP3 (src1) instruction formats
+  if is_vopc:
+    vsrc1_reg = inst.vsrc1.offset - 256
+    vsrc1_hi, src1_off = is_16bit and vsrc1_reg >= 128, 256 + (vsrc1_reg - 128 if is_16bit and vsrc1_reg >= 128 else vsrc1_reg)
+    src0_bits, src1_bits, dst_reg = (64, 64, VCC_LO.offset) if is_64bit else (32, 32, VCC_LO.offset)
+  else:
+    src1_off, vsrc1_hi, dst_reg = inst.src1.offset, False, inst.vdst.offset
+    _, src0_bits, _ = inst.operands.get('src0', (None, 32, None))
+    _, src1_bits, _ = inst.operands.get('src1', (None, 32, None))
+    is_16bit = src0_bits == 16 or src1_bits == 16
+
+  is_float, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), PCODE.get(inst.op)
   def get_cmp_bit(lane) -> UOp:
     lc = lane.cast(dtypes.index) if isinstance(lane, UOp) else _c(lane, dtypes.index)
-    s0, s1 = ctx.rsrc(inst.src0.offset, lc, bits), ctx.rsrc(vsrc1_offset, lc, bits)
-    if is_16bit and vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
+    s0, s1 = ctx.rsrc(inst.src0.offset, lc, src0_bits), ctx.rsrc(src1_off, lc, src1_bits)
+    if is_16bit:
+      if vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
+      if opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
+    if is_float and (abs_bits or neg_bits):
+      s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit, src0_bits == 64)
+      s1 = _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit, src1_bits == 64)
     if pcode is None: return U32_0
     for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=lc)[1]:
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return U32_0
-  new_bits = _unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False)
-  new_vcc = (old_vcc & (exec_mask ^ U32_MASK)) | (new_bits & exec_mask)
-  # For CMPX: new EXEC = lanes that were active AND passed comparison (no preservation of inactive bits)
-  new_exec = new_bits & exec_mask
-  return name, UOp.sink(ctx.wsgpr(EXEC_LO.offset if is_cmpx else VCC_LO.offset, new_exec if is_cmpx else new_vcc), ctx.inc_pc(), arg=KernelInfo(name=name))
+
+  new_bits = _unroll_lanes(get_cmp_bit, exec_mask, apply_exec=not is_vopc)
+  # VOPC preserves inactive lane bits in destination; VOP3 does not
+  new_result = ((ctx.rsgpr(dst_reg) & (exec_mask ^ U32_MASK)) | (new_bits & exec_mask)) if is_vopc else new_bits
+
+  # CMPX e32: writes EXEC only; CMPX e64: writes both EXEC and SDST; non-CMPX: writes dst only
+  if is_cmpx: stores = [ctx.wsgpr(EXEC_LO.offset, new_result)] + ([] if is_vopc else [ctx.wsgpr(dst_reg, new_result)])
+  else: stores = [ctx.wsgpr(dst_reg, new_result)]
+  return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask = ctx.rsgpr(EXEC_LO.offset)
@@ -503,27 +522,9 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     assert pcode_result is not None, f"no pcode for VOP3: {op_name}"
     return pcode_result
 
-  # VOP3 VOPC (v_cmp_*_e64)
-  is_vop3_vopc = 'V_CMP' in op_name or 'V_CMPX' in op_name
-  if is_vop3_vopc:
-    is_cmpx, abs_bits, neg_bits, operands = 'CMPX' in op_name, getattr(inst, 'abs', 0) or 0, getattr(inst, 'neg', 0) or 0, inst.operands
-    src0_fmt, src0_bits, _ = operands.get('src0', (None, 32, None))
-    src1_fmt, src1_bits, _ = operands.get('src1', (None, 32, None))
-    is_16bit_op = src0_bits == 16 or src1_bits == 16
-    is_float_op = src0_fmt is not None and any(x in src0_fmt.name for x in ('F32', 'F64', 'F16'))
-    pcode = PCODE.get(inst.op)
-    def get_cmp_bit(lane) -> UOp:
-      lc = lane.cast(dtypes.index) if isinstance(lane, UOp) else _c(lane, dtypes.index)
-      s0, s1 = ctx.rsrc(inst.src0.offset, lc, src0_bits), ctx.rsrc(inst.src1.offset, lc, src1_bits)
-      if is_16bit_op: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
-      if is_float_op: s0, s1 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit_op, src0_bits == 64), _apply_src_mods(s1, 1, abs_bits, neg_bits, is_16bit_op, src1_bits == 64)
-      if pcode is None: return U32_0
-      for dest, val in parse_pcode(pcode, {'S0': s0, 'S1': s1}, lane=lc)[1]:
-        if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
-      return U32_0
-    new_sdst = _unroll_lanes(get_cmp_bit, exec_mask)
-    stores = [ctx.wsgpr(EXEC_LO.offset, new_sdst), ctx.wsgpr(inst.vdst.offset, new_sdst)] if is_cmpx else [ctx.wsgpr(inst.vdst.offset, new_sdst)]
-    return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
+  # VOP3 VOPC (v_cmp_*_e64) - delegate to unified VOPC handler
+  if 'V_CMP' in op_name or 'V_CMPX' in op_name:
+    return _compile_vopc(inst, ctx, name, opsel=opsel, abs_bits=getattr(inst, 'abs', 0) or 0, neg_bits=getattr(inst, 'neg', 0) or 0)
 
   # Regular VOP3
   lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
