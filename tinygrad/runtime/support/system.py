@@ -1,4 +1,4 @@
-import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum
+import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum, tempfile
 from typing import ClassVar
 from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
@@ -320,12 +320,11 @@ class APLRemotePCIDevice(RemotePCIDevice):
 
   @staticmethod
   def install_tinygpu():
-    import zipfile, tempfile
     print("Downloading TinyGPU.app...")
     zip_path = fetch("https://github.com/nimlgen/tinygpu_releases/raw/5b6ff43c8dffc43f57b29677e85664f667633359/TinyGPU.zip")
     with tempfile.TemporaryDirectory() as tmpdir:
-      with zipfile.ZipFile(zip_path, 'r') as zf: zf.extractall(tmpdir)
-      system(f"mv {tmpdir}/TinyGPU.app /Applications/")
+      system(f"unzip -q {zip_path} -d {tmpdir}")
+      system(f"ditto {tmpdir}/TinyGPU.app /Applications/TinyGPU.app")
     print("Installing TinyGPU driver extension...")
     system(f"{APLRemotePCIDevice.APP_PATH} install")
 
