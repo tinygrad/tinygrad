@@ -6,10 +6,7 @@ from pathlib import Path
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
 
-from extra.assembly.amd.emu2 import run_asm as python_run_asm, decode_program as emu2_decode_program
-
-# only used for count_instructions
-from extra.assembly.amd.emu import decode_program
+from extra.assembly.amd.emu2 import run_asm as python_run_asm, decode_program
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
 if not REMU_PATH.exists():
@@ -71,11 +68,12 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
   """Benchmark Python emulator with compile and execution times separated."""
   # Measure compile time (decode_program includes UOp compilation to C and JIT)
   compile_start = time.perf_counter()
-  emu2_decode_program(kernel)
+  program = decode_program(kernel)
   compile_time = time.perf_counter() - compile_start
 
   # Execution time (program is cached in decode_program via @functools.cache)
-  return compile_time, benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, iterations)
+  exec_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, iterations)
+  return compile_time, exec_time
 
 def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], dict[int, bytes], int] | None:
   """Get a real tinygrad kernel by operation name. Returns (code, global_size, local_size, buf_sizes, buf_data, rsrc2)."""
@@ -162,17 +160,17 @@ def main():
       continue
 
     kernel, global_size, local_size, buf_sizes, buf_data, rsrc2 = kernel_info
-    n_insts = count_instructions(kernel)
+    buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
+
+    # Benchmark Python emulator (must be first to measure compile time before cache is populated)
+    py_compile, py_exec = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
+
+    n_insts = count_instructions(kernel)  # uses cached decode_program
     n_workgroups = global_size[0] * global_size[1] * global_size[2]
     n_threads = local_size[0] * local_size[1] * local_size[2]
     total_work = n_insts * n_workgroups * n_threads
 
     print(f"{n_insts} insts × {n_workgroups} WGs × {n_threads} threads = {total_work:,} ops")
-
-    buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
-    #set_valid_mem_ranges(ranges)
-
-    py_compile, py_exec = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
     rust_time = benchmark_emulator("Rust", rust_remu.run_asm, kernel, global_size, local_size, args_ptr, rsrc2, args.iterations) if rust_remu else None
 
     if py_compile is not None:

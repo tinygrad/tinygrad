@@ -857,7 +857,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_fma_f16_inline_const_1_0(self):
     """V_FMA_F16: a*b + 1.0 should use f16 inline constant."""
-    from extra.assembly.amd.emu import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(0.325928)  # ~0x3537
     f16_b = f32_to_f16(-0.486572)  # ~0xb7c9
     instructions = [
@@ -874,7 +874,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_fma_f16_inline_const_0_5(self):
     """V_FMA_F16: a*b + 0.5 should use f16 inline constant."""
-    from extra.assembly.amd.emu import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(2.0)
     f16_b = f32_to_f16(3.0)
     instructions = [
@@ -891,7 +891,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_fma_f16_inline_const_neg_1_0(self):
     """V_FMA_F16: a*b + (-1.0) should use f16 inline constant."""
-    from extra.assembly.amd.emu import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_a = f32_to_f16(2.0)
     f16_b = f32_to_f16(3.0)
     instructions = [
@@ -908,7 +908,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_add_f16_abs_both(self):
     """V_ADD_F16 with abs on both operands."""
-    from extra.assembly.amd.emu import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_neg2 = f32_to_f16(-2.0)
     f16_neg3 = f32_to_f16(-3.0)
     instructions = [
@@ -924,7 +924,7 @@ class TestF16Modifiers(unittest.TestCase):
 
   def test_v_mul_f16_neg_abs(self):
     """V_MUL_F16 with neg on one operand and abs on another."""
-    from extra.assembly.amd.emu import f32_to_f16, _f16
+    from extra.assembly.amd.test.hw.helpers import f32_to_f16, _f16
     f16_2 = f32_to_f16(2.0)
     f16_neg3 = f32_to_f16(-3.0)
     instructions = [
@@ -943,7 +943,7 @@ class TestF16Modifiers(unittest.TestCase):
 
     This tests the case from AMD_LLVM sin(0) where V_FMAC_F16 writes to v0.h.
     """
-    from extra.assembly.amd.emu import _f16
+    from extra.assembly.amd.test.hw.helpers import _f16
     instructions = [
       s_mov_b32(s[0], 0x38003c00),  # v0 = {hi=0.5, lo=1.0}
       v_mov_b32_e32(v[0], s[0]),
