@@ -256,7 +256,7 @@ class Inst:
 
   def __new__(cls, *args, **kwargs):
     # Auto-upgrade to _LIT variant if needed (only for base classes, not variants)
-    if not any(cls.__name__.endswith(sfx) for sfx in ('_LIT', '_DPP16', '_DPP8', '_SDWA', '_SDWA_SDST', '_MFMA', '_SDST')):
+    if not any(cls.__name__.endswith(sfx) for sfx in ('_LIT', '_DPP16', '_DPP8', '_SDWA', '_SDWA_SDST', '_MFMA')):
       lit_cls = _get_variant(cls, '_LIT')
       if lit_cls is not None:
         # Check if any src field needs a literal
