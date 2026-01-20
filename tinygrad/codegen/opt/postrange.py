@@ -6,7 +6,7 @@ from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
-from tinygrad.helpers import IMAGE, ALLOW_TF32, count
+from tinygrad.helpers import IMAGE, ALLOW_TF32, count, Context
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -342,7 +342,9 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   elif BEAM >= 1:
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ren.device)
-    k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+    # beam search may open devices
+    with Context(ALLOW_DEVICE_USAGE=1):
+      k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet

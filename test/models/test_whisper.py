@@ -1,7 +1,7 @@
 import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
-from examples.webgpu.whisper.audio_helpers import hann_window, mel, stft_full
+from examples.audio_helpers import hann_window, mel, stft_full
 import examples.mlperf.metrics as metrics
 from tinygrad.helpers import fetch
 from test.helpers import slow

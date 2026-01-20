@@ -7,7 +7,7 @@ from tinygrad import Tensor, TinyJit, Variable, nn, dtypes
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
 
-from examples.webgpu.whisper.audio_helpers import stft_full, mel
+from examples.audio_helpers import stft_full, mel
 import numpy as np
 import librosa
 
