@@ -182,6 +182,9 @@ class PM4Executor(AMDQueue):
     lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
     rsrc2 = self.gpu.regs[regCOMPUTE_PGM_RSRC2]
 
+    # Read private_segment_fixed_size from kernel descriptor (64 bytes before prg_addr, offset 4)
+    scratch_size = to_mv(prg_addr - 64 + 4, 4).cast('I')[0]
+
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
       if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
