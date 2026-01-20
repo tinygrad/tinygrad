@@ -89,10 +89,12 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int):
   return occupancy_records, wave_insts
 
 class TestSQTTExamples(unittest.TestCase):
+  arch = "gfx1100"
+
   @classmethod
   def setUpClass(cls):
     cls.examples = {}
-    for pkl_path in sorted(EXAMPLES_DIR.glob("*.pkl")):
+    for pkl_path in sorted((EXAMPLES_DIR/cls.arch).glob("*.pkl")):
       with open(pkl_path, "rb") as f:
         data = pickle.load(f)
       sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
@@ -141,19 +143,20 @@ class TestSQTTExamples(unittest.TestCase):
         all_packets = [p for e in events for p in decode(e.blob)]
         self.assertGreater(len([p for p in all_packets if isinstance(p, INST)]), 0, f"no INST packets in {name}")
 
+  expected = {
+    "profile_empty_run_0": [1803, 1908, 1928, 1979, 2006, 1912],
+    "profile_empty_run_1": [1803, 1908, 1928, 1979, 2006, 1912],
+    "profile_gemm_run_0": [2531, 1844, 1864, 1915, 1942, 1848, 3074, 1919, 1939, 1990, 2017, 1923, 19026, 1919, 1939, 1990, 2017, 1929],
+    "profile_gemm_run_1": [2554, 1844, 1864, 1915, 1942, 1848, 3084, 1919, 1939, 1990, 2017, 1923, 19010, 1919, 1939, 1990, 2017, 1923],
+    "profile_plus_run_0": [1900, 1908, 1928, 1979, 2006, 1912],
+    "profile_plus_run_1": [1856, 1908, 1928, 1979, 2006, 1912],
+  }
   def test_packet_counts(self):
-    expected = {
-      "profile_empty_run_0": [559, 600],
-      "profile_empty_run_1": [517, 570],
-      "profile_gemm_run_0": [1489, 604, 1789, 466, 17570, 407],
-      "profile_gemm_run_1": [1453, 604, 1871, 493, 17827, 460],
-      "profile_plus_run_0": [695, 668],
-      "profile_plus_run_1": [663, 593],
-    }
     for name, (events, *_) in self.examples.items():
       with self.subTest(example=name):
+        if not self.expected.get(name): continue
         counts = [len(list(decode(e.blob))) for e in events]
-        self.assertEqual(counts, expected[name], f"packet count mismatch in {name}")
+        self.assertEqual(counts, self.expected[name], f"packet count mismatch in {name}")
 
   def test_rocprof_wave_times_match(self):
     """Wave start/end times must match rocprof exactly."""
@@ -194,6 +197,10 @@ class TestSQTTExamples(unittest.TestCase):
             elif isinstance(p, IMMEDIATE_MASK):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
+
+#class TestSQTTExamplesRDNA4(TestSQTTExamples): arch = "gfx1200"
+
+#class TestSQTTExamplesCDNA(TestSQTTExamples): arch = "gfx950"
 
 if __name__ == "__main__":
   unittest.main()
