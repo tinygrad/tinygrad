@@ -1,9 +1,8 @@
-import z3
 from typing import Callable, cast
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, python_alu
-from tinygrad.dtype import ImageDType, dtypes, Invalid, PtrDType
-from tinygrad.helpers import IGNORE_OOB, cpu_profile
-
+from tinygrad.dtype import dtypes, Invalid
+from tinygrad.helpers import cpu_profile
+import z3
 
 # older versions of z3 dont have some operators like & overloaded
 if z3.get_version() < (4, 12, 4, 0):
@@ -56,7 +55,6 @@ def uops_to_z3(solver, *uops: UOp) -> list[z3.ExprRef]:
   return [z3map[u] for u in uops]
 
 def validate_index_with_z3(sz:int, idx:UOp, gate:UOp|None=None) -> bool:
-  import z3
   solver = z3.Solver(ctx=z3.Context())
   z3_idx, z3_mask = uops_to_z3(solver, idx, gate)
   solver.add(z3_mask)
