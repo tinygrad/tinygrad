@@ -910,9 +910,8 @@ class WaveState:
     self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
     self._vgpr_mv = self.vgpr_buf.as_buffer(force_zero_copy=True).cast('I')
     self._sgpr_mv = self.sgpr_buf.as_buffer(force_zero_copy=True).cast('I')
-    # Zero out all registers using ctypes memset (much faster than Python loop)
-    ctypes.memset(ctypes.addressof(ctypes.c_uint32.from_buffer(self._sgpr_mv)), 0, SGPR_COUNT * 4)
-    ctypes.memset(ctypes.addressof(ctypes.c_uint32.from_buffer(self._vgpr_mv)), 0, VGPR_SIZE * 4)
+    for i in range(SGPR_COUNT): self._write_sgpr(i, 0)
+    for i in range(VGPR_SIZE): self._vgpr_mv[i] = 0
     self._write_sgpr(EXEC_LO.offset, (1 << n_lanes) - 1)
     self._write_sgpr(PC_LO_IDX, 0)
 
