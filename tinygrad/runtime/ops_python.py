@@ -2,7 +2,7 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Any, TYPE_CHECKING, cast
+from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct, sys, functools
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_fp16, float_to_bf16, float_to_fp8, fp8_to_float
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
@@ -218,7 +218,7 @@ class PythonRenderer(Renderer):
   device = "PYTHON"
   code_for_op = python_alu
   def __init__(self):
-    match cast(str, EMULATE.value):
+    match EMULATE.value:
       case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
       case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
       case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4
@@ -230,6 +230,9 @@ class PythonRenderer(Renderer):
       case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
       case "": pass
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
+
+  # supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype != dtypes.half or sys.version_info >= (3, 12)
 
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source

@@ -2,10 +2,14 @@ from __future__ import annotations
 from typing import cast
 import ctypes, functools, hashlib
 from tinygrad.runtime.autogen import opencl as cl
-from tinygrad.helpers import init_c_var, to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing
+from tinygrad.runtime.support import c
+from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError, CompilerPair, CompilerSet
 from tinygrad.dtype import ImageDType
+
+CC_CB = c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], c.POINTER[None], cl.size_t, c.POINTER[None]]]
+BP_CB = c.CFUNCTYPE[None, [cl.cl_program, c.POINTER[None]]]
 
 # see test/external/external_osx_profiling.py to determine this ratio. it's in like GPU clocks or something
 OSX_TIMING_RATIO = (125/3) if OSX else 1.0
@@ -21,7 +25,7 @@ class CLCompiler(Compiler):
     super().__init__(f"compile_cl_{compile_key}")
   def compile(self, src:str) -> bytes:
     program = checked(cl.clCreateProgramWithSource(self.dev.context, 1, to_char_p_p([src.encode()]), None, status := ctypes.c_int32()), status)
-    build_status: int = cl.clBuildProgram(program, 1, self.dev.device_id, None, cl.clBuildProgram.argtypes[4](), None)
+    build_status: int = cl.clBuildProgram(program, 1, self.dev.device_id, None, BP_CB(), None)
     if build_status != 0:
       cl.clGetProgramBuildInfo(program, self.dev.device_id, cl.CL_PROGRAM_BUILD_LOG, 0, None, log_size := ctypes.c_size_t())
       cl.clGetProgramBuildInfo(program, self.dev.device_id, cl.CL_PROGRAM_BUILD_LOG,
@@ -40,7 +44,7 @@ class CLProgram:
                                                         to_char_p_p([lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
                                                         errcode_ret := ctypes.c_int32()), errcode_ret)
     check(binary_status.value)
-    check(cl.clBuildProgram(self.program, 1, device.device_id, None, cl.clBuildProgram.argtypes[4](), None)) # NOTE: OSX requires this
+    check(cl.clBuildProgram(self.program, 1, device.device_id, None, BP_CB(), None)) # NOTE: OSX requires this
     self.kernel = checked(cl.clCreateKernel(self.program, name.encode(), status := ctypes.c_int32()), status)
 
   def __del__(self):
@@ -103,8 +107,8 @@ class CLDevice(Compiled):
         err = cl.clGetDeviceIDs(platform_ids[0], device_type, 0, None, num_devices := ctypes.c_uint32())
         if err == 0 and num_devices.value != 0: break
       if DEBUG >= 1: print(f"CLDevice: got {num_platforms.value} platforms and {num_devices.value} devices")
-      CLDevice.device_ids = init_c_var((cl.cl_device_id * num_devices.value)(),
-                                       lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))
+      CLDevice.device_ids = c.init_c_var((cl.cl_device_id * num_devices.value),
+                                         lambda x: check(cl.clGetDeviceIDs(platform_ids[0], device_type, num_devices, x, None)))
 
     self.device_id = CLDevice.device_ids[0 if ":" not in device else int(device.split(":")[1])]
     self.device_name = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_NAME, 256,
@@ -112,7 +116,7 @@ class CLDevice(Compiled):
     self.driver_version = (cl.clGetDeviceInfo(self.device_id, cl.CL_DRIVER_VERSION, 256,
                                               buf:=ctypes.create_string_buffer(256), None), buf.value.decode())[1]
     if DEBUG >= 1: print(f"CLDevice: opening {self.device_name} with version {self.driver_version}")
-    self.context = checked(cl.clCreateContext(None, 1, self.device_id, cl.clCreateContext.argtypes[3](), None, status := ctypes.c_int32()), status)
+    self.context = checked(cl.clCreateContext(None, 1, self.device_id, CC_CB(), None, status := ctypes.c_int32()), status)
     self.queue = checked(cl.clCreateCommandQueue(self.context, self.device_id, cl.CL_QUEUE_PROFILING_ENABLE, status), status)
     self.pending_copyin: list[memoryview] = []
     self.device_exts = (cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_EXTENSIONS, 4096,

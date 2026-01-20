@@ -1,12 +1,12 @@
 from typing import cast
-import math, struct, sys
+import math, platform, struct, sys
 from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import AMDHIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.uop.decompositions import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, PtrDType, truncate
-from tinygrad.helpers import prod, AMX
+from tinygrad.helpers import prod, AMX, CI, OSX
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -142,6 +142,11 @@ class LLVMRenderer(Renderer):
   code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
   if AMX: tensor_cores = tc.amx
 
+  def is_dtype_supported(self, dtype:DType) -> bool:
+    if dtype == dtypes.bfloat16: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"}
+    # LLVM can't link to casting function?
+    return OSX if dtype == dtypes.half else dtype not in dtypes.fp8s
+
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
@@ -211,6 +216,9 @@ class AMDLLVMRenderer(LLVMRenderer):
   has_local = True
   shared_max = AMDHIPRenderer.shared_max
   global_max = AMDHIPRenderer.global_max
+
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in dtypes.fp8s or self.arch in {"gfx942", "gfx950"}
+
   abi = "amdgpu_kernel"
   code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
