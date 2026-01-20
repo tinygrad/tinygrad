@@ -141,4 +141,9 @@ def __getattr__(nm):
       return load("metal", "'Metal'", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
                   args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
+    case "iokit": return load("iokit", "'IOKit'", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"],
+                              args=["-isysroot", macossdk])
+    case "corefoundation": return load("corefoundation", "'CoreFoundation'",
+                                       [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
+                                       args=["-isysroot", macossdk])
     case _: raise AttributeError(f"no such autogen: {nm}")
