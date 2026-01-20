@@ -482,10 +482,12 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
     if mem is None: return _const(dt, 0)
     adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
+    active = vars.get('_active')
     byte_mem = mem.dtype.base == dtypes.uint8  # scratch is byte-addressable
     if byte_mem:
       # Byte-addressable memory (scratch): load bytes directly
       idx = addr.cast(dtypes.index)
+      idx = idx.valid(active) if active is not None else idx
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
         val = _u32(0).cast(dtypes.uint64)
         for i in range(8): val = val | (mem.index(idx + _const(dtypes.index, i), ptr=True).load().cast(dtypes.uint64) << _const(dtypes.uint64, i * 8))
@@ -499,9 +501,12 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     else:
       # Dword-addressable memory (vmem): addr >> 2 for dword index
       idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.index)
+      idx = idx.valid(active) if active is not None else idx
       val = mem.index(idx)
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-        val = val.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.index)).cast(dtypes.uint64) << _const(dtypes.uint64, 32))
+        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.index)
+        idx2 = idx2.valid(active) if active is not None else idx2
+        val = val.cast(dtypes.uint64) | (mem.index(idx2).cast(dtypes.uint64) << _const(dtypes.uint64, 32))
       elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
       elif dt in (dtypes.uint16, dtypes.int16): val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
     return val
