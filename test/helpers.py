@@ -8,6 +8,7 @@ from tinygrad.engine.realize import Runner, get_program
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, CI
+from tinygrad.renderer import Renderer
 from tinygrad.codegen import full_rewrite_to_sink, line_rewrite, pm_linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
 
@@ -18,7 +19,7 @@ from tinygrad.runtime.ops_python import PythonProgram, PythonCompiler
 def get_uops(sink:UOp, dev:str="") -> list[UOp]:
   """Extract linearized UOps from a sink. Test helper that only does linearization (no render)."""
   if sink.arg is None: sink = sink.replace(arg=KernelInfo())
-  full_sink = full_rewrite_to_sink(sink, dev, optimize=sink.tag is None)
+  full_sink = full_rewrite_to_sink(sink, dev, None if dev else Renderer(), optimize=sink.tag is None)
   return line_rewrite(linearize(full_sink), pm_linearize_cleanups)
 
 def derandomize_model(model):
