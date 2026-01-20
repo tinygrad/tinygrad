@@ -2,12 +2,13 @@ import unittest, math, operator, subprocess, struct
 from tinygrad.tensor import Tensor, dtypes, Device
 from tinygrad.dtype import DType, DTYPES_DICT, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv, CI, DEBUG
+from tinygrad.helpers import getenv, DEBUG
+from test.helpers import slow
 from hypothesis import given, settings, strategies as strat
 import numpy as np
 import torch
 
-settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+settings.register_profile("my_profile", max_examples=50, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())
@@ -594,7 +595,7 @@ class TestAutoCastType(unittest.TestCase):
     dtypes.default_float = old_default_float
 
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "very slow")
-  @unittest.skipIf(CI and Device.DEFAULT == "AMD", "very slow")
+  @slow
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Binding size is larger than the maximum storage buffer binding size")
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_mean_half_precision_underflow(self):

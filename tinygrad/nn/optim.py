@@ -11,7 +11,7 @@ class Optimizer:
   def __init__(self, params: list[Tensor], lr: float, fused=FUSE_OPTIM):
     # if requires_grad is None, but being put into an optimizer, set it to True
     for x in params:
-      if x.requires_grad is None: x.requires_grad = True
+      if x.requires_grad is None: x.requires_grad_(True)
 
     self.params: list[Tensor] = dedup([x for x in params if x.requires_grad])
     assert len(self.params) != 0, "optimizer must have at least one param"
@@ -163,11 +163,12 @@ class LAMB(Optimizer):
     self.b1_t *= self.b1
     self.b2_t *= self.b2
     for i, (t, g) in enumerate(zip(params, grads)):
+      if g.device != self.m[i].device: g = g.contiguous().to(self.m[i].device)
       self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
       self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
-      up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
+      up = (m_hat / (v_hat.sqrt() + self.eps)).shard_like(t) + self.wd * t.detach()
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
         r2 = up.square().sum().sqrt()

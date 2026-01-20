@@ -1,13 +1,12 @@
-import math, functools
+import math
 from typing import cast, Callable
-from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad import dtypes
+from tinygrad.uop.ops import AxisType, UOp, Ops
 from tinygrad.dtype import AddrSpace, PtrDType
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
-from extra.thunder.tiny.tk.tiles import ALL_TILES, GL, RT_16X16, RT_16X32, ST, RT, RV, TileLayout, VecLayout
+from extra.thunder.tiny.tk.tiles import ALL_TILES, ST, RT, RV, TileLayout, VecLayout
 
 class Group:
   def __init__(self, warps:int, ker):
@@ -25,13 +24,11 @@ class Group:
 
   # ops that only work on a single warp
 
-  clear_rid = 1000
   def clear(self, reg:ALL_TILES, value:float=0):
     reg = cast(UOp, reg)
     assert self.warps == 1
 
-    rngs_for_shape = tuple(UOp.range(dim, Group.clear_rid + i) for i, dim in enumerate(reg.shape))
-    Group.clear_rid += len(reg.shape)
+    rngs_for_shape = tuple(self.ker.raw_range(dim) for dim in reg.shape)
 
     reg_store = reg[*rngs_for_shape].store(value).end(*rngs_for_shape)
 
@@ -42,14 +39,12 @@ class Group:
   def ones(self, reg:ALL_TILES): return self.clear(reg, 1)
   def neg_inf(self, reg:ALL_TILES): return self.clear(reg, -math.inf)
 
-  copy_rid = 300
   def copy(self, dst:ALL_TILES, src:ALL_TILES):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert self.warps == 1
     assert dst.shape == src.shape
 
-    rngs_for_shape = tuple(UOp.range(dim, Group.copy_rid + i) for i, dim in enumerate(dst.shape))
-    Group.copy_rid += len(dst.shape)
+    rngs_for_shape = tuple(self.ker.raw_range(dim) for dim in dst.shape)
 
     src_load = src[*rngs_for_shape]
     if src.dtype.base != dst.dtype.base:
@@ -83,7 +78,7 @@ class Group:
       wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
       wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
-    else:  raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
+    else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -113,7 +108,7 @@ class Group:
       wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
       wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
-    else:  raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
+    else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -143,7 +138,7 @@ class Group:
       wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
       wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
-    else:  raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
+    else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -173,7 +168,7 @@ class Group:
       wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
       wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
-    else:  raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
+    else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -220,8 +215,7 @@ class Group:
     red_reg = self.ker.alloc((1,), src.dtype.base, AddrSpace.REG)
 
     for height in self.ker.range(src.shape[-3], track=False):
-      i = UOp.range(red_reg.size, Group.clear_rid)
-      Group.clear_rid += 1
+      i = self.ker.raw_range(red_reg.size)
       red_reg = red_reg.after(height, *[tkr._rng for tkr in self.ker.range_stack])
       reg_store = red_reg.flatten()[i].store(init_value).end(i)
       red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
@@ -255,8 +249,7 @@ class Group:
     red_reg = self.ker.alloc((1,), src.dtype.base, AddrSpace.REG)
 
     for width in self.ker.range(src.shape[-2], track=False):
-      i = UOp.range(red_reg.size, Group.clear_rid)
-      Group.clear_rid += 1
+      i = self.ker.raw_range(red_reg.size)
       red_reg = red_reg.after(width, *[tkr._rng for tkr in self.ker.range_stack])
       reg_store = red_reg.flatten()[i].store(init_value).end(i)
       red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
@@ -303,9 +296,20 @@ class Group:
               row = laneid % rt.base_shape.rows
               col = rt.base_shape.stride * (laneid // rt.base_shape.rows) + inner
 
+            sheight = height
+            swidth = width
+            if len(idxs) == 2:
+              row_idx = idxs[0] * dst.shape[-3] * rt.base_shape.rows
+              col_idx = idxs[1] * dst.shape[-2] * rt.base_shape.cols
+
+              row += row_idx % st.base_shape.rows
+              col += col_idx % st.base_shape.cols
+              sheight += row_idx // st.base_shape.rows
+              swidth += col_idx // st.base_shape.cols
+
             srow, scol = cast(ST, src).swizzle(row, col)
 
-            src_load = src[*idxs[:-2], height, width, srow, scol]
+            src_load = src[*idxs[:-2], sheight, swidth, srow, scol]
             if src.dtype.base != dst.dtype.base:
               src_load = src_load.cast(dst.dtype.base)
             dst_store = dst[*dst_idxs, height, width, inner].store(src_load)
@@ -319,28 +323,31 @@ class Group:
       idxs = tuple(idx * st.cols if i == 3 else idx for i, idx in enumerate(idxs))
       src_i = ((idxs[0] * src.shape[-3] + idxs[1]) * src.shape[-2] + idxs[2]) * src.shape[-1] + idxs[3]
 
-      for height in self.ker.range(dst.shape[-4], track=False):
-        for width in self.ker.range(dst.shape[-3], track=False):
-          elements_per_thread = st.base_shape.elements_per_thread
-          memcpy_per_row = st.base_shape.cols // elements_per_thread
-          total_calls = st.base_shape.num_elements // (self.group_threads * elements_per_thread)
+      elements_per_thread = st.base_shape.elements_per_thread
+      memcpy_per_row = st.cols // elements_per_thread
+      total_calls = (dst.shape[-4] * dst.shape[-3] * st.base_shape.num_elements) // (self.group_threads * elements_per_thread)
 
-          for outer in self.ker.range(total_calls, track=False):
-            for inner in self.ker.range(elements_per_thread, axis_type=AxisType.UPCAST, track=False):
-              load_idx = outer * self.group_threads + self.laneid
-              row = load_idx // memcpy_per_row
-              col = (load_idx * elements_per_thread) % st.base_shape.cols + inner
+      for outer in self.ker.range(total_calls, track=False):
+        for inner in self.ker.range(elements_per_thread, axis_type=AxisType.UPCAST, track=False):
+          load_idx = outer * self.group_threads + self.laneid
+          row = load_idx // memcpy_per_row
+          col = (load_idx * elements_per_thread) % st.cols + inner
+          height = row // st.base_shape.rows
+          width = col // st.base_shape.cols
 
-              srow, scol = cast(ST, dst).swizzle(row, col)
+          row = row % st.base_shape.rows
+          col = col % st.base_shape.cols
 
-              src_i += height * st.base_shape.rows * row_stride + width * st.base_shape.cols
-              src_i += row * row_stride + col
+          srow, scol = cast(ST, dst).swizzle(row, col)
 
-              src_load = srcf[src_i]
-              if src.dtype.base != dst.dtype.base:
-                src_load = src_load.cast(dst.dtype.base)
-              dst_store = dst[*dst_idxs, height, width, srow, scol].store(src_load)
-              dst_store = dst_store.end(height, width, outer, inner).barrier()
+          src_i += height * st.base_shape.rows * row_stride + width * st.base_shape.cols
+          src_i += row * row_stride + col
+
+          src_load = srcf[src_i]
+          if src.dtype.base != dst.dtype.base:
+            src_load = src_load.cast(dst.dtype.base)
+          dst_store = dst[*dst_idxs, height, width, srow, scol].store(src_load)
+          dst_store = dst_store.end(height, width, outer, inner).barrier()
     elif dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.GLOBAL and isinstance(dst, RT):
       srcf = src.flatten()
       row_stride = prod(src.shape[axis+1:])
@@ -387,7 +394,7 @@ class Group:
       idxs = tuple(idx * rv.length if i == 3 else idx for i, idx in enumerate(idxs))
       src_i = ((idxs[0] * src.shape[-3] + idxs[1]) * src.shape[-2] + idxs[2]) * src.shape[-1] + idxs[3]
 
-      for outer in self.ker.range(dst.shape[-2]):
+      for outer in self.ker.range(dst.shape[-2], track=False):
         src_i += outer * reductions + (laneid % reductions)
 
         src_load = srcf[src_i]
@@ -472,7 +479,7 @@ class Group:
       idxs = tuple(idx * rv.length if i == 3 else idx for i, idx in enumerate(idxs))
       dst_i = ((idxs[0] * dst.shape[-3] + idxs[1]) * dst.shape[-2] + idxs[2]) * dst.shape[-1] + idxs[3]
 
-      for outer in self.ker.range(src.shape[-2]):
+      for outer in self.ker.range(src.shape[-2], track=False):
         dst_i += outer * reductions + (laneid % reductions)
 
         src_load = src[outer, 0]

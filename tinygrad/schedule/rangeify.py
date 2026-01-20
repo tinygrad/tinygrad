@@ -63,9 +63,16 @@ mop_cleanup = PatternMatcher([
    lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 ])
 
+def resolve_custom_kernel(ck:UOp) -> UOp:
+  placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
+  return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+
+  # resolve custom kernels
+  (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
   (UPat(Ops.BUFFER).f(Ops.RESHAPE, allow_any_len=True, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),
@@ -523,7 +530,6 @@ add_tags = PatternMatcher([
 ])
 
 # support for using a contiguous permuted view instead of the parent view if one exists
-# modified from kernelize.py to not use ShapeTracker
 
 def found_contiguous(ctx:dict[UOp, UOp], contig:UOp, src:UOp):
   x = src
@@ -546,7 +552,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
   # convert movement ops to ranges
-  tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
+  tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")

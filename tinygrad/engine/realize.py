@@ -1,54 +1,12 @@
-from typing import cast, Generator, Callable
+from typing import cast, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
-from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
-from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.engine.schedule import ScheduleItem
-from tinygrad.codegen import full_rewrite
-from tinygrad.codegen.opt import Opt
-
-# **************** Program Creation ****************
-
-@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
-  """
-  Transform an AST into a ProgramSpec. May trigger BEAM search.
-
-  Args:
-    ast: The Ops.SINK rooted AST
-    renderer: The renderer used to generate the code
-
-  Returns:
-    The ProgramSpec of the program.
-  """
-
-  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: print(pyrender(ast))
-
-  # linearize
-  if opts is not None:
-    assert ast.arg is None, "can't apply opts if sink has an arg"
-    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  try:
-    uops = full_rewrite(ast, renderer)
-  except RuntimeError as e:
-    print("***** LINEARIZE FAILURE *****")
-    print(e)
-    print(pyrender(ast))
-    raise
-  assert uops[-1].op is Ops.SINK, "last uop must be sink"
-
-  # print and render
-  if DEBUG >= 6: print_uops(uops)
-  src = renderer.render(uops)
-
-  return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
-                     global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
-                     local_size=[1,1,1] if renderer.has_local else None)
+from tinygrad.renderer import ProgramSpec, Estimates
+from tinygrad.codegen import get_program
 
 # **************** Runners ****************
 
@@ -77,36 +35,29 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
   return ret[1]
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
+  def __init__(self, p:ProgramSpec, prg=None):
     if DEBUG >= 3: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
-    self.p:ProgramSpec = p
-    if precompiled is not None: self.lib = precompiled
-    else:
+    if p.lib is None:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        self.lib = Device[p.device].compiler.compile_cached(p.src)
-    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
+        p = replace(p, lib=Device[p.device].compiler.compile_cached(p.src))
+    self.p:ProgramSpec = p
+    assert self.p.lib is not None
+    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.p.lib)
+    self._prg = Device[p.device].runtime(p.function_name, self.p.lib, *p.aux) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
-  def __reduce__(self): return self.__class__, (self.p, self.lib)
+  def __reduce__(self): return self.__class__, (self.p,)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
     if var_vals is None: var_vals = {}
-    has_local = Device[self.p.device].renderer.has_local
     global_size, local_size = self.p.launch_dims(var_vals)
-    if has_local and global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
+    if Device[self.p.device].renderer.has_local and local_size is None and all_int(self.p.global_size):
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
-    lra = {}
-    if global_size:
-      lra['global_size'] = tuple(global_size)
-      assert len(global_size) == 3, "global size must have len 3"
-    if local_size:
-      lra['local_size'] = tuple(local_size)
-      assert len(local_size) == 3, "local size must have len 3"
-    return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
+    return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
+                     vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
@@ -115,13 +66,13 @@ class ViewOp(Runner):
 
 class BufferCopy(Runner):
   def __init__(self, total_sz, dest_device, src_device):
-    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    sz = f"{total_sz/1e6:7.2f}M" if total_sz >= 1e6 else f"{total_sz:8d}"
+    name = f"{type(self).__name__[6:].lower()} {sz}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     super().__init__(colored(name, "yellow"), dest_device, Estimates(lds=total_sz, mem=total_sz))
   def copy(self, dest, src):
     disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.dev, 'io_uring') and \
       getattr(src.allocator.dev, 'fd', None) is not None and dest.allocator.supports_copy_from_disk
-    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
+    if disk_supports_fast_copyout and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
     elif (src.device.startswith("DISK") or src.device.startswith("TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
@@ -163,7 +114,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
   else:
     prg: ProgramSpec = get_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
@@ -171,15 +122,43 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 
 # **************** lowering functions ****************
 
-@dataclass(frozen=True)
+# NOTE: ctx is the buffers
+si_lowerer = PatternMatcher([
+  (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
+  (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
+  (UPat(Ops.COPY, name="copy"), lambda ctx,copy: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
+      if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
+      else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device))),
+  (UPat(Ops.ENCDEC, name="encdec"), lambda ctx,encdec: EncDec(encdec, ctx[0].nbytes, ctx[1].device)),
+])
+
+@dataclass
 class ExecItem:
-  prg: Runner
-  bufs: list[Buffer|None]
-  metadata: tuple[Metadata, ...]|None = None
+  ast: UOp
+  bufs: list[Buffer|None] = field(default_factory=list)
+  metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[str, int] = field(default_factory=dict)
+  prg: Runner|None = None
+
+  def lower(self):
+    """Populate self.prg by lowering the AST."""
+    if self.prg is not None: return self
+    try: self.prg = cast(Runner, si_lowerer.rewrite(self.ast, self.bufs))
+    except Exception as e:
+      if DEBUG >= 2:
+        print(f"error lowering {self.ast.op}")
+        print("tensor operations:")
+        pprint.pprint(self.metadata, indent=2)
+      raise e
+    return self
+
   def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
+    if self.prg is None: self.lower()
+    assert self.prg is not None
     var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
-    bufs = [unwrap(x) for x in self.bufs] if jit else [unwrap(x).ensure_allocated() for x in self.bufs]
+    # reorder bufs to match program globals if needed
+    _bufs = [self.bufs[i] for i in self.prg.p.globals] if isinstance(self.prg, CompiledRunner) else self.bufs
+    bufs = cast(list[Buffer], [unwrap(x) for x in _bufs] if jit else [unwrap(x).ensure_allocated() for x in _bufs])
     if PROFILE:
       payload = {"metadata":self.metadata, "var_vals":var_vals, "bufs":[b.trace_num for b in bufs], "name":self.prg.display_name}
       payload["outputs"], payload["inputs"] = (self.prg.p.outs, self.prg.p.ins) if isinstance(self.prg, CompiledRunner) else ([0], [1])
@@ -206,48 +185,28 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-# NOTE: ctx is the buffers
-si_lowerer = PatternMatcher([
-  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: (runner:=get_runner(ctx[0].device, sink), [ctx[x] for x in runner.p.globals])),
-  (UPat(Ops.BUFFER_VIEW), lambda ctx: (ViewOp(ctx[0]), list(ctx))),
-  (UPat(Ops.COPY, name="copy"), lambda ctx,copy: ((BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
-      if hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx]) \
-      else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)), list(ctx))),
-  (UPat(Ops.ENCDEC, name="encdec"), lambda ctx,encdec: ((EncDec(encdec, ctx[0].nbytes, ctx[1].device)), list(ctx))),
-])
-def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata, si.fixedvars)
-
-def lower_schedule(schedule:list[ScheduleItem]) -> Generator[tuple[ScheduleItem, ExecItem], None, None]:
-  while len(schedule):
-    si = schedule.pop(0)
-    try: yield (si, lower_schedule_item(si))
-    except Exception as e:
-      if DEBUG >= 2:
-        print(f"error lowering {si.ast.op}")
-        print("tensor operations:")
-        pprint.pprint(si.metadata, indent=2)
-      raise e
-
 # **************** main run function ****************
 
 capturing: list = []  # put classes with an add method in here
 
-def run_schedule(schedule:list[ScheduleItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
-  for si, ei in lower_schedule(schedule):
+def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
+  while len(schedule):
+    ei = schedule.pop(0).lower()
     if len(capturing) and CAPTURING: capturing[0].add(ei)
-    if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
+    if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU
-      nb: tuple[Buffer, ...] = tuple(Buffer("CPU", b.size, b.dtype) for b in si.bufs)
-      for cpu_b, gpu_b in zip(nb, si.bufs):
-        if gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
+      bufs = [b for b in ei.bufs if b is not None]
+      nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
+      for cpu_b, gpu_b in zip(nb, bufs):
+        if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
 
       # run on GPU
       ei.run(var_vals, do_update_stats=do_update_stats)
 
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      with Context(BEAM=0): lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata, si.fixedvars)).run(var_vals, do_update_stats=do_update_stats)
+      with Context(BEAM=0): ExecItem(ei.ast, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
       import numpy as np
-      np.testing.assert_allclose(si.bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
+      assert nb[0] is not None
+      np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:
       ei.run(var_vals, do_update_stats=do_update_stats)

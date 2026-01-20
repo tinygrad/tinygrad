@@ -1,14 +1,7 @@
 #include "TinyGPUDriver.h"
 #include "TinyGPUDriverUserClient.h"
-#include <AudioDriverKit/AudioDriverKit.h>
-#include <DriverKit/IOUserServer.h>
 #include <DriverKit/IOLib.h>
-#include <DriverKit/OSString.h>
-#include <DriverKit/IOMemoryMap.h>
-#include <DriverKit/IODMACommand.h>
-#include <DriverKit/IODispatchQueue.h>
 #include <PCIDriverKit/PCIDriverKit.h>
-#include <DriverKit/OSAction.h>
 
 struct TinyGPUDriver_IVars
 {
@@ -34,9 +27,6 @@ bool TinyGPUDriver::init()
 
 void TinyGPUDriver::free()
 {
-	if (ivars != nullptr) {
-		
-	}
 	IOSafeDeleteNULL(ivars, TinyGPUDriver_IVars, 1);
 	super::free();
 }
@@ -63,32 +53,6 @@ kern_return_t TinyGPUDriver::Start_Impl(IOService* in_provider)
 	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetVendorID, &ven);
 	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetDeviceID, &dev);
 	os_log(OS_LOG_DEFAULT, "tinygpu: opened device ven=0x%04x dev=0x%04x", ven, dev);
-
-#if 0
-	uint32_t off = 0x100;
-	while (off) {
-		uint32_t hdr = 0, next = 0, cap_id = 0;
-		ivars->pci->ConfigurationRead32(off, &hdr);
-		cap_id = hdr & 0xFFFFu;
-		next = (hdr >> 20) & 0xFFCu;
-		os_log(OS_LOG_DEFAULT, "tinygpu: cap: %u", cap_id);
-		if (cap_id == 0x15) {
-			uint32_t cap = 0, ctrl = 0;
-			ivars->pci->ConfigurationRead32(off+0x4, &cap);
-			ivars->pci->ConfigurationRead32(off+0x8, &ctrl);
-
-			uint32_t new_bar_size = 31 - __builtin_clz(cap >> 4);
-			uint32_t new_ctrl = (ctrl & ~0x1f00) | (new_bar_size << 8);
-			ivars->pci->ConfigurationWrite32(off+0x8, new_ctrl);
-
-			os_log(OS_LOG_DEFAULT, "tinygpu: rebar: cap=%u ctrl=%u new_bar_size=%u new_ctrl=%u", cap, ctrl, new_bar_size, new_ctrl);
-			ivars->pci->Reset(0);
-			break;
-		}
-		off = next;
-	}
-	ivars->pci->Reset(kIOPCIDeviceResetTypeHotReset);
-#endif
 
 	uint16_t commandRegister;
 	ivars->pci->ConfigurationRead16(kIOPCIConfigurationOffsetCommand, &commandRegister);
@@ -130,96 +94,66 @@ error:
 
 kern_return_t TinyGPUDriver::MapBar(uint32_t bar, IOMemoryDescriptor** memory)
 {
-	kern_return_t err = 0;
 	uint8_t barMemoryIndex, barMemoryType;
 	uint64_t barMemorySize;
-	err = ivars->pci->GetBARInfo(bar, &barMemoryIndex, &barMemorySize, &barMemoryType);
+	kern_return_t err = ivars->pci->GetBARInfo(bar, &barMemoryIndex, &barMemorySize, &barMemoryType);
 	if (err) return err;
+	os_log(OS_LOG_DEFAULT, "tinygpu: bar mapping %d idx=%d", bar, barMemoryIndex);
+	return ivars->pci->_CopyDeviceMemoryWithIndex(barMemoryIndex, memory, this);
+}
 
-	os_log(OS_LOG_DEFAULT, "tinygpu: requested bar mapping %d, %d", bar, (uint32_t)barMemoryIndex);
-	err = ivars->pci->_CopyDeviceMemoryWithIndex(barMemoryIndex, memory, this);
-	return err;
+static kern_return_t WriteDMASegments(IOMemoryDescriptor* mem, IOAddressSegment* segments, uint32_t segCount,
+                                      uint64_t mapOffset = 0, uint64_t mapSize = 0)
+{
+	// write dma segments to mapped memory as [addr0, len0, addr1, len1, ..., 0, 0]
+
+	IOMemoryMap* map = nullptr;
+	kern_return_t err = mem->CreateMapping(0, 0, 0, mapOffset, mapSize, &map);
+	if (err || !map) return err ?: kIOReturnError;
+
+	uint64_t* out = (uint64_t*)map->GetAddress();
+	for (uint32_t i = 0; i < segCount; i++) { out[i * 2] = segments[i].address; out[i * 2 + 1] = segments[i].length; }
+	out[segCount * 2] = 0; out[segCount * 2 + 1] = 0;
+	map->release();
+	return 0;
+}
+
+kern_return_t TinyGPUDriver::SetupDMA(IOMemoryDescriptor* memory, uint64_t size, IODMACommand** outCmd,
+                                       IOAddressSegment* segments, uint32_t* segCount)
+{
+	IODMACommandSpecification dmaSpec = {.options = 0, .maxAddressBits = 40};
+	IODMACommand* dmaCmd = nullptr;
+
+	kern_return_t err = IODMACommand::Create(ivars->pci, kIODMACommandCreateNoOptions, &dmaSpec, &dmaCmd);
+	if (err) { os_log(OS_LOG_DEFAULT, "tinygpu: DMA create failed err=%d", err); return err; }
+
+	uint64_t flags = kIOMemoryDirectionInOut;
+	err = dmaCmd->PrepareForDMA(kIODMACommandPrepareForDMANoOptions, memory, 0, size, &flags, segCount, segments);
+	if (err) { os_log(OS_LOG_DEFAULT, "tinygpu: PrepareForDMA failed err=%d", err); dmaCmd->release(); return err; }
+
+	*outCmd = dmaCmd;
+	return 0;
 }
 
 kern_return_t TinyGPUDriver::CreateDMA(size_t size, TinyGPUCreateDMAResp* dmaDesc)
 {
-	kern_return_t err = 0;
-	IOMemoryMap* memoryMap = nullptr;
 	IOBufferMemoryDescriptor* sharedBuf = nullptr;
+	kern_return_t err = IOBufferMemoryDescriptor::Create(kIOMemoryDirectionInOut, size, IOVMPageSize, &sharedBuf);
+	if (err) { os_log(OS_LOG_DEFAULT, "tinygpu: alloc failed err=%d", err); return err; }
+
 	IODMACommand* dmaCmd = nullptr;
-	uint64_t flags = kIOMemoryDirectionInOut;
-	uint32_t segCount = 32;
 	IOAddressSegment segments[32];
-	IODMACommandSpecification dmaSpec = {
-		.options = 0,
-		.maxAddressBits = 40,
-	};
+	uint32_t segCount = 32;
+	err = SetupDMA(sharedBuf, size, &dmaCmd, segments, &segCount);
+	if (err) { sharedBuf->release(); return err; }
 
-	err = IOBufferMemoryDescriptor::Create(kIOMemoryDirectionInOut, size, IOVMPageSize, &sharedBuf);
-	if (err) {
-		os_log(OS_LOG_DEFAULT, "tinygpu: failed to alloc user buffer, err=%d", err);
-		goto error;
-	}
-	
-	err = IODMACommand::Create(ivars->pci, kIODMACommandCreateNoOptions, &dmaSpec, &dmaCmd);
-	if (err) {
-		os_log(OS_LOG_DEFAULT, "tinygpu: failed to create dma command, err=%d", err);
-		goto error;
-	}
-
-	err = dmaCmd->PrepareForDMA(kIODMACommandPrepareForDMANoOptions, sharedBuf, 0, size,
-								&flags, &segCount, segments);
-	if (err) {
-		os_log(OS_LOG_DEFAULT, "tinygpu: failed to prepare for dma, err=%d", err);
-		goto error;
-	}
-
-	// pass addresses to userland
-	{
-		// debug
-		for (int i = 0; i < segCount; i++) {
-			os_log(OS_LOG_DEFAULT, "tinygpu: new dma mapping (sz=0x%zx) %d 0x%llx 0x%llx", size, i, segments[i].address, segments[i].length);
-		}
-
-		err = sharedBuf->CreateMapping(0, 0, 0, IOVMPageSize, IOVMPageSize, &memoryMap); // one page should be fine
-		if (err) {
-			os_log(OS_LOG_DEFAULT, "tinygpu: failed to map memory, err=%d", err);
-			goto error;
-		}
-
-		// Send back gpu addresses
-		uint64_t* addr = (uint64_t*)memoryMap->GetAddress();
-		for (int i = 0; i < segCount; i++) {
-			addr[i * 2] = segments[i].address;
-			addr[i * 2 + 1] = segments[i].length;
-		}
-		addr[segCount * 2] = 0;
-		addr[segCount * 2 + 1] = 0;
-
-		// free memoryMap
-		memoryMap->release();
-		memoryMap = nullptr;
-	}
+	err = WriteDMASegments(sharedBuf, segments, segCount, IOVMPageSize, IOVMPageSize);
+	if (err) { dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions); dmaCmd->release(); sharedBuf->release(); return err; }
 
 	dmaDesc->sharedBuf = sharedBuf;
 	dmaDesc->dmaCmd = dmaCmd;
+	os_log(OS_LOG_DEFAULT, "tinygpu: CreateDMA size=0x%zx segs=%u", size, segCount);
 	return 0;
-
-error:
-	if (memoryMap) {
-		memoryMap->release();
-		memoryMap = nullptr;
-	}
-	if (dmaCmd) {
-		dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions);
-		dmaCmd->release();
-		dmaCmd = nullptr;
-	}
-	if (sharedBuf) {
-		sharedBuf->release();
-		sharedBuf = nullptr;
-	}
-	return err;
 }
 
 kern_return_t TinyGPUDriver::CfgRead(uint32_t off, uint32_t size, uint32_t* outVal)
@@ -256,4 +190,9 @@ kern_return_t TinyGPUDriver::ResetDevice()
 	if (!ivars->pci) return kIOReturnNotReady;
 	ivars->pci->Reset(kIOPCIDeviceResetTypeFunctionReset);
 	return 0;
+}
+
+IOPCIDevice* TinyGPUDriver::GetPCI()
+{
+	return ivars->pci;
 }

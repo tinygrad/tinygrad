@@ -3,7 +3,8 @@ from tinygrad.runtime.autogen import nv_570 as nv_gpu
 from enum import Enum, auto
 from test.mockgpu.gpu import VirtGPU
 from test.mockgpu.helpers import _try_dlopen_gpuocelot
-from tinygrad.helpers import to_mv, init_c_struct_t
+from tinygrad.helpers import to_mv
+from tinygrad.runtime.support.c import init_c_struct_t
 
 def make_qmd_struct_type():
   fields = []
@@ -11,11 +12,9 @@ def make_qmd_struct_type():
   bits += [(name+f"_{i}",dt(i)) for name,dt in nv_gpu.__dict__.items() for i in range(8) if name.startswith("NVC6C0_QMDV03_00") and callable(dt)]
   bits = sorted(bits, key=lambda x: x[1][1])
   for i,(name, data) in enumerate(bits):
-    if i > 0 and (gap:=(data[1] - bits[i-1][1][0] - 1)) != 0:  fields.append((f"_reserved{i}", ctypes.c_uint32, gap))
-    fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]-data[1]+1))
-  return init_c_struct_t(tuple(fields))
+    fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[1]//8, data[0]-data[1]+1, data[1]%8))
+  return init_c_struct_t(0x40 * 4, tuple(fields))
 qmd_struct_t = make_qmd_struct_type()
-assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 
 gpuocelot_lib = _try_dlopen_gpuocelot()
 

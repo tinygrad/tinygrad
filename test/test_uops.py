@@ -7,29 +7,26 @@ from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu, AxisType
 from tinygrad.uop.spec import shared_spec
-from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.engine.realize import CompiledRunner, get_program, get_runner, ExecItem
-from tinygrad.codegen import full_rewrite
+from tinygrad.engine.realize import CompiledRunner, get_program, get_runner
+from tinygrad.engine.schedule import ExecItem
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
+from test.helpers import get_uops
+from dataclasses import replace
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   sink = UOp.group(*u)
   for r in sink.ranges: sink = sink.end(r)
-  # we strip the SINK here for legacy reasons
-  ret = full_rewrite(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
+  ret = get_uops(sink.sink(arg=KernelInfo(opts_to_apply=())), ren)
   assert ret[-1].op is Ops.SINK
-  return ret[:-1]
+  return ret
 
 def _uops_to_prg(uops_list):
-  uops = full_rewrite(ast:=UOp.sink(*uops_list), ren=Device[Device.DEFAULT].renderer)
-  src = Device[Device.DEFAULT].renderer.render(uops)
-  has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, Device.DEFAULT, ast, uops=uops,
-                                global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
+  prg = get_program(UOp.sink(*uops_list), Device[Device.DEFAULT].renderer)
+  return CompiledRunner(replace(prg, device=Device.DEFAULT))
 
 def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
@@ -546,6 +543,12 @@ class TestUopsObject(unittest.TestCase):
     self.assertEqual(a.device, Device.DEFAULT)
 
 class TestUOpRender(unittest.TestCase):
+  def test_render_vectorize_empty(self):
+    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(0), src=())
+    self.assertEqual(u.render(simplify=False), "{}")
+  def test_render_vectorize_empty_simplified(self):
+    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(0), src=())
+    self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
     u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
     self.assertEqual(u.render(simplify=False), "{0, ...}")
@@ -568,7 +571,7 @@ class TestZeroRange(unittest.TestCase):
 
 class TestUOpPrograms(unittest.TestCase):
   def _run(self, prog:UOp, *tensors:Tensor):
-    ExecItem(get_runner(Device.DEFAULT, prog), [t.uop.buffer for t in tensors]).run(wait=True)
+    ExecItem(prog, [t.uop.buffer for t in tensors], prg=get_runner(Device.DEFAULT, prog)).run(wait=True)
 
   def test_simple(self):
     out = Tensor.empty(10,10,dtype=dtypes.int)

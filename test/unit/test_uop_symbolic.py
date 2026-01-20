@@ -3,8 +3,8 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from tinygrad.codegen import full_rewrite
 from tinygrad.helpers import Context
+from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid
 from tinygrad.uop.validate import uops_to_z3
@@ -747,7 +747,7 @@ class TestSymbolic(unittest.TestCase):
 
     # TODO: copied from render, render does not support cast
     glbl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
-    uops = full_rewrite(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
+    uops = get_uops(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
     self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))
@@ -1013,6 +1013,21 @@ class TestInvalidIndex(unittest.TestCase):
     c1 = UOp.const(dtypes.index.vec(4), (1, 1, Invalid, Invalid))
     c2 = UOp.const(dtypes.index.vec(4), (1, Invalid, 1, 1))
     self.assertIs((c1+c2).simplify(), UOp.const(dtypes.index.vec(4), (2, Invalid, Invalid, Invalid)))
+
+class TestStoreLoadFolding(unittest.TestCase):
+  """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""
+  def test_store_load_folding(self):
+    # store(idx, load(idx)) -> NOOP, including emergent patterns like store(idx, load(idx) + 0)
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), arg=0)
+    index = buf.index(UOp.const(dtypes.index, 0))
+    # Direct: store(idx, load(idx)) -> NOOP
+    self.assertEqual(graph_rewrite(index.store(index.load()), sym).op, Ops.NOOP)
+    # Emergent: store(idx, load(idx) + 0) -> store(idx, load(idx)) -> NOOP
+    self.assertEqual(graph_rewrite(index.store(index.load() + UOp.const(dtypes.int, 0)), sym).op, Ops.NOOP)
+    # Emergent: store(idx, load(idx) * 1) -> store(idx, load(idx)) -> NOOP
+    self.assertEqual(graph_rewrite(index.store(index.load() * UOp.const(dtypes.int, 1)), sym).op, Ops.NOOP)
+    # Negative: store(idx, load(idx) + 1) should NOT fold
+    self.assertEqual(graph_rewrite(index.store(index.load() + UOp.const(dtypes.int, 1)), sym).op, Ops.STORE)
 
 class TestSymbolicRealWorld(unittest.TestCase):
   def test_resnet_half(self):

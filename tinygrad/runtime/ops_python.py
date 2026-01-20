@@ -2,9 +2,9 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Any, TYPE_CHECKING, cast
+from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, struct, sys, functools
-from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_bf16, float_to_fp8, fp8_to_float
+from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_fp16, float_to_bf16, float_to_fp8, fp8_to_float
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
 from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet, CompilerPair
 from tinygrad.codegen.opt import tc
@@ -14,6 +14,7 @@ from tinygrad.renderer import Renderer
 def storage_fmt_for_dtype(dtype: DType): return 'H' if dtype == dtypes.bfloat16 else 'B' if dtype in dtypes.fp8s else dtype.fmt
 
 def to_storage_scalar(x, dtype: DType):
+  if dtype == dtypes.half: return float_to_fp16(x)
   if dtype == dtypes.bfloat16: return (struct.unpack('I', struct.pack('f', float_to_bf16(x)))[0] >> 16) & 0xFFFF
   if dtype in dtypes.fp8s: return float_to_fp8(float(x), dtype)
   return x
@@ -141,7 +142,7 @@ class PythonProgram:
           assert isinstance(first_src_dtype, DType) # mypy
           dims, dtype_in, device, threads = arg[1], first_src_dtype.scalar(), arg[4], arg[5]
           wmma_helper = functools.partial(generic_wmma_helper, src_values, warp_size)
-          # TODO: refactor these to a shared TensorCoreLayout in kernel.py
+          # TODO: refactor these to a shared TensorCoreLayout
           if device == "METAL":
             # A (2 elements on 32 threads): row major
             def a_b_elem(x, i, j, goff): return x[(i%2)][goff+(i//2)%2+(j%4)*2+(i//4)*8+(j//4)*16]
@@ -217,7 +218,7 @@ class PythonRenderer(Renderer):
   device = "PYTHON"
   code_for_op = python_alu
   def __init__(self):
-    match cast(str, EMULATE.value):
+    match EMULATE.value:
       case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
       case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
       case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4
@@ -229,6 +230,9 @@ class PythonRenderer(Renderer):
       case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
       case "": pass
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
+
+  # supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
+  def is_dtype_supported(self, dtype:DType) -> bool: return dtype != dtypes.half or sys.version_info >= (3, 12)
 
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source

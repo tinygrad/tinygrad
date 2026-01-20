@@ -3,7 +3,7 @@ from unittest.mock import patch
 from io import StringIO
 from collections import namedtuple
 from tqdm import tqdm
-from tinygrad.helpers import tqdm as tinytqdm, trange as tinytrange
+from tinygrad.helpers import tqdm as tinytqdm, trange
 import numpy as np
 
 def _get_iter_per_second(raw:str) -> float:
@@ -128,6 +128,26 @@ class TestProgressBar(unittest.TestCase):
         self._compare_bars(tinytqdm_output, tqdm_output)
         if n > 5: break
 
+  @patch('sys.stderr', new_callable=StringIO)
+  @patch('shutil.get_terminal_size')
+  def test_si_boundary(self, mock_terminal_size, mock_stderr):
+    """Test SI formatting at boundaries (e.g., 999.5 -> 1.00k, not 1000)"""
+    ncols = 80
+    mock_terminal_size.return_value = namedtuple(field_names='columns', typename='terminal_size')(ncols)
+
+    # Test rates at the boundary: 999 stays as "999", 999.5+ becomes "1.00k"
+    for rate in [999, 999.4, 999.5, 1000, 1001]:
+      mock_stderr.truncate(0)
+      mock_stderr.seek(0)
+      elapsed = 1.0 / rate
+      # Need 3 perf_counter calls: init st, init update, final update
+      with patch('time.perf_counter', side_effect=[0, 0, elapsed]):
+        bar = tinytqdm(desc="Test", total=1, unit_scale=True, rate=10**9)
+        bar.update(1, close=True)
+      tinytqdm_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
+      tqdm_output = tqdm.format_meter(n=1, total=1, elapsed=elapsed, ncols=ncols, prefix="Test", unit_scale=True)
+      self._compare_bars(tinytqdm_output, tqdm_output)
+
   @unittest.skip("this is flaky")
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
@@ -165,7 +185,7 @@ class TestProgressBar(unittest.TestCase):
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
-      for n in (bar := tinytrange(total, desc="Test")):
+      for n in (bar := trange(total, desc="Test")):
         if bar.i % bar.skip != 0: continue
         tiny_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
         iters_per_sec = float(tiny_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0

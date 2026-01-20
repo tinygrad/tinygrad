@@ -11,50 +11,50 @@ from tinygrad import Tensor
 class test_rearrange_examples(unittest.TestCase):
   def test1(self):
     # transpose
-    x = Tensor(np.arange(10 * 20 * 30 * 40).reshape([10, 20, 30, 40]))
+    x = Tensor(np.arange(10 * 20 * 30 * 40, dtype=np.int32).reshape([10, 20, 30, 40]))
     y = x.rearrange("b c h w -> b h w c")
     assert tuple(y.shape) == (10, 30, 40, 20)
 
   def test2(self):
     # view / reshape
-    x = Tensor(np.arange(10 * 20 * 30 * 40).reshape([10, 20, 30, 40]))
+    x = Tensor(np.arange(10 * 20 * 30 * 40, dtype=np.int32).reshape([10, 20, 30, 40]))
     y = x.rearrange("b c h w -> b (c h w)")
     assert tuple(y.shape) == (10, 20 * 30 * 40)
 
   def test3(self):
     # depth-to-space
-    x = Tensor(np.arange(10 * 20 * 30 * 40).reshape([10, 20, 30, 40]))
+    x = Tensor(np.arange(10 * 20 * 30 * 40, dtype=np.int32).reshape([10, 20, 30, 40]))
     y = x.rearrange("b (c h1 w1) h w -> b c (h h1) (w w1)", h1=2, w1=2)
     assert tuple(y.shape) == (10, 5, 30 * 2, 40 * 2)
 
   def test4(self):
     # space-to-depth
-    x = Tensor(np.arange(10 * 20 * 30 * 40).reshape([10, 20, 30, 40]))
+    x = Tensor(np.arange(10 * 20 * 30 * 40, dtype=np.int32).reshape([10, 20, 30, 40]))
     y = x.rearrange("b c (h h1) (w w1) -> b (h1 w1 c) h w", h1=2, w1=2)
     assert tuple(y.shape) == (10, 20 * 4, 30 // 2, 40 // 2)
 
   def test5(self):
     # simple transposition
-    x = Tensor(np.arange(10 * 20 * 30 * 40).reshape([10, 20, 30, 40]))
+    x = Tensor(np.arange(10 * 20 * 30 * 40, dtype=np.int32).reshape([10, 20, 30, 40]))
     y = x.rearrange("b1 sound b2 letter -> b1 b2 sound letter")
     assert tuple(y.shape) == (10, 30, 20, 40)
 
   def test6(self):
     # parsing parameters
-    x = Tensor(np.arange(10 * 20 * 30 * 40).reshape([10, 20, 30, 40]))
+    x = Tensor(np.arange(10 * 20 * 30 * 40, dtype=np.int32).reshape([10, 20, 30, 40]))
     t = x.rearrange("b c h w -> (b h w) c")
     t = t[:, ::2]  # replacement for dot-product, just changes size of second axis
     assert tuple(t.shape) == (10 * 30 * 40, 10)
 
   def test7(self):
-    x = Tensor(np.arange(10 * 20 * 30 * 40).reshape([10, 20, 30, 40]))
+    x = Tensor(np.arange(10 * 20 * 30 * 40, dtype=np.int32).reshape([10, 20, 30, 40]))
     # split of embedding into groups
     y1, y2 = x.rearrange("b (c g) h w -> g b c h w", g=2)
     assert tuple(y1.shape) == (10, 10, 30, 40)
     assert tuple(y2.shape) == (10, 10, 30, 40)
 
   def test8(self):
-    x = Tensor(np.arange(10 * 20 * 1 * 1).reshape([10, 20, 1, 1]))
+    x = Tensor(np.arange(10 * 20 * 1 * 1, dtype=np.int32).reshape([10, 20, 1, 1]))
     # squeeze - unsqueeze
     y = x.rearrange("b c () () -> b c")
     assert tuple(y.shape) == (10, 20)
@@ -62,7 +62,7 @@ class test_rearrange_examples(unittest.TestCase):
     assert tuple(y.shape) == (20, 10, 1, 1)
 
   def test9(self):
-    x = Tensor(np.arange(10 * 20 * 1 * 1).reshape([10, 20, 1, 1]))
+    x = Tensor(np.arange(10 * 20 * 1 * 1, dtype=np.int32).reshape([10, 20, 1, 1]))
     # squeeze - unsqueeze
     y = x.rearrange("b c 1 1 -> b c")
     assert tuple(y.shape) == (10, 20)
@@ -164,7 +164,7 @@ class test_rearrange_ops(unittest.TestCase):
       ("a b c d e -> b (a c d) e", "a b ... e -> b (a ...) e"),
     ]
 
-    xnp = np.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    xnp = np.arange(2 * 3 * 4 * 5 * 6, dtype=np.int32).reshape([2, 3, 4, 5, 6])
     x = Tensor(xnp)
     for pattern in identity_patterns:
       assert np.array_equal(xnp, x.rearrange(pattern).numpy()), pattern
@@ -174,7 +174,7 @@ class test_rearrange_ops(unittest.TestCase):
 
   def test_rearrange_consistency(self):
     shape = [1, 2, 3, 5, 7, 11]
-    xnp = np.arange(np.prod(shape)).reshape(shape)
+    xnp = np.arange(np.prod(shape), dtype=np.int32).reshape(shape)
     x = Tensor(xnp)
     for pattern in [
       "a b c d e f -> a b c d e f",
@@ -205,7 +205,7 @@ class test_rearrange_ops(unittest.TestCase):
     result = temp.rearrange("(f d) c (e b) a -> a b c d e f", **sizes).numpy()
     assert np.array_equal(xnp, result)
 
-    x2 = np.arange(2 * 3 * 4).reshape([2, 3, 4])
+    x2 = np.arange(2 * 3 * 4, dtype=np.int32).reshape([2, 3, 4])
     result = Tensor(x2).rearrange("a b c -> b c a").numpy()
     assert x2[1, 2, 3] == result[2, 3, 1]
     assert x2[0, 1, 2] == result[1, 2, 0]
@@ -213,7 +213,7 @@ class test_rearrange_ops(unittest.TestCase):
   def test_rearrange_permutations(self):
     # tests random permutation of axes against two independent numpy ways
     for n_axes in range(1, 10):
-      x = np.arange(2**n_axes).reshape([2] * n_axes)
+      x = np.arange(2**n_axes, dtype=np.int32).reshape([2] * n_axes)
       permutation = np.random.permutation(n_axes)
       left_expression = " ".join("i" + str(axis) for axis in range(n_axes))
       right_expression = " ".join("i" + str(axis) for axis in permutation)
@@ -224,7 +224,7 @@ class test_rearrange_ops(unittest.TestCase):
         assert x[tuple(pick)] == result[tuple(pick[permutation])]
 
     for n_axes in range(1, 10):
-      x = np.arange(2**n_axes).reshape([2] * n_axes)
+      x = np.arange(2**n_axes, dtype=np.int32).reshape([2] * n_axes)
       permutation = np.random.permutation(n_axes)
       left_expression = " ".join("i" + str(axis) for axis in range(n_axes)[::-1])
       right_expression = " ".join("i" + str(axis) for axis in permutation[::-1])
@@ -310,7 +310,7 @@ class test_rearrange_parsing(unittest.TestCase):
       ("a b … e -> b (a …) e", "a b ... e -> b (a ...) e"),
     ]
 
-    xnp = np.arange(2 * 3 * 4 * 5 * 6).reshape([2, 3, 4, 5, 6])
+    xnp = np.arange(2 * 3 * 4 * 5 * 6, dtype=np.int32).reshape([2, 3, 4, 5, 6])
     x = Tensor(xnp)
 
     for pattern1, pattern2 in equivalent_rearrange_patterns:

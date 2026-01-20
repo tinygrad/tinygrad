@@ -145,7 +145,7 @@ OPNAME = {
 ALUSRC = {
   1: "SALU",
   2: "VALU",
-  3: "VALU_ALT",
+  3: "VALU_SALU",
 }
 
 MEMSRC = {
@@ -534,8 +534,8 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
 
 def parse(fn:str):
   with Timing(f"unpickle {fn}: "): dat = pickle.load(open(fn, "rb"))
-  if getenv("ROCM", 0):
-    with Timing(f"decode {fn}: "): ctx = decode(dat)
+  #if getenv("ROCM", 0):
+  #  with Timing(f"decode {fn}: "): ctx = decode(dat)
   dat_sqtt = [x for x in dat if isinstance(x, ProfileSQTTEvent)]
   print(f"got {len(dat_sqtt)} SQTT events in {fn}")
   return dat_sqtt

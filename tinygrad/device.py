@@ -2,10 +2,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator
-import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
+import importlib, inspect, functools, pathlib, os, contextlib, sys, re, atexit, pickle, decimal
+from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -199,8 +199,7 @@ class Buffer:
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
-    if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
-    return Buffer(self.device, size, dtype, base=self, offset=offset)
+    return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
 
 @dataclass(frozen=True)
 class DMACPURef:
@@ -219,10 +218,10 @@ DeviceType = TypeVar('DeviceType', bound='Compiled')
 
 # TODO: size, dest, src are the same type. can we enforce this?
 class Allocator(Generic[DeviceType]):
-  def __init__(self, dev:DeviceType):
+  def __init__(self, dev:DeviceType, supports_copy_from_disk:bool=True, supports_transfer:bool=True):
     self.dev: DeviceType = dev
     self.default_buffer_spec: BufferSpec = BufferSpec()
-    self.supports_copy_from_disk: bool = True
+    self.supports_copy_from_disk, self.supports_transfer = supports_copy_from_disk, supports_transfer
   # overridden in LRUAllocator
   def alloc(self, size:int, options:BufferSpec|None=None):
     assert size > 0, f"alloc size must be positive, getting {size}"
@@ -245,9 +244,9 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
   The LRU Allocator is responsible for caching buffers.
   It ensures that buffers are not freed until it is absolutely necessary, optimizing performance.
   """
-  def __init__(self, dev:DeviceType):
+  def __init__(self, dev:DeviceType, **kwargs):
     self.cache: dict[tuple[int, BufferSpec|None], Any] = defaultdict(list)
-    super().__init__(dev)
+    super().__init__(dev, **kwargs)
   def alloc(self, size:int, options:BufferSpec|None=None):
     if len(c := self.cache[(size, options)]): return c.pop()
     try: return super().alloc(size, options)
@@ -278,7 +277,7 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
 
 @dataclass(frozen=True)
-class CompilerPair: renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial; ctrl_var:ContextVar|None = None # noqa: E702
+class CompilerPair: renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial|None; ctrl_var:ContextVar|None = None # noqa: E702
 
 @dataclass(frozen=True)
 class CompilerSet: cset:list[CompilerPair]; ctrl_var:ContextVar|None = None # noqa: E702
@@ -290,26 +289,30 @@ class Compiled:
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
 
     self.comps_ctrl_var = compilers.ctrl_var if compilers is not None else None
-    self.comp_sets:dict[Any, tuple[ContextVar|None, tuple[type[Renderer]|functools.partial, type[Compiler]|functools.partial]]] = {}
-    self.cached_pair:dict[Any, tuple[Renderer, Compiler]] = {}
+    self.comp_sets:dict[Any, tuple[ContextVar|None, tuple[type[Renderer]|functools.partial, type[Compiler]|functools.partial|None]]] = {}
+    self.cached_pair:dict[Any, tuple[Renderer, Compiler|None]] = {}
     for cpair in (compilers.cset if compilers is not None else [CompilerPair(Renderer, Compiler)]):
-      self.comp_sets[self._compiler_name(cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
+      self.comp_sets[self._compiler_name(cpair.renderer, cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
 
   @property
   def renderer(self) -> Renderer: return self._select_compiler_pair()[0]
 
   @property
-  def compiler(self) -> Compiler: return self._select_compiler_pair()[1]
+  def compiler(self) -> Compiler:
+    if (ret:=self.renderer.compiler or self._select_compiler_pair()[1]) is None: raise RuntimeError(f"no compiler for {self.device}")
+    return ret
 
-  def _compiler_name(self, c:type[Compiler]|functools.partial) -> str:
-    return unwrap_class_type(c).__name__.upper().removesuffix("COMPILER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
+  def _compiler_name(self, r:type[Renderer]|functools.partial, c:type[Compiler]|functools.partial|None) -> str:
+    devname = self.device.split(':')[0].upper()
+    if c is None: return unwrap_class_type(r).__name__.upper().removesuffix("RENDERER").removeprefix(devname) or devname
+    return unwrap_class_type(c).__name__.upper().removesuffix("COMPILER").removeprefix(devname) or devname
 
-  def _select_compiler_pair(self) -> tuple[Renderer, Compiler]:
+  def _select_compiler_pair(self) -> tuple[Renderer, Compiler|None]:
     # select forced compiler from global env var.
     forced_comps = set([self.comp_sets[val][1]] if self.comps_ctrl_var is not None and (val:=self.comps_ctrl_var.value) else [])
 
-    # add forced compilers from individual env vars.
-    forced_comps |= set(rc for en, rc in self.comp_sets.values() if en is not None and en.value == 1)
+    # add forced compilers from individual env vars (only if global env var is not set, as it takes precedence).
+    if not forced_comps: forced_comps |= set(rc for en, rc in self.comp_sets.values() if en is not None and en.value == 1)
     if len(forced_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {forced_comps}")
 
     # select remaining compilers (all or forced only)
@@ -339,35 +342,8 @@ class Compiled:
     """
     # override this in your device implementation
 
-# TODO: move this to each Device
 def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
-  if dtype == dtypes.index: return False
-  if device is None: device = Device.DEFAULT
-  if dtype == dtypes.bfloat16:
-    if device == "METAL": return not CI
-    if device == "CUDA": return not CI and not CUDA_PTX
-    if device == "NV": return not CI and not NV_PTX and not NV_NAK
-    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not CPU_LVP
-    return device in {"AMD", "PYTHON", "NULL"}
-  if dtype in dtypes.fp8s:
-    if device == "CUDA": return not CI and not CUDA_PTX
-    if device == "NV": return not CI and not NV_PTX and not NV_NAK
-    if device == "AMD": return not CI and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
-    return device in {"PYTHON", "NULL"}
-  if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
-                                          dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
-  # for CI GPU and OSX, cl_khr_fp16 isn't supported
-  # for CI LLVM, it segfaults because it can't link to the casting function
-  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  if dtype == dtypes.half:
-    if device == "CL": return not CI and not OSX
-    if device == "QCOM": return False # QCOM compiler is flaky with half
-    if device in ["CUDA", "NV"]: return not CI
-    if device == "CPU" and CPU_LLVM: return OSX
-    if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not getenv("NULL_IR3")
-  return True
+  return dtype != dtypes.index and Device[device or Device.DEFAULT].renderer.is_dtype_supported(dtype)
 
 if PROFILE:
   @atexit.register
@@ -398,7 +374,7 @@ def enumerate_devices_str() -> Generator[str, None, None]:
             # d.renderer, d.compiler = r(), c()
             with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
             if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-            set_text = f'({cc_ctrl_var.key}={d._compiler_name(c)} to make default)' if cc_ctrl_var is not None else ''
+            set_text = f'({cc_ctrl_var.key}={d._compiler_name(r, c)} to make default)' if cc_ctrl_var is not None else ''
             default_text = '(default)' if type(default_compiler) is type(d.compiler) else set_text
             compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
             any_works = True

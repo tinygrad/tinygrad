@@ -2,7 +2,8 @@ import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
 import examples.mlperf.metrics as metrics
-from tinygrad.helpers import CI, fetch, CPU_LLVM
+from tinygrad.helpers import fetch
+from test.helpers import slow
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
 
@@ -51,6 +52,8 @@ def wer_helper(result: str, reference: str)->float:
 
 @unittest.skipIf(Device.DEFAULT in ["CPU"], "slow")
 @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+# TODO: WEBGPU GPU dispatch dimensions limit
+@unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU GPU dispatch dimensions limit")
 class TestWhisper(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
@@ -75,11 +78,11 @@ class TestWhisper(unittest.TestCase):
   def test_transcribe_file1(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
 
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too many tests for CI")
+  @slow
   def test_transcribe_file2(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_2),  TRANSCRIPTION_2)
 
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too many tests for CI")
+  @slow
   def test_transcribe_batch12(self):
     waveforms = [load_file_waveform(TEST_FILE_1), load_file_waveform(TEST_FILE_2)]
     transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
@@ -95,14 +98,14 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[1])
 
   @unittest.skip("file 3 url is broken")
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
+  @slow
   def test_transcribe_long(self):
     waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
     transcription = transcribe_waveform(self.model, self.enc, waveform)
     self.assertWER(transcription, TRANSCRIPTION_3, 0.085)
 
   @unittest.skip("file 3 url is broken")
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
+  @slow
   def test_transcribe_long_no_batch(self):
     waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
 

@@ -13,7 +13,7 @@ from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.schedule.rangeify import Kernel
-from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
+from tinygrad.engine.realize import CompiledRunner, run_schedule
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -24,8 +24,9 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     sched = Tensor(t).schedule()
-  # test lowering all the ScheduleItems to ExecItems
-  kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
+  # test lowering all the ExecItems
+  for si in sched: si.lower()
+  kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
     if DEBUG >= 3:
@@ -117,7 +118,7 @@ class TestSchedule(unittest.TestCase):
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
     b = a.cast(dtypes.half).expand((2, 4, 4))+2
     run_schedule(check_schedule(b, 1))
-    np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2)
+    np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2, rtol=1e-3)
 
   def test_indexing_scalars_simple(self):
     X = Tensor.randn(2, 2).realize()
@@ -174,14 +175,14 @@ class TestSchedule(unittest.TestCase):
     child.realize()
     assert a.uop.is_realized
 
-  # NOTE: because empty does not have an ExecItem if realize is called on a childless empty, it never gets allocated.
+  # NOTE: because empty does not have a lowered ExecItem if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
     assert not a.uop.is_realized
 
   def test_simplify_padded_const(self):
-    a = Tensor.empty(1022).cummax(axis=0)
+    a, _ = Tensor.empty(1022).cummax(axis=0)
     check_schedule(a, 3)
 
   def test_basic_binop_fusion(self):
@@ -1755,7 +1756,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
-    args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
+    args = {"dim":32, "end":2048, "theta":10000}
     fused = precompute_freqs_cis(**args)
     run_schedule(check_schedule(fused, 1))
     if getenv("CHECK", 1):

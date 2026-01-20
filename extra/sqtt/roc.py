@@ -1,33 +1,9 @@
-import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools, threading
+#!/usr/bin/env python3
+import ctypes, pathlib, argparse, pickle, dataclasses, threading
 from typing import Generator
 from tinygrad.helpers import temp, unwrap, DEBUG
-from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
-from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-from tinygrad.runtime.autogen import llvm, rocprof
-from tinygrad.runtime.support.elf import elf_loader
-
-# to pass NULL to callbacks
-llvm.LLVMCreateDisasmCPUFeatures.argtypes = tuple(llvm.LLVMCreateDisasmCPUFeatures.argtypes[:5]) + (ctypes.c_void_p, ctypes.c_void_p)
-def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
-  llvm.LLVMInitializeAMDGPUTargetInfo()
-  llvm.LLVMInitializeAMDGPUTargetMC()
-  llvm.LLVMInitializeAMDGPUAsmParser()
-  llvm.LLVMInitializeAMDGPUDisassembler()
-  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, None, None)
-
-  image, sections, relocs = elf_loader(lib)
-  text = next((sh.header for sh in sections if sh.name == ".text"), None)
-  off, sz = unwrap(text).sh_addr, unwrap(text).sh_size
-
-  addr_table:dict[int, tuple[str, int]] = {}
-  out = ctypes.create_string_buffer(128)
-  cur_off = off
-  while cur_off < sz + off:
-    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
-    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
-    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
-    cur_off += instr_sz
-  return addr_table
+from tinygrad.runtime.ops_amd import ProfileSQTTEvent
+from tinygrad.runtime.autogen import rocprof
 
 @dataclasses.dataclass(frozen=True)
 class InstExec:
@@ -46,9 +22,7 @@ class WaveSlot:
   @property
   def cu_loc(self) -> str: return f"SE:{self.se} CU:{self.cu}"
   @property
-  def simd_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd}"
-  @property
-  def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
+  def wave_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd} W:{self.wave_id}"
 
 @dataclasses.dataclass(frozen=True)
 class WaveExec(WaveSlot):
@@ -70,16 +44,10 @@ class OccEvent(WaveSlot):
 RunKey = tuple[str, int]
 
 class _ROCParseCtx:
-  def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
-    self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
-    self.disasms:dict[str, dict[int, tuple[str, int]]] = {}
+  def __init__(self, sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[str, int]]]):
+    self.sqtt_evs, self.disasms = iter(sqtt_evs), disasms
     self.inst_execs:dict[RunKey, list[WaveExec]] = {}
     self.occ_events:dict[RunKey, list[OccEvent]] = {}
-
-    for prog in prog_evs:
-      arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
-      base = unwrap(prog.base)
-      self.disasms[prog.name] = asm = {base+addr:info for addr,info in llvm_disasm(arch, unwrap(prog.lib)).items()}
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
@@ -103,16 +71,8 @@ class _ROCParseCtx:
     self.inst_execs.setdefault(unwrap(self.active_run), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
                                                                              ev.end_time, insts_blob))
 
-def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
-  dev_events:dict[str, ProfileDeviceEvent] = {}
-  sqtt_events:list[ProfileSQTTEvent] = []
-  prog_events:list[ProfileProgramEvent] = []
-  for e in profile:
-    if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
-    if isinstance(e, ProfileSQTTEvent): sqtt_events.append(e)
-    if isinstance(e, ProfileProgramEvent) and e.device.startswith("AMD"): prog_events.append(e)
-
-  ROCParseCtx = _ROCParseCtx(dev_events, sqtt_events, prog_events)
+def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[str, int]]]) -> _ROCParseCtx:
+  ROCParseCtx = _ROCParseCtx(sqtt_evs, disasms)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
   def copy_cb(buf, buf_size, _):
@@ -151,28 +111,59 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
+  exc:Exception|None = None
   def worker():
+    nonlocal exc
     try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-    except AttributeError as e: raise RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install") from e
+    except AttributeError as e:
+      exc = RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install")
+      exc.__cause__ = e
   (t:=threading.Thread(target=worker, daemon=True)).start()
   t.join()
+  if exc is not None:
+    raise exc
   return ROCParseCtx
 
-def print_pmc(events:list[ProfilePMCEvent]) -> None:
-  from tinygrad.viz.serve import unpack_pmc
+def print_data(data:dict) -> None:
   from tabulate import tabulate
-  for e in events:
-    print("**", e.kern)
-    data = unpack_pmc(e)
-    print(tabulate([r[:-1] for r in data["rows"]], headers=data["cols"], tablefmt="github"))
+  # plaintext
+  if "src" in data: print(data["src"])
+  # table format
+  elif "cols" in data:
+    print(tabulate([r[:len(data["cols"])] for r in data["rows"]], headers=data["cols"], tablefmt="github"))
 
-if __name__ == "__main__":
+def main() -> None:
+  import tinygrad.viz.serve as viz
+  viz.ctxs = []
+
   parser = argparse.ArgumentParser()
-  parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--profile', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
+                      default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--kernel', type=str, default=None, metavar="NAME", help='Kernel to focus on (optional name, default: all kernels)')
+  parser.add_argument('-n', type=int, default=3, metavar="NUM", help='Max traces to print (optional number, default: 3 traces)')
   args = parser.parse_args()
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
-  rctx = decode(profile)
-  print('SQTT:', rctx.inst_execs.keys())
 
-  print_pmc([ev for ev in profile if isinstance(ev, ProfilePMCEvent)])
+  viz.get_profile(profile)
+
+  # List all kernels
+  if args.kernel is None:
+    for c in viz.ctxs:
+      print(c["name"])
+      for s in c["steps"]: print("  "+s["name"])
+    return None
+
+  # Find kernel trace
+  trace = next((c for c in viz.ctxs if c["name"] == f"Exec {args.kernel}"), None)
+  if not trace: raise RuntimeError(f"no matching trace for {args.kernel}")
+  n = 0
+  for s in trace["steps"]:
+    print(s["name"])
+    data = viz.get_render(s["query"])
+    print_data(data)
+    n += 1
+    if n > args.n: break
+
+if __name__ == "__main__":
+  main()
