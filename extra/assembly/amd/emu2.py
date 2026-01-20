@@ -19,8 +19,7 @@ def _set_daz_ftz():
 _set_daz_ftz()
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, graph_rewrite, PatternMatcher
 from tinygrad.dtype import dtypes
-from tinygrad.codegen import get_program, pm_to_program
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.codegen import get_program
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEBUG, colored
@@ -853,45 +852,64 @@ def compile_inst(data: bytes) -> tuple[str, UOp]:
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@functools.cache
-def _compile_single_inst(inst_bytes: bytes) -> tuple[str, ProgramSpec, CompiledRunner]:
-  """Compile a single instruction to a ProgramSpec and CompiledRunner. Cached by instruction bytes."""
-  name, sink = compile_inst(inst_bytes)
-  # NOTE: CPU_LLVM breaks test_v_rsq_f32_large and test_v_cos_f32_quarter
-  with Context(NOOPT=1): #, CPU_LLVM=1):
-    prg = get_program(sink, Device['CPU'].renderer)
-    runner = CompiledRunner(prg)
-  return name, prg, runner
+from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.runtime.support.elf import jit_loader, elf_symbol_offsets
+from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+from tinygrad.runtime.ops_cpu import CPUProgram
+
+_emu_renderer = ClangRenderer()  # renderer without compiler - get_program stops after render
+_emu_compiler = ClangJITCompiler()  # compiler for batch compilation
 
 @functools.cache
-def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, list[int]|None, CompiledRunner|None]]:
-  """Decode program to {pc: (name, fxn, globals, runner)}. Runner is kept alive to prevent fxn memory from being freed."""
-  result = {}
+def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
+  """Get ProgramSpec for an instruction (source only, no binary). Cached by instruction bytes."""
+  name, sink = compile_inst(inst_bytes)
+  with Context(NOOPT=1):
+    return get_program(sink, _emu_renderer)
+
+@functools.cache
+def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, list[int]|None, object]]:
+  """Decode program to {pc: (name, fxn, globals, lib_holder)}. lib_holder keeps compiled code alive."""
+
+  # Phase 1: Collect all instruction sources
+  inst_info: list[tuple[int, ProgramSpec]] = []  # (pc, prg)
   i = 0
   while i < len(data):
     inst = decode_inst(data[i:])
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
-
     try:
-      name, prg, runner = _compile_single_inst(bytes(data[i:i + inst.size() + 4]))
-      fxn = runner._prg.fxn  # Extract raw ctypes function for direct calls (bypasses HCQ overhead)
-      globals_list = prg.globals
+      prg = _get_inst_prg(bytes(data[i:i + inst.size() + 4]))
+      inst_info.append((i // 4, prg))
       if DEBUG >= 2:
-        try:
-          inst_str = repr(inst)
-        except Exception:
-          inst_str = f"<{type(inst).__name__} at PC={i//4}>"
+        try: inst_str = repr(inst)
+        except Exception: inst_str = f"<{type(inst).__name__} at PC={i//4}>"
         print(f"[emu2] PC={i//4}: {inst_str}\n{colored(prg.src, 'BLACK')}")
     except Exception as e:
-      try:
-        inst_str = repr(inst)
-      except Exception:
-        inst_str = f"<{type(inst).__name__}>"
+      try: inst_str = repr(inst)
+      except Exception: inst_str = f"<{type(inst).__name__}>"
       raise RuntimeError(f"[emu2] Failed to compile PC={i//4} {inst_str}: {type(e).__name__}: {e}") from e
-
-    result[i // 4] = (name, fxn, globals_list, runner)
     i += inst.size()
-  return result
+
+  if not inst_info: return {}
+
+  # Phase 2: Batch compile - concatenate unique sources, single clang call
+  seen_funcs: set[str] = set()
+  combined_src_parts: list[str] = []
+  for pc, prg in inst_info:
+    if prg.function_name not in seen_funcs:
+      seen_funcs.add(prg.function_name)
+      combined_src_parts.append(prg.src)
+
+  obj = _emu_compiler.compile_to_obj("\n".join(combined_src_parts))
+  sym_offsets = elf_symbol_offsets(obj)
+
+  # Phase 3: Map library into executable memory using CPUProgram
+  cpu_prg = CPUProgram(Device['CPU'], "emu2_batch", jit_loader(obj))
+  base_addr = ctypes.cast(cpu_prg.fxn, ctypes.c_void_p).value
+
+  # Phase 4: Build result dict with function pointers
+  return {pc: (prg.function_name, ctypes.CFUNCTYPE(None)(base_addr + sym_offsets.get(prg.function_name, 0)), prg.globals, cpu_prg)
+          for pc, prg in inst_info}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WAVE STATE
