@@ -1,8 +1,11 @@
-import ctypes, time
+import ctypes, time, os
 from test.mockgpu.gpu import VirtGPU
 from test.mockgpu.helpers import _try_dlopen_remu
 from tinygrad.helpers import getbits, to_mv
 from tinygrad.runtime.support import c
+
+MOCKGPU_ARCH = os.environ.get("MOCKGPU_ARCH", "rdna3")
+GFX_TARGET_VERSION = {"rdna3": 110000, "rdna4": 120000}[MOCKGPU_ARCH]
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4
 
 SDMA_MAX_COPY_SIZE = 0x400000
@@ -182,8 +185,22 @@ class PM4Executor(AMDQueue):
     lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
     rsrc2 = self.gpu.regs[regCOMPUTE_PGM_RSRC2]
 
-    # Read private_segment_fixed_size from kernel descriptor (64 bytes before prg_addr, offset 4)
-    scratch_size = to_mv(prg_addr - 64 + 4, 4).cast('I')[0]
+    # Find kernel descriptor by searching backwards from program address
+    # The KD's kernel_code_entry_byte_offset (int64 at offset 16) tells us the distance to the code
+    import os
+    scratch_size = 0
+    for search_offset in range(64, 8192, 64):  # KD must be 64-byte aligned, search up to 8KB back
+      kd_addr = prg_addr - search_offset
+      kd_entry_offset = to_mv(kd_addr + 16, 8).cast('q')[0]  # kernel_code_entry_byte_offset is int64 at offset 16
+      if kd_entry_offset == search_offset:
+        scratch_size = to_mv(kd_addr + 4, 4).cast('I')[0]  # private_segment_fixed_size at offset 4
+        if os.environ.get("DEBUG_KD"):
+          kd = to_mv(kd_addr, 64)
+          print(f"KD found at {kd_addr:#x} (offset {search_offset}): {bytes(kd).hex()}")
+          print(f"  private_segment_fixed_size (offset 4): {scratch_size}")
+        break
+    else:
+      if os.environ.get("DEBUG_KD"): print(f"KD not found searching back from {prg_addr:#x}")
 
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
@@ -197,10 +214,11 @@ class PM4Executor(AMDQueue):
     scratch_size = wavesize * 4  # approximate private_segment_size per lane
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    # Pass valid memory ranges, rsrc2, and scratch_size to Python emulator
+    # Pass valid memory ranges, rsrc2, scratch_size and arch to Python emulator
     if hasattr(remu, 'valid_mem_ranges'): remu.valid_mem_ranges = self.gpu.mapped_ranges
     if hasattr(remu, 'rsrc2'): remu.rsrc2 = rsrc2
     if hasattr(remu, 'scratch_size'): remu.scratch_size = scratch_size
+    if hasattr(remu, 'arch'): remu.arch = self.gpu.arch
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
@@ -317,6 +335,7 @@ class AMDGPU(VirtGPU):
     self.regs = AMDGPURegisters()
     self.mapped_ranges = set()
     self.queues = []
+    self.arch = MOCKGPU_ARCH
 
   def map_range(self, vaddr, size): self.mapped_ranges.add((vaddr, size))
   def unmap_range(self, vaddr, size): self.mapped_ranges.remove((vaddr, size))
@@ -345,7 +364,7 @@ simd_arrays_per_engine 2
 cu_per_simd_array 8
 simd_per_cu 2
 max_slots_scratch_cu 32
-gfx_target_version 110000
+gfx_target_version {gfx_target_version}
 vendor_id 4098
 device_id 29772
 location_id 34304
