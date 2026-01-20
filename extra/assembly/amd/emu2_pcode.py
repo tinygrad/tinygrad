@@ -13,7 +13,10 @@ def _u32(v): return _const(dtypes.uint32, v)
 def _u64(v): return _const(dtypes.uint64, v)
 def _to_u32(v): return v if v.dtype == dtypes.uint32 else v.bitcast(dtypes.uint32) if v.dtype.itemsize == 4 else v.cast(dtypes.uint32)
 def _to_bool(v): return v if v.dtype == dtypes.bool else v.ne(_const(v.dtype, 0))
-def _cast_to(v, dt): return v if v.dtype == dt else v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
+def _cast_to(v, dt):
+  if v.dtype == dt: return v
+  if dt == dtypes.half: return v.cast(dtypes.uint16).bitcast(dtypes.half)  # half needs uint16 intermediate
+  return v.cast(dt) if dt.itemsize != v.dtype.itemsize else v.bitcast(dt)
 def _try_eval(expr):
   try: return str(eval(expr)) if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()) else expr
   except: return expr
@@ -397,18 +400,12 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     hi, lo = first, second
     if lo >= val.dtype.itemsize * 8 and f'{var}{lo // 32}' in vars: val, lo, hi = vars[f'{var}{lo // 32}'], lo % 32, (hi % 32) + (lo % 32)
     result = _extract_bits(val, hi, lo)
-    if ts:
-      dt = DTYPES.get(ts, dtypes.uint32)
-      return result.cast(dtypes.uint16).bitcast(dtypes.half) if dt == dtypes.half else _cast_to(result, dt)
-    return result
+    return _cast_to(result, DTYPES.get(ts, dtypes.uint32)) if ts else result
 
   # Array bit slice
   if (m := re.match(r'([a-zA-Z_]\w*)\{(\d+)\}\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?$', expr)):
     result = _extract_bits(vars.get(f'{m.group(1)}{m.group(2)}', _u32(0)), int(m.group(3)), int(m.group(4)))
-    if m.group(5):
-      dt = DTYPES.get(m.group(5), dtypes.uint32)
-      return result.cast(dtypes.uint16).bitcast(dtypes.half) if dt == dtypes.half else _cast_to(result, dt)
-    return result
+    return _cast_to(result, DTYPES.get(m.group(5), dtypes.uint32)) if m.group(5) else result
 
   # Verilog-style
   if (m := re.match(r"([a-zA-Z_]\w*)\.(\w+)\[(.+?)\s*\+:\s*(?:\d+')?(\d+)U?\]", expr)):
@@ -709,19 +706,19 @@ def _register_funcs():
     return (bits & exp_m).eq(_const(bits.dtype, 0)) & (bits & mant_m).ne(_const(bits.dtype, 0))
   _FUNC_TABLE.append((r'isDENORM\((.+)\)', 1, _is_denorm))
 
+  _EXP_BITS = {10: 0x1F, 23: 0xFF, 52: 0x7FF}  # exponent bit masks by shift
+  def _get_exp(bits, shift): return ((bits >> _const(bits.dtype, shift)) & _const(bits.dtype, _EXP_BITS[shift])).cast(dtypes.int)
+
   def _exponent(a, v, m):
     bits, _, _, _, shift = _float_info(a[0], m.group(1))
-    exp_bits = {10: 0x1F, 23: 0xFF, 52: 0x7FF}[shift]
-    return ((bits >> _const(bits.dtype, shift)) & _const(bits.dtype, exp_bits)).cast(dtypes.int)
+    return _get_exp(bits, shift)
   _FUNC_TABLE.append((r'exponent\((.+)\)', 1, _exponent))
 
   def _div_would_be_denorm(a, v, m):
     bits_n, _, _, _, shift = _float_info(a[0], m.group(0))
     bits_d, _, _, _, _ = _float_info(a[1], m.group(0))
-    exp_bits, min_exp = {10: (0x1F, -14), 23: (0xFF, -126), 52: (0x7FF, -1022)}[shift]
-    exp_n = ((bits_n >> _const(bits_n.dtype, shift)) & _const(bits_n.dtype, exp_bits)).cast(dtypes.int)
-    exp_d = ((bits_d >> _const(bits_d.dtype, shift)) & _const(bits_d.dtype, exp_bits)).cast(dtypes.int)
-    return (exp_n - exp_d) < _const(dtypes.int, min_exp)
+    min_exp = {10: -14, 23: -126, 52: -1022}[shift]
+    return (_get_exp(bits_n, shift) - _get_exp(bits_d, shift)) < _const(dtypes.int, min_exp)
   _FUNC_TABLE.append((r'divWouldBeDenorm\((.+),\s*(.+)\)', 2, _div_would_be_denorm))
 
   def _sign(a, v, m):
