@@ -256,11 +256,10 @@ class LNXPCIIfaceBase:
 class RemoteCmd(enum.IntEnum): MAP_BAR, MAP_SYSMEM_FD, CFG_READ, CFG_WRITE, RESET, MMIO_READ, MMIO_WRITE = 1, 2, 3, 4, 5, 6, 7
 
 class RemotePCIDevice(PCIDevice):
-  def __init__(self, devpref:str, pcibus:str, bars:list[int], sock):
+  def __init__(self, devpref:str, pcibus:str, bars:list[int], sock:socket.socket):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.sock = pcibus, sock
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 64 << 20)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 64 << 20)
+    for buft in [socket.SO_SNDBUF, socket.SO_RCVBUF]: self.sock.setsockopt(socket.SOL_SOCKET, buft, 64 << 20)
     self.bar_info = {b: PCIBarInfo(0, self._rpc(RemoteCmd.MAP_BAR, b)[0]) for b in bars}
 
   def _recvall(self, n:int) -> bytes:
