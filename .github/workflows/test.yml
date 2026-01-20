@@ -229,8 +229,6 @@ jobs:
         deps: linting
     - name: Lint bad-indentation and trailing-whitespace with pylint
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
-    - name: Run pre-commit hooks
-      run: IGNORE_OOB=1 pre-commit run --all-files
     - name: Lint additional files with ruff
       run: |
         python3 -m ruff check examples/mlperf/ --ignore E501
@@ -254,10 +252,12 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: unittest-12
-        pydeps: "pillow numpy ftfy regex"
+        key: unittest-13
+        pydeps: "pillow numpy ftfy regex pre-commit"
         deps: testing_unit
         llvm: 'true'
+    - name: Run pre-commit hooks
+      run: pre-commit run --all-files
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
