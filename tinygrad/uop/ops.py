@@ -889,8 +889,8 @@ def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # skip over ops.py and anything in mixin
   while frm.f_back is not None and not frm.f_back.f_code.co_filename.startswith("<frozen"):
-    fn = frm.f_code.co_filename
-    if not (fn.endswith("ops.py") or "/mixin/" in fn or "\\mixin\\" in fn): break
+    fn = frm.f_code.co_filename.replace("\\", "/")
+    if not (fn.endswith("/ops.py") or "/mixin/" in fn): break
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
