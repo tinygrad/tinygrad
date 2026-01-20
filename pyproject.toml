@@ -55,6 +55,8 @@ linting = [
   "ruff==0.14.10",
   "numpy",
   "typeguard",
+  "pytest",
+  "pytest-xdist",
 ]
 # mlperf = [
 #   "mlperf-logging @ git+https://github.com/mlperf/logging.git@5.0.0-rc3",
