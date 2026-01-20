@@ -93,7 +93,10 @@ def _op_name(inst) -> str:
   if hasattr(inst, 'opx'): return f"{inst.opx.name}_{inst.opy.name}"  # VOPD has opx/opy not op
   return inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
 def _is_64bit_dest(dest: str) -> bool: return any(dest.endswith(x) for x in ('.b64', '.u64', '.i64', '.f64'))
-def _to_u32(val: UOp) -> UOp: return val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
+def _to_u32(val: UOp) -> UOp:
+  if val.dtype == dtypes.uint32: return val
+  if val.dtype.itemsize == 4: return val.bitcast(dtypes.uint32)  # same size: bitcast (float32->uint32)
+  return val.cast(dtypes.uint32)  # different size: cast (bool, int16, etc)
 def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & U32_1).ne(U32_0)
 def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp:
   return (val >> U32_16) & _c(0xFFFF) if opsel & (1 << sel_bit) else val
@@ -453,6 +456,8 @@ def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   else:
     srcs = {'S0': rsrc_sz(inst.ssrc0.offset, 'ssrc0')}
     if hasattr(inst, 'ssrc1'): srcs['S1'] = rsrc_sz(inst.ssrc1.offset, 'ssrc1')
+    # SOP2 instructions like s_fmamk_f32 use SIMM32 literal
+    if ctx.literal: srcs['SIMM32'] = UOp.const(dtypes.uint32, ctx.literal)
     dst_reg, dst_size = (0, 0) if isinstance(inst, SOPC) else (inst.sdst.offset, sizes.get('sdst', 1))
   pcode_result = compile_sop_pcode(inst.op, srcs, ctx.wsgpr, ctx.rsgpr, dst_reg, dst_size, ctx.inc_pc, name)
   assert pcode_result is not None, f"no pcode for {type(inst).__name__}: {inst.op.name}"

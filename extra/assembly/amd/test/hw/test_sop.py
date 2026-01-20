@@ -62,6 +62,28 @@ class TestBasicScalar(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[1], 0x80000000)
 
+  def test_s_fmamk_f32(self):
+    """S_FMAMK_F32: D = S0 * literal + S1."""
+    # 2.0 * 3.0 + 1.0 = 7.0
+    instructions = [
+      s_mov_b32(s[0], f2i(2.0)),
+      s_mov_b32(s[1], f2i(1.0)),
+      s_fmamk_f32(s[2], s[0], s[1], literal=f2i(3.0)),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], f2i(7.0))
+
+  def test_s_fmamk_f32_negative(self):
+    """S_FMAMK_F32 with negative values."""
+    # -2.0 * 4.0 + 10.0 = 2.0
+    instructions = [
+      s_mov_b32(s[0], f2i(-2.0)),
+      s_mov_b32(s[1], f2i(10.0)),
+      s_fmamk_f32(s[2], s[0], s[1], literal=f2i(4.0)),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], f2i(2.0))
+
 
 class TestQuadmaskWqm(unittest.TestCase):
   """Tests for S_QUADMASK_B32 and S_WQM_B32."""
