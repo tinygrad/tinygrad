@@ -136,6 +136,8 @@ class _System:
 
 System = _System()
 
+# *** PCI Devices
+
 class PCIDevice:
   def __init__(self, devpref:str, pcibus:str, bars:list[int], resize_bars:list[int]|None=None):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
@@ -253,7 +255,28 @@ class LNXPCIIfaceBase:
 
     self.dev_impl.mm.map_range(int(b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
 
+# *** Remote PCI Devices
+
 class RemoteCmd(enum.IntEnum): MAP_BAR, MAP_SYSMEM_FD, CFG_READ, CFG_WRITE, RESET, MMIO_READ, MMIO_WRITE = 1, 2, 3, 4, 5, 6, 7
+
+class RemoteMMIOInterface(MMIOInterface):
+  def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', off=0):
+    self.dev, self.residx, self.nbytes, self.fmt, self.off, self.el_sz = dev, residx, nbytes, fmt, off, struct.calcsize(fmt)
+
+  def __getitem__(self, index):
+    sl = index if isinstance(index, slice) else slice(index, index + 1)
+    start, stop = (sl.start or 0) * self.el_sz, (sl.stop or len(self)) * self.el_sz
+    data = self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.off + start, stop - start)
+    result = data if self.fmt == 'B' else list(struct.unpack(f'<{(stop - start) // self.el_sz}{self.fmt}', data))
+    return result if isinstance(index, slice) else result[0]
+
+  def __setitem__(self, index, val):
+    start = (index.start or 0) * self.el_sz if isinstance(index, slice) else index * self.el_sz
+    data = (val if self.fmt == 'B' else struct.pack(f'<{len(val)}{self.fmt}', *val)) if isinstance(index, slice) else struct.pack(f'<{self.fmt}', val)
+    self.dev._bulk_write(RemoteCmd.MMIO_WRITE, self.residx, self.off + start, data)
+
+  def view(self, offset:int=0, size:int|None=None, fmt=None):
+    return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.off + offset)
 
 class RemotePCIDevice(PCIDevice):
   def __init__(self, devpref:str, pcibus:str, bars:list[int], sock:socket.socket):
@@ -294,25 +317,6 @@ class RemotePCIDevice(PCIDevice):
   def reset(self): self._rpc(RemoteCmd.RESET, 0, 0, 0)
   def map_bar(self, bar:int, off:int=0, addr:int=0, size:int|None=None, fmt='B') -> MMIOInterface:
     return RemoteMMIOInterface(self, bar, size or self.bar_info[bar].size, fmt).view(off, size, fmt)
-
-class RemoteMMIOInterface(MMIOInterface):
-  def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', off=0):
-    self.dev, self.residx, self.nbytes, self.fmt, self.off, self.el_sz = dev, residx, nbytes, fmt, off, struct.calcsize(fmt)
-
-  def __getitem__(self, index):
-    sl = index if isinstance(index, slice) else slice(index, index + 1)
-    start, stop = (sl.start or 0) * self.el_sz, (sl.stop or len(self)) * self.el_sz
-    data = self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.off + start, stop - start)
-    result = data if self.fmt == 'B' else list(struct.unpack(f'<{(stop - start) // self.el_sz}{self.fmt}', data))
-    return result if isinstance(index, slice) else result[0]
-
-  def __setitem__(self, index, val):
-    start = (index.start or 0) * self.el_sz if isinstance(index, slice) else index * self.el_sz
-    data = (val if self.fmt == 'B' else struct.pack(f'<{len(val)}{self.fmt}', *val)) if isinstance(index, slice) else struct.pack(f'<{self.fmt}', val)
-    self.dev._bulk_write(RemoteCmd.MMIO_WRITE, self.residx, self.off + start, data)
-
-  def view(self, offset:int=0, size:int|None=None, fmt=None):
-    return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.off + offset)
 
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
