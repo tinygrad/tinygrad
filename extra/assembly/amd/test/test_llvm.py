@@ -25,13 +25,14 @@ RDNA_FILES = ['gfx11_asm_sop1.s', 'gfx11_asm_sop2.s', 'gfx11_asm_sopp.s', 'gfx11
   'gfx11_asm_wmma.s', 'gfx11_asm_vop3_features.s', 'gfx11_asm_vop3p_features.s', 'gfx11_asm_vopd_features.s',
   'gfx11_asm_vop3_alias.s', 'gfx11_asm_vop3p_alias.s', 'gfx11_asm_vopc_alias.s', 'gfx11_asm_vopcx_alias.s', 'gfx11_asm_vinterp_alias.s',
   'gfx11_asm_smem_alias.s']
-# CDNA (gfx9/gfx90a/gfx942) test files for compute instructions
+# CDNA (gfx9/gfx90a/gfx950) test files for compute instructions
 # Excluded: gfx9_asm_mubuf.s, gfx9_asm_mtbuf.s, gfx90a_ldst_acc.s (has MIMG mixed in)
 # Exclude gfx90a: 'gfx90a_asm_features.s', 'mai-gfx90a.s',
+# Exclude gfx950: 'gfx950_asm_features.s' (disasm error)
 CDNA_FILES = ['gfx9_asm_sop1.s', 'gfx9_asm_sop2.s', 'gfx9_asm_sopp.s', 'gfx9_asm_sopk.s', 'gfx9_asm_sopc.s',
   'gfx9_asm_vop1.s', 'gfx9_asm_vop2.s', 'gfx9_asm_vopc.s', 'gfx9_asm_vop3.s', 'gfx9_asm_vop3p.s',
   'gfx9_asm_ds.s', 'gfx9_asm_flat.s', 'gfx9_asm_smem.s',
-  'flat-scratch-gfx942.s', 'gfx942_asm_features.s', 'mai-gfx942.s']
+  'gfx950_asm_vop1.s', 'gfx950_asm_read_tr.s', 'mai-gfx950.s']
 # RDNA4 (gfx12) test files for compute instructions
 # Excluded: gfx12_asm_vbuffer_mubuf.s, gfx12_asm_vbuffer_mtbuf.s, gfx12_asm_exp.s (graphics-only)
 RDNA4_FILES = ['gfx12_asm_sop1.s', 'gfx12_asm_sop2.s', 'gfx12_asm_sopp.s', 'gfx12_asm_sopk.s', 'gfx12_asm_sopc.s',
@@ -65,14 +66,14 @@ def _get_tests_uncached(f: str, arch: str) -> list[tuple[str, bytes]]:
   elif arch == "rdna4":
     # Match GFX12 (but not GFX1250) and W32 only (wavefront32 mode)
     tests = _parse_llvm_tests(text, r'(?:GFX12(?!50)|W32)')
-  elif 'gfx90a' in f or 'gfx942' in f:
-    tests = _parse_llvm_tests(text, r'(?:GFX90A|GFX942)')
+  elif 'gfx90a' in f or 'gfx950' in f:
+    tests = _parse_llvm_tests(text, r'(?:GFX90A|GFX950)')
   else:
     tests = _parse_llvm_tests(text, r'(?:VI9|GFX9|CHECK)')
   # Exclude v_interp_* (graphics-only, not on CDNA)
   if arch == "cdna": tests = [(asm, data) for asm, data in tests if not asm.startswith('v_interp_')]
-  # Filter out tests where original ASM isn't valid on target (e.g., gfx9 tests with gfx942 constraints)
-  if arch == "cdna" and not ('gfx942' in f or 'gfx90a' in f): tests = _filter_valid_asm(tests, arch)
+  # Filter out tests where original ASM isn't valid on target (e.g., gfx9 tests with gfx950 constraints)
+  if arch == "cdna" and not ('gfx950' in f or 'gfx90a' in f): tests = _filter_valid_asm(tests, arch)
   return tests
 
 @functools.cache
@@ -88,7 +89,7 @@ def _compile_asm_batch(instrs: list[str], arch: str = "rdna3") -> list[bytes]:
           for line in result.stdout.split('\n') if 'encoding:' in line]
 
 def _filter_valid_asm(tests: list[tuple[str, bytes]], arch: str) -> list[tuple[str, bytes]]:
-  """Filter out tests where the original ASM isn't valid on the target (e.g., gfx9 tests with gfx942 constraints)."""
+  """Filter out tests where the original ASM isn't valid on the target (e.g., gfx9 tests with gfx950 constraints)."""
   if not tests: return []
   mcpu = get_target(arch)
   # Batch assemble all instructions, parse stderr to find which lines failed

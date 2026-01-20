@@ -21,7 +21,7 @@ NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOP3_SDST_ENC_LIT": "VOP3SD_LIT", "VOP3_
 FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"}, "FLAT": {55: "FLAT_ATOMIC_CSUB_U32"}},
          "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}},
          "cdna": {"DS": {152: "DS_GWS_SEMA_RELEASE_ALL", 154: "DS_GWS_SEMA_V", 156: "DS_GWS_SEMA_P"},
-                  "VOP3P": {62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
+                  "VOP3P": {44: "V_MFMA_LD_SCALE_B32", 62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
 _ENC_SUFFIXES = ("_NSA1",)
 # Encoding suffix to class suffix mapping (for variants we DO generate)
@@ -93,7 +93,9 @@ def parse_xml(filename: str):
               for f in enc.findall(".//MicrocodeFormat/BitMap/Field") if f.find("BitLayout/Range") is not None]
     ident = (enc.findall("EncodingIdentifiers/EncodingIdentifier") or [None])[0]
     enc_field = next((f for f in fields if f[0] == "encoding"), None)
-    enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1], enc_field[2]-1, -1)) if ident is not None and enc_field else None
+    # VOP3PX2 is 128-bit but identifier pattern is at [31:23] (VOP3P encoding in dword0), not at ENCODING field [95:87]
+    enc_bits_pos = (31, 23) if "VOP3PX2" in name and enc_field and enc_field[1] > 63 else (enc_field[1], enc_field[2]) if enc_field else (0, 0)
+    enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_bits_pos[0], enc_bits_pos[1]-1, -1)) if ident is not None and enc_field else None
     base_name = _strip_enc(name)
     encodings[NAME_MAP.get(base_name, base_name)] = (fields, enc_bits)
   # Extract instruction opcodes and operand info

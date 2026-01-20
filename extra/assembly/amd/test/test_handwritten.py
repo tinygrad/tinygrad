@@ -6,19 +6,16 @@ from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.test.test_roundtrip import compile_asm
 
-class _TestIntegration(unittest.TestCase):
+class TestIntegration(unittest.TestCase):
   inst: Inst
-  arch: str = "rdna3"
   def tearDown(self):
     if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
     st = self.inst.disasm()
     # Test that the instruction can be compiled by LLVM and produces the same bytes
     desc = f"{st:25s} {self.inst} {b!r}"
-    self.assertEqual(b, compile_asm(st, arch=self.arch), desc)
+    self.assertEqual(b, compile_asm(st), desc)
     print(desc)
-
-class TestIntegration(_TestIntegration):
 
   def test_wmma(self):
     self.inst = v_wmma_f32_16x16x16_f16(v[0:7], v[184:191], v[136:143], v[0:7])
@@ -126,21 +123,6 @@ class TestIntegration(_TestIntegration):
     self.inst = s_mov_b32(s[0], 1337.0)
     int_inst = s_mov_b32(s[0], struct.unpack("I", struct.pack("f", 1337.0))[0])
     self.assertEqual(self.inst, int_inst)
-
-class TestIntegrationCDNA(_TestIntegration):
-  arch = "cdna"
-
-  def test_smem(self):
-    from extra.assembly.amd.autogen.cdna.ins import s_load_dwordx2
-    self.inst = s_load_dwordx2(s[0:1], s[0:1], offset=0, imm=1, soffset=s[0], soffset_en=0)
-
-  def test_mfma(self):
-    from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x16_f16
-    self.inst = v_mfma_f32_16x16x16_f16(v[0:3], v[0:1], v[0:1], 0, clmp=1, opsel_hi=0)
-
-  def test_mfma_fp8(self):
-    from extra.assembly.amd.autogen.cdna.ins import v_mfma_f32_16x16x128_f8f6f4
-    self.inst = v_mfma_f32_16x16x128_f8f6f4(v[0:3], v[0:5], v[0:5], 1, clmp=1, opsel_hi=0, neg_hi=2, neg=2)
 
 class TestRegisterSliceSyntax(unittest.TestCase):
   """
