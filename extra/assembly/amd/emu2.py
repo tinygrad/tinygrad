@@ -85,8 +85,8 @@ VOPD_TO_VOP2 = {
   VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
 }
 WAVE_SIZE = 32
-PC_LO_IDX, PC_HI_IDX, SCC_IDX = 128, 129, 130
-SGPR_COUNT, VGPR_SIZE = 131, 256 * 32
+PC_LO_IDX, PC_HI_IDX, SCC_IDX, SCRATCH_STRIDE_IDX = 128, 129, 130, 131
+SGPR_COUNT, VGPR_SIZE = 132, 256 * 32
 
 def _is_16bit_op(op_name: str) -> bool: return any(x in op_name for x in ('B16', 'F16', 'I16', 'U16'))
 def _op_name(inst) -> str:
@@ -350,15 +350,13 @@ def compile_ds_pcode(op, inst, lane: UOp, rvgpr_fn, wvgpr_fn, lds: UOp, exec_mas
   return name, UOp.sink(UOp.sink(*stores).end(lane), inc_pc_fn(), arg=KernelInfo(name=name))
 
 # Buffers: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
-SCRATCH_PER_LANE = 0x10000  # 64KB per lane
-SCRATCH_SIZE = WAVE_SIZE * SCRATCH_PER_LANE  # Total scratch size
 
 def _define_bufs():
   sgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
   vgpr = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(VGPR_SIZE), arg=1)
   vmem = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(1 << 46), arg=2)
   lds = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(16384), arg=3)
-  scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(SCRATCH_SIZE), arg=4)
+  scratch = UOp(Ops.DEFINE_GLOBAL, dtypes.uint8.ptr(1 << 30), arg=4)
   return sgpr, vgpr, vmem, lds, scratch
 
 def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
@@ -803,9 +801,10 @@ def _compile_flat_global_scratch(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   is_scratch = isinstance(inst, SCRATCH)
 
   def make_addr(lane: UOp) -> UOp:
-    # SCRATCH: byte index into scratch buffer = lane * scratch_per_lane + vgpr[addr] + sgpr[saddr] + offset
+    # SCRATCH: byte index into scratch buffer = lane * scratch_stride + vgpr[addr] + sgpr[saddr] + offset
     if is_scratch:
-      base = lane.cast(dtypes.uint64) * UOp.const(dtypes.uint64, SCRATCH_PER_LANE)
+      scratch_stride = ctx.rsgpr(SCRATCH_STRIDE_IDX).cast(dtypes.uint64)
+      base = lane.cast(dtypes.uint64) * scratch_stride
       addr_offset = ctx.rvgpr(addr_reg, lane).cast(dtypes.uint64)
       if has_saddr: addr_offset = addr_offset + ctx.rsgpr(inst.saddr.offset).cast(dtypes.uint64)
       return base + addr_offset + UOp.const(dtypes.uint64, offset)
@@ -981,8 +980,9 @@ def _get_vmem_buf() -> Buffer:
     _vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
   return _vmem_buf
 
-def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c) -> int:
-  """Execute AMD assembly program."""
+def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
+            scratch_size: int = 0) -> int:
+  """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
   data = bytes((ctypes.c_char * lib_sz).from_address(lib).raw)
   program = decode_program(data)
 
@@ -991,7 +991,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
   vmem_buf = _get_vmem_buf()
   lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-  scratch_buf = Buffer('CPU', SCRATCH_SIZE, dtypes.uint8).ensure_allocated()
+  scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
   for gidz in range(gz):
     for gidy in range(gy):
@@ -1016,9 +1016,13 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             z, y, x = tid // (lx * ly), (tid // lx) % ly, tid % lx
             st._write_vgpr(0, lane, (z << 20) | (y << 10) | x)
 
+          # scratch stride in secret SGPR (private_segment_fixed_size from kernel descriptor)
+          st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
+
           # Execute wave: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
           # Pre-compute buffer addresses for direct ctypes calls (avoids per-instruction Buffer overhead)
-          buf_addrs = {0: st.sgpr_buf._buf.va_addr, 1: st.vgpr_buf._buf.va_addr, 2: vmem_buf._buf.va_addr, 3: lds_buf._buf.va_addr, 4: scratch_buf._buf.va_addr}
+          buf_addrs = {0: st.sgpr_buf._buf.va_addr, 1: st.vgpr_buf._buf.va_addr, 2: vmem_buf._buf.va_addr, 3: lds_buf._buf.va_addr}
+          if scratch_buf: buf_addrs[4] = scratch_buf._buf.va_addr
           max_instructions = 1_000_000
           inst_count = 0
           while True:
@@ -1029,6 +1033,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             if fxn is None:
               if DEBUG >= 1: print(f"[emu2] No fxn for {name} at PC={pc}")
               break
+
+            # Assert scratch buffer exists if instruction uses it
+            assert 4 not in globals_list or scratch_buf is not None, f"SCRATCH instruction {name} but scratch_size=0"
 
             # Direct ctypes call - bypasses HCQ queue/synchronization overhead (~75x faster)
             fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
