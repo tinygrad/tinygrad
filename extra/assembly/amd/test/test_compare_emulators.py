@@ -446,5 +446,16 @@ class TestTinygradKernels(unittest.TestCase):
     from tinygrad import dtypes
     self._test_kernel(lambda T: T([1, 10, -10, 7], dtype=dtypes.int64) % T([-1, 3, 3, -3], dtype=dtypes.int64))
 
+  def test_softmax_argmax_fused(self):
+    """Test fused softmax+argmax - tracks exp2 precision issue.
+
+    The fused kernel recomputes softmax inline and Python emulator's exp2 polynomial
+    has up to 1 ULP error vs native exp2f, causing accumulated differences.
+    """
+    import torch
+    torch.manual_seed(0)
+    x_np = torch.rand(4, 10).numpy()
+    self._test_kernel(lambda T: T(x_np.tolist()).softmax(1).argmax())
+
 if __name__ == "__main__":
   unittest.main()
