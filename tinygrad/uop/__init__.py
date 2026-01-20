@@ -57,7 +57,7 @@ class Ops(FastEnum):
 
   # BinaryOps
   ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); IDIV = auto(); MAX = auto(); MOD = auto()
-  CMPLT = auto(); CMPNE = auto(); CMPEQ = auto(); CMPLE = auto()
+  CMPLT = auto(); CMPNE = auto(); CMPEQ = auto()
   XOR = auto(); OR = auto(); AND = auto()
   THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto()
 
@@ -102,7 +102,7 @@ class Ops(FastEnum):
 
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
-  Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE,
+  Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
             Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
@@ -127,7 +127,7 @@ class GroupOp:
   Idempotent = {Ops.OR, Ops.AND, Ops.MAX}
 
   # These can change the dtype to bool
-  Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ, Ops.CMPLE}
+  Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
 
   # do not preserve f(0) = 0
   UnsafePad = {Ops.RECIPROCAL, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
