@@ -27,9 +27,9 @@ pm_syntactic_sugar = PatternMatcher([
    lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
 ])
 
-def full_rewrite_to_sink(sink:UOp, device:str="", optimize:bool=True) -> UOp:
-  if not device: device, ren = Device.DEFAULT, Renderer()
-  else: ren = Device[device].renderer
+def full_rewrite_to_sink(sink:UOp, device:str="", ren:Renderer|None=None, optimize:bool=True) -> UOp:
+  if not device: device = Device.DEFAULT
+  if not ren: ren = Device[device].renderer
 
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(sink))
@@ -152,7 +152,7 @@ pm_to_program = PatternMatcher([
 ])
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, device:str, opts:list[Opt]|None=None) -> ProgramSpec:
+def get_program(ast:UOp, device:str, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
@@ -173,7 +173,7 @@ def get_program(ast:UOp, device:str, opts:list[Opt]|None=None) -> ProgramSpec:
   # rewrite to prg
   if ast.op is Ops.PROGRAM: prg = ast
   else:
-    full_sink = full_rewrite_to_sink(ast, device, optimize=ast.tag is None)
+    full_sink = full_rewrite_to_sink(ast, device, renderer, optimize=ast.tag is None)
     prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=device)))
   prg = graph_rewrite(prg, pm_to_program, ctx=Device[device].renderer, name="linearize/render")
 
