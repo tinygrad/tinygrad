@@ -1,29 +1,22 @@
 import SwiftUI
 
+private let dextID = "org.tinygrad.tinygpu.edriver"
+
 @main
 struct TinyGPUApp: App {
   @State private var text = ""
-  @State private var buttonText: String? = nil
-  @State private var buttonAction: (() -> Void)? = nil
   @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
   init() {
-    if CommandLine.arguments.count > 1 {
-      let runner = TinyGPUCLIRunner(dextIdentifier: "org.tinygrad.tinygpu.edriver")
-      runner.run(args: CommandLine.arguments) { exit($0.rawValue) }
-      dispatchMain()
-    }
+    guard CommandLine.arguments.count > 1 else { return }
+    TinyGPUCLIRunner(dextID).run(args: CommandLine.arguments) { exit($0.rawValue) }
+    dispatchMain()
   }
 
   var body: some Scene {
     WindowGroup("TinyGPU") {
-      VStack(spacing: 12) {
-        ScrollView {
-          Text(text).font(.custom("Menlo", size: 11)).frame(maxWidth: .infinity, alignment: .leading).padding(8)
-        }
-        if let label = buttonText {
-          Button(label) { buttonAction?() }.buttonStyle(.borderedProminent).controlSize(.large)
-        }
+      ScrollView {
+        Text(text).font(.custom("Menlo", size: 11)).frame(maxWidth: .infinity, alignment: .leading).padding(8)
       }
       .frame(width: 500, height: 300).padding()
       .onAppear { setup() }
@@ -32,22 +25,18 @@ struct TinyGPUApp: App {
   }
 
   func setup() {
-    let dextIdentifier = "org.tinygrad.tinygpu.edriver"
     let bundlePath = Bundle.main.bundlePath
-
-    if !bundlePath.hasPrefix("/Applications/") {
-      text = "TinyGPU needs to be in /Applications/\n\n"
-      buttonText = "Move to /Applications"
-      buttonAction = {
-        var error: NSDictionary?
-        NSAppleScript(source: "do shell script \"mv '\(bundlePath)' '/Applications/'\" with administrator privileges")?.executeAndReturnError(&error)
-        text = error == nil ? "Moved! Please reopen from /Applications/\n" : "Failed: \(error?["NSAppleScriptErrorMessage"] ?? "")\n"
-        buttonText = nil
-      }
+    guard bundlePath.hasPrefix("/Applications/") else {
+      var error: NSDictionary?
+      NSAppleScript(source: "do shell script \"mv '\(bundlePath)' '/Applications/'\" with administrator privileges")?.executeAndReturnError(&error)
+      text = error == nil ? "Moved! Please reopen from /Applications/\n" : "Move TinyGPU to /Applications first.\n"
       return
     }
-
-    text = "TinyGPU - Remote PCI Device Server\n\n" + TinyGPUCLIRunner.getStatusText(TinyGPUCLIRunner.queryDextState(bundleID: dextIdentifier))
+    let state = TinyGPUCLIRunner.queryDextState(dextID)
+    if state == .unloaded || state == .activating {
+      TinyGPUCLIRunner(dextID).run(args: ["", "install"]) { _ in }
+    }
+    text = "TinyGPU - Remote PCI Device Server\n\n" + TinyGPUCLIRunner.statusText(state)
   }
 }
 
