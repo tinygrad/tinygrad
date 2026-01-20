@@ -181,14 +181,18 @@ class PM4Executor(AMDQueue):
     lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
     rsrc2 = self.gpu.regs[regCOMPUTE_PGM_RSRC2]
 
+    # Read private_segment_fixed_size from kernel descriptor (64 bytes before prg_addr, offset 4)
+    scratch_size = to_mv(prg_addr - 64 + 4, 4).cast('I')[0]
+
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
       if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    # Pass valid memory ranges and rsrc2 to Python emulator for bounds checking and SGPR/VGPR layout
+    # Pass valid memory ranges, rsrc2, and scratch_size to Python emulator
     if hasattr(remu, 'valid_mem_ranges'): remu.valid_mem_ranges = self.gpu.mapped_ranges
     if hasattr(remu, 'rsrc2'): remu.rsrc2 = rsrc2
+    if hasattr(remu, 'scratch_size'): remu.scratch_size = scratch_size
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)
     if err != 0: raise RuntimeError("remu does not support the new instruction introduced in this kernel")
 
