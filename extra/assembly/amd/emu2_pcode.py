@@ -481,12 +481,29 @@ def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp:
     addr, dt = parse_expr(m.group(1), vars), DTYPES.get(m.group(2), dtypes.uint32)
     mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
     if mem is None: return _const(dt, 0)
-    adt, idx = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32, (addr >> _const(addr.dtype, 2)).cast(dtypes.index)
-    val = mem.index(idx)
-    if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-      val = val.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.index)).cast(dtypes.uint64) << _const(dtypes.uint64, 32))
-    elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
-    elif dt in (dtypes.uint16, dtypes.int16): val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
+    adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
+    byte_mem = mem.dtype.base == dtypes.uint8  # scratch is byte-addressable
+    if byte_mem:
+      # Byte-addressable memory (scratch): load bytes directly
+      idx = addr.cast(dtypes.index)
+      if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+        val = _u32(0).cast(dtypes.uint64)
+        for i in range(8): val = val | (mem.index(idx + _const(dtypes.index, i), ptr=True).load().cast(dtypes.uint64) << _const(dtypes.uint64, i * 8))
+      elif dt in (dtypes.uint8, dtypes.int8):
+        val = mem.index(idx, ptr=True).load().cast(dt)
+      elif dt in (dtypes.uint16, dtypes.int16, dtypes.short):
+        val = (mem.index(idx, ptr=True).load().cast(dtypes.uint32) | (mem.index(idx + _const(dtypes.index, 1), ptr=True).load().cast(dtypes.uint32) << _u32(8))).cast(dt)
+      else:  # 32-bit
+        val = _u32(0)
+        for i in range(4): val = val | (mem.index(idx + _const(dtypes.index, i), ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
+    else:
+      # Dword-addressable memory (vmem): addr >> 2 for dword index
+      idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.index)
+      val = mem.index(idx)
+      if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+        val = val.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.index)).cast(dtypes.uint64) << _const(dtypes.uint64, 32))
+      elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
+      elif dt in (dtypes.uint16, dtypes.int16): val = (val >> (((addr >> _const(adt, 1)) & _const(adt, 1)).cast(dtypes.uint32) * _u32(16))) & _u32(0xFFFF)
     return val
 
   # Array element
