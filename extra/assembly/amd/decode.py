@@ -32,7 +32,7 @@ from extra.assembly.amd.autogen.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as 
 from extra.assembly.amd.autogen.cdna.ins import (VOP1 as C_VOP1, VOP1_SDWA as C_VOP1_SDWA, VOP1_DPP16 as C_VOP1_DPP16,
   VOP2 as C_VOP2, VOP2_LIT as C_VOP2_LIT, VOP2_SDWA as C_VOP2_SDWA, VOP2_DPP16 as C_VOP2_DPP16,
   VOPC as C_VOPC, VOPC_SDWA_SDST as C_VOPC_SDWA_SDST,
-  VOP3 as C_VOP3, VOP3_SDST as C_VOP3_SDST, VOP3SD as C_VOP3SD, VOP3P as C_VOP3P, VOP3PX2 as C_VOP3PX2,
+  VOP3 as C_VOP3, VOP3_SDST as C_VOP3_SDST, VOP3SD as C_VOP3SD, VOP3P as C_VOP3P,
   SOP1 as C_SOP1, SOP2 as C_SOP2, SOPC as C_SOPC, SOPK as C_SOPK, SOPK_LIT as C_SOPK_LIT, SOPP as C_SOPP, SMEM as C_SMEM, DS as C_DS,
   FLAT as C_FLAT, GLOBAL as C_GLOBAL, SCRATCH as C_SCRATCH, MUBUF as C_MUBUF)
 
@@ -52,12 +52,6 @@ def detect_format(data: bytes, arch: str = "rdna3") -> type[Inst]:
   """Detect instruction format from machine code bytes."""
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
   word = int.from_bytes(data[:4], 'little')
-  # VOP3PX2 is a 16-byte instruction: check dword2 (bytes 8-11) for VOP3P encoding (bits 31-23) and opcode 45/46 (bits 22-16)
-  if arch == "cdna" and len(data) >= 16:
-    word2 = int.from_bytes(data[8:12], 'little')
-    enc_bits = (word2 >> 23) & 0x1ff
-    op_bits = (word2 >> 16) & 0x7f
-    if enc_bits == 0b110100111 and op_bits in (45, 46): return C_VOP3PX2
   for cls in _FORMATS[arch]:
     if _matches(word, cls): return cls
   raise ValueError(f"unknown {arch} format word={word:#010x}")
