@@ -297,23 +297,23 @@ class RemotePCIDevice(PCIDevice):
     return RemoteMMIOInterface(self, bar, size or self.bar_info[bar].size, fmt).view(off, size, fmt)
 
 class RemoteMMIOInterface(MMIOInterface):
-  def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', addr=0):
-    self.dev, self.residx, self.nbytes, self.fmt, self.addr, self.el_sz = dev, residx, nbytes, fmt, addr, struct.calcsize(fmt)
+  def __init__(self, dev:RemotePCIDevice, residx:int, nbytes:int, fmt='B', off=0):
+    self.dev, self.residx, self.nbytes, self.fmt, self.off, self.el_sz = dev, residx, nbytes, fmt, off, struct.calcsize(fmt)
 
   def __getitem__(self, index):
-    if isinstance(index, slice):
-      start, stop = (index.start or 0) * self.el_sz, (index.stop or len(self)) * self.el_sz
-      data = self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.addr + start, stop - start)
-      return list(struct.unpack(f'<{(stop - start) // self.el_sz}{self.fmt}', data)) if self.fmt != 'B' else data
-    return struct.unpack(f'<{self.fmt}', self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.addr + index * self.el_sz, self.el_sz))[0]
+    sl = index if isinstance(index, slice) else slice(index, index + 1)
+    start, stop = (sl.start or 0) * self.el_sz, (sl.stop or len(self)) * self.el_sz
+    data = self.dev._bulk_read(RemoteCmd.MMIO_READ, self.residx, self.off + start, stop - start)
+    result = data if self.fmt == 'B' else list(struct.unpack(f'<{(stop - start) // self.el_sz}{self.fmt}', data))
+    return result if isinstance(index, slice) else result[0]
 
   def __setitem__(self, index, val):
     start = (index.start or 0) * self.el_sz if isinstance(index, slice) else index * self.el_sz
     data = (val if self.fmt == 'B' else struct.pack(f'<{len(val)}{self.fmt}', *val)) if isinstance(index, slice) else struct.pack(f'<{self.fmt}', val)
-    self.dev._bulk_write(RemoteCmd.MMIO_WRITE, self.residx, self.addr + start, data)
+    self.dev._bulk_write(RemoteCmd.MMIO_WRITE, self.residx, self.off + start, data)
 
   def view(self, offset:int=0, size:int|None=None, fmt=None):
-    return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.addr + offset)
+    return RemoteMMIOInterface(self.dev, self.residx, size or (self.nbytes - offset), fmt or self.fmt, self.off + offset)
 
 class APLRemotePCIDevice(RemotePCIDevice):
   APP_PATH = "/Applications/TinyGPU.app/Contents/MacOS/TinyGPU"
@@ -343,7 +343,6 @@ class APLRemoteIfaceBase(LNXPCIIfaceBase):
       if not os.path.exists(APLRemotePCIDevice.APP_PATH): APLRemotePCIDevice.install_tinygpu()
     self.pci_dev = APLRemotePCIDevice(dev.__class__.__name__[:2], f'remote:{dev_id}', bars)
     self.dev, self.vram_bar = dev, vram_bar
-    assert (read:=self.pci_dev.read_config(0x00, 2)) == vendor, f"Vendor ID mismatch {read:#06x} != {vendor:#06x}"
 
   def free(self, b:HCQBuffer):
     for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
