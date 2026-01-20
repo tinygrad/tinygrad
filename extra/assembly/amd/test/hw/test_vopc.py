@@ -731,5 +731,101 @@ class TestVCCBehavior(unittest.TestCase):
     self.assertEqual(st.vcc >> 16, 0x0000, "Lanes 16-31 should be false")
 
 
+class TestCmpxPartialWavefront(unittest.TestCase):
+  """Tests for V_CMPX with partial wavefronts (fewer than 32 active lanes).
+
+  Regression tests for bug where v_cmpx incorrectly set EXEC bits for inactive
+  lanes when the wavefront had fewer than 32 lanes. This caused garbage data
+  from uninitialized lanes to corrupt memory writes.
+  """
+
+  def test_v_cmpx_eq_u32_partial_wave_3_lanes(self):
+    """V_CMPX_EQ_U32 with 3 active lanes should only affect those 3 lanes.
+
+    With n_lanes=3, initial EXEC=0x7. After v_cmpx comparing lane_id == 1,
+    only lane 1 should pass, so EXEC should become 0x2 (not have bits 3-31 set).
+    """
+    instructions = [
+      v_cmpx_eq_u32_e32(1, v[255]),  # EXEC = lanes where lane_id == 1
+    ]
+    st = run_program(instructions, n_lanes=3)
+    # Only lane 1 should be active (bit 1 set)
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0x2,
+                     "Only lane 1 should be active after v_cmpx_eq_u32 with 3 lanes")
+
+  def test_v_cmpx_eq_u32_partial_wave_5_lanes(self):
+    """V_CMPX_EQ_U32 with 5 active lanes."""
+    instructions = [
+      v_cmpx_eq_u32_e32(3, v[255]),  # EXEC = lanes where lane_id == 3
+    ]
+    st = run_program(instructions, n_lanes=5)
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0x8,
+                     "Only lane 3 should be active after v_cmpx_eq_u32 with 5 lanes")
+
+  def test_v_cmpx_lt_u32_partial_wave(self):
+    """V_CMPX_LT_U32 with partial wavefront."""
+    # VOPC: src0 < vsrc1, so we need v_cmpx_gt_u32 to get lane_id < 2
+    instructions = [
+      v_cmpx_gt_u32_e32(2, v[255]),  # EXEC = lanes where 2 > lane_id (i.e., lane_id < 2)
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # Lanes 0,1 should be active (bits 0,1 set = 0x3)
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0x3,
+                     "Only lanes 0,1 should be active after v_cmpx_gt_u32(2, lane_id) with 4 lanes")
+
+  def test_v_cmpx_ge_u32_partial_wave(self):
+    """V_CMPX_GE_U32 with partial wavefront."""
+    # VOPC: src0 >= vsrc1, so v_cmpx_le_u32(1, lane_id) gives lane_id >= 2? No.
+    # v_cmpx_le_u32(src0, vsrc1) = src0 <= vsrc1 = 1 <= lane_id
+    instructions = [
+      v_cmpx_le_u32_e32(2, v[255]),  # EXEC = lanes where 2 <= lane_id (i.e., lane_id >= 2)
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # Lanes 2,3 should be active (bits 2,3 set = 0xC)
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0xC,
+                     "Only lanes 2,3 should be active after v_cmpx_le_u32(2, lane_id) with 4 lanes")
+
+  def test_v_cmpx_ne_u32_partial_wave_all_pass(self):
+    """V_CMPX_NE_U32 where all active lanes pass."""
+    instructions = [
+      v_cmpx_ne_u32_e32(99, v[255]),  # EXEC = lanes where lane_id != 99
+    ]
+    st = run_program(instructions, n_lanes=3)
+    # All 3 lanes should remain active (bits 0,1,2 set = 0x7)
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0x7,
+                     "All 3 lanes should remain active when all pass")
+
+  def test_v_cmpx_eq_u32_partial_wave_none_pass(self):
+    """V_CMPX_EQ_U32 where no active lanes pass."""
+    instructions = [
+      v_cmpx_eq_u32_e32(99, v[255]),  # EXEC = lanes where lane_id == 99
+    ]
+    st = run_program(instructions, n_lanes=3)
+    # No lanes should be active
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0x0,
+                     "No lanes should be active when none pass")
+
+  def test_v_cmpx_f32_partial_wave(self):
+    """V_CMPX_GT_F32 with partial wavefront - float comparison."""
+    instructions = [
+      v_cvt_f32_u32_e32(v[0], v[255]),  # v[0] = float(lane_id)
+      v_mov_b32_e32(v[1], f2i(0.5)),    # v[1] = 0.5
+      v_cmpx_gt_f32_e32(v[0], v[1]),    # EXEC = lanes where v[0] > 0.5
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # Lanes 1,2,3 have values > 0.5, lane 0 has 0.0
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0xE,
+                     "Lanes 1,2,3 should be active (float > 0.5)")
+
+  def test_v_cmpx_e64_partial_wave(self):
+    """V_CMPX_EQ_U32_E64 (VOP3 encoding) with partial wavefront."""
+    instructions = [
+      v_cmpx_eq_u32_e64(EXEC_LO, v[255], 2),  # EXEC = lanes where lane_id == 2
+    ]
+    st = run_program(instructions, n_lanes=4)
+    self.assertEqual(st.sgpr[EXEC_LO.offset] & 0xFFFFFFFF, 0x4,
+                     "Only lane 2 should be active after v_cmpx_eq_u32_e64")
+
+
 if __name__ == '__main__':
   unittest.main()

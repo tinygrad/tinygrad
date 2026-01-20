@@ -523,7 +523,9 @@ def _compile_vopc(inst: VOPC, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     return U32_0
   new_bits = _unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False)
   new_vcc = (old_vcc & (exec_mask ^ U32_MASK)) | (new_bits & exec_mask)
-  return name, UOp.sink(ctx.wsgpr(EXEC_LO.offset if is_cmpx else VCC_LO.offset, new_vcc), ctx.inc_pc(), arg=KernelInfo(name=name))
+  # For CMPX: new EXEC = lanes that were active AND passed comparison (no preservation of inactive bits)
+  new_exec = new_bits & exec_mask
+  return name, UOp.sink(ctx.wsgpr(EXEC_LO.offset if is_cmpx else VCC_LO.offset, new_exec if is_cmpx else new_vcc), ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask = ctx.rsgpr(EXEC_LO.offset)
@@ -823,11 +825,11 @@ def _compile_flat_global_scratch(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
     addr, active = make_addr(lane), _lane_active(exec_mask, lane)
     if is_atomic:
-      srcs = {'ADDR': addr, 'DATA': _u64(ctx.rvgpr(vdata_reg, lane), ctx.rvgpr(vdata_reg + 1, lane)) if is_64bit else ctx.rvgpr(vdata_reg, lane), '_vmem': mem}
+      srcs = {'ADDR': addr, 'DATA': _u64(ctx.rvgpr(vdata_reg, lane), ctx.rvgpr(vdata_reg + 1, lane)) if is_64bit else ctx.rvgpr(vdata_reg, lane), '_vmem': mem, '_active': active}
     else:
       vdata = ctx.rvgpr(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else ctx.rvgpr(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
       if 'STORE' in op_name and ndwords >= 2: vdata = vdata | (ctx.rvgpr(vdata_reg + 1, lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-      srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem}
+      srcs = {'ADDR': addr, 'VDATA': vdata, '_vmem': mem, '_active': active}
       for i in range(ndwords): srcs[f'VDATA{i}'] = ctx.rvgpr(vdata_reg + i, lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
     pcode_vars, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
     def wvmem(a: UOp, v: UOp, act: UOp) -> UOp:
