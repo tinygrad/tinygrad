@@ -13,8 +13,21 @@ class USBGPUDebug:
   CBUS_BOOTLOADER = (1 << 1)
 
   def __init__(self, device_url: str = 'ftdi://ftdi:230x/1'):
+    self.device_url = device_url
+    self.ftdi = None
+    self.eeprom = None
+    self.provisioned = False
+
+  def __enter__(self):
+    self.open()
+    return self
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    self.close()
+
+  def open(self):
     self.ftdi = Ftdi()
-    self.ftdi.open_from_url(device_url)
+    self.ftdi.open_from_url(self.device_url)
     self.ftdi.set_baudrate(921600)
     self.ftdi.set_line_property(8, 1, 'N')
 
@@ -30,6 +43,9 @@ class USBGPUDebug:
     # setup gpio for reset control
     self.ftdi.set_cbus_direction(self.CBUS_RESET | self.CBUS_BOOTLOADER, self.CBUS_RESET | self.CBUS_BOOTLOADER)
     self.ftdi.set_cbus_gpio(0x00)
+
+  def close(self):
+    self.ftdi.close()
 
   def provision(self):
     print("Provisioning FTDI device for usbgpu debugging...")
@@ -51,9 +67,7 @@ class USBGPUDebug:
     if bootloader:
       time.sleep(1)
       self.ftdi.set_cbus_gpio(0)
-
-  def close(self):
-    self.ftdi.close()
+    print("Device reset complete.")
 
   def read(self) -> bytes:
     return self.ftdi.read_data(256).decode('utf-8', errors='replace')
@@ -65,21 +79,24 @@ if __name__ == "__main__":
   args.add_argument('--provision', '-p', action='store_true', default=False, help="Provision the connected FTDI for usbgpu debugging")
   args.add_argument('--reset', '-r', action='store_true', default=False, help="Reset the device")
   args.add_argument('--bootloader', '-b', action='store_true', default=False, help="Reset to bootloader")
+  args.add_argument('--no-read', '-n', action='store_true', default=False, help="Do not read debug output")
 
   args = args.parse_args()
 
-  dbg = USBGPUDebug(args.device)
-  if args.provision:
-    dbg.provision()
+  with USBGPUDebug(args.device) as dbg:
+    if args.provision:
+      dbg.provision()
 
-  if args.reset:
-    dbg.reset(bootloader=False)
+    if args.reset:
+      dbg.reset(bootloader=False)
 
-  if args.bootloader:
-    dbg.reset(bootloader=True)
+    if args.bootloader:
+      dbg.reset(bootloader=True)
 
-  while True:
-    sys.stdout.write(dbg.read())
-    sys.stdout.flush()
-    time.sleep(0.001)
+    if not args.no_read:
+      print("Starting debug output. Press Ctrl-C to exit.\n------")
+      while True:
+        sys.stdout.write(dbg.read())
+        sys.stdout.flush()
+        time.sleep(0.001)
 
