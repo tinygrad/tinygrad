@@ -1,10 +1,7 @@
 from typing import Optional
-
 from tinygrad import Tensor
-
 from tinygrad.dtype import DTypeLike, dtypes
 import math
-
 
 # rewritten from numpy
 def rfftfreq(n: int, d: float = 1.0, device=None) -> Tensor:
@@ -13,11 +10,9 @@ def rfftfreq(n: int, d: float = 1.0, device=None) -> Tensor:
   results = Tensor.arange(N, device=device)
   return results * val
 
-
 # just like in librosa
 def fft_frequencies(sr: float, n_fft: int) -> Tensor:
   return rfftfreq(n=n_fft, d=1.0 / sr)
-
 
 def hz_to_mel(freq: Tensor) -> Tensor:
   # linear part
@@ -27,12 +22,10 @@ def hz_to_mel(freq: Tensor) -> Tensor:
   mels = (freq - f_min) / f_sp
 
   # log-scale part
-
   min_log_hz = 1000.0  # beginning of log region (Hz)
 
   mask = freq >= min_log_hz
   return mask.where(((min_log_hz - f_min) / f_sp) + (freq / min_log_hz).log() / (math.log(6.4) / 27.0), mels)
-
 
 def mel_to_hz(mels: Tensor) -> Tensor:
   # linear scale
@@ -50,7 +43,6 @@ def mel_to_hz(mels: Tensor) -> Tensor:
 
   return freqs
 
-
 def mel_frequencies(n_mels: int = 128, *, fmin: float = 0.0, fmax: float = 11025.0) -> Tensor:
   # center freqs of mel bands - uniformly spaced between limits
   min_max_mel = hz_to_mel(Tensor([fmin, fmax]))
@@ -58,7 +50,6 @@ def mel_frequencies(n_mels: int = 128, *, fmin: float = 0.0, fmax: float = 11025
   mels = Tensor.linspace(min_max_mel[0], min_max_mel[1], n_mels)
   hz = mel_to_hz(mels)
   return hz
-
 
 def mel(
   *,
