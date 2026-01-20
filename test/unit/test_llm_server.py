@@ -25,7 +25,7 @@ class TestLLMServer(unittest.TestCase):
     llm_module.eos_id = cls.eos_id
 
     from tinygrad.apps.llm import Handler
-    from tinygrad.helpers import TCPServerWithReuse
+    from tinygrad.viz.serve import TCPServerWithReuse
 
     cls.server = TCPServerWithReuse(('127.0.0.1', 0), Handler)
     cls.port = cls.server.server_address[1]
