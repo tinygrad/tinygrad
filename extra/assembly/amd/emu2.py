@@ -875,7 +875,13 @@ def _compile_inst_inner(inst_bytes: bytes) -> tuple[str, UOp]:
   literal = int.from_bytes(inst_bytes[lit_off:lit_off+4], 'little') if len(inst_bytes) >= lit_off + 4 else 0
   ctx = _Ctx(sgpr, vgpr, vmem, lds, scratch, literal, inst_words)
 
+  # Look up handler by type, falling back to base classes for _LIT variants
   handler = _INST_HANDLERS.get(type(inst))
+  if handler is None:
+    for base in type(inst).__mro__:
+      if base in _INST_HANDLERS:
+        handler = _INST_HANDLERS[base]
+        break
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
   return handler(inst, ctx, name)
 

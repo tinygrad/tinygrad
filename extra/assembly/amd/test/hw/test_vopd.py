@@ -9,7 +9,7 @@ VOPD executes two operations simultaneously. Key behavior:
 import unittest
 from extra.assembly.amd.test.hw.helpers import run_program, run_program_emu, run_program_hw, compare_wave_states, \
   v, s, v_mov_b32_e32, s_mov_b32
-from extra.assembly.amd.autogen.rdna3.ins import VOPD, VOPDOp
+from extra.assembly.amd.autogen.rdna3.ins import VOPD, VOPD_LIT, VOPDOp
 
 class TestVOPDBasic(unittest.TestCase):
   """Basic VOPD functionality tests."""
@@ -116,7 +116,7 @@ class TestVOPDLiterals(unittest.TestCase):
       # VOPD args: opx, opy, vdstx, vdsty, srcx0, srcy0, vsrcx1, vsrcy1
       # X: v[2] = fma(srcx0, vsrcx1, SIMM32) = v[0]*v[1]+10.0 = 2*3+10 = 16
       # Y: v[3] = srcy0 (MOV) = v[0] = 2.0
-      VOPD(VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_MOV_B32, v[2], v[3], v[0], v[0], v[1], v[0], literal=f2i(10.0)),
+      VOPD_LIT(VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_MOV_B32, v[2], v[3], v[0], v[0], v[1], v[0], literal=f2i(10.0)),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 16.0, places=5, msg="fma(2.0, 3.0, 10.0) should be 16.0")
@@ -133,7 +133,7 @@ class TestVOPDLiterals(unittest.TestCase):
       v_mov_b32_e32(v[1], f2i(3.0)),  # v[1] = 3.0
       # X: v[2] = fma(srcx0, SIMM32, vsrcx1) = v[0]*5.0+v[1] = 2*5+3 = 13
       # Y: v[3] = srcy0 (MOV) = v[0] = 2.0
-      VOPD(VOPDOp.V_DUAL_FMAMK_F32, VOPDOp.V_DUAL_MOV_B32, v[2], v[3], v[0], v[0], v[1], v[0], literal=f2i(5.0)),
+      VOPD_LIT(VOPDOp.V_DUAL_FMAMK_F32, VOPDOp.V_DUAL_MOV_B32, v[2], v[3], v[0], v[0], v[1], v[0], literal=f2i(5.0)),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 13.0, places=5, msg="fma(2.0, 5.0, 3.0) should be 13.0")
