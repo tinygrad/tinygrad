@@ -172,7 +172,10 @@ class TestProfiler(unittest.TestCase):
     for (i1, d1), (i2, d2) in pairs:
       cpu_diff = d1.gpu2cpu_compute_time_diff - d2.gpu2cpu_compute_time_diff
       jitter_matrix[i1][i2] = statistics.median(_sync_d2d(d1, d2) - _sync_d2d(d2, d1) for _ in range(20)) / 2 - cpu_diff
-      assert abs(jitter_matrix[i1][i2]) < 0.5, "jitter should be less than 0.5ms"
+
+    for (i1, d1), (i2, d2) in pairs:
+      assert abs(jitter_matrix[i1][i2]) < 0.5, "jitter should be less than 0.5us"
+
     print("pairwise clock jitter matrix (us):\n" + '\n'.join([''.join([f'{float(item):8.3f}' for item in row]) for row in jitter_matrix]))
 
   def test_cpu_profile(self):
