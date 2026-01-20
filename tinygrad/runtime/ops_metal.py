@@ -4,13 +4,12 @@ import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, CompilerSet, CompilerPair
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
-from tinygrad.runtime.support.c import DLL
 
 # 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
 REQUEST_TYPE_COMPILE = 13
 
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
-DLL("CoreGraphics", "CoreGraphics")
+ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 
 # FIXME: these need autogen to support objc categories
 # https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjectiveC/Chapters/ocCategories.html
@@ -68,7 +67,7 @@ class MetalCompiler(Compiler):
   # doesn't seem to be anything we can do.
   with contextlib.suppress(FileNotFoundError, ModuleNotFoundError):
     import tinygrad.runtime.autogen.llvm # noqa: F401
-  support = DLL("MTLCompiler", "MTLCompiler")
+  support = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
   support.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
 
   def __init__(self):

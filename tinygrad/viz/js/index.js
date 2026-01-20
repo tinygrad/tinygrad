@@ -325,7 +325,7 @@ async function renderProfiler(path, unit, opts) {
     const eventType = u8(), eventsLen = u32();
     const [pcolor, scolor] = path.includes("pkts") ? ["#00c72f", "#858b9d"] : ["#9ea2ad", null];
     // last row doesn't get a border
-    const rowBorderColor = i<layoutsLen ? "#22232a" : null;
+    const rowBorderColor = i<layoutsLen-1 ? "#22232a" : null;
     if (rowBorderColor != null) div.style("border-bottom", `1px solid ${rowBorderColor}`);
     if (eventType === EventTypes.EXEC) {
       const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
@@ -377,9 +377,7 @@ async function renderProfiler(path, unit, opts) {
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
         if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
-      const height = levelHeight*levels.length;
-      div.style("height", height+padding+"px").style("pointerEvents", "none");
-      data.tracks.get(k).height = Math.max(rect(div.node()).height-padding, levelHeight*levels.length);
+      div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
       const peak = u64();
       let x = 0, y = 0;
@@ -484,42 +482,42 @@ async function renderProfiler(path, unit, opts) {
     xscale.domain([st, et]);
     ctx.textBaseline = "middle";
     // draw shapes
-    const paths = [];
-    for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor, height, rowBorderColor }] of data.tracks) {
+    for (const [k, { shapes, eventType, visible, offsetY, valueMap, pcolor, scolor, rowBorderColor }] of data.tracks) {
       visible.length = 0;
-      const addBorder = scolor != null ? (p,w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(p); } } : null;
+      const addBorder = scolor != null ? (w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(); } } : null;
       for (const e of shapes) {
-        const p = new Path2D();
         if (eventType === EventTypes.BUF) { // generic polygon
           if (e.x[0]>et || e.x.at(-1)<st) continue;
+          ctx.beginPath();
           const x = e.x.map(xscale);
-          p.moveTo(x[0], offsetY+e.y0[0]);
+          ctx.moveTo(x[0], offsetY+e.y0[0]);
           for (let i=1; i<x.length; i++) {
-            p.lineTo(x[i], offsetY+e.y0[i]);
+            ctx.lineTo(x[i], offsetY+e.y0[i]);
             let arg = e.arg;
             if (arg == null && valueMap != null) arg = {tooltipText: `Total: ${formatUnit(valueMap.get(e.x[i-1]), 'B')}`}
             visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
-          for (let i=x.length-1; i>=0; i--) p.lineTo(x[i], offsetY+e.y1[i]);
-          p.closePath();
-          ctx.fillStyle = e.fillColor; ctx.fill(p);
+          for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y1[i]);
+          ctx.closePath();
+          ctx.fillStyle = e.fillColor; ctx.fill();
         } else { // contiguous rect
           if (e.x>et || e.x+e.width<st) continue;
           const x = xscale(e.x);
           const y = offsetY+e.y;
           const width = xscale(e.x+e.width)-x;
-          p.rect(x, y, width, e.height);
+          ctx.beginPath();
+          ctx.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
-          ctx.fillStyle = e.fillColor; ctx.fill(p);
-          addBorder?.(p, width);
+          ctx.fillStyle = e.fillColor; ctx.fill();
+          addBorder?.(width);
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
-        if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
+        if (focusedShape != null && e.arg?.key === focusedShape) { ctx.strokeStyle = pcolor; ctx.stroke(); }
       }
       // draw row line
       if (rowBorderColor != null) {
-        const y = offsetY+height+padding/2 - 0.5;
+        const y = offsetY+rect(document.getElementById(k)).height-padding/2 - 0.5;
         drawLine(ctx, [0, canvasWidth], [y, y], { color:rowBorderColor });
       }
     }
@@ -561,7 +559,6 @@ async function renderProfiler(path, unit, opts) {
       if (maxWidth <= 0) continue;
       drawText(ctx, m.label, tx, 1, maxWidth);
     }
-    for (const [p, color] of paths) { ctx.strokeStyle = color; ctx.stroke(p); }
   }
 
   function resize() {

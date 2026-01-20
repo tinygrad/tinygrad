@@ -353,6 +353,9 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
     if base not in base_encodings: continue
     sdst_ops = sdst_opcodes.get(base, set())
     if not sdst_ops: continue
+    # For VOP3, all ops < 256 (compare/cmpx ops) use SDST encoding
+    all_base_ops = set(enums.get(base, {}).keys())
+    if base == "VOP3": sdst_ops = sdst_ops | {op for op in all_base_ops if op < 256}
     op_field = next((f for f in base_encodings[base][0] if f[0] == "op"), None)
     lines.append(f"class {base}_SDST({base}):")
     if op_field:
