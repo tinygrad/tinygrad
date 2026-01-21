@@ -3,6 +3,7 @@ import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import polyN, DISABLE_FAST_IDIV
+from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 
 TRANSCENDENTAL_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
@@ -314,11 +315,18 @@ def threefry2x32(x: UOp, key: UOp):
 
   return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
 
+# ***** long as 2 ints *****
+def l2i_add(a: UOp, b: UOp, high: bool):
+  low = (al:=a.gep(0)) + (bl:=b.gep(0))
+  if not high: return low
+  carry = (al < 0).eq(bl < 0).bitwise_and((al < 0).ne(low < 0))
+  return a.gep(1) + b.gep(1) + carry.cast(dtypes.int)
+
 # ***** decomposition patterns *****
 
 powers_of_two = {2**i:i for i in range(64)}
 @functools.cache
-def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental):
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental):
   pat: list[tuple[UPat, Callable]] = []
   for op,f in ((Ops.EXP2, xexp2), (Ops.LOG2, xlog2), (Ops.SIN, xsin)):
     if op not in ops or force_transcendental:
@@ -364,4 +372,12 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], force_transcendental):
   if Ops.FDIV in ops:
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
+  if not is_dtype_supported(dtypes.long, device):
+    pat += [(UPat(GroupOp.All, dtypes.long, name='x'), lambda x: x.replace(dtype=dtypes.int.vec(2)))]
+    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x: x.replace(dtype=dtypes.int.ptr(x.dtype.size * 2)) if x.dtype.base is dtypes.long else None)]
+    pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', dtypes.int.vec(2))), name='st'),
+             lambda st,idx,val: st.replace(src=(idx, val.gep(0))).group(st.replace(src=(idx.replace(src=(idx.src[0], idx.src[1]+1)), val.gep(1)))))]
+    pat += [(UPat(Ops.ADD, dtypes.int.vec(2), src=(UPat.var('a'), UPat.var('b'))).f(Ops.GEP, name='g'), lambda g,a,b: l2i_add(a,b,bool(g.arg[0])))]
+    pat += [(UPat(Ops.LOAD, dtypes.int.vec(2), src=(UPat.var('idx'),), name='x').f(Ops.GEP, name='g'),
+             lambda g,x,idx: x.replace(dtype=dtypes.int, src=(idx.replace(src=(idx.src[0], idx.src[1]+g.arg[0])),)))]
   return PatternMatcher(pat)
