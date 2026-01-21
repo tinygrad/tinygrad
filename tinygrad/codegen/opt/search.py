@@ -142,7 +142,6 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
 
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
-    var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
     exiting, st = False, time.perf_counter()
     dev = Device[s.ren.device]
     while not exiting:
@@ -155,6 +154,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
         p, lib, compile_et = proc
         if lib in seen_libs: continue
         # filter out kernels that use 1000x more compute than the smallest
+        var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in p.ast.variables()}
         least_compute_ops = min(this_compute_ops:=sym_infer(p.estimates.ops, var_vals), least_compute_ops)
         if least_compute_ops*1000 < this_compute_ops:
           if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too much compute. {this_compute_ops} when least is {least_compute_ops}")
