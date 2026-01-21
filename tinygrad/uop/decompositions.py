@@ -319,7 +319,7 @@ def threefry2x32(x: UOp, key: UOp):
 def l2i_add(a: UOp, b: UOp, high: bool):
   low = (al:=a.gep(0)) + (bl:=b.gep(0))
   if not high: return low
-  carry = (al < 0).eq(bl < 0).bitwise_and((al < 0).ne(low < 0))
+  carry = low.bitcast(dtypes.uint) < al.bitcast(dtypes.uint)
   return a.gep(1) + b.gep(1) + carry.cast(dtypes.int)
 
 # ***** decomposition patterns *****

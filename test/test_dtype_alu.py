@@ -178,7 +178,6 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, ht.int32, strat.sampled_from(integer_binary_operations))
   def test_int32(self, a, b, op): universal_test(a, b, dtypes.int32, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.int64), f"no int64 on {Device.DEFAULT}")
   @given(ht.int64, ht.int64, strat.sampled_from(integer_binary_operations))
   def test_int64(self, a, b, op): universal_test(a, b, dtypes.int64, op)
 
