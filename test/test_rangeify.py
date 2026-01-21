@@ -76,6 +76,17 @@ class TestRangeifyEdgeCase(unittest.TestCase):
     res = Tensor.cat(a, c, dim=0)
     self.assertEqual(res.numpy()[-1, :16].tolist(), [512] * 16)
 
+  def test_pcontig_multi_gather(self):
+    # regression test: local bufferize must have device set for const_like to work
+    with Context(PCONTIG=2):
+      forest = Tensor(list(range(8)), dtype='uint')
+      idx = Tensor([0, 0], dtype='uint')
+      node_val = forest.gather(0, idx)
+      idx2 = idx * 2 + 1
+      node_val2 = forest.gather(0, idx2)
+      result = (node_val + node_val2).numpy()
+    self.assertEqual(result.tolist(), [1, 1])
+
 if getenv("BIG") > 2:
   # llama 8B (8192)
   BS, HEADS, SEQLEN, EMB = 4, 32, 8192, 128
