@@ -1,5 +1,58 @@
 import unittest, threading, time
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+from tinygrad import Tensor
+
+class TestTransformerGenerate(unittest.TestCase):
+  def test_start_pos_parameter_is_used(self):
+    """Test that start_pos parameter is not ignored (regression test for always resetting to 0)."""
+    from tinygrad.apps.llm import Transformer
+    # Create a minimal transformer
+    model = Transformer(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                        norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, max_context=32)
+
+    captured_inputs = []
+    def mock_call(self, tokens, start_pos):
+      captured_inputs.append((tokens.shape, start_pos if isinstance(start_pos, int) else start_pos.bind_val))
+      return Tensor([[42]])  # return a fake next token
+
+    with patch.object(Transformer, '__call__', mock_call):
+      tokens = [1, 2, 3, 4, 5]
+      gen = model.generate(tokens, start_pos=3)
+      next(gen)  # get first token
+
+    # With start_pos=3, the initial tensor should only have tokens[3:] = [4, 5] (length 2)
+    # If the bug existed (start_pos always reset to 0), it would have all 5 tokens
+    self.assertEqual(captured_inputs[0][0][-1], 2)  # shape should be (1, 2)
+    self.assertEqual(captured_inputs[0][1], 3)  # start_pos should be 3, not 0
+
+  @unittest.skip("loads a real model so skip by default")
+  def test_separate_conversations_server_style(self):
+    """Test that separate conversations work correctly - simulates server behavior.
+    BUG: Without forward_jit.reset(), second conversation only generates 1 token."""
+    from tinygrad.apps.llm import Transformer, SimpleTokenizer, models
+
+    model, kv = Transformer.from_gguf(Tensor.from_url(models['llama3.2:1b']), max_context=256)
+    tok = SimpleTokenizer.from_gguf_kv(kv)
+    bos_id = kv.get('tokenizer.ggml.bos_token_id')
+    eos_id = kv['tokenizer.ggml.eos_token_id']
+
+    def chat(msg):
+      ids = [bos_id] if bos_id else []
+      ids += tok.role("user") + tok.encode(msg) + tok.end_turn(eos_id) + tok.role("assistant")
+      out = []
+      for t in model.generate(ids):
+        if t == eos_id: break
+        out.append(t)
+        if len(out) >= 10: break
+      return out
+
+    # First conversation works
+    out1 = chat("hello")
+    self.assertGreater(len(out1), 1, "First conversation should generate multiple tokens")
+
+    # Second conversation should also work (but fails without reset)
+    out2 = chat("bye")
+    self.assertGreater(len(out2), 1, "Second conversation should generate multiple tokens (not just 1)")
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
