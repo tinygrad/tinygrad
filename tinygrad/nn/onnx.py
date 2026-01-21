@@ -366,18 +366,17 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
 }
 
-cache_misses = 0
 @functools.cache
 def _cached_to_python_const(t:Tensor): return t.data().tobytes() if t.dtype == dtypes.uint8 else t.tolist()
+_cached_to_python_const.last_misses = 0
 
 # Tensor -> python value cache for parameters
 def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
   if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
-  global cache_misses
   ret = _cached_to_python_const(t)
-  if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
+  if DEBUG >= 3 and (info := _cached_to_python_const.cache_info()).misses > _cached_to_python_const.last_misses:
     print(f"Cache miss for {t}")
-    cache_misses = info.misses
+    _cached_to_python_const.last_misses = info.misses
   return ret
 
 # ***** runner ******
