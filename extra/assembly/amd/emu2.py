@@ -937,8 +937,9 @@ class WaveState:
     self.sgpr_buf = Buffer('CPU', SGPR_COUNT, dtypes.uint32).ensure_allocated()
     self._vgpr_mv = self.vgpr_buf.as_buffer(force_zero_copy=True).cast('I')
     self._sgpr_mv = self.sgpr_buf.as_buffer(force_zero_copy=True).cast('I')
-    for i in range(SGPR_COUNT): self._write_sgpr(i, 0)
-    for i in range(VGPR_SIZE): self._vgpr_mv[i] = 0
+    # Zero memory using ctypes memset (much faster than Python loops)
+    ctypes.memset(self.vgpr_buf._buf.va_addr, 0, VGPR_SIZE * 4)
+    ctypes.memset(self.sgpr_buf._buf.va_addr, 0, SGPR_COUNT * 4)
     self._write_sgpr(EXEC_LO.offset, (1 << n_lanes) - 1)
     self._write_sgpr(PC_LO_IDX, 0)
 
@@ -1009,14 +1010,16 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               prg(*bufs, global_size=(1,1,1), local_size=(1,1,1))
             else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
           else:
-            # Clang backend: pass buffer addresses via ctypes
-            buf_addrs = [st.sgpr_buf._buf.va_addr, st.vgpr_buf._buf.va_addr, vmem_buf._buf.va_addr, lds_buf._buf.va_addr,
-                         scratch_buf._buf.va_addr if scratch_buf else 0]
+            # Clang/LLVM backend: pass buffer addresses via ctypes (pre-create to avoid allocation in loop)
+            c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
+                      ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
+                      ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
+            c_lane = ctypes.c_int32(0)
             for inst_count in range(1_000_000):
               if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
               name, fxn, globals_list, _ = program[pc]
               assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
               assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
-              fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
+              fxn(*[c_bufs[g] for g in globals_list], c_lane)
             else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0
