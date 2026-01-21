@@ -2012,7 +2012,7 @@ class Tensor(OpMixin):
     ```
     """
     m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + m.squeeze(axis)
+    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
 
   def logcumsumexp(self, axis=0) -> Tensor:
     """
