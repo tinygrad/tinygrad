@@ -50,7 +50,7 @@ class CompiledRunner(Runner):
   def __reduce__(self): return self.__class__, (self.p,)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
-    var_vals = {k: v[1] for k, v in self.p.runtimevars.items()} | (var_vals or {})
+    var_vals = var_vals or {}
     global_size, local_size = self.p.launch_dims(var_vals)
     if Device[self.p.device].renderer.has_local and local_size is None and all_int(self.p.global_size):
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
@@ -150,6 +150,7 @@ class ExecItem:
         print("tensor operations:")
         pprint.pprint(self.metadata, indent=2)
       raise e
+    self.fixedvars |= {k: v[1] for k, v in self.prg.p.runtimevars.items()} if isinstance(self.prg, CompiledRunner) else {}
     return self
 
   def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
