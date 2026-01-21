@@ -312,7 +312,6 @@ class TinyJit(Generic[ReturnType]):
         try:
           ret = self.fxn(*args, **kwargs)
           if len(params:=get_parameters(ret)): Tensor.realize(params[0], *params[1:])
-        except Exception as e: raise e
         finally: capturing.clear()
       jit_cache = self._jit_cache
       del self._buffer_replace, self._jit_cache
