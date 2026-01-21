@@ -2,9 +2,6 @@ from tinygrad import Tensor
 from tinygrad import nn
 from typing import Any
 
-def get_fsdp_units(fsdp_model:Any, units:list[Any]) -> Any:
-	pass
-
 
 class FSDP:
 	def __init__(self, module:Any, devices:tuple[str, ...], axis:int=0):
@@ -15,7 +12,6 @@ class FSDP:
 		self.units =  []
 
 		self.shard_model_()
-		get_fsdp_units(self, self.units)
 	
 	def shard_model_(self):
 		for name, param in nn.state.get_state_dict(self.module).items():
@@ -32,8 +28,10 @@ class FSDP:
 		parts = name.split(".")
 		submod = self.module
 		# replace all the model parameters with the new sharded ones
-		for p in parts[:-1]:
+		for i, p in enumerate(parts[:-1]):
 			submod = getattr(submod, p)
+			if i == len(parts) - 2 and submod not in self.units:
+				self.units.append(submod)
 		setattr(submod, parts[-1], param_sharded)
 
 	def gather_param(self, param:Tensor) -> Tensor:
