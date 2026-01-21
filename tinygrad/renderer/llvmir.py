@@ -54,8 +54,8 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
   N,M,K = wmma.arg[1]
   if cdna:
     if K == 32: dt_map.update({dtypes.half: ".f16", dtypes.bfloat16: ".bf16"})
-    if K >= 64: dt_map.update({dtypes.fp8e4m3: ".f8f6f4", dtypes.fp8e5m2: ".f8f6f4"})
-    scaled = K >= 64 and wmma.arg[2] in dtypes.fp8s
+    if (N,M,K) == (16,16,128): dt_map.update({dtypes.fp8e4m3: ".f8f6f4", dtypes.fp8e5m2: ".f8f6f4"})
+    scaled = (N,M,K) == (16,16,128) and wmma.arg[2] in dtypes.fp8s
     return f"  {ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.mfma.{'scale.' if scaled else ''}{dt_map[wmma.src[-1].dtype.scalar()]}" + \
            f".{N}x{M}x{K}{dt_map[wmma.arg[2]]}(" + ", ".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + f"{',i32 0' * (6 if scaled else 3)})"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
