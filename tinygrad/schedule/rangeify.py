@@ -488,8 +488,8 @@ pm_add_range_tags = PatternMatcher([
 ])
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
-  # if we have any outer ranges open here, we don't split
-  if len([r for r in x.ranges if r.arg[-1] != AxisType.OUTER]): return None
+  # if we have any non-outer ranges open here, we don't split
+  if any(r.arg[-1] != AxisType.OUTER for r in x.ranges): return None
 
   # ends of outer range don't go in kernels
   if x.op is Ops.END and x.src[1].op is Ops.RANGE and x.src[1].arg[-1] == AxisType.OUTER: return None
