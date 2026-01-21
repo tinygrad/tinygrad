@@ -41,7 +41,9 @@ class CPUWorker(threading.Thread):
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), tid)
+    vals = list(args[bufs:])
+    if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id'][0]] = tid
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, vals))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, tid, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
   def _timestamp(self, tid, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
@@ -54,7 +56,8 @@ class CPUComputeQueue(HWQueue):
     if isinstance(args_state, LVPArgsState):
       self.bind_args_state(args_state)
       return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
-    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
+    threads = args_state.vals[idx[0]] if (idx:=prg.runtimevars.get('core_id', None)) is not None else 1
+    return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=threads)
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
@@ -71,7 +74,9 @@ class CPUProgram(HCQProgram):
   try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
   except OSError: pass
 
-  def __init__(self, dev, name:str, lib:bytes):
+  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, tuple[int, int]]=None):
+    self.runtimevars = runtimevars or {}
+
     LVP = isinstance(dev.renderer, LVPRenderer)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000

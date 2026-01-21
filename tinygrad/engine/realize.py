@@ -44,13 +44,13 @@ class CompiledRunner(Runner):
     self.p:ProgramSpec = p
     assert self.p.lib is not None
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.p.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.p.lib, *p.aux) if prg is None else prg
+    self._prg = Device[p.device].runtime(p.function_name, self.p.lib, *p.aux, runtimevars=p.runtimevars) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
   def __reduce__(self): return self.__class__, (self.p,)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
-    if var_vals is None: var_vals = {}
+    var_vals = {k: v[1] for k, v in self.p.runtimevars.items()} | (var_vals or {})
     global_size, local_size = self.p.launch_dims(var_vals)
     if Device[self.p.device].renderer.has_local and local_size is None and all_int(self.p.global_size):
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
