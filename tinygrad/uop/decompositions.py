@@ -316,15 +316,18 @@ def threefry2x32(x: UOp, key: UOp):
   return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
 
 # ***** long as 2 ints *****
-def l2i(x:UOp, a: UOp, b: UOp):
-  if not x.tag: return
-  match x.op:
+def l2i(op: Ops, a0: UOp, a1: UOp, b0: UOp, b1: UOp):
+  match op:
     case Ops.ADD:
-      low = ((al:=a.rtag(0)) + b.rtag(0)).replace(dtype=dtypes.int)
-      if not x.tag: return low
-      carry = low.bitcast(dtypes.uint) < al.bitcast(dtypes.uint)
-      return (a.rtag(1) + b.rtag(1)).replace(dtype=dtypes.int) + carry.cast(dtypes.int)
+      carry = (low:=a0+b0).bitcast(dtypes.uint) < a0.bitcast(dtypes.uint)
+      return (low, (a1 + b1).replace(dtype=dtypes.int) + carry.cast(dtypes.int))
+    case Ops.MUL:
+      a00, a01, b00, b01 = a0.bitcast(dtypes.uint) & 0xFFFF, a0.bitcast(dtypes.uint) >> 16, b0.bitcast(dtypes.uint) & 0xFFFF, b0.bitcast(dtypes.uint) >> 16
+      mid = a00 * b01 + b01 * b00
+      return l2i(Ops.ADD, (a00 * b00 + (mid << 16)).bitcast(dtypes.int), (mid >> 16).bitcast(dtypes.int), UOp.const(dtypes.int, 0), (a0 * b1 + a1 * b0).bitcast(dtypes.int))
     case Ops.XOR | Ops.OR | Ops.AND: return x.replace(dtype=dtypes.int, src=(a.rtag(x.tag), b.rtag(x.tag)))
+
+def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]+off))
 
 # ***** decomposition patterns *****
 
@@ -377,12 +380,12 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
   if not is_dtype_supported(dtypes.long, device):
-    def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]+off))
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"),
              lambda x: x.replace(dtype=dtypes.int.ptr(x.dtype.size * 2)) if x.dtype.base is dtypes.long else None)]
     pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', dtypes.long)), name='st'),
              lambda st,idx,val: st.replace(src=(idx, val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
-    pat += [(UPat(GroupOp.ALU, dtypes.long, src=(UPat.var('a'), UPat.var('b')), name="x"), l2i)]
+    pat += [(UPat(GroupOp.ALU, dtypes.long, src=(UPat.var('a'), UPat.var('b')), name="x"),
+             lambda a,b,x: None if x.tag is None else l2i(x.op, a.rtag(0).cast(dtypes.int), a.rtag(1).cast(dtypes.int), b.rtag(0).cast(dtypes.int), b.rtag(1).cast(dtypes.int))[x.tag])]
     pat += [(UPat(Ops.LOAD, dtypes.long, src=(UPat.var('idx'),), name='x'),
              lambda x,idx: None if x.tag is None else x.replace(dtype=dtypes.int, src=(_idx(idx, x.tag),)))]
   return PatternMatcher(pat)
