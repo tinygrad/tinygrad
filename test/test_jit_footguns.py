@@ -9,6 +9,7 @@ SILENT MISMATCHES (highest priority - wrong results, no error):
   class_method_shared_across_instances EASY could check if first arg is self and warn
   slice_assign_requires_realize      MED    assign graph not connected to read during JIT replay
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
+  graph_input_output_aliasing        MED    GraphRunner skips aliased buffers but only input_replace updated
   python_constants_frozen            HARD   inherent to tracing JITs
   conditional_branches_frozen        HARD   inherent to tracing JITs
 
@@ -23,6 +24,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, TinyJit
 from tinygrad.engine.jit import JitError
+from tinygrad.helpers import JIT
 
 class TestJitFootguns(unittest.TestCase):
 
@@ -49,6 +51,41 @@ class TestJitFootguns(unittest.TestCase):
     r3 = f(Tensor([3, 3])).clone().realize()
 
     self.assertEqual([r1.item(), r2.item(), r3.item()], [2, 4, 6])
+
+  def test_graph_input_output_aliasing(self):
+    """JIT graph fails when input=output during graph creation, then different input later.
+
+    Graph-only because _input_replace is recomputed at _first_run only when JIT < 2 (graphing enabled).
+    When _first_run happens with input buffer == captured.ret buffer:
+    - get_input_replace() adds output position to input_replace (since buffer matches input_buffers)
+    - GraphRunner.__init__ skips setting buffer at output position (thinks it will be replaced)
+    - But output position isn't a true input, so it's never updated in __call__
+
+    This pattern occurs in LLM token generation where output becomes next input.
+    """
+    from tinygrad import Device
+    if Device[Device.DEFAULT].graph is None or JIT != 1:
+      self.skipTest("test requires JIT graph support")
+
+    @TinyJit
+    def step(x): return (x + 1).realize()
+
+    # Phase 1: warmup and capture with fresh inputs
+    a = Tensor([10]).contiguous().realize()
+    step(a)  # warmup (cnt=0)
+    b = Tensor([20]).contiguous().realize()
+    captured_ret = step(b)  # capture (cnt=1)
+
+    # Phase 2: first exec where input IS captured.ret (triggers _first_run with aliased buffers)
+    result = step(captured_ret)  # cnt=2, _first_run=True, input_buf == output_buf
+    self.assertEqual(result.item(), 22)  # 21+1=22, correct
+
+    # Phase 3: subsequent exec with DIFFERENT input (exposes the bug)
+    c = Tensor([100]).contiguous().realize()
+    result = step(c)  # cnt=3, different input buffer
+    # TODO: get_input_replace() incorrectly added output position to input_replace when input buffer == output buffer
+    # fix: output-only positions (in prg.p.outs but not prg.p.ins) should never be added to input_replace
+    self.assertEqual(result.item(), 22)  # should be 101!
 
   def test_multiple_outputs_same_intermediate(self):
     """Multiple outputs derived from the same intermediate - JIT copies aliased inputs to prevent hazard."""
