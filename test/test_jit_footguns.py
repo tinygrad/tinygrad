@@ -14,6 +14,7 @@ SILENT MISMATCHES (highest priority - wrong results, no error):
   conditional_branches_frozen        HARD   inherent to tracing JITs
 
 ERRORS RAISED (lower priority - at least users know):
+  item_bakes_in_values               EASY   raises JitError if .item()/.data() accessed during capture
   unrealized_const_input_error       EASY   raises JitError for unrealized const inputs
   non_tensor_outputs_error           EASY   raises JitError if return contains non-Tensor values
   positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
@@ -319,33 +320,31 @@ class TestJitFootguns(unittest.TestCase):
         f(Tensor([1]), Tensor([2]))
 
   def test_item_creates_unrealized_return(self):
-    """.item() in shape computation creates unrealized return with baked-in shape."""
+    """.item() in shape computation raises error during JIT capture."""
     @TinyJit
     def f(x): return Tensor.zeros(x.sum().item())
 
-    for _ in range(3): f(Tensor([1, 1, 1]))  # captures with sum=3
-    result = f(Tensor([2, 2, 2]))  # sum=6, but shape is baked in
-    assert result.shape == (3,)  # should be (6,)!
+    f(Tensor([1, 1, 1]))  # warmup
+    with self.assertRaises(JitError):
+      f(Tensor([1, 1, 1]))  # capture - .item() raises
 
   def test_item_bakes_in_values(self):
-    """.item() value is baked in, causing wrong output shapes (silent failure)."""
+    """.item() during JIT capture raises error (would bake in value)."""
     @TinyJit
     def f(x, mask): return x.masked_select(mask)
 
-    mask_2 = Tensor([True, False, True, False])
-    for _ in range(3): f(Tensor([1, 2, 3, 4]), mask_2)
-    mask_3 = Tensor([True, True, True, False])
-    result = f(Tensor([1, 2, 3, 4]), mask_3)
-    assert result.shape == (2,)  # should be (3,)!
+    f(Tensor([1, 2, 3, 4]), Tensor([True, False, True, False]))  # warmup
+    with self.assertRaises(JitError):
+      f(Tensor([1, 2, 3, 4]), Tensor([True, False, True, False]))  # capture - .item() raises
 
   def test_tolist_bakes_in_values(self):
-    """.tolist() returns Python values that get baked in (silent failure)."""
+    """.tolist() raises error during JIT capture (would bake in values)."""
     @TinyJit
     def f(x): return Tensor(x.tolist())
 
-    for _ in range(3): f(Tensor([1, 2, 3]))
-    result = f(Tensor([4, 5, 6]))
-    np.testing.assert_equal(result.numpy(), [1, 2, 3])  # should be [4,5,6]!
+    f(Tensor([1, 2, 3]))  # warmup
+    with self.assertRaises(JitError):
+      f(Tensor([1, 2, 3]))  # capture - .tolist() raises
 
 
 class TestJitCorrectBehavior(unittest.TestCase):
