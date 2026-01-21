@@ -337,6 +337,14 @@ class Inst:
     # MUBUF/MTBUF: vaddr size depends on offen/idxen (1 or 2 regs)
     if 'vaddr' in bits and hasattr(self, 'offen') and hasattr(self, 'idxen'):
       bits['vaddr'] = max(1, self.offen + self.idxen) * 32
+    # F8F6F4 MFMA: CBSZ selects matrix A format, BLGP selects matrix B format
+    # VGPRs: FP8/BF8(0,1)=8, FP6/BF6(2,3)=6, FP4(4)=4
+    if 'f8f6f4' in getattr(self, 'op_name', '').lower():
+      # Use explicit fields if available (VOP3PX2), else extract from VOP3P-MAI bit positions
+      cbsz = self.cbsz if hasattr(type(self), 'cbsz') else (self._raw >> 8) & 0x7
+      blgp = self.blgp if hasattr(type(self), 'blgp') else (self._raw >> 61) & 0x7
+      vgprs = {0: 8, 1: 8, 2: 6, 3: 6, 4: 4}
+      bits['src0'], bits['src1'] = vgprs.get(cbsz, 8) * 32, vgprs.get(blgp, 8) * 32
     return bits
   @property
   def op_regs(self) -> dict[str, int]:
