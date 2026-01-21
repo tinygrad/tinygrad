@@ -316,11 +316,15 @@ def threefry2x32(x: UOp, key: UOp):
   return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
 
 # ***** long as 2 ints *****
-def l2i_add(a: UOp, b: UOp, high: bool):
-  low = (al:=a.gep(0)) + (bl:=b.gep(0))
-  if not high: return low
-  carry = low.bitcast(dtypes.uint) < al.bitcast(dtypes.uint)
-  return a.gep(1) + b.gep(1) + carry.cast(dtypes.int)
+def l2i(x:UOp, a: UOp, b: UOp):
+  if not x.tag: return
+  match x.op:
+    case Ops.ADD:
+      low = ((al:=a.rtag(0)) + b.rtag(0)).replace(dtype=dtypes.int)
+      if not x.tag: return low
+      carry = low.bitcast(dtypes.uint) < al.bitcast(dtypes.uint)
+      return (a.rtag(1) + b.rtag(1)).replace(dtype=dtypes.int) + carry.cast(dtypes.int)
+    case Ops.XOR | Ops.OR | Ops.AND: return x.replace(dtype=dtypes.int, src=(a.rtag(x.tag), b.rtag(x.tag)))
 
 # ***** decomposition patterns *****
 
@@ -373,13 +377,11 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
   if not is_dtype_supported(dtypes.long, device):
-    pat += [(UPat(GroupOp.All, dtypes.long, name='x'), lambda x: x.replace(dtype=dtypes.int.vec(2)))]
-    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x: x.replace(dtype=dtypes.int.ptr(x.dtype.size * 2)) if x.dtype.base is dtypes.long else None)]
-    pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', dtypes.int.vec(2))), name='st'),
-             lambda st,idx,val: st.replace(src=(idx, val.gep(0))).group(st.replace(src=(idx.replace(src=(idx.src[0], idx.src[1]+1)), val.gep(1)))))]
-    pat += [(UPat(Ops.ADD, dtypes.int.vec(2), src=(UPat.var('a'), UPat.var('b'))).f(Ops.GEP, name='g'), lambda g,a,b: l2i_add(a,b,bool(g.arg[0])))]
-    pat += [(UPat((Ops.XOR, Ops.OR, Ops.AND), dtypes.int.vec(2), src=(UPat.var('a'), UPat.var('b')), name='x').f(Ops.GEP, name='g'),
-             lambda g,x,a,b: x.replace(dtype=dtypes.int, src=(a.gep(g.arg[0]), b.gep(g.arg[0]))))]
-    pat += [(UPat(Ops.LOAD, dtypes.int.vec(2), src=(UPat.var('idx'),), name='x').f(Ops.GEP, name='g'),
-             lambda g,x,idx: x.replace(dtype=dtypes.int, src=(idx.replace(src=(idx.src[0], idx.src[1]+g.arg[0])),)))]
+    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"),
+             lambda x: x.replace(dtype=dtypes.int.ptr(x.dtype.size * 2)) if x.dtype.base is dtypes.long else None)]
+    pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', dtypes.long)), name='st'),
+             lambda st,idx,val: st.replace(src=(idx, val.rtag(0))).group(st.replace(src=(idx.replace(src=(idx.src[0], idx.src[1]+1)), val.rtag(1)))) if val.tag is None else None)]
+    pat += [(UPat(GroupOp.ALU, dtypes.long, src=(UPat.var('a'), UPat.var('b')), name="x"), l2i)]
+    pat += [(UPat(Ops.LOAD, dtypes.long, src=(UPat.var('idx'),), name='x'),
+             lambda x,idx: None if x.tag is None else x.replace(dtype=dtypes.int, src=(idx.replace(src=(idx.src[0], idx.src[1]+x.tag)),)))]
   return PatternMatcher(pat)
