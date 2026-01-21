@@ -100,7 +100,8 @@ class GraphRunner(Runner):
       assert ji.prg is not None
       estimates += ji.prg.estimates
       if isinstance(ji.prg, CompiledRunner):
-        if ji.prg.p.vars: self.var_vals_replace[j] = [(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars]
+        if ji.prg.p.vars:
+          self.var_vals_replace[j] = [(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars and v.expr not in ji.prg.p.runtimevars]
 
         global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
         if global_dim_idx is not None or local_dim_idx is not None:

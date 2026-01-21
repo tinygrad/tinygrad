@@ -42,7 +42,7 @@ class CPUWorker(threading.Thread):
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
     vals = list(args[bufs:])
-    if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id'][0]] = tid
+    if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id']] = tid
     prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, vals))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, tid, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)

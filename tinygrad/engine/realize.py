@@ -57,7 +57,7 @@ class CompiledRunner(Runner):
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
     return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
-                     vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
+                     vals=tuple(var_vals[k.expr] if k.expr not in self.p.runtimevars else None for k in self.p.vars), wait=wait)
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
@@ -150,7 +150,6 @@ class ExecItem:
         print("tensor operations:")
         pprint.pprint(self.metadata, indent=2)
       raise e
-    self.fixedvars |= {k: v[1] for k, v in self.prg.p.runtimevars.items()} if isinstance(self.prg, CompiledRunner) else {}
     return self
 
   def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
