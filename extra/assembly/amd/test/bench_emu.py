@@ -67,12 +67,11 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
   return sum(times) / len(times)
 
 def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
-  """Benchmark Python emulator with build/compile/execution times separated."""
-  from extra.assembly.amd.emu2 import _emu_renderer, _emu_compiler, _ProgramClass, _elf_symbol_offsets, EMU2_BACKEND
+  """Benchmark Python emulator with build/render/compile/execution times separated."""
+  from extra.assembly.amd.emu2 import _emu_renderer, _emu_compiler, _elf_symbol_offsets, EMU2_BACKEND
   from extra.assembly.amd.emu2 import _get_inst_prg
   from tinygrad.codegen import get_program
   from tinygrad.helpers import Context
-  from tinygrad.device import Device
   from tinygrad.runtime.support.elf import jit_loader
 
   # Clear caches to measure fresh
@@ -93,14 +92,14 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
   sinks = [_get_inst_sink(inst_bytes) for inst_bytes in inst_bytes_list]
   build_time = time.perf_counter() - build_start
 
-  # Measure compile time (get_program: linearize + render)
-  compile_start = time.perf_counter()
+  # Measure render time (get_program: linearize + render to C)
+  render_start = time.perf_counter()
   with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
     prgs = [get_program(sink, _emu_renderer) for sink in sinks]
-  compile_time = time.perf_counter() - compile_start
+  render_time = time.perf_counter() - render_start
 
-  # Measure JIT time (batch compile C to native)
-  jit_start = time.perf_counter()
+  # Measure compile time (clang/llvm compile C to native)
+  compile_start = time.perf_counter()
   if EMU2_BACKEND == "python":
     for prg in prgs:
       _emu_compiler.compile(prg.src)
@@ -116,12 +115,12 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
     obj = _emu_compiler.compile_to_obj(combined_src)
     _elf_symbol_offsets(obj)
     jit_loader(obj)
-  jit_time = time.perf_counter() - jit_start
+  compile_time = time.perf_counter() - compile_start
 
   # Execution time (need to populate cache first)
   decode_program(kernel)
   exec_time = benchmark_emulator("Python", python_run_asm, kernel, global_size, local_size, args_ptr, rsrc2, iterations)
-  return build_time, compile_time, jit_time, exec_time
+  return build_time, render_time, compile_time, exec_time
 
 def get_tinygrad_kernel(op_name: str) -> tuple[bytes, tuple, tuple, list[int], dict[int, bytes], int] | None:
   """Get a real tinygrad kernel by operation name. Returns (code, global_size, local_size, buf_sizes, buf_data, rsrc2)."""
@@ -211,7 +210,7 @@ def main():
     buffers, args_arr, args_ptr, ranges = setup_buffers(buf_sizes, buf_data)
 
     # Benchmark Python emulator (must be first to measure compile time before cache is populated)
-    py_build, py_compile, py_jit, py_exec = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
+    py_build, py_render, py_compile, py_exec = benchmark_python_split(kernel, global_size, local_size, args_ptr, rsrc2, args.iterations)
 
     n_insts = count_instructions(kernel)  # uses cached decode_program
     n_workgroups = global_size[0] * global_size[1] * global_size[2]
@@ -223,35 +222,35 @@ def main():
 
     if py_build is not None:
       py_exec_rate = total_work / py_exec / 1e6
-      print(f"  Build (UOp):    {py_build*1000:8.3f} ms")
+      print(f"  Build:          {py_build*1000:8.3f} ms")
+      print(f"  Render:         {py_render*1000:8.3f} ms")
       print(f"  Compile:        {py_compile*1000:8.3f} ms")
-      print(f"  JIT:            {py_jit*1000:8.3f} ms")
       print(f"  Exec:           {py_exec*1000:8.3f} ms  ({py_exec_rate:7.2f} M ops/s)")
     if rust_time:
       rust_rate = total_work / rust_time / 1e6
       speedup = py_exec / rust_time if py_exec else 0
       print(f"  Rust:           {rust_time*1000:8.3f} ms  ({rust_rate:7.2f} M ops/s)  [{speedup:.1f}x faster]")
 
-    results.append((op_name, n_insts, n_workgroups, py_build, py_compile, py_jit, py_exec, rust_time))
+    results.append((op_name, n_insts, n_workgroups, py_build, py_render, py_compile, py_exec, rust_time))
 
   # Summary table
   print("\n" + "=" * 130)
   print("SUMMARY")
   print("=" * 130)
-  print(f"{'Name':<16} {'Insts':<6} {'WGs':<5} {'Build (ms)':<12} {'Compile (ms)':<14} {'JIT (ms)':<12} {'Exec (ms)':<12} {'Rust (ms)':<12} {'Speedup':<10}")
+  print(f"{'Name':<16} {'Insts':<6} {'WGs':<5} {'Build (ms)':<12} {'Render (ms)':<12} {'Compile (ms)':<14} {'Exec (ms)':<12} {'Rust (ms)':<12} {'Speedup':<10}")
   print("-" * 130)
 
-  for name, n_insts, n_wgs, py_build, py_compile, py_jit, py_exec, rust_time in results:
+  for name, n_insts, n_wgs, py_build, py_render, py_compile, py_exec, rust_time in results:
     build_ms = f"{py_build*1000:.3f}" if py_build else "error"
+    render_ms = f"{py_render*1000:.3f}" if py_render else "error"
     compile_ms = f"{py_compile*1000:.3f}" if py_compile else "error"
-    jit_ms = f"{py_jit*1000:.3f}" if py_jit else "error"
     exec_ms = f"{py_exec*1000:.3f}" if py_exec else "error"
     if rust_time:
       rust_ms = f"{rust_time*1000:.3f}"
       speedup = f"{py_exec/rust_time:.1f}x" if py_exec else "N/A"
     else:
       rust_ms, speedup = "N/A", "N/A"
-    print(f"{name:<16} {n_insts:<6} {n_wgs:<5} {build_ms:<12} {compile_ms:<14} {jit_ms:<12} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
+    print(f"{name:<16} {n_insts:<6} {n_wgs:<5} {build_ms:<12} {render_ms:<12} {compile_ms:<14} {exec_ms:<12} {rust_ms:<12} {speedup:<10}")
 
 if __name__ == "__main__":
   main()
