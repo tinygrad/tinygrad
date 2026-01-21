@@ -378,6 +378,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
     pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', dtypes.int.vec(2))), name='st'),
              lambda st,idx,val: st.replace(src=(idx, val.gep(0))).group(st.replace(src=(idx.replace(src=(idx.src[0], idx.src[1]+1)), val.gep(1)))))]
     pat += [(UPat(Ops.ADD, dtypes.int.vec(2), src=(UPat.var('a'), UPat.var('b'))).f(Ops.GEP, name='g'), lambda g,a,b: l2i_add(a,b,bool(g.arg[0])))]
+    pat += [(UPat((Ops.XOR, Ops.OR, Ops.AND), dtypes.int.vec(2), src=(UPat.var('a'), UPat.var('b')), name='x').f(Ops.GEP, name='g'),
+             lambda g,x,a,b: x.replace(dtype=dtypes.int, src=(a.gep(g.arg[0]), b.gep(g.arg[0]))))]
     pat += [(UPat(Ops.LOAD, dtypes.int.vec(2), src=(UPat.var('idx'),), name='x').f(Ops.GEP, name='g'),
              lambda g,x,idx: x.replace(dtype=dtypes.int, src=(idx.replace(src=(idx.src[0], idx.src[1]+g.arg[0])),)))]
   return PatternMatcher(pat)
