@@ -855,9 +855,8 @@ def _elf_symbol_offsets(obj: bytes) -> dict[str, int]:
   return {name: sections[sym.st_shndx].header.sh_addr + sym.st_value
           for sym in symbols if 0 < sym.st_shndx < len(sections) and (name := _strtab(strtab_sec.content, sym.st_name))}
 
-@functools.cache
-def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
-  """Compile instruction bytes to ProgramSpec. Cached by instruction bytes."""
+def _get_inst_sink(inst_bytes: bytes) -> UOp:
+  """Build UOp sink for instruction bytes. Cached by instruction bytes."""
   inst = decode_inst(inst_bytes)
   name = f"{_op_name(inst).lower()}_{inst_bytes[:inst.size()].hex()}"
   sgpr, vgpr, vmem, lds, scratch = _define_bufs()
@@ -876,8 +875,13 @@ def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
         break
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
   _, sink = handler(inst, ctx, name)
+  return sink
+
+@functools.cache
+def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
+  """Compile instruction bytes to ProgramSpec. Cached by instruction bytes."""
   with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
-    return get_program(sink, _emu_renderer)
+    return get_program(_get_inst_sink(inst_bytes), _emu_renderer)
 
 @functools.cache
 def decode_program(data: bytes) -> dict[int, tuple[str, object, list[int], object]]:
