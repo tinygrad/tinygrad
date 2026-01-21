@@ -84,7 +84,7 @@ class HCQGraph(MultiGraphRunner):
 
       if is_exec_prg:
         enqueue_queue = self.comp_queues[enqueue_dev]
-        self.fixedvars[enqueue_dev] = merge_dicts([self.fixedvars.get(enqueue_dev, {}), ji.prg.p.runtimevars])
+        self.fixedvars[enqueue_dev] = merge_dicts([self.fixedvars.get(enqueue_dev, {}), cast(CompiledRunner, ji.prg).p.runtimevars])
       else:
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
         queue_idx = self.devices.index(cast(HCQCompiled, Device[cast(Buffer, ji.bufs[0]).device])) % self.num_copy_queues
