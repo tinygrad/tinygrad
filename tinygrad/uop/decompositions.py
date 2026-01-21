@@ -377,11 +377,12 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
   if not is_dtype_supported(dtypes.long, device):
+    def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]+off))
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"),
              lambda x: x.replace(dtype=dtypes.int.ptr(x.dtype.size * 2)) if x.dtype.base is dtypes.long else None)]
     pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', dtypes.long)), name='st'),
-             lambda st,idx,val: st.replace(src=(idx, val.rtag(0))).group(st.replace(src=(idx.replace(src=(idx.src[0], idx.src[1]+1)), val.rtag(1)))) if val.tag is None else None)]
+             lambda st,idx,val: st.replace(src=(idx, val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
     pat += [(UPat(GroupOp.ALU, dtypes.long, src=(UPat.var('a'), UPat.var('b')), name="x"), l2i)]
     pat += [(UPat(Ops.LOAD, dtypes.long, src=(UPat.var('idx'),), name='x'),
-             lambda x,idx: None if x.tag is None else x.replace(dtype=dtypes.int, src=(idx.replace(src=(idx.src[0], idx.src[1]+x.tag)),)))]
+             lambda x,idx: None if x.tag is None else x.replace(dtype=dtypes.int, src=(_idx(idx, x.tag),)))]
   return PatternMatcher(pat)
