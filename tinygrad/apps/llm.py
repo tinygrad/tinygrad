@@ -217,7 +217,6 @@ class Transformer:
 
   def generate(self, tokens:list[int], start_pos=0):
     v_start_pos = UOp.variable("start_pos", 1, self.max_context-1)
-    start_pos = 0
     t = Tensor([tokens[start_pos:]], dtype="int32")
     self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
     while len(tokens) < self.max_context:
