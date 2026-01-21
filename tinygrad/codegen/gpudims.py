@@ -76,8 +76,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
 
   # get the idxs
   ki: KernelInfo = s.arg
-  if ctx.has_threads and not ctx.has_local and global_shape:
-    idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int).cast(dtypes.index)]
+  if ctx.has_threads: idxs = [UOp.variable("core_id", 0, int(global_shape[0])-1, dtypes.int).cast(dtypes.index)]
   elif ki.dont_use_locals:
     assert not local_dims, "can't use locals if there's no local dims"
     idxs = get_grouped_dims("idx", global_shape, ctx.global_max, reverse=True)
