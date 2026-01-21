@@ -323,9 +323,10 @@ def l2i(op: Ops, a0: UOp, a1: UOp, b0: UOp, b1: UOp):
       return (low, (a1 + b1).replace(dtype=dtypes.int) + carry.cast(dtypes.int))
     case Ops.MUL:
       a00, a01, b00, b01 = a0.bitcast(dtypes.uint) & 0xFFFF, a0.bitcast(dtypes.uint) >> 16, b0.bitcast(dtypes.uint) & 0xFFFF, b0.bitcast(dtypes.uint) >> 16
-      mid = a00 * b01 + b01 * b00
-      return l2i(Ops.ADD, (a00 * b00 + (mid << 16)).bitcast(dtypes.int), (mid >> 16).bitcast(dtypes.int), UOp.const(dtypes.int, 0), (a0 * b1 + a1 * b0).bitcast(dtypes.int))
-    case Ops.XOR | Ops.OR | Ops.AND: return x.replace(dtype=dtypes.int, src=(a.rtag(x.tag), b.rtag(x.tag)))
+      mid = l2i(Ops.ADD, ((a00*b01)<<16).bitcast(dtypes.int), ((a00*b01)>>16).bitcast(dtypes.int),
+                         ((a01*b00)<<16).bitcast(dtypes.int), ((a01*b00)>>16).bitcast(dtypes.int))
+      return l2i(Ops.ADD, *mid, (a00*b00).bitcast(dtypes.int), (a01*b01).bitcast(dtypes.int) + a0*b1 + a1*b0)
+    case Ops.XOR | Ops.OR | Ops.AND: return (UOp(op, dtypes.int, src=(a0, b0)), UOp(op, dtypes.int, src=(a1, b1)))
 
 def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]+off))
 
