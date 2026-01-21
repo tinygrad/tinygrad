@@ -1,6 +1,7 @@
 # type: ignore
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, signal
-from tinygrad.helpers import from_mv, to_mv, getenv, init_c_struct_t
+from tinygrad.helpers import from_mv, to_mv, getenv
+from tinygrad.runtime.support.c import init_c_struct_t
 from hexdump import hexdump
 start = time.perf_counter()
 
@@ -16,12 +17,12 @@ def get_struct(argp, stype):
 def dump_struct(st):
   if getenv("IOCTL", 0) == 0: return
   print("\t", st.__class__.__name__, end=" { ")
-  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
+  for v in type(st)._real_fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
   print("}")
 
 def format_struct(s):
   sdats = []
-  for field in s._fields_:
+  for field in s._real_fields_:
     dat = getattr(s, field[0])
     if isinstance(dat, int): sdats.append(f"{field[0]}:0x{dat:X}")
     else: sdats.append(f"{field[0]}:{dat}")
@@ -104,6 +105,12 @@ def ioctl(fd, request, argp):
         elif hasattr(nv_gpu, name+"_PARAMS"): dump_struct(get_struct(argp, getattr(nv_gpu, name+"_PARAMS")))
         elif name == "NVA06C_CTRL_CMD_GPFIFO_SCHEDULE": dump_struct(get_struct(argp, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS))
         elif name == "NV83DE_CTRL_CMD_GET_MAPPINGS": dump_struct(get_struct(s.params, nv_gpu.NV83DE_CTRL_DEBUG_GET_MAPPINGS_PARAMETERS))
+        elif name == "NVB0CC_CTRL_CMD_EXEC_REG_OPS" and struc is not None and getenv("IOCTL", 0) >= 3:
+          reg_params = get_struct(s.params, struc)
+          for i in range(reg_params.regOpCount):
+            op = reg_params.regOps[i]
+            val = (op.regValueHi << 32) | op.regValueLo
+            print(f"\t  regOps[{i:3d}]: op={op.regOp} type={op.regType} status={op.regStatus} offset=0x{op.regOffset:08x} value=0x{val:016x}")
       else:
         if getenv("IOCTL", 0) >= 1: print("unhandled cmd", hex(s.cmd))
       # format_struct(s)
@@ -205,7 +212,7 @@ def make_qmd_struct_type():
     fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]-data[1]+1))
     if len(fields) >= 2 and fields[-2][0].endswith('_lower') and fields[-1][0].endswith('_upper') and fields[-1][0][:-6] == fields[-2][0][:-6]:
       fields = fields[:-2] + [(fields[-1][0][:-6], ctypes.c_uint64, fields[-1][2] + fields[-2][2])]
-  return init_c_struct_t(tuple(fields))
+  return init_c_struct_t(0x40 * 4, tuple(fields))
 qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 

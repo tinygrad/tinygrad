@@ -4,11 +4,113 @@ from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, CUD
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerPair, CompilerSet
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.runtime.autogen import cuda
+from tinygrad.runtime.autogen import cuda, cupti
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler, NVCCCompiler
 from tinygrad.runtime.support.c import init_c_struct_t, init_c_var
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
+
+PROFILE = getenv("PROFILE", 0)
+
+# PC sampling stall reason names
+PC_STALL_REASONS = {
+  0: "invalid", 1: "none", 2: "inst_fetch", 3: "exec_dep", 4: "mem_dep",
+  5: "texture", 6: "sync", 7: "const_mem", 8: "pipe_busy", 9: "mem_throttle",
+  10: "not_selected", 11: "other", 12: "sleeping"
+}
+
+
+# CUPTI profiling support
+class CUPTIProfiler:
+  def __init__(self):
+    self.initialized = False
+    self.pc_sampling_enabled = False
+    self.buffers: list[ctypes.Array] = []
+    self.kernel_stalls: dict[int, dict[int, int]] = {}  # correlationId -> {stall_reason: samples}
+
+  def _check_cupti(self, status, soft=False):
+    if status != cupti.CUPTI_SUCCESS:
+      if soft: return False
+      raise RuntimeError(f"CUPTI Error {status}")
+    return True
+
+  def init(self, ctx, device_id: int = 0):
+    if self.initialized: return
+    # Initialize profiler API
+    init_params = cupti.CUpti_Profiler_Initialize_Params()
+    init_params.structSize = 16
+    cupti.cuptiProfilerInitialize(ctypes.byref(init_params))
+
+    # Register buffer callbacks for Activity API
+    self._buf_req_cb = cupti.CUpti_BuffersCallbackRequestFunc(self._buffer_requested)
+    self._buf_comp_cb = cupti.CUpti_BuffersCallbackCompleteFunc(self._buffer_completed)
+    self._check_cupti(cupti.cuptiActivityRegisterCallbacks(self._buf_req_cb, self._buf_comp_cb))
+
+    # PROFILE=1: kernel timing, PROFILE=2: PC sampling with stall reasons
+    if PROFILE >= 2:
+      # PC sampling for stall analysis (requires elevated privileges)
+      if DEBUG >= 1: print("  CUPTI: PC sampling mode (before)")
+      pc_status = cupti.cuptiActivityEnable(cupti.CUPTI_ACTIVITY_KIND_PC_SAMPLING)
+      if pc_status == cupti.CUPTI_SUCCESS:
+        config = cupti.CUpti_ActivityPCSamplingConfig()
+        config.size, config.samplingPeriod = 16, cupti.CUPTI_ACTIVITY_PC_SAMPLING_PERIOD_MIN
+        cfg_status = cupti.dll.cuptiActivityConfigurePCSampling(ctx, ctypes.byref(config))
+        if cfg_status == cupti.CUPTI_SUCCESS:
+          if DEBUG >= 1: print("  CUPTI: PC sampling mode (before stall analysis)")
+          cupti.cuptiActivityEnable(cupti.CUPTI_ACTIVITY_KIND_PC_SAMPLING_RECORD_INFO)
+          self.pc_sampling_enabled = True
+          if DEBUG >= 1: print("  CUPTI: PC sampling mode (stall analysis)")
+        elif cfg_status == 35:
+          if DEBUG >= 1: print("  CUPTI: PC sampling needs: echo 'options nvidia NVreg_RestrictProfilingToAdminUsers=0'|sudo tee /etc/modprobe.d/nvidia.conf && sudo reboot")
+      # Fall back to kernel timing if PC sampling setup failed
+      if not self.pc_sampling_enabled:
+        self._check_cupti(cupti.cuptiActivityEnable(cupti.CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL))
+    else:
+      # Kernel activity tracing for timing
+      self._check_cupti(cupti.cuptiActivityEnable(cupti.CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL))
+
+    self.initialized = True
+
+  def _buffer_requested(self, buffer, size, max_num_records):
+    buf = (ctypes.c_uint8 * 1024 * 1024)()  # 1MB buffer
+    self.buffers.append(buf)
+    buffer[0] = ctypes.cast(buf, ctypes.POINTER(ctypes.c_uint8))
+    size[0] = ctypes.sizeof(buf)
+    max_num_records[0] = 0
+
+  def _buffer_completed(self, ctx, stream_id, buffer, size, valid_size):
+    if valid_size > 0:
+      record = ctypes.POINTER(cupti.CUpti_Activity)()
+      while cupti.cuptiActivityGetNextRecord(buffer, valid_size, ctypes.byref(record)) == cupti.CUPTI_SUCCESS:
+        kind = record.contents.kind
+        if kind == cupti.CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL:
+          kernel = ctypes.cast(record, ctypes.POINTER(cupti.CUpti_ActivityKernel9)).contents
+          name = ctypes.string_at(kernel.name).decode() if kernel.name else "unknown"
+          duration_us = (kernel.end - kernel.start) / 1000.0
+          grid, block = (kernel.gridX, kernel.gridY, kernel.gridZ), (kernel.blockX, kernel.blockY, kernel.blockZ)
+          print(f"  CUPTI: {name[:40]:40s} | {duration_us:10.2f} us | grid={grid} block={block} | regs={kernel.registersPerThread:3d} smem={kernel.staticSharedMemory + kernel.dynamicSharedMemory:6d}B")
+        elif kind == cupti.CUPTI_ACTIVITY_KIND_PC_SAMPLING:
+          pc = ctypes.cast(record, ctypes.POINTER(cupti.CUpti_ActivityPCSampling3)).contents
+          cid = pc.correlationId
+          if cid not in self.kernel_stalls: self.kernel_stalls[cid] = {}
+          self.kernel_stalls[cid][pc.stallReason] = self.kernel_stalls[cid].get(pc.stallReason, 0) + pc.samples
+        elif kind == cupti.CUPTI_ACTIVITY_KIND_PC_SAMPLING_RECORD_INFO:
+          info = ctypes.cast(record, ctypes.POINTER(cupti.CUpti_ActivityPCSamplingRecordInfo)).contents
+          cid = info.correlationId
+          if cid in self.kernel_stalls:
+            stalls = self.kernel_stalls[cid]
+            total = sum(stalls.values())
+            if total > 0:
+              top = sorted(stalls.items(), key=lambda x: -x[1])[:5]
+              stall_str = " ".join(f"{PC_STALL_REASONS.get(r,'?')}:{100*c//total}%" for r,c in top if c > 0)
+              print(f"  CUPTI stalls (corr={cid}): {total} samples | {stall_str}")
+            del self.kernel_stalls[cid]
+
+  def flush(self):
+    if not self.initialized: return
+    self._check_cupti(cupti.cuptiActivityFlushAll(0))
+
+cupti_profiler = CUPTIProfiler() if PROFILE else None
 
 def check(status):
   if status != 0:
@@ -117,6 +219,9 @@ class CUDADevice(Compiled):
     self.pending_copyin: list[tuple[int, int, BufferSpec|None]] = []
     CUDADevice.devices.append(self)
 
+    # Initialize CUPTI profiling if enabled
+    if cupti_profiler: cupti_profiler.init(self.context, device_id)
+
     from tinygrad.runtime.graph.cuda import CUDAGraph
     compilers = CompilerSet([CompilerPair(functools.partial(CUDARenderer, self.arch), functools.partial(CUDACompiler, self.arch)),
                              CompilerPair(functools.partial(PTXRenderer, self.arch), functools.partial(PTXCompiler, self.arch), CUDA_PTX),
@@ -126,6 +231,7 @@ class CUDADevice(Compiled):
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))
     check(cuda.cuCtxSynchronize())
+    if cupti_profiler: cupti_profiler.flush()
     for opaque,sz,options in self.pending_copyin: self.allocator.free(opaque, sz, options)
     self.pending_copyin.clear()
 

@@ -38,6 +38,14 @@ def __getattr__(nm):
     case "avcodec": return load("avcodec", None, ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], tarball=ffmpeg_src)
     case "opencl": return load("opencl", "'OpenCL'", ["/usr/include/CL/cl.h"])
     case "cuda": return load("cuda", "'cuda'", ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"], parse_macros=False)
+    case "cupti": return load("cupti", "'/usr/local/cuda/targets/x86_64-linux/lib/libcupti.so'", [
+      "/usr/local/cuda/include/cupti_result.h", "/usr/local/cuda/include/cupti_activity.h",
+      "/usr/local/cuda/include/cupti_callbacks.h", "/usr/local/cuda/include/cupti_events.h",
+      "/usr/local/cuda/include/cupti_metrics.h", "/usr/local/cuda/include/cupti_driver_cbid.h",
+      "/usr/local/cuda/include/cupti_runtime_cbid.h", "/usr/local/cuda/include/cupti_profiler_target.h",
+      "/usr/local/cuda/include/cupti_profiler_host.h", "/usr/local/cuda/include/cupti_pmsampling.h",
+      "/usr/local/cuda/include/generated_cuda_meta.h", "/usr/local/cuda/include/generated_cuda_runtime_api_meta.h"
+    ], args=["-D__CUDA_API_VERSION_INTERNAL", "-I/usr/local/cuda/include"], parse_macros=False)
     case "nvrtc": return load("nvrtc", "'nvrtc'", ["/usr/include/nvrtc.h"], paths=nv_lib_path, prolog=["import sysconfig"])
     case "nvjitlink": load("nvjitlink", "'nvJitLink'", [root/"extra/nvJitLink.h"], paths=nv_lib_path, prolog=["import sysconfig"])
     case "kfd": return load("kfd", None, [root/"extra/hip_gpu_driver/kfd_ioctl.h"])
@@ -51,7 +59,7 @@ def __getattr__(nm):
                                                                          "-ioctl-numa", "-unix-nvos-params-wrappers"]],
         *[f"{{}}/src/common/sdk/nvidia/inc/{s}.h" for s in ["alloc/alloc_channel", "nvos", "ctrl/ctrlc36f", "ctrl/ctrlcb33",
                                                             "ctrl/ctrla06c", "ctrl/ctrl90f1", "ctrl/ctrla06f/ctrla06fgpfifo"]],
-        *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{s}/*.h" for s in ["0000", "0080", "2080", "83de"]],
+        *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{s}/*.h" for s in ["0000", "0080", "2080", "83de", "b0cc"]],
         "{}/kernel-open/common/inc/nvstatus.h", "{}/src/nvidia/generated/g_allclasses.h"
       ], args=[
         "-include", "{}/src/common/sdk/nvidia/inc/nvtypes.h", "-I{}/src/common/inc", "-I{}/kernel-open/nvidia-uvm", "-I{}/kernel-open/common/inc",
