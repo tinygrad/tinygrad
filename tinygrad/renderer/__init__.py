@@ -86,7 +86,7 @@ class ProgramSpec:
   def function_name(self) -> str: return to_function_name(self.name)
 
   @functools.cached_property
-  def runtimevars(self) -> dict[str, tuple[int, int]]: return {v.arg[0]: (i, v.arg[2]+1) for i, v in enumerate(self.vars) if v.arg[0] in ['core_id']}
+  def runtimevars(self) -> dict[str, tuple[int, int]]: return {v.arg[0]: (i, 0) for i, v in enumerate(self.vars) if v.arg[0] in ['core_id']}
 
   @property
   def applied_opts(self) -> tuple[Opt, ...]|None:
@@ -128,6 +128,7 @@ class ProgramSpec:
         special_size = local_size if u.arg[0] == 'l' else global_size
         # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
+      if u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id': global_size[0] = u.arg[2] + 1
 
     return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, list(prg.arg) if prg.arg else [], global_size, local_size,
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
