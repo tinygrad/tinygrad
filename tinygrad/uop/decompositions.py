@@ -327,6 +327,7 @@ def l2i(op: Ops, a0: UOp, a1: UOp, b0: UOp, b1: UOp):
                          ((a01*b00)<<16).bitcast(dtypes.int), ((a01*b00)>>16).bitcast(dtypes.int))
       return l2i(Ops.ADD, *mid, (a00*b00).bitcast(dtypes.int), (a01*b01).bitcast(dtypes.int) + a0*b1 + a1*b0)
     case Ops.XOR | Ops.OR | Ops.AND: return (UOp(op, dtypes.int, src=(a0, b0)), UOp(op, dtypes.int, src=(a1, b1)))
+    case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
 def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]+off))
 
@@ -362,8 +363,8 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d", vec=False), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
       pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
   if Ops.NEG in ops:
-    pat += [(UPat.var('x')*-1, lambda x: x.alu(Ops.NEG))]
-    if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda x,y: x.alu(Ops.SUB, y))]
+    pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG) if is_dtype_supported(x.dtype, ctx) else None)]
+    if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y) if is_dtype_supported(x.dtype, ctx) else None)]
   if Ops.CMPLT in ops:
     # These are late rewrites because simplex expects equalities to be a certain format
     pat += [
