@@ -318,18 +318,22 @@ def threefry2x32(x: UOp, key: UOp):
 # ***** long as 2 ints *****
 def l2i(op: Ops, a0: UOp, a1: UOp, b0: UOp, b1: UOp):
   match op:
+    # TODO: both of these need to look at b1 too...
+    case Ops.SHL: return a0 << b0, (a1 << b0) | (a0 >> (32 - b0))
+    case Ops.SHR: return a0 >> b0 | (a1 << (32 - b0)), a1 >> b0
     case Ops.ADD:
       carry = (low:=a0+b0).bitcast(dtypes.uint) < a0.bitcast(dtypes.uint)
-      return (low, (a1 + b1).replace(dtype=dtypes.int) + carry.cast(dtypes.int))
+      return low, (a1 + b1).replace(dtype=dtypes.int) + carry.cast(dtypes.int)
     case Ops.MUL:
       a00, a01, b00, b01 = a0.bitcast(dtypes.uint) & 0xFFFF, a0.bitcast(dtypes.uint) >> 16, b0.bitcast(dtypes.uint) & 0xFFFF, b0.bitcast(dtypes.uint) >> 16
       mid = l2i(Ops.ADD, ((a00*b01)<<16).bitcast(dtypes.int), ((a00*b01)>>16).bitcast(dtypes.int),
                          ((a01*b00)<<16).bitcast(dtypes.int), ((a01*b00)>>16).bitcast(dtypes.int))
       return l2i(Ops.ADD, *mid, (a00*b00).bitcast(dtypes.int), (a01*b01).bitcast(dtypes.int) + a0*b1 + a1*b0)
-    case Ops.XOR | Ops.OR | Ops.AND: return (UOp(op, dtypes.int, src=(a0, b0)), UOp(op, dtypes.int, src=(a1, b1)))
+    case Ops.XOR | Ops.OR | Ops.AND: return UOp(op, dtypes.int, src=(a0, b0)), UOp(op, dtypes.int, src=(a1, b1))
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
 def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]+off))
+def l2i_dt(dt): return {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}[dt]
 
 # ***** decomposition patterns *****
 
@@ -383,11 +387,11 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
   if not is_dtype_supported(dtypes.long, device):
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"),
-             lambda x: x.replace(dtype=dtypes.int.ptr(x.dtype.size * 2)) if x.dtype.base is dtypes.long else None)]
-    pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', dtypes.long)), name='st'),
+             lambda x: x.replace(dtype=l2i_dt(x.dtype.base).ptr(x.dtype.size * 2)) if x.dtype.base in (dtypes.long, dtypes.ulong) else None)]
+    pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', (dtypes.long, dtypes.ulong))), name='st'),
              lambda st,idx,val: st.replace(src=(idx, val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
-    pat += [(UPat(GroupOp.ALU, dtypes.long, src=(UPat.var('a'), UPat.var('b')), name="x"),
-             lambda a,b,x: None if x.tag is None else l2i(x.op, a.rtag(0).cast(dtypes.int), a.rtag(1).cast(dtypes.int), b.rtag(0).cast(dtypes.int), b.rtag(1).cast(dtypes.int))[x.tag])]
-    pat += [(UPat(Ops.LOAD, dtypes.long, src=(UPat.var('idx'),), name='x'),
-             lambda x,idx: None if x.tag is None else x.replace(dtype=dtypes.int, src=(_idx(idx, x.tag),)))]
+    pat += [(UPat(GroupOp.ALU, (dtypes.long, dtypes.ulong), src=(UPat.var('a'), UPat.var('b')), name="x"),
+             lambda a,b,x: None if x.tag is None else l2i(x.op, a.rtag(0).cast(l2i_dt(x.dtype)), a.rtag(1).cast(l2i_dt(x.dtype)), b.rtag(0).cast(l2i_dt(x.dtype)), b.rtag(1).cast(l2i_dt(x.dtype)))[x.tag])]
+    pat += [(UPat(Ops.LOAD, (dtypes.long, dtypes.ulong), src=(UPat.var('idx'),), name='x'),
+             lambda x,idx: None if x.tag is None else x.replace(dtype=l2i_dt(x.dtype), src=(_idx(idx, x.tag),)))]
   return PatternMatcher(pat)
