@@ -435,8 +435,8 @@ def wait_cond(cb, *args, value=True, timeout_ms=10000, msg="") -> bool:
 
 # *** ctypes helpers
 
-# TODO: make this work with read only memoryviews (if possible)
 def from_mv(mv:memoryview, to_type:type[ctypes._SimpleCData]=ctypes.c_char) -> ctypes.Array:
+  if mv.readonly: return (to_type * len(mv)).from_buffer_copy(mv)
   return ctypes.cast(ctypes.addressof(to_type.from_buffer(mv)), ctypes.POINTER(to_type * len(mv))).contents
 def to_mv(ptr:int, sz:int) -> memoryview: return memoryview((ctypes.c_uint8 * sz).from_address(ptr)).cast("B")
 def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))

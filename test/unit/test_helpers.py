@@ -230,6 +230,11 @@ class TestMemoryview(unittest.TestCase):
     mv[0] = 2
     assert base[0] == 2
 
+  def test_from_mv_readonly(self):
+    base = memoryview(b"\x11\x22\x33")
+    ct = from_mv(base)
+    self.assertEqual(bytes(ct), b"\x11\x22\x33")
+
   @unittest.skip("allocates tons of memory")
   def test_to_mv(self):
     sizes = [
