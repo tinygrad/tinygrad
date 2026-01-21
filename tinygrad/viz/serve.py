@@ -120,7 +120,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
       if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
-        label += f"\n{u.render()}"
+        if len(u.toposort()) < 30: label += f"\n{u.render()}"
         ranges: list[UOp] = []
         for us in u.src[1:]: ranges += [s for s in us.toposort() if s.op in {Ops.RANGE, Ops.SPECIAL}]
         if ranges: label += "\n"+' '.join([f"{s.render()}={s.vmax+1}" for s in ranges])
