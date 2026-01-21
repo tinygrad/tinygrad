@@ -128,6 +128,169 @@ class TestGlobalLoad(unittest.TestCase):
 class TestGlobalStore(unittest.TestCase):
   """Tests for GLOBAL store instructions."""
 
+  def test_global_store_b8_basic(self):
+    """GLOBAL_STORE_B8 stores a single byte from VDATA[7:0]."""
+    TEST_OFFSET = 256
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # First store 0xDEADBEEF to memory
+      s_mov_b32(s[4], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[0], 0),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Now store single byte 0x42 to same address (should only change byte 0)
+      v_mov_b32_e32(v[2], 0x42),
+      global_store_b8(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Read back and check
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[3]),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Only byte 0 should change from 0xEF to 0x42
+    self.assertEqual(st.vgpr[0][0], 0xDEADBE42, "Only byte 0 should be modified")
+
+  def test_global_store_b8_byte1(self):
+    """GLOBAL_STORE_B8 at offset+1 stores to byte 1."""
+    TEST_OFFSET = 256
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[4], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[0], 0),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[2], 0x42),
+      global_store_b8(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+1),
+      s_waitcnt(vmcnt=0),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[3]),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xDEAD42EF, "Only byte 1 should be modified")
+
+  def test_global_store_b16_basic(self):
+    """GLOBAL_STORE_B16 stores a 16-bit value from VDATA[15:0]."""
+    TEST_OFFSET = 256
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[4], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[0], 0),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[4], 0xCAFE),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b16(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[3]),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xDEADCAFE, "Only lower 16 bits should be modified")
+
+  def test_global_store_b16_high_half(self):
+    """GLOBAL_STORE_B16 at offset+2 stores to high 16 bits."""
+    TEST_OFFSET = 256
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[4], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[0], 0),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[4], 0xCAFE),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b16(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+2),
+      s_waitcnt(vmcnt=0),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[3]),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xCAFEBEEF, "Only upper 16 bits should be modified")
+
+  def test_global_store_b16_byte_offset_1(self):
+    """GLOBAL_STORE_B16 at byte offset 1 stores bytes 1-2 within the same word."""
+    TEST_OFFSET = 256
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[4], 0xDDCCBBAA),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[0], 0),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Store 0xBEEF at byte offset 1 (bytes 1-2)
+      s_mov_b32(s[4], 0xBEEF),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b16(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+1),
+      s_waitcnt(vmcnt=0),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[3]),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Bytes 1-2 should be 0xBEEF (0xEF at byte 1, 0xBE at byte 2)
+    # Original: 0xDDCCBBAA -> bytes [AA, BB, CC, DD]
+    # After:    0xDDBEEFAA -> bytes [AA, EF, BE, DD]
+    self.assertEqual(st.vgpr[0][0], 0xDDBEEFAA, "Bytes 1-2 should be 0xBEEF")
+
+  def test_global_store_b16_cross_word_boundary(self):
+    """GLOBAL_STORE_B16 at byte offset 3 crosses word boundary (byte 3 of word N, byte 0 of word N+1)."""
+    TEST_OFFSET = 256
+    instructions = [
+      s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Initialize two consecutive words
+      s_mov_b32(s[4], 0xDDCCBBAA),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[0], 0),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
+      s_mov_b32(s[4], 0x44332211),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+4),
+      s_waitcnt(vmcnt=0),
+      # Store 0xBEEF at byte offset 3 (crosses word boundary)
+      # Low byte (0xEF) goes to byte 3 of first word
+      # High byte (0xBE) goes to byte 0 of second word
+      s_mov_b32(s[4], 0xBEEF),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b16(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+3),
+      s_waitcnt(vmcnt=0),
+      # Load back both words
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
+      GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[4], data=v[4], saddr=s[2:3], offset=TEST_OFFSET+4),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[3]),
+      v_mov_b32_e32(v[1], v[4]),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # First word: 0xDDCCBBAA -> 0xEFCCBBAA (byte 3 becomes 0xEF)
+    # Second word: 0x44332211 -> 0x443322BE (byte 0 becomes 0xBE)
+    self.assertEqual(st.vgpr[0][0], 0xEFCCBBAA, "Byte 3 of first word should be 0xEF")
+    self.assertEqual(st.vgpr[0][1], 0x443322BE, "Byte 0 of second word should be 0xBE")
+
   def test_global_store_b64_basic(self):
     """GLOBAL_STORE_B64 stores 8 bytes from v[n:n+1] to memory."""
     TEST_OFFSET = 256
