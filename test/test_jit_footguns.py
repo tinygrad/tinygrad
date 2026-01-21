@@ -53,12 +53,13 @@ class TestJitFootguns(unittest.TestCase):
     self.assertEqual([r1.item(), r2.item(), r3.item()], [2, 4, 6])
 
   def test_graph_input_output_aliasing(self):
-    """GraphRunner fails when input=output during graph creation, then different input later.
+    """JIT graph fails when input=output during graph creation, then different input later.
 
+    Graph-only because _input_replace is recomputed at _first_run only when JIT < 2 (graphing enabled).
     When _first_run happens with input buffer == captured.ret buffer:
-    - GraphRunner skips that buffer at ALL positions (since it's in input_buffers)
-    - But only input_replace positions get updated during __call__
-    - Non-input-replace positions (like output) have no buffer binding
+    - get_input_replace() adds output position to input_replace (since buffer matches input_buffers)
+    - GraphRunner.__init__ skips setting buffer at output position (thinks it will be replaced)
+    - But output position isn't a true input, so it's never updated in __call__
 
     This pattern occurs in LLM token generation where output becomes next input.
     """
@@ -82,8 +83,8 @@ class TestJitFootguns(unittest.TestCase):
     # Phase 3: subsequent exec with DIFFERENT input (exposes the bug)
     c = Tensor([100]).contiguous().realize()
     result = step(c)  # cnt=3, different input buffer
-    # TODO: this returns wrong value because GraphRunner's ICB has missing buffer binding at output position
-    # The output buffer was skipped during graph creation (matched input_buffers) but isn't in input_replace
+    # TODO: get_input_replace() incorrectly added output position to input_replace when input buffer == output buffer
+    # fix: output-only positions (in prg.p.outs but not prg.p.ins) should never be added to input_replace
     self.assertEqual(result.item(), 22)  # should be 101!
 
   def test_multiple_outputs_same_intermediate(self):
