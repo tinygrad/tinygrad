@@ -759,7 +759,7 @@ jobs:
       - name: Run pytest (${{ matrix.backend }})
         run: |
           ulimit -c unlimited
-          sudo python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
+          sudo -E python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --durations=20
           sudo chmod -R +rwx /cores/*
       - uses: actions/upload-artifact@master
         if: ${{ failure() }}
