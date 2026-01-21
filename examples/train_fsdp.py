@@ -58,6 +58,11 @@ if __name__ == "__main__":
       out = model.forward(x)
       loss = out.sparse_categorical_crossentropy(y)
       loss.backward()
+      # reshard gradients to match parameters (axis mismatch 0 != 1)
+      for p in parameters:
+        if p.grad is not None and (not isinstance(p.grad.device, tuple) or p.grad.uop.axis != p.uop.axis):
+          src = p.grad.to(p.device[0]) if isinstance(p.grad.device, tuple) else p.grad
+          p.grad = src.shard(p.device, p.uop.axis)
       opt.step()
       return loss.realize()
 
