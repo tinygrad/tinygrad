@@ -22,7 +22,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.codegen import get_program
 from tinygrad.device import Device, Buffer, BufferSpec
 from tinygrad.runtime.autogen import hsa
-from tinygrad.helpers import Context, DEBUG, colored
+from tinygrad.helpers import Context, DEBUG, colored, TUPLE_ORDER, getenv
 from tinygrad.renderer import ProgramSpec
 
 from extra.assembly.amd.decode import decode_inst
@@ -821,13 +821,30 @@ _INST_HANDLERS: dict[type, callable] = {
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from tinygrad.renderer.cstyle import ClangRenderer
-from tinygrad.runtime.support.elf import jit_loader, elf_loader, libc
-from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
-from tinygrad.runtime.ops_cpu import CPUProgram
+# Backend selection: EMU2_BACKEND=python, clang (default), or llvm
+EMU2_BACKEND = getenv("EMU2_BACKEND", "clang")
 
-def elf_symbol_offsets(obj: bytes) -> dict[str, int]:
+def _get_backend():
+  """Get renderer, compiler, and program class based on EMU2_BACKEND."""
+  if EMU2_BACKEND == "python":
+    from tinygrad.runtime.ops_python import PythonRenderer, PythonCompiler, PythonProgram
+    return PythonRenderer(), PythonCompiler(), PythonProgram
+  elif EMU2_BACKEND == "llvm":
+    from tinygrad.renderer.llvmir import LLVMRenderer
+    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
+    from tinygrad.runtime.ops_cpu import CPUProgram
+    return LLVMRenderer(), CPULLVMCompiler(), CPUProgram
+  else:  # clang (default)
+    from tinygrad.renderer.cstyle import ClangRenderer
+    from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+    from tinygrad.runtime.ops_cpu import CPUProgram
+    return ClangRenderer(), ClangJITCompiler(), CPUProgram
+
+_emu_renderer, _emu_compiler, _ProgramClass = _get_backend()
+
+def _elf_symbol_offsets(obj: bytes) -> dict[str, int]:
   """Parse ELF object file and return {symbol_name: offset} for all defined symbols."""
+  from tinygrad.runtime.support.elf import elf_loader, libc
   def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
   _, sections, _ = elf_loader(obj)
   symtab_sec = next((s for s in sections if s.header.sh_type == libc.SHT_SYMTAB), None)
@@ -837,9 +854,6 @@ def elf_symbol_offsets(obj: bytes) -> dict[str, int]:
   symbols = (libc.Elf64_Sym * (symtab_sec.header.sh_size // symtab_sec.header.sh_entsize)).from_buffer_copy(symtab_sec.content)
   return {name: sections[sym.st_shndx].header.sh_addr + sym.st_value
           for sym in symbols if 0 < sym.st_shndx < len(sections) and (name := _strtab(strtab_sec.content, sym.st_name))}
-
-_emu_renderer = ClangRenderer()  # renderer without compiler - get_program stops after render
-_emu_compiler = ClangJITCompiler()  # compiler for batch compilation
 
 @functools.cache
 def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
@@ -862,14 +876,14 @@ def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
         break
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
   _, sink = handler(inst, ctx, name)
-  with Context(NOOPT=1, IGNORE_OOB=1):
+  with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
     return get_program(sink, _emu_renderer)
 
 @functools.cache
-def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, list[int]|None, object]]:
-  """Decode program to {pc: (name, fxn, globals, lib_holder)}. lib_holder keeps compiled code alive."""
+def decode_program(data: bytes) -> dict[int, tuple[str, object, list[int], object]]:
+  """Decode program to {pc: (name, program, globals, holder)}."""
 
-  # Phase 1: Collect all instruction sources
+  # Collect all instruction programs
   inst_info: list[tuple[int, ProgramSpec]] = []  # (pc, prg)
   i = 0
   while i < len(data):
@@ -890,24 +904,25 @@ def decode_program(data: bytes) -> dict[int, tuple[str, ctypes.CFUNCTYPE|None, l
 
   if not inst_info: return {}
 
-  # Phase 2: Batch compile - concatenate unique sources, single clang call
-  seen_funcs: set[str] = set()
-  combined_src_parts: list[str] = []
-  for pc, prg in inst_info:
-    if prg.function_name not in seen_funcs:
-      seen_funcs.add(prg.function_name)
-      combined_src_parts.append(prg.src)
-
-  obj = _emu_compiler.compile_to_obj("\n".join(combined_src_parts))
-  sym_offsets = elf_symbol_offsets(obj)
-
-  # Phase 3: Map library into executable memory using CPUProgram
-  cpu_prg = CPUProgram(Device['CPU'], "emu2_batch", jit_loader(obj))
-  base_addr = ctypes.cast(cpu_prg.fxn, ctypes.c_void_p).value
-
-  # Phase 4: Build result dict with function pointers
-  return {pc: (prg.function_name, ctypes.CFUNCTYPE(None)(base_addr + sym_offsets.get(prg.function_name, 0)), prg.globals, cpu_prg)
-          for pc, prg in inst_info}
+  if EMU2_BACKEND == "python":
+    # Python backend: create PythonProgram instances directly
+    return {pc: (prg.function_name, _ProgramClass(prg.function_name, _emu_compiler.compile(prg.src)), prg.globals, None)
+            for pc, prg in inst_info}
+  else:
+    # Clang/LLVM backend: batch compile and create function pointers
+    from tinygrad.runtime.support.elf import jit_loader
+    seen_funcs: set[str] = set()
+    combined_src_parts: list[str] = []
+    for pc, prg in inst_info:
+      if prg.function_name not in seen_funcs:
+        seen_funcs.add(prg.function_name)
+        combined_src_parts.append(prg.src)
+    obj = _emu_compiler.compile_to_obj("\n".join(combined_src_parts))
+    sym_offsets = _elf_symbol_offsets(obj)
+    cpu_prg = _ProgramClass(Device['CPU'], "emu2_batch", jit_loader(obj))
+    base_addr = ctypes.cast(cpu_prg.fxn, ctypes.c_void_p).value
+    return {pc: (prg.function_name, ctypes.CFUNCTYPE(None)(base_addr + sym_offsets.get(prg.function_name, 0)), prg.globals, cpu_prg)
+            for pc, prg in inst_info}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WAVE STATE
@@ -948,10 +963,16 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
-  # vmem buffer: external_ptr=0 means INDEX offsets directly to host memory addresses
-  vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
-  lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
-  scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
+  if EMU2_BACKEND == "python":
+    # Python backend: use memoryview buffers with address-0 trick for vmem
+    vmem_mv = memoryview((ctypes.c_char * (1 << 47)).from_address(0)).cast('B')  # 128TB at address 0
+    lds_mv = memoryview(bytearray(max(lds_size, 4)))
+    scratch_mv = memoryview(bytearray(scratch_size * WAVE_SIZE)) if scratch_size else None
+  else:
+    # Clang backend: use Buffer objects with external_ptr=0 for vmem
+    vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
+    lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
+    scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
   for gidx in range(gx):
     for gidy in range(gy):
@@ -974,14 +995,28 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
           st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
 
-          # Execute wave with pre-computed buffer addresses
-          buf_addrs = [st.sgpr_buf._buf.va_addr, st.vgpr_buf._buf.va_addr, vmem_buf._buf.va_addr, lds_buf._buf.va_addr,
-                       scratch_buf._buf.va_addr if scratch_buf else 0]
-          for inst_count in range(1_000_000):
-            if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
-            name, fxn, globals_list, _ = program[pc]
-            assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
-            assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
-            fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
-          else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
+          if EMU2_BACKEND == "python":
+            # Python backend: pass raw byte memoryviews
+            sgpr_raw = st.sgpr_buf.as_buffer(force_zero_copy=True)
+            vgpr_raw = st.vgpr_buf.as_buffer(force_zero_copy=True)
+            all_bufs = [sgpr_raw, vgpr_raw, vmem_mv, lds_mv, scratch_mv]
+            for inst_count in range(1_000_000):
+              if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
+              name, prg, globals_list, _ = program[pc]
+              assert prg is not None, f"[emu2] No program for {name} at PC={pc}"
+              assert 4 not in globals_list or scratch_mv, f"SCRATCH instruction {name} but scratch_size=0"
+              bufs = [all_bufs[g] for g in globals_list]
+              prg(*bufs, global_size=(1,1,1), local_size=(1,1,1))
+            else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
+          else:
+            # Clang backend: pass buffer addresses via ctypes
+            buf_addrs = [st.sgpr_buf._buf.va_addr, st.vgpr_buf._buf.va_addr, vmem_buf._buf.va_addr, lds_buf._buf.va_addr,
+                         scratch_buf._buf.va_addr if scratch_buf else 0]
+            for inst_count in range(1_000_000):
+              if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
+              name, fxn, globals_list, _ = program[pc]
+              assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
+              assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
+              fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
+            else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0
