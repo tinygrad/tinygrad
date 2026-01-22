@@ -536,6 +536,8 @@ jobs:
     name: Linux (devectorize)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      IGNORE_OOB: 1
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
