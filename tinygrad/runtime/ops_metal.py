@@ -176,7 +176,7 @@ class MetalTexture:
 class MetalAllocator(LRUAllocator[MetalDevice]):
   def _alloc(self, size:int, options) -> MetalBuffer:
     if options.external_ptr: return MetalBuffer(metal.MTLBuffer(options.external_ptr), size)
-    # NOTE: ImageDType allocates a MetalTexture (either buffer-backed or native texture depending on METAL_NATIVE_TEX)
+    # NOTE: ImageDType allocates a buffer-backed MetalTexture
     if options.image is not None:
       img = options.image
       size = img.pitch * img.shape[0]
@@ -187,10 +187,6 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
       desc.setWidth(img.shape[1])
       desc.setHeight(img.shape[0])
       desc.setUsage(metal.MTLTextureUsageShaderRead | metal.MTLTextureUsageShaderWrite)
-      if getenv("METAL_NATIVE_TEX"):
-        tex = self.dev.sysdevice.newTextureWithDescriptor(desc)
-        if tex.value is None: raise MemoryError("Metal OOM while allocating texture")
-        return MetalTexture(None, tex, size, img)
       ret = self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
       ret.retain = False
       if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
@@ -235,12 +231,6 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
       if src.buf is None: raise RuntimeError("native MetalTexture has no buffer view")
       return to_mv(src.buf.contents(), src.size)
     return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
-  def _cp_tex_native(self, tex:MetalTexture, mv:memoryview, to_tex:bool):
-    img, stride = tex.image, tex.image.shape[1] * tex.image.itemsize * 4
-    region = metal.MTLRegion(metal.MTLOrigin(0, 0, 0), metal.MTLSize(img.shape[1], img.shape[0], 1))
-    if to_tex: tex.tex.replaceRegion_mipmapLevel_withBytes_bytesPerRow(region, 0, to_mv(mv, mv.nbytes).ctypes.data, stride)
-    else: objc.msg("getBytes:bytesPerRow:fromRegion:mipmapLevel:", None,
-      [ctypes.c_void_p, metal.NSUInteger, metal.MTLRegion, metal.NSUInteger])(tex.tex, to_mv(mv, mv.nbytes).ctypes.data, stride, region, 0)
   def _cp_tex_pitched(self, tex:MetalTexture, mv:memoryview, to_tex:bool):
     img, stride = tex.image, tex.image.shape[1] * tex.image.itemsize * 4
     buf = self._as_buffer(tex)
@@ -251,10 +241,8 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
       else: mv[i*stride:(i+1)*stride] = buf[i*img.pitch:i*img.pitch+stride]
   def _copyin(self, dest:MetalBuffer, src:memoryview):
     if not isinstance(dest, MetalTexture): return self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
-    if dest.buf is None: return self._cp_tex_native(dest, src, to_tex=True)
     return self._cp_tex_pitched(dest, src, to_tex=True)
   def _copyout(self, dest:memoryview, src:MetalBuffer):
     if not isinstance(src, MetalTexture): return self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
-    if src.buf is None: return self._cp_tex_native(src, dest, to_tex=False)
     return self._cp_tex_pitched(src, dest, to_tex=False)
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)
