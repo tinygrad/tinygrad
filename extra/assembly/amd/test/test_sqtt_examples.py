@@ -33,7 +33,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
 
   blob_iter, current_blob = iter(blobs), [None]
   occupancy_records: list[tuple[int, int, int, int, bool]] = []  # (wave_id, simd, cu, time, is_start)
-  wave_insts: list[list[tuple[int, int]]] = []  # per-wave list of (time, stall)
+  wave_insts: list[list[tuple[int, int, int]]] = []  # per-wave list of (time, stall, pc)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
   def copy_cb(buf, buf_size, _):
@@ -56,7 +56,7 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
           insts_blob = bytearray(sz)
           ctypes.memmove((ctypes.c_char * sz).from_buffer(insts_blob), ev.instructions_array, sz)
           insts = list((rocprof.rocprofiler_thread_trace_decoder_inst_t * ev.instructions_size).from_buffer(insts_blob))
-          wave_insts.append([(inst.time, inst.stall) for inst in insts])
+          wave_insts.append([(inst.time, inst.stall, inst.pc.address) for inst in insts])
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   arch = TARGET_TO_ARCH[target]
@@ -76,8 +76,9 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_ENDPGM: mem_size_ptr[0] = 0
     # rocprof parses instruction string to determine type; v_nop works for all
     if (max_sz := size_ptr[0]) == 0: return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES
-    ctypes.memmove(instr_ptr, b"v_nop", min(5, max_sz - 1))
-    size_ptr[0] = min(5, max_sz - 1)
+    if (str_sz:=len(disasm:=inst.disasm().encode()))+1 > max_sz: str_sz = max_sz
+    ctypes.memmove(instr_ptr, disasm, str_sz)
+    size_ptr[0] = str_sz
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   exc = None
@@ -100,10 +101,12 @@ class TestSQTTExamples(unittest.TestCase):
     for pkl_path in sorted((EXAMPLES_DIR/cls.target).glob("*.pkl")):
       with open(pkl_path, "rb") as f:
         data = pickle.load(f)
-      sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
-      prg = next((e for e in data if type(e).__name__ == "ProfileProgramEvent"), None)
-      if sqtt_events and prg:
-        cls.examples[pkl_path.stem] = (sqtt_events, prg.lib, prg.base)
+      sqtt_events:dict[str, list] = {}
+      for e in data:
+        if type(e).__name__ == "ProfileSQTTEvent": sqtt_events.setdefault(e.kern, []).append(e)
+      prg = {e.name:e for e in data if type(e).__name__ == "ProfileProgramEvent"}
+      for name, events in sqtt_events.items():
+        cls.examples[pkl_path.stem+"_"+name] = (events, prg[name].lib, prg[name].base)
 
   def test_examples_loaded(self):
     self.assertGreater(len(self.examples), 0, "no example files found")
@@ -147,17 +150,20 @@ class TestSQTTExamples(unittest.TestCase):
         self.assertGreater(len([p for p in all_packets if isinstance(p, INST)]), 0, f"no INST packets in {name}")
 
   expected = {
-    "profile_empty_run_0": [1803, 1908, 1928, 1979, 2006, 1912],
-    "profile_empty_run_1": [1803, 1908, 1928, 1979, 2006, 1912],
-    "profile_gemm_run_0": [2531, 1844, 1864, 1915, 1942, 1848, 3074, 1919, 1939, 1990, 2017, 1923, 19026, 1919, 1939, 1990, 2017, 1929],
-    "profile_gemm_run_1": [2554, 1844, 1864, 1915, 1942, 1848, 3084, 1919, 1939, 1990, 2017, 1923, 19010, 1919, 1939, 1990, 2017, 1923],
-    "profile_plus_run_0": [1900, 1908, 1928, 1979, 2006, 1912],
-    "profile_plus_run_1": [1856, 1908, 1928, 1979, 2006, 1912],
+    "profile_empty_run_0_E": [1803, 1908, 1928, 1979, 2006, 1912],
+    "profile_empty_run_1_E": [1803, 1908, 1928, 1979, 2006, 1912],
+    "profile_gemm_run_0_E_32_32_4": [2531, 1844, 1864, 1915, 1942, 1848],
+    "profile_gemm_run_0_E_8_8_16_4": [3074, 1919, 1939, 1990, 2017, 1923],
+    "profile_gemm_run_0_r_2_8_16_4_4_16_4": [19026, 1919, 1939, 1990, 2017, 1929],
+    "profile_gemm_run_1_E_32_32_4": [2554, 1844, 1864, 1915, 1942, 1848],
+    "profile_gemm_run_1_E_8_8_16_4": [3084, 1919, 1939, 1990, 2017, 1923],
+    "profile_gemm_run_1_r_2_8_16_4_4_16_4": [19010, 1919, 1939, 1990, 2017, 1923],
+    "profile_plus_run_0_E_3": [1900, 1908, 1928, 1979, 2006, 1912],
+    "profile_plus_run_1_E_3": [1856, 1908, 1928, 1979, 2006, 1912],
   }
   def test_packet_counts(self):
     for name, (events, *_) in self.examples.items():
       with self.subTest(example=name):
-        if not self.expected.get(name): continue
         counts = [len(list(decode(e.blob))) for e in events]
         self.assertEqual(counts, self.expected[name], f"packet count mismatch in {name}")
 
@@ -189,7 +195,7 @@ class TestSQTTExamples(unittest.TestCase):
       with self.subTest(example=name):
         _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
         # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
-        roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
+        roc_insts = [time + stall for insts in wave_insts for time, stall, _ in insts[:-1]]
         # extract from our decoder
         our_insts: list[int] = []
         for event in events:
@@ -200,6 +206,13 @@ class TestSQTTExamples(unittest.TestCase):
             elif isinstance(p, IMMEDIATE_MASK):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
+
+  def test_rocprof_inst_traces_match(self):
+    for name, (events, lib, base) in self.examples.items():
+      with self.subTest(example=name):
+        _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
+        print(name)
+        print(len(wave_insts))
 
 #class TestSQTTExamplesRDNA4(TestSQTTExamples): target = "gfx1200"
 
