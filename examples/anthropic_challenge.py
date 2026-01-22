@@ -1,8 +1,19 @@
 import random
 from tinygrad import Tensor, dtypes, Context, getenv, UOp
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat
+from tinygrad.uop.symbolic import symbolic
 from tinygrad.codegen import Renderer
 from tinygrad.codegen.opt import Opt, OptOps
+
+def python_reference(forest: list[int], val: list[int], height: int, rounds: int) -> list[int]:
+  n_nodes = len(forest)
+  idx, val = [0] * len(val), val.copy()
+  for _ in range(rounds):
+    for i in range(len(idx)):
+      val[i] = myhash(val[i] ^ forest[idx[i]], lambda x: x % (2**32))
+      idx[i] = 2 * idx[i] + (1 if val[i] % 2 == 0 else 2)
+      if idx[i] >= n_nodes: idx[i] = 0
+  return val
 
 def myhash(a, m=lambda x: x):
   a = m(m(a + 0x7ED55D16) + m(a << 12))
@@ -54,22 +65,23 @@ def tree_traversal(forest: Tensor, val: Tensor, height: int, rounds: int, where_
 
   return val.contiguous(arg=(Opt(OptOps.UPCAST, 0, 8),))
 
-def python_reference(forest: list[int], val: list[int], height: int, rounds: int) -> list[int]:
-  n_nodes = len(forest)
-  idx, val = [0] * len(val), val.copy()
-  for _ in range(rounds):
-    for i in range(len(idx)):
-      val[i] = myhash(val[i] ^ forest[idx[i]], lambda x: x % (2**32))
-      idx[i] = 2 * idx[i] + (1 if val[i] % 2 == 0 else 2)
-      if idx[i] >= n_nodes: idx[i] = 0
-  return val
+# ************************* renderer for VLIW machine *************************
+
+def loop_unrolling(sink:UOp):
+  rng = [x for x in sink.toposort() if x.op is Ops.RANGE]
+  if len(rng) == 0: return None
+  unrolled_sinks = [sink.substitute({rng[0]:rng[0].const_like(i)}).src[0] for i in range(rng[0].vmax+1)]
+  return UOp.sink(*unrolled_sinks, arg=sink.arg)
 
 class VLIWRenderer(Renderer):
-  # this says this backend supports MULACC
-  code_for_op: dict = {Ops.MULACC: None}
+  has_local = False  # TODO: this should be the default / cleaned up
+  # this says this backend supports MULACC, SHR, and SHL
+  code_for_op: dict = {Ops.MULACC: None, Ops.SHR: None, Ops.SHL: None}
+  # loop unrolling (should be a part of tinygrad)
+  pre_matcher = PatternMatcher([(UPat(Ops.SINK, name="sink"), loop_unrolling)])+symbolic
 
   def render(self, uops:list[UOp]):
-    # TODO: implement this
+    # TODO: implement this. one pass, VLIW pack, register allocate
     from tinygrad.uop.ops import print_uops
     print_uops(uops)
 
