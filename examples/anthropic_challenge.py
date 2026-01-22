@@ -1,5 +1,7 @@
 import random
-from tinygrad import Tensor, dtypes, Context, getenv
+from tinygrad import Tensor, dtypes, Context, getenv, UOp
+from tinygrad.uop.ops import Ops
+from tinygrad.codegen import Renderer
 from tinygrad.codegen.opt import Opt, OptOps
 
 def myhash(a, m=lambda x: x):
@@ -62,6 +64,15 @@ def python_reference(forest: list[int], val: list[int], height: int, rounds: int
       if idx[i] >= n_nodes: idx[i] = 0
   return val
 
+class VLIWRenderer(Renderer):
+  # this says this backend supports MULACC
+  code_for_op: dict = {Ops.MULACC: None}
+
+  def render(self, uops:list[UOp]):
+    # TODO: implement this
+    from tinygrad.uop.ops import print_uops
+    print_uops(uops)
+
 if __name__ == "__main__":
   batch_size = getenv("BS", 256)
   height = 10
@@ -69,11 +80,22 @@ if __name__ == "__main__":
 
   forest = [random.randint(0, 2**30 - 1) for _ in range(2 ** (height + 1) - 1)]
   val = [random.randint(0, 2**30 - 1) for _ in range(batch_size)]
-
   forest_t = Tensor(forest, dtype=dtypes.uint32)
   val_t = Tensor(val, dtype=dtypes.uint32)
-  with Context(PCONTIG=2, DEVECTORIZE=2):
-    out = tree_traversal(forest_t, val_t, height, rounds)
-    val_out = out.tolist()
 
-  assert val_out == python_reference(forest, val, height, rounds)
+  if getenv("VERIFY", 1):
+    with Context(PCONTIG=2, DEVECTORIZE=2):
+      out = tree_traversal(forest_t, val_t, height, rounds)
+      val_out = out.tolist()
+    assert val_out == python_reference(forest, val, height, rounds)
+
+  # *** render to device ***
+
+  from tinygrad.codegen import get_program
+  with Context(PCONTIG=2, DEVECTORIZE=2, CPU_LLVM=1):
+    out = tree_traversal(forest_t.to("CPU"), val_t.to("CPU"), height, rounds)
+    sink = out.schedule()[-1].ast
+    prg = get_program(sink, VLIWRenderer())
+
+  # TODO: run prg.src in "Machine" from original_performance_takehome
+  print(prg.src)
