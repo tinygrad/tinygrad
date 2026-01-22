@@ -204,8 +204,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     if sys.is_finalizing(): return
     if isinstance(opaque, MetalTexture):
       opaque.tex.release
-      opaque.buf.release
-    else: opaque.buf.release
+    opaque.buf.release
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()
