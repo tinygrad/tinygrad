@@ -205,7 +205,7 @@ class TestMainOnnxOps(TestOnnxOps):
       x = Tensor([1.0, 2.0, 3.0])
       with self.assertRaises(JitError):
         for _ in range(3):
-          run_if(Tensor([True]), x).tolist(), [2, 3, 4]
+          run_if(Tensor([True]), x)
 
   def test_resize_downsample_scales_linear_align_corners(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-131
