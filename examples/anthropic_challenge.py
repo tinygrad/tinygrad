@@ -1,5 +1,5 @@
 import random
-from tinygrad import Tensor, dtypes, Context
+from tinygrad import Tensor, dtypes, Context, getenv
 from tinygrad.codegen.opt import Opt, OptOps
 
 def myhash(a, m=lambda x: x):
@@ -63,9 +63,9 @@ def python_reference(forest: list[int], val: list[int], height: int, rounds: int
   return val
 
 if __name__ == "__main__":
-  batch_size = 256
+  batch_size = getenv("BS", 256)
   height = 10
-  rounds = 16
+  rounds = getenv("ROUNDS", 16)
 
   forest = [random.randint(0, 2**30 - 1) for _ in range(2 ** (height + 1) - 1)]
   val = [random.randint(0, 2**30 - 1) for _ in range(batch_size)]

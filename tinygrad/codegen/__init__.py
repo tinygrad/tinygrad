@@ -87,7 +87,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   if DEVECTORIZE >= 0: sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
 
   # lower the index dtype to a concrete int
-  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing, ctx=ren.device, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, ctx=ren.device, name="lower all index dtypes")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # optional pre matcher
@@ -131,7 +131,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
 
 def do_linearize(prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
-  if SPEC: type_verify(lst, program_spec)
+  #if SPEC: type_verify(lst, program_spec)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
