@@ -86,22 +86,42 @@ class VLIWRenderer(Renderer):
   pre_matcher = vliw_prepare
 
   def render(self, uops:list[UOp]):
-    # TODO: implement this. VLIW pack, register allocate, output Machine code
-    from tinygrad.uop.ops import print_uops
-    print_uops(uops)
-    return "[]"
+    VLEN, alu_ops = 8, {Ops.ADD: "+", Ops.MUL: "*", Ops.XOR: "^", Ops.AND: "&", Ops.OR: "|", Ops.SHL: "<<", Ops.SHR: ">>", Ops.CMPLT: "<"}
+    reg, uop_reg, instrs = 0, {}, []
+    def r(u): return uop_reg[u]
+    for u in uops:
+      if u.op not in {Ops.STORE, Ops.SINK, Ops.GEP}: uop_reg[u] = reg; reg += u.dtype.count
+      if u.op is Ops.CONST: instrs.append({"load": [("const", r(u), u.arg)]})
+      elif u.op is Ops.VECTORIZE:
+        if all(s == u.src[0] for s in u.src): instrs.append({"valu": [("vbroadcast", r(u), r(u.src[0]))]})
+        else: instrs.extend({"flow": [("add_imm", r(u)+i, r(s), 0)]} for i, s in enumerate(u.src) if r(s) != r(u)+i)
+      elif u.op is Ops.GEP: uop_reg[u] = r(u.src[0]) + u.arg[0]  # extract element from vector
+      elif u.op is Ops.LOAD: instrs.append({"load": [("vload", r(u), r(u.src[0]))] if u.dtype.count > 1 else [("load", r(u), r(u.src[0]))]})
+      elif u.op is Ops.STORE: instrs.append({"store": [("vstore", r(u.src[0]), r(u.src[1]))] if u.src[1].dtype.count > 1 else [("store", r(u.src[0]), r(u.src[1]))]})
+      elif u.op is Ops.MULACC: assert u.dtype.count == 8; instrs.append({"valu": [("multiply_add", r(u), r(u.src[0]), r(u.src[1]), r(u.src[2]))]})
+      elif u.op is Ops.WHERE: assert u.dtype.count == 8; instrs.append({"flow": [("vselect", r(u), r(u.src[0]), r(u.src[1]), r(u.src[2]))]})
+      elif u.op in alu_ops: instrs.append({("valu" if u.dtype.count > 1 else "alu"): [(alu_ops[u.op], r(u), r(u.src[0]), r(u.src[1]))]})
+      elif u.op is Ops.SINK: instrs.append({"flow": [("halt",)]})
+      else: assert False, f"unhandled op {u.op}"
+    return repr(instrs)
 
 # ************************* test and render *************************
 
+import sys, types
 PROBLEM_URL = "https://raw.githubusercontent.com/anthropics/original_performance_takehome/refs/heads/main/tests/frozen_problem.py"
-exec(fetch(PROBLEM_URL).read_text(), globals=(problem:={}))
+sys.modules["problem"] = problem = types.ModuleType("problem")
+exec(fetch(PROBLEM_URL).read_text(), problem.__dict__)
 
 if __name__ == "__main__":
   height = 10
   rounds = getenv("ROUNDS", 16)
 
-  tree = problem['Tree'].generate(height)
-  inp = problem['Input'].generate(tree, BS, rounds)
+  # build problem
+  tree = problem.Tree.generate(height)
+  inp = problem.Input.generate(tree, BS, rounds)
+  mem = problem.build_mem_image(tree, inp)
+  global_addrs[0] = global_addrs[1] = mem[6]  # input and output
+  global_addrs[2] = mem[4]                    # forest
 
   # *** verify the kernel in tinygrad compared to reference ***
 
@@ -112,17 +132,11 @@ if __name__ == "__main__":
     with Context(PCONTIG=2, DEVECTORIZE=2):
       out = tree_traversal(forest_t, val_t, height, rounds)
       val_out = out.tolist()
-    problem['reference_kernel'](tree, inp)
+    problem.reference_kernel(tree, inp)
     assert val_out == inp.values
 
   # *** render to device ***
 
-  # build problem
-  mem = problem['build_mem_image'](tree, inp)
-  global_addrs[0] = global_addrs[1] = mem[6]  # input and output
-  global_addrs[2] = mem[4]                    # forest
-
-  # render
   from tinygrad.codegen import get_program
   with Context(PCONTIG=2, DEVECTORIZE=2, CPU_LLVM=1, SPEC=0):
     out = tree_traversal(forest_t.to("CPU"), val_t.to("CPU"), height, rounds)
@@ -132,12 +146,10 @@ if __name__ == "__main__":
   # *** run on Machine and compare ***
 
   ref_mem = mem.copy()
-  print(mem[4], mem[5], mem[6])
-  debug_info = problem['DebugInfo'](scratch_map={})
-  machine = problem['Machine'](mem, eval(prg.src), debug_info, n_cores=1, trace=False, scratch_size=1536)
+  machine = problem.Machine(mem, eval(prg.src), problem.DebugInfo(scratch_map={}), n_cores=1, trace=False, scratch_size=100000)
   machine.run()
   print(f"ran for {machine.cycle} cycles")
 
   # compare to reference
-  for _ in problem['reference_kernel2'](ref_mem, {}): pass
+  for _ in problem.reference_kernel2(ref_mem, {}): pass
   assert machine.mem[mem[6]:mem[6]+mem[2]] == ref_mem[mem[6]:mem[6]+mem[2]]
