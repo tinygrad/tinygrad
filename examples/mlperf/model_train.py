@@ -1286,6 +1286,8 @@ def train_llama3():
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
 
+  BENCHMARK = getenv("BENCHMARK")
+
   config = {}
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
@@ -1326,6 +1328,8 @@ def train_llama3():
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
+  print(f"model parameters: {model_params}")
+
   model = Transformer(**model_params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
   params = get_parameters(model)
   # weights are all bfloat16 for now
@@ -1432,7 +1436,7 @@ def train_llama3():
     eval_dataset = None
   else:
     from examples.mlperf.dataloader import get_llama3_dataset
-    eval_dataset = get_llama3_dataset(5760, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
+    eval_dataset = get_llama3_dataset(1024 if SMALL else 5760, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
 
   def get_eval_iter():
     if eval_dataset is None:
@@ -1442,6 +1446,7 @@ def train_llama3():
 
   iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
+  step_times = []
   for tokens in tqdm(iter, total=SAMPLES//GBS):
     GlobalCounters.reset()
     if getenv("TRAIN", 1):
@@ -1454,6 +1459,8 @@ def train_llama3():
       sequences_seen += tokens.shape[0]
 
       sec = time.perf_counter()-t
+      if BENCHMARK: step_times.append(sec)
+
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / sec
       tqdm.write(
@@ -1476,7 +1483,14 @@ def train_llama3():
         fn = f"{ckpt_dir}/llama3_{i}_optim.safe"
         safe_save(get_state_dict(scheduler), fn)
 
-    if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1):
+      if i == BENCHMARK:
+        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]
+        estimated_total_minutes = int(median_step_time * (SAMPLES // GBS) / 60)
+        print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
+        print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
+              f"epoch global_mem: {GlobalCounters.global_mem:_}")
+
+    if (sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
       tqdm.write(f"evaluating after {sequences_seen} sequences")
 
       # run eval
@@ -1484,8 +1498,12 @@ def train_llama3():
       eval_iter = get_eval_iter()
       tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
 
-      for tokens in tqdm(eval_iter, total=5760//EVAL_BS):
+      for j,tokens in tqdm(enumerate(eval_iter), total=5760//EVAL_BS):
         eval_losses += eval_step(model, tokens).tolist()
+        
+        if BENCHMARK and (j+1) == min(BENCHMARK, 5760//EVAL_BS):
+          return
+
       log_perplexity = Tensor(eval_losses).mean().float().item()
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
