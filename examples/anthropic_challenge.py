@@ -6,7 +6,7 @@ from tinygrad.codegen.opt import Opt, OptOps
 
 # ************************* implementation of problem (replace with anything!) ************************
 
-def myhash(a):
+def myhash(a: Tensor) -> Tensor:
   a = (a + 0x7ED55D16) + (a << 12)
   a = (a ^ 0xC761C23C) ^ (a >> 19)
   a = (a + 0x165667B1) + (a << 5)
@@ -61,6 +61,7 @@ def tree_traversal(forest: Tensor, val: Tensor, height: int, rounds: int, where_
 def loop_unrolling(sink:UOp):
   rng = [x for x in sink.toposort() if x.op is Ops.RANGE]
   if len(rng) == 0: return None
+  print(f"unrolling loop with size {rng[0].vmax+1}")
   unrolled_sinks = [sink.substitute({rng[0]:rng[0].const_like(i)}).src[0] for i in range(rng[0].vmax+1)]
   return UOp.sink(*unrolled_sinks, arg=sink.arg)
 
@@ -86,6 +87,8 @@ class VLIWRenderer(Renderer):
   pre_matcher = vliw_prepare
 
   def render(self, uops:list[UOp]):
+    # NOTE: this is a minimal renderer. to get speed, you need VLIW. to get under 1536 regs, you need a reg allocator
+    print(f"rendering with {len(uops)} uops")
     reg, uop_reg, instrs = 0, {}, []
     def r(u): return uop_reg[u]
     for u in uops:
@@ -134,6 +137,7 @@ if __name__ == "__main__":
       val_out = out.tolist()
     problem.reference_kernel(tree, inp)
     assert val_out == inp.values
+    print("verification passed")
 
   # *** render to device ***
 
@@ -145,11 +149,13 @@ if __name__ == "__main__":
 
   # *** run on Machine and compare ***
 
-  ref_mem = mem.copy()
+  # NOTE: the scratch size needs to be reduced to 1536 when you have a register allocator
   machine = problem.Machine(mem, eval(prg.src), problem.DebugInfo(scratch_map={}), n_cores=1, trace=False, scratch_size=100000)
   machine.run()
   print(f"ran for {machine.cycle} cycles")
 
   # compare to reference
+  ref_mem = mem.copy()
   for _ in problem.reference_kernel2(ref_mem, {}): pass
   assert machine.mem[mem[6]:mem[6]+mem[2]] == ref_mem[mem[6]:mem[6]+mem[2]]
+  print("compare passed!")
