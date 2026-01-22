@@ -299,6 +299,10 @@ class Tensor(OpMixin):
     return Tensor(self.uop.detach(), device=self.device, requires_grad=False)
 
   def _buffer(self) -> Buffer:
+    from tinygrad.engine.realize import capturing
+    if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
+      from tinygrad.engine.jit import JitError
+      raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
     x = self.cast(self.dtype.base).contiguous()
     if isinstance(self.device, tuple): x = x.to("CPU")
     return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
