@@ -1,6 +1,6 @@
 from typing import Any, cast
 import ctypes, re, decimal
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE
 from tinygrad.device import Buffer, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.engine.realize import ExecItem, CompiledRunner
@@ -41,12 +41,12 @@ class MetalGraph(GraphRunner):
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       all_pipelines.append(prg._prg.pipeline_state)
       icb_command.setComputePipelineState(prg._prg.pipeline_state)
-      buf_idx, arg_slots = 0, []
+      buf_idx = 0
+      arg_slots: list[int|None] = []
       for b in ji.bufs:
         if b is None:
           arg_slots.append(None)
           continue
-        if isinstance(b.dtype, ImageDType): raise GraphException
         slot = buf_idx
         buf_idx += 1
         if b not in input_buffers:
