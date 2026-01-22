@@ -269,7 +269,6 @@ class TestRandomness(unittest.TestCase):
     self.assertEqual(Tensor.randn(3,3,device="CPU").device, "CPU")
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
-  @unittest.skipIf(Device.DEFAULT in ["HSA", "AMD"], "bfloat16 local buffer broken in HSA")
   def test_randn_finite(self, default_float):
     if not is_dtype_supported(default_float): return
     old_default_float = dtypes.default_float
