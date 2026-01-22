@@ -1292,13 +1292,17 @@ def train_llama3():
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
-  assert grad_acc == 1, f"{grad_acc=} is not supported"
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
   SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
+  EVAL_SAMPLES       = config["EVAL_SAMPLES"]           = getenv("EVAL_SAMPLES", 5760 if not SMALL else 1024)
+  MAX_STEPS          = config["MAX_STEPS"]              = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS))
+  WARMUP_STEPS       = config["WARMUP_STEPS"]           = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
+  LR                 = config["LR"]                     = getenv("LR", 8e-5 * GBS / 1152)
+  END_LR             = config["END_LR"]                 = getenv("END_LR", 8e-7)
   EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
   EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
@@ -1312,10 +1316,10 @@ def train_llama3():
   opt_adamw_weight_decay = 0.1
 
   opt_gradient_clip_norm = 1.0
-  opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
-  opt_learning_rate_decay_steps = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS)) - opt_learning_rate_warmup_steps
-  opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
-  opt_end_learning_rate = getenv("END_LR", 8e-7)
+  opt_learning_rate_warmup_steps = WARMUP_STEPS
+  opt_learning_rate_decay_steps = MAX_STEPS - opt_learning_rate_warmup_steps
+  opt_base_learning_rate = LR
+  opt_end_learning_rate = END_LR
 
   # ** init wandb **
   WANDB = getenv("WANDB")
@@ -1365,6 +1369,12 @@ def train_llama3():
 
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
+
+  # init grads
+  for p in optim.params:
+    p.grad = p.zeros_like().contiguous().realize()
+  grads = [p.grad for p in optim.params]
+
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
   if resume_ckpt := getenv("RESUME_CKPT"):
@@ -1377,9 +1387,7 @@ def train_llama3():
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   @TinyJit
-  @Tensor.train()
-  def train_step(model, tokens:Tensor):
-    optim.zero_grad()
+  def minibatch(tokens:Tensor):
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
@@ -1389,6 +1397,15 @@ def train_llama3():
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
     loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
     loss.backward()
+    assert all(p.grad is g for p,g in zip(optim.params, grads))
+    Tensor.realize(loss, *grads)
+    return loss
+
+  @TinyJit
+  def optim_step():
+    for p in optim.params:
+      p.grad.assign(p.grad / grad_acc)
+
     # L2 norm grad clip
     # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
@@ -1403,9 +1420,13 @@ def train_llama3():
     optim.step()
     scheduler.step()
 
+    for p in optim.params:
+      p.grad.assign(p.grad.zeros_like().contiguous())
+
     lr = optim.lr
-    loss.realize(lr)
-    return loss, lr
+    Tensor.realize(lr, *grads)
+
+    return lr
 
   @TinyJit
   @Tensor.train(False)
@@ -1436,42 +1457,58 @@ def train_llama3():
     eval_dataset = None
   else:
     from examples.mlperf.dataloader import get_llama3_dataset
-    eval_dataset = get_llama3_dataset(1024 if SMALL else 5760, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
+    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
 
   def get_eval_iter():
     if eval_dataset is None:
-      return fake_data(EVAL_BS, 5760)
+      return fake_data(EVAL_BS, EVAL_SAMPLES)
     from examples.mlperf.dataloader import iterate_llama3_dataset
     return iterate_llama3_dataset(eval_dataset, EVAL_BS)
 
-  iter = get_train_iter()
+  train_iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
   step_times = []
-  for tokens in tqdm(iter, total=SAMPLES//GBS):
+  while i < MAX_STEPS:
     GlobalCounters.reset()
     if getenv("TRAIN", 1):
-      t = time.perf_counter()
-      loss, lr = train_step(model, tokens)
+      st = time.perf_counter()
+      for _ in range(grad_acc if i >= 3 else 1):
+        ist = time.perf_counter()
+        tokens = next(train_iter)
+        dt = time.perf_counter()
+        loss = minibatch(tokens)
+      gt = time.perf_counter()
+      lr = optim_step()
+      ot = time.perf_counter()
+
       loss = loss.float().item()
       lr = lr.item()
 
-      i += 1
-      sequences_seen += tokens.shape[0]
+      et = time.perf_counter()
+      step_time = et - st
+      gbs_time = gt - st
+      optim_time = ot - gt
+      data_time = dt - ist
+      if BENCHMARK: step_times.append(step_time)
 
-      sec = time.perf_counter()-t
-      if BENCHMARK: step_times.append(sec)
+      i += 1
+      sequences_seen += GBS
 
       mem_gb = GlobalCounters.mem_used / 1e9
-      gflops = GlobalCounters.global_ops / 1e9 / sec
+      gflops = GlobalCounters.global_ops / 1e9 / step_time
       tqdm.write(
-        f"{i:5} {sec:.2f} s run, {loss:.4f} loss, {lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
-
-      if (fname:=getenv("LOSS_FILE", "")):
-        with open(fname, "a") as f:
-          f.write(f"{i} {loss:.4f} {lr:.12f} {mem_gb:.2f}\n")
+          f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, {lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
 
       if WANDB:
-        wandb.log({"lr": lr, "train/loss": loss, "train/step_time": sec, "train/GFLOPS": gflops, "train/sequences_seen": sequences_seen})
+        wandb.log({
+          "lr": lr, "train/loss": loss,
+          "train/step_time": step_time,
+          "train/gbs_time": gbs_time,
+          "train/optim_time": optim_time,
+          "train/data_time": data_time,
+          "train/GFLOPS": gflops,
+          "train/sequences_seen": sequences_seen
+        })
 
       if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
         tqdm.write("saving checkpoint")
@@ -1498,10 +1535,10 @@ def train_llama3():
       eval_iter = get_eval_iter()
       tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
 
-      for j,tokens in tqdm(enumerate(eval_iter), total=5760//EVAL_BS):
+      for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
         eval_losses += eval_step(model, tokens).tolist()
-        
-        if BENCHMARK and (j+1) == min(BENCHMARK, 5760//EVAL_BS):
+
+        if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           return
 
       log_perplexity = Tensor(eval_losses).mean().float().item()
