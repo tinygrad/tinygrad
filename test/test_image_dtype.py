@@ -6,7 +6,7 @@ from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, unwrap
 from test.helpers import REAL_DEV
 
-IMAGE_SUPPORTED_DEVICES = ("QCOM", "CL")
+IMAGE_SUPPORTED_DEVICES = ("QCOM", "CL", "METAL")
 
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageCopy(unittest.TestCase):
@@ -45,6 +45,7 @@ class TestImageCopy(unittest.TestCase):
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageDType(unittest.TestCase):
   def test_image_pitch(self):
+    if REAL_DEV == "METAL": self.skipTest("OpenCL pitch expectations")
     def __validate(imgdt, expected_pitch):
       assert imgdt.pitch == expected_pitch, f"Failed pitch for image: {imgdt}. Got 0x{imgdt.pitch:X}, expected 0x{expected_pitch:X}"
 
@@ -125,6 +126,14 @@ class TestImageDType(unittest.TestCase):
     it = data.cast(dtypes.imagef((9,12,4))).realize()
     assert not isinstance(it.uop.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
+
+  def test_image_add_metal(self):
+    data = Tensor.randn(1*4*4).realize()
+    tst = data.numpy()
+    with Context(IMAGE=2):
+      it = data.cast(dtypes.imagef((1,4,4))).contiguous().realize()
+      out = (it + 1).realize()
+    np.testing.assert_allclose(out.numpy(), tst + 1, rtol=1e-6)
 
   def test_shrink_load_float(self):
     it = Tensor.randn(16).cast(dtypes.imagef((1,4,4))).realize()

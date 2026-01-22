@@ -2,6 +2,7 @@ import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, dec
 from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent, CompilerSet, CompilerPair
+from tinygrad.dtype import ImageDType
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
 
@@ -115,7 +116,7 @@ class MetalCompiler(Compiler):
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
-  def __init__(self, dev:MetalDevice, name:str, lib:bytes):
+  def __init__(self, dev:MetalDevice, name:str, lib:bytes, buf_dtypes=()):
     self.dev, self.name, self.lib = dev, name, lib
     if lib[:4] == b"MTLB":
       # binary metal library
@@ -127,9 +128,11 @@ class MetalProgram:
       try: self.library = metal_src_to_library(self.dev, lib.decode())
       except CompileError as e: raise RuntimeError from e
     self.fxn = self.library.newFunctionWithName(to_ns_str(name)).retained()
+    # NOTE: ICB (indirect command buffers) don't support texture arguments, only buffers
+    self.supports_icb = not any(isinstance(dt, ImageDType) for dt in buf_dtypes)
     descriptor = metal.MTLComputePipelineDescriptor.new()
     descriptor.setComputeFunction(self.fxn)
-    descriptor.setSupportIndirectCommandBuffers(True)
+    descriptor.setSupportIndirectCommandBuffers(self.supports_icb)
     self.pipeline_state = self.dev.sysdevice.newComputePipelineStateWithDescriptor_options_reflection_error(descriptor, metal.MTLPipelineOptionNone,
       None, ctypes.byref(error_pipeline_creation:=metal.NSError().retained()))
     error_check(error_pipeline_creation)
@@ -144,8 +147,16 @@ class MetalProgram:
     command_buffer = self.dev.mtl_queue.commandBuffer().retained() # FIXME: is this really ARC?
     encoder = command_buffer.computeCommandEncoder().retained() # FIXME: is this really ARC?
     encoder.setComputePipelineState(self.pipeline_state)
-    for i,a in enumerate(bufs): encoder.setBuffer_offset_atIndex(a.buf, a.offset, i)
-    for i,a in enumerate(vals, start=len(bufs)): encoder.setBytes_length_atIndex(bytes(ctypes.c_int(a)), 4, i)
+    # NOTE: Metal uses separate index spaces for buffers and textures, can't just enumerate
+    buf_idx, tex_idx = 0, 0
+    for a in bufs:
+      if isinstance(a, MetalTexture):
+        encoder.setTexture_atIndex(a.tex, tex_idx)
+        tex_idx += 1
+      else:
+        encoder.setBuffer_offset_atIndex(a.buf, a.offset, buf_idx)
+        buf_idx += 1
+    for i,a in enumerate(vals, start=buf_idx): encoder.setBytes_length_atIndex(bytes(ctypes.c_int(a)), 4, i)
     encoder.dispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
@@ -158,9 +169,33 @@ class MetalProgram:
 class MetalBuffer:
   def __init__(self, buf:metal.MTLBuffer, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
 
+class MetalTexture:
+  def __init__(self, buf:metal.MTLBuffer|None, tex:metal.MTLTexture, size:int, image):
+    self.buf, self.tex, self.size, self.image, self.offset = buf, tex, size, image, 0
+
 class MetalAllocator(LRUAllocator[MetalDevice]):
   def _alloc(self, size:int, options) -> MetalBuffer:
     if options.external_ptr: return MetalBuffer(metal.MTLBuffer(options.external_ptr), size)
+    # NOTE: ImageDType allocates a MetalTexture (either buffer-backed or native texture depending on METAL_NATIVE_TEX)
+    if options.image is not None:
+      img = options.image
+      size = img.pitch * img.shape[0]
+      fmt = metal.MTLPixelFormatRGBA16Float if img.itemsize == 2 else metal.MTLPixelFormatRGBA32Float
+      desc = metal.MTLTextureDescriptor.new()
+      desc.setTextureType(metal.MTLTextureType2D)
+      desc.setPixelFormat(fmt)
+      desc.setWidth(img.shape[1])
+      desc.setHeight(img.shape[0])
+      desc.setUsage(metal.MTLTextureUsageShaderRead | metal.MTLTextureUsageShaderWrite)
+      if getenv("METAL_NATIVE_TEX"):
+        tex = self.dev.sysdevice.newTextureWithDescriptor(desc)
+        if tex.value is None: raise MemoryError("Metal OOM while allocating texture")
+        return MetalTexture(None, tex, size, img)
+      ret = self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
+      ret.retain = False
+      if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
+      tex = ret.newTextureWithDescriptor_offset_bytesPerRow(desc, 0, img.pitch)
+      return MetalTexture(ret, tex, size, img)
 
     # Buffer is explicitly released in _free() rather than garbage collected via reference count
     ret = self.dev.sysdevice.newBufferWithLength_options(size, metal.MTLResourceStorageModeShared)
@@ -168,7 +203,11 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
   def _free(self, opaque:MetalBuffer, options):
-    if not sys.is_finalizing(): opaque.buf.release
+    if sys.is_finalizing(): return
+    if isinstance(opaque, MetalTexture):
+      opaque.tex.release
+      if opaque.buf is not None: opaque.buf.release
+    else: opaque.buf.release
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()
@@ -192,7 +231,30 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
+    if isinstance(src, MetalTexture):
+      if src.buf is None: raise RuntimeError("native MetalTexture has no buffer view")
+      return to_mv(src.buf.contents(), src.size)
     return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
-  def _copyin(self, dest:MetalBuffer, src:memoryview): self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
-  def _copyout(self, dest:memoryview, src:MetalBuffer): self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
+  def _cp_tex_native(self, tex:MetalTexture, mv:memoryview, to_tex:bool):
+    img, stride = tex.image, tex.image.shape[1] * tex.image.itemsize * 4
+    region = metal.MTLRegion(metal.MTLOrigin(0, 0, 0), metal.MTLSize(img.shape[1], img.shape[0], 1))
+    if to_tex: tex.tex.replaceRegion_mipmapLevel_withBytes_bytesPerRow(region, 0, to_mv(mv, mv.nbytes).ctypes.data, stride)
+    else: objc.msg("getBytes:bytesPerRow:fromRegion:mipmapLevel:", None,
+      [ctypes.c_void_p, metal.NSUInteger, metal.MTLRegion, metal.NSUInteger])(tex.tex, to_mv(mv, mv.nbytes).ctypes.data, stride, region, 0)
+  def _cp_tex_pitched(self, tex:MetalTexture, mv:memoryview, to_tex:bool):
+    img, stride = tex.image, tex.image.shape[1] * tex.image.itemsize * 4
+    buf = self._as_buffer(tex)
+    if img.pitch == stride:
+      return self._cp_mv(buf[:img.shape[0]*stride], mv, "TINY -> METAL") if to_tex else self._cp_mv(mv, buf[:img.shape[0]*stride], "METAL -> TINY")
+    for i in range(img.shape[0]):
+      if to_tex: buf[i*img.pitch:i*img.pitch+stride] = mv[i*stride:(i+1)*stride]
+      else: mv[i*stride:(i+1)*stride] = buf[i*img.pitch:i*img.pitch+stride]
+  def _copyin(self, dest:MetalBuffer, src:memoryview):
+    if not isinstance(dest, MetalTexture): return self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
+    if dest.buf is None: return self._cp_tex_native(dest, src, to_tex=True)
+    return self._cp_tex_pitched(dest, src, to_tex=True)
+  def _copyout(self, dest:memoryview, src:MetalBuffer):
+    if not isinstance(src, MetalTexture): return self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
+    if src.buf is None: return self._cp_tex_native(src, dest, to_tex=False)
+    return self._cp_tex_pitched(src, dest, to_tex=False)
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset)

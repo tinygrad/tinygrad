@@ -342,6 +342,7 @@ class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
   def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+  has_aux = True
 
   # language options
   kernel_typedef = "kernel void"
@@ -367,18 +368,50 @@ class MetalRenderer(CStyleLanguage):
 
   string_rewrite = PatternMatcher([
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
+    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4),
+          src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("var"))),
+      lambda ctx,buf,idx,var,gate: f"({ctx[gate]}?{ctx._image_read(buf, idx)}:{ctx[var]})"),
+    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))),)),
+      lambda ctx,buf,idx: ctx._image_read(buf, idx)),
+    (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), allow_any_len=True),
+                          UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
+      lambda ctx,buf,idx,var: ctx._image_write(buf, idx, var)),
   ]) + base_rewrite
+
+  def _image_read(self, buf:UOp, idx:UOp) -> str:
+    read = f"{self[buf]}.read(uint2({self[idx]}))"
+    return f"float4({read})" if buf.dtype.itemsize == 2 else read
+
+  def _image_write(self, buf:UOp, idx:UOp, var:UOp) -> str:
+    val = f"half4({self[var]})" if buf.dtype.itemsize == 2 else self[var]
+    return f"{self[buf]}.write({val}, uint2({self[idx]}));"
+
+  def render_dtype(self, dt:DType, mutable=True) -> str:
+    if isinstance(dt, ImageDType):
+      tex_dt = "half" if dt.itemsize == 2 else "float"
+      access = "read_write" if mutable else "read"
+      return f"texture2d<{tex_dt}, access::{access}>"
+    return super().render_dtype(dt, mutable)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):
     prefix = ["#include <metal_stdlib>","using namespace metal;"]
-    deduped_wmma_args = dedup([(name, dtype_in, dtype_out) for name, _, dtype_in, dtype_out, _, _, _, _ in wmma_args(uops)])
-    for name, dtype_in, dtype_out in deduped_wmma_args: prefix.append(
-  f"""{(dstr_out:=self.render_dtype(dtype_out.vec(2)))} __{name}({(dstr_in:=self.render_dtype(dtype_in.vec(2)))} a, {dstr_in} b, {dstr_out} c){{
+    for name, dtype_in, dtype_out in dedup([(n, di, do) for n, _, di, do, _, _, _, _ in wmma_args(uops)]):
+      dstr_in, dstr_out = self.render_dtype(dtype_in.vec(2)), self.render_dtype(dtype_out.vec(2))
+      prefix.append(f"""{dstr_out} __{name}({dstr_in} a, {dstr_in} b, {dstr_out} c){{
   simdgroup_{self.render_dtype(dtype_in)}8x8 mat_a, mat_b; simdgroup_{self.render_dtype(dtype_out)}8x8 mat_c;
   mat_a.thread_elements()[0] = a[0]; mat_b.thread_elements()[0] = b[0]; mat_c.thread_elements()[0] = c[0];
   mat_a.thread_elements()[1] = a[1]; mat_b.thread_elements()[1] = b[1]; mat_c.thread_elements()[1] = c[1];
   simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);\n  return {dstr_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+    # NOTE: Metal doesn't need sampler setup (unlike OpenCL), so we skip base class tmp handling
+    buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
+                self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
+    local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
+    launch_bounds = prod([d.vmax for d in local_dims])
+    prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
+      [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] + [") {\n"] + ['\n'.join(kernel), "\n}"])
+    return "\n".join(prefix)+f"\n{prg}"
+
+  def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL),)
 
 _nms = list("xyzwabcdefghijkl") + [f'v{i}' for i in range(16, 32)]
 

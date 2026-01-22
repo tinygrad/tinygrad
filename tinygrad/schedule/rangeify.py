@@ -225,8 +225,11 @@ def remove_noop_bufferize(idx,b2):
 pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.BUFFERIZE, name="b"), cleanup_dead_axes),
   (UPat(GroupOp.All-{Ops.BUFFERIZE, Ops.BUFFER}, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) else None),
-  (UPat((Ops.BUFFERIZE), name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType)
-    and (resolve(prod(x.dtype.shape)!=prod(x.shape)) or x.shape[-1]%4!=0) else None),
+  # update image dtype shape on BUFFERIZE, or fall back to base if shape is incompatible
+  (UPat(Ops.BUFFERIZE, name="x"), lambda x: x.replace(dtype=x.dtype.base) if isinstance(x.dtype, ImageDType) and x.shape[-1]%4!=0
+    else None if not isinstance(x.dtype, ImageDType) or not resolve(prod(x.dtype.shape)!=prod(x.shape))
+    else x.replace(dtype=x.dtype.base) if len(x.shape)!=3
+    else x.replace(dtype=(dtypes.imageh if x.dtype.itemsize==2 else dtypes.imagef)(x.shape))),
   # remove noop buffers. if we look at the next index we can remove even more of these
   (UPat(Ops.INDEX, name="idx").f(Ops.BUFFERIZE, allow_any_len=True, name="b2"), remove_noop_bufferize),
   # dont bufferize an arange
