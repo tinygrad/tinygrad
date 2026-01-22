@@ -9,8 +9,6 @@ from tinygrad.runtime.ops_metal import wait_check, to_ns_str, MetalTexture
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support import objc
 
-set_kernel_texture = objc.msg("setKernelTexture:atIndex:", None, [metal.MTLTexture, metal.NSUInteger])
-
 class MetalGraph(GraphRunner):
   def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
     super().__init__(jit_cache, input_buffers, var_vals)
@@ -52,7 +50,7 @@ class MetalGraph(GraphRunner):
         tex_idx, buf_idx = tex_idx + is_tex, buf_idx + (not is_tex)
         if b not in input_buffers:
           if is_tex:
-            set_kernel_texture(icb_command, b._buf.tex, slot[1])
+            icb_command.setKernelTexture_atIndex(b._buf.tex, slot[1])
             all_resources.append(b._buf.tex)
           else:
             icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, slot[1])
@@ -83,7 +81,7 @@ class MetalGraph(GraphRunner):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
       slot = self.arg_slots[j][i]
       if slot is None: continue
-      if slot[0]: set_kernel_texture(computeCommand, input_buffers[input_idx]._buf.tex, slot[1])
+      if slot[0]: computeCommand.setKernelTexture_atIndex(input_buffers[input_idx]._buf.tex, slot[1])
       else: computeCommand.setKernelBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, slot[1])
 
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):

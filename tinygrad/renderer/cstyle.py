@@ -370,21 +370,16 @@ class MetalRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4),
           src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("var"))),
-      lambda ctx,buf,idx,var,gate: f"({ctx[gate]}?{ctx._image_read(buf, idx)}:{ctx[var]})"),
+      lambda ctx,buf,idx,var,gate: (f"({ctx[gate]}?" +
+        (f"float4({ctx[buf]}.read(uint2({ctx[idx]})))" if buf.dtype.itemsize == 2 else f"{ctx[buf]}.read(uint2({ctx[idx]}))") +
+        f":{ctx[var]})")),
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))),)),
-      lambda ctx,buf,idx: ctx._image_read(buf, idx)),
+      lambda ctx,buf,idx: (f"float4({ctx[buf]}.read(uint2({ctx[idx]})))" if buf.dtype.itemsize == 2 else
+                           f"{ctx[buf]}.read(uint2({ctx[idx]}))")),
     (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), allow_any_len=True),
                           UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
-      lambda ctx,buf,idx,var: ctx._image_write(buf, idx, var)),
+      lambda ctx,buf,idx,var: f"{ctx[buf]}.write({f'half4({ctx[var]})' if buf.dtype.itemsize == 2 else ctx[var]}, uint2({ctx[idx]}));"),
   ]) + base_rewrite
-
-  def _image_read(self, buf:UOp, idx:UOp) -> str:
-    read = f"{self[buf]}.read(uint2({self[idx]}))"
-    return f"float4({read})" if buf.dtype.itemsize == 2 else read
-
-  def _image_write(self, buf:UOp, idx:UOp, var:UOp) -> str:
-    val = f"half4({self[var]})" if buf.dtype.itemsize == 2 else self[var]
-    return f"{self[buf]}.write({val}, uint2({self[idx]}));"
 
   def render_dtype(self, dt:DType, mutable=True) -> str:
     if isinstance(dt, ImageDType):
