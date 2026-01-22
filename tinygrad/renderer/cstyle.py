@@ -62,11 +62,11 @@ base_rewrite = PatternMatcher([
 
 extra_pm = PatternMatcher([
   # devectorize any bools
-  #(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
   # CAST (from bool) can't be vectorized
-  #(UPat(Ops.CAST, src=(UPat(dtype=dtypes.bool),), name="alu"), no_vectorized_alu),
+  (UPat(Ops.CAST, src=(UPat(dtype=dtypes.bool),), name="alu"), no_vectorized_alu),
   # WHERE can't be vectorized
-  #(UPat(Ops.WHERE, name="alu"), no_vectorized_alu),
+  (UPat(Ops.WHERE, name="alu"), no_vectorized_alu),
 ])
 
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
