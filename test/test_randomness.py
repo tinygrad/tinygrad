@@ -71,10 +71,17 @@ class TestRandomness(unittest.TestCase):
 
   def test_rand_is_lazy(self):
     Tensor.manual_seed(0)
-    r = Tensor.rand(10)
-    self.assertFalse(r.uop.is_realized, "rand should be lazy - tensor should not be realized")
-    r.realize()
-    self.assertTrue(r.uop.is_realized, "tensor should be realized after .realize()")
+    r1 = Tensor.rand(10)
+    self.assertFalse(r1.uop.is_realized, "rand should be lazy - tensor should not be realized")
+    counter = Tensor._device_rng_counters[Device.DEFAULT]
+    self.assertFalse(counter.uop.is_realized, "rand should be lazy - counter should not be realized")
+    # second rand triggers assign path
+    r2 = Tensor.rand(10)
+    self.assertFalse(r2.uop.is_realized, "rand should be lazy - tensor should not be realized after second rand")
+    self.assertFalse(counter.uop.is_realized, "rand should be lazy - counter should not be realized after second rand")
+    Tensor.realize(r1, r2)
+    self.assertTrue(r1.uop.is_realized, "tensor should be realized after .realize()")
+    self.assertTrue(r2.uop.is_realized, "tensor should be realized after .realize()")
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16) and is_dtype_supported(dtypes.ulong), "need float16 and ulong support")
   def test_rand_float16(self):
