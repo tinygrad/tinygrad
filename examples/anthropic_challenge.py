@@ -4,7 +4,7 @@ from tinygrad.uop.symbolic import symbolic
 from tinygrad.codegen import Renderer
 from tinygrad.codegen.opt import Opt, OptOps
 
-# ************************* implementation of problem ************************
+# ************************* implementation of problem (replace with anything!) ************************
 
 def myhash(a):
   a = (a + 0x7ED55D16) + (a << 12)
@@ -58,19 +58,17 @@ def tree_traversal(forest: Tensor, val: Tensor, height: int, rounds: int, where_
 
 # ************************* renderer for VLIW machine *************************
 
-BS = getenv("BS", 256)
-
 def loop_unrolling(sink:UOp):
   rng = [x for x in sink.toposort() if x.op is Ops.RANGE]
   if len(rng) == 0: return None
   unrolled_sinks = [sink.substitute({rng[0]:rng[0].const_like(i)}).src[0] for i in range(rng[0].vmax+1)]
   return UOp.sink(*unrolled_sinks, arg=sink.arg)
 
-global_addrs = [0,0,0]
+global_addrs = []
 vliw_prepare = PatternMatcher([
   # loop unrolling (should be a part of tinygrad)
   (UPat(Ops.SINK, name="sink"), loop_unrolling),
-  # cast is fake
+  # cast is fake (TODO: why is this needed?)
   (UPat(Ops.CAST, name="c"), lambda c: c.src[0]),
   # rewrites to hardcode the addresses in memory
   (UPat(Ops.DEFINE_GLOBAL, name="dg"), lambda dg: UOp.const(dtypes.uint, global_addrs[dg.arg])),
@@ -80,13 +78,14 @@ vliw_prepare = PatternMatcher([
 
 class VLIWRenderer(Renderer):
   has_local = False  # TODO: this should be the default / cleaned up
-  # this says this backend supports MULACC, SHR, and SHL
-  code_for_op: dict = {Ops.MULACC: None, Ops.SHR: None, Ops.SHL: None}
+  # this says this backend supports MULACC + more. decompositions uses this
+  code_for_op: dict = {Ops.MULACC: None, Ops.ADD: "+", Ops.MUL: "*",
+                       Ops.XOR: "^", Ops.AND: "&", Ops.OR: "|",
+                       Ops.SHL: "<<", Ops.SHR: ">>", Ops.CMPLT: "<"}
   # this matcher runs while still in graph form
   pre_matcher = vliw_prepare
 
   def render(self, uops:list[UOp]):
-    VLEN, alu_ops = 8, {Ops.ADD: "+", Ops.MUL: "*", Ops.XOR: "^", Ops.AND: "&", Ops.OR: "|", Ops.SHL: "<<", Ops.SHR: ">>", Ops.CMPLT: "<"}
     reg, uop_reg, instrs = 0, {}, []
     def r(u): return uop_reg[u]
     for u in uops:
@@ -100,7 +99,7 @@ class VLIWRenderer(Renderer):
       elif u.op is Ops.STORE: instrs.append({"store": [("vstore", r(u.src[0]), r(u.src[1]))] if u.src[1].dtype.count > 1 else [("store", r(u.src[0]), r(u.src[1]))]})
       elif u.op is Ops.MULACC: assert u.dtype.count == 8; instrs.append({"valu": [("multiply_add", r(u), r(u.src[0]), r(u.src[1]), r(u.src[2]))]})
       elif u.op is Ops.WHERE: assert u.dtype.count == 8; instrs.append({"flow": [("vselect", r(u), r(u.src[0]), r(u.src[1]), r(u.src[2]))]})
-      elif u.op in alu_ops: instrs.append({("valu" if u.dtype.count > 1 else "alu"): [(alu_ops[u.op], r(u), r(u.src[0]), r(u.src[1]))]})
+      elif u.op in self.code_for_op: instrs.append({("valu" if u.dtype.count > 1 else "alu"): [(self.code_for_op[u.op], r(u), r(u.src[0]), r(u.src[1]))]})
       elif u.op is Ops.SINK: instrs.append({"flow": [("halt",)]})
       else: assert False, f"unhandled op {u.op}"
     return repr(instrs)
@@ -113,15 +112,15 @@ sys.modules["problem"] = problem = types.ModuleType("problem")
 exec(fetch(PROBLEM_URL).read_text(), problem.__dict__)
 
 if __name__ == "__main__":
+  batch_size = getenv("BS", 256)
   height = 10
   rounds = getenv("ROUNDS", 16)
 
   # build problem
   tree = problem.Tree.generate(height)
-  inp = problem.Input.generate(tree, BS, rounds)
+  inp = problem.Input.generate(tree, batch_size, rounds)
   mem = problem.build_mem_image(tree, inp)
-  global_addrs[0] = global_addrs[1] = mem[6]  # input and output
-  global_addrs[2] = mem[4]                    # forest
+  global_addrs.extend([mem[6], mem[6], mem[4]])  # output, input, forest
 
   # *** verify the kernel in tinygrad compared to reference ***
 
@@ -129,7 +128,8 @@ if __name__ == "__main__":
   val_t = Tensor(inp.values, dtype=dtypes.uint32)
 
   if getenv("VERIFY", 1):
-    with Context(PCONTIG=2, DEVECTORIZE=2):
+    # verify on normal tinygrad device
+    with Context(PCONTIG=2):
       out = tree_traversal(forest_t, val_t, height, rounds)
       val_out = out.tolist()
     problem.reference_kernel(tree, inp)
@@ -138,8 +138,8 @@ if __name__ == "__main__":
   # *** render to device ***
 
   from tinygrad.codegen import get_program
-  with Context(PCONTIG=2, DEVECTORIZE=2, CPU_LLVM=1, SPEC=0):
-    out = tree_traversal(forest_t.to("CPU"), val_t.to("CPU"), height, rounds)
+  with Context(PCONTIG=2, DEVECTORIZE=2, SPEC=0):
+    out = tree_traversal(forest_t, val_t, height, rounds)
     sink = out.schedule()[-1].ast
     prg = get_program(sink, VLIWRenderer())
 
