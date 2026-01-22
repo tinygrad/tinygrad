@@ -226,13 +226,16 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     self.dev.synchronize()
     return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
   def _cp_buf_pitched(self, buf:MetalBuffer, mv:memoryview, to_tex:bool):
-    img, stride = buf.image, buf.image.shape[1] * buf.image.itemsize * 4
-    buf = self._as_buffer(buf)
+    img = buf.image
+    assert img is not None
+    stride = img.shape[1] * img.itemsize * 4
+    mv_buf = self._as_buffer(buf)
     if img.pitch == stride:
-      return self._cp_mv(buf[:img.shape[0]*stride], mv, "TINY -> METAL") if to_tex else self._cp_mv(mv, buf[:img.shape[0]*stride], "METAL -> TINY")
+      return self._cp_mv(mv_buf[:img.shape[0]*stride], mv, "TINY -> METAL") if to_tex else \
+        self._cp_mv(mv, mv_buf[:img.shape[0]*stride], "METAL -> TINY")
     for i in range(img.shape[0]):
-      if to_tex: buf[i*img.pitch:i*img.pitch+stride] = mv[i*stride:(i+1)*stride]
-      else: mv[i*stride:(i+1)*stride] = buf[i*img.pitch:i*img.pitch+stride]
+      if to_tex: mv_buf[i*img.pitch:i*img.pitch+stride] = mv[i*stride:(i+1)*stride]
+      else: mv[i*stride:(i+1)*stride] = mv_buf[i*img.pitch:i*img.pitch+stride]
   def _copyin(self, dest:MetalBuffer, src:memoryview):
     if dest.image is None: return self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
     return self._cp_buf_pitched(dest, src, to_tex=True)
