@@ -232,6 +232,9 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   # dont bufferize an arange
   (UPat.any((r:=UPat(dtype=dtypes.index).cast()).named("src"), r.eq(UPat()).named("src")).f(Ops.BUFFERIZE,
     allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
+  # dont bufferize arange like expressions
+  (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), lambda src,buf,idx:
+    remove_bufferize(src, buf, idx) if not src.op_in_backward_slice_with_self(Ops.REDUCE, Ops.INDEX) else None),
   # no buffers for const
   (UPat(Ops.CONST, name='c').f(Ops.BUFFERIZE, allow_any_len=True, name="b"), lambda c,b: b.const_like(c.arg).rtag(b.tag)),
   # indexing a const is a const
