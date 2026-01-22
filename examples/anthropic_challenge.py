@@ -2,13 +2,13 @@ import random
 from tinygrad import Tensor, dtypes, Context
 from tinygrad.codegen.opt import Opt, OptOps
 
-def myhash(a: Tensor) -> Tensor:
-  a = (a + 0x7ED55D16) + (a << 12)
-  a = (a ^ 0xC761C23C) ^ (a >> 19)
-  a = (a + 0x165667B1) + (a << 5)
-  a = (a + 0xD3A2646C) ^ (a << 9)
-  a = (a + 0xFD7046C5) + (a << 3)
-  a = (a ^ 0xB55A4F09) ^ (a >> 16)
+def myhash(a, m=lambda x: x):
+  a = m(m(a + 0x7ED55D16) + m(a << 12))
+  a = m(m(a ^ 0xC761C23C) ^ m(a >> 19))
+  a = m(m(a + 0x165667B1) + m(a << 5))
+  a = m(m(a + 0xD3A2646C) ^ m(a << 9))
+  a = m(m(a + 0xFD7046C5) + m(a << 3))
+  a = m(m(a ^ 0xB55A4F09) ^ m(a >> 16))
   return a
 
 def select_with_where_tree(values: Tensor, relative_idx: Tensor) -> Tensor:
@@ -52,16 +52,28 @@ def tree_traversal(forest: Tensor, val: Tensor, height: int, rounds: int, where_
 
   return val.contiguous(arg=(Opt(OptOps.UPCAST, 0, 8),))
 
+def python_reference(forest: list[int], val: list[int], height: int, rounds: int) -> list[int]:
+  n_nodes = len(forest)
+  idx, val = [0] * len(val), val.copy()
+  for _ in range(rounds):
+    for i in range(len(idx)):
+      val[i] = myhash(val[i] ^ forest[idx[i]], lambda x: x % (2**32))
+      idx[i] = 2 * idx[i] + (1 if val[i] % 2 == 0 else 2)
+      if idx[i] >= n_nodes: idx[i] = 0
+  return val
+
 if __name__ == "__main__":
-  height = 10
-  n_nodes = 2 ** (height + 1) - 1  # 2047
   batch_size = 256
+  height = 10
   rounds = 16
 
-  forest = Tensor([random.randint(0, 2**30 - 1) for _ in range(n_nodes)], dtype=dtypes.uint32)
-  val = Tensor([random.randint(0, 2**30 - 1) for _ in range(batch_size)], dtype=dtypes.uint32)
+  forest = [random.randint(0, 2**30 - 1) for _ in range(2 ** (height + 1) - 1)]
+  val = [random.randint(0, 2**30 - 1) for _ in range(batch_size)]
 
+  forest_t = Tensor(forest, dtype=dtypes.uint32)
+  val_t = Tensor(val, dtype=dtypes.uint32)
   with Context(PCONTIG=2, DEVECTORIZE=2):
-    out = tree_traversal(forest, val, height, rounds)
-    out.realize()
+    out = tree_traversal(forest_t, val_t, height, rounds)
+    val_out = out.tolist()
 
+  assert val_out == python_reference(forest, val, height, rounds)
