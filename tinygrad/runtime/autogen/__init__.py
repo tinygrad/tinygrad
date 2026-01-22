@@ -139,8 +139,7 @@ def __getattr__(nm):
                   args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
       return load("metal", "'Metal'", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
-                  ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer",
-                   "IndirectCommandEncoder", "Resource", "CommandEncoder"]],
+                  ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
                   args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
     case "iokit": return load("iokit", "'IOKit'", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"],
                               args=["-isysroot", macossdk])
