@@ -1600,6 +1600,12 @@ class struct_NV83DE_ALLOC_PARAMETERS(c.Struct):
   hClass3dObject: Annotated[NvHandle, 8]
 NV83DE_ALLOC_PARAMETERS: TypeAlias = struct_NV83DE_ALLOC_PARAMETERS
 @c.record
+class struct_NVB2CC_ALLOC_PARAMETERS(c.Struct):
+  SIZE = 8
+  hClientTarget: Annotated[NvHandle, 0]
+  hContextTarget: Annotated[NvHandle, 4]
+NVB2CC_ALLOC_PARAMETERS: TypeAlias = struct_NVB2CC_ALLOC_PARAMETERS
+@c.record
 class struct__clc9b5_tag0(c.Struct):
   SIZE = 8192
   Reserved00: Annotated[c.Array[NvV32, Literal[64]], 0]
@@ -15122,6 +15128,8 @@ NVC96F_GP_ENTRY1_OPCODE_SET_PB_SEGMENT_EXTENDED_BASE = 0x00000004 # type: ignore
 BLACKWELL_USERMODE_A = (0xc761) # type: ignore
 GT200_DEBUGGER = (0x83de) # type: ignore
 NV83DE_ALLOC_PARAMETERS_MESSAGE_ID = (0x83de) # type: ignore
+MAXWELL_PROFILER_DEVICE = (0xb2cc) # type: ignore
+NVB2CC_ALLOC_PARAMETERS_MESSAGE_ID = (0xb2cc) # type: ignore
 AMPERE_COMPUTE_A = 0xC6C0 # type: ignore
 NVC6C0_SET_OBJECT = 0x0000 # type: ignore
 NVC6C0_NO_OPERATION = 0x0100 # type: ignore
