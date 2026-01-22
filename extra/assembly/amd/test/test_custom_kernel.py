@@ -35,7 +35,7 @@ def custom_add_one(A:UOp, arch:str) -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=(*sink.src, sink)), *assemble_insts(insts, name, arch)))
 
 def custom_add_var(A:UOp, B:UOp, arch:str) -> UOp:
-  A = A.flatten()
+  A,B = A.flatten(), B.flatten()
   assert A.dtype.base == dtypes.uint32, f"buffer dtype must be uint32, got {A.dtype}"
   threads = UOp.special(A.size, "lidx0")
   var = UOp.variable("var", 0, 10)
@@ -65,8 +65,8 @@ class TestCustomKernel(unittest.TestCase):
     self.assertTrue((a.numpy() == 2.).all())
 
   def test_variable(self):
-    a = Tensor([0], dtype=dtypes.uint32).realize()
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
+    a = Tensor.zeros_like(b).contiguous().realize()
     a = Tensor.custom_kernel(a, b, fxn=functools.partial(custom_add_var, arch=Device[Device.DEFAULT].arch))[0]
     ei = a.schedule()[-1].lower()
     for i in range(4):
