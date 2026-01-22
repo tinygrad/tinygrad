@@ -10,8 +10,9 @@ from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support import objc
 
 class MetalGraph(GraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
-    super().__init__(jit_cache, input_buffers, var_vals)
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
+               orig_valid_positions: dict[int, set[int]]|None = None):
+    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
     # create metal batch exec
@@ -39,7 +40,7 @@ class MetalGraph(GraphRunner):
       all_pipelines.append(prg._prg.pipeline_state)
       icb_command.setComputePipelineState(prg._prg.pipeline_state)
       for i,b in enumerate(ji.bufs):
-        if b is not None and b not in input_buffers:
+        if b is not None and (j,i) not in self.input_replace:
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist.index(v.expr)*4, len(ji.bufs)+i)

@@ -9,7 +9,6 @@ SILENT MISMATCHES (highest priority - wrong results, no error):
   class_method_shared_across_instances EASY could check if first arg is self and warn
   slice_assign_requires_realize      MED    assign graph not connected to read during JIT replay
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
-  graph_input_output_aliasing        MED    GraphRunner skips aliased buffers but only input_replace updated
   python_constants_frozen            HARD   inherent to tracing JITs
   conditional_branches_frozen        HARD   inherent to tracing JITs
 
@@ -93,7 +92,7 @@ class TestJitFootguns(unittest.TestCase):
     y = Tensor([100]).contiguous().realize()
     for _ in range(3):
       y = step(y)  # should be (100+1)*2=202, (202+1)*2=406, (406+1)*2=814
-    self.assertEqual(y.item(), 1406)  # TODO: should be 814
+    self.assertEqual(y.item(), 814)  # fails with 1406 if bug exists (uses 350 instead of 100)
 
   def test_multiple_outputs_same_intermediate(self):
     """Multiple outputs derived from the same intermediate - JIT copies aliased inputs to prevent hazard."""
