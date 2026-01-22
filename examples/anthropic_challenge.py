@@ -1,5 +1,4 @@
-import random
-from tinygrad import Tensor, dtypes, Context, getenv, UOp
+from tinygrad import Tensor, dtypes, Context, getenv, UOp, fetch
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.codegen import Renderer
@@ -7,13 +6,13 @@ from tinygrad.codegen.opt import Opt, OptOps
 
 # ************************* implementation of problem ************************
 
-def myhash(a, m=lambda x: x):
-  a = m(m(a + 0x7ED55D16) + m(a << 12))
-  a = m(m(a ^ 0xC761C23C) ^ m(a >> 19))
-  a = m(m(a + 0x165667B1) + m(a << 5))
-  a = m(m(a + 0xD3A2646C) ^ m(a << 9))
-  a = m(m(a + 0xFD7046C5) + m(a << 3))
-  a = m(m(a ^ 0xB55A4F09) ^ m(a >> 16))
+def myhash(a):
+  a = (a + 0x7ED55D16) + (a << 12)
+  a = (a ^ 0xC761C23C) ^ (a >> 19)
+  a = (a + 0x165667B1) + (a << 5)
+  a = (a + 0xD3A2646C) ^ (a << 9)
+  a = (a + 0xFD7046C5) + (a << 3)
+  a = (a ^ 0xB55A4F09) ^ (a >> 16)
   return a
 
 def select_with_where_tree(values: Tensor, relative_idx: Tensor) -> Tensor:
@@ -59,16 +58,22 @@ def tree_traversal(forest: Tensor, val: Tensor, height: int, rounds: int, where_
 
 # ************************* renderer for VLIW machine *************************
 
+BS = getenv("BS", 256)
+
 def loop_unrolling(sink:UOp):
   rng = [x for x in sink.toposort() if x.op is Ops.RANGE]
   if len(rng) == 0: return None
   unrolled_sinks = [sink.substitute({rng[0]:rng[0].const_like(i)}).src[0] for i in range(rng[0].vmax+1)]
   return UOp.sink(*unrolled_sinks, arg=sink.arg)
 
+global_addrs = [0,0,0]
 vliw_prepare = PatternMatcher([
   # loop unrolling (should be a part of tinygrad)
-  (UPat(Ops.SINK, name="sink"), loop_unrolling)
-  # TODO: you can add more rules here
+  (UPat(Ops.SINK, name="sink"), loop_unrolling),
+  # rewrites to hardcode the addresses in memory
+  (UPat(Ops.DEFINE_GLOBAL, name="dg"), lambda dg: UOp.const(dtypes.uint, global_addrs[dg.arg])),
+  # INDEX is just plus
+  (UPat(Ops.INDEX, name="i"), lambda i: i.src[0]+i.src[1]),
 ])+symbolic
 
 class VLIWRenderer(Renderer):
@@ -82,43 +87,55 @@ class VLIWRenderer(Renderer):
     # TODO: implement this. VLIW pack, register allocate, output Machine code
     from tinygrad.uop.ops import print_uops
     print_uops(uops)
+    return "[]"
 
 # ************************* test and render *************************
 
+PROBLEM_URL = "https://raw.githubusercontent.com/anthropics/original_performance_takehome/refs/heads/main/tests/frozen_problem.py"
+exec(fetch(PROBLEM_URL).read_text(), globals=(problem:={}))
+
 if __name__ == "__main__":
-  batch_size = getenv("BS", 256)
   height = 10
   rounds = getenv("ROUNDS", 16)
 
-  forest = [random.randint(0, 2**30 - 1) for _ in range(2 ** (height + 1) - 1)]
-  val = [random.randint(0, 2**30 - 1) for _ in range(batch_size)]
-  forest_t = Tensor(forest, dtype=dtypes.uint32)
-  val_t = Tensor(val, dtype=dtypes.uint32)
+  tree = problem['Tree'].generate(height)
+  inp = problem['Input'].generate(tree, BS, rounds)
 
   # *** verify the kernel in tinygrad compared to reference ***
 
+  forest_t = Tensor(tree.values, dtype=dtypes.uint32)
+  val_t = Tensor(inp.values, dtype=dtypes.uint32)
+
   if getenv("VERIFY", 1):
-    def python_reference(forest: list[int], val: list[int], height: int, rounds: int) -> list[int]:
-      n_nodes = len(forest)
-      idx, val = [0] * len(val), val.copy()
-      for _ in range(rounds):
-        for i in range(len(idx)):
-          val[i] = myhash(val[i] ^ forest[idx[i]], lambda x: x % (2**32))
-          idx[i] = 2 * idx[i] + (1 if val[i] % 2 == 0 else 2)
-          if idx[i] >= n_nodes: idx[i] = 0
-      return val
     with Context(PCONTIG=2, DEVECTORIZE=2):
       out = tree_traversal(forest_t, val_t, height, rounds)
       val_out = out.tolist()
-    assert val_out == python_reference(forest, val, height, rounds)
+    problem['reference_kernel'](tree, inp)
+    assert val_out == inp.values
 
   # *** render to device ***
 
+  # build problem
+  mem = problem['build_mem_image'](tree, inp)
+  global_addrs[0] = global_addrs[1] = mem[6]  # input and output
+  global_addrs[2] = mem[4]                    # forest
+
+  # render
   from tinygrad.codegen import get_program
-  with Context(PCONTIG=2, DEVECTORIZE=2, CPU_LLVM=1):
+  with Context(PCONTIG=2, DEVECTORIZE=2, CPU_LLVM=1, SPEC=0):
     out = tree_traversal(forest_t.to("CPU"), val_t.to("CPU"), height, rounds)
     sink = out.schedule()[-1].ast
     prg = get_program(sink, VLIWRenderer())
 
-  # TODO: run prg.src in "Machine" from original_performance_takehome
-  print(prg.src)
+  # *** run on Machine and compare ***
+
+  ref_mem = mem.copy()
+  print(mem[4], mem[5], mem[6])
+  debug_info = problem['DebugInfo'](scratch_map={})
+  machine = problem['Machine'](mem, eval(prg.src), debug_info, n_cores=1, trace=False, scratch_size=1536)
+  machine.run()
+  print(f"ran for {machine.cycle} cycles")
+
+  # compare to reference
+  for _ in problem['reference_kernel2'](ref_mem, {}): pass
+  assert machine.mem[mem[6]:mem[6]+mem[2]] == ref_mem[mem[6]:mem[6]+mem[2]]
