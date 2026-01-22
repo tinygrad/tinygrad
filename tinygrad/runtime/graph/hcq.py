@@ -9,8 +9,9 @@ from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, Buffer
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
-    super().__init__(jit_cache, input_buffers, var_vals)
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
+               orig_valid_positions: dict[int, set[int]]|None = None):
+    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # CPU Device is always last

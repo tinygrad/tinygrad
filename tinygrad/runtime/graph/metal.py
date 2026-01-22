@@ -10,8 +10,9 @@ from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support import objc
 
 class MetalGraph(GraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
-    super().__init__(jit_cache, input_buffers, var_vals)
+  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
+               orig_valid_positions: dict[int, set[int]]|None = None):
+    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
     # NOTE: Metal ICB doesn't support texture arguments, so any non-ICB program disables graph execution.
     if not all(getattr(cast(CompiledRunner, ji.prg)._prg, "supports_icb", True) for ji in jit_cache): raise GraphException
@@ -41,20 +42,17 @@ class MetalGraph(GraphRunner):
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       all_pipelines.append(prg._prg.pipeline_state)
       icb_command.setComputePipelineState(prg._prg.pipeline_state)
-      buf_idx = 0
       arg_slots: list[int|None] = []
-      for b in ji.bufs:
-        if b is None:
+      for i,b in enumerate(ji.bufs):
+        if b is None or (j,i) in self.input_replace:
           arg_slots.append(None)
           continue
-        slot = buf_idx
-        buf_idx += 1
-        if b not in input_buffers:
-          icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, slot)
-          all_resources.append(b._buf.buf)
+        slot = i
+        icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, slot)
+        all_resources.append(b._buf.buf)
         arg_slots.append(slot)
       self.arg_slots.append(arg_slots)
-      for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist.index(v.expr)*4, buf_idx+i)
+      for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist.index(v.expr)*4, len(ji.bufs)+i)
 
       global_size, local_size = prg.p.launch_dims(var_vals)
       icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
