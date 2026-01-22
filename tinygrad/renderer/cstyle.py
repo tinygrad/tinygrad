@@ -112,6 +112,7 @@ class CStyleLanguage(Renderer):
   smem_prefix_for_cast: bool = True
   arg_int_prefix: str = "const int"
   barrier: str = ""
+  image_sampler: str = ""
   code_for_workitem: dict[Literal["g", "l", "i"], Callable] = {}
   extra_args: list[str] = []
   float4: str|None = None
@@ -134,9 +135,7 @@ class CStyleLanguage(Renderer):
   extra_matcher = extra_pm
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
-    tmp = ""
-    if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs):
-      tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
+    tmp = self.image_sampler if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
                 self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
@@ -287,6 +286,7 @@ class ClangJITRenderer(ClangRenderer):
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
   has_aux = True
+  image_sampler = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
 
   # language options
   kernel_typedef = "__kernel void"
@@ -397,14 +397,7 @@ class MetalRenderer(CStyleLanguage):
   mat_a.thread_elements()[0] = a[0]; mat_b.thread_elements()[0] = b[0]; mat_c.thread_elements()[0] = c[0];
   mat_a.thread_elements()[1] = a[1]; mat_b.thread_elements()[1] = b[1]; mat_c.thread_elements()[1] = c[1];
   simdgroup_multiply_accumulate(mat_c, mat_a, mat_b, mat_c);\n  return {dstr_out}(mat_c.thread_elements()[0], mat_c.thread_elements()[1]);\n}}""")
-    # NOTE: Metal doesn't need sampler setup (unlike OpenCL), so we skip base class tmp handling
-    buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
-                self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
-    local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
-    launch_bounds = prod([d.vmax for d in local_dims])
-    prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
-      [', '.join([f'{t} {name}' for name,t in buftypes] + self.extra_args)] + [") {\n"] + ['\n'.join(kernel), "\n}"])
-    return "\n".join(prefix)+f"\n{prg}"
+    return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL),)
 
