@@ -163,8 +163,8 @@ gep_pushing = PatternMatcher([
   (UPat(Ops.GEP, src=(UPat(dtype=dtypes.void, name="x"),)), lambda x: x),
   # GEP in order is removed
   (UPat(Ops.GEP, name="g"), lambda g: g.src[0] if not isinstance(g.dtype, PtrDType) and g.arg == tuple(range(g.src[0].dtype.count)) else None),
-  # push all GEPs through ALUs (TODO: remove this)
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name='alu').f(Ops.GEP, name='gep'),
+  # push all GEPs through WHERE/CAST/BITCAST (needed for index dtype)
+  (UPat((Ops.WHERE, Ops.CAST, Ops.BITCAST), name='alu').f(Ops.GEP, name='gep'),
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
      if not isinstance(gep.dtype, PtrDType) and not isinstance(alu.dtype, PtrDType) else None),
   # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
