@@ -66,7 +66,7 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_variable(self):
     a = Tensor([0], dtype=dtypes.uint32).realize()
-    b = Tensor([1], dtype=dtypes.uint32).realize()
+    b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.custom_kernel(a, b, fxn=functools.partial(custom_add_var, arch=Device[Device.DEFAULT].arch))[0]
     ei = a.schedule()[-1].lower()
     for i in range(4):
