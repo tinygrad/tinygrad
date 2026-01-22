@@ -138,9 +138,9 @@ class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
-  extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
   if AMX: tensor_cores = tc.amx
 
+  extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
