@@ -5,15 +5,7 @@ from tinygrad.uop.symbolic import symbolic
 from tinygrad.codegen import Renderer
 from tinygrad.codegen.opt import Opt, OptOps
 
-def python_reference(forest: list[int], val: list[int], height: int, rounds: int) -> list[int]:
-  n_nodes = len(forest)
-  idx, val = [0] * len(val), val.copy()
-  for _ in range(rounds):
-    for i in range(len(idx)):
-      val[i] = myhash(val[i] ^ forest[idx[i]], lambda x: x % (2**32))
-      idx[i] = 2 * idx[i] + (1 if val[i] % 2 == 0 else 2)
-      if idx[i] >= n_nodes: idx[i] = 0
-  return val
+# ************************* implementation of problem ************************
 
 def myhash(a, m=lambda x: x):
   a = m(m(a + 0x7ED55D16) + m(a << 12))
@@ -73,17 +65,25 @@ def loop_unrolling(sink:UOp):
   unrolled_sinks = [sink.substitute({rng[0]:rng[0].const_like(i)}).src[0] for i in range(rng[0].vmax+1)]
   return UOp.sink(*unrolled_sinks, arg=sink.arg)
 
+vliw_prepare = PatternMatcher([
+  # loop unrolling (should be a part of tinygrad)
+  (UPat(Ops.SINK, name="sink"), loop_unrolling)
+  # TODO: you can add more rules here
+])+symbolic
+
 class VLIWRenderer(Renderer):
   has_local = False  # TODO: this should be the default / cleaned up
   # this says this backend supports MULACC, SHR, and SHL
   code_for_op: dict = {Ops.MULACC: None, Ops.SHR: None, Ops.SHL: None}
-  # loop unrolling (should be a part of tinygrad)
-  pre_matcher = PatternMatcher([(UPat(Ops.SINK, name="sink"), loop_unrolling)])+symbolic
+  # this matcher runs while still in graph form
+  pre_matcher = vliw_prepare
 
   def render(self, uops:list[UOp]):
-    # TODO: implement this. one pass, VLIW pack, register allocate
+    # TODO: implement this. VLIW pack, register allocate, output Machine code
     from tinygrad.uop.ops import print_uops
     print_uops(uops)
+
+# ************************* test and render *************************
 
 if __name__ == "__main__":
   batch_size = getenv("BS", 256)
@@ -95,7 +95,18 @@ if __name__ == "__main__":
   forest_t = Tensor(forest, dtype=dtypes.uint32)
   val_t = Tensor(val, dtype=dtypes.uint32)
 
+  # *** verify the kernel in tinygrad compared to reference ***
+
   if getenv("VERIFY", 1):
+    def python_reference(forest: list[int], val: list[int], height: int, rounds: int) -> list[int]:
+      n_nodes = len(forest)
+      idx, val = [0] * len(val), val.copy()
+      for _ in range(rounds):
+        for i in range(len(idx)):
+          val[i] = myhash(val[i] ^ forest[idx[i]], lambda x: x % (2**32))
+          idx[i] = 2 * idx[i] + (1 if val[i] % 2 == 0 else 2)
+          if idx[i] >= n_nodes: idx[i] = 0
+      return val
     with Context(PCONTIG=2, DEVECTORIZE=2):
       out = tree_traversal(forest_t, val_t, height, rounds)
       val_out = out.tolist()
