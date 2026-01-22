@@ -138,10 +138,8 @@ def __getattr__(nm):
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
                   args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
-      mod = load("metal", "'Metal'", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
-                  ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
+      return load("metal", "'Metal'", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
+                  ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer",
+                   "IndirectCommandEncoder", "Resource", "CommandEncoder"]],
                   args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
-      if not hasattr(mod.MTLIndirectComputeCommand, "setKernelTexture_atIndex"):
-        mod.MTLIndirectComputeCommand._addmeth(("setKernelTexture:atIndex:", None, [mod.MTLTexture, mod.NSUInteger]))
-      return mod
     case _: raise AttributeError(f"no such autogen: {nm}")

@@ -5,7 +5,7 @@ from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE
 from tinygrad.device import Buffer, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.engine.jit import GraphRunner, GraphException
-from tinygrad.runtime.ops_metal import wait_check, to_ns_str, MetalTexture
+from tinygrad.runtime.ops_metal import wait_check, to_ns_str
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support import objc
 
@@ -34,27 +34,23 @@ class MetalGraph(GraphRunner):
     if len(self.varlist): self.int_buf = self.dev.allocator.alloc(len(self.varlist)*dtypes.int32.itemsize)
 
     all_pipelines, all_resources = [], [self.int_buf.buf] if len(self.varlist) else []
-    self.arg_slots: list[list[tuple[bool, int]|None]] = []
+    self.arg_slots: list[list[int|None]] = []
     for j,ji in enumerate(jit_cache):
       prg: CompiledRunner = cast(CompiledRunner, ji.prg)
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
       all_pipelines.append(prg._prg.pipeline_state)
       icb_command.setComputePipelineState(prg._prg.pipeline_state)
-      buf_idx, tex_idx, arg_slots = 0, 0, []
+      buf_idx, arg_slots = 0, []
       for b in ji.bufs:
         if b is None:
           arg_slots.append(None)
           continue
-        is_tex = isinstance(b.dtype, ImageDType)
-        slot = (is_tex, tex_idx if is_tex else buf_idx)
-        tex_idx, buf_idx = tex_idx + is_tex, buf_idx + (not is_tex)
+        if isinstance(b.dtype, ImageDType): raise GraphException
+        slot = buf_idx
+        buf_idx += 1
         if b not in input_buffers:
-          if is_tex:
-            icb_command.setKernelTexture_atIndex(b._buf.tex, slot[1])
-            all_resources.append(b._buf.tex)
-          else:
-            icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, slot[1])
-            all_resources.append(b._buf.buf)
+          icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, slot)
+          all_resources.append(b._buf.buf)
         arg_slots.append(slot)
       self.arg_slots.append(arg_slots)
       for i,v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.varlist.index(v.expr)*4, buf_idx+i)
@@ -75,14 +71,12 @@ class MetalGraph(GraphRunner):
     # NOTE: old command buffer may not be inflight anymore
     if self.command_buffer is not None and PROFILE: self.collect_timestamps()
 
-    def _resource(buf): return buf.tex if isinstance(buf, MetalTexture) else buf.buf
-    all_resources = dedup(self.all_resources + [_resource(input_buffers[input_idx]._buf) for input_idx in self.input_replace.values()])
+    all_resources = dedup(self.all_resources + [input_buffers[input_idx]._buf.buf for input_idx in self.input_replace.values()])
     for (j,i),input_idx in self.input_replace.items():
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
       slot = self.arg_slots[j][i]
       if slot is None: continue
-      if slot[0]: computeCommand.setKernelTexture_atIndex(input_buffers[input_idx]._buf.tex, slot[1])
-      else: computeCommand.setKernelBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, slot[1])
+      computeCommand.setKernelBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, slot)
 
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
