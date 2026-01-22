@@ -69,6 +69,13 @@ class TestRandomness(unittest.TestCase):
     self.assertFalse(normal_test(Tensor.rand))
     self.assertTrue(equal_distribution(Tensor.rand, torch.rand, lambda x: np.random.rand(*x)))
 
+  def test_rand_is_lazy(self):
+    Tensor.manual_seed(0)
+    r = Tensor.rand(10)
+    self.assertFalse(r.uop.is_realized, "rand should be lazy - tensor should not be realized")
+    r.realize()
+    self.assertTrue(r.uop.is_realized, "tensor should be realized after .realize()")
+
   @unittest.skipUnless(is_dtype_supported(dtypes.float16) and is_dtype_supported(dtypes.ulong), "need float16 and ulong support")
   def test_rand_float16(self):
     N = 128
