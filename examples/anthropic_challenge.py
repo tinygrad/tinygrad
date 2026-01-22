@@ -70,6 +70,8 @@ global_addrs = [0,0,0]
 vliw_prepare = PatternMatcher([
   # loop unrolling (should be a part of tinygrad)
   (UPat(Ops.SINK, name="sink"), loop_unrolling),
+  # cast is fake
+  (UPat(Ops.CAST, name="c"), lambda c: c.src[0]),
   # rewrites to hardcode the addresses in memory
   (UPat(Ops.DEFINE_GLOBAL, name="dg"), lambda dg: UOp.const(dtypes.uint, global_addrs[dg.arg])),
   # INDEX is just plus
