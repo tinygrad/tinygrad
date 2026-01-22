@@ -13,6 +13,7 @@ class MetalGraph(GraphRunner):
   def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int]):
     super().__init__(jit_cache, input_buffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
+    # NOTE: Metal ICB doesn't support texture arguments, so any non-ICB program disables graph execution.
     if not all(getattr(cast(CompiledRunner, ji.prg)._prg, "supports_icb", True) for ji in jit_cache): raise GraphException
 
     # create metal batch exec
