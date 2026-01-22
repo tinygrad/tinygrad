@@ -131,7 +131,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
 
 def do_linearize(prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
-  #if SPEC: type_verify(lst, program_spec)
+  if SPEC: type_verify(lst, program_spec)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
