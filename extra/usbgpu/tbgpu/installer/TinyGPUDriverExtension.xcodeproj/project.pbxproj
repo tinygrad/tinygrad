@@ -7,13 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A52E8692F18FC6900A816CD /* tiny_icon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 0A52E8682F18FC6900A816CD /* tiny_icon.icon */; };
+		0A5C11DD2F18E466006DBBCA /* server.c in Sources */ = {isa = PBXBuildFile; fileRef = 0A5C11DC2F18E461006DBBCA /* server.c */; };
 		0ACB55392E9CB880007029EF /* PCIDriverKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0ACB55382E9CB880007029EF /* PCIDriverKit.framework */; };
+		0AD7C2E52F18DEBC00562D1A /* TinyGPUCLIRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD7C2E42F18DEB800562D1A /* TinyGPUCLIRunner.swift */; };
 		54798269286A3512009785F6 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 54798268286A3512009785F6 /* CoreAudio.framework */; };
-		549EB121286A1A37009D38AB /* TinyGPUViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 549EB11F286A1A37009D38AB /* TinyGPUViewModel.swift */; };
 		549EB123286A1D48009D38AB /* org.tinygrad.tinygpu.edriver.dext in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = C5B7D9BC26128AC50089B4C3 /* org.tinygrad.tinygpu.edriver.dext */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		549EB131286A2B98009D38AB /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 549EB130286A2B98009D38AB /* IOKit.framework */; };
 		54E42BC8286A1697000E1E9A /* TinyGPUApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E42BB8286A1696000E1E9A /* TinyGPUApp.swift */; };
-		54E42BCA286A1697000E1E9A /* TinyGPUView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E42BB9286A1696000E1E9A /* TinyGPUView.swift */; };
 		54E42BCC286A1697000E1E9A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 54E42BBA286A1697000E1E9A /* Assets.xcassets */; };
 		C5B7D9C326128AC50089B4C3 /* TinyGPUDriver.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C5B7D9C226128AC50089B4C3 /* TinyGPUDriver.cpp */; };
 		C5B7D9C526128AC50089B4C3 /* TinyGPUDriver.iig in Sources */ = {isa = PBXBuildFile; fileRef = C5B7D9C426128AC50089B4C3 /* TinyGPUDriver.iig */; };
@@ -34,6 +35,15 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		0AD7C2DB2F18D7D500562D1A /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		549EB122286A1D3A009D38AB /* Embed System Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -48,13 +58,18 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0A52E8682F18FC6900A816CD /* tiny_icon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = tiny_icon.icon; sourceTree = "<group>"; };
+		0A5C11DC2F18E461006DBBCA /* server.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = server.c; sourceTree = "<group>"; };
+		0A5C11DE2F18E468006DBBCA /* TinyGPU-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "TinyGPU-Bridging-Header.h"; sourceTree = "<group>"; };
 		0ACB55382E9CB880007029EF /* PCIDriverKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PCIDriverKit.framework; path = System/DriverKit/System/Library/Frameworks/PCIDriverKit.framework; sourceTree = SDKROOT; };
+		0AD7C2D62F18D3DB00562D1A /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks/IOKit.framework; sourceTree = DEVELOPER_DIR; };
+		0AD7C2D82F18D3E300562D1A /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk/System/Library/Frameworks/CoreFoundation.framework; sourceTree = DEVELOPER_DIR; };
+		0AD7C2E42F18DEB800562D1A /* TinyGPUCLIRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TinyGPUCLIRunner.swift; sourceTree = "<group>"; };
+		0AFA851D2F1CE486005FDAC2 /* TinyGPUDriver.Release.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TinyGPUDriver.Release.entitlements; sourceTree = "<group>"; };
 		54798268286A3512009785F6 /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX13.0.sdk/System/Library/Frameworks/CoreAudio.framework; sourceTree = DEVELOPER_DIR; };
-		549EB11F286A1A37009D38AB /* TinyGPUViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TinyGPUViewModel.swift; sourceTree = "<group>"; usesTabs = 1; };
 		549EB130286A2B98009D38AB /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX13.0.sdk/System/Library/Frameworks/IOKit.framework; sourceTree = DEVELOPER_DIR; };
 		549EB132286A2B9D009D38AB /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS16.0.sdk/System/Library/Frameworks/IOKit.framework; sourceTree = DEVELOPER_DIR; };
 		54E42BB8286A1696000E1E9A /* TinyGPUApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TinyGPUApp.swift; sourceTree = "<group>"; };
-		54E42BB9286A1696000E1E9A /* TinyGPUView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TinyGPUView.swift; sourceTree = "<group>"; };
 		54E42BBA286A1697000E1E9A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		54E42BC4286A1697000E1E9A /* TinyGPU.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TinyGPU.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		54E42BC6286A1697000E1E9A /* macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = macOS.entitlements; sourceTree = "<group>"; };
@@ -102,10 +117,12 @@
 		54E42BB7286A1696000E1E9A /* Shared */ = {
 			isa = PBXGroup;
 			children = (
+				0A5C11DC2F18E461006DBBCA /* server.c */,
+				0AD7C2E42F18DEB800562D1A /* TinyGPUCLIRunner.swift */,
 				54E42BB8286A1696000E1E9A /* TinyGPUApp.swift */,
-				54E42BB9286A1696000E1E9A /* TinyGPUView.swift */,
-				549EB11F286A1A37009D38AB /* TinyGPUViewModel.swift */,
 				54E42BBA286A1697000E1E9A /* Assets.xcassets */,
+				0A52E8682F18FC6900A816CD /* tiny_icon.icon */,
+				0A5C11DE2F18E468006DBBCA /* TinyGPU-Bridging-Header.h */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -142,6 +159,8 @@
 		C5B7D9BE26128AC50089B4C3 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				0AD7C2D82F18D3E300562D1A /* CoreFoundation.framework */,
+				0AD7C2D62F18D3DB00562D1A /* IOKit.framework */,
 				0ACB55382E9CB880007029EF /* PCIDriverKit.framework */,
 				54798268286A3512009785F6 /* CoreAudio.framework */,
 				549EB130286A2B98009D38AB /* IOKit.framework */,
@@ -168,6 +187,7 @@
 				C5D787AB261667FC006047E5 /* TinyGPUDriverUserClient.iig */,
 				C5B7D9C626128AC50089B4C3 /* Info.plist */,
 				C5B7D9CE26128B150089B4C3 /* TinyGPUDriver.entitlements */,
+				0AFA851D2F1CE486005FDAC2 /* TinyGPUDriver.Release.entitlements */,
 			);
 			path = TinyGPUDriverExtension;
 			sourceTree = "<group>";
@@ -185,21 +205,22 @@
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
-		54E42BC3286A1697000E1E9A /* TinyGPU Installer (macOS) */ = {
+		54E42BC3286A1697000E1E9A /* TinyGPU */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 54E42BD2286A1697000E1E9A /* Build configuration list for PBXNativeTarget "TinyGPU Installer (macOS)" */;
+			buildConfigurationList = 54E42BD2286A1697000E1E9A /* Build configuration list for PBXNativeTarget "TinyGPU" */;
 			buildPhases = (
 				54E42BC0286A1697000E1E9A /* Sources */,
 				54E42BC1286A1697000E1E9A /* Frameworks */,
 				54E42BC2286A1697000E1E9A /* Resources */,
 				549EB122286A1D3A009D38AB /* Embed System Extensions */,
+				0AD7C2DB2F18D7D500562D1A /* CopyFiles */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				549EB127286A1D66009D38AB /* PBXTargetDependency */,
 			);
-			name = "TinyGPU Installer (macOS)";
+			name = TinyGPU;
 			productName = "SimpleAudioDriverExtension2 (macOS)";
 			productReference = 54E42BC4286A1697000E1E9A /* TinyGPU.app */;
 			productType = "com.apple.product-type.application";
@@ -236,7 +257,7 @@
 				TargetAttributes = {
 					54E42BC3286A1697000E1E9A = {
 						CreatedOnToolsVersion = 14.0;
-						LastSwiftMigration = 1400;
+						LastSwiftMigration = 2620;
 					};
 					C5B7D9BB26128AC50089B4C3 = {
 						CreatedOnToolsVersion = 13.0;
@@ -257,7 +278,7 @@
 			projectRoot = "";
 			targets = (
 				C5B7D9BB26128AC50089B4C3 /* TinyGPUDriver */,
-				54E42BC3286A1697000E1E9A /* TinyGPU Installer (macOS) */,
+				54E42BC3286A1697000E1E9A /* TinyGPU */,
 			);
 		};
 /* End PBXProject section */
@@ -268,6 +289,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				54E42BCC286A1697000E1E9A /* Assets.xcassets in Resources */,
+				0A52E8692F18FC6900A816CD /* tiny_icon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -285,9 +307,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				549EB121286A1A37009D38AB /* TinyGPUViewModel.swift in Sources */,
-				54E42BCA286A1697000E1E9A /* TinyGPUView.swift in Sources */,
 				54E42BC8286A1697000E1E9A /* TinyGPUApp.swift in Sources */,
+				0A5C11DD2F18E466006DBBCA /* server.c in Sources */,
+				0AD7C2E52F18DEBC00562D1A /* TinyGPUCLIRunner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -316,12 +338,12 @@
 		54E42BCF286A1697000E1E9A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = tiny_icon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = macOS/macOS.entitlements;
-				CODE_SIGN_IDENTITY = "-";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -331,19 +353,21 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.1;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.installer;
 				PRODUCT_NAME = TinyGPU;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/TinyGPU-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 			};
@@ -352,12 +376,12 @@
 		54E42BD0286A1697000E1E9A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = tiny_icon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = macOS/macOS.entitlements;
-				CODE_SIGN_IDENTITY = "-";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -367,19 +391,21 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.1;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.installer;
 				PRODUCT_NAME = TinyGPU;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Shared/TinyGPU-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 			};
@@ -477,6 +503,7 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DRIVERKIT_DEPLOYMENT_TARGET = 21.0;
@@ -502,26 +529,29 @@
 			buildSettings = {
 				AD_HOC_CODE_SIGNING_ALLOWED = YES;
 				CODE_SIGN_ENTITLEMENTS = TinyGPUDriverExtension/TinyGPUDriver.entitlements;
-				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 9YG3G8543N;
 				DRIVERKIT_DEPLOYMENT_TARGET = 21.0;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				EXCLUDED_ARCHS = "";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SDKROOT)/System/DriverKit/System/Library/Frameworks",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TinyGPUDriverExtension/Info.plist;
-				INFOPLIST_KEY_OSBundleUsageDescription = "Sample Code Audio Driver Kit Extension";
-				MARKETING_VERSION = 1.0;
+				INFOPLIST_KEY_OSBundleUsageDescription = "TinyGPU Driver";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.edriver;
 				PRODUCT_NAME = "$(inherited)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = driverkit;
 				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = driverkit;
 			};
 			name = Debug;
 		};
@@ -529,34 +559,40 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				AD_HOC_CODE_SIGNING_ALLOWED = YES;
-				CODE_SIGN_ENTITLEMENTS = TinyGPUDriverExtension/TinyGPUDriver.entitlements;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 9YG3G8543N;
+				CODE_SIGN_ENTITLEMENTS = TinyGPUDriverExtension/TinyGPUDriver.Release.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=driverkit*]" = "Apple Development";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = "";
+				"DEVELOPMENT_TEAM[sdk=driverkit*]" = 9YG3G8543N;
 				DRIVERKIT_DEPLOYMENT_TARGET = 21.0;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				EXCLUDED_ARCHS = "";
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SDKROOT)/System/DriverKit/System/Library/Frameworks",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TinyGPUDriverExtension/Info.plist;
-				INFOPLIST_KEY_OSBundleUsageDescription = "Sample Code Audio Driver Kit Extension";
-				MARKETING_VERSION = 1.0;
+				INFOPLIST_KEY_OSBundleUsageDescription = "TinyGPU Driver";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				MARKETING_VERSION = 1.0.0;
+				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = org.tinygrad.tinygpu.edriver;
 				PRODUCT_NAME = "$(inherited)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				RUN_CLANG_STATIC_ANALYZER = YES;
 				SDKROOT = driverkit;
 				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = driverkit;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		54E42BD2286A1697000E1E9A /* Build configuration list for PBXNativeTarget "TinyGPU Installer (macOS)" */ = {
+		54E42BD2286A1697000E1E9A /* Build configuration list for PBXNativeTarget "TinyGPU" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				54E42BCF286A1697000E1E9A /* Debug */,

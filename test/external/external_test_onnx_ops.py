@@ -65,6 +65,15 @@ class TestMainOnnxOps(TestOnnxOps):
     outputs = ["y"]
     self.helper_test_single_op("Conv", inputs, attributes, outputs, atol=1e-4)
 
+  def test_pad_constant_value_zero(self):
+    from tinygrad.nn.onnx import onnx_ops
+    Pad = onnx_ops["Pad"]
+    x = Tensor.arange(4).reshape(1, 1, 2, 2).float()
+    pads = [0, 0, 1, 1, 0, 0, 1, 1]
+    out = Pad(x, pads, constant_value=0, value=3)
+    expected = x.pad((pads[3], pads[7], pads[2], pads[6], pads[1], pads[5], pads[0], pads[4]), value=0)
+    self.assertEqual(out.tolist(), expected.tolist())
+
   def test_gather(self):
     # test const negative indices
     inputs = {

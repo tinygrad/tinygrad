@@ -1,6 +1,7 @@
 # type: ignore
 import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, signal
-from tinygrad.helpers import from_mv, to_mv, getenv, init_c_struct_t
+from tinygrad.helpers import from_mv, to_mv, getenv
+from tinygrad.runtime.support.c import init_c_struct_t
 from hexdump import hexdump
 start = time.perf_counter()
 
@@ -16,12 +17,12 @@ def get_struct(argp, stype):
 def dump_struct(st):
   if getenv("IOCTL", 0) == 0: return
   print("\t", st.__class__.__name__, end=" { ")
-  for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
+  for v in type(st)._real_fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
   print("}")
 
 def format_struct(s):
   sdats = []
-  for field in s._fields_:
+  for field in s._real_fields_:
     dat = getattr(s, field[0])
     if isinstance(dat, int): sdats.append(f"{field[0]}:0x{dat:X}")
     else: sdats.append(f"{field[0]}:{dat}")
@@ -205,7 +206,7 @@ def make_qmd_struct_type():
     fields.append((name.replace("NVC6C0_QMDV03_00_", "").lower(), ctypes.c_uint32, data[0]-data[1]+1))
     if len(fields) >= 2 and fields[-2][0].endswith('_lower') and fields[-1][0].endswith('_upper') and fields[-1][0][:-6] == fields[-2][0][:-6]:
       fields = fields[:-2] + [(fields[-1][0][:-6], ctypes.c_uint64, fields[-1][2] + fields[-2][2])]
-  return init_c_struct_t(tuple(fields))
+  return init_c_struct_t(0x40 * 4, tuple(fields))
 qmd_struct_t = make_qmd_struct_type()
 assert ctypes.sizeof(qmd_struct_t) == 0x40 * 4
 

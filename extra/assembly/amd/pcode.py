@@ -653,17 +653,17 @@ def _apply_pseudocode_fixes(op_name: str, code: str) -> str:
     code = code.replace('D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)',
                         'D0.f64 = (2.0 ** 128 if exponent(S2.f64) > 1023 else 2.0 ** -128) * fma(S0.f64, S1.f64, S2.f64)')
   if op_name == 'V_DIV_SCALE_F32':
-    code = code.replace('D0.f32 = float("nan")', 'VCC = Reg(0x1); D0.f32 = float("nan")')
+    code = code.replace('D0.f32 = float("nan")', 'VCC = Reg(1 << laneId); D0.f32 = float("nan")')
     code = code.replace('elif S1.f32 == DENORM.f32:\n  D0.f32 = ldexp(S0.f32, 64)', 'elif False:\n  pass')
     code += '\nif S1.f32 == DENORM.f32:\n  D0.f32 = float("nan")'
-    code = code.replace('elif exponent(S2.f32) <= 23:\n  D0.f32 = ldexp(S0.f32, 64)', 'elif exponent(S2.f32) <= 23:\n  VCC = Reg(0x1); D0.f32 = ldexp(S0.f32, 64)')
-    code = code.replace('elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)\n  if S0.f32 == S2.f32:\n    D0.f32 = ldexp(S0.f32, 64)', 'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)')
+    code = code.replace('elif exponent(S2.f32) <= 23:\n  D0.f32 = ldexp(S0.f32, 64)', 'elif exponent(S2.f32) <= 23:\n  VCC = Reg(1 << laneId); D0.f32 = ldexp(S0.f32, 64)')
+    code = code.replace('elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)\n  if S0.f32 == S2.f32:\n    D0.f32 = ldexp(S0.f32, 64)', 'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(1 << laneId)')
   if op_name == 'V_DIV_SCALE_F64':
-    code = code.replace('D0.f64 = float("nan")', 'VCC = Reg(0x1); D0.f64 = float("nan")')
+    code = code.replace('D0.f64 = float("nan")', 'VCC = Reg(1 << laneId); D0.f64 = float("nan")')
     code = code.replace('elif S1.f64 == DENORM.f64:\n  D0.f64 = ldexp(S0.f64, 128)', 'elif False:\n  pass')
     code += '\nif S1.f64 == DENORM.f64:\n  D0.f64 = float("nan")'
-    code = code.replace('elif exponent(S2.f64) <= 52:\n  D0.f64 = ldexp(S0.f64, 128)', 'elif exponent(S2.f64) <= 52:\n  VCC = Reg(0x1); D0.f64 = ldexp(S0.f64, 128)')
-    code = code.replace('elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)', 'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)')
+    code = code.replace('elif exponent(S2.f64) <= 52:\n  D0.f64 = ldexp(S0.f64, 128)', 'elif exponent(S2.f64) <= 52:\n  VCC = Reg(1 << laneId); D0.f64 = ldexp(S0.f64, 128)')
+    code = code.replace('elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)', 'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(1 << laneId)')
   if op_name == 'V_DIV_FIXUP_F32':
     code = code.replace('D0.f32 = ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))',
                         'D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32)) if isNAN(S0.f32) else ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))')

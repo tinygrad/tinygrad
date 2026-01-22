@@ -23,6 +23,19 @@ def get_llvm_objdump():
     if shutil.which(p): return p
   raise FileNotFoundError("llvm-objdump not found")
 
+ARCH_TO_TARGET:dict[str, list[str]] = {
+  "rdna3":["gfx1100"],
+  "rdna4":["gfx1200"],
+  "cdna":["gfx950", "gfx942"],
+}
+
+TARGET_TO_ARCH:dict[str, str] = {t:arch for arch,targets in ARCH_TO_TARGET.items() for t in targets}
+
+def get_target(arch:str) -> str: return ARCH_TO_TARGET[arch][0]
+
+def get_mattr(arch:str) -> str:
+  return {"rdna3":"+real-true16,+wavefrontsize32", "rdna4":"+real-true16,+wavefrontsize32", "cdna":"+wavefrontsize64"}[arch]
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # EXECUTION CONTEXT (for testing compiled pseudocode)
 # ═══════════════════════════════════════════════════════════════════════════════

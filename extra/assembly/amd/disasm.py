@@ -596,7 +596,7 @@ from extra.assembly.amd.autogen.cdna.ins import (VOP1 as CDNA_VOP1, VOP1_LIT as 
   VOP1_SDWA as CDNA_VOP1_SDWA, VOP1_DPP16 as CDNA_VOP1_DPP16,
   VOP2 as CDNA_VOP2, VOP2_LIT as CDNA_VOP2_LIT, VOP2_SDWA as CDNA_VOP2_SDWA, VOP2_DPP16 as CDNA_VOP2_DPP16,
   VOPC as CDNA_VOPC, VOPC_LIT as CDNA_VOPC_LIT, VOPC_SDWA_SDST as CDNA_VOPC_SDWA_SDST,
-  VOP3 as CDNA_VOP3, VOP3_SDST as CDNA_VOP3_SDST, VOP3SD as CDNA_VOP3SD, VOP3P as CDNA_VOP3P,
+  VOP3 as CDNA_VOP3, VOP3_SDST as CDNA_VOP3_SDST, VOP3SD as CDNA_VOP3SD, VOP3P as CDNA_VOP3P, VOP3PX2 as CDNA_VOP3PX2,
   SOP1 as CDNA_SOP1, SOP1_LIT as CDNA_SOP1_LIT, SOP2 as CDNA_SOP2, SOP2_LIT as CDNA_SOP2_LIT,
   SOPC as CDNA_SOPC, SOPC_LIT as CDNA_SOPC_LIT, SOPK as CDNA_SOPK, SOPK_LIT as CDNA_SOPK_LIT,
   SOPP as CDNA_SOPP, SMEM as CDNA_SMEM, DS as CDNA_DS,
@@ -686,6 +686,13 @@ def _disasm_cdna_vop3p(inst) -> str:
       src = _lit(inst, inst.src0) if src0_off == 255 else (f"v{src0_off - 256}" if src0_off >= 256 else decode_src(src0_off, cdna=True))
       return f"{name}_b32 a{vdst_off}, {src}"
 
+  # Handle v_mfma_ld_scale_b32 - special 2-operand format: v_mfma_ld_scale_b32 src0, src1
+  if 'ld_scale' in name:
+    src0, src1 = get_src(inst.src0, 1), get_src(inst.src1, 1)
+    mods = ([_fmt_bits("op_sel", inst.opsel, 2)] if inst.opsel else []) + \
+           ([_fmt_bits("op_sel_hi", inst.opsel_hi, 2)] if inst.opsel_hi != 3 else [])
+    return f"{name} {src0}, {src1}{' ' + ' '.join(mods) if mods else ''}"
+
   # Handle MFMA instructions with accumulator destinations
   if is_mfma:
     regs = inst.canonical_op_regs
@@ -703,6 +710,7 @@ def _disasm_cdna_vop3p(inst) -> str:
     def mfma_src(v, sc, is_acc):
       v = _unwrap(v)
       if v == 255: return _lit(inst, v)
+      if 128 <= v <= 208 or 240 <= v <= 248: return _lit(inst, v)
       base = v - 256 if v >= 256 else v
       if is_acc: return _areg(base, sc)
       return _vreg(base, sc)
@@ -713,7 +721,13 @@ def _disasm_cdna_vop3p(inst) -> str:
     dst = _areg(inst.vdst, dregs) if acc_cd else _vreg(inst.vdst, dregs)
     # MFMA uses neg:[...] not neg_lo:[...], and doesn't support op_sel_hi or clamp
     # Only f64 MFMA instructions support neg modifier
-    mods = ([_fmt_bits("neg", inst.neg, n)] if inst.neg and 'f64' in name else [])
+    # f8f6f4 MFMA instructions support cbsz/blgp modifiers
+    mods = []
+    if 'f8f6f4' in name:
+      if inst.neg_hi: mods.append(f"cbsz:{inst.neg_hi}")
+      if inst.neg: mods.append(f"blgp:{inst.neg}")
+    elif inst.neg and 'f64' in name:
+      mods.append(_fmt_bits("neg", inst.neg, n))
     return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}"
 
   # Standard VOP3P instructions
@@ -848,6 +862,31 @@ def _disasm_vopc_sdwa(inst) -> str:
   if inst.src1_sel != 6: mods.append(f"src1_sel:{src1_sel}")
   return f"{name}_sdwa {sdst}, {src0}, {src1} {' '.join(mods)}".strip()
 
+def _disasm_vop3px2(inst) -> str:
+  """VOP3PX2 disassembler for scaled MFMA instructions."""
+  name = inst.op_name.lower()
+  regs = inst.canonical_op_regs
+  dregs, r2 = regs['d'], regs['s2']
+  # F8F6F4 MFMA: CBSZ selects matrix A format, BLGP selects matrix B format
+  # VGPRs: FP8/BF8(0,1)=8, FP6/BF6(2,3)=6, FP4(4)=4
+  vgprs = {0: 8, 1: 8, 2: 6, 3: 6, 4: 4}
+  r0, r1 = vgprs.get(inst.cbsz, 8), vgprs.get(inst.blgp, 8)
+  def mfma_src(v, sc, is_acc):
+    v = _unwrap(v)
+    if v == 255: return _lit(inst, v)
+    base = v - 256 if v >= 256 else v
+    return _areg(base, sc) if is_acc else _vreg(base, sc)
+  src0, src1, src2 = mfma_src(inst.src0, r0, False), mfma_src(inst.src1, r1, inst.acc & 2), mfma_src(inst.src2, r2, inst.acc_cd)
+  dst = _areg(inst.vdst, dregs) if inst.acc_cd else _vreg(inst.vdst, dregs)
+  scale_src0, scale_src1 = _vreg(inst.scale_src0), _vreg(inst.scale_src1)
+  mods = []
+  if inst.opsel: mods.append(_fmt_bits("op_sel", inst.opsel, 3))
+  if inst.opsel_hi != 0: mods.append(_fmt_bits("op_sel_hi", inst.opsel_hi, 3))
+  if inst.neg: mods.append(_fmt_bits("neg", inst.neg, 3))
+  if inst.cbsz: mods.append(f"cbsz:{inst.cbsz}")
+  if inst.blgp: mods.append(f"blgp:{inst.blgp}")
+  return f"{name} {dst}, {src0}, {src1}, {src2}, {scale_src0}, {scale_src1}{' ' + ' '.join(mods) if mods else ''}"
+
 DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP1_LIT: _disasm_vop1,
   CDNA_VOP1_SDWA: _disasm_vop1_sdwa, CDNA_VOP1_DPP16: _disasm_vop1_dpp,
   CDNA_VOP2: _disasm_vop2, CDNA_VOP2_LIT: _disasm_vop2,
@@ -856,4 +895,5 @@ DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP1_LIT: _disasm_vop1,
   CDNA_SOP1: _disasm_sop1, CDNA_SOP1_LIT: _disasm_sop1, CDNA_SOP2: _disasm_sop2, CDNA_SOP2_LIT: _disasm_sop2,
   CDNA_SOPC: _disasm_sopc, CDNA_SOPC_LIT: _disasm_sopc, CDNA_SOPK: _disasm_sopk, CDNA_SOPK_LIT: _disasm_sopk, CDNA_SOPP: _disasm_sopp,
   CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat, CDNA_GLOBAL: _disasm_flat, CDNA_SCRATCH: _disasm_flat,
-  CDNA_VOP3: _disasm_vop3a, CDNA_VOP3_SDST: _disasm_vop3b, CDNA_VOP3SD: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p, CDNA_MUBUF: _disasm_mubuf})
+  CDNA_VOP3: _disasm_vop3a, CDNA_VOP3_SDST: _disasm_vop3b, CDNA_VOP3SD: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p,
+  CDNA_MUBUF: _disasm_mubuf, CDNA_VOP3PX2: _disasm_vop3px2})

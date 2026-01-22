@@ -43,7 +43,7 @@ jobs:
       run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev
     - name: Regenerate autogen files
       run: |
-        find tinygrad/runtime/autogen -type f -name "*.py" -not -name "__init__.py" -not -name "comgr_3.py" -not -name "metal.py" -not -name "libclang.py" -delete
+        find tinygrad/runtime/autogen -type f -name "*.py" -not -name "__init__.py" -not -name "comgr_3.py" -not -name "metal.py" -not -name "iokit.py" -not -name "corefoundation.py" -not -name "libclang.py" -delete
         python3 -c "from tinygrad.runtime.autogen import opencl"
         python3 -c "from tinygrad.runtime.autogen import cuda, nvrtc, nvjitlink, nv_570, nv_580, nv"
         python3 -c "from tinygrad.runtime.autogen import comgr, hsa, hip, amd_gpu, sqtt, rocprof, amdgpu_kd"
@@ -83,8 +83,8 @@ jobs:
         llvm: 'true'
     - name: Regenerate autogen files
       run: |
-        rm tinygrad/runtime/autogen/metal.py
-        LIBCLANG_PATH=/opt/homebrew/opt/llvm@20/lib/libclang.dylib python3 -c "from tinygrad.runtime.autogen import metal"
+        rm tinygrad/runtime/autogen/metal.py tinygrad/runtime/autogen/iokit.py tinygrad/runtime/autogen/corefoundation.py
+        LIBCLANG_PATH=/opt/homebrew/opt/llvm@20/lib/libclang.dylib python3 -c "from tinygrad.runtime.autogen import metal, iokit, corefoundation"
     - name: Check for differences
       run: |
         if ! git diff --quiet; then
