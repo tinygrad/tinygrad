@@ -133,18 +133,13 @@ base_rewrite = PatternMatcher([
 ])
 
 class LLVMRenderer(Renderer):
-  device = "CPU"
-  abi = 'win64cc' if sys.platform == 'win32' else None
   supports_float4 = True
-  has_local = False
-  global_max: tuple[int, ...] | None = None
-  string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
+  has_local: bool
+  abi: str | None
+  string_rewrite: PatternMatcher
   code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
-  if AMX: tensor_cores = tc.amx
-
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
-  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
-  def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
@@ -181,11 +176,11 @@ class LLVMRenderer(Renderer):
         assert isinstance(u.dtype, PtrDType)
         if u.op is Ops.DEFINE_REG:
           kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]")
-        elif self.device == "CPU" and u.op is Ops.DEFINE_LOCAL:
-          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}], align 16")
-        else:
+        elif self.has_local:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
+        else:
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}], align 16")
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
       elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
@@ -200,6 +195,17 @@ class LLVMRenderer(Renderer):
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
+
+class CPULLVMRenderer(LLVMRenderer):
+  device = "CPU"
+  has_local = False
+  global_max: tuple[int, ...] | None = None
+  abi = 'win64cc' if sys.platform == 'win32' else None
+  string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
+  if AMX: tensor_cores = tc.amx
+
+  def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
+  def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
