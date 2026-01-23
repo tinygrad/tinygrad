@@ -377,8 +377,10 @@ def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
     new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
     return None if new_t is t and new_f is f else cond.where(new_t, new_f)
   # no nested wheres, try simplifying t/f given cond
-  # skip during codegen (RANGE/SPECIAL in cond): the devectorizer folds WHERE into gated LOADs, and rewriting here can break that pattern
-  if cond.op_in_backward_slice_with_self(Ops.RANGE, Ops.SPECIAL): return None
+  # skip during codegen: vectorized types, or kernel-level ops (RANGE/SPECIAL/LOAD/INDEX) in any branch
+  if cond.dtype.count > 1: return None
+  for branch in (cond, t, f):
+    if branch.op_in_backward_slice_with_self(Ops.RANGE, Ops.SPECIAL, Ops.LOAD, Ops.INDEX): return None
   new_t, new_f = uop_given_valid(cond, t), uop_given_valid(cond.ne(True), f)
   return None if new_t is t and new_f is f else cond.where(new_t, new_f)
 
