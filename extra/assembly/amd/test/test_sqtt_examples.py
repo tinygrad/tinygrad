@@ -23,13 +23,13 @@ def run_rocprof_decoder(events: list, lib: bytes, base: int, target: int):
   from tinygrad.viz.serve import llvm_disasm
   from extra.sqtt.roc import decode as roc_decode
   occupancy_records: list[tuple[int, int, int, int, bool]] = []  # (wave_id, simd, cu, time, is_start)
-  wave_insts: list[list[tuple[int, int, int]]] = []  # per-wave list of (time, stall, pc)
+  wave_insts: list[list[tuple[int, int]]] = []  # per-wave list of (time, stall)
   disasm = {addr+base:inst_disasm for addr, inst_disasm in llvm_disasm(110000, lib).items()}
   rctx = roc_decode(events, {(e:=events[0]).kern:disasm})
   occ_events = rctx.occ_events[(e.kern, e.exec_tag)]
   wave_events = rctx.inst_execs.get((e.kern, e.exec_tag), [])
   for e in occ_events: occupancy_records.append((e.wave_id, e.simd, e.cu, e.time, e.start))
-  for e in wave_events: wave_insts.append([(i.time, i.stall, i.pc) for i in e.unpack_insts()])
+  for e in wave_events: wave_insts.append([(i.time, i.stall) for i in e.unpack_insts()])
   return occupancy_records, wave_insts
 
 class TestSQTTExamples(unittest.TestCase):
@@ -136,7 +136,7 @@ class TestSQTTExamples(unittest.TestCase):
       with self.subTest(example=name):
         _, wave_insts = run_rocprof_decoder(events, lib, base, self.gfx_num)
         # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
-        roc_insts = [time + stall for insts in wave_insts for time, stall, _ in insts[:-1]]
+        roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
         # extract from our decoder
         our_insts: list[int] = []
         for event in events:
