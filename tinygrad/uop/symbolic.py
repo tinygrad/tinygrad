@@ -66,11 +66,15 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, False), UPat.const(dtypes.bool, True)), lambda x: x.logical_not()),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.index)).trunc(), lambda x: x),
   # ** zero folding **
-  (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x < x -> False
+  (UPat.var("x").alu(Ops.CMPLT, UPat.var("x")), lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x < x -> False
   (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
   (UPat.var("x") ^ UPat.var("x"), lambda x: x.const_like(0)), # x^x -> 0
-  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.index)) != UPat.var("x"),
-   lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
+  (UPat.var("x").alu(Ops.CMPNE, UPat.var("x")),
+   lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False
+  (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.index)).alu(Ops.CMPEQ, UPat.var("x")),
+   lambda x: x.const_like(True).cast(dtypes.bool.vec(x.dtype.count))), # x == x -> True (only ints)
+  (UPat.var("x") & 0, lambda x: x.const_like(0)), # x & 0 -> 0
+  (UPat.var("x") | -1, lambda x: x.const_like(-1)), # x | -1 -> -1
   # ** constant folding **
   # TODO: add const folding for Ops.THREEFRY
   (UPat(GroupOp.Unary, src=(UPat((Ops.VCONST, Ops.CONST)),), name="a"), lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg], False))),
