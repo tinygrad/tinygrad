@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQProgram, HCQSignal, BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint
-from tinygrad.device import BufferSpec, CompilerPair, CompilerSet
+from tinygrad.device import Compiled, BufferSpec, CompilerPair, CompilerSet
 from tinygrad.helpers import DEBUG, getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, NV_CC, NV_PTX, NV_NAK, PROFILE
+from tinygrad.helpers import ContextVar, VIZ, ProfileEvent
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
@@ -19,6 +20,11 @@ from tinygrad.renderer.nir import NAKRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
 
 nv_gpu = nv_570 # default to 570
+
+PMA = ContextVar("PMA", abs(VIZ.value)>=2)
+
+@dataclass(frozen=True)
+class ProfilePMAEvent(ProfileEvent): device:str; kern:str; blob:bytes # noqa: E702
 
 def get_error_str(status): return f"{status}: {nv_gpu.nv_status_codes.get(status, 'Unknown error')}"
 
@@ -301,7 +307,6 @@ class NVProgram(HCQProgram):
     self.max_threads = ((65536 // round_up(max(1, self.regs_usage) * 32, 256)) // 4) * 4 * 32
 
     # NV's kernargs is constbuffer, then arguments to the kernel follows. Kernargs also appends QMD at the end of the kernel.
-    print("prog_addr", hex(prog_addr))
     super().__init__(NVArgsState, self.dev, self.name, kernargs_alloc_size=round_up(self.constbufs[0][1], 1 << 8) + (8 << 8))
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
@@ -316,7 +321,11 @@ class NVProgram(HCQProgram):
       raise RuntimeError(f"Too many resources requested for launch, {prod(local_size)=}, {self.max_threads=}")
     if any(cur > mx for cur,mx in zip(global_size, [2147483647, 65535, 65535])) or any(cur > mx for cur,mx in zip(local_size, [1024, 1024, 64])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
-    return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
+    res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
+    if self.dev.pma_enabled:
+      self.dev.synchronize()
+      if pma_blob:=self.dev._prof_readback(): Compiled.profile_events += [ProfilePMAEvent(self.dev.device, self.name, pma_blob)]
+    return res
 
 class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
@@ -480,7 +489,7 @@ class NVKIface:
 
       attr2 = ((nv_gpu.NVOS32_ATTR2_GPU_CACHEABLE_NO if uncached else nv_gpu.NVOS32_ATTR2_GPU_CACHEABLE_YES) << 2) \
             | ((nv_gpu.NVOS32_ATTR2_PAGE_SIZE_HUGE_2MB if page_size > 0x1000 else 0) << 20) | nv_gpu.NVOS32_ATTR2_ZBC_PREFER_NO_ZBC \
-            | ((nv_gpu.NVOS32_ATTR2_PROTECTION_USER_READ_ONLY << 22) if kwargs.get('user_read_only') else 0)
+            | ((nv_gpu.NVOS32_ATTR2_PROTECTION_USER_READ_ONLY << 22) if kwargs.get('read_only') else 0)
 
       fl = nv_gpu.NVOS32_ALLOC_FLAGS_MAP_NOT_REQUIRED | nv_gpu.NVOS32_ALLOC_FLAGS_MEMORY_HANDLE_PROVIDED \
          | (0 if uncached else (nv_gpu.NVOS32_ALLOC_FLAGS_ALIGNMENT_FORCE | nv_gpu.NVOS32_ALLOC_FLAGS_IGNORE_BANK_PLACEMENT)) \
@@ -619,9 +628,10 @@ class NVDevice(HCQCompiled[HCQSignal]):
        CompilerPair(functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm), None, NV_NAK)])
     super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
-    # Initialize profiler if PROFILE >= 2
-    if PROFILE >= 2: init_nv_profiler(self)
-    
+    # Initialize PMA profiler if PMA and PROFILE are set
+    self.pma_enabled = PMA.value > 0 and PROFILE >= 2 and isinstance(self.iface, NVKIface)
+    if self.pma_enabled: self._prof_init()
+
     self._setup_gpfifos()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, compute=False, video=False) -> GPFifo:
@@ -738,220 +748,89 @@ class NVDevice(HCQCompiled[HCQSignal]):
 
     raise RuntimeError("\n".join(report))
 
-  def synchronize(self):
-    super().synchronize()
-    if nv_profiler is not None: nv_profiler.flush(wait=True)
+  def _prof_init(self):
+    self.profiler = self.iface.rm_alloc(self.subdevice, nv_gpu.MAXWELL_PROFILER_DEVICE,
+      nv_gpu.NVB2CC_ALLOC_PARAMETERS(hClientTarget=self.iface.root, hContextTarget=self.channel_group))
 
-# PC Sampling Profiler for NV devices (PROFILE=2)
-class NVProfiler:
-  """PC sampling profiler for NV devices using the kernel driver interface."""
+    power_params = nv_gpu.struct_NVB0CC_CTRL_POWER_REQUEST_FEATURES_PARAMS(controlMask=(nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_ELCG_DISABLE << 0) | \
+      (nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_BLCG_DISABLE << 2) | (nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_ELPG_DISABLE << 6) | \
+      (nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_IDLE_SLOWDOWN_DISABLE << 8) | (nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_VAT_DISABLE << 10))
+    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, power_params)
 
-  def __init__(self, dev:NVDevice):
-    if not isinstance(dev.iface, NVKIface): raise RuntimeError("NVProfiler requires NVKIface (kernel driver)")
-    self.dev, self.iface = dev, dev.iface
+    self.pma_buf = self.iface.alloc(getenv("PMA_BUFFER_SIZE", 256) << 20, uncached=True, cpu_cached=True, cpu_access=True)
+    self.pma_bytes = self.iface.alloc(0x1000, uncached=True, cpu_cached=True, read_only=True)
+    self.pma_rptr = 0
 
-    # Create profiler targeting the app's channel group
-    profiler_params = nv_gpu.NVB2CC_ALLOC_PARAMETERS(hClientTarget=self.iface.root, hContextTarget=dev.channel_group)
-    self.profiler = self.iface.rm_alloc(dev.subdevice, nv_gpu.MAXWELL_PROFILER_DEVICE, profiler_params)
+    pma_stream = nv_gpu.struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS(hMemPmaBuffer=self.pma_buf.meta.hMemory,
+      pmaBufferSize=self.pma_buf.size, hMemPmaBytesAvailable=self.pma_bytes.meta.hMemory, pmaBufferVA=self.pma_buf.va_addr)
+    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM, pma_stream)
 
-    # Request power features (optional, may fail on some GPUs)
-    try: self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, nv_gpu.struct_NVB0CC_CTRL_POWER_REQUEST_FEATURES_PARAMS(controlMask=1349))
-    except RuntimeError: pass
+    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_RESERVE_HWPM_LEGACY, nv_gpu.struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS(ctxsw=0))
+    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_RESERVE_PM_AREA_PC_SAMPLER, None)
+    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_BIND_PM_RESOURCES, None)
 
-    # Allocate PMA buffers (system memory, CPU-cached, not GPU-cached)
-    self.pma_buf = self.iface.alloc(512 << 20, uncached=True, cpu_cached=True, cpu_access=True)
-    self.bytes_buf = self.iface.alloc(4096, uncached=True, cpu_cached=True, user_read_only=True)
+    self._prof_setup_pc_sampling()
 
-    # Setup PMA stream
-    pma_stream = nv_gpu.struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS(hMemPmaBuffer=self.pma_buf.meta.hMemory, pmaBufferSize=self.pma_buf.size,
-      hMemPmaBytesAvailable=self.bytes_buf.meta.hMemory, pmaBufferVA=self.pma_buf.va_addr)
-    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_ALLOC_PMA_STREAM, pma_stream)
-    if DEBUG >= 2: print(f"NVProfiler: pmaChannelIdx={pma_stream.pmaChannelIdx:#x}")
+  def _prof_setup_pc_sampling(self):
+    # TODO: CLEAN THIS MORE
+    def RegWrite(reg, val, mask=0xffffffff): return (reg, val, mask)
+    is_blackwell = False
 
-    # Reserve PM resources and configure
-    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_RESERVE_HWPM_LEGACY, nv_gpu.struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS(ctxsw=0))
-    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_RESERVE_PM_AREA_PC_SAMPLER, None)
-    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_BIND_PM_RESOURCES, None)
+    tpc_masks = [m for i in range(self.num_gpcs) if (m := self.iface.rm_control(self.subdevice, nv_gpu.NV2080_CTRL_CMD_GR_GET_TPC_MASK,
+      nv_gpu.NV2080_CTRL_GR_GET_TPC_MASK_PARAMS(gpcId=i)).tpcMask) > 0]
 
-    # Configure PC sampling hardware
-    self._setup_pc_sampling()
-    if DEBUG >= 1: print(f"NVProfiler: initialized for {dev.device}")
+    PMASYS, PMAGPC = 0x24a000, 0x244000
+    GPCBASE, GPCSTRIDE = (0x200200, 0x4000) if is_blackwell else (0x180000, 0x4000)
+    GRGPCS = 0x423800 if is_blackwell else 0x419000
 
-  def _rm_control(self, cmd, params): return self.iface.rm_control(self.profiler, cmd, params)
+    self.reg_ops(
+      RegWrite(PMASYS + 0x620, 0x2000000, mask=0x2000000),
+      *[RegWrite(PMAGPC + gpc * 0x200, 0x100, mask=0x100) for gpc in range(len(tpc_masks))])
 
-  def _setup_pc_sampling(self):
-    """Configure PC sampling hardware registers."""
-    all_tpc_masks = [
-      self.iface.rm_control(self.dev.subdevice, nv_gpu.NV2080_CTRL_CMD_GR_GET_TPC_MASK, nv_gpu.NV2080_CTRL_GR_GET_TPC_MASK_PARAMS(gpcId=i)).tpcMask
-      for i in range(self.dev.num_gpcs)]
-    # fully disabled gpcs are not enumerated
-    tpc_masks = [mask for mask in all_tpc_masks if mask > 0]
-    enabled_gpcs = range(len(tpc_masks))
+    hs = nv_gpu.struct_NVB0CC_CTRL_HS_CREDITS_PARAMS(pmaChannelIdx=0, numEntries=len(tpc_masks))
+    for i, mask in enumerate(tpc_masks):
+      hs.creditInfo[i] = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO(
+        chipletType=nv_gpu.NVB0CC_CHIPLET_TYPE_GPC, chipletIndex=i, numCredits=bin(mask).count('1'))
+    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_SET_HS_CREDITS, hs)
 
-    if DEBUG >= 2: print(f"NVProfiler: using {len(enabled_gpcs)} GPCs {enabled_gpcs}")
+    self.reg_ops(RegWrite(PMASYS + 0x03c, 0x1))
+    self.reg_ops(*[RegWrite(PMASYS + 0x65c + i * 4, 0xffffffff) for i in [0, 2, 4, 1, 3, 5, 6, 8, 10, 7, 9, 11, 16, 18, 20, 17, 19, 21]])
+    self.reg_ops(RegWrite(PMASYS + 0x010, 0xffffffff), RegWrite(PMASYS + 0x014, 0xffffffff))
+    self.reg_ops(RegWrite(PMASYS + 0x640, 0x40), RegWrite(PMASYS + 0x620, 0x2000007))
 
-    self._reg_ops([(0x24a620, 0x2000000, 0x2000000)])
-    self._reg_ops([(0x244000 + gpc * 0x200, 0x100, 0x100) for gpc in enabled_gpcs])
+    sm_ops = []
+    for gpc, mask in enumerate(tpc_masks):
+      for tpc in range(num_tpcs := bin(mask).count('1')):
+        for sm, sm_off in enumerate([0x400, 0x1000]):
+          base = GPCBASE + gpc * GPCSTRIDE + sm_off + (self.num_tpc_per_gpc - num_tpcs + tpc) * 0x200
+          tpc_id = ((0x20 + gpc + (gpc >= 7)) << 5) + (self.num_tpc_per_gpc + 2 - num_tpcs) + tpc + sm * self.num_tpc_per_gpc
+          sm_ops += [RegWrite(base + 0x0ec, 0x1), RegWrite(base + 0x06c, 0x2), RegWrite(base + 0x108, 0x20), RegWrite(base + 0x040, 0x19181716),
+                     RegWrite(base + 0x048, 0x1d1c1b1a), RegWrite(base + 0x050, 0x1e001f), RegWrite(base + 0x128, tpc_id), RegWrite(base + 0x09c, 0x40005)]
+    self.reg_ops(*sm_ops)
+    self.reg_ops(RegWrite(GRGPCS + 0xbdc, 0x1), reg_type=1)
 
-    # Get and allocate HS credits
-    total_credits = nv_gpu.struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS()
-    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_GET_TOTAL_HS_CREDITS, total_credits)
-    print(f"NVProfiler: total_credits={total_credits.numCredits}")
-
-    hs_alloc = nv_gpu.struct_NVB0CC_CTRL_HS_CREDITS_PARAMS(pmaChannelIdx=0, numEntries=len(enabled_gpcs))
-    for i, gpc in enumerate(enabled_gpcs):
-      hs_alloc.creditInfo[i] = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO(chipletType=nv_gpu.NVB0CC_CHIPLET_TYPE_GPC, chipletIndex=gpc,
-        numCredits=bin(tpc_masks[gpc]).count('1') * 4)
-    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_SET_HS_CREDITS, hs_alloc)
-
-    # Global PMASYS registers
-    self._reg_ops([((_PMASYS_CONTROL:=0x24a03c), 0x1)])
-    self._reg_ops([((_PMASYS_SRC_MASK:=0x24a65c) + i * 4, 0xffffffff) for i in [0, 2, 4, 1, 3, 5, 6, 8, 10, 7, 9, 11, 16, 18, 20, 17, 19, 21]])
-    self._reg_ops([((_PMASYS_ENGINE_MASK:=0x24a010), 0xffffffff), (_PMASYS_ENGINE_MASK + 4, 0xffffffff)])
-    self._reg_ops([((_PMASYS_TRIGGER:=0x24a640), 0x40), ((_PMASYS_CHANNEL_CONTROL:=0x24a620), 0x2000007)])
-
-    # Per-GPC configuration (GPC_BASE=0x180000, GPC_STRIDE=0x4000)
-    _GPC_BASE, _GPC_STRIDE = 0x180000, 0x4000
-    _GPC_PERF_EN = 0x0ec
-    self._reg_ops([(_GPC_BASE + gpc * _GPC_STRIDE + _GPC_PERF_EN, 0x1) for gpc in enabled_gpcs])
-    self._reg_ops([(_GPC_BASE + gpc * _GPC_STRIDE + _GPC_PERF_EN + 0x200, 0x1) for gpc in enabled_gpcs])
-
-    # Per-TPC configuration - skip disabled TPCs based on mask
-    _TPC_PERF_BASE, _TPC_PERF_STRIDE = 0x508, 0x200
-    _TPC_PERF_EN = -0x1c
-    tpc_offsets = tuple(_TPC_PERF_BASE + i * _TPC_PERF_STRIDE for i in range(20))
-    for gpc in enabled_gpcs:
-      base, mask = _GPC_BASE + gpc * _GPC_STRIDE, tpc_masks[gpc]
-      for i, tpc_base in enumerate(tpc_offsets):
-        if i < 18 and mask != 0 and not (mask & (1 << (i % self.dev.num_tpc_per_gpc))): continue
-        self._reg_ops([(base + tpc_base + _TPC_PERF_EN, 0x1)])
-
-    self._reg_ops([((_GR_GPCS_SWDX_SPILL_UNIT:=0x419b04), 0x80808a)])
-
-    # TPC ID configuration - generated from TPC masks (2 SMs per TPC)
-    _SM0_BASE, _SM1_BASE, _SM_STRIDE = 0x400, 0x1000, 0x200
-    _SM_PERF_EN, _SM_PERF_MODE, _SM_PERF_STATUS = 0x0ec, 0x06c, 0x108
-    _SM_PCSAMPLER_REMAP, _SM_PCSAMPLER_ID, _SM_PCSAMPLER_CFG = 0x040, 0x128, 0x09c
-    for gpc in enabled_gpcs:
-      if not (num_tpcs := bin(tpc_masks[gpc]).count('1')): continue
-      for tpc in range(num_tpcs):
-        for sm in range(2):
-          base = _GPC_BASE + gpc * _GPC_STRIDE + (_SM0_BASE if sm == 0 else _SM1_BASE) + (self.dev.num_tpc_per_gpc - num_tpcs + tpc) * _SM_STRIDE
-          tpc_id = ((0x20 + gpc + (gpc >= 7)) << 5) + (self.dev.num_tpc_per_gpc + 2 - num_tpcs) + tpc + sm * self.dev.num_tpc_per_gpc
-          self._reg_ops(
-            [(base + _SM_PERF_EN, 0x1), (base + _SM_PERF_MODE, 0x2), (base + _SM_PERF_STATUS, 0x20),
-             (base + _SM_PCSAMPLER_REMAP, 0x19181716), (base + _SM_PCSAMPLER_REMAP + 8, 0x1d1c1b1a), (base + _SM_PCSAMPLER_REMAP + 16, 0x1e001f),
-             (base + _SM_PCSAMPLER_ID, tpc_id), (base + _SM_PCSAMPLER_CFG, 0x40005)])
-
-    # Enable PC sampling (GR context register)
-    self._reg_ops([((_GR_GPCS_TPCS_SM_HWPM_CTL:=0x419bdc), 0x1)], reg_type=1)
-
-  def _reg_ops(self, ops, reg_type=0):
-    """Execute batch of register writes. ops: [(offset, value), ...] or [(offset, value, mask), ...]"""
+  def reg_ops(self, *ops, reg_type=0, op=nv_gpu.NV2080_CTRL_GPU_REG_OP_WRITE_32):
     for i in range(0, len(ops), 124):
-      chunk = ops[i:i + 124]
-      params = nv_gpu.struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS(regOpCount=len(chunk))
-      for j, (offset, value, *rest) in enumerate(chunk):
-        params.regOps[j] = nv_gpu.struct_NV2080_CTRL_GPU_REG_OP(regOp=nv_gpu.NV2080_CTRL_GPU_REG_OP_WRITE_32, regType=reg_type,
-          regOffset=offset, regValueLo=value, regAndNMaskLo=rest[0] if rest else 0xffffffff)
-      try: self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_EXEC_REG_OPS, params)
-      except RuntimeError: print("shit broke", ops)
+      params = nv_gpu.struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS(regOpCount=len(chunk:=ops[i:i+124]))
+      for j, (off, val, *rest) in enumerate(chunk):
+        params.regOps[j] = nv_gpu.struct_NV2080_CTRL_GPU_REG_OP(regOp=op, regType=reg_type,
+          regOffset=off, regValueLo=val, regAndNMaskLo=rest[0] if rest else 0xffffffff)
+      try: self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_EXEC_REG_OPS, params)
+      except RuntimeError: pass
 
-  def _parse_pc_samples(self, data: bytes):
-    """Parse PC sampling data from PMA stream."""
-    # PC sampling stall reasons - HW encoding to name mapping
-    # HW bits[15:12] -> stall name (matching CUPTI semantics)
-    STALL_REASONS = {0: "invalid", 1: "none", 2: "inst_fetch", 3: "exec_dep", 4: "mem_dep",
-                     5: "texture", 6: "const_mem", 7: "pipe_busy", 8: "mem_throttle",
-                     9: "not_selected", 10: "other", 11: "sleeping", 12: "sync",
-                     13: "lg_throttle", 14: "branch", 15: "dispatch"}
+  def _prof_readback(self) -> bytes|None:
+    params = self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT,
+      nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bUpdateAvailableBytes=1, bWait=1))
 
-    # Parse as 32-bit little-endian words
-    words = struct.unpack(f'<{len(data)//4}I', data)
+    if params.bOverflowStatus: raise RuntimeError("PMA profiler: buffer overflow detected")
+    if params.bytesAvailable == 0: return None
 
-    if DEBUG >= 4:
-      print("Raw words:")
-      for i in range(0, min(len(words), 40), 2):
-        print(f"  [{i:3d}] {words[i]:08x} {words[i+1]:08x}")
+    print(params.bytesAvailable)
 
-    # Helper functions for token classification
-    def is_separator(w): return (w & 0x0000FFFF) == 0x421c and ((w >> 16) & 0xFFFF) in (0x0800, 0x1800)
-    def is_meta(w): return (w >> 24) in (0x7F, 0x3F)
+    start, end = self.pma_rptr, self.pma_rptr + params.bytesAvailable
+    pma_data = self.pma_buf.cpu_view()[start:min(end, self.pma_buf.size)] + self.pma_buf.cpu_view()[:max(0, end - self.pma_buf.size)]
+    self.pma_rptr = end % self.pma_buf.size
 
-    # Collect stall statistics
-    stall_counts: dict[int, int] = {}
-    total_samples = 0
-    pc_samples: dict[int, int] = {}  # PC address -> count
-
-    # PMA PC sampling data format (8 bytes per sample):
-    # - Separators: 0x1800421c, 0x0800421c (skip these)
-    # - Meta tokens: 0x7Fxxxxxx or 0x3Fxxxxxx, stall_id = (meta >> 12) & 0xF
-    # - PC tokens: (PC >> 4) truncated to 32 bits
-    i = 0
-    while i < len(words) - 1:
-      w0, w1 = words[i], words[i + 1]
-
-      # Skip separators
-      if is_separator(w0):
-        i += 1
-        continue
-      if is_separator(w1):
-        i += 1
-        continue
-
-      # Determine which word is PC and which is metadata (can be in either order)
-      if is_meta(w0) and not is_meta(w1) and not is_separator(w1):
-        metadata, pc_token = w0, w1
-        i += 2
-      elif not is_meta(w0) and not is_separator(w0) and is_meta(w1):
-        pc_token, metadata = w0, w1
-        i += 2
-      else:
-        i += 1
-        continue
-
-      # Extract stall reason from metadata bits[15:12]
-      stall = (metadata >> 12) & 0xF
-
-      if pc_token != 0:
-        stall_counts[stall] = stall_counts.get(stall, 0) + 1
-        pc_samples[pc_token] = pc_samples.get(pc_token, 0) + 1
-        total_samples += 1
-
-    if total_samples > 0 and DEBUG >= 1:
-      # Format output similar to CUPTI
-      stall_str = " ".join(f"{STALL_REASONS.get(k, f'unk{k}')}:{v*100//total_samples}%"
-                           for k, v in sorted(stall_counts.items(), key=lambda x: -x[1]) if v > 0)
-      print(f"  NV PC sampling: {total_samples} samples | {stall_str}")
-      if DEBUG >= 3:
-        print(f"    PCs: {[(hex(pc), cnt) for pc, cnt in sorted(pc_samples.items(), key=lambda x: -x[1])[:10]]}")
-
-  def flush(self, wait=False):
-    """Read available profiling data from PMA stream."""
-    # Query bytes available (bWait=1 blocks until data available, bWait=0 returns immediately)
-    params = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bUpdateAvailableBytes=1, bWait=1)
-    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT, params)
-    if DEBUG >= 2: print(f"NVProfiler: bytesAvailable={params.bytesAvailable}")
-
-    if params.bytesAvailable > 0:
-      # Read data from CPU-mapped PMA buffer
-      pma_data = to_mv(self.pma_buf.va_addr, params.bytesAvailable)
-      if DEBUG >= 1: print(f"NVProfiler: got {params.bytesAvailable} bytes")
-
-      # Acknowledge consumption
-      ack = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bytesConsumed=params.bytesAvailable)
-      self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT, ack)
-
-      # Parse PC sampling data
-      self._parse_pc_samples(bytes(pma_data))
-      return bytes(pma_data)
-    return None
-
-nv_profiler: NVProfiler|None = None
-
-def init_nv_profiler(dev:NVDevice):
-  global nv_profiler
-  if nv_profiler is None and PROFILE >= 2:
-    nv_profiler = NVProfiler(dev)
-    # except Exception as e:
-    #   print(f"  NVProfiler: Failed to initialize: {e}")
+    self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT,
+      nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS(bytesConsumed=params.bytesAvailable))
+    return pma_data
