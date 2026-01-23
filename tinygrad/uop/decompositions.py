@@ -338,8 +338,8 @@ def l2i(op: Ops, dt: DType, a0: UOp, a1: UOp, b0: UOp, b1: UOp):
     case Ops.IDIV | Ops.MOD:
       q, r = (zero, zero), (zero, zero)
       for i in range(63, -1, -1):  # MSB first
-        r = l2i(Ops.SHL, dtypes.uint, *r, zero, one)
-        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, zero, UOp.const(dtypes.uint, i))[0] & one), r[1]
+        r = l2i(Ops.SHL, dtypes.uint, *r, one, zero)
+        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, UOp.const(dtypes.uint, i), zero)[0] & one), r[1]
         cond = l2i(Ops.CMPLT, dtypes.uint, *r, b0, b1).logical_not()  # r >= divisor
         diff = l2i(Ops.SUB, dtypes.uint, *r, b0, b1)
         q = ((q[0] | cond.cast(dt) << (i % 32), q[1]) if i < 32 else (q[0], q[1] | cond.cast(dt) << (i % 32)))
