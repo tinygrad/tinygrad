@@ -1,33 +1,76 @@
 """Tests comparing sqtt.py PACKET_TYPES against AMD's rocprof-trace-decoder binary."""
 import unittest
 from pathlib import Path
+import ctypes
 
 ROCPROF_LIB = "/usr/lib/librocprof-trace-decoder.so"
 
+def _find_rw_segment():
+  """Find the rw- segment of the loaded library."""
+  with open('/proc/self/maps', 'r') as f:
+    for line in f:
+      if 'librocprof-trace-decoder.so' in line and ' rw-p ' in line:
+        parts = line.split()
+        rw_base = int(parts[0].split('-')[0], 16)
+        rw_file_offset = int(parts[2], 16)
+        return rw_base, rw_file_offset
+  return None, None
+
 def extract_bit_tables():
-  """Extract bit budget tables from librocprof-trace-decoder.so."""
-  lib_path = Path(ROCPROF_LIB)
-  if not lib_path.exists():
+  """Extract bit budget tables by loading librocprof-trace-decoder.so at runtime."""
+  if not Path(ROCPROF_LIB).exists():
     return None, None, None
 
-  with open(lib_path, 'rb') as f:
-    f.seek(0x2d220)
-    layout2 = list(f.read(32))
-    f.seek(0x2d280)
-    layout3 = list(f.read(32))
-    f.seek(0x2d2c0)
-    layout4 = list(f.read(32))
+  ctypes.CDLL(ROCPROF_LIB)
+  rw_base, rw_file_offset = _find_rw_segment()
+  if rw_base is None:
+    return None, None, None
 
+  # Bit tables at file offsets 0x2d220, 0x2d280, 0x2d2c0
+  layout2 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d220 - rw_file_offset)))
+  layout3 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d280 - rw_file_offset)))
+  layout4 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d2c0 - rw_file_offset)))
   return layout2, layout3, layout4
 
-# Mapping from sqtt.py class name to rocprof type_id (verified via Ghidra analysis)
-NAME_TO_TYPE_ID = {
-  "VALUINST": 1, "VMEMEXEC": 2, "ALUEXEC": 3, "IMMEDIATE": 4, "IMMEDIATE_MASK": 5,
-  "WAVERDY": 6, "TS_DELTA_S8_W3": 7, "WAVEEND": 8, "WAVESTART": 9, "TS_DELTA_S5_W2": 10,
-  "WAVEALLOC": 11, "TS_DELTA_S5_W3": 12, "PERF": 13, "UTILCTR": 14, "TS_DELTA_SHORT": 15,
-  "NOP": 16, "TS_WAVE_STATE": 17, "EVENT": 18, "EVENT_BIG": 19, "REG": 20,
-  "SNAPSHOT": 21, "TS_DELTA_OR_MARK": 22, "LAYOUT_HEADER": 23,
-}
+def extract_packet_encodings():
+  """Extract packet type encodings from runtime packet type registrations.
+
+  Returns dict mapping type_id -> (mask, value).
+  """
+  if not Path(ROCPROF_LIB).exists():
+    return None
+
+  ctypes.CDLL(ROCPROF_LIB)
+  rw_base, rw_file_offset = _find_rw_segment()
+  if rw_base is None:
+    return None
+
+  # Packet registrations vector at file offset 0x2d340 (ghidra DAT_0012e340 -> vaddr 0x2e340)
+  vec_start_addr = rw_base + (0x2d340 - rw_file_offset)
+  vec_end_addr = rw_base + (0x2d348 - rw_file_offset)
+
+  vec_start = ctypes.c_void_p.from_address(vec_start_addr).value
+  vec_end = ctypes.c_void_p.from_address(vec_end_addr).value
+  if not vec_start or not vec_end:
+    return None
+
+  # Each entry is 32 bytes: type_id at offset 0, pattern_start at 8, pattern_end at 16
+  encodings = {}
+  for i in range((vec_end - vec_start) // 32):
+    entry_addr = vec_start + i * 32
+    type_id = ctypes.c_uint8.from_address(entry_addr).value
+    pattern_start = ctypes.c_void_p.from_address(entry_addr + 8).value
+    pattern_end = ctypes.c_void_p.from_address(entry_addr + 16).value
+
+    if pattern_start and pattern_end:
+      pattern_len = pattern_end - pattern_start
+      if 0 < pattern_len <= 8:
+        pattern = list((ctypes.c_uint8 * pattern_len).from_address(pattern_start))
+        mask = sum(1 << j for j in range(pattern_len))
+        value = sum(b << j for j, b in enumerate(pattern))
+        encodings[type_id] = (mask, value)
+
+  return encodings
 
 @unittest.skipUnless(Path(ROCPROF_LIB).exists(), "rocprof-trace-decoder not installed")
 class TestSQTTMatchesBinary(unittest.TestCase):
@@ -37,16 +80,60 @@ class TestSQTTMatchesBinary(unittest.TestCase):
 
     _, layout3, _ = extract_bit_tables()
 
-    for pkt_cls in PACKET_TYPES:
-      name = pkt_cls.__name__
-      if name not in NAME_TO_TYPE_ID:
-        continue
-      type_id = NAME_TO_TYPE_ID[name]
+    for type_id, pkt_cls in PACKET_TYPES.items():
       expected_bits = layout3[type_id]
       actual_bits = pkt_cls._size_nibbles * 4
-      with self.subTest(packet=name):
+      with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual(actual_bits, expected_bits,
-          f"{name}: {actual_bits} bits != expected {expected_bits}")
+          f"{pkt_cls.__name__}: {actual_bits} bits != expected {expected_bits}")
+
+  def test_bit_counts_match_layout4(self):
+    """Verify sqtt.py PACKET_TYPES with L4 overrides match rocprof-trace-decoder layout 4."""
+    from extra.assembly.amd.sqtt import PACKET_TYPES, _LAYOUT4_SIZE_OVERRIDES
+
+    _, _, layout4 = extract_bit_tables()
+
+    for type_id, pkt_cls in PACKET_TYPES.items():
+      expected_bits = layout4[type_id]
+      # Use L4 size override if available, otherwise use default
+      nib_count = _LAYOUT4_SIZE_OVERRIDES.get(pkt_cls, pkt_cls._size_nibbles)
+      actual_bits = nib_count * 4
+      with self.subTest(packet=pkt_cls.__name__):
+        self.assertEqual(actual_bits, expected_bits,
+          f"{pkt_cls.__name__}: {actual_bits} bits != expected {expected_bits}")
+
+  def test_encodings_exist_in_binary(self):
+    """Verify each PACKET_TYPE encoding exists in rocprof-trace-decoder."""
+    from extra.assembly.amd.sqtt import PACKET_TYPES
+
+    encodings = extract_packet_encodings()
+
+    for type_id, pkt_cls in PACKET_TYPES.items():
+      enc = (pkt_cls.encoding.mask, pkt_cls.encoding.default)
+      with self.subTest(packet=pkt_cls.__name__):
+        self.assertIn(type_id, encodings, f"{pkt_cls.__name__}: type_id {type_id} not in binary")
+        self.assertEqual(enc, encodings[type_id],
+          f"{pkt_cls.__name__}: encoding mismatch (ours=0x{enc[0]:02x}/0x{enc[1]:02x}, binary=0x{encodings[type_id][0]:02x}/0x{encodings[type_id][1]:02x})")
 
 if __name__ == "__main__":
+  layout2, layout3, layout4 = extract_bit_tables()
+  encodings = extract_packet_encodings()
+
+  print(layout2)
+  print(layout3)
+  print(layout4)
+
+  if encodings and layout3:
+    print("Packet type registrations from rocprof-trace-decoder:\n")
+    print(f"{'TypeID':>6} {'Mask':>6} {'Value':>6} {'L2':>4} {'L3':>4} {'L4':>4} {'Pattern'}")
+    print("-" * 60)
+    for type_id in sorted(encodings.keys()):
+      mask, value = encodings[type_id]
+      l2 = layout2[type_id] if type_id < len(layout2) else 0
+      l3 = layout3[type_id] if type_id < len(layout3) else 0
+      l4 = layout4[type_id] if type_id < len(layout4) else 0
+      # Reconstruct pattern from mask/value
+      pattern = [(value >> i) & 1 for i in range(mask.bit_length())]
+      print(f"{type_id:6d} 0x{mask:04x} 0x{value:04x} {l2:4d} {l3:4d} {l4:4d} {pattern}")
+
   unittest.main()

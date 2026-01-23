@@ -122,7 +122,8 @@ class TestSQTTExamples(unittest.TestCase):
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
           for pkt in decode(event.blob):
-            self.assertIn(type(pkt), PACKET_TYPES, f"unknown packet type {type(pkt)} in {name}")
+            # Use isinstance to handle layout-specific subclasses (e.g., WAVESTART_L4)
+            self.assertTrue(any(isinstance(pkt, cls) for cls in PACKET_TYPES.values()), f"unknown packet type {type(pkt)} in {name}")
 
   def test_wave_lifecycle(self):
     for name, (events, *_) in self.examples.items():
@@ -201,7 +202,7 @@ class TestSQTTExamples(unittest.TestCase):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
 
-#class TestSQTTExamplesRDNA4(TestSQTTExamples): target = "gfx1200"
+class TestSQTTExamplesRDNA4(TestSQTTExamples): target = "gfx1200"
 
 #class TestSQTTExamplesCDNA(TestSQTTExamples): target = "gfx950"
 

@@ -181,6 +181,10 @@ class WAVESTART(PacketType):  # exclude: 1 << 4
   @property
   def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
 
+class WAVESTART_L4(WAVESTART):  # Layout 4 has wave field at different position
+  wave = bits[19:15]
+  id7 = bits[31:20]
+
 class TS_DELTA_S5_W2(PacketType):
   encoding = bits[4:0] == 0b11100
   delta = bits[6:5]
@@ -276,51 +280,62 @@ class UTILCTR(PacketType):
   delta = bits[8:7]
   ctr = bits[47:9]
 
-# All packet types in encoding priority order (more specific masks first, NOP last as fallback)
-PACKET_TYPES: list[type[PacketType]] = [
-  EVENT, EVENT_BIG,
-  TS_DELTA_S8_W3, TS_WAVE_STATE, SNAPSHOT, TS_DELTA_OR_MARK, LAYOUT_HEADER, UTILCTR,
-  IMMEDIATE_MASK, WAVERDY, WAVEEND, WAVESTART, TS_DELTA_S5_W2, WAVEALLOC, TS_DELTA_S5_W3, PERF,
-  VMEMEXEC, ALUEXEC, IMMEDIATE, TS_DELTA_SHORT, REG,
-  VALUINST, INST,
-  NOP,
-]
+# All packet types with rocprof type IDs as keys
+PACKET_TYPES: dict[int, type[PacketType]] = {
+  1: VALUINST, 2: VMEMEXEC, 3: ALUEXEC, 4: IMMEDIATE, 5: IMMEDIATE_MASK, 6: WAVERDY, 7: TS_DELTA_S8_W3, 8: WAVEEND,
+  9: WAVESTART, 10: TS_DELTA_S5_W2, 11: WAVEALLOC, 12: TS_DELTA_S5_W3, 13: PERF, 14: UTILCTR, 15: TS_DELTA_SHORT,
+  16: NOP, 17: TS_WAVE_STATE, 18: EVENT, 19: EVENT_BIG, 20: REG, 21: SNAPSHOT, 22: TS_DELTA_OR_MARK, 23: LAYOUT_HEADER, 24: INST,
+}
 
 def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
-  table = [len(PACKET_TYPES) - 1] * 256  # default to NOP
-  opcode_to_class: dict[int, type[PacketType]] = {i: cls for i, cls in enumerate(PACKET_TYPES)}
+  table = [16] * 256  # default to NOP (type_id 16)
+  # Sort by mask bit count descending (more specific encodings first), NOP last
+  sorted_types = sorted(PACKET_TYPES.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
 
   for byte_val in range(256):
-    for opcode, pkt_cls in enumerate(PACKET_TYPES):
+    for opcode, pkt_cls in sorted_types:
       if (byte_val & pkt_cls.encoding.mask) == pkt_cls.encoding.default:
         table[byte_val] = opcode
         break
 
-  return bytes(table), opcode_to_class
+  return bytes(table), PACKET_TYPES
 
 STATE_TO_OPCODE, OPCODE_TO_CLASS = _build_state_table()
 
-# Precompute special case opcodes
-_TS_DELTA_OR_MARK_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_OR_MARK)
-_TS_DELTA_SHORT_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_SHORT)
+# Special case opcodes (rocprof type IDs)
+_TS_DELTA_OR_MARK_OPCODE, _TS_DELTA_SHORT_OPCODE = 22, 15
+
+# Layout-specific packet sizes (in nibbles). Layout 3 uses class defaults, layout 4 has overrides.
+# Differences: TS_DELTA_S8_W3 64->72, TS_DELTA_S5_W2 48->40, WAVEALLOC 20->24, TS_DELTA_S5_W3 52->56, PERF 28->32, TS_DELTA_OR_MARK 48->64
+_LAYOUT4_SIZE_OVERRIDES = {TS_DELTA_S8_W3: 18, TS_DELTA_S5_W2: 10, WAVEALLOC: 6, TS_DELTA_S5_W3: 14, PERF: 8, TS_DELTA_OR_MARK: 16}
+# Layout 4 class substitutions (different field positions)
+_LAYOUT4_CLASS_OVERRIDES = {WAVESTART: WAVESTART_L4}
 
 # Combined lookup: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
 # special_case: 0=none, 1=TS_DELTA_OR_MARK, 2=TS_DELTA_SHORT
-_DECODE_INFO: dict[int, tuple] = {}
-for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
-  _delta_field = getattr(_pkt_cls, 'delta', None)
-  _delta_lo = _delta_field.lo if _delta_field else 0
-  _delta_mask = _delta_field.mask if _delta_field else 0
-  _special = 1 if _opcode == _TS_DELTA_OR_MARK_OPCODE else (2 if _opcode == _TS_DELTA_SHORT_OPCODE else 0)
-  _DECODE_INFO[_opcode] = (_pkt_cls, _pkt_cls._size_nibbles, _delta_lo, _delta_mask, _special)
+def _build_decode_info(layout: int = 3) -> dict[int, tuple]:
+  decode_info: dict[int, tuple] = {}
+  for opcode, pkt_cls in OPCODE_TO_CLASS.items():
+    actual_cls = _LAYOUT4_CLASS_OVERRIDES.get(pkt_cls, pkt_cls) if layout == 4 else pkt_cls
+    delta_field = getattr(actual_cls, 'delta', None)
+    delta_lo = delta_field.lo if delta_field else 0
+    delta_mask = delta_field.mask if delta_field else 0
+    special = 1 if opcode == _TS_DELTA_OR_MARK_OPCODE else (2 if opcode == _TS_DELTA_SHORT_OPCODE else 0)
+    nib_count = _LAYOUT4_SIZE_OVERRIDES.get(pkt_cls, pkt_cls._size_nibbles) if layout == 4 else pkt_cls._size_nibbles
+    decode_info[opcode] = (actual_cls, nib_count, delta_lo, delta_mask, special)
+  return decode_info
+
+_DECODE_INFO_L3 = _build_decode_info(3)
+_DECODE_INFO_L4 = _build_decode_info(4)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def decode(data: bytes) -> Iterator[PacketType]:
-  """Decode raw SQTT blob, yielding packet instances."""
+  """Decode raw SQTT blob, yielding packet instances. Auto-detects layout from LAYOUT_HEADER."""
   n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
+  decode_info = _DECODE_INFO_L3  # default to layout 3, will update after seeing LAYOUT_HEADER
 
   while pos + ((nib_count + nib_off + 1) >> 1) <= n:
     need = nib_count - nib_off
@@ -334,12 +349,17 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
     opcode = STATE_TO_OPCODE[reg & 0xFF]
-    pkt_cls, nib_count, delta_lo, delta_mask, special = _DECODE_INFO[opcode]
+    pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
     delta = (reg >> delta_lo) & delta_mask
-    if special == 1 and (reg >> 9) & 1 and not (reg >> 8) & 1: delta = 0  # TS_DELTA_OR_MARK marker
+    if special == 1:  # TS_DELTA_OR_MARK
+      if (reg >> 9) & 1 and not (reg >> 8) & 1: delta = 0  # marker (bit9=1, bit8=0)
+      elif (reg >> 7) & 1: delta = 0  # L4: bit7=1 indicates sync packet with no delta
     elif special == 2: delta += 8  # TS_DELTA_SHORT
     time += delta
-    yield pkt_cls.from_raw(reg, time)
+    pkt = pkt_cls.from_raw(reg, time)
+    # detect layout from first LAYOUT_HEADER and switch decode tables if needed
+    if pkt_cls is LAYOUT_HEADER and pkt.layout == 4: decode_info = _DECODE_INFO_L4
+    yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PRINTER
