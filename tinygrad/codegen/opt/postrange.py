@@ -220,7 +220,7 @@ class Scheduler:
   def _apply_tc_opt(self, use_tensor_cores:int, axis:int, tc_select:int, opt_level:int) -> None|list[UOp]:
     if not (reduceops := self.reduceops): raise KernelOptError("no reduce ops for TensorCore")
     reduceop = reduceops[0]
-    if use_tensor_cores and reduceop is not None and reduceop.arg is Ops.ADD:
+    if use_tensor_cores and reduceop.arg is Ops.ADD:
       mul = reduceop.src[0] if reduceop.src[0].op is not Ops.CAST else reduceop.src[0].src[0]
       if mul.op is not Ops.MUL: return None
       in0, in1 = mul.src

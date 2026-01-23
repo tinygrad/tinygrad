@@ -9,11 +9,12 @@ SILENT MISMATCHES (highest priority - wrong results, no error):
   class_method_shared_across_instances EASY could check if first arg is self and warn
   slice_assign_requires_realize      MED    assign graph not connected to read during JIT replay
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
-  graph_input_output_aliasing        MED    GraphRunner skips aliased buffers but only input_replace updated
+  symbolic_pad_view_frozen           MED    pad view BIND values baked in at capture time
   python_constants_frozen            HARD   inherent to tracing JITs
   conditional_branches_frozen        HARD   inherent to tracing JITs
 
 ERRORS RAISED (lower priority - at least users know):
+  item_bakes_in_values               EASY   raises JitError if .item()/.data() accessed during capture
   unrealized_const_input_error       EASY   raises JitError for unrealized const inputs
   non_tensor_outputs_error           EASY   raises JitError if return contains non-Tensor values
   positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
@@ -93,7 +94,7 @@ class TestJitFootguns(unittest.TestCase):
     y = Tensor([100]).contiguous().realize()
     for _ in range(3):
       y = step(y)  # should be (100+1)*2=202, (202+1)*2=406, (406+1)*2=814
-    self.assertEqual(y.item(), 1406)  # TODO: should be 814
+    self.assertEqual(y.item(), 814)  # fails with 1406 if bug exists (uses 350 instead of 100)
 
   def test_multiple_outputs_same_intermediate(self):
     """Multiple outputs derived from the same intermediate - JIT copies aliased inputs to prevent hazard."""
@@ -134,6 +135,23 @@ class TestJitFootguns(unittest.TestCase):
     for i in range(4):
       cache2.assign(Tensor.zeros(4, 4)).realize()
       self.assertEqual(f_fixed(v_pos.bind(i)).item(), 4.0)
+
+  def test_symbolic_pad_view_frozen(self):
+    """Symbolic pad view has BIND values baked in at capture time. TODO: pad should be captured in jit."""
+    from tinygrad import Variable
+    a = Tensor.rand(3, 10).realize()
+
+    # broken: pad is a view, BIND values frozen at capture (i=2)
+    @TinyJit
+    def f_broken(a): return (a+1).pad((None, (0, 10-a.shape[1]))).realize()
+    for i in range(1, 5): f_broken(a[:, :Variable("i", 1, 10).bind(i)])
+    self.assertEqual(int((f_broken(a[:, :Variable("i", 1, 10).bind(4)])[0] != 0).sum().item()), 2)  # should be 4!
+
+    # workaround: contiguous fuses pad into kernel
+    @TinyJit
+    def f_fixed(a): return (a+1).pad((None, (0, 10-a.shape[1]))).contiguous().realize()
+    for i in range(1, 5): f_fixed(a[:, :Variable("i", 1, 10).bind(i)])
+    self.assertEqual(int((f_fixed(a[:, :Variable("i", 1, 10).bind(4)])[0] != 0).sum().item()), 4)
 
   def test_non_tensor_outputs_error(self):
     @TinyJit
@@ -302,33 +320,31 @@ class TestJitFootguns(unittest.TestCase):
         f(Tensor([1]), Tensor([2]))
 
   def test_item_creates_unrealized_return(self):
-    """.item() in shape computation creates unrealized return with baked-in shape."""
+    """.item() in shape computation raises error during JIT capture."""
     @TinyJit
     def f(x): return Tensor.zeros(x.sum().item())
 
-    for _ in range(3): f(Tensor([1, 1, 1]))  # captures with sum=3
-    result = f(Tensor([2, 2, 2]))  # sum=6, but shape is baked in
-    assert result.shape == (3,)  # should be (6,)!
+    f(Tensor([1, 1, 1]))  # warmup
+    with self.assertRaises(JitError):
+      f(Tensor([1, 1, 1]))  # capture - .item() raises
 
   def test_item_bakes_in_values(self):
-    """.item() value is baked in, causing wrong output shapes (silent failure)."""
+    """.item() during JIT capture raises error (would bake in value)."""
     @TinyJit
     def f(x, mask): return x.masked_select(mask)
 
-    mask_2 = Tensor([True, False, True, False])
-    for _ in range(3): f(Tensor([1, 2, 3, 4]), mask_2)
-    mask_3 = Tensor([True, True, True, False])
-    result = f(Tensor([1, 2, 3, 4]), mask_3)
-    assert result.shape == (2,)  # should be (3,)!
+    f(Tensor([1, 2, 3, 4]), Tensor([True, False, True, False]))  # warmup
+    with self.assertRaises(JitError):
+      f(Tensor([1, 2, 3, 4]), Tensor([True, False, True, False]))  # capture - .item() raises
 
   def test_tolist_bakes_in_values(self):
-    """.tolist() returns Python values that get baked in (silent failure)."""
+    """.tolist() raises error during JIT capture (would bake in values)."""
     @TinyJit
     def f(x): return Tensor(x.tolist())
 
-    for _ in range(3): f(Tensor([1, 2, 3]))
-    result = f(Tensor([4, 5, 6]))
-    np.testing.assert_equal(result.numpy(), [1, 2, 3])  # should be [4,5,6]!
+    f(Tensor([1, 2, 3]))  # warmup
+    with self.assertRaises(JitError):
+      f(Tensor([1, 2, 3]))  # capture - .tolist() raises
 
 
 class TestJitCorrectBehavior(unittest.TestCase):

@@ -40,13 +40,13 @@ jobs:
         mesa: 'true'
         pydeps: 'pyyaml mako'
     - name: Install autogen support packages
-      run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev
+      run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev libdrm-dev
     - name: Regenerate autogen files
       run: |
         find tinygrad/runtime/autogen -type f -name "*.py" -not -name "__init__.py" -not -name "comgr_3.py" -not -name "metal.py" -not -name "iokit.py" -not -name "corefoundation.py" -not -name "libclang.py" -delete
         python3 -c "from tinygrad.runtime.autogen import opencl"
         python3 -c "from tinygrad.runtime.autogen import cuda, nvrtc, nvjitlink, nv_570, nv_580, nv"
-        python3 -c "from tinygrad.runtime.autogen import comgr, hsa, hip, amd_gpu, sqtt, rocprof, amdgpu_kd"
+        python3 -c "from tinygrad.runtime.autogen import comgr, hsa, hip, amd_gpu, sqtt, rocprof, amdgpu_kd, amdgpu_drm"
         python3 -c "from tinygrad.runtime.autogen.am import am, pm4_soc15, pm4_nv, sdma_4_0_0, sdma_5_0_0, sdma_6_0_0, smu_v13_0_0, smu_v13_0_6, smu_v14_0_2"
         python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, ib, pci, vfio"
         python3 -c "from tinygrad.runtime.autogen import llvm"
