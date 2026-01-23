@@ -1299,6 +1299,11 @@ def train_llama3():
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
   SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
+  EVAL_SAMPLES       = config["EVAL_SAMPLES"]           = getenv("EVAL_SAMPLES", 5760 if not SMALL else 1024)
+  MAX_STEPS          = config["MAX_STEPS"]              = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS))
+  WARMUP_STEPS       = config["WARMUP_STEPS"]           = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
+  LR                 = config["LR"]                     = getenv("LR", 8e-5 * GBS / 1152)
+  END_LR             = config["END_LR"]                 = getenv("END_LR", 8e-7)
   EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
   EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
@@ -1312,10 +1317,10 @@ def train_llama3():
   opt_adamw_weight_decay = 0.1
 
   opt_gradient_clip_norm = 1.0
-  opt_learning_rate_warmup_steps = getenv("WARMUP_STEPS", math.ceil(8000 * 1152 / GBS))
-  opt_learning_rate_decay_steps = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS)) - opt_learning_rate_warmup_steps
-  opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
-  opt_end_learning_rate = getenv("END_LR", 8e-7)
+  opt_learning_rate_warmup_steps = WARMUP_STEPS
+  opt_learning_rate_decay_steps = MAX_STEPS - opt_learning_rate_warmup_steps
+  opt_base_learning_rate = LR
+  opt_end_learning_rate = END_LR
 
   # ** init wandb **
   WANDB = getenv("WANDB")
@@ -1398,7 +1403,7 @@ def train_llama3():
         total_norm += p.grad.float().square().sum()
       total_norm = total_norm.sqrt().contiguous()
       for p in optim.params:
-        p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
+        p.grad = (p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(p.grad.dtype)
 
     optim.step()
     scheduler.step()
@@ -1436,42 +1441,54 @@ def train_llama3():
     eval_dataset = None
   else:
     from examples.mlperf.dataloader import get_llama3_dataset
-    eval_dataset = get_llama3_dataset(1024 if SMALL else 5760, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
+    eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
 
   def get_eval_iter():
     if eval_dataset is None:
-      return fake_data(EVAL_BS, 5760)
+      return fake_data(EVAL_BS, EVAL_SAMPLES)
     from examples.mlperf.dataloader import iterate_llama3_dataset
     return iterate_llama3_dataset(eval_dataset, EVAL_BS)
 
-  iter = get_train_iter()
+  num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
+  train_iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
   step_times = []
-  for tokens in tqdm(iter, total=SAMPLES//GBS):
+  while i < MAX_STEPS:
     GlobalCounters.reset()
     if getenv("TRAIN", 1):
-      t = time.perf_counter()
+      st = time.perf_counter()
+      try: tokens = next(train_iter)
+      except StopIteration: break
+      dt = time.perf_counter()
       loss, lr = train_step(model, tokens)
       loss = loss.float().item()
       lr = lr.item()
 
+      et = time.perf_counter()
+      step_time = et - st
+      dev_time = et - dt
+      data_time = dt - st
+      if BENCHMARK: step_times.append(step_time)
+
       i += 1
       sequences_seen += tokens.shape[0]
 
-      sec = time.perf_counter()-t
-      if BENCHMARK: step_times.append(sec)
-
       mem_gb = GlobalCounters.mem_used / 1e9
-      gflops = GlobalCounters.global_ops / 1e9 / sec
+      gflops = GlobalCounters.global_ops / 1e9 / dev_time
+      mfu = ((6 * num_params * SEQLEN * BS) / (dev_time * max(getenv("DP", 1), getenv("MP", 1)) * 2.3e15)) * 100
       tqdm.write(
-        f"{i:5} {sec:.2f} s run, {loss:.4f} loss, {lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
-
-      if (fname:=getenv("LOSS_FILE", "")):
-        with open(fname, "a") as f:
-          f.write(f"{i} {loss:.4f} {lr:.12f} {mem_gb:.2f}\n")
+          f"{i:5} {step_time:.3f} s run, {dev_time:.3f} s device, {data_time:.3f} s data, {loss:.4f} loss, {lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
 
       if WANDB:
-        wandb.log({"lr": lr, "train/loss": loss, "train/step_time": sec, "train/GFLOPS": gflops, "train/sequences_seen": sequences_seen})
+        wandb.log({
+          "lr": lr, "train/loss": loss,
+          "train/step_time": step_time,
+          "train/dev_time": dev_time,
+          "train/data_time": data_time,
+          "train/GFLOPS": gflops,
+          "train/MFU": mfu,
+          "train/sequences_seen": sequences_seen
+        })
 
       if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
         tqdm.write("saving checkpoint")
@@ -1498,10 +1515,10 @@ def train_llama3():
       eval_iter = get_eval_iter()
       tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
 
-      for j,tokens in tqdm(enumerate(eval_iter), total=5760//EVAL_BS):
+      for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
         eval_losses += eval_step(model, tokens).tolist()
         
-        if BENCHMARK and (j+1) == min(BENCHMARK, 5760//EVAL_BS):
+        if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           return
 
       log_perplexity = Tensor(eval_losses).mean().float().item()
