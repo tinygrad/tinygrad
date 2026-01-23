@@ -116,8 +116,8 @@ class TestSQTTMatchesBinary(unittest.TestCase):
     if not (EXAMPLES_DIR / "gfx950").exists(): self.skipTest("no CDNA examples")
     pkt_sizes = extract_cdna_packet_sizes()
     self.assertIsNotNone(pkt_sizes, "failed to extract CDNA packet sizes")
-    expected = {0: 2, 1: 8, 2: 8, 3: 4, 4: 2, 5: 6, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 8, 12: 6, 13: 4, 14: 8, 15: 6}
-    for pkt_fmt, size in expected.items():
+    from extra.assembly.amd.sqtt_cdna import CDNA_PKT_SIZES
+    for pkt_fmt, size in CDNA_PKT_SIZES.items():
       with self.subTest(pkt_fmt=pkt_fmt): self.assertEqual(pkt_sizes.get(pkt_fmt), size)
 
   def _test_bit_counts(self, layout: int):
