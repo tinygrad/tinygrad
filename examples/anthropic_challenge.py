@@ -94,46 +94,50 @@ class VLIWRenderer(Renderer):
     # we left the fun parts to you
 
     print(f"rendering with {len(uops)} uops")
-    reg, uop_reg, instrs = 0, {}, []
-    def r(u): return uop_reg[u]
+    reg, inst = 0, []
+    r: dict[UOp, int] = {}
     for u in uops:
       assert u.dtype.count in (1,8), "dtype count must be 1 or 8"
 
       # dumb register allocator
-      if u.op not in {Ops.STORE, Ops.SINK, Ops.GEP}: uop_reg[u] = reg; reg += u.dtype.count
+      if u.op not in {Ops.STORE, Ops.SINK, Ops.GEP}:
+        r[u] = reg
+        reg += u.dtype.count
 
       # render UOps to instructions
       match u.op:
         case Ops.SINK:
-          instrs.append({"flow": [("halt",)]})
+          inst.append({"flow": [("halt",)]})
         case Ops.CONST:
-          instrs.append({"load": [("const", r(u), u.arg)]})
+          inst.append({"load": [("const", r[u], u.arg)]})
         case Ops.GEP:
-          uop_reg[u] = r(u.src[0]) + u.arg[0]
+          # a GEP is just an alias to a special register in the vector
+          r[u] = r[u.src[0]] + u.arg[0]
         case Ops.VECTORIZE:
           if all(s == u.src[0] for s in u.src):
-            instrs.append({"valu": [("vbroadcast", r(u), r(u.src[0]))]})
+            # if all sources are the same, we can broadcast
+            inst.append({"valu": [("vbroadcast", r[u], r[u.src[0]])]})
           else:
             # this is a copy into a contiguous chunk of registers
-            instrs.extend({"flow": [("add_imm", r(u)+i, r(s), 0)]} for i,s in enumerate(u.src) if r(s) != r(u)+i)
+            inst.extend({"flow": [("add_imm", r[u]+i, r[s], 0)]} for i,s in enumerate(u.src) if r[s] != r[u]+i)
         case Ops.LOAD:
           op = "vload" if u.dtype.count > 1 else "load"
-          instrs.append({"load": [(op, r(u), r(u.src[0]))]})
+          inst.append({"load": [(op, r[u], r[u.src[0]])]})
         case Ops.STORE:
           op = "vstore" if u.src[1].dtype.count > 1 else "store"
-          instrs.append({"store": [(op, r(u.src[0]), r(u.src[1]))]})
+          inst.append({"store": [(op, r[u.src[0]], r[u.src[1]])]})
         case Ops.MULACC:
           assert u.dtype.count == 8
-          instrs.append({"valu": [("multiply_add", r(u), r(u.src[0]), r(u.src[1]), r(u.src[2]))]})
+          inst.append({"valu": [("multiply_add", r[u], r[u.src[0]], r[u.src[1]], r[u.src[2]])]})
         case Ops.WHERE:
           assert u.dtype.count == 8
-          instrs.append({"flow": [("vselect", r(u), r(u.src[0]), r(u.src[1]), r(u.src[2]))]})
+          inst.append({"flow": [("vselect", r[u], r[u.src[0]], r[u.src[1]], r[u.src[2]])]})
         case _ if u.op in self.code_for_op:
           cat = "valu" if u.dtype.count > 1 else "alu"
-          instrs.append({cat: [(self.code_for_op[u.op], r(u), r(u.src[0]), r(u.src[1]))]})
+          inst.append({cat: [(self.code_for_op[u.op], r[u], r[u.src[0]], r[u.src[1]])]})
         case _:
           raise NotImplementedError(f"unhandled op {u.op}")
-    return repr(instrs)
+    return repr(inst)
 
 # ************************* test and render *************************
 
