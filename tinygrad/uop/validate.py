@@ -48,7 +48,9 @@ def uops_to_z3(solver, *uops: UOp) -> list[z3.ExprRef]:
   lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.dtype.scalar() in dtypes.ints+(dtypes.bool, dtypes.index) or x.op is Ops.SINK))[:-1]
   z3map: dict[UOp, z3.ExprRef] = {}
   for i,u in enumerate(lst):
-    new_u, constraint = cast(tuple[z3.ArithRef, z3.BoolRef|None], z3_renderer.rewrite(u, ctx=(solver, z3map)))
+    z3_rewritten = z3_renderer.rewrite(u, ctx=(solver, z3map))
+    if z3_rewritten is None: raise NotImplementedError(f"{u.op} is not supported by z3")
+    new_u, constraint = cast(tuple[z3.ArithRef, z3.BoolRef|None], z3_rewritten)
     if constraint is not None: solver.add(constraint)
     z3map[u] = new_u
   assert all(u in z3map for u in uops), "UOp failed to rewrite to z3!"

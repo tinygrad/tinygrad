@@ -116,7 +116,7 @@ class MetalCompiler(Compiler):
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
-  def __init__(self, dev:MetalDevice, name:str, lib:bytes, buf_dtypes=()):
+  def __init__(self, dev:MetalDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.name, self.lib = dev, name, lib
     self.buf_dtypes = buf_dtypes
     if lib[:4] == b"MTLB":
@@ -150,7 +150,6 @@ class MetalProgram:
     encoder.setComputePipelineState(self.pipeline_state)
     # NOTE: Metal uses separate index spaces for buffers and textures, can't just enumerate
     buf_idx, tex_idx = 0, 0
-    temp_textures = []
     for i,a in enumerate(bufs):
       if isinstance(self.buf_dtypes[i], ImageDType):
         img = a.image if a.image is not None else self.buf_dtypes[i]
@@ -161,7 +160,6 @@ class MetalProgram:
         desc.setHeight(img.shape[0])
         desc.setUsage(metal.MTLTextureUsageShaderRead | metal.MTLTextureUsageShaderWrite)
         tex = a.buf.newTextureWithDescriptor_offset_bytesPerRow(desc, a.offset, img.pitch)
-        temp_textures.append(tex)
         encoder.setTexture_atIndex(tex, tex_idx)
         tex_idx += 1
       else:

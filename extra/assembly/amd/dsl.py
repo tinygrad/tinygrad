@@ -360,7 +360,7 @@ class Inst:
       elif name in ('src1', 'vsrc1', 'ssrc1'): bits['s1'] = val
       elif name == 'src2': bits['s2'] = val
       elif name in ('vdst', 'sdst', 'sdata'): bits['d'] = val
-      elif name in ('data', 'vdata', 'data0'): bits['data'] = val
+      elif name in ('data', 'vdata', 'data0', 'vsrc'): bits['data'] = val
     return bits
   @property
   def canonical_op_regs(self) -> dict[str, int]:

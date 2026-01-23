@@ -71,7 +71,7 @@ class HCQGraph(MultiGraphRunner):
     for dev, queue in self.comp_queues.items(): dev_access[queue].add(dev)
 
     self.input_replace_map: dict[HCQCompiled, set[int]] = collections.defaultdict(set)
-    self.fixedvars: dict[HCQCompiled, dict[str, int]] = {}
+    self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
 
     for j,ji in enumerate(jit_cache):
       if is_exec_prg:=isinstance(ji.prg, CompiledRunner): enqueue_dev: HCQCompiled = ji.prg.dev
@@ -81,7 +81,8 @@ class HCQGraph(MultiGraphRunner):
           if (enqueue_dev:=cast(HCQCompiled, Device[b.device])).hw_copy_queue_t is not None: break
 
       # set any fixedvars on the device
-      self.fixedvars[enqueue_dev] = merge_dicts([self.fixedvars.get(enqueue_dev, {}), ji.fixedvars])
+      self.device_vars[enqueue_dev] = merge_dicts([self.device_vars.get(enqueue_dev, {}), ji.fixedvars])
+      if is_exec_prg: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], cast(CompiledRunner, ji.prg).p.runtimevars])
 
       if is_exec_prg:
         enqueue_queue = self.comp_queues[enqueue_dev]
@@ -209,7 +210,7 @@ class HCQGraph(MultiGraphRunner):
       hcq_var_vals[self.input_replace_to_var[(j,i)].expr] = input_buffers[input_idx]._buf.va_addr
 
     for dev in self.devices:
-      self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.fixedvars.get(dev, {}))
+      self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.device_vars.get(dev, {}))
       for copy_queue in self._dev_copy_queues(dev): copy_queue.submit(dev, hcq_var_vals_local)
       self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
 

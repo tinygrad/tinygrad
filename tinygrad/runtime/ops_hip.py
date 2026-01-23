@@ -22,7 +22,7 @@ class HIPDevice(Compiled):
     check(hip.hipDeviceSynchronize())
 
 class HIPProgram:
-  def __init__(self, dev:HIPDevice, name:str, lib:bytes):
+  def __init__(self, dev:HIPDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.name, self.lib = dev, name, lib
     check(hip.hipSetDevice(self.dev.device_id))
     self.module = init_c_var(hip.hipModule_t, lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))

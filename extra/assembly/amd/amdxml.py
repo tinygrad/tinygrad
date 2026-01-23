@@ -247,7 +247,7 @@ def write_enum(enums, path):
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_ins(encodings, enums, lit_only_ops, types, arch, path):
-  _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr"}
+  _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr", "vsrc"}
   _VARIANT_SUFFIXES = ("_LIT", "_DPP16", "_DPP8", "_SDWA_SDST", "_SDWA", "_MFMA")
   def get_base_fmt(fmt):
     for sfx in _VARIANT_SUFFIXES: fmt = fmt.replace(sfx, "")
@@ -310,7 +310,10 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
     all_ops = set(enums.get(enc_name, {}).keys())
     # Exclude SDST ops from base class (they need VOP1_SDST/VOP3_SDST/VOP3B)
     base_allowed = all_ops - base_lit_ops - sdst_opcodes.get(enc_name, set())
-    if enc_name in ("FLAT", "VFLAT"):
+    # RDNA3 FLAT/GLOBAL/SCRATCH share encoding bits, differentiated by seg field
+    # RDNA4 VFLAT/VGLOBAL/VSCRATCH have distinct encoding bits, no seg field needed
+    has_seg_field = any(fn == "seg" for fn, _, _ in fields)
+    if enc_name in ("FLAT", "VFLAT") and has_seg_field:
       prefix = "V" if enc_name == "VFLAT" else ""
       for cls, seg, op_enum in [(f"{prefix}FLAT", 0, f"{prefix}FLATOp"), (f"{prefix}GLOBAL", 2, f"{prefix}GLOBALOp"), (f"{prefix}SCRATCH", 1, f"{prefix}SCRATCHOp")]:
         cls_ops = set(enums.get(cls, {}).keys())
@@ -320,7 +323,7 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
           elif fn == "op": lines.append(f"  op = EnumBitField({hi}, {lo}, {op_enum}, {fmt_allowed(op_enum, cls_ops)})")
           else: lines.append(f"  {fn} = {field_def(fn, hi, lo, cls, enc_bits)}")
         lines.append("")
-    elif enc_name not in ("FLAT_GLOBAL", "FLAT_SCRATCH", "FLAT_GLBL", "VGLOBAL", "VSCRATCH", "DPP", "SDWA"):
+    elif enc_name not in ("FLAT_GLOBAL", "FLAT_SCRATCH", "FLAT_GLBL", "DPP", "SDWA"):
       lines.append(f"class {enc_name}(Inst):")
       for fn, hi, lo in sort_fields(fields):
         if fn == "op":
