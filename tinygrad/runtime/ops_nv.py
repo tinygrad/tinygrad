@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref
+import os, ctypes, contextlib, re, functools, mmap, struct, array, sys, weakref, itertools
 assert sys.platform != 'win32'
 from typing import cast, ClassVar
 from dataclasses import dataclass
@@ -781,124 +781,81 @@ class NVProfiler:
 
   def _setup_pc_sampling(self):
     """Configure PC sampling hardware registers."""
-    # Query max TPCs per GPC from device
-    info_array = (nv_gpu.NV2080_CTRL_GR_INFO * 1)()
-    info_array[0].index = nv_gpu.NV2080_CTRL_GR_INFO_INDEX_LITTER_NUM_TPC_PER_GPC
-    params = nv_gpu.NV2080_CTRL_GR_GET_INFO_PARAMS(grInfoListSize=1, grInfoList=ctypes.addressof(info_array))
-    self.iface.rm_control(self.dev.subdevice, nv_gpu.NV2080_CTRL_CMD_GR_GET_INFO, params)
-    max_tpc_per_gpc = info_array[0].data
+    all_tpc_masks = [
+      self.iface.rm_control(self.dev.subdevice, nv_gpu.NV2080_CTRL_CMD_GR_GET_TPC_MASK, nv_gpu.NV2080_CTRL_GR_GET_TPC_MASK_PARAMS(gpcId=i)).tpcMask
+      for i in range(self.dev.num_gpcs)]
+    # fully disabled gpcs are not enumerated
+    tpc_masks = [mask for mask in all_tpc_masks if mask > 0]
+    enabled_gpcs = range(len(tpc_masks))
 
-    # Query TPC masks for each GPC to determine which TPCs are enabled
-    tpc_masks = []
-    for gpc_id in range(self.dev.num_gpcs):
-      params = nv_gpu.NV2080_CTRL_GR_GET_TPC_MASK_PARAMS(gpcId=gpc_id)
-      self.iface.rm_control(self.dev.subdevice, nv_gpu.NV2080_CTRL_CMD_GR_GET_TPC_MASK, params)
-      tpc_masks.append(params.tpcMask)
-    # Use first 11 GPCs (0-10) like CUPTI, even if some have no TPCs
-    # The profiler API expects contiguous GPC indices
-    enabled_gpcs = list(range(11))
-    num_gpcs = 11
-    if DEBUG >= 2: print(f"NVProfiler: using {num_gpcs} GPCs (0-10), masks={[hex(tpc_masks[i]) if i < len(tpc_masks) else '?' for i in range(11)]}")
+    if DEBUG >= 2: print(f"NVProfiler: using {len(enabled_gpcs)} GPCs {enabled_gpcs}")
 
-    # Initial GR_CTX write
-    self._reg_op(0x419bdc, 0x0, reg_type=1)
-
-    # Clear GPC registers and setup HS credits (mask=0x100 to only modify bit 8 like CUPTI)
-    self._reg_ops([(0x244000 + gpc * 0x200, 0x0) for gpc in enabled_gpcs], mask=0x100)
-
-    # HS credits use logical chiplet indices (0 to num_gpcs-1), not physical GPC numbers
-    hs_clear = nv_gpu.struct_NVB0CC_CTRL_HS_CREDITS_PARAMS(pmaChannelIdx=0, numEntries=num_gpcs + 7)
-    for i in range(num_gpcs): hs_clear.creditInfo[i] = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO(chipletType=2, chipletIndex=i, numCredits=0)
-    for i in range(6): hs_clear.creditInfo[num_gpcs+i] = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO(chipletType=1, chipletIndex=i, numCredits=0)
-    hs_clear.creditInfo[num_gpcs+6] = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO(chipletType=3, chipletIndex=0, numCredits=0)
-    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_SET_HS_CREDITS, hs_clear)
-
-    self._reg_op(0x24a620, 0x2000000, mask=0x2000000)
-    self._reg_ops([(0x244000 + gpc * 0x200, 0x100) for gpc in enabled_gpcs], mask=0x100)
+    self._reg_ops([(0x24a620, 0x2000000, 0x2000000)])
+    self._reg_ops([(0x244000 + gpc * 0x200, 0x100, 0x100) for gpc in enabled_gpcs])
 
     # Get and allocate HS credits
     total_credits = nv_gpu.struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS()
     self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_GET_TOTAL_HS_CREDITS, total_credits)
-    if DEBUG >= 2: print(f"NVProfiler: total_credits={total_credits.numCredits}")
+    print(f"NVProfiler: total_credits={total_credits.numCredits}")
 
-    # Allocate HS credits based on TPC count: 4 credits per enabled TPC (2 SMs * 2 credits)
-    # For disabled GPCs (mask=0), still assign full credits (24) like CUPTI does
-    hs_alloc = nv_gpu.struct_NVB0CC_CTRL_HS_CREDITS_PARAMS(pmaChannelIdx=0, numEntries=num_gpcs)
+    hs_alloc = nv_gpu.struct_NVB0CC_CTRL_HS_CREDITS_PARAMS(pmaChannelIdx=0, numEntries=len(enabled_gpcs))
     for i, gpc in enumerate(enabled_gpcs):
-      tpc_count = bin(tpc_masks[gpc]).count('1') if tpc_masks[gpc] else 6  # Treat disabled GPCs as having 6 TPCs
-      hs_alloc.creditInfo[i] = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO(chipletType=2, chipletIndex=i, numCredits=tpc_count * 4)
-    hs_alloc_x = self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_SET_HS_CREDITS, hs_alloc)
-    if DEBUG >= 2: print(f"NVProfiler: hs_alloc status={hs_alloc_x.statusInfo.status}")
+      hs_alloc.creditInfo[i] = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO(chipletType=nv_gpu.NVB0CC_CHIPLET_TYPE_GPC, chipletIndex=gpc,
+        numCredits=bin(tpc_masks[gpc]).count('1') * 4)
+    self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_SET_HS_CREDITS, hs_alloc)
 
     # Global PMASYS registers
-    self._reg_op((_PMASYS_CONTROL:=0x24a03c), 0x1)
-    self._reg_op((_PMASYS_CHANNEL_CONFIG:=0x24a62c), 0x0)
-    self._reg_ops([((_PMASYS_COUNTER_CFG:=0x24a700) + i * 4, 0x0) for i in [0, 2, 4, 1, 3, 5, 6, 7, 8]])
+    self._reg_ops([((_PMASYS_CONTROL:=0x24a03c), 0x1)])
     self._reg_ops([((_PMASYS_SRC_MASK:=0x24a65c) + i * 4, 0xffffffff) for i in [0, 2, 4, 1, 3, 5, 6, 8, 10, 7, 9, 11, 16, 18, 20, 17, 19, 21]])
-    self._reg_ops([((_PMASYS_FILTER:=0x24a6b8) + i * 4, 0x0) for i in [0, 2, 4, 1, 3, 5]])
     self._reg_ops([((_PMASYS_ENGINE_MASK:=0x24a010), 0xffffffff), (_PMASYS_ENGINE_MASK + 4, 0xffffffff)])
     self._reg_ops([((_PMASYS_TRIGGER:=0x24a640), 0x40), ((_PMASYS_CHANNEL_CONTROL:=0x24a620), 0x2000007)])
 
     # Per-GPC configuration (GPC_BASE=0x180000, GPC_STRIDE=0x4000)
     _GPC_BASE, _GPC_STRIDE = 0x180000, 0x4000
-    _GPC_PERF_EN, _GPC_PERF_CTL, _GPC_PERF_STATUS, _GPC_PERF_CFG = 0x0ec, 0x100, 0x108, 0x110
-    self._reg_ops([(_GPC_BASE + gpc * _GPC_STRIDE + off, val) for gpc in enabled_gpcs
-                   for off, val in [(_GPC_PERF_STATUS, 0x0), (_GPC_PERF_CFG, 0x0), (_GPC_PERF_CTL, 0x0), (_GPC_PERF_EN, 0x1)]])
-    self._reg_ops([(_GPC_BASE + gpc * _GPC_STRIDE + off + 0x200, val) for gpc in enabled_gpcs
-                   for off, val in [(_GPC_PERF_STATUS, 0x0), (_GPC_PERF_CFG, 0x0), (_GPC_PERF_CTL, 0x0), (_GPC_PERF_EN, 0x1)]])
+    _GPC_PERF_EN = 0x0ec
+    self._reg_ops([(_GPC_BASE + gpc * _GPC_STRIDE + _GPC_PERF_EN, 0x1) for gpc in enabled_gpcs])
+    self._reg_ops([(_GPC_BASE + gpc * _GPC_STRIDE + _GPC_PERF_EN + 0x200, 0x1) for gpc in enabled_gpcs])
 
     # Per-TPC configuration - skip disabled TPCs based on mask
     _TPC_PERF_BASE, _TPC_PERF_STRIDE = 0x508, 0x200
-    _TPC_PERF_CTL, _TPC_PERF_STATUS, _TPC_PERF_EN = 0x0, -0x8, -0x1c
+    _TPC_PERF_EN = -0x1c
     tpc_offsets = tuple(_TPC_PERF_BASE + i * _TPC_PERF_STRIDE for i in range(20))
     for gpc in enabled_gpcs:
       base, mask = _GPC_BASE + gpc * _GPC_STRIDE, tpc_masks[gpc]
       for i, tpc_base in enumerate(tpc_offsets):
-        if i < 18 and mask != 0 and not (mask & (1 << (i % max_tpc_per_gpc))): continue
-        self._reg_ops([(base + tpc_base + off, val) for off, val in [(_TPC_PERF_CTL, 0x0), (0x8, 0x0), (_TPC_PERF_STATUS, 0x0), (_TPC_PERF_EN, 0x1)]])
+        if i < 18 and mask != 0 and not (mask & (1 << (i % self.dev.num_tpc_per_gpc))): continue
+        self._reg_ops([(base + tpc_base + _TPC_PERF_EN, 0x1)])
 
-    self._reg_ops([((_GR_GPCS_SWDX_SPILL_UNIT:=0x419b04), 0x0), (_GR_GPCS_SWDX_SPILL_UNIT, 0x80808a)])
+    self._reg_ops([((_GR_GPCS_SWDX_SPILL_UNIT:=0x419b04), 0x80808a)])
 
     # TPC ID configuration - generated from TPC masks (2 SMs per TPC)
     _SM0_BASE, _SM1_BASE, _SM_STRIDE = 0x400, 0x1000, 0x200
-    _SM_PERF_EN, _SM_PERF_MODE, _SM_PERF_CTL, _SM_PERF_STATUS = 0x0ec, 0x06c, 0x100, 0x108
-    _SM_PCSAMPLER_CTR, _SM_PCSAMPLER_REMAP, _SM_PCSAMPLER_ID, _SM_PCSAMPLER_CFG = 0x0cc, 0x040, 0x128, 0x09c
+    _SM_PERF_EN, _SM_PERF_MODE, _SM_PERF_STATUS = 0x0ec, 0x06c, 0x108
+    _SM_PCSAMPLER_REMAP, _SM_PCSAMPLER_ID, _SM_PCSAMPLER_CFG = 0x040, 0x128, 0x09c
     for gpc in enabled_gpcs:
       if not (num_tpcs := bin(tpc_masks[gpc]).count('1')): continue
       for tpc in range(num_tpcs):
         for sm in range(2):
-          base = _GPC_BASE + gpc * _GPC_STRIDE + (_SM0_BASE if sm == 0 else _SM1_BASE) + (max_tpc_per_gpc - num_tpcs + tpc) * _SM_STRIDE
-          tpc_id = ((0x20 + gpc + (gpc >= 7)) << 5) + (max_tpc_per_gpc + 2 - num_tpcs) + tpc + sm * max_tpc_per_gpc
+          base = _GPC_BASE + gpc * _GPC_STRIDE + (_SM0_BASE if sm == 0 else _SM1_BASE) + (self.dev.num_tpc_per_gpc - num_tpcs + tpc) * _SM_STRIDE
+          tpc_id = ((0x20 + gpc + (gpc >= 7)) << 5) + (self.dev.num_tpc_per_gpc + 2 - num_tpcs) + tpc + sm * self.dev.num_tpc_per_gpc
           self._reg_ops(
-            [(base + _SM_PERF_EN, 0x1), (base + _SM_PERF_MODE, 0x2), (base + _SM_PERF_STATUS, 0x20), (base + _SM_PERF_CTL, 0x0)]
-            + [(base + _SM_PCSAMPLER_CTR + i * 4, 0x0) for i in range(5)]
-            + [(base + _SM_PCSAMPLER_REMAP + i * 4, 0x0) for i in [0, 2, 4, 1, 3, 5]]
-            + [(base + _SM_PCSAMPLER_REMAP, 0x19181716), (base + _SM_PCSAMPLER_REMAP + 8, 0x1d1c1b1a), (base + _SM_PCSAMPLER_REMAP + 16, 0x1e001f),
-               (base + _SM_PCSAMPLER_ID, tpc_id), (base + _SM_PCSAMPLER_CFG, 0x40005)])
+            [(base + _SM_PERF_EN, 0x1), (base + _SM_PERF_MODE, 0x2), (base + _SM_PERF_STATUS, 0x20),
+             (base + _SM_PCSAMPLER_REMAP, 0x19181716), (base + _SM_PCSAMPLER_REMAP + 8, 0x1d1c1b1a), (base + _SM_PCSAMPLER_REMAP + 16, 0x1e001f),
+             (base + _SM_PCSAMPLER_ID, tpc_id), (base + _SM_PCSAMPLER_CFG, 0x40005)])
 
     # Enable PC sampling (GR context register)
-    self._reg_op((_GR_GPCS_TPCS_SM_HWPM_CTL:=0x419bdc), 0x1, reg_type=1)
+    self._reg_ops([((_GR_GPCS_TPCS_SM_HWPM_CTL:=0x419bdc), 0x1)], reg_type=1)
 
-  def _reg_op(self, offset, value, reg_type=0, mask=0xffffffff):
-    """Execute single register write."""
-    params = nv_gpu.struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS(regOpCount=1)
-    params.regOps[0] = nv_gpu.struct_NV2080_CTRL_GPU_REG_OP(regOp=nv_gpu.NV2080_CTRL_GPU_REG_OP_WRITE_32, regType=reg_type, regOffset=offset, regValueLo=value, regAndNMaskLo=mask)
-    try: self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_EXEC_REG_OPS, params)
-    except RuntimeError as e:
-      if DEBUG >= 3: print(f"NVProfiler: reg_op {offset:#x}={value:#x} type={reg_type} failed: {e}")
-
-  def _reg_ops(self, ops, mask=0xffffffff):
-    """Execute batch of register writes (max 124 per call). ops can be (offset, value) or (offset, value, mask)."""
+  def _reg_ops(self, ops, reg_type=0):
+    """Execute batch of register writes. ops: [(offset, value), ...] or [(offset, value, mask), ...]"""
     for i in range(0, len(ops), 124):
       chunk = ops[i:i + 124]
       params = nv_gpu.struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS(regOpCount=len(chunk))
-      for j, op in enumerate(chunk):
-        offset, value = op[0], op[1]
-        op_mask = op[2] if len(op) > 2 else mask
-        params.regOps[j] = nv_gpu.struct_NV2080_CTRL_GPU_REG_OP(regOp=nv_gpu.NV2080_CTRL_GPU_REG_OP_WRITE_32, regOffset=offset, regValueLo=value, regAndNMaskLo=op_mask)
+      for j, (offset, value, *rest) in enumerate(chunk):
+        params.regOps[j] = nv_gpu.struct_NV2080_CTRL_GPU_REG_OP(regOp=nv_gpu.NV2080_CTRL_GPU_REG_OP_WRITE_32, regType=reg_type,
+          regOffset=offset, regValueLo=value, regAndNMaskLo=rest[0] if rest else 0xffffffff)
       try: self._rm_control(nv_gpu.NVB0CC_CTRL_CMD_EXEC_REG_OPS, params)
-      except RuntimeError as e:
-        if DEBUG >= 3: print(f"NVProfiler: reg_ops batch[{i}:{i+len(chunk)}] failed: {e}")
+      except RuntimeError: print("shit broke", ops)
 
   def _parse_pc_samples(self, data: bytes):
     """Parse PC sampling data from PMA stream."""
