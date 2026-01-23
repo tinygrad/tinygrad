@@ -1,244 +1,170 @@
 """Tests comparing sqtt.py PACKET_TYPES_L3/L4 against AMD's rocprof-trace-decoder binary."""
-import unittest
+import unittest, struct, ctypes, pickle
 from pathlib import Path
-import ctypes
 
-ROCPROF_LIB = "/usr/lib/librocprof-trace-decoder.so"
+ROCPROF_LIB = Path("/usr/lib/librocprof-trace-decoder.so")
+EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
 
-def _find_rw_segment():
-  """Find the rw- segment of the loaded library."""
+def _find_segment(perms: str):
+  """Find a segment of the loaded library with given permissions (e.g. 'rw-p', 'r--p')."""
   with open('/proc/self/maps', 'r') as f:
     for line in f:
-      if 'librocprof-trace-decoder.so' in line and ' rw-p ' in line:
+      if 'librocprof-trace-decoder.so' in line and f' {perms} ' in line:
         parts = line.split()
-        rw_base = int(parts[0].split('-')[0], 16)
-        rw_file_offset = int(parts[2], 16)
-        return rw_base, rw_file_offset
+        return int(parts[0].split('-')[0], 16), int(parts[2], 16)
   return None, None
+
+def _read_array(file_offset: int, count: int):
+  """Read an array of uint8 at file_offset from the loaded library."""
+  base, seg_offset = _find_segment('rw-p')
+  if base is None: return None
+  return list((ctypes.c_uint8 * count).from_address(base + (file_offset - seg_offset)))
+
+def _load_lib():
+  if not ROCPROF_LIB.exists(): return False
+  ctypes.CDLL(str(ROCPROF_LIB))
+  return True
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RDNA EXTRACTION (nibble-based format)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def extract_bit_tables():
-  """Extract bit budget tables by loading librocprof-trace-decoder.so at runtime.
-
-  Returns (layout2, layout3, layout4). CDNA uses a different 16-bit header format, not nibble-based.
-  """
-  if not Path(ROCPROF_LIB).exists():
-    return None, None, None
-
-  ctypes.CDLL(ROCPROF_LIB)
-  rw_base, rw_file_offset = _find_rw_segment()
-  if rw_base is None:
-    return None, None, None
-
-  # Bit tables at file offsets 0x2d220, 0x2d280, 0x2d2c0
-  layout2 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d220 - rw_file_offset)))
-  layout3 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d280 - rw_file_offset)))
-  layout4 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d2c0 - rw_file_offset)))
-  return layout2, layout3, layout4
-
-def _find_ro_segment():
-  """Find the r--p segment containing .rodata of the loaded library."""
-  with open('/proc/self/maps', 'r') as f:
-    for line in f:
-      if 'librocprof-trace-decoder.so' in line and ' r--p ' in line:
-        parts = line.split()
-        base = int(parts[0].split('-')[0], 16)
-        file_offset = int(parts[2], 16)
-        # The delta table is at file offset 0x26dc0, which is in .rodata at 0x26000
-        if file_offset <= 0x26dc0:
-          return base, file_offset
-  return None, None
+  """Extract bit budget tables. Returns (layout2, layout3, layout4) or None."""
+  if not _load_lib(): return None
+  return _read_array(0x2d220, 32), _read_array(0x2d280, 32), _read_array(0x2d2c0, 32)
 
 def extract_delta_fields():
-  """Extract delta bitfield tables from .rodata section.
+  """Extract delta bitfield tables. Returns (layout2, layout3, layout4) dicts mapping type_id -> (lo, hi)."""
+  if not _load_lib(): return None
+  ro_base, ro_offset = _find_segment('r--p')
+  if ro_base is None: return None
 
-  Returns (layout2_table, layout3_table, layout4_table) where each is dict mapping type_id -> (delta_lo, delta_hi).
-  The delta field is at bits[delta_hi-1:delta_lo], extracted as: (reg >> delta_lo) & ((1 << (delta_hi - delta_lo)) - 1)
-  """
-  if not Path(ROCPROF_LIB).exists():
-    return None, None, None
+  def read_table(file_offset, num_entries):
+    addr = ro_base + (file_offset - ro_offset)
+    data = bytes((ctypes.c_uint8 * (num_entries * 12)).from_address(addr))
+    return {type_id: (lo, hi) for j in range(0, len(data), 12)
+            for type_id, lo, hi in [struct.unpack('<III', data[j:j+12])] if type_id < 32}
 
-  ctypes.CDLL(ROCPROF_LIB)
-  ro_base, ro_file_offset = _find_ro_segment()
-  if ro_base is None:
-    return None, None, None
-
-  import struct
-
-  def read_table(file_offset, num_entries=25):
-    table_addr = ro_base + (file_offset - ro_file_offset)
-    table_size = num_entries * 12
-    data = bytes((ctypes.c_uint8 * table_size).from_address(table_addr))
-    delta_fields = {}
-    for j in range(0, table_size, 12):
-      type_id, delta_lo, delta_hi = struct.unpack('<III', data[j:j+12])
-      if type_id < 32:
-        delta_fields[type_id] = (delta_lo, delta_hi)
-    return delta_fields
-
-  # Delta tables: Layout 2 at 0x26800, Layout 3 at 0x26dc0, Layout 4 at 0x27300
-  layout2 = read_table(0x26800, 24)  # L2 has 24 entries (no type 25)
-  layout3 = read_table(0x26dc0, 25)
-  layout4 = read_table(0x27300, 27)  # L4 has more entries
-  return layout2, layout3, layout4
-
-def _read_encodings_from_vector(rw_base, rw_file_offset, vec_offset):
-  """Read packet encodings from a registration vector at given file offset."""
-  vec_start_addr = rw_base + (vec_offset - rw_file_offset)
-  vec_end_addr = rw_base + (vec_offset + 8 - rw_file_offset)
-
-  vec_start = ctypes.c_void_p.from_address(vec_start_addr).value
-  vec_end = ctypes.c_void_p.from_address(vec_end_addr).value
-  if not vec_start or not vec_end:
-    return {}
-
-  # Each entry is 32 bytes: type_id at offset 0, pattern_start at 8, pattern_end at 16
-  encodings = {}
-  for i in range((vec_end - vec_start) // 32):
-    entry_addr = vec_start + i * 32
-    type_id = ctypes.c_uint8.from_address(entry_addr).value
-    pattern_start = ctypes.c_void_p.from_address(entry_addr + 8).value
-    pattern_end = ctypes.c_void_p.from_address(entry_addr + 16).value
-
-    if pattern_start and pattern_end:
-      pattern_len = pattern_end - pattern_start
-      if 0 < pattern_len <= 8:
-        pattern = list((ctypes.c_uint8 * pattern_len).from_address(pattern_start))
-        mask = sum(1 << j for j in range(pattern_len))
-        value = sum(b << j for j, b in enumerate(pattern))
-        encodings[type_id] = (mask, value)
-
-  return encodings
+  return read_table(0x26800, 24), read_table(0x26dc0, 25), read_table(0x27300, 27)
 
 def extract_packet_encodings():
-  """Extract packet type encodings from runtime packet type registrations.
+  """Extract packet encodings. Returns (L2, L3, L4) dicts mapping type_id -> (mask, value)."""
+  if not _load_lib(): return None
+  rw_base, rw_offset = _find_segment('rw-p')
+  if rw_base is None: return None
 
-  Returns (L2_encodings, L3_encodings, L4_encodings) - each is dict mapping type_id -> (mask, value).
-  L2 and L4 have layout-specific overrides on top of L3 base encodings.
-  """
-  if not Path(ROCPROF_LIB).exists():
-    return None, None, None
+  # Read base encodings from registration vector at 0x2d340
+  vec_start = ctypes.c_void_p.from_address(rw_base + (0x2d340 - rw_offset)).value
+  vec_end = ctypes.c_void_p.from_address(rw_base + (0x2d348 - rw_offset)).value
+  base = {}
+  if vec_start and vec_end:
+    for i in range((vec_end - vec_start) // 32):
+      addr = vec_start + i * 32
+      type_id = ctypes.c_uint8.from_address(addr).value
+      pat_start = ctypes.c_void_p.from_address(addr + 8).value
+      pat_end = ctypes.c_void_p.from_address(addr + 16).value
+      if pat_start and pat_end and 0 < (n := pat_end - pat_start) <= 8:
+        pat = list((ctypes.c_uint8 * n).from_address(pat_start))
+        base[type_id] = (sum(1 << j for j in range(n)), sum(b << j for j, b in enumerate(pat)))
 
-  ctypes.CDLL(ROCPROF_LIB)
-  rw_base, rw_file_offset = _find_rw_segment()
-  if rw_base is None:
-    return None, None, None
+  return {**base, 17: (0x7f, 0x51), 25: (0x7f, 0x31)}, base, {**base}  # L2 has overrides
 
-  # Base packet registrations vector at file offset 0x2d340 (shared by all layouts)
-  base_encodings = _read_encodings_from_vector(rw_base, rw_file_offset, 0x2d340)
+# ═══════════════════════════════════════════════════════════════════════════════
+# CDNA EXTRACTION (16-bit header format)
+# ═══════════════════════════════════════════════════════════════════════════════
 
-  # L2 overrides: type 17 and 25 have different encodings (from ghidra lines 25633-25657)
-  # Type 17: pattern [1,0,0,0,1,0,1] = mask 0x7f, value 0x51
-  # Type 25: pattern [1,0,0,0,1,1,0] = mask 0x7f, value 0x31
-  l2_encodings = {**base_encodings, 17: (0x7f, 0x51), 25: (0x7f, 0x31)}
+def extract_cdna_packet_sizes():
+  """Extract CDNA pkt_fmt -> size mapping by running rocprof decoder to populate its hash table."""
+  from extra.assembly.amd.test.test_sqtt_examples import run_rocprof_decoder
 
-  # L3 uses base encodings directly
-  l3_encodings = base_encodings
+  if not (pkl_path := next((EXAMPLES_DIR / "gfx950").glob("*.pkl"), None)): return None
+  with open(pkl_path, "rb") as f: data = pickle.load(f)
+  sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+  prg = next((e for e in data if type(e).__name__ == "ProfileProgramEvent"), None)
+  if not sqtt_events or not prg: return None
 
-  # L4 uses same encodings as L3 - only field positions/sizes differ
-  l4_encodings = {**base_encodings}
+  # Run decoder to trigger hash table initialization
+  run_rocprof_decoder([e.blob for e in sqtt_events], prg.lib, prg.base, "gfx950")
 
-  return l2_encodings, l3_encodings, l4_encodings
+  # Extract hash table: head at 0x2d4f0, nodes are 16 bytes (next[8], key[4], value[4])
+  rw_base, rw_offset = _find_segment('rw-p')
+  if not (head := ctypes.c_void_p.from_address(rw_base + (0x2d4f0 - rw_offset)).value if rw_base else None): return None
 
-@unittest.skipUnless(Path(ROCPROF_LIB).exists(), "rocprof-trace-decoder not installed")
+  pkt_sizes, node, seen = {}, head, set()
+  while node and node not in seen and len(pkt_sizes) < 20:
+    seen.add(node)
+    key, val = ctypes.c_uint32.from_address(node + 8).value, ctypes.c_uint32.from_address(node + 12).value
+    if key < 16 and val in (0x10, 0x20, 0x30, 0x40): pkt_sizes[key] = {0x10: 2, 0x20: 4, 0x30: 6, 0x40: 8}[val]
+    node = ctypes.c_void_p.from_address(node).value
+  return pkt_sizes if len(pkt_sizes) == 16 else None
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TESTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
 class TestSQTTMatchesBinary(unittest.TestCase):
-  def _test_bit_counts_match_layout(self, layout_num: int):
+  def test_bit_counts_match_layout3(self): self._test_bit_counts(3)
+  def test_bit_counts_match_layout4(self): self._test_bit_counts(4)
+  def test_encodings_match_layout3(self): self._test_encodings(3)
+  def test_encodings_match_layout4(self): self._test_encodings(4)
+  def test_delta_fields_match_layout3(self): self._test_delta_fields(3)
+  def test_delta_fields_match_layout4(self): self._test_delta_fields(4)
+
+  def test_cdna_packet_sizes(self):
+    """Extract and verify CDNA pkt_fmt -> size mapping from rocprof's hash table."""
+    if not (EXAMPLES_DIR / "gfx950").exists(): self.skipTest("no CDNA examples")
+    pkt_sizes = extract_cdna_packet_sizes()
+    self.assertIsNotNone(pkt_sizes, "failed to extract CDNA packet sizes")
+    expected = {0: 2, 1: 8, 2: 8, 3: 4, 4: 2, 5: 6, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 8, 12: 6, 13: 4, 14: 8, 15: 6}
+    for pkt_fmt, size in expected.items():
+      with self.subTest(pkt_fmt=pkt_fmt): self.assertEqual(pkt_sizes.get(pkt_fmt), size)
+
+  def _test_bit_counts(self, layout: int):
+    if not (tables := extract_bit_tables()): self.skipTest("rocprof-trace-decoder not installed")
     from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    layout2, layout3, layout4 = extract_bit_tables()
-    layout = {3: layout3, 4: layout4}[layout_num]
-    packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
-
-    for type_id, pkt_cls in packet_types.items():
-      expected_bits, actual_bits = layout[type_id], pkt_cls._size_nibbles * 4
+    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
       with self.subTest(packet=pkt_cls.__name__):
-        self.assertEqual(actual_bits, expected_bits, f"{pkt_cls.__name__}: {actual_bits} bits != expected {expected_bits}")
+        self.assertEqual(pkt_cls._size_nibbles * 4, tables[layout - 2][type_id])
 
-  # NOTE: CDNA uses a completely different 16-bit header format, not nibble-based - not tested here
-  def test_bit_counts_match_layout3(self): self._test_bit_counts_match_layout(3)
-  def test_bit_counts_match_layout4(self): self._test_bit_counts_match_layout(4)
-
-  def _test_encodings_match_layout(self, layout_num: int):
-    """Verify each PACKET_TYPE encoding matches rocprof-trace-decoder for given layout."""
+  def _test_encodings(self, layout: int):
+    if not (encodings := extract_packet_encodings()): self.skipTest("rocprof-trace-decoder not installed")
     from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
-
-    l2_enc, l3_enc, l4_enc = extract_packet_encodings()
-    encodings = {3: l3_enc, 4: l4_enc}[layout_num]
-
-    for type_id, pkt_cls in packet_types.items():
-      enc = (pkt_cls.encoding.mask, pkt_cls.encoding.default)
+    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
       with self.subTest(packet=pkt_cls.__name__):
-        self.assertIn(type_id, encodings, f"{pkt_cls.__name__}: type_id {type_id} not in binary")
-        self.assertEqual(enc, encodings[type_id],
-          f"{pkt_cls.__name__}: encoding mismatch (ours=0x{enc[0]:02x}/0x{enc[1]:02x}, binary=0x{encodings[type_id][0]:02x}/0x{encodings[type_id][1]:02x})")
+        self.assertEqual((pkt_cls.encoding.mask, pkt_cls.encoding.default), encodings[layout - 2][type_id])
 
-  # NOTE: CDNA uses a completely different 16-bit header format, not nibble-based - not tested here
-  def test_encodings_match_layout3(self): self._test_encodings_match_layout(3)
-  def test_encodings_match_layout4(self): self._test_encodings_match_layout(4)
-
-  def _test_delta_fields_match_layout(self, layout_num: int):
+  def _test_delta_fields(self, layout: int):
+    if not (deltas := extract_delta_fields()): self.skipTest("rocprof-trace-decoder not installed")
     from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
-    packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
-
-    layout2_deltas, layout3_deltas, layout4_deltas = extract_delta_fields()
-    delta_fields = {3: layout3_deltas, 4: layout4_deltas}[layout_num]
-
-    for type_id, pkt_cls in packet_types.items():
-      if type_id not in delta_fields:
-        continue
-      expected_lo, expected_hi = delta_fields[type_id]
-      delta_field = getattr(pkt_cls, 'delta', None)
-      if delta_field is None:
-        # NOP has no delta field, rocprof has (0, 0)
-        actual_lo, actual_hi = 0, 0
-      else:
-        actual_lo = delta_field.lo
-        # Our BitField hi is inclusive, rocprof's is exclusive, so convert
-        actual_hi = delta_field.hi + 1
-      with self.subTest(packet=pkt_cls.__name__):
-        self.assertEqual((actual_lo, actual_hi), (expected_lo, expected_hi),
-          f"{pkt_cls.__name__}: delta bits[{actual_hi}:{actual_lo}] != expected bits[{expected_hi}:{expected_lo}]")
-
-  # NOTE: CDNA uses a completely different 16-bit header format, not nibble-based - not tested here
-  def test_delta_fields_match_layout3(self): self._test_delta_fields_match_layout(3)
-  def test_delta_fields_match_layout4(self): self._test_delta_fields_match_layout(4)
+    for type_id, pkt_cls in {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout].items():
+      if type_id not in deltas[layout - 2]: continue
+      delta = getattr(pkt_cls, 'delta', None)
+      actual = (0, 0) if delta is None else (delta.lo, delta.hi + 1)
+      with self.subTest(packet=pkt_cls.__name__): self.assertEqual(actual, deltas[layout - 2][type_id])
 
 if __name__ == "__main__":
-  layout2, layout3, layout4 = extract_bit_tables()
-  l2_enc, l3_enc, l4_enc = extract_packet_encodings()
-  delta2, delta3, delta4 = extract_delta_fields()
+  tables = extract_bit_tables()
+  encodings = extract_packet_encodings()
+  deltas = extract_delta_fields()
 
-  TYPE_NAMES = {
-    1: 'VALUINST', 2: 'VMEMEXEC', 3: 'ALUEXEC', 4: 'IMMEDIATE', 5: 'IMMEDIATE_MASK',
-    6: 'WAVERDY', 7: 'TS_DELTA_S8_W3', 8: 'WAVEEND', 9: 'WAVESTART', 10: 'TS_DELTA_S5_W2',
-    11: 'WAVEALLOC', 12: 'TS_DELTA_S5_W3', 13: 'PERF', 14: 'UTILCTR', 15: 'TS_DELTA_SHORT',
-    16: 'NOP', 17: 'TS_WAVE_STATE', 18: 'EVENT', 19: 'EVENT_BIG', 20: 'REG',
-    21: 'SNAPSHOT', 22: 'TS_DELTA_OR_MARK', 23: 'LAYOUT_HEADER', 24: 'INST', 25: 'UNK_25',
-    26: 'UNK_26', 27: 'UNK_27', 28: 'UNK_28',
-  }
+  TYPE_NAMES = {1: 'VALUINST', 2: 'VMEMEXEC', 3: 'ALUEXEC', 4: 'IMMEDIATE', 5: 'IMMEDIATE_MASK', 6: 'WAVERDY',
+    7: 'TS_DELTA_S8_W3', 8: 'WAVEEND', 9: 'WAVESTART', 10: 'TS_DELTA_S5_W2', 11: 'WAVEALLOC', 12: 'TS_DELTA_S5_W3',
+    13: 'PERF', 14: 'UTILCTR', 15: 'TS_DELTA_SHORT', 16: 'NOP', 17: 'TS_WAVE_STATE', 18: 'EVENT', 19: 'EVENT_BIG',
+    20: 'REG', 21: 'SNAPSHOT', 22: 'TS_DELTA_OR_MARK', 23: 'LAYOUT_HEADER', 24: 'INST', 25: 'UNK_25'}
 
-  print("L2:", layout2)
-  print("L3:", layout3)
-  print("L4:", layout4)
-
-  if l3_enc and layout3:
-    print("\nPacket type registrations from rocprof-trace-decoder:\n")
-    print(f"{'TypeID':>6} {'Name':>18} {'L2 enc':>12} {'L3 enc':>12} {'L4 enc':>12} {'L2':>4} {'L3':>4} {'L4':>4} {'L2 delta':>12} {'L3 delta':>12} {'L4 delta':>12}")
+  print("L2:", tables[0], "\nL3:", tables[1], "\nL4:", tables[2])
+  if encodings and tables:
+    print(f"\n{'TypeID':>6} {'Name':>18} {'L2 enc':>12} {'L3 enc':>12} {'L4 enc':>12} {'L2':>4} {'L3':>4} {'L4':>4} {'L2 delta':>12} {'L3 delta':>12} {'L4 delta':>12}")
     print("-" * 140)
-    all_type_ids = sorted(set(l2_enc.keys()) | set(l3_enc.keys()) | set(l4_enc.keys()))
-    for type_id in all_type_ids:
+    for type_id in sorted(set(encodings[0]) | set(encodings[1]) | set(encodings[2])):
       name = TYPE_NAMES.get(type_id, f'UNK_{type_id}')
-      l2 = layout2[type_id] if type_id < len(layout2) else 0
-      l3 = layout3[type_id] if type_id < len(layout3) else 0
-      l4 = layout4[type_id] if type_id < len(layout4) else 0
-      d2 = delta2.get(type_id, (0, 0)) if delta2 else (0, 0)
-      d3 = delta3.get(type_id, (0, 0)) if delta3 else (0, 0)
-      d4 = delta4.get(type_id, (0, 0)) if delta4 else (0, 0)
-      d2_str = f"[{d2[1]-1}:{d2[0]}]" if d2[1] > d2[0] else "-"
-      d3_str = f"[{d3[1]-1}:{d3[0]}]" if d3[1] > d3[0] else "-"
-      d4_str = f"[{d4[1]-1}:{d4[0]}]" if d4[1] > d4[0] else "-"
-      l2_enc_str = f"0x{l2_enc[type_id][0]:02x}/0x{l2_enc[type_id][1]:02x}" if type_id in l2_enc else "-"
-      l3_enc_str = f"0x{l3_enc[type_id][0]:02x}/0x{l3_enc[type_id][1]:02x}" if type_id in l3_enc else "-"
-      l4_enc_str = f"0x{l4_enc[type_id][0]:02x}/0x{l4_enc[type_id][1]:02x}" if type_id in l4_enc else "-"
-      print(f"{type_id:6d} {name:>18} {l2_enc_str:>12} {l3_enc_str:>12} {l4_enc_str:>12} {l2:4d} {l3:4d} {l4:4d} {d2_str:>12} {d3_str:>12} {d4_str:>12}")
+      bits = [tables[i][type_id] if type_id < len(tables[i]) else 0 for i in range(3)]
+      enc_strs = [f"0x{encodings[i][type_id][0]:02x}/0x{encodings[i][type_id][1]:02x}" if type_id in encodings[i] else "-" for i in range(3)]
+      delta_strs = [f"[{d[1]-1}:{d[0]}]" if (d := deltas[i].get(type_id, (0, 0)))[1] > d[0] else "-" for i in range(3)]
+      print(f"{type_id:6d} {name:>18} {enc_strs[0]:>12} {enc_strs[1]:>12} {enc_strs[2]:>12} {bits[0]:4d} {bits[1]:4d} {bits[2]:4d} {delta_strs[0]:>12} {delta_strs[1]:>12} {delta_strs[2]:>12}")
+
+  cdna = extract_cdna_packet_sizes()
+  if cdna: print(f"\nCDNA packet sizes: {cdna}")
 
   unittest.main()
