@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """Tests for SQTT packet decoding using real captured examples."""
-import pickle, unittest, ctypes, threading
+import pickle, unittest
 from pathlib import Path
 from tinygrad.helpers import DEBUG
-from tinygrad.runtime.autogen import rocprof
-from tinygrad.runtime.support.elf import elf_loader
-from extra.assembly.amd.decode import decode_inst
-from extra.assembly.amd.autogen.rdna3.ins import SOPP
-from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
                                      ALUEXEC, VMEMEXEC, PACKET_TYPES, InstOp, print_packets)
-from extra.assembly.amd.test.helpers import TARGET_TO_ARCH
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
 # INST ops for non-traced SIMDs (excluded from instruction count)
