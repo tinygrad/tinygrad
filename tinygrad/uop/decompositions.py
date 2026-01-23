@@ -2,7 +2,7 @@ from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import polyN, DISABLE_FAST_IDIV
+from tinygrad.helpers import flatten, polyN, DISABLE_FAST_IDIV
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
 
@@ -316,18 +316,38 @@ def threefry2x32(x: UOp, key: UOp):
   return xr[1].cast(dtypes.uint64) * 2**32 | xr[0].cast(dtypes.uint64)
 
 # ***** long as 2 ints *****
+
+def unpack32(v): return v & 0xFFFF, v >> 16
+
+# see AOCP section 4.3.1
 def l2i(op: Ops, dt: DType, a0: UOp, a1: UOp, b0: UOp, b1: UOp):
+  zero, one = a0.const_like(0), a0.const_like(1)
   match op:
-    # TODO: both of these need to look at b1 too...
-    case Ops.SHL: return a0 << b0, (a1 << b0) | (a0 >> (32 - b0))
-    case Ops.SHR: return a0 >> b0 | (a1 << (32 - b0)), a1 >> b0
-    case Ops.ADD:
-      carry = (low:=a0+b0).bitcast(dtypes.uint) < a0.bitcast(dtypes.uint)
-      return low, (a1 + b1).replace(dtype=dt) + carry.cast(dt)
+    case Ops.SHL:
+      lo, hi = a0 << (b0_mod:=b0 & 31), (a1 << b0_mod) | ((a0 >> 1) >> (31 - b0_mod))
+      return (b0 >= 32).where(zero, lo), (b0 >= 32).where(lo, hi)
+    case Ops.SHR:
+      lo, hi = (a0 >> (b0_mod:=b0 & 31)) | ((a1 << 1) << (31 - b0_mod)), a1 >> b0_mod
+      return (b0 >= 32).where(hi, lo), (b0 >= 32).where(zero, hi)
+    case Ops.ADD: return (low:=a0+b0), (a1 + b1).replace(dtype=dt) + (low.bitcast(dtypes.uint) < a0.bitcast(dtypes.uint)).cast(dt)
+    case Ops.SUB: return a0 - b0, a1 - b1 - (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)).cast(dt)
     case Ops.MUL:
-      a00, a01, b00, b01 = a0.bitcast(dtypes.uint) & 0xFFFF, a0.bitcast(dtypes.uint) >> 16, b0.bitcast(dtypes.uint) & 0xFFFF, b0.bitcast(dtypes.uint) >> 16
+      (a00, a01), (b00, b01) = unpack32(a0), unpack32(b0)
       mid = l2i(Ops.ADD, dt, ((a00*b01)<<16).bitcast(dt), ((a00*b01)>>16).bitcast(dt), ((a01*b00)<<16).bitcast(dt), ((a01*b00)>>16).bitcast(dt))
       return l2i(Ops.ADD, dt, *mid, (a00*b00).bitcast(dt), (a01*b01).bitcast(dt) + a0*b1 + a1*b0)
+    case Ops.IDIV | Ops.MOD:
+      q, r = (zero, zero), (zero, zero)
+      for i in range(63, -1, -1):  # MSB first
+        r = l2i(Ops.SHL, dtypes.uint, *r, zero, one)
+        r = (r[0] | l2i(Ops.SHR, dtypes.uint, a0, a1, zero, UOp.const(dtypes.uint, i))[0] & one), r[1]
+        cond = l2i(Ops.CMPLT, dtypes.uint, *r, b0, b1).logical_not()  # r >= divisor
+        diff = l2i(Ops.SUB, dtypes.uint, *r, b0, b1)
+        q = ((q[0] | cond.cast(dt) << (i % 32), q[1]) if i < 32 else (q[0], q[1] | cond.cast(dt) << (i % 32)))
+        r = (cond.where(diff[0], r[0]), cond.where(diff[1], r[1]))
+      return r if op == Ops.MOD else q
+    case Ops.CMPLT: return (a1 < b1) | ((a1.eq(b1)) & (a0.bitcast(dtypes.uint) < b0.bitcast(dtypes.uint)))
+    case Ops.CMPEQ: return a0.eq(b0) & a1.eq(b1)
+    case Ops.CMPNE: return a0.ne(b0) | a1.ne(b1)
     case Ops.XOR | Ops.OR | Ops.AND: return UOp(op, dt, src=(a0, b0)), UOp(op, dt, src=(a1, b1))
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
@@ -364,10 +384,11 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
       c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
     if not DISABLE_FAST_IDIV:
       pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d", vec=False), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
-      pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
+      # exclude long/ulong - those are handled by l2i decomposition
+      pat += [(UPat.var("x", tuple(dt for dt in dtypes.ints if dt not in (dtypes.long, dtypes.ulong)))%UPat.var("d"), lambda x, d: x-d*(x//d))]
   if Ops.NEG in ops:
-    pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG) if is_dtype_supported(x.dtype, ctx) else None)]
-    if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y) if is_dtype_supported(x.dtype, ctx) else None)]
+    pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG))]
+    if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y))]
   if Ops.CMPLT in ops:
     # These are late rewrites because simplex expects equalities to be a certain format
     pat += [
@@ -389,8 +410,13 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
              lambda x: x.replace(dtype=l2i_dt(x.dtype.base).ptr(x.dtype.size * 2)) if x.dtype.base in (dtypes.long, dtypes.ulong) else None)]
     pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', (dtypes.long, dtypes.ulong))), name='st'),
              lambda st,idx,val: st.replace(src=(idx, val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
-    pat += [(UPat(GroupOp.ALU, (dtypes.long, dtypes.ulong), src=(UPat.var('a'), UPat.var('b')), name="x"),
+    pat += [(UPat(GroupOp.Comparison, src=(UPat.var('a', (dtypes.long, dtypes.ulong)), UPat.var('b', (dtypes.long, dtypes.ulong))), name="x"),
+             lambda a,b,x: l2i(x.op, dt:=l2i_dt(a.dtype), a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt)))]
+    pat += [(UPat(GroupOp.ALU - GroupOp.Comparison, (dtypes.long, dtypes.ulong), src=(UPat.var('a'), UPat.var('b')), name="x"),
              lambda a,b,x: None if x.tag is None else l2i(x.op, dt:=l2i_dt(x.dtype), a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt))[x.tag])]
     pat += [(UPat(Ops.LOAD, (dtypes.long, dtypes.ulong), src=(UPat.var('idx'),), name='x'),
              lambda x,idx: None if x.tag is None else x.replace(dtype=l2i_dt(x.dtype), src=(_idx(idx, x.tag),)))]
+    # split 64-bit constants into two 32-bit parts
+    pat += [(UPat(Ops.CONST, (dtypes.long, dtypes.ulong), name='x'),
+             lambda x: None if x.tag is None else UOp.const(l2i_dt(x.dtype), (x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF)))]
   return PatternMatcher(pat)
