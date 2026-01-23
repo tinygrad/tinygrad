@@ -10,7 +10,7 @@ os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
 from extra.assembly.amd.emu import WaveState, decode_program, WAVE_SIZE, set_valid_mem_ranges, LDSMem
-from extra.assembly.amd.test.helpers import KernelInfo
+from extra.assembly.amd.test.helpers import KernelInfo, get_target
 from extra.assembly.amd.test.bench_emu import REMU_PATH
 
 def _is_f32_nan(bits: int) -> bool:
@@ -284,10 +284,13 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   ok, msg, _ = run_single_kernel(kernel, n_lanes, args_ptr, global_size, program, max_steps, debug, trace_len)
   return ok, msg
 
-def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
+def get_kernels_from_tinygrad(op_fn, arch:str="rdna3") -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.runtime.support.elf import elf_loader
+  from tinygrad.runtime.support.compiler_amd import HIPCompiler
+
+  compiler = HIPCompiler(get_target(arch))
 
   out = op_fn(Tensor)
   sched = out.schedule()
@@ -309,8 +312,8 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], 
           src_data = bytes(src_buf.base._buf)
           buf_data[dst_id] = src_data
     elif ei.ast.op.name == 'SINK':
-      if lowered.prg and lowered.prg.p.lib:
-        lib = bytes(lowered.prg.p.lib)
+      if lowered.prg:
+        lib = compiler.compile(lowered.prg.p.src)
         _, sections, _ = elf_loader(lib)
         for sec in sections:
           if sec.name == '.text':

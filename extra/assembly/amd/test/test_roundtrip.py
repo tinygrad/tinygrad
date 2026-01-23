@@ -83,10 +83,8 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     arch = self.arch
 
     from extra.assembly.amd.test.test_compare_emulators import get_kernels_from_tinygrad
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
-    kernels, _, _ = get_kernels_from_tinygrad(op_fn)
-    compiler = HIPCompiler(get_target(arch))
+    kernels, _, _ = get_kernels_from_tinygrad(op_fn, arch)
 
     # First pass: decode all instructions and collect info
     decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
@@ -234,7 +232,6 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
   # Fused ops
   def test_fma(self): self._test_kernel_roundtrip(lambda T: (T([1.0, 2.0]) * T([3.0, 4.0]) + T([5.0, 6.0])))
 
-@unittest.skip("RDNA4 decode roundtrip not yet supported")
 class TestTinygradKernelRoundtripRDNA4(TestTinygradKernelRoundtrip): arch = 'rdna4'
 
 @unittest.skip("CDNA decode roundtrip not yet supported")
