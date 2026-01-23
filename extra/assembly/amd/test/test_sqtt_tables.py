@@ -74,33 +74,20 @@ def extract_packet_encodings():
 
 @unittest.skipUnless(Path(ROCPROF_LIB).exists(), "rocprof-trace-decoder not installed")
 class TestSQTTMatchesBinary(unittest.TestCase):
-  def test_bit_counts_match_layout3(self):
-    """Verify PACKET_TYPES bit counts match rocprof-trace-decoder layout 3."""
-    from extra.assembly.amd.sqtt import PACKET_TYPES
-
-    _, layout3, _ = extract_bit_tables()
-
-    for type_id, pkt_cls in PACKET_TYPES.items():
-      expected_bits = layout3[type_id]
-      actual_bits = pkt_cls._size_nibbles * 4
-      with self.subTest(packet=pkt_cls.__name__):
-        self.assertEqual(actual_bits, expected_bits,
-          f"{pkt_cls.__name__}: {actual_bits} bits != expected {expected_bits}")
-
-  def test_bit_counts_match_layout4(self):
-    """Verify sqtt.py PACKET_TYPES with L4 overrides match rocprof-trace-decoder layout 4."""
-    from extra.assembly.amd.sqtt import PACKET_TYPES, _LAYOUT4_SIZE_OVERRIDES
-
-    _, _, layout4 = extract_bit_tables()
+  def _test_bit_counts_match_layout(self, layout_num: int):
+    from extra.assembly.amd.sqtt import PACKET_TYPES, _LAYOUT4_CLASS_OVERRIDES
+    layout2, layout3, layout4 = extract_bit_tables()
+    layout = {2: layout2, 3: layout3, 4: layout4}[layout_num]
+    overrides = _LAYOUT4_CLASS_OVERRIDES if layout_num == 4 else {}
 
     for type_id, pkt_cls in PACKET_TYPES.items():
-      expected_bits = layout4[type_id]
-      # Use L4 size override if available, otherwise use default
-      nib_count = _LAYOUT4_SIZE_OVERRIDES.get(pkt_cls, pkt_cls._size_nibbles)
-      actual_bits = nib_count * 4
+      actual_cls = overrides.get(type_id, pkt_cls)
+      expected_bits, actual_bits = layout[type_id], actual_cls._size_nibbles * 4
       with self.subTest(packet=pkt_cls.__name__):
-        self.assertEqual(actual_bits, expected_bits,
-          f"{pkt_cls.__name__}: {actual_bits} bits != expected {expected_bits}")
+        self.assertEqual(actual_bits, expected_bits, f"{pkt_cls.__name__}: {actual_bits} bits != expected {expected_bits}")
+
+  def test_bit_counts_match_layout3(self): self._test_bit_counts_match_layout(3)
+  def test_bit_counts_match_layout4(self): self._test_bit_counts_match_layout(4)
 
   def test_encodings_exist_in_binary(self):
     """Verify each PACKET_TYPE encoding exists in rocprof-trace-decoder."""
