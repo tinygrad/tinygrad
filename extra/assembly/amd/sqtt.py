@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Iterator
 from enum import Enum
 from extra.assembly.amd.dsl import BitField, FixedBitField, bits
-from tinygrad.helpers import getenv
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIELD ENUMS
@@ -98,6 +97,7 @@ class InstOp(Enum):
 
 class InstOpL4(Enum):
   """SQTT instruction operation types for RDNA4 (gfx1200). Different encoding from RDNA3."""
+  # TODO: we need to do discovery of all of these from instructions
   SALU = 0x0
   SMEM = 0x1
   UNK_02 = 0x2
@@ -439,6 +439,7 @@ def format_packet(p) -> str:
   return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace("_L4", ""), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
+  from tinygrad.helpers import getenv
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
   for p in packets:
