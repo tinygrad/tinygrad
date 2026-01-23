@@ -324,6 +324,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], 
               buf_sizes.append(b.nbytes)
             kernels.append(KernelInfo(
               code=bytes(sec.content),
+              src=lowered.prg.p.src,
               global_size=tuple(lowered.prg.p.global_size),
               local_size=tuple(lowered.prg.p.local_size),
               buf_idxs=buf_idxs,
