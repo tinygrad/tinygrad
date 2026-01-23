@@ -8,6 +8,12 @@ from tinygrad.runtime.autogen import cuda, cupti
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler, NVCCCompiler
 from tinygrad.runtime.support.c import init_c_struct_t, init_c_var
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
+
+if getenv("IOCTL"):
+  from extra.nv_gpu_driver.nv_ioctl import _dump_gpfifo
+else:
+  def _dump_gpfifo(*args, **kwargs): pass
+
 if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
 
 PROFILE = getenv("PROFILE", 0)
@@ -36,6 +42,7 @@ class CUPTIProfiler:
 
   def init(self, ctx, device_id: int = 0):
     if self.initialized: return
+    _dump_gpfifo("before cupti")
     # Initialize profiler API
     init_params = cupti.CUpti_Profiler_Initialize_Params()
     init_params.structSize = 16
@@ -64,11 +71,12 @@ class CUPTIProfiler:
           if DEBUG >= 1: print("  CUPTI: PC sampling needs: echo 'options nvidia NVreg_RestrictProfilingToAdminUsers=0'|sudo tee /etc/modprobe.d/nvidia.conf && sudo reboot")
       # Fall back to kernel timing if PC sampling setup failed
       if not self.pc_sampling_enabled:
-        self._check_cupti(cupti.cuptiActivityEnable(cupti.CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL))
+        self._check_cupti(cupti.cuptiActivityEnable(cupti.CUPTI_ACTIVITY_KIND_KERNEL))
     else:
       # Kernel activity tracing for timing
-      self._check_cupti(cupti.cuptiActivityEnable(cupti.CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL))
+      self._check_cupti(cupti.cuptiActivityEnable(cupti.CUPTI_ACTIVITY_KIND_KERNEL))
 
+    _dump_gpfifo("after cupti")
     self.initialized = True
 
   def _buffer_requested(self, buffer, size, max_num_records):
@@ -154,6 +162,7 @@ class CUDAProgram:
   def __del__(self): check(cuda.cuModuleUnload(self.module))
 
   def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+    _dump_gpfifo("before __call__")
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
       self.c_args, self.vargs = encode_args(args, vals)
@@ -163,7 +172,9 @@ class CUDAProgram:
     else:
       for i in range(len(args)): self.c_args.__setattr__(f'f{i}', args[i])
       for i in range(len(vals)): self.c_args.__setattr__(f'v{i}', vals[i])
-    return cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
+    x = cu_time_execution(lambda: check(cuda.cuLaunchKernel(self.prg, *global_size, *local_size, self.smem, None, None, self.vargs)), enable=wait)
+    _dump_gpfifo("after __call__")
+    return x
 
 class CUDAAllocator(LRUAllocator['CUDADevice']):
   def _alloc(self, size, options:BufferSpec):
@@ -227,6 +238,7 @@ class CUDADevice(Compiled):
                              CompilerPair(functools.partial(PTXRenderer, self.arch), functools.partial(PTXCompiler, self.arch), CUDA_PTX),
                              CompilerPair(functools.partial(CUDARenderer, self.arch), functools.partial(NVCCCompiler, self.arch))], ctrl_var=CUDA_CC)
     super().__init__(device, CUDAAllocator(self), compilers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
+    _dump_gpfifo("after __init__")
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))

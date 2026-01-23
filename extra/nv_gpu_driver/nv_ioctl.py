@@ -70,6 +70,7 @@ def get_classes():
                    "NV20_SUBDEVICE_0"}
   for nm,val in nv_gpu.__dict__.items():
     if not isinstance(val, int): continue
+    if nm.endswith("PARAMETERS_MESSAGE_ID"): continue
     if 0x3000 < val < 0xffff: res[val] = nm
     if nm in known_classes: res[val] = nm
   return res
@@ -81,17 +82,52 @@ global_ioctl_id = 0
 gpus_user_modes = []
 gpus_mmio = []
 gpus_fifo = []
+offset_load = 0
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
-  global global_ioctl_id, gpus_user_modes, gpus_mmio
+  global global_ioctl_id, gpus_user_modes, gpus_mmio, cupti_batch_idx, offset_load
   global_ioctl_id += 1
+
+  idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
+  if itype == ord(nv_gpu.NV_IOCTL_MAGIC):
+    if nr == nv_gpu.NV_ESC_RM_CONTROL:
+      s = get_struct(argp, nv_gpu.NVOS54_PARAMETERS)
+      if s.cmd in nvcmds:
+        name, struc = nvcmds[s.cmd]
+        if name == "NVB0CC_CTRL_CMD_EXEC_REG_OPS":
+          reg_params = get_struct(s.params, struc)
+          # CUPTI_HACK=1: Replace with NV regops, CUPTI_HACK=2: Replace with CUPTI regops
+          hack_regops = nv_regops_all if CUPTI_HACK == 1 else cupti_regops_loaded if CUPTI_HACK == 2 else []
+          if CUPTI_HACK and len(hack_regops) > 0:
+            src = "NV" if CUPTI_HACK == 1 else "CUPTI"
+            print(f"CUPTI_HACK: replacing regops with {len(hack_regops)} {src} regops")
+            # Send all regops in batches of 124 (max per call)
+            batch_num = 0
+            for i, (regOp, regType, offset, value, mask) in enumerate(hack_regops[offset_load:offset_load+reg_params.regOpCount]):
+              if reg_params.regOps[i].regOp != regOp: print(f"CUPTI_HACK: warning regOp mismatch at batch {batch_num} idx {i}: {reg_params.regOps[i].regOp} != {regOp}")
+              if reg_params.regOps[i].regType != regType: print(f"CUPTI_HACK: warning regType mismatch at batch {batch_num} idx {i}: {reg_params.regOps[i].regType} != {regType}")
+              if reg_params.regOps[i].regOffset != offset: print(f"CUPTI_HACK: warning regOffset mismatch at batch {batch_num} idx {i}: {reg_params.regOps[i].regOffset} != {offset}")
+              if reg_params.regOps[i].regValueLo != value: print(f"CUPTI_HACK: warning regValueLo mismatch at batch {batch_num} idx {i}: {reg_params.regOps[i].regValueLo} != {value}")
+              if reg_params.regOps[i].regAndNMaskLo != mask: print(f"CUPTI_HACK: warning regAndNMaskLo mismatch at batch {batch_num} idx {i}: {reg_params.regOps[i].regAndNMaskLo} != {mask}")
+
+              reg_params.regOps[i].regOp = regOp
+              reg_params.regOps[i].regType = regType
+              reg_params.regOps[i].regOffset = offset
+              reg_params.regOps[i].regValueLo = value
+              reg_params.regOps[i].regAndNMaskLo = mask
+            offset_load += reg_params.regOpCount
+
+          for i in range(reg_params.regOpCount):
+            print(f"\t\t", end="")
+            dump_struct(reg_params.regOps[i])
+
   st = time.perf_counter()
   ret = libc.syscall(IOCTL_SYSCALL, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
   et = time.perf_counter()-st
   fn = os.readlink(f"/proc/self/fd/{fd}")
   #print(f"ioctl {request:8x} {fn:20s}")
-  idir, size, itype, nr = (request>>30), (request>>16)&0x3FFF, (request>>8)&0xFF, request&0xFF
+
   if getenv("IOCTL", 0) >= 1: print(f"#{global_ioctl_id}: ", end="")
   if itype == ord(nv_gpu.NV_IOCTL_MAGIC):
     if nr == nv_gpu.NV_ESC_RM_CONTROL:
@@ -105,12 +141,22 @@ def ioctl(fd, request, argp):
         elif hasattr(nv_gpu, name+"_PARAMS"): dump_struct(get_struct(argp, getattr(nv_gpu, name+"_PARAMS")))
         elif name == "NVA06C_CTRL_CMD_GPFIFO_SCHEDULE": dump_struct(get_struct(argp, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS))
         elif name == "NV83DE_CTRL_CMD_GET_MAPPINGS": dump_struct(get_struct(s.params, nv_gpu.NV83DE_CTRL_DEBUG_GET_MAPPINGS_PARAMETERS))
-        elif name == "NVB0CC_CTRL_CMD_EXEC_REG_OPS" and struc is not None and getenv("IOCTL", 0) >= 3:
+        elif name == "NVB0CC_CTRL_CMD_SET_HS_CREDITS":
+          hs_params = get_struct(s.params, nv_gpu.NVB0CC_CTRL_SET_HS_CREDITS_PARAMS)
+          dump_struct(hs_params)
+          if getenv("IOCTL", 0) >= 2:
+            for i in range(hs_params.numEntries):
+              print(f"\t\t", end="")
+              dump_struct(hs_params.creditInfo[i])
+
+        # Dump regOps for EXEC_REG_OPS when IOCTL >= 3
+        if name == "NVB0CC_CTRL_CMD_EXEC_REG_OPS" and struc is not None and getenv("IOCTL", 0) >= 3:
           reg_params = get_struct(s.params, struc)
           for i in range(reg_params.regOpCount):
-            op = reg_params.regOps[i]
-            val = (op.regValueHi << 32) | op.regValueLo
-            print(f"\t  regOps[{i:3d}]: op={op.regOp} type={op.regType} status={op.regStatus} offset=0x{op.regOffset:08x} value=0x{val:016x}")
+            print(f"\t\t", end="")
+            dump_struct(reg_params.regOps[i])
+            # val = (op.regValueHi << 32) | op.regValueLo
+            # print(f"\t  regOps[{i:3d}]: op={op.regOp} type={op.regType} status={op.regStatus} offset=0x{op.regOffset:08x} value=0x{val:016x}")
       else:
         if getenv("IOCTL", 0) >= 1: print("unhandled cmd", hex(s.cmd))
       # format_struct(s)
@@ -125,6 +171,7 @@ def ioctl(fd, request, argp):
         if s.hClass == nv_gpu.NV1_MEMORY_USER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.NV1_MEMORY_SYSTEM: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.GT200_DEBUGGER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV83DE_ALLOC_PARAMETERS))
+        if s.hClass == nv_gpu.MAXWELL_PROFILER_DEVICE: dump_struct(get_struct(s.pAllocParms, nv_gpu.NVB2CC_ALLOC_PARAMETERS))
         if s.hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
           sx = get_struct(s.pAllocParms, nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS)
           dump_struct(sx)
@@ -179,14 +226,14 @@ def _mmap(addr, length, prot, flags, fd, offset):
   return ret
 
 install_hook(libc.ioctl, ioctl)
-if getenv("IOCTL") >= 3: orig_mmap_mv = install_hook(libc.mmap, _mmap)
+if getenv("IOCTL") >= 4: orig_mmap_mv = install_hook(libc.mmap, _mmap)
 
 import collections
 old_gpputs = collections.defaultdict(int)
 def _dump_gpfifo(mark):
   launches = []
 
-  # print("_dump_gpfifo:", mark)
+  print("_dump_gpfifo:", mark)
   for start, size in gpus_fifo:
     gpfifo_controls = nv_gpu.AmpereAControlGPFifo.from_address(start+size*8)
     gpfifo = to_mv(start, size * 8).cast("Q")
