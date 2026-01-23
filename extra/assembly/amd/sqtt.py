@@ -436,7 +436,7 @@ def format_packet(p) -> str:
     fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
                       for k in p._fields if not k.startswith('_') and k not in filt)
   else: fields = ""
-  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace("_L4", ""), 'white'))} {fields}"
+  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace('_L4', ''), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
   from tinygrad.helpers import getenv
