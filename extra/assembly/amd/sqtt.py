@@ -111,6 +111,26 @@ class InstOpL4(Enum):
   OTHER_VMEM = 0x5e
   UNK_60 = 0x60
 
+class InstOpL0(Enum):
+  """SQTT instruction operation types for CDNA3 (gfx950/MI300). Different encoding from RDNA."""
+  SALU = 0x0
+  SMEM = 0x1
+  FLAT = 0x3
+  UNK_06 = 0x6
+  UNK_0C = 0xc
+  UNK_0D = 0xd
+  UNK_1C = 0x1c
+  UNK_29 = 0x29
+  UNK_30 = 0x30
+  UNK_36 = 0x36
+  UNK_41 = 0x41
+  UNK_43 = 0x43
+  UNK_46 = 0x46
+  UNK_47 = 0x47
+  UNK_52 = 0x52
+  UNK_66 = 0x66
+  UNK_7F = 0x7f
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -175,10 +195,19 @@ class TS_DELTA_OR_MARK(PacketType):
 class TS_DELTA_OR_MARK_L4(PacketType):  # Layout 4: 48->64 bits
   encoding = bits[6:0] == 0b0000001
   delta = bits[63:12]
+  bit7 = bits[7:7]
   bit8 = bits[8:8]
   bit9 = bits[9:9]
   @property
-  def is_marker(self) -> bool: return bool(self.bit9 and not self.bit8)
+  def is_marker(self) -> bool: return bool((self.bit9 and not self.bit8) or self.bit7)
+
+class TS_DELTA_OR_MARK_L0(PacketType):  # Layout 0 (CDNA): 48->64 bits, delta at bits[63:16]
+  encoding = bits[6:0] == 0b0000001
+  delta = bits[63:16]
+  bit8 = bits[8:8]
+  bit9 = bits[9:9]
+  @property
+  def is_marker(self) -> bool: return True  # L0: all TS_DELTA_OR_MARK are markers, delta comes from other packets
 
 class TS_DELTA_S5_W2(PacketType):
   encoding = bits[4:0] == 0b11100
@@ -343,10 +372,23 @@ class INST_L4(PacketType):  # Layout 4: different delta position and InstOp enco
   wave = bits[12:8]
   op = bits[19:13].enum(InstOpL4)
 
+class INST_L0(PacketType):  # Layout 0 (CDNA): different InstOp encoding
+  encoding = bits[2:0] == 0b010
+  delta = bits[6:4]
+  flag1 = bits[3:3]
+  flag2 = bits[7:7]
+  wave = bits[12:8]
+  op = bits[19:13].enum(InstOpL0)
+
 class UTILCTR(PacketType):
   encoding = bits[6:0] == 0b0110001
   delta = bits[8:7]
   ctr = bits[47:9]
+
+class UTILCTR_L0(PacketType):  # Layout 0 (CDNA): 48->64 bits
+  encoding = bits[6:0] == 0b0110001
+  delta = bits[8:7]
+  ctr = bits[63:9]
 
 # Packet types with rocprof type IDs as keys
 PACKET_TYPES_L3: dict[int, type[PacketType]] = {
@@ -358,6 +400,10 @@ PACKET_TYPES_L4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_L3,
   7: TS_DELTA_S8_W3_L4, 9: WAVESTART_L4, 10: TS_DELTA_S5_W2_L4, 11: WAVEALLOC_L4,
   12: TS_DELTA_S5_W3_L4, 13: PERF_L4, 22: TS_DELTA_OR_MARK_L4, 24: INST_L4,
+}
+PACKET_TYPES_L0: dict[int, type[PacketType]] = {
+  **PACKET_TYPES_L3,
+  14: UTILCTR_L0, 22: TS_DELTA_OR_MARK_L0, 24: INST_L0,
 }
 
 def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
@@ -390,6 +436,7 @@ def _build_decode_info(packet_types: dict[int, type[PacketType]]) -> dict[int, t
     decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_lo, delta_mask, special)
   return decode_info
 
+_DECODE_INFO_L0 = _build_decode_info(PACKET_TYPES_L0)
 _DECODE_INFO_L3 = _build_decode_info(PACKET_TYPES_L3)
 _DECODE_INFO_L4 = _build_decode_info(PACKET_TYPES_L4)
 
@@ -417,13 +464,15 @@ def decode(data: bytes) -> Iterator[PacketType]:
     pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
     delta = (reg >> delta_lo) & delta_mask
     if special == 1:  # TS_DELTA_OR_MARK
-      if (reg >> 9) & 1 and not (reg >> 8) & 1: delta = 0  # marker (bit9=1, bit8=0)
-      elif (reg >> 7) & 1: delta = 0  # L4: bit7=1 indicates sync packet with no delta
+      pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
+      if pkt.is_marker: delta = 0
     elif special == 2: delta += 8  # TS_DELTA_SHORT
     time += delta
     pkt = pkt_cls.from_raw(reg, time)
     # detect layout from first LAYOUT_HEADER and switch decode tables if needed
-    if pkt_cls is LAYOUT_HEADER and pkt.layout == 4: decode_info = _DECODE_INFO_L4
+    if pkt_cls is LAYOUT_HEADER:
+      if pkt.layout == 0: decode_info = _DECODE_INFO_L0
+      elif pkt.layout == 4: decode_info = _DECODE_INFO_L4
     yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -454,11 +503,10 @@ def format_packet(p) -> str:
   return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace("_L4", ""), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
-  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_OR_MARK_L4",
-          "TS_DELTA_S5_W2", "TS_DELTA_S5_W2_L4", "TS_DELTA_S5_W3", "TS_DELTA_S5_W3_L4",
-          "TS_DELTA_S8_W3", "TS_DELTA_S8_W3_L4", "REG", "EVENT"} if not getenv("NOSKIP") else {}
+  skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
+        "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {}
   for p in packets:
-    if type(p).__name__ not in skip: print(format_packet(p))
+    if type(p).__name__.replace("_L4", "").replace("_L0", "") not in skip: print(format_packet(p))
 
 if __name__ == "__main__":
   import sys, pickle
