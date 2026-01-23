@@ -294,6 +294,8 @@ class ReduceContext:
 def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   # if this has a horizontal reduction component, do that first
   if inp.dtype != out_dtype:
+    if getenv("LLVM_VECREDUCE", 0) and inp.dtype.vcount in (4, 8, 16) and inp.dtype.scalar() == out_dtype.scalar() == dtypes.float:
+      return [UOp(Ops.CUSTOM, out_dtype, (inp,), "llvm.vector.reduce.fadd")]
     # NOTE: [0 1 2 3 4 5 6 7] -> [0+4, 1+5, 2+6, 3+7]
     horizontal_amount = inp.dtype.count//out_dtype.count
     return [inp.gep(tuple(range(i, inp.dtype.count, horizontal_amount))) for i in range(0, horizontal_amount)]
@@ -301,6 +303,15 @@ def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
 
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
   inp, reduce_range = red.src[0], red.src[1:]
+  if getenv("LLVM_VECREDUCE", 0) and red.arg is Ops.ADD and len(reduce_range) >= 1 and red.dtype.scalar() == dtypes.float and inp.dtype.vcount == 1:
+    vec = getenv("LLVM_VECREDUCE_WIDTH", 4)
+    r = reduce_range[-1]
+    if (div := r.src[0].divides(vec)) is not None:
+      outer = UOp.range(div, r.arg[0], r.arg[1], dtype=r.dtype)
+      lanes = tuple(inp.substitute({r: outer*vec + UOp.const(dtypes.index, i)}) for i in range(vec))
+      vec_uop = UOp(Ops.VECTORIZE, red.dtype.scalar().vec(vec), lanes)
+      inp = UOp(Ops.CUSTOM, red.dtype.scalar(), (vec_uop,), "llvm.vector.reduce.fadd")
+      reduce_range = reduce_range[:-1] + (outer,)
   lst = horizontal_reduce(inp, red.dtype)
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
@@ -335,4 +346,3 @@ pm_add_loads = PatternMatcher([
   # remove loads from stores
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD),), allow_any_len=True, name="s"), lambda s: s.replace(src=(s.src[0].src[0],)+s.src[1:])),
 ])
-

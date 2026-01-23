@@ -22,6 +22,14 @@ def lconst(x, dtype:DType):
     return truncate[dtype](x)
   return int(x)
 
+def llvm_vec_suffix(dtype:DType) -> str:
+  scalar = dtype.scalar()
+  if scalar is dtypes.float: dt = "f32"
+  elif scalar is dtypes.half: dt = "f16"
+  elif scalar is dtypes.double: dt = "f64"
+  else: raise NotImplementedError(f"vector reduce unsupported for {scalar}")
+  return f"v{dtype.count}{dt}"
+
 def lcast(input_type:DType, output_type:DType):
   if dtypes.is_float(input_type):
     if dtypes.is_float(output_type): return 'fpext' if output_type.itemsize > input_type.itemsize else 'fptrunc'
@@ -67,7 +75,7 @@ unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "ure
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
 signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem", Ops.SHR: "ashr"}
-flags = (" reassoc" if getenv("LLVM_REASSOC", 1) else "") + " nsz arcp contract afn"
+flags = (" reassoc" if getenv("LLVM_REASSOC", 0) else "") + " nsz arcp contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} ult",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
@@ -97,6 +105,8 @@ base_rewrite = PatternMatcher([
                                                             f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
+  (UPat(Ops.CUSTOM, name="x", arg="llvm.vector.reduce.fadd"),
+   lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.vector.reduce.fadd.{llvm_vec_suffix(x.src[0].dtype)}({ldt(x.dtype)} {lconst(0.0, x.dtype)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   # rewrite cast to bool to CMPNE 0
   (UPat(Ops.CAST, name="x", dtype=dtypes.bool),
    lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][Ops.CMPNE]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, zeroinitializer"),
@@ -122,7 +132,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
    f"  br label %loop_footer_{range_str(r)}\n"
    f"loop_footer_{range_str(r)}:\n"
-   f"  br label %loop_latch_{range_str(r)}\n"
+   f"  br label %loop_latch_{range_str(r)}{(', !llvm.loop !0' if getenv('LLVM_LOOP_VEC', 0) else '')}\n"
    f"loop_exit_{range_str(r)}:"),
 
   # if
@@ -144,7 +154,11 @@ class LLVMRenderer(Renderer):
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
-  def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+  def _render_footer(self, uops: list[UOp]) -> str:
+    footer = 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+    if getenv("LLVM_LOOP_VEC", 0):
+      footer += '\n!0 = distinct !{!0, !1, !2}\n!1 = !{!"llvm.loop.vectorize.enable", i1 true}\n!2 = !{!"llvm.loop.vectorize.width", i32 4}'
+    return footer
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
