@@ -5,6 +5,7 @@ from dataclasses import dataclass
 @dataclass
 class KernelInfo:
   code: bytes
+  src: str
   global_size: tuple[int, int, int]
   local_size: tuple[int, int, int]
   buf_idxs: list[int]  # indices into shared buffer pool

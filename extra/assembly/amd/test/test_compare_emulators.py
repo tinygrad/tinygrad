@@ -284,7 +284,7 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   ok, msg, _ = run_single_kernel(kernel, n_lanes, args_ptr, global_size, program, max_steps, debug, trace_len)
   return ok, msg
 
-def get_kernels_from_tinygrad(op_fn, arch:str="rdna3") -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
+def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.runtime.support.elf import elf_loader
@@ -294,10 +294,6 @@ def get_kernels_from_tinygrad(op_fn, arch:str="rdna3") -> tuple[list[KernelInfo]
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
   buf_data: dict[int, bytes] = {}  # buffer id -> initial data from COPY
-
-  # TODO: don't do it like this
-  from tinygrad import Device
-  compiler = Device[out.device].compiler.__class__(get_target(arch))
 
   for ei in sched:
     lowered = ei.lower()
@@ -313,8 +309,8 @@ def get_kernels_from_tinygrad(op_fn, arch:str="rdna3") -> tuple[list[KernelInfo]
           src_data = bytes(src_buf.base._buf)
           buf_data[dst_id] = src_data
     elif ei.ast.op.name == 'SINK':
-      if lowered.prg:
-        lib = compiler.compile(lowered.prg.p.src)
+      if lowered.prg and lowered.prg.p.lib:
+        lib = bytes(lowered.prg.p.lib)
         _, sections, _ = elf_loader(lib)
         for sec in sections:
           if sec.name == '.text':
@@ -328,6 +324,7 @@ def get_kernels_from_tinygrad(op_fn, arch:str="rdna3") -> tuple[list[KernelInfo]
               buf_sizes.append(b.nbytes)
             kernels.append(KernelInfo(
               code=bytes(sec.content),
+              src=lowered.prg.p.src,
               global_size=tuple(lowered.prg.p.global_size),
               local_size=tuple(lowered.prg.p.local_size),
               buf_idxs=buf_idxs,

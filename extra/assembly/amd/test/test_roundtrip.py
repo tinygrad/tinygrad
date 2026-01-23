@@ -83,15 +83,19 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     arch = self.arch
 
     from extra.assembly.amd.test.test_compare_emulators import get_kernels_from_tinygrad
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    from tinygrad.runtime.support.elf import elf_loader
 
-    kernels, _, _ = get_kernels_from_tinygrad(op_fn, arch)
+    kernels, _, _ = get_kernels_from_tinygrad(op_fn)
+    compiler = HIPCompiler(get_target(arch))
 
     # First pass: decode all instructions and collect info
     decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
     for ki, kernel in enumerate(kernels):
       offset = 0
-      while offset < len(kernel.code):
-        remaining = kernel.code[offset:]
+      code = next((s.content for s in elf_loader(compiler.compile(kernel.src))[1] if s.name == ".text"))
+      while offset < len(code):
+        remaining = code[offset:]
         fmt = detect_format(remaining, arch)
         if fmt is None:
           decoded_instrs.append((ki, offset, None, None, None, False, "no format"))
