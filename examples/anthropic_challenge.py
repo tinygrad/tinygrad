@@ -150,7 +150,10 @@ if __name__ == "__main__":
   # *** run on Machine and compare ***
 
   # NOTE: the scratch size needs to be reduced to 1536 when you have a register allocator
-  machine = problem.Machine(mem, eval(prg.src), problem.DebugInfo(scratch_map={}), n_cores=1, trace=False, scratch_size=100000)
+  src = eval(prg.src)
+  max_regs = max(t[1] for instr in src for v in instr.values() for t in v if len(t) > 1) + 8
+  print(f"{max_regs} regs used" + ("" if max_regs < 1536 else " <-- WARNING: TOO MANY REGISTERS, MUST BE < 1536"))
+  machine = problem.Machine(mem, src, problem.DebugInfo(scratch_map={}), n_cores=1, trace=False, scratch_size=max_regs)
   machine.run()
   print(f"ran for {machine.cycle} cycles")
 
