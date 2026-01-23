@@ -19,6 +19,7 @@ OTHER_SIMD_OPS = {InstOp.OTHER_LDS_LOAD, InstOp.OTHER_LDS_STORE, InstOp.OTHER_LD
                   InstOp.OTHER_FLAT_STORE_128, InstOp.OTHER_GLOBAL_LOAD, InstOp.OTHER_GLOBAL_LOAD_VADDR,
                   InstOp.OTHER_GLOBAL_STORE_64, InstOp.OTHER_GLOBAL_STORE_96, InstOp.OTHER_GLOBAL_STORE_128,
                   InstOp.OTHER_GLOBAL_STORE_VADDR_128}
+OTHER_SIMD_OPS_L4 = {InstOpL4.OTHER_VMEM, InstOpL4.UNK_60}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROCPROF DECODER
@@ -192,7 +193,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
         for event in events:
           for p in decode(event.blob):
             if isinstance(p, INST) and p.op not in OTHER_SIMD_OPS: our_insts.append(p._time)
-            elif isinstance(p, INST_L4): our_insts.append(p._time)  # TODO: filter OTHER_SIMD for L4
+            elif isinstance(p, INST_L4) and p.op not in OTHER_SIMD_OPS_L4: our_insts.append(p._time)
             elif isinstance(p, VALUINST): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE): our_insts.append(p._time)
             elif isinstance(p, IMMEDIATE_MASK):
