@@ -369,11 +369,17 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
 def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
-  """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
+  """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f. Also simplify t/f given cond."""
   def is_valid_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (u.src[1].arg, u.src[2].arg)
   t_subs, f_subs = {u: u.src[1] for u in t.toposort() if is_valid_where(u)}, {u: u.src[2] for u in f.toposort() if is_valid_where(u)}
-  if not t_subs and not f_subs: return None
-  new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
+  if t_subs or f_subs:
+    # fold nested wheres with same condition
+    new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
+    return None if new_t is t and new_f is f else cond.where(new_t, new_f)
+  # no nested wheres, try simplifying t/f given cond
+  # skip during codegen (RANGE/SPECIAL in cond): the devectorizer folds WHERE into gated LOADs, and rewriting here can break that pattern
+  if cond.op_in_backward_slice_with_self(Ops.RANGE, Ops.SPECIAL): return None
+  new_t, new_f = uop_given_valid(cond, t), uop_given_valid(cond.ne(True), f)
   return None if new_t is t and new_f is f else cond.where(new_t, new_f)
 
 pm_simplify_valid = PatternMatcher([

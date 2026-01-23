@@ -665,8 +665,19 @@ class TestSymbolic(unittest.TestCase):
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
-    # TODO: simplify the true branch
-    self.helper_test_variable((idx<4).where(idx//4, idx.const_like(-1)), -1, 6, "(idx<4).where((idx//4), -1)")
+    # true branch simplifies: when idx < 4 (idx in [0,3]), idx//4 = 0
+    self.helper_test_variable((idx<4).where(idx//4, idx.const_like(-1)), -1, 0, "(idx<4).where(idx.const_like(0), idx.const_like(-1))")
+    # false branch simplifies: when idx >= 4 (idx in [4,24]), (idx-4) in [0,20], so (idx-4)//21 = 0
+    self.helper_test_variable((idx<4).where(idx.const_like(-1), (idx-4)//21), -1, 0, "(idx<4).where(idx.const_like(-1), idx.const_like(0))")
+    # both branches simplify to same constant, WHERE eliminated
+    self.helper_test_variable((idx<4).where(idx//4, (idx-4)//21), 0, 0, "0")
+    # realistic: padding bounds check, (idx-2)//20 = 0 when 2 <= idx < 22
+    self.helper_test_variable(((idx<2).ne(True)&(idx<22)).where((idx-2)//20, idx.const_like(-1)), -1, 0,
+                              "((idx<2).ne(True)&(idx<22)).where(idx.const_like(0), idx.const_like(-1))")
+    # nested where + simplifiable branch: first fold nested where, then simplify idx//4 -> 0
+    cond = idx < 4
+    nested = cond.where(idx.const_like(1), idx.const_like(2))  # folds to 1 in true branch
+    self.helper_test_variable(cond.where(nested + idx//4, idx.const_like(-1)), -1, 1, "(idx<4).where(idx.const_like(1), idx.const_like(-1))")
 
   def test_idiv_lt(self):
     idx = Variable("idx", 0, 24)
