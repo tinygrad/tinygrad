@@ -546,7 +546,7 @@ class AMDCopyQueue(HWQueue):
     sdma_queue.signal_doorbell(dev)
 
 class AMDProgram(HCQProgram):
-  def __init__(self, dev:AMDDevice, name:str, lib:bytes):
+  def __init__(self, dev:AMDDevice, name:str, lib:bytes, **kwargs):
     # TODO; this API needs the type signature of the function and global_size/local_size
     self.dev, self.name, self.lib = dev, name, lib
 
