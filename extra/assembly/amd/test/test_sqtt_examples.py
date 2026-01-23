@@ -214,7 +214,8 @@ class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
 class TestSQTTExamplesCDNA(SQTTExamplesTestBase):
   target = "gfx950"
-  def test_rocprof_inst_times_match(self): unittest.skip()
+  @unittest.skip("L0 INST decoding not yet implemented")
+  def test_rocprof_inst_times_match(self): pass
 
 if __name__ == "__main__":
   unittest.main()

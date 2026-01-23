@@ -406,10 +406,10 @@ PACKET_TYPES_L0: dict[int, type[PacketType]] = {
   14: UTILCTR_L0, 22: TS_DELTA_OR_MARK_L0, 24: INST_L0,
 }
 
-def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
+def _build_state_table(packet_types: dict[int, type[PacketType]]) -> bytes:
   table = [16] * 256  # default to NOP (type_id 16)
   # Sort by mask bit count descending (more specific encodings first), NOP last
-  sorted_types = sorted(PACKET_TYPES_L3.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
+  sorted_types = sorted(packet_types.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
 
   for byte_val in range(256):
     for opcode, pkt_cls in sorted_types:
@@ -419,14 +419,16 @@ def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
 
   return bytes(table)
 
-STATE_TO_OPCODE = _build_state_table()
+STATE_TO_OPCODE_L0 = _build_state_table(PACKET_TYPES_L0)
+STATE_TO_OPCODE_L3 = _build_state_table(PACKET_TYPES_L3)
+STATE_TO_OPCODE_L4 = _build_state_table(PACKET_TYPES_L4)
 
 # Special case opcodes (rocprof type IDs)
 _TS_DELTA_OR_MARK_OPCODE, _TS_DELTA_SHORT_OPCODE = 22, 15
 
 # Combined lookup: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
 # special_case: 0=none, 1=TS_DELTA_OR_MARK, 2=TS_DELTA_SHORT
-def _build_decode_info(packet_types: dict[int, type[PacketType]]) -> dict[int, tuple]:
+def _build_decode_info(packet_types: dict[int, type[PacketType]], state_table: bytes) -> tuple[dict[int, tuple], bytes]:
   decode_info: dict[int, tuple] = {}
   for opcode, pkt_cls in packet_types.items():
     delta_field = getattr(pkt_cls, 'delta', None)
@@ -434,11 +436,11 @@ def _build_decode_info(packet_types: dict[int, type[PacketType]]) -> dict[int, t
     delta_mask = delta_field.mask if delta_field else 0
     special = 1 if opcode == _TS_DELTA_OR_MARK_OPCODE else (2 if opcode == _TS_DELTA_SHORT_OPCODE else 0)
     decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_lo, delta_mask, special)
-  return decode_info
+  return decode_info, state_table
 
-_DECODE_INFO_L0 = _build_decode_info(PACKET_TYPES_L0)
-_DECODE_INFO_L3 = _build_decode_info(PACKET_TYPES_L3)
-_DECODE_INFO_L4 = _build_decode_info(PACKET_TYPES_L4)
+_DECODE_INFO_L0, _STATE_TABLE_L0 = _build_decode_info(PACKET_TYPES_L0, STATE_TO_OPCODE_L0)
+_DECODE_INFO_L3, _STATE_TABLE_L3 = _build_decode_info(PACKET_TYPES_L3, STATE_TO_OPCODE_L3)
+_DECODE_INFO_L4, _STATE_TABLE_L4 = _build_decode_info(PACKET_TYPES_L4, STATE_TO_OPCODE_L4)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
@@ -447,7 +449,7 @@ _DECODE_INFO_L4 = _build_decode_info(PACKET_TYPES_L4)
 def decode(data: bytes) -> Iterator[PacketType]:
   """Decode raw SQTT blob, yielding packet instances. Auto-detects layout from LAYOUT_HEADER."""
   n, reg, pos, nib_off, nib_count, time = len(data), 0, 0, 0, 16, 0
-  decode_info = _DECODE_INFO_L3  # default to layout 3, will update after seeing LAYOUT_HEADER
+  decode_info, state_table = _DECODE_INFO_L3, _STATE_TABLE_L3  # default to layout 3, will update after seeing LAYOUT_HEADER
 
   while pos + ((nib_count + nib_off + 1) >> 1) <= n:
     need = nib_count - nib_off
@@ -460,7 +462,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
     # 3. if odd, read low nibble
     if (nib_off := need & 1): reg = (reg >> 4) | ((data[pos] & 0xF) << 60)
 
-    opcode = STATE_TO_OPCODE[reg & 0xFF]
+    opcode = state_table[reg & 0xFF]
     pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
     delta = (reg >> delta_lo) & delta_mask
     if special == 1:  # TS_DELTA_OR_MARK
@@ -471,8 +473,8 @@ def decode(data: bytes) -> Iterator[PacketType]:
     pkt = pkt_cls.from_raw(reg, time)
     # detect layout from first LAYOUT_HEADER and switch decode tables if needed
     if pkt_cls is LAYOUT_HEADER:
-      if pkt.layout == 0: decode_info = _DECODE_INFO_L0
-      elif pkt.layout == 4: decode_info = _DECODE_INFO_L4
+      if pkt.layout == 0: decode_info, state_table = _DECODE_INFO_L0, _STATE_TABLE_L0
+      elif pkt.layout == 4: decode_info, state_table = _DECODE_INFO_L4, _STATE_TABLE_L4
     yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════

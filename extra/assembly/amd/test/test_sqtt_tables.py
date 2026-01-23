@@ -83,27 +83,15 @@ def extract_delta_fields():
   layout4 = read_table(0x27300, 27)  # L4 has more entries
   return layout0, layout0, layout3, layout4  # L2 shares L0's delta table
 
-def extract_packet_encodings():
-  """Extract packet type encodings from runtime packet type registrations.
-
-  Returns dict mapping type_id -> (mask, value).
-  """
-  if not Path(ROCPROF_LIB).exists():
-    return None
-
-  ctypes.CDLL(ROCPROF_LIB)
-  rw_base, rw_file_offset = _find_rw_segment()
-  if rw_base is None:
-    return None
-
-  # Packet registrations vector at file offset 0x2d340 (ghidra DAT_0012e340 -> vaddr 0x2e340)
-  vec_start_addr = rw_base + (0x2d340 - rw_file_offset)
-  vec_end_addr = rw_base + (0x2d348 - rw_file_offset)
+def _read_encodings_from_vector(rw_base, rw_file_offset, vec_offset):
+  """Read packet encodings from a registration vector at given file offset."""
+  vec_start_addr = rw_base + (vec_offset - rw_file_offset)
+  vec_end_addr = rw_base + (vec_offset + 8 - rw_file_offset)
 
   vec_start = ctypes.c_void_p.from_address(vec_start_addr).value
   vec_end = ctypes.c_void_p.from_address(vec_end_addr).value
   if not vec_start or not vec_end:
-    return None
+    return {}
 
   # Each entry is 32 bytes: type_id at offset 0, pattern_start at 8, pattern_end at 16
   encodings = {}
@@ -123,6 +111,36 @@ def extract_packet_encodings():
 
   return encodings
 
+def extract_packet_encodings():
+  """Extract packet type encodings from runtime packet type registrations.
+
+  Returns (L0_encodings, L3_encodings, L4_encodings) - each is dict mapping type_id -> (mask, value).
+  L0 and L4 have layout-specific overrides on top of L3 base encodings.
+  """
+  if not Path(ROCPROF_LIB).exists():
+    return None, None, None
+
+  ctypes.CDLL(ROCPROF_LIB)
+  rw_base, rw_file_offset = _find_rw_segment()
+  if rw_base is None:
+    return None, None, None
+
+  # Base packet registrations vector at file offset 0x2d340 (shared by all layouts)
+  base_encodings = _read_encodings_from_vector(rw_base, rw_file_offset, 0x2d340)
+
+  # L0 overrides: type 17 and 25 have different encodings (from ghidra lines 25633-25657)
+  # Type 17: pattern [1,0,0,0,1,0,1] = mask 0x7f, value 0x51
+  # Type 25: pattern [1,0,0,0,1,1,0] = mask 0x7f, value 0x31
+  l0_encodings = {**base_encodings, 17: (0x7f, 0x51), 25: (0x7f, 0x31)}
+
+  # L3 uses base encodings directly
+  l3_encodings = base_encodings
+
+  # L4 uses same encodings as L3 - only field positions/sizes differ
+  l4_encodings = base_encodings
+
+  return l0_encodings, l3_encodings, l4_encodings
+
 @unittest.skipUnless(Path(ROCPROF_LIB).exists(), "rocprof-trace-decoder not installed")
 class TestSQTTMatchesBinary(unittest.TestCase):
   def _test_bit_counts_match_layout(self, layout_num: int):
@@ -140,18 +158,24 @@ class TestSQTTMatchesBinary(unittest.TestCase):
   def test_bit_counts_match_layout3(self): self._test_bit_counts_match_layout(3)
   def test_bit_counts_match_layout4(self): self._test_bit_counts_match_layout(4)
 
-  def test_encodings_exist_in_binary(self):
-    """Verify each PACKET_TYPE encoding exists in rocprof-trace-decoder."""
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L3
+  def _test_encodings_match_layout(self, layout_num: int):
+    """Verify each PACKET_TYPE encoding matches rocprof-trace-decoder for given layout."""
+    from extra.assembly.amd.sqtt import PACKET_TYPES_L0, PACKET_TYPES_L3, PACKET_TYPES_L4
+    packet_types = {0: PACKET_TYPES_L0, 3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
 
-    encodings = extract_packet_encodings()
+    l0_enc, l3_enc, l4_enc = extract_packet_encodings()
+    encodings = {0: l0_enc, 3: l3_enc, 4: l4_enc}[layout_num]
 
-    for type_id, pkt_cls in PACKET_TYPES_L3.items():
+    for type_id, pkt_cls in packet_types.items():
       enc = (pkt_cls.encoding.mask, pkt_cls.encoding.default)
       with self.subTest(packet=pkt_cls.__name__):
         self.assertIn(type_id, encodings, f"{pkt_cls.__name__}: type_id {type_id} not in binary")
         self.assertEqual(enc, encodings[type_id],
           f"{pkt_cls.__name__}: encoding mismatch (ours=0x{enc[0]:02x}/0x{enc[1]:02x}, binary=0x{encodings[type_id][0]:02x}/0x{encodings[type_id][1]:02x})")
+
+  def test_encodings_match_layout0(self): self._test_encodings_match_layout(0)
+  def test_encodings_match_layout3(self): self._test_encodings_match_layout(3)
+  def test_encodings_match_layout4(self): self._test_encodings_match_layout(4)
 
   def _test_delta_fields_match_layout(self, layout_num: int):
     from extra.assembly.amd.sqtt import PACKET_TYPES_L0, PACKET_TYPES_L3, PACKET_TYPES_L4
@@ -182,7 +206,7 @@ class TestSQTTMatchesBinary(unittest.TestCase):
 
 if __name__ == "__main__":
   layout0, layout2, layout3, layout4 = extract_bit_tables()
-  encodings = extract_packet_encodings()
+  l0_enc, l3_enc, l4_enc = extract_packet_encodings()
   delta0, delta2, delta3, delta4 = extract_delta_fields()
 
   TYPE_NAMES = {
@@ -190,7 +214,8 @@ if __name__ == "__main__":
     6: 'WAVERDY', 7: 'TS_DELTA_S8_W3', 8: 'WAVEEND', 9: 'WAVESTART', 10: 'TS_DELTA_S5_W2',
     11: 'WAVEALLOC', 12: 'TS_DELTA_S5_W3', 13: 'PERF', 14: 'UTILCTR', 15: 'TS_DELTA_SHORT',
     16: 'NOP', 17: 'TS_WAVE_STATE', 18: 'EVENT', 19: 'EVENT_BIG', 20: 'REG',
-    21: 'SNAPSHOT', 22: 'TS_DELTA_OR_MARK', 23: 'LAYOUT_HEADER', 24: 'INST',
+    21: 'SNAPSHOT', 22: 'TS_DELTA_OR_MARK', 23: 'LAYOUT_HEADER', 24: 'INST', 25: 'UNK_25',
+    26: 'UNK_26', 27: 'UNK_27', 28: 'UNK_28',
   }
 
   print("L0:", layout0)
@@ -198,12 +223,12 @@ if __name__ == "__main__":
   print("L3:", layout3)
   print("L4:", layout4)
 
-  if encodings and layout3:
+  if l3_enc and layout3:
     print("\nPacket type registrations from rocprof-trace-decoder:\n")
-    print(f"{'TypeID':>6} {'Name':>18} {'Mask':>6} {'Value':>6} {'L0':>4} {'L3':>4} {'L4':>4} {'L0 delta':>12} {'L3 delta':>12} {'L4 delta':>12} {'Pattern'}")
-    print("-" * 130)
-    for type_id in sorted(encodings.keys()):
-      mask, value = encodings[type_id]
+    print(f"{'TypeID':>6} {'Name':>18} {'L0 enc':>12} {'L3 enc':>12} {'L4 enc':>12} {'L0':>4} {'L3':>4} {'L4':>4} {'L0 delta':>12} {'L3 delta':>12} {'L4 delta':>12}")
+    print("-" * 140)
+    all_type_ids = sorted(set(l0_enc.keys()) | set(l3_enc.keys()) | set(l4_enc.keys()))
+    for type_id in all_type_ids:
       name = TYPE_NAMES.get(type_id, f'UNK_{type_id}')
       l0 = layout0[type_id] if type_id < len(layout0) else 0
       l3 = layout3[type_id] if type_id < len(layout3) else 0
@@ -214,8 +239,9 @@ if __name__ == "__main__":
       d0_str = f"[{d0[1]-1}:{d0[0]}]" if d0[1] > d0[0] else "-"
       d3_str = f"[{d3[1]-1}:{d3[0]}]" if d3[1] > d3[0] else "-"
       d4_str = f"[{d4[1]-1}:{d4[0]}]" if d4[1] > d4[0] else "-"
-      # Reconstruct pattern from mask/value
-      pattern = [(value >> i) & 1 for i in range(mask.bit_length())]
-      print(f"{type_id:6d} {name:>18} 0x{mask:04x} 0x{value:04x} {l0:4d} {l3:4d} {l4:4d} {d0_str:>12} {d3_str:>12} {d4_str:>12} {pattern}")
+      l0_enc_str = f"0x{l0_enc[type_id][0]:02x}/0x{l0_enc[type_id][1]:02x}" if type_id in l0_enc else "-"
+      l3_enc_str = f"0x{l3_enc[type_id][0]:02x}/0x{l3_enc[type_id][1]:02x}" if type_id in l3_enc else "-"
+      l4_enc_str = f"0x{l4_enc[type_id][0]:02x}/0x{l4_enc[type_id][1]:02x}" if type_id in l4_enc else "-"
+      print(f"{type_id:6d} {name:>18} {l0_enc_str:>12} {l3_enc_str:>12} {l4_enc_str:>12} {l0:4d} {l3:4d} {l4:4d} {d0_str:>12} {d3_str:>12} {d4_str:>12}")
 
   unittest.main()
