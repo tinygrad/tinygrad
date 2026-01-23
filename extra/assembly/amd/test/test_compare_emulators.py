@@ -288,15 +288,16 @@ def get_kernels_from_tinygrad(op_fn, arch:str="rdna3") -> tuple[list[KernelInfo]
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.runtime.support.elf import elf_loader
-  from tinygrad.runtime.support.compiler_amd import HIPCompiler
-
-  compiler = HIPCompiler(get_target(arch))
 
   out = op_fn(Tensor)
   sched = out.schedule()
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
   buf_data: dict[int, bytes] = {}  # buffer id -> initial data from COPY
+
+  # TODO: don't do it like this
+  from tinygrad import Device
+  compiler = Device[out.device].compiler.__class__(get_target(arch))
 
   for ei in sched:
     lowered = ei.lower()
