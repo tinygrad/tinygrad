@@ -249,6 +249,34 @@ def no_vectorized_index_broadcast(buf:UOp, cast:UOp, bcast:UOp, idx:UOp):
   sum_arg = tuple(flatten([[i+y for y in input_gep] for i in range(cnt)]))
   return buf.broadcast(cnt*precnt).index(idx.gep(gep_arg)*cnt+UOp.const(dtypes.index.vec(cnt*precnt), sum_arg), ptr=True)
 
+def _vectorize_loads(v:UOp) -> UOp|None:
+  # Only handle VECTORIZE of contiguous scalar loads without masks.
+  if v.dtype.vcount <= 1 or any(s.op is not Ops.LOAD for s in v.src): return None
+  loads = v.src
+  if any(len(l.src) != 1 or l.src[0].op is not Ops.INDEX or len(l.src[0].src) != 2 for l in loads): return None
+  idx0 = loads[0].src[0]
+  base_ptr, base_idx = idx0.src
+  offs = []
+  for i,l in enumerate(loads):
+    idx = l.src[0]
+    if idx.src[0] is not base_ptr: return None
+    expr = idx.src[1]
+    if expr is base_idx: off = 0
+    else:
+      diff = (expr - base_idx).ssimplify()
+      if isinstance(diff, UOp):
+        if diff.op is Ops.CONST: off = diff.arg
+        else: return None
+      else:
+        off = diff
+    offs.append(int(off))
+  if sorted(offs) != list(range(len(offs))): return None
+  vec = len(offs)
+  if (vec_index := base_idx.divides(vec)) is None: return None
+  vec_dtype = loads[0].dtype.scalar().vec(vec)
+  vec_idx = idx0.replace(dtype=vec_dtype.ptr(), src=(base_ptr, vec_index))
+  return UOp(Ops.LOAD, vec_dtype, (vec_idx,))
+
 devectorize_buf_and_index = PatternMatcher([
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), no_vectorized_buf),
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)).or_after(name="buf").cast(name="cast").index(UPat.var("idx")), no_vectorized_index),
@@ -267,6 +295,8 @@ devectorize = PatternMatcher([
 ])+devectorize_buf_and_index
 
 pm_render = PatternMatcher([
+  # collapse vectorize of contiguous scalar loads into a single vector load (CPU LLVM)
+  (UPat(Ops.VECTORIZE, name="v"), lambda v: _vectorize_loads(v) if getenv("LLVM_VECREDUCE", 0) else None),
   # for rendering, we use explicit VECTORIZE
   (UPat(Ops.CONST, name='c'),
    lambda c: UOp(Ops.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
