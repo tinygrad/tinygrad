@@ -181,24 +181,41 @@ class TestSQTTMatchesBinary(unittest.TestCase):
   def test_delta_fields_match_layout4(self): self._test_delta_fields_match_layout(4)
 
 if __name__ == "__main__":
-  layout2, layout3, layout4 = extract_bit_tables()
+  layout0, layout2, layout3, layout4 = extract_bit_tables()
   encodings = extract_packet_encodings()
+  delta0, delta2, delta3, delta4 = extract_delta_fields()
 
-  print(layout2)
-  print(layout3)
-  print(layout4)
+  TYPE_NAMES = {
+    1: 'VALUINST', 2: 'VMEMEXEC', 3: 'ALUEXEC', 4: 'IMMEDIATE', 5: 'IMMEDIATE_MASK',
+    6: 'WAVERDY', 7: 'TS_DELTA_S8_W3', 8: 'WAVEEND', 9: 'WAVESTART', 10: 'TS_DELTA_S5_W2',
+    11: 'WAVEALLOC', 12: 'TS_DELTA_S5_W3', 13: 'PERF', 14: 'UTILCTR', 15: 'TS_DELTA_SHORT',
+    16: 'NOP', 17: 'TS_WAVE_STATE', 18: 'EVENT', 19: 'EVENT_BIG', 20: 'REG',
+    21: 'SNAPSHOT', 22: 'TS_DELTA_OR_MARK', 23: 'LAYOUT_HEADER', 24: 'INST',
+  }
+
+  print("L0:", layout0)
+  print("L2:", layout2)
+  print("L3:", layout3)
+  print("L4:", layout4)
 
   if encodings and layout3:
-    print("Packet type registrations from rocprof-trace-decoder:\n")
-    print(f"{'TypeID':>6} {'Mask':>6} {'Value':>6} {'L2':>4} {'L3':>4} {'L4':>4} {'Pattern'}")
-    print("-" * 60)
+    print("\nPacket type registrations from rocprof-trace-decoder:\n")
+    print(f"{'TypeID':>6} {'Name':>18} {'Mask':>6} {'Value':>6} {'L0':>4} {'L3':>4} {'L4':>4} {'L0 delta':>12} {'L3 delta':>12} {'L4 delta':>12} {'Pattern'}")
+    print("-" * 130)
     for type_id in sorted(encodings.keys()):
       mask, value = encodings[type_id]
-      l2 = layout2[type_id] if type_id < len(layout2) else 0
+      name = TYPE_NAMES.get(type_id, f'UNK_{type_id}')
+      l0 = layout0[type_id] if type_id < len(layout0) else 0
       l3 = layout3[type_id] if type_id < len(layout3) else 0
       l4 = layout4[type_id] if type_id < len(layout4) else 0
+      d0 = delta0.get(type_id, (0, 0)) if delta0 else (0, 0)
+      d3 = delta3.get(type_id, (0, 0)) if delta3 else (0, 0)
+      d4 = delta4.get(type_id, (0, 0)) if delta4 else (0, 0)
+      d0_str = f"[{d0[1]-1}:{d0[0]}]" if d0[1] > d0[0] else "-"
+      d3_str = f"[{d3[1]-1}:{d3[0]}]" if d3[1] > d3[0] else "-"
+      d4_str = f"[{d4[1]-1}:{d4[0]}]" if d4[1] > d4[0] else "-"
       # Reconstruct pattern from mask/value
       pattern = [(value >> i) & 1 for i in range(mask.bit_length())]
-      print(f"{type_id:6d} 0x{mask:04x} 0x{value:04x} {l2:4d} {l3:4d} {l4:4d} {pattern}")
+      print(f"{type_id:6d} {name:>18} 0x{mask:04x} 0x{value:04x} {l0:4d} {l3:4d} {l4:4d} {d0_str:>12} {d3_str:>12} {d4_str:>12} {pattern}")
 
   unittest.main()
