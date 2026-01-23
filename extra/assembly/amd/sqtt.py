@@ -91,7 +91,6 @@ class InstOp(Enum):
   OTHER_GLOBAL_STORE_96 = 0x5d         # saddr=SGPR 96 or saddr=NULL 64
   OTHER_GLOBAL_STORE_128 = 0x5e        # saddr=SGPR 128 or saddr=NULL 96
   OTHER_GLOBAL_STORE_VADDR_128 = 0x5f  # saddr=NULL, 128-bit
-  UNK_60 = 0x60           # RDNA4: unknown (0x6x range)
 
   # EXEC-modifying ops (0x7x range)
   SALU_SAVEEXEC = 0x72    # s_*_saveexec_b32/b64
