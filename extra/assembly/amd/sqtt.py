@@ -201,13 +201,13 @@ class TS_DELTA_OR_MARK_L4(PacketType):  # Layout 4: 48->64 bits
   @property
   def is_marker(self) -> bool: return bool((self.bit9 and not self.bit8) or self.bit7)
 
-class TS_DELTA_OR_MARK_L0(PacketType):  # Layout 0 (CDNA): 48->64 bits, delta at bits[63:16]
+class TS_DELTA_OR_MARK_L0(PacketType):  # Layout 0 (CDNA): 64 bits, delta at bits[63:16]
   encoding = bits[6:0] == 0b0000001
   delta = bits[63:16]
-  bit8 = bits[8:8]
-  bit9 = bits[9:9]
+  bits_15_14 = bits[15:14]
+  upper32 = bits[63:32]
   @property
-  def is_marker(self) -> bool: return True  # L0: all TS_DELTA_OR_MARK are markers, delta comes from other packets
+  def is_marker(self) -> bool: return self.bits_15_14 == 0 or self.upper32 != 0  # L0: marker if bits[15:14]==00 or corrupt upper bits
 
 class TS_DELTA_S5_W2(PacketType):
   encoding = bits[4:0] == 0b11100
@@ -497,8 +497,9 @@ def format_packet(p) -> str:
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
   elif isinstance(p, (WAVESTART, WAVESTART_L4, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
   elif hasattr(p, '_fields'):
+    filt = {'delta', 'encoding'} if not isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_L4, TS_DELTA_OR_MARK_L0)) else {'encoding'}
     fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
-                      for k in p._fields if not k.startswith('_') and k not in {'delta', 'encoding'})
+                      for k in p._fields if not k.startswith('_') and k not in filt)
   else: fields = ""
   return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace("_L4", ""), 'white'))} {fields}"
 
