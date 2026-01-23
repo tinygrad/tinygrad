@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Iterator
 from enum import Enum
 from extra.assembly.amd.dsl import BitField, FixedBitField, bits
+from tinygrad.helpers import getenv
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIELD ENUMS
@@ -451,12 +452,12 @@ def format_packet(p) -> str:
     fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
                       for k in p._fields if not k.startswith('_') and k not in {'delta', 'encoding'})
   else: fields = ""
-  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name, 'white'))} {fields}"
+  return f"{p._time:8}: {colored(f'{name:18}', PACKET_COLORS.get(name.replace("_L4", ""), 'white'))} {fields}"
 
 def print_packets(packets) -> None:
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_OR_MARK_L4",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W2_L4", "TS_DELTA_S5_W3", "TS_DELTA_S5_W3_L4",
-          "TS_DELTA_S8_W3", "TS_DELTA_S8_W3_L4", "REG", "EVENT"}
+          "TS_DELTA_S8_W3", "TS_DELTA_S8_W3_L4", "REG", "EVENT"} if not getenv("NOSKIP") else {}
   for p in packets:
     if type(p).__name__ not in skip: print(format_packet(p))
 

@@ -212,8 +212,6 @@ class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
 
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase):
   target = "gfx1200"
-  def test_rocprof_wave_times_match(self): self.skipTest("RDNA4 timing not yet implemented")
-  def test_rocprof_inst_times_match(self): self.skipTest("RDNA4 timing not yet implemented")
 
 #class TestSQTTExamplesCDNA(TestSQTTExamples): target = "gfx950"
 

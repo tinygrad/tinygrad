@@ -32,6 +32,46 @@ def extract_bit_tables():
   layout4 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d2c0 - rw_file_offset)))
   return layout2, layout3, layout4
 
+def _find_ro_segment():
+  """Find the r--p segment containing .rodata of the loaded library."""
+  with open('/proc/self/maps', 'r') as f:
+    for line in f:
+      if 'librocprof-trace-decoder.so' in line and ' r--p ' in line:
+        parts = line.split()
+        base = int(parts[0].split('-')[0], 16)
+        file_offset = int(parts[2], 16)
+        # The delta table is at file offset 0x26dc0, which is in .rodata at 0x26000
+        if file_offset <= 0x26dc0:
+          return base, file_offset
+  return None, None
+
+def extract_delta_fields():
+  """Extract delta bitfield table from .rodata section.
+
+  Returns dict mapping type_id -> (delta_lo, delta_hi).
+  The delta field is at bits[delta_hi-1:delta_lo], extracted as: (reg >> delta_lo) & ((1 << (delta_hi - delta_lo)) - 1)
+  """
+  if not Path(ROCPROF_LIB).exists():
+    return None
+
+  ctypes.CDLL(ROCPROF_LIB)
+  ro_base, ro_file_offset = _find_ro_segment()
+  if ro_base is None:
+    return None
+
+  # Delta table at file offset 0x26dc0, 25 entries of (type_id, delta_lo, delta_hi) as 4-byte ints
+  table_addr = ro_base + (0x26dc0 - ro_file_offset)
+  table_size = 25 * 12
+  data = bytes((ctypes.c_uint8 * table_size).from_address(table_addr))
+
+  import struct
+  delta_fields = {}
+  for j in range(0, table_size, 12):
+    type_id, delta_lo, delta_hi = struct.unpack('<III', data[j:j+12])
+    if type_id < 32:
+      delta_fields[type_id] = (delta_lo, delta_hi)
+  return delta_fields
+
 def extract_packet_encodings():
   """Extract packet type encodings from runtime packet type registrations.
 
@@ -100,6 +140,31 @@ class TestSQTTMatchesBinary(unittest.TestCase):
         self.assertIn(type_id, encodings, f"{pkt_cls.__name__}: type_id {type_id} not in binary")
         self.assertEqual(enc, encodings[type_id],
           f"{pkt_cls.__name__}: encoding mismatch (ours=0x{enc[0]:02x}/0x{enc[1]:02x}, binary=0x{encodings[type_id][0]:02x}/0x{encodings[type_id][1]:02x})")
+
+  def _test_delta_fields_match_layout(self, layout_num: int):
+    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
+    packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
+
+    delta_fields = extract_delta_fields()
+
+    for type_id, pkt_cls in packet_types.items():
+      if type_id not in delta_fields:
+        continue
+      expected_lo, expected_hi = delta_fields[type_id]
+      delta_field = getattr(pkt_cls, 'delta', None)
+      if delta_field is None:
+        # NOP has no delta field, rocprof has (0, 0)
+        actual_lo, actual_hi = 0, 0
+      else:
+        actual_lo = delta_field.lo
+        # Our BitField hi is inclusive, rocprof's is exclusive, so convert
+        actual_hi = delta_field.hi + 1
+      with self.subTest(packet=pkt_cls.__name__):
+        self.assertEqual((actual_lo, actual_hi), (expected_lo, expected_hi),
+          f"{pkt_cls.__name__}: delta bits[{actual_hi}:{actual_lo}] != expected bits[{expected_hi}:{expected_lo}]")
+
+  def test_delta_fields_match_layout3(self): self._test_delta_fields_match_layout(3)
+  def test_delta_fields_match_layout4(self): self._test_delta_fields_match_layout(4)
 
 if __name__ == "__main__":
   layout2, layout3, layout4 = extract_bit_tables()
