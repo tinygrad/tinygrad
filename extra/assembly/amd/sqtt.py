@@ -360,39 +360,21 @@ PACKET_TYPES_L4: dict[int, type[PacketType]] = {
   7: TS_DELTA_S8_W3_L4, 9: WAVESTART_L4, 10: TS_DELTA_S5_W2_L4, 11: WAVEALLOC_L4,
   12: TS_DELTA_S5_W3_L4, 13: PERF_L4, 22: TS_DELTA_OR_MARK_L4, 24: INST_L4,
 }
-def _build_state_table(packet_types: dict[int, type[PacketType]]) -> bytes:
-  table = [16] * 256  # default to NOP (type_id 16)
-  # Sort by mask bit count descending (more specific encodings first), NOP last
+def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dict[int, tuple], bytes]:
+  # Build state table: byte -> opcode. Sort by mask specificity (more bits first), NOP last
   sorted_types = sorted(packet_types.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
-
-  for byte_val in range(256):
-    for opcode, pkt_cls in sorted_types:
-      if (byte_val & pkt_cls.encoding.mask) == pkt_cls.encoding.default:
-        table[byte_val] = opcode
-        break
-
-  return bytes(table)
-
-STATE_TO_OPCODE_L3 = _build_state_table(PACKET_TYPES_L3)
-STATE_TO_OPCODE_L4 = _build_state_table(PACKET_TYPES_L4)
-
-# Special case opcodes (rocprof type IDs)
-_TS_DELTA_OR_MARK_OPCODE, _TS_DELTA_SHORT_OPCODE = 22, 15
-
-# Combined lookup: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
-# special_case: 0=none, 1=TS_DELTA_OR_MARK, 2=TS_DELTA_SHORT
-def _build_decode_info(packet_types: dict[int, type[PacketType]], state_table: bytes) -> tuple[dict[int, tuple], bytes]:
-  decode_info: dict[int, tuple] = {}
+  state_table = bytes(next((op for op, cls in sorted_types if (b & cls.encoding.mask) == cls.encoding.default), 16) for b in range(256))
+  # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
+  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 8)
+  decode_info = {}
   for opcode, pkt_cls in packet_types.items():
     delta_field = getattr(pkt_cls, 'delta', None)
-    delta_lo = delta_field.lo if delta_field else 0
-    delta_mask = delta_field.mask if delta_field else 0
-    special = 1 if opcode == _TS_DELTA_OR_MARK_OPCODE else (2 if opcode == _TS_DELTA_SHORT_OPCODE else 0)
-    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_lo, delta_mask, special)
+    special = {22: 1, 15: 2}.get(opcode, 0)  # TS_DELTA_OR_MARK=22, TS_DELTA_SHORT=15
+    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_field.lo if delta_field else 0, delta_field.mask if delta_field else 0, special)
   return decode_info, state_table
 
-_DECODE_INFO_L3, _STATE_TABLE_L3 = _build_decode_info(PACKET_TYPES_L3, STATE_TO_OPCODE_L3)
-_DECODE_INFO_L4, _STATE_TABLE_L4 = _build_decode_info(PACKET_TYPES_L4, STATE_TO_OPCODE_L4)
+_DECODE_INFO_L3, _STATE_TABLE_L3 = _build_decode_tables(PACKET_TYPES_L3)
+_DECODE_INFO_L4, _STATE_TABLE_L4 = _build_decode_tables(PACKET_TYPES_L4)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
@@ -424,7 +406,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
     time += delta
     pkt = pkt_cls.from_raw(reg, time)
     # detect layout from first LAYOUT_HEADER and switch decode tables if needed
-    # NOTE: Layout 0 (CDNA/MI300) uses a completely different 16-bit header format, not nibbles - not supported here
+    # NOTE: CDNA uses a completely different 16-bit header format, not nibbles - not supported here
     if pkt_cls is LAYOUT_HEADER and pkt.layout == 4:
       decode_info, state_table = _DECODE_INFO_L4, _STATE_TABLE_L4
     yield pkt
