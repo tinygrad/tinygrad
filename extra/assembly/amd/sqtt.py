@@ -382,17 +382,18 @@ _DECODE_INFO_L4, _STATE_TABLE_L4 = _build_decode_tables(PACKET_TYPES_L4)
 # CDNA pkt_fmt -> size in bytes (extracted from rocprof hash table)
 CDNA_PKT_SIZES = {0: 2, 1: 8, 2: 8, 3: 4, 4: 2, 5: 6, 6: 2, 7: 2, 8: 2, 9: 2, 10: 2, 11: 8, 12: 6, 13: 4, 14: 8, 15: 6}
 
-class CDNA_PKT_0(PacketType):
+class CDNA_TIMESTAMP_DELTA(PacketType):
   """pkt_fmt=0: 16-bit timestamp delta packet"""
   encoding = bits[3:0] == 0
   delta = bits[11:4]      # (data >> 4) & 0xff
   unk_0 = bits[12:12]     # (data >> 0xc) & 1
   unk_1 = bits[15:13]     # (data >> 0xd)
 
-class CDNA_PKT_1(PacketType):
+class CDNA_TIMESTAMP(PacketType):
   """pkt_fmt=1: 64-bit timestamp packet (case 0x0)"""
   encoding = bits[3:0] == 1
-  unk_padding = bits[63:4]  # stored as timestamp in local_58
+  unk_0 = bits[15:4]
+  timestamp = bits[63:16]   # stored as (data_word >> 0x10) in low 46 bits of local_58
 
 class CDNA_PKT_2(PacketType):
   """pkt_fmt=2: 64-bit packet (case 0x4)"""
@@ -401,14 +402,14 @@ class CDNA_PKT_2(PacketType):
   unk_1 = bits[7:7]       # (data >> 7) + 1 & 1
   unk_padding = bits[63:8]
 
-class CDNA_PKT_3(PacketType):
-  """pkt_fmt=3: 32-bit packet (case 0x8)"""
+class CDNA_WAVESTART(PacketType):
+  """pkt_fmt=3: 32-bit WAVESTART packet (case 0x8)"""
   encoding = bits[3:0] == 3
   unk_0 = bits[5:5]       # (data >> 5) & 1
   unk_1 = bits[9:6]       # (data >> 6) & 0xf
-  unk_2 = bits[13:10]     # (data >> 10) & 0xf
-  unk_3 = bits[15:14]     # (data >> 0xe) & 3
-  unk_4 = bits[17:16]     # (data >> 0x10) & 3
+  wave = bits[13:10]      # (data >> 10) & 0xf
+  simd = bits[15:14]      # (data >> 0xe) & 3
+  cu = bits[17:16]        # (data >> 0x10) & 3
   unk_5 = bits[19:18]     # (data >> 0x12) & 3
   unk_6 = bits[28:22]     # (data >> 0x16) & 0x7f
   unk_padding = bits[31:29]
@@ -429,13 +430,13 @@ class CDNA_PKT_5(PacketType):
   unk_2 = bits[15:9]      # (data >> 9) & 0x7f
   unk_padding = bits[47:16]
 
-class CDNA_PKT_6(PacketType):
-  """pkt_fmt=6: 16-bit packet (case 0x14, same as 0x8/0xc)"""
+class CDNA_WAVEEND(PacketType):
+  """pkt_fmt=6: 16-bit WAVEEND packet (case 0x14, same as 0x8/0xc)"""
   encoding = bits[3:0] == 6
   unk_0 = bits[5:5]       # (data_word >> 5) & 1
   unk_1 = bits[9:6]       # (data_word >> 6) & 0xf
-  unk_2 = bits[13:10]     # (data_word >> 10) & 0xf
-  unk_3 = bits[15:14]     # (data_word >> 0xe)
+  wave = bits[13:10]      # (data_word >> 10) & 0xf
+  simd = bits[15:14]      # (data_word >> 0xe)
 
 class CDNA_PKT_10(PacketType):
   """pkt_fmt=10: 16-bit packet (case 0x24)"""
@@ -492,8 +493,8 @@ class CDNA_PKT_15(PacketType):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 CDNA_PKT_TYPES: dict[int, type[PacketType]] = {
-  0: CDNA_PKT_0, 1: CDNA_PKT_1, 2: CDNA_PKT_2, 3: CDNA_PKT_3, 4: CDNA_PKT_4,
-  5: CDNA_PKT_5, 6: CDNA_PKT_6, 10: CDNA_PKT_10, 11: CDNA_PKT_11, 13: CDNA_PKT_13, 14: CDNA_PKT_14, 15: CDNA_PKT_15,
+  0: CDNA_TIMESTAMP_DELTA, 1: CDNA_TIMESTAMP, 2: CDNA_PKT_2, 3: CDNA_WAVESTART, 4: CDNA_PKT_4,
+  5: CDNA_PKT_5, 6: CDNA_WAVEEND, 10: CDNA_PKT_10, 11: CDNA_PKT_11, 13: CDNA_PKT_13, 14: CDNA_PKT_14, 15: CDNA_PKT_15,
 }
 # Validate CDNA packet definitions
 for pkt_fmt, pkt_cls in CDNA_PKT_TYPES.items():
