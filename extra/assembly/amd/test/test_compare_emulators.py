@@ -10,7 +10,7 @@ os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
 from extra.assembly.amd.emu import WaveState, decode_program, WAVE_SIZE, set_valid_mem_ranges, LDSMem
-from extra.assembly.amd.test.helpers import KernelInfo, get_target
+from extra.assembly.amd.test.helpers import KernelInfo
 from extra.assembly.amd.test.bench_emu import REMU_PATH
 
 def _is_f32_nan(bits: int) -> bool:
