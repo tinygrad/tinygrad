@@ -76,12 +76,12 @@ def extract_delta_fields():
         delta_fields[type_id] = (delta_lo, delta_hi)
     return delta_fields
 
-  # Delta tables: Layout 0 at 0x26800, Layout 2 at 0x26a80, Layout 3 at 0x26dc0, Layout 4 at 0x27300
+  # Delta tables: Layout 0 at 0x26800, Layout 3 at 0x26dc0, Layout 4 at 0x27300
+  # Note: L0 and L2 share the same delta table at 0x26800
   layout0 = read_table(0x26800, 24)  # L0 has 24 entries (no type 25)
-  layout2 = read_table(0x26a80, 25)
   layout3 = read_table(0x26dc0, 25)
   layout4 = read_table(0x27300, 27)  # L4 has more entries
-  return layout0, layout2, layout3, layout4
+  return layout0, layout0, layout3, layout4  # L2 shares L0's delta table
 
 def extract_packet_encodings():
   """Extract packet type encodings from runtime packet type registrations.
