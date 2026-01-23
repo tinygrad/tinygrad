@@ -132,7 +132,7 @@ class PacketType:
     return inst
 
   def __repr__(self) -> str:
-    fields_str = ", ".join(f"{k}={getattr(self, k)}" for k in self._fields if not k.startswith('_'))
+    fields_str = ", ".join(f"{k}={getattr(self, k)}" for k in self._fields if not k.startswith('_') and k != 'encoding')
     return f"{self.__class__.__name__}({fields_str})"
 
 # ═══════════════════════════════════════════════════════════════════════════════
