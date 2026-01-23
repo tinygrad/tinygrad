@@ -101,7 +101,7 @@ class VFLAT(Inst):
   sve = BitField(49, 49)
   scope = BitField(51, 50)
   th = BitField(54, 52)
-  vsrc = BitField(62, 55)
+  vsrc = VGPRField(62, 55)
   ioffset = BitField(95, 72)
 
 class VGLOBAL(Inst):
@@ -114,7 +114,7 @@ class VGLOBAL(Inst):
   sve = BitField(49, 49)
   scope = BitField(51, 50)
   th = BitField(54, 52)
-  vsrc = BitField(62, 55)
+  vsrc = VGPRField(62, 55)
   ioffset = BitField(95, 72)
 
 class VIMAGE(Inst):
@@ -250,7 +250,7 @@ class VSCRATCH(Inst):
   sve = BitField(49, 49)
   scope = BitField(51, 50)
   th = BitField(54, 52)
-  vsrc = BitField(62, 55)
+  vsrc = VGPRField(62, 55)
   ioffset = BitField(95, 72)
 
 class SOP1_LIT(SOP1):

@@ -247,7 +247,7 @@ def write_enum(enums, path):
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_ins(encodings, enums, lit_only_ops, types, arch, path):
-  _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr"}
+  _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr", "vsrc"}
   _VARIANT_SUFFIXES = ("_LIT", "_DPP16", "_DPP8", "_SDWA_SDST", "_SDWA", "_MFMA")
   def get_base_fmt(fmt):
     for sfx in _VARIANT_SUFFIXES: fmt = fmt.replace(sfx, "")
