@@ -157,8 +157,8 @@ class TS_DELTA_S5_W3(PacketType):
 
 class TS_DELTA_S5_W3_L4(PacketType):  # Layout 4: 52->56 bits
   encoding = bits[4:0] == 0b00110
-  delta = bits[7:5]
-  _padding = bits[55:8]
+  delta = bits[9:7]
+  _padding = bits[55:10]
 
 class TS_DELTA_SHORT(PacketType):
   encoding = bits[3:0] == 0b1000
@@ -172,12 +172,11 @@ class TS_DELTA_OR_MARK(PacketType):
   @property
   def is_marker(self) -> bool: return bool(self.bit9 and not self.bit8)
 
-class TS_DELTA_OR_MARK_L4(PacketType):  # Layout 4: 48->64 bits, bit7=1 means delta=0 (handled in decoder)
+class TS_DELTA_OR_MARK_L4(PacketType):  # Layout 4: 48->64 bits
   encoding = bits[6:0] == 0b0000001
-  delta = bits[47:12]
+  delta = bits[63:12]
   bit8 = bits[8:8]
   bit9 = bits[9:9]
-  _padding = bits[63:48]
   @property
   def is_marker(self) -> bool: return bool(self.bit9 and not self.bit8)
 
@@ -275,8 +274,8 @@ class PERF(PacketType):  # exclude: 1 << 11
 
 class PERF_L4(PacketType):  # Layout 4: 28->32 bits
   encoding = bits[4:0] == 0b10110
-  delta = bits[7:5]
-  arg = bits[31:8]
+  delta = bits[9:7]
+  arg = bits[31:10]
 
 class NOP(PacketType):
   encoding = bits[3:0] == 0b0000
@@ -336,10 +335,10 @@ class INST(PacketType):
   wave = bits[12:8]
   op = bits[19:13].enum(InstOp)
 
-class INST_L4(PacketType):  # Layout 4: different InstOp encoding
+class INST_L4(PacketType):  # Layout 4: different delta position and InstOp encoding
   encoding = bits[2:0] == 0b010
-  delta = bits[6:4]
-  flag1 = bits[3:3]
+  delta = bits[5:3]
+  flag1 = bits[6:6]
   flag2 = bits[7:7]
   wave = bits[12:8]
   op = bits[19:13].enum(InstOpL4)

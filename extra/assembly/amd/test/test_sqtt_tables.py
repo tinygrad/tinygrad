@@ -46,31 +46,37 @@ def _find_ro_segment():
   return None, None
 
 def extract_delta_fields():
-  """Extract delta bitfield table from .rodata section.
+  """Extract delta bitfield tables from .rodata section.
 
-  Returns dict mapping type_id -> (delta_lo, delta_hi).
+  Returns (layout2_table, layout3_table, layout4_table) where each is dict mapping type_id -> (delta_lo, delta_hi).
   The delta field is at bits[delta_hi-1:delta_lo], extracted as: (reg >> delta_lo) & ((1 << (delta_hi - delta_lo)) - 1)
   """
   if not Path(ROCPROF_LIB).exists():
-    return None
+    return None, None, None
 
   ctypes.CDLL(ROCPROF_LIB)
   ro_base, ro_file_offset = _find_ro_segment()
   if ro_base is None:
-    return None
-
-  # Delta table at file offset 0x26dc0, 25 entries of (type_id, delta_lo, delta_hi) as 4-byte ints
-  table_addr = ro_base + (0x26dc0 - ro_file_offset)
-  table_size = 25 * 12
-  data = bytes((ctypes.c_uint8 * table_size).from_address(table_addr))
+    return None, None, None
 
   import struct
-  delta_fields = {}
-  for j in range(0, table_size, 12):
-    type_id, delta_lo, delta_hi = struct.unpack('<III', data[j:j+12])
-    if type_id < 32:
-      delta_fields[type_id] = (delta_lo, delta_hi)
-  return delta_fields
+
+  def read_table(file_offset, num_entries=25):
+    table_addr = ro_base + (file_offset - ro_file_offset)
+    table_size = num_entries * 12
+    data = bytes((ctypes.c_uint8 * table_size).from_address(table_addr))
+    delta_fields = {}
+    for j in range(0, table_size, 12):
+      type_id, delta_lo, delta_hi = struct.unpack('<III', data[j:j+12])
+      if type_id < 32:
+        delta_fields[type_id] = (delta_lo, delta_hi)
+    return delta_fields
+
+  # Delta tables: Layout 2 at 0x26a80, Layout 3 at 0x26dc0, Layout 4 at 0x27300
+  layout2 = read_table(0x26a80, 25)
+  layout3 = read_table(0x26dc0, 25)
+  layout4 = read_table(0x27300, 27)  # L4 has more entries
+  return layout2, layout3, layout4
 
 def extract_packet_encodings():
   """Extract packet type encodings from runtime packet type registrations.
@@ -145,7 +151,8 @@ class TestSQTTMatchesBinary(unittest.TestCase):
     from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
     packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
 
-    delta_fields = extract_delta_fields()
+    layout2_deltas, layout3_deltas, layout4_deltas = extract_delta_fields()
+    delta_fields = {2: layout2_deltas, 3: layout3_deltas, 4: layout4_deltas}[layout_num]
 
     for type_id, pkt_cls in packet_types.items():
       if type_id not in delta_fields:
