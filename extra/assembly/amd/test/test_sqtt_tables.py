@@ -19,22 +19,21 @@ def _find_rw_segment():
 def extract_bit_tables():
   """Extract bit budget tables by loading librocprof-trace-decoder.so at runtime.
 
-  Returns (layout0, layout2, layout3, layout4) - Layout 0 (CDNA) shares Layout 2's bit counts.
+  Returns (layout2, layout3, layout4). CDNA uses a different 16-bit header format, not nibble-based.
   """
   if not Path(ROCPROF_LIB).exists():
-    return None, None, None, None
+    return None, None, None
 
   ctypes.CDLL(ROCPROF_LIB)
   rw_base, rw_file_offset = _find_rw_segment()
   if rw_base is None:
-    return None, None, None, None
+    return None, None, None
 
   # Bit tables at file offsets 0x2d220, 0x2d280, 0x2d2c0
-  # Layout 0 (CDNA) uses the same bit counts as Layout 2
   layout2 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d220 - rw_file_offset)))
   layout3 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d280 - rw_file_offset)))
   layout4 = list((ctypes.c_uint8 * 32).from_address(rw_base + (0x2d2c0 - rw_file_offset)))
-  return layout2, layout2, layout3, layout4  # L0 shares L2's bit counts
+  return layout2, layout3, layout4
 
 def _find_ro_segment():
   """Find the r--p segment containing .rodata of the loaded library."""
@@ -52,16 +51,16 @@ def _find_ro_segment():
 def extract_delta_fields():
   """Extract delta bitfield tables from .rodata section.
 
-  Returns (layout0_table, layout2_table, layout3_table, layout4_table) where each is dict mapping type_id -> (delta_lo, delta_hi).
+  Returns (layout2_table, layout3_table, layout4_table) where each is dict mapping type_id -> (delta_lo, delta_hi).
   The delta field is at bits[delta_hi-1:delta_lo], extracted as: (reg >> delta_lo) & ((1 << (delta_hi - delta_lo)) - 1)
   """
   if not Path(ROCPROF_LIB).exists():
-    return None, None, None, None
+    return None, None, None
 
   ctypes.CDLL(ROCPROF_LIB)
   ro_base, ro_file_offset = _find_ro_segment()
   if ro_base is None:
-    return None, None, None, None
+    return None, None, None
 
   import struct
 
@@ -76,12 +75,11 @@ def extract_delta_fields():
         delta_fields[type_id] = (delta_lo, delta_hi)
     return delta_fields
 
-  # Delta tables: Layout 0 at 0x26800, Layout 3 at 0x26dc0, Layout 4 at 0x27300
-  # Note: L0 and L2 share the same delta table at 0x26800
-  layout0 = read_table(0x26800, 24)  # L0 has 24 entries (no type 25)
+  # Delta tables: Layout 2 at 0x26800, Layout 3 at 0x26dc0, Layout 4 at 0x27300
+  layout2 = read_table(0x26800, 24)  # L2 has 24 entries (no type 25)
   layout3 = read_table(0x26dc0, 25)
   layout4 = read_table(0x27300, 27)  # L4 has more entries
-  return layout0, layout0, layout3, layout4  # L2 shares L0's delta table
+  return layout2, layout3, layout4
 
 def _read_encodings_from_vector(rw_base, rw_file_offset, vec_offset):
   """Read packet encodings from a registration vector at given file offset."""
@@ -114,8 +112,8 @@ def _read_encodings_from_vector(rw_base, rw_file_offset, vec_offset):
 def extract_packet_encodings():
   """Extract packet type encodings from runtime packet type registrations.
 
-  Returns (L0_encodings, L3_encodings, L4_encodings) - each is dict mapping type_id -> (mask, value).
-  L0 and L4 have layout-specific overrides on top of L3 base encodings.
+  Returns (L2_encodings, L3_encodings, L4_encodings) - each is dict mapping type_id -> (mask, value).
+  L2 and L4 have layout-specific overrides on top of L3 base encodings.
   """
   if not Path(ROCPROF_LIB).exists():
     return None, None, None
@@ -128,43 +126,43 @@ def extract_packet_encodings():
   # Base packet registrations vector at file offset 0x2d340 (shared by all layouts)
   base_encodings = _read_encodings_from_vector(rw_base, rw_file_offset, 0x2d340)
 
-  # L0 overrides: type 17 and 25 have different encodings (from ghidra lines 25633-25657)
+  # L2 overrides: type 17 and 25 have different encodings (from ghidra lines 25633-25657)
   # Type 17: pattern [1,0,0,0,1,0,1] = mask 0x7f, value 0x51
   # Type 25: pattern [1,0,0,0,1,1,0] = mask 0x7f, value 0x31
-  l0_encodings = {**base_encodings, 17: (0x7f, 0x51), 25: (0x7f, 0x31)}
+  l2_encodings = {**base_encodings, 17: (0x7f, 0x51), 25: (0x7f, 0x31)}
 
   # L3 uses base encodings directly
   l3_encodings = base_encodings
 
   # L4 uses same encodings as L3 - only field positions/sizes differ
-  l4_encodings = base_encodings
+  l4_encodings = {**base_encodings}
 
-  return l0_encodings, l3_encodings, l4_encodings
+  return l2_encodings, l3_encodings, l4_encodings
 
 @unittest.skipUnless(Path(ROCPROF_LIB).exists(), "rocprof-trace-decoder not installed")
 class TestSQTTMatchesBinary(unittest.TestCase):
   def _test_bit_counts_match_layout(self, layout_num: int):
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L0, PACKET_TYPES_L3, PACKET_TYPES_L4
-    layout0, layout2, layout3, layout4 = extract_bit_tables()
-    layout = {0: layout0, 2: layout2, 3: layout3, 4: layout4}[layout_num]
-    packet_types = {0: PACKET_TYPES_L0, 3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
+    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
+    layout2, layout3, layout4 = extract_bit_tables()
+    layout = {3: layout3, 4: layout4}[layout_num]
+    packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
 
     for type_id, pkt_cls in packet_types.items():
       expected_bits, actual_bits = layout[type_id], pkt_cls._size_nibbles * 4
       with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual(actual_bits, expected_bits, f"{pkt_cls.__name__}: {actual_bits} bits != expected {expected_bits}")
 
-  def test_bit_counts_match_layout0(self): self._test_bit_counts_match_layout(0)
+  # NOTE: CDNA uses a completely different 16-bit header format, not nibble-based - not tested here
   def test_bit_counts_match_layout3(self): self._test_bit_counts_match_layout(3)
   def test_bit_counts_match_layout4(self): self._test_bit_counts_match_layout(4)
 
   def _test_encodings_match_layout(self, layout_num: int):
     """Verify each PACKET_TYPE encoding matches rocprof-trace-decoder for given layout."""
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L0, PACKET_TYPES_L3, PACKET_TYPES_L4
-    packet_types = {0: PACKET_TYPES_L0, 3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
+    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
+    packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
 
-    l0_enc, l3_enc, l4_enc = extract_packet_encodings()
-    encodings = {0: l0_enc, 3: l3_enc, 4: l4_enc}[layout_num]
+    l2_enc, l3_enc, l4_enc = extract_packet_encodings()
+    encodings = {3: l3_enc, 4: l4_enc}[layout_num]
 
     for type_id, pkt_cls in packet_types.items():
       enc = (pkt_cls.encoding.mask, pkt_cls.encoding.default)
@@ -173,16 +171,16 @@ class TestSQTTMatchesBinary(unittest.TestCase):
         self.assertEqual(enc, encodings[type_id],
           f"{pkt_cls.__name__}: encoding mismatch (ours=0x{enc[0]:02x}/0x{enc[1]:02x}, binary=0x{encodings[type_id][0]:02x}/0x{encodings[type_id][1]:02x})")
 
-  def test_encodings_match_layout0(self): self._test_encodings_match_layout(0)
+  # NOTE: CDNA uses a completely different 16-bit header format, not nibble-based - not tested here
   def test_encodings_match_layout3(self): self._test_encodings_match_layout(3)
   def test_encodings_match_layout4(self): self._test_encodings_match_layout(4)
 
   def _test_delta_fields_match_layout(self, layout_num: int):
-    from extra.assembly.amd.sqtt import PACKET_TYPES_L0, PACKET_TYPES_L3, PACKET_TYPES_L4
-    packet_types = {0: PACKET_TYPES_L0, 3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
+    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
+    packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
 
-    layout0_deltas, layout2_deltas, layout3_deltas, layout4_deltas = extract_delta_fields()
-    delta_fields = {0: layout0_deltas, 2: layout2_deltas, 3: layout3_deltas, 4: layout4_deltas}[layout_num]
+    layout2_deltas, layout3_deltas, layout4_deltas = extract_delta_fields()
+    delta_fields = {3: layout3_deltas, 4: layout4_deltas}[layout_num]
 
     for type_id, pkt_cls in packet_types.items():
       if type_id not in delta_fields:
@@ -200,14 +198,14 @@ class TestSQTTMatchesBinary(unittest.TestCase):
         self.assertEqual((actual_lo, actual_hi), (expected_lo, expected_hi),
           f"{pkt_cls.__name__}: delta bits[{actual_hi}:{actual_lo}] != expected bits[{expected_hi}:{expected_lo}]")
 
-  def test_delta_fields_match_layout0(self): self._test_delta_fields_match_layout(0)
+  # NOTE: CDNA uses a completely different 16-bit header format, not nibble-based - not tested here
   def test_delta_fields_match_layout3(self): self._test_delta_fields_match_layout(3)
   def test_delta_fields_match_layout4(self): self._test_delta_fields_match_layout(4)
 
 if __name__ == "__main__":
-  layout0, layout2, layout3, layout4 = extract_bit_tables()
-  l0_enc, l3_enc, l4_enc = extract_packet_encodings()
-  delta0, delta2, delta3, delta4 = extract_delta_fields()
+  layout2, layout3, layout4 = extract_bit_tables()
+  l2_enc, l3_enc, l4_enc = extract_packet_encodings()
+  delta2, delta3, delta4 = extract_delta_fields()
 
   TYPE_NAMES = {
     1: 'VALUINST', 2: 'VMEMEXEC', 3: 'ALUEXEC', 4: 'IMMEDIATE', 5: 'IMMEDIATE_MASK',
@@ -218,30 +216,29 @@ if __name__ == "__main__":
     26: 'UNK_26', 27: 'UNK_27', 28: 'UNK_28',
   }
 
-  print("L0:", layout0)
   print("L2:", layout2)
   print("L3:", layout3)
   print("L4:", layout4)
 
   if l3_enc and layout3:
     print("\nPacket type registrations from rocprof-trace-decoder:\n")
-    print(f"{'TypeID':>6} {'Name':>18} {'L0 enc':>12} {'L3 enc':>12} {'L4 enc':>12} {'L0':>4} {'L3':>4} {'L4':>4} {'L0 delta':>12} {'L3 delta':>12} {'L4 delta':>12}")
+    print(f"{'TypeID':>6} {'Name':>18} {'L2 enc':>12} {'L3 enc':>12} {'L4 enc':>12} {'L2':>4} {'L3':>4} {'L4':>4} {'L2 delta':>12} {'L3 delta':>12} {'L4 delta':>12}")
     print("-" * 140)
-    all_type_ids = sorted(set(l0_enc.keys()) | set(l3_enc.keys()) | set(l4_enc.keys()))
+    all_type_ids = sorted(set(l2_enc.keys()) | set(l3_enc.keys()) | set(l4_enc.keys()))
     for type_id in all_type_ids:
       name = TYPE_NAMES.get(type_id, f'UNK_{type_id}')
-      l0 = layout0[type_id] if type_id < len(layout0) else 0
+      l2 = layout2[type_id] if type_id < len(layout2) else 0
       l3 = layout3[type_id] if type_id < len(layout3) else 0
       l4 = layout4[type_id] if type_id < len(layout4) else 0
-      d0 = delta0.get(type_id, (0, 0)) if delta0 else (0, 0)
+      d2 = delta2.get(type_id, (0, 0)) if delta2 else (0, 0)
       d3 = delta3.get(type_id, (0, 0)) if delta3 else (0, 0)
       d4 = delta4.get(type_id, (0, 0)) if delta4 else (0, 0)
-      d0_str = f"[{d0[1]-1}:{d0[0]}]" if d0[1] > d0[0] else "-"
+      d2_str = f"[{d2[1]-1}:{d2[0]}]" if d2[1] > d2[0] else "-"
       d3_str = f"[{d3[1]-1}:{d3[0]}]" if d3[1] > d3[0] else "-"
       d4_str = f"[{d4[1]-1}:{d4[0]}]" if d4[1] > d4[0] else "-"
-      l0_enc_str = f"0x{l0_enc[type_id][0]:02x}/0x{l0_enc[type_id][1]:02x}" if type_id in l0_enc else "-"
+      l2_enc_str = f"0x{l2_enc[type_id][0]:02x}/0x{l2_enc[type_id][1]:02x}" if type_id in l2_enc else "-"
       l3_enc_str = f"0x{l3_enc[type_id][0]:02x}/0x{l3_enc[type_id][1]:02x}" if type_id in l3_enc else "-"
       l4_enc_str = f"0x{l4_enc[type_id][0]:02x}/0x{l4_enc[type_id][1]:02x}" if type_id in l4_enc else "-"
-      print(f"{type_id:6d} {name:>18} {l0_enc_str:>12} {l3_enc_str:>12} {l4_enc_str:>12} {l0:4d} {l3:4d} {l4:4d} {d0_str:>12} {d3_str:>12} {d4_str:>12}")
+      print(f"{type_id:6d} {name:>18} {l2_enc_str:>12} {l3_enc_str:>12} {l4_enc_str:>12} {l2:4d} {l3:4d} {l4:4d} {d2_str:>12} {d3_str:>12} {d4_str:>12}")
 
   unittest.main()

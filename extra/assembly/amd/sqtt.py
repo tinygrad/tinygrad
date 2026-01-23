@@ -111,26 +111,6 @@ class InstOpL4(Enum):
   OTHER_VMEM = 0x5e
   UNK_60 = 0x60
 
-class InstOpL0(Enum):
-  """SQTT instruction operation types for CDNA3 (gfx950/MI300). Different encoding from RDNA."""
-  SALU = 0x0
-  SMEM = 0x1
-  FLAT = 0x3
-  UNK_06 = 0x6
-  UNK_0C = 0xc
-  UNK_0D = 0xd
-  UNK_1C = 0x1c
-  UNK_29 = 0x29
-  UNK_30 = 0x30
-  UNK_36 = 0x36
-  UNK_41 = 0x41
-  UNK_43 = 0x43
-  UNK_46 = 0x46
-  UNK_47 = 0x47
-  UNK_52 = 0x52
-  UNK_66 = 0x66
-  UNK_7F = 0x7f
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -200,14 +180,6 @@ class TS_DELTA_OR_MARK_L4(PacketType):  # Layout 4: 48->64 bits
   bit9 = bits[9:9]
   @property
   def is_marker(self) -> bool: return bool((self.bit9 and not self.bit8) or self.bit7)
-
-class TS_DELTA_OR_MARK_L0(PacketType):  # Layout 0 (CDNA): 64 bits, delta at bits[63:16]
-  encoding = bits[6:0] == 0b0000001
-  delta = bits[63:16]
-  bits_15_14 = bits[15:14]
-  upper32 = bits[63:32]
-  @property
-  def is_marker(self) -> bool: return self.bits_15_14 == 0 or self.upper32 != 0  # L0: marker if bits[15:14]==00 or corrupt upper bits
 
 class TS_DELTA_S5_W2(PacketType):
   encoding = bits[4:0] == 0b11100
@@ -372,23 +344,10 @@ class INST_L4(PacketType):  # Layout 4: different delta position and InstOp enco
   wave = bits[12:8]
   op = bits[19:13].enum(InstOpL4)
 
-class INST_L0(PacketType):  # Layout 0 (CDNA): different InstOp encoding
-  encoding = bits[2:0] == 0b010
-  delta = bits[6:4]
-  flag1 = bits[3:3]
-  flag2 = bits[7:7]
-  wave = bits[12:8]
-  op = bits[19:13].enum(InstOpL0)
-
 class UTILCTR(PacketType):
   encoding = bits[6:0] == 0b0110001
   delta = bits[8:7]
   ctr = bits[47:9]
-
-class UTILCTR_L0(PacketType):  # Layout 0 (CDNA): 48->64 bits
-  encoding = bits[6:0] == 0b0110001
-  delta = bits[8:7]
-  ctr = bits[63:9]
 
 # Packet types with rocprof type IDs as keys
 PACKET_TYPES_L3: dict[int, type[PacketType]] = {
@@ -401,11 +360,6 @@ PACKET_TYPES_L4: dict[int, type[PacketType]] = {
   7: TS_DELTA_S8_W3_L4, 9: WAVESTART_L4, 10: TS_DELTA_S5_W2_L4, 11: WAVEALLOC_L4,
   12: TS_DELTA_S5_W3_L4, 13: PERF_L4, 22: TS_DELTA_OR_MARK_L4, 24: INST_L4,
 }
-PACKET_TYPES_L0: dict[int, type[PacketType]] = {
-  **PACKET_TYPES_L3,
-  14: UTILCTR_L0, 22: TS_DELTA_OR_MARK_L0, 24: INST_L0,
-}
-
 def _build_state_table(packet_types: dict[int, type[PacketType]]) -> bytes:
   table = [16] * 256  # default to NOP (type_id 16)
   # Sort by mask bit count descending (more specific encodings first), NOP last
@@ -419,7 +373,6 @@ def _build_state_table(packet_types: dict[int, type[PacketType]]) -> bytes:
 
   return bytes(table)
 
-STATE_TO_OPCODE_L0 = _build_state_table(PACKET_TYPES_L0)
 STATE_TO_OPCODE_L3 = _build_state_table(PACKET_TYPES_L3)
 STATE_TO_OPCODE_L4 = _build_state_table(PACKET_TYPES_L4)
 
@@ -438,7 +391,6 @@ def _build_decode_info(packet_types: dict[int, type[PacketType]], state_table: b
     decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_lo, delta_mask, special)
   return decode_info, state_table
 
-_DECODE_INFO_L0, _STATE_TABLE_L0 = _build_decode_info(PACKET_TYPES_L0, STATE_TO_OPCODE_L0)
 _DECODE_INFO_L3, _STATE_TABLE_L3 = _build_decode_info(PACKET_TYPES_L3, STATE_TO_OPCODE_L3)
 _DECODE_INFO_L4, _STATE_TABLE_L4 = _build_decode_info(PACKET_TYPES_L4, STATE_TO_OPCODE_L4)
 
@@ -472,9 +424,9 @@ def decode(data: bytes) -> Iterator[PacketType]:
     time += delta
     pkt = pkt_cls.from_raw(reg, time)
     # detect layout from first LAYOUT_HEADER and switch decode tables if needed
-    if pkt_cls is LAYOUT_HEADER:
-      if pkt.layout == 0: decode_info, state_table = _DECODE_INFO_L0, _STATE_TABLE_L0
-      elif pkt.layout == 4: decode_info, state_table = _DECODE_INFO_L4, _STATE_TABLE_L4
+    # NOTE: Layout 0 (CDNA/MI300) uses a completely different 16-bit header format, not nibbles - not supported here
+    if pkt_cls is LAYOUT_HEADER and pkt.layout == 4:
+      decode_info, state_table = _DECODE_INFO_L4, _STATE_TABLE_L4
     yield pkt
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -499,7 +451,7 @@ def format_packet(p) -> str:
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
   elif isinstance(p, (WAVESTART, WAVESTART_L4, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
   elif hasattr(p, '_fields'):
-    filt = {'delta', 'encoding'} if not isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_L4, TS_DELTA_OR_MARK_L0)) else {'encoding'}
+    filt = {'delta', 'encoding'} if not isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_L4)) else {'encoding'}
     fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"
                       for k in p._fields if not k.startswith('_') and k not in filt)
   else: fields = ""
@@ -509,7 +461,7 @@ def print_packets(packets) -> None:
   skip = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK",
           "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "EVENT"} if not getenv("NOSKIP") else {"NOP"}
   for p in packets:
-    if type(p).__name__.replace("_L4", "").replace("_L0", "") not in skip: print(format_packet(p))
+    if type(p).__name__.replace("_L4", "") not in skip: print(format_packet(p))
 
 if __name__ == "__main__":
   import sys, pickle
