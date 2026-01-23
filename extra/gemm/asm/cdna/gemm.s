@@ -2,8 +2,9 @@
 	s_load_dwordx2  s[28:29], s[0:1], 0x0    // C
 	s_load_dwordx2  s[34:35], s[0:1], 0x08   // A
 	s_load_dwordx2  s[32:33], s[0:1], 0x10   // B
-	// ** others kernel args
-	s_load_dword    s24, s[0:1], 0x18        // N
+	s_load_dwordx2  s[24:25], s[0:1], 0x18   // params
+	s_waitcnt lgkmcnt(0)
+	s_load_dword  s24, s[24:25], 0x0
 	s_waitcnt lgkmcnt(0)
 	// "info"
 	s_mov_b32 s51, 1             // gemm_info = 1

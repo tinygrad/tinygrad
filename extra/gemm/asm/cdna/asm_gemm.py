@@ -21,19 +21,19 @@ def asm_gemm(A:Tensor, B:Tensor) -> Tensor:
   _stats["used"] += 1
 
   dname = A.device
-  def custom_gemm_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
+  def custom_gemm_kernel(C:UOp, A:UOp, B:UOp, params:UOp) -> UOp:
     N = A.shape[0]
     lidx = UOp.special(THREADS_PER_WG, "lidx0")
     gidx = UOp.special(N//THREADS_PER_WG * N//THREADS_PER_WG, "gidx0")
 
     src = (pathlib.Path(__file__).parent/"template.s").read_text().replace("INSTRUCTIONS", (pathlib.Path(__file__).parent/"gemm.s").read_text())
 
-    sz = UOp.variable("SZ", 256, 8192)
-    sink = UOp.sink(C.base, A.base, B.base, sz, lidx, gidx, arg=KernelInfo(name="gemm", estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
+    sink = UOp.sink(C.base, A.base, B.base, params.base, lidx, gidx, arg=KernelInfo(name="gemm", estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
   
+  params = Tensor.full((N, N), N).realize()
   C = Tensor.empty(N, N, dtype=dtypes.half)
-  C = Tensor.custom_kernel(C, A, B, fxn=custom_gemm_kernel)[0]
+  C = Tensor.custom_kernel(C, A, B.T, params, fxn=custom_gemm_kernel)[0]
   return C
 
 if __name__ == "__main__":
@@ -47,13 +47,7 @@ if __name__ == "__main__":
   C_asm = Tensor.empty(N, N, dtype=dtypes.half)
   Tensor.realize(A, B)
   C_asm = asm_gemm(A, B)
+  C_tiny = A @ B
+  C_asm.realize()
 
-  sched = Tensor.schedule(C_asm)
-  eis = [si.lower() for si in sched]
-
-  with Context(DEBUG=2):
-    for ei in eis:
-      et = ei.run({"SZ":N}, wait=True)
-      print(f"{(N*N*N*2 / et)*1e-12:.2f} REAL TFLOPS")
-
-  print(A.numpy())
+  np.testing.assert_allclose(C_asm.numpy(), C_tiny.numpy())
