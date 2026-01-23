@@ -4,7 +4,7 @@ import dataclasses, functools, io, math, types, warnings, pathlib, sys, os, stru
 from io import BufferedReader
 from tinygrad.nn.state import TensorIO
 from tinygrad.tensor import Tensor, _broadcast_shape, ReductionStr
-from tinygrad.helpers import getenv, DEBUG, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
+from tinygrad.helpers import getenv, all_same, prod, flatten, make_tuple, argsort, is_numpy_ndarray, get_single_element, polyN
 from tinygrad.dtype import DType, ConstType, dtypes, _from_np_dtype, truncate, least_upper_dtype, DTYPES_DICT
 from tinygrad.device import is_dtype_supported, Device
 
@@ -366,19 +366,8 @@ required_input_python_consts: dict[str, tuple[int, ...]] = {
   **{optim: (1,) for optim in ("Adam", "Adagrad", "Momentum")}
 }
 
-cache_misses = 0
-@functools.cache
-def _cached_to_python_const(t:Tensor): return t.data().tobytes() if t.dtype == dtypes.uint8 else t.tolist()
-
-# Tensor -> python value cache for parameters
-def to_python_const(t:Any, op:str, idx:int) -> list[ConstType]|ConstType|bytes:
-  if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
-  global cache_misses
-  ret = _cached_to_python_const(t)
-  if (info := _cached_to_python_const.cache_info()).misses > cache_misses and DEBUG >= 3:
-    print(f"Cache miss for {t}")
-    cache_misses = info.misses
-  return ret
+def _to_python_const(t:Tensor) -> list[ConstType]|ConstType|bytes:
+  return t.data().tobytes() if t.dtype == dtypes.uint8 else cast(list[ConstType]|ConstType, t.tolist())
 
 # ***** runner ******
 debug = int(getenv("DEBUGONNX", "0"))
@@ -409,6 +398,7 @@ class OnnxRunner:
 
     self.variable_dims: dict[str, int] = {}
     self.onnx_ops = onnx_ops
+    self._python_const_cache: dict[str, list[ConstType]|ConstType|bytes] = {}  # cache by name for JIT stability
 
   @classmethod
   def _from_subgraph(cls, graph: dict) -> "OnnxRunner":
@@ -453,13 +443,22 @@ class OnnxRunner:
                                       for n in self.graph_nodes)
     return self
 
+  def _get_python_const(self, name:str, op:str, idx:int) -> list[ConstType]|ConstType|bytes|Any:
+    """Convert tensor to python const with name-based caching for JIT stability."""
+    t = self.graph_values[name]
+    if idx not in required_input_python_consts.get(op, ()) or not isinstance(t, Tensor): return t
+    # cache by name - safe because JIT requires fixed input shapes, so computed values (Shape ops) are deterministic
+    # true graph inputs that are python consts are rare; if they change across runs, cached value will be wrong
+    if (cached := self._python_const_cache.get(name)) is None: cached = self._python_const_cache[name] = _to_python_const(t)
+    return cached
+
   def __call__(self, inputs:dict[str, Any], debug=debug):
     for name, input_spec in self.graph_inputs.items():
       if name not in inputs: raise RuntimeError(f"Please provide input data for {name}")
       self.graph_values[name] = self._parse_input(name, inputs[name], input_spec)
 
     for num, node in enumerate(self.graph_nodes):
-      inps = [to_python_const(self.graph_values[name], node.op, i) for i,name in enumerate(node.inputs)]
+      inps = [self._get_python_const(name, node.op, i) for i,name in enumerate(node.inputs)]
       opts = node.opts
 
       # provide additional opts
@@ -467,7 +466,9 @@ class OnnxRunner:
       if node.op in {"Gradient", "If"}: opts['intermediate_tensors'] = self.graph_values
       # for Gather, convert indices to python const if from Constant/initializer for shrink fast path
       if node.op == "Gather" and len(node.inputs) > 1 and node.inputs[1] in self.const_names:
-        inps[1] = _cached_to_python_const(self.graph_values[node.inputs[1]])
+        idx_name, cache = node.inputs[1], self._python_const_cache
+        if (cached := cache.get(idx_name)) is None: cached = cache[idx_name] = _to_python_const(self.graph_values[idx_name])
+        inps[1] = cached
 
       if debug >= 1: print((f"[{self.graph_name}] " if self.graph_name else "") + f"{num}: op '{node.op}' opt {opts}")
       if debug >= 2 and node.inputs: print("\tinputs:\n" + "\n".join(f"\t\t{x} - {i!r}" for x,i in zip(node.inputs, inps)))
@@ -565,7 +566,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if all(t.shape == e.shape for t,e in zip(then_out.values(), else_out.values())):
       return tuple(condition.where(t,e) for t,e in zip(then_out.values(), else_out.values()))
     # otherwise, use condition to select the output in python
-    cond = _resolve_const(_cached_to_python_const(condition))
+    cond = _resolve_const(_to_python_const(condition))
     return tuple(t if cond else e for t,e in zip(then_out.values(), else_out.values()))
 
   def Identity(x:Tensor): return x
