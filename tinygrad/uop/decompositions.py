@@ -351,7 +351,7 @@ def l2i(op: Ops, dt: DType, a0: UOp, a1: UOp, b0: UOp, b1: UOp):
     case Ops.XOR | Ops.OR | Ops.AND: return UOp(op, dt, src=(a0, b0)), UOp(op, dt, src=(a1, b1))
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
-def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]+off))
+def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]*2+off))
 def l2i_dt(dt): return {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}[dt]
 
 # ***** decomposition patterns *****
@@ -409,7 +409,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"),
              lambda x: x.replace(dtype=l2i_dt(x.dtype.base).ptr(x.dtype.size * 2)) if x.dtype.base in (dtypes.long, dtypes.ulong) else None)]
     pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', (dtypes.long, dtypes.ulong))), name='st'),
-             lambda st,idx,val: st.replace(src=(idx, val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
+             lambda st,idx,val: st.replace(src=(_idx(idx, 0), val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
     pat += [(UPat(GroupOp.Comparison, src=(UPat.var('a', (dtypes.long, dtypes.ulong)), UPat.var('b', (dtypes.long, dtypes.ulong))), name="x"),
              lambda a,b,x: l2i(x.op, dt:=l2i_dt(a.dtype), a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt)))]
     pat += [(UPat(GroupOp.ALU - GroupOp.Comparison, (dtypes.long, dtypes.ulong), src=(UPat.var('a'), UPat.var('b')), name="x"),
