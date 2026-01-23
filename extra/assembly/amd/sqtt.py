@@ -180,6 +180,16 @@ class TS_DELTA_OR_MARK_L4(PacketType):  # Layout 4: 48->64 bits, bit7=1 means de
   @property
   def is_marker(self) -> bool: return bool(self.bit9 and not self.bit8)
 
+class TS_DELTA_S5_W2(PacketType):
+  encoding = bits[4:0] == 0b11100
+  delta = bits[6:5]
+  _padding = bits[47:7]
+
+class TS_DELTA_S5_W2_L4(PacketType):  # Layout 4: 48->40 bits
+  encoding = bits[4:0] == 0b11100
+  delta = bits[6:5]
+  _padding = bits[39:7]
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -246,16 +256,6 @@ class WAVESTART_L4(PacketType):  # Layout 4 has wave field at different position
   id7 = bits[31:20]
   @property
   def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
-
-class TS_DELTA_S5_W2(PacketType):
-  encoding = bits[4:0] == 0b11100
-  delta = bits[6:5]
-  _padding = bits[47:7]
-
-class TS_DELTA_S5_W2_L4(PacketType):  # Layout 4: 48->40 bits
-  encoding = bits[4:0] == 0b11100
-  delta = bits[6:5]
-  _padding = bits[39:7]
 
 class WAVEALLOC(PacketType):  # exclude: 1 << 10
   encoding = bits[4:0] == 0b00101
@@ -348,17 +348,22 @@ class UTILCTR(PacketType):
   delta = bits[8:7]
   ctr = bits[47:9]
 
-# All packet types with rocprof type IDs as keys
-PACKET_TYPES: dict[int, type[PacketType]] = {
+# Packet types with rocprof type IDs as keys
+PACKET_TYPES_L3: dict[int, type[PacketType]] = {
   1: VALUINST, 2: VMEMEXEC, 3: ALUEXEC, 4: IMMEDIATE, 5: IMMEDIATE_MASK, 6: WAVERDY, 7: TS_DELTA_S8_W3, 8: WAVEEND,
   9: WAVESTART, 10: TS_DELTA_S5_W2, 11: WAVEALLOC, 12: TS_DELTA_S5_W3, 13: PERF, 14: UTILCTR, 15: TS_DELTA_SHORT,
   16: NOP, 17: TS_WAVE_STATE, 18: EVENT, 19: EVENT_BIG, 20: REG, 21: SNAPSHOT, 22: TS_DELTA_OR_MARK, 23: LAYOUT_HEADER, 24: INST,
+}
+PACKET_TYPES_L4: dict[int, type[PacketType]] = {
+  **PACKET_TYPES_L3,
+  7: TS_DELTA_S8_W3_L4, 9: WAVESTART_L4, 10: TS_DELTA_S5_W2_L4, 11: WAVEALLOC_L4,
+  12: TS_DELTA_S5_W3_L4, 13: PERF_L4, 22: TS_DELTA_OR_MARK_L4, 24: INST_L4,
 }
 
 def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
   table = [16] * 256  # default to NOP (type_id 16)
   # Sort by mask bit count descending (more specific encodings first), NOP last
-  sorted_types = sorted(PACKET_TYPES.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
+  sorted_types = sorted(PACKET_TYPES_L3.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
 
   for byte_val in range(256):
     for opcode, pkt_cls in sorted_types:
@@ -366,35 +371,27 @@ def _build_state_table() -> tuple[bytes, dict[int, type[PacketType]]]:
         table[byte_val] = opcode
         break
 
-  return bytes(table), PACKET_TYPES
+  return bytes(table)
 
-STATE_TO_OPCODE, OPCODE_TO_CLASS = _build_state_table()
+STATE_TO_OPCODE = _build_state_table()
 
 # Special case opcodes (rocprof type IDs)
 _TS_DELTA_OR_MARK_OPCODE, _TS_DELTA_SHORT_OPCODE = 22, 15
 
-# Layout 4 class substitutions (different sizes/field positions), keyed by rocprof type ID
-_LAYOUT4_CLASS_OVERRIDES: dict[int, type[PacketType]] = {
-  7: TS_DELTA_S8_W3_L4, 10: TS_DELTA_S5_W2_L4, 11: WAVEALLOC_L4,
-  12: TS_DELTA_S5_W3_L4, 13: PERF_L4, 22: TS_DELTA_OR_MARK_L4,
-  9: WAVESTART_L4, 24: INST_L4,
-}
-
 # Combined lookup: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
 # special_case: 0=none, 1=TS_DELTA_OR_MARK, 2=TS_DELTA_SHORT
-def _build_decode_info(layout: int = 3) -> dict[int, tuple]:
+def _build_decode_info(packet_types: dict[int, type[PacketType]]) -> dict[int, tuple]:
   decode_info: dict[int, tuple] = {}
-  for opcode, pkt_cls in OPCODE_TO_CLASS.items():
-    actual_cls = _LAYOUT4_CLASS_OVERRIDES.get(opcode, pkt_cls) if layout == 4 else pkt_cls
-    delta_field = getattr(actual_cls, 'delta', None)
+  for opcode, pkt_cls in packet_types.items():
+    delta_field = getattr(pkt_cls, 'delta', None)
     delta_lo = delta_field.lo if delta_field else 0
     delta_mask = delta_field.mask if delta_field else 0
     special = 1 if opcode == _TS_DELTA_OR_MARK_OPCODE else (2 if opcode == _TS_DELTA_SHORT_OPCODE else 0)
-    decode_info[opcode] = (actual_cls, actual_cls._size_nibbles, delta_lo, delta_mask, special)
+    decode_info[opcode] = (pkt_cls, pkt_cls._size_nibbles, delta_lo, delta_mask, special)
   return decode_info
 
-_DECODE_INFO_L3 = _build_decode_info(3)
-_DECODE_INFO_L4 = _build_decode_info(4)
+_DECODE_INFO_L3 = _build_decode_info(PACKET_TYPES_L3)
+_DECODE_INFO_L4 = _build_decode_info(PACKET_TYPES_L4)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER

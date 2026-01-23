@@ -1,4 +1,4 @@
-"""Tests comparing sqtt.py PACKET_TYPES against AMD's rocprof-trace-decoder binary."""
+"""Tests comparing sqtt.py PACKET_TYPES_L3/L4 against AMD's rocprof-trace-decoder binary."""
 import unittest
 from pathlib import Path
 import ctypes
@@ -75,14 +75,13 @@ def extract_packet_encodings():
 @unittest.skipUnless(Path(ROCPROF_LIB).exists(), "rocprof-trace-decoder not installed")
 class TestSQTTMatchesBinary(unittest.TestCase):
   def _test_bit_counts_match_layout(self, layout_num: int):
-    from extra.assembly.amd.sqtt import PACKET_TYPES, _LAYOUT4_CLASS_OVERRIDES
+    from extra.assembly.amd.sqtt import PACKET_TYPES_L3, PACKET_TYPES_L4
     layout2, layout3, layout4 = extract_bit_tables()
     layout = {2: layout2, 3: layout3, 4: layout4}[layout_num]
-    overrides = _LAYOUT4_CLASS_OVERRIDES if layout_num == 4 else {}
+    packet_types = {3: PACKET_TYPES_L3, 4: PACKET_TYPES_L4}[layout_num]
 
-    for type_id, pkt_cls in PACKET_TYPES.items():
-      actual_cls = overrides.get(type_id, pkt_cls)
-      expected_bits, actual_bits = layout[type_id], actual_cls._size_nibbles * 4
+    for type_id, pkt_cls in packet_types.items():
+      expected_bits, actual_bits = layout[type_id], pkt_cls._size_nibbles * 4
       with self.subTest(packet=pkt_cls.__name__):
         self.assertEqual(actual_bits, expected_bits, f"{pkt_cls.__name__}: {actual_bits} bits != expected {expected_bits}")
 
@@ -91,11 +90,11 @@ class TestSQTTMatchesBinary(unittest.TestCase):
 
   def test_encodings_exist_in_binary(self):
     """Verify each PACKET_TYPE encoding exists in rocprof-trace-decoder."""
-    from extra.assembly.amd.sqtt import PACKET_TYPES
+    from extra.assembly.amd.sqtt import PACKET_TYPES_L3
 
     encodings = extract_packet_encodings()
 
-    for type_id, pkt_cls in PACKET_TYPES.items():
+    for type_id, pkt_cls in PACKET_TYPES_L3.items():
       enc = (pkt_cls.encoding.mask, pkt_cls.encoding.default)
       with self.subTest(packet=pkt_cls.__name__):
         self.assertIn(type_id, encodings, f"{pkt_cls.__name__}: type_id {type_id} not in binary")

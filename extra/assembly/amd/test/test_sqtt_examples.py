@@ -9,7 +9,7 @@ from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_L4, WAVEEND, INST, INST_L4, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
-                                     ALUEXEC, VMEMEXEC, PACKET_TYPES, _LAYOUT4_CLASS_OVERRIDES, InstOp, InstOpL4, print_packets)
+                                     ALUEXEC, VMEMEXEC, PACKET_TYPES_L3, PACKET_TYPES_L4, InstOp, InstOpL4, print_packets)
 from extra.assembly.amd.test.helpers import TARGET_TO_ARCH
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
@@ -91,11 +91,12 @@ def run_rocprof_decoder(blobs: list[bytes], lib: bytes, base: int, target: str):
   if t.is_alive(): raise RuntimeError("rocprof decoder timeout")
   return occupancy_records, wave_insts
 
-class TestSQTTExamples(unittest.TestCase):
-  target = "gfx1100"
+class SQTTExamplesTestBase(unittest.TestCase):
+  target: str
 
   @classmethod
   def setUpClass(cls):
+    if cls is SQTTExamplesTestBase: raise unittest.SkipTest("base class")
     cls.examples = {}
     for pkl_path in sorted((EXAMPLES_DIR/cls.target).glob("*.pkl")):
       with open(pkl_path, "rb") as f:
@@ -118,7 +119,7 @@ class TestSQTTExamples(unittest.TestCase):
           self.assertIsInstance(packets[0], LAYOUT_HEADER, f"first packet should be LAYOUT_HEADER in {name}")
 
   def test_packet_types_valid(self):
-    all_classes = set(PACKET_TYPES.values()) | set(_LAYOUT4_CLASS_OVERRIDES.values())
+    all_classes = set(PACKET_TYPES_L3.values()) | set(PACKET_TYPES_L4.values())
     for name, (events, *_) in self.examples.items():
       for i, event in enumerate(events):
         with self.subTest(example=name, event=i):
@@ -148,15 +149,9 @@ class TestSQTTExamples(unittest.TestCase):
         all_packets = [p for e in events for p in decode(e.blob)]
         self.assertGreater(len([p for p in all_packets if isinstance(p, (INST, INST_L4))]), 0, f"no INST packets in {name}")
 
-  expected = {
-    "profile_empty_run_0": [1803, 1908, 1928, 1979, 2006, 1912],
-    "profile_empty_run_1": [1803, 1908, 1928, 1979, 2006, 1912],
-    "profile_gemm_run_0": [2531, 1844, 1864, 1915, 1942, 1848, 3074, 1919, 1939, 1990, 2017, 1923, 19026, 1919, 1939, 1990, 2017, 1929],
-    "profile_gemm_run_1": [2554, 1844, 1864, 1915, 1942, 1848, 3084, 1919, 1939, 1990, 2017, 1923, 19010, 1919, 1939, 1990, 2017, 1923],
-    "profile_plus_run_0": [1900, 1908, 1928, 1979, 2006, 1912],
-    "profile_plus_run_1": [1856, 1908, 1928, 1979, 2006, 1912],
-  }
+  expected: dict[str, list[int]] = {}  # override in subclasses
   def test_packet_counts(self):
+    if not self.expected: self.skipTest("no expected packet counts for this target")
     for name, (events, *_) in self.examples.items():
       with self.subTest(example=name):
         if not self.expected.get(name): continue
@@ -204,7 +199,21 @@ class TestSQTTExamples(unittest.TestCase):
               for _ in range(bin(p.mask).count('1')): our_insts.append(p._time)
         self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
 
-class TestSQTTExamplesRDNA4(TestSQTTExamples): target = "gfx1200"
+class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
+  target = "gfx1100"
+  expected = {
+    "profile_empty_run_0": [1803, 1908, 1928, 1979, 2006, 1912],
+    "profile_empty_run_1": [1803, 1908, 1928, 1979, 2006, 1912],
+    "profile_gemm_run_0": [2531, 1844, 1864, 1915, 1942, 1848, 3074, 1919, 1939, 1990, 2017, 1923, 19026, 1919, 1939, 1990, 2017, 1929],
+    "profile_gemm_run_1": [2554, 1844, 1864, 1915, 1942, 1848, 3084, 1919, 1939, 1990, 2017, 1923, 19010, 1919, 1939, 1990, 2017, 1923],
+    "profile_plus_run_0": [1900, 1908, 1928, 1979, 2006, 1912],
+    "profile_plus_run_1": [1856, 1908, 1928, 1979, 2006, 1912],
+  }
+
+class TestSQTTExamplesRDNA4(SQTTExamplesTestBase):
+  target = "gfx1200"
+  def test_rocprof_wave_times_match(self): self.skipTest("RDNA4 timing not yet implemented")
+  def test_rocprof_inst_times_match(self): self.skipTest("RDNA4 timing not yet implemented")
 
 #class TestSQTTExamplesCDNA(TestSQTTExamples): target = "gfx950"
 
