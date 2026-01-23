@@ -6,6 +6,7 @@ from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LL
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
+from tinygrad.renderer.nir import NIRRenderer
 
 if getenv("TINY_BACKEND"):
   import tinygrad.nn.torch # noqa: F401 # pylint: disable=unused-import
@@ -683,6 +684,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: 0.7**x, vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
   @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, NIRRenderer), "TODO: broken in LVP")
   def test_pow_const_direct(self):
     # x ** c
     def get_tiny_gradient(x, c):

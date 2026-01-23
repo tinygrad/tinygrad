@@ -87,8 +87,7 @@ class TestMainOnnxOps(TestOnnxOps):
   def test_gather_jit_different_indices(self):
     # Gather should not assume indices is const when it can change at runtime
     from tinygrad import TinyJit
-    from tinygrad.nn.onnx import onnx_ops, _cached_to_python_const
-    _cached_to_python_const.cache_clear()
+    from tinygrad.nn.onnx import onnx_ops
     Gather = onnx_ops["Gather"]
 
     x = Tensor([10, 20, 30, 40, 50])
@@ -101,6 +100,32 @@ class TestMainOnnxOps(TestOnnxOps):
     @TinyJit
     def gather_jit(x, indices): return Gather(x, indices)
     self.assertEqual([gather_jit(x, Tensor(idx)).tolist() for idx in indices_list], expected)
+
+  def test_gather_jit_const_zero_index(self):
+    # Gather with const index=0 (falsy in Python) should work with JIT cache
+    from tinygrad import TinyJit
+    # Create model: y = Gather(x, 0) + x where 0 is from initializer
+    # The Add ensures there's a kernel to JIT
+    x_input = onnx.helper.make_tensor_value_info("x", onnx.TensorProto.FLOAT, (5,))
+    y_output = onnx.helper.make_tensor_value_info("y", onnx.TensorProto.FLOAT, (5,))
+    idx_init = onnx.numpy_helper.from_array(np.array(0, dtype=np.int64), name="idx")
+    graph = onnx.helper.make_graph([
+      onnx.helper.make_node("Gather", ["x", "idx"], ["g"], axis=0),
+      onnx.helper.make_node("Add", ["g", "x"], ["y"])],
+      "test_gather_zero", [x_input], [y_output], [idx_init])
+    model = onnx.helper.make_model(graph, opset_imports=[onnx.helper.make_opsetid("", 13)])
+
+    with tempfile.NamedTemporaryFile(suffix=".onnx", delete=False) as tmp:
+      onnx.save(model, tmp.name)
+      runner = OnnxRunner(tmp.name)
+
+      @TinyJit
+      def run_gather(x): return runner({"x": x})["y"]
+
+      # Run multiple times - JIT capture should use cached index=0 correctly
+      for val in [[10, 20, 30, 40, 50], [100, 200, 300, 400, 500], [1, 2, 3, 4, 5]]:
+        result = run_gather(Tensor(val, dtype=dtypes.float32))
+        np.testing.assert_equal(result.numpy(), np.array(val) + val[0])
 
   # NOTE: resize OP is sensitive to numerical errors
   def _test_resize_scales(self, scale_values, **kwargs):
@@ -147,9 +172,9 @@ class TestMainOnnxOps(TestOnnxOps):
     self._test_if(np.array([[1, 2, 3], [4, 5, 6]]).astype(np.float32), np.array([[6, 5, 4, 3, 2, 1]]).astype(np.float32))
 
   def test_if_jit_different_shapes(self):
-    # TODO: If with different output shapes and non-const condition should raise
     # When shapes differ, Python selection evaluates condition at graph build time, breaking JIT
     from tinygrad import TinyJit
+    from tinygrad.engine.jit import JitError
     # then: x+1 shape (3,), else: x[:2]+1 shape (2,)
     x_input = onnx.helper.make_tensor_value_info("x", onnx.TensorProto.FLOAT, (3,))
     then_out = onnx.helper.make_tensor_value_info("res", onnx.TensorProto.FLOAT, (3,))
@@ -178,10 +203,9 @@ class TestMainOnnxOps(TestOnnxOps):
       def run_if(cond, x): return runner({"cond": cond, "x": x})["res"]
 
       x = Tensor([1.0, 2.0, 3.0])
-      self.assertEqual(run_if(Tensor([True]), x).tolist(), [2, 3, 4])   # x + 1
-      self.assertEqual(run_if(Tensor([True]), x).tolist(), [2, 3, 4])
-      self.assertEqual(run_if(Tensor([True]), x).tolist(), [2, 3, 4])
-      self.assertEqual(run_if(Tensor([False]), x).tolist(), [2, 3, 4])  # wrong! should be [2, 3]
+      with self.assertRaises(JitError):
+        for _ in range(3):
+          run_if(Tensor([True]), x)
 
   def test_resize_downsample_scales_linear_align_corners(self):
     # https://github.com/onnx/onnx/blob/main/docs/Operators.md#examples-131
