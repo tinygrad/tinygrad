@@ -270,7 +270,6 @@ class TestSQTTExamplesCDNA(unittest.TestCase):
         all_packets = [p for e in events for p in decode_cdna(e.blob)]
         self.assertGreater(len([p for p in all_packets if isinstance(p, CDNA_INST)]), 0, f"no INST packets in {name}")
 
-  @unittest.skip("CDNA timestamp normalization not yet implemented - rocprof uses complex cross-SE correlation")
   def test_rocprof_wave_times_match(self):
     """Wave start/end times must match rocprof exactly."""
     for name, (events, lib, base) in self.examples.items():
@@ -293,7 +292,6 @@ class TestSQTTExamplesCDNA(unittest.TestCase):
               our_waves.append((wave_starts.pop(key), p._time))
         self.assertEqual(sorted(our_waves), sorted(roc_waves), f"wave times mismatch in {name}")
 
-  @unittest.skip("CDNA timestamp normalization not yet implemented - rocprof uses complex cross-SE correlation")
   def test_rocprof_inst_times_match(self):
     """Instruction times must match rocprof exactly (excluding s_endpgm)."""
     for name, (events, lib, base) in self.examples.items():
