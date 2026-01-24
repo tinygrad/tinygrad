@@ -215,7 +215,7 @@ class NVArgsState(CLikeArgsState):
     super().__init__(buf, prg, bufs, vals=vals, prefix=prg.cbuf_0 or None)
 
 class NVProgram(HCQProgram):
-  def __init__(self, dev:NVDevice, name:str, lib:bytes):
+  def __init__(self, dev:NVDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.name, self.lib = dev, name, lib
     self.constbufs: dict[int, tuple[int, int]] = {0: (0, 0x160)} # dict[constbuf index, tuple[va_addr, size]]
 

@@ -79,7 +79,7 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   return pra, fds, attrs, (ins, outs)
 
 class DSPProgram:
-  def __init__(self, dev:DSPDevice, name:str, lib:bytes):
+  def __init__(self, dev:DSPDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.lib = dev, lib
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
@@ -289,7 +289,7 @@ class MockDSPRenderer(DSPRenderer):
     return '\n'.join(msrc)
 
 class MockDSPProgram:
-  def __init__(self, name:str, lib:bytes): self.lib = lib
+  def __init__(self, name:str, lib:bytes, **kwargs): self.lib = lib
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
