@@ -226,7 +226,7 @@ NO_ARG_SOPP = {SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV,
 
 def _disasm_sopp(inst: SOPP) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
-  is_rdna4 = 'rdna4' in inst.__class__.__module__
+  is_rdna4 = _is_r4(inst)
   # Ops that have no argument when simm16 == 0
   no_arg_zero = {'s_barrier', 's_wakeup', 's_icache_inv', 's_ttracedata', 's_wait_idle', 's_endpgm_saved',
                  's_endpgm_ordered_ps_done', 's_code_end'}
@@ -265,7 +265,7 @@ def _disasm_smem(inst: SMEM) -> str:
   name, cdna = inst.op_name.lower(), _is_cdna(inst)
   if name in ('s_gl1_inv', 's_dcache_inv', 's_dcache_inv_vol', 's_dcache_wb', 's_dcache_wb_vol', 's_icache_inv'): return name
   soe, imm = getattr(inst, 'soe', 0) or getattr(inst, 'soffset_en', 0), getattr(inst, 'imm', 1)
-  is_rdna4 = 'rdna4' in inst.__class__.__module__
+  is_rdna4 = _is_r4(inst)
   offset = inst.ioffset if is_rdna4 else getattr(inst, 'offset', 0)
   if cdna:
     if soe and imm: off_s = f"{decode_src(inst.soffset, cdna)} offset:0x{offset:x}"
@@ -465,7 +465,7 @@ def _disasm_vop3sd(inst: VOP3SD) -> str:
 
 def _disasm_vopd(inst: VOPD) -> str:
   lit = inst._literal
-  is_rdna4 = 'rdna4' in inst.__class__.__module__
+  is_rdna4 = _is_r4(inst)
   op_enum = R4_VOPDOp if is_rdna4 else VOPDOp
   vdst_y, nx, ny = (_unwrap(inst.vdsty) << 1) | ((_unwrap(inst.vdstx) & 1) ^ 1), op_enum(inst.opx).name.lower(), op_enum(inst.opy).name.lower()
   def half(n, vd, s0, vs1):
@@ -552,7 +552,7 @@ _HWREG_BLACKLIST_CDNA = {'HW_REG_PC_LO', 'HW_REG_PC_HI', 'HW_REG_IB_DBG1', 'HW_R
                          'HW_REG_SQ_PERF_SNAPSHOT_PC_LO', 'HW_REG_SQ_PERF_SNAPSHOT_PC_HI', 'HW_REG_XCC_ID'}
 def _disasm_sopk(inst: SOPK) -> str:
   op, name, cdna = inst.op, inst.op_name.lower(), _is_cdna(inst)
-  is_rdna4 = 'rdna4' in inst.__class__.__module__
+  is_rdna4 = _is_r4(inst)
   hw = HWREG_CDNA if cdna else (HWREG_RDNA4 if is_rdna4 else HWREG)
   blacklist = _HWREG_BLACKLIST_CDNA if cdna else _HWREG_BLACKLIST
   def fmt_hwreg(hid, hoff, hsz):
