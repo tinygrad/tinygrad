@@ -532,10 +532,30 @@ def _parse_lambda_body(body: str, vars: dict[str, UOp], funcs: dict) -> UOp:
   lines = [l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')]
   return _parse_lambda_block(lines, 0, vars, funcs)[1]
 
-def _line_starts_with(line: str, keyword: str) -> bool:
-  """Check if line starts with keyword (case insensitive)"""
-  tokens = tokenize(line)
-  return tokens[0].type == 'IDENT' and tokens[0].val.lower() == keyword.lower()
+def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
+  """Substitute loop variable and evaluate bracket expressions."""
+  toks = tokenize(line)
+  subst_parts = [str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in toks if t.type != 'EOF']
+  subst = ' '.join(subst_parts)
+  # Evaluate bracket expressions
+  stoks = tokenize(subst)
+  eval_parts, j = [], 0
+  while j < len(stoks):
+    if stoks[j].type == 'LBRACKET':
+      depth, start_j = 1, j
+      j += 1
+      while j < len(stoks) and depth > 0:
+        if stoks[j].type == 'LBRACKET': depth += 1
+        elif stoks[j].type == 'RBRACKET': depth -= 1
+        j += 1
+      inner = ' '.join(t.val for t in stoks[start_j+1:j-1] if t.type != 'EOF')
+      if ':' in inner and '+:' not in inner and '-:' not in inner:
+        parts = inner.split(':')
+        if len(parts) == 2: inner = f'{_try_eval(parts[0].strip())} : {_try_eval(parts[1].strip())}'
+      eval_parts.append(f'[{inner}]')
+    elif stoks[j].type != 'EOF': eval_parts.append(stoks[j].val); j += 1
+    else: j += 1
+  return ' '.join(eval_parts)
 
 def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict) -> tuple[int, UOp]:
   i = start
@@ -555,7 +575,6 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp], func
 
     # for var in start:end do
     if first == 'for':
-      # Parse: for VAR in NUM : NUM do
       p = Parser(tokens, vars, funcs, line)
       p.eat('IDENT')  # for
       loop_var = p.eat('IDENT').val
@@ -575,37 +594,8 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp], func
       # Execute loop
       for li in range(start_val, end_val + 1):
         for bl in body_lines:
-          # Substitute loop var everywhere (like old regex: re.sub(rf'\b{lv}\b', str(li), bl))
-          toks = tokenize(bl)
-          subst_parts = [str(li) if t.type == 'IDENT' and t.val == loop_var else t.val for t in toks if t.type != 'EOF']
-          subst = ' '.join(subst_parts)
-          # Evaluate bracket expressions (like old: re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', ...))
-          stoks = tokenize(subst)
-          eval_parts = []
-          j = 0
-          while j < len(stoks):
-            if stoks[j].type == 'LBRACKET':
-              # Find matching RBRACKET and evaluate any : range
-              depth, start_j = 1, j
-              j += 1
-              while j < len(stoks) and depth > 0:
-                if stoks[j].type == 'LBRACKET': depth += 1
-                elif stoks[j].type == 'RBRACKET': depth -= 1
-                j += 1
-              inner = ' '.join(t.val for t in stoks[start_j+1:j-1] if t.type != 'EOF')
-              if ':' in inner and '+:' not in inner and '-:' not in inner:
-                # Evaluate range like "i * 8 + 7 : i * 8"
-                parts = inner.split(':')
-                if len(parts) == 2:
-                  inner = f'{_try_eval(parts[0].strip())} : {_try_eval(parts[1].strip())}'
-              eval_parts.append(f'[{inner}]')
-            elif stoks[j].type != 'EOF':
-              eval_parts.append(stoks[j].val)
-              j += 1
-            else:
-              j += 1
-          subst = ' '.join(eval_parts)
-          # Now parse assignment: VAR[IDX] = EXPR
+          subst = _subst_loop_var(bl, loop_var, li)
+          # Parse assignment: VAR[IDX] = EXPR
           stoks = tokenize(subst)
           if len(stoks) >= 5 and stoks[0].type == 'IDENT' and stoks[1].type == 'LBRACKET' and stoks[2].type == 'NUM' and stoks[3].type == 'RBRACKET':
             var_name, idx = stoks[0].val, int(stoks[2].val)
@@ -621,7 +611,6 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp], func
 
     # if cond then
     if first == 'if':
-      # Extract condition between 'if' and 'then'
       line_lower = line.lower()
       if_idx = line_lower.find('if')
       then_idx = line_lower.rfind('then')
