@@ -189,13 +189,11 @@ class Group:
     self.ker.push_store(c_store, c)
     return c.after(c_store).reshape(c.shape)
 
-  map_rid = 400
   def map(self, a:ALL_TILES, op:Callable[[UOp], UOp]|Callable[[UOp, tuple], UOp]):
     a = cast(UOp, a)
     assert self.warps == 1
 
-    rngs_for_shape = tuple(UOp.range(dim, Group.map_rid + i) for i, dim in enumerate(a.shape))
-    Group.map_rid += len(a.shape)
+    rngs_for_shape = tuple(self.ker.raw_range(dim) for dim in a.shape)
 
     if op.__code__.co_argcount == 1:
       to_store = op(a[*rngs_for_shape]) # type: ignore
@@ -491,3 +489,68 @@ class Group:
 
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
+
+  def atomic_add(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis:int=0):
+    dst, src = cast(UOp, dst), cast(UOp, src)
+    assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
+    dst_dtype, src_dtype = dst.dtype, src.dtype
+    if src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.GLOBAL and isinstance(src, RT):
+      dstf = dst.flatten()
+      row_stride = prod(dst.shape[axis+1:])
+
+      laneid = self.ker.laneid
+      rt = cast(RT, src)
+      elements_per_thread = rt.base_shape.elements_per_thread
+
+      idxs = tuple(idx * src.shape[-3] * rt.base_shape.rows if i == axis else idx for i, idx in enumerate(idxs))
+      idxs = tuple(idx * src.shape[-2] * rt.base_shape.cols if i == 3 else idx for i, idx in enumerate(idxs))
+      base_dst_i = ((idxs[0] * dst.shape[-3] + idxs[1]) * dst.shape[-2] + idxs[2]) * dst.shape[-1] + idxs[3]
+
+      for height in self.ker.range(src.shape[-3], track=False):
+        for width in self.ker.range(src.shape[-2], track=False):
+          for inner in self.ker.range(elements_per_thread // 2, track=False):
+            base_row = height * rt.base_shape.rows
+            base_col = width * rt.base_shape.cols
+
+            inner0, inner1 = inner * 2, inner * 2 + 1
+
+            if rt.layout == TileLayout.COL:
+              row0 = rt.base_shape.stride * (laneid // rt.base_shape.cols) + inner0
+              col = laneid % rt.base_shape.cols
+              row1 = rt.base_shape.stride * (laneid // rt.base_shape.cols) + inner1
+            else:
+              row = laneid % rt.base_shape.rows
+              col0 = rt.base_shape.stride * (laneid // rt.base_shape.rows) + inner0
+              col1 = rt.base_shape.stride * (laneid // rt.base_shape.rows) + inner1
+
+            if rt.layout == TileLayout.COL:
+              srow0, scol0 = base_row + row0, base_col + col
+              srow1, scol1 = base_row + row1, base_col + col
+            else:
+              srow0, scol0 = base_row + row, base_col + col0
+              srow1, scol1 = base_row + row, base_col + col1
+
+            dst_i0 = base_dst_i + srow0 * row_stride + scol0
+            dst_i1 = base_dst_i + srow1 * row_stride + scol1
+
+            src_val0 = src[*src_idxs, height, width, inner0]
+            src_val1 = src[*src_idxs, height, width, inner1]
+            if src.dtype.base != dtypes.bfloat16:
+              src_val0 = src_val0.cast(dtypes.bfloat16)
+              src_val1 = src_val1.cast(dtypes.bfloat16)
+
+            val0_u32 = src_val0.bitcast(dtypes.ushort).cast(dtypes.uint32)._uop
+            val1_u32 = src_val1.bitcast(dtypes.ushort).cast(dtypes.uint32)._uop
+            packed_val = val0_u32 | (val1_u32 << 16)
+
+            aligned_dst_i = dst_i0 - (dst_i0 % 2)
+
+            op_arg = "asm volatile(\"global_atomic_pk_add_bf16 %0, %1, off\" :: \"v\"({0}), \"v\"({1}));"
+            ptr = dstf.src[0].index(aligned_dst_i, ptr=True)
+            dst_store = UOp(Ops.CUSTOM, dtypes.void, (ptr, packed_val), arg=op_arg)
+            dst_store = dst_store.end(height, width, inner)
+
+      self.ker.push_store(dst_store, dst)
+      return dst.after(dst_store).reshape(dst.shape)
+    else:
+      raise NotImplementedError(f"atomic_add from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
