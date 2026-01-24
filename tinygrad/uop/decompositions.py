@@ -359,7 +359,7 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
 
 def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]*2+off))
-def l2i_dt(dt): return {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}[dt]
+l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
 
 # ***** decomposition patterns *****
 
@@ -413,18 +413,14 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
     pat += [(UPat.var("x").reciprocal(), lambda x: x.const_like(1).alu(Ops.FDIV, x))]
     pat += [(UPat.var("a", dtypes.floats) * UPat.const(dtypes.floats, 1).alu(Ops.FDIV, UPat.var("b")), lambda a,b: a.alu(Ops.FDIV, b))]
   if not is_dtype_supported(dtypes.long, device):
-    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"),
-             lambda x: x.replace(dtype=l2i_dt(x.dtype.base).ptr(x.dtype.size * 2)) if x.dtype.base in (dtypes.long, dtypes.ulong) else None)]
-    pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', (dtypes.long, dtypes.ulong))), name='st'),
-             lambda st,idx,val: st.replace(src=(_idx(idx, 0), val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
-    pat += [(UPat(GroupOp.Comparison, src=(UPat.var('a', (dtypes.long, dtypes.ulong)), UPat.var('b', (dtypes.long, dtypes.ulong))), name="x"),
-             lambda a,b,x: l2i(x.op, dt:=l2i_dt(a.dtype), a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt)))]
-    pat += [(UPat(GroupOp.ALU - GroupOp.Comparison, (dtypes.long, dtypes.ulong), name="x"),
-             lambda x: None if x.tag is None else l2i(x.op, dt:=l2i_dt(x.dtype), *flatten((a.rtag(0).cast(dt), a.rtag(1).cast(dt))
-                                                                                          if a.dtype.bitsize == 64 else (a,) for a in x.src))[x.tag])]
-    pat += [(UPat(Ops.LOAD, (dtypes.long, dtypes.ulong), src=(UPat.var('idx'),), name='x'),
-             lambda x,idx: None if x.tag is None else x.replace(dtype=l2i_dt(x.dtype), src=(_idx(idx, x.tag),)))]
-    # split 64-bit constants into two 32-bit parts
-    pat += [(UPat(Ops.CONST, (dtypes.long, dtypes.ulong), name='x'),
-             lambda x: None if x.tag is None else UOp.const(l2i_dt(x.dtype), (x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF)))]
+    pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
+             x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if x.dtype.base in l2i_dt else None)]
+    pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
+             st.replace(src=(_idx(idx, 0), val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
+    pat += [(UPat(GroupOp.ALU, tuple(l2i_dt.keys()), name="x"), lambda x: None if x.tag is None else
+             l2i(x.op, dt:=l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt), a.rtag(1).cast(dt)) if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag])]
+    pat += [(UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
+             None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(_idx(idx, x.tag),)))]
+    pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
+             None if x.tag is None else UOp.const(l2i_dt[x.dtype], (x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF)))]
   return PatternMatcher(pat)
