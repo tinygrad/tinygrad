@@ -480,7 +480,7 @@ class Parser:
         return _parse_lambda_body(body, lv, self.funcs)
       return parse_expr(body, lv, self.funcs)
     if name in self.funcs:
-      return self.funcs[name](args, self.vars)
+      return self.funcs[name](args)
     raise RuntimeError(f"unknown function: {name}")
 
   def _handle_mem_load(self, addr: UOp, dt) -> UOp:
@@ -1030,45 +1030,45 @@ def _register_funcs():
     return result
 
   _FUNCS.update({
-    'sqrt': lambda a, v: UOp(Ops.SQRT, a[0].dtype, (a[0],)), 'trunc': lambda a, v: UOp(Ops.TRUNC, a[0].dtype, (a[0],)),
-    'log2': lambda a, v: UOp(Ops.LOG2, a[0].dtype, (a[0],)), 'sin': lambda a, v: _trig_reduce(a[0]),
-    'cos': lambda a, v: _trig_reduce(a[0], 0.25), 'floor': lambda a, v: _floor(a[0]), 'fract': lambda a, v: a[0] - _floor(a[0]),
-    'signext': lambda a, v: _signext(a), 'abs': lambda a, v: _abs(a),
-    'isEven': lambda a, v: (UOp(Ops.TRUNC, a[0].dtype, (a[0],)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
-    'max': lambda a, v: UOp(Ops.MAX, a[0].dtype, (a[0], a[1])),
-    'min': lambda a, v: UOp(Ops.MAX, a[0].dtype, (a[0].neg(), a[1].neg())).neg(),
-    'pow': lambda a, v: UOp(Ops.EXP2, dtypes.float32, (a[1].bitcast(dtypes.float32),)),
-    'fma': lambda a, v: a[0] * a[1] + a[2],
-    'i32_to_f32': lambda a, v: a[0].cast(dtypes.int).cast(dtypes.float32),
-    'u32_to_f32': lambda a, v: a[0].cast(dtypes.uint32).cast(dtypes.float32),
-    'f32_to_i32': lambda a, v: UOp(Ops.TRUNC, dtypes.float32, (a[0].bitcast(dtypes.float32),)).cast(dtypes.int),
-    'f32_to_u32': lambda a, v: _f_to_u(a[0].bitcast(dtypes.float32), dtypes.uint32),
-    'f64_to_i32': lambda a, v: UOp(Ops.TRUNC, dtypes.float64, (a[0].bitcast(dtypes.float64),)).cast(dtypes.int),
-    'f64_to_u32': lambda a, v: _f_to_u(a[0].bitcast(dtypes.float64), dtypes.uint32),
-    'f16_to_f32': lambda a, v: _f16_extract(a[0]).cast(dtypes.float32),
-    'f32_to_f16': lambda a, v: a[0].cast(dtypes.half),
-    'f32_to_f64': lambda a, v: a[0].bitcast(dtypes.float32).cast(dtypes.float64),
-    'f64_to_f32': lambda a, v: a[0].bitcast(dtypes.float64).cast(dtypes.float32),
-    'i32_to_f64': lambda a, v: a[0].cast(dtypes.int).cast(dtypes.float64),
-    'u32_to_f64': lambda a, v: a[0].cast(dtypes.uint32).cast(dtypes.float64),
-    'f16_to_i16': lambda a, v: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.int16),
-    'f16_to_u16': lambda a, v: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.uint16),
-    'i16_to_f16': lambda a, v: a[0].cast(dtypes.int16).cast(dtypes.half),
-    'u16_to_f16': lambda a, v: a[0].cast(dtypes.uint16).cast(dtypes.half),
-    'bf16_to_f32': lambda a, v: (((a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
-    'isNAN': lambda a, v: _isnan(a[0]), 'isSignalNAN': lambda a, v: _check_nan(a[0], False),
-    'isQuietNAN': lambda a, v: _check_nan(a[0], True), 'cvtToQuietNAN': lambda a, v: _cvt_quiet(a),
-    'isDENORM': lambda a, v: _is_denorm(a), 'exponent': lambda a, v: _exponent(a),
-    'divWouldBeDenorm': lambda a, v: _div_would_be_denorm(a), 'sign': lambda a, v: _sign(a),
-    'signext_from_bit': lambda a, v: _signext_from_bit(a), 'ldexp': lambda a, v: _ldexp(a),
-    'frexp_mant': lambda a, v: _frexp_mant(a), 'mantissa': lambda a, v: _frexp_mant(a),
-    'frexp_exp': lambda a, v: _frexp_exp(a), 'trig_preop_result': lambda a, v: _trig_preop(a),
-    's_ff1_i32_b32': lambda a, v: _ff1(a, 32), 's_ff1_i32_b64': lambda a, v: _ff1(a, 64),
+    'sqrt': lambda a: UOp(Ops.SQRT, a[0].dtype, (a[0],)), 'trunc': lambda a: UOp(Ops.TRUNC, a[0].dtype, (a[0],)),
+    'log2': lambda a: UOp(Ops.LOG2, a[0].dtype, (a[0],)), 'sin': lambda a: _trig_reduce(a[0]),
+    'cos': lambda a: _trig_reduce(a[0], 0.25), 'floor': lambda a: _floor(a[0]), 'fract': lambda a: a[0] - _floor(a[0]),
+    'signext': lambda a: _signext(a), 'abs': lambda a: _abs(a),
+    'isEven': lambda a: (UOp(Ops.TRUNC, a[0].dtype, (a[0],)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
+    'max': lambda a: UOp(Ops.MAX, a[0].dtype, (a[0], a[1])),
+    'min': lambda a: UOp(Ops.MAX, a[0].dtype, (a[0].neg(), a[1].neg())).neg(),
+    'pow': lambda a: UOp(Ops.EXP2, dtypes.float32, (a[1].bitcast(dtypes.float32),)),
+    'fma': lambda a: a[0] * a[1] + a[2],
+    'i32_to_f32': lambda a: a[0].cast(dtypes.int).cast(dtypes.float32),
+    'u32_to_f32': lambda a: a[0].cast(dtypes.uint32).cast(dtypes.float32),
+    'f32_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float32, (a[0].bitcast(dtypes.float32),)).cast(dtypes.int),
+    'f32_to_u32': lambda a: _f_to_u(a[0].bitcast(dtypes.float32), dtypes.uint32),
+    'f64_to_i32': lambda a: UOp(Ops.TRUNC, dtypes.float64, (a[0].bitcast(dtypes.float64),)).cast(dtypes.int),
+    'f64_to_u32': lambda a: _f_to_u(a[0].bitcast(dtypes.float64), dtypes.uint32),
+    'f16_to_f32': lambda a: _f16_extract(a[0]).cast(dtypes.float32),
+    'f32_to_f16': lambda a: a[0].cast(dtypes.half),
+    'f32_to_f64': lambda a: a[0].bitcast(dtypes.float32).cast(dtypes.float64),
+    'f64_to_f32': lambda a: a[0].bitcast(dtypes.float64).cast(dtypes.float32),
+    'i32_to_f64': lambda a: a[0].cast(dtypes.int).cast(dtypes.float64),
+    'u32_to_f64': lambda a: a[0].cast(dtypes.uint32).cast(dtypes.float64),
+    'f16_to_i16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.int16),
+    'f16_to_u16': lambda a: UOp(Ops.TRUNC, dtypes.half, (_f16_extract(a[0]),)).cast(dtypes.uint16),
+    'i16_to_f16': lambda a: a[0].cast(dtypes.int16).cast(dtypes.half),
+    'u16_to_f16': lambda a: a[0].cast(dtypes.uint16).cast(dtypes.half),
+    'bf16_to_f32': lambda a: (((a[0].cast(dtypes.uint32) if a[0].dtype != dtypes.uint32 else a[0]) & _u32(0xFFFF)) << _u32(16)).bitcast(dtypes.float32),
+    'isNAN': lambda a: _isnan(a[0]), 'isSignalNAN': lambda a: _check_nan(a[0], False),
+    'isQuietNAN': lambda a: _check_nan(a[0], True), 'cvtToQuietNAN': lambda a: _cvt_quiet(a),
+    'isDENORM': lambda a: _is_denorm(a), 'exponent': lambda a: _exponent(a),
+    'divWouldBeDenorm': lambda a: _div_would_be_denorm(a), 'sign': lambda a: _sign(a),
+    'signext_from_bit': lambda a: _signext_from_bit(a), 'ldexp': lambda a: _ldexp(a),
+    'frexp_mant': lambda a: _frexp_mant(a), 'mantissa': lambda a: _frexp_mant(a),
+    'frexp_exp': lambda a: _frexp_exp(a), 'trig_preop_result': lambda a: _trig_preop(a),
+    's_ff1_i32_b32': lambda a: _ff1(a, 32), 's_ff1_i32_b64': lambda a: _ff1(a, 64),
   })
   for is_max, name in [(False, 'min'), (True, 'max')]:
     for dt, sfx in [(dtypes.float32, 'f32'), (dtypes.int, 'i32'), (dtypes.uint32, 'u32'), (dtypes.int16, 'i16'), (dtypes.uint16, 'u16')]:
-      _FUNCS[f'v_{name}_{sfx}'] = lambda a, v, im=is_max, d=dt: _minmax_reduce(im, d, a)
-      _FUNCS[f'v_{name}3_{sfx}'] = lambda a, v, im=is_max, d=dt: _minmax_reduce(im, d, a)
+      _FUNCS[f'v_{name}_{sfx}'] = lambda a, im=is_max, d=dt: _minmax_reduce(im, d, a)
+      _FUNCS[f'v_{name}3_{sfx}'] = lambda a, im=is_max, d=dt: _minmax_reduce(im, d, a)
 
 _register_funcs()
 
