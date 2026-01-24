@@ -204,6 +204,7 @@ amdhsa.kernels:
   prg = AMDProgram(dev, "test", lib)
 
   out_gpu = dev.allocator.alloc(OUT_BYTES)
+  assert out_gpu.va_addr % 16 == 0, f"buffer not 16-byte aligned: 0x{out_gpu.va_addr:x}"
   prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
 
   out_buf = bytearray(OUT_BYTES)

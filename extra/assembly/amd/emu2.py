@@ -483,7 +483,13 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
+  # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
+  if inst.op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV):
+    return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
   addr = ctx.rsgpr64(inst.sbase.offset) + UOp.const(dtypes.uint64, _sext(inst.offset, 21))
+  # Add register offset (soffset) if not NULL (offset 124)
+  if inst.soffset.offset != 124:
+    addr = addr + ctx.rsgpr(inst.soffset.offset).cast(dtypes.uint64)
   sdata_reg = inst.sdata.offset
   ndwords = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}.get(inst.op, 1)
   stores = [ctx.wsgpr(sdata_reg + i, ctx.vmem.index((addr + UOp.const(dtypes.uint64, i * 4) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)))

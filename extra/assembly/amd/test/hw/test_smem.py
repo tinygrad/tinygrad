@@ -9,6 +9,9 @@ from extra.assembly.amd.test.hw.helpers import *
 # Use offset into output buffer for test data (output buffer is 2124 bytes)
 TEST_OFFSET = 2000
 
+# Cache invalidation sequence for scalar loads after vector stores
+CACHE_INV = [s_gl1_inv(), s_dcache_inv(), s_waitcnt(0)] + [s_nop(0)]*16
+
 class TestSLoadRegisterOffset(unittest.TestCase):
   """Tests for s_load with register offset (soffset field).
 
@@ -32,12 +35,15 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
       s_waitcnt(vmcnt=0),
+      *CACHE_INV,
       # Now test s_load with register offset
       # Put offset value in s[4]: offset = 4 bytes (1 dword)
       s_mov_b32(s[4], 4),
       # Load from out_ptr + TEST_OFFSET + s[4] (should load 0xBBBBBBBB)
       s_load_b32(s[5], s[2:3], s[4], offset=TEST_OFFSET),
       s_waitcnt(0),
+      # Zero out pointer regs (different addresses in emu vs hw)
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[5], 0xBBBBBBBB,
@@ -58,6 +64,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
       s_waitcnt(vmcnt=0),
+      *CACHE_INV,
       # Load with immediate offset 0
       s_load_b32(s[5], s[2:3], NULL, offset=TEST_OFFSET),
       s_waitcnt(0),
@@ -65,6 +72,8 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       s_mov_b32(s[4], 4),
       s_load_b32(s[6], s[2:3], s[4], offset=TEST_OFFSET),
       s_waitcnt(0),
+      # Zero out pointer regs (different addresses in emu vs hw)
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
     # s[5] has dword at offset 0 (0xAAAAAAAA), s[6] has dword at offset 4 (0xBBBBBBBB)
@@ -94,6 +103,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
       s_waitcnt(vmcnt=0),
+      *CACHE_INV,
       # Set up s[4] = 4 (offset in bytes)
       s_mov_b32(s[4], 4),
       # Load using s[4] as both offset and destination
@@ -103,6 +113,8 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       # Also load with immediate offset 4 for comparison
       s_load_b32(s[5], s[2:3], NULL, offset=TEST_OFFSET+4),
       s_waitcnt(0),
+      # Zero out pointer regs (different addresses in emu vs hw)
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
     # s[4] and s[5] should have the same value (both loaded from offset 4 = 0xBBBBBBBB)
@@ -123,6 +135,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       s_waitcnt(vmcnt=0),
+      *CACHE_INV,
       # Load with register offset 0
       s_mov_b32(s[4], 0),
       s_load_b32(s[5], s[2:3], s[4], offset=TEST_OFFSET),
@@ -130,6 +143,8 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       # Load with immediate offset 0
       s_load_b32(s[6], s[2:3], NULL, offset=TEST_OFFSET),
       s_waitcnt(0),
+      # Zero out pointer regs (different addresses in emu vs hw)
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[5], 0xDEADBEEF)
@@ -152,6 +167,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
       s_waitcnt(vmcnt=0),
+      *CACHE_INV,
       # reg offset = 4, imm offset = 0 -> total offset = 4
       s_mov_b32(s[4], 4),
       s_load_b32(s[5], s[2:3], s[4], offset=TEST_OFFSET),
@@ -160,6 +176,8 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       s_mov_b32(s[6], 0),
       s_load_b32(s[7], s[2:3], s[6], offset=TEST_OFFSET+4),
       s_waitcnt(0),
+      # Zero out pointer regs (different addresses in emu vs hw)
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
     # Both should load from offset 4 (0xBBBBBBBB)
@@ -188,6 +206,7 @@ class TestSLoadMultiDword(unittest.TestCase):
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
       s_waitcnt(vmcnt=0),
+      *CACHE_INV,
       # Load with register offset 0
       s_mov_b32(s[4], 0),
       s_load_b64(s[6:7], s[2:3], s[4], offset=TEST_OFFSET),
@@ -195,6 +214,8 @@ class TestSLoadMultiDword(unittest.TestCase):
       # Compare with immediate offset
       s_load_b64(s[8:9], s[2:3], NULL, offset=TEST_OFFSET),
       s_waitcnt(0),
+      # Zero out pointer regs (different addresses in emu vs hw)
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[6], 0xAAAAAAAA)
@@ -223,21 +244,24 @@ class TestSLoadMultiDword(unittest.TestCase):
       v_mov_b32_e32(v[2], s[14]),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+12),
       s_waitcnt(vmcnt=0),
-      # Load with register offset 0
-      s_mov_b32(s[4], 0),
-      s_load_b128(s[6:9], s[2:3], s[4], offset=TEST_OFFSET),
+      *CACHE_INV,
+      # Load with register offset 0 (s_load_b128 requires 4-aligned dest: s[4], s[8], s[12], ...)
+      s_mov_b32(s[15], 0),
+      s_load_b128(s[4:7], s[2:3], s[15], offset=TEST_OFFSET),
       s_waitcnt(0),
       # Compare with immediate offset
-      s_load_b128(s[10:13], s[2:3], NULL, offset=TEST_OFFSET),
+      s_load_b128(s[8:11], s[2:3], NULL, offset=TEST_OFFSET),
       s_waitcnt(0),
+      # Zero out pointer regs (different addresses in emu vs hw)
+      s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
-    self.assertEqual(st.sgpr[6], 0xAAAAAAAA)
-    self.assertEqual(st.sgpr[7], 0xBBBBBBBB)
-    self.assertEqual(st.sgpr[8], 0xCCCCCCCC)
-    self.assertEqual(st.sgpr[9], 0xDDDDDDDD)
-    self.assertEqual(st.sgpr[6], st.sgpr[10])
-    self.assertEqual(st.sgpr[7], st.sgpr[11])
+    self.assertEqual(st.sgpr[4], 0xAAAAAAAA)
+    self.assertEqual(st.sgpr[5], 0xBBBBBBBB)
+    self.assertEqual(st.sgpr[6], 0xCCCCCCCC)
+    self.assertEqual(st.sgpr[7], 0xDDDDDDDD)
+    self.assertEqual(st.sgpr[4], st.sgpr[8])
+    self.assertEqual(st.sgpr[5], st.sgpr[9])
 
 
 if __name__ == '__main__':
