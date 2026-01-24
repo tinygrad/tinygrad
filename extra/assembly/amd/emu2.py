@@ -552,9 +552,9 @@ def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0,
       if '[laneId]' in dest and ('D0' in dest or 'EXEC' in dest): return val.cast(dtypes.uint32)
     return U32_0
 
-  new_bits = _unroll_lanes(get_cmp_bit, exec_mask, apply_exec=not is_vopc)
-  # VOPC preserves inactive lane bits in destination; VOP3 does not
-  new_result = ((ctx.rsgpr(dst_reg) & (exec_mask ^ U32_MASK)) | (new_bits & exec_mask)) if is_vopc else new_bits
+  new_bits = _unroll_lanes(get_cmp_bit, exec_mask, apply_exec=False)
+  # Both VOPC and VOP3 clear inactive lane bits (hardware verified)
+  new_result = new_bits & exec_mask
 
   # CMPX e32: writes EXEC only; CMPX e64: writes both EXEC and SDST; non-CMPX: writes dst only
   if is_cmpx: stores = [ctx.wsgpr(EXEC_LO.offset, new_result)] + ([] if is_vopc else [ctx.wsgpr(dst_reg, new_result)])
