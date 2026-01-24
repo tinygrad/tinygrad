@@ -650,5 +650,74 @@ class TestSOPPNop(unittest.TestCase):
     self.assertEqual(st.sgpr[0], 2)
 
 
+class TestNullRegister(unittest.TestCase):
+  """Tests for NULL register (124) behavior - writes should be discarded, reads return 0."""
+
+  def test_s_mov_b32_from_null(self):
+    """S_MOV_B32 from NULL should read as 0."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADBEEF),  # Set s[0] to sentinel
+      s_mov_b32(s[0], NULL),  # Read from NULL - should be 0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0)
+
+  def test_s_add_u32_with_null_src(self):
+    """S_ADD_U32 with NULL as source should use 0."""
+    instructions = [
+      s_mov_b32(s[0], 100),
+      s_add_u32(s[1], s[0], NULL),  # 100 + 0 = 100
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 100)
+
+  def test_s_mov_b32_to_null(self):
+    """S_MOV_B32 to NULL (sdst=124) should discard the write."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADBEEF),  # Set s[0] to sentinel
+      s_mov_b32(NULL, 42),  # Write to NULL - should be discarded
+      # s[0] should still be 0xDEADBEEF since NULL write doesn't affect it
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 0xDEADBEEF)
+
+  def test_s_add_u32_to_null(self):
+    """S_ADD_U32 with sdst=NULL should discard result but still set SCC."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 1),
+      s_add_u32(NULL, s[0], s[1]),  # overflow, write to NULL
+      s_cselect_b32(s[2], 1, 0),  # capture SCC
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # SCC should still be set from overflow even though result was discarded
+    self.assertEqual(st.sgpr[2], 1)
+    self.assertEqual(st.scc, 1)
+
+  def test_s_and_b32_to_null(self):
+    """S_AND_B32 with sdst=NULL should discard result but still set SCC."""
+    instructions = [
+      s_mov_b32(s[0], 0xFF00FF00),
+      s_mov_b32(s[1], 0x0F0F0F0F),
+      s_and_b32(NULL, s[0], s[1]),  # result=0x0F000F00, non-zero so SCC=1
+      s_cselect_b32(s[2], 1, 0),  # capture SCC
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 1)  # SCC=1 because result was non-zero
+    self.assertEqual(st.scc, 1)
+
+  def test_s_or_b32_to_null_zero_result(self):
+    """S_OR_B32 with sdst=NULL and zero result should set SCC=0."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_mov_b32(s[1], 0),
+      s_or_b32(NULL, s[0], s[1]),  # result=0, so SCC=0
+      s_cselect_b32(s[2], 1, 0),  # capture SCC
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[2], 0)  # SCC=0 because result was zero
+    self.assertEqual(st.scc, 0)
+
+
 if __name__ == '__main__':
   unittest.main()

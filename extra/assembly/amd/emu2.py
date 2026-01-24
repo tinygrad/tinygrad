@@ -386,7 +386,9 @@ class _Ctx:
     self.sgpr, self.vgpr, self.vmem, self.lds, self.scratch = sgpr, vgpr, vmem, lds, scratch
     self.literal, self.inst_words = literal, inst_words
 
-  def rsgpr(self, reg: int) -> UOp: return self.sgpr.index(UOp.const(dtypes.index, reg), ptr=True).load()
+  def rsgpr(self, reg: int) -> UOp:
+    if reg == 124: return UOp.const(dtypes.uint32, 0)  # NULL register reads as 0
+    return self.sgpr.index(UOp.const(dtypes.index, reg), ptr=True).load()
   def rsgpr64(self, off: int) -> UOp:
     if off >= 128:  # inline constant
       if off < 193: return UOp.const(dtypes.uint64, off - 128)  # 0-64
@@ -394,7 +396,9 @@ class _Ctx:
       if off == 255: return UOp.const(dtypes.uint64, self.literal)  # literal constant
       return UOp.const(dtypes.uint64, 0)  # other inline constants
     return _u64(self.rsgpr(off), self.rsgpr(off + 1))
-  def wsgpr(self, reg: int, val: UOp) -> UOp: return self.sgpr.index(UOp.const(dtypes.index, reg)).store(val.cast(dtypes.uint32))
+  def wsgpr(self, reg: int, val: UOp) -> UOp:
+    if reg == 124: return UOp(Ops.GROUP)  # NULL register - discard write
+    return self.sgpr.index(UOp.const(dtypes.index, reg)).store(val.cast(dtypes.uint32))
 
   def rvgpr(self, reg: int, lane: UOp) -> UOp: return self.vgpr.index(UOp.const(dtypes.index, reg * 32) + lane.cast(dtypes.index), ptr=True).load()
   def wvgpr(self, reg: int, lane: UOp, val: UOp, exec_mask: UOp, after: UOp|None = None) -> UOp:
@@ -654,17 +658,12 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       else:
         d0_u32 = d0_val.bitcast(dtypes.uint32) if d0_val.dtype in (dtypes.float32, dtypes.half) else d0_val.cast(dtypes.uint32)
         vgpr_stores.append(ctx.wvgpr(vdst_reg, lane3, d0_u32, exec_mask))
-    # Only write carry output if sdst is not NULL (124)
-    if sdst_reg != 124:
-      vcc_write = ctx.wsgpr(sdst_reg, final_vcc)
-      if vgpr_stores:
-        # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
-        return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), ctx.inc_pc(), arg=KernelInfo(name=name))
-      return name, UOp.sink(vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
-    else:
-      if vgpr_stores:
-        return name, UOp.sink(UOp.sink(*vgpr_stores).end(lane3), ctx.inc_pc(), arg=KernelInfo(name=name))
-      return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
+    # Write carry output (wsgpr returns GROUP no-op for NULL register 124)
+    vcc_write = ctx.wsgpr(sdst_reg, final_vcc)
+    if vgpr_stores:
+      # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
+      return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), ctx.inc_pc(), arg=KernelInfo(name=name))
+    return name, UOp.sink(vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
   else:
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, sdst_reg=sdst_reg)
     assert pcode_result is not None, f"no pcode for VOP3SD: {op_name}"
