@@ -810,6 +810,81 @@ class TestCarryOps(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 0)  # Overflowed to 0
     self.assertEqual(st.vcc, 1)  # Carry out
 
+  def test_v_add_co_ci_u32_clears_carry(self):
+    """V_ADD_CO_CI_U32: VCC must be updated even when no carry is generated.
+
+    This tests the case where VCC=1 going in (carry-in consumed) but the addition
+    does not overflow, so VCC must be cleared to 0.
+
+    Regression test for: VCC not being written by v_add_co_ci_u32_e32.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 1),  # VCC = 1 (carry in)
+      v_mov_b32_e32(v[0], 1),  # S0 = 1
+      v_mov_b32_e32(v[1], 1),  # S1 = 1
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 1 + 1 + 1 = 3 (no overflow)
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 3)  # 1 + 1 + 1 = 3
+    self.assertEqual(st.vcc, 0)  # No carry out - VCC must be cleared
+
+  def test_v_add_co_ci_u32_multilane_clears_vcc(self):
+    """V_ADD_CO_CI_U32 with multiple lanes: VCC bits must be updated per-lane.
+
+    When VCC has multiple bits set (one per active lane), and the addition doesn't
+    overflow for any lane, all VCC bits must be cleared.
+
+    Regression test for: VCC not being written by v_add_co_ci_u32_e32 in multi-lane case.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 0b11),  # VCC = 0b11 (lanes 0,1 have carry-in)
+      v_mov_b32_e32(v[0], 1),  # S0 = 1 for all lanes
+      v_mov_b32_e32(v[1], 1),  # S1 = 1 for all lanes
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 1 + 1 + 1 = 3 (no overflow)
+    ]
+    st = run_program(instructions, n_lanes=2)
+    self.assertEqual(st.vgpr[0][2], 3)  # lane 0: 1 + 1 + 1 = 3
+    self.assertEqual(st.vgpr[1][2], 3)  # lane 1: 1 + 1 + 1 = 3
+    self.assertEqual(st.vcc, 0)  # No carry out for any lane - all VCC bits must be cleared
+
+  def test_v_add_co_ci_u32_preserves_inactive_vcc_bits(self):
+    """V_ADD_CO_CI_U32: VCC carry-out overwrites entire VCC register.
+
+    VOP2 carry instructions write ALL VCC bits based on carry-out, clearing
+    bits for lanes that don't overflow regardless of EXEC mask.
+
+    Note: This differs from VOPC which only writes active lane bits.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 0x00010000),  # VCC bit 16 set
+      v_mov_b32_e32(v[0], 1),  # S0 = 1
+      v_mov_b32_e32(v[1], 1),  # S1 = 1
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # D0 = 1 + 1 + 0 = 2 (no carry)
+    ]
+    st = run_program(instructions, n_lanes=4)
+    self.assertEqual(st.vgpr[0][2], 2)  # lane 0: 1 + 1 + 0 = 2
+    # VCC should be completely cleared (all lanes have no carry-out)
+    self.assertEqual(st.vcc, 0)
+
+  def test_v_add_co_ci_u32_all_lanes_same_result(self):
+    """V_ADD_CO_CI_U32: all active lanes should produce the same result.
+
+    When the same constant inputs are used across all lanes, each lane should
+    compute the same result and write to its own VGPR slot.
+
+    Regression test for: VGPR writes not happening for all lanes.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 0),  # No carry-in
+      v_mov_b32_e32(v[0], 3),  # inline constant 3
+      v_mov_b32_e32(v[1], 5),  # value 5
+      v_add_co_ci_u32_e32(v[1], 3, v[1]),  # v[1] = 3 + v[1] + 0 = 3 + 5 = 8
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # All 4 lanes should have v[1] = 8
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 8, f"lane {lane} should have v[1]=8")
+
   def test_v_sub_co_ci_u32_no_borrow(self):
     """V_SUB_CO_CI_U32: D0 = S0 - S1 - VCC_IN, when VCC_IN=0."""
     instructions = [

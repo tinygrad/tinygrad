@@ -344,7 +344,7 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
   srcs['EXEC'], srcs['SCC'] = exec_mask, rsgpr_fn(SCC_IDX)
   _, assigns = parse_pcode(pcode, srcs, lane, op_name=op.name)
 
-  raw_stores = []
+  raw_stores, vcc_val, exec_val = [], None, None
   for dest, val in assigns:
     if 'D0' in dest and '[laneId]' in dest:
       raw_stores.append(('vcc', wsgpr_fn(VCC_LO.offset, _set_lane_bit(rsgpr_fn(VCC_LO.offset), lane, val, exec_mask))))
@@ -366,11 +366,11 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
                  (old_val & UOp.const(dtypes.uint32, 0xFFFF0000)) | (result & UOp.const(dtypes.uint32, 0xFFFF))
         raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, result, exec_mask)))
       else: raw_stores.append(('vgpr', wvgpr_fn(vdst_reg, lane, _val_to_u32(val), exec_mask)))
-    elif dest.startswith('VCC'): raw_stores.append(('vcc', wsgpr_fn(vcc_reg, _set_lane_bit(rsgpr_fn(vcc_reg), lane, val, exec_mask))))
-    elif dest.startswith('EXEC'): raw_stores.append(('exec', wsgpr_fn(EXEC_LO.offset, _set_lane_bit(rsgpr_fn(EXEC_LO.offset), lane, val, exec_mask))))
+    elif dest.startswith('VCC'): vcc_val = val  # Collect VCC value to reduce across lanes
+    elif dest.startswith('EXEC'): exec_val = val  # Collect EXEC value to reduce across lanes
     elif dest.startswith('SCC'): raw_stores.append(('scc', wsgpr_fn(SCC_IDX, _to_u32(val))))
 
-  stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t in ('vgpr', 'vcc', 'exec')], [s for t, s in raw_stores if t == 'scc']
+  stores, lane_stores, scalar_stores = [], [s for t, s in raw_stores if t == 'vgpr'], [s for t, s in raw_stores if t == 'scc']
   slice_stores = [s for t, s in raw_stores if t == 'vgpr_slice']
   if slice_stores:
     result = rvgpr_fn(vdst_reg, lane) if rvgpr_fn else UOp.const(dtypes.uint32, 0)
@@ -379,6 +379,15 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
       result = (result & (mask ^ UOp.const(dtypes.uint32, 0xFFFFFFFF))) | (val_bits << UOp.const(dtypes.uint32, lo_bit))
     lane_stores.append(wvgpr_fn(vdst_reg, lane, result, exec_mask))
   if lane_stores: stores.append(UOp.sink(*lane_stores).end(lane))
+  # VCC/EXEC writes use reduce to combine all lane bits, then write once (fixes multi-lane carry bug)
+  # Must use _unroll_lanes pattern with fresh lambda to avoid graph issues with the main lane range
+  # VOP2 carry instructions write ALL 32 VCC bits (hardware verified), not just active lane bits
+  if vcc_val is not None:
+    def get_vcc_bit(l): return (_to_u32(vcc_val.substitute({lane: l})) & U32_1).cast(dtypes.uint32)
+    stores.append(wsgpr_fn(vcc_reg, _unroll_lanes(get_vcc_bit, exec_mask, apply_exec=False)))
+  if exec_val is not None:
+    def get_exec_bit(l): return (_to_u32(exec_val.substitute({lane: l})) & U32_1).cast(dtypes.uint32)
+    stores.append(wsgpr_fn(EXEC_LO.offset, _unroll_lanes(get_exec_bit, exec_mask, apply_exec=False)))
   stores.extend(scalar_stores)
   if not stores: return None
   return (name, UOp.sink(*stores, inc_pc_fn(), arg=KernelInfo(name=name))) if inc_pc_fn else stores

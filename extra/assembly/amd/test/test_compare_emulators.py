@@ -198,8 +198,10 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             # s_add_i32/s_sub_i32: Rust has incorrect SCC overflow detection
             # v_exp_f32/v_log_f32/v_ldexp_f32: precision differences in transcendental functions
             # s_delay_alu: Rust handles differently
+            # v_add_co_ci_u32/v_sub_co_ci_u32/v_subrev_co_ci_u32: Rust preserves inactive VCC bits, but hardware clears all bits
             sync_after = any(x in inst_mnemonic.lower() for x in ('v_div_scale', 'v_div_fixup', 'v_cvt_f16_f32', 's_add_i32', 's_sub_i32',
-                                                                   'v_exp_f32', 'v_log_f32', 'v_ldexp_f32', 's_delay_alu'))
+                                                                   'v_exp_f32', 'v_log_f32', 'v_ldexp_f32', 's_delay_alu',
+                                                                   'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'))
             # Skip comparison if previous instruction had known Rust bugs (states were synced but may still differ slightly)
             diffs = rust_before.diff(python_before, n_lanes) if not prev_sync_after else []
             if diffs:
@@ -454,6 +456,14 @@ class TestTinygradKernels(unittest.TestCase):
     """Test int64 modulo, especially edge cases like 1 % -1."""
     from tinygrad import dtypes
     self._test_kernel(lambda T: T([1, 10, -10, 7], dtype=dtypes.int64) % T([-1, 3, 3, -3], dtype=dtypes.int64))
+
+  @unittest.skip("slow and broken with AMD_LLVM=1")
+  def test_nonzero(self):
+    """Test nonzero operation - counts and gathers indices of non-zero elements."""
+    import numpy as np
+    np.random.seed(42)
+    x_np = np.random.rand(10, 5, 3).astype(np.float32)
+    self._test_kernel(lambda T: (T(x_np.tolist()) > 0.5).nonzero())
 
   @unittest.skip("Precision differences in v_exp/v_log accumulate across kernels, causing memory divergence")
   def test_softmax_argmax_fused(self):
