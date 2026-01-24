@@ -415,4 +415,6 @@ class Inst:
     name = self.op.name.lower() if hasattr(self, 'op') else type(self).__name__
     parts = [(repr(v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
     while parts and parts[-1][1]: parts.pop()
-    return f"{name}({', '.join(p[0] for p in parts)})"
+    # TODO: fix this with a test, LIT isn't an operand
+    ret = f"{name}({', '.join(p[0] for p in parts if p[0] != "LIT")})"
+    return ret
