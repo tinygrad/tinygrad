@@ -1013,12 +1013,25 @@ def _register_funcs():
     return ((val.bitcast(dtypes.uint64) >> _const(dtypes.uint64, 52)) & _const(dtypes.uint64, 0x7FF)).cast(dtypes.int) - _const(dtypes.int, 1022)
 
   TWO_OVER_PI = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6
-  _PREOP = {s: float(((TWO_OVER_PI << s) >> (1201 - 53)) & 0x1fffffffffffff) for s in range(1149)}
+  # TWO_OVER_PI as 19 u64 words for trig_preop_result (word[0] = bits 0-63, word[18] = bits 1152-1200)
+  _PREOP_WORDS = tuple((TWO_OVER_PI >> (64 * i)) & 0xFFFFFFFFFFFFFFFF for i in range(19))
   def _trig_preop(a):
-    if a[0].op == Ops.CONST: return _const(dtypes.float64, _PREOP.get(int(a[0].arg), float(((TWO_OVER_PI << int(a[0].arg)) >> (1201 - 53)) & 0x1fffffffffffff)))
-    result = _const(dtypes.float64, _PREOP[0])
-    for s in range(1148, -1, -1): result = a[0].eq(_const(a[0].dtype, s)).where(_const(dtypes.float64, _PREOP[s]), result)
-    return result
+    # Extract 53 bits from position (1148 - shift) in the 1201-bit 2/PI constant
+    # Using word-based selection: 19 conditions instead of 1149
+    shift = a[0].cast(dtypes.uint32)
+    bit_pos = _u32(1148) - shift  # starting bit position from LSB
+    word_idx = bit_pos >> _u32(6)  # // 64
+    bit_off = bit_pos & _u32(63)   # % 64
+    # Select lo_word and hi_word using shared conditions
+    lo_word, hi_word = _u64(_PREOP_WORDS[18]), _u64(0)
+    for i in range(17, -1, -1):
+      cond = word_idx.eq(_u32(i))
+      lo_word = cond.where(_u64(_PREOP_WORDS[i]), lo_word)
+      hi_word = cond.where(_u64(_PREOP_WORDS[i + 1]), hi_word)
+    # Combine and extract 53 bits: ((lo >> bit_off) | (hi << (64 - bit_off))) & mask
+    bit_off_64 = bit_off.cast(dtypes.uint64)
+    result = ((lo_word >> bit_off_64) | (hi_word << (_u64(64) - bit_off_64))) & _u64(0x1fffffffffffff)
+    return result.cast(dtypes.float64)
 
   def _ff1(a, bits):
     dt = dtypes.uint64 if bits == 64 else dtypes.uint32
