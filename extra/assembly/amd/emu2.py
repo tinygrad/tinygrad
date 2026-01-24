@@ -654,11 +654,17 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       else:
         d0_u32 = d0_val.bitcast(dtypes.uint32) if d0_val.dtype in (dtypes.float32, dtypes.half) else d0_val.cast(dtypes.uint32)
         vgpr_stores.append(ctx.wvgpr(vdst_reg, lane3, d0_u32, exec_mask))
-    vcc_write = ctx.wsgpr(sdst_reg, final_vcc)
-    if vgpr_stores:
-      # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
-      return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), ctx.inc_pc(), arg=KernelInfo(name=name))
-    return name, UOp.sink(vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
+    # Only write carry output if sdst is not NULL (124)
+    if sdst_reg != 124:
+      vcc_write = ctx.wsgpr(sdst_reg, final_vcc)
+      if vgpr_stores:
+        # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
+        return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), ctx.inc_pc(), arg=KernelInfo(name=name))
+      return name, UOp.sink(vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
+    else:
+      if vgpr_stores:
+        return name, UOp.sink(UOp.sink(*vgpr_stores).end(lane3), ctx.inc_pc(), arg=KernelInfo(name=name))
+      return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
   else:
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, sdst_reg=sdst_reg)
     assert pcode_result is not None, f"no pcode for VOP3SD: {op_name}"

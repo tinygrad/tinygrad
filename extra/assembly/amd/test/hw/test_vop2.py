@@ -860,6 +860,23 @@ class TestCarryOps(unittest.TestCase):
     self.assertEqual(st.vgpr[0][0], 16)
     self.assertEqual(st.sgpr[10], 0)  # No carry out
 
+  def test_v_add_co_ci_u32_vop3sd_null_sdst(self):
+    """VOP3SD V_ADD_CO_CI_U32 with sdst=NULL: carry output is discarded.
+
+    When sdst=NULL (register 124), the carry-out should NOT be written anywhere.
+    We verify this by checking that VCC (which we set to a sentinel value) is unchanged.
+    """
+    instructions = [
+      s_mov_b32(VCC_LO, 0xDEADBEEF),  # Sentinel value in VCC
+      s_mov_b32(s[6], 0),  # carry-in = 0
+      # VOP3SD with NULL sdst: carry-out should be discarded
+      # Uses 0xFFFFFFFF + 1 + 0 = 0 with carry-out=1, but carry should not be written
+      v_add_co_ci_u32(v[0], NULL, 0xFFFFFFFF, 1, s[6]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0)  # 0xFFFFFFFF + 1 + 0 = 0 (overflow)
+    self.assertEqual(st.vcc, 0xDEADBEEF)  # VCC unchanged - carry was discarded
+
 
 if __name__ == '__main__':
   unittest.main()
