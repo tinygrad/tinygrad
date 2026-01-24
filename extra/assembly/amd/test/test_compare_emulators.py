@@ -457,6 +457,18 @@ class TestTinygradKernels(unittest.TestCase):
     from tinygrad import dtypes
     self._test_kernel(lambda T: T([1, 10, -10, 7], dtype=dtypes.int64) % T([-1, 3, 3, -3], dtype=dtypes.int64))
 
+  def test_expand_flatten_sum(self):
+    """Test flatten of expanded tensor followed by sum.
+
+    Bug: flatten() of an expanded tensor produces wrong results for certain sizes.
+    Sizes that are multiples of 32 work (32, 48, 64), but sizes like 33, 49, 50 fail.
+    This breaks masked_select and nonzero operations.
+    """
+    import numpy as np
+    np.random.seed(0)
+    x_np = np.random.uniform(-2, 2, (33,)).astype(np.float32)
+    self._test_kernel(lambda T: (T(x_np.tolist()) > 0.5).unsqueeze(-1).expand(33, 3).flatten().sum())
+
   @unittest.skip("slow and broken with AMD_LLVM=1")
   def test_nonzero(self):
     """Test nonzero operation - counts and gathers indices of non-zero elements."""
