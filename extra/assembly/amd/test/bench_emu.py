@@ -75,6 +75,7 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
   from tinygrad.runtime.support.elf import jit_loader
 
   # Clear caches to measure fresh
+  _get_inst_sink.cache_clear()
   _get_inst_prg.cache_clear()
   decode_program.cache_clear()
 
