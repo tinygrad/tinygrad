@@ -34,7 +34,7 @@ def cu_time_execution(cb, enable=False) -> float|None:
   return ret.value * 1e-3
 
 class CUDAProgram:
-  def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0):
+  def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0, **kwargs):
     self.dev, self.name, self.lib, self.smem = dev, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
 

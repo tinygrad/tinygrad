@@ -16,12 +16,6 @@ class Reg:
     self.offset, self.sz = offset, sz
     self.neg, self.abs_, self.hi = neg, abs_, hi
 
-  # TODO: remove these legacy aliases
-  @property
-  def count(self): return self.sz
-  @property
-  def idx(self): return self.offset
-
   def __hash__(self): return hash((self.offset, self.sz, self.neg, self.abs_, self.hi))
   def __getitem__(self, key):
     if isinstance(key, slice):

@@ -227,8 +227,6 @@ class ClangRenderer(CStyleLanguage):
   global_max = (CPU_COUNT.value, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
-  code_for_workitem = {"g": lambda _: "core_id"}
-  extra_args = ['int core_id']
   if AMX: tensor_cores = tc.amx
 
   # language options
