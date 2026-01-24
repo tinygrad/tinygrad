@@ -10,7 +10,8 @@ from extra.assembly.amd.test.hw.helpers import *
 TEST_OFFSET = 2000
 
 # Cache invalidation sequence for scalar loads after vector stores
-CACHE_INV = [s_gl1_inv(), s_dcache_inv(), s_waitcnt(0)] + [s_nop(0)]*16
+# s_wait_idle waits for all outstanding memory operations including cache flushes
+CACHE_INV = [s_gl1_inv(), s_dcache_inv(), s_wait_idle()]
 
 class TestSLoadRegisterOffset(unittest.TestCase):
   """Tests for s_load with register offset (soffset field).
