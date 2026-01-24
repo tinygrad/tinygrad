@@ -14,7 +14,7 @@ class FSDP:
     self.to_sync:list[tuple[Tensor, Tensor, tuple[int, ...]]] = []
     for name, param in nn.state.get_state_dict(self.module).items(): self.shard_param(name, param)
     for unit in self.units: self.wrap_call(unit)
-  
+
   def shard_param(self, name:str, param:Tensor):
     # save the correct shape of the parameter and calculate the padded shape to use in sharding.
     self.logical_shapes[name] = param.shape
@@ -36,7 +36,6 @@ class FSDP:
     setattr(submod, parts[-1], param_sharded)
 
   def gather_param(self, shape:tuple[int], param:Tensor) -> Tensor:
-    split_size = param.shape[self.axis] // self.ndev
     parts = []
     for i in range(self.ndev):
       # extract shard, ensure single device

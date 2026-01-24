@@ -3,6 +3,7 @@ import numpy as np
 from tinygrad import Tensor, Device, nn
 from tinygrad.nn.distributed import FSDP
 from test.helpers import needs_second_gpu
+from os import getenv
 
 # ** Define a simple network to do tests on **
 class Net:
@@ -15,10 +16,10 @@ class Net:
 
 
 class TestFSDP(unittest.TestCase):
-  #@needs_second_gpu
+  @needs_second_gpu
   def setUp(self):
     self.net = Net()
-    self.devices = ("CPU", "CUDA")
+    self.devices =tuple(f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 2)))
 
     # Save original state for comparison (copying tensors to avoid sharing memory)
     self.original_state = {k: v.numpy() for k, v in nn.state.get_state_dict(self.net).items()}
