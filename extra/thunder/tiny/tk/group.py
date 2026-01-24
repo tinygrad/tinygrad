@@ -261,7 +261,7 @@ class Group:
       red_local_store = red_local[self.laneid].store(red_reg[0])
       red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
 
-      # reduce from shared memory - combine across thread groups
+      # reduce from shared memory
       for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
         offset = (self.laneid + (1 + inner) * 16) % self.group_threads
         reg_store = red_reg[0].store(op(red_reg[0], red_local[offset])).end(inner)
