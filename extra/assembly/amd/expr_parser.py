@@ -19,8 +19,8 @@ def _cast_to(v, dt):
 
 # Token types
 class Token:
-  __slots__ = ('type', 'val', 'pos')
-  def __init__(self, type: str, val: str, pos: int = 0): self.type, self.val, self.pos = type, val, pos
+  __slots__ = ('type', 'val')
+  def __init__(self, type: str, val: str): self.type, self.val = type, val
   def __repr__(self): return f'{self.type}:{self.val}'
 
 def tokenize(s: str) -> list[Token]:
@@ -30,20 +30,20 @@ def tokenize(s: str) -> list[Token]:
     if c.isspace(): i += 1; continue
     # Two-char operators
     if i + 1 < n and s[i:i+2] in ('||', '&&', '>=', '<=', '==', '!=', '<>', '>>', '<<', '**', '+:', '-:'):
-      tokens.append(Token('OP', s[i:i+2], i)); i += 2; continue
+      tokens.append(Token('OP', s[i:i+2])); i += 2; continue
     # Single-char tokens
-    if c in '|^&><+-*/~!%': tokens.append(Token('OP', c, i)); i += 1; continue
-    if c == '(': tokens.append(Token('LPAREN', c, i)); i += 1; continue
-    if c == ')': tokens.append(Token('RPAREN', c, i)); i += 1; continue
-    if c == '[': tokens.append(Token('LBRACKET', c, i)); i += 1; continue
-    if c == ']': tokens.append(Token('RBRACKET', c, i)); i += 1; continue
-    if c == '{': tokens.append(Token('LBRACE', c, i)); i += 1; continue
-    if c == '}': tokens.append(Token('RBRACE', c, i)); i += 1; continue
-    if c == ':': tokens.append(Token('COLON', c, i)); i += 1; continue
-    if c == ',': tokens.append(Token('COMMA', c, i)); i += 1; continue
-    if c == '?': tokens.append(Token('QUESTION', c, i)); i += 1; continue
-    if c == '.': tokens.append(Token('DOT', c, i)); i += 1; continue
-    if c == "'": tokens.append(Token('QUOTE', c, i)); i += 1; continue
+    if c in '|^&><+-*/~!%': tokens.append(Token('OP', c)); i += 1; continue
+    if c == '(': tokens.append(Token('LPAREN', c)); i += 1; continue
+    if c == ')': tokens.append(Token('RPAREN', c)); i += 1; continue
+    if c == '[': tokens.append(Token('LBRACKET', c)); i += 1; continue
+    if c == ']': tokens.append(Token('RBRACKET', c)); i += 1; continue
+    if c == '{': tokens.append(Token('LBRACE', c)); i += 1; continue
+    if c == '}': tokens.append(Token('RBRACE', c)); i += 1; continue
+    if c == ':': tokens.append(Token('COLON', c)); i += 1; continue
+    if c == ',': tokens.append(Token('COMMA', c)); i += 1; continue
+    if c == '?': tokens.append(Token('QUESTION', c)); i += 1; continue
+    if c == '.': tokens.append(Token('DOT', c)); i += 1; continue
+    if c == "'": tokens.append(Token('QUOTE', c)); i += 1; continue
     if c == ';': i += 1; continue
     # Number (including hex, float with suffix)
     if c.isdigit() or (c == '-' and i + 1 < n and s[i+1].isdigit()):
@@ -60,14 +60,14 @@ def tokenize(s: str) -> list[Token]:
       # Suffix
       for sfx in ('ULL', 'LL', 'UL', 'U', 'L', 'F', 'f'):
         if s[i:i+len(sfx)] == sfx: i += len(sfx); break
-      tokens.append(Token('NUM', s[start:i], start)); continue
+      tokens.append(Token('NUM', s[start:i])); continue
     # Identifier
     if c.isalpha() or c == '_':
       start = i
       while i < n and (s[i].isalnum() or s[i] == '_'): i += 1
-      tokens.append(Token('IDENT', s[start:i], start)); continue
+      tokens.append(Token('IDENT', s[start:i])); continue
     raise RuntimeError(f"unexpected char '{c}' at pos {i} in: {s}")
-  tokens.append(Token('EOF', '', n))
+  tokens.append(Token('EOF', ''))
   return tokens
 
 class Parser:
@@ -209,9 +209,9 @@ class Parser:
 
       # Function call
       if self.try_eat('LPAREN'):
-        args_str, args = self._parse_args_raw()
+        args = self._parse_args()
         self.eat('RPAREN')
-        return self._call_func(name, args, args_str)
+        return self._call_func(name, args)
 
       # Special constants
       if name == 'PI': return _const(dtypes.float32, 3.141592653589793)
@@ -485,18 +485,15 @@ class Parser:
     if 'U' in suffix: return _const(dtypes.uint32, val)
     return _const(dtypes.int if val < 0 else dtypes.uint32, val)
 
-  def _parse_args_raw(self) -> tuple[str, list[UOp]]:
-    """Parse comma-separated arguments, returning both raw string and parsed UOps"""
-    if self.at('RPAREN'): return '', []
-    start_pos = self.peek().pos
+  def _parse_args(self) -> list[UOp]:
+    """Parse comma-separated arguments"""
+    if self.at('RPAREN'): return []
     args = [self.expr_top()]
     while self.try_eat('COMMA'):
       args.append(self.expr_top())
-    end_pos = self.peek().pos
-    args_str = self.expr[start_pos:end_pos].strip()
-    return args_str, args
+    return args
 
-  def _call_func(self, name: str, args: list[UOp], args_str: str) -> UOp:
+  def _call_func(self, name: str, args: list[UOp]) -> UOp:
     """Call a built-in function"""
     # Lambda call
     if name in self.vars and isinstance(self.vars[name], tuple) and self.vars[name][0] == 'lambda':
@@ -508,7 +505,7 @@ class Parser:
       return parse_expr(body, lv, self.funcs)
     # Built-in function
     if name in self.funcs:
-      return self.funcs[name](args, self.vars, self.expr, args_str)
+      return self.funcs[name](args, self.vars)
     raise RuntimeError(f"unknown function: {name} in: {self.expr}")
 
   def _handle_mem_load(self, addr: UOp, dt) -> UOp:
