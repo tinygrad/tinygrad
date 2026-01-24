@@ -343,7 +343,12 @@ class Parser:
             base = self.vars[f'{vn}{lo // 32}']
             lo, hi = lo % 32, (hi % 32) + (lo % 32)
         return _extract_bits(base, hi, lo)
-      return base
+      # Dynamic bit slice: (base >> lo) & ((1 << (hi - lo + 1)) - 1)
+      dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+      hi, lo = first.cast(dt), second.cast(dt)
+      width = hi - lo + _const(dt, 1)
+      mask = (_const(dt, 1) << width) - _const(dt, 1)
+      return (base.cast(dt) >> lo) & mask
     self.eat('RBRACKET')
     dt_suffix = None
     if self.try_eat('DOT'):
@@ -563,20 +568,7 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
     j += 1
   # Second pass: substitute loop variable in remaining positions
   subst_parts = [str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in result_toks if t.type != 'EOF']
-  subst = ' '.join(subst_parts)
-  stoks = tokenize(subst)
-  eval_parts, j = [], 0
-  while j < len(stoks):
-    if stoks[j].type == 'LBRACKET':
-      j, inner_toks = _match_bracket(stoks, j)
-      inner = _tok_str(inner_toks)
-      if ':' in inner and '+:' not in inner and '-:' not in inner:
-        parts = inner.split(':')
-        if len(parts) == 2: inner = f'{_try_eval(parts[0].strip())} : {_try_eval(parts[1].strip())}'
-      eval_parts.append(f'[{inner}]')
-    elif stoks[j].type != 'EOF': eval_parts.append(stoks[j].val); j += 1
-    else: j += 1
-  return ' '.join(eval_parts)
+  return ' '.join(subst_parts)
 
 def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict | None = None,
                 assigns: list | None = None) -> tuple[int, dict[str, UOp], UOp | None]:
@@ -1083,8 +1075,3 @@ _register_funcs()
 def parse_expr(expr: str, vars: dict, funcs: dict | None = None) -> UOp:
   return Parser(tokenize(expr.strip().rstrip(';')), vars, funcs).parse()
 
-# Helper for evaluating simple arithmetic expressions with variable substitution
-import re as _re
-def _try_eval(s: str) -> str:
-  try: return str(int(eval(_re.sub(r'(\d+)U', r'\1', s))))
-  except Exception: return s
