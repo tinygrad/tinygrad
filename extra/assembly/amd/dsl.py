@@ -416,5 +416,12 @@ class Inst:
     parts = [(repr(v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
     while parts and parts[-1][1]: parts.pop()
     # TODO: fix this with a test, LIT isn't an operand
-    ret = f"{name}({', '.join(p[0] for p in parts if p[0] != "LIT")})"
+    new_parts:list[str] = []
+    for p,_ in parts:
+      if p == "LIT":
+        imm = parts.pop()[0]
+        int(imm) # assert it can be int
+        new_parts.append(imm)
+      else: new_parts.append(p)
+    ret = f"{name}({', '.join(p for p in new_parts)})"
     return ret
