@@ -40,7 +40,7 @@ def asm_gemm(A:Tensor, B:Tensor) -> Tensor:
   
   params = Tensor.full((N, N), N).contiguous()
   Bt = B.T.contiguous()
-  with Context(DEBUG=1): Tensor.realize(params, Bt)
+  with Context(DEBUG=0): Tensor.realize(params, Bt)
   C = Tensor.empty(N, N, dtype=dtypes.half)
   C = Tensor.custom_kernel(C, A, Bt, params, fxn=custom_gemm_kernel)[0]
   return C
