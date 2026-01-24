@@ -855,6 +855,7 @@ def _elf_symbol_offsets(obj: bytes) -> dict[str, int]:
   return {name: sections[sym.st_shndx].header.sh_addr + sym.st_value
           for sym in symbols if 0 < sym.st_shndx < len(sections) and (name := _strtab(strtab_sec.content, sym.st_name))}
 
+@functools.cache
 def _get_inst_sink(inst_bytes: bytes) -> UOp:
   """Build UOp sink for instruction bytes. Cached by instruction bytes."""
   inst = decode_inst(inst_bytes)
