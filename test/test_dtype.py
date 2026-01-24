@@ -333,8 +333,14 @@ class TestUint16DType(TestDType):
 class TestInt32DType(TestDType): DTYPE = dtypes.int32
 class TestUint32DType(TestDType): DTYPE = dtypes.uint32
 
-class TestInt64DType(TestDType): DTYPE = dtypes.int64
+class TestInt64DType(TestDType):
+  DTYPE = dtypes.int64
+  @classmethod
+  def setUpClass(cls): cls.DATA = rand_for_dtype(cls.DTYPE, 10)
+
 class TestUint64DType(TestDType):
+  @classmethod
+  def setUpClass(cls): cls.DATA = rand_for_dtype(cls.DTYPE, 10)
   DTYPE = dtypes.uint64
   def test_uint64_load(self):
     assert Tensor(2**64 - 1, dtype=dtypes.uint64).numpy() == 2**64 - 1

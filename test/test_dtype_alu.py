@@ -191,7 +191,6 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint32, strat.sampled_from(integer_unary_operations))
   def test_uint32_unary(self, a, op): universal_test_unary(a, dtypes.uint32, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint64), f"no uint64 on {Device.DEFAULT}")
   @given(ht.uint64, strat.sampled_from(integer_unary_operations))
   def test_uint64_unary(self, a, op): universal_test_unary(a, dtypes.uint64, op)
 
@@ -204,7 +203,6 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, strat.sampled_from(integer_unary_operations))
   def test_int32_unary(self, a, op): universal_test_unary(a, dtypes.int32, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.int64), f"no int64 on {Device.DEFAULT}")
   @given(ht.int64, strat.sampled_from(integer_unary_operations))
   def test_int64_unary(self, a, op): universal_test_unary(a, dtypes.int64, op)
 
