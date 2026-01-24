@@ -1,24 +1,31 @@
-import pathlib
+import pathlib, atexit
 from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import all_same, Context
 from tinygrad.engine.realize import Estimates
 from tinygrad.uop.ops import Ops, KernelInfo
 
-_stats = {"used":0, "called":0, "errs":[]}
-def todo(msg:str=""): _stats["errs"].append(msg); return False
-
 THREADS_PER_WG = 256
 
+stats = {"used":0, "errs":[]}
+def todo(msg:str="") -> bool: stats["errs"].append(msg); return False
+
 def can_use_asm_gemm(A:Tensor, B:Tensor) -> bool:
-  _stats["called"] += 1
-  if A.shape != B.shape: return todo()
-  if not all_same(A.shape): return todo()
-  if A.shape[0] % THREADS_PER_WG != 0: return todo()
+  if A.dtype != dtypes.half or B.dtype != dtypes.half: return todo("only fp16")
+  if A.shape != B.shape: return todo("matrices must be the same shape")
+  if not all_same(A.shape): return todo("only supports square matrices")
+  if A.shape[0] % THREADS_PER_WG != 0: return todo(f"N must be divisable by {THREADS_PER_WG}")
   return True
 
+def print_stats():
+  print(f"ASM_GEMM=1: {stats['used']} used, {len(stats['errs'])} not used")
+  if stats["errs"]:
+    print("ASM_GEMM=1 unused reasons:")
+    for e in stats["errs"]: print(f" --{e}")
+atexit.register(print_stats)
+
 def asm_gemm(A:Tensor, B:Tensor) -> Tensor:
-  assert can_use_asm_gemm(A, B), f"{_stats['errs'][0]}"
-  _stats["used"] += 1
+  assert can_use_asm_gemm(A, B), f"{stats['errs'][0]}"
+  stats["used"] += 1
 
   N = A.shape[0]
   dname = A.device
