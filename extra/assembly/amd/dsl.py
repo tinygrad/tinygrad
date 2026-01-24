@@ -16,12 +16,6 @@ class Reg:
     self.offset, self.sz = offset, sz
     self.neg, self.abs_, self.hi = neg, abs_, hi
 
-  # TODO: remove these legacy aliases
-  @property
-  def count(self): return self.sz
-  @property
-  def idx(self): return self.offset
-
   def __hash__(self): return hash((self.offset, self.sz, self.neg, self.abs_, self.hi))
   def __getitem__(self, key):
     if isinstance(key, slice):
@@ -360,7 +354,7 @@ class Inst:
       elif name in ('src1', 'vsrc1', 'ssrc1'): bits['s1'] = val
       elif name == 'src2': bits['s2'] = val
       elif name in ('vdst', 'sdst', 'sdata'): bits['d'] = val
-      elif name in ('data', 'vdata', 'data0'): bits['data'] = val
+      elif name in ('data', 'vdata', 'data0', 'vsrc'): bits['data'] = val
     return bits
   @property
   def canonical_op_regs(self) -> dict[str, int]:

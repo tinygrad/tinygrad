@@ -38,7 +38,7 @@ class CLCompiler(Compiler):
     return bytes(binary)
 
 class CLProgram:
-  def __init__(self, device:CLDevice, name:str, lib:bytes, buf_dtypes=[]):
+  def __init__(self, device:CLDevice, name:str, lib:bytes, buf_dtypes=[], **kwargs):
     self.dev, self.name, self.lib, self.buf_dtypes = device, name, lib, buf_dtypes
     self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(lib)),
                                                         to_char_p_p([lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),

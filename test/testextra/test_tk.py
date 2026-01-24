@@ -807,7 +807,7 @@ class TestTK(unittest.TestCase):
 
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 1024, 32, 32, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
@@ -831,7 +831,7 @@ class TestTK(unittest.TestCase):
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True)
+    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True, enable_gqa=True)
     ref = ref.float().transpose(1, 2)
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
@@ -845,7 +845,7 @@ class TestTK(unittest.TestCase):
 
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 1024, 32, 32, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()

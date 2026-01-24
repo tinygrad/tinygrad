@@ -73,7 +73,7 @@ def create_uniform(wgpu_device:WGPUDevPtr, val:int|float) -> WGPUBufPtr:
   return buf
 
 class WebGPUProgram:
-  def __init__(self, dev:tuple[WGPUDevPtr, bool], name:str, lib:bytes):
+  def __init__(self, dev:tuple[WGPUDevPtr, bool], name:str, lib:bytes, **kwargs):
     (self.dev, self.timestamp_supported) = dev
 
     # Creating shader module

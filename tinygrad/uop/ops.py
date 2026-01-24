@@ -308,12 +308,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     for er in self.ended_ranges:
       if er.op is Ops.RANGE:
         # if it's a single RANGE, we don't flow through it.
-        if er in ret: del ret[er]
+        ret.pop(er, None)
       else:
         # if it's not a RANGE, we include all ranges in srcs.
         # technically we shouldn't flow through these ranges either, but this is pre pm_add_control_flow so it's the same.
-        for s in er.ranges:
-          if s in ret: del ret[s]
+        for s in er.ranges: ret.pop(s, None)
     return ret
 
   @property
