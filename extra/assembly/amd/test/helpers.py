@@ -5,6 +5,7 @@ from dataclasses import dataclass
 @dataclass
 class KernelInfo:
   code: bytes
+  src: str
   global_size: tuple[int, int, int]
   local_size: tuple[int, int, int]
   buf_idxs: list[int]  # indices into shared buffer pool
@@ -26,7 +27,7 @@ def get_llvm_objdump():
 ARCH_TO_TARGET:dict[str, list[str]] = {
   "rdna3":["gfx1100"],
   "rdna4":["gfx1200"],
-  "cdna":["gfx942", "gfx950"],
+  "cdna":["gfx950", "gfx942"],
 }
 
 TARGET_TO_ARCH:dict[str, str] = {t:arch for arch,targets in ARCH_TO_TARGET.items() for t in targets}

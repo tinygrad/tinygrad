@@ -21,7 +21,7 @@ NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOP3_SDST_ENC_LIT": "VOP3SD_LIT", "VOP3_
 FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_END"}, "FLAT": {55: "FLAT_ATOMIC_CSUB_U32"}},
          "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}},
          "cdna": {"DS": {152: "DS_GWS_SEMA_RELEASE_ALL", 154: "DS_GWS_SEMA_V", 156: "DS_GWS_SEMA_P"},
-                  "VOP3P": {62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
+                  "VOP3P": {44: "V_MFMA_LD_SCALE_B32", 62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
 _ENC_SUFFIXES = ("_NSA1",)
 # Encoding suffix to class suffix mapping (for variants we DO generate)
@@ -93,7 +93,8 @@ def parse_xml(filename: str):
               for f in enc.findall(".//MicrocodeFormat/BitMap/Field") if f.find("BitLayout/Range") is not None]
     ident = (enc.findall("EncodingIdentifiers/EncodingIdentifier") or [None])[0]
     enc_field = next((f for f in fields if f[0] == "encoding"), None)
-    enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1], enc_field[2]-1, -1)) if ident is not None and enc_field else None
+    # For multi-dword formats, encoding field may be in higher dword but identifier pattern is always in dword0; use % 32
+    enc_bits = "".join(ident.text[len(ident.text)-1-b] for b in range(enc_field[1] % 32, (enc_field[2] % 32)-1, -1)) if ident is not None and enc_field else None
     base_name = _strip_enc(name)
     encodings[NAME_MAP.get(base_name, base_name)] = (fields, enc_bits)
   # Extract instruction opcodes and operand info
@@ -246,7 +247,7 @@ def write_enum(enums, path):
   with open(path, "w") as f: f.write("\n".join(lines))
 
 def write_ins(encodings, enums, lit_only_ops, types, arch, path):
-  _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr"}
+  _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr", "vsrc"}
   _VARIANT_SUFFIXES = ("_LIT", "_DPP16", "_DPP8", "_SDWA_SDST", "_SDWA", "_MFMA")
   def get_base_fmt(fmt):
     for sfx in _VARIANT_SUFFIXES: fmt = fmt.replace(sfx, "")
@@ -309,7 +310,10 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
     all_ops = set(enums.get(enc_name, {}).keys())
     # Exclude SDST ops from base class (they need VOP1_SDST/VOP3_SDST/VOP3B)
     base_allowed = all_ops - base_lit_ops - sdst_opcodes.get(enc_name, set())
-    if enc_name in ("FLAT", "VFLAT"):
+    # RDNA3 FLAT/GLOBAL/SCRATCH share encoding bits, differentiated by seg field
+    # RDNA4 VFLAT/VGLOBAL/VSCRATCH have distinct encoding bits, no seg field needed
+    has_seg_field = any(fn == "seg" for fn, _, _ in fields)
+    if enc_name in ("FLAT", "VFLAT") and has_seg_field:
       prefix = "V" if enc_name == "VFLAT" else ""
       for cls, seg, op_enum in [(f"{prefix}FLAT", 0, f"{prefix}FLATOp"), (f"{prefix}GLOBAL", 2, f"{prefix}GLOBALOp"), (f"{prefix}SCRATCH", 1, f"{prefix}SCRATCHOp")]:
         cls_ops = set(enums.get(cls, {}).keys())
@@ -319,7 +323,7 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
           elif fn == "op": lines.append(f"  op = EnumBitField({hi}, {lo}, {op_enum}, {fmt_allowed(op_enum, cls_ops)})")
           else: lines.append(f"  {fn} = {field_def(fn, hi, lo, cls, enc_bits)}")
         lines.append("")
-    elif enc_name not in ("FLAT_GLOBAL", "FLAT_SCRATCH", "FLAT_GLBL", "VGLOBAL", "VSCRATCH", "DPP", "SDWA"):
+    elif enc_name not in ("FLAT_GLOBAL", "FLAT_SCRATCH", "FLAT_GLBL", "DPP", "SDWA"):
       lines.append(f"class {enc_name}(Inst):")
       for fn, hi, lo in sort_fields(fields):
         if fn == "op":
