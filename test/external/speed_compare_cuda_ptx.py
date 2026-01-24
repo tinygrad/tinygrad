@@ -3,8 +3,8 @@ from tinygrad import Device
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 from tinygrad.helpers import getenv, colorize_float
-from extra.optimization.helpers import load_worlds, ast_str_to_lin
-from tinygrad.codegen.opt.search import bufs_from_lin
+from extra.optimization.helpers import load_worlds, ast_str_to_lin, ast_str_to_ast
+from tinygrad.codegen.opt.postrange import bufs_from_ast
 from tinygrad.runtime.ops_cuda import PTXCompiler, PTXRenderer, CUDACompiler
 
 if __name__ == "__main__":
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     lin.apply_opts(hand_coded_optimizations(lin))
     cuda_prg = CompiledRunner(get_program(lin.get_optimized_ast(), lin.opts))
 
-    bufs = bufs_from_lin(lin)
+    bufs = bufs_from_ast(ast_str_to_ast(ast), "CUDA")
 
     # ptx compile
     dev.compiler = PTXCompiler(dev.arch)
