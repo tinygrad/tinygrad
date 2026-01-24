@@ -31,7 +31,7 @@ from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, 
   DS, FLAT, GLOBAL, SCRATCH, VOPD, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOPDOp)
 from extra.assembly.amd.dsl import NULL, VCC_LO, EXEC_LO
 from extra.assembly.amd.autogen.common import OpType
-from extra.assembly.amd.expr_parser import parse_expr as _parse_expr, parse_block as _parse_block, _FUNCS
+from extra.assembly.amd.expr_parser import parse_block
 
 MASK32 = 0xFFFFFFFF
 
@@ -163,7 +163,7 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
   vars.update({'laneId': lane if lane is not None else U32_0, 'WAVE_MODE': {'IEEE': U32_1}, 'WAVE32': _c(True, dtypes.bool), 'WAVE64': _c(False, dtypes.bool)})
   assigns: list[tuple[str, UOp]] = []
   lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
-  _, final, _ = _parse_block(lines, 0, vars, _FUNCS, assigns)
+  _, final, _ = parse_block(lines, 0, vars, assigns=assigns)
   sliced = set(d.split('[')[0] for d, _ in assigns if '[' in d)
   for var, val in final.items():
     if var in ['D0', 'SCC', 'VCC', 'EXEC', 'PC', 'RETURN_DATA', 'VDATA']:
@@ -172,8 +172,6 @@ def parse_pcode(pcode: str, srcs: dict[str, UOp] | None = None, lane: UOp | None
         if (m := re.match(rf'{var}\.(\w+(?:\[\w+\])?)', l)): assigns.append((f'{var}.{m.group(1)}', val)); break
       else: assigns.append((var, val))
   return vars, assigns
-
-def parse_expr(expr: str, vars: dict[str, UOp]) -> UOp: return _parse_expr(expr, vars, _FUNCS)
 
 def _write_64bit(val: UOp, wfn, reg_or_addr, *args) -> list[UOp]:
   """Write a 64-bit value as two 32-bit writes. args passed to wfn after reg/addr and lo/hi value."""

@@ -570,10 +570,11 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
     else: j += 1
   return ' '.join(eval_parts)
 
-def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict,
+def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict | None = None,
                 assigns: list | None = None) -> tuple[int, dict[str, UOp], UOp | None]:
   """Parse a block of pcode. Returns (next_line, block_assigns, return_value).
   If assigns list is provided, side effects (MEM/VGPR writes) are appended to it."""
+  if funcs is None: funcs = _FUNCS
   block_assigns: dict[str, UOp] = {}
   i = start
   def ctx(): return {**vars, **block_assigns}
