@@ -14,7 +14,6 @@ py_dsl:list[str] = []
 while offset < text_off + text_size:
   inst = decode_inst(image[offset:], "cdna")
   py_dsl.append(repr(inst)+",")
-  eval(repr(inst))
   offset += inst.size()
 
 pre = "from extra.assembly.amd.autogen.cdna.ins import *\n\n"
