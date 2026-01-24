@@ -1625,3 +1625,9 @@ def asm_gemm_kernel(N:int, arch:str="gfx950", dtype=dtypes.half) -> Kernel:
   k.emit(s_nop())
   k.emit(s_endpgm())
   return k
+
+if __name__ == "__main__":
+  k = asm_gemm_kernel(4096)
+  _, lib = k.to_asm()
+  with open(pathlib.Path(__file__).parent/"lib", "rb") as f: lib_cmp = f.read()
+  assert lib == lib_cmp
