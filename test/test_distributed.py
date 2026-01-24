@@ -18,19 +18,17 @@ class TestFSDP(unittest.TestCase):
   #@needs_second_gpu
   def setUp(self):
     self.net = Net()
-    #self.devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
     self.devices = ("CPU", "CUDA")
 
     # Save original state for comparison (copying tensors to avoid sharing memory)
     self.original_state = {k: v.numpy() for k, v in nn.state.get_state_dict(self.net).items()}
 
-    # Wrap with FSDP
     self.fsdp = FSDP(self.net, self.devices)
 
   def test_sharding(self):
     for name, param in nn.state.get_state_dict(self.net).items():
       self.assertEqual(param.device, self.devices)
-      self.assertEqual(param.uop.axis, 0) # FSDP defaults to axis 0
+      self.assertEqual(param.uop.axis, 0)
       # Check if sharded correctly
       for i, lb in enumerate(param.uop.src):
         expected_shape = list(self.original_state[name].shape)
@@ -60,49 +58,45 @@ class TestFSDP(unittest.TestCase):
     nn.state.load_state_dict(ref_net, {k: Tensor(v) for k, v in self.original_state.items()})
 
     x = Tensor.randn(4, 5)
-    x_sharded = x.clone().shard(self.devices, 0)
-    out_fsdp = self.fsdp(x_sharded)
     out_ref = ref_net(x)
+    out_fsdp = self.fsdp(x)
 
     np.testing.assert_allclose(out_fsdp.numpy(), out_ref.numpy(), atol=1e-5, rtol=1e-5)
 
   def test_backward(self):
-    x = Tensor.randn(4, 5)
-
-    # 1. Reference pass
-    ref_net = self.net.__class__()
-    nn.state.load_state_dict(ref_net, {k: Tensor(v) for k, v in self.original_state.items()})
+      import numpy as np
+      x = Tensor.randn(4, 5)
     
-    # Ensure reference params track gradients
-    for param in nn.state.get_state_dict(ref_net).values():
-        param.requires_grad = True
-
-    out_ref = ref_net(x)
-    out_ref.mean().backward()
+      # 1. Reference pass
+      ref_net = self.net.__class__()
+      nn.state.load_state_dict(ref_net, {k: Tensor(v) for k, v in self.original_state.items()})
     
-    ref_grads = {k: v.grad.numpy() for k, v in nn.state.get_state_dict(ref_net).items()}
-
-    # 2. FSDP pass
-    # Shard input to devices (axis=None replicates it to all devices)
-    x_sharded = x.shard(self.devices, axis=0)
+      # Ensure reference params track gradients
+      for param in nn.state.get_state_dict(ref_net).values():
+          param.requires_grad = True
     
-    out_fsdp = self.fsdp(x_sharded)
-    out_fsdp.mean().backward()
-
-    for name, param in nn.state.get_state_dict(self.net).items():
-      sharded_grad = param.grad
-      self.assertIsNotNone(sharded_grad, f"Gradient for {name} is None")
+      out_ref = ref_net(x)
+      out_ref.mean().backward()
+    
+      ref_grads = {k: v.grad.numpy() for k, v in nn.state.get_state_dict(ref_net).items()}
+    
+      out_fsdp = self.fsdp(x)
+      out_fsdp.mean().backward()
       
-      # FIX: Don't use gather_param() here. It reshards/broadcasts which confuses the scheduler
-      # during realization. Just gather to CPU directly for verification.
-      
-      # 1. Gather to CPU (creates a Single-Device tensor)
-      grad_cpu = sharded_grad.to(self.devices[0])
-      
-      # 2. Remove padding (using logical shape)
-      shape = self.fsdp.logical_shapes[name]
-      slices = tuple(slice(0, s) for s in shape)
-      grad_cpu = grad_cpu[slices]
-      
-      # 3. Compare
-      np.testing.assert_allclose(grad_cpu.numpy(), ref_grads[name], atol=1e-5, rtol=1e-5)
+      self.fsdp.sync_grad()
+    
+      for name, param in nn.state.get_state_dict(self.net).items():
+        sharded_grad = param.grad
+        self.assertIsNotNone(sharded_grad, f"Gradient for {name} is None")
+    
+        # 1. Gather to CPU (creates a Single-Device tensor)
+        # This performs an All-Gather on the sharded gradients to reconstruct the full padded tensor
+        grad_cpu = sharded_grad.to(self.devices[0])
+    
+        # 2. Remove padding (using logical shape)
+        shape = self.fsdp.logical_shapes[name]
+        slices = tuple(slice(0, s) for s in shape)
+        grad_cpu = grad_cpu[slices]
+    
+        # 3. Compare
+        np.testing.assert_allclose(grad_cpu.numpy(), ref_grads[name], atol=1e-5, rtol=1e-5)
