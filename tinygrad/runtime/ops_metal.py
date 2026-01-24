@@ -116,9 +116,8 @@ class MetalCompiler(Compiler):
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
-  def __init__(self, dev:MetalDevice, name:str, lib:bytes, **kwargs):
-    self.dev, self.name, self.lib = dev, name, lib
-    self.buf_dtypes = buf_dtypes
+  def __init__(self, dev:MetalDevice, name:str, lib:bytes, buf_dtypes=[], **kwargs):
+    self.dev, self.name, self.lib, self.buf_dtypes = dev, name, lib, buf_dtypes
     if lib[:4] == b"MTLB":
       # binary metal library
       data = objc.dispatch_data_create(lib, len(lib), None, None)
@@ -223,21 +222,14 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
     return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]
-  def _cp_buf_pitched(self, buf:MetalBuffer, mv:memoryview, to_tex:bool):
-    img = buf.image
-    assert img is not None
-    stride = img.shape[1] * img.itemsize * 4
-    mv_buf = self._as_buffer(buf)
-    if img.pitch == stride:
-      return self._cp_mv(mv_buf[:img.shape[0]*stride], mv, "TINY -> METAL") if to_tex else \
-        self._cp_mv(mv, mv_buf[:img.shape[0]*stride], "METAL -> TINY")
-    for i in range(img.shape[0]):
-      if to_tex: mv_buf[i*img.pitch:i*img.pitch+stride] = mv[i*stride:(i+1)*stride]
-      else: mv[i*stride:(i+1)*stride] = mv_buf[i*img.pitch:i*img.pitch+stride]
   def _copyin(self, dest:MetalBuffer, src:memoryview):
     if dest.image is None: return self._cp_mv(self._as_buffer(dest), src, "TINY -> METAL")
-    return self._cp_buf_pitched(dest, src, to_tex=True)
+    img, mv_buf, stride = dest.image, self._as_buffer(dest), dest.image.shape[1] * dest.image.itemsize * 4
+    if img.pitch == stride: return self._cp_mv(mv_buf[:img.shape[0]*stride], src, "TINY -> METAL")
+    for i in range(img.shape[0]): mv_buf[i*img.pitch:i*img.pitch+stride] = src[i*stride:(i+1)*stride]
   def _copyout(self, dest:memoryview, src:MetalBuffer):
     if src.image is None: return self._cp_mv(dest, self._as_buffer(src), "METAL -> TINY")
-    return self._cp_buf_pitched(src, dest, to_tex=False)
+    img, mv_buf, stride = src.image, self._as_buffer(src), src.image.shape[1] * src.image.itemsize * 4
+    if img.pitch == stride: return self._cp_mv(dest, mv_buf[:img.shape[0]*stride], "METAL -> TINY")
+    for i in range(img.shape[0]): dest[i*stride:(i+1)*stride] = mv_buf[i*img.pitch:i*img.pitch+stride]
   def _offset(self, buf:MetalBuffer, size:int, offset:int): return MetalBuffer(buf.buf, size, offset, buf.image)
