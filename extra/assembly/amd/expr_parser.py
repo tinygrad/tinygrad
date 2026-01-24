@@ -87,110 +87,45 @@ class Parser:
     if self.peek().val == val: tok = self.tokens[self.pos]; self.pos += 1; return tok
     return None
 
-  def parse(self) -> UOp: return self.expr_top()
-
+  def parse(self) -> UOp: return self.ternary()
   def expr_top(self) -> UOp: return self.ternary()
 
   def ternary(self) -> UOp:
-    cond = self.or_expr()
+    cond = self.binop(0)
     if self.try_eat('QUESTION'):
-      then_val = self.ternary()
-      self.eat('COLON')
-      else_val = self.ternary()
-      cond_bool = _to_bool(cond)
-      return cond_bool.where(then_val, else_val)
+      then_val, else_val = self.ternary(), (self.eat('COLON'), self.ternary())[1]
+      return _to_bool(cond).where(then_val, else_val)
     return cond
 
-  def or_expr(self) -> UOp:
-    left = self.and_expr()
-    while self.at('OP') and self.peek().val == '||':
-      self.eat('OP'); right = self.and_expr()
-      left, right = self._coerce_bitwise(left, right)
-      left = left | right
-    return left
+  # Precedence table: (ops, apply_fn) - lowest precedence first
+  # apply_fn(left, right, op) -> result
+  def _apply_binop(self, left, right, op):
+    if op in ('||', '&&', '|', '^', '&'): left, right = self._coerce_bitwise(left, right)
+    elif op in ('>=', '<=', '>', '<', '==', '!=', '<>', '>>', '<<'): left, right = self._coerce_cmp(left, right)
+    elif left.dtype != right.dtype: right = right.cast(left.dtype)
+    match op:
+      case '||' | '|': return left | right
+      case '&&' | '&': return left & right
+      case '^': return left ^ right
+      case '==' | '<>': return left.eq(right) if op == '==' else left.ne(right)
+      case '!=' : return left.ne(right)
+      case '>=' | '<=' | '>' | '<': return self._cmp_nan(left, right, {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b)}[op])
+      case '>>' | '<<': return (left >> right) if op == '>>' else (left << right)
+      case '+' | '-':
+        if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST: return _const(left.dtype, left.arg - right.arg)
+        return (left + right) if op == '+' else (left - right)
+      case '*' | '/': return (left * right) if op == '*' else (left / right)
+      case '**': return UOp(Ops.EXP2, left.dtype, (right.cast(left.dtype),)) if left.op == Ops.CONST and left.arg == 2.0 else left
 
-  def and_expr(self) -> UOp:
-    left = self.bitor_expr()
-    while self.at('OP') and self.peek().val == '&&':
-      self.eat('OP'); right = self.bitor_expr()
-      left, right = self._coerce_bitwise(left, right)
-      left = left & right
-    return left
+  _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
 
-  def bitor_expr(self) -> UOp:
-    left = self.xor_expr()
-    while self.at('OP') and self.peek().val == '|':
-      self.eat('OP'); right = self.xor_expr()
-      left, right = self._coerce_bitwise(left, right)
-      left = left | right
-    return left
-
-  def xor_expr(self) -> UOp:
-    left = self.bitand_expr()
-    while self.at('OP') and self.peek().val == '^':
-      self.eat('OP'); right = self.bitand_expr()
-      left, right = self._coerce_bitwise(left, right)
-      left = left ^ right
-    return left
-
-  def bitand_expr(self) -> UOp:
-    left = self.eq_expr()
-    while self.at('OP') and self.peek().val == '&':
-      self.eat('OP'); right = self.eq_expr()
-      left, right = self._coerce_bitwise(left, right)
-      left = left & right
-    return left
-
-  def eq_expr(self) -> UOp:
-    left = self.cmp_expr()
-    while self.at('OP') and self.peek().val in ('==', '!=', '<>'):
-      op = self.eat('OP').val; right = self.cmp_expr()
-      left, right = self._coerce_cmp(left, right)
-      left = left.eq(right) if op == '==' else left.ne(right)
-    return left
-
-  def cmp_expr(self) -> UOp:
-    left = self.shift_expr()
-    while self.at('OP') and self.peek().val in ('>=', '<=', '>', '<'):
-      op = self.eat('OP').val; right = self.shift_expr()
-      left, right = self._coerce_cmp(left, right)
-      left = self._cmp_nan(left, right, {'>=':(lambda a,b:a>=b),'<=':(lambda a,b:a<=b),'>':(lambda a,b:a>b),'<':(lambda a,b:a<b)}[op])
-    return left
-
-  def shift_expr(self) -> UOp:
-    left = self.add_expr()
-    while self.at('OP') and self.peek().val in ('>>', '<<'):
-      op = self.eat('OP').val; right = self.add_expr()
-      left, right = self._coerce_cmp(left, right)
-      left = (left >> right) if op == '>>' else (left << right)
-    return left
-
-  def add_expr(self) -> UOp:
-    left = self.mul_expr()
-    while self.at('OP') and self.peek().val in ('+', '-'):
-      op = self.eat('OP').val; right = self.mul_expr()
-      if left.dtype != right.dtype: right = right.cast(left.dtype)
-      if op == '-' and left.op == Ops.CONST and right.op == Ops.CONST:
-        left = _const(left.dtype, left.arg - right.arg)
-      else:
-        left = (left + right) if op == '+' else (left - right)
-    return left
-
-  def mul_expr(self) -> UOp:
-    left = self.pow_expr()
-    while self.at('OP') and self.peek().val in ('*', '/'):
-      op = self.eat('OP').val; right = self.pow_expr()
-      if left.dtype != right.dtype: right = right.cast(left.dtype)
-      left = (left * right) if op == '*' else (left / right)
-    return left
-
-  def pow_expr(self) -> UOp:
-    left = self.unary()
-    if self.at('OP') and self.peek().val == '**':
-      self.eat('OP'); right = self.pow_expr()
-      if left.op == Ops.CONST and left.arg == 2.0:
-        return UOp(Ops.EXP2, left.dtype, (right.cast(left.dtype),))
-      return left
+  def binop(self, prec: int) -> UOp:
+    if prec >= len(self._PREC): return self.unary()
+    left = self.binop(prec + 1)
+    ops = self._PREC[prec]
+    while self.at('OP') and self.peek().val in ops:
+      op = self.eat('OP').val
+      left = self._apply_binop(left, self.binop(prec + 1), op)
     return left
 
   def unary(self) -> UOp:
