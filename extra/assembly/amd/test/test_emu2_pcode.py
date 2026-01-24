@@ -1,8 +1,8 @@
-"""Tests for the emu2 pcode parser (extra.assembly.amd.emu2_pcode)."""
+"""Tests for the emu2 pcode parser (extra.assembly.amd.emu2)."""
 import unittest
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
-from extra.assembly.amd.emu2_pcode import parse_pcode, parse_expr
+from extra.assembly.amd.emu2 import parse_pcode, parse_expr
 from extra.assembly.amd.autogen.rdna3.str_pcode import PCODE
 from extra.assembly.amd.autogen.rdna3.enum import VOP1Op, VOP2Op, VOP3Op, SOP1Op, SOP2Op, DSOp
 
