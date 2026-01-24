@@ -9,6 +9,7 @@ SDMA_MAX_COPY_SIZE = 0x400000
 
 regCOMPUTE_PGM_LO = 0x1bac + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_PGM_RSRC2 = 0x1bb3 + amd_gpu.GC_BASE__INST0_SEG0
+regCOMPUTE_TMPRING_SIZE = 0x1bb8 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_USER_DATA_0 = 0x1be0 + amd_gpu.GC_BASE__INST0_SEG0
 regCOMPUTE_NUM_THREAD_X = 0x1ba7 + amd_gpu.GC_BASE__INST0_SEG0
 regGRBM_GFX_INDEX = 0x2200 + amd_gpu.GC_BASE__INST0_SEG1
@@ -181,12 +182,16 @@ class PM4Executor(AMDQueue):
     lc = [self.gpu.regs[i] for i in range(regCOMPUTE_NUM_THREAD_X, regCOMPUTE_NUM_THREAD_X+3)]
     rsrc2 = self.gpu.regs[regCOMPUTE_PGM_RSRC2]
 
-    # Read private_segment_fixed_size from kernel descriptor (64 bytes before prg_addr, offset 4)
-    scratch_size = to_mv(prg_addr - 64 + 4, 4).cast('I')[0]
-
     prg_sz = 0
     for st,sz in self.gpu.mapped_ranges:
       if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
+
+    # Get scratch size from COMPUTE_TMPRING_SIZE register (WAVESIZE field, bits 12:25 for gfx11)
+    # WAVESIZE = ceildiv(64 * size_per_thread, 256), so size_per_thread ≈ WAVESIZE * 4
+    try: tmpring_size = self.gpu.regs[regCOMPUTE_TMPRING_SIZE]
+    except KeyError: tmpring_size = 0
+    wavesize = (tmpring_size >> 12) & 0x3FFF  # bits 12:25 for gfx11
+    scratch_size = wavesize * 4  # approximate private_segment_size per lane
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
     # Pass valid memory ranges, rsrc2, and scratch_size to Python emulator
