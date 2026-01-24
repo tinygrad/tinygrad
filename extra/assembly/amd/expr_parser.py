@@ -870,59 +870,41 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
 
       # If/elsif/else - skip branches with statically false conditions (WAVE32/WAVE64)
       if first == 'if':
-        line_lower = line.lower()
-        then_idx = line_lower.rfind('then')
-        cond_str = line[line_lower.find('if') + 2:then_idx].strip() if then_idx > 0 else line[line_lower.find('if') + 2:].strip()
-        cond = _to_bool(parse_expr(cond_str, ctx(), funcs))
-        cond_const = cond.arg if cond.op == Ops.CONST else None
-        conditions, else_assigns, vars_snap = [], {}, dict(vars)
+        def parse_cond(s, kw):
+          ll = s.lower()
+          return _to_bool(parse_expr(s[ll.find(kw) + len(kw):ll.rfind('then')].strip(), ctx(), funcs))
+        def not_static_false(c): return c.op != Ops.CONST or c.arg is not False
+        cond = parse_cond(line, 'if')
+        conditions, else_branch, vars_snap = ([(cond, None)] if not_static_false(cond) else []), (None, {}), dict(vars)
         i += 1
         i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
-        if ret is not None:
-          # Lambda-style: return values
-          conds_ret = [(cond, ret)] if cond_const is not False else []
-          vars.clear(); vars.update(vars_snap)
-          while i < len(lines):
-            ltoks = tokenize(lines[i])
-            if ltoks[0].type != 'IDENT': break
-            lf = ltoks[0].val.lower()
-            if lf == 'elsif':
-              ll = lines[i].lower()
-              cond_str = lines[i][ll.find('elsif') + 5:ll.rfind('then')].strip()
-              c = _to_bool(parse_expr(cond_str, ctx(), funcs))
-              i += 1; i, _, rv = parse_block(lines, i, vars, funcs, assigns)
-              if c.op != Ops.CONST or c.arg is not False: conds_ret.append((c, rv))
-            elif lf == 'else':
-              i += 1; i, _, er = parse_block(lines, i, vars, funcs, assigns)
-              result = er
-              for c, rv in reversed(conds_ret):
-                if rv is not None:
-                  if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
-                  result = c.where(rv, result)
-              return i, block_assigns, result
-            elif lf == 'endif': i += 1; break
-            else: break
-          continue
-        # Main style: update variables
-        if cond_const is not False: conditions.append((cond, branch))
+        if conditions: conditions[0] = (cond, ret if ret is not None else branch)
         vars.clear(); vars.update(vars_snap)
         while i < len(lines):
           ltoks = tokenize(lines[i])
           if ltoks[0].type != 'IDENT': break
           lf = ltoks[0].val.lower()
           if lf == 'elsif':
-            ll = lines[i].lower()
-            cond_str = lines[i][ll.find('elsif') + 5:ll.rfind('then')].strip()
-            cond = _to_bool(parse_expr(cond_str, ctx(), funcs))
-            cond_const = cond.arg if cond.op == Ops.CONST else None
-            i += 1; i, branch, _ = parse_block(lines, i, vars, funcs, assigns)
-            if cond_const is not False: conditions.append((cond, branch))
+            c = parse_cond(lines[i], 'elsif')
+            i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+            if not_static_false(c): conditions.append((c, ret if ret is not None else branch))
             vars.clear(); vars.update(vars_snap)
           elif lf == 'else':
-            i += 1; i, else_assigns, _ = parse_block(lines, i, vars, funcs, assigns)
+            i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+            else_branch = (ret, branch)
             vars.clear(); vars.update(vars_snap)
           elif lf == 'endif': i += 1; break
           else: break
+        # Check if any branch returned a value (lambda-style)
+        if any(isinstance(br, UOp) for _, br in conditions):
+          result = else_branch[0]
+          for c, rv in reversed(conditions):
+            if rv is not None:
+              if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+              result = c.where(rv, result)
+          return i, block_assigns, result
+        # Main style: merge variable assignments with WHERE
+        else_assigns = else_branch[1]
         all_vars = set().union(*[ba.keys() for _, ba in conditions], else_assigns.keys())
         for var in all_vars:
           result = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
