@@ -868,7 +868,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
             block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_expr(bit_str, ctx(), funcs)), parse_expr(val_str, ctx(), funcs))
             i += 1; continue
 
-      # If/elsif/else with constant folding
+      # If/elsif/else - skip branches with statically false conditions (WAVE32/WAVE64)
       if first == 'if':
         line_lower = line.lower()
         then_idx = line_lower.rfind('then')
@@ -880,7 +880,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
         i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
         if ret is not None:
           # Lambda-style: return values
-          conds_ret = [(cond, ret)]
+          conds_ret = [(cond, ret)] if cond_const is not False else []
           vars.clear(); vars.update(vars_snap)
           while i < len(lines):
             ltoks = tokenize(lines[i])
@@ -889,8 +889,9 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
             if lf == 'elsif':
               ll = lines[i].lower()
               cond_str = lines[i][ll.find('elsif') + 5:ll.rfind('then')].strip()
+              c = _to_bool(parse_expr(cond_str, ctx(), funcs))
               i += 1; i, _, rv = parse_block(lines, i, vars, funcs, assigns)
-              conds_ret.append((_to_bool(parse_expr(cond_str, ctx(), funcs)), rv))
+              if c.op != Ops.CONST or c.arg is not False: conds_ret.append((c, rv))
             elif lf == 'else':
               i += 1; i, _, er = parse_block(lines, i, vars, funcs, assigns)
               result = er
@@ -903,7 +904,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
             else: break
           continue
         # Main style: update variables
-        if cond_const is not False: conditions.append((cond, branch, cond_const))
+        if cond_const is not False: conditions.append((cond, branch))
         vars.clear(); vars.update(vars_snap)
         while i < len(lines):
           ltoks = tokenize(lines[i])
@@ -915,27 +916,21 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
             cond = _to_bool(parse_expr(cond_str, ctx(), funcs))
             cond_const = cond.arg if cond.op == Ops.CONST else None
             i += 1; i, branch, _ = parse_block(lines, i, vars, funcs, assigns)
-            if cond_const is not False: conditions.append((cond, branch, cond_const))
+            if cond_const is not False: conditions.append((cond, branch))
             vars.clear(); vars.update(vars_snap)
           elif lf == 'else':
             i += 1; i, else_assigns, _ = parse_block(lines, i, vars, funcs, assigns)
             vars.clear(); vars.update(vars_snap)
           elif lf == 'endif': i += 1; break
           else: break
-        static_true = next((j for j, (_, _, cc) in enumerate(conditions) if cc is True), None)
-        if static_true is not None:
-          block_assigns.update(conditions[static_true][1]); vars.update(conditions[static_true][1])
-        elif not conditions:
-          block_assigns.update(else_assigns); vars.update(else_assigns)
-        else:
-          all_vars = set().union(*[ba.keys() for _, ba, _ in conditions], else_assigns.keys())
-          for var in all_vars:
-            result = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
-            for cond, ba, _ in reversed(conditions):
-              if var in ba:
-                tv = ba[var]
-                result = cond.where(tv, result.cast(tv.dtype) if tv.dtype != result.dtype and tv.dtype.itemsize == result.dtype.itemsize else result)
-            block_assigns[var] = vars[var] = result
+        all_vars = set().union(*[ba.keys() for _, ba in conditions], else_assigns.keys())
+        for var in all_vars:
+          result = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
+          for cond, ba in reversed(conditions):
+            if var in ba:
+              tv = ba[var]
+              result = cond.where(tv, result.cast(tv.dtype) if tv.dtype != result.dtype and tv.dtype.itemsize == result.dtype.itemsize else result)
+          block_assigns[var] = vars[var] = result
         continue
 
       # Regular assignment: var = value
