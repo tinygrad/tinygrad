@@ -129,10 +129,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
 
-  (UPat(Ops.BARRIER), lambda ctx: ""),
-
-  # special
-  (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = {ctx.code_for_workitem[x.arg[0]](x.arg[-1])}")
+  (UPat(Ops.BARRIER), lambda ctx: "")
 ])
 
 class LLVMRenderer(Renderer):
@@ -140,7 +137,6 @@ class LLVMRenderer(Renderer):
   has_local: bool
   abi: str | None
   string_rewrite: PatternMatcher
-  code_for_workitem: dict = {}
   code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
   if AMX: tensor_cores = tc.amx
 
@@ -151,7 +147,6 @@ class LLVMRenderer(Renderer):
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
-    self.r = r
     args: list[tuple[str, DType]] = []
     kernel: list[str] = []
     vc = -1
@@ -197,12 +192,10 @@ class LLVMRenderer(Renderer):
           r[u] = f"%v{vc}"
 
         # do the rendering of the llvm ir code
-        if (l:=self.string_rewrite.rewrite(u, ctx=self)) is None:
+        if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
-
-  def __getitem__(self, key): return self.r[key]   # hacky helper
 
 class CPULLVMRenderer(LLVMRenderer):
   device = "CPU"
@@ -215,6 +208,8 @@ class CPULLVMRenderer(LLVMRenderer):
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
+code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
+                     "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
 # https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#llvm-ir-intrinsics
 llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 class AMDLLVMRenderer(LLVMRenderer):
@@ -223,10 +218,9 @@ class AMDLLVMRenderer(LLVMRenderer):
   shared_max = AMDHIPRenderer.shared_max
   global_max = AMDHIPRenderer.global_max
   abi = "amdgpu_kernel"
-  code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",
-                       "l": lambda x: f"tail call i32 @llvm.amdgcn.workitem.id.{chr(120+int(x))}()"}
   code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
     (UPat(tuple(llvm_intrinsics), name="x"),
     lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
