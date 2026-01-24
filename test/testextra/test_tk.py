@@ -807,7 +807,7 @@ class TestTK(unittest.TestCase):
 
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 1024, 32, 32, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
@@ -831,14 +831,14 @@ class TestTK(unittest.TestCase):
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True)
+    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_, is_causal=True, enable_gqa=True)
     ref = ref.float().transpose(1, 2)
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=4e-2, rtol=2e-2)
     np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
+    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=7e-2, rtol=2e-2)
 
   def test_fast_fa_bwd_causal_jitted(self):
     from extra.thunder.tiny.fa import flash_attention
@@ -936,9 +936,80 @@ class TestTK(unittest.TestCase):
     ref.backward(do_ref)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=1e-2)
+    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=1e-2)
+    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=2e-2, rtol=1e-2)
+
+  def test_atomic_add(self):
+    N = 32
+    BLOCK_SIZE = 32
+    with Kernel("atomic_add", (1, 1, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, N, N), dtypes.bfloat16)
+      a = ker.gl((1, 1, N, N), dtypes.bfloat16)
+
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+
+      for tile_row in ker.range(N // BLOCK_SIZE):
+        for tile_col in ker.range(N // BLOCK_SIZE):
+          a_smem = warp.load(a_smem, a, (), (0, 0, tile_row, tile_col), axis=2)
+          a_reg = warp.load(a_reg, a_smem)
+
+          b = warp.atomic_add(b, a_reg, (0, 0, tile_row, tile_col), (), axis=2)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, N, N, dtype="bfloat16").contiguous()
+      b = Tensor.zeros(1, 1, N, N, dtype="bfloat16").contiguous()
+      Tensor.realize(a, b)
+
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei.run(wait=True)
+    b = b.float()
+
+    ref = a.float()
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
+
+  def test_atomic_add_contention(self):
+    # Test that actually exercises atomic behavior - multiple tiles all add to the same output location
+    NUM_TILES = 4
+    BLOCK_SIZE = 32
+    with Kernel("atomic_add_contention", (1, 1, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      # Output is a single tile, input has NUM_TILES tiles
+      b = ker.gl((1, 1, BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      a = ker.gl((1, 1, NUM_TILES * BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+
+      # All tiles atomically add to the same output location (0, 0, 0, 0)
+      for tile_idx in ker.range(NUM_TILES):
+        a_smem = warp.load(a_smem, a, (), (0, 0, tile_idx, 0), axis=2)
+        a_reg = warp.load(a_reg, a_smem)
+
+        b = warp.atomic_add(b, a_reg, (0, 0, 0, 0), (), axis=2)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, NUM_TILES * BLOCK_SIZE, BLOCK_SIZE, dtype="bfloat16").contiguous()
+      b = Tensor.zeros(1, 1, BLOCK_SIZE, BLOCK_SIZE, dtype="bfloat16").contiguous()
+      Tensor.realize(a, b)
+
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei.run(wait=True)
+    b = b.float()
+
+    # Reference: sum all tiles
+    ref = a.float().reshape(1, 1, NUM_TILES, BLOCK_SIZE, BLOCK_SIZE).sum(axis=2)
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-2, rtol=1e-2)
 
 if __name__ == "__main__":
   unittest.main()
