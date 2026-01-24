@@ -19,7 +19,7 @@ class Kernel:
     lib = HIPCompiler(self.arch).compile(src)
     return src, lib
 
-def asm_gemm_kernel(arch:str="gfx950", dtype=dtypes.half): 
+def asm_gemm_kernel(N:int, arch:str="gfx950", dtype=dtypes.half): 
   v_mfma_32x32x16 = {dtypes.half:v_mfma_f32_32x32x16_f16, dtypes.bfloat16:v_mfma_f32_32x32x16_bf16}[dtype]
   v_mfma_16x16x32 = {dtypes.half:v_mfma_f32_16x16x32_f16, dtypes.bfloat16:v_mfma_f32_16x16x32_bf16}[dtype]
   v_cvt_out = {dtypes.half:v_cvt_pk_f16_f32, dtypes.bfloat16:v_cvt_pk_bf16_f32}[dtype]
@@ -28,9 +28,8 @@ def asm_gemm_kernel(arch:str="gfx950", dtype=dtypes.half):
   k.emit(s_load_dwordx2(s[28:29], s[0:1], s[0], 0, 0, 0, 0, 1))
   k.emit(s_load_dwordx2(s[34:35], s[0:1], s[0], 8, 0, 0, 0, 1))
   k.emit(s_load_dwordx2(s[32:33], s[0:1], s[0], 16, 0, 0, 0, 1))
-  k.emit(s_load_dwordx2(s[24:25], s[0:1], s[0], 24, 0, 0, 0, 1))
   k.emit(s_waitcnt(49279))
-  k.emit(s_load_dword(s[24], s[24:25], s[0], 0, 0, 0, 0, 1))
+  k.emit(s_mov_b32(s[24], N))
   k.emit(s_waitcnt(49279))
   k.emit(s_mov_b32(s[51], 1))
   k.emit(s_mov_b32(s[53], 1))
@@ -1626,9 +1625,3 @@ def asm_gemm_kernel(arch:str="gfx950", dtype=dtypes.half):
   k.emit(s_nop())
   k.emit(s_endpgm())
   return k
-
-if __name__ == "__main__":
-  k = asm_gemm_kernel()
-  _, lib = k.to_asm()
-  with open(pathlib.Path(__file__).parent/"lib", "rb") as f: lib_cmp = f.read()
-  assert lib == lib_cmp

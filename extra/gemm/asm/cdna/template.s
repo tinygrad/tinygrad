@@ -13,7 +13,7 @@ INSTRUCTIONS
   # basic memory requirements
   .amdhsa_group_segment_fixed_size 133120
   .amdhsa_private_segment_fixed_size 0
-  .amdhsa_kernarg_size 32
+  .amdhsa_kernarg_size 24
   # register usage (RSRC1)
   .amdhsa_next_free_vgpr 504
   .amdhsa_next_free_sgpr 96
@@ -65,7 +65,7 @@ amdhsa.kernels:
     .group_segment_fixed_size: 133120
     .private_segment_fixed_size: 0
     .kernarg_segment_align: 8
-    .kernarg_segment_size: 32
+    .kernarg_segment_size: 24
     .max_flat_workgroup_size: 256
     .sgpr_count: 88
     .sgpr_spill_count: 0
