@@ -19,7 +19,11 @@ class TestFSDP(unittest.TestCase):
   @needs_second_gpu
   def setUp(self):
     self.net = Net()
-    self.devices =tuple(f'{Device.DEFAULT}:{i}' for i in range(getenv("GPUS", 2)))
+    n_gpus = int(os.getenv("GPUS", 2))
+    self.devices = tuple(
+      f"{Device.DEFAULT}:{i}" if i != 0 else f"{Device.DEFAULT}"
+      for i in range(n_gpus)
+    )
 
     # Save original state for comparison (copying tensors to avoid sharing memory)
     self.original_state = {k: v.numpy() for k, v in nn.state.get_state_dict(self.net).items()}
@@ -28,7 +32,7 @@ class TestFSDP(unittest.TestCase):
 
   def test_sharding(self):
     for name, param in nn.state.get_state_dict(self.net).items():
-      self.assertIn(param.device, self.devices)
+      self.assertEqual(param.device, self.devices)
       self.assertEqual(param.uop.axis, 0)
       # Check if sharded correctly
       for i, lb in enumerate(param.uop.src):
