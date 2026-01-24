@@ -46,7 +46,7 @@ class TestImageCopy(unittest.TestCase):
 class TestImageDType(unittest.TestCase):
   def test_image_pitch(self):
     def __validate(imgdt, pitch_map):
-      assert imgdt.pitch == pitch_map[REAL_DEV], f"Failed pitch for image: {imgdt}. Got 0x{imgdt.pitch:X}, expected 0x{expected:X}"
+      assert imgdt.pitch == pitch_map[REAL_DEV], f"Failed pitch for image: {imgdt}. Got 0x{imgdt.pitch:X}, expected 0x{pitch_map[REAL_DEV]:X}"
 
     __validate(dtypes.imageh((1, 201)), {"CL": 0x680, "QCOM": 0x680, "METAL": 0x800})
     __validate(dtypes.imageh((16, 216)), {"CL": 0x700, "QCOM": 0x700, "METAL": 0x800})

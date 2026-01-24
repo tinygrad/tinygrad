@@ -380,10 +380,7 @@ class MetalRenderer(CStyleLanguage):
   ]) + base_rewrite
 
   def render_dtype(self, dt:DType, mutable=True) -> str:
-    if isinstance(dt, ImageDType):
-      tex_dt = "half" if dt.itemsize == 2 else "float"
-      access = "read_write" if mutable else "read"
-      return f"texture2d<{tex_dt}, access::{access}>"
+    if isinstance(dt, ImageDType): return f"texture2d<{'half' if dt.itemsize == 2 else 'float'}, access::{'read_write' if mutable else 'read'}>"
     return super().render_dtype(dt, mutable)
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None):

@@ -73,9 +73,8 @@ class MetalGraph(GraphRunner):
     all_resources = dedup(self.all_resources + [input_buffers[input_idx]._buf.buf for input_idx in self.input_replace.values()])
     for (j,i),input_idx in self.input_replace.items():
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
-      slot = self.arg_slots[j][i]
-      if slot is None: continue
-      computeCommand.setKernelBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, slot)
+      if self.arg_slots[j][i] is None: continue
+      computeCommand.setKernelBuffer_offset_atIndex(input_buffers[input_idx]._buf.buf, input_buffers[input_idx]._buf.offset, self.arg_slots[j][i])
 
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
@@ -84,8 +83,12 @@ class MetalGraph(GraphRunner):
 
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
     encoder = command_buffer.computeCommandEncoder().retained()
-    encoder.useResources_count_usage(ctypes.cast((metal.MTLResource * len(all_resources))(*all_resources), ctypes.POINTER(metal.MTLResource)),
-                                     len(all_resources), metal.MTLResourceUsageRead | metal.MTLResourceUsageWrite)
+    usage = metal.MTLResourceUsageRead | metal.MTLResourceUsageWrite
+    for restype in (metal.MTLBuffer, metal.MTLTexture):
+      resources = [r for r in all_resources if isinstance(r, restype)]
+      if not resources: continue
+      res_resources = (restype * len(resources))(*resources)
+      encoder.useResources_count_usage(ctypes.cast(res_resources, ctypes.POINTER(metal.MTLResource)), len(resources), usage)
 
     # NOTE: the pipelines likely need to be added to the used resources to fix the crash on M1/M2, but I haven't figured out how
     # this is a O(n) hack to get them used. what should work is:
