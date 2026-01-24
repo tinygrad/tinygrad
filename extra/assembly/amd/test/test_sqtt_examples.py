@@ -10,6 +10,7 @@ from extra.assembly.amd.autogen.rdna3.ins import SOPP
 from extra.assembly.amd.autogen.rdna3.enum import SOPPOp
 from extra.assembly.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_L4, WAVEEND, INST, INST_L4, VALUINST, IMMEDIATE, IMMEDIATE_MASK,
                                      ALUEXEC, VMEMEXEC, PACKET_TYPES_L3, PACKET_TYPES_L4, InstOp, InstOpL4, print_packets)
+from extra.assembly.amd.sqtt_cdna import decode as decode_cdna, CDNA_WAVESTART, CDNA_WAVEEND, CDNA_INST, CDNA_PKT_TYPES
 from extra.assembly.amd.test.helpers import TARGET_TO_ARCH
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent.parent / "sqtt/examples"
@@ -212,13 +213,100 @@ class TestSQTTExamplesRDNA3(SQTTExamplesTestBase):
   }
 
 class TestSQTTExamplesRDNA4(SQTTExamplesTestBase): target = "gfx1200"
-# CDNA/MI300 (gfx950) uses a completely different 16-bit header packet format, not the nibble-based format.
-# See decode_tt_header_stream in ghidra/librocprof-trace-decoder.c - it reads 16-bit headers and uses
-# pkt_fmt = header & 0xf to look up packet_class (0x10=2bytes, 0x20=4bytes, 0x30=6bytes, 0x40=8bytes).
-# This is NOT implemented yet - the nibble decoder produces garbage for CDNA data.
-@unittest.skip("CDNA/MI300 uses 16-bit header format, not nibble-based - decoder not implemented")
-class TestSQTTExamplesCDNA(SQTTExamplesTestBase):
+
+class TestSQTTExamplesCDNA(unittest.TestCase):
+  """CDNA/MI300 (gfx950) uses 16-bit header packet format - uses sqtt_cdna decoder."""
   target = "gfx950"
+
+  @classmethod
+  def setUpClass(cls):
+    cls.examples = {}
+    for pkl_path in sorted((EXAMPLES_DIR/cls.target).glob("*.pkl")):
+      with open(pkl_path, "rb") as f:
+        data = pickle.load(f)
+      sqtt_events = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"]
+      prg = next((e for e in data if type(e).__name__ == "ProfileProgramEvent"), None)
+      if sqtt_events and prg:
+        cls.examples[pkl_path.stem] = (sqtt_events, prg.lib, prg.base)
+
+  def test_examples_loaded(self):
+    self.assertGreater(len(self.examples), 0, "no example files found")
+
+  def test_decode_all_examples(self):
+    for name, (events, *_) in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          packets = list(decode_cdna(event.blob))
+          if DEBUG >= 2: print(f"\n=== {name} event {i} ===\n" + "\n".join(f"{p._time:8}: {p}" for p in packets))
+          self.assertGreater(len(packets), 0, f"no packets decoded from {name} event {i}")
+
+  def test_packet_types_valid(self):
+    all_classes = set(CDNA_PKT_TYPES.values())
+    for name, (events, *_) in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          for pkt in decode_cdna(event.blob):
+            self.assertTrue(any(isinstance(pkt, cls) for cls in all_classes), f"unknown packet type {type(pkt)} in {name}")
+
+  def test_wave_lifecycle(self):
+    for name, (events, *_) in self.examples.items():
+      if "empty" in name: continue
+      with self.subTest(example=name):
+        all_packets = [p for e in events for p in decode_cdna(e.blob)]
+        self.assertGreater(len([p for p in all_packets if isinstance(p, CDNA_WAVESTART)]), 0, f"no WAVESTART in {name}")
+        self.assertGreater(len([p for p in all_packets if isinstance(p, CDNA_WAVEEND)]), 0, f"no WAVEEND in {name}")
+
+  def test_time_monotonic(self):
+    for name, (events, *_) in self.examples.items():
+      for i, event in enumerate(events):
+        with self.subTest(example=name, event=i):
+          times = [p._time for p in decode_cdna(event.blob)]
+          self.assertEqual(times, sorted(times), f"timestamps not monotonic in {name}")
+
+  def test_gemm_has_instructions(self):
+    for name, (events, *_) in self.examples.items():
+      if "gemm" not in name: continue
+      with self.subTest(example=name):
+        all_packets = [p for e in events for p in decode_cdna(e.blob)]
+        self.assertGreater(len([p for p in all_packets if isinstance(p, CDNA_INST)]), 0, f"no INST packets in {name}")
+
+  @unittest.skip("CDNA timestamp normalization not yet implemented - rocprof uses complex cross-SE correlation")
+  def test_rocprof_wave_times_match(self):
+    """Wave start/end times must match rocprof exactly."""
+    for name, (events, lib, base) in self.examples.items():
+      with self.subTest(example=name):
+        occupancy, _ = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
+        # extract from rocprof occupancy records (keyed by wave, simd - CDNA_WAVEEND doesn't have cu)
+        roc_starts: dict[tuple[int, int], int] = {}
+        roc_waves: list[tuple[int, int]] = []
+        for wave_id, simd, cu, time, is_start in occupancy:
+          key = (wave_id, simd)
+          if is_start: roc_starts[key] = time
+          elif key in roc_starts: roc_waves.append((roc_starts.pop(key), time))
+        # extract from our decoder
+        our_waves: list[tuple[int, int]] = []
+        for event in events:
+          wave_starts: dict[tuple[int, int], int] = {}
+          for p in decode_cdna(event.blob):
+            if isinstance(p, CDNA_WAVESTART): wave_starts[(p.wave, p.simd)] = p._time
+            elif isinstance(p, CDNA_WAVEEND) and (key := (p.wave, p.simd)) in wave_starts:
+              our_waves.append((wave_starts.pop(key), p._time))
+        self.assertEqual(sorted(our_waves), sorted(roc_waves), f"wave times mismatch in {name}")
+
+  @unittest.skip("CDNA timestamp normalization not yet implemented - rocprof uses complex cross-SE correlation")
+  def test_rocprof_inst_times_match(self):
+    """Instruction times must match rocprof exactly (excluding s_endpgm)."""
+    for name, (events, lib, base) in self.examples.items():
+      with self.subTest(example=name):
+        _, wave_insts = run_rocprof_decoder([e.blob for e in events], lib, base, self.target)
+        # skip last inst per wave (s_endpgm) - it needs special handling (time + duration instead of time + stall)
+        roc_insts = [time + stall for insts in wave_insts for time, stall in insts[:-1]]
+        # extract from our decoder
+        our_insts: list[int] = []
+        for event in events:
+          for p in decode_cdna(event.blob):
+            if isinstance(p, CDNA_INST): our_insts.append(p._time)
+        self.assertEqual(sorted(our_insts), sorted(roc_insts), f"instruction times mismatch in {name}")
 
 if __name__ == "__main__":
   unittest.main()
