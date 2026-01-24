@@ -99,6 +99,7 @@ def tokenize(s: str) -> list[Token]:
     if c == ',': tokens.append(Token('COMMA', c)); i += 1; continue
     if c == '?': tokens.append(Token('QUESTION', c)); i += 1; continue
     if c == '.': tokens.append(Token('DOT', c)); i += 1; continue
+    if c == '=': tokens.append(Token('EQUALS', c)); i += 1; continue
     if c == "'": tokens.append(Token('QUOTE', c)); i += 1; continue
     if c == ';': i += 1; continue
     if c.isdigit() or (c == '-' and i + 1 < n and s[i+1].isdigit()):
@@ -526,41 +527,118 @@ class Parser:
       return result & _isnan(l).logical_not() & _isnan(r).logical_not()
     return result
 
-# Lambda body parser (moved from emu2_pcode)
-import re
-def _try_eval(expr):
-  try: return str(eval(expr)) if re.match(r'^[\d\s\+\-\*\/\(\)\&\|]+$', expr.strip()) else expr
-  except: return expr
-
+# Lambda body parser using tokenizer
 def _parse_lambda_body(body: str, vars: dict[str, UOp], funcs: dict) -> UOp:
-  return _parse_lambda_block([l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')], 0, vars, funcs)[1]
+  lines = [l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')]
+  return _parse_lambda_block(lines, 0, vars, funcs)[1]
+
+def _line_starts_with(line: str, keyword: str) -> bool:
+  """Check if line starts with keyword (case insensitive)"""
+  tokens = tokenize(line)
+  return tokens[0].type == 'IDENT' and tokens[0].val.lower() == keyword.lower()
 
 def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict) -> tuple[int, UOp]:
   i = start
   while i < len(lines):
     line = lines[i]
-    if re.match(r'(elsif|else|endif|endfor)\b', line, re.IGNORECASE): break
-    if (m := re.match(r'return\s+(.+)$', line, re.IGNORECASE)): return i + 1, parse_expr(m.group(1), vars, funcs)
-    if (m := re.match(r'for\s+(\w+)\s+in\s+(\d+)\s*:\s*(\d+)\s+do', line, re.IGNORECASE)):
-      lv, sv, ev = m.group(1), int(m.group(2)), int(m.group(3))
-      i += 1; body, depth = [], 1
+    tokens = tokenize(line)
+    if tokens[0].type != 'IDENT': i += 1; continue
+    first = tokens[0].val.lower()
+
+    # Block terminators
+    if first in ('elsif', 'else', 'endif', 'endfor'): break
+
+    # return expr
+    if first == 'return':
+      rest = line[line.lower().find('return') + 6:].strip()
+      return i + 1, parse_expr(rest, vars, funcs)
+
+    # for var in start:end do
+    if first == 'for':
+      # Parse: for VAR in NUM : NUM do
+      p = Parser(tokens, vars, funcs, line)
+      p.eat('IDENT')  # for
+      loop_var = p.eat('IDENT').val
+      p.eat('IDENT')  # in
+      start_val = int(p.eat('NUM').val.rstrip('U'))
+      p.eat('COLON')
+      end_val = int(p.eat('NUM').val.rstrip('U'))
+      # Collect body
+      i += 1; body_lines, depth = [], 1
       while i < len(lines) and depth > 0:
-        depth += 1 if re.match(r'for\s+', lines[i], re.IGNORECASE) else -1 if re.match(r'endfor\b', lines[i], re.IGNORECASE) else 0
-        if depth > 0: body.append(lines[i]); i += 1
-        else: i += 1
-      for li in range(sv, ev + 1):
-        for bl in body:
-          subst = re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', lambda m: f'[{_try_eval(m.group(1))} : {_try_eval(m.group(2))}]', re.sub(rf'\b{lv}\b', str(li), bl))
-          if (am := re.match(r'(\w+)\[(\d+)\]\s*=\s*(.+)', subst)): vars[f'{am.group(1)}{am.group(2)}'] = parse_expr(am.group(3), vars, funcs)
+        btoks = tokenize(lines[i])
+        if btoks[0].type == 'IDENT':
+          if btoks[0].val.lower() == 'for': depth += 1
+          elif btoks[0].val.lower() == 'endfor': depth -= 1
+        if depth > 0: body_lines.append(lines[i])
+        i += 1
+      # Execute loop
+      for li in range(start_val, end_val + 1):
+        for bl in body_lines:
+          # Substitute loop var everywhere (like old regex: re.sub(rf'\b{lv}\b', str(li), bl))
+          toks = tokenize(bl)
+          subst_parts = [str(li) if t.type == 'IDENT' and t.val == loop_var else t.val for t in toks if t.type != 'EOF']
+          subst = ' '.join(subst_parts)
+          # Evaluate bracket expressions (like old: re.sub(r'\[([^\]\[]+?)\s*:\s*([^\]\[]+?)\]', ...))
+          stoks = tokenize(subst)
+          eval_parts = []
+          j = 0
+          while j < len(stoks):
+            if stoks[j].type == 'LBRACKET':
+              # Find matching RBRACKET and evaluate any : range
+              depth, start_j = 1, j
+              j += 1
+              while j < len(stoks) and depth > 0:
+                if stoks[j].type == 'LBRACKET': depth += 1
+                elif stoks[j].type == 'RBRACKET': depth -= 1
+                j += 1
+              inner = ' '.join(t.val for t in stoks[start_j+1:j-1] if t.type != 'EOF')
+              if ':' in inner and '+:' not in inner and '-:' not in inner:
+                # Evaluate range like "i * 8 + 7 : i * 8"
+                parts = inner.split(':')
+                if len(parts) == 2:
+                  inner = f'{_try_eval(parts[0].strip())} : {_try_eval(parts[1].strip())}'
+              eval_parts.append(f'[{inner}]')
+            elif stoks[j].type != 'EOF':
+              eval_parts.append(stoks[j].val)
+              j += 1
+            else:
+              j += 1
+          subst = ' '.join(eval_parts)
+          # Now parse assignment: VAR[IDX] = EXPR
+          stoks = tokenize(subst)
+          if len(stoks) >= 5 and stoks[0].type == 'IDENT' and stoks[1].type == 'LBRACKET' and stoks[2].type == 'NUM' and stoks[3].type == 'RBRACKET':
+            var_name, idx = stoks[0].val, int(stoks[2].val)
+            for k, t in enumerate(stoks):
+              if t.type == 'EQUALS':
+                rhs = subst[subst.find('=') + 1:].strip()
+                vars[f'{var_name}{idx}'] = parse_expr(rhs, vars, funcs)
+                break
       continue
-    if re.match(r'declare\s+', line, re.IGNORECASE): i += 1; continue
-    if (m := re.match(r'if\s+(.+?)\s+then$', line, re.IGNORECASE)):
-      conds = [(_to_bool(parse_expr(m.group(1), vars, funcs)), None)]
+
+    # declare
+    if first == 'declare': i += 1; continue
+
+    # if cond then
+    if first == 'if':
+      # Extract condition between 'if' and 'then'
+      line_lower = line.lower()
+      if_idx = line_lower.find('if')
+      then_idx = line_lower.rfind('then')
+      cond_str = line[if_idx + 2:then_idx].strip() if then_idx > 0 else line[if_idx + 2:].strip()
+      conds = [(_to_bool(parse_expr(cond_str, vars, funcs)), None)]
       i += 1; i, rv = _parse_lambda_block(lines, i, vars, funcs); conds[0] = (conds[0][0], rv)
       while i < len(lines):
-        if (m := re.match(r'elsif\s+(.+?)\s+then$', lines[i], re.IGNORECASE)):
-          i += 1; i, rv = _parse_lambda_block(lines, i, vars, funcs); conds.append((_to_bool(parse_expr(m.group(1), vars, funcs)), rv))
-        elif re.match(r'else$', lines[i], re.IGNORECASE):
+        ltoks = tokenize(lines[i])
+        if ltoks[0].type != 'IDENT': break
+        lf = ltoks[0].val.lower()
+        if lf == 'elsif':
+          ll = lines[i].lower()
+          ei, ti = ll.find('elsif'), ll.rfind('then')
+          cond_str = lines[i][ei + 5:ti].strip() if ti > 0 else lines[i][ei + 5:].strip()
+          i += 1; i, rv = _parse_lambda_block(lines, i, vars, funcs)
+          conds.append((_to_bool(parse_expr(cond_str, vars, funcs)), rv))
+        elif lf == 'else':
           i += 1; i, er = _parse_lambda_block(lines, i, vars, funcs)
           result = er
           for c, rv in reversed(conds):
@@ -568,7 +646,7 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp], func
               if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
               result = c.where(rv, result)
           return i, result
-        elif re.match(r'endif\b', lines[i], re.IGNORECASE): i += 1; break
+        elif lf == 'endif': i += 1; break
         else: break
       continue
     i += 1
@@ -738,3 +816,9 @@ def parse_expr(expr: str, vars: dict, funcs: dict = None) -> UOp:
   tokens = tokenize(expr)
   parser = Parser(tokens, vars, funcs, expr)
   return parser.parse()
+
+# Helper for evaluating simple arithmetic expressions with variable substitution
+import re as _re
+def _try_eval(s: str) -> str:
+  try: return str(int(eval(_re.sub(r'(\d+)U', r'\1', s))))
+  except Exception: return s
