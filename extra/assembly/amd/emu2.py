@@ -985,7 +985,8 @@ def decode_program(data: bytes) -> dict[int, tuple[str, object, list[int], objec
       if DEBUG >= 2:
         try: inst_str = repr(inst)
         except Exception: inst_str = f"<{type(inst).__name__} at PC={i//4}>"
-        print(f"[emu2] PC={i//4}: {inst_str}\n{colored(prg.src, 'BLACK')}")
+        print(f"[emu2] PC={i//4}: {inst_str}")
+        if DEBUG >= 3: print(f"{colored(prg.src, 'BLACK')}")
     except Exception as e:
       try: inst_str = repr(inst)
       except Exception: inst_str = f"<{type(inst).__name__}>"
