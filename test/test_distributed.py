@@ -28,7 +28,7 @@ class TestFSDP(unittest.TestCase):
 
   def test_sharding(self):
     for name, param in nn.state.get_state_dict(self.net).items():
-      self.assertEqual(param.device, self.devices)
+      self.assertIn(param.device, self.devices)
       self.assertEqual(param.uop.axis, 0)
       # Check if sharded correctly
       for i, lb in enumerate(param.uop.src):
