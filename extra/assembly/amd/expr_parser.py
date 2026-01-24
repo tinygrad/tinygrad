@@ -86,6 +86,8 @@ def tokenize(s: str) -> list[Token]:
   while i < n:
     c = s[i]
     if c.isspace(): i += 1; continue
+    if i + 1 < n and s[i:i+2] in ('+=', '-='):
+      tokens.append(Token('ASSIGN_OP', s[i:i+2])); i += 2; continue
     if i + 1 < n and s[i:i+2] in ('||', '&&', '>=', '<=', '==', '!=', '<>', '>>', '<<', '**', '+:', '-:'):
       tokens.append(Token('OP', s[i:i+2])); i += 2; continue
     if c in '|^&><+-*/~!%': tokens.append(Token('OP', c)); i += 1; continue
@@ -125,14 +127,14 @@ def tokenize(s: str) -> list[Token]:
   return tokens
 
 class Parser:
-  def __init__(self, tokens: list[Token], vars: dict, funcs: dict, expr: str):
-    self.tokens, self.vars, self.funcs, self.expr, self.pos = tokens, vars, funcs, expr, 0
+  def __init__(self, tokens: list[Token], vars: dict, funcs: dict | None = None):
+    self.tokens, self.vars, self.funcs, self.pos = tokens, vars, funcs if funcs is not None else _FUNCS, 0
 
   def peek(self, offset=0) -> Token: return self.tokens[min(self.pos + offset, len(self.tokens) - 1)]
   def at(self, *types) -> bool: return self.peek().type in types
   def at_val(self, *vals) -> bool: return self.peek().val in vals
   def eat(self, type: str) -> Token:
-    if self.peek().type != type: raise RuntimeError(f"expected {type}, got {self.peek()} in: {self.expr}")
+    if self.peek().type != type: raise RuntimeError(f"expected {type}, got {self.peek()}")
     tok = self.tokens[self.pos]; self.pos += 1; return tok
   def try_eat(self, type: str) -> Token | None:
     if self.peek().type == type: return self.eat(type)
@@ -286,7 +288,7 @@ class Parser:
         v = self.vars[name]
         return v if isinstance(v, UOp) else _u32(0) if isinstance(v, dict) else _u32(0)
       return _u32(0)
-    raise RuntimeError(f"unexpected token in primary: {self.peek()} in: {self.expr}")
+    raise RuntimeError(f"unexpected token in primary: {self.peek()}")
 
   def _handle_dot(self, base, field: str) -> UOp:
     if isinstance(base, str): return _u32(0)
@@ -413,7 +415,7 @@ class Parser:
         if len(ident) > 1: num = ident[1:]
         elif self.at('NUM'): num = self.eat('NUM').val
         elif self.at('IDENT'): num = self.eat('IDENT').val
-        else: raise RuntimeError(f"expected number after {bits}'{fmt} in: {self.expr}")
+        else: raise RuntimeError(f"expected number after {bits}'{fmt}")
         if fmt == 'h': val = int(num, 16)
         elif fmt == 'b': val = int(num, 2)
         else: val = int(num)
@@ -440,7 +442,7 @@ class Parser:
       dt = {1: dtypes.uint32, 8: dtypes.uint8, 16: dtypes.int16 if 'U' not in suffix else dtypes.uint16,
             32: dtypes.int if 'U' not in suffix else dtypes.uint32, 64: dtypes.int64 if 'U' not in suffix else dtypes.uint64}.get(bits, dtypes.uint32)
       return _const(dt, val)
-    raise RuntimeError(f"unexpected token after {bits}': {self.peek()} in: {self.expr}")
+    raise RuntimeError(f"unexpected token after {bits}': {self.peek()}")
 
   def _parse_number(self, num: str) -> UOp:
     suffix = ''
@@ -474,7 +476,7 @@ class Parser:
       return parse_expr(body, lv, self.funcs)
     if name in self.funcs:
       return self.funcs[name](args, self.vars)
-    raise RuntimeError(f"unknown function: {name} in: {self.expr}")
+    raise RuntimeError(f"unknown function: {name}")
 
   def _handle_mem_load(self, addr: UOp, dt) -> UOp:
     mem = self.vars.get('_vmem') if '_vmem' in self.vars else self.vars.get('_lds')
@@ -527,6 +529,17 @@ class Parser:
       return result & _isnan(l).logical_not() & _isnan(r).logical_not()
     return result
 
+def _match_bracket(toks: list[Token], start: int) -> tuple[int, list[Token]]:
+  """Match brackets from start, return (end_idx, inner_tokens)."""
+  j, depth = start + 1, 1
+  while j < len(toks) and depth > 0:
+    if toks[j].type == 'LBRACKET': depth += 1
+    elif toks[j].type == 'RBRACKET': depth -= 1
+    j += 1
+  return j, [t for t in toks[start+1:j-1] if t.type != 'EOF']
+
+def _tok_str(toks: list[Token]) -> str: return ' '.join(t.val for t in toks)
+
 # Unified block parser for pcode
 def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
   """Substitute loop variable and evaluate bracket expressions.
@@ -555,13 +568,8 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
   eval_parts, j = [], 0
   while j < len(stoks):
     if stoks[j].type == 'LBRACKET':
-      depth, start_j = 1, j
-      j += 1
-      while j < len(stoks) and depth > 0:
-        if stoks[j].type == 'LBRACKET': depth += 1
-        elif stoks[j].type == 'RBRACKET': depth -= 1
-        j += 1
-      inner = ' '.join(t.val for t in stoks[start_j+1:j-1] if t.type != 'EOF')
+      j, inner_toks = _match_bracket(stoks, j)
+      inner = _tok_str(inner_toks)
       if ':' in inner and '+:' not in inner and '-:' not in inner:
         parts = inner.split(':')
         if len(parts) == 2: inner = f'{_try_eval(parts[0].strip())} : {_try_eval(parts[1].strip())}'
@@ -596,7 +604,7 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
     # for loop
     if first == 'for':
       # Parse: for VAR in [SIZE']START : [SIZE']END do
-      p = Parser(toks, vars, funcs, line)
+      p = Parser(toks, vars, funcs)
       p.eat('IDENT')  # for
       loop_var = p.eat('IDENT').val
       p.eat('IDENT')  # in
@@ -691,23 +699,15 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
 
     # MEM assignment: MEM[addr].type (+|-)?= value
     if first == 'mem' and toks[1].type == 'LBRACKET':
-      j = 2; depth = 1
-      while j < len(toks) and depth > 0:
-        if toks[j].type == 'LBRACKET': depth += 1
-        elif toks[j].type == 'RBRACKET': depth -= 1
-        j += 1
-      addr_str = ' '.join(t.val for t in toks[2:j-1] if t.type != 'EOF')
-      addr = parse_expr(addr_str, ctx(), funcs)
+      j, addr_toks = _match_bracket(toks, 1)
+      addr = parse_expr(_tok_str(addr_toks), ctx(), funcs)
       if j < len(toks) and toks[j].type == 'DOT': j += 1
       dt_name = toks[j].val if j < len(toks) and toks[j].type == 'IDENT' else 'u32'
-      dt = DTYPES.get(dt_name, dtypes.uint32)
-      j += 1
+      dt, j = DTYPES.get(dt_name, dtypes.uint32), j + 1
       compound_op = None
-      if j < len(toks) and toks[j].type == 'OP' and toks[j].val in ('+', '-'):
-        compound_op = toks[j].val; j += 1
-      if j < len(toks) and toks[j].type == 'EQUALS': j += 1
-      rhs_str = ' '.join(t.val for t in toks[j:] if t.type != 'EOF')
-      rhs = parse_expr(rhs_str, ctx(), funcs)
+      if j < len(toks) and toks[j].type == 'ASSIGN_OP': compound_op = toks[j].val; j += 1
+      elif j < len(toks) and toks[j].type == 'EQUALS': j += 1
+      rhs = parse_expr(_tok_str(toks[j:]), ctx(), funcs)
       if compound_op:
         mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
         if mem is not None:
@@ -716,29 +716,18 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
           old = mem.index(idx)
           if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
             old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.index)).cast(dtypes.uint64) << _u64(32))
-          rhs = (old + rhs) if compound_op == '+' else (old - rhs)
-      if assigns is not None: assigns.append((f'MEM[{addr_str}].{dt_name}', (addr, rhs)))
+          rhs = (old + rhs) if compound_op == '+=' else (old - rhs)
+      if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
       i += 1; continue
 
     # VGPR assignment: VGPR[lane][reg] = value
     if first == 'vgpr' and toks[1].type == 'LBRACKET':
-      j = 2; depth = 1
-      while j < len(toks) and depth > 0:
-        if toks[j].type == 'LBRACKET': depth += 1
-        elif toks[j].type == 'RBRACKET': depth -= 1
-        j += 1
-      lane_str = ' '.join(t.val for t in toks[2:j-1] if t.type != 'EOF')
+      j, lane_toks = _match_bracket(toks, 1)
       if j < len(toks) and toks[j].type == 'LBRACKET':
-        j += 1; reg_start = j; depth = 1
-        while j < len(toks) and depth > 0:
-          if toks[j].type == 'LBRACKET': depth += 1
-          elif toks[j].type == 'RBRACKET': depth -= 1
-          j += 1
-        reg_str = ' '.join(t.val for t in toks[reg_start:j-1] if t.type != 'EOF')
+        j, reg_toks = _match_bracket(toks, j)
         if j < len(toks) and toks[j].type == 'EQUALS': j += 1
-        val_str = ' '.join(t.val for t in toks[j:] if t.type != 'EOF')
-        ln, rg, val = parse_expr(lane_str, ctx(), funcs), parse_expr(reg_str, ctx(), funcs), parse_expr(val_str, ctx(), funcs)
-        if assigns is not None: assigns.append((f'VGPR[{lane_str}][{reg_str}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
+        ln, rg, val = parse_expr(_tok_str(lane_toks), ctx(), funcs), parse_expr(_tok_str(reg_toks), ctx(), funcs), parse_expr(_tok_str(toks[j:]), ctx(), funcs)
+        if assigns is not None: assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
         i += 1; continue
 
     # Compound destination: {hi.type, lo.type} = value
@@ -809,13 +798,13 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
 
     # Compound assignment: var += or var -=
     for j, t in enumerate(toks):
-      if t.type == 'OP' and t.val in ('+', '-') and j+1 < len(toks) and toks[j+1].type == 'EQUALS':
+      if t.type == 'ASSIGN_OP':
         var = toks[0].val
         old = block_assigns.get(var, vars.get(var, _u32(0)))
-        rhs_str = ' '.join(tk.val for tk in toks[j+2:] if tk.type != 'EOF')
+        rhs_str = ' '.join(tk.val for tk in toks[j+1:] if tk.type != 'EOF')
         rhs = parse_expr(rhs_str, ctx(), funcs)
         if rhs.dtype != old.dtype: rhs = rhs.cast(old.dtype)
-        block_assigns[var] = vars[var] = (old + rhs) if t.val == '+' else (old - rhs)
+        block_assigns[var] = vars[var] = (old + rhs) if t.val == '+=' else (old - rhs)
         i += 1; break
     else:
       # Typed element: var.type[idx] = value
@@ -1091,12 +1080,8 @@ def _register_funcs():
 
 _register_funcs()
 
-def parse_expr(expr: str, vars: dict, funcs: dict = None) -> UOp:
-  if funcs is None: funcs = _FUNCS
-  expr = expr.strip().rstrip(';')
-  tokens = tokenize(expr)
-  parser = Parser(tokens, vars, funcs, expr)
-  return parser.parse()
+def parse_expr(expr: str, vars: dict, funcs: dict | None = None) -> UOp:
+  return Parser(tokenize(expr.strip().rstrip(';')), vars, funcs).parse()
 
 # Helper for evaluating simple arithmetic expressions with variable substitution
 import re as _re
