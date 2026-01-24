@@ -206,12 +206,6 @@ class Group:
     return a.after(a_store).reshape(a.shape)
 
   def row_reduce(self, vec:UOp|RV, src:UOp|RT, op:Callable[[UOp, UOp], UOp], init_value:float=0.0):
-    # extract base_shape before casting to UOp
-    base_shape = cast(RT, src).base_shape if isinstance(src, RT) else cast(RV, src).base_shape
-    elements_per_thread = base_shape.elements_per_thread
-    num_groups = self.group_threads // base_shape.rows
-    group_stride = base_shape.rows
-
     vec, src = cast(UOp, vec), cast(UOp, src)
     assert self.warps == 1
 
@@ -225,7 +219,7 @@ class Group:
       red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
       for width in self.ker.range(src.shape[-2], axis_type=AxisType.REDUCE, track=False):
-        for inner in self.ker.range(elements_per_thread, axis_type=AxisType.REDUCE, track=False):
+        for inner in self.ker.range(4, axis_type=AxisType.REDUCE, track=False):
           reg_store = red_reg[0].store(op(red_reg[0], src[height, width, inner])).end(width, inner)
           red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
@@ -233,9 +227,9 @@ class Group:
       red_local_store = red_local[self.laneid].store(red_reg[0])
       red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
 
-      # reduce from shared memory - combine across thread groups
-      for inner in self.ker.range(num_groups - 1, axis_type=AxisType.REDUCE, track=False):
-        offset = (self.laneid + (1 + inner) * group_stride) % self.group_threads
+      # reduce from shared memory
+      for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
+        offset = (self.laneid + (1 + inner) * 16) % self.group_threads
         reg_store = red_reg[0].store(op(red_reg[0], red_local[offset])).end(inner)
         red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
@@ -246,12 +240,6 @@ class Group:
     return vec.after(vec_store).reshape(vec.shape)
 
   def col_reduce(self, vec:UOp|RV, src:UOp|RT, op:Callable[[UOp, UOp], UOp], init_value:float=0.0):
-    # extract base_shape before casting to UOp
-    base_shape = cast(RT, src).base_shape if isinstance(src, RT) else cast(RV, src).base_shape
-    elements_per_thread = base_shape.elements_per_thread
-    num_groups = self.group_threads // base_shape.cols
-    group_stride = base_shape.cols
-
     vec, src = cast(UOp, vec), cast(UOp, src)
     assert self.warps == 1
 
@@ -265,7 +253,7 @@ class Group:
       red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
       for height in self.ker.range(src.shape[-3], axis_type=AxisType.REDUCE, track=False):
-        for inner in self.ker.range(elements_per_thread, axis_type=AxisType.REDUCE, track=False):
+        for inner in self.ker.range(4, axis_type=AxisType.REDUCE, track=False):
           reg_store = red_reg[0].store(op(red_reg[0], src[height, width, inner])).end(height, inner)
           red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
@@ -274,8 +262,8 @@ class Group:
       red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
 
       # reduce from shared memory - combine across thread groups
-      for inner in self.ker.range(num_groups - 1, axis_type=AxisType.REDUCE, track=False):
-        offset = (self.laneid + (1 + inner) * group_stride) % self.group_threads
+      for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
+        offset = (self.laneid + (1 + inner) * 16) % self.group_threads
         reg_store = red_reg[0].store(op(red_reg[0], red_local[offset])).end(inner)
         red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
