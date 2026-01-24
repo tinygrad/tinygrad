@@ -7,16 +7,37 @@
 from __future__ import annotations
 import ctypes, functools, re, platform, subprocess, tempfile
 
-# Set DAZ+FTZ (denormals-are-zero + flush-to-zero) in MXCSR to match RDNA3 default float mode
-def _set_daz_ftz():
-  if platform.machine() not in ('x86_64', 'AMD64'): return
+# Set/restore DAZ+FTZ (denormals-are-zero + flush-to-zero) in MXCSR to match RDNA3 default float mode
+# Only applied during emulator execution, restored afterward to avoid breaking hypothesis tests
+@functools.cache
+def _get_mxcsr_lib():
+  if platform.machine() not in ('x86_64', 'AMD64'): return None
   try:
-    src = b'void set_daz_ftz(void){unsigned int m;__asm__ __volatile__("stmxcsr %0":"=m"(m));m|=0x8040;__asm__ __volatile__("ldmxcsr %0"::"m"(m));}'
+    src = b'''
+unsigned int get_mxcsr(void){unsigned int m;__asm__ __volatile__("stmxcsr %0":"=m"(m));return m;}
+void set_mxcsr(unsigned int m){__asm__ __volatile__("ldmxcsr %0"::"m"(m));}
+'''
     with tempfile.NamedTemporaryFile(suffix='.so', delete=False) as f:
       subprocess.check_output(['clang', '-shared', '-O2', '-x', 'c', '-', '-o', f.name], input=src)
-      ctypes.CDLL(f.name).set_daz_ftz()
-  except Exception: pass
-_set_daz_ftz()
+      lib = ctypes.CDLL(f.name)
+      lib.get_mxcsr.restype = ctypes.c_uint32
+      lib.set_mxcsr.argtypes = [ctypes.c_uint32]
+      return lib
+  except Exception: return None
+
+class _MXCSRContext:
+  """Context manager to set DAZ+FTZ during emulator execution and restore afterward."""
+  __slots__ = ('_saved',)
+  def __enter__(self):
+    lib = _get_mxcsr_lib()
+    if lib is None: return self
+    self._saved = lib.get_mxcsr()
+    lib.set_mxcsr(self._saved | 0x8040)  # DAZ (bit 6) + FTZ (bit 15)
+    return self
+  def __exit__(self, *args):
+    lib = _get_mxcsr_lib()
+    if lib is None or not hasattr(self, '_saved'): return
+    lib.set_mxcsr(self._saved)
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes
 from tinygrad.codegen import get_program
@@ -1035,51 +1056,53 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
     scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
-  for gidx in range(gx):
-    for gidy in range(gy):
-      for gidz in range(gz):
-        for wave_start in range(0, total_threads, WAVE_SIZE):
-          n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
-          st._write_sgpr(0, args_ptr & MASK32)
-          st._write_sgpr(1, (args_ptr >> 32) & MASK32)
+  # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
+  with _MXCSRContext():
+    for gidx in range(gx):
+      for gidy in range(gy):
+        for gidz in range(gz):
+          for wave_start in range(0, total_threads, WAVE_SIZE):
+            n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
+            st._write_sgpr(0, args_ptr & MASK32)
+            st._write_sgpr(1, (args_ptr >> 32) & MASK32)
 
-          # Workgroup IDs in SGPRs after user SGPRs
-          sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
-          for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
-                               (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
-                               (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
-            if rsrc2 & enabled: st._write_sgpr(sgpr_idx, gid); sgpr_idx += 1
+            # Workgroup IDs in SGPRs after user SGPRs
+            sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
+            for enabled, gid in [(hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, gidx),
+                                 (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
+                                 (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
+              if rsrc2 & enabled: st._write_sgpr(sgpr_idx, gid); sgpr_idx += 1
 
-          # v0 = packed workitem IDs, scratch stride in secret SGPR
-          for lane in range(n_lanes):
-            tid = wave_start + lane
-            st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
-          st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
+            # v0 = packed workitem IDs, scratch stride in secret SGPR
+            for lane in range(n_lanes):
+              tid = wave_start + lane
+              st._write_vgpr(0, lane, ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx))
+            st._write_sgpr(SCRATCH_STRIDE_IDX, scratch_size)
 
-          if EMU2_BACKEND == "python":
-            # Python backend: pass raw byte memoryviews
-            sgpr_raw = st.sgpr_buf.as_buffer(force_zero_copy=True)
-            vgpr_raw = st.vgpr_buf.as_buffer(force_zero_copy=True)
-            all_bufs = [sgpr_raw, vgpr_raw, vmem_mv, lds_mv, scratch_mv]
-            for inst_count in range(1_000_000):
-              if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
-              name, prg, globals_list, _ = program[pc]
-              assert prg is not None, f"[emu2] No program for {name} at PC={pc}"
-              assert 4 not in globals_list or scratch_mv, f"SCRATCH instruction {name} but scratch_size=0"
-              bufs = [all_bufs[g] for g in globals_list]
-              prg(*bufs, global_size=(1,1,1), local_size=(1,1,1))
-            else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
-          else:
-            # Clang/LLVM backend: pass buffer addresses via ctypes (pre-create to avoid allocation in loop)
-            c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
-                      ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
-                      ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
-            c_lane = ctypes.c_int32(0)
-            for inst_count in range(1_000_000):
-              if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
-              name, fxn, globals_list, _ = program[pc]
-              assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
-              assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
-              fxn(*[c_bufs[g] for g in globals_list], c_lane)
-            else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
+            if EMU2_BACKEND == "python":
+              # Python backend: pass raw byte memoryviews
+              sgpr_raw = st.sgpr_buf.as_buffer(force_zero_copy=True)
+              vgpr_raw = st.vgpr_buf.as_buffer(force_zero_copy=True)
+              all_bufs = [sgpr_raw, vgpr_raw, vmem_mv, lds_mv, scratch_mv]
+              for inst_count in range(1_000_000):
+                if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
+                name, prg, globals_list, _ = program[pc]
+                assert prg is not None, f"[emu2] No program for {name} at PC={pc}"
+                assert 4 not in globals_list or scratch_mv, f"SCRATCH instruction {name} but scratch_size=0"
+                bufs = [all_bufs[g] for g in globals_list]
+                prg(*bufs, global_size=(1,1,1), local_size=(1,1,1))
+              else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
+            else:
+              # Clang/LLVM backend: pass buffer addresses via ctypes (pre-create to avoid allocation in loop)
+              c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
+                        ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
+                        ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
+              c_lane = ctypes.c_int32(0)
+              for inst_count in range(1_000_000):
+                if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
+                name, fxn, globals_list, _ = program[pc]
+                assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
+                assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
+                fxn(*[c_bufs[g] for g in globals_list], c_lane)
+              else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0
