@@ -126,11 +126,7 @@ class AMDLLVMCompiler(LLVMCompiler):
     super().__init__(self.arch, "+cumode")
   def __reduce__(self): return (AMDLLVMCompiler, (self.arch,))
   def compile(self, src:str) -> bytes:
-    try:
-      if src.split('\n', 1)[0].strip() == '.text':
-        subprocess.check_output(["clang", "-c", "-x", "assembler", "--target=amdgcn-amd-amdhsa", f"-mcpu={self.arch}", "-o", "-", "-"],
-                                input=src.encode("utf-8"))
-      return super().compile(src)
+    try: return super().compile(src)
     except RuntimeError as e:
       if "undefined value '@llvm.amdgcn." in str(e): raise CompileError(str(e) + "AMD with LLVM backend requires LLVM >= 18") from e
       raise CompileError(e) from e
