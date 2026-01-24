@@ -14,6 +14,7 @@ from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
 from tinygrad.engine.realize import Estimates
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from extra.assembly.amd.dsl import s, v, VCC_LO, NULL
 from extra.assembly.amd.autogen.rdna3.ins import *
 
@@ -470,7 +471,7 @@ THREADS = 128
 
 def test_matmul():
   dev = Device[Device.DEFAULT]
-  print(f"Device arch: {dev.arch}")
+  print(f"Device arch: {dev.renderer.arch}")
 
   if getenv("STOCK", 0):
     # Load the stock kernel from amd_seb/kernel8_batched_gmem.s
@@ -478,9 +479,9 @@ def test_matmul():
     asm = stock_path.read_text()
     print(f"Loaded stock kernel from {stock_path}")
   else:
-    asm = build_kernel(dev.arch)
+    asm = build_kernel(dev.renderer.arch)
 
-  binary = dev.compiler.compile(asm)
+  binary = HIPCompiler(dev.renderer.arch).compile(asm)
   print(f"Compiled! Binary size: {len(binary)} bytes")
 
   rng = np.random.default_rng(42)
