@@ -19,7 +19,7 @@ class Kernel:
     lib = HIPCompiler(self.arch).compile(src)
     return src, lib
 
-def asm_gemm_kernel(N:int, arch:str="gfx950", dtype=dtypes.half): 
+def asm_gemm_kernel(N:int, arch:str="gfx950", dtype=dtypes.half) -> Kernel:
   v_mfma_32x32x16 = {dtypes.half:v_mfma_f32_32x32x16_f16, dtypes.bfloat16:v_mfma_f32_32x32x16_bf16}[dtype]
   v_mfma_16x16x32 = {dtypes.half:v_mfma_f32_16x16x32_f16, dtypes.bfloat16:v_mfma_f32_16x16x32_bf16}[dtype]
   v_cvt_out = {dtypes.half:v_cvt_pk_f16_f32, dtypes.bfloat16:v_cvt_pk_bf16_f32}[dtype]
