@@ -1,6 +1,20 @@
+import pathlib
 from extra.assembly.amd.autogen.cdna.ins import *
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
-insts = [
+class Kernel:
+  def __init__(self, arch="gfx950", name="gemm"):
+    self.instructions, self.arch, self.name = [], arch, name
+
+  def to_asm(self) -> tuple[str, bytes]:
+    insts_bytes = b"".join(inst.to_bytes() for inst in self.instructions)
+    insts_bytes_str = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in insts_bytes[i:i+16]) for i in range(0, len(insts_bytes), 16)) + "\n"
+    src = (pathlib.Path(__file__).parent/"template.s").read_text().replace("INSTRUCTIONS", insts_bytes_str)
+    lib = HIPCompiler(self.arch).compile(src)
+    return src, lib
+
+k = Kernel()
+k.instructions = [
   s_load_dwordx2(s[28:29], s[0:1], s[0], 0, 0, 0, 0, 1),
   s_load_dwordx2(s[34:35], s[0:1], s[0], 8, 0, 0, 0, 1),
   s_load_dwordx2(s[32:33], s[0:1], s[0], 16, 0, 0, 0, 1),
@@ -1602,3 +1616,8 @@ insts = [
   s_nop(),
   s_endpgm(),
 ]
+
+if __name__ == "__main__":
+  _, lib = k.to_asm()
+  with open(pathlib.Path(__file__).parent/"lib", "rb") as f: lib_cmp = f.read()
+  assert lib == lib_cmp

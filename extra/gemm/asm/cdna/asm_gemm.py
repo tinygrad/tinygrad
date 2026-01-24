@@ -1,10 +1,10 @@
-import pathlib, atexit
-from tinygrad import Tensor, Device, UOp, dtypes
+import pathlib, atexit, functools
+from tinygrad import Tensor, UOp, dtypes
 from tinygrad.helpers import all_same, dedup
 from tinygrad.engine.realize import Estimates
 from tinygrad.uop.ops import Ops, KernelInfo
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
-from extra.gemm.asm.cdna.gemm import insts
+# note: this should be in the same file
+from extra.gemm.asm.cdna.gemm import k
 
 THREADS_PER_WG = 256
 
@@ -18,6 +18,15 @@ def can_use_asm_gemm(A:Tensor, B:Tensor) -> bool:
   if A.shape[0] % THREADS_PER_WG != 0: return todo(f"N must be divisable by {THREADS_PER_WG}")
   return True
 
+def custom_gemm_kernel(C:UOp, A:UOp, B:UOp, params:UOp, dname:str) -> UOp:
+  N = A.shape[0]
+  lidx = UOp.special(THREADS_PER_WG, "lidx0")
+  gidx = UOp.special(N//THREADS_PER_WG * N//THREADS_PER_WG, "gidx0")
+  src, lib = k.to_asm()
+  sink = UOp.sink(C.base, A.base, B.base, params.base, lidx, gidx, arg=KernelInfo(name="gemm", estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                               UOp(Ops.BINARY, arg=lib)))
+
 @atexit.register
 def print_stats():
   print(f"ASM_GEMM=1: {stats['used']} used, {len(stats['errs'])} not used")
@@ -30,26 +39,10 @@ def asm_gemm(A:Tensor, B:Tensor) -> Tensor:
   stats["used"] += 1
 
   N = A.shape[0]
-  dname = A.device
-  # may open the device to get arch
-  arch = Device[dname].renderer.arch
-  def custom_gemm_kernel(C:UOp, A:UOp, B:UOp, params:UOp) -> UOp:
-    lidx = UOp.special(THREADS_PER_WG, "lidx0")
-    gidx = UOp.special(N//THREADS_PER_WG * N//THREADS_PER_WG, "gidx0")
-
-    insts_bytes = b"".join(inst.to_bytes() for inst in insts)
-    insts_bytes_str = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in insts_bytes[i:i+16]) for i in range(0, len(insts_bytes), 16)) + "\n"
-    src = (pathlib.Path(__file__).parent/"template.s").read_text().replace("INSTRUCTIONS", insts_bytes_str)
-    lib = HIPCompiler(arch).compile(src)
-
-    sink = UOp.sink(C.base, A.base, B.base, params.base, lidx, gidx, arg=KernelInfo(name="gemm", estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                                 UOp(Ops.BINARY, arg=lib)))
-
   params = Tensor.full((N, N), N).contiguous()
   Bt = B.T.contiguous()
   C = Tensor.empty(N, N, dtype=dtypes.half)
-  C = Tensor.custom_kernel(C, A, Bt, params, fxn=custom_gemm_kernel)[0]
+  C = Tensor.custom_kernel(C, A, Bt, params, fxn=functools.partial(custom_gemm_kernel, dname=A.device))[0]
   return C
 
 if __name__ == "__main__":
