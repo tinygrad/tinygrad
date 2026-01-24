@@ -1,6 +1,6 @@
 import pathlib, atexit
 from tinygrad import Tensor, UOp, dtypes
-from tinygrad.helpers import all_same, Context, dedup
+from tinygrad.helpers import all_same, dedup
 from tinygrad.engine.realize import Estimates
 from tinygrad.uop.ops import Ops, KernelInfo
 
@@ -16,12 +16,12 @@ def can_use_asm_gemm(A:Tensor, B:Tensor) -> bool:
   if A.shape[0] % THREADS_PER_WG != 0: return todo(f"N must be divisable by {THREADS_PER_WG}")
   return True
 
+@atexit.register
 def print_stats():
   print(f"ASM_GEMM=1: {stats['used']} used, {len(stats['errs'])} not used")
   if stats["errs"]:
     print("ASM_GEMM=1 unused reasons:")
     for e in dedup(stats["errs"]): print(f" {e}")
-atexit.register(print_stats)
 
 def asm_gemm(A:Tensor, B:Tensor) -> Tensor:
   assert can_use_asm_gemm(A, B), f"{stats['errs'][0]}"
@@ -37,26 +37,24 @@ def asm_gemm(A:Tensor, B:Tensor) -> Tensor:
 
     sink = UOp.sink(C.base, A.base, B.base, params.base, lidx, gidx, arg=KernelInfo(name="gemm", estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
-  
+
   params = Tensor.full((N, N), N).contiguous()
   Bt = B.T.contiguous()
-  with Context(DEBUG=0): Tensor.realize(params, Bt)
   C = Tensor.empty(N, N, dtype=dtypes.half)
   C = Tensor.custom_kernel(C, A, Bt, params, fxn=custom_gemm_kernel)[0]
   return C
 
 if __name__ == "__main__":
   import numpy as np
-  from tinygrad.helpers import getenv
+  from tinygrad.helpers import getenv, Context
   N = getenv("N", 4096)
 
   rng = np.random.default_rng(0)
   A = Tensor(rng.random((N, N), dtype=np.float32) - 0.5, dtype=dtypes.half)
   B = Tensor(rng.random((N, N), dtype=np.float32) - 0.5, dtype=dtypes.half)
-  C_asm = Tensor.empty(N, N, dtype=dtypes.half)
   Tensor.realize(A, B)
+
   C_asm = asm_gemm(A, B)
   C_tiny = A @ B
-  C_asm.realize()
 
   np.testing.assert_allclose(C_asm.numpy(), C_tiny.numpy())
