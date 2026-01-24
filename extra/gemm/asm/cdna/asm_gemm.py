@@ -1,8 +1,10 @@
 import pathlib, atexit
-from tinygrad import Tensor, UOp, dtypes
+from tinygrad import Tensor, Device, UOp, dtypes
 from tinygrad.helpers import all_same, dedup
 from tinygrad.engine.realize import Estimates
 from tinygrad.uop.ops import Ops, KernelInfo
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
+from extra.gemm.asm.cdna.gemm import insts
 
 THREADS_PER_WG = 256
 
@@ -29,14 +31,20 @@ def asm_gemm(A:Tensor, B:Tensor) -> Tensor:
 
   N = A.shape[0]
   dname = A.device
+  # may open the device to get arch
+  arch = Device[dname].renderer.arch
   def custom_gemm_kernel(C:UOp, A:UOp, B:UOp, params:UOp) -> UOp:
     lidx = UOp.special(THREADS_PER_WG, "lidx0")
     gidx = UOp.special(N//THREADS_PER_WG * N//THREADS_PER_WG, "gidx0")
 
-    src = (pathlib.Path(__file__).parent/"template.s").read_text().replace("INSTRUCTIONS", (pathlib.Path(__file__).parent/"gemm.s").read_text())
+    insts_bytes = b"".join(inst.to_bytes() for inst in insts)
+    insts_bytes_str = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in insts_bytes[i:i+16]) for i in range(0, len(insts_bytes), 16)) + "\n"
+    src = (pathlib.Path(__file__).parent/"template.s").read_text().replace("INSTRUCTIONS", insts_bytes_str)
+    lib = HIPCompiler(arch).compile(src)
 
     sink = UOp.sink(C.base, A.base, B.base, params.base, lidx, gidx, arg=KernelInfo(name="gemm", estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                                 UOp(Ops.BINARY, arg=lib)))
 
   params = Tensor.full((N, N), N).contiguous()
   Bt = B.T.contiguous()
