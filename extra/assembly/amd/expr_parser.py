@@ -527,17 +527,30 @@ class Parser:
       return result & _isnan(l).logical_not() & _isnan(r).logical_not()
     return result
 
-# Lambda body parser using tokenizer
-def _parse_lambda_body(body: str, vars: dict[str, UOp], funcs: dict) -> UOp:
-  lines = [l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')]
-  return _parse_lambda_block(lines, 0, vars, funcs)[1]
-
+# Unified block parser for pcode
 def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
-  """Substitute loop variable and evaluate bracket expressions."""
+  """Substitute loop variable and evaluate bracket expressions.
+  Converts var[loop_var] to var{val} for array element access (like the old regex parser)."""
   toks = tokenize(line)
-  subst_parts = [str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in toks if t.type != 'EOF']
+  # First pass: convert var[loop_var] to var{loop_var} to mark for array element assignment
+  result_toks, j = [], 0
+  while j < len(toks):
+    t = toks[j]
+    # Check for pattern: IDENT[loop_var] where it's not preceded by a dot (not .type[...])
+    if t.type == 'IDENT' and j+3 < len(toks) and toks[j+1].type == 'LBRACKET' and toks[j+2].type == 'IDENT' and toks[j+2].val == loop_var and toks[j+3].type == 'RBRACKET':
+      # Check that it's not .type[loop_var]
+      if not result_toks or result_toks[-1].type != 'DOT':
+        result_toks.append(t)
+        result_toks.append(Token('LBRACE', '{'))
+        result_toks.append(Token('NUM', str(val)))
+        result_toks.append(Token('RBRACE', '}'))
+        j += 4
+        continue
+    result_toks.append(t)
+    j += 1
+  # Second pass: substitute loop variable in remaining positions
+  subst_parts = [str(val) if t.type == 'IDENT' and t.val == loop_var else t.val for t in result_toks if t.type != 'EOF']
   subst = ' '.join(subst_parts)
-  # Evaluate bracket expressions
   stoks = tokenize(subst)
   eval_parts, j = [], 0
   while j < len(stoks):
@@ -557,31 +570,48 @@ def _subst_loop_var(line: str, loop_var: str, val: int) -> str:
     else: j += 1
   return ' '.join(eval_parts)
 
-def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict) -> tuple[int, UOp]:
+def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict,
+                assigns: list | None = None) -> tuple[int, dict[str, UOp], UOp | None]:
+  """Parse a block of pcode. Returns (next_line, block_assigns, return_value).
+  If assigns list is provided, side effects (MEM/VGPR writes) are appended to it."""
+  block_assigns: dict[str, UOp] = {}
   i = start
+  def ctx(): return {**vars, **block_assigns}
+
   while i < len(lines):
     line = lines[i]
-    tokens = tokenize(line)
-    if tokens[0].type != 'IDENT': i += 1; continue
-    first = tokens[0].val.lower()
+    toks = tokenize(line)
+    if toks[0].type != 'IDENT' and toks[0].type != 'LBRACE': i += 1; continue
+    first = toks[0].val.lower() if toks[0].type == 'IDENT' else '{'
 
     # Block terminators
     if first in ('elsif', 'else', 'endif', 'endfor'): break
 
-    # return expr
+    # return expr (lambda bodies)
     if first == 'return':
       rest = line[line.lower().find('return') + 6:].strip()
-      return i + 1, parse_expr(rest, vars, funcs)
+      return i + 1, block_assigns, parse_expr(rest, ctx(), funcs)
 
-    # for var in start:end do
+    # for loop
     if first == 'for':
-      p = Parser(tokens, vars, funcs, line)
+      # Parse: for VAR in [SIZE']START : [SIZE']END do
+      p = Parser(toks, vars, funcs, line)
       p.eat('IDENT')  # for
       loop_var = p.eat('IDENT').val
       p.eat('IDENT')  # in
-      start_val = int(p.eat('NUM').val.rstrip('U'))
+      if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
+      if p.at('NUM'):
+        start_val = int(p.eat('NUM').val.rstrip('UuLl'))
+      else:
+        start_expr = p.expr_top()
+        start_val = int(start_expr.arg) if start_expr.op == Ops.CONST else 0
       p.eat('COLON')
-      end_val = int(p.eat('NUM').val.rstrip('U'))
+      if p.at('NUM') and p.peek(1).type == 'QUOTE': p.eat('NUM'); p.eat('QUOTE')
+      if p.at('NUM'):
+        end_val = int(p.eat('NUM').val.rstrip('UuLl'))
+      else:
+        end_expr = p.expr_top()
+        end_val = int(end_expr.arg) if end_expr.op == Ops.CONST else 0
       # Collect body
       i += 1; body_lines, depth = [], 1
       while i < len(lines) and depth > 0:
@@ -591,55 +621,339 @@ def _parse_lambda_block(lines: list[str], start: int, vars: dict[str, UOp], func
           elif btoks[0].val.lower() == 'endfor': depth -= 1
         if depth > 0: body_lines.append(lines[i])
         i += 1
-      # Execute loop
-      for li in range(start_val, end_val + 1):
-        for bl in body_lines:
-          subst = _subst_loop_var(bl, loop_var, li)
-          # Parse assignment: VAR[IDX] = EXPR
-          stoks = tokenize(subst)
-          if len(stoks) >= 5 and stoks[0].type == 'IDENT' and stoks[1].type == 'LBRACKET' and stoks[2].type == 'NUM' and stoks[3].type == 'RBRACKET':
-            var_name, idx = stoks[0].val, int(stoks[2].val)
-            for k, t in enumerate(stoks):
-              if t.type == 'EQUALS':
-                rhs = subst[subst.find('=') + 1:].strip()
-                vars[f'{var_name}{idx}'] = parse_expr(rhs, vars, funcs)
+      # Execute loop with break support
+      has_break = any('break' in bl.lower() for bl in body_lines)
+      found_var = f'_found_{id(body_lines)}' if has_break else None
+      if found_var: vars[found_var] = block_assigns[found_var] = _const(dtypes.bool, False)
+      for loop_i in range(start_val, end_val + 1):
+        subst_lines = [_subst_loop_var(bl, loop_var, loop_i) for bl in body_lines if not (has_break and bl.strip().lower() == 'break')]
+        _, iter_assigns, _ = parse_block(subst_lines, 0, {**vars, **block_assigns}, funcs, assigns)
+        if has_break:
+          found = block_assigns.get(found_var, vars.get(found_var))
+          not_found = found.eq(_const(dtypes.bool, False))
+          for var, val in iter_assigns.items():
+            if var != found_var:
+              old = block_assigns.get(var, vars.get(var, _u32(0)))
+              block_assigns[var] = vars[var] = not_found.where(val, old.cast(val.dtype) if val.dtype != old.dtype and val.dtype.itemsize == old.dtype.itemsize else old)
+          for j, bl in enumerate(body_lines):
+            bl_l = bl.strip().lower()
+            if bl_l.startswith('if ') and bl_l.endswith(' then'):
+              if any(body_lines[k].strip().lower() == 'break' for k in range(j+1, len(body_lines))):
+                cond_str = _subst_loop_var(bl.strip()[3:-5].strip(), loop_var, loop_i)
+                cond = _to_bool(parse_expr(cond_str, {**vars, **block_assigns}, funcs))
+                block_assigns[found_var] = vars[found_var] = not_found.where(cond, found)
                 break
+        else:
+          block_assigns.update(iter_assigns); vars.update(iter_assigns)
       continue
 
     # declare
-    if first == 'declare': i += 1; continue
+    if first == 'declare':
+      if '[' not in line and len(toks) >= 2 and toks[1].type == 'IDENT': vars[toks[1].val] = _u32(0)
+      i += 1; continue
 
-    # if cond then
-    if first == 'if':
-      line_lower = line.lower()
-      if_idx = line_lower.find('if')
-      then_idx = line_lower.rfind('then')
-      cond_str = line[if_idx + 2:then_idx].strip() if then_idx > 0 else line[if_idx + 2:].strip()
-      conds = [(_to_bool(parse_expr(cond_str, vars, funcs)), None)]
-      i += 1; i, rv = _parse_lambda_block(lines, i, vars, funcs); conds[0] = (conds[0][0], rv)
-      while i < len(lines):
-        ltoks = tokenize(lines[i])
-        if ltoks[0].type != 'IDENT': break
-        lf = ltoks[0].val.lower()
-        if lf == 'elsif':
-          ll = lines[i].lower()
-          ei, ti = ll.find('elsif'), ll.rfind('then')
-          cond_str = lines[i][ei + 5:ti].strip() if ti > 0 else lines[i][ei + 5:].strip()
-          i += 1; i, rv = _parse_lambda_block(lines, i, vars, funcs)
-          conds.append((_to_bool(parse_expr(cond_str, vars, funcs)), rv))
-        elif lf == 'else':
-          i += 1; i, er = _parse_lambda_block(lines, i, vars, funcs)
-          result = er
-          for c, rv in reversed(conds):
-            if rv is not None:
-              if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
-              result = c.where(rv, result)
-          return i, result
-        elif lf == 'endif': i += 1; break
-        else: break
+    # lambda definition
+    if first != '{' and '=' in line and 'lambda' in line and any(t.type == 'IDENT' and t.val == 'lambda' for t in toks):
+      name = toks[0].val
+      body_start, depth = line[line.find('(', line.find('lambda')):], 0
+      params_end = 0
+      for j, ch in enumerate(body_start):
+        if ch == '(': depth += 1
+        elif ch == ')':
+          depth -= 1
+          if depth == 0: params_end = j + 1; break
+      params = [p.strip() for p in body_start[1:params_end-1].split(',') if p.strip()]
+      rest = body_start[params_end:].strip()
+      if rest.startswith('('):
+        depth, body_end = 1, 1
+        for j, ch in enumerate(rest[1:], 1):
+          if ch == '(': depth += 1
+          elif ch == ')':
+            depth -= 1
+            if depth == 0: body_end = j; break
+        body = rest[1:body_end].strip()
+        if depth > 0:
+          body_lines_lst = [rest[1:]]
+          i += 1
+          while i < len(lines) and depth > 0:
+            for j, ch in enumerate(lines[i]):
+              if ch == '(': depth += 1
+              elif ch == ')':
+                depth -= 1
+                if depth == 0: body_lines_lst.append(lines[i][:j]); break
+            else: body_lines_lst.append(lines[i])
+            i += 1
+          body = '\n'.join(body_lines_lst).strip()
+        else: i += 1
+        vars[name] = ('lambda', params, body)
+        continue
+
+    # MEM assignment: MEM[addr].type (+|-)?= value
+    if first == 'mem' and toks[1].type == 'LBRACKET':
+      j = 2; depth = 1
+      while j < len(toks) and depth > 0:
+        if toks[j].type == 'LBRACKET': depth += 1
+        elif toks[j].type == 'RBRACKET': depth -= 1
+        j += 1
+      addr_str = ' '.join(t.val for t in toks[2:j-1] if t.type != 'EOF')
+      addr = parse_expr(addr_str, ctx(), funcs)
+      if j < len(toks) and toks[j].type == 'DOT': j += 1
+      dt_name = toks[j].val if j < len(toks) and toks[j].type == 'IDENT' else 'u32'
+      dt = DTYPES.get(dt_name, dtypes.uint32)
+      j += 1
+      compound_op = None
+      if j < len(toks) and toks[j].type == 'OP' and toks[j].val in ('+', '-'):
+        compound_op = toks[j].val; j += 1
+      if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+      rhs_str = ' '.join(t.val for t in toks[j:] if t.type != 'EOF')
+      rhs = parse_expr(rhs_str, ctx(), funcs)
+      if compound_op:
+        mem = vars.get('_vmem') if '_vmem' in vars else vars.get('_lds')
+        if mem is not None:
+          adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
+          idx = (addr >> _const(adt, 2)).cast(dtypes.index)
+          old = mem.index(idx)
+          if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
+            old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.index)).cast(dtypes.uint64) << _u64(32))
+          rhs = (old + rhs) if compound_op == '+' else (old - rhs)
+      if assigns is not None: assigns.append((f'MEM[{addr_str}].{dt_name}', (addr, rhs)))
+      i += 1; continue
+
+    # VGPR assignment: VGPR[lane][reg] = value
+    if first == 'vgpr' and toks[1].type == 'LBRACKET':
+      j = 2; depth = 1
+      while j < len(toks) and depth > 0:
+        if toks[j].type == 'LBRACKET': depth += 1
+        elif toks[j].type == 'RBRACKET': depth -= 1
+        j += 1
+      lane_str = ' '.join(t.val for t in toks[2:j-1] if t.type != 'EOF')
+      if j < len(toks) and toks[j].type == 'LBRACKET':
+        j += 1; reg_start = j; depth = 1
+        while j < len(toks) and depth > 0:
+          if toks[j].type == 'LBRACKET': depth += 1
+          elif toks[j].type == 'RBRACKET': depth -= 1
+          j += 1
+        reg_str = ' '.join(t.val for t in toks[reg_start:j-1] if t.type != 'EOF')
+        if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+        val_str = ' '.join(t.val for t in toks[j:] if t.type != 'EOF')
+        ln, rg, val = parse_expr(lane_str, ctx(), funcs), parse_expr(reg_str, ctx(), funcs), parse_expr(val_str, ctx(), funcs)
+        if assigns is not None: assigns.append((f'VGPR[{lane_str}][{reg_str}]', (_to_u32(rg) * _u32(32) + _to_u32(ln), val)))
+        i += 1; continue
+
+    # Compound destination: {hi.type, lo.type} = value
+    if first == '{':
+      j = 1
+      if j+2 < len(toks) and toks[j].type == 'IDENT' and toks[j+1].type == 'DOT':
+        hi_var, hi_type = toks[j].val, toks[j+2].val
+        j += 3
+        if j < len(toks) and toks[j].type == 'COMMA': j += 1
+        if j+2 < len(toks) and toks[j].type == 'IDENT' and toks[j+1].type == 'DOT':
+          lo_var, lo_type = toks[j].val, toks[j+2].val
+          j += 3
+          if j < len(toks) and toks[j].type == 'RBRACE': j += 1
+          if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+          val_str = ' '.join(t.val for t in toks[j:] if t.type != 'EOF')
+          val = parse_expr(val_str, ctx(), funcs)
+          lo_dt, hi_dt = DTYPES.get(lo_type, dtypes.uint64), DTYPES.get(hi_type, dtypes.uint32)
+          lo_bits = 64 if lo_dt in (dtypes.uint64, dtypes.int64) else 32
+          lo_val = val.cast(lo_dt) if val.dtype.itemsize * 8 <= lo_bits else (val & _const(val.dtype, (1 << lo_bits) - 1)).cast(lo_dt)
+          hi_val = (val >> _const(val.dtype, lo_bits)).cast(hi_dt)
+          block_assigns[lo_var] = vars[lo_var] = lo_val
+          block_assigns[hi_var] = vars[hi_var] = hi_val
+          if assigns is not None: assigns.extend([(f'{lo_var}.{lo_type}', lo_val), (f'{hi_var}.{hi_type}', hi_val)])
+          i += 1; continue
+
+    # Bit slice: var[hi:lo] = value or var.type[hi:lo] = value
+    if len(toks) >= 5 and toks[0].type == 'IDENT' and (toks[1].type == 'LBRACKET' or (toks[1].type == 'DOT' and toks[3].type == 'LBRACKET')):
+      bracket_start = 2 if toks[1].type == 'LBRACKET' else 4
+      j = bracket_start
+      colon_pos = None
+      while j < len(toks) and toks[j].type != 'RBRACKET':
+        if toks[j].type == 'COLON': colon_pos = j
+        j += 1
+      if colon_pos is not None:
+        hi_str = ' '.join(t.val for t in toks[bracket_start:colon_pos] if t.type != 'EOF')
+        lo_str = ' '.join(t.val for t in toks[colon_pos+1:j] if t.type != 'EOF')
+        try:
+          hi, lo = max(int(eval(hi_str)), int(eval(lo_str))), min(int(eval(hi_str)), int(eval(lo_str)))
+          var = toks[0].val
+          j += 1
+          if j < len(toks) and toks[j].type == 'DOT': j += 2
+          if j < len(toks) and toks[j].type == 'EQUALS': j += 1
+          val_str = ' '.join(t.val for t in toks[j:] if t.type != 'EOF')
+          val = parse_expr(val_str, ctx(), funcs)
+          dt_suffix = toks[2].val if toks[1].type == 'DOT' else None
+          if assigns is not None: assigns.append((f'{var}[{hi}:{lo}]' + (f'.{dt_suffix}' if dt_suffix else ''), val))
+          if var not in vars: vars[var] = _const(dtypes.uint64 if hi >= 32 else dtypes.uint32, 0)
+          old = block_assigns.get(var, vars.get(var))
+          mask = _u32(((1 << (hi - lo + 1)) - 1) << lo)
+          block_assigns[var] = vars[var] = (old & (mask ^ _u32(0xFFFFFFFF))) | (_val_to_bits(val) << _u32(lo))
+          i += 1; continue
+        except: pass
+
+    # Array element: var{idx} = value
+    if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACE' and toks[2].type == 'NUM':
+      var, idx = toks[0].val, int(toks[2].val)
+      j = 4
+      while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+      if j < len(toks):
+        val_str = ' '.join(t.val for t in toks[j+1:] if t.type != 'EOF')
+        val = parse_expr(val_str, ctx(), funcs)
+        existing = block_assigns.get(var, vars.get(var))
+        if existing is not None and isinstance(existing, UOp):
+          block_assigns[var] = vars[var] = _set_bit(existing, _u32(idx), val)
+        else:
+          block_assigns[f'{var}{idx}'] = vars[f'{var}{idx}'] = val
+        i += 1; continue
+
+    # Compound assignment: var += or var -=
+    for j, t in enumerate(toks):
+      if t.type == 'OP' and t.val in ('+', '-') and j+1 < len(toks) and toks[j+1].type == 'EQUALS':
+        var = toks[0].val
+        old = block_assigns.get(var, vars.get(var, _u32(0)))
+        rhs_str = ' '.join(tk.val for tk in toks[j+2:] if tk.type != 'EOF')
+        rhs = parse_expr(rhs_str, ctx(), funcs)
+        if rhs.dtype != old.dtype: rhs = rhs.cast(old.dtype)
+        block_assigns[var] = vars[var] = (old + rhs) if t.val == '+' else (old - rhs)
+        i += 1; break
+    else:
+      # Typed element: var.type[idx] = value
+      if len(toks) >= 7 and toks[0].type == 'IDENT' and toks[1].type == 'DOT' and toks[2].type == 'IDENT' and toks[3].type == 'LBRACKET' and toks[4].type == 'NUM':
+        var, dt_name, idx = toks[0].val, toks[2].val, int(toks[4].val)
+        dt = DTYPES.get(dt_name, dtypes.uint32)
+        j = 6
+        while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+        if j < len(toks):
+          val_str = ' '.join(t.val for t in toks[j+1:] if t.type != 'EOF')
+          val, old = parse_expr(val_str, ctx(), funcs), block_assigns.get(var, vars.get(var, _u32(0)))
+          bw, lo_bit = dt.itemsize * 8, idx * dt.itemsize * 8
+          mask = _u32(((1 << bw) - 1) << lo_bit)
+          block_assigns[var] = vars[var] = (old & (mask ^ _u32(0xFFFFFFFF))) | (((val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val) & _u32((1 << bw) - 1)) << _u32(lo_bit))
+          if assigns is not None: assigns.append((f'{var}.{dt_name}[{idx}]', val))
+          i += 1; continue
+
+      # Dynamic bit: var.type[expr_with_brackets] = value
+      if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'DOT' and toks[2].type == 'IDENT' and toks[3].type == 'LBRACKET':
+        j, depth, has_inner = 4, 1, False
+        while j < len(toks) and depth > 0:
+          if toks[j].type == 'LBRACKET': depth += 1; has_inner = True
+          elif toks[j].type == 'RBRACKET': depth -= 1
+          j += 1
+        if has_inner:
+          var = toks[0].val
+          bit_expr_str = ' '.join(t.val for t in toks[4:j-1] if t.type != 'EOF')
+          bit_pos = _to_u32(parse_expr(bit_expr_str, ctx(), funcs))
+          while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+          if j < len(toks):
+            val_str = ' '.join(t.val for t in toks[j+1:] if t.type != 'EOF')
+            val = parse_expr(val_str, ctx(), funcs)
+            old, mask = block_assigns.get(var, vars.get(var, _u32(0))), _u32(1) << bit_pos
+            block_assigns[var] = vars[var] = (old | mask) if val.op == Ops.CONST and val.arg == 1 else \
+                                              (old & (mask ^ _u32(0xFFFFFFFF))) if val.op == Ops.CONST and val.arg == 0 else _set_bit(old, bit_pos, val)
+            i += 1; continue
+
+      # Bit index: var[expr] = value (bit assignment to existing scalar)
+      if len(toks) >= 5 and toks[0].type == 'IDENT' and toks[1].type == 'LBRACKET':
+        var = toks[0].val
+        existing = block_assigns.get(var, vars.get(var))
+        if existing is not None and isinstance(existing, UOp) and not any(f'{var}{k}' in vars or f'{var}{k}' in block_assigns for k in range(8)):
+          j = 2
+          while j < len(toks) and toks[j].type != 'RBRACKET': j += 1
+          bit_str = ' '.join(t.val for t in toks[2:j] if t.type != 'EOF')
+          j += 1
+          while j < len(toks) and toks[j].type != 'EQUALS': j += 1
+          if j < len(toks):
+            val_str = ' '.join(t.val for t in toks[j+1:] if t.type != 'EOF')
+            block_assigns[var] = vars[var] = _set_bit(existing, _to_u32(parse_expr(bit_str, ctx(), funcs)), parse_expr(val_str, ctx(), funcs))
+            i += 1; continue
+
+      # If/elsif/else with constant folding
+      if first == 'if':
+        line_lower = line.lower()
+        then_idx = line_lower.rfind('then')
+        cond_str = line[line_lower.find('if') + 2:then_idx].strip() if then_idx > 0 else line[line_lower.find('if') + 2:].strip()
+        cond = _to_bool(parse_expr(cond_str, ctx(), funcs))
+        cond_const = cond.arg if cond.op == Ops.CONST else None
+        conditions, else_assigns, vars_snap = [], {}, dict(vars)
+        i += 1
+        i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+        if ret is not None:
+          # Lambda-style: return values
+          conds_ret = [(cond, ret)]
+          vars.clear(); vars.update(vars_snap)
+          while i < len(lines):
+            ltoks = tokenize(lines[i])
+            if ltoks[0].type != 'IDENT': break
+            lf = ltoks[0].val.lower()
+            if lf == 'elsif':
+              ll = lines[i].lower()
+              cond_str = lines[i][ll.find('elsif') + 5:ll.rfind('then')].strip()
+              i += 1; i, _, rv = parse_block(lines, i, vars, funcs, assigns)
+              conds_ret.append((_to_bool(parse_expr(cond_str, ctx(), funcs)), rv))
+            elif lf == 'else':
+              i += 1; i, _, er = parse_block(lines, i, vars, funcs, assigns)
+              result = er
+              for c, rv in reversed(conds_ret):
+                if rv is not None:
+                  if rv.dtype != result.dtype and rv.dtype.itemsize == result.dtype.itemsize: result = result.cast(rv.dtype)
+                  result = c.where(rv, result)
+              return i, block_assigns, result
+            elif lf == 'endif': i += 1; break
+            else: break
+          continue
+        # Main style: update variables
+        if cond_const is not False: conditions.append((cond, branch, cond_const))
+        vars.clear(); vars.update(vars_snap)
+        while i < len(lines):
+          ltoks = tokenize(lines[i])
+          if ltoks[0].type != 'IDENT': break
+          lf = ltoks[0].val.lower()
+          if lf == 'elsif':
+            ll = lines[i].lower()
+            cond_str = lines[i][ll.find('elsif') + 5:ll.rfind('then')].strip()
+            cond = _to_bool(parse_expr(cond_str, ctx(), funcs))
+            cond_const = cond.arg if cond.op == Ops.CONST else None
+            i += 1; i, branch, _ = parse_block(lines, i, vars, funcs, assigns)
+            if cond_const is not False: conditions.append((cond, branch, cond_const))
+            vars.clear(); vars.update(vars_snap)
+          elif lf == 'else':
+            i += 1; i, else_assigns, _ = parse_block(lines, i, vars, funcs, assigns)
+            vars.clear(); vars.update(vars_snap)
+          elif lf == 'endif': i += 1; break
+          else: break
+        static_true = next((j for j, (_, _, cc) in enumerate(conditions) if cc is True), None)
+        if static_true is not None:
+          block_assigns.update(conditions[static_true][1]); vars.update(conditions[static_true][1])
+        elif not conditions:
+          block_assigns.update(else_assigns); vars.update(else_assigns)
+        else:
+          all_vars = set().union(*[ba.keys() for _, ba, _ in conditions], else_assigns.keys())
+          for var in all_vars:
+            result = else_assigns.get(var, block_assigns.get(var, vars.get(var, _u32(0))))
+            for cond, ba, _ in reversed(conditions):
+              if var in ba:
+                tv = ba[var]
+                result = cond.where(tv, result.cast(tv.dtype) if tv.dtype != result.dtype and tv.dtype.itemsize == result.dtype.itemsize else result)
+            block_assigns[var] = vars[var] = result
+        continue
+
+      # Regular assignment: var = value
+      for j, t in enumerate(toks):
+        if t.type == 'EQUALS':
+          if any(toks[k].type == 'OP' and toks[k].val in ('<', '>', '!', '=') for k in range(j)): break
+          base_var = toks[0].val
+          rhs_str = ' '.join(tk.val for tk in toks[j+1:] if tk.type != 'EOF')
+          block_assigns[base_var] = vars[base_var] = parse_expr(rhs_str, ctx(), funcs)
+          i += 1; break
+      else: i += 1
       continue
-    i += 1
-  return i, _u32(0)
+    continue
+  return i, block_assigns, None
+
+def _parse_lambda_body(body: str, vars: dict[str, UOp], funcs: dict) -> UOp:
+  lines = [l.strip() for l in body.replace(';', '\n').split('\n') if l.strip() and not l.strip().startswith('//')]
+  _, _, result = parse_block(lines, 0, vars, funcs)
+  return result if result is not None else _u32(0)
 
 # Built-in function registry
 _FUNCS: dict[str, callable] = {}

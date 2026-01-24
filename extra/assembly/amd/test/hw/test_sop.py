@@ -619,5 +619,36 @@ class Test64BitCompare(unittest.TestCase):
     self.assertEqual(st.sgpr[4], 1)
 
 
+class TestSOPPNop(unittest.TestCase):
+  """Tests for S_NOP and other SOPP instructions with expression-based for loops.
+
+  S_NOP's pcode uses 'for i in 0U : SIMM16.u16[3 : 0].u32 do' which requires
+  the parser to handle non-constant loop bounds.
+  """
+
+  def test_s_nop_basic(self):
+    """S_NOP executes without side effects."""
+    # S_NOP with immediate 0 should just do nothing
+    instructions = [
+      s_mov_b32(s[0], 42),
+      s_nop(0),  # nop with simm16=0
+      s_mov_b32(s[1], 100),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 42)
+    self.assertEqual(st.sgpr[1], 100)
+
+  def test_s_nop_with_count(self):
+    """S_NOP with count parameter executes multiple nops."""
+    # S_NOP with immediate 3 should execute 4 nops (0:3 inclusive)
+    instructions = [
+      s_mov_b32(s[0], 1),
+      s_nop(3),  # nop with simm16=3 -> 4 iterations
+      s_add_u32(s[0], s[0], 1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[0], 2)
+
+
 if __name__ == '__main__':
   unittest.main()
