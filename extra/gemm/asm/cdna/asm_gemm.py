@@ -1,6 +1,6 @@
 import pathlib, atexit
 from tinygrad import Tensor, UOp, dtypes
-from tinygrad.helpers import all_same, Context
+from tinygrad.helpers import all_same, Context, dedup
 from tinygrad.engine.realize import Estimates
 from tinygrad.uop.ops import Ops, KernelInfo
 
@@ -20,7 +20,7 @@ def print_stats():
   print(f"ASM_GEMM=1: {stats['used']} used, {len(stats['errs'])} not used")
   if stats["errs"]:
     print("ASM_GEMM=1 unused reasons:")
-    for e in stats["errs"]: print(f" --{e}")
+    for e in dedup(stats["errs"]): print(f" {e}")
 atexit.register(print_stats)
 
 def asm_gemm(A:Tensor, B:Tensor) -> Tensor:
