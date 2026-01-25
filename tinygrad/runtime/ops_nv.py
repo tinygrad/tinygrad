@@ -607,7 +607,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
        CompilerPair(functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm), None, NV_NAK)])
     super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 
-    self.pma_enabled = PMA.value > 0 and PROFILE >= 2
+    self.pma_enabled = PMA.value > 0 and PROFILE >= 1
     if self.pma_enabled: self._prof_init()
 
     self._setup_gpfifos()
