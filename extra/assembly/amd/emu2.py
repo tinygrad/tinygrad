@@ -1069,7 +1069,8 @@ class WaveState:
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c,
             scratch_size: int = 0) -> int:
   """Execute AMD assembly program. scratch_size is private_segment_fixed_size from kernel descriptor (per-lane)."""
-  program = decode_program(bytes((ctypes.c_char * lib_sz).from_address(lib).raw))
+  program_raw = decode_program(bytes((ctypes.c_char * lib_sz).from_address(lib).raw))
+  program = {lib + offset: val for offset, val in program_raw.items()}  # Remap to actual addresses
   lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
   total_threads = lx * ly * lz
 
@@ -1091,6 +1092,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
         for gidz in range(gz):
           for wave_start in range(0, total_threads, WAVE_SIZE):
             n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
+            st.pc = lib  # Set PC to code base address
             st._write_sgpr(0, args_ptr & MASK32)
             st._write_sgpr(1, (args_ptr >> 32) & MASK32)
 
