@@ -6,7 +6,7 @@ from pathlib import Path
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
 
-from extra.assembly.amd.emu2 import run_asm as python_run_asm, decode_program, _get_inst_sink
+from extra.assembly.amd.emu2 import run_asm as python_run_asm, decode_program, _get_inst_sink, _get_inst_prg
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.autogen.rdna3.ins import SOPP, SOPPOp
 
@@ -68,13 +68,15 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
 
 def profile_instructions(kernel: bytes):
   """Profile individual instructions and return sorted by render time."""
-  from extra.assembly.amd.emu2 import _emu_renderer, _get_inst_prg
+  from extra.assembly.amd.emu2 import _get_inst_prg, _get_inst_sink, _canonical_prg_cache
   from tinygrad.codegen import get_program
+  from extra.assembly.amd.emu2 import _emu_renderer
   from tinygrad.helpers import Context
 
   # Clear caches to measure fresh
   _get_inst_sink.cache_clear()
   _get_inst_prg.cache_clear()
+  _canonical_prg_cache.clear()
   decode_program.cache_clear()
 
   # Collect instruction bytes and names
@@ -94,22 +96,32 @@ def profile_instructions(kernel: bytes):
   # Profile each instruction
   results = []
   for inst_bytes, inst_str, inst_type in inst_data:
-    # Build (get sink)
+    # Build sink and get canonical key
     build_start = time.perf_counter()
-    sink = _get_inst_sink(inst_bytes)
+    sink, ctx = _get_inst_sink(inst_bytes)
     build_time = time.perf_counter() - build_start
 
     # Count UOps in sink
     uop_count = len(sink.toposort())
 
-    # Render
-    render_start = time.perf_counter()
-    with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
-      prg = get_program(sink, _emu_renderer)
-    render_time = time.perf_counter() - render_start
+    # Check canonical cache
+    canonical = ctx.canonical_key(inst_bytes)
+    is_cache_hit = canonical is not None and canonical in _canonical_prg_cache
+
+    # Render (skip if cache hit - would be instant)
+    if is_cache_hit:
+      render_time = 0
+    else:
+      render_start = time.perf_counter()
+      with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
+        prg = get_program(sink, _emu_renderer)
+      render_time = time.perf_counter() - render_start
+      # Update canonical cache if applicable
+      if canonical is not None:
+        _canonical_prg_cache[canonical] = prg
 
     results.append({
-      'inst_str': inst_str,
+      'inst_str': inst_str + (' [HIT]' if is_cache_hit else ''),
       'inst_type': inst_type,
       'uop_count': uop_count,
       'build_ms': build_time * 1000,
@@ -122,7 +134,7 @@ def profile_instructions(kernel: bytes):
 def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
   """Benchmark Python emulator with build/render/compile/execution times separated."""
   from extra.assembly.amd.emu2 import _emu_renderer, _emu_compiler, _elf_symbol_offsets, EMU2_BACKEND
-  from extra.assembly.amd.emu2 import _get_inst_prg
+  from extra.assembly.amd.emu2 import _get_inst_prg, _get_inst_sink, _canonical_prg_cache
   from tinygrad.codegen import get_program
   from tinygrad.helpers import Context
   from tinygrad.runtime.support.elf import jit_loader
@@ -130,6 +142,7 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
   # Clear caches to measure fresh
   _get_inst_sink.cache_clear()
   _get_inst_prg.cache_clear()
+  _canonical_prg_cache.clear()
   decode_program.cache_clear()
 
   # Collect instruction bytes
@@ -141,15 +154,15 @@ def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsr
     inst_bytes_list.append(bytes(kernel[i:i + inst.size() + 4]))
     i += inst.size()
 
-  # Measure build time (UOp sink generation)
+  # Measure build time (UOp sink generation, cached)
   build_start = time.perf_counter()
-  sinks = [_get_inst_sink(inst_bytes) for inst_bytes in inst_bytes_list]
+  for inst_bytes in inst_bytes_list:
+    _get_inst_sink(inst_bytes)
   build_time = time.perf_counter() - build_start
 
-  # Measure render time (get_program: linearize + render to C)
+  # Measure render time (uses cached sinks, handles canonical dedup)
   render_start = time.perf_counter()
-  with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
-    prgs = [get_program(sink, _emu_renderer) for sink in sinks]
+  prgs = [_get_inst_prg(inst_bytes) for inst_bytes in inst_bytes_list]
   render_time = time.perf_counter() - render_start
 
   # Measure compile time (clang/llvm compile C to native)

@@ -96,12 +96,21 @@ class PythonEmulator:
     self.program: dict | None = None
     self.vmem_buf = None
     self.lds_buf = None
+    self.kernel_buf = None  # Keep kernel bytes alive
+    self.lib_addr = 0  # Base address of kernel code
 
   def create(self, kernel: bytes, n_lanes: int):
+    import ctypes
     from tinygrad.device import Buffer, BufferSpec
     from tinygrad.dtype import dtypes
-    self.program = decode_program(kernel)
+    # Store kernel in a ctypes buffer so generic instructions can read from vmem at actual PC address
+    self.kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
+    self.lib_addr = ctypes.addressof(self.kernel_buf)
+    # Remap program dict to use actual addresses (like run_asm does)
+    program_raw = decode_program(kernel)
+    self.program = {self.lib_addr + offset: val for offset, val in program_raw.items()}
     self.state = WaveState(n_lanes)
+    self.state.pc = self.lib_addr  # Set PC to code base address
     self.vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
     self.lds_buf = Buffer('CPU', 65536 // 4, dtypes.uint32).ensure_allocated()
 
@@ -129,8 +138,9 @@ class PythonEmulator:
     assert self.state is not None
     sgpr = [self.state._read_sgpr(i) for i in range(128)]
     vgpr = [[self.state._read_vgpr(reg, lane) for reg in range(256)] for lane in range(WAVE_SIZE)]
-    # Convert byte-based PC to word-based for comparison with Rust emulator
-    return StateSnapshot(pc=self.state.pc // 4, scc=self.state._read_sgpr(SCC_IDX), vcc=sgpr[VCC_LO.offset],
+    # Convert actual PC address to word offset for comparison with Rust emulator
+    pc_offset = (self.state.pc - self.lib_addr) // 4 if self.state.pc != 0xFFFFFFFFFFFFFFFF else 0xFFFFFFFFFFFFFFFF
+    return StateSnapshot(pc=pc_offset, scc=self.state._read_sgpr(SCC_IDX), vcc=sgpr[VCC_LO.offset],
                          exec_mask=sgpr[EXEC_LO.offset], sgpr=sgpr, vgpr=vgpr)
 
 def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: tuple[int, int, int],
@@ -175,7 +185,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             rust_before = rust.get_snapshot()
             python_before = python.get_snapshot()
 
-            inst_info = program.get(python_before.pc * 4)  # Convert word offset to byte offset for program lookup
+            inst_info = python.program.get(python.lib_addr + python_before.pc * 4)  # Convert word offset to actual address
             inst_hex_name = inst_info[0] if inst_info else f"unknown at PC={python_before.pc}"
             # Decode the instruction to get mnemonic for sync_after checks
             try:
@@ -187,6 +197,8 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
               inst_mnemonic = repr(decoded).split('(')[0] if decoded else ""
             except:
               inst_mnemonic = ""
+            # For generic instructions, use function name for sync_after check
+            if not inst_mnemonic: inst_mnemonic = inst_hex_name
             inst_str = inst_hex_name
             trace.append((step, python_before.pc, inst_str, rust_before, python_before))
             if len(trace) > trace_len: trace.pop(0)
@@ -243,8 +255,8 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
               for lane in range(n_lanes):
                 for i in range(256): python.set_vgpr(lane, i, rust_after.vgpr[lane][i])
               assert python.state is not None
-              # Convert Rust's word-based PC to Python's byte-based PC
-              python.state.pc = rust_after.pc * 4
+              # Convert Rust's word-based PC to Python's actual address
+              python.state.pc = python.lib_addr + rust_after.pc * 4
               python.state._write_sgpr(SCC_IDX, rust_after.scc)
               python.state._write_sgpr(VCC_LO.offset, rust_after.vcc)
               python.state._write_sgpr(EXEC_LO.offset, rust_after.exec_mask)
