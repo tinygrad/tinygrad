@@ -330,9 +330,9 @@ class Inst:
     if not self._is_cdna():
       name = self.op_name.lower()
       if 'cndmask' in name and 'src2' in bits: bits['src2'] = 32
-      if '_co_ci_' in name:
-        if 'src2' in bits: bits['src2'] = 32
-        if 'sdst' in bits: bits['sdst'] = 32
+      if '_co_ci_' in name and 'src2' in bits: bits['src2'] = 32  # carry-in source
+      # VOP3SD: sdst is always wavefront-size dependent (carry-out or condition mask)
+      if 'VOP3SD' in type(self).__name__ and 'sdst' in bits: bits['sdst'] = 32
       if 'cmp' in name and 'vdst' in bits: bits['vdst'] = 32
     # GLOBAL/FLAT: addr is 32-bit if saddr is valid SGPR, 64-bit if saddr is NULL
     # SCRATCH: addr is always 32-bit (offset from scratch base, not absolute address)
