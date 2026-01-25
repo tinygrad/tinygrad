@@ -78,7 +78,7 @@ EXEC = src[126:127]
 INV_2PI = src[248]
 DPP16 = src[250]
 SCC = src[253]
-# 255: literal constant
+LIT = src[255]           # literal constant marker
 v = src[256:511]         # VGPR0-255
 
 # ══════════════════════════════════════════════════════════════
@@ -209,7 +209,12 @@ class VDSTYField(BitField):
     if not isinstance(val, Reg): raise TypeError(f"VDSTYField requires Reg, got {type(val).__name__}")
     if not (256 <= val.offset < 512): raise ValueError(f"VDSTYField requires VGPR, got offset {val.offset}")
     return (val.offset - 256) >> 1
-  def decode(self, raw): return raw  # raw value, actual vdsty = (raw << 1) | ((vdstx & 1) ^ 1)
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    raw = (obj._raw >> self.lo) & self.mask
+    vdstx_bit0 = (obj.vdstx.offset - 256) & 1
+    vgpr_idx = (raw << 1) | (vdstx_bit0 ^ 1)
+    return Reg(256 + vgpr_idx, 1)
 
 # ══════════════════════════════════════════════════════════════
 # Operand info from XML
@@ -263,7 +268,7 @@ class Inst:
         for name, field in cls._fields:
           if isinstance(field, FixedBitField): continue
           val = kwargs.get(name) if name in kwargs else next(args_iter, None)
-          if isinstance(field, SrcField) and _needs_literal(val):
+          if isinstance(field, SrcField) and (_needs_literal(val) or (isinstance(val, Reg) and val.offset == 255)):
             return lit_cls(*args, **kwargs)
     return object.__new__(cls)
 
@@ -277,6 +282,10 @@ class Inst:
       elif name in kwargs: vals[name] = kwargs[name]
       else: vals[name] = next(args_iter, None)
     remaining = list(args_iter)
+    # If there's one remaining arg and class has 'literal' field, use it as literal value
+    if len(remaining) == 1 and any(name == 'literal' for name, _ in self._fields):
+      vals['literal'] = remaining[0]
+      remaining = []
     assert not remaining, f"too many positional args: {remaining}"
     # Extract modifiers from Reg objects and merge into neg/abs/opsel
     neg_bits, abs_bits, opsel_bits = 0, 0, 0
@@ -305,7 +314,7 @@ class Inst:
     # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC)
     for name, expected in self.op_regs.items():
       if (val := vals.get(name)) is None: continue
-      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or val.offset == 253):
+      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or val.offset in (253, 255)):
         raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
 
   @property
