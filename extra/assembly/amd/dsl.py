@@ -272,7 +272,8 @@ class Inst:
         val = kwargs.get(name) if name in kwargs else next(args_iter, None)
         if not isinstance(field, SrcField): continue
         if isinstance(val, Reg) and val.offset == 255 and (lit_cls := _get_variant(cls, '_LIT')): return lit_cls(*args, **kwargs)
-        if isinstance(val, Reg) and val.offset == 249 and (sdwa_cls := _get_variant(cls, '_SDWA')): return sdwa_cls(*args, **kwargs)
+        if isinstance(val, Reg) and val.offset == 249:
+          if (sdwa_cls := _get_variant(cls, '_SDWA') or _get_variant(cls, '_SDWA_SDST')): return sdwa_cls(*args, **kwargs)
         if isinstance(val, Reg) and val.offset == 250 and (dpp_cls := _get_variant(cls, '_DPP16')): return dpp_cls(*args, **kwargs)
         if _needs_literal(val) and (lit_cls := _get_variant(cls, '_LIT')): return lit_cls(*args, **kwargs)
     return object.__new__(cls)
