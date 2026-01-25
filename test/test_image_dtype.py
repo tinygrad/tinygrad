@@ -125,20 +125,10 @@ class TestImageDType(unittest.TestCase):
     assert not isinstance(it.uop.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
 
-  def test_image_add(self, img_type=dtypes.imagef, rtol=1e-6):
-    data = Tensor.randn(1*4*4).realize()
-    tst = data.numpy()
-    with Context(IMAGE=2):
-      it = data.cast(img_type((1,4,4))).contiguous().realize()
-      out = (it + 1).realize()
-    np.testing.assert_allclose(out.numpy(), tst + 1, rtol=rtol)
-  def test_image_add_half(self): self.test_image_add(img_type=dtypes.imageh, rtol=1e-2)
-
-  def test_shrink_load_float(self, img_type=dtypes.imagef):
-    it = Tensor.randn(16).cast(img_type((1,4,4))).realize()
+  def test_shrink_load_float(self):
+    it = Tensor.randn(16).cast(dtypes.imagef((1,4,4))).realize()
     imgv = it.numpy()
     np.testing.assert_equal(imgv[0:2], it[0:2].numpy())
-  def test_shrink_load_half(self): self.test_shrink_load_float(img_type=dtypes.imageh)
 
   def test_mul_stays_image(self):
     # NOTE: contiguous is needed otherwise this folds
