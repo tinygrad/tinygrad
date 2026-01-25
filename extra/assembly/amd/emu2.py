@@ -539,8 +539,11 @@ class _Ctx:
     if bits == 64:
       is_vgpr, is_sgpr = off >= _c(256), off < _c(128)
       sgpr_val = _u64(self.rsgpr_dyn(off), self.rsgpr_dyn(off + U32_1))
+      # Use .valid() for VGPR reads to avoid invalid memory access when off < 256
       vgpr_reg = off - _c(256)
-      vgpr_val = _u64(self.rvgpr_dyn(vgpr_reg, lane), self.rvgpr_dyn(vgpr_reg + U32_1, lane))
+      vgpr_idx0 = (vgpr_reg.cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(is_vgpr)
+      vgpr_idx1 = ((vgpr_reg + U32_1).cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(is_vgpr)
+      vgpr_val = _u64(self.vgpr.index(vgpr_idx0, ptr=True).load(), self.vgpr.index(vgpr_idx1, ptr=True).load())
       # 64-bit inline constants need special handling (different from 32-bit values in SGPR buffer)
       inline = _u64(self.rsgpr_dyn(off), self.rsgpr_dyn(off))  # integers: just extend
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
@@ -909,19 +912,31 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
 def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask = ctx.rsgpr(EXEC_LO.offset)
-  vdstx_reg, vdsty_reg = inst.vdstx.offset - 256, inst.vdsty.offset - 256
+  # Read operands dynamically
+  vdstx_reg = ctx.inst_field(VOPD.vdstx)
+  # vdsty has complex encoding: actual = (raw << 1) | ((vdstx & 1) ^ 1)
+  vdsty_raw = ctx.inst_field(VOPD.vdsty)
+  vdsty_reg = (vdsty_raw << U32_1) | ((vdstx_reg & U32_1) ^ U32_1)
+  srcx0_off = ctx.inst_field(VOPD.srcx0)
+  srcy0_off = ctx.inst_field(VOPD.srcy0)
+  vsrcx1_reg = ctx.inst_field(VOPD.vsrcx1)
+  vsrcy1_reg = ctx.inst_field(VOPD.vsrcy1)
+  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
+
   lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-  srcy0, srcy1 = ctx.rsrc(inst.srcy0.offset, lane), ctx.rvgpr(inst.vsrcy1.offset - 256, lane)
-  def wvgpr_after_y(reg: int, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
-    return ctx.wvgpr(reg, lane, val, exec_mask, after=srcy1)
+  srcy0, srcy1 = ctx.rsrc_dyn(srcy0_off, lane, literal=literal), ctx.rvgpr_dyn(vsrcy1_reg, lane)
+  def wvgpr_after_y(reg: UOp, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
+    buf = ctx.vgpr.after(srcy1)
+    offset = (reg.cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(_lane_active(exec_mask, lane))
+    return buf.index(offset).store(val.cast(dtypes.uint32))
   all_stores = []
-  for op, src0_off, vsrc1_off, vdst_reg, label in [(inst.opx, inst.srcx0.offset, inst.vsrcx1.offset, vdstx_reg, 'X'),
-                                                     (inst.opy, inst.srcy0.offset, inst.vsrcy1.offset, vdsty_reg, 'Y')]:
+  for op, src0_off, vsrc1_reg, vdst_reg, label in [(inst.opx, srcx0_off, vsrcx1_reg, vdstx_reg, 'X'),
+                                                    (inst.opy, srcy0_off, vsrcy1_reg, vdsty_reg, 'Y')]:
     vop = VOPD_TO_VOP2.get(op)
     assert vop is not None, f"no VOP mapping for VOPD {label}: {op}"
-    if label == 'Y': srcs = {'S0': srcy0, 'S1': srcy1, 'D0': ctx.rvgpr(vdst_reg, lane)}
-    else: srcs = {'S0': ctx.rsrc(src0_off, lane), 'S1': ctx.rvgpr(vsrc1_off - 256, lane), 'D0': ctx.rvgpr(vdst_reg, lane)}
-    if op in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32): srcs['SIMM32'] = UOp.const(dtypes.uint32, ctx.literal)
+    if label == 'Y': srcs = {'S0': srcy0, 'S1': srcy1, 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
+    else: srcs = {'S0': ctx.rsrc_dyn(src0_off, lane, literal=literal), 'S1': ctx.rvgpr_dyn(vsrc1_reg, lane), 'D0': ctx.rvgpr_dyn(vdst_reg, lane)}
+    if op in (VOPDOp.V_DUAL_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32): srcs['SIMM32'] = literal if literal is not None else _c(ctx.literal)
     if op == VOPDOp.V_DUAL_CNDMASK_B32: srcs['VCC'] = ctx.rsgpr(VCC_LO.offset)
     pcode = PCODE.get(vop)
     assert pcode is not None, f"no pcode for VOPD {label}: {vop}"
