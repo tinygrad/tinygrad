@@ -967,7 +967,7 @@ def _get_inst_sink(inst_bytes: bytes) -> UOp:
         break
   if handler is None: raise RuntimeError(f"[emu2] unimplemented instruction type: {type(inst).__name__} {_op_name(inst)}")
   _, sink = handler(inst, ctx, name)
-  return sink
+  return sink.rtag(1)  # this tag skips optimizations in get_program
 
 @functools.cache
 def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
