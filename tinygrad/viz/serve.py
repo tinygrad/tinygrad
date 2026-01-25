@@ -346,13 +346,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
   addr_table = amd_decode(device_props[p.device]["gfx_target_version"], unwrap(p.lib))
-  disasm:dict[int, tuple[str, int]] = {}
-  for addr, inst in addr_table.items():
-    d = inst.disasm()
-    # note: rocprof trace decoder assumes simm16 is a decimal integer, our disasm uses hex
-    # keep the decimal int for backwards compatibility, remove once there's no rocprof decoder
-    if "branch" in d: d = f"{inst.op_name.lower()} {inst.simm16}"
-    disasm[addr+base] = (d, inst.size())
+  disasm:dict[int, tuple[str, int]] = {addr+base:(inst.disasm(), inst.size()) for addr, inst in addr_table.items()}
   rctx = decode(data, {p.name:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
@@ -490,7 +484,7 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
     # otherwise a basic block can have exactly one or two paths
     nx = pc+inst.size()
     if (offset:=parse_branch(inst)) is not None:
-      if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
+      if inst.op_name == "s_branch": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}

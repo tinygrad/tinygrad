@@ -258,7 +258,7 @@ def _disasm_sopp(inst: SOPP) -> str:
     dep = lambda v: deps[v-1] if 0 < v <= len(deps) else str(v)
     p = [f"instid0({dep(id0)})" if id0 else "", f"instskip({skips[skip]})" if skip else "", f"instid1({dep(id1)})" if id1 else ""]
     return f"s_delay_alu {' | '.join(x for x in p if x) or '0'}"
-  if name.startswith(('s_cbranch', 's_branch')): return f"{name} 0x{inst.simm16:x}"
+  if name.startswith(('s_cbranch', 's_branch')): return f"{name} {inst.simm16}"
   return f"{name} 0x{inst.simm16:x}"
 
 def _disasm_smem(inst: SMEM) -> str:
