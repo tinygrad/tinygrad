@@ -367,7 +367,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: gen-dataset
-          deps: testing_minimal
+          deps: testing
           opencl: 'true'
       - name: Generate Dataset
         run: CL=1 extra/optimization/generate_dataset.sh
