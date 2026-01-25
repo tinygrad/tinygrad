@@ -461,7 +461,10 @@ if __name__ == "__main__":
   for arch, cfg in ARCHS.items():
     print(f"Parsing XML: {cfg['xml']} -> {arch}")
     encodings, enums, types, fmts, op_types_set, lit_only_ops, mfma_only_ops = parse_xml(cfg["xml"])
-    for fmt, ops in FIXES.get(arch, {}).items(): enums.setdefault(fmt, {}).update(ops)
+    for fmt, ops in FIXES.get(arch, {}).items():
+      enums.setdefault(fmt, {}).update(ops)
+      for opcode, name in ops.items():
+        if "MFMA" in name: mfma_only_ops.setdefault(fmt, set()).add(opcode)
     for fmt, fields in FIELD_FIXES.get(arch, {}).items():
       if fmt in encodings: encodings[fmt] = (encodings[fmt][0] + fields, encodings[fmt][1])
     arch_data[arch] = {"encodings": encodings, "enums": enums, "types": types, "lit_only_ops": lit_only_ops, "mfma_only_ops": mfma_only_ops}
