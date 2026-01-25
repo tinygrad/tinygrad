@@ -345,7 +345,14 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
   # * init decoder
   from extra.sqtt.roc import decode
   base = unwrap(p.base)
-  disasm = {addr+base:inst_disasm for addr,inst_disasm in amd_disasm(device_props[p.device]["gfx_target_version"], unwrap(p.lib)).items()}
+  addr_table = amd_decode(device_props[p.device]["gfx_target_version"], unwrap(p.lib))
+  disasm:dict[int, tuple[str, int]] = {}
+  for addr, inst in addr_table.items():
+    d = inst.disasm()
+    # note: rocprof trace decoder assumes simm16 is a decimal integer, our disasm uses hex
+    # keep the decimal int for backwards compatibility, remove once there's no rocprof decoder
+    if "branch" in d: d = f"{inst.op_name.lower()} {inst.simm16}"
+    disasm[addr+base] = (d, inst.size())
   rctx = decode(data, {p.name:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
@@ -447,28 +454,6 @@ def amd_decode(target:int, lib:bytes) -> dict[int, Any]: # Any is the Inst class
     fmt = detect_format(remaining, arch)
     decoded = fmt.from_bytes(remaining)
     addr_table[off+offset] = decoded
-    offset += decoded.size()
-  return addr_table
-
-def amd_disasm(target:int, lib:bytes) -> dict[int, tuple[str, int]]:
-  from tinygrad.runtime.support.elf import elf_loader
-  from extra.assembly.amd.decode import detect_format
-  image, sections, _ = elf_loader(lib)
-  text = next((sh for sh in sections if sh.name == ".text"), None)
-  assert text is not None, "no .text section found in ELF"
-  off, buf = text.header.sh_addr, text.content
-  arch = {11:"rdna3", 12:"rdna4"}.get(target//10000, "cdna")
-  addr_table:dict[int, tuple[str, int]] = {}
-  offset = 0
-  while offset < len(buf):
-    remaining = buf[offset:]
-    fmt = detect_format(remaining, arch)
-    decoded = fmt.from_bytes(remaining)
-    disasm = decoded.disasm()
-    # note: rocprof trace decoder assumes simm16 is a decimal integer, our disasm uses hex
-    # keep the decimal int for backwards compatibility, remove once there's no rocprof decoder
-    if "branch" in disasm: disasm = f"{decoded.op_name.lower()} {decoded.simm16}"
-    addr_table[off+offset] = (disasm, decoded.size())
     offset += decoded.size()
   return addr_table
 
