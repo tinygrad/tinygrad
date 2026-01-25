@@ -772,7 +772,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
 
     # tpc addressing is right aligned
     tpc_cnt = [bin(mask).count('1') for mask in tpc_masks]
-    SM_REG = lambda gpc,tpc,sm,reg: GPC_BASE + gpc * 0x4000 + (self.num_tpc_per_gpc - tpc_cnt[gpc] + tpc) * 0x200 + [0x400, 0x1000][sm] + reg
+    def SM_REG(gpc, tpc, sm, reg): return GPC_BASE + gpc * 0x4000 + (self.num_tpc_per_gpc - tpc_cnt[gpc] + tpc) * 0x200 + [0x400, 0x1000][sm] + reg
 
     self.reg_ops(*[op for gpc in range(len(tpc_masks)) for tpc in range(tpc_cnt[gpc]) for sm in range(2) for op in [
       (SM_REG(gpc, tpc, sm, 0x128), (gpc << 5) | (tpc << 1) | sm), # enumeration. NOTE: different from cuda
