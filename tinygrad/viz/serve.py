@@ -472,27 +472,6 @@ def amd_disasm(target:int, lib:bytes) -> dict[int, tuple[str, int]]:
     offset += decoded.size()
   return addr_table
 
-def _op2dsl(op: str) -> str:
-  """Convert LLVM asm operand (s0, s[0:1], v0) to DSL format (s[0], s[0:1], v[0])."""
-  import re
-  op = op.strip()
-  lo = op.lower()
-  SPEC_DSL = {'vcc_lo': 'VCC_LO', 'vcc_hi': 'VCC_HI', 'vcc': 'VCC', 'exec_lo': 'EXEC_LO', 'exec_hi': 'EXEC_HI', 'exec': 'EXEC',
-              'scc': 'SCC', 'm0': 'M0', 'null': 'NULL', 'off': 'OFF'}
-  if lo in SPEC_DSL: return SPEC_DSL[lo]
-  rp = {'s': 's', 'v': 'v', 't': 'ttmp', 'ttmp': 'ttmp'}
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return f"{rp[m.group(1)]}[{m.group(2)}:{m.group(3)}]"
-  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', lo): return f"{rp[m.group(1)]}[{m.group(2)}]"
-  return op
-
-def amdgpu_tokenize(st:str) -> list[str]:
-  try:
-    from extra.assembly.amd.dsl import s, v, Reg, VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
-    dsl = eval(_op2dsl(st), {'s':s, 'v':v, 'VCC_LO':VCC_LO, 'VCC_HI':VCC_HI, 'VCC':VCC, 'EXEC_LO':EXEC_LO, 'EXEC_HI':EXEC_HI, 'EXEC':EXEC,
-                             'SCC':SCC, 'M0':M0, 'NULL':NULL, 'OFF':OFF})
-    return [f"{type(dsl).__name__[0].lower()}{dsl.offset + i}" for i in range(dsl.sz)] if isinstance(dsl, Reg) else [st]
-  except (ImportError, NameError, SyntaxError, TypeError): return []
-
 def parse_branch(inst) -> int|None:
   if "branch" in getattr(inst, "op_name", "").lower():
     x = inst.simm16 & 0xffff
@@ -524,15 +503,18 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
     else: assert curr is not None, f"no basic block found for {pc}"
     blocks[curr].append(pc)
     # otherwise a basic block can have exactly one or two paths
-    nx = pc+(sz:=inst.size())
+    nx = pc+inst.size()
     if (offset:=parse_branch(inst)) is not None:
       if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
+  from extra.assembly.amd.dsl import Reg
   for pc, inst in pc_table.items():
-    text = disasm[pc]
-    pc_tokens[pc] = [{"st":s, "keys":amdgpu_tokenize(s) if i>0 else [s], "kind":int(i>0)} for i,s in enumerate(text.replace(",", " , ").split(" "))]
+    pc_tokens[pc] = tokens = []
+    for name, field in inst._fields:
+      if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
+      if name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
   return {"data":{"blocks":blocks, "paths":paths, "pc_tokens":pc_tokens}, "src":"\n".join(lines)}
 
 # ** Main render function to get the complete details about a trace event
