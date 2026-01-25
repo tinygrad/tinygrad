@@ -106,7 +106,7 @@ VOPD_TO_VOP2 = {
   VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
 }
 WAVE_SIZE = 32
-PC_LO_IDX, SCC_IDX, SCRATCH_STRIDE_IDX = 128, 130, 131
+PC_LO_IDX, PC_HI_IDX, SCC_IDX, SCRATCH_STRIDE_IDX = 128, 129, 130, 131
 SGPR_COUNT, VGPR_SIZE = 132, 256 * 32
 
 def _is_16bit_op(op_name: str) -> bool: return any(x in op_name for x in ('B16', 'F16', 'I16', 'U16'))
@@ -305,7 +305,7 @@ def compile_sop_pcode(op, srcs: dict[str, UOp], wsgpr_fn, rsgpr_fn, sdst_reg: in
   _, assigns = parse_pcode(pcode, srcs, lane=None)
   stores = _scalar_stores(assigns, wsgpr_fn, sdst_reg, sdst_size)
   if not stores: return None
-  return name, UOp.sink(*stores, inc_pc_fn(), arg=KernelInfo(name=name))
+  return name, UOp.sink(*stores, *inc_pc_fn(), arg=KernelInfo(name=name))
 
 def compile_lane_pcode(op, inst, vgpr, wsgpr_fn, rsgpr_fn, rsrc_fn, inc_pc_fn, name: str):
   """Compile READLANE/READFIRSTLANE/WRITELANE using pcode parser."""
@@ -332,7 +332,7 @@ def compile_lane_pcode(op, inst, vgpr, wsgpr_fn, rsgpr_fn, rsrc_fn, inc_pc_fn, n
       stores.append(vgpr.index(idx.cast(dtypes.index)).store(write_val.cast(dtypes.uint32)))
 
   if not stores: return None
-  return name, UOp.sink(*stores, inc_pc_fn(), arg=KernelInfo(name=name))
+  return name, UOp.sink(*stores, *inc_pc_fn(), arg=KernelInfo(name=name))
 
 def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, rsgpr_fn, vdst_reg: int, exec_mask: UOp,
                       inc_pc_fn=None, name: str = None, opsel_dst_hi: bool = False, rvgpr_fn=None, sdst_reg: int | None = None):
@@ -390,7 +390,7 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
     stores.append(wsgpr_fn(EXEC_LO.offset, _unroll_lanes(get_exec_bit, exec_mask, apply_exec=False)))
   stores.extend(scalar_stores)
   if not stores: return None
-  return (name, UOp.sink(*stores, inc_pc_fn(), arg=KernelInfo(name=name))) if inc_pc_fn else stores
+  return (name, UOp.sink(*stores, *inc_pc_fn(), arg=KernelInfo(name=name))) if inc_pc_fn else stores
 
 # Buffers: sgpr=0, vgpr=1, vmem=2, lds=3, scratch=4
 
@@ -410,11 +410,11 @@ def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('sgpr', 'vgpr', 'vmem', 'lds', 'scratch', 'literal', 'inst_words')
+  __slots__ = ('sgpr', 'vgpr', 'vmem', 'lds', 'scratch', 'literal', 'inst_size')
 
-  def __init__(self, sgpr, vgpr, vmem, lds, scratch, literal, inst_words):
+  def __init__(self, sgpr, vgpr, vmem, lds, scratch, literal, inst_size):
     self.sgpr, self.vgpr, self.vmem, self.lds, self.scratch = sgpr, vgpr, vmem, lds, scratch
-    self.literal, self.inst_words = literal, inst_words
+    self.literal, self.inst_size = literal, inst_size
 
   def rsgpr(self, reg: int) -> UOp:
     if reg == 124: return UOp.const(dtypes.uint32, 0)  # NULL register reads as 0
@@ -461,7 +461,15 @@ class _Ctx:
     """Read source with size from operand metadata."""
     return self.rsrc(off, lane, 64) if sizes.get(key, 1) == 2 else self.rsrc(off, lane, 16 if f16 else 32)
 
-  def inc_pc(self) -> UOp: return self.wsgpr(PC_LO_IDX, self.rsgpr(PC_LO_IDX) + UOp.const(dtypes.uint32, self.inst_words))
+  def rpc(self) -> UOp:
+    """Read PC as 64-bit byte address."""
+    return _u64(self.rsgpr(PC_LO_IDX), self.rsgpr(PC_HI_IDX))
+
+  def inc_pc(self) -> list[UOp]:
+    """Increment PC by instruction size in bytes. Returns [lo_store, hi_store]."""
+    new_pc = self.rpc() + UOp.const(dtypes.uint64, self.inst_size)
+    lo, hi = _split64(new_pc)
+    return [self.wsgpr(PC_LO_IDX, lo), self.wsgpr(PC_HI_IDX, hi)]
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION HANDLERS
@@ -469,23 +477,24 @@ class _Ctx:
 
 def _compile_sopp(inst: SOPP, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   if inst.op == SOPPOp.S_ENDPGM:
-    return name, UOp.sink(ctx.wsgpr(PC_LO_IDX, UOp.const(dtypes.uint32, 0xFFFFFFFF)), arg=KernelInfo(name=name))
+    return name, UOp.sink(ctx.wsgpr(PC_LO_IDX, UOp.const(dtypes.uint32, 0xFFFFFFFF)),
+                          ctx.wsgpr(PC_HI_IDX, UOp.const(dtypes.uint32, 0xFFFFFFFF)), arg=KernelInfo(name=name))
   pcode = PCODE.get(inst.op)
   if pcode is not None:
-    pc_words = ctx.rsgpr(PC_LO_IDX)
-    pc_bytes = pc_words.cast(dtypes.int64) * UOp.const(dtypes.int64, 4)
+    pc_bytes = ctx.rpc()  # PC is already 64-bit byte address
     vcc, exec_lo = ctx.rsgpr(VCC_LO.offset), ctx.rsgpr(EXEC_LO.offset)
-    srcs = {'PC': pc_bytes, 'SIMM16': UOp.const(dtypes.int16, _sext(inst.simm16, 16)), 'SCC': ctx.rsgpr(SCC_IDX), 'VCC': vcc,
+    srcs = {'PC': pc_bytes.cast(dtypes.int64), 'SIMM16': UOp.const(dtypes.int16, _sext(inst.simm16, 16)), 'SCC': ctx.rsgpr(SCC_IDX), 'VCC': vcc,
             'VCCZ': vcc.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32), 'EXECZ': exec_lo.eq(UOp.const(dtypes.uint32, 0)).cast(dtypes.uint32)}
     for dest, val in parse_pcode(pcode, srcs, op_name=inst.op.name)[1]:
       if dest == 'PC' or dest.startswith('PC.'):
-        return name, UOp.sink(ctx.wsgpr(PC_LO_IDX, (val >> UOp.const(dtypes.int64, 2)).cast(dtypes.uint32)), arg=KernelInfo(name=name))
-  return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
+        lo, hi = _split64(val.cast(dtypes.uint64))
+        return name, UOp.sink(ctx.wsgpr(PC_LO_IDX, lo), ctx.wsgpr(PC_HI_IDX, hi), arg=KernelInfo(name=name))
+  return name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
   if inst.op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV):
-    return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
+    return name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name))
   addr = ctx.rsgpr64(inst.sbase.offset) + UOp.const(dtypes.uint64, _sext(inst.offset, 21))
   # Add register offset (soffset) if not NULL (offset 124)
   if inst.soffset.offset != 124:
@@ -494,7 +503,7 @@ def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   ndwords = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}.get(inst.op, 1)
   stores = [ctx.wsgpr(sdata_reg + i, ctx.vmem.index((addr + UOp.const(dtypes.uint64, i * 4) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)))
             for i in range(ndwords)]
-  return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
+  return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   sizes = getattr(inst, 'op_regs', {})
@@ -599,7 +608,7 @@ def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0,
   # CMPX e32: writes EXEC only; CMPX e64: writes both EXEC and SDST; non-CMPX: writes dst only
   if is_cmpx: stores = [ctx.wsgpr(EXEC_LO.offset, new_result)] + ([] if is_vopc else [ctx.wsgpr(dst_reg, new_result)])
   else: stores = [ctx.wsgpr(dst_reg, new_result)]
-  return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
+  return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask = ctx.rsgpr(EXEC_LO.offset)
@@ -641,7 +650,7 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   if opsel_dst_hi:
     stores = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, opsel_dst_hi=True, rvgpr_fn=ctx.rvgpr)
     if stores is not None:
-      return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
+      return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
   pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, rvgpr_fn=ctx.rvgpr)
   assert pcode_result is not None, f"no pcode for VOP3: {inst.op.name}"
   return pcode_result
@@ -698,8 +707,8 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     vcc_write = ctx.wsgpr(sdst_reg, final_vcc)
     if vgpr_stores:
       # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
-      return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), ctx.inc_pc(), arg=KernelInfo(name=name))
-    return name, UOp.sink(vcc_write, ctx.inc_pc(), arg=KernelInfo(name=name))
+      return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), *ctx.inc_pc(), arg=KernelInfo(name=name))
+    return name, UOp.sink(vcc_write, *ctx.inc_pc(), arg=KernelInfo(name=name))
   else:
     pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, sdst_reg=sdst_reg)
     assert pcode_result is not None, f"no pcode for VOP3SD: {op_name}"
@@ -734,7 +743,7 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     mat_c = [ctx.rvgpr(src2_r + i // 32, UOp.const(dtypes.index, i % 32)).bitcast(dtypes.float32) for i in range(256)]
     mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
     stores = [ctx.wvgpr(vdst_reg + i // 32, UOp.const(dtypes.index, i % 32), mat_d[i].bitcast(dtypes.uint32), exec_mask) for i in range(256)]
-    return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
+    return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
 
   pcode = PCODE.get(inst.op)
   if pcode is not None:
@@ -762,8 +771,8 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       if s2_new is not None: srcs['S2'] = s2_new
     stores = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, rvgpr_fn=ctx.rvgpr)
     if stores is not None:
-      return name, UOp.sink(*stores, ctx.inc_pc(), arg=KernelInfo(name=name))
-  return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
+      return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
+  return name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask = ctx.rsgpr(EXEC_LO.offset)
@@ -786,13 +795,13 @@ def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     srcs.update({'VCC': ctx.rsgpr(VCC_LO.offset), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)})
     for dest, val in parse_pcode(pcode, srcs, lane, op_name=vop.name)[1]:
       if dest.startswith('D0'): all_stores.append(wvgpr_after_y(vdst_reg, lane, _val_to_u32(val), exec_mask))
-  return name, UOp.sink(UOp.group(*all_stores).end(lane), ctx.inc_pc(), arg=KernelInfo(name=name))
+  return name, UOp.sink(UOp.group(*all_stores).end(lane), *ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   """Unified memory operation compiler for DS, FLAT, GLOBAL, SCRATCH."""
   exec_mask, op_name = ctx.rsgpr(EXEC_LO.offset), _op_name(inst)
   pcode = PCODE.get(inst.op)
-  if pcode is None: return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
+  if pcode is None: return name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name))
 
   is_lds = isinstance(inst, DS)
   is_scratch = isinstance(inst, SCRATCH)
@@ -883,7 +892,7 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
         active = _lane_active(exec_mask, lane)
         _, lane_assigns = parse_pcode(pcode, make_srcs(lane), lane=lane, op_name=op_name)
         ended.extend(s.end(lane) for s in make_stores(dest, lane_assigns[i][1], lane, active, True, {}))
-      return (name, UOp.sink(*ended, ctx.inc_pc(), arg=KernelInfo(name=name))) if ended else (name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name)))
+      return (name, UOp.sink(*ended, *ctx.inc_pc(), arg=KernelInfo(name=name))) if ended else (name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name)))
 
   # Standard path: single lane range
   writes_return_data = '_RTN' in op_name or (is_lds and op_name.startswith('DS_LOAD')) or (is_atomic and glc)
@@ -897,8 +906,8 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     for dword_idx, val in sorted(_collect_data_slices(assigns, 'VDATA', pcode_vars, op_name).items()):
       stores.append(ctx.wvgpr(vdst_reg + dword_idx, lane, val, exec_mask))
 
-  if stores: return name, UOp.sink(UOp.sink(*stores).end(lane), ctx.inc_pc(), arg=KernelInfo(name=name))
-  return name, UOp.sink(ctx.inc_pc(), arg=KernelInfo(name=name))
+  if stores: return name, UOp.sink(UOp.sink(*stores).end(lane), *ctx.inc_pc(), arg=KernelInfo(name=name))
+  return name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name))
 
 # Dispatch table: instruction type -> handler function
 _INST_HANDLERS: dict[type, callable] = {
@@ -952,11 +961,11 @@ def _get_inst_sink(inst_bytes: bytes) -> UOp:
   inst = decode_inst(inst_bytes)
   name = f"{_op_name(inst).lower()}_{inst_bytes[:inst.size()].hex()}"
   sgpr, vgpr, vmem, lds, scratch = _define_bufs()
-  inst_words = inst.size() // 4
+  inst_size = inst.size()  # bytes
   is_8byte_base = isinstance(inst, (VOP3, VOP3SD, VOP3P, SMEM, DS, FLAT, GLOBAL, VOPD, SCRATCH))
   lit_off = 8 if is_8byte_base else 4
   literal = int.from_bytes(inst_bytes[lit_off:lit_off+4], 'little') if len(inst_bytes) >= lit_off + 4 else 0
-  ctx = _Ctx(sgpr, vgpr, vmem, lds, scratch, literal, inst_words)
+  ctx = _Ctx(sgpr, vgpr, vmem, lds, scratch, literal, inst_size)
 
   # Look up handler by type, falling back to base classes for _LIT variants
   handler = _INST_HANDLERS.get(type(inst))
@@ -980,23 +989,23 @@ def decode_program(data: bytes) -> dict[int, tuple[str, object, list[int], objec
   """Decode program to {pc: (name, program, globals, holder)}."""
 
   # Collect all instruction programs
-  inst_info: list[tuple[int, ProgramSpec]] = []  # (pc, prg)
+  inst_info: list[tuple[int, ProgramSpec]] = []  # (pc_bytes, prg)
   i = 0
   while i < len(data):
     inst = decode_inst(data[i:])
     if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
     try:
       prg = _get_inst_prg(bytes(data[i:i + inst.size() + 4]))
-      inst_info.append((i // 4, prg))
+      inst_info.append((i, prg))  # PC is now byte offset
       if DEBUG >= 3:
         try: inst_str = repr(inst)
-        except Exception: inst_str = f"<{type(inst).__name__} at PC={i//4}>"
-        print(f"[emu2] PC={i//4}: {inst_str}")
+        except Exception: inst_str = f"<{type(inst).__name__} at PC={i}>"
+        print(f"[emu2] PC={i}: {inst_str}")
         if DEBUG >= 4: print(f"{colored(prg.src, 'BLACK')}")
     except Exception as e:
       try: inst_str = repr(inst)
       except Exception: inst_str = f"<{type(inst).__name__}>"
-      raise RuntimeError(f"[emu2] Failed to compile PC={i//4} {inst_str}: {type(e).__name__}: {e}") from e
+      raise RuntimeError(f"[emu2] Failed to compile PC={i} {inst_str}: {type(e).__name__}: {e}") from e
     i += inst.size()
 
   if not inst_info: return {}
@@ -1039,6 +1048,7 @@ class WaveState:
     ctypes.memset(self.sgpr_buf._buf.va_addr, 0, SGPR_COUNT * 4)
     self._write_sgpr(EXEC_LO.offset, (1 << n_lanes) - 1)
     self._write_sgpr(PC_LO_IDX, 0)
+    self._write_sgpr(PC_HI_IDX, 0)
 
   def _write_sgpr(self, idx: int, val: int): self._sgpr_mv[idx] = val & MASK32
   def _read_sgpr(self, idx: int) -> int: return self._sgpr_mv[idx]
@@ -1046,9 +1056,11 @@ class WaveState:
   def _read_vgpr(self, reg: int, lane: int) -> int: return self._vgpr_mv[reg * 32 + lane]
 
   @property
-  def pc(self) -> int: return self._read_sgpr(PC_LO_IDX)
+  def pc(self) -> int: return self._read_sgpr(PC_LO_IDX) | (self._read_sgpr(PC_HI_IDX) << 32)
   @pc.setter
-  def pc(self, val: int): self._write_sgpr(PC_LO_IDX, val)
+  def pc(self, val: int):
+    self._write_sgpr(PC_LO_IDX, val & MASK32)
+    self._write_sgpr(PC_HI_IDX, (val >> 32) & MASK32)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # EXECUTION
@@ -1101,7 +1113,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               vgpr_raw = st.vgpr_buf.as_buffer(force_zero_copy=True)
               all_bufs = [sgpr_raw, vgpr_raw, vmem_mv, lds_mv, scratch_mv]
               for inst_count in range(1_000_000):
-                if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
+                if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF or pc not in program: break
                 name, prg, globals_list, _ = program[pc]
                 assert prg is not None, f"[emu2] No program for {name} at PC={pc}"
                 assert 4 not in globals_list or scratch_mv, f"SCRATCH instruction {name} but scratch_size=0"
@@ -1115,7 +1127,7 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                         ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
               c_lane = ctypes.c_int32(0)
               for inst_count in range(1_000_000):
-                if (pc := st.pc) == 0xFFFFFFFF or pc not in program: break
+                if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF or pc not in program: break
                 name, fxn, globals_list, _ = program[pc]
                 assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
                 assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"

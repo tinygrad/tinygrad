@@ -9,7 +9,7 @@ os.environ["AMD"] = "1"
 os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
-from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, MASK32, PC_LO_IDX, SCC_IDX, VCC_LO, EXEC_LO
+from extra.assembly.amd.emu2 import WaveState, decode_program, WAVE_SIZE, MASK32, PC_LO_IDX, PC_HI_IDX, SCC_IDX, VCC_LO, EXEC_LO
 from extra.assembly.amd.decode import decode_inst
 from extra.assembly.amd.test.helpers import KernelInfo
 from extra.assembly.amd.test.bench_emu import REMU_PATH
@@ -109,14 +109,14 @@ class PythonEmulator:
     import ctypes
     assert self.program is not None and self.state is not None
     pc = self.state.pc
-    if pc == 0xFFFFFFFF or pc not in self.program: return -1
+    if pc == 0xFFFFFFFFFFFFFFFF or pc not in self.program: return -1
     name, fxn, globals_list, _runner = self.program[pc]
     if fxn is None: return 1  # unsupported instruction
     buf_addrs = {0: self.state.sgpr_buf._buf.va_addr, 1: self.state.vgpr_buf._buf.va_addr,
                  2: self.vmem_buf._buf.va_addr, 3: self.lds_buf._buf.va_addr}
     # Direct ctypes call - bypasses HCQ overhead
     fxn(*[ctypes.c_uint64(buf_addrs[g]) for g in globals_list], ctypes.c_int32(0))
-    return -1 if self.state.pc == 0xFFFFFFFF else 0
+    return -1 if self.state.pc == 0xFFFFFFFFFFFFFFFF else 0
 
   def set_sgpr(self, idx: int, val: int):
     assert self.state is not None
@@ -129,7 +129,8 @@ class PythonEmulator:
     assert self.state is not None
     sgpr = [self.state._read_sgpr(i) for i in range(128)]
     vgpr = [[self.state._read_vgpr(reg, lane) for reg in range(256)] for lane in range(WAVE_SIZE)]
-    return StateSnapshot(pc=self.state.pc, scc=self.state._read_sgpr(SCC_IDX), vcc=sgpr[VCC_LO.offset],
+    # Convert byte-based PC to word-based for comparison with Rust emulator
+    return StateSnapshot(pc=self.state.pc // 4, scc=self.state._read_sgpr(SCC_IDX), vcc=sgpr[VCC_LO.offset],
                          exec_mask=sgpr[EXEC_LO.offset], sgpr=sgpr, vgpr=vgpr)
 
 def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: tuple[int, int, int],
@@ -174,7 +175,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             rust_before = rust.get_snapshot()
             python_before = python.get_snapshot()
 
-            inst_info = program.get(python_before.pc)
+            inst_info = program.get(python_before.pc * 4)  # Convert word offset to byte offset for program lookup
             inst_hex_name = inst_info[0] if inst_info else f"unknown at PC={python_before.pc}"
             # Decode the instruction to get mnemonic for sync_after checks
             try:
@@ -242,7 +243,8 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
               for lane in range(n_lanes):
                 for i in range(256): python.set_vgpr(lane, i, rust_after.vgpr[lane][i])
               assert python.state is not None
-              python.state._write_sgpr(PC_LO_IDX, rust_after.pc)
+              # Convert Rust's word-based PC to Python's byte-based PC
+              python.state.pc = rust_after.pc * 4
               python.state._write_sgpr(SCC_IDX, rust_after.scc)
               python.state._write_sgpr(VCC_LO.offset, rust_after.vcc)
               python.state._write_sgpr(EXEC_LO.offset, rust_after.exec_mask)

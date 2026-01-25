@@ -239,6 +239,7 @@ def main():
   parser.add_argument("--iterations", type=int, default=3, help="Number of iterations per benchmark")
   parser.add_argument("--profile", type=str, default=None, help="Profile instructions for a specific kernel (e.g. 'sin')")
   parser.add_argument("--top", type=int, default=20, help="Number of top instructions to show in profile")
+  parser.add_argument("--sort-build", action="store_true", help="Sort profile by build time instead of render time")
   args = parser.parse_args()
 
   # Profile mode: show individual instruction timing
@@ -251,6 +252,8 @@ def main():
     print(f"Profiling instructions for '{args.profile}' kernel...")
     print("=" * 140)
     results = profile_instructions(kernel)
+    if args.sort_build:
+      results = sorted(results, key=lambda x: x['build_ms'], reverse=True)
     print(f"{'Instruction':<90} {'UOps':>6}  {'Build(ms)':>10}  {'Render(ms)':>10}")
     print("-" * 140)
     for r in results[:args.top]:
