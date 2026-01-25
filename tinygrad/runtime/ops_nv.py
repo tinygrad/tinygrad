@@ -757,7 +757,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
       (nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_IDLE_SLOWDOWN_DISABLE << 8) | (nv_gpu.NVB0CC_CTRL_POWER_FEATURE_MASK_VAT_DISABLE << 10))
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_POWER_REQUEST_FEATURES, power_params)
 
-    self.pma_buf = self.iface.alloc(getenv("PMA_BUFFER_SIZE", 256) << 20, uncached=True, cpu_cached=True, cpu_access=True)
+    self.pma_buf = self.iface.alloc(getenv("PMA_BUFFER_SIZE", 512) << 20, uncached=True, cpu_cached=True, cpu_access=True)
     self.pma_bytes = self.iface.alloc(0x1000, uncached=True, cpu_cached=True, read_only=True)
     self.pma_rptr = 0
 
@@ -772,42 +772,35 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self._prof_setup_pc_sampling()
 
   def _prof_setup_pc_sampling(self):
-    # TODO: CLEAN THIS MORE
-    def RegWrite(reg, val, mask=0xffffffff): return (reg, val, mask)
-    is_blackwell = False
+    PMASYS_BASE, PMAGPC_BASE, GR_GPC_BASE, GPC_BASE = 0x24a000, 0x244000, 0x419000, 0x180000
 
     tpc_masks = [m for i in range(self.num_gpcs) if (m := self.iface.rm_control(self.subdevice, nv_gpu.NV2080_CTRL_CMD_GR_GET_TPC_MASK,
       nv_gpu.NV2080_CTRL_GR_GET_TPC_MASK_PARAMS(gpcId=i)).tpcMask) > 0]
 
-    PMASYS, PMAGPC = 0x24a000, 0x244000
-    GPCBASE, GPCSTRIDE = (0x200200, 0x4000) if is_blackwell else (0x180000, 0x4000)
-    GRGPCS = 0x423800 if is_blackwell else 0x419000
+    # enables pma on gpc
+    self.reg_ops(*[(PMAGPC_BASE + gpc * 0x200, 0x100, 0x100) for gpc in range(len(tpc_masks))])
 
-    self.reg_ops(
-      RegWrite(PMASYS + 0x620, 0x2000000, mask=0x2000000),
-      *[RegWrite(PMAGPC + gpc * 0x200, 0x100, mask=0x100) for gpc in range(len(tpc_masks))])
-
+    # sets streaming bw for each gpc
     hs = nv_gpu.struct_NVB0CC_CTRL_HS_CREDITS_PARAMS(pmaChannelIdx=0, numEntries=len(tpc_masks))
     for i, mask in enumerate(tpc_masks):
       hs.creditInfo[i] = nv_gpu.struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO(
         chipletType=nv_gpu.NVB0CC_CHIPLET_TYPE_GPC, chipletIndex=i, numCredits=bin(mask).count('1'))
     self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_SET_HS_CREDITS, hs)
 
-    self.reg_ops(RegWrite(PMASYS + 0x03c, 0x1))
-    self.reg_ops(*[RegWrite(PMASYS + 0x65c + i * 4, 0xffffffff) for i in [0, 2, 4, 1, 3, 5, 6, 8, 10, 7, 9, 11, 16, 18, 20, 17, 19, 21]])
-    self.reg_ops(RegWrite(PMASYS + 0x010, 0xffffffff), RegWrite(PMASYS + 0x014, 0xffffffff))
-    self.reg_ops(RegWrite(PMASYS + 0x640, 0x40), RegWrite(PMASYS + 0x620, 0x2000007))
+    self.reg_ops(*[(PMASYS_BASE + 0x65c + off * 4, 0xffffffff) for off in range(self.num_gpcs * 2)])
+    self.reg_ops((PMASYS_BASE + 0x620, 0x2000007))
 
-    sm_ops = []
-    for gpc, mask in enumerate(tpc_masks):
-      for tpc in range(num_tpcs := bin(mask).count('1')):
-        for sm, sm_off in enumerate([0x400, 0x1000]):
-          base = GPCBASE + gpc * GPCSTRIDE + sm_off + (self.num_tpc_per_gpc - num_tpcs + tpc) * 0x200
-          tpc_id = ((0x20 + gpc + (gpc >= 7)) << 5) + (self.num_tpc_per_gpc + 2 - num_tpcs) + tpc + sm * self.num_tpc_per_gpc
-          sm_ops += [RegWrite(base + 0x0ec, 0x1), RegWrite(base + 0x06c, 0x2), RegWrite(base + 0x108, 0x20), RegWrite(base + 0x040, 0x19181716),
-                     RegWrite(base + 0x048, 0x1d1c1b1a), RegWrite(base + 0x050, 0x1e001f), RegWrite(base + 0x128, tpc_id), RegWrite(base + 0x09c, 0x40005)]
-    self.reg_ops(*sm_ops)
-    self.reg_ops(RegWrite(GRGPCS + 0xbdc, 0x1), reg_type=1)
+    # tpc addressing is right aligned
+    tpc_cnt = [bin(mask).count('1') for mask in tpc_masks]
+    SM_REG = lambda gpc,tpc,sm,reg: GPC_BASE + gpc * 0x4000 + (self.num_tpc_per_gpc - tpc_cnt[gpc] + tpc) * 0x200 + [0x400, 0x1000][sm] + reg
+
+    self.reg_ops(*[op for gpc in range(len(tpc_masks)) for tpc in range(tpc_cnt[gpc]) for sm in range(2) for op in [
+      (SM_REG(gpc, tpc, sm, 0x128), (gpc << 5) | (tpc << 1) | sm), # enumeration. NOTE: different from cuda
+      (SM_REG(gpc, tpc, sm, 0x40), 0x19181716), (SM_REG(gpc, tpc, sm, 0x48), 0x1d1c1b1a), (SM_REG(gpc, tpc, sm, 0x50), 0x1e201f), # unk, counters?
+      (SM_REG(gpc, tpc, sm, 0xec), 0x1), (SM_REG(gpc, tpc, sm, 0x6c), 0x2), (SM_REG(gpc, tpc, sm, 0x9c), 0x5), (SM_REG(gpc, tpc, sm, 0x108), 0x20)]])
+
+    # enable pc sampling for the context
+    self.reg_ops((GR_GPC_BASE + 0xbdc, 0x1), reg_type=1)
 
   def reg_ops(self, *ops, reg_type=0, op=nv_gpu.NV2080_CTRL_GPU_REG_OP_WRITE_32):
     for i in range(0, len(ops), 124):
