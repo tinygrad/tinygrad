@@ -111,6 +111,8 @@ class TestCfg(unittest.TestCase):
     _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
     cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
+    edge_count = sum(len(v) for v in cfg["paths"].values())
+    self.assertEqual(edge_count, 5)
     references:dict[str, list[str]] = {}
     for pc, tokens in cfg["pc_tokens"].items():
       for t in tokens:

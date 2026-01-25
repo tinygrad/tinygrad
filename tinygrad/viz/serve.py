@@ -484,7 +484,7 @@ def amdgpu_cfg(lib:bytes, target:int) -> dict:
     # otherwise a basic block can have exactly one or two paths
     nx = pc+inst.size()
     if (offset:=parse_branch(inst)) is not None:
-      if inst.op_name == "s_branch": paths[curr][nx+offset] = UNCOND
+      if inst.op_name == "S_BRANCH": paths[curr][nx+offset] = UNCOND
       else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
     elif nx in leaders: paths[curr][nx] = UNCOND
   pc_tokens:dict[int, list[dict]] = {}
