@@ -1077,7 +1077,7 @@ class TestF64Ops(unittest.TestCase):
       s_mov_b32(s[3], one_f64 >> 32),
       v_mov_b32_e32(v[2], s[2]),
       v_mov_b32_e32(v[3], s[3]),
-      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=s[10:11], src0=v[0:1], src1=v[0:1], src2=v[2:3]),
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4:5], sdst=s[10], src0=v[0:1], src1=v[0:1], src2=v[2:3]),
     ]
     st = run_program(instructions, n_lanes=1)
     result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))

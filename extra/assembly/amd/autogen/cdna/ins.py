@@ -38,7 +38,7 @@ class GLOBAL(Inst):
   addr = VGPRField(39, 32)
   data = VGPRField(47, 40)
   saddr = SGPRField(54, 48, default=NULL)
-  offset = BitField(11, 0)
+  offset = BitField(12, 0)
   seg = FixedBitField(15, 14, 2)
   acc = BitField(55, 55)
   sve = BitField(13, 13)
@@ -53,7 +53,7 @@ class SCRATCH(Inst):
   addr = VGPRField(39, 32)
   data = VGPRField(47, 40)
   saddr = SGPRField(54, 48, default=NULL)
-  offset = BitField(11, 0)
+  offset = BitField(12, 0)
   seg = FixedBitField(15, 14, 1)
   acc = BitField(55, 55)
   sve = BitField(13, 13)
@@ -174,6 +174,7 @@ class VOP3P(Inst):
   clmp = BitField(15, 15)
   opsel = BitField(13, 11)
   opsel_hi = BitField(60, 59, default=3)
+  opsel_hi2 = BitField(14, 14, default=1)
 
 class VOP3PX2(Inst):
   encoding = FixedBitField(95, 87, 0b110100111)
