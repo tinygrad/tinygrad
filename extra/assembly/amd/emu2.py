@@ -767,7 +767,7 @@ def _compile_vop3p(inst: VOP3P, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
 def _compile_vopd(inst: VOPD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask = ctx.rsgpr(EXEC_LO.offset)
-  vdstx_reg, vdsty_reg = inst.vdstx.offset - 256, (inst.vdsty << 1) | ((inst.vdstx.offset & 1) ^ 1)
+  vdstx_reg, vdsty_reg = inst.vdstx.offset - 256, inst.vdsty.offset - 256
   lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
   srcy0, srcy1 = ctx.rsrc(inst.srcy0.offset, lane), ctx.rvgpr(inst.vsrcy1.offset - 256, lane)
   def wvgpr_after_y(reg: int, lane: UOp, val: UOp, exec_mask: UOp) -> UOp:
