@@ -125,6 +125,26 @@ def _make_test(f: str, arch: str, test_type: str):
         except ValueError: skipped += 1  # skip invalid opcodes not in enum
       print(f"{name}: {passed} passed, {skipped} skipped")
       self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
+    elif test_type == "repr":
+      # Test that eval(repr(inst)) reproduces the instruction
+      if arch == "rdna3": import extra.assembly.amd.autogen.rdna3.ins as ins
+      elif arch == "rdna4": import extra.assembly.amd.autogen.rdna4.ins as ins
+      elif arch == "cdna": import extra.assembly.amd.autogen.cdna.ins as ins
+      ns = {k: getattr(ins, k) for k in dir(ins) if not k.startswith('_')}
+      passed, skipped = 0, 0
+      for _, data in tests:
+        try:
+          decoded = detect_format(data, arch).from_bytes(data)
+          if decoded.to_bytes()[:len(data)] != data: skipped += 1; continue  # skip if binary roundtrip fails
+          r = repr(decoded)
+          try:
+            decoded2 = eval(r, ns)  # noqa: S307
+            if decoded == decoded2: passed += 1
+            else: skipped += 1
+          except Exception: skipped += 1
+        except ValueError: skipped += 1
+      print(f"{name}: {passed} passed, {skipped} skipped")
+      self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
     elif test_type == "disasm":
       to_test = []
       for _, data in tests:
@@ -149,12 +169,15 @@ class TestLLVM(unittest.TestCase): pass
 for f in RDNA_FILES:
   setattr(TestLLVM, f"test_rdna3_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "roundtrip"))
   setattr(TestLLVM, f"test_rdna3_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "disasm"))
+  setattr(TestLLVM, f"test_rdna3_repr_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna3", "repr"))
 for f in CDNA_FILES:
   setattr(TestLLVM, f"test_cdna_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "roundtrip"))
   setattr(TestLLVM, f"test_cdna_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "disasm"))
+  setattr(TestLLVM, f"test_cdna_repr_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "cdna", "repr"))
 for f in RDNA4_FILES:
   setattr(TestLLVM, f"test_rdna4_roundtrip_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna4", "roundtrip"))
   setattr(TestLLVM, f"test_rdna4_disasm_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna4", "disasm"))
+  setattr(TestLLVM, f"test_rdna4_repr_{f.replace('.s', '').replace('-', '_')}", _make_test(f, "rdna4", "repr"))
 
 if __name__ == "__main__":
   unittest.main()
