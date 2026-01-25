@@ -1,4 +1,4 @@
-import ctypes, platform, sys, subprocess
+import ctypes, platform, sys, subprocess, os
 from tinygrad.device import Compiler
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG, unwrap
 from tinygrad.runtime.support.elf import jit_loader
@@ -69,6 +69,8 @@ class LLVMCompiler(Compiler):
 
   def compile(self, src:str) -> bytes:
     self.diag_msgs.clear()
+    if getenv("LLVM_DUMP_IR", 0):
+      with open(f"/tmp/tinygrad_llvm_{os.getpid()}.ll", "w") as f: f.write(src)
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
     mod = expect(llvm.LLVMParseIRInContext(self.context, src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
     expect(llvm.LLVMVerifyModule(mod, llvm.LLVMReturnStatusAction, err:=cerr()), err)
