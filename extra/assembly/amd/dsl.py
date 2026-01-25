@@ -13,7 +13,7 @@ class Reg:
             106: "VCC_LO", 107: "VCC_HI", 124: "NULL", 125: "M0", 126: "EXEC_LO", 127: "EXEC_HI",
             233: "DPP8", 234: "DPP8FI", 235: "SHARED_BASE", 236: "SHARED_LIMIT", 237: "PRIVATE_BASE", 238: "PRIVATE_LIMIT",
             240: "0.5", 241: "-0.5", 242: "1.0", 243: "-1.0", 244: "2.0", 245: "-2.0", 246: "4.0", 247: "-4.0",
-            248: "INV_2PI", 249: "SDWA", 250: "DPP", 251: "VCCZ", 252: "EXECZ", 253: "SCC", 255: "LIT"}
+            248: "INV_2PI", 249: "SDWA", 250: "DPP", 251: "VCCZ", 252: "EXECZ", 253: "SCC", 254: "SRC_LDS_DIRECT", 255: "LIT"}
   _PAIRS = {106: "VCC", 126: "EXEC"}
 
   def __init__(self, offset: int = 0, sz: int = 512, *, neg: bool = False, abs_: bool = False, hi: bool = False):
@@ -76,8 +76,12 @@ EXEC = src[126:127]
 # 128: 0, 129-192: integers 1-64, 193-208: integers -1 to -16
 # 240-248: float constants (0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 4.0, -4.0, 1/(2*PI))
 INV_2PI = src[248]
-DPP16 = src[250]
+SDWA = src[249]
+DPP = DPP16 = src[250]
+VCCZ = src[251]
+EXECZ = src[252]
 SCC = src[253]
+SRC_LDS_DIRECT = src[254]
 LIT = src[255]           # literal constant marker
 v = src[256:511]         # VGPR0-255
 
@@ -258,18 +262,17 @@ class Inst:
     cls._base_size = (max(f.hi for _, f in cls._fields) + 8) // 8
 
   def __new__(cls, *args, **kwargs):
-    # Auto-upgrade to _LIT variant if needed (only for base classes, not variants)
+    # Auto-upgrade to variant if needed (only for base classes, not variants)
     if not any(cls.__name__.endswith(sfx) for sfx in ('_LIT', '_DPP16', '_DPP8', '_SDWA', '_SDWA_SDST', '_MFMA')):
-      lit_cls = _get_variant(cls, '_LIT')
-      if lit_cls is not None:
-        # Check if any src field needs a literal
-        # Map positional args to field names to find src values
-        args_iter = iter(args)
-        for name, field in cls._fields:
-          if isinstance(field, FixedBitField): continue
-          val = kwargs.get(name) if name in kwargs else next(args_iter, None)
-          if isinstance(field, SrcField) and (_needs_literal(val) or (isinstance(val, Reg) and val.offset == 255)):
-            return lit_cls(*args, **kwargs)
+      args_iter = iter(args)
+      for name, field in cls._fields:
+        if isinstance(field, FixedBitField): continue
+        val = kwargs.get(name) if name in kwargs else next(args_iter, None)
+        if not isinstance(field, SrcField): continue
+        if isinstance(val, Reg) and val.offset == 255 and (lit_cls := _get_variant(cls, '_LIT')): return lit_cls(*args, **kwargs)
+        if isinstance(val, Reg) and val.offset == 249 and (sdwa_cls := _get_variant(cls, '_SDWA')): return sdwa_cls(*args, **kwargs)
+        if isinstance(val, Reg) and val.offset == 250 and (dpp_cls := _get_variant(cls, '_DPP16')): return dpp_cls(*args, **kwargs)
+        if _needs_literal(val) and (lit_cls := _get_variant(cls, '_LIT')): return lit_cls(*args, **kwargs)
     return object.__new__(cls)
 
   def __init__(self, *args, **kwargs):
@@ -281,12 +284,7 @@ class Inst:
       if isinstance(field, FixedBitField): vals[name] = None
       elif name in kwargs: vals[name] = kwargs[name]
       else: vals[name] = next(args_iter, None)
-    remaining = list(args_iter)
-    # If there's one remaining arg and class has 'literal' field, use it as literal value
-    if len(remaining) == 1 and any(name == 'literal' for name, _ in self._fields):
-      vals['literal'] = remaining[0]
-      remaining = []
-    assert not remaining, f"too many positional args: {remaining}"
+    assert not (remaining := list(args_iter)), f"too many positional args: {remaining}"
     # Extract modifiers from Reg objects and merge into neg/abs/opsel
     neg_bits, abs_bits, opsel_bits = 0, 0, 0
     for name, bit in [('src0', 0), ('src1', 1), ('src2', 2)]:
@@ -314,7 +312,7 @@ class Inst:
     # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC)
     for name, expected in self.op_regs.items():
       if (val := vals.get(name)) is None: continue
-      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or val.offset in (253, 255)):
+      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or 251 <= val.offset <= 255):
         raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
 
   @property
