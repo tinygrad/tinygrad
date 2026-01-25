@@ -66,6 +66,59 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
 
   return sum(times) / len(times)
 
+def profile_instructions(kernel: bytes):
+  """Profile individual instructions and return sorted by render time."""
+  from extra.assembly.amd.emu2 import _emu_renderer, _get_inst_prg
+  from tinygrad.codegen import get_program
+  from tinygrad.helpers import Context
+
+  # Clear caches to measure fresh
+  _get_inst_sink.cache_clear()
+  _get_inst_prg.cache_clear()
+  decode_program.cache_clear()
+
+  # Collect instruction bytes and names
+  inst_data = []
+  i = 0
+  while i < len(kernel):
+    inst = decode_inst(kernel[i:])
+    if isinstance(inst, SOPP) and inst.op == SOPPOp.S_CODE_END: break
+    inst_bytes = bytes(kernel[i:i + inst.size() + 4])
+    if hasattr(inst, 'opx'):  # VOPD
+      op_name = f"{inst.opx.name}_{inst.opy.name}"
+    else:
+      op_name = inst.op.name if hasattr(inst.op, 'name') else str(inst.op)
+    inst_data.append((inst_bytes, op_name, type(inst).__name__))
+    i += inst.size()
+
+  # Profile each instruction
+  results = []
+  for inst_bytes, op_name, inst_type in inst_data:
+    # Build (get sink)
+    build_start = time.perf_counter()
+    sink = _get_inst_sink(inst_bytes)
+    build_time = time.perf_counter() - build_start
+
+    # Count UOps in sink
+    uop_count = len(sink.toposort())
+
+    # Render
+    render_start = time.perf_counter()
+    with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
+      prg = get_program(sink, _emu_renderer)
+    render_time = time.perf_counter() - render_start
+
+    results.append({
+      'op_name': op_name,
+      'inst_type': inst_type,
+      'uop_count': uop_count,
+      'build_ms': build_time * 1000,
+      'render_ms': render_time * 1000,
+    })
+
+  # Sort by render time descending
+  return sorted(results, key=lambda x: x['render_ms'], reverse=True)
+
 def benchmark_python_split(kernel: bytes, global_size, local_size, args_ptr, rsrc2: int, iterations: int = 5):
   """Benchmark Python emulator with build/render/compile/execution times separated."""
   from extra.assembly.amd.emu2 import _emu_renderer, _emu_compiler, _elf_symbol_offsets, EMU2_BACKEND
@@ -184,7 +237,29 @@ def main():
   import argparse
   parser = argparse.ArgumentParser(description="Benchmark RDNA3 emulators")
   parser.add_argument("--iterations", type=int, default=3, help="Number of iterations per benchmark")
+  parser.add_argument("--profile", type=str, default=None, help="Profile instructions for a specific kernel (e.g. 'sin')")
+  parser.add_argument("--top", type=int, default=20, help="Number of top instructions to show in profile")
   args = parser.parse_args()
+
+  # Profile mode: show individual instruction timing
+  if args.profile:
+    kernel_info = get_tinygrad_kernel(args.profile)
+    if kernel_info is None:
+      print(f"Failed to get kernel for '{args.profile}'")
+      return
+    kernel = kernel_info[0]
+    print(f"Profiling instructions for '{args.profile}' kernel...")
+    print("=" * 90)
+    results = profile_instructions(kernel)
+    print(f"{'Op Name':<40} {'Type':<14} {'UOps':>6}  {'Build(ms)':>10}  {'Render(ms)':>10}")
+    print("-" * 90)
+    for r in results[:args.top]:
+      print(f"{r['op_name']:<40} {r['inst_type']:<14} {r['uop_count']:>6}  {r['build_ms']:>10.3f}  {r['render_ms']:>10.3f}")
+    print("-" * 90)
+    total_build = sum(r['build_ms'] for r in results)
+    total_render = sum(r['render_ms'] for r in results)
+    print(f"{'TOTAL':<40} {'':<14} {'':>6}  {total_build:>10.3f}  {total_render:>10.3f}")
+    return
 
   rust_remu = get_rust_remu()
   if rust_remu is None:
