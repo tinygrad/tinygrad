@@ -345,22 +345,22 @@ def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   return UOp.const(dtypes.bool, True).prod(*keep).where(x, i) if drop else None
 pm_drop_and_clauses = PatternMatcher([(invalid_gate, drop_and_clauses)])
 
-def where_on_load(c1, buf, x):
-  c2 = x.get_valid()
-  duplicate_clauses = [c for c in c1.split_uop(Ops.AND) if c in c2.split_uop(Ops.AND)]
-  # we move the condition from the where to the load _as long as_ the condtition doesn't have some range that would place it inside of a new range
-  # also no data dependent loads!
-  moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)
-    and all(u in x.backward_slice_with_self for u in c.backward_slice_with_self if u.op is Ops.INDEX)]
-  if not (removed:=moved_clauses+duplicate_clauses): return None
-  # aditionally we can drop the clause on the where if it already exists in the load
-  remaining_clause = UOp.const(dtypes.bool, True).prod(*[c for c in c1.split_uop(Ops.AND) if c not in removed])
-  return remaining_clause.where(buf.index(x.get_idx().valid(functools.reduce(operator.and_, moved_clauses, c2))), 0)
+# move conditions from where to load's valid, drop clauses already in load
+def where_on_load(cond:UOp, buf:UOp, idx:UOp) -> UOp|None:
+  where_clauses, load_valid = list(cond.split_uop(Ops.AND)), idx.get_valid()
+  in_load = set(load_valid.split_uop(Ops.AND))
+  idx_index = {u for u in idx.backward_slice_with_self if u.op is Ops.INDEX}
+  # can move if: condition's ranges are subset of idx's ranges, and no data dependent INDEX (only idx's INDEX allowed)
+  def can_move(c:UOp) -> bool:
+    return c.ranges.keys() <= idx.ranges.keys() and all(u in idx_index for u in c.backward_slice_with_self if u.op is Ops.INDEX)
+  moved, keep = partition([c for c in where_clauses if c not in in_load], can_move)
+  if len(keep) == len(where_clauses): return None
+  return UOp.const(dtypes.bool, True).prod(*keep).where(buf.index(idx.get_idx().valid(functools.reduce(operator.and_, moved, load_valid))), 0)
 
 # where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
 pm_move_where_on_load = PatternMatcher([
-  (UPat.var("c1").where(UPat.var("buf").index(UPat.var("x")), 0), where_on_load),
-  (UPat.var("c1").where(0, UPat.var("buf").index(UPat.var("x"))), lambda c1,buf,x: where_on_load(c1.logical_not(),buf,x)),
+  (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")), 0), where_on_load),
+  (UPat.var("cond").where(0, UPat.var("buf").index(UPat.var("idx"))), lambda cond,buf,idx: where_on_load(cond.logical_not(),buf,idx)),
 ])
 
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
@@ -368,13 +368,14 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
-def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
-  """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
-  def is_valid_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (u.src[1].arg, u.src[2].arg)
-  t_subs, f_subs = {u: u.src[1] for u in t.toposort() if is_valid_where(u)}, {u: u.src[2] for u in f.toposort() if is_valid_where(u)}
-  if not t_subs and not f_subs: return None
-  new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
-  return None if new_t is t and new_f is f else cond.where(new_t, new_f)
+# TODO: this is O(number of WHERE * number of node)
+# def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
+#   """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
+#   def is_valid_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (u.src[1].arg, u.src[2].arg)
+#   t_subs, f_subs = {u: u.src[1] for u in t.toposort() if is_valid_where(u)}, {u: u.src[2] for u in f.toposort() if is_valid_where(u)}
+#   if not t_subs and not f_subs: return None
+#   new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
+#   return None if new_t is t and new_f is f else cond.where(new_t, new_f)
 
 pm_simplify_valid = PatternMatcher([
   # simplify valid
@@ -392,8 +393,8 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # x!=0 -> (bool)x
   (UPat.var("x")!=0, lambda x: x.cast(dtypes.bool.vec(x.dtype.count))),
   # ** where **
-  # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
-  (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
+  # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
+  # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
   # ** pow **
