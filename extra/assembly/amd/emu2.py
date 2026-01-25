@@ -676,23 +676,36 @@ def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0,
   is_cmpx, is_16bit, is_64bit = 'CMPX' in op_name, _is_16bit_op(op_name), 'F64' in op_name
   is_vopc = hasattr(inst, 'vsrc1')  # VOPC (e32) vs VOP3 (e64) format
 
-  # Handle both VOPC (vsrc1) and VOP3 (src1) instruction formats
+  # Handle both VOPC (vsrc1) and VOP3 (src1) instruction formats - read operands dynamically
   if is_vopc:
-    vsrc1_reg = inst.vsrc1.offset - 256
-    vsrc1_hi, src1_off = is_16bit and vsrc1_reg >= 128, 256 + (vsrc1_reg - 128 if is_16bit and vsrc1_reg >= 128 else vsrc1_reg)
-    src0_bits, src1_bits, dst_reg = (64, 64, VCC_LO.offset) if is_64bit else (32, 32, VCC_LO.offset)
+    src0_off = ctx.inst_field(VOPC.src0)
+    vsrc1_off = ctx.inst_field(VOPC.vsrc1)
+    # For 16-bit ops, vsrc1 >= 128 means hi-half of v[vsrc1-128]
+    if is_16bit:
+      vsrc1_hi = vsrc1_off >= _c(128)
+      src1_off = _c(256) + vsrc1_hi.where(vsrc1_off - _c(128), vsrc1_off)
+    else:
+      vsrc1_hi = False
+      src1_off = _c(256) + vsrc1_off
+    src0_bits, src1_bits = (64, 64) if is_64bit else (32, 32)
   else:
-    src1_off, vsrc1_hi, dst_reg = inst.src1.offset, False, inst.vdst.offset
+    src0_off = ctx.inst_field(VOP3.src0)
+    src1_off = ctx.inst_field(VOP3.src1)
+    dst_off = ctx.inst_field(VOP3.vdst)
+    vsrc1_hi = False
     _, src0_bits, _ = inst.operands.get('src0', (None, 32, None))
     _, src1_bits, _ = inst.operands.get('src1', (None, 32, None))
     is_16bit = src0_bits == 16 or src1_bits == 16
+  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
 
   is_float, pcode = any(x in op_name for x in ('_F32', '_F64', '_F16')), PCODE.get(inst.op)
   def get_cmp_bit(lane) -> UOp:
     lc = lane.cast(dtypes.index) if isinstance(lane, UOp) else _c(lane, dtypes.index)
-    s0, s1 = ctx.rsrc(inst.src0.offset, lc, src0_bits), ctx.rsrc(src1_off, lc, src1_bits)
+    s0 = ctx.rsrc_dyn(src0_off, lc, src0_bits, literal)
+    s1 = ctx.rsrc_dyn(src1_off, lc, src1_bits, literal)
     if is_16bit:
-      if vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
+      if isinstance(vsrc1_hi, UOp): s1 = vsrc1_hi.where((s1 >> U32_16) & _c(0xFFFF), s1)
+      elif vsrc1_hi: s1 = (s1 >> U32_16) & _c(0xFFFF)
       if opsel: s0, s1 = _apply_opsel(s0, 0, opsel), _apply_opsel(s1, 1, opsel)
     if is_float and (abs_bits or neg_bits):
       s0 = _apply_src_mods(s0, 0, abs_bits, neg_bits, is_16bit, src0_bits == 64)
@@ -707,8 +720,11 @@ def _compile_vopc(inst, ctx: _Ctx, name: str, opsel: int = 0, abs_bits: int = 0,
   new_result = new_bits & exec_mask
 
   # CMPX e32: writes EXEC only; CMPX e64: writes both EXEC and SDST; non-CMPX: writes dst only
-  if is_cmpx: stores = [ctx.wsgpr(EXEC_LO.offset, new_result)] + ([] if is_vopc else [ctx.wsgpr(dst_reg, new_result)])
-  else: stores = [ctx.wsgpr(dst_reg, new_result)]
+  if is_cmpx:
+    stores = [ctx.wsgpr(EXEC_LO.offset, new_result)]
+    if not is_vopc: stores.append(ctx.wsgpr_dyn(dst_off, new_result))
+  else:
+    stores = [ctx.wsgpr_dyn(dst_off, new_result)] if not is_vopc else [ctx.wsgpr(VCC_LO.offset, new_result)]
   return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
 
 def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
@@ -726,12 +742,17 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   if 'V_CMP' in op_name or 'V_CMPX' in op_name:
     return _compile_vopc(inst, ctx, name, opsel=opsel, abs_bits=getattr(inst, 'abs', 0) or 0, neg_bits=getattr(inst, 'neg', 0) or 0)
 
-  # Regular VOP3
+  # Regular VOP3 - read operands dynamically
   lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
   is_f16_op = 'F16' in op_name
-  src0 = ctx.rsrc_sized(inst.src0.offset, lane, sizes, 'src0', is_f16_op)
-  src1 = ctx.rsrc_sized(inst.src1.offset, lane, sizes, 'src1', is_f16_op)
-  src2 = ctx.rsrc_sized(inst.src2.offset, lane, sizes, 'src2', is_f16_op) if inst.src2 is not None else None
+  vdst_reg = ctx.inst_field(VOP3.vdst)
+  src0_off = ctx.inst_field(VOP3.src0)
+  src1_off = ctx.inst_field(VOP3.src1)
+  src2_off = ctx.inst_field(VOP3.src2) if inst.src2 is not None else None
+  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
+  src0 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', f16=is_f16_op, literal=literal)
+  src1 = ctx.rsrc_dyn_sized(src1_off, lane, sizes, 'src1', f16=is_f16_op, literal=literal)
+  src2 = ctx.rsrc_dyn_sized(src2_off, lane, sizes, 'src2', f16=is_f16_op, literal=literal) if src2_off is not None else None
   if _is_16bit_op(op_name):
     src0, src1 = _apply_opsel(src0, 0, opsel), _apply_opsel(src1, 1, opsel)
     if src2 is not None: src2 = _apply_opsel(src2, 2, opsel)
@@ -741,8 +762,6 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     src0 = _apply_src_mods(src0, 0, abs_bits, neg_bits, is_16bit_op, sizes.get('src0', 1) == 2)
     if src1 is not None: src1 = _apply_src_mods(src1, 1, abs_bits, neg_bits, is_16bit_op, sizes.get('src1', 1) == 2)
     if src2 is not None: src2 = _apply_src_mods(src2, 2, abs_bits, neg_bits, is_16bit_op, sizes.get('src2', 1) == 2)
-  # Read vdst dynamically from instruction encoding
-  vdst_reg = ctx.inst_field(VOP3.vdst)
   srcs = {'S0': src0, 'S1': src1}
   if src2 is not None: srcs['S2'] = src2
   if inst.op in (VOP3Op.V_CNDMASK_B32_E64, VOP3Op.V_CNDMASK_B16) and src2 is not None: srcs['VCC'] = src2
@@ -761,18 +780,25 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
 def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   exec_mask = ctx.rsgpr(EXEC_LO.offset)
-  sizes = getattr(inst, 'op_regs', {})
-  sdst_reg, op_name, vdst_reg = inst.sdst.offset, _op_name(inst), inst.vdst.offset - 256
+  sizes, op_name = getattr(inst, 'op_regs', {}), _op_name(inst)
   pcode = PCODE.get(inst.op)
   assert pcode is not None, f"no pcode for VOP3SD: {op_name}"
 
+  # Read operands dynamically from instruction encoding
+  vdst_reg = ctx.inst_field(VOP3SD.vdst)
+  sdst_off = ctx.inst_field(VOP3SD.sdst)
+  src0_off = ctx.inst_field(VOP3SD.src0)
+  src1_off = ctx.inst_field(VOP3SD.src1)
+  src2_off = ctx.inst_field(VOP3SD.src2) if inst.src2 is not None else None
+  literal = ctx.inst_field(type(inst).literal) if hasattr(type(inst), 'literal') else None
+
   has_carry_in = 'src2' in inst.operands and inst.operands['src2'][2] == OpType.OPR_SREG
-  vcc_in_reg = inst.src2.offset if has_carry_in and inst.src2 is not None else sdst_reg
+  vcc_in_off = src2_off if has_carry_in and src2_off is not None else sdst_off
 
   lane = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-  src0, src1 = ctx.rsrc_sized(inst.src0.offset, lane, sizes, 'src0'), ctx.rsrc_sized(inst.src1.offset, lane, sizes, 'src1')
-  src2 = ctx.rsrc_sized(inst.src2.offset, lane, sizes, 'src2') if inst.src2 is not None else None
-  srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr(vcc_in_reg), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)}
+  src0, src1 = ctx.rsrc_dyn_sized(src0_off, lane, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane, sizes, 'src1', literal=literal)
+  src2 = ctx.rsrc_dyn_sized(src2_off, lane, sizes, 'src2', literal=literal) if src2_off is not None else None
+  srcs = {'S0': src0, 'S1': src1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)}
   if src2 is not None: srcs['S2'] = src2
   _, assigns = parse_pcode(pcode, srcs, lane, op_name=op_name)
 
@@ -781,9 +807,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     # VCC computation: RANGE+REDUCE gets axis ID first (lower ID = runs first)
     # This ensures VCC reads source values BEFORE VGPR stores modify them
     def get_vcc_bit(lane_uop) -> UOp:
-      s0, s1 = ctx.rsrc_sized(inst.src0.offset, lane_uop, sizes, 'src0'), ctx.rsrc_sized(inst.src1.offset, lane_uop, sizes, 'src1')
-      s2 = ctx.rsrc_sized(inst.src2.offset, lane_uop, sizes, 'src2') if inst.src2 is not None else None
-      lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr(vcc_in_reg), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)}
+      s0, s1 = ctx.rsrc_dyn_sized(src0_off, lane_uop, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane_uop, sizes, 'src1', literal=literal)
+      s2 = ctx.rsrc_dyn_sized(src2_off, lane_uop, sizes, 'src2', literal=literal) if src2_off is not None else None
+      lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)}
       if s2 is not None: lane_srcs['S2'] = s2
       vcc_bit = U32_0
       for dest, val in parse_pcode(pcode, lane_srcs, lane_uop, op_name=op_name)[1]:
@@ -792,9 +818,9 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     final_vcc = _unroll_lanes(get_vcc_bit, exec_mask)
     # VGPR stores: RANGE gets axis ID second (higher ID = runs after VCC loop)
     lane3 = UOp.range(32, _next_axis_id(), AxisType.LOOP)
-    s0, s1 = ctx.rsrc_sized(inst.src0.offset, lane3, sizes, 'src0'), ctx.rsrc_sized(inst.src1.offset, lane3, sizes, 'src1')
-    s2 = ctx.rsrc_sized(inst.src2.offset, lane3, sizes, 'src2') if inst.src2 is not None else None
-    lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr(vcc_in_reg), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)}
+    s0, s1 = ctx.rsrc_dyn_sized(src0_off, lane3, sizes, 'src0', literal=literal), ctx.rsrc_dyn_sized(src1_off, lane3, sizes, 'src1', literal=literal)
+    s2 = ctx.rsrc_dyn_sized(src2_off, lane3, sizes, 'src2', literal=literal) if src2_off is not None else None
+    lane_srcs = {'S0': s0, 'S1': s1, 'VCC': ctx.rsgpr_dyn(vcc_in_off), 'EXEC': exec_mask, 'SCC': ctx.rsgpr(SCC_IDX)}
     if s2 is not None: lane_srcs['S2'] = s2
     d0_val = None
     for dest, val in parse_pcode(pcode, lane_srcs, lane3, op_name=op_name)[1]:
@@ -803,18 +829,21 @@ def _compile_vop3sd(inst: VOP3SD, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     if d0_val is not None:
       if d0_val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
         lo, hi = _split64(d0_val)
-        vgpr_stores.extend([ctx.wvgpr(vdst_reg, lane3, lo, exec_mask), ctx.wvgpr(vdst_reg + 1, lane3, hi, exec_mask)])
+        vgpr_stores.extend([ctx.wvgpr_dyn(vdst_reg, lane3, lo, exec_mask), ctx.wvgpr_dyn(vdst_reg + U32_1, lane3, hi, exec_mask)])
       else:
         d0_u32 = d0_val.bitcast(dtypes.uint32) if d0_val.dtype in (dtypes.float32, dtypes.half) else d0_val.cast(dtypes.uint32)
-        vgpr_stores.append(ctx.wvgpr(vdst_reg, lane3, d0_u32, exec_mask))
-    # Write carry output (wsgpr returns GROUP no-op for NULL register 124)
-    vcc_write = ctx.wsgpr(sdst_reg, final_vcc)
+        vgpr_stores.append(ctx.wvgpr_dyn(vdst_reg, lane3, d0_u32, exec_mask))
+    # Write carry output (skip write if sdst is NULL register 124)
+    is_not_null = sdst_off.ne(_c(124))
+    vcc_idx = ctx.sgpr.index(sdst_off.cast(dtypes.index).valid(is_not_null))
+    vcc_write = vcc_idx.store(final_vcc)
     if vgpr_stores:
       # VCC write must come first in sink to ensure VCC loop runs before VGPR loop
       return name, UOp.sink(vcc_write, UOp.sink(*vgpr_stores).end(lane3), *ctx.inc_pc(), arg=KernelInfo(name=name))
     return name, UOp.sink(vcc_write, *ctx.inc_pc(), arg=KernelInfo(name=name))
   else:
-    pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name, sdst_reg=sdst_reg)
+    pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr, ctx.wsgpr, ctx.rsgpr, vdst_reg, exec_mask, ctx.inc_pc, name,
+                                     sdst_reg=inst.sdst.offset, wvgpr_dyn_fn=ctx.wvgpr_dyn, rvgpr_dyn_fn=ctx.rvgpr_dyn)
     assert pcode_result is not None, f"no pcode for VOP3SD: {op_name}"
     return pcode_result
 
