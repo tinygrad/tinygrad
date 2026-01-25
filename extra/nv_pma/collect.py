@@ -40,79 +40,64 @@ def pcsampling_test(name: str):
 
 @pcsampling_test("test_plus")
 def test_plus():
-  """Simple addition - small kernel, single TPC."""
   a = Tensor([1, 2, 3, 4])
   b = Tensor([5, 6, 7, 8])
   (a + b).realize()
 
 @pcsampling_test("test_matmul")
 def test_matmul():
-  """Matrix multiplication - larger kernel, multiple TPCs."""
   a = Tensor(np.random.rand(12, 12).astype(np.float32))
   b = Tensor(np.random.rand(12, 12).astype(np.float32))
   (a @ b).realize()
 
 @pcsampling_test("test_reduce_sum")
 def test_reduce_sum():
-  """Sum reduction - different stall patterns."""
   a = Tensor(np.random.rand(1024).astype(np.float32))
   a.sum().realize()
 
 @pcsampling_test("test_reduce_max")
 def test_reduce_max():
-  """Max reduction."""
   a = Tensor(np.random.rand(1024).astype(np.float32))
   a.max().realize()
 
 @pcsampling_test("test_exp")
 def test_exp():
-  """Exponential - math-heavy kernel."""
   a = Tensor(np.random.rand(256).astype(np.float32))
   a.exp().realize()
 
 @pcsampling_test("test_softmax")
 def test_softmax():
-  """Softmax - combination of exp, sum, div."""
   a = Tensor(np.random.rand(64, 64).astype(np.float32))
   a.softmax().realize()
 
 @pcsampling_test("test_conv2d")
 def test_conv2d():
-  """2D convolution - complex memory access patterns."""
   x = Tensor(np.random.rand(1, 3, 32, 32).astype(np.float32))
   w = Tensor(np.random.rand(8, 3, 3, 3).astype(np.float32))
   x.conv2d(w).realize()
 
 @pcsampling_test("test_large_matmul")
 def test_large_matmul():
-  """Large matrix multiplication - many samples across SMs."""
   a = Tensor(np.random.rand(128, 128).astype(np.float32))
   b = Tensor(np.random.rand(128, 128).astype(np.float32))
   (a @ b).realize()
 
 @pcsampling_test("test_elementwise_chain")
 def test_elementwise_chain():
-  """Chain of elementwise ops - fused kernel."""
   a = Tensor(np.random.rand(512).astype(np.float32))
   ((a + 1) * 2 - 0.5).relu().realize()
 
 @pcsampling_test("test_broadcast")
 def test_broadcast():
-  """Broadcasting operation."""
   a = Tensor(np.random.rand(64, 1).astype(np.float32))
   b = Tensor(np.random.rand(1, 64).astype(np.float32))
   (a + b).realize()
 
 @pcsampling_test("test_plus_big")
 def test_plus_big():
-  """Simple addition - larger kernel."""
   a = Tensor(np.random.rand(64, 32).astype(np.float32))
   b = Tensor(np.random.rand(64, 32).astype(np.float32))
   (a + b).realize()
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def save_example(name: str, data: dict):
   pma_bytes = sum(len(d) for d in data['pma_raw_dumps'])

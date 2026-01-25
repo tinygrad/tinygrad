@@ -12,9 +12,9 @@ class CUPTIProfiler:
     self.initialized = False
     self.pc_sampling_enabled = False
     self.buffers: list[ctypes.Array] = []
-    self.kernel_stalls: dict[int, dict[int, int]] = {}  # correlationId -> {stall_reason: samples}
-    self.raw_buffers: list[bytes] = []  # raw CUPTI activity buffer data
-    self.pc_samples: list[dict] = []  # detailed PC sampling records
+    self.kernel_stalls: dict[int, dict[int, int]] = {}
+    self.raw_buffers: list[bytes] = []
+    self.pc_samples: list[dict] = []
 
   def _check_cupti(self, status, soft=False):
     if status != cupti.CUPTI_SUCCESS:
