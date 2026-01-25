@@ -8,7 +8,7 @@ from extra.assembly.amd.test.test_roundtrip import compile_asm
 
 class _TestIntegration(unittest.TestCase):
   inst: Inst
-  arch: str = "rdna3"
+  arch: str
   def tearDown(self):
     if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
@@ -24,6 +24,7 @@ class _TestIntegration(unittest.TestCase):
     print(desc)
 
 class TestIntegration(_TestIntegration):
+  arch: str = "rdna3"
 
   def test_wmma(self):
     self.inst = v_wmma_f32_16x16x16_f16(v[0:7], v[184:191], v[136:143], v[0:7])
