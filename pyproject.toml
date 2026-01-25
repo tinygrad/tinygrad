@@ -52,7 +52,7 @@ linting = [
   "mypy==1.19.1",
   "typing-extensions",
   "pre-commit",
-  "ruff",
+  "ruff==0.14.10",
   "numpy",
   "typeguard",
 ]

@@ -115,7 +115,7 @@ class MetalCompiler(Compiler):
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
-  def __init__(self, dev:MetalDevice, name:str, lib:bytes):
+  def __init__(self, dev:MetalDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.name, self.lib = dev, name, lib
     if lib[:4] == b"MTLB":
       # binary metal library

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final, Iterator
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -308,12 +308,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     for er in self.ended_ranges:
       if er.op is Ops.RANGE:
         # if it's a single RANGE, we don't flow through it.
-        if er in ret: del ret[er]
+        ret.pop(er, None)
       else:
         # if it's not a RANGE, we include all ranges in srcs.
         # technically we shouldn't flow through these ranges either, but this is pre pm_add_control_flow so it's the same.
-        for s in er.ranges:
-          if s in ret: del ret[s]
+        for s in er.ranges: ret.pop(s, None)
     return ret
 
   @property
@@ -468,7 +467,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
-  def split_uop(self:UOp, sep:Ops):
+  def split_uop(self:UOp, sep:Ops) -> Iterator[UOp]:
     if self.op is sep:
       for s in self.src: yield from s.split_uop(sep)
     else: yield self
@@ -735,7 +734,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       (fac, const), (div_fac, div_const) = self.pop_const(Ops.MUL), v.pop_const(Ops.MUL)
       new_count = collections.Counter(fac.split_uop(Ops.MUL))
       new_count.subtract(div_fac.split_uop(Ops.MUL))
-      if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod([*new_count.elements(), self.const_like(const//div_const)])
+      if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod(new_count.elements(), start=self.const_like(const//div_const))
     return None # generic None if we aren't sure
   def sum(self:UOp, *uops:UOp) -> UOp: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, uops, self)
   def prod(self:UOp, *uops:UOp) -> UOp: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, uops, self)
@@ -888,8 +887,9 @@ def print_uops(uops:list[UOp]):
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
   # skip over ops.py and anything in mixin
-  while ((codepath:=pathlib.Path(frm.f_code.co_filename)).name == "ops.py" or codepath.parent.name == "mixin") and frm.f_back is not None and \
-      not frm.f_back.f_code.co_filename.startswith("<frozen"):
+  while frm.f_back is not None and not frm.f_back.f_code.co_filename.startswith("<frozen"):
+    fn = frm.f_code.co_filename.replace("\\", "/")
+    if not (fn.endswith("/ops.py") or "/mixin/" in fn): break
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
@@ -1011,19 +1011,25 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
+def upat_deferred_compile(p:UPat, fxn:Callable, entry:list) -> Callable:
+  def lazy_compile(uop, ctx):
+    from tinygrad.uop.upat import upat_compile
+    entry[1] = upat_compile(p, fxn) or upat_interpret(p, fxn)
+    return entry[1](uop, ctx)
+  return lazy_compile
+
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
-    if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
+    self.pdict: dict[Ops, list[list]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
-      if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
-      else: match = upat_interpret(p, fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
+      entry: list = [p, None, p.early_reject]
+      entry[1] = upat_deferred_compile(p, fxn, entry) if compiled else upat_interpret(p, fxn)
+      for uop in p.op: self.pdict.setdefault(uop, []).append(entry)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
