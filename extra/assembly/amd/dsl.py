@@ -170,7 +170,9 @@ class SrcField(BitField):
     # Resize register based on operand info (skip non-resizable special registers)
     # VCC/EXEC pairs (106, 126), NULL (124), M0 (125), float constants (240-255)
     if reg.offset not in (124, 125) and not 240 <= reg.offset <= 255:
-      if sz := obj.op_regs.get(self.name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
+      # Map variant field names (vsrc0->src0, vsrc1->src1, etc.) for DPP/SDWA classes
+      name = self.name[1:] if self.name.startswith('v') and self.name[1:] in obj.op_regs else self.name
+      if sz := obj.op_regs.get(name, 1): reg = Reg(reg.offset, sz, neg=reg.neg, abs_=reg.abs_, hi=reg.hi)
     return reg
 
 class VGPRField(SrcField):
@@ -309,10 +311,10 @@ class Inst:
     # Set all field values
     for name, field in self._fields:
       self._raw = field.set(self._raw, vals[name])
-    # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC)
+    # Validate register sizes against operand info (skip special registers like NULL, VCC, EXEC, SDWA/DPP markers)
     for name, expected in self.op_regs.items():
       if (val := vals.get(name)) is None: continue
-      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or 251 <= val.offset <= 255):
+      if isinstance(val, Reg) and val.sz != expected and not (106 <= val.offset <= 127 or 249 <= val.offset <= 255):
         raise TypeError(f"{name} expects {expected} register(s), got {val.sz}")
 
   @property

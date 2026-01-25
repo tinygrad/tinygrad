@@ -22,6 +22,8 @@ FIXES = {"rdna3": {"SOPK": {22: "S_SUBVECTOR_LOOP_BEGIN", 23: "S_SUBVECTOR_LOOP_
          "rdna4": {"SOP1": {80: "S_GET_BARRIER_STATE", 81: "S_BARRIER_INIT", 82: "S_BARRIER_JOIN"}, "SOPP": {9: "S_WAITCNT", 21: "S_BARRIER_LEAVE"}},
          "cdna": {"DS": {152: "DS_GWS_SEMA_RELEASE_ALL", 154: "DS_GWS_SEMA_V", 156: "DS_GWS_SEMA_P"},
                   "VOP3P": {44: "V_MFMA_LD_SCALE_B32", 62: "V_MFMA_F32_16X16X8_XF32", 63: "V_MFMA_F32_32X32X4_XF32"}}}
+# Fields missing from XML but present in hardware (format: {arch: {encoding: [(name, hi, lo), ...]}})
+FIELD_FIXES = {"cdna": {"VOP3P": [("opsel_hi2", 14, 14)]}}
 # Encoding suffixes to strip (variants we don't generate separate classes for)
 _ENC_SUFFIXES = ("_NSA1",)
 # Encoding suffix to class suffix mapping (for variants we DO generate)
@@ -271,6 +273,8 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
     if name.startswith("ssrc") and bits == 8: return f"SSrcField({hi}, {lo})"
     if name in ("saddr", "soffset") and bits == 8: return f"SSrcField({hi}, {lo}, default=NULL)"
     if name.startswith("src") and bits == 9: return f"SrcField({hi}, {lo})"
+    # GLOBAL/SCRATCH: offset is 13-bit signed [12:0], FLAT: 12-bit unsigned (XML has 12-bit for all)
+    if name == "offset" and base_fmt in ("GLOBAL", "SCRATCH"): return f"BitField(12, {lo})"
     if base_fmt == "VOP3P" and name == "opsel_hi": return f"BitField({hi}, {lo}, default=3)"
     if base_fmt == "VOP3P" and name == "opsel_hi2": return f"BitField({hi}, {lo}, default=1)"
     return f"BitField({hi}, {lo})"
@@ -443,6 +447,8 @@ if __name__ == "__main__":
     print(f"Parsing XML: {cfg['xml']} -> {arch}")
     encodings, enums, types, fmts, op_types_set, lit_only_ops = parse_xml(cfg["xml"])
     for fmt, ops in FIXES.get(arch, {}).items(): enums.setdefault(fmt, {}).update(ops)
+    for fmt, fields in FIELD_FIXES.get(arch, {}).items():
+      if fmt in encodings: encodings[fmt] = (encodings[fmt][0] + fields, encodings[fmt][1])
     arch_data[arch] = {"encodings": encodings, "enums": enums, "types": types, "lit_only_ops": lit_only_ops}
     for fmt, bits in fmts.items():
       assert fmt not in all_fmts or all_fmts[fmt] == bits, f"FMT_BITS mismatch for {fmt}: {all_fmts[fmt]} vs {bits}"
