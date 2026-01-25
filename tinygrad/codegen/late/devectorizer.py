@@ -280,7 +280,10 @@ def _vectorize_loads(v:UOp) -> UOp|None:
   vec = len(offs)
   if (vec_index := base_idx.divides(vec)) is None: return None
   vec_dtype = loads[0].dtype.scalar().vec(vec)
-  vec_idx = idx0.replace(dtype=vec_dtype.ptr(), src=(base_ptr, vec_index))
+  if not isinstance(base_ptr.dtype, PtrDType): return None
+  vec_ptr_dtype = base_ptr.dtype.base.vec(vec).ptr(size=base_ptr.dtype.size, addrspace=base_ptr.dtype.addrspace)
+  vec_ptr = base_ptr if base_ptr.dtype == vec_ptr_dtype else base_ptr.bitcast(vec_ptr_dtype)
+  vec_idx = idx0.replace(dtype=vec_ptr_dtype, src=(vec_ptr, vec_index))
   return UOp(Ops.LOAD, vec_dtype, (vec_idx,))
 
 devectorize_buf_and_index = PatternMatcher([
@@ -302,7 +305,8 @@ devectorize = PatternMatcher([
 
 pm_render = PatternMatcher([
   # collapse vectorize of contiguous scalar loads into a single vector load (CPU LLVM)
-  (UPat(Ops.VECTORIZE, name="v"), lambda v: _vectorize_loads(v) if getenv("LLVM_VECREDUCE", 0) else None),
+  (UPat(Ops.VECTORIZE, name="v"),
+   lambda v: _vectorize_loads(v) if getenv("LLVM_VECREDUCE", 0) and getenv("LLVM_VECREDUCE_LOADS", 0) else None),
   # for rendering, we use explicit VECTORIZE
   (UPat(Ops.CONST, name='c'),
    lambda c: UOp(Ops.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
