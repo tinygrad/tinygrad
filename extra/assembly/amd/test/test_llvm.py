@@ -127,12 +127,10 @@ def _make_test(f: str, arch: str, test_type: str):
       self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
     elif test_type == "repr":
       # Test that eval(repr(inst)) reproduces the instruction
-      import extra.assembly.amd.dsl as dsl
       if arch == "rdna3": import extra.assembly.amd.autogen.rdna3.ins as ins
       elif arch == "rdna4": import extra.assembly.amd.autogen.rdna4.ins as ins
       elif arch == "cdna": import extra.assembly.amd.autogen.cdna.ins as ins
-      ns = {k: getattr(dsl, k) for k in dir(dsl) if not k.startswith('_')}
-      ns.update({k: getattr(ins, k) for k in dir(ins) if not k.startswith('_')})
+      ns = {k: getattr(ins, k) for k in dir(ins) if not k.startswith('_')}
       passed, skipped = 0, 0
       for _, data in tests:
         try:
@@ -146,6 +144,7 @@ def _make_test(f: str, arch: str, test_type: str):
           except Exception: skipped += 1
         except ValueError: skipped += 1
       print(f"{name}: {passed} passed, {skipped} skipped")
+      self.assertEqual(skipped, 0, f"{name}: {skipped} tests skipped, expected 0")
     elif test_type == "disasm":
       to_test = []
       for _, data in tests:
