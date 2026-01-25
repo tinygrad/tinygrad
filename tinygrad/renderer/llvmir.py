@@ -132,7 +132,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
    f"  br label %loop_footer_{range_str(r)}\n"
    f"loop_footer_{range_str(r)}:\n"
-   f"  br label %loop_latch_{range_str(r)}{(', !llvm.loop !0' if getenv('LLVM_LOOP_VEC', 0) else '')}\n"
+   f"  br label %loop_latch_{range_str(r)}\n"
    f"loop_exit_{range_str(r)}:"),
 
   # if
@@ -156,8 +156,6 @@ class LLVMRenderer(Renderer):
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str:
     footer = 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
-    if getenv("LLVM_LOOP_VEC", 0):
-      footer += '\n!0 = distinct !{!0, !1, !2}\n!1 = !{!"llvm.loop.vectorize.enable", i1 true}\n!2 = !{!"llvm.loop.vectorize.width", i32 4}'
     return footer
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
