@@ -106,7 +106,8 @@ base_rewrite = PatternMatcher([
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.CUSTOM, name="x", arg="llvm.vector.reduce.fadd"),
-   lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.vector.reduce.fadd.{llvm_vec_suffix(x.src[0].dtype)}({ldt(x.dtype)} {lconst(0.0, x.dtype)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
+   lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.vector.reduce.fadd.{llvm_vec_suffix(x.src[0].dtype)}("
+                 f"{ldt(x.dtype)} {lconst(0.0, x.dtype)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
   # rewrite cast to bool to CMPNE 0
   (UPat(Ops.CAST, name="x", dtype=dtypes.bool),
    lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][Ops.CMPNE]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, zeroinitializer"),

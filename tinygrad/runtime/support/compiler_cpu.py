@@ -1,4 +1,4 @@
-import ctypes, platform, sys, subprocess, os
+import ctypes, platform, sys, subprocess
 from tinygrad.device import Compiler
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG, unwrap
 from tinygrad.runtime.support.elf import jit_loader
@@ -42,7 +42,7 @@ class LLVMCompiler(Compiler):
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if (opt:=bool(getenv("LLVMOPT", "1"))):
-      self.passes = b'default<O3>'
+      self.passes = b'default<O2>'
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetSLPVectorization(self.pbo, True)
