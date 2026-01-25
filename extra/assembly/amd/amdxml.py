@@ -132,7 +132,13 @@ def parse_xml(filename: str):
     for opcode, encs in opcodes.items():
       if all("_LIT" in e for e in encs):
         lit_only_ops.setdefault(base_fmt, set()).add(opcode)
-  return encodings, enums, types, fmts, op_types_set, lit_only_ops
+  # Find opcodes that only exist in _MFMA encoding
+  mfma_only_ops: dict[str, set[int]] = {}
+  for base_fmt, opcodes in opcode_encs.items():
+    for opcode, encs in opcodes.items():
+      if all("_MFMA" in e for e in encs):
+        mfma_only_ops.setdefault(base_fmt, set()).add(opcode)
+  return encodings, enums, types, fmts, op_types_set, lit_only_ops, mfma_only_ops
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PDF parsing
@@ -252,7 +258,7 @@ def write_enum(enums, path):
     lines.append("")
   with open(path, "w") as f: f.write("\n".join(lines))
 
-def write_ins(encodings, enums, lit_only_ops, types, arch, path):
+def write_ins(encodings, enums, lit_only_ops, mfma_only_ops, types, arch, path):
   _VGPR_FIELDS = {"vdst", "vdstx", "vsrc0", "vsrc1", "vsrc2", "vsrc3", "vsrcx1", "vsrcy1", "vaddr", "vdata", "data", "data0", "data1", "addr", "vsrc"}
   _VARIANT_SUFFIXES = ("_LIT", "_DPP16", "_DPP8", "_SDWA_SDST", "_SDWA", "_MFMA")
   def get_base_fmt(fmt):
@@ -313,11 +319,12 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
 
   # Generate base classes first
   for enc_name, (fields, enc_bits) in sorted(base_encodings.items()):
-    # Get lit-only ops for this format (these can't be used in base class)
+    # Get lit-only and mfma-only ops for this format (these can't be used in base class)
     base_lit_ops = lit_only_ops.get(enc_name, set())
+    base_mfma_ops = mfma_only_ops.get(enc_name, set())
     all_ops = set(enums.get(enc_name, {}).keys())
-    # Exclude SDST ops from base class (they need VOP1_SDST/VOP3_SDST/VOP3B)
-    base_allowed = all_ops - base_lit_ops - sdst_opcodes.get(enc_name, set())
+    # Exclude SDST/MFMA ops from base class (they need specialized subclasses)
+    base_allowed = all_ops - base_lit_ops - base_mfma_ops - sdst_opcodes.get(enc_name, set())
     # RDNA3 FLAT/GLOBAL/SCRATCH share encoding bits, differentiated by seg field
     # RDNA4 VFLAT/VGLOBAL/VSCRATCH have distinct encoding bits, no seg field needed
     has_seg_field = any(fn == "seg" for fn, _, _ in fields)
@@ -348,14 +355,20 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
     base_fields = {f[0] for f in base_encodings[base][0]}
     extra_fields = [(fn, hi, lo) for fn, hi, lo in fields if fn not in base_fields]
     is_lit = enc_name.endswith("_LIT")
+    is_mfma = enc_name.endswith("_MFMA")
     all_ops = set(enums.get(base, {}).keys())
-    if extra_fields or is_lit:
+    if extra_fields or is_lit or is_mfma:
       lines.append(f"class {enc_name}({base}):")
       op_field = next((f for f in base_encodings[base][0] if f[0] == "op"), None)
       # _LIT classes: override op to allow all opcodes (base excludes lit-only ops)
       if op_field and is_lit:
         _, hi, lo = op_field
         lines.append(f"  op = EnumBitField({hi}, {lo}, {base}Op, {fmt_allowed(f'{base}Op', all_ops)})")
+      # _MFMA classes: override op to only allow MFMA opcodes
+      if op_field and is_mfma:
+        _, hi, lo = op_field
+        mfma_ops = mfma_only_ops.get(base, set())
+        lines.append(f"  op = EnumBitField({hi}, {lo}, {base}Op, {fmt_allowed(f'{base}Op', mfma_ops)})")
       for fn, hi, lo in sort_fields(extra_fields):
         lines.append(f"  {fn} = {field_def(fn, hi, lo, enc_name)}")
       lines.append("")
@@ -390,12 +403,14 @@ def write_ins(encodings, enums, lit_only_ops, types, arch, path):
     if fmt not in base_encodings and fmt not in ("GLOBAL", "SCRATCH", "VGLOBAL", "VSCRATCH"): continue
     suffix = "_E32" if fmt in ("VOP1", "VOP2", "VOPC") else "_E64" if fmt == "VOP3" else ""
     lit_ops = lit_only_ops.get(fmt, set())
+    mfma_ops = mfma_only_ops.get(fmt, set())
     fmt_sdst_ops = sdst_opcodes.get(fmt, set())
     for op, name in sorted(ops.items()):
       msuf = suffix if fmt != "VOP3" or op < 512 else ""
-      # Determine class: SDST variants, LIT-only instructions, or base
+      # Determine class: SDST variants, MFMA, LIT-only instructions, or base
       if fmt == "VOP1" and op in fmt_sdst_ops: cls = "VOP1_SDST"
       elif fmt == "VOP3" and (op in fmt_sdst_ops or op < 256): cls = "VOP3_SDST"
+      elif op in mfma_ops: cls = f"{fmt}_MFMA"
       elif op in lit_ops: cls = f"{fmt}_LIT"
       else: cls = fmt
       lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
@@ -445,11 +460,11 @@ if __name__ == "__main__":
   # First pass: parse XML for all architectures
   for arch, cfg in ARCHS.items():
     print(f"Parsing XML: {cfg['xml']} -> {arch}")
-    encodings, enums, types, fmts, op_types_set, lit_only_ops = parse_xml(cfg["xml"])
+    encodings, enums, types, fmts, op_types_set, lit_only_ops, mfma_only_ops = parse_xml(cfg["xml"])
     for fmt, ops in FIXES.get(arch, {}).items(): enums.setdefault(fmt, {}).update(ops)
     for fmt, fields in FIELD_FIXES.get(arch, {}).items():
       if fmt in encodings: encodings[fmt] = (encodings[fmt][0] + fields, encodings[fmt][1])
-    arch_data[arch] = {"encodings": encodings, "enums": enums, "types": types, "lit_only_ops": lit_only_ops}
+    arch_data[arch] = {"encodings": encodings, "enums": enums, "types": types, "lit_only_ops": lit_only_ops, "mfma_only_ops": mfma_only_ops}
     for fmt, bits in fmts.items():
       assert fmt not in all_fmts or all_fmts[fmt] == bits, f"FMT_BITS mismatch for {fmt}: {all_fmts[fmt]} vs {bits}"
       all_fmts[fmt] = bits
@@ -462,7 +477,7 @@ if __name__ == "__main__":
   for arch, data in arch_data.items():
     base = pathlib.Path(__file__).parent / "autogen" / arch
     write_enum(data["enums"], base / "enum.py")
-    write_ins(data["encodings"], data["enums"], data["lit_only_ops"], data["types"], arch, base / "ins.py")
+    write_ins(data["encodings"], data["enums"], data["lit_only_ops"], data["mfma_only_ops"], data["types"], arch, base / "ins.py")
     write_operands(data["types"], data["enums"], arch, base / "operands.py")
     print(f"  {arch}: {len(data['encodings'])} encodings, {sum(len(v) for v in data['enums'].values())} instructions")
   # Second pass: parse PDFs and write pcode
