@@ -788,8 +788,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
       for j, (off, val, *rest) in enumerate(chunk):
         params.regOps[j] = nv_gpu.struct_NV2080_CTRL_GPU_REG_OP(regOp=op, regType=reg_type,
           regOffset=off, regValueLo=val, regAndNMaskLo=rest[0] if rest else 0xffffffff)
-      try: self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_EXEC_REG_OPS, params)
-      except RuntimeError: pass
+      with contextlib.suppress(RuntimeError): self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_EXEC_REG_OPS, params)
 
   def _prof_readback(self) -> bytes|None:
     params = self.iface.rm_control(self.profiler, nv_gpu.NVB0CC_CTRL_CMD_PMA_STREAM_UPDATE_GET_PUT,
