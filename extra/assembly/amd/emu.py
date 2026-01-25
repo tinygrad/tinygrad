@@ -274,11 +274,11 @@ def exec_scalar(st: WaveState, inst: Inst):
 
 def exec_vopd(st: WaveState, inst, V: VGPRLane, lane: int) -> None:
   """VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)."""
-  literal, vdstx = inst._literal, inst.vdstx
-  vdsty = v[(inst.vdsty << 1) | ((inst.vdstx.offset & 1) ^ 1)]  # vdsty is raw int from VDSTYField.decode
-  sx0, sx1, dx, sy0, sy1, dy = st.rsrc(inst.srcx0, lane, literal), V[inst.vsrcx1], V[vdstx], st.rsrc(inst.srcy0, lane, literal), V[inst.vsrcy1], V[vdsty]
-  V[vdstx] = inst._fnx(sx0, sx1, 0, dx, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
-  V[vdsty] = inst._fny(sy0, sy1, 0, dy, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
+  literal = inst._literal
+  sx0, sx1, dx = st.rsrc(inst.srcx0, lane, literal), V[inst.vsrcx1], V[inst.vdstx]
+  sy0, sy1, dy = st.rsrc(inst.srcy0, lane, literal), V[inst.vsrcy1], V[inst.vdsty]
+  V[inst.vdstx] = inst._fnx(sx0, sx1, 0, dx, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
+  V[inst.vdsty] = inst._fny(sy0, sy1, 0, dy, st.scc, st.vcc, lane, st.exec_mask, literal, None)['D0']
 
 def exec_flat(st: WaveState, inst, V: VGPRLane, lane: int) -> None:
   """FLAT/GLOBAL/SCRATCH memory ops."""

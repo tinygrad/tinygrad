@@ -1,12 +1,13 @@
 #!/bin/bash
+set -e
 export PAGE_SIZE=1
 export PYTHONPATH=.
 export LOGOPS=/tmp/ops
 export CAPTURE_PROCESS_REPLAY=1
-rm $LOGOPS
+rm "$LOGOPS" 2>/dev/null || true
 test/external/process_replay/reset.py
 
-CI=1 python3 -m pytest -n=auto test/test_ops.py test/test_nn.py test/test_winograd.py test/models/test_real_world.py --durations=20
+CI=1 python3 -m pytest -n=auto test/test_ops.py test/test_nn.py test/unit/test_winograd.py test/models/test_real_world.py --durations=20
 CL=1 python3 -m pytest test/test_tiny.py
 
 # extract, sort and uniq
