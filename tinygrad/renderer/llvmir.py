@@ -134,7 +134,6 @@ base_rewrite = PatternMatcher([
 
 class LLVMRenderer(Renderer):
   supports_float4 = True
-  has_local: bool
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
