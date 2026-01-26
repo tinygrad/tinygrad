@@ -1353,7 +1353,9 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                 name, fxn, globals_list, _ = program[pc]
                 assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
                 assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
-                if DEBUG >= 5: print(f"[emu2] exec PC={pc}: {name}")
+                if DEBUG >= 5:
+                  inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw))
+                  print(f"[emu2] exec PC={pc:X}: {inst!r}")
                 fxn(*[c_bufs[g] for g in globals_list], c_lane)
               else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0
