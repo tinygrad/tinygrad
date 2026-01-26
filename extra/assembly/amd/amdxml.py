@@ -393,14 +393,14 @@ def write_ins(encodings, enums, suffix_only_ops, types, arch, path):
   for fmt, ops in sorted(enums.items()):
     if fmt not in base_encodings and fmt not in ("GLOBAL", "SCRATCH", "VGLOBAL", "VSCRATCH"): continue
     suffix = "_E32" if fmt in ("VOP1", "VOP2", "VOPC") else "_E64" if fmt == "VOP3" else ""
-    suffix_ops = {op:suffix for suffix,ops in suffix_only_ops.items() for op in ops.get(fmt, set())}
+    op_to_suffix = {op:suffix for suffix,ops in suffix_only_ops.items() for op in ops.get(fmt, set())}
     fmt_sdst_ops = sdst_opcodes.get(fmt, set())
     for op, name in sorted(ops.items()):
       msuf = suffix if fmt != "VOP3" or op < 512 else ""
       # Determine class: SDST variants, suffix-specific variants (e.g., _MFMA, _LIT), or base
       if fmt == "VOP1" and op in fmt_sdst_ops: cls = "VOP1_SDST"
       elif fmt == "VOP3" and (op in fmt_sdst_ops or op < 256): cls = "VOP3_SDST"
-      elif suffix_ops.get(op): cls = f"{fmt}{suffix_ops[op]}"
+      elif op_to_suffix.get(op): cls = f"{fmt}{op_to_suffix[op]}"
       else: cls = fmt
       lines.append(f"{name.lower()}{msuf.lower()} = functools.partial({cls}, {fmt}Op.{name}{msuf})")
   with open(path, "w") as f: f.write("\n".join(lines))
