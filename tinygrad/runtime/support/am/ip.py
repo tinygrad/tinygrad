@@ -425,8 +425,10 @@ class AM_IH(AM_IP):
         [getattr(am, f'SOC15_{n}_FROM_IH_ENTRY')(entry) for n in ['CLIENT_ID', 'SOURCE_ID', 'RING_ID', 'VMID', 'VMID_TYPE', 'PASID', 'NODEID']]
       ctx = [getattr(am, f'SOC15_CONTEXT_ID{i}_FROM_IH_ENTRY')(entry) for i in range(4)]
 
-      print(f"am {self.adev.devfmt}: IH client={self.adev.soc.ih_clients.get(client)} src={self.adev.soc.ih_scrs_names.get(client, {}).get(src, '')}({src}) "
+      src_name = self.adev.soc.ih_scrs_names.get(client, {}).get(src, '')
+      print(f"am {self.adev.devfmt}: IH ({rptr:#x}/{wptr['offset']:#x}) client={self.adev.soc.ih_clients.get(client)} src={src_name}({src}) "
             f"ring={ring_id} vmid={vmid}({vmid_type}) pasid={pasid} node={node} ctx=[{ctx[0]:#x}, {ctx[1]:#x}, {ctx[2]:#x}, {ctx[3]:#x}]")
+
       rptr = (rptr + 8) % (self.ring_size // 4)
 
     if wptr['rb_overflow']:
