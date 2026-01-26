@@ -90,6 +90,7 @@ class TestCfg(unittest.TestCase):
         "s_branch bb1",
       "bb1:",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_diamond(self):
@@ -107,10 +108,13 @@ class TestCfg(unittest.TestCase):
         s_nop(0),
       "end:",
         s_endpgm(),
+        s_code_end(),
     ])
     _, lib = assemble("diamond", insts, Device[Device.DEFAULT].compiler)
     cfg = amdgpu_cfg(lib, Device[Device.DEFAULT].device_props()["gfx_target_version"])["data"]
     self.assertEqual(len(cfg["blocks"]), 5)
+    edge_count = sum(len(v) for v in cfg["paths"].values())
+    self.assertEqual(edge_count, 5)
     references:dict[str, list[str]] = {}
     for pc, tokens in cfg["pc_tokens"].items():
       for t in tokens:
@@ -128,6 +132,7 @@ class TestCfg(unittest.TestCase):
         s_cmp_eq_i32(s[1], 0),
         "s_cbranch_scc0 loop",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_loop_branch(self):
@@ -145,6 +150,7 @@ class TestCfg(unittest.TestCase):
         s_cmp_eq_i32(s[1], 0),
         "s_cbranch_scc0 loop",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_loop_break(self):
@@ -159,6 +165,7 @@ class TestCfg(unittest.TestCase):
         "s_cbranch_scc0 loop",
       "break:",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_switch(self):
@@ -180,6 +187,7 @@ class TestCfg(unittest.TestCase):
         "s_branch join",
       "join:",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_ping_pong(self):
@@ -197,6 +205,7 @@ class TestCfg(unittest.TestCase):
         "s_cbranch_scc1 ping",
       "end:",
         s_endpgm(),
+        s_code_end(),
     ])
 
   def test_colored_blocks(self):
@@ -212,7 +221,7 @@ class TestCfg(unittest.TestCase):
           f"s_cbranch_scc0 {loop}",
           f"s_branch {'init' + str(i+1) if i + 1 < N else 'end'}",
       ]
-    asm += ["end:", s_endpgm()]
+    asm += ["end:", s_endpgm(), s_code_end()]
     run_asm("test_colored_blocks", asm)
 
   def test_jump_back_to_end(self):
@@ -226,6 +235,7 @@ class TestCfg(unittest.TestCase):
         s_add_u32(s[1], s[1], -1),
         s_cmp_eq_i32(s[1], 0),
         "s_branch end",
+        s_code_end(),
     ])
 
 if __name__ == "__main__":

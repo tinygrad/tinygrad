@@ -258,7 +258,7 @@ def _disasm_sopp(inst: SOPP) -> str:
     dep = lambda v: deps[v-1] if 0 < v <= len(deps) else str(v)
     p = [f"instid0({dep(id0)})" if id0 else "", f"instskip({skips[skip]})" if skip else "", f"instid1({dep(id1)})" if id1 else ""]
     return f"s_delay_alu {' | '.join(x for x in p if x) or '0'}"
-  if name.startswith(('s_cbranch', 's_branch')): return f"{name} 0x{inst.simm16:x}"
+  if name.startswith(('s_cbranch', 's_branch')): return f"{name} {inst.simm16}"
   return f"{name} 0x{inst.simm16:x}"
 
 def _disasm_smem(inst: SMEM) -> str:
@@ -465,16 +465,15 @@ def _disasm_vop3sd(inst: VOP3SD) -> str:
 
 def _disasm_vopd(inst: VOPD) -> str:
   lit = inst._literal
-  is_rdna4 = _is_r4(inst)
-  op_enum = R4_VOPDOp if is_rdna4 else VOPDOp
-  vdst_y, nx, ny = (_unwrap(inst.vdsty) << 1) | ((_unwrap(inst.vdstx) & 1) ^ 1), op_enum(inst.opx).name.lower(), op_enum(inst.opy).name.lower()
+  op_enum = R4_VOPDOp if _is_r4(inst) else VOPDOp
+  nx, ny = op_enum(inst.opx).name.lower(), op_enum(inst.opy).name.lower()
   def half(n, vd, s0, vs1):
     vd, vs1 = _vi(vd), _vi(vs1)
     if 'mov' in n: return f"{n} v{vd}, {_lit(inst, s0)}"
     if 'fmamk' in n and lit: return f"{n} v{vd}, {_lit(inst, s0)}, 0x{lit:x}, v{vs1}"
     if 'fmaak' in n and lit: return f"{n} v{vd}, {_lit(inst, s0)}, v{vs1}, 0x{lit:x}"
     return f"{n} v{vd}, {_lit(inst, s0)}, v{vs1}"
-  return f"{half(nx, inst.vdstx, inst.srcx0, inst.vsrcx1)} :: {half(ny, vdst_y, inst.srcy0, inst.vsrcy1)}"
+  return f"{half(nx, inst.vdstx, inst.srcx0, inst.vsrcx1)} :: {half(ny, inst.vdsty, inst.srcy0, inst.vsrcy1)}"
 
 def _disasm_vop3p(inst: VOP3P) -> str:
   name = inst.op_name.lower()
@@ -604,7 +603,7 @@ from extra.assembly.amd.autogen.cdna.ins import (VOP1 as CDNA_VOP1, VOP1_LIT as 
   VOP1_SDWA as CDNA_VOP1_SDWA, VOP1_DPP16 as CDNA_VOP1_DPP16,
   VOP2 as CDNA_VOP2, VOP2_LIT as CDNA_VOP2_LIT, VOP2_SDWA as CDNA_VOP2_SDWA, VOP2_DPP16 as CDNA_VOP2_DPP16,
   VOPC as CDNA_VOPC, VOPC_LIT as CDNA_VOPC_LIT, VOPC_SDWA_SDST as CDNA_VOPC_SDWA_SDST,
-  VOP3 as CDNA_VOP3, VOP3_SDST as CDNA_VOP3_SDST, VOP3SD as CDNA_VOP3SD, VOP3P as CDNA_VOP3P, VOP3PX2 as CDNA_VOP3PX2,
+  VOP3 as CDNA_VOP3, VOP3_SDST as CDNA_VOP3_SDST, VOP3SD as CDNA_VOP3SD, VOP3P as CDNA_VOP3P, VOP3P_MFMA as CDNA_VOP3P_MFMA, VOP3PX2 as CDNA_VOP3PX2,
   SOP1 as CDNA_SOP1, SOP1_LIT as CDNA_SOP1_LIT, SOP2 as CDNA_SOP2, SOP2_LIT as CDNA_SOP2_LIT,
   SOPC as CDNA_SOPC, SOPC_LIT as CDNA_SOPC_LIT, SOPK as CDNA_SOPK, SOPK_LIT as CDNA_SOPK_LIT,
   SOPP as CDNA_SOPP, SMEM as CDNA_SMEM, DS as CDNA_DS,
@@ -903,5 +902,5 @@ DISASM_HANDLERS.update({CDNA_VOP1: _disasm_vop1, CDNA_VOP1_LIT: _disasm_vop1,
   CDNA_SOP1: _disasm_sop1, CDNA_SOP1_LIT: _disasm_sop1, CDNA_SOP2: _disasm_sop2, CDNA_SOP2_LIT: _disasm_sop2,
   CDNA_SOPC: _disasm_sopc, CDNA_SOPC_LIT: _disasm_sopc, CDNA_SOPK: _disasm_sopk, CDNA_SOPK_LIT: _disasm_sopk, CDNA_SOPP: _disasm_sopp,
   CDNA_SMEM: _disasm_smem, CDNA_DS: _disasm_ds, CDNA_FLAT: _disasm_flat, CDNA_GLOBAL: _disasm_flat, CDNA_SCRATCH: _disasm_flat,
-  CDNA_VOP3: _disasm_vop3a, CDNA_VOP3_SDST: _disasm_vop3b, CDNA_VOP3SD: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p,
+  CDNA_VOP3: _disasm_vop3a, CDNA_VOP3_SDST: _disasm_vop3b, CDNA_VOP3SD: _disasm_vop3b, CDNA_VOP3P: _disasm_cdna_vop3p, CDNA_VOP3P_MFMA: _disasm_cdna_vop3p,
   CDNA_MUBUF: _disasm_mubuf, CDNA_VOP3PX2: _disasm_vop3px2})

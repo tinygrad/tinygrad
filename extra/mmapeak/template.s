@@ -15,8 +15,8 @@ matmul:
 .rodata
 .p2align 6
 .amdhsa_kernel matmul
-  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
-  .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
+  .amdhsa_next_free_vgpr VGPR_COUNT
+  .amdhsa_next_free_sgpr 3
   DIRECTIVE
 .end_amdhsa_kernel
 
