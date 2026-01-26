@@ -138,6 +138,56 @@ class TestDS2AddrMore(unittest.TestCase):
     self.assertEqual(st.vgpr[0][4], 0x12345678, "v4 should be untouched")
 
 
+class TestDSB128(unittest.TestCase):
+  """Tests for DS_STORE_B128 and DS_LOAD_B128 (128-bit / 4 dwords)."""
+
+  def test_ds_store_load_b128(self):
+    """DS_STORE_B128 stores 4 VGPRs, DS_LOAD_B128 loads them back."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0x44444444),
+      v_mov_b32_e32(v[3], s[0]),
+      ds_store_b128(addr=v[10], data0=v[0:3]),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b128(addr=v[10], vdst=v[4:7]),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have first dword")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have second dword")
+    self.assertEqual(st.vgpr[0][6], 0x33333333, "v6 should have third dword")
+    self.assertEqual(st.vgpr[0][7], 0x44444444, "v7 should have fourth dword")
+
+  def test_ds_store_b128_with_offset(self):
+    """DS_STORE_B128 with non-zero offset."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0xCCCCCCCC),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xDDDDDDDD),
+      v_mov_b32_e32(v[3], s[0]),
+      DS(DSOp.DS_STORE_B128, addr=v[10], data0=v[0:3], offset0=16),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B128, addr=v[10], vdst=v[4:7], offset0=16),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA)
+    self.assertEqual(st.vgpr[0][5], 0xBBBBBBBB)
+    self.assertEqual(st.vgpr[0][6], 0xCCCCCCCC)
+    self.assertEqual(st.vgpr[0][7], 0xDDDDDDDD)
+
+
 class TestDSAtomic(unittest.TestCase):
   """Tests for DS atomic operations."""
 

@@ -1,7 +1,7 @@
 import math
 from typing import cast, Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel, CustomKernel
-from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
+from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, IGNORE_OOB
 
 def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
@@ -15,8 +15,9 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
 
   # TODO: validate these
   # WEBGPU has a BITCAST in the index, PTX casts pointer to long
+  # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
   for x in idx.toposort() | gate.toposort():
-    if x.op is Ops.BITCAST or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
+    if x.op in {Ops.BITCAST, Ops.VECTORIZE, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
   # if all is good and IGNORE_OOB=0, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
@@ -305,7 +306,8 @@ from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.schedule.rangeify import BufferizeOpts
 glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Kernel": Kernel, "Metadata": Metadata,
                         "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid, "CustomKernel": CustomKernel,
-                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic}
+                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
+                        "ConstFloat": ConstFloat}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
   exec(code, glbls, lcls)
