@@ -15,12 +15,7 @@ class _TestIntegration(unittest.TestCase):
     st = self.inst.disasm()
     # Test that the instruction can be compiled by LLVM and produces the same bytes
     desc = f"{st:25s} {self.inst} {b!r}"
-    llvm_bytes = compile_asm(st, arch=self.arch)
-    if llvm_bytes != b:
-      ll_inst = self.inst.__class__.from_bytes(llvm_bytes)
-      for n,_ in self.inst._fields:
-        if (sv:=getattr(self.inst, n)) != (lv:=getattr(ll_inst, n)): print(f"FIELD MISMATCH {n} {sv} != {lv}")
-      raise AssertionError(f"{b} != {llvm_bytes} {desc}")
+    self.assertEqual(b, compile_asm(st), desc)
     print(desc)
 
 class TestIntegration(_TestIntegration):
