@@ -4,7 +4,7 @@ import tinygrad.runtime.autogen.am.am as am
 import tinygrad.runtime.autogen.amdgpu_drm as amdgpu_drm
 from tinygrad.helpers import from_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
-from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props
+from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props, MOCKGPU_ARCH, GFX_TARGET_VERSION
 
 libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
@@ -96,7 +96,7 @@ class AMDDriver(VirtDriver):
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}', functools.partial(DirFileDesc, child_names=['gpu_id', 'properties'])),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/gpu_id', functools.partial(TextFileDesc, text=f"{gpu_id}")),
       VirtFile(f'/sys/devices/virtual/kfd/kfd/topology/nodes/{gpu_id}/properties',
-        functools.partial(TextFileDesc, text=gpu_props.format(drm_render_minor=gpu_id))),
+        functools.partial(TextFileDesc, text=gpu_props.format(drm_render_minor=gpu_id, gfx_target_version=GFX_TARGET_VERSION))),
       VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/power_dpm_force_performance_level',
                functools.partial(TextFileDesc, text='profile_standard\n')),
       VirtFile(f'/sys/class/drm/renderD{gpu_id}/device/ip_discovery/die/0',

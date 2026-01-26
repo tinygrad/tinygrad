@@ -145,6 +145,20 @@ class TestTiny(unittest.TestCase):
     Tensor.empty(4, 1, 14, 14).sequential(layers).sum().backward()
     Tensor.realize(*[x.grad for x in nn.state.get_parameters(layers) if x.grad is not None])
 
+  # *** transcendental functions (tests VOP3_SDST on RDNA4) ***
+
+  def test_transcendental(self):
+    import math
+    x = Tensor([0.0, 1.0, 2.0])
+    # exp
+    self.assertAlmostEqual(x.exp().tolist()[0], 1.0, places=5)
+    self.assertAlmostEqual(x.exp().tolist()[1], math.e, places=5)
+    # log
+    self.assertAlmostEqual(Tensor([1.0, math.e]).log().tolist()[0], 0.0, places=5)
+    self.assertAlmostEqual(Tensor([1.0, math.e]).log().tolist()[1], 1.0, places=5)
+    # sqrt
+    self.assertAlmostEqual(Tensor([4.0, 2.0]).sqrt().tolist()[0], 2.0, places=5)
+
   # *** image ***
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
