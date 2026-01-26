@@ -1041,7 +1041,10 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     if is_scratch:
       scratch_stride = ctx.rsgpr_dyn(_c(SCRATCH_STRIDE_IDX)).cast(dtypes.uint64)
       base = lane.cast(dtypes.uint64) * scratch_stride
-      addr_offset = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
+      # SVE (Scratch VGPR Enable): when SVE=1, VADDR is used as offset; when SVE=0, VADDR is ignored
+      sve = getattr(inst, 'sve', 0)
+      vaddr = ctx.rvgpr_dyn(addr_reg, lane).cast(dtypes.uint64)
+      addr_offset = vaddr if sve == 1 else UOp.const(dtypes.uint64, 0)
       # Add saddr value only if use_saddr is true (saddr < 124)
       saddr_contrib = use_saddr.where(ctx.rsgpr_dyn(saddr_reg).cast(dtypes.uint64), UOp.const(dtypes.uint64, 0)) if saddr_reg is not None else UOp.const(dtypes.uint64, 0)
       return base + addr_offset + saddr_contrib + offset64
@@ -1341,7 +1344,6 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
             c_bufs = [ctypes.c_uint64(st.sgpr_buf._buf.va_addr), ctypes.c_uint64(st.vgpr_buf._buf.va_addr),
                       ctypes.c_uint64(vmem_buf._buf.va_addr), ctypes.c_uint64(lds_buf._buf.va_addr),
                       ctypes.c_uint64(scratch_buf._buf.va_addr if scratch_buf else 0)]
-            c_lane = ctypes.c_int32(0)
             for inst_count in range(1_000_000):
               if (pc := st.pc) == 0xFFFFFFFFFFFFFFFF or pc not in program: break
               name, fxn, globals_list, _ = program[pc]
@@ -1350,6 +1352,6 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               if DEBUG >= 5:
                 inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw))
                 print(f"[emu2] exec PC={pc:X}: {inst!r}")
-              fxn(*[c_bufs[g] for g in globals_list], c_lane)
+              fxn(*[c_bufs[g] for g in globals_list])
             else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
   return 0
