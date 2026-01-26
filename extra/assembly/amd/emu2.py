@@ -1141,10 +1141,10 @@ EMU2_BACKEND = getenv("EMU2_BACKEND", "clang")
 def _get_backend():
   """Get renderer, compiler, and program class based on EMU2_BACKEND."""
   if EMU2_BACKEND == "llvm":
-    from tinygrad.renderer.llvmir import LLVMRenderer
+    from tinygrad.renderer.llvmir import CPULLVMRenderer
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
     from tinygrad.runtime.ops_cpu import CPUProgram
-    return LLVMRenderer(), CPULLVMCompiler(), CPUProgram
+    return CPULLVMRenderer(), CPULLVMCompiler(), CPUProgram
   else:  # clang (default)
     from tinygrad.renderer.cstyle import ClangRenderer
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
