@@ -15,7 +15,7 @@ DEVICES = tuple(f"{Device.DEFAULT}:{i}" if i != 0 else f"{Device.DEFAULT}" for i
 
 NUM_ITERS = 50
 BATCH_SIZE = 8
-SEQ_LEN = 256
+SEQ_LEN = 1024
 DIM = 768
 N_HEADS = 12
 N_LAYERS = 12
