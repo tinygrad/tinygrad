@@ -28,8 +28,8 @@ pm_mops = PatternMatcher([
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
 def fix_assign_hazard(dest:UOp, src:UOp, assign:UOp):
-  # PERMUTE and FLIP reorder indices, causing read/write races when src and dest are the same buffer
-  unsafe = {Ops.PERMUTE, Ops.FLIP}
+  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
+  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if dest.op_in_backward_slice_with_self(Ops.SHRINK) else set())
   if not (hazards:=[s for s in src.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS) if s.op in unsafe]): return
   for h in hazards:
     if any(s is dest.base for s in h.toposort(gate=lambda s:s.op not in ALWAYS_CONTIGUOUS-{Ops.BUFFER})):

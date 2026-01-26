@@ -415,10 +415,8 @@ class TestAssign(unittest.TestCase):
 
   # TODO: is there a way to sneak in a permute such that it returns the wrong answer?
 
-  # NOTE: overlapping shrink assign tests are WIP, behavior depends on backend/thread ordering
-  @unittest.skip("WIP: not a stable test, relies on undefined behavior")
   def test_overlapping_shrink_assignment_forward(self):
-    # Forward shift: read index > write index in overlap - works by thread ordering luck
+    # Forward shift: read index > write index in overlap
     N = 100000
     shift = 1000
     a = Tensor.arange(N).float().contiguous().realize()
@@ -427,28 +425,14 @@ class TestAssign(unittest.TestCase):
     with Context(NOOPT=1): a[0:N-shift].assign(a[shift:N]).realize()
     np.testing.assert_allclose(a.numpy(), expected)
 
-  @unittest.skip("WIP: not a stable test, relies on undefined behavior")
-  @unittest.expectedFailure
   def test_overlapping_shrink_assignment_reverse(self):
-    # Reverse shift: write index > read index in overlap - race condition!
-    # This fails because find_permutes excludes SHRINK from hazard detection
+    # Reverse shift: write index > read index in overlap
     N = 100000
     shift = 1000
     a = Tensor.arange(N).float().contiguous().realize()
     expected = np.arange(N, dtype=np.float32)
     expected[shift:] = expected[:N-shift].copy()
     with Context(NOOPT=1): a[shift:N].assign(a[0:N-shift]).realize()
-    np.testing.assert_allclose(a.numpy(), expected)
-
-  @unittest.skip("WIP: not a stable test, relies on undefined behavior")
-  def test_overlapping_shrink_assignment_reverse_with_contiguous(self):
-    # Adding .contiguous() forces a copy, fixing the race
-    N = 100000
-    shift = 1000
-    a = Tensor.arange(N).float().contiguous().realize()
-    expected = np.arange(N, dtype=np.float32)
-    expected[shift:] = expected[:N-shift].copy()
-    with Context(NOOPT=1): a[shift:N].assign(a[0:N-shift].contiguous()).realize()
     np.testing.assert_allclose(a.numpy(), expected)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
