@@ -15,19 +15,17 @@ class AM_IP:
 class AM_SOC(AM_IP):
   def init_sw(self):
     self.module = import_soc(self.adev.ip_ver[am.GC_HWIP])
-    self.ih_clients = am.enum_soc21_ih_clientid if self.adev.ip_ver[am.GC_HWIP][0] >= 11 else am.enum_soc15_ih_clientid
+    self.ih_clients = am.enum_soc21_ih_clientid if (ih_soc21:=self.adev.ip_ver[am.GC_HWIP][0] >= 11) else am.enum_soc15_ih_clientid
 
-    def _ih_srcs(pref, hwip):
+    self.gfx_ih_clients = [am.SOC21_IH_CLIENTID_GRBM_CP, am.SOC21_IH_CLIENTID_GFX] \
+      if ih_soc21 else [am.SOC15_IH_CLIENTID_GRBM_CP] + [getattr(am, f'SOC15_IH_CLIENTID_SE{i}SH') for i in range(4)]
+    self.sdma_ih_clients = [] if ih_soc21 else [getattr(am, f'SOC15_IH_CLIENTID_SDMA{i}') for i in range(8)]
+
+    def _ih_srcs(pref:str, hwip:int) -> dict[int, str]:
       return {getattr(am, k): k[off+9:] for k in dir(am) if k.startswith(f'{pref}_{self.adev.ip_ver[hwip][0]}') and (off:=k.find('__SRCID__')) != -1}
 
     gfx_srcs, sdma_srcs = _ih_srcs('GFX', am.GC_HWIP), _ih_srcs('SDMA0', am.SDMA0_HWIP)
-
-    self.ih_scrs_names:dict[int, dict[int, str]] = {}
-    if self.adev.ip_ver[am.GC_HWIP][0] >= 11: self.ih_scrs_names |= {k: gfx_srcs for k in [am.SOC21_IH_CLIENTID_GRBM_CP, am.SOC21_IH_CLIENTID_GFX]}
-    else: self.ih_scrs_names |= {k: gfx_srcs for k in [am.SOC15_IH_CLIENTID_GRBM_CP] + [getattr(am, f'SOC15_IH_CLIENTID_SE{i}SH') for i in range(4)]}
-
-    if self.adev.ip_ver[am.SDMA0_HWIP][0] in {4, 5}:
-      self.ih_scrs_names |= {k: sdma_srcs for k in [getattr(am, f'SOC15_IH_CLIENTID_SDMA{i}') for i in range(8)]}
+    self.ih_scrs_names:dict[int, dict[int, str]] = {**{k: gfx_srcs for k in self.gfx_ih_clients}, **{k: sdma_srcs for k in self.sdma_ih_clients}}
 
   def init_hw(self):
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
@@ -339,8 +337,6 @@ class AM_GFX(AM_IP):
 
       self.adev.gmc.flush_hdp()
       self._grbm_select(inst=xcc)
-
-      self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=0, generic0_int_enable=0, inst=xcc)
     return restore_ptr // 16, doorbell
 
   def set_clockgating_state(self):
@@ -455,8 +451,7 @@ class AM_SDMA(AM_IP):
                                                           inst=inst)
         self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0}, inst=inst)
 
-      self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=0, trap_enable=0,
-        **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
+      self.adev.reg(f"regSDMA{pipe}_CNTL").update(**({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
 
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
       for aid_id in range(4):
