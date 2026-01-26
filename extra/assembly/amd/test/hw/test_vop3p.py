@@ -562,6 +562,45 @@ class TestWMMA(unittest.TestCase):
         self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 16.0, got {i2f(result)}")
 
 
+class TestWMMABF16(unittest.TestCase):
+  """Tests for WMMA BF16 instructions."""
+
+  def test_v_wmma_f32_16x16x16_bf16_all_ones(self):
+    """V_WMMA_F32_16X16X16_BF16 with all ones produces 16.0."""
+    instructions = []
+    # BF16 1.0 = 0x3f80, packed = 0x3f803f80
+    instructions.append(s_mov_b32(s[0], 0x3f803f80))
+    for i in range(16, 32):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], 0))
+    instructions.append(v_wmma_f32_16x16x16_bf16(v[0:7], v[16:23], v[24:31], v[0:7]))
+    st = run_program(instructions, n_lanes=32)
+    expected = f2i(16.0)
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 16.0, got {i2f(result)}")
+
+  def test_v_wmma_f32_16x16x16_bf16_with_accumulator(self):
+    """V_WMMA_F32_16X16X16_BF16 with non-zero accumulator."""
+    instructions = []
+    # BF16 1.0 = 0x3f80, packed = 0x3f803f80
+    instructions.append(s_mov_b32(s[0], 0x3f803f80))
+    instructions.append(s_mov_b32(s[1], f2i(5.0)))
+    for i in range(16, 32):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], s[1]))
+    instructions.append(v_wmma_f32_16x16x16_bf16(v[0:7], v[16:23], v[24:31], v[0:7]))
+    st = run_program(instructions, n_lanes=32)
+    expected = f2i(21.0)  # 16 + 5
+    for lane in range(32):
+      for reg in range(8):
+        result = st.vgpr[lane][reg]
+        self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 21.0, got {i2f(result)}")
+
+
 class TestSpecialOps(unittest.TestCase):
   """Tests for special operations (SAD, PERM, DOT2)."""
 
