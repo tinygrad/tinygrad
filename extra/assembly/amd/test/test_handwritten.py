@@ -15,7 +15,7 @@ class _TestIntegration(unittest.TestCase):
     st = self.inst.disasm()
     # Test that the instruction can be compiled by LLVM and produces the same bytes
     desc = f"{st:25s} {self.inst} {b!r}"
-    self.assertEqual(b, compile_asm(st), desc)
+    self.assertEqual(b, compile_asm(st, arch=self.arch), desc)
     print(desc)
 
 class TestIntegration(_TestIntegration):
