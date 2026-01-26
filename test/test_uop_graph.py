@@ -449,6 +449,21 @@ class TestUOpGraph(unittest.TestCase):
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD: assert u.src[1].arg == 5
 
+  def test_where_two_gated_loads_with_cast_no_roundtrip(self):
+    # test that CAST(WHERE(c, LOAD_a_guarded_by_c, LOAD_b_guarded_by_not_c), float) doesn't create roundtrip uint->float->uint
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.uint.ptr(), (), 0)
+    d1 = UOp(Ops.DEFINE_GLOBAL, dtypes.uint.ptr(), (), 1)
+    cond = ridx0 < 50
+    ld0 = d0.index(ridx0.valid(cond)).load()  # guarded by cond
+    ld1 = d1.index(ridx0.valid(cond.logical_not())).load()  # guarded by !cond
+    w = cond.where(ld0, ld1).cast(dtypes.float)  # cast the whole WHERE to float
+    uops = to_uops_list([w])
+    # verify no roundtrip cast: there should be no CAST(uint) of a CAST(float)
+    for u in uops:
+      if u.op is Ops.CAST and u.dtype == dtypes.uint:
+        assert not (u.src[0].op is Ops.CAST and u.src[0].dtype == dtypes.float), "found roundtrip cast uint->float->uint"
+
   def test_where_in_store_becomes_gate(self):
     ridx0 = UOp.range(100, 0)
     d0 = UOp(Ops.DEFINE_GLOBAL, dtypes.long.ptr(), (), 0)
