@@ -56,7 +56,7 @@ from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, 
 from extra.assembly.amd.autogen.rdna4.ins import (SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
   SMEM as R4_SMEM, VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST,
   VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P, VOPC as R4_VOPC, DS as R4_DS, VFLAT as R4_FLAT, VGLOBAL as R4_GLOBAL, VSCRATCH as R4_SCRATCH, VOPD as R4_VOPD,
-  SOPPOp as R4_SOPPOp)
+  SOPPOp as R4_SOPPOp, SMEMOp as R4_SMEMOp)
 from extra.assembly.amd.dsl import NULL, VCC_LO, EXEC_LO
 from extra.assembly.amd.autogen.common import OpType
 from extra.assembly.amd.expr_parser import parse_block
@@ -573,19 +573,26 @@ def _compile_sopp(inst: SOPP, ctx: _Ctx, name: str) -> tuple[str, UOp]:
 
 def _compile_smem(inst: SMEM, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   # Cache invalidation instructions are no-ops in the emulator (we don't model caches)
-  if inst.op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV):
+  cache_inv_ops = {SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV, R4_SMEMOp.S_DCACHE_INV}
+  if inst.op in cache_inv_ops:
     return name, UOp.sink(*ctx.inc_pc(), arg=KernelInfo(name=name))
+  inst_cls = type(inst)
   # Dynamic sbase field (bits 5:0) - SGPR pair, field value * 2 = register offset
-  sbase = ctx.inst_field(SMEM.sbase) * _c(2)
+  sbase = ctx.inst_field(inst_cls.sbase) * _c(2)
   # Dynamic sdata field (bits 12:6) - destination SGPR
-  sdata_reg = ctx.inst_field(SMEM.sdata)
-  # Dynamic offset field (bits 52:32) - 21-bit signed immediate
-  offset_raw = ctx.inst_field(SMEM.offset)
-  offset = (offset_raw.cast(dtypes.int) ^ _c(0x100000, dtypes.int)) - _c(0x100000, dtypes.int)  # sign-extend 21-bit
-  # Dynamic soffset field (bits 63:57) - SGPR for additional offset (NULL=124 reads as 0)
-  soffset = ctx.inst_field(SMEM.soffset)
+  sdata_reg = ctx.inst_field(inst_cls.sdata)
+  # Dynamic offset field - RDNA3: offset (21-bit), RDNA4: ioffset (24-bit)
+  offset_field = getattr(inst_cls, 'offset', None) or getattr(inst_cls, 'ioffset', None)
+  offset_raw = ctx.inst_field(offset_field)
+  # Sign extend: RDNA3 is 21-bit, RDNA4 is 24-bit
+  sign_bit = 1 << (offset_field.hi - offset_field.lo)
+  offset = (offset_raw.cast(dtypes.int) ^ _c(sign_bit, dtypes.int)) - _c(sign_bit, dtypes.int)
+  # Dynamic soffset field - SGPR for additional offset (NULL=124 reads as 0)
+  soffset = ctx.inst_field(inst_cls.soffset)
   addr = _u64(ctx.rsgpr_dyn(sbase), ctx.rsgpr_dyn(sbase + _c(1))) + offset.cast(dtypes.uint64) + ctx.rsgpr_dyn(soffset).cast(dtypes.uint64)
-  ndwords = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}.get(inst.op, 1)
+  # Map opcode to number of dwords - handle both RDNA3 and RDNA4 enum types
+  ndwords = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16,
+             R4_SMEMOp.S_LOAD_B32: 1, R4_SMEMOp.S_LOAD_B64: 2, R4_SMEMOp.S_LOAD_B128: 4, R4_SMEMOp.S_LOAD_B256: 8, R4_SMEMOp.S_LOAD_B512: 16}.get(inst.op, 1)
   stores = [ctx.wsgpr_dyn(sdata_reg + _c(i), ctx.vmem.index((addr + UOp.const(dtypes.uint64, i * 4) >> UOp.const(dtypes.uint64, 2)).cast(dtypes.index)))
             for i in range(ndwords)]
   return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
@@ -1033,9 +1040,10 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
     addr_reg = ctx.inst_field(addr_field)
     vdata_reg = ctx.inst_field(data_field)
     vdst_reg = ctx.inst_field(inst_cls.vdst)
-    # Dynamic 13-bit signed offset: cast to int, then (val ^ 0x1000) - 0x1000 for sign extension
+    # Sign extend offset: RDNA3 is 13-bit, RDNA4 is 24-bit
     raw_offset = ctx.inst_field(offset_field).cast(dtypes.int)
-    offset = (raw_offset ^ _c(0x1000, dtypes.int)) - _c(0x1000, dtypes.int)
+    sign_bit = 1 << (offset_field.hi - offset_field.lo)  # sign bit position
+    offset = (raw_offset ^ _c(sign_bit, dtypes.int)) - _c(sign_bit, dtypes.int)
     offset0, offset1 = 0, 0
     # Dynamic saddr - read field, NULL (124) or >= 128 means no saddr
     saddr_reg = ctx.inst_field(inst_cls.saddr) if hasattr(inst, 'saddr') else None
@@ -1367,7 +1375,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
               assert fxn is not None, f"[emu2] No fxn for {name} at PC={pc}"
               assert 4 not in globals_list or scratch_buf, f"SCRATCH instruction {name} but scratch_size=0"
               if DEBUG >= 5:
-                inst = decode_inst(bytes((ctypes.c_char * 12).from_address(pc).raw), arch)
+                inst_bytes = bytes((ctypes.c_char * 12).from_address(pc).raw)
+                inst = decode_inst(inst_bytes, arch)
                 print(f"[emu2] exec PC={pc:X}: {inst!r}")
               fxn(*[c_bufs[g] for g in globals_list], c_lane)
             else: raise RuntimeError("exceeded 1M instructions, likely infinite loop")
