@@ -36,7 +36,7 @@ LLAMA_1B_CONFIG = {
 
 BATCH_SIZE = 1
 SEQ_LEN = 64
-NUM_WARMUP = 3
+NUM_WARMUP = 15  # Increased to ensure JIT is fully compiled
 NUM_TOKENS = 10
 
 class TestLlama1BSpeed(unittest.TestCase):
@@ -53,10 +53,13 @@ class TestLlama1BSpeed(unittest.TestCase):
     print(f"Creating tinygrad Llama 1B model (dim={LLAMA_1B_CONFIG['dim']}, layers={LLAMA_1B_CONFIG['n_layers']})...")
     cls.tinygrad_model = Transformer(**LLAMA_1B_CONFIG, max_context=512)
 
-    # Initialize with random weights (seed for reproducibility)
+    # Initialize with random weights (seed for reproducibility) - explicit float32
     np.random.seed(1337)
+    from tinygrad.dtype import dtypes
     for v in get_state_dict(cls.tinygrad_model).values():
-      v.assign(Tensor.randn(*v.shape, dtype=v.dtype) * 0.02)
+      # Force float32 to match PyTorch default
+      target_dtype = dtypes.float32 if v.dtype in [dtypes.float16, dtypes.bfloat16] else v.dtype
+      v.assign(Tensor.randn(*v.shape, dtype=target_dtype) * 0.02)
 
     # Create PyTorch model
     try:
@@ -70,6 +73,7 @@ class TestLlama1BSpeed(unittest.TestCase):
           intermediate_size=LLAMA_1B_CONFIG["hidden_dim"],
           vocab_size=LLAMA_1B_CONFIG["vocab_size"],
           rms_norm_eps=LLAMA_1B_CONFIG["norm_eps"],
+          torch_dtype=cls.torch.float32,  # Explicit float32
       )
       cls.torch_model = LlamaForCausalLM(config)
       cls.torch_model.eval()
@@ -82,7 +86,12 @@ class TestLlama1BSpeed(unittest.TestCase):
     """Benchmark tinygrad inference speed"""
     print("\nTinyGrad Benchmark:")
     print(f"  Device: {Device.DEFAULT}")
-    print(f"  Backend: LLVM={getenv('LLVM', 0)}, CLANG={getenv('CLANG', 0)}")
+    print(f"  Backend: CPU_LLVM={getenv('CPU_LLVM', 0)}, LLVM={getenv('LLVM', 0)}, CLANG={getenv('CLANG', 0)}")
+
+    # Check dtype of model weights
+    from tinygrad.nn.state import get_state_dict
+    sample_weight = next(iter(get_state_dict(self.tinygrad_model).values()))
+    print(f"  Model dtype: {sample_weight.dtype}")
 
     # JIT compile forward pass
     @TinyJit
