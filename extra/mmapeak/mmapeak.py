@@ -5,7 +5,7 @@ os.environ["AMD_AQL"] = "1"
 
 from tinygrad.device import Device
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
-from extra.assembly.amd.dsl import Reg
+from extra.assembly.amd.dsl import Reg, Kernel
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -27,7 +27,9 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   vgprs:set = set()
   for n,_ in inst._fields:
     if isinstance(val:=getattr(inst, n), Reg) and val.offset >= v.offset: vgprs |= {val.offset+i for i in range(val.sz)}
-  inst_bytes = b"".join([inst.to_bytes() for _ in range(INSTRUCTIONS_PER_LOOP)])
+  k = Kernel()
+  k.emit_repeat([inst]*INSTRUCTIONS_PER_LOOP, n=INTERNAL_LOOP, counter=s[2]).emit_end()
+  inst_bytes = k.to_bytes()
   inst_hex = "\n".join("  .byte " + ",".join(f"0x{b:02x}" for b in inst_bytes[i:i+16]) for i in range(0, len(inst_bytes), 16)) + "\n"
   src = assemblyTemplate.replace("INTERNAL_LOOP", str(INTERNAL_LOOP)).replace("INSTRUCTION", inst_hex).replace("VGPR_COUNT", str(len(vgprs)))
   src = src.replace("DIRECTIVE", DIRECTIVE)

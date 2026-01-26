@@ -432,3 +432,50 @@ class Inst:
     parts = [(repr(v := getattr(self, n)), v == f.default) for n, f in self._fields if n != 'op' and not isinstance(f, FixedBitField)]
     while parts and parts[-1][1]: parts.pop()
     return f"{name}({', '.join(p[0] for p in parts)})"
+
+
+# todo: unify this with asm_matmuls
+class Kernel:
+  def __init__(self):
+    self.instructions: list[Inst] = []
+
+  def emit(self, inst:Inst) -> Inst: self.instructions.append(inst); return inst
+
+  def emit_repeat(self, loop_body:list[Inst], n:int, counter:Reg): # doesn't do reg alloc
+    # import arch-specific instructions
+    # todo: linker!
+    mod = type(loop_body[0]).__module__
+    if 'rdna4' in mod:
+      from extra.assembly.amd.autogen.rdna4.ins import s_mov_b32, s_sub_co_u32, s_cmp_lg_i32, s_cbranch_scc1
+      s_sub_u32 = s_sub_co_u32
+    elif 'cdna' in mod:
+      from extra.assembly.amd.autogen.cdna.ins import s_mov_b32, s_sub_u32, s_cmp_lg_i32, s_cbranch_scc1
+    else:  # rdna3
+      from extra.assembly.amd.autogen.rdna3.ins import s_mov_b32, s_sub_u32, s_cmp_lg_i32, s_cbranch_scc1
+    # loop preamble
+    self.emit(s_mov_b32(counter, n))
+    # loop body
+    for inst in loop_body: self.emit(inst)
+    # loop control: decrement, compare, branch back
+    sub_inst = self.emit(s_sub_u32(counter, counter, 1))
+    cmp_inst = self.emit(s_cmp_lg_i32(counter, 0))
+    # this should be a more generic label to pc infrastructure
+    loop_body_size = sum(i.size() for i in loop_body) + sub_inst.size() + cmp_inst.size() + 4
+    branch_offset = -(loop_body_size // 4)
+    self.emit(s_cbranch_scc1(simm16=branch_offset & 0xFFFF))
+    return self
+
+  def emit_end(self):
+    mod = type(self.instructions[0]).__module__
+    # import arch-specific instructions
+    # todo: linker!
+    if 'rdna4' in mod:
+      from extra.assembly.amd.autogen.rdna4.ins import s_endpgm
+    elif 'cdna' in mod:
+      from extra.assembly.amd.autogen.cdna.ins import s_endpgm
+    else:
+      from extra.assembly.amd.autogen.rdna3.ins import s_endpgm
+    self.emit(s_endpgm())
+    return self
+
+  def to_bytes(self) -> bytes: return b"".join(inst.to_bytes() for inst in self.instructions)
