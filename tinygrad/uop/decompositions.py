@@ -317,7 +317,9 @@ def threefry2x32(x: UOp, key: UOp):
 
 # ***** long as 2 ints *****
 
+l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
 def unpack32(v): return v.bitcast(dtypes.uint) & 0xFFFF, v.bitcast(dtypes.uint) >> 16
+def l2i_idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]*2+off))
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
@@ -371,9 +373,6 @@ def l2i(op: Ops, dt: DType, *uops:UOp):
     case Ops.WHERE: return uops[0].where(uops[1], uops[3]), uops[0].where(uops[2], uops[4])
     case Ops.MAX: return l2i(Ops.WHERE, dt, l2i(Ops.CMPLT, dt, *uops), b0, b1, a0, a1)
     case _: raise NotImplementedError(f"long decomposition of {op} unsupported")
-
-def _idx(idx,off): return idx.replace(src=(idx.src[0], idx.src[1]*2+off))
-l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
 
 # ***** decomposition patterns *****
 
@@ -429,7 +428,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
     pat += [(UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
              x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if x.dtype.base in l2i_dt else None)]
     pat += [(UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
-             st.replace(src=(_idx(idx, 0), val.rtag(0))).group(st.replace(src=(_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
+             st.replace(src=(l2i_idx(idx, 0), val.rtag(0))).group(st.replace(src=(l2i_idx(idx, 1), val.rtag(1)))) if val.tag is None else None)]
     pat += [(UPat(GroupOp.Comparison, src=(UPat.var('a', tuple(l2i_dt.keys())), UPat.var('b', tuple(l2i_dt.keys()))), name="x"), lambda a,b,x:
              l2i(x.op, dt:=l2i_dt[a.dtype], a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt)))]
     pat += [(UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
@@ -440,7 +439,7 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], device, force_transcendental)
              None if x.tag is None else l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
                                                                             if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag])]
     pat += [(UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
-             None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(_idx(idx, x.tag),)))]
+             None if x.tag is None else x.replace(dtype=l2i_dt[x.dtype], src=(l2i_idx(idx, x.tag),)))]
     pat += [(UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
              None if x.tag is None else UOp.const(l2i_dt[x.dtype], (x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF)))]
   return PatternMatcher(pat)
