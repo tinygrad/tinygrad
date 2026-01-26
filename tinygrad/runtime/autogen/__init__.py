@@ -10,6 +10,7 @@ macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/M
 
 llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else " +
             repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))]))
+clang_lib = "'/opt/homebrew/opt/llvm@20/lib/libclang.dylib' if OSX ['clang-20', 'clang']"
 
 webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
 nv_lib_path = "[f'/{pre}/cuda/targets/{sysconfig.get_config_vars().get(\"MULTIARCH\", \"\").rsplit(\"-\", 1)[0]}/lib' for pre in ['opt', 'usr/local']]"
@@ -135,7 +136,7 @@ def __getattr__(nm):
   tarball="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
   prolog=["import gzip, base64"], epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
-      return load("libclang", "['clang-20', 'clang']",
+      return load("libclang", clang_lib,
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
                   args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
