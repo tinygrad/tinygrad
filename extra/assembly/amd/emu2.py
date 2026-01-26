@@ -429,12 +429,10 @@ def _sext(v, bits): return v - (1 << bits) if v & (1 << (bits - 1)) else v
 
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
-  __slots__ = ('sgpr', 'sgpr64', 'vgpr', 'vmem', 'lds', 'scratch', 'inst_size', 'dyn_fields')
+  __slots__ = ('sgpr', 'vgpr', 'vmem', 'lds', 'scratch', 'inst_size', 'dyn_fields')
 
   def __init__(self, sgpr, vgpr, vmem, lds, scratch, inst_size):
     self.sgpr, self.vgpr, self.vmem, self.lds, self.scratch = sgpr, vgpr, vmem, lds, scratch
-    # Cast sgpr to uint64 ptr for efficient 64-bit PC read (half the count since 64-bit)
-    self.sgpr64 = sgpr.cast(dtypes.uint64.ptr(SGPR_COUNT // 2))
     self.inst_size = inst_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
 
@@ -534,13 +532,13 @@ class _Ctx:
 
   def rpc(self) -> UOp:
     """Read PC as 64-bit byte address."""
-    # PC_LO is at index 256 in uint32 array = index 128 in uint64 array
-    return self.sgpr64.index(_c(PC_LO_IDX // 2, dtypes.index), ptr=True).load()
+    # Index at PC_LO, then cast to uint64 ptr and load
+    return self.sgpr.index(_c(PC_LO_IDX, dtypes.index), ptr=True).cast(dtypes.uint64.ptr(SGPR_COUNT // 2)).load()
 
   def inc_pc(self) -> list[UOp]:
     """Increment PC by instruction size in bytes. Returns [store]."""
     new_pc = self.rpc() + UOp.const(dtypes.uint64, self.inst_size)
-    return [self.sgpr64.index(_c(PC_LO_IDX // 2, dtypes.index)).store(new_pc)]
+    return [self.sgpr.index(_c(PC_LO_IDX, dtypes.index), ptr=True).cast(dtypes.uint64.ptr(SGPR_COUNT // 2)).store(new_pc)]
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION HANDLERS
@@ -1214,7 +1212,7 @@ def _get_inst_prg(inst_bytes: bytes) -> ProgramSpec:
     _last_compiled_new = False
     return prg
   sink, (base, mask, size) = _get_inst_sink(inst_bytes)
-  with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0, SPEC=0):
+  with Context(NOOPT=1, IGNORE_OOB=1, TUPLE_ORDER=0):
     prg = get_program(sink, _emu_renderer)
   _canonical_prg_cache.append((base, mask, size, prg))
   _last_compiled_new = True
