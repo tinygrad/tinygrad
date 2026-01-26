@@ -655,7 +655,7 @@ jobs:
       - name: Run AMD emulated mmapeak on NULL backend
         env:
           AMD: 0
-        run: PYTHONPATH=. NULL=1 EMULATE=AMD_CDNA4 python extra/mmapeak/mmapeak.py
+        run: PYTHONPATH=. NULL=1 EMULATE=AMD python extra/mmapeak/mmapeak.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
