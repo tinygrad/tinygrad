@@ -60,7 +60,8 @@ MASK32 = 0xFFFFFFFF
 # Common UOp constants (avoid repeated allocation)
 def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
 U32_0, U32_1, U32_16, U32_MASK = _c(0), _c(1), _c(16), _c(MASK32)
-IDX_0 = _c(0, dtypes.index)
+IDX_0, IDX_32 = _c(0, dtypes.index), _c(32, dtypes.index)
+U64_2 = UOp.const(dtypes.uint64, 2)
 
 # Inline float constants (as bit patterns) for GPU instructions
 F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
@@ -439,7 +440,7 @@ class _Ctx:
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
     pc = self.rpc()
-    addr = (pc + UOp.const(dtypes.uint64, dword_idx * 4)) >> UOp.const(dtypes.uint64, 2)
+    addr = (pc + UOp.const(dtypes.uint64, dword_idx * 4)) >> U64_2 if dword_idx else pc >> U64_2
     return self.vmem.index(addr.cast(dtypes.index), ptr=True).load()
 
   def inst_field(self, field) -> UOp:
@@ -486,12 +487,12 @@ class _Ctx:
 
   def rvgpr_dyn(self, reg: UOp, lane: UOp) -> UOp:
     """Read VGPR with dynamic register index."""
-    return self.vgpr.index(reg.cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index), ptr=True).load()
+    return self.vgpr.index(reg.cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index), ptr=True).load()
 
   def wvgpr_dyn(self, reg: UOp, lane: UOp, val: UOp, exec_mask: UOp, after: UOp | None = None) -> UOp:
     """Write VGPR with dynamic register index."""
     buf = self.vgpr.after(after) if after is not None else self.vgpr
-    offset = (reg.cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(_lane_active(exec_mask, lane))
+    offset = (reg.cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)).valid(_lane_active(exec_mask, lane))
     return buf.index(offset).store(val.cast(dtypes.uint32))
 
   def rsrc_dyn(self, off: UOp, lane: UOp, bits: int = 32, literal: UOp | None = None) -> UOp:
@@ -508,8 +509,8 @@ class _Ctx:
       sgpr_val = _u64(self.sgpr.index(sgpr_idx0, ptr=True).load(), self.sgpr.index(sgpr_idx1, ptr=True).load())
       # Use .valid() for VGPR reads to avoid invalid memory access when off < 256
       vgpr_reg = off - _c(256)
-      vgpr_idx0 = (vgpr_reg.cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(is_vgpr)
-      vgpr_idx1 = ((vgpr_reg + U32_1).cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)).valid(is_vgpr)
+      vgpr_idx0 = (vgpr_reg.cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)).valid(is_vgpr)
+      vgpr_idx1 = ((vgpr_reg + U32_1).cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)).valid(is_vgpr)
       vgpr_val = _u64(self.vgpr.index(vgpr_idx0, ptr=True).load(), self.vgpr.index(vgpr_idx1, ptr=True).load())
       # 64-bit inline constants need special handling (different from 32-bit values in SGPR buffer)
       inline_idx = off.cast(dtypes.index).valid(is_in_sgpr)
@@ -523,7 +524,7 @@ class _Ctx:
     if literal is not None: sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
     if bits == 16:  # F16 constants differ from pre-populated F32 constants
       for off_val, val in F16_INLINE.items(): sgpr_val = off.eq(_c(off_val)).where(UOp.const(dtypes.uint32, val), sgpr_val)
-    vgpr_idx = (off - _c(256)).cast(dtypes.index) * UOp.const(dtypes.index, 32) + lane.cast(dtypes.index)
+    vgpr_idx = (off - _c(256)).cast(dtypes.index) * IDX_32 + lane.cast(dtypes.index)
     vgpr_val = self.vgpr.index(vgpr_idx.valid(is_vgpr), ptr=True).load()
     return is_vgpr.where(vgpr_val, sgpr_val)
 
