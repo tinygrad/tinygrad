@@ -79,10 +79,8 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    # NOTE: 0.0 == -0.0 in Python, so they'd share cache entries. Use copysign to distinguish signed zero for cache key.
-    cache_arg = (math.copysign(1.0, arg), 0.0) if isinstance(arg, float) and arg == 0.0 else arg
-    if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, cache_arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
-    UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(op, dtype, src, arg, tag))
+    if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
+    UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     if metadata is not None: all_metadata[created] = metadata
     # NOTE: this value is set by pickle when pickling a realized tensor
     if _buffer is not None:
@@ -123,9 +121,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   tag:Any = None
   def __del__(self):
     if Ops is not None and self.op is Ops.BUFFER and (buffer:=buffers.get(self)) is not None: buffer.ref(-1)
-    # NOTE: cache key uses transformed arg for signed zero (see UOpMetaClass.__call__)
-    cache_arg = (math.copysign(1.0, self.arg), 0.0) if isinstance(self.arg, float) and self.arg == 0.0 else self.arg
-    try: del UOpMetaClass.ucache[(self.op, self.dtype, self.src, cache_arg, self.tag)]
+    try: del UOpMetaClass.ucache[(self.op, self.dtype, self.src, self.arg, self.tag)]
     except AttributeError: pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
@@ -204,7 +200,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.CUSTOM_KERNEL | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.CAT:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY:
         return None
 
       case Ops.INDEX:
@@ -422,13 +418,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None, unique:bool|int=False):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
-    # NOTE: 0.0 == -0.0 in Python, so use copysign to distinguish signed zero for cache key
-    cache_b = (math.copysign(1.0, b), 0.0) if isinstance(b, float) and b == 0.0 else b
-    return UOp._const_impl(dtype, b, cache_b, device, shape, unique)
-  @staticmethod
-  @functools.cache
-  def _const_impl(dtype:DType, b:ConstLike, cache_b, device:str|tuple[str, ...]|None=None,
-                  shape:tuple[sint, ...]|None=None, unique:bool|int=False):
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
       b = b[0]  # doesn't have to be a VCONST if they are all the same
@@ -872,13 +861,10 @@ def safe_pow(x, y):
 python_alu: dict[Ops, Callable]  = {
   Ops.LOG2: lambda x: math.log2(x) if x > 0 else -math.inf if x == 0 else math.nan, Ops.EXP2: safe_exp2,
   Ops.SQRT: lambda x: math.sqrt(x) if x >= 0 else math.nan, Ops.RECIPROCAL: lambda x: 1/x if x != 0 else math.copysign(math.inf, x),
-  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, Ops.POW: safe_pow,
-  Ops.TRUNC: lambda x: x if math.isinf(x) or math.isnan(x) else math.copysign(math.trunc(x), x),
+  Ops.SIN: lambda x: math.sin(x) if not math.isinf(x) else math.nan, Ops.POW: safe_pow, Ops.TRUNC: math.trunc,
   Ops.NEG: operator.neg, Ops.ADD: operator.add, Ops.SUB: operator.sub, Ops.MUL: operator.mul, Ops.CMPNE: operator.ne, Ops.CMPLT: operator.lt,
   Ops.XOR: operator.xor, Ops.OR: operator.or_, Ops.AND: operator.and_, Ops.SHR: operator.rshift, Ops.SHL: operator.lshift, Ops.MAX: max,
-  Ops.MOD: cmod, Ops.IDIV: cdiv, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq,
-  Ops.MULACC: lambda x,y,z: math.fma(x,y,z) if not (math.isinf(x) or math.isinf(y) or math.isnan(x) or math.isnan(y)) else (x*y)+z,
-  Ops.FDIV: lambda x,y: x/y if y != 0 else (math.nan if x == 0 else math.copysign(math.inf, x*y))}
+  Ops.MOD: cmod, Ops.IDIV: cdiv, Ops.MULACC: lambda x,y,z: (x*y)+z, Ops.WHERE: lambda x,y,z: y if x else z, Ops.CMPEQ: operator.eq}
 
 def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
   if dtype.count > 1:

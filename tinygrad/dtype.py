@@ -5,6 +5,15 @@ from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod, round_up, next_power2, OSX
 from enum import Enum, auto
 
+class ConstFloat(float):
+  """Float subclass that compares by bits (distinguishes -0.0 from 0.0)."""
+  __slots__ = ('bits',)
+  def __new__(cls, v:float):
+    obj = super().__new__(cls, v)
+    obj.bits = struct.unpack('<Q', struct.pack('<d', v))[0]
+    return obj
+  def __hash__(self): return hash(self.bits)
+
 class InvalidType:
   _instance: ClassVar[InvalidType|None] = None
   def __new__(cls):
@@ -141,8 +150,8 @@ class dtypes:
     if isinstance(val, InvalidType): return val
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan
-    # int is the default
-    return float(val) if dtypes.is_float(dtype) else bool(val) if dtypes.is_bool(dtype) else int(val)
+    # int is the default. wrap floats in ConstFloat to distinguish -0.0 from 0.0 in cache
+    return ConstFloat(float(val)) if dtypes.is_float(dtype) else bool(val) if dtypes.is_bool(dtype) else int(val)
   @staticmethod
   @functools.cache
   def min(dtype:DType):
