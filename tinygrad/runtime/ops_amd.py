@@ -863,7 +863,7 @@ class PCIIface(PCIIfaceBase):
   def sleep(self, timeout) -> bool:
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
-      self.dev_impl.ih.interrupt_handler()
+    self.dev_impl.ih.interrupt_handler()
     return self.dev_impl.gmc.check_fault() is not None
 
   def on_device_hang(self):
