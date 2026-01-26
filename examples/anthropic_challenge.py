@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from tinygrad import Tensor, dtypes, Context, getenv, UOp, fetch
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.uop.symbolic import symbolic
@@ -61,9 +62,6 @@ def tree_traversal(forest: Tensor, val: Tensor, height: int, rounds: int, where_
 
 # *** machine spec ***
 SLOT_LIMITS = {"alu": 12, "valu": 6, "load": 2, "store": 2, "flow": 1}
-
-from dataclasses import dataclass
-
 
 @dataclass(frozen=True)
 class ScheduledOp:
