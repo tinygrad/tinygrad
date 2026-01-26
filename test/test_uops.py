@@ -28,8 +28,9 @@ def _uops_to_prg(uops_list):
   prg = get_program(UOp.sink(*uops_list), Device[Device.DEFAULT].renderer)
   return CompiledRunner(replace(prg, device=Device.DEFAULT))
 
-def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
-  uops.append(UOp(uop, dtype, tuple(src), arg))
+def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
+  if op is Ops.CONST: uops.append(UOp.const(dtype, arg))
+  else: uops.append(UOp(op, dtype, tuple(src), arg))
   return uops[-1]
 
 def _test_single_value(vals, op, dts):
@@ -378,8 +379,8 @@ class TestLocalAccess(unittest.TestCase):
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
     g1 = UOp(Ops.DEFINE_GLOBAL, dtypes.int32.ptr(), (), 0)
-    c1 = UOp(Ops.CONST, dtypes.int, (), 2)
-    c2 = UOp(Ops.CONST, dtypes.int, (), 3)
+    c1 = UOp.const(dtypes.int, 2)
+    c2 = UOp.const(dtypes.int, 3)
     l1 = g1.index(c1)
     a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
     a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
@@ -392,7 +393,7 @@ class TestAssembly(unittest.TestCase):
   def test_division_power_of_two(self):
     for dt in (dtypes.int32, dtypes.uint32):
       g = UOp(Ops.DEFINE_GLOBAL, dt.ptr(), (), 0)
-      c = UOp(Ops.CONST, dt, (), 2)
+      c = UOp.const(dt, 2)
       l = g.index(c)
       a = UOp(Ops.IDIV, dt, (l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -403,7 +404,7 @@ class TestAssembly(unittest.TestCase):
 
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 3)
+    c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
     a = UOp(Ops.IDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -423,7 +424,7 @@ class TestAssembly(unittest.TestCase):
   def test_fast_idiv_overflow(self):
     # This will be possible with a slightly different method for fast_idiv
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    c = UOp.const(dtypes.uint, 7)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
     a = UOp(Ops.IDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
@@ -455,7 +456,7 @@ class TestAssembly(unittest.TestCase):
 
   def test_use_cmpeq(self):
     g = UOp(Ops.DEFINE_GLOBAL, dtypes.uint32.ptr(), (), 0)
-    c = UOp(Ops.CONST, dtypes.uint, (), 7)
+    c = UOp.const(dtypes.uint, 7)
     comp = g.index(c).ne(c).ne(True)
     uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
@@ -466,8 +467,8 @@ class TestAssembly(unittest.TestCase):
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
   def test_compare_alu_same_src_different_arg(self):
-    a = UOp(Ops.CONST, dtypes.float, (), 2.0)
-    b = UOp(Ops.CONST, dtypes.float, (), 3.0)
+    a = UOp.const(dtypes.float, 2.0)
+    b = UOp.const(dtypes.float, 3.0)
 
     add = UOp(Ops.ADD, dtypes.float, (a, b))
     mul = UOp(Ops.MUL, dtypes.float, (a, b))
@@ -483,7 +484,7 @@ class TestUOpMethod(unittest.TestCase):
 
   def test_const_factor(self):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 8),), 'gidx0')
-    self.assertEqual(UOp(Ops.CONST, dtypes.int, (), 17).const_factor(), 17)
+    self.assertEqual(UOp.const(dtypes.int, 17).const_factor(), 17)
     self.assertEqual(gidx0.const_factor(), 1)
     self.assertEqual((gidx0*3).const_factor(), 3)
     self.assertEqual((gidx0*3+6).const_factor(), 3)
@@ -494,9 +495,22 @@ class TestUOpMethod(unittest.TestCase):
     self.assertIs(x.replace(arg=None).arg, None)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
+  def test_const_zero_neg_zero_different(self):
+    # -0.0 and 0.0 must be different UOps (for IEEE754 correctness, e.g. 1/-0.0 = -inf)
+    pos_zero = UOp.const(dtypes.float, 0.0)
+    neg_zero = UOp.const(dtypes.float, -0.0)
+    self.assertIsNot(pos_zero, neg_zero)
+    self.assertNotEqual(hash(pos_zero.arg), hash(neg_zero.arg))
+
+  def test_const_nan_same(self):
+    # nan constants should be deduplicated
+    nan1 = UOp.const(dtypes.float, float('nan'))
+    nan2 = UOp.const(dtypes.float, float('nan'))
+    self.assertIs(nan1, nan2)
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
-    a = UOp(Ops.CONST, dtypes.float, (), 2.0) + UOp(Ops.CONST, dtypes.float, (), 3.0)
+    a = UOp.const(dtypes.float, 2.0) + UOp.const(dtypes.float, 3.0)
     for _ in range(20): a = a + a
     assert len(str(a)) < 10_000, "exponential string growth"
     assert str(eval(str(a))) == str(a)
