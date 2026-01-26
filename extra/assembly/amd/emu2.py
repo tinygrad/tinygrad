@@ -61,7 +61,6 @@ MASK32 = 0xFFFFFFFF
 def _c(val, dtype=dtypes.uint32): return UOp.const(dtype, val)
 U32_0, U32_1, U32_16, U32_MASK = _c(0), _c(1), _c(16), _c(MASK32)
 IDX_0, IDX_32 = _c(0, dtypes.index), _c(32, dtypes.index)
-U64_2 = UOp.const(dtypes.uint64, 2)
 
 # Inline float constants (as bit patterns) for GPU instructions
 F32_INLINE = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,  # 0.5, -0.5, 1.0, -1.0
@@ -440,7 +439,7 @@ class _Ctx:
   def inst_word(self, dword_idx: int) -> UOp:
     """Read instruction dword from vmem at PC + dword_idx*4."""
     pc = self.rpc()
-    addr = (pc + UOp.const(dtypes.uint64, dword_idx * 4)) >> U64_2 if dword_idx else pc >> U64_2
+    addr = (pc + UOp.const(dtypes.uint64, dword_idx * 4)) >> UOp.const(dtypes.uint64, 2)
     return self.vmem.index(addr.cast(dtypes.index), ptr=True).load()
 
   def inst_field(self, field) -> UOp:
