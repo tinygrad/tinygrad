@@ -485,30 +485,23 @@ class _Ctx:
     is_vgpr = off >= _c(256)
     if bits == 64:
       is_sgpr = off < _c(128)
-      # SGPR buffer (size 260) can hold any off 0-255, no guard needed
       sgpr_idx = off.cast(dtypes.int)
       sgpr_lo = self.sgpr.index(sgpr_idx, ptr=True).load()
       sgpr_hi = self.sgpr.index(sgpr_idx + _c(1, dtypes.int), ptr=True).load()
       sgpr_val = _u64(sgpr_lo, sgpr_hi)
-      # Use WHERE on register instead of .valid() on index - avoids expensive valid gate pattern matching
-      vgpr_reg = is_vgpr.where(off - _c(256), _c(0))
-      vgpr_idx0 = vgpr_reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
-      vgpr_idx1 = (vgpr_reg + _c(1)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
-      vgpr_val = _u64(self.vgpr.index(vgpr_idx0, ptr=True).load(), self.vgpr.index(vgpr_idx1, ptr=True).load())
-      # 64-bit inline constants: extend 32-bit value (reuse sgpr_lo)
+      vgpr_idx0 = (off - _c(256)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
+      vgpr_idx1 = (off - _c(255)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
+      vgpr_val = _u64(self.vgpr.index(vgpr_idx0, is_vgpr, ptr=True).load(), self.vgpr.index(vgpr_idx1, is_vgpr, ptr=True).load())
       inline = _u64(sgpr_lo, sgpr_lo)
       if literal is not None: inline = off.eq(_c(255)).where(literal.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32), inline)
       for off_val, val in F64_INLINE.items(): inline = off.eq(_c(off_val)).where(UOp.const(dtypes.uint64, val), inline)
       return is_vgpr.where(vgpr_val, is_sgpr.where(sgpr_val, inline))
-    # SGPR buffer (size 260) can hold any off 0-255, no guard needed
     sgpr_val = self.sgpr.index(off.cast(dtypes.int), ptr=True).load()
     if literal is not None: sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
-    if bits == 16:  # F16 constants differ from pre-populated F32 constants
+    if bits == 16:
       for off_val, val in F16_INLINE.items(): sgpr_val = off.eq(_c(off_val)).where(UOp.const(dtypes.uint32, val), sgpr_val)
-    # Use WHERE on register instead of .valid() on index - avoids expensive valid gate pattern matching
-    vgpr_reg = is_vgpr.where(off - _c(256), _c(0))
-    vgpr_idx = vgpr_reg.cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
-    vgpr_val = self.vgpr.index(vgpr_idx, ptr=True).load()
+    vgpr_idx = (off - _c(256)).cast(dtypes.int) * _c(32, dtypes.int) + lane.cast(dtypes.int)
+    vgpr_val = self.vgpr.index(vgpr_idx, is_vgpr, ptr=True).load()
     return is_vgpr.where(vgpr_val, sgpr_val)
 
   def rsrc_dyn_sized(self, off: UOp, lane: UOp, sizes: dict, key: str, f16: bool = False, literal: UOp | None = None) -> UOp:
