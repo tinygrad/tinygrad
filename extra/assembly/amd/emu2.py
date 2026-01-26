@@ -132,6 +132,7 @@ def _is_64bit_dest(dest: str) -> bool: return any(dest.endswith(x) for x in ('.b
 def _to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.uint32: return val
   if val.dtype.itemsize == 4: return val.bitcast(dtypes.uint32)  # same size: bitcast (float32->uint32)
+  if val.dtype == dtypes.half: return val.bitcast(dtypes.uint16).cast(dtypes.uint32)  # float16: bitcast then zero-extend
   return val.cast(dtypes.uint32)  # different size: cast (bool, int16, etc)
 def _lane_active(exec_mask: UOp, lane: UOp) -> UOp: return ((exec_mask >> lane.cast(dtypes.uint32)) & _c(1)).ne(_c(0))
 def _apply_opsel(val: UOp, sel_bit: int, opsel: int) -> UOp:
@@ -158,6 +159,27 @@ def _val_to_u32(val: UOp) -> UOp:
   if val.dtype == dtypes.half: return val.bitcast(dtypes.uint16).cast(dtypes.uint32)
   if val.dtype in (dtypes.uint16, dtypes.int16): return val.cast(dtypes.uint32)
   return val.cast(dtypes.uint32)
+
+def _apply_clamp(val: UOp, clmp: int | UOp) -> UOp:
+  """Apply VOP3 clamp modifier: clamp float results to [0.0, 1.0] range."""
+  if isinstance(clmp, int) and clmp == 0: return val
+  # Only clamp float types
+  if val.dtype == dtypes.float32:
+    zero, one = UOp.const(dtypes.float32, 0.0), UOp.const(dtypes.float32, 1.0)
+    clamped = val.maximum(zero).minimum(one)
+    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
+    return clamped
+  if val.dtype == dtypes.half:
+    zero, one = UOp.const(dtypes.half, 0.0), UOp.const(dtypes.half, 1.0)
+    clamped = val.maximum(zero).minimum(one)
+    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
+    return clamped
+  if val.dtype == dtypes.float64:
+    zero, one = UOp.const(dtypes.float64, 0.0), UOp.const(dtypes.float64, 1.0)
+    clamped = val.maximum(zero).minimum(one)
+    if isinstance(clmp, UOp): return clmp.ne(_c(0)).where(clamped, val)
+    return clamped
+  return val
 
 # Pcode parser
 def _apply_pseudocode_fixes(op_name: str, pcode: str) -> str:
@@ -348,7 +370,7 @@ def compile_lane_pcode(op, inst, ctx: '_Ctx', inc_pc_fn, name: str):
 
 def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, rsgpr_fn, vdst_reg: UOp, exec_mask: UOp,
                       inc_pc_fn=None, name: str = None, opsel_dst_hi: bool | UOp = False, rvgpr_fn=None, sdst_reg: int | None = None,
-                      scalar_dst: bool = False):
+                      scalar_dst: bool = False, clmp: int | UOp = 0):
   """Compile a VOP instruction using pcode parser. Returns (name, sink) if inc_pc_fn/name provided, else list of store UOps, or None."""
   pcode = PCODE.get(op)
   if pcode is None: return None
@@ -369,6 +391,8 @@ def compile_vop_pcode(op, srcs: dict[str, UOp], lane: UOp, wvgpr_fn, wsgpr_fn, r
       if scalar_dst:
         raw_stores.append(('sgpr', wsgpr_fn(vdst_reg, _val_to_u32(val))))
         continue
+      # Apply clamp modifier for float types
+      val = _apply_clamp(val, clmp)
       if (slice_match := re.match(r'D0\[(\d+)\s*:\s*(\d+)\]', dest)):
         hi_bit, lo_bit = int(slice_match.group(1)), int(slice_match.group(2))
         if hi_bit != 31 or lo_bit != 0:
@@ -745,7 +769,8 @@ def _compile_vop12(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       if isinstance(src0_hi, UOp): s0 = src0_hi.where(s0_hi, s0)
       elif src0_hi: s0 = s0_hi
     srcs = {'S0': s0, 'S1': s1, 'D0': d0}
-    if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32):
+    if inst.op in (VOP2Op.V_FMAAK_F32_E32, VOP2Op.V_FMAMK_F32_E32, VOP2Op.V_FMAAK_F16_E32, VOP2Op.V_FMAMK_F16_E32,
+                   R4_VOP2Op.V_FMAAK_F32_E32, R4_VOP2Op.V_FMAMK_F32_E32, R4_VOP2Op.V_FMAAK_F16_E32, R4_VOP2Op.V_FMAMK_F16_E32):
       srcs['SIMM32'] = literal
   pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr_dyn, ctx.wsgpr_dyn, ctx.rsgpr_dyn, vdst_reg, exec_mask, ctx.inc_pc, name,
                                    opsel_dst_hi=write_hi_half, rvgpr_fn=ctx.rvgpr_dyn)
@@ -855,13 +880,14 @@ def _compile_vop3(inst: VOP3, ctx: _Ctx, name: str) -> tuple[str, UOp]:
   # FMAC instructions need D0 (accumulator) from destination register
   if 'FMAC' in op_name: srcs['D0'] = ctx.rvgpr_dyn(vdst_reg, lane)
   opsel_dst_hi = bool(opsel & 0b1000) and _is_16bit_op(op_name)
+  clmp = getattr(inst, 'clmp', 0) or 0
   if opsel_dst_hi:
     stores = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr_dyn, ctx.wsgpr_dyn, ctx.rsgpr_dyn, vdst_reg, exec_mask, opsel_dst_hi=True,
-                               rvgpr_fn=ctx.rvgpr_dyn, scalar_dst=is_scalar_dst)
+                               rvgpr_fn=ctx.rvgpr_dyn, scalar_dst=is_scalar_dst, clmp=clmp)
     if stores is not None:
       return name, UOp.sink(*stores, *ctx.inc_pc(), arg=KernelInfo(name=name))
   pcode_result = compile_vop_pcode(inst.op, srcs, lane, ctx.wvgpr_dyn, ctx.wsgpr_dyn, ctx.rsgpr_dyn, vdst_reg, exec_mask, ctx.inc_pc, name,
-                                   rvgpr_fn=ctx.rvgpr_dyn, scalar_dst=is_scalar_dst)
+                                   rvgpr_fn=ctx.rvgpr_dyn, scalar_dst=is_scalar_dst, clmp=clmp)
   assert pcode_result is not None, f"no pcode for VOP3: {inst.op.name}"
   return pcode_result
 
