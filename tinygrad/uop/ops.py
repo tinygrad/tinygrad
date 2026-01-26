@@ -3,7 +3,7 @@ from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable,
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
-from tinygrad.uop import Ops, GroupOp
+from tinygrad.uop import Ops, GroupOp, X86Ops
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
@@ -75,9 +75,13 @@ def pretty_print(x:UOp, cache=None, d=0)->str:
   cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
 
+from typing import Generic
+from typing_extensions import TypeVar
+OpT = TypeVar("OpT", Ops, X86Ops, default=Ops)
+
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
-  def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
+  def __call__(cls, op:OpT, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
@@ -113,8 +117,8 @@ from tinygrad.mixin import OpMixin
 
 # NOTE: this should be frozen, but frozen is slower
 @dataclass(eq=False, slots=True)
-class UOp(OpMixin, metaclass=UOpMetaClass):
-  op:Ops
+class UOp(OpMixin, Generic[OpT], metaclass=UOpMetaClass):
+  op:OpT
   dtype:DType = dtypes.void
   src:tuple[UOp, ...] = tuple()
   arg:Any = None
@@ -893,13 +897,15 @@ def get_location() -> tuple[str, int]:
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
 
+AllOps = Ops | X86Ops
+
 class UPat(OpMixin):
   __slots__ = ("op", "dtype", "arg", "name", "src", "is_any")
-  def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
+  def __init__(self, op:AllOps|tuple[AllOps, ...]|set[Ops]|set[X86Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
                name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False):
-    assert op is None or isinstance(op, (Ops, tuple, set)), "op must be Ops or tuple of Ops"
-    self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
+    assert op is None or isinstance(op, (AllOps, tuple, set)), "op must be Ops or tuple of Ops"
+    self.op: tuple[AllOps, ...]|None = (op,) if isinstance(op, AllOps) else (tuple(op) if isinstance(op, set) else op)
     self.dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
