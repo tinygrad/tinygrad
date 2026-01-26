@@ -654,7 +654,7 @@ jobs:
           VIZ=1 SQTT=1 DEBUG=5 python3 test/test_ops.py TestOps.test_add
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
       - name: Run AMD emulated mmapeak on NULL backend
-        run: PYTHONPATH=. DEV=NULL EMULATE=AMD_CDNA4 python extra/mmapeak/mmapeak.py
+        run: PYTHONPATH=. NULL=1 EMULATE=AMD_CDNA4 python extra/mmapeak/mmapeak.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
