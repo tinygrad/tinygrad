@@ -80,7 +80,7 @@ class TestLlama1BSpeed(unittest.TestCase):
 
   def _benchmark_tinygrad(self):
     """Benchmark tinygrad inference speed"""
-    print(f"\nTinyGrad Benchmark:")
+    print("\nTinyGrad Benchmark:")
     print(f"  Device: {Device.DEFAULT}")
     print(f"  Backend: LLVM={getenv('LLVM', 0)}, CLANG={getenv('CLANG', 0)}")
 
@@ -104,7 +104,7 @@ class TestLlama1BSpeed(unittest.TestCase):
     for i in range(NUM_TOKENS):
       Device[Device.DEFAULT].synchronize()
       st = time.perf_counter()
-      output = forward(tokens, i).realize()
+      forward(tokens, i).realize()
       Device[Device.DEFAULT].synchronize()
       et = (time.perf_counter() - st) * 1000
       times.append(et)
@@ -124,8 +124,8 @@ class TestLlama1BSpeed(unittest.TestCase):
     if not self.has_torch:
       return None, None
 
-    print(f"\nPyTorch Benchmark:")
-    print(f"  Device: CPU (single threaded)")
+    print("\nPyTorch Benchmark:")
+    print("  Device: CPU (single threaded)")
 
     tokens = self.torch.tensor([[1] * SEQ_LEN], dtype=self.torch.long)
 
@@ -170,7 +170,7 @@ class TestLlama1BSpeed(unittest.TestCase):
 
     # Compare
     speedup = pt_avg / tg_avg
-    print(f"\n" + "="*70)
+    print("\n" + "="*70)
     print("RESULTS")
     print("="*70)
     print(f"TinyGrad: {tg_avg:.2f}ms/token ({1000/tg_avg:.1f} tok/s)")
