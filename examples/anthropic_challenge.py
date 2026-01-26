@@ -213,7 +213,7 @@ class VLIWPacker:
       scheduled_this_bundle: list[int] = []
 
       # complete any pending split demotion FIRST (hi half)
-      if pending_split is not None and SLOT_LIMITS["alu"] - slots_used["alu"] >= 4:
+      if pending_split is not None:
         split_idx, _ = pending_split
         bundle.append(ScheduledOp(self.uops[split_idx], "alu", (4, 8)))
         slots_used["alu"] += 4
