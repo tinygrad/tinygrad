@@ -102,7 +102,8 @@ def add_third_op_to_assign_to_track_shape(ctx:IndexingContext, assign:UOp):
   if assign.src[1].op is Ops.KERNEL: return None
   to_mop = graph_rewrite(assign.src[0], PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.replace(tag=()))]))
   ret = assign.replace(src=assign.src+(to_mop,))
-  ctx.range_map[ret] = ctx.range_map[assign]
+  # assign may not be in range_map if it was reconstructed after its sources were rewritten
+  if assign in ctx.range_map: ctx.range_map[ret] = ctx.range_map[assign]
   return ret
 
 pm_apply_rangeify = PatternMatcher([
