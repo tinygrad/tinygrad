@@ -495,6 +495,19 @@ class TestUOpMethod(unittest.TestCase):
     self.assertIs(x.replace(arg=None).arg, None)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
+  def test_const_zero_neg_zero_different(self):
+    # -0.0 and 0.0 must be different UOps (for IEEE754 correctness, e.g. 1/-0.0 = -inf)
+    pos_zero = UOp.const(dtypes.float, 0.0)
+    neg_zero = UOp.const(dtypes.float, -0.0)
+    self.assertIsNot(pos_zero, neg_zero)
+    self.assertNotEqual(hash(pos_zero.arg), hash(neg_zero.arg))
+
+  def test_const_nan_same(self):
+    # nan constants should be deduplicated
+    nan1 = UOp.const(dtypes.float, float('nan'))
+    nan2 = UOp.const(dtypes.float, float('nan'))
+    self.assertIs(nan1, nan2)
+
 class TestUOpStr(unittest.TestCase):
   def test_uop_str(self):
     a = UOp.const(dtypes.float, 2.0) + UOp.const(dtypes.float, 3.0)
