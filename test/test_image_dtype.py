@@ -4,11 +4,10 @@ from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.device import LRUAllocator, is_dtype_supported
 from tinygrad.dtype import ImageDType
 from tinygrad.helpers import prod, unwrap
-from test.helpers import REAL_DEV
 
 IMAGE_SUPPORTED_DEVICES = ("QCOM", "CL")
 
-@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
+@unittest.skipUnless(Device.DEFAULT in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageCopy(unittest.TestCase):
   def test_image_copyout_1x8(self, img_type=dtypes.imagef):
     it = Tensor.arange(32).cast(img_type((1,8,4))).realize()
@@ -42,7 +41,7 @@ class TestImageCopy(unittest.TestCase):
 
     assert (it == it2).sum().item() == prod(sz)
 
-@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
+@unittest.skipUnless(Device.DEFAULT in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageDType(unittest.TestCase):
   def test_image_pitch(self):
     def __validate(imgdt, expected_pitch):
@@ -199,7 +198,7 @@ class TestImageDType(unittest.TestCase):
       self.assertEqual(w1.grad.uop.base.buffer.dtype, dtypes.float32)
       self.assertEqual(len(sched), 9)
 
-@unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
+@unittest.skipUnless(Device.DEFAULT in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageRealization(unittest.TestCase):
   def test_image_dtype_expand(self):
     data = Tensor.randn(9*32*4).realize()
