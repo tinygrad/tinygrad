@@ -851,13 +851,20 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
 
       # If/elsif/else - skip branches with statically false conditions (WAVE32/WAVE64)
       if first == 'if':
+        def collect_cond_lines(start_idx, kw):
+          # Collect lines until we find 'then' (handles multi-line conditions)
+          full_line, idx = lines[start_idx], start_idx + 1
+          while 'then' not in full_line.lower() and idx < len(lines):
+            full_line += ' ' + lines[idx]
+            idx += 1
+          return full_line, idx
         def parse_cond(s, kw):
           ll = s.lower()
           return _to_bool(parse_expr(s[ll.find(kw) + len(kw):ll.rfind('then')].strip(), ctx(), funcs))
         def not_static_false(c): return c.op != Ops.CONST or c.arg is not False
-        cond = parse_cond(line, 'if')
+        full_if_line, i = collect_cond_lines(i, 'if')
+        cond = parse_cond(full_if_line, 'if')
         conditions, else_branch, vars_snap = ([(cond, None)] if not_static_false(cond) else []), (None, {}), dict(vars)
-        i += 1
         i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
         if conditions: conditions[0] = (cond, ret if ret is not None else branch)
         vars.clear(); vars.update(vars_snap)
@@ -866,8 +873,9 @@ def parse_block(lines: list[str], start: int, vars: dict[str, UOp], funcs: dict 
           if ltoks[0].type != 'IDENT': break
           lf = ltoks[0].val.lower()
           if lf == 'elsif':
-            c = parse_cond(lines[i], 'elsif')
-            i += 1; i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
+            full_elsif_line, i = collect_cond_lines(i, 'elsif')
+            c = parse_cond(full_elsif_line, 'elsif')
+            i, branch, ret = parse_block(lines, i, vars, funcs, assigns)
             if not_static_false(c): conditions.append((c, ret if ret is not None else branch))
             vars.clear(); vars.update(vars_snap)
           elif lf == 'else':
@@ -1047,6 +1055,8 @@ def _register_funcs():
     'log2': lambda a: UOp(Ops.LOG2, a[0].dtype, (a[0],)), 'sin': lambda a: _trig_reduce(a[0]),
     'cos': lambda a: _trig_reduce(a[0], 0.25), 'floor': lambda a: _floor(a[0]), 'fract': lambda a: a[0] - _floor(a[0]),
     'signext': lambda a: _signext(a), 'abs': lambda a: _abs(a),
+    'CalcDsAddr': lambda a: a[0].cast(dtypes.uint32) + a[1].cast(dtypes.uint32),
+    'CalcGlobalAddr': lambda a: a[0].cast(dtypes.uint64) + a[1].cast(dtypes.uint64),
     'isEven': lambda a: (UOp(Ops.TRUNC, a[0].dtype, (a[0],)).cast(dtypes.int) & _const(dtypes.int, 1)).eq(_const(dtypes.int, 0)),
     'max': lambda a: UOp(Ops.MAX, a[0].dtype, (a[0], a[1])),
     'min': lambda a: UOp(Ops.MAX, a[0].dtype, (a[0].neg(), a[1].neg())).neg(),

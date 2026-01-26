@@ -56,7 +56,7 @@ from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, 
 from extra.assembly.amd.autogen.rdna4.ins import (SOP1 as R4_SOP1, SOP2 as R4_SOP2, SOPC as R4_SOPC, SOPK as R4_SOPK, SOPP as R4_SOPP,
   SMEM as R4_SMEM, VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP2 as R4_VOP2, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST,
   VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P, VOPC as R4_VOPC, DS as R4_DS, VFLAT as R4_FLAT, VGLOBAL as R4_GLOBAL, VSCRATCH as R4_SCRATCH, VOPD as R4_VOPD,
-  SOPPOp as R4_SOPPOp, SMEMOp as R4_SMEMOp)
+  SOPPOp as R4_SOPPOp, SMEMOp as R4_SMEMOp, VOPDOp as R4_VOPDOp, VOP1Op as R4_VOP1Op, VOP2Op as R4_VOP2Op)
 from extra.assembly.amd.dsl import NULL, VCC_LO, EXEC_LO
 from extra.assembly.amd.autogen.common import OpType
 from extra.assembly.amd.expr_parser import parse_block
@@ -104,6 +104,7 @@ def _apply_src_mods(val: UOp, mod_bit: int, abs_bits: int, neg_bits: int, is_16b
 
 # Map VOPD ops to VOP2 ops for pcode lookup
 VOPD_TO_VOP2 = {
+  # RDNA3 mappings
   VOPDOp.V_DUAL_FMAC_F32: VOP2Op.V_FMAC_F32_E32, VOPDOp.V_DUAL_MUL_F32: VOP2Op.V_MUL_F32_E32,
   VOPDOp.V_DUAL_ADD_F32: VOP2Op.V_ADD_F32_E32, VOPDOp.V_DUAL_SUB_F32: VOP2Op.V_SUB_F32_E32,
   VOPDOp.V_DUAL_SUBREV_F32: VOP2Op.V_SUBREV_F32_E32, VOPDOp.V_DUAL_MAX_F32: VOP2Op.V_MAX_F32_E32,
@@ -111,6 +112,14 @@ VOPD_TO_VOP2 = {
   VOPDOp.V_DUAL_LSHLREV_B32: VOP2Op.V_LSHLREV_B32_E32, VOPDOp.V_DUAL_AND_B32: VOP2Op.V_AND_B32_E32,
   VOPDOp.V_DUAL_MOV_B32: VOP1Op.V_MOV_B32_E32, VOPDOp.V_DUAL_CNDMASK_B32: VOP2Op.V_CNDMASK_B32_E32,
   VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32_E32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32_E32,
+  # RDNA4 mappings (use RDNA4 VOP opcodes for pcode lookup)
+  R4_VOPDOp.V_DUAL_FMAC_F32: R4_VOP2Op.V_FMAC_F32_E32, R4_VOPDOp.V_DUAL_MUL_F32: R4_VOP2Op.V_MUL_F32_E32,
+  R4_VOPDOp.V_DUAL_ADD_F32: R4_VOP2Op.V_ADD_F32_E32, R4_VOPDOp.V_DUAL_SUB_F32: R4_VOP2Op.V_SUB_F32_E32,
+  R4_VOPDOp.V_DUAL_SUBREV_F32: R4_VOP2Op.V_SUBREV_F32_E32, R4_VOPDOp.V_DUAL_ADD_NC_U32: R4_VOP2Op.V_ADD_NC_U32_E32,
+  R4_VOPDOp.V_DUAL_LSHLREV_B32: R4_VOP2Op.V_LSHLREV_B32_E32, R4_VOPDOp.V_DUAL_AND_B32: R4_VOP2Op.V_AND_B32_E32,
+  R4_VOPDOp.V_DUAL_MOV_B32: R4_VOP1Op.V_MOV_B32_E32, R4_VOPDOp.V_DUAL_CNDMASK_B32: R4_VOP2Op.V_CNDMASK_B32_E32,
+  R4_VOPDOp.V_DUAL_FMAAK_F32: R4_VOP2Op.V_FMAAK_F32_E32, R4_VOPDOp.V_DUAL_FMAMK_F32: R4_VOP2Op.V_FMAMK_F32_E32,
+  R4_VOPDOp.V_DUAL_MAX_NUM_F32: R4_VOP2Op.V_MAX_NUM_F32_E32, R4_VOPDOp.V_DUAL_MIN_NUM_F32: R4_VOP2Op.V_MIN_NUM_F32_E32,
 }
 WAVE_SIZE = 32
 # Special registers stored after inline constants (256-259)
@@ -628,29 +637,30 @@ def _compile_sop(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       sgpr_val = off.eq(_c(255)).where(literal, sgpr_val)
     return sgpr_val
 
-  if isinstance(inst, SOPK):
-    sdst_off = ctx.inst_field(SOPK.sdst)
-    simm16 = ctx.inst_field(SOPK.simm16)
+  inst_cls = type(inst)
+  if isinstance(inst, (SOPK, R4_SOPK)):
+    sdst_off = ctx.inst_field(inst_cls.sdst)
+    simm16 = ctx.inst_field(inst_cls.simm16)
     # Sign-extend simm16
     simm16_sext = simm16.cast(dtypes.int16).cast(dtypes.int32)
     srcs = {'S0': ctx.rsgpr_dyn(sdst_off), 'SIMM16': simm16_sext, 'D0': ctx.rsgpr_dyn(sdst_off)}
     dst_off, dst_size = sdst_off, 1
-  elif isinstance(inst, SOP1):
-    sdst_off = ctx.inst_field(SOP1.sdst)
-    ssrc0_off = ctx.inst_field(SOP1.ssrc0)
+  elif isinstance(inst, (SOP1, R4_SOP1)):
+    sdst_off = ctx.inst_field(inst_cls.sdst)
+    ssrc0_off = ctx.inst_field(inst_cls.ssrc0)
     srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2)}
     dst_off, dst_size = sdst_off, sizes.get('sdst', 1)
-  elif isinstance(inst, SOP2):
-    sdst_off = ctx.inst_field(SOP2.sdst)
-    ssrc0_off = ctx.inst_field(SOP2.ssrc0)
-    ssrc1_off = ctx.inst_field(SOP2.ssrc1)
+  elif isinstance(inst, (SOP2, R4_SOP2)):
+    sdst_off = ctx.inst_field(inst_cls.sdst)
+    ssrc0_off = ctx.inst_field(inst_cls.ssrc0)
+    ssrc1_off = ctx.inst_field(inst_cls.ssrc1)
     srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2),
             'S1': rsrc_dyn_scalar(ssrc1_off, sizes.get('ssrc1', 1) == 2)}
     if literal is not None: srcs['SIMM32'] = literal
     dst_off, dst_size = sdst_off, sizes.get('sdst', 1)
-  elif isinstance(inst, SOPC):
-    ssrc0_off = ctx.inst_field(SOPC.ssrc0)
-    ssrc1_off = ctx.inst_field(SOPC.ssrc1)
+  elif isinstance(inst, (SOPC, R4_SOPC)):
+    ssrc0_off = ctx.inst_field(inst_cls.ssrc0)
+    ssrc1_off = ctx.inst_field(inst_cls.ssrc1)
     srcs = {'S0': rsrc_dyn_scalar(ssrc0_off, sizes.get('ssrc0', 1) == 2),
             'S1': rsrc_dyn_scalar(ssrc1_off, sizes.get('ssrc1', 1) == 2)}
     dst_off, dst_size = _c(0), 0  # SOPC writes to SCC, not sdst
@@ -1089,14 +1099,24 @@ def _compile_mem_op(inst, ctx: _Ctx, name: str) -> tuple[str, UOp]:
       else:
         data = {'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)),
                 'DATA2': _u64(ctx.rvgpr_dyn(data1_reg, lane), ctx.rvgpr_dyn(data1_reg + _c(1), lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
-      return {'ADDR': addr, 'addr': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, **data}
+      return {'ADDR': addr, 'addr': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1,
+              'vgpr_a': addr, 'offset': offset, '_lds': mem, **data}
     active = _lane_active(exec_mask, lane)
     if is_atomic:
       return {'ADDR': addr, 'addr': addr, 'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)) if is_64bit else ctx.rvgpr_dyn(vdata_reg, lane),
               '_vmem': mem, '_active': active}
     vdata = ctx.rvgpr_dyn(vdata_reg, lane).cast(dtypes.uint64) if 'STORE' in op_name else ctx.rvgpr_dyn(vdst_reg, lane) if 'D16' in op_name else UOp.const(dtypes.uint32, 0)
     if 'STORE' in op_name and ndwords >= 2: vdata = vdata | (ctx.rvgpr_dyn(vdata_reg + _c(1), lane).cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
-    srcs = {'ADDR': addr, 'addr': addr, 'VDATA': vdata, '_vmem': mem, '_active': active}
+    # v_addr = 64-bit address from VGPR pair, s_saddr = 64-bit base from SGPR pair (or 0 if NULL)
+    v_addr = _u64(ctx.rvgpr_dyn(addr_reg, lane), ctx.rvgpr_dyn(addr_reg + _c(1), lane))
+    # s_saddr: use saddr pair if valid (saddr < 124), else 0
+    if saddr_reg is not None:
+      saddr_valid = saddr_reg < _c(124)
+      saddr_base = _u64(ctx.rsgpr_dyn(saddr_reg), ctx.rsgpr_dyn(saddr_reg + U32_1))
+      s_saddr = saddr_valid.where(saddr_base, UOp.const(dtypes.uint64, 0))
+    else:
+      s_saddr = UOp.const(dtypes.uint64, 0)
+    srcs = {'ADDR': addr, 'addr': addr, 'VDATA': vdata, 'v_addr': v_addr, 's_saddr': s_saddr, '_vmem': mem, '_active': active}
     for i in range(ndwords): srcs[f'VDATA{i}'] = ctx.rvgpr_dyn(vdata_reg + _c(i), lane) if 'STORE' in op_name else UOp.const(dtypes.uint32, 0)
     return srcs
 
@@ -1337,7 +1357,6 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
 
   # Use Buffer objects with external_ptr=0 for vmem
   vmem_buf = Buffer('CPU', 1 << 40, dtypes.uint32, options=BufferSpec(external_ptr=0)).ensure_allocated()
-  lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
   scratch_buf = Buffer('CPU', scratch_size * WAVE_SIZE, dtypes.uint8).ensure_allocated() if scratch_size else None
 
   # Set DAZ+FTZ during emulator execution, restore afterward to avoid breaking hypothesis tests
@@ -1345,6 +1364,8 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     for gidx in range(gx):
       for gidy in range(gy):
         for gidz in range(gz):
+          # LDS is per-workgroup - create fresh buffer for each workgroup
+          lds_buf = Buffer('CPU', max(lds_size // 4, 1), dtypes.uint32).ensure_allocated()
           for wave_start in range(0, total_threads, WAVE_SIZE):
             n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState(min(WAVE_SIZE, total_threads - wave_start))
             st.pc = lib  # Set PC to code base address
@@ -1357,6 +1378,13 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
                                  (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y, gidy),
                                  (hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z, gidz)]:
               if rsrc2 & enabled: st._write_sgpr(sgpr_idx, gid); sgpr_idx += 1
+
+            # RDNA4 also reads workgroup IDs from ttmp registers (ttmp[9]=X, ttmp[10]=Y, ttmp[11]=Z)
+            # ttmp registers are at SGPR indices 108-123 (ttmp[0-15])
+            if arch == "rdna4":
+              st._write_sgpr(108 + 9, gidx)   # ttmp[9] = workgroup_id_x
+              st._write_sgpr(108 + 10, gidy)  # ttmp[10] = workgroup_id_y
+              st._write_sgpr(108 + 11, gidz)  # ttmp[11] = workgroup_id_z
 
             # v0 = packed workitem IDs, scratch stride in secret SGPR
             for lane in range(n_lanes):
