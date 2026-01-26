@@ -142,7 +142,7 @@ class dtypes:
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(val, float) and math.isnan(val): val = math.nan
     # int is the default
-    return float(val) if dtypes.is_float(dtype) else bool(val) if dtype == dtypes.bool else int(val)
+    return float(val) if dtypes.is_float(dtype) else bool(val) if dtypes.is_bool(dtype) else int(val)
   @staticmethod
   @functools.cache
   def min(dtype:DType):
